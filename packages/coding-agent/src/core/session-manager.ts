@@ -20,6 +20,7 @@ import { createInterface } from "readline";
 import { StringDecoder } from "string_decoder";
 import { getAgentDir as getDefaultAgentDir, getSessionsDir } from "../config.ts";
 import { encodePathForStorage, normalizePath, resolvePath } from "../utils/paths.ts";
+import type { PersistedToolOutput } from "./large-tool-output.ts";
 import {
 	type BashExecutionMessage,
 	type CustomMessage,
@@ -49,15 +50,23 @@ function imageExtension(mimeType: string): string | undefined {
 	}
 }
 
-export function getSessionImageDir(sessionFile: string): string {
+function getSessionAssetDir(sessionFile: string, assetName: "images" | "tool-results"): string {
 	const resolvedFile = normalizePath(sessionFile);
 	const defaultSessionsDir = normalizePath(getSessionsDir());
 	const relativePath = relative(defaultSessionsDir, resolvedFile);
 	const isDefaultSession =
 		relativePath !== "" && relativePath !== ".." && !relativePath.startsWith(`..${sep}`) && !isAbsolute(relativePath);
-	const imageRoot = isDefaultSession ? join(getDefaultAgentDir(), "images") : join(dirname(resolvedFile), "images");
+	const assetRoot = isDefaultSession ? join(getDefaultAgentDir(), assetName) : join(dirname(resolvedFile), assetName);
 	const sessionKey = createHash("sha256").update(resolve(resolvedFile)).digest("hex");
-	return join(imageRoot, sessionKey);
+	return join(assetRoot, sessionKey);
+}
+
+export function getSessionImageDir(sessionFile: string): string {
+	return getSessionAssetDir(sessionFile, "images");
+}
+
+export function getSessionToolOutputDir(sessionFile: string): string {
+	return getSessionAssetDir(sessionFile, "tool-results");
 }
 
 function getImageStoreDir(sessionFile: string): string {
@@ -153,6 +162,7 @@ export interface SessionEntryBase {
 export interface SessionMessageEntry extends SessionEntryBase {
 	type: "message";
 	message: AgentMessage;
+	toolOutput?: PersistedToolOutput;
 }
 
 export interface ThinkingLevelChangeEntry extends SessionEntryBase {
@@ -1094,13 +1104,14 @@ export class SessionManager {
 	 * so it is easier to find them.
 	 * These need to be appended via appendCompaction() and appendBranchSummary() methods.
 	 */
-	appendMessage(message: Message | CustomMessage | BashExecutionMessage): string {
+	appendMessage(message: Message | CustomMessage | BashExecutionMessage, toolOutput?: PersistedToolOutput): string {
 		const entry: SessionMessageEntry = {
 			type: "message",
 			id: generateId(this.byId),
 			parentId: this.leafId,
 			timestamp: new Date().toISOString(),
 			message,
+			...(toolOutput ? { toolOutput } : {}),
 		};
 		this._appendEntry(entry);
 		return entry.id;

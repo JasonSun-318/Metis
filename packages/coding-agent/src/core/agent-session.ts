@@ -15,7 +15,8 @@
 
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { basename, dirname } from "node:path";
+import { tmpdir } from "node:os";
+import { basename, dirname, join } from "node:path";
 import type {
 	Agent,
 	AgentEvent,
@@ -85,6 +86,7 @@ import {
 	wrapRegisteredTools,
 } from "./extensions/index.ts";
 import { emitSessionShutdownEvent } from "./extensions/runner.ts";
+import { externalizeLargeToolOutput, type PersistedToolOutput } from "./large-tool-output.ts";
 import {
 	type DreamActiveRun,
 	type DreamHistoryRecord,
@@ -98,7 +100,12 @@ import type { ModelRegistry } from "./model-registry.ts";
 import { expandPromptTemplate, type PromptTemplate } from "./prompt-templates.ts";
 import type { ResourceExtensionPaths, ResourceLoader } from "./resource-loader.ts";
 import type { BranchSummaryEntry, CompactionEntry, SessionEntry, SessionManager } from "./session-manager.ts";
-import { CURRENT_SESSION_VERSION, getLatestCompactionEntry, type SessionHeader } from "./session-manager.ts";
+import {
+	CURRENT_SESSION_VERSION,
+	getLatestCompactionEntry,
+	getSessionToolOutputDir,
+	type SessionHeader,
+} from "./session-manager.ts";
 import type { SettingsManager } from "./settings-manager.ts";
 import type { SlashCommandInfo } from "./slash-commands.ts";
 import { createSyntheticSourceInfo, type SourceInfo } from "./source-info.ts";
@@ -589,6 +596,28 @@ export class AgentSession {
 		// Emit to extensions first
 		await this._emitExtensionEvent(event);
 
+		let toolOutput: PersistedToolOutput | undefined;
+		if (
+			event.type === "message_end" &&
+			event.message.role === "toolResult" &&
+			this._toolDefinitions.get(event.message.toolName)?.sourceInfo.source !== "builtin"
+		) {
+			const sessionFile = this.sessionManager.getSessionFile();
+			// ponytail: retain output files until deletion can account for references shared by branched sessions.
+			const outputDir = sessionFile
+				? getSessionToolOutputDir(sessionFile)
+				: join(tmpdir(), "arcmind-tool-results", this.sessionManager.getSessionId());
+			try {
+				const externalized = await externalizeLargeToolOutput(event.message.content, outputDir);
+				if (externalized) {
+					event.message.content = externalized.content;
+					toolOutput = externalized.toolOutput;
+				}
+			} catch {
+				// Preserve the original result when the complete output could not be saved.
+			}
+		}
+
 		// Notify all listeners
 		this._emit(event.type === "agent_end" ? { ...event, willRetry: this._willRetryAfterAgentEnd(event) } : event);
 
@@ -609,7 +638,10 @@ export class AgentSession {
 				event.message.role === "toolResult"
 			) {
 				// Regular LLM message - persist as SessionMessageEntry
-				this.sessionManager.appendMessage(event.message);
+				this.sessionManager.appendMessage(
+					event.message,
+					event.message.role === "toolResult" ? toolOutput : undefined,
+				);
 			}
 			// Other message types (bashExecution, compactionSummary, branchSummary) are persisted elsewhere
 

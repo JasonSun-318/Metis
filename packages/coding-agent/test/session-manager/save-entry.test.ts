@@ -1,5 +1,9 @@
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { type CustomEntry, SessionManager } from "../../src/core/session-manager.ts";
+import { assistantMsg } from "../utilities.ts";
 
 describe("SessionManager.saveCustomEntry", () => {
 	it("saves custom entries and includes them in tree traversal", () => {
@@ -51,5 +55,43 @@ describe("SessionManager.saveCustomEntry", () => {
 		// buildSessionContext should work (custom entries skipped in messages)
 		const ctx = session.buildSessionContext();
 		expect(ctx.messages).toHaveLength(2); // only message entries
+	});
+
+	it("stores tool-output metadata outside the model message", () => {
+		const tempDir = mkdtempSync(join(tmpdir(), "arcmind-tool-output-jsonl-"));
+		try {
+			const session = SessionManager.create(tempDir, tempDir);
+			session.appendMessage(assistantMsg("calling tool"));
+			const message = {
+				role: "toolResult" as const,
+				toolCallId: "call-1",
+				toolName: "external_search",
+				content: [{ type: "text" as const, text: "preview" }],
+				details: { preserved: true },
+				isError: false,
+				timestamp: 2,
+			};
+			const toolOutput = {
+				truncated: true as const,
+				originalBytes: 60_000,
+				previewBytes: 2_048,
+				fullOutputPath: "/tmp/full-output.txt",
+			};
+
+			session.appendMessage(message, toolOutput);
+
+			const rows = readFileSync(session.getSessionFile()!, "utf8")
+				.trim()
+				.split("\n")
+				.map((line) => JSON.parse(line));
+			const stored = rows.find((row) => row.type === "message" && row.message?.role === "toolResult");
+			expect(stored.toolOutput).toEqual(toolOutput);
+			expect(stored.message).not.toHaveProperty("toolOutput");
+			const restored = session.buildSessionContext().messages.find((item) => item.role === "toolResult");
+			expect(restored).toEqual(message);
+			expect(restored).not.toHaveProperty("toolOutput");
+		} finally {
+			rmSync(tempDir, { recursive: true, force: true });
+		}
 	});
 });

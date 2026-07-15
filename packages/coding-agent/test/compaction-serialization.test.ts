@@ -76,4 +76,31 @@ describe("serializeConversation", () => {
 		expect(result).not.toContain("truncated");
 		expect(result).toContain(longText);
 	});
+
+	it("serializes a stored-output notice as an ordinary bounded tool result", () => {
+		const path = "/tmp/arcmind/tool-results/result.txt";
+		const notice = [
+			"[Tool output truncated: preview only]",
+			"Original size: 60000 bytes",
+			"Preview size: 2048 bytes",
+			`Full output: ${path}`,
+			"",
+			"x".repeat(2048),
+		].join("\n");
+		const result = serializeConversation([
+			{
+				role: "toolResult",
+				toolCallId: "tc-large",
+				toolName: "external_search",
+				content: [{ type: "text", text: notice }],
+				isError: false,
+				timestamp: Date.now(),
+			},
+		]);
+
+		expect(result).toContain("Tool output truncated: preview only");
+		expect(result).toContain("Original size: 60000 bytes");
+		expect(result).toContain(`Full output: ${path}`);
+		expect(result).toContain("more characters truncated");
+	});
 });
