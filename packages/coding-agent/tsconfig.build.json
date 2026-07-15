@@ -1,0 +1,17 @@
+{
+	"extends": "../../tsconfig.base.json",
+	"compilerOptions": {
+		"outDir": "./dist",
+		"paths": {
+			"@arcmind/agent-core": ["../agent/dist/index.d.ts"],
+			"@arcmind/agent-core/*": ["../agent/dist/*.d.ts"],
+			"@arcmind/ai": ["../ai/dist/index.d.ts"],
+			"@arcmind/ai/*": ["../ai/dist/*.d.ts", "../ai/dist/providers/*.d.ts"],
+			"@arcmind/tui": ["../tui/dist/index.d.ts"],
+			"@arcmind/tui/*": ["../tui/dist/*.d.ts", "../tui/dist/components/*.d.ts"]
+		},
+		"rootDir": "./src"
+	},
+	"include": ["src/**/*.ts", "src/**/*.d.ts"],
+	"exclude": ["node_modules", "dist"]
+}

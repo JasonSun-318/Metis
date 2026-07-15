@@ -1,0 +1,41 @@
+node_modules/
+dist/
+*.log
+.DS_Store
+*.tsbuildinfo
+# packages/*/node_modules/
+packages/*/dist/
+packages/*/dist-chrome/
+packages/*/dist-firefox/
+*.cpuprofile
+
+# Environment
+.env
+
+# Editor files
+.vscode/
+.zed/
+.idea/
+.claude/
+*.swp
+*.swo
+*~
+
+# Package specific
+.npm/
+coverage/
+.nyc_output/
+.arcmind_config/
+tui-debug.log
+compaction-results/
+.opencode/
+syntax.jsonl
+out.jsonl
+arcmind-*.html
+out.html
+packages/coding-agent/binaries/
+todo.md
+plans/
+.arcmind/hf-sessions/
+.arcmind/hf-sessions-backup/
+collect.sh
