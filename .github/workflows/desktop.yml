@@ -1,0 +1,107 @@
+name: Desktop package
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/desktop.yml"
+      - "package-lock.json"
+      - "package.json"
+      - "packages/app-protocol/**"
+      - "packages/app-server/**"
+      - "packages/coding-agent/**"
+      - "packages/desktop/**"
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-14, windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    env:
+      ARCMIND_UPDATE_FEED_URL: ${{ startsWith(github.ref, 'refs/tags/v') && vars.ARCMIND_UPDATE_FEED_URL || '' }}
+      MACOS_SIGN_IDENTITY: ${{ startsWith(github.ref, 'refs/tags/v') && secrets.MACOS_SIGN_IDENTITY || '' }}
+      APPLE_ID: ${{ startsWith(github.ref, 'refs/tags/v') && secrets.APPLE_ID || '' }}
+      APPLE_APP_SPECIFIC_PASSWORD: ${{ startsWith(github.ref, 'refs/tags/v') && secrets.APPLE_APP_SPECIFIC_PASSWORD || '' }}
+      APPLE_TEAM_ID: ${{ startsWith(github.ref, 'refs/tags/v') && secrets.APPLE_TEAM_ID || '' }}
+      MACOS_CERTIFICATE_BASE64: ${{ startsWith(github.ref, 'refs/tags/v') && secrets.MACOS_CERTIFICATE_BASE64 || '' }}
+      MACOS_CERTIFICATE_PASSWORD: ${{ startsWith(github.ref, 'refs/tags/v') && secrets.MACOS_CERTIFICATE_PASSWORD || '' }}
+      WINDOWS_CERTIFICATE_BASE64: ${{ startsWith(github.ref, 'refs/tags/v') && secrets.WINDOWS_CERTIFICATE_BASE64 || '' }}
+      WINDOWS_CERTIFICATE_PASSWORD_SECRET: ${{ startsWith(github.ref, 'refs/tags/v') && secrets.WINDOWS_CERTIFICATE_PASSWORD || '' }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.13.0
+          cache: npm
+
+      - name: Install Linux packaging dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y fakeroot rpm xvfb
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Import Apple signing certificate
+        if: runner.os == 'macOS' && env.MACOS_CERTIFICATE_BASE64 != ''
+        shell: bash
+        run: |
+          CERTIFICATE_PATH="$RUNNER_TEMP/arcmind-signing.p12"
+          KEYCHAIN_PATH="$RUNNER_TEMP/arcmind-signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(uuidgen)"
+          echo "$MACOS_CERTIFICATE_BASE64" | base64 --decode > "$CERTIFICATE_PATH"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$CERTIFICATE_PATH" -P "$MACOS_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          security list-keychain -d user -s "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+      - name: Materialize Windows signing certificate
+        if: runner.os == 'Windows' && env.WINDOWS_CERTIFICATE_BASE64 != ''
+        shell: pwsh
+        run: |
+          $certificatePath = Join-Path $env:RUNNER_TEMP "arcmind-signing.pfx"
+          [IO.File]::WriteAllBytes($certificatePath, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE_BASE64))
+          "WINDOWS_CERTIFICATE_FILE=$certificatePath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "WINDOWS_CERTIFICATE_PASSWORD=$env:WINDOWS_CERTIFICATE_PASSWORD_SECRET" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Build desktop runtime
+        run: npm run build
+
+      - name: Check desktop types
+        run: npm run check:desktop
+
+      - name: Run desktop foundation tests
+        run: npm test --workspace @arcmind/app-protocol && npm test --workspace @arcmind/app-server && npm test --workspace @arcmind/desktop
+
+      - name: Make native artifacts
+        run: npm run make --workspace @arcmind/desktop
+
+      - name: Verify packaged runtime assets
+        run: npm run verify:package --workspace @arcmind/desktop
+
+      - name: Run packaged E2E (macOS and Windows)
+        if: runner.os != 'Linux'
+        run: npm run test:e2e --workspace @arcmind/desktop
+
+      - name: Run packaged E2E (Linux)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a npm run test:e2e --workspace @arcmind/desktop
+
+      - name: Upload native artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: arcmind-${{ runner.os }}-${{ runner.arch }}
+          path: packages/desktop/out/make/**
+          if-no-files-found: error

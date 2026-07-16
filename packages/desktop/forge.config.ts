@@ -1,0 +1,160 @@
+import path from "node:path";
+import { spawn } from "node:child_process";
+import { cp, rm } from "node:fs/promises";
+import { type FuseConfig, FuseV1Options, FuseVersion, flipFuses } from "@electron/fuses";
+import { MakerDeb } from "@electron-forge/maker-deb";
+import { MakerDMG, type MakerDMGConfig } from "@electron-forge/maker-dmg";
+import { MakerRpm } from "@electron-forge/maker-rpm";
+import { MakerSquirrel } from "@electron-forge/maker-squirrel";
+import { MakerZIP } from "@electron-forge/maker-zip";
+import { AutoUnpackNativesPlugin } from "@electron-forge/plugin-auto-unpack-natives";
+import { namedHookWithTaskFn, PluginBase } from "@electron-forge/plugin-base";
+import { WebpackPlugin } from "@electron-forge/plugin-webpack";
+import type { ForgeConfig, ForgeMultiHookMap } from "@electron-forge/shared-types";
+
+/** Forge 7's published fuse plugin still peers on fuses v1; Electron 43 needs v2's ninth fuse. */
+class CompleteFusesPlugin extends PluginBase<FuseConfig> {
+	name = "complete-fuses";
+
+	getHooks(): ForgeMultiHookMap {
+		return {
+			packageAfterCopy: namedHookWithTaskFn<"packageAfterCopy">(
+				async (_task, resolvedForgeConfig, resourcesPath, _electronVersion, platform, arch) => {
+					const apple = platform === "darwin" || platform === "mas";
+					const basePath = path.resolve(resourcesPath, "../..");
+					const executable = apple
+						? path.join(basePath, "MacOS", "Electron")
+						: path.join(basePath, platform === "win32" ? "electron.exe" : "electron");
+					const signing = resolvedForgeConfig.packagerConfig.osxSign;
+					const signed =
+						(typeof signing === "object" && signing !== null && Object.keys(signing).length > 0) || Boolean(signing);
+					await flipFuses(executable, {
+						resetAdHocDarwinSignature: !signed && apple && arch === "arm64",
+						...this.config,
+					});
+				},
+				"Flipping complete Electron fuses",
+			),
+		};
+	}
+}
+
+const desktopRoot = __dirname;
+const repoRoot = path.resolve(desktopRoot, "../..");
+const appServerRuntime = path.join(repoRoot, "node_modules", ".cache", "arcmind-desktop", "app-server");
+
+function completeCredentialGroup(names: readonly string[]): Record<string, string> | undefined {
+	const values = names.map((name) => process.env[name]);
+	if (values.every((value) => !value)) return undefined;
+	if (values.some((value) => !value)) throw new Error(`Incomplete release credential group: ${names.join(", ")}`);
+	return Object.fromEntries(names.map((name, index) => [name, values[index]!])) as Record<string, string>;
+}
+
+const macosRelease = completeCredentialGroup([
+	"MACOS_SIGN_IDENTITY",
+	"APPLE_ID",
+	"APPLE_APP_SPECIFIC_PASSWORD",
+	"APPLE_TEAM_ID",
+]);
+const windowsCertificate = completeCredentialGroup(["WINDOWS_CERTIFICATE_FILE", "WINDOWS_CERTIFICATE_PASSWORD"]);
+const windowsSign = windowsCertificate
+	? {
+			certificateFile: windowsCertificate.WINDOWS_CERTIFICATE_FILE,
+			certificatePassword: windowsCertificate.WINDOWS_CERTIFICATE_PASSWORD,
+			description: "ArcMind",
+		}
+	: undefined;
+// appdmg's runtime schema supports `filesystem`, but its published TypeScript
+// declaration omits the property.
+const apfsDmgConfig = { additionalDMGOptions: { filesystem: "APFS" } } as unknown as MakerDMGConfig;
+
+async function prepareAppServerRuntime(): Promise<void> {
+	await new Promise<void>((resolve, reject) => {
+		const child = spawn(process.execPath, [path.join(desktopRoot, "scripts", "prepare-app-server-runtime.mjs")], {
+			cwd: repoRoot,
+			stdio: "inherit",
+		});
+		child.once("error", reject);
+		child.once("exit", (code) => {
+			if (code === 0) resolve();
+			else reject(new Error(`App-server runtime staging failed with exit code ${code}`));
+		});
+	});
+}
+
+const config: ForgeConfig = {
+	packagerConfig: {
+		asar: true,
+		appBundleId: "ai.arcmind.desktop",
+		appCategoryType: "public.app-category.developer-tools",
+		name: "ArcMind",
+		executableName: "arcmind",
+		osxSign: macosRelease
+			? {
+					identity: macosRelease.MACOS_SIGN_IDENTITY,
+					optionsForFile: () => ({ hardenedRuntime: true }),
+				}
+			: undefined,
+		osxNotarize: macosRelease
+			? {
+					appleId: macosRelease.APPLE_ID,
+					appleIdPassword: macosRelease.APPLE_APP_SPECIFIC_PASSWORD,
+					teamId: macosRelease.APPLE_TEAM_ID,
+				}
+			: undefined,
+		windowsSign,
+	},
+	hooks: {
+		generateAssets: prepareAppServerRuntime,
+		packageAfterCopy: async (_forgeConfig, buildPath, _electronVersion, _platform, arch) => {
+			const target = path.join(buildPath, ".webpack", arch, "app-server");
+			await rm(target, { recursive: true, force: true });
+			await cp(appServerRuntime, target, { recursive: true });
+		},
+	},
+	makers: [
+		new MakerSquirrel({ windowsSign }),
+		new MakerZIP({}),
+		// APFS avoids appdmg's legacy `bless --openfolder` path, which fails when
+		// an x64 Node process runs under Rosetta on Apple Silicon.
+		new MakerDMG(apfsDmgConfig),
+		new MakerDeb({}),
+		new MakerRpm({}),
+	],
+	plugins: [
+		new AutoUnpackNativesPlugin({}),
+		new WebpackPlugin({
+			mainConfig: "./webpack.main.config.ts",
+			renderer: {
+				config: "./webpack.renderer.config.ts",
+				nodeIntegration: false,
+				entryPoints: [
+					{
+						name: "main_window",
+						html: "./src/renderer/index.html",
+						js: "./src/renderer/index.tsx",
+						preload: { js: "./src/preload.ts" },
+					},
+				],
+			},
+			devContentSecurityPolicy:
+				"default-src 'self'; script-src 'self' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' ws://127.0.0.1:* ws://localhost:*",
+		}),
+		new CompleteFusesPlugin({
+			version: FuseVersion.V1,
+			strictlyRequireAllFuses: true,
+			[FuseV1Options.RunAsNode]: false,
+			[FuseV1Options.EnableCookieEncryption]: true,
+			[FuseV1Options.EnableNodeOptionsEnvironmentVariable]: false,
+			[FuseV1Options.EnableNodeCliInspectArguments]: false,
+			[FuseV1Options.EnableEmbeddedAsarIntegrityValidation]: true,
+			[FuseV1Options.OnlyLoadAppFromAsar]: true,
+			// Electron's stock bundle has the shared snapshot, not browser_v8_context_snapshot.bin.
+			[FuseV1Options.LoadBrowserProcessSpecificV8Snapshot]: false,
+			[FuseV1Options.GrantFileProtocolExtraPrivileges]: false,
+			[FuseV1Options.WasmTrapHandlers]: true,
+		}),
+	],
+};
+
+export default config;
