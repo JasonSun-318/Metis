@@ -48,6 +48,44 @@ export type ToolExecutionMode = "sequential" | "parallel";
  */
 export type QueueMode = "all" | "one-at-a-time";
 
+/** Durable identity attached to a queued message by callers that own one. */
+export interface AgentQueueIdentity {
+	readonly queueItemId: string;
+	readonly operationId: string;
+}
+
+/** Queue names aligned with the durable runtime journal schema. */
+export type AgentQueueKind = "steer" | "follow_up";
+
+/** One identity-preserving queued message exposed to the queue commit hook. */
+export interface ReservedAgentQueueItem {
+	readonly queueItemId: string;
+	readonly operationId?: string;
+	readonly message: AgentMessage;
+}
+
+/**
+ * A non-destructive queue reservation. Only the agent loop may commit or release it;
+ * {@link AgentLoopConfig.beforeQueueCommit} receives only its read-only items.
+ */
+export interface AgentQueueReservation {
+	readonly items: readonly ReservedAgentQueueItem[];
+	commit(): void;
+	release(): void;
+}
+
+/** Context passed to the mandatory queue-consumption commit hook. */
+export interface BeforeQueueCommitContext {
+	readonly queue: AgentQueueKind;
+	readonly items: readonly ReservedAgentQueueItem[];
+}
+
+/** Context passed before an explicit queue clear mutates pending items. */
+export interface BeforeQueueClearContext {
+	readonly queue: AgentQueueKind;
+	readonly items: readonly ReservedAgentQueueItem[];
+}
+
 /** A single tool call content block emitted by an assistant message. */
 export type AgentToolCall = Extract<AssistantMessage["content"][number], { type: "toolCall" }>;
 
@@ -95,6 +133,14 @@ export interface BeforeToolCallContext {
 	args: unknown;
 	/** Current agent context at the time the tool call is prepared. */
 	context: AgentContext;
+}
+
+/** Read-only snapshot passed at the final boundary immediately before `tool.execute()`. */
+export interface BeforeToolExecuteContext {
+	readonly assistantMessage: AssistantMessage;
+	readonly toolCall: AgentToolCall;
+	readonly args: unknown;
+	readonly context: AgentContext;
 }
 
 /** Context passed to `afterToolCall`. */
@@ -222,6 +268,30 @@ export interface AgentLoopConfig extends SimpleStreamOptions {
 	) => AgentLoopTurnUpdate | undefined | Promise<AgentLoopTurnUpdate | undefined>;
 
 	/**
+	 * Reserves steering messages without removing them. Preferred over
+	 * `getSteeringMessages` when both are present.
+	 */
+	reserveSteeringMessages?: () => AgentQueueReservation | undefined | Promise<AgentQueueReservation | undefined>;
+
+	/**
+	 * Reserves follow-up messages without removing them. Preferred over
+	 * `getFollowUpMessages` when both are present.
+	 */
+	reserveFollowUpMessages?: () => AgentQueueReservation | undefined | Promise<AgentQueueReservation | undefined>;
+
+	/**
+	 * Mandatory commit point for a reserved queue batch.
+	 *
+	 * Called before the reservation is removed, before its message events, and
+	 * before the next provider request. This callback may throw or reject. On
+	 * failure the reservation is released and remains queued unless it was
+	 * concurrently cleared; the provider is not called.
+	 */
+	beforeQueueCommit?: (context: BeforeQueueCommitContext, signal?: AbortSignal) => Promise<void>;
+	/** Called after request preparation and immediately before the provider stream starts. */
+	beforeProviderRequest?: (signal?: AbortSignal) => Promise<void>;
+
+	/**
 	 * Returns steering messages to inject into the conversation mid-run.
 	 *
 	 * Called after the current assistant turn finishes executing its tool calls, unless `shouldStopAfterTurn` exits first.
@@ -265,6 +335,15 @@ export interface AgentLoopConfig extends SimpleStreamOptions {
 	 * The hook receives the agent abort signal and is responsible for honoring it.
 	 */
 	beforeToolCall?: (context: BeforeToolCallContext, signal?: AbortSignal) => Promise<BeforeToolCallResult | undefined>;
+
+	/**
+	 * Mandatory marker hook called at the final boundary immediately before
+	 * `tool.execute()`, after argument preparation, validation, and `beforeToolCall`.
+	 *
+	 * This callback may throw or reject. Its failure prevents tool execution and
+	 * propagates out of the loop; it is never converted into an ordinary tool result.
+	 */
+	beforeToolExecute?: (context: BeforeToolExecuteContext, signal?: AbortSignal) => Promise<void>;
 
 	/**
 	 * Called after a tool finishes executing, before `tool_execution_end` and tool-result message events are emitted.

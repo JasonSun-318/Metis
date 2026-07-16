@@ -12,13 +12,21 @@ import {
 	type OAuthCredentials,
 	type OAuthLoginCallbacks,
 	type OAuthProviderId,
+	type OAuthProviderInterface,
 } from "@arcmind/ai/compat";
-import { getOAuthApiKey, getOAuthProvider, getOAuthProviders } from "@arcmind/ai/oauth";
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
+import { getOAuthProviders as getCompatibilityOAuthProviders } from "@arcmind/ai/oauth";
+import { existsSync } from "fs";
 import { dirname, join } from "path";
 import lockfile from "proper-lockfile";
 import { getAgentDir } from "../config.ts";
 import { normalizePath } from "../utils/paths.ts";
+import {
+	cleanupPublishedAliasesSync,
+	createFileAtomicallySync,
+	ensureDirectoryDurablySync,
+	readSingleLinkTextFileSync,
+	replaceFileAtomicallySync,
+} from "./durable-file.ts";
 import { resolveConfigValue } from "./resolve-config-value.ts";
 
 export type ApiKeyCredential = {
@@ -50,7 +58,7 @@ type LockResult<T> = {
 	next?: string;
 };
 
-const AUTH_FILE_WRITE_OPTIONS = { encoding: "utf-8", mode: 0o600 } as const;
+const AUTH_FILE_MODE = 0o600;
 
 export interface AuthStorageBackend {
 	withLock<T>(fn: (current: string | undefined) => LockResult<T>): T;
@@ -65,16 +73,23 @@ export class FileAuthStorageBackend implements AuthStorageBackend {
 	}
 
 	private ensureParentDir(): void {
-		const dir = dirname(this.authPath);
-		if (!existsSync(dir)) {
-			mkdirSync(dir, { recursive: true, mode: 0o700 });
-		}
+		ensureDirectoryDurablySync(dirname(this.authPath));
 	}
 
 	private ensureFileExists(): void {
-		if (!existsSync(this.authPath)) {
-			writeFileSync(this.authPath, "{}", AUTH_FILE_WRITE_OPTIONS);
-			chmodSync(this.authPath, 0o600);
+		cleanupPublishedAliasesSync(this.authPath);
+		if (existsSync(this.authPath)) return;
+		try {
+			createFileAtomicallySync(this.authPath, "{}", { mode: AUTH_FILE_MODE });
+		} catch (error) {
+			if (
+				typeof error !== "object" ||
+				error === null ||
+				!("code" in error) ||
+				String((error as NodeJS.ErrnoException).code) !== "EEXIST"
+			) {
+				throw error;
+			}
 		}
 	}
 
@@ -112,11 +127,10 @@ export class FileAuthStorageBackend implements AuthStorageBackend {
 		let release: (() => void) | undefined;
 		try {
 			release = this.acquireLockSyncWithRetry(this.authPath);
-			const current = existsSync(this.authPath) ? readFileSync(this.authPath, "utf-8") : undefined;
+			const current = readSingleLinkTextFileSync(this.authPath);
 			const { result, next } = fn(current);
 			if (next !== undefined) {
-				writeFileSync(this.authPath, next, AUTH_FILE_WRITE_OPTIONS);
-				chmodSync(this.authPath, 0o600);
+				replaceFileAtomicallySync(this.authPath, next, { mode: AUTH_FILE_MODE });
 			}
 			return result;
 		} finally {
@@ -141,6 +155,7 @@ export class FileAuthStorageBackend implements AuthStorageBackend {
 
 		try {
 			release = await lockfile.lock(this.authPath, {
+				realpath: false,
 				retries: {
 					retries: 10,
 					factor: 2,
@@ -156,12 +171,11 @@ export class FileAuthStorageBackend implements AuthStorageBackend {
 			});
 
 			throwIfCompromised();
-			const current = existsSync(this.authPath) ? readFileSync(this.authPath, "utf-8") : undefined;
+			const current = readSingleLinkTextFileSync(this.authPath);
 			const { result, next } = await fn(current);
 			throwIfCompromised();
 			if (next !== undefined) {
-				writeFileSync(this.authPath, next, AUTH_FILE_WRITE_OPTIONS);
-				chmodSync(this.authPath, 0o600);
+				replaceFileAtomicallySync(this.authPath, next, { mode: AUTH_FILE_MODE });
 			}
 			throwIfCompromised();
 			return result;
@@ -203,12 +217,22 @@ export class InMemoryAuthStorageBackend implements AuthStorageBackend {
 export class AuthStorage {
 	private data: AuthStorageData = {};
 	private runtimeOverrides: Map<string, string> = new Map();
+	private readonly baselineOAuthProviders: Map<string, OAuthProviderInterface>;
+	private oauthProviders: Map<string, OAuthProviderInterface>;
 	private loadError: Error | null = null;
 	private errors: Error[] = [];
 	private storage: AuthStorageBackend;
+	private readonly onDidPersist?: () => void;
 
-	private constructor(storage: AuthStorageBackend) {
+	private constructor(storage: AuthStorageBackend, onDidPersist?: () => void) {
 		this.storage = storage;
+		this.onDidPersist = onDidPersist;
+		// Snapshot the legacy registry once for backward compatibility. All later
+		// registration and reset operations remain local to this AuthStorage view.
+		this.baselineOAuthProviders = new Map(
+			getCompatibilityOAuthProviders().map((provider) => [provider.id, provider]),
+		);
+		this.oauthProviders = new Map(this.baselineOAuthProviders);
 		this.reload();
 	}
 
@@ -216,8 +240,8 @@ export class AuthStorage {
 		return new AuthStorage(new FileAuthStorageBackend(authPath ?? join(getAgentDir(), "auth.json")));
 	}
 
-	static fromStorage(storage: AuthStorageBackend): AuthStorage {
-		return new AuthStorage(storage);
+	static fromStorage(storage: AuthStorageBackend, onDidPersist?: () => void): AuthStorage {
+		return new AuthStorage(storage, onDidPersist);
 	}
 
 	static inMemory(data: AuthStorageData = {}): AuthStorage {
@@ -244,6 +268,14 @@ export class AuthStorage {
 	private recordError(error: unknown): void {
 		const normalizedError = error instanceof Error ? error : new Error(String(error));
 		this.errors.push(normalizedError);
+	}
+
+	private notifyPersisted(): void {
+		try {
+			this.onDidPersist?.();
+		} catch (error) {
+			this.recordError(error);
+		}
 	}
 
 	private parseStorageData(content: string | undefined): AuthStorageData {
@@ -325,6 +357,7 @@ export class AuthStorage {
 	 */
 	set(provider: string, credential: AuthCredential): void {
 		this.data = this.persistProviderChange(provider, credential);
+		this.notifyPersisted();
 	}
 
 	/**
@@ -332,6 +365,7 @@ export class AuthStorage {
 	 */
 	remove(provider: string): void {
 		this.data = this.persistProviderChange(provider, undefined);
+		this.notifyPersisted();
 	}
 
 	/**
@@ -396,7 +430,7 @@ export class AuthStorage {
 	 * Login to an OAuth provider.
 	 */
 	async login(providerId: OAuthProviderId, callbacks: OAuthLoginCallbacks): Promise<void> {
-		const provider = getOAuthProvider(providerId);
+		const provider = this.getOAuthProvider(providerId);
 		if (!provider) {
 			throw new Error(`Unknown OAuth provider: ${providerId}`);
 		}
@@ -419,11 +453,12 @@ export class AuthStorage {
 	private async refreshOAuthTokenWithLock(
 		providerId: OAuthProviderId,
 	): Promise<{ apiKey: string; newCredentials: OAuthCredentials } | null> {
-		const provider = getOAuthProvider(providerId);
+		const provider = this.getOAuthProvider(providerId);
 		if (!provider) {
 			return null;
 		}
 
+		let persisted = false;
 		const result = await this.storage.withLockAsync(async (current) => {
 			const currentData = this.parseStorageData(current);
 			this.data = currentData;
@@ -438,17 +473,13 @@ export class AuthStorage {
 				return { result: { apiKey: provider.getApiKey(cred), newCredentials: cred } };
 			}
 
-			const oauthCreds: Record<string, OAuthCredentials> = {};
-			for (const [key, value] of Object.entries(currentData)) {
-				if (value.type === "oauth") {
-					oauthCreds[key] = value;
-				}
+			let newCredentials: OAuthCredentials;
+			try {
+				newCredentials = await provider.refreshToken(cred);
+			} catch {
+				throw new Error(`Failed to refresh OAuth token for ${providerId}`);
 			}
-
-			const refreshed = await getOAuthApiKey(providerId, oauthCreds);
-			if (!refreshed) {
-				return { result: null };
-			}
+			const refreshed = { apiKey: provider.getApiKey(newCredentials), newCredentials };
 
 			const merged: AuthStorageData = {
 				...currentData,
@@ -456,8 +487,10 @@ export class AuthStorage {
 			};
 			this.data = merged;
 			this.loadError = null;
+			persisted = true;
 			return { result: refreshed, next: JSON.stringify(merged, null, 2) };
 		});
+		if (persisted) this.notifyPersisted();
 
 		return result;
 	}
@@ -484,7 +517,7 @@ export class AuthStorage {
 		}
 
 		if (cred?.type === "oauth") {
-			const provider = getOAuthProvider(providerId);
+			const provider = this.getOAuthProvider(providerId);
 			if (!provider) {
 				// Unknown OAuth provider, can't get API key
 				return undefined;
@@ -530,10 +563,28 @@ export class AuthStorage {
 		return undefined;
 	}
 
-	/**
-	 * Get all registered OAuth providers
-	 */
-	getOAuthProviders() {
-		return getOAuthProviders();
+	getOAuthProvider(providerId: string): OAuthProviderInterface | undefined {
+		return this.oauthProviders.get(providerId);
+	}
+
+	getOAuthProviders(): OAuthProviderInterface[] {
+		return Array.from(this.oauthProviders.values());
+	}
+
+	registerOAuthProvider(provider: OAuthProviderInterface): void {
+		this.oauthProviders.set(provider.id, provider);
+	}
+
+	unregisterOAuthProvider(providerId: string): void {
+		const baseline = this.baselineOAuthProviders.get(providerId);
+		if (baseline) {
+			this.oauthProviders.set(providerId, baseline);
+			return;
+		}
+		this.oauthProviders.delete(providerId);
+	}
+
+	resetOAuthProviders(): void {
+		this.oauthProviders = new Map(this.baselineOAuthProviders);
 	}
 }

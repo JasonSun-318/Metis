@@ -3,8 +3,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { getModel } from "@arcmind/ai/compat";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import type { ResourceLoader } from "../src/core/resource-loader.ts";
 import { createAgentSession } from "../src/core/sdk.ts";
-import { SessionManager } from "../src/core/session-manager.ts";
+import { getDefaultSessionDir, SessionManager } from "../src/core/session-manager.ts";
 
 describe("createAgentSession session manager defaults", () => {
 	let tempDir: string;
@@ -91,5 +92,30 @@ describe("createAgentSession session manager defaults", () => {
 		expect(realpathSync(output.trim())).toBe(realpathSync(sessionCwd));
 
 		session.dispose();
+	});
+
+	it("releases an internally-created session lease when initialization fails", async () => {
+		const resourceLoader: ResourceLoader = {
+			getExtensions: () => {
+				throw new Error("injected extension discovery failure");
+			},
+			getSkills: () => ({ skills: [], diagnostics: [] }),
+			getPrompts: () => ({ prompts: [], diagnostics: [] }),
+			getThemes: () => ({ themes: [], diagnostics: [] }),
+			getAgentsFiles: () => ({ agentsFiles: [] }),
+			getSystemPrompt: () => undefined,
+			getAppendSystemPrompt: () => [],
+			extendResources: () => {},
+			reload: async () => {},
+		};
+
+		await expect(createAgentSession({ cwd, agentDir, resourceLoader })).rejects.toThrow(
+			"injected extension discovery failure",
+		);
+
+		const [created] = await SessionManager.list(cwd, getDefaultSessionDir(cwd, agentDir));
+		expect(created).toBeDefined();
+		const reopened = SessionManager.open(created!.path);
+		reopened.close();
 	});
 });

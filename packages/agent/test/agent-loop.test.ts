@@ -8,7 +8,7 @@ import {
 } from "@arcmind/ai";
 import { Type } from "typebox";
 import { describe, expect, it } from "vitest";
-import { agentLoop, agentLoopContinue } from "../src/agent-loop.ts";
+import { agentLoop, agentLoopContinue, runAgentLoop } from "../src/agent-loop.ts";
 import type { AgentContext, AgentEvent, AgentLoopConfig, AgentMessage, AgentTool } from "../src/types.ts";
 
 // Mock stream for testing - mimics MockAssistantStream
@@ -383,6 +383,7 @@ describe("agentLoop with AgentMessage", () => {
 	it("should execute mutated beforeToolCall args without revalidation", async () => {
 		const toolSchema = Type.Object({ value: Type.String() });
 		const executed: Array<string | number> = [];
+		const marked: Array<string | number> = [];
 		const tool: AgentTool<typeof toolSchema, { value: string | number }> = {
 			name: "echo",
 			label: "Echo",
@@ -413,6 +414,9 @@ describe("agentLoop with AgentMessage", () => {
 				mutableArgs.value = 123;
 				return undefined;
 			},
+			beforeToolExecute: async ({ args }) => {
+				marked.push((args as { value: string | number }).value);
+			},
 		};
 
 		let callIndex = 0;
@@ -440,6 +444,551 @@ describe("agentLoop with AgentMessage", () => {
 		}
 
 		expect(executed).toEqual([123]);
+		expect(marked).toEqual([123]);
+	});
+
+	it("propagates beforeToolExecute failure without executing the tool", async () => {
+		const parameters = Type.Object({});
+		let executions = 0;
+		const tool: AgentTool<typeof parameters> = {
+			name: "write",
+			label: "Write",
+			description: "Side effecting tool",
+			parameters,
+			async execute() {
+				executions++;
+				return { content: [{ type: "text", text: "done" }], details: {} };
+			},
+		};
+		const context: AgentContext = { systemPrompt: "", messages: [], tools: [tool] };
+		const config: AgentLoopConfig = {
+			model: createModel(),
+			convertToLlm: identityConverter,
+			beforeToolExecute: async () => {
+				throw new Error("tool marker sync failed");
+			},
+		};
+		const streamFn = () => {
+			const stream = new MockAssistantStream();
+			queueMicrotask(() => {
+				stream.push({
+					type: "done",
+					reason: "toolUse",
+					message: createAssistantMessage(
+						[{ type: "toolCall", id: "tool-1", name: "write", arguments: {} }],
+						"toolUse",
+					),
+				});
+			});
+			return stream;
+		};
+
+		await expect(
+			runAgentLoop([createUserMessage("write")], context, config, () => {}, undefined, streamFn),
+		).rejects.toThrow("tool marker sync failed");
+		expect(executions).toBe(0);
+	});
+
+	it("rejects raw agentLoopContinue iteration and result when beforeToolExecute fails", async () => {
+		const parameters = Type.Object({});
+		const failure = new Error("tool marker sync failed");
+		let executions = 0;
+		const tool: AgentTool<typeof parameters> = {
+			name: "write",
+			label: "Write",
+			description: "Side effecting tool",
+			parameters,
+			async execute() {
+				executions++;
+				return { content: [{ type: "text", text: "unexpected" }], details: {} };
+			},
+		};
+		const context: AgentContext = {
+			systemPrompt: "",
+			messages: [createUserMessage("write")],
+			tools: [tool],
+		};
+		const config: AgentLoopConfig = {
+			model: createModel(),
+			convertToLlm: identityConverter,
+			beforeToolExecute: async () => {
+				throw failure;
+			},
+		};
+		const stream = agentLoopContinue(context, config, undefined, () => {
+			const response = new MockAssistantStream();
+			queueMicrotask(() => {
+				response.push({
+					type: "done",
+					reason: "toolUse",
+					message: createAssistantMessage(
+						[{ type: "toolCall", id: "tool-1", name: "write", arguments: {} }],
+						"toolUse",
+					),
+				});
+			});
+			return response;
+		});
+
+		let iteratorFailure: unknown;
+		try {
+			for await (const _event of stream) {
+				// Drain events emitted before the mandatory marker failed.
+			}
+		} catch (error) {
+			iteratorFailure = error;
+		}
+
+		expect(iteratorFailure).toBe(failure);
+		await expect(stream.result()).rejects.toBe(failure);
+		expect(executions).toBe(0);
+	});
+
+	it.each([
+		["failed call first", ["tool-fail", "tool-success"]],
+		["failed call last", ["tool-success", "tool-fail"]],
+	] as const)("settles successful parallel tools before propagating a marker failure: %s", async (_label, ids) => {
+		const parameters = Type.Object({});
+		const executions: string[] = [];
+		const events: AgentEvent[] = [];
+		const tool: AgentTool<typeof parameters> = {
+			name: "write",
+			label: "Write",
+			description: "Side effecting tool",
+			parameters,
+			async execute(toolCallId) {
+				executions.push(toolCallId);
+				return { content: [{ type: "text", text: toolCallId }], details: {} };
+			},
+		};
+		const context: AgentContext = { systemPrompt: "", messages: [], tools: [tool] };
+		const config: AgentLoopConfig = {
+			model: createModel(),
+			convertToLlm: identityConverter,
+			toolExecution: "parallel",
+			beforeToolExecute: async ({ toolCall }) => {
+				if (toolCall.id === "tool-fail") throw new Error("tool-fail marker failed");
+			},
+		};
+		const streamFn = () => {
+			const stream = new MockAssistantStream();
+			queueMicrotask(() => {
+				stream.push({
+					type: "done",
+					reason: "toolUse",
+					message: createAssistantMessage(
+						ids.map((id) => ({ type: "toolCall", id, name: "write", arguments: {} })),
+						"toolUse",
+					),
+				});
+			});
+			return stream;
+		};
+
+		await expect(
+			runAgentLoop(
+				[createUserMessage("write twice")],
+				context,
+				config,
+				(event) => {
+					events.push(event);
+				},
+				undefined,
+				streamFn,
+			),
+		).rejects.toThrow("tool-fail marker failed");
+
+		expect(executions).toEqual(["tool-success"]);
+		expect(events.flatMap((event) => (event.type === "tool_execution_end" ? [event.toolCallId] : []))).toEqual([
+			"tool-success",
+		]);
+		expect(
+			events.flatMap((event) =>
+				event.type === "message_end" && event.message.role === "toolResult" ? [event.message.toolCallId] : [],
+			),
+		).toEqual(["tool-success"]);
+	});
+
+	it.each(["sequential", "parallel"] as const)(
+		"does not execute a tool when the marker aborts the run in %s mode",
+		async (toolExecution) => {
+			const parameters = Type.Object({});
+			const controller = new AbortController();
+			const events: AgentEvent[] = [];
+			let executions = 0;
+			let afterCalls = 0;
+			let providerCalls = 0;
+			const tool: AgentTool<typeof parameters> = {
+				name: "write",
+				label: "Write",
+				description: "Side effecting tool",
+				parameters,
+				async execute() {
+					executions++;
+					return { content: [{ type: "text", text: "unexpected" }], details: {} };
+				},
+			};
+			const context: AgentContext = { systemPrompt: "", messages: [], tools: [tool] };
+			const config: AgentLoopConfig = {
+				model: createModel(),
+				convertToLlm: identityConverter,
+				toolExecution,
+				beforeToolExecute: async () => controller.abort(),
+				afterToolCall: async () => {
+					afterCalls++;
+					return undefined;
+				},
+			};
+			const streamFn = () => {
+				providerCalls++;
+				const stream = new MockAssistantStream();
+				queueMicrotask(() => {
+					stream.push({
+						type: "done",
+						reason: "toolUse",
+						message: createAssistantMessage(
+							[{ type: "toolCall", id: "tool-1", name: "write", arguments: {} }],
+							"toolUse",
+						),
+					});
+				});
+				return stream;
+			};
+
+			let rejection: unknown;
+			try {
+				await runAgentLoop(
+					[createUserMessage("write")],
+					context,
+					config,
+					(event) => {
+						events.push(event);
+					},
+					controller.signal,
+					streamFn,
+				);
+			} catch (error) {
+				rejection = error;
+			}
+
+			expect(rejection).toBeDefined();
+			expect(executions).toBe(0);
+			expect(afterCalls).toBe(0);
+			expect(providerCalls).toBe(1);
+			const result = events.find((event) => event.type === "message_end" && event.message.role === "toolResult");
+			expect(result).toMatchObject({
+				type: "message_end",
+				message: { role: "toolResult", toolCallId: "tool-1", isError: true },
+			});
+			if (result?.type === "message_end" && result.message.role === "toolResult") {
+				expect(result.message.content).toEqual([{ type: "text", text: "Operation aborted" }]);
+			}
+		},
+	);
+
+	it.each(["sequential", "parallel"] as const)(
+		"calls beforeToolExecute exactly once per tool in %s mode",
+		async (toolExecution) => {
+			const parameters = Type.Object({ value: Type.String() });
+			const markers: string[] = [];
+			const executions: string[] = [];
+			const tool: AgentTool<typeof parameters> = {
+				name: "echo",
+				label: "Echo",
+				description: "Echo",
+				parameters,
+				async execute(toolCallId) {
+					executions.push(toolCallId);
+					return { content: [{ type: "text", text: "done" }], details: {} };
+				},
+			};
+			const context: AgentContext = { systemPrompt: "", messages: [], tools: [tool] };
+			const config: AgentLoopConfig = {
+				model: createModel(),
+				convertToLlm: identityConverter,
+				toolExecution,
+				beforeToolExecute: async ({ toolCall, args }) => {
+					markers.push(toolCall.id);
+					expect(args).toEqual({ value: toolCall.id });
+				},
+			};
+			let providerCalls = 0;
+			const streamFn = () => {
+				const stream = new MockAssistantStream();
+				queueMicrotask(() => {
+					if (providerCalls++ === 0) {
+						stream.push({
+							type: "done",
+							reason: "toolUse",
+							message: createAssistantMessage(
+								[
+									{ type: "toolCall", id: "tool-1", name: "echo", arguments: { value: "tool-1" } },
+									{ type: "toolCall", id: "tool-2", name: "echo", arguments: { value: "tool-2" } },
+								],
+								"toolUse",
+							),
+						});
+						return;
+					}
+					stream.push({
+						type: "done",
+						reason: "stop",
+						message: createAssistantMessage([{ type: "text", text: "done" }]),
+					});
+				});
+				return stream;
+			};
+
+			await runAgentLoop([createUserMessage("echo")], context, config, () => {}, undefined, streamFn);
+
+			expect(markers).toEqual(["tool-1", "tool-2"]);
+			expect(executions.sort()).toEqual(["tool-1", "tool-2"]);
+		},
+	);
+
+	it("rejects duplicate tool-call IDs before any tool hook or execution", async () => {
+		const parameters = Type.Object({});
+		let beforeCalls = 0;
+		let markerCalls = 0;
+		let executions = 0;
+		const tool: AgentTool<typeof parameters> = {
+			name: "write",
+			label: "Write",
+			description: "Side effecting tool",
+			parameters,
+			async execute() {
+				executions++;
+				return { content: [{ type: "text", text: "done" }], details: {} };
+			},
+		};
+		const context: AgentContext = { systemPrompt: "", messages: [], tools: [tool] };
+		const config: AgentLoopConfig = {
+			model: createModel(),
+			convertToLlm: identityConverter,
+			beforeToolCall: async () => {
+				beforeCalls++;
+				return undefined;
+			},
+			beforeToolExecute: async () => {
+				markerCalls++;
+			},
+		};
+		const events: AgentEvent[] = [];
+		const streamFn = () => {
+			const stream = new MockAssistantStream();
+			queueMicrotask(() => {
+				stream.push({
+					type: "done",
+					reason: "toolUse",
+					message: createAssistantMessage(
+						[
+							{ type: "toolCall", id: "duplicate", name: "write", arguments: {} },
+							{ type: "toolCall", id: "duplicate", name: "write", arguments: {} },
+						],
+						"toolUse",
+					),
+				});
+			});
+			return stream;
+		};
+
+		await expect(
+			runAgentLoop(
+				[createUserMessage("write twice")],
+				context,
+				config,
+				(event) => {
+					events.push(event);
+				},
+				undefined,
+				streamFn,
+			),
+		).rejects.toThrow("Duplicate tool call ID");
+		expect({ beforeCalls, markerCalls, executions }).toEqual({ beforeCalls: 0, markerCalls: 0, executions: 0 });
+		expect(events.some((event) => event.type === "message_end" && event.message.role === "assistant")).toBe(false);
+	});
+
+	it("rejects a tool-call ID reused by a later assistant response before persisting or executing it", async () => {
+		const parameters = Type.Object({});
+		const assistantMessageEnds: AssistantMessage[] = [];
+		let executions = 0;
+		let providerCalls = 0;
+		const tool: AgentTool<typeof parameters> = {
+			name: "write",
+			label: "Write",
+			description: "Side effecting tool",
+			parameters,
+			async execute() {
+				executions++;
+				return { content: [{ type: "text", text: "done" }], details: {} };
+			},
+		};
+		const context: AgentContext = { systemPrompt: "", messages: [], tools: [tool] };
+		const config: AgentLoopConfig = { model: createModel(), convertToLlm: identityConverter };
+		const streamFn = () => {
+			providerCalls++;
+			const stream = new MockAssistantStream();
+			queueMicrotask(() => {
+				stream.push({
+					type: "done",
+					reason: "toolUse",
+					message: createAssistantMessage(
+						[{ type: "toolCall", id: "reused", name: "write", arguments: {} }],
+						"toolUse",
+					),
+				});
+			});
+			return stream;
+		};
+
+		await expect(
+			runAgentLoop(
+				[createUserMessage("write")],
+				context,
+				config,
+				(event) => {
+					if (event.type === "message_end" && event.message.role === "assistant") {
+						assistantMessageEnds.push(event.message);
+					}
+				},
+				undefined,
+				streamFn,
+			),
+		).rejects.toThrow("Duplicate tool call ID");
+		expect(providerCalls).toBe(2);
+		expect(executions).toBe(1);
+		expect(assistantMessageEnds).toHaveLength(1);
+	});
+
+	it("releases an already-aborted queue reservation without calling its commit hook", async () => {
+		const controller = new AbortController();
+		controller.abort();
+		let hookCalls = 0;
+		let commits = 0;
+		let releases = 0;
+		let providerCalls = 0;
+		const config: AgentLoopConfig = {
+			model: createModel(),
+			convertToLlm: identityConverter,
+			reserveSteeringMessages: async () => ({
+				items: [{ queueItemId: "queue-1", message: createUserMessage("queued") }],
+				commit: () => commits++,
+				release: () => releases++,
+			}),
+			beforeQueueCommit: async () => {
+				hookCalls++;
+			},
+		};
+
+		let rejection: unknown;
+		try {
+			await runAgentLoop(
+				[createUserMessage("direct")],
+				{ systemPrompt: "", messages: [] },
+				config,
+				() => {},
+				controller.signal,
+				() => {
+					providerCalls++;
+					return new MockAssistantStream();
+				},
+			);
+		} catch (error) {
+			rejection = error;
+		}
+
+		expect(rejection).toBeDefined();
+		expect({ hookCalls, commits, releases, providerCalls }).toEqual({
+			hookCalls: 0,
+			commits: 0,
+			releases: 1,
+			providerCalls: 0,
+		});
+	});
+
+	it("rejects raw agentLoop iteration and result when beforeQueueCommit fails", async () => {
+		const failure = new Error("queue marker sync failed");
+		let commits = 0;
+		let releases = 0;
+		let providerCalls = 0;
+		const config: AgentLoopConfig = {
+			model: createModel(),
+			convertToLlm: identityConverter,
+			reserveSteeringMessages: () => ({
+				items: [{ queueItemId: "queue-1", message: createUserMessage("queued") }],
+				commit: () => commits++,
+				release: () => releases++,
+			}),
+			beforeQueueCommit: async () => {
+				throw failure;
+			},
+		};
+		const stream = agentLoop(
+			[createUserMessage("direct")],
+			{ systemPrompt: "", messages: [] },
+			config,
+			undefined,
+			() => {
+				providerCalls++;
+				return new MockAssistantStream();
+			},
+		);
+
+		let iteratorFailure: unknown;
+		try {
+			for await (const _event of stream) {
+				// A queue marker fails before any loop event is emitted.
+			}
+		} catch (error) {
+			iteratorFailure = error;
+		}
+
+		expect(iteratorFailure).toBe(failure);
+		await expect(stream.result()).rejects.toBe(failure);
+		expect({ commits, releases, providerCalls }).toEqual({ commits: 0, releases: 1, providerCalls: 0 });
+	});
+
+	it("releases a queue reservation whose commit hook aborts before commit", async () => {
+		const controller = new AbortController();
+		const endedUserMessages: string[] = [];
+		let commits = 0;
+		let releases = 0;
+		let providerCalls = 0;
+		const config: AgentLoopConfig = {
+			model: createModel(),
+			convertToLlm: identityConverter,
+			reserveSteeringMessages: async () => ({
+				items: [{ queueItemId: "queue-1", message: createUserMessage("queued") }],
+				commit: () => commits++,
+				release: () => releases++,
+			}),
+			beforeQueueCommit: async () => controller.abort(),
+		};
+
+		let rejection: unknown;
+		try {
+			await runAgentLoop(
+				[createUserMessage("direct")],
+				{ systemPrompt: "", messages: [] },
+				config,
+				(event) => {
+					if (event.type === "message_end" && event.message.role === "user") {
+						endedUserMessages.push(String(event.message.content));
+					}
+				},
+				controller.signal,
+				() => {
+					providerCalls++;
+					return new MockAssistantStream();
+				},
+			);
+		} catch (error) {
+			rejection = error;
+		}
+
+		expect(rejection).toBeDefined();
+		expect({ commits, releases, providerCalls }).toEqual({ commits: 0, releases: 1, providerCalls: 0 });
+		expect(endedUserMessages).toEqual([]);
 	});
 
 	it("should prepare tool arguments for validation", async () => {

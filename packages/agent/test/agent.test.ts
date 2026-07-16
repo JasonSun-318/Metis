@@ -630,6 +630,339 @@ describe("Agent", () => {
 		expect(responseCount).toBe(2);
 	});
 
+	it("keeps a reserved queue item when the durable commit fails and consumes it once on retry", async () => {
+		let rejectCommit = true;
+		let providerCalls = 0;
+		const commits: Array<{ queue: string; ids: string[] }> = [];
+		const agent = new Agent({
+			streamFn: () => {
+				providerCalls++;
+				const stream = new MockAssistantStream();
+				queueMicrotask(() => {
+					stream.push({ type: "done", reason: "stop", message: createAssistantMessage("Processed") });
+				});
+				return stream;
+			},
+		});
+		agent.installMandatoryRuntimeHooks({
+			beforeQueueCommit: async ({ queue, items }) => {
+				commits.push({ queue, ids: items.map((item) => item.queueItemId) });
+				if (rejectCommit) throw new Error("journal sync failed");
+			},
+		});
+		agent.state.messages = [createAssistantMessage("Initial response")];
+		agent.followUp(
+			{ role: "user", content: "same text", timestamp: Date.now() },
+			{ queueItemId: "queue-1", operationId: "operation-1" },
+		);
+
+		await expect(agent.continue()).resolves.toBeUndefined();
+		expect(providerCalls).toBe(0);
+		expect(agent.hasQueuedMessages()).toBe(true);
+		expect(agent.state.errorMessage).toBe("journal sync failed");
+
+		rejectCommit = false;
+		await expect(agent.continue()).resolves.toBeUndefined();
+		expect(providerCalls).toBe(1);
+		expect(commits).toEqual([
+			{ queue: "follow_up", ids: ["queue-1"] },
+			{ queue: "follow_up", ids: ["queue-1"] },
+		]);
+		expect(agent.state.messages.filter((message) => message.role === "user")).toHaveLength(1);
+		expect(agent.hasQueuedMessages()).toBe(false);
+	});
+
+	it("preserves synchronous legacy queue consumption when no durable hook is configured", async () => {
+		let providerCalls = 0;
+		const agent = new Agent({
+			streamFn: () => {
+				providerCalls++;
+				const stream = new MockAssistantStream();
+				queueMicrotask(() => {
+					stream.push({ type: "done", reason: "stop", message: createAssistantMessage("Processed") });
+				});
+				return stream;
+			},
+		});
+		agent.state.messages = [createAssistantMessage("Initial response")];
+		agent.followUp({ role: "user", content: "queued", timestamp: Date.now() });
+
+		const continuation = agent.continue();
+		agent.clearFollowUpQueue();
+		await continuation;
+
+		expect(providerCalls).toBe(1);
+		expect(agent.state.messages.some((message) => message.role === "user" && message.content === "queued")).toBe(
+			true,
+		);
+		expect(agent.hasQueuedMessages()).toBe(false);
+	});
+
+	it("commits initial legacy steering before an immediate clear can invalidate its reservation", async () => {
+		let providerCalls = 0;
+		const agent = new Agent({
+			streamFn: () => {
+				providerCalls++;
+				const stream = new MockAssistantStream();
+				queueMicrotask(() => {
+					stream.push({ type: "done", reason: "stop", message: createAssistantMessage("Processed") });
+				});
+				return stream;
+			},
+		});
+		agent.steer({ role: "user", content: "queued", timestamp: Date.now() });
+
+		const prompt = agent.prompt("direct");
+		agent.clearSteeringQueue();
+		await prompt;
+
+		expect(providerCalls).toBe(1);
+		expect(
+			agent.state.messages.filter((message) => message.role === "user").map((message) => message.content),
+		).toEqual([[{ type: "text", text: "direct" }], "queued"]);
+		expect(agent.hasQueuedMessages()).toBe(false);
+	});
+
+	it("keeps the durable assistant tool call and appends a failure assistant when its marker fails", async () => {
+		const schema = Type.Object({});
+		let executions = 0;
+		const tool: AgentTool<typeof schema> = {
+			name: "write",
+			label: "Write",
+			description: "Side effecting tool",
+			parameters: schema,
+			async execute() {
+				executions++;
+				return { content: [{ type: "text", text: "unexpected" }], details: {} };
+			},
+		};
+		const agent = new Agent({
+			initialState: { tools: [tool] },
+			streamFn: () => {
+				const stream = new MockAssistantStream();
+				queueMicrotask(() => {
+					stream.push({
+						type: "done",
+						reason: "toolUse",
+						message: createAssistantToolUseMessage([
+							{ type: "toolCall", id: "tool-1", name: "write", arguments: {} },
+						]),
+					});
+				});
+				return stream;
+			},
+		});
+		agent.installMandatoryRuntimeHooks({
+			beforeToolExecute: async () => {
+				throw new Error("tool marker sync failed");
+			},
+		});
+
+		await agent.prompt("write");
+
+		expect(executions).toBe(0);
+		expect(agent.state.messages.some((message) => message.role === "toolResult")).toBe(false);
+		const assistants = agent.state.messages.filter((message) => message.role === "assistant");
+		expect(assistants).toHaveLength(2);
+		expect(assistants[0]?.content).toEqual([{ type: "toolCall", id: "tool-1", name: "write", arguments: {} }]);
+		expect(assistants[1]).toMatchObject({ stopReason: "error", errorMessage: "tool marker sync failed" });
+	});
+
+	it("does not append a malformed duplicate-tool assistant before the failure assistant", async () => {
+		const schema = Type.Object({});
+		let beforeCalls = 0;
+		let executions = 0;
+		const tool: AgentTool<typeof schema> = {
+			name: "write",
+			label: "Write",
+			description: "Side effecting tool",
+			parameters: schema,
+			async execute() {
+				executions++;
+				return { content: [{ type: "text", text: "unexpected" }], details: {} };
+			},
+		};
+		const agent = new Agent({
+			initialState: { tools: [tool] },
+			streamFn: () => {
+				const stream = new MockAssistantStream();
+				queueMicrotask(() => {
+					stream.push({
+						type: "done",
+						reason: "toolUse",
+						message: createAssistantToolUseMessage([
+							{ type: "toolCall", id: "duplicate", name: "write", arguments: {} },
+							{ type: "toolCall", id: "duplicate", name: "write", arguments: {} },
+						]),
+					});
+				});
+				return stream;
+			},
+		});
+		agent.installMandatoryRuntimeHooks({
+			beforeToolExecute: async () => {
+				beforeCalls++;
+			},
+		});
+
+		await agent.prompt("write twice");
+
+		expect({ beforeCalls, executions }).toEqual({ beforeCalls: 0, executions: 0 });
+		const assistants = agent.state.messages.filter((message) => message.role === "assistant");
+		expect(assistants).toHaveLength(1);
+		expect(assistants[0]).toMatchObject({ stopReason: "error" });
+		expect(assistants[0]?.errorMessage).toContain("Duplicate tool call ID");
+	});
+
+	it("commits an all-mode queue batch once in insertion order", async () => {
+		const commits: Array<{ queue: string; ids: string[]; operationIds: Array<string | undefined> }> = [];
+		const ordering: string[] = [];
+		let providerCalls = 0;
+		const agent = new Agent({
+			steeringMode: "all",
+			streamFn: () => {
+				providerCalls++;
+				const stream = new MockAssistantStream();
+				queueMicrotask(() => {
+					stream.push({ type: "done", reason: "stop", message: createAssistantMessage("done") });
+				});
+				return stream;
+			},
+		});
+		agent.installMandatoryRuntimeHooks({
+			beforeQueueCommit: async ({ queue, items }) => {
+				ordering.push("commit");
+				commits.push({
+					queue,
+					ids: items.map((item) => item.queueItemId),
+					operationIds: items.map((item) => item.operationId),
+				});
+			},
+		});
+		agent.subscribe((event) => {
+			if (event.type === "message_start") ordering.push("message_start");
+		});
+		agent.steer(
+			{ role: "user", content: "repeated", timestamp: 1 },
+			{ queueItemId: "queue-first", operationId: "operation-first" },
+		);
+		agent.steer(
+			{ role: "user", content: "repeated", timestamp: 2 },
+			{ queueItemId: "queue-second", operationId: "operation-second" },
+		);
+
+		await agent.prompt("start");
+
+		expect(commits).toEqual([
+			{
+				queue: "steer",
+				ids: ["queue-first", "queue-second"],
+				operationIds: ["operation-first", "operation-second"],
+			},
+		]);
+		expect(providerCalls).toBe(1);
+		expect(ordering[0]).toBe("commit");
+	});
+
+	it("assigns distinct identities to repeated legacy queue messages", async () => {
+		const committedIds: string[] = [];
+		const agent = new Agent({
+			steeringMode: "all",
+			streamFn: () => {
+				const stream = new MockAssistantStream();
+				queueMicrotask(() => {
+					stream.push({ type: "done", reason: "stop", message: createAssistantMessage("done") });
+				});
+				return stream;
+			},
+		});
+		agent.installMandatoryRuntimeHooks({
+			beforeQueueCommit: async ({ items }) => {
+				committedIds.push(...items.map((item) => item.queueItemId));
+			},
+		});
+		agent.state.messages = [createAssistantMessage("Initial response")];
+		agent.steer({ role: "user", content: "repeated", timestamp: 1 });
+		agent.steer({ role: "user", content: "repeated", timestamp: 2 });
+
+		await agent.continue();
+
+		expect(committedIds).toHaveLength(2);
+		expect(new Set(committedIds).size).toBe(2);
+	});
+
+	it("commits a durably marked reservation while clearing its unreserved tail", async () => {
+		const commitStarted = createDeferred();
+		const releaseCommit = createDeferred();
+		let providerCalls = 0;
+		const agent = new Agent({
+			streamFn: () => {
+				providerCalls++;
+				const stream = new MockAssistantStream();
+				queueMicrotask(() => {
+					stream.push({ type: "done", reason: "stop", message: createAssistantMessage("unexpected") });
+				});
+				return stream;
+			},
+		});
+		agent.installMandatoryRuntimeHooks({
+			beforeQueueCommit: async () => {
+				commitStarted.resolve();
+				await releaseCommit.promise;
+			},
+		});
+		agent.state.messages = [createAssistantMessage("Initial response")];
+		agent.steer({ role: "user", content: "queued", timestamp: 1 });
+
+		const continuation = agent.continue();
+		await commitStarted.promise;
+		await expect(agent.continue()).rejects.toThrow("Agent is already processing");
+		agent.steer({ role: "user", content: "tail", timestamp: 2 });
+		agent.clearSteeringQueue();
+		releaseCommit.resolve();
+
+		await expect(continuation).resolves.toBeUndefined();
+		expect(providerCalls).toBe(1);
+		expect(agent.hasQueuedMessages()).toBe(false);
+		expect(
+			agent.state.messages.filter((message) => message.role === "user").map((message) => message.content),
+		).toEqual(["queued"]);
+		expect(agent.state.errorMessage).toBeUndefined();
+	});
+
+	it("drops a cleared reservation and its unreserved tail when the durable hook fails", async () => {
+		const commitStarted = createDeferred();
+		const releaseCommit = createDeferred();
+		let providerCalls = 0;
+		const agent = new Agent({
+			streamFn: () => {
+				providerCalls++;
+				return new MockAssistantStream();
+			},
+		});
+		agent.installMandatoryRuntimeHooks({
+			beforeQueueCommit: async () => {
+				commitStarted.resolve();
+				await releaseCommit.promise;
+				throw new Error("journal sync failed");
+			},
+		});
+		agent.state.messages = [createAssistantMessage("Initial response")];
+		agent.steer({ role: "user", content: "queued", timestamp: 1 });
+
+		const continuation = agent.continue();
+		await commitStarted.promise;
+		agent.steer({ role: "user", content: "tail", timestamp: 2 });
+		agent.clearSteeringQueue();
+		releaseCommit.resolve();
+
+		await expect(continuation).resolves.toBeUndefined();
+		expect(providerCalls).toBe(0);
+		expect(agent.hasQueuedMessages()).toBe(false);
+		expect(agent.state.messages.some((message) => message.role === "user")).toBe(false);
+		expect(agent.state.errorMessage).toBe("journal sync failed");
+	});
+
 	it("keeps legacy prepareNextTurn signal callback behavior", async () => {
 		const schema = Type.Object({});
 		const tool: AgentTool<typeof schema> = {

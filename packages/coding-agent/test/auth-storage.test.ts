@@ -1,7 +1,18 @@
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import {
+	existsSync,
+	linkSync,
+	lstatSync,
+	mkdirSync,
+	readFileSync,
+	rmSync,
+	statSync,
+	symlinkSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { registerOAuthProvider } from "@arcmind/ai/oauth";
+import { registerOAuthProvider, unregisterOAuthProvider } from "@arcmind/ai/oauth";
 import lockfile from "proper-lockfile";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { AuthStorage } from "../src/core/auth-storage.ts";
@@ -34,6 +45,29 @@ describe("AuthStorage", () => {
 	function toShPath(value: string): string {
 		return value.replace(/\\/g, "/").replace(/"/g, '\\"');
 	}
+
+	test("supports auth storage beneath an existing symlinked agent directory", ({ skip }) => {
+		const targetDirectory = join(tempDir, "agent-target");
+		const linkedDirectory = join(tempDir, "agent-link");
+		mkdirSync(targetDirectory);
+		try {
+			symlinkSync(targetDirectory, linkedDirectory, "dir");
+		} catch (error) {
+			if (process.platform === "win32" && error instanceof Error && "code" in error && error.code === "EPERM") {
+				skip("Creating directory symlinks requires Windows Developer Mode");
+				return;
+			}
+			throw error;
+		}
+		const linkedAuthPath = join(linkedDirectory, "auth.json");
+		const storage = AuthStorage.create(linkedAuthPath);
+
+		expect(storage.drainErrors()).toEqual([]);
+		storage.set("openai", { type: "api_key", key: "test-key" });
+		expect(JSON.parse(readFileSync(join(targetDirectory, "auth.json"), "utf8"))).toEqual({
+			openai: { type: "api_key", key: "test-key" },
+		});
+	});
 
 	describe("API key resolution", () => {
 		test("literal API key is returned directly", async () => {
@@ -486,9 +520,47 @@ describe("AuthStorage", () => {
 	});
 
 	describe("oauth lock compromise handling", () => {
+		test("snapshots legacy OAuth providers without following later global mutations", () => {
+			const providerId = `legacy-oauth-provider-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+			registerOAuthProvider({
+				id: providerId,
+				name: "Legacy OAuth Provider",
+				async login() {
+					return { access: "access", refresh: "refresh", expires: Date.now() + 60_000 };
+				},
+				async refreshToken(credentials) {
+					return credentials;
+				},
+				getApiKey(credentials) {
+					return credentials.access;
+				},
+			});
+
+			try {
+				authStorage = AuthStorage.create(authJsonPath);
+				expect(authStorage.getOAuthProvider(providerId)?.name).toBe("Legacy OAuth Provider");
+
+				unregisterOAuthProvider(providerId);
+				expect(authStorage.getOAuthProvider(providerId)?.name).toBe("Legacy OAuth Provider");
+				authStorage.resetOAuthProviders();
+				expect(authStorage.getOAuthProvider(providerId)?.name).toBe("Legacy OAuth Provider");
+			} finally {
+				unregisterOAuthProvider(providerId);
+			}
+		});
+
 		test("returns undefined on compromised lock and allows a later retry", async () => {
 			const providerId = `test-oauth-provider-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-			registerOAuthProvider({
+			writeAuthJson({
+				[providerId]: {
+					type: "oauth",
+					refresh: "refresh-token",
+					access: "expired-access-token",
+					expires: Date.now() - 10_000,
+				},
+			});
+			authStorage = AuthStorage.create(authJsonPath);
+			authStorage.registerOAuthProvider({
 				id: providerId,
 				name: "Test OAuth Provider",
 				async login() {
@@ -505,17 +577,6 @@ describe("AuthStorage", () => {
 					return `Bearer ${credentials.access}`;
 				},
 			});
-
-			writeAuthJson({
-				[providerId]: {
-					type: "oauth",
-					refresh: "refresh-token",
-					access: "expired-access-token",
-					expires: Date.now() - 10_000,
-				},
-			});
-
-			authStorage = AuthStorage.create(authJsonPath);
 
 			const realLock = lockfile.lock.bind(lockfile);
 			const lockSpy = vi.spyOn(lockfile, "lock");
@@ -535,6 +596,110 @@ describe("AuthStorage", () => {
 	});
 
 	describe("persistence semantics", () => {
+		test("creates auth.json with private permissions", () => {
+			authStorage = AuthStorage.create(authJsonPath);
+
+			expect(readFileSync(authJsonPath, "utf-8")).toBe("{}");
+			if (process.platform !== "win32") {
+				expect(statSync(authJsonPath).mode & 0o777).toBe(0o600);
+			}
+		});
+
+		test("recovers a published auth file after a crash leaves its temporary hard link", () => {
+			const publishedAlias = join(tempDir, ".auth.json.00000000-0000-4000-8000-000000000000.publish.tmp");
+			writeAuthJson({ openai: { type: "api_key", key: "preserved" } });
+			linkSync(authJsonPath, publishedAlias);
+			expect(statSync(authJsonPath).nlink).toBe(2);
+
+			authStorage = AuthStorage.create(authJsonPath);
+
+			expect(authStorage.get("openai")).toEqual({ type: "api_key", key: "preserved" });
+			expect(authStorage.drainErrors()).toEqual([]);
+			expect(statSync(authJsonPath).nlink).toBe(1);
+			expect(existsSync(publishedAlias)).toBe(false);
+		});
+
+		test("does not remove a hard link outside the publish helper namespace", () => {
+			const unrelatedAlias = join(tempDir, ".auth.json.backup.publish.tmp");
+			writeAuthJson({ openai: { type: "api_key", key: "untrusted-alias" } });
+			linkSync(authJsonPath, unrelatedAlias);
+
+			authStorage = AuthStorage.create(authJsonPath);
+
+			expect(authStorage.get("openai")).toBeUndefined();
+			expect(authStorage.drainErrors()).not.toHaveLength(0);
+			expect(statSync(authJsonPath).nlink).toBe(2);
+			expect(existsSync(unrelatedAlias)).toBe(true);
+		});
+
+		test.skipIf(process.platform === "win32")("refuses to initialize through a dangling symlink", () => {
+			const outsidePath = join(tempDir, "outside-auth.json");
+			symlinkSync(outsidePath, authJsonPath);
+
+			authStorage = AuthStorage.create(authJsonPath);
+
+			expect(existsSync(outsidePath)).toBe(false);
+			expect(lstatSync(authJsonPath).isSymbolicLink()).toBe(true);
+		});
+
+		test("rejects credentials read through an auth symlink", ({ skip }) => {
+			const outsidePath = join(tempDir, "outside-auth.json");
+			writeFileSync(outsidePath, JSON.stringify({ anthropic: { type: "api_key", key: "injected" } }), "utf-8");
+			try {
+				symlinkSync(outsidePath, authJsonPath);
+			} catch (error) {
+				if (process.platform === "win32" && error instanceof Error && "code" in error && error.code === "EPERM") {
+					skip("Creating symlinks requires Windows Developer Mode");
+					return;
+				}
+				throw error;
+			}
+			authStorage = AuthStorage.create(authJsonPath);
+
+			expect(authStorage.get("anthropic")).toBeUndefined();
+			expect(authStorage.drainErrors()).not.toHaveLength(0);
+			expect(() => authStorage.set("openai", { type: "api_key", key: "secret" })).toThrow(
+				"Cannot update auth storage because it could not be loaded",
+			);
+			expect(lstatSync(authJsonPath).isSymbolicLink()).toBe(true);
+		});
+
+		test("rejects credentials read through a hard-linked auth file", () => {
+			const outsidePath = join(tempDir, "outside-auth.json");
+			writeFileSync(outsidePath, JSON.stringify({ anthropic: { type: "api_key", key: "injected" } }), "utf-8");
+			linkSync(outsidePath, authJsonPath);
+			authStorage = AuthStorage.create(authJsonPath);
+
+			expect(authStorage.get("anthropic")).toBeUndefined();
+			expect(authStorage.drainErrors()).not.toHaveLength(0);
+		});
+
+		test.skipIf(process.platform === "win32")("rejects a final auth FIFO without blocking", ({ skip }) => {
+			const mkfifo = spawnSync("mkfifo", [authJsonPath], { encoding: "utf8" });
+			if (mkfifo.error && "code" in mkfifo.error && mkfifo.error.code === "ENOENT") {
+				skip("mkfifo is unavailable");
+				return;
+			}
+			expect(mkfifo.status, mkfifo.stderr).toBe(0);
+
+			const moduleUrl = new URL("../src/core/auth-storage.ts", import.meta.url).href;
+			const child = spawnSync(
+				process.execPath,
+				[
+					"--import",
+					"tsx",
+					"--input-type=module",
+					"--eval",
+					`const { AuthStorage } = await import(${JSON.stringify(moduleUrl)}); const storage = AuthStorage.create(process.argv[1]); if (storage.get("anthropic") !== undefined || storage.drainErrors().length === 0) process.exit(2);`,
+					authJsonPath,
+				],
+				{ encoding: "utf8", timeout: 10_000 },
+			);
+
+			expect(child.error).toBeUndefined();
+			expect(child.status, child.stderr).toBe(0);
+		});
+
 		test("set preserves unrelated external edits", () => {
 			writeAuthJson({
 				anthropic: { type: "api_key", key: "old-anthropic" },

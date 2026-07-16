@@ -1,7 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { type FileEntry, migrateSessionEntries } from "../../src/core/session-manager.ts";
+import { type FileEntry, migrateSessionEntries, parseSessionEntries } from "../../src/core/session-manager.ts";
 
 describe("migrateSessionEntries", () => {
+	it("keeps compatibility parsing tolerant of blank and malformed lines", () => {
+		const header = { type: "session", id: "session-1" };
+		const message = { type: "message", id: "message-1" };
+		expect(parseSessionEntries(`${JSON.stringify(header)}\n\n{malformed}\n${JSON.stringify(message)}\n`)).toEqual([
+			header,
+			message,
+		]);
+	});
+
 	it("should add id/parentId to v1 entries", () => {
 		const entries: FileEntry[] = [
 			{ type: "session", id: "sess-1", timestamp: "2025-01-01T00:00:00Z", cwd: "/tmp" },
@@ -25,7 +34,7 @@ describe("migrateSessionEntries", () => {
 		migrateSessionEntries(entries);
 
 		// Header should have the current version after all migrations.
-		expect((entries[0] as any).version).toBe(4);
+		expect((entries[0] as any).version).toBe(5);
 
 		// Entries should have id/parentId
 		const msg1 = entries[1] as any;

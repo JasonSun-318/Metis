@@ -151,6 +151,7 @@ export type {
 	WriteToolCallEvent,
 } from "./core/extensions/index.ts";
 export {
+	createDialogExtensionUIContext,
 	createExtensionRuntime,
 	defineTool,
 	discoverAndLoadExtensions,
@@ -189,6 +190,38 @@ export type {
 export { DefaultPackageManager } from "./core/package-manager.ts";
 export type { ResourceCollision, ResourceDiagnostic, ResourceLoader } from "./core/resource-loader.ts";
 export { DefaultResourceLoader, loadProjectContextFiles } from "./core/resource-loader.ts";
+export {
+	type DurableImageRef,
+	type DurablePromptInput,
+	type DurablePromptSubmission,
+	deriveBatchedTurnId,
+	identifyRuntimeRequest,
+	identifySubmitPromptRequest,
+	isRuntimeControlEntryType,
+	parseDurablePromptSubmission,
+	parseRuntimeControlEntry,
+	type ReducedRuntimeOperation,
+	type ReducedRuntimeQueueItem,
+	type ReducedRuntimeTool,
+	type ReducedRuntimeTurn,
+	RequestIdReusedError,
+	type RuntimeControlEntry,
+	type RuntimeOperationEntry,
+	type RuntimeOperationKind,
+	type RuntimeOperationState,
+	type RuntimeQueueEntry,
+	type RuntimeQueueKind,
+	type RuntimeQueueState,
+	type RuntimeRecoveryDecision,
+	type RuntimeRecoveryResult,
+	type RuntimeRequestIdentity,
+	type RuntimeToolEntry,
+	type RuntimeToolState,
+	type RuntimeTurnEntry,
+	type RuntimeTurnState,
+	reduceRuntimeJournal,
+} from "./core/runtime-recovery.ts";
+export type { RecoverablePromptDraft } from "./core/runtime-recovery-materializer.ts";
 // SDK for programmatic usage
 export {
 	AgentSessionRuntime,
@@ -216,8 +249,13 @@ export {
 	createReadTool,
 	createWriteTool,
 	type PromptTemplate,
+	type SubmitInterruptInput,
+	type SubmitInterruptResult,
+	type SubmitPromptInput,
+	type SubmitPromptResult,
 } from "./core/sdk.ts";
 export {
+	assertValidSessionId,
 	type BranchSummaryEntry,
 	buildContextEntries,
 	buildSessionContext,
@@ -226,11 +264,14 @@ export {
 	type CustomEntry,
 	type CustomMessageEntry,
 	type FileEntry,
+	getDefaultSessionDir,
 	getLatestCompactionEntry,
 	type ModelChangeEntry,
 	migrateSessionEntries,
+	moveSessionFileWithLease,
 	type NewSessionOptions,
 	parseSessionEntries,
+	type RuntimeControlPayload,
 	type SessionContext,
 	type SessionEntry,
 	type SessionEntryBase,
@@ -315,8 +356,10 @@ export {
 	withFileMutationQueue,
 } from "./core/tools/index.ts";
 export {
+	getProjectTrustOptions,
 	hasTrustRequiringProjectResources,
 	type ProjectTrustDecision,
+	type ProjectTrustOption,
 	ProjectTrustStore,
 	type ProjectTrustStoreEntry,
 	type ProjectTrustUpdate,

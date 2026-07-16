@@ -768,6 +768,20 @@ describe("Coding Agent Tools", () => {
 			expect(fullOutput).toContain("1\n2\n3");
 			expect(fullOutput).toContain("2998\n2999\n3000");
 		});
+
+		it("waits for synchronous full-output persistence before resolving", async () => {
+			const completeOutput = `${Array.from({ length: 3000 }, (_, index) => index + 1).join("\n")}\n`;
+			const operations: BashOperations = {
+				exec: async (_command, _cwd, { onData }) => {
+					onData(Buffer.from(completeOutput));
+					return { exitCode: 0 };
+				},
+			};
+
+			const result = await executeBashWithOperations("unused", process.cwd(), operations);
+			expect(result.fullOutputPath).toBeDefined();
+			expect(readFileSync(result.fullOutputPath!, "utf8")).toBe(completeOutput);
+		});
 	});
 
 	describe("grep tool", () => {

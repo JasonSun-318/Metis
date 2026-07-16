@@ -1,4 +1,5 @@
-import { copyFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { AsyncLocalStorage } from "node:async_hooks";
+import { existsSync, realpathSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { resolvePath } from "../utils/paths.ts";
 import type { AgentSession } from "./agent-session.ts";
@@ -10,9 +11,17 @@ import type {
 	SessionStartEvent,
 } from "./extensions/index.ts";
 import { emitSessionShutdownEvent } from "./extensions/runner.ts";
+import {
+	type DurableImageRef,
+	identifyRuntimeRequest,
+	identifySubmitPromptRequest,
+	parseDurablePromptSubmission,
+	RequestIdReusedError,
+} from "./runtime-recovery.ts";
+import { materializeRuntimeRecovery, type RecoverablePromptDraft } from "./runtime-recovery-materializer.ts";
 import type { CreateAgentSessionResult } from "./sdk.ts";
 import { assertSessionCwdExists } from "./session-cwd.ts";
-import { loadEntriesFromFile, SessionManager, stringifySessionEntry } from "./session-manager.ts";
+import { SessionManager } from "./session-manager.ts";
 
 /**
  * Result returned by runtime creation.
@@ -23,6 +32,29 @@ import { loadEntriesFromFile, SessionManager, stringifySessionEntry } from "./se
 export interface CreateAgentSessionRuntimeResult extends CreateAgentSessionResult {
 	services: AgentSessionServices;
 	diagnostics: AgentSessionRuntimeDiagnostic[];
+}
+
+export interface SubmitPromptInput {
+	requestId: string;
+	text: string;
+	images?: readonly DurableImageRef[];
+	streamingBehavior?: "steer" | "followUp";
+}
+
+export interface SubmitPromptResult {
+	operationId: string;
+	queueItemId?: string;
+	turnId?: string;
+	status: "accepted" | "existing";
+}
+
+export interface SubmitInterruptInput {
+	requestId: string;
+}
+
+export interface SubmitInterruptResult {
+	operationId: string;
+	status: "accepted" | "existing";
 }
 
 /**
@@ -64,12 +96,96 @@ function extractUserMessageText(content: string | Array<{ type: string; text?: s
 		.join("");
 }
 
+function pathsReferToSameFile(left: string, right: string): boolean {
+	if (resolve(left) === resolve(right)) return true;
+	try {
+		return realpathSync(left) === realpathSync(right);
+	} catch {
+		return false;
+	}
+}
+
+function closeUnadoptedSessionManager(sessionManager: SessionManager, error: unknown, message: string): never {
+	try {
+		sessionManager.close();
+	} catch (cleanupError) {
+		try {
+			sessionManager.close();
+		} catch (retryError) {
+			throw new AggregateError([error, cleanupError, retryError], message);
+		}
+	}
+	throw error;
+}
+
+function recoverSessionManager(sessionManager: SessionManager): RecoveredSessionRuntime {
+	const result = materializeRuntimeRecovery(sessionManager);
+	const reduced = result.state;
+	if (reduced.decisions.length > 0) throw new Error("Runtime recovery did not reach a stable journal state");
+	const queues = new Map(reduced.queues.map((queue) => [queue.operationId, queue]));
+	const requests = new Map<string, IndexedRuntimeRequest>();
+	const operations = new Map<string, IndexedRuntimeRequest>();
+	for (const operation of reduced.operations) {
+		const queue = queues.get(operation.operationId);
+		const indexed: IndexedRuntimeRequest = {
+			requestId: operation.requestId,
+			requestHash: operation.requestHash,
+			operationId: operation.operationId,
+			...(queue === undefined ? {} : { queueItemId: queue.queueItemId }),
+			...(operation.turnId === undefined ? {} : { turnId: operation.turnId }),
+		};
+		requests.set(indexed.requestId, indexed);
+		operations.set(indexed.operationId, indexed);
+	}
+	return {
+		recoverableDrafts: result.drafts.map((draft) => ({
+			queueItemId: draft.queueItemId,
+			input: structuredClone(draft.input),
+		})),
+		requests,
+		operations,
+	};
+}
+
+const lifecycleOperationContext = new AsyncLocalStorage<{ owner: object; active: boolean }>();
+const acceptedPromptTaskContext = new AsyncLocalStorage<{ owner: object; active: boolean }>();
+const REENTRANT_LIFECYCLE_ERROR = "Session lifecycle changes cannot be awaited from within another lifecycle operation";
+const ACCEPTED_PROMPT_LIFECYCLE_ERROR = "Session lifecycle changes cannot run from within an accepted prompt task";
+const RUNTIME_DISPOSING_ERROR = "Agent session runtime is disposing or disposed";
+
+class AgentSessionRuntimeTerminalError extends Error {
+	constructor(message: string, cause: unknown) {
+		super(message, { cause });
+		this.name = "AgentSessionRuntimeTerminalError";
+	}
+}
+
+type CandidateRuntimeOptions = Omit<Parameters<CreateAgentSessionRuntimeFactory>[0], "agentDir" | "sessionManager">;
+
+interface PreparedRuntime {
+	readonly result: CreateAgentSessionRuntimeResult;
+	readonly recovered: RecoveredSessionRuntime;
+}
+
+interface IndexedRuntimeRequest {
+	readonly requestId: string;
+	readonly requestHash: string;
+	readonly operationId: string;
+	queueItemId?: string;
+	turnId?: string;
+}
+
+interface RecoveredSessionRuntime {
+	readonly recoverableDrafts: readonly RecoverablePromptDraft[];
+	readonly requests: Map<string, IndexedRuntimeRequest>;
+	readonly operations: Map<string, IndexedRuntimeRequest>;
+}
+
 /**
  * Owns the current AgentSession plus its cwd-bound services.
  *
- * Session replacement methods tear down the current runtime first, then create
- * and apply the next runtime. If creation fails, the error is propagated to the
- * caller. The caller is responsible for user-facing error handling.
+ * Different-target replacements prepare the next runtime before invalidating the
+ * current one. Same-target replacements rebuild the original runtime on failure.
  */
 export class AgentSessionRuntime {
 	private rebindSession?: (session: AgentSession) => Promise<void>;
@@ -79,6 +195,22 @@ export class AgentSessionRuntime {
 	private readonly createRuntime: CreateAgentSessionRuntimeFactory;
 	private _diagnostics: AgentSessionRuntimeDiagnostic[];
 	private _modelFallbackMessage?: string;
+	private disposePromise?: Promise<void>;
+	private eventPersistenceDrained = false;
+	private shutdownAttempted = false;
+	private beforeInvalidateAttempted = false;
+	private runtimeRecoveryAttempted = false;
+	private disposed = false;
+	private disposeRequested = false;
+	private terminalError?: AgentSessionRuntimeTerminalError;
+	private lifecycleTail: Promise<void> = Promise.resolve();
+	private submissionGateOpen = true;
+	private submissionDisabled = false;
+	private pendingLifecycleOperations = 0;
+	private readonly acceptedTasks = new Set<Promise<void>>();
+	private _recoverableDrafts: readonly RecoverablePromptDraft[];
+	private requestIndex: Map<string, IndexedRuntimeRequest>;
+	private operationIndex: Map<string, IndexedRuntimeRequest>;
 
 	constructor(
 		_session: AgentSession,
@@ -86,23 +218,31 @@ export class AgentSessionRuntime {
 		createRuntime: CreateAgentSessionRuntimeFactory,
 		_diagnostics: AgentSessionRuntimeDiagnostic[] = [],
 		_modelFallbackMessage?: string,
+		_recovered?: RecoveredSessionRuntime,
 	) {
 		this._session = _session;
 		this._services = _services;
 		this.createRuntime = createRuntime;
 		this._diagnostics = _diagnostics;
 		this._modelFallbackMessage = _modelFallbackMessage;
+		this._recoverableDrafts = _recovered?.recoverableDrafts ?? [];
+		this.requestIndex = _recovered?.requests ?? new Map();
+		this.operationIndex = _recovered?.operations ?? new Map();
+		this.bindDurableSession(_session);
 	}
 
 	get services(): AgentSessionServices {
+		this.assertPubliclyAccessible();
 		return this._services;
 	}
 
 	get session(): AgentSession {
+		this.assertPubliclyAccessible();
 		return this._session;
 	}
 
 	get cwd(): string {
+		this.assertPubliclyAccessible();
 		return this._services.cwd;
 	}
 
@@ -112,6 +252,18 @@ export class AgentSessionRuntime {
 
 	get modelFallbackMessage(): string | undefined {
 		return this._modelFallbackMessage;
+	}
+
+	get recoverableDrafts(): readonly RecoverablePromptDraft[] {
+		this.assertPubliclyAccessible();
+		return structuredClone(this._recoverableDrafts);
+	}
+
+	private bindDurableSession(session: AgentSession): void {
+		session.setDurableOperationTurnListener((operationId, turnId) => {
+			const indexed = this.operationIndex.get(operationId);
+			if (indexed) indexed.turnId = turnId;
+		});
 	}
 
 	setRebindSession(rebindSession?: (session: AgentSession) => Promise<void>): void {
@@ -128,6 +280,337 @@ export class AgentSessionRuntime {
 	 */
 	setBeforeSessionInvalidate(beforeSessionInvalidate?: () => void): void {
 		this.beforeSessionInvalidate = beforeSessionInvalidate;
+	}
+
+	async submitPrompt(input: SubmitPromptInput): Promise<SubmitPromptResult> {
+		this.assertPubliclyAccessible();
+		if (!this.submissionGateOpen) throw new Error(RUNTIME_DISPOSING_ERROR);
+
+		const submission = parseDurablePromptSubmission(input);
+		const identity = identifySubmitPromptRequest(submission.requestId, submission.input);
+		const existing = this.requestIndex.get(submission.requestId);
+		if (existing) {
+			if (existing.requestHash !== identity.requestHash) throw new RequestIdReusedError(submission.requestId);
+			return {
+				operationId: existing.operationId,
+				...(existing.queueItemId === undefined ? {} : { queueItemId: existing.queueItemId }),
+				...(existing.turnId === undefined ? {} : { turnId: existing.turnId }),
+				status: "existing",
+			};
+		}
+
+		const queued = this._session.activeDurableTurnId !== undefined || this._session.isStreaming;
+		if (queued && submission.input.streamingBehavior === undefined) {
+			throw new Error("Agent is already processing. Specify streamingBehavior ('steer' or 'followUp').");
+		}
+		this._session.assertCanDrainAgentEventPersistence();
+		this._session.assertDurablePromptCapacity(submission.input);
+		this._session.prepareDurablePrompt(submission.input);
+		let accepted = false;
+		let queueDurable = false;
+		let turnStarted = false;
+		const indexed: IndexedRuntimeRequest = {
+			requestId: identity.requestId,
+			requestHash: identity.requestHash,
+			operationId: identity.operationId,
+		};
+		try {
+			this._session.sessionManager.appendRuntimeControl({
+				type: "runtime_operation",
+				operationId: identity.operationId,
+				requestId: identity.requestId,
+				requestHash: identity.requestHash,
+				kind: queued ? "steer" : "turn",
+				state: "accepted",
+				input: submission.input,
+			});
+			accepted = true;
+			this.requestIndex.set(identity.requestId, indexed);
+			this.operationIndex.set(identity.operationId, indexed);
+
+			if (queued) {
+				const behavior = submission.input.streamingBehavior!;
+				const queue = behavior === "followUp" ? "follow_up" : "steer";
+				this._session.sessionManager.appendRuntimeControl({
+					type: "runtime_queue",
+					operationId: identity.operationId,
+					queueItemId: identity.queueItemId,
+					queue,
+					state: "enqueued",
+					input: submission.input,
+				});
+				queueDurable = true;
+				indexed.queueItemId = identity.queueItemId;
+				this._session.enqueueAcceptedDurablePrompt(submission.input, identity, behavior);
+				return { operationId: identity.operationId, queueItemId: identity.queueItemId, status: "accepted" };
+			}
+
+			const session = this._session;
+			const predecessors = [...this.acceptedTasks];
+			session.beginDurableDirectTurn(identity, submission.input);
+			turnStarted = true;
+			this.trackAcceptedTask(identity.turnId, session, async () => {
+				await Promise.all(predecessors);
+				await session.runAcceptedDurablePrompt(identity.turnId, submission.input);
+			});
+			return { operationId: identity.operationId, turnId: identity.turnId, status: "accepted" };
+		} catch (error) {
+			if (!accepted) throw error;
+			try {
+				if (queueDurable) {
+					this._session.sessionManager.appendRuntimeControl({
+						type: "runtime_queue",
+						operationId: identity.operationId,
+						queueItemId: identity.queueItemId,
+						queue: submission.input.streamingBehavior === "followUp" ? "follow_up" : "steer",
+						state: "cancelled",
+						reason: "admission_failed",
+					});
+				}
+				if (turnStarted) {
+					this._session.sessionManager.appendRuntimeControl({
+						type: "runtime_turn",
+						turnId: identity.turnId,
+						operationIds: [identity.operationId],
+						state: "interrupted",
+						consumedQueueItemIds: [],
+					});
+				}
+				this._session.sessionManager.appendRuntimeControl({
+					type: "runtime_operation",
+					operationId: identity.operationId,
+					requestId: identity.requestId,
+					requestHash: identity.requestHash,
+					kind: queued ? "steer" : "turn",
+					state: "interrupted",
+					...(turnStarted ? { turnId: identity.turnId } : {}),
+					error: { code: "ADMISSION_FAILED", message: "The accepted prompt could not be scheduled." },
+				});
+			} catch (compensationError) {
+				this.submissionDisabled = true;
+				this.submissionGateOpen = false;
+				this._diagnostics = [
+					...this._diagnostics,
+					{ type: "error", message: "Durable prompt admission failed; new submissions are disabled." },
+				];
+				throw new AggregateError([error, compensationError], "Prompt acceptance could not be compensated");
+			}
+			throw error;
+		}
+	}
+
+	/** Durably accept an interrupt, settle active work, then rebuild clean runtime state. */
+	interrupt(input: SubmitInterruptInput): Promise<SubmitInterruptResult> {
+		return this.enqueueLifecycle(() => this.interruptOnce(input));
+	}
+
+	private async interruptOnce(input: SubmitInterruptInput): Promise<SubmitInterruptResult> {
+		this.assertPubliclyAccessible();
+		const identity = identifyRuntimeRequest("interrupt", input.requestId, {});
+		const existing = this.requestIndex.get(input.requestId);
+		if (existing) {
+			if (existing.requestHash !== identity.requestHash) throw new RequestIdReusedError(input.requestId);
+			return { operationId: existing.operationId, status: "existing" };
+		}
+
+		const session = this._session;
+		const sessionFile = session.sessionManager.getSessionFile();
+		if (!sessionFile) throw new Error("Durable interrupt requires a persisted session");
+		const previousCwd = session.sessionManager.getCwd();
+		const indexed: IndexedRuntimeRequest = {
+			requestId: identity.requestId,
+			requestHash: identity.requestHash,
+			operationId: identity.operationId,
+		};
+		session.sessionManager.appendRuntimeControl({
+			type: "runtime_operation",
+			operationId: identity.operationId,
+			requestId: identity.requestId,
+			requestHash: identity.requestHash,
+			kind: "interrupt",
+			state: "accepted",
+		});
+		this.requestIndex.set(identity.requestId, indexed);
+		this.operationIndex.set(identity.operationId, indexed);
+
+		let interruptError: unknown;
+		try {
+			await session.abortAndDrainAgentEventPersistence();
+			await this.drainAcceptedTasks();
+			session.sessionManager.appendRuntimeControl({
+				type: "runtime_operation",
+				operationId: identity.operationId,
+				requestId: identity.requestId,
+				requestHash: identity.requestHash,
+				kind: "interrupt",
+				state: "completed",
+			});
+		} catch (error) {
+			interruptError = error;
+			try {
+				session.sessionManager.appendRuntimeControl({
+					type: "runtime_operation",
+					operationId: identity.operationId,
+					requestId: identity.requestId,
+					requestHash: identity.requestHash,
+					kind: "interrupt",
+					state: "interrupted",
+					error: { code: "INTERRUPT_FAILED", message: "The accepted interrupt did not settle cleanly." },
+				});
+			} catch (compensationError) {
+				throw this.enterTerminalState(
+					"Agent session runtime is unusable after interrupt compensation failed",
+					new AggregateError([error, compensationError], "Interrupt could not be compensated"),
+				);
+			}
+		}
+
+		let teardownError: unknown;
+		try {
+			teardownError = await this.replaceCurrentInPlace(
+				sessionFile,
+				() => SessionManager.open(sessionFile, undefined, previousCwd),
+				"resume",
+				(sessionManager) => ({
+					cwd: sessionManager.getCwd(),
+					sessionStartEvent: { type: "session_start", reason: "resume", previousSessionFile: sessionFile },
+				}),
+			);
+			await this.finishReplacement(teardownError);
+		} catch (error) {
+			if (interruptError === undefined) throw error;
+			throw new AggregateError([interruptError, error], "Interrupt and runtime recovery failed");
+		}
+		if (interruptError !== undefined) throw interruptError;
+		return { operationId: identity.operationId, status: "accepted" };
+	}
+
+	private trackAcceptedTask(turnId: string, session: AgentSession, task: () => Promise<void>): void {
+		const context = { owner: this, active: true };
+		const accepted = Promise.resolve()
+			.then(() =>
+				acceptedPromptTaskContext.run(context, async () => {
+					try {
+						await task();
+					} finally {
+						context.active = false;
+					}
+				}),
+			)
+			.catch(() => {
+				if (session.activeDurableTurnId === turnId) {
+					this.submissionDisabled = true;
+					this.submissionGateOpen = false;
+					this._diagnostics = [
+						...this._diagnostics,
+						{
+							type: "error",
+							message:
+								"Durable prompt finalization failed; new submissions are disabled until session recovery.",
+						},
+					];
+					return;
+				}
+				this._diagnostics = [
+					...this._diagnostics,
+					{ type: "warning", message: "An accepted prompt did not complete; its durable state was preserved." },
+				];
+			});
+		this.acceptedTasks.add(accepted);
+		void accepted.then(() => this.acceptedTasks.delete(accepted));
+	}
+
+	private async drainAcceptedTasks(): Promise<void> {
+		while (this.acceptedTasks.size > 0) await Promise.all([...this.acceptedTasks]);
+	}
+
+	private assertUsable(): void {
+		if (this.terminalError) throw this.terminalError;
+	}
+
+	private assertPubliclyAccessible(): void {
+		const context = lifecycleOperationContext.getStore();
+		const insideAcceptedLifecycle = context?.owner === this && context.active;
+		if ((this.disposeRequested || this.disposed) && !insideAcceptedLifecycle) {
+			throw new Error(RUNTIME_DISPOSING_ERROR);
+		}
+		this.assertUsable();
+	}
+
+	private enterTerminalState(message: string, cause: unknown): AgentSessionRuntimeTerminalError {
+		const error = new AgentSessionRuntimeTerminalError(message, cause);
+		this.terminalError = error;
+		return error;
+	}
+
+	private assertNotInLifecycleOperation(): void {
+		const context = lifecycleOperationContext.getStore();
+		if (context?.owner === this && context.active) {
+			throw new Error(REENTRANT_LIFECYCLE_ERROR);
+		}
+		const acceptedContext = acceptedPromptTaskContext.getStore();
+		if (acceptedContext?.owner === this && acceptedContext.active) {
+			throw new Error(ACCEPTED_PROMPT_LIFECYCLE_ERROR);
+		}
+	}
+
+	private runLifecycleOperation<T>(operation: () => Promise<T>): Promise<T> {
+		const context = { owner: this, active: true };
+		return lifecycleOperationContext.run(context, async () => {
+			try {
+				return await operation();
+			} finally {
+				// Async work spawned by a completed hook inherits the store. Marking the
+				// shared context inactive prevents those later tasks from being rejected.
+				context.active = false;
+			}
+		});
+	}
+
+	private enqueueLifecycle<T>(operation: () => Promise<T>): Promise<T> {
+		if (this.disposeRequested) {
+			return Promise.reject(new Error(RUNTIME_DISPOSING_ERROR));
+		}
+		try {
+			this.assertUsable();
+			this.assertNotInLifecycleOperation();
+			this._session.assertCanDrainAgentEventPersistence();
+		} catch (error) {
+			return Promise.reject(error);
+		}
+		this.pendingLifecycleOperations += 1;
+		this.submissionGateOpen = false;
+		const result = this.lifecycleTail.then(() =>
+			this.runLifecycleOperation(async () => {
+				// A previously queued replacement may have put the runtime into a
+				// terminal state or installed a different session since this call was accepted.
+				this.assertUsable();
+				this._session.assertCanDrainAgentEventPersistence();
+				return operation();
+			}),
+		);
+		this.lifecycleTail = result.then(
+			() => undefined,
+			() => undefined,
+		);
+		void result.then(
+			() => this.releaseLifecycleAdmission(),
+			() => this.releaseLifecycleAdmission(),
+		);
+		return result;
+	}
+
+	private releaseLifecycleAdmission(): void {
+		this.pendingLifecycleOperations -= 1;
+		if (
+			this.pendingLifecycleOperations === 0 &&
+			!this.disposeRequested &&
+			!this.disposed &&
+			!this.terminalError &&
+			!this.submissionDisabled
+		) {
+			this.submissionGateOpen = true;
+		}
 	}
 
 	private async emitBeforeSwitch(
@@ -165,34 +648,198 @@ export class AgentSessionRuntime {
 	}
 
 	private async teardownCurrent(reason: SessionShutdownEvent["reason"], targetSessionFile?: string): Promise<void> {
-		this.session.abortCompaction();
-		await this.session.waitForDream();
-		await emitSessionShutdownEvent(this.session.extensionRunner, {
-			type: "session_shutdown",
-			reason,
-			targetSessionFile,
-		});
-		this.beforeSessionInvalidate?.();
-		this.session.dispose();
+		const session = this._session;
+		session.beginRuntimeTeardown();
+		this.submissionGateOpen = false;
+		const errors: unknown[] = [];
+		try {
+			session.abortCompaction();
+		} catch (error) {
+			errors.push(error);
+		}
+		try {
+			await session.abortAndDrainAgentEventPersistence();
+		} catch (error) {
+			errors.push(error);
+		}
+		try {
+			await this.drainAcceptedTasks();
+		} catch (error) {
+			errors.push(error);
+		}
+		try {
+			recoverSessionManager(session.sessionManager);
+		} catch (error) {
+			errors.push(error);
+		}
+		try {
+			await session.waitForDream();
+		} catch (error) {
+			errors.push(error);
+		}
+		try {
+			await emitSessionShutdownEvent(session.extensionRunner, {
+				type: "session_shutdown",
+				reason,
+				targetSessionFile,
+			});
+		} catch (error) {
+			errors.push(error);
+		}
+		try {
+			this.beforeSessionInvalidate?.();
+		} catch (error) {
+			errors.push(error);
+		}
+		try {
+			session.disposeFromRuntime();
+		} catch (error) {
+			errors.push(error);
+			try {
+				session.disposeFromRuntime();
+			} catch (retryError) {
+				errors.push(retryError);
+			}
+		}
+		if (errors.length === 1) throw errors[0];
+		if (errors.length > 1) throw new AggregateError(errors, "Failed to tear down agent session");
 	}
 
-	private apply(result: CreateAgentSessionRuntimeResult): void {
-		this._session = result.session;
-		this._services = result.services;
-		this._diagnostics = result.diagnostics;
-		this._modelFallbackMessage = result.modelFallbackMessage;
+	private apply(prepared: PreparedRuntime): void {
+		this._session = prepared.result.session;
+		this._services = prepared.result.services;
+		this._diagnostics = prepared.result.diagnostics;
+		this._modelFallbackMessage = prepared.result.modelFallbackMessage;
+		this._recoverableDrafts = prepared.recovered.recoverableDrafts;
+		this.requestIndex = prepared.recovered.requests;
+		this.operationIndex = prepared.recovered.operations;
+		this.submissionDisabled = false;
+		this.bindDurableSession(prepared.result.session);
 	}
 
-	private async finishSessionReplacement(withSession?: (ctx: ReplacedSessionContext) => Promise<void>): Promise<void> {
+	private async prepareCandidate(
+		sessionManager: SessionManager,
+		getOptions: () => CandidateRuntimeOptions,
+	): Promise<PreparedRuntime> {
+		try {
+			const recovered = recoverSessionManager(sessionManager);
+			const result = await this.createRuntime({
+				...getOptions(),
+				agentDir: this._services.agentDir,
+				sessionManager,
+			});
+			return { result, recovered };
+		} catch (error) {
+			closeUnadoptedSessionManager(sessionManager, error, "Failed to create and clean up replacement session");
+		}
+	}
+
+	private async replaceCurrent(
+		sessionManager: SessionManager,
+		reason: SessionShutdownEvent["reason"],
+		getOptions: () => CandidateRuntimeOptions,
+	): Promise<unknown | undefined> {
+		// Gate A made runtime services independent, so prepare a different target
+		// before invalidating the current session. Factory failure is then harmless.
+		const result = await this.prepareCandidate(sessionManager, getOptions);
+		let teardownError: unknown;
+		try {
+			await this.teardownCurrent(reason, sessionManager.getSessionFile());
+		} catch (error) {
+			teardownError = error;
+		}
+		this.apply(result);
+		return teardownError;
+	}
+
+	private async replaceCurrentInPlace(
+		previousSessionFile: string,
+		createSessionManager: () => SessionManager,
+		reason: SessionShutdownEvent["reason"],
+		getOptions: (sessionManager: SessionManager) => CandidateRuntimeOptions,
+	): Promise<unknown | undefined> {
+		const previousCwd = this._services.cwd;
+		let teardownError: unknown;
+		try {
+			await this.teardownCurrent(reason, previousSessionFile);
+		} catch (error) {
+			teardownError = error;
+		}
+
+		try {
+			const sessionManager = createSessionManager();
+			const result = await this.prepareCandidate(sessionManager, () => getOptions(sessionManager));
+			this.apply(result);
+			return teardownError;
+		} catch (replacementError) {
+			const errors = teardownError === undefined ? [replacementError] : [teardownError, replacementError];
+			try {
+				const rollbackManager = SessionManager.open(previousSessionFile, undefined, previousCwd);
+				try {
+					assertSessionCwdExists(rollbackManager, previousCwd);
+				} catch (error) {
+					closeUnadoptedSessionManager(
+						rollbackManager,
+						error,
+						"Failed to validate and clean up replacement rollback",
+					);
+				}
+				const rollback = await this.prepareCandidate(rollbackManager, () => getOptions(rollbackManager));
+				this.apply(rollback);
+				await this.rebindCurrentSession();
+			} catch (rollbackError) {
+				if (rollbackError instanceof AgentSessionRuntimeTerminalError) throw rollbackError;
+				throw this.enterTerminalState(
+					"Agent session runtime is unusable after replacement and rollback failed",
+					new AggregateError([...errors, rollbackError], "Session replacement rollback failed"),
+				);
+			}
+			if (errors.length === 1) throw errors[0];
+			throw new AggregateError(errors, "Session replacement failed and the previous session was restored");
+		}
+	}
+
+	private async rebindCurrentSession(): Promise<void> {
 		if (this.rebindSession) {
-			await this.rebindSession(this.session);
+			try {
+				await this.rebindSession(this._session);
+			} catch (error) {
+				throw this.enterTerminalState("Agent session runtime is unusable after host rebinding failed", error);
+			}
+		}
+	}
+
+	private async finishReplacement(
+		teardownError: unknown | undefined,
+		withSession?: (ctx: ReplacedSessionContext) => Promise<void>,
+	): Promise<void> {
+		await this.rebindCurrentSession();
+		if (teardownError !== undefined) {
+			this._diagnostics = [
+				...this._diagnostics,
+				{
+					type: "warning",
+					message: "The previous session did not shut down cleanly; the replacement session is active.",
+				},
+			];
 		}
 		if (withSession) {
-			await withSession(this.session.createReplacedSessionContext());
+			await withSession(this._session.createReplacedSessionContext());
 		}
 	}
 
-	async switchSession(
+	switchSession(
+		sessionPath: string,
+		options?: {
+			cwdOverride?: string;
+			withSession?: (ctx: ReplacedSessionContext) => Promise<void>;
+			projectTrustContextFactory?: (cwd: string) => ProjectTrustContext;
+		},
+	): Promise<{ cancelled: boolean }> {
+		return this.enqueueLifecycle(() => this.switchSessionOnce(sessionPath, options));
+	}
+
+	private async switchSessionOnce(
 		sessionPath: string,
 		options?: {
 			cwdOverride?: string;
@@ -206,23 +853,59 @@ export class AgentSessionRuntime {
 		}
 
 		const previousSessionFile = this.session.sessionFile;
-		const sessionManager = SessionManager.open(sessionPath, undefined, options?.cwdOverride);
-		assertSessionCwdExists(sessionManager, this.cwd);
-		await this.teardownCurrent("resume", sessionManager.getSessionFile());
-		this.apply(
-			await this.createRuntime({
+		const targetIsCurrent =
+			previousSessionFile !== undefined && pathsReferToSameFile(resolvePath(sessionPath), previousSessionFile);
+
+		let teardownError: unknown;
+		if (targetIsCurrent) {
+			teardownError = await this.replaceCurrentInPlace(
+				previousSessionFile,
+				() => {
+					const sessionManager = SessionManager.open(sessionPath, undefined, options?.cwdOverride);
+					try {
+						assertSessionCwdExists(sessionManager, this._services.cwd);
+					} catch (error) {
+						closeUnadoptedSessionManager(
+							sessionManager,
+							error,
+							"Failed to validate and clean up resumed session",
+						);
+					}
+					return sessionManager;
+				},
+				"resume",
+				(sessionManager) => ({
+					cwd: sessionManager.getCwd(),
+					sessionStartEvent: { type: "session_start", reason: "resume", previousSessionFile },
+					projectTrustContext: options?.projectTrustContextFactory?.(sessionManager.getCwd()),
+				}),
+			);
+		} else {
+			const sessionManager = SessionManager.open(sessionPath, undefined, options?.cwdOverride);
+			try {
+				assertSessionCwdExists(sessionManager, this._services.cwd);
+			} catch (error) {
+				closeUnadoptedSessionManager(sessionManager, error, "Failed to validate and clean up resumed session");
+			}
+			teardownError = await this.replaceCurrent(sessionManager, "resume", () => ({
 				cwd: sessionManager.getCwd(),
-				agentDir: this.services.agentDir,
-				sessionManager,
 				sessionStartEvent: { type: "session_start", reason: "resume", previousSessionFile },
 				projectTrustContext: options?.projectTrustContextFactory?.(sessionManager.getCwd()),
-			}),
-		);
-		await this.finishSessionReplacement(options?.withSession);
+			}));
+		}
+		await this.finishReplacement(teardownError, options?.withSession);
 		return { cancelled: false };
 	}
 
-	async newSession(options?: {
+	newSession(options?: {
+		parentSession?: string;
+		setup?: (sessionManager: SessionManager) => Promise<void>;
+		withSession?: (ctx: ReplacedSessionContext) => Promise<void>;
+	}): Promise<{ cancelled: boolean }> {
+		return this.enqueueLifecycle(() => this.newSessionOnce(options));
+	}
+
+	private async newSessionOnce(options?: {
 		parentSession?: string;
 		setup?: (sessionManager: SessionManager) => Promise<void>;
 		withSession?: (ctx: ReplacedSessionContext) => Promise<void>;
@@ -235,30 +918,35 @@ export class AgentSessionRuntime {
 		const previousSessionFile = this.session.sessionFile;
 		const sessionDir = this.session.sessionManager.getSessionDir();
 		const sessionManager = this.session.sessionManager.isPersisted()
-			? SessionManager.create(this.cwd, sessionDir)
-			: SessionManager.inMemory(this.cwd);
-		if (options?.parentSession) {
-			sessionManager.newSession({ parentSession: options.parentSession });
-		}
+			? SessionManager.create(this.cwd, sessionDir, { parentSession: options?.parentSession })
+			: SessionManager.inMemory(this.cwd, { parentSession: options?.parentSession });
 
-		await this.teardownCurrent("new", sessionManager.getSessionFile());
-		this.apply(
-			await this.createRuntime({
-				cwd: this.cwd,
-				agentDir: this.services.agentDir,
-				sessionManager,
-				sessionStartEvent: { type: "session_start", reason: "new", previousSessionFile },
-			}),
-		);
-		if (options?.setup) {
-			await options.setup(this.session.sessionManager);
-			this.session.agent.state.messages = this.session.sessionManager.buildSessionContext().messages;
+		const teardownError = await this.replaceCurrent(sessionManager, "new", () => ({
+			cwd: this.cwd,
+			sessionStartEvent: { type: "session_start", reason: "new", previousSessionFile },
+		}));
+		let setupError: unknown;
+		try {
+			if (options?.setup) {
+				await options.setup(this.session.sessionManager);
+				this.session.agent.state.messages = this.session.sessionManager.buildSessionContext().messages;
+			}
+		} catch (error) {
+			setupError = error;
 		}
-		await this.finishSessionReplacement(options?.withSession);
+		await this.finishReplacement(teardownError, setupError === undefined ? options?.withSession : undefined);
+		if (setupError !== undefined) throw setupError;
 		return { cancelled: false };
 	}
 
-	async fork(
+	fork(
+		entryId: string,
+		options?: { position?: "before" | "at"; withSession?: (ctx: ReplacedSessionContext) => Promise<void> },
+	): Promise<{ cancelled: boolean; selectedText?: string }> {
+		return this.enqueueLifecycle(() => this.forkOnce(entryId, options));
+	}
+
+	private async forkOnce(
 		entryId: string,
 		options?: { position?: "before" | "at"; withSession?: (ctx: ReplacedSessionContext) => Promise<void> },
 	): Promise<{ cancelled: boolean; selectedText?: string }> {
@@ -286,62 +974,18 @@ export class AgentSessionRuntime {
 		}
 
 		const previousSessionFile = this.session.sessionFile;
-		if (this.session.sessionManager.isPersisted()) {
-			const currentSessionFile = this.session.sessionFile;
-			if (!currentSessionFile) {
-				throw new Error("Persisted session is missing a session file");
-			}
-			const sessionDir = this.session.sessionManager.getSessionDir();
-			if (!targetLeafId) {
-				const sessionManager = SessionManager.create(this.cwd, sessionDir);
-				sessionManager.newSession({ parentSession: currentSessionFile });
-				await this.teardownCurrent("fork", sessionManager.getSessionFile());
-				this.apply(
-					await this.createRuntime({
-						cwd: this.cwd,
-						agentDir: this.services.agentDir,
-						sessionManager,
-						sessionStartEvent: { type: "session_start", reason: "fork", previousSessionFile },
-					}),
-				);
-				await this.finishSessionReplacement(options?.withSession);
-				return { cancelled: false, selectedText };
-			}
+		const currentManager = this.session.sessionManager;
+		const sessionManager = targetLeafId
+			? currentManager.createBranchedSessionManager(targetLeafId)
+			: currentManager.isPersisted()
+				? SessionManager.create(this.cwd, currentManager.getSessionDir(), { parentSession: previousSessionFile })
+				: SessionManager.inMemory(this.cwd, { parentSession: previousSessionFile });
 
-			const sessionManager = SessionManager.open(currentSessionFile, sessionDir);
-			const forkedSessionPath = sessionManager.createBranchedSession(targetLeafId);
-			if (!forkedSessionPath) {
-				throw new Error("Failed to create forked session");
-			}
-			await this.teardownCurrent("fork", sessionManager.getSessionFile());
-			this.apply(
-				await this.createRuntime({
-					cwd: sessionManager.getCwd(),
-					agentDir: this.services.agentDir,
-					sessionManager,
-					sessionStartEvent: { type: "session_start", reason: "fork", previousSessionFile },
-				}),
-			);
-			await this.finishSessionReplacement(options?.withSession);
-			return { cancelled: false, selectedText };
-		}
-
-		const sessionManager = this.session.sessionManager;
-		if (!targetLeafId) {
-			sessionManager.newSession({ parentSession: this.session.sessionFile });
-		} else {
-			sessionManager.createBranchedSession(targetLeafId);
-		}
-		await this.teardownCurrent("fork", sessionManager.getSessionFile());
-		this.apply(
-			await this.createRuntime({
-				cwd: this.cwd,
-				agentDir: this.services.agentDir,
-				sessionManager,
-				sessionStartEvent: { type: "session_start", reason: "fork", previousSessionFile },
-			}),
-		);
-		await this.finishSessionReplacement(options?.withSession);
+		const teardownError = await this.replaceCurrent(sessionManager, "fork", () => ({
+			cwd: sessionManager.getCwd(),
+			sessionStartEvent: { type: "session_start", reason: "fork", previousSessionFile },
+		}));
+		await this.finishReplacement(teardownError, options?.withSession);
 		return { cancelled: false, selectedText };
 	}
 
@@ -352,17 +996,17 @@ export class AgentSessionRuntime {
 	 * @throws {SessionImportFileNotFoundError} When the input path does not exist.
 	 * @throws {MissingSessionCwdError} When the imported session cwd cannot be resolved and no override is provided.
 	 */
-	async importFromJsonl(inputPath: string, cwdOverride?: string): Promise<{ cancelled: boolean }> {
+	importFromJsonl(inputPath: string, cwdOverride?: string): Promise<{ cancelled: boolean }> {
+		return this.enqueueLifecycle(() => this.importFromJsonlOnce(inputPath, cwdOverride));
+	}
+
+	private async importFromJsonlOnce(inputPath: string, cwdOverride?: string): Promise<{ cancelled: boolean }> {
 		const resolvedPath = resolvePath(inputPath);
 		if (!existsSync(resolvedPath)) {
 			throw new SessionImportFileNotFoundError(resolvedPath);
 		}
 
 		const sessionDir = this.session.sessionManager.getSessionDir();
-		if (!existsSync(sessionDir)) {
-			mkdirSync(sessionDir, { recursive: true });
-		}
-
 		const destinationPath = join(sessionDir, basename(resolvedPath));
 		const beforeResult = await this.emitBeforeSwitch("resume", destinationPath);
 		if (beforeResult.cancelled) {
@@ -370,40 +1014,139 @@ export class AgentSessionRuntime {
 		}
 
 		const previousSessionFile = this.session.sessionFile;
-		const entries = loadEntriesFromFile(resolvedPath);
-		if (entries.length > 0) {
-			writeFileSync(
-				destinationPath,
-				`${entries.map((entry) => stringifySessionEntry(entry, destinationPath)).join("\n")}\n`,
-			);
-		} else if (resolve(destinationPath) !== resolvedPath) {
-			copyFileSync(resolvedPath, destinationPath);
-		}
+		const targetIsCurrent =
+			previousSessionFile !== undefined && pathsReferToSameFile(destinationPath, previousSessionFile);
 
-		const sessionManager = SessionManager.open(destinationPath, sessionDir, cwdOverride);
-		assertSessionCwdExists(sessionManager, this.cwd);
-		await this.teardownCurrent("resume", sessionManager.getSessionFile());
-		this.apply(
-			await this.createRuntime({
+		let teardownError: unknown;
+		if (targetIsCurrent) {
+			teardownError = await this.replaceCurrentInPlace(
+				previousSessionFile,
+				() => {
+					const sessionManager = SessionManager.importFrom(resolvedPath, destinationPath, cwdOverride);
+					try {
+						assertSessionCwdExists(sessionManager, this._services.cwd);
+					} catch (error) {
+						closeUnadoptedSessionManager(
+							sessionManager,
+							error,
+							"Failed to validate and clean up imported session",
+						);
+					}
+					return sessionManager;
+				},
+				"resume",
+				(sessionManager) => ({
+					cwd: sessionManager.getCwd(),
+					sessionStartEvent: { type: "session_start", reason: "resume", previousSessionFile },
+				}),
+			);
+		} else {
+			const sessionManager = SessionManager.importFrom(resolvedPath, destinationPath, cwdOverride);
+			try {
+				assertSessionCwdExists(sessionManager, this._services.cwd);
+			} catch (error) {
+				closeUnadoptedSessionManager(sessionManager, error, "Failed to validate and clean up imported session");
+			}
+			teardownError = await this.replaceCurrent(sessionManager, "resume", () => ({
 				cwd: sessionManager.getCwd(),
-				agentDir: this.services.agentDir,
-				sessionManager,
 				sessionStartEvent: { type: "session_start", reason: "resume", previousSessionFile },
-			}),
-		);
-		await this.finishSessionReplacement();
+			}));
+		}
+		await this.finishReplacement(teardownError);
 		return { cancelled: false };
 	}
 
-	async dispose(): Promise<void> {
-		this.session.abortCompaction();
-		await this.session.waitForDream();
-		await emitSessionShutdownEvent(this.session.extensionRunner, {
-			type: "session_shutdown",
-			reason: "quit",
-		});
-		this.beforeSessionInvalidate?.();
-		this.session.dispose();
+	private async disposeOnce(): Promise<void> {
+		const session = this._session;
+		session.beginRuntimeTeardown();
+		const errors: unknown[] = [];
+		if (!this.eventPersistenceDrained) {
+			try {
+				session.abortCompaction();
+			} catch (error) {
+				errors.push(error);
+			}
+			try {
+				await session.abortAndDrainAgentEventPersistence();
+			} catch (error) {
+				errors.push(error);
+			} finally {
+				// Drain errors are reported after teardown. The drain itself has already settled,
+				// so a retry must not re-run it or repeat shutdown hooks.
+				this.eventPersistenceDrained = true;
+			}
+		}
+		try {
+			await this.drainAcceptedTasks();
+		} catch (error) {
+			errors.push(error);
+		}
+		if (!this.runtimeRecoveryAttempted && !this.terminalError) {
+			try {
+				recoverSessionManager(session.sessionManager);
+			} catch (error) {
+				errors.push(error);
+			} finally {
+				this.runtimeRecoveryAttempted = true;
+			}
+		}
+		if (!this.shutdownAttempted) {
+			this.shutdownAttempted = true;
+			try {
+				await session.waitForDream();
+			} catch (error) {
+				errors.push(error);
+			}
+			try {
+				await emitSessionShutdownEvent(session.extensionRunner, {
+					type: "session_shutdown",
+					reason: "quit",
+				});
+			} catch (error) {
+				errors.push(error);
+			}
+		}
+		if (!this.beforeInvalidateAttempted) {
+			this.beforeInvalidateAttempted = true;
+			try {
+				this.beforeSessionInvalidate?.();
+			} catch (error) {
+				errors.push(error);
+			}
+		}
+		try {
+			session.disposeFromRuntime();
+		} catch (error) {
+			errors.push(error);
+		}
+		if (errors.length === 1) throw errors[0];
+		if (errors.length > 1) throw new AggregateError(errors, "Failed to dispose agent session runtime");
+	}
+
+	dispose(): Promise<void> {
+		try {
+			this.assertNotInLifecycleOperation();
+			this._session.assertCanDrainAgentEventPersistence();
+		} catch (error) {
+			return Promise.reject(error);
+		}
+		if (this.disposed) return Promise.resolve();
+		if (this.disposePromise) return this.disposePromise;
+		this._session.beginRuntimeTeardown();
+		this.disposeRequested = true;
+		this.submissionGateOpen = false;
+		const attempt = this.lifecycleTail.then(() => this.runLifecycleOperation(() => this.disposeOnce()));
+		this.disposePromise = attempt;
+		attempt.then(
+			() => {
+				this.disposed = true;
+				if (this.disposePromise === attempt) this.disposePromise = undefined;
+			},
+			() => {
+				if (this.disposePromise === attempt) this.disposePromise = undefined;
+			},
+		);
+		return attempt;
 	}
 }
 
@@ -422,15 +1165,26 @@ export async function createAgentSessionRuntime(
 		sessionStartEvent?: SessionStartEvent;
 	},
 ): Promise<AgentSessionRuntime> {
-	assertSessionCwdExists(options.sessionManager, options.cwd);
-	const result = await createRuntime(options);
-	return new AgentSessionRuntime(
-		result.session,
-		result.services,
-		createRuntime,
-		result.diagnostics,
-		result.modelFallbackMessage,
-	);
+	try {
+		assertSessionCwdExists(options.sessionManager, options.cwd);
+		const recovered = recoverSessionManager(options.sessionManager);
+		const result = await createRuntime(options);
+		const runtime = new AgentSessionRuntime(
+			result.session,
+			result.services,
+			createRuntime,
+			result.diagnostics,
+			result.modelFallbackMessage,
+			recovered,
+		);
+		return runtime;
+	} catch (error) {
+		closeUnadoptedSessionManager(
+			options.sessionManager,
+			error,
+			"Failed to create and clean up agent session runtime",
+		);
+	}
 }
 
 export {

@@ -106,7 +106,7 @@ describe("RPC unknown command responses (#5868)", () => {
 				});
 			});
 		} finally {
-			harness.cleanup();
+			await harness.cleanup();
 			restoreListeners(listenerSnapshot);
 		}
 	});

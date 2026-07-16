@@ -1,23 +1,25 @@
-import { constants as bufferConstants } from "buffer";
 import { createHash } from "crypto";
 import {
-	appendFileSync,
-	closeSync,
+	existsSync,
 	mkdirSync,
-	openSync,
+	mkdtempSync,
+	readdirSync,
 	readFileSync,
+	realpathSync,
 	rmSync,
+	symlinkSync,
 	unlinkSync,
 	writeFileSync,
-	writeSync,
 } from "fs";
 import { tmpdir } from "os";
-import { join } from "path";
+import { basename, join } from "path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
 	findMostRecentSession,
 	getSessionImageDir,
+	getSessionToolOutputDir,
 	loadEntriesFromFile,
+	moveSessionFileWithLease,
 	SessionManager,
 } from "../../src/core/session-manager.ts";
 import { assistantMsg } from "../utilities.ts";
@@ -26,8 +28,7 @@ describe("loadEntriesFromFile", () => {
 	let tempDir: string;
 
 	beforeEach(() => {
-		tempDir = join(tmpdir(), `session-test-${Date.now()}`);
-		mkdirSync(tempDir, { recursive: true });
+		tempDir = mkdtempSync(join(tmpdir(), "session-test-"));
 	});
 
 	afterEach(() => {
@@ -45,16 +46,16 @@ describe("loadEntriesFromFile", () => {
 		expect(loadEntriesFromFile(file)).toEqual([]);
 	});
 
-	it("returns empty array for file without valid session header", () => {
+	it("rejects a file without a valid session header", () => {
 		const file = join(tempDir, "no-header.jsonl");
 		writeFileSync(file, '{"type":"message","id":"1"}\n');
-		expect(loadEntriesFromFile(file)).toEqual([]);
+		expect(() => loadEntriesFromFile(file)).toThrow("not a valid arcmind session");
 	});
 
-	it("returns empty array for malformed JSON", () => {
+	it("rejects malformed complete JSON", () => {
 		const file = join(tempDir, "malformed.jsonl");
 		writeFileSync(file, "not json\n");
-		expect(loadEntriesFromFile(file)).toEqual([]);
+		expect(() => loadEntriesFromFile(file)).toThrow("Malformed complete journal record");
 	});
 
 	it("loads valid session file", () => {
@@ -92,6 +93,7 @@ describe("loadEntriesFromFile", () => {
 		expect(raw.match(/"type":"image_ref"/g)).toHaveLength(2);
 		expect(readFileSync(join(getSessionImageDir(sessionFile), `${hash}.png`))).toEqual(bytes);
 
+		session.close();
 		const reopened = SessionManager.open(sessionFile, tempDir);
 		const userMessage = reopened.buildSessionContext().messages[0];
 		if (userMessage.role !== "user") throw new Error("Expected user message");
@@ -100,6 +102,7 @@ describe("loadEntriesFromFile", () => {
 			{ type: "image", data, mimeType: "image/png" },
 			{ type: "image", data, mimeType: "image/png" },
 		]);
+		reopened.close();
 	});
 
 	it("replaces a missing stored image with an unavailable note", () => {
@@ -115,10 +118,12 @@ describe("loadEntriesFromFile", () => {
 		session.appendMessage(assistantMsg("ok"));
 		unlinkSync(join(getSessionImageDir(session.getSessionFile()!), `${hash}.jpg`));
 
+		session.close();
 		const reopened = SessionManager.open(session.getSessionFile()!, tempDir);
 		const userMessage = reopened.buildSessionContext().messages[0];
 		if (userMessage.role !== "user") throw new Error("Expected user message");
 		expect(userMessage.content).toEqual([{ type: "text", text: `[Image unavailable: ${hash}]` }]);
+		reopened.close();
 	});
 
 	it("keeps inline data when an existing hash file is corrupt", () => {
@@ -139,6 +144,93 @@ describe("loadEntriesFromFile", () => {
 		const raw = readFileSync(session.getSessionFile()!, "utf8");
 		expect(raw).toContain(data);
 		expect(raw).not.toContain('"type":"image_ref"');
+	});
+
+	it.skipIf(process.platform === "win32")("does not trust a symlink at an existing image hash", () => {
+		const bytes = Buffer.from("symlinked image bytes");
+		const data = bytes.toString("base64");
+		const hash = createHash("sha256").update(bytes).digest("hex");
+		const session = SessionManager.create(tempDir, tempDir);
+		const imageDir = getSessionImageDir(session.getSessionFile()!);
+		mkdirSync(imageDir, { recursive: true });
+		const outside = join(tempDir, "outside-image");
+		writeFileSync(outside, bytes);
+		symlinkSync(outside, join(imageDir, `${hash}.png`));
+
+		session.appendMessage({
+			role: "user",
+			content: [{ type: "image", data, mimeType: "image/png" }],
+			timestamp: 1,
+		});
+
+		const raw = readFileSync(session.getSessionFile()!, "utf8");
+		expect(raw).toContain(data);
+		expect(raw).not.toContain('"type":"image_ref"');
+		session.close();
+	});
+
+	it.skipIf(process.platform === "win32")("uses one image store across session path aliases", () => {
+		const realDirectory = join(tempDir, "real");
+		const aliasDirectory = join(tempDir, "alias");
+		mkdirSync(realDirectory);
+		symlinkSync(realDirectory, aliasDirectory, "dir");
+		const bytes = Buffer.from("alias image bytes");
+		const data = bytes.toString("base64");
+		const session = SessionManager.create(aliasDirectory, aliasDirectory);
+		session.appendMessage({
+			role: "user",
+			content: [{ type: "image", data, mimeType: "image/png" }],
+			timestamp: 1,
+		});
+		const aliasFile = session.getSessionFile()!;
+		session.close();
+
+		const reopened = SessionManager.open(join(realDirectory, basename(aliasFile)), realDirectory);
+		const message = reopened.buildSessionContext().messages[0];
+		if (message.role !== "user") throw new Error("Expected user message");
+		expect(message.content).toEqual([{ type: "image", data, mimeType: "image/png" }]);
+		reopened.close();
+	});
+
+	it.skipIf(process.platform === "win32")("keeps image storage pinned when a session file alias is swapped", () => {
+		const oldTarget = join(tempDir, "old.jsonl");
+		const newTarget = join(tempDir, "new.jsonl");
+		const aliasFile = join(tempDir, "current.jsonl");
+		const makeHeader = (id: string) =>
+			`${JSON.stringify({
+				type: "session",
+				version: 5,
+				id,
+				timestamp: "2025-01-01T00:00:00Z",
+				cwd: tempDir,
+			})}\n`;
+		writeFileSync(oldTarget, makeHeader("old"));
+		writeFileSync(newTarget, makeHeader("new"));
+		symlinkSync(oldTarget, aliasFile, "file");
+
+		const session = SessionManager.open(aliasFile, tempDir);
+		expect(session.getToolOutputDir()).toBe(getSessionToolOutputDir(realpathSync(oldTarget)));
+		const pinnedToolOutputDir = session.getToolOutputDir();
+		unlinkSync(aliasFile);
+		symlinkSync(newTarget, aliasFile, "file");
+		expect(session.getToolOutputDir()).toBe(pinnedToolOutputDir);
+
+		const bytes = Buffer.from("pinned alias image bytes");
+		const data = bytes.toString("base64");
+		session.appendMessage({
+			role: "user",
+			content: [{ type: "image", data, mimeType: "image/png" }],
+			timestamp: 1,
+		});
+		session.close();
+
+		expect(readFileSync(oldTarget, "utf8")).toContain('"type":"image_ref"');
+		expect(readFileSync(newTarget, "utf8")).toBe(makeHeader("new"));
+		const reopened = SessionManager.open(oldTarget, tempDir);
+		const message = reopened.buildSessionContext().messages[0];
+		if (message.role !== "user") throw new Error("Expected user message");
+		expect(message.content).toEqual([{ type: "image", data, mimeType: "image/png" }]);
+		reopened.close();
 	});
 
 	it("keeps image stores isolated between sessions", () => {
@@ -169,7 +261,7 @@ describe("loadEntriesFromFile", () => {
 		expect(readFileSync(join(secondImageDir, `${sharedHash}.png`))).toEqual(sharedBytes);
 	});
 
-	it("migrates v3 inline images to v4 references", () => {
+	it("migrates v3 inline images to current references", () => {
 		const file = join(tempDir, "legacy.jsonl");
 		const data = Buffer.from("legacy image bytes").toString("base64");
 		const entries = [
@@ -195,53 +287,84 @@ describe("loadEntriesFromFile", () => {
 		];
 		writeFileSync(file, `${entries.map((entry) => JSON.stringify(entry)).join("\n")}\n`);
 
-		SessionManager.open(file, tempDir);
+		SessionManager.open(file, tempDir).close();
 
 		const raw = readFileSync(file, "utf8");
-		expect(raw).toContain('"version":4');
+		expect(raw).toContain('"version":5');
 		expect(raw).toContain('"type":"image_ref"');
 		expect(raw).not.toContain(data);
+		const backup = readdirSync(tempDir).find((name) => name.includes(".keep-v3."));
+		expect(backup).toMatch(/\.replace\.bak$/);
+		expect(readFileSync(join(tempDir, backup!), "utf8")).toContain('"version":3');
 	});
 
-	it("skips malformed lines but keeps valid ones", () => {
+	it("rejects a malformed complete line without changing the file", () => {
 		const file = join(tempDir, "mixed.jsonl");
-		writeFileSync(
-			file,
+		const original =
 			'{"type":"session","id":"abc","timestamp":"2025-01-01T00:00:00Z","cwd":"/tmp"}\n' +
-				"not valid json\n" +
-				'{"type":"message","id":"1","parentId":null,"timestamp":"2025-01-01T00:00:01Z","message":{"role":"user","content":"hi","timestamp":1}}\n',
-		);
-		const entries = loadEntriesFromFile(file);
-		expect(entries).toHaveLength(2);
+			"not valid json\n" +
+			'{"type":"message","id":"1","parentId":null,"timestamp":"2025-01-01T00:00:01Z","message":{"role":"user","content":"hi","timestamp":1}}\n';
+		writeFileSync(file, original);
+		expect(() => loadEntriesFromFile(file)).toThrow("Malformed complete journal record");
+		expect(readFileSync(file, "utf8")).toBe(original);
+	});
+});
+
+describe("moveSessionFileWithLease", () => {
+	let tempDir: string;
+
+	beforeEach(() => {
+		tempDir = mkdtempSync(join(tmpdir(), "session-move-test-"));
 	});
 
-	it("opens session files larger than Node's max string length", () => {
-		const file = join(tempDir, "large.jsonl");
-		writeFileSync(
-			file,
-			'{"type":"session","version":3,"id":"abc","timestamp":"2025-01-01T00:00:00Z","cwd":"/tmp"}\n',
-		);
+	afterEach(() => {
+		rmSync(tempDir, { recursive: true, force: true });
+	});
 
-		const fd = openSync(file, "r+");
-		try {
-			const newline = Buffer.from("\n");
-			const stride = 16 * 1024 * 1024;
-			for (let offset = stride; offset <= bufferConstants.MAX_STRING_LENGTH + stride; offset += stride) {
-				writeSync(fd, newline, 0, newline.length, offset);
-			}
-		} finally {
-			closeSync(fd);
-		}
+	it("moves a closed session to a durable destination", () => {
+		const session = SessionManager.create(tempDir, join(tempDir, "sessions"));
+		const source = session.getSessionFile()!;
+		const destination = join(tempDir, "sessions", ".archive", basename(source));
+		session.close();
 
-		appendFileSync(
-			file,
-			'{"type":"message","id":"1","parentId":null,"timestamp":"2025-01-01T00:00:01Z","message":{"role":"user","content":"hi","timestamp":1}}\n',
-		);
+		moveSessionFileWithLease(source, destination);
 
-		const sessionManager = SessionManager.open(file, tempDir);
-		expect(sessionManager.getSessionId()).toBe("abc");
-		expect(sessionManager.getEntries()).toHaveLength(1);
-		expect(sessionManager.buildSessionContext().messages).toEqual([{ role: "user", content: "hi", timestamp: 1 }]);
+		expect(existsSync(source)).toBe(false);
+		expect(readFileSync(destination, "utf8")).toContain(`"id":"${session.getSessionId()}"`);
+	});
+
+	it("refuses to move a session with an active writer", () => {
+		const session = SessionManager.create(tempDir, join(tempDir, "sessions"));
+		const source = session.getSessionFile()!;
+		const destination = join(tempDir, "sessions", ".archive", basename(source));
+
+		expect(() => moveSessionFileWithLease(source, destination)).toThrow();
+		expect(existsSync(source)).toBe(true);
+		expect(existsSync(destination)).toBe(false);
+		session.close();
+	});
+
+	it.skipIf(process.platform === "win32")("refuses a symlink source", () => {
+		const source = join(tempDir, "source.jsonl");
+		const alias = join(tempDir, "alias.jsonl");
+		const destination = join(tempDir, "archive", "source.jsonl");
+		writeFileSync(source, "{}\n");
+		symlinkSync(source, alias);
+
+		expect(() => moveSessionFileWithLease(alias, destination)).toThrow("single-link regular file");
+		expect(existsSync(source)).toBe(true);
+	});
+
+	it.skipIf(process.platform === "win32")("refuses to replace a broken destination symlink", () => {
+		const session = SessionManager.create(tempDir, join(tempDir, "sessions"));
+		const source = session.getSessionFile()!;
+		const destination = join(tempDir, "sessions", ".archive", basename(source));
+		session.close();
+		mkdirSync(join(tempDir, "sessions", ".archive"), { recursive: true });
+		symlinkSync(join(tempDir, "missing-target"), destination);
+
+		expect(() => moveSessionFileWithLease(source, destination)).toThrow("already exists");
+		expect(existsSync(source)).toBe(true);
 	});
 });
 
@@ -249,8 +372,7 @@ describe("findMostRecentSession", () => {
 	let tempDir: string;
 
 	beforeEach(() => {
-		tempDir = join(tmpdir(), `session-test-${Date.now()}`);
-		mkdirSync(tempDir, { recursive: true });
+		tempDir = mkdtempSync(join(tmpdir(), "session-test-"));
 	});
 
 	afterEach(() => {
@@ -305,6 +427,55 @@ describe("findMostRecentSession", () => {
 		expect(findMostRecentSession(tempDir)).toBe(valid);
 	});
 
+	it("skips a newer session with a corrupt graph and returns the older valid session", async () => {
+		const valid = join(tempDir, "valid.jsonl");
+		const corrupt = join(tempDir, "corrupt.jsonl");
+		writeFileSync(
+			valid,
+			'{"type":"session","version":5,"id":"valid","timestamp":"2025-01-01T00:00:00Z","cwd":"/tmp"}\n',
+		);
+		await new Promise((resolveDelay) => setTimeout(resolveDelay, 10));
+		writeFileSync(
+			corrupt,
+			'{"type":"session","version":5,"id":"corrupt","timestamp":"2025-01-01T00:00:00Z","cwd":"/tmp"}\n' +
+				'{"type":"custom","id":"orphan","parentId":"missing","timestamp":"2025-01-01T00:00:01Z","customType":"x"}\n',
+		);
+
+		expect(findMostRecentSession(tempDir)).toBe(valid);
+	});
+
+	it("continues the newest session when only its final record is incomplete", async () => {
+		const older = join(tempDir, "older.jsonl");
+		const newer = join(tempDir, "newer.jsonl");
+		writeFileSync(
+			older,
+			`${JSON.stringify({
+				type: "session",
+				version: 5,
+				id: "older",
+				timestamp: "2025-01-01T00:00:00Z",
+				cwd: "/tmp",
+			})}\n`,
+		);
+		await new Promise((resolveDelay) => setTimeout(resolveDelay, 10));
+		writeFileSync(
+			newer,
+			'{"type":"session","version":5,"id":"newer","timestamp":"2025-01-01T00:00:00Z","cwd":"/tmp"}\n' +
+				'{"type":"custom","id":"complete","parentId":null,"timestamp":"2025-01-01T00:00:01Z","customType":"x"}\n' +
+				'{"type":"custom","id":"partial"',
+		);
+
+		expect(findMostRecentSession(tempDir, "/tmp")).toBe(newer);
+		expect((await SessionManager.list("/tmp", tempDir)).some((session) => session.path === newer)).toBe(true);
+		const resumed = SessionManager.continueRecent("/tmp", tempDir);
+		expect(resumed.getSessionFile()).toBe(newer);
+		expect(resumed.getEntries()).toMatchObject([
+			{ id: "complete", customType: "x" },
+			{ type: "custom", customType: "arcmind.session_recovery", parentId: "complete" },
+		]);
+		resumed.close();
+	});
+
 	it("filters most recent session by cwd", async () => {
 		const projectA = join(tempDir, "project-a");
 		const projectB = join(tempDir, "project-b");
@@ -332,7 +503,7 @@ describe("SessionManager custom flat session directory", () => {
 	let projectB: string;
 
 	beforeEach(() => {
-		tempDir = join(tmpdir(), `session-test-${Date.now()}`);
+		tempDir = mkdtempSync(join(tmpdir(), "session-test-"));
 		projectA = join(tempDir, "project-a");
 		projectB = join(tempDir, "project-b");
 		mkdirSync(projectA, { recursive: true });
@@ -367,6 +538,7 @@ describe("SessionManager custom flat session directory", () => {
 		if (!sessionFile) {
 			throw new Error("Expected persisted session file");
 		}
+		session.close();
 		return sessionFile;
 	}
 
@@ -390,12 +562,30 @@ describe("SessionManager.setSessionFile with corrupted files", () => {
 	let tempDir: string;
 
 	beforeEach(() => {
-		tempDir = join(tmpdir(), `session-test-${Date.now()}`);
-		mkdirSync(tempDir, { recursive: true });
+		tempDir = mkdtempSync(join(tmpdir(), "session-test-"));
 	});
 
 	afterEach(() => {
 		rmSync(tempDir, { recursive: true, force: true });
+	});
+
+	it("uses cwd from a valid header longer than the initial read buffer", () => {
+		const path = join(tempDir, "long-header.jsonl");
+		writeFileSync(
+			path,
+			`${JSON.stringify({
+				type: "session",
+				version: 5,
+				id: "long-header",
+				timestamp: "2026-01-01T00:00:00.000Z",
+				cwd: tempDir,
+				parentSession: "x".repeat(70 * 1024),
+			})}\n`,
+		);
+
+		const manager = SessionManager.open(path, tempDir);
+		expect(manager.getCwd()).toBe(tempDir);
+		manager.close();
 	});
 
 	it("truncates and rewrites empty file with valid header", () => {
@@ -457,9 +647,11 @@ describe("SessionManager.setSessionFile with corrupted files", () => {
 
 		const sm1 = SessionManager.open(emptyFile, tempDir);
 		const sessionId = sm1.getSessionId();
+		sm1.close();
 
 		const sm2 = SessionManager.open(emptyFile, tempDir);
 		expect(sm2.getSessionId()).toBe(sessionId);
 		expect(sm2.getHeader()?.type).toBe("session");
+		sm2.close();
 	});
 });

@@ -11,6 +11,7 @@ import {
 	type ToolResultMessage,
 	validateToolArguments,
 } from "@arcmind/ai/compat";
+import { consumeQueueReservation } from "./pending-message-queue.ts";
 import type {
 	AgentContext,
 	AgentEvent,
@@ -46,9 +47,13 @@ export function agentLoop(
 		},
 		signal,
 		streamFn,
-	).then((messages) => {
-		stream.end(messages);
-	});
+	)
+		.then((messages) => {
+			stream.end(messages);
+		})
+		.catch((error) => {
+			stream.fail(error);
+		});
 
 	return stream;
 }
@@ -85,9 +90,13 @@ export function agentLoopContinue(
 		},
 		signal,
 		streamFn,
-	).then((messages) => {
-		stream.end(messages);
-	});
+	)
+		.then((messages) => {
+			stream.end(messages);
+		})
+		.catch((error) => {
+			stream.fail(error);
+		});
 
 	return stream;
 }
@@ -105,6 +114,9 @@ export async function runAgentLoop(
 		...context,
 		messages: [...context.messages, ...prompts],
 	};
+	const initialPendingMessages = config.reserveSteeringMessages
+		? await consumeQueuedMessages("steer", config, signal)
+		: undefined;
 
 	await emit({ type: "agent_start" });
 	await emit({ type: "turn_start" });
@@ -113,7 +125,7 @@ export async function runAgentLoop(
 		await emit({ type: "message_end", message: prompt });
 	}
 
-	await runLoop(currentContext, newMessages, config, signal, emit, streamFn);
+	await runLoop(currentContext, newMessages, config, signal, emit, streamFn, initialPendingMessages);
 	return newMessages;
 }
 
@@ -134,11 +146,14 @@ export async function runAgentLoopContinue(
 
 	const newMessages: AgentMessage[] = [];
 	const currentContext: AgentContext = { ...context };
+	const initialPendingMessages = config.reserveSteeringMessages
+		? await consumeQueuedMessages("steer", config, signal)
+		: undefined;
 
 	await emit({ type: "agent_start" });
 	await emit({ type: "turn_start" });
 
-	await runLoop(currentContext, newMessages, config, signal, emit, streamFn);
+	await runLoop(currentContext, newMessages, config, signal, emit, streamFn, initialPendingMessages);
 	return newMessages;
 }
 
@@ -159,12 +174,14 @@ async function runLoop(
 	signal: AbortSignal | undefined,
 	emit: AgentEventSink,
 	streamFn?: StreamFn,
+	initialPendingMessages?: AgentMessage[],
 ): Promise<void> {
 	let currentContext = initialContext;
 	let config = initialConfig;
 	let firstTurn = true;
+	const seenToolCallIds = new Set<string>();
 	// Check for steering messages at start (user may have typed while waiting)
-	let pendingMessages: AgentMessage[] = (await config.getSteeringMessages?.()) || [];
+	let pendingMessages = initialPendingMessages ?? (await consumeQueuedMessages("steer", config, signal));
 
 	// Outer loop: continues when queued follow-up messages arrive after agent would stop
 	while (true) {
@@ -190,7 +207,7 @@ async function runLoop(
 			}
 
 			// Stream assistant response
-			const message = await streamAssistantResponse(currentContext, config, signal, emit, streamFn);
+			const message = await streamAssistantResponse(currentContext, config, signal, emit, streamFn, seenToolCallIds);
 			newMessages.push(message);
 
 			if (message.stopReason === "error" || message.stopReason === "aborted") {
@@ -256,11 +273,11 @@ async function runLoop(
 				return;
 			}
 
-			pendingMessages = (await config.getSteeringMessages?.()) || [];
+			pendingMessages = await consumeQueuedMessages("steer", config, signal);
 		}
 
 		// Agent would stop here. Check for follow-up messages.
-		const followUpMessages = (await config.getFollowUpMessages?.()) || [];
+		const followUpMessages = await consumeQueuedMessages("follow_up", config, signal);
 		if (followUpMessages.length > 0) {
 			// Set as pending so inner loop processes them
 			pendingMessages = followUpMessages;
@@ -274,6 +291,32 @@ async function runLoop(
 	await emit({ type: "agent_end", messages: newMessages });
 }
 
+async function consumeQueuedMessages(
+	queue: "steer" | "follow_up",
+	config: AgentLoopConfig,
+	signal: AbortSignal | undefined,
+): Promise<AgentMessage[]> {
+	const reserve = queue === "steer" ? config.reserveSteeringMessages : config.reserveFollowUpMessages;
+	if (reserve) {
+		const pendingReservation = reserve();
+		const reservation = pendingReservation instanceof Promise ? await pendingReservation : pendingReservation;
+		return consumeQueueReservation(queue, reservation, config.beforeQueueCommit, signal);
+	}
+	const getMessages = queue === "steer" ? config.getSteeringMessages : config.getFollowUpMessages;
+	return (await getMessages?.()) ?? [];
+}
+
+function assertUniqueToolCallIds(toolCalls: readonly AgentToolCall[], seenIds: Set<string>): void {
+	const messageIds = new Set<string>();
+	for (const toolCall of toolCalls) {
+		if (messageIds.has(toolCall.id) || seenIds.has(toolCall.id)) {
+			throw new Error(`Duplicate tool call ID in agent turn: ${toolCall.id}`);
+		}
+		messageIds.add(toolCall.id);
+	}
+	for (const id of messageIds) seenIds.add(id);
+}
+
 /**
  * Stream an assistant response from the LLM.
  * This is where AgentMessage[] gets transformed to Message[] for the LLM.
@@ -284,6 +327,7 @@ async function streamAssistantResponse(
 	signal: AbortSignal | undefined,
 	emit: AgentEventSink,
 	streamFn?: StreamFn,
+	seenToolCallIds: Set<string> = new Set(),
 ): Promise<AssistantMessage> {
 	// Apply context transform if configured (AgentMessage[] → AgentMessage[])
 	let messages = context.messages;
@@ -307,6 +351,9 @@ async function streamAssistantResponse(
 	const resolvedApiKey =
 		(config.getApiKey ? await config.getApiKey(config.model.provider) : undefined) || config.apiKey;
 
+	if (signal?.aborted) throw signal.reason ?? new Error("Operation aborted");
+	await config.beforeProviderRequest?.(signal);
+	if (signal?.aborted) throw signal.reason ?? new Error("Operation aborted");
 	const response = await streamFunction(config.model, llmContext, {
 		...config,
 		apiKey: resolvedApiKey,
@@ -348,6 +395,10 @@ async function streamAssistantResponse(
 			case "done":
 			case "error": {
 				const finalMessage = await response.result();
+				assertUniqueToolCallIds(
+					finalMessage.content.filter((content) => content.type === "toolCall"),
+					seenToolCallIds,
+				);
 				if (addedPartial) {
 					context.messages[context.messages.length - 1] = finalMessage;
 				} else {
@@ -363,6 +414,10 @@ async function streamAssistantResponse(
 	}
 
 	const finalMessage = await response.result();
+	assertUniqueToolCallIds(
+		finalMessage.content.filter((content) => content.type === "toolCall"),
+		seenToolCallIds,
+	);
 	if (addedPartial) {
 		context.messages[context.messages.length - 1] = finalMessage;
 	} else {
@@ -460,7 +515,14 @@ async function executeToolCallsSequential(
 				isError: preparation.isError,
 			};
 		} else {
-			const executed = await executePreparedToolCall(preparation, signal, emit);
+			const executed = await executePreparedToolCall(
+				currentContext,
+				assistantMessage,
+				preparation,
+				config,
+				signal,
+				emit,
+			);
 			finalized = await finalizeExecutedToolCall(
 				currentContext,
 				assistantMessage,
@@ -522,7 +584,14 @@ async function executeToolCallsParallel(
 		}
 
 		finalizedCalls.push(async () => {
-			const executed = await executePreparedToolCall(preparation, signal, emit);
+			const executed = await executePreparedToolCall(
+				currentContext,
+				assistantMessage,
+				preparation,
+				config,
+				signal,
+				emit,
+			);
 			const finalized = await finalizeExecutedToolCall(
 				currentContext,
 				assistantMessage,
@@ -539,15 +608,25 @@ async function executeToolCallsParallel(
 		}
 	}
 
-	const orderedFinalizedCalls = await Promise.all(
+	const settledFinalizedCalls = await Promise.allSettled(
 		finalizedCalls.map((entry) => (typeof entry === "function" ? entry() : Promise.resolve(entry))),
 	);
+	const orderedFinalizedCalls: FinalizedToolCallOutcome[] = [];
+	let executionFailure: PromiseRejectedResult | undefined;
+	for (const settled of settledFinalizedCalls) {
+		if (settled.status === "rejected") {
+			executionFailure ??= settled;
+		} else {
+			orderedFinalizedCalls.push(settled.value);
+		}
+	}
 	const messages: ToolResultMessage[] = [];
 	for (const finalized of orderedFinalizedCalls) {
 		const toolResultMessage = createToolResultMessage(finalized);
 		await emitToolResultMessage(toolResultMessage, emit);
 		messages.push(toolResultMessage);
 	}
+	if (executionFailure) throw executionFailure.reason;
 
 	return {
 		messages,
@@ -571,6 +650,7 @@ type ImmediateToolCallOutcome = {
 type ExecutedToolCallOutcome = {
 	result: AgentToolResult<any>;
 	isError: boolean;
+	attempted: boolean;
 };
 
 type FinalizedToolCallOutcome = {
@@ -666,12 +746,30 @@ async function prepareToolCall(
 }
 
 async function executePreparedToolCall(
+	currentContext: AgentContext,
+	assistantMessage: AssistantMessage,
 	prepared: PreparedToolCall,
+	config: AgentLoopConfig,
 	signal: AbortSignal | undefined,
 	emit: AgentEventSink,
 ): Promise<ExecutedToolCallOutcome> {
 	const updateEvents: Promise<void>[] = [];
 	let acceptingUpdates = true;
+	if (signal?.aborted) {
+		return { result: createErrorToolResult("Operation aborted"), isError: true, attempted: false };
+	}
+	await config.beforeToolExecute?.(
+		{
+			assistantMessage,
+			toolCall: prepared.toolCall,
+			args: prepared.args,
+			context: currentContext,
+		},
+		signal,
+	);
+	if (signal?.aborted) {
+		return { result: createErrorToolResult("Operation aborted"), isError: true, attempted: false };
+	}
 
 	try {
 		const result = await prepared.tool.execute(
@@ -695,13 +793,14 @@ async function executePreparedToolCall(
 		);
 		acceptingUpdates = false;
 		await Promise.all(updateEvents);
-		return { result, isError: false };
+		return { result, isError: false, attempted: true };
 	} catch (error) {
 		acceptingUpdates = false;
 		await Promise.all(updateEvents);
 		return {
 			result: createErrorToolResult(error instanceof Error ? error.message : String(error)),
 			isError: true,
+			attempted: true,
 		};
 	} finally {
 		acceptingUpdates = false;
@@ -719,7 +818,7 @@ async function finalizeExecutedToolCall(
 	let result = executed.result;
 	let isError = executed.isError;
 
-	if (config.afterToolCall) {
+	if (config.afterToolCall && executed.attempted) {
 		try {
 			const afterResult = await config.afterToolCall(
 				{

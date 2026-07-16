@@ -1,9 +1,10 @@
 import type { AgentState } from "@arcmind/agent-core";
-import { existsSync, readFileSync, writeFileSync } from "fs";
-import { basename, join } from "path";
+import { existsSync, readFileSync, realpathSync, statSync } from "fs";
+import { basename, join, resolve } from "path";
 import { APP_NAME, getExportTemplateDir } from "../../config.ts";
 import { getResolvedThemeColors, getThemeExportColors } from "../../modes/interactive/theme/theme.ts";
 import { normalizePath, resolvePath } from "../../utils/paths.ts";
+import { replaceFileAtomicallySync } from "../durable-file.ts";
 import type { ToolDefinition } from "../extensions/types.ts";
 import type { SessionEntry } from "../session-manager.ts";
 import { SessionManager } from "../session-manager.ts";
@@ -37,6 +38,24 @@ export interface ExportOptions {
 	themeName?: string;
 	/** Optional tool renderer for custom tools */
 	toolRenderer?: ToolHtmlRenderer;
+}
+
+function pathsReferToSameFile(left: string, right: string): boolean {
+	if (resolve(left) === resolve(right)) return true;
+	try {
+		if (realpathSync(left) === realpathSync(right)) return true;
+		const leftStats = statSync(left);
+		const rightStats = statSync(right);
+		return leftStats.dev === rightStats.dev && leftStats.ino === rightStats.ino;
+	} catch {
+		return false;
+	}
+}
+
+function assertExportDoesNotOverwriteSession(sessionFile: string, outputPath: string): void {
+	if (pathsReferToSameFile(sessionFile, outputPath)) {
+		throw new Error(`HTML export output must not overwrite the source session: ${sessionFile}`);
+	}
 }
 
 /** Parse a color string to RGB values. Supports hex (#RRGGBB) and rgb(r,g,b) formats. */
@@ -277,7 +296,8 @@ export async function exportSessionToHtml(
 		outputPath = `${APP_NAME}-session-${sessionBasename}.html`;
 	}
 
-	writeFileSync(outputPath, html, "utf8");
+	assertExportDoesNotOverwriteSession(sessionFile, outputPath);
+	replaceFileAtomicallySync(outputPath, html);
 	return outputPath;
 }
 
@@ -293,7 +313,9 @@ export async function exportFromFile(inputPath: string, options?: ExportOptions 
 		throw new Error(`File not found: ${resolvedInputPath}`);
 	}
 
-	const sm = SessionManager.open(resolvedInputPath);
+	// Standalone export is a catalog-style read: it must work while another
+	// runtime owns the session writer lease and must never repair the source.
+	const sm = SessionManager.openReadOnly(resolvedInputPath);
 
 	const sessionData: SessionData = {
 		header: sm.getHeader(),
@@ -311,6 +333,7 @@ export async function exportFromFile(inputPath: string, options?: ExportOptions 
 		outputPath = `${APP_NAME}-session-${inputBasename}.html`;
 	}
 
-	writeFileSync(outputPath, html, "utf8");
+	assertExportDoesNotOverwriteSession(resolvedInputPath, outputPath);
+	replaceFileAtomicallySync(outputPath, html);
 	return outputPath;
 }

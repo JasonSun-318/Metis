@@ -94,7 +94,7 @@ import { copyToClipboard, readClipboardText } from "../../utils/clipboard.ts";
 import { readClipboardImage } from "../../utils/clipboard-image.ts";
 import { parseGitUrl } from "../../utils/git.ts";
 import { processImage } from "../../utils/image-process.ts";
-import { getCwdRelativePath } from "../../utils/paths.ts";
+import { canonicalizePath, getCwdRelativePath } from "../../utils/paths.ts";
 import { killTrackedDetachedChildren } from "../../utils/shell.ts";
 import { ensureTool } from "../../utils/tools-manager.ts";
 import { AssistantMessageComponent } from "./components/assistant-message.ts";
@@ -4691,8 +4691,18 @@ export class InteractiveMode {
 					renameSession: async (sessionFilePath: string, nextName: string | undefined) => {
 						const next = (nextName ?? "").trim();
 						if (!next) return;
+						const currentPath = this.sessionManager.getSessionFile();
+						if (currentPath && canonicalizePath(currentPath) === canonicalizePath(sessionFilePath)) {
+							this.sessionManager.appendSessionInfo(next);
+							return;
+						}
+
 						const mgr = SessionManager.open(sessionFilePath);
-						mgr.appendSessionInfo(next);
+						try {
+							mgr.appendSessionInfo(next);
+						} finally {
+							mgr.close();
+						}
 					},
 					showRenameHint: true,
 					keybindings: this.keybindings,

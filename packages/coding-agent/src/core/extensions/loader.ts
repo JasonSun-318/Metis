@@ -117,28 +117,51 @@ function getAliases(): Record<string, string> {
 
 type HandlerFn = (...args: unknown[]) => Promise<unknown>;
 
-let extensionCacheCwd: string | undefined;
-let extensionCacheGeneration = 0;
-const extensionCache = new Map<string, ExtensionFactory>();
-
 interface ExtensionCacheToken {
+	cache: ExtensionModuleCache;
 	cwd: string;
 	generation: number;
 }
 
-export function clearExtensionCache(): void {
-	extensionCache.clear();
-	extensionCacheCwd = undefined;
-	extensionCacheGeneration++;
+export class ExtensionModuleCache {
+	private cwd: string | undefined;
+	private generation = 0;
+	private factories = new Map<string, ExtensionFactory>();
+
+	clear(): void {
+		this.factories.clear();
+		this.cwd = undefined;
+		this.generation++;
+	}
+
+	begin(cwd: string): ExtensionCacheToken {
+		const resolvedCwd = resolvePath(cwd);
+		if (this.cwd !== undefined && this.cwd !== resolvedCwd) {
+			this.clear();
+		}
+		this.cwd = resolvedCwd;
+		return { cache: this, cwd: resolvedCwd, generation: this.generation };
+	}
+
+	get(token: ExtensionCacheToken, extensionPath: string): ExtensionFactory | undefined {
+		return this.isCurrent(token) ? this.factories.get(extensionPath) : undefined;
+	}
+
+	set(token: ExtensionCacheToken, extensionPath: string, factory: ExtensionFactory): void {
+		if (this.isCurrent(token)) {
+			this.factories.set(extensionPath, factory);
+		}
+	}
+
+	private isCurrent(token: ExtensionCacheToken): boolean {
+		return token.cache === this && this.cwd === token.cwd && this.generation === token.generation;
+	}
 }
 
-function useExtensionCacheCwd(cwd: string): ExtensionCacheToken {
-	const resolvedCwd = resolvePath(cwd);
-	if (extensionCacheCwd !== undefined && extensionCacheCwd !== resolvedCwd) {
-		clearExtensionCache();
-	}
-	extensionCacheCwd = resolvedCwd;
-	return { cwd: resolvedCwd, generation: extensionCacheGeneration };
+const sharedExtensionCache = new ExtensionModuleCache();
+
+export function clearExtensionCache(): void {
+	sharedExtensionCache.clear();
 }
 
 /**
@@ -358,17 +381,9 @@ function createExtensionAPI(
 	return api;
 }
 
-function isCurrentCacheToken(cacheToken: ExtensionCacheToken | undefined): cacheToken is ExtensionCacheToken {
-	return (
-		cacheToken !== undefined &&
-		extensionCacheCwd === cacheToken.cwd &&
-		extensionCacheGeneration === cacheToken.generation
-	);
-}
-
 async function loadExtensionModule(extensionPath: string, cacheToken?: ExtensionCacheToken) {
-	if (isCurrentCacheToken(cacheToken)) {
-		const cachedFactory = extensionCache.get(extensionPath);
+	if (cacheToken) {
+		const cachedFactory = cacheToken.cache.get(cacheToken, extensionPath);
 		if (cachedFactory) {
 			return cachedFactory;
 		}
@@ -387,8 +402,8 @@ async function loadExtensionModule(extensionPath: string, cacheToken?: Extension
 	if (typeof factory !== "function") {
 		return undefined;
 	}
-	if (isCurrentCacheToken(cacheToken)) {
-		extensionCache.set(extensionPath, factory);
+	if (cacheToken) {
+		cacheToken.cache.set(cacheToken, extensionPath, factory);
 	}
 	return factory;
 }
@@ -472,10 +487,11 @@ async function loadExtensionsInternal(
 	eventBus?: EventBus,
 	runtime?: ExtensionRuntime,
 	useCache = false,
+	extensionCache?: ExtensionModuleCache,
 ): Promise<LoadExtensionsResult> {
 	const extensions: Extension[] = [];
 	const errors: Array<{ path: string; error: string }> = [];
-	const cacheToken = useCache ? useExtensionCacheCwd(cwd) : undefined;
+	const cacheToken = useCache ? (extensionCache ?? sharedExtensionCache).begin(cwd) : undefined;
 	const resolvedCwd = cacheToken?.cwd ?? resolvePath(cwd);
 	const resolvedEventBus = eventBus ?? createEventBus();
 	const resolvedRuntime = runtime ?? createExtensionRuntime();
@@ -520,8 +536,9 @@ export async function loadExtensionsCached(
 	cwd: string,
 	eventBus?: EventBus,
 	runtime?: ExtensionRuntime,
+	extensionCache?: ExtensionModuleCache,
 ): Promise<LoadExtensionsResult> {
-	return loadExtensionsInternal(paths, cwd, eventBus, runtime, true);
+	return loadExtensionsInternal(paths, cwd, eventBus, runtime, true, extensionCache);
 }
 
 interface ArcMindManifest {

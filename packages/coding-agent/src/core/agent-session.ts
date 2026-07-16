@@ -13,16 +13,20 @@
  * Modes use this class and add their own I/O layer on top.
  */
 
+import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import type {
 	Agent,
 	AgentEvent,
 	AgentMessage,
+	AgentQueueIdentity,
 	AgentState,
 	AgentTool,
+	BeforeQueueCommitContext,
+	BeforeToolExecuteContext,
 	PrepareNextTurnContext,
 	ThinkingLevel,
 } from "@arcmind/agent-core";
@@ -34,7 +38,6 @@ import {
 	isContextOverflow,
 	isRetryableAssistantError,
 	modelsAreEqual,
-	resetApiProviders,
 	streamSimple,
 } from "@arcmind/ai/compat";
 import { getThemeByName, theme } from "../modes/interactive/theme/theme.ts";
@@ -44,6 +47,7 @@ import { sleep } from "../utils/sleep.ts";
 import { formatNoApiKeyFoundMessage, formatNoModelSelectedMessage } from "./auth-guidance.ts";
 import { type AutoMemorySnapshot, loadAutoMemory } from "./auto-memory.ts";
 import { type BashResult, executeBashWithOperations } from "./bash-executor.ts";
+import { readBoundedUtf8FileSync } from "./bounded-text-file.ts";
 import {
 	type CompactionPreparation,
 	type CompactionResult,
@@ -99,13 +103,22 @@ import type { BashExecutionMessage, CustomMessage } from "./messages.ts";
 import type { ModelRegistry } from "./model-registry.ts";
 import { expandPromptTemplate, type PromptTemplate } from "./prompt-templates.ts";
 import type { ResourceExtensionPaths, ResourceLoader } from "./resource-loader.ts";
-import type { BranchSummaryEntry, CompactionEntry, SessionEntry, SessionManager } from "./session-manager.ts";
 import {
-	CURRENT_SESSION_VERSION,
-	getLatestCompactionEntry,
-	getSessionToolOutputDir,
-	type SessionHeader,
-} from "./session-manager.ts";
+	type DurablePromptInput,
+	deriveBatchedTurnId,
+	MAX_DURABLE_IMAGE_BYTES,
+	MAX_DURABLE_PROMPT_IMAGE_BYTES,
+	MAX_DURABLE_PROMPT_IMAGES,
+	MAX_DURABLE_PROMPT_TEXT_BYTES,
+	MAX_DURABLE_TURN_RESIDENT_PAYLOAD_BYTES,
+	type RuntimeAssistantMessageEvidence,
+	type RuntimeRequestIdentity,
+	validateRuntimeAssistantMessageEvidence,
+	validateRuntimeToolResultMessageEvidence,
+} from "./runtime-recovery.ts";
+import { appendSyntheticRuntimeToolResult } from "./runtime-recovery-materializer.ts";
+import type { BranchSummaryEntry, CompactionEntry, SessionEntry, SessionManager } from "./session-manager.ts";
+import { CURRENT_SESSION_VERSION, getLatestCompactionEntry, type SessionHeader } from "./session-manager.ts";
 import type { SettingsManager } from "./settings-manager.ts";
 import type { SlashCommandInfo } from "./slash-commands.ts";
 import { createSyntheticSourceInfo, type SourceInfo } from "./source-info.ts";
@@ -281,10 +294,58 @@ function estimateMessagesTokens(messages: AgentMessage[]): number {
 
 /** Standard thinking levels */
 const THINKING_LEVELS: ThinkingLevel[] = ["off", "minimal", "low", "medium", "high"];
+const MAX_DURABLE_TURN_OPERATIONS = 256;
 
 // ============================================================================
 // AgentSession Class
 // ============================================================================
+
+interface AgentEventPersistenceScope {
+	owner: object;
+	active: boolean;
+}
+
+interface DurablePromptExecutionScope {
+	readonly owner: AgentSession;
+	readonly turnId: string;
+	readonly input: DurablePromptInput;
+	active: boolean;
+}
+
+class DurableMessageValidationError extends Error {
+	constructor(cause: unknown) {
+		super("Rejected invalid durable message evidence", { cause });
+		this.name = "DurableMessageValidationError";
+	}
+}
+
+interface ActiveDurableTurn {
+	readonly turnId: string;
+	readonly operations: DurableOperationMetadata[];
+	readonly consumedQueueItemIds: string[];
+}
+
+interface DurableOperationMetadata {
+	readonly identity: RuntimeRequestIdentity;
+	readonly input: DurablePromptInput;
+	readonly kind: "turn" | "steer";
+	residentPayloadBytes: number;
+}
+
+interface DurableQueueMetadata {
+	readonly operation: DurableOperationMetadata;
+	readonly queue: "steer" | "follow_up";
+}
+
+function durablePromptResidentPayloadBytes(input: DurablePromptInput, text = input.text): number {
+	return (
+		Buffer.byteLength(text, "utf8") +
+		(input.images ?? []).reduce((total, image) => total + 4 * Math.ceil(image.size / 3), 0)
+	);
+}
+
+const agentEventPersistenceContext = new AsyncLocalStorage<AgentEventPersistenceScope>();
+const durablePromptExecutionContext = new AsyncLocalStorage<DurablePromptExecutionScope>();
 
 export class AgentSession {
 	readonly agent: Agent;
@@ -297,8 +358,24 @@ export class AgentSession {
 	private _unsubscribeAgent?: () => void;
 	private _eventListeners: AgentSessionEventListener[] = [];
 	private _isAgentRunActive = false;
+	private _isAgentSettling = false;
 	private _idleWaitPromise: Promise<void> | undefined;
 	private _resolveIdleWait: (() => void) | undefined;
+	private readonly _inFlightEventPersistence = new Set<Promise<void>>();
+	private _eventPersistenceFailure: unknown;
+	private _durableTurn?: ActiveDurableTurn;
+	private readonly _durableStartedTools = new Map<string, string>();
+	private readonly _durableToolResults = new Set<string>();
+	private readonly _durableCompletedTools = new Set<string>();
+	private readonly _durableToolCalls = new Map<string, string>();
+	private readonly _durablePendingToolCalls = new Map<string, string>();
+	private readonly _durableQueues = new Map<string, DurableQueueMetadata>();
+	private _durableResidentPayloadBytes = 0;
+	private _durableTerminalEvidence: "completed" | "interrupted" | undefined;
+	private _durableOperationTurnListener?: (operationId: string, turnId: string) => void;
+	private _runtimeTeardownRequested = false;
+	private _stopCurrentRunAfterAbort = false;
+	private _durableRecoveryRequired = false;
 
 	/** Tracks pending steering messages for UI display. Removed when delivered. */
 	private _steeringMessages: string[] = [];
@@ -348,6 +425,9 @@ export class AgentSession {
 	private _extensionShutdownHandler?: ShutdownHandler;
 	private _extensionErrorListener?: ExtensionErrorListener;
 	private _extensionErrorUnsubscriber?: () => void;
+	private _disposeCoreComplete = false;
+	private _resourceLoaderDisposed = false;
+	private _sessionManagerClosed = false;
 
 	// Model registry for API key resolution
 	private _modelRegistry: ModelRegistry;
@@ -384,6 +464,7 @@ export class AgentSession {
 		// (session persistence, extensions, auto-compaction, retry logic)
 		this._unsubscribeAgent = this.agent.subscribe(this._handleAgentEvent);
 		this._installAgentToolHooks();
+		this._installAgentDurabilityHooks();
 		this._installAgentNextTurnRefresh();
 
 		this._buildRuntime({
@@ -495,6 +576,213 @@ export class AgentSession {
 		};
 	}
 
+	private _installAgentDurabilityHooks(): void {
+		this.agent.installMandatoryRuntimeHooks({
+			beforeRunStart: () => this._assertDurablePromptExecutionOwner(),
+			beforeQueueCommit: async (context) => {
+				try {
+					this._commitDurableQueueTurn(context);
+				} catch (error) {
+					if (context.items.some((item) => item.operationId !== undefined)) this._durableRecoveryRequired = true;
+					throw error;
+				}
+			},
+			beforeQueueClear: (context) => {
+				if (context.items.some((item) => item.operationId !== undefined)) {
+					throw new Error("Durable queued prompts cannot be cleared before they are consumed or recovered");
+				}
+			},
+			beforeProviderRequest: async () => this._markDurableProviderEpoch(),
+			beforeToolExecute: async (context) => {
+				let started = false;
+				try {
+					const turn = this._durableTurn;
+					if (!turn) return;
+					const expectedToolName = this._durablePendingToolCalls.get(context.toolCall.id);
+					if (expectedToolName === undefined) {
+						throw new Error(`Durable tool call is not pending: ${context.toolCall.id}`);
+					}
+					if (expectedToolName !== context.toolCall.name) {
+						throw new Error(`Durable tool call name changed for ${context.toolCall.id}`);
+					}
+					if (this._durableStartedTools.has(context.toolCall.id)) {
+						throw new Error(`Durable tool call already started: ${context.toolCall.id}`);
+					}
+					this.sessionManager.appendRuntimeControl({
+						type: "runtime_tool",
+						turnId: turn.turnId,
+						toolCallId: context.toolCall.id,
+						toolName: context.toolCall.name,
+						state: "started",
+					});
+					started = true;
+					this._durableStartedTools.set(context.toolCall.id, context.toolCall.name);
+				} catch (error) {
+					try {
+						this._repairRejectedDurableTool(context, started);
+					} catch (repairError) {
+						throw new AggregateError(
+							[error, repairError],
+							"Failed to mark and structurally repair a rejected tool call",
+						);
+					}
+					throw error;
+				}
+			},
+		});
+	}
+
+	private _commitDurableQueueTurn(context: BeforeQueueCommitContext): void {
+		if (this._durableRecoveryRequired) {
+			throw new Error("The durable prompt queue must be recovered before running more work");
+		}
+		if (this._runtimeTeardownRequested || this._stopCurrentRunAfterAbort) {
+			throw new Error("The durable agent run was stopped before its queued work could be consumed");
+		}
+		const durableItems = context.items.filter(
+			(item): item is typeof item & { operationId: string } => item.operationId !== undefined,
+		);
+		if (durableItems.length === 0) {
+			if (context.items.length > 0) this._markDurableProviderEpoch();
+			return;
+		}
+
+		const metadata: DurableQueueMetadata[] = [];
+		for (const item of durableItems) {
+			const queue = this._durableQueues.get(item.queueItemId);
+			if (!queue || queue.operation.identity.operationId !== item.operationId || queue.queue !== context.queue) {
+				throw new Error(`Queue item is not durably enqueued: ${item.queueItemId}`);
+			}
+			metadata.push(queue);
+		}
+		let hydratedImages: Array<ImageContent[] | undefined>;
+		try {
+			hydratedImages = metadata.map(({ operation }) =>
+				operation.input.images?.length
+					? this.sessionManager.resolveDurableImageRefs(operation.input.images)
+					: undefined,
+			);
+		} catch (error) {
+			this._durableRecoveryRequired = true;
+			throw error;
+		}
+		const hydratedContent: Array<Array<TextContent | ImageContent> | undefined> = [];
+		for (let index = 0; index < durableItems.length; index += 1) {
+			const images = hydratedImages[index];
+			if (!images?.length) {
+				hydratedContent.push(undefined);
+				continue;
+			}
+			const message = durableItems[index]!.message;
+			if (message.role !== "user") throw new Error("Durable queue item is not a user message");
+			const textContent =
+				typeof message.content === "string"
+					? [{ type: "text" as const, text: message.content }]
+					: message.content.filter((content) => content.type !== "image");
+			hydratedContent.push([...textContent, ...images]);
+		}
+		const applyHydratedContent = () => {
+			for (let index = 0; index < hydratedContent.length; index += 1) {
+				const content = hydratedContent[index];
+				if (!content) continue;
+				const message = durableItems[index]!.message;
+				if (message.role === "user") message.content = content;
+			}
+		};
+
+		const operations = metadata.map((item) => item.operation);
+		const operationIds = operations.map((operation) => operation.identity.operationId);
+		const queueItemIds = durableItems.map((item) => item.queueItemId);
+		const current = this._durableTurn;
+		if (!current) {
+			const turnId = deriveBatchedTurnId(queueItemIds);
+			this.sessionManager.appendRuntimeControl({
+				type: "runtime_turn",
+				turnId,
+				operationIds,
+				state: "started",
+				consumedQueueItemIds: queueItemIds,
+			});
+			applyHydratedContent();
+			this._durableTurn = { turnId, operations: [...operations], consumedQueueItemIds: [...queueItemIds] };
+			for (const operation of operations) {
+				this._durableOperationTurnListener?.(operation.identity.operationId, turnId);
+			}
+			for (const id of queueItemIds) this._durableQueues.delete(id);
+			this._durableTerminalEvidence = undefined;
+			return;
+		}
+
+		if (queueItemIds.some((id) => current.consumedQueueItemIds.includes(id))) {
+			throw new Error("A durable queue item was offered for consumption more than once");
+		}
+		const nextOperationIds = [
+			...current.operations.map((operation) => operation.identity.operationId),
+			...operationIds,
+		];
+		const nextQueueItemIds = [...current.consumedQueueItemIds, ...queueItemIds];
+		this.sessionManager.appendRuntimeControl({
+			type: "runtime_turn",
+			turnId: current.turnId,
+			operationIds: nextOperationIds,
+			state: "started",
+			consumedQueueItemIds: nextQueueItemIds,
+		});
+		applyHydratedContent();
+		current.operations.push(...operations);
+		current.consumedQueueItemIds.push(...queueItemIds);
+		for (const operation of operations) {
+			this._durableOperationTurnListener?.(operation.identity.operationId, current.turnId);
+		}
+		for (const id of queueItemIds) this._durableQueues.delete(id);
+		this._durableTerminalEvidence = undefined;
+	}
+
+	private _markDurableProviderEpoch(): void {
+		if (this._durableRecoveryRequired) {
+			throw new Error("The durable prompt queue must be recovered before starting another provider request");
+		}
+		if (this._runtimeTeardownRequested || this._stopCurrentRunAfterAbort) {
+			throw new Error("The durable agent run was stopped before its next provider request");
+		}
+		const turn = this._durableTurn;
+		if (!turn) return;
+		if (this._durablePendingToolCalls.size > 0) {
+			throw new Error(`Runtime turn ${turn.turnId} cannot start a provider request with unresolved tool calls`);
+		}
+		this.sessionManager.appendRuntimeControl({
+			type: "runtime_turn",
+			turnId: turn.turnId,
+			operationIds: turn.operations.map((operation) => operation.identity.operationId),
+			state: "started",
+			consumedQueueItemIds: turn.consumedQueueItemIds,
+		});
+		this._durableTerminalEvidence = undefined;
+	}
+
+	private _repairRejectedDurableTool(context: BeforeToolExecuteContext, started: boolean): void {
+		const turn = this._durableTurn;
+		if (!turn || !this._durablePendingToolCalls.has(context.toolCall.id)) return;
+		if (started) {
+			this.sessionManager.appendRuntimeControl({
+				type: "runtime_tool",
+				turnId: turn.turnId,
+				toolCallId: context.toolCall.id,
+				toolName: context.toolCall.name,
+				state: "interrupted",
+			});
+			this._durableCompletedTools.add(context.toolCall.id);
+		}
+		const message = appendSyntheticRuntimeToolResult(
+			this.sessionManager,
+			turn.turnId,
+			context.toolCall.id,
+			context.toolCall.name,
+		);
+		this.agent.state.messages.push(message);
+		this._durablePendingToolCalls.delete(context.toolCall.id);
+	}
+
 	private _installAgentNextTurnRefresh(): void {
 		const previousPrepareNextTurnWithContext =
 			this.agent.prepareNextTurnWithContext ??
@@ -547,7 +835,7 @@ export class AgentSession {
 	}
 
 	private _resolveIdleWaitIfIdle(): void {
-		if (this._isAgentRunActive || !this._resolveIdleWait) {
+		if (this._isAgentRunActive || this._isAgentSettling || !this._resolveIdleWait) {
 			return;
 		}
 		const resolve = this._resolveIdleWait;
@@ -557,11 +845,14 @@ export class AgentSession {
 	}
 
 	private async _emitAgentSettled(): Promise<void> {
+		this._isAgentSettling = true;
 		this._isAgentRunActive = false;
 		try {
 			await this._extensionRunner.emit({ type: "agent_settled" });
 			this._emit({ type: "agent_settled" });
 		} finally {
+			this._isAgentSettling = false;
+			this._stopCurrentRunAfterAbort = false;
 			this._resolveIdleWaitIfIdle();
 		}
 	}
@@ -569,8 +860,8 @@ export class AgentSession {
 	// Track last assistant message for auto-compaction check
 	private _lastAssistantMessage: AssistantMessage | undefined = undefined;
 
-	/** Internal handler for agent events - shared by subscribe and reconnect */
-	private _handleAgentEvent = async (event: AgentEvent): Promise<void> => {
+	/** Internal event implementation. The subscription wrapper below tracks durable message writes. */
+	private async _processAgentEvent(event: AgentEvent): Promise<void> {
 		// When a user message starts, check if it's from either queue and remove it BEFORE emitting
 		// This ensures the UI sees the updated queue state
 		if (event.type === "message_start" && event.message.role === "user") {
@@ -602,12 +893,11 @@ export class AgentSession {
 			event.message.role === "toolResult" &&
 			this._toolDefinitions.get(event.message.toolName)?.sourceInfo.source !== "builtin"
 		) {
-			const sessionFile = this.sessionManager.getSessionFile();
 			// ponytail: retain output files until deletion can account for references shared by branched sessions.
-			const outputDir = sessionFile
-				? getSessionToolOutputDir(sessionFile)
-				: join(tmpdir(), "arcmind-tool-results", this.sessionManager.getSessionId());
 			try {
+				const outputDir =
+					this.sessionManager.getToolOutputDir() ??
+					join(tmpdir(), "arcmind-tool-results", this.sessionManager.getSessionId());
 				const externalized = await externalizeLargeToolOutput(event.message.content, outputDir);
 				if (externalized) {
 					event.message.content = externalized.content;
@@ -623,6 +913,20 @@ export class AgentSession {
 
 		// Handle session persistence
 		if (event.type === "message_end") {
+			let durableAssistantEvidence: RuntimeAssistantMessageEvidence | undefined;
+			if (this._durableTurn && (event.message.role === "assistant" || event.message.role === "toolResult")) {
+				try {
+					if (event.message.role === "assistant") {
+						this._repairPendingDurableToolCallsBeforeAssistant(event.message);
+						durableAssistantEvidence = this._validateDurableAssistantToolCalls(event.message);
+					} else {
+						this._validateDurableToolResult(event.message);
+					}
+				} catch (error) {
+					this._discardUnpersistedAgentMessage(event.message);
+					throw new DurableMessageValidationError(error);
+				}
+			}
 			// Check if this is a custom message from extensions
 			if (event.message.role === "custom") {
 				// Persist as CustomMessageEntry
@@ -641,7 +945,32 @@ export class AgentSession {
 				this.sessionManager.appendMessage(
 					event.message,
 					event.message.role === "toolResult" ? toolOutput : undefined,
+					this._durableTurn?.turnId,
 				);
+				if (event.message.role === "user" && this._durableTurn) {
+					this._durableTerminalEvidence = undefined;
+				} else if (event.message.role === "assistant" && this._durableTurn) {
+					if (!durableAssistantEvidence) throw new Error("Missing validated durable assistant evidence");
+					for (const call of durableAssistantEvidence.toolCalls) {
+						this._durableToolCalls.set(call.toolCallId, call.toolName);
+						this._durablePendingToolCalls.set(call.toolCallId, call.toolName);
+					}
+					this._durableTerminalEvidence = durableAssistantEvidence.outcome;
+				} else if (event.message.role === "toolResult" && this._durableTurn) {
+					this._durablePendingToolCalls.delete(event.message.toolCallId);
+					this._durableToolResults.add(event.message.toolCallId);
+					const toolName = this._durableStartedTools.get(event.message.toolCallId);
+					if (toolName !== undefined) {
+						this.sessionManager.appendRuntimeControl({
+							type: "runtime_tool",
+							turnId: this._durableTurn.turnId,
+							toolCallId: event.message.toolCallId,
+							toolName,
+							state: "completed",
+						});
+						this._durableCompletedTools.add(event.message.toolCallId);
+					}
+				}
 			}
 			// Other message types (bashExecution, compactionSummary, branchSummary) are persisted elsewhere
 
@@ -666,6 +995,72 @@ export class AgentSession {
 				}
 			}
 		}
+	}
+
+	private _validateDurableAssistantToolCalls(message: AssistantMessage): RuntimeAssistantMessageEvidence {
+		const evidence = validateRuntimeAssistantMessageEvidence(message);
+		const calls = new Set<string>();
+		for (const call of evidence.toolCalls) {
+			if (this._durableToolCalls.has(call.toolCallId) || calls.has(call.toolCallId)) {
+				throw new Error(`Durable tool call ID was reused in one turn: ${call.toolCallId}`);
+			}
+			calls.add(call.toolCallId);
+		}
+		return evidence;
+	}
+
+	private _validateDurableToolResult(message: Extract<AgentMessage, { role: "toolResult" }>): void {
+		const evidence = validateRuntimeToolResultMessageEvidence(message);
+		const expectedToolName = this._durablePendingToolCalls.get(evidence.toolCallId);
+		if (expectedToolName === undefined) {
+			throw new Error(`Durable tool result has no pending tool call: ${evidence.toolCallId}`);
+		}
+		if (expectedToolName !== evidence.toolName) {
+			throw new Error(`Durable tool result name changed for ${evidence.toolCallId}`);
+		}
+	}
+
+	private _discardUnpersistedAgentMessage(message: AgentMessage): void {
+		const index = this.agent.state.messages.lastIndexOf(message);
+		if (index !== -1) this.agent.state.messages.splice(index, 1);
+	}
+
+	private _repairPendingDurableToolCallsBeforeAssistant(nextAssistant: AssistantMessage): void {
+		const turn = this._durableTurn;
+		if (!turn || this._durablePendingToolCalls.size === 0) return;
+		for (const [toolCallId, toolName] of this._durablePendingToolCalls) {
+			if (this._durableStartedTools.has(toolCallId)) {
+				throw new Error(`Assistant advanced while durable tool call remained active: ${toolCallId}`);
+			}
+			const message = appendSyntheticRuntimeToolResult(this.sessionManager, turn.turnId, toolCallId, toolName);
+			const currentIndex = this.agent.state.messages.lastIndexOf(nextAssistant);
+			if (currentIndex === -1) this.agent.state.messages.push(message);
+			else this.agent.state.messages.splice(currentIndex, 0, message);
+			this._durablePendingToolCalls.delete(toolCallId);
+		}
+	}
+
+	/** Internal handler for agent events - shared by subscribe and reconnect. */
+	private _handleAgentEvent = (event: AgentEvent): Promise<void> => {
+		const scope: AgentEventPersistenceScope = { owner: this, active: true };
+		const task = agentEventPersistenceContext.run(scope, async () => {
+			try {
+				await this._processAgentEvent(event);
+			} finally {
+				scope.active = false;
+			}
+		});
+		if (event.type !== "message_end") return task;
+
+		this._inFlightEventPersistence.add(task);
+		void task.then(
+			() => this._inFlightEventPersistence.delete(task),
+			(error) => {
+				this._inFlightEventPersistence.delete(task);
+				if (!(error instanceof DurableMessageValidationError)) this._eventPersistenceFailure ??= error;
+			},
+		);
+		return task;
 	};
 
 	private _willRetryAfterAgentEnd(event: Extract<AgentEvent, { type: "agent_end" }>): boolean {
@@ -847,22 +1242,84 @@ export class AgentSession {
 	 * Call this when completely done with the session.
 	 */
 	dispose(): void {
-		try {
-			this.abortRetry();
-			this.abortCompaction();
-			this.abortBranchSummary();
-			this.abortBash();
-			this.agent.abort();
-		} catch {
-			// Dispose must succeed even if an abort hook throws.
+		this._dispose(false);
+	}
+
+	/** @internal Runtime lifecycle entry after accepted work and recovery have drained. */
+	disposeFromRuntime(): void {
+		this._dispose(true);
+	}
+
+	private _dispose(runtimeOwned: boolean): void {
+		if (
+			!this._disposeCoreComplete &&
+			!runtimeOwned &&
+			(this._durableTurn !== undefined ||
+				this._durableQueues.size > 0 ||
+				this._durableRecoveryRequired ||
+				this._runtimeTeardownRequested ||
+				this._eventPersistenceFailure !== undefined)
+		) {
+			throw new Error(
+				"Cannot directly dispose a runtime-owned durable session; dispose its AgentSessionRuntime instead",
+			);
+		}
+		if (
+			!this._disposeCoreComplete &&
+			(this._isAgentRunActive || this._isAgentSettling || this._inFlightEventPersistence.size > 0)
+		) {
+			throw new Error(
+				"Cannot dispose an active agent session; await abortAndDrainAgentEventPersistence() before disposing",
+			);
+		}
+		const errors: unknown[] = [];
+		if (!this._disposeCoreComplete) {
+			try {
+				try {
+					this.abortRetry();
+					this.abortCompaction();
+					this.abortBranchSummary();
+					this.abortBash();
+					this.agent.abort();
+				} catch {
+					// Continue invalidating the session even if an abort hook throws.
+				}
+
+				this._extensionRunner.invalidate(
+					"This extension ctx is stale after session replacement or reload. Do not use a captured arcmind or command ctx after ctx.newSession(), ctx.fork(), ctx.switchSession(), or ctx.reload(). For newSession, fork, and switchSession, move post-replacement work into withSession and use the ctx passed to withSession. For reload, do not use the old ctx after await ctx.reload().",
+				);
+				this._disconnectFromAgent();
+				this._eventListeners = [];
+				cleanupSessionResources(this.sessionId);
+				this._disposeCoreComplete = true;
+			} catch (error) {
+				errors.push(error);
+			}
 		}
 
-		this._extensionRunner.invalidate(
-			"This extension ctx is stale after session replacement or reload. Do not use a captured arcmind or command ctx after ctx.newSession(), ctx.fork(), ctx.switchSession(), or ctx.reload(). For newSession, fork, and switchSession, move post-replacement work into withSession and use the ctx passed to withSession. For reload, do not use the old ctx after await ctx.reload().",
-		);
-		this._disconnectFromAgent();
-		this._eventListeners = [];
-		cleanupSessionResources(this.sessionId);
+		if (!this._resourceLoaderDisposed) {
+			try {
+				this._resourceLoader.dispose?.();
+				this._resourceLoaderDisposed = true;
+			} catch (error) {
+				errors.push(error);
+			}
+		}
+
+		if (!this._sessionManagerClosed) {
+			try {
+				// Release the cross-process writer lease only after agent and extension activity stops.
+				this.sessionManager.close();
+				this._sessionManagerClosed = true;
+			} catch (error) {
+				errors.push(error);
+			}
+		}
+
+		if (errors.length === 1) throw errors[0];
+		if (errors.length > 1) {
+			throw new AggregateError(errors, "Failed to dispose agent session");
+		}
 	}
 
 	// =========================================================================
@@ -891,7 +1348,15 @@ export class AgentSession {
 
 	/** Whether the session has no active agent run, retry, auto-compaction, or queued continuation. */
 	get isIdle(): boolean {
+		// Preserve the public event contract: agent_settled observers see the
+		// provider run as idle. Lifecycle waits and disposal additionally guard
+		// _isAgentSettling so the writer lease cannot be released mid-callback.
 		return !this._isAgentRunActive;
+	}
+
+	/** Durable direct admission stays active across async prompt preflight and settlement. */
+	get activeDurableTurnId(): string | undefined {
+		return this._durableTurn?.turnId;
 	}
 
 	/** Current effective system prompt (includes any per-turn extension modifications) */
@@ -1094,21 +1559,223 @@ export class AgentSession {
 	// Prompting
 	// =========================================================================
 
+	/** Validate an app-server prompt without retaining provider-ready image payloads. */
+	prepareDurablePrompt(input: DurablePromptInput): void {
+		if (!this.sessionManager.isPersisted()) {
+			throw new Error("Durable prompt submission requires a persisted session");
+		}
+		if (!this.settingsManager.isProjectTrusted()) {
+			throw new Error("Project is not trusted");
+		}
+		if (this._durableRecoveryRequired) {
+			throw new Error("The durable prompt queue must be recovered before accepting more work");
+		}
+		if (!this.model) throw new Error(formatNoModelSelectedMessage());
+		if (!this._modelRegistry.hasConfiguredAuth(this.model)) {
+			throw new Error(formatNoApiKeyFoundMessage(this.model.provider));
+		}
+		if (input.text.startsWith("/")) this._throwIfExtensionCommand(input.text);
+		if (input.images?.length) this.sessionManager.validateDurableImageRefs(input.images);
+	}
+
+	assertDurablePromptCapacity(input: DurablePromptInput): void {
+		const reserved = (this._durableTurn?.operations.length ?? 0) + this._durableQueues.size;
+		if (reserved >= MAX_DURABLE_TURN_OPERATIONS) {
+			throw new Error(`A durable runtime turn cannot contain more than ${MAX_DURABLE_TURN_OPERATIONS} operations`);
+		}
+		if (
+			this._durableResidentPayloadBytes + durablePromptResidentPayloadBytes(input) >
+			MAX_DURABLE_TURN_RESIDENT_PAYLOAD_BYTES
+		) {
+			throw new Error(
+				`Durable runtime turn payloads cannot exceed ${MAX_DURABLE_TURN_RESIDENT_PAYLOAD_BYTES} resident bytes`,
+			);
+		}
+	}
+
+	setDurableOperationTurnListener(listener?: (operationId: string, turnId: string) => void): void {
+		this._durableOperationTurnListener = listener;
+	}
+
+	/** Persist the authoritative direct-turn start before provider work is scheduled. */
+	beginDurableDirectTurn(identity: RuntimeRequestIdentity, input: DurablePromptInput): void {
+		if (this._durableTurn) throw new Error("A durable runtime turn is already active");
+		const residentPayloadBytes = durablePromptResidentPayloadBytes(input);
+		this.sessionManager.appendRuntimeControl({
+			type: "runtime_turn",
+			turnId: identity.turnId,
+			operationIds: [identity.operationId],
+			state: "started",
+			consumedQueueItemIds: [],
+		});
+		this._durableTurn = {
+			turnId: identity.turnId,
+			operations: [{ identity, input, kind: "turn", residentPayloadBytes }],
+			consumedQueueItemIds: [],
+		};
+		this._durableResidentPayloadBytes += residentPayloadBytes;
+		this._durableOperationTurnListener?.(identity.operationId, identity.turnId);
+		this._durableTerminalEvidence = undefined;
+	}
+
+	/** Queue one already-accepted prompt with its durable identity. */
+	enqueueAcceptedDurablePrompt(
+		input: DurablePromptInput,
+		identity: RuntimeRequestIdentity,
+		behavior: "steer" | "followUp",
+	): void {
+		let text = this._expandSkillCommand(input.text, true);
+		text = expandPromptTemplate(text, [...this.promptTemplates], MAX_DURABLE_PROMPT_TEXT_BYTES);
+		const textBytes = Buffer.byteLength(text, "utf8");
+		if (textBytes > MAX_DURABLE_PROMPT_TEXT_BYTES) {
+			throw new Error(`Expanded durable prompt cannot exceed ${MAX_DURABLE_PROMPT_TEXT_BYTES} UTF-8 bytes`);
+		}
+		const queue = behavior === "followUp" ? "follow_up" : "steer";
+		if (this._durableQueues.has(identity.queueItemId)) {
+			throw new Error(`Durable queue item is already enqueued: ${identity.queueItemId}`);
+		}
+		const residentPayloadBytes = durablePromptResidentPayloadBytes(input, text);
+		if (this._durableResidentPayloadBytes + residentPayloadBytes > MAX_DURABLE_TURN_RESIDENT_PAYLOAD_BYTES) {
+			throw new Error(
+				`Durable runtime turn payloads cannot exceed ${MAX_DURABLE_TURN_RESIDENT_PAYLOAD_BYTES} resident bytes`,
+			);
+		}
+		this._durableQueues.set(identity.queueItemId, {
+			operation: { identity, input, kind: "steer", residentPayloadBytes },
+			queue,
+		});
+		this._durableResidentPayloadBytes += residentPayloadBytes;
+		try {
+			const queueIdentity = { operationId: identity.operationId, queueItemId: identity.queueItemId };
+			if (behavior === "followUp") this._enqueueFollowUp(text, undefined, queueIdentity);
+			else this._enqueueSteer(text, undefined, queueIdentity);
+		} catch (error) {
+			this._durableQueues.delete(identity.queueItemId);
+			this._durableResidentPayloadBytes -= residentPayloadBytes;
+			throw error;
+		}
+	}
+
+	/** Execute accepted work; final durable markers settle before this promise. */
+	async runAcceptedDurablePrompt(turnId: string, input: DurablePromptInput): Promise<void> {
+		const context: DurablePromptExecutionScope = { owner: this, turnId, input, active: true };
+		try {
+			if (this._runtimeTeardownRequested) throw new Error("The agent session is tearing down");
+			const images = input.images?.length ? this.sessionManager.resolveDurableImageRefs(input.images) : undefined;
+			await durablePromptExecutionContext.run(context, () => this.prompt(input.text, { images }));
+		} finally {
+			context.active = false;
+			if (!this._isAgentRunActive && this._durableTurn?.turnId === turnId) this._finishDurableTurn();
+		}
+	}
+
+	private _finishDurableTurn(): void {
+		const turn = this._durableTurn;
+		if (!turn) return;
+
+		for (const [toolCallId, toolName] of this._durableStartedTools) {
+			if (this._durableCompletedTools.has(toolCallId)) continue;
+			if (this._durableToolResults.has(toolCallId)) {
+				this.sessionManager.appendRuntimeControl({
+					type: "runtime_tool",
+					turnId: turn.turnId,
+					toolCallId,
+					toolName,
+					state: "completed",
+				});
+				this._durableCompletedTools.add(toolCallId);
+				continue;
+			}
+			this.sessionManager.appendRuntimeControl({
+				type: "runtime_tool",
+				turnId: turn.turnId,
+				toolCallId,
+				toolName,
+				state: "interrupted",
+			});
+			const message = appendSyntheticRuntimeToolResult(this.sessionManager, turn.turnId, toolCallId, toolName);
+			this.agent.state.messages.push(message);
+			this._durablePendingToolCalls.delete(toolCallId);
+		}
+		for (const [toolCallId, toolName] of this._durablePendingToolCalls) {
+			const message = appendSyntheticRuntimeToolResult(this.sessionManager, turn.turnId, toolCallId, toolName);
+			this.agent.state.messages.push(message);
+		}
+
+		const state =
+			this._durableTerminalEvidence === "completed" && this._durablePendingToolCalls.size === 0
+				? "completed"
+				: "interrupted";
+		const operationIds = turn.operations.map((operation) => operation.identity.operationId);
+		this.sessionManager.appendRuntimeControl({
+			type: "runtime_turn",
+			turnId: turn.turnId,
+			operationIds,
+			state,
+			consumedQueueItemIds: turn.consumedQueueItemIds,
+		});
+		for (const operation of turn.operations) {
+			this.sessionManager.appendRuntimeControl({
+				type: "runtime_operation",
+				operationId: operation.identity.operationId,
+				requestId: operation.identity.requestId,
+				requestHash: operation.identity.requestHash,
+				kind: operation.kind,
+				state,
+				turnId: turn.turnId,
+				...(state === "interrupted"
+					? { error: { code: "RUNTIME_INTERRUPTED", message: "The operation did not complete." } }
+					: {}),
+			});
+		}
+		this._durableResidentPayloadBytes -= turn.operations.reduce(
+			(total, operation) => total + operation.residentPayloadBytes,
+			0,
+		);
+		if (this._durableQueues.size > 0) this._durableRecoveryRequired = true;
+		this._durableTurn = undefined;
+		this._durableStartedTools.clear();
+		this._durableToolResults.clear();
+		this._durableCompletedTools.clear();
+		this._durableToolCalls.clear();
+		this._durablePendingToolCalls.clear();
+		this._durableTerminalEvidence = undefined;
+	}
+
 	private async _runAgentPrompt(messages: AgentMessage | AgentMessage[]): Promise<void> {
 		this._isAgentRunActive = true;
+		const errors: unknown[] = [];
 		try {
 			await this.agent.prompt(messages);
 			while (await this._handlePostAgentRun()) {
 				await this.agent.continue();
 			}
-		} finally {
-			this._systemPromptOverride = undefined;
-			this._flushPendingBashMessages();
-			await this._emitAgentSettled();
+		} catch (error) {
+			errors.push(error);
 		}
+		this._systemPromptOverride = undefined;
+		try {
+			this._flushPendingBashMessages();
+		} catch (error) {
+			errors.push(error);
+		}
+		try {
+			this._finishDurableTurn();
+		} catch (error) {
+			errors.push(error);
+		}
+		try {
+			await this._emitAgentSettled();
+		} catch (error) {
+			errors.push(error);
+		}
+		if (errors.length === 1) throw errors[0];
+		if (errors.length > 1) throw new AggregateError(errors, "Failed to run and settle the durable agent turn");
 	}
 
 	private async _handlePostAgentRun(): Promise<boolean> {
+		if (this._runtimeTeardownRequested || this._stopCurrentRunAfterAbort || this._durableRecoveryRequired)
+			return false;
 		const msg = this._lastAssistantMessage;
 		this._lastAssistantMessage = undefined;
 		if (!msg) {
@@ -1148,6 +1815,7 @@ export class AgentSession {
 	 * @throws Error if no model selected or no API key available (when not streaming)
 	 */
 	async prompt(text: string, options?: PromptOptions): Promise<void> {
+		this._assertDurablePromptExecutionOwner();
 		const expandPromptTemplates = options?.expandPromptTemplates ?? true;
 		const preflightResult = options?.preflightResult;
 		let messages: AgentMessage[] | undefined;
@@ -1195,9 +1863,16 @@ export class AgentSession {
 			// Expand skill commands (/skill:name args) and prompt templates (/template args)
 			let expandedText = currentText;
 			if (expandPromptTemplates) {
-				expandedText = this._expandSkillCommand(expandedText);
-				expandedText = expandPromptTemplate(expandedText, [...this.promptTemplates]);
+				const durableScope = durablePromptExecutionContext.getStore();
+				const durableExpansion = durableScope?.owner === this && durableScope.active;
+				expandedText = this._expandSkillCommand(expandedText, durableExpansion);
+				expandedText = expandPromptTemplate(
+					expandedText,
+					[...this.promptTemplates],
+					durableExpansion ? MAX_DURABLE_PROMPT_TEXT_BYTES : undefined,
+				);
 			}
+			this._accountActiveDurablePromptPayload(expandedText, currentImages);
 
 			// If streaming, queue via steer() or followUp() based on option
 			if (this.isStreaming) {
@@ -1339,7 +2014,7 @@ export class AgentSession {
 	 * Returns the expanded text, or the original text if not a skill command or skill not found.
 	 * Emits errors via extension runner if file read fails.
 	 */
-	private _expandSkillCommand(text: string): string {
+	private _expandSkillCommand(text: string, failOnReadError = false): string {
 		if (!text.startsWith("/skill:")) return text;
 
 		const spaceIndex = text.indexOf(" ");
@@ -1350,9 +2025,21 @@ export class AgentSession {
 		if (!skill) return text; // Unknown skill, pass through
 
 		try {
-			const content = readFileSync(skill.filePath, "utf-8");
+			const content = readBoundedUtf8FileSync(skill.filePath, MAX_DURABLE_PROMPT_TEXT_BYTES);
 			const body = stripFrontmatter(content).trim();
-			const skillBlock = `<skill name="${skill.name}" location="${skill.filePath}">\nReferences are relative to ${skill.baseDir}.\n\n${body}\n</skill>`;
+			const prefix = `<skill name="${skill.name}" location="${skill.filePath}">\nReferences are relative to ${skill.baseDir}.\n\n`;
+			const suffix = "\n</skill>";
+			if (
+				failOnReadError &&
+				Buffer.byteLength(prefix, "utf8") +
+					Buffer.byteLength(body, "utf8") +
+					Buffer.byteLength(suffix, "utf8") +
+					(args ? Buffer.byteLength(args, "utf8") + 2 : 0) >
+					MAX_DURABLE_PROMPT_TEXT_BYTES
+			) {
+				throw new Error(`Expanded durable prompt cannot exceed ${MAX_DURABLE_PROMPT_TEXT_BYTES} UTF-8 bytes`);
+			}
+			const skillBlock = `${prefix}${body}${suffix}`;
 			return args ? `${skillBlock}\n\n${args}` : skillBlock;
 		} catch (err) {
 			// Emit error like extension commands do
@@ -1361,8 +2048,46 @@ export class AgentSession {
 				event: "skill_expansion",
 				error: err instanceof Error ? err.message : String(err),
 			});
+			if (failOnReadError) throw err;
 			return text; // Return original on error
 		}
+	}
+
+	private _accountActiveDurablePromptPayload(text: string, images: ImageContent[] | undefined): void {
+		const scope = durablePromptExecutionContext.getStore();
+		if (scope?.owner !== this || !scope.active) return;
+		const textBytes = Buffer.byteLength(text, "utf8");
+		if (textBytes > MAX_DURABLE_PROMPT_TEXT_BYTES) {
+			throw new Error(`Expanded durable prompt cannot exceed ${MAX_DURABLE_PROMPT_TEXT_BYTES} UTF-8 bytes`);
+		}
+		if ((images?.length ?? 0) > MAX_DURABLE_PROMPT_IMAGES) {
+			throw new Error(`Expanded durable prompts support at most ${MAX_DURABLE_PROMPT_IMAGES} images`);
+		}
+		const maxImagePayloadBytes = 4 * Math.ceil(MAX_DURABLE_IMAGE_BYTES / 3);
+		let imagePayloadBytes = 0;
+		for (const image of images ?? []) {
+			if (typeof image.data !== "string" || image.data.length > maxImagePayloadBytes) {
+				throw new Error(`Expanded durable prompt image payload cannot exceed ${maxImagePayloadBytes} bytes`);
+			}
+			imagePayloadBytes += image.data.length;
+		}
+		const maxImagePayloadTotal = 4 * Math.ceil(MAX_DURABLE_PROMPT_IMAGE_BYTES / 3);
+		if (imagePayloadBytes > maxImagePayloadTotal) {
+			throw new Error(`Expanded durable prompt image payloads cannot exceed ${maxImagePayloadTotal} total bytes`);
+		}
+		const turn = this._durableTurn;
+		const operation = turn?.operations.find((item) => item.input === scope.input);
+		if (!operation) throw new Error(`Durable runtime turn ${scope.turnId} lost its accepted operation`);
+		const residentPayloadBytes = textBytes + imagePayloadBytes;
+		const nextTotal = this._durableResidentPayloadBytes - operation.residentPayloadBytes + residentPayloadBytes;
+		if (nextTotal > MAX_DURABLE_TURN_RESIDENT_PAYLOAD_BYTES) {
+			if (this._durableQueues.size > 0) this._durableRecoveryRequired = true;
+			throw new Error(
+				`Durable runtime turn payloads cannot exceed ${MAX_DURABLE_TURN_RESIDENT_PAYLOAD_BYTES} resident bytes`,
+			);
+		}
+		this._durableResidentPayloadBytes = nextTotal;
+		operation.residentPayloadBytes = residentPayloadBytes;
 	}
 
 	/**
@@ -1374,6 +2099,7 @@ export class AgentSession {
 	 * @throws Error if text is an extension command
 	 */
 	async steer(text: string, images?: ImageContent[]): Promise<void> {
+		this._assertDurablePromptExecutionOwner();
 		// Check for extension commands (cannot be queued)
 		if (text.startsWith("/")) {
 			this._throwIfExtensionCommand(text);
@@ -1394,6 +2120,7 @@ export class AgentSession {
 	 * @throws Error if text is an extension command
 	 */
 	async followUp(text: string, images?: ImageContent[]): Promise<void> {
+		this._assertDurablePromptExecutionOwner();
 		// Check for extension commands (cannot be queued)
 		if (text.startsWith("/")) {
 			this._throwIfExtensionCommand(text);
@@ -1410,34 +2137,34 @@ export class AgentSession {
 	 * Internal: Queue a steering message (already expanded, no extension command check).
 	 */
 	private async _queueSteer(text: string, images?: ImageContent[]): Promise<void> {
+		this._enqueueSteer(text, images);
+	}
+
+	private _enqueueSteer(text: string, images?: ImageContent[], identity?: AgentQueueIdentity): void {
 		this._steeringMessages.push(text);
 		this._emitQueueUpdate();
 		const content: (TextContent | ImageContent)[] = [{ type: "text", text }];
 		if (images) {
 			content.push(...images);
 		}
-		this.agent.steer({
-			role: "user",
-			content,
-			timestamp: Date.now(),
-		});
+		this.agent.steer({ role: "user", content, timestamp: Date.now() }, identity);
 	}
 
 	/**
 	 * Internal: Queue a follow-up message (already expanded, no extension command check).
 	 */
 	private async _queueFollowUp(text: string, images?: ImageContent[]): Promise<void> {
+		this._enqueueFollowUp(text, images);
+	}
+
+	private _enqueueFollowUp(text: string, images?: ImageContent[], identity?: AgentQueueIdentity): void {
 		this._followUpMessages.push(text);
 		this._emitQueueUpdate();
 		const content: (TextContent | ImageContent)[] = [{ type: "text", text }];
 		if (images) {
 			content.push(...images);
 		}
-		this.agent.followUp({
-			role: "user",
-			content,
-			timestamp: Date.now(),
-		});
+		this.agent.followUp({ role: "user", content, timestamp: Date.now() }, identity);
 	}
 
 	/**
@@ -1471,6 +2198,7 @@ export class AgentSession {
 		message: Pick<CustomMessage<T>, "customType" | "content" | "display" | "details">,
 		options?: { triggerTurn?: boolean; deliverAs?: "steer" | "followUp" | "nextTurn" },
 	): Promise<void> {
+		this._assertDurablePromptExecutionOwner();
 		const appMessage = {
 			role: "custom" as const,
 			customType: message.customType,
@@ -1543,6 +2271,18 @@ export class AgentSession {
 		});
 	}
 
+	private _assertDurablePromptExecutionOwner(): void {
+		if (this._runtimeTeardownRequested) throw new Error("The agent session is tearing down");
+		if (this._durableRecoveryRequired) {
+			throw new Error("The durable prompt queue must be recovered before running more work");
+		}
+		const turnId = this._durableTurn?.turnId;
+		if (turnId === undefined) return;
+		const context = durablePromptExecutionContext.getStore();
+		if (context?.owner === this && context.turnId === turnId && context.active) return;
+		throw new Error("A durable app-server prompt has already been admitted for this session");
+	}
+
 	/**
 	 * Clear all queued messages and return them.
 	 * Useful for restoring to editor when user aborts.
@@ -1551,9 +2291,9 @@ export class AgentSession {
 	clearQueue(): { steering: string[]; followUp: string[] } {
 		const steering = [...this._steeringMessages];
 		const followUp = [...this._followUpMessages];
+		this.agent.clearAllQueues();
 		this._steeringMessages = [];
 		this._followUpMessages = [];
-		this.agent.clearAllQueues();
 		this._emitQueueUpdate();
 		return { steering, followUp };
 	}
@@ -1577,17 +2317,79 @@ export class AgentSession {
 		return this._resourceLoader;
 	}
 
+	/** @internal Runtime lifecycle guard against awaiting its own agent-event task. */
+	assertCanDrainAgentEventPersistence(): void {
+		const scope = agentEventPersistenceContext.getStore();
+		if (scope?.owner === this && scope.active) {
+			throw new Error(
+				"Session lifecycle changes cannot be awaited from an agent event handler before message persistence completes",
+			);
+		}
+	}
+
+	private async _drainAgentEventPersistence(): Promise<void> {
+		const errors: unknown[] = this._eventPersistenceFailure === undefined ? [] : [this._eventPersistenceFailure];
+		this._eventPersistenceFailure = undefined;
+		while (this._inFlightEventPersistence.size > 0) {
+			const tasks = [...this._inFlightEventPersistence];
+			const results = await Promise.allSettled(tasks);
+			for (let index = 0; index < results.length; index++) {
+				this._inFlightEventPersistence.delete(tasks[index]!);
+				const result = results[index]!;
+				if (result.status === "rejected" && !errors.includes(result.reason)) {
+					errors.push(result.reason);
+				}
+			}
+		}
+		this._eventPersistenceFailure = undefined;
+		if (errors.length === 1) throw errors[0];
+		if (errors.length > 1) throw new AggregateError(errors, "Failed to persist agent events");
+	}
+
+	/** Permanently stop new provider work before runtime-owned teardown begins. */
+	beginRuntimeTeardown(): void {
+		this._runtimeTeardownRequested = true;
+		this._stopCurrentRunAfterAbort = true;
+	}
+
+	/** Abort the active turn and keep the session lease until all durable event writes settle. */
+	async abortAndDrainAgentEventPersistence(): Promise<void> {
+		this.assertCanDrainAgentEventPersistence();
+		if (this._durableQueues.size > 0) this._durableRecoveryRequired = true;
+		this._stopCurrentRunAfterAbort = true;
+		this.abortRetry();
+		this.agent.abort();
+		const results = await Promise.allSettled([this.waitForIdle(), this._drainAgentEventPersistence()]);
+		const errors = results
+			.filter((result): result is PromiseRejectedResult => result.status === "rejected")
+			.map((result) => result.reason);
+		try {
+			// A final pass covers persistence tasks emitted while the active turn was aborting.
+			await this._drainAgentEventPersistence();
+		} catch (error) {
+			if (!errors.includes(error)) errors.push(error);
+		}
+		if (errors.length === 1) throw errors[0];
+		if (errors.length > 1) throw new AggregateError(errors, "Failed to abort and persist the active agent turn");
+	}
+
 	/**
 	 * Abort current operation and wait for agent to become idle.
 	 */
 	async abort(): Promise<void> {
+		if (this._durableQueues.size > 0) this._durableRecoveryRequired = true;
+		// Preserve the long-standing CLI behavior where aborting a non-durable
+		// provider response can still deliver an already queued steer/follow-up.
+		// Durable turns stop instead: queued durable work must be recovered, never
+		// consumed by a fresh provider request after an abort.
+		if (this._durableTurn) this._stopCurrentRunAfterAbort = true;
 		this.abortRetry();
 		this.agent.abort();
 		await this.waitForIdle();
 	}
 
 	async waitForIdle(): Promise<void> {
-		if (this.isIdle) {
+		if (this.isIdle && !this._isAgentSettling) {
 			return;
 		}
 		await this._getIdleWaitPromise();
@@ -2523,11 +3325,11 @@ export class AgentSession {
 			},
 			{
 				registerProvider: (name, config) => {
-					this._modelRegistry.registerProvider(name, config);
+					this._modelRegistry.registerExtensionProvider(name, config);
 					this._refreshCurrentModelFromRegistry();
 				},
 				unregisterProvider: (name) => {
-					this._modelRegistry.unregisterProvider(name);
+					this._modelRegistry.unregisterExtensionProvider(name);
 					this._refreshCurrentModelFromRegistry();
 				},
 			},
@@ -2686,7 +3488,8 @@ export class AgentSession {
 		await emitSessionShutdownEvent(this._extensionRunner, { type: "session_shutdown", reason: "reload" });
 		await this.settingsManager.reload();
 		this.syncQueueModesFromSettings();
-		resetApiProviders();
+		this._modelRegistry.resetExtensionProviders();
+		this._refreshCurrentModelFromRegistry();
 		await this._resourceLoader.reload();
 		this._buildRuntime({
 			activeToolNames: this.getActiveToolNames(),

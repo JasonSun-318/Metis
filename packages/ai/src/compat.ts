@@ -27,15 +27,7 @@ export * from "./index.ts";
 export * from "./legacy-api-aliases.ts";
 export * from "./providers/images/register-builtins.ts";
 
-import { anthropicMessagesApi } from "./api/anthropic-messages.lazy.ts";
-import { azureOpenAIResponsesApi } from "./api/azure-openai-responses.lazy.ts";
-import { bedrockConverseStreamApi } from "./api/bedrock-converse-stream.lazy.ts";
-import { googleGenerativeAIApi } from "./api/google-generative-ai.lazy.ts";
-import { googleVertexApi } from "./api/google-vertex.lazy.ts";
-import { mistralConversationsApi } from "./api/mistral-conversations.lazy.ts";
-import { openAICodexResponsesApi } from "./api/openai-codex-responses.lazy.ts";
-import { openAICompletionsApi } from "./api/openai-completions.lazy.ts";
-import { openAIResponsesApi } from "./api/openai-responses.lazy.ts";
+import { builtInApiIds, getBuiltInApiStreams } from "./api/builtin-streams.ts";
 import { getEnvApiKey } from "./env-api-keys.ts";
 import { builtinModels, getBuiltinModel, getBuiltinModels, getBuiltinProviders } from "./providers/all.ts";
 import { createFauxCore, type FauxProviderRegistration, type RegisterFauxProviderOptions } from "./providers/faux.ts";
@@ -47,11 +39,12 @@ import type {
 	Context,
 	Model,
 	ProviderStreamOptions,
-	ProviderStreams,
 	SimpleStreamOptions,
 	StreamFunction,
 	StreamOptions,
 } from "./types.ts";
+
+export { getBuiltInApiStreams };
 
 /** @deprecated Static catalog read. Use `getBuiltinModel` from "@arcmind/ai/providers/all" or `Models.getModel()`. */
 export const getModel = getBuiltinModel;
@@ -158,6 +151,8 @@ export function registerFauxProvider(options: RegisterFauxProviderOptions = {}):
 	return {
 		api: core.api,
 		models: core.models,
+		stream: core.stream,
+		streamSimple: core.streamSimple,
 		getModel: core.getModel,
 		state: core.state,
 		setResponses: core.setResponses,
@@ -169,18 +164,6 @@ export function registerFauxProvider(options: RegisterFauxProviderOptions = {}):
 	};
 }
 
-const BUILTIN_APIS: [Api, ProviderStreams][] = [
-	["anthropic-messages", anthropicMessagesApi()],
-	["openai-completions", openAICompletionsApi()],
-	["openai-responses", openAIResponsesApi()],
-	["openai-codex-responses", openAICodexResponsesApi()],
-	["azure-openai-responses", azureOpenAIResponsesApi()],
-	["google-generative-ai", googleGenerativeAIApi()],
-	["google-vertex", googleVertexApi()],
-	["mistral-conversations", mistralConversationsApi()],
-	["bedrock-converse-stream", bedrockConverseStreamApi()],
-];
-
 const builtinApiProviderInstances = new Map<Api, ReturnType<typeof getApiProvider>>();
 
 /**
@@ -189,7 +172,8 @@ const builtinApiProviderInstances = new Map<Api, ReturnType<typeof getApiProvide
  * already registered an override for a builtin api id.
  */
 export function registerBuiltInApiProviders(): void {
-	for (const [api, streams] of BUILTIN_APIS) {
+	for (const api of builtInApiIds) {
+		const streams = getBuiltInApiStreams(api)!;
 		if (!getApiProvider(api)) {
 			registerApiProvider({ api, stream: streams.stream, streamSimple: streams.streamSimple });
 		}

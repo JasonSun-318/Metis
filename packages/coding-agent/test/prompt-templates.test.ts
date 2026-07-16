@@ -451,6 +451,24 @@ describe("expandPromptTemplate", () => {
 
 		expect(result).toBe("arg1: label-2");
 	});
+
+	test("bounds repeated placeholder amplification before constructing the expanded prompt", () => {
+		const template = {
+			name: "amplify",
+			description: "test",
+			content: "$@ $@ $@ $@",
+			sourceInfo: {
+				path: "/tmp/amplify.md",
+				source: "local" as const,
+				scope: "temporary" as const,
+				origin: "top-level" as const,
+			},
+			filePath: "/tmp/amplify.md",
+		};
+		expect(() => expandPromptTemplate(`/amplify ${"x".repeat(1024 * 1024)}`, [template], 2 * 1024 * 1024)).toThrow(
+			"Expanded prompt cannot exceed 2097152 UTF-8 bytes",
+		);
+	});
 });
 
 // ============================================================================

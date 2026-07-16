@@ -83,7 +83,7 @@ export interface Harness {
 	events: AgentSessionEvent[];
 	eventsOfType<T extends AgentSessionEvent["type"]>(type: T): Extract<AgentSessionEvent, { type: T }>[];
 	tempDir: string;
-	cleanup: () => void;
+	cleanup: () => Promise<void>;
 }
 
 function createTempDir(): string {
@@ -116,6 +116,7 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
 			baseUrl: model.baseUrl,
 			apiKey: "faux-key",
 			api: fauxProvider.api,
+			streamSimple: fauxProvider.streamSimple,
 			models: fauxProvider.models.map((registeredModel) => ({
 				id: registeredModel.id,
 				name: registeredModel.name,
@@ -203,12 +204,32 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
 			return events.filter((event): event is Extract<AgentSessionEvent, { type: T }> => event.type === type);
 		},
 		tempDir,
-		cleanup() {
-			session.dispose();
-			fauxProvider.unregister();
-			if (existsSync(tempDir)) {
-				rmSync(tempDir, { recursive: true });
+		async cleanup() {
+			const errors: unknown[] = [];
+			try {
+				await session.abortAndDrainAgentEventPersistence();
+			} catch (error) {
+				errors.push(error);
 			}
+			try {
+				session.dispose();
+			} catch (error) {
+				errors.push(error);
+			}
+			try {
+				fauxProvider.unregister();
+			} catch (error) {
+				errors.push(error);
+			}
+			try {
+				if (existsSync(tempDir)) {
+					rmSync(tempDir, { recursive: true });
+				}
+			} catch (error) {
+				errors.push(error);
+			}
+			if (errors.length === 1) throw errors[0];
+			if (errors.length > 1) throw new AggregateError(errors, "Failed to clean up test harness");
 		},
 	};
 }

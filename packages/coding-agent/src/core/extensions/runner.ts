@@ -263,6 +263,12 @@ const noOpUIContext: ExtensionUIContext = {
 	setToolsExpanded: () => {},
 };
 
+export function createDialogExtensionUIContext(
+	overrides: Pick<ExtensionUIContext, "select" | "confirm" | "input" | "notify">,
+): ExtensionUIContext {
+	return { ...noOpUIContext, ...overrides };
+}
+
 export class ExtensionRunner {
 	private extensions: Extension[];
 	private runtime: ExtensionRuntime;
@@ -351,7 +357,7 @@ export class ExtensionRunner {
 				if (providerActions?.registerProvider) {
 					providerActions.registerProvider(name, config);
 				} else {
-					this.modelRegistry.registerProvider(name, config);
+					this.modelRegistry.registerExtensionProvider(name, config);
 				}
 			} catch (err) {
 				this.emitError({
@@ -371,14 +377,14 @@ export class ExtensionRunner {
 				providerActions.registerProvider(name, config);
 				return;
 			}
-			this.modelRegistry.registerProvider(name, config);
+			this.modelRegistry.registerExtensionProvider(name, config);
 		};
 		this.runtime.unregisterProvider = (name) => {
 			if (providerActions?.unregisterProvider) {
 				providerActions.unregisterProvider(name);
 				return;
 			}
-			this.modelRegistry.unregisterProvider(name);
+			this.modelRegistry.unregisterExtensionProvider(name);
 		};
 	}
 

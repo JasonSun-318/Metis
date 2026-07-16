@@ -4,7 +4,12 @@ import { join } from "node:path";
 import { setKeybindings } from "@arcmind/tui";
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { KeybindingsManager } from "../src/core/keybindings.ts";
-import { getSessionImageDir, type SessionInfo, SessionManager } from "../src/core/session-manager.ts";
+import {
+	getSessionImageDir,
+	getSessionToolOutputDir,
+	type SessionInfo,
+	SessionManager,
+} from "../src/core/session-manager.ts";
 import { deleteSessionFile, SessionSelectorComponent } from "../src/modes/interactive/components/session-selector.ts";
 import { initTheme } from "../src/modes/interactive/theme/theme.ts";
 import { assistantMsg } from "./utilities.ts";
@@ -33,6 +38,17 @@ async function flushPromises(): Promise<void> {
 
 function stripAnsi(text: string): string {
 	return text.replace(/\x1B\[[0-?]*[ -/]*[@-~]/g, "");
+}
+
+async function withoutTrash<T>(callback: () => Promise<T>): Promise<T> {
+	const previousPath = process.env.PATH;
+	process.env.PATH = "";
+	try {
+		return await callback();
+	} finally {
+		if (previousPath === undefined) delete process.env.PATH;
+		else process.env.PATH = previousPath;
+	}
 }
 
 function makeSession(overrides: Partial<SessionInfo> & { id: string }): SessionInfo {
@@ -198,18 +214,97 @@ describe("session selector path/delete interactions", () => {
 		session.appendMessage(assistantMsg("ok"));
 		const sessionFile = session.getSessionFile()!;
 		const imageDir = getSessionImageDir(sessionFile);
-		const previousPath = process.env.PATH;
-		process.env.PATH = "";
+		session.close();
 
-		try {
-			const result = await deleteSessionFile(sessionFile);
-			expect(result).toEqual({ ok: true, method: "unlink", warning: undefined });
-			expect(existsSync(sessionFile)).toBe(false);
-			expect(existsSync(imageDir)).toBe(false);
-		} finally {
-			if (previousPath === undefined) delete process.env.PATH;
-			else process.env.PATH = previousPath;
-		}
+		const result = await withoutTrash(() => deleteSessionFile(sessionFile));
+		expect(result).toEqual({ ok: true, method: "unlink", warning: undefined });
+		expect(existsSync(sessionFile)).toBe(false);
+		expect(existsSync(imageDir)).toBe(false);
+	});
+
+	it("deletes the session tool output directory with the session file", async () => {
+		const baseDir = mkdtempSync(join(tmpdir(), "arcmind-session-delete-tool-output-"));
+		tempDirs.push(baseDir);
+		const session = SessionManager.create(baseDir, baseDir);
+		session.appendMessage(assistantMsg("ok"));
+		const sessionFile = session.getSessionFile()!;
+		const toolOutputDir = getSessionToolOutputDir(sessionFile);
+		mkdirSync(toolOutputDir, { recursive: true });
+		writeFileSync(join(toolOutputDir, "result.txt"), "large result");
+		session.close();
+
+		const result = await withoutTrash(() => deleteSessionFile(sessionFile));
+		expect(result).toEqual({ ok: true, method: "unlink", warning: undefined });
+		expect(existsSync(sessionFile)).toBe(false);
+		expect(existsSync(toolOutputDir)).toBe(false);
+	});
+
+	it("succeeds when the session tool output directory is missing", async () => {
+		const baseDir = mkdtempSync(join(tmpdir(), "arcmind-session-delete-no-tool-output-"));
+		tempDirs.push(baseDir);
+		const session = SessionManager.create(baseDir, baseDir);
+		session.appendMessage(assistantMsg("ok"));
+		const sessionFile = session.getSessionFile()!;
+		const toolOutputDir = getSessionToolOutputDir(sessionFile);
+		session.close();
+
+		const result = await withoutTrash(() => deleteSessionFile(sessionFile));
+		expect(result).toEqual({ ok: true, method: "unlink", warning: undefined });
+		expect(existsSync(sessionFile)).toBe(false);
+		expect(existsSync(toolOutputDir)).toBe(false);
+	});
+
+	it("warns when the session tool output directory cannot be removed", async () => {
+		const baseDir = mkdtempSync(join(tmpdir(), "arcmind-session-delete-tool-output-failure-"));
+		tempDirs.push(baseDir);
+		const session = SessionManager.create(baseDir, baseDir);
+		session.appendMessage(assistantMsg("ok"));
+		const sessionFile = session.getSessionFile()!;
+		const toolOutputRoot = join(baseDir, "tool-results");
+		writeFileSync(toolOutputRoot, "not a directory");
+		session.close();
+
+		const result = await withoutTrash(() => deleteSessionFile(sessionFile));
+		expect(result).toMatchObject({ ok: true, method: "unlink" });
+		expect(result.warning).toContain("tool output");
+		expect(existsSync(sessionFile)).toBe(false);
+		expect(existsSync(toolOutputRoot)).toBe(true);
+	});
+
+	it("removes a tool output directory symlink without deleting its target", async () => {
+		const baseDir = mkdtempSync(join(tmpdir(), "arcmind-session-delete-tool-output-link-"));
+		tempDirs.push(baseDir);
+		const session = SessionManager.create(baseDir, baseDir);
+		session.appendMessage(assistantMsg("ok"));
+		const sessionFile = session.getSessionFile()!;
+		const toolOutputDir = getSessionToolOutputDir(sessionFile);
+		const externalDir = join(baseDir, "external");
+		mkdirSync(join(baseDir, "tool-results"), { recursive: true });
+		mkdirSync(externalDir);
+		const sentinel = join(externalDir, "keep.txt");
+		writeFileSync(sentinel, "keep");
+		symlinkSync(externalDir, toolOutputDir, "dir");
+		session.close();
+
+		const result = await withoutTrash(() => deleteSessionFile(sessionFile));
+		expect(result).toEqual({ ok: true, method: "unlink", warning: undefined });
+		expect(existsSync(sessionFile)).toBe(false);
+		expect(existsSync(toolOutputDir)).toBe(false);
+		expect(existsSync(sentinel)).toBe(true);
+	});
+
+	it("refuses to delete a session while another live writer owns it", async () => {
+		const baseDir = mkdtempSync(join(tmpdir(), "arcmind-session-delete-live-"));
+		tempDirs.push(baseDir);
+		const session = SessionManager.create(baseDir, baseDir);
+		const sessionFile = session.getSessionFile()!;
+
+		const result = await deleteSessionFile(sessionFile);
+
+		expect(result).toMatchObject({ ok: false, method: "unlink" });
+		expect(result.error).toContain("already in use");
+		expect(existsSync(sessionFile)).toBe(true);
+		session.close();
 	});
 
 	it("does not switch scope back to All when All load resolves after toggling back to Current", async () => {

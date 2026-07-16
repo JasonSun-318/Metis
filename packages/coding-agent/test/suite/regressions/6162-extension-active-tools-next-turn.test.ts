@@ -62,7 +62,7 @@ describe("extension active tools next-turn refresh", () => {
 			expect(harness.session.getActiveToolNames()).toEqual(["after_switch"]);
 			expect(providerToolNames).toEqual([["switch_tools"], ["after_switch"]]);
 		} finally {
-			harness.cleanup();
+			await harness.cleanup();
 		}
 	});
 
@@ -118,7 +118,7 @@ describe("extension active tools next-turn refresh", () => {
 			expect(harness.session.getActiveToolNames()).toEqual(["load_more_tools", "after_load"]);
 			expect(addedToolNames).toEqual([["after_load"]]);
 		} finally {
-			harness.cleanup();
+			await harness.cleanup();
 		}
 	});
 
@@ -186,7 +186,7 @@ describe("extension active tools next-turn refresh", () => {
 			expect(providerSystemPrompts[0]).toContain("keep this run override");
 			expect(providerSystemPrompts[1]).toContain("keep this run override");
 		} finally {
-			harness.cleanup();
+			await harness.cleanup();
 		}
 	});
 });

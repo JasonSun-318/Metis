@@ -1,6 +1,6 @@
 import { realpathSync } from "node:fs";
 import { homedir } from "node:os";
-import { isAbsolute, join, resolve as nodeResolvePath, relative, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve as nodeResolvePath, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnProcessSync } from "./child-process.ts";
 
@@ -30,6 +30,34 @@ export function canonicalizePath(path: string): string {
 		return realpathSync(path);
 	} catch {
 		return path;
+	}
+}
+
+/**
+ * Canonicalize a path that may not exist yet by resolving its deepest existing
+ * ancestor first, then reattaching the missing suffix. This keeps paths stable
+ * across aliases such as macOS `/var` -> `/private/var` during durable create.
+ */
+export function canonicalizePathForCreation(path: string): string {
+	const absolutePath = nodeResolvePath(path);
+	const suffix: string[] = [];
+	let candidate = absolutePath;
+
+	while (true) {
+		try {
+			const canonicalAncestor = realpathSync(candidate);
+			return suffix.length === 0 ? canonicalAncestor : join(canonicalAncestor, ...suffix.reverse());
+		} catch (error) {
+			const code =
+				typeof error === "object" && error !== null && "code" in error
+					? String((error as NodeJS.ErrnoException).code)
+					: undefined;
+			if (code !== "ENOENT" && code !== "ENOTDIR") return absolutePath;
+			const parent = dirname(candidate);
+			if (parent === candidate) return absolutePath;
+			suffix.push(basename(candidate));
+			candidate = parent;
+		}
 	}
 }
 

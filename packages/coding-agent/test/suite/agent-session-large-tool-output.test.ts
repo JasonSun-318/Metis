@@ -1,5 +1,5 @@
-import { readFileSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { readFileSync, rmSync } from "node:fs";
+import { dirname } from "node:path";
 import type { AgentTool } from "@arcmind/agent-core";
 import { fauxAssistantMessage, fauxToolCall } from "@arcmind/ai";
 import { Type } from "typebox";
@@ -69,7 +69,7 @@ describe("large external tool output", () => {
 			expect(readFileSync(entry.toolOutput.fullOutputPath, "utf8")).toBe(fullText);
 		} finally {
 			if (outputDir) rmSync(outputDir, { recursive: true, force: true });
-			harness.cleanup();
+			await harness.cleanup();
 		}
 	});
 
@@ -102,7 +102,7 @@ describe("large external tool output", () => {
 			expect(entry?.message.role === "toolResult" ? getMessageText(entry.message) : "").toBe(fullText);
 			expect(providerText).toBe(fullText);
 		} finally {
-			harness.cleanup();
+			await harness.cleanup();
 		}
 	});
 
@@ -120,11 +120,11 @@ describe("large external tool output", () => {
 			},
 		];
 		const harness = await createHarness({ extensionFactories });
+		const getToolOutputDir = harness.sessionManager.getToolOutputDir.bind(harness.sessionManager);
 		try {
-			writeFileSync(join(harness.tempDir, "tool-results"), "block output directory creation");
-			const sessionFile = join(harness.tempDir, "session.jsonl");
-			const getSessionFile = harness.sessionManager.getSessionFile.bind(harness.sessionManager);
-			harness.sessionManager.getSessionFile = () => sessionFile;
+			harness.sessionManager.getToolOutputDir = () => {
+				throw new Error("blocked output directory");
+			};
 			let providerText = "";
 			harness.setResponses([
 				fauxAssistantMessage(fauxToolCall("external_failure", {}), { stopReason: "toolUse" }),
@@ -135,7 +135,6 @@ describe("large external tool output", () => {
 			]);
 
 			await harness.session.prompt("run external tool");
-			harness.sessionManager.getSessionFile = getSessionFile;
 
 			const entry = harness.sessionManager
 				.getEntries()
@@ -144,7 +143,8 @@ describe("large external tool output", () => {
 			expect(entry?.message.role === "toolResult" ? getMessageText(entry.message) : "").toBe(fullText);
 			expect(providerText).toBe(fullText);
 		} finally {
-			harness.cleanup();
+			harness.sessionManager.getToolOutputDir = getToolOutputDir;
+			await harness.cleanup();
 		}
 	});
 });

@@ -20,9 +20,9 @@ function createWaitTool(released: Promise<void>): AgentTool {
 describe("regression #6363: agent settled event and idle waiting", () => {
 	const harnesses: Harness[] = [];
 
-	afterEach(() => {
+	afterEach(async () => {
 		while (harnesses.length > 0) {
-			harnesses.pop()?.cleanup();
+			await harnesses.pop()?.cleanup();
 		}
 	});
 

@@ -9,6 +9,7 @@ import {
 	type Transport,
 } from "@arcmind/ai/compat";
 import { runAgentLoop, runAgentLoopContinue } from "./agent-loop.ts";
+import { consumeQueueReservation, PendingMessageQueue } from "./pending-message-queue.ts";
 import type {
 	AfterToolCallContext,
 	AfterToolCallResult,
@@ -17,10 +18,14 @@ import type {
 	AgentLoopConfig,
 	AgentLoopTurnUpdate,
 	AgentMessage,
+	AgentQueueIdentity,
 	AgentState,
 	AgentTool,
+	BeforeQueueClearContext,
+	BeforeQueueCommitContext,
 	BeforeToolCallContext,
 	BeforeToolCallResult,
+	BeforeToolExecuteContext,
 	PrepareNextTurnContext,
 	QueueMode,
 	StreamFn,
@@ -120,40 +125,12 @@ export interface AgentOptions {
 	toolExecution?: ToolExecutionMode;
 }
 
-class PendingMessageQueue {
-	private messages: AgentMessage[] = [];
-	public mode: QueueMode;
-
-	constructor(mode: QueueMode) {
-		this.mode = mode;
-	}
-
-	enqueue(message: AgentMessage): void {
-		this.messages.push(message);
-	}
-
-	hasItems(): boolean {
-		return this.messages.length > 0;
-	}
-
-	drain(): AgentMessage[] {
-		if (this.mode === "all") {
-			const drained = this.messages.slice();
-			this.messages = [];
-			return drained;
-		}
-
-		const first = this.messages[0];
-		if (!first) {
-			return [];
-		}
-		this.messages = this.messages.slice(1);
-		return [first];
-	}
-
-	clear(): void {
-		this.messages = [];
-	}
+export interface AgentMandatoryRuntimeHooks {
+	beforeRunStart?: () => void;
+	beforeToolExecute?: (context: BeforeToolExecuteContext, signal?: AbortSignal) => Promise<void>;
+	beforeQueueCommit?: (context: BeforeQueueCommitContext, signal?: AbortSignal) => Promise<void>;
+	beforeQueueClear?: (context: BeforeQueueClearContext) => void;
+	beforeProviderRequest?: (signal?: AbortSignal) => Promise<void>;
 }
 
 type ActiveRun = {
@@ -206,6 +183,7 @@ export class Agent {
 	public maxRetryDelayMs?: number;
 	/** Tool execution strategy for assistant messages that contain multiple tool calls. */
 	public toolExecution: ToolExecutionMode;
+	private mandatoryRuntimeHooks?: Readonly<AgentMandatoryRuntimeHooks>;
 
 	constructor(options: AgentOptions = {}) {
 		this._state = createMutableAgentState(options.initialState);
@@ -219,13 +197,19 @@ export class Agent {
 		this.afterToolCall = options.afterToolCall;
 		this.prepareNextTurn = options.prepareNextTurn;
 		this.prepareNextTurnWithContext = options.prepareNextTurnWithContext;
-		this.steeringQueue = new PendingMessageQueue(options.steeringMode ?? "one-at-a-time");
-		this.followUpQueue = new PendingMessageQueue(options.followUpMode ?? "one-at-a-time");
+		this.steeringQueue = new PendingMessageQueue(options.steeringMode ?? "one-at-a-time", "steer");
+		this.followUpQueue = new PendingMessageQueue(options.followUpMode ?? "one-at-a-time", "follow_up");
 		this.sessionId = options.sessionId;
 		this.thinkingBudgets = options.thinkingBudgets;
 		this.transport = options.transport ?? "auto";
 		this.maxRetryDelayMs = options.maxRetryDelayMs;
 		this.toolExecution = options.toolExecution ?? "parallel";
+	}
+
+	/** @internal Installs non-replaceable durability hooks owned by the session runtime. */
+	installMandatoryRuntimeHooks(hooks: AgentMandatoryRuntimeHooks): void {
+		if (this.mandatoryRuntimeHooks) throw new Error("Mandatory agent runtime hooks are already installed");
+		this.mandatoryRuntimeHooks = Object.freeze({ ...hooks });
 	}
 
 	/**
@@ -271,29 +255,34 @@ export class Agent {
 	}
 
 	/** Queue a message to be injected after the current assistant turn finishes. */
-	steer(message: AgentMessage): void {
-		this.steeringQueue.enqueue(message);
+	steer(message: AgentMessage, identity?: AgentQueueIdentity): void {
+		this.steeringQueue.enqueue(message, identity);
 	}
 
 	/** Queue a message to run only after the agent would otherwise stop. */
-	followUp(message: AgentMessage): void {
-		this.followUpQueue.enqueue(message);
+	followUp(message: AgentMessage, identity?: AgentQueueIdentity): void {
+		this.followUpQueue.enqueue(message, identity);
 	}
 
-	/** Remove all queued steering messages. */
+	/** Clear steering; an in-flight reservation is consumed only if its commit hook succeeds. */
 	clearSteeringQueue(): void {
+		this.steeringQueue.assertCanClear((context) => this.mandatoryRuntimeHooks?.beforeQueueClear?.(context));
 		this.steeringQueue.clear();
 	}
 
-	/** Remove all queued follow-up messages. */
+	/** Clear follow-ups; an in-flight reservation is consumed only if its commit hook succeeds. */
 	clearFollowUpQueue(): void {
+		this.followUpQueue.assertCanClear((context) => this.mandatoryRuntimeHooks?.beforeQueueClear?.(context));
 		this.followUpQueue.clear();
 	}
 
 	/** Remove all queued steering and follow-up messages. */
 	clearAllQueues(): void {
-		this.clearSteeringQueue();
-		this.clearFollowUpQueue();
+		const beforeClear = (context: BeforeQueueClearContext) => this.mandatoryRuntimeHooks?.beforeQueueClear?.(context);
+		this.steeringQueue.assertCanClear(beforeClear);
+		this.followUpQueue.assertCanClear(beforeClear);
+		this.steeringQueue.clear();
+		this.followUpQueue.clear();
 	}
 
 	/** Returns true when either queue still contains pending messages. */
@@ -322,19 +311,19 @@ export class Agent {
 
 	/** Clear transcript state, runtime state, and queued messages. */
 	reset(): void {
+		this.clearAllQueues();
 		this._state.messages = [];
 		this._state.isStreaming = false;
 		this._state.streamingMessage = undefined;
 		this._state.pendingToolCalls = new Set<string>();
 		this._state.errorMessage = undefined;
-		this.clearFollowUpQueue();
-		this.clearSteeringQueue();
 	}
 
 	/** Start a new prompt from text, a single message, or a batch of messages. */
 	async prompt(message: AgentMessage | AgentMessage[]): Promise<void>;
 	async prompt(input: string, images?: ImageContent[]): Promise<void>;
 	async prompt(input: string | AgentMessage | AgentMessage[], images?: ImageContent[]): Promise<void> {
+		this.mandatoryRuntimeHooks?.beforeRunStart?.();
 		if (this.activeRun) {
 			throw new Error(
 				"Agent is already processing a prompt. Use steer() or followUp() to queue messages, or wait for completion.",
@@ -346,6 +335,7 @@ export class Agent {
 
 	/** Continue from the current transcript. The last message must be a user or tool-result message. */
 	async continue(): Promise<void> {
+		this.mandatoryRuntimeHooks?.beforeRunStart?.();
 		if (this.activeRun) {
 			throw new Error("Agent is already processing. Wait for completion before continuing.");
 		}
@@ -356,15 +346,13 @@ export class Agent {
 		}
 
 		if (lastMessage.role === "assistant") {
-			const queuedSteering = this.steeringQueue.drain();
-			if (queuedSteering.length > 0) {
-				await this.runPromptMessages(queuedSteering, { skipInitialSteeringPoll: true });
+			if (this.steeringQueue.hasItems()) {
+				await this.runQueuedPrompt(this.steeringQueue, { skipInitialSteeringPoll: true });
 				return;
 			}
 
-			const queuedFollowUps = this.followUpQueue.drain();
-			if (queuedFollowUps.length > 0) {
-				await this.runPromptMessages(queuedFollowUps);
+			if (this.followUpQueue.hasItems()) {
+				await this.runQueuedPrompt(this.followUpQueue);
 				return;
 			}
 
@@ -398,15 +386,34 @@ export class Agent {
 		options: { skipInitialSteeringPoll?: boolean } = {},
 	): Promise<void> {
 		await this.runWithLifecycle(async (signal) => {
-			await runAgentLoop(
-				messages,
-				this.createContextSnapshot(),
-				this.createLoopConfig(options),
-				(event) => this.processEvents(event),
-				signal,
-				this.streamFn,
-			);
+			await this.executePromptMessages(messages, options, signal);
 		});
+	}
+
+	private async runQueuedPrompt(
+		queue: PendingMessageQueue,
+		options: { skipInitialSteeringPoll?: boolean } = {},
+	): Promise<void> {
+		await this.runWithLifecycle(async (signal) => {
+			const messages = await this.consumeQueue(queue, signal);
+			if (messages.length === 0) throw new Error("Queued messages were cleared before they could be committed");
+			await this.executePromptMessages(messages, options, signal);
+		});
+	}
+
+	private async executePromptMessages(
+		messages: AgentMessage[],
+		options: { skipInitialSteeringPoll?: boolean },
+		signal: AbortSignal,
+	): Promise<void> {
+		await runAgentLoop(
+			messages,
+			this.createContextSnapshot(),
+			this.createLoopConfig(options),
+			(event) => this.processEvents(event),
+			signal,
+			this.streamFn,
+		);
 	}
 
 	private async runContinuation(): Promise<void> {
@@ -429,6 +436,27 @@ export class Agent {
 		};
 	}
 
+	private async runBeforeQueueCommit(context: BeforeQueueCommitContext, signal?: AbortSignal): Promise<void> {
+		await this.mandatoryRuntimeHooks?.beforeQueueCommit?.(context, signal);
+	}
+
+	private async runBeforeToolExecute(context: BeforeToolExecuteContext, signal?: AbortSignal): Promise<void> {
+		await this.mandatoryRuntimeHooks?.beforeToolExecute?.(context, signal);
+	}
+
+	private async runBeforeProviderRequest(signal?: AbortSignal): Promise<void> {
+		await this.mandatoryRuntimeHooks?.beforeProviderRequest?.(signal);
+	}
+
+	private async consumeQueue(queue: PendingMessageQueue, signal: AbortSignal): Promise<AgentMessage[]> {
+		return consumeQueueReservation(
+			queue.kind,
+			queue.reserve(),
+			(context, hookSignal) => this.runBeforeQueueCommit(context, hookSignal),
+			signal,
+		);
+	}
+
 	private createLoopConfig(options: { skipInitialSteeringPoll?: boolean } = {}): AgentLoopConfig {
 		let skipInitialSteeringPoll = options.skipInitialSteeringPoll === true;
 		return {
@@ -442,7 +470,10 @@ export class Agent {
 			maxRetryDelayMs: this.maxRetryDelayMs,
 			toolExecution: this.toolExecution,
 			beforeToolCall: this.beforeToolCall,
+			beforeToolExecute: (context, signal) => this.runBeforeToolExecute(context, signal),
 			afterToolCall: this.afterToolCall,
+			beforeQueueCommit: (context, signal) => this.runBeforeQueueCommit(context, signal),
+			beforeProviderRequest: (signal) => this.runBeforeProviderRequest(signal),
 			prepareNextTurn:
 				this.prepareNextTurnWithContext || this.prepareNextTurn
 					? async (context) => {
@@ -455,14 +486,14 @@ export class Agent {
 			convertToLlm: this.convertToLlm,
 			transformContext: this.transformContext,
 			getApiKey: this.getApiKey,
-			getSteeringMessages: async () => {
+			reserveSteeringMessages: () => {
 				if (skipInitialSteeringPoll) {
 					skipInitialSteeringPoll = false;
-					return [];
+					return undefined;
 				}
-				return this.steeringQueue.drain();
+				return this.steeringQueue.reserve();
 			},
-			getFollowUpMessages: async () => this.followUpQueue.drain(),
+			reserveFollowUpMessages: () => this.followUpQueue.reserve(),
 		};
 	}
 

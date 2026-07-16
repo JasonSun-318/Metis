@@ -3,7 +3,14 @@ import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
-import { canonicalizePath, getCwdRelativePath, isLocalPath, normalizePath, resolvePath } from "../src/utils/paths.ts";
+import {
+	canonicalizePath,
+	canonicalizePathForCreation,
+	getCwdRelativePath,
+	isLocalPath,
+	normalizePath,
+	resolvePath,
+} from "../src/utils/paths.ts";
 
 let tempDir: string;
 
@@ -59,6 +66,20 @@ describe("canonicalizePath", () => {
 		symlinkSync(target, link);
 		// realpathSync would throw, so canonicalizePath returns the link path.
 		expect(canonicalizePath(link)).toBe(link);
+	});
+});
+
+describe("canonicalizePathForCreation", () => {
+	it("resolves a symlinked existing ancestor beneath a missing suffix", () => {
+		const dir = createTempDir();
+		const targetDir = join(dir, "target-dir");
+		const linkDir = join(dir, "link-dir");
+		mkdirSync(targetDir);
+		symlinkSync(targetDir, linkDir, "dir");
+
+		expect(canonicalizePathForCreation(join(linkDir, "missing", "session.jsonl"))).toBe(
+			join(realpathSync(targetDir), "missing", "session.jsonl"),
+		);
 	});
 });
 

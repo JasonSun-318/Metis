@@ -12,6 +12,7 @@ import {
 import { AuthStorage } from "../src/core/auth-storage.ts";
 import { SessionManager } from "../src/core/session-manager.ts";
 import type {
+	ExtensionAPI,
 	ExtensionFactory,
 	SessionBeforeForkEvent,
 	SessionBeforeSwitchEvent,
@@ -49,7 +50,27 @@ describe("AgentSessionRuntime session lifecycle events", () => {
 			authStorage,
 			model: faux.getModel(),
 			resourceLoaderOptions: {
-				extensionFactories: [extensionFactory],
+				extensionFactories: [
+					(arcmind: ExtensionAPI) => {
+						arcmind.registerProvider(faux.getModel().provider, {
+							baseUrl: faux.getModel().baseUrl,
+							apiKey: "faux-key",
+							api: faux.api,
+							streamSimple: faux.streamSimple,
+							models: faux.models.map((model) => ({
+								id: model.id,
+								name: model.name,
+								api: model.api,
+								reasoning: model.reasoning,
+								input: model.input,
+								cost: model.cost,
+								contextWindow: model.contextWindow,
+								maxTokens: model.maxTokens,
+							})),
+						});
+					},
+					extensionFactory,
+				],
 				noSkills: true,
 				noPromptTemplates: true,
 				noThemes: true,

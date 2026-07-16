@@ -40,19 +40,26 @@ describe("JSONL image export and import", () => {
 		const destinationDir = join(tempDir, "imported-sessions");
 		mkdirSync(destinationDir);
 		let imported: SessionManager | undefined;
-		const runtime = {
-			session: { sessionManager: { getSessionDir: () => destinationDir }, sessionFile: undefined },
-			cwd: tempDir,
-			services: { agentDir: tempDir },
+		const importedManagers: SessionManager[] = [];
+		const runtime = Object.assign(Object.create(AgentSessionRuntime.prototype), {
+			_session: {
+				sessionManager: { getSessionDir: () => destinationDir },
+				sessionFile: undefined,
+				assertCanDrainAgentEventPersistence: () => {},
+			},
+			_services: { cwd: tempDir, agentDir: tempDir },
+			disposeRequested: false,
+			lifecycleTail: Promise.resolve(),
 			emitBeforeSwitch: async () => ({ cancelled: false }),
 			teardownCurrent: async () => {},
 			createRuntime: async ({ sessionManager }: { sessionManager: SessionManager }) => {
 				imported = sessionManager;
+				importedManagers.push(sessionManager);
 				return {};
 			},
 			apply: () => {},
 			finishSessionReplacement: async () => {},
-		} as unknown as AgentSessionRuntime;
+		}) as AgentSessionRuntime;
 
 		await AgentSessionRuntime.prototype.importFromJsonl.call(runtime, exportPath);
 
@@ -73,5 +80,10 @@ describe("JSONL image export and import", () => {
 		const sameDirectoryStored = readFileSync(sameDirectoryPath, "utf8");
 		expect(sameDirectoryStored).toContain('"type":"image_ref"');
 		expect(sameDirectoryStored).not.toContain(data);
+
+		for (const sessionManager of importedManagers) {
+			sessionManager.close();
+		}
+		source.close();
 	});
 });

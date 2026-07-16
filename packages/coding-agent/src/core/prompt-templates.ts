@@ -1,8 +1,10 @@
-import { existsSync, readdirSync, readFileSync, statSync } from "fs";
+import { existsSync, readdirSync, statSync } from "fs";
 import { basename, dirname, join, resolve, sep } from "path";
 import { CONFIG_DIR_NAME } from "../config.ts";
 import { parseFrontmatter } from "../utils/frontmatter.ts";
 import { resolvePath } from "../utils/paths.ts";
+import { readBoundedUtf8FileSync } from "./bounded-text-file.ts";
+import { MAX_DURABLE_PROMPT_TEXT_BYTES } from "./runtime-recovery.ts";
 import { createSyntheticSourceInfo, type SourceInfo } from "./source-info.ts";
 
 /**
@@ -71,38 +73,55 @@ export function substituteArgs(content: string, args: string[]): string {
 
 	return content.replace(
 		/\$\{(\d+):-([^}]*)\}|\$\{@:(\d+)(?::(\d+))?\}|\$(ARGUMENTS|@|\d+)/g,
-		(_match, defaultNum, defaultValue, sliceStart, sliceLength, simple) => {
-			if (defaultNum) {
-				const index = parseInt(defaultNum, 10) - 1;
-				const value = args[index];
-				return value ? value : defaultValue;
-			}
-
-			if (sliceStart) {
-				let start = parseInt(sliceStart, 10) - 1; // Convert to 0-indexed (user provides 1-indexed)
-				// Treat 0 as 1 (bash convention: args start at 1)
-				if (start < 0) start = 0;
-
-				if (sliceLength) {
-					const length = parseInt(sliceLength, 10);
-					return args.slice(start, start + length).join(" ");
-				}
-				return args.slice(start).join(" ");
-			}
-
-			if (simple === "ARGUMENTS" || simple === "@") {
-				return allArgs;
-			}
-
-			const index = parseInt(simple, 10) - 1;
-			return args[index] ?? "";
-		},
+		(_match, defaultNum, defaultValue, sliceStart, sliceLength, simple) =>
+			resolveTemplateReplacement(args, allArgs, defaultNum, defaultValue, sliceStart, sliceLength, simple),
 	);
+}
+
+function resolveTemplateReplacement(
+	args: string[],
+	allArgs: string,
+	defaultNum?: string,
+	defaultValue?: string,
+	sliceStart?: string,
+	sliceLength?: string,
+	simple?: string,
+): string {
+	if (defaultNum) {
+		const value = args[parseInt(defaultNum, 10) - 1];
+		return value ? value : (defaultValue ?? "");
+	}
+	if (sliceStart) {
+		const start = Math.max(0, parseInt(sliceStart, 10) - 1);
+		return sliceLength ? args.slice(start, start + parseInt(sliceLength, 10)).join(" ") : args.slice(start).join(" ");
+	}
+	if (simple === "ARGUMENTS" || simple === "@") return allArgs;
+	return args[parseInt(simple ?? "", 10) - 1] ?? "";
+}
+
+function substituteArgsBounded(content: string, args: string[], maxOutputBytes: number): string {
+	const allArgs = args.join(" ");
+	const pattern = /\$\{(\d+):-([^}]*)\}|\$\{@:(\d+)(?::(\d+))?\}|\$(ARGUMENTS|@|\d+)/g;
+	const chunks: string[] = [];
+	let usedBytes = 0;
+	let previousIndex = 0;
+	const append = (chunk: string) => {
+		usedBytes += Buffer.byteLength(chunk, "utf8");
+		if (usedBytes > maxOutputBytes) throw new Error(`Expanded prompt cannot exceed ${maxOutputBytes} UTF-8 bytes`);
+		chunks.push(chunk);
+	};
+	for (let match = pattern.exec(content); match; match = pattern.exec(content)) {
+		append(content.slice(previousIndex, match.index));
+		append(resolveTemplateReplacement(args, allArgs, match[1], match[2], match[3], match[4], match[5]));
+		previousIndex = pattern.lastIndex;
+	}
+	append(content.slice(previousIndex));
+	return chunks.join("");
 }
 
 function loadTemplateFromFile(filePath: string, sourceInfo: SourceInfo): PromptTemplate | null {
 	try {
-		const rawContent = readFileSync(filePath, "utf-8");
+		const rawContent = readBoundedUtf8FileSync(filePath, MAX_DURABLE_PROMPT_TEXT_BYTES);
 		const { frontmatter, body } = parseFrontmatter<Record<string, string>>(rawContent);
 
 		const name = basename(filePath).replace(/\.md$/, "");
@@ -265,7 +284,7 @@ export function loadPromptTemplates(options: LoadPromptTemplatesOptions): Prompt
  * Expand a prompt template if it matches a template name.
  * Returns the expanded content or the original text if not a template.
  */
-export function expandPromptTemplate(text: string, templates: PromptTemplate[]): string {
+export function expandPromptTemplate(text: string, templates: PromptTemplate[], maxOutputBytes?: number): string {
 	if (!text.startsWith("/")) return text;
 
 	const match = text.match(/^\/([^\s]+)(?:\s+([\s\S]*))?$/);
@@ -277,7 +296,9 @@ export function expandPromptTemplate(text: string, templates: PromptTemplate[]):
 	const template = templates.find((t) => t.name === templateName);
 	if (template) {
 		const args = parseCommandArgs(argsString);
-		return substituteArgs(template.content, args);
+		return maxOutputBytes === undefined
+			? substituteArgs(template.content, args)
+			: substituteArgsBounded(template.content, args, maxOutputBytes);
 	}
 
 	return text;

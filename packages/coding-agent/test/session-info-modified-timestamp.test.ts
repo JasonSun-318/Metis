@@ -17,8 +17,6 @@ function createSessionFile(path: string): void {
 	};
 	writeFileSync(path, `${JSON.stringify(header)}\n`, "utf8");
 
-	// SessionManager only persists once it has seen at least one assistant message.
-	// Add a minimal assistant entry so subsequent appends are persisted.
 	const mgr = SessionManager.open(path);
 	mgr.appendMessage({
 		role: "assistant",
@@ -37,6 +35,7 @@ function createSessionFile(path: string): void {
 		stopReason: "stop",
 		timestamp: Date.now(),
 	});
+	mgr.close();
 }
 
 describe("SessionInfo.modified", () => {
@@ -79,5 +78,6 @@ describe("SessionInfo.modified", () => {
 		expect(s).toBeDefined();
 		expect(s!.modified.getTime()).toBe(msgTime);
 		expect(s!.modified.getTime()).not.toBe(before.mtime.getTime());
+		mgr.close();
 	});
 });

@@ -2,24 +2,29 @@ import { type AgentMessage, uuidv7 } from "@arcmind/agent-core";
 import type { ImageContent, Message, TextContent } from "@arcmind/ai";
 import { createHash, randomUUID } from "crypto";
 import {
-	appendFileSync,
 	closeSync,
-	createReadStream,
 	existsSync,
-	mkdirSync,
+	constants as fsConstants,
+	fstatSync,
+	lstatSync,
 	openSync,
 	readdirSync,
-	readFileSync,
 	readSync,
+	renameSync,
 	statSync,
-	writeFileSync,
 } from "fs";
-import { readdir, stat } from "fs/promises";
-import { dirname, isAbsolute, join, relative, resolve, sep } from "path";
-import { createInterface } from "readline";
-import { StringDecoder } from "string_decoder";
+import { lstat, open, readdir } from "fs/promises";
+import { dirname, isAbsolute, join, parse, relative, resolve, sep } from "path";
+import { setImmediate as yieldToEventLoop } from "timers/promises";
+import { TextDecoder } from "util";
 import { getAgentDir as getDefaultAgentDir, getSessionsDir } from "../config.ts";
-import { encodePathForStorage, normalizePath, resolvePath } from "../utils/paths.ts";
+import { canonicalizePathForCreation, encodePathForStorage, normalizePath, resolvePath } from "../utils/paths.ts";
+import {
+	createFileAtomicallySync,
+	ensureDirectoryDurablySync,
+	ensureRealDirectoryDurablySync,
+	syncDirectorySync,
+} from "./durable-file.ts";
 import type { PersistedToolOutput } from "./large-tool-output.ts";
 import {
 	type BashExecutionMessage,
@@ -28,13 +33,34 @@ import {
 	createCompactionSummaryMessage,
 	createCustomMessage,
 } from "./messages.ts";
+import {
+	type DurableImageRef,
+	isRuntimeControlEntryType,
+	MAX_DURABLE_IMAGE_BYTES,
+	MAX_DURABLE_PROMPT_IMAGE_BYTES,
+	MAX_DURABLE_PROMPT_IMAGES,
+	parseRuntimeControlEntry,
+	type RuntimeControlEntry,
+} from "./runtime-recovery.ts";
+import { CorruptSessionError, openSessionJournal, type SessionJournal } from "./session-journal.ts";
+import { SessionLease, SessionLeaseError } from "./session-lease.ts";
 
-export const CURRENT_SESSION_VERSION = 4;
+export const CURRENT_SESSION_VERSION = 5;
 
 interface ImageReference {
 	type: "image_ref";
 	hash: string;
 	mimeType: string;
+	size?: number;
+}
+
+// Legacy transcripts may contain larger refs than the app prompt contract.
+// Keep one bounded compatibility budget; larger attachments need a streaming seam.
+const MAX_SESSION_IMAGE_BLOB_BYTES = 64 * 1024 * 1024;
+
+interface ImageReadBudget {
+	used: number;
+	readonly limit: number;
 }
 
 function imageExtension(mimeType: string): string | undefined {
@@ -50,15 +76,25 @@ function imageExtension(mimeType: string): string | undefined {
 	}
 }
 
-function getSessionAssetDir(sessionFile: string, assetName: "images" | "tool-results"): string {
-	const resolvedFile = normalizePath(sessionFile);
-	const defaultSessionsDir = normalizePath(getSessionsDir());
+function canonicalPath(filePath: string): string {
+	return canonicalizePathForCreation(filePath);
+}
+
+function getSessionAssetDirFromStoragePath(storagePath: string, assetName: "images" | "tool-results"): string {
+	const resolvedFile = resolve(storagePath);
+	const defaultSessionsDir = canonicalPath(getSessionsDir());
 	const relativePath = relative(defaultSessionsDir, resolvedFile);
 	const isDefaultSession =
 		relativePath !== "" && relativePath !== ".." && !relativePath.startsWith(`..${sep}`) && !isAbsolute(relativePath);
-	const assetRoot = isDefaultSession ? join(getDefaultAgentDir(), assetName) : join(dirname(resolvedFile), assetName);
+	const assetRoot = isDefaultSession
+		? join(canonicalPath(getDefaultAgentDir()), assetName)
+		: join(dirname(resolvedFile), assetName);
 	const sessionKey = createHash("sha256").update(resolve(resolvedFile)).digest("hex");
 	return join(assetRoot, sessionKey);
+}
+
+function getSessionAssetDir(sessionFile: string, assetName: "images" | "tool-results"): string {
+	return getSessionAssetDirFromStoragePath(canonicalPath(sessionFile), assetName);
 }
 
 export function getSessionImageDir(sessionFile: string): string {
@@ -67,6 +103,62 @@ export function getSessionImageDir(sessionFile: string): string {
 
 export function getSessionToolOutputDir(sessionFile: string): string {
 	return getSessionAssetDir(sessionFile, "tool-results");
+}
+
+/**
+ * Move one persisted session while holding its writer lease.
+ *
+ * The caller is responsible for constraining both paths to its catalog roots.
+ * This primitive rejects aliases and replacement races, publishes the move with
+ * one filesystem rename, and syncs both parent directories before returning.
+ */
+export function moveSessionFileWithLease(sourcePath: string, destinationPath: string): void {
+	const unresolvedSource = resolvePath(sourcePath);
+	const unresolvedDestination = resolvePath(destinationPath);
+	const sourceBeforeCanonicalization = lstatSync(unresolvedSource);
+	if (!sourceBeforeCanonicalization.isFile() || sourceBeforeCanonicalization.nlink !== 1) {
+		throw new Error("Session source must be a single-link regular file");
+	}
+
+	const source = canonicalPath(unresolvedSource);
+	const destination = canonicalPath(unresolvedDestination);
+	if (source === destination) throw new Error("Session source and destination must differ");
+	try {
+		lstatSync(destination);
+		throw new Error("Session destination already exists");
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+	}
+
+	const destinationDirectory = dirname(destination);
+	ensureRealDirectoryDurablySync(destinationDirectory);
+	const expected = lstatSync(source);
+	if (!expected.isFile() || expected.nlink !== 1) {
+		throw new Error("Session source must be a single-link regular file");
+	}
+
+	const lease = SessionLease.acquire(source);
+	try {
+		lease.withWritePermit(() => {
+			const current = lstatSync(source);
+			if (!current.isFile() || current.nlink !== 1 || current.dev !== expected.dev || current.ino !== expected.ino) {
+				throw new Error("Session source changed before it could be moved");
+			}
+			try {
+				lstatSync(destination);
+				throw new Error("Session destination already exists");
+			} catch (error) {
+				if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+			}
+
+			renameSync(source, destination);
+			const sourceDirectory = dirname(source);
+			syncDirectorySync(sourceDirectory);
+			if (destinationDirectory !== sourceDirectory) syncDirectorySync(destinationDirectory);
+		});
+	} finally {
+		lease.close();
+	}
 }
 
 function getImageStoreDir(sessionFile: string): string {
@@ -83,14 +175,128 @@ function isImageContent(value: unknown): value is ImageContent {
 	);
 }
 
+function containsExternalizableImage(value: unknown): boolean {
+	let found = false;
+	JSON.stringify(value, (_key, candidate) => {
+		if (found || !isImageContent(candidate) || !imageExtension(candidate.mimeType)) return candidate;
+		try {
+			const size = Buffer.from(candidate.data, "base64").byteLength;
+			found = size > 0 && size <= MAX_SESSION_IMAGE_BLOB_BYTES;
+		} catch {
+			// The serializer will keep invalid image data inline.
+		}
+		return candidate;
+	});
+	return found;
+}
+
 function isImageReference(value: unknown): value is ImageReference {
 	return (
 		typeof value === "object" &&
 		value !== null &&
 		(value as { type?: unknown }).type === "image_ref" &&
 		typeof (value as { hash?: unknown }).hash === "string" &&
-		typeof (value as { mimeType?: unknown }).mimeType === "string"
+		typeof (value as { mimeType?: unknown }).mimeType === "string" &&
+		((value as { size?: unknown }).size === undefined ||
+			(typeof (value as { size?: unknown }).size === "number" &&
+				Number.isSafeInteger((value as { size: number }).size) &&
+				(value as { size: number }).size > 0))
 	);
+}
+
+function hasImageReferenceTag(value: unknown): value is { type: "image_ref" } {
+	return typeof value === "object" && value !== null && (value as { type?: unknown }).type === "image_ref";
+}
+
+function readOwnedRegularFile(
+	filePath: string,
+	options: { expectedSize?: number; maxBytes?: number; budget?: ImageReadBudget } = {},
+): Buffer {
+	const before = lstatSync(filePath);
+	if (!before.isFile() || before.nlink !== 1) throw new Error("unsafe image asset");
+	const noFollow = typeof fsConstants.O_NOFOLLOW === "number" ? fsConstants.O_NOFOLLOW : 0;
+	const nonBlock = typeof fsConstants.O_NONBLOCK === "number" ? fsConstants.O_NONBLOCK : 0;
+	const fd = openSync(filePath, fsConstants.O_RDONLY | noFollow | nonBlock);
+	try {
+		const opened = fstatSync(fd);
+		const current = lstatSync(filePath);
+		if (
+			!opened.isFile() ||
+			opened.nlink !== 1 ||
+			!current.isFile() ||
+			current.nlink !== 1 ||
+			opened.dev !== current.dev ||
+			opened.ino !== current.ino
+		) {
+			throw new Error("unsafe image asset");
+		}
+		if (options.maxBytes !== undefined && opened.size > options.maxBytes) {
+			throw new Error("image asset exceeds its read limit");
+		}
+		if (options.expectedSize !== undefined && opened.size !== options.expectedSize) {
+			throw new Error("image asset size mismatch");
+		}
+		if (options.budget) {
+			if (options.budget.used + opened.size > options.budget.limit) {
+				throw new Error("image assets exceed their cumulative read limit");
+			}
+			options.budget.used += opened.size;
+		}
+		const bytes = Buffer.alloc(opened.size);
+		let offset = 0;
+		while (offset < bytes.length) {
+			const count = readSync(fd, bytes, offset, bytes.length - offset, offset);
+			if (count === 0) throw new Error("image asset was truncated while reading");
+			offset += count;
+		}
+		const afterOpened = fstatSync(fd);
+		const afterPath = lstatSync(filePath);
+		if (
+			!afterOpened.isFile() ||
+			afterOpened.nlink !== 1 ||
+			!afterPath.isFile() ||
+			afterPath.nlink !== 1 ||
+			afterOpened.dev !== opened.dev ||
+			afterOpened.ino !== opened.ino ||
+			afterOpened.size !== opened.size ||
+			afterPath.dev !== opened.dev ||
+			afterPath.ino !== opened.ino ||
+			afterPath.size !== opened.size
+		) {
+			throw new Error("image asset changed while reading");
+		}
+		return bytes;
+	} finally {
+		closeSync(fd);
+	}
+}
+
+function assertSafeSessionAssetRoot(assetDir: string): void {
+	const assetRoot = dirname(assetDir);
+	try {
+		if (!lstatSync(assetRoot).isDirectory()) {
+			throw new Error(`Session asset root is not a real directory: ${assetRoot}`);
+		}
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+	}
+}
+
+function assertSafeSessionAssetDirectory(assetDir: string): void {
+	assertSafeSessionAssetRoot(assetDir);
+	try {
+		if (!lstatSync(assetDir).isDirectory()) {
+			throw new Error(`Session asset directory is not a real directory: ${assetDir}`);
+		}
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+	}
+}
+
+function ensureSessionAssetDirectory(assetDir: string): void {
+	assertSafeSessionAssetRoot(assetDir);
+	ensureRealDirectoryDurablySync(assetDir);
+	assertSafeSessionAssetDirectory(assetDir);
 }
 
 function externalizeImage(image: ImageContent, imageDir: string): ImageContent | ImageReference {
@@ -99,33 +305,44 @@ function externalizeImage(image: ImageContent, imageDir: string): ImageContent |
 
 	try {
 		const bytes = Buffer.from(image.data, "base64");
-		if (bytes.length === 0) return image;
+		if (bytes.length === 0 || bytes.length > MAX_SESSION_IMAGE_BLOB_BYTES) return image;
 		const hash = createHash("sha256").update(bytes).digest("hex");
-		mkdirSync(imageDir, { recursive: true, mode: 0o700 });
+		ensureSessionAssetDirectory(imageDir);
 		const imagePath = join(imageDir, `${hash}.${extension}`);
 		try {
-			writeFileSync(imagePath, bytes, { flag: "wx", mode: 0o600 });
+			createFileAtomicallySync(imagePath, bytes, { mode: 0o600 });
 		} catch (error) {
 			if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-			const storedBytes = readFileSync(imagePath);
+			const storedBytes = readOwnedRegularFile(imagePath, {
+				expectedSize: bytes.length,
+				maxBytes: MAX_SESSION_IMAGE_BLOB_BYTES,
+			});
 			if (createHash("sha256").update(storedBytes).digest("hex") !== hash) {
 				throw new Error("stored image hash mismatch");
 			}
 		}
-		return { type: "image_ref", hash, mimeType: image.mimeType };
+		return { type: "image_ref", hash, mimeType: image.mimeType, size: bytes.length };
 	} catch {
 		return image;
 	}
 }
 
-function hydrateImage(reference: ImageReference, imageDir: string): ImageContent | TextContent {
+function hydrateImage(
+	reference: ImageReference,
+	imageDir: string,
+	budget: ImageReadBudget,
+): ImageContent | TextContent {
 	const extension = imageExtension(reference.mimeType);
 	if (!extension || !/^[a-f0-9]{64}$/.test(reference.hash)) {
 		return { type: "text", text: "[Image unavailable: invalid image reference]" };
 	}
 
 	try {
-		const bytes = readFileSync(join(imageDir, `${reference.hash}.${extension}`));
+		const bytes = readOwnedRegularFile(join(imageDir, `${reference.hash}.${extension}`), {
+			expectedSize: reference.size,
+			maxBytes: MAX_SESSION_IMAGE_BLOB_BYTES,
+			budget,
+		});
 		if (createHash("sha256").update(bytes).digest("hex") !== reference.hash) throw new Error("hash mismatch");
 		return { type: "image", data: bytes.toString("base64"), mimeType: reference.mimeType };
 	} catch {
@@ -133,9 +350,94 @@ function hydrateImage(reference: ImageReference, imageDir: string): ImageContent
 	}
 }
 
+function visitReferencedImagesStrictly(
+	records: readonly FileEntry[],
+	storagePath: string,
+	visit: (assetKey: string, bytes: Buffer) => void,
+): void {
+	const imageDir = getSessionAssetDirFromStoragePath(storagePath, "images");
+	const visited = new Map<string, number>();
+	const imageBudget: ImageReadBudget = { used: 0, limit: MAX_SESSION_IMAGE_BLOB_BYTES };
+	const pending: unknown[] = [records];
+
+	while (pending.length > 0) {
+		const value = pending.pop();
+		if (typeof value !== "object" || value === null) continue;
+		if ((value as { type?: unknown }).type !== "image_ref") {
+			for (const child of Object.values(value)) pending.push(child);
+			continue;
+		}
+		if (!isImageReference(value)) throw new Error("Invalid image reference");
+
+		const extension = imageExtension(value.mimeType);
+		if (!extension || !/^[a-f0-9]{64}$/.test(value.hash)) {
+			throw new Error("Invalid image reference");
+		}
+		const assetKey = `${value.hash}.${extension}`;
+		const visitedSize = visited.get(assetKey);
+		if (visitedSize !== undefined) {
+			if (value.size !== undefined && value.size !== visitedSize) {
+				throw new Error(`Image asset size mismatch: ${value.hash}`);
+			}
+			continue;
+		}
+
+		assertSafeSessionAssetDirectory(imageDir);
+		const bytes = readOwnedRegularFile(join(imageDir, assetKey), {
+			expectedSize: value.size,
+			maxBytes: MAX_SESSION_IMAGE_BLOB_BYTES,
+			budget: imageBudget,
+		});
+		if (createHash("sha256").update(bytes).digest("hex") !== value.hash) {
+			throw new Error(`Image asset hash mismatch: ${value.hash}`);
+		}
+		visit(assetKey, bytes);
+		visited.set(assetKey, bytes.length);
+	}
+}
+
+function copyReferencedImagesStrictly(
+	records: readonly FileEntry[],
+	sourceStoragePath: string,
+	destinationStoragePath: string,
+): void {
+	const destinationImageDir = getSessionAssetDirFromStoragePath(destinationStoragePath, "images");
+
+	visitReferencedImagesStrictly(records, sourceStoragePath, (assetKey, bytes) => {
+		ensureSessionAssetDirectory(destinationImageDir);
+		const destinationImagePath = join(destinationImageDir, assetKey);
+		try {
+			createFileAtomicallySync(destinationImagePath, bytes, { mode: 0o600 });
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+			const storedBytes = readOwnedRegularFile(destinationImagePath, {
+				expectedSize: bytes.length,
+				maxBytes: MAX_SESSION_IMAGE_BLOB_BYTES,
+			});
+			if (!storedBytes.equals(bytes)) {
+				throw new Error(`Destination image asset mismatch: ${assetKey}`);
+			}
+		}
+	});
+}
+
 export function stringifySessionEntry(entry: unknown, sessionFile: string): string {
 	const imageDir = getImageStoreDir(sessionFile);
+	return stringifySessionEntryWithImageDir(entry, imageDir);
+}
+
+function stringifySessionEntryWithImageDir(entry: unknown, imageDir: string): string {
 	return JSON.stringify(entry, (_key, value) => (isImageContent(value) ? externalizeImage(value, imageDir) : value));
+}
+
+function prepareDurableRecord(record: FileEntry, storagePath: string): FileEntry {
+	return JSON.parse(
+		stringifySessionEntryWithImageDir(record, getSessionAssetDirFromStoragePath(storagePath, "images")),
+	) as FileEntry;
+}
+
+function prepareDurableRecords(records: readonly FileEntry[], storagePath: string): FileEntry[] {
+	return records.map((record) => prepareDurableRecord(record, storagePath));
 }
 
 export interface SessionHeader {
@@ -152,6 +454,10 @@ export interface NewSessionOptions {
 	parentSession?: string;
 }
 
+export interface ImportSessionOptions {
+	destinationMode?: "replace" | "create-exclusive";
+}
+
 export interface SessionEntryBase {
 	type: string;
 	id: string;
@@ -163,6 +469,7 @@ export interface SessionMessageEntry extends SessionEntryBase {
 	type: "message";
 	message: AgentMessage;
 	toolOutput?: PersistedToolOutput;
+	turnId?: string;
 }
 
 export interface ThinkingLevelChangeEntry extends SessionEntryBase {
@@ -258,8 +565,13 @@ export type SessionEntry =
 	| LabelEntry
 	| SessionInfoEntry;
 
-/** Raw file entry (includes header) */
-export type FileEntry = SessionHeader | SessionEntry;
+/** Raw file entry (includes header and journal-only runtime controls). */
+export type FileEntry = SessionHeader | SessionEntry | RuntimeControlEntry;
+
+type RuntimePayload<Entry> = Entry extends RuntimeControlEntry ? Omit<Entry, "id" | "parentId" | "timestamp"> : never;
+
+/** Runtime control data accepted by SessionManager; journal metadata is manager-owned. */
+export type RuntimeControlPayload = RuntimePayload<RuntimeControlEntry>;
 
 /** Tree node for getTree() - defensive copy of session structure */
 export interface SessionTreeNode {
@@ -311,6 +623,41 @@ export type ReadonlySessionManager = Pick<
 	| "getSessionName"
 >;
 
+function deepFreeze<T>(value: T): T {
+	const pending: object[] = [];
+	if (typeof value === "object" && value !== null) pending.push(value);
+	const seen = new WeakSet<object>();
+	while (pending.length > 0) {
+		const current = pending.pop()!;
+		if (seen.has(current)) continue;
+		seen.add(current);
+		for (const child of Object.values(current)) {
+			if (typeof child === "object" && child !== null) pending.push(child);
+		}
+		Object.freeze(current);
+	}
+	return value;
+}
+
+function readonlySessionSnapshot(manager: SessionManager): ReadonlySessionManager {
+	return Object.freeze({
+		getCwd: () => manager.getCwd(),
+		getSessionDir: () => manager.getSessionDir(),
+		getSessionId: () => manager.getSessionId(),
+		getSessionFile: () => manager.getSessionFile(),
+		getLeafId: () => manager.getLeafId(),
+		getLeafEntry: () => manager.getLeafEntry(),
+		getEntry: (id: string) => manager.getEntry(id),
+		getLabel: (id: string) => manager.getLabel(id),
+		getBranch: (fromId?: string) => manager.getBranch(fromId),
+		buildContextEntries: () => manager.buildContextEntries(),
+		getHeader: () => manager.getHeader(),
+		getEntries: () => manager.getEntries(),
+		getTree: () => manager.getTree(),
+		getSessionName: () => manager.getSessionName(),
+	});
+}
+
 function createSessionId(): string {
 	return uuidv7();
 }
@@ -329,8 +676,11 @@ function generateId(byId: { has(id: string): boolean }): string {
 		const id = randomUUID().slice(0, 8);
 		if (!byId.has(id)) return id;
 	}
-	// Fallback to full UUID if somehow we have collisions
-	return randomUUID();
+	for (let i = 0; i < 100; i++) {
+		const id = randomUUID();
+		if (!byId.has(id)) return id;
+	}
+	throw new Error("Unable to generate a unique session record id");
 }
 
 /** Migrate v1 → v2: add id/parentId tree structure. Mutates in place. */
@@ -344,9 +694,11 @@ function migrateV1ToV2(entries: FileEntry[]): void {
 			continue;
 		}
 
-		entry.id = generateId(ids);
-		entry.parentId = prevId;
-		prevId = entry.id;
+		const treeEntry = entry as SessionEntry;
+		treeEntry.id = generateId(ids);
+		ids.add(treeEntry.id);
+		treeEntry.parentId = prevId;
+		prevId = treeEntry.id;
 
 		// Convert firstKeptEntryIndex to firstKeptEntryId for compaction
 		if (entry.type === "compaction") {
@@ -387,6 +739,13 @@ function migrateV3ToV4(entries: FileEntry[]): void {
 	}
 }
 
+/** Migrate v4 → v5: reserve journal-only runtime control records. */
+function migrateV4ToV5(entries: FileEntry[]): void {
+	for (const entry of entries) {
+		if (entry.type === "session") entry.version = 5;
+	}
+}
+
 /**
  * Run all necessary migrations to bring entries to current version.
  * Mutates entries in place. Returns true if any migration was applied.
@@ -394,12 +753,21 @@ function migrateV3ToV4(entries: FileEntry[]): void {
 function migrateToCurrentVersion(entries: FileEntry[]): boolean {
 	const header = entries.find((e) => e.type === "session") as SessionHeader | undefined;
 	const version = header?.version ?? 1;
+	if (
+		version < 5 &&
+		entries.some(
+			(entry) => entry.type !== "session" && typeof entry.type === "string" && entry.type.startsWith("runtime_"),
+		)
+	) {
+		throw new TypeError("Runtime control entries require a v5 session header");
+	}
 
 	if (version >= CURRENT_SESSION_VERSION) return false;
 
 	if (version < 2) migrateV1ToV2(entries);
 	if (version < 3) migrateV2ToV3(entries);
 	if (version < 4) migrateV3ToV4(entries);
+	if (version < 5) migrateV4ToV5(entries);
 
 	return true;
 }
@@ -412,18 +780,14 @@ export function migrateSessionEntries(entries: FileEntry[]): void {
 /** Exported for compaction.test.ts */
 export function parseSessionEntries(content: string): FileEntry[] {
 	const entries: FileEntry[] = [];
-	const lines = content.trim().split("\n");
-
-	for (const line of lines) {
+	for (const line of content.trim().split("\n")) {
 		if (!line.trim()) continue;
 		try {
-			const entry = JSON.parse(line) as FileEntry;
-			entries.push(entry);
+			entries.push(JSON.parse(line) as FileEntry);
 		} catch {
-			// Skip malformed lines
+			// Keep this compatibility parser tolerant; durable reads use SessionJournal.
 		}
 	}
-
 	return entries;
 }
 
@@ -594,88 +958,334 @@ function getDefaultSessionDirPath(cwd: string, agentDir: string = getDefaultAgen
 
 export function getDefaultSessionDir(cwd: string, agentDir: string = getDefaultAgentDir()): string {
 	const sessionDir = getDefaultSessionDirPath(cwd, agentDir);
-	if (!existsSync(sessionDir)) {
-		mkdirSync(sessionDir, { recursive: true });
-	}
+	ensureDirectoryDurablySync(sessionDir);
 	return sessionDir;
 }
 
-const SESSION_READ_BUFFER_SIZE = 1024 * 1024;
+interface PreparedRecords {
+	records: FileEntry[];
+	migrated: boolean;
+}
 
-function parseSessionEntryLine(line: string, imageDir?: string): FileEntry | null {
-	if (!line.trim()) return null;
+function isJsonObject(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function corruptSession(filePath: string, lineNumber: number, message: string): never {
+	throw new CorruptSessionError(filePath, lineNumber, message);
+}
+
+function validateRawSessionRecord(record: unknown, index: number, filePath: string): Record<string, unknown> {
+	if (!isJsonObject(record) || typeof record.type !== "string" || record.type.length === 0) {
+		corruptSession(filePath, index + 1, "Session record must be a JSON object with a type");
+	}
+	if (index === 0 && record.type !== "session") {
+		corruptSession(filePath, 1, `Session file is not a valid arcmind session: ${filePath}`);
+	}
+	if (index > 0 && record.type === "session") {
+		corruptSession(filePath, index + 1, "Session journal contains more than one header");
+	}
+	return record;
+}
+
+function validateSessionHeader(record: Record<string, unknown>, filePath: string): SessionHeader {
+	const header = record as unknown as SessionHeader;
 	try {
-		return JSON.parse(line, (_key, value) =>
-			imageDir && isImageReference(value) ? hydrateImage(value, imageDir) : value,
-		) as FileEntry;
-	} catch {
-		// Skip malformed lines
-		return null;
+		assertValidSessionId(header.id);
+	} catch (error) {
+		throw new CorruptSessionError(filePath, 1, "Session header has an invalid id", { cause: error });
+	}
+	if (typeof header.timestamp !== "string" || !Number.isFinite(Date.parse(header.timestamp))) {
+		corruptSession(filePath, 1, "Session header has an invalid timestamp");
+	}
+	if (typeof header.cwd !== "string") {
+		corruptSession(filePath, 1, "Session header has an invalid cwd");
+	}
+	if (header.parentSession !== undefined && typeof header.parentSession !== "string") {
+		corruptSession(filePath, 1, "Session header has an invalid parentSession");
+	}
+
+	const version = header.version ?? 1;
+	if (!Number.isInteger(version) || version < 1) {
+		corruptSession(filePath, 1, "Session header has an invalid version");
+	}
+	if (version > CURRENT_SESSION_VERSION) {
+		corruptSession(
+			filePath,
+			1,
+			`Session version ${version} is newer than supported version ${CURRENT_SESSION_VERSION}`,
+		);
+	}
+	return header;
+}
+
+function validateRawSessionRecords(records: readonly unknown[], filePath: string): SessionHeader {
+	if (records.length === 0) corruptSession(filePath, 1, "Session journal is empty");
+	for (let index = 0; index < records.length; index++) {
+		validateRawSessionRecord(records[index], index, filePath);
+	}
+	const header = validateSessionHeader(records[0] as Record<string, unknown>, filePath);
+	const version = header.version ?? 1;
+	for (let index = 1; index < records.length; index++) {
+		const type = (records[index] as { type: string }).type;
+		if (!type.startsWith("runtime_")) continue;
+		if (version < 5) {
+			corruptSession(filePath, index + 1, "Runtime control entries require a v5 session header");
+		}
+		if (!isRuntimeControlEntryType(type)) {
+			corruptSession(filePath, index + 1, `Unknown runtime control entry type: ${type}`);
+		}
+		parseRuntimeRecord(records[index], index + 1, filePath);
+	}
+	return header;
+}
+
+function parseRuntimeRecord(record: unknown, lineNumber: number, filePath: string): RuntimeControlEntry {
+	try {
+		const entry = parseRuntimeControlEntry(record);
+		if (!Number.isFinite(Date.parse(entry.timestamp))) {
+			corruptSession(filePath, lineNumber, `Runtime control entry ${entry.id} has an invalid timestamp`);
+		}
+		return entry;
+	} catch (error) {
+		if (error instanceof CorruptSessionError) throw error;
+		throw new CorruptSessionError(filePath, lineNumber, "Invalid runtime control entry", { cause: error });
 	}
 }
 
-/** Exported for testing */
+function validateRecordId(id: unknown, lineNumber: number, filePath: string, seen: Set<string>): asserts id is string {
+	if (typeof id !== "string" || id.length === 0) {
+		corruptSession(filePath, lineNumber, "Session entry has an invalid id");
+	}
+	if (seen.has(id)) {
+		corruptSession(filePath, lineNumber, `Session entry id is duplicated: ${id}`);
+	}
+}
+
+function validateSessionGraphEntry(
+	entry: SessionEntry,
+	lineNumber: number,
+	filePath: string,
+	seenRecordIds: Set<string>,
+	seenTreeIds: Set<string>,
+): void {
+	validateRecordId(entry.id, lineNumber, filePath, seenRecordIds);
+	if (entry.parentId !== null && (typeof entry.parentId !== "string" || entry.parentId.length === 0)) {
+		corruptSession(filePath, lineNumber, `Session entry ${entry.id} has an invalid parentId`);
+	}
+	if (entry.parentId === entry.id) {
+		corruptSession(filePath, lineNumber, `Session entry ${entry.id} cannot be its own parent`);
+	}
+	if (entry.parentId !== null && !seenTreeIds.has(entry.parentId)) {
+		corruptSession(
+			filePath,
+			lineNumber,
+			`Session entry ${entry.id} references a missing or forward parent: ${entry.parentId}`,
+		);
+	}
+	if (typeof entry.timestamp !== "string" || !Number.isFinite(Date.parse(entry.timestamp))) {
+		corruptSession(filePath, lineNumber, `Session entry ${entry.id} has an invalid timestamp`);
+	}
+	if (entry.type === "label" && (typeof entry.targetId !== "string" || !seenTreeIds.has(entry.targetId))) {
+		corruptSession(filePath, lineNumber, `Label ${entry.id} references an unknown target`);
+	}
+	if (entry.type === "message" && entry.turnId !== undefined && (typeof entry.turnId !== "string" || !entry.turnId)) {
+		corruptSession(filePath, lineNumber, `Session message ${entry.id} has an invalid turnId`);
+	}
+	seenRecordIds.add(entry.id);
+	seenTreeIds.add(entry.id);
+}
+
+function validateRuntimeGraphEntry(
+	entry: RuntimeControlEntry,
+	lineNumber: number,
+	filePath: string,
+	seenRecordIds: Set<string>,
+	seenTreeIds: Set<string>,
+): void {
+	validateRecordId(entry.id, lineNumber, filePath, seenRecordIds);
+	if (entry.parentId !== null && !seenTreeIds.has(entry.parentId)) {
+		corruptSession(
+			filePath,
+			lineNumber,
+			`Runtime control entry ${entry.id} references a missing, forward, or non-tree parent: ${entry.parentId}`,
+		);
+	}
+	seenRecordIds.add(entry.id);
+}
+
+function validateSessionGraph(records: readonly FileEntry[], filePath: string): void {
+	validateRawSessionRecords(records, filePath);
+	const seenRecordIds = new Set<string>();
+	const seenTreeIds = new Set<string>();
+	for (let index = 1; index < records.length; index++) {
+		const record = records[index];
+		if (isRuntimeControlEntryType(record.type)) {
+			validateRuntimeGraphEntry(
+				parseRuntimeRecord(record, index + 1, filePath),
+				index + 1,
+				filePath,
+				seenRecordIds,
+				seenTreeIds,
+			);
+		} else {
+			validateSessionGraphEntry(record as SessionEntry, index + 1, filePath, seenRecordIds, seenTreeIds);
+		}
+	}
+}
+
+function prepareRawSessionRecords(records: readonly unknown[], filePath: string): PreparedRecords {
+	validateRawSessionRecords(records, filePath);
+	const copy = structuredClone(records) as FileEntry[];
+	const migrated = migrateToCurrentVersion(copy);
+	validateSessionGraph(copy, filePath);
+	return { records: copy, migrated };
+}
+
+function hydrateSessionRecords(
+	records: readonly FileEntry[],
+	storagePath: string,
+	imageBudget: ImageReadBudget = { used: 0, limit: MAX_SESSION_IMAGE_BLOB_BYTES },
+): FileEntry[] {
+	const imageDir = getSessionAssetDirFromStoragePath(storagePath, "images");
+	return records.map((record) => {
+		if (isRuntimeControlEntryType(record.type)) return structuredClone(record);
+		return JSON.parse(JSON.stringify(record), (_key, value) => {
+			if (!hasImageReferenceTag(value)) return value;
+			return isImageReference(value)
+				? hydrateImage(value, imageDir, imageBudget)
+				: { type: "text", text: "[Image unavailable: invalid image reference]" };
+		}) as FileEntry;
+	});
+}
+
+function readSessionRecordsReadOnly(
+	filePath: string,
+	options: { allowIncompleteTail?: boolean; followSymlinkAlias?: boolean } = {},
+): PreparedRecords {
+	const journal = openSessionJournal<unknown>(filePath, {
+		readOnly: true,
+		followSymlinkAlias: options.followSymlinkAlias,
+	});
+	try {
+		const { records } = journal.readStrict({
+			repairTail: false,
+			allowIncompleteTail: options.allowIncompleteTail,
+		});
+		return prepareRawSessionRecords(records, filePath);
+	} finally {
+		journal.close();
+	}
+}
+
+function targetContainsDurableSource(
+	targetStoragePath: string,
+	sourceJournalPath: string,
+	sourceAssetStoragePath: string,
+	sourceOptions: { allowIncompleteTail?: boolean; followSymlinkAlias?: boolean } = {},
+): boolean {
+	const sourceRecords = readSessionRecordsReadOnly(sourceJournalPath, sourceOptions).records;
+	return targetContainsDurableRecords(targetStoragePath, sourceRecords, sourceAssetStoragePath);
+}
+
+function recordsStartWith(records: readonly FileEntry[], prefix: readonly FileEntry[]): boolean {
+	return (
+		records.length >= prefix.length &&
+		prefix.every((record, index) => JSON.stringify(record) === JSON.stringify(records[index]))
+	);
+}
+
+function targetContainsDurableRecords(
+	targetStoragePath: string,
+	sourceRecords: readonly FileEntry[],
+	sourceAssetStoragePath: string,
+): boolean {
+	const targetRecords = readSessionRecordsReadOnly(targetStoragePath).records;
+	if (!recordsStartWith(targetRecords, sourceRecords)) return false;
+	visitReferencedImagesStrictly(sourceRecords, sourceAssetStoragePath, () => undefined);
+	visitReferencedImagesStrictly(sourceRecords, targetStoragePath, () => undefined);
+	return true;
+}
+
+/** Strict, read-only load that never acquires a writer lease or repairs the source. */
 export function loadEntriesFromFile(filePath: string): FileEntry[] {
 	const resolvedFilePath = normalizePath(filePath);
-	if (!existsSync(resolvedFilePath)) return [];
-	const imageDir = getImageStoreDir(resolvedFilePath);
-
-	const entries: FileEntry[] = [];
-	const fd = openSync(resolvedFilePath, "r");
-	try {
-		const decoder = new StringDecoder("utf8");
-		const buffer = Buffer.allocUnsafe(SESSION_READ_BUFFER_SIZE);
-		let pending = "";
-
-		while (true) {
-			const bytesRead = readSync(fd, buffer, 0, buffer.length, null);
-			if (bytesRead === 0) break;
-
-			pending += decoder.write(buffer.subarray(0, bytesRead));
-			let lineStart = 0;
-			let newlineIndex = pending.indexOf("\n", lineStart);
-			while (newlineIndex !== -1) {
-				const entry = parseSessionEntryLine(pending.slice(lineStart, newlineIndex), imageDir);
-				if (entry) entries.push(entry);
-				lineStart = newlineIndex + 1;
-				newlineIndex = pending.indexOf("\n", lineStart);
-			}
-			pending = pending.slice(lineStart);
-		}
-
-		pending += decoder.end();
-		const finalEntry = parseSessionEntryLine(pending, imageDir);
-		if (finalEntry) entries.push(finalEntry);
-	} finally {
-		closeSync(fd);
-	}
-
-	// Validate session header
-	if (entries.length === 0) return entries;
-	const header = entries[0];
-	if (header.type !== "session" || typeof (header as { id?: unknown }).id !== "string") {
-		return [];
-	}
-
-	return entries;
+	const storagePath = canonicalPath(resolvedFilePath);
+	if (!existsSync(storagePath) || statSync(storagePath).size === 0) return [];
+	return hydrateSessionRecords(readSessionRecordsReadOnly(storagePath).records, storagePath);
 }
 
-function readSessionHeader(filePath: string): SessionHeader | null {
+const SESSION_READ_BUFFER_BYTES = 64 * 1024;
+const MAX_SESSION_RECORD_BYTES = 64 * 1024 * 1024;
+
+function readSessionHeaderInfo(filePath: string): { header: SessionHeader; mtimeMs: number } | null {
 	try {
-		const fd = openSync(filePath, "r");
-		const buffer = Buffer.alloc(512);
-		const bytesRead = readSync(fd, buffer, 0, 512, 0);
-		closeSync(fd);
-		const firstLine = buffer.toString("utf8", 0, bytesRead).split("\n")[0];
+		const before = lstatSync(filePath);
+		if (!before.isFile() || before.nlink !== 1) return null;
+		const noFollow = typeof fsConstants.O_NOFOLLOW === "number" ? fsConstants.O_NOFOLLOW : 0;
+		const nonBlock = typeof fsConstants.O_NONBLOCK === "number" ? fsConstants.O_NONBLOCK : 0;
+		const fd = openSync(filePath, fsConstants.O_RDONLY | noFollow | nonBlock);
+		const chunks: Buffer[] = [];
+		let totalBytes = 0;
+		let mtimeMs = 0;
+		try {
+			const opened = fstatSync(fd);
+			mtimeMs = opened.mtimeMs;
+			const current = lstatSync(filePath);
+			if (
+				!opened.isFile() ||
+				opened.nlink !== 1 ||
+				!current.isFile() ||
+				current.nlink !== 1 ||
+				before.dev !== opened.dev ||
+				before.ino !== opened.ino ||
+				opened.dev !== current.dev ||
+				opened.ino !== current.ino
+			) {
+				return null;
+			}
+			const buffer = Buffer.allocUnsafe(SESSION_READ_BUFFER_BYTES);
+			while (true) {
+				const bytesRead = readSync(fd, buffer, 0, buffer.byteLength, null);
+				if (bytesRead === 0) return null;
+				const newline = buffer.subarray(0, bytesRead).indexOf(0x0a);
+				const lineBytes = newline === -1 ? bytesRead : newline;
+				if (totalBytes + lineBytes > MAX_SESSION_RECORD_BYTES) return null;
+				chunks.push(Buffer.from(buffer.subarray(0, lineBytes)));
+				totalBytes += lineBytes;
+				if (newline !== -1) break;
+			}
+			const afterOpened = fstatSync(fd);
+			const afterPath = lstatSync(filePath);
+			if (
+				!afterOpened.isFile() ||
+				afterOpened.nlink !== 1 ||
+				!afterPath.isFile() ||
+				afterPath.nlink !== 1 ||
+				afterOpened.dev !== opened.dev ||
+				afterOpened.ino !== opened.ino ||
+				afterPath.dev !== opened.dev ||
+				afterPath.ino !== opened.ino
+			) {
+				return null;
+			}
+		} finally {
+			closeSync(fd);
+		}
+		const firstLine = Buffer.concat(chunks, totalBytes).toString("utf8");
 		if (!firstLine) return null;
 		const header = JSON.parse(firstLine) as Record<string, unknown>;
 		if (header.type !== "session" || typeof header.id !== "string") {
 			return null;
 		}
-		return header as unknown as SessionHeader;
+		return { header: header as unknown as SessionHeader, mtimeMs };
 	} catch {
 		return null;
 	}
+}
+
+function readSessionHeader(filePath: string): SessionHeader | null {
+	return readSessionHeaderInfo(filePath)?.header ?? null;
 }
 
 function getSessionHeaderCwd(header: SessionHeader): string | undefined {
@@ -689,29 +1299,46 @@ function sessionCwdMatches(cwd: string | undefined, resolvedCwd: string): boolea
 
 /** Exported for testing */
 export function findMostRecentSession(sessionDir: string, cwd?: string): string | null {
+	for (const file of findRecentSessionCandidates(sessionDir, cwd)) {
+		try {
+			// A writer can recover a partial final record. Validate the complete
+			// prefix without mutating the candidate.
+			readSessionRecordsReadOnly(file.path, { allowIncompleteTail: true });
+			return file.path;
+		} catch {
+			// Corrupt candidates are isolated; continue to the next valid session.
+		}
+	}
+	return null;
+}
+
+function findRecentSessionCandidates(sessionDir: string, cwd?: string): { path: string; mtimeMs: number }[] {
 	const resolvedSessionDir = normalizePath(sessionDir);
 	const resolvedCwd = cwd ? resolvePath(cwd) : undefined;
 	try {
-		const files = readdirSync(resolvedSessionDir)
-			.filter((f) => f.endsWith(".jsonl"))
-			.map((f) => join(resolvedSessionDir, f))
-			.map((path) => ({ path, header: readSessionHeader(path) }))
+		return readdirSync(resolvedSessionDir)
+			.filter((name) => name.endsWith(".jsonl"))
+			.map((name) => join(resolvedSessionDir, name))
+			.map((path) => ({ path, info: readSessionHeaderInfo(path) }))
 			.filter(
-				(file): file is { path: string; header: SessionHeader } =>
-					file.header !== null &&
-					(!resolvedCwd || sessionCwdMatches(getSessionHeaderCwd(file.header), resolvedCwd)),
+				(candidate): candidate is { path: string; info: { header: SessionHeader; mtimeMs: number } } =>
+					candidate.info !== null &&
+					(!resolvedCwd || sessionCwdMatches(getSessionHeaderCwd(candidate.info.header), resolvedCwd)),
 			)
-			.map(({ path }) => ({ path, mtime: statSync(path).mtime }))
-			.sort((a, b) => b.mtime.getTime() - a.mtime.getTime());
-
-		return files[0]?.path || null;
+			.map(({ path, info }) => ({ path, mtimeMs: info.mtimeMs }))
+			.sort((a, b) => b.mtimeMs - a.mtimeMs);
 	} catch {
-		return null;
+		return [];
 	}
 }
 
-function isMessageWithContent(message: AgentMessage): message is Message {
-	return typeof (message as Message).role === "string" && "content" in message;
+function isMessageWithContent(message: unknown): message is Message {
+	return (
+		typeof message === "object" &&
+		message !== null &&
+		typeof (message as Message).role === "string" &&
+		"content" in message
+	);
 }
 
 function extractTextContent(message: Message): string {
@@ -739,80 +1366,215 @@ function getMessageActivityTime(entry: SessionMessageEntry): number | undefined 
 	return Number.isNaN(t) ? undefined : t;
 }
 
-async function buildSessionInfo(filePath: string): Promise<SessionInfo | null> {
+const SESSION_CATALOG_YIELD_BYTES = 1024 * 1024;
+const fatalUtf8Decoder = new TextDecoder("utf-8", { fatal: true });
+
+interface SessionCatalogState {
+	header?: SessionHeader;
+	seenRecordIds: Set<string>;
+	seenTreeIds: Set<string>;
+	messageCount: number;
+	firstMessage: string;
+	allMessages: string[];
+	name?: string;
+	lastActivityTime?: number;
+}
+
+function parseCatalogRecord(bytes: Buffer, filePath: string, lineNumber: number): unknown {
+	let line: string;
 	try {
-		const stats = await stat(filePath);
-		let header: SessionHeader | null = null;
-		let messageCount = 0;
-		let firstMessage = "";
-		const allMessages: string[] = [];
-		let name: string | undefined;
-		let lastActivityTime: number | undefined;
+		line = fatalUtf8Decoder.decode(bytes);
+	} catch (error) {
+		throw new CorruptSessionError(filePath, lineNumber, "Journal record is not valid UTF-8", { cause: error });
+	}
+	if (line.trim().length === 0) {
+		corruptSession(filePath, lineNumber, "Journal contains an empty complete record");
+	}
+	try {
+		return JSON.parse(line) as unknown;
+	} catch (error) {
+		throw new CorruptSessionError(filePath, lineNumber, "Malformed complete journal record", { cause: error });
+	}
+}
 
-		const rl = createInterface({
-			input: createReadStream(filePath, { encoding: "utf8" }),
-			crlfDelay: Infinity,
-		});
+function addCatalogRecord(state: SessionCatalogState, record: unknown, index: number, filePath: string): void {
+	const raw = validateRawSessionRecord(record, index, filePath);
+	if (index === 0) {
+		state.header = validateSessionHeader(raw, filePath);
+		return;
+	}
 
-		for await (const line of rl) {
-			const entry = parseSessionEntryLine(line);
-			if (!entry) continue;
+	const header = state.header;
+	if (!header) corruptSession(filePath, 1, "Session journal is empty");
+	const type = raw.type as string;
+	if (type.startsWith("runtime_")) {
+		if ((header.version ?? 1) < 5) {
+			corruptSession(filePath, index + 1, "Runtime control entries require a v5 session header");
+		}
+		if (!isRuntimeControlEntryType(type)) {
+			corruptSession(filePath, index + 1, `Unknown runtime control entry type: ${type}`);
+		}
+		validateRuntimeGraphEntry(
+			parseRuntimeRecord(raw, index + 1, filePath),
+			index + 1,
+			filePath,
+			state.seenRecordIds,
+			state.seenTreeIds,
+		);
+		return;
+	}
+	const entry = raw as unknown as SessionEntry;
+	if ((header.version ?? 1) === 1) {
+		if (typeof entry.timestamp !== "string" || !Number.isFinite(Date.parse(entry.timestamp))) {
+			corruptSession(filePath, index + 1, "Session entry has an invalid timestamp");
+		}
+		if (entry.type === "label") {
+			corruptSession(filePath, index + 1, "Legacy session label references an unknown target");
+		}
+	} else {
+		validateSessionGraphEntry(entry, index + 1, filePath, state.seenRecordIds, state.seenTreeIds);
+	}
 
-			if (!header) {
-				if (entry.type !== "session") return null;
-				header = entry;
-				continue;
+	if (entry.type === "session_info") {
+		if (entry.name !== undefined && typeof entry.name !== "string") {
+			corruptSession(filePath, index + 1, "Session name must be a string");
+		}
+		state.name = entry.name?.trim() || undefined;
+	}
+	if (entry.type !== "message") return;
+	state.messageCount++;
+
+	const activityTime = getMessageActivityTime(entry);
+	if (typeof activityTime === "number") {
+		state.lastActivityTime = Math.max(state.lastActivityTime ?? 0, activityTime);
+	}
+	const message = entry.message;
+	if (!isMessageWithContent(message) || (message.role !== "user" && message.role !== "assistant")) return;
+	const textContent = extractTextContent(message);
+	if (!textContent) return;
+	state.allMessages.push(textContent);
+	if (!state.firstMessage && message.role === "user") state.firstMessage = textContent;
+}
+
+async function scanSessionCatalog(filePath: string): Promise<{ state: SessionCatalogState; mtime: Date }> {
+	const before = await lstat(filePath);
+	if (!before.isFile() || before.nlink !== 1) throw new Error(`Unsafe session catalog file: ${filePath}`);
+	const noFollow = typeof fsConstants.O_NOFOLLOW === "number" ? fsConstants.O_NOFOLLOW : 0;
+	const nonBlock = typeof fsConstants.O_NONBLOCK === "number" ? fsConstants.O_NONBLOCK : 0;
+	const handle = await open(filePath, fsConstants.O_RDONLY | noFollow | nonBlock);
+	try {
+		const opened = await handle.stat();
+		const current = await lstat(filePath);
+		if (
+			!opened.isFile() ||
+			opened.nlink !== 1 ||
+			!current.isFile() ||
+			current.nlink !== 1 ||
+			before.dev !== opened.dev ||
+			before.ino !== opened.ino ||
+			opened.dev !== current.dev ||
+			opened.ino !== current.ino
+		) {
+			throw new Error(`Unsafe session catalog file: ${filePath}`);
+		}
+
+		const state: SessionCatalogState = {
+			seenRecordIds: new Set(),
+			seenTreeIds: new Set(),
+			messageCount: 0,
+			firstMessage: "",
+			allMessages: [],
+		};
+		const pending: Buffer[] = [];
+		let pendingBytes = 0;
+		let position = 0;
+		let lineNumber = 1;
+		let bytesSinceYield = 0;
+		const readBuffer = Buffer.allocUnsafe(SESSION_READ_BUFFER_BYTES);
+
+		while (position < opened.size) {
+			const length = Math.min(readBuffer.byteLength, opened.size - position);
+			const { bytesRead } = await handle.read(readBuffer, 0, length, position);
+			if (bytesRead === 0) throw new Error(`Session catalog snapshot was truncated: ${filePath}`);
+			position += bytesRead;
+			bytesSinceYield += bytesRead;
+			const chunk = readBuffer.subarray(0, bytesRead);
+			let segmentStart = 0;
+			let lineEnd = chunk.indexOf(0x0a);
+			while (lineEnd !== -1) {
+				const segment = chunk.subarray(segmentStart, lineEnd);
+				const lineBytes = pendingBytes + segment.byteLength;
+				if (lineBytes > MAX_SESSION_RECORD_BYTES) {
+					corruptSession(filePath, lineNumber, `Journal record exceeds ${MAX_SESSION_RECORD_BYTES} byte limit`);
+				}
+				const bytes = pendingBytes === 0 ? segment : Buffer.concat([...pending, segment], lineBytes);
+				addCatalogRecord(state, parseCatalogRecord(bytes, filePath, lineNumber), lineNumber - 1, filePath);
+				pending.length = 0;
+				pendingBytes = 0;
+				lineNumber++;
+				segmentStart = lineEnd + 1;
+				lineEnd = chunk.indexOf(0x0a, segmentStart);
 			}
 
-			// Extract session name (use latest, including explicit clears)
-			if (entry.type === "session_info") {
-				name = entry.name?.trim() || undefined;
+			const remainder = chunk.subarray(segmentStart);
+			if (remainder.byteLength > 0) {
+				if (pendingBytes + remainder.byteLength > MAX_SESSION_RECORD_BYTES) {
+					corruptSession(filePath, lineNumber, `Journal record exceeds ${MAX_SESSION_RECORD_BYTES} byte limit`);
+				}
+				pending.push(Buffer.from(remainder));
+				pendingBytes += remainder.byteLength;
 			}
-
-			if (entry.type !== "message") continue;
-			messageCount++;
-
-			const activityTime = getMessageActivityTime(entry);
-			if (typeof activityTime === "number") {
-				lastActivityTime = Math.max(lastActivityTime ?? 0, activityTime);
-			}
-
-			const message = entry.message;
-			if (!isMessageWithContent(message)) continue;
-			if (message.role !== "user" && message.role !== "assistant") continue;
-
-			const textContent = extractTextContent(message);
-			if (!textContent) continue;
-
-			allMessages.push(textContent);
-			if (!firstMessage && message.role === "user") {
-				firstMessage = textContent;
+			if (bytesSinceYield >= SESSION_CATALOG_YIELD_BYTES) {
+				bytesSinceYield = 0;
+				await yieldToEventLoop();
 			}
 		}
 
-		if (!header) return null;
+		if (!state.header) corruptSession(filePath, 1, "Session journal is empty");
+		// A writer may have crashed mid-record. Catalog reads ignore only this
+		// incomplete final tail; every newline-terminated record was parsed strictly.
+		const afterOpened = await handle.stat();
+		const afterPath = await lstat(filePath);
+		if (
+			!afterOpened.isFile() ||
+			afterOpened.nlink !== 1 ||
+			!afterPath.isFile() ||
+			afterPath.nlink !== 1 ||
+			afterOpened.dev !== opened.dev ||
+			afterOpened.ino !== opened.ino ||
+			afterPath.dev !== opened.dev ||
+			afterPath.ino !== opened.ino
+		) {
+			throw new Error(`Session catalog file changed identity during scan: ${filePath}`);
+		}
+		return { state, mtime: opened.mtime };
+	} finally {
+		await handle.close();
+	}
+}
 
-		const cwd = typeof header.cwd === "string" ? header.cwd : "";
-		const parentSessionPath = header.parentSession;
-		const headerTime = typeof header.timestamp === "string" ? new Date(header.timestamp).getTime() : NaN;
+async function buildSessionInfo(filePath: string): Promise<SessionInfo | null> {
+	try {
+		const { state, mtime } = await scanSessionCatalog(filePath);
+		const header = state.header!;
+		const headerTime = new Date(header.timestamp).getTime();
 		const modified =
-			typeof lastActivityTime === "number" && lastActivityTime > 0
-				? new Date(lastActivityTime)
+			typeof state.lastActivityTime === "number" && state.lastActivityTime > 0
+				? new Date(state.lastActivityTime)
 				: !Number.isNaN(headerTime)
 					? new Date(headerTime)
-					: stats.mtime;
-
+					: mtime;
 		return {
 			path: filePath,
 			id: header.id,
-			cwd,
-			name,
-			parentSessionPath,
+			cwd: header.cwd,
+			name: state.name,
+			parentSessionPath: header.parentSession,
 			created: new Date(header.timestamp),
 			modified,
-			messageCount,
-			firstMessage: firstMessage || "(no messages)",
-			allMessagesText: allMessages.join(" "),
+			messageCount: state.messageCount,
+			firstMessage: state.firstMessage || "(no messages)",
+			allMessagesText: state.allMessages.join(" "),
 		};
 	} catch {
 		return null;
@@ -896,6 +1658,256 @@ async function listSessionsFromDir(
 	return sessions;
 }
 
+interface ManagedSessionState {
+	sessionId: string;
+	sessionFile: string | undefined;
+	/** Canonical path pinned when a persisted session is opened. */
+	storagePath?: string;
+	toolOutputDir?: string;
+	rawFileEntries: FileEntry[];
+	fileEntries: FileEntry[];
+	imageReadBudget: ImageReadBudget;
+	recordIds: Set<string>;
+	byId: Map<string, SessionEntry>;
+	labelsById: Map<string, string>;
+	labelTimestampsById: Map<string, string>;
+	leafId: string | null;
+	journal?: SessionJournal<FileEntry>;
+	lease?: SessionLease;
+}
+
+function buildManagedSessionState(
+	fileEntries: FileEntry[],
+	sessionFile?: string,
+	journal?: SessionJournal<FileEntry>,
+	lease?: SessionLease,
+	storagePath?: string,
+): ManagedSessionState {
+	const rawFileEntries = fileEntries;
+	const transcriptFileEntries = rawFileEntries.filter((entry) => !isRuntimeControlEntryType(entry.type));
+	const imageReadBudget: ImageReadBudget = { used: 0, limit: MAX_SESSION_IMAGE_BLOB_BYTES };
+	const hydratedFileEntries = storagePath
+		? hydrateSessionRecords(transcriptFileEntries, storagePath, imageReadBudget)
+		: [...transcriptFileEntries];
+	const header = rawFileEntries[0] as SessionHeader;
+	const recordIds = new Set<string>();
+	const byId = new Map<string, SessionEntry>();
+	const labelsById = new Map<string, string>();
+	const labelTimestampsById = new Map<string, string>();
+	let leafId: string | null = null;
+	for (const rawEntry of rawFileEntries.slice(1)) recordIds.add((rawEntry as SessionEntry | RuntimeControlEntry).id);
+	for (const entry of hydratedFileEntries.slice(1)) {
+		if (isRuntimeControlEntryType(entry.type)) continue;
+		const treeEntry = entry as SessionEntry;
+		byId.set(treeEntry.id, treeEntry);
+		leafId = treeEntry.id;
+		if (treeEntry.type !== "label") continue;
+		if (treeEntry.label) {
+			labelsById.set(treeEntry.targetId, treeEntry.label);
+			labelTimestampsById.set(treeEntry.targetId, treeEntry.timestamp);
+		} else {
+			labelsById.delete(treeEntry.targetId);
+			labelTimestampsById.delete(treeEntry.targetId);
+		}
+	}
+	return {
+		sessionId: header.id,
+		sessionFile,
+		storagePath,
+		toolOutputDir: storagePath ? getSessionAssetDirFromStoragePath(storagePath, "tool-results") : undefined,
+		rawFileEntries,
+		fileEntries: hydratedFileEntries,
+		imageReadBudget,
+		recordIds,
+		byId,
+		labelsById,
+		labelTimestampsById,
+		leafId,
+		journal,
+		lease,
+	};
+}
+
+function closeManagedSessionState(state: Pick<ManagedSessionState, "journal" | "lease">): void {
+	// Journal mutations sync and close their fd before returning. Release the lease
+	// first so a failed lease close leaves this manager fully usable for retry.
+	state.lease?.close();
+	state.journal?.close();
+}
+
+function journalOptions(_storagePath: string, lease: SessionLease, displayPath: string) {
+	return {
+		serializer: (entry: FileEntry) => JSON.stringify(entry),
+		validateRecords: (records: readonly FileEntry[]) => {
+			prepareRawSessionRecords(records, displayPath);
+		},
+		runExclusiveMutation: <T>(mutation: () => T) => lease.withWritePermit(mutation),
+	};
+}
+
+function createPersistedSessionState(
+	filePath: string,
+	fileEntries: FileEntry[],
+	mode: "create" | "replace",
+	storagePath = canonicalPath(filePath),
+	copyImagesFromStoragePath?: string,
+): ManagedSessionState {
+	validateSessionGraph(fileEntries, filePath);
+	ensureDirectoryDurablySync(dirname(storagePath));
+	const lease = SessionLease.acquire(storagePath);
+	let journal: SessionJournal<FileEntry> | undefined;
+	try {
+		if (mode === "create") {
+			try {
+				lstatSync(storagePath);
+				const conflict = new Error(`Session destination already exists: ${filePath}`) as NodeJS.ErrnoException;
+				conflict.code = "EEXIST";
+				conflict.path = storagePath;
+				throw conflict;
+			} catch (error) {
+				if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+			}
+		}
+		if (copyImagesFromStoragePath) {
+			copyReferencedImagesStrictly(fileEntries, copyImagesFromStoragePath, storagePath);
+		}
+		const durableFileEntries = prepareDurableRecords(fileEntries, storagePath);
+		validateSessionGraph(durableFileEntries, filePath);
+		if (mode === "create" || !existsSync(storagePath)) {
+			journal = openSessionJournal<FileEntry>(storagePath, {
+				...journalOptions(storagePath, lease, filePath),
+				create: true,
+				initialRecords: durableFileEntries,
+			});
+		} else {
+			journal = openSessionJournal<FileEntry>(storagePath, journalOptions(storagePath, lease, filePath));
+			journal.replaceAtomically(durableFileEntries);
+		}
+		const state = buildManagedSessionState(durableFileEntries, filePath, journal, lease, storagePath);
+		if (mode === "replace") appendPendingRecoveryNotices(state);
+		return state;
+	} catch (error) {
+		try {
+			closeManagedSessionState({ journal, lease });
+		} catch (cleanupError) {
+			throw new AggregateError([error, cleanupError], `Failed to publish and clean up session: ${filePath}`);
+		}
+		throw error;
+	}
+}
+
+function appendRecoveryNotice(state: ManagedSessionState, artifactPath: string, discardedBytes: number): void {
+	const entry: CustomEntry = {
+		type: "custom",
+		customType: "arcmind.session_recovery",
+		data: {
+			artifactPath,
+			discardedBytes,
+		},
+		id: generateId(state.recordIds),
+		parentId: state.leafId,
+		timestamp: new Date().toISOString(),
+	};
+	if (!state.journal || !state.storagePath) throw new Error("Persisted session is missing durable recovery state");
+	const rawEntry = prepareDurableRecord(entry, state.storagePath);
+	state.journal.append(rawEntry);
+	state.rawFileEntries.push(rawEntry);
+	state.fileEntries.push(entry);
+	state.recordIds.add(entry.id);
+	state.byId.set(entry.id, entry);
+	state.leafId = entry.id;
+}
+
+function appendPendingRecoveryNotices(state: ManagedSessionState): void {
+	if (!state.journal) return;
+	if (!state.storagePath) throw new Error("Persisted session is missing its storage path");
+	const recoveryDirectory = join(dirname(state.storagePath), ".recovery");
+	let directoryStats: ReturnType<typeof lstatSync>;
+	try {
+		directoryStats = lstatSync(recoveryDirectory);
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+		throw error;
+	}
+	if (!directoryStats.isDirectory()) throw new Error(`Unsafe session recovery directory: ${recoveryDirectory}`);
+
+	const recorded = new Set<string>();
+	for (const entry of state.fileEntries) {
+		if (entry.type !== "custom" || entry.customType !== "arcmind.session_recovery") continue;
+		const artifactPath = (entry.data as { artifactPath?: unknown } | undefined)?.artifactPath;
+		if (typeof artifactPath === "string") recorded.add(resolve(artifactPath));
+	}
+
+	const prefix = `${parse(state.storagePath).name}-`;
+	for (const name of readdirSync(recoveryDirectory).sort()) {
+		if (!name.startsWith(prefix) || !name.endsWith(".partial")) continue;
+		const artifactPath = join(recoveryDirectory, name);
+		const artifactStats = lstatSync(artifactPath);
+		if (!artifactStats.isFile() || artifactStats.nlink !== 1) {
+			throw new Error(`Unsafe session recovery artifact: ${artifactPath}`);
+		}
+		if (recorded.has(resolve(artifactPath))) continue;
+		appendRecoveryNotice(state, artifactPath, artifactStats.size);
+		recorded.add(resolve(artifactPath));
+	}
+}
+
+function openPersistedSessionState(
+	filePath: string,
+	emptyHeader: () => SessionHeader,
+	storagePath = canonicalPath(filePath),
+	options: { createIfMissing?: boolean; externalizeInlineImages?: boolean } = {},
+): ManagedSessionState {
+	const lease = SessionLease.acquire(storagePath);
+	let journal: SessionJournal<FileEntry> | undefined;
+	try {
+		let records: FileEntry[] | undefined;
+		try {
+			journal = openSessionJournal<FileEntry>(storagePath, journalOptions(storagePath, lease, filePath));
+		} catch (error) {
+			if (!options.createIfMissing || (error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+			records = [emptyHeader()];
+			journal = openSessionJournal<FileEntry>(storagePath, {
+				...journalOptions(storagePath, lease, filePath),
+				create: true,
+				initialRecords: records,
+			});
+		}
+		if (!records) {
+			const result = journal.readStrict();
+			if (result.records.length === 0) {
+				records = [emptyHeader()];
+				journal.replaceAtomically(records);
+			} else {
+				const sourceVersion = (result.records[0] as SessionHeader | undefined)?.version ?? 1;
+				const prepared = prepareRawSessionRecords(result.records, filePath);
+				records = prepared.records;
+				const shouldExternalize = options.externalizeInlineImages && containsExternalizableImage(records);
+				if (prepared.migrated || shouldExternalize) {
+					records = prepareDurableRecords(records, storagePath);
+					validateSessionGraph(records, filePath);
+				}
+				if (prepared.migrated) {
+					journal.replaceAtomically(records, { backupTag: `v${sourceVersion}` });
+				} else if (shouldExternalize) {
+					journal.replaceAtomically(records);
+				}
+			}
+		}
+
+		const state = buildManagedSessionState(records, filePath, journal, lease, storagePath);
+		appendPendingRecoveryNotices(state);
+		return state;
+	} catch (error) {
+		try {
+			closeManagedSessionState({ journal, lease });
+		} catch (cleanupError) {
+			throw new AggregateError([error, cleanupError], `Failed to open and clean up session: ${filePath}`);
+		}
+		throw error;
+	}
+}
+
 /**
  * Manages conversation sessions as append-only trees stored in JSONL files.
  *
@@ -910,132 +1922,159 @@ async function listSessionsFromDir(
 export class SessionManager {
 	private sessionId: string = "";
 	private sessionFile: string | undefined;
+	private storagePath: string | undefined;
+	private toolOutputDir: string | undefined;
 	private sessionDir: string;
 	private cwd: string;
 	private persist: boolean;
-	private flushed: boolean = false;
+	private rawFileEntries: FileEntry[] = [];
 	private fileEntries: FileEntry[] = [];
+	private imageReadBudget: ImageReadBudget = { used: 0, limit: MAX_SESSION_IMAGE_BLOB_BYTES };
+	private recordIds: Set<string> = new Set();
 	private byId: Map<string, SessionEntry> = new Map();
 	private labelsById: Map<string, string> = new Map();
 	private labelTimestampsById: Map<string, string> = new Map();
 	private leafId: string | null = null;
+	private journal?: SessionJournal<FileEntry>;
+	private lease?: SessionLease;
+	private closed = false;
 
 	private constructor(
 		cwd: string,
 		sessionDir: string,
-		sessionFile: string | undefined,
 		persist: boolean,
-		newSessionOptions?: NewSessionOptions,
+		init: {
+			sessionFile?: string;
+			newSessionOptions?: NewSessionOptions;
+			state?: ManagedSessionState;
+		} = {},
 	) {
 		this.cwd = resolvePath(cwd);
 		this.sessionDir = normalizePath(sessionDir);
 		this.persist = persist;
-		if (persist && this.sessionDir && !existsSync(this.sessionDir)) {
-			mkdirSync(this.sessionDir, { recursive: true });
-		}
+		if (persist && this.sessionDir) ensureDirectoryDurablySync(this.sessionDir);
 
-		if (sessionFile) {
-			this.setSessionFile(sessionFile);
+		if (init.state) {
+			this._applyManagedState(init.state);
+		} else if (init.sessionFile) {
+			this._setSessionFile(init.sessionFile);
 		} else {
-			this.newSession(newSessionOptions);
+			this.newSession(init.newSessionOptions);
 		}
 	}
 
 	/** Switch to a different session file (used for resume and branching) */
 	setSessionFile(sessionFile: string): void {
-		this.sessionFile = resolvePath(sessionFile);
-		if (existsSync(this.sessionFile)) {
-			this.fileEntries = loadEntriesFromFile(this.sessionFile);
+		this._setSessionFile(sessionFile);
+	}
 
-			// If file was empty, initialize it with a valid session header. If it was
-			// non-empty but did not parse as a arcmind session, fail without modifying it.
-			if (this.fileEntries.length === 0) {
-				const explicitPath = this.sessionFile;
-				if (statSync(explicitPath).size > 0) {
-					throw new Error(`Session file is not a valid arcmind session: ${explicitPath}`);
-				}
-				this.newSession();
-				this.sessionFile = explicitPath;
-				this._rewriteFile();
-				this.flushed = true;
-				return;
-			}
+	private _setSessionFile(sessionFile: string): void {
+		this._assertOpen();
+		const resolvedFile = resolvePath(sessionFile);
+		const storagePath = canonicalPath(resolvedFile);
+		if (this.storagePath === storagePath) return;
 
-			const header = this.fileEntries.find((e) => e.type === "session") as SessionHeader | undefined;
-			this.sessionId = header?.id ?? createSessionId();
-
-			if (migrateToCurrentVersion(this.fileEntries)) {
-				this._rewriteFile();
-			}
-
-			this._buildIndex();
-			this.flushed = true;
-		} else {
-			const explicitPath = this.sessionFile;
-			this.newSession();
-			this.sessionFile = explicitPath; // preserve explicit path from --session flag
+		const createHeader = (): SessionHeader => ({
+			type: "session",
+			version: CURRENT_SESSION_VERSION,
+			id: createSessionId(),
+			timestamp: new Date().toISOString(),
+			cwd: this.cwd,
+		});
+		if (!this.persist) {
+			const records = existsSync(storagePath) ? readSessionRecordsReadOnly(storagePath).records : [createHeader()];
+			this._replaceManagedState(buildManagedSessionState(records, resolvedFile, undefined, undefined, storagePath));
+			return;
 		}
+		const state = openPersistedSessionState(resolvedFile, createHeader, storagePath, { createIfMissing: true });
+		this._replaceManagedState(state);
 	}
 
 	newSession(options?: NewSessionOptions): string | undefined {
+		this._assertOpen();
 		if (options?.id !== undefined) {
 			assertValidSessionId(options.id);
 		}
-		this.sessionId = options?.id ?? createSessionId();
+		const sessionId = options?.id ?? createSessionId();
 		const timestamp = new Date().toISOString();
 		const header: SessionHeader = {
 			type: "session",
 			version: CURRENT_SESSION_VERSION,
-			id: this.sessionId,
+			id: sessionId,
 			timestamp,
 			cwd: this.cwd,
 			parentSession: options?.parentSession,
 		};
-		this.fileEntries = [header];
-		this.byId.clear();
-		this.labelsById.clear();
-		this.labelTimestampsById.clear();
-		this.leafId = null;
-		this.flushed = false;
-
+		let state: ManagedSessionState;
 		if (this.persist) {
 			const fileTimestamp = timestamp.replace(/[:.]/g, "-");
-			this.sessionFile = join(this.getSessionDir(), `${fileTimestamp}_${this.sessionId}.jsonl`);
+			const sessionFile = join(this.getSessionDir(), `${fileTimestamp}_${sessionId}.jsonl`);
+			state = createPersistedSessionState(sessionFile, [header], "create");
+		} else {
+			state = buildManagedSessionState([header]);
 		}
+		this._replaceManagedState(state);
 		return this.sessionFile;
 	}
 
-	private _buildIndex(): void {
-		this.byId.clear();
-		this.labelsById.clear();
-		this.labelTimestampsById.clear();
-		this.leafId = null;
-		for (const entry of this.fileEntries) {
-			if (entry.type === "session") continue;
-			this.byId.set(entry.id, entry);
-			this.leafId = entry.id;
-			if (entry.type === "label") {
-				if (entry.label) {
-					this.labelsById.set(entry.targetId, entry.label);
-					this.labelTimestampsById.set(entry.targetId, entry.timestamp);
-				} else {
-					this.labelsById.delete(entry.targetId);
-					this.labelTimestampsById.delete(entry.targetId);
-				}
-			}
-		}
+	private _assertOpen(): void {
+		if (this.closed) throw new Error("Session manager is closed");
 	}
 
-	private _rewriteFile(): void {
-		if (!this.persist || !this.sessionFile) return;
-		const fd = openSync(this.sessionFile, "w");
+	private _applyManagedState(state: ManagedSessionState): void {
+		this.sessionId = state.sessionId;
+		this.sessionFile = state.sessionFile;
+		this.storagePath = state.storagePath;
+		this.toolOutputDir = state.toolOutputDir;
+		this.rawFileEntries = state.rawFileEntries;
+		this.fileEntries = state.fileEntries;
+		this.imageReadBudget = state.imageReadBudget;
+		this.recordIds = state.recordIds;
+		this.byId = state.byId;
+		this.labelsById = state.labelsById;
+		this.labelTimestampsById = state.labelTimestampsById;
+		this.leafId = state.leafId;
+		this.journal = state.journal;
+		this.lease = state.lease;
+	}
+
+	private _detachManagedState(): ManagedSessionState {
+		const state: ManagedSessionState = {
+			sessionId: this.sessionId,
+			sessionFile: this.sessionFile,
+			storagePath: this.storagePath,
+			toolOutputDir: this.toolOutputDir,
+			rawFileEntries: this.rawFileEntries,
+			fileEntries: this.fileEntries,
+			imageReadBudget: this.imageReadBudget,
+			recordIds: this.recordIds,
+			byId: this.byId,
+			labelsById: this.labelsById,
+			labelTimestampsById: this.labelTimestampsById,
+			leafId: this.leafId,
+			journal: this.journal,
+			lease: this.lease,
+		};
+		this.journal = undefined;
+		this.lease = undefined;
+		this.storagePath = undefined;
+		this.toolOutputDir = undefined;
+		this.closed = true;
+		return state;
+	}
+
+	private _replaceManagedState(state: ManagedSessionState): void {
 		try {
-			for (const entry of this.fileEntries) {
-				writeFileSync(fd, `${stringifySessionEntry(entry, this.sessionFile)}\n`);
+			closeManagedSessionState({ journal: this.journal, lease: this.lease });
+		} catch (error) {
+			try {
+				closeManagedSessionState(state);
+			} catch (cleanupError) {
+				throw new AggregateError([error, cleanupError], "Failed to switch session and clean up candidate");
 			}
-		} finally {
-			closeSync(fd);
+			throw error;
 		}
+		this._applyManagedState(state);
 	}
 
 	isPersisted(): boolean {
@@ -1062,40 +2101,94 @@ export class SessionManager {
 		return this.sessionFile;
 	}
 
-	_persist(entry: SessionEntry): void {
-		if (!this.persist || !this.sessionFile) return;
+	/** Stable directory for large tool outputs owned by this persisted session. */
+	getToolOutputDir(): string | undefined {
+		if (this.toolOutputDir) assertSafeSessionAssetDirectory(this.toolOutputDir);
+		return this.toolOutputDir;
+	}
 
-		const hasAssistant = this.fileEntries.some((e) => e.type === "message" && e.message.role === "assistant");
-		if (!hasAssistant) {
-			if (this.flushed) {
-				appendFileSync(this.sessionFile, `${stringifySessionEntry(entry, this.sessionFile)}\n`);
-			} else {
-				// Mark as not flushed so when assistant arrives, all entries get written
-				this.flushed = false;
-			}
-			return;
+	private _readDurableImageRefs(refs: readonly DurableImageRef[]): Array<{ ref: DurableImageRef; bytes: Buffer }> {
+		this._assertOpen();
+		if (!this.persist || !this.storagePath) {
+			throw new Error("Durable image references require a persisted session");
 		}
-
-		if (!this.flushed) {
-			const fd = openSync(this.sessionFile, "wx");
+		if (!Array.isArray(refs)) throw new TypeError("Durable image references must be an array");
+		if (refs.length > MAX_DURABLE_PROMPT_IMAGES) {
+			throw new TypeError(`Durable prompts support at most ${MAX_DURABLE_PROMPT_IMAGES} images`);
+		}
+		const prepared = refs.map((ref) => {
+			const extension = isImageReference(ref) ? imageExtension(ref.mimeType) : undefined;
+			if (
+				!extension ||
+				!/^[a-f0-9]{64}$/.test(ref.hash) ||
+				ref.size === undefined ||
+				ref.size > MAX_DURABLE_IMAGE_BYTES
+			) {
+				throw new TypeError("Invalid durable image reference");
+			}
+			return { ref, extension };
+		});
+		if (prepared.reduce((total, item) => total + item.ref.size, 0) > MAX_DURABLE_PROMPT_IMAGE_BYTES) {
+			throw new TypeError(`Durable prompt images exceed ${MAX_DURABLE_PROMPT_IMAGE_BYTES} total bytes`);
+		}
+		const imageDir = getSessionAssetDirFromStoragePath(this.storagePath, "images");
+		const imageBudget: ImageReadBudget = { used: 0, limit: MAX_DURABLE_PROMPT_IMAGE_BYTES };
+		return prepared.map(({ ref, extension }) => {
+			let bytes: Buffer;
 			try {
-				for (const e of this.fileEntries) {
-					writeFileSync(fd, `${stringifySessionEntry(e, this.sessionFile)}\n`);
-				}
-			} finally {
-				closeSync(fd);
+				assertSafeSessionAssetDirectory(imageDir);
+				bytes = readOwnedRegularFile(join(imageDir, `${ref.hash}.${extension}`), {
+					expectedSize: ref.size,
+					maxBytes: MAX_DURABLE_IMAGE_BYTES,
+					budget: imageBudget,
+				});
+			} catch {
+				throw new Error(`Durable image asset is unavailable or unsafe: ${ref.hash}`);
 			}
-			this.flushed = true;
-		} else {
-			appendFileSync(this.sessionFile, `${stringifySessionEntry(entry, this.sessionFile)}\n`);
-		}
+			if (createHash("sha256").update(bytes).digest("hex") !== ref.hash) {
+				throw new Error(`Durable image asset hash mismatch: ${ref.hash}`);
+			}
+			return { ref, bytes };
+		});
+	}
+
+	/** Validate durable prompt refs and owned blobs without retaining provider payloads. */
+	validateDurableImageRefs(refs: readonly DurableImageRef[]): void {
+		this._readDurableImageRefs(refs);
+	}
+
+	/** Resolve durable prompt image refs without exposing storage paths or fail-to-text fallback. */
+	resolveDurableImageRefs(refs: readonly DurableImageRef[]): ImageContent[] {
+		return this._readDurableImageRefs(refs).map(({ ref, bytes }) => ({
+			type: "image",
+			data: bytes.toString("base64"),
+			mimeType: ref.mimeType,
+		}));
+	}
+
+	close(): void {
+		if (this.closed) return;
+		closeManagedSessionState({ journal: this.journal, lease: this.lease });
+		this.journal = undefined;
+		this.lease = undefined;
+		this.closed = true;
 	}
 
 	private _appendEntry(entry: SessionEntry): void {
-		this.fileEntries.push(entry);
-		this.byId.set(entry.id, entry);
+		this._assertOpen();
+		let rawEntry: SessionEntry = entry;
+		let hydratedEntry: SessionEntry = entry;
+		if (this.persist) {
+			if (!this.journal || !this.storagePath) throw new Error("Persisted session is missing its journal");
+			rawEntry = prepareDurableRecord(entry, this.storagePath) as SessionEntry;
+			this.journal.append(rawEntry);
+			hydratedEntry = hydrateSessionRecords([rawEntry], this.storagePath, this.imageReadBudget)[0] as SessionEntry;
+		}
+		this.rawFileEntries.push(rawEntry);
+		this.fileEntries.push(hydratedEntry);
+		this.recordIds.add(entry.id);
+		this.byId.set(entry.id, hydratedEntry);
 		this.leafId = entry.id;
-		this._persist(entry);
 	}
 
 	/** Append a message as child of current leaf, then advance leaf. Returns entry id.
@@ -1104,24 +2197,69 @@ export class SessionManager {
 	 * so it is easier to find them.
 	 * These need to be appended via appendCompaction() and appendBranchSummary() methods.
 	 */
-	appendMessage(message: Message | CustomMessage | BashExecutionMessage, toolOutput?: PersistedToolOutput): string {
+	appendMessage(
+		message: Message | CustomMessage | BashExecutionMessage,
+		toolOutput?: PersistedToolOutput,
+		turnId?: string,
+	): string {
+		if (turnId !== undefined && (typeof turnId !== "string" || turnId.length === 0)) {
+			throw new TypeError("turnId must be a non-empty string");
+		}
 		const entry: SessionMessageEntry = {
 			type: "message",
-			id: generateId(this.byId),
+			id: generateId(this.recordIds),
 			parentId: this.leafId,
 			timestamp: new Date().toISOString(),
 			message,
 			...(toolOutput ? { toolOutput } : {}),
+			...(turnId === undefined ? {} : { turnId }),
 		};
 		this._appendEntry(entry);
 		return entry.id;
+	}
+
+	/** Append one validated runtime control record durably without advancing the transcript leaf. */
+	appendRuntimeControl(payload: RuntimeControlPayload): string {
+		this._assertOpen();
+		if (!this.persist || !this.journal || !this.storagePath) {
+			throw new Error("Runtime control entries require a persisted session");
+		}
+		if (typeof payload !== "object" || payload === null || Array.isArray(payload)) {
+			throw new TypeError("Runtime control payload must be a plain object");
+		}
+		const prototype = Object.getPrototypeOf(payload);
+		if (prototype !== Object.prototype && prototype !== null) {
+			throw new TypeError("Runtime control payload must be a plain object");
+		}
+		for (const field of ["id", "parentId", "timestamp"] as const) {
+			if (Object.hasOwn(payload, field)) throw new TypeError(`Runtime control payload must not contain ${field}`);
+		}
+
+		const candidate = Object.create(Object.prototype);
+		Object.defineProperties(candidate, Object.getOwnPropertyDescriptors(payload));
+		Object.defineProperties(candidate, {
+			id: { enumerable: true, value: generateId(this.recordIds) },
+			parentId: { enumerable: true, value: this.leafId },
+			timestamp: { enumerable: true, value: new Date().toISOString() },
+		});
+		const entry = parseRuntimeControlEntry(candidate);
+		this.journal.append(entry);
+		this.rawFileEntries.push(entry);
+		this.recordIds.add(entry.id);
+		return entry.id;
+	}
+
+	/** Raw journal-order snapshot for runtime reduction; callers cannot mutate manager state. */
+	getDurableJournalSnapshot(): readonly FileEntry[] {
+		this._assertOpen();
+		return deepFreeze(structuredClone(this.rawFileEntries));
 	}
 
 	/** Append a thinking level change as child of current leaf, then advance leaf. Returns entry id. */
 	appendThinkingLevelChange(thinkingLevel: string): string {
 		const entry: ThinkingLevelChangeEntry = {
 			type: "thinking_level_change",
-			id: generateId(this.byId),
+			id: generateId(this.recordIds),
 			parentId: this.leafId,
 			timestamp: new Date().toISOString(),
 			thinkingLevel,
@@ -1134,7 +2272,7 @@ export class SessionManager {
 	appendModelChange(provider: string, modelId: string): string {
 		const entry: ModelChangeEntry = {
 			type: "model_change",
-			id: generateId(this.byId),
+			id: generateId(this.recordIds),
 			parentId: this.leafId,
 			timestamp: new Date().toISOString(),
 			provider,
@@ -1154,7 +2292,7 @@ export class SessionManager {
 	): string {
 		const entry: CompactionEntry<T> = {
 			type: "compaction",
-			id: generateId(this.byId),
+			id: generateId(this.recordIds),
 			parentId: this.leafId,
 			timestamp: new Date().toISOString(),
 			summary,
@@ -1173,7 +2311,7 @@ export class SessionManager {
 			type: "custom",
 			customType,
 			data,
-			id: generateId(this.byId),
+			id: generateId(this.recordIds),
 			parentId: this.leafId,
 			timestamp: new Date().toISOString(),
 		};
@@ -1186,7 +2324,7 @@ export class SessionManager {
 		const sanitizedName = name.replace(/[\r\n]+/g, " ").trim();
 		const entry: SessionInfoEntry = {
 			type: "session_info",
-			id: generateId(this.byId),
+			id: generateId(this.recordIds),
 			parentId: this.leafId,
 			timestamp: new Date().toISOString(),
 			name: sanitizedName,
@@ -1229,7 +2367,7 @@ export class SessionManager {
 			content,
 			display,
 			details,
-			id: generateId(this.byId),
+			id: generateId(this.recordIds),
 			parentId: this.leafId,
 			timestamp: new Date().toISOString(),
 		};
@@ -1284,7 +2422,7 @@ export class SessionManager {
 		}
 		const entry: LabelEntry = {
 			type: "label",
-			id: generateId(this.byId),
+			id: generateId(this.recordIds),
 			parentId: this.leafId,
 			timestamp: new Date().toISOString(),
 			targetId,
@@ -1348,7 +2486,88 @@ export class SessionManager {
 	 * change the leaf pointer. Entries cannot be modified or deleted.
 	 */
 	getEntries(): SessionEntry[] {
-		return this.fileEntries.filter((e): e is SessionEntry => e.type !== "session");
+		return this.fileEntries.filter(
+			(entry): entry is SessionEntry => entry.type !== "session" && !isRuntimeControlEntryType(entry.type),
+		);
+	}
+
+	/** Compare durable records while both source and target writer leases are held. */
+	containsDurablePrefixOf(source: SessionManager): boolean {
+		this._assertOpen();
+		source._assertOpen();
+		if (
+			!this.persist ||
+			!source.persist ||
+			!this.storagePath ||
+			!source.storagePath ||
+			!this.lease ||
+			!source.lease
+		) {
+			throw new Error("Durable session comparison requires two persisted sessions");
+		}
+		const targetStoragePath = this.storagePath;
+		const sourceStoragePath = source.storagePath;
+		const targetLease = this.lease;
+		const sourceLease = source.lease;
+
+		const compare = (): boolean =>
+			targetContainsDurableSource(targetStoragePath, sourceStoragePath, sourceStoragePath);
+
+		return targetStoragePath < sourceStoragePath
+			? targetLease.withWritePermit(() => sourceLease.withWritePermit(compare))
+			: sourceLease.withWritePermit(() => targetLease.withWritePermit(compare));
+	}
+
+	/** Revalidate an atomically retired source journal while retaining its original asset location. */
+	containsRetiredDurableSource(sourceJournalPath: string, sourceAssetStoragePath: string): boolean {
+		this._assertOpen();
+		if (!this.persist || !this.storagePath || !this.lease) {
+			throw new Error("Retired source comparison requires a persisted target session");
+		}
+		const sourceStoragePath = resolvePath(sourceJournalPath);
+		const sourceAssetPath = canonicalPath(sourceAssetStoragePath);
+		return this.lease.withWritePermit(() =>
+			targetContainsDurableSource(this.storagePath!, sourceStoragePath, sourceAssetPath, {
+				allowIncompleteTail: true,
+				followSymlinkAlias: false,
+			}),
+		);
+	}
+
+	/**
+	 * Reconcile a retained legacy source with this migration target.
+	 *
+	 * The retired journal may still grow through an old fd, so this adopts one
+	 * fixed raw snapshot and leaves the backup in place for a later startup.
+	 * Returns false when the journals diverged and neither may replace the other.
+	 */
+	reconcileRetiredDurableSource(sourceJournalPath: string, sourceAssetStoragePath: string): boolean {
+		this._assertOpen();
+		if (!this.persist || !this.storagePath || !this.journal || !this.lease) {
+			throw new Error("Retired source reconciliation requires a persisted target session");
+		}
+		const sourceStoragePath = resolvePath(sourceJournalPath);
+		const sourceAssetPath = canonicalPath(sourceAssetStoragePath);
+		const sourceRecords = readSessionRecordsReadOnly(sourceStoragePath, {
+			allowIncompleteTail: true,
+			followSymlinkAlias: false,
+		}).records;
+		const targetRecords = readSessionRecordsReadOnly(this.storagePath).records;
+
+		if (!recordsStartWith(targetRecords, sourceRecords) && !recordsStartWith(sourceRecords, targetRecords)) {
+			return false;
+		}
+
+		// Equality and target-superset cases still pass through the strict copy so a
+		// missing target image can be repaired from the original legacy asset store.
+		copyReferencedImagesStrictly(sourceRecords, sourceAssetPath, this.storagePath);
+		if (!recordsStartWith(targetRecords, sourceRecords)) {
+			this.journal.replaceAtomically(sourceRecords);
+			this._applyManagedState(
+				buildManagedSessionState(sourceRecords, this.sessionFile, this.journal, this.lease, this.storagePath),
+			);
+		}
+		return targetContainsDurableRecords(this.storagePath, sourceRecords, sourceAssetPath);
 	}
 
 	/**
@@ -1407,6 +2626,7 @@ export class SessionManager {
 	 * are not modified or deleted.
 	 */
 	branch(branchFromId: string): void {
+		this._assertOpen();
 		if (!this.byId.has(branchFromId)) {
 			throw new Error(`Entry ${branchFromId} not found`);
 		}
@@ -1419,6 +2639,7 @@ export class SessionManager {
 	 * Use this when navigating to re-edit the first user message.
 	 */
 	resetLeaf(): void {
+		this._assertOpen();
 		this.leafId = null;
 	}
 
@@ -1428,13 +2649,13 @@ export class SessionManager {
 	 * context from the abandoned conversation path.
 	 */
 	branchWithSummary(branchFromId: string | null, summary: string, details?: unknown, fromHook?: boolean): string {
+		this._assertOpen();
 		if (branchFromId !== null && !this.byId.has(branchFromId)) {
 			throw new Error(`Entry ${branchFromId} not found`);
 		}
-		this.leafId = branchFromId;
 		const entry: BranchSummaryEntry = {
 			type: "branch_summary",
-			id: generateId(this.byId),
+			id: generateId(this.recordIds),
 			parentId: branchFromId,
 			timestamp: new Date().toISOString(),
 			fromId: branchFromId ?? "root",
@@ -1446,14 +2667,24 @@ export class SessionManager {
 		return entry.id;
 	}
 
-	/**
-	 * Create a new session file containing only the path from root to the specified leaf.
-	 * Useful for extracting a single conversation path from a branched session.
-	 * Returns the new session file path, or undefined if not persisting.
-	 */
-	createBranchedSession(leafId: string): string | undefined {
-		const previousSessionFile = this.sessionFile;
-		const path = this.getBranch(leafId);
+	/** Create an independent candidate containing the path from root to the selected leaf. */
+	createBranchedSessionManager(leafId: string): SessionManager {
+		this._assertOpen();
+		let sourceStoragePath: string | undefined;
+		let path: SessionEntry[];
+		if (this.persist) {
+			if (!this.storagePath || !this.lease) throw new Error("Persisted session is missing durable ownership");
+			sourceStoragePath = this.storagePath;
+			const storagePath = sourceStoragePath;
+			const records = this.lease.withWritePermit(() => readSessionRecordsReadOnly(storagePath).records);
+			const rawEntries = records
+				.slice(1)
+				.filter((entry): entry is SessionEntry => !isRuntimeControlEntryType(entry.type));
+			const rawById = buildEntryIndex(rawEntries);
+			path = rawById.has(leafId) ? buildSessionPath(rawEntries, leafId, rawById) : [];
+		} else {
+			path = this.getBranch(leafId);
+		}
 		if (path.length === 0) {
 			throw new Error(`Entry ${leafId} not found`);
 		}
@@ -1469,88 +2700,61 @@ export class SessionManager {
 			pathParentId = entry.id;
 		}
 
-		const newSessionId = createSessionId();
+		const sessionId = createSessionId();
 		const timestamp = new Date().toISOString();
-		const fileTimestamp = timestamp.replace(/[:.]/g, "-");
-		const newSessionFile = join(this.getSessionDir(), `${fileTimestamp}_${newSessionId}.jsonl`);
-
 		const header: SessionHeader = {
 			type: "session",
 			version: CURRENT_SESSION_VERSION,
-			id: newSessionId,
+			id: sessionId,
 			timestamp,
 			cwd: this.cwd,
-			parentSession: this.persist ? previousSessionFile : undefined,
+			parentSession: this.persist ? this.sessionFile : undefined,
 		};
 
-		// Collect labels for entries in the path
 		const pathEntryIds = new Set(pathWithoutLabels.map((e) => e.id));
-		const labelsToWrite: Array<{ targetId: string; label: string; timestamp: string }> = [];
-		for (const [targetId, label] of this.labelsById) {
-			if (pathEntryIds.has(targetId)) {
-				labelsToWrite.push({ targetId, label, timestamp: this.labelTimestampsById.get(targetId)! });
-			}
-		}
-
-		if (this.persist) {
-			// Build label entries
-			const lastEntryId = pathWithoutLabels[pathWithoutLabels.length - 1]?.id || null;
-			let parentId = lastEntryId;
-			const labelEntries: LabelEntry[] = [];
-			for (const { targetId, label, timestamp: labelTimestamp } of labelsToWrite) {
-				const labelEntry: LabelEntry = {
-					type: "label",
-					id: generateId(new Set(pathEntryIds)),
-					parentId,
-					timestamp: labelTimestamp,
-					targetId,
-					label,
-				};
-				pathEntryIds.add(labelEntry.id);
-				labelEntries.push(labelEntry);
-				parentId = labelEntry.id;
-			}
-
-			this.fileEntries = [header, ...pathWithoutLabels, ...labelEntries];
-			this.sessionId = newSessionId;
-			this.sessionFile = newSessionFile;
-			this._buildIndex();
-
-			// Only write the file now if it contains an assistant message.
-			// Otherwise defer to _persist(), which creates the file on the
-			// first assistant response, matching the newSession() contract
-			// and avoiding the duplicate-header bug when _persist()'s
-			// no-assistant guard later resets flushed to false.
-			const hasAssistant = this.fileEntries.some((e) => e.type === "message" && e.message.role === "assistant");
-			if (hasAssistant) {
-				this._rewriteFile();
-				this.flushed = true;
-			} else {
-				this.flushed = false;
-			}
-
-			return newSessionFile;
-		}
-
-		// In-memory mode: replace current session with the path + labels
 		const labelEntries: LabelEntry[] = [];
-		let parentId = pathWithoutLabels[pathWithoutLabels.length - 1]?.id || null;
-		for (const { targetId, label, timestamp: labelTimestamp } of labelsToWrite) {
+		let parentId = pathWithoutLabels[pathWithoutLabels.length - 1]?.id ?? null;
+		for (const [targetId, label] of this.labelsById) {
+			if (!pathEntryIds.has(targetId)) continue;
 			const labelEntry: LabelEntry = {
 				type: "label",
-				id: generateId(new Set([...pathEntryIds, ...labelEntries.map((e) => e.id)])),
+				id: generateId(pathEntryIds),
 				parentId,
-				timestamp: labelTimestamp,
+				timestamp: this.labelTimestampsById.get(targetId) ?? timestamp,
 				targetId,
 				label,
 			};
+			pathEntryIds.add(labelEntry.id);
 			labelEntries.push(labelEntry);
 			parentId = labelEntry.id;
 		}
-		this.fileEntries = [header, ...pathWithoutLabels, ...labelEntries];
-		this.sessionId = newSessionId;
-		this._buildIndex();
-		return undefined;
+
+		const records: FileEntry[] = [header, ...pathWithoutLabels, ...labelEntries];
+		let state: ManagedSessionState;
+		if (this.persist) {
+			const sessionFile = join(this.getSessionDir(), `${timestamp.replace(/[:.]/g, "-")}_${sessionId}.jsonl`);
+			state = createPersistedSessionState(
+				sessionFile,
+				records,
+				"create",
+				canonicalPath(sessionFile),
+				sourceStoragePath,
+			);
+		} else {
+			state = buildManagedSessionState(records);
+		}
+		return new SessionManager(this.cwd, this.sessionDir, this.persist, { state });
+	}
+
+	/**
+	 * Compatibility wrapper that replaces this manager with a newly created branch.
+	 * New lifecycle code should prefer createBranchedSessionManager().
+	 */
+	createBranchedSession(leafId: string): string | undefined {
+		const candidate = this.createBranchedSessionManager(leafId);
+		const sessionFile = candidate.getSessionFile();
+		this._replaceManagedState(candidate._detachManagedState());
+		return sessionFile;
 	}
 
 	/**
@@ -1560,7 +2764,33 @@ export class SessionManager {
 	 */
 	static create(cwd: string, sessionDir?: string, options?: NewSessionOptions): SessionManager {
 		const dir = sessionDir ? normalizePath(sessionDir) : getDefaultSessionDir(cwd);
-		return new SessionManager(cwd, dir, undefined, true, options);
+		return new SessionManager(cwd, dir, true, { newSessionOptions: options });
+	}
+
+	private static openPinned(
+		resolvedPath: string,
+		storagePath: string,
+		sessionDir?: string,
+		cwdOverride?: string,
+		options: { createIfMissing?: boolean; externalizeInlineImages?: boolean } = {},
+	): SessionManager {
+		const dir = sessionDir ? normalizePath(sessionDir) : resolve(resolvedPath, "..");
+		ensureDirectoryDurablySync(dir);
+		const headerHint = readSessionHeader(storagePath);
+		const initialCwd = cwdOverride ?? headerHint?.cwd ?? process.cwd();
+		const createHeader = (): SessionHeader => ({
+			type: "session",
+			version: CURRENT_SESSION_VERSION,
+			id: createSessionId(),
+			timestamp: new Date().toISOString(),
+			cwd: resolvePath(initialCwd),
+		});
+		const state = openPersistedSessionState(resolvedPath, createHeader, storagePath, {
+			createIfMissing: options.createIfMissing !== false,
+			externalizeInlineImages: options.externalizeInlineImages,
+		});
+		const header = state.fileEntries[0] as SessionHeader;
+		return new SessionManager(cwdOverride ?? header.cwd, dir, true, { state });
 	}
 
 	/**
@@ -1571,13 +2801,44 @@ export class SessionManager {
 	 */
 	static open(path: string, sessionDir?: string, cwdOverride?: string): SessionManager {
 		const resolvedPath = resolvePath(path);
-		// Extract cwd from session header if possible, otherwise use process.cwd()
-		const entries = loadEntriesFromFile(resolvedPath);
-		const header = entries.find((e) => e.type === "session") as SessionHeader | undefined;
-		const cwd = cwdOverride ?? header?.cwd ?? process.cwd();
-		// If no sessionDir provided, derive from file's parent directory
-		const dir = sessionDir ? normalizePath(sessionDir) : resolve(resolvedPath, "..");
-		return new SessionManager(cwd, dir, resolvedPath, true);
+		const storagePath = canonicalPath(resolvedPath);
+		return SessionManager.openPinned(resolvedPath, storagePath, sessionDir, cwdOverride);
+	}
+
+	/** Open an immutable, no-lease snapshot. Legacy migrations are applied only in memory. */
+	static openReadOnly(path: string, cwdOverride?: string): ReadonlySessionManager {
+		const resolvedPath = resolvePath(path);
+		const storagePath = canonicalPath(resolvedPath);
+		const prepared = readSessionRecordsReadOnly(storagePath);
+		const header = prepared.records[0] as SessionHeader;
+		const state = buildManagedSessionState(prepared.records, resolvedPath, undefined, undefined, storagePath);
+		deepFreeze(state.rawFileEntries);
+		deepFreeze(state.fileEntries);
+		return readonlySessionSnapshot(
+			new SessionManager(cwdOverride ?? header.cwd, dirname(resolvedPath), false, { state }),
+		);
+	}
+
+	/** Strictly inspect a retired migration journal without following its final path component. */
+	static readRetiredSessionHeader(path: string): SessionHeader {
+		const resolvedPath = resolvePath(path);
+		return structuredClone(
+			readSessionRecordsReadOnly(resolvedPath, {
+				allowIncompleteTail: true,
+				followSymlinkAlias: false,
+			}).records[0] as SessionHeader,
+		);
+	}
+
+	/** Create a clean source from the complete prefix of an immutable retired backup. */
+	static restoreRetiredSessionPrefix(path: string, destinationPath: string): void {
+		const resolvedPath = resolvePath(path);
+		const records = readSessionRecordsReadOnly(resolvedPath, {
+			allowIncompleteTail: true,
+			followSymlinkAlias: false,
+		}).records;
+		const content = records.length === 0 ? "" : `${records.map((record) => JSON.stringify(record)).join("\n")}\n`;
+		createFileAtomicallySync(resolvePath(destinationPath), content, { mode: 0o600 });
 	}
 
 	/**
@@ -1588,16 +2849,22 @@ export class SessionManager {
 	static continueRecent(cwd: string, sessionDir?: string): SessionManager {
 		const dir = sessionDir ? normalizePath(sessionDir) : getDefaultSessionDir(cwd);
 		const filterCwd = sessionDir !== undefined && dir !== getDefaultSessionDirPath(cwd);
-		const mostRecent = findMostRecentSession(dir, filterCwd ? cwd : undefined);
-		if (mostRecent) {
-			return new SessionManager(cwd, dir, mostRecent, true);
+		for (const candidate of findRecentSessionCandidates(dir, filterCwd ? cwd : undefined)) {
+			try {
+				// Opening is the validation pass. Do not first materialize the full
+				// journal through findMostRecentSession and then read it again here.
+				return SessionManager.open(candidate.path, dir, cwd);
+			} catch (error) {
+				if (error instanceof SessionLeaseError) throw error;
+				// A corrupt or raced candidate must not hide an older valid session.
+			}
 		}
-		return new SessionManager(cwd, dir, undefined, true);
+		return new SessionManager(cwd, dir, true);
 	}
 
 	/** Create an in-memory session (no file persistence) */
 	static inMemory(cwd: string = process.cwd(), options?: NewSessionOptions): SessionManager {
-		return new SessionManager(cwd, "", undefined, false, options);
+		return new SessionManager(cwd, "", false, { newSessionOptions: options });
 	}
 
 	/**
@@ -1614,23 +2881,11 @@ export class SessionManager {
 		options?: NewSessionOptions,
 	): SessionManager {
 		const resolvedSourcePath = resolvePath(sourcePath);
+		const sourceStoragePath = canonicalPath(resolvedSourcePath);
 		const resolvedTargetCwd = resolvePath(targetCwd);
-		const sourceEntries = loadEntriesFromFile(resolvedSourcePath);
-		if (sourceEntries.length === 0) {
-			throw new Error(`Cannot fork: source session file is empty or invalid: ${resolvedSourcePath}`);
-		}
-
-		const sourceHeader = sourceEntries.find((e) => e.type === "session") as SessionHeader | undefined;
-		if (!sourceHeader) {
-			throw new Error(`Cannot fork: source session has no header: ${resolvedSourcePath}`);
-		}
+		const source = readSessionRecordsReadOnly(sourceStoragePath);
 
 		const dir = sessionDir ? normalizePath(sessionDir) : getDefaultSessionDir(resolvedTargetCwd);
-		if (!existsSync(dir)) {
-			mkdirSync(dir, { recursive: true });
-		}
-
-		// Create new session file with new ID but forked content
 		if (options?.id !== undefined) {
 			assertValidSessionId(options.id);
 		}
@@ -1648,16 +2903,56 @@ export class SessionManager {
 			cwd: resolvedTargetCwd,
 			parentSession: resolvedSourcePath,
 		};
-		writeFileSync(newSessionFile, `${stringifySessionEntry(newHeader, newSessionFile)}\n`, { flag: "wx" });
+		const state = createPersistedSessionState(
+			newSessionFile,
+			[
+				newHeader,
+				...source.records.slice(1).filter((entry): entry is SessionEntry => !isRuntimeControlEntryType(entry.type)),
+			],
+			"create",
+			canonicalPath(newSessionFile),
+			sourceStoragePath,
+		);
+		return new SessionManager(resolvedTargetCwd, dir, true, { state });
+	}
 
-		// Copy all non-header entries from source
-		for (const entry of sourceEntries) {
-			if (entry.type !== "session") {
-				appendFileSync(newSessionFile, `${stringifySessionEntry(entry, newSessionFile)}\n`);
+	/** Strictly import a complete raw source snapshot and atomically publish the destination. */
+	static importFrom(
+		sourcePath: string,
+		destinationPath: string,
+		cwdOverride?: string,
+		options: ImportSessionOptions = {},
+	): SessionManager {
+		const resolvedSourcePath = resolvePath(sourcePath);
+		const resolvedDestinationPath = resolvePath(destinationPath);
+		const sourceStoragePath = canonicalPath(resolvedSourcePath);
+		const destinationStoragePath = canonicalPath(resolvedDestinationPath);
+		if (sourceStoragePath === destinationStoragePath) {
+			if (options.destinationMode === "create-exclusive") {
+				throw new Error("Create-exclusive import requires a different destination");
 			}
+			return SessionManager.openPinned(resolvedDestinationPath, destinationStoragePath, undefined, cwdOverride, {
+				createIfMissing: false,
+				externalizeInlineImages: true,
+			});
 		}
-
-		return new SessionManager(resolvedTargetCwd, dir, newSessionFile, true);
+		const source = readSessionRecordsReadOnly(sourceStoragePath);
+		const records = source.records;
+		const header = records[0] as SessionHeader;
+		const mode =
+			options.destinationMode === "create-exclusive"
+				? "create"
+				: existsSync(destinationStoragePath)
+					? "replace"
+					: "create";
+		const state = createPersistedSessionState(
+			resolvedDestinationPath,
+			records,
+			mode,
+			destinationStoragePath,
+			sourceStoragePath,
+		);
+		return new SessionManager(cwdOverride ?? header.cwd, dirname(resolvedDestinationPath), true, { state });
 	}
 
 	/**

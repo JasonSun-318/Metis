@@ -1,9 +1,10 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import lockfile from "proper-lockfile";
 import { CONFIG_DIR_NAME } from "../config.ts";
 import { canonicalizePath, resolvePath } from "../utils/paths.ts";
+import { ensureDirectoryDurablySync, readSingleLinkTextFileSync, replaceFileAtomicallySync } from "./durable-file.ts";
 
 export type ProjectTrustDecision = boolean | null;
 
@@ -95,13 +96,11 @@ export function getProjectTrustOptions(cwd: string, options?: { includeSessionOn
 }
 
 function readTrustFile(path: string): TrustFile {
-	if (!existsSync(path)) {
-		return {};
-	}
-
 	let parsed: unknown;
 	try {
-		parsed = JSON.parse(readFileSync(path, "utf-8"));
+		const contents = readSingleLinkTextFileSync(path);
+		if (contents === undefined) return {};
+		parsed = JSON.parse(contents);
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error);
 		throw new Error(`Failed to read trust store ${path}: ${message}`);
@@ -129,13 +128,14 @@ function writeTrustFile(path: string, data: TrustFile): void {
 			sorted[key] = value;
 		}
 	}
-	mkdirSync(dirname(path), { recursive: true });
-	writeFileSync(path, `${JSON.stringify(sorted, null, 2)}\n`, "utf-8");
+	const existing = existsSync(path) ? lstatSync(path) : undefined;
+	const mode = existing?.isFile() ? existing.mode & 0o777 : 0o666;
+	replaceFileAtomicallySync(path, `${JSON.stringify(sorted, null, 2)}\n`, { mode });
 }
 
 function acquireTrustLockSync(path: string): () => void {
 	const trustDir = dirname(path);
-	mkdirSync(trustDir, { recursive: true });
+	ensureDirectoryDurablySync(trustDir);
 	const maxAttempts = 10;
 	const delayMs = 20;
 	let lastError: unknown;

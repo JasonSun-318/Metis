@@ -1,5 +1,5 @@
-import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
-import { spawn } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { execFile, spawn } from "node:child_process";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
@@ -14,6 +14,10 @@ const defaultNodeProfileDir = join(repoRoot, "profiles-node");
 const defaultBunProfileDir = join(repoRoot, "profiles-bun");
 const agentDirEnvName = "ARCMIND_CODING_AGENT_DIR";
 const startupBenchmarkEnvName = "ARCMIND_STARTUP_BENCHMARK";
+const benchmarkTimeoutMs = 30_000;
+const buildTimeoutMs = 10 * 60_000;
+const benchmarkChildren = new Set();
+let shuttingDown = false;
 
 function printHelp() {
 	console.log(`Usage:
@@ -34,7 +38,9 @@ Options:
   --label <name>         Profile name prefix (default: <mode>-startup)
   --runtime <name>       node, bun, or auto (default: auto)
   --agent-dir <dir>      Use a specific ARCMIND_CODING_AGENT_DIR for the benchmark run
+  --json-output <file>   Write raw measured samples and summaries as JSON
   --isolated-agent-dir   Use a fresh temporary agent dir instead of the normal one
+  --minimal-resources    Disable extensions, skills, prompts, themes, and context files
   --no-offline           Do not force ARCMIND_OFFLINE=1
   --skip-build           Reuse the current dist/cli.js without rebuilding first (Node only)
   --cpu-profile          Write CPU profiles for benchmark runs
@@ -45,14 +51,17 @@ Notes:
   - TUI mode measures startup until the interactive UI reaches first usable state.
   - RPC mode measures startup until a real get_state request receives a response, then closes stdin to exit cleanly.
   - CPU profiles are kept in the selected profile directory for later analysis.
+  - Offline mode applies to benchmark children. The default Node pre-build may run model generators;
+    use --skip-build when profiling must remain strictly offline.
 `);
 }
 
-function parseIntegerFlag(value, name) {
-	const parsed = Number.parseInt(value, 10);
-	if (!Number.isFinite(parsed) || parsed < 0) {
+function parseIntegerFlag(value, name, minimum = 0) {
+	if (!/^\d+$/.test(value)) {
 		throw new Error(`Invalid ${name}: ${value}`);
 	}
+	const parsed = Number(value);
+	if (!Number.isSafeInteger(parsed) || parsed < minimum) throw new Error(`Invalid ${name}: ${value}`);
 	return parsed;
 }
 
@@ -82,7 +91,9 @@ function parseArgs(argv) {
 		runtime: "auto",
 		agentDir: undefined,
 		isolatedAgentDir: false,
+		minimalResources: false,
 		cpuProfile: false,
+		jsonOutput: undefined,
 	};
 
 	for (let index = 0; index < argv.length; index++) {
@@ -103,6 +114,11 @@ function parseArgs(argv) {
 			continue;
 		}
 
+		if (arg === "--minimal-resources") {
+			options.minimalResources = true;
+			continue;
+		}
+
 		if (arg === "--skip-build") {
 			options.build = false;
 			continue;
@@ -120,7 +136,8 @@ function parseArgs(argv) {
 				arg === "--profile-dir" ||
 				arg === "--label" ||
 				arg === "--runtime" ||
-				arg === "--agent-dir") &&
+				arg === "--agent-dir" ||
+				arg === "--json-output") &&
 			index + 1 >= argv.length
 		) {
 			throw new Error(`Missing value for ${arg}`);
@@ -132,7 +149,7 @@ function parseArgs(argv) {
 		}
 
 		if (arg === "--runs") {
-			options.runs = parseIntegerFlag(argv[++index], "--runs");
+			options.runs = parseIntegerFlag(argv[++index], "--runs", 1);
 			continue;
 		}
 
@@ -158,6 +175,11 @@ function parseArgs(argv) {
 
 		if (arg === "--agent-dir") {
 			options.agentDir = resolve(argv[++index]);
+			continue;
+		}
+
+		if (arg === "--json-output") {
+			options.jsonOutput = resolve(argv[++index]);
 			continue;
 		}
 
@@ -261,27 +283,207 @@ function summarizeTimingMaps(runs) {
 	return summaries;
 }
 
+function writeJsonResult(options, runtime, measuredRuns, elapsedSummary, timingSummaries) {
+	if (!options.jsonOutput) return;
+	mkdirSync(dirname(options.jsonOutput), { recursive: true });
+	writeFileSync(
+		options.jsonOutput,
+		`${JSON.stringify(
+			{
+				generatedAt: new Date().toISOString(),
+				runtime,
+				mode: options.mode,
+				warmupRuns: options.warmup,
+				configuration: {
+					offline: options.offline,
+					isolatedAgentDir: options.isolatedAgentDir,
+					minimalResources: options.minimalResources,
+				},
+				measuredRuns: measuredRuns.map((run) => ({
+					elapsedMs: run.elapsedMs,
+					timingsMs: Object.fromEntries(run.timings),
+				})),
+				summary: {
+					elapsedMs: elapsedSummary,
+					timingsMs: Object.fromEntries(timingSummaries),
+				},
+			},
+			null,
+			2,
+		)}\n`,
+		"utf8",
+	);
+}
+
 function toMetricName(label) {
 	return `${label.replaceAll(/[^a-zA-Z0-9]+/g, "_").replaceAll(/^_+|_+$/g, "")}_ms`;
 }
 
 async function waitForExit(child, errorPrefix) {
-	return await new Promise((resolve, reject) => {
-		child.once("error", reject);
+	const { code, signal } = await child.exitResult;
+	if (signal) throw new Error(`${errorPrefix} exited from signal ${signal}`);
+	return code;
+}
+
+async function waitWithTimeout(promise, timeoutMs, description) {
+	let timeout;
+	try {
+		return await Promise.race([
+			promise,
+			new Promise((_, reject) => {
+				timeout = setTimeout(() => reject(new Error(`${description} timed out after ${timeoutMs}ms`)), timeoutMs);
+			}),
+		]);
+	} finally {
+		clearTimeout(timeout);
+	}
+}
+
+function observeChild(child) {
+	benchmarkChildren.add(child);
+	child.exitResult = new Promise((resolvePromise, reject) => {
+		child.once("error", (error) => {
+			benchmarkChildren.delete(child);
+			reject(error);
+		});
 		child.once("exit", (code, signal) => {
-			if (signal) {
-				reject(new Error(`${errorPrefix} exited from signal ${signal}`));
-				return;
-			}
-			resolve(code ?? 0);
+			benchmarkChildren.delete(child);
+			resolvePromise({ code: code ?? 0, signal });
 		});
 	});
+	return child;
+}
+
+function spawnManaged(executable, args, options) {
+	if (shuttingDown) throw new Error("Profiler is shutting down");
+	return observeChild(
+		spawn(executable, args, {
+			...options,
+			detached: process.platform !== "win32",
+		}),
+	);
+}
+
+function execFileAsync(file, args) {
+	return new Promise((resolvePromise, reject) => {
+		execFile(file, args, { encoding: "utf8", maxBuffer: 10 * 1024 * 1024 }, (error, stdout, stderr) => {
+			if (error) reject(Object.assign(error, { stdout, stderr }));
+			else resolvePromise({ stdout, stderr });
+		});
+	});
+}
+
+async function processTable() {
+	if (process.platform === "win32") {
+		const script = "Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId | ConvertTo-Json -Compress";
+		const { stdout } = await execFileAsync("powershell.exe", ["-NoProfile", "-Command", script]);
+		const parsed = JSON.parse(stdout || "[]");
+		return (Array.isArray(parsed) ? parsed : [parsed]).map((entry) => ({
+			pid: Number(entry.ProcessId),
+			ppid: Number(entry.ParentProcessId),
+			pgid: Number(entry.ProcessId),
+		}));
+	}
+
+	const { stdout } = await execFileAsync("ps", ["-axo", "pid=,ppid=,pgid="]);
+	return stdout
+		.trim()
+		.split(/\r?\n/)
+		.map((line) => line.trim().split(/\s+/).map(Number))
+		.filter(([pid, ppid, pgid]) => Number.isFinite(pid) && Number.isFinite(ppid) && Number.isFinite(pgid))
+		.map(([pid, ppid, pgid]) => ({ pid, ppid, pgid }));
+}
+
+function collectProcessTree(table, rootPid) {
+	const byParent = new Map();
+	for (const processInfo of table) {
+		const children = byParent.get(processInfo.ppid) ?? [];
+		children.push(processInfo.pid);
+		byParent.set(processInfo.ppid, children);
+	}
+	const wanted = new Set([rootPid]);
+	const queue = [rootPid];
+	while (queue.length > 0) {
+		for (const childPid of byParent.get(queue.shift()) ?? []) {
+			if (wanted.has(childPid)) continue;
+			wanted.add(childPid);
+			queue.push(childPid);
+		}
+	}
+	return table.filter((entry) => wanted.has(entry.pid));
+}
+
+function processGroupExists(processGroupId) {
+	try {
+		process.kill(-processGroupId, 0);
+		return true;
+	} catch (error) {
+		return error?.code === "EPERM";
+	}
+}
+
+async function waitForProcessGroupsToExit(processGroupIds, timeoutMs) {
+	const deadline = Date.now() + timeoutMs;
+	while (processGroupIds.some((id) => processGroupExists(id)) && Date.now() < deadline) {
+		await new Promise((resolvePromise) => setTimeout(resolvePromise, 25));
+	}
+}
+
+async function terminateProcessTree(child) {
+	if (!child) return;
+	const tree = await processTable()
+		.then((table) => collectProcessTree(table, child.pid))
+		.catch(() => []);
+	const processGroupIds =
+		process.platform === "win32" ? [] : Array.from(new Set([child.pid, ...tree.map((entry) => entry.pgid)]));
+
+	if (child.exitCode === null && child.signalCode === null) {
+		child.stdin?.end();
+		await waitWithTimeout(child.exitResult, 1_000, "graceful benchmark shutdown").catch(() => undefined);
+	}
+
+	if (process.platform === "win32") {
+		if (child.exitCode === null && child.signalCode === null) {
+			await execFileAsync("taskkill", ["/pid", String(child.pid), "/T", "/F"]).catch(() => undefined);
+		}
+		for (const processInfo of tree.reverse()) {
+			if (processInfo.pid === child.pid) continue;
+			await execFileAsync("taskkill", ["/pid", String(processInfo.pid), "/T", "/F"]).catch(() => undefined);
+		}
+	} else {
+		for (const processGroupId of processGroupIds) {
+			if (!processGroupExists(processGroupId)) continue;
+			try {
+				process.kill(-processGroupId, "SIGTERM");
+			} catch {
+				// Process group may have exited between checks.
+			}
+		}
+		await waitForProcessGroupsToExit(processGroupIds, 250);
+		for (const processGroupId of processGroupIds) {
+			if (!processGroupExists(processGroupId)) continue;
+			try {
+				process.kill(-processGroupId, "SIGKILL");
+			} catch {
+				// Process group may have exited between checks.
+			}
+		}
+		await waitForProcessGroupsToExit(processGroupIds, 1_000);
+	}
+	await waitWithTimeout(child.exitResult, 1_000, "forced benchmark shutdown").catch(() => undefined);
+	benchmarkChildren.delete(child);
+}
+
+async function terminateBenchmarkChildren() {
+	while (benchmarkChildren.size > 0) {
+		await Promise.all(Array.from(benchmarkChildren, (child) => terminateProcessTree(child)));
+	}
 }
 
 async function runBuild() {
 	process.stdout.write("Building packages/tui, packages/ai, packages/agent, and packages/coding-agent...\n");
 	const startedAt = performance.now();
-	const child = spawn(
+	const child = spawnManaged(
 		"npm",
 		[
 			"run",
@@ -314,22 +516,35 @@ async function runBuild() {
 		stderr += chunk;
 	});
 
-	const exitCode = await waitForExit(child, "Build");
-	if (exitCode !== 0) {
-		if (stdout.trim()) {
-			process.stdout.write(`${stdout}${stdout.endsWith("\n") ? "" : "\n"}`);
+	try {
+		const exitCode = await waitWithTimeout(waitForExit(child, "Build"), buildTimeoutMs, "Build");
+		if (exitCode !== 0) {
+			if (stdout.trim()) {
+				process.stdout.write(`${stdout}${stdout.endsWith("\n") ? "" : "\n"}`);
+			}
+			if (stderr.trim()) {
+				process.stderr.write(`${stderr}${stderr.endsWith("\n") ? "" : "\n"}`);
+			}
+			throw new Error(`Build failed with exit code ${exitCode}`);
 		}
-		if (stderr.trim()) {
-			process.stderr.write(`${stderr}${stderr.endsWith("\n") ? "" : "\n"}`);
-		}
-		throw new Error(`Build failed with exit code ${exitCode}`);
+	} finally {
+		await terminateProcessTree(child);
 	}
 
 	process.stdout.write(`Build completed in ${formatMs(performance.now() - startedAt)}\n`);
 }
 
-function getRuntimeCommand(runtime, mode, profileDir, profileName, cpuProfile) {
+function getRuntimeCommand(runtime, mode, profileDir, profileName, cpuProfile, minimalResources) {
 	const benchmarkArgs = ["--no-session"];
+	if (minimalResources) {
+		benchmarkArgs.push(
+			"--no-extensions",
+			"--no-skills",
+			"--no-prompt-templates",
+			"--no-themes",
+			"--no-context-files",
+		);
+	}
 	if (mode === "rpc") {
 		benchmarkArgs.push("--mode", "rpc");
 	}
@@ -383,8 +598,16 @@ async function runTuiBenchmarkRun({ runtime, runIndex, measuredIndex, options, p
 		mkdirSync(isolatedAgentDir, { recursive: true });
 	}
 
-	const command = getRuntimeCommand(runtime, "tui", profileDir, profileName, options.cpuProfile);
-	const child = spawn(command.executable, command.args, {
+	const command = getRuntimeCommand(
+		runtime,
+		"tui",
+		profileDir,
+		profileName,
+		options.cpuProfile,
+		options.minimalResources,
+	);
+	const startedAt = performance.now();
+	const child = spawnManaged(command.executable, command.args, {
 		cwd: packageDir,
 		env: createBenchmarkEnv(options, isolatedAgentDir),
 		stdio: ["inherit", "ignore", "pipe"],
@@ -397,11 +620,10 @@ async function runTuiBenchmarkRun({ runtime, runIndex, measuredIndex, options, p
 		stderr += chunk;
 	});
 
-	const startedAt = performance.now();
-	const exitCode = await waitForExit(child, `Benchmark ${measuredIndex === undefined ? `warmup ${runNumber}` : `run ${measuredIndex}`}`);
-	const elapsedMs = performance.now() - startedAt;
-
 	try {
+		const description = `Benchmark ${measuredIndex === undefined ? `warmup ${runNumber}` : `run ${measuredIndex}`}`;
+		const exitCode = await waitWithTimeout(waitForExit(child, description), benchmarkTimeoutMs, description);
+		const elapsedMs = performance.now() - startedAt;
 		if (exitCode !== 0) {
 			throw new Error(stderr.trim() || `Benchmark child exited with code ${exitCode}`);
 		}
@@ -413,6 +635,7 @@ async function runTuiBenchmarkRun({ runtime, runIndex, measuredIndex, options, p
 
 		return { elapsedMs, profilePath, timings: parseStartupTimings(stderr) };
 	} finally {
+		await terminateProcessTree(child);
 		if (tempRoot) {
 			rmSync(tempRoot, { recursive: true, force: true });
 		}
@@ -442,8 +665,16 @@ async function runRpcBenchmarkRun({ runtime, runIndex, measuredIndex, options, p
 		mkdirSync(isolatedAgentDir, { recursive: true });
 	}
 
-	const command = getRuntimeCommand(runtime, "rpc", profileDir, profileName, options.cpuProfile);
-	const child = spawn(command.executable, command.args, {
+	const command = getRuntimeCommand(
+		runtime,
+		"rpc",
+		profileDir,
+		profileName,
+		options.cpuProfile,
+		options.minimalResources,
+	);
+	const startedAt = performance.now();
+	const child = spawnManaged(command.executable, command.args, {
 		cwd: packageDir,
 		env: createBenchmarkEnv(options, isolatedAgentDir),
 		stdio: ["pipe", "pipe", "pipe"],
@@ -455,7 +686,6 @@ async function runRpcBenchmarkRun({ runtime, runIndex, measuredIndex, options, p
 	let readyElapsedMs;
 	let responseError;
 	const requestId = `startup-benchmark-${runNumber}`;
-	const startedAt = performance.now();
 
 	child.stdout.setEncoding("utf8");
 	child.stdout.on("data", (chunk) => {
@@ -468,6 +698,7 @@ async function runRpcBenchmarkRun({ runtime, runIndex, measuredIndex, options, p
 				parsed = JSON.parse(line);
 			} catch (error) {
 				responseError = error instanceof Error ? error.message : String(error);
+				child.stdin.end();
 				return;
 			}
 
@@ -477,6 +708,7 @@ async function runRpcBenchmarkRun({ runtime, runIndex, measuredIndex, options, p
 
 			if (parsed.success !== true) {
 				responseError = typeof parsed.error === "string" ? parsed.error : "get_state failed";
+				child.stdin.end();
 				return;
 			}
 
@@ -495,9 +727,9 @@ async function runRpcBenchmarkRun({ runtime, runIndex, measuredIndex, options, p
 	child.stdin.setDefaultEncoding("utf8");
 	child.stdin.write(`${JSON.stringify({ id: requestId, type: "get_state" })}\n`);
 
-	const exitCode = await waitForExit(child, `Benchmark ${measuredIndex === undefined ? `warmup ${runNumber}` : `run ${measuredIndex}`}`);
-
 	try {
+		const description = `Benchmark ${measuredIndex === undefined ? `warmup ${runNumber}` : `run ${measuredIndex}`}`;
+		const exitCode = await waitWithTimeout(waitForExit(child, description), benchmarkTimeoutMs, description);
 		if (responseError) {
 			throw new Error(responseError);
 		}
@@ -515,6 +747,7 @@ async function runRpcBenchmarkRun({ runtime, runIndex, measuredIndex, options, p
 
 		return { elapsedMs: readyElapsedMs, profilePath, timings: parseStartupTimings(stderr) };
 	} finally {
+		await terminateProcessTree(child);
 		if (tempRoot) {
 			rmSync(tempRoot, { recursive: true, force: true });
 		}
@@ -591,6 +824,7 @@ async function main() {
 
 	const elapsedSummary = summarize(measuredRuns.map((run) => run.elapsedMs));
 	const timingSummaries = summarizeTimingMaps(measuredRuns);
+	writeJsonResult(options, runtime, measuredRuns, elapsedSummary, timingSummaries);
 	const maxElapsedRun = measuredRuns.reduce((slowest, run) => (run.elapsedMs > slowest.elapsedMs ? run : slowest));
 	if (measuredRuns.length === 1) {
 		process.stdout.write("\nResult\n");
@@ -631,8 +865,19 @@ async function main() {
 	}
 }
 
+for (const signal of ["SIGINT", "SIGTERM"]) {
+	process.once(signal, () => {
+		if (shuttingDown) return;
+		shuttingDown = true;
+		const exitCode = signal === "SIGINT" ? 130 : 143;
+		process.exitCode = exitCode;
+		void terminateBenchmarkChildren().finally(() => process.exit(exitCode));
+	});
+}
+
 main().catch((error) => {
+	if (shuttingDown) return;
 	const message = error instanceof Error ? error.message : String(error);
 	console.error(message);
-	process.exit(1);
+	process.exitCode = 1;
 });

@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { getModel } from "@arcmind/ai/compat";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { AuthStorage } from "../src/core/auth-storage.ts";
+import { ModelRegistry } from "../src/core/model-registry.ts";
 import { DefaultResourceLoader } from "../src/core/resource-loader.ts";
 import type { ExtensionFactory } from "../src/core/sdk.ts";
 import { createAgentSession } from "../src/core/sdk.ts";
@@ -26,11 +27,16 @@ describe("AgentSession dynamic provider registration", () => {
 		}
 	});
 
-	async function createSession(extensionFactories: ExtensionFactory[]) {
+	async function createSession(
+		extensionFactories: ExtensionFactory[],
+		configureRegistry?: (modelRegistry: ModelRegistry) => void,
+	) {
 		const settingsManager = SettingsManager.create(tempDir, agentDir);
 		const sessionManager = SessionManager.inMemory();
 		const authStorage = AuthStorage.create(join(agentDir, "auth.json"));
 		authStorage.setRuntimeApiKey("anthropic", "test-key");
+		const modelRegistry = ModelRegistry.create(authStorage, join(agentDir, "models.json"));
+		configureRegistry?.(modelRegistry);
 		const resourceLoader = new DefaultResourceLoader({
 			cwd: tempDir,
 			agentDir,
@@ -42,10 +48,11 @@ describe("AgentSession dynamic provider registration", () => {
 		const { session } = await createAgentSession({
 			cwd: tempDir,
 			agentDir,
-			model: getModel("anthropic", "claude-sonnet-4-5")!,
+			model: modelRegistry.find("anthropic", "claude-sonnet-4-5") ?? getModel("anthropic", "claude-sonnet-4-5")!,
 			settingsManager,
 			sessionManager,
 			authStorage,
+			modelRegistry,
 			resourceLoader,
 		});
 
@@ -112,6 +119,38 @@ describe("AgentSession dynamic provider registration", () => {
 		expect(session.model?.baseUrl).toBe("http://localhost:8080/command");
 		expect(await capturePromptBaseUrl(session)).toBe("http://localhost:8080/command");
 
+		session.dispose();
+	});
+
+	it("removes providers that are no longer registered after reload", async () => {
+		let enabled = true;
+		const session = await createSession([
+			(arcmind) => {
+				if (enabled) {
+					arcmind.registerProvider("anthropic", { baseUrl: "http://localhost:8080/temporary" });
+				}
+			},
+		]);
+
+		expect(session.model?.baseUrl).toBe("http://localhost:8080/temporary");
+
+		enabled = false;
+		await session.reload();
+
+		expect(session.model?.baseUrl).not.toBe("http://localhost:8080/temporary");
+		session.dispose();
+	});
+
+	it("preserves SDK-registered providers across extension reload", async () => {
+		const session = await createSession([], (modelRegistry) => {
+			modelRegistry.registerProvider("anthropic", { baseUrl: "http://localhost:8080/sdk" });
+		});
+
+		expect(session.model?.baseUrl).toBe("http://localhost:8080/sdk");
+
+		await session.reload();
+
+		expect(session.model?.baseUrl).toBe("http://localhost:8080/sdk");
 		session.dispose();
 	});
 });

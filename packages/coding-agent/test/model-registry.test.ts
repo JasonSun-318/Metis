@@ -3,7 +3,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AnthropicMessagesCompat, Api, Context, Model, OpenAICompletionsCompat } from "@arcmind/ai/compat";
 import { getApiProvider, getSupportedThinkingLevels } from "@arcmind/ai/compat";
-import { getOAuthProvider } from "@arcmind/ai/oauth";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { AuthStorage } from "../src/core/auth-storage.ts";
 import { clearApiKeyCache, ModelRegistry, type ProviderConfigInput } from "../src/core/model-registry.ts";
@@ -1149,15 +1148,16 @@ describe("ModelRegistry", () => {
 				},
 			});
 
-			expect(getOAuthProvider("anthropic")?.name).toBe("Custom Anthropic OAuth");
+			expect(authStorage.getOAuthProvider("anthropic")?.name).toBe("Custom Anthropic OAuth");
 
 			registry.unregisterProvider("anthropic");
 
-			expect(getOAuthProvider("anthropic")?.name).not.toBe("Custom Anthropic OAuth");
+			expect(authStorage.getOAuthProvider("anthropic")?.name).not.toBe("Custom Anthropic OAuth");
 		});
 
 		test("unregisterProvider removes custom streamSimple override and restores built-in API stream handler", () => {
 			const registry = ModelRegistry.create(authStorage, modelsJsonPath);
+			const globalProvider = getApiProvider("openai-completions");
 
 			registry.registerProvider("stream-override-provider", {
 				api: "openai-completions",
@@ -1168,22 +1168,82 @@ describe("ModelRegistry", () => {
 
 			let threwCustomOverride = false;
 			try {
-				getApiProvider("openai-completions")?.streamSimple(openAiModel, emptyContext);
+				registry.streamSimple(openAiModel, emptyContext);
 			} catch (error) {
 				threwCustomOverride = error instanceof Error && error.message === "custom streamSimple override";
 			}
 			expect(threwCustomOverride).toBe(true);
+			expect(getApiProvider("openai-completions")).toBe(globalProvider);
 
 			registry.unregisterProvider("stream-override-provider");
 
 			let threwCustomOverrideAfterUnregister = false;
 			try {
-				getApiProvider("openai-completions")?.streamSimple(openAiModel, emptyContext);
+				registry.streamSimple(openAiModel, emptyContext);
 			} catch (error) {
 				threwCustomOverrideAfterUnregister =
 					error instanceof Error && error.message === "custom streamSimple override";
 			}
 			expect(threwCustomOverrideAfterUnregister).toBe(false);
+			expect(getApiProvider("openai-completions")).toBe(globalProvider);
+		});
+
+		test("resetExtensionProviders restores SDK-owned provider models and stream routing", () => {
+			const registry = ModelRegistry.create(authStorage, modelsJsonPath);
+			registry.registerProvider("anthropic", { baseUrl: "https://sdk.example/anthropic" });
+			registry.registerProvider("sdk-stream", {
+				api: "openai-completions",
+				streamSimple: () => {
+					throw new Error("sdk stream");
+				},
+			});
+			registry.registerExtensionProvider("anthropic", { baseUrl: "https://extension.example/anthropic" });
+			registry.registerExtensionProvider("extension-stream", {
+				api: "openai-completions",
+				streamSimple: () => {
+					throw new Error("extension stream");
+				},
+			});
+
+			expect(getModelsForProvider(registry, "anthropic")[0]?.baseUrl).toBe("https://extension.example/anthropic");
+			expect(() => registry.streamSimple(openAiModel, emptyContext)).toThrow("extension stream");
+
+			registry.resetExtensionProviders();
+
+			expect(getModelsForProvider(registry, "anthropic")[0]?.baseUrl).toBe("https://sdk.example/anthropic");
+			expect(() => registry.streamSimple(openAiModel, emptyContext)).toThrow("sdk stream");
+		});
+
+		test("non-routing extension metadata does not reorder SDK stream handlers", () => {
+			const registry = ModelRegistry.create(authStorage, modelsJsonPath);
+			registry.registerProvider("sdk-a", {
+				api: "openai-completions",
+				streamSimple: () => {
+					throw new Error("sdk A stream");
+				},
+			});
+			registry.registerProvider("sdk-b", {
+				api: "openai-completions",
+				streamSimple: () => {
+					throw new Error("sdk B stream");
+				},
+			});
+
+			expect(() => registry.streamSimple(openAiModel, emptyContext)).toThrow("sdk B stream");
+
+			registry.registerExtensionProvider("sdk-a", { baseUrl: "https://extension.example/sdk-a" });
+			expect(() => registry.streamSimple(openAiModel, emptyContext)).toThrow("sdk B stream");
+
+			registry.registerExtensionProvider("sdk-a", {
+				api: "openai-completions",
+				streamSimple: () => {
+					throw new Error("extension A stream");
+				},
+			});
+			expect(() => registry.streamSimple(openAiModel, emptyContext)).toThrow("extension A stream");
+
+			registry.resetExtensionProviders();
+			expect(() => registry.streamSimple(openAiModel, emptyContext)).toThrow("sdk B stream");
 		});
 
 		describe("dynamic provider override persistence", () => {

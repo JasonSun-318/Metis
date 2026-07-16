@@ -7,6 +7,7 @@ import {
 	type Api,
 	type AssistantMessageEventStream,
 	type Context,
+	getBuiltInApiStreams,
 	getModels,
 	getProviders,
 	type KnownProvider,
@@ -14,11 +15,8 @@ import {
 	type OAuthProviderInterface,
 	type OpenAICompletionsCompat,
 	type OpenAIResponsesCompat,
-	registerApiProvider,
-	resetApiProviders,
 	type SimpleStreamOptions,
 } from "@arcmind/ai/compat";
-import { registerOAuthProvider, resetOAuthProviders } from "@arcmind/ai/oauth";
 import { existsSync, readFileSync } from "fs";
 import { join } from "path";
 import { type Static, Type } from "typebox";
@@ -374,6 +372,8 @@ export class ModelRegistry {
 	private modelRequestHeaders: Map<string, Record<string, string>> = new Map();
 	private configModelOverrides: Map<string, Map<string, ModelOverride>> = new Map();
 	private registeredProviders: Map<string, ProviderConfigInput> = new Map();
+	private extensionProviders: Map<string, ProviderConfigInput> = new Map();
+	private providerStreams: Map<Api, ProviderConfigInput["streamSimple"]> = new Map();
 	private loadError: string | undefined = undefined;
 	readonly authStorage: AuthStorage;
 	private modelsJsonPath: string | undefined;
@@ -400,15 +400,21 @@ export class ModelRegistry {
 		this.modelRequestHeaders.clear();
 		this.loadError = undefined;
 
-		// Ensure dynamic API/OAuth registrations are rebuilt from current provider state.
-		resetApiProviders();
-		resetOAuthProviders();
+		this.providerStreams.clear();
+		this.authStorage.resetOAuthProviders();
 
 		this.loadModels();
 
-		for (const [providerName, config] of this.registeredProviders.entries()) {
+		for (const [providerName, config] of this.getEffectiveProviderConfigs()) {
 			this.applyProviderConfig(providerName, config);
 		}
+		this.rebuildDynamicRouting();
+	}
+
+	/** Drop only extension-owned providers before the current extension set is loaded again. */
+	resetExtensionProviders(): void {
+		this.extensionProviders.clear();
+		this.refresh();
 	}
 
 	/**
@@ -813,7 +819,7 @@ export class ModelRegistry {
 	 * Get display name for a provider.
 	 */
 	getProviderDisplayName(provider: string): string {
-		const registeredProvider = this.registeredProviders.get(provider);
+		const registeredProvider = this.getEffectiveProviderConfig(provider);
 		const oauthProvider = this.authStorage.getOAuthProviders().find((p) => p.id === provider);
 
 		return (
@@ -856,9 +862,12 @@ export class ModelRegistry {
 	 * If provider has oauth: registers OAuth provider for /login support.
 	 */
 	registerProvider(providerName: string, config: ProviderConfigInput): void {
-		this.validateProviderConfig(providerName, config);
-		this.applyProviderConfig(providerName, config);
-		this.upsertRegisteredProvider(providerName, config);
+		this.registerProviderIn(this.registeredProviders, providerName, config);
+	}
+
+	/** Register a provider owned by the current extension set. */
+	registerExtensionProvider(providerName: string, config: ProviderConfigInput): void {
+		this.registerProviderIn(this.extensionProviders, providerName, config);
 	}
 
 	/**
@@ -876,21 +885,90 @@ export class ModelRegistry {
 		this.refresh();
 	}
 
+	/** Unregister a provider owned by the current extension set. */
+	unregisterExtensionProvider(providerName: string): void {
+		if (!this.extensionProviders.has(providerName)) return;
+		this.extensionProviders.delete(providerName);
+		this.refresh();
+	}
+
 	/**
 	 * Upsert a provider config into registeredProviders.
 	 * If the provider is already registered, defined values in the incoming config
 	 * override existing ones; undefined values are preserved from the stored config.
 	 * If the provider is not registered, the incoming config is stored as-is.
 	 */
-	private upsertRegisteredProvider(providerName: string, config: ProviderConfigInput): void {
-		const existing = this.registeredProviders.get(providerName);
+	private registerProviderIn(
+		providers: Map<string, ProviderConfigInput>,
+		providerName: string,
+		config: ProviderConfigInput,
+	): void {
+		this.validateProviderConfig(providerName, config);
+		this.upsertProviderConfig(providers, providerName, config);
+		this.applyProviderConfig(providerName, this.getEffectiveProviderConfig(providerName)!);
+		this.rebuildDynamicRouting();
+	}
+
+	private mergeProviderConfig(
+		existing: ProviderConfigInput | undefined,
+		config: ProviderConfigInput,
+	): ProviderConfigInput {
+		const merged = { ...existing };
+		for (const key of Object.keys(config) as (keyof ProviderConfigInput)[]) {
+			if (config[key] !== undefined) {
+				(merged as Record<string, unknown>)[key] = config[key];
+			}
+		}
+		return merged;
+	}
+
+	private upsertProviderConfig(
+		providers: Map<string, ProviderConfigInput>,
+		providerName: string,
+		config: ProviderConfigInput,
+	): void {
+		const existing = providers.get(providerName);
 		if (!existing) {
-			this.registeredProviders.set(providerName, config);
+			providers.set(providerName, { ...config });
 			return;
 		}
-		for (const k of Object.keys(config) as (keyof ProviderConfigInput)[]) {
-			if (config[k] !== undefined) {
-				(existing as Record<string, unknown>)[k] = config[k];
+		const merged = this.mergeProviderConfig(existing, config);
+		if (config.streamSimple !== undefined || config.api !== undefined) {
+			providers.delete(providerName);
+		}
+		providers.set(providerName, merged);
+	}
+
+	private getEffectiveProviderConfig(providerName: string): ProviderConfigInput | undefined {
+		const registered = this.registeredProviders.get(providerName);
+		const extension = this.extensionProviders.get(providerName);
+		if (!registered) return extension;
+		if (!extension) return registered;
+		return this.mergeProviderConfig(registered, extension);
+	}
+
+	private getEffectiveProviderConfigs(): Map<string, ProviderConfigInput> {
+		const effective = new Map(this.registeredProviders);
+		for (const [providerName, config] of this.extensionProviders) {
+			const existing = effective.get(providerName);
+			const merged = this.mergeProviderConfig(existing, config);
+			if (!existing || config.streamSimple !== undefined || config.api !== undefined) {
+				effective.delete(providerName);
+			}
+			effective.set(providerName, merged);
+		}
+		return effective;
+	}
+
+	private rebuildDynamicRouting(): void {
+		this.providerStreams.clear();
+		this.authStorage.resetOAuthProviders();
+		for (const [providerName, config] of this.getEffectiveProviderConfigs()) {
+			if (config.oauth) {
+				this.authStorage.registerOAuthProvider({ ...config.oauth, id: providerName });
+			}
+			if (config.streamSimple && config.api) {
+				this.providerStreams.set(config.api, config.streamSimple);
 			}
 		}
 	}
@@ -920,28 +998,6 @@ export class ModelRegistry {
 	}
 
 	private applyProviderConfig(providerName: string, config: ProviderConfigInput): void {
-		// Register OAuth provider if provided
-		if (config.oauth) {
-			// Ensure the OAuth provider ID matches the provider name
-			const oauthProvider: OAuthProviderInterface = {
-				...config.oauth,
-				id: providerName,
-			};
-			registerOAuthProvider(oauthProvider);
-		}
-
-		if (config.streamSimple) {
-			const streamSimple = config.streamSimple;
-			registerApiProvider(
-				{
-					api: config.api!,
-					stream: (model, context, options) => streamSimple(model, context, options as SimpleStreamOptions),
-					streamSimple,
-				},
-				`provider:${providerName}`,
-			);
-		}
-
 		this.storeProviderRequestConfig(providerName, config);
 
 		if (config.models && config.models.length > 0) {
@@ -993,6 +1049,18 @@ export class ModelRegistry {
 				};
 			});
 		}
+	}
+
+	streamSimple(model: Model<Api>, context: Context, options?: SimpleStreamOptions): AssistantMessageEventStream {
+		const providerStream = this.providerStreams.get(model.api);
+		if (providerStream) {
+			return providerStream(model, context, options);
+		}
+		const builtInStreams = getBuiltInApiStreams(model.api);
+		if (!builtInStreams) {
+			throw new Error(`No API provider registered for api: ${model.api}`);
+		}
+		return builtInStreams.streamSimple(model, context, options);
 	}
 }
 

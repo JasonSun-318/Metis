@@ -6,9 +6,9 @@ import { createHarness, type Harness } from "../harness.ts";
 describe("issue #6324 branch summary ambient auth", () => {
 	const harnesses: Harness[] = [];
 
-	afterEach(() => {
+	afterEach(async () => {
 		while (harnesses.length > 0) {
-			harnesses.pop()?.cleanup();
+			await harnesses.pop()?.cleanup();
 		}
 	});
 
