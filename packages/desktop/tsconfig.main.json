@@ -1,0 +1,25 @@
+{
+	"extends": "../../tsconfig.base.json",
+	"compilerOptions": {
+		"noEmit": true,
+		"module": "ESNext",
+		"moduleResolution": "Bundler",
+		"lib": ["ES2022"],
+		"types": ["node", "electron", "vitest/globals"],
+		"jsx": "react-jsx",
+		"allowImportingTsExtensions": true
+	},
+	"include": [
+		"forge.config.ts",
+		"playwright.config.ts",
+		"vitest.config.ts",
+		"webpack.main.config.ts",
+		"webpack.renderer.config.ts",
+		"e2e/**/*.ts",
+		"src/main/**/*.ts",
+		"src/preload.ts",
+		"src/types/**/*.d.ts",
+		"test/**/*.ts"
+	],
+	"exclude": ["node_modules", ".webpack", "out", "src/renderer"]
+}

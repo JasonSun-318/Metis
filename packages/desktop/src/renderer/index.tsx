@@ -1,0 +1,17 @@
+import { StrictMode } from "react";
+import { createRoot } from "react-dom/client";
+import { App } from "./components/App.tsx";
+import { AppStore } from "./store/app-store.ts";
+import "./styles/tokens.css";
+import "./styles/app.css";
+
+const root = document.getElementById("root");
+if (!root) throw new Error("ArcMind renderer root is missing");
+
+const store = new AppStore();
+
+createRoot(root).render(
+	<StrictMode>
+		<App api={window.arcMind} store={store} />
+	</StrictMode>,
+);

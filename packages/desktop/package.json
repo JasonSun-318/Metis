@@ -1,0 +1,52 @@
+{
+	"name": "@arcmind/desktop",
+	"version": "0.80.6",
+	"description": "Secure Electron desktop shell for ArcMind",
+	"private": true,
+	"main": ".webpack/main",
+	"scripts": {
+		"clean": "shx rm -rf .webpack out",
+		"start": "electron-forge start",
+		"package": "electron-forge package",
+		"make": "electron-forge make",
+		"verify:package": "node scripts/verify-package.mjs",
+		"check:types": "tsgo --noEmit -p tsconfig.main.json && tsgo --noEmit -p tsconfig.renderer.json",
+		"test": "vitest --run",
+		"test:e2e": "playwright test",
+		"profile": "node ../../scripts/profile-desktop.mjs"
+	},
+	"dependencies": {
+		"@arcmind/app-protocol": "^0.80.6",
+		"@arcmind/app-server": "^0.80.6",
+		"@tanstack/react-virtual": "3.14.6",
+		"electron-squirrel-startup": "1.0.1",
+		"react": "19.2.7",
+		"react-dom": "19.2.7"
+	},
+	"devDependencies": {
+		"@electron-forge/cli": "7.11.2",
+		"@electron-forge/maker-deb": "7.11.2",
+		"@electron-forge/maker-dmg": "7.11.2",
+		"@electron-forge/maker-rpm": "7.11.2",
+		"@electron-forge/maker-squirrel": "7.11.2",
+		"@electron-forge/maker-zip": "7.11.2",
+		"@electron-forge/plugin-auto-unpack-natives": "7.11.2",
+		"@electron-forge/plugin-base": "7.11.2",
+		"@electron-forge/plugin-webpack": "7.11.2",
+		"@electron-forge/shared-types": "7.11.2",
+		"@electron/asar": "3.4.1",
+		"@electron/fuses": "2.1.3",
+		"@playwright/test": "1.61.1",
+		"@types/react": "19.2.17",
+		"@types/react-dom": "19.2.3",
+		"css-loader": "7.1.4",
+		"electron": "43.1.1",
+		"jsdom": "29.1.1",
+		"mini-css-extract-plugin": "2.10.2",
+		"shx": "0.4.0",
+		"ts-loader": "9.6.2",
+		"vitest": "4.1.9",
+		"webpack": "5.108.4",
+		"webpack-cli": "7.2.1"
+	}
+}

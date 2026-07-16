@@ -1,0 +1,14 @@
+{
+	"extends": "../../tsconfig.base.json",
+	"compilerOptions": {
+		"noEmit": true,
+		"module": "ESNext",
+		"moduleResolution": "Bundler",
+		"lib": ["ES2022", "DOM", "DOM.Iterable"],
+		"types": ["react", "react-dom"],
+		"jsx": "react-jsx",
+		"allowImportingTsExtensions": true
+	},
+	"include": ["src/renderer/**/*.ts", "src/renderer/**/*.tsx"],
+	"exclude": ["node_modules", ".webpack", "out"]
+}

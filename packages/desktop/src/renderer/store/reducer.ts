@@ -1,0 +1,244 @@
+import type {
+	ConnectionEventsParams,
+	DomainEvent,
+	InteractionView,
+	ItemView,
+	SessionSnapshot,
+	SessionSummary,
+	TurnView,
+} from "@arcmind/app-protocol";
+
+export type ProjectionSyncStatus = "empty" | "ready" | "resubscribing" | "resnapshot_required";
+export type BatchApplyResult = "applied" | "resnapshot_required";
+
+export interface MutableProjectionState {
+	readonly sessionsById: Map<string, SessionSummary>;
+	sessionOrder: string[];
+	activeSessionId: string | null;
+	readonly turnsById: Map<string, TurnView>;
+	turnOrder: string[];
+	readonly itemsById: Map<string, ItemView>;
+	itemOrder: string[];
+	readonly interactionsById: Map<string, InteractionView>;
+	interactionOrder: string[];
+	notifications: Array<Extract<DomainEvent, { type: "interaction/notify" }>>;
+	nextBeforeItemId: string | null;
+	activeTurnId: string | null;
+	serverEpoch: string | null;
+	cursor: number;
+	syncStatus: ProjectionSyncStatus;
+}
+
+export function createProjectionState(): MutableProjectionState {
+	return {
+		sessionsById: new Map(),
+		sessionOrder: [],
+		activeSessionId: null,
+		turnsById: new Map(),
+		turnOrder: [],
+		itemsById: new Map(),
+		itemOrder: [],
+		interactionsById: new Map(),
+		interactionOrder: [],
+		notifications: [],
+		nextBeforeItemId: null,
+		activeTurnId: null,
+		serverEpoch: null,
+		cursor: 0,
+		syncStatus: "empty",
+	};
+}
+
+export function replaceSessionList(state: MutableProjectionState, sessions: readonly SessionSummary[]): void {
+	const active = state.activeSessionId === null ? undefined : state.sessionsById.get(state.activeSessionId);
+	state.sessionsById.clear();
+	state.sessionOrder = [];
+	for (const session of sessions) {
+		state.sessionsById.set(session.sessionId, structuredClone(session));
+		state.sessionOrder.push(session.sessionId);
+	}
+	if (active && !state.sessionsById.has(active.sessionId)) {
+		state.sessionsById.set(active.sessionId, active);
+		state.sessionOrder.unshift(active.sessionId);
+	}
+}
+
+export function replaceProjectionSnapshot(state: MutableProjectionState, snapshotValue: SessionSnapshot): void {
+	const snapshot = structuredClone(snapshotValue);
+	const sessionId = snapshot.session.sessionId;
+	state.sessionsById.set(sessionId, snapshot.session);
+	if (!state.sessionOrder.includes(sessionId)) state.sessionOrder.unshift(sessionId);
+	state.activeSessionId = sessionId;
+
+	state.turnsById.clear();
+	state.turnOrder = [];
+	for (const turn of snapshot.turns) {
+		state.turnsById.set(turn.turnId, turn);
+		state.turnOrder.push(turn.turnId);
+	}
+
+	state.itemsById.clear();
+	state.itemOrder = [];
+	for (const item of snapshot.recentItems) {
+		state.itemsById.set(item.itemId, item);
+		state.itemOrder.push(item.itemId);
+	}
+
+	state.interactionsById.clear();
+	state.interactionOrder = [];
+	for (const interaction of snapshot.pendingInteractions) {
+		state.interactionsById.set(interaction.interactionId, interaction);
+		state.interactionOrder.push(interaction.interactionId);
+	}
+
+	state.nextBeforeItemId = snapshot.nextBeforeItemId;
+	state.activeTurnId = snapshot.activeTurnId;
+	state.serverEpoch = snapshot.serverEpoch;
+	state.cursor = snapshot.cursor;
+	state.syncStatus = "ready";
+}
+
+export function markProjectionResubscribing(state: MutableProjectionState): void {
+	state.syncStatus = "resubscribing";
+}
+
+function eventSessionId(event: DomainEvent): string | undefined {
+	switch (event.type) {
+		case "session/updated":
+			return event.session.sessionId;
+		case "turn/started":
+		case "turn/completed":
+		case "turn/interrupted":
+			return event.turn.sessionId;
+		case "item/started":
+		case "item/completed":
+			return event.item.sessionId;
+		case "item/delta":
+			return event.sessionId;
+		case "interaction/notify":
+			return event.sessionId;
+		case "server/state":
+			return undefined;
+	}
+}
+
+function canApplyEvents(state: MutableProjectionState, events: readonly DomainEvent[]): boolean {
+	const activeSessionId = state.activeSessionId;
+	if (!activeSessionId) return false;
+	const itemStates = new Map<string, ItemView["state"]>();
+	for (const event of events) {
+		const sessionId = eventSessionId(event);
+		if (sessionId !== undefined && sessionId !== activeSessionId) return false;
+		switch (event.type) {
+			case "item/started":
+			case "item/completed":
+				itemStates.set(event.item.itemId, event.item.state);
+				break;
+			case "item/delta": {
+				const stateBeforeDelta = itemStates.get(event.itemId) ?? state.itemsById.get(event.itemId)?.state;
+				if (stateBeforeDelta !== "streaming") return false;
+				break;
+			}
+		}
+	}
+	return true;
+}
+
+function upsertOrdered<T>(map: Map<string, T>, order: string[], id: string, value: T): string[] {
+	if (map.has(id)) {
+		map.set(id, value);
+		return order;
+	}
+	map.set(id, value);
+	return [...order, id];
+}
+
+function appendItemDelta(item: ItemView, text: string): ItemView {
+	const content = [...item.content];
+	const last = content.at(-1);
+	if (last?.type === "text") content[content.length - 1] = { ...last, text: last.text + text };
+	else content.push({ type: "text", text });
+	return { ...item, content };
+}
+
+function applyEvent(state: MutableProjectionState, event: DomainEvent): void {
+	switch (event.type) {
+		case "server/state":
+			return;
+		case "interaction/notify":
+			state.notifications = [...state.notifications.slice(-99), structuredClone(event)];
+			return;
+		case "session/updated":
+			state.sessionsById.set(event.session.sessionId, structuredClone(event.session));
+			return;
+		case "turn/started":
+		case "turn/completed":
+		case "turn/interrupted":
+			state.turnOrder = upsertOrdered(
+				state.turnsById,
+				state.turnOrder,
+				event.turn.turnId,
+				structuredClone(event.turn),
+			);
+			if (event.turn.state === "running") state.activeTurnId = event.turn.turnId;
+			else if (state.activeTurnId === event.turn.turnId) state.activeTurnId = null;
+			return;
+		case "item/started":
+		case "item/completed":
+			state.itemOrder = upsertOrdered(
+				state.itemsById,
+				state.itemOrder,
+				event.item.itemId,
+				structuredClone(event.item),
+			);
+			return;
+		case "item/delta":
+			state.itemsById.set(event.itemId, appendItemDelta(state.itemsById.get(event.itemId)!, event.delta.text));
+	}
+}
+
+export function applyConnectionEvents(state: MutableProjectionState, batch: ConnectionEventsParams): BatchApplyResult {
+	if (
+		state.syncStatus !== "ready" ||
+		batch.serverEpoch !== state.serverEpoch ||
+		batch.fromCursor !== state.cursor + 1 ||
+		batch.toCursor < batch.fromCursor ||
+		!canApplyEvents(state, batch.events)
+	) {
+		state.syncStatus = "resnapshot_required";
+		return "resnapshot_required";
+	}
+
+	for (const event of batch.events) applyEvent(state, event);
+	state.cursor = batch.toCursor;
+	return "applied";
+}
+
+export function prependProjectionItems(
+	state: MutableProjectionState,
+	page: { readonly items: readonly ItemView[]; readonly nextBeforeItemId: string | null },
+): void {
+	const activeSessionId = state.activeSessionId;
+	if (!activeSessionId || page.items.some((item) => item.sessionId !== activeSessionId)) {
+		throw new TypeError("History page does not belong to the active session");
+	}
+	const added: string[] = [];
+	for (const item of page.items) {
+		if (!state.itemsById.has(item.itemId)) added.push(item.itemId);
+		state.itemsById.set(item.itemId, structuredClone(item));
+	}
+	state.itemOrder = [...added, ...state.itemOrder];
+	state.nextBeforeItemId = page.nextBeforeItemId;
+}
+
+export function addPendingInteraction(state: MutableProjectionState, interaction: InteractionView): void {
+	if (!state.interactionsById.has(interaction.interactionId)) {
+		state.interactionOrder = [...state.interactionOrder, interaction.interactionId];
+	}
+	state.interactionsById.set(interaction.interactionId, structuredClone(interaction));
+}
+
+export function removePendingInteraction(state: MutableProjectionState, interactionId: string): void {
+	if (!state.interactionsById.delete(interactionId)) return;
+	state.interactionOrder = state.interactionOrder.filter((id) => id !== interactionId);
+}
