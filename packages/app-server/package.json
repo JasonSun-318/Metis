@@ -1,0 +1,51 @@
+{
+	"name": "@arcmind/app-server",
+	"version": "0.80.6",
+	"description": "Recoverable multi-session application server for ArcMind clients",
+	"type": "module",
+	"main": "./dist/index.js",
+	"types": "./dist/index.d.ts",
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"import": "./dist/index.js"
+		},
+		"./stdio-entry": {
+			"types": "./dist/stdio-entry.d.ts",
+			"import": "./dist/stdio-entry.js"
+		},
+		"./utility-entry": {
+			"types": "./dist/utility-entry.d.ts",
+			"import": "./dist/utility-entry.js"
+		},
+		"./package.json": "./package.json"
+	},
+	"files": [
+		"dist"
+	],
+	"scripts": {
+		"clean": "shx rm -rf dist",
+		"build": "tsgo -p tsconfig.build.json",
+		"test": "vitest --run",
+		"prepublishOnly": "npm run clean && npm run build"
+	},
+	"dependencies": {
+		"@arcmind/app-protocol": "^0.80.6",
+		"@arcmind/coding-agent": "^0.80.6"
+	},
+	"devDependencies": {
+		"@types/node": "24.12.4",
+		"shx": "0.4.0",
+		"typescript": "5.9.3",
+		"vitest": "4.1.9"
+	},
+	"engines": {
+		"node": ">=22.19.0"
+	},
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "git+https://gitee.com/sun124578963_0/arc-mind.git",
+		"directory": "packages/app-server"
+	}
+}

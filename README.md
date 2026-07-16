@@ -8,7 +8,7 @@ ArcMind is an extensible general-purpose agent foundation for terminal and appli
 - `@arcmind/agent-core`: agent runtime and tool execution
 - `@arcmind/coding-agent`: interactive CLI, SDK, and RPC mode
 - `@arcmind/tui`: terminal UI components
-- `@arcmind/orchestrator`: experimental process orchestration
+- `@arcmind/app-server`: recoverable multi-session application server
 
 ## Development
 

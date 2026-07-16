@@ -1,0 +1,18 @@
+[
+	{ "name": "PARSE_ERROR", "envelope": { "jsonrpc": "2.0", "id": null, "error": { "code": -32700, "message": "Parse error" } } },
+	{ "name": "INVALID_REQUEST", "envelope": { "jsonrpc": "2.0", "id": null, "error": { "code": -32600, "message": "Invalid request" } } },
+	{ "name": "METHOD_NOT_FOUND", "envelope": { "jsonrpc": "2.0", "id": "client-x", "error": { "code": -32601, "message": "Method not found" } } },
+	{ "name": "INVALID_PARAMS", "envelope": { "jsonrpc": "2.0", "id": "client-x", "error": { "code": -32602, "message": "Invalid params" } } },
+	{ "name": "INTERNAL", "envelope": { "jsonrpc": "2.0", "id": "client-x", "error": { "code": -32603, "message": "Internal error" } } },
+	{ "name": "NOT_INITIALIZED", "envelope": { "jsonrpc": "2.0", "id": "client-x", "error": { "code": -32001, "message": "Connection is not initialized", "data": { "name": "NOT_INITIALIZED", "retryable": true } } } },
+	{ "name": "PROTOCOL_MISMATCH", "envelope": { "jsonrpc": "2.0", "id": "client-x", "error": { "code": -32002, "message": "Protocol version mismatch", "data": { "name": "PROTOCOL_MISMATCH", "retryable": false } } } },
+	{ "name": "NOT_FOUND", "envelope": { "jsonrpc": "2.0", "id": "client-x", "error": { "code": -32003, "message": "Resource not found", "data": { "name": "NOT_FOUND", "retryable": false, "sessionId": "11111111-1111-4111-8111-111111111111" } } } },
+	{ "name": "BUSY", "envelope": { "jsonrpc": "2.0", "id": "client-x", "error": { "code": -32004, "message": "Resource is busy", "data": { "name": "BUSY", "retryable": true, "sessionId": "11111111-1111-4111-8111-111111111111" } } } },
+	{ "name": "REQUEST_ID_REUSED", "envelope": { "jsonrpc": "2.0", "id": "client-x", "error": { "code": -32005, "message": "Request ID was reused with different parameters", "data": { "name": "REQUEST_ID_REUSED", "retryable": false, "requestId": "22222222-2222-4222-8222-222222222222" } } } },
+	{ "name": "SERVER_RESTARTED", "envelope": { "jsonrpc": "2.0", "id": "client-x", "error": { "code": -32006, "message": "App-server restarted", "data": { "name": "SERVER_RESTARTED", "retryable": true } } } },
+	{ "name": "OVERLOADED", "envelope": { "jsonrpc": "2.0", "id": "client-x", "error": { "code": -32007, "message": "Connection is overloaded", "data": { "name": "OVERLOADED", "retryable": true } } } },
+	{ "name": "INTERACTION_CANCELLED", "envelope": { "jsonrpc": "2.0", "id": "server-x", "error": { "code": -32008, "message": "Interaction was cancelled", "data": { "name": "INTERACTION_CANCELLED", "retryable": true, "interactionId": "44444444-4444-4444-8444-444444444444" } } } },
+	{ "name": "SESSION_IN_USE", "envelope": { "jsonrpc": "2.0", "id": "client-x", "error": { "code": -32009, "message": "Session is already in use", "data": { "name": "SESSION_IN_USE", "retryable": true, "sessionId": "11111111-1111-4111-8111-111111111111" } } } },
+	{ "name": "SESSION_CORRUPT", "envelope": { "jsonrpc": "2.0", "id": "client-x", "error": { "code": -32010, "message": "Session is corrupt", "data": { "name": "SESSION_CORRUPT", "retryable": false, "sessionId": "11111111-1111-4111-8111-111111111111" } } } },
+	{ "name": "OPERATION_FAILED", "envelope": { "jsonrpc": "2.0", "id": "client-x", "error": { "code": -32011, "message": "Operation failed", "data": { "name": "OPERATION_FAILED", "retryable": false, "operationId": "operation_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" } } } }
+]

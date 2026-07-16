@@ -1,0 +1,221 @@
+[
+	{
+		"direction": "client",
+		"method": "initialize",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "client-1",
+			"result": {
+				"protocolVersion": 1,
+				"server": { "name": "arcmind-app-server", "version": "0.80.6" },
+				"serverEpoch": "33333333-3333-4333-8333-333333333333",
+				"capabilities": ["interaction.v1", "session.cursor.v1"]
+			}
+		}
+	},
+	{
+		"direction": "client",
+		"method": "session/list",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "client-2",
+			"result": {
+				"sessions": [
+					{
+						"sessionId": "legacy-session",
+						"cwd": null,
+						"createdAt": "2026-07-15T00:00:00.000Z",
+						"updatedAt": "2026-07-15T00:00:00.000Z",
+						"state": "idle",
+						"archived": false
+					}
+				],
+				"nextAfterSessionId": null
+			}
+		}
+	},
+	{
+		"direction": "client",
+		"method": "session/create",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "client-3",
+			"result": {
+				"session": {
+					"sessionId": "my-custom-id",
+					"name": "Desktop session",
+					"cwd": "/tmp/arcmind-project",
+					"createdAt": "2026-07-16T00:00:00.000Z",
+					"updatedAt": "2026-07-16T00:00:00.000Z",
+					"state": "idle",
+					"archived": false
+				}
+			}
+		}
+	},
+	{
+		"direction": "client",
+		"method": "session/open",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "client-4",
+			"result": {
+				"session": {
+					"sessionId": "my-custom-id",
+					"cwd": "/tmp/arcmind-project",
+					"createdAt": "2026-07-16T00:00:00.000Z",
+					"updatedAt": "2026-07-16T00:00:00.000Z",
+					"state": "idle",
+					"archived": false
+				}
+			}
+		}
+	},
+	{
+		"direction": "client",
+		"method": "session/readItems",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "client-5",
+			"result": { "items": [], "nextBeforeItemId": null }
+		}
+	},
+	{
+		"direction": "client",
+		"method": "session/close",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "client-6",
+			"result": { "sessionId": "11111111-1111-4111-8111-111111111111", "closed": true }
+		}
+	},
+	{
+		"direction": "client",
+		"method": "session/archive",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "client-7",
+			"result": {
+				"session": {
+					"sessionId": "11111111-1111-4111-8111-111111111111",
+					"cwd": "/tmp/arcmind-project",
+					"createdAt": "2026-07-16T00:00:00.000Z",
+					"updatedAt": "2026-07-16T00:00:01.000Z",
+					"state": "idle",
+					"archived": true
+				}
+			}
+		}
+	},
+	{
+		"direction": "client",
+		"method": "session/unarchive",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "client-8",
+			"result": {
+				"session": {
+					"sessionId": "11111111-1111-4111-8111-111111111111",
+					"cwd": "/tmp/arcmind-project",
+					"createdAt": "2026-07-16T00:00:00.000Z",
+					"updatedAt": "2026-07-16T00:00:02.000Z",
+					"state": "idle",
+					"archived": false
+				}
+			}
+		}
+	},
+	{
+		"direction": "client",
+		"method": "session/subscribe",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "client-9",
+			"result": {
+				"snapshot": {
+					"session": {
+						"sessionId": "11111111-1111-4111-8111-111111111111",
+						"cwd": "/tmp/arcmind-project",
+						"createdAt": "2026-07-16T00:00:00.000Z",
+						"updatedAt": "2026-07-16T00:00:02.000Z",
+						"state": "idle",
+						"archived": false
+					},
+					"turns": [],
+					"recentItems": [],
+					"nextBeforeItemId": null,
+					"activeTurnId": null,
+					"pendingInteractions": [],
+					"serverEpoch": "33333333-3333-4333-8333-333333333333",
+					"cursor": 42
+				}
+			}
+		}
+	},
+	{
+		"direction": "client",
+		"method": "session/unsubscribe",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "client-10",
+			"result": { "sessionId": "11111111-1111-4111-8111-111111111111", "unsubscribed": true }
+		}
+	},
+	{
+		"direction": "client",
+		"method": "turn/start",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "client-11",
+			"result": {
+				"operationId": "operation_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+				"turnId": "turn_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+				"status": "accepted"
+			}
+		}
+	},
+	{
+		"direction": "client",
+		"method": "turn/steer",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "client-12",
+			"result": {
+				"operationId": "operation_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+				"queueItemId": "queue_dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+				"status": "accepted"
+			}
+		}
+	},
+	{
+		"direction": "client",
+		"method": "turn/interrupt",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "client-13",
+			"result": {
+				"operationId": "operation_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+				"turnId": "turn_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+				"status": "accepted"
+			}
+		}
+	},
+	{
+		"direction": "client",
+		"method": "connection/ack",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "client-14",
+			"result": { "acknowledgedCursor": 42 }
+		}
+	},
+	{
+		"direction": "host",
+		"method": "server/shutdown",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "host-1",
+			"result": { "accepted": true }
+		}
+	}
+]

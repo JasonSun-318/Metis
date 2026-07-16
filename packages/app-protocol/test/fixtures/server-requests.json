@@ -1,0 +1,144 @@
+[
+	{
+		"method": "interaction/request",
+		"kind": "project_trust",
+		"request": {
+			"jsonrpc": "2.0",
+			"id": "server-1",
+			"method": "interaction/request",
+			"params": {
+				"serverEpoch": "33333333-3333-4333-8333-333333333333",
+				"interaction": {
+					"interactionId": "44444444-4444-4444-8444-444444444441",
+					"sessionId": "11111111-1111-4111-8111-111111111111",
+					"kind": "project_trust",
+					"title": "Trust this project?",
+					"message": "Project resources can execute local code.",
+					"createdAt": "2026-07-16T00:00:03.000Z",
+					"projectPath": "/tmp/arcmind-project",
+					"choices": [
+						{ "id": "trust_once", "label": "Trust once" },
+						{ "id": "deny", "label": "Deny" }
+					]
+				}
+			}
+		},
+		"response": {
+			"jsonrpc": "2.0",
+			"id": "server-1",
+			"result": {
+				"interactionId": "44444444-4444-4444-8444-444444444441",
+				"kind": "project_trust",
+				"choiceId": "trust_once"
+			}
+		},
+		"cancelResponse": {
+			"jsonrpc": "2.0",
+			"id": "server-1",
+			"error": {
+				"code": -32008,
+				"message": "Interaction was cancelled",
+				"data": {
+					"name": "INTERACTION_CANCELLED",
+					"retryable": true,
+					"interactionId": "44444444-4444-4444-8444-444444444441"
+				}
+			}
+		}
+	},
+	{
+		"method": "interaction/request",
+		"kind": "select",
+		"request": {
+			"jsonrpc": "2.0",
+			"id": "server-2",
+			"method": "interaction/request",
+			"params": {
+				"serverEpoch": "33333333-3333-4333-8333-333333333333",
+				"interaction": {
+					"interactionId": "44444444-4444-4444-8444-444444444442",
+					"sessionId": "11111111-1111-4111-8111-111111111111",
+					"kind": "select",
+					"title": "Choose a model",
+					"message": "Select one configured model.",
+					"createdAt": "2026-07-16T00:00:04.000Z",
+					"choices": [
+						{ "id": "fast", "label": "Fast" },
+						{ "id": "deep", "label": "Deep" }
+					]
+				}
+			}
+		},
+		"response": {
+			"jsonrpc": "2.0",
+			"id": "server-2",
+			"result": {
+				"interactionId": "44444444-4444-4444-8444-444444444442",
+				"kind": "select",
+				"choiceId": "deep"
+			}
+		}
+	},
+	{
+		"method": "interaction/request",
+		"kind": "confirm",
+		"request": {
+			"jsonrpc": "2.0",
+			"id": "server-3",
+			"method": "interaction/request",
+			"params": {
+				"serverEpoch": "33333333-3333-4333-8333-333333333333",
+				"interaction": {
+					"interactionId": "44444444-4444-4444-8444-444444444443",
+					"sessionId": "11111111-1111-4111-8111-111111111111",
+					"kind": "confirm",
+					"title": "Continue?",
+					"message": "Confirm the extension action.",
+					"createdAt": "2026-07-16T00:00:05.000Z",
+					"confirmLabel": "Continue",
+					"cancelLabel": "Cancel"
+				}
+			}
+		},
+		"response": {
+			"jsonrpc": "2.0",
+			"id": "server-3",
+			"result": {
+				"interactionId": "44444444-4444-4444-8444-444444444443",
+				"kind": "confirm",
+				"confirmed": true
+			}
+		}
+	},
+	{
+		"method": "interaction/request",
+		"kind": "input",
+		"request": {
+			"jsonrpc": "2.0",
+			"id": "server-4",
+			"method": "interaction/request",
+			"params": {
+				"serverEpoch": "33333333-3333-4333-8333-333333333333",
+				"interaction": {
+					"interactionId": "44444444-4444-4444-8444-444444444444",
+					"sessionId": "11111111-1111-4111-8111-111111111111",
+					"kind": "input",
+					"title": "Name the session",
+					"message": "Enter a display name.",
+					"createdAt": "2026-07-16T00:00:06.000Z",
+					"placeholder": "Session name",
+					"secret": false
+				}
+			}
+		},
+		"response": {
+			"jsonrpc": "2.0",
+			"id": "server-4",
+			"result": {
+				"interactionId": "44444444-4444-4444-8444-444444444444",
+				"kind": "input",
+				"value": "Recovered work"
+			}
+		}
+	}
+]

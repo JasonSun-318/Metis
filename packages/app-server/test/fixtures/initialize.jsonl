@@ -1,0 +1,1 @@
+{"jsonrpc":"2.0","id":"initialize","method":"initialize","params":{"protocolVersion":1,"client":{"name":"stdio-fixture","version":"1"},"capabilities":[]}}

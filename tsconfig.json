@@ -10,11 +10,13 @@
 			"@arcmind/ai/dist/*": ["./packages/ai/src/*"],
 			"@arcmind/agent-core": ["./packages/agent/src/index.ts"],
 			"@arcmind/agent-core/*": ["./packages/agent/src/*"],
+			"@arcmind/app-protocol": ["./packages/app-protocol/src/index.ts"],
+			"@arcmind/app-protocol/*": ["./packages/app-protocol/src/*"],
+			"@arcmind/app-server": ["./packages/app-server/src/index.ts"],
+			"@arcmind/app-server/*": ["./packages/app-server/src/*"],
 			"@arcmind/coding-agent": ["./packages/coding-agent/src/index.ts"],
 			"@arcmind/coding-agent/hooks": ["./packages/coding-agent/src/core/hooks/index.ts"],
 			"@arcmind/coding-agent/*": ["./packages/coding-agent/src/*"],
-			"@arcmind/orchestrator": ["./packages/orchestrator/src/index.ts"],
-			"@arcmind/orchestrator/*": ["./packages/orchestrator/src/*"],
 			"typebox": ["./node_modules/typebox"],
 			"@arcmind/tui": ["./packages/tui/src/index.ts"],
 			"@arcmind/tui/*": ["./packages/tui/src/*"],
@@ -23,5 +25,5 @@
 		}
 	},
 	"include": ["packages/*/src/**/*", "packages/*/test/**/*", "packages/coding-agent/examples/**/*"],
-	"exclude": ["**/dist/**", "packages/coding-agent/examples/extensions/gondolin/**"]
+	"exclude": ["**/dist/**", "packages/desktop/**", "packages/coding-agent/examples/extensions/gondolin/**"]
 }

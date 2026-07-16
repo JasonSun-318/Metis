@@ -1,0 +1,45 @@
+{
+	"name": "@arcmind/app-protocol",
+	"version": "0.80.6",
+	"description": "Versioned runtime-independent protocol for the ArcMind app-server",
+	"type": "module",
+	"main": "./dist/index.js",
+	"types": "./dist/index.d.ts",
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"import": "./dist/index.js"
+		},
+		"./package.json": "./package.json"
+	},
+	"files": [
+		"dist",
+		"generated"
+	],
+	"scripts": {
+		"clean": "shx rm -rf dist",
+		"build": "tsgo -p tsconfig.build.json",
+		"generate": "node scripts/generate-schema.mjs",
+		"check:generated": "node scripts/generate-schema.mjs --check",
+		"test": "vitest --run",
+		"prepublishOnly": "npm run clean && npm run build && npm run check:generated"
+	},
+	"dependencies": {
+		"typebox": "1.1.38"
+	},
+	"devDependencies": {
+		"@types/node": "24.12.4",
+		"shx": "0.4.0",
+		"typescript": "5.9.3",
+		"vitest": "4.1.9"
+	},
+	"engines": {
+		"node": ">=22.19.0"
+	},
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "git+https://gitee.com/sun124578963_0/arc-mind.git",
+		"directory": "packages/app-protocol"
+	}
+}
