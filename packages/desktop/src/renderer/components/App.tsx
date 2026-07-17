@@ -1,4 +1,5 @@
 import type { InteractionResponseInput } from "@arcmind/app-protocol";
+import { FolderSimple } from "@phosphor-icons/react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ArcMindDesktopApi } from "../../shared/desktop-api.ts";
 import { useAppStore } from "../hooks/use-app-store.ts";
@@ -144,6 +145,7 @@ export function App({ api, store }: AppProps) {
 			await openSession(created.session.sessionId);
 		} catch (cause) {
 			reportError(cause);
+			throw cause;
 		} finally {
 			setBusy(false);
 		}
@@ -213,9 +215,9 @@ export function App({ api, store }: AppProps) {
 			<SessionSidebar busy={busy || !serverReady} onCreate={createSession} onOpen={openSession} state={state} />
 			<main className="workspace">
 				<header className="workspace-header">
-					<div>
+					<div className="workspace-title">
+						<FolderSimple aria-hidden="true" size={19} />
 						<h1>{activeSession?.name || activeSession?.cwd || "ArcMind"}</h1>
-						{activeSession?.cwd && <p>{activeSession.cwd}</p>}
 					</div>
 					<div className={`server-pill server-${state.supervisor.state}`}>{state.supervisor.state}</div>
 				</header>
@@ -242,9 +244,9 @@ export function App({ api, store }: AppProps) {
 					</>
 				) : (
 					<section className="welcome-panel">
-						<p className="eyebrow">Recoverable by design</p>
-						<h2>Start with a project folder.</h2>
-						<p>ArcMind keeps agent work in the App Server, so this window can reload without stopping the task.</p>
+						<p className="eyebrow">ArcMind Desktop</p>
+						<h2>Start a new task.</h2>
+						<p>Choose a project folder from the sidebar. Your tasks stay recoverable even when this window reloads.</p>
 					</section>
 				)}
 				<div className="sr-only" aria-live="polite">{error || latestNotification?.message || message}</div>

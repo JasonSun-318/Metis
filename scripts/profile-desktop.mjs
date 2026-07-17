@@ -329,14 +329,15 @@ async function oneRun(executable, run) {
 		const page = connected.page;
 		await page.locator(".server-pill").waitFor({ state: "visible" });
 		await waitFor(() => page.locator(".server-pill").textContent(), (value) => value === "ready", "App Server ready");
-		await page.locator("#project-path").waitFor({ state: "visible" });
+		await page.getByRole("button", { name: "New task" }).waitFor({ state: "visible" });
 		const usableAt = performance.now();
 		const detected = await utilityDetected;
 		const initialUtilityPid = detected.process.pid;
 
 		const zeroSessionRss = await medianRss(initialUtilityPid);
+		await page.getByRole("button", { name: "New task" }).click();
 		await page.locator("#project-path").fill(projectDir);
-		await page.getByRole("button", { name: "New" }).click();
+		await page.getByRole("button", { name: "Create" }).click();
 		await waitFor(() => page.locator("h1").textContent(), (value) => value === projectDir, "first session open");
 		const oneSessionRss = await medianRss(initialUtilityPid);
 		const firstSessionId = await page.evaluate(async (cwd) => {

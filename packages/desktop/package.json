@@ -18,6 +18,7 @@
 	"dependencies": {
 		"@arcmind/app-protocol": "^0.80.6",
 		"@arcmind/app-server": "^0.80.6",
+		"@phosphor-icons/react": "2.1.10",
 		"@tanstack/react-virtual": "3.14.6",
 		"electron-squirrel-startup": "1.0.1",
 		"react": "19.2.7",

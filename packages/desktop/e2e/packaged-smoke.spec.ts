@@ -143,8 +143,9 @@ test("packaged worker, WASM, trusted extension, and utility lifecycle stay funct
 		({ browser, page } = await connectToApp(debuggingPort));
 		phase = "creating trusted project session";
 		await expect(page.locator(".server-pill")).toHaveText("ready");
+		await page.getByRole("button", { name: "New task" }).click();
 		await page.locator("#project-path").fill(projectDir);
-		await page.getByRole("button", { name: "New" }).click();
+		await page.getByRole("button", { name: "Create" }).click();
 		await expect(page.getByRole("heading", { name: "Trust this project?" })).toBeVisible();
 		await page.getByRole("button", { name: /Trust \(this session only\)/ }).click();
 

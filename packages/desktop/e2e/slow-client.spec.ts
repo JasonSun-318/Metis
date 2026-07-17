@@ -127,8 +127,9 @@ test("a blocked renderer catches up with 10,000 deltas without losing its app se
 	try {
 		({ browser, page } = await connectToApp(port));
 		await expect(page.locator(".server-pill")).toHaveText("ready");
+		await page.getByRole("button", { name: "New task" }).click();
 		await page.locator("#project-path").fill(projectDir);
-		await page.getByRole("button", { name: "New" }).click();
+		await page.getByRole("button", { name: "Create" }).click();
 		await expect(page.getByRole("heading", { level: 1 })).toHaveText(projectDir);
 
 		const rootPid = app.pid;

@@ -171,8 +171,9 @@ test("packaged projection client recovers across renderer and app-server restart
 		phase = "creating a session";
 		await expect(page.locator(".app-shell")).toBeVisible();
 		await expect(page.locator(".server-pill")).toHaveText("ready");
+		await page.getByRole("button", { name: "New task" }).click();
 		await page.locator("#project-path").fill(projectDir);
-		await page.getByRole("button", { name: "New" }).click();
+		await page.getByRole("button", { name: "Create" }).click();
 		await expect(page.getByRole("heading", { level: 1 })).toHaveText(projectDir);
 		await expect(page.locator("#composer-input")).toBeEnabled();
 

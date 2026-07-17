@@ -1,5 +1,6 @@
 import type { ConnectionEventsParams, ItemView, SessionSnapshot, SessionSummary } from "@arcmind/app-protocol";
 import { describe, expect, it } from "vitest";
+import { groupSessionsByProject } from "../src/renderer/components/SessionSidebar.tsx";
 import { AppStore } from "../src/renderer/store/app-store.ts";
 
 const EPOCH_A = "11111111-1111-4111-8111-111111111111";
@@ -57,6 +58,23 @@ function batch(serverEpoch: string, fromCursor: number, toCursor: number, text =
 }
 
 describe("renderer projection reducer", () => {
+	it("groups recent tasks by their project without copying session state", () => {
+		const store = new AppStore();
+		const first = { ...session("session-1"), cwd: "/work/alpha", name: "First" };
+		const second = { ...session("session-2"), cwd: "/work/beta", name: "Second" };
+		const third = { ...session("session-3"), cwd: "/work/alpha", name: "Third" };
+		const legacy = { ...session("session-4"), cwd: null, name: "Legacy" };
+		store.setSessions({ sessions: [first, second, third, legacy], nextAfterSessionId: null });
+
+		const groups = groupSessionsByProject(store.getSnapshot());
+		expect(groups.map(({ name, sessions }) => [name, sessions.map((item) => item.sessionId)])).toEqual([
+			["alpha", ["session-1", "session-3"]],
+			["beta", ["session-2"]],
+			["Other", ["session-4"]],
+		]);
+		expect(groups[0]?.sessions[0]).toBe(store.getSnapshot().sessionsById.get("session-1"));
+	});
+
 	it("replaces the complete active projection on every snapshot", () => {
 		const store = new AppStore();
 		store.applySnapshot(snapshot(EPOCH_A, 3, [item("old-item", "old", "completed")]));

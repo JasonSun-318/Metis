@@ -1,3 +1,4 @@
+import { ArrowUp, Stop } from "@phosphor-icons/react";
 import { useState, type FormEvent } from "react";
 
 interface ComposerProps {
@@ -24,32 +25,37 @@ export function Composer({ disabled, running, onInterrupt, onSubmit }: ComposerP
 	};
 
 	return (
-		<form className="composer" onSubmit={(event) => void submit(event)}>
-			<label className="sr-only" htmlFor="composer-input">Message ArcMind</label>
-			<textarea
-				disabled={disabled || submitting}
-				id="composer-input"
-				onChange={(event) => setText(event.target.value)}
-				onKeyDown={(event) => {
-					if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) event.currentTarget.form?.requestSubmit();
-				}}
-				placeholder={running ? "Steer the active turn…" : "Ask ArcMind to work on this project…"}
-				rows={3}
-				value={text}
-			/>
-			<div className="composer-actions">
-				<span>⌘/Ctrl + Enter to send</span>
-				<div>
-					{running && (
-						<button className="button-secondary" disabled={disabled} onClick={() => void onInterrupt()} type="button">
-							Stop
+		<div className="composer-dock">
+			<form className="composer" onSubmit={(event) => void submit(event)}>
+				<label className="sr-only" htmlFor="composer-input">Message ArcMind</label>
+				<textarea
+					disabled={disabled || submitting}
+					id="composer-input"
+					onChange={(event) => setText(event.target.value)}
+					onKeyDown={(event) => {
+						if (event.key === "Enter" && !event.shiftKey) {
+							event.preventDefault();
+							event.currentTarget.form?.requestSubmit();
+						}
+					}}
+					placeholder={running ? "Steer the active task…" : "Ask ArcMind anything, or describe a task…"}
+					rows={2}
+					value={text}
+				/>
+				<div className="composer-actions">
+					<span>Enter to send · Shift+Enter for a new line</span>
+					<div>
+						{running && (
+							<button aria-label="Stop task" className="composer-icon-button button-secondary" disabled={disabled} onClick={() => void onInterrupt()} type="button">
+								<Stop aria-hidden="true" size={16} weight="fill" />
+							</button>
+						)}
+						<button aria-label={running ? "Steer task" : "Send message"} className="composer-icon-button composer-send" disabled={disabled || submitting || text.trim().length === 0} type="submit">
+							<ArrowUp aria-hidden="true" size={19} weight="bold" />
 						</button>
-					)}
-					<button disabled={disabled || submitting || text.trim().length === 0} type="submit">
-						{running ? "Steer" : "Send"}
-					</button>
+					</div>
 				</div>
-			</div>
-		</form>
+			</form>
+		</div>
 	);
 }
