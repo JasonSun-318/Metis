@@ -1,369 +1,134 @@
+import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import { accessSync, constants, existsSync, lstatSync, readFileSync } from "node:fs";
+import { arch, platform } from "node:os";
+import { join } from "node:path";
 import chalk from "chalk";
-import { type SpawnSyncReturns, spawnSync } from "child_process";
-import { chmodSync, createWriteStream, existsSync, mkdirSync, readdirSync, renameSync, rmSync } from "fs";
-import { arch, platform } from "os";
-import { join } from "path";
-import { Readable } from "stream";
-import { pipeline } from "stream/promises";
-import { APP_NAME, getBinDir } from "../config.ts";
+import { getPackageDir, isBunBinary } from "../config.ts";
 
-const TOOLS_DIR = getBinDir();
-const NETWORK_TIMEOUT_MS = 10_000;
-const DOWNLOAD_TIMEOUT_MS = 120_000;
+export type NativeToolName = "fd" | "rg";
 
-function isOfflineModeEnabled(): boolean {
-	const value = process.env.ARCMIND_OFFLINE;
-	if (!value) return false;
-	return value === "1" || value.toLowerCase() === "true" || value.toLowerCase() === "yes";
-}
-
-interface ToolConfig {
-	name: string;
-	repo: string; // GitHub repo (e.g., "sharkdp/fd")
-	binaryName: string; // Name of the binary inside the archive
-	systemBinaryNames?: string[]; // Alternative system command names to try before downloading
-	tagPrefix: string; // Prefix for tags (e.g., "v" for v1.0.0, "" for 1.0.0)
-	getAssetName: (version: string, plat: string, architecture: string) => string | null;
-}
-
-const TOOLS: Record<string, ToolConfig> = {
-	fd: {
-		name: "fd",
-		repo: "sharkdp/fd",
-		binaryName: "fd",
-		systemBinaryNames: ["fd", "fdfind"],
-		tagPrefix: "v",
-		getAssetName: (version, plat, architecture) => {
-			if (plat === "darwin") {
-				const archStr = architecture === "arm64" ? "aarch64" : "x86_64";
-				return `fd-v${version}-${archStr}-apple-darwin.tar.gz`;
-			} else if (plat === "linux") {
-				const archStr = architecture === "arm64" ? "aarch64" : "x86_64";
-				return `fd-v${version}-${archStr}-unknown-linux-gnu.tar.gz`;
-			} else if (plat === "win32") {
-				const archStr = architecture === "arm64" ? "aarch64" : "x86_64";
-				return `fd-v${version}-${archStr}-pc-windows-msvc.zip`;
-			}
-			return null;
-		},
-	},
-	rg: {
-		name: "ripgrep",
-		repo: "BurntSushi/ripgrep",
-		binaryName: "rg",
-		tagPrefix: "",
-		getAssetName: (version, plat, architecture) => {
-			if (plat === "darwin") {
-				const archStr = architecture === "arm64" ? "aarch64" : "x86_64";
-				return `ripgrep-${version}-${archStr}-apple-darwin.tar.gz`;
-			} else if (plat === "linux") {
-				if (architecture === "arm64") {
-					return `ripgrep-${version}-aarch64-unknown-linux-gnu.tar.gz`;
-				}
-				return `ripgrep-${version}-x86_64-unknown-linux-musl.tar.gz`;
-			} else if (plat === "win32") {
-				const archStr = architecture === "arm64" ? "aarch64" : "x86_64";
-				return `ripgrep-${version}-${archStr}-pc-windows-msvc.zip`;
-			}
-			return null;
-		},
-	},
+const TOOL_NAMES: Record<NativeToolName, { display: string; binary: string; systemNames: string[] }> = {
+	fd: { display: "fd", binary: "fd", systemNames: ["fd", "fdfind"] },
+	rg: { display: "ripgrep", binary: "rg", systemNames: ["rg"] },
 };
 
-// Check if a command exists in PATH by trying to run it
-function commandExists(cmd: string): boolean {
+interface BundledToolManifest {
+	schemaVersion: 1;
+	pair: string;
+	tools: Record<NativeToolName, { binary: string; binarySha256: string; version: string }>;
+}
+
+export interface BundledToolLookupOptions {
+	packageDir?: string;
+	platform?: NodeJS.Platform;
+	arch?: string;
+	requireBundle?: boolean;
+}
+
+function commandExists(command: string): boolean {
 	try {
-		const result = spawnSync(cmd, ["--version"], { stdio: "pipe" });
-		// Check for ENOENT error (command not found)
-		return result.error === undefined || result.error === null;
+		return spawnSync(command, ["--version"], { stdio: "pipe" }).error == null;
 	} catch {
 		return false;
 	}
 }
 
-// Get the path to a tool (system-wide or in our tools dir)
-export function getToolPath(tool: "fd" | "rg"): string | null {
-	const config = TOOLS[tool];
-	if (!config) return null;
-
-	// Check our tools directory first
-	const localPath = join(TOOLS_DIR, config.binaryName + (platform() === "win32" ? ".exe" : ""));
-	if (existsSync(localPath)) {
-		return localPath;
-	}
-
-	// Check system PATH - if found, just return the command name (it's in PATH)
-	const systemBinaryNames = config.systemBinaryNames ?? [config.binaryName];
-	for (const systemBinaryName of systemBinaryNames) {
-		if (commandExists(systemBinaryName)) {
-			return systemBinaryName;
-		}
-	}
-
-	return null;
+function sha256(path: string): string {
+	return createHash("sha256").update(readFileSync(path)).digest("hex");
 }
 
-// Fetch latest release version from GitHub
-async function getLatestVersion(repo: string): Promise<string> {
-	const response = await fetch(`https://api.github.com/repos/${repo}/releases/latest`, {
-		headers: { "User-Agent": `${APP_NAME}-coding-agent` },
-		signal: AbortSignal.timeout(NETWORK_TIMEOUT_MS),
-	});
-
-	if (!response.ok) {
-		throw new Error(`GitHub API error: ${response.status}`);
-	}
-
-	const data = (await response.json()) as { tag_name: string };
-	return data.tag_name.replace(/^v/, "");
+function incompleteInstallation(message: string): Error {
+	return new Error(
+		`Incomplete ArcMind installation: ${message}. Reinstall ArcMind; no runtime download will be attempted.`,
+	);
 }
 
-// Download a file from URL
-async function downloadFile(url: string, dest: string): Promise<void> {
-	const response = await fetch(url, {
-		signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS),
-	});
-
-	if (!response.ok) {
-		throw new Error(`Failed to download: ${response.status}`);
-	}
-
-	if (!response.body) {
-		throw new Error("No response body");
-	}
-
-	const fileStream = createWriteStream(dest);
-	await pipeline(Readable.fromWeb(response.body as any), fileStream);
+function bundledRoots(packageDir: string): string[] {
+	return [join(packageDir, "vendor", "tools"), join(packageDir, "dist", "vendor", "tools")];
 }
 
-function findBinaryRecursively(rootDir: string, binaryFileName: string): string | null {
-	const stack: string[] = [rootDir];
-
-	while (stack.length > 0) {
-		const currentDir = stack.pop();
-		if (!currentDir) continue;
-
-		const entries = readdirSync(currentDir, { withFileTypes: true });
-		for (const entry of entries) {
-			const fullPath = join(currentDir, entry.name);
-			if (entry.isFile() && entry.name === binaryFileName) {
-				return fullPath;
-			}
-			if (entry.isDirectory()) {
-				stack.push(fullPath);
-			}
-		}
-	}
-
-	return null;
+function isCompiledRuntime(): boolean {
+	return isBunBinary || /\/dist\//.test(import.meta.url);
 }
 
-function formatSpawnFailure(result: SpawnSyncReturns<Buffer>): string {
-	if (result.error?.message) {
-		return result.error.message;
-	}
-	const stderr = result.stderr?.toString().trim();
-	if (stderr) {
-		return stderr;
-	}
-	const stdout = result.stdout?.toString().trim();
-	if (stdout) {
-		return stdout;
-	}
-	return `exit status ${result.status ?? "unknown"}`;
-}
+export function getBundledToolPath(tool: NativeToolName, options: BundledToolLookupOptions = {}): string | null {
+	const runtimePlatform = options.platform ?? platform();
+	const runtimeArch = options.arch ?? arch();
+	if (runtimePlatform !== "darwin" && runtimePlatform !== "win32") return null;
+	if (runtimeArch !== "arm64" && runtimeArch !== "x64") return null;
 
-function runExtractionCommand(command: string, args: string[]): string | null {
-	const result = spawnSync(command, args, { stdio: "pipe" });
-	if (!result.error && result.status === 0) {
+	const packageDir = options.packageDir ?? getPackageDir();
+	const roots = bundledRoots(packageDir);
+	const pair = `${runtimePlatform}-${runtimeArch}`;
+	const pairDirectory = roots.map((root) => join(root, pair)).find(existsSync);
+	const requireBundle = options.requireBundle ?? (isCompiledRuntime() || roots.some(existsSync));
+	if (!pairDirectory) {
+		if (requireBundle) throw incompleteInstallation(`bundled native tools are missing for ${pair}`);
 		return null;
 	}
-	return `${command}: ${formatSpawnFailure(result)}`;
-}
 
-function extractTarGzArchive(archivePath: string, extractDir: string, assetName: string): void {
-	const failure = runExtractionCommand("tar", ["xzf", archivePath, "-C", extractDir]);
-	if (failure) {
-		throw new Error(`Failed to extract ${assetName}: ${failure}`);
-	}
-}
-
-function getWindowsTarCommand(): string {
-	const systemRoot = process.env.SystemRoot ?? process.env.WINDIR;
-	if (systemRoot) {
-		const systemTar = join(systemRoot, "System32", "tar.exe");
-		if (existsSync(systemTar)) {
-			return systemTar;
-		}
-	}
-	return "tar.exe";
-}
-
-function extractZipArchive(archivePath: string, extractDir: string, assetName: string): void {
-	const failures: string[] = [];
-
-	if (platform() === "win32") {
-		// Windows ships bsdtar as tar.exe, which supports zip files. Prefer the
-		// System32 binary over Git Bash's GNU tar, which does not handle zip archives.
-		const tarFailure = runExtractionCommand(getWindowsTarCommand(), ["xf", archivePath, "-C", extractDir]);
-		if (!tarFailure) return;
-		failures.push(tarFailure);
-
-		const script =
-			"& { param($archive, $destination) $ErrorActionPreference = 'Stop'; Expand-Archive -LiteralPath $archive -DestinationPath $destination -Force }";
-		const powershellFailure = runExtractionCommand("powershell.exe", [
-			"-NoLogo",
-			"-NoProfile",
-			"-NonInteractive",
-			"-ExecutionPolicy",
-			"Bypass",
-			"-Command",
-			script,
-			archivePath,
-			extractDir,
-		]);
-		if (!powershellFailure) return;
-		failures.push(powershellFailure);
-	} else {
-		const unzipFailure = runExtractionCommand("unzip", ["-q", archivePath, "-d", extractDir]);
-		if (!unzipFailure) return;
-		failures.push(unzipFailure);
-
-		const tarFailure = runExtractionCommand("tar", ["xf", archivePath, "-C", extractDir]);
-		if (!tarFailure) return;
-		failures.push(tarFailure);
-	}
-
-	throw new Error(`Failed to extract ${assetName}: ${failures.join("; ")}`);
-}
-
-// Download and install a tool
-async function downloadTool(tool: "fd" | "rg"): Promise<string> {
-	const config = TOOLS[tool];
-	if (!config) throw new Error(`Unknown tool: ${tool}`);
-
-	const plat = platform();
-	const architecture = arch();
-
-	// Get latest version
-	let version = await getLatestVersion(config.repo);
-	if (tool === "fd" && plat === "darwin" && architecture === "x64") {
-		version = "10.3.0";
-	}
-
-	// Get asset name for this platform
-	const assetName = config.getAssetName(version, plat, architecture);
-	if (!assetName) {
-		throw new Error(`Unsupported platform: ${plat}/${architecture}`);
-	}
-
-	// Create tools directory
-	mkdirSync(TOOLS_DIR, { recursive: true });
-
-	const downloadUrl = `https://github.com/${config.repo}/releases/download/${config.tagPrefix}${version}/${assetName}`;
-	const archivePath = join(TOOLS_DIR, assetName);
-	const binaryExt = plat === "win32" ? ".exe" : "";
-	const binaryPath = join(TOOLS_DIR, config.binaryName + binaryExt);
-
-	// Download
-	await downloadFile(downloadUrl, archivePath);
-
-	// Extract into a unique temp directory. fd and rg downloads can run concurrently
-	// during startup, so sharing a fixed directory causes races.
-	const extractDir = join(
-		TOOLS_DIR,
-		`extract_tmp_${config.binaryName}_${process.pid}_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`,
-	);
-	mkdirSync(extractDir, { recursive: true });
-
+	const manifestPath = join(pairDirectory, "manifest.json");
+	let manifest: BundledToolManifest;
 	try {
-		if (assetName.endsWith(".tar.gz")) {
-			extractTarGzArchive(archivePath, extractDir, assetName);
-		} else if (assetName.endsWith(".zip")) {
-			extractZipArchive(archivePath, extractDir, assetName);
-		} else {
-			throw new Error(`Unsupported archive format: ${assetName}`);
-		}
-
-		// Find the binary in extracted files. Some archives contain files directly
-		// at root, others nest under a versioned subdirectory.
-		const binaryFileName = config.binaryName + binaryExt;
-		const extractedDir = join(extractDir, assetName.replace(/\.(tar\.gz|zip)$/, ""));
-		const extractedBinaryCandidates = [join(extractedDir, binaryFileName), join(extractDir, binaryFileName)];
-		let extractedBinary = extractedBinaryCandidates.find((candidate) => existsSync(candidate));
-
-		if (!extractedBinary) {
-			extractedBinary = findBinaryRecursively(extractDir, binaryFileName) ?? undefined;
-		}
-
-		if (extractedBinary) {
-			renameSync(extractedBinary, binaryPath);
-		} else {
-			throw new Error(`Binary not found in archive: expected ${binaryFileName} under ${extractDir}`);
-		}
-
-		// Make executable (Unix only)
-		if (plat !== "win32") {
-			chmodSync(binaryPath, 0o755);
-		}
-	} finally {
-		// Cleanup
-		rmSync(archivePath, { force: true });
-		rmSync(extractDir, { recursive: true, force: true });
+		manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as BundledToolManifest;
+	} catch {
+		throw incompleteInstallation(`the native-tool manifest is missing or invalid for ${pair}`);
+	}
+	if (manifest.schemaVersion !== 1 || manifest.pair !== pair) {
+		throw incompleteInstallation(`the native-tool manifest does not match ${pair}`);
+	}
+	const entry = manifest.tools?.[tool];
+	const expectedBinary = `${TOOL_NAMES[tool].binary}${runtimePlatform === "win32" ? ".exe" : ""}`;
+	if (!entry || entry.binary !== expectedBinary || !/^[a-f0-9]{64}$/.test(entry.binarySha256)) {
+		throw incompleteInstallation(`the ${tool} manifest entry is invalid for ${pair}`);
 	}
 
+	const binaryPath = join(pairDirectory, expectedBinary);
+	try {
+		const metadata = lstatSync(binaryPath);
+		if (!metadata.isFile() || metadata.isSymbolicLink()) {
+			throw new Error("not a regular file");
+		}
+		if (runtimePlatform !== "win32") accessSync(binaryPath, constants.X_OK);
+	} catch {
+		throw incompleteInstallation(`bundled ${tool} is missing or not executable for ${pair}`);
+	}
+	if (sha256(binaryPath) !== entry.binarySha256) {
+		throw incompleteInstallation(`bundled ${tool} failed its integrity check for ${pair}`);
+	}
 	return binaryPath;
 }
 
-// Termux package names for tools
-const TERMUX_PACKAGES: Record<string, string> = {
-	fd: "fd",
-	rg: "ripgrep",
-};
-
-// Ensure a tool is available, downloading if necessary
-// Returns the path to the tool, or null if unavailable
-export async function ensureTool(tool: "fd" | "rg", silent: boolean = false): Promise<string | undefined> {
-	const existingPath = getToolPath(tool);
-	if (existingPath) {
-		return existingPath;
+/** Resolve a verified bundled tool, or a user-installed PATH dependency on unsupported/development platforms. */
+export function getToolPath(tool: NativeToolName): string | null {
+	const bundled = getBundledToolPath(tool);
+	if (bundled) return bundled;
+	for (const command of TOOL_NAMES[tool].systemNames) {
+		if (commandExists(command)) return command;
 	}
+	return null;
+}
 
-	const config = TOOLS[tool];
-	if (!config) return undefined;
+/** Resolve a native search helper without downloading or modifying the host. */
+export async function ensureTool(tool: NativeToolName, silent = false): Promise<string | undefined> {
+	const existing = getToolPath(tool);
+	if (existing) return existing;
 
-	if (isOfflineModeEnabled()) {
-		if (!silent) {
-			console.log(chalk.yellow(`${config.name} not found. Offline mode enabled, skipping download.`));
-		}
-		return undefined;
-	}
-
-	// On Android/Termux, Linux binaries don't work due to Bionic libc incompatibility.
-	// Users must install via pkg.
-	if (platform() === "android") {
-		const pkgName = TERMUX_PACKAGES[tool] ?? tool;
-		if (!silent) {
-			console.log(chalk.yellow(`${config.name} not found. Install with: pkg install ${pkgName}`));
-		}
-		return undefined;
-	}
-
-	// Tool not found - download it
 	if (!silent) {
-		console.log(chalk.dim(`${config.name} not found. Downloading...`));
-	}
-
-	try {
-		const path = await downloadTool(tool);
-		if (!silent) {
-			console.log(chalk.dim(`${config.name} installed to ${path}`));
+		if (platform() === "android") {
+			console.log(
+				chalk.yellow(
+					`${TOOL_NAMES[tool].display} not found. Install with: pkg install ${tool === "rg" ? "ripgrep" : "fd"}`,
+				),
+			);
+		} else if (platform() === "linux") {
+			console.log(
+				chalk.yellow(`${TOOL_NAMES[tool].display} not found in PATH. Install it with your system package manager.`),
+			);
+		} else {
+			console.log(chalk.yellow(`${TOOL_NAMES[tool].display} not found in this development environment.`));
 		}
-		return path;
-	} catch (e) {
-		if (!silent) {
-			console.log(chalk.yellow(`Failed to download ${config.name}: ${e instanceof Error ? e.message : e}`));
-		}
-		return undefined;
 	}
+	return undefined;
 }

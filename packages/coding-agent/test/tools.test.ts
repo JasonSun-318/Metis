@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { executeBashWithOperations } from "../src/core/bash-executor.ts";
 import { type BashOperations, createBashTool, createLocalBashOperations } from "../src/core/tools/bash.ts";
 import { computeEditsDiff } from "../src/core/tools/edit-diff.ts";
+import type { ToolSubprocessExecutor } from "../src/core/tools/subprocess.ts";
 import {
 	createEditTool,
 	createFindTool,
@@ -785,6 +786,23 @@ describe("Coding Agent Tools", () => {
 	});
 
 	describe("grep tool", () => {
+		it("routes the default rg process through the session subprocess boundary", async () => {
+			let actionId: string | undefined;
+			const subprocess: ToolSubprocessExecutor = {
+				execute: async (input, run) => {
+					actionId = input.actionId;
+					return run({ argv: [input.executable, ...input.args] });
+				},
+			};
+			const guardedGrep = createGrepTool(testDir, { subprocess });
+			writeFileSync(join(testDir, "guarded.txt"), "match");
+
+			const result = await guardedGrep.execute("grep-action", { pattern: "match", path: testDir });
+
+			expect(actionId).toBe("grep-action");
+			expect(getTextOutput(result)).toContain("guarded.txt:1: match");
+		});
+
 		it("should include filename when searching a single file", async () => {
 			const testFile = join(testDir, "example.txt");
 			writeFileSync(testFile, "first line\nmatch line\nlast line");
@@ -937,6 +955,23 @@ describe("Coding Agent Tools", () => {
 	});
 
 	describe("find tool", () => {
+		it("routes the default fd process through the session subprocess boundary", async () => {
+			let actionId: string | undefined;
+			const subprocess: ToolSubprocessExecutor = {
+				execute: async (input, run) => {
+					actionId = input.actionId;
+					return run({ argv: [input.executable, ...input.args] });
+				},
+			};
+			const guardedFind = createFindTool(testDir, { subprocess });
+			writeFileSync(join(testDir, "guarded.txt"), "ok");
+
+			const result = await guardedFind.execute("find-action", { pattern: "*.txt", path: testDir });
+
+			expect(actionId).toBe("find-action");
+			expect(getTextOutput(result)).toContain("guarded.txt");
+		});
+
 		it("should include hidden files that are not gitignored", async () => {
 			const hiddenDir = join(testDir, ".secret");
 			mkdirSync(hiddenDir);

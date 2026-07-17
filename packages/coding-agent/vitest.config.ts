@@ -11,6 +11,7 @@ export default defineConfig({
 	test: {
 		globals: true,
 		environment: "node",
+		globalSetup: "./test/global-setup.ts",
 		testTimeout: 30000,
 		reporters: process.env.GITHUB_ACTIONS ? ["dot", "github-actions"] : ["dot"],
 		silent: "passed-only",
