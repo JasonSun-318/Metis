@@ -2,6 +2,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { existsSync, realpathSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { resolvePath } from "../utils/paths.ts";
+import type { AgentMode } from "./agent-mode.ts";
 import type { AgentSession } from "./agent-session.ts";
 import type { AgentSessionRuntimeDiagnostic, AgentSessionServices } from "./agent-session-services.ts";
 import type {
@@ -21,7 +22,9 @@ import {
 import { materializeRuntimeRecovery, type RecoverablePromptDraft } from "./runtime-recovery-materializer.ts";
 import type { CreateAgentSessionResult } from "./sdk.ts";
 import { assertSessionCwdExists } from "./session-cwd.ts";
+import { createSessionId } from "./session-id.ts";
 import { SessionManager } from "./session-manager.ts";
+import { removeOwnedManagedWorkspace, resolveNewSessionWorkspace } from "./session-workspace.ts";
 
 /**
  * Result returned by runtime creation.
@@ -211,6 +214,7 @@ export class AgentSessionRuntime {
 	private _recoverableDrafts: readonly RecoverablePromptDraft[];
 	private requestIndex: Map<string, IndexedRuntimeRequest>;
 	private operationIndex: Map<string, IndexedRuntimeRequest>;
+	private readonly hostCwd: string;
 
 	constructor(
 		_session: AgentSession,
@@ -219,6 +223,7 @@ export class AgentSessionRuntime {
 		_diagnostics: AgentSessionRuntimeDiagnostic[] = [],
 		_modelFallbackMessage?: string,
 		_recovered?: RecoveredSessionRuntime,
+		hostCwd: string = process.cwd(),
 	) {
 		this._session = _session;
 		this._services = _services;
@@ -228,6 +233,7 @@ export class AgentSessionRuntime {
 		this._recoverableDrafts = _recovered?.recoverableDrafts ?? [];
 		this.requestIndex = _recovered?.requests ?? new Map();
 		this.operationIndex = _recovered?.operations ?? new Map();
+		this.hostCwd = resolvePath(hostCwd);
 		this.bindDurableSession(_session);
 	}
 
@@ -244,6 +250,11 @@ export class AgentSessionRuntime {
 	get cwd(): string {
 		this.assertPubliclyAccessible();
 		return this._services.cwd;
+	}
+
+	/** Terminal cwd captured when the runtime host was created. */
+	get terminalCwd(): string {
+		return this.hostCwd;
 	}
 
 	get diagnostics(): readonly AgentSessionRuntimeDiagnostic[] {
@@ -899,6 +910,8 @@ export class AgentSessionRuntime {
 
 	newSession(options?: {
 		parentSession?: string;
+		mode?: AgentMode;
+		cwd?: string;
 		setup?: (sessionManager: SessionManager) => Promise<void>;
 		withSession?: (ctx: ReplacedSessionContext) => Promise<void>;
 	}): Promise<{ cancelled: boolean }> {
@@ -907,6 +920,8 @@ export class AgentSessionRuntime {
 
 	private async newSessionOnce(options?: {
 		parentSession?: string;
+		mode?: AgentMode;
+		cwd?: string;
 		setup?: (sessionManager: SessionManager) => Promise<void>;
 		withSession?: (ctx: ReplacedSessionContext) => Promise<void>;
 	}): Promise<{ cancelled: boolean }> {
@@ -916,15 +931,57 @@ export class AgentSessionRuntime {
 		}
 
 		const previousSessionFile = this.session.sessionFile;
-		const sessionDir = this.session.sessionManager.getSessionDir();
-		const sessionManager = this.session.sessionManager.isPersisted()
-			? SessionManager.create(this.cwd, sessionDir, { parentSession: options?.parentSession })
-			: SessionManager.inMemory(this.cwd, { parentSession: options?.parentSession });
+		const currentManager = this.session.sessionManager;
+		const mode = options?.mode ?? currentManager.getMode();
+		const sessionId = createSessionId();
+		const workspace = resolveNewSessionWorkspace({
+			id: sessionId,
+			mode,
+			requestedCwd: options?.cwd,
+			hostCwd: this.hostCwd,
+			agentDir: this._services.agentDir,
+		});
+		let sessionManager: SessionManager;
+		try {
+			const reusesCurrentCwd = pathsReferToSameFile(workspace.cwd, currentManager.getCwd());
+			const sessionDir =
+				reusesCurrentCwd || !currentManager.usesDefaultSessionDir() ? currentManager.getSessionDir() : undefined;
+			const newSessionOptions = {
+				id: sessionId,
+				parentSession: options?.parentSession,
+				mode,
+				cwdOrigin: workspace.cwdOrigin,
+			} as const;
+			sessionManager = currentManager.isPersisted()
+				? SessionManager.create(workspace.cwd, sessionDir, newSessionOptions)
+				: SessionManager.inMemory(workspace.cwd, newSessionOptions);
+		} catch (error) {
+			removeOwnedManagedWorkspace({
+				id: sessionId,
+				cwd: workspace.cwd,
+				cwdOrigin: workspace.cwdOrigin,
+				agentDir: this._services.agentDir,
+			});
+			throw error;
+		}
 
-		const teardownError = await this.replaceCurrent(sessionManager, "new", () => ({
-			cwd: this.cwd,
-			sessionStartEvent: { type: "session_start", reason: "new", previousSessionFile },
-		}));
+		let teardownError: unknown;
+		try {
+			teardownError = await this.replaceCurrent(sessionManager, "new", () => ({
+				cwd: workspace.cwd,
+				sessionStartEvent: { type: "session_start", reason: "new", previousSessionFile },
+			}));
+		} catch (error) {
+			const candidatePath = sessionManager.getSessionFile();
+			if (candidatePath) await SessionManager.deleteSession(candidatePath, { agentDir: this._services.agentDir });
+			removeOwnedManagedWorkspace({
+				id: sessionId,
+				cwd: workspace.cwd,
+				cwdOrigin: workspace.cwdOrigin,
+				agentDir: this._services.agentDir,
+			});
+			throw error;
+		}
 		let setupError: unknown;
 		try {
 			if (options?.setup) {
@@ -975,11 +1032,7 @@ export class AgentSessionRuntime {
 
 		const previousSessionFile = this.session.sessionFile;
 		const currentManager = this.session.sessionManager;
-		const sessionManager = targetLeafId
-			? currentManager.createBranchedSessionManager(targetLeafId)
-			: currentManager.isPersisted()
-				? SessionManager.create(this.cwd, currentManager.getSessionDir(), { parentSession: previousSessionFile })
-				: SessionManager.inMemory(this.cwd, { parentSession: previousSessionFile });
+		const sessionManager = currentManager.createBranchedSessionManager(targetLeafId);
 
 		const teardownError = await this.replaceCurrent(sessionManager, "fork", () => ({
 			cwd: sessionManager.getCwd(),
@@ -1176,6 +1229,7 @@ export async function createAgentSessionRuntime(
 			result.diagnostics,
 			result.modelFallbackMessage,
 			recovered,
+			options.cwd,
 		);
 		return runtime;
 	} catch (error) {

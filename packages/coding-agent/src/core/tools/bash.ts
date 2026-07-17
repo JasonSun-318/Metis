@@ -65,6 +65,7 @@ export interface BashOperations {
 		command: string,
 		cwd: string,
 		options: {
+			actionId?: string;
 			onData: (data: Buffer) => void;
 			signal?: AbortSignal;
 			timeout?: number;
@@ -302,7 +303,7 @@ export function createBashToolDefinition(
 		promptSnippet: "Execute bash commands (ls, grep, find, etc.)",
 		parameters: bashSchema,
 		async execute(
-			_toolCallId,
+			toolCallId,
 			{ command, timeout }: { command: string; timeout?: number },
 			signal?: AbortSignal,
 			onUpdate?,
@@ -398,6 +399,7 @@ export function createBashToolDefinition(
 				let exitCode: number | null;
 				try {
 					const result = await ops.exec(spawnContext.command, spawnContext.cwd, {
+						actionId: toolCallId,
 						onData: handleData,
 						signal,
 						timeout,

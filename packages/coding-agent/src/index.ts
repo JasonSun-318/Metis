@@ -10,8 +10,10 @@ export {
 	getExamplesPath,
 	getPackageDir,
 	getReadmePath,
+	getWorkspacesDir,
 	VERSION,
 } from "./config.ts";
+export { type AgentMode, DEFAULT_AGENT_MODE, isAgentMode } from "./core/agent-mode.ts";
 export {
 	AgentSession,
 	type AgentSessionConfig,
@@ -188,6 +190,41 @@ export type {
 	ResolvedResource,
 } from "./core/package-manager.ts";
 export { DefaultPackageManager } from "./core/package-manager.ts";
+export {
+	defaultPermissionSettings,
+	isPermissionMode,
+	type PermissionMode,
+	type PermissionSettings,
+} from "./core/permission-mode.ts";
+export {
+	type ActionRisk,
+	buildPermissionReviewerUserPrompt,
+	type ClassifiedAction,
+	type ClassifyActionInput,
+	classifyAction,
+	createSandboxGrant,
+	type NetworkTarget,
+	PERMISSION_REVIEWER_SYSTEM_PROMPT,
+	type PermissionActionSource,
+	type PermissionApprovalDecision,
+	type PermissionApprovalRequest,
+	type PermissionAuthorization,
+	PermissionPolicy,
+	PermissionReviewer,
+	type PermissionReviewerDecision,
+	type PermissionReviewerStream,
+	type PermissionReviewerStreamRequest,
+	type PermissionReviewInput,
+	type PermissionRoute,
+	parsePermissionReviewerDecision,
+	type RequestPermissionApproval,
+	routeAction,
+	type SandboxGrant,
+	type SandboxScope,
+	selectPermissionReviewerUserMessages,
+	type ToolProvenance,
+	tokenizePermissionCommand,
+} from "./core/permission-policy.ts";
 export type { ResourceCollision, ResourceDiagnostic, ResourceLoader } from "./core/resource-loader.ts";
 export { DefaultResourceLoader, loadProjectContextFiles } from "./core/resource-loader.ts";
 export {
@@ -255,6 +292,17 @@ export {
 	type SubmitPromptResult,
 } from "./core/sdk.ts";
 export {
+	isSessionControlEntryType,
+	type PermissionDecision,
+	type PermissionDecisionSource,
+	parseSessionControlEntry,
+	type SessionControlEntry,
+	type SessionControlPayload,
+	type SessionPermissionDecisionEntry,
+	type SessionPermissionsEntry,
+} from "./core/session-control.ts";
+export { createSessionId } from "./core/session-id.ts";
+export {
 	assertValidSessionId,
 	type BranchSummaryEntry,
 	buildContextEntries,
@@ -263,6 +311,7 @@ export {
 	CURRENT_SESSION_VERSION,
 	type CustomEntry,
 	type CustomMessageEntry,
+	type CwdOrigin,
 	type FileEntry,
 	getDefaultSessionDir,
 	getLatestCompactionEntry,
@@ -270,6 +319,7 @@ export {
 	migrateSessionEntries,
 	moveSessionFileWithLease,
 	type NewSessionOptions,
+	type PermissionDecisionPayload,
 	parseSessionEntries,
 	type RuntimeControlPayload,
 	type SessionContext,
@@ -284,6 +334,14 @@ export {
 	sessionEntryToContextMessages,
 	type ThinkingLevelChangeEntry,
 } from "./core/session-manager.ts";
+export {
+	getManagedWorkspaceDir,
+	getOwnedManagedWorkspace,
+	publishManagedWorkspaceCopy,
+	removeOwnedManagedWorkspace,
+	resolveNewSessionWorkspace,
+	type SessionWorkspace,
+} from "./core/session-workspace.ts";
 export {
 	type CompactionSettings,
 	type DefaultProjectTrust,

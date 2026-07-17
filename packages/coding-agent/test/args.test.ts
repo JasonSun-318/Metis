@@ -33,6 +33,63 @@ describe("parseArgs", () => {
 		});
 	});
 
+	describe("--agent-mode", () => {
+		test.each(["chat", "code"] as const)("parses %s without changing the output mode", (agentMode) => {
+			const result = parseArgs(["--agent-mode", agentMode, "--mode", "json"]);
+			expect(result.agentMode).toBe(agentMode);
+			expect(result.mode).toBe("json");
+			expect(result.diagnostics).toEqual([]);
+		});
+
+		test("reports a missing value", () => {
+			const result = parseArgs(["--agent-mode"]);
+			expect(result.diagnostics).toEqual([{ type: "error", message: "--agent-mode requires chat or code" }]);
+		});
+
+		test("reports an invalid value", () => {
+			const result = parseArgs(["--agent-mode", "focus"]);
+			expect(result.diagnostics).toEqual([
+				{ type: "error", message: 'Invalid agent mode "focus". Valid values: chat, code' },
+			]);
+		});
+	});
+
+	describe("new-session workspace and permissions", () => {
+		test("parses cwd, permission mode, and reviewer choice", () => {
+			const result = parseArgs(["--cwd", "./project", "--permission-mode", "auto", "--no-reviewer"]);
+			expect(result.cwd).toBe("./project");
+			expect(result.permissionMode).toBe("auto");
+			expect(result.reviewerEnabled).toBe(false);
+			expect(result.diagnostics).toEqual([]);
+		});
+
+		test.each(["ask", "auto", "full"] as const)("parses permission mode %s", (mode) => {
+			const result = parseArgs(["--permission-mode", mode, "--reviewer"]);
+			expect(result.permissionMode).toBe(mode);
+			expect(result.reviewerEnabled).toBe(true);
+			expect(result.diagnostics).toEqual([]);
+		});
+
+		test("reports missing and invalid values", () => {
+			expect(parseArgs(["--cwd"]).diagnostics).toEqual([
+				{ type: "error", message: "--cwd requires a directory path" },
+			]);
+			expect(parseArgs(["--permission-mode"]).diagnostics).toEqual([
+				{ type: "error", message: "--permission-mode requires ask, auto, or full" },
+			]);
+			expect(parseArgs(["--permission-mode", "trusted"]).diagnostics).toEqual([
+				{ type: "error", message: 'Invalid permission mode "trusted". Valid values: ask, auto, full' },
+			]);
+		});
+
+		test("rejects contradictory reviewer flags", () => {
+			const result = parseArgs(["--reviewer", "--no-reviewer"]);
+			expect(result.diagnostics).toEqual([
+				{ type: "error", message: "--reviewer cannot be combined with --no-reviewer" },
+			]);
+		});
+	});
+
 	describe("--print flag", () => {
 		test("parses --print flag", () => {
 			const result = parseArgs(["--print"]);

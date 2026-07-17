@@ -129,6 +129,24 @@ export function getCwdRelativePath(filePath: string, cwd: string): string | unde
 	return isInsideCwd ? relativePath || "." : undefined;
 }
 
+/** Canonicalize an existing path or the deepest existing parent of a creation target. */
+export function canonicalizeActionPath(input: string, cwd: string): string {
+	return canonicalizePathForCreation(resolvePath(input, cwd, { trim: true }));
+}
+
+/** Compare canonical paths without relying on string prefixes. */
+export function isPathInside(parent: string, target: string): boolean {
+	const canonicalParent = canonicalizeActionPath(parent, parent);
+	const canonicalTarget = canonicalizeActionPath(target, canonicalParent);
+	const child = relative(canonicalParent, canonicalTarget);
+	return child === "" || (child !== ".." && !child.startsWith(`..${sep}`) && !isAbsolute(child));
+}
+
+/** True when either canonical path contains the other. */
+export function pathsIntersect(left: string, right: string): boolean {
+	return isPathInside(left, right) || isPathInside(right, left);
+}
+
 export function formatPathRelativeToCwdOrAbsolute(filePath: string, cwd: string): string {
 	const absolutePath = resolvePath(filePath, cwd);
 	return (getCwdRelativePath(absolutePath, cwd) ?? absolutePath).split(sep).join("/");

@@ -1,6 +1,3 @@
-import { spawnSync } from "node:child_process";
-import { lstatSync } from "node:fs";
-import { rm, unlink } from "node:fs/promises";
 import * as os from "node:os";
 import {
 	type Component,
@@ -14,13 +11,7 @@ import {
 	visibleWidth,
 } from "@arcmind/tui";
 import { KeybindingsManager } from "../../../core/keybindings.ts";
-import { SessionLease } from "../../../core/session-lease.ts";
-import {
-	getSessionImageDir,
-	getSessionToolOutputDir,
-	type SessionInfo,
-	type SessionListProgress,
-} from "../../../core/session-manager.ts";
+import { type SessionInfo, type SessionListProgress, SessionManager } from "../../../core/session-manager.ts";
 import { canonicalizePath as _canonicalizePath } from "../../../utils/paths.ts";
 import { theme } from "../theme/theme.ts";
 import { DynamicBorder } from "./dynamic-border.ts";
@@ -645,94 +636,13 @@ class SessionList implements Component, Focusable {
 
 type SessionsLoader = (onProgress?: SessionListProgress) => Promise<SessionInfo[]>;
 
-function pathEntryExists(path: string): boolean {
-	try {
-		lstatSync(path);
-		return true;
-	} catch (error) {
-		return (error as NodeJS.ErrnoException).code !== "ENOENT";
-	}
-}
-
 /**
- * Delete a session file, trying the `trash` CLI first, then falling back to unlink
+ * Delete a session and its proven ArcMind-owned assets.
  */
 export async function deleteSessionFile(
 	sessionPath: string,
 ): Promise<{ ok: boolean; method: "trash" | "unlink"; error?: string; warning?: string }> {
-	const canonicalSessionPath = canonicalizePath(sessionPath) ?? sessionPath;
-	let lease: SessionLease;
-	try {
-		lease = SessionLease.acquire(canonicalSessionPath);
-	} catch (error) {
-		return {
-			ok: false,
-			method: "unlink",
-			error: error instanceof Error ? error.message : String(error),
-		};
-	}
-
-	try {
-		const imageDir = getSessionImageDir(canonicalSessionPath);
-		const toolOutputDir = getSessionToolOutputDir(canonicalSessionPath);
-		const assetDirs = [
-			{ label: "image", path: imageDir },
-			{ label: "tool output", path: toolOutputDir },
-		];
-		const trashTargets = [
-			canonicalSessionPath,
-			...assetDirs.filter(({ path }) => pathEntryExists(path)).map(({ path }) => path),
-		];
-		// Try `trash` first (if installed)
-		const trashArgs = trashTargets.some((path) => path.startsWith("-")) ? ["--", ...trashTargets] : trashTargets;
-		const trashResult = spawnSync("trash", trashArgs, { encoding: "utf-8" });
-
-		const getTrashErrorHint = (): string | null => {
-			const parts: string[] = [];
-			if (trashResult.error) {
-				parts.push(trashResult.error.message);
-			}
-			const stderr = trashResult.stderr?.trim();
-			if (stderr) {
-				parts.push(stderr.split("\n")[0] ?? stderr);
-			}
-			if (parts.length === 0) return null;
-			return `trash: ${parts.join(" · ").slice(0, 200)}`;
-		};
-
-		// A multi-target trash operation can partially succeed, so verify every target is gone.
-		if (!pathEntryExists(canonicalSessionPath) && assetDirs.every(({ path }) => !pathEntryExists(path))) {
-			return { ok: true, method: "trash" };
-		}
-
-		// Fallback to permanent deletion
-		try {
-			if (pathEntryExists(canonicalSessionPath)) await unlink(canonicalSessionPath);
-			const cleanupErrors: string[] = [];
-			for (const asset of assetDirs) {
-				try {
-					await rm(asset.path, { recursive: true, force: true });
-				} catch (error) {
-					cleanupErrors.push(`${asset.label}: ${error instanceof Error ? error.message : String(error)}`);
-				}
-			}
-			return {
-				ok: true,
-				method: "unlink",
-				warning:
-					cleanupErrors.length > 0
-						? `Some session asset directories could not be deleted: ${cleanupErrors.join("; ")}`
-						: undefined,
-			};
-		} catch (err) {
-			const unlinkError = err instanceof Error ? err.message : String(err);
-			const trashErrorHint = getTrashErrorHint();
-			const error = trashErrorHint ? `${unlinkError} (${trashErrorHint})` : unlinkError;
-			return { ok: false, method: "unlink", error };
-		}
-	} finally {
-		lease.close();
-	}
+	return SessionManager.deleteSession(sessionPath);
 }
 
 /**

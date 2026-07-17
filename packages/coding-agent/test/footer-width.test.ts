@@ -1,5 +1,6 @@
 import { visibleWidth } from "@arcmind/tui";
 import { beforeAll, describe, expect, it } from "vitest";
+import type { AgentMode } from "../src/core/agent-mode.ts";
 import type { AgentSession } from "../src/core/agent-session.ts";
 import type { ReadonlyFooterDataProvider } from "../src/core/footer-data-provider.ts";
 import { FooterComponent, formatCwdForFooter } from "../src/modes/interactive/components/footer.ts";
@@ -21,6 +22,7 @@ function createSession(options: {
 	reasoning?: boolean;
 	thinkingLevel?: string;
 	usage?: AssistantUsage;
+	mode?: AgentMode;
 }): AgentSession {
 	const usage = options.usage;
 	const entries =
@@ -50,6 +52,8 @@ function createSession(options: {
 			getEntries: () => entries,
 			getSessionName: () => options.sessionName,
 			getCwd: () => "/tmp/project",
+			getMode: () => options.mode ?? "code",
+			getPermissionSettings: () => ({ mode: "auto", reviewerEnabled: true }),
 		},
 		getContextUsage: () => ({ contextWindow: 200_000, percent: 12.3 }),
 		modelRegistry: {
@@ -140,5 +144,11 @@ describe("FooterComponent width handling", () => {
 
 		const statsLine = stripAnsi(footer.render(120)[1]);
 		expect(statsLine).toContain("CH25.0%");
+	});
+
+	it("shows the current agent mode", () => {
+		const footer = new FooterComponent(createSession({ sessionName: "", mode: "chat" }), createFooterData(1));
+
+		expect(stripAnsi(footer.render(120)[0])).toContain("[chat • Auto]");
 	});
 });

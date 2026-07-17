@@ -83,6 +83,41 @@ export {
 	type WorkingIndicatorOptions,
 } from "./extensions/index.ts";
 export {
+	defaultPermissionSettings,
+	isPermissionMode,
+	type PermissionMode,
+	type PermissionSettings,
+} from "./permission-mode.ts";
+export {
+	type ActionRisk,
+	buildPermissionReviewerUserPrompt,
+	type ClassifiedAction,
+	type ClassifyActionInput,
+	classifyAction,
+	createSandboxGrant,
+	type NetworkTarget,
+	PERMISSION_REVIEWER_SYSTEM_PROMPT,
+	type PermissionActionSource,
+	type PermissionApprovalDecision,
+	type PermissionApprovalRequest,
+	type PermissionAuthorization,
+	PermissionPolicy,
+	PermissionReviewer,
+	type PermissionReviewerDecision,
+	type PermissionReviewerStream,
+	type PermissionReviewerStreamRequest,
+	type PermissionReviewInput,
+	type PermissionRoute,
+	parsePermissionReviewerDecision,
+	type RequestPermissionApproval,
+	routeAction,
+	type SandboxGrant,
+	type SandboxScope,
+	selectPermissionReviewerUserMessages,
+	type ToolProvenance,
+	tokenizePermissionCommand,
+} from "./permission-policy.ts";
+export {
 	type DurableImageRef,
 	type DurablePromptInput,
 	type DurablePromptSubmission,
@@ -115,13 +150,35 @@ export {
 } from "./runtime-recovery.ts";
 export type { RecoverablePromptDraft } from "./runtime-recovery-materializer.ts";
 export {
+	isSessionControlEntryType,
+	type PermissionDecision,
+	type PermissionDecisionSource,
+	parseSessionControlEntry,
+	type SessionControlEntry,
+	type SessionControlPayload,
+	type SessionPermissionDecisionEntry,
+	type SessionPermissionsEntry,
+} from "./session-control.ts";
+export { createSessionId } from "./session-id.ts";
+export {
 	assertValidSessionId,
 	CURRENT_SESSION_VERSION,
+	type CwdOrigin,
 	type FileEntry,
 	getDefaultSessionDir,
 	moveSessionFileWithLease,
+	type PermissionDecisionPayload,
 	type RuntimeControlPayload,
 	SessionManager,
 	type SessionMessageEntry,
 } from "./session-manager.ts";
+export {
+	getManagedWorkspaceDir,
+	getOwnedManagedWorkspace,
+	getWorkspacesDir,
+	publishManagedWorkspaceCopy,
+	removeOwnedManagedWorkspace,
+	resolveNewSessionWorkspace,
+	type SessionWorkspace,
+} from "./session-workspace.ts";
 export { createSyntheticSourceInfo } from "./source-info.ts";

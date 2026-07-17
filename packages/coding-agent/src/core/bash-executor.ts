@@ -21,6 +21,8 @@ import { DEFAULT_MAX_BYTES, truncateTail } from "./tools/truncate.ts";
 // ============================================================================
 
 export interface BashExecutorOptions {
+	/** Exact one-action permission grant consumed by the execution backend. */
+	actionId?: string;
 	/** Callback for streaming output chunks (already sanitized) */
 	onChunk?: (chunk: string) => void;
 	/** AbortSignal for cancellation */
@@ -116,6 +118,7 @@ export async function executeBashWithOperations(
 
 	try {
 		const result = await operations.exec(command, cwd, {
+			actionId: options?.actionId,
 			onData,
 			signal: options?.signal,
 		});

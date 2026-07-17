@@ -1,4 +1,5 @@
-import { type AgentMessage, uuidv7 } from "@arcmind/agent-core";
+import { spawnSync } from "node:child_process";
+import type { AgentMessage } from "@arcmind/agent-core";
 import type { ImageContent, Message, TextContent } from "@arcmind/ai";
 import { createHash, randomUUID } from "crypto";
 import {
@@ -11,7 +12,9 @@ import {
 	readdirSync,
 	readSync,
 	renameSync,
+	rmSync,
 	statSync,
+	unlinkSync,
 } from "fs";
 import { lstat, open, readdir } from "fs/promises";
 import { dirname, isAbsolute, join, parse, relative, resolve, sep } from "path";
@@ -19,6 +22,7 @@ import { setImmediate as yieldToEventLoop } from "timers/promises";
 import { TextDecoder } from "util";
 import { getAgentDir as getDefaultAgentDir, getSessionsDir } from "../config.ts";
 import { canonicalizePathForCreation, encodePathForStorage, normalizePath, resolvePath } from "../utils/paths.ts";
+import { type AgentMode, DEFAULT_AGENT_MODE, isAgentMode } from "./agent-mode.ts";
 import {
 	createFileAtomicallySync,
 	ensureDirectoryDurablySync,
@@ -34,6 +38,12 @@ import {
 	createCustomMessage,
 } from "./messages.ts";
 import {
+	defaultPermissionSettings,
+	isPermissionMode,
+	type PermissionMode,
+	type PermissionSettings,
+} from "./permission-mode.ts";
+import {
 	type DurableImageRef,
 	isRuntimeControlEntryType,
 	MAX_DURABLE_IMAGE_BYTES,
@@ -42,10 +52,19 @@ import {
 	parseRuntimeControlEntry,
 	type RuntimeControlEntry,
 } from "./runtime-recovery.ts";
+import {
+	isSessionControlEntryType,
+	parseSessionControlEntry,
+	type SessionControlEntry,
+	type SessionControlPayload,
+	type SessionPermissionDecisionEntry,
+} from "./session-control.ts";
+import { assertValidSessionId, createSessionId } from "./session-id.ts";
 import { CorruptSessionError, openSessionJournal, type SessionJournal } from "./session-journal.ts";
 import { SessionLease, SessionLeaseError } from "./session-lease.ts";
+import { type CwdOrigin, getOwnedManagedWorkspace, publishManagedWorkspaceCopy } from "./session-workspace.ts";
 
-export const CURRENT_SESSION_VERSION = 5;
+export const CURRENT_SESSION_VERSION = 6;
 
 interface ImageReference {
 	type: "image_ref";
@@ -446,16 +465,33 @@ export interface SessionHeader {
 	id: string;
 	timestamp: string;
 	cwd: string;
+	mode?: AgentMode;
+	cwdOrigin?: CwdOrigin;
+	permissionMode?: PermissionMode;
+	reviewerEnabled?: boolean;
 	parentSession?: string;
 }
+
+export type { CwdOrigin } from "./session-workspace.ts";
 
 export interface NewSessionOptions {
 	id?: string;
 	parentSession?: string;
+	mode?: AgentMode;
+	cwdOrigin?: CwdOrigin;
+	permissionMode?: PermissionMode;
+	reviewerEnabled?: boolean;
 }
 
 export interface ImportSessionOptions {
 	destinationMode?: "replace" | "create-exclusive";
+}
+
+export interface DeleteSessionResult {
+	ok: boolean;
+	method: "trash" | "unlink";
+	error?: string;
+	warning?: string;
 }
 
 export interface SessionEntryBase {
@@ -565,13 +601,15 @@ export type SessionEntry =
 	| LabelEntry
 	| SessionInfoEntry;
 
-/** Raw file entry (includes header and journal-only runtime controls). */
-export type FileEntry = SessionHeader | SessionEntry | RuntimeControlEntry;
+/** Raw file entry (includes header and journal-only control records). */
+export type FileEntry = SessionHeader | SessionEntry | RuntimeControlEntry | SessionControlEntry;
 
 type RuntimePayload<Entry> = Entry extends RuntimeControlEntry ? Omit<Entry, "id" | "parentId" | "timestamp"> : never;
 
 /** Runtime control data accepted by SessionManager; journal metadata is manager-owned. */
 export type RuntimeControlPayload = RuntimePayload<RuntimeControlEntry>;
+
+export type PermissionDecisionPayload = Omit<SessionPermissionDecisionEntry, "type" | "id" | "parentId" | "timestamp">;
 
 /** Tree node for getTree() - defensive copy of session structure */
 export interface SessionTreeNode {
@@ -594,6 +632,8 @@ export interface SessionInfo {
 	id: string;
 	/** Working directory where the session was started. Empty string for old sessions. */
 	cwd: string;
+	/** Immutable session classification. Missing legacy values resolve to code. */
+	mode: AgentMode;
 	/** User-defined display name from session_info entries. */
 	name?: string;
 	/** Path to the parent session (if this session was forked). */
@@ -618,6 +658,9 @@ export type ReadonlySessionManager = Pick<
 	| "getBranch"
 	| "buildContextEntries"
 	| "getHeader"
+	| "getMode"
+	| "getCwdOrigin"
+	| "getPermissionSettings"
 	| "getEntries"
 	| "getTree"
 	| "getSessionName"
@@ -652,23 +695,16 @@ function readonlySessionSnapshot(manager: SessionManager): ReadonlySessionManage
 		getBranch: (fromId?: string) => manager.getBranch(fromId),
 		buildContextEntries: () => manager.buildContextEntries(),
 		getHeader: () => manager.getHeader(),
+		getMode: () => manager.getMode(),
+		getCwdOrigin: () => manager.getCwdOrigin(),
+		getPermissionSettings: () => manager.getPermissionSettings(),
 		getEntries: () => manager.getEntries(),
 		getTree: () => manager.getTree(),
 		getSessionName: () => manager.getSessionName(),
 	});
 }
 
-function createSessionId(): string {
-	return uuidv7();
-}
-
-export function assertValidSessionId(id: string): void {
-	if (!/^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$/.test(id)) {
-		throw new Error(
-			"Session id must be non-empty, contain only alphanumeric characters, '-', '_', and '.', and start and end with an alphanumeric character",
-		);
-	}
-}
+export { assertValidSessionId } from "./session-id.ts";
 
 /** Generate a unique short ID (8 hex chars, collision-checked) */
 function generateId(byId: { has(id: string): boolean }): string {
@@ -746,6 +782,13 @@ function migrateV4ToV5(entries: FileEntry[]): void {
 	}
 }
 
+/** Migrate v5 → v6: reserve journal-only session permission controls. */
+function migrateV5ToV6(entries: FileEntry[]): void {
+	for (const entry of entries) {
+		if (entry.type === "session") entry.version = 6;
+	}
+}
+
 /**
  * Run all necessary migrations to bring entries to current version.
  * Mutates entries in place. Returns true if any migration was applied.
@@ -761,6 +804,9 @@ function migrateToCurrentVersion(entries: FileEntry[]): boolean {
 	) {
 		throw new TypeError("Runtime control entries require a v5 session header");
 	}
+	if (version < 6 && entries.some((entry) => isSessionControlEntryType(entry.type))) {
+		throw new TypeError("Session control entries require a v6 session header");
+	}
 
 	if (version >= CURRENT_SESSION_VERSION) return false;
 
@@ -768,6 +814,7 @@ function migrateToCurrentVersion(entries: FileEntry[]): boolean {
 	if (version < 3) migrateV2ToV3(entries);
 	if (version < 4) migrateV3ToV4(entries);
 	if (version < 5) migrateV4ToV5(entries);
+	if (version < 6) migrateV5ToV6(entries);
 
 	return true;
 }
@@ -1004,6 +1051,18 @@ function validateSessionHeader(record: Record<string, unknown>, filePath: string
 	if (header.parentSession !== undefined && typeof header.parentSession !== "string") {
 		corruptSession(filePath, 1, "Session header has an invalid parentSession");
 	}
+	if (header.mode !== undefined && !isAgentMode(header.mode)) {
+		corruptSession(filePath, 1, "Session header has an invalid mode");
+	}
+	if (header.cwdOrigin !== undefined && header.cwdOrigin !== "managed" && header.cwdOrigin !== "user-selected") {
+		corruptSession(filePath, 1, "Session header has an invalid cwdOrigin");
+	}
+	if (header.permissionMode !== undefined && !isPermissionMode(header.permissionMode)) {
+		corruptSession(filePath, 1, "Session header has an invalid permissionMode");
+	}
+	if (header.reviewerEnabled !== undefined && typeof header.reviewerEnabled !== "boolean") {
+		corruptSession(filePath, 1, "Session header has an invalid reviewerEnabled");
+	}
 
 	const version = header.version ?? 1;
 	if (!Number.isInteger(version) || version < 1) {
@@ -1015,6 +1074,12 @@ function validateSessionHeader(record: Record<string, unknown>, filePath: string
 			1,
 			`Session version ${version} is newer than supported version ${CURRENT_SESSION_VERSION}`,
 		);
+	}
+	if (
+		version < 6 &&
+		(header.cwdOrigin !== undefined || header.permissionMode !== undefined || header.reviewerEnabled !== undefined)
+	) {
+		corruptSession(filePath, 1, "Workspace and permission header fields require a v6 session header");
 	}
 	return header;
 }
@@ -1028,14 +1093,26 @@ function validateRawSessionRecords(records: readonly unknown[], filePath: string
 	const version = header.version ?? 1;
 	for (let index = 1; index < records.length; index++) {
 		const type = (records[index] as { type: string }).type;
-		if (!type.startsWith("runtime_")) continue;
-		if (version < 5) {
-			corruptSession(filePath, index + 1, "Runtime control entries require a v5 session header");
+		if (type.startsWith("runtime_")) {
+			if (version < 5) {
+				corruptSession(filePath, index + 1, "Runtime control entries require a v5 session header");
+			}
+			if (!isRuntimeControlEntryType(type)) {
+				corruptSession(filePath, index + 1, `Unknown runtime control entry type: ${type}`);
+			}
+			parseRuntimeRecord(records[index], index + 1, filePath);
+			continue;
 		}
-		if (!isRuntimeControlEntryType(type)) {
-			corruptSession(filePath, index + 1, `Unknown runtime control entry type: ${type}`);
+		if (isSessionControlEntryType(type)) {
+			if (version < 6) {
+				corruptSession(filePath, index + 1, "Session control entries require a v6 session header");
+			}
+			parseSessionControlRecord(records[index], index + 1, filePath);
+			continue;
 		}
-		parseRuntimeRecord(records[index], index + 1, filePath);
+		if (type.startsWith("session_permission")) {
+			corruptSession(filePath, index + 1, `Unknown session control entry type: ${type}`);
+		}
 	}
 	return header;
 }
@@ -1050,6 +1127,19 @@ function parseRuntimeRecord(record: unknown, lineNumber: number, filePath: strin
 	} catch (error) {
 		if (error instanceof CorruptSessionError) throw error;
 		throw new CorruptSessionError(filePath, lineNumber, "Invalid runtime control entry", { cause: error });
+	}
+}
+
+function parseSessionControlRecord(record: unknown, lineNumber: number, filePath: string): SessionControlEntry {
+	try {
+		const entry = parseSessionControlEntry(record);
+		if (!Number.isFinite(Date.parse(entry.timestamp))) {
+			corruptSession(filePath, lineNumber, `Session control entry ${entry.id} has an invalid timestamp`);
+		}
+		return entry;
+	} catch (error) {
+		if (error instanceof CorruptSessionError) throw error;
+		throw new CorruptSessionError(filePath, lineNumber, "Invalid session control entry", { cause: error });
 	}
 }
 
@@ -1096,8 +1186,8 @@ function validateSessionGraphEntry(
 	seenTreeIds.add(entry.id);
 }
 
-function validateRuntimeGraphEntry(
-	entry: RuntimeControlEntry,
+function validateControlGraphEntry(
+	entry: RuntimeControlEntry | SessionControlEntry,
 	lineNumber: number,
 	filePath: string,
 	seenRecordIds: Set<string>,
@@ -1108,7 +1198,7 @@ function validateRuntimeGraphEntry(
 		corruptSession(
 			filePath,
 			lineNumber,
-			`Runtime control entry ${entry.id} references a missing, forward, or non-tree parent: ${entry.parentId}`,
+			`Control entry ${entry.id} references a missing, forward, or non-tree parent: ${entry.parentId}`,
 		);
 	}
 	seenRecordIds.add(entry.id);
@@ -1121,8 +1211,16 @@ function validateSessionGraph(records: readonly FileEntry[], filePath: string): 
 	for (let index = 1; index < records.length; index++) {
 		const record = records[index];
 		if (isRuntimeControlEntryType(record.type)) {
-			validateRuntimeGraphEntry(
+			validateControlGraphEntry(
 				parseRuntimeRecord(record, index + 1, filePath),
+				index + 1,
+				filePath,
+				seenRecordIds,
+				seenTreeIds,
+			);
+		} else if (isSessionControlEntryType(record.type)) {
+			validateControlGraphEntry(
+				parseSessionControlRecord(record, index + 1, filePath),
 				index + 1,
 				filePath,
 				seenRecordIds,
@@ -1149,7 +1247,9 @@ function hydrateSessionRecords(
 ): FileEntry[] {
 	const imageDir = getSessionAssetDirFromStoragePath(storagePath, "images");
 	return records.map((record) => {
-		if (isRuntimeControlEntryType(record.type)) return structuredClone(record);
+		if (isRuntimeControlEntryType(record.type) || isSessionControlEntryType(record.type)) {
+			return structuredClone(record);
+		}
 		return JSON.parse(JSON.stringify(record), (_key, value) => {
 			if (!hasImageReferenceTag(value)) return value;
 			return isImageReference(value)
@@ -1414,7 +1514,7 @@ function addCatalogRecord(state: SessionCatalogState, record: unknown, index: nu
 		if (!isRuntimeControlEntryType(type)) {
 			corruptSession(filePath, index + 1, `Unknown runtime control entry type: ${type}`);
 		}
-		validateRuntimeGraphEntry(
+		validateControlGraphEntry(
 			parseRuntimeRecord(raw, index + 1, filePath),
 			index + 1,
 			filePath,
@@ -1422,6 +1522,22 @@ function addCatalogRecord(state: SessionCatalogState, record: unknown, index: nu
 			state.seenTreeIds,
 		);
 		return;
+	}
+	if (isSessionControlEntryType(type)) {
+		if ((header.version ?? 1) < 6) {
+			corruptSession(filePath, index + 1, "Session control entries require a v6 session header");
+		}
+		validateControlGraphEntry(
+			parseSessionControlRecord(raw, index + 1, filePath),
+			index + 1,
+			filePath,
+			state.seenRecordIds,
+			state.seenTreeIds,
+		);
+		return;
+	}
+	if (type.startsWith("session_permission")) {
+		corruptSession(filePath, index + 1, `Unknown session control entry type: ${type}`);
 	}
 	const entry = raw as unknown as SessionEntry;
 	if ((header.version ?? 1) === 1) {
@@ -1568,6 +1684,7 @@ async function buildSessionInfo(filePath: string): Promise<SessionInfo | null> {
 			path: filePath,
 			id: header.id,
 			cwd: header.cwd,
+			mode: header.mode ?? DEFAULT_AGENT_MODE,
 			name: state.name,
 			parentSessionPath: header.parentSession,
 			created: new Date(header.timestamp),
@@ -1660,6 +1777,8 @@ async function listSessionsFromDir(
 
 interface ManagedSessionState {
 	sessionId: string;
+	cwdOrigin: CwdOrigin;
+	permissionSettings: PermissionSettings;
 	sessionFile: string | undefined;
 	/** Canonical path pinned when a persisted session is opened. */
 	storagePath?: string;
@@ -1676,6 +1795,20 @@ interface ManagedSessionState {
 	lease?: SessionLease;
 }
 
+function reducePermissionSettings(entries: readonly FileEntry[]): PermissionSettings {
+	const header = entries[0] as SessionHeader;
+	const defaults = defaultPermissionSettings(header.mode ?? DEFAULT_AGENT_MODE);
+	let settings: PermissionSettings = {
+		mode: header.permissionMode ?? defaults.mode,
+		reviewerEnabled: header.reviewerEnabled ?? defaults.reviewerEnabled,
+	};
+	for (const entry of entries.slice(1)) {
+		if (entry.type !== "session_permissions") continue;
+		settings = { mode: entry.permissionMode, reviewerEnabled: entry.reviewerEnabled };
+	}
+	return settings;
+}
+
 function buildManagedSessionState(
 	fileEntries: FileEntry[],
 	sessionFile?: string,
@@ -1684,7 +1817,9 @@ function buildManagedSessionState(
 	storagePath?: string,
 ): ManagedSessionState {
 	const rawFileEntries = fileEntries;
-	const transcriptFileEntries = rawFileEntries.filter((entry) => !isRuntimeControlEntryType(entry.type));
+	const transcriptFileEntries = rawFileEntries.filter(
+		(entry) => !isRuntimeControlEntryType(entry.type) && !isSessionControlEntryType(entry.type),
+	);
 	const imageReadBudget: ImageReadBudget = { used: 0, limit: MAX_SESSION_IMAGE_BLOB_BYTES };
 	const hydratedFileEntries = storagePath
 		? hydrateSessionRecords(transcriptFileEntries, storagePath, imageReadBudget)
@@ -1695,9 +1830,12 @@ function buildManagedSessionState(
 	const labelsById = new Map<string, string>();
 	const labelTimestampsById = new Map<string, string>();
 	let leafId: string | null = null;
-	for (const rawEntry of rawFileEntries.slice(1)) recordIds.add((rawEntry as SessionEntry | RuntimeControlEntry).id);
+	const permissionSettings = reducePermissionSettings(rawFileEntries);
+	for (const rawEntry of rawFileEntries.slice(1)) {
+		recordIds.add((rawEntry as SessionEntry | RuntimeControlEntry | SessionControlEntry).id);
+	}
 	for (const entry of hydratedFileEntries.slice(1)) {
-		if (isRuntimeControlEntryType(entry.type)) continue;
+		if (isRuntimeControlEntryType(entry.type) || isSessionControlEntryType(entry.type)) continue;
 		const treeEntry = entry as SessionEntry;
 		byId.set(treeEntry.id, treeEntry);
 		leafId = treeEntry.id;
@@ -1712,6 +1850,8 @@ function buildManagedSessionState(
 	}
 	return {
 		sessionId: header.id,
+		cwdOrigin: header.cwdOrigin ?? "user-selected",
+		permissionSettings,
 		sessionFile,
 		storagePath,
 		toolOutputDir: storagePath ? getSessionAssetDirFromStoragePath(storagePath, "tool-results") : undefined,
@@ -1921,6 +2061,8 @@ function openPersistedSessionState(
  */
 export class SessionManager {
 	private sessionId: string = "";
+	private cwdOrigin: CwdOrigin = "user-selected";
+	private permissionSettings: PermissionSettings = defaultPermissionSettings(DEFAULT_AGENT_MODE);
 	private sessionFile: string | undefined;
 	private storagePath: string | undefined;
 	private toolOutputDir: string | undefined;
@@ -1980,6 +2122,10 @@ export class SessionManager {
 			id: createSessionId(),
 			timestamp: new Date().toISOString(),
 			cwd: this.cwd,
+			mode: DEFAULT_AGENT_MODE,
+			cwdOrigin: "user-selected",
+			permissionMode: defaultPermissionSettings(DEFAULT_AGENT_MODE).mode,
+			reviewerEnabled: defaultPermissionSettings(DEFAULT_AGENT_MODE).reviewerEnabled,
 		});
 		if (!this.persist) {
 			const records = existsSync(storagePath) ? readSessionRecordsReadOnly(storagePath).records : [createHeader()];
@@ -1997,12 +2143,22 @@ export class SessionManager {
 		}
 		const sessionId = options?.id ?? createSessionId();
 		const timestamp = new Date().toISOString();
+		const mode = options?.mode ?? this.getMode();
+		const permissionDefaults = defaultPermissionSettings(mode);
+		const permissionMode = options?.permissionMode ?? permissionDefaults.mode;
+		const reviewerEnabled = options?.reviewerEnabled ?? permissionDefaults.reviewerEnabled;
+		if (!isPermissionMode(permissionMode)) throw new TypeError("Invalid permission mode");
+		if (typeof reviewerEnabled !== "boolean") throw new TypeError("reviewerEnabled must be a boolean");
 		const header: SessionHeader = {
 			type: "session",
 			version: CURRENT_SESSION_VERSION,
 			id: sessionId,
 			timestamp,
 			cwd: this.cwd,
+			mode,
+			cwdOrigin: options?.cwdOrigin ?? "user-selected",
+			permissionMode,
+			reviewerEnabled,
 			parentSession: options?.parentSession,
 		};
 		let state: ManagedSessionState;
@@ -2023,6 +2179,8 @@ export class SessionManager {
 
 	private _applyManagedState(state: ManagedSessionState): void {
 		this.sessionId = state.sessionId;
+		this.cwdOrigin = state.cwdOrigin;
+		this.permissionSettings = state.permissionSettings;
 		this.sessionFile = state.sessionFile;
 		this.storagePath = state.storagePath;
 		this.toolOutputDir = state.toolOutputDir;
@@ -2041,6 +2199,8 @@ export class SessionManager {
 	private _detachManagedState(): ManagedSessionState {
 		const state: ManagedSessionState = {
 			sessionId: this.sessionId,
+			cwdOrigin: this.cwdOrigin,
+			permissionSettings: this.permissionSettings,
 			sessionFile: this.sessionFile,
 			storagePath: this.storagePath,
 			toolOutputDir: this.toolOutputDir,
@@ -2247,6 +2407,53 @@ export class SessionManager {
 		this.rawFileEntries.push(entry);
 		this.recordIds.add(entry.id);
 		return entry.id;
+	}
+
+	private _appendSessionControl(payload: SessionControlPayload): SessionControlEntry {
+		this._assertOpen();
+		if (typeof payload !== "object" || payload === null || Array.isArray(payload)) {
+			throw new TypeError("Session control payload must be a plain object");
+		}
+		const prototype = Object.getPrototypeOf(payload);
+		if (prototype !== Object.prototype && prototype !== null) {
+			throw new TypeError("Session control payload must be a plain object");
+		}
+		for (const field of ["id", "parentId", "timestamp"] as const) {
+			if (Object.hasOwn(payload, field)) throw new TypeError(`Session control payload must not contain ${field}`);
+		}
+
+		const candidate = Object.create(Object.prototype);
+		Object.defineProperties(candidate, Object.getOwnPropertyDescriptors(payload));
+		Object.defineProperties(candidate, {
+			id: { enumerable: true, value: generateId(this.recordIds) },
+			parentId: { enumerable: true, value: this.leafId },
+			timestamp: { enumerable: true, value: new Date().toISOString() },
+		});
+		const entry = parseSessionControlEntry(candidate);
+		if (this.persist) {
+			if (!this.journal) throw new Error("Persisted session is missing its journal");
+			this.journal.append(entry);
+		}
+		this.rawFileEntries.push(entry);
+		this.recordIds.add(entry.id);
+		return entry;
+	}
+
+	/** Persist effective per-session permissions without advancing the transcript leaf. */
+	setPermissionSettings(settings: PermissionSettings): string {
+		const entry = this._appendSessionControl({
+			type: "session_permissions",
+			permissionMode: settings.mode,
+			reviewerEnabled: settings.reviewerEnabled,
+		});
+		if (entry.type !== "session_permissions") throw new Error("Unexpected session control entry");
+		this.permissionSettings = { mode: entry.permissionMode, reviewerEnabled: entry.reviewerEnabled };
+		return entry.id;
+	}
+
+	/** Append one permission decision audit record without granting persistent authority. */
+	appendPermissionDecision(decision: PermissionDecisionPayload): string {
+		return this._appendSessionControl({ type: "session_permission_decision", ...decision }).id;
 	}
 
 	/** Raw journal-order snapshot for runtime reduction; callers cannot mutate manager state. */
@@ -2477,7 +2684,22 @@ export class SessionManager {
 	 */
 	getHeader(): SessionHeader | null {
 		const h = this.fileEntries.find((e) => e.type === "session");
-		return h ? (h as SessionHeader) : null;
+		return h ? { ...(h as SessionHeader) } : null;
+	}
+
+	/** Get the effective immutable session classification mode. */
+	getMode(): AgentMode {
+		return this.getHeader()?.mode ?? DEFAULT_AGENT_MODE;
+	}
+
+	/** Whether ArcMind owns the working directory or the user selected it. */
+	getCwdOrigin(): CwdOrigin {
+		return this.cwdOrigin;
+	}
+
+	/** Effective permission settings after reducing session control records. */
+	getPermissionSettings(): PermissionSettings {
+		return { ...this.permissionSettings };
 	}
 
 	/**
@@ -2487,7 +2709,10 @@ export class SessionManager {
 	 */
 	getEntries(): SessionEntry[] {
 		return this.fileEntries.filter(
-			(entry): entry is SessionEntry => entry.type !== "session" && !isRuntimeControlEntryType(entry.type),
+			(entry): entry is SessionEntry =>
+				entry.type !== "session" &&
+				!isRuntimeControlEntryType(entry.type) &&
+				!isSessionControlEntryType(entry.type),
 		);
 	}
 
@@ -2668,7 +2893,7 @@ export class SessionManager {
 	}
 
 	/** Create an independent candidate containing the path from root to the selected leaf. */
-	createBranchedSessionManager(leafId: string): SessionManager {
+	createBranchedSessionManager(leafId: string | null): SessionManager {
 		this._assertOpen();
 		let sourceStoragePath: string | undefined;
 		let path: SessionEntry[];
@@ -2679,13 +2904,16 @@ export class SessionManager {
 			const records = this.lease.withWritePermit(() => readSessionRecordsReadOnly(storagePath).records);
 			const rawEntries = records
 				.slice(1)
-				.filter((entry): entry is SessionEntry => !isRuntimeControlEntryType(entry.type));
+				.filter(
+					(entry): entry is SessionEntry =>
+						!isRuntimeControlEntryType(entry.type) && !isSessionControlEntryType(entry.type),
+				);
 			const rawById = buildEntryIndex(rawEntries);
-			path = rawById.has(leafId) ? buildSessionPath(rawEntries, leafId, rawById) : [];
+			path = leafId === null ? [] : rawById.has(leafId) ? buildSessionPath(rawEntries, leafId, rawById) : [];
 		} else {
-			path = this.getBranch(leafId);
+			path = leafId === null ? [] : this.getBranch(leafId);
 		}
-		if (path.length === 0) {
+		if (leafId !== null && path.length === 0) {
 			throw new Error(`Entry ${leafId} not found`);
 		}
 
@@ -2708,6 +2936,10 @@ export class SessionManager {
 			id: sessionId,
 			timestamp,
 			cwd: this.cwd,
+			mode: this.getMode(),
+			cwdOrigin: this.getCwdOrigin(),
+			permissionMode: this.permissionSettings.mode,
+			reviewerEnabled: this.permissionSettings.reviewerEnabled,
 			parentSession: this.persist ? this.sessionFile : undefined,
 		};
 
@@ -2729,21 +2961,45 @@ export class SessionManager {
 			parentId = labelEntry.id;
 		}
 
-		const records: FileEntry[] = [header, ...pathWithoutLabels, ...labelEntries];
-		let state: ManagedSessionState;
-		if (this.persist) {
-			const sessionFile = join(this.getSessionDir(), `${timestamp.replace(/[:.]/g, "-")}_${sessionId}.jsonl`);
-			state = createPersistedSessionState(
-				sessionFile,
-				records,
-				"create",
-				canonicalPath(sessionFile),
-				sourceStoragePath,
-			);
-		} else {
-			state = buildManagedSessionState(records);
+		const createManager = (targetCwd: string, targetSessionDir: string): SessionManager => {
+			header.cwd = targetCwd;
+			const records: FileEntry[] = [header, ...pathWithoutLabels, ...labelEntries];
+			let state: ManagedSessionState;
+			if (this.persist) {
+				const sessionFile = join(targetSessionDir, `${timestamp.replace(/[:.]/g, "-")}_${sessionId}.jsonl`);
+				state = createPersistedSessionState(
+					sessionFile,
+					records,
+					"create",
+					canonicalPath(sessionFile),
+					sourceStoragePath,
+				);
+			} else {
+				state = buildManagedSessionState(records);
+			}
+			return new SessionManager(targetCwd, targetSessionDir, this.persist, { state });
+		};
+
+		if (this.getCwdOrigin() === "managed") {
+			const sessionDirAgent = dirname(dirname(this.sessionDir));
+			const sessionDirUsesManagedAgent =
+				canonicalPath(this.sessionDir) === canonicalPath(getDefaultSessionDirPath(this.cwd, sessionDirAgent));
+			const agentDir = sessionDirUsesManagedAgent ? sessionDirAgent : dirname(dirname(this.cwd));
+			return publishManagedWorkspaceCopy({
+				sourceId: this.sessionId,
+				sourceCwd: this.cwd,
+				targetId: sessionId,
+				agentDir,
+				publish: (targetCwd) => {
+					const defaultSessionDir =
+						canonicalPath(this.sessionDir) === canonicalPath(getDefaultSessionDirPath(this.cwd, agentDir));
+					const targetSessionDir = defaultSessionDir ? getDefaultSessionDir(targetCwd, agentDir) : this.sessionDir;
+					return createManager(targetCwd, targetSessionDir);
+				},
+			});
 		}
-		return new SessionManager(this.cwd, this.sessionDir, this.persist, { state });
+
+		return createManager(this.cwd, this.sessionDir);
 	}
 
 	/**
@@ -2784,6 +3040,10 @@ export class SessionManager {
 			id: createSessionId(),
 			timestamp: new Date().toISOString(),
 			cwd: resolvePath(initialCwd),
+			mode: DEFAULT_AGENT_MODE,
+			cwdOrigin: "user-selected",
+			permissionMode: defaultPermissionSettings(DEFAULT_AGENT_MODE).mode,
+			reviewerEnabled: defaultPermissionSettings(DEFAULT_AGENT_MODE).reviewerEnabled,
 		});
 		const state = openPersistedSessionState(resolvedPath, createHeader, storagePath, {
 			createIfMissing: options.createIfMissing !== false,
@@ -2846,7 +3106,7 @@ export class SessionManager {
 	 * @param cwd Working directory
 	 * @param sessionDir Optional session directory. If omitted, uses default (~/.arcmind/agent/sessions/<encoded-cwd>/).
 	 */
-	static continueRecent(cwd: string, sessionDir?: string): SessionManager {
+	static continueRecent(cwd: string, sessionDir?: string, options?: Pick<NewSessionOptions, "mode">): SessionManager {
 		const dir = sessionDir ? normalizePath(sessionDir) : getDefaultSessionDir(cwd);
 		const filterCwd = sessionDir !== undefined && dir !== getDefaultSessionDirPath(cwd);
 		for (const candidate of findRecentSessionCandidates(dir, filterCwd ? cwd : undefined)) {
@@ -2859,7 +3119,7 @@ export class SessionManager {
 				// A corrupt or raced candidate must not hide an older valid session.
 			}
 		}
-		return new SessionManager(cwd, dir, true);
+		return new SessionManager(cwd, dir, true, { newSessionOptions: options });
 	}
 
 	/** Create an in-memory session (no file persistence) */
@@ -2878,12 +3138,14 @@ export class SessionManager {
 		sourcePath: string,
 		targetCwd: string,
 		sessionDir?: string,
-		options?: NewSessionOptions,
+		options?: Pick<NewSessionOptions, "id">,
 	): SessionManager {
 		const resolvedSourcePath = resolvePath(sourcePath);
 		const sourceStoragePath = canonicalPath(resolvedSourcePath);
 		const resolvedTargetCwd = resolvePath(targetCwd);
 		const source = readSessionRecordsReadOnly(sourceStoragePath);
+		const sourceHeader = source.records[0] as SessionHeader;
+		const sourcePermissions = reducePermissionSettings(source.records);
 
 		const dir = sessionDir ? normalizePath(sessionDir) : getDefaultSessionDir(resolvedTargetCwd);
 		if (options?.id !== undefined) {
@@ -2901,13 +3163,22 @@ export class SessionManager {
 			id: newSessionId,
 			timestamp,
 			cwd: resolvedTargetCwd,
+			mode: sourceHeader.mode ?? DEFAULT_AGENT_MODE,
+			cwdOrigin: sourceHeader.cwdOrigin ?? "user-selected",
+			permissionMode: sourcePermissions.mode,
+			reviewerEnabled: sourcePermissions.reviewerEnabled,
 			parentSession: resolvedSourcePath,
 		};
 		const state = createPersistedSessionState(
 			newSessionFile,
 			[
 				newHeader,
-				...source.records.slice(1).filter((entry): entry is SessionEntry => !isRuntimeControlEntryType(entry.type)),
+				...source.records
+					.slice(1)
+					.filter(
+						(entry): entry is SessionEntry =>
+							!isRuntimeControlEntryType(entry.type) && !isSessionControlEntryType(entry.type),
+					),
 			],
 			"create",
 			canonicalPath(newSessionFile),
@@ -2953,6 +3224,102 @@ export class SessionManager {
 			sourceStoragePath,
 		);
 		return new SessionManager(cwdOverride ?? header.cwd, dirname(resolvedDestinationPath), true, { state });
+	}
+
+	/** Delete one closed session and only the assets ArcMind can prove it owns. */
+	static async deleteSession(sessionPath: string, options: { agentDir?: string } = {}): Promise<DeleteSessionResult> {
+		const unresolvedPath = resolvePath(sessionPath);
+		let before: ReturnType<typeof lstatSync>;
+		try {
+			before = lstatSync(unresolvedPath);
+			if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1) {
+				throw new Error("Session path must be a single-link regular file");
+			}
+		} catch (error) {
+			return { ok: false, method: "unlink", error: error instanceof Error ? error.message : String(error) };
+		}
+
+		const storagePath = canonicalPath(unresolvedPath);
+		let lease: SessionLease;
+		try {
+			lease = SessionLease.acquire(storagePath);
+		} catch (error) {
+			return { ok: false, method: "unlink", error: error instanceof Error ? error.message : String(error) };
+		}
+
+		try {
+			const current = lstatSync(unresolvedPath);
+			if (
+				!current.isFile() ||
+				current.isSymbolicLink() ||
+				current.nlink !== 1 ||
+				current.dev !== before.dev ||
+				current.ino !== before.ino
+			) {
+				throw new Error("Session path changed before deletion");
+			}
+			const records = readSessionRecordsReadOnly(storagePath, { followSymlinkAlias: false }).records;
+			const header = records[0] as SessionHeader;
+			const imageDir = getSessionImageDir(storagePath);
+			const toolOutputDir = getSessionToolOutputDir(storagePath);
+			const workspace = getOwnedManagedWorkspace({
+				id: header.id,
+				cwd: header.cwd,
+				cwdOrigin: header.cwdOrigin ?? "user-selected",
+				agentDir: options.agentDir ?? getDefaultAgentDir(),
+			});
+			const ownedTargets = [
+				{ label: "image", path: imageDir },
+				{ label: "tool output", path: toolOutputDir },
+				...(workspace ? [{ label: "managed workspace", path: workspace }] : []),
+			];
+			const exists = (path: string): boolean => {
+				try {
+					lstatSync(path);
+					return true;
+				} catch (error) {
+					return (error as NodeJS.ErrnoException).code !== "ENOENT";
+				}
+			};
+			const trashTargets = [storagePath, ...ownedTargets.filter(({ path }) => exists(path)).map(({ path }) => path)];
+			const trashArgs = trashTargets.some((path) => path.startsWith("-")) ? ["--", ...trashTargets] : trashTargets;
+			const trashResult = spawnSync("trash", trashArgs, { encoding: "utf8" });
+			if (!exists(storagePath) && ownedTargets.every(({ path }) => !exists(path))) {
+				return { ok: true, method: "trash" };
+			}
+
+			try {
+				if (exists(storagePath)) unlinkSync(storagePath);
+			} catch (error) {
+				const trashHint = [trashResult.error?.message, trashResult.stderr?.trim().split("\n")[0]]
+					.filter(Boolean)
+					.join(" · ");
+				const message = error instanceof Error ? error.message : String(error);
+				return { ok: false, method: "unlink", error: trashHint ? `${message} (trash: ${trashHint})` : message };
+			}
+
+			const cleanupErrors: string[] = [];
+			for (const target of ownedTargets) {
+				try {
+					rmSync(target.path, { recursive: true, force: true });
+					if (exists(target.path)) throw new Error("target still exists after removal");
+				} catch (error) {
+					cleanupErrors.push(`${target.label}: ${error instanceof Error ? error.message : String(error)}`);
+				}
+			}
+			return {
+				ok: true,
+				method: "unlink",
+				warning:
+					cleanupErrors.length > 0
+						? `Some session asset directories could not be deleted: ${cleanupErrors.join("; ")}`
+						: undefined,
+			};
+		} catch (error) {
+			return { ok: false, method: "unlink", error: error instanceof Error ? error.message : String(error) };
+		} finally {
+			lease.close();
+		}
 	}
 
 	/**

@@ -2,7 +2,8 @@ import { join } from "node:path";
 import { Agent, type AgentMessage, type ThinkingLevel } from "@arcmind/agent-core";
 import { clampThinkingLevel, type Message, type Model } from "@arcmind/ai/compat";
 import { getAgentDir } from "../config.ts";
-import { resolvePath } from "../utils/paths.ts";
+import { canonicalizeActionPath, resolvePath } from "../utils/paths.ts";
+import { type AgentMode, DEFAULT_AGENT_MODE } from "./agent-mode.ts";
 import { AgentSession } from "./agent-session.ts";
 import { formatNoModelsAvailableMessage } from "./auth-guidance.ts";
 import { AuthStorage } from "./auth-storage.ts";
@@ -11,10 +12,14 @@ import type { ExtensionRunner, LoadExtensionsResult, SessionStartEvent, ToolDefi
 import { convertToLlm } from "./messages.ts";
 import { ModelRegistry } from "./model-registry.ts";
 import { findInitialModel } from "./model-resolver.ts";
+import type { PermissionMode } from "./permission-mode.ts";
+import { canUseFullOnce, type PermissionApprovalRequest } from "./permission-policy.ts";
 import { mergeProviderAttributionHeaders } from "./provider-attribution.ts";
 import type { ResourceLoader } from "./resource-loader.ts";
 import { DefaultResourceLoader } from "./resource-loader.ts";
+import { createSessionId } from "./session-id.ts";
 import { getDefaultSessionDir, SessionManager } from "./session-manager.ts";
+import { removeOwnedManagedWorkspace, resolveNewSessionWorkspace } from "./session-workspace.ts";
 import { SettingsManager } from "./settings-manager.ts";
 import { time } from "./timings.ts";
 import {
@@ -36,6 +41,14 @@ export interface CreateAgentSessionOptions {
 	cwd?: string;
 	/** Global config directory. Default: ~/.arcmind/agent */
 	agentDir?: string;
+	/** Classification mode for a newly-created default session manager. Default: code. */
+	agentMode?: AgentMode;
+	/** Initial permission mode for a newly-created session. */
+	permissionMode?: PermissionMode;
+	/** Whether Auto uses the current session model as reviewer. */
+	reviewerEnabled?: boolean;
+	/** Host callback for one-action approvals and one-time Windows sandbox setup. */
+	onPermissionRequest?: PermissionRequester;
 
 	/** Auth storage for credentials. Default: AuthStorage.create(agentDir/auth.json) */
 	authStorage?: AuthStorage;
@@ -81,6 +94,20 @@ export interface CreateAgentSessionOptions {
 	/** Session start event metadata for extension runtime startup. */
 	sessionStartEvent?: SessionStartEvent;
 }
+
+export interface PermissionRequest {
+	kind: "action" | "sandbox-setup";
+	title: string;
+	summary: string;
+	details: string;
+	allowFullOnce: boolean;
+	fullOnceRequired: boolean;
+}
+
+export type PermissionRequester = (
+	request: PermissionRequest,
+	signal?: AbortSignal,
+) => Promise<"allow-once" | "full-once" | "deny">;
 
 /** Result from createAgentSession */
 export interface CreateAgentSessionResult {
@@ -129,6 +156,47 @@ function getDefaultAgentDir(): string {
 	return getAgentDir();
 }
 
+function createActionPermissionRequester(requester: PermissionRequester | undefined) {
+	if (!requester) return undefined;
+	return async (request: PermissionApprovalRequest) => {
+		const action = request.action;
+		const allowFullOnce = canUseFullOnce(action);
+		const decision = await requester(
+			{
+				kind: "action",
+				title: `Approve ${action.toolName}?`,
+				summary: request.reason,
+				details: JSON.stringify({
+					provenance: action.provenance,
+					risks: action.risks,
+					paths: action.paths,
+					networkTargets: action.networkTargets,
+					command: action.command,
+					arguments: request.args,
+				}),
+				allowFullOnce,
+				fullOnceRequired: request.fullOnceRequired,
+			},
+			request.signal,
+		);
+		if (decision === "deny") return { decision: "deny" as const };
+		return { decision: "allow" as const, fullOnce: decision === "full-once" && allowFullOnce };
+	};
+}
+
+function createWindowsSetupRequester(requester: PermissionRequester | undefined) {
+	if (!requester) return undefined;
+	return async () =>
+		(await requester({
+			kind: "sandbox-setup",
+			title: "Set up the Windows sandbox?",
+			summary: "This one-time setup creates the local SRT sandbox account and requires a UAC prompt.",
+			details: "ArcMind will not download SRT during setup; the runtime helper is shipped with the application.",
+			allowFullOnce: false,
+			fullOnceRequired: false,
+		})) === "allow-once";
+}
+
 /**
  * Create an AgentSession with the specified options.
  *
@@ -165,23 +233,78 @@ function getDefaultAgentDir(): string {
  * ```
  */
 export async function createAgentSession(options: CreateAgentSessionOptions = {}): Promise<CreateAgentSessionResult> {
-	const cwd = resolvePath(options.cwd ?? options.sessionManager?.getCwd() ?? process.cwd());
 	const agentDir = options.agentDir ? resolvePath(options.agentDir) : getDefaultAgentDir();
+	const suppliedSessionManager = options.sessionManager;
+	if (
+		suppliedSessionManager &&
+		options.agentMode !== undefined &&
+		options.agentMode !== suppliedSessionManager.getMode()
+	) {
+		throw new Error("agentMode cannot override the supplied sessionManager mode");
+	}
+	if (
+		suppliedSessionManager &&
+		options.cwd !== undefined &&
+		canonicalizeActionPath(options.cwd, process.cwd()) !==
+			canonicalizeActionPath(suppliedSessionManager.getCwd(), suppliedSessionManager.getCwd())
+	) {
+		throw new Error("cwd cannot override the supplied sessionManager cwd");
+	}
+	if (suppliedSessionManager && options.permissionMode !== undefined) {
+		if (options.permissionMode !== suppliedSessionManager.getPermissionSettings().mode) {
+			throw new Error("permissionMode cannot override the supplied sessionManager permissions");
+		}
+	}
+	if (suppliedSessionManager && options.reviewerEnabled !== undefined) {
+		if (options.reviewerEnabled !== suppliedSessionManager.getPermissionSettings().reviewerEnabled) {
+			throw new Error("reviewerEnabled cannot override the supplied sessionManager permissions");
+		}
+	}
+	if (options.authStorage && options.modelRegistry && options.modelRegistry.authStorage !== options.authStorage) {
+		throw new Error("authStorage must match modelRegistry.authStorage");
+	}
+
+	const mode = options.agentMode ?? DEFAULT_AGENT_MODE;
+	const sessionId = suppliedSessionManager ? undefined : createSessionId();
+	const workspace = suppliedSessionManager
+		? undefined
+		: resolveNewSessionWorkspace({
+				id: sessionId!,
+				mode,
+				requestedCwd: options.cwd,
+				hostCwd: process.cwd(),
+				agentDir,
+			});
+	const cwd = suppliedSessionManager?.getCwd() ?? workspace!.cwd;
 	let resourceLoader = options.resourceLoader;
 	const ownsResourceLoader = resourceLoader === undefined;
 
 	// Use provided or create AuthStorage and ModelRegistry
 	const authPath = options.agentDir ? join(agentDir, "auth.json") : undefined;
 	const modelsPath = options.agentDir ? join(agentDir, "models.json") : undefined;
-	if (options.authStorage && options.modelRegistry && options.modelRegistry.authStorage !== options.authStorage) {
-		throw new Error("authStorage must match modelRegistry.authStorage");
-	}
 	const authStorage = options.modelRegistry?.authStorage ?? options.authStorage ?? AuthStorage.create(authPath);
 	const modelRegistry = options.modelRegistry ?? ModelRegistry.create(authStorage, modelsPath);
 
-	const settingsManager = options.settingsManager ?? SettingsManager.create(cwd, agentDir);
-	const sessionManager = options.sessionManager ?? SessionManager.create(cwd, getDefaultSessionDir(cwd, agentDir));
-	const ownsSessionManager = options.sessionManager === undefined;
+	let settingsManager: SettingsManager;
+	let sessionManager: SessionManager;
+	try {
+		settingsManager = options.settingsManager ?? SettingsManager.create(cwd, agentDir);
+		sessionManager =
+			suppliedSessionManager ??
+			SessionManager.create(cwd, getDefaultSessionDir(cwd, agentDir), {
+				id: sessionId,
+				mode,
+				cwdOrigin: workspace!.cwdOrigin,
+				permissionMode: options.permissionMode,
+				reviewerEnabled: options.reviewerEnabled,
+			});
+	} catch (error) {
+		if (workspace?.cwdOrigin === "managed") {
+			removeOwnedManagedWorkspace({ id: sessionId!, cwd, cwdOrigin: "managed", agentDir });
+		}
+		throw error;
+	}
+	const ownsSessionManager = suppliedSessionManager === undefined;
 	let completed = false;
 
 	try {
@@ -405,6 +528,8 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			excludedToolNames,
 			extensionRunnerRef,
 			sessionStartEvent: options.sessionStartEvent,
+			requestPermissionApproval: createActionPermissionRequester(options.onPermissionRequest),
+			requestWindowsSandboxSetup: createWindowsSetupRequester(options.onPermissionRequest),
 		});
 		completed = true;
 		return {
@@ -419,7 +544,15 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			} finally {
 				// A manager created by the SDK is transferred to AgentSession only on
 				// success. Release its writer lease on every initialization failure.
-				if (ownsSessionManager) sessionManager.close();
+				if (ownsSessionManager) {
+					try {
+						sessionManager.close();
+					} finally {
+						if (workspace?.cwdOrigin === "managed") {
+							removeOwnedManagedWorkspace({ id: sessionId!, cwd, cwdOrigin: "managed", agentDir });
+						}
+					}
+				}
 			}
 		}
 	}

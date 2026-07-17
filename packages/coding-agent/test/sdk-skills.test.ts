@@ -42,7 +42,7 @@ This is a test skill.
 		const { session } = await createAgentSession({
 			cwd: tempDir,
 			agentDir: tempDir,
-			sessionManager: SessionManager.inMemory(),
+			sessionManager: SessionManager.inMemory(tempDir),
 		});
 
 		// Skills should be discovered and exposed on the session
@@ -66,7 +66,7 @@ This is a test skill.
 		const { session } = await createAgentSession({
 			cwd: tempDir,
 			agentDir: tempDir,
-			sessionManager: SessionManager.inMemory(),
+			sessionManager: SessionManager.inMemory(tempDir),
 			resourceLoader,
 		});
 
@@ -99,7 +99,7 @@ This is a test skill.
 		const { session } = await createAgentSession({
 			cwd: tempDir,
 			agentDir: tempDir,
-			sessionManager: SessionManager.inMemory(),
+			sessionManager: SessionManager.inMemory(tempDir),
 			resourceLoader,
 		});
 

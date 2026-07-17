@@ -5,7 +5,9 @@
 import type { ThinkingLevel } from "@arcmind/agent-core";
 import chalk from "chalk";
 import { APP_NAME, CONFIG_DIR_NAME, ENV_AGENT_DIR, ENV_SESSION_DIR } from "../config.ts";
+import { type AgentMode, isAgentMode } from "../core/agent-mode.ts";
 import type { ExtensionFlag } from "../core/extensions/types.ts";
+import { isPermissionMode, type PermissionMode } from "../core/permission-mode.ts";
 
 export type Mode = "text" | "json" | "rpc";
 
@@ -21,6 +23,10 @@ export interface Args {
 	help?: boolean;
 	version?: boolean;
 	mode?: Mode;
+	agentMode?: AgentMode;
+	cwd?: string;
+	permissionMode?: PermissionMode;
+	reviewerEnabled?: boolean;
 	name?: string;
 	noSession?: boolean;
 	session?: string;
@@ -67,6 +73,8 @@ export function parseArgs(args: string[]): Args {
 		unknownFlags: new Map(),
 		diagnostics: [],
 	};
+	let reviewerFlagSeen = false;
+	let noReviewerFlagSeen = false;
 
 	for (let i = 0; i < args.length; i++) {
 		const arg = args[i];
@@ -80,6 +88,50 @@ export function parseArgs(args: string[]): Args {
 			if (mode === "text" || mode === "json" || mode === "rpc") {
 				result.mode = mode;
 			}
+		} else if (arg === "--agent-mode") {
+			const mode = args[i + 1];
+			if (mode === undefined || mode.startsWith("-")) {
+				result.diagnostics.push({ type: "error", message: "--agent-mode requires chat or code" });
+			} else {
+				i++;
+				if (isAgentMode(mode)) {
+					result.agentMode = mode;
+				} else {
+					result.diagnostics.push({
+						type: "error",
+						message: `Invalid agent mode "${mode}". Valid values: chat, code`,
+					});
+				}
+			}
+		} else if (arg === "--cwd") {
+			const path = args[i + 1];
+			if (path === undefined || path.startsWith("-")) {
+				result.diagnostics.push({ type: "error", message: "--cwd requires a directory path" });
+			} else {
+				result.cwd = path;
+				i++;
+			}
+		} else if (arg === "--permission-mode") {
+			const mode = args[i + 1];
+			if (mode === undefined || mode.startsWith("-")) {
+				result.diagnostics.push({ type: "error", message: "--permission-mode requires ask, auto, or full" });
+			} else {
+				i++;
+				if (isPermissionMode(mode)) {
+					result.permissionMode = mode;
+				} else {
+					result.diagnostics.push({
+						type: "error",
+						message: `Invalid permission mode "${mode}". Valid values: ask, auto, full`,
+					});
+				}
+			}
+		} else if (arg === "--reviewer") {
+			reviewerFlagSeen = true;
+			result.reviewerEnabled = true;
+		} else if (arg === "--no-reviewer") {
+			noReviewerFlagSeen = true;
+			result.reviewerEnabled = false;
 		} else if (arg === "--continue" || arg === "-c") {
 			result.continue = true;
 		} else if (arg === "--resume" || arg === "-r") {
@@ -206,6 +258,10 @@ export function parseArgs(args: string[]): Args {
 		}
 	}
 
+	if (reviewerFlagSeen && noReviewerFlagSeen) {
+		result.diagnostics.push({ type: "error", message: "--reviewer cannot be combined with --no-reviewer" });
+	}
+
 	return result;
 }
 
@@ -241,6 +297,11 @@ ${chalk.bold("Options:")}
   --system-prompt <text>         System prompt (default: general-purpose agent prompt)
   --append-system-prompt <text>  Append text or file contents to the system prompt (can be used multiple times)
   --mode <mode>                  Output mode: text (default), json, or rpc
+  --agent-mode <mode>            New-session classification: chat or code (default: code)
+  --cwd <path>                   Bind a new session to an existing directory
+  --permission-mode <mode>       New-session permissions: ask, auto, or full
+  --reviewer                     Enable Auto review for a new session
+  --no-reviewer                  Disable Auto review for a new session
   --print, -p                    Non-interactive mode: process prompt and exit
   --continue, -c                 Continue previous session
   --resume, -r                   Select a session to resume
@@ -300,6 +361,9 @@ ${chalk.bold("Examples:")}
 
   # Start a named session
   ${APP_NAME} --name "Refactor auth module"
+
+  # Start a chat session
+  ${APP_NAME} --agent-mode chat "Compare these proposals"
 
   # Use different model
   ${APP_NAME} --provider openai --model gpt-4o-mini "Help me refactor this code"

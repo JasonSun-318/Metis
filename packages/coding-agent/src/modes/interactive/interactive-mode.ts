@@ -54,7 +54,13 @@ import {
 	getDocsPath,
 	VERSION,
 } from "../../config.ts";
-import { type AgentSession, type AgentSessionEvent, parseSkillBlock } from "../../core/agent-session.ts";
+import { type AgentMode, isAgentMode } from "../../core/agent-mode.ts";
+import {
+	type AgentSession,
+	type AgentSessionEvent,
+	parseSkillBlock,
+	type UserBashAuthorization,
+} from "../../core/agent-session.ts";
 import { type AgentSessionRuntime, SessionImportFileNotFoundError } from "../../core/agent-session-runtime.ts";
 import {
 	CACHE_TTL_MS,
@@ -82,6 +88,11 @@ import type { DreamHistoryRecord } from "../../core/memory-dream.ts";
 import { createCompactionSummaryMessage } from "../../core/messages.ts";
 import { defaultModelPerProvider, findExactModelReferenceMatch, resolveModelScope } from "../../core/model-resolver.ts";
 import { DefaultPackageManager } from "../../core/package-manager.ts";
+import {
+	canUseFullOnce,
+	type PermissionApprovalDecision,
+	type PermissionApprovalRequest,
+} from "../../core/permission-policy.ts";
 import { BUILT_IN_PROVIDER_DISPLAY_NAMES } from "../../core/provider-display-names.ts";
 import type { ResourceDiagnostic } from "../../core/resource-loader.ts";
 import { formatMissingSessionCwdPrompt, MissingSessionCwdError } from "../../core/session-cwd.ts";
@@ -94,7 +105,7 @@ import { copyToClipboard, readClipboardText } from "../../utils/clipboard.ts";
 import { readClipboardImage } from "../../utils/clipboard-image.ts";
 import { parseGitUrl } from "../../utils/git.ts";
 import { processImage } from "../../utils/image-process.ts";
-import { canonicalizePath, getCwdRelativePath } from "../../utils/paths.ts";
+import { canonicalizePath, getCwdRelativePath, resolvePath } from "../../utils/paths.ts";
 import { killTrackedDetachedChildren } from "../../utils/shell.ts";
 import { ensureTool } from "../../utils/tools-manager.ts";
 import { AssistantMessageComponent } from "./components/assistant-message.ts";
@@ -117,6 +128,7 @@ import {
 	formatAuthSelectorProviderType,
 	OAuthSelectorComponent,
 } from "./components/oauth-selector.ts";
+import { PermissionsSelectorComponent } from "./components/permissions-selector.ts";
 import { ScopedModelsSelectorComponent } from "./components/scoped-models-selector.ts";
 import { SessionSelectorComponent } from "./components/session-selector.ts";
 import { SettingsSelectorComponent } from "./components/settings-selector.ts";
@@ -444,6 +456,8 @@ export class InteractiveMode {
 	private extensionInput: ExtensionInputComponent | undefined = undefined;
 	private extensionEditor: ExtensionEditorComponent | undefined = undefined;
 	private extensionTerminalInputUnsubscribers = new Set<() => void>();
+	private permissionApprovalTail: Promise<void> = Promise.resolve();
+	private permissionApprovalAbortController?: AbortController;
 
 	// Extension widgets (components rendered above/below the editor)
 	private extensionWidgetsAbove = new Map<string, Component & { dispose?(): void }>();
@@ -486,9 +500,11 @@ export class InteractiveMode {
 		this.options = options;
 		this.autoTrustOnReloadCwd = options.autoTrustOnReloadCwd;
 		this.runtimeHost.setBeforeSessionInvalidate(() => {
+			this.permissionApprovalAbortController?.abort();
 			this.resetExtensionUI();
 		});
-		this.runtimeHost.setRebindSession(async () => {
+		this.runtimeHost.setRebindSession(async (session) => {
+			this.bindPermissionApproval(session);
 			await this.rebindCurrentSession({ renderBeforeBind: true });
 		});
 		this.version = VERSION;
@@ -528,6 +544,88 @@ export class InteractiveMode {
 			(message) => this.showError(message),
 			() => this.updateEditorBorderColor(),
 		);
+		this.bindPermissionApproval(this.session);
+	}
+
+	private bindPermissionApproval(session: AgentSession): void {
+		session.setPermissionApprovalHandler((request) => this.requestPermissionApproval(session, request));
+		session.setWindowsSandboxSetupHandler(() => this.requestWindowsSandboxSetup(session));
+	}
+
+	private requestWindowsSandboxSetup(session: AgentSession): Promise<boolean> {
+		const pending = this.permissionApprovalTail.then(async () => {
+			if (session !== this.session) return false;
+			const controller = new AbortController();
+			this.permissionApprovalAbortController = controller;
+			try {
+				const choice = await this.showExtensionSelector(
+					"Set up the Windows sandbox?\nThis one-time setup requires a UAC prompt.",
+					["Allow setup", "Deny"],
+					{ signal: controller.signal },
+				);
+				return choice === "Allow setup";
+			} finally {
+				if (this.permissionApprovalAbortController === controller) {
+					this.permissionApprovalAbortController = undefined;
+				}
+			}
+		});
+		this.permissionApprovalTail = pending.then(
+			() => undefined,
+			() => undefined,
+		);
+		return pending;
+	}
+
+	private requestPermissionApproval(
+		session: AgentSession,
+		request: PermissionApprovalRequest,
+	): Promise<PermissionApprovalDecision> {
+		const pending = this.permissionApprovalTail.then(async () => {
+			if (session !== this.session || request.signal?.aborted) {
+				return { decision: "deny" as const, reason: "The session changed before approval" };
+			}
+			const controller = new AbortController();
+			this.permissionApprovalAbortController = controller;
+			try {
+				const action = request.action;
+				const allowFullOnce = canUseFullOnce(action);
+				const signal = request.signal ? AbortSignal.any([request.signal, controller.signal]) : controller.signal;
+				const details = [
+					`Reason: ${request.reason}`,
+					`Risk: ${action.risks.join(", ")}`,
+					action.command ? `Command: ${JSON.stringify(action.command)}` : undefined,
+					action.paths.length > 0 ? `Paths: ${action.paths.join(", ")}` : undefined,
+					action.networkTargets.length > 0
+						? `Network: ${action.networkTargets.map(({ host, port }) => `${host}:${port}`).join(", ")}`
+						: undefined,
+				]
+					.filter((line): line is string => line !== undefined)
+					.join("\n")
+					.slice(0, 2000);
+				const choice = await this.showExtensionSelector(
+					`Approve ${action.toolName}?\n${details}`,
+					request.fullOnceRequired
+						? ["Run once with Full", "Deny"]
+						: allowFullOnce
+							? ["Allow once", "Run once with Full", "Deny"]
+							: ["Allow once", "Deny"],
+					{ signal },
+				);
+				if (choice === "Allow once") return { decision: "allow" as const };
+				if (choice === "Run once with Full") return { decision: "allow" as const, fullOnce: true };
+				return { decision: "deny" as const, reason: "Denied by the user" };
+			} finally {
+				if (this.permissionApprovalAbortController === controller) {
+					this.permissionApprovalAbortController = undefined;
+				}
+			}
+		});
+		this.permissionApprovalTail = pending.then(
+			() => undefined,
+			() => undefined,
+		);
+		return pending;
 	}
 
 	private getAutocompleteSourceTag(sourceInfo?: SourceInfo): string | undefined {
@@ -687,8 +785,8 @@ export class InteractiveMode {
 
 		this.registerSignalHandlers();
 
-		// Ensure fd and rg are available (downloads if missing, adds to PATH via getBinDir)
-		// Both are needed: fd for autocomplete, rg for grep tool and bash commands
+		// Resolve verified bundled helpers (macOS/Windows) or system dependencies (Linux).
+		// Both are needed: fd for autocomplete, rg for grep tool and bash commands.
 		const [fdPath] = await Promise.all([ensureTool("fd"), ensureTool("rg")]);
 		this.fdPath = fdPath;
 
@@ -2643,6 +2741,13 @@ export class InteractiveMode {
 		return true;
 	}
 
+	private guardSessionMutation(): boolean {
+		if (this.guardCompactionMutation()) return true;
+		if (!this.session.isStreaming) return false;
+		this.showWarning("Wait for the current agent run to finish before changing the session");
+		return true;
+	}
+
 	private setupEditorSubmitHandler(): void {
 		this.defaultEditor.onSubmit = async (text: string) => {
 			text = text.trim();
@@ -2654,6 +2759,11 @@ export class InteractiveMode {
 			if (text === "/settings") {
 				this.showSettingsSelector();
 				this.editor.setText("");
+				return;
+			}
+			if (text === "/permissions") {
+				this.editor.setText("");
+				this.showPermissionsSelector();
 				return;
 			}
 			if (text === "/scoped-models") {
@@ -2728,9 +2838,9 @@ export class InteractiveMode {
 				this.editor.setText("");
 				return;
 			}
-			if (text === "/new") {
+			if (text === "/new" || text.startsWith("/new ")) {
 				this.editor.setText("");
-				await this.handleClearCommand();
+				await this.handleNewSessionCommand(text);
 				return;
 			}
 			if (text === "/compact" || text.startsWith("/compact ")) {
@@ -3530,9 +3640,9 @@ export class InteractiveMode {
 		await this.ui.terminal.drainInput(1000);
 
 		this.stop();
+		const resumeCommand = formatResumeCommand(this.sessionManager);
 		await this.runtimeHost.dispose();
 
-		const resumeCommand = formatResumeCommand(this.sessionManager);
 		if (resumeCommand) {
 			process.stdout.write(`${chalk.dim("To resume this session:")} ${resumeCommand}\n`);
 		}
@@ -4260,6 +4370,29 @@ export class InteractiveMode {
 				},
 			);
 			return { component: selector, focus: selector.getSettingsList() };
+		});
+	}
+
+	private showPermissionsSelector(): void {
+		if (this.guardSessionMutation()) return;
+		this.showSelector((done) => {
+			const selector = new PermissionsSelectorComponent(
+				this.sessionManager.getPermissionSettings(),
+				(settings) => {
+					this.sessionManager.setPermissionSettings(settings);
+					done();
+					this.footer.invalidate();
+					this.showStatus(
+						`Permissions: ${settings.mode}${settings.mode === "auto" ? (settings.reviewerEnabled ? " with reviewer" : " without reviewer") : ""}`,
+					);
+					this.ui.requestRender();
+				},
+				() => {
+					done();
+					this.ui.requestRender();
+				},
+			);
+			return { component: selector, focus: selector };
 		});
 	}
 
@@ -5541,7 +5674,12 @@ export class InteractiveMode {
 			info += `${theme.fg("dim", "Name:")} ${sessionName}\n`;
 		}
 		info += `${theme.fg("dim", "File:")} ${stats.sessionFile ?? "In-memory"}\n`;
-		info += `${theme.fg("dim", "ID:")} ${stats.sessionId}\n\n`;
+		info += `${theme.fg("dim", "ID:")} ${stats.sessionId}\n`;
+		info += `${theme.fg("dim", "Mode:")} ${stats.mode}\n`;
+		info += `${theme.fg("dim", "Workspace:")} ${stats.cwd} (${stats.cwdOrigin})\n`;
+		info += `${theme.fg("dim", "Permissions:")} ${stats.permissionMode}`;
+		if (stats.permissionMode === "auto") info += stats.reviewerEnabled ? " (reviewer on)" : " (reviewer off)";
+		info += "\n\n";
 		info += `${theme.bold("Messages")}\n`;
 		info += `${theme.fg("dim", "Total:")} ${stats.totalMessages}\n`;
 		info += `${theme.fg("dim", "User:")} ${stats.userMessages}\n`;
@@ -5719,16 +5857,62 @@ export class InteractiveMode {
 		this.ui.requestRender();
 	}
 
-	private async handleClearCommand(): Promise<void> {
-		if (this.guardCompactionMutation()) return;
+	private async handleNewSessionCommand(text: string): Promise<void> {
+		const value = text.slice("/new".length).trim();
+		if (value !== "" && !isAgentMode(value)) {
+			this.showError("Usage: /new [chat|code]");
+			return;
+		}
+		if (this.guardSessionMutation()) return;
+		let mode: AgentMode | undefined = value || undefined;
+		if (!mode) {
+			const currentMode = this.sessionManager.getMode();
+			const choices = currentMode === "chat" ? ["Chat", "Code"] : ["Code", "Chat"];
+			const selected = await this.showExtensionSelector("New session mode", choices);
+			if (!selected) return;
+			mode = selected.toLowerCase() as AgentMode;
+		}
+
+		const terminalCwd = this.runtimeHost.terminalCwd;
+		const managed = "ArcMind managed workspace";
+		const terminal = `Terminal working directory (${terminalCwd})`;
+		const other = "Other directory";
+		const workspace = await this.showExtensionSelector(
+			`${mode === "chat" ? "Chat" : "Code"} workspace`,
+			mode === "chat" ? [managed, terminal, other] : [terminal, other],
+		);
+		if (!workspace) return;
+
+		let cwd: string | undefined;
+		if (workspace === terminal) {
+			cwd = terminalCwd;
+		} else if (workspace === other) {
+			const input = await this.showExtensionInput("Directory", terminalCwd);
+			if (!input) return;
+			const resolved = resolvePath(input, terminalCwd);
+			try {
+				if (!fs.statSync(resolved).isDirectory()) throw new Error("Not a directory");
+				cwd = canonicalizePath(resolved);
+			} catch {
+				this.showError(`Directory does not exist: ${resolved}`);
+				return;
+			}
+		}
+		await this.handleClearCommand(mode, cwd);
+	}
+
+	private async handleClearCommand(mode?: AgentMode, cwd?: string): Promise<void> {
+		if (this.guardSessionMutation()) return;
 		this.clearStatusIndicator();
 		try {
-			const result = await this.runtimeHost.newSession();
+			const result = await this.runtimeHost.newSession(mode ? { mode, cwd } : undefined);
 			if (result.cancelled) {
 				return;
 			}
 			this.chatContainer.addChild(new Spacer(1));
-			this.chatContainer.addChild(new Text(`${theme.fg("accent", "✓ New session started")}`, 1, 1));
+			this.chatContainer.addChild(
+				new Text(`${theme.fg("accent", `✓ New ${this.sessionManager.getMode()} session started`)}`, 1, 1),
+			);
 			this.ui.requestRender();
 		} catch (error: unknown) {
 			await this.handleFatalRuntimeError("Failed to create session", error);
@@ -5770,17 +5954,31 @@ export class InteractiveMode {
 
 	private async handleBashCommand(command: string, excludeFromContext = false): Promise<void> {
 		const extensionRunner = this.session.extensionRunner;
+		let authorization: UserBashAuthorization;
+		try {
+			authorization = await this.session.authorizeUserBash(command);
+		} catch (error) {
+			this.showError(error instanceof Error ? error.message : "Bash permission denied");
+			return;
+		}
 
 		// Emit user_bash event to let extensions intercept
-		const eventResult = await extensionRunner.emitUserBash({
-			type: "user_bash",
-			command,
-			excludeFromContext,
-			cwd: this.sessionManager.getCwd(),
-		});
+		let eventResult: Awaited<ReturnType<typeof extensionRunner.emitUserBash>>;
+		try {
+			eventResult = await extensionRunner.emitUserBash({
+				type: "user_bash",
+				command,
+				excludeFromContext,
+				cwd: this.sessionManager.getCwd(),
+			});
+		} catch (error) {
+			this.session.cancelUserBashAuthorization(authorization);
+			throw error;
+		}
 
 		// If extension returned a full result, use it directly
 		if (eventResult?.result) {
+			this.session.cancelUserBashAuthorization(authorization);
 			const result = eventResult.result;
 
 			// Create UI component for display
@@ -5833,7 +6031,7 @@ export class InteractiveMode {
 						this.ui.requestRender();
 					}
 				},
-				{ excludeFromContext, operations: eventResult?.operations },
+				{ excludeFromContext, operations: eventResult?.operations, authorization },
 			);
 
 			if (this.bashComponent) {
@@ -5849,6 +6047,8 @@ export class InteractiveMode {
 				this.bashComponent.setComplete(undefined, false);
 			}
 			this.showError(`Bash command failed: ${error instanceof Error ? error.message : "Unknown error"}`);
+		} finally {
+			this.session.cancelUserBashAuthorization(authorization);
 		}
 
 		this.bashComponent = undefined;

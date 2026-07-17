@@ -9,6 +9,7 @@ import {
 	getAutoMemoryRoot,
 	loadAutoMemory,
 } from "../src/core/auto-memory.ts";
+import { canonicalizePathForCreation } from "../src/utils/paths.ts";
 
 describe("auto memory", () => {
 	const tempDirs: string[] = [];
@@ -22,7 +23,7 @@ describe("auto memory", () => {
 		for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 	});
 
-	it("uses one global MEMORY.md and a lowercase project.md keyed by exact cwd", () => {
+	it("uses one global MEMORY.md and a lowercase project.md keyed by canonical cwd", () => {
 		const root = makeTemp();
 		const agentDir = join(root, "agent");
 		const cwd = join(root, "project");
@@ -30,8 +31,9 @@ describe("auto memory", () => {
 
 		expect(paths.global.indexPath).toBe(join(agentDir, "memory", "MEMORY.md"));
 		expect(getAutoMemoryRoot(agentDir)).toBe(join(agentDir, "memory"));
+		const canonicalCwd = canonicalizePathForCreation(cwd);
 		expect(paths.project.indexPath).toBe(
-			join(agentDir, "memory", "projects", `--${cwd.slice(1).replaceAll("/", "-")}--`, "project.md"),
+			join(agentDir, "memory", "projects", `--${canonicalCwd.slice(1).replaceAll("/", "-")}--`, "project.md"),
 		);
 		expect(getAutoMemoryPaths(agentDir, join(cwd, ".")).project.indexPath).toBe(paths.project.indexPath);
 		expect(getAutoMemoryPaths(agentDir, join(cwd, "subdir")).project.indexPath).not.toBe(paths.project.indexPath);

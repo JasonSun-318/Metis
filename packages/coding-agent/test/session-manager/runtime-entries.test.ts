@@ -59,7 +59,7 @@ function acceptedTurn(requestId: string, text = "hello"): RuntimeControlPayload 
 	};
 }
 
-describe("SessionManager v5 runtime journal", () => {
+describe("SessionManager runtime journal", () => {
 	let directory: string;
 
 	beforeEach(() => {
@@ -90,7 +90,7 @@ describe("SessionManager v5 runtime journal", () => {
 		});
 		const secondId = manager.appendMessage({ role: "user", content: "second", timestamp: 2 });
 
-		expect(manager.getHeader()?.version).toBe(5);
+		expect(manager.getHeader()?.version).toBe(6);
 		expect(manager.getLeafId()).toBe(secondId);
 		expect(manager.getEntries().map((entry) => entry.id)).toEqual([firstId, secondId]);
 		expect(manager.getEntry(runtimeId)).toBeUndefined();
@@ -136,7 +136,7 @@ describe("SessionManager v5 runtime journal", () => {
 				),
 			).toBe(false);
 			expect(reopened.getDurableJournalSnapshot()).toEqual(expectedSnapshot);
-			expect(readFileSync(path, "utf8").split("\n")[0]).toContain('"version":5');
+			expect(readFileSync(path, "utf8").split("\n")[0]).toContain('"version":6');
 		} finally {
 			reopened.close();
 		}
@@ -378,15 +378,15 @@ describe("SessionManager v5 runtime journal", () => {
 		writeRecords(readonlyPath, records);
 
 		const migrated = SessionManager.open(writablePath, directory);
-		expect(migrated.getHeader()?.version).toBe(5);
+		expect(migrated.getHeader()?.version).toBe(6);
 		migrated.close();
-		expect(readFileSync(writablePath, "utf8").split("\n")[0]).toContain('"version":5');
+		expect(readFileSync(writablePath, "utf8").split("\n")[0]).toContain('"version":6');
 		const backup = readdirSync(directory).find((name) => name.includes(".writable.jsonl.keep-v4."));
 		expect(backup).toMatch(/\.replace\.bak$/);
 		expect(readFileSync(join(directory, backup!), "utf8").split("\n")[0]).toContain('"version":4');
 
 		const readonly = SessionManager.openReadOnly(readonlyPath);
-		expect(readonly.getHeader()?.version).toBe(5);
+		expect(readonly.getHeader()?.version).toBe(6);
 		expect(readFileSync(readonlyPath, "utf8").split("\n")[0]).toContain('"version":4');
 		expect(readdirSync(directory).some((name) => name.includes(".readonly.jsonl.keep-v4."))).toBe(false);
 	});

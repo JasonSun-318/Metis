@@ -1,6 +1,6 @@
 import { closeSync, openSync, readSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { encodePathForStorage, resolvePath } from "../utils/paths.ts";
+import { canonicalizePathForCreation, encodePathForStorage, resolvePath } from "../utils/paths.ts";
 
 export const AUTO_MEMORY_MAX_LINES = 200;
 export const AUTO_MEMORY_MAX_BYTES = 25 * 1024;
@@ -25,7 +25,7 @@ export function getAutoMemoryRoot(agentDir: string): string {
 
 export function getAutoMemoryPaths(agentDir: string, cwd: string): AutoMemorySnapshot {
 	const memoryDir = getAutoMemoryRoot(agentDir);
-	const projectDir = join(memoryDir, "projects", encodePathForStorage(cwd));
+	const projectDir = join(memoryDir, "projects", encodePathForStorage(canonicalizePathForCreation(cwd)));
 	return {
 		global: emptyIndex(memoryDir, join(memoryDir, "MEMORY.md")),
 		project: emptyIndex(projectDir, join(projectDir, "project.md")),

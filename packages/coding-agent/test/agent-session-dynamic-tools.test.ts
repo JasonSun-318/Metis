@@ -27,7 +27,7 @@ describe("AgentSession dynamic tool registration", () => {
 
 	it("refreshes tool registry when tools are registered after initialization", async () => {
 		const settingsManager = SettingsManager.create(tempDir, agentDir);
-		const sessionManager = SessionManager.inMemory();
+		const sessionManager = SessionManager.inMemory(tempDir);
 
 		const resourceLoader = new DefaultResourceLoader({
 			cwd: tempDir,
@@ -96,7 +96,7 @@ describe("AgentSession dynamic tool registration", () => {
 
 	it("returns source metadata for SDK custom tools", async () => {
 		const settingsManager = SettingsManager.create(tempDir, agentDir);
-		const sessionManager = SessionManager.inMemory();
+		const sessionManager = SessionManager.inMemory(tempDir);
 		const resourceLoader = new DefaultResourceLoader({
 			cwd: tempDir,
 			agentDir,
@@ -139,7 +139,7 @@ describe("AgentSession dynamic tool registration", () => {
 
 	it("keeps custom tools active but omits them from available tools when promptSnippet is not provided", async () => {
 		const settingsManager = SettingsManager.create(tempDir, agentDir);
-		const sessionManager = SessionManager.inMemory();
+		const sessionManager = SessionManager.inMemory(tempDir);
 
 		const resourceLoader = new DefaultResourceLoader({
 			cwd: tempDir,

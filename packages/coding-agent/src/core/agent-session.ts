@@ -40,10 +40,13 @@ import {
 	modelsAreEqual,
 	streamSimple,
 } from "@arcmind/ai/compat";
+import { getAgentDir } from "../config.ts";
 import { getThemeByName, theme } from "../modes/interactive/theme/theme.ts";
 import { stripFrontmatter } from "../utils/frontmatter.ts";
-import { resolvePath } from "../utils/paths.ts";
+import { canonicalizeActionPath, resolvePath } from "../utils/paths.ts";
+import { getShellConfig } from "../utils/shell.ts";
 import { sleep } from "../utils/sleep.ts";
+import type { AgentMode } from "./agent-mode.ts";
 import { formatNoApiKeyFoundMessage, formatNoModelSelectedMessage } from "./auth-guidance.ts";
 import { type AutoMemorySnapshot, loadAutoMemory } from "./auto-memory.ts";
 import { type BashResult, executeBashWithOperations } from "./bash-executor.ts";
@@ -101,6 +104,17 @@ import {
 } from "./memory-dream.ts";
 import type { BashExecutionMessage, CustomMessage } from "./messages.ts";
 import type { ModelRegistry } from "./model-registry.ts";
+import type { PermissionMode } from "./permission-mode.ts";
+import {
+	type ClassifiedAction,
+	classifyAction,
+	PermissionPolicy,
+	PermissionReviewer,
+	type PermissionReviewerStream,
+	type RequestPermissionApproval,
+	type SandboxGrant,
+	type ToolProvenance,
+} from "./permission-policy.ts";
 import { expandPromptTemplate, type PromptTemplate } from "./prompt-templates.ts";
 import type { ResourceExtensionPaths, ResourceLoader } from "./resource-loader.ts";
 import {
@@ -117,14 +131,17 @@ import {
 	validateRuntimeToolResultMessageEvidence,
 } from "./runtime-recovery.ts";
 import { appendSyntheticRuntimeToolResult } from "./runtime-recovery-materializer.ts";
+import { SandboxRuntimeCoordinator } from "./sandbox-runtime.ts";
 import type { BranchSummaryEntry, CompactionEntry, SessionEntry, SessionManager } from "./session-manager.ts";
 import { CURRENT_SESSION_VERSION, getLatestCompactionEntry, type SessionHeader } from "./session-manager.ts";
+import type { CwdOrigin } from "./session-workspace.ts";
 import type { SettingsManager } from "./settings-manager.ts";
 import type { SlashCommandInfo } from "./slash-commands.ts";
 import { createSyntheticSourceInfo, type SourceInfo } from "./source-info.ts";
 import { type BuildSystemPromptOptions, buildSystemPrompt } from "./system-prompt.ts";
 import { type BashOperations, createLocalBashOperations } from "./tools/bash.ts";
 import { createAllToolDefinitions } from "./tools/index.ts";
+import type { ToolSubprocessExecutor } from "./tools/subprocess.ts";
 import { createToolDefinitionFromAgentTool } from "./tools/tool-definition-wrapper.ts";
 
 // ============================================================================
@@ -222,6 +239,14 @@ export interface AgentSessionConfig {
 	extensionRunnerRef?: { current?: ExtensionRunner };
 	/** Session start event metadata emitted when extensions bind to this runtime. */
 	sessionStartEvent?: SessionStartEvent;
+	/** Request a one-action approval from the active frontend. Missing UI fails closed. */
+	requestPermissionApproval?: RequestPermissionApproval;
+	/** Test/custom runtime seam; production uses the current session model. */
+	permissionReviewerStream?: PermissionReviewerStream;
+	/** Test/custom runtime seam for SRT orchestration. */
+	sandboxRuntime?: SandboxRuntimeCoordinator;
+	/** Explicit Windows provisioning consent shown before SRT's one-time UAC setup. */
+	requestWindowsSandboxSetup?: () => Promise<boolean>;
 }
 
 export interface ExtensionBindings {
@@ -257,6 +282,11 @@ export interface ModelCycleResult {
 
 /** Session statistics for /session command */
 export interface SessionStats {
+	mode: AgentMode;
+	cwd: string;
+	cwdOrigin: CwdOrigin;
+	permissionMode: PermissionMode;
+	reviewerEnabled: boolean;
 	sessionFile: string | undefined;
 	sessionId: string;
 	userMessages: number;
@@ -278,6 +308,18 @@ export interface SessionStats {
 interface ToolDefinitionEntry {
 	definition: ToolDefinition;
 	sourceInfo: SourceInfo;
+}
+
+interface AuthorizedPermissionAction {
+	readonly action: ClassifiedAction;
+	readonly grant: SandboxGrant;
+	readonly bypassSandbox: boolean;
+	readonly cwd: string;
+}
+
+export interface UserBashAuthorization {
+	readonly actionId: string;
+	readonly command: string;
 }
 
 function estimateMessagesTokens(messages: AgentMessage[]): number {
@@ -442,6 +484,11 @@ export class AgentSession {
 	private _baseSystemPrompt = "";
 	private _baseSystemPromptOptions!: BuildSystemPromptOptions;
 	private _systemPromptOverride?: string;
+	private readonly _permissionPolicy: PermissionPolicy;
+	private readonly _permissionGrants = new Map<string, AuthorizedPermissionAction>();
+	private readonly _permissionDenials = new Map<string, string>();
+	private readonly _sandboxRuntime: SandboxRuntimeCoordinator;
+	private _runtimeShellCommandPrefix?: string;
 
 	constructor(config: AgentSessionConfig) {
 		this.agent = config.agent;
@@ -459,6 +506,17 @@ export class AgentSession {
 		this._excludedToolNames = config.excludedToolNames ? new Set(config.excludedToolNames) : undefined;
 		this._baseToolsOverride = config.baseToolsOverride;
 		this._sessionStartEvent = config.sessionStartEvent ?? { type: "session_start", reason: "startup" };
+		const reviewerStream = config.permissionReviewerStream ?? ((request) => this._streamPermissionReview(request));
+		this._permissionPolicy = new PermissionPolicy(
+			new PermissionReviewer(reviewerStream),
+			config.requestPermissionApproval,
+		);
+		this._sandboxRuntime =
+			config.sandboxRuntime ??
+			new SandboxRuntimeCoordinator({
+				agentDir: this._agentDir ?? getAgentDir(),
+				requestWindowsSetup: config.requestWindowsSandboxSetup,
+			});
 
 		// Always subscribe to agent events for internal handling
 		// (session persistence, extensions, auto-compaction, retry logic)
@@ -476,6 +534,14 @@ export class AgentSession {
 	/** Model registry for API key resolution and model discovery */
 	get modelRegistry(): ModelRegistry {
 		return this._modelRegistry;
+	}
+
+	setPermissionApprovalHandler(handler?: RequestPermissionApproval): void {
+		this._permissionPolicy.setRequestApproval(handler);
+	}
+
+	setWindowsSandboxSetupHandler(handler?: () => Promise<boolean>): void {
+		this._sandboxRuntime.setWindowsSetupRequester(handler);
 	}
 
 	private async _getRequiredRequestAuth(model: Model<any>): Promise<{
@@ -516,6 +582,209 @@ export class AgentSession {
 
 		const result = await this._modelRegistry.getApiKeyAndHeaders(model);
 		return result.ok ? { apiKey: result.apiKey, headers: result.headers, env: result.env } : {};
+	}
+
+	private async _streamPermissionReview(request: Parameters<PermissionReviewerStream>[0]): Promise<string> {
+		const model = this.model;
+		if (!model) throw new Error(formatNoModelSelectedMessage());
+		const { apiKey, headers, env } = await this._getSummarizationRequestAuth(model);
+		const reasoning = clampThinkingLevel(model, request.reasoning);
+		const response = await this.agent.streamFn(
+			model,
+			{
+				systemPrompt: request.systemPrompt,
+				messages: [{ role: "user", content: request.userPrompt, timestamp: Date.now() }],
+			},
+			{
+				apiKey,
+				headers,
+				env,
+				signal: request.signal,
+				maxTokens: request.maxTokens,
+				reasoning: reasoning === "off" ? undefined : reasoning,
+			},
+		);
+		const message = await response.result();
+		if (message.stopReason === "error" || message.stopReason === "aborted") {
+			throw new Error(message.errorMessage ?? "Permission review failed");
+		}
+		return message.content
+			.filter((content): content is TextContent => content.type === "text")
+			.map((content) => content.text)
+			.join("");
+	}
+
+	private _permissionUserMessages(): string[] {
+		const messages: string[] = [];
+		for (const message of this.agent.state.messages) {
+			if (message.role !== "user") continue;
+			const text = this._getUserMessageText(message);
+			if (text) messages.push(text);
+		}
+		return messages;
+	}
+
+	private _toolProvenance(toolName: string): ToolProvenance {
+		const source = this._toolDefinitions.get(toolName)?.sourceInfo.source.toLowerCase();
+		if (source === "builtin") return "builtin";
+		if (source === "sdk") return "sdk";
+		if (source === "mcp" || source?.startsWith("mcp:")) return "mcp";
+		return "extension";
+	}
+
+	private _withPermissionGuard(tool: AgentTool): AgentTool {
+		return {
+			...tool,
+			execute: async (toolCallId, args, signal, onUpdate) => {
+				const denial = this._permissionDenials.get(toolCallId);
+				if (denial) throw new Error(denial);
+				if (!this._permissionGrants.has(toolCallId)) {
+					throw new Error(`Missing one-action permission grant for ${tool.name}`);
+				}
+				return tool.execute(toolCallId, args, signal, onUpdate);
+			},
+		};
+	}
+
+	private _appendPermissionAudit(
+		action: ClassifiedAction,
+		source: "user" | "reviewer",
+		decision: "allow" | "ask" | "deny",
+		reason: string,
+	): void {
+		this.sessionManager.appendPermissionDecision({
+			actionId: action.actionId,
+			toolName: action.toolName,
+			source,
+			decision,
+			reason,
+		});
+	}
+
+	private async _authorizePermissionAction(input: {
+		actionId: string;
+		toolName: string;
+		provenance: ToolProvenance;
+		args: unknown;
+		actionSource: "assistant" | "user-bash";
+		effectiveCommand?: string;
+		cwd?: string;
+		signal?: AbortSignal;
+	}): Promise<AuthorizedPermissionAction> {
+		if (this._permissionGrants.has(input.actionId)) {
+			throw new Error(`Permission action ID was reused: ${input.actionId}`);
+		}
+		const cwd = input.cwd ?? this.sessionManager.getCwd();
+		let action = classifyAction({
+			actionId: input.actionId,
+			toolName: input.toolName,
+			provenance: input.provenance,
+			args: input.args,
+			cwd,
+		});
+		if (input.effectiveCommand !== undefined) action = { ...action, command: input.effectiveCommand };
+		const settings = this.sessionManager.getPermissionSettings();
+		const authorization = await this._permissionPolicy.authorize({
+			settings,
+			action,
+			actionSource: input.actionSource,
+			args:
+				input.effectiveCommand === undefined
+					? input.args
+					: { ...(input.args as Record<string, unknown>), command: input.effectiveCommand },
+			userMessages: this._permissionUserMessages(),
+			cwd,
+			signal: input.signal,
+		});
+		if (authorization.reviewerDecision) {
+			this._appendPermissionAudit(
+				action,
+				"reviewer",
+				authorization.reviewerDecision.decision,
+				authorization.reviewerDecision.reason,
+			);
+		}
+		if (authorization.source === "user") {
+			this._appendPermissionAudit(action, "user", authorization.decision, authorization.reason);
+		}
+		if (authorization.decision === "deny") {
+			throw new Error(`Permission denied for ${input.toolName}: ${authorization.reason}`);
+		}
+		const authorized = {
+			action,
+			grant: authorization.grant,
+			bypassSandbox: settings.mode === "full" || authorization.grant.fullOnce,
+			cwd,
+		} satisfies AuthorizedPermissionAction;
+		this._permissionGrants.set(input.actionId, authorized);
+		return authorized;
+	}
+
+	private _takePermissionAction(actionId: string | undefined, toolName: string): AuthorizedPermissionAction {
+		if (!actionId) throw new Error(`Missing one-action permission grant for ${toolName}`);
+		const authorized = this._permissionGrants.get(actionId);
+		if (!authorized || authorized.action.toolName !== toolName || authorized.grant.actionId !== actionId) {
+			throw new Error(`Invalid or expired one-action permission grant for ${toolName}`);
+		}
+		this._permissionGrants.delete(actionId);
+		return authorized;
+	}
+
+	private _createPermissionBashOperations(shellPath?: string, trustedOperations?: BashOperations): BashOperations {
+		const local = createLocalBashOperations({ shellPath });
+		return {
+			exec: async (command, cwd, options) => {
+				const authorized = this._takePermissionAction(options.actionId, "bash");
+				if (authorized.action.command !== command) {
+					throw new Error("Bash command changed after permission approval");
+				}
+				if (
+					canonicalizeActionPath(cwd, authorized.cwd) !== canonicalizeActionPath(authorized.cwd, authorized.cwd)
+				) {
+					throw new Error("Bash working directory changed after permission approval");
+				}
+				if (trustedOperations) return trustedOperations.exec(command, cwd, options);
+				if (authorized.bypassSandbox) return local.exec(command, cwd, options);
+				return this._sandboxRuntime.execute({
+					command,
+					shell: getShellConfig(shellPath).shell,
+					cwd,
+					grant: authorized.grant,
+					signal: options.signal,
+					timeout: options.timeout,
+					onData: options.onData,
+				});
+			},
+		};
+	}
+
+	private _createToolSubprocessExecutor(toolName: "grep" | "find", shellPath?: string): ToolSubprocessExecutor {
+		return {
+			execute: async (input, run) => {
+				const authorized = this._takePermissionAction(input.actionId, toolName);
+				if (
+					canonicalizeActionPath(input.cwd, authorized.cwd) !==
+					canonicalizeActionPath(authorized.cwd, authorized.cwd)
+				) {
+					throw new Error(`${toolName} working directory changed after permission approval`);
+				}
+				if (authorized.bypassSandbox) {
+					return run({ argv: [input.executable, ...input.args] });
+				}
+				return this._sandboxRuntime.executeArgvWith(
+					{
+						executable: input.executable,
+						args: input.args,
+						cwd: input.cwd,
+						grant: authorized.grant,
+						shell: getShellConfig(shellPath).shell,
+						signal: input.signal,
+						onData: () => {},
+					},
+					({ argv, env }) => run({ argv, env }),
+				);
+			},
+		};
 	}
 
 	/**
@@ -593,7 +862,36 @@ export class AgentSession {
 				}
 			},
 			beforeProviderRequest: async () => this._markDurableProviderEpoch(),
-			beforeToolExecute: async (context) => {
+			beforeToolExecute: async (context, signal) => {
+				const provenance = this._toolProvenance(context.toolCall.name);
+				const args =
+					typeof context.args === "object" && context.args !== null
+						? (context.args as Record<string, unknown>)
+						: {};
+				const command =
+					provenance === "builtin" && context.toolCall.name === "bash" && typeof args.command === "string"
+						? this._runtimeShellCommandPrefix
+							? `${this._runtimeShellCommandPrefix}\n${args.command}`
+							: args.command
+						: undefined;
+				try {
+					await this._authorizePermissionAction({
+						actionId: context.toolCall.id,
+						toolName: context.toolCall.name,
+						provenance,
+						args: context.args,
+						actionSource: "assistant",
+						effectiveCommand: command,
+						cwd: this._cwd,
+						signal,
+					});
+				} catch (error) {
+					this._permissionGrants.delete(context.toolCall.id);
+					this._permissionDenials.set(
+						context.toolCall.id,
+						error instanceof Error ? error.message : `Permission denied for ${context.toolCall.name}`,
+					);
+				}
 				let started = false;
 				try {
 					const turn = this._durableTurn;
@@ -618,6 +916,8 @@ export class AgentSession {
 					started = true;
 					this._durableStartedTools.set(context.toolCall.id, context.toolCall.name);
 				} catch (error) {
+					this._permissionGrants.delete(context.toolCall.id);
+					this._permissionDenials.delete(context.toolCall.id);
 					try {
 						this._repairRejectedDurableTool(context, started);
 					} catch (repairError) {
@@ -862,6 +1162,10 @@ export class AgentSession {
 
 	/** Internal event implementation. The subscription wrapper below tracks durable message writes. */
 	private async _processAgentEvent(event: AgentEvent): Promise<void> {
+		if (event.type === "tool_execution_end") {
+			this._permissionGrants.delete(event.toolCallId);
+			this._permissionDenials.delete(event.toolCallId);
+		}
 		// When a user message starts, check if it's from either queue and remove it BEFORE emitting
 		// This ensures the UI sees the updated queue state
 		if (event.type === "message_start" && event.message.role === "user") {
@@ -1466,6 +1770,11 @@ export class AgentSession {
 	/** Current session file path, or undefined if sessions are disabled */
 	get sessionFile(): string | undefined {
 		return this.sessionManager.getSessionFile();
+	}
+
+	/** Current immutable session classification mode. */
+	get mode(): AgentMode {
+		return this.sessionManager.getMode();
 	}
 
 	/** Current session ID */
@@ -3345,6 +3654,7 @@ export class AgentSession {
 			(!allowedToolNames || allowedToolNames.has(name)) && !excludedToolNames?.has(name);
 
 		const registeredTools = this._extensionRunner.getAllRegisteredTools();
+		const baseToolSource = this._baseToolsOverride ? "sdk" : "builtin";
 		const allCustomTools = [
 			...registeredTools,
 			...this._customTools.map((definition) => ({
@@ -3359,7 +3669,7 @@ export class AgentSession {
 					name,
 					{
 						definition,
-						sourceInfo: createSyntheticSourceInfo(`<builtin:${name}>`, { source: "builtin" }),
+						sourceInfo: createSyntheticSourceInfo(`<${baseToolSource}:${name}>`, { source: baseToolSource }),
 					},
 				]),
 		);
@@ -3393,14 +3703,22 @@ export class AgentSession {
 				.filter((definition) => isAllowedTool(definition.name))
 				.map((definition) => ({
 					definition,
-					sourceInfo: createSyntheticSourceInfo(`<builtin:${definition.name}>`, { source: "builtin" }),
+					sourceInfo: createSyntheticSourceInfo(`<${baseToolSource}:${definition.name}>`, {
+						source: baseToolSource,
+					}),
 				})),
 			runner,
 		);
 
-		const toolRegistry = new Map(wrappedBuiltInTools.map((tool) => [tool.name, tool]));
+		const toolRegistry = new Map(
+			wrappedBuiltInTools.map((tool) => {
+				const guarded = this._withPermissionGuard(tool);
+				return [guarded.name, guarded] as const;
+			}),
+		);
 		for (const tool of wrappedExtensionTools as AgentTool[]) {
-			toolRegistry.set(tool.name, tool);
+			const guarded = this._withPermissionGuard(tool);
+			toolRegistry.set(guarded.name, guarded);
 		}
 		this._toolRegistry = toolRegistry;
 
@@ -3437,6 +3755,7 @@ export class AgentSession {
 		const autoResizeImages = this.settingsManager.getImageAutoResize();
 		const shellCommandPrefix = this.settingsManager.getShellCommandPrefix();
 		const shellPath = this.settingsManager.getShellPath();
+		this._runtimeShellCommandPrefix = shellCommandPrefix;
 		const baseToolDefinitions = this._baseToolsOverride
 			? Object.fromEntries(
 					Object.entries(this._baseToolsOverride).map(([name, tool]) => [
@@ -3446,7 +3765,13 @@ export class AgentSession {
 				)
 			: createAllToolDefinitions(this._cwd, {
 					read: { autoResizeImages },
-					bash: { commandPrefix: shellCommandPrefix, shellPath },
+					bash: {
+						commandPrefix: shellCommandPrefix,
+						shellPath,
+						operations: this._createPermissionBashOperations(shellPath),
+					},
+					grep: { subprocess: this._createToolSubprocessExecutor("grep", shellPath) },
+					find: { subprocess: this._createToolSubprocessExecutor("find", shellPath) },
 				});
 
 		this._baseToolDefinitions = new Map(
@@ -3607,6 +3932,26 @@ export class AgentSession {
 	// Bash Execution
 	// =========================================================================
 
+	async authorizeUserBash(command: string): Promise<UserBashAuthorization> {
+		const prefix = this.settingsManager.getShellCommandPrefix();
+		const effectiveCommand = prefix ? `${prefix}\n${command}` : command;
+		const actionId = `user-bash:${randomUUID()}`;
+		await this._authorizePermissionAction({
+			actionId,
+			toolName: "bash",
+			provenance: "builtin",
+			args: { command },
+			actionSource: "user-bash",
+			effectiveCommand,
+		});
+		return { actionId, command };
+	}
+
+	cancelUserBashAuthorization(authorization: UserBashAuthorization): void {
+		const pending = this._permissionGrants.get(authorization.actionId);
+		if (pending?.action.toolName === "bash") this._permissionGrants.delete(authorization.actionId);
+	}
+
 	/**
 	 * Execute a bash command.
 	 * Adds result to agent context and session.
@@ -3618,22 +3963,32 @@ export class AgentSession {
 	async executeBash(
 		command: string,
 		onChunk?: (chunk: string) => void,
-		options?: { excludeFromContext?: boolean; operations?: BashOperations },
+		options?: {
+			excludeFromContext?: boolean;
+			operations?: BashOperations;
+			authorization?: UserBashAuthorization;
+		},
 	): Promise<BashResult> {
 		if (this.isCompacting) throw new Error("Wait for compaction to finish before running bash");
-		this._bashAbortController = new AbortController();
 
 		// Apply command prefix if configured (e.g., "shopt -s expand_aliases" for alias support)
 		const prefix = this.settingsManager.getShellCommandPrefix();
 		const shellPath = this.settingsManager.getShellPath();
 		const resolvedCommand = prefix ? `${prefix}\n${command}` : command;
+		const authorization = options?.authorization ?? (await this.authorizeUserBash(command));
+		if (authorization.command !== command) {
+			this.cancelUserBashAuthorization(authorization);
+			throw new Error("Bash command changed after permission approval");
+		}
+		this._bashAbortController = new AbortController();
 
 		try {
 			const result = await executeBashWithOperations(
 				resolvedCommand,
 				this.sessionManager.getCwd(),
-				options?.operations ?? createLocalBashOperations({ shellPath }),
+				this._createPermissionBashOperations(shellPath, options?.operations),
 				{
+					actionId: authorization.actionId,
 					onChunk,
 					signal: this._bashAbortController.signal,
 				},
@@ -3642,6 +3997,7 @@ export class AgentSession {
 			this.recordBashResult(command, result, options);
 			return result;
 		} finally {
+			this.cancelUserBashAuthorization(authorization);
 			this._bashAbortController = undefined;
 		}
 	}
@@ -4000,6 +4356,11 @@ export class AgentSession {
 		}
 
 		return {
+			mode: this.mode,
+			cwd: this.sessionManager.getCwd(),
+			cwdOrigin: this.sessionManager.getCwdOrigin(),
+			permissionMode: this.sessionManager.getPermissionSettings().mode,
+			reviewerEnabled: this.sessionManager.getPermissionSettings().reviewerEnabled,
 			sessionFile: this.sessionFile,
 			sessionId: this.sessionId,
 			userMessages,
@@ -4110,6 +4471,7 @@ export class AgentSession {
 			id: this.sessionManager.getSessionId(),
 			timestamp: new Date().toISOString(),
 			cwd: this.sessionManager.getCwd(),
+			mode: this.sessionManager.getMode(),
 		};
 
 		const branchEntries = this.sessionManager.getBranch();

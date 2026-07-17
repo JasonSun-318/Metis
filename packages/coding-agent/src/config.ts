@@ -527,6 +527,11 @@ export function getSessionsDir(): string {
 	return join(getAgentDir(), "sessions");
 }
 
+/** Get path to ArcMind-owned Chat workspaces. */
+export function getWorkspacesDir(agentDir: string = getAgentDir()): string {
+	return join(agentDir, "workspaces");
+}
+
 /** Get path to debug log file */
 export function getDebugLogPath(): string {
 	return join(getAgentDir(), `${APP_NAME}-debug.log`);

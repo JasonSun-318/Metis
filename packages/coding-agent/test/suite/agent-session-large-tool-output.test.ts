@@ -73,7 +73,7 @@ describe("large external tool output", () => {
 		}
 	});
 
-	it("leaves builtin tool results on their existing path", async () => {
+	it("treats SDK base-tool overrides as external tool results", async () => {
 		const fullText = "b".repeat(LARGE_TOOL_OUTPUT_MAX_CHARS + 1);
 		const builtinTool: AgentTool = {
 			name: "builtin_test",
@@ -83,6 +83,7 @@ describe("large external tool output", () => {
 			execute: async () => ({ content: [{ type: "text", text: fullText }], details: {} }),
 		};
 		const harness = await createHarness({ tools: [builtinTool] });
+		let outputDir: string | undefined;
 		try {
 			let providerText = "";
 			harness.setResponses([
@@ -98,10 +99,16 @@ describe("large external tool output", () => {
 			const entry = harness.sessionManager
 				.getEntries()
 				.find((item): item is SessionMessageEntry => item.type === "message" && item.message.role === "toolResult");
-			expect(entry?.toolOutput).toBeUndefined();
-			expect(entry?.message.role === "toolResult" ? getMessageText(entry.message) : "").toBe(fullText);
-			expect(providerText).toBe(fullText);
+			expect(entry?.toolOutput).toMatchObject({ truncated: true, originalBytes: fullText.length });
+			if (!entry?.toolOutput) throw new Error("missing stored SDK tool output");
+			outputDir = dirname(entry.toolOutput.fullOutputPath);
+			expect(entry?.message.role === "toolResult" ? getMessageText(entry.message) : "").toContain(
+				"Tool output truncated: preview only",
+			);
+			expect(providerText).toContain("Tool output truncated: preview only");
+			expect(readFileSync(entry.toolOutput.fullOutputPath, "utf8")).toBe(fullText);
 		} finally {
+			if (outputDir) rmSync(outputDir, { recursive: true, force: true });
 			await harness.cleanup();
 		}
 	});

@@ -50,6 +50,11 @@ export {
 	type ReadToolInput,
 	type ReadToolOptions,
 } from "./read.ts";
+export type {
+	ToolSubprocessExecutor,
+	ToolSubprocessInput,
+	WrappedToolSubprocess,
+} from "./subprocess.ts";
 export {
 	DEFAULT_MAX_BYTES,
 	DEFAULT_MAX_LINES,

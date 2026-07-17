@@ -136,10 +136,13 @@ describe("AgentSessionRuntime characterization", () => {
 				diagnostics: services.diagnostics,
 			};
 		};
+		const sessionManager = options?.sessionManager ?? SessionManager.create(tempDir);
+		sessionManager.setPermissionSettings({ mode: "full", reviewerEnabled: true });
+		const sessionCwd = sessionManager.getCwd();
 		const runtime = await createAgentSessionRuntime(createRuntime, {
-			cwd: tempDir,
+			cwd: sessionCwd,
 			agentDir: tempDir,
-			sessionManager: options?.sessionManager ?? SessionManager.create(tempDir),
+			sessionManager,
 		});
 		await runtime.session.bindExtensions({});
 

@@ -67,12 +67,14 @@ function restoreStdoutIsTTY(): void {
 }
 
 function createContext(order: string[], sessionManager = createSessionManager()): ShutdownThis {
+	let disposed = false;
 	return {
 		isShuttingDown: false,
 		unregisterSignalHandlers: vi.fn(),
 		runtimeHost: {
 			dispose: vi.fn(async () => {
 				order.push("dispose");
+				disposed = true;
 			}),
 		},
 		ui: {
@@ -86,7 +88,10 @@ function createContext(order: string[], sessionManager = createSessionManager())
 		stop: vi.fn(() => {
 			order.push("stop");
 		}),
-		sessionManager,
+		get sessionManager() {
+			if (disposed) throw new Error("Agent session runtime is disposing or disposed");
+			return sessionManager;
+		},
 	};
 }
 

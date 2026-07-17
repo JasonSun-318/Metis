@@ -264,6 +264,7 @@ export function createTestSession(options: TestSessionOptions = {}): TestSession
 
 	const authStorage = AuthStorage.create(join(tempDir, "auth.json"));
 	const modelRegistry = ModelRegistry.create(authStorage, tempDir);
+	sessionManager.setPermissionSettings({ mode: "full", reviewerEnabled: true });
 
 	const session = new AgentSession({
 		agent,

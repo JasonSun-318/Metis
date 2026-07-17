@@ -1,7 +1,10 @@
 /**
- * Sandbox Extension - OS-level sandboxing for bash commands
+ * Legacy Sandbox Extension Example - custom OS-level sandboxing for bash
  *
- * Uses @anthropic-ai/sandbox-runtime to enforce filesystem and network
+ * ArcMind already enforces its built-in Ask/Auto permission boundary. This
+ * example exists only to demonstrate a trusted extension that replaces Bash
+ * and adds a separate custom SRT configuration. Uses
+ * @anthropic-ai/sandbox-runtime to enforce filesystem and network
  * restrictions on bash commands at the OS level (sandbox-exec on macOS,
  * bubblewrap on Linux).
  *

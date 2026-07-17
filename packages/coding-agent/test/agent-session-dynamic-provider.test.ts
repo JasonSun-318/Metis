@@ -32,7 +32,7 @@ describe("AgentSession dynamic provider registration", () => {
 		configureRegistry?: (modelRegistry: ModelRegistry) => void,
 	) {
 		const settingsManager = SettingsManager.create(tempDir, agentDir);
-		const sessionManager = SessionManager.inMemory();
+		const sessionManager = SessionManager.inMemory(tempDir);
 		const authStorage = AuthStorage.create(join(agentDir, "auth.json"));
 		authStorage.setRuntimeApiKey("anthropic", "test-key");
 		const modelRegistry = ModelRegistry.create(authStorage, join(agentDir, "models.json"));

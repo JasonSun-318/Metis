@@ -16,6 +16,7 @@ import { createProjectTrustContext } from "./cli/project-trust.ts";
 import { selectSession } from "./cli/session-picker.ts";
 import { shouldRunFirstTimeSetup, showFirstTimeSetup, showStartupSelector } from "./cli/startup-ui.ts";
 import { ENV_SESSION_DIR, expandTildePath, getAgentDir, getPackageDir, VERSION } from "./config.ts";
+import { DEFAULT_AGENT_MODE } from "./core/agent-mode.ts";
 import {
 	type AgentSessionRuntime,
 	type CreateAgentSessionRuntimeFactory,
@@ -42,7 +43,9 @@ import {
 	MissingSessionCwdError,
 	type SessionCwdIssue,
 } from "./core/session-cwd.ts";
+import { createSessionId } from "./core/session-id.ts";
 import { assertValidSessionId, SessionManager } from "./core/session-manager.ts";
+import { removeOwnedManagedWorkspace, resolveNewSessionWorkspace } from "./core/session-workspace.ts";
 import { SettingsManager } from "./core/settings-manager.ts";
 import { printTimings, resetTimings, time } from "./core/timings.ts";
 import { hasTrustRequiringProjectResources, ProjectTrustStore } from "./core/trust-manager.ts";
@@ -164,6 +167,17 @@ async function findLocalSessionByExactId(
 	return localMatch ? { type: "local", path: localMatch.path } : undefined;
 }
 
+async function findSessionByExactId(
+	sessionId: string,
+	cwd: string,
+	sessionDir?: string,
+): Promise<{ path: string } | undefined> {
+	const localMatch = await findLocalSessionByExactId(sessionId, cwd, sessionDir);
+	if (localMatch) return localMatch;
+	const globalMatch = (await SessionManager.listAll(sessionDir)).find((session) => session.id === sessionId);
+	return globalMatch ? { path: globalMatch.path } : undefined;
+}
+
 async function resolveSessionPath(sessionArg: string, cwd: string, sessionDir?: string): Promise<ResolvedSession> {
 	// If it looks like a file path, resolve it before handing it to the session manager.
 	if (sessionArg.includes("/") || sessionArg.includes("\\") || sessionArg.endsWith(".jsonl")) {
@@ -245,6 +259,41 @@ function validateSessionIdFlags(parsed: Args): void {
 	}
 }
 
+function validateCreationOnlyFlags(parsed: Args): void {
+	if (parsed.help || parsed.listModels !== undefined) return;
+	const selectedExistingSession = parsed.session || parsed.resume || parsed.fork || parsed.continue;
+	if (!selectedExistingSession) return;
+
+	const conflictingFlags = [
+		parsed.cwd !== undefined ? "--cwd" : undefined,
+		parsed.permissionMode !== undefined ? "--permission-mode" : undefined,
+		parsed.reviewerEnabled !== undefined ? (parsed.reviewerEnabled ? "--reviewer" : "--no-reviewer") : undefined,
+		parsed.agentMode !== undefined && !parsed.continue ? "--agent-mode" : undefined,
+	].filter((flag): flag is string => flag !== undefined);
+	if (conflictingFlags.length === 0) return;
+
+	console.error(
+		chalk.red(
+			`Error: ${conflictingFlags.join(", ")} ${conflictingFlags.length === 1 ? "is" : "are"} only valid when creating a new session`,
+		),
+	);
+	process.exit(1);
+}
+
+function rejectCreationOverridesForExistingSession(parsed: Args): void {
+	const conflictingFlags = [
+		parsed.agentMode !== undefined ? "--agent-mode" : undefined,
+		parsed.cwd !== undefined ? "--cwd" : undefined,
+		parsed.permissionMode !== undefined ? "--permission-mode" : undefined,
+		parsed.reviewerEnabled !== undefined ? (parsed.reviewerEnabled ? "--reviewer" : "--no-reviewer") : undefined,
+	].filter((flag): flag is string => flag !== undefined);
+	if (conflictingFlags.length === 0) return;
+	console.error(
+		chalk.red(`Error: ${conflictingFlags.join(", ")} cannot override an existing session selected by --session-id`),
+	);
+	process.exit(1);
+}
+
 function openSessionOrExit(path: string, sessionDir?: string): SessionManager {
 	try {
 		return SessionManager.open(path, sessionDir);
@@ -270,9 +319,24 @@ async function createSessionManager(
 	cwd: string,
 	sessionDir: string | undefined,
 	settingsManager: SettingsManager,
+	agentDir: string,
 ): Promise<SessionManager> {
 	if (parsed.noSession || parsed.help || parsed.listModels !== undefined) {
-		return SessionManager.inMemory(cwd, parsed.sessionId !== undefined ? { id: parsed.sessionId } : undefined);
+		const ephemeralCwd = parsed.cwd
+			? resolveNewSessionWorkspace({
+					id: parsed.sessionId ?? createSessionId(),
+					mode: parsed.agentMode ?? DEFAULT_AGENT_MODE,
+					requestedCwd: parsed.cwd,
+					hostCwd: cwd,
+					agentDir,
+				}).cwd
+			: cwd;
+		return SessionManager.inMemory(ephemeralCwd, {
+			id: parsed.sessionId,
+			mode: parsed.agentMode,
+			permissionMode: parsed.permissionMode,
+			reviewerEnabled: parsed.reviewerEnabled,
+		});
 	}
 
 	if (parsed.fork) {
@@ -340,12 +404,13 @@ async function createSessionManager(
 	}
 
 	if (parsed.continue) {
-		return SessionManager.continueRecent(cwd, sessionDir);
+		return SessionManager.continueRecent(cwd, sessionDir, { mode: parsed.agentMode });
 	}
 
 	if (parsed.sessionId) {
-		const existingSession = await findLocalSessionByExactId(parsed.sessionId, cwd, sessionDir);
+		const existingSession = await findSessionByExactId(parsed.sessionId, cwd, sessionDir);
 		if (existingSession) {
+			rejectCreationOverridesForExistingSession(parsed);
 			return SessionManager.open(existingSession.path, sessionDir);
 		}
 		console.error(
@@ -355,7 +420,34 @@ async function createSessionManager(
 		);
 	}
 
-	return SessionManager.create(cwd, sessionDir, { id: parsed.sessionId });
+	const mode = parsed.agentMode ?? DEFAULT_AGENT_MODE;
+	const sessionId = parsed.sessionId ?? createSessionId();
+	const workspace = resolveNewSessionWorkspace({
+		id: sessionId,
+		mode,
+		requestedCwd: parsed.cwd,
+		hostCwd: cwd,
+		agentDir,
+	});
+	try {
+		return SessionManager.create(workspace.cwd, sessionDir, {
+			id: sessionId,
+			mode,
+			cwdOrigin: workspace.cwdOrigin,
+			permissionMode: parsed.permissionMode,
+			reviewerEnabled: parsed.reviewerEnabled,
+		});
+	} catch (error) {
+		if (workspace.cwdOrigin === "managed") {
+			removeOwnedManagedWorkspace({
+				id: sessionId,
+				cwd: workspace.cwd,
+				cwdOrigin: workspace.cwdOrigin,
+				agentDir,
+			});
+		}
+		throw error;
+	}
 }
 
 function buildSessionOptions(
@@ -576,6 +668,7 @@ export async function main(args: string[], options?: MainOptions) {
 
 	validateForkFlags(parsed);
 	validateSessionIdFlags(parsed);
+	validateCreationOnlyFlags(parsed);
 
 	// Run migrations (pass cwd for project-local migrations)
 	const { migratedAuthProviders: migratedProviders, deprecationWarnings } = runMigrations(cwd);
@@ -601,7 +694,7 @@ export async function main(args: string[], options?: MainOptions) {
 		(parsed.sessionDir ? normalizePath(parsed.sessionDir) : undefined) ??
 		(envSessionDir ? expandTildePath(envSessionDir) : undefined) ??
 		startupSettingsManager.getSessionDir();
-	let sessionManager = await createSessionManager(parsed, cwd, sessionDir, startupSettingsManager);
+	let sessionManager = await createSessionManager(parsed, cwd, sessionDir, startupSettingsManager, agentDir);
 	let runtimeOwnsSessionManager = false;
 	try {
 		const missingSessionCwdIssue = getMissingSessionCwdIssue(sessionManager, cwd);

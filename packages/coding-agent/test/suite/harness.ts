@@ -14,6 +14,9 @@ import { AuthStorage } from "../../src/core/auth-storage.ts";
 import type { ExtensionRunner } from "../../src/core/extensions/index.ts";
 import { convertToLlm } from "../../src/core/messages.ts";
 import { ModelRegistry } from "../../src/core/model-registry.ts";
+import type { PermissionSettings } from "../../src/core/permission-mode.ts";
+import type { PermissionReviewerStream, RequestPermissionApproval } from "../../src/core/permission-policy.ts";
+import type { SandboxRuntimeCoordinator } from "../../src/core/sandbox-runtime.ts";
 import { SessionManager } from "../../src/core/session-manager.ts";
 import type { Settings } from "../../src/core/settings-manager.ts";
 import { SettingsManager } from "../../src/core/settings-manager.ts";
@@ -66,6 +69,10 @@ export interface HarnessOptions {
 	resourceLoader?: ResourceLoader;
 	extensionFactories?: Array<InlineExtension | CreateTestExtensionsResultInput>;
 	withConfiguredAuth?: boolean;
+	permissionSettings?: PermissionSettings;
+	requestPermissionApproval?: RequestPermissionApproval;
+	permissionReviewerStream?: PermissionReviewerStream;
+	sandboxRuntime?: SandboxRuntimeCoordinator;
 }
 
 export interface Harness {
@@ -168,6 +175,7 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
 		: undefined;
 	const resourceLoader =
 		options.resourceLoader ?? createTestResourceLoader(extensionsResult ? { extensionsResult } : undefined);
+	sessionManager.setPermissionSettings(options.permissionSettings ?? { mode: "full", reviewerEnabled: true });
 
 	const session = new AgentSession({
 		agent,
@@ -181,6 +189,9 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
 		allowedToolNames: options.allowedToolNames,
 		excludedToolNames: options.excludedToolNames,
 		extensionRunnerRef,
+		requestPermissionApproval: options.requestPermissionApproval,
+		permissionReviewerStream: options.permissionReviewerStream,
+		sandboxRuntime: options.sandboxRuntime,
 	});
 
 	const events: AgentSessionEvent[] = [];
