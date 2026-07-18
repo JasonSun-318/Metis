@@ -70,6 +70,30 @@ describe("McpServerClient", () => {
 		expect(client.status().state).toBe("connected");
 	});
 
+	it("classifies a plain HTTP 401 as static-token authentication", async () => {
+		const testServer = await createMcpTestServer({ requiredBearerToken: "expected-token" });
+		servers.push(testServer);
+		const client = new McpServerClient(httpConfig(testServer.url), AuthStorage.inMemory());
+		clients.push(client);
+
+		await expect(client.start()).rejects.toThrow();
+		expect(client.status()).toMatchObject({ state: "auth_required", authRequirement: "token" });
+		expect(JSON.stringify(client.status())).not.toContain("expected-token");
+	});
+
+	it("classifies advertised protected-resource metadata as OAuth without opening a browser", async () => {
+		const testServer = await createMcpTestServer({
+			requiredBearerToken: "expected-token",
+			advertiseOAuth: true,
+		});
+		servers.push(testServer);
+		const client = new McpServerClient(httpConfig(testServer.url), AuthStorage.inMemory());
+		clients.push(client);
+
+		await expect(client.start()).rejects.toThrow();
+		expect(client.status()).toMatchObject({ state: "auth_required", authRequirement: "oauth" });
+	});
+
 	it("spawns and closes a stdio server", async () => {
 		const client = new McpServerClient(stdioFixtureConfig(), AuthStorage.inMemory());
 		clients.push(client);

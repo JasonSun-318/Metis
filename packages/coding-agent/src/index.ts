@@ -34,6 +34,8 @@ export {
 	type AuthStorageBackend,
 	FileAuthStorageBackend,
 	InMemoryAuthStorageBackend,
+	type McpSecretCredential,
+	mcpCredentialKey,
 	type OAuthCredential,
 } from "./core/auth-storage.ts";
 // Compaction
@@ -171,7 +173,7 @@ export {
 } from "./core/extensions/index.ts";
 // Footer data provider (git branch + extension statuses - data not otherwise available to extensions)
 export type { ReadonlyFooterDataProvider } from "./core/footer-data-provider.ts";
-export type { McpConnectionState, McpServerStatus, McpToolRecord } from "./core/mcp/index.ts";
+export type { McpAuthRequirement, McpConnectionState, McpServerStatus, McpToolRecord } from "./core/mcp/index.ts";
 export { convertToLlm } from "./core/messages.ts";
 export { ModelRegistry } from "./core/model-registry.ts";
 export {

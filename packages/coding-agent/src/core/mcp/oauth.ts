@@ -7,11 +7,7 @@ import type {
 	OAuthClientMetadata,
 	OAuthTokens,
 } from "@modelcontextprotocol/sdk/shared/auth.js";
-import type { AuthStorage, McpOAuthCredential } from "../auth-storage.ts";
-
-function credentialKey(serverName: string): string {
-	return `mcp:${serverName}`;
-}
+import { type AuthStorage, type McpOAuthCredential, mcpCredentialKey } from "../auth-storage.ts";
 
 export class ArcMindMcpOAuthProvider implements OAuthClientProvider {
 	readonly clientMetadataUrl = undefined;
@@ -54,12 +50,12 @@ export class ArcMindMcpOAuthProvider implements OAuthClientProvider {
 	}
 
 	private read(): McpOAuthCredential {
-		const value = this.options.authStorage.get(credentialKey(this.options.serverName));
+		const value = this.options.authStorage.get(mcpCredentialKey(this.options.serverName));
 		return value?.type === "mcp_oauth" ? value : { type: "mcp_oauth" };
 	}
 
 	private write(patch: Partial<McpOAuthCredential>): void {
-		this.options.authStorage.set(credentialKey(this.options.serverName), {
+		this.options.authStorage.set(mcpCredentialKey(this.options.serverName), {
 			...this.read(),
 			...patch,
 			type: "mcp_oauth",
@@ -106,7 +102,7 @@ export class ArcMindMcpOAuthProvider implements OAuthClientProvider {
 
 	invalidateCredentials(scope: "all" | "client" | "tokens" | "verifier" | "discovery"): void {
 		if (scope === "all") {
-			this.options.authStorage.remove(credentialKey(this.options.serverName));
+			this.options.authStorage.remove(mcpCredentialKey(this.options.serverName));
 			return;
 		}
 		const next = { ...this.read() };
@@ -114,7 +110,7 @@ export class ArcMindMcpOAuthProvider implements OAuthClientProvider {
 		if (scope === "tokens") delete next.tokens;
 		if (scope === "verifier") delete next.codeVerifier;
 		if (scope === "discovery") delete next.discoveryState;
-		this.options.authStorage.set(credentialKey(this.options.serverName), next);
+		this.options.authStorage.set(mcpCredentialKey(this.options.serverName), next);
 	}
 }
 

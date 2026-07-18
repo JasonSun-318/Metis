@@ -20,6 +20,8 @@ export interface McpTestServerOptions {
 	pageSize?: number;
 	closeDuringTool?: boolean;
 	callDelayMs?: number;
+	requiredBearerToken?: string;
+	advertiseOAuth?: boolean;
 }
 
 export interface McpTestServer {
@@ -114,6 +116,42 @@ export async function createMcpTestServer(options: McpTestServerOptions = {}): P
 	await server.connect(transport);
 	const httpServer = createServer(async (request, response) => {
 		try {
+			const origin = `http://${request.headers.host}`;
+			const requestUrl = new URL(request.url ?? "/", origin);
+			if (
+				options.advertiseOAuth &&
+				(requestUrl.pathname === "/.well-known/oauth-protected-resource" ||
+					requestUrl.pathname === "/.well-known/oauth-protected-resource/mcp")
+			) {
+				response.writeHead(200, { "content-type": "application/json" });
+				response.end(
+					JSON.stringify({ resource: `${origin}/mcp`, authorization_servers: [origin] }),
+				);
+				return;
+			}
+			if (options.advertiseOAuth && requestUrl.pathname === "/.well-known/oauth-authorization-server") {
+				response.writeHead(200, { "content-type": "application/json" });
+				response.end(
+					JSON.stringify({
+						issuer: origin,
+						authorization_endpoint: `${origin}/authorize`,
+						token_endpoint: `${origin}/token`,
+						response_types_supported: ["code"],
+						code_challenge_methods_supported: ["S256"],
+					}),
+				);
+				return;
+			}
+			if (
+				options.requiredBearerToken &&
+				request.headers.authorization !== `Bearer ${options.requiredBearerToken}`
+			) {
+				const challenge = options.advertiseOAuth
+					? `Bearer resource_metadata="${origin}/.well-known/oauth-protected-resource"`
+					: "Bearer";
+				response.writeHead(401, { "www-authenticate": challenge }).end("Unauthorized");
+				return;
+			}
 			await transport.handleRequest(request, response);
 		} catch (error) {
 			if (!response.headersSent) response.writeHead(500);

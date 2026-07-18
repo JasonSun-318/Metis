@@ -4921,7 +4921,7 @@ export class InteractiveMode {
 
 		for (const providerId of authStorage.list()) {
 			const credential = authStorage.get(providerId);
-			if (!credential || credential.type === "mcp_oauth") {
+			if (!credential || credential.type === "mcp_oauth" || credential.type === "mcp_secret") {
 				continue;
 			}
 			options.push({

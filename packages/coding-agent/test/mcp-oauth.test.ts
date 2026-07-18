@@ -1,6 +1,6 @@
 import { request } from "node:http";
 import { describe, expect, it, vi } from "vitest";
-import { AuthStorage } from "../src/core/auth-storage.ts";
+import { AuthStorage, mcpCredentialKey } from "../src/core/auth-storage.ts";
 import { ArcMindMcpOAuthProvider, startMcpOAuthCallback } from "../src/core/mcp/oauth.ts";
 
 async function visit(url: URL): Promise<number> {
@@ -31,8 +31,8 @@ describe("MCP OAuth", () => {
 
 		expect(provider.codeVerifier()).toBe("verifier");
 		expect(provider.tokens()).toMatchObject({ access_token: "access" });
-		expect(storage.get("mcp:figma")).toMatchObject({ type: "mcp_oauth" });
-		expect(await storage.getApiKey("mcp:figma", { includeFallback: false })).toBeUndefined();
+		expect(storage.get(mcpCredentialKey("figma"))).toMatchObject({ type: "mcp_oauth" });
+		expect(await storage.getApiKey(mcpCredentialKey("figma"), { includeFallback: false })).toBeUndefined();
 		expect(redirect).toHaveBeenCalledOnce();
 	});
 

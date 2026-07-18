@@ -48,6 +48,7 @@ import { getShellConfig } from "../utils/shell.ts";
 import { sleep } from "../utils/sleep.ts";
 import type { AgentMode } from "./agent-mode.ts";
 import { formatNoApiKeyFoundMessage, formatNoModelSelectedMessage } from "./auth-guidance.ts";
+import type { McpSecretCredential } from "./auth-storage.ts";
 import { type AutoMemorySnapshot, loadAutoMemory } from "./auto-memory.ts";
 import { type BashResult, executeBashWithOperations } from "./bash-executor.ts";
 import { readBoundedUtf8FileSync } from "./bounded-text-file.ts";
@@ -1736,6 +1737,15 @@ export class AgentSession {
 	logoutMcpServer(name: string): Promise<void> {
 		if (!this._mcpManager) return Promise.reject(new Error("MCP is not available in this session"));
 		return this._mcpManager.logout(name);
+	}
+
+	setMcpSecret(name: string, credential: Omit<McpSecretCredential, "type">): Promise<void> {
+		if (!this._mcpManager) return Promise.reject(new Error("MCP is not available in this session"));
+		return this._mcpManager.setSecret(name, credential);
+	}
+
+	deleteMcpCredential(name: string): void {
+		this._mcpManager?.deleteCredential(name);
 	}
 
 	restartMcpServers(name?: string): Promise<void> {

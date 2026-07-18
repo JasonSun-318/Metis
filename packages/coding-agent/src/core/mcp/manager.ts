@@ -6,9 +6,18 @@ import type {
 	Tool,
 	ToolAnnotations,
 } from "@modelcontextprotocol/sdk/types.js";
-import type { AuthStorage } from "../auth-storage.ts";
+import {
+	type AuthStorage,
+	type McpSecretCredential,
+	mcpCredentialKey,
+} from "../auth-storage.ts";
 import type { SettingsManager } from "../settings-manager.ts";
-import { type McpConnectionState, type McpLoginCallbacks, McpServerClient } from "./client.ts";
+import {
+	type McpAuthRequirement,
+	type McpConnectionState,
+	type McpLoginCallbacks,
+	McpServerClient,
+} from "./client.ts";
 import { type ResolvedMcpServerConfig, type ResolvedMcpSettings, resolveMcpSettings } from "./config.ts";
 
 const MAX_TOOL_NAME = 64;
@@ -42,6 +51,7 @@ export interface McpServerStatus {
 	promptCount: number;
 	capabilities: string[];
 	lastError?: string;
+	authRequirement?: McpAuthRequirement;
 }
 
 function sanitizeSegment(value: string): string {
@@ -195,8 +205,21 @@ export class McpManager {
 
 	private createClients(settings: ResolvedMcpSettings): Map<string, McpServerClient> {
 		return new Map(
-			settings.servers.map((config) => [config.name, new McpServerClient(config, this.authStorage)] as const),
+			settings.servers.map((config) => {
+				const resolved = this.applyStoredCredential(config);
+				return [resolved.name, new McpServerClient(resolved, this.authStorage)] as const;
+			}),
 		);
+	}
+
+	private applyStoredCredential(config: ResolvedMcpServerConfig): ResolvedMcpServerConfig {
+		const credential = this.authStorage.get(mcpCredentialKey(config.name));
+		if (credential?.type !== "mcp_secret") return config;
+		return {
+			...config,
+			bearerToken: credential.bearerToken ?? config.bearerToken,
+			env: { ...(config.env ?? {}), ...(credential.env ?? {}) },
+		};
 	}
 
 	private async startClients(clients: Map<string, McpServerClient>): Promise<void> {
@@ -365,11 +388,12 @@ export class McpManager {
 				serverInfo: snapshot.serverInfo,
 				toolCount: snapshot.tools.length,
 				resourceCount: snapshot.resources.length,
-				resourceTemplateCount: snapshot.resourceTemplates.length,
-				promptCount: snapshot.prompts.length,
-				capabilities: Object.keys(snapshot.capabilities).sort(),
-				lastError: status.lastError,
-			};
+					resourceTemplateCount: snapshot.resourceTemplates.length,
+					promptCount: snapshot.prompts.length,
+					capabilities: Object.keys(snapshot.capabilities).sort(),
+					lastError: status.lastError,
+					authRequirement: status.authRequirement,
+				};
 		});
 	}
 
@@ -401,17 +425,29 @@ export class McpManager {
 		for (const listener of this.catalogListeners) listener();
 	}
 
+	async setSecret(server: string, credential: Omit<McpSecretCredential, "type">): Promise<void> {
+		const client = this.clientFor(server);
+		const environment = Object.entries(credential.env ?? {});
+		if (credential.bearerToken === "" || environment.some(([name, value]) => !name || !value)) {
+			throw new Error("MCP secret names and values must not be empty");
+		}
+		if (!credential.bearerToken && environment.length === 0) {
+			throw new Error("MCP secret must contain a bearer token or environment value");
+		}
+		await client.close();
+		this.authStorage.set(mcpCredentialKey(server), { type: "mcp_secret", ...credential });
+		await this.reload();
+	}
+
+	deleteCredential(server: string): void {
+		this.authStorage.remove(mcpCredentialKey(server));
+	}
+
 	async logout(server: string): Promise<void> {
 		const client = this.clientFor(server);
-		this.authStorage.remove(`mcp:${server}`);
 		await client.close();
-		try {
-			await client.start();
-		} catch (error) {
-			if (client.status().state !== "auth_required") throw error;
-		}
-		this.rebuildRecords();
-		for (const listener of this.catalogListeners) listener();
+		this.deleteCredential(server);
+		await this.reload();
 	}
 
 	async restart(server?: string): Promise<void> {

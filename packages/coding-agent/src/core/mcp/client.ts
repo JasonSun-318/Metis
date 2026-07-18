@@ -1,8 +1,11 @@
 import { randomUUID } from "node:crypto";
-import { UnauthorizedError } from "@modelcontextprotocol/sdk/client/auth.js";
+import { discoverOAuthServerInfo, UnauthorizedError } from "@modelcontextprotocol/sdk/client/auth.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { getDefaultEnvironment, StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import {
+	StreamableHTTPClientTransport,
+	StreamableHTTPError,
+} from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import {
 	type CallToolResult,
 	CallToolResultSchema,
@@ -18,7 +21,7 @@ import {
 	type Tool,
 } from "@modelcontextprotocol/sdk/types.js";
 import { VERSION } from "../../config.ts";
-import type { AuthStorage } from "../auth-storage.ts";
+import { type AuthStorage, mcpCredentialKey } from "../auth-storage.ts";
 import type { ResolvedMcpServerConfig } from "./config.ts";
 import { ArcMindMcpOAuthProvider, startMcpOAuthCallback } from "./oauth.ts";
 
@@ -34,6 +37,8 @@ export type McpConnectionState =
 	| "error"
 	| "closed";
 
+export type McpAuthRequirement = "oauth" | "token";
+
 export interface McpCatalogSnapshot {
 	serverName: string;
 	serverInfo?: { name: string; version: string };
@@ -48,6 +53,7 @@ export interface McpCatalogSnapshot {
 export interface McpServerClientStatus {
 	state: McpConnectionState;
 	lastError?: string;
+	authRequirement?: McpAuthRequirement;
 }
 
 export interface McpLoginCallbacks {
@@ -87,6 +93,7 @@ export class McpServerClient {
 	private transport?: McpTransport;
 	private connectionState: McpConnectionState;
 	private lastError?: string;
+	private authRequirement?: McpAuthRequirement;
 	private catalog: McpCatalogSnapshot;
 	private readonly catalogListeners = new Set<() => void>();
 	private readonly statusListeners = new Set<() => void>();
@@ -123,7 +130,7 @@ export class McpServerClient {
 	}
 
 	status(): McpServerClientStatus {
-		return { state: this.connectionState, lastError: this.lastError };
+		return { state: this.connectionState, lastError: this.lastError, authRequirement: this.authRequirement };
 	}
 
 	subscribeCatalog(listener: () => void): () => void {
@@ -136,9 +143,25 @@ export class McpServerClient {
 		return () => this.statusListeners.delete(listener);
 	}
 
+	private credentialValues(): string[] {
+		const values = [this.config.bearerToken, ...Object.values(this.config.env ?? {})];
+		const credential = this.authStorage.get(mcpCredentialKey(this.config.name));
+		if (credential?.type === "mcp_oauth") {
+			values.push(credential.tokens?.access_token, credential.tokens?.refresh_token);
+		}
+		return values.filter((value): value is string => Boolean(value));
+	}
+
+	private safeErrorMessage(error: unknown): string {
+		let message = errorMessage(error);
+		for (const value of this.credentialValues()) message = message.replaceAll(value, "[REDACTED]");
+		return message;
+	}
+
 	private setState(state: McpConnectionState, error?: unknown): void {
 		this.connectionState = state;
-		if (error !== undefined) this.lastError = errorMessage(error);
+		if (state !== "auth_required") this.authRequirement = undefined;
+		if (error !== undefined) this.lastError = this.safeErrorMessage(error);
 		else if (state === "connected") this.lastError = undefined;
 		for (const listener of this.statusListeners) listener();
 	}
@@ -226,10 +249,27 @@ export class McpServerClient {
 
 	private startupOAuthProvider(): ArcMindMcpOAuthProvider | undefined {
 		if (this.config.transport !== "http") return undefined;
-		if (this.authStorage.get(`mcp:${this.config.name}`)?.type !== "mcp_oauth") return undefined;
+		if (this.authStorage.get(mcpCredentialKey(this.config.name))?.type !== "mcp_oauth") return undefined;
 		return this.oauthProvider(new URL("http://127.0.0.1/mcp/oauth"), () => {
 			this.setState("auth_required", "MCP OAuth authorization required");
 		});
+	}
+
+	private async detectAuthRequirement(): Promise<McpAuthRequirement> {
+		if (this.config.transport !== "http") return "token";
+		if (this.authStorage.get(mcpCredentialKey(this.config.name))?.type === "mcp_oauth") return "oauth";
+		try {
+			const discovered = await discoverOAuthServerInfo(this.config.url!, {
+				fetchFn: (input, init) =>
+					fetch(input, { ...init, signal: AbortSignal.timeout(this.config.startupTimeoutMs) }),
+			});
+			return discovered.authorizationServerMetadata?.authorization_endpoint ||
+				discovered.resourceMetadata?.authorization_servers?.length
+				? "oauth"
+				: "token";
+		} catch {
+			return "token";
+		}
 	}
 
 	private async collectPages<T>(
@@ -340,7 +380,7 @@ export class McpServerClient {
 			if (!this.intentionallyClosing && !this.disposed) this.scheduleReconnect("MCP transport closed");
 		};
 		client.onerror = (error) => {
-			if (this.client === client) this.lastError = error.message;
+			if (this.client === client) this.lastError = this.safeErrorMessage(error);
 		};
 	}
 
@@ -370,8 +410,12 @@ export class McpServerClient {
 			await client.close().catch(() => undefined);
 			if (this.intentionallyClosing || this.disposed) {
 				this.setState("closed");
-			} else if (error instanceof UnauthorizedError) {
-				this.setState("auth_required", error);
+			} else if (
+				error instanceof UnauthorizedError ||
+				(error instanceof StreamableHTTPError && error.code === 401)
+			) {
+				this.authRequirement = await this.detectAuthRequirement();
+				this.setState("auth_required", "Authentication required");
 			} else {
 				this.setState("error", error);
 				this.scheduleReconnect(error);
@@ -391,7 +435,7 @@ export class McpServerClient {
 
 	private scheduleReconnect(error: unknown): void {
 		if (this.reconnectTimer || this.intentionallyClosing || this.disposed || !this.config.enabled) return;
-		this.lastError = errorMessage(error);
+		this.lastError = this.safeErrorMessage(error);
 		this.setState("reconnecting");
 		const delay = RECONNECT_DELAYS_MS[Math.min(this.reconnectAttempt, RECONNECT_DELAYS_MS.length - 1)];
 		this.reconnectAttempt += 1;

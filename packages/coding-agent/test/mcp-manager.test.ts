@@ -1,6 +1,7 @@
+import { fileURLToPath } from "node:url";
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { AuthStorage } from "../src/core/auth-storage.ts";
+import { AuthStorage, mcpCredentialKey } from "../src/core/auth-storage.ts";
 import { McpManager } from "../src/core/mcp/index.ts";
 import type { McpHttpServerSettings } from "../src/core/settings-manager.ts";
 import { SettingsManager } from "../src/core/settings-manager.ts";
@@ -43,6 +44,77 @@ afterEach(async () => {
 });
 
 describe("McpManager", () => {
+	it("injects a stored bearer token without exposing it in status", async () => {
+		const server = await createMcpTestServer({ requiredBearerToken: "stored-secret" });
+		servers.push(server);
+		const manager = await McpManager.create({
+			settingsManager: SettingsManager.inMemory({ mcpServers: { docs: { url: String(server.url) } } }),
+			authStorage: AuthStorage.inMemory({
+				[mcpCredentialKey("docs")]: { type: "mcp_secret", bearerToken: "stored-secret" },
+			}),
+			cwd: process.cwd(),
+		});
+		managers.push(manager);
+
+		expect(manager.getStatus()[0]).toMatchObject({ state: "connected" });
+		expect(JSON.stringify(manager.getStatus())).not.toContain("stored-secret");
+	});
+
+	it("injects stored environment values into a stdio child", async () => {
+		const fixture = fileURLToPath(new URL("./fixtures/mcp-stdio-server.mjs", import.meta.url));
+		const manager = await McpManager.create({
+			settingsManager: SettingsManager.inMemory({
+				mcpServers: { local: { command: process.execPath, args: [fixture] } },
+			}),
+			authStorage: AuthStorage.inMemory({
+				[mcpCredentialKey("local")]: { type: "mcp_secret", env: { LOCAL_TOKEN: "stored-secret" } },
+			}),
+			cwd: process.cwd(),
+		});
+		managers.push(manager);
+
+		const result = await manager.callTool("mcp__local__env_status", {});
+		expect(result.content).toContainEqual({ type: "text", text: "configured" });
+		expect(JSON.stringify(result)).not.toContain("stored-secret");
+	});
+
+	it("rebuilds clients when static credentials are set and removed", async () => {
+		const server = await createMcpTestServer({ requiredBearerToken: "stored-secret" });
+		servers.push(server);
+		const storage = AuthStorage.inMemory();
+		const manager = await McpManager.create({
+			settingsManager: SettingsManager.inMemory({ mcpServers: { docs: { url: String(server.url) } } }),
+			authStorage: storage,
+			cwd: process.cwd(),
+		});
+		managers.push(manager);
+		expect(manager.getStatus()[0]).toMatchObject({ state: "auth_required", authRequirement: "token" });
+
+		await manager.setSecret("docs", { bearerToken: "stored-secret" });
+		expect(manager.getStatus()[0]).toMatchObject({ state: "connected" });
+		expect(storage.get(mcpCredentialKey("docs"))).toMatchObject({ type: "mcp_secret" });
+
+		await manager.logout("docs");
+		expect(manager.getStatus()[0]).toMatchObject({ state: "auth_required", authRequirement: "token" });
+		expect(storage.has(mcpCredentialKey("docs"))).toBe(false);
+	});
+
+	it("rejects empty static credentials without replacing the active auth state", async () => {
+		const server = await createMcpTestServer({ requiredBearerToken: "stored-secret" });
+		servers.push(server);
+		const storage = AuthStorage.inMemory();
+		const manager = await McpManager.create({
+			settingsManager: SettingsManager.inMemory({ mcpServers: { docs: { url: String(server.url) } } }),
+			authStorage: storage,
+			cwd: process.cwd(),
+		});
+		managers.push(manager);
+
+		await expect(manager.setSecret("docs", { bearerToken: "" })).rejects.toThrow("must not be empty");
+		expect(storage.has(mcpCredentialKey("docs"))).toBe(false);
+		expect(manager.getStatus()[0]).toMatchObject({ state: "auth_required", authRequirement: "token" });
+	});
+
 	it("normalizes model names while preserving raw call identity", async () => {
 		const { manager, server } = await managerWithTools("Some Server", [
 			{

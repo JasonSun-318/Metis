@@ -25,12 +25,20 @@ server.setRequestHandler(ListToolsRequestSchema, () => ({
 			description: "Exit the fixture process before replying",
 			inputSchema: { type: "object", properties: {}, additionalProperties: false },
 		},
+		{
+			name: "env_status",
+			description: "Report whether LOCAL_TOKEN is configured without returning it",
+			inputSchema: { type: "object", properties: {}, additionalProperties: false },
+		},
 	],
 }));
 server.setRequestHandler(CallToolRequestSchema, async ({ params }) => {
 	if (params.name === "crash") {
 		setImmediate(() => process.exit(1));
 		await new Promise(() => {});
+	}
+	if (params.name === "env_status") {
+		return { content: [{ type: "text", text: process.env.LOCAL_TOKEN ? "configured" : "missing" }] };
 	}
 	return { content: [{ type: "text", text: String(params.arguments?.value ?? "") }] };
 });

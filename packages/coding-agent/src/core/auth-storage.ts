@@ -49,7 +49,17 @@ export type McpOAuthCredential = {
 	discoveryState?: OAuthDiscoveryState;
 };
 
-export type AuthCredential = ApiKeyCredential | OAuthCredential | McpOAuthCredential;
+export type McpSecretCredential = {
+	type: "mcp_secret";
+	bearerToken?: string;
+	env?: Record<string, string>;
+};
+
+export function mcpCredentialKey(serverName: string): string {
+	return `mcp:${serverName}`;
+}
+
+export type AuthCredential = ApiKeyCredential | OAuthCredential | McpOAuthCredential | McpSecretCredential;
 
 export type AuthStorageData = Record<string, AuthCredential>;
 

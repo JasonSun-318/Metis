@@ -15,7 +15,7 @@ import { join } from "node:path";
 import { registerOAuthProvider, unregisterOAuthProvider } from "@arcmind/ai/oauth";
 import lockfile from "proper-lockfile";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { AuthStorage } from "../src/core/auth-storage.ts";
+import { AuthStorage, mcpCredentialKey } from "../src/core/auth-storage.ts";
 import { clearConfigValueCache, resolveConfigValueUncached } from "../src/core/resolve-config-value.ts";
 import * as shellModule from "../src/utils/shell.ts";
 
@@ -45,6 +45,23 @@ describe("AuthStorage", () => {
 	function toShPath(value: string): string {
 		return value.replace(/\\/g, "/").replace(/"/g, '\\"');
 	}
+
+	test("round-trips a namespaced MCP static credential without exposing its value in status", () => {
+		const storage = AuthStorage.inMemory();
+		storage.set(mcpCredentialKey("docs"), {
+			type: "mcp_secret",
+			bearerToken: "stored-secret",
+			env: { DOCS_TOKEN: "stdio-secret" },
+		});
+
+		expect(storage.get(mcpCredentialKey("docs"))).toEqual({
+			type: "mcp_secret",
+			bearerToken: "stored-secret",
+			env: { DOCS_TOKEN: "stdio-secret" },
+		});
+		expect(JSON.stringify(storage.getAuthStatus(mcpCredentialKey("docs")))).not.toContain("stored-secret");
+		expect(JSON.stringify(storage.getAuthStatus(mcpCredentialKey("docs")))).not.toContain("stdio-secret");
+	});
 
 	test("supports auth storage beneath an existing symlinked agent directory", ({ skip }) => {
 		const targetDirectory = join(tempDir, "agent-target");
