@@ -64,11 +64,11 @@ function optionalBoolean(value: unknown, key: string, fallback: boolean): boolea
 	return value;
 }
 
-function resolveServer(
+export function resolveMcpServerSettings(
 	name: string,
 	server: McpServerSettings,
 	cwd: string,
-	environment: NodeJS.ProcessEnv,
+	environment: NodeJS.ProcessEnv = process.env,
 ): ResolvedMcpServerConfig {
 	if (!name.trim()) throw new Error("MCP server name must not be empty");
 	if (typeof server !== "object" || server === null || Array.isArray(server)) {
@@ -180,7 +180,7 @@ export function resolveMcpSettings(
 
 	return {
 		servers: Object.entries(settings.getMcpServers()).map(([name, server]) =>
-			resolveServer(name, server, cwd, environment),
+			resolveMcpServerSettings(name, server, cwd, environment),
 		),
 		oauthCallbackPort,
 		oauthCallbackUrl,

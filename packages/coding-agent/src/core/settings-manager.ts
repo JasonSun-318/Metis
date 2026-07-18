@@ -475,6 +475,42 @@ export class SettingsManager {
 		return structuredClone(this.settings.mcpServers ?? {});
 	}
 
+	setMcpServer(scope: SettingsScope, name: string, server: McpServerSettings): void {
+		if (!name.trim()) throw new Error("MCP server name must not be empty");
+		const value = structuredClone(server);
+		if (scope === "global") {
+			this.globalSettings.mcpServers = { ...(this.globalSettings.mcpServers ?? {}), [name]: value };
+			this.markModified("mcpServers", name);
+			this.save();
+			return;
+		}
+		this.updateProjectSettings(
+			"mcpServers",
+			(settings) => {
+				settings.mcpServers = { ...(settings.mcpServers ?? {}), [name]: value };
+			},
+			name,
+		);
+	}
+
+	removeMcpServer(scope: SettingsScope, name: string): boolean {
+		const source = scope === "global" ? this.globalSettings.mcpServers : this.projectSettings.mcpServers;
+		if (!source || !(name in source)) return false;
+		const remove = (settings: Settings) => {
+			const next = { ...(settings.mcpServers ?? {}) };
+			delete next[name];
+			settings.mcpServers = next;
+		};
+		if (scope === "global") {
+			remove(this.globalSettings);
+			this.markModified("mcpServers", name);
+			this.save();
+		} else {
+			this.updateProjectSettings("mcpServers", remove, name);
+		}
+		return true;
+	}
+
 	getMcpOAuthCallbackPort(): number | undefined {
 		return this.settings.mcpOAuthCallbackPort;
 	}
@@ -675,11 +711,11 @@ export class SettingsManager {
 		});
 	}
 
-	private updateProjectSettings(field: keyof Settings, update: (settings: Settings) => void): void {
+	private updateProjectSettings(field: keyof Settings, update: (settings: Settings) => void, nestedKey?: string): void {
 		this.assertProjectTrustedForWrite();
 		const projectSettings = structuredClone(this.projectSettings);
 		update(projectSettings);
-		this.markProjectModified(field);
+		this.markProjectModified(field, nestedKey);
 		this.saveProjectSettings(projectSettings);
 	}
 

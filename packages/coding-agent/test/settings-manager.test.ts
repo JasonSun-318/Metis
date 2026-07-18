@@ -26,6 +26,41 @@ describe("SettingsManager", () => {
 	});
 
 	describe("preserves externally added settings", () => {
+		it("adds and removes one global MCP server without replacing unrelated settings", async () => {
+			const settingsPath = join(agentDir, "settings.json");
+			writeFileSync(
+				settingsPath,
+				JSON.stringify({ theme: "dark", mcpServers: { existing: { command: "existing" } } }),
+			);
+			const manager = SettingsManager.create(projectDir, agentDir);
+
+			manager.setMcpServer("global", "docs", { url: "https://mcp.example.test/mcp" });
+			await manager.flush();
+			let saved = JSON.parse(readFileSync(settingsPath, "utf8"));
+			expect(saved.theme).toBe("dark");
+			expect(saved.mcpServers.docs).toEqual({ url: "https://mcp.example.test/mcp" });
+
+			expect(manager.removeMcpServer("global", "docs")).toBe(true);
+			expect(manager.removeMcpServer("global", "missing")).toBe(false);
+			await manager.flush();
+			saved = JSON.parse(readFileSync(settingsPath, "utf8"));
+			expect(saved.mcpServers).toEqual({ existing: { command: "existing" } });
+		});
+
+		it("refuses project MCP writes until the project is trusted", async () => {
+			const manager = SettingsManager.create(projectDir, agentDir, { projectTrusted: false });
+			expect(() => manager.setMcpServer("project", "local", { command: "node" })).toThrow(
+				"Project is not trusted",
+			);
+
+			manager.setProjectTrusted(true);
+			manager.setMcpServer("project", "local", { command: "node", args: ["server.mjs"] });
+			await manager.flush();
+			expect(JSON.parse(readFileSync(join(projectDir, ".arcmind", "settings.json"), "utf8"))).toMatchObject({
+				mcpServers: { local: { command: "node", args: ["server.mjs"] } },
+			});
+		});
+
 		it("should preserve enabledModels when changing thinking level", async () => {
 			// Create initial settings file
 			const settingsPath = join(agentDir, "settings.json");

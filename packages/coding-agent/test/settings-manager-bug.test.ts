@@ -34,6 +34,25 @@ describe("SettingsManager - External Edit Preservation", () => {
 		}
 	});
 
+	it("preserves an externally added MCP server while changing another", async () => {
+		const settingsPath = join(agentDir, "settings.json");
+		writeFileSync(settingsPath, JSON.stringify({ mcpServers: { first: { command: "one" } } }));
+		const manager = SettingsManager.create(projectDir, agentDir);
+		writeFileSync(
+			settingsPath,
+			JSON.stringify({ mcpServers: { first: { command: "one" }, external: { command: "two" } } }),
+		);
+
+		manager.setMcpServer("global", "third", { command: "three" });
+		await manager.flush();
+
+		expect(JSON.parse(readFileSync(settingsPath, "utf8")).mcpServers).toEqual({
+			first: { command: "one" },
+			external: { command: "two" },
+			third: { command: "three" },
+		});
+	});
+
 	it("should preserve file changes to packages array when changing unrelated setting", async () => {
 		const settingsPath = join(agentDir, "settings.json");
 

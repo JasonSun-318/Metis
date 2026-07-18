@@ -1,8 +1,31 @@
 import { describe, expect, it } from "vitest";
-import { resolveMcpSettings } from "../src/core/mcp/config.ts";
+import { resolveMcpServerSettings, resolveMcpSettings } from "../src/core/mcp/config.ts";
 import { InMemorySettingsStorage, SettingsManager } from "../src/core/settings-manager.ts";
 
 describe("MCP settings", () => {
+	it("resolves one server with the production validation rules", () => {
+		const resolved = resolveMcpServerSettings(
+			"docs",
+			{ command: "node", args: ["server.mjs"], envVars: ["DOCS_TOKEN"] },
+			"/repo",
+			{ DOCS_TOKEN: "secret" },
+		);
+
+		expect(resolved).toMatchObject({
+			name: "docs",
+			transport: "stdio",
+			command: "node",
+			args: ["server.mjs"],
+			env: { DOCS_TOKEN: "secret" },
+		});
+	});
+
+	it("rejects one invalid server before persistence", () => {
+		expect(() => resolveMcpServerSettings("docs", { url: "file:///tmp/mcp" }, "/repo", {})).toThrow(
+			"http or https",
+		);
+	});
+
 	it("merges trusted server entries and resolves safe defaults", () => {
 		const storage = new InMemorySettingsStorage();
 		storage.withLock("global", () =>
