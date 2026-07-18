@@ -48,6 +48,7 @@ type LegacyMcpOAuthCredential = {
 
 export type McpSecretCredential = {
 	type: "mcp_secret";
+	serverFingerprint?: string;
 	bearerToken?: string;
 	env?: Record<string, string>;
 };

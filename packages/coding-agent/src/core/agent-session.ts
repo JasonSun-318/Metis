@@ -1724,6 +1724,10 @@ export class AgentSession {
 		return this._mcpManager?.getStatus() ?? [];
 	}
 
+	getMcpSecretEnvironment(name: string): Record<string, string> {
+		return this._mcpManager?.getSecretEnvironment(name) ?? {};
+	}
+
 	logoutMcpServer(name: string): Promise<void> {
 		if (!this._mcpManager) return Promise.reject(new Error("MCP is not available in this session"));
 		return this._mcpManager.logout(name);

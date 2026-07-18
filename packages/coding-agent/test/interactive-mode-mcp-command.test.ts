@@ -1,7 +1,14 @@
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { Component } from "@arcmind/tui";
 import { beforeAll, describe, expect, it, vi } from "vitest";
+import { AuthStorage, type McpSecretCredential } from "../src/core/auth-storage.ts";
+import { McpManager, type McpServerStatus } from "../src/core/mcp/index.ts";
+import { SettingsManager } from "../src/core/settings-manager.ts";
 import { InteractiveMode } from "../src/modes/interactive/interactive-mode.ts";
 import { initTheme } from "../src/modes/interactive/theme/theme.ts";
+import { createMcpTestServer } from "./helpers/mcp-test-server.ts";
 
 const connectedStatus = {
 	name: "docs",
@@ -14,13 +21,13 @@ const connectedStatus = {
 	resourceTemplateCount: 0,
 	promptCount: 1,
 	capabilities: ["tools", "resources", "prompts"],
-};
+} satisfies McpServerStatus;
 
 function createContext(
 	options: {
 		globalServers?: Record<string, object>;
 		projectServers?: Record<string, object>;
-		statuses?: () => Array<typeof connectedStatus>;
+		statuses?: () => McpServerStatus[];
 	} = {},
 ) {
 	const globalSettings = { mcpServers: { ...(options.globalServers ?? {}) } };
@@ -46,7 +53,15 @@ function createContext(
 		getMcpStatus: vi.fn(options.statuses ?? (() => (globalSettings.mcpServers.docs ? [connectedStatus] : []))),
 		reload: vi.fn().mockResolvedValue(undefined),
 		restartMcpServers: vi.fn().mockResolvedValue(undefined),
-		logoutMcpServer: vi.fn().mockResolvedValue(undefined),
+		logoutMcpServer: vi.fn(async (name: string) => {
+			credentials.delete(`mcp:${name}`);
+		}),
+		getMcpSecretEnvironment: vi.fn((name: string) => {
+			const credential = credentials.get(`mcp:${name}`);
+			return credential !== null && typeof credential === "object" && "env" in credential
+				? { ...((credential as { env?: Record<string, string> }).env ?? {}) }
+				: {};
+		}),
 		setMcpSecret: vi.fn(async (name: string, credential: object) => {
 			credentials.set(`mcp:${name}`, { type: "mcp_secret", ...credential });
 		}),
@@ -204,6 +219,51 @@ describe("InteractiveMode /mcp", () => {
 		expect(JSON.stringify(context.target.showError.mock.calls)).not.toContain("super-secret-value");
 	});
 
+	it("keeps the old credential when environment settings fail to persist", async () => {
+		const context = createContext({ globalServers: { docs: { url: "https://docs.example/mcp" } } });
+		context.credentials.set("mcp:docs", { type: "mcp_secret", bearerToken: "old-secret" });
+		context.settingsManager.flush.mockRejectedValueOnce(new Error("disk full"));
+		context.target.showExtensionSelector
+			.mockResolvedValueOnce("docs · connected · http · 3 tools")
+			.mockResolvedValueOnce("Authentication")
+			.mockResolvedValueOnce("Use environment variable")
+			.mockResolvedValueOnce("Back")
+			.mockResolvedValueOnce("Back")
+			.mockResolvedValueOnce("Close");
+		context.target.showExtensionInput.mockResolvedValueOnce("MCP_TOKEN");
+
+		await handler.call(context.target);
+
+		expect(context.session.deleteMcpCredential).not.toHaveBeenCalled();
+		expect(context.session.logoutMcpServer).not.toHaveBeenCalled();
+		expect(context.credentials.get("mcp:docs")).toMatchObject({ bearerToken: "old-secret" });
+		expect(context.target.showError).toHaveBeenCalledWith("disk full");
+	});
+
+	it("does not report success when an entered token is rejected", async () => {
+		const authRequiredStatus = {
+			...connectedStatus,
+			state: "auth_required" as const,
+			toolCount: 0,
+		};
+		const context = createContext({
+			globalServers: { docs: { url: "https://docs.example/mcp" } },
+			statuses: () => [authRequiredStatus],
+		});
+		context.target.showExtensionSelector
+			.mockResolvedValueOnce("docs · auth_required · http · 0 tools")
+			.mockResolvedValueOnce("Authentication")
+			.mockResolvedValueOnce("Enter token")
+			.mockResolvedValueOnce("Back")
+			.mockResolvedValueOnce("Close");
+		context.target.showExtensionInput.mockResolvedValueOnce("wrong-token");
+
+		await handler.call(context.target);
+
+		expect(context.target.showWarning).toHaveBeenCalledWith('Authentication failed for MCP server "docs"');
+		expect(context.target.showStatus).not.toHaveBeenCalledWith('Updated authentication for MCP server "docs"');
+	});
+
 	it("removes a definition and its credential after confirmation", async () => {
 		const context = createContext({ globalServers: { docs: { url: "https://docs.example/mcp" } } });
 		context.credentials.set("mcp:docs", { type: "mcp_secret", bearerToken: "hidden" });
@@ -237,5 +297,73 @@ describe("InteractiveMode /mcp", () => {
 			.join("\n");
 		expect(rendered).toContain("docs-server/1.0.0");
 		expect(rendered).toContain("Capabilities: tools, resources, prompts");
+	});
+
+	it("persists a TUI-entered token and reconnects after restart", async () => {
+		const root = mkdtempSync(join(tmpdir(), "arcmind-mcp-tui-"));
+		const agentDir = join(root, "agent");
+		const projectDir = join(root, "project");
+		mkdirSync(projectDir, { recursive: true });
+		const server = await createMcpTestServer({ requiredBearerToken: "persisted-secret" });
+		let manager: McpManager | undefined;
+
+		try {
+			const settingsManager = SettingsManager.create(projectDir, agentDir);
+			const authStorage = AuthStorage.create(join(agentDir, "auth.json"));
+			manager = await McpManager.create({ settingsManager, authStorage, cwd: projectDir });
+			const context = createContext();
+			Object.assign(context.target.runtimeHost.session, {
+				settingsManager,
+				getMcpStatus: () => manager!.getStatus(),
+				reload: () => manager!.reload(),
+				restartMcpServers: (name?: string) => manager!.restart(name),
+				logoutMcpServer: (name: string) => manager!.logout(name),
+				getMcpSecretEnvironment: (name: string) => manager!.getSecretEnvironment(name),
+				setMcpSecret: (name: string, credential: Omit<McpSecretCredential, "type">) =>
+					manager!.setSecret(name, credential),
+				deleteMcpCredential: (name: string) => manager!.deleteCredential(name),
+				modelRegistry: { authStorage },
+			});
+			context.target.showExtensionSelector
+				.mockResolvedValueOnce("Add server")
+				.mockResolvedValueOnce("Personal")
+				.mockResolvedValueOnce("Remote URL (HTTP)")
+				.mockResolvedValueOnce("Enter token")
+				.mockResolvedValueOnce("Close");
+			context.target.showExtensionInput
+				.mockResolvedValueOnce("docs")
+				.mockResolvedValueOnce(String(server.url))
+				.mockResolvedValueOnce("persisted-secret");
+
+			await handler.call(context.target);
+
+			expect(manager.getStatus()[0]).toMatchObject({ state: "connected" });
+			expect(await manager.callTool("mcp__docs__search_docs", { query: "before restart" })).toMatchObject({
+				content: [{ type: "text", text: "match:before restart" }],
+			});
+			const settingsText = readFileSync(join(agentDir, "settings.json"), "utf8");
+			const authText = readFileSync(join(agentDir, "auth.json"), "utf8");
+			expect(settingsText).not.toContain("persisted-secret");
+			expect(authText).toContain("persisted-secret");
+			expect(authText).toContain("serverFingerprint");
+			expect(statSync(join(agentDir, "auth.json")).mode & 0o777).toBe(0o600);
+
+			await manager.close();
+			const restartedSettings = SettingsManager.create(projectDir, agentDir);
+			const restartedAuth = AuthStorage.create(join(agentDir, "auth.json"));
+			manager = await McpManager.create({
+				settingsManager: restartedSettings,
+				authStorage: restartedAuth,
+				cwd: projectDir,
+			});
+			expect(manager.getStatus()[0]).toMatchObject({ state: "connected" });
+			expect(await manager.callTool("mcp__docs__search_docs", { query: "after restart" })).toMatchObject({
+				content: [{ type: "text", text: "match:after restart" }],
+			});
+		} finally {
+			await manager?.close();
+			await server.close();
+			rmSync(root, { recursive: true, force: true });
+		}
 	});
 });

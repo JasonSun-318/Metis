@@ -5613,6 +5613,14 @@ export class InteractiveMode {
 		return Boolean(value) && !value.includes("=") && !value.includes("\0");
 	}
 
+	private showMcpConnectionResult(name: string, connectedMessage: string): void {
+		const status = this.session.getMcpStatus().find((item) => item.name === name);
+		if (status?.state === "connected") this.showStatus(connectedMessage);
+		else if (status?.state === "auth_required") this.showWarning(`Authentication failed for MCP server "${name}"`);
+		else if (status?.lastError) this.showError(status.lastError);
+		else this.showWarning(`MCP server "${name}" is ${status?.state ?? "unavailable"}`);
+	}
+
 	private async showMcpAuthenticationMenu(name: string): Promise<void> {
 		while (true) {
 			const definition = this.getMcpDefinition(name);
@@ -5637,7 +5645,7 @@ export class InteractiveMode {
 					const { bearerTokenEnvVar: _bearerTokenEnvVar, ...server } = definition.server as McpHttpServerSettings;
 					await this.persistMcpDefinition(definition.scope, name, server, false);
 					await this.session.setMcpSecret(name, { bearerToken: token });
-					this.showStatus(`Updated authentication for MCP server "${name}"`);
+					this.showMcpConnectionResult(name, `Updated authentication for MCP server "${name}"`);
 					return;
 				}
 				if (selected === "Use environment variable" && http) {
@@ -5647,16 +5655,21 @@ export class InteractiveMode {
 						this.showWarning("Environment variable name must not be empty or contain =");
 						continue;
 					}
-					this.session.deleteMcpCredential(name);
-					await this.persistMcpDefinition(definition.scope, name, {
-						...(definition.server as McpHttpServerSettings),
-						bearerTokenEnvVar: envName,
-					});
+					await this.persistMcpDefinition(
+						definition.scope,
+						name,
+						{
+							...(definition.server as McpHttpServerSettings),
+							bearerTokenEnvVar: envName,
+						},
+						false,
+					);
+					await this.session.logoutMcpServer(name);
 					if (process.env[envName] === undefined) {
 						this.showWarning(
 							`Environment variable ${envName} is not available. Restart ArcMind after setting it.`,
 						);
-					}
+					} else this.showMcpConnectionResult(name, `Updated authentication for MCP server "${name}"`);
 					return;
 				}
 				if (selected === "Set environment variable" && !http) {
@@ -5669,14 +5682,14 @@ export class InteractiveMode {
 					continue;
 				}
 				if (selected === "No authentication") {
-					this.session.deleteMcpCredential(name);
 					const server = http
 						? (({ bearerTokenEnvVar: _bearerTokenEnvVar, ...rest }) => rest)(
 								definition.server as McpHttpServerSettings,
 							)
 						: { ...(definition.server as McpStdioServerSettings), envVars: undefined };
-					await this.persistMcpDefinition(definition.scope, name, server);
-					this.showStatus(`Cleared authentication for MCP server "${name}"`);
+					await this.persistMcpDefinition(definition.scope, name, server, false);
+					await this.session.logoutMcpServer(name);
+					this.showMcpConnectionResult(name, `Cleared authentication for MCP server "${name}"`);
 					return;
 				}
 			} catch (error) {
@@ -5723,15 +5736,13 @@ export class InteractiveMode {
 						},
 						false,
 					);
-					const credential = this.session.modelRegistry.authStorage.get(mcpCredentialKey(name));
-					const existing = credential?.type === "mcp_secret" ? credential.env : undefined;
+					const existing = this.session.getMcpSecretEnvironment(name);
 					await this.session.setMcpSecret(name, { env: { ...existing, [envName]: value } });
-					this.showStatus(`Updated authentication for MCP server "${name}"`);
+					this.showMcpConnectionResult(name, `Updated authentication for MCP server "${name}"`);
 					return true;
 				}
 
-				const credential = this.session.modelRegistry.authStorage.get(mcpCredentialKey(name));
-				const remaining = credential?.type === "mcp_secret" ? { ...(credential.env ?? {}) } : {};
+				const remaining = this.session.getMcpSecretEnvironment(name);
 				delete remaining[envName];
 				const literal = { ...(server.env ?? {}) };
 				delete literal[envName];
@@ -5743,13 +5754,10 @@ export class InteractiveMode {
 					false,
 				);
 				if (Object.keys(remaining).length > 0) await this.session.setMcpSecret(name, { env: remaining });
-				else {
-					this.session.deleteMcpCredential(name);
-					await this.session.reload();
-				}
+				else await this.session.logoutMcpServer(name);
 				if (process.env[envName] === undefined) {
 					this.showWarning(`Environment variable ${envName} is not available. Restart ArcMind after setting it.`);
-				}
+				} else this.showMcpConnectionResult(name, `Updated authentication for MCP server "${name}"`);
 				return true;
 			}
 		}

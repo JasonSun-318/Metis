@@ -33,6 +33,8 @@ Select a configured server in `/mcp` to see its status and catalog counts, open 
 
 `settings.json` stores server definitions and environment-variable references, never values entered in a masked field. `auth.json` is ArcMind's existing credential store; it is protected by filesystem permissions but is not encrypted or backed by an OS keychain. Keep the account and filesystem trusted.
 
+Stored MCP credentials are bound to the configured HTTP URL or the stdio command, arguments, and working directory. Changing that server identity requires authentication again; credentials written by older builds without an identity binding are not forwarded automatically.
+
 Secret values are not placed in model context, MCP status, diagnostics, logs, or `arcmind mcp` output. The target server still receives the credential when ArcMind connects or starts its process.
 
 ## Scriptable configuration

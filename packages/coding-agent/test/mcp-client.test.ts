@@ -94,6 +94,20 @@ describe("McpServerClient", () => {
 		expect(client.status()).toMatchObject({ state: "auth_required" });
 	});
 
+	it("redacts environment-backed HTTP header values from errors", () => {
+		const client = new McpServerClient(
+			httpConfig(new URL("https://mcp.example.test/mcp"), {
+				httpHeaders: { "X-Secret": "header-secret" },
+			}),
+			AuthStorage.inMemory(),
+		);
+		const safeErrorMessage = Reflect.get(client, "safeErrorMessage") as (error: unknown) => string;
+
+		expect(safeErrorMessage.call(client, new Error("request failed: header-secret"))).toBe(
+			"request failed: [REDACTED]",
+		);
+	});
+
 	it("spawns and closes a stdio server", async () => {
 		const client = new McpServerClient(stdioFixtureConfig(), AuthStorage.inMemory());
 		clients.push(client);

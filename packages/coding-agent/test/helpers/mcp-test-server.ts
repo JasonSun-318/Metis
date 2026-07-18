@@ -45,17 +45,6 @@ function page<T>(items: T[], cursor?: string, pageSize = items.length || 1): { i
 }
 
 export async function createMcpTestServer(options: McpTestServerOptions = {}): Promise<McpTestServer> {
-	const server = new Server(
-		{ name: "arcmind-mcp-test", version: "1.0.0" },
-		{
-			capabilities: {
-				tools: { listChanged: true },
-				resources: { listChanged: true },
-				prompts: { listChanged: true },
-			},
-			instructions: options.instructions ?? "Use docs before guessing.",
-		},
-	);
 	let toolCalls = 0;
 	let lastToolCall: string | undefined;
 	let currentTools: Tool[] = options.tools ?? [
@@ -81,39 +70,63 @@ export async function createMcpTestServer(options: McpTestServerOptions = {}): P
 		},
 	];
 
-	server.setRequestHandler(ListToolsRequestSchema, ({ params }) => {
-		const result = page(currentTools, params?.cursor, options.pageSize);
-		return { tools: result.items, nextCursor: result.nextCursor };
-	});
-	server.setRequestHandler(CallToolRequestSchema, async ({ params }) => {
-		toolCalls += 1;
-		lastToolCall = params.name;
-		if (options.closeDuringTool) {
-			void transport.close();
-			throw new Error("test transport closed during tool call");
-		}
-		if (options.callDelayMs) {
-			await new Promise((resolve) => setTimeout(resolve, options.callDelayMs));
-		}
-		return { content: [{ type: "text" as const, text: `match:${String(params.arguments?.query ?? "")}` }] };
-	});
-	server.setRequestHandler(ListResourcesRequestSchema, () => ({ resources: currentResources }));
-	server.setRequestHandler(ListResourceTemplatesRequestSchema, () => ({ resourceTemplates: [] }));
-	server.setRequestHandler(ReadResourceRequestSchema, () => ({
-		contents: [{ uri: "docs://guide", mimeType: "text/plain", text: "guide body" }],
-	}));
-	server.setRequestHandler(ListPromptsRequestSchema, () => ({ prompts: currentPrompts }));
-	server.setRequestHandler(GetPromptRequestSchema, ({ params }) => ({
-		messages: [
+	let transport: StreamableHTTPServerTransport;
+	const createProtocolServer = () => {
+		const next = new Server(
+			{ name: "arcmind-mcp-test", version: "1.0.0" },
 			{
-				role: "user" as const,
-				content: { type: "text" as const, text: `Review ${params.arguments?.target ?? ""}` },
+				capabilities: {
+					tools: { listChanged: true },
+					resources: { listChanged: true },
+					prompts: { listChanged: true },
+				},
+				instructions: options.instructions ?? "Use docs before guessing.",
 			},
-		],
-	}));
-
-	const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: randomUUID });
-	await server.connect(transport);
+		);
+		next.setRequestHandler(ListToolsRequestSchema, ({ params }) => {
+			const result = page(currentTools, params?.cursor, options.pageSize);
+			return { tools: result.items, nextCursor: result.nextCursor };
+		});
+		next.setRequestHandler(CallToolRequestSchema, async ({ params }) => {
+			toolCalls += 1;
+			lastToolCall = params.name;
+			if (options.closeDuringTool) {
+				void transport.close();
+				throw new Error("test transport closed during tool call");
+			}
+			if (options.callDelayMs) {
+				await new Promise((resolve) => setTimeout(resolve, options.callDelayMs));
+			}
+			return { content: [{ type: "text" as const, text: `match:${String(params.arguments?.query ?? "")}` }] };
+		});
+		next.setRequestHandler(ListResourcesRequestSchema, () => ({ resources: currentResources }));
+		next.setRequestHandler(ListResourceTemplatesRequestSchema, () => ({ resourceTemplates: [] }));
+		next.setRequestHandler(ReadResourceRequestSchema, () => ({
+			contents: [{ uri: "docs://guide", mimeType: "text/plain", text: "guide body" }],
+		}));
+		next.setRequestHandler(ListPromptsRequestSchema, () => ({ prompts: currentPrompts }));
+		next.setRequestHandler(GetPromptRequestSchema, ({ params }) => ({
+			messages: [
+				{
+					role: "user" as const,
+					content: { type: "text" as const, text: `Review ${params.arguments?.target ?? ""}` },
+				},
+			],
+		}));
+		return next;
+	};
+	let server: Server;
+	let transportOpen = false;
+	const connectTransport = async () => {
+		server = createProtocolServer();
+		transport = new StreamableHTTPServerTransport({ sessionIdGenerator: randomUUID });
+		transportOpen = true;
+		transport.onclose = () => {
+			transportOpen = false;
+		};
+		await server.connect(transport);
+	};
+	await connectTransport();
 	const httpServer = createServer(async (request, response) => {
 		try {
 			const origin = `http://${request.headers.host}`;
@@ -147,6 +160,10 @@ export async function createMcpTestServer(options: McpTestServerOptions = {}): P
 				response.writeHead(401, { "www-authenticate": challenge }).end("Unauthorized");
 				return;
 			}
+			if (request.method === "POST" && !request.headers["mcp-session-id"] && transport.sessionId) {
+				await server.close();
+			}
+			if (!transportOpen) await connectTransport();
 			await transport.handleRequest(request, response);
 		} catch (error) {
 			if (!response.headersSent) response.writeHead(500);
@@ -161,7 +178,9 @@ export async function createMcpTestServer(options: McpTestServerOptions = {}): P
 
 	return {
 		url: new URL(`http://127.0.0.1:${address.port}/mcp`),
-		server,
+		get server() {
+			return server;
+		},
 		async setTools(names) {
 			currentTools = names.map((name) => ({
 				name,

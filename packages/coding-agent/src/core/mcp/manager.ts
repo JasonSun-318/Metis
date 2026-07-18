@@ -165,6 +165,14 @@ function errorMessage(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
 }
 
+function serverFingerprint(config: ResolvedMcpServerConfig): string {
+	const identity =
+		config.transport === "http"
+			? ["http", config.url?.href]
+			: ["stdio", config.command, config.args ?? [], config.cwd];
+	return createHash("sha256").update(JSON.stringify(identity)).digest("hex");
+}
+
 export class McpManager {
 	private readonly settingsManager: SettingsManager;
 	private readonly authStorage: AuthStorage;
@@ -200,9 +208,16 @@ export class McpManager {
 		);
 	}
 
-	private applyStoredCredential(config: ResolvedMcpServerConfig): ResolvedMcpServerConfig {
+	private storedSecret(config: ResolvedMcpServerConfig): McpSecretCredential | undefined {
 		const credential = this.authStorage.get(mcpCredentialKey(config.name));
-		if (credential?.type !== "mcp_secret") return config;
+		return credential?.type === "mcp_secret" && credential.serverFingerprint === serverFingerprint(config)
+			? credential
+			: undefined;
+	}
+
+	private applyStoredCredential(config: ResolvedMcpServerConfig): ResolvedMcpServerConfig {
+		const credential = this.storedSecret(config);
+		if (!credential) return config;
 		return {
 			...config,
 			bearerToken: credential.bearerToken ?? config.bearerToken,
@@ -382,6 +397,13 @@ export class McpManager {
 		});
 	}
 
+	getSecretEnvironment(server: string): Record<string, string> {
+		const config = this.clientFor(server).resolvedConfig;
+		const credential = this.storedSecret(config);
+		if (!credential) return {};
+		return { ...(credential.env ?? {}) };
+	}
+
 	subscribeCatalog(listener: () => void): () => void {
 		this.catalogListeners.add(listener);
 		return () => this.catalogListeners.delete(listener);
@@ -408,9 +430,20 @@ export class McpManager {
 		if (!credential.bearerToken && environment.length === 0) {
 			throw new Error("MCP secret must contain a bearer token or environment value");
 		}
-		await client.close();
-		this.authStorage.set(mcpCredentialKey(server), { type: "mcp_secret", ...credential });
-		await this.reload();
+		const key = mcpCredentialKey(server);
+		const previous = this.authStorage.get(key);
+		this.authStorage.set(key, {
+			type: "mcp_secret",
+			...credential,
+			serverFingerprint: serverFingerprint(client.resolvedConfig),
+		});
+		try {
+			await this.reload();
+		} catch (error) {
+			if (previous) this.authStorage.set(key, previous);
+			else this.authStorage.remove(key);
+			throw error;
+		}
 	}
 
 	deleteCredential(server: string): void {
@@ -418,10 +451,16 @@ export class McpManager {
 	}
 
 	async logout(server: string): Promise<void> {
-		const client = this.clientFor(server);
-		await client.close();
-		this.deleteCredential(server);
-		await this.reload();
+		this.clientFor(server);
+		const key = mcpCredentialKey(server);
+		const previous = this.authStorage.get(key);
+		this.authStorage.remove(key);
+		try {
+			await this.reload();
+		} catch (error) {
+			if (previous) this.authStorage.set(key, previous);
+			throw error;
+		}
 	}
 
 	async restart(server?: string): Promise<void> {

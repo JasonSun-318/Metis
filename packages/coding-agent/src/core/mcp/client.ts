@@ -111,7 +111,11 @@ export class McpServerClient {
 	}
 
 	private credentialValues(): string[] {
-		const values = [this.config.bearerToken, ...Object.values(this.config.env ?? {})];
+		const values = [
+			this.config.bearerToken,
+			...Object.values(this.config.env ?? {}),
+			...Object.values(this.config.httpHeaders ?? {}),
+		];
 		const credential = this.authStorage.get(mcpCredentialKey(this.config.name));
 		if (credential?.type === "mcp_oauth") {
 			values.push(credential.tokens?.access_token, credential.tokens?.refresh_token);
