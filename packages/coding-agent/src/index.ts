@@ -171,6 +171,7 @@ export {
 } from "./core/extensions/index.ts";
 // Footer data provider (git branch + extension statuses - data not otherwise available to extensions)
 export type { ReadonlyFooterDataProvider } from "./core/footer-data-provider.ts";
+export type { McpConnectionState, McpServerStatus, McpToolRecord } from "./core/mcp/index.ts";
 export { convertToLlm } from "./core/messages.ts";
 export { ModelRegistry } from "./core/model-registry.ts";
 export {
@@ -346,6 +347,10 @@ export {
 	type CompactionSettings,
 	type DefaultProjectTrust,
 	type ImageSettings,
+	type McpCommonServerSettings,
+	type McpHttpServerSettings,
+	type McpServerSettings,
+	type McpStdioServerSettings,
 	type PackageSource,
 	type RetrySettings,
 	SettingsManager,

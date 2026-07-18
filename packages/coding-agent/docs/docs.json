@@ -61,6 +61,10 @@
           "path": "prompt-templates.md"
         },
         {
+          "title": "MCP Servers",
+          "path": "mcp.md"
+        },
+        {
           "title": "Themes",
           "path": "themes.md"
         },

@@ -9,6 +9,7 @@ import { formatNoModelsAvailableMessage } from "./auth-guidance.ts";
 import { AuthStorage } from "./auth-storage.ts";
 import { DEFAULT_THINKING_LEVEL } from "./defaults.ts";
 import type { ExtensionRunner, LoadExtensionsResult, SessionStartEvent, ToolDefinition } from "./extensions/index.ts";
+import { McpManager } from "./mcp/index.ts";
 import { convertToLlm } from "./messages.ts";
 import { ModelRegistry } from "./model-registry.ts";
 import { findInitialModel } from "./model-resolver.ts";
@@ -54,6 +55,8 @@ export interface CreateAgentSessionOptions {
 	authStorage?: AuthStorage;
 	/** Model registry. Default: ModelRegistry.create(authStorage, agentDir/models.json) */
 	modelRegistry?: ModelRegistry;
+	/** Injectable MCP manager. Ownership transfers to AgentSession after successful construction. */
+	mcpManager?: McpManager;
 
 	/** Model to use. Default: from settings, else first available */
 	model?: Model<any>;
@@ -197,6 +200,18 @@ function createWindowsSetupRequester(requester: PermissionRequester | undefined)
 		})) === "allow-once";
 }
 
+function restoredMcpToolNames(sessionManager: SessionManager, manager: McpManager): string[] {
+	const known = new Set(manager.getToolRecords().map((tool) => tool.modelName));
+	const restored = new Set<string>();
+	for (const entry of sessionManager.getBranch()) {
+		if (entry.type !== "message" || entry.message.role !== "toolResult") continue;
+		for (const name of entry.message.addedToolNames ?? []) {
+			if (known.has(name)) restored.add(name);
+		}
+	}
+	return [...restored];
+}
+
 /**
  * Create an AgentSession with the specified options.
  *
@@ -305,9 +320,12 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		throw error;
 	}
 	const ownsSessionManager = suppliedSessionManager === undefined;
+	let mcpManager = options.mcpManager;
+	const ownsMcpManager = mcpManager === undefined;
 	let completed = false;
 
 	try {
+		mcpManager ??= await McpManager.create({ settingsManager, authStorage, cwd });
 		if (!resourceLoader) {
 			resourceLoader = new DefaultResourceLoader({ cwd, agentDir, settingsManager });
 			await resourceLoader.reload();
@@ -378,7 +396,9 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		const excludedToolNameSet = excludedToolNames ? new Set(excludedToolNames) : undefined;
 		const initialActiveToolNames: string[] = (
 			options.tools ? [...options.tools] : options.noTools ? [] : defaultActiveToolNames
-		).filter((name) => !excludedToolNameSet?.has(name));
+		)
+			.concat(mcpManager.getDirectToolNames(), restoredMcpToolNames(sessionManager, mcpManager))
+			.filter((name) => !excludedToolNameSet?.has(name));
 
 		let agent: Agent;
 
@@ -523,6 +543,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			resourceLoader,
 			customTools: options.customTools,
 			modelRegistry,
+			mcpManager,
 			initialActiveToolNames,
 			allowedToolNames,
 			excludedToolNames,
@@ -540,16 +561,19 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 	} finally {
 		if (!completed) {
 			try {
-				if (ownsResourceLoader) resourceLoader?.dispose?.();
+				if (ownsMcpManager) await mcpManager?.close();
 			} finally {
-				// A manager created by the SDK is transferred to AgentSession only on
-				// success. Release its writer lease on every initialization failure.
-				if (ownsSessionManager) {
-					try {
-						sessionManager.close();
-					} finally {
-						if (workspace?.cwdOrigin === "managed") {
-							removeOwnedManagedWorkspace({ id: sessionId!, cwd, cwdOrigin: "managed", agentDir });
+				try {
+					if (ownsResourceLoader) resourceLoader?.dispose?.();
+				} finally {
+					// Managers created by the SDK transfer to AgentSession only on success.
+					if (ownsSessionManager) {
+						try {
+							sessionManager.close();
+						} finally {
+							if (workspace?.cwdOrigin === "managed") {
+								removeOwnedManagedWorkspace({ id: sessionId!, cwd, cwdOrigin: "managed", agentDir });
+							}
 						}
 					}
 				}

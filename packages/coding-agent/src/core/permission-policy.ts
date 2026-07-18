@@ -137,6 +137,10 @@ export interface ClassifyActionInput {
 	provenance: ToolProvenance;
 	args: unknown;
 	cwd: string;
+	mcpAnnotations?: {
+		readOnlyHint?: boolean;
+		destructiveHint?: boolean;
+	};
 }
 
 const RISK_ORDER: readonly ActionRisk[] = [
@@ -174,6 +178,14 @@ const COMMON_SENSITIVE_ENV_FILES = [
 	".env.test",
 	".env.test.local",
 ] as const;
+const MCP_READ_TOOLS = new Set([
+	"tool_search",
+	"list_mcp_resources",
+	"list_mcp_resource_templates",
+	"read_mcp_resource",
+	"list_mcp_prompts",
+	"get_mcp_prompt",
+]);
 
 function record(value: unknown): Record<string, unknown> | undefined {
 	return typeof value === "object" && value !== null && !Array.isArray(value)
@@ -553,7 +565,15 @@ function classifyShell(input: ClassifyActionInput, command: string): ClassifiedA
 }
 
 export function classifyAction(input: ClassifyActionInput): ClassifiedAction {
+	if (input.provenance === "mcp") {
+		if (input.mcpAnnotations?.destructiveHint) {
+			return classified(input, ["destructive", "external-side-effect"]);
+		}
+		if (input.mcpAnnotations?.readOnlyHint) return classified(input, ["ordinary-read"]);
+		return classified(input, ["custom"]);
+	}
 	if (input.provenance !== "builtin") return classified(input, ["custom"]);
+	if (MCP_READ_TOOLS.has(input.toolName)) return classified(input, ["ordinary-read"]);
 	const args = record(input.args);
 	if (!args) return classified(input, ["unknown"]);
 	if (input.toolName === "bash") {

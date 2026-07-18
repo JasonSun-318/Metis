@@ -82,6 +82,7 @@ export {
 	type TurnStartEvent,
 	type WorkingIndicatorOptions,
 } from "./extensions/index.ts";
+export type { McpConnectionState, McpServerStatus, McpToolRecord } from "./mcp/index.ts";
 export {
 	defaultPermissionSettings,
 	isPermissionMode,
@@ -181,4 +182,10 @@ export {
 	resolveNewSessionWorkspace,
 	type SessionWorkspace,
 } from "./session-workspace.ts";
+export type {
+	McpCommonServerSettings,
+	McpHttpServerSettings,
+	McpServerSettings,
+	McpStdioServerSettings,
+} from "./settings-manager.ts";
 export { createSyntheticSourceInfo } from "./source-info.ts";

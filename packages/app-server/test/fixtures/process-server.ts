@@ -34,6 +34,17 @@ SessionManager.prototype.appendRuntimeControl = function (...args) {
 	return result;
 };
 
+// Process recovery tests exercise crash consistency, not interactive permission routing.
+// Make the fixture's new session explicit so extension side effects reach each crash point.
+const createSession = SessionManager.create;
+SessionManager.create = function (cwd, sessionDir, options) {
+	return createSession.call(this, cwd, sessionDir, {
+		...options,
+		permissionMode: "full",
+		reviewerEnabled: false,
+	});
+};
+
 const appendMessage = SessionManager.prototype.appendMessage;
 SessionManager.prototype.appendMessage = function (...args) {
 	const result = appendMessage.apply(this, args);

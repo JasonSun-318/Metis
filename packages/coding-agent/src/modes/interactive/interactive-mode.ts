@@ -2864,6 +2864,11 @@ export class InteractiveMode {
 				this.showWarning("Usage: /dream");
 				return;
 			}
+			if (text === "/mcp" || text.startsWith("/mcp ")) {
+				this.editor.setText("");
+				await this.handleMcpCommand(text);
+				return;
+			}
 			if (text === "/reload") {
 				this.editor.setText("");
 				await this.handleReloadCommand();
@@ -4916,7 +4921,7 @@ export class InteractiveMode {
 
 		for (const providerId of authStorage.list()) {
 			const credential = authStorage.get(providerId);
-			if (!credential) {
+			if (!credential || credential.type === "mcp_oauth") {
 				continue;
 			}
 			options.push({
@@ -5410,6 +5415,90 @@ export class InteractiveMode {
 		this.ui.requestRender();
 	}
 
+	private async handleMcpCommand(text: string): Promise<void> {
+		const [subcommand, server] = text.slice(4).trim().split(/\s+/, 2);
+		if (!subcommand || subcommand === "verbose") {
+			const verbose = subcommand === "verbose";
+			const statuses = this.session.getMcpStatus();
+			let output = `${theme.bold("MCP servers")}\n`;
+			output +=
+				statuses.length === 0
+					? theme.fg("dim", "No MCP servers configured")
+					: statuses
+							.map((status) => {
+								let line = `${status.name} · ${status.state} · ${status.transport} · ${status.toolCount} tools · ${status.resourceCount} resources · ${status.promptCount} prompts`;
+								if (verbose && status.serverInfo) {
+									line += ` · ${status.serverInfo.name}/${status.serverInfo.version}`;
+								}
+								if (verbose && status.capabilities.length > 0) line += ` · ${status.capabilities.join(",")}`;
+								if (status.lastError) line += `\n  ${theme.fg("error", status.lastError)}`;
+								return line;
+							})
+							.join("\n");
+			this.chatContainer.addChild(new Spacer(1));
+			this.chatContainer.addChild(new Text(output, 1, 0));
+			this.ui.requestRender();
+			return;
+		}
+
+		if (this.guardSessionMutation()) return;
+		if (subcommand === "login" && server) {
+			await this.showMcpLogin(server);
+			return;
+		}
+		if (subcommand === "logout" && server) {
+			try {
+				await this.session.logoutMcpServer(server);
+				this.showStatus(`Logged out MCP server "${server}"`);
+			} catch (error) {
+				this.showError(error instanceof Error ? error.message : String(error));
+			}
+			return;
+		}
+		if (subcommand === "restart") {
+			try {
+				await this.session.restartMcpServers(server);
+				this.showStatus(server ? `Restarted MCP server "${server}"` : "Restarted MCP servers");
+			} catch (error) {
+				this.showError(error instanceof Error ? error.message : String(error));
+			}
+			return;
+		}
+		this.showWarning("Usage: /mcp [verbose|login <server>|logout <server>|restart [server]]");
+	}
+
+	private async showMcpLogin(server: string): Promise<void> {
+		const dialog = new LoginDialogComponent(
+			this.ui,
+			`mcp:${server}`,
+			() => {},
+			server,
+			`Login to MCP server ${server}`,
+		);
+		const restoreEditor = () => {
+			this.editorContainer.clear();
+			this.editorContainer.addChild(this.editor);
+			this.ui.setFocus(this.editor);
+			this.ui.requestRender();
+		};
+		this.editorContainer.clear();
+		this.editorContainer.addChild(dialog);
+		this.ui.setFocus(dialog);
+		this.ui.requestRender();
+		try {
+			await this.session.loginMcpServer(server, {
+				signal: dialog.signal,
+				onAuthorize: (url) => dialog.showAuth(String(url), "Complete authorization in your browser."),
+			});
+			restoreEditor();
+			this.showStatus(`Authenticated MCP server "${server}"`);
+		} catch (error) {
+			restoreEditor();
+			const message = error instanceof Error ? error.message : String(error);
+			if (!dialog.signal.aborted && message !== "Login cancelled") this.showError(message);
+		}
+	}
+
 	private async handleReloadCommand(): Promise<void> {
 		if (this.session.isStreaming) {
 			this.showWarning("Wait for the current response to finish before reloading.");
@@ -5430,7 +5519,7 @@ export class InteractiveMode {
 			new Text(
 				theme.fg(
 					"muted",
-					"Reloading keybindings, extensions, skills, prompts, themes, context files, and memory...",
+					"Reloading keybindings, extensions, skills, prompts, themes, context files, memory, and MCP servers...",
 				),
 				1,
 				0,
@@ -5504,8 +5593,8 @@ export class InteractiveMode {
 			}
 			this.showStatus(
 				savedImplicitProjectTrust
-					? "Reloaded keybindings, extensions, skills, prompts, themes, context files, and memory; saved project trust"
-					: "Reloaded keybindings, extensions, skills, prompts, themes, context files, and memory",
+					? "Reloaded keybindings, extensions, skills, prompts, themes, context files, memory, and MCP servers; saved project trust"
+					: "Reloaded keybindings, extensions, skills, prompts, themes, context files, memory, and MCP servers",
 			);
 			dismissReloadBox(this.editor as Component);
 			reloadBoxDismissed = true;

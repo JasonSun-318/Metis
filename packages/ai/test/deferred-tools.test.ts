@@ -8,6 +8,7 @@ interface AnthropicToolPayload {
 	name: string;
 	description?: string;
 	defer_loading?: boolean;
+	input_schema?: unknown;
 }
 
 interface AnthropicContentBlock {
@@ -41,11 +42,11 @@ interface OpenAIToolSearchOutput {
 	call_id?: string | null;
 	execution?: string;
 	status?: string | null;
-	tools: Array<{ type: string; name: string; defer_loading?: boolean }>;
+	tools: Array<{ type: string; name: string; defer_loading?: boolean; parameters?: unknown }>;
 }
 
 interface OpenAIPayload {
-	tools?: Array<{ name?: string; function?: { name: string } }>;
+	tools?: Array<{ name?: string; parameters?: unknown; function?: { name: string; parameters?: unknown } }>;
 	input?: Array<OpenAIToolSearchCall | OpenAIToolSearchOutput | { type?: string }>;
 }
 
@@ -140,6 +141,48 @@ function makeCodexToken(): string {
 }
 
 describe("deferred tools", () => {
+	it("preserves a complete MCP schema across OpenAI, Anthropic, and ordinary fallback loading", async () => {
+		const mcpTool: Tool = {
+			name: "mcp__docs__search_docs",
+			description: "Search product documentation",
+			parameters: Type.Object({ query: Type.String() }),
+		};
+		const context = makeContext([makeTool("tool_search"), mcpTool], [mcpTool.name]);
+		const assistant = context.messages[1] as AssistantMessage;
+		assistant.content = [{ type: "toolCall", id: "call_1", name: "tool_search", arguments: { query: "docs" } }];
+		const result = context.messages[2] as ToolResultMessage;
+		result.toolName = "tool_search";
+
+		const openai = await capturePayload<OpenAIPayload>(getModel("openai", "gpt-5.4"), context);
+		const searchOutput = openai.input?.find(
+			(item): item is OpenAIToolSearchOutput => item.type === "tool_search_output",
+		);
+		expect(searchOutput?.tools).toMatchObject([
+			{
+				name: mcpTool.name,
+				defer_loading: true,
+				parameters: { properties: { query: { type: "string" } }, required: ["query"] },
+			},
+		]);
+
+		const anthropic = await capturePayload<AnthropicPayload>(getModel("anthropic", "claude-opus-4-6"), context);
+		expect(anthropic.tools?.find((tool) => tool.name === mcpTool.name)).toMatchObject({
+			defer_loading: true,
+			input_schema: { properties: { query: { type: "string" } }, required: ["query"] },
+		});
+		expect(findAnthropicToolResult(anthropic).content).toEqual([{ type: "tool_reference", tool_name: mcpTool.name }]);
+
+		const fallbackModel: Model<"openai-responses"> = {
+			...getModel("openai", "gpt-5.4"),
+			provider: "openai-proxy",
+			compat: { supportsToolSearch: false },
+		};
+		const fallback = await capturePayload<OpenAIPayload>(fallbackModel, context);
+		expect(fallback.tools?.find((tool) => tool.name === mcpTool.name)).toMatchObject({
+			parameters: { properties: { query: { type: "string" } }, required: ["query"] },
+		});
+	});
+
 	it("loads an Anthropic tool at its tool-result marker", async () => {
 		const context = makeContext([makeTool("base_tool"), makeTool("late_tool")]);
 		const payload = await capturePayload<AnthropicPayload>(getModel("anthropic", "claude-opus-4-6"), context);

@@ -15,6 +15,8 @@ import {
 	type OAuthProviderInterface,
 } from "@arcmind/ai/compat";
 import { getOAuthProviders as getCompatibilityOAuthProviders } from "@arcmind/ai/oauth";
+import type { OAuthDiscoveryState } from "@modelcontextprotocol/sdk/client/auth.js";
+import type { OAuthClientInformationMixed, OAuthTokens } from "@modelcontextprotocol/sdk/shared/auth.js";
 import { existsSync } from "fs";
 import { dirname, join } from "path";
 import lockfile from "proper-lockfile";
@@ -39,7 +41,15 @@ export type OAuthCredential = {
 	type: "oauth";
 } & OAuthCredentials;
 
-export type AuthCredential = ApiKeyCredential | OAuthCredential;
+export type McpOAuthCredential = {
+	type: "mcp_oauth";
+	tokens?: OAuthTokens;
+	clientInformation?: OAuthClientInformationMixed;
+	codeVerifier?: string;
+	discoveryState?: OAuthDiscoveryState;
+};
+
+export type AuthCredential = ApiKeyCredential | OAuthCredential | McpOAuthCredential;
 
 export type AuthStorageData = Record<string, AuthCredential>;
 

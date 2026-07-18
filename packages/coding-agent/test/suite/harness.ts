@@ -12,6 +12,7 @@ import { registerFauxProvider } from "@arcmind/ai/compat";
 import { AgentSession, type AgentSessionEvent } from "../../src/core/agent-session.ts";
 import { AuthStorage } from "../../src/core/auth-storage.ts";
 import type { ExtensionRunner } from "../../src/core/extensions/index.ts";
+import type { McpManager } from "../../src/core/mcp/index.ts";
 import { convertToLlm } from "../../src/core/messages.ts";
 import { ModelRegistry } from "../../src/core/model-registry.ts";
 import type { PermissionSettings } from "../../src/core/permission-mode.ts";
@@ -73,6 +74,7 @@ export interface HarnessOptions {
 	requestPermissionApproval?: RequestPermissionApproval;
 	permissionReviewerStream?: PermissionReviewerStream;
 	sandboxRuntime?: SandboxRuntimeCoordinator;
+	mcpManager?: McpManager;
 }
 
 export interface Harness {
@@ -183,6 +185,7 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
 		settingsManager,
 		cwd: tempDir,
 		modelRegistry,
+		mcpManager: options.mcpManager,
 		resourceLoader,
 		baseToolsOverride: toolMap,
 		initialActiveToolNames: options.initialActiveToolNames,

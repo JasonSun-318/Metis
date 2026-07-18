@@ -203,4 +203,31 @@ describe("permission reviewer", () => {
 		});
 		expect(requestApproval).not.toHaveBeenCalled();
 	});
+
+	it("classifies MCP annotations and direct discovery tools", () => {
+		const mcpInput = (mcpAnnotations: { readOnlyHint?: boolean; destructiveHint?: boolean } | undefined) => ({
+			actionId: "action",
+			toolName: "mcp__docs__tool",
+			provenance: "mcp" as const,
+			args: {},
+			cwd,
+			mcpAnnotations,
+		});
+
+		expect(classifyAction(mcpInput({ readOnlyHint: true })).risks).toEqual(["ordinary-read"]);
+		expect(classifyAction(mcpInput({ destructiveHint: true })).risks).toEqual([
+			"destructive",
+			"external-side-effect",
+		]);
+		expect(classifyAction(mcpInput(undefined)).risks).toEqual(["custom"]);
+		expect(
+			classifyAction({
+				actionId: "action",
+				toolName: "tool_search",
+				provenance: "builtin",
+				args: { query: "docs" },
+				cwd,
+			}).risks,
+		).toEqual(["ordinary-read"]);
+	});
 });

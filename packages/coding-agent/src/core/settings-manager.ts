@@ -59,6 +59,33 @@ export type DefaultProjectTrust = "ask" | "always" | "never";
 
 export type TransportSetting = Transport;
 
+export interface McpCommonServerSettings {
+	enabled?: boolean;
+	required?: boolean;
+	startupTimeoutSec?: number;
+	toolTimeoutSec?: number;
+	enabledTools?: string[];
+	disabledTools?: string[];
+}
+
+export interface McpStdioServerSettings extends McpCommonServerSettings {
+	command: string;
+	args?: string[];
+	env?: Record<string, string>;
+	envVars?: string[];
+	cwd?: string;
+	url?: never;
+}
+
+export interface McpHttpServerSettings extends McpCommonServerSettings {
+	url: string;
+	bearerTokenEnvVar?: string;
+	envHttpHeaders?: Record<string, string>;
+	command?: never;
+}
+
+export type McpServerSettings = McpStdioServerSettings | McpHttpServerSettings;
+
 /**
  * Package source for npm/git packages.
  * - String form: load all resources from the package
@@ -120,6 +147,9 @@ export interface Settings {
 	httpProxy?: string; // Proxy URL applied as HTTP_PROXY and HTTPS_PROXY for ArcMind-managed HTTP clients
 	httpIdleTimeoutMs?: number; // HTTP header/body idle timeout in milliseconds; 0 disables it
 	websocketConnectTimeoutMs?: number; // WebSocket connect/open handshake timeout in milliseconds; 0 disables it
+	mcpServers?: Record<string, McpServerSettings>;
+	mcpOAuthCallbackPort?: number;
+	mcpOAuthCallbackUrl?: string;
 }
 
 /** Deep merge settings: project/overrides take precedence, nested objects merge recursively */
@@ -439,6 +469,18 @@ export class SettingsManager {
 
 	getProjectSettings(): Settings {
 		return structuredClone(this.projectSettings);
+	}
+
+	getMcpServers(): Record<string, McpServerSettings> {
+		return structuredClone(this.settings.mcpServers ?? {});
+	}
+
+	getMcpOAuthCallbackPort(): number | undefined {
+		return this.settings.mcpOAuthCallbackPort;
+	}
+
+	getMcpOAuthCallbackUrl(): string | undefined {
+		return this.settings.mcpOAuthCallbackUrl;
 	}
 
 	isProjectTrusted(): boolean {

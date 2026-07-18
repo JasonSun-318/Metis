@@ -95,6 +95,12 @@ import {
 import { emitSessionShutdownEvent } from "./extensions/runner.ts";
 import { externalizeLargeToolOutput, type PersistedToolOutput } from "./large-tool-output.ts";
 import {
+	createMcpToolDefinitions,
+	type McpLoginCallbacks,
+	type McpManager,
+	type McpServerStatus,
+} from "./mcp/index.ts";
+import {
 	type DreamActiveRun,
 	type DreamHistoryRecord,
 	type DreamStatusSnapshot,
@@ -222,6 +228,8 @@ export interface AgentSessionConfig {
 	customTools?: ToolDefinition[];
 	/** Model registry for API key resolution and model discovery */
 	modelRegistry: ModelRegistry;
+	/** MCP manager. A successfully constructed session owns and disposes it. */
+	mcpManager?: McpManager;
 	/** Initial active built-in tool names. Default: [read, grep, bash, edit, write] */
 	initialActiveToolNames?: string[];
 	/** Optional allowlist of tool names. When provided, only these tool names are exposed. */
@@ -470,6 +478,9 @@ export class AgentSession {
 	private _disposeCoreComplete = false;
 	private _resourceLoaderDisposed = false;
 	private _sessionManagerClosed = false;
+	private readonly _mcpManager?: McpManager;
+	private _unsubscribeMcpCatalog?: () => void;
+	private _mcpManagerDisposed = false;
 
 	// Model registry for API key resolution
 	private _modelRegistry: ModelRegistry;
@@ -500,6 +511,7 @@ export class AgentSession {
 		this._cwd = config.cwd;
 		this._agentDir = config.agentDir;
 		this._modelRegistry = config.modelRegistry;
+		this._mcpManager = config.mcpManager;
 		this._extensionRunnerRef = config.extensionRunnerRef;
 		this._initialActiveToolNames = config.initialActiveToolNames;
 		this._allowedToolNames = config.allowedToolNames ? new Set(config.allowedToolNames) : undefined;
@@ -528,6 +540,9 @@ export class AgentSession {
 		this._buildRuntime({
 			activeToolNames: this._initialActiveToolNames,
 			includeAllExtensionTools: true,
+		});
+		this._unsubscribeMcpCatalog = this._mcpManager?.subscribeCatalog(() => {
+			this._refreshToolRegistry({ activeToolNames: this.getActiveToolNames() });
 		});
 	}
 
@@ -681,6 +696,7 @@ export class AgentSession {
 			provenance: input.provenance,
 			args: input.args,
 			cwd,
+			mcpAnnotations: input.provenance === "mcp" ? this._mcpManager?.getToolAnnotations(input.toolName) : undefined,
 		});
 		if (input.effectiveCommand !== undefined) action = { ...action, command: input.effectiveCommand };
 		const settings = this.sessionManager.getPermissionSettings();
@@ -1610,6 +1626,17 @@ export class AgentSession {
 			}
 		}
 
+		if (!this._mcpManagerDisposed) {
+			try {
+				this._unsubscribeMcpCatalog?.();
+				this._unsubscribeMcpCatalog = undefined;
+				this._mcpManager?.dispose();
+				this._mcpManagerDisposed = true;
+			} catch (error) {
+				errors.push(error);
+			}
+		}
+
 		if (!this._sessionManagerClosed) {
 			try {
 				// Release the cross-process writer lease only after agent and extension activity stops.
@@ -1695,6 +1722,25 @@ export class AgentSession {
 	 */
 	getActiveToolNames(): string[] {
 		return this.agent.state.tools.map((t) => t.name);
+	}
+
+	getMcpStatus(): McpServerStatus[] {
+		return this._mcpManager?.getStatus() ?? [];
+	}
+
+	loginMcpServer(name: string, callbacks: McpLoginCallbacks): Promise<void> {
+		if (!this._mcpManager) return Promise.reject(new Error("MCP is not available in this session"));
+		return this._mcpManager.login(name, callbacks);
+	}
+
+	logoutMcpServer(name: string): Promise<void> {
+		if (!this._mcpManager) return Promise.reject(new Error("MCP is not available in this session"));
+		return this._mcpManager.logout(name);
+	}
+
+	restartMcpServers(name?: string): Promise<void> {
+		if (!this._mcpManager) return Promise.reject(new Error("MCP is not available in this session"));
+		return this._mcpManager.restart(name);
 	}
 
 	/**
@@ -3662,6 +3708,12 @@ export class AgentSession {
 				sourceInfo: createSyntheticSourceInfo(`<sdk:${definition.name}>`, { source: "sdk" }),
 			})),
 		].filter((tool) => isAllowedTool(tool.definition.name));
+		const mcpTools = this._mcpManager
+			? createMcpToolDefinitions(this._mcpManager, this)
+			: { direct: [], deferred: [] };
+		const directMcpTools = mcpTools.direct.filter((definition) => isAllowedTool(definition.name));
+		const deferredMcpTools = mcpTools.deferred.filter(({ definition }) => isAllowedTool(definition.name));
+		const deferredMcpNames = new Set(deferredMcpTools.map(({ definition }) => definition.name));
 		const definitionRegistry = new Map<string, ToolDefinitionEntry>(
 			Array.from(this._baseToolDefinitions.entries())
 				.filter(([name]) => isAllowedTool(name))
@@ -3677,6 +3729,20 @@ export class AgentSession {
 			definitionRegistry.set(tool.definition.name, {
 				definition: tool.definition,
 				sourceInfo: tool.sourceInfo,
+			});
+		}
+		for (const definition of directMcpTools) {
+			definitionRegistry.set(definition.name, {
+				definition: definition as ToolDefinition,
+				sourceInfo: createSyntheticSourceInfo(`<builtin:${definition.name}>`, { source: "builtin" }),
+			});
+		}
+		for (const { definition, serverName } of deferredMcpTools) {
+			definitionRegistry.set(definition.name, {
+				definition: definition as ToolDefinition,
+				sourceInfo: createSyntheticSourceInfo(`<mcp:${serverName}:${definition.name}>`, {
+					source: `mcp:${serverName}`,
+				}),
 			});
 		}
 		this._toolDefinitions = definitionRegistry;
@@ -3709,6 +3775,22 @@ export class AgentSession {
 				})),
 			runner,
 		);
+		const wrappedDirectMcpTools = wrapRegisteredTools(
+			directMcpTools.map((definition) => ({
+				definition: definition as ToolDefinition,
+				sourceInfo: createSyntheticSourceInfo(`<builtin:${definition.name}>`, { source: "builtin" }),
+			})),
+			runner,
+		);
+		const wrappedDeferredMcpTools = wrapRegisteredTools(
+			deferredMcpTools.map(({ definition, serverName }) => ({
+				definition: definition as ToolDefinition,
+				sourceInfo: createSyntheticSourceInfo(`<mcp:${serverName}:${definition.name}>`, {
+					source: `mcp:${serverName}`,
+				}),
+			})),
+			runner,
+		);
 
 		const toolRegistry = new Map(
 			wrappedBuiltInTools.map((tool) => {
@@ -3717,6 +3799,10 @@ export class AgentSession {
 			}),
 		);
 		for (const tool of wrappedExtensionTools as AgentTool[]) {
+			const guarded = this._withPermissionGuard(tool);
+			toolRegistry.set(guarded.name, guarded);
+		}
+		for (const tool of [...wrappedDirectMcpTools, ...wrappedDeferredMcpTools]) {
 			const guarded = this._withPermissionGuard(tool);
 			toolRegistry.set(guarded.name, guarded);
 		}
@@ -3738,11 +3824,12 @@ export class AgentSession {
 			}
 		} else if (!options?.activeToolNames) {
 			for (const toolName of this._toolRegistry.keys()) {
-				if (!previousRegistryNames.has(toolName)) {
+				if (!previousRegistryNames.has(toolName) && !deferredMcpNames.has(toolName)) {
 					nextActiveToolNames.push(toolName);
 				}
 			}
 		}
+		for (const tool of wrappedDirectMcpTools) nextActiveToolNames.push(tool.name);
 
 		this.setActiveToolsByName([...new Set(nextActiveToolNames)]);
 	}
@@ -3812,6 +3899,7 @@ export class AgentSession {
 		const previousFlagValues = this._extensionRunner.getFlagValues();
 		await emitSessionShutdownEvent(this._extensionRunner, { type: "session_shutdown", reason: "reload" });
 		await this.settingsManager.reload();
+		await this._mcpManager?.reload();
 		this.syncQueueModesFromSettings();
 		this._modelRegistry.resetExtensionProviders();
 		this._refreshCurrentModelFromRegistry();
