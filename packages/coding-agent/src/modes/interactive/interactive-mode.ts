@@ -5306,6 +5306,7 @@ export class InteractiveMode {
 
 		// Restore editor helper
 		const restoreEditor = () => {
+			dialog.dispose();
 			this.editorContainer.clear();
 			this.editorContainer.addChild(this.editor);
 			this.ui.setFocus(this.editor);

@@ -6,18 +6,9 @@ import type {
 	Tool,
 	ToolAnnotations,
 } from "@modelcontextprotocol/sdk/types.js";
-import {
-	type AuthStorage,
-	type McpSecretCredential,
-	mcpCredentialKey,
-} from "../auth-storage.ts";
+import { type AuthStorage, type McpSecretCredential, mcpCredentialKey } from "../auth-storage.ts";
 import type { SettingsManager } from "../settings-manager.ts";
-import {
-	type McpAuthRequirement,
-	type McpConnectionState,
-	type McpLoginCallbacks,
-	McpServerClient,
-} from "./client.ts";
+import { type McpAuthRequirement, type McpConnectionState, type McpLoginCallbacks, McpServerClient } from "./client.ts";
 import { type ResolvedMcpServerConfig, type ResolvedMcpSettings, resolveMcpSettings } from "./config.ts";
 
 const MAX_TOOL_NAME = 64;
@@ -388,12 +379,12 @@ export class McpManager {
 				serverInfo: snapshot.serverInfo,
 				toolCount: snapshot.tools.length,
 				resourceCount: snapshot.resources.length,
-					resourceTemplateCount: snapshot.resourceTemplates.length,
-					promptCount: snapshot.prompts.length,
-					capabilities: Object.keys(snapshot.capabilities).sort(),
-					lastError: status.lastError,
-					authRequirement: status.authRequirement,
-				};
+				resourceTemplateCount: snapshot.resourceTemplates.length,
+				promptCount: snapshot.prompts.length,
+				capabilities: Object.keys(snapshot.capabilities).sort(),
+				lastError: status.lastError,
+				authRequirement: status.authRequirement,
+			};
 		});
 	}
 

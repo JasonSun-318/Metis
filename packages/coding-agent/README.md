@@ -464,7 +464,7 @@ See [docs/rpc.md](docs/rpc.md) for the protocol.
 
 ArcMind is aggressively extensible so it doesn't have to dictate your workflow. Features that other tools bake in can be built with [extensions](#extensions), [skills](#skills), or installed from third-party [arcmind packages](#arcmind-packages). This keeps the core minimal while letting you shape arcmind to fit how you work.
 
-**MCP:** Connect trusted stdio and Streamable HTTP servers with OAuth, resources, prompts, permission-aware calls, and Codex-style lazy tool discovery. See [docs/mcp.md](docs/mcp.md).
+**MCP:** Run `/mcp` to add and authenticate trusted stdio or Streamable HTTP servers without editing JSON. ArcMind supports OAuth, resources, prompts, permission-aware calls, and Codex-style lazy tool discovery. See [docs/mcp.md](docs/mcp.md).
 
 **No sub-agents.** There's many ways to do this. Spawn arcmind instances via tmux, or build your own with [extensions](#extensions), or install a package that does it your way.
 

@@ -124,9 +124,7 @@ export async function createMcpTestServer(options: McpTestServerOptions = {}): P
 					requestUrl.pathname === "/.well-known/oauth-protected-resource/mcp")
 			) {
 				response.writeHead(200, { "content-type": "application/json" });
-				response.end(
-					JSON.stringify({ resource: `${origin}/mcp`, authorization_servers: [origin] }),
-				);
+				response.end(JSON.stringify({ resource: `${origin}/mcp`, authorization_servers: [origin] }));
 				return;
 			}
 			if (options.advertiseOAuth && requestUrl.pathname === "/.well-known/oauth-authorization-server") {
@@ -142,10 +140,7 @@ export async function createMcpTestServer(options: McpTestServerOptions = {}): P
 				);
 				return;
 			}
-			if (
-				options.requiredBearerToken &&
-				request.headers.authorization !== `Bearer ${options.requiredBearerToken}`
-			) {
+			if (options.requiredBearerToken && request.headers.authorization !== `Bearer ${options.requiredBearerToken}`) {
 				const challenge = options.advertiseOAuth
 					? `Bearer resource_metadata="${origin}/.well-known/oauth-protected-resource"`
 					: "Bearer";

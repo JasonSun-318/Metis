@@ -711,7 +711,11 @@ export class SettingsManager {
 		});
 	}
 
-	private updateProjectSettings(field: keyof Settings, update: (settings: Settings) => void, nestedKey?: string): void {
+	private updateProjectSettings(
+		field: keyof Settings,
+		update: (settings: Settings) => void,
+		nestedKey?: string,
+	): void {
 		this.assertProjectTrustedForWrite();
 		const projectSettings = structuredClone(this.projectSettings);
 		update(projectSettings);

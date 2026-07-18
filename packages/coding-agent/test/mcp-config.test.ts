@@ -21,9 +21,7 @@ describe("MCP settings", () => {
 	});
 
 	it("rejects one invalid server before persistence", () => {
-		expect(() => resolveMcpServerSettings("docs", { url: "file:///tmp/mcp" }, "/repo", {})).toThrow(
-			"http or https",
-		);
+		expect(() => resolveMcpServerSettings("docs", { url: "file:///tmp/mcp" }, "/repo", {})).toThrow("http or https");
 	});
 
 	it("merges trusted server entries and resolves safe defaults", () => {

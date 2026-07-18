@@ -38,11 +38,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	{ name: "resume", description: "Resume a different session" },
 	{ name: "memory", description: "Show or toggle long-term memory", argumentHint: "[on|off]" },
 	{ name: "dream", description: "Show Dream status and recent memory-maintenance history" },
-	{
-		name: "mcp",
-		description: "Show or manage MCP servers",
-		argumentHint: "[verbose|login <server>|logout <server>|restart [server]]",
-	},
+	{ name: "mcp", description: "Open MCP server manager" },
 	{ name: "reload", description: "Reload resources, context files, and memory" },
 	{ name: "quit", description: `Quit ${APP_NAME}` },
 ];

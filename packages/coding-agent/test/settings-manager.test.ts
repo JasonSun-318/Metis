@@ -49,9 +49,7 @@ describe("SettingsManager", () => {
 
 		it("refuses project MCP writes until the project is trusted", async () => {
 			const manager = SettingsManager.create(projectDir, agentDir, { projectTrusted: false });
-			expect(() => manager.setMcpServer("project", "local", { command: "node" })).toThrow(
-				"Project is not trusted",
-			);
+			expect(() => manager.setMcpServer("project", "local", { command: "node" })).toThrow("Project is not trusted");
 
 			manager.setProjectTrusted(true);
 			manager.setMcpServer("project", "local", { command: "node", args: ["server.mjs"] });

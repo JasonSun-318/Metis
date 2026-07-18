@@ -1,10 +1,14 @@
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ENV_AGENT_DIR } from "../src/config.ts";
 import { AuthStorage, mcpCredentialKey } from "../src/core/auth-storage.ts";
+import { McpManager } from "../src/core/mcp/index.ts";
+import { SettingsManager } from "../src/core/settings-manager.ts";
 import { handleMcpCliCommand } from "../src/mcp-cli.ts";
+import { createMcpTestServer } from "./helpers/mcp-test-server.ts";
 
 describe("MCP CLI", () => {
 	let tempDir: string;
@@ -129,5 +133,68 @@ describe("MCP CLI", () => {
 		expect(output).toContain("<redacted>");
 		expect(output).not.toContain("settings-secret");
 		expect(process.exitCode).toBeUndefined();
+	});
+
+	it("writes a stdio definition that the production runtime starts and calls", async () => {
+		const fixture = fileURLToPath(new URL("./fixtures/mcp-stdio-server.mjs", import.meta.url));
+		await handleMcpCliCommand(["mcp", "add", "fixture", "--", process.execPath, fixture]);
+		const manager = await McpManager.create({
+			settingsManager: SettingsManager.create(projectDir, agentDir),
+			authStorage: AuthStorage.inMemory(),
+			cwd: projectDir,
+		});
+
+		try {
+			expect(manager.getStatus()[0]).toMatchObject({ state: "connected", toolCount: 3 });
+			const result = await manager.callTool("mcp__fixture__echo", { value: "configured-by-cli" });
+			expect(result.content).toContainEqual({ type: "text", text: "configured-by-cli" });
+		} finally {
+			await manager.close();
+		}
+	});
+
+	it("closes the stored-token HTTP lifecycle without exposing or orphaning the secret", async () => {
+		const secret = "stored-secret";
+		const server = await createMcpTestServer({ requiredBearerToken: secret });
+		const authPath = join(agentDir, "auth.json");
+		const authStorage = AuthStorage.create(authPath);
+		await handleMcpCliCommand(["mcp", "add", "protected", "--url", String(server.url)]);
+		let manager = await McpManager.create({
+			settingsManager: SettingsManager.create(projectDir, agentDir),
+			authStorage,
+			cwd: projectDir,
+		});
+
+		try {
+			expect(manager.getStatus()[0]).toMatchObject({ state: "auth_required", authRequirement: "token" });
+			expect(JSON.stringify(manager.getStatus())).not.toContain(secret);
+
+			await manager.setSecret("protected", { bearerToken: secret });
+			expect(manager.getStatus()[0]).toMatchObject({ state: "connected" });
+			const result = await manager.callTool("mcp__protected__search_docs", { query: "closed loop" });
+			expect(result.content).toContainEqual({ type: "text", text: "match:closed loop" });
+			expect(JSON.stringify({ status: manager.getStatus(), result })).not.toContain(secret);
+
+			await manager.logout("protected");
+			expect(manager.getStatus()[0]).toMatchObject({ state: "auth_required", authRequirement: "token" });
+			expect(authStorage.has(mcpCredentialKey("protected"))).toBe(false);
+
+			await manager.setSecret("protected", { bearerToken: secret });
+			expect(authStorage.has(mcpCredentialKey("protected"))).toBe(true);
+			await manager.close();
+			await handleMcpCliCommand(["mcp", "remove", "protected"]);
+
+			manager = await McpManager.create({
+				settingsManager: SettingsManager.create(projectDir, agentDir),
+				authStorage: AuthStorage.create(authPath),
+				cwd: projectDir,
+			});
+			expect(manager.getStatus()).toEqual([]);
+			expect(AuthStorage.create(authPath).has(mcpCredentialKey("protected"))).toBe(false);
+			expect(readFileSync(join(agentDir, "settings.json"), "utf8")).not.toContain(secret);
+		} finally {
+			await manager.close();
+			await server.close();
+		}
 	});
 });
