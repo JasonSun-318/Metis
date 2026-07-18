@@ -4,6 +4,25 @@ import { Input } from "../src/components/input.ts";
 import { visibleWidth } from "../src/utils.ts";
 
 describe("Input component", () => {
+	it("masks rendered text while preserving the submitted value", () => {
+		const input = new Input({ mask: "•" });
+		input.focused = true;
+		input.handleInput("secret-value");
+		const rendered = input.render(40).join("\n");
+
+		assert.strictEqual(input.getValue(), "secret-value");
+		assert.ok(!rendered.includes("secret-value"));
+		assert.ok(rendered.includes("••••••••••••"));
+	});
+
+	it("masks one cell per grapheme", () => {
+		const input = new Input({ mask: "•" });
+		input.handleInput("a😀b");
+
+		assert.strictEqual(input.getValue(), "a😀b");
+		assert.ok(input.render(20).join("\n").includes("•••"));
+	});
+
 	it("submits value including backslash on Enter", () => {
 		const input = new Input();
 		let submitted: string | undefined;

@@ -2287,7 +2287,7 @@ export class InteractiveMode {
 	private showExtensionInput(
 		title: string,
 		placeholder?: string,
-		opts?: ExtensionUIDialogOptions,
+		opts?: ExtensionUIDialogOptions & { secret?: boolean },
 	): Promise<string | undefined> {
 		return new Promise((resolve) => {
 			if (opts?.signal?.aborted) {
@@ -2314,7 +2314,7 @@ export class InteractiveMode {
 					this.hideExtensionInput();
 					resolve(undefined);
 				},
-				{ tui: this.ui, timeout: opts?.timeout },
+				{ tui: this.ui, timeout: opts?.timeout, secret: opts?.secret },
 			);
 
 			this.editorContainer.clear();
