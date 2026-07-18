@@ -1,5 +1,5 @@
 import { getOAuthProviders, type OAuthDeviceCodeInfo } from "@arcmind/ai/oauth";
-import { Container, type Focusable, getKeybindings, Input, Spacer, Text, type TUI } from "@arcmind/tui";
+import { Container, type Focusable, getKeybindings, Input, Loader, Spacer, Text, type TUI } from "@arcmind/tui";
 import { openBrowser } from "../../../utils/open-browser.ts";
 import { theme } from "../theme/theme.ts";
 import { DynamicBorder } from "./dynamic-border.ts";
@@ -16,6 +16,7 @@ export class LoginDialogComponent extends Container implements Focusable {
 	private inputResolver?: (value: string) => void;
 	private inputRejecter?: (error: Error) => void;
 	private onComplete: (success: boolean, message?: string) => void;
+	private loader?: Loader;
 
 	// Focusable implementation - propagate to input for IME cursor positioning
 	private _focused = false;
@@ -82,6 +83,7 @@ export class LoginDialogComponent extends Container implements Focusable {
 	}
 
 	private cancel(): void {
+		this.stopLoader();
 		this.abortController.abort();
 		if (this.inputRejecter) {
 			this.inputRejecter(new Error("Login cancelled"));
@@ -95,6 +97,7 @@ export class LoginDialogComponent extends Container implements Focusable {
 	 * Called by onAuth callback - show URL and optional instructions
 	 */
 	showAuth(url: string, instructions?: string): void {
+		this.stopLoader();
 		this.contentContainer.clear();
 		this.contentContainer.addChild(new Spacer(1));
 		const linkedUrl = `\x1b]8;;${url}\x07${url}\x1b]8;;\x07`;
@@ -117,6 +120,7 @@ export class LoginDialogComponent extends Container implements Focusable {
 	 * Called by onDeviceCode callback - show URL and user code.
 	 */
 	showDeviceCode(info: OAuthDeviceCodeInfo): void {
+		this.stopLoader();
 		this.contentContainer.clear();
 		this.contentContainer.addChild(new Spacer(1));
 		const linkedUrl = `\x1b]8;;${info.verificationUri}\x07${info.verificationUri}\x1b]8;;\x07`;
@@ -135,6 +139,7 @@ export class LoginDialogComponent extends Container implements Focusable {
 	 * Show input for manual code/URL entry (for callback server providers)
 	 */
 	showManualInput(prompt: string): Promise<string> {
+		this.stopLoader();
 		this.input.setValue("");
 		this.contentContainer.addChild(new Spacer(1));
 		this.contentContainer.addChild(new Text(theme.fg("dim", prompt), 1, 0));
@@ -153,6 +158,7 @@ export class LoginDialogComponent extends Container implements Focusable {
 	 * Note: Does NOT clear content, appends to existing (preserves URL from showAuth)
 	 */
 	showPrompt(message: string, placeholder?: string): Promise<string> {
+		this.stopLoader();
 		this.contentContainer.addChild(new Spacer(1));
 		this.contentContainer.addChild(new Text(theme.fg("text", message), 1, 0));
 		if (placeholder) {
@@ -180,6 +186,7 @@ export class LoginDialogComponent extends Container implements Focusable {
 	 * Show informational text before another login step.
 	 */
 	showDetails(lines: string[]): void {
+		this.stopLoader();
 		this.contentContainer.clear();
 		this.contentContainer.addChild(new Spacer(1));
 		for (const line of lines) {
@@ -201,9 +208,16 @@ export class LoginDialogComponent extends Container implements Focusable {
 	/**
 	 * Show waiting message (for polling flows like GitHub Copilot)
 	 */
-	showWaiting(message: string): void {
-		this.contentContainer.addChild(new Spacer(1));
-		this.contentContainer.addChild(new Text(theme.fg("dim", message), 1, 0));
+	showWaiting(message: string, preserveContent = true): void {
+		this.stopLoader();
+		if (!preserveContent) this.contentContainer.clear();
+		this.loader = new Loader(
+			this.tui,
+			(value) => theme.fg("accent", value),
+			(value) => theme.fg("dim", value),
+			message,
+		);
+		this.contentContainer.addChild(this.loader);
 		this.contentContainer.addChild(new Text(`(${keyHint("tui.select.cancel", "to cancel")})`, 1, 0));
 		this.tui.requestRender();
 	}
@@ -212,8 +226,21 @@ export class LoginDialogComponent extends Container implements Focusable {
 	 * Called by onProgress callback
 	 */
 	showProgress(message: string): void {
+		if (this.loader) {
+			this.loader.setMessage(message);
+			return;
+		}
 		this.contentContainer.addChild(new Text(theme.fg("dim", message), 1, 0));
 		this.tui.requestRender();
+	}
+
+	private stopLoader(): void {
+		this.loader?.stop();
+		this.loader = undefined;
+	}
+
+	dispose(): void {
+		this.stopLoader();
 	}
 
 	handleInput(data: string): void {

@@ -2,10 +2,7 @@ import { randomUUID } from "node:crypto";
 import { discoverOAuthServerInfo, UnauthorizedError } from "@modelcontextprotocol/sdk/client/auth.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { getDefaultEnvironment, StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import {
-	StreamableHTTPClientTransport,
-	StreamableHTTPError,
-} from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { StreamableHTTPClientTransport, StreamableHTTPError } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import {
 	type CallToolResult,
 	CallToolResultSchema,
@@ -59,6 +56,7 @@ export interface McpServerClientStatus {
 export interface McpLoginCallbacks {
 	signal?: AbortSignal;
 	onAuthorize(url: URL): void;
+	onProgress?(message: string): void;
 }
 
 export interface McpOAuthCallbackSettings {
@@ -491,15 +489,18 @@ export class McpServerClient {
 
 		try {
 			await client.connect(transport, this.startupRequestOptions());
+			callbacks.onProgress?.("Loading MCP tools…");
 			await this.replaceConnection(client, transport);
 			await callback.close();
 			return;
 		} catch (error) {
 			if (!(error instanceof UnauthorizedError)) throw error;
 			const authorizationCode = await withAbort(codePromise, callbacks.signal);
+			callbacks.onProgress?.("Completing authorization…");
 			await transport.finishAuth(authorizationCode);
 			await client.close().catch(() => undefined);
 			await this.closeConnection();
+			callbacks.onProgress?.("Loading MCP tools…");
 			await this.start();
 		} finally {
 			await callback.close().catch(() => undefined);

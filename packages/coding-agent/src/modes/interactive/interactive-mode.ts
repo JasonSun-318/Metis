@@ -62,6 +62,7 @@ import {
 	type UserBashAuthorization,
 } from "../../core/agent-session.ts";
 import { type AgentSessionRuntime, SessionImportFileNotFoundError } from "../../core/agent-session-runtime.ts";
+import { mcpCredentialKey } from "../../core/auth-storage.ts";
 import {
 	CACHE_TTL_MS,
 	type CacheMiss,
@@ -84,6 +85,8 @@ import type {
 import { FooterDataProvider, type ReadonlyFooterDataProvider } from "../../core/footer-data-provider.ts";
 import { configureHttpDispatcher, formatHttpIdleTimeoutMs } from "../../core/http-dispatcher.ts";
 import { type AppKeybinding, KeybindingsManager } from "../../core/keybindings.ts";
+import { resolveMcpServerSettings } from "../../core/mcp/config.ts";
+import type { McpServerStatus } from "../../core/mcp/manager.ts";
 import type { DreamHistoryRecord } from "../../core/memory-dream.ts";
 import { createCompactionSummaryMessage } from "../../core/messages.ts";
 import { defaultModelPerProvider, findExactModelReferenceMatch, resolveModelScope } from "../../core/model-resolver.ts";
@@ -93,10 +96,17 @@ import {
 	type PermissionApprovalDecision,
 	type PermissionApprovalRequest,
 } from "../../core/permission-policy.ts";
+import { parseCommandArgs } from "../../core/prompt-templates.ts";
 import { BUILT_IN_PROVIDER_DISPLAY_NAMES } from "../../core/provider-display-names.ts";
 import type { ResourceDiagnostic } from "../../core/resource-loader.ts";
 import { formatMissingSessionCwdPrompt, MissingSessionCwdError } from "../../core/session-cwd.ts";
 import { type SessionEntry, SessionManager, sessionEntryToContextMessages } from "../../core/session-manager.ts";
+import type {
+	McpHttpServerSettings,
+	McpServerSettings,
+	McpStdioServerSettings,
+	SettingsScope,
+} from "../../core/settings-manager.ts";
 import { BUILTIN_SLASH_COMMANDS } from "../../core/slash-commands.ts";
 import type { SourceInfo } from "../../core/source-info.ts";
 import type { TruncationResult } from "../../core/tools/truncate.ts";
@@ -2864,9 +2874,14 @@ export class InteractiveMode {
 				this.showWarning("Usage: /dream");
 				return;
 			}
-			if (text === "/mcp" || text.startsWith("/mcp ")) {
+			if (text === "/mcp") {
 				this.editor.setText("");
-				await this.handleMcpCommand(text);
+				await this.handleMcpCommand();
+				return;
+			}
+			if (text.startsWith("/mcp ")) {
+				this.editor.setText("");
+				this.showWarning("Use /mcp and choose an action from the menu.");
 				return;
 			}
 			if (text === "/reload") {
@@ -5415,56 +5430,389 @@ export class InteractiveMode {
 		this.ui.requestRender();
 	}
 
-	private async handleMcpCommand(text: string): Promise<void> {
-		const [subcommand, server] = text.slice(4).trim().split(/\s+/, 2);
-		if (!subcommand || subcommand === "verbose") {
-			const verbose = subcommand === "verbose";
-			const statuses = this.session.getMcpStatus();
-			let output = `${theme.bold("MCP servers")}\n`;
-			output +=
-				statuses.length === 0
-					? theme.fg("dim", "No MCP servers configured")
-					: statuses
-							.map((status) => {
-								let line = `${status.name} · ${status.state} · ${status.transport} · ${status.toolCount} tools · ${status.resourceCount} resources · ${status.promptCount} prompts`;
-								if (verbose && status.serverInfo) {
-									line += ` · ${status.serverInfo.name}/${status.serverInfo.version}`;
-								}
-								if (verbose && status.capabilities.length > 0) line += ` · ${status.capabilities.join(",")}`;
-								if (status.lastError) line += `\n  ${theme.fg("error", status.lastError)}`;
-								return line;
-							})
-							.join("\n");
-			this.chatContainer.addChild(new Spacer(1));
-			this.chatContainer.addChild(new Text(output, 1, 0));
-			this.ui.requestRender();
-			return;
-		}
+	private getMcpDefinition(name: string): { scope: SettingsScope; server: McpServerSettings } | undefined {
+		const project = this.settingsManager.getProjectSettings().mcpServers?.[name];
+		if (project) return { scope: "project", server: project };
+		const global = this.settingsManager.getGlobalSettings().mcpServers?.[name];
+		return global ? { scope: "global", server: global } : undefined;
+	}
 
-		if (this.guardSessionMutation()) return;
-		if (subcommand === "login" && server) {
-			await this.showMcpLogin(server);
-			return;
+	private async persistMcpDefinition(
+		scope: SettingsScope,
+		name: string,
+		server: McpServerSettings,
+		reload = true,
+	): Promise<void> {
+		resolveMcpServerSettings(name, server, process.cwd(), process.env);
+		this.settingsManager.setMcpServer(scope, name, server);
+		await this.settingsManager.flush();
+		const errors = this.settingsManager.drainErrors();
+		if (errors.length > 0) throw errors[0]!.error;
+		if (reload) await this.session.reload();
+	}
+
+	private mcpStatusRow(status: McpServerStatus): string {
+		return `${status.name} · ${status.state} · ${status.transport} · ${status.toolCount} tools`;
+	}
+
+	private showMcpDetails(status: McpServerStatus): void {
+		const lines = [
+			theme.bold(status.name),
+			`${status.state} · ${status.transport} · ${status.toolCount} tools · ${status.resourceCount} resources · ${status.resourceTemplateCount} resource templates · ${status.promptCount} prompts`,
+		];
+		if (status.serverInfo) lines.push(`${status.serverInfo.name}/${status.serverInfo.version}`);
+		if (status.capabilities.length > 0) lines.push(`Capabilities: ${status.capabilities.join(", ")}`);
+		if (status.lastError) lines.push(theme.fg("error", status.lastError));
+		this.chatContainer.addChild(new Spacer(1));
+		this.chatContainer.addChild(new Text(lines.join("\n"), 1, 0));
+		this.ui.requestRender();
+	}
+
+	private async handleMcpCommand(): Promise<void> {
+		await this.showMcpManager();
+	}
+
+	private async showMcpManager(): Promise<void> {
+		while (true) {
+			const statuses = this.session.getMcpStatus();
+			const rows = new Map(statuses.map((status) => [this.mcpStatusRow(status), status.name]));
+			const selected = await this.showExtensionSelector("MCP servers", ["Add server", ...rows.keys(), "Close"]);
+			if (!selected || selected === "Close") return;
+			if (selected === "Add server") {
+				if (!this.guardSessionMutation()) await this.showMcpAdd();
+				continue;
+			}
+			const name = rows.get(selected);
+			if (name) await this.showMcpServerMenu(name);
 		}
-		if (subcommand === "logout" && server) {
+	}
+
+	private async showMcpAdd(): Promise<void> {
+		let step: "scope" | "name" | "transport" = "scope";
+		let scope: SettingsScope = "global";
+		let name = "";
+		while (true) {
+			if (step === "scope") {
+				const scopes = ["Personal", ...(this.settingsManager.isProjectTrusted() ? ["Project"] : [])];
+				const selected = await this.showExtensionSelector("Add MCP server · Scope", scopes);
+				if (!selected) return;
+				scope = selected === "Project" ? "project" : "global";
+				step = "name";
+				continue;
+			}
+			if (step === "name") {
+				const entered = await this.showExtensionInput("Add MCP server · Server name", name || undefined);
+				if (entered === undefined) {
+					step = "scope";
+					continue;
+				}
+				name = entered.trim();
+				if (!name) {
+					this.showWarning("MCP server name must not be empty");
+					continue;
+				}
+				step = "transport";
+				continue;
+			}
+
+			const transport = await this.showExtensionSelector("Add MCP server · Transport", [
+				"Local command (stdio)",
+				"Remote URL (HTTP)",
+			]);
+			if (!transport) {
+				step = "name";
+				continue;
+			}
+			const server = await this.promptMcpServer(transport === "Local command (stdio)" ? "stdio" : "http");
+			if (!server) continue;
+
+			const definitions =
+				scope === "global"
+					? this.settingsManager.getGlobalSettings().mcpServers
+					: this.settingsManager.getProjectSettings().mcpServers;
+			if (definitions?.[name]) {
+				const replace = await this.showExtensionConfirm(
+					"Replace MCP server?",
+					`A ${scope === "global" ? "personal" : "project"} server named "${name}" already exists.`,
+				);
+				if (!replace) continue;
+			}
+
 			try {
-				await this.session.logoutMcpServer(server);
-				this.showStatus(`Logged out MCP server "${server}"`);
+				await this.persistMcpDefinition(scope, name, server);
+				await this.handleMcpPostAdd(name);
+				return;
 			} catch (error) {
 				this.showError(error instanceof Error ? error.message : String(error));
 			}
+		}
+	}
+
+	private async promptMcpServer(transport: "stdio" | "http"): Promise<McpServerSettings | undefined> {
+		if (transport === "http") {
+			const url = await this.showExtensionInput("Add MCP server · URL", "https://example.com/mcp");
+			return url === undefined ? undefined : { url: url.trim() };
+		}
+		let command = "";
+		while (true) {
+			const entered = await this.showExtensionInput("Add MCP server · Executable", command || "npx");
+			if (entered === undefined) return undefined;
+			command = entered.trim();
+			const args = await this.showExtensionInput("Add MCP server · Arguments", "-y @scope/server");
+			if (args !== undefined) return { command, args: parseCommandArgs(args) };
+		}
+	}
+
+	private async handleMcpPostAdd(name: string): Promise<void> {
+		const status = this.session.getMcpStatus().find((item) => item.name === name);
+		if (!status) {
+			this.showStatus(`Added MCP server "${name}"`);
 			return;
 		}
-		if (subcommand === "restart") {
+		if (status.state === "connected") {
+			this.showStatus(`Connected MCP server "${name}"`);
+			return;
+		}
+		if (status.state === "auth_required" && status.authRequirement === "oauth") {
+			const selected = await this.showExtensionSelector(`MCP server "${name}" requires OAuth`, [
+				"Log in now",
+				"Later",
+			]);
+			if (selected === "Log in now") await this.prepareMcpOAuth(name);
+			return;
+		}
+		if (status.state === "auth_required") {
+			await this.showMcpAuthenticationMenu(name);
+			return;
+		}
+		if (status.lastError) this.showError(status.lastError);
+	}
+
+	private async showMcpServerMenu(name: string): Promise<void> {
+		while (true) {
+			const status = this.session.getMcpStatus().find((item) => item.name === name);
+			if (!status || !this.getMcpDefinition(name)) return;
+			const stored = this.session.modelRegistry.authStorage.has(mcpCredentialKey(name));
+			const actions = [
+				"Details",
+				...(status.authRequirement === "oauth" ? ["Log in"] : []),
+				"Authentication",
+				"Restart",
+				...(stored ? ["Sign out"] : []),
+				"Remove",
+				"Back",
+			];
+			const selected = await this.showExtensionSelector(`MCP server · ${name}`, actions);
+			if (!selected || selected === "Back") return;
+			if (selected === "Details") {
+				this.showMcpDetails(status);
+				continue;
+			}
+			if (this.guardSessionMutation()) continue;
 			try {
-				await this.session.restartMcpServers(server);
-				this.showStatus(server ? `Restarted MCP server "${server}"` : "Restarted MCP servers");
+				if (selected === "Log in") await this.prepareMcpOAuth(name);
+				else if (selected === "Authentication") await this.showMcpAuthenticationMenu(name);
+				else if (selected === "Restart") {
+					await this.session.restartMcpServers(name);
+					this.showStatus(`Restarted MCP server "${name}"`);
+				} else if (selected === "Sign out") {
+					await this.session.logoutMcpServer(name);
+					this.showStatus(`Signed out MCP server "${name}"`);
+				} else if (selected === "Remove" && (await this.removeMcpServer(name))) return;
 			} catch (error) {
 				this.showError(error instanceof Error ? error.message : String(error));
 			}
-			return;
 		}
-		this.showWarning("Usage: /mcp [verbose|login <server>|logout <server>|restart [server]]");
+	}
+
+	private async prepareMcpOAuth(name: string): Promise<void> {
+		const definition = this.getMcpDefinition(name);
+		if (!definition || !("url" in definition.server)) throw new Error("OAuth is available only for HTTP MCP servers");
+		const { bearerTokenEnvVar: _bearerTokenEnvVar, ...server } = definition.server as McpHttpServerSettings;
+		this.session.deleteMcpCredential(name);
+		await this.persistMcpDefinition(definition.scope, name, server);
+		await this.showMcpLogin(name);
+	}
+
+	private validEnvironmentName(value: string): boolean {
+		return Boolean(value) && !value.includes("=") && !value.includes("\0");
+	}
+
+	private async showMcpAuthenticationMenu(name: string): Promise<void> {
+		while (true) {
+			const definition = this.getMcpDefinition(name);
+			if (!definition) return;
+			const http = "url" in definition.server;
+			const selected = await this.showExtensionSelector(
+				`MCP authentication · ${name}`,
+				http
+					? ["Enter token", "Use environment variable", "OAuth login", "No authentication", "Back"]
+					: ["Set environment variable", "No authentication", "Back"],
+			);
+			if (!selected || selected === "Back") return;
+
+			try {
+				if (selected === "Enter token" && http) {
+					const token = await this.showExtensionInput("Access token", undefined, { secret: true });
+					if (token === undefined) continue;
+					if (!token) {
+						this.showWarning("Access token must not be empty");
+						continue;
+					}
+					const { bearerTokenEnvVar: _bearerTokenEnvVar, ...server } = definition.server as McpHttpServerSettings;
+					await this.persistMcpDefinition(definition.scope, name, server, false);
+					await this.session.setMcpSecret(name, { bearerToken: token });
+					this.showStatus(`Updated authentication for MCP server "${name}"`);
+					return;
+				}
+				if (selected === "Use environment variable" && http) {
+					const envName = (await this.showExtensionInput("Environment variable name", "MCP_TOKEN"))?.trim();
+					if (envName === undefined) continue;
+					if (!this.validEnvironmentName(envName)) {
+						this.showWarning("Environment variable name must not be empty or contain =");
+						continue;
+					}
+					this.session.deleteMcpCredential(name);
+					await this.persistMcpDefinition(definition.scope, name, {
+						...(definition.server as McpHttpServerSettings),
+						bearerTokenEnvVar: envName,
+					});
+					if (process.env[envName] === undefined) {
+						this.showWarning(
+							`Environment variable ${envName} is not available. Restart ArcMind after setting it.`,
+						);
+					}
+					return;
+				}
+				if (selected === "OAuth login" && http) {
+					await this.prepareMcpOAuth(name);
+					return;
+				}
+				if (selected === "Set environment variable" && !http) {
+					const updated = await this.configureMcpStdioEnvironment(
+						name,
+						definition.scope,
+						definition.server as McpStdioServerSettings,
+					);
+					if (updated) return;
+					continue;
+				}
+				if (selected === "No authentication") {
+					this.session.deleteMcpCredential(name);
+					const server = http
+						? (({ bearerTokenEnvVar: _bearerTokenEnvVar, ...rest }) => rest)(
+								definition.server as McpHttpServerSettings,
+							)
+						: { ...(definition.server as McpStdioServerSettings), envVars: undefined };
+					await this.persistMcpDefinition(definition.scope, name, server);
+					this.showStatus(`Cleared authentication for MCP server "${name}"`);
+					return;
+				}
+			} catch (error) {
+				this.showError(error instanceof Error ? error.message : String(error));
+			}
+		}
+	}
+
+	private async configureMcpStdioEnvironment(
+		name: string,
+		scope: SettingsScope,
+		server: McpStdioServerSettings,
+	): Promise<boolean> {
+		while (true) {
+			const envName = (await this.showExtensionInput("Environment variable name", "MCP_TOKEN"))?.trim();
+			if (envName === undefined) return false;
+			if (!this.validEnvironmentName(envName)) {
+				this.showWarning("Environment variable name must not be empty or contain =");
+				continue;
+			}
+			while (true) {
+				const source = await this.showExtensionSelector(`Environment value · ${envName}`, [
+					"Enter value",
+					"Use existing environment variable",
+					"Back",
+				]);
+				if (!source || source === "Back") break;
+				if (source === "Enter value") {
+					const value = await this.showExtensionInput(`Value for ${envName}`, undefined, { secret: true });
+					if (value === undefined) continue;
+					if (!value) {
+						this.showWarning("Environment value must not be empty");
+						continue;
+					}
+					const literal = { ...(server.env ?? {}) };
+					delete literal[envName];
+					await this.persistMcpDefinition(
+						scope,
+						name,
+						{
+							...server,
+							env: Object.keys(literal).length > 0 ? literal : undefined,
+							envVars: server.envVars?.filter((item) => item !== envName),
+						},
+						false,
+					);
+					const credential = this.session.modelRegistry.authStorage.get(mcpCredentialKey(name));
+					const existing = credential?.type === "mcp_secret" ? credential.env : undefined;
+					await this.session.setMcpSecret(name, { env: { ...existing, [envName]: value } });
+					this.showStatus(`Updated authentication for MCP server "${name}"`);
+					return true;
+				}
+
+				const credential = this.session.modelRegistry.authStorage.get(mcpCredentialKey(name));
+				const remaining = credential?.type === "mcp_secret" ? { ...(credential.env ?? {}) } : {};
+				delete remaining[envName];
+				const literal = { ...(server.env ?? {}) };
+				delete literal[envName];
+				const envVars = [...new Set([...(server.envVars ?? []), envName])];
+				await this.persistMcpDefinition(
+					scope,
+					name,
+					{ ...server, env: Object.keys(literal).length > 0 ? literal : undefined, envVars },
+					false,
+				);
+				if (Object.keys(remaining).length > 0) await this.session.setMcpSecret(name, { env: remaining });
+				else {
+					this.session.deleteMcpCredential(name);
+					await this.session.reload();
+				}
+				if (process.env[envName] === undefined) {
+					this.showWarning(`Environment variable ${envName} is not available. Restart ArcMind after setting it.`);
+				}
+				return true;
+			}
+		}
+	}
+
+	private async removeMcpServer(name: string): Promise<boolean> {
+		const global = this.settingsManager.getGlobalSettings().mcpServers?.[name];
+		const project = this.settingsManager.getProjectSettings().mcpServers?.[name];
+		let scope: SettingsScope;
+		if (global && project) {
+			const selected = await this.showExtensionSelector(`Remove MCP server · ${name}`, [
+				"Project override",
+				"Personal definition",
+				"Back",
+			]);
+			if (!selected || selected === "Back") return false;
+			scope = selected === "Project override" ? "project" : "global";
+		} else if (project) scope = "project";
+		else if (global) scope = "global";
+		else return false;
+
+		const confirmed = await this.showExtensionConfirm(
+			"Remove MCP server?",
+			`Remove the ${scope === "global" ? "personal" : "project"} definition for "${name}" and its stored credential?`,
+		);
+		if (!confirmed) return false;
+		if (!this.settingsManager.removeMcpServer(scope, name)) return false;
+		await this.settingsManager.flush();
+		const errors = this.settingsManager.drainErrors();
+		if (errors.length > 0) throw errors[0]!.error;
+		this.session.deleteMcpCredential(name);
+		await this.session.reload();
+		this.showStatus(`Removed MCP server "${name}"`);
+		return true;
 	}
 
 	private async showMcpLogin(server: string): Promise<void> {
@@ -5476,6 +5824,7 @@ export class InteractiveMode {
 			`Login to MCP server ${server}`,
 		);
 		const restoreEditor = () => {
+			dialog.dispose();
 			this.editorContainer.clear();
 			this.editorContainer.addChild(this.editor);
 			this.ui.setFocus(this.editor);
@@ -5485,10 +5834,15 @@ export class InteractiveMode {
 		this.editorContainer.addChild(dialog);
 		this.ui.setFocus(dialog);
 		this.ui.requestRender();
+		dialog.showWaiting("Preparing secure login…", false);
 		try {
 			await this.session.loginMcpServer(server, {
 				signal: dialog.signal,
-				onAuthorize: (url) => dialog.showAuth(String(url), "Complete authorization in your browser."),
+				onAuthorize: (url) => {
+					dialog.showAuth(String(url), "Complete authorization in your browser.");
+					dialog.showWaiting("Waiting for browser authorization…");
+				},
+				onProgress: (message) => dialog.showWaiting(message, false),
 			});
 			restoreEditor();
 			this.showStatus(`Authenticated MCP server "${server}"`);
