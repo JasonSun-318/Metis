@@ -166,7 +166,7 @@ describe("MCP CLI", () => {
 		});
 
 		try {
-			expect(manager.getStatus()[0]).toMatchObject({ state: "auth_required", authRequirement: "token" });
+			expect(manager.getStatus()[0]).toMatchObject({ state: "auth_required" });
 			expect(JSON.stringify(manager.getStatus())).not.toContain(secret);
 
 			await manager.setSecret("protected", { bearerToken: secret });
@@ -176,7 +176,7 @@ describe("MCP CLI", () => {
 			expect(JSON.stringify({ status: manager.getStatus(), result })).not.toContain(secret);
 
 			await manager.logout("protected");
-			expect(manager.getStatus()[0]).toMatchObject({ state: "auth_required", authRequirement: "token" });
+			expect(manager.getStatus()[0]).toMatchObject({ state: "auth_required" });
 			expect(authStorage.has(mcpCredentialKey("protected"))).toBe(false);
 
 			await manager.setSecret("protected", { bearerToken: secret });

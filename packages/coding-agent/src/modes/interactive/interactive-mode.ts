@@ -5574,14 +5574,6 @@ export class InteractiveMode {
 			this.showStatus(`Connected MCP server "${name}"`);
 			return;
 		}
-		if (status.state === "auth_required" && status.authRequirement === "oauth") {
-			const selected = await this.showExtensionSelector(`MCP server "${name}" requires OAuth`, [
-				"Log in now",
-				"Later",
-			]);
-			if (selected === "Log in now") await this.prepareMcpOAuth(name);
-			return;
-		}
 		if (status.state === "auth_required") {
 			await this.showMcpAuthenticationMenu(name);
 			return;
@@ -5594,15 +5586,7 @@ export class InteractiveMode {
 			const status = this.session.getMcpStatus().find((item) => item.name === name);
 			if (!status || !this.getMcpDefinition(name)) return;
 			const stored = this.session.modelRegistry.authStorage.has(mcpCredentialKey(name));
-			const actions = [
-				"Details",
-				...(status.authRequirement === "oauth" ? ["Log in"] : []),
-				"Authentication",
-				"Restart",
-				...(stored ? ["Sign out"] : []),
-				"Remove",
-				"Back",
-			];
+			const actions = ["Details", "Authentication", "Restart", ...(stored ? ["Sign out"] : []), "Remove", "Back"];
 			const selected = await this.showExtensionSelector(`MCP server · ${name}`, actions);
 			if (!selected || selected === "Back") return;
 			if (selected === "Details") {
@@ -5611,8 +5595,7 @@ export class InteractiveMode {
 			}
 			if (this.guardSessionMutation()) continue;
 			try {
-				if (selected === "Log in") await this.prepareMcpOAuth(name);
-				else if (selected === "Authentication") await this.showMcpAuthenticationMenu(name);
+				if (selected === "Authentication") await this.showMcpAuthenticationMenu(name);
 				else if (selected === "Restart") {
 					await this.session.restartMcpServers(name);
 					this.showStatus(`Restarted MCP server "${name}"`);
@@ -5624,15 +5607,6 @@ export class InteractiveMode {
 				this.showError(error instanceof Error ? error.message : String(error));
 			}
 		}
-	}
-
-	private async prepareMcpOAuth(name: string): Promise<void> {
-		const definition = this.getMcpDefinition(name);
-		if (!definition || !("url" in definition.server)) throw new Error("OAuth is available only for HTTP MCP servers");
-		const { bearerTokenEnvVar: _bearerTokenEnvVar, ...server } = definition.server as McpHttpServerSettings;
-		this.session.deleteMcpCredential(name);
-		await this.persistMcpDefinition(definition.scope, name, server);
-		await this.showMcpLogin(name);
 	}
 
 	private validEnvironmentName(value: string): boolean {
@@ -5647,7 +5621,7 @@ export class InteractiveMode {
 			const selected = await this.showExtensionSelector(
 				`MCP authentication · ${name}`,
 				http
-					? ["Enter token", "Use environment variable", "OAuth login", "No authentication", "Back"]
+					? ["Enter token", "Use environment variable", "No authentication", "Back"]
 					: ["Set environment variable", "No authentication", "Back"],
 			);
 			if (!selected || selected === "Back") return;
@@ -5683,10 +5657,6 @@ export class InteractiveMode {
 							`Environment variable ${envName} is not available. Restart ArcMind after setting it.`,
 						);
 					}
-					return;
-				}
-				if (selected === "OAuth login" && http) {
-					await this.prepareMcpOAuth(name);
 					return;
 				}
 				if (selected === "Set environment variable" && !http) {
@@ -5814,44 +5784,6 @@ export class InteractiveMode {
 		await this.session.reload();
 		this.showStatus(`Removed MCP server "${name}"`);
 		return true;
-	}
-
-	private async showMcpLogin(server: string): Promise<void> {
-		const dialog = new LoginDialogComponent(
-			this.ui,
-			`mcp:${server}`,
-			() => {},
-			server,
-			`Login to MCP server ${server}`,
-		);
-		const restoreEditor = () => {
-			dialog.dispose();
-			this.editorContainer.clear();
-			this.editorContainer.addChild(this.editor);
-			this.ui.setFocus(this.editor);
-			this.ui.requestRender();
-		};
-		this.editorContainer.clear();
-		this.editorContainer.addChild(dialog);
-		this.ui.setFocus(dialog);
-		this.ui.requestRender();
-		dialog.showWaiting("Preparing secure login…", false);
-		try {
-			await this.session.loginMcpServer(server, {
-				signal: dialog.signal,
-				onAuthorize: (url) => {
-					dialog.showAuth(String(url), "Complete authorization in your browser.");
-					dialog.showWaiting("Waiting for browser authorization…");
-				},
-				onProgress: (message) => dialog.showWaiting(message, false),
-			});
-			restoreEditor();
-			this.showStatus(`Authenticated MCP server "${server}"`);
-		} catch (error) {
-			restoreEditor();
-			const message = error instanceof Error ? error.message : String(error);
-			if (!dialog.signal.aborted && message !== "Login cancelled") this.showError(message);
-		}
 	}
 
 	private async handleReloadCommand(): Promise<void> {

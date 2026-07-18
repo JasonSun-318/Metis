@@ -97,13 +97,4 @@ describe("MCP settings", () => {
 		const manager = SettingsManager.inMemory({ mcpServers: { broken: server as never } });
 		expect(() => resolveMcpSettings(manager, "/repo", {})).toThrow(message);
 	});
-
-	it("validates OAuth callback settings", () => {
-		const manager = SettingsManager.inMemory({
-			mcpOAuthCallbackPort: 65_536,
-			mcpOAuthCallbackUrl: "file:///tmp/callback",
-		});
-
-		expect(() => resolveMcpSettings(manager, "/repo", {})).toThrow("mcpOAuthCallbackPort");
-	});
 });

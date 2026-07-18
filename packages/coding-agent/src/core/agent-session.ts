@@ -95,12 +95,7 @@ import {
 } from "./extensions/index.ts";
 import { emitSessionShutdownEvent } from "./extensions/runner.ts";
 import { externalizeLargeToolOutput, type PersistedToolOutput } from "./large-tool-output.ts";
-import {
-	createMcpToolDefinitions,
-	type McpLoginCallbacks,
-	type McpManager,
-	type McpServerStatus,
-} from "./mcp/index.ts";
+import { createMcpToolDefinitions, type McpManager, type McpServerStatus } from "./mcp/index.ts";
 import {
 	type DreamActiveRun,
 	type DreamHistoryRecord,
@@ -1727,11 +1722,6 @@ export class AgentSession {
 
 	getMcpStatus(): McpServerStatus[] {
 		return this._mcpManager?.getStatus() ?? [];
-	}
-
-	loginMcpServer(name: string, callbacks: McpLoginCallbacks): Promise<void> {
-		if (!this._mcpManager) return Promise.reject(new Error("MCP is not available in this session"));
-		return this._mcpManager.login(name, callbacks);
 	}
 
 	logoutMcpServer(name: string): Promise<void> {

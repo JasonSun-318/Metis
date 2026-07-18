@@ -88,14 +88,14 @@ describe("McpManager", () => {
 			cwd: process.cwd(),
 		});
 		managers.push(manager);
-		expect(manager.getStatus()[0]).toMatchObject({ state: "auth_required", authRequirement: "token" });
+		expect(manager.getStatus()[0]).toMatchObject({ state: "auth_required" });
 
 		await manager.setSecret("docs", { bearerToken: "stored-secret" });
 		expect(manager.getStatus()[0]).toMatchObject({ state: "connected" });
 		expect(storage.get(mcpCredentialKey("docs"))).toMatchObject({ type: "mcp_secret" });
 
 		await manager.logout("docs");
-		expect(manager.getStatus()[0]).toMatchObject({ state: "auth_required", authRequirement: "token" });
+		expect(manager.getStatus()[0]).toMatchObject({ state: "auth_required" });
 		expect(storage.has(mcpCredentialKey("docs"))).toBe(false);
 	});
 
@@ -112,7 +112,7 @@ describe("McpManager", () => {
 
 		await expect(manager.setSecret("docs", { bearerToken: "" })).rejects.toThrow("must not be empty");
 		expect(storage.has(mcpCredentialKey("docs"))).toBe(false);
-		expect(manager.getStatus()[0]).toMatchObject({ state: "auth_required", authRequirement: "token" });
+		expect(manager.getStatus()[0]).toMatchObject({ state: "auth_required" });
 	});
 
 	it("normalizes model names while preserving raw call identity", async () => {

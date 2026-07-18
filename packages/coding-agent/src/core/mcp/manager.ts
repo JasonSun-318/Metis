@@ -8,7 +8,7 @@ import type {
 } from "@modelcontextprotocol/sdk/types.js";
 import { type AuthStorage, type McpSecretCredential, mcpCredentialKey } from "../auth-storage.ts";
 import type { SettingsManager } from "../settings-manager.ts";
-import { type McpAuthRequirement, type McpConnectionState, type McpLoginCallbacks, McpServerClient } from "./client.ts";
+import { type McpConnectionState, McpServerClient } from "./client.ts";
 import { type ResolvedMcpServerConfig, type ResolvedMcpSettings, resolveMcpSettings } from "./config.ts";
 
 const MAX_TOOL_NAME = 64;
@@ -42,7 +42,6 @@ export interface McpServerStatus {
 	promptCount: number;
 	capabilities: string[];
 	lastError?: string;
-	authRequirement?: McpAuthRequirement;
 }
 
 function sanitizeSegment(value: string): string {
@@ -177,8 +176,6 @@ export class McpManager {
 	private recordByModelName = new Map<string, McpToolRecord>();
 	private searchIndex = new ToolSearchIndex([]);
 	private readonly catalogListeners = new Set<() => void>();
-	private oauthCallbackPort?: number;
-	private oauthCallbackUrl?: URL;
 	private closed = false;
 
 	private constructor(options: McpManagerCreateOptions) {
@@ -244,8 +241,6 @@ export class McpManager {
 		const clients = this.createClients(settings);
 		await this.startClients(clients);
 		this.clients = clients;
-		this.oauthCallbackPort = settings.oauthCallbackPort;
-		this.oauthCallbackUrl = settings.oauthCallbackUrl;
 		this.attachClientSubscriptions();
 		this.rebuildRecords();
 	}
@@ -383,7 +378,6 @@ export class McpManager {
 				promptCount: snapshot.prompts.length,
 				capabilities: Object.keys(snapshot.capabilities).sort(),
 				lastError: status.lastError,
-				authRequirement: status.authRequirement,
 			};
 		});
 	}
@@ -399,21 +393,10 @@ export class McpManager {
 		await this.startClients(nextClients);
 		const previousClients = this.clients;
 		this.clients = nextClients;
-		this.oauthCallbackPort = settings.oauthCallbackPort;
-		this.oauthCallbackUrl = settings.oauthCallbackUrl;
 		this.attachClientSubscriptions();
 		this.rebuildRecords();
 		for (const listener of this.catalogListeners) listener();
 		await Promise.all([...previousClients.values()].map((client) => client.close()));
-	}
-
-	async login(server: string, callbacks: McpLoginCallbacks): Promise<void> {
-		await this.clientFor(server).login(callbacks, {
-			port: this.oauthCallbackPort,
-			baseUrl: this.oauthCallbackUrl,
-		});
-		this.rebuildRecords();
-		for (const listener of this.catalogListeners) listener();
 	}
 
 	async setSecret(server: string, credential: Omit<McpSecretCredential, "type">): Promise<void> {

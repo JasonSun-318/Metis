@@ -15,8 +15,6 @@ import {
 	type OAuthProviderInterface,
 } from "@arcmind/ai/compat";
 import { getOAuthProviders as getCompatibilityOAuthProviders } from "@arcmind/ai/oauth";
-import type { OAuthDiscoveryState } from "@modelcontextprotocol/sdk/client/auth.js";
-import type { OAuthClientInformationMixed, OAuthTokens } from "@modelcontextprotocol/sdk/shared/auth.js";
 import { existsSync } from "fs";
 import { dirname, join } from "path";
 import lockfile from "proper-lockfile";
@@ -41,12 +39,11 @@ export type OAuthCredential = {
 	type: "oauth";
 } & OAuthCredentials;
 
-export type McpOAuthCredential = {
+// Read-only compatibility shape so credentials written by older versions can be
+// redacted and removed. MCP OAuth is not an active authentication mechanism.
+type LegacyMcpOAuthCredential = {
 	type: "mcp_oauth";
-	tokens?: OAuthTokens;
-	clientInformation?: OAuthClientInformationMixed;
-	codeVerifier?: string;
-	discoveryState?: OAuthDiscoveryState;
+	tokens?: { access_token?: string; refresh_token?: string };
 };
 
 export type McpSecretCredential = {
@@ -59,7 +56,7 @@ export function mcpCredentialKey(serverName: string): string {
 	return `mcp:${serverName}`;
 }
 
-export type AuthCredential = ApiKeyCredential | OAuthCredential | McpOAuthCredential | McpSecretCredential;
+export type AuthCredential = ApiKeyCredential | OAuthCredential | LegacyMcpOAuthCredential | McpSecretCredential;
 
 export type AuthStorageData = Record<string, AuthCredential>;
 

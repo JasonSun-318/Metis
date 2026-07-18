@@ -77,11 +77,11 @@ describe("McpServerClient", () => {
 		clients.push(client);
 
 		await expect(client.start()).rejects.toThrow();
-		expect(client.status()).toMatchObject({ state: "auth_required", authRequirement: "token" });
+		expect(client.status()).toMatchObject({ state: "auth_required" });
 		expect(JSON.stringify(client.status())).not.toContain("expected-token");
 	});
 
-	it("classifies advertised protected-resource metadata as OAuth without opening a browser", async () => {
+	it("does not special-case advertised OAuth metadata", async () => {
 		const testServer = await createMcpTestServer({
 			requiredBearerToken: "expected-token",
 			advertiseOAuth: true,
@@ -91,7 +91,7 @@ describe("McpServerClient", () => {
 		clients.push(client);
 
 		await expect(client.start()).rejects.toThrow();
-		expect(client.status()).toMatchObject({ state: "auth_required", authRequirement: "oauth" });
+		expect(client.status()).toMatchObject({ state: "auth_required" });
 	});
 
 	it("spawns and closes a stdio server", async () => {

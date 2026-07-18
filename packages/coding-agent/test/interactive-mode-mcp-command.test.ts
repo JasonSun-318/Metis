@@ -3,9 +3,6 @@ import { beforeAll, describe, expect, it, vi } from "vitest";
 import { InteractiveMode } from "../src/modes/interactive/interactive-mode.ts";
 import { initTheme } from "../src/modes/interactive/theme/theme.ts";
 
-const { openBrowser } = vi.hoisted(() => ({ openBrowser: vi.fn() }));
-vi.mock("../src/utils/open-browser.ts", () => ({ openBrowser }));
-
 const connectedStatus = {
 	name: "docs",
 	transport: "http" as const,
@@ -71,7 +68,6 @@ function createContext(
 		showExtensionSelector: vi.fn(),
 		showExtensionInput: vi.fn(),
 		showExtensionConfirm: vi.fn(),
-		showMcpLogin: vi.fn().mockResolvedValue(undefined),
 		showWarning: vi.fn(),
 		showError: vi.fn(),
 		showStatus: vi.fn(),
@@ -143,6 +139,12 @@ describe("InteractiveMode /mcp", () => {
 			"MCP servers",
 		]);
 		expect(context.target.showExtensionInput).toHaveBeenCalledWith("Access token", undefined, { secret: true });
+		expect(context.target.showExtensionSelector.mock.calls[2]?.[1]).toEqual([
+			"Enter token",
+			"Use environment variable",
+			"No authentication",
+			"Back",
+		]);
 		expect(context.settingsManager.setMcpServer).not.toHaveBeenCalled();
 		expect(context.session.setMcpSecret).not.toHaveBeenCalled();
 	});
@@ -235,40 +237,5 @@ describe("InteractiveMode /mcp", () => {
 			.join("\n");
 		expect(rendered).toContain("docs-server/1.0.0");
 		expect(rendered).toContain("Capabilities: tools, resources, prompts");
-	});
-
-	it("hands explicit OAuth authorization to the login dialog and restores the editor", async () => {
-		const editor = {};
-		const loginMcpServer = vi.fn(
-			async (_server: string, callbacks: { onAuthorize(url: URL): void; onProgress?(message: string): void }) => {
-				callbacks.onAuthorize(new URL("https://auth.example.test/authorize"));
-				callbacks.onProgress?.("Loading MCP tools…");
-			},
-		);
-		const target = Object.assign(Object.create(InteractiveMode.prototype), {
-			runtimeHost: { session: { loginMcpServer } },
-			ui: { requestRender: vi.fn(), setFocus: vi.fn() },
-			editorContainer: { clear: vi.fn(), addChild: vi.fn() },
-			editor,
-			showStatus: vi.fn(),
-			showError: vi.fn(),
-		});
-		const showLogin = Reflect.get(InteractiveMode.prototype, "showMcpLogin") as (
-			this: typeof target,
-			server: string,
-		) => Promise<void>;
-
-		await showLogin.call(target, "docs");
-
-		expect(loginMcpServer).toHaveBeenCalledWith(
-			"docs",
-			expect.objectContaining({ signal: expect.any(AbortSignal), onAuthorize: expect.any(Function) }),
-		);
-		expect(openBrowser).toHaveBeenCalledWith("https://auth.example.test/authorize");
-		const dialog = target.editorContainer.addChild.mock.calls[0]?.[0] as Component;
-		expect(dialog.render(200).join("\n")).toContain("Loading MCP tools…");
-		expect(target.editorContainer.addChild).toHaveBeenLastCalledWith(editor);
-		expect(target.showStatus).toHaveBeenCalledWith('Authenticated MCP server "docs"');
-		expect(target.showError).not.toHaveBeenCalled();
 	});
 });

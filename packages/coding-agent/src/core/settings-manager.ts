@@ -148,8 +148,6 @@ export interface Settings {
 	httpIdleTimeoutMs?: number; // HTTP header/body idle timeout in milliseconds; 0 disables it
 	websocketConnectTimeoutMs?: number; // WebSocket connect/open handshake timeout in milliseconds; 0 disables it
 	mcpServers?: Record<string, McpServerSettings>;
-	mcpOAuthCallbackPort?: number;
-	mcpOAuthCallbackUrl?: string;
 }
 
 /** Deep merge settings: project/overrides take precedence, nested objects merge recursively */
@@ -509,14 +507,6 @@ export class SettingsManager {
 			this.updateProjectSettings("mcpServers", remove, name);
 		}
 		return true;
-	}
-
-	getMcpOAuthCallbackPort(): number | undefined {
-		return this.settings.mcpOAuthCallbackPort;
-	}
-
-	getMcpOAuthCallbackUrl(): string | undefined {
-		return this.settings.mcpOAuthCallbackUrl;
 	}
 
 	isProjectTrusted(): boolean {

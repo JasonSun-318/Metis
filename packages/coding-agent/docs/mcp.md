@@ -16,8 +16,9 @@ ArcMind validates and saves the definition, starts the server, initializes its c
 For an HTTP server, ArcMind first connects without credentials:
 
 - A successful connection needs no authentication.
-- If the server returns `401` and publishes OAuth metadata, ArcMind offers **Log in now** or **Later**. Login shows the authorization URL and visible preparing, waiting, and tool-loading states.
-- A plain `401` opens **Authentication**, where you can enter a token through a masked field, reference an environment variable, or go back and configure it later.
+- A `401` opens **Authentication**, where you can enter a token through a masked field, reference an environment variable, or go back and configure it later.
+
+MCP OAuth is not currently supported. Use a server-issued token or an environment variable when the server requires authentication.
 
 For stdio, MCP has no protocol-level way to discover a credential name. Choose **Authentication** → **Set environment variable**, enter the name documented by that server, then either enter its value through the masked field or forward an existing environment variable.
 
@@ -27,7 +28,7 @@ Select a configured server in `/mcp` to see its status and catalog counts, open 
 
 - Personal definitions: `~/.arcmind/agent/settings.json`
 - Project definitions: `.arcmind/settings.json` in a trusted project
-- Directly entered tokens, directly entered stdio environment values, and OAuth material: `~/.arcmind/agent/auth.json`, written with file mode `0600`
+- Directly entered tokens and directly entered stdio environment values: `~/.arcmind/agent/auth.json`, written with file mode `0600`
 - Environment-backed values: remain in the process environment and are not copied into ArcMind files
 
 `settings.json` stores server definitions and environment-variable references, never values entered in a masked field. `auth.json` is ArcMind's existing credential store; it is protected by filesystem permissions but is not encrypted or backed by an OS keychain. Keep the account and filesystem trusted.
@@ -58,7 +59,7 @@ arcmind mcp add projectDocs --scope project --approve -- node server.mjs
 arcmind mcp remove companyDocs
 ```
 
-Use `/mcp` when you want to enter a real token or complete OAuth.
+Use `/mcp` when you want to enter a real token.
 
 ## What the model receives
 

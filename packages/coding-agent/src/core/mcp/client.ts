@@ -1,5 +1,4 @@
-import { randomUUID } from "node:crypto";
-import { discoverOAuthServerInfo, UnauthorizedError } from "@modelcontextprotocol/sdk/client/auth.js";
+import { UnauthorizedError } from "@modelcontextprotocol/sdk/client/auth.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { getDefaultEnvironment, StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { StreamableHTTPClientTransport, StreamableHTTPError } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
@@ -20,7 +19,6 @@ import {
 import { VERSION } from "../../config.ts";
 import { type AuthStorage, mcpCredentialKey } from "../auth-storage.ts";
 import type { ResolvedMcpServerConfig } from "./config.ts";
-import { ArcMindMcpOAuthProvider, startMcpOAuthCallback } from "./oauth.ts";
 
 const MAX_CATALOG_ITEMS = 10_000;
 const RECONNECT_DELAYS_MS = [250, 1_000, 4_000, 10_000] as const;
@@ -33,8 +31,6 @@ export type McpConnectionState =
 	| "reconnecting"
 	| "error"
 	| "closed";
-
-export type McpAuthRequirement = "oauth" | "token";
 
 export interface McpCatalogSnapshot {
 	serverName: string;
@@ -50,38 +46,12 @@ export interface McpCatalogSnapshot {
 export interface McpServerClientStatus {
 	state: McpConnectionState;
 	lastError?: string;
-	authRequirement?: McpAuthRequirement;
-}
-
-export interface McpLoginCallbacks {
-	signal?: AbortSignal;
-	onAuthorize(url: URL): void;
-	onProgress?(message: string): void;
-}
-
-export interface McpOAuthCallbackSettings {
-	port?: number;
-	baseUrl?: URL;
 }
 
 type McpTransport = StdioClientTransport | StreamableHTTPClientTransport;
 
 function errorMessage(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
-}
-
-function abortReason(signal: AbortSignal): Error {
-	return signal.reason instanceof Error ? signal.reason : new DOMException("Login cancelled", "AbortError");
-}
-
-async function withAbort<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
-	if (!signal) return promise;
-	if (signal.aborted) throw abortReason(signal);
-	return new Promise<T>((resolve, reject) => {
-		const onAbort = () => reject(abortReason(signal));
-		signal.addEventListener("abort", onAbort, { once: true });
-		promise.then(resolve, reject).finally(() => signal.removeEventListener("abort", onAbort));
-	});
 }
 
 export class McpServerClient {
@@ -91,7 +61,6 @@ export class McpServerClient {
 	private transport?: McpTransport;
 	private connectionState: McpConnectionState;
 	private lastError?: string;
-	private authRequirement?: McpAuthRequirement;
 	private catalog: McpCatalogSnapshot;
 	private readonly catalogListeners = new Set<() => void>();
 	private readonly statusListeners = new Set<() => void>();
@@ -128,7 +97,7 @@ export class McpServerClient {
 	}
 
 	status(): McpServerClientStatus {
-		return { state: this.connectionState, lastError: this.lastError, authRequirement: this.authRequirement };
+		return { state: this.connectionState, lastError: this.lastError };
 	}
 
 	subscribeCatalog(listener: () => void): () => void {
@@ -158,7 +127,6 @@ export class McpServerClient {
 
 	private setState(state: McpConnectionState, error?: unknown): void {
 		this.connectionState = state;
-		if (state !== "auth_required") this.authRequirement = undefined;
 		if (error !== undefined) this.lastError = this.safeErrorMessage(error);
 		else if (state === "connected") this.lastError = undefined;
 		for (const listener of this.statusListeners) listener();
@@ -212,17 +180,7 @@ export class McpServerClient {
 		);
 	}
 
-	private oauthProvider(redirectUrl: URL, onRedirect: (url: URL) => void, state?: string): ArcMindMcpOAuthProvider {
-		return new ArcMindMcpOAuthProvider({
-			serverName: this.config.name,
-			redirectUrl,
-			authStorage: this.authStorage,
-			onRedirect,
-			state,
-		});
-	}
-
-	private createTransport(options: { oauthProvider?: ArcMindMcpOAuthProvider } = {}): McpTransport {
+	private createTransport(): McpTransport {
 		if (this.config.transport === "stdio") {
 			const transport = new StdioClientTransport({
 				command: this.config.command!,
@@ -240,34 +198,8 @@ export class McpServerClient {
 			...(this.config.bearerToken ? { Authorization: `Bearer ${this.config.bearerToken}` } : {}),
 		};
 		return new StreamableHTTPClientTransport(this.config.url!, {
-			authProvider: options.oauthProvider,
 			requestInit: { headers },
 		});
-	}
-
-	private startupOAuthProvider(): ArcMindMcpOAuthProvider | undefined {
-		if (this.config.transport !== "http") return undefined;
-		if (this.authStorage.get(mcpCredentialKey(this.config.name))?.type !== "mcp_oauth") return undefined;
-		return this.oauthProvider(new URL("http://127.0.0.1/mcp/oauth"), () => {
-			this.setState("auth_required", "MCP OAuth authorization required");
-		});
-	}
-
-	private async detectAuthRequirement(): Promise<McpAuthRequirement> {
-		if (this.config.transport !== "http") return "token";
-		if (this.authStorage.get(mcpCredentialKey(this.config.name))?.type === "mcp_oauth") return "oauth";
-		try {
-			const discovered = await discoverOAuthServerInfo(this.config.url!, {
-				fetchFn: (input, init) =>
-					fetch(input, { ...init, signal: AbortSignal.timeout(this.config.startupTimeoutMs) }),
-			});
-			return discovered.authorizationServerMetadata?.authorization_endpoint ||
-				discovered.resourceMetadata?.authorization_servers?.length
-				? "oauth"
-				: "token";
-		} catch {
-			return "token";
-		}
 	}
 
 	private async collectPages<T>(
@@ -392,7 +324,7 @@ export class McpServerClient {
 		this.setState(this.reconnectAttempt > 0 ? "reconnecting" : "connecting");
 
 		const client = this.createClient();
-		const transport = this.createTransport({ oauthProvider: this.startupOAuthProvider() });
+		const transport = this.createTransport();
 		this.attachConnection(client, transport);
 		try {
 			await client.connect(transport, this.startupRequestOptions());
@@ -412,7 +344,6 @@ export class McpServerClient {
 				error instanceof UnauthorizedError ||
 				(error instanceof StreamableHTTPError && error.code === 401)
 			) {
-				this.authRequirement = await this.detectAuthRequirement();
 				this.setState("auth_required", "Authentication required");
 			} else {
 				this.setState("error", error);
@@ -472,48 +403,6 @@ export class McpServerClient {
 
 	getPrompt(name: string, args?: Record<string, string>, signal?: AbortSignal): Promise<GetPromptResult> {
 		return this.requireClient().getPrompt({ name, arguments: args }, this.requestOptions(signal));
-	}
-
-	async login(callbacks: McpLoginCallbacks, callbackSettings: McpOAuthCallbackSettings = {}): Promise<void> {
-		if (this.config.transport !== "http") {
-			throw new Error(`MCP server "${this.config.name}" does not support OAuth over stdio`);
-		}
-		callbacks.signal?.throwIfAborted();
-		const state = randomUUID();
-		const callback = await startMcpOAuthCallback({ state, ...callbackSettings });
-		const codePromise = callback.waitForCode;
-		void codePromise.catch(() => undefined);
-		const provider = this.oauthProvider(callback.redirectUrl, callbacks.onAuthorize, state);
-		const transport = this.createTransport({ oauthProvider: provider }) as StreamableHTTPClientTransport;
-		const client = this.createClient();
-
-		try {
-			await client.connect(transport, this.startupRequestOptions());
-			callbacks.onProgress?.("Loading MCP tools…");
-			await this.replaceConnection(client, transport);
-			await callback.close();
-			return;
-		} catch (error) {
-			if (!(error instanceof UnauthorizedError)) throw error;
-			const authorizationCode = await withAbort(codePromise, callbacks.signal);
-			callbacks.onProgress?.("Completing authorization…");
-			await transport.finishAuth(authorizationCode);
-			await client.close().catch(() => undefined);
-			await this.closeConnection();
-			callbacks.onProgress?.("Loading MCP tools…");
-			await this.start();
-		} finally {
-			await callback.close().catch(() => undefined);
-			if (this.client !== client) await client.close().catch(() => undefined);
-		}
-	}
-
-	private async replaceConnection(client: Client, transport: McpTransport): Promise<void> {
-		await this.closeConnection();
-		this.attachConnection(client, transport);
-		await this.loadCatalog(client);
-		this.reconnectAttempt = 0;
-		this.setState("connected");
 	}
 
 	private async closeConnection(): Promise<void> {

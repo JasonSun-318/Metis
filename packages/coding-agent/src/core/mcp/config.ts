@@ -26,8 +26,6 @@ export interface ResolvedMcpServerConfig {
 
 export interface ResolvedMcpSettings {
 	servers: ResolvedMcpServerConfig[];
-	oauthCallbackPort?: number;
-	oauthCallbackUrl?: URL;
 }
 
 function positiveSeconds(value: unknown, key: string, fallback: number): number {
@@ -157,32 +155,9 @@ export function resolveMcpSettings(
 	cwd: string,
 	environment: NodeJS.ProcessEnv = process.env,
 ): ResolvedMcpSettings {
-	const oauthCallbackPort = settings.getMcpOAuthCallbackPort();
-	if (
-		oauthCallbackPort !== undefined &&
-		(!Number.isInteger(oauthCallbackPort) || oauthCallbackPort < 1 || oauthCallbackPort > 65_535)
-	) {
-		throw new Error("Invalid mcpOAuthCallbackPort; expected an integer from 1 to 65535");
-	}
-
-	const callback = settings.getMcpOAuthCallbackUrl();
-	let oauthCallbackUrl: URL | undefined;
-	if (callback !== undefined) {
-		try {
-			oauthCallbackUrl = new URL(callback);
-		} catch {
-			throw new Error("Invalid mcpOAuthCallbackUrl; expected a valid URL");
-		}
-		if (oauthCallbackUrl.protocol !== "http:" && oauthCallbackUrl.protocol !== "https:") {
-			throw new Error("Invalid mcpOAuthCallbackUrl; expected http or https");
-		}
-	}
-
 	return {
 		servers: Object.entries(settings.getMcpServers()).map(([name, server]) =>
 			resolveMcpServerSettings(name, server, cwd, environment),
 		),
-		oauthCallbackPort,
-		oauthCallbackUrl,
 	};
 }
