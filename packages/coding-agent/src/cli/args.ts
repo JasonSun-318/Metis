@@ -288,7 +288,8 @@ ${chalk.bold("Commands:")}
   ${APP_NAME} update [source|self|arcmind]   Update arcmind (use --all for arcmind and extensions)
   ${APP_NAME} list                      List installed extensions from settings
   ${APP_NAME} config [-l]               Open TUI to enable/disable package resources (Tab switches scope)
-  ${APP_NAME} <command> --help          Show help for install/remove/uninstall/update/list/config
+  ${APP_NAME} mcp <add|list|get|remove>  Manage MCP server configuration
+  ${APP_NAME} <command> --help          Show help for install/remove/uninstall/update/list/config/mcp
 
 ${chalk.bold("Options:")}
   --provider <name>              Provider name (default: google)
