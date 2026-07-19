@@ -54,17 +54,20 @@ import {
 } from "./runtime-recovery.ts";
 import {
 	isSessionControlEntryType,
+	isSubagentControlEntryType,
 	parseSessionControlEntry,
 	type SessionControlEntry,
 	type SessionControlPayload,
 	type SessionPermissionDecisionEntry,
+	type SubagentControlEntry,
+	type SubagentControlPayload,
 } from "./session-control.ts";
 import { assertValidSessionId, createSessionId } from "./session-id.ts";
 import { CorruptSessionError, openSessionJournal, type SessionJournal } from "./session-journal.ts";
 import { SessionLease, SessionLeaseError } from "./session-lease.ts";
 import { type CwdOrigin, getOwnedManagedWorkspace, publishManagedWorkspaceCopy } from "./session-workspace.ts";
 
-export const CURRENT_SESSION_VERSION = 6;
+export const CURRENT_SESSION_VERSION = 7;
 
 interface ImageReference {
 	type: "image_ref";
@@ -122,6 +125,12 @@ export function getSessionImageDir(sessionFile: string): string {
 
 export function getSessionToolOutputDir(sessionFile: string): string {
 	return getSessionAssetDir(sessionFile, "tool-results");
+}
+
+/** Parent-ID-owned directory for first-class child session journals. */
+export function getSessionSubagentDir(agentDir: string, parentSessionId: string): string {
+	assertValidSessionId(parentSessionId);
+	return join(resolvePath(agentDir), "subagents", parentSessionId);
 }
 
 /**
@@ -470,6 +479,11 @@ export interface SessionHeader {
 	permissionMode?: PermissionMode;
 	reviewerEnabled?: boolean;
 	parentSession?: string;
+	subagent?: {
+		agentId: string;
+		name: string;
+		parentSessionId: string;
+	};
 }
 
 export type { CwdOrigin } from "./session-workspace.ts";
@@ -481,6 +495,7 @@ export interface NewSessionOptions {
 	cwdOrigin?: CwdOrigin;
 	permissionMode?: PermissionMode;
 	reviewerEnabled?: boolean;
+	subagent?: SessionHeader["subagent"];
 }
 
 export interface ImportSessionOptions {
@@ -661,6 +676,8 @@ export type ReadonlySessionManager = Pick<
 	| "getMode"
 	| "getCwdOrigin"
 	| "getPermissionSettings"
+	| "getSubagentsEnabled"
+	| "getDurableJournalSnapshot"
 	| "getEntries"
 	| "getTree"
 	| "getSessionName"
@@ -698,6 +715,8 @@ function readonlySessionSnapshot(manager: SessionManager): ReadonlySessionManage
 		getMode: () => manager.getMode(),
 		getCwdOrigin: () => manager.getCwdOrigin(),
 		getPermissionSettings: () => manager.getPermissionSettings(),
+		getSubagentsEnabled: () => manager.getSubagentsEnabled(),
+		getDurableJournalSnapshot: () => manager.getDurableJournalSnapshot(),
 		getEntries: () => manager.getEntries(),
 		getTree: () => manager.getTree(),
 		getSessionName: () => manager.getSessionName(),
@@ -789,6 +808,13 @@ function migrateV5ToV6(entries: FileEntry[]): void {
 	}
 }
 
+/** Migrate v6 → v7: reserve child markers and first-class subagent controls. */
+function migrateV6ToV7(entries: FileEntry[]): void {
+	for (const entry of entries) {
+		if (entry.type === "session") entry.version = 7;
+	}
+}
+
 /**
  * Run all necessary migrations to bring entries to current version.
  * Mutates entries in place. Returns true if any migration was applied.
@@ -804,8 +830,14 @@ function migrateToCurrentVersion(entries: FileEntry[]): boolean {
 	) {
 		throw new TypeError("Runtime control entries require a v5 session header");
 	}
-	if (version < 6 && entries.some((entry) => isSessionControlEntryType(entry.type))) {
+	if (
+		version < 6 &&
+		entries.some((entry) => entry.type === "session_permissions" || entry.type === "session_permission_decision")
+	) {
 		throw new TypeError("Session control entries require a v6 session header");
+	}
+	if (version < 7 && entries.some((entry) => isSubagentControlEntryType(entry.type))) {
+		throw new TypeError("Subagent control entries require a v7 session header");
 	}
 
 	if (version >= CURRENT_SESSION_VERSION) return false;
@@ -815,6 +847,7 @@ function migrateToCurrentVersion(entries: FileEntry[]): boolean {
 	if (version < 4) migrateV3ToV4(entries);
 	if (version < 5) migrateV4ToV5(entries);
 	if (version < 6) migrateV5ToV6(entries);
+	if (version < 7) migrateV6ToV7(entries);
 
 	return true;
 }
@@ -1063,6 +1096,32 @@ function validateSessionHeader(record: Record<string, unknown>, filePath: string
 	if (header.reviewerEnabled !== undefined && typeof header.reviewerEnabled !== "boolean") {
 		corruptSession(filePath, 1, "Session header has an invalid reviewerEnabled");
 	}
+	if (header.subagent !== undefined) {
+		if (!isJsonObject(header.subagent)) corruptSession(filePath, 1, "Session header has an invalid subagent marker");
+		const fields = Object.keys(header.subagent);
+		if (
+			fields.length !== 3 ||
+			!fields.includes("agentId") ||
+			!fields.includes("name") ||
+			!fields.includes("parentSessionId")
+		) {
+			corruptSession(filePath, 1, "Session header has an invalid subagent marker");
+		}
+		try {
+			assertValidSessionId(header.subagent.agentId);
+			assertValidSessionId(header.subagent.parentSessionId);
+		} catch (error) {
+			throw new CorruptSessionError(filePath, 1, "Session header has an invalid subagent id", { cause: error });
+		}
+		if (
+			typeof header.subagent.name !== "string" ||
+			header.subagent.name.length < 1 ||
+			header.subagent.name.length > 128 ||
+			/[\u0000-\u001f\u007f-\u009f]/u.test(header.subagent.name)
+		) {
+			corruptSession(filePath, 1, "Session header has an invalid subagent name");
+		}
+	}
 
 	const version = header.version ?? 1;
 	if (!Number.isInteger(version) || version < 1) {
@@ -1080,6 +1139,9 @@ function validateSessionHeader(record: Record<string, unknown>, filePath: string
 		(header.cwdOrigin !== undefined || header.permissionMode !== undefined || header.reviewerEnabled !== undefined)
 	) {
 		corruptSession(filePath, 1, "Workspace and permission header fields require a v6 session header");
+	}
+	if (version < 7 && header.subagent !== undefined) {
+		corruptSession(filePath, 1, "Subagent header fields require a v7 session header");
 	}
 	return header;
 }
@@ -1104,13 +1166,19 @@ function validateRawSessionRecords(records: readonly unknown[], filePath: string
 			continue;
 		}
 		if (isSessionControlEntryType(type)) {
-			if (version < 6) {
+			if (isSubagentControlEntryType(type) && version < 7) {
+				corruptSession(filePath, index + 1, "Subagent control entries require a v7 session header");
+			}
+			if (!isSubagentControlEntryType(type) && version < 6) {
 				corruptSession(filePath, index + 1, "Session control entries require a v6 session header");
 			}
 			parseSessionControlRecord(records[index], index + 1, filePath);
 			continue;
 		}
 		if (type.startsWith("session_permission")) {
+			corruptSession(filePath, index + 1, `Unknown session control entry type: ${type}`);
+		}
+		if (type.startsWith("subagent_")) {
 			corruptSession(filePath, index + 1, `Unknown session control entry type: ${type}`);
 		}
 	}
@@ -1779,6 +1847,7 @@ interface ManagedSessionState {
 	sessionId: string;
 	cwdOrigin: CwdOrigin;
 	permissionSettings: PermissionSettings;
+	subagentsEnabled: boolean;
 	sessionFile: string | undefined;
 	/** Canonical path pinned when a persisted session is opened. */
 	storagePath?: string;
@@ -1809,6 +1878,14 @@ function reducePermissionSettings(entries: readonly FileEntry[]): PermissionSett
 	return settings;
 }
 
+function reduceSubagentsEnabled(entries: readonly FileEntry[]): boolean {
+	let enabled = false;
+	for (const entry of entries.slice(1)) {
+		if (entry.type === "subagent_mode_change") enabled = entry.enabled;
+	}
+	return enabled;
+}
+
 function buildManagedSessionState(
 	fileEntries: FileEntry[],
 	sessionFile?: string,
@@ -1831,6 +1908,7 @@ function buildManagedSessionState(
 	const labelTimestampsById = new Map<string, string>();
 	let leafId: string | null = null;
 	const permissionSettings = reducePermissionSettings(rawFileEntries);
+	const subagentsEnabled = reduceSubagentsEnabled(rawFileEntries);
 	for (const rawEntry of rawFileEntries.slice(1)) {
 		recordIds.add((rawEntry as SessionEntry | RuntimeControlEntry | SessionControlEntry).id);
 	}
@@ -1852,6 +1930,7 @@ function buildManagedSessionState(
 		sessionId: header.id,
 		cwdOrigin: header.cwdOrigin ?? "user-selected",
 		permissionSettings,
+		subagentsEnabled,
 		sessionFile,
 		storagePath,
 		toolOutputDir: storagePath ? getSessionAssetDirFromStoragePath(storagePath, "tool-results") : undefined,
@@ -2063,6 +2142,7 @@ export class SessionManager {
 	private sessionId: string = "";
 	private cwdOrigin: CwdOrigin = "user-selected";
 	private permissionSettings: PermissionSettings = defaultPermissionSettings(DEFAULT_AGENT_MODE);
+	private subagentsEnabled = false;
 	private sessionFile: string | undefined;
 	private storagePath: string | undefined;
 	private toolOutputDir: string | undefined;
@@ -2149,6 +2229,18 @@ export class SessionManager {
 		const reviewerEnabled = options?.reviewerEnabled ?? permissionDefaults.reviewerEnabled;
 		if (!isPermissionMode(permissionMode)) throw new TypeError("Invalid permission mode");
 		if (typeof reviewerEnabled !== "boolean") throw new TypeError("reviewerEnabled must be a boolean");
+		if (options?.subagent) {
+			assertValidSessionId(options.subagent.agentId);
+			assertValidSessionId(options.subagent.parentSessionId);
+			if (
+				typeof options.subagent.name !== "string" ||
+				options.subagent.name.length < 1 ||
+				options.subagent.name.length > 128 ||
+				/[\u0000-\u001f\u007f-\u009f]/u.test(options.subagent.name)
+			) {
+				throw new TypeError("Invalid subagent name");
+			}
+		}
 		const header: SessionHeader = {
 			type: "session",
 			version: CURRENT_SESSION_VERSION,
@@ -2160,6 +2252,7 @@ export class SessionManager {
 			permissionMode,
 			reviewerEnabled,
 			parentSession: options?.parentSession,
+			subagent: options?.subagent,
 		};
 		let state: ManagedSessionState;
 		if (this.persist) {
@@ -2181,6 +2274,7 @@ export class SessionManager {
 		this.sessionId = state.sessionId;
 		this.cwdOrigin = state.cwdOrigin;
 		this.permissionSettings = state.permissionSettings;
+		this.subagentsEnabled = state.subagentsEnabled;
 		this.sessionFile = state.sessionFile;
 		this.storagePath = state.storagePath;
 		this.toolOutputDir = state.toolOutputDir;
@@ -2201,6 +2295,7 @@ export class SessionManager {
 			sessionId: this.sessionId,
 			cwdOrigin: this.cwdOrigin,
 			permissionSettings: this.permissionSettings,
+			subagentsEnabled: this.subagentsEnabled,
 			sessionFile: this.sessionFile,
 			storagePath: this.storagePath,
 			toolOutputDir: this.toolOutputDir,
@@ -2456,6 +2551,21 @@ export class SessionManager {
 		return this._appendSessionControl({ type: "session_permission_decision", ...decision }).id;
 	}
 
+	/** Append one validated first-class subagent control without advancing the transcript leaf. */
+	appendSubagentControl(payload: SubagentControlPayload): string {
+		const entry = this._appendSessionControl(payload);
+		if (!isSubagentControlEntryType(entry.type)) throw new Error("Unexpected session control entry");
+		return entry.id;
+	}
+
+	/** Persist the user-facing Ultra orchestration flag independently from provider thinking. */
+	setSubagentsEnabled(enabled: boolean): string {
+		if (typeof enabled !== "boolean") throw new TypeError("enabled must be a boolean");
+		const id = this.appendSubagentControl({ type: "subagent_mode_change", enabled });
+		this.subagentsEnabled = enabled;
+		return id;
+	}
+
 	/** Raw journal-order snapshot for runtime reduction; callers cannot mutate manager state. */
 	getDurableJournalSnapshot(): readonly FileEntry[] {
 		this._assertOpen();
@@ -2700,6 +2810,11 @@ export class SessionManager {
 	/** Effective permission settings after reducing session control records. */
 	getPermissionSettings(): PermissionSettings {
 		return { ...this.permissionSettings };
+	}
+
+	/** Effective Ultra orchestration flag after reducing journal-order controls. */
+	getSubagentsEnabled(): boolean {
+		return this.subagentsEnabled;
 	}
 
 	/**
@@ -3268,6 +3383,17 @@ export class SessionManager {
 				cwdOrigin: header.cwdOrigin ?? "user-selected",
 				agentDir: options.agentDir ?? getDefaultAgentDir(),
 			});
+			const subagentDir = getSessionSubagentDir(options.agentDir ?? getDefaultAgentDir(), header.id);
+			try {
+				rmSync(subagentDir, { recursive: true, force: true });
+				if (existsSync(subagentDir)) throw new Error("subagent directory still exists after removal");
+			} catch (error) {
+				return {
+					ok: false,
+					method: "unlink",
+					error: `subagents: ${error instanceof Error ? error.message : String(error)}`,
+				};
+			}
 			const ownedTargets = [
 				{ label: "image", path: imageDir },
 				{ label: "tool output", path: toolOutputDir },

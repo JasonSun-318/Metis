@@ -12,6 +12,7 @@ import type { BashResult } from "../../core/bash-executor.ts";
 import type { CompactionResult } from "../../core/compaction/index.ts";
 import type { SessionEntry, SessionTreeNode } from "../../core/session-manager.ts";
 import type { SourceInfo } from "../../core/source-info.ts";
+import type { ThinkingSelection } from "../../core/thinking-selection.ts";
 
 // ============================================================================
 // RPC Commands (stdin)
@@ -34,7 +35,7 @@ export type RpcCommand =
 	| { id?: string; type: "get_available_models" }
 
 	// Thinking
-	| { id?: string; type: "set_thinking_level"; level: ThinkingLevel }
+	| { id?: string; type: "set_thinking_level"; level: ThinkingSelection }
 	| { id?: string; type: "cycle_thinking_level" }
 
 	// Queue modes

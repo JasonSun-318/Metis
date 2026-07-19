@@ -6,11 +6,33 @@
 			"jsonrpc": "2.0",
 			"id": "client-1",
 			"result": {
-				"protocolVersion": 1,
+				"protocolVersion": 2,
 				"server": { "name": "arcmind-app-server", "version": "0.80.6" },
 				"serverEpoch": "33333333-3333-4333-8333-333333333333",
 				"capabilities": ["interaction.v1", "session.cursor.v1"]
 			}
+		}
+	},
+	{
+		"direction": "client",
+		"method": "session/setThinkingSelection",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "client-thinking",
+			"result": {
+				"thinkingSelection": "ultra",
+				"actualThinkingLevel": "max",
+				"availableThinkingSelections": ["off", "high", "max", "ultra"]
+			}
+		}
+	},
+	{
+		"direction": "client",
+		"method": "subagent/readItems",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "client-subagent-items",
+			"result": { "items": [], "nextBeforeItemId": null }
 		}
 	},
 	{
@@ -146,6 +168,10 @@
 					"nextBeforeItemId": null,
 					"activeTurnId": null,
 					"pendingInteractions": [],
+					"thinkingSelection": "off",
+					"actualThinkingLevel": "off",
+					"availableThinkingSelections": ["off", "ultra"],
+					"subagents": [],
 					"serverEpoch": "33333333-3333-4333-8333-333333333333",
 					"cursor": 42
 				}

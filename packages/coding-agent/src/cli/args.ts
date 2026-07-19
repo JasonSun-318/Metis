@@ -2,12 +2,12 @@
  * CLI argument parsing and help display
  */
 
-import type { ThinkingLevel } from "@arcmind/agent-core";
 import chalk from "chalk";
 import { APP_NAME, CONFIG_DIR_NAME, ENV_AGENT_DIR, ENV_SESSION_DIR } from "../config.ts";
 import { type AgentMode, isAgentMode } from "../core/agent-mode.ts";
 import type { ExtensionFlag } from "../core/extensions/types.ts";
 import { isPermissionMode, type PermissionMode } from "../core/permission-mode.ts";
+import { isThinkingSelection, type ThinkingSelection } from "../core/thinking-selection.ts";
 
 export type Mode = "text" | "json" | "rpc";
 
@@ -17,7 +17,7 @@ export interface Args {
 	apiKey?: string;
 	systemPrompt?: string;
 	appendSystemPrompt?: string[];
-	thinking?: ThinkingLevel;
+	thinking?: ThinkingSelection;
 	continue?: boolean;
 	resume?: boolean;
 	help?: boolean;
@@ -60,11 +60,20 @@ export interface Args {
 	diagnostics: Array<{ type: "warning" | "error"; message: string }>;
 }
 
-const VALID_THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
-
-export function isValidThinkingLevel(level: string): level is ThinkingLevel {
-	return VALID_THINKING_LEVELS.includes(level as ThinkingLevel);
+export function isValidThinkingLevel(level: string): level is ThinkingSelection {
+	return isThinkingSelection(level);
 }
+
+const VALID_THINKING_SELECTIONS: readonly ThinkingSelection[] = [
+	"off",
+	"minimal",
+	"low",
+	"medium",
+	"high",
+	"xhigh",
+	"max",
+	"ultra",
+];
 
 export function parseArgs(args: string[]): Args {
 	const result: Args = {
@@ -186,7 +195,7 @@ export function parseArgs(args: string[]): Args {
 			} else {
 				result.diagnostics.push({
 					type: "warning",
-					message: `Invalid thinking level "${level}". Valid values: ${VALID_THINKING_LEVELS.join(", ")}`,
+					message: `Invalid thinking level "${level}". Valid values: ${VALID_THINKING_SELECTIONS.join(", ")}`,
 				});
 			}
 		} else if (arg === "--print" || arg === "-p") {
@@ -320,7 +329,7 @@ ${chalk.bold("Options:")}
                                  Applies to built-in, extension, and custom tools
   --exclude-tools, -xt <tools>   Comma-separated denylist of tool names to disable
                                  Applies to built-in, extension, and custom tools
-  --thinking <level>             Set thinking level: off, minimal, low, medium, high, xhigh, max
+  --thinking <level>             Set thinking: off, minimal, low, medium, high, xhigh, max, ultra
   --extension, -e <path>         Load an extension file (can be used multiple times)
   --no-extensions, -ne           Disable extension discovery (explicit -e paths still work)
   --skill <path>                 Load a skill file or directory (can be used multiple times)
@@ -386,6 +395,9 @@ ${chalk.bold("Examples:")}
 
   # Start with a specific thinking level
   ${APP_NAME} --thinking high "Solve this complex problem"
+
+  # Use maximum model reasoning plus subagent orchestration
+  ${APP_NAME} --thinking ultra "Handle this multi-part task"
 
   # Read-only mode (no file modifications possible)
   ${APP_NAME} --tools read,grep,find,ls -p "Review the code in src/"

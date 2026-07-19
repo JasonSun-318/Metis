@@ -136,6 +136,7 @@ import { appendSyntheticRuntimeToolResult } from "./runtime-recovery-materialize
 import { SandboxRuntimeCoordinator } from "./sandbox-runtime.ts";
 import type { BranchSummaryEntry, CompactionEntry, SessionEntry, SessionManager } from "./session-manager.ts";
 import { CURRENT_SESSION_VERSION, getLatestCompactionEntry, type SessionHeader } from "./session-manager.ts";
+import { getHighestSupportedThinkingLevel, type ThinkingSelection } from "./thinking-selection.ts";
 import type { CwdOrigin } from "./session-workspace.ts";
 import type { SettingsManager } from "./settings-manager.ts";
 import type { SlashCommandInfo } from "./slash-commands.ts";
@@ -192,6 +193,12 @@ export type AgentSessionEvent =
 	| { type: "session_info_changed"; name: string | undefined }
 	| { type: "thinking_level_changed"; level: ThinkingLevel }
 	| {
+			type: "thinking_selection_changed";
+			selection: ThinkingSelection;
+			actualThinkingLevel: ThinkingLevel;
+			subagentsEnabled: boolean;
+	  }
+	| {
 			type: "compaction_end";
 			reason: "manual" | "threshold" | "overflow";
 			result: CompactionResult | undefined;
@@ -217,7 +224,7 @@ export interface AgentSessionConfig {
 	/** ArcMind agent directory used for global and project memory. */
 	agentDir?: string;
 	/** Models to cycle through with Ctrl+P (from --models flag) */
-	scopedModels?: Array<{ model: Model<any>; thinkingLevel?: ThinkingLevel }>;
+	scopedModels?: Array<{ model: Model<any>; thinkingLevel?: ThinkingSelection }>;
 	/** Resource loader for extensions, skills, prompts, themes, context files, and system prompt */
 	resourceLoader: ResourceLoader;
 	/** SDK custom tools registered outside extensions */
@@ -251,6 +258,10 @@ export interface AgentSessionConfig {
 	sandboxRuntime?: SandboxRuntimeCoordinator;
 	/** Explicit Windows provisioning consent shown before SRT's one-time UAC setup. */
 	requestWindowsSandboxSetup?: () => Promise<boolean>;
+	/** Host capability: only persisted primary AgentSessionRuntime instances set this. */
+	ultraAvailable?: boolean;
+	/** Host-owned prompt suffix used for runtime coordination profiles. */
+	additionalSystemPrompt?: string | (() => string | undefined);
 }
 
 export interface ExtensionBindings {
@@ -398,7 +409,7 @@ export class AgentSession {
 	readonly sessionManager: SessionManager;
 	readonly settingsManager: SettingsManager;
 
-	private _scopedModels: Array<{ model: Model<any>; thinkingLevel?: ThinkingLevel }>;
+	private _scopedModels: Array<{ model: Model<any>; thinkingLevel?: ThinkingSelection }>;
 
 	// Event subscription state
 	private _unsubscribeAgent?: () => void;
@@ -492,10 +503,14 @@ export class AgentSession {
 	private _baseSystemPromptOptions!: BuildSystemPromptOptions;
 	private _systemPromptOverride?: string;
 	private readonly _permissionPolicy: PermissionPolicy;
+	private _requestPermissionApproval?: RequestPermissionApproval;
 	private readonly _permissionGrants = new Map<string, AuthorizedPermissionAction>();
 	private readonly _permissionDenials = new Map<string, string>();
 	private readonly _sandboxRuntime: SandboxRuntimeCoordinator;
 	private _runtimeShellCommandPrefix?: string;
+	private readonly _ultraAvailable: boolean;
+	private _additionalSystemPrompt?: string | (() => string | undefined);
+	private readonly _trustedControlToolNames = new Set<string>();
 
 	constructor(config: AgentSessionConfig) {
 		this.agent = config.agent;
@@ -514,11 +529,17 @@ export class AgentSession {
 		this._excludedToolNames = config.excludedToolNames ? new Set(config.excludedToolNames) : undefined;
 		this._baseToolsOverride = config.baseToolsOverride;
 		this._sessionStartEvent = config.sessionStartEvent ?? { type: "session_start", reason: "startup" };
+		this._ultraAvailable = config.ultraAvailable === true;
+		this._additionalSystemPrompt = config.additionalSystemPrompt;
+		if (this.sessionManager.getSubagentsEnabled() && !this._ultraAvailable) {
+			throw new Error("Ultra sessions require AgentSessionRuntime");
+		}
 		const reviewerStream = config.permissionReviewerStream ?? ((request) => this._streamPermissionReview(request));
 		this._permissionPolicy = new PermissionPolicy(
 			new PermissionReviewer(reviewerStream),
 			config.requestPermissionApproval,
 		);
+		this._requestPermissionApproval = config.requestPermissionApproval;
 		this._sandboxRuntime =
 			config.sandboxRuntime ??
 			new SandboxRuntimeCoordinator({
@@ -548,11 +569,39 @@ export class AgentSession {
 	}
 
 	setPermissionApprovalHandler(handler?: RequestPermissionApproval): void {
+		this._requestPermissionApproval = handler;
 		this._permissionPolicy.setRequestApproval(handler);
+	}
+
+	/** Forward a child approval through the frontend currently attached to this session. */
+	requestPermissionApproval(request: Parameters<RequestPermissionApproval>[0]): ReturnType<RequestPermissionApproval> {
+		const handler = this._requestPermissionApproval;
+		if (!handler) return Promise.resolve({ decision: "deny", reason: "No interactive session owner is available" });
+		return handler(request);
 	}
 
 	setWindowsSandboxSetupHandler(handler?: () => Promise<boolean>): void {
 		this._sandboxRuntime.setWindowsSetupRequester(handler);
+	}
+
+	/** Install runtime-owned control tools and bypass user-action approval for them. */
+	installHostTools(definitions: readonly ToolDefinition[]): void {
+		const active = new Set(this.getActiveToolNames());
+		for (const definition of definitions) {
+			const existing = this._customTools.findIndex((candidate) => candidate.name === definition.name);
+			if (existing < 0) this._customTools.push(definition);
+			else this._customTools[existing] = definition;
+			this._trustedControlToolNames.add(definition.name);
+			this._allowedToolNames?.add(definition.name);
+			active.add(definition.name);
+		}
+		this._refreshToolRegistry({ activeToolNames: [...active] });
+	}
+
+	setHostSystemPrompt(additional?: string | (() => string | undefined)): void {
+		this._additionalSystemPrompt = additional;
+		this._baseSystemPrompt = this._rebuildSystemPrompt(this.getActiveToolNames());
+		this.agent.state.systemPrompt = this._baseSystemPrompt;
 	}
 
 	private async _getRequiredRequestAuth(model: Model<any>): Promise<{
@@ -647,6 +696,9 @@ export class AgentSession {
 		return {
 			...tool,
 			execute: async (toolCallId, args, signal, onUpdate) => {
+				if (this._trustedControlToolNames.has(tool.name)) {
+					return tool.execute(toolCallId, args, signal, onUpdate);
+				}
 				const denial = this._permissionDenials.get(toolCallId);
 				if (denial) throw new Error(denial);
 				if (!this._permissionGrants.has(toolCallId)) {
@@ -887,7 +939,8 @@ export class AgentSession {
 							: args.command
 						: undefined;
 				try {
-					await this._authorizePermissionAction({
+					if (!this._trustedControlToolNames.has(context.toolCall.name)) {
+						await this._authorizePermissionAction({
 						actionId: context.toolCall.id,
 						toolName: context.toolCall.name,
 						provenance,
@@ -895,8 +948,9 @@ export class AgentSession {
 						actionSource: "assistant",
 						effectiveCommand: command,
 						cwd: this._cwd,
-						signal,
-					});
+							signal,
+						});
+					}
 				} catch (error) {
 					this._permissionGrants.delete(context.toolCall.id);
 					this._permissionDenials.set(
@@ -1838,12 +1892,12 @@ export class AgentSession {
 	}
 
 	/** Scoped models for cycling (from --models flag) */
-	get scopedModels(): ReadonlyArray<{ model: Model<any>; thinkingLevel?: ThinkingLevel }> {
+	get scopedModels(): ReadonlyArray<{ model: Model<any>; thinkingLevel?: ThinkingSelection }> {
 		return this._scopedModels;
 	}
 
 	/** Update scoped models for cycling */
-	setScopedModels(scopedModels: Array<{ model: Model<any>; thinkingLevel?: ThinkingLevel }>): void {
+	setScopedModels(scopedModels: Array<{ model: Model<any>; thinkingLevel?: ThinkingSelection }>): void {
 		this._scopedModels = scopedModels;
 	}
 
@@ -1911,7 +1965,12 @@ export class AgentSession {
 			promptGuidelines,
 			autoMemory,
 		};
-		return buildSystemPrompt(this._baseSystemPromptOptions);
+		const base = buildSystemPrompt(this._baseSystemPromptOptions);
+		const additional =
+			typeof this._additionalSystemPrompt === "function"
+				? this._additionalSystemPrompt()
+				: this._additionalSystemPrompt;
+		return additional?.trim() ? `${base}\n\n${additional.trim()}` : base;
 	}
 
 	// =========================================================================
@@ -2783,13 +2842,13 @@ export class AgentSession {
 		}
 
 		const previousModel = this.model;
-		const thinkingLevel = this._getThinkingLevelForModelSwitch();
+		const thinkingSelection = this.getThinkingSelection();
 		this.agent.state.model = model;
 		this.sessionManager.appendModelChange(model.provider, model.id);
 		this.settingsManager.setDefaultModelAndProvider(model.provider, model.id);
 
 		// Re-clamp thinking level for new model's capabilities
-		this.setThinkingLevel(thinkingLevel);
+		this.setThinkingSelection(thinkingSelection);
 
 		await this._emitModelSelect(model, previousModel, "set");
 	}
@@ -2818,7 +2877,7 @@ export class AgentSession {
 		const len = scopedModels.length;
 		const nextIndex = direction === "forward" ? (currentIndex + 1) % len : (currentIndex - 1 + len) % len;
 		const next = scopedModels[nextIndex];
-		const thinkingLevel = this._getThinkingLevelForModelSwitch(next.thinkingLevel);
+		const thinkingSelection = next.thinkingLevel ?? this.getThinkingSelection();
 
 		// Apply model
 		this.agent.state.model = next.model;
@@ -2829,7 +2888,7 @@ export class AgentSession {
 		// - Explicit scoped model thinking level overrides current session level
 		// - Undefined scoped model thinking level inherits the current session preference
 		// setThinkingLevel clamps to model capabilities.
-		this.setThinkingLevel(thinkingLevel);
+		this.setThinkingSelection(thinkingSelection);
 
 		await this._emitModelSelect(next.model, currentModel, "cycle");
 
@@ -2848,13 +2907,13 @@ export class AgentSession {
 		const nextIndex = direction === "forward" ? (currentIndex + 1) % len : (currentIndex - 1 + len) % len;
 		const nextModel = availableModels[nextIndex];
 
-		const thinkingLevel = this._getThinkingLevelForModelSwitch();
+		const thinkingSelection = this.getThinkingSelection();
 		this.agent.state.model = nextModel;
 		this.sessionManager.appendModelChange(nextModel.provider, nextModel.id);
 		this.settingsManager.setDefaultModelAndProvider(nextModel.provider, nextModel.id);
 
 		// Re-clamp thinking level for new model's capabilities
-		this.setThinkingLevel(thinkingLevel);
+		this.setThinkingSelection(thinkingSelection);
 
 		await this._emitModelSelect(nextModel, currentModel, "cycle");
 
@@ -2882,7 +2941,7 @@ export class AgentSession {
 
 		if (isChanging) {
 			this.sessionManager.appendThinkingLevelChange(effectiveLevel);
-			if (this.supportsThinking() || effectiveLevel !== "off") {
+			if (!this.sessionManager.getSubagentsEnabled() && (this.supportsThinking() || effectiveLevel !== "off")) {
 				this.settingsManager.setDefaultThinkingLevel(effectiveLevel);
 			}
 			this._emit({ type: "thinking_level_changed", level: effectiveLevel });
@@ -2892,6 +2951,54 @@ export class AgentSession {
 				previousLevel,
 			});
 		}
+	}
+
+	/** User-facing composite selection; provider requests continue to use thinkingLevel. */
+	getThinkingSelection(): ThinkingSelection {
+		return this.sessionManager.getSubagentsEnabled() ? "ultra" : this.thinkingLevel;
+	}
+
+	getAvailableThinkingSelections(): ThinkingSelection[] {
+		const selections: ThinkingSelection[] = this.getAvailableThinkingLevels();
+		if (this._ultraAvailable) selections.push("ultra");
+		return selections;
+	}
+
+	setThinkingSelection(selection: ThinkingSelection): void {
+		if (selection !== "ultra") {
+			if (this.sessionManager.getSubagentsEnabled()) this.sessionManager.setSubagentsEnabled(false);
+			this.setThinkingLevel(selection);
+			this.settingsManager.setDefaultThinkingLevel(selection);
+			this._emit({
+				type: "thinking_selection_changed",
+				selection,
+				actualThinkingLevel: this.thinkingLevel,
+				subagentsEnabled: false,
+			});
+			return;
+		}
+		if (!this._ultraAvailable || !this.sessionManager.isPersisted() || this.sessionManager.getHeader()?.subagent) {
+			throw new Error("Ultra requires a persisted primary AgentSessionRuntime");
+		}
+		if (!this.sessionManager.getSubagentsEnabled()) this.sessionManager.setSubagentsEnabled(true);
+		const actual = getHighestSupportedThinkingLevel(this.model);
+		this.setThinkingLevel(actual);
+		this.settingsManager.setDefaultThinkingLevel("ultra");
+		this._emit({
+			type: "thinking_selection_changed",
+			selection: "ultra",
+			actualThinkingLevel: actual,
+			subagentsEnabled: true,
+		});
+	}
+
+	cycleThinkingSelection(): ThinkingSelection | undefined {
+		const selections = this.getAvailableThinkingSelections();
+		if (selections.length === 0) return undefined;
+		const current = selections.indexOf(this.getThinkingSelection());
+		const next = selections[(current + 1) % selections.length];
+		this.setThinkingSelection(next);
+		return next;
 	}
 
 	/**
@@ -2924,16 +3031,6 @@ export class AgentSession {
 	 */
 	supportsThinking(): boolean {
 		return !!this.model?.reasoning;
-	}
-
-	private _getThinkingLevelForModelSwitch(explicitLevel?: ThinkingLevel): ThinkingLevel {
-		if (explicitLevel !== undefined) {
-			return explicitLevel;
-		}
-		if (!this.supportsThinking()) {
-			return this.settingsManager.getDefaultThinkingLevel() ?? DEFAULT_THINKING_LEVEL;
-		}
-		return this.thinkingLevel;
 	}
 
 	private _clampThinkingLevel(level: ThinkingLevel, _availableLevels: ThinkingLevel[]): ThinkingLevel {
@@ -3701,7 +3798,8 @@ export class AgentSession {
 		const allowedToolNames = this._allowedToolNames;
 		const excludedToolNames = this._excludedToolNames;
 		const isAllowedTool = (name: string): boolean =>
-			(!allowedToolNames || allowedToolNames.has(name)) && !excludedToolNames?.has(name);
+			this._trustedControlToolNames.has(name) ||
+			((!allowedToolNames || allowedToolNames.has(name)) && !excludedToolNames?.has(name));
 
 		const registeredTools = this._extensionRunner.getAllRegisteredTools();
 		const baseToolSource = this._baseToolsOverride ? "sdk" : "builtin";

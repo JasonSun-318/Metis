@@ -8,6 +8,8 @@ import { Composer } from "./Composer.tsx";
 import { InteractionHost } from "./InteractionHost.tsx";
 import { RecoveryBanner } from "./RecoveryBanner.tsx";
 import { SessionSidebar } from "./SessionSidebar.tsx";
+import { SubagentPanel } from "./SubagentPanel.tsx";
+import { ThinkingSelector } from "./ThinkingSelector.tsx";
 import { Transcript } from "./Transcript.tsx";
 
 interface AppProps {
@@ -210,6 +212,22 @@ export function App({ api, store }: AppProps) {
 		store.removeInteraction(response.interactionId);
 	};
 
+	const changeThinking = async (selection: AppStoreSnapshot["thinkingSelection"]) => {
+		if (!state.activeSessionId) return;
+		setBusy(true);
+		try {
+			await api.setThinkingSelection({
+				sessionId: state.activeSessionId,
+				requestId: crypto.randomUUID(),
+				selection,
+			});
+		} catch (cause) {
+			reportError(cause);
+		} finally {
+			setBusy(false);
+		}
+	};
+
 	return (
 		<div className="app-shell">
 			<SessionSidebar busy={busy || !serverReady} onCreate={createSession} onOpen={openSession} state={state} />
@@ -219,7 +237,10 @@ export function App({ api, store }: AppProps) {
 						<FolderSimple aria-hidden="true" size={19} />
 						<h1>{activeSession?.name || activeSession?.cwd || "ArcMind"}</h1>
 					</div>
-					<div className={`server-pill server-${state.supervisor.state}`}>{state.supervisor.state}</div>
+					<div className="workspace-controls">
+						{activeSession && <ThinkingSelector actualThinkingLevel={state.actualThinkingLevel} available={state.availableThinkingSelections} disabled={busy || !serverReady} onChange={(selection) => void changeThinking(selection)} value={state.thinkingSelection} />}
+						<div className={`server-pill server-${state.supervisor.state}`}>{state.supervisor.state}</div>
+					</div>
 				</header>
 				{state.supervisor.state === "failed" && (
 					<div className="server-banner" role="alert">
@@ -231,17 +252,20 @@ export function App({ api, store }: AppProps) {
 					<div className="server-banner" role="status">App Server is recovering. Your saved session is safe.</div>
 				)}
 				{activeSession ? (
-					<>
-						<RecoveryBanner session={activeSession} />
-						<Transcript
-							hasOlder={state.nextBeforeItemId !== null}
-							itemIds={state.itemOrder}
-							itemsById={state.itemsById}
-							loadingOlder={loadingOlder}
-							onLoadOlder={loadOlder}
-						/>
-						<Composer disabled={!serverReady || state.syncStatus !== "ready"} onInterrupt={interrupt} onSubmit={submit} running={running} />
-					</>
+					<div className="workspace-body">
+						<div className="conversation-column">
+							<RecoveryBanner session={activeSession} />
+							<Transcript
+								hasOlder={state.nextBeforeItemId !== null}
+								itemIds={state.itemOrder}
+								itemsById={state.itemsById}
+								loadingOlder={loadingOlder}
+								onLoadOlder={loadOlder}
+							/>
+							<Composer disabled={!serverReady || state.syncStatus !== "ready"} onInterrupt={interrupt} onSubmit={submit} running={running} />
+						</div>
+						{state.subagents.length > 0 && <SubagentPanel api={api} sessionId={state.activeSessionId!} subagents={state.subagents} />}
+					</div>
 				) : (
 					<section className="welcome-panel">
 						<p className="eyebrow">ArcMind Desktop</p>

@@ -12,6 +12,7 @@ export const XIAOMI_MODELS = {
 		baseUrl: "https://api.xiaomimimo.com/v1",
 		compat: {"requiresReasoningContentOnAssistantMessages":true,"thinkingFormat":"deepseek"},
 		reasoning: true,
+		thinkingLevelMap: {"minimal":null},
 		input: ["text"],
 		cost: {
 			input: 0.14,
@@ -30,6 +31,7 @@ export const XIAOMI_MODELS = {
 		baseUrl: "https://api.xiaomimimo.com/v1",
 		compat: {"requiresReasoningContentOnAssistantMessages":true,"thinkingFormat":"deepseek"},
 		reasoning: true,
+		thinkingLevelMap: {"minimal":null},
 		input: ["text", "image"],
 		cost: {
 			input: 0.14,
@@ -48,6 +50,7 @@ export const XIAOMI_MODELS = {
 		baseUrl: "https://api.xiaomimimo.com/v1",
 		compat: {"requiresReasoningContentOnAssistantMessages":true,"thinkingFormat":"deepseek"},
 		reasoning: true,
+		thinkingLevelMap: {"minimal":null},
 		input: ["text"],
 		cost: {
 			input: 0.435,
@@ -66,6 +69,7 @@ export const XIAOMI_MODELS = {
 		baseUrl: "https://api.xiaomimimo.com/v1",
 		compat: {"requiresReasoningContentOnAssistantMessages":true,"thinkingFormat":"deepseek"},
 		reasoning: true,
+		thinkingLevelMap: {"minimal":null},
 		input: ["text", "image"],
 		cost: {
 			input: 0.14,
@@ -84,6 +88,7 @@ export const XIAOMI_MODELS = {
 		baseUrl: "https://api.xiaomimimo.com/v1",
 		compat: {"requiresReasoningContentOnAssistantMessages":true,"thinkingFormat":"deepseek"},
 		reasoning: true,
+		thinkingLevelMap: {"minimal":null},
 		input: ["text"],
 		cost: {
 			input: 0.435,
@@ -102,6 +107,7 @@ export const XIAOMI_MODELS = {
 		baseUrl: "https://api.xiaomimimo.com/v1",
 		compat: {"requiresReasoningContentOnAssistantMessages":true,"thinkingFormat":"deepseek"},
 		reasoning: true,
+		thinkingLevelMap: {"minimal":null},
 		input: ["text"],
 		cost: {
 			input: 1.305,

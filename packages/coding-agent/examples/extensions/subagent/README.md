@@ -2,6 +2,8 @@
 
 Delegate tasks to specialized subagents with isolated context windows.
 
+> This is the legacy process-isolation extension, not the first-class Ultra runtime. Use it when you specifically want separate ArcMind OS processes, extension-defined agent files, or chain templates. For durable parent-owned child sessions, cold resume, permission routing, and `close_agent`, see [Ultra and Subagents](../../../docs/subagents.md).
+
 ## Features
 
 - **Isolated context**: Each subagent runs in a separate `arcmind` process

@@ -22,6 +22,7 @@ import { createSessionId } from "./session-id.ts";
 import { getDefaultSessionDir, SessionManager } from "./session-manager.ts";
 import { removeOwnedManagedWorkspace, resolveNewSessionWorkspace } from "./session-workspace.ts";
 import { SettingsManager } from "./settings-manager.ts";
+import { getHighestSupportedThinkingLevel, type ThinkingSelection } from "./thinking-selection.ts";
 import { time } from "./timings.ts";
 import {
 	createBashTool,
@@ -62,8 +63,10 @@ export interface CreateAgentSessionOptions {
 	model?: Model<any>;
 	/** Thinking level. Default: from settings, else 'medium' (clamped to model capabilities) */
 	thinkingLevel?: ThinkingLevel;
+	/** User-facing composite selection; Ultra requires a persisted primary runtime host. */
+	thinkingSelection?: ThinkingSelection;
 	/** Models available for cycling (Ctrl+P in interactive mode) */
-	scopedModels?: Array<{ model: Model<any>; thinkingLevel?: ThinkingLevel }>;
+	scopedModels?: Array<{ model: Model<any>; thinkingLevel?: ThinkingSelection }>;
 
 	/**
 	 * Optional default tool suppression mode when no explicit allowlist is provided.
@@ -91,6 +94,10 @@ export interface CreateAgentSessionOptions {
 
 	/** Session manager. Default: SessionManager.create(cwd) */
 	sessionManager?: SessionManager;
+	/** @internal Host-owned capability for a persisted primary runtime. */
+	ultraAvailable?: boolean;
+	/** @internal Host-owned prompt suffix for parent/child runtime profiles. */
+	additionalSystemPrompt?: string | (() => string | undefined);
 
 	/** Settings manager. Default: SettingsManager.create(cwd, agentDir) */
 	settingsManager?: SettingsManager;
@@ -248,6 +255,9 @@ function restoredMcpToolNames(sessionManager: SessionManager, manager: McpManage
  * ```
  */
 export async function createAgentSession(options: CreateAgentSessionOptions = {}): Promise<CreateAgentSessionResult> {
+	if (options.thinkingLevel !== undefined && options.thinkingSelection !== undefined) {
+		throw new Error("thinkingLevel and thinkingSelection cannot both be supplied");
+	}
 	const agentDir = options.agentDir ? resolvePath(options.agentDir) : getDefaultAgentDir();
 	const suppliedSessionManager = options.sessionManager;
 	if (
@@ -336,6 +346,8 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		const existingSession = sessionManager.buildSessionContext();
 		const hasExistingSession = existingSession.messages.length > 0;
 		const hasThinkingEntry = sessionManager.getBranch().some((entry) => entry.type === "thinking_level_change");
+		const savedThinkingSelection = settingsManager.getDefaultThinkingLevel();
+		const savedThinkingLevel = savedThinkingSelection === "ultra" ? undefined : savedThinkingSelection;
 
 		let model = options.model;
 		let modelFallbackMessage: string | undefined;
@@ -358,7 +370,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 				isContinuing: hasExistingSession,
 				defaultProvider: settingsManager.getDefaultProvider(),
 				defaultModelId: settingsManager.getDefaultModel(),
-				defaultThinkingLevel: settingsManager.getDefaultThinkingLevel(),
+				defaultThinkingLevel: savedThinkingLevel,
 				modelRegistry,
 			});
 			model = result.model;
@@ -370,18 +382,38 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		}
 
 		let thinkingLevel = options.thinkingLevel;
+		let thinkingSelection = options.thinkingSelection;
+		if (
+			thinkingSelection === undefined &&
+			thinkingLevel === undefined &&
+			savedThinkingSelection === "ultra" &&
+			(!hasExistingSession || !hasThinkingEntry)
+		) {
+			const supportsSavedUltra =
+				options.ultraAvailable === true && sessionManager.isPersisted() && !sessionManager.getHeader()?.subagent;
+			if (supportsSavedUltra) {
+				thinkingSelection = "ultra";
+			} else {
+				thinkingLevel = getHighestSupportedThinkingLevel(model);
+				const warning = "Saved Ultra preference is unavailable in this host; using the model's highest normal thinking level.";
+				modelFallbackMessage = modelFallbackMessage ? `${modelFallbackMessage}. ${warning}` : warning;
+			}
+		}
 
 		// If session has data, restore thinking level from it
 		if (thinkingLevel === undefined && hasExistingSession) {
 			thinkingLevel = hasThinkingEntry
 				? (existingSession.thinkingLevel as ThinkingLevel)
-				: (settingsManager.getDefaultThinkingLevel() ?? DEFAULT_THINKING_LEVEL);
+				: (savedThinkingLevel ?? thinkingLevel ?? DEFAULT_THINKING_LEVEL);
 		}
 
 		// Fall back to settings default
 		if (thinkingLevel === undefined) {
-			thinkingLevel = settingsManager.getDefaultThinkingLevel() ?? DEFAULT_THINKING_LEVEL;
+			thinkingLevel = savedThinkingLevel ?? DEFAULT_THINKING_LEVEL;
 		}
+
+		if (thinkingSelection === "ultra") thinkingLevel = getHighestSupportedThinkingLevel(model);
+		else if (thinkingSelection !== undefined) thinkingLevel = thinkingSelection;
 
 		// Clamp to model capabilities
 		if (!model) {
@@ -551,7 +583,10 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			sessionStartEvent: options.sessionStartEvent,
 			requestPermissionApproval: createActionPermissionRequester(options.onPermissionRequest),
 			requestWindowsSandboxSetup: createWindowsSetupRequester(options.onPermissionRequest),
+			ultraAvailable: options.ultraAvailable,
+			additionalSystemPrompt: options.additionalSystemPrompt,
 		});
+		if (thinkingSelection === "ultra") session.setThinkingSelection("ultra");
 		completed = true;
 		return {
 			session,

@@ -97,6 +97,20 @@ class PausableRuntime implements OpenedSessionRuntime {
 		return this.projection.readItems(input);
 	}
 
+	async readSubagentItems(_input: ClientParams<"subagent/readItems">): Promise<ClientResult<"subagent/readItems">> {
+		return { items: [], nextBeforeItemId: null };
+	}
+
+	async setThinkingSelection(
+		input: ClientParams<"session/setThinkingSelection">,
+	): Promise<ClientResult<"session/setThinkingSelection">> {
+		return {
+			thinkingSelection: input.selection,
+			actualThinkingLevel: input.selection === "ultra" ? "max" : input.selection,
+			availableThinkingSelections: ["off", "high", "ultra"],
+		};
+	}
+
 	async snapshot(serverEpoch: string, currentCursor: () => number): Promise<SessionSnapshot> {
 		const result = this.projection.snapshot(serverEpoch, currentCursor());
 		this.snapshotMaterialized?.();
@@ -142,7 +156,7 @@ function initialize(id: string) {
 		jsonrpc: "2.0" as const,
 		id,
 		method: "initialize" as const,
-		params: { protocolVersion: 1, client: { name: "test", version: "1" }, capabilities: [] },
+		params: { protocolVersion: 2, client: { name: "test", version: "1" }, capabilities: [] },
 	};
 }
 

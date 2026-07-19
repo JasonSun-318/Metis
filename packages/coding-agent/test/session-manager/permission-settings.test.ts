@@ -25,7 +25,7 @@ describe("SessionManager permission settings", () => {
 		const chat = SessionManager.inMemory(directory, { mode: "chat" });
 		expect(chat.getPermissionSettings()).toEqual({ mode: "ask", reviewerEnabled: true });
 		expect(chat.getHeader()).toMatchObject({
-			version: 6,
+			version: 7,
 			cwdOrigin: "user-selected",
 			permissionMode: "ask",
 			reviewerEnabled: true,

@@ -85,6 +85,10 @@ export class SessionProjection {
 			case "server/state":
 			case "interaction/notify":
 				return clone(event);
+			case "session/thinkingSelectionChanged":
+			case "subagent/updated":
+				this.assertSession(event.sessionId);
+				return clone(event);
 			case "session/updated":
 				this.assertSession(event.session.sessionId);
 				this.session = clone(event.session);
@@ -135,7 +139,19 @@ export class SessionProjection {
 		};
 	}
 
-	snapshot(serverEpoch: string, cursor: number): SessionSnapshot {
+	snapshot(
+		serverEpoch: string,
+		cursor: number,
+		runtime: Pick<
+			SessionSnapshot,
+			"thinkingSelection" | "actualThinkingLevel" | "availableThinkingSelections" | "subagents"
+		> = {
+			thinkingSelection: "off",
+			actualThinkingLevel: "off",
+			availableThinkingSelections: ["off"],
+			subagents: [],
+		},
+	): SessionSnapshot {
 		const recentItemIds = this.itemOrder.slice(-MAX_SNAPSHOT_ITEMS);
 		const turns = this.turnOrder.slice(-MAX_SNAPSHOT_TURNS).map((turnId) => clone(this.turnsById.get(turnId)!));
 		return {
@@ -146,6 +162,7 @@ export class SessionProjection {
 				this.itemOrder.length > recentItemIds.length && recentItemIds.length > 0 ? recentItemIds[0]! : null,
 			activeTurnId: [...turns].reverse().find((turn) => turn.state === "running")?.turnId ?? null,
 			pendingInteractions: clone(this.pendingInteractions),
+			...clone(runtime),
 			serverEpoch,
 			cursor,
 		};

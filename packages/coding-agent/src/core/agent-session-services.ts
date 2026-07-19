@@ -15,6 +15,7 @@ import {
 import { type CreateAgentSessionOptions, type CreateAgentSessionResult, createAgentSession } from "./sdk.ts";
 import type { SessionManager } from "./session-manager.ts";
 import { SettingsManager } from "./settings-manager.ts";
+import type { ThinkingSelection } from "./thinking-selection.ts";
 
 /**
  * Non-fatal issues collected while creating services or sessions.
@@ -59,12 +60,15 @@ export interface CreateAgentSessionFromServicesOptions {
 	sessionStartEvent?: SessionStartEvent;
 	model?: Model<any>;
 	thinkingLevel?: ThinkingLevel;
-	scopedModels?: Array<{ model: Model<any>; thinkingLevel?: ThinkingLevel }>;
+	thinkingSelection?: ThinkingSelection;
+	scopedModels?: Array<{ model: Model<any>; thinkingLevel?: ThinkingSelection }>;
 	tools?: string[];
 	excludeTools?: CreateAgentSessionOptions["excludeTools"];
 	noTools?: CreateAgentSessionOptions["noTools"];
 	customTools?: ToolDefinition[];
 	onPermissionRequest?: CreateAgentSessionOptions["onPermissionRequest"];
+	ultraAvailable?: boolean;
+	additionalSystemPrompt?: string | (() => string | undefined);
 }
 
 /**
@@ -210,12 +214,15 @@ export async function createAgentSessionFromServices(
 		sessionManager: options.sessionManager,
 		model: options.model,
 		thinkingLevel: options.thinkingLevel,
+		thinkingSelection: options.thinkingSelection,
 		scopedModels: options.scopedModels,
 		tools: options.tools,
 		excludeTools: options.excludeTools,
 		noTools: options.noTools,
 		customTools: options.customTools,
 		onPermissionRequest: options.onPermissionRequest,
+		ultraAvailable: options.ultraAvailable,
+		additionalSystemPrompt: options.additionalSystemPrompt,
 		sessionStartEvent: options.sessionStartEvent,
 	});
 }

@@ -1,4 +1,3 @@
-import type { ThinkingLevel } from "@arcmind/agent-core";
 import type { Transport } from "@arcmind/ai";
 import {
 	type Component,
@@ -14,6 +13,7 @@ import {
 } from "@arcmind/tui";
 import { formatHttpIdleTimeoutMs, HTTP_IDLE_TIMEOUT_CHOICES } from "../../../core/http-dispatcher.ts";
 import type { DefaultProjectTrust } from "../../../core/settings-manager.ts";
+import type { ThinkingSelection } from "../../../core/thinking-selection.ts";
 import {
 	getSelectListTheme,
 	getSettingsListTheme,
@@ -29,7 +29,7 @@ const SETTINGS_SUBMENU_SELECT_LIST_LAYOUT: SelectListLayoutOptions = {
 	maxPrimaryColumnWidth: 32,
 };
 
-const THINKING_DESCRIPTIONS: Record<ThinkingLevel, string> = {
+const THINKING_DESCRIPTIONS: Record<ThinkingSelection, string> = {
 	off: "No reasoning",
 	minimal: "Very brief reasoning (~1k tokens)",
 	low: "Light reasoning (~2k tokens)",
@@ -37,6 +37,7 @@ const THINKING_DESCRIPTIONS: Record<ThinkingLevel, string> = {
 	high: "Deep reasoning (~16k tokens)",
 	xhigh: "Extra-high reasoning (~32k tokens)",
 	max: "Maximum reasoning",
+	ultra: "Maximum reasoning plus subagent orchestration",
 };
 
 const DEFAULT_PROJECT_TRUST_LABELS: Record<DefaultProjectTrust, string> = {
@@ -60,8 +61,8 @@ export interface SettingsConfig {
 	followUpMode: "all" | "one-at-a-time";
 	transport: Transport;
 	httpIdleTimeoutMs: number;
-	thinkingLevel: ThinkingLevel;
-	availableThinkingLevels: ThinkingLevel[];
+	thinkingSelection: ThinkingSelection;
+	availableThinkingSelections: ThinkingSelection[];
 	currentTheme: string;
 	terminalTheme: TerminalTheme;
 	availableThemes: string[];
@@ -91,7 +92,7 @@ export interface SettingsCallbacks {
 	onFollowUpModeChange: (mode: "all" | "one-at-a-time") => void;
 	onTransportChange: (transport: Transport) => void;
 	onHttpIdleTimeoutMsChange: (timeoutMs: number) => void;
-	onThinkingLevelChange: (level: ThinkingLevel) => void;
+	onThinkingSelectionChange: (selection: ThinkingSelection) => void;
 	onThemeChange: (theme: string) => void;
 	onThemePreview?: (theme: string) => void;
 	onHideThinkingBlockChange: (hidden: boolean) => void;
@@ -519,19 +520,19 @@ export class SettingsSelectorComponent extends Container {
 				id: "thinking",
 				label: "Thinking level",
 				description: "Reasoning depth for thinking-capable models",
-				currentValue: config.thinkingLevel,
+				currentValue: config.thinkingSelection,
 				submenu: (currentValue, done) =>
 					new SelectSubmenu(
 						"Thinking Level",
 						"Select reasoning depth for thinking-capable models",
-						config.availableThinkingLevels.map((level) => ({
+						config.availableThinkingSelections.map((level) => ({
 							value: level,
-							label: level,
+							label: level === "ultra" ? "Ultra · multi-agent" : level,
 							description: THINKING_DESCRIPTIONS[level],
 						})),
 						currentValue,
 						(value) => {
-							callbacks.onThinkingLevelChange(value as ThinkingLevel);
+							callbacks.onThinkingSelectionChange(value as ThinkingSelection);
 							done(value);
 						},
 						() => done(),

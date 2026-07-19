@@ -200,14 +200,39 @@ interface SessionEntryBase {
 First line of the file. Metadata only, not part of the tree (no `id`/`parentId`).
 
 ```json
-{"type":"session","version":3,"id":"uuid","timestamp":"2024-12-03T14:00:00.000Z","cwd":"/path/to/project"}
+{"type":"session","version":7,"id":"uuid","timestamp":"2026-07-17T14:00:00.000Z","cwd":"/path/to/project","mode":"code","cwdOrigin":"user-selected","permissionMode":"auto","reviewerEnabled":true}
 ```
+
+`mode` is `"chat"` or `"code"`. `cwdOrigin` is `"managed"` only for a workspace that ArcMind owns and may copy/delete; otherwise it is `"user-selected"`. `permissionMode` is `"ask"`, `"auto"`, or `"full"`. New sessions always write all four fields. Legacy sessions resolve to Code/Auto with review unless their stored Chat mode selects the Chat/Ask default.
 
 For sessions with a parent (created via `/fork`, `/clone`, or `newSession({ parentSession })`):
 
 ```json
-{"type":"session","version":3,"id":"uuid","timestamp":"2024-12-03T14:00:00.000Z","cwd":"/path/to/project","parentSession":"/path/to/original/session.jsonl"}
+{"type":"session","version":7,"id":"uuid","timestamp":"2026-07-17T14:00:00.000Z","cwd":"/path/to/project","mode":"chat","cwdOrigin":"user-selected","permissionMode":"ask","reviewerEnabled":true,"parentSession":"/path/to/original/session.jsonl"}
 ```
+
+`parentSession` records lineage; forks and clones inherit the source session's mode.
+
+### Session Permission Controls
+
+Permission changes and decisions are append-only journal metadata:
+
+```json
+{"type":"session_permissions","id":"a1b2c3d4","parentId":"leaf1234","timestamp":"2026-07-17T14:01:00.000Z","permissionMode":"auto","reviewerEnabled":false}
+{"type":"session_permission_decision","id":"b2c3d4e5","parentId":"leaf1234","timestamp":"2026-07-17T14:01:01.000Z","actionId":"call-1","toolName":"bash","source":"user","decision":"allow","reason":"Approved once"}
+```
+
+These records are reduced in raw journal order. They do not advance the transcript leaf, appear in `getEntries()`/`getTree()`, or become model messages. Decision records are audits, not reusable grants.
+
+### Subagent headers and controls (v7)
+
+A first-class child adds an immutable ownership marker to its normal session header:
+
+```json
+{"type":"session","version":7,"id":"child-id","timestamp":"2026-07-18T00:00:00.000Z","cwd":"/path/to/project","mode":"code","cwdOrigin":"user-selected","permissionMode":"ask","reviewerEnabled":true,"subagent":{"agentId":"child-id","name":"researcher","parentSessionId":"parent-id"}}
+```
+
+Its journal begins with `subagent_created` and then records `subagent_state` and queued/accepted/cancelled `subagent_follow_up` controls. The parent records `subagent_mode_change` for Ultra selection and receives `subagent_closed` only after successful child deletion. Active child configuration and transcript data never enter the parent journal. See [Ultra and Subagents](subagents.md).
 
 ### SessionMessageEntry
 
@@ -384,20 +409,25 @@ for (const line of lines) {
 Key methods for working with sessions programmatically.
 
 ### Static Creation Methods
-- `SessionManager.create(cwd, sessionDir?)` - New session
+- `SessionManager.create(cwd, sessionDir?, { id?, mode?, cwdOrigin?, permissionMode?, reviewerEnabled? })` - Create a session; omitted mode defaults to Code/Auto
 - `SessionManager.open(path, sessionDir?)` - Open existing session file
-- `SessionManager.continueRecent(cwd, sessionDir?)` - Continue most recent or create new
-- `SessionManager.inMemory(cwd?)` - No file persistence
-- `SessionManager.forkFrom(sourcePath, targetCwd, sessionDir?)` - Fork session from another project
+- `SessionManager.continueRecent(cwd, sessionDir?, { mode? })` - Open the latest session; use the option only when no session exists
+- `SessionManager.inMemory(cwd?, options?)` - No file persistence
+- `SessionManager.forkFrom(sourcePath, targetCwd, sessionDir?)` - Fork a session and inherit its mode
 
 ### Static Listing Methods
 - `SessionManager.list(cwd, sessionDir?, onProgress?)` - List sessions for a directory
 - `SessionManager.listAll(onProgress?)` - List all sessions across all projects
 
 ### Instance Methods - Session Management
-- `newSession(options?)` - Start a new session (options: `{ parentSession?: string }`)
+- `newSession({ mode?, parentSession? })` - Start a peer session; omitted mode inherits the current manager mode
 - `setSessionFile(path)` - Switch to a different session file
 - `createBranchedSession(leafId)` - Extract branch to new session file
+- `createBranchedSessionManager(leafId)` - Create a branch manager that inherits the source mode
+- `getMode()` - Return the effective mode, including the legacy `code` fallback
+- `getCwdOrigin()` - Return `managed` or `user-selected`
+- `getPermissionSettings()` - Return the effective permission mode and reviewer state
+- `setPermissionSettings(settings)` - Append non-tree permission metadata
 
 ### Instance Methods - Appending (all return entry ID)
 - `appendMessage(message)` - Add message

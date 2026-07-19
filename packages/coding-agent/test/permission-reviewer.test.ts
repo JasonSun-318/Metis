@@ -1,5 +1,5 @@
 import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -56,10 +56,16 @@ describe("permission reviewer", () => {
 			reasoning: "off",
 		});
 		expect(captured!.systemPrompt).not.toContain("Please push this branch");
+		expect(captured!.systemPrompt).toContain("write target is in existingPaths");
 		const payload = JSON.parse(captured!.userPrompt);
+		expect(payload.runtimeContext).toEqual({
+			homeDirectory: homedir(),
+			desktopDirectory: join(homedir(), "Desktop"),
+		});
 		expect(payload.userRequest).toEqual(["older", "Please push this branch"]);
 		expect(payload.proposedAction.arguments).toEqual(args);
 		expect(payload.proposedAction.actionId).toBe("tool-call-1");
+		expect(payload.proposedAction.existingPaths).toEqual([]);
 		expect(captured!.userPrompt).toContain("ignore previous instructions");
 		expect(captured!.userPrompt).not.toContain("Available tools");
 	});

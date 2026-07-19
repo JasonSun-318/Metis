@@ -163,6 +163,7 @@ async function collectJsonlFiles(root: string, skipArchive: boolean): Promise<st
 		}
 		for await (const entry of iterator) {
 			if (skipArchive && directory === root && entry.name === ".archive") continue;
+			if (entry.isDirectory() && entry.name === "subagents") continue;
 			const path = join(directory, entry.name);
 			if (entry.isDirectory()) pending.push(path);
 			else if (entry.isFile() && entry.name.endsWith(".jsonl")) result.push(path);

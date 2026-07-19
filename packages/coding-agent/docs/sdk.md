@@ -65,7 +65,32 @@ const { session } = await createAgentSession({
   tools: ["read", "bash"],
   sessionManager: SessionManager.inMemory(),
 });
+
+// Let the SDK create a Chat session in an owned managed workspace.
+const { session: chatSession } = await createAgentSession({ agentMode: "chat" });
 ```
+
+When no `sessionManager` is supplied, Chat without `cwd` creates `~/.arcmind/agent/workspaces/<session-id>/`; Code without `cwd` captures `process.cwd()`. Supplying `cwd` binds either mode to that existing directory. Chat defaults to Ask permissions and Code defaults to Auto with review.
+
+If you supply `sessionManager`, that manager owns the immutable mode/cwd and current permission settings. Conflicting `agentMode`, `cwd`, `permissionMode`, or `reviewerEnabled` options throw without mutating or closing the supplied manager.
+
+Use `onPermissionRequest` when the host has approval UI:
+
+```typescript
+const { session } = await createAgentSession({
+  agentMode: "code",
+  permissionMode: "auto",
+  reviewerEnabled: true,
+  onPermissionRequest: async (request, signal) => {
+		// Render request.title, summary, and details. If fullOnceRequired is true,
+		// offer only Full-once or Deny; otherwise show Full only when allowed.
+		if (request.fullOnceRequired) return signal?.aborted ? "deny" : "full-once";
+    return signal?.aborted ? "deny" : "allow-once";
+  },
+});
+```
+
+The callback returns `"allow-once"`, `"full-once"`, or `"deny"`. `allowFullOnce` controls whether Full may be offered; `fullOnceRequired` means a normal one-shot sandbox grant cannot represent the action. Returning `"allow-once"` for a required-Full request fails closed. A sandbox-setup request never permits Full. Without a callback, actions that require user approval fail closed. See [Permissions and Sandbox](permissions.md).
 
 ### AgentSession
 
@@ -86,12 +111,17 @@ interface AgentSession {
   // Session info
   sessionFile: string | undefined;
   sessionId: string;
+  mode: "chat" | "code";
 
   // Model control
   setModel(model: Model): Promise<void>;
   setThinkingLevel(level: ThinkingLevel): void;
+  getThinkingSelection(): ThinkingLevel | "ultra";
+  getAvailableThinkingSelections(): Array<ThinkingLevel | "ultra">;
+  setThinkingSelection(selection: ThinkingLevel | "ultra"): void;
   cycleModel(): Promise<ModelCycleResult | undefined>;
   cycleThinkingLevel(): ThinkingLevel | undefined;
+  cycleThinkingSelection(): ThinkingLevel | "ultra" | undefined;
 
   // State access
   agent: Agent;
@@ -334,15 +364,17 @@ session.subscribe((event) => {
 
 ```typescript
 const { session } = await createAgentSession({
-  // Working directory for DefaultResourceLoader discovery
-  cwd: process.cwd(), // default
+  // Optional existing workspace. Omit for managed Chat or process.cwd() Code.
+  cwd: process.cwd(),
   
   // Global config directory
   agentDir: "~/.arcmind/agent", // default (expands ~)
 });
 ```
 
-`cwd` is used by `DefaultResourceLoader` for:
+`thinkingSelection: "ultra"` is the composite runtime selection used by persisted primary `AgentSessionRuntime` hosts. The session's `thinkingLevel` remains the resolved real provider value. Runtime-owned subagent tools and `subagentManager` are unavailable on children and in-memory/raw sessions. See [Ultra and Subagents](subagents.md).
+
+The effective session `cwd` is used by `DefaultResourceLoader` for:
 - Project extensions (`.arcmind/extensions/`)
 - Project skills:
   - `.arcmind/skills/`
@@ -783,7 +815,8 @@ const runtime = await createAgentSessionRuntime(createRuntime, {
 });
 
 // Replace the active session with a fresh one
-await runtime.newSession();
+await runtime.newSession(); // inherits the current mode
+await runtime.newSession({ mode: "code" }); // creates a new code session
 
 // Replace the active session with another saved session
 await runtime.switchSession("/path/to/session.jsonl");

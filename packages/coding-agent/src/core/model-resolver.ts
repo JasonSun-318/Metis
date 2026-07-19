@@ -9,6 +9,7 @@ import { minimatch } from "minimatch";
 import { isValidThinkingLevel } from "../cli/args.ts";
 import { DEFAULT_THINKING_LEVEL } from "./defaults.ts";
 import type { ModelRegistry } from "./model-registry.ts";
+import { getHighestSupportedThinkingLevel, type ThinkingSelection } from "./thinking-selection.ts";
 
 /** Default model IDs for each known provider */
 export const defaultModelPerProvider: Record<KnownProvider, string> = {
@@ -51,7 +52,7 @@ export const defaultModelPerProvider: Record<KnownProvider, string> = {
 export interface ScopedModel {
 	model: Model<Api>;
 	/** Thinking level if explicitly specified in pattern (e.g., "model:high"), undefined otherwise */
-	thinkingLevel?: ThinkingLevel;
+	thinkingLevel?: ThinkingSelection;
 }
 
 /**
@@ -155,7 +156,7 @@ function tryMatchModel(modelPattern: string, availableModels: Model<Api>[]): Mod
 export interface ParsedModelResult {
 	model: Model<Api> | undefined;
 	/** Thinking level if explicitly specified in pattern, undefined otherwise */
-	thinkingLevel?: ThinkingLevel;
+	thinkingLevel?: ThinkingSelection;
 	warning: string | undefined;
 }
 
@@ -279,7 +280,7 @@ export async function resolveModelScopeWithDiagnostics(
 			// Extract optional thinking level suffix (e.g., "provider/*:high")
 			const colonIdx = pattern.lastIndexOf(":");
 			let globPattern = pattern;
-			let thinkingLevel: ThinkingLevel | undefined;
+			let thinkingLevel: ThinkingSelection | undefined;
 
 			if (colonIdx !== -1) {
 				const suffix = pattern.substring(colonIdx + 1);
@@ -339,7 +340,7 @@ export async function resolveModelScope(patterns: string[], modelRegistry: Model
 
 export interface ResolveCliModelResult {
 	model: Model<Api> | undefined;
-	thinkingLevel?: ThinkingLevel;
+	thinkingLevel?: ThinkingSelection;
 	warning: string | undefined;
 	/**
 	 * Error message suitable for CLI display.
@@ -362,7 +363,7 @@ export interface ResolveCliModelResult {
 export function resolveCliModel(options: {
 	cliProvider?: string;
 	cliModel?: string;
-	cliThinking?: ThinkingLevel;
+	cliThinking?: ThinkingSelection;
 	modelRegistry: ModelRegistry;
 }): ResolveCliModelResult {
 	const { cliProvider, cliModel, cliThinking, modelRegistry } = options;
@@ -499,7 +500,7 @@ export function resolveCliModel(options: {
 		// but only when --thinking is not explicitly provided.
 		// e.g. "zai-org/GLM-5.1-FP8:high" → modelId="zai-org/GLM-5.1-FP8", fallbackThinking="high"
 		let fallbackPattern = pattern;
-		let fallbackThinking: ThinkingLevel | undefined;
+		let fallbackThinking: ThinkingSelection | undefined;
 		if (!cliThinking) {
 			const lastColon = pattern.lastIndexOf(":");
 			if (lastColon !== -1) {
@@ -588,9 +589,13 @@ export async function findInitialModel(options: {
 
 	// 2. Use first model from scoped models (skip if continuing/resuming)
 	if (scopedModels.length > 0 && !isContinuing) {
+		const scopedThinking = scopedModels[0].thinkingLevel;
 		return {
 			model: scopedModels[0].model,
-			thinkingLevel: scopedModels[0].thinkingLevel ?? defaultThinkingLevel ?? DEFAULT_THINKING_LEVEL,
+			thinkingLevel:
+				scopedThinking === "ultra"
+					? getHighestSupportedThinkingLevel(scopedModels[0].model)
+					: (scopedThinking ?? defaultThinkingLevel ?? DEFAULT_THINKING_LEVEL),
 			fallbackMessage: undefined,
 		};
 	}

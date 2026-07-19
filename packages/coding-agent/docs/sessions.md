@@ -11,20 +11,54 @@ arcmind -c                  # Continue most recent session
 arcmind -r                  # Browse and select from past sessions
 arcmind --no-session        # Ephemeral mode; do not save
 arcmind --name "my task"    # Set session display name at startup
+arcmind --agent-mode chat   # New Chat session with a managed workspace
+arcmind --cwd ./project     # Bind a new session to an existing directory
 arcmind --session <path|id> # Use a specific session file or partial session ID
 arcmind --fork <path|id>    # Fork a session file or partial session ID into a new session
 ```
 
-Use `/session` in interactive mode to see the current session file, session ID, message count, tokens, and cost.
+Use `/session` in interactive mode to see the current session file, session ID, mode, workspace path/ownership, permission state, message count, tokens, and cost.
 
 For the JSONL file format and SessionManager API, see [Session Format](session-format.md).
+
+Persisted primary sessions in either mode may select [Ultra](subagents.md). Chat and Code have identical subagent capabilities; the child snapshots and retains the parent's immutable mode.
+
+## Chat and Code modes
+
+Every session has one immutable classification mode:
+
+| Action | Resulting mode |
+|---|---|
+| Start ArcMind with no mode option | `code` |
+| `arcmind --agent-mode chat` | New `chat` session |
+| `/new` | Choose Chat or Code, with the current mode listed first |
+| `/new chat` or `/new code` | Skip the mode choice and create in that mode |
+| Resume, continue, or import | Use the stored session mode |
+| Fork or clone | Inherit the source session mode |
+| Navigate with `/tree` | Keep the current session mode |
+
+The two modes currently use the same general-purpose system prompt, tools, model configuration, and resources. Chat mode may write code when required, and Code mode may perform research, writing, planning, or analysis. They differ in workspace creation and default permissions:
+
+| New session | No directory supplied | Directory supplied | Default permissions |
+|---|---|---|---|
+| Chat | ArcMind creates `~/.arcmind/agent/workspaces/<session-id>/` | The chosen existing directory is stored | Ask |
+| Code | The terminal working directory captured at startup is stored | The chosen existing directory is stored | Auto with reviewer enabled |
+
+`/new` reuses the normal TUI option and input components. After the mode choice, Chat offers a managed workspace, the captured terminal directory, or another directory; Code offers the captured terminal directory or another directory. The selection is made only while creating the session. Cancelling or entering an invalid path leaves the current session unchanged.
+
+The mode, workspace path, and workspace ownership are immutable after creation. Resuming or switching restores the stored values; creation-only CLI flags cannot mutate an existing session. Permission settings are per-session but can be changed later with `/permissions`. See [Permissions and Sandbox](permissions.md).
+
+Mode does not change `--system-prompt` or `--append-system-prompt` behavior.
+
+Sessions for both modes remain JSONL files under `~/.arcmind/agent/sessions/<encoded-cwd>/` (or the configured session directory). For managed Chat sessions, the encoded cwd is the managed workspace path. Forking or cloning a managed session copies its workspace into a new owned directory; external workspaces remain shared. Deleting a closed session removes its workspace only when ArcMind can prove that exact directory is owned by that session.
 
 ## Session Commands
 
 | Command | Description |
 |---------|-------------|
 | `/resume` | Browse and select previous sessions |
-| `/new` | Start a new session |
+| `/new [chat\|code]` | Create a session and choose its immutable workspace |
+| `/permissions` | Change the current session's Ask, Auto, or Full setting |
 | `/name <name>` | Set the current session display name |
 | `/session` | Show session info |
 | `/tree` | Navigate the current session tree |

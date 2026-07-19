@@ -17,6 +17,8 @@ Common options:
 - `--no-session`: Disable session persistence
 - `--session-dir <path>`: Custom session storage directory
 
+`set_thinking_level` accepts `"ultra"` for persisted primary sessions. `get_state` continues to expose the actual provider thinking level; subagent creation and control happen through the six model tools described in [Ultra and Subagents](subagents.md).
+
 ## Protocol Overview
 
 - **Commands**: JSON objects sent to stdin, one per line
@@ -286,9 +288,9 @@ Set the reasoning/thinking level for models that support it.
 {"type": "set_thinking_level", "level": "high"}
 ```
 
-Levels: `"off"`, `"minimal"`, `"low"`, `"medium"`, `"high"`, `"xhigh"`, `"max"`
+Selections: `"off"`, `"minimal"`, `"low"`, `"medium"`, `"high"`, `"xhigh"`, `"max"`, `"ultra"`
 
-`"xhigh"` and `"max"` are exposed only when supported by the selected model. Some models, including GPT-5.6, expose both.
+`"xhigh"` and `"max"` are exposed only when supported by the selected model. `"ultra"` is exposed only for persisted primary runtime sessions and combines the model's highest real level with subagent orchestration.
 
 Response:
 ```json

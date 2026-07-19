@@ -1,4 +1,5 @@
 import type { ThinkingLevel } from "@arcmind/agent-core";
+import type { ThinkingSelection } from "./thinking-selection.ts";
 import type { Transport } from "@arcmind/ai";
 import { randomUUID } from "crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
@@ -106,7 +107,7 @@ export type PackageSource =
 export interface Settings {
 	defaultProvider?: string;
 	defaultModel?: string;
-	defaultThinkingLevel?: ThinkingLevel;
+	defaultThinkingLevel?: ThinkingSelection;
 	transport?: TransportSetting; // default: "auto"
 	steeringMode?: "all" | "one-at-a-time";
 	followUpMode?: "all" | "one-at-a-time";
@@ -793,11 +794,11 @@ export class SettingsManager {
 		this.save();
 	}
 
-	getDefaultThinkingLevel(): ThinkingLevel | undefined {
+	getDefaultThinkingLevel(): ThinkingSelection | undefined {
 		return this.settings.defaultThinkingLevel;
 	}
 
-	setDefaultThinkingLevel(level: ThinkingLevel): void {
+	setDefaultThinkingLevel(level: ThinkingSelection): void {
 		this.globalSettings.defaultThinkingLevel = level;
 		this.markModified("defaultThinkingLevel");
 		this.save();

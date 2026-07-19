@@ -173,6 +173,60 @@ export const InteractionViewSchema = Type.Union([
 	InputInteractionViewSchema,
 ]);
 
+export const ActualThinkingLevelSchema = Type.Union([
+	Type.Literal("off"),
+	Type.Literal("minimal"),
+	Type.Literal("low"),
+	Type.Literal("medium"),
+	Type.Literal("high"),
+	Type.Literal("xhigh"),
+	Type.Literal("max"),
+]);
+export const ThinkingSelectionSchema = Type.Union([ActualThinkingLevelSchema, Type.Literal("ultra")]);
+export const SubagentStatusSchema = Type.Union([
+	Type.Literal("queued"),
+	Type.Literal("running"),
+	Type.Literal("done"),
+	Type.Literal("failed"),
+	Type.Literal("stopped"),
+	Type.Literal("close_failed"),
+	Type.Literal("closed"),
+]);
+export const SubagentModelRefSchema = StrictObject({ provider: NameSchema, modelId: NameSchema });
+export const SubagentUsageSchema = StrictObject({
+	model: SubagentModelRefSchema,
+	input: Type.Number({ minimum: 0 }),
+	output: Type.Number({ minimum: 0 }),
+	cacheRead: Type.Number({ minimum: 0 }),
+	cacheWrite: Type.Number({ minimum: 0 }),
+	elapsedMs: Type.Number({ minimum: 0 }),
+	cost: Type.Optional(Type.Number({ minimum: 0 })),
+});
+export const SubagentSummarySchema = StrictObject({
+	agentId: SessionIdSchema,
+	name: NameSchema,
+	status: SubagentStatusSchema,
+	taskSummary: PublicTextSchema,
+	configuration: Type.Optional(
+		StrictObject({
+			mode: Type.Union([Type.Literal("chat"), Type.Literal("code")]),
+			tools: Type.Array(NameSchema, { maxItems: 128, uniqueItems: true }),
+			permissionMode: Type.Union([Type.Literal("ask"), Type.Literal("auto"), Type.Literal("full")]),
+			model: SubagentModelRefSchema,
+			thinkingLevel: ActualThinkingLevelSchema,
+			cwd: PathSchema,
+			forkTurns: Type.Union([Type.Integer({ minimum: 0, maximum: 1_000 }), Type.Literal("all")]),
+			timeoutSeconds: Type.Integer({ minimum: 1, maximum: 1_800 }),
+		}),
+	),
+	finalSummary: Type.Optional(PublicTextSchema),
+	error: Type.Optional(PublicTextSchema),
+	residualPath: Type.Optional(PathSchema),
+	usage: Type.Optional(SubagentUsageSchema),
+	createdAt: TimestampSchema,
+	updatedAt: TimestampSchema,
+});
+
 export const SessionSnapshotSchema = StrictObject({
 	session: SessionSummarySchema,
 	turns: Type.Array(TurnViewSchema, { maxItems: MAX_HISTORY_ITEMS }),
@@ -180,8 +234,26 @@ export const SessionSnapshotSchema = StrictObject({
 	nextBeforeItemId: Type.Union([OpaqueIdSchema, Type.Null()]),
 	activeTurnId: Type.Union([OpaqueIdSchema, Type.Null()]),
 	pendingInteractions: Type.Array(InteractionViewSchema, { maxItems: MAX_INTERACTION_CHOICES }),
+	thinkingSelection: ThinkingSelectionSchema,
+	actualThinkingLevel: ActualThinkingLevelSchema,
+	availableThinkingSelections: Type.Array(ThinkingSelectionSchema, { minItems: 1, maxItems: 8, uniqueItems: true }),
+	subagents: Type.Array(SubagentSummarySchema, { maxItems: 10 }),
 	serverEpoch: UuidSchema,
 	cursor: CursorSchema,
+});
+
+export const ThinkingSelectionChangedEventSchema = StrictObject({
+	type: Type.Literal("session/thinkingSelectionChanged"),
+	sessionId: SessionIdSchema,
+	thinkingSelection: ThinkingSelectionSchema,
+	actualThinkingLevel: ActualThinkingLevelSchema,
+	availableThinkingSelections: Type.Array(ThinkingSelectionSchema, { minItems: 1, maxItems: 8, uniqueItems: true }),
+});
+
+export const SubagentUpdatedEventSchema = StrictObject({
+	type: Type.Literal("subagent/updated"),
+	sessionId: SessionIdSchema,
+	subagent: SubagentSummarySchema,
 });
 
 export const SessionUpdatedEventSchema = StrictObject({
@@ -257,6 +329,8 @@ export const DomainEventSchema = Type.Union([
 	ItemCompletedEventSchema,
 	InteractionNotifyEventSchema,
 	ServerStateEventSchema,
+	ThinkingSelectionChangedEventSchema,
+	SubagentUpdatedEventSchema,
 ]);
 
 export const ConnectionEventsParamsSchema = Type.Refine(
@@ -279,5 +353,7 @@ export type TurnView = Static<typeof TurnViewSchema>;
 export type InteractionChoice = Static<typeof InteractionChoiceSchema>;
 export type InteractionView = Static<typeof InteractionViewSchema>;
 export type SessionSnapshot = Static<typeof SessionSnapshotSchema>;
+export type ThinkingSelectionView = Static<typeof ThinkingSelectionSchema>;
+export type SubagentSummaryView = Static<typeof SubagentSummarySchema>;
 export type DomainEvent = Static<typeof DomainEventSchema>;
 export type ConnectionEventsParams = Static<typeof ConnectionEventsParamsSchema>;

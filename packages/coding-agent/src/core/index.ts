@@ -92,6 +92,7 @@ export {
 export {
 	type ActionRisk,
 	buildPermissionReviewerUserPrompt,
+	canUseFullOnce,
 	type ClassifiedAction,
 	type ClassifyActionInput,
 	classifyAction,
@@ -162,11 +163,27 @@ export {
 } from "./session-control.ts";
 export { createSessionId } from "./session-id.ts";
 export {
+	SUBAGENT_TOOL_NAMES,
+	type SubagentConfig,
+	type SubagentDisplayConfig,
+	type SubagentStatus,
+	type SubagentSummary,
+	type SubagentTombstone,
+	type SubagentUsage,
+} from "./subagents/types.ts";
+export { buildChildSystemPrompt, SUBAGENT_COORDINATION_PROMPT } from "./subagents/prompts.ts";
+export {
+	getHighestSupportedThinkingLevel,
+	isThinkingSelection,
+	type ThinkingSelection,
+} from "./thinking-selection.ts";
+export {
 	assertValidSessionId,
 	CURRENT_SESSION_VERSION,
 	type CwdOrigin,
 	type FileEntry,
 	getDefaultSessionDir,
+	getSessionSubagentDir,
 	moveSessionFileWithLease,
 	type PermissionDecisionPayload,
 	type RuntimeControlPayload,

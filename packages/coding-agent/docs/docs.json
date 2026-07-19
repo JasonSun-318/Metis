@@ -24,6 +24,10 @@
           "path": "security.md"
         },
         {
+          "title": "Permissions and Sandbox",
+          "path": "permissions.md"
+        },
+        {
           "title": "Containerization",
           "path": "containerization.md"
         },
@@ -38,6 +42,10 @@
         {
           "title": "Sessions",
           "path": "sessions.md"
+        },
+        {
+          "title": "Ultra and Subagents",
+          "path": "subagents.md"
         },
         {
           "title": "Compaction",

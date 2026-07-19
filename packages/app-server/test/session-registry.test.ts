@@ -51,6 +51,20 @@ class FakeRuntime implements OpenedSessionRuntime {
 		return { items: [], nextBeforeItemId: null };
 	}
 
+	async readSubagentItems(_input: ClientParams<"subagent/readItems">): Promise<ClientResult<"subagent/readItems">> {
+		return { items: [], nextBeforeItemId: null };
+	}
+
+	async setThinkingSelection(
+		input: ClientParams<"session/setThinkingSelection">,
+	): Promise<ClientResult<"session/setThinkingSelection">> {
+		return {
+			thinkingSelection: input.selection,
+			actualThinkingLevel: input.selection === "ultra" ? "max" : input.selection,
+			availableThinkingSelections: ["off", "high", "ultra"],
+		};
+	}
+
 	async snapshot(serverEpoch: string, currentCursor: () => number): Promise<SessionSnapshot> {
 		return {
 			session: this.getSummary(),
@@ -59,6 +73,10 @@ class FakeRuntime implements OpenedSessionRuntime {
 			nextBeforeItemId: null,
 			activeTurnId: null,
 			pendingInteractions: [],
+			thinkingSelection: "high",
+			actualThinkingLevel: "high",
+			availableThinkingSelections: ["off", "high", "ultra"],
+			subagents: [],
 			serverEpoch,
 			cursor: currentCursor(),
 		};

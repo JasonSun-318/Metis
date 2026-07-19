@@ -68,6 +68,7 @@ describe("externalizeLargeToolOutput", () => {
 		expect(notice).toContain(`Original size: ${Buffer.byteLength(fullText, "utf8")} bytes`);
 		expect(notice).toContain(`Preview size: ${TOOL_OUTPUT_PREVIEW_BYTES - 1} bytes`);
 		expect(notice).toContain(`Full output: ${result?.toolOutput.fullOutputPath}`);
+		expect(notice).toContain("If you need the full output, read the saved file.");
 		expect(notice).not.toContain("�");
 	});
 

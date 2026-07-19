@@ -129,6 +129,15 @@ export class Dispatcher {
 				const ref = this.runtimeRef(request.params.sessionId);
 				return await this.registry.run(ref, (runtime) => runtime.readItems(request.params));
 			}
+			case "subagent/readItems": {
+				const ref = this.runtimeRef(request.params.sessionId);
+				return await this.registry.run(ref, (runtime) => runtime.readSubagentItems(request.params));
+			}
+			case "session/setThinkingSelection":
+				return await this.replayMutation(request, async () => {
+					const ref = this.runtimeRef(request.params.sessionId);
+					return await this.registry.run(ref, (runtime) => runtime.setThinkingSelection(request.params));
+				});
 			case "session/close": {
 				this.catalog.get(request.params.sessionId);
 				const result = await this.replayMutation(request, async () => {

@@ -2,6 +2,8 @@
 
 Add custom providers and models (Ollama, vLLM, LM Studio, proxies) via `~/.arcmind/agent/models.json`.
 
+Model selectors and CLI patterns accept `:ultra` in addition to the real provider thinking levels. Ultra resolves to that model's highest supported real level and enables subagent orchestration in a persisted primary runtime; the literal value `ultra` is never sent to the provider. See [Ultra and Subagents](subagents.md).
+
 ## Table of Contents
 
 - [Minimal Example](#minimal-example)

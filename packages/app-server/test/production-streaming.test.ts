@@ -86,7 +86,7 @@ describe("production runtime streaming", () => {
 				jsonrpc: "2.0",
 				id: "initialize",
 				method: "initialize",
-				params: { protocolVersion: 1, client: { name: "test", version: "1" }, capabilities: [] },
+				params: { protocolVersion: 2, client: { name: "test", version: "1" }, capabilities: [] },
 			});
 			await connection.handle({
 				jsonrpc: "2.0",

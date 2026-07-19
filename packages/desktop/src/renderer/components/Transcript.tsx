@@ -9,6 +9,7 @@ interface TranscriptProps {
 	readonly itemsById: ReadonlyMap<string, ItemView>;
 	readonly loadingOlder: boolean;
 	readonly onLoadOlder: () => Promise<void>;
+	readonly olderLabel?: string;
 }
 
 function ContentBlock({ block }: { readonly block: ItemContentBlockView }) {
@@ -36,7 +37,7 @@ function ContentBlock({ block }: { readonly block: ItemContentBlockView }) {
 	}
 }
 
-export function Transcript({ hasOlder, itemIds, itemsById, loadingOlder, onLoadOlder }: TranscriptProps) {
+export function Transcript({ hasOlder, itemIds, itemsById, loadingOlder, onLoadOlder, olderLabel = "Load older messages" }: TranscriptProps) {
 	const scrollRef = useRef<HTMLDivElement>(null);
 	const previousLastItemId = useRef<string | undefined>(undefined);
 	const virtualizer = useVirtualizer({
@@ -72,7 +73,7 @@ export function Transcript({ hasOlder, itemIds, itemsById, loadingOlder, onLoadO
 		<section className="transcript" aria-label="Conversation transcript">
 			{hasOlder && (
 				<button className="history-button button-secondary" disabled={loadingOlder} onClick={() => void onLoadOlder()} type="button">
-					{loadingOlder ? "Loading…" : "Load older messages"}
+					{loadingOlder ? "Loading…" : olderLabel}
 				</button>
 			)}
 			<div className="transcript-scroll" ref={scrollRef}>

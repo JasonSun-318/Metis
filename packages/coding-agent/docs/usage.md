@@ -41,9 +41,10 @@ Type `/` in the editor to open command completion. Extensions can register custo
 | `/scoped-models` | Enable/disable models for Ctrl+P cycling |
 | `/settings` | Thinking level, theme, message delivery, transport |
 | `/resume` | Pick from previous sessions |
-| `/new` | Start a new session |
+| `/new [chat\|code]` | Create a session and choose its immutable workspace |
+| `/permissions` | Choose Ask, Auto with review, or Full for this session |
 | `/name <name>` | Set session display name |
-| `/session` | Show session file, ID, messages, tokens, and cost |
+| `/session` | Show session file, ID, mode, messages, tokens, and cost |
 | `/tree` | Jump to any point in the session and continue from there |
 | `/trust` | Save project trust decision for future sessions |
 | `/fork` | Create a new session from a previous user message |
@@ -215,6 +216,10 @@ cat README.md | arcmind -p "Summarize this text"
 
 | Option | Description |
 |--------|-------------|
+| `--agent-mode <chat\|code>` | Classify a newly created session (default: `code`) |
+| `--cwd <path>` | Bind a newly created session to an existing directory |
+| `--permission-mode <ask\|auto\|full>` | Set permissions for a newly created session |
+| `--reviewer`, `--no-reviewer` | Enable or disable Auto review for a newly created session |
 | `-c`, `--continue` | Continue the most recent session |
 | `-r`, `--resume` | Browse and select a session |
 | `--session <path\|id>` | Use a specific session file or partial UUID |
@@ -326,4 +331,4 @@ arcmind --exclude-tools ask_question
 
 ArcMind keeps the core small and pushes workflow-specific behavior into extensions, skills, prompt templates, and packages.
 
-It intentionally does not include built-in MCP, sub-agents, permission popups, plan mode, to-dos, or background bash. You can build or install those workflows as extensions or packages, or use external tools such as containers and tmux.
+It intentionally does not include built-in MCP, plan mode, to-dos, or background bash. Persisted sessions can select [Ultra](subagents.md) for first-class recoverable subagents. Ask and Auto provide a built-in action-permission and SRT boundary; Full explicitly bypasses it. See [Permissions and Sandbox](permissions.md). You can build or install other workflows as extensions or packages, or add a stronger outer boundary with containers and VMs.

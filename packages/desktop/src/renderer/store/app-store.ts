@@ -38,6 +38,10 @@ export interface AppStoreSnapshot {
 	readonly serverEpoch: string | null;
 	readonly cursor: number;
 	readonly syncStatus: "empty" | "ready" | "resubscribing" | "resnapshot_required";
+	readonly thinkingSelection: SessionSnapshot["thinkingSelection"];
+	readonly actualThinkingLevel: SessionSnapshot["actualThinkingLevel"];
+	readonly availableThinkingSelections: SessionSnapshot["availableThinkingSelections"];
+	readonly subagents: SessionSnapshot["subagents"];
 	readonly supervisor: SupervisorView;
 }
 
@@ -136,6 +140,10 @@ export class AppStore {
 			serverEpoch: this.state.serverEpoch,
 			cursor: this.state.cursor,
 			syncStatus: this.state.syncStatus,
+			thinkingSelection: this.state.thinkingSelection,
+			actualThinkingLevel: this.state.actualThinkingLevel,
+			availableThinkingSelections: this.state.availableThinkingSelections,
+			subagents: this.state.subagents,
 			supervisor: this.supervisor,
 		};
 	}

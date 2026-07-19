@@ -39,6 +39,10 @@ function snapshot(serverEpoch: string, cursor: number, text: string): SessionSna
 		nextBeforeItemId: null,
 		activeTurnId: null,
 		pendingInteractions: [],
+		thinkingSelection: "off",
+		actualThinkingLevel: "off",
+		availableThinkingSelections: ["off"],
+		subagents: [],
 		serverEpoch,
 		cursor,
 	};

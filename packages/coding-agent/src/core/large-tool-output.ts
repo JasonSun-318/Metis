@@ -192,6 +192,7 @@ export async function externalizeLargeToolOutput(
 		`Original size: ${toolOutput.originalBytes} bytes`,
 		`Preview size: ${toolOutput.previewBytes} bytes`,
 		`Full output: ${toolOutput.fullOutputPath}`,
+		"If you need the full output, read the saved file.",
 		"",
 		preview.text,
 	].join("\n");

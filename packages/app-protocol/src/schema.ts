@@ -3,7 +3,7 @@ import { Compile, type Validator } from "typebox/compile";
 
 export type EmptySchemaContext = Record<string, never>;
 
-export const PROTOCOL_VERSION = 1 as const;
+export const PROTOCOL_VERSION = 2 as const;
 export const MAX_ENVELOPE_UTF8_BYTES = 8 * 1024 * 1024;
 export const MAX_NAME_UTF16_UNITS = 256;
 export const MAX_PATH_UTF8_BYTES = 32 * 1024;
@@ -84,7 +84,11 @@ export const PathSchema = Utf8String(MAX_PATH_UTF8_BYTES, { minLength: 1 });
 export const PromptTextSchema = Utf8String(MAX_PROMPT_UTF8_BYTES);
 export const PublicTextSchema = Utf8String(MAX_PUBLIC_TEXT_UTF8_BYTES);
 export const DeltaTextSchema = Utf8String(MAX_DELTA_UTF8_BYTES);
-export const CapabilitySchema = Type.String({ minLength: 1, maxLength: 128, pattern: "^[a-z0-9][a-z0-9._:/-]*$" });
+export const CapabilitySchema = Type.String({
+	minLength: 1,
+	maxLength: 128,
+	pattern: "^[A-Za-z0-9][A-Za-z0-9._:/-]*$",
+});
 export const UuidSchema = Type.String({ format: "uuid" });
 // Matches coding-agent's persisted/custom session-id contract. The 8 MiB
 // envelope limit provides the outer bound without rejecting existing IDs.

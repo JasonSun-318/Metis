@@ -34,7 +34,7 @@ describe("migrateSessionEntries", () => {
 		migrateSessionEntries(entries);
 
 		// Header should have the current version after all migrations.
-		expect((entries[0] as any).version).toBe(6);
+		expect((entries[0] as any).version).toBe(7);
 
 		// Entries should have id/parentId
 		const msg1 = entries[1] as any;

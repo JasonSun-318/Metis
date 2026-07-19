@@ -25,6 +25,11 @@ import { assertSessionCwdExists } from "./session-cwd.ts";
 import { createSessionId } from "./session-id.ts";
 import { SessionManager } from "./session-manager.ts";
 import { removeOwnedManagedWorkspace, resolveNewSessionWorkspace } from "./session-workspace.ts";
+import { SubagentManager } from "./subagents/manager.ts";
+import { SUBAGENT_COORDINATION_PROMPT } from "./subagents/prompts.ts";
+import { createSubagentTools } from "./subagents/tools.ts";
+import type { SubagentConfig } from "./subagents/types.ts";
+import { SUBAGENT_TOOL_NAMES } from "./subagents/types.ts";
 
 /**
  * Result returned by runtime creation.
@@ -73,6 +78,8 @@ export type CreateAgentSessionRuntimeFactory = (options: {
 	sessionManager: SessionManager;
 	sessionStartEvent?: SessionStartEvent;
 	projectTrustContext?: ProjectTrustContext;
+	ultraAvailable?: boolean;
+	childConfig?: SubagentConfig;
 }) => Promise<CreateAgentSessionRuntimeResult>;
 
 /**
@@ -215,6 +222,7 @@ export class AgentSessionRuntime {
 	private requestIndex: Map<string, IndexedRuntimeRequest>;
 	private operationIndex: Map<string, IndexedRuntimeRequest>;
 	private readonly hostCwd: string;
+	private subagentManagerValue?: SubagentManager;
 
 	constructor(
 		_session: AgentSession,
@@ -235,6 +243,7 @@ export class AgentSessionRuntime {
 		this.operationIndex = _recovered?.operations ?? new Map();
 		this.hostCwd = resolvePath(hostCwd);
 		this.bindDurableSession(_session);
+		this.bindSubagents(_session);
 	}
 
 	get services(): AgentSessionServices {
@@ -270,11 +279,90 @@ export class AgentSessionRuntime {
 		return structuredClone(this._recoverableDrafts);
 	}
 
+	get subagentManager(): SubagentManager | undefined {
+		this.assertPubliclyAccessible();
+		return this.subagentManagerValue;
+	}
+
+	async initializeSubagents(): Promise<void> {
+		this.assertPubliclyAccessible();
+		await this.subagentManagerValue?.recoverCloseMarkers();
+	}
+
 	private bindDurableSession(session: AgentSession): void {
 		session.setDurableOperationTurnListener((operationId, turnId) => {
 			const indexed = this.operationIndex.get(operationId);
 			if (indexed) indexed.turnId = turnId;
 		});
+	}
+
+	private bindSubagents(session: AgentSession): void {
+		if (!session.sessionManager.isPersisted() || session.sessionManager.getHeader()?.subagent) {
+			this.subagentManagerValue = undefined;
+			return;
+		}
+		const manager = new SubagentManager({
+			parentSessionManager: session.sessionManager,
+			agentDir: this._services.agentDir,
+			workspaceRoots: [session.sessionManager.getCwd()],
+			onPermissionRequest: (request) => session.requestPermissionApproval(request),
+			createChildRuntime: async ({ config, sessionManager, onPermissionRequest }) => {
+				const recovered = recoverSessionManager(sessionManager);
+				const result = await this.createRuntime({
+					cwd: config.cwd,
+					agentDir: this._services.agentDir,
+					sessionManager,
+					ultraAvailable: false,
+					childConfig: config,
+					sessionStartEvent: { type: "session_start", reason: "resume" },
+				});
+				result.session.setPermissionApprovalHandler(onPermissionRequest);
+				return new AgentSessionRuntime(
+					result.session,
+					result.services,
+					this.createRuntime,
+					result.diagnostics,
+					result.modelFallbackMessage,
+					recovered,
+					this.hostCwd,
+				);
+			},
+		});
+		manager.attachParent(session);
+		this.subagentManagerValue = manager;
+		session.installHostTools(
+			createSubagentTools({
+				getManager: () => this.subagentManagerValue,
+				getSession: () => this._session,
+			}),
+		);
+		session.setHostSystemPrompt(() =>
+			session.getThinkingSelection() === "ultra" ? SUBAGENT_COORDINATION_PROMPT : undefined,
+		);
+		const sync = (): void => this.syncSubagentCapabilities(session);
+		session.subscribe((event) => {
+			if (event.type === "thinking_selection_changed") sync();
+		});
+		manager.subscribe(() => sync());
+		sync();
+	}
+
+	private syncSubagentCapabilities(session: AgentSession): void {
+		const manager = this.subagentManagerValue;
+		if (!manager) return;
+		const management = new Set<string>(SUBAGENT_TOOL_NAMES);
+		const base = session.getActiveToolNames().filter((name) => !management.has(name));
+		const residual = manager.listSummaries().some((summary) => summary.status !== "closed");
+		const desired =
+			session.getThinkingSelection() === "ultra"
+				? [...SUBAGENT_TOOL_NAMES]
+				: residual
+					? ["inspect_agents", "wait_agents", "interrupt_agent", "close_agent"]
+					: [];
+		session.setActiveToolsByName([...base, ...desired]);
+		session.setHostSystemPrompt(() =>
+			session.getThinkingSelection() === "ultra" ? SUBAGENT_COORDINATION_PROMPT : undefined,
+		);
 	}
 
 	setRebindSession(rebindSession?: (session: AgentSession) => Promise<void>): void {
@@ -664,6 +752,12 @@ export class AgentSessionRuntime {
 		this.submissionGateOpen = false;
 		const errors: unknown[] = [];
 		try {
+			await this.subagentManagerValue?.unload("parent_unloaded");
+		} catch (error) {
+			errors.push(error);
+		}
+		this.subagentManagerValue = undefined;
+		try {
 			session.abortCompaction();
 		} catch (error) {
 			errors.push(error);
@@ -716,7 +810,7 @@ export class AgentSessionRuntime {
 		if (errors.length > 1) throw new AggregateError(errors, "Failed to tear down agent session");
 	}
 
-	private apply(prepared: PreparedRuntime): void {
+	private async apply(prepared: PreparedRuntime): Promise<void> {
 		this._session = prepared.result.session;
 		this._services = prepared.result.services;
 		this._diagnostics = prepared.result.diagnostics;
@@ -726,6 +820,8 @@ export class AgentSessionRuntime {
 		this.operationIndex = prepared.recovered.operations;
 		this.submissionDisabled = false;
 		this.bindDurableSession(prepared.result.session);
+		this.bindSubagents(prepared.result.session);
+		await this.subagentManagerValue?.recoverCloseMarkers();
 	}
 
 	private async prepareCandidate(
@@ -738,6 +834,7 @@ export class AgentSessionRuntime {
 				...getOptions(),
 				agentDir: this._services.agentDir,
 				sessionManager,
+				ultraAvailable: true,
 			});
 			return { result, recovered };
 		} catch (error) {
@@ -759,7 +856,7 @@ export class AgentSessionRuntime {
 		} catch (error) {
 			teardownError = error;
 		}
-		this.apply(result);
+		await this.apply(result);
 		return teardownError;
 	}
 
@@ -780,7 +877,7 @@ export class AgentSessionRuntime {
 		try {
 			const sessionManager = createSessionManager();
 			const result = await this.prepareCandidate(sessionManager, () => getOptions(sessionManager));
-			this.apply(result);
+			await this.apply(result);
 			return teardownError;
 		} catch (replacementError) {
 			const errors = teardownError === undefined ? [replacementError] : [teardownError, replacementError];
@@ -796,7 +893,7 @@ export class AgentSessionRuntime {
 					);
 				}
 				const rollback = await this.prepareCandidate(rollbackManager, () => getOptions(rollbackManager));
-				this.apply(rollback);
+				await this.apply(rollback);
 				await this.rebindCurrentSession();
 			} catch (rollbackError) {
 				if (rollbackError instanceof AgentSessionRuntimeTerminalError) throw rollbackError;
@@ -1113,6 +1210,12 @@ export class AgentSessionRuntime {
 		const session = this._session;
 		session.beginRuntimeTeardown();
 		const errors: unknown[] = [];
+		try {
+			await this.subagentManagerValue?.unload("parent_unloaded");
+		} catch (error) {
+			errors.push(error);
+		}
+		this.subagentManagerValue = undefined;
 		if (!this.eventPersistenceDrained) {
 			try {
 				session.abortCompaction();
@@ -1216,12 +1319,13 @@ export async function createAgentSessionRuntime(
 		agentDir: string;
 		sessionManager: SessionManager;
 		sessionStartEvent?: SessionStartEvent;
+		ultraAvailable?: boolean;
 	},
 ): Promise<AgentSessionRuntime> {
 	try {
 		assertSessionCwdExists(options.sessionManager, options.cwd);
 		const recovered = recoverSessionManager(options.sessionManager);
-		const result = await createRuntime(options);
+		const result = await createRuntime({ ...options, ultraAvailable: options.ultraAvailable ?? true });
 		const runtime = new AgentSessionRuntime(
 			result.session,
 			result.services,
@@ -1231,6 +1335,7 @@ export async function createAgentSessionRuntime(
 			recovered,
 			options.cwd,
 		);
+		await runtime.initializeSubagents();
 		return runtime;
 	} catch (error) {
 		closeUnadoptedSessionManager(

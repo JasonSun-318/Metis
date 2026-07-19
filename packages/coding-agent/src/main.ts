@@ -46,6 +46,7 @@ import {
 import { createSessionId } from "./core/session-id.ts";
 import { assertValidSessionId, SessionManager } from "./core/session-manager.ts";
 import { removeOwnedManagedWorkspace, resolveNewSessionWorkspace } from "./core/session-workspace.ts";
+import { buildChildSystemPrompt } from "./core/subagents/prompts.ts";
 import { SettingsManager } from "./core/settings-manager.ts";
 import { printTimings, resetTimings, time } from "./core/timings.ts";
 import { hasTrustRequiringProjectResources, ProjectTrustStore } from "./core/trust-manager.ts";
@@ -487,7 +488,8 @@ function buildSessionOptions(
 			// Allow "--model <pattern>:<thinking>" as a shorthand.
 			// Explicit --thinking still takes precedence (applied later).
 			if (!parsed.thinking && resolved.thinkingLevel) {
-				options.thinkingLevel = resolved.thinkingLevel;
+				if (resolved.thinkingLevel === "ultra") options.thinkingSelection = "ultra";
+				else options.thinkingLevel = resolved.thinkingLevel;
 				cliThinkingFromModel = true;
 			}
 		}
@@ -504,20 +506,23 @@ function buildSessionOptions(
 			options.model = savedInScope.model;
 			// Use thinking level from scoped model config if explicitly set
 			if (!parsed.thinking && savedInScope.thinkingLevel) {
-				options.thinkingLevel = savedInScope.thinkingLevel;
+				if (savedInScope.thinkingLevel === "ultra") options.thinkingSelection = "ultra";
+				else options.thinkingLevel = savedInScope.thinkingLevel;
 			}
 		} else {
 			options.model = scopedModels[0].model;
 			// Use thinking level from first scoped model if explicitly set
 			if (!parsed.thinking && scopedModels[0].thinkingLevel) {
-				options.thinkingLevel = scopedModels[0].thinkingLevel;
+				if (scopedModels[0].thinkingLevel === "ultra") options.thinkingSelection = "ultra";
+				else options.thinkingLevel = scopedModels[0].thinkingLevel;
 			}
 		}
 	}
 
 	// Thinking level from CLI (takes precedence over scoped model thinking levels set above)
 	if (parsed.thinking) {
-		options.thinkingLevel = parsed.thinking;
+		if (parsed.thinking === "ultra") options.thinkingSelection = "ultra";
+		else options.thinkingLevel = parsed.thinking;
 	}
 
 	// Scoped models for Ctrl+P cycling
@@ -747,6 +752,8 @@ export async function main(args: string[], options?: MainOptions) {
 			sessionManager,
 			sessionStartEvent,
 			projectTrustContext,
+			ultraAvailable,
+			childConfig,
 		}) => {
 			// Credentials remain shared through the locked auth file, while OAuth provider
 			// routing stays owned by this runtime's AuthStorage instance.
@@ -848,23 +855,33 @@ export async function main(args: string[], options?: MainOptions) {
 					}
 				}
 
+				const childModel = childConfig
+					? modelRegistry.find(childConfig.model.provider, childConfig.model.modelId)
+					: undefined;
+				if (childConfig && !childModel) {
+					throw new Error(`Child model is unavailable: ${childConfig.model.provider}/${childConfig.model.modelId}`);
+				}
 				const created = await createAgentSessionFromServices({
 					services,
 					sessionManager,
 					sessionStartEvent,
-					model: sessionOptions.model,
-					thinkingLevel: sessionOptions.thinkingLevel,
-					scopedModels: sessionOptions.scopedModels,
-					tools: sessionOptions.tools,
-					excludeTools: sessionOptions.excludeTools,
-					noTools: sessionOptions.noTools,
-					customTools: sessionOptions.customTools,
+					model: childModel ?? sessionOptions.model,
+					thinkingLevel: childConfig?.thinkingLevel ?? sessionOptions.thinkingLevel,
+					thinkingSelection: childConfig ? undefined : sessionOptions.thinkingSelection,
+					scopedModels: childConfig ? [] : sessionOptions.scopedModels,
+					tools: childConfig ? [...childConfig.tools] : sessionOptions.tools,
+					excludeTools: childConfig ? undefined : sessionOptions.excludeTools,
+					noTools: childConfig ? undefined : sessionOptions.noTools,
+					customTools: childConfig ? [] : sessionOptions.customTools,
+					ultraAvailable,
+					additionalSystemPrompt: childConfig ? buildChildSystemPrompt(childConfig) : undefined,
 				});
 				servicesTransferred = true;
 				try {
 					const cliThinkingOverride = parsed.thinking !== undefined || cliThinkingFromModel;
 					if (created.session.model && cliThinkingOverride) {
-						created.session.setThinkingLevel(created.session.thinkingLevel);
+						if (sessionOptions.thinkingSelection === "ultra") created.session.setThinkingSelection("ultra");
+						else created.session.setThinkingLevel(created.session.thinkingLevel);
 					}
 
 					return {

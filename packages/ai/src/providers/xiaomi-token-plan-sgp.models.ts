@@ -12,6 +12,7 @@ export const XIAOMI_TOKEN_PLAN_SGP_MODELS = {
 		baseUrl: "https://token-plan-sgp.xiaomimimo.com/v1",
 		compat: {"requiresReasoningContentOnAssistantMessages":true,"thinkingFormat":"deepseek"},
 		reasoning: true,
+		thinkingLevelMap: {"minimal":null},
 		input: ["text"],
 		cost: {
 			input: 0,
@@ -30,6 +31,7 @@ export const XIAOMI_TOKEN_PLAN_SGP_MODELS = {
 		baseUrl: "https://token-plan-sgp.xiaomimimo.com/v1",
 		compat: {"requiresReasoningContentOnAssistantMessages":true,"thinkingFormat":"deepseek"},
 		reasoning: true,
+		thinkingLevelMap: {"minimal":null},
 		input: ["text", "image"],
 		cost: {
 			input: 0,
@@ -48,6 +50,7 @@ export const XIAOMI_TOKEN_PLAN_SGP_MODELS = {
 		baseUrl: "https://token-plan-sgp.xiaomimimo.com/v1",
 		compat: {"requiresReasoningContentOnAssistantMessages":true,"thinkingFormat":"deepseek"},
 		reasoning: true,
+		thinkingLevelMap: {"minimal":null},
 		input: ["text"],
 		cost: {
 			input: 0,

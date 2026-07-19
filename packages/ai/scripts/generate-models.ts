@@ -1672,6 +1672,7 @@ async function loadModelsDevData(): Promise<Model<any>[]> {
 					baseUrl,
 					compat: xiaomiCompat,
 					reasoning: m.reasoning === true,
+					thinkingLevelMap: m.reasoning === true ? { minimal: null } : undefined,
 					input: m.modalities?.input?.includes("image") ? ["text", "image"] : ["text"],
 					cost: {
 						input: m.cost?.input || 0,

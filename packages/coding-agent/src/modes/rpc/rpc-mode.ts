@@ -492,12 +492,12 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 			// =================================================================
 
 			case "set_thinking_level": {
-				session.setThinkingLevel(command.level);
+				session.setThinkingSelection(command.level);
 				return success(id, "set_thinking_level");
 			}
 
 			case "cycle_thinking_level": {
-				const level = session.cycleThinkingLevel();
+				const level = session.cycleThinkingSelection();
 				if (!level) {
 					return success(id, "cycle_thinking_level", null);
 				}

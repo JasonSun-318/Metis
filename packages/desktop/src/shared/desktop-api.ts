@@ -34,6 +34,8 @@ export const DESKTOP_IPC_CHANNELS = {
 	createSession: "arcmind:create-session",
 	openSession: "arcmind:open-session",
 	readItems: "arcmind:read-items",
+	readSubagentItems: "arcmind:read-subagent-items",
+	setThinkingSelection: "arcmind:set-thinking-selection",
 	startTurn: "arcmind:start-turn",
 	steerTurn: "arcmind:steer-turn",
 	interruptTurn: "arcmind:interrupt-turn",
@@ -50,6 +52,10 @@ export interface ArcMindDesktopApi {
 	createSession(input: ClientParams<"session/create">): Promise<ClientResult<"session/create">>;
 	openSession(input: ClientParams<"session/open">): Promise<ClientResult<"session/subscribe">["snapshot"]>;
 	readItems(input: ClientParams<"session/readItems">): Promise<ClientResult<"session/readItems">>;
+	readSubagentItems(input: ClientParams<"subagent/readItems">): Promise<ClientResult<"subagent/readItems">>;
+	setThinkingSelection(
+		input: ClientParams<"session/setThinkingSelection">,
+	): Promise<ClientResult<"session/setThinkingSelection">>;
 	startTurn(input: ClientParams<"turn/start">): Promise<ClientResult<"turn/start">>;
 	steerTurn(input: ClientParams<"turn/steer">): Promise<ClientResult<"turn/steer">>;
 	interruptTurn(input: ClientParams<"turn/interrupt">): Promise<ClientResult<"turn/interrupt">>;

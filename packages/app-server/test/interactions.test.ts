@@ -6,6 +6,7 @@ import {
 	MAX_PUBLIC_TEXT_UTF8_BYTES,
 	type ServerRpcRequest,
 } from "@arcmind/app-protocol";
+import type { PermissionApprovalRequest } from "@arcmind/coding-agent";
 import { describe, expect, it, vi } from "vitest";
 import { AppServerConnection } from "../src/connection.ts";
 import { InteractionBroker, type InteractionPeer } from "../src/interactions.ts";
@@ -32,6 +33,57 @@ class FakePeer implements InteractionPeer {
 }
 
 describe("InteractionBroker", () => {
+	const childApproval = (overrides: Partial<PermissionApprovalRequest> = {}): PermissionApprovalRequest => ({
+		action: {
+			actionId: "action-1",
+			toolName: "bash",
+			provenance: "builtin",
+			risks: ["network"],
+			paths: ["/tmp/work/result.txt"],
+			networkTargets: [],
+			command: "curl https://example.test",
+			sandbox: "workspace-write",
+		},
+		args: { command: "curl https://example.test" },
+		userMessages: ["check the endpoint"],
+		reason: "Subagent researcher (agent-child-1): Network destination needs approval",
+		fullOnceRequired: false,
+		...overrides,
+	});
+
+	it("routes child permission details to the owning peer and supports Full once", async () => {
+		const interactionId = "00000000-0000-4000-8000-000000000320";
+		const broker = new InteractionBroker({ serverEpoch: EPOCH, createId: () => interactionId });
+		const peer = new FakePeer();
+		broker.assign(SESSION_ID, peer);
+		peer.response = { interactionId, kind: "select", choiceId: "choice:1" };
+
+		await expect(broker.requestPermissionApproval(SESSION_ID, childApproval())).resolves.toEqual({
+			decision: "allow",
+			fullOnce: true,
+		});
+		expect(peer.requests[0]).toMatchObject({
+			kind: "select",
+			title: "Approve bash?",
+			choices: [
+				{ id: "choice:0", label: "Allow once" },
+				{ id: "choice:1", label: "Run once with Full" },
+				{ id: "choice:2", label: "Deny" },
+			],
+		});
+		expect(peer.requests[0]?.message).toContain("Subagent researcher (agent-child-1)");
+		expect(peer.requests[0]?.message).toContain("Risk: network");
+		expect(peer.requests[0]?.message).toContain('Arguments: {"command":"curl https://example.test"}');
+		expect(peer.requests[0]?.message).toContain("Paths: /tmp/work/result.txt");
+	});
+
+	it("fails a child permission request closed without an owning peer", async () => {
+		const broker = new InteractionBroker({ serverEpoch: EPOCH });
+		await expect(broker.requestPermissionApproval(SESSION_ID, childApproval())).resolves.toMatchObject({
+			decision: "deny",
+		});
+	});
+
 	it("denies project trust when no interaction owner is connected", async () => {
 		const broker = new InteractionBroker({
 			serverEpoch: EPOCH,
@@ -188,7 +240,7 @@ describe("InteractionBroker", () => {
 			jsonrpc: "2.0",
 			id: "initialize",
 			method: "initialize",
-			params: { protocolVersion: 1, client: { name: "test", version: "1" }, capabilities: [] },
+			params: { protocolVersion: 2, client: { name: "test", version: "1" }, capabilities: [] },
 		});
 		const ids = ["00000000-0000-4000-8000-000000000307", "00000000-0000-4000-8000-000000000308"];
 		const broker = new InteractionBroker({ serverEpoch: EPOCH, createId: () => ids.shift()! });
@@ -226,7 +278,7 @@ describe("InteractionBroker", () => {
 			jsonrpc: "2.0",
 			id: "initialize",
 			method: "initialize",
-			params: { protocolVersion: 1, client: { name: "test", version: "1" }, capabilities: [] },
+			params: { protocolVersion: 2, client: { name: "test", version: "1" }, capabilities: [] },
 		});
 		const ids = ["00000000-0000-4000-8000-000000000309", "00000000-0000-4000-8000-000000000310"];
 		const broker = new InteractionBroker({ serverEpoch: EPOCH, createId: () => ids.shift()! });

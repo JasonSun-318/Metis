@@ -3014,6 +3014,12 @@ export class InteractiveMode {
 				this.updateEditorBorderColor();
 				break;
 
+			case "thinking_selection_changed":
+				this.footer.invalidate();
+				this.updateEditorBorderColor();
+				this.ui.requestRender();
+				break;
+
 			case "message_start":
 				if (event.message.role === "custom") {
 					this.addMessageToChat(event.message);
@@ -3847,7 +3853,7 @@ export class InteractiveMode {
 		if (this.isBashMode) {
 			this.editor.borderColor = theme.getBashModeBorderColor();
 		} else {
-			const level = this.session.thinkingLevel || "off";
+			const level = this.session.getThinkingSelection() === "ultra" ? "max" : this.session.thinkingLevel || "off";
 			this.editor.borderColor = theme.getThinkingBorderColor(level);
 		}
 		this.ui.requestRender();
@@ -3855,13 +3861,13 @@ export class InteractiveMode {
 
 	private cycleThinkingLevel(): void {
 		if (this.guardCompactionMutation()) return;
-		const newLevel = this.session.cycleThinkingLevel();
+		const newLevel = this.session.cycleThinkingSelection();
 		if (newLevel === undefined) {
 			this.showStatus("Current model does not support thinking");
 		} else {
 			this.footer.invalidate();
 			this.updateEditorBorderColor();
-			this.showStatus(`Thinking level: ${newLevel}`);
+			this.showStatus(newLevel === "ultra" ? "Thinking: Ultra · multi-agent" : `Thinking level: ${newLevel}`);
 		}
 	}
 
@@ -4233,8 +4239,8 @@ export class InteractiveMode {
 					followUpMode: this.session.followUpMode,
 					transport: this.settingsManager.getTransport(),
 					httpIdleTimeoutMs: this.settingsManager.getHttpIdleTimeoutMs(),
-					thinkingLevel: this.session.thinkingLevel,
-					availableThinkingLevels: this.session.getAvailableThinkingLevels(),
+					thinkingSelection: this.session.getThinkingSelection(),
+					availableThinkingSelections: this.session.getAvailableThinkingSelections(),
 					currentTheme: this.settingsManager.getThemeSetting() || "dark",
 					terminalTheme: this.themeController.getTerminalTheme(),
 					availableThemes: getAvailableThemes(),
@@ -4298,8 +4304,8 @@ export class InteractiveMode {
 						configureHttpDispatcher(timeoutMs);
 						this.showStatus(`HTTP idle timeout: ${formatHttpIdleTimeoutMs(timeoutMs)}`);
 					},
-					onThinkingLevelChange: (level) => {
-						this.session.setThinkingLevel(level);
+					onThinkingSelectionChange: (selection) => {
+						this.session.setThinkingSelection(selection);
 						this.footer.invalidate();
 						this.updateEditorBorderColor();
 					},

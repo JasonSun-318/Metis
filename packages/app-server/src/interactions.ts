@@ -11,9 +11,12 @@ import {
 	validateServerRequest,
 } from "@arcmind/app-protocol";
 import {
+	canUseFullOnce,
 	createDialogExtensionUIContext,
 	type ExtensionUIContext,
 	type ExtensionUIDialogOptions,
+	type PermissionApprovalDecision,
+	type PermissionApprovalRequest,
 	type ProjectTrustOption,
 } from "@arcmind/coding-agent";
 
@@ -123,6 +126,54 @@ export class InteractionBroker {
 		if (response?.kind !== "project_trust") return undefined;
 		const index = Number(response.choiceId.slice("choice:".length));
 		return options[index];
+	}
+
+	async requestPermissionApproval(
+		sessionId: string,
+		approval: PermissionApprovalRequest,
+	): Promise<PermissionApprovalDecision> {
+		const action = approval.action;
+		let args = "[unavailable]";
+		try {
+			args = JSON.stringify(approval.args);
+		} catch {
+			// Keep the request actionable even if a custom tool supplied non-JSON arguments.
+		}
+		const message = [
+			`Reason: ${approval.reason}`,
+			`Tool: ${action.toolName}`,
+			`Risk: ${action.risks.join(", ") || "none"}`,
+			`Arguments: ${args}`,
+			action.command ? `Command: ${action.command}` : undefined,
+			action.paths.length > 0 ? `Paths: ${action.paths.join(", ")}` : undefined,
+			action.networkTargets.length > 0
+				? `Network: ${action.networkTargets.map(({ host, port }) => `${host}:${port}`).join(", ")}`
+				: undefined,
+		]
+			.filter((line): line is string => line !== undefined)
+			.join("\n");
+		const labels = approval.fullOnceRequired
+			? ["Run once with Full", "Deny"]
+			: canUseFullOnce(action)
+				? ["Allow once", "Run once with Full", "Deny"]
+				: ["Allow once", "Deny"];
+		const interactionId = this.createId();
+		const response = await this.request(
+			sessionId,
+			{
+				...this.baseInteraction(sessionId, interactionId, `Approve ${action.toolName}?`, message, {
+					signal: approval.signal,
+				}),
+				kind: "select",
+				choices: labels.map((label, index) => ({ id: choiceId(index), label })),
+			},
+			{ signal: approval.signal },
+		);
+		if (response?.kind !== "select") return { decision: "deny", reason: "Approval was unavailable or cancelled" };
+		const selected = labels[Number(response.choiceId.slice("choice:".length))];
+		if (selected === "Allow once") return { decision: "allow" };
+		if (selected === "Run once with Full") return { decision: "allow", fullOnce: true };
+		return { decision: "deny", reason: "Denied by the session owner" };
 	}
 
 	createExtensionUIContext(sessionId: string, publish: (event: NotificationEvent) => void): ExtensionUIContext {

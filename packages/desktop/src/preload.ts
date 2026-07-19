@@ -29,6 +29,14 @@ const api = {
 		invoke(DESKTOP_IPC_CHANNELS.openSession, "session/open", input) as ReturnType<ArcMindDesktopApi["openSession"]>,
 	readItems: (input: ClientParams<"session/readItems">) =>
 		invoke(DESKTOP_IPC_CHANNELS.readItems, "session/readItems", input) as ReturnType<ArcMindDesktopApi["readItems"]>,
+	readSubagentItems: (input: ClientParams<"subagent/readItems">) =>
+		invoke(DESKTOP_IPC_CHANNELS.readSubagentItems, "subagent/readItems", input) as ReturnType<
+			ArcMindDesktopApi["readSubagentItems"]
+		>,
+	setThinkingSelection: (input: ClientParams<"session/setThinkingSelection">) =>
+		invoke(DESKTOP_IPC_CHANNELS.setThinkingSelection, "session/setThinkingSelection", input) as ReturnType<
+			ArcMindDesktopApi["setThinkingSelection"]
+		>,
 	startTurn: (input: ClientParams<"turn/start">) =>
 		invoke(DESKTOP_IPC_CHANNELS.startTurn, "turn/start", input) as ReturnType<ArcMindDesktopApi["startTurn"]>,
 	steerTurn: (input: ClientParams<"turn/steer">) =>

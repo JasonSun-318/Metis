@@ -28,13 +28,13 @@ Declining trust skips protected resources. `AGENTS.md` and `CLAUDE.md` context f
 
 Non-interactive modes (`-p`, `--mode json`, and `--mode rpc`) do not show a trust prompt. Without an applicable saved trust decision, `defaultProjectTrust: "ask"` and `"never"` ignore such resources, while `"always"` trusts them. Use `--approve`/`-a` or `--no-approve`/`-na` to override project trust for one run.
 
-## No Built-in Sandbox
+## Action Permissions and Sandbox
 
-ArcMind does not include a built-in sandbox. Built-in tools can read files, write files, edit files, and run shell commands with the permissions of the arcmind process. Extensions are TypeScript modules that run with the same permissions. Package installs, shell commands, language servers, test commands, and other developer tools behave as ordinary local processes.
+Every session stores one of three permission modes: Ask, Auto, or Full. Ask and Auto classify model tool calls and manual shell commands, issue exact one-action grants, and run local Bash/`grep`/`find` child processes through SRT. Full explicitly bypasses ArcMind approvals and SRT. See [Permissions and Sandbox](permissions.md) for the decision table, reviewer inputs, sensitive paths and environment, Windows setup, native helper packaging, and fail-closed behavior.
 
-This is intentional. ArcMind is designed to operate on local source trees, invoke project toolchains, and integrate with the user's existing development environment. A partial in-process sandbox would be easy to misunderstand as a security boundary while still depending on the host shell, filesystem, package managers, credentials, and extension code. Real isolation needs to come from the operating system or a virtualization/container boundary.
+This boundary limits model-initiated actions; it is not isolation for trusted in-process code. Extensions are TypeScript modules that run with the ArcMind process's OS permissions during load and event hooks. Installing or configuring an extension, SDK integration, or future MCP server means trusting that code. Model-facing calls exposed by those integrations are still treated as custom permission actions.
 
-Project trust is only an input-loading guard. It prevents a repository from silently changing arcmind's settings or extensions before you approve it. It does not make untrusted code, untrusted prompts, or untrusted model output safe. Prompt injection from repository files, comments, documentation, context files, or build output is expected local-agent risk and cannot be reliably prevented by arcmind.
+Project trust is an input-loading guard. It prevents a repository from silently changing ArcMind's settings or extensions before approval. It does not make untrusted code, prompts, or model output safe. Prompt injection from repository files, comments, documentation, context files, or build output remains a local-agent risk.
 
 ## Running Untrusted or Unmonitored Work
 
@@ -56,4 +56,4 @@ If you bind-mount a host workspace read/write, writes from inside the container 
 
 To report a security issue, follow the repository [Security Policy](https://github.com/arcmind/arcmind/blob/main/SECURITY.md). Do not open a public issue for security-sensitive reports.
 
-Expected local-agent behavior, lack of a built-in sandbox, prompt injection from untrusted content, and behavior of user-installed extensions or skills are generally outside the security boundary unless the report demonstrates a real privilege-boundary bypass or shows how arcmind grants access that the local user did not already have.
+Expected Full-mode behavior, prompt injection from untrusted content, and behavior of user-installed trusted code are generally outside the security boundary unless a report demonstrates a permission/SRT bypass or shows ArcMind granting access beyond the documented boundary.

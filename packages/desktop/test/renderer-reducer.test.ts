@@ -36,6 +36,10 @@ function snapshot(serverEpoch = EPOCH_A, cursor = 0, recentItems: ItemView[] = [
 		nextBeforeItemId: null,
 		activeTurnId: null,
 		pendingInteractions: [],
+		thinkingSelection: "off",
+		actualThinkingLevel: "off",
+		availableThinkingSelections: ["off"],
+		subagents: [],
 		serverEpoch,
 		cursor,
 	};

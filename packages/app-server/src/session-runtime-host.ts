@@ -24,6 +24,10 @@ export interface OpenedSessionRuntime {
 	hasPendingInteractions(): boolean;
 	getSummary(): SessionSummary;
 	readItems(input: ClientParams<"session/readItems">): Promise<ClientResult<"session/readItems">>;
+	readSubagentItems(input: ClientParams<"subagent/readItems">): Promise<ClientResult<"subagent/readItems">>;
+	setThinkingSelection(
+		input: ClientParams<"session/setThinkingSelection">,
+	): Promise<ClientResult<"session/setThinkingSelection">>;
 	snapshot(serverEpoch: string, currentCursor: () => number): Promise<SessionSnapshot>;
 	startTurn(input: ClientParams<"turn/start">): Promise<ClientResult<"turn/start">>;
 	steer(input: ClientParams<"turn/steer">): Promise<ClientResult<"turn/steer">>;

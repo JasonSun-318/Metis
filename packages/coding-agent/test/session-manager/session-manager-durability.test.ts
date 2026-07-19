@@ -113,7 +113,7 @@ describe("SessionManager durable ownership and recovery", () => {
 		writeFileSync(path, '{"type":"session"');
 
 		const manager = SessionManager.open(path);
-		expect(manager.getHeader()).toMatchObject({ type: "session", version: 6 });
+		expect(manager.getHeader()).toMatchObject({ type: "session", version: 7 });
 		expect(manager.getEntries()).toMatchObject([
 			{ type: "custom", customType: "arcmind.session_recovery", parentId: null },
 		]);
@@ -163,7 +163,7 @@ describe("SessionManager durable ownership and recovery", () => {
 			.split("\n")
 			.map((line) => JSON.parse(line));
 		expect(restored).toMatchObject([
-			{ type: "session", version: 6, id: "good" },
+			{ type: "session", version: 7, id: "good" },
 			{ id: "one", parentId: null },
 		]);
 		expect(existsSync(backupPath)).toBe(false);

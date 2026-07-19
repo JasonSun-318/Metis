@@ -20,7 +20,15 @@ import { type OutboundEnvelope, OutboundQueue, type OutboundQueueLimits } from "
 import { AppServerError } from "./session-runtime-host.ts";
 import { ConnectionSubscriptions, type SessionSubscriptions } from "./subscriptions.ts";
 
-const SERVER_CAPABILITIES = ["archive.v1", "recovery.v1", "session.cursor.v1", "sessions.v1", "turns.v1"] as const;
+const SERVER_CAPABILITIES = [
+	"archive.v1",
+	"recovery.v1",
+	"session.cursor.v1",
+	"sessions.v1",
+	"subagents.v1",
+	"thinkingSelection.v1",
+	"turns.v1",
+] as const;
 
 function protocolErrorName(error: ProtocolValidationError): RpcErrorName {
 	switch (error.kind) {

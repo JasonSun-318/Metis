@@ -16,12 +16,14 @@ import {
 	UuidSchema,
 } from "./schema.ts";
 import {
+	ActualThinkingLevelSchema,
 	ConnectionEventsParamsSchema,
 	DurableImageRefViewSchema,
 	InteractionViewSchema,
 	ItemViewSchema,
 	SessionSnapshotSchema,
 	SessionSummarySchema,
+	ThinkingSelectionSchema,
 } from "./views.ts";
 
 export interface RpcMethodDefinition<Params extends TSchema = TSchema, Result extends TSchema = TSchema> {
@@ -106,6 +108,24 @@ export const SessionUnsubscribeResultSchema = StrictObject({
 	unsubscribed: Type.Literal(true),
 });
 
+export const SessionSetThinkingSelectionParamsSchema = StrictObject({
+	sessionId: SessionIdSchema,
+	requestId: UuidSchema,
+	selection: ThinkingSelectionSchema,
+});
+export const SessionThinkingSelectionResultSchema = StrictObject({
+	thinkingSelection: ThinkingSelectionSchema,
+	actualThinkingLevel: ActualThinkingLevelSchema,
+	availableThinkingSelections: Type.Array(ThinkingSelectionSchema, { minItems: 1, maxItems: 8, uniqueItems: true }),
+});
+
+export const SubagentReadItemsParamsSchema = StrictObject({
+	sessionId: SessionIdSchema,
+	agentId: SessionIdSchema,
+	beforeItemId: Type.Optional(Type.Union([OpaqueIdSchema, Type.Null()])),
+	limit: Type.Integer({ minimum: 1, maximum: MAX_HISTORY_ITEMS }),
+});
+
 export const TurnInputSchema = StrictObject({
 	sessionId: SessionIdSchema,
 	// Turn request IDs are scoped to sessionId.
@@ -183,6 +203,11 @@ export const ClientRequestMethods = {
 	"session/unarchive": method(SessionMutationParamsSchema, SessionMutationResultSchema),
 	"session/subscribe": method(SessionRefParamsSchema, SessionSubscribeResultSchema),
 	"session/unsubscribe": method(SessionRefParamsSchema, SessionUnsubscribeResultSchema),
+	"session/setThinkingSelection": method(
+		SessionSetThinkingSelectionParamsSchema,
+		SessionThinkingSelectionResultSchema,
+	),
+	"subagent/readItems": method(SubagentReadItemsParamsSchema, SessionReadItemsResultSchema),
 	"turn/start": method(TurnInputSchema, AcceptedOperationSchema),
 	"turn/steer": method(TurnSteerParamsSchema, AcceptedOperationSchema),
 	"turn/interrupt": method(SessionMutationParamsSchema, AcceptedOperationSchema),

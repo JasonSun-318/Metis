@@ -57,6 +57,20 @@ class FakeRuntime implements OpenedSessionRuntime {
 		return { items: [], nextBeforeItemId: null };
 	}
 
+	async readSubagentItems(_input: ClientParams<"subagent/readItems">): Promise<ClientResult<"subagent/readItems">> {
+		return { items: [], nextBeforeItemId: null };
+	}
+
+	async setThinkingSelection(
+		input: ClientParams<"session/setThinkingSelection">,
+	): Promise<ClientResult<"session/setThinkingSelection">> {
+		return {
+			thinkingSelection: input.selection,
+			actualThinkingLevel: input.selection === "ultra" ? "max" : input.selection,
+			availableThinkingSelections: ["off", "high", "ultra"],
+		};
+	}
+
 	async snapshot(serverEpoch: string, currentCursor: () => number): Promise<SessionSnapshot> {
 		return {
 			session: this.getSummary(),
@@ -65,6 +79,10 @@ class FakeRuntime implements OpenedSessionRuntime {
 			nextBeforeItemId: null,
 			activeTurnId: null,
 			pendingInteractions: [],
+			thinkingSelection: "high",
+			actualThinkingLevel: "high",
+			availableThinkingSelections: ["off", "high", "ultra"],
+			subagents: [],
 			serverEpoch,
 			cursor: currentCursor(),
 		};
@@ -116,7 +134,7 @@ function initialize(id = "initialize") {
 		jsonrpc: "2.0" as const,
 		id,
 		method: "initialize" as const,
-		params: { protocolVersion: 1, client: { name: "test", version: "1" }, capabilities: [] },
+		params: { protocolVersion: 2, client: { name: "test", version: "1" }, capabilities: [] },
 	};
 }
 
@@ -171,13 +189,13 @@ describe("AppServer", () => {
 		expectError(
 			await connection.handle({
 				...initialize("wrong-version"),
-				params: { ...initialize().params, protocolVersion: 2 },
+				params: { ...initialize().params, protocolVersion: 1 },
 			}),
 			RPC_ERROR_CODES.PROTOCOL_MISMATCH,
 		);
 		const initialized = await connection.handle(initialize());
 		expect(initialized).toMatchObject({
-			result: { protocolVersion: 1, server: { name: "arcmind-app-server" }, serverEpoch: server.serverEpoch },
+			result: { protocolVersion: 2, server: { name: "arcmind-app-server" }, serverEpoch: server.serverEpoch },
 		});
 		expectError(await connection.handle(initialize("again")), RPC_ERROR_CODES.INVALID_REQUEST);
 	});

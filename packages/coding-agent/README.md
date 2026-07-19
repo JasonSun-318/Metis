@@ -143,9 +143,10 @@ Type `/` in the editor to trigger commands. [Extensions](#extensions) can regist
 | `/scoped-models` | Enable/disable models for Ctrl+P cycling |
 | `/settings` | Thinking level, theme, message delivery, transport |
 | `/resume` | Pick from previous sessions |
-| `/new` | Start a new session |
+| [`/new [chat\|code]`](docs/sessions.md#chat-and-code-modes) | Create a session and choose its immutable workspace |
+| [`/permissions`](docs/permissions.md) | Choose Ask, Auto with review, or Full for this session |
 | `/name <name>` | Set session display name |
-| `/session` | Show session info (file, ID, messages, tokens, cost) |
+| `/session` | Show session info (file, ID, mode, messages, tokens, cost) |
 | `/tree` | Jump to any point in the session and continue from there |
 | `/trust` | Save project trust decision for future sessions (restart required) |
 | `/fork` | Create a new session from a previous user message |
@@ -466,9 +467,9 @@ ArcMind is aggressively extensible so it doesn't have to dictate your workflow. 
 
 **MCP:** Run `/mcp` to add and authenticate trusted stdio or Streamable HTTP servers without editing JSON. ArcMind supports token-backed authentication, resources, prompts, permission-aware calls, and Codex-style lazy tool discovery. See [docs/mcp.md](docs/mcp.md).
 
-**No sub-agents.** There's many ways to do this. Spawn arcmind instances via tmux, or build your own with [extensions](#extensions), or install a package that does it your way.
+**Explicit multi-agent tier.** Persisted Chat and Code sessions can select Ultra for maximum model reasoning plus recoverable first-class subagents. The process-spawning extension remains available for custom isolation and chained workflows. See [Ultra and Subagents](docs/subagents.md).
 
-**No permission popups.** Run in a container, or build your own confirmation flow with [extensions](#extensions) inline with your environment and security requirements.
+**Explicit permission boundary.** Ask and Auto use one-shot approvals and SRT for model-initiated local processes; Full is an explicit unsandboxed mode. Installed extension code remains trusted. See [Permissions and Sandbox](docs/permissions.md).
 
 **No plan mode.** Write plans to files, or build it with [extensions](#extensions), or install a package.
 
@@ -533,6 +534,10 @@ cat README.md | arcmind -p "Summarize this text"
 
 | Option | Description |
 |--------|-------------|
+| `--agent-mode <chat\|code>` | Classify a newly created session (default: `code`) |
+| `--cwd <path>` | Bind a newly created session to an existing directory |
+| `--permission-mode <ask\|auto\|full>` | Set permissions for a newly created session |
+| `--reviewer`, `--no-reviewer` | Enable or disable Auto review for a newly created session |
 | `-c`, `--continue` | Continue most recent session |
 | `-r`, `--resume` | Browse and select session |
 | `--session <path\|id>` | Use specific session file or partial UUID |

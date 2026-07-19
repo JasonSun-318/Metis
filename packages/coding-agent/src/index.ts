@@ -202,6 +202,7 @@ export {
 export {
 	type ActionRisk,
 	buildPermissionReviewerUserPrompt,
+	canUseFullOnce,
 	type ClassifiedAction,
 	type ClassifyActionInput,
 	classifyAction,
@@ -306,6 +307,21 @@ export {
 } from "./core/session-control.ts";
 export { createSessionId } from "./core/session-id.ts";
 export {
+	SUBAGENT_TOOL_NAMES,
+	type SubagentConfig,
+	type SubagentDisplayConfig,
+	type SubagentStatus,
+	type SubagentSummary,
+	type SubagentTombstone,
+	type SubagentUsage,
+} from "./core/subagents/types.ts";
+export { buildChildSystemPrompt, SUBAGENT_COORDINATION_PROMPT } from "./core/subagents/prompts.ts";
+export {
+	getHighestSupportedThinkingLevel,
+	isThinkingSelection,
+	type ThinkingSelection,
+} from "./core/thinking-selection.ts";
+export {
 	assertValidSessionId,
 	type BranchSummaryEntry,
 	buildContextEntries,
@@ -317,6 +333,7 @@ export {
 	type CwdOrigin,
 	type FileEntry,
 	getDefaultSessionDir,
+	getSessionSubagentDir,
 	getLatestCompactionEntry,
 	type ModelChangeEntry,
 	migrateSessionEntries,

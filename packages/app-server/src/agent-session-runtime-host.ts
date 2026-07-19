@@ -14,6 +14,7 @@ import {
 	type AgentSession,
 	type AgentSessionEvent,
 	type AgentSessionRuntime,
+	buildChildSystemPrompt,
 	type CreateAgentSessionRuntimeFactory,
 	createAgentSessionFromServices,
 	createAgentSessionRuntime,
@@ -24,6 +25,7 @@ import {
 	reduceRuntimeJournal,
 	SessionManager,
 	SettingsManager,
+	type SubagentSummary,
 } from "@arcmind/coding-agent";
 import type { CredentialCoordinator } from "./credential-coordinator.ts";
 import {
@@ -91,6 +93,14 @@ function optionalName(value: unknown): string | undefined {
 		.trim()
 		.slice(0, 256);
 	return normalized.length > 0 ? normalized : undefined;
+}
+
+function subagentView(summary: SubagentSummary): SessionSnapshot["subagents"][number] {
+	const { configuration, ...rest } = summary;
+	return {
+		...rest,
+		...(configuration ? { configuration: { ...configuration, tools: [...configuration.tools] } } : {}),
+	};
 }
 
 function timestamp(value: unknown, fallback: string): string {
@@ -263,6 +273,7 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 	private readonly projectedTurnStates = new Map<string, TurnView["state"]>();
 	private liveItemSequence = 0;
 	private unsubscribeAgent?: () => void;
+	private unsubscribeSubagents?: () => void;
 	private closed = false;
 	private closePromise?: Promise<void>;
 	private readonly interactions?: InteractionBroker;
@@ -295,6 +306,11 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 
 	private async bindExtensionUI(session: AgentSession): Promise<void> {
 		const uiContext = this.interactions?.createExtensionUIContext(this.sessionId, (event) => this.publish(event));
+		session.setPermissionApprovalHandler((request) =>
+			this.interactions
+				? this.interactions.requestPermissionApproval(this.sessionId, request)
+				: Promise.resolve({ decision: "deny", reason: "No interactive session owner is available" }),
+		);
 		await session.bindExtensions(uiContext ? { uiContext, mode: "rpc" } : {});
 	}
 
@@ -304,8 +320,12 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 
 	private bind(session: AgentSession): void {
 		this.unsubscribeAgent?.();
+		this.unsubscribeSubagents?.();
 		this.session = session;
 		this.unsubscribeAgent = session.subscribe((event) => this.onAgentEvent(event));
+		this.unsubscribeSubagents = this.runtime.subagentManager?.subscribe((event) => {
+			this.publish({ type: "subagent/updated", sessionId: this.sessionId, subagent: subagentView(event.summary) });
+		});
 	}
 
 	private publish(event: DomainEvent): void {
@@ -360,6 +380,15 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 		}
 		if (event.type === "session_info_changed") {
 			this.refreshLifecycleProjection();
+		}
+		if (event.type === "thinking_selection_changed") {
+			this.publish({
+				type: "session/thinkingSelectionChanged",
+				sessionId: this.sessionId,
+				thinkingSelection: event.selection,
+				actualThinkingLevel: event.actualThinkingLevel,
+				availableThinkingSelections: this.session.getAvailableThinkingSelections(),
+			});
 		}
 	}
 
@@ -456,7 +485,7 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 		return journal
 			.map((entry) =>
 				mapMessageEntry(
-					entry as Record<string, unknown>,
+					entry as unknown as Record<string, unknown>,
 					this.sessionId,
 					turnStates,
 					toolStates,
@@ -564,9 +593,49 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 		return this.projection.readItems(input);
 	}
 
+	async readSubagentItems(input: ClientParams<"subagent/readItems">): Promise<ClientResult<"subagent/readItems">> {
+		const manager = this.runtime.subagentManager;
+		if (!manager) throw new AppServerError("NOT_FOUND", { sessionId: input.sessionId });
+		const journal = await manager.readJournal(input.agentId);
+		const reduced = reduceRuntimeJournal(journal);
+		const turns = new Map(reduced.turns.map((turn) => [opaqueId(turn.turnId, "turn"), turn.state]));
+		const tools = new Map(reduced.tools.map((tool) => [opaqueId(tool.toolCallId, "tool"), tool.state]));
+		const items = journal
+			.map((entry) =>
+				mapMessageEntry(
+					entry as unknown as Record<string, unknown>,
+					input.agentId,
+					turns,
+					tools,
+					this.ref.summary.createdAt,
+				),
+			)
+			.filter((item): item is ItemView => item !== undefined);
+		const end = input.beforeItemId ? items.findIndex((item) => item.itemId === input.beforeItemId) : items.length;
+		if (input.beforeItemId && end < 0) throw new AppServerError("NOT_FOUND", { sessionId: input.sessionId });
+		const start = Math.max(0, end - input.limit);
+		return { items: items.slice(start, end), nextBeforeItemId: start > 0 ? items[start]!.itemId : null };
+	}
+
+	async setThinkingSelection(
+		input: ClientParams<"session/setThinkingSelection">,
+	): Promise<ClientResult<"session/setThinkingSelection">> {
+		this.session.setThinkingSelection(input.selection);
+		return {
+			thinkingSelection: this.session.getThinkingSelection(),
+			actualThinkingLevel: this.session.thinkingLevel,
+			availableThinkingSelections: this.session.getAvailableThinkingSelections(),
+		};
+	}
+
 	async snapshot(serverEpoch: string, currentCursor: () => number): Promise<SessionSnapshot> {
 		this.refreshLifecycleProjection();
-		return this.projection.snapshot(serverEpoch, currentCursor());
+		return this.projection.snapshot(serverEpoch, currentCursor(), {
+			thinkingSelection: this.session.getThinkingSelection(),
+			actualThinkingLevel: this.session.thinkingLevel,
+			availableThinkingSelections: this.session.getAvailableThinkingSelections(),
+			subagents: [...(this.runtime.subagentManager?.listSummaries() ?? [])].map(subagentView),
+		});
 	}
 
 	async startTurn(input: ClientParams<"turn/start">): Promise<ClientResult<"turn/start">> {
@@ -611,6 +680,8 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 					this.runtime.setRebindSession(undefined);
 					this.unsubscribeAgent?.();
 					this.unsubscribeAgent = undefined;
+					this.unsubscribeSubagents?.();
+					this.unsubscribeSubagents = undefined;
 					this.listeners.clear();
 					this.closed = true;
 				})
@@ -662,10 +733,23 @@ export class AgentSessionRuntimeHost implements SessionRuntimeHost {
 			...(this.options.credentials ? { authStorage: this.options.credentials.createView() } : {}),
 		});
 		try {
+			const child = options.childConfig;
+			const childModel = child ? services.modelRegistry.find(child.model.provider, child.model.modelId) : undefined;
+			if (child && !childModel)
+				throw new Error(`Child model is unavailable: ${child.model.provider}/${child.model.modelId}`);
 			const result = await createAgentSessionFromServices({
 				services,
 				sessionManager: options.sessionManager,
 				sessionStartEvent: options.sessionStartEvent,
+				ultraAvailable: options.ultraAvailable,
+				...(child
+					? {
+							model: childModel!,
+							thinkingLevel: child.thinkingLevel,
+							tools: [...child.tools],
+							additionalSystemPrompt: buildChildSystemPrompt(child),
+						}
+					: {}),
 			});
 			return { ...result, services, diagnostics: services.diagnostics };
 		} catch (error) {

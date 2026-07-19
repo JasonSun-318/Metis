@@ -5,6 +5,8 @@ import type {
 	ItemView,
 	SessionSnapshot,
 	SessionSummary,
+	SubagentSummaryView,
+	ThinkingSelectionView,
 	TurnView,
 } from "@arcmind/app-protocol";
 
@@ -27,6 +29,10 @@ export interface MutableProjectionState {
 	serverEpoch: string | null;
 	cursor: number;
 	syncStatus: ProjectionSyncStatus;
+	thinkingSelection: ThinkingSelectionView;
+	actualThinkingLevel: Exclude<ThinkingSelectionView, "ultra">;
+	availableThinkingSelections: ThinkingSelectionView[];
+	subagents: SubagentSummaryView[];
 }
 
 export function createProjectionState(): MutableProjectionState {
@@ -46,6 +52,10 @@ export function createProjectionState(): MutableProjectionState {
 		serverEpoch: null,
 		cursor: 0,
 		syncStatus: "empty",
+		thinkingSelection: "off",
+		actualThinkingLevel: "off",
+		availableThinkingSelections: ["off"],
+		subagents: [],
 	};
 }
 
@@ -96,6 +106,10 @@ export function replaceProjectionSnapshot(state: MutableProjectionState, snapsho
 	state.serverEpoch = snapshot.serverEpoch;
 	state.cursor = snapshot.cursor;
 	state.syncStatus = "ready";
+	state.thinkingSelection = snapshot.thinkingSelection;
+	state.actualThinkingLevel = snapshot.actualThinkingLevel;
+	state.availableThinkingSelections = snapshot.availableThinkingSelections;
+	state.subagents = snapshot.subagents;
 }
 
 export function markProjectionResubscribing(state: MutableProjectionState): void {
@@ -114,6 +128,9 @@ function eventSessionId(event: DomainEvent): string | undefined {
 		case "item/completed":
 			return event.item.sessionId;
 		case "item/delta":
+			return event.sessionId;
+		case "session/thinkingSelectionChanged":
+		case "subagent/updated":
 			return event.sessionId;
 		case "interaction/notify":
 			return event.sessionId;
@@ -171,6 +188,21 @@ function applyEvent(state: MutableProjectionState, event: DomainEvent): void {
 		case "session/updated":
 			state.sessionsById.set(event.session.sessionId, structuredClone(event.session));
 			return;
+		case "session/thinkingSelectionChanged":
+			state.thinkingSelection = event.thinkingSelection;
+			state.actualThinkingLevel = event.actualThinkingLevel;
+			state.availableThinkingSelections = event.availableThinkingSelections;
+			return;
+		case "subagent/updated": {
+			const index = state.subagents.findIndex((candidate) => candidate.agentId === event.subagent.agentId);
+			state.subagents =
+				index < 0
+					? [...state.subagents, structuredClone(event.subagent)]
+					: state.subagents.map((candidate, current) =>
+							current === index ? structuredClone(event.subagent) : candidate,
+						);
+			return;
+		}
 		case "turn/started":
 		case "turn/completed":
 		case "turn/interrupted":

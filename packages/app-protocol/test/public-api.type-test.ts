@@ -25,6 +25,10 @@ const snapshot: SessionSnapshot = {
 	nextBeforeItemId: null,
 	activeTurnId: null,
 	pendingInteractions: [],
+	thinkingSelection: "off",
+	actualThinkingLevel: "off",
+	availableThinkingSelections: ["off"],
+	subagents: [],
 	serverEpoch: "33333333-3333-4333-8333-333333333333",
 	cursor: 0,
 };
