@@ -6,7 +6,9 @@ Ultra is available only in persisted primary **Code** sessions. It is unavailabl
 
 | Session state | Subagent tools |
 |---|---|
-| Persisted primary Code + Ultra | All six |
+| Persisted primary Code + Ultra, not activated, no children | `activate_subagents` |
+| Persisted primary Code + Ultra, not activated, residual children | `activate_subagents`, inspect, wait, interrupt, close |
+| Persisted primary Code + Ultra, activated | All six orchestration tools |
 | Persisted primary Code, normal thinking, no children | None |
 | Persisted primary Code, normal thinking, residual children | Inspect, wait, interrupt, close |
 | Legacy Chat with residual children | Inspect, wait, interrupt, close |
@@ -14,7 +16,11 @@ Ultra is available only in persisted primary **Code** sessions. It is unavailabl
 
 ## Model-visible tools
 
-While Ultra is selected, the main agent receives six normal tools:
+While Ultra is selected but orchestration is inactive, the main agent receives only `activate_subagents`. Its strict parameters are `{}`. It is intended for complex work that can be split into independent, bounded assignments or requires broad multi-file exploration; it should not be used for simple, known-location, or inherently sequential work.
+
+The first successful call returns `{ "activated": true, "alreadyActivated": false }`. A repeated call from an already-issued or batched tool call is harmless and returns `alreadyActivated: true`. Activation refreshes tools before the next automatic provider request in the same user turn, so no second user message is required.
+
+After activation, `activate_subagents` is hidden and the main agent receives these six normal tools:
 
 | Tool | Purpose |
 |---|---|
@@ -27,7 +33,11 @@ While Ultra is selected, the main agent receives six normal tools:
 
 The main agent may own at most 10 non-closed children. The process runs at most four children globally and four per parent, in FIFO order. Children cannot create children or talk directly to siblings.
 
-Leaving Ultra does not interrupt existing children. Until all children are closed, the main agent keeps only `inspect_agents`, `wait_agents`, `interrupt_agent`, and `close_agent`; creation and messaging require re-entering Ultra.
+Activation is runtime-only and is not written to the session journal or settings. Leaving Ultra clears it immediately. Re-entering Ultra, replacing or reopening a session, or constructing a new runtime requires `activate_subagents` again. Ordinary provider requests, context compaction, and prompt rebuilding within the same active runtime keep it enabled.
+
+Leaving Ultra does not interrupt existing children. Until all children are closed, the main agent keeps only `inspect_agents`, `wait_agents`, `interrupt_agent`, and `close_agent`; creation and messaging remain hidden. Re-entering Ultra adds `activate_subagents` beside those cleanup controls, and successful activation restores all six orchestration tools.
+
+The six tool schemas are the detailed lazy-loaded usage contract: they describe assignment shape, least-capability tools, permission/model/thinking defaults, path bounds, forked turns, timeout, inspection, messaging, waiting, interruption, and deletion. Version 1 does not add a separate subagent index or inject child prompts/transcripts into the parent context.
 
 A typical creation request is:
 
@@ -40,7 +50,6 @@ A typical creation request is:
   "readPaths": ["."],
   "writePaths": ["."],
   "permissionMode": "ask",
-  "forkTurns": 0,
   "timeoutSeconds": 1800
 }
 ```
@@ -56,6 +65,8 @@ The parent chooses a least-capability subset of its active tools. A child gets a
 The runtime-owned coordinator prompt and child contract have one implementation source in `src/core/subagents/prompts.ts` and byte-for-byte tests. User-supplied names, roles, and instructions are encoded as assignment data rather than interpolated as runtime policy.
 
 `forkTurns` defaults to `0`. A positive number or `"all"` copies only visible parent conversation turns and strips hidden thinking. The child's initial task is always a new user message.
+
+Before activation, the compact activation tool definition is the only subagent-specific model context. After activation, the parent receives the six tool definitions plus the compact runtime-owned coordinator block. Tool changes are recorded on the activation result and are used by the next automatic provider request; neither activation nor a child completion mutates a request already in flight.
 
 ## Asynchronous results
 
