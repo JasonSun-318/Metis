@@ -30,6 +30,8 @@ const CREATED_AT = "2026-07-16T00:00:00.000Z";
 function summary(): SessionSummary {
 	return {
 		sessionId: SESSION_ID,
+		mode: "code",
+		cwdOrigin: "user-selected",
 		cwd: "/tmp/project",
 		createdAt: CREATED_AT,
 		updatedAt: CREATED_AT,
@@ -156,7 +158,7 @@ function initialize(id: string) {
 		jsonrpc: "2.0" as const,
 		id,
 		method: "initialize" as const,
-		params: { protocolVersion: 2, client: { name: "test", version: "1" }, capabilities: [] },
+		params: { protocolVersion: 3, client: { name: "test", version: "1" }, capabilities: [] },
 	};
 }
 

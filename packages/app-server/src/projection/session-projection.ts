@@ -144,7 +144,7 @@ export class SessionProjection {
 		cursor: number,
 		runtime: Pick<
 			SessionSnapshot,
-			"thinkingSelection" | "actualThinkingLevel" | "availableThinkingSelections" | "subagents"
+			"thinkingSelection" | "actualThinkingLevel" | "availableThinkingSelections" | "subagents" | "model"
 		> = {
 			thinkingSelection: "off",
 			actualThinkingLevel: "off",

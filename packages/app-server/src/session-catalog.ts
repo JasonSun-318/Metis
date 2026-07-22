@@ -2,12 +2,22 @@ import { createHash } from "node:crypto";
 import { type Dir, constants as fsConstants } from "node:fs";
 import { lstat, open, opendir, realpath } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
-import { type ClientParams, type ClientResult, MAX_NAME_UTF16_UNITS, type SessionSummary } from "@arcmind/app-protocol";
+import {
+	type AgentMode,
+	type ClientParams,
+	type ClientResult,
+	type CwdOrigin,
+	MAX_NAME_UTF16_UNITS,
+	type SessionSummary,
+} from "@arcmind/app-protocol";
 import {
 	assertValidSessionId,
 	CURRENT_SESSION_VERSION,
 	getDefaultSessionDir,
+	getOwnedManagedWorkspace,
 	moveSessionFileWithLease,
+	removeOwnedManagedWorkspace,
+	resolveNewSessionWorkspace,
 	SessionManager,
 } from "@arcmind/coding-agent";
 import {
@@ -31,6 +41,8 @@ interface ScannedSession {
 		readonly id: string;
 		readonly timestamp: string;
 		readonly cwd: string;
+		readonly mode: AgentMode;
+		readonly cwdOrigin: CwdOrigin;
 	};
 	readonly updatedAt: string;
 }
@@ -75,6 +87,8 @@ function corruptId(relativePath: string, discriminator = ""): string {
 function corruptSummary(sessionId: string, scanned: ScannedSession): SessionSummary {
 	return {
 		sessionId,
+		mode: "code",
+		cwdOrigin: "user-selected",
 		cwd: null,
 		createdAt: scanned.updatedAt,
 		updatedAt: scanned.updatedAt,
@@ -84,7 +98,13 @@ function corruptSummary(sessionId: string, scanned: ScannedSession): SessionSumm
 	};
 }
 
-async function readHeader(path: string): Promise<{ id: string; timestamp: string; cwd: string }> {
+async function readHeader(path: string): Promise<{
+	id: string;
+	timestamp: string;
+	cwd: string;
+	mode: AgentMode;
+	cwdOrigin: CwdOrigin;
+}> {
 	const before = await lstat(path);
 	if (!before.isFile() || before.nlink !== 1) throw new Error("Session journal is not a single-link regular file");
 	const noFollow = typeof fsConstants.O_NOFOLLOW === "number" ? fsConstants.O_NOFOLLOW : 0;
@@ -131,7 +151,14 @@ async function readHeader(path: string): Promise<{ id: string; timestamp: string
 		) {
 			throw new Error("Session journal changed while reading its header");
 		}
-		return { id: value.id, timestamp: value.timestamp, cwd: value.cwd };
+		return {
+			id: value.id,
+			timestamp: value.timestamp,
+			cwd: value.cwd,
+			mode: value.mode === "chat" || value.mode === "code" ? value.mode : "code",
+			cwdOrigin:
+				value.cwdOrigin === "managed" || value.cwdOrigin === "user-selected" ? value.cwdOrigin : "user-selected",
+		};
 	} finally {
 		await handle.close();
 	}
@@ -231,6 +258,8 @@ export class SessionCatalog {
 				item.header && !duplicate
 					? {
 							sessionId,
+							mode: item.header.mode,
+							cwdOrigin: item.header.cwdOrigin,
 							cwd: item.header.cwd || null,
 							createdAt: item.header.timestamp,
 							updatedAt: item.updatedAt,
@@ -282,24 +311,40 @@ export class SessionCatalog {
 
 	create(input: ClientParams<"session/create">): Promise<SessionSummary> {
 		return this.mutate(async () => {
-			const cwd = resolve(input.cwd);
+			const mode = input.mode ?? "code";
 			const requestedName = normalizedSessionName(input.name);
 			const mutation: DurableSessionMutation = {
 				method: "session/create",
 				kind: "session_create",
 				requestId: input.requestId,
-				params: { cwd: input.cwd, ...(input.name === undefined ? {} : { name: input.name }) },
+				params: {
+					...(input.mode === undefined ? {} : { mode: input.mode }),
+					...(input.cwd === undefined ? {} : { cwd: input.cwd }),
+					...(input.name === undefined ? {} : { name: input.name }),
+				},
 			};
 			const existing = this.sessions.get(input.requestId);
 			if (existing) {
 				const manager = SessionManager.open(existing.path);
 				try {
 					const prepared = prepareSessionMutation(manager, mutation);
+					if (prepared.state === "completed") return prepared.result as SessionSummary;
 					const name = normalizedSessionName(manager.getSessionName());
-					if (existing.summary.cwd !== cwd || name !== requestedName) {
+					const requestedCwd = input.cwd === undefined ? undefined : await realpath(resolve(input.cwd));
+					const workspaceMatches = requestedCwd
+						? manager.getCwd() === requestedCwd && manager.getCwdOrigin() === "user-selected"
+						: mode === "chat"
+							? getOwnedManagedWorkspace({
+									id: input.requestId,
+									cwd: manager.getCwd(),
+									cwdOrigin: manager.getCwdOrigin(),
+									agentDir: this.agentDir,
+								}) !== undefined
+							: manager.getCwd() === (await realpath(process.cwd())) &&
+								manager.getCwdOrigin() === "user-selected";
+					if (manager.getMode() !== mode || !workspaceMatches || name !== requestedName) {
 						throw new AppServerError("REQUEST_ID_REUSED", { requestId: input.requestId });
 					}
-					if (prepared.state === "completed") return prepared.result as SessionSummary;
 					const summary = { ...existing.summary, ...(name === undefined ? {} : { name }) };
 					return completeSessionMutation(manager, mutation, summary) as SessionSummary;
 				} finally {
@@ -310,11 +355,32 @@ export class SessionCatalog {
 				throw new AppServerError("REQUEST_ID_REUSED", { requestId: input.requestId });
 			}
 
+			const workspace = resolveNewSessionWorkspace({
+				id: input.requestId,
+				mode,
+				requestedCwd: input.cwd,
+				hostCwd: process.cwd(),
+				agentDir: this.agentDir,
+			});
 			let manager: SessionManager | undefined;
 			try {
-				manager = SessionManager.create(cwd, getDefaultSessionDir(cwd, this.agentDir), {
-					id: input.requestId,
-				});
+				try {
+					manager = SessionManager.create(workspace.cwd, getDefaultSessionDir(workspace.cwd, this.agentDir), {
+						id: input.requestId,
+						mode,
+						cwdOrigin: workspace.cwdOrigin,
+					});
+				} catch (error) {
+					if (workspace.cwdOrigin === "managed") {
+						removeOwnedManagedWorkspace({
+							id: input.requestId,
+							cwd: workspace.cwd,
+							cwdOrigin: workspace.cwdOrigin,
+							agentDir: this.agentDir,
+						});
+					}
+					throw error;
+				}
 				if (requestedName !== undefined) manager.appendSessionInfo(requestedName);
 				prepareSessionMutation(manager, mutation);
 			} finally {

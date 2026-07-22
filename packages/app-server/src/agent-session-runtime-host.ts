@@ -97,9 +97,26 @@ function optionalName(value: unknown): string | undefined {
 
 function subagentView(summary: SubagentSummary): SessionSnapshot["subagents"][number] {
 	const { configuration, ...rest } = summary;
+	if (summary.status === "closed") {
+		return {
+			agentId: summary.agentId,
+			name: summary.name,
+			status: "closed",
+			taskSummary: summary.taskSummary,
+			...(summary.finalSummary ? { finalSummary: summary.finalSummary } : {}),
+			createdAt: summary.createdAt,
+			updatedAt: summary.updatedAt,
+		};
+	}
+	if (!configuration) throw new Error(`Active subagent is missing configuration: ${summary.agentId}`);
 	return {
 		...rest,
-		...(configuration ? { configuration: { ...configuration, tools: [...configuration.tools] } } : {}),
+		configuration: {
+			...configuration,
+			tools: [...configuration.tools],
+			readPaths: [...configuration.readPaths],
+			writePaths: [...configuration.writePaths],
+		},
 	};
 }
 
@@ -631,6 +648,9 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 	async snapshot(serverEpoch: string, currentCursor: () => number): Promise<SessionSnapshot> {
 		this.refreshLifecycleProjection();
 		return this.projection.snapshot(serverEpoch, currentCursor(), {
+			...(this.session.model
+				? { model: { provider: this.session.model.provider, modelId: this.session.model.id } }
+				: {}),
 			thinkingSelection: this.session.getThinkingSelection(),
 			actualThinkingLevel: this.session.thinkingLevel,
 			availableThinkingSelections: this.session.getAvailableThinkingSelections(),
@@ -724,18 +744,34 @@ export class AgentSessionRuntimeHost implements SessionRuntimeHost {
 	}
 
 	private readonly createRuntime: CreateAgentSessionRuntimeFactory = async (options) => {
+		if (options.childConfig && !options.childCapabilityScope) {
+			throw new Error("Child runtime is missing its capability snapshot");
+		}
 		const projectTrusted = await this.resolveProjectTrust(options.cwd, options.sessionManager.getSessionId());
 		const settingsManager = SettingsManager.create(options.cwd, this.agentDir, { projectTrusted });
+		const child = options.childConfig;
 		const services = await createAgentSessionServices({
 			cwd: options.cwd,
 			agentDir: this.agentDir,
 			settingsManager,
 			...(this.options.credentials ? { authStorage: this.options.credentials.createView() } : {}),
+			...(child
+				? {
+						resourceLoaderOptions: {
+							noSkills: true,
+							noPromptTemplates: true,
+							noThemes: true,
+							systemPromptOverride: () => undefined,
+							appendSystemPromptOverride: () => [],
+						},
+					}
+				: {}),
 		});
 		try {
-			const child = options.childConfig;
 			const childModel = child ? services.modelRegistry.find(child.model.provider, child.model.modelId) : undefined;
-			if (child && !childModel)
+			if (child?.mode !== undefined && child.mode !== "code")
+				throw new Error("Legacy Chat subagents are cleanup-only and cannot start a runtime");
+			if (child && (!childModel || !services.modelRegistry.hasConfiguredAuth(childModel)))
 				throw new Error(`Child model is unavailable: ${child.model.provider}/${child.model.modelId}`);
 			const result = await createAgentSessionFromServices({
 				services,
@@ -748,6 +784,8 @@ export class AgentSessionRuntimeHost implements SessionRuntimeHost {
 							thinkingLevel: child.thinkingLevel,
 							tools: [...child.tools],
 							additionalSystemPrompt: buildChildSystemPrompt(child),
+							includeAutoMemory: false,
+							childCapabilityScope: options.childCapabilityScope,
 						}
 					: {}),
 			});

@@ -1,4 +1,13 @@
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	realpathSync,
+	rmSync,
+	symlinkSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import type {
@@ -10,7 +19,7 @@ import type {
 	SessionSummary,
 } from "@arcmind/app-protocol";
 import { RPC_ERROR_CODES } from "@arcmind/app-protocol";
-import { ProjectTrustStore, SessionManager } from "@arcmind/coding-agent";
+import { getManagedWorkspaceDir, ProjectTrustStore, SessionManager } from "@arcmind/coding-agent";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AppServer } from "../src/app-server.ts";
 import {
@@ -134,7 +143,7 @@ function initialize(id = "initialize") {
 		jsonrpc: "2.0" as const,
 		id,
 		method: "initialize" as const,
-		params: { protocolVersion: 2, client: { name: "test", version: "1" }, capabilities: [] },
+		params: { protocolVersion: 3, client: { name: "test", version: "1" }, capabilities: [] },
 	};
 }
 
@@ -195,7 +204,7 @@ describe("AppServer", () => {
 		);
 		const initialized = await connection.handle(initialize());
 		expect(initialized).toMatchObject({
-			result: { protocolVersion: 2, server: { name: "arcmind-app-server" }, serverEpoch: server.serverEpoch },
+			result: { protocolVersion: 3, server: { name: "arcmind-app-server" }, serverEpoch: server.serverEpoch },
 		});
 		expectError(await connection.handle(initialize("again")), RPC_ERROR_CODES.INVALID_REQUEST);
 	});
@@ -348,6 +357,93 @@ describe("AppServer", () => {
 				...create,
 				id: "create-duplicate",
 				params: { requestId: REQUEST_B, cwd: projectDir },
+			}),
+			RPC_ERROR_CODES.REQUEST_ID_REUSED,
+		);
+	});
+
+	it("replays a completed create after its working directory is removed", async () => {
+		const firstServer = await AppServer.create({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
+		const first = firstServer.connect();
+		await first.handle(initialize("first"));
+		const create = {
+			jsonrpc: "2.0" as const,
+			id: "create",
+			method: "session/create" as const,
+			params: { requestId: REQUEST_A, mode: "chat" as const, cwd: projectDir, name: "durable replay" },
+		};
+		const created = await first.handle(create);
+		firstServer.beginShutdown();
+		await firstServer.waitForShutdown();
+		rmSync(projectDir, { recursive: true, force: true });
+		const secondServer = await AppServer.create({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
+		const second = secondServer.connect();
+		await second.handle(initialize("second"));
+
+		expect(await second.handle({ ...create, id: "create-replay" })).toEqual({
+			...created,
+			id: "create-replay",
+		});
+	});
+
+	it("creates managed and folder-backed chat sessions with durable mode metadata", async () => {
+		const server = await AppServer.create({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
+		const connection = server.connect();
+		await connection.handle(initialize());
+		const managedCreate = {
+			jsonrpc: "2.0" as const,
+			id: "create-managed-chat",
+			method: "session/create" as const,
+			params: { requestId: REQUEST_A, mode: "chat" as const, name: "Managed chat" },
+		};
+
+		const managed = await connection.handle(managedCreate);
+		const managedCwd = realpathSync(getManagedWorkspaceDir(REQUEST_A, agentDir));
+		expect(managed).toMatchObject({
+			result: {
+				session: {
+					sessionId: REQUEST_A,
+					mode: "chat",
+					cwdOrigin: "managed",
+					cwd: managedCwd,
+				},
+			},
+		});
+		expect(existsSync(managedCwd)).toBe(true);
+		expect(await connection.handle({ ...managedCreate, id: "create-managed-chat-replay" })).toMatchObject({
+			result: { session: { sessionId: REQUEST_A, cwd: managedCwd } },
+		});
+
+		const manager = SessionManager.open(server.catalog.get(REQUEST_A).path);
+		try {
+			expect(manager.getMode()).toBe("chat");
+			expect(manager.getCwdOrigin()).toBe("managed");
+		} finally {
+			manager.close();
+		}
+
+		const selected = await connection.handle({
+			jsonrpc: "2.0",
+			id: "create-folder-chat",
+			method: "session/create",
+			params: { requestId: REQUEST_B, mode: "chat", cwd: projectDir },
+		});
+		expect(selected).toMatchObject({
+			result: {
+				session: {
+					sessionId: REQUEST_B,
+					mode: "chat",
+					cwdOrigin: "user-selected",
+					cwd: realpathSync(projectDir),
+				},
+			},
+		});
+
+		expectError(
+			await connection.handle({
+				...managedCreate,
+				id: "reuse-managed-chat-id",
+				params: { requestId: REQUEST_A, mode: "code" },
 			}),
 			RPC_ERROR_CODES.REQUEST_ID_REUSED,
 		);
@@ -670,7 +766,9 @@ describe("AppServer", () => {
 			const interaction = envelope.params.interaction;
 			if (interaction.kind === "project_trust") {
 				const label =
-					interaction.projectPath === parentProject ? "Trust parent folder" : "Trust (this session only)";
+					interaction.projectPath === realpathSync(parentProject)
+						? "Trust parent folder"
+						: "Trust (this session only)";
 				const choice = interaction.choices.find((candidate) => candidate.label.startsWith(label));
 				if (!choice) throw new Error(`Missing project trust choice: ${label}`);
 				connection.handleServerResponse({
@@ -704,7 +802,7 @@ describe("AppServer", () => {
 				method: "session/open",
 				params: { sessionId: requestId },
 			});
-			expect(opened).toMatchObject({ result: { session: { sessionId: requestId, cwd } } });
+			expect(opened).toMatchObject({ result: { session: { sessionId: requestId, cwd: realpathSync(cwd) } } });
 		}
 
 		expect(interactions.map((request) => request.params.interaction.kind)).toEqual([

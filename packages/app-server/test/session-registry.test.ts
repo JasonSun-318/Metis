@@ -12,6 +12,8 @@ import type {
 function summary(sessionId: string): SessionSummary {
 	return {
 		sessionId,
+		mode: "code",
+		cwdOrigin: "user-selected",
 		cwd: "/tmp/project",
 		createdAt: "2026-01-01T00:00:00.000Z",
 		updatedAt: "2026-01-01T00:00:00.000Z",
