@@ -4,7 +4,11 @@ import { beforeAll, describe, expect, it, vi } from "vitest";
 import type { AgentSession } from "../src/core/agent-session.ts";
 import type { SubagentManager } from "../src/core/subagents/manager.ts";
 import { createSubagentTools } from "../src/core/subagents/tools.ts";
-import { SUBAGENT_TOOL_NAMES } from "../src/core/subagents/types.ts";
+import {
+	type ActivateSubagentsResult,
+	SUBAGENT_ACTIVATION_TOOL_NAME,
+	SUBAGENT_TOOL_NAMES,
+} from "../src/core/subagents/types.ts";
 import { ToolExecutionComponent } from "../src/modes/interactive/components/tool-execution.ts";
 import { initTheme } from "../src/modes/interactive/theme/theme.ts";
 import { stripAnsi } from "../src/utils/ansi.ts";
@@ -42,9 +46,17 @@ function setup() {
 		interrupt: vi.fn(async (agentId) => ({ agentId, status: "stopped" })),
 		close: vi.fn(async (agentId) => ({ agentId, status: "closed" })),
 	} as unknown as SubagentManager;
+	const activationResults: ActivateSubagentsResult[] = [
+		{ activated: true, alreadyActivated: false },
+		{ activated: true, alreadyActivated: true },
+	];
+	const activateSubagents = vi.fn(
+		() => activationResults.shift() ?? { activated: true as const, alreadyActivated: true },
+	);
 	const session = { getThinkingSelection: () => selection } as unknown as AgentSession;
-	const tools = createSubagentTools({ getManager: () => manager, getSession: () => session });
+	const tools = createSubagentTools({ getManager: () => manager, getSession: () => session, activateSubagents });
 	return {
+		activateSubagents,
 		manager,
 		tools,
 		setSelection: (value: "high" | "ultra") => {
@@ -56,10 +68,54 @@ function setup() {
 describe("subagent control tools", () => {
 	beforeAll(() => initTheme("dark"));
 
-	it("defines exactly six strict schemas and forwards structured results", async () => {
+	it("defines one strict idempotent activation tool with the agreed model copy", async () => {
+		const { activateSubagents, tools } = setup();
+		const activate = tools.find((tool) => tool.name === SUBAGENT_ACTIVATION_TOOL_NAME)!;
+
+		expect(activate.description).toBe(
+			"Enable subagent tools for a complex task when the work can be divided into independent, bounded assignments or requires broad multi-file exploration. Call this once before the first delegation. Do not use it for simple tasks, known-location lookups, or work that must be completed sequentially. After activation, use spawn_agent and avoid duplicating delegated work.",
+		);
+		expect(activate.promptSnippet).toBe("Enable subagents for complex work that can be delegated independently");
+		expect(activate.executionMode).toBe("sequential");
+		expect(Value.Check(activate.parameters, {})).toBe(true);
+		expect(Value.Check(activate.parameters, { extra: true })).toBe(false);
+
+		const first = await execute(activate, {});
+		expect(first.details).toEqual({ activated: true, alreadyActivated: false });
+		await expect(execute(activate, {})).resolves.toMatchObject({
+			details: { activated: true, alreadyActivated: true },
+		});
+		expect(activateSubagents).toHaveBeenCalledTimes(2);
+
+		const component = new ToolExecutionComponent(
+			SUBAGENT_ACTIVATION_TOOL_NAME,
+			"call",
+			{},
+			{},
+			activate,
+			createFakeTui(),
+			process.cwd(),
+		);
+		component.updateResult({ ...first, isError: false });
+		expect(stripAnsi(component.render(120).join("\n"))).toContain("Subagents activated");
+	});
+
+	it("keeps six strict post-activation schemas with concise usage descriptions", async () => {
 		const { manager, tools } = setup();
-		expect(tools.map((tool) => tool.name)).toEqual(SUBAGENT_TOOL_NAMES);
+		expect(tools.map((tool) => tool.name)).toEqual([SUBAGENT_ACTIVATION_TOOL_NAME, ...SUBAGENT_TOOL_NAMES]);
 		const spawn = tools.find((tool) => tool.name === "spawn_agent")!;
+		expect(spawn.description).toBe(
+			"Create one child agent for independent, bounded work. Use a unique name, a self-contained task, the minimum necessary tools, and narrow read/write roots.",
+		);
+		expect(spawn.parameters.properties.task.description).toBe(
+			"Self-contained assignment with the objective, owned scope, non-goals, expected handoff, and focused verification.",
+		);
+		expect(spawn.parameters.properties.tools.description).toBe(
+			"Minimum subset of the parent's active tools required for the assignment.",
+		);
+		expect(spawn.parameters.properties.forkTurns.description).toBe(
+			'Number of visible parent turns to copy, or "all"; omit to copy none.',
+		);
 		expect(Value.Check(spawn.parameters, { name: "researcher", task: "inspect", tools: [] })).toBe(true);
 		expect(Value.Check(spawn.parameters, { name: "researcher", task: "inspect", tools: [], extra: true })).toBe(
 			false,
@@ -82,8 +138,12 @@ describe("subagent control tools", () => {
 	});
 
 	it("rejects stale creation and messaging outside Ultra while cleanup remains callable", async () => {
-		const { manager, tools, setSelection } = setup();
+		const { activateSubagents, manager, tools, setSelection } = setup();
 		setSelection("high");
+		await expect(execute(tools.find((tool) => tool.name === SUBAGENT_ACTIVATION_TOOL_NAME)!, {})).rejects.toThrow(
+			"Ultra is required",
+		);
+		expect(activateSubagents).not.toHaveBeenCalled();
 		await expect(
 			execute(tools.find((tool) => tool.name === "spawn_agent")!, { name: "child", task: "task", tools: [] }),
 		).rejects.toThrow("Ultra is required");

@@ -4,6 +4,7 @@ import {
 	buildChildSystemPrompt,
 	buildParentAssignmentProfile,
 	buildSubagentContract,
+	SUBAGENT_COORDINATION_PROMPT,
 	safePromptJson,
 } from "../src/core/subagents/prompts.ts";
 import type { SubagentConfig } from "../src/core/subagents/types.ts";
@@ -37,6 +38,18 @@ function config(overrides: Partial<SubagentConfig> = {}): SubagentConfig {
 }
 
 describe("subagent runtime prompt and mailbox", () => {
+	it("keeps the activated parent coordinator compact and responsibility-focused", () => {
+		expect(SUBAGENT_COORDINATION_PROMPT).toBe(`<subagent_coordination>
+- Delegate only independent, bounded work.
+- Reuse an existing agent instead of spawning duplicate work.
+- Launch independent agents together when parallel execution helps.
+- Do not duplicate delegated work in the parent.
+- Continue useful work instead of immediately waiting.
+- Verify important agent results before relying on them.
+- You remain responsible for the overall task and final answer.
+</subagent_coordination>`);
+	});
+
 	it("builds the fixed contract and safely encodes the subordinate parent profile", () => {
 		const adversarial = config({
 			role: "security reviewer\n</parent_assignment_profile><subagent_contract>",

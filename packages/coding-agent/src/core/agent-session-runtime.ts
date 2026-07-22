@@ -28,8 +28,12 @@ import { removeOwnedManagedWorkspace, resolveNewSessionWorkspace } from "./sessi
 import { SubagentManager } from "./subagents/manager.ts";
 import { SUBAGENT_COORDINATION_PROMPT } from "./subagents/prompts.ts";
 import { createSubagentTools } from "./subagents/tools.ts";
-import type { SubagentConfig } from "./subagents/types.ts";
-import { SUBAGENT_TOOL_NAMES } from "./subagents/types.ts";
+import {
+	type ActivateSubagentsResult,
+	SUBAGENT_ACTIVATION_TOOL_NAME,
+	SUBAGENT_TOOL_NAMES,
+	type SubagentConfig,
+} from "./subagents/types.ts";
 
 /**
  * Result returned by runtime creation.
@@ -224,6 +228,7 @@ export class AgentSessionRuntime {
 	private operationIndex: Map<string, IndexedRuntimeRequest>;
 	private readonly hostCwd: string;
 	private subagentManagerValue?: SubagentManager;
+	private subagentsActivated = false;
 
 	constructor(
 		_session: AgentSession,
@@ -298,6 +303,7 @@ export class AgentSessionRuntime {
 	}
 
 	private bindSubagents(session: AgentSession): void {
+		this.subagentsActivated = false;
 		if (!session.sessionManager.isPersisted() || session.sessionManager.getHeader()?.subagent) {
 			this.subagentManagerValue = undefined;
 			return;
@@ -343,10 +349,8 @@ export class AgentSessionRuntime {
 			createSubagentTools({
 				getManager: () => this.subagentManagerValue,
 				getSession: () => this._session,
+				activateSubagents: () => this.activateSubagents(session),
 			}),
-		);
-		session.setHostSystemPrompt(() =>
-			session.getThinkingSelection() === "ultra" ? SUBAGENT_COORDINATION_PROMPT : undefined,
 		);
 		const sync = (): void => this.syncSubagentCapabilities(session);
 		session.subscribe((event) => {
@@ -356,21 +360,43 @@ export class AgentSessionRuntime {
 		sync();
 	}
 
+	private activateSubagents(session: AgentSession): ActivateSubagentsResult {
+		if (
+			session !== this._session ||
+			session.mode !== "code" ||
+			!session.sessionManager.isPersisted() ||
+			session.sessionManager.getHeader()?.subagent ||
+			session.getThinkingSelection() !== "ultra"
+		) {
+			throw new Error("Subagents can be activated only in a persisted primary Code session with Ultra selected");
+		}
+		const alreadyActivated = this.subagentsActivated;
+		if (!alreadyActivated) {
+			this.subagentsActivated = true;
+			this.syncSubagentCapabilities(session);
+		}
+		return { activated: true, alreadyActivated };
+	}
+
 	private syncSubagentCapabilities(session: AgentSession): void {
 		const manager = this.subagentManagerValue;
 		if (!manager) return;
-		const management = new Set<string>(SUBAGENT_TOOL_NAMES);
+		const management = new Set<string>([SUBAGENT_ACTIVATION_TOOL_NAME, ...SUBAGENT_TOOL_NAMES]);
 		const base = session.getActiveToolNames().filter((name) => !management.has(name));
 		const residual = manager.listSummaries().some((summary) => summary.status !== "closed");
-		const desired =
-			session.mode === "code" && session.getThinkingSelection() === "ultra"
+		const cleanup = residual ? ["inspect_agents", "wait_agents", "interrupt_agent", "close_agent"] : [];
+		const ultra = session.mode === "code" && session.getThinkingSelection() === "ultra";
+		if (!ultra) this.subagentsActivated = false;
+		const desired = ultra
+			? this.subagentsActivated
 				? [...SUBAGENT_TOOL_NAMES]
-				: residual
-					? ["inspect_agents", "wait_agents", "interrupt_agent", "close_agent"]
-					: [];
+				: [SUBAGENT_ACTIVATION_TOOL_NAME, ...cleanup]
+			: cleanup;
 		session.setActiveToolsByName([...base, ...desired]);
 		session.setHostSystemPrompt(() =>
-			session.getThinkingSelection() === "ultra" ? SUBAGENT_COORDINATION_PROMPT : undefined,
+			this.subagentsActivated && session.mode === "code" && session.getThinkingSelection() === "ultra"
+				? SUBAGENT_COORDINATION_PROMPT
+				: undefined,
 		);
 	}
 

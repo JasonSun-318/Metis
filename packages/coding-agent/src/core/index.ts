@@ -200,6 +200,8 @@ export {
 	safePromptJson,
 } from "./subagents/prompts.ts";
 export {
+	type ActivateSubagentsResult,
+	SUBAGENT_ACTIVATION_TOOL_NAME,
 	SUBAGENT_TOOL_NAMES,
 	type SubagentConfig,
 	type SubagentDisplayConfig,

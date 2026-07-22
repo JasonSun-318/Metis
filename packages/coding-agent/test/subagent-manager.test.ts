@@ -9,6 +9,7 @@ import type { PermissionApprovalRequest } from "../src/core/permission-policy.ts
 import { SessionManager } from "../src/core/session-manager.ts";
 import { type ChildRuntimeFactoryInput, SubagentManager } from "../src/core/subagents/manager.ts";
 import { SubagentScheduler } from "../src/core/subagents/scheduler.ts";
+import { SUBAGENT_ACTIVATION_TOOL_NAME } from "../src/core/subagents/types.ts";
 import { assistantMsg, userMsg } from "./utilities.ts";
 
 const cleanups: Array<() => void> = [];
@@ -488,15 +489,17 @@ describe("SubagentManager", () => {
 		expect(harness.runtimes[0]?.disposed).toBe(true);
 	});
 
-	it("keeps the master plan tool out of child snapshots", async () => {
+	it("keeps parent-only control tools out of child snapshots", async () => {
 		const harness = setup();
-		await expect(
-			harness.manager.spawn({
-				name: "planner-child",
-				task: "Inspect one module",
-				tools: ["update_plan"],
-			}),
-		).rejects.toThrow("Subagent tool is reserved: update_plan");
+		for (const tool of [SUBAGENT_ACTIVATION_TOOL_NAME, "update_plan"]) {
+			await expect(
+				harness.manager.spawn({
+					name: `child-for-${tool}`,
+					task: "Inspect one module",
+					tools: [tool],
+				}),
+			).rejects.toThrow(`Subagent tool is reserved: ${tool}`);
+		}
 	});
 
 	it("rejects invalid ingress before creating a child journal", async () => {

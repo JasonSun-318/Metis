@@ -2,6 +2,13 @@ import type { ThinkingLevel } from "@arcmind/agent-core";
 import type { AgentMode } from "../agent-mode.ts";
 import type { PermissionMode } from "../permission-mode.ts";
 
+export const SUBAGENT_ACTIVATION_TOOL_NAME = "activate_subagents" as const;
+
+export interface ActivateSubagentsResult {
+	readonly activated: true;
+	readonly alreadyActivated: boolean;
+}
+
 export const SUBAGENT_TOOL_NAMES = [
 	"spawn_agent",
 	"inspect_agents",

@@ -11,6 +11,7 @@ import type { FileEntry, SessionManager } from "../session-manager.ts";
 import { defaultSubagentScheduler, type SubagentSchedulerApi } from "./scheduler.ts";
 import { type SubagentDiskRecord, SubagentStore, type SubagentStoreApi } from "./store.ts";
 import {
+	SUBAGENT_ACTIVATION_TOOL_NAME,
 	SUBAGENT_TOOL_NAMES,
 	type SubagentConfig,
 	type SubagentForkTurns,
@@ -342,7 +343,7 @@ export class SubagentManager implements SubagentManagerApi {
 		const names = new Set(this.listSummaries().map((summary) => summary.name));
 		if (names.has(input.name)) throw new Error(`Subagent name has already been used: ${input.name}`);
 		if (new Set(input.tools).size !== input.tools.length) throw new Error("Subagent tools must be unique");
-		const reserved = new Set<string>([...SUBAGENT_TOOL_NAMES, "update_plan"]);
+		const reserved = new Set<string>([SUBAGENT_ACTIVATION_TOOL_NAME, ...SUBAGENT_TOOL_NAMES, "update_plan"]);
 		const active = new Set(parent.getActiveToolNames());
 		for (const tool of input.tools) {
 			if (!tool || tool.length > 256 || /[\u0000-\u001f\u007f-\u009f]/u.test(tool)) {
