@@ -1,8 +1,8 @@
 import { validateToolArguments } from "@arcmind/ai";
 import { applyPatch } from "diff";
-import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
-import { join } from "path";
+import { dirname, join } from "path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { executeBashWithOperations } from "../src/core/bash-executor.ts";
 import { type BashOperations, createBashTool, createLocalBashOperations } from "../src/core/tools/bash.ts";
@@ -729,8 +729,9 @@ describe("Coding Agent Tools", () => {
 			expect(result.output).toBe("red\n");
 		});
 
-		it("should persist full output when truncation happens by line count only", async () => {
-			const bash = createBashTool(testDir);
+		it("should persist full output in the requested directory when truncation happens by line count", async () => {
+			const outputDir = join(testDir, "tool-results-agent-bash");
+			const bash = createBashTool(testDir, { outputDir });
 			const result = await bash.execute("test-call-line-truncation", { command: "seq 3000" });
 			const output = getTextOutput(result);
 			const fullOutputPath = result.details?.fullOutputPath;
@@ -740,31 +741,26 @@ describe("Coding Agent Tools", () => {
 			expect(fullOutputPath).toBeDefined();
 			expect(output).toMatch(/\[Showing lines \d+-\d+ of \d+\. Full output: /);
 			expect(output).not.toContain("Full output: undefined");
-
-			for (let i = 0; i < 20 && (!fullOutputPath || !existsSync(fullOutputPath)); i++) {
-				await new Promise((resolve) => setTimeout(resolve, 10));
-			}
-
-			expect(fullOutputPath).toBeDefined();
+			expect(dirname(fullOutputPath!)).toBe(outputDir);
 			expect(existsSync(fullOutputPath!)).toBe(true);
+			if (process.platform !== "win32") expect(statSync(fullOutputPath!).mode & 0o777).toBe(0o600);
 			const fullOutput = readFileSync(fullOutputPath!, "utf-8");
 			expect(fullOutput).toContain("1\n2\n3");
 			expect(fullOutput).toContain("2998\n2999\n3000");
 		});
 
-		it("executeBash should persist full output when truncation happens by line count only", async () => {
-			const result = await executeBashWithOperations("seq 3000", process.cwd(), createLocalBashOperations());
+		it("executeBash should persist full output in the requested directory", async () => {
+			const outputDir = join(testDir, "tool-results-user-bash");
+			const result = await executeBashWithOperations("seq 3000", process.cwd(), createLocalBashOperations(), {
+				outputDir,
+			});
 			const fullOutputPath = result.fullOutputPath;
 
 			expect(result.truncated).toBe(true);
 			expect(fullOutputPath).toBeDefined();
-
-			for (let i = 0; i < 20 && (!fullOutputPath || !existsSync(fullOutputPath)); i++) {
-				await new Promise((resolve) => setTimeout(resolve, 10));
-			}
-
-			expect(fullOutputPath).toBeDefined();
+			expect(dirname(fullOutputPath!)).toBe(outputDir);
 			expect(existsSync(fullOutputPath!)).toBe(true);
+			if (process.platform !== "win32") expect(statSync(fullOutputPath!).mode & 0o777).toBe(0o600);
 			const fullOutput = readFileSync(fullOutputPath!, "utf-8");
 			expect(fullOutput).toContain("1\n2\n3");
 			expect(fullOutput).toContain("2998\n2999\n3000");

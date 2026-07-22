@@ -4,9 +4,12 @@ import type { ImageContent, Message, TextContent } from "@arcmind/ai";
 import { createHash, randomUUID } from "crypto";
 import {
 	closeSync,
+	copyFileSync,
 	existsSync,
+	fchmodSync,
 	constants as fsConstants,
 	fstatSync,
+	fsyncSync,
 	lstatSync,
 	openSync,
 	readdirSync,
@@ -17,7 +20,7 @@ import {
 	unlinkSync,
 } from "fs";
 import { lstat, open, readdir } from "fs/promises";
-import { dirname, isAbsolute, join, parse, relative, resolve, sep } from "path";
+import { basename, dirname, isAbsolute, join, parse, relative, resolve, sep } from "path";
 import { setImmediate as yieldToEventLoop } from "timers/promises";
 import { TextDecoder } from "util";
 import { getAgentDir as getDefaultAgentDir, getSessionsDir } from "../config.ts";
@@ -446,6 +449,118 @@ function copyReferencedImagesStrictly(
 			}
 		}
 	});
+}
+
+function ownedToolOutputPath(path: string, storagePath: string): string | undefined {
+	const outputDir = getSessionAssetDirFromStoragePath(storagePath, "tool-results");
+	const resolved = resolve(path);
+	return dirname(resolved) === resolve(outputDir) ? resolved : undefined;
+}
+
+function rewriteToolOutputPath(entry: SessionMessageEntry, sourcePath: string, destinationPath: string): void {
+	if (entry.toolOutput?.fullOutputPath === sourcePath) {
+		entry.toolOutput = { ...entry.toolOutput, fullOutputPath: destinationPath };
+	}
+	if (entry.message.role === "toolResult") {
+		const details = entry.message.details;
+		if (
+			typeof details === "object" &&
+			details !== null &&
+			!Array.isArray(details) &&
+			(details as { fullOutputPath?: unknown }).fullOutputPath === sourcePath
+		) {
+			entry.message.details = { ...details, fullOutputPath: destinationPath };
+		}
+		entry.message.content = entry.message.content.map((block) =>
+			block.type === "text" ? { ...block, text: block.text.split(sourcePath).join(destinationPath) } : block,
+		);
+	}
+	if (entry.message.role === "bashExecution" && entry.message.fullOutputPath === sourcePath) {
+		entry.message.fullOutputPath = destinationPath;
+	}
+}
+
+function copyReferencedToolOutputsStrictly(
+	records: readonly FileEntry[],
+	sourceStoragePath: string,
+	destinationStoragePath: string,
+): FileEntry[] {
+	const rewritten = structuredClone(records) as FileEntry[];
+	const sourceDir = getSessionAssetDirFromStoragePath(sourceStoragePath, "tool-results");
+	const destinationDir = getSessionAssetDirFromStoragePath(destinationStoragePath, "tool-results");
+	const copied = new Map<string, string>();
+
+	for (const record of rewritten) {
+		if (record.type !== "message") continue;
+		const candidates = new Set<string>();
+		if (record.toolOutput?.fullOutputPath) candidates.add(record.toolOutput.fullOutputPath);
+		if (record.message.role === "toolResult") {
+			const details = record.message.details;
+			if (typeof details === "object" && details !== null && !Array.isArray(details)) {
+				const path = (details as { fullOutputPath?: unknown }).fullOutputPath;
+				if (typeof path === "string") candidates.add(path);
+			}
+		}
+		if (record.message.role === "bashExecution" && record.message.fullOutputPath) {
+			candidates.add(record.message.fullOutputPath);
+		}
+
+		for (const candidate of candidates) {
+			const sourcePath = ownedToolOutputPath(candidate, sourceStoragePath);
+			if (!sourcePath) continue;
+			let destinationPath = copied.get(sourcePath);
+			if (!destinationPath) {
+				assertSafeSessionAssetDirectory(sourceDir);
+				const before = lstatSync(sourcePath);
+				if (!before.isFile() || before.nlink !== 1) throw new Error(`Unsafe tool output source: ${sourcePath}`);
+				ensureSessionAssetDirectory(destinationDir);
+				destinationPath = join(destinationDir, basename(sourcePath));
+				copyFileSync(sourcePath, destinationPath, fsConstants.COPYFILE_EXCL | fsConstants.COPYFILE_FICLONE);
+				const after = lstatSync(sourcePath);
+				const destination = lstatSync(destinationPath);
+				if (
+					!after.isFile() ||
+					after.nlink !== 1 ||
+					after.dev !== before.dev ||
+					after.ino !== before.ino ||
+					after.size !== before.size ||
+					!destination.isFile() ||
+					destination.nlink !== 1 ||
+					destination.size !== before.size
+				) {
+					throw new Error(`Tool output changed while copying: ${sourcePath}`);
+				}
+				const noFollow = typeof fsConstants.O_NOFOLLOW === "number" ? fsConstants.O_NOFOLLOW : 0;
+				const destinationFd = openSync(destinationPath, fsConstants.O_RDWR | noFollow);
+				try {
+					const opened = fstatSync(destinationFd);
+					const current = lstatSync(destinationPath);
+					if (
+						!opened.isFile() ||
+						opened.nlink !== 1 ||
+						!current.isFile() ||
+						current.nlink !== 1 ||
+						opened.dev !== current.dev ||
+						opened.ino !== current.ino ||
+						opened.size !== before.size
+					) {
+						throw new Error(`Unsafe copied tool output: ${destinationPath}`);
+					}
+					fchmodSync(destinationFd, 0o600);
+					fsyncSync(destinationFd);
+				} finally {
+					closeSync(destinationFd);
+				}
+				assertSafeSessionAssetDirectory(sourceDir);
+				assertSafeSessionAssetDirectory(destinationDir);
+				syncDirectorySync(destinationDir);
+				copied.set(sourcePath, destinationPath);
+			}
+			rewriteToolOutputPath(record, candidate, destinationPath);
+		}
+	}
+
+	return rewritten;
 }
 
 export function stringifySessionEntry(entry: unknown, sessionFile: string): string {
@@ -2007,6 +2122,7 @@ function createPersistedSessionState(
 	mode: "create" | "replace",
 	storagePath = canonicalPath(filePath),
 	copyImagesFromStoragePath?: string,
+	copyToolOutputs = false,
 ): ManagedSessionState {
 	validateSessionGraph(fileEntries, filePath);
 	ensureDirectoryDurablySync(dirname(storagePath));
@@ -2024,10 +2140,18 @@ function createPersistedSessionState(
 				if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
 			}
 		}
+		let destinationEntries = fileEntries;
 		if (copyImagesFromStoragePath) {
-			copyReferencedImagesStrictly(fileEntries, copyImagesFromStoragePath, storagePath);
+			copyReferencedImagesStrictly(destinationEntries, copyImagesFromStoragePath, storagePath);
+			if (copyToolOutputs) {
+				destinationEntries = copyReferencedToolOutputsStrictly(
+					destinationEntries,
+					copyImagesFromStoragePath,
+					storagePath,
+				);
+			}
 		}
-		const durableFileEntries = prepareDurableRecords(fileEntries, storagePath);
+		const durableFileEntries = prepareDurableRecords(destinationEntries, storagePath);
 		validateSessionGraph(durableFileEntries, filePath);
 		if (mode === "create" || !existsSync(storagePath)) {
 			journal = openSessionJournal<FileEntry>(storagePath, {
@@ -3125,6 +3249,7 @@ export class SessionManager {
 					"create",
 					canonicalPath(sessionFile),
 					sourceStoragePath,
+					true,
 				);
 			} else {
 				state = buildManagedSessionState(records);
@@ -3335,6 +3460,7 @@ export class SessionManager {
 			"create",
 			canonicalPath(newSessionFile),
 			sourceStoragePath,
+			true,
 		);
 		return new SessionManager(resolvedTargetCwd, dir, true, { state });
 	}

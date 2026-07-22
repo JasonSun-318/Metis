@@ -170,6 +170,8 @@ export interface BashToolOptions {
 	shellPath?: string;
 	/** Hook to adjust command, cwd, or env before execution */
 	spawnHook?: BashSpawnHook;
+	/** Directory for complete output files when truncation occurs */
+	outputDir?: string;
 }
 
 const BASH_PREVIEW_LINES = 5;
@@ -311,7 +313,7 @@ export function createBashToolDefinition(
 		) {
 			const resolvedCommand = commandPrefix ? `${commandPrefix}\n${command}` : command;
 			const spawnContext = resolveSpawnContext(resolvedCommand, cwd, spawnHook);
-			const output = new OutputAccumulator({ tempFilePrefix: "arcmind-bash" });
+			const output = new OutputAccumulator({ tempFilePrefix: "arcmind-bash", outputDir: options?.outputDir });
 			let acceptingOutput = true;
 			let updateTimer: NodeJS.Timeout | undefined;
 			let updateDirty = false;

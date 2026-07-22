@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import { constants as fsConstants, lstatSync, type Stats } from "node:fs";
 import { type FileHandle, open } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import type { ImageContent, TextContent } from "@arcmind/ai";
 import { ensureDirectoryDurablySync } from "./durable-file.ts";
@@ -33,6 +33,12 @@ interface PinnedOutputDirectory extends FileIdentity {
 interface OpenedOutputFile extends FileIdentity {
 	handle: FileHandle;
 	path: string;
+}
+
+interface OpenedSourceFile extends FileIdentity {
+	handle: FileHandle;
+	path: string;
+	size: number;
 }
 
 function errorCode(error: unknown): string | undefined {
@@ -117,6 +123,54 @@ async function assertOpenedOutputFile(path: string, openedFile: OpenedOutputFile
 	}
 }
 
+async function openVerifiedSourceFile(path: string): Promise<OpenedSourceFile> {
+	const before = lstatSync(path);
+	if (!before.isFile() || before.nlink !== 1) {
+		throw new Error(`Tool output source is not a single-link regular file: ${path}`);
+	}
+	const noFollow = typeof fsConstants.O_NOFOLLOW === "number" ? fsConstants.O_NOFOLLOW : 0;
+	const nonBlocking = typeof fsConstants.O_NONBLOCK === "number" ? fsConstants.O_NONBLOCK : 0;
+	const handle = await open(path, fsConstants.O_RDONLY | noFollow | nonBlocking);
+	try {
+		const opened = await handle.stat();
+		const current = lstatSync(path);
+		const identity = { device: before.dev, inode: before.ino };
+		if (
+			!opened.isFile() ||
+			opened.nlink !== 1 ||
+			!current.isFile() ||
+			current.nlink !== 1 ||
+			!sameIdentity(opened, identity) ||
+			!sameIdentity(current, identity) ||
+			opened.size !== before.size ||
+			current.size !== before.size
+		) {
+			throw new Error(`Tool output source identity changed: ${path}`);
+		}
+		return { handle, path, size: opened.size, device: opened.dev, inode: opened.ino };
+	} catch (error) {
+		await handle.close().catch(() => undefined);
+		throw error;
+	}
+}
+
+async function assertOpenedSourceFile(source: OpenedSourceFile): Promise<void> {
+	const opened = await source.handle.stat();
+	const current = lstatSync(source.path);
+	if (
+		!opened.isFile() ||
+		opened.nlink !== 1 ||
+		!current.isFile() ||
+		current.nlink !== 1 ||
+		!sameIdentity(opened, source) ||
+		!sameIdentity(current, source) ||
+		opened.size !== source.size ||
+		current.size !== source.size
+	) {
+		throw new Error(`Tool output source changed while copying: ${source.path}`);
+	}
+}
+
 function supportsDataSyncFallback(error: unknown): boolean {
 	if (typeof error !== "object" || error === null || !("code" in error)) return false;
 	const code = String((error as NodeJS.ErrnoException).code);
@@ -129,12 +183,105 @@ function supportsDirectorySyncFallback(error: unknown): boolean {
 	return code === "EACCES" || code === "EINVAL" || code === "EISDIR" || code === "ENOTSUP" || code === "EPERM";
 }
 
+async function syncOutputFile(
+	outputDir: string,
+	directory: PinnedOutputDirectory,
+	outputFile: OpenedOutputFile,
+): Promise<void> {
+	try {
+		await outputFile.handle.datasync();
+	} catch (error) {
+		if (!supportsDataSyncFallback(error)) throw error;
+		await outputFile.handle.sync();
+	}
+	assertPinnedOutputDirectory(outputDir, directory);
+	await assertOpenedOutputFile(outputFile.path, outputFile);
+	try {
+		await directory.handle.sync();
+	} catch (error) {
+		if (!supportsDirectorySyncFallback(error)) throw error;
+	}
+	assertPinnedOutputDirectory(outputDir, directory);
+	await assertOpenedOutputFile(outputFile.path, outputFile);
+}
+
 function firstUtf8Bytes(text: string, maxBytes: number): { text: string; bytes: number } {
 	// A bounded UTF-16 slice avoids allocating a Buffer for the complete large result.
 	const bytes = Buffer.from(text.slice(0, maxBytes), "utf8");
 	const decoder = new StringDecoder("utf8");
 	const preview = decoder.write(bytes.subarray(0, maxBytes));
 	return { text: preview, bytes: Buffer.byteLength(preview, "utf8") };
+}
+
+export async function isOwnedToolOutputFile(filePath: string, outputDir: string): Promise<boolean> {
+	if (dirname(resolve(filePath)) !== resolve(outputDir)) return false;
+	let source: OpenedSourceFile | undefined;
+	try {
+		const directory = await openPinnedOutputDirectory(outputDir);
+		try {
+			source = await openVerifiedSourceFile(filePath);
+			assertPinnedOutputDirectory(outputDir, directory);
+			await assertOpenedSourceFile(source);
+			assertPinnedOutputDirectory(outputDir, directory);
+			return true;
+		} finally {
+			await source?.handle.close().catch(() => undefined);
+			await directory.handle.close().catch(() => undefined);
+		}
+	} catch {
+		return false;
+	}
+}
+
+export async function persistToolOutputText(text: string, outputDir: string): Promise<string> {
+	const directory = await openPinnedOutputDirectory(outputDir);
+	let outputFile: OpenedOutputFile | undefined;
+	try {
+		outputFile = await openVerifiedOutputFile(outputDir, directory);
+		await outputFile.handle.writeFile(text, { encoding: "utf8" });
+		await syncOutputFile(outputDir, directory, outputFile);
+		return outputFile.path;
+	} finally {
+		await outputFile?.handle.close().catch(() => undefined);
+		await directory.handle.close().catch(() => undefined);
+	}
+}
+
+export async function importToolOutputFile(sourcePath: string, outputDir: string): Promise<string> {
+	if (await isOwnedToolOutputFile(sourcePath, outputDir)) return sourcePath;
+
+	const source = await openVerifiedSourceFile(sourcePath);
+	const directory = await openPinnedOutputDirectory(outputDir);
+	let outputFile: OpenedOutputFile | undefined;
+	try {
+		outputFile = await openVerifiedOutputFile(outputDir, directory);
+		const buffer = Buffer.allocUnsafe(64 * 1024);
+		let position = 0;
+		while (true) {
+			const { bytesRead } = await source.handle.read(buffer, 0, buffer.length, position);
+			if (bytesRead === 0) break;
+			let offset = 0;
+			while (offset < bytesRead) {
+				const { bytesWritten } = await outputFile.handle.write(
+					buffer,
+					offset,
+					bytesRead - offset,
+					position + offset,
+				);
+				if (bytesWritten === 0) throw new Error("Tool output copy made no progress");
+				offset += bytesWritten;
+			}
+			position += bytesRead;
+		}
+		if (position !== source.size) throw new Error("Tool output source size changed while copying");
+		await assertOpenedSourceFile(source);
+		await syncOutputFile(outputDir, directory, outputFile);
+		return outputFile.path;
+	} finally {
+		await outputFile?.handle.close().catch(() => undefined);
+		await directory.handle.close().catch(() => undefined);
+		await source.handle.close().catch(() => undefined);
+	}
 }
 
 export async function externalizeLargeToolOutput(
@@ -147,38 +294,7 @@ export async function externalizeLargeToolOutput(
 
 	const fullText = textBlocks.map((block) => block.text).join("");
 	const originalBytes = Buffer.byteLength(fullText, "utf8");
-	const outputDirectory = await openPinnedOutputDirectory(outputDir);
-	let outputFile: OpenedOutputFile | undefined;
-	let outputClosed = false;
-	let directoryClosed = false;
-	try {
-		outputFile = await openVerifiedOutputFile(outputDir, outputDirectory);
-		await outputFile.handle.writeFile(fullText, { encoding: "utf8" });
-		try {
-			await outputFile.handle.datasync();
-		} catch (error) {
-			if (!supportsDataSyncFallback(error)) throw error;
-			await outputFile.handle.sync();
-		}
-		assertPinnedOutputDirectory(outputDir, outputDirectory);
-		await assertOpenedOutputFile(outputFile.path, outputFile);
-		try {
-			await outputDirectory.handle.sync();
-		} catch (error) {
-			if (!supportsDirectorySyncFallback(error)) throw error;
-		}
-		assertPinnedOutputDirectory(outputDir, outputDirectory);
-		await assertOpenedOutputFile(outputFile.path, outputFile);
-		await outputFile.handle.close();
-		outputClosed = true;
-		await outputDirectory.handle.close();
-		directoryClosed = true;
-	} finally {
-		if (!outputClosed) await outputFile?.handle.close().catch(() => undefined);
-		if (!directoryClosed) await outputDirectory.handle.close().catch(() => undefined);
-	}
-	if (!outputFile) throw new Error("Tool output file was not created");
-	const fullOutputPath = outputFile.path;
+	const fullOutputPath = await persistToolOutputText(fullText, outputDir);
 
 	const preview = firstUtf8Bytes(fullText, TOOL_OUTPUT_PREVIEW_BYTES);
 	const toolOutput: PersistedToolOutput = {

@@ -1,9 +1,10 @@
-import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setKeybindings } from "@arcmind/tui";
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { KeybindingsManager } from "../src/core/keybindings.ts";
+import { persistToolOutputText } from "../src/core/large-tool-output.ts";
 import {
 	getSessionImageDir,
 	getSessionToolOutputDir,
@@ -230,13 +231,17 @@ describe("session selector path/delete interactions", () => {
 		session.appendMessage(assistantMsg("ok"));
 		const sessionFile = session.getSessionFile()!;
 		const toolOutputDir = getSessionToolOutputDir(sessionFile);
-		mkdirSync(toolOutputDir, { recursive: true });
-		writeFileSync(join(toolOutputDir, "result.txt"), "large result");
+		const outputPath = await persistToolOutputText("large result", toolOutputDir);
 		session.close();
+
+		const resumed = SessionManager.open(sessionFile, baseDir, baseDir);
+		expect(readFileSync(outputPath, "utf8")).toBe("large result");
+		resumed.close();
 
 		const result = await withoutTrash(() => deleteSessionFile(sessionFile));
 		expect(result).toEqual({ ok: true, method: "unlink", warning: undefined });
 		expect(existsSync(sessionFile)).toBe(false);
+		expect(existsSync(outputPath)).toBe(false);
 		expect(existsSync(toolOutputDir)).toBe(false);
 	});
 

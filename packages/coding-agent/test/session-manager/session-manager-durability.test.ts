@@ -426,6 +426,105 @@ describe("SessionManager durable ownership and recovery", () => {
 		source.close();
 	});
 
+	it("copies owned tool outputs into fork and branch candidates", async () => {
+		const sourcePath = join(directory, "source.jsonl");
+		const source = SessionManager.open(sourcePath, directory, directory);
+		const sourceOutputDir = source.getToolOutputDir();
+		if (!sourceOutputDir) throw new Error("Expected source tool output directory");
+		mkdirSync(sourceOutputDir, { recursive: true });
+		const sourceOutputPath = join(sourceOutputDir, "full-output.txt");
+		writeFileSync(sourceOutputPath, "complete tool output");
+		const toolEntryId = source.appendMessage(
+			{
+				role: "toolResult",
+				toolCallId: "read-1",
+				toolName: "read",
+				content: [{ type: "text", text: `preview\nFull output: ${sourceOutputPath}` }],
+				details: { fullOutputPath: sourceOutputPath },
+				isError: false,
+				timestamp: Date.now(),
+			},
+			{ truncated: true, originalBytes: 20, previewBytes: 7, fullOutputPath: sourceOutputPath },
+		);
+		const selected = source.appendMessage({
+			role: "bashExecution",
+			command: "seq 3000",
+			output: "preview",
+			exitCode: 0,
+			cancelled: false,
+			truncated: true,
+			fullOutputPath: sourceOutputPath,
+			timestamp: Date.now(),
+		});
+
+		const fork = SessionManager.forkFrom(sourcePath, directory, directory, { id: "fork-tool-output" });
+		const branch = source.createBranchedSessionManager(selected);
+		const candidatePaths: string[] = [];
+		for (const candidate of [fork, branch]) {
+			const entry = candidate.getEntry(toolEntryId);
+			if (entry?.type !== "message" || !entry.toolOutput) throw new Error("Expected copied tool output");
+			const copiedPath = entry.toolOutput.fullOutputPath;
+			candidatePaths.push(copiedPath);
+			expect(copiedPath).not.toBe(sourceOutputPath);
+			expect(readFileSync(copiedPath, "utf8")).toBe("complete tool output");
+			expect(entry.message.role === "toolResult" ? entry.message.details : undefined).toMatchObject({
+				fullOutputPath: copiedPath,
+			});
+			expect(entry.message.role === "toolResult" ? entry.message.content[0] : undefined).toMatchObject({
+				text: expect.stringContaining(copiedPath),
+			});
+			const bashEntry = candidate.getEntry(selected);
+			expect(bashEntry?.type === "message" ? bashEntry.message : undefined).toMatchObject({
+				role: "bashExecution",
+				fullOutputPath: copiedPath,
+			});
+			expect(readdirSync(dirname(copiedPath))).toHaveLength(1);
+			if (process.platform !== "win32") expect(statSync(copiedPath).mode & 0o777).toBe(0o600);
+			candidate.close();
+		}
+		source.close();
+
+		expect((await SessionManager.deleteSession(sourcePath)).ok).toBe(true);
+		expect(existsSync(sourceOutputPath)).toBe(false);
+		for (const path of candidatePaths) expect(readFileSync(path, "utf8")).toBe("complete tool output");
+	});
+
+	it.skipIf(process.platform === "win32")(
+		"does not publish a fork or branch through a symlinked owned tool output",
+		() => {
+			const sourcePath = join(directory, "source.jsonl");
+			const source = SessionManager.open(sourcePath, directory, directory);
+			const sourceOutputDir = source.getToolOutputDir();
+			if (!sourceOutputDir) throw new Error("Expected source tool output directory");
+			mkdirSync(sourceOutputDir, { recursive: true });
+			const sourceOutputPath = join(sourceOutputDir, "full-output.txt");
+			writeFileSync(sourceOutputPath, "complete tool output");
+			const selected = source.appendMessage(
+				{
+					role: "toolResult",
+					toolCallId: "read-1",
+					toolName: "read",
+					content: [{ type: "text", text: `Full output: ${sourceOutputPath}` }],
+					details: { fullOutputPath: sourceOutputPath },
+					isError: false,
+					timestamp: Date.now(),
+				},
+				{ truncated: true, originalBytes: 20, previewBytes: 7, fullOutputPath: sourceOutputPath },
+			);
+			source.close();
+			const outside = join(directory, "outside-tool-output.txt");
+			writeFileSync(outside, "outside");
+			rmSync(sourceOutputPath);
+			symlinkSync(outside, sourceOutputPath);
+
+			expect(() => SessionManager.forkFrom(sourcePath, directory, directory, { id: "fork-tool-symlink" })).toThrow();
+			const reopened = SessionManager.open(sourcePath, directory, directory);
+			expect(() => reopened.createBranchedSessionManager(selected)).toThrow();
+			reopened.close();
+			expect(readdirSync(directory).filter((name) => name.endsWith(".jsonl"))).toEqual(["source.jsonl"]);
+		},
+	);
+
 	it.each(["missing", "corrupt"] as const)(
 		"does not publish a fork or branch with a %s referenced image",
 		(failure) => {

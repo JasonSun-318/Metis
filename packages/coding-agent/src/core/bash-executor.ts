@@ -7,12 +7,21 @@
  */
 
 import { randomBytes } from "node:crypto";
-import { createWriteStream, type WriteStream } from "node:fs";
+import {
+	closeSync,
+	createWriteStream,
+	constants as fsConstants,
+	fstatSync,
+	lstatSync,
+	openSync,
+	type WriteStream,
+} from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { finished } from "node:stream/promises";
 import { stripAnsi } from "../utils/ansi.ts";
 import { sanitizeBinaryOutput } from "../utils/shell.ts";
+import { ensureRealDirectoryDurablySync, syncDirectorySync, syncFileSync } from "./durable-file.ts";
 import type { BashOperations } from "./tools/bash.ts";
 import { DEFAULT_MAX_BYTES, truncateTail } from "./tools/truncate.ts";
 
@@ -27,6 +36,8 @@ export interface BashExecutorOptions {
 	onChunk?: (chunk: string) => void;
 	/** AbortSignal for cancellation */
 	signal?: AbortSignal;
+	/** Directory for complete output files when truncation occurs */
+	outputDir?: string;
 }
 
 export interface BashResult {
@@ -62,15 +73,49 @@ export async function executeBashWithOperations(
 
 	let tempFilePath: string | undefined;
 	let tempFileStream: WriteStream | undefined;
+	let tempFileFd: number | undefined;
+	let tempFileIdentity: { dev: number; ino: number } | undefined;
+	let tempFileError: Error | undefined;
 	let totalBytes = 0;
+	const outputDir = options?.outputDir ?? tmpdir();
+	ensureRealDirectoryDurablySync(outputDir);
 
 	const ensureTempFile = () => {
 		if (tempFilePath) {
 			return;
 		}
 		const id = randomBytes(8).toString("hex");
-		tempFilePath = join(tmpdir(), `arcmind-bash-${id}.log`);
-		tempFileStream = createWriteStream(tempFilePath);
+		const path = join(outputDir, `arcmind-bash-${id}.log`);
+		const noFollow = typeof fsConstants.O_NOFOLLOW === "number" ? fsConstants.O_NOFOLLOW : 0;
+		const fd = openSync(path, fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_EXCL | noFollow, 0o600);
+		try {
+			const opened = fstatSync(fd);
+			const current = lstatSync(path);
+			if (
+				!opened.isFile() ||
+				opened.nlink !== 1 ||
+				!current.isFile() ||
+				current.nlink !== 1 ||
+				opened.dev !== current.dev ||
+				opened.ino !== current.ino
+			) {
+				throw new Error(`Bash output path is not a single-link regular file: ${path}`);
+			}
+			tempFilePath = path;
+			tempFileFd = fd;
+			tempFileIdentity = { dev: opened.dev, ino: opened.ino };
+			tempFileStream = createWriteStream(path, { fd, autoClose: false });
+			tempFileStream.on("error", (error) => {
+				tempFileError ??= error;
+			});
+		} catch (error) {
+			tempFilePath = undefined;
+			tempFileFd = undefined;
+			tempFileIdentity = undefined;
+			tempFileStream = undefined;
+			closeSync(fd);
+			throw error;
+		}
 		for (const chunk of outputChunks) {
 			tempFileStream.write(chunk);
 		}
@@ -80,9 +125,35 @@ export async function executeBashWithOperations(
 		if (!tempFileStream) return;
 		const stream = tempFileStream;
 		tempFileStream = undefined;
-		const completion = finished(stream);
-		stream.end();
-		await completion;
+		const fd = tempFileFd;
+		const path = tempFilePath;
+		const identity = tempFileIdentity;
+		if (fd === undefined || !path || !identity) throw new Error("Bash output file was not opened safely");
+		try {
+			if (tempFileError) throw tempFileError;
+			const completion = finished(stream);
+			stream.end();
+			await completion;
+			syncFileSync(fd);
+			const opened = fstatSync(fd);
+			const current = lstatSync(path);
+			if (
+				!opened.isFile() ||
+				opened.nlink !== 1 ||
+				!current.isFile() ||
+				current.nlink !== 1 ||
+				opened.dev !== identity.dev ||
+				opened.ino !== identity.ino ||
+				current.dev !== identity.dev ||
+				current.ino !== identity.ino
+			) {
+				throw new Error(`Bash output file identity changed: ${path}`);
+			}
+		} finally {
+			closeSync(fd);
+			tempFileFd = undefined;
+		}
+		syncDirectorySync(dirname(path));
 	};
 
 	const decoder = new TextDecoder();

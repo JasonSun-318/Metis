@@ -12,9 +12,9 @@ Where `<path>` is the working directory with `/` replaced by `-`.
 
 ## Deleting Sessions
 
-Sessions can be removed from `/resume` by selecting a session and pressing `Ctrl+D`. ArcMind moves or deletes the JSONL file together with that session's image directory.
+Sessions can be removed from `/resume` by selecting a session and pressing `Ctrl+D`. ArcMind removes the JSONL file together with that session's image directory, tool-output directory, child-session directory, and ArcMind-owned managed workspace where applicable.
 
-When available, ArcMind uses the `trash` CLI instead of permanently deleting these files. Deleting a JSONL file manually does not clean up its image directory.
+When available, ArcMind uses the `trash` CLI instead of permanently deleting eligible files. Deleting a JSONL file manually does not clean up its owned assets.
 
 ## Session Version
 
@@ -43,6 +43,12 @@ interface ImageReference {
 ```
 
 For default sessions, the image bytes are stored under `~/.arcmind/agent/images/<session-key>/<sha256>.<ext>`. Custom session files use an `images/<session-key>/` directory beside the JSONL file. The `session-key` is derived from the absolute session-file path. Repeated copies of the same image within one session share the same file. ArcMind verifies the hash and restores the normal `ImageContent` before sending the conversation to a model. `/export file.jsonl` is intentionally self-contained and keeps image data inline; `/import` moves it back into the session's content-addressed image store.
+
+## Tool-output Storage
+
+Durable full tool results are stored under `tool-results/<session-key>/`, using the same session-key derivation as image storage. The latest five eligible results keep their preview in model context; older eligible results may be projected as a short path reference after their total reaches 20,000 estimated tokens.
+
+Closing the app, resuming a session, microcompaction, and full compaction do not remove these files. Fork and branch-copy operations copy proven session-owned references into the destination session directory and rewrite the destination paths. Explicit session deletion removes that session's tool-output directory. In-memory sessions use an isolated temporary directory that is removed when `AgentSession.dispose()` completes. ArcMind does not delete legacy paths outside a proven session-owned directory.
 
 ## Source Files
 

@@ -11,6 +11,14 @@ LLMs have limited context windows. When conversations grow too long, arcmind use
 
 For TypeScript definitions in your project, inspect `node_modules/@arcmind/coding-agent/dist/`.
 
+## Tool-result microcompaction
+
+Immediately before each main-model provider request, ArcMind inspects text results from its real built-in `read`, `bash`, `edit`, `write`, `grep`, `find`, and `ls` tools. Bash results are eligible only when they already declare a complete-output path. The newest five eligible results remain unchanged. When the older eligible results reach 20,000 estimated tokens, ArcMind saves each complete result under the session's `tool-results` directory and replaces its complete preview in that provider request with a short path reference.
+
+This is an immutable context projection: agent state and the append-only session journal keep their original messages. A later request can project them again, and the model can use `read` on the saved path when detail is needed. Image results, `update_plan`, subagent, MCP, SDK, extension, custom, and unknown tools are excluded. Text error results from eligible built-ins are not specially excluded.
+
+If a declared complete-output file is missing or cannot be copied into session-owned storage, ArcMind keeps that result unchanged. Microcompaction does not call a model and is separate from the summarizing compaction described below.
+
 ## Overview
 
 ArcMind has two summarization mechanisms:

@@ -17,7 +17,10 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	externalizeLargeToolOutput,
+	importToolOutputFile,
+	isOwnedToolOutputFile,
 	LARGE_TOOL_OUTPUT_MAX_CHARS,
+	persistToolOutputText,
 	TOOL_OUTPUT_PREVIEW_BYTES,
 } from "../src/core/large-tool-output.ts";
 
@@ -79,6 +82,55 @@ describe("externalizeLargeToolOutput", () => {
 		await expect(
 			externalizeLargeToolOutput([{ type: "text", text: "x".repeat(LARGE_TOOL_OUTPUT_MAX_CHARS + 1) }], blockedPath),
 		).rejects.toThrow();
+	});
+
+	it("persists arbitrary text through the same hardened output store", async () => {
+		const outputDir = join(tempDir, "tool-results");
+		const path = await persistToolOutputText("complete\nresult", outputDir);
+
+		expect(readFileSync(path, "utf8")).toBe("complete\nresult");
+		expect(await isOwnedToolOutputFile(path, outputDir)).toBe(true);
+		expect(statSync(path).nlink).toBe(1);
+		if (process.platform !== "win32") expect(statSync(path).mode & 0o777).toBe(0o600);
+	});
+
+	it("copies an existing full output without loading it into the caller", async () => {
+		const sourcePath = join(tempDir, "legacy-bash.log");
+		const outputDir = join(tempDir, "tool-results");
+		writeFileSync(sourcePath, "full bash output".repeat(10_000));
+
+		const importedPath = await importToolOutputFile(sourcePath, outputDir);
+
+		expect(importedPath).not.toBe(sourcePath);
+		expect(readFileSync(importedPath)).toEqual(readFileSync(sourcePath));
+		expect(await isOwnedToolOutputFile(importedPath, outputDir)).toBe(true);
+	});
+
+	it("reuses a verified file already owned by the session", async () => {
+		const outputDir = join(tempDir, "tool-results");
+		const storedPath = await persistToolOutputText("already owned", outputDir);
+
+		expect(await importToolOutputFile(storedPath, outputDir)).toBe(storedPath);
+		expect(readdirSync(outputDir)).toHaveLength(1);
+	});
+
+	it("rejects a symlink source and does not expose its target", async ({ skip }) => {
+		const targetPath = join(tempDir, "outside.txt");
+		const sourcePath = join(tempDir, "source-link.txt");
+		const outputDir = join(tempDir, "tool-results");
+		writeFileSync(targetPath, "secret");
+		try {
+			symlinkSync(targetPath, sourcePath, "file");
+		} catch (error) {
+			if (process.platform === "win32" && error instanceof Error && "code" in error && error.code === "EPERM") {
+				skip("Creating symlinks requires Windows Developer Mode");
+				return;
+			}
+			throw error;
+		}
+
+		await expect(importToolOutputFile(sourcePath, outputDir)).rejects.toThrow("regular file");
+		expect(existsSync(outputDir) ? readdirSync(outputDir) : []).toEqual([]);
 	});
 
 	it("rejects a symlinked output directory without writing through it", async ({ skip }) => {

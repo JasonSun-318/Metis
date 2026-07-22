@@ -1,13 +1,23 @@
 import { randomBytes } from "node:crypto";
-import { createWriteStream, type WriteStream } from "node:fs";
+import {
+	closeSync,
+	createWriteStream,
+	constants as fsConstants,
+	fstatSync,
+	lstatSync,
+	openSync,
+	type WriteStream,
+} from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { ensureRealDirectoryDurablySync, syncDirectorySync, syncFileSync } from "../durable-file.ts";
 import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, type TruncationResult, truncateTail } from "./truncate.ts";
 
 export interface OutputAccumulatorOptions {
 	maxLines?: number;
 	maxBytes?: number;
 	tempFilePrefix?: string;
+	outputDir?: string;
 }
 
 export interface OutputSnapshot {
@@ -16,9 +26,9 @@ export interface OutputSnapshot {
 	fullOutputPath?: string;
 }
 
-function defaultTempFilePath(prefix: string): string {
+function defaultTempFilePath(outputDir: string, prefix: string): string {
 	const id = randomBytes(8).toString("hex");
-	return join(tmpdir(), `${prefix}-${id}.log`);
+	return join(outputDir, `${prefix}-${id}.log`);
 }
 
 function byteLength(text: string): number {
@@ -37,6 +47,7 @@ export class OutputAccumulator {
 	private readonly maxBytes: number;
 	private readonly maxRollingBytes: number;
 	private readonly tempFilePrefix: string;
+	private readonly outputDir: string;
 	private readonly decoder = new TextDecoder();
 
 	private rawChunks: Buffer[] = [];
@@ -53,12 +64,17 @@ export class OutputAccumulator {
 
 	private tempFilePath: string | undefined;
 	private tempFileStream: WriteStream | undefined;
+	private tempFileFd: number | undefined;
+	private tempFileIdentity: { dev: number; ino: number } | undefined;
+	private tempFileError: Error | undefined;
 
 	constructor(options: OutputAccumulatorOptions = {}) {
 		this.maxLines = options.maxLines ?? DEFAULT_MAX_LINES;
 		this.maxBytes = options.maxBytes ?? DEFAULT_MAX_BYTES;
 		this.maxRollingBytes = Math.max(this.maxBytes * 2, 1);
 		this.tempFilePrefix = options.tempFilePrefix ?? "arcmind-output";
+		this.outputDir = options.outputDir ?? tmpdir();
+		ensureRealDirectoryDurablySync(this.outputDir);
 	}
 
 	append(data: Buffer): void {
@@ -125,20 +141,45 @@ export class OutputAccumulator {
 
 		const stream = this.tempFileStream;
 		this.tempFileStream = undefined;
-
-		await new Promise<void>((resolve, reject) => {
-			const onError = (error: Error) => {
-				stream.off("finish", onFinish);
-				reject(error);
-			};
-			const onFinish = () => {
-				stream.off("error", onError);
-				resolve();
-			};
-			stream.once("error", onError);
-			stream.once("finish", onFinish);
-			stream.end();
-		});
+		const fd = this.tempFileFd;
+		const path = this.tempFilePath;
+		const identity = this.tempFileIdentity;
+		if (fd === undefined || !path || !identity) throw new Error("Output file was not opened safely");
+		try {
+			if (this.tempFileError) throw this.tempFileError;
+			await new Promise<void>((resolve, reject) => {
+				const onError = (error: Error) => {
+					stream.off("finish", onFinish);
+					reject(error);
+				};
+				const onFinish = () => {
+					stream.off("error", onError);
+					resolve();
+				};
+				stream.once("error", onError);
+				stream.once("finish", onFinish);
+				stream.end();
+			});
+			syncFileSync(fd);
+			const opened = fstatSync(fd);
+			const current = lstatSync(path);
+			if (
+				!opened.isFile() ||
+				opened.nlink !== 1 ||
+				!current.isFile() ||
+				current.nlink !== 1 ||
+				opened.dev !== identity.dev ||
+				opened.ino !== identity.ino ||
+				current.dev !== identity.dev ||
+				current.ino !== identity.ino
+			) {
+				throw new Error(`Output file identity changed: ${path}`);
+			}
+		} finally {
+			closeSync(fd);
+			this.tempFileFd = undefined;
+		}
+		syncDirectorySync(dirname(path));
 	}
 
 	getLastLineBytes(): number {
@@ -212,8 +253,38 @@ export class OutputAccumulator {
 		if (this.tempFilePath) {
 			return;
 		}
-		this.tempFilePath = defaultTempFilePath(this.tempFilePrefix);
-		this.tempFileStream = createWriteStream(this.tempFilePath);
+		ensureRealDirectoryDurablySync(this.outputDir);
+		const path = defaultTempFilePath(this.outputDir, this.tempFilePrefix);
+		const noFollow = typeof fsConstants.O_NOFOLLOW === "number" ? fsConstants.O_NOFOLLOW : 0;
+		const fd = openSync(path, fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_EXCL | noFollow, 0o600);
+		try {
+			const opened = fstatSync(fd);
+			const current = lstatSync(path);
+			if (
+				!opened.isFile() ||
+				opened.nlink !== 1 ||
+				!current.isFile() ||
+				current.nlink !== 1 ||
+				opened.dev !== current.dev ||
+				opened.ino !== current.ino
+			) {
+				throw new Error(`Output path is not a single-link regular file: ${path}`);
+			}
+			this.tempFilePath = path;
+			this.tempFileFd = fd;
+			this.tempFileIdentity = { dev: opened.dev, ino: opened.ino };
+			this.tempFileStream = createWriteStream(path, { fd, autoClose: false });
+			this.tempFileStream.on("error", (error) => {
+				this.tempFileError ??= error;
+			});
+		} catch (error) {
+			this.tempFilePath = undefined;
+			this.tempFileFd = undefined;
+			this.tempFileIdentity = undefined;
+			this.tempFileStream = undefined;
+			closeSync(fd);
+			throw error;
+		}
 		for (const chunk of this.rawChunks) {
 			this.tempFileStream.write(chunk);
 		}

@@ -1,5 +1,6 @@
-import { readFileSync, rmSync } from "node:fs";
-import { dirname } from "node:path";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import type { AgentTool } from "@arcmind/agent-core";
 import { fauxAssistantMessage, fauxToolCall } from "@arcmind/ai";
 import { Type } from "typebox";
@@ -127,11 +128,10 @@ describe("large external tool output", () => {
 			},
 		];
 		const harness = await createHarness({ extensionFactories });
-		const getToolOutputDir = harness.sessionManager.getToolOutputDir.bind(harness.sessionManager);
+		const blockedOutputDir = join(tmpdir(), "arcmind-tool-results", harness.sessionManager.getSessionId());
 		try {
-			harness.sessionManager.getToolOutputDir = () => {
-				throw new Error("blocked output directory");
-			};
+			mkdirSync(dirname(blockedOutputDir), { recursive: true });
+			writeFileSync(blockedOutputDir, "blocked output directory");
 			let providerText = "";
 			harness.setResponses([
 				fauxAssistantMessage(fauxToolCall("external_failure", {}), { stopReason: "toolUse" }),
@@ -150,7 +150,7 @@ describe("large external tool output", () => {
 			expect(entry?.message.role === "toolResult" ? getMessageText(entry.message) : "").toBe(fullText);
 			expect(providerText).toBe(fullText);
 		} finally {
-			harness.sessionManager.getToolOutputDir = getToolOutputDir;
+			rmSync(blockedOutputDir, { recursive: true, force: true });
 			await harness.cleanup();
 		}
 	});

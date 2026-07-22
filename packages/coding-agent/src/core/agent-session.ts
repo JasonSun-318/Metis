@@ -15,7 +15,7 @@
 
 import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import type {
@@ -141,6 +141,7 @@ import type { SlashCommandInfo } from "./slash-commands.ts";
 import { createSyntheticSourceInfo, type SourceInfo } from "./source-info.ts";
 import { type BuildSystemPromptOptions, buildSystemPrompt } from "./system-prompt.ts";
 import { canUseUltra, getHighestSupportedThinkingLevel, type ThinkingSelection } from "./thinking-selection.ts";
+import { createToolResultMicrocompactor } from "./tool-result-microcompaction.ts";
 import { type BashOperations, createLocalBashOperations } from "./tools/bash.ts";
 import { createAllToolDefinitions } from "./tools/index.ts";
 import type { ToolSubprocessExecutor } from "./tools/subprocess.ts";
@@ -420,6 +421,8 @@ export class AgentSession {
 	readonly agent: Agent;
 	readonly sessionManager: SessionManager;
 	readonly settingsManager: SettingsManager;
+	private readonly _toolOutputDir: string;
+	private readonly _ephemeralToolOutputDir: string | undefined;
 
 	private _scopedModels: Array<{ model: Model<any>; thinkingLevel?: ThinkingSelection }>;
 
@@ -533,6 +536,11 @@ export class AgentSession {
 	constructor(config: AgentSessionConfig) {
 		this.agent = config.agent;
 		this.sessionManager = config.sessionManager;
+		const persistedToolOutputDir = this.sessionManager.getToolOutputDir();
+		this._ephemeralToolOutputDir = persistedToolOutputDir
+			? undefined
+			: join(tmpdir(), "arcmind-tool-results", this.sessionManager.getSessionId());
+		this._toolOutputDir = persistedToolOutputDir ?? this._ephemeralToolOutputDir!;
 		this.settingsManager = config.settingsManager;
 		this._scopedModels = config.scopedModels ?? [];
 		this._resourceLoader = config.resourceLoader;
@@ -577,6 +585,7 @@ export class AgentSession {
 		this._unsubscribeAgent = this.agent.subscribe(this._handleAgentEvent);
 		this._installAgentToolHooks();
 		this._installBackgroundMessageHook();
+		this._installToolResultMicrocompactionHook();
 		this._installAgentDurabilityHooks();
 		this._installAgentNextTurnRefresh();
 
@@ -677,6 +686,23 @@ export class AgentSession {
 					? messages
 					: [...messages, ...this._stagedBackgroundMessages.map(([, message]) => message)];
 			return transformContext ? transformContext(withPending, signal) : withPending;
+		};
+	}
+
+	private _installToolResultMicrocompactionHook(): void {
+		const transformContext = this.agent.transformContext;
+		const microcompact = createToolResultMicrocompactor({
+			outputDir: this._toolOutputDir,
+			isBuiltinTool: (toolName) => {
+				if (this._baseToolsOverride) return false;
+				const active = this._toolDefinitions.get(toolName)?.definition;
+				const builtin = this._baseToolDefinitions.get(toolName);
+				return active !== undefined && active === builtin;
+			},
+		});
+		this.agent.transformContext = async (messages, signal) => {
+			const transformed = transformContext ? await transformContext(messages, signal) : messages;
+			return microcompact(transformed, signal);
 		};
 	}
 
@@ -1375,12 +1401,8 @@ export class AgentSession {
 			event.message.role === "toolResult" &&
 			this._toolDefinitions.get(event.message.toolName)?.sourceInfo.source !== "builtin"
 		) {
-			// ponytail: retain output files until deletion can account for references shared by branched sessions.
 			try {
-				const outputDir =
-					this.sessionManager.getToolOutputDir() ??
-					join(tmpdir(), "arcmind-tool-results", this.sessionManager.getSessionId());
-				const externalized = await externalizeLargeToolOutput(event.message.content, outputDir);
+				const externalized = await externalizeLargeToolOutput(event.message.content, this._toolOutputDir);
 				if (externalized) {
 					event.message.content = externalized.content;
 					toolOutput = externalized.toolOutput;
@@ -1773,6 +1795,9 @@ export class AgentSession {
 				this._disconnectFromAgent();
 				this._eventListeners = [];
 				cleanupSessionResources(this.sessionId);
+				if (this._ephemeralToolOutputDir) {
+					rmSync(this._ephemeralToolOutputDir, { recursive: true, force: true });
+				}
 				this._disposeCoreComplete = true;
 			} catch (error) {
 				errors.push(error);
@@ -4073,6 +4098,7 @@ export class AgentSession {
 						commandPrefix: shellCommandPrefix,
 						shellPath,
 						operations: this._createPermissionBashOperations(shellPath),
+						outputDir: this._toolOutputDir,
 					},
 					grep: { subprocess: this._createToolSubprocessExecutor("grep", shellPath) },
 					find: { subprocess: this._createToolSubprocessExecutor("find", shellPath) },
@@ -4303,6 +4329,7 @@ export class AgentSession {
 					actionId: authorization.actionId,
 					onChunk,
 					signal: this._bashAbortController.signal,
+					outputDir: this._toolOutputDir,
 				},
 			);
 
