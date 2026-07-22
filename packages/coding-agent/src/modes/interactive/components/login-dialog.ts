@@ -53,20 +53,8 @@ export class LoginDialogComponent extends Container implements Focusable {
 		this.contentContainer = new Container();
 		this.addChild(this.contentContainer);
 
-		// Input (always present, used when needed)
-		this.input = new Input();
-		this.input.onSubmit = () => {
-			if (this.inputResolver) {
-				const value = this.input.getValue();
-				this.replaceInputWithSubmittedText(value);
-				this.inputResolver(value);
-				this.inputResolver = undefined;
-				this.inputRejecter = undefined;
-			}
-		};
-		this.input.onEscape = () => {
-			this.cancel();
-		};
+		// Input is replaced for each prompt so secret masking cannot leak into later OAuth prompts.
+		this.input = this.createInput();
 
 		// Bottom border
 		this.addChild(new DynamicBorder());
@@ -76,9 +64,24 @@ export class LoginDialogComponent extends Container implements Focusable {
 		return this.abortController.signal;
 	}
 
-	private replaceInputWithSubmittedText(value: string): void {
+	private createInput(secret = false): Input {
+		const input = new Input({ mask: secret ? "•" : undefined });
+		input.focused = this._focused;
+		input.onSubmit = () => {
+			if (!this.inputResolver) return;
+			const value = input.getValue();
+			this.replaceInputWithSubmittedText(input, secret ? "[hidden]" : value);
+			this.inputResolver(value);
+			this.inputResolver = undefined;
+			this.inputRejecter = undefined;
+		};
+		input.onEscape = () => this.cancel();
+		return input;
+	}
+
+	private replaceInputWithSubmittedText(input: Input, value: string): void {
 		this.contentContainer.children = this.contentContainer.children.map((child) =>
-			child === this.input ? new Text(`> ${value}`, 0, 0) : child,
+			child === input ? new Text(`> ${value}`, 0, 0) : child,
 		);
 	}
 
@@ -140,7 +143,7 @@ export class LoginDialogComponent extends Container implements Focusable {
 	 */
 	showManualInput(prompt: string): Promise<string> {
 		this.stopLoader();
-		this.input.setValue("");
+		this.input = this.createInput();
 		this.contentContainer.addChild(new Spacer(1));
 		this.contentContainer.addChild(new Text(theme.fg("dim", prompt), 1, 0));
 		this.contentContainer.addChild(this.input);
@@ -157,8 +160,9 @@ export class LoginDialogComponent extends Container implements Focusable {
 	 * Called by onPrompt callback - show prompt and wait for input
 	 * Note: Does NOT clear content, appends to existing (preserves URL from showAuth)
 	 */
-	showPrompt(message: string, placeholder?: string): Promise<string> {
+	showPrompt(message: string, placeholder?: string, options: { secret?: boolean } = {}): Promise<string> {
 		this.stopLoader();
+		this.input = this.createInput(options.secret === true);
 		this.contentContainer.addChild(new Spacer(1));
 		this.contentContainer.addChild(new Text(theme.fg("text", message), 1, 0));
 		if (placeholder) {
@@ -173,7 +177,6 @@ export class LoginDialogComponent extends Container implements Focusable {
 			),
 		);
 
-		this.input.setValue("");
 		this.tui.requestRender();
 
 		return new Promise((resolve, reject) => {

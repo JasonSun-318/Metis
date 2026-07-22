@@ -111,6 +111,12 @@ import { BUILTIN_SLASH_COMMANDS } from "../../core/slash-commands.ts";
 import type { SourceInfo } from "../../core/source-info.ts";
 import type { TruncationResult } from "../../core/tools/truncate.ts";
 import { hasTrustRequiringProjectResources, ProjectTrustStore } from "../../core/trust-manager.ts";
+import {
+	WEB_SEARCH_PROVIDER_INFO,
+	WEB_SEARCH_PROVIDERS,
+	webSearchCredentialId,
+	webSearchProviderFromCredentialId,
+} from "../../core/web-search-config.ts";
 import { copyToClipboard, readClipboardText } from "../../utils/clipboard.ts";
 import { readClipboardImage } from "../../utils/clipboard-image.ts";
 import { parseGitUrl } from "../../utils/git.ts";
@@ -304,6 +310,14 @@ export function isApiKeyLoginProvider(
 		return false;
 	}
 	return !oauthProviderIds.has(providerId);
+}
+
+export function getWebSearchLoginProviderOptions(): AuthSelectorProvider[] {
+	return WEB_SEARCH_PROVIDERS.map((provider) => ({
+		id: webSearchCredentialId(provider),
+		name: WEB_SEARCH_PROVIDER_INFO[provider].label,
+		authType: "api_key" as const,
+	})).sort((left, right) => left.name.localeCompare(right.name));
 }
 
 type LoginProviderCompletionOption = {
@@ -4257,6 +4271,8 @@ export class InteractiveMode {
 					quietStartup: this.settingsManager.getQuietStartup(),
 					clearOnShrink: this.settingsManager.getClearOnShrink(),
 					showTerminalProgress: this.settingsManager.getShowTerminalProgress(),
+					webSearchEnabled: this.settingsManager.getWebSearchSettings().enabled,
+					webSearchProvider: this.settingsManager.getWebSearchSettings().provider,
 				},
 				{
 					onAutoCompactChange: (enabled) => {
@@ -4389,6 +4405,8 @@ export class InteractiveMode {
 					onShowTerminalProgressChange: (enabled) => {
 						this.settingsManager.setShowTerminalProgress(enabled);
 					},
+					onWebSearchEnabledChange: (enabled) => this.session.setWebSearchEnabled(enabled),
+					onWebSearchProviderChange: (provider) => this.session.setWebSearchProvider(provider),
 					onCancel: () => {
 						done();
 						this.ui.requestRender();
@@ -4931,6 +4949,7 @@ export class InteractiveMode {
 				authType: "api_key",
 			});
 		}
+		options.push(...getWebSearchLoginProviderOptions());
 
 		const filteredOptions = authType ? options.filter((option) => option.authType === authType) : options;
 		return filteredOptions.sort((a, b) => a.name.localeCompare(b.name));
@@ -4945,9 +4964,12 @@ export class InteractiveMode {
 			if (!credential || credential.type === "mcp_oauth" || credential.type === "mcp_secret") {
 				continue;
 			}
+			const searchProvider = webSearchProviderFromCredentialId(providerId);
 			options.push({
 				id: providerId,
-				name: this.session.modelRegistry.getProviderDisplayName(providerId),
+				name: searchProvider
+					? WEB_SEARCH_PROVIDER_INFO[searchProvider].label
+					: this.session.modelRegistry.getProviderDisplayName(providerId),
 				authType: credential.type,
 			});
 		}
@@ -5128,6 +5150,11 @@ export class InteractiveMode {
 
 					try {
 						this.session.modelRegistry.authStorage.logout(providerOption.id);
+						const searchProvider = webSearchProviderFromCredentialId(providerOption.id);
+						if (searchProvider) {
+							this.showStatus(`Removed stored API key for ${WEB_SEARCH_PROVIDER_INFO[searchProvider].label}.`);
+							return;
+						}
 						this.session.modelRegistry.refresh();
 						await this.updateAvailableProviderCount();
 						const message =
@@ -5231,12 +5258,20 @@ export class InteractiveMode {
 		};
 
 		try {
-			const apiKey = (await dialog.showPrompt("Enter API key:")).trim();
+			const apiKey = (await dialog.showPrompt("Enter API key:", undefined, { secret: true })).trim();
 			if (!apiKey) {
 				throw new Error("API key cannot be empty.");
 			}
 
 			this.session.modelRegistry.authStorage.set(providerId, { type: "api_key", key: apiKey });
+			const searchProvider = webSearchProviderFromCredentialId(providerId);
+			if (searchProvider) {
+				restoreEditor();
+				this.showStatus(
+					`Saved API key for ${WEB_SEARCH_PROVIDER_INFO[searchProvider].label}. Credentials saved to ${getAuthPath()}`,
+				);
+				return;
+			}
 
 			restoreEditor();
 			await this.completeProviderAuthentication(providerId, providerName, "api_key", previousModel);

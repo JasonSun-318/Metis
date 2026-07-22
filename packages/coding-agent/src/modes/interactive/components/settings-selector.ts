@@ -15,6 +15,11 @@ import { formatHttpIdleTimeoutMs, HTTP_IDLE_TIMEOUT_CHOICES } from "../../../cor
 import type { DefaultProjectTrust } from "../../../core/settings-manager.ts";
 import type { ThinkingSelection } from "../../../core/thinking-selection.ts";
 import {
+	WEB_SEARCH_PROVIDER_INFO,
+	WEB_SEARCH_PROVIDERS,
+	type WebSearchProvider,
+} from "../../../core/web-search-config.ts";
+import {
 	getSelectListTheme,
 	getSettingsListTheme,
 	parseAutoThemeSetting,
@@ -79,6 +84,8 @@ export interface SettingsConfig {
 	defaultProjectTrust: DefaultProjectTrust;
 	clearOnShrink: boolean;
 	showTerminalProgress: boolean;
+	webSearchEnabled: boolean;
+	webSearchProvider: WebSearchProvider;
 }
 
 export interface SettingsCallbacks {
@@ -108,6 +115,8 @@ export interface SettingsCallbacks {
 	onDefaultProjectTrustChange: (defaultProjectTrust: DefaultProjectTrust) => void;
 	onClearOnShrinkChange: (enabled: boolean) => void;
 	onShowTerminalProgressChange: (enabled: boolean) => void;
+	onWebSearchEnabledChange: (enabled: boolean) => void;
+	onWebSearchProviderChange: (provider: WebSearchProvider) => void;
 	onCancel: () => void;
 }
 
@@ -656,6 +665,25 @@ export class SettingsSelectorComponent extends Container {
 			values: ["true", "false"],
 		});
 
+		items.splice(
+			1,
+			0,
+			{
+				id: "web-search-enabled",
+				label: "Web search",
+				description: "Expose the built-in web_search tool to the model",
+				currentValue: config.webSearchEnabled ? "true" : "false",
+				values: ["true", "false"],
+			},
+			{
+				id: "web-search-provider",
+				label: "Search provider",
+				description: "Provider used by web_search",
+				currentValue: WEB_SEARCH_PROVIDER_INFO[config.webSearchProvider].label,
+				values: WEB_SEARCH_PROVIDERS.map((provider) => WEB_SEARCH_PROVIDER_INFO[provider].label),
+			},
+		);
+
 		// Add borders
 		this.addChild(new DynamicBorder());
 
@@ -668,6 +696,16 @@ export class SettingsSelectorComponent extends Container {
 					case "autocompact":
 						callbacks.onAutoCompactChange(newValue === "true");
 						break;
+					case "web-search-enabled":
+						callbacks.onWebSearchEnabledChange(newValue === "true");
+						break;
+					case "web-search-provider": {
+						const provider = WEB_SEARCH_PROVIDERS.find(
+							(value) => WEB_SEARCH_PROVIDER_INFO[value].label === newValue,
+						);
+						if (provider) callbacks.onWebSearchProviderChange(provider);
+						break;
+					}
 					case "show-images":
 						callbacks.onShowImagesChange(newValue === "true");
 						break;

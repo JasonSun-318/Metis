@@ -4,7 +4,7 @@ import { AuthStorage } from "../src/core/auth-storage.ts";
 import { KeybindingsManager } from "../src/core/keybindings.ts";
 import { BUILT_IN_PROVIDER_DISPLAY_NAMES } from "../src/core/provider-display-names.ts";
 import { OAuthSelectorComponent } from "../src/modes/interactive/components/oauth-selector.ts";
-import { isApiKeyLoginProvider } from "../src/modes/interactive/interactive-mode.ts";
+import { getWebSearchLoginProviderOptions, isApiKeyLoginProvider } from "../src/modes/interactive/interactive-mode.ts";
 import { initTheme } from "../src/modes/interactive/theme/theme.ts";
 import { stripAnsi } from "../src/utils/ansi.ts";
 
@@ -38,6 +38,14 @@ describe("OAuthSelectorComponent", () => {
 		expect(isApiKeyLoginProvider("amazon-bedrock", oauthProviderIds, builtInProviderIds)).toBe(true);
 		expect(isApiKeyLoginProvider("custom-oauth", oauthProviderIds, builtInProviderIds)).toBe(false);
 		expect(isApiKeyLoginProvider("custom-api", oauthProviderIds, builtInProviderIds)).toBe(true);
+	});
+
+	it("offers all web search providers as API-key logins", () => {
+		expect(getWebSearchLoginProviderOptions()).toEqual([
+			{ id: "web-search:brave", name: "Brave Search", authType: "api_key" },
+			{ id: "web-search:serpapi", name: "SerpApi", authType: "api_key" },
+			{ id: "web-search:tavily", name: "Tavily", authType: "api_key" },
+		]);
 	});
 
 	it("shows stored OAuth auth distinctly in the API key selector", () => {
