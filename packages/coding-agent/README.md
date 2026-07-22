@@ -1,6 +1,6 @@
 ArcMind is a minimal general-purpose terminal agent. Adapt ArcMind to your workflows without modifying its internals. Extend it with TypeScript [Extensions](#extensions), [Skills](#skills), [Prompt Templates](#prompt-templates), and [Themes](#themes).
 
-ArcMind ships with powerful defaults but skips features like sub agents and plan mode. Instead, you can ask arcmind to build what you want or install a third party arcmind package that matches your workflow.
+ArcMind ships with powerful defaults while leaving workflow-specific modes to extensions. The core `update_plan` tool tracks execution progress; the independent Plan Mode and Todo extensions remain available for richer workflows.
 
 ArcMind runs in four modes: interactive, print or JSON, RPC for process integration, and an SDK for embedding in your own apps. See [openclaw/openclaw](https://github.com/openclaw/openclaw) for a real-world SDK integration.
 
@@ -471,9 +471,9 @@ ArcMind is aggressively extensible so it doesn't have to dictate your workflow. 
 
 **Explicit permission boundary.** Ask and Auto use one-shot approvals and SRT for model-initiated local processes; Full is an explicit unsandboxed mode. Installed extension code remains trusted. See [Permissions and Sandbox](docs/permissions.md).
 
-**No plan mode.** Write plans to files, or build it with [extensions](#extensions), or install a package.
+**No separate plan mode.** The built-in `update_plan` tool lets the model show progress for complex multi-step work. Use a plan file or the independent Plan Mode extension when you want a review-first or read-only planning workflow.
 
-**No built-in to-dos.** They confuse models. Use a TODO.md file, or build your own with [extensions](#extensions).
+**No built-in to-do manager.** `update_plan` tracks the current agent task; it does not add manual Todo commands or project task storage. Use a TODO.md file or the Todo extension for those workflows.
 
 **No background bash.** Use tmux. Full observability, direct interaction.
 
@@ -555,7 +555,7 @@ cat README.md | arcmind -p "Summarize this text"
 | `--no-builtin-tools`, `-nbt` | Disable built-in tools by default but keep extension/custom tools enabled |
 | `--no-tools`, `-nt` | Disable all tools by default |
 
-Available built-in tools: `read`, `bash`, `edit`, `write`, `grep`, `find`, `ls`
+Available built-in tools: `read`, `bash`, `edit`, `write`, `grep`, `find`, `ls`, `update_plan`
 
 ### Resource Options
 

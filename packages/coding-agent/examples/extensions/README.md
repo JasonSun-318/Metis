@@ -30,7 +30,7 @@ cp permission-gate.ts ~/.arcmind/agent/extensions/
 
 | Extension | Description |
 |-----------|-------------|
-| `todo.ts` | Todo list tool + `/todos` command with custom rendering and state persistence |
+| `todo.ts` | Independent Todo manager with `/todos`; it does not share state with built-in `update_plan` |
 | `hello.ts` | Minimal custom tool example |
 | `question.ts` | Demonstrates `ctx.ui.select()` for asking the user questions with custom UI |
 | `questionnaire.ts` | Multi-question input with tab bar navigation between questions |
@@ -48,7 +48,7 @@ cp permission-gate.ts ~/.arcmind/agent/extensions/
 | Extension | Description |
 |-----------|-------------|
 | `preset.ts` | Named presets for model, thinking level, tools, and instructions via `--preset` flag and `/preset` command |
-| `plan-mode/` | Claude Code-style plan mode for read-only exploration with `/plan` command and step tracking |
+| `plan-mode/` | Independent read-only/review-first Plan Mode; built-in `update_plan` only tracks execution progress |
 | `tools.ts` | Interactive `/tools` command to enable/disable tools with session persistence |
 | `handoff.ts` | Transfer context to a new focused session via `/handoff <goal>` |
 | `qna.ts` | Extracts questions from last response into editor via `ctx.ui.setEditorText()` |

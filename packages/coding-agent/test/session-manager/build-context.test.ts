@@ -38,6 +38,33 @@ function msg(id: string, parentId: string | null, role: "user" | "assistant", te
 	};
 }
 
+function planResult(
+	id: string,
+	parentId: string | null,
+	state: "active" | "completed" | "cleared",
+	lines: string[] = [],
+	isError = false,
+): SessionMessageEntry {
+	const text =
+		state === "cleared"
+			? '<latest_plan state="cleared" />'
+			: [`<latest_plan state="${state}">`, ...lines, "</latest_plan>"].join("\n");
+	return {
+		type: "message",
+		id,
+		parentId,
+		timestamp: "2025-01-01T00:00:00Z",
+		message: {
+			role: "toolResult",
+			toolCallId: `call-${id}`,
+			toolName: "update_plan",
+			content: [{ type: "text", text }],
+			isError,
+			timestamp: 1,
+		},
+	};
+}
+
 function compaction(id: string, parentId: string | null, summary: string, firstKeptEntryId: string): CompactionEntry {
 	return {
 		type: "compaction",
@@ -206,9 +233,108 @@ describe("buildSessionContext", () => {
 			expect(ctx.thinkingLevel).toBe("high");
 			expect(ctx.messages.map((message) => message.role)).toEqual(["compactionSummary", "user"]);
 		});
+
+		it("restores a compacted active plan including completed steps", () => {
+			const entries: SessionEntry[] = [
+				msg("1", null, "user", "start"),
+				planResult("2", "1", "active", ["1. [completed] Inspect", "2. [in_progress] Implement"]),
+				msg("3", "2", "assistant", "working"),
+				compaction("4", "3", "summary", "3"),
+			];
+
+			const context = buildSessionContext(entries);
+			expect(context.messages.map(({ role }) => role)).toEqual(["compactionSummary", "custom", "assistant"]);
+			expect(context.messages[1]).toMatchObject({
+				role: "custom",
+				customType: "latest_plan",
+				display: false,
+				content: expect.arrayContaining([
+					expect.objectContaining({ text: expect.stringContaining("1. [completed] Inspect") }),
+				]),
+			});
+		});
+
+		it("restores a compacted completed plan", () => {
+			const entries: SessionEntry[] = [
+				msg("1", null, "user", "start"),
+				planResult("2", "1", "completed", ["1. [completed] Inspect", "2. [completed] Implement"]),
+				msg("3", "2", "assistant", "done"),
+				compaction("4", "3", "summary", "3"),
+			];
+
+			const recovered = buildSessionContext(entries).messages.find((message) => message.role === "custom");
+			expect(recovered).toMatchObject({
+				customType: "latest_plan",
+				display: false,
+				content: expect.arrayContaining([
+					expect.objectContaining({ text: expect.stringContaining('state="completed"') }),
+				]),
+			});
+		});
+
+		it("restores an explicit clear instead of an older plan", () => {
+			const entries: SessionEntry[] = [
+				msg("1", null, "user", "start"),
+				planResult("2", "1", "active", ["1. [in_progress] Implement"]),
+				planResult("3", "2", "cleared"),
+				msg("4", "3", "assistant", "cancelled"),
+				compaction("5", "4", "summary", "4"),
+			];
+
+			const recovered = buildSessionContext(entries).messages.find((message) => message.role === "custom");
+			expect(recovered).toMatchObject({
+				customType: "latest_plan",
+				content: [{ type: "text", text: '<latest_plan state="cleared" />' }],
+			});
+		});
+
+		it("does not duplicate a plan result already in kept context", () => {
+			const entries: SessionEntry[] = [
+				msg("1", null, "user", "start"),
+				msg("2", "1", "assistant", "working"),
+				compaction("3", "2", "summary", "2"),
+				planResult("4", "3", "active", ["1. [in_progress] Implement"]),
+			];
+
+			const messages = buildSessionContext(entries).messages;
+			expect(messages.filter((message) => message.role === "custom")).toEqual([]);
+			expect(
+				messages.filter((message) => message.role === "toolResult" && message.toolName === "update_plan"),
+			).toHaveLength(1);
+		});
+
+		it("ignores failed updates and restores the previous successful plan", () => {
+			const entries: SessionEntry[] = [
+				msg("1", null, "user", "start"),
+				planResult("2", "1", "active", ["1. [in_progress] Implement"]),
+				planResult("3", "2", "active", ["invalid"], true),
+				msg("4", "3", "assistant", "retrying"),
+				compaction("5", "4", "summary", "4"),
+			];
+
+			const recovered = buildSessionContext(entries).messages.find((message) => message.role === "custom");
+			expect(recovered).toMatchObject({
+				content: expect.arrayContaining([
+					expect.objectContaining({ text: expect.stringContaining("1. [in_progress] Implement") }),
+				]),
+			});
+		});
 	});
 
 	describe("with branches", () => {
+		it("restores plan state from the selected branch only", () => {
+			const entries: SessionEntry[] = [
+				msg("1", null, "user", "start"),
+				planResult("2", "1", "active", ["1. [in_progress] Branch A"]),
+				msg("3", "2", "assistant", "working"),
+				compaction("4", "3", "summary", "3"),
+				msg("5", "1", "user", "branch B"),
+			];
+
+			expect(buildSessionContext(entries, "4").messages.some((message) => message.role === "custom")).toBe(true);
+			expect(buildSessionContext(entries, "5").messages.some((message) => message.role === "custom")).toBe(false);
+		});
+
 		it("follows path to specified leaf", () => {
 			// Tree:
 			//   1 -> 2 -> 3 (branch A)

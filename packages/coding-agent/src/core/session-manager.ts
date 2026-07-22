@@ -1011,6 +1011,29 @@ export function buildContextEntries(
 	return contextEntries;
 }
 
+function latestCompactedPlanMessage(path: SessionEntry[], contextEntries: SessionEntry[]): AgentMessage | undefined {
+	if (!contextEntries.some(({ type }) => type === "compaction")) return undefined;
+
+	let latest: SessionMessageEntry | undefined;
+	let latestContent: (TextContent | ImageContent)[] = [];
+	for (let index = path.length - 1; index >= 0; index--) {
+		const entry = path[index];
+		if (
+			entry?.type === "message" &&
+			entry.message.role === "toolResult" &&
+			entry.message.toolName === "update_plan" &&
+			entry.message.isError === false
+		) {
+			latest = entry;
+			latestContent = entry.message.content ?? [];
+			break;
+		}
+	}
+	if (!latest || contextEntries.some(({ id }) => id === latest.id)) return undefined;
+
+	return createCustomMessage("latest_plan", latestContent, false, undefined, latest.timestamp);
+}
+
 /**
  * Build the session context from entries using tree traversal.
  * If leafId is provided, walks from that entry to root.
@@ -1023,7 +1046,10 @@ export function buildSessionContext(
 ): SessionContext {
 	const path = buildSessionPath(entries, leafId, byId);
 	const { thinkingLevel, model } = getSessionContextSettings(path);
-	const messages = buildContextEntries(entries, leafId, byId).flatMap(sessionEntryToContextMessages);
+	const contextEntries = buildContextEntries(entries, leafId, byId);
+	const messages = contextEntries.flatMap(sessionEntryToContextMessages);
+	const latestPlan = latestCompactedPlanMessage(path, contextEntries);
+	if (latestPlan) messages.splice(1, 0, latestPlan);
 	return { messages, thinkingLevel, model };
 }
 

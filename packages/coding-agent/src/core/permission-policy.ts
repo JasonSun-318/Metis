@@ -573,6 +573,7 @@ export function classifyAction(input: ClassifyActionInput): ClassifiedAction {
 		return classified(input, ["custom"]);
 	}
 	if (input.provenance !== "builtin") return classified(input, ["custom"]);
+	if (input.toolName === "update_plan") return classified(input, ["ordinary-read"]);
 	if (MCP_READ_TOOLS.has(input.toolName)) return classified(input, ["ordinary-read"]);
 	const args = record(input.args);
 	if (!args) return classified(input, ["unknown"]);

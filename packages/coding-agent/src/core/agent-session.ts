@@ -233,7 +233,7 @@ export interface AgentSessionConfig {
 	modelRegistry: ModelRegistry;
 	/** MCP manager. A successfully constructed session owns and disposes it. */
 	mcpManager?: McpManager;
-	/** Initial active built-in tool names. Default: [read, grep, bash, edit, write] */
+	/** Initial active built-in tool names. Primary default: [read, grep, bash, edit, write, update_plan] */
 	initialActiveToolNames?: string[];
 	/** Optional allowlist of tool names. When provided, only these tool names are exposed. */
 	allowedToolNames?: string[];
@@ -3989,7 +3989,14 @@ export class AgentSession {
 
 		const defaultActiveToolNames = this._baseToolsOverride
 			? Object.keys(this._baseToolsOverride)
-			: ["read", "grep", "bash", "edit", "write"];
+			: [
+					"read",
+					"grep",
+					"bash",
+					"edit",
+					"write",
+					...(this.sessionManager.getHeader()?.subagent ? [] : ["update_plan"]),
+				];
 		const baseActiveToolNames = options.activeToolNames ?? defaultActiveToolNames;
 		this._refreshToolRegistry({
 			activeToolNames: baseActiveToolNames,

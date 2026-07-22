@@ -76,6 +76,8 @@ What the LLM sees:
     prompt   from cmp          messages from firstKeptEntryId
 ```
 
+If the latest successful `update_plan` result falls outside the kept range, ArcMind adds that exact result back as a hidden `latest_plan` custom message immediately after the compaction summary. Active, completed, and explicitly cleared states are preserved. This message is visible to the model but not rendered as a new CLI event, so compaction does not duplicate the task list.
+
 On repeated compactions, the summarized span starts at the previous compaction's kept boundary (`firstKeptEntryId`), not at the compaction entry itself, falling back to the entry after the previous compaction if that kept entry cannot be found in the path. This preserves messages that survived the earlier compaction by including them in the next summarization pass as well. ArcMind also recalculates `tokensBefore` from the rebuilt session context before writing the new `CompactionEntry`, so the token count reflects the actual pre-compaction context being replaced.
 
 ### Split Turns

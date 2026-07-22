@@ -237,7 +237,9 @@ cat README.md | arcmind -p "Summarize this text"
 | `--no-builtin-tools`, `-nbt` | Disable built-in tools but keep extension/custom tools enabled |
 | `--no-tools`, `-nt` | Disable all tools |
 
-Built-in tools: `read`, `bash`, `edit`, `write`, `grep`, `find`, `ls`.
+Built-in tools: `read`, `bash`, `edit`, `write`, `grep`, `find`, `ls`, `update_plan`.
+
+`update_plan` is enabled by default for primary sessions and is intended only for complex multi-step work. Each call replaces the complete plan. Tool allowlists, exclusions, `--no-builtin-tools`, and `--no-tools` apply normally.
 
 ### Resource Options
 
