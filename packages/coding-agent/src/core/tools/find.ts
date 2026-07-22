@@ -257,7 +257,15 @@ export function createFindToolDefinition(
 						}
 						args.push("--", effectivePattern, searchPath);
 
-						const runChild = async ({ argv, env }: WrappedToolSubprocess): Promise<void> => {
+						const runChild = async ({
+							argv,
+							env,
+							signal: wrappedSignal,
+						}: WrappedToolSubprocess): Promise<void> => {
+							const commandSignal = wrappedSignal ?? signal;
+							if (wrappedSignal && wrappedSignal !== signal) {
+								wrappedSignal.addEventListener("abort", onAbort, { once: true });
+							}
 							const child = spawn(argv[0]!, argv.slice(1), {
 								cwd,
 								env,
@@ -275,6 +283,9 @@ export function createFindToolDefinition(
 
 							const cleanup = () => {
 								rl.close();
+								if (wrappedSignal && wrappedSignal !== signal) {
+									wrappedSignal.removeEventListener("abort", onAbort);
+								}
 							};
 
 							child.stderr?.on("data", (chunk) => {
@@ -292,7 +303,7 @@ export function createFindToolDefinition(
 
 							child.on("close", (code) => {
 								cleanup();
-								if (signal?.aborted) {
+								if (commandSignal?.aborted) {
 									settle(() => reject(new Error("Operation aborted")));
 									return;
 								}

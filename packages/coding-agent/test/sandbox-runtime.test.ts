@@ -19,6 +19,9 @@ function grant(overrides: Partial<SandboxGrant> = {}): SandboxGrant {
 	return {
 		actionId: "action-1",
 		sandbox: "read-only",
+		denyReadPaths: [],
+		capabilityReadPaths: [],
+		capabilityWritePaths: [],
 		readPaths: [],
 		writePaths: [],
 		networkTargets: [],

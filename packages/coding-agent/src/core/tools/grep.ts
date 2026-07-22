@@ -239,7 +239,12 @@ export function createGrepToolDefinition(
 						if (glob) args.push("--glob", glob);
 						args.push("--", pattern, searchPath);
 
-						const runChild = async ({ argv, env }: WrappedToolSubprocess): Promise<void> => {
+						const runChild = async ({
+							argv,
+							env,
+							signal: wrappedSignal,
+						}: WrappedToolSubprocess): Promise<void> => {
+							const commandSignal = wrappedSignal ?? signal;
 							const child = spawn(argv[0]!, argv.slice(1), {
 								cwd,
 								env,
@@ -257,7 +262,7 @@ export function createGrepToolDefinition(
 
 							const cleanup = () => {
 								rl.close();
-								signal?.removeEventListener("abort", onAbort);
+								commandSignal?.removeEventListener("abort", onAbort);
 							};
 							const stopChild = (dueToLimit = false) => {
 								if (!child.killed) {
@@ -269,7 +274,7 @@ export function createGrepToolDefinition(
 								aborted = true;
 								stopChild();
 							};
-							signal?.addEventListener("abort", onAbort, { once: true });
+							commandSignal?.addEventListener("abort", onAbort, { once: true });
 							child.stderr?.on("data", (chunk) => {
 								stderr += chunk.toString();
 							});

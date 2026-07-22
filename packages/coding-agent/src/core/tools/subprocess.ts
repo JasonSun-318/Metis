@@ -9,6 +9,7 @@ export interface ToolSubprocessInput {
 export interface WrappedToolSubprocess {
 	readonly argv: readonly string[];
 	readonly env?: NodeJS.ProcessEnv;
+	readonly signal?: AbortSignal;
 }
 
 /**

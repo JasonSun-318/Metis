@@ -845,7 +845,7 @@ export class AgentSession {
 						signal: input.signal,
 						onData: () => {},
 					},
-					({ argv, env }) => run({ argv, env }),
+					({ argv, env, signal }) => run({ argv, env, signal }),
 				);
 			},
 		};

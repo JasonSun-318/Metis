@@ -18,6 +18,7 @@ import { waitForChildProcess } from "../utils/child-process.ts";
 import { canonicalizeActionPath, isPathInside } from "../utils/paths.ts";
 import { killProcessTree, trackDetachedChildPid, untrackDetachedChildPid } from "../utils/shell.ts";
 import { getSensitiveFilesystemPaths, type NetworkTarget, type SandboxGrant } from "./permission-policy.ts";
+import { executeWindowsSandboxWorker, type WindowsSandboxWorkerLauncher } from "./windows-sandbox-worker.ts";
 
 export const SENSITIVE_ENVIRONMENT_NAMES = [
 	"AWS_ACCESS_KEY_ID",
@@ -99,6 +100,10 @@ export interface SandboxRuntimeCoordinatorOptions {
 	platform?: NodeJS.Platform;
 	requestWindowsSetup?: () => Promise<boolean>;
 	windows?: WindowsSandboxAdapter;
+	/** Test seam for native-Windows worker launch. */
+	windowsWorkerLauncher?: WindowsSandboxWorkerLauncher;
+	/** Keep injected Windows adapters on the legacy in-process seam. */
+	windowsInProcess?: boolean;
 }
 
 export interface SandboxedCommandInput {
@@ -114,6 +119,7 @@ export interface SandboxedCommandInput {
 export interface WrappedSandboxCommand {
 	readonly argv: readonly string[];
 	readonly env: NodeJS.ProcessEnv;
+	readonly signal?: AbortSignal;
 }
 
 export type RunWrappedSandboxCommand<T> = (command: WrappedSandboxCommand) => Promise<T>;
@@ -126,7 +132,7 @@ function compiledVendorAsset(...parts: string[]): string | undefined {
 	return existsSync(path) ? path : undefined;
 }
 
-function defaultWindowsSandboxAdapter(): WindowsSandboxAdapter {
+export function createDefaultWindowsSandboxAdapter(): WindowsSandboxAdapter {
 	const getSrtWin = () => {
 		const path = compiledVendorAsset("srt-win", arch(), "srt-win.exe");
 		return resolveSrtWin(path ? { path } : undefined);
@@ -170,7 +176,10 @@ function normalizeHost(host: string): string {
 		.replace(/\.$/, "");
 }
 
-function networkTargetMatches(granted: readonly NetworkTarget[], actual: { host: string; port?: number }): boolean {
+export function networkTargetMatches(
+	granted: readonly NetworkTarget[],
+	actual: { host: string; port?: number },
+): boolean {
 	if (actual.port === undefined) return false;
 	const host = normalizeHost(actual.host);
 	return granted.some((target) => normalizeHost(target.host) === host && target.port === actual.port);
@@ -276,7 +285,7 @@ async function defaultSpawn(input: SandboxSpawnInput): Promise<{ exitCode: numbe
 	}
 }
 
-function defaultCrossProcessLock(agentDir: string): SandboxLock {
+export function createSandboxRuntimeLock(agentDir: string): SandboxLock {
 	return async () => {
 		mkdirSync(agentDir, { recursive: true });
 		const lockfilePath = join(agentDir, "sandbox-runtime.lock");
@@ -304,15 +313,23 @@ export class SandboxRuntimeCoordinator {
 	private readonly platform: NodeJS.Platform;
 	private requestWindowsSetup?: () => Promise<boolean>;
 	private readonly windows: WindowsSandboxAdapter;
+	private readonly windowsWorkerLauncher?: WindowsSandboxWorkerLauncher;
+	private readonly useWindowsWorker: boolean;
 
 	constructor(options: SandboxRuntimeCoordinatorOptions) {
 		this.agentDir = options.agentDir;
 		this.manager = options.manager ?? SandboxManager;
 		this.spawnCommand = options.spawn ?? defaultSpawn;
-		this.acquireLock = options.acquireLock ?? defaultCrossProcessLock(options.agentDir);
+		this.acquireLock = options.acquireLock ?? createSandboxRuntimeLock(options.agentDir);
 		this.platform = options.platform ?? process.platform;
 		this.requestWindowsSetup = options.requestWindowsSetup;
-		this.windows = options.windows ?? defaultWindowsSandboxAdapter();
+		this.windows = options.windows ?? createDefaultWindowsSandboxAdapter();
+		this.windowsWorkerLauncher = options.windowsWorkerLauncher;
+		this.useWindowsWorker =
+			this.platform === "win32" &&
+			options.windowsInProcess !== true &&
+			(options.windowsWorkerLauncher !== undefined ||
+				(options.manager === undefined && options.windows === undefined && options.acquireLock === undefined));
 	}
 
 	setWindowsSetupRequester(requester?: () => Promise<boolean>): void {
@@ -332,12 +349,12 @@ export class SandboxRuntimeCoordinator {
 	}
 
 	execute(input: SandboxedCommandInput): Promise<{ exitCode: number | null }> {
-		return this.executeWith(input, async ({ argv, env }) =>
+		return this.executeWith(input, async ({ argv, env, signal }) =>
 			this.spawnCommand({
 				argv,
 				cwd: input.cwd,
 				env,
-				signal: input.signal,
+				signal,
 				timeout: input.timeout,
 				onData: input.onData,
 			}),
@@ -358,7 +375,15 @@ export class SandboxRuntimeCoordinator {
 	}
 
 	executeWith<T>(input: SandboxedCommandInput, run: RunWrappedSandboxCommand<T>): Promise<T> {
-		return enqueueSandboxRuntime(() => this.executeSerial(input, run));
+		return enqueueSandboxRuntime(() =>
+			this.useWindowsWorker
+				? executeWindowsSandboxWorker(input, run, {
+						agentDir: this.agentDir,
+						requestSetup: this.requestWindowsSetup,
+						launcher: this.windowsWorkerLauncher,
+					})
+				: this.executeSerial(input, run),
+		);
 	}
 
 	private async executeSerial<T>(input: SandboxedCommandInput, run: RunWrappedSandboxCommand<T>): Promise<T> {
@@ -387,7 +412,7 @@ export class SandboxRuntimeCoordinator {
 				input.signal,
 				input.cwd,
 			);
-			result = await run({ argv: wrapped.argv, env: wrapped.env });
+			result = await run({ argv: wrapped.argv, env: wrapped.env, signal: input.signal });
 		} catch (error) {
 			operationError = error;
 		} finally {

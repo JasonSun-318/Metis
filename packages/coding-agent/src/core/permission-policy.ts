@@ -39,6 +39,9 @@ export interface ClassifiedAction {
 export interface SandboxGrant {
 	readonly actionId: string;
 	readonly sandbox: SandboxScope;
+	readonly denyReadPaths: readonly string[];
+	readonly capabilityReadPaths: readonly string[];
+	readonly capabilityWritePaths: readonly string[];
 	readonly readPaths: readonly string[];
 	readonly writePaths: readonly string[];
 	readonly networkTargets: readonly NetworkTarget[];
@@ -632,6 +635,9 @@ export function createSandboxGrant(
 	return {
 		actionId: action.actionId,
 		sandbox: options.fullOnce ? "none" : action.sandbox,
+		denyReadPaths: [],
+		capabilityReadPaths: [],
+		capabilityWritePaths: [],
 		readPaths: action.risks.includes("sensitive-read") ? uniquePaths(action.paths) : [],
 		writePaths: uniquePaths(writes),
 		networkTargets: [...action.networkTargets],
