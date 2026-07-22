@@ -554,4 +554,24 @@ describe("SettingsManager", () => {
 			expect(manager.getShellPath()).toBe(homedir());
 		});
 	});
+
+	describe("web search settings", () => {
+		it("defaults to disabled and persists only global settings", async () => {
+			const manager = SettingsManager.inMemory();
+			expect(manager.getWebSearchSettings()).toEqual({ enabled: false, provider: "brave" });
+
+			manager.setWebSearchEnabled(true);
+			manager.setWebSearchProvider("serpapi");
+			await manager.flush();
+
+			expect(manager.getWebSearchSettings()).toEqual({ enabled: true, provider: "serpapi" });
+			expect(manager.getGlobalSettings().webSearch).toEqual({ enabled: true, provider: "serpapi" });
+		});
+
+		it("ignores project and runtime override enablement", () => {
+			const manager = SettingsManager.inMemory();
+			manager.applyOverrides({ webSearch: { enabled: true, provider: "tavily" } });
+			expect(manager.getWebSearchSettings()).toEqual({ enabled: false, provider: "brave" });
+		});
+	});
 });

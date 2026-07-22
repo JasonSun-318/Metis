@@ -6,7 +6,17 @@ import { importToolOutputFile, isOwnedToolOutputFile, persistToolOutputText } fr
 export const MICROCOMPACTION_KEEP_RECENT = 5;
 export const MICROCOMPACTION_TRIGGER_TOKENS = 20_000;
 
-const CLEARABLE_BUILTIN_TOOLS = new Set(["read", "bash", "edit", "write", "grep", "find", "ls"]);
+const CLEARABLE_BUILTIN_TOOLS = new Set([
+	"read",
+	"bash",
+	"edit",
+	"write",
+	"grep",
+	"find",
+	"ls",
+	"web_fetch",
+	"web_search",
+]);
 
 type ToolResultMessage = Extract<AgentMessage, { role: "toolResult" }>;
 

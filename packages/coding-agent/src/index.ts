@@ -289,6 +289,8 @@ export {
 	createLsTool,
 	createReadOnlyTools,
 	createReadTool,
+	createWebFetchTool,
+	createWebSearchTool,
 	createWriteTool,
 	type PromptTemplate,
 	type SubmitInterruptInput,
@@ -360,6 +362,7 @@ export {
 	type RetrySettings,
 	SettingsManager,
 	type SettingsManagerCreateOptions,
+	type WebSearchSettings,
 } from "./core/settings-manager.ts";
 // Skills
 export {
@@ -414,6 +417,8 @@ export {
 	createLocalBashOperations,
 	createLsToolDefinition,
 	createReadToolDefinition,
+	createWebFetchToolDefinition,
+	createWebSearchToolDefinition,
 	createWriteToolDefinition,
 	DEFAULT_MAX_BYTES,
 	DEFAULT_MAX_LINES,
@@ -430,6 +435,7 @@ export {
 	type GrepToolDetails,
 	type GrepToolInput,
 	type GrepToolOptions,
+	type ImageResult,
 	type LsOperations,
 	type LsToolDetails,
 	type LsToolInput,
@@ -444,6 +450,13 @@ export {
 	truncateHead,
 	truncateLine,
 	truncateTail,
+	type WebFetchToolDetails,
+	type WebFetchToolInput,
+	type WebResult,
+	type WebSearchResponse,
+	type WebSearchToolDetails,
+	type WebSearchToolInput,
+	type WebSearchToolOptions,
 	type WriteOperations,
 	type WriteToolInput,
 	type WriteToolOptions,
@@ -458,6 +471,7 @@ export {
 	type ProjectTrustStoreEntry,
 	type ProjectTrustUpdate,
 } from "./core/trust-manager.ts";
+export type { WebSearchProvider } from "./core/web-search-config.ts";
 // Main entry point
 export { type MainOptions, main } from "./main.ts";
 // Run modes for programmatic SDK usage

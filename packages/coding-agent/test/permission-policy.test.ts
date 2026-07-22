@@ -143,6 +143,10 @@ describe("permission policy", () => {
 	});
 
 	it("marks network, publish, and elevation commands", () => {
+		const webFetch = action("web_fetch", { url: "https://example.com:8443/page" });
+		expect(webFetch.risks).toEqual(["network"]);
+		expect(webFetch.networkTargets).toEqual([{ host: "example.com", port: 8443 }]);
+
 		const curl = action("bash", { command: "curl https://example.com:8443/data" });
 		expect(curl.risks).toEqual(["network"]);
 		expect(curl.networkTargets).toEqual([{ host: "example.com", port: 8443 }]);
@@ -151,6 +155,23 @@ describe("permission policy", () => {
 		expect(push.risks).toEqual(["network", "external-side-effect"]);
 		expect(action("bash", { command: "npm publish" }).risks).toEqual(["network", "external-side-effect"]);
 		expect(action("bash", { command: "sudo make install" }).risks).toEqual(["elevation"]);
+	});
+
+	it("classifies web_search only against the host-selected provider target", () => {
+		const classified = classifyAction({
+			actionId: "search-1",
+			toolName: "web_search",
+			provenance: "builtin",
+			args: { query: "test" },
+			cwd,
+			builtinNetworkTargets: [{ host: "api.tavily.com", port: 443 }],
+		});
+		expect(classified.risks).toEqual(["network"]);
+		expect(classified.networkTargets).toEqual([{ host: "api.tavily.com", port: 443 }]);
+
+		const missingTarget = action("web_search", { query: "test" });
+		expect(missingTarget.risks).toEqual(["unknown"]);
+		expect(missingTarget.networkTargets).toEqual([]);
 	});
 
 	it("treats dynamic, compound, and unrecognized shell expressions as unknown", () => {

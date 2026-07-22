@@ -1,5 +1,3 @@
-import type { ThinkingLevel } from "@arcmind/agent-core";
-import type { ThinkingSelection } from "./thinking-selection.ts";
 import type { Transport } from "@arcmind/ai";
 import { randomUUID } from "crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
@@ -8,6 +6,8 @@ import lockfile from "proper-lockfile";
 import { CONFIG_DIR_NAME, getAgentDir } from "../config.ts";
 import { normalizePath, resolvePath } from "../utils/paths.ts";
 import { DEFAULT_HTTP_IDLE_TIMEOUT_MS, parseHttpIdleTimeoutMs } from "./http-dispatcher.ts";
+import type { ThinkingSelection } from "./thinking-selection.ts";
+import { isWebSearchProvider, type WebSearchProvider } from "./web-search-config.ts";
 
 export interface CompactionSettings {
 	enabled?: boolean; // default: true
@@ -54,6 +54,11 @@ export interface ThinkingBudgetsSettings {
 
 export interface MarkdownSettings {
 	codeBlockIndent?: string; // default: "  "
+}
+
+export interface WebSearchSettings {
+	enabled?: boolean;
+	provider?: WebSearchProvider;
 }
 
 export type DefaultProjectTrust = "ask" | "always" | "never";
@@ -149,6 +154,7 @@ export interface Settings {
 	httpIdleTimeoutMs?: number; // HTTP header/body idle timeout in milliseconds; 0 disables it
 	websocketConnectTimeoutMs?: number; // WebSocket connect/open handshake timeout in milliseconds; 0 disables it
 	mcpServers?: Record<string, McpServerSettings>;
+	webSearch?: WebSearchSettings; // global-only opt-in external search
 }
 
 /** Deep merge settings: project/overrides take precedence, nested objects merge recursively */
@@ -468,6 +474,26 @@ export class SettingsManager {
 
 	getProjectSettings(): Settings {
 		return structuredClone(this.projectSettings);
+	}
+
+	getWebSearchSettings(): { enabled: boolean; provider: WebSearchProvider } {
+		const value = this.globalSettings.webSearch;
+		return {
+			enabled: value?.enabled === true,
+			provider: isWebSearchProvider(value?.provider) ? value.provider : "brave",
+		};
+	}
+
+	setWebSearchEnabled(enabled: boolean): void {
+		this.globalSettings.webSearch = { ...this.globalSettings.webSearch, enabled };
+		this.markModified("webSearch", "enabled");
+		this.save();
+	}
+
+	setWebSearchProvider(provider: WebSearchProvider): void {
+		this.globalSettings.webSearch = { ...this.globalSettings.webSearch, provider };
+		this.markModified("webSearch", "provider");
+		this.save();
 	}
 
 	getMcpServers(): Record<string, McpServerSettings> {

@@ -146,6 +146,7 @@ import { type BashOperations, createLocalBashOperations } from "./tools/bash.ts"
 import { createAllToolDefinitions } from "./tools/index.ts";
 import type { ToolSubprocessExecutor } from "./tools/subprocess.ts";
 import { createToolDefinitionFromAgentTool } from "./tools/tool-definition-wrapper.ts";
+import { resolveWebSearchApiKey, WEB_SEARCH_PROVIDER_INFO, type WebSearchProvider } from "./web-search-config.ts";
 
 // ============================================================================
 // Skill Block Parsing
@@ -242,8 +243,10 @@ export interface AgentSessionConfig {
 	modelRegistry: ModelRegistry;
 	/** MCP manager. A successfully constructed session owns and disposes it. */
 	mcpManager?: McpManager;
-	/** Initial active built-in tool names. Primary default: [read, grep, bash, edit, write, update_plan] */
+	/** Initial active built-in tool names. Primary default: [read, grep, bash, edit, write, web_fetch, update_plan] */
 	initialActiveToolNames?: string[];
+	/** Whether settings may activate default built-ins omitted by noTools. Default: true. */
+	defaultBuiltinToolsEnabled?: boolean;
 	/** Optional allowlist of tool names. When provided, only these tool names are exposed. */
 	allowedToolNames?: string[];
 	/** Optional denylist of tool names. When provided, these tool names are not exposed. */
@@ -365,6 +368,7 @@ function estimateMessagesTokens(messages: AgentMessage[]): number {
 /** Standard thinking levels */
 const THINKING_LEVELS: ThinkingLevel[] = ["off", "minimal", "low", "medium", "high"];
 const MAX_DURABLE_TURN_OPERATIONS = 256;
+const IMMEDIATE_EXTERNALIZATION_BUILTINS = new Set(["web_fetch", "web_search"]);
 
 // ============================================================================
 // AgentSession Class
@@ -490,6 +494,7 @@ export class AgentSession {
 	private _agentDir?: string;
 	private _extensionRunnerRef?: { current?: ExtensionRunner };
 	private _initialActiveToolNames?: string[];
+	private _defaultBuiltinToolsEnabled: boolean;
 	private _allowedToolNames?: Set<string>;
 	private _excludedToolNames?: Set<string>;
 	private _baseToolsOverride?: Record<string, AgentTool>;
@@ -551,6 +556,7 @@ export class AgentSession {
 		this._mcpManager = config.mcpManager;
 		this._extensionRunnerRef = config.extensionRunnerRef;
 		this._initialActiveToolNames = config.initialActiveToolNames;
+		this._defaultBuiltinToolsEnabled = config.defaultBuiltinToolsEnabled !== false;
 		this._allowedToolNames = config.allowedToolNames ? new Set(config.allowedToolNames) : undefined;
 		this._excludedToolNames = config.excludedToolNames ? new Set(config.excludedToolNames) : undefined;
 		this._baseToolsOverride = config.baseToolsOverride;
@@ -812,8 +818,20 @@ export class AgentSession {
 				}
 				const denial = this._permissionDenials.get(toolCallId);
 				if (denial) throw new Error(denial);
-				if (!this._permissionGrants.has(toolCallId)) {
+				const authorization = this._permissionGrants.get(toolCallId);
+				if (!authorization) {
 					throw new Error(`Missing one-action permission grant for ${tool.name}`);
+				}
+				if (tool.name === "web_search" && this._toolProvenance(tool.name) === "builtin") {
+					const target =
+						WEB_SEARCH_PROVIDER_INFO[this.settingsManager.getWebSearchSettings().provider].networkTarget;
+					if (
+						!authorization.grant.networkTargets.some(
+							(value) => value.host === target.host && value.port === target.port,
+						)
+					) {
+						throw new Error("web_search provider changed after permission approval; retry the search");
+					}
 				}
 				return tool.execute(toolCallId, args, signal, onUpdate);
 			},
@@ -856,6 +874,10 @@ export class AgentSession {
 			args: input.args,
 			cwd,
 			mcpAnnotations: input.provenance === "mcp" ? this._mcpManager?.getToolAnnotations(input.toolName) : undefined,
+			builtinNetworkTargets:
+				input.provenance === "builtin" && input.toolName === "web_search"
+					? [WEB_SEARCH_PROVIDER_INFO[this.settingsManager.getWebSearchSettings().provider].networkTarget]
+					: undefined,
 		});
 		if (input.effectiveCommand !== undefined) action = { ...action, command: input.effectiveCommand };
 		const childScope = input.provenance === "builtin" ? this._childCapabilityScope : undefined;
@@ -1399,7 +1421,8 @@ export class AgentSession {
 		if (
 			event.type === "message_end" &&
 			event.message.role === "toolResult" &&
-			this._toolDefinitions.get(event.message.toolName)?.sourceInfo.source !== "builtin"
+			(this._toolDefinitions.get(event.message.toolName)?.sourceInfo.source !== "builtin" ||
+				IMMEDIATE_EXTERNALIZATION_BUILTINS.has(event.message.toolName))
 		) {
 			try {
 				const externalized = await externalizeLargeToolOutput(event.message.content, this._toolOutputDir);
@@ -1909,6 +1932,22 @@ export class AgentSession {
 	 */
 	getActiveToolNames(): string[] {
 		return this.agent.state.tools.map((t) => t.name);
+	}
+
+	private _canActivateWebSearch(): boolean {
+		return this._allowedToolNames ? this._allowedToolNames.has("web_search") : this._defaultBuiltinToolsEnabled;
+	}
+
+	setWebSearchEnabled(enabled: boolean): void {
+		this.settingsManager.setWebSearchEnabled(enabled);
+		const names = new Set(this.getActiveToolNames());
+		if (enabled && this._canActivateWebSearch() && this._toolRegistry.has("web_search")) names.add("web_search");
+		else names.delete("web_search");
+		this.setActiveToolsByName([...names]);
+	}
+
+	setWebSearchProvider(provider: WebSearchProvider): void {
+		this.settingsManager.setWebSearchProvider(provider);
 	}
 
 	getMcpStatus(): McpServerStatus[] {
@@ -4102,6 +4141,10 @@ export class AgentSession {
 					},
 					grep: { subprocess: this._createToolSubprocessExecutor("grep", shellPath) },
 					find: { subprocess: this._createToolSubprocessExecutor("find", shellPath) },
+					webSearch: {
+						getSettings: () => this.settingsManager.getWebSearchSettings(),
+						getApiKey: (provider) => resolveWebSearchApiKey(this._modelRegistry.authStorage, provider),
+					},
 				});
 
 		this._baseToolDefinitions = new Map(
@@ -4136,11 +4179,18 @@ export class AgentSession {
 					"bash",
 					"edit",
 					"write",
+					"web_fetch",
+					...(this.settingsManager.getWebSearchSettings().enabled && this._canActivateWebSearch()
+						? ["web_search"]
+						: []),
 					...(this.sessionManager.getHeader()?.subagent ? [] : ["update_plan"]),
 				];
 		const baseActiveToolNames = options.activeToolNames ?? defaultActiveToolNames;
+		const globallyEnabledToolNames = this.settingsManager.getWebSearchSettings().enabled
+			? baseActiveToolNames
+			: baseActiveToolNames.filter((name) => name !== "web_search");
 		this._refreshToolRegistry({
-			activeToolNames: baseActiveToolNames,
+			activeToolNames: globallyEnabledToolNames,
 			includeAllExtensionTools: options.includeAllExtensionTools,
 		});
 	}

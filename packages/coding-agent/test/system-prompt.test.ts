@@ -36,6 +36,7 @@ describe("buildSystemPrompt", () => {
 					bash: "Execute bash commands",
 					edit: "Make surgical edits",
 					write: "Create or overwrite files",
+					web_fetch: "Fetch an HTTP(S) page and return Markdown",
 				},
 				contextFiles: [],
 				skills: [],
@@ -47,6 +48,7 @@ describe("buildSystemPrompt", () => {
 			expect(prompt).toContain("- bash:");
 			expect(prompt).toContain("- edit:");
 			expect(prompt).toContain("- write:");
+			expect(prompt).toContain("- web_fetch:");
 			expect(prompt).toContain("You are ArcMind, a general-purpose AI agent");
 			expect(prompt).not.toContain("expert coding assistant");
 			expect(prompt).toContain("Use bash for file operations like ls, find");

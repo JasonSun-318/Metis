@@ -22,7 +22,7 @@ Security:
 export interface BuildSystemPromptOptions {
 	/** Custom system prompt (replaces default). */
 	customPrompt?: string;
-	/** Tools to include in prompt. Default: [read, grep, bash, edit, write] */
+	/** Tools to include in prompt. Default: [read, grep, bash, edit, write, web_fetch] */
 	selectedTools?: string[];
 	/** Optional one-line tool snippets keyed by tool name. */
 	toolSnippets?: Record<string, string>;
@@ -156,7 +156,7 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
 
 	const contextFiles = providedContextFiles ?? [];
 	const skills = providedSkills ?? [];
-	const tools = selectedTools || ["read", "grep", "bash", "edit", "write"];
+	const tools = selectedTools || ["read", "grep", "bash", "edit", "write", "web_fetch"];
 
 	if (customPrompt) {
 		let prompt = customPrompt;

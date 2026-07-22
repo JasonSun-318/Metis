@@ -144,6 +144,7 @@ export interface ClassifyActionInput {
 		readOnlyHint?: boolean;
 		destructiveHint?: boolean;
 	};
+	builtinNetworkTargets?: readonly NetworkTarget[];
 }
 
 const RISK_ORDER: readonly ActionRisk[] = [
@@ -580,6 +581,28 @@ export function classifyAction(input: ClassifyActionInput): ClassifiedAction {
 	if (MCP_READ_TOOLS.has(input.toolName)) return classified(input, ["ordinary-read"]);
 	const args = record(input.args);
 	if (!args) return classified(input, ["unknown"]);
+	if (input.toolName === "web_fetch") {
+		if (typeof args.url !== "string") return classified(input, ["unknown"]);
+		try {
+			const url = new URL(args.url);
+			if ((url.protocol !== "http:" && url.protocol !== "https:") || url.username || url.password) {
+				return classified(input, ["unknown"]);
+			}
+			return classified(input, ["network"], [], undefined, [
+				{
+					host: url.hostname,
+					port: url.port ? Number(url.port) : url.protocol === "https:" ? 443 : 80,
+				},
+			]);
+		} catch {
+			return classified(input, ["unknown"]);
+		}
+	}
+	if (input.toolName === "web_search") {
+		return input.builtinNetworkTargets?.length
+			? classified(input, ["network"], [], undefined, input.builtinNetworkTargets)
+			: classified(input, ["unknown"]);
+	}
 	if (input.toolName === "bash") {
 		return typeof args.command === "string" ? classifyShell(input, args.command) : classified(input, ["unknown"]);
 	}

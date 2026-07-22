@@ -53,10 +53,10 @@ describe("tool-result microcompaction", () => {
 		expect(existsSync(outputDir)).toBe(false);
 	});
 
-	it("clears all eligible results older than the latest five at the exact threshold", async () => {
+	it.each(["web_fetch", "web_search"])("clears older %s results at the exact threshold", async (toolName) => {
 		const compact = createToolResultMicrocompactor({ outputDir, isBuiltinTool: () => true });
 		const oldText = "x".repeat(MICROCOMPACTION_TRIGGER_TOKENS * 4);
-		const messages = [result("1", oldText)];
+		const messages = [result("1", oldText, { toolName })];
 		for (let index = 2; index <= MICROCOMPACTION_KEEP_RECENT + 1; index++) {
 			messages.push(result(String(index), `recent-${index}`));
 		}

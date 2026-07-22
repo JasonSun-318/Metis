@@ -33,6 +33,8 @@ import {
 	createLsTool,
 	createReadOnlyTools,
 	createReadTool,
+	createWebFetchTool,
+	createWebSearchTool,
 	createWriteTool,
 	type ToolName,
 	withFileMutationQueue,
@@ -72,15 +74,16 @@ export interface CreateAgentSessionOptions {
 	 * Optional default tool suppression mode when no explicit allowlist is provided.
 	 *
 	 * - "all": start with no tools enabled
-	 * - "builtin": disable the default built-in tools (read, grep, bash, edit, write, update_plan)
-	 *   but keep extension/custom tools enabled
+	 * - "builtin": disable the default built-in tools (read, grep, bash, edit, write, web_fetch, update_plan,
+	 *   and web_search when globally enabled) but keep extension/custom tools enabled
 	 */
 	noTools?: "all" | "builtin";
 	/**
 	 * Optional allowlist of tool names.
 	 *
-	 * When omitted, arcmind enables the default built-in tools (read, grep, bash, edit, write, update_plan)
-	 * and leaves extension/custom tools enabled unless `noTools` changes that default.
+	 * When omitted, arcmind enables the default built-in tools (read, grep, bash, edit, write, web_fetch,
+	 * update_plan, and web_search when globally enabled) and leaves extension/custom tools enabled unless
+	 * `noTools` changes that default.
 	 * When provided, only the listed tool names are enabled.
 	 */
 	tools?: string[];
@@ -156,6 +159,8 @@ export {
 	createCodingTools,
 	createReadOnlyTools,
 	createReadTool,
+	createWebFetchTool,
+	createWebSearchTool,
 	createBashTool,
 	createEditTool,
 	createWriteTool,
@@ -456,6 +461,8 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			"bash",
 			"edit",
 			"write",
+			"web_fetch",
+			...(settingsManager.getWebSearchSettings().enabled ? (["web_search"] as const) : []),
 			...(isSubagent ? [] : (["update_plan"] as const)),
 		];
 		const allowedToolNames = options.tools ?? (options.noTools === "all" ? [] : undefined);
@@ -467,7 +474,8 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			options.tools ? [...options.tools] : options.noTools ? [] : defaultActiveToolNames
 		)
 			.concat(mcpManager.getDirectToolNames(), restoredMcpToolNames(sessionManager, mcpManager))
-			.filter((name) => !excludedToolNameSet?.has(name));
+			.filter((name) => !excludedToolNameSet?.has(name))
+			.filter((name) => name !== "web_search" || settingsManager.getWebSearchSettings().enabled);
 
 		let agent: Agent;
 
@@ -614,6 +622,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			modelRegistry,
 			mcpManager,
 			initialActiveToolNames,
+			defaultBuiltinToolsEnabled: options.noTools === undefined,
 			allowedToolNames,
 			excludedToolNames,
 			extensionRunnerRef,

@@ -56,6 +56,7 @@ describe("regression #5109: exclude tools", () => {
 				"edit",
 				"grep",
 				"update_plan",
+				"web_fetch",
 				"write",
 			]);
 			expect(harness.session.systemPrompt).not.toContain("- read:");
@@ -81,6 +82,21 @@ describe("regression #5109: exclude tools", () => {
 			expect(harness.session.systemPrompt).toContain("- bash:");
 			expect(harness.session.systemPrompt).not.toContain("- read:");
 			expect(harness.session.systemPrompt).not.toContain("ask_question");
+		} finally {
+			await harness.cleanup();
+		}
+	});
+
+	it("keeps enabled web_search excluded from the registry", async () => {
+		const harness = await createHarness({
+			settings: { webSearch: { enabled: true, provider: "brave" } },
+			excludedToolNames: ["web_search"],
+		});
+		try {
+			expect(toolNames(harness.session.getAllTools())).not.toContain("web_search");
+			expect(harness.session.getActiveToolNames()).not.toContain("web_search");
+			harness.session.setWebSearchEnabled(true);
+			expect(harness.session.getActiveToolNames()).not.toContain("web_search");
 		} finally {
 			await harness.cleanup();
 		}

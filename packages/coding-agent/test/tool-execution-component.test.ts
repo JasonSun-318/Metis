@@ -426,6 +426,79 @@ describe("ToolExecutionComponent parity", () => {
 		expect(expanded).toContain("hidden content");
 	});
 
+	test("collapses web_fetch results until expanded while keeping errors visible", () => {
+		const component = new ToolExecutionComponent(
+			"web_fetch",
+			"tool-web-fetch-collapsed",
+			{ url: "https://example.com/page" },
+			{},
+			undefined,
+			createFakeTui(),
+			process.cwd(),
+		);
+		component.updateResult(
+			{
+				content: [{ type: "text", text: "hidden fetched markdown" }],
+				details: { url: "https://example.com/page", status: 200, contentType: "text/html", bytes: 23 },
+				isError: false,
+			},
+			false,
+		);
+
+		const collapsed = stripAnsi(component.render(120).join("\n"));
+		expect(collapsed).toContain("web_fetch");
+		expect(collapsed).toContain("https://example.com/page");
+		expect(collapsed).toContain("to expand");
+		expect(collapsed).not.toContain("hidden fetched markdown");
+
+		component.setExpanded(true);
+		const expanded = stripAnsi(component.render(120).join("\n"));
+		expect(expanded).toContain("hidden fetched markdown");
+
+		component.setExpanded(false);
+		component.updateResult({ content: [{ type: "text", text: "fetch failed" }], isError: true });
+		const failed = stripAnsi(component.render(120).join("\n"));
+		expect(failed).toContain("fetch failed");
+		expect(failed).not.toContain("to expand");
+	});
+
+	test("collapses web_search results until expanded while keeping errors visible", () => {
+		const component = new ToolExecutionComponent(
+			"web_search",
+			"tool-web-search-collapsed",
+			{ query: "ArcMind", type: "images" },
+			{},
+			undefined,
+			createFakeTui(),
+			process.cwd(),
+		);
+		component.updateResult(
+			{
+				content: [{ type: "text", text: '{"type":"images","results":[{"url":"https://example.com/a.png"}]}' }],
+				details: { provider: "brave", type: "images", count: 1 },
+				isError: false,
+			},
+			false,
+		);
+
+		const collapsed = stripAnsi(component.render(120).join("\n"));
+		expect(collapsed).toContain("web_search");
+		expect(collapsed).toContain("images");
+		expect(collapsed).toContain("ArcMind");
+		expect(collapsed).toContain("to expand");
+		expect(collapsed).not.toContain("https://example.com/a.png");
+
+		component.setExpanded(true);
+		const expanded = stripAnsi(component.render(120).join("\n"));
+		expect(expanded).toContain("https://example.com/a.png");
+
+		component.setExpanded(false);
+		component.updateResult({ content: [{ type: "text", text: "search failed" }], isError: true });
+		const failed = stripAnsi(component.render(120).join("\n"));
+		expect(failed).toContain("search failed");
+		expect(failed).not.toContain("to expand");
+	});
+
 	for (const scenario of [
 		{
 			title: "SKILL.md",

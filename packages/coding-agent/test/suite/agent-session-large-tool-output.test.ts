@@ -4,13 +4,93 @@ import { dirname, join } from "node:path";
 import type { AgentTool } from "@arcmind/agent-core";
 import { fauxAssistantMessage, fauxToolCall } from "@arcmind/ai";
 import { Type } from "typebox";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { LARGE_TOOL_OUTPUT_MAX_CHARS } from "../../src/core/large-tool-output.ts";
 import type { SessionMessageEntry } from "../../src/core/session-manager.ts";
 import type { ExtensionFactory } from "../../src/index.ts";
 import { createHarness, getMessageText } from "./harness.ts";
 
-describe("large external tool output", () => {
+describe("large tool output", () => {
+	it("externalizes built-in web_fetch output before the next model call", async () => {
+		const fullText = "w".repeat(LARGE_TOOL_OUTPUT_MAX_CHARS + 1);
+		const harness = await createHarness();
+		const originalFetch = globalThis.fetch;
+		globalThis.fetch = vi.fn(
+			async () => new Response(fullText, { headers: { "content-type": "text/plain" } }),
+		) as typeof fetch;
+		let outputDir: string | undefined;
+		try {
+			let providerText = "";
+			harness.setResponses([
+				fauxAssistantMessage(fauxToolCall("web_fetch", { url: "https://example.com/large" }), {
+					stopReason: "toolUse",
+				}),
+				(context) => {
+					providerText = getMessageText(context.messages.find((message) => message.role === "toolResult"));
+					return fauxAssistantMessage("done");
+				},
+			]);
+
+			await harness.session.prompt("fetch a large page");
+
+			const entry = harness.sessionManager
+				.getEntries()
+				.find((item): item is SessionMessageEntry => item.type === "message" && item.message.role === "toolResult");
+			expect(entry?.toolOutput).toMatchObject({
+				truncated: true,
+				originalBytes: LARGE_TOOL_OUTPUT_MAX_CHARS + 1,
+				previewBytes: 2_048,
+			});
+			if (!entry?.toolOutput) throw new Error("missing stored web_fetch output");
+			outputDir = dirname(entry.toolOutput.fullOutputPath);
+			expect(providerText).toContain("Tool output truncated: preview only");
+			expect(providerText).toContain(`Full output: ${entry.toolOutput.fullOutputPath}`);
+			expect(providerText).not.toContain(fullText);
+			expect(readFileSync(entry.toolOutput.fullOutputPath, "utf8")).toBe(fullText);
+		} finally {
+			globalThis.fetch = originalFetch;
+			if (outputDir) rmSync(outputDir, { recursive: true, force: true });
+			await harness.cleanup();
+		}
+	});
+
+	it("externalizes built-in web_search output before the next model call", async () => {
+		const fullSnippet = "s".repeat(LARGE_TOOL_OUTPUT_MAX_CHARS + 1);
+		const harness = await createHarness({ settings: { webSearch: { enabled: true, provider: "tavily" } } });
+		harness.authStorage.set("web-search:tavily", { type: "api_key", key: "secret" });
+		const originalFetch = globalThis.fetch;
+		globalThis.fetch = vi.fn(async () =>
+			Response.json({ results: [{ title: "Large", url: "https://example.com", content: fullSnippet }] }),
+		) as typeof fetch;
+		let outputDir: string | undefined;
+		try {
+			let providerText = "";
+			harness.setResponses([
+				fauxAssistantMessage(fauxToolCall("web_search", { query: "large" }), { stopReason: "toolUse" }),
+				(context) => {
+					providerText = getMessageText(context.messages.find((message) => message.role === "toolResult"));
+					return fauxAssistantMessage("done");
+				},
+			]);
+
+			await harness.session.prompt("search");
+			const entry = harness.sessionManager
+				.getEntries()
+				.find((item): item is SessionMessageEntry => item.type === "message" && item.message.role === "toolResult");
+			expect(entry?.toolOutput).toMatchObject({ truncated: true, previewBytes: 2_048 });
+			if (!entry?.toolOutput) throw new Error("missing stored web_search output");
+			outputDir = dirname(entry.toolOutput.fullOutputPath);
+			expect(providerText).toContain("Tool output truncated: preview only");
+			expect(providerText).toContain(entry.toolOutput.fullOutputPath);
+			expect(providerText).not.toContain(fullSnippet);
+			expect(readFileSync(entry.toolOutput.fullOutputPath, "utf8")).toContain(fullSnippet);
+		} finally {
+			globalThis.fetch = originalFetch;
+			if (outputDir) rmSync(outputDir, { recursive: true, force: true });
+			await harness.cleanup();
+		}
+	});
+
 	it("externalizes the final message_end replacement before persistence and the next model call", async () => {
 		const fullText = "x".repeat(LARGE_TOOL_OUTPUT_MAX_CHARS + 1);
 		const extensionFactories: ExtensionFactory[] = [
