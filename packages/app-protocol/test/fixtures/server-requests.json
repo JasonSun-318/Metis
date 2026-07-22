@@ -17,8 +17,14 @@
 					"createdAt": "2026-07-16T00:00:03.000Z",
 					"projectPath": "/tmp/arcmind-project",
 					"choices": [
-						{ "id": "trust_once", "label": "Trust once" },
-						{ "id": "deny", "label": "Deny" }
+						{
+							"id": "trust_once",
+							"label": "Trust once"
+						},
+						{
+							"id": "deny",
+							"label": "Deny"
+						}
 					]
 				}
 			}
@@ -63,8 +69,14 @@
 					"message": "Select one configured model.",
 					"createdAt": "2026-07-16T00:00:04.000Z",
 					"choices": [
-						{ "id": "fast", "label": "Fast" },
-						{ "id": "deep", "label": "Deep" }
+						{
+							"id": "fast",
+							"label": "Fast"
+						},
+						{
+							"id": "deep",
+							"label": "Deep"
+						}
 					]
 				}
 			}

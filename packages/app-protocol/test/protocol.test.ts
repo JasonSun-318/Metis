@@ -143,9 +143,27 @@ describe("golden protocol fixtures", () => {
 				"item/delta",
 				"item/completed",
 				"interaction/notify",
+				"session/thinkingSelectionChanged",
+				"subagent/updated",
 				"server/state",
 			]),
 		);
+	});
+
+	it("requires configuration only for non-closed subagent summaries", () => {
+		const envelope = structuredClone(notifications[0]!.envelope) as {
+			params: { events: Array<{ type: string; subagent?: Record<string, unknown> }> };
+		};
+		const event = envelope.params.events.find((candidate) => candidate.type === "subagent/updated")!;
+		const configuration = event.subagent!.configuration;
+		delete event.subagent!.configuration;
+		expect(() => validateServerNotification(envelope)).toThrow(ProtocolValidationError);
+
+		event.subagent!.status = "closed";
+		event.subagent!.configuration = configuration;
+		expect(() => validateServerNotification(envelope)).toThrow(ProtocolValidationError);
+		delete event.subagent!.configuration;
+		expect(validateServerNotification(envelope)).toEqual(envelope);
 	});
 
 	it("pins every standard and ArcMind error", () => {
@@ -187,6 +205,16 @@ describe("exact limits", () => {
 		expect(() => validateClientRequest(start)).not.toThrow();
 		(start.params as { text: string }).text += "a";
 		expect(() => validateClientRequest(start)).toThrow(ProtocolValidationError);
+	});
+
+	it("accepts chat creation without a cwd and rejects unknown modes", () => {
+		const create = makeClientRequest("session/create", {
+			requestId: "22222222-2222-4222-8222-222222222224",
+			mode: "chat",
+		});
+		expect(() => validateClientRequest(create)).not.toThrow();
+		(create.params as { mode: string }).mode = "cowork";
+		expect(() => validateClientRequest(create)).toThrow(ProtocolValidationError);
 	});
 
 	it("bounds choices, history pages, and event batches", () => {
@@ -336,7 +364,7 @@ describe("direction and response correlation", () => {
 		const initialize = structuredClone(requestFor("client", "initialize").envelope) as {
 			params: { protocolVersion: number | string };
 		};
-		initialize.params.protocolVersion = 2;
+		initialize.params.protocolVersion = 3;
 		expect(validateClientRequest(initialize)).toEqual(initialize);
 		initialize.params.protocolVersion = 0;
 		expect(() => validateClientRequest(initialize)).toThrow(ProtocolValidationError);

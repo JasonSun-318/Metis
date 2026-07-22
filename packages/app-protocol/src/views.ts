@@ -25,6 +25,9 @@ export const SessionStateSchema = Type.Union([
 	Type.Literal("in_use"),
 ]);
 
+export const AgentModeSchema = Type.Union([Type.Literal("chat"), Type.Literal("code")]);
+export const CwdOriginSchema = Type.Union([Type.Literal("managed"), Type.Literal("user-selected")]);
+
 export const PublicErrorDataSchema = StrictObject({
 	name: Type.String({ minLength: 1, maxLength: 64, pattern: "^[A-Z][A-Z0-9_]*$" }),
 	retryable: Type.Boolean(),
@@ -37,6 +40,8 @@ export const PublicErrorDataSchema = StrictObject({
 export const SessionSummarySchema = StrictObject({
 	sessionId: SessionIdSchema,
 	name: Type.Optional(OptionalNameSchema),
+	mode: AgentModeSchema,
+	cwdOrigin: CwdOriginSchema,
 	// Legacy journals may not contain a working directory. App-server projects
 	// their empty-string sentinel to null instead of exposing it on the wire.
 	cwd: Type.Union([PathSchema, Type.Null()]),
@@ -202,33 +207,52 @@ export const SubagentUsageSchema = StrictObject({
 	elapsedMs: Type.Number({ minimum: 0 }),
 	cost: Type.Optional(Type.Number({ minimum: 0 })),
 });
-export const SubagentSummarySchema = StrictObject({
+const SubagentIdentityFields = {
 	agentId: SessionIdSchema,
 	name: NameSchema,
-	status: SubagentStatusSchema,
 	taskSummary: PublicTextSchema,
-	configuration: Type.Optional(
-		StrictObject({
-			mode: Type.Union([Type.Literal("chat"), Type.Literal("code")]),
-			tools: Type.Array(NameSchema, { maxItems: 128, uniqueItems: true }),
-			permissionMode: Type.Union([Type.Literal("ask"), Type.Literal("auto"), Type.Literal("full")]),
-			model: SubagentModelRefSchema,
-			thinkingLevel: ActualThinkingLevelSchema,
-			cwd: PathSchema,
-			forkTurns: Type.Union([Type.Integer({ minimum: 0, maximum: 1_000 }), Type.Literal("all")]),
-			timeoutSeconds: Type.Integer({ minimum: 1, maximum: 1_800 }),
-		}),
-	),
 	finalSummary: Type.Optional(PublicTextSchema),
-	error: Type.Optional(PublicTextSchema),
-	residualPath: Type.Optional(PathSchema),
-	usage: Type.Optional(SubagentUsageSchema),
 	createdAt: TimestampSchema,
 	updatedAt: TimestampSchema,
+};
+const ActiveSubagentStatusSchema = Type.Union([
+	Type.Literal("queued"),
+	Type.Literal("running"),
+	Type.Literal("done"),
+	Type.Literal("failed"),
+	Type.Literal("stopped"),
+	Type.Literal("close_failed"),
+]);
+const SubagentConfigurationSchema = StrictObject({
+	mode: Type.Union([Type.Literal("chat"), Type.Literal("code")]),
+	tools: Type.Array(NameSchema, { maxItems: 128, uniqueItems: true }),
+	permissionMode: Type.Union([Type.Literal("ask"), Type.Literal("auto"), Type.Literal("full")]),
+	model: SubagentModelRefSchema,
+	thinkingLevel: ActualThinkingLevelSchema,
+	cwd: PathSchema,
+	readPaths: Type.Array(PathSchema, { minItems: 1, maxItems: 32, uniqueItems: true }),
+	writePaths: Type.Array(PathSchema, { minItems: 1, maxItems: 32, uniqueItems: true }),
+	forkTurns: Type.Union([Type.Integer({ minimum: 0, maximum: 1_000 }), Type.Literal("all")]),
+	timeoutSeconds: Type.Integer({ minimum: 1, maximum: 1_800 }),
 });
+export const SubagentSummarySchema = Type.Union([
+	StrictObject({
+		...SubagentIdentityFields,
+		status: ActiveSubagentStatusSchema,
+		configuration: SubagentConfigurationSchema,
+		error: Type.Optional(PublicTextSchema),
+		residualPath: Type.Optional(PathSchema),
+		usage: Type.Optional(SubagentUsageSchema),
+	}),
+	StrictObject({
+		...SubagentIdentityFields,
+		status: Type.Literal("closed"),
+	}),
+]);
 
 export const SessionSnapshotSchema = StrictObject({
 	session: SessionSummarySchema,
+	model: Type.Optional(SubagentModelRefSchema),
 	turns: Type.Array(TurnViewSchema, { maxItems: MAX_HISTORY_ITEMS }),
 	recentItems: Type.Array(ItemViewSchema, { maxItems: MAX_HISTORY_ITEMS }),
 	nextBeforeItemId: Type.Union([OpaqueIdSchema, Type.Null()]),
@@ -345,6 +369,8 @@ export const ConnectionEventsParamsSchema = Type.Refine(
 );
 
 export type PublicErrorData = Static<typeof PublicErrorDataSchema>;
+export type AgentMode = Static<typeof AgentModeSchema>;
+export type CwdOrigin = Static<typeof CwdOriginSchema>;
 export type SessionSummary = Static<typeof SessionSummarySchema>;
 export type DurableImageRefView = Static<typeof DurableImageRefViewSchema>;
 export type ItemContentBlockView = Static<typeof ItemContentBlockViewSchema>;

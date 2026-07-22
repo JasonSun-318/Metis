@@ -9,6 +9,8 @@ import type {
 
 const session = {
 	sessionId: "11111111-1111-4111-8111-111111111111",
+	mode: "code",
+	cwdOrigin: "user-selected",
 	cwd: "/tmp/project",
 	createdAt: "2026-07-16T00:00:00.000Z",
 	updatedAt: "2026-07-16T00:00:00.000Z",

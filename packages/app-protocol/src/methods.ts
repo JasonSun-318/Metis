@@ -17,6 +17,7 @@ import {
 } from "./schema.ts";
 import {
 	ActualThinkingLevelSchema,
+	AgentModeSchema,
 	ConnectionEventsParamsSchema,
 	DurableImageRefViewSchema,
 	InteractionViewSchema,
@@ -73,7 +74,8 @@ export const SessionListResultSchema = StrictObject({
 export const SessionCreateParamsSchema = StrictObject({
 	// Create IDs are globally scoped because the ID also becomes the session ID.
 	requestId: UuidSchema,
-	cwd: PathSchema,
+	mode: Type.Optional(AgentModeSchema),
+	cwd: Type.Optional(PathSchema),
 	name: Type.Optional(OptionalNameSchema),
 });
 export const SessionCreateResultSchema = StrictObject({ session: SessionSummarySchema });

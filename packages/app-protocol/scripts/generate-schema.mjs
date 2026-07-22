@@ -12,6 +12,7 @@ import {
 	InteractionResultSchema,
 	InteractionViewSchema,
 	ItemViewSchema,
+	PROTOCOL_VERSION,
 	RpcErrorObjectSchema,
 	RpcErrorResponseEnvelopeSchema,
 	ServerNotificationEnvelopeSchema,
@@ -27,8 +28,8 @@ const outputPath = resolve(root, "generated/app-server.schema.json");
 
 const document = {
 	$schema: "https://json-schema.org/draft/2020-12/schema",
-	$id: "https://arcmind.dev/schemas/app-server-v1.json",
-	title: "ArcMind App-Server Protocol v1",
+	$id: `https://arcmind.dev/schemas/app-server-v${PROTOCOL_VERSION}.json`,
+	title: `ArcMind App-Server Protocol v${PROTOCOL_VERSION}`,
 	$ref: "#/$defs/AppProtocolEnvelope",
 	$defs: {
 		AppProtocolEnvelope: AppProtocolEnvelopeSchema,

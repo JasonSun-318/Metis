@@ -7,7 +7,7 @@
 			"params": {
 				"serverEpoch": "33333333-3333-4333-8333-333333333333",
 				"fromCursor": 43,
-				"toCursor": 51,
+				"toCursor": 53,
 				"events": [
 					{
 						"type": "session/updated",
@@ -17,7 +17,9 @@
 							"createdAt": "2026-07-16T00:00:00.000Z",
 							"updatedAt": "2026-07-16T00:00:07.000Z",
 							"state": "running",
-							"archived": false
+							"archived": false,
+							"mode": "code",
+							"cwdOrigin": "user-selected"
 						}
 					},
 					{
@@ -25,7 +27,9 @@
 						"turn": {
 							"turnId": "turn_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
 							"sessionId": "11111111-1111-4111-8111-111111111111",
-							"operationIds": ["operation_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],
+							"operationIds": [
+								"operation_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+							],
 							"state": "running",
 							"startedAt": "2026-07-16T00:00:07.000Z"
 						}
@@ -46,7 +50,10 @@
 						"type": "item/delta",
 						"sessionId": "11111111-1111-4111-8111-111111111111",
 						"itemId": "item_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-						"delta": { "type": "text", "text": "Recovery is conservative." }
+						"delta": {
+							"type": "text",
+							"text": "Recovery is conservative."
+						}
 					},
 					{
 						"type": "item/completed",
@@ -56,7 +63,12 @@
 							"turnId": "turn_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
 							"role": "assistant",
 							"state": "completed",
-							"content": [{ "type": "text", "text": "Recovery is conservative." }],
+							"content": [
+								{
+									"type": "text",
+									"text": "Recovery is conservative."
+								}
+							],
 							"createdAt": "2026-07-16T00:00:08.000Z",
 							"completedAt": "2026-07-16T00:00:09.000Z"
 						}
@@ -66,7 +78,9 @@
 						"turn": {
 							"turnId": "turn_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
 							"sessionId": "11111111-1111-4111-8111-111111111111",
-							"operationIds": ["operation_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],
+							"operationIds": [
+								"operation_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+							],
 							"state": "completed",
 							"startedAt": "2026-07-16T00:00:07.000Z",
 							"completedAt": "2026-07-16T00:00:09.000Z"
@@ -77,11 +91,17 @@
 						"turn": {
 							"turnId": "turn_dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
 							"sessionId": "11111111-1111-4111-8111-111111111111",
-							"operationIds": ["operation_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"],
+							"operationIds": [
+								"operation_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+							],
 							"state": "interrupted",
 							"startedAt": "2026-07-16T00:00:10.000Z",
 							"completedAt": "2026-07-16T00:00:11.000Z",
-							"error": { "name": "OPERATION_FAILED", "retryable": false, "operationId": "operation_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee" }
+							"error": {
+								"name": "OPERATION_FAILED",
+								"retryable": false,
+								"operationId": "operation_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+							}
 						}
 					},
 					{
@@ -92,6 +112,37 @@
 						"title": "Extension",
 						"message": "Background work finished.",
 						"createdAt": "2026-07-16T00:00:12.000Z"
+					},
+					{
+						"type": "session/thinkingSelectionChanged",
+						"sessionId": "11111111-1111-4111-8111-111111111111",
+						"thinkingSelection": "ultra",
+						"actualThinkingLevel": "max",
+						"availableThinkingSelections": ["off", "high", "max", "ultra"]
+					},
+					{
+						"type": "subagent/updated",
+						"sessionId": "11111111-1111-4111-8111-111111111111",
+						"subagent": {
+							"agentId": "22222222-2222-4222-8222-222222222222",
+							"name": "researcher",
+							"status": "running",
+							"taskSummary": "Inspect the runtime",
+							"configuration": {
+								"mode": "code",
+								"tools": ["read"],
+								"permissionMode": "ask",
+								"model": { "provider": "openai", "modelId": "gpt-test" },
+								"thinkingLevel": "max",
+								"cwd": "/tmp/arcmind-project",
+								"readPaths": ["/tmp/arcmind-project"],
+								"writePaths": ["/tmp/arcmind-project"],
+								"forkTurns": 0,
+								"timeoutSeconds": 1800
+							},
+							"createdAt": "2026-07-16T00:00:12.000Z",
+							"updatedAt": "2026-07-16T00:00:12.000Z"
+						}
 					},
 					{
 						"type": "server/state",

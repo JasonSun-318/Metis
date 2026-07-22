@@ -6,10 +6,16 @@
 			"jsonrpc": "2.0",
 			"id": "client-1",
 			"result": {
-				"protocolVersion": 2,
-				"server": { "name": "arcmind-app-server", "version": "0.80.6" },
+				"protocolVersion": 3,
+				"server": {
+					"name": "arcmind-app-server",
+					"version": "0.80.6"
+				},
 				"serverEpoch": "33333333-3333-4333-8333-333333333333",
-				"capabilities": ["interaction.v1", "session.cursor.v1"]
+				"capabilities": [
+					"interaction.v1",
+					"session.cursor.v1"
+				]
 			}
 		}
 	},
@@ -22,7 +28,12 @@
 			"result": {
 				"thinkingSelection": "ultra",
 				"actualThinkingLevel": "max",
-				"availableThinkingSelections": ["off", "high", "max", "ultra"]
+				"availableThinkingSelections": [
+					"off",
+					"high",
+					"max",
+					"ultra"
+				]
 			}
 		}
 	},
@@ -32,7 +43,10 @@
 		"envelope": {
 			"jsonrpc": "2.0",
 			"id": "client-subagent-items",
-			"result": { "items": [], "nextBeforeItemId": null }
+			"result": {
+				"items": [],
+				"nextBeforeItemId": null
+			}
 		}
 	},
 	{
@@ -49,7 +63,9 @@
 						"createdAt": "2026-07-15T00:00:00.000Z",
 						"updatedAt": "2026-07-15T00:00:00.000Z",
 						"state": "idle",
-						"archived": false
+						"archived": false,
+						"mode": "code",
+						"cwdOrigin": "user-selected"
 					}
 				],
 				"nextAfterSessionId": null
@@ -70,7 +86,9 @@
 					"createdAt": "2026-07-16T00:00:00.000Z",
 					"updatedAt": "2026-07-16T00:00:00.000Z",
 					"state": "idle",
-					"archived": false
+					"archived": false,
+					"mode": "code",
+					"cwdOrigin": "user-selected"
 				}
 			}
 		}
@@ -88,7 +106,9 @@
 					"createdAt": "2026-07-16T00:00:00.000Z",
 					"updatedAt": "2026-07-16T00:00:00.000Z",
 					"state": "idle",
-					"archived": false
+					"archived": false,
+					"mode": "code",
+					"cwdOrigin": "user-selected"
 				}
 			}
 		}
@@ -99,7 +119,10 @@
 		"envelope": {
 			"jsonrpc": "2.0",
 			"id": "client-5",
-			"result": { "items": [], "nextBeforeItemId": null }
+			"result": {
+				"items": [],
+				"nextBeforeItemId": null
+			}
 		}
 	},
 	{
@@ -108,7 +131,10 @@
 		"envelope": {
 			"jsonrpc": "2.0",
 			"id": "client-6",
-			"result": { "sessionId": "11111111-1111-4111-8111-111111111111", "closed": true }
+			"result": {
+				"sessionId": "11111111-1111-4111-8111-111111111111",
+				"closed": true
+			}
 		}
 	},
 	{
@@ -124,7 +150,9 @@
 					"createdAt": "2026-07-16T00:00:00.000Z",
 					"updatedAt": "2026-07-16T00:00:01.000Z",
 					"state": "idle",
-					"archived": true
+					"archived": true,
+					"mode": "code",
+					"cwdOrigin": "user-selected"
 				}
 			}
 		}
@@ -142,7 +170,9 @@
 					"createdAt": "2026-07-16T00:00:00.000Z",
 					"updatedAt": "2026-07-16T00:00:02.000Z",
 					"state": "idle",
-					"archived": false
+					"archived": false,
+					"mode": "code",
+					"cwdOrigin": "user-selected"
 				}
 			}
 		}
@@ -161,7 +191,9 @@
 						"createdAt": "2026-07-16T00:00:00.000Z",
 						"updatedAt": "2026-07-16T00:00:02.000Z",
 						"state": "idle",
-						"archived": false
+						"archived": false,
+						"mode": "code",
+						"cwdOrigin": "user-selected"
 					},
 					"turns": [],
 					"recentItems": [],
@@ -170,7 +202,10 @@
 					"pendingInteractions": [],
 					"thinkingSelection": "off",
 					"actualThinkingLevel": "off",
-					"availableThinkingSelections": ["off", "ultra"],
+					"availableThinkingSelections": [
+						"off",
+						"ultra"
+					],
 					"subagents": [],
 					"serverEpoch": "33333333-3333-4333-8333-333333333333",
 					"cursor": 42
@@ -184,7 +219,10 @@
 		"envelope": {
 			"jsonrpc": "2.0",
 			"id": "client-10",
-			"result": { "sessionId": "11111111-1111-4111-8111-111111111111", "unsubscribed": true }
+			"result": {
+				"sessionId": "11111111-1111-4111-8111-111111111111",
+				"unsubscribed": true
+			}
 		}
 	},
 	{
@@ -232,7 +270,9 @@
 		"envelope": {
 			"jsonrpc": "2.0",
 			"id": "client-14",
-			"result": { "acknowledgedCursor": 42 }
+			"result": {
+				"acknowledgedCursor": 42
+			}
 		}
 	},
 	{
@@ -241,7 +281,9 @@
 		"envelope": {
 			"jsonrpc": "2.0",
 			"id": "host-1",
-			"result": { "accepted": true }
+			"result": {
+				"accepted": true
+			}
 		}
 	}
 ]
