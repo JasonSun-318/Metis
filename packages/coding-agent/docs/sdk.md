@@ -526,8 +526,8 @@ const { session } = await createAgentSession({ resourceLoader: loader });
 
 Specify which built-in tools to enable:
 
-- Built-in tool names: `read`, `bash`, `edit`, `write`, `grep`, `find`, `ls`, `update_plan`
-- Default primary-session built-ins: `read`, `grep`, `bash`, `edit`, `write`, `update_plan`
+- Built-in tool names: `read`, `bash`, `edit`, `write`, `grep`, `find`, `ls`, `web_fetch`, `web_search`, `update_plan`
+- Default primary-session built-ins: `read`, `grep`, `bash`, `edit`, `write`, `web_fetch`, `update_plan`, plus `web_search` when globally enabled
 - `noTools: "all"` disables all tools
 - `noTools: "builtin"` disables default built-ins while keeping extension and custom tools enabled
 - `excludeTools` disables specific built-in, extension, or custom tool names after any `tools` allowlist is applied

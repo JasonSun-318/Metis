@@ -36,10 +36,10 @@ Type `/` in the editor to open command completion. Extensions can register custo
 
 | Command | Description |
 |---------|-------------|
-| `/login`, `/logout` | Manage OAuth or API-key credentials |
+| `/login`, `/logout` | Manage model and web-search OAuth/API-key credentials |
 | `/model` | Switch models |
 | `/scoped-models` | Enable/disable models for Ctrl+P cycling |
-| `/settings` | Thinking level, theme, message delivery, transport |
+| `/settings` | Web search, thinking level, theme, message delivery, transport |
 | `/resume` | Pick from previous sessions |
 | `/new [chat\|code]` | Create a session and choose its immutable workspace |
 | `/permissions` | Choose Ask, Auto with review, or Full for this session |
@@ -237,9 +237,22 @@ cat README.md | arcmind -p "Summarize this text"
 | `--no-builtin-tools`, `-nbt` | Disable built-in tools but keep extension/custom tools enabled |
 | `--no-tools`, `-nt` | Disable all tools |
 
-Built-in tools: `read`, `bash`, `edit`, `write`, `grep`, `find`, `ls`, `update_plan`.
+Built-in tools: `read`, `bash`, `edit`, `write`, `grep`, `find`, `ls`, `web_fetch`, `web_search`, `update_plan`.
 
-`update_plan` is enabled by default for primary sessions and is intended only for complex multi-step work. Each call replaces the complete plan. Tool allowlists, exclusions, `--no-builtin-tools`, and `--no-tools` apply normally.
+`web_fetch` is enabled by default and converts HTTP(S) pages to Markdown. Redirects that change the host or port require another `web_fetch` call so the new network target receives its own permission decision. `update_plan` is enabled by default for primary sessions and is intended only for complex multi-step work. Each plan call replaces the complete plan. Tool allowlists, exclusions, `--no-builtin-tools`, and `--no-tools` apply normally.
+
+`web_search` is disabled by default. Enable it and choose a provider in `/settings`, then store the matching key with `/login web-search:brave`, `/login web-search:tavily`, or `/login web-search:serpapi`. Project settings cannot enable or switch this global paid-service choice. The model-facing contract is:
+
+```ts
+web_search({ query: string, type?: "web" | "images", limit?: number })
+
+type WebOutput = { type: "web"; results: Array<{ title: string; url: string; snippet?: string }> };
+type ImageOutput = { type: "images"; results: Array<{ url: string; title?: string; sourceUrl?: string }> };
+```
+
+Search returns metadata and URLs; use `web_fetch` to retrieve a selected page as Markdown. Images are not downloaded, and returned image URLs may expire or reject hotlinking. Tavily's image mode returns images related to its search response rather than a dedicated image-only index, so it generally has no `sourceUrl`.
+
+When either web tool returns more than 50,000 characters, ArcMind immediately saves the full text under the session's `tool-results` directory and keeps a preview plus the file path in active model context. Press Ctrl+O to expand or collapse the visible TUI result.
 
 ### Resource Options
 

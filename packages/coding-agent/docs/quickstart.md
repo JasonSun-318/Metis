@@ -66,6 +66,18 @@ You can also run `/login` and select an API-key provider to store the key in `~/
 
 See [Providers](providers.md) for all supported providers, environment variables, and cloud-provider setup.
 
+### Optional: enable web search
+
+`web_search` is built in but disabled by default. Run `/settings`, enable **Web search**, and select Brave Search, Tavily, or SerpApi. Then store the selected provider's API key:
+
+```text
+/login web-search:brave
+/login web-search:tavily
+/login web-search:serpapi
+```
+
+Only one search provider is selected at a time, and the model receives `web_search` only while the global setting is enabled. Search returns URLs and result metadata; `web_fetch` retrieves a selected page as Markdown.
+
 ## First session
 
 Once arcmind starts, type a request and press Enter:
@@ -74,15 +86,17 @@ Once arcmind starts, type a request and press Enter:
 Review this workspace and summarize its purpose, contents, and important next steps.
 ```
 
-By default, arcmind gives the model five tools:
+By default, a primary session gives the model seven tools:
 
 - `read` - read files
 - `grep` - search file contents with bounded output
 - `write` - create or overwrite files
 - `edit` - patch files
 - `bash` - run shell commands
+- `web_fetch` - fetch an HTTP(S) URL as Markdown
+- `update_plan` - track progress on complex multi-step work
 
-Additional built-in read-only tools (`find`, `ls`) are available through tool options. ArcMind runs in your current working directory and can modify files there. Use git or another checkpointing workflow if you want easy rollback.
+Additional built-in read-only tools (`find`, `ls`, and opt-in `web_search`) are available through tool options and settings. ArcMind runs in your current working directory and can modify files there. Use git or another checkpointing workflow if you want easy rollback.
 
 ## Give arcmind project instructions
 

@@ -58,7 +58,9 @@ arcmind
 /login  # Then select an API-key provider
 ```
 
-Then just talk to arcmind. By default, arcmind gives the model five tools: `read`, `grep`, `write`, `edit`, and `bash`. The model uses these to fulfill your requests. Add capabilities via [skills](#skills), [prompt templates](#prompt-templates), [extensions](#extensions), or [arcmind packages](#arcmind-packages).
+Then just talk to arcmind. By default, a primary session gives the model seven tools: `read`, `grep`, `write`, `edit`, `bash`, `web_fetch`, and `update_plan`. The model uses these to fulfill your requests. Add capabilities via [skills](#skills), [prompt templates](#prompt-templates), [extensions](#extensions), or [arcmind packages](#arcmind-packages).
+
+`web_search` is also built in but disabled by default. Enable it and choose Brave Search, Tavily, or SerpApi in `/settings`, then store that provider's key with `/login web-search:brave`, `/login web-search:tavily`, or `/login web-search:serpapi`. Search returns result URLs and metadata; use `web_fetch` to retrieve a selected page as Markdown.
 
 **Platform notes:** [Windows](docs/windows.md) | [Termux (Android)](docs/termux.md) | [tmux](docs/tmux.md) | [Terminal setup](docs/terminal-setup.md) | [Shell aliases](docs/shell-aliases.md)
 
@@ -138,10 +140,10 @@ Type `/` in the editor to trigger commands. [Extensions](#extensions) can regist
 
 | Command | Description |
 |---------|-------------|
-| `/login`, `/logout` | Store or remove provider API keys |
+| `/login`, `/logout` | Store or remove model and web-search provider API keys |
 | `/model` | Switch models |
 | `/scoped-models` | Enable/disable models for Ctrl+P cycling |
-| `/settings` | Thinking level, theme, message delivery, transport |
+| `/settings` | Web search, thinking level, theme, message delivery, transport |
 | `/resume` | Pick from previous sessions |
 | [`/new [chat\|code]`](docs/sessions.md#chat-and-code-modes) | Create a session and choose its immutable workspace |
 | [`/permissions`](docs/permissions.md) | Choose Ask, Auto with review, or Full for this session |
@@ -555,7 +557,7 @@ cat README.md | arcmind -p "Summarize this text"
 | `--no-builtin-tools`, `-nbt` | Disable built-in tools by default but keep extension/custom tools enabled |
 | `--no-tools`, `-nt` | Disable all tools by default |
 
-Available built-in tools: `read`, `bash`, `edit`, `write`, `grep`, `find`, `ls`, `update_plan`
+Available built-in tools: `read`, `bash`, `edit`, `write`, `grep`, `find`, `ls`, `web_fetch`, `web_search`, `update_plan`
 
 ### Resource Options
 

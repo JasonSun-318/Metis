@@ -13,7 +13,9 @@ For TypeScript definitions in your project, inspect `node_modules/@arcmind/codin
 
 ## Tool-result microcompaction
 
-Immediately before each main-model provider request, ArcMind inspects text results from its real built-in `read`, `bash`, `edit`, `write`, `grep`, `find`, and `ls` tools. Bash results are eligible only when they already declare a complete-output path. The newest five eligible results remain unchanged. When the older eligible results reach 20,000 estimated tokens, ArcMind saves each complete result under the session's `tool-results` directory and replaces its complete preview in that provider request with a short path reference.
+Immediately before each main-model provider request, ArcMind inspects text results from its real built-in `read`, `bash`, `edit`, `write`, `grep`, `find`, `ls`, `web_fetch`, and `web_search` tools. Bash results are eligible only when they already declare a complete-output path. The newest five eligible results remain unchanged. When the older eligible results reach 20,000 estimated tokens, ArcMind saves each complete result under the session's `tool-results` directory and replaces its complete preview in that provider request with a short path reference.
+
+`web_fetch` and `web_search` also use immediate large-output handling: a result over 50,000 characters is saved under the session's `tool-results` directory as soon as the tool finishes, before persistence or the next model request. The active result keeps a bounded preview and the full-output path so the model can read details on demand.
 
 This is an immutable context projection: agent state and the append-only session journal keep their original messages. A later request can project them again, and the model can use `read` on the saved path when detail is needed. Image results, `update_plan`, subagent, MCP, SDK, extension, custom, and unknown tools are excluded. Text error results from eligible built-ins are not specially excluded.
 

@@ -89,6 +89,21 @@ ArcMind does not perform version checks or install telemetry. `enableProviderAtt
 }
 ```
 
+### Web Search
+
+`webSearch` is global-only so a project cannot silently enable a paid external search service or switch providers. It is disabled by default. Configure it through `/settings` or in `~/.arcmind/agent/settings.json`:
+
+```json
+{
+  "webSearch": {
+    "enabled": true,
+    "provider": "brave"
+  }
+}
+```
+
+`provider` accepts `"brave"`, `"tavily"`, or `"serpapi"`. Store its API key separately in the credential store with `/login web-search:brave`, `/login web-search:tavily`, or `/login web-search:serpapi`; API keys never belong in settings. Disabling the setting removes `web_search` from the model immediately. Tool allowlists, exclusions, `--no-builtin-tools`, and `--no-tools` can further restrict it but cannot bypass the disabled state.
+
 ### Compaction
 
 | Setting | Type | Default | Description |

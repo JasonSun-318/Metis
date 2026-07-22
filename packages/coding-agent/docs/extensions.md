@@ -1956,7 +1956,7 @@ arcmind.registerTool({
 
 ### Overriding Built-in Tools
 
-Extensions can override built-in tools (`read`, `bash`, `edit`, `write`, `grep`, `find`, `ls`) by registering a tool with the same name. Interactive mode displays a warning when this happens.
+Extensions can override built-in tools (`read`, `bash`, `edit`, `write`, `grep`, `find`, `ls`, `web_fetch`, `web_search`) by registering a tool with the same name. Interactive mode displays a warning when this happens.
 
 ```bash
 # Extension's read tool replaces built-in read
@@ -1985,6 +1985,8 @@ Built-in tool implementations:
 - [grep.ts](https://github.com/arcmind/arcmind/blob/main/packages/coding-agent/src/core/tools/grep.ts) - `GrepToolDetails`
 - [find.ts](https://github.com/arcmind/arcmind/blob/main/packages/coding-agent/src/core/tools/find.ts) - `FindToolDetails`
 - [ls.ts](https://github.com/arcmind/arcmind/blob/main/packages/coding-agent/src/core/tools/ls.ts) - `LsToolDetails`
+- [web-fetch.ts](https://github.com/arcmind/arcmind/blob/main/packages/coding-agent/src/core/tools/web-fetch.ts) - `WebFetchToolDetails`
+- [web-search.ts](https://github.com/arcmind/arcmind/blob/main/packages/coding-agent/src/core/tools/web-search.ts) - `WebSearchToolDetails`
 
 ### Remote Execution
 

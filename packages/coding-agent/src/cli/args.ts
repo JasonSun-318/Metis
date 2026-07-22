@@ -285,7 +285,7 @@ export function printHelp(extensionFlags?: ExtensionFlag[]): void {
 					})
 					.join("\n")}\n`
 			: "";
-	console.log(`${chalk.bold(APP_NAME)} - General-purpose AI agent with read, grep, bash, edit, write tools
+	console.log(`${chalk.bold(APP_NAME)} - General-purpose AI agent with read, grep, bash, edit, write, web_fetch, web_search tools
 
 ${chalk.bold("Usage:")}
   ${APP_NAME} [options] [@files...] [messages...]
