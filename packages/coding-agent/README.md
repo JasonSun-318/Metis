@@ -467,7 +467,7 @@ ArcMind is aggressively extensible so it doesn't have to dictate your workflow. 
 
 **MCP:** Run `/mcp` to add and authenticate trusted stdio or Streamable HTTP servers without editing JSON. ArcMind supports token-backed authentication, resources, prompts, permission-aware calls, and Codex-style lazy tool discovery. See [docs/mcp.md](docs/mcp.md).
 
-**Explicit multi-agent tier.** Persisted Chat and Code sessions can select Ultra for maximum model reasoning plus recoverable first-class subagents. The process-spawning extension remains available for custom isolation and chained workflows. See [Ultra and Subagents](docs/subagents.md).
+**Explicit multi-agent tier.** Persisted primary Code sessions can select Ultra for maximum model reasoning plus recoverable first-class subagents. The process-spawning extension remains available for custom isolation and chained workflows. See [Ultra and Subagents](docs/subagents.md).
 
 **Explicit permission boundary.** Ask and Auto use one-shot approvals and SRT for model-initiated local processes; Full is an explicit unsandboxed mode. Installed extension code remains trusted. See [Permissions and Sandbox](docs/permissions.md).
 

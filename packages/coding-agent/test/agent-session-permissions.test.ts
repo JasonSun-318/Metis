@@ -218,6 +218,60 @@ describe("AgentSession permission enforcement", () => {
 		expect(requestApproval).not.toHaveBeenCalled();
 	});
 
+	it("keeps explicitly delegated SDK tools under the child permission mode", async () => {
+		const { tool, execute } = customTool();
+		const requestApproval = vi.fn(async () => ({ decision: "allow" as const }));
+		const harness = await createHarness({
+			tools: [tool],
+			permissionSettings: { mode: "ask", reviewerEnabled: true },
+			requestPermissionApproval: requestApproval,
+			childCapabilityScope: {
+				readPaths: ["/workspace/frontend"],
+				writePaths: ["/workspace/frontend"],
+				workspaceRoots: ["/workspace"],
+			},
+		});
+		harnesses.push(harness);
+		harness.setResponses([
+			fauxAssistantMessage([fauxToolCall("custom_action", { value: "/workspace/backend" })], {
+				stopReason: "toolUse",
+			}),
+			fauxAssistantMessage("done"),
+		]);
+
+		await harness.session.prompt("run the delegated SDK tool");
+
+		expect(requestApproval).toHaveBeenCalledOnce();
+		expect(execute).toHaveBeenCalledOnce();
+	});
+
+	it("enforces child filesystem roots even in Full mode", async () => {
+		const harness = await createHarness({
+			permissionSettings: { mode: "full", reviewerEnabled: true },
+			childCapabilityScope: {
+				readPaths: ["/assigned"],
+				writePaths: ["/assigned"],
+				workspaceRoots: ["/workspace"],
+			},
+		});
+		harnesses.push(harness);
+		harness.setResponses([
+			fauxAssistantMessage([fauxToolCall("write", { path: "/outside/result.txt", content: "forbidden" })], {
+				stopReason: "toolUse",
+			}),
+			fauxAssistantMessage("done"),
+		]);
+
+		await harness.session.prompt("write outside the assigned root");
+
+		expect(
+			harness.session.messages.some(
+				(message) =>
+					message.role === "toolResult" && getMessageText(message).includes("outside its assigned roots"),
+			),
+		).toBe(true);
+	});
+
 	it("runs an automatically allowed Ask-mode bash read through SRT with its returned environment", async () => {
 		const events: string[] = [];
 		const manager: SandboxManagerAdapter = {
@@ -270,5 +324,45 @@ describe("AgentSession permission enforcement", () => {
 				(message) => message.role === "toolResult" && getMessageText(message).includes("sandboxed"),
 			),
 		).toBe(true);
+	});
+
+	it("carries the child workspace read boundary into every sandboxed builtin command", async () => {
+		let initialized: Parameters<SandboxManagerAdapter["initialize"]>[0] | undefined;
+		const manager: SandboxManagerAdapter = {
+			isSupportedPlatform: () => true,
+			checkDependencies: () => ({ errors: [], warnings: [] }),
+			reset: async () => {},
+			initialize: async (config) => {
+				initialized = config;
+			},
+			wrapWithSandboxArgv: async () => ({ argv: ["wrapped", "pwd"], env: {} }),
+			cleanupAfterCommand: async () => {},
+		};
+		const sandboxRuntime = new SandboxRuntimeCoordinator({
+			agentDir: process.cwd(),
+			manager,
+			acquireLock: async () => async () => {},
+			spawn: async () => ({ exitCode: 0 }),
+		});
+		const harness = await createHarness({
+			permissionSettings: { mode: "full", reviewerEnabled: true },
+			sandboxRuntime,
+			childCapabilityScope: {
+				readPaths: ["/"],
+				writePaths: ["/"],
+				workspaceRoots: ["/workspace-boundary"],
+			},
+		});
+		harnesses.push(harness);
+		harness.setResponses([
+			fauxAssistantMessage([fauxToolCall("bash", { command: "pwd" })], { stopReason: "toolUse" }),
+			fauxAssistantMessage("done"),
+		]);
+
+		await harness.session.prompt("show the current directory");
+
+		expect(initialized?.filesystem.denyRead).toContain("/workspace-boundary");
+		expect(initialized?.filesystem.allowRead).toContain("/");
+		expect(initialized?.filesystem.allowWrite).not.toContain("/");
 	});
 });

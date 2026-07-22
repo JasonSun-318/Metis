@@ -372,7 +372,7 @@ const { session } = await createAgentSession({
 });
 ```
 
-`thinkingSelection: "ultra"` is the composite runtime selection used by persisted primary `AgentSessionRuntime` hosts. The session's `thinkingLevel` remains the resolved real provider value. Runtime-owned subagent tools and `subagentManager` are unavailable on children and in-memory/raw sessions. See [Ultra and Subagents](subagents.md).
+`thinkingSelection: "ultra"` is the composite runtime selection used only by persisted primary Code `AgentSessionRuntime` hosts. The session's `thinkingLevel` remains the resolved real provider value. Raw `createAgentSession`, Chat, child, and in-memory runtimes cannot enable Ultra; first-class children require a persisted Code `AgentSessionRuntime`. See [Ultra and Subagents](subagents.md).
 
 The effective session `cwd` is used by `DefaultResourceLoader` for:
 - Project extensions (`.arcmind/extensions/`)

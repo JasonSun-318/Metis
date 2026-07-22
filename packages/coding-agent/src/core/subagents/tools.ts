@@ -1,5 +1,7 @@
 import type { ThinkingLevel } from "@arcmind/agent-core";
+import { Text } from "@arcmind/tui";
 import { Type } from "typebox";
+import { keyHint } from "../../modes/interactive/components/keybinding-hints.ts";
 import type { AgentSession } from "../agent-session.ts";
 import { defineTool, type ToolDefinition } from "../extensions/types.ts";
 import type { SubagentManager } from "./manager.ts";
@@ -19,6 +21,12 @@ const Spawn = Type.Object(
 		model: Type.Optional(Type.String({ pattern: "^[^/]+/[^/]+$" })),
 		thinkingLevel: Type.Optional(RealThinkingLevel),
 		cwd: Type.Optional(Type.String({ minLength: 1 })),
+		readPaths: Type.Optional(
+			Type.Array(Type.String({ minLength: 1 }), { minItems: 1, maxItems: 32, uniqueItems: true }),
+		),
+		writePaths: Type.Optional(
+			Type.Array(Type.String({ minLength: 1 }), { minItems: 1, maxItems: 32, uniqueItems: true }),
+		),
 		forkTurns: Type.Optional(Type.Union([Type.Integer({ minimum: 1, maximum: 1_000 }), Type.Literal("all")])),
 		timeoutSeconds: Type.Optional(Type.Integer({ minimum: 1, maximum: 1_800 })),
 	},
@@ -51,6 +59,9 @@ const Wait = Type.Object(
 );
 
 const AgentId = Type.Object({ agentId: Type.String({ minLength: 1 }) }, { additionalProperties: false });
+const COMPACT_AGENT_LIMIT = 5;
+const COMPACT_TEXT_LINES = 10;
+const COMPACT_TEXT_CHARS = 2_000;
 
 function result(value: unknown, isError = false) {
 	return {
@@ -59,6 +70,84 @@ function result(value: unknown, isError = false) {
 		...(isError ? { isError: true } : {}),
 	};
 }
+
+function record(value: unknown): Record<string, unknown> | undefined {
+	return typeof value === "object" && value !== null && !Array.isArray(value)
+		? (value as Record<string, unknown>)
+		: undefined;
+}
+
+function agentSummary(value: unknown): string | undefined {
+	const agent = record(value);
+	if (!agent) return undefined;
+	const name = typeof agent.name === "string" ? agent.name : undefined;
+	const agentId = typeof agent.agentId === "string" ? agent.agentId : undefined;
+	const status = typeof agent.status === "string" ? agent.status : undefined;
+	const label = name && agentId ? `${name} (${agentId})` : (name ?? agentId ?? "Agent");
+	return status ? `${label} · ${status}` : label;
+}
+
+function compactResult(value: unknown): string {
+	const details = record(value);
+	if (!details) return "Completed";
+	if (Array.isArray(details.agents)) {
+		const summaries = details.agents.map(agentSummary).filter((line): line is string => line !== undefined);
+		if (summaries.length === 0) return "No agents";
+		const lines = summaries.slice(0, COMPACT_AGENT_LIMIT);
+		if (summaries.length > lines.length) lines.push(`… ${summaries.length - lines.length} more`);
+		if (Array.isArray(details.journal)) lines[lines.length - 1] += ` · ${details.journal.length} recent entries`;
+		return lines.join("\n");
+	}
+	if (Array.isArray(details.updatedAgentIds)) {
+		const ids = details.updatedAgentIds.filter((id): id is string => typeof id === "string");
+		return ids.length > 0 ? `Updated: ${ids.join(", ")}` : "No live agents";
+	}
+	const summary = agentSummary(details);
+	const suffix = [details.delivery, details.reason]
+		.filter((part): part is string => typeof part === "string")
+		.join(" · ");
+	return suffix ? `${summary ?? "Completed"} · ${suffix}` : (summary ?? "Completed");
+}
+
+function textResult(result: { content: readonly { type: string; text?: string }[] }): string {
+	return result.content
+		.filter(
+			(block): block is { type: "text"; text: string } => block.type === "text" && typeof block.text === "string",
+		)
+		.map((block) => block.text)
+		.join("\n");
+}
+
+function compactTextResult(
+	result: { content: readonly { type: string; text?: string }[] },
+	emptyOutput: "Completed" | "Failed",
+): string {
+	const output = textResult(result);
+	if (!output) return emptyOutput;
+	const characterPreview = output.slice(0, COMPACT_TEXT_CHARS);
+	const lines = characterPreview.split("\n");
+	const preview = lines.slice(0, COMPACT_TEXT_LINES).join("\n");
+	return output.length > characterPreview.length || lines.length > COMPACT_TEXT_LINES ? `${preview}\n…` : preview;
+}
+
+function fullResult(result: { content: readonly { type: string; text?: string }[]; details?: unknown }): string {
+	return result.details !== undefined ? JSON.stringify(result.details, null, 2) : textResult(result);
+}
+
+const renderSubagentResult: NonNullable<ToolDefinition["renderResult"]> = (result, options, theme, context) => {
+	const text = (context.lastComponent as Text | undefined) ?? new Text("", 0, 0);
+	const output = options.expanded
+		? fullResult(result)
+		: context.isError || result.details === undefined
+			? compactTextResult(result, context.isError ? "Failed" : "Completed")
+			: compactResult(result.details);
+	text.setText(
+		options.expanded
+			? theme.fg("toolOutput", output)
+			: `${theme.fg("toolOutput", output)} ${theme.fg("muted", "(")}${keyHint("app.tools.expand", "to expand")}${theme.fg("muted", ")")}`,
+	);
+	return text;
+};
 
 export interface SubagentToolHost {
 	getManager(): SubagentManager | undefined;
@@ -81,6 +170,7 @@ export function createSubagentTools(host: SubagentToolHost): ToolDefinition[] {
 			label: "Spawn agent",
 			description: "Create one isolated child agent for independent bounded work. Requires Ultra.",
 			parameters: Spawn,
+			renderResult: renderSubagentResult,
 			async execute(_id, params) {
 				requireUltra();
 				return result(
@@ -93,6 +183,7 @@ export function createSubagentTools(host: SubagentToolHost): ToolDefinition[] {
 			label: "Inspect agents",
 			description: "List child summaries or inspect one owned child's recent durable activity.",
 			parameters: Inspect,
+			renderResult: renderSubagentResult,
 			async execute(_id, params) {
 				return result(await manager().inspect(params));
 			},
@@ -102,6 +193,7 @@ export function createSubagentTools(host: SubagentToolHost): ToolDefinition[] {
 			label: "Message agent",
 			description: "Steer a running child or queue a follow-up that resumes a cold child. Requires Ultra.",
 			parameters: Message,
+			renderResult: renderSubagentResult,
 			async execute(_id, params) {
 				requireUltra();
 				return result(await manager().message(params));
@@ -110,8 +202,10 @@ export function createSubagentTools(host: SubagentToolHost): ToolDefinition[] {
 		defineTool({
 			name: "wait_agents",
 			label: "Wait for agents",
-			description: "Wait until any selected child changes state; with no IDs, observe all non-closed children.",
+			description:
+				"Wait only when the next critical step depends on a new child terminal event and no useful independent work remains. Completed children notify automatically; do not poll. Returns IDs, never transcripts.",
 			parameters: Wait,
+			renderResult: renderSubagentResult,
 			async execute(_id, params, signal) {
 				return result(await manager().wait(params, signal));
 			},
@@ -121,6 +215,7 @@ export function createSubagentTools(host: SubagentToolHost): ToolDefinition[] {
 			label: "Interrupt agent",
 			description: "Stop queued or running child work while preserving its recoverable session.",
 			parameters: AgentId,
+			renderResult: renderSubagentResult,
 			async execute(_id, params) {
 				return result(await manager().interrupt(params.agentId));
 			},
@@ -130,6 +225,7 @@ export function createSubagentTools(host: SubagentToolHost): ToolDefinition[] {
 			label: "Close agent",
 			description: "Permanently delete one child session and retain only its parent tombstone.",
 			parameters: AgentId,
+			renderResult: renderSubagentResult,
 			async execute(_id, params) {
 				return result(await manager().close(params.agentId));
 			},

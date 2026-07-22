@@ -52,7 +52,25 @@ describe("Ultra composite thinking selection", () => {
 		const model = getModel("anthropic", "claude-sonnet-4-5")!;
 		const memory = SessionManager.inMemory(cwd);
 		const created = await createAgentSession({ cwd, agentDir, model, sessionManager: memory });
-		expect(() => created.session.setThinkingSelection("ultra")).toThrow("persisted primary AgentSessionRuntime");
+		expect(() => created.session.setThinkingSelection("ultra")).toThrow("persisted primary Code AgentSessionRuntime");
+		created.session.dispose();
+	});
+
+	it("never offers Ultra to a persisted Chat session even when the host supports orchestration", async () => {
+		const { root, cwd, agentDir } = setup();
+		const model = getModel("anthropic", "claude-sonnet-4-5")!;
+		const manager = SessionManager.create(cwd, join(root, "sessions"), { mode: "chat" });
+		const created = await createAgentSession({
+			cwd,
+			agentDir,
+			model,
+			sessionManager: manager,
+			ultraAvailable: true,
+		});
+
+		expect(created.session.getAvailableThinkingSelections()).not.toContain("ultra");
+		expect(() => created.session.setThinkingSelection("ultra")).toThrow("persisted primary Code AgentSessionRuntime");
+		expect(created.session.sessionManager.getSubagentsEnabled()).toBe(false);
 		created.session.dispose();
 	});
 

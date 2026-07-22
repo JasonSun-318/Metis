@@ -43,7 +43,7 @@ import {
 import { getAgentDir } from "../config.ts";
 import { getThemeByName, theme } from "../modes/interactive/theme/theme.ts";
 import { stripFrontmatter } from "../utils/frontmatter.ts";
-import { canonicalizeActionPath, resolvePath } from "../utils/paths.ts";
+import { canonicalizeActionPath, isPathInside, resolvePath } from "../utils/paths.ts";
 import { getShellConfig } from "../utils/shell.ts";
 import { sleep } from "../utils/sleep.ts";
 import type { AgentMode } from "./agent-mode.ts";
@@ -64,7 +64,6 @@ import {
 	prepareCompaction,
 	shouldCompact,
 } from "./compaction/index.ts";
-import { DEFAULT_THINKING_LEVEL } from "./defaults.ts";
 import { exportSessionToHtml, type ToolHtmlRenderer } from "./export-html/index.ts";
 import { createToolHtmlRenderer } from "./export-html/tool-renderer.ts";
 import {
@@ -136,12 +135,12 @@ import { appendSyntheticRuntimeToolResult } from "./runtime-recovery-materialize
 import { SandboxRuntimeCoordinator } from "./sandbox-runtime.ts";
 import type { BranchSummaryEntry, CompactionEntry, SessionEntry, SessionManager } from "./session-manager.ts";
 import { CURRENT_SESSION_VERSION, getLatestCompactionEntry, type SessionHeader } from "./session-manager.ts";
-import { getHighestSupportedThinkingLevel, type ThinkingSelection } from "./thinking-selection.ts";
 import type { CwdOrigin } from "./session-workspace.ts";
 import type { SettingsManager } from "./settings-manager.ts";
 import type { SlashCommandInfo } from "./slash-commands.ts";
 import { createSyntheticSourceInfo, type SourceInfo } from "./source-info.ts";
 import { type BuildSystemPromptOptions, buildSystemPrompt } from "./system-prompt.ts";
+import { canUseUltra, getHighestSupportedThinkingLevel, type ThinkingSelection } from "./thinking-selection.ts";
 import { type BashOperations, createLocalBashOperations } from "./tools/bash.ts";
 import { createAllToolDefinitions } from "./tools/index.ts";
 import type { ToolSubprocessExecutor } from "./tools/subprocess.ts";
@@ -216,6 +215,15 @@ export type AgentSessionEventListener = (event: AgentSessionEvent) => void;
 // Types
 // ============================================================================
 
+export interface ChildCapabilityScope {
+	/** Project roots enforced for sandbox-aware builtin reads. */
+	readonly readPaths: readonly string[];
+	/** Project roots enforced for sandbox-aware builtin writes. */
+	readonly writePaths: readonly string[];
+	/** Parent workspace regions hidden from sandboxed child processes except for readPaths. */
+	readonly workspaceRoots: readonly string[];
+}
+
 export interface AgentSessionConfig {
 	agent: Agent;
 	sessionManager: SessionManager;
@@ -262,6 +270,10 @@ export interface AgentSessionConfig {
 	ultraAvailable?: boolean;
 	/** Host-owned prompt suffix used for runtime coordination profiles. */
 	additionalSystemPrompt?: string | (() => string | undefined);
+	/** Include automatic memory context and dream writes. Defaults to true. */
+	includeAutoMemory?: boolean;
+	/** Project filesystem capability for a child's sandbox-aware builtin tools. */
+	childCapabilityScope?: ChildCapabilityScope;
 }
 
 export interface ExtensionBindings {
@@ -440,6 +452,10 @@ export class AgentSession {
 	private _followUpMessages: string[] = [];
 	/** Messages queued to be included with the next user prompt as context ("asides"). */
 	private _pendingNextTurnMessages: CustomMessage[] = [];
+	/** Host-owned durable events awaiting the next provider request boundary. */
+	private readonly _pendingBackgroundMessages = new Map<string, CustomMessage>();
+	private readonly _backgroundMessageKeys = new Set<string>();
+	private _stagedBackgroundMessages: readonly [string, CustomMessage][] = [];
 
 	// Compaction state
 	private _compactionAbortController: AbortController | undefined = undefined;
@@ -509,6 +525,8 @@ export class AgentSession {
 	private readonly _sandboxRuntime: SandboxRuntimeCoordinator;
 	private _runtimeShellCommandPrefix?: string;
 	private readonly _ultraAvailable: boolean;
+	private readonly _includeAutoMemory: boolean;
+	private readonly _childCapabilityScope?: ChildCapabilityScope;
 	private _additionalSystemPrompt?: string | (() => string | undefined);
 	private readonly _trustedControlToolNames = new Set<string>();
 
@@ -529,8 +547,15 @@ export class AgentSession {
 		this._excludedToolNames = config.excludedToolNames ? new Set(config.excludedToolNames) : undefined;
 		this._baseToolsOverride = config.baseToolsOverride;
 		this._sessionStartEvent = config.sessionStartEvent ?? { type: "session_start", reason: "startup" };
-		this._ultraAvailable = config.ultraAvailable === true;
+		this._ultraAvailable = canUseUltra({
+			hostAllowsUltra: config.ultraAvailable === true,
+			persisted: this.sessionManager.isPersisted(),
+			mode: this.sessionManager.getMode(),
+			isSubagent: this.sessionManager.getHeader()?.subagent !== undefined,
+		});
 		this._additionalSystemPrompt = config.additionalSystemPrompt;
+		this._includeAutoMemory = config.includeAutoMemory !== false;
+		this._childCapabilityScope = config.childCapabilityScope;
 		if (this.sessionManager.getSubagentsEnabled() && !this._ultraAvailable) {
 			throw new Error("Ultra sessions require AgentSessionRuntime");
 		}
@@ -551,6 +576,7 @@ export class AgentSession {
 		// (session persistence, extensions, auto-compaction, retry logic)
 		this._unsubscribeAgent = this.agent.subscribe(this._handleAgentEvent);
 		this._installAgentToolHooks();
+		this._installBackgroundMessageHook();
 		this._installAgentDurabilityHooks();
 		this._installAgentNextTurnRefresh();
 
@@ -602,6 +628,65 @@ export class AgentSession {
 		this._additionalSystemPrompt = additional;
 		this._baseSystemPrompt = this._rebuildSystemPrompt(this.getActiveToolNames());
 		this.agent.state.systemPrompt = this._baseSystemPrompt;
+	}
+
+	/**
+	 * Persist a host event without interrupting, steering, or starting a model turn.
+	 * The event is added to the first provider request whose context includes it.
+	 */
+	enqueueBackgroundCustomMessage<T = unknown>(
+		message: Pick<CustomMessage<T>, "customType" | "content" | "display" | "details">,
+		dedupeKey: string,
+	): void {
+		if (this._runtimeTeardownRequested) throw new Error("The agent session is tearing down");
+		if (!dedupeKey) throw new Error("Background message dedupe key must be non-empty");
+		if (this._backgroundMessageKeys.has(dedupeKey)) {
+			throw new Error(`Background message dedupe key was reused: ${dedupeKey}`);
+		}
+		if (this._pendingBackgroundMessages.size >= 256) throw new Error("Background message mailbox is full");
+		const appMessage = {
+			role: "custom" as const,
+			customType: message.customType,
+			content: message.content ?? [],
+			display: message.display,
+			details: message.details,
+			timestamp: Date.now(),
+		} satisfies CustomMessage<T>;
+		this.sessionManager.appendCustomMessageEntry(
+			appMessage.customType,
+			appMessage.content,
+			appMessage.display,
+			appMessage.details,
+		);
+		this._backgroundMessageKeys.add(dedupeKey);
+		this._pendingBackgroundMessages.set(dedupeKey, appMessage);
+		this._emit({ type: "message_start", message: appMessage });
+		this._emit({ type: "message_end", message: appMessage });
+	}
+
+	hasPendingBackgroundMessage(dedupeKey: string): boolean {
+		return this._pendingBackgroundMessages.has(dedupeKey);
+	}
+
+	private _installBackgroundMessageHook(): void {
+		const transformContext = this.agent.transformContext;
+		this.agent.transformContext = async (messages, signal) => {
+			this._stagedBackgroundMessages = [...this._pendingBackgroundMessages.entries()];
+			const withPending =
+				this._stagedBackgroundMessages.length === 0
+					? messages
+					: [...messages, ...this._stagedBackgroundMessages.map(([, message]) => message)];
+			return transformContext ? transformContext(withPending, signal) : withPending;
+		};
+	}
+
+	private _commitStagedBackgroundMessages(): void {
+		for (const [key, message] of this._stagedBackgroundMessages) {
+			if (this._pendingBackgroundMessages.get(key) !== message) continue;
+			this.agent.state.messages.push(message);
+			this._pendingBackgroundMessages.delete(key);
+		}
+		this._stagedBackgroundMessages = [];
 	}
 
 	private async _getRequiredRequestAuth(model: Model<any>): Promise<{
@@ -747,6 +832,17 @@ export class AgentSession {
 			mcpAnnotations: input.provenance === "mcp" ? this._mcpManager?.getToolAnnotations(input.toolName) : undefined,
 		});
 		if (input.effectiveCommand !== undefined) action = { ...action, command: input.effectiveCommand };
+		const childScope = input.provenance === "builtin" ? this._childCapabilityScope : undefined;
+		const isWrite = action.risks.some(
+			(risk) => risk === "workspace-write" || risk === "outside-write" || risk === "destructive",
+		);
+		if (childScope && action.paths.length > 0) {
+			const roots = isWrite ? childScope.writePaths : childScope.readPaths;
+			const deniedPath = action.paths.find((path) => !roots.some((root) => isPathInside(root, path)));
+			if (deniedPath) {
+				throw new Error(`Subagent ${isWrite ? "write" : "read"} path is outside its assigned roots: ${deniedPath}`);
+			}
+		}
 		const settings = this.sessionManager.getPermissionSettings();
 		const authorization = await this._permissionPolicy.authorize({
 			settings,
@@ -774,10 +870,23 @@ export class AgentSession {
 		if (authorization.decision === "deny") {
 			throw new Error(`Permission denied for ${input.toolName}: ${authorization.reason}`);
 		}
+		const grant: SandboxGrant = childScope
+			? {
+					actionId: authorization.grant.actionId,
+					sandbox: action.sandbox === "none" ? "exact" : action.sandbox,
+					denyReadPaths: childScope.workspaceRoots,
+					capabilityReadPaths: childScope.readPaths,
+					capabilityWritePaths: isWrite ? childScope.writePaths : [],
+					readPaths: authorization.grant.readPaths,
+					writePaths: [],
+					networkTargets: authorization.grant.networkTargets,
+					fullOnce: false,
+				}
+			: authorization.grant;
 		const authorized = {
 			action,
-			grant: authorization.grant,
-			bypassSandbox: settings.mode === "full" || authorization.grant.fullOnce,
+			grant,
+			bypassSandbox: childScope === undefined && (settings.mode === "full" || authorization.grant.fullOnce),
 			cwd,
 		} satisfies AuthorizedPermissionAction;
 		this._permissionGrants.set(input.actionId, authorized);
@@ -925,7 +1034,10 @@ export class AgentSession {
 					throw new Error("Durable queued prompts cannot be cleared before they are consumed or recovered");
 				}
 			},
-			beforeProviderRequest: async () => this._markDurableProviderEpoch(),
+			beforeProviderRequest: async () => {
+				this._commitStagedBackgroundMessages();
+				this._markDurableProviderEpoch();
+			},
 			beforeToolExecute: async (context, signal) => {
 				const provenance = this._toolProvenance(context.toolCall.name);
 				const args =
@@ -941,13 +1053,13 @@ export class AgentSession {
 				try {
 					if (!this._trustedControlToolNames.has(context.toolCall.name)) {
 						await this._authorizePermissionAction({
-						actionId: context.toolCall.id,
-						toolName: context.toolCall.name,
-						provenance,
-						args: context.args,
-						actionSource: "assistant",
-						effectiveCommand: command,
-						cwd: this._cwd,
+							actionId: context.toolCall.id,
+							toolName: context.toolCall.name,
+							provenance,
+							args: context.args,
+							actionSource: "assistant",
+							effectiveCommand: command,
+							cwd: this._cwd,
 							signal,
 						});
 					}
@@ -1751,7 +1863,7 @@ export class AgentSession {
 
 	getDreamStatus(limit = 10): DreamStatusSnapshot {
 		return {
-			enabled: this.settingsManager.getAutoMemoryEnabled(),
+			enabled: this._includeAutoMemory && this.settingsManager.getAutoMemoryEnabled(),
 			active: this._activeDream ? { ...this._activeDream } : undefined,
 			recent: this._agentDir ? readDreamHistory(this._agentDir, limit) : [],
 		};
@@ -1952,7 +2064,10 @@ export class AgentSession {
 			loaderAppendSystemPrompt.length > 0 ? loaderAppendSystemPrompt.join("\n\n") : undefined;
 		const loadedSkills = this._resourceLoader.getSkills().skills;
 		const loadedContextFiles = this._resourceLoader.getAgentsFiles().agentsFiles;
-		const autoMemory = this.settingsManager.getAutoMemoryEnabled() ? this.getAutoMemorySnapshot() : undefined;
+		const autoMemory =
+			this._includeAutoMemory && this.settingsManager.getAutoMemoryEnabled()
+				? this.getAutoMemorySnapshot()
+				: undefined;
 
 		this._baseSystemPromptOptions = {
 			cwd: this._cwd,
@@ -2978,7 +3093,7 @@ export class AgentSession {
 			return;
 		}
 		if (!this._ultraAvailable || !this.sessionManager.isPersisted() || this.sessionManager.getHeader()?.subagent) {
-			throw new Error("Ultra requires a persisted primary AgentSessionRuntime");
+			throw new Error("Ultra requires a persisted primary Code AgentSessionRuntime");
 		}
 		if (!this.sessionManager.getSubagentsEnabled()) this.sessionManager.setSubagentsEnabled(true);
 		const actual = getHighestSupportedThinkingLevel(this.model);
@@ -3075,7 +3190,7 @@ export class AgentSession {
 		compactWork: () => Promise<T>,
 	): Promise<T> {
 		signal.throwIfAborted();
-		if (!this._agentDir || !this.settingsManager.getAutoMemoryEnabled() || !this.model) {
+		if (!this._includeAutoMemory || !this._agentDir || !this.settingsManager.getAutoMemoryEnabled() || !this.model) {
 			return compactWork();
 		}
 

@@ -8,7 +8,7 @@ Permissions belong to a session. They are restored when that session is resumed 
 |---|---|---|---|
 | **Ask before changes** | Ordinary, non-sensitive reads and a strict set of known read-only shell commands | Writes, edits, deletion, network, elevation, external side effects, destructive or unknown commands, and custom tool calls ask the user directly | SRT is read-only by default; one approval adds only the paths or network target required for that action |
 | **Auto with review** | Ordinary reads plus writes, builds, and tests inside the session workspace | Sensitive reads, writes outside the workspace, destructive actions, network, elevation, external side effects, and custom tool calls go to the reviewer when enabled; otherwise they ask the user | SRT can write the workspace; an approval can add an exact outside target for one action |
-| **Full access** | Everything | Nothing | ArcMind approvals and SRT are bypassed; normal OS-user permissions are the boundary |
+| **Full access** | Everything | Nothing | Primary sessions bypass SRT; an Ultra child still uses SRT to enforce its immutable capability roots |
 
 New Chat sessions default to Ask. New Code sessions default to Auto with review enabled. Ask never calls the reviewer. A risky manual `!command` or `!!command` asks the user directly in both Ask and Auto.
 
@@ -38,7 +38,7 @@ Ask and Auto execute built-in Bash plus the child processes used by `grep` and `
 
 Ordinary reads may target a file outside the workspace because SRT read access is deny-list based. Ordinary actions never receive an `allowRead` exception over the fixed sensitive deny list; only an explicitly approved sensitive target does. Selecting a workspace does not make the rest of the filesystem writable.
 
-On Windows, the first Ask/Auto command may request one-time SRT setup. Approval starts the bundled `srt-win.exe` setup and Windows displays one UAC prompt. Cancelling blocks the command. Neither setup nor normal execution downloads SRT.
+On Windows, the first Ask/Auto command may request one-time SRT setup. Approval starts the bundled `srt-win.exe` setup and Windows displays one UAC prompt. Cancelling blocks the command. Neither setup nor normal execution downloads SRT. Status, provisioning, initialize, wrapping, cleanup, and reset run in a dedicated per-command worker process so synchronous native operations do not freeze the CLI or App Server event loop. Sandbox commands still use one global FIFO correctness lock; this improves responsiveness, not Windows sandbox throughput.
 
 macOS and Linux report missing SRT system dependencies instead of falling back to unsandboxed execution. Full deliberately does not initialize SRT.
 
@@ -57,4 +57,4 @@ Installing or configuring an extension, SDK integration, or future MCP server me
 For hostile code or unattended workloads, add a VM, container, micro-VM, or separate OS account around the whole ArcMind process. See [Security](security.md) and [Containerization](containerization.md).
 ## Child-agent approvals
 
-Ultra child sessions snapshot a permission mode that may only be equal to or stricter than the parent's mode at creation. Each child has independent review, sandbox, and one-shot approval state. Approval requests are routed through the current parent UI with the child name/ID and exact action details; without an interactive owner they fail closed. See [Ultra and Subagents](subagents.md).
+Ultra child sessions snapshot a permission mode that may only be equal to or stricter than the parent's mode at creation. Each child has independent review, sandbox, and one-shot approval state. Built-in filesystem/process tools are also clamped to canonical read/write roots inside the parent workspace; changing the parent permission mode later cannot widen them. Full removes approval prompts but does not bypass this child capability sandbox. Approval requests are routed through the current parent UI with the child name/ID and exact action details; without an interactive owner they fail closed. Extensions, SDK tools, and MCP implementations remain trusted in-process code. See [Ultra and Subagents](subagents.md).

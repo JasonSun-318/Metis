@@ -61,6 +61,9 @@ describe("Ultra subagent end to end", () => {
 			});
 		};
 		const createRuntime: CreateAgentSessionRuntimeFactory = async (options) => {
+			if (options.childConfig && !options.childCapabilityScope) {
+				throw new Error("Child runtime is missing its capability snapshot");
+			}
 			const services = await createAgentSessionServices({
 				cwd: options.cwd,
 				agentDir,
@@ -70,6 +73,9 @@ describe("Ultra subagent end to end", () => {
 					noSkills: true,
 					noPromptTemplates: true,
 					noThemes: true,
+					...(options.childConfig
+						? { systemPromptOverride: () => undefined, appendSystemPromptOverride: () => [] }
+						: {}),
 				},
 			});
 			const child = options.childConfig;
@@ -88,6 +94,8 @@ describe("Ultra subagent end to end", () => {
 							thinkingLevel: child.thinkingLevel,
 							tools: [...child.tools],
 							additionalSystemPrompt: buildChildSystemPrompt(child),
+							includeAutoMemory: false,
+							childCapabilityScope: options.childCapabilityScope,
 						}
 					: {}),
 			});
@@ -95,7 +103,7 @@ describe("Ultra subagent end to end", () => {
 		};
 		const parentManager = SessionManager.create(cwd, join(root, "sessions"), {
 			id: "parent-e2e-1",
-			mode: "chat",
+			mode: "code",
 			permissionMode: "full",
 			reviewerEnabled: true,
 		});
@@ -108,6 +116,8 @@ describe("Ultra subagent end to end", () => {
 			expect(runtime.session.getThinkingSelection()).toBe("ultra");
 			expect(runtime.session.getActiveToolNames()).toEqual(expect.arrayContaining([...SUBAGENT_TOOL_NAMES]));
 			expect(runtime.session.systemPrompt).toContain("<subagent_coordination>");
+			expect(runtime.session.systemPrompt).toContain("Use wait_agents only when the next critical step needs");
+			expect(runtime.session.systemPrompt).toContain("do not call it immediately after spawn or poll it repeatedly");
 			const manager = runtime.subagentManager!;
 			const spawned = await manager.spawn({
 				name: "researcher",

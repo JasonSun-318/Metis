@@ -1,5 +1,6 @@
 import type { ThinkingLevel } from "@arcmind/agent-core";
 import { getSupportedThinkingLevels, type Model } from "@arcmind/ai/compat";
+import type { AgentMode } from "./agent-mode.ts";
 
 export type ThinkingSelection = ThinkingLevel | "ultra";
 
@@ -20,4 +21,13 @@ export function getHighestSupportedThinkingLevel(model: Model<any> | undefined):
 	if (!model) return "off";
 	const levels = getSupportedThinkingLevels(model) as ThinkingLevel[];
 	return levels.at(-1) ?? "off";
+}
+
+export function canUseUltra(input: {
+	readonly hostAllowsUltra: boolean;
+	readonly persisted: boolean;
+	readonly mode: AgentMode;
+	readonly isSubagent: boolean;
+}): boolean {
+	return input.hostAllowsUltra && input.persisted && input.mode === "code" && !input.isSubagent;
 }

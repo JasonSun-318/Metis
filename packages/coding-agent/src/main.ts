@@ -46,8 +46,8 @@ import {
 import { createSessionId } from "./core/session-id.ts";
 import { assertValidSessionId, SessionManager } from "./core/session-manager.ts";
 import { removeOwnedManagedWorkspace, resolveNewSessionWorkspace } from "./core/session-workspace.ts";
-import { buildChildSystemPrompt } from "./core/subagents/prompts.ts";
 import { SettingsManager } from "./core/settings-manager.ts";
+import { buildChildSystemPrompt } from "./core/subagents/prompts.ts";
 import { printTimings, resetTimings, time } from "./core/timings.ts";
 import { hasTrustRequiringProjectResources, ProjectTrustStore } from "./core/trust-manager.ts";
 import { handleMcpCliCommand } from "./mcp-cli.ts";
@@ -754,7 +754,9 @@ export async function main(args: string[], options?: MainOptions) {
 			projectTrustContext,
 			ultraAvailable,
 			childConfig,
+			childCapabilityScope,
 		}) => {
+			if (childConfig && !childCapabilityScope) throw new Error("Child runtime is missing its capability snapshot");
 			// Credentials remain shared through the locked auth file, while OAuth provider
 			// routing stays owned by this runtime's AuthStorage instance.
 			const authStorage = AuthStorage.create();
@@ -802,17 +804,23 @@ export async function main(args: string[], options?: MainOptions) {
 					: undefined,
 				resourceLoaderOptions: {
 					additionalExtensionPaths: resolvedExtensionPaths,
-					additionalSkillPaths: resolvedSkillPaths,
-					additionalPromptTemplatePaths: resolvedPromptTemplatePaths,
-					additionalThemePaths: resolvedThemePaths,
+					additionalSkillPaths: childConfig ? [] : resolvedSkillPaths,
+					additionalPromptTemplatePaths: childConfig ? [] : resolvedPromptTemplatePaths,
+					additionalThemePaths: childConfig ? [] : resolvedThemePaths,
 					noExtensions: parsed.noExtensions,
-					noSkills: parsed.noSkills,
-					noPromptTemplates: parsed.noPromptTemplates,
-					noThemes: parsed.noThemes,
+					noSkills: childConfig ? true : parsed.noSkills,
+					noPromptTemplates: childConfig ? true : parsed.noPromptTemplates,
+					noThemes: childConfig ? true : parsed.noThemes,
 					noContextFiles: parsed.noContextFiles,
-					systemPrompt: parsed.systemPrompt,
-					appendSystemPrompt: parsed.appendSystemPrompt,
+					systemPrompt: childConfig ? undefined : parsed.systemPrompt,
+					appendSystemPrompt: childConfig ? undefined : parsed.appendSystemPrompt,
 					extensionFactories: options?.extensionFactories,
+					...(childConfig
+						? {
+								systemPromptOverride: () => undefined,
+								appendSystemPromptOverride: () => [],
+							}
+						: {}),
 				},
 			});
 			let servicesTransferred = false;
@@ -858,8 +866,13 @@ export async function main(args: string[], options?: MainOptions) {
 				const childModel = childConfig
 					? modelRegistry.find(childConfig.model.provider, childConfig.model.modelId)
 					: undefined;
-				if (childConfig && !childModel) {
-					throw new Error(`Child model is unavailable: ${childConfig.model.provider}/${childConfig.model.modelId}`);
+				if (childConfig?.mode !== undefined && childConfig.mode !== "code") {
+					throw new Error("Legacy Chat subagents are cleanup-only and cannot start a runtime");
+				}
+				if (childConfig && (!childModel || !modelRegistry.hasConfiguredAuth(childModel))) {
+					throw new Error(
+						`Child model is unavailable: ${childConfig.model.provider}/${childConfig.model.modelId}`,
+					);
 				}
 				const created = await createAgentSessionFromServices({
 					services,
@@ -875,6 +888,8 @@ export async function main(args: string[], options?: MainOptions) {
 					customTools: childConfig ? [] : sessionOptions.customTools,
 					ultraAvailable,
 					additionalSystemPrompt: childConfig ? buildChildSystemPrompt(childConfig) : undefined,
+					includeAutoMemory: childConfig ? false : undefined,
+					childCapabilityScope,
 				});
 				servicesTransferred = true;
 				try {

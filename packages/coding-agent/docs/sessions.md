@@ -21,7 +21,7 @@ Use `/session` in interactive mode to see the current session file, session ID, 
 
 For the JSONL file format and SessionManager API, see [Session Format](session-format.md).
 
-Persisted primary sessions in either mode may select [Ultra](subagents.md). Chat and Code have identical subagent capabilities; the child snapshots and retains the parent's immutable mode.
+Only persisted primary Code sessions may select [Ultra](subagents.md). Ordinary Chat sessions never receive subagent tools. A legacy Chat session with existing children receives cleanup-only controls until those children are closed.
 
 ## Chat and Code modes
 

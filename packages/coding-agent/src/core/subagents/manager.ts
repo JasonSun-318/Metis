@@ -2,7 +2,7 @@ import { realpathSync, statSync } from "node:fs";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import type { ThinkingLevel } from "@arcmind/agent-core";
 import { getSupportedThinkingLevels, type Model } from "@arcmind/ai/compat";
-import type { AgentSession } from "../agent-session.ts";
+import type { AgentSession, ChildCapabilityScope } from "../agent-session.ts";
 import type { AgentSessionRuntime } from "../agent-session-runtime.ts";
 import type { PermissionMode } from "../permission-mode.ts";
 import type { RequestPermissionApproval } from "../permission-policy.ts";
@@ -14,9 +14,11 @@ import {
 	SUBAGENT_TOOL_NAMES,
 	type SubagentConfig,
 	type SubagentForkTurns,
+	type SubagentMailboxEvent,
 	type SubagentManagerEvent,
 	type SubagentStatus,
 	type SubagentSummary,
+	type SubagentTerminalStatus,
 	type SubagentTombstone,
 	type SubagentUsage,
 } from "./types.ts";
@@ -31,18 +33,25 @@ export interface SpawnSubagentInput {
 	readonly model?: string;
 	readonly thinkingLevel?: ThinkingLevel;
 	readonly cwd?: string;
+	readonly readPaths?: readonly string[];
+	readonly writePaths?: readonly string[];
 	readonly forkTurns?: SubagentForkTurns;
 	readonly timeoutSeconds?: number;
 }
 
 export interface SpawnSubagentResult {
 	readonly agentId: string;
+	readonly runId: string;
 	readonly name: string;
 	readonly status: "queued" | "running";
 	readonly taskSummary: string;
 	readonly mode: "chat" | "code";
 	readonly tools: readonly string[];
 	readonly permissionMode: PermissionMode;
+	readonly cwd: string;
+	readonly readPaths: readonly string[];
+	readonly writePaths: readonly string[];
+	readonly overlaps: readonly { readonly agentId: string; readonly name: string }[];
 	readonly forkTurns: SubagentForkTurns;
 }
 
@@ -75,6 +84,7 @@ export interface MessageSubagentInput {
 
 export interface MessageSubagentResult {
 	readonly agentId: string;
+	readonly runId: string;
 	readonly status: SubagentStatus;
 	readonly delivery: "accepted" | "queued";
 }
@@ -84,7 +94,8 @@ export interface WaitSubagentsInput {
 }
 
 export interface WaitSubagentsResult {
-	readonly agents: readonly SubagentSummary[];
+	readonly updatedAgentIds: readonly string[];
+	readonly reason: "mailbox_update" | "no_live_agents";
 }
 
 export interface CloseSubagentResult {
@@ -97,6 +108,7 @@ export interface CloseSubagentResult {
 
 export interface ChildRuntimeFactoryInput {
 	readonly config: SubagentConfig;
+	readonly capabilityScope: ChildCapabilityScope;
 	readonly sessionManager: SessionManager;
 	readonly onPermissionRequest?: RequestPermissionApproval;
 }
@@ -133,12 +145,14 @@ export interface SubagentManagerApi {
 
 interface HotChild {
 	readonly runtime: AgentSessionRuntime;
+	readonly runId: string;
 	readonly startedAt: number;
 	readonly settled: Promise<void>;
 	resolveSettled(): void;
 	readonly completion: Promise<void>;
 	resolveCompletion(): void;
-	interrupted: boolean;
+	stopReason?: "interrupted" | "parent_unloaded";
+	lifecycleError?: Error;
 	unsubscribe(): void;
 }
 
@@ -210,14 +224,16 @@ function isInside(root: string, target: string): boolean {
 	return path === "" || (!path.startsWith(`..${sep}`) && path !== ".." && !isAbsolute(path));
 }
 
-function isTerminal(status: SubagentStatus): boolean {
-	return (
-		status === "done" ||
-		status === "failed" ||
-		status === "stopped" ||
-		status === "close_failed" ||
-		status === "closed"
-	);
+function isTerminal(status: SubagentStatus): status is SubagentTerminalStatus {
+	return status === "done" || status === "failed" || status === "stopped";
+}
+
+function safeJson(value: unknown): string {
+	return JSON.stringify(value).replace(/[<>&]/gu, (character) => {
+		if (character === "<") return "\\u003c";
+		if (character === ">") return "\\u003e";
+		return "\\u0026";
+	});
 }
 
 function summaryFromRecord(record: SubagentDiskRecord): SubagentSummary {
@@ -236,6 +252,8 @@ function summaryFromRecord(record: SubagentDiskRecord): SubagentSummary {
 						model: config.model,
 						thinkingLevel: config.thinkingLevel,
 						cwd: config.cwd,
+						readPaths: config.readPaths,
+						writePaths: config.writePaths,
 						forkTurns: config.forkTurns,
 						timeoutSeconds: config.timeoutSeconds,
 					},
@@ -266,7 +284,8 @@ export class SubagentManager implements SubagentManagerApi {
 	private readonly listeners = new Set<(event: SubagentManagerEvent) => void>();
 	private readonly waiters = new Set<Waiter>();
 	private readonly tails = new Map<string, Promise<unknown>>();
-	private readonly scheduleKeys = new Map<string, string>();
+	private readonly scheduledRuns = new Map<string, { key: string; runId: string }>();
+	private readonly mailbox = new Map<string, SubagentMailboxEvent>();
 	private parent?: AgentSession;
 	private unloaded = false;
 	private requestSequence = 0;
@@ -290,11 +309,13 @@ export class SubagentManager implements SubagentManagerApi {
 			throw new Error("Subagent manager parent session mismatch");
 		}
 		this.parent = session;
+		this.recoverMailboxEvents();
 	}
 
 	async spawn(input: SpawnSubagentInput): Promise<SpawnSubagentResult> {
 		this.assertActive();
 		const parent = this.requireParent();
+		if (parent.mode !== "code") throw new Error("Subagents can start only from a Code session");
 		if (!input.name || input.name.length > 128 || /[\u0000-\u001f\u007f-\u009f]/u.test(input.name)) {
 			throw new Error("Subagent name must be 1-128 characters with no control characters");
 		}
@@ -321,7 +342,7 @@ export class SubagentManager implements SubagentManagerApi {
 		const names = new Set(this.listSummaries().map((summary) => summary.name));
 		if (names.has(input.name)) throw new Error(`Subagent name has already been used: ${input.name}`);
 		if (new Set(input.tools).size !== input.tools.length) throw new Error("Subagent tools must be unique");
-		const reserved = new Set<string>(SUBAGENT_TOOL_NAMES);
+		const reserved = new Set<string>([...SUBAGENT_TOOL_NAMES, "update_plan"]);
 		const active = new Set(parent.getActiveToolNames());
 		for (const tool of input.tools) {
 			if (!tool || tool.length > 256 || /[\u0000-\u001f\u007f-\u009f]/u.test(tool)) {
@@ -341,6 +362,13 @@ export class SubagentManager implements SubagentManagerApi {
 		if (!levels.includes(thinkingLevel))
 			throw new Error(`Thinking level is unavailable for child model: ${thinkingLevel}`);
 		const cwd = this.resolveCwd(input.cwd ?? parent.sessionManager.getCwd());
+		const readPaths = this.resolveRoots(input.readPaths ?? [cwd], cwd, "readPaths");
+		const writePaths = this.resolveRoots(input.writePaths ?? [cwd], cwd, "writePaths");
+		for (const writePath of writePaths) {
+			if (!readPaths.some((readPath) => isInside(readPath, writePath))) {
+				throw new Error("Every subagent write root must be contained by a read root");
+			}
+		}
 		const timeoutSeconds = input.timeoutSeconds ?? 1_800;
 		if (!Number.isInteger(timeoutSeconds) || timeoutSeconds < 1 || timeoutSeconds > 1_800) {
 			throw new Error("Subagent timeout must be an integer from 1 through 1800 seconds");
@@ -364,21 +392,42 @@ export class SubagentManager implements SubagentManagerApi {
 			model: { provider: model.provider, modelId: model.id },
 			thinkingLevel,
 			cwd,
+			readPaths,
+			writePaths,
 			forkTurns: input.forkTurns ?? 0,
 			timeoutSeconds,
 			...(input.role === undefined ? {} : { role: input.role }),
 			...(input.developerInstructions === undefined ? {} : { developerInstructions: input.developerInstructions }),
 		};
 		this.store.create(config, parent.messages);
-		const admission = this.schedule(config.agentId);
+		const runId = this.createId();
+		this.store.appendState(config.agentId, {
+			type: "subagent_state",
+			agentId: config.agentId,
+			runId,
+			status: "queued",
+		});
+		const overlaps = records
+			.map((record) => this.store.load(record.agentId))
+			.filter((record) => {
+				const other = record.config;
+				return other !== undefined && this.rootsOverlap(readPaths, writePaths, other.readPaths, other.writePaths);
+			})
+			.map((record) => ({ agentId: record.agentId, name: record.name }));
+		const admission = this.schedule(config.agentId, runId);
 		return {
 			agentId: config.agentId,
+			runId,
 			name: config.name,
 			status: admission,
 			taskSummary: config.taskSummary,
 			mode: config.mode,
 			tools: config.tools,
 			permissionMode: config.permissionMode,
+			cwd: config.cwd,
+			readPaths: config.readPaths,
+			writePaths: config.writePaths,
+			overlaps,
 			forkTurns: config.forkTurns,
 		};
 	}
@@ -400,6 +449,9 @@ export class SubagentManager implements SubagentManagerApi {
 
 	message(input: MessageSubagentInput): Promise<MessageSubagentResult> {
 		return this.serialize(input.agentId, async () => {
+			if (this.requireParent().mode !== "code") {
+				throw new Error("Legacy Chat subagents are cleanup-only and cannot receive messages");
+			}
 			this.assertOperable(input.agentId);
 			if (!input.message || new TextEncoder().encode(input.message).byteLength > 2 * 1024 * 1024) {
 				throw new Error("Subagent message must be non-empty and at most 2 MiB");
@@ -414,13 +466,14 @@ export class SubagentManager implements SubagentManagerApi {
 					text: input.message,
 					streamingBehavior: "steer",
 				});
-				return { agentId: input.agentId, status: "running", delivery: "accepted" };
+				return { agentId: input.agentId, runId: hot.runId, status: "running", delivery: "accepted" };
 			}
 			const messageId = this.requestId("follow-up", input.agentId);
 			if (hot) {
 				hot.runtime.session.sessionManager.appendSubagentControl({
 					type: "subagent_follow_up",
 					agentId: input.agentId,
+					runId: hot.runId,
 					messageId,
 					text: input.message,
 					state: "queued",
@@ -433,13 +486,31 @@ export class SubagentManager implements SubagentManagerApi {
 				hot.runtime.session.sessionManager.appendSubagentControl({
 					type: "subagent_follow_up",
 					agentId: input.agentId,
+					runId: hot.runId,
 					messageId,
 					text: input.message,
 					state: "accepted",
 				});
-				return { agentId: input.agentId, status: "running", delivery: "accepted" };
+				return { agentId: input.agentId, runId: hot.runId, status: "running", delivery: "accepted" };
 			}
 			const current = this.store.load(input.agentId);
+			const scheduled = this.scheduledRuns.get(input.agentId);
+			if (current.status === "queued" && scheduled) {
+				this.store.appendFollowUp(input.agentId, {
+					type: "subagent_follow_up",
+					agentId: input.agentId,
+					runId: scheduled.runId,
+					messageId,
+					text: input.message,
+					state: "queued",
+				});
+				return {
+					agentId: input.agentId,
+					runId: scheduled.runId,
+					status: "queued",
+					delivery: "queued",
+				};
+			}
 			if (current.status !== "done" && current.status !== "failed" && current.status !== "stopped") {
 				throw new Error(
 					current.status === "close_failed"
@@ -447,9 +518,11 @@ export class SubagentManager implements SubagentManagerApi {
 						: "Subagent is queued; wait for it to start",
 				);
 			}
+			const runId = this.createId();
 			this.store.appendFollowUp(input.agentId, {
 				type: "subagent_follow_up",
 				agentId: input.agentId,
+				runId,
 				messageId,
 				text: input.message,
 				state: "queued",
@@ -457,11 +530,12 @@ export class SubagentManager implements SubagentManagerApi {
 			this.store.appendState(input.agentId, {
 				type: "subagent_state",
 				agentId: input.agentId,
+				runId,
 				status: "queued",
 				reason: "recovered",
 			});
-			const status = this.schedule(input.agentId);
-			return { agentId: input.agentId, status, delivery: "queued" };
+			const status = this.schedule(input.agentId, runId);
+			return { agentId: input.agentId, runId, status, delivery: "queued" };
 		});
 	}
 
@@ -474,8 +548,14 @@ export class SubagentManager implements SubagentManagerApi {
 			throw new Error("wait_agents accepts at most 10 unique agent IDs");
 		for (const id of ids) this.findSummary(id);
 		const selected = new Set(ids);
-		const terminal = summaries.filter((summary) => selected.has(summary.agentId) && isTerminal(summary.status));
-		if (terminal.length > 0 || selected.size === 0) return Promise.resolve({ agents: terminal });
+		const updatedAgentIds = this.pendingMailboxAgentIds(selected);
+		if (updatedAgentIds.length > 0) {
+			return Promise.resolve({ updatedAgentIds, reason: "mailbox_update" });
+		}
+		const hasLiveAgent = summaries.some(
+			(summary) => selected.has(summary.agentId) && (summary.status === "queued" || summary.status === "running"),
+		);
+		if (!hasLiveAgent) return Promise.resolve({ updatedAgentIds: [], reason: "no_live_agents" });
 		if (signal?.aborted) return Promise.reject(signal.reason ?? new Error("Aborted"));
 		return new Promise<WaitSubagentsResult>((resolvePromise, rejectPromise) => {
 			const onAbort = (): void =>
@@ -484,7 +564,10 @@ export class SubagentManager implements SubagentManagerApi {
 				ids: selected,
 				resolve: () => {
 					waiter.dispose();
-					resolvePromise({ agents: this.listSummaries().filter((summary) => selected.has(summary.agentId)) });
+					resolvePromise({
+						updatedAgentIds: this.pendingMailboxAgentIds(selected),
+						reason: "mailbox_update",
+					});
 				},
 				reject: (error) => {
 					waiter.dispose();
@@ -503,22 +586,26 @@ export class SubagentManager implements SubagentManagerApi {
 	interrupt(agentId: string): Promise<SubagentSummary> {
 		return this.serialize(agentId, async () => {
 			this.assertOperable(agentId);
+			const queuedRunId = this.scheduledRuns.get(agentId)?.runId;
 			if (this.cancelScheduled(agentId)) {
+				this.cancelQueuedFollowUps(agentId);
 				const record = this.store.appendState(agentId, {
 					type: "subagent_state",
 					agentId,
+					runId: queuedRunId ?? this.store.load(agentId).runId,
 					status: "stopped",
 					reason: "interrupted",
 				});
-				return this.emitUpdate(summaryFromRecord(record));
+				return this.publishTerminal(record);
 			}
 			await this.starting.get(agentId)?.ready;
 			this.assertOperable(agentId);
 			const hot = this.hot.get(agentId);
 			if (!hot) return this.findSummary(agentId);
-			hot.interrupted = true;
+			hot.stopReason = "interrupted";
 			await hot.runtime.interrupt({ requestId: this.requestId("interrupt", agentId) });
 			await hot.completion;
+			if (hot.lifecycleError) throw hot.lifecycleError;
 			return this.findSummary(agentId);
 		});
 	}
@@ -542,20 +629,21 @@ export class SubagentManager implements SubagentManagerApi {
 					closedAt: new Date(this.now()).toISOString(),
 				};
 				this.store.beginClose(agentId, tombstone);
-				this.cancelScheduled(agentId);
+				const cancelledScheduled = this.cancelScheduled(agentId);
+				if (cancelledScheduled) this.cancelQueuedFollowUps(agentId);
 				await this.starting.get(agentId)?.ready;
 				const hot = this.hot.get(agentId);
 				if (hot) {
-					hot.interrupted = true;
+					hot.stopReason = "interrupted";
 					await hot.runtime.interrupt({ requestId: this.requestId("close", agentId) });
 					await hot.completion;
-				}
+				} else this.cancelQueuedFollowUps(agentId);
 				const result = await this.store.finishClose(agentId);
 				if (result.status === "closed") {
 					this.emitUpdate(this.findSummary(agentId));
 					return { agentId, status: "closed" };
 				}
-				this.notify(this.findSummary(agentId));
+				this.emitUpdate(this.findSummary(agentId));
 				return { agentId, ...result };
 			} finally {
 				this.closing.delete(agentId);
@@ -619,27 +707,40 @@ export class SubagentManager implements SubagentManagerApi {
 	async unload(reason: "parent_unloaded"): Promise<void> {
 		if (this.unloaded) return;
 		this.unloaded = true;
+		const errors: unknown[] = [];
 		for (const record of this.store.list().agents) {
-			this.cancelScheduled(record.agentId);
-			await this.starting.get(record.agentId)?.ready;
-			const hot = this.hot.get(record.agentId);
-			if (hot) {
-				hot.interrupted = true;
-				await hot.runtime.interrupt({ requestId: this.requestId("unload", record.agentId) });
-				await hot.completion;
-			} else if (record.status === "queued" || record.status === "running") {
-				this.store.appendState(record.agentId, {
-					type: "subagent_state",
-					agentId: record.agentId,
-					status: "stopped",
-					reason,
-				});
+			try {
+				const cancelledScheduled = this.cancelScheduled(record.agentId);
+				if (cancelledScheduled) this.cancelQueuedFollowUps(record.agentId);
+				await this.starting.get(record.agentId)?.ready;
+				const hot = this.hot.get(record.agentId);
+				if (hot) {
+					hot.stopReason = reason;
+					await hot.runtime.interrupt({ requestId: this.requestId("unload", record.agentId) });
+					await hot.completion;
+					if (hot.lifecycleError) errors.push(hot.lifecycleError);
+				} else {
+					const current = this.store.load(record.agentId);
+					if (current.status !== "queued" && current.status !== "running") continue;
+					this.cancelQueuedFollowUps(record.agentId);
+					this.store.appendState(record.agentId, {
+						type: "subagent_state",
+						agentId: record.agentId,
+						runId: current.runId,
+						status: "stopped",
+						reason,
+					});
+				}
+			} catch (error) {
+				errors.push(error);
 			}
 		}
 		for (const waiter of [...this.waiters]) waiter.reject(new Error("Subagent manager unloaded"));
+		if (errors.length === 1) throw errors[0];
+		if (errors.length > 1) throw new AggregateError(errors, "Failed to unload subagents");
 	}
 
-	private schedule(agentId: string): "queued" | "running" {
+	private schedule(agentId: string, runId: string): "queued" | "running" {
 		const key = `${agentId}:${++this.scheduleSequence}`;
 		let readyResolved = false;
 		let resolveReadyPromise!: () => void;
@@ -653,7 +754,7 @@ export class SubagentManager implements SubagentManagerApi {
 				resolveReadyPromise();
 			},
 		};
-		this.scheduleKeys.set(agentId, key);
+		this.scheduledRuns.set(agentId, { key, runId });
 		this.starting.set(agentId, starting);
 		try {
 			return this.scheduler.enqueue({
@@ -661,14 +762,14 @@ export class SubagentManager implements SubagentManagerApi {
 				parentSessionId: this.parentSessionManager.getSessionId(),
 				start: async () => {
 					try {
-						await this.runChild(agentId, starting);
+						await this.runChild(agentId, runId, starting);
 					} finally {
-						if (this.scheduleKeys.get(agentId) === key) this.scheduleKeys.delete(agentId);
+						if (this.scheduledRuns.get(agentId)?.key === key) this.scheduledRuns.delete(agentId);
 					}
 				},
 			});
 		} catch (error) {
-			if (this.scheduleKeys.get(agentId) === key) this.scheduleKeys.delete(agentId);
+			if (this.scheduledRuns.get(agentId)?.key === key) this.scheduledRuns.delete(agentId);
 			starting.resolveReady();
 			if (this.starting.get(agentId) === starting) this.starting.delete(agentId);
 			throw error;
@@ -676,9 +777,9 @@ export class SubagentManager implements SubagentManagerApi {
 	}
 
 	private cancelScheduled(agentId: string): boolean {
-		const key = this.scheduleKeys.get(agentId);
-		if (!key || !this.scheduler.cancel(key)) return false;
-		if (this.scheduleKeys.get(agentId) === key) this.scheduleKeys.delete(agentId);
+		const scheduled = this.scheduledRuns.get(agentId);
+		if (!scheduled || !this.scheduler.cancel(scheduled.key)) return false;
+		if (this.scheduledRuns.get(agentId)?.key === scheduled.key) this.scheduledRuns.delete(agentId);
 		const starting = this.starting.get(agentId);
 		starting?.resolveReady();
 		if (starting && this.starting.get(agentId) === starting) this.starting.delete(agentId);
@@ -686,37 +787,48 @@ export class SubagentManager implements SubagentManagerApi {
 	}
 
 	private isScheduledQueued(agentId: string): boolean {
-		const key = this.scheduleKeys.get(agentId);
-		return key !== undefined && this.scheduler.isQueued(key);
+		const scheduled = this.scheduledRuns.get(agentId);
+		return scheduled !== undefined && this.scheduler.isQueued(scheduled.key);
 	}
 
-	private async runChild(agentId: string, starting: StartingChild): Promise<void> {
+	private async runChild(agentId: string, runId: string, starting: StartingChild): Promise<void> {
 		try {
-			if (this.closing.has(agentId) || this.unloaded) return;
-			await this.runChildLifecycle(agentId, starting.resolveReady);
-		} catch (error) {
-			if (!this.closing.has(agentId)) {
-				try {
-					const errorText = error instanceof Error ? error.message : String(error);
-					const failed = this.store.appendState(agentId, {
-						type: "subagent_state",
-						agentId,
-						status: "failed",
-						reason: "error",
-						error: utf8Prefix(errorText, 64 * 1024),
-					});
-					this.notify(summaryFromRecord(failed));
-				} catch {
-					// The child journal itself is unavailable; store diagnostics retain the failure.
+			let terminal: SubagentDiskRecord | undefined;
+			try {
+				if (this.closing.has(agentId) || this.unloaded) return;
+				terminal = await this.runChildLifecycle(agentId, runId, starting.resolveReady);
+			} catch (error) {
+				if (!this.closing.has(agentId)) {
+					try {
+						const errorText = error instanceof Error ? error.message : String(error);
+						terminal = this.store.appendState(agentId, {
+							type: "subagent_state",
+							agentId,
+							runId,
+							status: "failed",
+							reason: "error",
+							error: utf8Prefix(errorText, 64 * 1024),
+						});
+					} catch {
+						// The child journal itself is unavailable; store diagnostics retain the failure.
+					}
 				}
 			}
+			if (terminal) this.publishTerminal(terminal);
 		} finally {
+			const hot = this.hot.get(agentId);
+			this.hot.delete(agentId);
+			hot?.resolveCompletion();
 			starting.resolveReady();
 			if (this.starting.get(agentId) === starting) this.starting.delete(agentId);
 		}
 	}
 
-	private async runChildLifecycle(agentId: string, markReady: () => void): Promise<void> {
+	private async runChildLifecycle(
+		agentId: string,
+		runId: string,
+		markReady: () => void,
+	): Promise<SubagentDiskRecord | undefined> {
 		const record = this.store.load(agentId);
 		const config = record.config!;
 		const childManager = (await import("../session-manager.ts")).SessionManager.open(record.path);
@@ -735,9 +847,23 @@ export class SubagentManager implements SubagentManagerApi {
 			};
 			runtime = await this.createChildRuntime({
 				config,
+				capabilityScope: {
+					readPaths: config.readPaths,
+					writePaths: config.writePaths,
+					workspaceRoots: this.workspaceRoots,
+				},
 				sessionManager: childManager,
 				onPermissionRequest,
 			});
+			const configuredTools = new Set(config.tools);
+			const activeTools = runtime.session.getActiveToolNames();
+			const missingTools = config.tools.filter((tool) => !activeTools.includes(tool));
+			const unexpectedTools = activeTools.filter((tool) => !configuredTools.has(tool));
+			if (missingTools.length > 0 || unexpectedTools.length > 0) {
+				throw new Error(
+					`Child runtime tool snapshot mismatch (missing: ${missingTools.join(", ") || "none"}; unexpected: ${unexpectedTools.join(", ") || "none"})`,
+				);
+			}
 			let resolveSettled!: () => void;
 			const settled = new Promise<void>((resolvePromise) => {
 				resolveSettled = resolvePromise;
@@ -748,12 +874,12 @@ export class SubagentManager implements SubagentManagerApi {
 			});
 			const hot: HotChild = {
 				runtime,
+				runId,
 				startedAt: this.now(),
 				settled,
 				resolveSettled,
 				completion,
 				resolveCompletion,
-				interrupted: false,
 				unsubscribe: () => undefined,
 			};
 			hot.unsubscribe = runtime.session.subscribe((event) => {
@@ -761,43 +887,49 @@ export class SubagentManager implements SubagentManagerApi {
 			});
 			this.hot.set(agentId, hot);
 			markReady();
-			const running = this.appendHotState(runtime, { type: "subagent_state", agentId, status: "running" });
-			this.notify(
+			const running = this.appendHotState(runtime, { type: "subagent_state", agentId, runId, status: "running" });
+			this.emitUpdate(
 				summaryFromRecord({ ...record, status: "running", updatedAt: new Date(this.now()).toISOString() }),
 			);
 			void running;
-			const queued = runtime.session.sessionManager
-				.getDurableJournalSnapshot()
-				.filter(
-					(entry) => entry.type === "subagent_follow_up" && entry.agentId === agentId && entry.state === "queued",
-				);
-			const initial = queued[0]?.type === "subagent_follow_up" ? queued[0] : undefined;
-			const text = initial?.text ?? config.task;
+			const journal = runtime.session.sessionManager.getDurableJournalSnapshot();
+			const initialRun = !journal.some(
+				(entry) => entry.type === "subagent_state" && entry.agentId === agentId && entry.runId !== runId,
+			);
+			const queued = journal.filter(
+				(entry) => entry.type === "subagent_follow_up" && entry.agentId === agentId && entry.state === "queued",
+			);
+			const initial = !initialRun && queued[0]?.type === "subagent_follow_up" ? queued[0] : undefined;
+			const text = initialRun ? config.task : initial?.text;
+			if (!text) throw new Error("Cold subagent run is missing its queued follow-up");
 			const requestId = initial?.messageId ?? this.requestId("initial", agentId);
 			await runtime.submitPrompt({ requestId, text });
 			if (initial) {
 				runtime.session.sessionManager.appendSubagentControl({
 					type: "subagent_follow_up",
 					agentId: initial.agentId,
+					runId,
 					messageId: initial.messageId,
 					text: initial.text,
 					state: "accepted",
 				});
-				for (const follow of queued.slice(1)) {
-					if (follow.type !== "subagent_follow_up") continue;
-					await runtime.submitPrompt({
-						requestId: follow.messageId,
-						text: follow.text,
-						streamingBehavior: "followUp",
-					});
-					runtime.session.sessionManager.appendSubagentControl({
-						type: "subagent_follow_up",
-						agentId: follow.agentId,
-						messageId: follow.messageId,
-						text: follow.text,
-						state: "accepted",
-					});
-				}
+			}
+			const remaining = initialRun ? queued : queued.slice(1);
+			for (const follow of remaining) {
+				if (follow.type !== "subagent_follow_up") continue;
+				await runtime.submitPrompt({
+					requestId: follow.messageId,
+					text: follow.text,
+					streamingBehavior: "followUp",
+				});
+				runtime.session.sessionManager.appendSubagentControl({
+					type: "subagent_follow_up",
+					agentId: follow.agentId,
+					runId,
+					messageId: follow.messageId,
+					text: follow.text,
+					state: "accepted",
+				});
 			}
 			let timeout: ReturnType<typeof setTimeout> | undefined;
 			const timedOut = new Promise<"timeout">((resolvePromise) => {
@@ -806,7 +938,7 @@ export class SubagentManager implements SubagentManagerApi {
 			const outcome = await Promise.race([settled.then(() => "settled" as const), timedOut]);
 			if (timeout) clearTimeout(timeout);
 			if (outcome === "timeout") {
-				hot.interrupted = false;
+				hot.stopReason = undefined;
 				await runtime.interrupt({ requestId: this.requestId("timeout", agentId) });
 			}
 			const stats = runtime.session.getSessionStats();
@@ -826,7 +958,7 @@ export class SubagentManager implements SubagentManagerApi {
 			const status =
 				outcome === "timeout"
 					? "failed"
-					: hot.interrupted
+					: hot.stopReason
 						? "stopped"
 						: assistant?.stopReason === "error"
 							? "failed"
@@ -834,30 +966,26 @@ export class SubagentManager implements SubagentManagerApi {
 			const reason =
 				outcome === "timeout"
 					? "timeout"
-					: hot.interrupted
-						? "interrupted"
-						: assistant?.stopReason === "error"
-							? "error"
-							: "completed";
+					: (hot.stopReason ?? (assistant?.stopReason === "error" ? "error" : "completed"));
 			const terminalError =
 				assistant?.stopReason === "error"
 					? (assistant.errorMessage ?? "Child model response ended with an error")
 					: undefined;
-			hot.unsubscribe();
-			await runtime.dispose();
-			runtime = undefined;
-			const terminal = this.store.appendState(agentId, {
+			this.appendHotState(runtime, {
 				type: "subagent_state",
 				agentId,
+				runId,
 				status,
 				reason,
 				...(finalSummary ? { finalSummary } : {}),
 				...(terminalError ? { error: utf8Prefix(terminalError, 64 * 1024) } : {}),
 				usage,
 			});
-			this.hot.delete(agentId);
-			this.notify(summaryFromRecord(terminal));
-			hot.resolveCompletion();
+			hot.unsubscribe();
+			await runtime.dispose();
+			runtime = undefined;
+			const terminal = this.store.load(agentId);
+			return terminal;
 		} catch (error) {
 			const hot = this.hot.get(agentId);
 			hot?.unsubscribe();
@@ -868,29 +996,43 @@ export class SubagentManager implements SubagentManagerApi {
 			} catch (cleanupError) {
 				lifecycleErrors.push(cleanupError);
 			}
-			try {
-				if (!this.closing.has(agentId)) {
-					const errorText = lifecycleErrors
-						.map((failure) => (failure instanceof Error ? failure.message : String(failure)))
-						.join("; ");
-					const failed = this.store.appendState(agentId, {
-						type: "subagent_state",
-						agentId,
-						status: "failed",
-						reason: "error",
-						error: utf8Prefix(errorText, 64 * 1024),
-					});
-					this.notify(summaryFromRecord(failed));
-				}
-			} finally {
-				this.hot.delete(agentId);
-				hot?.resolveCompletion();
-			}
+			const errorText = lifecycleErrors
+				.map((failure) => (failure instanceof Error ? failure.message : String(failure)))
+				.join("; ");
+			const firstError = lifecycleErrors[0];
+			const lifecycleError =
+				lifecycleErrors.length === 1 && firstError instanceof Error
+					? firstError
+					: new AggregateError(lifecycleErrors, "Subagent lifecycle cleanup failed");
+			if (hot) hot.lifecycleError = lifecycleError;
+			if (this.closing.has(agentId)) return undefined;
+			return this.store.appendState(agentId, {
+				type: "subagent_state",
+				agentId,
+				runId,
+				status: hot?.stopReason ? "stopped" : "failed",
+				reason: hot?.stopReason ?? "error",
+				error: utf8Prefix(errorText, 64 * 1024),
+			});
 		}
 	}
 
 	private appendHotState(runtime: AgentSessionRuntime, entry: Parameters<SubagentStoreApi["appendState"]>[1]): string {
 		return runtime.session.sessionManager.appendSubagentControl(entry);
+	}
+
+	private cancelQueuedFollowUps(agentId: string): void {
+		for (const entry of this.store.readJournal(agentId)) {
+			if (entry.type !== "subagent_follow_up" || entry.state !== "queued") continue;
+			this.store.appendFollowUp(agentId, {
+				type: "subagent_follow_up",
+				agentId,
+				runId: entry.runId,
+				messageId: entry.messageId,
+				text: entry.text,
+				state: "cancelled",
+			});
+		}
 	}
 
 	private recoverInterruptedWork(): void {
@@ -899,6 +1041,7 @@ export class SubagentManager implements SubagentManagerApi {
 			this.store.appendState(record.agentId, {
 				type: "subagent_state",
 				agentId: record.agentId,
+				runId: record.runId,
 				status: "stopped",
 				reason: "parent_unloaded",
 			});
@@ -907,6 +1050,7 @@ export class SubagentManager implements SubagentManagerApi {
 				this.store.appendFollowUp(record.agentId, {
 					type: "subagent_follow_up",
 					agentId: entry.agentId,
+					runId: entry.runId,
 					messageId: entry.messageId,
 					text: entry.text,
 					state: "cancelled",
@@ -931,11 +1075,38 @@ export class SubagentManager implements SubagentManagerApi {
 	}
 
 	private resolveCwd(value: string): string {
-		const path = realpathSync(resolve(value));
+		const path = realpathSync(resolve(this.parentSessionManager.getCwd(), value));
 		if (!statSync(path).isDirectory()) throw new Error("Subagent cwd must be an existing directory");
 		if (!this.workspaceRoots.some((root) => isInside(root, path)))
 			throw new Error("Subagent cwd must stay inside an authorized workspace root");
 		return path;
+	}
+
+	private resolveRoots(values: readonly string[], cwd: string, label: "readPaths" | "writePaths"): readonly string[] {
+		if (values.length === 0 || values.length > 32) throw new Error(`Subagent ${label} must contain 1-32 paths`);
+		const paths = values.map((value) => {
+			const path = realpathSync(resolve(cwd, value));
+			if (!statSync(path).isDirectory()) throw new Error(`Subagent ${label} must contain existing directories`);
+			if (!this.workspaceRoots.some((root) => isInside(root, path))) {
+				throw new Error(`Subagent ${label} must stay inside an authorized workspace root`);
+			}
+			return path;
+		});
+		if (new Set(paths).size !== paths.length) throw new Error(`Subagent ${label} must contain unique paths`);
+		return paths;
+	}
+
+	private rootsOverlap(
+		leftRead: readonly string[],
+		leftWrite: readonly string[],
+		rightRead: readonly string[],
+		rightWrite: readonly string[],
+	): boolean {
+		const overlap = (left: string, right: string) => isInside(left, right) || isInside(right, left);
+		return (
+			leftWrite.some((left) => [...rightRead, ...rightWrite].some((right) => overlap(left, right))) ||
+			rightWrite.some((right) => leftRead.some((left) => overlap(left, right)))
+		);
 	}
 
 	private closedTombstones(): SubagentTombstone[] {
@@ -956,29 +1127,12 @@ export class SubagentManager implements SubagentManagerApi {
 	private emitUpdate(summary: SubagentSummary): SubagentSummary {
 		const event: SubagentManagerEvent = { type: "updated", summary };
 		for (const listener of this.listeners) listener(event);
-		for (const waiter of [...this.waiters]) if (waiter.ids.has(summary.agentId)) waiter.resolve();
 		return summary;
 	}
 
 	private emitApprovalRequired(summary: SubagentSummary, toolName: string): void {
 		const event: SubagentManagerEvent = { type: "approval_required", summary, toolName };
 		for (const listener of this.listeners) listener(event);
-		for (const waiter of [...this.waiters]) if (waiter.ids.has(summary.agentId)) waiter.resolve();
-		if (!this.parent) return;
-		this.parent.sessionManager.appendCustomMessageEntry(
-			"subagent_status",
-			[
-				{
-					type: "text",
-					text: utf8Prefix(
-						`Subagent ${summary.name} (${summary.agentId}) requires approval for ${toolName}.`,
-						16 * 1024,
-					),
-				},
-			],
-			true,
-			{ agentId: summary.agentId, name: summary.name, status: summary.status, approvalRequired: true, toolName },
-		);
 	}
 
 	private visibleJournal(agentId: string): FileEntry[] {
@@ -1003,19 +1157,87 @@ export class SubagentManager implements SubagentManagerApi {
 		return result;
 	}
 
-	private notify(summary: SubagentSummary): void {
-		this.emitUpdate(summary);
-		if (!this.parent || (summary.status !== "running" && !isTerminal(summary.status))) return;
-		const detail = summary.finalSummary ?? summary.error;
-		const text = utf8Prefix(
-			`Subagent ${summary.name} (${summary.agentId}) is ${summary.status}${detail ? `: ${detail}` : "."}`,
-			16 * 1024,
+	private publishTerminal(record: SubagentDiskRecord): SubagentSummary {
+		const summary = summaryFromRecord(record);
+		const published = this.emitUpdate(summary);
+		if (isTerminal(record.status) && !this.unloaded) {
+			this.enqueueMailbox({
+				eventId: `subagent:${record.agentId}:${record.runId}:terminal`,
+				runId: record.runId,
+				agentId: record.agentId,
+				name: record.name,
+				type: "terminal",
+				status: record.status,
+				...(record.finalSummary ? { finalMessage: utf8Prefix(record.finalSummary, 4 * 1024) } : {}),
+				...(record.error ? { error: utf8Prefix(record.error, 4 * 1024) } : {}),
+				completedAt: record.updatedAt,
+			});
+		}
+		return published;
+	}
+
+	private enqueueMailbox(event: SubagentMailboxEvent): void {
+		const parent = this.parent;
+		if (!parent || this.mailbox.has(event.eventId)) return;
+		try {
+			parent.enqueueBackgroundCustomMessage(
+				{
+					customType: "subagent_mailbox",
+					content: [
+						{
+							type: "text",
+							text: `<subagent_mailbox_event encoding="json">\n${safeJson(event)}\n</subagent_mailbox_event>`,
+						},
+					],
+					display: true,
+					details: event,
+				},
+				event.eventId,
+			);
+		} catch (error) {
+			if (!parent.hasPendingBackgroundMessage(event.eventId)) {
+				const failure = error instanceof Error ? error : new Error(String(error));
+				for (const waiter of [...this.waiters]) if (waiter.ids.has(event.agentId)) waiter.reject(failure);
+				throw error;
+			}
+		}
+		this.mailbox.set(event.eventId, event);
+		for (const waiter of [...this.waiters]) if (waiter.ids.has(event.agentId)) waiter.resolve();
+	}
+
+	private pendingMailboxAgentIds(selected: ReadonlySet<string>): string[] {
+		const parent = this.parent;
+		if (!parent) return [];
+		return [
+			...new Set(
+				[...this.mailbox.values()]
+					.filter((event) => selected.has(event.agentId) && parent.hasPendingBackgroundMessage(event.eventId))
+					.map((event) => event.agentId),
+			),
+		];
+	}
+
+	private recoverMailboxEvents(): void {
+		const known = new Set(
+			this.parentSessionManager
+				.getDurableJournalSnapshot()
+				.filter(
+					(entry): entry is Extract<FileEntry, { type: "custom_message" }> =>
+						entry.type === "custom_message" && entry.customType === "subagent_mailbox",
+				)
+				.map((entry) =>
+					typeof entry.details === "object" && entry.details !== null
+						? (entry.details as { eventId?: unknown }).eventId
+						: undefined,
+				)
+				.filter((eventId): eventId is string => typeof eventId === "string"),
 		);
-		this.parent.sessionManager.appendCustomMessageEntry("subagent_status", [{ type: "text", text }], true, {
-			agentId: summary.agentId,
-			name: summary.name,
-			status: summary.status,
-		});
+		for (const record of this.store.list().agents.map((item) => this.store.load(item.agentId))) {
+			if (!isTerminal(record.status)) continue;
+			const eventId = `subagent:${record.agentId}:${record.runId}:terminal`;
+			if (known.has(eventId)) continue;
+			this.publishTerminal(record);
+		}
 	}
 
 	private serialize<T>(agentId: string, operation: () => Promise<T>): Promise<T> {

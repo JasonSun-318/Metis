@@ -24,13 +24,15 @@ function config(): SubagentConfig {
 		name: "researcher",
 		task: "Research the session format",
 		taskSummary: "Research the session format",
-		mode: "chat",
+		mode: "code",
 		tools: ["read"],
 		permissionMode: "ask",
 		reviewerEnabled: true,
 		model: { provider: "openai", modelId: "gpt-test" },
 		thinkingLevel: "high",
 		cwd: "/tmp/project",
+		readPaths: ["/tmp/project"],
+		writePaths: ["/tmp/project"],
 		forkTurns: "all",
 		timeoutSeconds: 60,
 	};
@@ -42,7 +44,7 @@ describe("v7 first-class subagent records", () => {
 		mkdirSync(join(root, "project"));
 		const manager = SessionManager.create(join(root, "project"), join(root, "sessions"), {
 			id: "agent-child-1",
-			mode: "chat",
+			mode: "code",
 			subagent: { agentId: "agent-child-1", name: "researcher", parentSessionId: "parent-session-1" },
 		});
 		manager.appendSubagentControl({ type: "subagent_created", config: config() });
@@ -53,7 +55,7 @@ describe("v7 first-class subagent records", () => {
 			name: "researcher",
 			parentSessionId: "parent-session-1",
 		});
-		expect(manager.getMode()).toBe("chat");
+		expect(manager.getMode()).toBe("code");
 		expect(manager.getDurableJournalSnapshot().map((entry) => entry.type)).toContain("subagent_created");
 		manager.close();
 	});
@@ -67,6 +69,48 @@ describe("v7 first-class subagent records", () => {
 				timestamp: new Date(0).toISOString(),
 			}),
 		).toThrow("Unknown session control entry type");
+	});
+
+	it("rejects invalid state transitions and non-canonical capability roots", () => {
+		const base = {
+			id: "record-1",
+			parentId: null,
+			timestamp: new Date(0).toISOString(),
+		};
+		expect(() =>
+			parseSessionControlEntry({
+				...base,
+				type: "subagent_state",
+				agentId: "agent-child-1",
+				runId: "run-1",
+				status: "done",
+				reason: "timeout",
+			}),
+		).toThrow("timeout requires failed status");
+		expect(() =>
+			parseSessionControlEntry({
+				...base,
+				type: "subagent_state",
+				agentId: "agent-child-1",
+				runId: "run-1",
+				status: "running",
+				reason: "recovered",
+			}),
+		).toThrow("recovered requires queued status");
+		expect(() =>
+			parseSessionControlEntry({
+				...base,
+				type: "subagent_created",
+				config: { ...config(), readPaths: ["relative/path"] },
+			}),
+		).toThrow("invalid path");
+		expect(() =>
+			parseSessionControlEntry({
+				...base,
+				type: "subagent_created",
+				config: { ...config(), writePaths: ["/tmp/other"] },
+			}),
+		).toThrow("writePaths must stay inside readPaths");
 	});
 
 	it("rejects subagent records under v6 and migrates ordinary v6 journals", () => {

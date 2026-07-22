@@ -188,8 +188,17 @@ export function networkTargetMatches(
 export function buildSandboxRuntimeConfig(grant: SandboxGrant, cwd: string): SandboxRuntimeConfig {
 	if (grant.fullOnce || grant.sandbox === "none") throw new Error("Full-once execution must bypass SRT");
 	const sensitive = getSensitiveFilesystemPaths(cwd);
-	const readPaths = grant.readPaths.map((path) => canonicalizeActionPath(path, cwd));
-	const writePaths = grant.writePaths.map((path) => canonicalizeActionPath(path, cwd));
+	const denyReadPaths = grant.denyReadPaths.map((path) => canonicalizeActionPath(path, cwd));
+	const explicitReadPaths = grant.readPaths.map((path) => canonicalizeActionPath(path, cwd));
+	const readPaths = [
+		...new Set([...explicitReadPaths, ...grant.capabilityReadPaths.map((path) => canonicalizeActionPath(path, cwd))]),
+	];
+	const writePaths = [
+		...new Set([
+			...grant.writePaths.map((path) => canonicalizeActionPath(path, cwd)),
+			...grant.capabilityWritePaths.map((path) => canonicalizeActionPath(path, cwd)),
+		]),
+	];
 	for (const writePath of writePaths) {
 		if (sensitive.some((deniedPath) => isPathInside(deniedPath, writePath))) {
 			throw new Error("Sensitive writes require explicit Full-once approval");
@@ -197,7 +206,7 @@ export function buildSandboxRuntimeConfig(grant: SandboxGrant, cwd: string): San
 	}
 	const exactReads = new Set(readPaths);
 	const effectiveCredentialFiles = credentialFilePaths(cwd).filter(
-		(path) => !readPaths.some((allowedPath) => isPathInside(allowedPath, path)),
+		(path) => !explicitReadPaths.some((allowedPath) => isPathInside(allowedPath, path)),
 	);
 	const compiledSrtWin = compiledVendorAsset("srt-win", arch(), "srt-win.exe");
 	const compiledSeccomp = compiledVendorAsset("seccomp", arch(), "apply-seccomp");
@@ -209,7 +218,7 @@ export function buildSandboxRuntimeConfig(grant: SandboxGrant, cwd: string): San
 			allowLocalBinding: false,
 		},
 		filesystem: {
-			denyRead: sensitive,
+			denyRead: [...new Set([...sensitive, ...denyReadPaths])],
 			allowRead: [...exactReads],
 			allowWrite: [...getDefaultWritePaths(), ...writePaths],
 			denyWrite: sensitive,

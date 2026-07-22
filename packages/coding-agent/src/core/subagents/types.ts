@@ -14,6 +14,21 @@ export const SUBAGENT_TOOL_NAMES = [
 export type SubagentToolName = (typeof SUBAGENT_TOOL_NAMES)[number];
 export type SubagentStatus = "queued" | "running" | "done" | "failed" | "stopped" | "close_failed" | "closed";
 export type SubagentForkTurns = number | "all";
+export type SubagentTerminalStatus = "done" | "failed" | "stopped";
+
+export interface SubagentMailboxTerminalEvent {
+	readonly eventId: string;
+	readonly runId: string;
+	readonly agentId: string;
+	readonly name: string;
+	readonly type: "terminal";
+	readonly status: SubagentTerminalStatus;
+	readonly finalMessage?: string;
+	readonly error?: string;
+	readonly completedAt: string;
+}
+
+export type SubagentMailboxEvent = SubagentMailboxTerminalEvent;
 
 export interface SubagentModelRef {
 	readonly provider: string;
@@ -32,6 +47,8 @@ export interface SubagentConfig {
 	readonly model: SubagentModelRef;
 	readonly thinkingLevel: ThinkingLevel;
 	readonly cwd: string;
+	readonly readPaths: readonly string[];
+	readonly writePaths: readonly string[];
 	readonly forkTurns: SubagentForkTurns;
 	readonly timeoutSeconds: number;
 	readonly role?: string;
@@ -55,6 +72,8 @@ export interface SubagentDisplayConfig {
 	readonly model: SubagentModelRef;
 	readonly thinkingLevel: ThinkingLevel;
 	readonly cwd: string;
+	readonly readPaths: readonly string[];
+	readonly writePaths: readonly string[];
 	readonly forkTurns: SubagentForkTurns;
 	readonly timeoutSeconds: number;
 }

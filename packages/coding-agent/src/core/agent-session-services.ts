@@ -69,6 +69,8 @@ export interface CreateAgentSessionFromServicesOptions {
 	onPermissionRequest?: CreateAgentSessionOptions["onPermissionRequest"];
 	ultraAvailable?: boolean;
 	additionalSystemPrompt?: string | (() => string | undefined);
+	includeAutoMemory?: boolean;
+	childCapabilityScope?: CreateAgentSessionOptions["childCapabilityScope"];
 }
 
 /**
@@ -223,6 +225,8 @@ export async function createAgentSessionFromServices(
 		onPermissionRequest: options.onPermissionRequest,
 		ultraAvailable: options.ultraAvailable,
 		additionalSystemPrompt: options.additionalSystemPrompt,
+		includeAutoMemory: options.includeAutoMemory,
+		childCapabilityScope: options.childCapabilityScope,
 		sessionStartEvent: options.sessionStartEvent,
 	});
 }

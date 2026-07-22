@@ -1,11 +1,8 @@
+import { isAbsolute, normalize } from "node:path";
+import { isPathInside } from "../utils/paths.ts";
 import { isAgentMode } from "./agent-mode.ts";
 import { isPermissionMode, type PermissionMode } from "./permission-mode.ts";
-import type {
-	SubagentConfig,
-	SubagentStatus,
-	SubagentTombstone,
-	SubagentUsage,
-} from "./subagents/types.ts";
+import type { SubagentConfig, SubagentStatus, SubagentTombstone, SubagentUsage } from "./subagents/types.ts";
 
 interface SessionControlEntryBase {
 	readonly id: string;
@@ -36,17 +33,12 @@ export interface SubagentCreatedEntry extends SessionControlEntryBase {
 	readonly config: SubagentConfig;
 }
 
-export type SubagentStateReason =
-	| "completed"
-	| "error"
-	| "interrupted"
-	| "timeout"
-	| "parent_unloaded"
-	| "recovered";
+export type SubagentStateReason = "completed" | "error" | "interrupted" | "timeout" | "parent_unloaded" | "recovered";
 
 export interface SubagentStateEntry extends SessionControlEntryBase {
 	readonly type: "subagent_state";
 	readonly agentId: string;
+	readonly runId: string;
 	readonly status: Exclude<SubagentStatus, "closed">;
 	readonly reason?: SubagentStateReason;
 	readonly finalSummary?: string;
@@ -58,6 +50,7 @@ export interface SubagentStateEntry extends SessionControlEntryBase {
 export interface SubagentFollowUpEntry extends SessionControlEntryBase {
 	readonly type: "subagent_follow_up";
 	readonly agentId: string;
+	readonly runId: string;
 	readonly messageId: string;
 	readonly text: string;
 	readonly state: "queued" | "accepted" | "cancelled";
@@ -80,10 +73,7 @@ export type SubagentControlEntry =
 	| SubagentClosedEntry
 	| SubagentModeChangeEntry;
 
-export type SessionControlEntry =
-	| SessionPermissionsEntry
-	| SessionPermissionDecisionEntry
-	| SubagentControlEntry;
+export type SessionControlEntry = SessionPermissionsEntry | SessionPermissionDecisionEntry | SubagentControlEntry;
 
 export type SessionControlPayload = SessionControlEntry extends infer Entry
 	? Entry extends SessionControlEntry
@@ -123,7 +113,11 @@ function dataFields(value: unknown, label = "Session control entry"): Map<string
 	return fields;
 }
 
-function assertOnlyFields(fields: ReadonlyMap<string, unknown>, allowed: readonly string[], label = "Session control entry"): void {
+function assertOnlyFields(
+	fields: ReadonlyMap<string, unknown>,
+	allowed: readonly string[],
+	label = "Session control entry",
+): void {
 	const allowedFields = new Set(allowed);
 	const unknown = [...fields.keys()].filter((key) => !allowedFields.has(key)).sort()[0];
 	if (unknown) invalid(`${label} has unknown field: ${unknown}`);
@@ -138,8 +132,10 @@ function requiredString(
 	const value = fields.get(key);
 	if (typeof value !== "string" || value.length === 0) invalid(`${label}.${key} must be a non-empty string`);
 	if (options.maxLength !== undefined && value.length > options.maxLength) invalid(`${label}.${key} is too long`);
-	if (options.maxBytes !== undefined && encoder.encode(value).byteLength > options.maxBytes) invalid(`${label}.${key} is too large`);
-	if (options.noControls && /[\u0000-\u001f\u007f-\u009f]/u.test(value)) invalid(`${label}.${key} contains control characters`);
+	if (options.maxBytes !== undefined && encoder.encode(value).byteLength > options.maxBytes)
+		invalid(`${label}.${key} is too large`);
+	if (options.noControls && /[\u0000-\u001f\u007f-\u009f]/u.test(value))
+		invalid(`${label}.${key} contains control characters`);
 	return value;
 }
 
@@ -154,7 +150,8 @@ function optionalString(
 
 function finiteNonNegative(fields: ReadonlyMap<string, unknown>, key: string, label: string): number {
 	const value = fields.get(key);
-	if (typeof value !== "number" || !Number.isFinite(value) || value < 0) invalid(`${label}.${key} must be finite and non-negative`);
+	if (typeof value !== "number" || !Number.isFinite(value) || value < 0)
+		invalid(`${label}.${key} must be finite and non-negative`);
 	return value;
 }
 
@@ -182,13 +179,38 @@ function parseModel(value: unknown, label: string): SubagentConfig["model"] {
 function parseTools(value: unknown, label: string): readonly string[] {
 	if (!Array.isArray(value) || value.length > 128) invalid(`${label} must be an array of at most 128 tool names`);
 	const tools = value.map((tool) => {
-		if (typeof tool !== "string" || tool.length === 0 || tool.length > 256 || /[\u0000-\u001f\u007f-\u009f]/u.test(tool)) {
+		if (
+			typeof tool !== "string" ||
+			tool.length === 0 ||
+			tool.length > 256 ||
+			/[\u0000-\u001f\u007f-\u009f]/u.test(tool)
+		) {
 			invalid(`${label} contains an invalid tool name`);
 		}
 		return tool;
 	});
 	if (new Set(tools).size !== tools.length) invalid(`${label} must contain unique tool names`);
 	return tools;
+}
+
+function parsePaths(value: unknown, label: string): readonly string[] {
+	if (!Array.isArray(value) || value.length === 0 || value.length > 32) {
+		invalid(`${label} must be a non-empty array of at most 32 paths`);
+	}
+	const paths = value.map((path) => {
+		if (
+			typeof path !== "string" ||
+			path.length === 0 ||
+			encoder.encode(path).byteLength > 32 * 1024 ||
+			!isAbsolute(path) ||
+			normalize(path) !== path
+		) {
+			invalid(`${label} contains an invalid path`);
+		}
+		return path;
+	});
+	if (new Set(paths).size !== paths.length) invalid(`${label} must contain unique paths`);
+	return paths;
 }
 
 function parseForkTurns(value: unknown, label: string): SubagentConfig["forkTurns"] {
@@ -216,6 +238,8 @@ function parseConfig(value: unknown): SubagentConfig {
 			"model",
 			"thinkingLevel",
 			"cwd",
+			"readPaths",
+			"writePaths",
 			"forkTurns",
 			"timeoutSeconds",
 			"role",
@@ -231,9 +255,17 @@ function parseConfig(value: unknown): SubagentConfig {
 	if (!isAgentMode(mode)) invalid(`${label}.mode is invalid`);
 	if (!isPermissionMode(permissionMode)) invalid(`${label}.permissionMode is invalid`);
 	if (typeof reviewerEnabled !== "boolean") invalid(`${label}.reviewerEnabled must be a boolean`);
-	if (typeof thinkingLevel !== "string" || !REAL_THINKING_LEVELS.has(thinkingLevel)) invalid(`${label}.thinkingLevel is invalid`);
+	if (typeof thinkingLevel !== "string" || !REAL_THINKING_LEVELS.has(thinkingLevel))
+		invalid(`${label}.thinkingLevel is invalid`);
 	if (!Number.isInteger(timeoutSeconds) || (timeoutSeconds as number) < 1 || (timeoutSeconds as number) > 1_800) {
 		invalid(`${label}.timeoutSeconds must be an integer from 1 through 1800`);
+	}
+	const cwd = requiredString(fields, "cwd", { label, maxBytes: 32 * 1024 });
+	if (!isAbsolute(cwd) || normalize(cwd) !== cwd) invalid(`${label}.cwd must be a canonical absolute path`);
+	const readPaths = fields.has("readPaths") ? parsePaths(fields.get("readPaths"), `${label}.readPaths`) : [cwd];
+	const writePaths = fields.has("writePaths") ? parsePaths(fields.get("writePaths"), `${label}.writePaths`) : [cwd];
+	if (writePaths.some((writePath) => !readPaths.some((readPath) => isPathInside(readPath, writePath)))) {
+		invalid(`${label}.writePaths must stay inside readPaths`);
 	}
 	return {
 		agentId: requiredString(fields, "agentId", { label, maxLength: 256, noControls: true }),
@@ -246,7 +278,10 @@ function parseConfig(value: unknown): SubagentConfig {
 		reviewerEnabled,
 		model: parseModel(fields.get("model"), `${label}.model`),
 		thinkingLevel: thinkingLevel as SubagentConfig["thinkingLevel"],
-		cwd: requiredString(fields, "cwd", { label, maxBytes: 32 * 1024 }),
+		cwd,
+		// Compatibility for v7 sessions created by the first implementation.
+		readPaths,
+		writePaths,
 		forkTurns: parseForkTurns(fields.get("forkTurns"), `${label}.forkTurns`),
 		timeoutSeconds: timeoutSeconds as number,
 		role: optionalString(fields, "role", { label, maxBytes: 8 * 1024 }),
@@ -315,7 +350,8 @@ export function parseSessionControlEntry(value: unknown): SessionControlEntry {
 		const source = fields.get("source");
 		const decision = fields.get("decision");
 		if (source !== "user" && source !== "reviewer") invalid("Session control entry.source is invalid");
-		if (decision !== "allow" && decision !== "ask" && decision !== "deny") invalid("Session control entry.decision is invalid");
+		if (decision !== "allow" && decision !== "ask" && decision !== "deny")
+			invalid("Session control entry.decision is invalid");
 		return {
 			type,
 			...parseBase(fields),
@@ -331,34 +367,66 @@ export function parseSessionControlEntry(value: unknown): SessionControlEntry {
 		return { type, ...parseBase(fields), config: parseConfig(fields.get("config")) };
 	}
 	if (type === "subagent_state") {
-		assertOnlyFields(fields, [...baseFields, "agentId", "status", "reason", "finalSummary", "error", "residualPath", "usage"]);
+		assertOnlyFields(fields, [
+			...baseFields,
+			"agentId",
+			"runId",
+			"status",
+			"reason",
+			"finalSummary",
+			"error",
+			"residualPath",
+			"usage",
+		]);
 		const status = fields.get("status");
 		const reason = fields.get("reason");
-		if (typeof status !== "string" || !SUBAGENT_STATUSES.has(status)) invalid("Session control entry.status is invalid");
-		if (reason !== undefined && (typeof reason !== "string" || !STATE_REASONS.has(reason))) invalid("Session control entry.reason is invalid");
-		if (reason === "completed" && status !== "done") invalid("Session control entry.reason completed requires done status");
-		if (reason === "error" && status !== "failed" && status !== "close_failed") invalid("Session control entry.reason error requires failed status");
-		if ((reason === "interrupted" || reason === "parent_unloaded") && status !== "stopped") invalid(`Session control entry.reason ${reason} requires stopped status`);
+		if (typeof status !== "string" || !SUBAGENT_STATUSES.has(status))
+			invalid("Session control entry.status is invalid");
+		if (reason !== undefined && (typeof reason !== "string" || !STATE_REASONS.has(reason)))
+			invalid("Session control entry.reason is invalid");
+		if (reason === "completed" && status !== "done")
+			invalid("Session control entry.reason completed requires done status");
+		if (reason === "error" && status !== "failed" && status !== "close_failed")
+			invalid("Session control entry.reason error requires failed status");
+		if ((reason === "interrupted" || reason === "parent_unloaded") && status !== "stopped")
+			invalid(`Session control entry.reason ${reason} requires stopped status`);
+		if (reason === "timeout" && status !== "failed")
+			invalid("Session control entry.reason timeout requires failed status");
+		if (reason === "recovered" && status !== "queued")
+			invalid("Session control entry.reason recovered requires queued status");
+		const base = parseBase(fields);
 		return {
 			type,
-			...parseBase(fields),
+			...base,
 			agentId: requiredString(fields, "agentId", { maxLength: 256, noControls: true }),
+			runId: fields.has("runId")
+				? requiredString(fields, "runId", { maxLength: 256, noControls: true })
+				: `legacy-${base.id}`,
 			status: status as Exclude<SubagentStatus, "closed">,
 			...(reason === undefined ? {} : { reason: reason as SubagentStateReason }),
-			...(fields.has("finalSummary") ? { finalSummary: optionalString(fields, "finalSummary", { maxBytes: 4 * 1024 }) } : {}),
+			...(fields.has("finalSummary")
+				? { finalSummary: optionalString(fields, "finalSummary", { maxBytes: 4 * 1024 }) }
+				: {}),
 			...(fields.has("error") ? { error: optionalString(fields, "error", { maxBytes: 64 * 1024 }) } : {}),
-			...(fields.has("residualPath") ? { residualPath: optionalString(fields, "residualPath", { maxBytes: 32 * 1024 }) } : {}),
+			...(fields.has("residualPath")
+				? { residualPath: optionalString(fields, "residualPath", { maxBytes: 32 * 1024 }) }
+				: {}),
 			...(fields.has("usage") ? { usage: parseUsage(fields.get("usage")) } : {}),
 		};
 	}
 	if (type === "subagent_follow_up") {
-		assertOnlyFields(fields, [...baseFields, "agentId", "messageId", "text", "state"]);
+		assertOnlyFields(fields, [...baseFields, "agentId", "runId", "messageId", "text", "state"]);
 		const state = fields.get("state");
-		if (state !== "queued" && state !== "accepted" && state !== "cancelled") invalid("Session control entry.state is invalid");
+		if (state !== "queued" && state !== "accepted" && state !== "cancelled")
+			invalid("Session control entry.state is invalid");
+		const base = parseBase(fields);
 		return {
 			type,
-			...parseBase(fields),
+			...base,
 			agentId: requiredString(fields, "agentId", { maxLength: 256, noControls: true }),
+			runId: fields.has("runId")
+				? requiredString(fields, "runId", { maxLength: 256, noControls: true })
+				: `legacy-${base.id}`,
 			messageId: requiredString(fields, "messageId", { maxLength: 256, noControls: true }),
 			text: requiredString(fields, "text", { maxBytes: 2 * 1024 * 1024 }),
 			state,

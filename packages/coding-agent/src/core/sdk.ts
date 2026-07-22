@@ -4,7 +4,7 @@ import { clampThinkingLevel, type Message, type Model } from "@arcmind/ai/compat
 import { getAgentDir } from "../config.ts";
 import { canonicalizeActionPath, resolvePath } from "../utils/paths.ts";
 import { type AgentMode, DEFAULT_AGENT_MODE } from "./agent-mode.ts";
-import { AgentSession } from "./agent-session.ts";
+import { AgentSession, type AgentSessionConfig } from "./agent-session.ts";
 import { formatNoModelsAvailableMessage } from "./auth-guidance.ts";
 import { AuthStorage } from "./auth-storage.ts";
 import { DEFAULT_THINKING_LEVEL } from "./defaults.ts";
@@ -22,7 +22,7 @@ import { createSessionId } from "./session-id.ts";
 import { getDefaultSessionDir, SessionManager } from "./session-manager.ts";
 import { removeOwnedManagedWorkspace, resolveNewSessionWorkspace } from "./session-workspace.ts";
 import { SettingsManager } from "./settings-manager.ts";
-import { getHighestSupportedThinkingLevel, type ThinkingSelection } from "./thinking-selection.ts";
+import { canUseUltra, getHighestSupportedThinkingLevel, type ThinkingSelection } from "./thinking-selection.ts";
 import { time } from "./timings.ts";
 import {
 	createBashTool,
@@ -98,6 +98,10 @@ export interface CreateAgentSessionOptions {
 	ultraAvailable?: boolean;
 	/** @internal Host-owned prompt suffix for parent/child runtime profiles. */
 	additionalSystemPrompt?: string | (() => string | undefined);
+	/** @internal Disable automatic memory context and dream writes for isolated runtimes. */
+	includeAutoMemory?: boolean;
+	/** @internal Immutable maximum filesystem capability for a child runtime. */
+	childCapabilityScope?: AgentSessionConfig["childCapabilityScope"];
 
 	/** Settings manager. Default: SettingsManager.create(cwd, agentDir) */
 	settingsManager?: SettingsManager;
@@ -389,13 +393,18 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			savedThinkingSelection === "ultra" &&
 			(!hasExistingSession || !hasThinkingEntry)
 		) {
-			const supportsSavedUltra =
-				options.ultraAvailable === true && sessionManager.isPersisted() && !sessionManager.getHeader()?.subagent;
+			const supportsSavedUltra = canUseUltra({
+				hostAllowsUltra: options.ultraAvailable === true,
+				persisted: sessionManager.isPersisted(),
+				mode: sessionManager.getMode(),
+				isSubagent: sessionManager.getHeader()?.subagent !== undefined,
+			});
 			if (supportsSavedUltra) {
 				thinkingSelection = "ultra";
 			} else {
 				thinkingLevel = getHighestSupportedThinkingLevel(model);
-				const warning = "Saved Ultra preference is unavailable in this host; using the model's highest normal thinking level.";
+				const warning =
+					"Saved Ultra preference is unavailable in this host; using the model's highest normal thinking level.";
 				modelFallbackMessage = modelFallbackMessage ? `${modelFallbackMessage}. ${warning}` : warning;
 			}
 		}
@@ -420,6 +429,24 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			thinkingLevel = "off";
 		} else {
 			thinkingLevel = clampThinkingLevel(model, thinkingLevel) as ThinkingLevel;
+		}
+
+		const ultraCapable = canUseUltra({
+			hostAllowsUltra: options.ultraAvailable === true,
+			persisted: sessionManager.isPersisted(),
+			mode: sessionManager.getMode(),
+			isSubagent: sessionManager.getHeader()?.subagent !== undefined,
+		});
+		if (sessionManager.getSubagentsEnabled() && !ultraCapable) {
+			if (sessionManager.getHeader()?.subagent) {
+				throw new Error("A subagent session cannot restore Ultra");
+			}
+			sessionManager.setSubagentsEnabled(false);
+			thinkingSelection = undefined;
+			thinkingLevel = getHighestSupportedThinkingLevel(model);
+			const warning =
+				"Saved Ultra is available only in persisted Code sessions; using the model's highest normal thinking level.";
+			modelFallbackMessage = modelFallbackMessage ? `${modelFallbackMessage}. ${warning}` : warning;
 		}
 
 		const isSubagent = sessionManager.getHeader()?.subagent !== undefined;
@@ -595,6 +622,8 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			requestWindowsSandboxSetup: createWindowsSetupRequester(options.onPermissionRequest),
 			ultraAvailable: options.ultraAvailable,
 			additionalSystemPrompt: options.additionalSystemPrompt,
+			includeAutoMemory: options.includeAutoMemory,
+			childCapabilityScope: options.childCapabilityScope,
 		});
 		if (thinkingSelection === "ultra") session.setThinkingSelection("ultra");
 		completed = true;

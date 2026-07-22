@@ -8,13 +8,8 @@
 import type { AgentMessage, StreamFn } from "@arcmind/agent-core";
 import type { Model, SimpleStreamOptions } from "@arcmind/ai/compat";
 import { completeSimple } from "@arcmind/ai/compat";
-import {
-	convertToLlm,
-	createBranchSummaryMessage,
-	createCompactionSummaryMessage,
-	createCustomMessage,
-} from "../messages.ts";
-import type { ReadonlySessionManager, SessionEntry } from "../session-manager.ts";
+import { convertToLlm, createBranchSummaryMessage, createCompactionSummaryMessage } from "../messages.ts";
+import { type ReadonlySessionManager, type SessionEntry, sessionEntryToContextMessages } from "../session-manager.ts";
 import { estimateTokens } from "./compaction.ts";
 import {
 	computeFileLists,
@@ -155,7 +150,7 @@ function getMessageFromEntry(entry: SessionEntry): AgentMessage | undefined {
 			return entry.message;
 
 		case "custom_message":
-			return createCustomMessage(entry.customType, entry.content, entry.display, entry.details, entry.timestamp);
+			return sessionEntryToContextMessages(entry)[0];
 
 		case "branch_summary":
 			return createBranchSummaryMessage(entry.summary, entry.fromId, entry.timestamp);

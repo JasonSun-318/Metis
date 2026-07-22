@@ -59,7 +59,6 @@ import {
 	type SessionControlEntry,
 	type SessionControlPayload,
 	type SessionPermissionDecisionEntry,
-	type SubagentControlEntry,
 	type SubagentControlPayload,
 } from "./session-control.ts";
 import { assertValidSessionId, createSessionId } from "./session-id.ts";
@@ -952,6 +951,18 @@ export function sessionEntryToContextMessages(entry: SessionEntry): AgentMessage
 		return [message];
 	}
 	if (entry.type === "custom_message") {
+		const details = entry.details;
+		// Old releases persisted child approval notices as model-visible mailbox
+		// messages. Keep those journal records for audit, but user approval is UI-only.
+		if (
+			entry.customType === "subagent_mailbox" &&
+			typeof details === "object" &&
+			details !== null &&
+			"type" in details &&
+			details.type === "approval_required"
+		) {
+			return [];
+		}
 		return [
 			createCustomMessage(entry.customType, entry.content ?? [], entry.display, entry.details, entry.timestamp),
 		];

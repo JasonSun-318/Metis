@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -36,6 +36,8 @@ function config(root: string): SubagentConfig {
 		model: { provider: "openai", modelId: "gpt-test" },
 		thinkingLevel: "high",
 		cwd: join(root, "project"),
+		readPaths: [join(root, "project")],
+		writePaths: [join(root, "project")],
 		forkTurns: "all",
 		timeoutSeconds: 60,
 	};
@@ -52,6 +54,7 @@ describe("SubagentStore", () => {
 		const running = store.appendState(created.agentId, {
 			type: "subagent_state",
 			agentId: created.agentId,
+			runId: "run-1",
 			status: "running",
 		});
 		expect(running.status).toBe("running");
@@ -104,11 +107,13 @@ describe("SubagentStore", () => {
 		store.appendState(created.agentId, {
 			type: "subagent_state",
 			agentId: created.agentId,
+			runId: "run-1",
 			status: "running",
 		});
 		store.appendFollowUp(created.agentId, {
 			type: "subagent_follow_up",
 			agentId: created.agentId,
+			runId: "run-1",
 			messageId: "follow-up-1",
 			text: "Continue after restart",
 			state: "queued",
@@ -154,6 +159,29 @@ describe("SubagentStore", () => {
 				.getDurableJournalSnapshot()
 				.filter((entry) => entry.type === "subagent_closed" && entry.tombstone.agentId === created.agentId),
 		).toHaveLength(1);
+		parent.close();
+	});
+
+	it("never mistakes an unreadable residual child for a completed deletion", async () => {
+		const { root, parent, store } = setup();
+		const created = store.create(config(root), []);
+		const tombstone = {
+			agentId: created.agentId,
+			name: created.name,
+			status: "closed" as const,
+			taskSummary: created.taskSummary,
+			closedAt: new Date().toISOString(),
+		};
+		store.beginClose(created.agentId, tombstone);
+		writeFileSync(created.path, "not-jsonl\n", "utf8");
+
+		await expect(store.finishClose(created.agentId)).rejects.toThrow("still exists but cannot be verified");
+		expect(existsSync(created.path)).toBe(true);
+		expect(
+			parent
+				.getDurableJournalSnapshot()
+				.some((entry) => entry.type === "subagent_closed" && entry.tombstone.agentId === created.agentId),
+		).toBe(false);
 		parent.close();
 	});
 });

@@ -15,6 +15,7 @@ import type { SubagentConfig, SubagentStatus, SubagentTombstone, SubagentUsage }
 
 export interface SubagentDiskRecord {
 	readonly agentId: string;
+	readonly runId: string;
 	readonly name: string;
 	readonly path: string;
 	readonly status: Exclude<SubagentStatus, "closed">;
@@ -87,6 +88,7 @@ function reduceRecord(path: string, parentSessionId: string, includeConfig: bool
 	if (created.config.mode !== (header.mode ?? "code"))
 		throw new Error("Child session mode disagrees with its creation record");
 	let status: Exclude<SubagentStatus, "closed"> = "queued";
+	let runId = `legacy-created-${header.id}`;
 	let updatedAt = created.timestamp;
 	let finalSummary: string | undefined;
 	let error: string | undefined;
@@ -94,7 +96,14 @@ function reduceRecord(path: string, parentSessionId: string, includeConfig: bool
 	let usage: SubagentUsage | undefined;
 	for (const entry of entries) {
 		if (entry.type !== "subagent_state" || entry.agentId !== header.id) continue;
+		if (entry.runId !== runId) {
+			finalSummary = undefined;
+			error = undefined;
+			residualPath = undefined;
+			usage = undefined;
+		}
 		status = entry.status;
+		runId = entry.runId;
 		updatedAt = entry.timestamp;
 		finalSummary = entry.finalSummary ?? finalSummary;
 		error = entry.error ?? error;
@@ -103,6 +112,7 @@ function reduceRecord(path: string, parentSessionId: string, includeConfig: bool
 	}
 	return {
 		agentId: header.id,
+		runId,
 		name: header.subagent.name,
 		path,
 		status,
@@ -276,7 +286,17 @@ export class SubagentStore implements SubagentStoreApi {
 		let record: SubagentDiskRecord | undefined;
 		try {
 			record = this.load(agentId);
-		} catch {
+		} catch (error) {
+			const expectedSuffix = `_${agentId}.jsonl`;
+			const residualName = existsSync(this.directory)
+				? readdirSync(this.directory, { withFileTypes: true }).find((entry) => entry.name.endsWith(expectedSuffix))
+						?.name
+				: undefined;
+			if (residualName) {
+				throw new Error(
+					`Child session still exists but cannot be verified for deletion (${join(this.directory, residualName)}): ${error instanceof Error ? error.message : String(error)}`,
+				);
+			}
 			// A crash may have happened after child deletion; the marker owns recovery.
 		}
 		if (record) {
@@ -287,6 +307,7 @@ export class SubagentStore implements SubagentStoreApi {
 					this.appendState(agentId, {
 						type: "subagent_state",
 						agentId,
+						runId: record.runId,
 						status: "close_failed",
 						reason: "error",
 						error,
@@ -295,6 +316,8 @@ export class SubagentStore implements SubagentStoreApi {
 				} catch {
 					// Preserve the original deletion failure.
 				}
+				rmSync(markerPath, { force: true });
+				if (existsSync(this.closingDirectory)) syncDirectorySync(this.closingDirectory);
 				return { status: "close_failed", residualPath: record.path, error };
 			}
 		}

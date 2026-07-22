@@ -24,8 +24,11 @@ Sessions have a version field in the header:
 - **Version 2**: Tree structure with `id`/`parentId` linking
 - **Version 3**: Renamed `hookMessage` role to `custom` (extensions unification)
 - **Version 4**: Stores session images as content-addressed file references
+- **Version 5**: Reserves durable runtime operation/queue/turn controls
+- **Version 6**: Stores immutable mode/workspace ownership and permission controls
+- **Version 7**: Adds child ownership markers and first-class subagent controls
 
-Existing sessions are automatically migrated to the current version (v4) when loaded.
+Existing sessions are automatically migrated to the current version (v7) when loaded. A journal containing a newer control family under an older header is rejected rather than guessed.
 
 ## Image Storage
 
@@ -232,7 +235,11 @@ A first-class child adds an immutable ownership marker to its normal session hea
 {"type":"session","version":7,"id":"child-id","timestamp":"2026-07-18T00:00:00.000Z","cwd":"/path/to/project","mode":"code","cwdOrigin":"user-selected","permissionMode":"ask","reviewerEnabled":true,"subagent":{"agentId":"child-id","name":"researcher","parentSessionId":"parent-id"}}
 ```
 
-Its journal begins with `subagent_created` and then records `subagent_state` and queued/accepted/cancelled `subagent_follow_up` controls. The parent records `subagent_mode_change` for Ultra selection and receives `subagent_closed` only after successful child deletion. Active child configuration and transcript data never enter the parent journal. See [Ultra and Subagents](subagents.md).
+Its journal begins with `subagent_created`, which snapshots inherited Code mode, exact model/real thinking level, tools, permissions, cwd, canonical read/write roots, fork policy, timeout, and optional assignment profile. Every admitted initial/follow-up run has an immutable `runId`; `subagent_state` and queued/accepted/cancelled `subagent_follow_up` records use that ID.
+
+The parent records `subagent_mode_change` for Ultra selection. Terminal notices use ordinary visible `custom_message` entries with `customType: "subagent_mailbox"` and a deterministic `details.eventId`; recovery compares that ID with child terminal state and repairs a missing parent event once. Child permission requests go directly to the active user approval UI and remain audited only in the child session. Full child transcripts and configuration never enter the parent journal.
+
+Children live under `<agentDir>/subagents/<parentSessionId>/`. Close markers live in that directory's `.closing/` child. Only successful deletion appends one minimal `subagent_closed` tombstone to the parent. See [Ultra and Subagents](subagents.md).
 
 ### SessionMessageEntry
 

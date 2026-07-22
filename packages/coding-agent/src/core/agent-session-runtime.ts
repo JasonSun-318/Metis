@@ -3,7 +3,7 @@ import { existsSync, realpathSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { resolvePath } from "../utils/paths.ts";
 import type { AgentMode } from "./agent-mode.ts";
-import type { AgentSession } from "./agent-session.ts";
+import type { AgentSession, ChildCapabilityScope } from "./agent-session.ts";
 import type { AgentSessionRuntimeDiagnostic, AgentSessionServices } from "./agent-session-services.ts";
 import type {
 	ProjectTrustContext,
@@ -23,7 +23,7 @@ import { materializeRuntimeRecovery, type RecoverablePromptDraft } from "./runti
 import type { CreateAgentSessionResult } from "./sdk.ts";
 import { assertSessionCwdExists } from "./session-cwd.ts";
 import { createSessionId } from "./session-id.ts";
-import { SessionManager } from "./session-manager.ts";
+import { getSessionSubagentDir, SessionManager } from "./session-manager.ts";
 import { removeOwnedManagedWorkspace, resolveNewSessionWorkspace } from "./session-workspace.ts";
 import { SubagentManager } from "./subagents/manager.ts";
 import { SUBAGENT_COORDINATION_PROMPT } from "./subagents/prompts.ts";
@@ -80,6 +80,7 @@ export type CreateAgentSessionRuntimeFactory = (options: {
 	projectTrustContext?: ProjectTrustContext;
 	ultraAvailable?: boolean;
 	childConfig?: SubagentConfig;
+	childCapabilityScope?: ChildCapabilityScope;
 }) => Promise<CreateAgentSessionRuntimeResult>;
 
 /**
@@ -301,12 +302,19 @@ export class AgentSessionRuntime {
 			this.subagentManagerValue = undefined;
 			return;
 		}
+		const hasLegacyChildren =
+			existsSync(getSessionSubagentDir(this._services.agentDir, session.sessionManager.getSessionId())) ||
+			session.sessionManager.getDurableJournalSnapshot().some((entry) => entry.type === "subagent_closed");
+		if (session.mode !== "code" && !hasLegacyChildren) {
+			this.subagentManagerValue = undefined;
+			return;
+		}
 		const manager = new SubagentManager({
 			parentSessionManager: session.sessionManager,
 			agentDir: this._services.agentDir,
 			workspaceRoots: [session.sessionManager.getCwd()],
 			onPermissionRequest: (request) => session.requestPermissionApproval(request),
-			createChildRuntime: async ({ config, sessionManager, onPermissionRequest }) => {
+			createChildRuntime: async ({ config, capabilityScope, sessionManager, onPermissionRequest }) => {
 				const recovered = recoverSessionManager(sessionManager);
 				const result = await this.createRuntime({
 					cwd: config.cwd,
@@ -314,6 +322,7 @@ export class AgentSessionRuntime {
 					sessionManager,
 					ultraAvailable: false,
 					childConfig: config,
+					childCapabilityScope: capabilityScope,
 					sessionStartEvent: { type: "session_start", reason: "resume" },
 				});
 				result.session.setPermissionApprovalHandler(onPermissionRequest);
@@ -354,7 +363,7 @@ export class AgentSessionRuntime {
 		const base = session.getActiveToolNames().filter((name) => !management.has(name));
 		const residual = manager.listSummaries().some((summary) => summary.status !== "closed");
 		const desired =
-			session.getThinkingSelection() === "ultra"
+			session.mode === "code" && session.getThinkingSelection() === "ultra"
 				? [...SUBAGENT_TOOL_NAMES]
 				: residual
 					? ["inspect_agents", "wait_agents", "interrupt_agent", "close_agent"]

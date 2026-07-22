@@ -233,6 +233,25 @@ describe("SandboxRuntimeCoordinator", () => {
 		expect(config.allowAppleEvents).toBe(false);
 	});
 
+	it("denies sibling workspace reads while re-allowing assigned child roots", () => {
+		const assigned = join(root, "frontend");
+		const config = buildSandboxRuntimeConfig(
+			grant({
+				denyReadPaths: [root],
+				capabilityReadPaths: [assigned],
+				capabilityWritePaths: [assigned],
+			}),
+			assigned,
+		);
+
+		expect(config.filesystem.denyRead).toContain(canonicalizeActionPath(root, assigned));
+		expect(config.filesystem.allowRead).toContain(canonicalizeActionPath(assigned, assigned));
+		expect(config.filesystem.allowWrite).toContain(canonicalizeActionPath(assigned, assigned));
+		expect(config.credentials?.files?.map((item) => item.path)).toContain(
+			canonicalizeActionPath(join(assigned, ".env"), assigned),
+		);
+	});
+
 	it("strips fixed credentials and credential-like environment suffixes", () => {
 		expect(
 			sensitiveEnvironmentNames({

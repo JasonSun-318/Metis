@@ -9,7 +9,7 @@ import type { AgentMessage, AgentTool } from "@arcmind/agent-core";
 import { Agent } from "@arcmind/agent-core";
 import type { FauxModelDefinition, FauxProviderRegistration, FauxResponseStep, Model } from "@arcmind/ai/compat";
 import { registerFauxProvider } from "@arcmind/ai/compat";
-import { AgentSession, type AgentSessionEvent } from "../../src/core/agent-session.ts";
+import { AgentSession, type AgentSessionEvent, type ChildCapabilityScope } from "../../src/core/agent-session.ts";
 import { AuthStorage } from "../../src/core/auth-storage.ts";
 import type { ExtensionRunner } from "../../src/core/extensions/index.ts";
 import type { McpManager } from "../../src/core/mcp/index.ts";
@@ -75,6 +75,8 @@ export interface HarnessOptions {
 	permissionReviewerStream?: PermissionReviewerStream;
 	sandboxRuntime?: SandboxRuntimeCoordinator;
 	mcpManager?: McpManager;
+	childCapabilityScope?: ChildCapabilityScope;
+	includeAutoMemory?: boolean;
 }
 
 export interface Harness {
@@ -195,6 +197,8 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
 		requestPermissionApproval: options.requestPermissionApproval,
 		permissionReviewerStream: options.permissionReviewerStream,
 		sandboxRuntime: options.sandboxRuntime,
+		childCapabilityScope: options.childCapabilityScope,
+		includeAutoMemory: options.includeAutoMemory,
 	});
 
 	const events: AgentSessionEvent[] = [];
