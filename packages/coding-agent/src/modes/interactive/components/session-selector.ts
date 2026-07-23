@@ -11,7 +11,12 @@ import {
 	visibleWidth,
 } from "@arcmind/tui";
 import { KeybindingsManager } from "../../../core/keybindings.ts";
-import { type SessionInfo, type SessionListProgress, SessionManager } from "../../../core/session-manager.ts";
+import {
+	type DeleteSessionResult,
+	type SessionInfo,
+	type SessionListProgress,
+	SessionManager,
+} from "../../../core/session-manager.ts";
 import { canonicalizePath as _canonicalizePath } from "../../../utils/paths.ts";
 import { theme } from "../theme/theme.ts";
 import { DynamicBorder } from "./dynamic-border.ts";
@@ -639,10 +644,8 @@ type SessionsLoader = (onProgress?: SessionListProgress) => Promise<SessionInfo[
 /**
  * Delete a session and its proven ArcMind-owned assets.
  */
-export async function deleteSessionFile(
-	sessionPath: string,
-): Promise<{ ok: boolean; method: "trash" | "unlink"; error?: string; warning?: string }> {
-	return SessionManager.deleteSession(sessionPath);
+export async function deleteSessionFile(sessionPath: string, agentDir?: string): Promise<DeleteSessionResult> {
+	return SessionManager.deleteSession(sessionPath, { agentDir });
 }
 
 /**
@@ -723,6 +726,7 @@ export class SessionSelectorComponent extends Container implements Focusable {
 			renameSession?: (sessionPath: string, currentName: string | undefined) => Promise<void>;
 			showRenameHint?: boolean;
 			keybindings?: KeybindingsManager;
+			agentDir?: string;
 		},
 		currentSessionFilePath?: string,
 	) {
@@ -796,7 +800,7 @@ export class SessionSelectorComponent extends Container implements Focusable {
 
 		// Handle session deletion
 		this.sessionList.onDeleteSession = async (sessionPath: string) => {
-			const result = await deleteSessionFile(sessionPath);
+			const result = await deleteSessionFile(sessionPath, options?.agentDir);
 
 			if (result.ok) {
 				if (this.currentSessions) {
@@ -813,8 +817,8 @@ export class SessionSelectorComponent extends Container implements Focusable {
 				const msg = result.warning
 					? `${result.method === "trash" ? "Session moved to trash" : "Session deleted"}; ${result.warning}`
 					: result.method === "trash"
-						? "Session and images moved to trash"
-						: "Session and images deleted";
+						? "Session and assets moved to trash"
+						: "Session and assets deleted";
 				this.header.setStatusMessage({ type: result.warning ? "error" : "info", message: msg }, 3000);
 				await this.refreshSessionsAfterMutation();
 			} else {

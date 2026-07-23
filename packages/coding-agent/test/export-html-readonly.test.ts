@@ -68,6 +68,34 @@ describe("standalone HTML export", () => {
 		}
 	});
 
+	it("removes private attachment metadata from exported session data", async () => {
+		const directory = mkdtempSync(join(tmpdir(), "arcmind-export-attachments-"));
+		let manager: SessionManager | undefined;
+		try {
+			manager = SessionManager.create(directory, directory);
+			const internalPath = "/private/attachments/token-report.pdf";
+			manager.appendMessage({
+				role: "user",
+				content: `<attachment>${JSON.stringify({ name: "report.pdf", path: internalPath, size: 12 })}</attachment> summarize`,
+				timestamp: 1,
+			});
+			const outputPath = join(directory, "session.html");
+
+			await exportFromFile(manager.getSessionFile()!, { outputPath });
+			const html = readFileSync(outputPath, "utf8");
+			const encoded = html.match(/<script id="session-data" type="application\/json">([^<]+)<\/script>/)?.[1];
+			expect(encoded).toBeDefined();
+			const sessionData = JSON.parse(Buffer.from(encoded!, "base64").toString("utf8"));
+			expect(JSON.stringify(sessionData)).not.toContain(internalPath);
+			expect(sessionData.entries.find((entry: any) => entry.type === "message").message.content).toBe(
+				"[report.pdf] summarize",
+			);
+		} finally {
+			manager?.close();
+			rmSync(directory, { recursive: true, force: true });
+		}
+	});
+
 	it.each(["hardlink", "symlink"] as const)(
 		"atomically replaces a late %s alias without truncating the source journal",
 		async (kind) => {

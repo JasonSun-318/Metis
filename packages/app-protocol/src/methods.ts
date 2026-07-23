@@ -128,12 +128,18 @@ export const SubagentReadItemsParamsSchema = StrictObject({
 	limit: Type.Integer({ minimum: 1, maximum: MAX_HISTORY_ITEMS }),
 });
 
+export const FileAttachmentInputSchema = StrictObject({
+	path: PathSchema,
+	name: Type.Optional(Type.String({ minLength: 1, maxLength: 255 })),
+});
+
 export const TurnInputSchema = StrictObject({
 	sessionId: SessionIdSchema,
 	// Turn request IDs are scoped to sessionId.
 	requestId: UuidSchema,
 	text: PromptTextSchema,
 	images: Type.Optional(Type.Array(DurableImageRefViewSchema, { maxItems: 32 })),
+	attachments: Type.Optional(Type.Array(FileAttachmentInputSchema, { maxItems: 16 })),
 });
 
 export const TurnSteerParamsSchema = StrictObject({
@@ -141,6 +147,7 @@ export const TurnSteerParamsSchema = StrictObject({
 	requestId: UuidSchema,
 	text: PromptTextSchema,
 	images: Type.Optional(Type.Array(DurableImageRefViewSchema, { maxItems: 32 })),
+	attachments: Type.Optional(Type.Array(FileAttachmentInputSchema, { maxItems: 16 })),
 	delivery: Type.Union([Type.Literal("steer"), Type.Literal("follow_up")]),
 });
 

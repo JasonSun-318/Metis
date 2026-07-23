@@ -32,6 +32,9 @@ export interface EditorComponent extends Component {
 	/** Called when text changes */
 	onChange?: (text: string) => void;
 
+	/** Return true after handling a bracketed paste to suppress normal insertion */
+	onPaste?: (text: string) => boolean;
+
 	/** Called when a registered atomic marker is deleted as one unit */
 	onAtomicMarkerDeleted?: (marker: string) => void;
 

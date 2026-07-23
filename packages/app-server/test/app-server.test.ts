@@ -143,7 +143,7 @@ function initialize(id = "initialize") {
 		jsonrpc: "2.0" as const,
 		id,
 		method: "initialize" as const,
-		params: { protocolVersion: 3, client: { name: "test", version: "1" }, capabilities: [] },
+		params: { protocolVersion: 4, client: { name: "test", version: "1" }, capabilities: [] },
 	};
 }
 
@@ -204,7 +204,7 @@ describe("AppServer", () => {
 		);
 		const initialized = await connection.handle(initialize());
 		expect(initialized).toMatchObject({
-			result: { protocolVersion: 3, server: { name: "arcmind-app-server" }, serverEpoch: server.serverEpoch },
+			result: { protocolVersion: 4, server: { name: "arcmind-app-server" }, serverEpoch: server.serverEpoch },
 		});
 		expectError(await connection.handle(initialize("again")), RPC_ERROR_CODES.INVALID_REQUEST);
 	});
@@ -703,7 +703,12 @@ describe("AppServer", () => {
 		);
 		const manager = SessionManager.create(projectDir, join(sessionsRoot, "project"));
 		const sessionId = manager.getSessionId();
-		manager.appendMessage({ role: "user", content: "x".repeat(2 * 1024 * 1024), timestamp: Date.now() });
+		const internalPath = "/private/attachments/token-report.pdf";
+		manager.appendMessage({
+			role: "user",
+			content: `<attachment>${JSON.stringify({ name: "report.pdf", path: internalPath, size: 12 })}</attachment> ${"x".repeat(2 * 1024 * 1024)}`,
+			timestamp: Date.now(),
+		});
 		manager.close();
 		const server = await AppServer.create({ agentDir, sessionsRoot });
 		const connection = server.connect();
@@ -728,6 +733,8 @@ describe("AppServer", () => {
 		const recentItems = (subscribed as { result: { snapshot: SessionSnapshot } }).result.snapshot.recentItems;
 		expect(recentItems).toHaveLength(1);
 		expect(Buffer.byteLength(JSON.stringify(recentItems[0]), "utf8")).toBeLessThan(20 * 1024);
+		expect(JSON.stringify(recentItems[0])).toContain("[report.pdf]");
+		expect(JSON.stringify(recentItems[0])).not.toContain(internalPath);
 
 		await connection.handle({
 			jsonrpc: "2.0",

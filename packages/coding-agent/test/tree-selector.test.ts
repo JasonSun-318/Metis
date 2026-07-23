@@ -293,6 +293,30 @@ describe("TreeSelectorComponent", () => {
 
 			expect(copied).toBe(message);
 		});
+
+		test("hides attachment metadata when rendering and copying a user message", () => {
+			const message =
+				'<attachment>{"name":"report.pdf","path":"/private/attachments/token.pdf","size":123}</attachment> summarize';
+			const tree = buildTree([userMessage("user-1", null, message)]);
+			const selector = new TreeSelectorComponent(
+				tree,
+				"user-1",
+				24,
+				() => {},
+				() => {},
+			);
+			let copied: string | undefined;
+			selector.onCopy = (text) => {
+				copied = text;
+			};
+
+			const rendered = selector.render(120).map(stripVTControlCharacters).join("\n");
+			selector.handleInput("\x18");
+
+			expect(rendered).toContain("[report.pdf] summarize");
+			expect(rendered).not.toContain("/private/attachments");
+			expect(copied).toBe("[report.pdf] summarize");
+		});
 	});
 
 	describe("label timestamps", () => {

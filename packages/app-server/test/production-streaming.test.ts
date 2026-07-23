@@ -1,5 +1,5 @@
 import { once } from "node:events";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server, type ServerResponse } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -18,12 +18,18 @@ async function listen(server: Server): Promise<number> {
 	return address.port;
 }
 
-function textFrom(items: ItemView[]): string {
-	return items
-		.flatMap((item) => item.content)
-		.filter((block) => block.type === "text")
-		.map((block) => block.text)
-		.join("");
+function summarizedAssistant(items: ItemView[]) {
+	const assistant = items.find((item) => item.role === "assistant");
+	return {
+		state: assistant?.state,
+		content: (assistant?.content ?? []).map((block) =>
+			block.type === "thinking" || block.type === "text"
+				? { type: block.type, text: block.type === "thinking" ? block.text.length : block.text }
+				: block.type === "tool_call"
+					? { type: block.type, name: block.name }
+					: { type: block.type },
+		),
+	};
 }
 
 describe("production runtime streaming", () => {
@@ -33,16 +39,16 @@ describe("production runtime streaming", () => {
 		for (const root of temporaryRoots.splice(0)) rmSync(root, { recursive: true, force: true });
 	});
 
-	it("projects text before the provider stream ends", async () => {
+	it("projects ordered thinking and text before the provider stream ends", async () => {
+		const longThinking = "t".repeat(9 * 1024);
 		let completionResponse: ServerResponse | undefined;
+		let completionRequestBody = "";
 		let resolveConnected!: () => void;
 		const connected = new Promise<void>((resolve) => {
 			resolveConnected = resolve;
 		});
 		const provider = createServer(async (request, response) => {
-			for await (const _chunk of request) {
-				// Drain the request before responding, as a normal HTTP server would.
-			}
+			for await (const chunk of request) completionRequestBody += chunk.toString();
 			completionResponse = response;
 			response.writeHead(200, {
 				"cache-control": "no-cache",
@@ -61,6 +67,8 @@ describe("production runtime streaming", () => {
 		const sessionsRoot = join(agentDir, "sessions");
 		mkdirSync(projectDir, { recursive: true });
 		mkdirSync(agentDir, { recursive: true });
+		const attachmentSource = join(root, "legal report.pdf");
+		writeFileSync(attachmentSource, "document");
 		writeFileSync(
 			join(agentDir, "models.json"),
 			JSON.stringify({
@@ -69,7 +77,16 @@ describe("production runtime streaming", () => {
 						baseUrl: `http://127.0.0.1:${providerPort}/v1`,
 						apiKey: "test-key",
 						api: "openai-completions",
-						models: [{ id: "streaming-test", name: "Streaming Test", contextWindow: 32_000, maxTokens: 1_024 }],
+						models: [
+							{
+								id: "streaming-test",
+								name: "Streaming Test",
+								contextWindow: 32_000,
+								maxTokens: 1_024,
+								reasoning: true,
+								compat: { thinkingFormat: "deepseek" },
+							},
+						],
 					},
 				},
 			}),
@@ -86,7 +103,7 @@ describe("production runtime streaming", () => {
 				jsonrpc: "2.0",
 				id: "initialize",
 				method: "initialize",
-				params: { protocolVersion: 3, client: { name: "test", version: "1" }, capabilities: [] },
+				params: { protocolVersion: 4, client: { name: "test", version: "1" }, capabilities: [] },
 			});
 			await connection.handle({
 				jsonrpc: "2.0",
@@ -104,9 +121,43 @@ describe("production runtime streaming", () => {
 				jsonrpc: "2.0",
 				id: "turn",
 				method: "turn/start",
-				params: { sessionId: SESSION_REQUEST, requestId: TURN_REQUEST, text: "hello" },
+				params: {
+					sessionId: SESSION_REQUEST,
+					requestId: TURN_REQUEST,
+					text: "hello",
+					attachments: [{ path: attachmentSource, name: "legal report.pdf" }],
+				},
 			});
 			await connected;
+			const requestStrings: string[] = [];
+			const collectStrings = (value: unknown): void => {
+				if (typeof value === "string") requestStrings.push(value);
+				else if (Array.isArray(value)) value.forEach(collectStrings);
+				else if (typeof value === "object" && value !== null) Object.values(value).forEach(collectStrings);
+			};
+			collectStrings(JSON.parse(completionRequestBody));
+			const attachmentPrompt = requestStrings.find((value) => value.includes("<attachments>"));
+			expect(attachmentPrompt).toBeDefined();
+			const metadata = JSON.parse(
+				attachmentPrompt!.slice(
+					attachmentPrompt!.indexOf("<attachments>") + "<attachments>".length,
+					attachmentPrompt!.indexOf("</attachments>"),
+				),
+			) as Array<{ name: string; path: string; size: number }>;
+			expect(metadata).toHaveLength(1);
+			expect(metadata[0]!.name).toBe("legal report.pdf");
+			expect(metadata[0]!.path).not.toBe(attachmentSource);
+			expect(metadata[0]!.path).toContain(join(agentDir, "attachments", SESSION_REQUEST));
+			expect(existsSync(metadata[0]!.path)).toBe(true);
+			expect(readFileSync(metadata[0]!.path, "utf8")).toBe("document");
+			const visibleUserItem = await connection.handle({
+				jsonrpc: "2.0",
+				id: "read-user",
+				method: "session/readItems",
+				params: { sessionId: SESSION_REQUEST, limit: 200 },
+			});
+			expect(JSON.stringify(visibleUserItem)).toContain("[legal report.pdf]");
+			expect(JSON.stringify(visibleUserItem)).not.toContain(metadata[0]!.path);
 			completionResponse!.write(
 				`data: ${JSON.stringify({
 					id: "chatcmpl-test",
@@ -114,7 +165,26 @@ describe("production runtime streaming", () => {
 					created: 1,
 					model: "streaming-test",
 					choices: [
-						{ index: 0, delta: { role: "assistant", content: "visible-before-end" }, finish_reason: null },
+						{
+							index: 0,
+							delta: { role: "assistant", reasoning_content: longThinking },
+							finish_reason: null,
+						},
+					],
+				})}\n\n`,
+			);
+			completionResponse!.write(
+				`data: ${JSON.stringify({
+					id: "chatcmpl-test",
+					object: "chat.completion.chunk",
+					created: 1,
+					model: "streaming-test",
+					choices: [
+						{
+							index: 0,
+							delta: { content: "visible-before-end" },
+							finish_reason: null,
+						},
 					],
 				})}\n\n`,
 			);
@@ -127,10 +197,51 @@ describe("production runtime streaming", () => {
 						method: "session/readItems",
 						params: { sessionId: SESSION_REQUEST, limit: 200 },
 					});
-					if (!("result" in response) || !("items" in response.result)) return "";
-					return textFrom(response.result.items);
+					if (!("result" in response) || !("items" in response.result)) return [];
+					return summarizedAssistant(response.result.items).content;
 				})
-				.toContain("visible-before-end");
+				.toEqual([
+					{ type: "thinking", text: 8 * 1024 },
+					{ type: "text", text: "visible-before-end" },
+				]);
+
+			completionResponse!.write(
+				`data: ${JSON.stringify({
+					id: "chatcmpl-test",
+					object: "chat.completion.chunk",
+					created: 1,
+					model: "streaming-test",
+					choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+				})}\n\n`,
+			);
+			completionResponse!.end("data: [DONE]\n\n");
+			completionResponse = undefined;
+			await expect
+				.poll(async () => {
+					const response = await connection.handle({
+						jsonrpc: "2.0",
+						id: "read-completed",
+						method: "session/readItems",
+						params: { sessionId: SESSION_REQUEST, limit: 200 },
+					});
+					if (!("result" in response) || !("items" in response.result)) return undefined;
+					const completed = summarizedAssistant(response.result.items);
+					return {
+						...completed,
+						content: completed.content.map((block) =>
+							block.type === "thinking"
+								? { ...block, text: typeof block.text === "number" && block.text > 0 && block.text <= 8 * 1024 }
+								: block,
+						),
+					};
+				})
+				.toEqual({
+					state: "completed",
+					content: [
+						{ type: "thinking", text: true },
+						{ type: "text", text: "visible-before-end" },
+					],
+				});
 		} finally {
 			server.beginShutdown();
 			await server.waitForShutdown();

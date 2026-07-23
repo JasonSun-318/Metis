@@ -5,6 +5,7 @@ import { setKeybindings } from "@arcmind/tui";
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { KeybindingsManager } from "../src/core/keybindings.ts";
 import { persistToolOutputText } from "../src/core/large-tool-output.ts";
+import { getSessionAttachmentDir, importSessionAttachments } from "../src/core/session-attachments.ts";
 import {
 	getSessionImageDir,
 	getSessionToolOutputDir,
@@ -243,6 +244,31 @@ describe("session selector path/delete interactions", () => {
 		expect(existsSync(sessionFile)).toBe(false);
 		expect(existsSync(outputPath)).toBe(false);
 		expect(existsSync(toolOutputDir)).toBe(false);
+	});
+
+	it("deletes attachments from the runtime agent directory", async () => {
+		const baseDir = mkdtempSync(join(tmpdir(), "arcmind-session-delete-attachments-"));
+		tempDirs.push(baseDir);
+		const agentDir = join(baseDir, "custom-agent");
+		const session = SessionManager.create(baseDir, baseDir);
+		session.appendMessage(assistantMsg("ok"));
+		const sessionFile = session.getSessionFile()!;
+		const sessionId = session.getSessionId();
+		const source = join(baseDir, "report.pdf");
+		writeFileSync(source, "pdf");
+		importSessionAttachments({
+			agentDir,
+			sessionId,
+			cwd: baseDir,
+			attachments: [{ path: source }],
+		});
+		const attachmentDir = getSessionAttachmentDir(agentDir, sessionId);
+		session.close();
+
+		const result = await withoutTrash(() => deleteSessionFile(sessionFile, agentDir));
+		expect(result).toEqual({ ok: true, method: "unlink", warning: undefined });
+		expect(existsSync(sessionFile)).toBe(false);
+		expect(existsSync(attachmentDir)).toBe(false);
 	});
 
 	it("succeeds when the session tool output directory is missing", async () => {

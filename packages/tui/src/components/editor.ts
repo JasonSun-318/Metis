@@ -337,6 +337,7 @@ export class Editor implements Component, Focusable {
 
 	public onSubmit?: (text: string) => void;
 	public onChange?: (text: string) => void;
+	public onPaste?: (text: string) => boolean;
 	public onAtomicMarkerDeleted?: (marker: string) => void;
 	public disableSubmit: boolean = false;
 
@@ -1173,8 +1174,6 @@ export class Editor implements Component, Focusable {
 		this.exitHistoryBrowsing();
 		this.lastAction = null;
 
-		this.pushUndoSnapshot();
-
 		// Some terminals (e.g. tmux popups with extended-keys-format=csi-u) re-encode
 		// control bytes inside bracketed paste as CSI-u Ctrl+<letter> sequences
 		// (ESC [ <codepoint> ; 5 u). Decode those back to their literal byte so the
@@ -1195,6 +1194,10 @@ export class Editor implements Component, Focusable {
 			.split("")
 			.filter((char) => char === "\n" || char.charCodeAt(0) >= 32)
 			.join("");
+
+		if (this.onPaste?.(filteredText)) return;
+
+		this.pushUndoSnapshot();
 
 		// If pasting a file path (starts with /, ~, or .) and the character before
 		// the cursor is a word character, prepend a space for better readability

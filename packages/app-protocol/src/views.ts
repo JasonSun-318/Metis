@@ -68,6 +68,11 @@ export const TextBlockViewSchema = StrictObject({
 	text: PromptTextSchema,
 });
 
+export const ThinkingBlockViewSchema = StrictObject({
+	type: Type.Literal("thinking"),
+	text: PublicTextSchema,
+});
+
 export const ImageBlockViewSchema = StrictObject({
 	type: Type.Literal("image"),
 	image: DurableImageRefViewSchema,
@@ -102,6 +107,7 @@ export const NoticeBlockViewSchema = StrictObject({
 
 export const ItemContentBlockViewSchema = Type.Union([
 	TextBlockViewSchema,
+	ThinkingBlockViewSchema,
 	ImageBlockViewSchema,
 	ToolCallBlockViewSchema,
 	ToolResultBlockViewSchema,
@@ -307,10 +313,10 @@ export const ItemDeltaEventSchema = StrictObject({
 	type: Type.Literal("item/delta"),
 	sessionId: SessionIdSchema,
 	itemId: OpaqueIdSchema,
-	delta: StrictObject({
-		type: Type.Literal("text"),
-		text: DeltaTextSchema,
-	}),
+	delta: Type.Union([
+		StrictObject({ type: Type.Literal("text"), text: DeltaTextSchema }),
+		StrictObject({ type: Type.Literal("thinking"), text: DeltaTextSchema }),
+	]),
 });
 
 export const ItemCompletedEventSchema = StrictObject({

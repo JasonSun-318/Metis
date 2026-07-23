@@ -14,7 +14,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { AppServer } from "../src/app-server.ts";
 import type { DurableSessionMutation, PreparedSessionMutation } from "../src/durable-mutation.ts";
 import type { OutboundEnvelope } from "../src/outbound-queue.ts";
-import { SessionProjection } from "../src/projection/session-projection.ts";
+import { MAX_PROJECTED_THINKING_BYTES, SessionProjection } from "../src/projection/session-projection.ts";
 import type {
 	OpenedSessionRuntime,
 	SessionEventListener,
@@ -158,7 +158,7 @@ function initialize(id: string) {
 		jsonrpc: "2.0" as const,
 		id,
 		method: "initialize" as const,
-		params: { protocolVersion: 3, client: { name: "test", version: "1" }, capabilities: [] },
+		params: { protocolVersion: 4, client: { name: "test", version: "1" }, capabilities: [] },
 	};
 }
 
@@ -306,6 +306,29 @@ describe("gap-free reconnect", () => {
 			itemId: "item-stream",
 			content: [{ type: "text", text: "hello world" }],
 		});
+	});
+
+	it("reserves visible-answer capacity after a long thinking stream", () => {
+		const projection = new SessionProjection({ session: summary() });
+		projection.apply({ type: "item/started", item: { ...item("item-thinking", "streaming", ""), content: [] } });
+		projection.apply({
+			type: "item/delta",
+			sessionId: SESSION_ID,
+			itemId: "item-thinking",
+			delta: { type: "thinking", text: "t".repeat(MAX_PROJECTED_THINKING_BYTES + 1024) },
+		});
+		projection.apply({
+			type: "item/delta",
+			sessionId: SESSION_ID,
+			itemId: "item-thinking",
+			delta: { type: "text", text: "final answer" },
+		});
+
+		const projected = projection.snapshot("00000000-0000-4000-8000-000000000001", 2).recentItems.at(-1);
+		expect(projected?.content).toEqual([
+			{ type: "thinking", text: "t".repeat(MAX_PROJECTED_THINKING_BYTES) },
+			{ type: "text", text: "final answer" },
+		]);
 	});
 
 	it("disconnects only the overloaded client while a reconnect snapshots the continuing session", async () => {

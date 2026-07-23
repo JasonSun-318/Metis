@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { delimiter } from "node:path";
 import { spawn, spawnSync } from "child_process";
-import { getBinDir } from "../config.ts";
+import { getBinDir, getBundledToolsDir } from "../config.ts";
 
 export interface ShellConfig {
 	shell: string;
@@ -124,12 +124,18 @@ export function getShellEnv(): NodeJS.ProcessEnv {
 	const pathKey = Object.keys(process.env).find((key) => key.toLowerCase() === "path") ?? "PATH";
 	const currentPath = process.env[pathKey] ?? "";
 	const pathEntries = currentPath.split(delimiter).filter(Boolean);
-	const hasBinDir = pathEntries.includes(binDir);
-	const updatedPath = hasBinDir ? currentPath : [binDir, currentPath].filter(Boolean).join(delimiter);
+	const bundledToolsDir = getBundledToolsDir();
+	const prepended = [bundledToolsDir, binDir].filter(
+		(entry): entry is string => !!entry && !pathEntries.includes(entry),
+	);
+	const updatedPath = [...prepended, currentPath].filter(Boolean).join(delimiter);
 
 	return {
 		...process.env,
 		[pathKey]: updatedPath,
+		OFFICECLI_SKIP_UPDATE: "1",
+		OFFICECLI_NO_AUTO_INSTALL: "1",
+		OFFICECLI_RESIDENT_FLUSH: "each",
 	};
 }
 

@@ -57,6 +57,7 @@ import {
 	parseRuntimeControlEntry,
 	type RuntimeControlEntry,
 } from "./runtime-recovery.ts";
+import { formatSessionAttachmentDisplayText, getOwnedSessionAttachmentDir } from "./session-attachments.ts";
 import {
 	isSessionControlEntryType,
 	isSubagentControlEntryType,
@@ -1798,7 +1799,9 @@ function addCatalogRecord(state: SessionCatalogState, record: unknown, index: nu
 	const textContent = extractTextContent(message);
 	if (!textContent) return;
 	state.allMessages.push(textContent);
-	if (!state.firstMessage && message.role === "user") state.firstMessage = textContent;
+	if (!state.firstMessage && message.role === "user") {
+		state.firstMessage = formatSessionAttachmentDisplayText(textContent);
+	}
 }
 
 async function scanSessionCatalog(filePath: string): Promise<{ state: SessionCatalogState; mtime: Date }> {
@@ -3559,13 +3562,15 @@ export class SessionManager {
 			const header = records[0] as SessionHeader;
 			const imageDir = getSessionImageDir(storagePath);
 			const toolOutputDir = getSessionToolOutputDir(storagePath);
+			const agentDir = options.agentDir ?? getDefaultAgentDir();
+			const attachmentDir = getOwnedSessionAttachmentDir(agentDir, header.id);
 			const workspace = getOwnedManagedWorkspace({
 				id: header.id,
 				cwd: header.cwd,
 				cwdOrigin: header.cwdOrigin ?? "user-selected",
-				agentDir: options.agentDir ?? getDefaultAgentDir(),
+				agentDir,
 			});
-			const subagentDir = getSessionSubagentDir(options.agentDir ?? getDefaultAgentDir(), header.id);
+			const subagentDir = getSessionSubagentDir(agentDir, header.id);
 			try {
 				rmSync(subagentDir, { recursive: true, force: true });
 				if (existsSync(subagentDir)) throw new Error("subagent directory still exists after removal");
@@ -3579,6 +3584,7 @@ export class SessionManager {
 			const ownedTargets = [
 				{ label: "image", path: imageDir },
 				{ label: "tool output", path: toolOutputDir },
+				...(attachmentDir ? [{ label: "attachment", path: attachmentDir }] : []),
 				...(workspace ? [{ label: "managed workspace", path: workspace }] : []),
 			];
 			const exists = (path: string): boolean => {

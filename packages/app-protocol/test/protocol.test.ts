@@ -235,6 +235,29 @@ describe("exact limits", () => {
 		expect(() => validateClientRequest(create)).toThrow(ProtocolValidationError);
 	});
 
+	it("accepts bounded local file attachments on turns", () => {
+		const request = makeClientRequest("turn/start", {
+			sessionId: SESSION_ID,
+			requestId: "22222222-2222-4222-8222-222222222222",
+			text: "Summarize this",
+			attachments: [{ path: "/tmp/report.pdf", name: "report.pdf" }],
+		});
+		expect(validateClientRequest(request).params).toMatchObject({
+			attachments: [{ path: "/tmp/report.pdf", name: "report.pdf" }],
+		});
+
+		expect(() =>
+			validateClientRequest(
+				makeClientRequest("turn/start", {
+					sessionId: SESSION_ID,
+					requestId: "22222222-2222-4222-8222-222222222222",
+					text: "Too many",
+					attachments: Array.from({ length: 17 }, (_, index) => ({ path: `/tmp/${index}.pdf` })),
+				}),
+			),
+		).toThrow(ProtocolValidationError);
+	});
+
 	it("bounds choices, history pages, and event batches", () => {
 		const choices = Array.from({ length: MAX_INTERACTION_CHOICES }, (_, index) => ({
 			id: `choice-${index}`,

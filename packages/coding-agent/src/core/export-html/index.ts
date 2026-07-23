@@ -6,6 +6,7 @@ import { getResolvedThemeColors, getThemeExportColors } from "../../modes/intera
 import { normalizePath, resolvePath } from "../../utils/paths.ts";
 import { replaceFileAtomicallySync } from "../durable-file.ts";
 import type { ToolDefinition } from "../extensions/types.ts";
+import { formatSessionAttachmentDisplayText } from "../session-attachments.ts";
 import type { SessionEntry } from "../session-manager.ts";
 import { SessionManager } from "../session-manager.ts";
 
@@ -156,6 +157,22 @@ interface SessionData {
 	renderedTools?: Record<string, RenderedToolHtml>;
 }
 
+function sanitizeExportEntries(entries: SessionEntry[]): SessionEntry[] {
+	const sanitized = structuredClone(entries);
+	for (const entry of sanitized) {
+		if (entry.type !== "message" || entry.message.role !== "user") continue;
+		const content = entry.message.content;
+		if (typeof content === "string") {
+			entry.message.content = formatSessionAttachmentDisplayText(content);
+			continue;
+		}
+		for (const block of content) {
+			if (block.type === "text") block.text = formatSessionAttachmentDisplayText(block.text);
+		}
+	}
+	return sanitized;
+}
+
 /**
  * Core HTML generation logic shared by both export functions.
  */
@@ -176,7 +193,9 @@ function generateHtml(sessionData: SessionData, themeName?: string): string {
 	const infoBg = themeExport.infoBg ?? derivedExportColors.infoBg;
 
 	// Base64 encode session data to avoid escaping issues
-	const sessionDataBase64 = Buffer.from(JSON.stringify(sessionData)).toString("base64");
+	const sessionDataBase64 = Buffer.from(
+		JSON.stringify({ ...sessionData, entries: sanitizeExportEntries(sessionData.entries) }),
+	).toString("base64");
 
 	// Build the CSS with theme variables injected
 	const css = templateCss

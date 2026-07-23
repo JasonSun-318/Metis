@@ -94,6 +94,15 @@ import {
 import { parseCommandArgs } from "../../core/prompt-templates.ts";
 import { BUILT_IN_PROVIDER_DISPLAY_NAMES } from "../../core/provider-display-names.ts";
 import type { ResourceDiagnostic } from "../../core/resource-loader.ts";
+import {
+	formatSessionAttachment,
+	formatSessionAttachmentDisplayText,
+	importSessionAttachments,
+	MAX_SESSION_ATTACHMENTS,
+	removeSessionAttachment,
+	replaceSessionAttachmentReferences,
+	type SessionAttachment,
+} from "../../core/session-attachments.ts";
 import { formatMissingSessionCwdPrompt, MissingSessionCwdError } from "../../core/session-cwd.ts";
 import { type SessionEntry, SessionManager, sessionEntryToContextMessages } from "../../core/session-manager.ts";
 import type {
@@ -238,13 +247,53 @@ type InteractiveUserInput = {
 	images?: ImageContent[];
 };
 
+type PendingFileAttachment = {
+	attachment: SessionAttachment;
+	sessionId: string;
+};
+
 type RenderSessionItem = AgentMessage | Extract<SessionEntry, { type: "custom" }>;
 
 const CLIPBOARD_IMAGE_PLACEHOLDER_REGEX = /\[image(\d+)\]/g;
 const CLIPBOARD_IMAGE_PLACEHOLDER_SINGLE = /^\[image(\d+)\]$/;
+const FILE_ATTACHMENT_PLACEHOLDER_REGEX = /\[file(\d+):[^\]]+\]/g;
+const FILE_ATTACHMENT_PLACEHOLDER_SINGLE = /^\[file(\d+):[^\]]+\]$/;
 
 function clipboardImagePlaceholder(id: number): string {
 	return `[image${id}]`;
+}
+
+function fileAttachmentPlaceholder(id: number, name: string): string {
+	return `[file${id}:${name}]`;
+}
+
+function parsePastedPathList(value: string): string[] | undefined {
+	const paths: string[] = [];
+	let path = "";
+	let quote: "'" | '"' | undefined;
+	for (let index = 0; index < value.length; index++) {
+		const character = value[index]!;
+		if (process.platform !== "win32" && character === "\\" && quote !== "'") {
+			const escaped = value[++index];
+			if (escaped === undefined) return undefined;
+			path += escaped;
+		} else if (quote) {
+			if (character === quote) quote = undefined;
+			else path += character;
+		} else if (character === "'" || character === '"') {
+			quote = character;
+		} else if (/\s/.test(character)) {
+			if (path) {
+				paths.push(path);
+				path = "";
+			}
+		} else {
+			path += character;
+		}
+	}
+	if (quote) return undefined;
+	if (path) paths.push(path);
+	return paths.length > 0 ? paths : undefined;
 }
 
 function isCustomSessionEntry(item: RenderSessionItem): item is Extract<SessionEntry, { type: "custom" }> {
@@ -434,6 +483,8 @@ export class InteractiveMode {
 	private pendingTools = new Map<string, ToolExecutionComponent>();
 	private pendingClipboardImages = new Map<number, ImageContent>();
 	private clipboardImageCounter = 0;
+	private pendingFileAttachments = new Map<number, PendingFileAttachment>();
+	private fileAttachmentCounter = 0;
 
 	// Tool output expansion state
 	private toolOutputExpanded = false;
@@ -519,6 +570,7 @@ export class InteractiveMode {
 		this.autoTrustOnReloadCwd = options.autoTrustOnReloadCwd;
 		this.runtimeHost.setBeforeSessionInvalidate(() => {
 			this.permissionApprovalAbortController?.abort();
+			this.cleanupClipboardAttachments();
 			this.resetExtensionUI();
 		});
 		this.runtimeHost.setRebindSession(async (session) => {
@@ -820,7 +872,7 @@ export class InteractiveMode {
 				rawKeyHint("!!", "to run bash (no context)"),
 				hint("app.message.followUp", "to queue follow-up"),
 				hint("app.message.dequeue", "to edit all queued messages"),
-				hint("app.clipboard.pasteImage", "to paste image (with text fallback)"),
+				hint("app.clipboard.pasteImage", "to paste image, file, or text"),
 				rawKeyHint("drop files", "to attach"),
 			].join("\n");
 			const compactInstructions = [
@@ -1633,7 +1685,8 @@ export class InteractiveMode {
 					try {
 						const result = await this.runtimeHost.fork(entryId, options);
 						if (!result.cancelled) {
-							this.editor.setText(result.selectedText ?? "");
+							this.editor.setText(this.restoreAttachmentMarkers(result.selectedText ?? ""));
+							this.syncClipboardMarkers();
 							this.showStatus("Forked to new session");
 						}
 						return { cancelled: result.cancelled };
@@ -1655,7 +1708,8 @@ export class InteractiveMode {
 					this.chatContainer.clear();
 					this.renderInitialMessages();
 					if (result.editorText && !this.editor.getText().trim()) {
-						this.editor.setText(result.editorText);
+						this.editor.setText(this.restoreAttachmentMarkers(result.editorText));
+						this.syncClipboardMarkers();
 					}
 					this.showStatus("Navigated to selected point");
 					void this.flushCompactionQueue({ willRetry: false });
@@ -2361,6 +2415,7 @@ export class InteractiveMode {
 			// Wire up callbacks from the default editor
 			newEditor.onSubmit = this.defaultEditor.onSubmit;
 			newEditor.onChange = this.defaultEditor.onChange;
+			newEditor.onPaste = this.defaultEditor.onPaste;
 			newEditor.onAtomicMarkerDeleted = this.defaultEditor.onAtomicMarkerDeleted;
 
 			// Copy text from previous editor
@@ -2407,7 +2462,7 @@ export class InteractiveMode {
 			this.defaultEditor.setText(currentText);
 			this.editor = this.defaultEditor;
 		}
-		this.syncClipboardImageMarkers();
+		this.syncClipboardMarkers();
 
 		this.editorContainer.addChild(this.editor as Component);
 		this.ui.setFocus(this.editor as Component);
@@ -2591,13 +2646,14 @@ export class InteractiveMode {
 				this.updateEditorBorderColor();
 			}
 		};
-		this.defaultEditor.onAtomicMarkerDeleted = (marker: string) => this.removeClipboardImage(marker);
+		this.defaultEditor.onAtomicMarkerDeleted = (marker: string) => this.removeClipboardAttachment(marker);
 
-		// Handle clipboard paste (triggered on Ctrl+V). Images are attached directly;
-		// otherwise, paste plain text from the system clipboard.
+		// Handle clipboard paste (triggered on Ctrl+V). Images and local file paths
+		// are attached directly; other clipboard text is inserted normally.
 		this.defaultEditor.onPasteImage = () => {
 			void this.handleClipboardPaste();
 		};
+		this.defaultEditor.onPaste = (text) => this.attachPastedFiles(text);
 	}
 
 	private async handleClipboardPaste(): Promise<void> {
@@ -2623,7 +2679,7 @@ export class InteractiveMode {
 					data: processed.data,
 					mimeType: processed.mimeType,
 				});
-				this.syncClipboardImageMarkers();
+				this.syncClipboardMarkers();
 				this.editor.insertTextAtCursor?.(clipboardImagePlaceholder(imageId));
 				this.ui.requestRender();
 				return;
@@ -2631,18 +2687,17 @@ export class InteractiveMode {
 
 			const text = await readClipboardText();
 			if (text) {
+				if (this.attachPastedFiles(text)) return;
 				this.editor.insertTextAtCursor?.(text);
 				this.ui.requestRender();
 			}
-		} catch {
-			// Silently ignore clipboard errors (may not have permission, etc.)
-		}
+		} catch {}
 	}
 
 	private takeClipboardInput(text: string): InteractiveUserInput {
 		const images: ImageContent[] = [];
 		const attachedIds = new Set<number>();
-		const promptText = text.replace(CLIPBOARD_IMAGE_PLACEHOLDER_REGEX, (_placeholder, idText: string) => {
+		let promptText = text.replace(CLIPBOARD_IMAGE_PLACEHOLDER_REGEX, (_placeholder, idText: string) => {
 			const id = Number.parseInt(idText, 10);
 			const image = this.pendingClipboardImages.get(id);
 			if (image && !attachedIds.has(id)) {
@@ -2651,36 +2706,137 @@ export class InteractiveMode {
 			}
 			return "";
 		});
+		const referencedFiles = new Set<number>();
+		promptText = promptText.replace(FILE_ATTACHMENT_PLACEHOLDER_REGEX, (_placeholder) => {
+			const match = FILE_ATTACHMENT_PLACEHOLDER_SINGLE.exec(_placeholder);
+			if (!match) return "";
+			const id = Number.parseInt(match[1]!, 10);
+			const pending = this.pendingFileAttachments.get(id);
+			if (!pending || referencedFiles.has(id)) return "";
+			referencedFiles.add(id);
+			return formatSessionAttachment(pending.attachment);
+		});
+		for (const [id, pending] of this.pendingFileAttachments) {
+			if (!referencedFiles.has(id)) {
+				removeSessionAttachment(this.runtimeHost.services.agentDir, pending.sessionId, pending.attachment.path);
+			}
+		}
 		this.pendingClipboardImages.clear();
 		this.clipboardImageCounter = 0;
-		this.syncClipboardImageMarkers();
+		this.pendingFileAttachments.clear();
+		this.fileAttachmentCounter = 0;
+		this.syncClipboardMarkers();
 		return {
 			text: promptText.trim(),
 			images: images.length > 0 ? images : undefined,
 		};
 	}
 
-	private removeClipboardImage(marker: string): void {
+	private removeClipboardAttachment(marker: string): void {
 		if (this.editor.getText().includes(marker)) return;
-		const match = CLIPBOARD_IMAGE_PLACEHOLDER_SINGLE.exec(marker);
-		if (!match) return;
-		this.pendingClipboardImages.delete(Number.parseInt(match[1]!, 10));
-		if (this.pendingClipboardImages.size === 0) this.clipboardImageCounter = 0;
-		this.syncClipboardImageMarkers();
+		const imageMatch = CLIPBOARD_IMAGE_PLACEHOLDER_SINGLE.exec(marker);
+		if (imageMatch) {
+			this.pendingClipboardImages.delete(Number.parseInt(imageMatch[1]!, 10));
+			if (this.pendingClipboardImages.size === 0) this.clipboardImageCounter = 0;
+		}
+		const fileMatch = FILE_ATTACHMENT_PLACEHOLDER_SINGLE.exec(marker);
+		if (fileMatch) {
+			const id = Number.parseInt(fileMatch[1]!, 10);
+			const pending = this.pendingFileAttachments.get(id);
+			if (pending) {
+				removeSessionAttachment(this.runtimeHost.services.agentDir, pending.sessionId, pending.attachment.path);
+				this.pendingFileAttachments.delete(id);
+			}
+			if (this.pendingFileAttachments.size === 0) this.fileAttachmentCounter = 0;
+		}
+		this.syncClipboardMarkers();
 	}
 
-	private syncClipboardImageMarkers(): void {
-		const markers = [...this.pendingClipboardImages.keys()].map(clipboardImagePlaceholder);
+	private syncClipboardMarkers(): void {
+		const markers = [
+			...[...this.pendingClipboardImages.keys()].map(clipboardImagePlaceholder),
+			...[...this.pendingFileAttachments.entries()].map(([id, pending]) =>
+				fileAttachmentPlaceholder(id, pending.attachment.name),
+			),
+		];
 		this.defaultEditor.setAtomicMarkers(markers);
 		if (this.editor !== this.defaultEditor) {
 			this.editor.setAtomicMarkers?.(markers);
 		}
 	}
 
-	private cleanupClipboardImages(): void {
+	private cleanupClipboardAttachments(): void {
 		this.pendingClipboardImages.clear();
 		this.clipboardImageCounter = 0;
-		this.syncClipboardImageMarkers();
+		for (const pending of this.pendingFileAttachments.values()) {
+			removeSessionAttachment(this.runtimeHost.services.agentDir, pending.sessionId, pending.attachment.path);
+		}
+		this.pendingFileAttachments.clear();
+		this.fileAttachmentCounter = 0;
+		this.syncClipboardMarkers();
+	}
+
+	private isAttachableFile(value: string): boolean {
+		try {
+			const metadata = fs.lstatSync(resolvePath(value, this.sessionManager.getCwd(), { trim: true }));
+			return metadata.isFile() && !metadata.isSymbolicLink();
+		} catch {
+			return false;
+		}
+	}
+
+	private droppedFilePaths(text: string): string[] | undefined {
+		const directPaths = text
+			.trim()
+			.split(/\r?\n/)
+			.map((line) => line.trim())
+			.filter(Boolean);
+		if (directPaths.length === 0 || directPaths.length > MAX_SESSION_ATTACHMENTS) return undefined;
+		const normalizedPaths = directPaths.map((line) => {
+			if ((line.startsWith('"') && line.endsWith('"')) || (line.startsWith("'") && line.endsWith("'"))) {
+				return line.slice(1, -1);
+			}
+			return process.platform === "win32" ? line : line.replace(/\\(.)/g, "$1");
+		});
+		if (normalizedPaths.every((filePath) => this.isAttachableFile(filePath))) return normalizedPaths;
+		const parsedPaths = parsePastedPathList(text.trim());
+		if (!parsedPaths || parsedPaths.length > MAX_SESSION_ATTACHMENTS) return undefined;
+		return parsedPaths.every((filePath) => this.isAttachableFile(filePath)) ? parsedPaths : undefined;
+	}
+
+	private importFilePaths(paths: readonly string[]): SessionAttachment[] {
+		return importSessionAttachments({
+			agentDir: this.runtimeHost.services.agentDir,
+			sessionId: this.sessionManager.getSessionId(),
+			cwd: this.sessionManager.getCwd(),
+			attachments: paths.map((filePath) => ({ path: filePath })),
+		});
+	}
+
+	private attachFilePaths(paths: readonly string[]): void {
+		if (this.pendingFileAttachments.size + paths.length > MAX_SESSION_ATTACHMENTS) {
+			throw new Error(`Attachments are limited to ${MAX_SESSION_ATTACHMENTS} files per message`);
+		}
+		const sessionId = this.sessionManager.getSessionId();
+		const markers = this.importFilePaths(paths).map((attachment) => {
+			const id = ++this.fileAttachmentCounter;
+			this.pendingFileAttachments.set(id, { attachment, sessionId });
+			return fileAttachmentPlaceholder(id, attachment.name);
+		});
+		this.syncClipboardMarkers();
+		this.editor.insertTextAtCursor?.(markers.join(" "));
+		this.ui.requestRender();
+	}
+
+	private attachPastedFiles(text: string): boolean {
+		const paths = this.droppedFilePaths(text);
+		if (!paths) return false;
+		try {
+			this.attachFilePaths(paths);
+		} catch (error) {
+			this.showWarning(error instanceof Error ? error.message : String(error));
+		}
+		return true;
 	}
 
 	private routeCompactionInput(text: string, mode: "steer" | "followUp"): "not-compacting" | "handled" | "dispatch" {
@@ -2884,7 +3040,7 @@ export class InteractiveMode {
 			if (this.session.isStreaming) {
 				this.editor.setText("");
 				const input = this.takeClipboardInput(text);
-				this.editor.addToHistory?.(input.text);
+				this.editor.addToHistory?.(formatSessionAttachmentDisplayText(input.text));
 				await this.session.prompt(input.text, {
 					streamingBehavior: "steer",
 					images: input.images,
@@ -2904,7 +3060,7 @@ export class InteractiveMode {
 			} else {
 				this.pendingUserInputs.push(input);
 			}
-			this.editor.addToHistory?.(input.text);
+			this.editor.addToHistory?.(formatSessionAttachmentDisplayText(input.text));
 		};
 	}
 
@@ -3226,7 +3382,7 @@ export class InteractiveMode {
 			typeof message.content === "string"
 				? [{ type: "text", text: message.content }]
 				: message.content.filter((c: { type: string }) => c.type === "text");
-		return textBlocks.map((c) => (c as { text: string }).text).join("");
+		return formatSessionAttachmentDisplayText(textBlocks.map((c) => (c as { text: string }).text).join(""));
 	}
 
 	/**
@@ -3636,7 +3792,7 @@ export class InteractiveMode {
 		this.isShuttingDown = true;
 		this.unregisterSignalHandlers();
 		killTrackedDetachedChildren();
-		this.cleanupClipboardImages();
+		this.cleanupClipboardAttachments();
 		// The terminal is gone. Do not run normal shutdown because TUI and
 		// extension cleanup can write restore sequences and re-trigger EIO.
 		process.exit(129);
@@ -3667,7 +3823,7 @@ export class InteractiveMode {
 		try {
 			this.ui.stop();
 		} catch {}
-		this.cleanupClipboardImages();
+		this.cleanupClipboardAttachments();
 		console.error("arcmind exiting due to uncaughtException:");
 		console.error(error);
 		process.exit(1);
@@ -3781,7 +3937,7 @@ export class InteractiveMode {
 		if (this.session.isStreaming) {
 			this.editor.setText("");
 			const input = this.takeClipboardInput(text);
-			this.editor.addToHistory?.(input.text);
+			this.editor.addToHistory?.(formatSessionAttachmentDisplayText(input.text));
 			await this.session.prompt(input.text, {
 				streamingBehavior: "followUp",
 				images: input.images,
@@ -3944,7 +4100,7 @@ export class InteractiveMode {
 	// =========================================================================
 
 	clearEditor(): void {
-		this.cleanupClipboardImages();
+		this.cleanupClipboardAttachments();
 		this.editor.setText("");
 		this.ui.requestRender();
 	}
@@ -4021,11 +4177,11 @@ export class InteractiveMode {
 		if (steeringMessages.length > 0 || followUpMessages.length > 0) {
 			this.pendingMessagesContainer.addChild(new Spacer(1));
 			for (const message of steeringMessages) {
-				const text = theme.fg("dim", `Steering: ${message}`);
+				const text = theme.fg("dim", `Steering: ${formatSessionAttachmentDisplayText(message)}`);
 				this.pendingMessagesContainer.addChild(new TruncatedText(text, 1, 0));
 			}
 			for (const message of followUpMessages) {
-				const text = theme.fg("dim", `Follow-up: ${message}`);
+				const text = theme.fg("dim", `Follow-up: ${formatSessionAttachmentDisplayText(message)}`);
 				this.pendingMessagesContainer.addChild(new TruncatedText(text, 1, 0));
 			}
 			const dequeueHint = this.getAppKeyDisplay("app.message.dequeue");
@@ -4044,10 +4200,11 @@ export class InteractiveMode {
 			}
 			return 0;
 		}
-		const queuedText = allQueued.join("\n\n");
+		const queuedText = allQueued.map((message) => this.restoreAttachmentMarkers(message)).join("\n\n");
 		const currentText = options?.currentText ?? this.editor.getText();
 		const combinedText = [queuedText, currentText].filter((t) => t.trim()).join("\n\n");
 		this.editor.setText(combinedText);
+		this.syncClipboardMarkers();
 		this.updatePendingMessagesDisplay();
 		if (options?.abort) {
 			this.agent.abort();
@@ -4055,9 +4212,22 @@ export class InteractiveMode {
 		return allQueued.length;
 	}
 
+	private restoreAttachmentMarkers(text: string): string {
+		const sessionId = this.sessionManager.getSessionId();
+		return replaceSessionAttachmentReferences(text, (attachments) =>
+			attachments
+				.map((attachment) => {
+					const id = ++this.fileAttachmentCounter;
+					this.pendingFileAttachments.set(id, { attachment, sessionId });
+					return fileAttachmentPlaceholder(id, attachment.name);
+				})
+				.join(" "),
+		);
+	}
+
 	private queueCompactionMessage(text: string, mode: "steer" | "followUp", images?: ImageContent[]): void {
 		this.compactionQueuedMessages.push({ text, mode, images });
-		this.editor.addToHistory?.(text);
+		this.editor.addToHistory?.(formatSessionAttachmentDisplayText(text));
 		this.editor.setText("");
 		this.updatePendingMessagesDisplay();
 		this.showStatus("Queued message for after compaction");
@@ -4609,7 +4779,7 @@ export class InteractiveMode {
 
 		this.showSelector((done) => {
 			const selector = new UserMessageSelectorComponent(
-				userMessages.map((m) => ({ id: m.entryId, text: m.text })),
+				userMessages.map((m) => ({ id: m.entryId, text: formatSessionAttachmentDisplayText(m.text) })),
 				async (entryId) => {
 					done();
 					try {
@@ -4619,7 +4789,8 @@ export class InteractiveMode {
 							return;
 						}
 
-						this.editor.setText(result.selectedText ?? "");
+						this.editor.setText(this.restoreAttachmentMarkers(result.selectedText ?? ""));
+						this.syncClipboardMarkers();
 						this.showStatus("Forked to new session");
 					} catch (error: unknown) {
 						this.showError(error instanceof Error ? error.message : String(error));
@@ -4752,7 +4923,8 @@ export class InteractiveMode {
 						this.chatContainer.clear();
 						this.renderInitialMessages();
 						if (result.editorText && !this.editor.getText().trim()) {
-							this.editor.setText(result.editorText);
+							this.editor.setText(this.restoreAttachmentMarkers(result.editorText));
+							this.syncClipboardMarkers();
 						}
 						this.showStatus("Navigated to selected point");
 						void this.flushCompactionQueue({ willRetry: false });
@@ -4833,6 +5005,7 @@ export class InteractiveMode {
 					},
 					showRenameHint: true,
 					keybindings: this.keybindings,
+					agentDir: this.runtimeHost.services.agentDir,
 				},
 
 				this.sessionManager.getSessionFile(),
@@ -6206,7 +6379,7 @@ export class InteractiveMode {
 | \`${copyMessage}\` | Copy last assistant message |
 | \`${followUp}\` | Queue follow-up message |
 | \`${dequeue}\` | Restore queued messages |
-| \`${pasteImage}\` | Paste image or text from clipboard |
+| \`${pasteImage}\` | Paste image, local file, or text from clipboard |
 | \`/\` | Slash commands |
 | \`!\` | Run bash command |
 | \`!!\` | Run bash command (excluded from context) |
@@ -6438,7 +6611,7 @@ export class InteractiveMode {
 		this.clearExtensionTerminalInputListeners();
 		this.footer.dispose();
 		this.footerDataProvider.dispose();
-		this.cleanupClipboardImages();
+		this.cleanupClipboardAttachments();
 		if (this.unsubscribe) {
 			this.unsubscribe();
 		}

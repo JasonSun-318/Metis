@@ -23,7 +23,7 @@ const packageDir = join(repoRoot, "packages", "coding-agent");
 const packageJson = JSON.parse(readFileSync(join(packageDir, "package.json"), "utf8"));
 const versions = packageJson.arcmindNativeTools;
 
-if (versions?.rg !== "15.2.0" || versions?.fd !== "10.4.2") {
+if (versions?.rg !== "15.2.0" || versions?.fd !== "10.4.2" || versions?.officecli !== "1.0.140") {
 	throw new Error("Update the pinned native-tool archive table before changing arcmindNativeTools");
 }
 
@@ -70,6 +70,33 @@ const pairs = {
 	},
 };
 
+const officeCliPairs = {
+	"darwin-arm64": [
+		"officecli-mac-arm64",
+		"d83d68a6138c9a8456707db86f9ff62813a2d752d08ea725b3c8f077950086ba",
+	],
+	"darwin-x64": [
+		"officecli-mac-x64",
+		"61b864e628d0cf4e203b2b8e679bccdaf657e0328d54f17d08173181a2adba13",
+	],
+	"linux-arm64": [
+		"officecli-linux-arm64",
+		"924dd58f57891d1b3fe8cf77f06990f58f8f0c0ddf6fe22e1d91c7f10d3e7576",
+	],
+	"linux-x64": [
+		"officecli-linux-x64",
+		"cee68cc2108074e5ae5ad114e1cd5cab4514da8ead4983d5d94aa0acba4f41e8",
+	],
+	"win32-arm64": [
+		"officecli-win-arm64.exe",
+		"a83bcfbab9a092dd060d6016168c42a639865d198ef6aa3772dd196109433551",
+	],
+	"win32-x64": [
+		"officecli-win-x64.exe",
+		"43ad45527bf2c486da1dd7c8d9257b90ac17a6b83028d7064ea38235cd43ec3e",
+	],
+};
+
 function option(name, fallback) {
 	const index = process.argv.indexOf(name);
 	return index === -1 ? fallback : process.argv[index + 1];
@@ -80,14 +107,15 @@ const outputDir = resolve(packageDir, option("--output", "dist/vendor/tools"));
 const dispatcher = new EnvHttpProxyAgent();
 
 function currentPair() {
-	if (process.platform !== "darwin" && process.platform !== "win32") return undefined;
+	if (!["darwin", "linux", "win32"].includes(process.platform)) return undefined;
 	if (process.arch !== "arm64" && process.arch !== "x64") return undefined;
 	return `${process.platform}-${process.arch}`;
 }
 
-const selectedPairs = target === "all" ? Object.keys(pairs) : target === "current" ? [currentPair()].filter(Boolean) : [target];
+const supportedPairs = [...new Set([...Object.keys(pairs), ...Object.keys(officeCliPairs)])];
+const selectedPairs = target === "all" ? supportedPairs : target === "current" ? [currentPair()].filter(Boolean) : [target];
 for (const pair of selectedPairs) {
-	if (!pairs[pair]) throw new Error(`Unsupported native-tool target: ${pair}`);
+	if (!supportedPairs.includes(pair)) throw new Error(`Unsupported native-tool target: ${pair}`);
 }
 
 function sha256(data) {
@@ -178,6 +206,46 @@ async function stageTool(pair, tool, destination) {
 	}
 }
 
+let officeCliLicenses;
+
+async function getOfficeCliLicenses() {
+	officeCliLicenses ??= Promise.all(
+		["LICENSE", "NOTICE"].map(async (name) => [
+			name,
+			await download(`https://raw.githubusercontent.com/iOfficeAI/OfficeCLI/v${versions.officecli}/${name}`),
+		]),
+	);
+	return officeCliLicenses;
+}
+
+async function stageOfficeCli(pair, destination) {
+	const [assetName, expectedSha256] = officeCliPairs[pair];
+	const binary = await download(
+		`https://github.com/iOfficeAI/OfficeCLI/releases/download/v${versions.officecli}/${assetName}`,
+	);
+	const actualSha256 = sha256(binary);
+	if (actualSha256 !== expectedSha256) {
+		throw new Error(`${assetName} SHA-256 mismatch: expected ${expectedSha256}, got ${actualSha256}`);
+	}
+	const executableName = `officecli${pair.startsWith("win32-") ? ".exe" : ""}`;
+	const destinationExecutable = join(destination, executableName);
+	writeFileSync(destinationExecutable, binary);
+	if (!pair.startsWith("win32-")) chmodSync(destinationExecutable, 0o755);
+
+	const licensesDir = join(destination, "licenses");
+	mkdirSync(licensesDir, { recursive: true });
+	for (const [name, contents] of await getOfficeCliLicenses()) {
+		writeFileSync(join(licensesDir, `officecli-${name}`), contents);
+	}
+	return {
+		version: versions.officecli,
+		archive: assetName,
+		archiveSha256: expectedSha256,
+		binary: executableName,
+		binarySha256: actualSha256,
+	};
+}
+
 async function stageTools() {
 	mkdirSync(dirname(outputDir), { recursive: true });
 	const staged = `${outputDir}.tmp-${process.pid}`;
@@ -188,7 +256,10 @@ async function stageTools() {
 			const destination = join(staged, pair);
 			mkdirSync(destination, { recursive: true });
 			const manifest = { schemaVersion: 1, pair, tools: {} };
-			for (const tool of ["rg", "fd"]) manifest.tools[tool] = await stageTool(pair, tool, destination);
+			if (pairs[pair]) {
+				for (const tool of ["rg", "fd"]) manifest.tools[tool] = await stageTool(pair, tool, destination);
+			}
+			if (officeCliPairs[pair]) manifest.tools.officecli = await stageOfficeCli(pair, destination);
 			writeFileSync(join(destination, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
 		}
 		rmSync(outputDir, { recursive: true, force: true });

@@ -10,7 +10,8 @@ import type {
 } from "@arcmind/app-protocol";
 import { AppServerError } from "../session-runtime-host.ts";
 
-export const MAX_PROJECTED_ITEM_TEXT_BYTES = 16 * 1024;
+export const MAX_PROJECTED_THINKING_BYTES = 8 * 1024;
+export const MAX_PROJECTED_VISIBLE_TEXT_BYTES = 20 * 1024;
 const MAX_SNAPSHOT_ITEMS = 200;
 const MAX_SNAPSHOT_TURNS = 200;
 
@@ -107,15 +108,20 @@ export class SessionProjection {
 				const item = this.itemsById.get(event.itemId);
 				if (!item || item.state !== "streaming") return undefined;
 				const currentBytes = item.content.reduce(
-					(total, block) => total + (block.type === "text" ? Buffer.byteLength(block.text, "utf8") : 0),
+					(total, block) => total + (block.type === event.delta.type ? Buffer.byteLength(block.text, "utf8") : 0),
 					0,
 				);
-				const accepted = textPrefixWithinBytes(event.delta.text, MAX_PROJECTED_ITEM_TEXT_BYTES - currentBytes);
+				const maximumBytes =
+					event.delta.type === "thinking" ? MAX_PROJECTED_THINKING_BYTES : MAX_PROJECTED_VISIBLE_TEXT_BYTES;
+				const accepted = textPrefixWithinBytes(event.delta.text, maximumBytes - currentBytes);
 				if (accepted.length === 0) return undefined;
 				const last = item.content.at(-1);
-				if (last?.type === "text") item.content[item.content.length - 1] = { ...last, text: last.text + accepted };
-				else item.content.push({ type: "text", text: accepted });
-				return { ...event, delta: { type: "text", text: accepted } };
+				if (last?.type === event.delta.type) {
+					item.content[item.content.length - 1] = { ...last, text: last.text + accepted };
+				} else {
+					item.content.push({ type: event.delta.type, text: accepted });
+				}
+				return { ...event, delta: { type: event.delta.type, text: accepted } };
 			}
 		}
 	}

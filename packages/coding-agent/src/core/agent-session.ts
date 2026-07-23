@@ -130,6 +130,11 @@ import {
 	validateRuntimeToolResultMessageEvidence,
 } from "./runtime-recovery.ts";
 import { appendSyntheticRuntimeToolResult } from "./runtime-recovery-materializer.ts";
+import {
+	clearSessionAttachmentWorkDir,
+	getSessionAttachmentDir,
+	getSessionAttachmentWorkDir,
+} from "./session-attachments.ts";
 import type { BranchSummaryEntry, CompactionEntry, SessionEntry, SessionManager } from "./session-manager.ts";
 import { CURRENT_SESSION_VERSION, getLatestCompactionEntry, type SessionHeader } from "./session-manager.ts";
 import type { CwdOrigin } from "./session-workspace.ts";
@@ -2220,6 +2225,9 @@ export class AgentSession {
 
 	private async _runAgentPrompt(messages: AgentMessage | AgentMessage[]): Promise<void> {
 		this._isAgentRunActive = true;
+		if (this._agentDir) {
+			clearSessionAttachmentWorkDir(this._agentDir, this.sessionManager.getSessionId());
+		}
 		const errors: unknown[] = [];
 		try {
 			await this.agent.prompt(messages);
@@ -2239,6 +2247,9 @@ export class AgentSession {
 			this._finishDurableTurn();
 		} catch (error) {
 			errors.push(error);
+		}
+		if (this._agentDir) {
+			clearSessionAttachmentWorkDir(this._agentDir, this.sessionManager.getSessionId());
 		}
 		try {
 			await this._emitAgentSettled();
@@ -4016,6 +4027,24 @@ export class AgentSession {
 						commandPrefix: shellCommandPrefix,
 						shellPath,
 						outputDir: this._toolOutputDir,
+						...(this._agentDir
+							? {
+									spawnHook: (context) => ({
+										...context,
+										env: {
+											...context.env,
+											ARCMIND_ATTACHMENTS_DIR: getSessionAttachmentDir(
+												this._agentDir!,
+												this.sessionManager.getSessionId(),
+											),
+											ARCMIND_WORK_DIR: getSessionAttachmentWorkDir(
+												this._agentDir!,
+												this.sessionManager.getSessionId(),
+											),
+										},
+									}),
+								}
+							: {}),
 					},
 					webSearch: {
 						getSettings: () => this.settingsManager.getWebSearchSettings(),

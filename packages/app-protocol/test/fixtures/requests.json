@@ -7,7 +7,7 @@
 			"id": "client-1",
 			"method": "initialize",
 			"params": {
-				"protocolVersion": 3,
+				"protocolVersion": 4,
 				"client": { "name": "ArcMind Desktop", "version": "0.80.6" },
 				"capabilities": ["interaction.v1", "session.cursor.v1"]
 			}

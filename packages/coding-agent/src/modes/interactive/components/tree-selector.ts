@@ -12,6 +12,7 @@ import {
 	visibleWidth,
 	wrapTextWithAnsi,
 } from "@arcmind/tui";
+import { formatSessionAttachmentDisplayText } from "../../../core/session-attachments.ts";
 import type { SessionTreeNode } from "../../../core/session-manager.ts";
 import { theme } from "../theme/theme.ts";
 import { DynamicBorder } from "./dynamic-border.ts";
@@ -777,7 +778,9 @@ class TreeList implements Component {
 				const role = msg.role;
 				if (role === "user") {
 					const msgWithContent = msg as { content?: unknown };
-					const content = normalize(this.extractContent(msgWithContent.content));
+					const content = normalize(
+						formatSessionAttachmentDisplayText(this.extractContent(msgWithContent.content)),
+					);
 					result = theme.fg("accent", "user: ") + content;
 				} else if (role === "assistant") {
 					const msgWithContent = msg as { content?: unknown; stopReason?: string; errorMessage?: string };
@@ -903,6 +906,7 @@ class TreeList implements Component {
 					text = entry.message.command;
 				} else if ("content" in entry.message) {
 					text = this.extractFullContent(entry.message.content);
+					if (entry.message.role === "user") text = formatSessionAttachmentDisplayText(text);
 					if (!text && entry.message.role === "assistant") {
 						text = entry.message.errorMessage;
 					}

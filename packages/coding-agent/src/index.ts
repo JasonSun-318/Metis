@@ -293,6 +293,19 @@ export {
 	type SubmitPromptResult,
 } from "./core/sdk.ts";
 export {
+	formatSessionAttachmentDisplayText,
+	formatSessionAttachments,
+	getOwnedSessionAttachmentDir,
+	getSessionAttachmentDir,
+	importSessionAttachments,
+	MAX_SESSION_ATTACHMENT_BYTES,
+	MAX_SESSION_ATTACHMENTS,
+	MAX_SESSION_ATTACHMENTS_BYTES,
+	removeSessionAttachment,
+	type SessionAttachment,
+	type SessionAttachmentInput,
+} from "./core/session-attachments.ts";
+export {
 	isSessionControlEntryType,
 	type PermissionDecision,
 	type PermissionDecisionSource,

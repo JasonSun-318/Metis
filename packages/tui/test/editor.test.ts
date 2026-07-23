@@ -1775,6 +1775,19 @@ describe("Editor component", () => {
 			assert.strictEqual(editor.getText(), "hello| world");
 		});
 
+		it("lets the host replace a pasted file path before display", () => {
+			const editor = new Editor(createTestTUI(), defaultEditorTheme);
+			editor.onPaste = (text) => {
+				if (text !== "/tmp/report.docx") return false;
+				editor.insertTextAtCursor("[file1:report.docx]");
+				return true;
+			};
+
+			editor.handleInput("\x1b[200~/tmp/report.docx\x1b[201~");
+
+			assert.strictEqual(editor.getText(), "[file1:report.docx]");
+		});
+
 		it("does not trigger autocomplete during single-line paste", () => {
 			const editor = new Editor(createTestTUI(), defaultEditorTheme);
 			let suggestionCalls = 0;

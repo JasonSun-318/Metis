@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://arcmind.dev/schemas/app-server-v3.json",
-  "title": "ArcMind App-Server Protocol v3",
+  "$id": "https://arcmind.dev/schemas/app-server-v4.json",
+  "title": "ArcMind App-Server Protocol v4",
   "$ref": "#/$defs/AppProtocolEnvelope",
   "$defs": {
     "AppProtocolEnvelope": {
@@ -747,6 +747,29 @@
                         "additionalProperties": false
                       },
                       "maxItems": 32
+                    },
+                    "attachments": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "path"
+                        ],
+                        "properties": {
+                          "path": {
+                            "type": "string",
+                            "minLength": 1,
+                            "x-arcmind-maxUtf8Bytes": 32768
+                          },
+                          "name": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 255
+                          }
+                        },
+                        "additionalProperties": false
+                      },
+                      "maxItems": 16
                     }
                   },
                   "additionalProperties": false
@@ -842,6 +865,29 @@
                         "additionalProperties": false
                       },
                       "maxItems": 32
+                    },
+                    "attachments": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "path"
+                        ],
+                        "properties": {
+                          "path": {
+                            "type": "string",
+                            "minLength": 1,
+                            "x-arcmind-maxUtf8Bytes": 32768
+                          },
+                          "name": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 255
+                          }
+                        },
+                        "additionalProperties": false
+                      },
+                      "maxItems": 16
                     },
                     "delivery": {
                       "anyOf": [
@@ -1921,6 +1967,24 @@
                                       "type": "object",
                                       "required": [
                                         "type",
+                                        "text"
+                                      ],
+                                      "properties": {
+                                        "type": {
+                                          "type": "string",
+                                          "const": "thinking"
+                                        },
+                                        "text": {
+                                          "type": "string",
+                                          "x-arcmind-maxUtf8Bytes": 65536
+                                        }
+                                      },
+                                      "additionalProperties": false
+                                    },
+                                    {
+                                      "type": "object",
+                                      "required": [
+                                        "type",
                                         "image"
                                       ],
                                       "properties": {
@@ -2139,22 +2203,44 @@
                             "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
                           },
                           "delta": {
-                            "type": "object",
-                            "required": [
-                              "type",
-                              "text"
-                            ],
-                            "properties": {
-                              "type": {
-                                "type": "string",
-                                "const": "text"
+                            "anyOf": [
+                              {
+                                "type": "object",
+                                "required": [
+                                  "type",
+                                  "text"
+                                ],
+                                "properties": {
+                                  "type": {
+                                    "type": "string",
+                                    "const": "text"
+                                  },
+                                  "text": {
+                                    "type": "string",
+                                    "x-arcmind-maxUtf8Bytes": 262144
+                                  }
+                                },
+                                "additionalProperties": false
                               },
-                              "text": {
-                                "type": "string",
-                                "x-arcmind-maxUtf8Bytes": 262144
+                              {
+                                "type": "object",
+                                "required": [
+                                  "type",
+                                  "text"
+                                ],
+                                "properties": {
+                                  "type": {
+                                    "type": "string",
+                                    "const": "thinking"
+                                  },
+                                  "text": {
+                                    "type": "string",
+                                    "x-arcmind-maxUtf8Bytes": 262144
+                                  }
+                                },
+                                "additionalProperties": false
                               }
-                            },
-                            "additionalProperties": false
+                            ]
                           }
                         },
                         "additionalProperties": false
@@ -2252,6 +2338,24 @@
                                         "text": {
                                           "type": "string",
                                           "x-arcmind-maxUtf8Bytes": 2097152
+                                        }
+                                      },
+                                      "additionalProperties": false
+                                    },
+                                    {
+                                      "type": "object",
+                                      "required": [
+                                        "type",
+                                        "text"
+                                      ],
+                                      "properties": {
+                                        "type": {
+                                          "type": "string",
+                                          "const": "thinking"
+                                        },
+                                        "text": {
+                                          "type": "string",
+                                          "x-arcmind-maxUtf8Bytes": 65536
                                         }
                                       },
                                       "additionalProperties": false
@@ -3079,7 +3183,7 @@
                   "properties": {
                     "protocolVersion": {
                       "type": "number",
-                      "const": 3
+                      "const": 4
                     },
                     "server": {
                       "type": "object",
@@ -3646,6 +3750,24 @@
                                     "text": {
                                       "type": "string",
                                       "x-arcmind-maxUtf8Bytes": 2097152
+                                    }
+                                  },
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "object",
+                                  "required": [
+                                    "type",
+                                    "text"
+                                  ],
+                                  "properties": {
+                                    "type": {
+                                      "type": "string",
+                                      "const": "thinking"
+                                    },
+                                    "text": {
+                                      "type": "string",
+                                      "x-arcmind-maxUtf8Bytes": 65536
                                     }
                                   },
                                   "additionalProperties": false
@@ -4525,6 +4647,24 @@
                                         "text": {
                                           "type": "string",
                                           "x-arcmind-maxUtf8Bytes": 2097152
+                                        }
+                                      },
+                                      "additionalProperties": false
+                                    },
+                                    {
+                                      "type": "object",
+                                      "required": [
+                                        "type",
+                                        "text"
+                                      ],
+                                      "properties": {
+                                        "type": {
+                                          "type": "string",
+                                          "const": "thinking"
+                                        },
+                                        "text": {
+                                          "type": "string",
+                                          "x-arcmind-maxUtf8Bytes": 65536
                                         }
                                       },
                                       "additionalProperties": false
@@ -5796,6 +5936,24 @@
                                     "text": {
                                       "type": "string",
                                       "x-arcmind-maxUtf8Bytes": 2097152
+                                    }
+                                  },
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "object",
+                                  "required": [
+                                    "type",
+                                    "text"
+                                  ],
+                                  "properties": {
+                                    "type": {
+                                      "type": "string",
+                                      "const": "thinking"
+                                    },
+                                    "text": {
+                                      "type": "string",
+                                      "x-arcmind-maxUtf8Bytes": 65536
                                     }
                                   },
                                   "additionalProperties": false
@@ -7870,6 +8028,29 @@
                     "additionalProperties": false
                   },
                   "maxItems": 32
+                },
+                "attachments": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": [
+                      "path"
+                    ],
+                    "properties": {
+                      "path": {
+                        "type": "string",
+                        "minLength": 1,
+                        "x-arcmind-maxUtf8Bytes": 32768
+                      },
+                      "name": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 255
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "maxItems": 16
                 }
               },
               "additionalProperties": false
@@ -7965,6 +8146,29 @@
                     "additionalProperties": false
                   },
                   "maxItems": 32
+                },
+                "attachments": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": [
+                      "path"
+                    ],
+                    "properties": {
+                      "path": {
+                        "type": "string",
+                        "minLength": 1,
+                        "x-arcmind-maxUtf8Bytes": 32768
+                      },
+                      "name": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 255
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "maxItems": 16
                 },
                 "delivery": {
                   "anyOf": [
@@ -8107,7 +8311,7 @@
               "properties": {
                 "protocolVersion": {
                   "type": "number",
-                  "const": 3
+                  "const": 4
                 },
                 "server": {
                   "type": "object",
@@ -8674,6 +8878,24 @@
                                 "text": {
                                   "type": "string",
                                   "x-arcmind-maxUtf8Bytes": 2097152
+                                }
+                              },
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "required": [
+                                "type",
+                                "text"
+                              ],
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "const": "thinking"
+                                },
+                                "text": {
+                                  "type": "string",
+                                  "x-arcmind-maxUtf8Bytes": 65536
                                 }
                               },
                               "additionalProperties": false
@@ -9553,6 +9775,24 @@
                                     "text": {
                                       "type": "string",
                                       "x-arcmind-maxUtf8Bytes": 2097152
+                                    }
+                                  },
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "object",
+                                  "required": [
+                                    "type",
+                                    "text"
+                                  ],
+                                  "properties": {
+                                    "type": {
+                                      "type": "string",
+                                      "const": "thinking"
+                                    },
+                                    "text": {
+                                      "type": "string",
+                                      "x-arcmind-maxUtf8Bytes": 65536
                                     }
                                   },
                                   "additionalProperties": false
@@ -10832,6 +11072,24 @@
                               "type": "object",
                               "required": [
                                 "type",
+                                "text"
+                              ],
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "const": "thinking"
+                                },
+                                "text": {
+                                  "type": "string",
+                                  "x-arcmind-maxUtf8Bytes": 65536
+                                }
+                              },
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "required": [
+                                "type",
                                 "image"
                               ],
                               "properties": {
@@ -11850,6 +12108,24 @@
                               "type": "object",
                               "required": [
                                 "type",
+                                "text"
+                              ],
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "const": "thinking"
+                                },
+                                "text": {
+                                  "type": "string",
+                                  "x-arcmind-maxUtf8Bytes": 65536
+                                }
+                              },
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "required": [
+                                "type",
                                 "image"
                               ],
                               "properties": {
@@ -12068,22 +12344,44 @@
                     "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
                   },
                   "delta": {
-                    "type": "object",
-                    "required": [
-                      "type",
-                      "text"
-                    ],
-                    "properties": {
-                      "type": {
-                        "type": "string",
-                        "const": "text"
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "required": [
+                          "type",
+                          "text"
+                        ],
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "const": "text"
+                          },
+                          "text": {
+                            "type": "string",
+                            "x-arcmind-maxUtf8Bytes": 262144
+                          }
+                        },
+                        "additionalProperties": false
                       },
-                      "text": {
-                        "type": "string",
-                        "x-arcmind-maxUtf8Bytes": 262144
+                      {
+                        "type": "object",
+                        "required": [
+                          "type",
+                          "text"
+                        ],
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "const": "thinking"
+                          },
+                          "text": {
+                            "type": "string",
+                            "x-arcmind-maxUtf8Bytes": 262144
+                          }
+                        },
+                        "additionalProperties": false
                       }
-                    },
-                    "additionalProperties": false
+                    ]
                   }
                 },
                 "additionalProperties": false
@@ -12181,6 +12479,24 @@
                                 "text": {
                                   "type": "string",
                                   "x-arcmind-maxUtf8Bytes": 2097152
+                                }
+                              },
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "required": [
+                                "type",
+                                "text"
+                              ],
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "const": "thinking"
+                                },
+                                "text": {
+                                  "type": "string",
+                                  "x-arcmind-maxUtf8Bytes": 65536
                                 }
                               },
                               "additionalProperties": false
@@ -13536,6 +13852,24 @@
                         "type": "object",
                         "required": [
                           "type",
+                          "text"
+                        ],
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "const": "thinking"
+                          },
+                          "text": {
+                            "type": "string",
+                            "x-arcmind-maxUtf8Bytes": 65536
+                          }
+                        },
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "required": [
+                          "type",
                           "image"
                         ],
                         "properties": {
@@ -13754,22 +14088,44 @@
               "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
             },
             "delta": {
-              "type": "object",
-              "required": [
-                "type",
-                "text"
-              ],
-              "properties": {
-                "type": {
-                  "type": "string",
-                  "const": "text"
+              "anyOf": [
+                {
+                  "type": "object",
+                  "required": [
+                    "type",
+                    "text"
+                  ],
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "const": "text"
+                    },
+                    "text": {
+                      "type": "string",
+                      "x-arcmind-maxUtf8Bytes": 262144
+                    }
+                  },
+                  "additionalProperties": false
                 },
-                "text": {
-                  "type": "string",
-                  "x-arcmind-maxUtf8Bytes": 262144
+                {
+                  "type": "object",
+                  "required": [
+                    "type",
+                    "text"
+                  ],
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "const": "thinking"
+                    },
+                    "text": {
+                      "type": "string",
+                      "x-arcmind-maxUtf8Bytes": 262144
+                    }
+                  },
+                  "additionalProperties": false
                 }
-              },
-              "additionalProperties": false
+              ]
             }
           },
           "additionalProperties": false
@@ -13867,6 +14223,24 @@
                           "text": {
                             "type": "string",
                             "x-arcmind-maxUtf8Bytes": 2097152
+                          }
+                        },
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "required": [
+                          "type",
+                          "text"
+                        ],
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "const": "thinking"
+                          },
+                          "text": {
+                            "type": "string",
+                            "x-arcmind-maxUtf8Bytes": 65536
                           }
                         },
                         "additionalProperties": false
@@ -15194,6 +15568,24 @@
                   "text": {
                     "type": "string",
                     "x-arcmind-maxUtf8Bytes": 2097152
+                  }
+                },
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "required": [
+                  "type",
+                  "text"
+                ],
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "thinking"
+                  },
+                  "text": {
+                    "type": "string",
+                    "x-arcmind-maxUtf8Bytes": 65536
                   }
                 },
                 "additionalProperties": false
@@ -17443,6 +17835,24 @@
                                   "type": "object",
                                   "required": [
                                     "type",
+                                    "text"
+                                  ],
+                                  "properties": {
+                                    "type": {
+                                      "type": "string",
+                                      "const": "thinking"
+                                    },
+                                    "text": {
+                                      "type": "string",
+                                      "x-arcmind-maxUtf8Bytes": 65536
+                                    }
+                                  },
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "object",
+                                  "required": [
+                                    "type",
                                     "image"
                                   ],
                                   "properties": {
@@ -17661,22 +18071,44 @@
                         "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
                       },
                       "delta": {
-                        "type": "object",
-                        "required": [
-                          "type",
-                          "text"
-                        ],
-                        "properties": {
-                          "type": {
-                            "type": "string",
-                            "const": "text"
+                        "anyOf": [
+                          {
+                            "type": "object",
+                            "required": [
+                              "type",
+                              "text"
+                            ],
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "const": "text"
+                              },
+                              "text": {
+                                "type": "string",
+                                "x-arcmind-maxUtf8Bytes": 262144
+                              }
+                            },
+                            "additionalProperties": false
                           },
-                          "text": {
-                            "type": "string",
-                            "x-arcmind-maxUtf8Bytes": 262144
+                          {
+                            "type": "object",
+                            "required": [
+                              "type",
+                              "text"
+                            ],
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "const": "thinking"
+                              },
+                              "text": {
+                                "type": "string",
+                                "x-arcmind-maxUtf8Bytes": 262144
+                              }
+                            },
+                            "additionalProperties": false
                           }
-                        },
-                        "additionalProperties": false
+                        ]
                       }
                     },
                     "additionalProperties": false
@@ -17774,6 +18206,24 @@
                                     "text": {
                                       "type": "string",
                                       "x-arcmind-maxUtf8Bytes": 2097152
+                                    }
+                                  },
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "object",
+                                  "required": [
+                                    "type",
+                                    "text"
+                                  ],
+                                  "properties": {
+                                    "type": {
+                                      "type": "string",
+                                      "const": "thinking"
+                                    },
+                                    "text": {
+                                      "type": "string",
+                                      "x-arcmind-maxUtf8Bytes": 65536
                                     }
                                   },
                                   "additionalProperties": false
@@ -19342,6 +19792,24 @@
                         "text": {
                           "type": "string",
                           "x-arcmind-maxUtf8Bytes": 2097152
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "type",
+                        "text"
+                      ],
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "thinking"
+                        },
+                        "text": {
+                          "type": "string",
+                          "x-arcmind-maxUtf8Bytes": 65536
                         }
                       },
                       "additionalProperties": false

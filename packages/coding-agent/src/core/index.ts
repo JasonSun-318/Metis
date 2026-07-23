@@ -147,6 +147,19 @@ export {
 } from "./runtime-recovery.ts";
 export type { RecoverablePromptDraft } from "./runtime-recovery-materializer.ts";
 export {
+	formatSessionAttachmentDisplayText,
+	formatSessionAttachments,
+	getOwnedSessionAttachmentDir,
+	getSessionAttachmentDir,
+	importSessionAttachments,
+	MAX_SESSION_ATTACHMENT_BYTES,
+	MAX_SESSION_ATTACHMENTS,
+	MAX_SESSION_ATTACHMENTS_BYTES,
+	removeSessionAttachment,
+	type SessionAttachment,
+	type SessionAttachmentInput,
+} from "./session-attachments.ts";
+export {
 	isSessionControlEntryType,
 	type PermissionDecision,
 	type PermissionDecisionSource,

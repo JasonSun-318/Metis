@@ -23,7 +23,7 @@ The editor can be replaced temporarily by built-in UI such as `/settings` or by 
 | Path completion | Press Tab to complete paths |
 | Multi-line input | Shift+Enter, or Ctrl+Enter on Windows Terminal |
 | Copy response | Ctrl+X copies the last assistant message; in `/tree`, it copies the selected message |
-| Images | Paste with Ctrl+V, Alt+V on Windows, or drag into the terminal |
+| Attachments | Paste an image or local file with Ctrl+V (Alt+V on Windows), or drag a file into the terminal; files display as `[filename]` |
 | Shell command | `!command` runs and sends output to the model |
 | Hidden shell command | `!!command` runs without sending output to the model |
 | External editor | Ctrl+G opens `externalEditor`, `$VISUAL`, `$EDITOR`, Notepad on Windows, or `nano` elsewhere |

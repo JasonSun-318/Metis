@@ -19,8 +19,11 @@ import {
 	createAgentSessionFromServices,
 	createAgentSessionRuntime,
 	createAgentSessionServices,
+	formatSessionAttachmentDisplayText,
+	formatSessionAttachments,
 	getProjectTrustOptions,
 	hasTrustRequiringProjectResources,
+	importSessionAttachments,
 	ProjectTrustStore,
 	reduceRuntimeJournal,
 	SessionManager,
@@ -34,7 +37,11 @@ import {
 	prepareSessionMutation,
 } from "./durable-mutation.ts";
 import type { InteractionBroker } from "./interactions.ts";
-import { SessionProjection } from "./projection/session-projection.ts";
+import {
+	MAX_PROJECTED_THINKING_BYTES,
+	MAX_PROJECTED_VISIBLE_TEXT_BYTES,
+	SessionProjection,
+} from "./projection/session-projection.ts";
 import {
 	AppServerError,
 	type OpenedSessionRuntime,
@@ -46,6 +53,7 @@ import {
 const MAX_TURNS = 200;
 const MAX_ITEM_BLOCKS = 16;
 const MAX_ITEM_TEXT_BYTES = 16 * 1024;
+const MAX_ASSISTANT_TOOL_INPUT_BYTES = 4 * 1024;
 
 export interface AgentSessionRuntimeHostOptions {
 	readonly agentDir: string;
@@ -180,6 +188,75 @@ function textBlocks(content: unknown, budget: TextBudget): ItemContentBlockView[
 	return blocks;
 }
 
+function assistantBlocks(
+	content: unknown,
+	budgets: { readonly text: TextBudget; readonly thinking: TextBudget; readonly tool: TextBudget },
+	toolStates: ReadonlyMap<string, "active" | "completed" | "interrupted">,
+): ItemContentBlockView[] {
+	if (typeof content === "string") return textBlocks(content, budgets.text);
+	if (!Array.isArray(content)) return [];
+	const blocks: ItemContentBlockView[] = [];
+	for (const candidate of content.slice(0, 256)) {
+		if (blocks.length >= MAX_ITEM_BLOCKS) break;
+		if (typeof candidate !== "object" || candidate === null) continue;
+		const block = candidate as Record<string, unknown>;
+		if (block.type === "text" && typeof block.text === "string") {
+			const text = takeText(block.text, budgets.text);
+			if (text !== undefined) blocks.push({ type: "text", text });
+			continue;
+		}
+		if (block.type === "thinking" && block.redacted !== true && typeof block.thinking === "string") {
+			const text = takeText(block.thinking, budgets.thinking);
+			if (text) blocks.push({ type: "thinking", text });
+			continue;
+		}
+		const image = durableImage(block);
+		if (image) {
+			blocks.push({ type: "image", image });
+			continue;
+		}
+		if (block.type !== "toolCall") continue;
+		const toolCallId = opaqueId(block.id, "tool");
+		const toolState = toolStates.get(toolCallId) ?? "completed";
+		let inputPreview: string | undefined;
+		try {
+			if (block.arguments !== undefined) {
+				const serialized = JSON.stringify(block.arguments);
+				if (serialized !== undefined) inputPreview = takeText(serialized, budgets.tool);
+			}
+		} catch {
+			// Omit non-JSON tool details rather than leaking or stringifying them.
+		}
+		blocks.push({
+			type: "tool_call",
+			toolCallId,
+			name: name(block.name, "tool"),
+			state: toolState === "active" ? "running" : toolState,
+			...(inputPreview === undefined ? {} : { inputPreview }),
+		});
+	}
+	return blocks;
+}
+
+function userBlocks(content: unknown, budget: TextBudget): ItemContentBlockView[] {
+	if (typeof content === "string") return textBlocks(formatSessionAttachmentDisplayText(content), budget);
+	if (!Array.isArray(content)) return [];
+	return textBlocks(
+		content.map((candidate) =>
+			typeof candidate === "object" &&
+			candidate !== null &&
+			(candidate as Record<string, unknown>).type === "text" &&
+			typeof (candidate as Record<string, unknown>).text === "string"
+				? {
+						...candidate,
+						text: formatSessionAttachmentDisplayText((candidate as Record<string, unknown>).text as string),
+					}
+				: candidate,
+		),
+		budget,
+	);
+}
+
 function mapMessageEntry(
 	entry: Record<string, unknown>,
 	sessionId: string,
@@ -203,41 +280,22 @@ function mapMessageEntry(
 			...(turnId === undefined ? {} : { turnId }),
 			role: "user",
 			state,
-			content: textBlocks(message.content, budget),
+			content: userBlocks(message.content, budget),
 			createdAt,
 			...(state === "streaming" ? {} : { completedAt: createdAt }),
 		};
 	}
 
 	if (message.role === "assistant") {
-		const budget = { remaining: MAX_ITEM_TEXT_BYTES };
-		const content = textBlocks(message.content, budget);
-		if (Array.isArray(message.content)) {
-			for (const candidate of message.content.slice(0, 256)) {
-				if (content.length >= MAX_ITEM_BLOCKS) break;
-				if (typeof candidate !== "object" || candidate === null) continue;
-				const block = candidate as Record<string, unknown>;
-				if (block.type !== "toolCall") continue;
-				const toolCallId = opaqueId(block.id, "tool");
-				const toolState = toolStates.get(toolCallId) ?? "completed";
-				let inputPreview: string | undefined;
-				try {
-					if (block.arguments !== undefined) {
-						const serialized = JSON.stringify(block.arguments);
-						if (serialized !== undefined) inputPreview = takeText(serialized, budget);
-					}
-				} catch {
-					// Omit non-JSON tool details rather than leaking or stringifying them.
-				}
-				content.push({
-					type: "tool_call",
-					toolCallId,
-					name: name(block.name, "tool"),
-					state: toolState === "active" ? "running" : toolState,
-					...(inputPreview === undefined ? {} : { inputPreview }),
-				});
-			}
-		}
+		const content = assistantBlocks(
+			message.content,
+			{
+				text: { remaining: MAX_PROJECTED_VISIBLE_TEXT_BYTES },
+				thinking: { remaining: MAX_PROJECTED_THINKING_BYTES },
+				tool: { remaining: MAX_ASSISTANT_TOOL_INPUT_BYTES },
+			},
+			toolStates,
+		);
 		return {
 			itemId,
 			sessionId,
@@ -292,11 +350,13 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 	private closed = false;
 	private closePromise?: Promise<void>;
 	private readonly interactions?: InteractionBroker;
+	private readonly agentDir: string;
 
-	constructor(runtime: AgentSessionRuntime, ref: SessionRef, interactions?: InteractionBroker) {
+	constructor(runtime: AgentSessionRuntime, ref: SessionRef, agentDir: string, interactions?: InteractionBroker) {
 		this.runtime = runtime;
 		this.session = runtime.session;
 		this.ref = ref;
+		this.agentDir = agentDir;
 		this.interactions = interactions;
 		const journal = this.journal();
 		const reduced = reduceRuntimeJournal(journal);
@@ -364,13 +424,19 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 			return;
 		}
 		if (event.type === "message_update") {
-			if (event.assistantMessageEvent.type === "text_delta") {
+			if (
+				event.assistantMessageEvent.type === "text_delta" ||
+				event.assistantMessageEvent.type === "thinking_delta"
+			) {
 				const itemId = this.itemIdFor(event.message);
 				this.publish({
 					type: "item/delta",
 					sessionId: this.sessionId,
 					itemId,
-					delta: { type: "text", text: event.assistantMessageEvent.delta },
+					delta: {
+						type: event.assistantMessageEvent.type === "text_delta" ? "text" : "thinking",
+						text: event.assistantMessageEvent.delta,
+					},
 				});
 			}
 			return;
@@ -657,17 +723,35 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 	}
 
 	async startTurn(input: ClientParams<"turn/start">): Promise<ClientResult<"turn/start">> {
+		const attachments = input.attachments?.length
+			? importSessionAttachments({
+					agentDir: this.agentDir,
+					sessionId: this.sessionId,
+					cwd: this.runtime.cwd,
+					attachments: input.attachments,
+					key: input.requestId,
+				})
+			: [];
 		return await this.runtime.submitPrompt({
 			requestId: input.requestId,
-			text: input.text,
+			text: formatSessionAttachments(input.text, attachments),
 			...(input.images === undefined ? {} : { images: input.images.map(toRuntimeImage) }),
 		});
 	}
 
 	async steer(input: ClientParams<"turn/steer">): Promise<ClientResult<"turn/steer">> {
+		const attachments = input.attachments?.length
+			? importSessionAttachments({
+					agentDir: this.agentDir,
+					sessionId: this.sessionId,
+					cwd: this.runtime.cwd,
+					attachments: input.attachments,
+					key: input.requestId,
+				})
+			: [];
 		return await this.runtime.submitPrompt({
 			requestId: input.requestId,
-			text: input.text,
+			text: formatSessionAttachments(input.text, attachments),
 			...(input.images === undefined ? {} : { images: input.images.map(toRuntimeImage) }),
 			streamingBehavior: input.delivery === "follow_up" ? "followUp" : "steer",
 		});
@@ -817,7 +901,7 @@ export class AgentSessionRuntimeHost implements SessionRuntimeHost {
 				sessionManager: manager,
 			});
 			try {
-				const opened = new OpenedAgentSessionRuntime(runtime, ref, this.options.interactions);
+				const opened = new OpenedAgentSessionRuntime(runtime, ref, this.agentDir, this.options.interactions);
 				await opened.initialize();
 				return opened;
 			} catch (error) {

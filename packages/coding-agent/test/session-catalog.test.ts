@@ -108,6 +108,29 @@ describe("session catalog", () => {
 		expect(sessions.map((session) => session.path)).toEqual([partial]);
 	});
 
+	it("hides attachment metadata in the session-list preview", async () => {
+		const path = join(directory, "attachment.jsonl");
+		const internalPath = "/private/attachments/token-report.pdf";
+		writeRecords(path, [
+			header("attachment", 4),
+			{
+				type: "message",
+				id: "user",
+				parentId: null,
+				timestamp,
+				message: {
+					role: "user",
+					content: `<attachment>${JSON.stringify({ name: "report.pdf", path: internalPath, size: 12 })}</attachment> summarize`,
+					timestamp: 1,
+				},
+			},
+		]);
+
+		const [session] = await SessionManager.list("/tmp", directory);
+		expect(session.firstMessage).toBe("[report.pdf] summarize");
+		expect(session.firstMessage).not.toContain(internalPath);
+	});
+
 	it.skipIf(process.platform === "win32")("rejects final-component symlink and hardlink aliases", async () => {
 		const outside = join(tmpdir(), `arcmind-session-catalog-outside-${process.pid}-${Date.now()}.jsonl`);
 		writeRecords(outside, [header("outside", 4)]);

@@ -58,6 +58,51 @@ Skill content here.`,
 			expect(skills.some((s) => s.name === "test-skill")).toBe(true);
 		});
 
+		it("should load bundled OfficeCLI skills by default", async () => {
+			const loader = new DefaultResourceLoader({ cwd, agentDir });
+			await loader.reload();
+
+			const skills = loader.getSkills().skills;
+			const officialHeadings = {
+				docx: "# OfficeCLI DOCX Skill",
+				pptx: "# OfficeCLI PPTX Skill",
+				xlsx: "# OfficeCLI XLSX Skill",
+			};
+			for (const [name, heading] of Object.entries(officialHeadings)) {
+				const skill = skills.find((candidate) => candidate.name === name);
+				expect(skill).toBeDefined();
+				const instructions = readFileSync(skill!.filePath, "utf8");
+				expect(instructions).toContain(heading);
+				expect(instructions.length).toBeGreaterThan(25_000);
+				expect(instructions).toContain("If visual confirmation is unnecessary, do not render.");
+				expect(instructions).toContain("ArcMind integration rules in this section still take priority");
+			}
+			const pptxSkill = skills.find((skill) => skill.name === "pptx");
+			const pptxInstructions = readFileSync(pptxSkill!.filePath, "utf8");
+			expect(pptxInstructions).toContain("two separate shell tool calls");
+			expect(pptxInstructions).toContain("sed -n '1,400p'");
+			expect(pptxInstructions).toContain("sed -n '401,900p'");
+			expect(skills.some((skill) => skill.name === "pdf")).toBe(true);
+		});
+
+		it("should let a project skill override a bundled skill", async () => {
+			const skillDir = join(cwd, ".arcmind", "skills", "pdf");
+			mkdirSync(skillDir, { recursive: true });
+			const skillPath = join(skillDir, "SKILL.md");
+			writeFileSync(
+				skillPath,
+				`---
+name: pdf
+description: Project-specific PDF workflow
+---
+Project PDF rules.`,
+			);
+			const loader = new DefaultResourceLoader({ cwd, agentDir });
+			await loader.reload();
+
+			expect(loader.getSkills().skills.find((skill) => skill.name === "pdf")?.filePath).toBe(skillPath);
+		});
+
 		it("should ignore extra markdown files in auto-discovered skill dirs", async () => {
 			const skillDir = join(agentDir, "skills", "arcmind-skills", "browser-tools");
 			mkdirSync(skillDir, { recursive: true });

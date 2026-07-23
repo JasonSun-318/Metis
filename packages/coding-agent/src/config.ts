@@ -403,6 +403,26 @@ export function getThemesDir(): string {
 	return join(packageDir, srcOrDist, "modes", "interactive", "theme");
 }
 
+/** Get the bundled skills directory for source, npm, and compiled-binary layouts. */
+export function getSkillsDir(): string {
+	const packageDir = getPackageDir();
+	if (isBunBinary) return join(packageDir, "skills");
+	const sourceSkills = join(packageDir, "skills");
+	return existsSync(sourceSkills) ? sourceSkills : join(packageDir, "dist", "skills");
+}
+
+/** Get the platform-specific bundled tools directory when one was packaged. */
+export function getBundledToolsDir(): string | undefined {
+	if (!["darwin", "linux", "win32"].includes(process.platform) || !["arm64", "x64"].includes(process.arch)) {
+		return undefined;
+	}
+	const pair = `${process.platform}-${process.arch}`;
+	const packageDir = getPackageDir();
+	return [join(packageDir, "vendor", "tools", pair), join(packageDir, "dist", "vendor", "tools", pair)].find(
+		existsSync,
+	);
+}
+
 /**
  * Get path to HTML export template directory (shipped with package)
  * - For Bun binary: export-html/ next to executable
