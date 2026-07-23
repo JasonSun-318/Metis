@@ -146,7 +146,7 @@ Type `/` in the editor to trigger commands. [Extensions](#extensions) can regist
 | `/settings` | Web search, thinking level, theme, message delivery, transport |
 | `/resume` | Pick from previous sessions |
 | [`/new [chat\|code]`](docs/sessions.md#chat-and-code-modes) | Create a session and choose its immutable workspace |
-| [`/permissions`](docs/permissions.md) | Choose Ask, Auto with review, or Full for this session |
+| [`/permissions`](docs/permissions.md) | Choose Ask or Full for this session |
 | `/name <name>` | Set session display name |
 | `/session` | Show session info (file, ID, mode, messages, tokens, cost) |
 | `/tree` | Jump to any point in the session and continue from there |
@@ -361,7 +361,7 @@ The default export can also be `async`. arcmind waits for async extension factor
 - Custom editors and UI components
 - Status lines, headers, footers
 - Git checkpointing and auto-commit
-- SSH and sandbox execution
+- SSH and Extension-authored external isolation
 - MCP server integration
 - Make arcmind look like Claude Code
 - Games while waiting (yes, Doom runs)
@@ -471,7 +471,7 @@ ArcMind is aggressively extensible so it doesn't have to dictate your workflow. 
 
 **Explicit multi-agent tier.** Persisted primary Code sessions can select Ultra for maximum model reasoning plus recoverable first-class subagents. The process-spawning extension remains available for custom isolation and chained workflows. See [Ultra and Subagents](docs/subagents.md).
 
-**Explicit permission boundary.** Ask and Auto use one-shot approvals and SRT for model-initiated local processes; Full is an explicit unsandboxed mode. Installed extension code remains trusted. See [Permissions and Sandbox](docs/permissions.md).
+**Explicit permission boundary.** Ask automatically permits only proven safe structured reads and fixed internal controls; other model actions need one Allow-once decision. Approved actions and Full run directly with the current user's OS authority. Installed integration code remains trusted. See [Permissions](docs/permissions.md).
 
 **No separate plan mode.** The built-in `update_plan` tool lets the model show progress for complex multi-step work. Use a plan file or the independent Plan Mode extension when you want a review-first or read-only planning workflow.
 
@@ -538,8 +538,7 @@ cat README.md | arcmind -p "Summarize this text"
 |--------|-------------|
 | `--agent-mode <chat\|code>` | Classify a newly created session (default: `code`) |
 | `--cwd <path>` | Bind a newly created session to an existing directory |
-| `--permission-mode <ask\|auto\|full>` | Set permissions for a newly created session |
-| `--reviewer`, `--no-reviewer` | Enable or disable Auto review for a newly created session |
+| `--permission-mode <ask\|full>` | Set permissions for a newly created session |
 | `-c`, `--continue` | Continue most recent session |
 | `-r`, `--resume` | Browse and select session |
 | `--session <path\|id>` | Use specific session file or partial UUID |

@@ -70,27 +70,24 @@ const { session } = await createAgentSession({
 const { session: chatSession } = await createAgentSession({ agentMode: "chat" });
 ```
 
-When no `sessionManager` is supplied, Chat without `cwd` creates `~/.arcmind/agent/workspaces/<session-id>/`; Code without `cwd` captures `process.cwd()`. Supplying `cwd` binds either mode to that existing directory. Chat defaults to Ask permissions and Code defaults to Auto with review.
+When no `sessionManager` is supplied, Chat without `cwd` creates `~/.arcmind/agent/workspaces/<session-id>/`; Code without `cwd` captures `process.cwd()`. Supplying `cwd` binds either mode to that existing directory. Both modes default to Ask permissions.
 
-If you supply `sessionManager`, that manager owns the immutable mode/cwd and current permission settings. Conflicting `agentMode`, `cwd`, `permissionMode`, or `reviewerEnabled` options throw without mutating or closing the supplied manager.
+If you supply `sessionManager`, that manager owns the immutable mode/cwd and current permission setting. Conflicting `agentMode`, `cwd`, or normalized `permissionMode` options throw without mutating or closing the supplied manager. Deprecated `permissionMode: "auto"` is accepted as Ask; deprecated `reviewerEnabled` is accepted and ignored.
 
 Use `onPermissionRequest` when the host has approval UI:
 
 ```typescript
 const { session } = await createAgentSession({
-  agentMode: "code",
-  permissionMode: "auto",
-  reviewerEnabled: true,
+  permissionMode: "ask",
   onPermissionRequest: async (request, signal) => {
-		// Render request.title, summary, and details. If fullOnceRequired is true,
-		// offer only Full-once or Deny; otherwise show Full only when allowed.
-		if (request.fullOnceRequired) return signal?.aborted ? "deny" : "full-once";
-    return signal?.aborted ? "deny" : "allow-once";
+    if (signal?.aborted) return "deny";
+    renderApproval(request.title, request.summary, request.details);
+    return await userAllowedOnce() ? "allow-once" : "deny";
   },
 });
 ```
 
-The callback returns `"allow-once"`, `"full-once"`, or `"deny"`. `allowFullOnce` controls whether Full may be offered; `fullOnceRequired` means a normal one-shot sandbox grant cannot represent the action. Returning `"allow-once"` for a required-Full request fails closed. A sandbox-setup request never permits Full. Without a callback, actions that require user approval fail closed. See [Permissions and Sandbox](permissions.md).
+The callback returns `"allow-once"` or `"deny"`. It must render `details` without omitting or truncating the command/arguments. Allowing executes the exact action directly on the host with the current user's authority. Without a callback, actions that require approval fail closed. See [Permissions](permissions.md).
 
 ### AgentSession
 

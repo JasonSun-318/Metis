@@ -24,7 +24,7 @@ After activation, `activate_subagents` is hidden and the main agent receives the
 
 | Tool | Purpose |
 |---|---|
-| `spawn_agent` | Create a child with a unique name, task, explicit tool list, cwd/read/write roots, and optional role/model/thinking/permission/fork/timeout snapshot |
+| `spawn_agent` | Create a child with a unique name, task, explicit tool list, cwd, and optional role/model/thinking/permission/fork/timeout snapshot |
 | `inspect_agents` | List compact summaries or page through one child's recent visible activity |
 | `message_agent` | Steer a running child or queue a follow-up that rehydrates a cold child under the same ID |
 | `wait_agents` | Wait for a selected child event without polling |
@@ -37,7 +37,7 @@ Activation is runtime-only and is not written to the session journal or settings
 
 Leaving Ultra does not interrupt existing children. Until all children are closed, the main agent keeps only `inspect_agents`, `wait_agents`, `interrupt_agent`, and `close_agent`; creation and messaging remain hidden. Re-entering Ultra adds `activate_subagents` beside those cleanup controls, and successful activation restores all six orchestration tools.
 
-The six tool schemas are the detailed lazy-loaded usage contract: they describe assignment shape, least-capability tools, permission/model/thinking defaults, path bounds, forked turns, timeout, inspection, messaging, waiting, interruption, and deletion. Version 1 does not add a separate subagent index or inject child prompts/transcripts into the parent context.
+The six tool schemas are the detailed lazy-loaded usage contract: they describe assignment shape, least-capability tools, permission/model/thinking defaults, cwd, forked turns, timeout, inspection, messaging, waiting, interruption, and deletion. Version 1 does not add a separate subagent index or inject child prompts/transcripts into the parent context.
 
 A typical creation request is:
 
@@ -47,20 +47,18 @@ A typical creation request is:
   "task": "Review the frontend change and report concrete defects.",
   "tools": ["read", "grep", "bash"],
   "cwd": "./frontend",
-  "readPaths": ["."],
-  "writePaths": ["."],
   "permissionMode": "ask",
   "timeoutSeconds": 1800
 }
 ```
 
-Paths are resolved relative to the selected child cwd, canonicalized, and must be existing directories within the parent workspace. Each write root must be contained by a read root. Omitted read and write roots default independently to `[cwd]`.
+`cwd` is resolved against the parent cwd, canonicalized, and must be an existing directory inside the parent workspace. It is only the base for relative paths, not a filesystem capability boundary. An absolute path outside the child cwd follows the child's Ask/Full mode like any other tool target.
 
 ## Context and prompt isolation
 
-A child receives ArcMind's normal Code base prompt, its actual tools/permission/path context, applicable `AGENTS.md`, a fixed runtime-owned child contract, and a subordinate JSON-encoded parent assignment profile. The task remains a separate user message. It does not copy the parent's assembled system prompt, skills, auto-memory block, prompt templates, Ultra coordinator block, or subagent tools.
+A child receives ArcMind's normal Code base prompt, its actual tools/permission/cwd context, applicable `AGENTS.md`, a fixed runtime-owned child contract, and a subordinate JSON-encoded parent assignment profile. The task remains a separate user message. It does not copy the parent's assembled system prompt, skills, auto-memory block, prompt templates, Ultra coordinator block, or subagent tools.
 
-The parent chooses a least-capability subset of its active tools. A child gets a fresh loader, extension/MCP runtime, tool registry, permission policy, sandbox coordinator, listeners, and approval state. If a configured tool or exact model is unavailable on a later cold resume, that run fails visibly instead of silently changing configuration.
+The parent chooses a least-capability subset of its active tools. A child gets a fresh loader, extension/MCP runtime, tool registry, permission policy, listeners, and approval state. If a configured tool or exact model is unavailable on a later cold resume, that run fails visibly instead of silently changing configuration.
 
 The runtime-owned coordinator prompt and child contract have one implementation source in `src/core/subagents/prompts.ts` and byte-for-byte tests. User-supplied names, roles, and instructions are encoded as assignment data rather than interpolated as runtime policy.
 
@@ -96,25 +94,26 @@ Only a running child owns an in-memory runtime/model context. `done`, `failed`, 
 
 Parent runtime unload records active children as `stopped / parent_unloaded`. A child cleanup error remains attached to that stopped state and is also reported by parent teardown; it does not turn the interrupted task into `failed`.
 
-`close_agent` is different from `interrupt_agent`. Interrupt preserves the child transcript. Close drains the runtime, deletes the child JSONL and session-owned image/tool-result assets, and appends a minimal parent tombstone containing its ID, name, closed state, task summary, bounded final summary, and close time. It never deletes the assigned cwd/read/write roots or a worktree/directory created for the task. A durable close marker lets recovery finish a crash-interrupted deletion. Failed deletion reports `close_failed` with the residual path and can be retried.
+`close_agent` is different from `interrupt_agent`. Interrupt preserves the child transcript. Close drains the runtime, deletes the child JSONL and session-owned image/tool-result assets, and appends a minimal parent tombstone containing its ID, name, closed state, task summary, bounded final summary, and close time. It never deletes the assigned cwd or a worktree/directory created for the task. A durable close marker lets recovery finish a crash-interrupted deletion. Failed deletion reports `close_failed` with the residual path and can be retried.
 
 Closing is idempotent after success. Names remain reserved for the lifetime of the parent even after close. Deleting the parent session removes its owned subagent directory before deleting the parent journal; failure preserves the parent so cleanup can be retried.
 
 ## Permissions
 
-Child permissions are snapshotted at creation and may only be stricter than the parent's current setting. Tools and reviewer settings do not change when the parent later changes. Each child has a fresh permission policy, sandbox coordinator, and one-shot grant state.
+Child permissions inherit or narrow the parent's current mode. Each child has a fresh permission policy and one-action approval state.
 
 | Parent mode | Allowed child modes |
 |---|---|
 | `ask` | `ask` |
-| `auto` | `ask`, `auto` |
-| `full` | `ask`, `auto`, `full` |
+| `full` | `ask`, `full` |
 
-Built-in local tools are clamped to the child project roots even when the child permission mode is Full. The sandbox denies sibling regions of the parent workspace and re-allows only assigned read roots; action-specific grants cannot widen assigned write roots. Explicitly delegated SDK and Extension tools are trusted capabilities that enforce their own resource semantics. MCP calls are not local filesystem capabilities; they retain MCP annotations and the child's snapshotted permission mode.
+When the parent changes from Full to Ask, ArcMind immediately lowers every non-closed child's in-memory ceiling and durably appends Ask to hot, cold, and queued child sessions. A child starting during the transition sees Ask before its first prompt. Changing the parent back to Full never re-upgrades an existing child.
 
-When a child needs approval, only that child pauses. The request is routed to the parent session's current interactive owner and identifies the child name/ID plus the exact tool, arguments, risks, paths, and network targets. With no owner, it fails closed. An approval never grants authority to a sibling.
+Ask automatically permits only proven safe structured reads and `inspect_agents`/`wait_agents`; other model-facing child calls ask. Approved built-ins execute directly as the current OS user, and installed integrations use their configured runtime. Extension, SDK, and MCP code is trusted when installed/configured, but their model-facing tools still follow Ask/Full.
 
-Read/write scopes may overlap. Spawn reports overlaps but does not reject, lock, serialize, create a worktree, or promise conflict-free writes. The main agent should assign disjoint directories/worktrees when isolation matters; every child must preserve unrelated changes and report unresolved concurrent edits.
+When a child needs approval, only that child pauses. The request uses the parent's single approval queue and identifies the child name/ID plus the exact tool, arguments, risks, paths, and network targets. With no owner, it fails closed. The decision is audited in the child journal and never grants authority to a sibling or enters the parent model transcript.
+
+Children share the host filesystem. Spawn does not detect overlap, lock, serialize, create a worktree, or promise conflict-free writes. The main agent should assign disjoint directories/worktrees when isolation matters; every child must preserve unrelated changes and report unresolved concurrent edits.
 
 Runs are never retried automatically because tool side effects may already have happened. Per-run usage is recorded in the child projection and aggregated into the parent session accounting without replaying transcript content into the parent model.
 

@@ -42,11 +42,11 @@ The two modes currently use the same general-purpose system prompt, tools, model
 | New session | No directory supplied | Directory supplied | Default permissions |
 |---|---|---|---|
 | Chat | ArcMind creates `~/.arcmind/agent/workspaces/<session-id>/` | The chosen existing directory is stored | Ask |
-| Code | The terminal working directory captured at startup is stored | The chosen existing directory is stored | Auto with reviewer enabled |
+| Code | The terminal working directory captured at startup is stored | The chosen existing directory is stored | Ask |
 
 `/new` reuses the normal TUI option and input components. After the mode choice, Chat offers a managed workspace, the captured terminal directory, or another directory; Code offers the captured terminal directory or another directory. The selection is made only while creating the session. Cancelling or entering an invalid path leaves the current session unchanged.
 
-The mode, workspace path, and workspace ownership are immutable after creation. Resuming or switching restores the stored values; creation-only CLI flags cannot mutate an existing session. Permission settings are per-session but can be changed later with `/permissions`. See [Permissions and Sandbox](permissions.md).
+The mode, workspace path, and workspace ownership are immutable after creation. Resuming or switching restores the stored values; creation-only CLI flags cannot mutate an existing session. Permission settings are per-session but can be changed later with `/permissions`. See [Permissions](permissions.md).
 
 Mode does not change `--system-prompt` or `--append-system-prompt` behavior.
 
@@ -58,7 +58,7 @@ Sessions for both modes remain JSONL files under `~/.arcmind/agent/sessions/<enc
 |---------|-------------|
 | `/resume` | Browse and select previous sessions |
 | `/new [chat\|code]` | Create a session and choose its immutable workspace |
-| `/permissions` | Change the current session's Ask, Auto, or Full setting |
+| `/permissions` | Change the current session's Ask or Full setting |
 | `/name <name>` | Set the current session display name |
 | `/session` | Show session info |
 | `/tree` | Navigate the current session tree |

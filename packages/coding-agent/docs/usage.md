@@ -42,7 +42,7 @@ Type `/` in the editor to open command completion. Extensions can register custo
 | `/settings` | Web search, thinking level, theme, message delivery, transport |
 | `/resume` | Pick from previous sessions |
 | `/new [chat\|code]` | Create a session and choose its immutable workspace |
-| `/permissions` | Choose Ask, Auto with review, or Full for this session |
+| `/permissions` | Choose Ask or Full for this session |
 | `/name <name>` | Set session display name |
 | `/session` | Show session file, ID, mode, messages, tokens, and cost |
 | `/tree` | Jump to any point in the session and continue from there |
@@ -218,8 +218,7 @@ cat README.md | arcmind -p "Summarize this text"
 |--------|-------------|
 | `--agent-mode <chat\|code>` | Classify a newly created session (default: `code`) |
 | `--cwd <path>` | Bind a newly created session to an existing directory |
-| `--permission-mode <ask\|auto\|full>` | Set permissions for a newly created session |
-| `--reviewer`, `--no-reviewer` | Enable or disable Auto review for a newly created session |
+| `--permission-mode <ask\|full>` | Set permissions for a newly created session |
 | `-c`, `--continue` | Continue the most recent session |
 | `-r`, `--resume` | Browse and select a session |
 | `--session <path\|id>` | Use a specific session file or partial UUID |
@@ -346,4 +345,4 @@ arcmind --exclude-tools ask_question
 
 ArcMind keeps the core small and pushes workflow-specific behavior into extensions, skills, prompt templates, and packages.
 
-It intentionally does not include built-in MCP, a separate plan mode, a manual to-do manager, or background bash. The core `update_plan` tool only tracks execution progress for complex work. Persisted primary Code sessions can select [Ultra](subagents.md) for first-class recoverable subagents. Ask and Auto provide a built-in action-permission and SRT boundary; Full explicitly bypasses it. See [Permissions and Sandbox](permissions.md). You can build or install other workflows as extensions or packages, or add a stronger outer boundary with containers and VMs.
+It intentionally does not include built-in MCP, a separate plan mode, a manual to-do manager, or background bash. The core `update_plan` tool only tracks execution progress for complex work. Persisted primary Code sessions can select [Ultra](subagents.md) for first-class recoverable subagents. Ask provides one-action approval for model tool calls; Full skips that approval. Approved actions run on the host, so use containers or VMs when you need isolation. See [Permissions](permissions.md).

@@ -209,15 +209,15 @@ interface SessionEntryBase {
 First line of the file. Metadata only, not part of the tree (no `id`/`parentId`).
 
 ```json
-{"type":"session","version":7,"id":"uuid","timestamp":"2026-07-17T14:00:00.000Z","cwd":"/path/to/project","mode":"code","cwdOrigin":"user-selected","permissionMode":"auto","reviewerEnabled":true}
+{"type":"session","version":7,"id":"uuid","timestamp":"2026-07-17T14:00:00.000Z","cwd":"/path/to/project","mode":"code","cwdOrigin":"user-selected","permissionMode":"ask"}
 ```
 
-`mode` is `"chat"` or `"code"`. `cwdOrigin` is `"managed"` only for a workspace that ArcMind owns and may copy/delete; otherwise it is `"user-selected"`. `permissionMode` is `"ask"`, `"auto"`, or `"full"`. New sessions always write all four fields. Legacy sessions resolve to Code/Auto with review unless their stored Chat mode selects the Chat/Ask default.
+`mode` is `"chat"` or `"code"`. `cwdOrigin` is `"managed"` only for a workspace that ArcMind owns and may copy/delete; otherwise it is `"user-selected"`. New records write `permissionMode` as `"ask"` or `"full"`; both modes default to Ask. Legacy v6/v7 `"auto"` loads as Ask, and legacy `reviewerEnabled` is validated when present but ignored.
 
 For sessions with a parent (created via `/fork`, `/clone`, or `newSession({ parentSession })`):
 
 ```json
-{"type":"session","version":7,"id":"uuid","timestamp":"2026-07-17T14:00:00.000Z","cwd":"/path/to/project","mode":"chat","cwdOrigin":"user-selected","permissionMode":"ask","reviewerEnabled":true,"parentSession":"/path/to/original/session.jsonl"}
+{"type":"session","version":7,"id":"uuid","timestamp":"2026-07-17T14:00:00.000Z","cwd":"/path/to/project","mode":"chat","cwdOrigin":"user-selected","permissionMode":"ask","parentSession":"/path/to/original/session.jsonl"}
 ```
 
 `parentSession` records lineage; forks and clones inherit the source session's mode.
@@ -227,21 +227,21 @@ For sessions with a parent (created via `/fork`, `/clone`, or `newSession({ pare
 Permission changes and decisions are append-only journal metadata:
 
 ```json
-{"type":"session_permissions","id":"a1b2c3d4","parentId":"leaf1234","timestamp":"2026-07-17T14:01:00.000Z","permissionMode":"auto","reviewerEnabled":false}
+{"type":"session_permissions","id":"a1b2c3d4","parentId":"leaf1234","timestamp":"2026-07-17T14:01:00.000Z","permissionMode":"full"}
 {"type":"session_permission_decision","id":"b2c3d4e5","parentId":"leaf1234","timestamp":"2026-07-17T14:01:01.000Z","actionId":"call-1","toolName":"bash","source":"user","decision":"allow","reason":"Approved once"}
 ```
 
-These records are reduced in raw journal order. They do not advance the transcript leaf, appear in `getEntries()`/`getTree()`, or become model messages. Decision records are audits, not reusable grants.
+These records are reduced in raw journal order. They do not advance the transcript leaf, appear in `getEntries()`/`getTree()`, or become model messages. New decision records contain only user `allow`/`deny` decisions and are audits, not reusable grants. Legacy reviewer sources and `ask` decisions remain readable but cannot be written through the current API.
 
 ### Subagent headers and controls (v7)
 
 A first-class child adds an immutable ownership marker to its normal session header:
 
 ```json
-{"type":"session","version":7,"id":"child-id","timestamp":"2026-07-18T00:00:00.000Z","cwd":"/path/to/project","mode":"code","cwdOrigin":"user-selected","permissionMode":"ask","reviewerEnabled":true,"subagent":{"agentId":"child-id","name":"researcher","parentSessionId":"parent-id"}}
+{"type":"session","version":7,"id":"child-id","timestamp":"2026-07-18T00:00:00.000Z","cwd":"/path/to/project","mode":"code","cwdOrigin":"user-selected","permissionMode":"ask","subagent":{"agentId":"child-id","name":"researcher","parentSessionId":"parent-id"}}
 ```
 
-Its journal begins with `subagent_created`, which snapshots inherited Code mode, exact model/real thinking level, tools, permissions, cwd, canonical read/write roots, fork policy, timeout, and optional assignment profile. Every admitted initial/follow-up run has an immutable `runId`; `subagent_state` and queued/accepted/cancelled `subagent_follow_up` records use that ID.
+Its journal begins with `subagent_created`, which snapshots inherited Code mode, exact model/real thinking level, tools, permission mode, cwd, fork policy, timeout, and optional assignment profile. Legacy child records may contain `auto`, `reviewerEnabled`, `readPaths`, and `writePaths`; the parser validates and discards those removed fields while normalizing Auto to Ask. Every admitted initial/follow-up run has an immutable `runId`; `subagent_state` and queued/accepted/cancelled `subagent_follow_up` records use that ID.
 
 The parent records `subagent_mode_change` for Ultra selection. Terminal notices use ordinary visible `custom_message` entries with `customType: "subagent_mailbox"` and a deterministic `details.eventId`; recovery compares that ID with child terminal state and repairs a missing parent event once. Child permission requests go directly to the active user approval UI and remain audited only in the child session. Full child transcripts and configuration never enter the parent journal.
 
@@ -422,7 +422,7 @@ for (const line of lines) {
 Key methods for working with sessions programmatically.
 
 ### Static Creation Methods
-- `SessionManager.create(cwd, sessionDir?, { id?, mode?, cwdOrigin?, permissionMode?, reviewerEnabled? })` - Create a session; omitted mode defaults to Code/Auto
+- `SessionManager.create(cwd, sessionDir?, { id?, mode?, cwdOrigin?, permissionMode? })` - Create a session; omitted permission mode defaults to Ask
 - `SessionManager.open(path, sessionDir?)` - Open existing session file
 - `SessionManager.continueRecent(cwd, sessionDir?, { mode? })` - Open the latest session; use the option only when no session exists
 - `SessionManager.inMemory(cwd?, options?)` - No file persistence
@@ -439,7 +439,7 @@ Key methods for working with sessions programmatically.
 - `createBranchedSessionManager(leafId)` - Create a branch manager that inherits the source mode
 - `getMode()` - Return the effective mode, including the legacy `code` fallback
 - `getCwdOrigin()` - Return `managed` or `user-selected`
-- `getPermissionSettings()` - Return the effective permission mode and reviewer state
+- `getPermissionSettings()` - Return the effective Ask/Full permission mode
 - `setPermissionSettings(settings)` - Append non-tree permission metadata
 
 ### Instance Methods - Appending (all return entry ID)

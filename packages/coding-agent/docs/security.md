@@ -28,9 +28,9 @@ Declining trust skips protected resources. `AGENTS.md` and `CLAUDE.md` context f
 
 Non-interactive modes (`-p`, `--mode json`, and `--mode rpc`) do not show a trust prompt. Without an applicable saved trust decision, `defaultProjectTrust: "ask"` and `"never"` ignore such resources, while `"always"` trusts them. Use `--approve`/`-a` or `--no-approve`/`-na` to override project trust for one run.
 
-## Action Permissions and Sandbox
+## Action Permissions
 
-Every session stores one of three permission modes: Ask, Auto, or Full. Ask and Auto classify model tool calls and manual shell commands, issue exact one-action grants, and run local Bash/`grep`/`find` child processes through SRT. Full explicitly bypasses ArcMind approvals and SRT. See [Permissions and Sandbox](permissions.md) for the decision table, reviewer inputs, sensitive paths and environment, Windows setup, native helper packaging, and fail-closed behavior.
+Every session stores Ask or Full. Ask automatically permits only proven safe built-in structured reads and fixed no-host controls; every other model tool action needs one explicit **Allow once** decision. Full skips ArcMind action approval. Approved built-ins run directly as the current OS user—ArcMind does not provide an OS sandbox. See [Permissions](permissions.md) for the exact decision table and fail-closed behavior.
 
 This boundary limits model-initiated actions; it is not isolation for trusted in-process code. Extensions are TypeScript modules that run with the ArcMind process's OS permissions during load and event hooks. Installing or configuring an extension, SDK integration, or future MCP server means trusting that code. Model-facing calls exposed by those integrations are still treated as custom permission actions.
 
@@ -56,4 +56,4 @@ If you bind-mount a host workspace read/write, writes from inside the container 
 
 To report a security issue, follow the repository [Security Policy](https://github.com/arcmind/arcmind/blob/main/SECURITY.md). Do not open a public issue for security-sensitive reports.
 
-Expected Full-mode behavior, prompt injection from untrusted content, and behavior of user-installed trusted code are generally outside the security boundary unless a report demonstrates a permission/SRT bypass or shows ArcMind granting access beyond the documented boundary.
+Expected Full-mode behavior, prompt injection from untrusted content, and behavior of user-installed trusted code are generally outside the security boundary unless a report demonstrates an approval bypass or shows ArcMind granting access beyond the documented boundary.
