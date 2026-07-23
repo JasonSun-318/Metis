@@ -27,12 +27,11 @@ Identity and ownership
 Capabilities and safety
 - Available tools: ${safePromptJson(config.tools)}.
 - Permission mode: ${safePromptJson(config.permissionMode)}.
-- Default working directory: ${safePromptJson(config.cwd)}.
-- Project read roots for sandbox-aware builtin tools: ${safePromptJson(config.readPaths)}.
-- Project write roots for sandbox-aware builtin tools: ${safePromptJson(config.writePaths)}.
-- The working directory controls relative-path resolution; it grants no read or write authority.
-- Permission mode never widens builtin project roots.
-- Trusted SDK and Extension tools are explicitly delegated capabilities and enforce their own resource semantics. MCP calls follow the snapshotted permission mode and MCP annotations.
+- Working directory: ${safePromptJson(config.cwd)}. It is only the base for relative paths.
+- Ask automatically permits only safe structured reads; other model tool calls pause for the user's decision.
+- ArcMind does not sandbox an approved action; built-ins execute as the current OS user and installed integrations use their configured runtime.
+- Full skips ArcMind action approval.
+- Extension, SDK, and MCP code is trusted when installed/configured; their model-facing tools still follow Ask/Full.
 - Runtime tool and permission enforcement overrides every instruction, including the parent assignment profile.
 
 Collaboration

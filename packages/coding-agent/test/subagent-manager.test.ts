@@ -5,6 +5,7 @@ import { getModel } from "@arcmind/ai/compat";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AgentSession } from "../src/core/agent-session.ts";
 import type { AgentSessionRuntime } from "../src/core/agent-session-runtime.ts";
+import type { PermissionMode } from "../src/core/permission-mode.ts";
 import type { PermissionApprovalRequest } from "../src/core/permission-policy.ts";
 import { SessionManager } from "../src/core/session-manager.ts";
 import { type ChildRuntimeFactoryInput, SubagentManager } from "../src/core/subagents/manager.ts";
@@ -108,12 +109,17 @@ interface Harness {
 	readonly pendingMailbox: Set<string>;
 }
 
-function setup(
-	onPermissionRequest?: (request: PermissionApprovalRequest) => Promise<{ decision: "allow" | "deny" }>,
-	factoryGate?: Promise<void>,
-	scheduler = new SubagentScheduler(4, 4),
-	childRuntimeTools?: readonly string[],
-): Harness {
+interface SetupOptions {
+	readonly parentPermissionMode?: PermissionMode;
+	readonly onPermissionRequest?: (
+		request: PermissionApprovalRequest,
+	) => Promise<{ decision: "allow" | "deny"; reason?: string }>;
+	readonly factoryGate?: Promise<void>;
+	readonly scheduler?: SubagentScheduler;
+	readonly childRuntimeTools?: readonly string[];
+}
+
+function setup(options: SetupOptions = {}): Harness {
 	const root = mkdtempSync(join(tmpdir(), "arcmind-subagent-manager-"));
 	const cwd = join(root, "project");
 	const agentDir = join(root, "agent");
@@ -121,8 +127,7 @@ function setup(
 	const parentManager = SessionManager.create(cwd, join(root, "sessions"), {
 		id: "parent-session-1",
 		mode: "code",
-		permissionMode: "full",
-		reviewerEnabled: true,
+		permissionMode: options.parentPermissionMode ?? "full",
 	});
 	const model = getModel("anthropic", "claude-sonnet-4-5")!;
 	const pendingMailbox = new Set<string>();
@@ -155,13 +160,13 @@ function setup(
 		parentSessionManager: parentManager,
 		agentDir,
 		workspaceRoots: [cwd],
-		scheduler,
+		scheduler: options.scheduler ?? new SubagentScheduler(4, 4),
 		createId: () => `child-session-${++sequence}`,
-		onPermissionRequest,
+		onPermissionRequest: options.onPermissionRequest,
 		createChildRuntime: async (input) => {
 			factoryInputs.push(input);
-			await factoryGate;
-			const runtime = new FakeChildRuntime(input.sessionManager, childRuntimeTools ?? input.config.tools);
+			await options.factoryGate;
+			const runtime = new FakeChildRuntime(input.sessionManager, options.childRuntimeTools ?? input.config.tools);
 			runtimes.push(runtime);
 			return runtime as unknown as AgentSessionRuntime;
 		},
@@ -195,11 +200,7 @@ describe("SubagentManager", () => {
 		const harness = setup();
 		const created = await spawn(harness);
 		const first = harness.runtimes[0]!;
-		expect(harness.factoryInputs[0]!.capabilityScope).toEqual({
-			readPaths: [realpathSync(join(harness.root, "project"))],
-			writePaths: [realpathSync(join(harness.root, "project"))],
-			workspaceRoots: [realpathSync(join(harness.root, "project"))],
-		});
+		expect(harness.factoryInputs[0]!.permissionModeCeiling()).toBe("full");
 		first.session.settle("verified handoff");
 		await expect(harness.manager.wait({ agentIds: [created.agentId] })).resolves.toMatchObject({
 			updatedAgentIds: [created.agentId],
@@ -216,6 +217,172 @@ describe("SubagentManager", () => {
 		harness.runtimes[1]!.session.settle("edge case checked");
 		await vi.waitFor(() => expect(harness.manager.listSummaries()[0]?.finalSummary).toBe("edge case checked"));
 		expect(harness.manager.listSummaries()[0]?.agentId).toBe(created.agentId);
+	});
+
+	it("inherits the parent mode and rejects a broader child", async () => {
+		const harness = setup({ parentPermissionMode: "ask" });
+		const inherited = await spawn(harness);
+		expect(inherited.permissionMode).toBe("ask");
+		expect(harness.runtimes[0]!.session.sessionManager.getPermissionSettings()).toEqual({ mode: "ask" });
+		await expect(
+			harness.manager.spawn({
+				name: "too-wide",
+				task: "work",
+				tools: ["read"],
+				permissionMode: "full",
+			}),
+		).rejects.toThrow("Child permissions cannot be broader than parent permissions");
+		harness.runtimes[0]!.session.settle();
+	});
+
+	it("lets a Full parent choose Ask or Full for a new child", async () => {
+		const harness = setup({ parentPermissionMode: "full" });
+		const ask = await harness.manager.spawn({
+			name: "narrow",
+			task: "work narrowly",
+			tools: ["read"],
+			permissionMode: "ask",
+		});
+		const full = await harness.manager.spawn({
+			name: "wide",
+			task: "work broadly",
+			tools: ["read"],
+			permissionMode: "full",
+		});
+		expect(ask.permissionMode).toBe("ask");
+		expect(full.permissionMode).toBe("full");
+		await vi.waitFor(() => expect(harness.runtimes).toHaveLength(2));
+		harness.runtimes[0]!.session.settle();
+		harness.runtimes[1]!.session.settle();
+	});
+
+	it("downgrades a running Full child and never re-upgrades it", async () => {
+		const harness = setup({ parentPermissionMode: "full" });
+		const child = await spawn(harness);
+		expect(harness.runtimes[0]!.session.sessionManager.getPermissionSettings()).toEqual({ mode: "full" });
+
+		harness.parentManager.setPermissionSettings({ mode: "ask" });
+		expect(harness.factoryInputs[0]!.permissionModeCeiling()).toBe("ask");
+		expect(harness.runtimes[0]!.session.sessionManager.getPermissionSettings()).toEqual({ mode: "ask" });
+		expect(harness.manager.listSummaries()[0]).toMatchObject({
+			agentId: child.agentId,
+			configuration: { permissionMode: "ask" },
+		});
+
+		harness.parentManager.setPermissionSettings({ mode: "full" });
+		expect(harness.factoryInputs[0]!.permissionModeCeiling()).toBe("ask");
+		expect(harness.runtimes[0]!.session.sessionManager.getPermissionSettings()).toEqual({ mode: "ask" });
+		harness.runtimes[0]!.session.settle();
+	});
+
+	it("applies a parent downgrade before a starting child's first prompt", async () => {
+		const gate = deferred();
+		const harness = setup({ parentPermissionMode: "full", factoryGate: gate.promise });
+		const child = await harness.manager.spawn({
+			name: "starting",
+			task: "start later",
+			tools: ["read"],
+		});
+		await vi.waitFor(() => expect(harness.factoryInputs).toHaveLength(1));
+		harness.parentManager.setPermissionSettings({ mode: "ask" });
+		expect(harness.factoryInputs[0]!.permissionModeCeiling()).toBe("ask");
+
+		gate.resolve();
+		await vi.waitFor(() => expect(harness.runtimes).toHaveLength(1));
+		expect(harness.runtimes[0]!.session.sessionManager.getPermissionSettings()).toEqual({ mode: "ask" });
+		expect(harness.runtimes[0]!.prompts).toEqual(["start later"]);
+		expect(harness.manager.listSummaries()[0]).toMatchObject({
+			agentId: child.agentId,
+			configuration: { permissionMode: "ask" },
+		});
+		harness.runtimes[0]!.session.settle();
+	});
+
+	it("persists Ask for a queued child before it starts", async () => {
+		const harness = setup({
+			parentPermissionMode: "full",
+			scheduler: new SubagentScheduler(1, 1),
+		});
+		await spawn(harness, "blocker");
+		const queued = await harness.manager.spawn({
+			name: "queued",
+			task: "queued task",
+			tools: ["read"],
+		});
+		expect(queued.status).toBe("queued");
+
+		harness.parentManager.setPermissionSettings({ mode: "ask" });
+		expect(await harness.manager.readJournal(queued.agentId)).toEqual(
+			expect.arrayContaining([expect.objectContaining({ type: "session_permissions", permissionMode: "ask" })]),
+		);
+
+		harness.runtimes[0]!.session.settle();
+		await vi.waitFor(() => expect(harness.runtimes).toHaveLength(2));
+		expect(harness.runtimes[1]!.session.sessionManager.getPermissionSettings()).toEqual({ mode: "ask" });
+		harness.runtimes[1]!.session.settle();
+	});
+
+	it("persists a parent downgrade into a cold completed child and never re-upgrades it", async () => {
+		const harness = setup({ parentPermissionMode: "full" });
+		const child = await spawn(harness);
+		const childPath = harness.factoryInputs[0]!.sessionManager.getSessionFile()!;
+		harness.runtimes[0]!.session.settle();
+		await vi.waitFor(() => expect(harness.manager.listSummaries()[0]?.status).toBe("done"));
+		await vi.waitFor(() => expect(harness.runtimes[0]!.disposed).toBe(true));
+
+		harness.parentManager.setPermissionSettings({ mode: "ask" });
+		const downgraded = SessionManager.open(childPath);
+		expect(downgraded.getPermissionSettings()).toEqual({ mode: "ask" });
+		downgraded.close();
+		expect(harness.manager.listSummaries()[0]).toMatchObject({
+			agentId: child.agentId,
+			configuration: { permissionMode: "ask" },
+		});
+
+		harness.parentManager.setPermissionSettings({ mode: "full" });
+		const reopened = SessionManager.open(childPath);
+		expect(reopened.getPermissionSettings()).toEqual({ mode: "ask" });
+		reopened.close();
+	});
+
+	it("reports a cold child downgrade persistence failure instead of hiding it", async () => {
+		const harness = setup({ parentPermissionMode: "full" });
+		await spawn(harness);
+		harness.runtimes[0]!.session.settle();
+		await vi.waitFor(() => expect(harness.runtimes[0]!.disposed).toBe(true));
+		const open = vi.spyOn(SessionManager, "open").mockImplementationOnce(() => {
+			throw new Error("child journal unavailable");
+		});
+
+		expect(() => harness.parentManager.setPermissionSettings({ mode: "ask" })).toThrow(
+			"Failed to persist Ask permission for every child session",
+		);
+		expect(harness.manager.listSummaries()[0]).toMatchObject({
+			configuration: { permissionMode: "ask" },
+		});
+		open.mockRestore();
+	});
+
+	it("fails closed when a child approval has no parent UI", async () => {
+		const harness = setup();
+		await spawn(harness);
+		const callback = harness.factoryInputs[0]!.onPermissionRequest!;
+		await expect(
+			callback({
+				action: {
+					actionId: "action-1",
+					toolName: "bash",
+					provenance: "builtin",
+					risks: ["shell"],
+					paths: [],
+					networkTargets: [],
+					command: "pwd",
+				},
+				args: { command: "pwd" },
+				reason: "Shell execution",
+			}),
+		).rejects.toThrow("No interactive parent session owner is available");
+		harness.runtimes[0]!.session.settle();
 	});
 
 	it("maps provider errors to failed and exposes only bounded visible activity", async () => {
@@ -241,7 +408,7 @@ describe("SubagentManager", () => {
 	});
 
 	it("fails visibly when a cold runtime cannot recreate the exact configured tool set", async () => {
-		const harness = setup(undefined, undefined, new SubagentScheduler(4, 4), []);
+		const harness = setup({ scheduler: new SubagentScheduler(4, 4), childRuntimeTools: [] });
 		const created = await harness.manager.spawn({
 			name: "missing-tool",
 			task: "Use the delegated reader",
@@ -321,7 +488,7 @@ describe("SubagentManager", () => {
 
 	it("forwards approvals to the user without notifying the parent model", async () => {
 		const approvals = vi.fn(async (_request: PermissionApprovalRequest) => ({ decision: "allow" as const }));
-		const harness = setup(approvals);
+		const harness = setup({ onPermissionRequest: approvals });
 		const created = await spawn(harness);
 		const events: string[] = [];
 		harness.manager.subscribe((event) => events.push(event.type));
@@ -340,15 +507,16 @@ describe("SubagentManager", () => {
 					risks: ["network"],
 					paths: [],
 					networkTargets: [],
-					sandbox: "workspace-write",
 				},
 				args: { command: "curl example.test" },
-				userMessages: [],
 				reason: "network requires confirmation",
-				fullOnceRequired: false,
 			}),
 		).resolves.toEqual({ decision: "allow" });
-		expect(approvals.mock.calls[0]?.[0].reason).toContain(`Subagent researcher (${created.agentId})`);
+		expect(approvals.mock.calls[0]?.[0].actor).toEqual({
+			type: "subagent",
+			id: created.agentId,
+			name: "researcher",
+		});
 		expect(events).toContain("approval_required");
 		await Promise.resolve();
 		expect(waitResolved).toBe(false);
@@ -362,7 +530,7 @@ describe("SubagentManager", () => {
 
 	it("does not resolve wait for queued or running progress", async () => {
 		const gate = deferred();
-		const harness = setup(undefined, gate.promise);
+		const harness = setup({ factoryGate: gate.promise });
 		const created = await harness.manager.spawn({ name: "wait-child", task: "Wait", tools: ["read"] });
 		let resolved = false;
 		const waiting = harness.manager.wait({ agentIds: [created.agentId] }).then((result) => {
@@ -385,7 +553,7 @@ describe("SubagentManager", () => {
 	});
 
 	it("runs the original task before follow-ups queued during scheduler admission", async () => {
-		const harness = setup(undefined, undefined, new SubagentScheduler(1, 1));
+		const harness = setup({ scheduler: new SubagentScheduler(1, 1) });
 		await spawn(harness, "blocker");
 		const queued = await harness.manager.spawn({
 			name: "queued-child",
@@ -410,7 +578,7 @@ describe("SubagentManager", () => {
 		);
 	});
 
-	it("canonicalizes relative roots and reports overlapping child scopes without rejecting them", async () => {
+	it("canonicalizes a child cwd inside the parent workspace", async () => {
 		const harness = setup();
 		const project = join(harness.root, "project");
 		mkdirSync(join(project, "frontend"));
@@ -419,24 +587,14 @@ describe("SubagentManager", () => {
 			task: "Own frontend",
 			tools: [],
 			cwd: "frontend",
-			readPaths: ["."],
-			writePaths: ["."],
-		});
-		const second = await harness.manager.spawn({
-			name: "frontend-b",
-			task: "Share frontend",
-			tools: [],
-			cwd: "frontend",
-			readPaths: ["."],
-			writePaths: ["."],
 		});
 
 		expect(first.cwd).toBe(realpathSync(join(project, "frontend")));
-		expect(first.readPaths).toEqual([realpathSync(join(project, "frontend"))]);
-		expect(second.overlaps).toEqual([{ agentId: first.agentId, name: "frontend-a" }]);
-		await vi.waitFor(() => expect(harness.runtimes).toHaveLength(2));
+		expect(first).not.toHaveProperty("readPaths");
+		expect(first).not.toHaveProperty("writePaths");
+		expect(first).not.toHaveProperty("overlaps");
+		await vi.waitFor(() => expect(harness.runtimes).toHaveLength(1));
 		harness.runtimes[0]!.session.settle();
-		harness.runtimes[1]!.session.settle();
 	});
 
 	it("closes idempotently only after a running child is drained and deleted", async () => {
@@ -470,7 +628,7 @@ describe("SubagentManager", () => {
 
 	it("lets close take ownership while the child runtime is still starting", async () => {
 		const gate = deferred();
-		const harness = setup(undefined, gate.promise);
+		const harness = setup({ factoryGate: gate.promise });
 		const created = await harness.manager.spawn({
 			name: "starting-child",
 			task: "Start slowly",
@@ -509,9 +667,9 @@ describe("SubagentManager", () => {
 		await expect(harness.manager.spawn({ name: "fork-zero", task: "task", tools: [], forkTurns: 0 })).rejects.toThrow(
 			"1 through 1000",
 		);
-		await expect(
-			harness.manager.spawn({ name: "escape", task: "task", tools: [], readPaths: [harness.root] }),
-		).rejects.toThrow("authorized workspace root");
+		await expect(harness.manager.spawn({ name: "escape", task: "task", tools: [], cwd: ".." })).rejects.toThrow(
+			"parent workspace",
+		);
 		expect(harness.manager.listSummaries()).toEqual([]);
 	});
 });

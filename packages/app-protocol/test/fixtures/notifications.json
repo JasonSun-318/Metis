@@ -135,8 +135,6 @@
 								"model": { "provider": "openai", "modelId": "gpt-test" },
 								"thinkingLevel": "max",
 								"cwd": "/tmp/arcmind-project",
-								"readPaths": ["/tmp/arcmind-project"],
-								"writePaths": ["/tmp/arcmind-project"],
 								"forkTurns": 0,
 								"timeoutSeconds": 1800
 							},

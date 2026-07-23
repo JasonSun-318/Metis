@@ -1,20 +1,18 @@
+import { writeFileSync } from "node:fs";
 import type { AgentTool } from "@arcmind/agent-core";
-import { fauxAssistantMessage, fauxToolCall, type SimpleStreamOptions } from "@arcmind/ai";
+import { fauxAssistantMessage, fauxToolCall } from "@arcmind/ai";
 import { Type } from "typebox";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-	type SandboxManagerAdapter,
-	SandboxRuntimeCoordinator,
-	type SandboxSpawnInput,
-} from "../src/core/sandbox-runtime.ts";
-import type { BashOperations } from "../src/core/tools/bash.ts";
+import type { PermissionApprovalRequest } from "../src/core/permission-policy.ts";
 import { createHarness, getMessageText, type Harness } from "./suite/harness.ts";
 
-function customTool(
-	execute = vi.fn(async () => ({ content: [{ type: "text" as const, text: "done" }], details: {} })),
-) {
+function customTool(name = "custom_action") {
+	const execute = vi.fn(async (_toolCallId: string, _params: unknown) => ({
+		content: [{ type: "text" as const, text: "done" }],
+		details: {},
+	}));
 	const tool: AgentTool = {
-		name: "custom_action",
+		name,
 		label: "Custom action",
 		description: "Test custom action",
 		parameters: Type.Object({ value: Type.String() }),
@@ -30,14 +28,12 @@ describe("AgentSession permission enforcement", () => {
 		while (harnesses.length > 0) await harnesses.pop()?.cleanup();
 	});
 
-	it("uses user approval without reviewer in Ask mode and audits the decision", async () => {
+	it("asks once, audits once, and executes a custom tool in Ask", async () => {
 		const { tool, execute } = customTool();
-		const reviewer = vi.fn(async () => '{"decision":"allow","reason":"ok"}');
-		const requestApproval = vi.fn(async () => ({ decision: "allow" as const }));
+		const requestApproval = vi.fn(async (_request: PermissionApprovalRequest) => ({ decision: "allow" as const }));
 		const harness = await createHarness({
 			tools: [tool],
-			permissionSettings: { mode: "ask", reviewerEnabled: true },
-			permissionReviewerStream: reviewer,
+			permissionSettings: { mode: "ask" },
 			requestPermissionApproval: requestApproval,
 		});
 		harnesses.push(harness);
@@ -46,163 +42,95 @@ describe("AgentSession permission enforcement", () => {
 			fauxAssistantMessage("done"),
 		]);
 
-		await harness.session.prompt("run the custom action");
+		await harness.session.prompt("run it");
 
-		expect(reviewer).not.toHaveBeenCalled();
 		expect(requestApproval).toHaveBeenCalledOnce();
 		expect(execute).toHaveBeenCalledOnce();
-		expect(harness.sessionManager.getDurableJournalSnapshot()).toEqual(
-			expect.arrayContaining([
-				expect.objectContaining({
-					type: "session_permission_decision",
-					source: "user",
-					decision: "allow",
-					toolName: "custom_action",
-				}),
-			]),
-		);
+		expect(
+			harness.sessionManager
+				.getDurableJournalSnapshot()
+				.filter((entry) => entry.type === "session_permission_decision"),
+		).toEqual([expect.objectContaining({ source: "user", decision: "allow", toolName: "custom_action" })]);
 	});
 
-	it("lets the current-session reviewer allow one Auto action without user approval", async () => {
-		const { tool, execute } = customTool();
-		const reviewer = vi.fn(async () => '{"decision":"allow","reason":"Matches the explicit request"}');
-		const requestApproval = vi.fn(async () => ({ decision: "deny" as const }));
-		const harness = await createHarness({
-			tools: [tool],
-			permissionSettings: { mode: "auto", reviewerEnabled: true },
-			permissionReviewerStream: reviewer,
-			requestPermissionApproval: requestApproval,
-		});
-		harnesses.push(harness);
-		harness.setResponses([
-			fauxAssistantMessage([fauxToolCall("custom_action", { value: "x" })], { stopReason: "toolUse" }),
-			fauxAssistantMessage("done"),
-		]);
-
-		await harness.session.prompt("run the custom action");
-
-		expect(reviewer).toHaveBeenCalledOnce();
-		expect(requestApproval).not.toHaveBeenCalled();
-		expect(execute).toHaveBeenCalledOnce();
-		expect(harness.sessionManager.getDurableJournalSnapshot()).toEqual(
-			expect.arrayContaining([
-				expect.objectContaining({
-					type: "session_permission_decision",
-					source: "reviewer",
-					decision: "allow",
-				}),
-			]),
-		);
-	});
-
-	it("runs the reviewer with thinking off or the model's lowest supported level", async () => {
-		const { tool } = customTool();
-		const harness = await createHarness({
-			models: [{ id: "faux-1", reasoning: true }],
-			tools: [tool],
-			permissionSettings: { mode: "auto", reviewerEnabled: true },
-		});
-		harnesses.push(harness);
-		const reviewerReasoning: Array<SimpleStreamOptions["reasoning"]> = [];
-		const reviewerResponse = (_context: unknown, options: unknown) => {
-			reviewerReasoning.push((options as SimpleStreamOptions | undefined)?.reasoning);
-			return fauxAssistantMessage('{"decision":"allow","reason":"Matches the request"}');
-		};
-
-		harness.setResponses([
-			fauxAssistantMessage([fauxToolCall("custom_action", { value: "off" })], { stopReason: "toolUse" }),
-			reviewerResponse,
-			fauxAssistantMessage("done"),
-		]);
-		await harness.session.prompt("run it");
-
-		Object.assign(harness.getModel(), { thinkingLevelMap: { off: null, minimal: null } });
-		harness.setResponses([
-			fauxAssistantMessage([fauxToolCall("custom_action", { value: "low" })], { stopReason: "toolUse" }),
-			reviewerResponse,
-			fauxAssistantMessage("done"),
-		]);
-		await harness.session.prompt("run it again");
-
-		expect(reviewerReasoning).toEqual([undefined, "low"]);
-	});
-
-	it("escalates reviewer ask to the user and records both decisions", async () => {
-		const { tool } = customTool();
-		const harness = await createHarness({
-			tools: [tool],
-			permissionSettings: { mode: "auto", reviewerEnabled: true },
-			permissionReviewerStream: async () => '{"decision":"ask","reason":"Target is ambiguous"}',
-			requestPermissionApproval: async () => ({ decision: "allow" }),
-		});
-		harnesses.push(harness);
-		harness.setResponses([
-			fauxAssistantMessage([fauxToolCall("custom_action", { value: "x" })], { stopReason: "toolUse" }),
-			fauxAssistantMessage("done"),
-		]);
-
-		await harness.session.prompt("run it");
-
-		const decisions = harness.sessionManager
-			.getDurableJournalSnapshot()
-			.filter((entry) => entry.type === "session_permission_decision");
-		expect(decisions).toEqual([
-			expect.objectContaining({ source: "reviewer", decision: "ask" }),
-			expect.objectContaining({ source: "user", decision: "allow" }),
-		]);
-	});
-
-	it("fails closed when approval is required but no UI exists", async () => {
+	it("denies without execution and writes one user decision", async () => {
 		const { tool, execute } = customTool();
 		const harness = await createHarness({
 			tools: [tool],
-			permissionSettings: { mode: "ask", reviewerEnabled: true },
+			permissionSettings: { mode: "ask" },
+			requestPermissionApproval: async () => ({ decision: "deny", reason: "No" }),
 		});
 		harnesses.push(harness);
 		harness.setResponses([
 			fauxAssistantMessage([fauxToolCall("custom_action", { value: "x" })], { stopReason: "toolUse" }),
+			fauxAssistantMessage("done"),
 		]);
 
 		await harness.session.prompt("run it");
+
 		expect(execute).not.toHaveBeenCalled();
 		expect(
 			harness.session.messages.some(
-				(message) =>
-					message.role === "toolResult" && getMessageText(message).includes("no approval UI is available"),
+				(message) => message.role === "toolResult" && getMessageText(message).includes("Permission denied"),
 			),
 		).toBe(true);
+		expect(
+			harness.sessionManager
+				.getDurableJournalSnapshot()
+				.filter((entry) => entry.type === "session_permission_decision"),
+		).toEqual([expect.objectContaining({ source: "user", decision: "deny" })]);
 	});
 
-	it("consumes manual bash approval exactly once", async () => {
+	it("fails closed without UI and does not record a false user denial", async () => {
+		const { tool, execute } = customTool();
 		const harness = await createHarness({
-			permissionSettings: { mode: "ask", reviewerEnabled: true },
-			requestPermissionApproval: async () => ({ decision: "allow" }),
+			tools: [tool],
+			permissionSettings: { mode: "ask" },
 		});
 		harnesses.push(harness);
-		const operations: BashOperations = {
-			exec: async (_command, _cwd, options) => {
-				options.onData(Buffer.from("ok"));
-				return { exitCode: 0 };
-			},
-		};
-		const authorization = await harness.session.authorizeUserBash("echo ok");
+		harness.setResponses([
+			fauxAssistantMessage([fauxToolCall("custom_action", { value: "x" })], { stopReason: "toolUse" }),
+			fauxAssistantMessage("done"),
+		]);
 
-		await expect(
-			harness.session.executeBash("echo ok", undefined, { operations, authorization }),
-		).resolves.toMatchObject({ output: "ok" });
-		await expect(harness.session.executeBash("echo ok", undefined, { operations, authorization })).rejects.toThrow(
-			"Invalid or expired one-action permission grant",
-		);
+		await harness.session.prompt("run it");
+
+		expect(execute).not.toHaveBeenCalled();
+		expect(
+			harness.sessionManager
+				.getDurableJournalSnapshot()
+				.filter((entry) => entry.type === "session_permission_decision"),
+		).toEqual([]);
 	});
 
-	it("Full mode bypasses reviewer and user approval", async () => {
+	it("does not let approval UI mutate execution arguments", async () => {
 		const { tool, execute } = customTool();
-		const reviewer = vi.fn(async () => '{"decision":"deny","reason":"no"}');
+		const harness = await createHarness({
+			tools: [tool],
+			permissionSettings: { mode: "ask" },
+			requestPermissionApproval: async (request) => {
+				(request.args as { value: string }).value = "changed-in-ui";
+				return { decision: "allow" };
+			},
+		});
+		harnesses.push(harness);
+		harness.setResponses([
+			fauxAssistantMessage([fauxToolCall("custom_action", { value: "original" })], { stopReason: "toolUse" }),
+			fauxAssistantMessage("done"),
+		]);
+
+		await harness.session.prompt("run it");
+
+		expect(execute).toHaveBeenCalledOnce();
+		expect(execute.mock.calls[0]?.[1]).toEqual({ value: "original" });
+	});
+
+	it("executes in Full without approval or decision audit", async () => {
+		const { tool, execute } = customTool();
 		const requestApproval = vi.fn(async () => ({ decision: "deny" as const }));
 		const harness = await createHarness({
 			tools: [tool],
-			permissionSettings: { mode: "full", reviewerEnabled: true },
-			permissionReviewerStream: reviewer,
+			permissionSettings: { mode: "full" },
 			requestPermissionApproval: requestApproval,
 		});
 		harnesses.push(harness);
@@ -214,155 +142,127 @@ describe("AgentSession permission enforcement", () => {
 		await harness.session.prompt("run it");
 
 		expect(execute).toHaveBeenCalledOnce();
-		expect(reviewer).not.toHaveBeenCalled();
 		expect(requestApproval).not.toHaveBeenCalled();
+		expect(
+			harness.sessionManager
+				.getDurableJournalSnapshot()
+				.filter((entry) => entry.type === "session_permission_decision"),
+		).toEqual([]);
 	});
 
-	it("keeps explicitly delegated SDK tools under the child permission mode", async () => {
-		const { tool, execute } = customTool();
-		const requestApproval = vi.fn(async () => ({ decision: "allow" as const }));
+	it("runs a proven structured read in Ask without approval", async () => {
+		const requestApproval = vi.fn(async () => ({ decision: "deny" as const }));
 		const harness = await createHarness({
-			tools: [tool],
-			permissionSettings: { mode: "ask", reviewerEnabled: true },
+			permissionSettings: { mode: "ask" },
 			requestPermissionApproval: requestApproval,
-			childCapabilityScope: {
-				readPaths: ["/workspace/frontend"],
-				writePaths: ["/workspace/frontend"],
-				workspaceRoots: ["/workspace"],
+		});
+		harnesses.push(harness);
+		const path = `${harness.tempDir}/safe.txt`;
+		writeFileSync(path, "safe\n");
+		harness.setResponses([
+			fauxAssistantMessage([fauxToolCall("read", { path })], { stopReason: "toolUse" }),
+			fauxAssistantMessage("done"),
+		]);
+
+		await harness.session.prompt("read it");
+
+		expect(requestApproval).not.toHaveBeenCalled();
+		expect(
+			harness.session.messages.some(
+				(message) => message.role === "toolResult" && getMessageText(message).includes("safe"),
+			),
+		).toBe(true);
+	});
+
+	it("serializes parallel approval callbacks", async () => {
+		const first = customTool("custom_one");
+		const second = customTool("custom_two");
+		let active = 0;
+		let maximum = 0;
+		const harness = await createHarness({
+			tools: [first.tool, second.tool],
+			permissionSettings: { mode: "ask" },
+			requestPermissionApproval: async () => {
+				active += 1;
+				maximum = Math.max(maximum, active);
+				await Promise.resolve();
+				active -= 1;
+				return { decision: "allow" };
 			},
 		});
 		harnesses.push(harness);
 		harness.setResponses([
-			fauxAssistantMessage([fauxToolCall("custom_action", { value: "/workspace/backend" })], {
-				stopReason: "toolUse",
-			}),
+			fauxAssistantMessage(
+				[fauxToolCall("custom_one", { value: "1" }), fauxToolCall("custom_two", { value: "2" })],
+				{ stopReason: "toolUse" },
+			),
 			fauxAssistantMessage("done"),
 		]);
 
-		await harness.session.prompt("run the delegated SDK tool");
+		await harness.session.prompt("run both");
+
+		expect(maximum).toBe(1);
+		expect(first.execute).toHaveBeenCalledOnce();
+		expect(second.execute).toHaveBeenCalledOnce();
+	});
+
+	it("automatically trusts only explicitly named host control tools", async () => {
+		const inspect = customTool("inspect_agents");
+		const spawn = customTool("spawn_agent");
+		const requestApproval = vi.fn(async (_request: PermissionApprovalRequest) => ({ decision: "allow" as const }));
+		const harness = await createHarness({
+			permissionSettings: { mode: "ask" },
+			requestPermissionApproval: requestApproval,
+		});
+		harnesses.push(harness);
+		harness.session.installHostTools([inspect.tool, spawn.tool] as never, {
+			automaticPermissionToolNames: ["inspect_agents"],
+		});
+		harness.setResponses([
+			fauxAssistantMessage(
+				[fauxToolCall("inspect_agents", { value: "inspect" }), fauxToolCall("spawn_agent", { value: "spawn" })],
+				{ stopReason: "toolUse" },
+			),
+			fauxAssistantMessage("done"),
+		]);
+
+		await harness.session.prompt("inspect and spawn");
+
+		expect(inspect.execute).toHaveBeenCalledOnce();
+		expect(spawn.execute).toHaveBeenCalledOnce();
+		expect(requestApproval).toHaveBeenCalledOnce();
+		expect(requestApproval.mock.calls[0]?.[0].action.toolName).toBe("spawn_agent");
+	});
+
+	it("does not transfer host-control trust to a same-name replacement definition", async () => {
+		const inspect = customTool("inspect_agents");
+		const requestApproval = vi.fn(async (_request: PermissionApprovalRequest) => ({ decision: "allow" as const }));
+		const harness = await createHarness({
+			permissionSettings: { mode: "ask" },
+			requestPermissionApproval: requestApproval,
+		});
+		harnesses.push(harness);
+		harness.session.installHostTools([inspect.tool] as never, {
+			automaticPermissionToolNames: ["inspect_agents"],
+		});
+		const registry = (
+			harness.session as unknown as {
+				_toolDefinitions: Map<string, { definition: AgentTool; sourceInfo: unknown }>;
+			}
+		)._toolDefinitions;
+		const registered = registry.get("inspect_agents")!;
+		registry.set("inspect_agents", {
+			...registered,
+			definition: { ...registered.definition },
+		});
+		harness.setResponses([
+			fauxAssistantMessage([fauxToolCall("inspect_agents", { value: "inspect" })], { stopReason: "toolUse" }),
+			fauxAssistantMessage("done"),
+		]);
+
+		await harness.session.prompt("inspect");
 
 		expect(requestApproval).toHaveBeenCalledOnce();
-		expect(execute).toHaveBeenCalledOnce();
-	});
-
-	it("enforces child filesystem roots even in Full mode", async () => {
-		const harness = await createHarness({
-			permissionSettings: { mode: "full", reviewerEnabled: true },
-			childCapabilityScope: {
-				readPaths: ["/assigned"],
-				writePaths: ["/assigned"],
-				workspaceRoots: ["/workspace"],
-			},
-		});
-		harnesses.push(harness);
-		harness.setResponses([
-			fauxAssistantMessage([fauxToolCall("write", { path: "/outside/result.txt", content: "forbidden" })], {
-				stopReason: "toolUse",
-			}),
-			fauxAssistantMessage("done"),
-		]);
-
-		await harness.session.prompt("write outside the assigned root");
-
-		expect(
-			harness.session.messages.some(
-				(message) =>
-					message.role === "toolResult" && getMessageText(message).includes("outside its assigned roots"),
-			),
-		).toBe(true);
-	});
-
-	it("runs an automatically allowed Ask-mode bash read through SRT with its returned environment", async () => {
-		const events: string[] = [];
-		const manager: SandboxManagerAdapter = {
-			isSupportedPlatform: () => true,
-			checkDependencies: () => ({ errors: [], warnings: [] }),
-			reset: async () => {
-				events.push("reset");
-			},
-			initialize: async () => {
-				events.push("initialize");
-			},
-			wrapWithSandboxArgv: async () => {
-				events.push("wrap");
-				return { argv: ["wrapped", "pwd"], env: { SRT_ONLY: "1" } };
-			},
-			cleanupAfterCommand: async () => {
-				events.push("cleanup");
-			},
-		};
-		let spawnInput: SandboxSpawnInput | undefined;
-		const sandboxRuntime = new SandboxRuntimeCoordinator({
-			agentDir: process.cwd(),
-			manager,
-			acquireLock: async () => async () => {
-				events.push("release");
-			},
-			spawn: async (input) => {
-				spawnInput = input;
-				events.push("spawn");
-				input.onData(Buffer.from("sandboxed"));
-				return { exitCode: 0 };
-			},
-		});
-		const harness = await createHarness({
-			permissionSettings: { mode: "ask", reviewerEnabled: true },
-			sandboxRuntime,
-		});
-		harnesses.push(harness);
-		harness.setResponses([
-			fauxAssistantMessage([fauxToolCall("bash", { command: "pwd" })], { stopReason: "toolUse" }),
-			fauxAssistantMessage("done"),
-		]);
-
-		await harness.session.prompt("show the current directory");
-
-		expect(spawnInput?.env).toEqual({ SRT_ONLY: "1" });
-		expect(events).toEqual(["reset", "initialize", "wrap", "spawn", "cleanup", "reset", "release"]);
-		expect(
-			harness.session.messages.some(
-				(message) => message.role === "toolResult" && getMessageText(message).includes("sandboxed"),
-			),
-		).toBe(true);
-	});
-
-	it("carries the child workspace read boundary into every sandboxed builtin command", async () => {
-		let initialized: Parameters<SandboxManagerAdapter["initialize"]>[0] | undefined;
-		const manager: SandboxManagerAdapter = {
-			isSupportedPlatform: () => true,
-			checkDependencies: () => ({ errors: [], warnings: [] }),
-			reset: async () => {},
-			initialize: async (config) => {
-				initialized = config;
-			},
-			wrapWithSandboxArgv: async () => ({ argv: ["wrapped", "pwd"], env: {} }),
-			cleanupAfterCommand: async () => {},
-		};
-		const sandboxRuntime = new SandboxRuntimeCoordinator({
-			agentDir: process.cwd(),
-			manager,
-			acquireLock: async () => async () => {},
-			spawn: async () => ({ exitCode: 0 }),
-		});
-		const harness = await createHarness({
-			permissionSettings: { mode: "full", reviewerEnabled: true },
-			sandboxRuntime,
-			childCapabilityScope: {
-				readPaths: ["/"],
-				writePaths: ["/"],
-				workspaceRoots: ["/workspace-boundary"],
-			},
-		});
-		harnesses.push(harness);
-		harness.setResponses([
-			fauxAssistantMessage([fauxToolCall("bash", { command: "pwd" })], { stopReason: "toolUse" }),
-			fauxAssistantMessage("done"),
-		]);
-
-		await harness.session.prompt("show the current directory");
-
-		expect(initialized?.filesystem.denyRead).toContain("/workspace-boundary");
-		expect(initialized?.filesystem.allowRead).toContain("/");
-		expect(initialized?.filesystem.allowWrite).not.toContain("/");
+		expect(inspect.execute).toHaveBeenCalledOnce();
 	});
 });

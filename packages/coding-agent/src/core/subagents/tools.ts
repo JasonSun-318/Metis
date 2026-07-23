@@ -43,7 +43,7 @@ const Spawn = Type.Object(
 			}),
 		),
 		permissionMode: Type.Optional(
-			Type.Union([Type.Literal("ask"), Type.Literal("auto"), Type.Literal("full")], {
+			Type.Union([Type.Literal("ask"), Type.Literal("full")], {
 				description:
 					"Optional child permission mode; cannot be broader than the parent and defaults to the parent mode.",
 			}),
@@ -67,23 +67,6 @@ const Spawn = Type.Object(
 			Type.String({
 				minLength: 1,
 				description: "Working directory used for relative path resolution; it grants no read or write authority.",
-			}),
-		),
-		readPaths: Type.Optional(
-			Type.Array(Type.String({ minLength: 1 }), {
-				minItems: 1,
-				maxItems: 32,
-				uniqueItems: true,
-				description: "Project directories the child may read; defaults to [cwd].",
-			}),
-		),
-		writePaths: Type.Optional(
-			Type.Array(Type.String({ minLength: 1 }), {
-				minItems: 1,
-				maxItems: 32,
-				uniqueItems: true,
-				description:
-					"Project directories the child may write; each must be inside a read path and the list defaults to [cwd].",
 			}),
 		),
 		forkTurns: Type.Optional(
@@ -275,7 +258,7 @@ export function createSubagentTools(host: SubagentToolHost): ToolDefinition[] {
 			name: "spawn_agent",
 			label: "Spawn agent",
 			description:
-				"Create one child agent for independent, bounded work. Use a unique name, a self-contained task, the minimum necessary tools, and narrow read/write roots.",
+				"Create one child agent for independent, bounded work. Use a unique name, a self-contained task, and the minimum necessary tools.",
 			parameters: Spawn,
 			renderResult: renderSubagentResult,
 			async execute(_id, params) {

@@ -42,46 +42,43 @@ describe("InteractionBroker", () => {
 			paths: ["/tmp/work/result.txt"],
 			networkTargets: [],
 			command: "curl https://example.test",
-			sandbox: "workspace-write",
 		},
 		args: { command: "curl https://example.test" },
-		userMessages: ["check the endpoint"],
-		reason: "Subagent researcher (agent-child-1): Network destination needs approval",
-		fullOnceRequired: false,
+		reason: "Network destination needs approval",
+		actor: { type: "subagent", id: "agent-child-1", name: "researcher" },
 		...overrides,
 	});
 
-	it("routes child permission details to the owning peer and supports Full once", async () => {
+	it("routes complete child permission details to the owning peer", async () => {
 		const interactionId = "00000000-0000-4000-8000-000000000320";
 		const broker = new InteractionBroker({ serverEpoch: EPOCH, createId: () => interactionId });
 		const peer = new FakePeer();
 		broker.assign(SESSION_ID, peer);
-		peer.response = { interactionId, kind: "select", choiceId: "choice:1" };
+		peer.response = { interactionId, kind: "select", choiceId: "choice:0" };
 
 		await expect(broker.requestPermissionApproval(SESSION_ID, childApproval())).resolves.toEqual({
 			decision: "allow",
-			fullOnce: true,
 		});
 		expect(peer.requests[0]).toMatchObject({
 			kind: "select",
 			title: "Approve bash?",
 			choices: [
 				{ id: "choice:0", label: "Allow once" },
-				{ id: "choice:1", label: "Run once with Full" },
-				{ id: "choice:2", label: "Deny" },
+				{ id: "choice:1", label: "Deny" },
 			],
 		});
-		expect(peer.requests[0]?.message).toContain("Subagent researcher (agent-child-1)");
+		expect(peer.requests[0]?.message).toContain("Subagent: researcher (agent-child-1)");
 		expect(peer.requests[0]?.message).toContain("Risk: network");
-		expect(peer.requests[0]?.message).toContain('Arguments: {"command":"curl https://example.test"}');
-		expect(peer.requests[0]?.message).toContain("Paths: /tmp/work/result.txt");
+		expect(peer.requests[0]?.message).toContain('"command": "curl https://example.test"');
+		expect(peer.requests[0]?.message).toContain("Path: /tmp/work/result.txt");
+		expect(peer.requests[0]?.message).toContain("ArcMind does not sandbox this action");
 	});
 
 	it("fails a child permission request closed without an owning peer", async () => {
 		const broker = new InteractionBroker({ serverEpoch: EPOCH });
-		await expect(broker.requestPermissionApproval(SESSION_ID, childApproval())).resolves.toMatchObject({
-			decision: "deny",
-		});
+		await expect(broker.requestPermissionApproval(SESSION_ID, childApproval())).rejects.toThrow(
+			"Approval was unavailable or cancelled",
+		);
 	});
 
 	it("denies project trust when no interaction owner is connected", async () => {

@@ -269,7 +269,6 @@ function validateCreationOnlyFlags(parsed: Args): void {
 	const conflictingFlags = [
 		parsed.cwd !== undefined ? "--cwd" : undefined,
 		parsed.permissionMode !== undefined ? "--permission-mode" : undefined,
-		parsed.reviewerEnabled !== undefined ? (parsed.reviewerEnabled ? "--reviewer" : "--no-reviewer") : undefined,
 		parsed.agentMode !== undefined && !parsed.continue ? "--agent-mode" : undefined,
 	].filter((flag): flag is string => flag !== undefined);
 	if (conflictingFlags.length === 0) return;
@@ -287,7 +286,6 @@ function rejectCreationOverridesForExistingSession(parsed: Args): void {
 		parsed.agentMode !== undefined ? "--agent-mode" : undefined,
 		parsed.cwd !== undefined ? "--cwd" : undefined,
 		parsed.permissionMode !== undefined ? "--permission-mode" : undefined,
-		parsed.reviewerEnabled !== undefined ? (parsed.reviewerEnabled ? "--reviewer" : "--no-reviewer") : undefined,
 	].filter((flag): flag is string => flag !== undefined);
 	if (conflictingFlags.length === 0) return;
 	console.error(
@@ -337,7 +335,6 @@ async function createSessionManager(
 			id: parsed.sessionId,
 			mode: parsed.agentMode,
 			permissionMode: parsed.permissionMode,
-			reviewerEnabled: parsed.reviewerEnabled,
 		});
 	}
 
@@ -437,7 +434,6 @@ async function createSessionManager(
 			mode,
 			cwdOrigin: workspace.cwdOrigin,
 			permissionMode: parsed.permissionMode,
-			reviewerEnabled: parsed.reviewerEnabled,
 		});
 	} catch (error) {
 		if (workspace.cwdOrigin === "managed") {
@@ -754,9 +750,9 @@ export async function main(args: string[], options?: MainOptions) {
 			projectTrustContext,
 			ultraAvailable,
 			childConfig,
-			childCapabilityScope,
+			permissionModeCeiling,
 		}) => {
-			if (childConfig && !childCapabilityScope) throw new Error("Child runtime is missing its capability snapshot");
+			if (childConfig && !permissionModeCeiling) throw new Error("Child runtime is missing its permission ceiling");
 			// Credentials remain shared through the locked auth file, while OAuth provider
 			// routing stays owned by this runtime's AuthStorage instance.
 			const authStorage = AuthStorage.create();
@@ -889,7 +885,7 @@ export async function main(args: string[], options?: MainOptions) {
 					ultraAvailable,
 					additionalSystemPrompt: childConfig ? buildChildSystemPrompt(childConfig) : undefined,
 					includeAutoMemory: childConfig ? false : undefined,
-					childCapabilityScope,
+					permissionModeCeiling,
 				});
 				servicesTransferred = true;
 				try {

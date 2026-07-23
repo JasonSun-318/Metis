@@ -105,15 +105,16 @@ describe("subagent control tools", () => {
 		expect(tools.map((tool) => tool.name)).toEqual([SUBAGENT_ACTIVATION_TOOL_NAME, ...SUBAGENT_TOOL_NAMES]);
 		const spawn = tools.find((tool) => tool.name === "spawn_agent")!;
 		expect(spawn.description).toBe(
-			"Create one child agent for independent, bounded work. Use a unique name, a self-contained task, the minimum necessary tools, and narrow read/write roots.",
+			"Create one child agent for independent, bounded work. Use a unique name, a self-contained task, and the minimum necessary tools.",
 		);
-		expect(spawn.parameters.properties.task.description).toBe(
+		const properties = (spawn.parameters as { properties: Record<string, { description?: string }> }).properties;
+		expect(properties.task?.description).toBe(
 			"Self-contained assignment with the objective, owned scope, non-goals, expected handoff, and focused verification.",
 		);
-		expect(spawn.parameters.properties.tools.description).toBe(
+		expect(properties.tools?.description).toBe(
 			"Minimum subset of the parent's active tools required for the assignment.",
 		);
-		expect(spawn.parameters.properties.forkTurns.description).toBe(
+		expect(properties.forkTurns?.description).toBe(
 			'Number of visible parent turns to copy, or "all"; omit to copy none.',
 		);
 		expect(Value.Check(spawn.parameters, { name: "researcher", task: "inspect", tools: [] })).toBe(true);
@@ -123,6 +124,22 @@ describe("subagent control tools", () => {
 		expect(Value.Check(spawn.parameters, { name: "researcher", task: "inspect", tools: [], forkTurns: 0 })).toBe(
 			false,
 		);
+		expect(
+			Value.Check(spawn.parameters, {
+				name: "researcher",
+				task: "inspect",
+				tools: [],
+				permissionMode: "auto",
+			}),
+		).toBe(false);
+		expect(
+			Value.Check(spawn.parameters, {
+				name: "researcher",
+				task: "inspect",
+				tools: [],
+				readPaths: ["/tmp"],
+			}),
+		).toBe(false);
 
 		const response = await execute(spawn, { name: "researcher", task: "inspect", tools: [] });
 		expect(manager.spawn).toHaveBeenCalledWith({

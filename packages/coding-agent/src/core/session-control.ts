@@ -1,7 +1,6 @@
 import { isAbsolute, normalize } from "node:path";
-import { isPathInside } from "../utils/paths.ts";
 import { isAgentMode } from "./agent-mode.ts";
-import { isPermissionMode, type PermissionMode } from "./permission-mode.ts";
+import { isPersistedPermissionMode, normalizePermissionMode, type PersistedPermissionMode } from "./permission-mode.ts";
 import type { SubagentConfig, SubagentStatus, SubagentTombstone, SubagentUsage } from "./subagents/types.ts";
 
 interface SessionControlEntryBase {
@@ -12,8 +11,9 @@ interface SessionControlEntryBase {
 
 export interface SessionPermissionsEntry extends SessionControlEntryBase {
 	readonly type: "session_permissions";
-	readonly permissionMode: PermissionMode;
-	readonly reviewerEnabled: boolean;
+	readonly permissionMode: PersistedPermissionMode;
+	/** Legacy v6/v7 field. New writers omit it. */
+	readonly reviewerEnabled?: boolean;
 }
 
 export type PermissionDecision = "allow" | "ask" | "deny";
@@ -253,8 +253,10 @@ function parseConfig(value: unknown): SubagentConfig {
 	const thinkingLevel = fields.get("thinkingLevel");
 	const timeoutSeconds = fields.get("timeoutSeconds");
 	if (!isAgentMode(mode)) invalid(`${label}.mode is invalid`);
-	if (!isPermissionMode(permissionMode)) invalid(`${label}.permissionMode is invalid`);
-	if (typeof reviewerEnabled !== "boolean") invalid(`${label}.reviewerEnabled must be a boolean`);
+	if (!isPersistedPermissionMode(permissionMode)) invalid(`${label}.permissionMode is invalid`);
+	if (reviewerEnabled !== undefined && typeof reviewerEnabled !== "boolean") {
+		invalid(`${label}.reviewerEnabled must be a boolean`);
+	}
 	if (typeof thinkingLevel !== "string" || !REAL_THINKING_LEVELS.has(thinkingLevel))
 		invalid(`${label}.thinkingLevel is invalid`);
 	if (!Number.isInteger(timeoutSeconds) || (timeoutSeconds as number) < 1 || (timeoutSeconds as number) > 1_800) {
@@ -262,11 +264,8 @@ function parseConfig(value: unknown): SubagentConfig {
 	}
 	const cwd = requiredString(fields, "cwd", { label, maxBytes: 32 * 1024 });
 	if (!isAbsolute(cwd) || normalize(cwd) !== cwd) invalid(`${label}.cwd must be a canonical absolute path`);
-	const readPaths = fields.has("readPaths") ? parsePaths(fields.get("readPaths"), `${label}.readPaths`) : [cwd];
-	const writePaths = fields.has("writePaths") ? parsePaths(fields.get("writePaths"), `${label}.writePaths`) : [cwd];
-	if (writePaths.some((writePath) => !readPaths.some((readPath) => isPathInside(readPath, writePath)))) {
-		invalid(`${label}.writePaths must stay inside readPaths`);
-	}
+	if (fields.has("readPaths")) parsePaths(fields.get("readPaths"), `${label}.readPaths`);
+	if (fields.has("writePaths")) parsePaths(fields.get("writePaths"), `${label}.writePaths`);
 	return {
 		agentId: requiredString(fields, "agentId", { label, maxLength: 256, noControls: true }),
 		name: requiredString(fields, "name", { label, maxLength: 128, noControls: true }),
@@ -274,14 +273,10 @@ function parseConfig(value: unknown): SubagentConfig {
 		taskSummary: requiredString(fields, "taskSummary", { label, maxLength: 240 }),
 		mode,
 		tools: parseTools(fields.get("tools"), `${label}.tools`),
-		permissionMode,
-		reviewerEnabled,
+		permissionMode: normalizePermissionMode(permissionMode)!,
 		model: parseModel(fields.get("model"), `${label}.model`),
 		thinkingLevel: thinkingLevel as SubagentConfig["thinkingLevel"],
 		cwd,
-		// Compatibility for v7 sessions created by the first implementation.
-		readPaths,
-		writePaths,
 		forkTurns: parseForkTurns(fields.get("forkTurns"), `${label}.forkTurns`),
 		timeoutSeconds: timeoutSeconds as number,
 		role: optionalString(fields, "role", { label, maxBytes: 8 * 1024 }),
@@ -341,9 +336,16 @@ export function parseSessionControlEntry(value: unknown): SessionControlEntry {
 		assertOnlyFields(fields, [...baseFields, "permissionMode", "reviewerEnabled"]);
 		const permissionMode = fields.get("permissionMode");
 		const reviewerEnabled = fields.get("reviewerEnabled");
-		if (!isPermissionMode(permissionMode)) invalid("Session control entry.permissionMode is invalid");
-		if (typeof reviewerEnabled !== "boolean") invalid("Session control entry.reviewerEnabled must be a boolean");
-		return { type, ...parseBase(fields), permissionMode, reviewerEnabled };
+		if (!isPersistedPermissionMode(permissionMode)) invalid("Session control entry.permissionMode is invalid");
+		if (reviewerEnabled !== undefined && typeof reviewerEnabled !== "boolean") {
+			invalid("Session control entry.reviewerEnabled must be a boolean");
+		}
+		return {
+			type,
+			...parseBase(fields),
+			permissionMode,
+			...(reviewerEnabled === undefined ? {} : { reviewerEnabled }),
+		};
 	}
 	if (type === "session_permission_decision") {
 		assertOnlyFields(fields, [...baseFields, "actionId", "toolName", "source", "decision", "reason"]);

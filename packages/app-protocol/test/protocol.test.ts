@@ -166,6 +166,24 @@ describe("golden protocol fixtures", () => {
 		expect(validateServerNotification(envelope)).toEqual(envelope);
 	});
 
+	it.each([
+		["auto", "permissionMode", "auto"],
+		["readPaths", "readPaths", ["/tmp/project"]],
+		["writePaths", "writePaths", ["/tmp/project"]],
+	])("rejects legacy %s in current subagent notifications", (_label, field, value) => {
+		const envelope = structuredClone(notifications[0]!.envelope) as {
+			params: {
+				events: Array<{
+					type: string;
+					subagent?: { configuration?: Record<string, unknown> };
+				}>;
+			};
+		};
+		const event = envelope.params.events.find((candidate) => candidate.type === "subagent/updated")!;
+		event.subagent!.configuration![field] = value;
+		expect(() => validateServerNotification(envelope)).toThrow(ProtocolValidationError);
+	});
+
 	it("pins every standard and ArcMind error", () => {
 		expect(new Set(errors.map((entry) => entry.name))).toEqual(new Set(Object.keys(RPC_ERROR_CODES)));
 		for (const entry of errors) expect(validateUncorrelatedErrorResponse(entry.envelope)).toEqual(entry.envelope);

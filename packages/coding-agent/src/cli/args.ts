@@ -26,7 +26,6 @@ export interface Args {
 	agentMode?: AgentMode;
 	cwd?: string;
 	permissionMode?: PermissionMode;
-	reviewerEnabled?: boolean;
 	name?: string;
 	noSession?: boolean;
 	session?: string;
@@ -82,9 +81,6 @@ export function parseArgs(args: string[]): Args {
 		unknownFlags: new Map(),
 		diagnostics: [],
 	};
-	let reviewerFlagSeen = false;
-	let noReviewerFlagSeen = false;
-
 	for (let i = 0; i < args.length; i++) {
 		const arg = args[i];
 
@@ -123,24 +119,29 @@ export function parseArgs(args: string[]): Args {
 		} else if (arg === "--permission-mode") {
 			const mode = args[i + 1];
 			if (mode === undefined || mode.startsWith("-")) {
-				result.diagnostics.push({ type: "error", message: "--permission-mode requires ask, auto, or full" });
+				result.diagnostics.push({ type: "error", message: "--permission-mode requires ask or full" });
 			} else {
 				i++;
-				if (isPermissionMode(mode)) {
+				if (mode === "auto") {
+					result.permissionMode = "ask";
+					result.diagnostics.push({
+						type: "warning",
+						message: '--permission-mode auto is deprecated; using "ask"',
+					});
+				} else if (isPermissionMode(mode)) {
 					result.permissionMode = mode;
 				} else {
 					result.diagnostics.push({
 						type: "error",
-						message: `Invalid permission mode "${mode}". Valid values: ask, auto, full`,
+						message: `Invalid permission mode "${mode}". Valid values: ask, full`,
 					});
 				}
 			}
-		} else if (arg === "--reviewer") {
-			reviewerFlagSeen = true;
-			result.reviewerEnabled = true;
-		} else if (arg === "--no-reviewer") {
-			noReviewerFlagSeen = true;
-			result.reviewerEnabled = false;
+		} else if (arg === "--reviewer" || arg === "--no-reviewer") {
+			result.diagnostics.push({
+				type: "warning",
+				message: `${arg} is deprecated and ignored; permissions use Ask or Full`,
+			});
 		} else if (arg === "--continue" || arg === "-c") {
 			result.continue = true;
 		} else if (arg === "--resume" || arg === "-r") {
@@ -267,10 +268,6 @@ export function parseArgs(args: string[]): Args {
 		}
 	}
 
-	if (reviewerFlagSeen && noReviewerFlagSeen) {
-		result.diagnostics.push({ type: "error", message: "--reviewer cannot be combined with --no-reviewer" });
-	}
-
 	return result;
 }
 
@@ -309,9 +306,7 @@ ${chalk.bold("Options:")}
   --mode <mode>                  Output mode: text (default), json, or rpc
   --agent-mode <mode>            New-session classification: chat or code (default: code)
   --cwd <path>                   Bind a new session to an existing directory
-  --permission-mode <mode>       New-session permissions: ask, auto, or full
-  --reviewer                     Enable Auto review for a new session
-  --no-reviewer                  Disable Auto review for a new session
+  --permission-mode <ask|full>   New-session approval mode
   --print, -p                    Non-interactive mode: process prompt and exit
   --continue, -c                 Continue previous session
   --resume, -r                   Select a session to resume

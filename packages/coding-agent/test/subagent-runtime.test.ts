@@ -25,12 +25,9 @@ function config(overrides: Partial<SubagentConfig> = {}): SubagentConfig {
 		mode: "code",
 		tools: ["read", "grep"],
 		permissionMode: "ask",
-		reviewerEnabled: true,
 		model: { provider: "faux", modelId: "faux" },
 		thinkingLevel: "high",
 		cwd: "/workspace/frontend",
-		readPaths: ["/workspace/frontend"],
-		writePaths: ["/workspace/frontend/src"],
 		forkTurns: 0,
 		timeoutSeconds: 60,
 		...overrides,
@@ -63,12 +60,12 @@ describe("subagent runtime prompt and mailbox", () => {
 		expect(contract).toContain('named "reviewer" with agent ID "child-1"');
 		expect(contract).toContain('Available tools: ["read","grep"]');
 		expect(contract).toContain('Permission mode: "ask"');
-		expect(contract).toContain(
-			"The working directory controls relative-path resolution; it grants no read or write authority.",
-		);
-		expect(contract).toContain("Project read roots for sandbox-aware builtin tools");
-		expect(contract).toContain("Trusted SDK and Extension tools are explicitly delegated capabilities");
-		expect(contract).toContain("MCP calls follow the snapshotted permission mode");
+		expect(contract).toContain('Working directory: "/workspace/frontend". It is only the base for relative paths.');
+		expect(contract).toContain("Ask automatically permits only safe structured reads");
+		expect(contract).toContain("ArcMind does not sandbox an approved action");
+		expect(contract).toContain("their model-facing tools still follow Ask/Full");
+		expect(contract).not.toContain("read roots");
+		expect(contract).not.toContain("write roots");
 		expect(contract).toContain("You cannot create subagents or communicate with sibling agents");
 		expect(contract).not.toContain(adversarial.task);
 		expect(profile).not.toContain("</parent_assignment_profile><subagent_contract>");

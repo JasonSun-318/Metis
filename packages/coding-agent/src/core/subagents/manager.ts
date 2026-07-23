@@ -2,12 +2,12 @@ import { realpathSync, statSync } from "node:fs";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import type { ThinkingLevel } from "@arcmind/agent-core";
 import { getSupportedThinkingLevels, type Model } from "@arcmind/ai/compat";
-import type { AgentSession, ChildCapabilityScope } from "../agent-session.ts";
+import type { AgentSession } from "../agent-session.ts";
 import type { AgentSessionRuntime } from "../agent-session-runtime.ts";
-import type { PermissionMode } from "../permission-mode.ts";
+import { narrowPermissionMode, type PermissionMode } from "../permission-mode.ts";
 import type { RequestPermissionApproval } from "../permission-policy.ts";
 import { createSessionId } from "../session-id.ts";
-import type { FileEntry, SessionManager } from "../session-manager.ts";
+import { type FileEntry, SessionManager } from "../session-manager.ts";
 import { defaultSubagentScheduler, type SubagentSchedulerApi } from "./scheduler.ts";
 import { type SubagentDiskRecord, SubagentStore, type SubagentStoreApi } from "./store.ts";
 import {
@@ -34,8 +34,6 @@ export interface SpawnSubagentInput {
 	readonly model?: string;
 	readonly thinkingLevel?: ThinkingLevel;
 	readonly cwd?: string;
-	readonly readPaths?: readonly string[];
-	readonly writePaths?: readonly string[];
 	readonly forkTurns?: SubagentForkTurns;
 	readonly timeoutSeconds?: number;
 }
@@ -50,9 +48,6 @@ export interface SpawnSubagentResult {
 	readonly tools: readonly string[];
 	readonly permissionMode: PermissionMode;
 	readonly cwd: string;
-	readonly readPaths: readonly string[];
-	readonly writePaths: readonly string[];
-	readonly overlaps: readonly { readonly agentId: string; readonly name: string }[];
 	readonly forkTurns: SubagentForkTurns;
 }
 
@@ -109,7 +104,7 @@ export interface CloseSubagentResult {
 
 export interface ChildRuntimeFactoryInput {
 	readonly config: SubagentConfig;
-	readonly capabilityScope: ChildCapabilityScope;
+	readonly permissionModeCeiling: () => PermissionMode;
 	readonly sessionManager: SessionManager;
 	readonly onPermissionRequest?: RequestPermissionApproval;
 }
@@ -237,7 +232,7 @@ function safeJson(value: unknown): string {
 	});
 }
 
-function summaryFromRecord(record: SubagentDiskRecord): SubagentSummary {
+function summaryFromRecord(record: SubagentDiskRecord, permissionMode?: PermissionMode): SubagentSummary {
 	const config = record.config;
 	return {
 		agentId: record.agentId,
@@ -249,12 +244,10 @@ function summaryFromRecord(record: SubagentDiskRecord): SubagentSummary {
 					configuration: {
 						mode: config.mode,
 						tools: config.tools,
-						permissionMode: config.permissionMode,
+						permissionMode: permissionMode ?? config.permissionMode,
 						model: config.model,
 						thinkingLevel: config.thinkingLevel,
 						cwd: config.cwd,
-						readPaths: config.readPaths,
-						writePaths: config.writePaths,
 						forkTurns: config.forkTurns,
 						timeoutSeconds: config.timeoutSeconds,
 					},
@@ -287,6 +280,8 @@ export class SubagentManager implements SubagentManagerApi {
 	private readonly tails = new Map<string, Promise<unknown>>();
 	private readonly scheduledRuns = new Map<string, { key: string; runId: string }>();
 	private readonly mailbox = new Map<string, SubagentMailboxEvent>();
+	private readonly childPermissionCeilings = new Map<string, PermissionMode>();
+	private readonly unsubscribeParentPermissions: () => void;
 	private parent?: AgentSession;
 	private unloaded = false;
 	private requestSequence = 0;
@@ -303,6 +298,25 @@ export class SubagentManager implements SubagentManagerApi {
 		this.now = options.now ?? Date.now;
 		this.createId = options.createId ?? createSessionId;
 		this.recoverInterruptedWork();
+		const parentMode = this.parentSessionManager.getPermissionSettings().mode;
+		for (const record of this.store.list().agents) {
+			const config = this.store.load(record.agentId).config;
+			this.childPermissionCeilings.set(
+				record.agentId,
+				narrowPermissionMode(config?.permissionMode ?? "ask", parentMode),
+			);
+		}
+		this.unsubscribeParentPermissions = this.parentSessionManager.subscribePermissionSettings((next) => {
+			if (next.mode === "ask") this.downgradeChildrenToAsk();
+		});
+		if (parentMode === "ask") {
+			try {
+				this.downgradeChildrenToAsk();
+			} catch (error) {
+				this.unsubscribeParentPermissions();
+				throw error;
+			}
+		}
 	}
 
 	attachParent(session: AgentSession): void {
@@ -338,8 +352,7 @@ export class SubagentManager implements SubagentManagerApi {
 		if (listing.diagnostics.length > 0) {
 			throw new Error("Cannot create a subagent while an existing child session is unreadable");
 		}
-		const records = listing.agents;
-		if (records.length >= 10) throw new Error("A parent session may own at most 10 non-closed subagents");
+		if (listing.agents.length >= 10) throw new Error("A parent session may own at most 10 non-closed subagents");
 		const names = new Set(this.listSummaries().map((summary) => summary.name));
 		if (names.has(input.name)) throw new Error(`Subagent name has already been used: ${input.name}`);
 		if (new Set(input.tools).size !== input.tools.length) throw new Error("Subagent tools must be unique");
@@ -352,24 +365,17 @@ export class SubagentManager implements SubagentManagerApi {
 			if (reserved.has(tool)) throw new Error(`Subagent tool is reserved: ${tool}`);
 			if (!active.has(tool)) throw new Error(`Subagent tool is not active in the parent: ${tool}`);
 		}
-		const parentPermissions = parent.sessionManager.getPermissionSettings();
-		const permissionMode = input.permissionMode ?? parentPermissions.mode;
-		const strength = { ask: 0, auto: 1, full: 2 } as const;
-		if (strength[permissionMode] > strength[parentPermissions.mode])
+		const parentMode = parent.sessionManager.getPermissionSettings().mode;
+		const permissionMode = input.permissionMode ?? parentMode;
+		if (parentMode === "ask" && permissionMode === "full") {
 			throw new Error("Child permissions cannot be broader than parent permissions");
+		}
 		const model = this.resolveModel(parent, input.model);
 		const levels = getSupportedThinkingLevels(model) as ThinkingLevel[];
 		const thinkingLevel = input.thinkingLevel ?? parent.thinkingLevel;
 		if (!levels.includes(thinkingLevel))
 			throw new Error(`Thinking level is unavailable for child model: ${thinkingLevel}`);
 		const cwd = this.resolveCwd(input.cwd ?? parent.sessionManager.getCwd());
-		const readPaths = this.resolveRoots(input.readPaths ?? [cwd], cwd, "readPaths");
-		const writePaths = this.resolveRoots(input.writePaths ?? [cwd], cwd, "writePaths");
-		for (const writePath of writePaths) {
-			if (!readPaths.some((readPath) => isInside(readPath, writePath))) {
-				throw new Error("Every subagent write root must be contained by a read root");
-			}
-		}
 		const timeoutSeconds = input.timeoutSeconds ?? 1_800;
 		if (!Number.isInteger(timeoutSeconds) || timeoutSeconds < 1 || timeoutSeconds > 1_800) {
 			throw new Error("Subagent timeout must be an integer from 1 through 1800 seconds");
@@ -389,18 +395,16 @@ export class SubagentManager implements SubagentManagerApi {
 			mode: parent.mode,
 			tools: [...input.tools],
 			permissionMode,
-			reviewerEnabled: parentPermissions.reviewerEnabled,
 			model: { provider: model.provider, modelId: model.id },
 			thinkingLevel,
 			cwd,
-			readPaths,
-			writePaths,
 			forkTurns: input.forkTurns ?? 0,
 			timeoutSeconds,
 			...(input.role === undefined ? {} : { role: input.role }),
 			...(input.developerInstructions === undefined ? {} : { developerInstructions: input.developerInstructions }),
 		};
 		this.store.create(config, parent.messages);
+		this.childPermissionCeilings.set(config.agentId, permissionMode);
 		const runId = this.createId();
 		this.store.appendState(config.agentId, {
 			type: "subagent_state",
@@ -408,13 +412,6 @@ export class SubagentManager implements SubagentManagerApi {
 			runId,
 			status: "queued",
 		});
-		const overlaps = records
-			.map((record) => this.store.load(record.agentId))
-			.filter((record) => {
-				const other = record.config;
-				return other !== undefined && this.rootsOverlap(readPaths, writePaths, other.readPaths, other.writePaths);
-			})
-			.map((record) => ({ agentId: record.agentId, name: record.name }));
 		const admission = this.schedule(config.agentId, runId);
 		return {
 			agentId: config.agentId,
@@ -426,9 +423,6 @@ export class SubagentManager implements SubagentManagerApi {
 			tools: config.tools,
 			permissionMode: config.permissionMode,
 			cwd: config.cwd,
-			readPaths: config.readPaths,
-			writePaths: config.writePaths,
-			overlaps,
 			forkTurns: config.forkTurns,
 		};
 	}
@@ -641,6 +635,7 @@ export class SubagentManager implements SubagentManagerApi {
 				} else this.cancelQueuedFollowUps(agentId);
 				const result = await this.store.finishClose(agentId);
 				if (result.status === "closed") {
+					this.childPermissionCeilings.delete(agentId);
 					this.emitUpdate(this.findSummary(agentId));
 					return { agentId, status: "closed" };
 				}
@@ -658,7 +653,10 @@ export class SubagentManager implements SubagentManagerApi {
 	}
 
 	listSummaries(): readonly SubagentSummary[] {
-		const active = this.store.list().agents.map((record) => summaryFromRecord(this.store.load(record.agentId)));
+		const active = this.store.list().agents.map((record) => {
+			const loaded = this.store.load(record.agentId);
+			return summaryFromRecord(loaded, this.childPermissionCeilings.get(record.agentId));
+		});
 		const closed = this.closedTombstones().map(
 			(tombstone): SubagentSummary => ({
 				agentId: tombstone.agentId,
@@ -708,6 +706,7 @@ export class SubagentManager implements SubagentManagerApi {
 	async unload(reason: "parent_unloaded"): Promise<void> {
 		if (this.unloaded) return;
 		this.unloaded = true;
+		this.unsubscribeParentPermissions();
 		const errors: unknown[] = [];
 		for (const record of this.store.list().agents) {
 			try {
@@ -839,23 +838,24 @@ export class SubagentManager implements SubagentManagerApi {
 				const summary = this.findSummary(agentId);
 				this.emitApprovalRequired(summary, request.action.toolName);
 				if (!this.onPermissionRequest) {
-					return { decision: "deny", reason: "No interactive parent session owner is available" };
+					throw new Error("No interactive parent session owner is available");
 				}
 				return this.onPermissionRequest({
 					...request,
-					reason: `Subagent ${config.name} (${config.agentId}): ${request.reason}`,
+					actor: {
+						type: "subagent",
+						id: config.agentId,
+						name: config.name,
+					},
 				});
 			};
 			runtime = await this.createChildRuntime({
 				config,
-				capabilityScope: {
-					readPaths: config.readPaths,
-					writePaths: config.writePaths,
-					workspaceRoots: this.workspaceRoots,
-				},
+				permissionModeCeiling: () => this.childPermissionCeilings.get(agentId) ?? "ask",
 				sessionManager: childManager,
 				onPermissionRequest,
 			});
+			this.persistRuntimeCeiling(runtime, agentId);
 			const configuredTools = new Set(config.tools);
 			const activeTools = runtime.session.getActiveToolNames();
 			const missingTools = config.tools.filter((tool) => !activeTools.includes(tool));
@@ -888,9 +888,13 @@ export class SubagentManager implements SubagentManagerApi {
 			});
 			this.hot.set(agentId, hot);
 			markReady();
+			this.persistRuntimeCeiling(runtime, agentId);
 			const running = this.appendHotState(runtime, { type: "subagent_state", agentId, runId, status: "running" });
 			this.emitUpdate(
-				summaryFromRecord({ ...record, status: "running", updatedAt: new Date(this.now()).toISOString() }),
+				summaryFromRecord(
+					{ ...record, status: "running", updatedAt: new Date(this.now()).toISOString() },
+					this.childPermissionCeilings.get(agentId),
+				),
 			);
 			void running;
 			const journal = runtime.session.sessionManager.getDurableJournalSnapshot();
@@ -1060,6 +1064,53 @@ export class SubagentManager implements SubagentManagerApi {
 		}
 	}
 
+	private downgradeChildrenToAsk(): void {
+		const failures: unknown[] = [];
+		for (const record of this.store.list().agents) {
+			this.childPermissionCeilings.set(record.agentId, "ask");
+		}
+		for (const record of this.store.list().agents) {
+			const hot = this.hot.get(record.agentId);
+			if (hot) {
+				try {
+					if (hot.runtime.session.sessionManager.getPermissionSettings().mode !== "ask") {
+						hot.runtime.session.sessionManager.setPermissionSettings({ mode: "ask" });
+					}
+				} catch (error) {
+					hot.lifecycleError = error instanceof Error ? error : new Error(String(error));
+					failures.push(error);
+					void hot.runtime.interrupt({
+						requestId: this.requestId("permission-downgrade", record.agentId),
+					});
+				}
+				continue;
+			}
+			if (this.starting.has(record.agentId) && !this.isScheduledQueued(record.agentId)) continue;
+			let manager: SessionManager | undefined;
+			try {
+				manager = SessionManager.open(record.path);
+				if (manager.getPermissionSettings().mode !== "ask") manager.setPermissionSettings({ mode: "ask" });
+			} catch (error) {
+				failures.push(error);
+			} finally {
+				try {
+					manager?.close();
+				} catch (error) {
+					failures.push(error);
+				}
+			}
+		}
+		if (failures.length > 0) {
+			throw new AggregateError(failures, "Failed to persist Ask permission for every child session");
+		}
+	}
+
+	private persistRuntimeCeiling(runtime: AgentSessionRuntime, agentId: string): void {
+		if (this.childPermissionCeilings.get(agentId) !== "ask") return;
+		const manager = runtime.session.sessionManager;
+		if (manager.getPermissionSettings().mode !== "ask") manager.setPermissionSettings({ mode: "ask" });
+	}
+
 	private resolveModel(parent: AgentSession, requested: string | undefined): Model<any> {
 		if (!requested) {
 			if (!parent.model) throw new Error("Parent session has no selected model");
@@ -1078,36 +1129,10 @@ export class SubagentManager implements SubagentManagerApi {
 	private resolveCwd(value: string): string {
 		const path = realpathSync(resolve(this.parentSessionManager.getCwd(), value));
 		if (!statSync(path).isDirectory()) throw new Error("Subagent cwd must be an existing directory");
-		if (!this.workspaceRoots.some((root) => isInside(root, path)))
-			throw new Error("Subagent cwd must stay inside an authorized workspace root");
+		if (!this.workspaceRoots.some((root) => isInside(root, path))) {
+			throw new Error("Subagent cwd must stay inside the parent workspace");
+		}
 		return path;
-	}
-
-	private resolveRoots(values: readonly string[], cwd: string, label: "readPaths" | "writePaths"): readonly string[] {
-		if (values.length === 0 || values.length > 32) throw new Error(`Subagent ${label} must contain 1-32 paths`);
-		const paths = values.map((value) => {
-			const path = realpathSync(resolve(cwd, value));
-			if (!statSync(path).isDirectory()) throw new Error(`Subagent ${label} must contain existing directories`);
-			if (!this.workspaceRoots.some((root) => isInside(root, path))) {
-				throw new Error(`Subagent ${label} must stay inside an authorized workspace root`);
-			}
-			return path;
-		});
-		if (new Set(paths).size !== paths.length) throw new Error(`Subagent ${label} must contain unique paths`);
-		return paths;
-	}
-
-	private rootsOverlap(
-		leftRead: readonly string[],
-		leftWrite: readonly string[],
-		rightRead: readonly string[],
-		rightWrite: readonly string[],
-	): boolean {
-		const overlap = (left: string, right: string) => isInside(left, right) || isInside(right, left);
-		return (
-			leftWrite.some((left) => [...rightRead, ...rightWrite].some((right) => overlap(left, right))) ||
-			rightWrite.some((right) => leftRead.some((left) => overlap(left, right)))
-		);
 	}
 
 	private closedTombstones(): SubagentTombstone[] {
@@ -1159,7 +1184,7 @@ export class SubagentManager implements SubagentManagerApi {
 	}
 
 	private publishTerminal(record: SubagentDiskRecord): SubagentSummary {
-		const summary = summaryFromRecord(record);
+		const summary = summaryFromRecord(record, this.childPermissionCeilings.get(record.agentId));
 		const published = this.emitUpdate(summary);
 		if (isTerminal(record.status) && !this.unloaded) {
 			this.enqueueMailbox({

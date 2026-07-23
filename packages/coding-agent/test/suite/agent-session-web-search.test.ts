@@ -27,7 +27,7 @@ describe("AgentSession web search", () => {
 		let harness!: Harness;
 		harness = await createHarness({
 			settings: { webSearch: { enabled: true, provider: "brave" } },
-			permissionSettings: { mode: "ask", reviewerEnabled: false },
+			permissionSettings: { mode: "ask" },
 			requestPermissionApproval: async () => {
 				harness.session.setWebSearchProvider("tavily");
 				return { decision: "allow" };

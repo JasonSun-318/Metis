@@ -13,8 +13,8 @@ import { McpManager } from "./mcp/index.ts";
 import { convertToLlm } from "./messages.ts";
 import { ModelRegistry } from "./model-registry.ts";
 import { findInitialModel } from "./model-resolver.ts";
-import type { PermissionMode } from "./permission-mode.ts";
-import { canUseFullOnce, type PermissionApprovalRequest } from "./permission-policy.ts";
+import { normalizePermissionMode, type PermissionMode } from "./permission-mode.ts";
+import { formatPermissionApproval, type PermissionApprovalRequest } from "./permission-policy.ts";
 import { mergeProviderAttributionHeaders } from "./provider-attribution.ts";
 import type { ResourceLoader } from "./resource-loader.ts";
 import { DefaultResourceLoader } from "./resource-loader.ts";
@@ -48,10 +48,10 @@ export interface CreateAgentSessionOptions {
 	/** Classification mode for a newly-created default session manager. Default: code. */
 	agentMode?: AgentMode;
 	/** Initial permission mode for a newly-created session. */
-	permissionMode?: PermissionMode;
-	/** Whether Auto uses the current session model as reviewer. */
+	permissionMode?: PermissionMode | "auto";
+	/** @deprecated Ignored. Ask/Full has no reviewer. */
 	reviewerEnabled?: boolean;
-	/** Host callback for one-action approvals and one-time Windows sandbox setup. */
+	/** Host callback for one-action approvals. */
 	onPermissionRequest?: PermissionRequester;
 
 	/** Auth storage for credentials. Default: AuthStorage.create(agentDir/auth.json) */
@@ -103,8 +103,8 @@ export interface CreateAgentSessionOptions {
 	additionalSystemPrompt?: string | (() => string | undefined);
 	/** @internal Disable automatic memory context and dream writes for isolated runtimes. */
 	includeAutoMemory?: boolean;
-	/** @internal Immutable maximum filesystem capability for a child runtime. */
-	childCapabilityScope?: AgentSessionConfig["childCapabilityScope"];
+	/** @internal Host-owned monotonic permission ceiling for a child runtime. */
+	permissionModeCeiling?: AgentSessionConfig["permissionModeCeiling"];
 
 	/** Settings manager. Default: SettingsManager.create(cwd, agentDir) */
 	settingsManager?: SettingsManager;
@@ -113,18 +113,13 @@ export interface CreateAgentSessionOptions {
 }
 
 export interface PermissionRequest {
-	kind: "action" | "sandbox-setup";
+	kind: "action";
 	title: string;
 	summary: string;
 	details: string;
-	allowFullOnce: boolean;
-	fullOnceRequired: boolean;
 }
 
-export type PermissionRequester = (
-	request: PermissionRequest,
-	signal?: AbortSignal,
-) => Promise<"allow-once" | "full-once" | "deny">;
+export type PermissionRequester = (request: PermissionRequest, signal?: AbortSignal) => Promise<"allow-once" | "deny">;
 
 /** Result from createAgentSession */
 export interface CreateAgentSessionResult {
@@ -178,42 +173,18 @@ function getDefaultAgentDir(): string {
 function createActionPermissionRequester(requester: PermissionRequester | undefined) {
 	if (!requester) return undefined;
 	return async (request: PermissionApprovalRequest) => {
-		const action = request.action;
-		const allowFullOnce = canUseFullOnce(action);
+		const view = formatPermissionApproval(request);
 		const decision = await requester(
 			{
 				kind: "action",
-				title: `Approve ${action.toolName}?`,
-				summary: request.reason,
-				details: JSON.stringify({
-					provenance: action.provenance,
-					risks: action.risks,
-					paths: action.paths,
-					networkTargets: action.networkTargets,
-					command: action.command,
-					arguments: request.args,
-				}),
-				allowFullOnce,
-				fullOnceRequired: request.fullOnceRequired,
+				title: view.title,
+				summary: view.summary,
+				details: view.details,
 			},
 			request.signal,
 		);
-		if (decision === "deny") return { decision: "deny" as const };
-		return { decision: "allow" as const, fullOnce: decision === "full-once" && allowFullOnce };
+		return decision === "allow-once" ? { decision: "allow" as const } : { decision: "deny" as const };
 	};
-}
-
-function createWindowsSetupRequester(requester: PermissionRequester | undefined) {
-	if (!requester) return undefined;
-	return async () =>
-		(await requester({
-			kind: "sandbox-setup",
-			title: "Set up the Windows sandbox?",
-			summary: "This one-time setup creates the local SRT sandbox account and requires a UAC prompt.",
-			details: "ArcMind will not download SRT during setup; the runtime helper is shipped with the application.",
-			allowFullOnce: false,
-			fullOnceRequired: false,
-		})) === "allow-once";
 }
 
 function restoredMcpToolNames(sessionManager: SessionManager, manager: McpManager): string[] {
@@ -269,6 +240,11 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 	}
 	const agentDir = options.agentDir ? resolvePath(options.agentDir) : getDefaultAgentDir();
 	const suppliedSessionManager = options.sessionManager;
+	const requestedPermissionMode =
+		options.permissionMode === undefined ? undefined : normalizePermissionMode(options.permissionMode);
+	if (options.permissionMode !== undefined && !requestedPermissionMode) {
+		throw new TypeError("permissionMode must be ask, auto, or full");
+	}
 	if (
 		suppliedSessionManager &&
 		options.agentMode !== undefined &&
@@ -284,14 +260,9 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 	) {
 		throw new Error("cwd cannot override the supplied sessionManager cwd");
 	}
-	if (suppliedSessionManager && options.permissionMode !== undefined) {
-		if (options.permissionMode !== suppliedSessionManager.getPermissionSettings().mode) {
+	if (suppliedSessionManager && requestedPermissionMode !== undefined) {
+		if (requestedPermissionMode !== suppliedSessionManager.getPermissionSettings().mode) {
 			throw new Error("permissionMode cannot override the supplied sessionManager permissions");
-		}
-	}
-	if (suppliedSessionManager && options.reviewerEnabled !== undefined) {
-		if (options.reviewerEnabled !== suppliedSessionManager.getPermissionSettings().reviewerEnabled) {
-			throw new Error("reviewerEnabled cannot override the supplied sessionManager permissions");
 		}
 	}
 	if (options.authStorage && options.modelRegistry && options.modelRegistry.authStorage !== options.authStorage) {
@@ -329,8 +300,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 				id: sessionId,
 				mode,
 				cwdOrigin: workspace!.cwdOrigin,
-				permissionMode: options.permissionMode,
-				reviewerEnabled: options.reviewerEnabled,
+				permissionMode: requestedPermissionMode,
 			});
 	} catch (error) {
 		if (workspace?.cwdOrigin === "managed") {
@@ -628,11 +598,10 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			extensionRunnerRef,
 			sessionStartEvent: options.sessionStartEvent,
 			requestPermissionApproval: createActionPermissionRequester(options.onPermissionRequest),
-			requestWindowsSandboxSetup: createWindowsSetupRequester(options.onPermissionRequest),
 			ultraAvailable: options.ultraAvailable,
 			additionalSystemPrompt: options.additionalSystemPrompt,
 			includeAutoMemory: options.includeAutoMemory,
-			childCapabilityScope: options.childCapabilityScope,
+			permissionModeCeiling: options.permissionModeCeiling,
 		});
 		if (thinkingSelection === "ultra") session.setThinkingSelection("ultra");
 		completed = true;

@@ -71,22 +71,22 @@ describe("createAgentSession session manager defaults", () => {
 		expect(session.sessionManager.getCwd()).toBe(
 			realpathSync(join(agentDir, "workspaces", session.sessionManager.getSessionId())),
 		);
-		expect(session.sessionManager.getPermissionSettings()).toEqual({ mode: "ask", reviewerEnabled: true });
+		expect(session.sessionManager.getPermissionSettings()).toEqual({ mode: "ask" });
 		session.dispose();
 	});
 
-	it("creates Code without cwd in the host cwd with Auto review", async () => {
+	it("creates Code without cwd in the host cwd with Ask permissions", async () => {
 		const model = getModel("anthropic", "claude-sonnet-4-5")!;
 		const { session } = await createAgentSession({ agentDir, model, agentMode: "code" });
 
 		expect(session.mode).toBe("code");
 		expect(session.sessionManager.getCwd()).toBe(realpathSync(process.cwd()));
 		expect(session.sessionManager.getCwdOrigin()).toBe("user-selected");
-		expect(session.sessionManager.getPermissionSettings()).toEqual({ mode: "auto", reviewerEnabled: true });
+		expect(session.sessionManager.getPermissionSettings()).toEqual({ mode: "ask" });
 		session.dispose();
 	});
 
-	it("persists explicit initial permission settings on a new session", async () => {
+	it("normalizes deprecated SDK auto and ignores reviewerEnabled", async () => {
 		const model = getModel("anthropic", "claude-sonnet-4-5")!;
 		const { session } = await createAgentSession({
 			cwd,
@@ -97,11 +97,12 @@ describe("createAgentSession session manager defaults", () => {
 			reviewerEnabled: false,
 		});
 
-		expect(session.sessionManager.getPermissionSettings()).toEqual({ mode: "auto", reviewerEnabled: false });
+		expect(session.sessionManager.getPermissionSettings()).toEqual({ mode: "ask" });
+		expect(session.sessionManager.getHeader()).not.toHaveProperty("reviewerEnabled");
 		session.dispose();
 	});
 
-	it("exposes required Full-once actions through the SDK approval callback", async () => {
+	it("exposes complete one-action details through the SDK approval callback", async () => {
 		const model = getModel("anthropic", "claude-sonnet-4-5")!;
 		let request: PermissionRequest | undefined;
 		const { session } = await createAgentSession({
@@ -111,17 +112,29 @@ describe("createAgentSession session manager defaults", () => {
 			permissionMode: "ask",
 			onPermissionRequest: async (next) => {
 				request = next;
-				return next.fullOnceRequired ? "full-once" : "deny";
+				return "allow-once";
 			},
 		});
 
-		const authorization = await session.authorizeUserBash("git push origin main");
+		await session.requestPermissionApproval({
+			action: {
+				actionId: "push-1",
+				toolName: "bash",
+				provenance: "builtin",
+				risks: ["shell", "network", "external-side-effect"],
+				paths: [],
+				networkTargets: [],
+				command: "git push origin main",
+			},
+			args: { command: "git push origin main" },
+			reason: "This action affects the host",
+		});
 		expect(request).toMatchObject({
 			kind: "action",
-			allowFullOnce: true,
-			fullOnceRequired: true,
+			title: "Approve bash?",
 		});
-		session.cancelUserBashAuthorization(authorization);
+		expect(request?.details).toContain("Command: git push origin main");
+		expect(request?.details).toContain("ArcMind does not sandbox this action");
 		session.dispose();
 	});
 
@@ -140,7 +153,6 @@ describe("createAgentSession session manager defaults", () => {
 		const sessionManager = SessionManager.inMemory(cwd, {
 			mode: "chat",
 			permissionMode: "ask",
-			reviewerEnabled: false,
 		});
 		const otherCwd = join(tempDir, "other-project");
 		mkdirSync(otherCwd);
@@ -151,11 +163,10 @@ describe("createAgentSession session manager defaults", () => {
 		await expect(createAgentSession({ agentDir, model, sessionManager, permissionMode: "full" })).rejects.toThrow(
 			"permissionMode cannot override the supplied sessionManager permissions",
 		);
-		await expect(createAgentSession({ agentDir, model, sessionManager, reviewerEnabled: true })).rejects.toThrow(
-			"reviewerEnabled cannot override the supplied sessionManager permissions",
-		);
-		expect(sessionManager.getPermissionSettings()).toEqual({ mode: "ask", reviewerEnabled: false });
-		sessionManager.close();
+		const compatible = await createAgentSession({ agentDir, model, sessionManager, reviewerEnabled: true });
+		expect(compatible.session.sessionManager).toBe(sessionManager);
+		expect(sessionManager.getPermissionSettings()).toEqual({ mode: "ask" });
+		compatible.session.dispose();
 	});
 
 	it("keeps an explicit sessionManager override", async () => {

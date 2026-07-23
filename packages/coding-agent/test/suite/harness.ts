@@ -9,15 +9,14 @@ import type { AgentMessage, AgentTool } from "@arcmind/agent-core";
 import { Agent } from "@arcmind/agent-core";
 import type { FauxModelDefinition, FauxProviderRegistration, FauxResponseStep, Model } from "@arcmind/ai/compat";
 import { registerFauxProvider } from "@arcmind/ai/compat";
-import { AgentSession, type AgentSessionEvent, type ChildCapabilityScope } from "../../src/core/agent-session.ts";
+import { AgentSession, type AgentSessionEvent } from "../../src/core/agent-session.ts";
 import { AuthStorage } from "../../src/core/auth-storage.ts";
 import type { ExtensionRunner } from "../../src/core/extensions/index.ts";
 import type { McpManager } from "../../src/core/mcp/index.ts";
 import { convertToLlm } from "../../src/core/messages.ts";
 import { ModelRegistry } from "../../src/core/model-registry.ts";
 import type { PermissionSettings } from "../../src/core/permission-mode.ts";
-import type { PermissionReviewerStream, RequestPermissionApproval } from "../../src/core/permission-policy.ts";
-import type { SandboxRuntimeCoordinator } from "../../src/core/sandbox-runtime.ts";
+import type { RequestPermissionApproval } from "../../src/core/permission-policy.ts";
 import { SessionManager } from "../../src/core/session-manager.ts";
 import type { Settings } from "../../src/core/settings-manager.ts";
 import { SettingsManager } from "../../src/core/settings-manager.ts";
@@ -72,10 +71,8 @@ export interface HarnessOptions {
 	withConfiguredAuth?: boolean;
 	permissionSettings?: PermissionSettings;
 	requestPermissionApproval?: RequestPermissionApproval;
-	permissionReviewerStream?: PermissionReviewerStream;
-	sandboxRuntime?: SandboxRuntimeCoordinator;
 	mcpManager?: McpManager;
-	childCapabilityScope?: ChildCapabilityScope;
+	permissionModeCeiling?: () => PermissionSettings["mode"];
 	includeAutoMemory?: boolean;
 }
 
@@ -179,7 +176,7 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
 		: undefined;
 	const resourceLoader =
 		options.resourceLoader ?? createTestResourceLoader(extensionsResult ? { extensionsResult } : undefined);
-	sessionManager.setPermissionSettings(options.permissionSettings ?? { mode: "full", reviewerEnabled: true });
+	sessionManager.setPermissionSettings(options.permissionSettings ?? { mode: "full" });
 
 	const session = new AgentSession({
 		agent,
@@ -195,9 +192,7 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
 		excludedToolNames: options.excludedToolNames,
 		extensionRunnerRef,
 		requestPermissionApproval: options.requestPermissionApproval,
-		permissionReviewerStream: options.permissionReviewerStream,
-		sandboxRuntime: options.sandboxRuntime,
-		childCapabilityScope: options.childCapabilityScope,
+		permissionModeCeiling: options.permissionModeCeiling,
 		includeAutoMemory: options.includeAutoMemory,
 	});
 

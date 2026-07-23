@@ -15,7 +15,7 @@ import { createTestResourceLoader } from "./utilities.ts";
 const servers: McpTestServer[] = [];
 const harnesses: Harness[] = [];
 
-async function setup(tools?: Tool[], permissionSettings?: { mode: "full" | "ask"; reviewerEnabled: boolean }) {
+async function setup(tools?: Tool[], permissionSettings?: { mode: "full" | "ask" }) {
 	const server = await createMcpTestServer({ tools });
 	servers.push(server);
 	const manager = await McpManager.create({
@@ -130,7 +130,7 @@ describe("MCP agent loop", () => {
 		}
 	});
 
-	it("uses MCP annotations for one destructive-tool approval without prompting for search", async () => {
+	it("uses MCP annotations only to enrich one destructive-tool approval", async () => {
 		const requestPermissionApproval = vi.fn(async (_request: PermissionApprovalRequest) => ({
 			decision: "allow" as const,
 			reason: "test approval",
@@ -150,7 +150,7 @@ describe("MCP agent loop", () => {
 		});
 		const harness = await createHarness({
 			mcpManager: manager,
-			permissionSettings: { mode: "ask", reviewerEnabled: false },
+			permissionSettings: { mode: "ask" },
 			requestPermissionApproval,
 		});
 		harnesses.push(harness);
@@ -168,7 +168,7 @@ describe("MCP agent loop", () => {
 		expect(requestPermissionApproval.mock.calls[0]?.[0].action).toMatchObject({
 			toolName: "mcp__docs__destructive_tool",
 			provenance: "mcp",
-			risks: ["destructive", "external-side-effect"],
+			risks: ["destructive", "external-side-effect", "custom"],
 		});
 		expect(server.toolCallCount()).toBe(1);
 	});

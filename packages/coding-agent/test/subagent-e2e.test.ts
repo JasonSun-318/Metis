@@ -78,8 +78,8 @@ describe("Ultra subagent end to end", () => {
 			});
 		};
 		const createRuntime: CreateAgentSessionRuntimeFactory = async (options) => {
-			if (options.childConfig && !options.childCapabilityScope) {
-				throw new Error("Child runtime is missing its capability snapshot");
+			if (options.childConfig && !options.permissionModeCeiling) {
+				throw new Error("Child runtime is missing its permission ceiling");
 			}
 			const services = await createAgentSessionServices({
 				cwd: options.cwd,
@@ -112,7 +112,7 @@ describe("Ultra subagent end to end", () => {
 							tools: [...child.tools],
 							additionalSystemPrompt: buildChildSystemPrompt(child),
 							includeAutoMemory: false,
-							childCapabilityScope: options.childCapabilityScope,
+							permissionModeCeiling: options.permissionModeCeiling,
 						}
 					: {}),
 			});
@@ -122,7 +122,6 @@ describe("Ultra subagent end to end", () => {
 			id: "parent-e2e-1",
 			mode: "code",
 			permissionMode: "full",
-			reviewerEnabled: true,
 		});
 		const runtime = await createAgentSessionRuntime(createRuntime, { cwd, agentDir, sessionManager: parentManager });
 		let runtimeDisposed = false;

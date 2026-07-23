@@ -11,10 +11,10 @@ import {
 	validateServerRequest,
 } from "@arcmind/app-protocol";
 import {
-	canUseFullOnce,
 	createDialogExtensionUIContext,
 	type ExtensionUIContext,
 	type ExtensionUIDialogOptions,
+	formatPermissionApproval,
 	type PermissionApprovalDecision,
 	type PermissionApprovalRequest,
 	type ProjectTrustOption,
@@ -132,48 +132,33 @@ export class InteractionBroker {
 		sessionId: string,
 		approval: PermissionApprovalRequest,
 	): Promise<PermissionApprovalDecision> {
-		const action = approval.action;
-		let args = "[unavailable]";
-		try {
-			args = JSON.stringify(approval.args);
-		} catch {
-			// Keep the request actionable even if a custom tool supplied non-JSON arguments.
+		const view = formatPermissionApproval(approval);
+		const message = `${view.summary}\n${view.details}`;
+		if (Buffer.byteLength(message, "utf8") > MAX_PUBLIC_TEXT_UTF8_BYTES) {
+			throw new TypeError("Permission action exceeds the App Server protocol limit");
 		}
-		const message = [
-			`Reason: ${approval.reason}`,
-			`Tool: ${action.toolName}`,
-			`Risk: ${action.risks.join(", ") || "none"}`,
-			`Arguments: ${args}`,
-			action.command ? `Command: ${action.command}` : undefined,
-			action.paths.length > 0 ? `Paths: ${action.paths.join(", ")}` : undefined,
-			action.networkTargets.length > 0
-				? `Network: ${action.networkTargets.map(({ host, port }) => `${host}:${port}`).join(", ")}`
-				: undefined,
-		]
-			.filter((line): line is string => line !== undefined)
-			.join("\n");
-		const labels = approval.fullOnceRequired
-			? ["Run once with Full", "Deny"]
-			: canUseFullOnce(action)
-				? ["Allow once", "Run once with Full", "Deny"]
-				: ["Allow once", "Deny"];
 		const interactionId = this.createId();
 		const response = await this.request(
 			sessionId,
 			{
-				...this.baseInteraction(sessionId, interactionId, `Approve ${action.toolName}?`, message, {
-					signal: approval.signal,
-				}),
+				interactionId,
+				sessionId,
+				title: view.title,
+				message,
+				createdAt: new Date(this.now()).toISOString(),
+				expiresAt: deadline(this.now(), this.defaultTimeoutMs),
 				kind: "select",
-				choices: labels.map((label, index) => ({ id: choiceId(index), label })),
+				choices: [
+					{ id: choiceId(0), label: "Allow once" },
+					{ id: choiceId(1), label: "Deny" },
+				],
 			},
 			{ signal: approval.signal },
 		);
-		if (response?.kind !== "select") return { decision: "deny", reason: "Approval was unavailable or cancelled" };
-		const selected = labels[Number(response.choiceId.slice("choice:".length))];
-		if (selected === "Allow once") return { decision: "allow" };
-		if (selected === "Run once with Full") return { decision: "allow", fullOnce: true };
-		return { decision: "deny", reason: "Denied by the session owner" };
+		if (response?.kind !== "select") throw new Error("Approval was unavailable or cancelled");
+		if (response.choiceId === choiceId(0)) return { decision: "allow" };
+		if (response.choiceId === choiceId(1)) return { decision: "deny", reason: "Denied by the session owner" };
+		throw new Error("Approval returned an unknown choice");
 	}
 
 	createExtensionUIContext(sessionId: string, publish: (event: NotificationEvent) => void): ExtensionUIContext {

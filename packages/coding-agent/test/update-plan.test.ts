@@ -253,7 +253,7 @@ describe("update_plan", () => {
 			cwd: process.cwd(),
 		});
 		expect(action.risks).toEqual(["ordinary-read"]);
-		expect(routeAction({ mode: "ask", reviewerEnabled: true }, action, "assistant")).toBe("allow");
+		expect(routeAction({ mode: "ask" }, action)).toBe("allow");
 	});
 
 	it("is installed in normal CLI runtimes and advertised in the system prompt", async () => {

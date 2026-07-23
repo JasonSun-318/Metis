@@ -226,12 +226,10 @@ const ActiveSubagentStatusSchema = Type.Union([
 const SubagentConfigurationSchema = StrictObject({
 	mode: Type.Union([Type.Literal("chat"), Type.Literal("code")]),
 	tools: Type.Array(NameSchema, { maxItems: 128, uniqueItems: true }),
-	permissionMode: Type.Union([Type.Literal("ask"), Type.Literal("auto"), Type.Literal("full")]),
+	permissionMode: Type.Union([Type.Literal("ask"), Type.Literal("full")]),
 	model: SubagentModelRefSchema,
 	thinkingLevel: ActualThinkingLevelSchema,
 	cwd: PathSchema,
-	readPaths: Type.Array(PathSchema, { minItems: 1, maxItems: 32, uniqueItems: true }),
-	writePaths: Type.Array(PathSchema, { minItems: 1, maxItems: 32, uniqueItems: true }),
 	forkTurns: Type.Union([Type.Integer({ minimum: 0, maximum: 1_000 }), Type.Literal("all")]),
 	timeoutSeconds: Type.Integer({ minimum: 1, maximum: 1_800 }),
 });

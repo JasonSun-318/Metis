@@ -9,52 +9,37 @@ describe("PermissionsSelectorComponent", () => {
 	beforeAll(() => initTheme("dark"));
 	beforeEach(() => setKeybindings(new KeybindingsManager()));
 
-	it("reuses the current SelectList style and descriptions", () => {
+	it("reuses the current SelectList style for Ask and Full", () => {
 		const selector = new PermissionsSelectorComponent(
-			{ mode: "ask", reviewerEnabled: true },
+			{ mode: "ask" },
 			() => {},
 			() => {},
 		);
-
 		const output = stripAnsi(selector.render(100).join("\n"));
 
 		expect(output).toContain("Ask before changes");
-		expect(output).toContain("Auto with review");
 		expect(output).toContain("Full access");
-		expect(output).toContain("Read in a sandbox");
+		expect(output).toContain("Safe structured reads run directly");
+		expect(output).not.toContain("Auto");
+		expect(output).not.toContain("sandbox");
 	});
 
 	it("saves Ask or Full directly", () => {
 		const onSave = vi.fn();
-		const selector = new PermissionsSelectorComponent({ mode: "ask", reviewerEnabled: false }, onSave, () => {});
+		const ask = new PermissionsSelectorComponent({ mode: "ask" }, onSave, () => {});
+		ask.handleInput("\n");
+		expect(onSave).toHaveBeenCalledWith({ mode: "ask" });
 
-		selector.handleInput("\n");
-
-		expect(onSave).toHaveBeenCalledWith({ mode: "ask", reviewerEnabled: false });
+		const full = new PermissionsSelectorComponent({ mode: "ask" }, onSave, () => {});
+		full.handleInput("\x1b[B");
+		full.handleInput("\n");
+		expect(onSave).toHaveBeenLastCalledWith({ mode: "full" });
 	});
 
-	it("selects reviewer state as a second Auto list", () => {
-		const onSave = vi.fn();
-		const selector = new PermissionsSelectorComponent({ mode: "auto", reviewerEnabled: true }, onSave, () => {});
-
-		selector.handleInput("\n");
-		expect(stripAnsi(selector.render(100).join("\n"))).toContain("Reviewer enabled");
-		selector.handleInput("\x1b[B");
-		selector.handleInput("\n");
-
-		expect(onSave).toHaveBeenCalledWith({ mode: "auto", reviewerEnabled: false });
-	});
-
-	it("returns from reviewer choices before cancelling the whole selector", () => {
+	it("cancels from the only selector screen", () => {
 		const onCancel = vi.fn();
-		const selector = new PermissionsSelectorComponent({ mode: "auto", reviewerEnabled: true }, () => {}, onCancel);
-
-		selector.handleInput("\n");
+		const selector = new PermissionsSelectorComponent({ mode: "ask" }, () => {}, onCancel);
 		selector.handleInput("\x1b");
-		expect(onCancel).not.toHaveBeenCalled();
-		expect(stripAnsi(selector.render(100).join("\n"))).toContain("Auto with review");
-		selector.handleInput("\x1b");
-
 		expect(onCancel).toHaveBeenCalledOnce();
 	});
 });

@@ -114,8 +114,6 @@ function subagentView(summary: SubagentSummary): SessionSnapshot["subagents"][nu
 		configuration: {
 			...configuration,
 			tools: [...configuration.tools],
-			readPaths: [...configuration.readPaths],
-			writePaths: [...configuration.writePaths],
 		},
 	};
 }
@@ -744,8 +742,8 @@ export class AgentSessionRuntimeHost implements SessionRuntimeHost {
 	}
 
 	private readonly createRuntime: CreateAgentSessionRuntimeFactory = async (options) => {
-		if (options.childConfig && !options.childCapabilityScope) {
-			throw new Error("Child runtime is missing its capability snapshot");
+		if (options.childConfig && !options.permissionModeCeiling) {
+			throw new Error("Child runtime is missing its permission ceiling");
 		}
 		const projectTrusted = await this.resolveProjectTrust(options.cwd, options.sessionManager.getSessionId());
 		const settingsManager = SettingsManager.create(options.cwd, this.agentDir, { projectTrusted });
@@ -785,7 +783,7 @@ export class AgentSessionRuntimeHost implements SessionRuntimeHost {
 							tools: [...child.tools],
 							additionalSystemPrompt: buildChildSystemPrompt(child),
 							includeAutoMemory: false,
-							childCapabilityScope: options.childCapabilityScope,
+							permissionModeCeiling: options.permissionModeCeiling,
 						}
 					: {}),
 			});

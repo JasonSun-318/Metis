@@ -195,7 +195,6 @@ export class SubagentStore implements SubagentStoreApi {
 			id: config.agentId,
 			mode: config.mode,
 			permissionMode: config.permissionMode,
-			reviewerEnabled: config.reviewerEnabled,
 			subagent: { agentId: config.agentId, name: config.name, parentSessionId: this.parent.getSessionId() },
 		});
 		const path = manager.getSessionFile();

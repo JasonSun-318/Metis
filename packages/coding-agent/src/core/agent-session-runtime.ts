@@ -3,7 +3,7 @@ import { existsSync, realpathSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { resolvePath } from "../utils/paths.ts";
 import type { AgentMode } from "./agent-mode.ts";
-import type { AgentSession, ChildCapabilityScope } from "./agent-session.ts";
+import type { AgentSession } from "./agent-session.ts";
 import type { AgentSessionRuntimeDiagnostic, AgentSessionServices } from "./agent-session-services.ts";
 import type {
 	ProjectTrustContext,
@@ -12,6 +12,7 @@ import type {
 	SessionStartEvent,
 } from "./extensions/index.ts";
 import { emitSessionShutdownEvent } from "./extensions/runner.ts";
+import type { PermissionMode } from "./permission-mode.ts";
 import {
 	type DurableImageRef,
 	identifyRuntimeRequest,
@@ -84,7 +85,7 @@ export type CreateAgentSessionRuntimeFactory = (options: {
 	projectTrustContext?: ProjectTrustContext;
 	ultraAvailable?: boolean;
 	childConfig?: SubagentConfig;
-	childCapabilityScope?: ChildCapabilityScope;
+	permissionModeCeiling?: () => PermissionMode;
 }) => Promise<CreateAgentSessionRuntimeResult>;
 
 /**
@@ -320,7 +321,7 @@ export class AgentSessionRuntime {
 			agentDir: this._services.agentDir,
 			workspaceRoots: [session.sessionManager.getCwd()],
 			onPermissionRequest: (request) => session.requestPermissionApproval(request),
-			createChildRuntime: async ({ config, capabilityScope, sessionManager, onPermissionRequest }) => {
+			createChildRuntime: async ({ config, permissionModeCeiling, sessionManager, onPermissionRequest }) => {
 				const recovered = recoverSessionManager(sessionManager);
 				const result = await this.createRuntime({
 					cwd: config.cwd,
@@ -328,7 +329,7 @@ export class AgentSessionRuntime {
 					sessionManager,
 					ultraAvailable: false,
 					childConfig: config,
-					childCapabilityScope: capabilityScope,
+					permissionModeCeiling,
 					sessionStartEvent: { type: "session_start", reason: "resume" },
 				});
 				result.session.setPermissionApprovalHandler(onPermissionRequest);
@@ -351,6 +352,7 @@ export class AgentSessionRuntime {
 				getSession: () => this._session,
 				activateSubagents: () => this.activateSubagents(session),
 			}),
+			{ automaticPermissionToolNames: ["inspect_agents", "wait_agents"] },
 		);
 		const sync = (): void => this.syncSubagentCapabilities(session);
 		session.subscribe((event) => {

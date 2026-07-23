@@ -43,8 +43,10 @@ import {
 import {
 	defaultPermissionSettings,
 	isPermissionMode,
-	type PermissionMode,
+	isPersistedPermissionMode,
+	normalizePermissionMode,
 	type PermissionSettings,
+	type PersistedPermissionMode,
 } from "./permission-mode.ts";
 import {
 	type DurableImageRef,
@@ -61,7 +63,6 @@ import {
 	parseSessionControlEntry,
 	type SessionControlEntry,
 	type SessionControlPayload,
-	type SessionPermissionDecisionEntry,
 	type SubagentControlPayload,
 } from "./session-control.ts";
 import { assertValidSessionId, createSessionId } from "./session-id.ts";
@@ -590,7 +591,8 @@ export interface SessionHeader {
 	cwd: string;
 	mode?: AgentMode;
 	cwdOrigin?: CwdOrigin;
-	permissionMode?: PermissionMode;
+	permissionMode?: PersistedPermissionMode;
+	/** Legacy v6/v7 field. New writers omit it. */
 	reviewerEnabled?: boolean;
 	parentSession?: string;
 	subagent?: {
@@ -607,7 +609,8 @@ export interface NewSessionOptions {
 	parentSession?: string;
 	mode?: AgentMode;
 	cwdOrigin?: CwdOrigin;
-	permissionMode?: PermissionMode;
+	permissionMode?: PersistedPermissionMode;
+	/** @deprecated Ignored. Ask/Full has no reviewer. */
 	reviewerEnabled?: boolean;
 	subagent?: SessionHeader["subagent"];
 }
@@ -738,7 +741,13 @@ type RuntimePayload<Entry> = Entry extends RuntimeControlEntry ? Omit<Entry, "id
 /** Runtime control data accepted by SessionManager; journal metadata is manager-owned. */
 export type RuntimeControlPayload = RuntimePayload<RuntimeControlEntry>;
 
-export type PermissionDecisionPayload = Omit<SessionPermissionDecisionEntry, "type" | "id" | "parentId" | "timestamp">;
+export interface PermissionDecisionPayload {
+	readonly actionId: string;
+	readonly toolName: string;
+	readonly source: "user";
+	readonly decision: "allow" | "deny";
+	readonly reason?: string;
+}
 
 /** Tree node for getTree() - defensive copy of session structure */
 export interface SessionTreeNode {
@@ -1242,7 +1251,7 @@ function validateSessionHeader(record: Record<string, unknown>, filePath: string
 	if (header.cwdOrigin !== undefined && header.cwdOrigin !== "managed" && header.cwdOrigin !== "user-selected") {
 		corruptSession(filePath, 1, "Session header has an invalid cwdOrigin");
 	}
-	if (header.permissionMode !== undefined && !isPermissionMode(header.permissionMode)) {
+	if (header.permissionMode !== undefined && !isPersistedPermissionMode(header.permissionMode)) {
 		corruptSession(filePath, 1, "Session header has an invalid permissionMode");
 	}
 	if (header.reviewerEnabled !== undefined && typeof header.reviewerEnabled !== "boolean") {
@@ -2018,16 +2027,12 @@ interface ManagedSessionState {
 
 function reducePermissionSettings(entries: readonly FileEntry[]): PermissionSettings {
 	const header = entries[0] as SessionHeader;
-	const defaults = defaultPermissionSettings(header.mode ?? DEFAULT_AGENT_MODE);
-	let settings: PermissionSettings = {
-		mode: header.permissionMode ?? defaults.mode,
-		reviewerEnabled: header.reviewerEnabled ?? defaults.reviewerEnabled,
-	};
+	let mode = normalizePermissionMode(header.permissionMode) ?? defaultPermissionSettings().mode;
 	for (const entry of entries.slice(1)) {
 		if (entry.type !== "session_permissions") continue;
-		settings = { mode: entry.permissionMode, reviewerEnabled: entry.reviewerEnabled };
+		mode = normalizePermissionMode(entry.permissionMode) ?? mode;
 	}
-	return settings;
+	return { mode };
 }
 
 function reduceSubagentsEnabled(entries: readonly FileEntry[]): boolean {
@@ -2302,7 +2307,8 @@ function openPersistedSessionState(
 export class SessionManager {
 	private sessionId: string = "";
 	private cwdOrigin: CwdOrigin = "user-selected";
-	private permissionSettings: PermissionSettings = defaultPermissionSettings(DEFAULT_AGENT_MODE);
+	private permissionSettings: PermissionSettings = defaultPermissionSettings();
+	private permissionSettingsListeners = new Set<(next: PermissionSettings, previous: PermissionSettings) => void>();
 	private subagentsEnabled = false;
 	private sessionFile: string | undefined;
 	private storagePath: string | undefined;
@@ -2365,8 +2371,7 @@ export class SessionManager {
 			cwd: this.cwd,
 			mode: DEFAULT_AGENT_MODE,
 			cwdOrigin: "user-selected",
-			permissionMode: defaultPermissionSettings(DEFAULT_AGENT_MODE).mode,
-			reviewerEnabled: defaultPermissionSettings(DEFAULT_AGENT_MODE).reviewerEnabled,
+			permissionMode: defaultPermissionSettings().mode,
 		});
 		if (!this.persist) {
 			const records = existsSync(storagePath) ? readSessionRecordsReadOnly(storagePath).records : [createHeader()];
@@ -2385,11 +2390,15 @@ export class SessionManager {
 		const sessionId = options?.id ?? createSessionId();
 		const timestamp = new Date().toISOString();
 		const mode = options?.mode ?? this.getMode();
-		const permissionDefaults = defaultPermissionSettings(mode);
-		const permissionMode = options?.permissionMode ?? permissionDefaults.mode;
-		const reviewerEnabled = options?.reviewerEnabled ?? permissionDefaults.reviewerEnabled;
-		if (!isPermissionMode(permissionMode)) throw new TypeError("Invalid permission mode");
-		if (typeof reviewerEnabled !== "boolean") throw new TypeError("reviewerEnabled must be a boolean");
+		const requestedPermissionMode = options?.permissionMode;
+		const permissionMode =
+			requestedPermissionMode === undefined
+				? defaultPermissionSettings().mode
+				: normalizePermissionMode(requestedPermissionMode);
+		if (!permissionMode) throw new TypeError("Invalid permission mode");
+		if (options?.reviewerEnabled !== undefined && typeof options.reviewerEnabled !== "boolean") {
+			throw new TypeError("reviewerEnabled must be a boolean");
+		}
 		if (options?.subagent) {
 			assertValidSessionId(options.subagent.agentId);
 			assertValidSessionId(options.subagent.parentSessionId);
@@ -2411,7 +2420,6 @@ export class SessionManager {
 			mode,
 			cwdOrigin: options?.cwdOrigin ?? "user-selected",
 			permissionMode,
-			reviewerEnabled,
 			parentSession: options?.parentSession,
 			subagent: options?.subagent,
 		};
@@ -2697,19 +2705,33 @@ export class SessionManager {
 
 	/** Persist effective per-session permissions without advancing the transcript leaf. */
 	setPermissionSettings(settings: PermissionSettings): string {
+		if (!isPermissionMode(settings.mode)) throw new TypeError("Invalid permission mode");
+		const previous = this.permissionSettings;
 		const entry = this._appendSessionControl({
 			type: "session_permissions",
 			permissionMode: settings.mode,
-			reviewerEnabled: settings.reviewerEnabled,
 		});
 		if (entry.type !== "session_permissions") throw new Error("Unexpected session control entry");
-		this.permissionSettings = { mode: entry.permissionMode, reviewerEnabled: entry.reviewerEnabled };
+		this.permissionSettings = { mode: normalizePermissionMode(entry.permissionMode)! };
+		for (const listener of [...this.permissionSettingsListeners]) {
+			listener(this.getPermissionSettings(), { ...previous });
+		}
 		return entry.id;
+	}
+
+	/** Observe persisted mode changes. The listener is called only after the append succeeds. */
+	subscribePermissionSettings(listener: (next: PermissionSettings, previous: PermissionSettings) => void): () => void {
+		this.permissionSettingsListeners.add(listener);
+		return () => this.permissionSettingsListeners.delete(listener);
 	}
 
 	/** Append one permission decision audit record without granting persistent authority. */
 	appendPermissionDecision(decision: PermissionDecisionPayload): string {
-		return this._appendSessionControl({ type: "session_permission_decision", ...decision }).id;
+		return this._appendSessionControl({
+			type: "session_permission_decision",
+			...decision,
+			reason: decision.reason ?? "No reason provided",
+		}).id;
 	}
 
 	/** Append one validated first-class subagent control without advancing the transcript leaf. */
@@ -3215,7 +3237,6 @@ export class SessionManager {
 			mode: this.getMode(),
 			cwdOrigin: this.getCwdOrigin(),
 			permissionMode: this.permissionSettings.mode,
-			reviewerEnabled: this.permissionSettings.reviewerEnabled,
 			parentSession: this.persist ? this.sessionFile : undefined,
 		};
 
@@ -3319,8 +3340,7 @@ export class SessionManager {
 			cwd: resolvePath(initialCwd),
 			mode: DEFAULT_AGENT_MODE,
 			cwdOrigin: "user-selected",
-			permissionMode: defaultPermissionSettings(DEFAULT_AGENT_MODE).mode,
-			reviewerEnabled: defaultPermissionSettings(DEFAULT_AGENT_MODE).reviewerEnabled,
+			permissionMode: defaultPermissionSettings().mode,
 		});
 		const state = openPersistedSessionState(resolvedPath, createHeader, storagePath, {
 			createIfMissing: options.createIfMissing !== false,
@@ -3443,7 +3463,6 @@ export class SessionManager {
 			mode: sourceHeader.mode ?? DEFAULT_AGENT_MODE,
 			cwdOrigin: sourceHeader.cwdOrigin ?? "user-selected",
 			permissionMode: sourcePermissions.mode,
-			reviewerEnabled: sourcePermissions.reviewerEnabled,
 			parentSession: resolvedSourcePath,
 		};
 		const state = createPersistedSessionState(

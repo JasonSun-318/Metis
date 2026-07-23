@@ -12,23 +12,13 @@ const MODE_ITEMS: SelectItem[] = [
 	{
 		value: "ask",
 		label: "Ask before changes",
-		description: "Read in a sandbox; ask before writes, network, or risky actions",
-	},
-	{
-		value: "auto",
-		label: "Auto with review",
-		description: "Read/write the workspace; review risky or external actions",
+		description: "Safe structured reads run directly; other model actions ask first",
 	},
 	{
 		value: "full",
 		label: "Full access",
-		description: "Run without ArcMind approvals or sandboxing",
+		description: "Run model tool actions directly with no ArcMind approval",
 	},
-];
-
-const REVIEWER_ITEMS: SelectItem[] = [
-	{ value: "enabled", label: "Reviewer enabled", description: "Use the current session model for risky actions" },
-	{ value: "disabled", label: "Reviewer disabled", description: "Ask the user instead of automatic review" },
 ];
 
 export class PermissionsSelectorComponent extends Container {
@@ -66,24 +56,8 @@ export class PermissionsSelectorComponent extends Container {
 		this.setItems(
 			MODE_ITEMS,
 			this.current.mode,
-			(value) => {
-				const mode = value as PermissionMode;
-				if (mode === "auto") {
-					this.showReviewer();
-					return;
-				}
-				this.onSave({ mode, reviewerEnabled: this.current.reviewerEnabled });
-			},
+			(value) => this.onSave({ mode: value as PermissionMode }),
 			this.onCancel,
-		);
-	}
-
-	private showReviewer(): void {
-		this.setItems(
-			REVIEWER_ITEMS,
-			this.current.reviewerEnabled ? "enabled" : "disabled",
-			(value) => this.onSave({ mode: "auto", reviewerEnabled: value === "enabled" }),
-			() => this.showModes(),
 		);
 	}
 

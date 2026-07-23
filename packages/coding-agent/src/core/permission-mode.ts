@@ -1,19 +1,27 @@
-import type { AgentMode } from "./agent-mode.ts";
-
-export type PermissionMode = "ask" | "auto" | "full";
+export type PermissionMode = "ask" | "full";
+export type PersistedPermissionMode = PermissionMode | "auto";
 
 export interface PermissionSettings {
 	readonly mode: PermissionMode;
-	readonly reviewerEnabled: boolean;
+}
+
+export function defaultPermissionSettings(): PermissionSettings {
+	return { mode: "ask" };
 }
 
 export function isPermissionMode(value: unknown): value is PermissionMode {
+	return value === "ask" || value === "full";
+}
+
+export function isPersistedPermissionMode(value: unknown): value is PersistedPermissionMode {
 	return value === "ask" || value === "auto" || value === "full";
 }
 
-export function defaultPermissionSettings(agentMode: AgentMode): PermissionSettings {
-	return {
-		mode: agentMode === "chat" ? "ask" : "auto",
-		reviewerEnabled: true,
-	};
+export function normalizePermissionMode(value: unknown): PermissionMode | undefined {
+	if (value === "auto") return "ask";
+	return isPermissionMode(value) ? value : undefined;
+}
+
+export function narrowPermissionMode(left: PermissionMode, right: PermissionMode): PermissionMode {
+	return left === "ask" || right === "ask" ? "ask" : "full";
 }

@@ -53,7 +53,7 @@ function createSession(options: {
 			getSessionName: () => options.sessionName,
 			getCwd: () => "/tmp/project",
 			getMode: () => options.mode ?? "code",
-			getPermissionSettings: () => ({ mode: "auto", reviewerEnabled: true }),
+			getPermissionSettings: () => ({ mode: "ask" }),
 		},
 		getContextUsage: () => ({ contextWindow: 200_000, percent: 12.3 }),
 		modelRegistry: {
@@ -149,6 +149,6 @@ describe("FooterComponent width handling", () => {
 	it("shows the current agent mode", () => {
 		const footer = new FooterComponent(createSession({ sessionName: "", mode: "chat" }), createFooterData(1));
 
-		expect(stripAnsi(footer.render(120)[0])).toContain("[chat • Auto]");
+		expect(stripAnsi(footer.render(120)[0])).toContain("[chat • Ask]");
 	});
 });

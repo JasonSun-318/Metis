@@ -55,12 +55,7 @@ import {
 	VERSION,
 } from "../../config.ts";
 import { type AgentMode, isAgentMode } from "../../core/agent-mode.ts";
-import {
-	type AgentSession,
-	type AgentSessionEvent,
-	parseSkillBlock,
-	type UserBashAuthorization,
-} from "../../core/agent-session.ts";
+import { type AgentSession, type AgentSessionEvent, parseSkillBlock } from "../../core/agent-session.ts";
 import { type AgentSessionRuntime, SessionImportFileNotFoundError } from "../../core/agent-session-runtime.ts";
 import { mcpCredentialKey } from "../../core/auth-storage.ts";
 import {
@@ -92,7 +87,7 @@ import { createCompactionSummaryMessage } from "../../core/messages.ts";
 import { defaultModelPerProvider, findExactModelReferenceMatch, resolveModelScope } from "../../core/model-resolver.ts";
 import { DefaultPackageManager } from "../../core/package-manager.ts";
 import {
-	canUseFullOnce,
+	formatPermissionApproval,
 	type PermissionApprovalDecision,
 	type PermissionApprovalRequest,
 } from "../../core/permission-policy.ts";
@@ -480,7 +475,6 @@ export class InteractiveMode {
 	private extensionInput: ExtensionInputComponent | undefined = undefined;
 	private extensionEditor: ExtensionEditorComponent | undefined = undefined;
 	private extensionTerminalInputUnsubscribers = new Set<() => void>();
-	private permissionApprovalTail: Promise<void> = Promise.resolve();
 	private permissionApprovalAbortController?: AbortController;
 
 	// Extension widgets (components rendered above/below the editor)
@@ -573,83 +567,31 @@ export class InteractiveMode {
 
 	private bindPermissionApproval(session: AgentSession): void {
 		session.setPermissionApprovalHandler((request) => this.requestPermissionApproval(session, request));
-		session.setWindowsSandboxSetupHandler(() => this.requestWindowsSandboxSetup(session));
 	}
 
-	private requestWindowsSandboxSetup(session: AgentSession): Promise<boolean> {
-		const pending = this.permissionApprovalTail.then(async () => {
-			if (session !== this.session) return false;
-			const controller = new AbortController();
-			this.permissionApprovalAbortController = controller;
-			try {
-				const choice = await this.showExtensionSelector(
-					"Set up the Windows sandbox?\nThis one-time setup requires a UAC prompt.",
-					["Allow setup", "Deny"],
-					{ signal: controller.signal },
-				);
-				return choice === "Allow setup";
-			} finally {
-				if (this.permissionApprovalAbortController === controller) {
-					this.permissionApprovalAbortController = undefined;
-				}
-			}
-		});
-		this.permissionApprovalTail = pending.then(
-			() => undefined,
-			() => undefined,
-		);
-		return pending;
-	}
-
-	private requestPermissionApproval(
+	private async requestPermissionApproval(
 		session: AgentSession,
 		request: PermissionApprovalRequest,
 	): Promise<PermissionApprovalDecision> {
-		const pending = this.permissionApprovalTail.then(async () => {
-			if (session !== this.session || request.signal?.aborted) {
-				return { decision: "deny" as const, reason: "The session changed before approval" };
+		if (session !== this.session || request.signal?.aborted) throw new Error("The session changed before approval");
+		const controller = new AbortController();
+		this.permissionApprovalAbortController = controller;
+		try {
+			const view = formatPermissionApproval(request);
+			const signal = request.signal ? AbortSignal.any([request.signal, controller.signal]) : controller.signal;
+			const choice = await this.showExtensionSelector(
+				`${view.title}\n${view.summary}\n${view.details}`,
+				["Allow once", "Deny"],
+				{ signal },
+			);
+			if (choice === "Allow once") return { decision: "allow" };
+			if (choice === "Deny") return { decision: "deny", reason: "Denied by the user" };
+			throw new Error("The approval dialog closed without a decision");
+		} finally {
+			if (this.permissionApprovalAbortController === controller) {
+				this.permissionApprovalAbortController = undefined;
 			}
-			const controller = new AbortController();
-			this.permissionApprovalAbortController = controller;
-			try {
-				const action = request.action;
-				const allowFullOnce = canUseFullOnce(action);
-				const signal = request.signal ? AbortSignal.any([request.signal, controller.signal]) : controller.signal;
-				const details = [
-					`Reason: ${request.reason}`,
-					`Risk: ${action.risks.join(", ")}`,
-					action.command ? `Command: ${JSON.stringify(action.command)}` : undefined,
-					action.paths.length > 0 ? `Paths: ${action.paths.join(", ")}` : undefined,
-					action.networkTargets.length > 0
-						? `Network: ${action.networkTargets.map(({ host, port }) => `${host}:${port}`).join(", ")}`
-						: undefined,
-				]
-					.filter((line): line is string => line !== undefined)
-					.join("\n")
-					.slice(0, 2000);
-				const choice = await this.showExtensionSelector(
-					`Approve ${action.toolName}?\n${details}`,
-					request.fullOnceRequired
-						? ["Run once with Full", "Deny"]
-						: allowFullOnce
-							? ["Allow once", "Run once with Full", "Deny"]
-							: ["Allow once", "Deny"],
-					{ signal },
-				);
-				if (choice === "Allow once") return { decision: "allow" as const };
-				if (choice === "Run once with Full") return { decision: "allow" as const, fullOnce: true };
-				return { decision: "deny" as const, reason: "Denied by the user" };
-			} finally {
-				if (this.permissionApprovalAbortController === controller) {
-					this.permissionApprovalAbortController = undefined;
-				}
-			}
-		});
-		this.permissionApprovalTail = pending.then(
-			() => undefined,
-			() => undefined,
-		);
-		return pending;
+		}
 	}
 
 	private getAutocompleteSourceTag(sourceInfo?: SourceInfo): string | undefined {
@@ -4426,9 +4368,7 @@ export class InteractiveMode {
 					this.sessionManager.setPermissionSettings(settings);
 					done();
 					this.footer.invalidate();
-					this.showStatus(
-						`Permissions: ${settings.mode}${settings.mode === "auto" ? (settings.reviewerEnabled ? " with reviewer" : " without reviewer") : ""}`,
-					);
+					this.showStatus(`Permissions: ${settings.mode}`);
 					this.ui.requestRender();
 				},
 				() => {
@@ -6102,9 +6042,7 @@ export class InteractiveMode {
 		info += `${theme.fg("dim", "ID:")} ${stats.sessionId}\n`;
 		info += `${theme.fg("dim", "Mode:")} ${stats.mode}\n`;
 		info += `${theme.fg("dim", "Workspace:")} ${stats.cwd} (${stats.cwdOrigin})\n`;
-		info += `${theme.fg("dim", "Permissions:")} ${stats.permissionMode}`;
-		if (stats.permissionMode === "auto") info += stats.reviewerEnabled ? " (reviewer on)" : " (reviewer off)";
-		info += "\n\n";
+		info += `${theme.fg("dim", "Permissions:")} ${stats.permissionMode}\n\n`;
 		info += `${theme.bold("Messages")}\n`;
 		info += `${theme.fg("dim", "Total:")} ${stats.totalMessages}\n`;
 		info += `${theme.fg("dim", "User:")} ${stats.userMessages}\n`;
@@ -6379,31 +6317,17 @@ export class InteractiveMode {
 
 	private async handleBashCommand(command: string, excludeFromContext = false): Promise<void> {
 		const extensionRunner = this.session.extensionRunner;
-		let authorization: UserBashAuthorization;
-		try {
-			authorization = await this.session.authorizeUserBash(command);
-		} catch (error) {
-			this.showError(error instanceof Error ? error.message : "Bash permission denied");
-			return;
-		}
 
 		// Emit user_bash event to let extensions intercept
-		let eventResult: Awaited<ReturnType<typeof extensionRunner.emitUserBash>>;
-		try {
-			eventResult = await extensionRunner.emitUserBash({
-				type: "user_bash",
-				command,
-				excludeFromContext,
-				cwd: this.sessionManager.getCwd(),
-			});
-		} catch (error) {
-			this.session.cancelUserBashAuthorization(authorization);
-			throw error;
-		}
+		const eventResult = await extensionRunner.emitUserBash({
+			type: "user_bash",
+			command,
+			excludeFromContext,
+			cwd: this.sessionManager.getCwd(),
+		});
 
 		// If extension returned a full result, use it directly
 		if (eventResult?.result) {
-			this.session.cancelUserBashAuthorization(authorization);
 			const result = eventResult.result;
 
 			// Create UI component for display
@@ -6456,7 +6380,7 @@ export class InteractiveMode {
 						this.ui.requestRender();
 					}
 				},
-				{ excludeFromContext, operations: eventResult?.operations, authorization },
+				{ excludeFromContext, operations: eventResult?.operations },
 			);
 
 			if (this.bashComponent) {
@@ -6472,8 +6396,6 @@ export class InteractiveMode {
 				this.bashComponent.setComplete(undefined, false);
 			}
 			this.showError(`Bash command failed: ${error instanceof Error ? error.message : "Unknown error"}`);
-		} finally {
-			this.session.cancelUserBashAuthorization(authorization);
 		}
 
 		this.bashComponent = undefined;

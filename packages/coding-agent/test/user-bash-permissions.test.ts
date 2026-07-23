@@ -9,54 +9,31 @@ describe("manual bash permissions", () => {
 		while (harnesses.length > 0) await harnesses.pop()?.cleanup();
 	});
 
-	it("allows a known Ask read without reviewer or user approval", async () => {
-		const reviewer = vi.fn(async () => '{"decision":"deny","reason":"unused"}');
-		const requestApproval = vi.fn(async () => ({ decision: "deny" as const }));
-		const harness = await createHarness({
-			permissionSettings: { mode: "ask", reviewerEnabled: true },
-			permissionReviewerStream: reviewer,
-			requestPermissionApproval: requestApproval,
+	for (const mode of ["ask", "full"] as const) {
+		it(`treats user-entered commands as explicit authorization in ${mode}`, async () => {
+			const requestApproval = vi.fn(async () => ({ decision: "deny" as const }));
+			const harness = await createHarness({
+				permissionSettings: { mode },
+				requestPermissionApproval: requestApproval,
+			});
+			harnesses.push(harness);
+			const commands: string[] = [];
+			const operations: BashOperations = {
+				exec: async (command, _cwd, options) => {
+					commands.push(command);
+					options.onData(Buffer.from("ok"));
+					return { exitCode: 0 };
+				},
+			};
+
+			for (const command of ["rm -rf build", "git push origin main", "curl https://example.test"]) {
+				await expect(harness.session.executeBash(command, undefined, { operations })).resolves.toMatchObject({
+					output: "ok",
+				});
+			}
+
+			expect(commands).toEqual(["rm -rf build", "git push origin main", "curl https://example.test"]);
+			expect(requestApproval).not.toHaveBeenCalled();
 		});
-		harnesses.push(harness);
-
-		const authorization = await harness.session.authorizeUserBash("pwd");
-		expect(reviewer).not.toHaveBeenCalled();
-		expect(requestApproval).not.toHaveBeenCalled();
-		harness.session.cancelUserBashAuthorization(authorization);
-	});
-
-	it("asks exactly once before an Ask write-like command", async () => {
-		const requestApproval = vi.fn(async () => ({ decision: "allow" as const }));
-		const harness = await createHarness({
-			permissionSettings: { mode: "ask", reviewerEnabled: true },
-			requestPermissionApproval: requestApproval,
-		});
-		harnesses.push(harness);
-		const operations: BashOperations = {
-			exec: async (_command, _cwd, options) => {
-				options.onData(Buffer.from("written"));
-				return { exitCode: 0 };
-			},
-		};
-
-		const authorization = await harness.session.authorizeUserBash("echo x > output.txt");
-		await harness.session.executeBash("echo x > output.txt", undefined, { authorization, operations });
-		expect(requestApproval).toHaveBeenCalledOnce();
-	});
-
-	it("sends risky Auto manual commands directly to the user, never the reviewer", async () => {
-		const reviewer = vi.fn(async () => '{"decision":"allow","reason":"unused"}');
-		const requestApproval = vi.fn(async () => ({ decision: "allow" as const }));
-		const harness = await createHarness({
-			permissionSettings: { mode: "auto", reviewerEnabled: true },
-			permissionReviewerStream: reviewer,
-			requestPermissionApproval: requestApproval,
-		});
-		harnesses.push(harness);
-
-		const authorization = await harness.session.authorizeUserBash("ssh example.com");
-		expect(requestApproval).toHaveBeenCalledOnce();
-		expect(reviewer).not.toHaveBeenCalled();
-		harness.session.cancelUserBashAuthorization(authorization);
-	});
+	}
 });

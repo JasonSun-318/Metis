@@ -31,13 +31,10 @@ function config(root: string): SubagentConfig {
 		taskSummary: "Inspect the implementation",
 		mode: "code",
 		tools: ["read"],
-		permissionMode: "auto",
-		reviewerEnabled: true,
+		permissionMode: "ask",
 		model: { provider: "openai", modelId: "gpt-test" },
 		thinkingLevel: "high",
 		cwd: join(root, "project"),
-		readPaths: [join(root, "project")],
-		writePaths: [join(root, "project")],
 		forkTurns: "all",
 		timeoutSeconds: 60,
 	};
@@ -50,6 +47,10 @@ describe("SubagentStore", () => {
 		expect(existsSync(created.path)).toBe(true);
 		expect(created.agentId).toBe("child-session-1");
 		expect(store.list().agents).toMatchObject([{ agentId: "child-session-1", status: "queued" }]);
+		const serialized = JSON.stringify(store.readJournal(created.agentId));
+		expect(serialized).not.toContain("reviewerEnabled");
+		expect(serialized).not.toContain("readPaths");
+		expect(serialized).not.toContain("writePaths");
 
 		const running = store.appendState(created.agentId, {
 			type: "subagent_state",

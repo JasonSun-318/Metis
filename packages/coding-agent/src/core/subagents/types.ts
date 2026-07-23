@@ -50,12 +50,9 @@ export interface SubagentConfig {
 	readonly mode: AgentMode;
 	readonly tools: readonly string[];
 	readonly permissionMode: PermissionMode;
-	readonly reviewerEnabled: boolean;
 	readonly model: SubagentModelRef;
 	readonly thinkingLevel: ThinkingLevel;
 	readonly cwd: string;
-	readonly readPaths: readonly string[];
-	readonly writePaths: readonly string[];
 	readonly forkTurns: SubagentForkTurns;
 	readonly timeoutSeconds: number;
 	readonly role?: string;
@@ -79,8 +76,6 @@ export interface SubagentDisplayConfig {
 	readonly model: SubagentModelRef;
 	readonly thinkingLevel: ThinkingLevel;
 	readonly cwd: string;
-	readonly readPaths: readonly string[];
-	readonly writePaths: readonly string[];
 	readonly forkTurns: SubagentForkTurns;
 	readonly timeoutSeconds: number;
 }

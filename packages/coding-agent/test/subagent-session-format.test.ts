@@ -27,12 +27,9 @@ function config(): SubagentConfig {
 		mode: "code",
 		tools: ["read"],
 		permissionMode: "ask",
-		reviewerEnabled: true,
 		model: { provider: "openai", modelId: "gpt-test" },
 		thinkingLevel: "high",
 		cwd: "/tmp/project",
-		readPaths: ["/tmp/project"],
-		writePaths: ["/tmp/project"],
 		forkTurns: "all",
 		timeoutSeconds: 60,
 	};
@@ -71,7 +68,7 @@ describe("v7 first-class subagent records", () => {
 		).toThrow("Unknown session control entry type");
 	});
 
-	it("rejects invalid state transitions and non-canonical capability roots", () => {
+	it("rejects invalid state transitions and malformed legacy path fields", () => {
 		const base = {
 			id: "record-1",
 			parentId: null,
@@ -104,13 +101,24 @@ describe("v7 first-class subagent records", () => {
 				config: { ...config(), readPaths: ["relative/path"] },
 			}),
 		).toThrow("invalid path");
-		expect(() =>
-			parseSessionControlEntry({
-				...base,
-				type: "subagent_created",
-				config: { ...config(), writePaths: ["/tmp/other"] },
-			}),
-		).toThrow("writePaths must stay inside readPaths");
+		const legacy = parseSessionControlEntry({
+			...base,
+			type: "subagent_created",
+			config: {
+				...config(),
+				permissionMode: "auto",
+				reviewerEnabled: true,
+				readPaths: ["/tmp/project"],
+				writePaths: ["/tmp/other"],
+			},
+		});
+		expect(legacy).toMatchObject({
+			type: "subagent_created",
+			config: { permissionMode: "ask" },
+		});
+		expect(legacy.type === "subagent_created" ? legacy.config : {}).not.toHaveProperty("reviewerEnabled");
+		expect(legacy.type === "subagent_created" ? legacy.config : {}).not.toHaveProperty("readPaths");
+		expect(legacy.type === "subagent_created" ? legacy.config : {}).not.toHaveProperty("writePaths");
 	});
 
 	it("rejects subagent records under v6 and migrates ordinary v6 journals", () => {
