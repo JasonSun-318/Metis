@@ -4,7 +4,6 @@ import { createHash } from "node:crypto";
 import {
 	chmodSync,
 	cpSync,
-	existsSync,
 	mkdirSync,
 	mkdtempSync,
 	readdirSync,
@@ -78,7 +77,6 @@ function option(name, fallback) {
 
 const target = option("--target", "all");
 const outputDir = resolve(packageDir, option("--output", "dist/vendor/tools"));
-const includeSrt = process.argv.includes("--include-srt");
 const dispatcher = new EnvHttpProxyAgent();
 
 function currentPair() {
@@ -201,32 +199,8 @@ async function stageTools() {
 	}
 }
 
-function stageSrtAssets() {
-	if (!includeSrt) return;
-	const vendorDir = dirname(outputDir);
-	const srtVendor = join(repoRoot, "node_modules", "@anthropic-ai", "sandbox-runtime", "vendor");
-	if (!existsSync(srtVendor)) throw new Error("@anthropic-ai/sandbox-runtime vendor assets are missing");
-	if (process.platform === "win32" && (process.arch === "arm64" || process.arch === "x64")) {
-		const destination = join(vendorDir, "srt-win", process.arch);
-		mkdirSync(destination, { recursive: true });
-		cpSync(join(srtVendor, "srt-win", process.arch, "srt-win.exe"), join(destination, "srt-win.exe"));
-	}
-	if (process.platform === "linux" && (process.arch === "arm64" || process.arch === "x64")) {
-		const destination = join(vendorDir, "seccomp", process.arch);
-		mkdirSync(destination, { recursive: true });
-		const target = join(destination, "apply-seccomp");
-		cpSync(join(srtVendor, "seccomp", process.arch, "apply-seccomp"), target);
-		chmodSync(target, 0o755);
-	}
-	cpSync(
-		join(repoRoot, "node_modules", "@anthropic-ai", "sandbox-runtime", "LICENSE"),
-		join(vendorDir, "sandbox-runtime-LICENSE"),
-	);
-}
-
 try {
 	await stageTools();
-	stageSrtAssets();
 } finally {
 	await dispatcher.close();
 }
