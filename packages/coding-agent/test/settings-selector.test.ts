@@ -1,4 +1,6 @@
-import { beforeAll, describe, expect, it } from "vitest";
+import { setKeybindings } from "@arcmind/tui";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { KeybindingsManager } from "../src/core/keybindings.ts";
 import {
 	type SettingsCallbacks,
 	type SettingsConfig,
@@ -44,11 +46,38 @@ const callbacks = new Proxy({}, { get: () => () => undefined }) as SettingsCallb
 
 describe("settings selector web search controls", () => {
 	beforeAll(() => initTheme("dark"));
+	beforeEach(() => setKeybindings(new KeybindingsManager()));
 
-	it("shows enablement and selected provider", () => {
+	it("shows the disabled state", () => {
 		const text = stripAnsi(new SettingsSelectorComponent(config, callbacks).render(120).join("\n"));
 		expect(text).toContain("Web search");
-		expect(text).toContain("false");
-		expect(text).toContain("Brave Search");
+		expect(text).toContain("Disabled");
+	});
+
+	it("routes provider and disable choices through one submenu", () => {
+		const onWebSearchEnabledChange = vi.fn();
+		const onWebSearchProviderChange = vi.fn();
+		const testCallbacks = new Proxy(
+			{ onWebSearchEnabledChange, onWebSearchProviderChange },
+			{ get: (target, key) => Reflect.get(target, key) ?? (() => undefined) },
+		) as unknown as SettingsCallbacks;
+
+		const providerList = new SettingsSelectorComponent(config, testCallbacks).getSettingsList();
+		providerList.handleInput("\x1b[B");
+		providerList.handleInput("\r");
+		expect(stripAnsi(providerList.render(120).join("\n"))).toContain("Brave Search");
+		providerList.handleInput("\x1b[B");
+		providerList.handleInput("\r");
+		expect(onWebSearchProviderChange).toHaveBeenCalledWith("brave");
+
+		const disabledList = new SettingsSelectorComponent(
+			{ ...config, webSearchEnabled: true },
+			testCallbacks,
+		).getSettingsList();
+		disabledList.handleInput("\x1b[B");
+		disabledList.handleInput("\r");
+		disabledList.handleInput("\x1b[A");
+		disabledList.handleInput("\r");
+		expect(onWebSearchEnabledChange).toHaveBeenCalledWith(false);
 	});
 });

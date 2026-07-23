@@ -665,24 +665,27 @@ export class SettingsSelectorComponent extends Container {
 			values: ["true", "false"],
 		});
 
-		items.splice(
-			1,
-			0,
-			{
-				id: "web-search-enabled",
-				label: "Web search",
-				description: "Expose the built-in web_search tool to the model",
-				currentValue: config.webSearchEnabled ? "true" : "false",
-				values: ["true", "false"],
-			},
-			{
-				id: "web-search-provider",
-				label: "Search provider",
-				description: "Provider used by web_search",
-				currentValue: WEB_SEARCH_PROVIDER_INFO[config.webSearchProvider].label,
-				values: WEB_SEARCH_PROVIDERS.map((provider) => WEB_SEARCH_PROVIDER_INFO[provider].label),
-			},
-		);
+		items.splice(1, 0, {
+			id: "web-search",
+			label: "Web search",
+			description: "Choose a provider and enter its API key, or disable web_search",
+			currentValue: config.webSearchEnabled ? WEB_SEARCH_PROVIDER_INFO[config.webSearchProvider].label : "Disabled",
+			submenu: (currentValue, done) =>
+				new SelectSubmenu(
+					"Web Search",
+					"Select a provider to configure its API key.",
+					[
+						{ value: "Disabled", label: "Disabled", description: "Do not expose web_search to the model" },
+						...WEB_SEARCH_PROVIDERS.map((provider) => ({
+							value: WEB_SEARCH_PROVIDER_INFO[provider].label,
+							label: WEB_SEARCH_PROVIDER_INFO[provider].label,
+						})),
+					],
+					currentValue,
+					(value) => done(value),
+					() => done(),
+				),
+		});
 
 		// Add borders
 		this.addChild(new DynamicBorder());
@@ -696,10 +699,11 @@ export class SettingsSelectorComponent extends Container {
 					case "autocompact":
 						callbacks.onAutoCompactChange(newValue === "true");
 						break;
-					case "web-search-enabled":
-						callbacks.onWebSearchEnabledChange(newValue === "true");
-						break;
-					case "web-search-provider": {
+					case "web-search": {
+						if (newValue === "Disabled") {
+							callbacks.onWebSearchEnabledChange(false);
+							break;
+						}
 						const provider = WEB_SEARCH_PROVIDERS.find(
 							(value) => WEB_SEARCH_PROVIDER_INFO[value].label === newValue,
 						);

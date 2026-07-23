@@ -60,7 +60,7 @@ arcmind
 
 Then just talk to arcmind. By default, a primary session gives the model seven tools: `read`, `grep`, `write`, `edit`, `bash`, `web_fetch`, and `update_plan`. The model uses these to fulfill your requests. Add capabilities via [skills](#skills), [prompt templates](#prompt-templates), [extensions](#extensions), or [arcmind packages](#arcmind-packages).
 
-`web_search` is also built in but disabled by default. Enable it and choose Brave Search, Tavily, or SerpApi in `/settings`, then store that provider's key with `/login web-search:brave`, `/login web-search:tavily`, or `/login web-search:serpapi`. Search returns result URLs and metadata; use `web_fetch` to retrieve a selected page as Markdown.
+`web_search` is also built in but disabled by default. Open **Web search** in `/settings`, choose Brave Search, Tavily, or SerpApi, then enter that provider's API key when prompted. Search returns result URLs and metadata; use `web_fetch` to retrieve a selected page as Markdown.
 
 **Platform notes:** [Windows](docs/windows.md) | [Termux (Android)](docs/termux.md) | [tmux](docs/tmux.md) | [Terminal setup](docs/terminal-setup.md) | [Shell aliases](docs/shell-aliases.md)
 

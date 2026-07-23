@@ -68,13 +68,7 @@ See [Providers](providers.md) for all supported providers, environment variables
 
 ### Optional: enable web search
 
-`web_search` is built in but disabled by default. Run `/settings`, enable **Web search**, and select Brave Search, Tavily, or SerpApi. Then store the selected provider's API key:
-
-```text
-/login web-search:brave
-/login web-search:tavily
-/login web-search:serpapi
-```
+`web_search` is built in but disabled by default. Run `/settings`, open **Web search**, select Brave Search, Tavily, or SerpApi, and enter the provider's API key in the masked prompt.
 
 Only one search provider is selected at a time, and the model receives `web_search` only while the global setting is enabled. Search returns URLs and result metadata; `web_fetch` retrieves a selected page as Markdown.
 

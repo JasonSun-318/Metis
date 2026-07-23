@@ -4348,7 +4348,17 @@ export class InteractiveMode {
 						this.settingsManager.setShowTerminalProgress(enabled);
 					},
 					onWebSearchEnabledChange: (enabled) => this.session.setWebSearchEnabled(enabled),
-					onWebSearchProviderChange: (provider) => this.session.setWebSearchProvider(provider),
+					onWebSearchProviderChange: (provider) => {
+						void this.showApiKeyLoginDialog(
+							webSearchCredentialId(provider),
+							WEB_SEARCH_PROVIDER_INFO[provider].label,
+							`Configure ${WEB_SEARCH_PROVIDER_INFO[provider].label}`,
+						).then((saved) => {
+							if (!saved) return;
+							this.session.setWebSearchProvider(provider);
+							this.session.setWebSearchEnabled(true);
+						});
+					},
 					onCancel: () => {
 						done();
 						this.ui.requestRender();
@@ -5165,7 +5175,11 @@ export class InteractiveMode {
 		}
 	}
 
-	private async showApiKeyLoginDialog(providerId: string, providerName: string): Promise<void> {
+	private async showApiKeyLoginDialog(
+		providerId: string,
+		providerName: string,
+		titleOverride?: string,
+	): Promise<boolean> {
 		const previousModel = this.session.model;
 
 		const dialog = new LoginDialogComponent(
@@ -5175,6 +5189,7 @@ export class InteractiveMode {
 				// Completion handled below
 			},
 			providerName,
+			titleOverride,
 		);
 
 		if (providerId === "amazon-bedrock") {
@@ -5210,17 +5225,19 @@ export class InteractiveMode {
 				this.showStatus(
 					`Saved API key for ${WEB_SEARCH_PROVIDER_INFO[searchProvider].label}. Credentials saved to ${getAuthPath()}`,
 				);
-				return;
+				return true;
 			}
 
 			restoreEditor();
 			await this.completeProviderAuthentication(providerId, providerName, "api_key", previousModel);
+			return true;
 		} catch (error: unknown) {
 			restoreEditor();
 			const errorMsg = error instanceof Error ? error.message : String(error);
 			if (errorMsg !== "Login cancelled") {
 				this.showError(`Failed to save API key for ${providerName}: ${errorMsg}`);
 			}
+			return false;
 		}
 	}
 

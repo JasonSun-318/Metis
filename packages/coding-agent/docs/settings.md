@@ -102,7 +102,7 @@ ArcMind does not perform version checks or install telemetry. `enableProviderAtt
 }
 ```
 
-`provider` accepts `"brave"`, `"tavily"`, or `"serpapi"`. Store its API key separately in the credential store with `/login web-search:brave`, `/login web-search:tavily`, or `/login web-search:serpapi`; API keys never belong in settings. Disabling the setting removes `web_search` from the model immediately. Tool allowlists, exclusions, `--no-builtin-tools`, and `--no-tools` can further restrict it but cannot bypass the disabled state.
+`provider` accepts `"brave"`, `"tavily"`, or `"serpapi"`. The `/settings` **Web search** submenu prompts for the selected provider's API key and saves it in the credential store; API keys never belong in settings. `/login web-search:<provider>` remains available for compatibility. Disabling the setting removes `web_search` from the model immediately. Tool allowlists, exclusions, `--no-builtin-tools`, and `--no-tools` can further restrict it but cannot bypass the disabled state.
 
 ### Compaction
 

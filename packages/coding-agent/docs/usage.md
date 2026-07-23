@@ -240,7 +240,7 @@ Built-in tools: `read`, `bash`, `edit`, `write`, `grep`, `find`, `ls`, `web_fetc
 
 `web_fetch` is enabled by default and converts HTTP(S) pages to Markdown. Redirects that change the host or port require another `web_fetch` call so the new network target receives its own permission decision. `update_plan` is enabled by default for primary sessions and is intended only for complex multi-step work. Each plan call replaces the complete plan. Tool allowlists, exclusions, `--no-builtin-tools`, and `--no-tools` apply normally.
 
-`web_search` is disabled by default. Enable it and choose a provider in `/settings`, then store the matching key with `/login web-search:brave`, `/login web-search:tavily`, or `/login web-search:serpapi`. Project settings cannot enable or switch this global paid-service choice. The model-facing contract is:
+`web_search` is disabled by default. Open **Web search** in `/settings`, choose a provider, and enter its API key in the masked prompt. Project settings cannot enable or switch this global paid-service choice. `/login web-search:<provider>` remains available for compatibility. The model-facing contract is:
 
 ```ts
 web_search({ query: string, type?: "web" | "images", limit?: number })
