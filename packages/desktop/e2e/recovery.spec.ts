@@ -10,10 +10,12 @@ import {
 	appServerPid,
 	closeServer,
 	connectToApp,
+	createAndRestoreChatSession,
 	listen,
 	packagedExecutable,
 	reservePort,
 	stopProcess,
+	waitForServerReady,
 } from "./packaged-app-harness.ts";
 
 class ControlledCompletion {
@@ -70,19 +72,16 @@ class ControlledCompletion {
 	}
 }
 
-async function serverProjectionText(page: Page, cwd: string): Promise<string> {
-	return page.evaluate(async (projectCwd) => {
+async function serverProjectionText(page: Page, sessionId: string): Promise<string> {
+	return page.evaluate(async (id) => {
 		const api = (globalThis as unknown as { arcMind: ArcMindDesktopApi }).arcMind;
-		const listed = await api.listSessions({ limit: 200 });
-		const session = listed.sessions.find((candidate) => candidate.cwd === projectCwd);
-		if (!session) return "";
-		const page = await api.readItems({ sessionId: session.sessionId, limit: 200 });
+		const page = await api.readItems({ sessionId: id, limit: 200 });
 		return page.items
 			.flatMap((item) => item.content)
 			.filter((block) => block.type === "text")
 			.map((block) => block.text)
 			.join("");
-	}, cwd);
+	}, sessionId);
 }
 
 test("packaged projection client recovers across renderer and app-server restarts", async () => {
@@ -159,6 +158,7 @@ test("packaged projection client recovers across renderer and app-server restart
 	let page: Page | undefined;
 	let phase = "connecting to the packaged app";
 	const rendererErrors: string[] = [];
+	let sessionId = "";
 	try {
 		const connected = await connectToApp(debuggingPort);
 		browser = connected.browser;
@@ -170,11 +170,8 @@ test("packaged projection client recovers across renderer and app-server restart
 
 		phase = "creating a session";
 		await expect(page.locator(".app-shell")).toBeVisible();
-		await expect(page.locator(".server-pill")).toHaveText("ready");
-		await page.getByRole("button", { name: "New task" }).click();
-		await page.locator("#project-path").fill(projectDir);
-		await page.getByRole("button", { name: "Create" }).click();
-		await expect(page.getByRole("heading", { level: 1 })).toHaveText(projectDir);
+		await waitForServerReady(page);
+		sessionId = await createAndRestoreChatSession(page, projectDir);
 		await expect(page.locator("#composer-input")).toBeEnabled();
 
 		const rootPid = app.pid;
@@ -188,14 +185,14 @@ test("packaged projection client recovers across renderer and app-server restart
 		await expect.poll(() => completions[0]!.isStarted).toBe(true);
 		completions[0]!.write("renderer-before-");
 		phase = "waiting for the first app-server projection delta";
-		await expect.poll(() => serverProjectionText(page!, projectDir)).toContain("renderer-before-");
+		await expect.poll(() => serverProjectionText(page!, sessionId)).toContain("renderer-before-");
 		phase = "waiting for the first renderer delta";
 		await expect(page.getByText("renderer-before-", { exact: true })).toBeVisible();
 
 		phase = "reloading the renderer mid-turn";
 		await page.reload({ waitUntil: "domcontentloaded" });
 		await expect(page.locator(".app-shell")).toBeVisible();
-		await expect(page.getByRole("heading", { level: 1 })).toHaveText(projectDir);
+		await expect(page.locator(".workspace-header h1")).toBeVisible();
 		await expect(page.getByText("renderer-before-", { exact: true })).toBeVisible();
 		expect(appServerPid(rootPid)).toBe(serverPidBeforeReload);
 
@@ -217,7 +214,7 @@ test("packaged projection client recovers across renderer and app-server restart
 		if (!crashedServerPid) throw new Error("Could not find the app-server utility process");
 		process.kill(crashedServerPid, "SIGKILL");
 		await expect.poll(() => appServerPid(rootPid), { timeout: 10_000 }).not.toBe(crashedServerPid);
-		await expect(page.locator(".server-pill")).toHaveText("ready");
+		await waitForServerReady(page);
 		await expect(page.locator(".recovery-banner")).toContainText("last turn was interrupted");
 		await expect(page.locator("#composer-input")).toBeEnabled();
 

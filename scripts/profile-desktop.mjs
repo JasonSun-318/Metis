@@ -6,6 +6,7 @@ import {
 	mkdirSync,
 	mkdtempSync,
 	readFileSync,
+	realpathSync,
 	readdirSync,
 	rmSync,
 	writeFileSync,
@@ -152,7 +153,11 @@ async function medianRss(pid) {
 
 function createHistory(agentDir, cwd) {
 	mkdirSync(cwd, { recursive: true });
-	const manager = SessionManager.create(cwd, getDefaultSessionDir(cwd, agentDir), { id: HISTORY_SESSION_ID });
+	const manager = SessionManager.create(cwd, getDefaultSessionDir(cwd, agentDir), {
+		id: HISTORY_SESSION_ID,
+		mode: "chat",
+		cwdOrigin: "user-selected",
+	});
 	let parentId = manager.appendSessionInfo("10,000 item profile");
 	const sessionFile = manager.getSessionFile();
 	manager.close();
@@ -248,6 +253,8 @@ async function oneRun(executable, run) {
 	const historyDir = join(root, "history-project");
 	const userDataDir = join(root, "electron");
 	for (const directory of [agentDir, projectDir, ...otherProjects, userDataDir]) mkdirSync(directory, { recursive: true });
+	const projectCwd = realpathSync(projectDir);
+	const otherProjectCwds = otherProjects.map((directory) => realpathSync(directory));
 	createHistory(agentDir, historyDir);
 
 	const gates = [deferred(), deferred()];
@@ -327,34 +334,35 @@ async function oneRun(executable, run) {
 		const connected = await connect(port);
 		browser = connected.browser;
 		const page = connected.page;
-		await page.locator(".server-pill").waitFor({ state: "visible" });
-		await waitFor(() => page.locator(".server-pill").textContent(), (value) => value === "ready", "App Server ready");
+		await waitFor(
+			() => page.evaluate(() => globalThis.arcMind.getServerState()),
+			(value) => value.state === "ready",
+			"App Server ready",
+		);
 		await page.getByRole("button", { name: "New task" }).waitFor({ state: "visible" });
 		const usableAt = performance.now();
 		const detected = await utilityDetected;
 		const initialUtilityPid = detected.process.pid;
 
 		const zeroSessionRss = await medianRss(initialUtilityPid);
-		await page.getByRole("button", { name: "New task" }).click();
-		await page.locator("#project-path").fill(projectDir);
-		await page.getByRole("button", { name: "Create" }).click();
-		await waitFor(() => page.locator("h1").textContent(), (value) => value === projectDir, "first session open");
-		const oneSessionRss = await medianRss(initialUtilityPid);
 		const firstSessionId = await page.evaluate(async (cwd) => {
-			const sessions = await globalThis.arcMind.listSessions({ limit: 200 });
-			return sessions.sessions.find((session) => session.cwd === cwd)?.sessionId;
-		}, projectDir);
-		if (!firstSessionId) throw new Error("First profile session is missing");
+			const created = await globalThis.arcMind.createSession({ requestId: crypto.randomUUID(), mode: "chat", cwd });
+			localStorage.setItem("arcmind.activeSessionId.chat", created.session.sessionId);
+			return created.session.sessionId;
+		}, projectCwd);
+		await page.reload({ waitUntil: "domcontentloaded" });
+		await waitFor(() => page.locator(".workspace-header h1").textContent(), (value) => value === projectCwd, "first session open");
+		const oneSessionRss = await medianRss(initialUtilityPid);
 		await page.evaluate(async (paths) => {
 			for (const cwd of paths) {
-				const created = await globalThis.arcMind.createSession({ requestId: crypto.randomUUID(), cwd });
+				const created = await globalThis.arcMind.createSession({ requestId: crypto.randomUUID(), mode: "chat", cwd });
 				await globalThis.arcMind.openSession({ sessionId: created.session.sessionId });
 			}
-		}, otherProjects);
+		}, otherProjectCwds);
 		const threeSessionRss = await medianRss(initialUtilityPid);
-		await page.evaluate((sessionId) => localStorage.setItem("arcmind.activeSessionId", sessionId), firstSessionId);
+		await page.evaluate((sessionId) => localStorage.setItem("arcmind.activeSessionId.chat", sessionId), firstSessionId);
 		await page.reload({ waitUntil: "domcontentloaded" });
-		await waitFor(() => page.locator("h1").textContent(), (value) => value === projectDir, "restore first session");
+		await waitFor(() => page.locator(".workspace-header h1").textContent(), (value) => value === projectCwd, "restore first session");
 
 		const turnAckMs = await page.evaluate(async (sessionId) => {
 			const before = performance.now();
@@ -365,13 +373,13 @@ async function oneRun(executable, run) {
 		const firstReleaseAt = performance.now();
 		gates[0].resolve();
 		await waitFor(
-			() => assistantTextLength(page, projectDir),
+			() => assistantTextLength(page, projectCwd),
 			(length) => length >= "profile-delta".length,
 			"server first delta",
 		);
 		const serverFirstDeltaMs = performance.now() - firstReleaseAt;
 		await waitFor(
-			() => page.locator(".message-assistant p").last().textContent(),
+			() => page.locator("[data-transcript-answer]").last().textContent(),
 			(text) => text === "profile-delta",
 			"renderer first delta",
 		);
@@ -392,17 +400,17 @@ async function oneRun(executable, run) {
 		const streamReleaseAt = performance.now();
 		gates[1].resolve();
 		await waitFor(
-			() => page.locator(".message-assistant p").last().textContent(),
+			() => page.locator("[data-transcript-answer]").last().textContent(),
 			(text) => text?.length === 10_000,
 			"10,000 renderer deltas",
 			30_000,
 		);
 		const tenThousandDeltaMs = performance.now() - streamReleaseAt;
-		const streamedDomCount = await page.locator("[data-transcript-item]").count();
+		const streamedDomCount = await page.locator("[data-transcript-turn]").count();
 		const reloadAt = performance.now();
 		await page.reload({ waitUntil: "domcontentloaded" });
 		await waitFor(
-			() => page.locator(".message-assistant p").last().textContent(),
+			() => page.locator("[data-transcript-answer]").last().textContent(),
 			(text) => text?.length === 10_000,
 			"renderer reload resnapshot",
 		);
@@ -419,7 +427,11 @@ async function oneRun(executable, run) {
 			10_000,
 		);
 		const crashDetectedMs = performance.now() - crashAt;
-		await waitFor(() => page.locator(".server-pill").textContent(), (value) => value === "ready", "crash recovery ready");
+		await waitFor(
+			() => page.evaluate(() => globalThis.arcMind.getServerState()),
+			(value) => value.state === "ready",
+			"crash recovery ready",
+		);
 		const crashRecoveryMs = performance.now() - crashAt;
 
 		const historyOpen = await page.evaluate(async (sessionId) => {
@@ -437,9 +449,9 @@ async function oneRun(executable, run) {
 			return { elapsedMs: performance.now() - before, items: page.items.length };
 		}, { sessionId: HISTORY_SESSION_ID, beforeItemId: historyOpen.nextBeforeItemId });
 
-		await page.evaluate((sessionId) => localStorage.setItem("arcmind.activeSessionId", sessionId), HISTORY_SESSION_ID);
+		await page.evaluate((sessionId) => localStorage.setItem("arcmind.activeSessionId.chat", sessionId), HISTORY_SESSION_ID);
 		await page.reload({ waitUntil: "domcontentloaded" });
-		await waitFor(() => page.locator("h1").textContent(), (value) => value === "10,000 item profile", "history UI open");
+		await waitFor(() => page.locator(".workspace-header h1").textContent(), (value) => value === "10,000 item profile", "history UI open");
 		const pagingAt = performance.now();
 		let pagesLoaded = 1;
 		for (;;) {
@@ -476,7 +488,7 @@ async function oneRun(executable, run) {
 					requestAnimationFrame(frame);
 				}),
 		);
-		const historyDomCount = await page.locator("[data-transcript-item]").count();
+		const historyDomCount = await page.locator("[data-transcript-turn]").count();
 
 		return {
 			launchToUsableMs: usableAt - launchAt,

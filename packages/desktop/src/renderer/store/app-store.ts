@@ -19,6 +19,7 @@ import {
 	removePendingInteraction,
 	replaceProjectionSnapshot,
 	replaceSessionList,
+	restoreProjectionSyncStatus,
 } from "./reducer.ts";
 
 export interface AppStoreSnapshot {
@@ -41,6 +42,7 @@ export interface AppStoreSnapshot {
 	readonly thinkingSelection: SessionSnapshot["thinkingSelection"];
 	readonly actualThinkingLevel: SessionSnapshot["actualThinkingLevel"];
 	readonly availableThinkingSelections: SessionSnapshot["availableThinkingSelections"];
+	readonly model: SessionSnapshot["model"];
 	readonly subagents: SessionSnapshot["subagents"];
 	readonly supervisor: SupervisorView;
 }
@@ -90,6 +92,12 @@ export class AppStore {
 		if (this.state.syncStatus === "resubscribing") return;
 		markProjectionResubscribing(this.state);
 		this.commit();
+	}
+
+	restoreSyncStatusAfterFailedOpen(
+		previous: Pick<AppStoreSnapshot, "activeSessionId" | "serverEpoch" | "syncStatus">,
+	): void {
+		if (restoreProjectionSyncStatus(this.state, previous)) this.commit();
 	}
 
 	setSupervisor(view: SupervisorView): void {
@@ -143,6 +151,7 @@ export class AppStore {
 			thinkingSelection: this.state.thinkingSelection,
 			actualThinkingLevel: this.state.actualThinkingLevel,
 			availableThinkingSelections: this.state.availableThinkingSelections,
+			model: this.state.model,
 			subagents: this.state.subagents,
 			supervisor: this.supervisor,
 		};

@@ -28,6 +28,8 @@ function snapshot(serverEpoch: string, cursor: number, text: string): SessionSna
 	return {
 		session: {
 			sessionId: "session-1",
+			mode: "code",
+			cwdOrigin: "user-selected",
 			cwd: "/tmp/project",
 			createdAt: "2026-07-16T00:00:00.000Z",
 			updatedAt: "2026-07-16T00:00:00.000Z",
@@ -117,6 +119,8 @@ describe("renderer reconnect behavior", () => {
 				<RecoveryBanner
 					session={{
 						sessionId: "session-1",
+						mode: "code",
+						cwdOrigin: "user-selected",
 						cwd: "/tmp/project",
 						createdAt: "2026-07-16T00:00:00.000Z",
 						updatedAt: "2026-07-16T00:00:01.000Z",
@@ -235,6 +239,7 @@ describe("renderer reconnect behavior", () => {
 		await act(async () => {
 			root.render(
 				<Transcript
+					appearance="code"
 					hasOlder={false}
 					itemIds={itemIds}
 					itemsById={itemsById}

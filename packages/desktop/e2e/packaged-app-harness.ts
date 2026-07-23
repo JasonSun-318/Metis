@@ -3,6 +3,7 @@ import { once } from "node:events";
 import { createServer, type Server } from "node:http";
 import path from "node:path";
 import { chromium, expect, type Browser, type Page } from "@playwright/test";
+import type { ArcMindDesktopApi } from "../src/shared/desktop-api.ts";
 
 export const desktopRoot = path.resolve(__dirname, "..");
 
@@ -129,6 +130,35 @@ export async function connectToApp(port: number): Promise<{ browser: Browser; pa
 	const page = context.pages()[0];
 	if (!page) throw new Error("Packaged app did not expose a renderer page");
 	return { browser, page };
+}
+
+export async function waitForServerReady(page: Page): Promise<void> {
+	await expect
+		.poll(() =>
+			page.evaluate(async () => {
+				const api = (globalThis as unknown as { arcMind: ArcMindDesktopApi }).arcMind;
+				return (await api.getServerState()).state;
+			}),
+		)
+		.toBe("ready");
+}
+
+export async function createAndRestoreChatSession(
+	page: Page,
+	cwd: string,
+	waitForActive = true,
+): Promise<string> {
+	const created = await page.evaluate(async (projectCwd) => {
+		const api = (globalThis as unknown as { arcMind: ArcMindDesktopApi }).arcMind;
+		const result = await api.createSession({ requestId: crypto.randomUUID(), mode: "chat", cwd: projectCwd });
+		localStorage.setItem("arcmind.activeSessionId.chat", result.session.sessionId);
+		return result.session;
+	}, cwd);
+	await page.reload({ waitUntil: "domcontentloaded", timeout: 15_000 });
+	if (waitForActive) {
+		await page.locator(`[data-active-session-id="${created.sessionId}"]`).waitFor({ state: "visible", timeout: 15_000 });
+	}
+	return created.sessionId;
 }
 
 export async function stopProcess(child: ChildProcess): Promise<void> {

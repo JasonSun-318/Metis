@@ -10,25 +10,38 @@ import {
 	appServerPid,
 	closeServer,
 	connectToApp,
+	createAndRestoreChatSession,
 	listen,
 	packagedExecutable,
 	reservePort,
 	stopProcess,
+	waitForServerReady,
 } from "./packaged-app-harness.ts";
 
-async function projectedTextLength(page: Page, cwd: string): Promise<number> {
-	return page.evaluate(async (projectCwd) => {
+async function projectedTextLength(page: Page, sessionId: string): Promise<number> {
+	return page.evaluate(async (id) => {
 		const api = (globalThis as unknown as { arcMind: ArcMindDesktopApi }).arcMind;
-		const listed = await api.listSessions({ limit: 200 });
-		const session = listed.sessions.find((candidate) => candidate.cwd === projectCwd);
-		if (!session) return -1;
-		const items = await api.readItems({ sessionId: session.sessionId, limit: 200 });
+		const items = await api.readItems({ sessionId: id, limit: 200 });
 		return items.items
 			.flatMap((item) => item.content)
 			.filter((block) => block.type === "text")
 			.map((block) => block.text)
 			.join("").length;
-	}, cwd);
+	}, sessionId);
+}
+
+async function diagnosticWithin<T>(promise: Promise<T>, fallback: T, timeoutMs = 2_000): Promise<T> {
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	try {
+		return await Promise.race([
+			promise,
+			new Promise<T>((resolve) => {
+				timer = setTimeout(() => resolve(fallback), timeoutMs);
+			}),
+		]);
+	} finally {
+		if (timer) clearTimeout(timer);
+	}
 }
 
 test("a blocked renderer catches up with 10,000 deltas without losing its app server", async () => {
@@ -46,16 +59,11 @@ test("a blocked renderer catches up with 10,000 deltas without losing its app se
 		releaseStream = resolve;
 	});
 	let providerRequests = 0;
-	let providerStarted!: () => void;
-	const providerReady = new Promise<void>((resolve) => {
-		providerStarted = resolve;
-	});
 	const provider = createServer(async (request, response) => {
 		for await (const _chunk of request) {
 			// Drain the request before streaming.
 		}
 		providerRequests += 1;
-		providerStarted();
 		await streamGate;
 		const chunks = Array.from({ length: 10_000 }, (_, index) =>
 			`data: ${JSON.stringify({
@@ -124,26 +132,30 @@ test("a blocked renderer catches up with 10,000 deltas without losing its app se
 
 	let browser: Browser | undefined;
 	let page: Page | undefined;
+	let sessionId = "";
+	let phase = "connect to renderer";
 	try {
 		({ browser, page } = await connectToApp(port));
-		await expect(page.locator(".server-pill")).toHaveText("ready");
-		await page.getByRole("button", { name: "New task" }).click();
-		await page.locator("#project-path").fill(projectDir);
-		await page.getByRole("button", { name: "Create" }).click();
-		await expect(page.getByRole("heading", { level: 1 })).toHaveText(projectDir);
+		phase = "wait for App Server";
+		await waitForServerReady(page);
+		phase = "restore Chat session";
+		sessionId = await createAndRestoreChatSession(page, projectDir);
 
+		phase = "inspect process tree";
 		const rootPid = app.pid;
 		if (!rootPid) throw new Error("Packaged app has no process id");
 		const originalServerPid = appServerPid(rootPid);
 		if (!originalServerPid) throw new Error("Packaged App Server is missing");
 
-		await page.locator("#composer-input").fill("stream many deltas");
-		await page.getByRole("button", { name: "Send" }).click();
-		await providerReady;
-		const blockingStarted = new Promise<void>((resolve) => {
-			page!.on("console", (message) => {
-				if (message.text() === "slow-client-blocking") resolve();
-			});
+		phase = "submit prompt";
+		await page.locator("#composer-input").fill("stream many deltas", { timeout: 10_000 });
+		await page.getByRole("button", { name: "Send" }).click({ timeout: 10_000 });
+		phase = "wait for provider request";
+		await expect.poll(() => providerRequests, { timeout: 10_000 }).toBe(1);
+		phase = "block renderer";
+		const blockingStarted = page.waitForEvent("console", {
+			predicate: (message) => message.text() === "slow-client-blocking",
+			timeout: 10_000,
 		});
 		const blocked = page.evaluate(() => {
 			console.log("slow-client-blocking");
@@ -156,20 +168,30 @@ test("a blocked renderer catches up with 10,000 deltas without losing its app se
 		releaseStream();
 		await blocked;
 
+		phase = "catch up streamed deltas";
 		await expect
-			.poll(async () => (await page!.locator(".message-assistant p").last().textContent())?.length ?? 0, {
+			.poll(async () => (await page!.locator("[data-transcript-answer]").last().textContent())?.length ?? 0, {
 				timeout: 20_000,
 			})
 			.toBe(10_000);
-		expect(await page.locator("[data-transcript-item]").count()).toBeLessThan(50);
+		phase = "verify recovered renderer";
+		expect(await page.locator("[data-transcript-turn]").count()).toBeLessThan(50);
+		expect(await page.locator(".transcript-scroll").evaluate((element) => {
+			const scroll = element as unknown as { scrollHeight: number; scrollTop: number; clientHeight: number };
+			return scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight;
+		})).toBeLessThanOrEqual(48);
 		expect(appServerPid(rootPid)).toBe(originalServerPid);
 		expect(providerRequests).toBe(1);
 		await expect(page.locator("#composer-input")).toBeEnabled();
 	} catch (error) {
-		const body = await page?.locator("body").innerText().catch(() => "renderer unavailable");
-		const projectionLength = page ? await projectedTextLength(page, projectDir).catch(() => -2) : -3;
+		const body = page
+			? await diagnosticWithin(page.locator("body").innerText().catch(() => "renderer unavailable"), "renderer diagnostic timed out")
+			: "renderer unavailable";
+		const projectionLength = page && sessionId
+			? await diagnosticWithin(projectedTextLength(page, sessionId).catch(() => -2), -4)
+			: -3;
 		throw new Error(
-			`${error instanceof Error ? error.message : String(error)}\nserver projection length=${projectionLength}\nrenderer body:\n${body}\n${diagnostics.join("").slice(-8_000)}`,
+			`phase=${phase}\n${error instanceof Error ? error.message : String(error)}\nserver projection length=${projectionLength}\nrenderer body:\n${body}\n${diagnostics.join("").slice(-8_000)}`,
 		);
 	} finally {
 		releaseStream();

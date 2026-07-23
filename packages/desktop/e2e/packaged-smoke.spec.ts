@@ -6,16 +6,19 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { expect, test, type Browser, type Page } from "@playwright/test";
+import type { ArcMindDesktopApi } from "../src/shared/desktop-api.ts";
 import {
 	appServerPid,
 	closeServer,
 	connectToApp,
+	createAndRestoreChatSession,
 	listen,
 	packagedAsar,
 	packagedExecutable,
 	processIsAlive,
 	reservePort,
 	stopProcess,
+	waitForServerReady,
 } from "./packaged-app-harness.ts";
 
 const TINY_PNG =
@@ -33,14 +36,18 @@ test("packaged worker, WASM, trusted extension, and utility lifecycle stay funct
 	await Promise.all([mkdir(agentDir), mkdir(extensionDir, { recursive: true }), mkdir(userDataDir)]);
 
 	let providerRequests = 0;
+	const providerToolNames: string[][] = [];
 	const fakeProvider = createServer(async (request, response) => {
 		if (request.method !== "POST" || request.url !== "/v1/chat/completions") {
 			response.writeHead(404).end();
 			return;
 		}
-		for await (const _chunk of request) {
-			// Drain request input before returning a deterministic SSE response.
-		}
+		let body = "";
+		for await (const chunk of request) body += chunk;
+		const payload = JSON.parse(body) as { tools?: Array<{ function?: { name?: string }; name?: string }> };
+		providerToolNames.push(
+			(payload.tools ?? []).map((tool) => tool.function?.name ?? tool.name).filter((name): name is string => Boolean(name)),
+		);
 		providerRequests += 1;
 		response.writeHead(200, { "content-type": "text/event-stream" });
 		response.end(
@@ -92,6 +99,7 @@ test("packaged worker, WASM, trusted extension, and utility lifecycle stay funct
 				defaultProvider: "packaged-smoke",
 				defaultModel: "packaged-smoke-model",
 				retry: { enabled: false },
+				webSearch: { enabled: true, provider: "brave" },
 			}),
 		),
 		writeFile(
@@ -141,11 +149,30 @@ test("packaged worker, WASM, trusted extension, and utility lifecycle stay funct
 	let finalUtilityPid: number | undefined;
 	try {
 		({ browser, page } = await connectToApp(debuggingPort));
-		phase = "creating trusted project session";
-		await expect(page.locator(".server-pill")).toHaveText("ready");
+		phase = "verifying draft creation timing";
+		await waitForServerReady(page);
+		const sessionsBeforeDraft = await page.evaluate(() =>
+			(globalThis as unknown as { arcMind: ArcMindDesktopApi }).arcMind.listSessions({ limit: 200 }),
+		);
+		expect(sessionsBeforeDraft.sessions).toHaveLength(0);
 		await page.getByRole("button", { name: "New task" }).click();
-		await page.locator("#project-path").fill(projectDir);
-		await page.getByRole("button", { name: "Create" }).click();
+		const sessionsAfterNewTask = await page.evaluate(() =>
+			(globalThis as unknown as { arcMind: ArcMindDesktopApi }).arcMind.listSessions({ limit: 200 }),
+		);
+		expect(sessionsAfterNewTask.sessions).toHaveLength(0);
+		await page.locator("#composer-input").fill("managed packaged smoke");
+		await page.getByRole("button", { name: "Send message" }).click();
+		await expect(page.getByText("packaged-turn-ok", { exact: true })).toBeVisible();
+		expect(providerToolNames[0]).toEqual(expect.arrayContaining(["web_fetch", "web_search"]));
+		const sessionsAfterFirstSend = await page.evaluate(() =>
+			(globalThis as unknown as { arcMind: ArcMindDesktopApi }).arcMind.listSessions({ limit: 200 }),
+		);
+		expect(sessionsAfterFirstSend.sessions).toHaveLength(1);
+		expect(sessionsAfterFirstSend.sessions[0]).toMatchObject({ mode: "chat", cwdOrigin: "managed" });
+		await expect(page.getByText("Tasks", { exact: true })).toBeVisible();
+
+		phase = "creating trusted project session";
+		const trustedSessionId = await createAndRestoreChatSession(page, projectDir, false);
 		await expect(page.getByRole("heading", { name: "Trust this project?" })).toBeVisible();
 		await page.getByRole("button", { name: /Trust \(this session only\)/ }).click();
 
@@ -153,8 +180,7 @@ test("packaged worker, WASM, trusted extension, and utility lifecycle stay funct
 		await expect(page.getByRole("heading", { name: "Packaged image pipeline" })).toBeVisible();
 		await expect(page.getByText("Worker and WASM returned 1x1", { exact: true })).toBeVisible();
 		await page.getByRole("button", { name: "Confirm" }).click();
-		await expect(page.getByRole("heading", { level: 1 })).toHaveText(projectDir);
-
+		await page.locator(`[data-active-session-id="${trustedSessionId}"]`).waitFor({ state: "visible", timeout: 15_000 });
 		const rootPid = app.pid;
 		if (!rootPid) throw new Error("Packaged app has no process id");
 		await expect.poll(() => appServerPid(rootPid)).not.toBeUndefined();
@@ -163,7 +189,7 @@ test("packaged worker, WASM, trusted extension, and utility lifecycle stay funct
 		await page.locator("#composer-input").fill("packaged smoke turn");
 		await page.getByRole("button", { name: "Send" }).click();
 		await expect(page.getByText("packaged-turn-ok", { exact: true })).toBeVisible();
-		expect(providerRequests).toBe(1);
+		expect(providerRequests).toBe(2);
 
 		phase = "reloading and restarting";
 		await page.reload({ waitUntil: "domcontentloaded" });
@@ -172,7 +198,7 @@ test("packaged worker, WASM, trusted extension, and utility lifecycle stay funct
 		if (!firstUtilityPid) throw new Error("Could not find the packaged App Server");
 		process.kill(firstUtilityPid, "SIGKILL");
 		await expect.poll(() => appServerPid(rootPid)).not.toBe(firstUtilityPid);
-		await expect(page.locator(".server-pill")).toHaveText("ready");
+		await waitForServerReady(page);
 		finalUtilityPid = appServerPid(rootPid);
 		if (!finalUtilityPid) throw new Error("Packaged App Server did not restart");
 

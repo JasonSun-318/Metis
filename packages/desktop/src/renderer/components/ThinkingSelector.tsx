@@ -4,11 +4,12 @@ interface ThinkingSelectorProps {
 	readonly actualThinkingLevel: SessionSnapshot["actualThinkingLevel"];
 	readonly available: SessionSnapshot["availableThinkingSelections"];
 	readonly disabled: boolean;
+	readonly model?: SessionSnapshot["model"];
 	readonly onChange: (selection: SessionSnapshot["thinkingSelection"]) => void;
 	readonly value: SessionSnapshot["thinkingSelection"];
 }
 
-export function ThinkingSelector({ actualThinkingLevel, available, disabled, onChange, value }: ThinkingSelectorProps) {
+export function ThinkingSelector({ actualThinkingLevel, available, disabled, model, onChange, value }: ThinkingSelectorProps) {
 	return (
 		<label className={`thinking-control${value === "ultra" ? " thinking-ultra" : ""}`}>
 			<span>Thinking</span>
@@ -20,7 +21,9 @@ export function ThinkingSelector({ actualThinkingLevel, available, disabled, onC
 			>
 				{available.map((selection) => (
 					<option key={selection} value={selection}>
-						{selection === "ultra" ? "Ultra · Multi-agent" : selection}
+						{model
+							? `${model.modelId}${selection === "off" ? "" : ` · ${selection}`}`
+							: selection === "ultra" ? "Ultra · Multi-agent" : selection}
 					</option>
 				))}
 			</select>

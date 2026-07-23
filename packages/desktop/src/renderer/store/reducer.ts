@@ -32,6 +32,7 @@ export interface MutableProjectionState {
 	thinkingSelection: ThinkingSelectionView;
 	actualThinkingLevel: Exclude<ThinkingSelectionView, "ultra">;
 	availableThinkingSelections: ThinkingSelectionView[];
+	model: SessionSnapshot["model"];
 	subagents: SubagentSummaryView[];
 }
 
@@ -55,6 +56,7 @@ export function createProjectionState(): MutableProjectionState {
 		thinkingSelection: "off",
 		actualThinkingLevel: "off",
 		availableThinkingSelections: ["off"],
+		model: undefined,
 		subagents: [],
 	};
 }
@@ -100,6 +102,7 @@ export function replaceProjectionSnapshot(state: MutableProjectionState, snapsho
 		state.interactionsById.set(interaction.interactionId, interaction);
 		state.interactionOrder.push(interaction.interactionId);
 	}
+	state.notifications = [];
 
 	state.nextBeforeItemId = snapshot.nextBeforeItemId;
 	state.activeTurnId = snapshot.activeTurnId;
@@ -109,11 +112,27 @@ export function replaceProjectionSnapshot(state: MutableProjectionState, snapsho
 	state.thinkingSelection = snapshot.thinkingSelection;
 	state.actualThinkingLevel = snapshot.actualThinkingLevel;
 	state.availableThinkingSelections = snapshot.availableThinkingSelections;
+	state.model = snapshot.model;
 	state.subagents = snapshot.subagents;
 }
 
 export function markProjectionResubscribing(state: MutableProjectionState): void {
 	state.syncStatus = "resubscribing";
+}
+
+export function restoreProjectionSyncStatus(
+	state: MutableProjectionState,
+	previous: Pick<MutableProjectionState, "activeSessionId" | "serverEpoch" | "syncStatus">,
+): boolean {
+	if (
+		state.syncStatus !== "resubscribing" ||
+		state.activeSessionId !== previous.activeSessionId ||
+		state.serverEpoch !== previous.serverEpoch
+	) {
+		return false;
+	}
+	state.syncStatus = previous.syncStatus;
+	return true;
 }
 
 function eventSessionId(event: DomainEvent): string | undefined {
@@ -170,11 +189,11 @@ function upsertOrdered<T>(map: Map<string, T>, order: string[], id: string, valu
 	return [...order, id];
 }
 
-function appendItemDelta(item: ItemView, text: string): ItemView {
+function appendItemDelta(item: ItemView, delta: Extract<DomainEvent, { type: "item/delta" }>["delta"]): ItemView {
 	const content = [...item.content];
 	const last = content.at(-1);
-	if (last?.type === "text") content[content.length - 1] = { ...last, text: last.text + text };
-	else content.push({ type: "text", text });
+	if (last?.type === delta.type) content[content.length - 1] = { ...last, text: last.text + delta.text };
+	else content.push({ type: delta.type, text: delta.text });
 	return { ...item, content };
 }
 
@@ -225,7 +244,7 @@ function applyEvent(state: MutableProjectionState, event: DomainEvent): void {
 			);
 			return;
 		case "item/delta":
-			state.itemsById.set(event.itemId, appendItemDelta(state.itemsById.get(event.itemId)!, event.delta.text));
+			state.itemsById.set(event.itemId, appendItemDelta(state.itemsById.get(event.itemId)!, event.delta));
 	}
 }
 

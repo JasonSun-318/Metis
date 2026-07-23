@@ -1,6 +1,6 @@
 import type { ConnectionEventsParams, ItemView, SessionSnapshot, SessionSummary } from "@arcmind/app-protocol";
 import { describe, expect, it } from "vitest";
-import { groupSessionsByProject } from "../src/renderer/components/SessionSidebar.tsx";
+import { buildSessionTree } from "../src/renderer/components/SessionSidebar.tsx";
 import { AppStore } from "../src/renderer/store/app-store.ts";
 
 const EPOCH_A = "11111111-1111-4111-8111-111111111111";
@@ -9,6 +9,8 @@ const EPOCH_B = "22222222-2222-4222-8222-222222222222";
 function session(sessionId = "session-1"): SessionSummary {
 	return {
 		sessionId,
+		mode: "code",
+		cwdOrigin: "user-selected",
 		cwd: "/tmp/project",
 		createdAt: "2026-07-16T00:00:00.000Z",
 		updatedAt: "2026-07-16T00:00:00.000Z",
@@ -62,26 +64,52 @@ function batch(serverEpoch: string, fromCursor: number, toCursor: number, text =
 }
 
 describe("renderer projection reducer", () => {
-	it("groups recent tasks by their project without copying session state", () => {
+	it("filters sessions by mode and separates managed tasks from project folders", () => {
 		const store = new AppStore();
-		const first = { ...session("session-1"), cwd: "/work/alpha", name: "First" };
-		const second = { ...session("session-2"), cwd: "/work/beta", name: "Second" };
-		const third = { ...session("session-3"), cwd: "/work/alpha", name: "Third" };
-		const legacy = { ...session("session-4"), cwd: null, name: "Legacy" };
-		store.setSessions({ sessions: [first, second, third, legacy], nextAfterSessionId: null });
+		const first = { ...session("session-1"), mode: "chat" as const, cwd: "/work/alpha", name: "First" };
+		const code = { ...session("session-2"), cwd: "/work/beta", name: "Code" };
+		const third = { ...session("session-3"), mode: "chat" as const, cwd: "/work/alpha", name: "Third" };
+		const managed = {
+			...session("session-4"),
+			mode: "chat" as const,
+			cwdOrigin: "managed" as const,
+			cwd: "/internal/chat",
+			name: "Managed",
+		};
+		const legacy = { ...session("session-5"), cwd: null, name: "Legacy" };
+		store.setSessions({ sessions: [first, code, third, managed, legacy], nextAfterSessionId: null });
 
-		const groups = groupSessionsByProject(store.getSnapshot());
-		expect(groups.map(({ name, sessions }) => [name, sessions.map((item) => item.sessionId)])).toEqual([
+		const chat = buildSessionTree(store.getSnapshot(), "chat");
+		expect(chat.projects.map(({ name, sessions }) => [name, sessions.map((item) => item.sessionId)])).toEqual([
 			["alpha", ["session-1", "session-3"]],
-			["beta", ["session-2"]],
-			["Other", ["session-4"]],
 		]);
-		expect(groups[0]?.sessions[0]).toBe(store.getSnapshot().sessionsById.get("session-1"));
+		expect(chat.tasks.map((item) => item.sessionId)).toEqual(["session-4"]);
+		expect(chat.projects[0]?.sessions[0]).toBe(store.getSnapshot().sessionsById.get("session-1"));
+
+		const codeTree = buildSessionTree(store.getSnapshot(), "code");
+		expect(codeTree.projects.map((group) => group.name)).toEqual(["beta"]);
+		expect(codeTree.tasks.map((item) => item.sessionId)).toEqual(["session-5"]);
 	});
 
 	it("replaces the complete active projection on every snapshot", () => {
 		const store = new AppStore();
 		store.applySnapshot(snapshot(EPOCH_A, 3, [item("old-item", "old", "completed")]));
+		store.applyBatch({
+			serverEpoch: EPOCH_A,
+			fromCursor: 4,
+			toCursor: 4,
+			events: [
+				{
+					type: "interaction/notify",
+					notificationId: "33333333-3333-4333-8333-333333333333",
+					sessionId: "session-1",
+					level: "info",
+					message: "old notification",
+					createdAt: "2026-07-16T00:00:00.000Z",
+				},
+			],
+		});
+		expect(store.getSnapshot().notifications).toHaveLength(1);
 		store.applySnapshot(snapshot(EPOCH_B, 8, [item("new-item", "new", "completed")]));
 
 		const state = store.getSnapshot();
@@ -89,6 +117,7 @@ describe("renderer projection reducer", () => {
 		expect(state.cursor).toBe(8);
 		expect(state.itemOrder).toEqual(["new-item"]);
 		expect(state.itemsById.has("old-item")).toBe(false);
+		expect(state.notifications).toEqual([]);
 		expect(state.syncStatus).toBe("ready");
 	});
 
@@ -104,6 +133,36 @@ describe("renderer projection reducer", () => {
 		expect(state.itemsById.get("item-2")).toBe(untouched);
 		expect(state.itemsById.get("item-1")?.content).toEqual([{ type: "text", text: "AB" }]);
 		expect(state.cursor).toBe(1);
+	});
+
+	it("preserves streamed thinking before visible text", () => {
+		const store = new AppStore();
+		store.applySnapshot(snapshot(EPOCH_A, 0, [{ ...item("item-1", ""), content: [] }]));
+		expect(
+			store.applyBatch({
+				serverEpoch: EPOCH_A,
+				fromCursor: 1,
+				toCursor: 2,
+				events: [
+					{
+						type: "item/delta",
+						sessionId: "session-1",
+						itemId: "item-1",
+						delta: { type: "thinking", text: "think" },
+					},
+					{
+						type: "item/delta",
+						sessionId: "session-1",
+						itemId: "item-1",
+						delta: { type: "text", text: "answer" },
+					},
+				],
+			}),
+		).toBe("applied");
+		expect(store.getSnapshot().itemsById.get("item-1")?.content).toEqual([
+			{ type: "thinking", text: "think" },
+			{ type: "text", text: "answer" },
+		]);
 	});
 
 	it.each([
@@ -125,6 +184,17 @@ describe("renderer projection reducer", () => {
 		store.markResubscribing();
 		expect(store.applyBatch(batch(EPOCH_A, 1, 1))).toBe("resnapshot_required");
 		expect(store.getSnapshot().itemsById.get("item-1")?.content).toEqual([{ type: "text", text: "A" }]);
+	});
+
+	it("restores the previous projection status after an unchanged open fails", () => {
+		const store = new AppStore();
+		store.applySnapshot(snapshot());
+		const previous = store.getSnapshot();
+		store.markResubscribing();
+		expect(store.getSnapshot().syncStatus).toBe("resubscribing");
+
+		store.restoreSyncStatusAfterFailedOpen(previous);
+		expect(store.getSnapshot().syncStatus).toBe("ready");
 	});
 
 	it("prepends a backward history page without duplicating existing items", () => {
