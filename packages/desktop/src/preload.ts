@@ -48,13 +48,14 @@ const api = {
 	respondToInteraction: async (input: InteractionResponseInput) => {
 		await ipcRenderer.invoke(DESKTOP_IPC_CHANNELS.respondToInteraction, validateInteractionResponseInput(input));
 	},
+	selectProjectFolder: () => ipcRenderer.invoke(DESKTOP_IPC_CHANNELS.selectProjectFolder),
 	subscribe: (listener: (event: DesktopApiEvent) => void) => {
 		if (typeof listener !== "function") throw new TypeError("ArcMind event listener must be a function");
 		const onEvent = (_event: IpcRendererEvent, value: unknown) => {
 			listener(structuredClone(validateDesktopApiEvent(value)));
 		};
 		ipcRenderer.on(DESKTOP_EVENT_CHANNEL, onEvent);
-		void ipcRenderer.invoke(DESKTOP_IPC_CHANNELS.subscribe);
+		void ipcRenderer.invoke(DESKTOP_IPC_CHANNELS.subscribe).catch(() => undefined);
 		return () => ipcRenderer.off(DESKTOP_EVENT_CHANNEL, onEvent);
 	},
 	getServerState: () => ipcRenderer.invoke(DESKTOP_IPC_CHANNELS.getServerState),

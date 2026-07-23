@@ -7,8 +7,8 @@
 	"scripts": {
 		"clean": "shx rm -rf .webpack out",
 		"start": "electron-forge start",
-		"package": "electron-forge package",
-		"make": "electron-forge make",
+		"package": "node scripts/package.mjs package",
+		"make": "node scripts/package.mjs make",
 		"verify:package": "node scripts/verify-package.mjs",
 		"check:types": "tsgo --noEmit -p tsconfig.main.json && tsgo --noEmit -p tsconfig.renderer.json",
 		"test": "vitest --run",

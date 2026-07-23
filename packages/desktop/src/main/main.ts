@@ -1,5 +1,13 @@
 import { join } from "node:path";
-import { app, autoUpdater, type BrowserWindow, dialog, ipcMain, utilityProcess } from "electron";
+import {
+	app,
+	autoUpdater,
+	type BrowserWindow,
+	dialog,
+	ipcMain,
+	type OpenDialogOptions,
+	utilityProcess,
+} from "electron";
 import squirrelStartup from "electron-squirrel-startup";
 import { installAppProtocol, registerAppScheme } from "./app-protocol-scheme.ts";
 import { AppServerSupervisor, type UtilityChild } from "./app-server-supervisor.ts";
@@ -44,7 +52,20 @@ async function launch(): Promise<void> {
 		backups: 2,
 	});
 	const supervisor = new AppServerSupervisor({ spawn: spawnAppServer, diagnostics });
-	const broker = new ClientBroker({ ipcMain, supervisor });
+	const broker = new ClientBroker({
+		ipcMain,
+		supervisor,
+		selectProjectFolder: async () => {
+			const options: OpenDialogOptions = {
+				title: "Choose a project or folder",
+				properties: ["openDirectory", "createDirectory"],
+			};
+			const result = mainWindow
+				? await dialog.showOpenDialog(mainWindow, options)
+				: await dialog.showOpenDialog(options);
+			return result.canceled ? null : (result.filePaths[0] ?? null);
+		},
+	});
 	const openMainWindow = async (): Promise<void> => {
 		const window = createMainWindow();
 		broker.attach(window);

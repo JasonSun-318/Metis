@@ -56,6 +56,20 @@ const macosRelease = completeCredentialGroup([
 	"APPLE_APP_SPECIFIC_PASSWORD",
 	"APPLE_TEAM_ID",
 ]);
+const macosSign = macosRelease
+	? {
+			identity: macosRelease.MACOS_SIGN_IDENTITY,
+			optionsForFile: () => ({ hardenedRuntime: true }),
+		}
+	: process.platform === "darwin"
+		? {
+				identity: "-",
+				identityValidation: false,
+				preAutoEntitlements: false,
+				preEmbedProvisioningProfile: false,
+				optionsForFile: () => ({ hardenedRuntime: false, timestamp: "none" }),
+			}
+		: undefined;
 const windowsCertificate = completeCredentialGroup(["WINDOWS_CERTIFICATE_FILE", "WINDOWS_CERTIFICATE_PASSWORD"]);
 const windowsSign = windowsCertificate
 	? {
@@ -89,12 +103,14 @@ const config: ForgeConfig = {
 		appCategoryType: "public.app-category.developer-tools",
 		name: "ArcMind",
 		executableName: "arcmind",
-		osxSign: macosRelease
-			? {
-					identity: macosRelease.MACOS_SIGN_IDENTITY,
-					optionsForFile: () => ({ hardenedRuntime: true }),
-				}
-			: undefined,
+		extendInfo: {
+			NSDesktopFolderUsageDescription: "ArcMind needs access to Desktop files you choose for a task.",
+			NSDocumentsFolderUsageDescription: "ArcMind needs access to Documents files you choose for a task.",
+			NSDownloadsFolderUsageDescription: "ArcMind needs access to Downloads files you choose for a task.",
+		},
+		// Even local builds need an app-owned identity so macOS TCC attributes
+		// protected-folder consent to ArcMind instead of the stock Electron bundle.
+		osxSign: macosSign,
 		osxNotarize: macosRelease
 			? {
 					appleId: macosRelease.APPLE_ID,

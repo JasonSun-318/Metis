@@ -9,12 +9,32 @@ const runtimeRoot = join(repoRoot, "node_modules", ".cache", "arcmind-desktop", 
 const workspacePackages = ["app-protocol", "ai", "agent", "tui", "coding-agent", "app-server"].map((name) =>
 	join(repoRoot, "packages", name),
 );
+const npm = process.platform === "win32" ? "npm.cmd" : "npm";
 
+async function runNpm(args, failure) {
+	await new Promise((resolveRun, rejectRun) => {
+		const child = spawn(npm, args, { cwd: repoRoot, stdio: "inherit" });
+		child.once("error", rejectRun);
+		child.once("exit", (code) => {
+			if (code === 0) resolveRun();
+			else rejectRun(new Error(`${failure} with exit code ${code}`));
+		});
+	});
+}
+
+const buildSteps = [
+	["run", "build", "--workspace", "@arcmind/tui"],
+	["exec", "--workspace", "@arcmind/ai", "--", "tsgo", "-p", "tsconfig.build.json"],
+	["run", "build", "--workspace", "@arcmind/agent-core"],
+	["run", "build", "--workspace", "@arcmind/coding-agent"],
+	["run", "build", "--workspace", "@arcmind/app-protocol"],
+	["run", "build", "--workspace", "@arcmind/app-server"],
+];
+for (const args of buildSteps) await runNpm(args, `Building ${args.at(-1)} failed`);
 for (const packageRoot of workspacePackages) await access(join(packageRoot, "dist"));
 await rm(runtimeRoot, { recursive: true, force: true });
 await mkdir(runtimeRoot, { recursive: true });
 
-const npm = process.platform === "win32" ? "npm.cmd" : "npm";
 const args = [
 	"install",
 	"--prefix",
@@ -28,14 +48,7 @@ const args = [
 	...workspacePackages,
 ];
 
-await new Promise((resolveRun, rejectRun) => {
-	const child = spawn(npm, args, { cwd: repoRoot, stdio: "inherit" });
-	child.once("error", rejectRun);
-	child.once("exit", (code) => {
-		if (code === 0) resolveRun();
-		else rejectRun(new Error(`Preparing the packaged app-server runtime failed with exit code ${code}`));
-	});
-});
+await runNpm(args, "Preparing the packaged app-server runtime failed");
 
 await rm(join(runtimeRoot, "node_modules", ".bin"), { recursive: true, force: true });
 

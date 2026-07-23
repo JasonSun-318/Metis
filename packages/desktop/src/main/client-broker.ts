@@ -34,6 +34,7 @@ interface BrokerSupervisor {
 interface ClientBrokerOptions {
 	readonly ipcMain: Pick<IpcMain, "handle" | "removeHandler">;
 	readonly supervisor: BrokerSupervisor;
+	readonly selectProjectFolder?: () => Promise<string | null>;
 }
 
 type InvokeHandler = (event: IpcMainInvokeEvent, ...args: unknown[]) => Promise<unknown>;
@@ -72,8 +73,10 @@ function rpcFailure(response: RpcErrorResponse): Error {
 export class ClientBroker {
 	private readonly ipcMain: Pick<IpcMain, "handle" | "removeHandler">;
 	private readonly supervisor: BrokerSupervisor;
+	private readonly selectProjectFolder: () => Promise<string | null>;
 	private readonly pendingInteractions = new Map<string, PendingInteraction>();
 	private readonly subscribedSessions = new Set<string>();
+	private subscriptionMutation = Promise.resolve();
 	private readonly removeSupervisorListeners: readonly (() => void)[];
 	private owner?: WebContents;
 	private ownerSubscribed = false;
@@ -83,6 +86,7 @@ export class ClientBroker {
 	constructor(options: ClientBrokerOptions) {
 		this.ipcMain = options.ipcMain;
 		this.supervisor = options.supervisor;
+		this.selectProjectFolder = options.selectProjectFolder ?? (async () => null);
 		this.registerHandlers();
 		this.removeSupervisorListeners = [
 			this.supervisor.onState((view) => {
@@ -143,11 +147,20 @@ export class ClientBroker {
 		);
 		this.register(DESKTOP_IPC_CHANNELS.openSession, 1, async (_event, [input]) => {
 			const params = this.validatedParams("session/open", input);
-			await this.unsubscribeSessionSubscriptions();
-			await this.clientCall("session/open", params);
-			const subscribed = await this.clientCall("session/subscribe", { sessionId: params.sessionId });
-			this.subscribedSessions.add(params.sessionId);
-			return subscribed.snapshot;
+			return this.enqueueSubscriptionMutation(async () => {
+				const previousSessionIds = [...this.subscribedSessions].filter(
+					(sessionId) => sessionId !== params.sessionId,
+				);
+				await this.clientCall("session/open", params);
+				const subscribed = await this.clientCall("session/subscribe", { sessionId: params.sessionId });
+				this.subscribedSessions.add(params.sessionId);
+				const previousSessions = new Set(previousSessionIds);
+				this.cancelPendingInteractionsForSessions(previousSessions);
+				await this.unsubscribeSessions(previousSessionIds, true);
+				// A request can cross the process boundary while unsubscribe is in flight.
+				this.cancelPendingInteractionsForSessions(previousSessions);
+				return subscribed.snapshot;
+			});
 		});
 		this.register(DESKTOP_IPC_CHANNELS.readItems, 1, async (_event, [input]) =>
 			this.clientCall("session/readItems", input),
@@ -166,6 +179,7 @@ export class ClientBroker {
 		this.register(DESKTOP_IPC_CHANNELS.respondToInteraction, 1, async (_event, [input]) => {
 			this.respondToInteraction(input);
 		});
+		this.register(DESKTOP_IPC_CHANNELS.selectProjectFolder, 0, async () => this.selectProjectFolder());
 		this.register(DESKTOP_IPC_CHANNELS.getServerState, 0, async () => this.supervisor.view());
 		this.register(DESKTOP_IPC_CHANNELS.retryServer, 0, async () => {
 			await this.supervisor.retry();
@@ -284,6 +298,15 @@ export class ClientBroker {
 		}
 	}
 
+	private cancelPendingInteractionsForSessions(sessionIds: ReadonlySet<string>): void {
+		for (const [interactionId, pending] of this.pendingInteractions) {
+			if (!sessionIds.has(pending.request.params.interaction.sessionId)) continue;
+			this.pendingInteractions.delete(interactionId);
+			if (pending.timer) clearTimeout(pending.timer);
+			this.cancelServerInteraction(pending.request);
+		}
+	}
+
 	private dropPendingInteractions(): void {
 		for (const pending of this.pendingInteractions.values()) {
 			if (pending.timer) clearTimeout(pending.timer);
@@ -326,17 +349,35 @@ export class ClientBroker {
 	}
 
 	private releaseSessionSubscriptions(): void {
-		void this.unsubscribeSessionSubscriptions(true);
+		void this.enqueueSubscriptionMutation(() => this.unsubscribeSessionSubscriptions(true));
+	}
+
+	private enqueueSubscriptionMutation<Result>(operation: () => Promise<Result>): Promise<Result> {
+		const result = this.subscriptionMutation.then(operation);
+		this.subscriptionMutation = result.then(
+			() => undefined,
+			() => undefined,
+		);
+		return result;
 	}
 
 	private async unsubscribeSessionSubscriptions(ignoreErrors = false): Promise<void> {
-		const sessionIds = [...this.subscribedSessions];
-		this.subscribedSessions.clear();
+		await this.unsubscribeSessions([...this.subscribedSessions], ignoreErrors);
+	}
+
+	private async unsubscribeSessions(sessionIds: readonly string[], ignoreErrors: boolean): Promise<void> {
+		const errors: unknown[] = [];
 		await Promise.all(
-			sessionIds.map((sessionId) => {
-				const request = this.clientCall("session/unsubscribe", { sessionId });
-				return ignoreErrors ? request.catch(() => undefined) : request;
+			sessionIds.map(async (sessionId) => {
+				try {
+					await this.clientCall("session/unsubscribe", { sessionId });
+					this.subscribedSessions.delete(sessionId);
+				} catch (error) {
+					// A later session switch or renderer teardown retries tracked cleanup.
+					if (!ignoreErrors) errors.push(error);
+				}
 			}),
 		);
+		if (errors.length > 0) throw errors[0];
 	}
 }

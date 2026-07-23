@@ -1,5 +1,6 @@
-import { BrowserWindow } from "electron";
+import { BrowserWindow, shell } from "electron";
 import { APP_ORIGIN } from "./app-protocol-scheme.ts";
+import { isSafeExternalUrl } from "./external-url.ts";
 
 declare const MAIN_WINDOW_PRELOAD_WEBPACK_ENTRY: string;
 
@@ -10,7 +11,13 @@ export function createMainWindow(): BrowserWindow {
 		minWidth: 900,
 		minHeight: 640,
 		show: false,
-		backgroundColor: "#111318",
+		backgroundColor: "#1f201e",
+		...(process.platform === "darwin"
+			? {
+					titleBarStyle: "hiddenInset" as const,
+					trafficLightPosition: { x: 22, y: 28 },
+				}
+			: {}),
 		webPreferences: {
 			preload: MAIN_WINDOW_PRELOAD_WEBPACK_ENTRY,
 			contextIsolation: true,
@@ -21,7 +28,10 @@ export function createMainWindow(): BrowserWindow {
 	});
 
 	window.once("ready-to-show", () => window.show());
-	window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+	window.webContents.setWindowOpenHandler(({ url }) => {
+		if (isSafeExternalUrl(url)) void shell.openExternal(url).catch(() => undefined);
+		return { action: "deny" };
+	});
 	window.webContents.session.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false));
 	window.webContents.session.setPermissionCheckHandler(() => false);
 	window.webContents.on("will-attach-webview", (event) => event.preventDefault());

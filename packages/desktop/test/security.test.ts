@@ -4,6 +4,7 @@ import { pathToFileURL } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 import { resolveRendererAsset } from "../src/main/app-protocol-scheme.ts";
 import { ClientBroker, isTrustedRendererUrl } from "../src/main/client-broker.ts";
+import { isSafeExternalUrl } from "../src/main/external-url.ts";
 import { DESKTOP_IPC_CHANNELS } from "../src/shared/desktop-api.ts";
 
 const desktopRoot = join(import.meta.dirname, "..");
@@ -101,13 +102,32 @@ describe("desktop trust boundaries", () => {
 		expect(windowSource).toContain("sandbox: true");
 		expect(windowSource).toContain("nodeIntegration: false");
 		expect(windowSource).toContain("webviewTag: false");
+		expect(windowSource).toContain('process.platform === "darwin"');
+		expect(windowSource).toContain('titleBarStyle: "hiddenInset"');
 		expect(windowSource).not.toMatch(/enableRemoteModule|@electron\/remote/u);
-		expect(windowSource).toContain('setWindowOpenHandler(() => ({ action: "deny" }))');
+		expect(windowSource).toContain("setWindowOpenHandler");
+		expect(windowSource).toContain("isSafeExternalUrl");
+		expect(windowSource).toContain("shell.openExternal");
 		expect(windowSource).toContain("will-navigate");
 		expect(windowSource).toContain("will-redirect");
 		expect(windowSource).toContain("will-attach-webview");
 		expect(windowSource).toContain("setPermissionRequestHandler");
 		expect(windowSource).toContain("setPermissionCheckHandler");
+	});
+
+	it("opens only ordinary web and mail links outside the renderer", () => {
+		for (const url of ["https://example.com/path", "http://localhost:3000", "mailto:user@example.com"]) {
+			expect(isSafeExternalUrl(url)).toBe(true);
+		}
+		for (const url of [
+			"javascript:alert(1)",
+			"file:///etc/passwd",
+			"app://renderer/index.html",
+			"//example.com",
+			"not a URL",
+		]) {
+			expect(isSafeExternalUrl(url)).toBe(false);
+		}
 	});
 
 	it("ships a strict production CSP and no renderer runtime imports", () => {
@@ -188,6 +208,222 @@ describe("desktop trust boundaries", () => {
 		expect(supervisor.request).toHaveBeenCalledWith(
 			expect.objectContaining({ method: "session/list", params: { limit: 1 } }),
 		);
+		broker.dispose();
+	});
+
+	it("keeps the current subscription when opening the replacement session fails", async () => {
+		const ipcMain = new FakeIpcMain();
+		const { supervisor } = supervisorHarness();
+		const currentSessionId = "11111111-1111-4111-8111-111111111201";
+		const replacementSessionId = "11111111-1111-4111-8111-111111111202";
+		supervisor.request.mockImplementation(async (request) => {
+			if (request.method === "session/open" && request.params.sessionId === replacementSessionId) {
+				throw new Error("replacement open failed");
+			}
+			return {
+				jsonrpc: "2.0",
+				id: request.id,
+				result:
+					request.method === "session/subscribe"
+						? { snapshot: { session: { sessionId: request.params.sessionId } } }
+						: {},
+			};
+		});
+		const broker = new ClientBroker({ ipcMain: ipcMain as never, supervisor });
+		const webContents = new FakeWebContents();
+		broker.attach({ webContents: webContents as never });
+		const event = { sender: webContents, senderFrame: webContents.mainFrame };
+		const openSession = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.openSession)!;
+
+		await expect(openSession(event, { sessionId: currentSessionId })).resolves.toEqual({
+			session: { sessionId: currentSessionId },
+		});
+		supervisor.request.mockClear();
+		await expect(openSession(event, { sessionId: replacementSessionId })).rejects.toThrow("replacement open failed");
+
+		expect(supervisor.request).not.toHaveBeenCalledWith(
+			expect.objectContaining({ method: "session/unsubscribe", params: { sessionId: currentSessionId } }),
+		);
+		broker.dispose();
+	});
+
+	it("cancels hidden interactions only after the replacement session is subscribed", async () => {
+		const ipcMain = new FakeIpcMain();
+		const { emitMessage, supervisor } = supervisorHarness();
+		const currentSessionId = "11111111-1111-4111-8111-111111111211";
+		const replacementSessionId = "11111111-1111-4111-8111-111111111212";
+		let interactionDuringUnsubscribe: unknown;
+		supervisor.request.mockImplementation(async (request) => {
+			if (request.method === "session/unsubscribe" && interactionDuringUnsubscribe) {
+				emitMessage(interactionDuringUnsubscribe);
+			}
+			return {
+				jsonrpc: "2.0",
+				id: request.id,
+				result:
+					request.method === "session/subscribe"
+						? { snapshot: { session: { sessionId: request.params.sessionId } } }
+						: {},
+			};
+		});
+		const broker = new ClientBroker({ ipcMain: ipcMain as never, supervisor });
+		const webContents = new FakeWebContents();
+		broker.attach({ webContents: webContents as never });
+		const event = { sender: webContents, senderFrame: webContents.mainFrame };
+		const openSession = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.openSession)!;
+		await ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.subscribe)!(event);
+		await openSession(event, { sessionId: currentSessionId });
+
+		const interactionRequest = {
+			jsonrpc: "2.0" as const,
+			id: "interaction-rpc-switch",
+			method: "interaction/request" as const,
+			params: {
+				serverEpoch: "11111111-1111-4111-8111-111111111111",
+				interaction: {
+					interactionId: "33333333-3333-4333-8333-333333333311",
+					sessionId: currentSessionId,
+					title: "Confirm",
+					message: "Continue?",
+					createdAt: "2026-07-16T00:00:00.000Z",
+					kind: "confirm" as const,
+				},
+			},
+		};
+		emitMessage(interactionRequest);
+		interactionDuringUnsubscribe = {
+			...interactionRequest,
+			id: "interaction-rpc-switch-late",
+			params: {
+				...interactionRequest.params,
+				interaction: {
+					...interactionRequest.params.interaction,
+					interactionId: "33333333-3333-4333-8333-333333333312",
+				},
+			},
+		};
+		supervisor.respondToServerRequest.mockClear();
+		supervisor.request.mockClear();
+
+		await openSession(event, { sessionId: replacementSessionId });
+
+		const methods = supervisor.request.mock.calls.map(([request]) => request.method);
+		expect(methods).toEqual(["session/open", "session/subscribe", "session/unsubscribe"]);
+		expect(supervisor.respondToServerRequest).toHaveBeenCalledWith(
+			interactionRequest,
+			expect.objectContaining({ error: expect.objectContaining({ code: -32008 }) }),
+		);
+		expect(supervisor.respondToServerRequest).toHaveBeenCalledWith(
+			interactionDuringUnsubscribe,
+			expect.objectContaining({ error: expect.objectContaining({ code: -32008 }) }),
+		);
+		expect(supervisor.respondToServerRequest).toHaveBeenCalledTimes(2);
+		broker.dispose();
+	});
+
+	it("retries a session unsubscribe that was lost during renderer navigation", async () => {
+		const ipcMain = new FakeIpcMain();
+		const { supervisor } = supervisorHarness();
+		const currentSessionId = "11111111-1111-4111-8111-111111111221";
+		const replacementSessionId = "11111111-1111-4111-8111-111111111222";
+		let loseNextUnsubscribe = false;
+		supervisor.request.mockImplementation(async (request) => {
+			if (request.method === "session/unsubscribe" && loseNextUnsubscribe) {
+				loseNextUnsubscribe = false;
+				throw new Error("unsubscribe response lost");
+			}
+			return {
+				jsonrpc: "2.0",
+				id: request.id,
+				result:
+					request.method === "session/subscribe"
+						? { snapshot: { session: { sessionId: request.params.sessionId } } }
+						: {},
+			};
+		});
+		const broker = new ClientBroker({ ipcMain: ipcMain as never, supervisor });
+		const webContents = new FakeWebContents();
+		broker.attach({ webContents: webContents as never });
+		const event = { sender: webContents, senderFrame: webContents.mainFrame };
+		const openSession = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.openSession)!;
+		await openSession(event, { sessionId: currentSessionId });
+
+		loseNextUnsubscribe = true;
+		webContents.emit("did-start-navigation", {}, "app://renderer/index.html", false, true);
+		await vi.waitFor(() => {
+			expect(supervisor.request).toHaveBeenCalledWith(
+				expect.objectContaining({ method: "session/unsubscribe", params: { sessionId: currentSessionId } }),
+			);
+		});
+		supervisor.request.mockClear();
+
+		await openSession(event, { sessionId: replacementSessionId });
+		expect(supervisor.request).toHaveBeenCalledWith(
+			expect.objectContaining({ method: "session/unsubscribe", params: { sessionId: currentSessionId } }),
+		);
+		broker.dispose();
+	});
+
+	it("serializes renderer teardown before a replacement subscription", async () => {
+		const ipcMain = new FakeIpcMain();
+		const { supervisor } = supervisorHarness();
+		const sessionId = "11111111-1111-4111-8111-111111111231";
+		let releaseUnsubscribe!: () => void;
+		const unsubscribeGate = new Promise<void>((resolve) => {
+			releaseUnsubscribe = resolve;
+		});
+		supervisor.request.mockImplementation(async (request) => {
+			if (request.method === "session/unsubscribe") await unsubscribeGate;
+			return {
+				jsonrpc: "2.0",
+				id: request.id,
+				result:
+					request.method === "session/subscribe"
+						? { snapshot: { session: { sessionId: request.params.sessionId } } }
+						: {},
+			};
+		});
+		const broker = new ClientBroker({ ipcMain: ipcMain as never, supervisor });
+		const webContents = new FakeWebContents();
+		broker.attach({ webContents: webContents as never });
+		const event = { sender: webContents, senderFrame: webContents.mainFrame };
+		const openSession = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.openSession)!;
+		await openSession(event, { sessionId });
+		supervisor.request.mockClear();
+
+		webContents.emit("did-start-navigation", {}, "app://renderer/index.html", false, true);
+		await vi.waitFor(() => {
+			expect(supervisor.request).toHaveBeenCalledWith(
+				expect.objectContaining({ method: "session/unsubscribe", params: { sessionId } }),
+			);
+		});
+		const reopened = openSession(event, { sessionId });
+		await Promise.resolve();
+		expect(supervisor.request).not.toHaveBeenCalledWith(
+			expect.objectContaining({ method: "session/open", params: { sessionId } }),
+		);
+
+		releaseUnsubscribe();
+		await expect(reopened).resolves.toEqual({ session: { sessionId } });
+		expect(supervisor.request.mock.calls.map(([request]) => request.method)).toEqual([
+			"session/unsubscribe",
+			"session/open",
+			"session/subscribe",
+		]);
+		broker.dispose();
+	});
+
+	it("exposes only the guarded native project-folder picker", async () => {
+		const ipcMain = new FakeIpcMain();
+		const { supervisor } = supervisorHarness();
+		const selectProjectFolder = vi.fn().mockResolvedValue("/tmp/project");
+		const broker = new ClientBroker({ ipcMain: ipcMain as never, supervisor, selectProjectFolder });
+		const webContents = new FakeWebContents();
+		broker.attach({ webContents: webContents as never });
+		const select = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.selectProjectFolder)!;
+
+		await expect(select({ sender: webContents, senderFrame: webContents.mainFrame })).resolves.toBe("/tmp/project");
+		expect(selectProjectFolder).toHaveBeenCalledOnce();
 		broker.dispose();
 	});
 

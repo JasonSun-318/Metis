@@ -2,6 +2,7 @@ import { access, lstat } from "node:fs/promises";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { listPackage } from "@electron/asar";
+import { FuseState, FuseV1Options, getCurrentFuseWire } from "@electron/fuses";
 
 const desktopRoot = path.resolve(import.meta.dirname, "..");
 
@@ -21,13 +22,62 @@ function nativeArch() {
 	return process.arch;
 }
 
-const packageRoot = path.join(desktopRoot, "out", `ArcMind-${process.platform}-${nativeArch()}`);
+const expectedArch = nativeArch();
+const packageRoot = path.join(desktopRoot, "out", `ArcMind-${process.platform}-${expectedArch}`);
 const resourcesRoot =
 	process.platform === "darwin"
 		? path.join(packageRoot, "ArcMind.app", "Contents", "Resources")
 		: path.join(packageRoot, "resources");
 const appAsar = path.join(resourcesRoot, "app.asar");
+const executable =
+	process.platform === "darwin"
+		? path.join(packageRoot, "ArcMind.app", "Contents", "MacOS", "arcmind")
+		: path.join(packageRoot, process.platform === "win32" ? "arcmind.exe" : "arcmind");
 await access(appAsar);
+
+if (process.platform === "darwin") {
+	const appBundle = path.join(packageRoot, "ArcMind.app");
+	const infoPlist = path.join(appBundle, "Contents", "Info.plist");
+	const architecture = spawnSync("/usr/bin/lipo", ["-archs", executable], { encoding: "utf8" });
+	if (architecture.status !== 0 || !architecture.stdout.trim().split(/\s+/u).includes(expectedArch)) {
+		throw new Error(`Packaged macOS executable does not include the native ${expectedArch} architecture`);
+	}
+	for (const [key, expected] of [
+		["CFBundleIdentifier", "ai.arcmind.desktop"],
+		["NSDesktopFolderUsageDescription"],
+		["NSDocumentsFolderUsageDescription"],
+		["NSDownloadsFolderUsageDescription"],
+	]) {
+		const result = spawnSync("/usr/bin/plutil", ["-extract", key, "raw", infoPlist], { encoding: "utf8" });
+		const value = result.status === 0 ? result.stdout.trim() : "";
+		if (!value || (expected && value !== expected)) throw new Error(`Invalid packaged Info.plist value for ${key}`);
+	}
+	const signature = spawnSync("/usr/bin/codesign", ["-dvv", appBundle], { encoding: "utf8" });
+	if (signature.status !== 0 || !/^Identifier=ai\.arcmind\.desktop$/mu.test(signature.stderr)) {
+		throw new Error("Packaged macOS application is not signed with the ArcMind bundle identity");
+	}
+	const verification = spawnSync("/usr/bin/codesign", ["--verify", "--deep", "--strict", appBundle], {
+		encoding: "utf8",
+	});
+	if (verification.status !== 0) {
+		throw new Error(`Packaged macOS signature is invalid: ${verification.stderr.trim()}`);
+	}
+}
+
+const fuses = await getCurrentFuseWire(executable);
+for (const [fuse, expected] of [
+	[FuseV1Options.RunAsNode, FuseState.DISABLE],
+	[FuseV1Options.EnableCookieEncryption, FuseState.ENABLE],
+	[FuseV1Options.EnableNodeOptionsEnvironmentVariable, FuseState.DISABLE],
+	[FuseV1Options.EnableNodeCliInspectArguments, FuseState.DISABLE],
+	[FuseV1Options.EnableEmbeddedAsarIntegrityValidation, FuseState.ENABLE],
+	[FuseV1Options.OnlyLoadAppFromAsar, FuseState.ENABLE],
+	[FuseV1Options.LoadBrowserProcessSpecificV8Snapshot, FuseState.DISABLE],
+	[FuseV1Options.GrantFileProtocolExtraPrivileges, FuseState.DISABLE],
+	[FuseV1Options.WasmTrapHandlers, FuseState.ENABLE],
+]) {
+	if (fuses[fuse] !== expected) throw new Error(`Packaged Electron fuse ${FuseV1Options[fuse]} is misconfigured`);
+}
 
 const packagedPaths = new Set(listPackage(appAsar));
 for (const required of [

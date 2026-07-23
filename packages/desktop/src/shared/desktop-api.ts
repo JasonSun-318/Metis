@@ -40,6 +40,7 @@ export const DESKTOP_IPC_CHANNELS = {
 	steerTurn: "arcmind:steer-turn",
 	interruptTurn: "arcmind:interrupt-turn",
 	respondToInteraction: "arcmind:respond-to-interaction",
+	selectProjectFolder: "arcmind:select-project-folder",
 	getServerState: "arcmind:get-server-state",
 	retryServer: "arcmind:retry-server",
 	subscribe: "arcmind:subscribe",
@@ -60,6 +61,7 @@ export interface ArcMindDesktopApi {
 	steerTurn(input: ClientParams<"turn/steer">): Promise<ClientResult<"turn/steer">>;
 	interruptTurn(input: ClientParams<"turn/interrupt">): Promise<ClientResult<"turn/interrupt">>;
 	respondToInteraction(input: InteractionResponseInput): Promise<void>;
+	selectProjectFolder(): Promise<string | null>;
 	subscribe(listener: (event: DesktopApiEvent) => void): () => void;
 	getServerState(): Promise<SupervisorView>;
 	retryServer(): Promise<void>;
