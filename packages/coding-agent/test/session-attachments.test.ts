@@ -45,9 +45,16 @@ describe("session attachments", () => {
 		expect(readFileSync(attachment.path, "utf8")).toBe("document");
 		expect(formatSessionAttachments("Summarize this", [attachment])).toContain(JSON.stringify(attachment.path));
 		expect(formatSessionAttachmentDisplayText(formatSessionAttachments("Summarize this", [attachment]))).toBe(
-			"[report.pdf]\n\nSummarize this",
+			"Summarize this\n\n[report.pdf]",
 		);
 		expect(readFileSync(source, "utf8")).toBe("document");
+	});
+
+	it("keeps an explicit skill invocation first when attachments are present", () => {
+		const attachment = { name: "report.pdf", path: "/private/report.pdf", size: 8 };
+		const prompt = formatSessionAttachments("/skill:pdf Summarize this", [attachment]);
+
+		expect(prompt.startsWith("/skill:pdf Summarize this\n\n<attachments>")).toBe(true);
 	});
 
 	it("imports long display names without creating an overlong internal filename", () => {

@@ -184,7 +184,7 @@ export function formatSessionAttachments(text: string, attachments: readonly Ses
 	);
 	const attachmentBlock = `<attachments>\n${block}\n</attachments>`;
 	const prompt = text.trimStart();
-	return prompt ? `${attachmentBlock}\n\n${prompt}` : attachmentBlock;
+	return prompt ? `${prompt}\n\n${attachmentBlock}` : attachmentBlock;
 }
 
 function stringifyAttachmentMetadata(value: unknown, space?: number): string {
