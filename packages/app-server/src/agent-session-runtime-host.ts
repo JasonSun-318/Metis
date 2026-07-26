@@ -19,6 +19,7 @@ import {
 	createAgentSessionFromServices,
 	createAgentSessionRuntime,
 	createAgentSessionServices,
+	DefaultResourceLoader,
 	formatSessionAttachmentDisplayText,
 	formatSessionAttachments,
 	getProjectTrustOptions,
@@ -647,6 +648,10 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 		return this.projection.getSummary();
 	}
 
+	async listSkills(): Promise<ClientResult<"skill/list">> {
+		return publicSkills(this.session.resourceLoader.getSkills().skills);
+	}
+
 	private summaryFromRuntime(
 		journal: readonly unknown[] = this.journal(),
 		reduced: ReturnType<typeof reduceRuntimeJournal> = reduceRuntimeJournal(journal),
@@ -799,6 +804,10 @@ function toRuntimeImage(image: DurableImageRefView) {
 	return { type: "image_ref" as const, hash: image.hash, mimeType: image.mediaType, size: image.byteLength };
 }
 
+function publicSkills(skills: readonly { name: string; description: string }[]): ClientResult<"skill/list"> {
+	return { skills: skills.slice(0, 256).map(({ name, description }) => ({ name, description })) };
+}
+
 export class AgentSessionRuntimeHost implements SessionRuntimeHost {
 	private readonly agentDir: string;
 	private readonly options: AgentSessionRuntimeHostOptions;
@@ -877,6 +886,28 @@ export class AgentSessionRuntimeHost implements SessionRuntimeHost {
 			throw error;
 		}
 	};
+
+	async listSkills(cwd: string | null): Promise<ClientResult<"skill/list">> {
+		const effectiveCwd = cwd ?? this.agentDir;
+		const settingsManager = SettingsManager.create(effectiveCwd, this.agentDir, {
+			projectTrusted: cwd !== null && this.trustStore.get(effectiveCwd) === true,
+		});
+		const loader = new DefaultResourceLoader({
+			cwd: effectiveCwd,
+			agentDir: this.agentDir,
+			settingsManager,
+			noExtensions: true,
+			noPromptTemplates: true,
+			noThemes: true,
+			noContextFiles: true,
+		});
+		try {
+			await loader.reload();
+			return publicSkills(loader.getSkills().skills);
+		} finally {
+			loader.dispose();
+		}
+	}
 
 	async open(ref: SessionRef): Promise<OpenedSessionRuntime> {
 		if (ref.summary.archived) throw new AppServerError("NOT_FOUND", { sessionId: ref.summary.sessionId });

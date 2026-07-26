@@ -7,10 +7,20 @@
 			"id": "client-1",
 			"method": "initialize",
 			"params": {
-				"protocolVersion": 4,
+				"protocolVersion": 5,
 				"client": { "name": "ArcMind Desktop", "version": "0.80.6" },
 				"capabilities": ["interaction.v1", "session.cursor.v1"]
 			}
+		}
+	},
+	{
+		"direction": "client",
+		"method": "skill/list",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "client-skills",
+			"method": "skill/list",
+			"params": { "cwd": null }
 		}
 	},
 	{

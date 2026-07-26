@@ -6,7 +6,7 @@
 			"jsonrpc": "2.0",
 			"id": "client-1",
 			"result": {
-				"protocolVersion": 4,
+				"protocolVersion": 5,
 				"server": {
 					"name": "arcmind-app-server",
 					"version": "0.80.6"
@@ -15,6 +15,19 @@
 				"capabilities": [
 					"interaction.v1",
 					"session.cursor.v1"
+				]
+			}
+		}
+	},
+	{
+		"direction": "client",
+		"method": "skill/list",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "client-skills",
+			"result": {
+				"skills": [
+					{ "name": "pdf", "description": "Read and create PDF documents" }
 				]
 			}
 		}

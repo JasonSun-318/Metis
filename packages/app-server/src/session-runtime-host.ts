@@ -23,6 +23,7 @@ export interface OpenedSessionRuntime {
 	isActive(): boolean;
 	hasPendingInteractions(): boolean;
 	getSummary(): SessionSummary;
+	listSkills(): Promise<ClientResult<"skill/list">>;
 	readItems(input: ClientParams<"session/readItems">): Promise<ClientResult<"session/readItems">>;
 	readSubagentItems(input: ClientParams<"subagent/readItems">): Promise<ClientResult<"subagent/readItems">>;
 	setThinkingSelection(
@@ -40,6 +41,7 @@ export interface OpenedSessionRuntime {
 /** Factory seam used by the registry; production and tests provide different hosts. */
 export interface SessionRuntimeHost {
 	open(ref: SessionRef): Promise<OpenedSessionRuntime>;
+	listSkills?(cwd: string | null): Promise<ClientResult<"skill/list">>;
 }
 
 export class AppServerError extends Error {

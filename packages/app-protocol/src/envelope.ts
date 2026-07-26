@@ -276,6 +276,13 @@ function validateClientResultCorrelation(request: ClientRpcRequest, result: unkn
 			}
 			return;
 		}
+		case "skill/list": {
+			const skills = (result as ClientResult<"skill/list">).skills;
+			if (!hasUniqueIds(skills.map((skill) => skill.name))) {
+				failResponseCorrelation("Skill list contains duplicate names");
+			}
+			return;
+		}
 		case "session/open":
 			if ((result as ClientResult<"session/open">).session.sessionId !== request.params.sessionId) {
 				failResponseCorrelation("Opened session does not match its request");

@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://arcmind.dev/schemas/app-server-v4.json",
-  "title": "ArcMind App-Server Protocol v4",
+  "$id": "https://arcmind.dev/schemas/app-server-v5.json",
+  "title": "ArcMind App-Server Protocol v5",
   "$ref": "#/$defs/AppProtocolEnvelope",
   "$defs": {
     "AppProtocolEnvelope": {
@@ -130,6 +130,71 @@
                     }
                   },
                   "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "jsonrpc",
+                "id",
+                "method",
+                "params"
+              ],
+              "properties": {
+                "jsonrpc": {
+                  "type": "string",
+                  "const": "2.0"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "x-arcmind-maxUtf16Units": 128
+                },
+                "method": {
+                  "type": "string",
+                  "const": "skill/list"
+                },
+                "params": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "required": [
+                        "sessionId"
+                      ],
+                      "properties": {
+                        "sessionId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "cwd"
+                      ],
+                      "properties": {
+                        "cwd": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "minLength": 1,
+                              "x-arcmind-maxUtf8Bytes": 32768
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "additionalProperties": false
+                    }
+                  ]
                 }
               },
               "additionalProperties": false
@@ -3183,7 +3248,7 @@
                   "properties": {
                     "protocolVersion": {
                       "type": "number",
-                      "const": 4
+                      "const": 5
                     },
                     "server": {
                       "type": "object",
@@ -3368,6 +3433,60 @@
                           "type": "null"
                         }
                       ]
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "jsonrpc",
+                "id",
+                "result"
+              ],
+              "properties": {
+                "jsonrpc": {
+                  "type": "string",
+                  "const": "2.0"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "x-arcmind-maxUtf16Units": 128
+                },
+                "result": {
+                  "type": "object",
+                  "required": [
+                    "skills"
+                  ],
+                  "properties": {
+                    "skills": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "name",
+                          "description"
+                        ],
+                        "properties": {
+                          "name": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 256,
+                            "x-arcmind-maxUtf16Units": 256
+                          },
+                          "description": {
+                            "type": "string",
+                            "x-arcmind-maxUtf8Bytes": 65536
+                          }
+                        },
+                        "additionalProperties": false
+                      },
+                      "maxItems": 256
                     }
                   },
                   "additionalProperties": false
@@ -7436,6 +7555,71 @@
             },
             "method": {
               "type": "string",
+              "const": "skill/list"
+            },
+            "params": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "required": [
+                    "sessionId"
+                  ],
+                  "properties": {
+                    "sessionId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "required": [
+                    "cwd"
+                  ],
+                  "properties": {
+                    "cwd": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "minLength": 1,
+                          "x-arcmind-maxUtf8Bytes": 32768
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "type": "string",
+              "const": "2.0"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "x-arcmind-maxUtf16Units": 128
+            },
+            "method": {
+              "type": "string",
               "const": "session/create"
             },
             "params": {
@@ -8311,7 +8495,7 @@
               "properties": {
                 "protocolVersion": {
                   "type": "number",
-                  "const": 4
+                  "const": 5
                 },
                 "server": {
                   "type": "object",
@@ -8496,6 +8680,60 @@
                       "type": "null"
                     }
                   ]
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "jsonrpc",
+            "id",
+            "result"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "type": "string",
+              "const": "2.0"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "x-arcmind-maxUtf16Units": 128
+            },
+            "result": {
+              "type": "object",
+              "required": [
+                "skills"
+              ],
+              "properties": {
+                "skills": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": [
+                      "name",
+                      "description"
+                    ],
+                    "properties": {
+                      "name": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256,
+                        "x-arcmind-maxUtf16Units": 256
+                      },
+                      "description": {
+                        "type": "string",
+                        "x-arcmind-maxUtf8Bytes": 65536
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "maxItems": 256
                 }
               },
               "additionalProperties": false

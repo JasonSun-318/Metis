@@ -24,6 +24,7 @@ import {
 	ItemViewSchema,
 	SessionSnapshotSchema,
 	SessionSummarySchema,
+	SkillSummaryViewSchema,
 	ThinkingSelectionSchema,
 } from "./views.ts";
 
@@ -69,6 +70,15 @@ export const SessionListParamsSchema = StrictObject({
 export const SessionListResultSchema = StrictObject({
 	sessions: Type.Array(SessionSummarySchema, { maxItems: MAX_HISTORY_ITEMS }),
 	nextAfterSessionId: Type.Union([SessionIdSchema, Type.Null()]),
+});
+
+export const SkillListParamsSchema = Type.Union([
+	StrictObject({ sessionId: SessionIdSchema }),
+	StrictObject({ cwd: Type.Union([PathSchema, Type.Null()]) }),
+]);
+
+export const SkillListResultSchema = StrictObject({
+	skills: Type.Array(SkillSummaryViewSchema, { maxItems: 256 }),
 });
 
 export const SessionCreateParamsSchema = StrictObject({
@@ -204,6 +214,7 @@ export const InteractionResultSchema = Type.Union([
 export const ClientRequestMethods = {
 	initialize: method(InitializeParamsSchema, InitializeResultSchema),
 	"session/list": method(SessionListParamsSchema, SessionListResultSchema),
+	"skill/list": method(SkillListParamsSchema, SkillListResultSchema),
 	"session/create": method(SessionCreateParamsSchema, SessionCreateResultSchema),
 	"session/open": method(SessionRefParamsSchema, SessionOpenResultSchema),
 	"session/readItems": method(SessionReadItemsParamsSchema, SessionReadItemsResultSchema),

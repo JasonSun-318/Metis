@@ -106,6 +106,12 @@ export class Dispatcher {
 				throw new AppServerError("INVALID_REQUEST");
 			case "session/list":
 				return this.catalog.list(request.params);
+			case "skill/list":
+				if ("sessionId" in request.params) {
+					const ref = this.runtimeRef(request.params.sessionId);
+					return await this.registry.run(ref, (runtime) => runtime.listSkills());
+				}
+				return await this.registry.listDraftSkills(request.params.cwd);
 			case "session/create":
 				return await this.replayMutation(request, async () => ({
 					session: await this.catalog.create(request.params),

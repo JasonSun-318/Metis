@@ -1,3 +1,4 @@
+import type { ClientResult } from "@arcmind/app-protocol";
 import {
 	AppServerError,
 	type OpenedSessionRuntime,
@@ -36,6 +37,10 @@ export class SessionRegistry {
 
 	has(sessionId: string): boolean {
 		return this.slots.has(sessionId);
+	}
+
+	async listDraftSkills(cwd: string | null): Promise<ClientResult<"skill/list">> {
+		return this.host.listSkills ? await this.host.listSkills(cwd) : { skills: [] };
 	}
 
 	private slotFor(ref: SessionRef): RuntimeSlot {

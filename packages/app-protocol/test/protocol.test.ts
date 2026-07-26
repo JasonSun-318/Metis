@@ -235,6 +235,19 @@ describe("exact limits", () => {
 		expect(() => validateClientRequest(create)).toThrow(ProtocolValidationError);
 	});
 
+	it("accepts session and draft skill catalog contexts", () => {
+		const sessionRequest = makeClientRequest("skill/list", { sessionId: SESSION_ID });
+		const draftRequest = makeClientRequest("skill/list", { cwd: "/work/project" });
+		const globalDraftRequest = makeClientRequest("skill/list", { cwd: null });
+
+		expect(() => validateClientRequest(sessionRequest)).not.toThrow();
+		expect(() => validateClientRequest(draftRequest)).not.toThrow();
+		expect(() => validateClientRequest(globalDraftRequest)).not.toThrow();
+		expect(() =>
+			validateClientRequest(makeClientRequest("skill/list", { sessionId: SESSION_ID, cwd: "/work" })),
+		).toThrow(ProtocolValidationError);
+	});
+
 	it("accepts bounded local file attachments on turns", () => {
 		const request = makeClientRequest("turn/start", {
 			sessionId: SESSION_ID,
@@ -440,6 +453,15 @@ describe("direction and response correlation", () => {
 		const listResponse = responses.find((entry) => entry.method === "session/list")!.envelope;
 		const wrong = { ...listResponse, id: open.id };
 		expect(() => validateResponseFor("client", open, wrong)).toThrow(ProtocolValidationError);
+	});
+
+	it("rejects duplicate skill names", () => {
+		const request = requestFor("client", "skill/list").envelope;
+		const response = structuredClone(responses.find((entry) => entry.method === "skill/list")!.envelope) as {
+			result: { skills: Array<{ name: string; description: string }> };
+		};
+		response.result.skills.push({ ...response.result.skills[0]! });
+		expect(() => validateResponseFor("client", request, response)).toThrow("duplicate names");
 	});
 
 	it("rejects method-valid results and errors correlated to another session", () => {

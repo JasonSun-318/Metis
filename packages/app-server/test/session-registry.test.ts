@@ -49,6 +49,10 @@ class FakeRuntime implements OpenedSessionRuntime {
 		return { ...summary(this.sessionId), state: this.active ? "running" : "idle" };
 	}
 
+	async listSkills(): Promise<ClientResult<"skill/list">> {
+		return { skills: [] };
+	}
+
 	async readItems(_input: ClientParams<"session/readItems">): Promise<ClientResult<"session/readItems">> {
 		return { items: [], nextBeforeItemId: null };
 	}

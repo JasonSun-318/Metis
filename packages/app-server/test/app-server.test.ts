@@ -62,6 +62,10 @@ class FakeRuntime implements OpenedSessionRuntime {
 		return { ...this.ref.summary, state: this.active ? "running" : "idle" };
 	}
 
+	async listSkills(): Promise<ClientResult<"skill/list">> {
+		return { skills: [{ name: "pdf", description: "Read and create PDF documents" }] };
+	}
+
 	async readItems(_input: ClientParams<"session/readItems">): Promise<ClientResult<"session/readItems">> {
 		return { items: [], nextBeforeItemId: null };
 	}
@@ -131,6 +135,11 @@ class FakeRuntime implements OpenedSessionRuntime {
 
 class FakeHost implements SessionRuntimeHost {
 	readonly runtimes = new Map<string, FakeRuntime>();
+	readonly listSkills = vi.fn(
+		async (): Promise<ClientResult<"skill/list">> => ({
+			skills: [{ name: "global", description: "A global Skill" }],
+		}),
+	);
 	readonly open = vi.fn(async (ref: SessionRef): Promise<FakeRuntime> => {
 		const runtime = new FakeRuntime(ref);
 		this.runtimes.set(runtime.sessionId, runtime);
@@ -143,7 +152,7 @@ function initialize(id = "initialize") {
 		jsonrpc: "2.0" as const,
 		id,
 		method: "initialize" as const,
-		params: { protocolVersion: 4, client: { name: "test", version: "1" }, capabilities: [] },
+		params: { protocolVersion: 5, client: { name: "test", version: "1" }, capabilities: [] },
 	};
 }
 
@@ -204,7 +213,7 @@ describe("AppServer", () => {
 		);
 		const initialized = await connection.handle(initialize());
 		expect(initialized).toMatchObject({
-			result: { protocolVersion: 4, server: { name: "arcmind-app-server" }, serverEpoch: server.serverEpoch },
+			result: { protocolVersion: 5, server: { name: "arcmind-app-server" }, serverEpoch: server.serverEpoch },
 		});
 		expectError(await connection.handle(initialize("again")), RPC_ERROR_CODES.INVALID_REQUEST);
 	});
@@ -267,6 +276,64 @@ describe("AppServer", () => {
 		});
 		expect(host.runtimes.get("session-a")?.closed).toBe(true);
 		expect(host.runtimes.get("session-b")?.closed).toBe(false);
+	});
+
+	it("lists draft and opened-session skills through their owning runtime boundary", async () => {
+		writeSession(sessionsRoot, "session-a", projectDir);
+		const host = new FakeHost();
+		const server = await AppServer.create({ agentDir, sessionsRoot, runtimeHost: host });
+		const connection = server.connect();
+		await connection.handle(initialize());
+
+		expect(
+			await connection.handle({ jsonrpc: "2.0", id: "skills-draft", method: "skill/list", params: { cwd: null } }),
+		).toMatchObject({ result: { skills: [{ name: "global" }] } });
+		expect(host.open).not.toHaveBeenCalled();
+		expect(
+			await connection.handle({
+				jsonrpc: "2.0",
+				id: "skills-session",
+				method: "skill/list",
+				params: { sessionId: "session-a" },
+			}),
+		).toMatchObject({ result: { skills: [{ name: "pdf" }] } });
+		expect(host.open).toHaveBeenCalledOnce();
+	});
+
+	it("lists draft skills without creating a session or trusting project resources", async () => {
+		const writeSkill = (root: string, name: string, description: string) => {
+			const directory = join(root, name);
+			mkdirSync(directory, { recursive: true });
+			writeFileSync(join(directory, "SKILL.md"), `---\nname: ${name}\ndescription: ${description}\n---\n`);
+		};
+		writeSkill(join(agentDir, "skills"), "global-skill", "Available to every session");
+		writeSkill(join(projectDir, ".arcmind", "skills"), "project-skill", "Available only after trust");
+		const server = await AppServer.create({ agentDir, sessionsRoot });
+		const connection = server.connect();
+		await connection.handle(initialize());
+
+		const untrusted = await connection.handle({
+			jsonrpc: "2.0",
+			id: "skills-untrusted",
+			method: "skill/list",
+			params: { cwd: projectDir },
+		});
+		const untrustedNames = (untrusted as { result: ClientResult<"skill/list"> }).result.skills.map(
+			(skill) => skill.name,
+		);
+		expect(untrustedNames).toContain("global-skill");
+		expect(untrustedNames).not.toContain("project-skill");
+		expect(server.catalog.list({}).sessions).toEqual([]);
+
+		new ProjectTrustStore(agentDir).set(projectDir, true);
+		const trusted = await connection.handle({
+			jsonrpc: "2.0",
+			id: "skills-trusted",
+			method: "skill/list",
+			params: { cwd: projectDir },
+		});
+		const trustedNames = (trusted as { result: ClientResult<"skill/list"> }).result.skills.map((skill) => skill.name);
+		expect(trustedNames).toEqual(expect.arrayContaining(["global-skill", "project-skill"]));
 	});
 
 	it("replays an identical mutation and rejects changed parameters", async () => {

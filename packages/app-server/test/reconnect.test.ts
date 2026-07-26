@@ -95,6 +95,10 @@ class PausableRuntime implements OpenedSessionRuntime {
 		return this.projection.getSummary();
 	}
 
+	async listSkills(): Promise<ClientResult<"skill/list">> {
+		return { skills: [] };
+	}
+
 	async readItems(input: ClientParams<"session/readItems">): Promise<ClientResult<"session/readItems">> {
 		return this.projection.readItems(input);
 	}
@@ -158,7 +162,7 @@ function initialize(id: string) {
 		jsonrpc: "2.0" as const,
 		id,
 		method: "initialize" as const,
-		params: { protocolVersion: 4, client: { name: "test", version: "1" }, capabilities: [] },
+		params: { protocolVersion: 5, client: { name: "test", version: "1" }, capabilities: [] },
 	};
 }
 

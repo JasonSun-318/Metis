@@ -52,6 +52,11 @@ export const SessionSummarySchema = StrictObject({
 	recoveryNotice: Type.Optional(PublicTextSchema),
 });
 
+export const SkillSummaryViewSchema = StrictObject({
+	name: NameSchema,
+	description: PublicTextSchema,
+});
+
 export const DurableImageRefViewSchema = StrictObject({
 	hash: Sha256Schema,
 	mediaType: Type.Union([
@@ -376,6 +381,7 @@ export type PublicErrorData = Static<typeof PublicErrorDataSchema>;
 export type AgentMode = Static<typeof AgentModeSchema>;
 export type CwdOrigin = Static<typeof CwdOriginSchema>;
 export type SessionSummary = Static<typeof SessionSummarySchema>;
+export type SkillSummaryView = Static<typeof SkillSummaryViewSchema>;
 export type DurableImageRefView = Static<typeof DurableImageRefViewSchema>;
 export type ItemContentBlockView = Static<typeof ItemContentBlockViewSchema>;
 export type ItemView = Static<typeof ItemViewSchema>;

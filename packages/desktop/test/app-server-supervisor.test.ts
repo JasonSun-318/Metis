@@ -52,7 +52,7 @@ class FakeChild implements UtilityChild {
 			jsonrpc: "2.0",
 			id: request.id,
 			result: {
-				protocolVersion: 4,
+				protocolVersion: 5,
 				server: { name: "arcmind-app-server", version: "0.80.6" },
 				serverEpoch: epoch,
 				capabilities: [],
