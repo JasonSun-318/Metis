@@ -27,8 +27,9 @@ Sessions have a version field in the header:
 - **Version 5**: Reserves durable runtime operation/queue/turn controls
 - **Version 6**: Stores immutable mode/workspace ownership and permission controls
 - **Version 7**: Adds child ownership markers and first-class subagent controls
+- **Version 8**: Adds Code-session additional-directory controls
 
-Existing sessions are automatically migrated to the current version (v7) when loaded. A journal containing a newer control family under an older header is rejected rather than guessed.
+Existing sessions are automatically migrated to the current version (v8) when loaded. A journal containing a newer control family under an older header is rejected rather than guessed.
 
 ## Image Storage
 
@@ -209,15 +210,15 @@ interface SessionEntryBase {
 First line of the file. Metadata only, not part of the tree (no `id`/`parentId`).
 
 ```json
-{"type":"session","version":7,"id":"uuid","timestamp":"2026-07-17T14:00:00.000Z","cwd":"/path/to/project","mode":"code","cwdOrigin":"user-selected","permissionMode":"ask"}
+{"type":"session","version":8,"id":"uuid","timestamp":"2026-07-17T14:00:00.000Z","cwd":"/path/to/project","mode":"code","cwdOrigin":"user-selected","permissionMode":"ask"}
 ```
 
-`mode` is `"chat"` or `"code"`. `cwdOrigin` is `"managed"` only for a workspace that ArcMind owns and may copy/delete; otherwise it is `"user-selected"`. New records write `permissionMode` as `"ask"` or `"full"`; both modes default to Ask. Legacy v6/v7 `"auto"` loads as Ask, and legacy `reviewerEnabled` is validated when present but ignored.
+`mode` is `"chat"` or `"code"`. `cwdOrigin` is `"managed"` only for a workspace that ArcMind owns and may copy/delete; otherwise it is `"user-selected"`. New records write `permissionMode` as `"ask"` or `"full"`; both modes default to Ask. Legacy v6-v8 `"auto"` loads as Ask, and legacy `reviewerEnabled` is validated when present but ignored.
 
 For sessions with a parent (created via `/fork`, `/clone`, or `newSession({ parentSession })`):
 
 ```json
-{"type":"session","version":7,"id":"uuid","timestamp":"2026-07-17T14:00:00.000Z","cwd":"/path/to/project","mode":"chat","cwdOrigin":"user-selected","permissionMode":"ask","parentSession":"/path/to/original/session.jsonl"}
+{"type":"session","version":8,"id":"uuid","timestamp":"2026-07-17T14:00:00.000Z","cwd":"/path/to/project","mode":"chat","cwdOrigin":"user-selected","permissionMode":"ask","parentSession":"/path/to/original/session.jsonl"}
 ```
 
 `parentSession` records lineage; forks and clones inherit the source session's mode.
@@ -233,12 +234,25 @@ Permission changes and decisions are append-only journal metadata:
 
 These records are reduced in raw journal order. They do not advance the transcript leaf, appear in `getEntries()`/`getTree()`, or become model messages. New decision records contain only user `allow`/`deny` decisions and are audits, not reusable grants. Legacy reviewer sources and `ask` decisions remain readable but cannot be written through the current API.
 
+### Code additional-directory controls (v8)
+
+Code sessions append one strict non-tree control whenever an additional file-access root changes:
+
+```json
+{"type":"session_directory_added","id":"c3d4e5f6","parentId":"leaf1234","timestamp":"2026-07-26T14:01:00.000Z","path":"/canonical/path/to/shared"}
+{"type":"session_directory_removed","id":"d4e5f6a7","parentId":"leaf1234","timestamp":"2026-07-26T14:02:00.000Z","path":"/canonical/path/to/shared"}
+```
+
+Each record permits only the base control fields and one normalized canonical absolute `path`. The records are reduced in raw journal order; they do not advance the transcript leaf, appear in `getEntries()`/`getTree()`, or become model messages. A directory need not still exist when the journal is reopened. Directory controls require a v8 header, and any Chat journal containing them is invalid.
+
+Opening or resuming the same journal preserves these controls. `/tree` and compaction stay within that journal and preserve them. Clone, fork, `newSession()`, and import into a new destination exclude these authority-bearing controls.
+
 ### Subagent headers and controls (v7)
 
 A first-class child adds an immutable ownership marker to its normal session header:
 
 ```json
-{"type":"session","version":7,"id":"child-id","timestamp":"2026-07-18T00:00:00.000Z","cwd":"/path/to/project","mode":"code","cwdOrigin":"user-selected","permissionMode":"ask","subagent":{"agentId":"child-id","name":"researcher","parentSessionId":"parent-id"}}
+{"type":"session","version":8,"id":"child-id","timestamp":"2026-07-18T00:00:00.000Z","cwd":"/path/to/project","mode":"code","cwdOrigin":"user-selected","permissionMode":"ask","subagent":{"agentId":"child-id","name":"researcher","parentSessionId":"parent-id"}}
 ```
 
 Its journal begins with `subagent_created`, which snapshots inherited Code mode, exact model/real thinking level, tools, permission mode, cwd, fork policy, timeout, and optional assignment profile. Legacy child records may contain `auto`, `reviewerEnabled`, `readPaths`, and `writePaths`; the parser validates and discards those removed fields while normalizing Auto to Ask. Every admitted initial/follow-up run has an immutable `runId`; `subagent_state` and queued/accepted/cancelled `subagent_follow_up` records use that ID.
@@ -439,6 +453,10 @@ Key methods for working with sessions programmatically.
 - `createBranchedSessionManager(leafId)` - Create a branch manager that inherits the source mode
 - `getMode()` - Return the effective mode, including the legacy `code` fallback
 - `getCwdOrigin()` - Return `managed` or `user-selected`
+- `getAdditionalDirectories()` - Return the current Code-only additional roots
+- `getWorkspaceRoots()` - Return the immutable primary root followed by current additional roots
+- `addWorkspaceDirectory(path)` - Append one existing canonical Code root without changing cwd
+- `removeWorkspaceDirectory(path)` - Revoke one added Code root, including a temporarily missing root
 - `getPermissionSettings()` - Return the effective Ask/Full permission mode
 - `setPermissionSettings(settings)` - Append non-tree permission metadata
 

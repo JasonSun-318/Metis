@@ -41,8 +41,11 @@ Type `/` in the editor to open command completion. Extensions can register custo
 | `/scoped-models` | Enable/disable models for Ctrl+P cycling |
 | `/settings` | Web search, thinking level, theme, message delivery, transport |
 | `/resume` | Pick from previous sessions |
-| `/new [chat\|code]` | Create a session and choose its immutable workspace |
+| `/new [chat\|code]` | Create a session and choose its immutable primary workspace |
 | `/permissions` | Choose Ask or Full for this session |
+| `/add-dir <path>` | Code only: add one existing directory as a file-access root for this session |
+| `/remove-dir <path>` | Code only: remove one previously added directory |
+| `/dirs` | Code only: list the primary and additional working directories |
 | `/name <name>` | Set session display name |
 | `/session` | Show session file, ID, mode, messages, tokens, and cost |
 | `/tree` | Jump to any point in the session and continue from there |
@@ -120,7 +123,7 @@ Dream runs silently alongside manual and automatic context compaction when long-
 
 `/dream` is read-only and remains available while Dream is running. It shows live state and the latest 10 metadata-only records from `~/.arcmind/agent/memory/dream-history.jsonl`. Dream cannot be started manually.
 
-While Compact/Dream runs, Shell commands, extension commands, and built-ins that mutate model, settings, authentication, sessions, exports, imports, or memory state are rejected and left in the editor. `/copy`, `/session`, `/hotkeys`, `/memory`, `/dream`, `/quit`, `/debug`, Escape, and display-only shortcuts remain available.
+While Compact/Dream runs, Shell commands, extension commands, and built-ins that mutate model, settings, authentication, sessions, exports, imports, or memory state are rejected and left in the editor. Read-only `/dirs`, `/copy`, `/session`, `/hotkeys`, `/memory`, `/dream`, `/quit`, `/debug`, Escape, and display-only shortcuts remain available; `/add-dir` and `/remove-dir` remain blocked.
 
 ## Context Files
 

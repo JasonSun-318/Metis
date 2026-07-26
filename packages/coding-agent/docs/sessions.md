@@ -46,7 +46,15 @@ The two modes currently use the same general-purpose system prompt, tools, model
 
 `/new` reuses the normal TUI option and input components. After the mode choice, Chat offers a managed workspace, the captured terminal directory, or another directory; Code offers the captured terminal directory or another directory. The selection is made only while creating the session. Cancelling or entering an invalid path leaves the current session unchanged.
 
-The mode, workspace path, and workspace ownership are immutable after creation. Resuming or switching restores the stored values; creation-only CLI flags cannot mutate an existing session. Permission settings are per-session but can be changed later with `/permissions`. See [Permissions](permissions.md).
+The mode, primary workspace path, and workspace ownership are immutable after creation. Resuming or switching restores the stored values; creation-only CLI flags cannot mutate an existing session. Code sessions may separately change their additional file-access roots as described below. Permission settings are per-session but can be changed later with `/permissions`. See [Permissions](permissions.md).
+
+### Code additional directories
+
+`/add-dir <path>` adds one existing directory to the current Code session without changing its primary working directory. Relative paths still resolve from the primary directory, and Bash still starts there. `/dirs` lists the effective roots; `/remove-dir <path>` revokes one added root.
+
+ArcMind stores only canonical path controls. It does not scan or preload the directory, and it does not load `AGENTS.md`, `.arcmind`, skills, prompts, extensions, hooks, themes, or project memory from it. Files enter model context only after a tool reads them.
+
+The same session restores its roots on resume and keeps them through `/tree` and compaction. `/new`, `/clone`, `/fork`, and import into a new session start without inherited additional directories. A temporarily missing root remains listed so the session can recover and the user can remove it.
 
 Mode does not change `--system-prompt` or `--append-system-prompt` behavior.
 
@@ -57,8 +65,11 @@ Sessions for both modes remain JSONL files under `~/.arcmind/agent/sessions/<enc
 | Command | Description |
 |---------|-------------|
 | `/resume` | Browse and select previous sessions |
-| `/new [chat\|code]` | Create a session and choose its immutable workspace |
+| `/new [chat\|code]` | Create a session and choose its immutable primary workspace |
 | `/permissions` | Change the current session's Ask or Full setting |
+| `/add-dir <path>` | Code only: add one existing directory as a file-access root for this session |
+| `/remove-dir <path>` | Code only: remove one previously added directory |
+| `/dirs` | Code only: list the primary and additional working directories |
 | `/name <name>` | Set the current session display name |
 | `/session` | Show session info |
 | `/tree` | Navigate the current session tree |

@@ -52,7 +52,7 @@ A typical creation request is:
 }
 ```
 
-`cwd` is resolved against the parent cwd, canonicalized, and must be an existing directory inside the parent workspace. It is only the base for relative paths, not a filesystem capability boundary. An absolute path outside the child cwd follows the child's Ask/Full mode like any other tool target.
+`cwd` is resolved against the parent's primary cwd, canonicalized, and must be an existing directory inside one of the parent's current workspace roots. A directory added after the manager starts is available to future children; existing child sessions keep their stored cwd. Workspace roots select cwd and Ask auto-read behavior, but they are not an OS filesystem capability boundary.
 
 ## Context and prompt isolation
 
@@ -74,13 +74,15 @@ Mailbox events are persisted first and injected FIFO at the next provider bounda
 
 ## Lifecycle and storage
 
-Each active child is a normal v7 JSONL session under:
+Each active child is a normal v8 JSONL session under:
 
 ```text
 <agentDir>/subagents/<parentSessionId>/
 ```
 
 Only a running child owns an in-memory runtime/model context. `done`, `failed`, and `stopped` children are cold but resumable. Restart never silently resumes work: prior `queued` and `running` states become `stopped`, and a follow-up is required to run again.
+
+First-class subagent ownership and control records were introduced in session format v7; v8 is the current format.
 
 | State | Meaning |
 |---|---|
