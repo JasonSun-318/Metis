@@ -74,6 +74,8 @@ export interface HarnessOptions {
 	mcpManager?: McpManager;
 	permissionModeCeiling?: () => PermissionSettings["mode"];
 	includeAutoMemory?: boolean;
+	/** Optional caller-owned manager; cleanup does not close it. */
+	sessionManager?: SessionManager;
 }
 
 export interface Harness {
@@ -111,7 +113,7 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
 	const withConfiguredAuth = options.withConfiguredAuth ?? true;
 	const extensionRunnerRef: { current?: ExtensionRunner } = {};
 
-	const sessionManager = SessionManager.inMemory();
+	const sessionManager = options.sessionManager ?? SessionManager.inMemory();
 	const settingsManager = SettingsManager.inMemory(options.settings);
 
 	const authStorage = AuthStorage.inMemory();
@@ -182,7 +184,7 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
 		agent,
 		sessionManager,
 		settingsManager,
-		cwd: tempDir,
+		cwd: options.sessionManager ? sessionManager.getCwd() : tempDir,
 		modelRegistry,
 		mcpManager: options.mcpManager,
 		resourceLoader,
