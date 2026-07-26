@@ -15,7 +15,7 @@ import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { openSessionJournal } from "../../src/core/session-journal.ts";
 import { SessionLease } from "../../src/core/session-lease.ts";
-import { getSessionImageDir, SessionManager } from "../../src/core/session-manager.ts";
+import { CURRENT_SESSION_VERSION, getSessionImageDir, SessionManager } from "../../src/core/session-manager.ts";
 
 const timestamp = "2026-01-01T00:00:00.000Z";
 
@@ -113,7 +113,7 @@ describe("SessionManager durable ownership and recovery", () => {
 		writeFileSync(path, '{"type":"session"');
 
 		const manager = SessionManager.open(path);
-		expect(manager.getHeader()).toMatchObject({ type: "session", version: 7 });
+		expect(manager.getHeader()).toMatchObject({ type: "session", version: CURRENT_SESSION_VERSION });
 		expect(manager.getEntries()).toMatchObject([
 			{ type: "custom", customType: "arcmind.session_recovery", parentId: null },
 		]);
@@ -163,7 +163,7 @@ describe("SessionManager durable ownership and recovery", () => {
 			.split("\n")
 			.map((line) => JSON.parse(line));
 		expect(restored).toMatchObject([
-			{ type: "session", version: 7, id: "good" },
+			{ type: "session", version: CURRENT_SESSION_VERSION, id: "good" },
 			{ id: "one", parentId: null },
 		]);
 		expect(existsSync(backupPath)).toBe(false);

@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { type FileEntry, migrateSessionEntries, parseSessionEntries } from "../../src/core/session-manager.ts";
+import {
+	CURRENT_SESSION_VERSION,
+	type FileEntry,
+	migrateSessionEntries,
+	parseSessionEntries,
+} from "../../src/core/session-manager.ts";
 
 describe("migrateSessionEntries", () => {
 	it("keeps compatibility parsing tolerant of blank and malformed lines", () => {
@@ -34,7 +39,7 @@ describe("migrateSessionEntries", () => {
 		migrateSessionEntries(entries);
 
 		// Header should have the current version after all migrations.
-		expect((entries[0] as any).version).toBe(7);
+		expect((entries[0] as any).version).toBe(CURRENT_SESSION_VERSION);
 
 		// Entries should have id/parentId
 		const msg1 = entries[1] as any;

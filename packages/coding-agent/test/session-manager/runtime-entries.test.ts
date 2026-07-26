@@ -22,7 +22,12 @@ import {
 	parseDurablePromptSubmission,
 } from "../../src/core/runtime-recovery.ts";
 import { getSessionImageDir } from "../../src/core/session-manager.ts";
-import { identifySubmitPromptRequest, type RuntimeControlPayload, SessionManager } from "../../src/index.ts";
+import {
+	CURRENT_SESSION_VERSION,
+	identifySubmitPromptRequest,
+	type RuntimeControlPayload,
+	SessionManager,
+} from "../../src/index.ts";
 
 const timestamp = "2026-01-01T00:00:00.000Z";
 
@@ -90,7 +95,7 @@ describe("SessionManager runtime journal", () => {
 		});
 		const secondId = manager.appendMessage({ role: "user", content: "second", timestamp: 2 });
 
-		expect(manager.getHeader()?.version).toBe(7);
+		expect(manager.getHeader()?.version).toBe(CURRENT_SESSION_VERSION);
 		expect(manager.getLeafId()).toBe(secondId);
 		expect(manager.getEntries().map((entry) => entry.id)).toEqual([firstId, secondId]);
 		expect(manager.getEntry(runtimeId)).toBeUndefined();
@@ -136,7 +141,7 @@ describe("SessionManager runtime journal", () => {
 				),
 			).toBe(false);
 			expect(reopened.getDurableJournalSnapshot()).toEqual(expectedSnapshot);
-			expect(readFileSync(path, "utf8").split("\n")[0]).toContain('"version":7');
+			expect(readFileSync(path, "utf8").split("\n")[0]).toContain(`"version":${CURRENT_SESSION_VERSION}`);
 		} finally {
 			reopened.close();
 		}
@@ -378,15 +383,15 @@ describe("SessionManager runtime journal", () => {
 		writeRecords(readonlyPath, records);
 
 		const migrated = SessionManager.open(writablePath, directory);
-		expect(migrated.getHeader()?.version).toBe(7);
+		expect(migrated.getHeader()?.version).toBe(CURRENT_SESSION_VERSION);
 		migrated.close();
-		expect(readFileSync(writablePath, "utf8").split("\n")[0]).toContain('"version":7');
+		expect(readFileSync(writablePath, "utf8").split("\n")[0]).toContain(`"version":${CURRENT_SESSION_VERSION}`);
 		const backup = readdirSync(directory).find((name) => name.includes(".writable.jsonl.keep-v4."));
 		expect(backup).toMatch(/\.replace\.bak$/);
 		expect(readFileSync(join(directory, backup!), "utf8").split("\n")[0]).toContain('"version":4');
 
 		const readonly = SessionManager.openReadOnly(readonlyPath);
-		expect(readonly.getHeader()?.version).toBe(7);
+		expect(readonly.getHeader()?.version).toBe(CURRENT_SESSION_VERSION);
 		expect(readFileSync(readonlyPath, "utf8").split("\n")[0]).toContain('"version":4');
 		expect(readdirSync(directory).some((name) => name.includes(".readonly.jsonl.keep-v4."))).toBe(false);
 	});

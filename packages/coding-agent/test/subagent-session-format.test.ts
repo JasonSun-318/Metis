@@ -148,8 +148,59 @@ describe("v7 first-class subagent records", () => {
 		const goodPath = join(root, "good.jsonl");
 		writeFileSync(goodPath, `${JSON.stringify(header)}\n`);
 		const manager = SessionManager.open(goodPath);
-		expect(manager.getHeader()?.version).toBe(7);
+		expect(manager.getHeader()?.version).toBe(CURRENT_SESSION_VERSION);
 		manager.close();
-		expect(JSON.parse(readFileSync(goodPath, "utf8").trim()).version).toBe(7);
+		expect(JSON.parse(readFileSync(goodPath, "utf8").trim()).version).toBe(CURRENT_SESSION_VERSION);
+	});
+
+	it("requires v8 for workspace-directory controls and migrates ordinary v7 journals", () => {
+		const root = tempRoot();
+		const header = {
+			type: "session",
+			version: 7,
+			id: "code-session-1",
+			timestamp: new Date(0).toISOString(),
+			cwd: root,
+			mode: "code",
+			cwdOrigin: "user-selected",
+			permissionMode: "ask",
+		};
+		const control = {
+			type: "session_directory_added",
+			id: "directory-1",
+			parentId: null,
+			timestamp: new Date(1).toISOString(),
+			path: "/tmp/external",
+		};
+		const badPath = join(root, "bad-v7-directory.jsonl");
+		writeFileSync(badPath, `${JSON.stringify(header)}\n${JSON.stringify(control)}\n`);
+		expect(() => SessionManager.open(badPath)).toThrow("Directory control entries require a v8 session header");
+
+		const chatPath = join(root, "bad-chat-directory.jsonl");
+		writeFileSync(
+			chatPath,
+			`${JSON.stringify({ ...header, version: 8, mode: "chat" })}\n${JSON.stringify(control)}\n`,
+		);
+		expect(() => SessionManager.open(chatPath)).toThrow("Directory controls are only valid for Code sessions");
+
+		const unknownPath = join(root, "bad-unknown-directory.jsonl");
+		writeFileSync(
+			unknownPath,
+			`${JSON.stringify({ ...header, version: 8 })}\n${JSON.stringify({ ...control, type: "session_directory_changed" })}\n`,
+		);
+		expect(() => SessionManager.open(unknownPath)).toThrow("Unknown session control entry type");
+
+		const relativePath = join(root, "bad-relative-directory.jsonl");
+		writeFileSync(
+			relativePath,
+			`${JSON.stringify({ ...header, version: 8 })}\n${JSON.stringify({ ...control, path: "relative" })}\n`,
+		);
+		expect(() => SessionManager.open(relativePath)).toThrow("Invalid session control entry");
+
+		const goodPath = join(root, "ordinary-v7.jsonl");
+		writeFileSync(goodPath, `${JSON.stringify(header)}\n`);
+		const manager = SessionManager.open(goodPath);
+		expect(manager.getHeader()?.version).toBe(8);
+		manager.close();
 	});
 });

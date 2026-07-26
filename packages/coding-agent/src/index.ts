@@ -307,11 +307,15 @@ export {
 } from "./core/session-attachments.ts";
 export {
 	isSessionControlEntryType,
+	isSessionDirectoryControlEntryType,
 	type PermissionDecision,
 	type PermissionDecisionSource,
 	parseSessionControlEntry,
 	type SessionControlEntry,
 	type SessionControlPayload,
+	type SessionDirectoryAddedEntry,
+	type SessionDirectoryControlEntry,
+	type SessionDirectoryRemovedEntry,
 	type SessionPermissionDecisionEntry,
 	type SessionPermissionsEntry,
 } from "./core/session-control.ts";
@@ -348,6 +352,7 @@ export {
 	type SessionTreeNode,
 	sessionEntryToContextMessages,
 	type ThinkingLevelChangeEntry,
+	type WorkspaceDirectoryChange,
 } from "./core/session-manager.ts";
 export {
 	getManagedWorkspaceDir,

@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { SessionManager } from "../../src/core/session-manager.ts";
+import { CURRENT_SESSION_VERSION, SessionManager } from "../../src/core/session-manager.ts";
 
 const timestamp = "2026-07-17T00:00:00.000Z";
 
@@ -27,7 +27,7 @@ describe("SessionManager permission settings", () => {
 
 		expect(chat.getPermissionSettings()).toEqual({ mode: "ask" });
 		expect(code.getPermissionSettings()).toEqual({ mode: "ask" });
-		expect(chat.getHeader()).toMatchObject({ version: 7, permissionMode: "ask" });
+		expect(chat.getHeader()).toMatchObject({ version: CURRENT_SESSION_VERSION, permissionMode: "ask" });
 		expect(chat.getHeader()).not.toHaveProperty("reviewerEnabled");
 		expect(code.getHeader()).not.toHaveProperty("reviewerEnabled");
 		chat.close();

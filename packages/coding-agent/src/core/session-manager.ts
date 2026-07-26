@@ -14,6 +14,7 @@ import {
 	openSync,
 	readdirSync,
 	readSync,
+	realpathSync,
 	renameSync,
 	rmSync,
 	statSync,
@@ -60,6 +61,7 @@ import {
 import { formatSessionAttachmentDisplayText, getOwnedSessionAttachmentDir } from "./session-attachments.ts";
 import {
 	isSessionControlEntryType,
+	isSessionDirectoryControlEntryType,
 	isSubagentControlEntryType,
 	parseSessionControlEntry,
 	type SessionControlEntry,
@@ -71,7 +73,7 @@ import { CorruptSessionError, openSessionJournal, type SessionJournal } from "./
 import { SessionLease, SessionLeaseError } from "./session-lease.ts";
 import { type CwdOrigin, getOwnedManagedWorkspace, publishManagedWorkspaceCopy } from "./session-workspace.ts";
 
-export const CURRENT_SESSION_VERSION = 7;
+export const CURRENT_SESSION_VERSION = 8;
 
 interface ImageReference {
 	type: "image_ref";
@@ -593,7 +595,7 @@ export interface SessionHeader {
 	mode?: AgentMode;
 	cwdOrigin?: CwdOrigin;
 	permissionMode?: PersistedPermissionMode;
-	/** Legacy v6/v7 field. New writers omit it. */
+	/** Legacy v6-v8 field. New writers omit it. */
 	reviewerEnabled?: boolean;
 	parentSession?: string;
 	subagent?: {
@@ -750,6 +752,11 @@ export interface PermissionDecisionPayload {
 	readonly reason?: string;
 }
 
+export interface WorkspaceDirectoryChange {
+	readonly path: string;
+	readonly changed: boolean;
+}
+
 /** Tree node for getTree() - defensive copy of session structure */
 export interface SessionTreeNode {
 	entry: SessionEntry;
@@ -801,6 +808,8 @@ export type ReadonlySessionManager = Pick<
 	| "getCwdOrigin"
 	| "getPermissionSettings"
 	| "getSubagentsEnabled"
+	| "getAdditionalDirectories"
+	| "getWorkspaceRoots"
 	| "getDurableJournalSnapshot"
 	| "getEntries"
 	| "getTree"
@@ -840,6 +849,8 @@ function readonlySessionSnapshot(manager: SessionManager): ReadonlySessionManage
 		getCwdOrigin: () => manager.getCwdOrigin(),
 		getPermissionSettings: () => manager.getPermissionSettings(),
 		getSubagentsEnabled: () => manager.getSubagentsEnabled(),
+		getAdditionalDirectories: () => manager.getAdditionalDirectories(),
+		getWorkspaceRoots: () => manager.getWorkspaceRoots(),
 		getDurableJournalSnapshot: () => manager.getDurableJournalSnapshot(),
 		getEntries: () => manager.getEntries(),
 		getTree: () => manager.getTree(),
@@ -939,6 +950,13 @@ function migrateV6ToV7(entries: FileEntry[]): void {
 	}
 }
 
+/** Migrate v7 → v8: reserve Code-session additional-directory controls. */
+function migrateV7ToV8(entries: FileEntry[]): void {
+	for (const entry of entries) {
+		if (entry.type === "session") entry.version = 8;
+	}
+}
+
 /**
  * Run all necessary migrations to bring entries to current version.
  * Mutates entries in place. Returns true if any migration was applied.
@@ -963,6 +981,9 @@ function migrateToCurrentVersion(entries: FileEntry[]): boolean {
 	if (version < 7 && entries.some((entry) => isSubagentControlEntryType(entry.type))) {
 		throw new TypeError("Subagent control entries require a v7 session header");
 	}
+	if (version < 8 && entries.some((entry) => isSessionDirectoryControlEntryType(entry.type))) {
+		throw new TypeError("Directory control entries require a v8 session header");
+	}
 
 	if (version >= CURRENT_SESSION_VERSION) return false;
 
@@ -972,6 +993,7 @@ function migrateToCurrentVersion(entries: FileEntry[]): boolean {
 	if (version < 5) migrateV4ToV5(entries);
 	if (version < 6) migrateV5ToV6(entries);
 	if (version < 7) migrateV6ToV7(entries);
+	if (version < 8) migrateV7ToV8(entries);
 
 	return true;
 }
@@ -1328,6 +1350,12 @@ function validateRawSessionRecords(records: readonly unknown[], filePath: string
 			continue;
 		}
 		if (isSessionControlEntryType(type)) {
+			if (isSessionDirectoryControlEntryType(type) && version < 8) {
+				corruptSession(filePath, index + 1, "Directory control entries require a v8 session header");
+			}
+			if (isSessionDirectoryControlEntryType(type) && (header.mode ?? DEFAULT_AGENT_MODE) !== "code") {
+				corruptSession(filePath, index + 1, "Directory controls are only valid for Code sessions");
+			}
 			if (isSubagentControlEntryType(type) && version < 7) {
 				corruptSession(filePath, index + 1, "Subagent control entries require a v7 session header");
 			}
@@ -1338,6 +1366,9 @@ function validateRawSessionRecords(records: readonly unknown[], filePath: string
 			continue;
 		}
 		if (type.startsWith("session_permission")) {
+			corruptSession(filePath, index + 1, `Unknown session control entry type: ${type}`);
+		}
+		if (type.startsWith("session_directory_")) {
 			corruptSession(filePath, index + 1, `Unknown session control entry type: ${type}`);
 		}
 		if (type.startsWith("subagent_")) {
@@ -1754,7 +1785,13 @@ function addCatalogRecord(state: SessionCatalogState, record: unknown, index: nu
 		return;
 	}
 	if (isSessionControlEntryType(type)) {
-		if ((header.version ?? 1) < 6) {
+		if (isSessionDirectoryControlEntryType(type) && (header.version ?? 1) < 8) {
+			corruptSession(filePath, index + 1, "Directory control entries require a v8 session header");
+		}
+		if (isSessionDirectoryControlEntryType(type) && (header.mode ?? DEFAULT_AGENT_MODE) !== "code") {
+			corruptSession(filePath, index + 1, "Directory controls are only valid for Code sessions");
+		}
+		if (!isSessionDirectoryControlEntryType(type) && (header.version ?? 1) < 6) {
 			corruptSession(filePath, index + 1, "Session control entries require a v6 session header");
 		}
 		validateControlGraphEntry(
@@ -1767,6 +1804,9 @@ function addCatalogRecord(state: SessionCatalogState, record: unknown, index: nu
 		return;
 	}
 	if (type.startsWith("session_permission")) {
+		corruptSession(filePath, index + 1, `Unknown session control entry type: ${type}`);
+	}
+	if (type.startsWith("session_directory_")) {
 		corruptSession(filePath, index + 1, `Unknown session control entry type: ${type}`);
 	}
 	const entry = raw as unknown as SessionEntry;
@@ -2012,6 +2052,7 @@ interface ManagedSessionState {
 	cwdOrigin: CwdOrigin;
 	permissionSettings: PermissionSettings;
 	subagentsEnabled: boolean;
+	additionalDirectories: string[];
 	sessionFile: string | undefined;
 	/** Canonical path pinned when a persisted session is opened. */
 	storagePath?: string;
@@ -2046,6 +2087,15 @@ function reduceSubagentsEnabled(entries: readonly FileEntry[]): boolean {
 	return enabled;
 }
 
+function reduceAdditionalDirectories(entries: readonly FileEntry[]): string[] {
+	const directories = new Set<string>();
+	for (const entry of entries.slice(1)) {
+		if (entry.type === "session_directory_added") directories.add(entry.path);
+		if (entry.type === "session_directory_removed") directories.delete(entry.path);
+	}
+	return [...directories];
+}
+
 function buildManagedSessionState(
 	fileEntries: FileEntry[],
 	sessionFile?: string,
@@ -2069,6 +2119,8 @@ function buildManagedSessionState(
 	let leafId: string | null = null;
 	const permissionSettings = reducePermissionSettings(rawFileEntries);
 	const subagentsEnabled = reduceSubagentsEnabled(rawFileEntries);
+	const primaryRoot = canonicalizePathForCreation(header.cwd);
+	const additionalDirectories = reduceAdditionalDirectories(rawFileEntries).filter((path) => path !== primaryRoot);
 	for (const rawEntry of rawFileEntries.slice(1)) {
 		recordIds.add((rawEntry as SessionEntry | RuntimeControlEntry | SessionControlEntry).id);
 	}
@@ -2091,6 +2143,7 @@ function buildManagedSessionState(
 		cwdOrigin: header.cwdOrigin ?? "user-selected",
 		permissionSettings,
 		subagentsEnabled,
+		additionalDirectories,
 		sessionFile,
 		storagePath,
 		toolOutputDir: storagePath ? getSessionAssetDirFromStoragePath(storagePath, "tool-results") : undefined,
@@ -2313,11 +2366,13 @@ export class SessionManager {
 	private permissionSettings: PermissionSettings = defaultPermissionSettings();
 	private permissionSettingsListeners = new Set<(next: PermissionSettings, previous: PermissionSettings) => void>();
 	private subagentsEnabled = false;
+	private additionalDirectories: string[] = [];
 	private sessionFile: string | undefined;
 	private storagePath: string | undefined;
 	private toolOutputDir: string | undefined;
 	private sessionDir: string;
 	private cwd: string;
+	private readonly primaryWorkspaceRoot: string;
 	private persist: boolean;
 	private rawFileEntries: FileEntry[] = [];
 	private fileEntries: FileEntry[] = [];
@@ -2342,6 +2397,7 @@ export class SessionManager {
 		} = {},
 	) {
 		this.cwd = resolvePath(cwd);
+		this.primaryWorkspaceRoot = canonicalizePathForCreation(this.cwd);
 		this.sessionDir = normalizePath(sessionDir);
 		this.persist = persist;
 		if (persist && this.sessionDir) ensureDirectoryDurablySync(this.sessionDir);
@@ -2447,6 +2503,7 @@ export class SessionManager {
 		this.cwdOrigin = state.cwdOrigin;
 		this.permissionSettings = state.permissionSettings;
 		this.subagentsEnabled = state.subagentsEnabled;
+		this.additionalDirectories = state.additionalDirectories.filter((path) => path !== this.primaryWorkspaceRoot);
 		this.sessionFile = state.sessionFile;
 		this.storagePath = state.storagePath;
 		this.toolOutputDir = state.toolOutputDir;
@@ -2468,6 +2525,7 @@ export class SessionManager {
 			cwdOrigin: this.cwdOrigin,
 			permissionSettings: this.permissionSettings,
 			subagentsEnabled: this.subagentsEnabled,
+			additionalDirectories: this.additionalDirectories,
 			sessionFile: this.sessionFile,
 			storagePath: this.storagePath,
 			toolOutputDir: this.toolOutputDir,
@@ -2510,6 +2568,53 @@ export class SessionManager {
 
 	getCwd(): string {
 		return this.cwd;
+	}
+
+	getAdditionalDirectories(): readonly string[] {
+		return [...this.additionalDirectories];
+	}
+
+	getWorkspaceRoots(): readonly string[] {
+		return [this.primaryWorkspaceRoot, ...this.additionalDirectories];
+	}
+
+	private _assertCodeWorkspaceDirectories(): void {
+		if (this.getMode() !== "code") throw new Error("Additional directories are only available in Code mode");
+	}
+
+	private _validateDirectoryInput(input: string): string {
+		if (typeof input !== "string" || !input.trim()) throw new TypeError("Directory path must not be empty");
+		if (/[\u0000-\u001f\u007f-\u009f]/u.test(input))
+			throw new TypeError("Directory path contains control characters");
+		return resolvePath(input, this.cwd, { trim: true });
+	}
+
+	addWorkspaceDirectory(input: string): WorkspaceDirectoryChange {
+		this._assertCodeWorkspaceDirectories();
+		const resolved = this._validateDirectoryInput(input);
+		let path: string;
+		try {
+			path = realpathSync(resolved);
+		} catch {
+			throw new Error(`Directory does not exist: ${resolved}`);
+		}
+		if (!statSync(path).isDirectory()) throw new Error(`Path is not a directory: ${resolved}`);
+		if (path === this.primaryWorkspaceRoot || this.additionalDirectories.includes(path)) {
+			return { path, changed: false };
+		}
+		this._appendSessionControl({ type: "session_directory_added", path });
+		this.additionalDirectories = [...this.additionalDirectories, path];
+		return { path, changed: true };
+	}
+
+	removeWorkspaceDirectory(input: string): WorkspaceDirectoryChange {
+		this._assertCodeWorkspaceDirectories();
+		const path = canonicalizePathForCreation(this._validateDirectoryInput(input));
+		if (path === this.primaryWorkspaceRoot) throw new Error("Primary working directory cannot be removed");
+		if (!this.additionalDirectories.includes(path)) return { path, changed: false };
+		this._appendSessionControl({ type: "session_directory_removed", path });
+		this.additionalDirectories = this.additionalDirectories.filter((candidate) => candidate !== path);
+		return { path, changed: true };
 	}
 
 	getSessionDir(): string {
@@ -3508,7 +3613,7 @@ export class SessionManager {
 			});
 		}
 		const source = readSessionRecordsReadOnly(sourceStoragePath);
-		const records = source.records;
+		const records = source.records.filter((entry) => !isSessionDirectoryControlEntryType(entry.type));
 		const header = records[0] as SessionHeader;
 		const mode =
 			options.destinationMode === "create-exclusive"

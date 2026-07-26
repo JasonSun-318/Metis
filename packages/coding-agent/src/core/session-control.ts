@@ -12,7 +12,7 @@ interface SessionControlEntryBase {
 export interface SessionPermissionsEntry extends SessionControlEntryBase {
 	readonly type: "session_permissions";
 	readonly permissionMode: PersistedPermissionMode;
-	/** Legacy v6/v7 field. New writers omit it. */
+	/** Legacy v6-v8 field. New writers omit it. */
 	readonly reviewerEnabled?: boolean;
 }
 
@@ -27,6 +27,18 @@ export interface SessionPermissionDecisionEntry extends SessionControlEntryBase 
 	readonly decision: PermissionDecision;
 	readonly reason: string;
 }
+
+export interface SessionDirectoryAddedEntry extends SessionControlEntryBase {
+	readonly type: "session_directory_added";
+	readonly path: string;
+}
+
+export interface SessionDirectoryRemovedEntry extends SessionControlEntryBase {
+	readonly type: "session_directory_removed";
+	readonly path: string;
+}
+
+export type SessionDirectoryControlEntry = SessionDirectoryAddedEntry | SessionDirectoryRemovedEntry;
 
 export interface SubagentCreatedEntry extends SessionControlEntryBase {
 	readonly type: "subagent_created";
@@ -73,7 +85,11 @@ export type SubagentControlEntry =
 	| SubagentClosedEntry
 	| SubagentModeChangeEntry;
 
-export type SessionControlEntry = SessionPermissionsEntry | SessionPermissionDecisionEntry | SubagentControlEntry;
+export type SessionControlEntry =
+	| SessionPermissionsEntry
+	| SessionPermissionDecisionEntry
+	| SessionDirectoryControlEntry
+	| SubagentControlEntry;
 
 export type SessionControlPayload = SessionControlEntry extends infer Entry
 	? Entry extends SessionControlEntry
@@ -324,8 +340,17 @@ export function isSubagentControlEntryType(type: unknown): type is SubagentContr
 	);
 }
 
+export function isSessionDirectoryControlEntryType(type: unknown): type is SessionDirectoryControlEntry["type"] {
+	return type === "session_directory_added" || type === "session_directory_removed";
+}
+
 export function isSessionControlEntryType(type: unknown): type is SessionControlEntry["type"] {
-	return type === "session_permissions" || type === "session_permission_decision" || isSubagentControlEntryType(type);
+	return (
+		type === "session_permissions" ||
+		type === "session_permission_decision" ||
+		isSessionDirectoryControlEntryType(type) ||
+		isSubagentControlEntryType(type)
+	);
 }
 
 export function parseSessionControlEntry(value: unknown): SessionControlEntry {
@@ -363,6 +388,14 @@ export function parseSessionControlEntry(value: unknown): SessionControlEntry {
 			decision,
 			reason: requiredString(fields, "reason"),
 		};
+	}
+	if (isSessionDirectoryControlEntryType(type)) {
+		assertOnlyFields(fields, [...baseFields, "path"]);
+		const path = requiredString(fields, "path", { maxBytes: 32 * 1024, noControls: true });
+		if (!isAbsolute(path) || normalize(path) !== path) {
+			invalid("Session control entry.path must be a canonical absolute path");
+		}
+		return { type, ...parseBase(fields), path };
 	}
 	if (type === "subagent_created") {
 		assertOnlyFields(fields, [...baseFields, "config"]);

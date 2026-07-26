@@ -15,6 +15,7 @@ import { tmpdir } from "os";
 import { basename, join } from "path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
+	CURRENT_SESSION_VERSION,
 	findMostRecentSession,
 	getSessionImageDir,
 	getSessionToolOutputDir,
@@ -290,7 +291,7 @@ describe("loadEntriesFromFile", () => {
 		SessionManager.open(file, tempDir).close();
 
 		const raw = readFileSync(file, "utf8");
-		expect(raw).toContain('"version":7');
+		expect(raw).toContain(`"version":${CURRENT_SESSION_VERSION}`);
 		expect(raw).toContain('"type":"image_ref"');
 		expect(raw).not.toContain(data);
 		const backup = readdirSync(tempDir).find((name) => name.includes(".keep-v3."));
