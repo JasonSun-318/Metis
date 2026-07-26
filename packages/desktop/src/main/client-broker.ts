@@ -18,6 +18,7 @@ import {
 	DESKTOP_EVENT_CHANNEL,
 	DESKTOP_IPC_CHANNELS,
 	type DesktopApiEvent,
+	type DesktopAttachmentSelection,
 	type SupervisorView,
 	validateInteractionResponseInput,
 } from "../shared/desktop-api.ts";
@@ -35,6 +36,7 @@ interface ClientBrokerOptions {
 	readonly ipcMain: Pick<IpcMain, "handle" | "removeHandler">;
 	readonly supervisor: BrokerSupervisor;
 	readonly selectProjectFolder?: () => Promise<string | null>;
+	readonly selectAttachmentFiles?: () => Promise<DesktopAttachmentSelection[]>;
 }
 
 type InvokeHandler = (event: IpcMainInvokeEvent, ...args: unknown[]) => Promise<unknown>;
@@ -74,6 +76,7 @@ export class ClientBroker {
 	private readonly ipcMain: Pick<IpcMain, "handle" | "removeHandler">;
 	private readonly supervisor: BrokerSupervisor;
 	private readonly selectProjectFolder: () => Promise<string | null>;
+	private readonly selectAttachmentFiles: () => Promise<DesktopAttachmentSelection[]>;
 	private readonly pendingInteractions = new Map<string, PendingInteraction>();
 	private readonly subscribedSessions = new Set<string>();
 	private subscriptionMutation = Promise.resolve();
@@ -87,6 +90,7 @@ export class ClientBroker {
 		this.ipcMain = options.ipcMain;
 		this.supervisor = options.supervisor;
 		this.selectProjectFolder = options.selectProjectFolder ?? (async () => null);
+		this.selectAttachmentFiles = options.selectAttachmentFiles ?? (async () => []);
 		this.registerHandlers();
 		this.removeSupervisorListeners = [
 			this.supervisor.onState((view) => {
@@ -142,6 +146,9 @@ export class ClientBroker {
 		this.register(DESKTOP_IPC_CHANNELS.listSessions, 1, async (_event, [input]) =>
 			this.clientCall("session/list", input),
 		);
+		this.register(DESKTOP_IPC_CHANNELS.listSkills, 1, async (_event, [input]) =>
+			this.clientCall("skill/list", input),
+		);
 		this.register(DESKTOP_IPC_CHANNELS.createSession, 1, async (_event, [input]) =>
 			this.clientCall("session/create", input),
 		);
@@ -180,6 +187,7 @@ export class ClientBroker {
 			this.respondToInteraction(input);
 		});
 		this.register(DESKTOP_IPC_CHANNELS.selectProjectFolder, 0, async () => this.selectProjectFolder());
+		this.register(DESKTOP_IPC_CHANNELS.selectAttachmentFiles, 0, async () => this.selectAttachmentFiles());
 		this.register(DESKTOP_IPC_CHANNELS.getServerState, 0, async () => this.supervisor.view());
 		this.register(DESKTOP_IPC_CHANNELS.retryServer, 0, async () => {
 			await this.supervisor.retry();

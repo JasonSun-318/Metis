@@ -21,6 +21,8 @@ function invoke<Method extends Exclude<ClientRequestMethod, "initialize">>(
 const api = {
 	listSessions: (input: ClientParams<"session/list"> = {}) =>
 		invoke(DESKTOP_IPC_CHANNELS.listSessions, "session/list", input) as ReturnType<ArcMindDesktopApi["listSessions"]>,
+	listSkills: (input: ClientParams<"skill/list">) =>
+		invoke(DESKTOP_IPC_CHANNELS.listSkills, "skill/list", input) as ReturnType<ArcMindDesktopApi["listSkills"]>,
 	createSession: (input: ClientParams<"session/create">) =>
 		invoke(DESKTOP_IPC_CHANNELS.createSession, "session/create", input) as ReturnType<
 			ArcMindDesktopApi["createSession"]
@@ -49,6 +51,7 @@ const api = {
 		await ipcRenderer.invoke(DESKTOP_IPC_CHANNELS.respondToInteraction, validateInteractionResponseInput(input));
 	},
 	selectProjectFolder: () => ipcRenderer.invoke(DESKTOP_IPC_CHANNELS.selectProjectFolder),
+	selectAttachmentFiles: () => ipcRenderer.invoke(DESKTOP_IPC_CHANNELS.selectAttachmentFiles),
 	subscribe: (listener: (event: DesktopApiEvent) => void) => {
 		if (typeof listener !== "function") throw new TypeError("ArcMind event listener must be a function");
 		const onEvent = (_event: IpcRendererEvent, value: unknown) => {

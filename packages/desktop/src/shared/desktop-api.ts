@@ -31,6 +31,7 @@ export type DesktopApiEvent =
 
 export const DESKTOP_IPC_CHANNELS = {
 	listSessions: "arcmind:list-sessions",
+	listSkills: "arcmind:list-skills",
 	createSession: "arcmind:create-session",
 	openSession: "arcmind:open-session",
 	readItems: "arcmind:read-items",
@@ -41,6 +42,7 @@ export const DESKTOP_IPC_CHANNELS = {
 	interruptTurn: "arcmind:interrupt-turn",
 	respondToInteraction: "arcmind:respond-to-interaction",
 	selectProjectFolder: "arcmind:select-project-folder",
+	selectAttachmentFiles: "arcmind:select-attachment-files",
 	getServerState: "arcmind:get-server-state",
 	retryServer: "arcmind:retry-server",
 	subscribe: "arcmind:subscribe",
@@ -48,8 +50,14 @@ export const DESKTOP_IPC_CHANNELS = {
 
 export const DESKTOP_EVENT_CHANNEL = "arcmind:event";
 
+export interface DesktopAttachmentSelection {
+	readonly path: string;
+	readonly name: string;
+}
+
 export interface ArcMindDesktopApi {
 	listSessions(input?: ClientParams<"session/list">): Promise<ClientResult<"session/list">>;
+	listSkills(input: ClientParams<"skill/list">): Promise<ClientResult<"skill/list">>;
 	createSession(input: ClientParams<"session/create">): Promise<ClientResult<"session/create">>;
 	openSession(input: ClientParams<"session/open">): Promise<ClientResult<"session/subscribe">["snapshot"]>;
 	readItems(input: ClientParams<"session/readItems">): Promise<ClientResult<"session/readItems">>;
@@ -62,6 +70,7 @@ export interface ArcMindDesktopApi {
 	interruptTurn(input: ClientParams<"turn/interrupt">): Promise<ClientResult<"turn/interrupt">>;
 	respondToInteraction(input: InteractionResponseInput): Promise<void>;
 	selectProjectFolder(): Promise<string | null>;
+	selectAttachmentFiles(): Promise<DesktopAttachmentSelection[]>;
 	subscribe(listener: (event: DesktopApiEvent) => void): () => void;
 	getServerState(): Promise<SupervisorView>;
 	retryServer(): Promise<void>;

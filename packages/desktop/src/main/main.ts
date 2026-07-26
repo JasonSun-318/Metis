@@ -1,4 +1,4 @@
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import {
 	app,
 	autoUpdater,
@@ -64,6 +64,16 @@ async function launch(): Promise<void> {
 				? await dialog.showOpenDialog(mainWindow, options)
 				: await dialog.showOpenDialog(options);
 			return result.canceled ? null : (result.filePaths[0] ?? null);
+		},
+		selectAttachmentFiles: async () => {
+			const options: OpenDialogOptions = {
+				title: "Add files or photos",
+				properties: ["openFile", "multiSelections"],
+			};
+			const result = mainWindow
+				? await dialog.showOpenDialog(mainWindow, options)
+				: await dialog.showOpenDialog(options);
+			return result.canceled ? [] : result.filePaths.map((path) => ({ path, name: basename(path) }));
 		},
 	});
 	const openMainWindow = async (): Promise<void> => {

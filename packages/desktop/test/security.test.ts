@@ -191,13 +191,17 @@ describe("desktop trust boundaries", () => {
 		supervisor.request.mockImplementation(async (request) => ({
 			jsonrpc: "2.0",
 			id: request.id,
-			result: { sessions: [], nextAfterSessionId: null },
+			result:
+				request.method === "skill/list"
+					? { skills: [{ name: "pdf", description: "Read PDF files" }] }
+					: { sessions: [], nextAfterSessionId: null },
 		}));
 		const broker = new ClientBroker({ ipcMain: ipcMain as never, supervisor });
 		const webContents = new FakeWebContents();
 		broker.attach({ webContents: webContents as never });
 		const event = { sender: webContents, senderFrame: webContents.mainFrame };
 		const listSessions = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.listSessions)!;
+		const listSkills = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.listSkills)!;
 
 		await expect(listSessions(event, { limit: 0 })).rejects.toThrow("Invalid session/list params");
 		expect(supervisor.request).not.toHaveBeenCalled();
@@ -207,6 +211,15 @@ describe("desktop trust boundaries", () => {
 		});
 		expect(supervisor.request).toHaveBeenCalledWith(
 			expect.objectContaining({ method: "session/list", params: { limit: 1 } }),
+		);
+		await expect(listSkills(event, { sessionId: "session", cwd: "/tmp" })).rejects.toThrow(
+			"Invalid skill/list params",
+		);
+		await expect(listSkills(event, { cwd: null })).resolves.toEqual({
+			skills: [{ name: "pdf", description: "Read PDF files" }],
+		});
+		expect(supervisor.request).toHaveBeenCalledWith(
+			expect.objectContaining({ method: "skill/list", params: { cwd: null } }),
 		);
 		broker.dispose();
 	});
@@ -424,6 +437,22 @@ describe("desktop trust boundaries", () => {
 
 		await expect(select({ sender: webContents, senderFrame: webContents.mainFrame })).resolves.toBe("/tmp/project");
 		expect(selectProjectFolder).toHaveBeenCalledOnce();
+		broker.dispose();
+	});
+
+	it("returns only selected files through the guarded native file capability", async () => {
+		const ipcMain = new FakeIpcMain();
+		const { supervisor } = supervisorHarness();
+		const selectAttachmentFiles = vi.fn().mockResolvedValue([{ path: "/tmp/report.pdf", name: "report.pdf" }]);
+		const broker = new ClientBroker({ ipcMain: ipcMain as never, supervisor, selectAttachmentFiles });
+		const webContents = new FakeWebContents();
+		broker.attach({ webContents: webContents as never });
+		const event = { sender: webContents, senderFrame: webContents.mainFrame };
+
+		await expect(ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.selectAttachmentFiles)!(event)).resolves.toEqual([
+			{ path: "/tmp/report.pdf", name: "report.pdf" },
+		]);
+		expect(selectAttachmentFiles).toHaveBeenCalledOnce();
 		broker.dispose();
 	});
 
