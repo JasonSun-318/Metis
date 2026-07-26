@@ -36,3 +36,36 @@ Focused composer comparison evidence: `/Users/ent/ArcMind/packages/desktop/test-
 - The final package executable was verified as native macOS ARM64.
 
 final result: passed
+
+## Composer add menu follow-up
+
+Source visual truth: `/var/folders/l4/qhmjdv2d42b6wx8xm8t18cb80000gn/T/codex-clipboard-36459ce7-e608-470a-bc16-b7142663e93d.png`
+
+Implementation screenshot: `/tmp/arcmind-final-submenu-open.png`
+
+Viewport and normalization: the source is 1560 × 858 pixels and the implementation capture is 2880 × 1800 pixels from a 1440 × 900 Retina desktop. The menus were compared as equal-density focused regions: 450 × 170 pixels for the primary menu and 388 × 360 pixels for the skills menu.
+
+State: packaged ARM64 Electron app, Chat composer open, primary menu open, Skills active, and the installed-skills submenu open with pointer interaction.
+
+Full-view evidence: `/tmp/arcmind-final-submenu-open.png`
+
+Focused primary-menu comparison: `/tmp/arcmind-menu-final-compare.png`
+
+Focused skills-menu comparison: `/tmp/arcmind-submenu-final-compare.png`
+
+### Findings
+
+- No actionable P0, P1, or P2 differences remain in the requested menu surfaces.
+- Fonts and typography: menu labels now use an explicit 16px system sans, 400 weight, 1.25 line-height, and bright foreground instead of inheriting the composer's 11px muted style. Shortcut text remains muted and right-aligned.
+- Spacing and layout rhythm: row centers match the reference's 64-pixel backing-pixel cadence; reduced outer padding aligns the divider and active-row position. Both menus keep the reference radius, border, active fill, and layered shadow shape.
+- Colors and visual tokens: menu `#383835`, active row `#42423f`, bright labels, muted caret/shortcut, border opacity, and shadow layers visibly track the reference.
+- Image quality and asset fidelity: the add, paperclip, scroll, caret, and briefcase marks are real Phosphor icons. No text glyph or handmade SVG substitutes are used for icons.
+- Copy and content: the primary menu contains only the approved Add files or photos and Skills entries. The submenu uses ArcMind's live installed skills and intentionally omits Browse skills, Add connector, and Add plugins.
+
+### Comparison history
+
+1. P1 — menu labels inherited the composer's 11px muted toolbar style, making them visibly too small and grey. Fixed with an explicit 16px, 400-weight, bright menu type rule. Post-fix evidence: `/tmp/arcmind-menu-final-compare.png`.
+2. P2 — menu rows lacked the reference divider and the active Skills state. Added the separator and persistent active fill while the submenu is open. Post-fix evidence: `/tmp/arcmind-menu-final-compare.png`.
+3. P2 — icon scale, outer padding, and the missing Command-U affordance left the menu visibly different. Matched icon scale and padding, added `⌘U`, and wired it to the real file picker. Post-fix evidence: `/tmp/arcmind-menu-final-compare.png` and `/tmp/arcmind-submenu-final-compare.png`.
+
+final result: passed

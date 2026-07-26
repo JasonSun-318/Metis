@@ -48,7 +48,7 @@ function snapshot(summary: SessionSummary): SessionSnapshot {
 }
 
 function button(container: HTMLElement, label: string): HTMLButtonElement {
-	const match = [...container.querySelectorAll("button")].find((candidate) => candidate.textContent?.trim() === label);
+	const match = [...container.querySelectorAll("button")].find((candidate) => candidate.getAttribute("aria-label") === label || candidate.textContent?.trim() === label);
 	if (!match) throw new Error(`Missing button: ${label}`);
 	return match;
 }
@@ -246,11 +246,19 @@ describe("Chat desktop shell", () => {
 		await flush();
 
 		expect(container.querySelector('[aria-label="Add folder (coming soon)"]')).toBeNull();
+		await act(async () => document.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, code: "KeyU", metaKey: true })));
+		await flush();
+		expect(api.selectAttachmentFiles).toHaveBeenCalledTimes(1);
 		await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Add to message"]')!.click());
+		expect(container.querySelector(".composer-add-menu > .composer-menu-separator")).not.toBeNull();
+		expect(container.querySelector(".composer-menu-shortcut")?.textContent).toBe("⌘U");
 		await act(async () => button(container.querySelector<HTMLElement>(".composer-add-menu")!, "Add files or photos").click());
 		await flush();
+		expect(api.selectAttachmentFiles).toHaveBeenCalledTimes(2);
 		await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Add to message"]')!.click());
-		await act(async () => button(container.querySelector<HTMLElement>(".composer-add-menu")!, "Skills").click());
+		const skillsButton = button(container.querySelector<HTMLElement>(".composer-add-menu")!, "Skills");
+		await act(async () => skillsButton.click());
+		expect(skillsButton.classList.contains("is-active")).toBe(true);
 		await act(async () => button(container.querySelector<HTMLElement>(".composer-skill-menu")!, "pdf").click());
 
 		expect(container.textContent).toContain("report.pdf");

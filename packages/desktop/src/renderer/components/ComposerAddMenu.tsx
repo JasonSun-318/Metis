@@ -1,5 +1,5 @@
 import type { SkillSummaryView } from "@arcmind/app-protocol";
-import { Briefcase, CaretRight, Paperclip, Scroll } from "@phosphor-icons/react";
+import { Briefcase, CaretRight, Paperclip, Plus, Scroll } from "@phosphor-icons/react";
 import { useEffect, useRef, useState } from "react";
 
 interface ComposerAddMenuProps {
@@ -46,6 +46,18 @@ export function ComposerAddMenu({ disabled, skills, onAddFiles, onManageSkills, 
 		};
 	}, [open]);
 
+	useEffect(() => {
+		if (disabled) return;
+		const onKeyDown = (event: KeyboardEvent) => {
+			if (!event.metaKey || event.code !== "KeyU") return;
+			event.preventDefault();
+			close();
+			onAddFiles();
+		};
+		document.addEventListener("keydown", onKeyDown);
+		return () => document.removeEventListener("keydown", onKeyDown);
+	}, [disabled, onAddFiles]);
+
 	return (
 		<div className="composer-add" ref={rootRef}>
 			<button
@@ -61,17 +73,25 @@ export function ComposerAddMenu({ disabled, skills, onAddFiles, onManageSkills, 
 				ref={triggerRef}
 				type="button"
 			>
-				<span aria-hidden="true" className="composer-add-glyph">+</span>
+				<Plus aria-hidden="true" size={20} />
 			</button>
 			{open && (
 				<div className="composer-add-popover">
 					<div className="composer-add-menu" role="menu">
-						<button onClick={() => { close(); onAddFiles(); }} role="menuitem" type="button">
-							<Paperclip aria-hidden="true" size={16} />
+						<button aria-label="Add files or photos" onClick={() => { close(); onAddFiles(); }} role="menuitem" type="button">
+							<Paperclip aria-hidden="true" size={18} />
 							<span>Add files or photos</span>
+							<span aria-hidden="true" className="composer-menu-shortcut">⌘U</span>
 						</button>
-						<button aria-expanded={skillsOpen} onClick={() => setSkillsOpen((value) => !value)} role="menuitem" type="button">
-							<Scroll aria-hidden="true" size={16} />
+						<div className="composer-menu-separator" role="separator" />
+						<button
+							aria-expanded={skillsOpen}
+							className={skillsOpen ? "is-active" : undefined}
+							onClick={() => setSkillsOpen((value) => !value)}
+							role="menuitem"
+							type="button"
+						>
+							<Scroll aria-hidden="true" size={18} />
 							<span>Skills</span>
 							<CaretRight aria-hidden="true" className="composer-menu-caret" size={14} />
 						</button>
@@ -79,13 +99,13 @@ export function ComposerAddMenu({ disabled, skills, onAddFiles, onManageSkills, 
 							<div className="composer-skill-menu" role="menu">
 								{skills.map((skill) => (
 									<button key={skill.name} onClick={() => { close(); onSelectSkill(skill); }} role="menuitem" type="button">
-										<Scroll aria-hidden="true" size={15} />
+										<Scroll aria-hidden="true" size={18} />
 										<span>{skill.name}</span>
 									</button>
 								))}
 								<div className="composer-menu-separator" role="separator" />
 								<button onClick={() => { close(); onManageSkills(); }} role="menuitem" type="button">
-									<Briefcase aria-hidden="true" size={15} />
+									<Briefcase aria-hidden="true" size={18} />
 									<span>Manage skills</span>
 								</button>
 							</div>

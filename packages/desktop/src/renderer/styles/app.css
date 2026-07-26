@@ -186,21 +186,24 @@ textarea { resize: none; }
 .composer-leading, .composer-trailing { display: flex; align-items: center; gap: 7px; }
 .composer-plain-button { display: grid; width: 30px; height: 30px; place-items: center; border-radius: 50%; color: var(--text); transition: background-color 140ms ease, box-shadow 140ms ease, transform 140ms ease; }
 .composer-add { position: relative; }
-.composer-add-glyph { font-size: 22px; font-weight: 300; line-height: 1; }
-.composer-add-popover { position: absolute; z-index: 12; bottom: 42px; left: 0; }
-.composer-add-menu, .composer-skill-menu { display: grid; min-width: 226px; gap: 2px; border: 1px solid var(--border-strong); border-radius: 12px; background: var(--panel-raised); box-shadow: 0 16px 38px rgb(0 0 0 / 34%); padding: 6px; }
+.composer-add > .composer-plain-button { width: 32px; height: 32px; border-radius: 8px; background: #343532; box-shadow: 0 3px 9px rgb(0 0 0 / 18%), inset 0 1px rgb(255 255 255 / 4%); }
+.composer-add-popover { position: absolute; z-index: 12; bottom: 36px; left: 0; }
+.composer-add-menu, .composer-skill-menu { display: grid; min-width: 226px; gap: 2px; border: 1px solid rgb(255 255 255 / 16%); border-radius: 12px; background: #383835; box-shadow: 0 2px 4px rgb(0 0 0 / 24%), 0 14px 34px rgb(0 0 0 / 26%), 0 30px 64px rgb(0 0 0 / 18%), inset 0 1px rgb(255 255 255 / 4%); padding: 4px; }
 .composer-add-menu { position: relative; }
-.composer-skill-menu { position: absolute; bottom: 0; left: calc(100% + 6px); min-width: 194px; }
-.composer-add-menu button, .composer-skill-menu button { display: flex; min-height: 34px; align-items: center; gap: 9px; border-radius: 8px; color: var(--muted); padding: 0 9px; text-align: left; white-space: nowrap; }
-.composer-add-menu button:hover, .composer-add-menu button:focus-visible, .composer-skill-menu button:hover, .composer-skill-menu button:focus-visible { background: var(--panel-hover); box-shadow: 0 5px 14px rgb(0 0 0 / 16%); color: var(--text); }
-.composer-menu-caret { margin-left: auto; }
-.composer-menu-separator { height: 1px; background: var(--border-strong); margin: 4px 5px; }
+.composer-skill-menu { position: absolute; bottom: 0; left: calc(100% + 3px); min-width: 194px; }
+.composer-add-menu button, .composer-skill-menu button { display: flex; min-height: 30px; align-items: center; gap: 9px; border-radius: 8px; color: var(--text); padding: 0 9px; font-size: 16px; font-weight: 400; line-height: 1.25; text-align: left; white-space: nowrap; }
+.composer-add-menu button:hover, .composer-add-menu button:focus-visible, .composer-add-menu button.is-active, .composer-skill-menu button:hover, .composer-skill-menu button:focus-visible { background: #42423f; box-shadow: 0 4px 12px rgb(0 0 0 / 18%), inset 0 1px rgb(255 255 255 / 4%); color: #f6f5f0; }
+.composer-add-menu button > svg, .composer-skill-menu button > svg { flex: none; }
+.composer-menu-caret { margin-left: auto; color: #aaa8a2; }
+.composer-menu-shortcut { margin-left: auto; color: #aaa8a2; }
+.composer-menu-separator { height: 1px; background: var(--border-strong); margin: 3px 5px; }
 .composer-chips { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 4px 4px; }
 .composer-chips button { display: flex; max-width: 230px; align-items: center; gap: 6px; border: 1px solid var(--border); border-radius: 9px; background: #252624; color: #deddd8; padding: 5px 8px; }
 .composer-chips button:hover { background: #30312e; }
 .composer-chips span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .composer-icon-button { display: grid; width: 32px; height: 32px; place-items: center; border-radius: 50%; padding: 0; transition: background-color 140ms ease, box-shadow 140ms ease, transform 140ms ease; }
 .composer-plain-button:hover:not(:disabled), .composer-icon-button:hover:not(:disabled) { box-shadow: 0 5px 13px rgb(0 0 0 / 20%); transform: translateY(-1px); }
+.composer-add > .composer-plain-button:hover:not(:disabled), .composer-add > .composer-plain-button[aria-expanded="true"] { background: #3d3e3a; box-shadow: 0 5px 14px rgb(0 0 0 / 24%), inset 0 1px rgb(255 255 255 / 5%); transform: none; }
 .composer-send { background: #f3f2ee; color: #252523; }
 .composer-send { border-radius: 9px; }
 .composer-send:hover:not(:disabled) { background: #fff; box-shadow: 0 6px 16px rgb(0 0 0 / 30%); }
