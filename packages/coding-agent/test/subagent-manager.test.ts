@@ -159,7 +159,7 @@ function setup(options: SetupOptions = {}): Harness {
 	const manager = new SubagentManager({
 		parentSessionManager: parentManager,
 		agentDir,
-		workspaceRoots: [cwd],
+		getWorkspaceRoots: () => parentManager.getWorkspaceRoots(),
 		scheduler: options.scheduler ?? new SubagentScheduler(4, 4),
 		createId: () => `child-session-${++sequence}`,
 		onPermissionRequest: options.onPermissionRequest,
@@ -594,6 +594,28 @@ describe("SubagentManager", () => {
 		expect(first).not.toHaveProperty("writePaths");
 		expect(first).not.toHaveProperty("overlaps");
 		await vi.waitFor(() => expect(harness.runtimes).toHaveLength(1));
+		harness.runtimes[0]!.session.settle();
+	});
+
+	it("uses the current parent roots for each future child cwd", async () => {
+		const harness = setup();
+		const external = join(harness.root, "external");
+		mkdirSync(external);
+
+		await expect(
+			harness.manager.spawn({ name: "before", task: "work", tools: ["read"], cwd: external }),
+		).rejects.toThrow("inside the parent workspace");
+
+		harness.parentManager.addWorkspaceDirectory(external);
+		const child = await harness.manager.spawn({ name: "after", task: "work", tools: ["read"], cwd: external });
+		expect(child.cwd).toBe(realpathSync(external));
+		await vi.waitFor(() => expect(harness.runtimes).toHaveLength(1));
+
+		harness.parentManager.removeWorkspaceDirectory(external);
+		expect(harness.manager.listSummaries()[0]?.configuration?.cwd).toBe(realpathSync(external));
+		await expect(
+			harness.manager.spawn({ name: "removed", task: "work", tools: ["read"], cwd: external }),
+		).rejects.toThrow("inside the parent workspace");
 		harness.runtimes[0]!.session.settle();
 	});
 

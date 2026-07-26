@@ -123,7 +123,7 @@ describe("SubagentStore", () => {
 		new SubagentManager({
 			parentSessionManager: parent,
 			agentDir,
-			workspaceRoots: [join(root, "project")],
+			getWorkspaceRoots: () => parent.getWorkspaceRoots(),
 			store,
 			createChildRuntime: async () => {
 				throw new Error("Recovery must not start child work");

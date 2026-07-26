@@ -319,7 +319,7 @@ export class AgentSessionRuntime {
 		const manager = new SubagentManager({
 			parentSessionManager: session.sessionManager,
 			agentDir: this._services.agentDir,
-			workspaceRoots: [session.sessionManager.getCwd()],
+			getWorkspaceRoots: () => session.sessionManager.getWorkspaceRoots(),
 			onPermissionRequest: (request) => session.requestPermissionApproval(request),
 			createChildRuntime: async ({ config, permissionModeCeiling, sessionManager, onPermissionRequest }) => {
 				const recovered = recoverSessionManager(sessionManager);

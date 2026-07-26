@@ -114,7 +114,7 @@ export type CreateChildRuntime = (input: ChildRuntimeFactoryInput) => Promise<Ag
 export interface SubagentManagerOptions {
 	readonly parentSessionManager: SessionManager;
 	readonly agentDir: string;
-	readonly workspaceRoots: readonly string[];
+	readonly getWorkspaceRoots: () => readonly string[];
 	readonly scheduler?: SubagentSchedulerApi;
 	readonly store?: SubagentStoreApi;
 	readonly createChildRuntime: CreateChildRuntime;
@@ -265,7 +265,7 @@ function summaryFromRecord(record: SubagentDiskRecord, permissionMode?: Permissi
 export class SubagentManager implements SubagentManagerApi {
 	private readonly parentSessionManager: SessionManager;
 	private readonly agentDir: string;
-	private readonly workspaceRoots: readonly string[];
+	private readonly getWorkspaceRoots: () => readonly string[];
 	private readonly scheduler: SubagentSchedulerApi;
 	private readonly store: SubagentStoreApi;
 	private readonly createChildRuntime: CreateChildRuntime;
@@ -290,7 +290,7 @@ export class SubagentManager implements SubagentManagerApi {
 	constructor(options: SubagentManagerOptions) {
 		this.parentSessionManager = options.parentSessionManager;
 		this.agentDir = options.agentDir;
-		this.workspaceRoots = options.workspaceRoots.map((root) => realpathSync(root));
+		this.getWorkspaceRoots = options.getWorkspaceRoots;
 		this.scheduler = options.scheduler ?? defaultSubagentScheduler;
 		this.store = options.store ?? new SubagentStore(options.parentSessionManager, options.agentDir);
 		this.createChildRuntime = options.createChildRuntime;
@@ -1129,7 +1129,7 @@ export class SubagentManager implements SubagentManagerApi {
 	private resolveCwd(value: string): string {
 		const path = realpathSync(resolve(this.parentSessionManager.getCwd(), value));
 		if (!statSync(path).isDirectory()) throw new Error("Subagent cwd must be an existing directory");
-		if (!this.workspaceRoots.some((root) => isInside(root, path))) {
+		if (!this.getWorkspaceRoots().some((root) => isInside(root, path))) {
 			throw new Error("Subagent cwd must stay inside the parent workspace");
 		}
 		return path;
