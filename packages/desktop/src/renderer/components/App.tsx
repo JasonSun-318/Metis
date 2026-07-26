@@ -1,11 +1,11 @@
-import type { AgentMode, InteractionResponseInput, InteractionView, SessionSummary } from "@arcmind/app-protocol";
+import type { AgentMode, InteractionResponseInput, InteractionView, SessionSummary, SkillSummaryView } from "@arcmind/app-protocol";
 import { CaretDown, ClipboardText, FolderSimple, Globe, PlusCircle, Robot, SidebarSimple, TerminalWindow } from "@phosphor-icons/react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ArcMindDesktopApi } from "../../shared/desktop-api.ts";
 import { useAppStore } from "../hooks/use-app-store.ts";
 import type { AppStore, AppStoreSnapshot } from "../store/app-store.ts";
 import { ChatHome } from "./ChatHome.tsx";
-import { Composer } from "./Composer.tsx";
+import { Composer, type ComposerSubmission } from "./Composer.tsx";
 import { InteractionHost } from "./InteractionHost.tsx";
 import { RecoveryBanner } from "./RecoveryBanner.tsx";
 import { type SidebarDestination, SessionSidebar } from "./SessionSidebar.tsx";
@@ -29,6 +29,25 @@ export function titleFromPrompt(prompt: string): string {
 
 export function sessionDisplayTitle(session: Pick<SessionSummary, "cwd" | "cwdOrigin" | "name">): string {
 	return session.name || (session.cwdOrigin === "managed" ? "Chat" : session.cwd) || "ArcMind";
+}
+
+function composerText(input: ComposerSubmission): string {
+	return input.skill ? `/skill:${input.skill.name}${input.text ? ` ${input.text}` : ""}` : input.text;
+}
+
+function composerPayload(input: ComposerSubmission) {
+	return {
+		text: composerText(input),
+		...(input.attachments.length > 0 ? { attachments: input.attachments.map(({ path, name }) => ({ path, name })) } : {}),
+	};
+}
+
+function composerRequestKey(input: ComposerSubmission): string {
+	return JSON.stringify({
+		text: input.text,
+		attachments: input.attachments.map(({ path, name }) => ({ path, name })),
+		skill: input.skill?.name ?? null,
+	});
 }
 
 export function shouldResnapshotAfterReady(
@@ -67,6 +86,7 @@ export function App({ api, store }: AppProps) {
 	const [bootstrapped, setBootstrapped] = useState(false);
 	const [busy, setBusy] = useState(false);
 	const [loadingOlder, setLoadingOlder] = useState(false);
+	const [skills, setSkills] = useState<readonly SkillSummaryView[]>([]);
 	const [message, setMessage] = useState("Starting ArcMind…");
 	const [error, setError] = useState<string | null>(null);
 	const openGeneration = useRef(0);
@@ -79,6 +99,7 @@ export function App({ api, store }: AppProps) {
 		method: "start" | "steer";
 		requestId: string;
 	} | null>(null);
+	const skillListGeneration = useRef(0);
 
 	const reportError = useCallback((cause: unknown) => {
 		setError(cause instanceof Error ? cause.message : "ArcMind could not complete the request.");
@@ -265,13 +286,13 @@ export function App({ api, store }: AppProps) {
 			.catch(() => undefined);
 	};
 
-	const submitChatDraft = async (text: string) => {
+	const submitChatDraft = async (input: ComposerSubmission) => {
 		setBusy(true);
 		setError(null);
 		try {
 			let sessionId = chatDraftSessionId;
 			if (!sessionId) {
-				const name = titleFromPrompt(text);
+				const name = titleFromPrompt(input.text || input.skill?.name || input.attachments[0]?.name || "Chat");
 				const createKey = JSON.stringify({ cwd: chatDraftFolder, name });
 				const createRequest = chatDraftCreateRequest.current?.key === createKey
 					? chatDraftCreateRequest.current
@@ -290,12 +311,12 @@ export function App({ api, store }: AppProps) {
 			await refreshSessions();
 			await openSession(sessionId);
 			setBusy(true);
-			const turnKey = JSON.stringify({ sessionId, text });
+			const turnKey = JSON.stringify({ sessionId, input: composerRequestKey(input) });
 			const turnRequest = chatDraftTurnRequest.current?.key === turnKey
 				? chatDraftTurnRequest.current
 				: { key: turnKey, requestId: crypto.randomUUID() };
 			chatDraftTurnRequest.current = turnRequest;
-			await api.startTurn({ sessionId, requestId: turnRequest.requestId, text });
+			await api.startTurn({ sessionId, requestId: turnRequest.requestId, ...composerPayload(input) });
 			setChatDraftOpen(false);
 			setChatDraftSessionId(null);
 			chatDraftCreateRequest.current = null;
@@ -315,6 +336,26 @@ export function App({ api, store }: AppProps) {
 		: undefined;
 	const running = visibleActiveSession?.state === "running" || (visibleActiveSession !== undefined && state.activeTurnId !== null);
 	const serverReady = state.supervisor.state === "ready";
+	const skillSessionId = visibleActiveSession?.sessionId ?? chatDraftSessionId;
+	useEffect(() => {
+		const generation = ++skillListGeneration.current;
+		if (!bootstrapped || !serverReady || mode !== "chat" || destination !== "tasks") {
+			setSkills([]);
+			return;
+		}
+		void api.listSkills(skillSessionId ? { sessionId: skillSessionId } : { cwd: chatDraftFolder })
+			.then((result) => {
+				if (generation === skillListGeneration.current) setSkills(result.skills);
+			})
+			.catch((cause) => {
+				if (generation !== skillListGeneration.current) return;
+				setSkills([]);
+				reportError(cause);
+			});
+		return () => {
+			if (generation === skillListGeneration.current) skillListGeneration.current += 1;
+		};
+	}, [api, bootstrapped, chatDraftFolder, destination, mode, reportError, serverReady, skillSessionId]);
 	const interactiveSessionId =
 		destination === "tasks" && openingSession?.mode === mode
 			? openingSession.sessionId
@@ -328,19 +369,19 @@ export function App({ api, store }: AppProps) {
 		.reverse()
 		.find((notification) => notification.sessionId === undefined || notification.sessionId === visibleActiveSession?.sessionId);
 
-	const submit = async (text: string) => {
+	const submit = async (input: ComposerSubmission) => {
 		if (!visibleActiveSession) return;
 		setError(null);
 		try {
-			const key = JSON.stringify({ sessionId: visibleActiveSession.sessionId, text });
+			const key = JSON.stringify({ sessionId: visibleActiveSession.sessionId, input: composerRequestKey(input) });
 			const request = activeTurnRequest.current?.key === key
 				? activeTurnRequest.current
 				: { key, method: running ? "steer" as const : "start" as const, requestId: crypto.randomUUID() };
 			activeTurnRequest.current = request;
 			if (request.method === "steer") {
-				await api.steerTurn({ sessionId: visibleActiveSession.sessionId, requestId: request.requestId, text, delivery: "steer" });
+				await api.steerTurn({ sessionId: visibleActiveSession.sessionId, requestId: request.requestId, ...composerPayload(input), delivery: "steer" });
 			} else {
-				await api.startTurn({ sessionId: visibleActiveSession.sessionId, requestId: request.requestId, text });
+				await api.startTurn({ sessionId: visibleActiveSession.sessionId, requestId: request.requestId, ...composerPayload(input) });
 			}
 			activeTurnRequest.current = null;
 		} catch (cause) {
@@ -397,6 +438,14 @@ export function App({ api, store }: AppProps) {
 			value={state.thinkingSelection}
 		/>
 	) : undefined;
+	const pickAttachmentFiles = async () => {
+		try {
+			return await api.selectAttachmentFiles();
+		} catch (cause) {
+			reportError(cause);
+			return [];
+		}
+	};
 
 	return (
 		<div className={`app-shell${sessionsSidebarOpen ? "" : " sessions-sidebar-collapsed"}`}>
@@ -457,14 +506,17 @@ export function App({ api, store }: AppProps) {
 						folder={chatDraftFolder}
 						folderLocked={chatDraftSessionId !== null}
 						onChooseFolder={chooseChatFolder}
+						onManageSkills={() => setDestination("skills")}
+						onPickFiles={pickAttachmentFiles}
 						onSubmit={submitChatDraft}
+						skills={skills}
 					/>
 				) : visibleActiveSession ? (
 					<div className="workspace-body">
 						<div className="conversation-column">
 							<RecoveryBanner session={visibleActiveSession} />
 								<Transcript appearance={visibleActiveSession.mode} hasOlder={state.nextBeforeItemId !== null} itemIds={state.itemOrder} itemsById={state.itemsById} loadingOlder={loadingOlder} onLoadOlder={loadOlder} />
-							<Composer appearance={visibleActiveSession.mode} disabled={!serverReady || state.syncStatus !== "ready"} onInterrupt={interrupt} onSubmit={submit} running={running} thinkingControl={thinkingControl} placeholder="Write a message…" />
+							<Composer appearance={visibleActiveSession.mode} disabled={!serverReady || state.syncStatus !== "ready"} key={visibleActiveSession.sessionId} onInterrupt={interrupt} onManageSkills={() => setDestination("skills")} onPickFiles={pickAttachmentFiles} onSubmit={submit} running={running} skills={skills} thinkingControl={thinkingControl} placeholder="Write a message…" />
 						</div>
 					</div>
 				) : (

@@ -1,19 +1,24 @@
+import type { SkillSummaryView } from "@arcmind/app-protocol";
 import { CaretDown, FolderSimple, Sparkle } from "@phosphor-icons/react";
-import { Composer } from "./Composer.tsx";
+import type { DesktopAttachmentSelection } from "../../shared/desktop-api.ts";
+import { Composer, type ComposerSubmission } from "./Composer.tsx";
 
 interface ChatHomeProps {
 	readonly busy: boolean;
 	readonly folder: string | null;
 	readonly folderLocked: boolean;
 	readonly onChooseFolder: () => Promise<void>;
-	readonly onSubmit: (text: string) => Promise<void>;
+	readonly onManageSkills: () => void;
+	readonly onPickFiles: () => Promise<readonly DesktopAttachmentSelection[]>;
+	readonly onSubmit: (input: ComposerSubmission) => Promise<void>;
+	readonly skills: readonly SkillSummaryView[];
 }
 
 function folderName(folder: string): string {
 	return folder.split(/[\\/]/u).filter(Boolean).at(-1) ?? folder;
 }
 
-export function ChatHome({ busy, folder, folderLocked, onChooseFolder, onSubmit }: ChatHomeProps) {
+export function ChatHome({ busy, folder, folderLocked, onChooseFolder, onManageSkills, onPickFiles, onSubmit, skills }: ChatHomeProps) {
 	return (
 		<section className="chat-home">
 			<div className="chat-home-content">
@@ -29,9 +34,12 @@ export function ChatHome({ busy, folder, folderLocked, onChooseFolder, onSubmit 
 						appearance="chat"
 						disabled={busy}
 						onInterrupt={async () => {}}
+						onManageSkills={onManageSkills}
+						onPickFiles={onPickFiles}
 						onSubmit={onSubmit}
 						placeholder="How can I help you today?"
 						running={false}
+						skills={skills}
 					/>
 					<button
 						className="folder-picker"

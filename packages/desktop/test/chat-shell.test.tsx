@@ -86,7 +86,16 @@ function createHarness(options: {
 			order.push("list");
 			return { sessions, nextAfterSessionId: null };
 		}),
+		listSkills: vi.fn().mockResolvedValue({
+			skills: [
+				{ name: "pdf", description: "Read and create PDF documents" },
+				{ name: "xlsx", description: "Read and create spreadsheets" },
+			],
+		}),
 		selectProjectFolder: vi.fn().mockResolvedValue("/work/selected-project"),
+		selectAttachmentFiles: vi.fn().mockResolvedValue([
+			{ path: "/tmp/report.pdf", name: "report.pdf" },
+		]),
 		createSession: vi.fn(async (input) => {
 			order.push("create");
 			const created = createdByRequestId.get(input.requestId) ?? {
@@ -224,6 +233,145 @@ describe("Chat desktop shell", () => {
 		}));
 		expect(order).toEqual(["create", "list", "open", "start"]);
 
+		await act(async () => root.unmount());
+	});
+
+	it("submits selected files and one hidden skill on first Chat send", async () => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		const { api } = createHarness();
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<App api={api} store={new AppStore()} />));
+		await flush();
+
+		expect(container.querySelector('[aria-label="Add folder (coming soon)"]')).toBeNull();
+		await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Add to message"]')!.click());
+		await act(async () => button(container.querySelector<HTMLElement>(".composer-add-menu")!, "Add files or photos").click());
+		await flush();
+		await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Add to message"]')!.click());
+		await act(async () => button(container.querySelector<HTMLElement>(".composer-add-menu")!, "Skills").click());
+		await act(async () => button(container.querySelector<HTMLElement>(".composer-skill-menu")!, "pdf").click());
+
+		expect(container.textContent).toContain("report.pdf");
+		expect(container.querySelector('[aria-label="Remove skill pdf"]')).not.toBeNull();
+		expect([...container.querySelectorAll("button")].some((candidate) => candidate.textContent?.trim() === "Browse skills")).toBe(false);
+		const textarea = container.querySelector("textarea")!;
+		await act(async () => changeTextarea(textarea, "Summarize this"));
+		await act(async () => textarea.form!.requestSubmit());
+		await flush();
+		await flush();
+
+		expect(api.createSession).toHaveBeenCalledTimes(1);
+		expect(api.startTurn).toHaveBeenCalledWith(expect.objectContaining({
+			sessionId: "chat-created",
+			text: "/skill:pdf Summarize this",
+			attachments: [{ path: "/tmp/report.pdf", name: "report.pdf" }],
+		}));
+		await act(async () => root.unmount());
+	});
+
+	it("removes files, replaces the selected skill, closes with Escape, and routes Manage skills", async () => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		const { api } = createHarness();
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<App api={api} store={new AppStore()} />));
+		await flush();
+
+		const add = () => container.querySelector<HTMLButtonElement>('[aria-label="Add to message"]')!;
+		await act(async () => add().click());
+		await act(async () => button(container.querySelector<HTMLElement>(".composer-add-menu")!, "Add files or photos").click());
+		await flush();
+		await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Remove file report.pdf"]')!.click());
+		expect(container.textContent).not.toContain("report.pdf");
+
+		await act(async () => add().click());
+		await act(async () => button(container.querySelector<HTMLElement>(".composer-add-menu")!, "Skills").click());
+		await act(async () => button(container.querySelector<HTMLElement>(".composer-skill-menu")!, "pdf").click());
+		await act(async () => add().click());
+		await act(async () => button(container.querySelector<HTMLElement>(".composer-add-menu")!, "Skills").click());
+		await act(async () => button(container.querySelector<HTMLElement>(".composer-skill-menu")!, "xlsx").click());
+		expect(container.querySelector('[aria-label="Remove skill pdf"]')).toBeNull();
+		expect(container.querySelector('[aria-label="Remove skill xlsx"]')).not.toBeNull();
+
+		await act(async () => add().click());
+		await act(async () => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
+		expect(container.querySelector(".composer-add-menu")).toBeNull();
+
+		await act(async () => add().click());
+		await act(async () => button(container.querySelector<HTMLElement>(".composer-add-menu")!, "Skills").click());
+		await act(async () => button(container.querySelector<HTMLElement>(".composer-skill-menu")!, "Manage skills").click());
+		expect(container.textContent).toContain("Skills are coming to Desktop.");
+		await act(async () => root.unmount());
+	});
+
+	it("permits an attachment-only Chat send", async () => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		const { api } = createHarness();
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<App api={api} store={new AppStore()} />));
+		await flush();
+
+		await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Add to message"]')!.click());
+		await act(async () => button(container.querySelector<HTMLElement>(".composer-add-menu")!, "Add files or photos").click());
+		await flush();
+		await act(async () => container.querySelector<HTMLTextAreaElement>("textarea")!.form!.requestSubmit());
+		await flush();
+		await flush();
+
+		expect(api.startTurn).toHaveBeenCalledWith(expect.objectContaining({
+			text: "",
+			attachments: [{ path: "/tmp/report.pdf", name: "report.pdf" }],
+		}));
+		await act(async () => root.unmount());
+	});
+
+	it("retains additions after a failed active send and changes replay identity with the file", async () => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		localStorage.setItem("arcmind.activeSessionId.chat", "chat-existing");
+		const { api } = createHarness({ loseFirstStartResponse: true });
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<App api={api} store={new AppStore()} />));
+		await flush();
+
+		const add = () => container.querySelector<HTMLButtonElement>('[aria-label="Add to message"]')!;
+		await act(async () => add().click());
+		await act(async () => button(container.querySelector<HTMLElement>(".composer-add-menu")!, "Add files or photos").click());
+		await flush();
+		await act(async () => add().click());
+		await act(async () => button(container.querySelector<HTMLElement>(".composer-add-menu")!, "Skills").click());
+		await act(async () => button(container.querySelector<HTMLElement>(".composer-skill-menu")!, "pdf").click());
+		const textarea = container.querySelector("textarea")!;
+		await act(async () => changeTextarea(textarea, "Same prompt"));
+		await act(async () => textarea.form!.requestSubmit());
+		await flush();
+
+		expect(textarea.value).toBe("Same prompt");
+		expect(container.querySelector('[aria-label="Remove file report.pdf"]')).not.toBeNull();
+		expect(container.querySelector('[aria-label="Remove skill pdf"]')).not.toBeNull();
+		await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Remove file report.pdf"]')!.click());
+		vi.mocked(api.selectAttachmentFiles).mockResolvedValueOnce([{ path: "/tmp/other.pdf", name: "other.pdf" }]);
+		await act(async () => add().click());
+		await act(async () => button(container.querySelector<HTMLElement>(".composer-add-menu")!, "Add files or photos").click());
+		await flush();
+		await act(async () => textarea.form!.requestSubmit());
+		await flush();
+
+		const first = vi.mocked(api.startTurn).mock.calls[0]![0];
+		const second = vi.mocked(api.startTurn).mock.calls[1]![0];
+		expect(second.requestId).not.toBe(first.requestId);
+		expect(second).toEqual(expect.objectContaining({
+			text: "/skill:pdf Same prompt",
+			attachments: [{ path: "/tmp/other.pdf", name: "other.pdf" }],
+		}));
+		expect(textarea.value).toBe("");
+		expect(container.querySelector(".composer-chips")).toBeNull();
 		await act(async () => root.unmount());
 	});
 
@@ -610,6 +758,7 @@ describe("Chat desktop shell", () => {
 		expect(container.textContent).not.toContain("Chat project task");
 		expect(api.openSession).toHaveBeenLastCalledWith({ sessionId: "code-existing" });
 		expect(container.textContent).toContain("test-model");
+		expect(container.querySelector('[aria-label="Add to message"]')).toBeNull();
 
 		await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Hide sessions sidebar"]')!.click());
 		expect(container.querySelector(".session-sidebar")).toBeNull();
@@ -637,6 +786,7 @@ describe("Chat desktop shell", () => {
 		expect(container.textContent).not.toContain("审阅");
 		expect(container.textContent).not.toContain("文件");
 		expect(container.textContent).not.toContain("Subagent");
+		expect(container.querySelector('[aria-label="Add to message"]')).not.toBeNull();
 		await act(async () => root.unmount());
 	});
 });

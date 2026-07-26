@@ -1,13 +1,25 @@
-import { ArrowUp, FolderPlus, Plus, Stop } from "@phosphor-icons/react";
-import { useState, type FormEvent, type ReactNode } from "react";
+import type { SkillSummaryView } from "@arcmind/app-protocol";
+import { ArrowUp, Paperclip, Scroll, Stop, X } from "@phosphor-icons/react";
+import { useEffect, useState, type FormEvent, type ReactNode } from "react";
+import type { DesktopAttachmentSelection } from "../../shared/desktop-api.ts";
+import { ComposerAddMenu } from "./ComposerAddMenu.tsx";
+
+export interface ComposerSubmission {
+	readonly text: string;
+	readonly attachments: readonly DesktopAttachmentSelection[];
+	readonly skill?: SkillSummaryView;
+}
 
 interface ComposerProps {
 	readonly disabled: boolean;
 	readonly running: boolean;
 	readonly onInterrupt: () => Promise<void>;
-	readonly onSubmit: (text: string) => Promise<void>;
+	readonly onSubmit: (input: ComposerSubmission) => Promise<void>;
+	readonly onManageSkills?: () => void;
+	readonly onPickFiles?: () => Promise<readonly DesktopAttachmentSelection[]>;
 	readonly appearance?: "chat" | "code";
 	readonly placeholder?: string;
+	readonly skills?: readonly SkillSummaryView[];
 	readonly thinkingControl?: ReactNode;
 }
 
@@ -16,20 +28,43 @@ export function Composer({
 	running,
 	onInterrupt,
 	onSubmit,
+	onManageSkills,
+	onPickFiles,
 	appearance = "code",
 	placeholder,
+	skills = [],
 	thinkingControl,
 }: ComposerProps) {
 	const [text, setText] = useState("");
+	const [attachments, setAttachments] = useState<readonly DesktopAttachmentSelection[]>([]);
+	const [selectedSkill, setSelectedSkill] = useState<SkillSummaryView>();
 	const [submitting, setSubmitting] = useState(false);
+	useEffect(() => {
+		setSelectedSkill((current) => current && skills.some(({ name }) => name === current.name) ? current : undefined);
+	}, [skills]);
+	const addFiles = async () => {
+		if (!onPickFiles) return;
+		const selected = await onPickFiles();
+		setAttachments((current) => {
+			const byPath = new Map(current.map((attachment) => [attachment.path, attachment]));
+			for (const attachment of selected) byPath.set(attachment.path, attachment);
+			return [...byPath.values()].slice(0, 16);
+		});
+	};
 	const submit = async (event: FormEvent) => {
 		event.preventDefault();
 		const prompt = text.trim();
-		if (!prompt || disabled || submitting) return;
+		if ((!prompt && attachments.length === 0) || disabled || submitting) return;
 		setSubmitting(true);
 		try {
-			await onSubmit(prompt);
+			await onSubmit({
+				text: prompt,
+				attachments,
+				...(selectedSkill ? { skill: selectedSkill } : {}),
+			});
 			setText("");
+			setAttachments([]);
+			setSelectedSkill(undefined);
 		} finally {
 			setSubmitting(false);
 		}
@@ -53,17 +88,34 @@ export function Composer({
 					rows={1}
 					value={text}
 				/>
+				{appearance === "chat" && (selectedSkill || attachments.length > 0) && (
+					<div aria-label="Message additions" className="composer-chips">
+						{selectedSkill && (
+							<button aria-label={`Remove skill ${selectedSkill.name}`} onClick={() => setSelectedSkill(undefined)} type="button">
+								<Scroll aria-hidden="true" size={14} />
+								<span>{selectedSkill.name}</span>
+								<X aria-hidden="true" size={12} />
+							</button>
+						)}
+						{attachments.map((attachment) => (
+							<button aria-label={`Remove file ${attachment.name}`} key={attachment.path} onClick={() => setAttachments((current) => current.filter(({ path }) => path !== attachment.path))} type="button">
+								<Paperclip aria-hidden="true" size={14} />
+								<span>{attachment.name}</span>
+								<X aria-hidden="true" size={12} />
+							</button>
+						))}
+					</div>
+				)}
 				<div className="composer-actions">
 					<div className="composer-leading">
 						{appearance === "chat" ? (
-							<>
-								<button aria-label="Attach files (coming soon)" className="composer-plain-button" disabled title="Coming soon" type="button">
-									<Plus aria-hidden="true" size={20} />
-								</button>
-								<button aria-label="Add folder (coming soon)" className="composer-plain-button" disabled title="Coming soon" type="button">
-									<FolderPlus aria-hidden="true" size={19} />
-								</button>
-							</>
+							<ComposerAddMenu
+								disabled={disabled || submitting}
+								onAddFiles={() => void addFiles().catch(() => undefined)}
+								onManageSkills={() => onManageSkills?.()}
+								onSelectSkill={setSelectedSkill}
+								skills={skills}
+							/>
 						) : (
 							<span>Enter to send · Shift+Enter for a new line</span>
 						)}
@@ -75,7 +127,7 @@ export function Composer({
 								<Stop aria-hidden="true" size={16} weight="fill" />
 							</button>
 						)}
-						<button aria-label={running ? "Steer task" : "Send message"} className="composer-icon-button composer-send" disabled={disabled || submitting || text.trim().length === 0} type="submit">
+						<button aria-label={running ? "Steer task" : "Send message"} className="composer-icon-button composer-send" disabled={disabled || submitting || (text.trim().length === 0 && attachments.length === 0)} type="submit">
 							<ArrowUp aria-hidden="true" size={19} weight="bold" />
 						</button>
 					</div>
