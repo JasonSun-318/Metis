@@ -9,6 +9,7 @@ export type ToolProvenance = "builtin" | "extension" | "sdk" | "mcp";
 
 export type ActionRisk =
 	| "ordinary-read"
+	| "outside-read"
 	| "sensitive-read"
 	| "workspace-write"
 	| "outside-write"
@@ -87,6 +88,7 @@ export interface ClassifyActionInput {
 	readonly provenance: ToolProvenance;
 	readonly args: unknown;
 	readonly cwd: string;
+	readonly workspaceRoots: readonly string[];
 	readonly mcpAnnotations?: {
 		readonly readOnlyHint?: boolean;
 		readonly destructiveHint?: boolean;
@@ -111,6 +113,7 @@ const IRREVERSIBLE_WARNING =
 
 const RISK_ORDER: readonly ActionRisk[] = [
 	"ordinary-read",
+	"outside-read",
 	"sensitive-read",
 	"workspace-write",
 	"outside-write",
@@ -164,22 +167,30 @@ function uniquePaths(paths: Iterable<string>): string[] {
 }
 
 /** Fixed host-owned paths that require explicit sensitive-read authorization. */
-export function getSensitiveFilesystemPaths(cwd: string, environment: NodeJS.ProcessEnv = process.env): string[] {
+export function getSensitiveFilesystemPaths(
+	cwd: string,
+	environment: NodeJS.ProcessEnv = process.env,
+	workspaceRoots: readonly string[] = [cwd],
+): string[] {
 	const home = homedir();
-	const environmentFiles = new Set<string>(COMMON_SENSITIVE_ENV_FILES);
-	try {
-		for (const name of readdirSync(cwd)) {
-			const lower = name.toLowerCase();
-			if (
-				(lower === ".env" || lower.startsWith(".env.")) &&
-				!lower.endsWith(".example") &&
-				!lower.endsWith(".sample")
-			) {
-				environmentFiles.add(name);
+	const workspaceEnvironmentFiles = workspaceRoots.flatMap((root) =>
+		COMMON_SENSITIVE_ENV_FILES.map((name) => join(root, name)),
+	);
+	for (const root of workspaceRoots) {
+		try {
+			for (const name of readdirSync(root)) {
+				const lower = name.toLowerCase();
+				if (
+					(lower === ".env" || lower.startsWith(".env.")) &&
+					!lower.endsWith(".example") &&
+					!lower.endsWith(".sample")
+				) {
+					workspaceEnvironmentFiles.push(join(root, name));
+				}
 			}
+		} catch {
+			// Fixed sensitive paths and direct sensitive-name checks still apply.
 		}
-	} catch {
-		// Fixed sensitive paths below still apply when cwd cannot be inspected.
 	}
 	const roots = [
 		...Array.from(SENSITIVE_DIRECTORY_NAMES, (name) => join(home, name)),
@@ -194,7 +205,7 @@ export function getSensitiveFilesystemPaths(cwd: string, environment: NodeJS.Pro
 		join(home, ".netrc"),
 		join(home, ".npmrc"),
 		join(home, ".arcmind", "agent", "auth.json"),
-		...Array.from(environmentFiles, (name) => join(cwd, name)),
+		...workspaceEnvironmentFiles,
 	];
 	if (process.platform === "darwin") {
 		roots.push(
@@ -236,11 +247,15 @@ function hasSensitiveName(path: string): boolean {
 		.some((part) => SENSITIVE_DIRECTORY_NAMES.has(part));
 }
 
-function isSensitivePath(path: string, cwd: string, traversal: boolean): boolean {
+function isSensitivePath(path: string, cwd: string, traversal: boolean, workspaceRoots: readonly string[]): boolean {
 	if (hasSensitiveName(path)) return true;
-	return getSensitiveFilesystemPaths(cwd).some((sensitive) =>
+	return getSensitiveFilesystemPaths(cwd, process.env, workspaceRoots).some((sensitive) =>
 		traversal ? existsSync(sensitive) && pathsIntersect(path, sensitive) : isPathInside(sensitive, path),
 	);
+}
+
+function isInsideWorkspaceRoots(path: string, roots: readonly string[]): boolean {
+	return roots.some((root) => isPathInside(root, path));
 }
 
 function normalizePaths(rawPaths: readonly string[], cwd: string): { paths: string[]; invalid: boolean } {
@@ -304,7 +319,11 @@ function classifyStructuredRead(input: ClassifyActionInput, rawPath: string, tra
 	}
 	return action(
 		input,
-		isSensitivePath(normalized.paths[0]!, input.cwd, traversal) ? ["sensitive-read"] : ["ordinary-read"],
+		isSensitivePath(normalized.paths[0]!, input.cwd, traversal, input.workspaceRoots)
+			? ["sensitive-read"]
+			: isInsideWorkspaceRoots(normalized.paths[0]!, input.workspaceRoots)
+				? ["ordinary-read"]
+				: ["outside-read"],
 		normalized.paths,
 	);
 }
@@ -314,7 +333,7 @@ function classifyStructuredWrite(input: ClassifyActionInput, rawPath: string): P
 	if (normalized.invalid || normalized.paths.length !== 1) return action(input, ["unknown"], normalized.paths);
 	return action(
 		input,
-		isPathInside(input.cwd, normalized.paths[0]!) ? ["workspace-write"] : ["outside-write"],
+		isInsideWorkspaceRoots(normalized.paths[0]!, input.workspaceRoots) ? ["workspace-write"] : ["outside-write"],
 		normalized.paths,
 	);
 }
@@ -393,7 +412,12 @@ export function routeAction(settings: PermissionSettings, value: PermissionActio
 	return value.risks.length === 1 && value.risks[0] === "ordinary-read" ? "allow" : "user";
 }
 
-export function revalidateStructuredActionBinding(approved: PermissionAction, args: unknown, cwd: string): boolean {
+export function revalidateStructuredActionBinding(
+	approved: PermissionAction,
+	args: unknown,
+	cwd: string,
+	workspaceRoots: readonly string[],
+): boolean {
 	if (approved.paths.length === 0) return true;
 	if (
 		approved.provenance !== "builtin" ||
@@ -407,6 +431,7 @@ export function revalidateStructuredActionBinding(approved: PermissionAction, ar
 		provenance: approved.provenance,
 		args,
 		cwd,
+		workspaceRoots,
 	});
 	return isDeepStrictEqual(current.paths, approved.paths) && isDeepStrictEqual(current.risks, approved.risks);
 }

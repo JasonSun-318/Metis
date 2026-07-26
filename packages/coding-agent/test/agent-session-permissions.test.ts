@@ -1,4 +1,6 @@
-import { writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { AgentTool } from "@arcmind/agent-core";
 import { fauxAssistantMessage, fauxToolCall } from "@arcmind/ai";
 import { Type } from "typebox";
@@ -157,8 +159,7 @@ describe("AgentSession permission enforcement", () => {
 			requestPermissionApproval: requestApproval,
 		});
 		harnesses.push(harness);
-		const path = `${harness.tempDir}/safe.txt`;
-		writeFileSync(path, "safe\n");
+		const path = join(harness.sessionManager.getCwd(), "package.json");
 		harness.setResponses([
 			fauxAssistantMessage([fauxToolCall("read", { path })], { stopReason: "toolUse" }),
 			fauxAssistantMessage("done"),
@@ -169,9 +170,65 @@ describe("AgentSession permission enforcement", () => {
 		expect(requestApproval).not.toHaveBeenCalled();
 		expect(
 			harness.session.messages.some(
-				(message) => message.role === "toolResult" && getMessageText(message).includes("safe"),
+				(message) => message.role === "toolResult" && getMessageText(message).includes("arcmind"),
 			),
 		).toBe(true);
+	});
+
+	it("automatically reads from an added directory", async () => {
+		const requestApproval = vi.fn(async () => ({ decision: "allow" as const }));
+		const harness = await createHarness({
+			permissionSettings: { mode: "ask" },
+			requestPermissionApproval: requestApproval,
+		});
+		harnesses.push(harness);
+		const external = mkdtempSync(join(tmpdir(), "arcmind-added-read-"));
+		try {
+			const path = join(external, "safe.txt");
+			writeFileSync(path, "safe\n");
+			harness.sessionManager.addWorkspaceDirectory(external);
+			harness.setResponses([
+				fauxAssistantMessage([fauxToolCall("read", { path })], { stopReason: "toolUse" }),
+				fauxAssistantMessage("done"),
+			]);
+
+			await harness.session.prompt("read it");
+			expect(requestApproval).not.toHaveBeenCalled();
+		} finally {
+			rmSync(external, { recursive: true, force: true });
+		}
+	});
+
+	it("invalidates an Ask grant when workspace roots change before execution", async () => {
+		const external = mkdtempSync(join(tmpdir(), "arcmind-root-revalidation-"));
+		try {
+			const path = join(external, "new.txt");
+			let harness!: Harness;
+			harness = await createHarness({
+				permissionSettings: { mode: "ask" },
+				requestPermissionApproval: async () => {
+					harness.sessionManager.removeWorkspaceDirectory(external);
+					return { decision: "allow" };
+				},
+			});
+			harnesses.push(harness);
+			harness.sessionManager.addWorkspaceDirectory(external);
+			harness.setResponses([
+				fauxAssistantMessage([fauxToolCall("write", { path, content: "x" })], { stopReason: "toolUse" }),
+				fauxAssistantMessage("done"),
+			]);
+
+			await harness.session.prompt("write it");
+			expect(existsSync(path)).toBe(false);
+			expect(
+				harness.session.messages.some(
+					(message) =>
+						message.role === "toolResult" && getMessageText(message).includes("workspace roots changed"),
+				),
+			).toBe(true);
+		} finally {
+			rmSync(external, { recursive: true, force: true });
+		}
 	});
 
 	it("serializes parallel approval callbacks", async () => {

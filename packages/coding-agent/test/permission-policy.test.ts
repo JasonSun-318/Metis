@@ -46,6 +46,7 @@ describe("Ask/Full permission policy", () => {
 		provenance,
 		args,
 		cwd,
+		workspaceRoots: [cwd],
 	});
 	const action = (
 		toolName: string,
@@ -153,7 +154,58 @@ describe("Ask/Full permission policy", () => {
 		const approved = action("read", { path: ordinary });
 		rmSync(ordinary);
 		symlinkSync(env, ordinary);
-		expect(revalidateStructuredActionBinding(approved, { path: ordinary }, cwd)).toBe(false);
+		expect(revalidateStructuredActionBinding(approved, { path: ordinary }, cwd, [cwd])).toBe(false);
+	});
+
+	it("asks for an ordinary read outside roots and allows it after the directory is added", () => {
+		const outsideFile = join(outside, "outside.txt");
+		const outsideAction = classifyAction({ ...input("read", { path: outsideFile }), workspaceRoots: [cwd] });
+		const addedAction = classifyAction({
+			...input("read", { path: outsideFile }),
+			workspaceRoots: [cwd, outside],
+		});
+
+		expect(outsideAction.risks).toEqual(["outside-read"]);
+		expect(routeAction(settings("ask"), outsideAction)).toBe("user");
+		expect(routeAction(settings("full"), outsideAction)).toBe("allow");
+		expect(addedAction.risks).toEqual(["ordinary-read"]);
+		expect(routeAction(settings("ask"), addedAction)).toBe("allow");
+	});
+
+	it("keeps sensitive reads protected inside an added root", () => {
+		const env = join(outside, ".env.local");
+		writeFileSync(env, "TOKEN=x\n");
+		const direct = classifyAction({ ...input("read", { path: env }), workspaceRoots: [cwd, outside] });
+		const traversal = classifyAction({
+			...input("grep", { path: outside, pattern: "TOKEN" }),
+			workspaceRoots: [cwd, outside],
+		});
+		expect(direct.risks).toEqual(["sensitive-read"]);
+		expect(traversal.risks).toEqual(["sensitive-read"]);
+		expect(routeAction(settings("ask"), direct)).toBe("user");
+		expect(routeAction(settings("ask"), traversal)).toBe("user");
+	});
+
+	it("classifies a symlink by its canonical target root", () => {
+		if (process.platform === "win32") return;
+		const alias = join(cwd, "outside-link.txt");
+		symlinkSync(join(outside, "outside.txt"), alias);
+		const value = classifyAction({ ...input("read", { path: alias }), workspaceRoots: [cwd] });
+		expect(value.risks).toEqual(["outside-read"]);
+	});
+
+	it("classifies writes against all effective roots", () => {
+		const addedWrite = classifyAction({
+			...input("write", { path: join(outside, "new.txt"), content: "x" }),
+			workspaceRoots: [cwd, outside],
+		});
+		const unrelated = join(root, "unrelated", "new.txt");
+		const outsideWrite = classifyAction({
+			...input("write", { path: unrelated, content: "x" }),
+			workspaceRoots: [cwd, outside],
+		});
+		expect(addedWrite.risks).toEqual(["workspace-write"]);
+		expect(outsideWrite.risks).toEqual(["outside-write"]);
 	});
 
 	it("covers fixed credential, browser, and OS credential roots", () => {

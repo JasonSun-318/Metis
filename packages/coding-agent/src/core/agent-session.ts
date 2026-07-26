@@ -330,6 +330,7 @@ interface AuthorizedPermissionAction {
 	readonly action: PermissionAction;
 	readonly args: unknown;
 	readonly cwd: string;
+	readonly workspaceRoots: readonly string[];
 	readonly authorizedMode: PermissionMode;
 }
 
@@ -826,6 +827,7 @@ export class AgentSession {
 		}
 		const approvedArgs = structuredClone(input.args);
 		const approvedCwd = input.cwd ?? this._cwd;
+		const approvedWorkspaceRoots = this.sessionManager.getWorkspaceRoots();
 		const approvedSettings = this._getEffectivePermissionSettings();
 		const classificationArgs =
 			input.effectiveCommand === undefined
@@ -837,6 +839,7 @@ export class AgentSession {
 			provenance: input.provenance,
 			args: classificationArgs,
 			cwd: approvedCwd,
+			workspaceRoots: approvedWorkspaceRoots,
 			mcpAnnotations: input.provenance === "mcp" ? this._mcpManager?.getToolAnnotations(input.toolName) : undefined,
 			builtinNetworkTargets:
 				input.provenance === "builtin" && input.toolName === "web_search"
@@ -860,6 +863,7 @@ export class AgentSession {
 			action,
 			args: approvedArgs,
 			cwd: approvedCwd,
+			workspaceRoots: approvedWorkspaceRoots,
 			authorizedMode: approvedSettings.mode,
 		} satisfies AuthorizedPermissionAction;
 		this._permissionGrants.set(input.actionId, authorized);
@@ -884,9 +888,13 @@ export class AgentSession {
 		if (authorized.authorizedMode === "full" && this._getEffectivePermissionSettings().mode !== "full") {
 			throw new Error(`${toolName} permission mode narrowed before execution; retry requires approval`);
 		}
+		const currentWorkspaceRoots = this.sessionManager.getWorkspaceRoots();
+		if (authorized.authorizedMode === "ask" && !isDeepStrictEqual(currentWorkspaceRoots, authorized.workspaceRoots)) {
+			throw new Error(`${toolName} workspace roots changed after authorization; retry requires approval`);
+		}
 		if (
 			authorized.action.paths.length > 0 &&
-			!revalidateStructuredActionBinding(authorized.action, args, authorized.cwd)
+			!revalidateStructuredActionBinding(authorized.action, args, authorized.cwd, currentWorkspaceRoots)
 		) {
 			throw new Error(`${toolName} filesystem target changed after authorization; retry requires approval`);
 		}
@@ -2019,6 +2027,7 @@ export class AgentSession {
 
 		this._baseSystemPromptOptions = {
 			cwd: this._cwd,
+			additionalDirectories: this.sessionManager.getAdditionalDirectories(),
 			skills: loadedSkills,
 			contextFiles: loadedContextFiles,
 			customPrompt: loaderSystemPrompt,

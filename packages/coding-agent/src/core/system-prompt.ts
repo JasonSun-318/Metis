@@ -32,6 +32,8 @@ export interface BuildSystemPromptOptions {
 	appendSystemPrompt?: string;
 	/** Working directory. */
 	cwd: string;
+	/** Additional file-access roots that do not change cwd or load project configuration. */
+	additionalDirectories?: readonly string[];
 	/** Pre-loaded context files. */
 	contextFiles?: Array<{ path: string; content: string }>;
 	/** Pre-loaded skills. */
@@ -139,12 +141,19 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
 		promptGuidelines,
 		appendSystemPrompt,
 		cwd,
+		additionalDirectories,
 		contextFiles: providedContextFiles,
 		skills: providedSkills,
 		autoMemory,
 	} = options;
 	const resolvedCwd = cwd;
 	const promptCwd = resolvedCwd.replace(/\\/g, "/");
+	const additionalDirectorySection =
+		additionalDirectories && additionalDirectories.length > 0
+			? `\nAdditional working directories (file access only):\nThese paths do not change cwd, preload contents, or load project configuration.\n${additionalDirectories
+					.map((directory) => `- ${JSON.stringify(directory.replace(/\\/g, "/"))}`)
+					.join("\n")}`
+			: "";
 
 	const now = new Date();
 	const year = now.getFullYear();
@@ -190,6 +199,7 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
 		// Add date and working directory last
 		prompt += `\nCurrent date: ${date}`;
 		prompt += `\nCurrent working directory: ${promptCwd}`;
+		prompt += additionalDirectorySection;
 
 		return prompt;
 	}
@@ -293,6 +303,7 @@ ArcMind documentation (read only when the user asks about arcmind itself, its SD
 	// Add date and working directory last
 	prompt += `\nCurrent date: ${date}`;
 	prompt += `\nCurrent working directory: ${promptCwd}`;
+	prompt += additionalDirectorySection;
 
 	return prompt;
 }

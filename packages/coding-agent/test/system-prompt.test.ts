@@ -136,6 +136,33 @@ describe("buildSystemPrompt", () => {
 		});
 	});
 
+	describe("additional working directories", () => {
+		test("lists paths without changing cwd or loading their contents", () => {
+			const prompt = buildSystemPrompt({
+				cwd: "/workspace/main",
+				additionalDirectories: ["/workspace/shared", "/tmp/name\nwith-newline"],
+			});
+			expect(prompt).toContain("Current working directory: /workspace/main");
+			expect(prompt).toContain("Additional working directories (file access only)");
+			expect(prompt).toContain(JSON.stringify("/workspace/shared"));
+			expect(prompt).toContain(JSON.stringify("/tmp/name\nwith-newline"));
+			expect(prompt).not.toContain("AGENTS.md");
+
+			const custom = buildSystemPrompt({
+				cwd: "/workspace/main",
+				customPrompt: "CUSTOM",
+				additionalDirectories: ["/workspace/shared"],
+			});
+			expect(custom).toContain("CUSTOM");
+			expect(custom).toContain(JSON.stringify("/workspace/shared"));
+		});
+
+		test("omits the section when none are configured", () => {
+			const prompt = buildSystemPrompt({ cwd: "/workspace/main", additionalDirectories: [] });
+			expect(prompt).not.toContain("Additional working directories");
+		});
+	});
+
 	describe("long-term memory", () => {
 		const autoMemory: AutoMemorySnapshot = {
 			global: {

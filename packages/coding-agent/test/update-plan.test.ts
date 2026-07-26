@@ -251,6 +251,7 @@ describe("update_plan", () => {
 			provenance: "builtin",
 			args: planInput(),
 			cwd: process.cwd(),
+			workspaceRoots: [process.cwd()],
 		});
 		expect(action.risks).toEqual(["ordinary-read"]);
 		expect(routeAction({ mode: "ask" }, action)).toBe("allow");
