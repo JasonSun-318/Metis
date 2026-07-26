@@ -151,6 +151,14 @@ test("packaged worker, WASM, trusted extension, and utility lifecycle stay funct
 		({ browser, page } = await connectToApp(debuggingPort));
 		phase = "verifying draft creation timing";
 		await waitForServerReady(page);
+		const bridge = await page.evaluate(() => {
+			const api = (globalThis as unknown as { arcMind: ArcMindDesktopApi }).arcMind;
+			return {
+				hasAttachmentPicker: typeof api.selectAttachmentFiles === "function",
+				hasSkillList: typeof api.listSkills === "function",
+			};
+		});
+		expect(bridge).toEqual({ hasAttachmentPicker: true, hasSkillList: true });
 		const sessionsBeforeDraft = await page.evaluate(() =>
 			(globalThis as unknown as { arcMind: ArcMindDesktopApi }).arcMind.listSessions({ limit: 200 }),
 		);
