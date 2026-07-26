@@ -111,7 +111,7 @@ import type {
 	McpStdioServerSettings,
 	SettingsScope,
 } from "../../core/settings-manager.ts";
-import { BUILTIN_SLASH_COMMANDS } from "../../core/slash-commands.ts";
+import { BUILTIN_SLASH_COMMANDS, getBuiltinSlashCommands } from "../../core/slash-commands.ts";
 import type { SourceInfo } from "../../core/source-info.ts";
 import type { TruncationResult } from "../../core/tools/truncate.ts";
 import { hasTrustRequiringProjectResources, ProjectTrustStore } from "../../core/trust-manager.ts";
@@ -191,7 +191,7 @@ function isExpandable(obj: unknown): obj is Expandable {
 	return typeof obj === "object" && obj !== null && "setExpanded" in obj && typeof obj.setExpanded === "function";
 }
 
-const COMPACTION_SAFE_COMMANDS = new Set(["copy", "session", "hotkeys", "dream", "quit", "debug"]);
+const COMPACTION_SAFE_COMMANDS = new Set(["copy", "session", "hotkeys", "dream", "dirs", "quit", "debug"]);
 const COMPACTION_WARNING =
 	"Compact/Dream is running. Wait for it to finish, then run the command again. Press Esc to cancel.";
 
@@ -696,7 +696,7 @@ export class InteractiveMode {
 
 	private createBaseAutocompleteProvider(): AutocompleteProvider {
 		// Define commands for autocomplete
-		const slashCommands: SlashCommand[] = BUILTIN_SLASH_COMMANDS.map((command) => ({
+		const slashCommands: SlashCommand[] = getBuiltinSlashCommands(this.sessionManager.getMode()).map((command) => ({
 			name: command.name,
 			description: command.description,
 			...(command.argumentHint && { argumentHint: command.argumentHint }),
@@ -749,7 +749,7 @@ export class InteractiveMode {
 		}));
 
 		// Convert extension commands to SlashCommand format
-		const builtinCommandNames = new Set(slashCommands.map((c) => c.name));
+		const builtinCommandNames = new Set(BUILTIN_SLASH_COMMANDS.map((command) => command.name));
 		const extensionCommands: SlashCommand[] = this.session.extensionRunner
 			.getRegisteredCommands()
 			.filter((cmd) => !builtinCommandNames.has(cmd.name))
@@ -2870,6 +2870,76 @@ export class InteractiveMode {
 		return true;
 	}
 
+	private getWorkspaceDirectoryCommandArgument(text: string, command: "/add-dir" | "/remove-dir"): string | undefined {
+		if (!text.startsWith(`${command} `)) return undefined;
+		const value = text.slice(command.length + 1).trim();
+		if (!value) return undefined;
+		const first = value[0];
+		if ((first === '"' || first === "'") && value.at(-1) === first) return value.slice(1, -1);
+		return value;
+	}
+
+	private handleAddDirectoryCommand(inputPath: string | undefined): void {
+		if (this.sessionManager.getMode() !== "code") {
+			this.showWarning("Additional directories are only available in Code mode");
+			return;
+		}
+		if (!inputPath) {
+			this.showWarning("Usage: /add-dir <path>");
+			return;
+		}
+		if (this.guardSessionMutation()) return;
+		try {
+			const result = this.sessionManager.addWorkspaceDirectory(inputPath);
+			if (result.changed) this.session.refreshSystemPrompt();
+			this.showStatus(
+				result.changed
+					? `Added working directory: ${result.path}`
+					: `Working directory already added: ${result.path}`,
+			);
+		} catch (error) {
+			this.showError(error instanceof Error ? error.message : String(error));
+		}
+	}
+
+	private handleRemoveDirectoryCommand(inputPath: string | undefined): void {
+		if (this.sessionManager.getMode() !== "code") {
+			this.showWarning("Additional directories are only available in Code mode");
+			return;
+		}
+		if (!inputPath) {
+			this.showWarning("Usage: /remove-dir <path>");
+			return;
+		}
+		if (this.guardSessionMutation()) return;
+		try {
+			const result = this.sessionManager.removeWorkspaceDirectory(inputPath);
+			if (result.changed) this.session.refreshSystemPrompt();
+			this.showStatus(
+				result.changed
+					? `Removed working directory: ${result.path}`
+					: `Working directory was not added: ${result.path}`,
+			);
+		} catch (error) {
+			this.showError(error instanceof Error ? error.message : String(error));
+		}
+	}
+
+	private handleDirectoriesCommand(argument: string): void {
+		if (this.sessionManager.getMode() !== "code") {
+			this.showWarning("Additional directories are only available in Code mode");
+			return;
+		}
+		if (argument) {
+			this.showWarning("Usage: /dirs");
+			return;
+		}
+		const [primary, ...additional] = this.sessionManager.getWorkspaceRoots();
+		this.showStatus(
+			["Working directories:", `- ${primary} (primary)`, ...additional.map((path) => `- ${path}`)].join("\n"),
+		);
+	}
+
 	private setupEditorSubmitHandler(): void {
 		this.defaultEditor.onSubmit = async (text: string) => {
 			text = text.trim();
@@ -2958,6 +3028,23 @@ export class InteractiveMode {
 			if (text === "/logout") {
 				this.showOAuthSelector("logout");
 				this.editor.setText("");
+				return;
+			}
+			if (text === "/add-dir" || text.startsWith("/add-dir ")) {
+				const inputPath = this.getWorkspaceDirectoryCommandArgument(text, "/add-dir");
+				this.editor.setText("");
+				this.handleAddDirectoryCommand(inputPath);
+				return;
+			}
+			if (text === "/remove-dir" || text.startsWith("/remove-dir ")) {
+				const inputPath = this.getWorkspaceDirectoryCommandArgument(text, "/remove-dir");
+				this.editor.setText("");
+				this.handleRemoveDirectoryCommand(inputPath);
+				return;
+			}
+			if (text === "/dirs" || text.startsWith("/dirs ")) {
+				this.editor.setText("");
+				this.handleDirectoriesCommand(text.slice("/dirs".length).trim());
 				return;
 			}
 			if (text === "/new" || text.startsWith("/new ")) {

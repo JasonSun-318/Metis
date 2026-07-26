@@ -386,7 +386,7 @@ describe("InteractiveMode.createBaseAutocompleteProvider", () => {
 			};
 			settingsManager: { getEnableSkillCommands: () => boolean };
 			skillCommands: Map<string, string>;
-			sessionManager: { getCwd: () => string };
+			sessionManager: { getCwd: () => string; getMode: () => "code" };
 			fdPath: null;
 		};
 
@@ -409,7 +409,7 @@ describe("InteractiveMode.createBaseAutocompleteProvider", () => {
 			},
 			settingsManager: { getEnableSkillCommands: () => false },
 			skillCommands: new Map(),
-			sessionManager: { getCwd: () => "/tmp" },
+			sessionManager: { getCwd: () => "/tmp", getMode: () => "code" },
 			fdPath: null,
 		};
 
@@ -436,7 +436,7 @@ describe("InteractiveMode.createBaseAutocompleteProvider", () => {
 			};
 			settingsManager: { getEnableSkillCommands: () => boolean };
 			skillCommands: Map<string, string>;
-			sessionManager: { getCwd: () => string };
+			sessionManager: { getCwd: () => string; getMode: () => "code" };
 			fdPath: null;
 			getLoginProviderOptions: () => AuthSelectorProvider[];
 		};
@@ -456,7 +456,7 @@ describe("InteractiveMode.createBaseAutocompleteProvider", () => {
 			},
 			settingsManager: { getEnableSkillCommands: () => false },
 			skillCommands: new Map(),
-			sessionManager: { getCwd: () => "/tmp" },
+			sessionManager: { getCwd: () => "/tmp", getMode: () => "code" },
 			fdPath: null,
 			getLoginProviderOptions: () => [
 				{ id: "anthropic", name: "Anthropic", authType: "oauth" },
