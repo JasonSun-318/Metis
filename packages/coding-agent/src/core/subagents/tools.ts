@@ -15,7 +15,7 @@ const Spawn = Type.Object(
 		name: Type.String({
 			minLength: 1,
 			maxLength: 128,
-			description: "Unique short name for this child within the parent session.",
+			description: "Unique short name for this child in your session.",
 		}),
 		task: Type.String({
 			minLength: 1,
@@ -26,40 +26,39 @@ const Spawn = Type.Object(
 		tools: Type.Array(Type.String({ minLength: 1, maxLength: 256 }), {
 			maxItems: 128,
 			uniqueItems: true,
-			description: "Minimum subset of the parent's active tools required for the assignment.",
+			description: "Minimum subset of your currently active tools required for the assignment.",
 		}),
 		role: Type.Optional(
 			Type.String({
 				minLength: 1,
 				maxLength: 8 * 1024,
-				description: "Optional subordinate role guidance encoded as assignment data.",
+				description: "Optional role guidance for the child.",
 			}),
 		),
 		developerInstructions: Type.Optional(
 			Type.String({
 				minLength: 1,
 				maxLength: 64 * 1024,
-				description: "Optional assignment constraints subordinate to the runtime-owned child contract.",
+				description: "Optional assignment constraints. They cannot override the child's enforced contract.",
 			}),
 		),
 		permissionMode: Type.Optional(
 			Type.Union([Type.Literal("ask"), Type.Literal("full")], {
 				description:
-					"Optional child permission mode; cannot be broader than the parent and defaults to the parent mode.",
+					"Optional child permission mode; cannot be broader than yours and defaults to your current mode.",
 			}),
 		),
 		model: Type.Optional(
 			Type.String({
 				pattern: "^[^/]+/[^/]+$",
-				description: "Optional provider/modelId; defaults to the parent's current model.",
+				description: "Optional provider/modelId; defaults to your current model.",
 			}),
 		),
 		thinkingLevel: Type.Optional(
 			Type.Union(
 				REAL_THINKING_LEVELS.map((level) => Type.Literal(level)),
 				{
-					description:
-						"Optional supported real thinking level; defaults to the parent's actual real thinking level.",
+					description: "Optional supported real thinking level; defaults to your current real thinking level.",
 				},
 			),
 		),
@@ -71,7 +70,7 @@ const Spawn = Type.Object(
 		),
 		forkTurns: Type.Optional(
 			Type.Union([Type.Integer({ minimum: 1, maximum: 1_000 }), Type.Literal("all")], {
-				description: 'Number of visible parent turns to copy, or "all"; omit to copy none.',
+				description: 'Number of your visible turns to copy, or "all"; omit to copy none.',
 			}),
 		),
 		timeoutSeconds: Type.Optional(
@@ -81,6 +80,10 @@ const Spawn = Type.Object(
 				description: "Maximum runtime in seconds, from 1 through 1800.",
 			}),
 		),
+		background: Type.Boolean({
+			description:
+				"False returns this run's terminal result in the current tool call; true returns after admission and delivers the terminal result automatically in a later turn.",
+		}),
 	},
 	{ additionalProperties: false },
 );
@@ -98,33 +101,30 @@ const Inspect = Type.Object(
 	{ additionalProperties: false },
 );
 
-const Message = Type.Object(
-	{
-		agentId: Type.String({ minLength: 1, description: "Owned child ID." }),
-		mode: Type.Union([Type.Literal("steer"), Type.Literal("follow_up")], {
-			description: "Use steer for a running child or follow_up to queue or resume work.",
-		}),
-		message: Type.String({
-			minLength: 1,
-			maxLength: 2 * 1024 * 1024,
-			description: "New bounded instructions for the child.",
-		}),
-	},
-	{ additionalProperties: false },
-);
-
-const Wait = Type.Object(
-	{
-		agentIds: Type.Optional(
-			Type.Array(Type.String({ minLength: 1 }), {
-				maxItems: 10,
-				uniqueItems: true,
-				description: "Owned child IDs to wait for; omit to wait for any live owned child.",
+const AgentIdField = Type.String({ minLength: 1, description: "Owned child ID." });
+const MessageField = Type.String({
+	minLength: 1,
+	maxLength: 2 * 1024 * 1024,
+	description: "New bounded instructions for the child.",
+});
+const Message = Type.Union([
+	Type.Object(
+		{ agentId: AgentIdField, mode: Type.Literal("steer"), message: MessageField },
+		{ additionalProperties: false },
+	),
+	Type.Object(
+		{
+			agentId: AgentIdField,
+			mode: Type.Literal("follow_up"),
+			message: MessageField,
+			background: Type.Boolean({
+				description:
+					"False returns this run's terminal result in the current tool call; true returns after admission and delivers the terminal result automatically in a later turn.",
 			}),
-		),
-	},
-	{ additionalProperties: false },
-);
+		},
+		{ additionalProperties: false },
+	),
+]);
 
 const AgentId = Type.Object(
 	{ agentId: Type.String({ minLength: 1, description: "Owned child ID." }) },
@@ -177,7 +177,9 @@ function compactResult(value: unknown): string {
 		return ids.length > 0 ? `Updated: ${ids.join(", ")}` : "No live agents";
 	}
 	const summary = agentSummary(details);
-	const suffix = [details.delivery, details.reason]
+	const mode =
+		typeof details.background === "boolean" ? (details.background ? "background" : "foreground") : undefined;
+	const suffix = [mode, details.delivery, details.reason]
 		.filter((part): part is string => typeof part === "string")
 		.join(" · ");
 	return suffix ? `${summary ?? "Completed"} · ${suffix}` : (summary ?? "Completed");
@@ -261,10 +263,13 @@ export function createSubagentTools(host: SubagentToolHost): ToolDefinition[] {
 				"Create one child agent for independent, bounded work. Use a unique name, a self-contained task, and the minimum necessary tools.",
 			parameters: Spawn,
 			renderResult: renderSubagentResult,
-			async execute(_id, params) {
+			async execute(_id, params, signal) {
 				requireUltra();
 				return result(
-					await manager().spawn({ ...params, thinkingLevel: params.thinkingLevel as ThinkingLevel | undefined }),
+					await manager().spawn(
+						{ ...params, thinkingLevel: params.thinkingLevel as ThinkingLevel | undefined },
+						signal,
+					),
 				);
 			},
 		}),
@@ -286,20 +291,9 @@ export function createSubagentTools(host: SubagentToolHost): ToolDefinition[] {
 				"Steer a running child or send a follow-up that resumes a completed, failed, or stopped child. Reuse an existing child when its responsibility has not changed.",
 			parameters: Message,
 			renderResult: renderSubagentResult,
-			async execute(_id, params) {
-				requireUltra();
-				return result(await manager().message(params));
-			},
-		}),
-		defineTool({
-			name: "wait_agents",
-			label: "Wait for agents",
-			description:
-				"Wait only when the next step depends on a new terminal event and no useful independent work remains. Completion notifications arrive automatically; do not poll.",
-			parameters: Wait,
-			renderResult: renderSubagentResult,
 			async execute(_id, params, signal) {
-				return result(await manager().wait(params, signal));
+				requireUltra();
+				return result(await manager().message(params, signal));
 			},
 		}),
 		defineTool({

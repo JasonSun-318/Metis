@@ -28,8 +28,11 @@ Sessions have a version field in the header:
 - **Version 6**: Stores immutable mode/workspace ownership and permission controls
 - **Version 7**: Adds child ownership markers and first-class subagent controls
 - **Version 8**: Adds Code-session additional-directory controls
+- **Version 9**: Adds policy-owned unattended permission decisions
+- **Version 10**: Adds hidden scheduled-session ownership markers
+- **Version 11**: Adds per-run Subagent delivery mode and durable mailbox delivery controls
 
-Existing sessions are automatically migrated to the current version (v8) when loaded. A journal containing a newer control family under an older header is rejected rather than guessed.
+Existing sessions are automatically migrated to the current version (v11) when loaded. A journal containing a newer control family under an older header is rejected rather than guessed.
 
 ## Image Storage
 
@@ -210,7 +213,7 @@ interface SessionEntryBase {
 First line of the file. Metadata only, not part of the tree (no `id`/`parentId`).
 
 ```json
-{"type":"session","version":8,"id":"uuid","timestamp":"2026-07-17T14:00:00.000Z","cwd":"/path/to/project","mode":"code","cwdOrigin":"user-selected","permissionMode":"ask"}
+{"type":"session","version":11,"id":"uuid","timestamp":"2026-07-17T14:00:00.000Z","cwd":"/path/to/project","mode":"code","cwdOrigin":"user-selected","permissionMode":"ask"}
 ```
 
 `mode` is `"chat"` or `"code"`. `cwdOrigin` is `"managed"` only for a workspace that ArcMind owns and may copy/delete; otherwise it is `"user-selected"`. New records write `permissionMode` as `"ask"` or `"full"`; both modes default to Ask. Legacy v6-v8 `"auto"` loads as Ask, and legacy `reviewerEnabled` is validated when present but ignored.
@@ -218,7 +221,7 @@ First line of the file. Metadata only, not part of the tree (no `id`/`parentId`)
 For sessions with a parent (created via `/fork`, `/clone`, or `newSession({ parentSession })`):
 
 ```json
-{"type":"session","version":8,"id":"uuid","timestamp":"2026-07-17T14:00:00.000Z","cwd":"/path/to/project","mode":"chat","cwdOrigin":"user-selected","permissionMode":"ask","parentSession":"/path/to/original/session.jsonl"}
+{"type":"session","version":11,"id":"uuid","timestamp":"2026-07-17T14:00:00.000Z","cwd":"/path/to/project","mode":"chat","cwdOrigin":"user-selected","permissionMode":"ask","parentSession":"/path/to/original/session.jsonl"}
 ```
 
 `parentSession` records lineage; forks and clones inherit the source session's mode.
@@ -252,12 +255,18 @@ Opening or resuming the same journal preserves these controls. `/tree` and compa
 A first-class child adds an immutable ownership marker to its normal session header:
 
 ```json
-{"type":"session","version":8,"id":"child-id","timestamp":"2026-07-18T00:00:00.000Z","cwd":"/path/to/project","mode":"code","cwdOrigin":"user-selected","permissionMode":"ask","subagent":{"agentId":"child-id","name":"researcher","parentSessionId":"parent-id"}}
+{"type":"session","version":11,"id":"child-id","timestamp":"2026-07-18T00:00:00.000Z","cwd":"/path/to/project","mode":"code","cwdOrigin":"user-selected","permissionMode":"ask","subagent":{"agentId":"child-id","name":"researcher","parentSessionId":"parent-id"}}
 ```
 
 Its journal begins with `subagent_created`, which snapshots inherited Code mode, exact model/real thinking level, tools, permission mode, cwd, fork policy, timeout, and optional assignment profile. Legacy child records may contain `auto`, `reviewerEnabled`, `readPaths`, and `writePaths`; the parser validates and discards those removed fields while normalizing Auto to Ask. Every admitted initial/follow-up run has an immutable `runId`; `subagent_state` and queued/accepted/cancelled `subagent_follow_up` records use that ID.
 
-The parent records `subagent_mode_change` for Ultra selection. Terminal notices use ordinary visible `custom_message` entries with `customType: "subagent_mailbox"` and a deterministic `details.eventId`; recovery compares that ID with child terminal state and repairs a missing parent event once. Child permission requests go directly to the active user approval UI and remain audited only in the child session. Full child transcripts and configuration never enter the parent journal.
+The parent records `subagent_mode_change` for Ultra selection. Child permission requests go directly to the active user approval UI and remain audited only in the child session. Full child transcripts and configuration never enter the parent journal.
+
+### Subagent mailbox controls (v11)
+
+`subagent_state.background` records the delivery choice for one `runId`; omitted legacy values mean background.
+
+`subagent_mailbox_event` stores one bounded terminal event globally in the parent session. `subagent_mailbox_delivery` records `started` and `completed` for one `deliveryId` and the exact ordered event IDs included in a provider request. A started delivery without a matching completed record remains pending after recovery. Pre-v11 generic mailbox custom messages are considered delivered and are not replayed during migration.
 
 Children live under `<agentDir>/subagents/<parentSessionId>/`. Close markers live in that directory's `.closing/` child. Only successful deletion appends one minimal `subagent_closed` tombstone to the parent. See [Ultra and Subagents](subagents.md).
 

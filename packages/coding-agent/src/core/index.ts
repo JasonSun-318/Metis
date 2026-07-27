@@ -146,6 +146,7 @@ export {
 	reduceRuntimeJournal,
 } from "./runtime-recovery.ts";
 export type { RecoverablePromptDraft } from "./runtime-recovery-materializer.ts";
+export * from "./schedules/index.ts";
 export {
 	formatSessionAttachmentDisplayText,
 	formatSessionAttachments,
@@ -155,6 +156,7 @@ export {
 	MAX_SESSION_ATTACHMENT_BYTES,
 	MAX_SESSION_ATTACHMENTS,
 	MAX_SESSION_ATTACHMENTS_BYTES,
+	pruneStaleSessionWorkDirs,
 	removeSessionAttachment,
 	type SessionAttachment,
 	type SessionAttachmentInput,
@@ -230,3 +232,15 @@ export {
 	isThinkingSelection,
 	type ThinkingSelection,
 } from "./thinking-selection.ts";
+export {
+	authorizeUnattendedAction,
+	createUnattendedExecutionProfile,
+	revalidateUnattendedAction,
+	UNATTENDED_TOOL_NAMES,
+	type UnattendedExecutionProfile,
+} from "./unattended-execution.ts";
+export {
+	createWorkspaceSandbox,
+	type WorkspaceSandbox,
+	WorkspaceSandboxError,
+} from "./workspace-sandbox.ts";

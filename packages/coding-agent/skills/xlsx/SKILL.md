@@ -11,16 +11,17 @@ This file embeds the official `excel` skill from the bundled OfficeCLI 1.0.140.
 - For a financial model, scenarios, or projections, run `officecli load_skill financial-model` once. For a KPI, analytics, or executive dashboard, run `officecli load_skill data-dashboard` once. Treat the selected specialized skill as overriding the generic guidance below; the ArcMind integration rules in this section still take priority.
 - Use the exact absolute path from the `<attachment>` or `<attachments>` block.
 - Put every new deliverable under `$ARCMIND_ATTACHMENTS_DIR`; create the directory first.
-- Put disposable previews, rendered sheets, extracted media, conversion files, and other intermediates under `$ARCMIND_WORK_DIR`; create it before use and pass `-o "$ARCMIND_WORK_DIR/<name>"` to `officecli view` modes that accept an output path. ArcMind clears this directory when the agent run ends. Never put a deliverable there.
+- A simple read must print content to stdout with a targeted `view`, `get`, or `query`. Do not create a work directory, preview, HTML file, rendered sheet, extracted-media directory, or copied workbook for reading, Q&A, or summary.
+- ArcMind creates a unique `$ARCMIND_WORK_DIR` for the current run. Put previews, rendered sheets, extracted media, conversions, and other intermediates only there; never create `.work`, `work`, or `tmp` beside an attachment. Start file-producing operations from `cd "$ARCMIND_WORK_DIR"` and pass `-o "$ARCMIND_WORK_DIR/<name>"` when supported. ArcMind clears the directory after the run.
 - Preserve the input by default and write modifications to a new deliverable unless the user explicitly requests an in-place change to an ArcMind-owned attachment.
 - Use the fewest sufficient operations and stop when the request is answered. Read only the ranges needed for the question; do not validate or render unless needed.
-- Use `batch` for multiple related changes. Explicit `open` and `save` are unnecessary for simple tasks because ArcMind sets `OFFICECLI_RESIDENT_FLUSH=each`.
+- ArcMind disables OfficeCLI auto-resident mode. Each command is self-contained and file-changing commands persist before returning. Ignore later resident lifecycle instructions: do not use `open`, `save`, `close`, or `watch`. Use `batch` for multiple related changes.
 - Preserve formulas separately from displayed values; never infer a computed value that OfficeCLI can return.
-- Never call a remote document, image, OCR, or vision service.
+- Never call a separate remote document, image, OCR, or vision service. When visual confirmation is needed, use only the current ArcMind model's image input as described below.
 
 ### Conditional visual confirmation
 
-The official visual-delivery guidance below is conditional in ArcMind, not universal. Render and read images only when the task needs confirmation of charts, dashboard appearance, clipped text, column widths, overlap, or final visual appearance. If visual confirmation is unnecessary, do not render.
+The official visual-delivery guidance below is conditional in ArcMind, not universal. Ignore later rules that say every workbook must be rendered. Render and read images only when the task needs confirmation of charts, dashboard appearance, clipped text, column widths, overlap, or final visual appearance. If visual confirmation is unnecessary, do not render.
 
 When visual confirmation is needed and the current model accepts image input, render only the relevant sheets or ranges and use the `read` tool on the resulting PNG files. A printed image path is not image input.
 
@@ -70,9 +71,9 @@ Before reaching for a command, know what a good xlsx looks like. These are the d
 
 **Preserve existing templates.** When editing a file that already has a look, match it. Existing conventions override these guidelines.
 
-### Visual delivery floor (applies to EVERY workbook)
+### Conditional visual-preview reference
 
-Before you declare done, run `officecli view "$FILE" html` and Read the returned HTML path to confirm all of these:
+When the task needs visual confirmation, run `officecli view "$FILE" html` and inspect the returned preview for:
 
 - **No `###` in any cell.** `###` means a column is too narrow for its widest value. Every column the user reads needs an explicit `width`. `###` in a delivered file is unfinished work, never "a small visual nit".
 - **No truncated titles.** Sheet titles, section headers, long labels must fit. Widen the column or apply `wrapText=true` on the cell.
@@ -133,11 +134,11 @@ Any hardcoded number without a source is an undocumented assumption — a review
 
 Six steps. Every non-trivial build follows this shape.
 
-1. **Open/save lifecycle.** Use `officecli open <file>` at the start and `officecli save <file>` at the end to flush to disk — `save` only writes and leaves the resident warm for follow-up edits; reach for `officecli close <file>` only to release the resident on a one-shot handoff. Both are always safe (never error or lose work). For many cells, use `batch`: **≤ 50 ops/block recommended; tested up to 80+ ops per block on pure value-set payloads with zero failures. Cross-sheet formula batches are the exception — run those non-resident, single heredoc (see Known Issues)**. **Flush only at the non-officecli boundary:** officecli's own reads always see your edits; run `save`/`close` only before a non-officecli program reads the file (openpyxl/pandas, Excel, a renderer, delivery).
+1. **ArcMind lifecycle.** Do not open a resident. Every mutating command persists before it returns. For many cells, use `batch`: **≤ 50 ops/block recommended; tested up to 80+ ops per block on pure value-set payloads with zero failures.**
 2. **Create or load.** `officecli create "$FILE"` (new) or `officecli view "$FILE" outline` (existing — get the lay of the land first).
 3. **Build incrementally.** One command, read the output, continue. After any structural op (new sheet, chart, named range, pivot), run `get` on it to confirm shape before stacking more on top.
 4. **Format.** Column widths, number formats, freeze panes, tab colors, header fills. Formatting is not optional polish — per "Requirements for Outputs" it is part of the deliverable.
-5. **Save, then reckon with the cache.** `officecli save <file>` writes to disk. Newly-added formulas ship without cached values; when a human opens the file in a spreadsheet app, the app recalculates and populates them. **But your downstream `INDEX/MATCH`, `SUMPRODUCT`, or any formula that references an upstream formula will cache whatever the upstream cached at write-time — often `0` or a stale value — and that cached lie survives into non-recalculating readers.** After any multi-formula build involving array formulas (`SUMPRODUCT`, `SUMIFS` with dynamic criteria) or cross-sheet chains, **re-touch every downstream cell** (run `set` again with the same formula) so the engine recomputes its cache from the freshly-cached upstream. ⚠️ Re-touch on cross-sheet chains via resident is unreliable (see Batch / resident caveats) — prefer non-resident `set` for the re-touch pass. Then `officecli get` a few downstream cells and eyeball that their `cachedValue=` is plausible. `validate` is safe with a resident open and itself flushes pending edits to disk (same as docx / pptx).
+5. **Reckon with the cache.** Newly-added formulas may ship without cached values; when a human opens the file in a spreadsheet app, the app recalculates them. **But downstream formulas can cache a stale upstream value.** After a multi-formula build with array formulas or cross-sheet chains, re-touch downstream cells with the same formula, then `officecli get` a few downstream cells and confirm `cachedValue=` is plausible.
 6. **QA — assume there are problems.** See the QA section. You are not done when your last command exited 0; you are done after one fix-and-verify cycle finds zero new issues.
 
 ## Quick Start
@@ -146,7 +147,6 @@ Minimal viable xlsx: 3 months of revenue + a total formula + column widths + a c
 
 ```bash
 officecli create "$FILE"
-officecli open "$FILE"
 officecli set "$FILE" /Sheet1/A1 --prop value=Month --prop bold=true
 officecli set "$FILE" /Sheet1/B1 --prop value=Revenue --prop bold=true
 officecli set "$FILE" /Sheet1/A2 --prop value=Jan
@@ -159,11 +159,10 @@ officecli set "$FILE" /Sheet1/A5 --prop value=Total --prop bold=true
 officecli set "$FILE" /Sheet1/B5 --prop formula="SUM(B2:B4)" --prop bold=true --prop numFmt='$#,##0'
 officecli set "$FILE" "/Sheet1/col[A]" --prop width=12
 officecli set "$FILE" "/Sheet1/col[B]" --prop width=15
-officecli close "$FILE"
 officecli validate "$FILE"
 ```
 
-Verified: `validate` returns `no errors found`, `B5` resolves to `135000`. This is the shape of every build: open → set cells/formulas → format → close → validate.
+Verified: `validate` returns `no errors found`, `B5` resolves to `135000`. This is the shape of every build: create/orient → set cells/formulas → format → validate.
 
 ## CSV / bulk import
 
@@ -206,7 +205,7 @@ Start wide, then narrow. `outline` first tells you what sheets exist and where t
 
 **Open the rendered workbook to eyeball your own work.**
 - `officecli view $FILE html` — Read the returned HTML to audit the rendered output. Each sheet is addressable, charts render inline. Catches `###`, placeholder leakage, pivot layout, row-height clipping.
-- `officecli watch $FILE` keeps a live preview running for the human user — they open it at their own discretion. Use when the user wants to watch along; agent self-check uses `view html` above.
+- Do not launch `officecli watch` from ArcMind. If the user wants a live viewer, ask them to open the workbook in Excel / WPS / Numbers.
 Use `view html` as your **first visual check after a batch of edits** — fix at source. For final visual verification, the user opens the `.xlsx` in their Excel / WPS / Numbers viewer.
 
 **Orient.** Sheets, dimensions, formula counts.
@@ -407,8 +406,8 @@ Your first workbook is almost never correct. Treat QA as a bug hunt, not a confi
    officecli query "$FILE" 'cell:contains("#NAME?")'
    officecli query "$FILE" 'cell:contains("#N/A")'
    ```
-4. `officecli validate "$FILE"` — safe with a resident open; `validate` flushes pending edits to disk itself.
-5. **Visual pass — walk every sheet via the HTML preview.** Run `officecli view "$FILE" html` and Read the returned HTML path. Each sheet renders with charts inline. Scan for `###`, truncated titles, placeholder tokens (`$fy$24`, `{var}`, `<TODO>`), sliced charts, white-slice pie charts, empty chart anchors — **STOP and fix before declaring done**. "validate pass" is not delivery; "the preview looks like a real workbook" is delivery. For human preview, run `officecli watch "$FILE"` (user opens the live preview at their own discretion) or have them open the `.xlsx` directly in Excel / WPS / Numbers.
+4. `officecli validate "$FILE"` — schema check.
+5. **Conditional visual pass.** Only when the task needs visual confirmation, inspect `officecli view "$FILE" html` for `###`, truncated titles, placeholder tokens (`$fy$24`, `{var}`, `<TODO>`), sliced charts, white-slice pie charts, and empty chart anchors. If it is not needed, skip preview generation. For human preview on request, have the user open the `.xlsx` directly.
 6. **Print layout fix (wide tables / multi-chart sheets).** When a sheet holds a chart or a wide table and the user will print it, set per-sheet page layout — but match the fit mode to the sheet's height:
    ```bash
    # Short summary / chart sheet → fit to one page.
@@ -515,4 +514,4 @@ Before calling a color or chart "broken", open the file in the user's actual tar
 
 ## ArcMind final override
 
-ArcMind's integration rules above take priority over conflicting generic requirements: do not install or update tools, do not use remote services, save deliverables under `$ARCMIND_ATTACHMENTS_DIR`, keep intermediates under `$ARCMIND_WORK_DIR`, and do not render when visual confirmation is unnecessary.
+ArcMind's integration rules above take priority over conflicting generic requirements: simple reads use stdout without intermediate files; OfficeCLI is non-resident; do not install or update tools; do not use separate remote services; save deliverables under `$ARCMIND_ATTACHMENTS_DIR`; keep intermediates under the runtime-created `$ARCMIND_WORK_DIR`; and do not render when visual confirmation is unnecessary.

@@ -39,6 +39,7 @@ import {
 	type ToolName,
 	withFileMutationQueue,
 } from "./tools/index.ts";
+import { UNATTENDED_TOOL_NAMES, type UnattendedExecutionProfile } from "./unattended-execution.ts";
 
 export interface CreateAgentSessionOptions {
 	/** Working directory for project-local discovery. Default: process.cwd() */
@@ -105,6 +106,8 @@ export interface CreateAgentSessionOptions {
 	includeAutoMemory?: boolean;
 	/** @internal Host-owned monotonic permission ceiling for a child runtime. */
 	permissionModeCeiling?: AgentSessionConfig["permissionModeCeiling"];
+	/** @internal Host-only fail-closed profile for unattended runs. */
+	unattendedExecution?: UnattendedExecutionProfile;
 
 	/** Settings manager. Default: SettingsManager.create(cwd, agentDir) */
 	settingsManager?: SettingsManager;
@@ -268,6 +271,9 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 	if (options.authStorage && options.modelRegistry && options.modelRegistry.authStorage !== options.authStorage) {
 		throw new Error("authStorage must match modelRegistry.authStorage");
 	}
+	if (options.unattendedExecution && options.mcpManager) {
+		throw new TypeError("Unattended execution cannot use an MCP manager");
+	}
 
 	const mode = options.agentMode ?? DEFAULT_AGENT_MODE;
 	const sessionId = suppliedSessionManager ? undefined : createSessionId();
@@ -309,16 +315,31 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		throw error;
 	}
 	const ownsSessionManager = suppliedSessionManager === undefined;
-	let mcpManager = options.mcpManager;
-	const ownsMcpManager = mcpManager === undefined;
+	let mcpManager = options.unattendedExecution ? undefined : options.mcpManager;
+	const ownsMcpManager = !options.unattendedExecution && mcpManager === undefined;
 	let completed = false;
 
 	try {
-		mcpManager ??= await McpManager.create({ settingsManager, authStorage, cwd });
+		if (!options.unattendedExecution) {
+			mcpManager ??= await McpManager.create({ settingsManager, authStorage, cwd });
+		}
 		if (!resourceLoader) {
-			resourceLoader = new DefaultResourceLoader({ cwd, agentDir, settingsManager });
+			resourceLoader = new DefaultResourceLoader({
+				cwd,
+				agentDir,
+				settingsManager,
+				...(options.unattendedExecution
+					? { noExtensions: true, noSkills: true, noPromptTemplates: true, noThemes: true }
+					: {}),
+			});
 			await resourceLoader.reload();
 			time("resourceLoader.reload");
+		}
+		if (
+			options.unattendedExecution &&
+			(resourceLoader.getExtensions().extensions.length > 0 || resourceLoader.getSkills().skills.length > 0)
+		) {
+			throw new TypeError("Unattended execution requires extensions and skills to be disabled");
 		}
 
 		// Check if session has existing data to restore
@@ -361,7 +382,8 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		}
 
 		let thinkingLevel = options.thinkingLevel;
-		let thinkingSelection = options.thinkingSelection;
+		const unattendedUltra = options.unattendedExecution !== undefined && options.thinkingSelection === "ultra";
+		let thinkingSelection = unattendedUltra ? undefined : options.thinkingSelection;
 		if (
 			thinkingSelection === undefined &&
 			thinkingLevel === undefined &&
@@ -369,7 +391,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			(!hasExistingSession || !hasThinkingEntry)
 		) {
 			const supportsSavedUltra = canUseUltra({
-				hostAllowsUltra: options.ultraAvailable === true,
+				hostAllowsUltra: options.ultraAvailable === true && !options.unattendedExecution,
 				persisted: sessionManager.isPersisted(),
 				mode: sessionManager.getMode(),
 				isSubagent: sessionManager.getHeader()?.subagent !== undefined,
@@ -396,7 +418,12 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			thinkingLevel = savedThinkingLevel ?? DEFAULT_THINKING_LEVEL;
 		}
 
-		if (thinkingSelection === "ultra") thinkingLevel = getHighestSupportedThinkingLevel(model);
+		if (unattendedUltra) {
+			thinkingLevel = getHighestSupportedThinkingLevel(model);
+			const warning =
+				"Ultra is unavailable for unattended execution; using the model's highest normal thinking level.";
+			modelFallbackMessage = modelFallbackMessage ? `${modelFallbackMessage}. ${warning}` : warning;
+		} else if (thinkingSelection === "ultra") thinkingLevel = getHighestSupportedThinkingLevel(model);
 		else if (thinkingSelection !== undefined) thinkingLevel = thinkingSelection;
 
 		// Clamp to model capabilities
@@ -407,7 +434,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		}
 
 		const ultraCapable = canUseUltra({
-			hostAllowsUltra: options.ultraAvailable === true,
+			hostAllowsUltra: options.ultraAvailable === true && !options.unattendedExecution,
 			persisted: sessionManager.isPersisted(),
 			mode: sessionManager.getMode(),
 			isSubagent: sessionManager.getHeader()?.subagent !== undefined,
@@ -435,15 +462,26 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			...(settingsManager.getWebSearchSettings().enabled ? (["web_search"] as const) : []),
 			...(isSubagent ? [] : (["update_plan"] as const)),
 		];
-		const allowedToolNames = options.tools ?? (options.noTools === "all" ? [] : undefined);
+		const allowedToolNames = options.unattendedExecution
+			? [...UNATTENDED_TOOL_NAMES]
+			: (options.tools ?? (options.noTools === "all" ? [] : undefined));
 		const excludedToolNames = isSubagent
 			? [...new Set([...(options.excludeTools ?? []), "update_plan"])]
 			: options.excludeTools;
 		const excludedToolNameSet = excludedToolNames ? new Set(excludedToolNames) : undefined;
 		const initialActiveToolNames: string[] = (
-			options.tools ? [...options.tools] : options.noTools ? [] : defaultActiveToolNames
+			options.unattendedExecution
+				? [...UNATTENDED_TOOL_NAMES]
+				: options.tools
+					? [...options.tools]
+					: options.noTools
+						? []
+						: defaultActiveToolNames
 		)
-			.concat(mcpManager.getDirectToolNames(), restoredMcpToolNames(sessionManager, mcpManager))
+			.concat(
+				mcpManager ? mcpManager.getDirectToolNames() : [],
+				mcpManager ? restoredMcpToolNames(sessionManager, mcpManager) : [],
+			)
 			.filter((name) => !excludedToolNameSet?.has(name))
 			.filter((name) => name !== "web_search" || settingsManager.getWebSearchSettings().enabled);
 
@@ -588,7 +626,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			agentDir,
 			scopedModels: options.scopedModels,
 			resourceLoader,
-			customTools: options.customTools,
+			customTools: options.unattendedExecution ? [] : options.customTools,
 			modelRegistry,
 			mcpManager,
 			initialActiveToolNames,
@@ -602,6 +640,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			additionalSystemPrompt: options.additionalSystemPrompt,
 			includeAutoMemory: options.includeAutoMemory,
 			permissionModeCeiling: options.permissionModeCeiling,
+			unattendedExecution: options.unattendedExecution,
 		});
 		if (thinkingSelection === "ultra") session.setThinkingSelection("ultra");
 		completed = true;

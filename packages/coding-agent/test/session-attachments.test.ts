@@ -1,15 +1,27 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	realpathSync,
+	rmSync,
+	symlinkSync,
+	utimesSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
-	clearSessionAttachmentWorkDir,
+	clearSessionAttachmentNonFiles,
+	clearSessionWorkDir,
+	createSessionWorkDir,
 	formatSessionAttachment,
 	formatSessionAttachmentDisplayText,
 	formatSessionAttachments,
 	getSessionAttachmentDir,
-	getSessionAttachmentWorkDir,
 	importSessionAttachments,
+	pruneStaleSessionWorkDirs,
 	removeSessionAttachment,
 } from "../src/core/session-attachments.ts";
 import { SessionManager } from "../src/core/session-manager.ts";
@@ -114,7 +126,7 @@ describe("session attachments", () => {
 		expect(formatSessionAttachmentDisplayText(safelySerialized)).toBe("[attachment_.pdf]");
 	});
 
-	it("clears only the disposable work directory", () => {
+	it("creates unique disposable work directories outside attachments", () => {
 		const source = join(cwd, "report.pdf");
 		writeFileSync(source, "document");
 		const [attachment] = importSessionAttachments({
@@ -123,32 +135,67 @@ describe("session attachments", () => {
 			cwd,
 			attachments: [{ path: source }],
 		});
-		const workDir = getSessionAttachmentWorkDir(agentDir, "session-work");
-		mkdirSync(workDir);
-		writeFileSync(join(workDir, "page-1.png"), "preview");
+		const first = createSessionWorkDir(agentDir, "session-work");
+		const second = createSessionWorkDir(agentDir, "session-work");
+		writeFileSync(join(first, "page-1.png"), "preview");
 
-		expect(clearSessionAttachmentWorkDir(agentDir, "session-work")).toBe(true);
-		expect(existsSync(workDir)).toBe(false);
+		expect(first).not.toBe(second);
+		expect(first.startsWith(join(realpathSync(agentDir), "tmp", "document-work"))).toBe(true);
+		expect(first.startsWith(getSessionAttachmentDir(agentDir, "session-work"))).toBe(false);
+		expect(clearSessionWorkDir(agentDir, attachment.path)).toBe(false);
+		expect(clearSessionWorkDir(agentDir, first)).toBe(true);
+		expect(existsSync(first)).toBe(false);
+		expect(existsSync(second)).toBe(true);
 		expect(existsSync(attachment.path)).toBe(true);
 	});
 
-	it.skipIf(process.platform === "win32")("does not follow a symlinked work directory", () => {
+	it.skipIf(process.platform === "win32")("does not follow a replaced work-directory symlink", () => {
+		const external = join(root, "external");
+		mkdirSync(external);
+		writeFileSync(join(external, "keep.txt"), "keep");
+		const workDir = createSessionWorkDir(agentDir, "session-work-link");
+		rmSync(workDir, { recursive: true });
+		symlinkSync(external, workDir);
+
+		expect(clearSessionWorkDir(agentDir, workDir)).toBe(true);
+		expect(existsSync(workDir)).toBe(false);
+		expect(readFileSync(join(external, "keep.txt"), "utf8")).toBe("keep");
+	});
+
+	it("prunes only expired run directories", () => {
+		const now = Date.now();
+		const expired = createSessionWorkDir(agentDir, "session-expired");
+		const current = createSessionWorkDir(agentDir, "session-current");
+		const old = new Date(now - 2_000);
+		utimesSync(expired, old, old);
+
+		expect(pruneStaleSessionWorkDirs(agentDir, 1_000, now)).toBe(1);
+		expect(existsSync(expired)).toBe(false);
+		expect(existsSync(current)).toBe(true);
+	});
+
+	it.skipIf(process.platform === "win32")("removes attachment-side scratch without following symlinks", () => {
 		const source = join(cwd, "report.pdf");
 		const external = join(root, "external");
 		writeFileSync(source, "document");
 		mkdirSync(external);
 		writeFileSync(join(external, "keep.txt"), "keep");
-		importSessionAttachments({
+		const [attachment] = importSessionAttachments({
 			agentDir,
-			sessionId: "session-work-link",
+			sessionId: "session-scratch",
 			cwd,
 			attachments: [{ path: source }],
 		});
-		symlinkSync(external, getSessionAttachmentWorkDir(agentDir, "session-work-link"));
+		const attachmentDir = getSessionAttachmentDir(agentDir, "session-scratch");
+		mkdirSync(join(attachmentDir, "work"));
+		writeFileSync(join(attachmentDir, "work", "document.txt"), "temporary");
+		symlinkSync(external, join(attachmentDir, ".work"));
 
-		expect(clearSessionAttachmentWorkDir(agentDir, "session-work-link")).toBe(true);
-		expect(existsSync(getSessionAttachmentWorkDir(agentDir, "session-work-link"))).toBe(false);
+		expect(clearSessionAttachmentNonFiles(agentDir, "session-scratch")).toBe(2);
+		expect(existsSync(join(attachmentDir, "work"))).toBe(false);
+		expect(existsSync(join(attachmentDir, ".work"))).toBe(false);
 		expect(readFileSync(join(external, "keep.txt"), "utf8")).toBe("keep");
+		expect(existsSync(attachment.path)).toBe(true);
 	});
 
 	it.skipIf(process.platform === "win32")("rejects symlinked input files", () => {

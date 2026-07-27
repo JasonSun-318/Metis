@@ -1,7 +1,13 @@
 import { isAbsolute, normalize } from "node:path";
 import { isAgentMode } from "./agent-mode.ts";
 import { isPersistedPermissionMode, normalizePermissionMode, type PersistedPermissionMode } from "./permission-mode.ts";
-import type { SubagentConfig, SubagentStatus, SubagentTombstone, SubagentUsage } from "./subagents/types.ts";
+import type {
+	SubagentConfig,
+	SubagentMailboxEvent,
+	SubagentStatus,
+	SubagentTombstone,
+	SubagentUsage,
+} from "./subagents/types.ts";
 
 interface SessionControlEntryBase {
 	readonly id: string;
@@ -17,7 +23,7 @@ export interface SessionPermissionsEntry extends SessionControlEntryBase {
 }
 
 export type PermissionDecision = "allow" | "ask" | "deny";
-export type PermissionDecisionSource = "user" | "reviewer";
+export type PermissionDecisionSource = "user" | "reviewer" | "policy";
 
 export interface SessionPermissionDecisionEntry extends SessionControlEntryBase {
 	readonly type: "session_permission_decision";
@@ -52,11 +58,24 @@ export interface SubagentStateEntry extends SessionControlEntryBase {
 	readonly agentId: string;
 	readonly runId: string;
 	readonly status: Exclude<SubagentStatus, "closed">;
+	readonly background?: boolean;
 	readonly reason?: SubagentStateReason;
 	readonly finalSummary?: string;
 	readonly error?: string;
 	readonly residualPath?: string;
 	readonly usage?: SubagentUsage;
+}
+
+export interface SubagentMailboxEventEntry extends SessionControlEntryBase {
+	readonly type: "subagent_mailbox_event";
+	readonly event: SubagentMailboxEvent;
+}
+
+export interface SubagentMailboxDeliveryEntry extends SessionControlEntryBase {
+	readonly type: "subagent_mailbox_delivery";
+	readonly deliveryId: string;
+	readonly eventIds: readonly string[];
+	readonly state: "started" | "completed";
 }
 
 export interface SubagentFollowUpEntry extends SessionControlEntryBase {
@@ -81,6 +100,8 @@ export interface SubagentModeChangeEntry extends SessionControlEntryBase {
 export type SubagentControlEntry =
 	| SubagentCreatedEntry
 	| SubagentStateEntry
+	| SubagentMailboxEventEntry
+	| SubagentMailboxDeliveryEntry
 	| SubagentFollowUpEntry
 	| SubagentClosedEntry
 	| SubagentModeChangeEntry;
@@ -330,10 +351,42 @@ function parseTombstone(value: unknown): SubagentTombstone {
 	};
 }
 
+function parseSubagentMailboxEvent(value: unknown): SubagentMailboxEvent {
+	const label = "Session control entry.event";
+	const fields = dataFields(value, label);
+	assertOnlyFields(
+		fields,
+		["eventId", "runId", "agentId", "name", "type", "status", "finalMessage", "error", "completedAt"],
+		label,
+	);
+	if (fields.get("type") !== "terminal") invalid(`${label}.type must be terminal`);
+	const status = fields.get("status");
+	if (status !== "done" && status !== "failed" && status !== "stopped") {
+		invalid(`${label}.status is invalid`);
+	}
+	const completedAt = requiredString(fields, "completedAt", { label, maxLength: 64, noControls: true });
+	if (!Number.isFinite(Date.parse(completedAt))) invalid(`${label}.completedAt is invalid`);
+	return {
+		eventId: requiredString(fields, "eventId", { label, maxLength: 512, noControls: true }),
+		runId: requiredString(fields, "runId", { label, maxLength: 256, noControls: true }),
+		agentId: requiredString(fields, "agentId", { label, maxLength: 256, noControls: true }),
+		name: requiredString(fields, "name", { label, maxLength: 128, noControls: true }),
+		type: "terminal",
+		status,
+		...(fields.has("finalMessage")
+			? { finalMessage: optionalString(fields, "finalMessage", { label, maxBytes: 4 * 1024 }) }
+			: {}),
+		...(fields.has("error") ? { error: optionalString(fields, "error", { label, maxBytes: 4 * 1024 }) } : {}),
+		completedAt,
+	};
+}
+
 export function isSubagentControlEntryType(type: unknown): type is SubagentControlEntry["type"] {
 	return (
 		type === "subagent_created" ||
 		type === "subagent_state" ||
+		type === "subagent_mailbox_event" ||
+		type === "subagent_mailbox_delivery" ||
 		type === "subagent_follow_up" ||
 		type === "subagent_closed" ||
 		type === "subagent_mode_change"
@@ -376,7 +429,9 @@ export function parseSessionControlEntry(value: unknown): SessionControlEntry {
 		assertOnlyFields(fields, [...baseFields, "actionId", "toolName", "source", "decision", "reason"]);
 		const source = fields.get("source");
 		const decision = fields.get("decision");
-		if (source !== "user" && source !== "reviewer") invalid("Session control entry.source is invalid");
+		if (source !== "user" && source !== "reviewer" && source !== "policy") {
+			invalid("Session control entry.source is invalid");
+		}
 		if (decision !== "allow" && decision !== "ask" && decision !== "deny")
 			invalid("Session control entry.decision is invalid");
 		return {
@@ -407,6 +462,7 @@ export function parseSessionControlEntry(value: unknown): SessionControlEntry {
 			"agentId",
 			"runId",
 			"status",
+			"background",
 			"reason",
 			"finalSummary",
 			"error",
@@ -415,6 +471,7 @@ export function parseSessionControlEntry(value: unknown): SessionControlEntry {
 		]);
 		const status = fields.get("status");
 		const reason = fields.get("reason");
+		const background = fields.get("background");
 		if (typeof status !== "string" || !SUBAGENT_STATUSES.has(status))
 			invalid("Session control entry.status is invalid");
 		if (reason !== undefined && (typeof reason !== "string" || !STATE_REASONS.has(reason)))
@@ -429,6 +486,9 @@ export function parseSessionControlEntry(value: unknown): SessionControlEntry {
 			invalid("Session control entry.reason timeout requires failed status");
 		if (reason === "recovered" && status !== "queued")
 			invalid("Session control entry.reason recovered requires queued status");
+		if (background !== undefined && typeof background !== "boolean") {
+			invalid("Session control entry.background must be a boolean");
+		}
 		const base = parseBase(fields);
 		return {
 			type,
@@ -438,6 +498,7 @@ export function parseSessionControlEntry(value: unknown): SessionControlEntry {
 				? requiredString(fields, "runId", { maxLength: 256, noControls: true })
 				: `legacy-${base.id}`,
 			status: status as Exclude<SubagentStatus, "closed">,
+			...(background === undefined ? {} : { background }),
 			...(reason === undefined ? {} : { reason: reason as SubagentStateReason }),
 			...(fields.has("finalSummary")
 				? { finalSummary: optionalString(fields, "finalSummary", { maxBytes: 4 * 1024 }) }
@@ -447,6 +508,41 @@ export function parseSessionControlEntry(value: unknown): SessionControlEntry {
 				? { residualPath: optionalString(fields, "residualPath", { maxBytes: 32 * 1024 }) }
 				: {}),
 			...(fields.has("usage") ? { usage: parseUsage(fields.get("usage")) } : {}),
+		};
+	}
+	if (type === "subagent_mailbox_event") {
+		assertOnlyFields(fields, [...baseFields, "event"]);
+		return { type, ...parseBase(fields), event: parseSubagentMailboxEvent(fields.get("event")) };
+	}
+	if (type === "subagent_mailbox_delivery") {
+		assertOnlyFields(fields, [...baseFields, "deliveryId", "eventIds", "state"]);
+		const rawEventIds = fields.get("eventIds");
+		if (!Array.isArray(rawEventIds) || rawEventIds.length === 0) {
+			invalid("Session control entry.eventIds must contain at least one event ID");
+		}
+		if (rawEventIds.length > 256) invalid("Session control entry.eventIds may contain at most 256 event IDs");
+		const eventIds = rawEventIds.map((value, index) => {
+			if (
+				typeof value !== "string" ||
+				value.length === 0 ||
+				value.length > 512 ||
+				/[\u0000-\u001f\u007f-\u009f]/u.test(value)
+			) {
+				invalid(`Session control entry.eventIds[${index}] is invalid`);
+			}
+			return value;
+		});
+		if (new Set(eventIds).size !== eventIds.length) {
+			invalid("Session control entry.eventIds must not contain duplicates");
+		}
+		const state = fields.get("state");
+		if (state !== "started" && state !== "completed") invalid("Session control entry.state is invalid");
+		return {
+			type,
+			...parseBase(fields),
+			deliveryId: requiredString(fields, "deliveryId", { maxLength: 256, noControls: true }),
+			eventIds,
+			state,
 		};
 	}
 	if (type === "subagent_follow_up") {

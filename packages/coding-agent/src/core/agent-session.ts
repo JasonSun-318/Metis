@@ -43,7 +43,7 @@ import {
 } from "@arcmind/ai/compat";
 import { getThemeByName, theme } from "../modes/interactive/theme/theme.ts";
 import { stripFrontmatter } from "../utils/frontmatter.ts";
-import { resolvePath } from "../utils/paths.ts";
+import { isPathInside, resolvePath } from "../utils/paths.ts";
 import { sleep } from "../utils/sleep.ts";
 import type { AgentMode } from "./agent-mode.ts";
 import { formatNoApiKeyFoundMessage, formatNoModelSelectedMessage } from "./auth-guidance.ts";
@@ -131,22 +131,32 @@ import {
 } from "./runtime-recovery.ts";
 import { appendSyntheticRuntimeToolResult } from "./runtime-recovery-materializer.ts";
 import {
-	clearSessionAttachmentWorkDir,
+	clearSessionAttachmentNonFiles,
+	clearSessionWorkDir,
+	createSessionWorkDir,
 	getSessionAttachmentDir,
-	getSessionAttachmentWorkDir,
 } from "./session-attachments.ts";
+import { createSessionId } from "./session-id.ts";
 import type { BranchSummaryEntry, CompactionEntry, SessionEntry, SessionManager } from "./session-manager.ts";
 import { CURRENT_SESSION_VERSION, getLatestCompactionEntry, type SessionHeader } from "./session-manager.ts";
 import type { CwdOrigin } from "./session-workspace.ts";
 import type { SettingsManager } from "./settings-manager.ts";
 import type { SlashCommandInfo } from "./slash-commands.ts";
 import { createSyntheticSourceInfo, type SourceInfo } from "./source-info.ts";
+import { buildSubagentMailboxContent } from "./subagents/prompts.ts";
+import type { SubagentMailboxEvent } from "./subagents/types.ts";
 import { type BuildSystemPromptOptions, buildSystemPrompt } from "./system-prompt.ts";
 import { canUseUltra, getHighestSupportedThinkingLevel, type ThinkingSelection } from "./thinking-selection.ts";
 import { createToolResultMicrocompactor } from "./tool-result-microcompaction.ts";
 import { type BashOperations, createLocalBashOperations } from "./tools/bash.ts";
 import { createAllToolDefinitions } from "./tools/index.ts";
 import { createToolDefinitionFromAgentTool } from "./tools/tool-definition-wrapper.ts";
+import {
+	authorizeUnattendedAction,
+	revalidateUnattendedAction,
+	UNATTENDED_TOOL_NAMES,
+	type UnattendedExecutionProfile,
+} from "./unattended-execution.ts";
 import { resolveWebSearchApiKey, WEB_SEARCH_PROVIDER_INFO, type WebSearchProvider } from "./web-search-config.ts";
 
 // ============================================================================
@@ -264,6 +274,8 @@ export interface AgentSessionConfig {
 	includeAutoMemory?: boolean;
 	/** Host-owned monotonic upper bound for a child session. */
 	permissionModeCeiling?: () => PermissionMode;
+	/** Host-only fail-closed profile for unattended runs. Never derive from user or model input. */
+	unattendedExecution?: UnattendedExecutionProfile;
 }
 
 export interface ExtensionBindings {
@@ -331,7 +343,7 @@ interface AuthorizedPermissionAction {
 	readonly args: unknown;
 	readonly cwd: string;
 	readonly workspaceRoots: readonly string[];
-	readonly authorizedMode: PermissionMode;
+	readonly authorizedMode: PermissionMode | "unattended";
 }
 
 function estimateMessagesTokens(messages: AgentMessage[]): number {
@@ -392,6 +404,15 @@ interface DurableQueueMetadata {
 	readonly queue: "steer" | "follow_up";
 }
 
+interface PendingSubagentMailboxEvent {
+	readonly event: SubagentMailboxEvent;
+}
+
+interface ActiveSubagentMailboxDelivery {
+	readonly deliveryId: string;
+	readonly eventIds: readonly string[];
+}
+
 function durablePromptResidentPayloadBytes(input: DurablePromptInput, text = input.text): number {
 	return (
 		Buffer.byteLength(text, "utf8") +
@@ -440,10 +461,11 @@ export class AgentSession {
 	private _followUpMessages: string[] = [];
 	/** Messages queued to be included with the next user prompt as context ("asides"). */
 	private _pendingNextTurnMessages: CustomMessage[] = [];
-	/** Host-owned durable events awaiting the next provider request boundary. */
-	private readonly _pendingBackgroundMessages = new Map<string, CustomMessage>();
-	private readonly _backgroundMessageKeys = new Set<string>();
-	private _stagedBackgroundMessages: readonly [string, CustomMessage][] = [];
+	private readonly _knownSubagentMailboxEventIds = new Set<string>();
+	private readonly _pendingSubagentMailboxEvents = new Map<string, PendingSubagentMailboxEvent>();
+	private _stagedSubagentMailboxEventIds: readonly string[] = [];
+	private _activeSubagentMailboxDelivery?: ActiveSubagentMailboxDelivery;
+	private _requestedSubagentMailboxEventIds?: ReadonlySet<string>;
 
 	// Compaction state
 	private _compactionAbortController: AbortController | undefined = undefined;
@@ -463,6 +485,7 @@ export class AgentSession {
 	// Bash execution state
 	private _bashAbortController: AbortController | undefined = undefined;
 	private _pendingBashMessages: BashExecutionMessage[] = [];
+	private _activeWorkDir: string | undefined;
 
 	// Extension system
 	private _extensionRunner!: ExtensionRunner;
@@ -516,12 +539,31 @@ export class AgentSession {
 	private readonly _ultraAvailable: boolean;
 	private readonly _includeAutoMemory: boolean;
 	private readonly _permissionModeCeiling?: () => PermissionMode;
+	private readonly _unattendedExecution?: UnattendedExecutionProfile;
 	private _additionalSystemPrompt?: string | (() => string | undefined);
 	private readonly _trustedControlTools = new Map<string, ToolDefinition>();
 
 	constructor(config: AgentSessionConfig) {
+		if (config.unattendedExecution) {
+			if (config.sessionManager.getHeader()?.subagent) {
+				throw new TypeError("Unattended execution cannot run as a subagent");
+			}
+			if (config.baseToolsOverride) throw new TypeError("Unattended execution cannot override built-in tools");
+			if (config.mcpManager) throw new TypeError("Unattended execution cannot use MCP tools");
+			if (config.customTools?.length) throw new TypeError("Unattended execution cannot use custom tools");
+			if (config.resourceLoader.getExtensions().extensions.length > 0) {
+				throw new TypeError("Unattended execution cannot load extensions");
+			}
+			if (config.resourceLoader.getSkills().skills.length > 0) {
+				throw new TypeError("Unattended execution cannot load skills");
+			}
+			if (!config.unattendedExecution.workspaceRoots.some((root) => isPathInside(root, config.cwd))) {
+				throw new TypeError("Unattended execution cwd must be inside its workspace roots");
+			}
+		}
 		this.agent = config.agent;
 		this.sessionManager = config.sessionManager;
+		this._restoreSubagentMailbox();
 		const persistedToolOutputDir = this.sessionManager.getToolOutputDir();
 		this._ephemeralToolOutputDir = persistedToolOutputDir
 			? undefined
@@ -530,16 +572,28 @@ export class AgentSession {
 		this.settingsManager = config.settingsManager;
 		this._scopedModels = config.scopedModels ?? [];
 		this._resourceLoader = config.resourceLoader;
-		this._customTools = config.customTools ?? [];
+		this._customTools = config.unattendedExecution ? [] : (config.customTools ?? []);
 		this._cwd = config.cwd;
 		this._agentDir = config.agentDir;
 		this._modelRegistry = config.modelRegistry;
-		this._mcpManager = config.mcpManager;
+		this._mcpManager = config.unattendedExecution ? undefined : config.mcpManager;
 		this._extensionRunnerRef = config.extensionRunnerRef;
-		this._initialActiveToolNames = config.initialActiveToolNames;
-		this._defaultBuiltinToolsEnabled = config.defaultBuiltinToolsEnabled !== false;
-		this._allowedToolNames = config.allowedToolNames ? new Set(config.allowedToolNames) : undefined;
-		this._excludedToolNames = config.excludedToolNames ? new Set(config.excludedToolNames) : undefined;
+		this._initialActiveToolNames = config.unattendedExecution
+			? [...UNATTENDED_TOOL_NAMES]
+			: config.initialActiveToolNames;
+		this._defaultBuiltinToolsEnabled = config.unattendedExecution
+			? false
+			: config.defaultBuiltinToolsEnabled !== false;
+		this._allowedToolNames = config.unattendedExecution
+			? new Set(UNATTENDED_TOOL_NAMES)
+			: config.allowedToolNames
+				? new Set(config.allowedToolNames)
+				: undefined;
+		this._excludedToolNames = config.unattendedExecution
+			? undefined
+			: config.excludedToolNames
+				? new Set(config.excludedToolNames)
+				: undefined;
 		this._baseToolsOverride = config.baseToolsOverride;
 		this._sessionStartEvent = config.sessionStartEvent ?? { type: "session_start", reason: "startup" };
 		this._ultraAvailable = canUseUltra({
@@ -551,6 +605,7 @@ export class AgentSession {
 		this._additionalSystemPrompt = config.additionalSystemPrompt;
 		this._includeAutoMemory = config.includeAutoMemory !== false;
 		this._permissionModeCeiling = config.permissionModeCeiling;
+		this._unattendedExecution = config.unattendedExecution;
 		if (this.sessionManager.getSubagentsEnabled() && !this._ultraAvailable) {
 			throw new Error("Ultra sessions require AgentSessionRuntime");
 		}
@@ -561,7 +616,7 @@ export class AgentSession {
 		// (session persistence, extensions, auto-compaction, retry logic)
 		this._unsubscribeAgent = this.agent.subscribe(this._handleAgentEvent);
 		this._installAgentToolHooks();
-		this._installBackgroundMessageHook();
+		this._installSubagentMailboxHook();
 		this._installToolResultMicrocompactionHook();
 		this._installAgentDurabilityHooks();
 		this._installAgentNextTurnRefresh();
@@ -612,6 +667,7 @@ export class AgentSession {
 		definitions: readonly ToolDefinition[],
 		options?: { readonly automaticPermissionToolNames?: readonly string[] },
 	): void {
+		if (this._unattendedExecution) throw new Error("Unattended execution cannot install host tools");
 		const active = new Set(this.getActiveToolNames());
 		const automatic = new Set(options?.automaticPermissionToolNames);
 		for (const definition of definitions) {
@@ -626,6 +682,17 @@ export class AgentSession {
 		this._refreshToolRegistry({ activeToolNames: [...active] });
 	}
 
+	removeHostTools(names: readonly string[]): void {
+		if (this._unattendedExecution) throw new Error("Unattended execution cannot remove host tools");
+		const removed = new Set(names);
+		this._customTools = this._customTools.filter(({ name }) => !removed.has(name));
+		for (const name of removed) {
+			this._trustedControlTools.delete(name);
+			this._allowedToolNames?.delete(name);
+		}
+		this._refreshToolRegistry({ activeToolNames: this.getActiveToolNames().filter((name) => !removed.has(name)) });
+	}
+
 	private _isTrustedControlTool(name: string): boolean {
 		const trusted = this._trustedControlTools.get(name);
 		return trusted !== undefined && this._toolDefinitions.get(name)?.definition === trusted;
@@ -637,52 +704,111 @@ export class AgentSession {
 		this.agent.state.systemPrompt = this._baseSystemPrompt;
 	}
 
-	/**
-	 * Persist a host event without interrupting, steering, or starting a model turn.
-	 * The event is added to the first provider request whose context includes it.
-	 */
-	enqueueBackgroundCustomMessage<T = unknown>(
-		message: Pick<CustomMessage<T>, "customType" | "content" | "display" | "details">,
-		dedupeKey: string,
-	): void {
-		if (this._runtimeTeardownRequested) throw new Error("The agent session is tearing down");
-		if (!dedupeKey) throw new Error("Background message dedupe key must be non-empty");
-		if (this._backgroundMessageKeys.has(dedupeKey)) {
-			throw new Error(`Background message dedupe key was reused: ${dedupeKey}`);
+	private _restoreSubagentMailbox(): void {
+		const startedDeliveries = new Set<string>();
+		const deliveredEventIds = new Set<string>();
+		for (const entry of this.sessionManager.getDurableJournalSnapshot()) {
+			if (entry.type === "subagent_mailbox_event") {
+				this._knownSubagentMailboxEventIds.add(entry.event.eventId);
+				if (!this._pendingSubagentMailboxEvents.has(entry.event.eventId)) {
+					this._pendingSubagentMailboxEvents.set(entry.event.eventId, { event: entry.event });
+				}
+				continue;
+			}
+			if (entry.type === "subagent_mailbox_delivery") {
+				const key = `${entry.deliveryId}\n${JSON.stringify(entry.eventIds)}`;
+				if (entry.state === "started") startedDeliveries.add(key);
+				else if (startedDeliveries.has(key)) {
+					for (const eventId of entry.eventIds) deliveredEventIds.add(eventId);
+				}
+				continue;
+			}
+			if (entry.type !== "custom_message" || entry.customType !== "subagent_mailbox") continue;
+			const details = entry.details;
+			if (typeof details !== "object" || details === null || !("eventId" in details)) continue;
+			if (typeof details.eventId === "string") this._knownSubagentMailboxEventIds.add(details.eventId);
 		}
-		if (this._pendingBackgroundMessages.size >= 256) throw new Error("Background message mailbox is full");
-		const appMessage = {
-			role: "custom" as const,
-			customType: message.customType,
-			content: message.content ?? [],
-			display: message.display,
-			details: message.details,
+		for (const eventId of deliveredEventIds) this._pendingSubagentMailboxEvents.delete(eventId);
+	}
+
+	enqueueSubagentMailboxEvent(event: SubagentMailboxEvent): boolean {
+		if (this._runtimeTeardownRequested) throw new Error("The agent session is tearing down");
+		if (this._knownSubagentMailboxEventIds.has(event.eventId)) {
+			return this._pendingSubagentMailboxEvents.has(event.eventId);
+		}
+		if (this._pendingSubagentMailboxEvents.size >= 256) throw new Error("Subagent mailbox is full");
+		this.sessionManager.appendSubagentControl({ type: "subagent_mailbox_event", event });
+		this._knownSubagentMailboxEventIds.add(event.eventId);
+		this._pendingSubagentMailboxEvents.set(event.eventId, { event });
+		return true;
+	}
+
+	hasSubagentMailboxEvent(eventId: string): boolean {
+		return this._knownSubagentMailboxEventIds.has(eventId);
+	}
+
+	getPendingSubagentMailboxEventIds(): readonly string[] {
+		return [...this._pendingSubagentMailboxEvents.keys()];
+	}
+
+	async continueSubagentMailbox(eventIds?: readonly string[]): Promise<boolean> {
+		const requested = eventIds ?? this.getPendingSubagentMailboxEventIds();
+		const pending = [...new Set(requested)].filter((eventId) => this._pendingSubagentMailboxEvents.has(eventId));
+		if (this._runtimeTeardownRequested || pending.length === 0 || !this.isIdle || this._isAgentSettling) return false;
+		this._requestedSubagentMailboxEventIds = new Set(pending);
+		try {
+			await this._runAgentPrompt({
+				role: "custom",
+				customType: "subagent_continuation",
+				content: [
+					{
+						type: "text",
+						text: "<subagent_notification>One or more background agents have completed. Review the pending result events, integrate what is relevant, and continue your task without repeating completed work.</subagent_notification>",
+					},
+				],
+				display: false,
+				timestamp: Date.now(),
+			});
+			return true;
+		} finally {
+			this._requestedSubagentMailboxEventIds = undefined;
+		}
+	}
+
+	private _currentBranchSubagentMailboxEventIds(): Set<string> {
+		const eventIds = new Set<string>();
+		for (const entry of this.sessionManager.buildContextEntries()) {
+			if (entry.type !== "custom_message" || entry.customType !== "subagent_mailbox") continue;
+			const details = entry.details;
+			if (typeof details !== "object" || details === null || !("eventId" in details)) continue;
+			if (typeof details.eventId === "string") eventIds.add(details.eventId);
+		}
+		return eventIds;
+	}
+
+	private _subagentMailboxMessage(event: SubagentMailboxEvent): CustomMessage<SubagentMailboxEvent> {
+		return {
+			role: "custom",
+			customType: "subagent_mailbox",
+			content: buildSubagentMailboxContent(event),
+			display: true,
+			details: event,
 			timestamp: Date.now(),
-		} satisfies CustomMessage<T>;
-		this.sessionManager.appendCustomMessageEntry(
-			appMessage.customType,
-			appMessage.content,
-			appMessage.display,
-			appMessage.details,
-		);
-		this._backgroundMessageKeys.add(dedupeKey);
-		this._pendingBackgroundMessages.set(dedupeKey, appMessage);
-		this._emit({ type: "message_start", message: appMessage });
-		this._emit({ type: "message_end", message: appMessage });
+		};
 	}
 
-	hasPendingBackgroundMessage(dedupeKey: string): boolean {
-		return this._pendingBackgroundMessages.has(dedupeKey);
-	}
-
-	private _installBackgroundMessageHook(): void {
+	private _installSubagentMailboxHook(): void {
 		const transformContext = this.agent.transformContext;
 		this.agent.transformContext = async (messages, signal) => {
-			this._stagedBackgroundMessages = [...this._pendingBackgroundMessages.entries()];
-			const withPending =
-				this._stagedBackgroundMessages.length === 0
-					? messages
-					: [...messages, ...this._stagedBackgroundMessages.map(([, message]) => message)];
+			const requested = this._requestedSubagentMailboxEventIds ?? this._pendingSubagentMailboxEvents.keys();
+			this._stagedSubagentMailboxEventIds = [...requested].filter((eventId) =>
+				this._pendingSubagentMailboxEvents.has(eventId),
+			);
+			const visible = this._currentBranchSubagentMailboxEventIds();
+			const pendingMessages = this._stagedSubagentMailboxEventIds
+				.filter((eventId) => !visible.has(eventId))
+				.map((eventId) => this._subagentMailboxMessage(this._pendingSubagentMailboxEvents.get(eventId)!.event));
+			const withPending = pendingMessages.length === 0 ? messages : [...messages, ...pendingMessages];
 			return transformContext ? transformContext(withPending, signal) : withPending;
 		};
 	}
@@ -704,13 +830,49 @@ export class AgentSession {
 		};
 	}
 
-	private _commitStagedBackgroundMessages(): void {
-		for (const [key, message] of this._stagedBackgroundMessages) {
-			if (this._pendingBackgroundMessages.get(key) !== message) continue;
+	private _commitStagedSubagentMailboxDelivery(): void {
+		const eventIds = this._stagedSubagentMailboxEventIds.filter((eventId) =>
+			this._pendingSubagentMailboxEvents.has(eventId),
+		);
+		this._stagedSubagentMailboxEventIds = [];
+		if (eventIds.length === 0) return;
+		if (this._activeSubagentMailboxDelivery) throw new Error("A subagent mailbox delivery is already active");
+		const visibleEventIds = this._currentBranchSubagentMailboxEventIds();
+
+		for (const eventId of eventIds) {
+			if (visibleEventIds.has(eventId)) continue;
+			const message = this._subagentMailboxMessage(this._pendingSubagentMailboxEvents.get(eventId)!.event);
 			this.agent.state.messages.push(message);
-			this._pendingBackgroundMessages.delete(key);
+			this.sessionManager.appendCustomMessageEntry(
+				message.customType,
+				message.content,
+				message.display,
+				message.details,
+			);
+			visibleEventIds.add(eventId);
 		}
-		this._stagedBackgroundMessages = [];
+
+		const deliveryId = createSessionId();
+		this.sessionManager.appendSubagentControl({
+			type: "subagent_mailbox_delivery",
+			deliveryId,
+			eventIds,
+			state: "started",
+		});
+		this._activeSubagentMailboxDelivery = { deliveryId, eventIds };
+	}
+
+	private _completeSubagentMailboxDelivery(): void {
+		const active = this._activeSubagentMailboxDelivery;
+		if (!active) return;
+		this.sessionManager.appendSubagentControl({
+			type: "subagent_mailbox_delivery",
+			deliveryId: active.deliveryId,
+			eventIds: active.eventIds,
+			state: "completed",
+		});
+		for (const eventId of active.eventIds) this._pendingSubagentMailboxEvents.delete(eventId);
+		this._activeSubagentMailboxDelivery = undefined;
 	}
 
 	private async _getRequiredRequestAuth(model: Model<any>): Promise<{
@@ -787,11 +949,16 @@ export class AgentSession {
 		};
 	}
 
-	private _appendPermissionAudit(action: PermissionAction, decision: "allow" | "deny", reason: string): void {
+	private _appendPermissionAudit(
+		action: PermissionAction,
+		decision: "allow" | "deny",
+		reason: string,
+		source: "user" | "policy" = "user",
+	): void {
 		this.sessionManager.appendPermissionDecision({
 			actionId: action.actionId,
 			toolName: action.toolName,
-			source: "user",
+			source,
 			decision,
 			reason,
 		});
@@ -827,7 +994,8 @@ export class AgentSession {
 		}
 		const approvedArgs = structuredClone(input.args);
 		const approvedCwd = input.cwd ?? this._cwd;
-		const approvedWorkspaceRoots = this.sessionManager.getWorkspaceRoots();
+		const approvedWorkspaceRoots =
+			this._unattendedExecution?.workspaceRoots ?? this.sessionManager.getWorkspaceRoots();
 		const approvedSettings = this._getEffectivePermissionSettings();
 		const classificationArgs =
 			input.effectiveCommand === undefined
@@ -846,16 +1014,27 @@ export class AgentSession {
 					? [WEB_SEARCH_PROVIDER_INFO[this.settingsManager.getWebSearchSettings().provider].networkTarget]
 					: undefined,
 		};
-		const action =
-			approvedSettings.mode === "full" ? unclassifiedAction(classifyInput) : classifyAction(classifyInput);
-		const authorization = await this._permissionPolicy.authorize({
-			settings: approvedSettings,
-			action,
-			args: structuredClone(approvedArgs),
-			signal: input.signal,
-		});
+		const action = this._unattendedExecution
+			? classifyAction(classifyInput)
+			: approvedSettings.mode === "full"
+				? unclassifiedAction(classifyInput)
+				: classifyAction(classifyInput);
+		const authorization = this._unattendedExecution
+			? authorizeUnattendedAction({
+					profile: this._unattendedExecution,
+					action,
+					args: structuredClone(approvedArgs),
+					cwd: approvedCwd,
+				})
+			: await this._permissionPolicy.authorize({
+					settings: approvedSettings,
+					action,
+					args: structuredClone(approvedArgs),
+					signal: input.signal,
+				});
 		if (authorization.decision === "deny") {
-			if (authorization.source === "user") this._appendPermissionAudit(action, "deny", authorization.reason);
+			if (this._unattendedExecution) this._appendPermissionAudit(action, "deny", authorization.reason, "policy");
+			else if (authorization.source === "user") this._appendPermissionAudit(action, "deny", authorization.reason);
 			throw new Error(`Permission denied for ${input.toolName}: ${authorization.reason}`);
 		}
 		if (authorization.source === "user") this._appendPermissionAudit(action, "allow", authorization.reason);
@@ -864,7 +1043,7 @@ export class AgentSession {
 			args: approvedArgs,
 			cwd: approvedCwd,
 			workspaceRoots: approvedWorkspaceRoots,
-			authorizedMode: approvedSettings.mode,
+			authorizedMode: this._unattendedExecution ? "unattended" : approvedSettings.mode,
 		} satisfies AuthorizedPermissionAction;
 		this._permissionGrants.set(input.actionId, authorized);
 		return authorized;
@@ -884,6 +1063,17 @@ export class AgentSession {
 		}
 		if (toolName === "bash" && authorized.action.command !== this._effectiveBashCommand(args)) {
 			throw new Error("Bash effective command changed after permission approval");
+		}
+		if (authorized.authorizedMode === "unattended") {
+			if (!this._unattendedExecution) throw new Error("Unattended execution profile is unavailable");
+			revalidateUnattendedAction({
+				profile: this._unattendedExecution,
+				authorized: authorized.action,
+				toolName,
+				args,
+				cwd: this._cwd,
+			});
+			return authorized;
 		}
 		if (authorized.authorizedMode === "full" && this._getEffectivePermissionSettings().mode !== "full") {
 			throw new Error(`${toolName} permission mode narrowed before execution; retry requires approval`);
@@ -976,7 +1166,7 @@ export class AgentSession {
 				}
 			},
 			beforeProviderRequest: async () => {
-				this._commitStagedBackgroundMessages();
+				this._commitStagedSubagentMailboxDelivery();
 				this._markDurableProviderEpoch();
 			},
 			beforeToolExecute: async (context, signal) => {
@@ -1366,6 +1556,7 @@ export class AgentSession {
 					event.message.role === "toolResult" ? toolOutput : undefined,
 					this._durableTurn?.turnId,
 				);
+				if (event.message.role === "assistant") this._completeSubagentMailboxDelivery();
 				if (event.message.role === "user" && this._durableTurn) {
 					this._durableTerminalEvidence = undefined;
 				} else if (event.message.role === "assistant" && this._durableTurn) {
@@ -2233,40 +2424,48 @@ export class AgentSession {
 	}
 
 	private async _runAgentPrompt(messages: AgentMessage | AgentMessage[]): Promise<void> {
+		const sessionId = this.sessionManager.getSessionId();
+		this._activeWorkDir = undefined;
 		this._isAgentRunActive = true;
-		if (this._agentDir) {
-			clearSessionAttachmentWorkDir(this._agentDir, this.sessionManager.getSessionId());
-		}
-		const errors: unknown[] = [];
 		try {
-			await this.agent.prompt(messages);
-			while (await this._handlePostAgentRun()) {
-				await this.agent.continue();
+			if (this._agentDir) clearSessionAttachmentNonFiles(this._agentDir, sessionId);
+			const errors: unknown[] = [];
+			try {
+				await this.agent.prompt(messages);
+				while (await this._handlePostAgentRun()) {
+					await this.agent.continue();
+				}
+			} catch (error) {
+				errors.push(error);
 			}
-		} catch (error) {
-			errors.push(error);
+			this._systemPromptOverride = undefined;
+			try {
+				this._flushPendingBashMessages();
+			} catch (error) {
+				errors.push(error);
+			}
+			try {
+				this._finishDurableTurn();
+			} catch (error) {
+				errors.push(error);
+			}
+			try {
+				await this._emitAgentSettled();
+			} catch (error) {
+				errors.push(error);
+			}
+			if (errors.length === 1) throw errors[0];
+			if (errors.length > 1) throw new AggregateError(errors, "Failed to run and settle the durable agent turn");
+		} finally {
+			this._activeSubagentMailboxDelivery = undefined;
+			this._stagedSubagentMailboxEventIds = [];
+			const workDir = this._activeWorkDir;
+			if (this._agentDir) {
+				clearSessionAttachmentNonFiles(this._agentDir, sessionId);
+				if (workDir) clearSessionWorkDir(this._agentDir, workDir);
+			}
+			this._activeWorkDir = undefined;
 		}
-		this._systemPromptOverride = undefined;
-		try {
-			this._flushPendingBashMessages();
-		} catch (error) {
-			errors.push(error);
-		}
-		try {
-			this._finishDurableTurn();
-		} catch (error) {
-			errors.push(error);
-		}
-		if (this._agentDir) {
-			clearSessionAttachmentWorkDir(this._agentDir, this.sessionManager.getSessionId());
-		}
-		try {
-			await this._emitAgentSettled();
-		} catch (error) {
-			errors.push(error);
-		}
-		if (errors.length === 1) throw errors[0];
-		if (errors.length > 1) throw new AggregateError(errors, "Failed to run and settle the durable agent turn");
 	}
 
 	private async _handlePostAgentRun(): Promise<boolean> {
@@ -4020,8 +4219,8 @@ export class AgentSession {
 		includeAllExtensionTools?: boolean;
 	}): void {
 		const autoResizeImages = this.settingsManager.getImageAutoResize();
-		const shellCommandPrefix = this.settingsManager.getShellCommandPrefix();
-		const shellPath = this.settingsManager.getShellPath();
+		const shellCommandPrefix = this._unattendedExecution ? undefined : this.settingsManager.getShellCommandPrefix();
+		const shellPath = this._unattendedExecution ? undefined : this.settingsManager.getShellPath();
 		this._runtimeShellCommandPrefix = shellCommandPrefix;
 		const baseToolDefinitions = this._baseToolsOverride
 			? Object.fromEntries(
@@ -4033,25 +4232,41 @@ export class AgentSession {
 			: createAllToolDefinitions(this._cwd, {
 					read: { autoResizeImages },
 					bash: {
+						operations: this._unattendedExecution?.bashOperations,
 						commandPrefix: shellCommandPrefix,
 						shellPath,
 						outputDir: this._toolOutputDir,
-						...(this._agentDir
+						...(!this._unattendedExecution && this._agentDir
 							? {
-									spawnHook: (context) => ({
-										...context,
-										env: {
-											...context.env,
-											ARCMIND_ATTACHMENTS_DIR: getSessionAttachmentDir(
+									spawnHook: (context) => {
+										if (!this._activeWorkDir && context.command.includes("ARCMIND_WORK_DIR")) {
+											this._activeWorkDir = createSessionWorkDir(
 												this._agentDir!,
 												this.sessionManager.getSessionId(),
-											),
-											ARCMIND_WORK_DIR: getSessionAttachmentWorkDir(
-												this._agentDir!,
-												this.sessionManager.getSessionId(),
-											),
-										},
-									}),
+											);
+										}
+										return {
+											...context,
+											command: this._activeWorkDir
+												? `readonly ARCMIND_WORK_DIR\n${context.command}`
+												: context.command,
+											env: {
+												...context.env,
+												ARCMIND_ATTACHMENTS_DIR: getSessionAttachmentDir(
+													this._agentDir!,
+													this.sessionManager.getSessionId(),
+												),
+												...(this._activeWorkDir
+													? {
+															ARCMIND_WORK_DIR: this._activeWorkDir,
+															TMPDIR: this._activeWorkDir,
+															TMP: this._activeWorkDir,
+															TEMP: this._activeWorkDir,
+														}
+													: {}),
+											},
+										};
+									},
 								}
 							: {}),
 					},
@@ -4066,6 +4281,12 @@ export class AgentSession {
 		);
 
 		const extensionsResult = this._resourceLoader.getExtensions();
+		if (this._unattendedExecution && extensionsResult.extensions.length > 0) {
+			throw new TypeError("Unattended execution cannot load extensions");
+		}
+		if (this._unattendedExecution && this._resourceLoader.getSkills().skills.length > 0) {
+			throw new TypeError("Unattended execution cannot load skills");
+		}
 		if (options.flagValues) {
 			for (const [name, value] of options.flagValues) {
 				extensionsResult.runtime.flagValues.set(name, value);

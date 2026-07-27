@@ -16,6 +16,7 @@ import { type CreateAgentSessionOptions, type CreateAgentSessionResult, createAg
 import type { SessionManager } from "./session-manager.ts";
 import { SettingsManager } from "./settings-manager.ts";
 import type { ThinkingSelection } from "./thinking-selection.ts";
+import type { UnattendedExecutionProfile } from "./unattended-execution.ts";
 
 /**
  * Non-fatal issues collected while creating services or sessions.
@@ -71,6 +72,8 @@ export interface CreateAgentSessionFromServicesOptions {
 	additionalSystemPrompt?: string | (() => string | undefined);
 	includeAutoMemory?: boolean;
 	permissionModeCeiling?: CreateAgentSessionOptions["permissionModeCeiling"];
+	/** Host-only fail-closed profile for unattended runs. */
+	unattendedExecution?: UnattendedExecutionProfile;
 }
 
 /**
@@ -227,6 +230,7 @@ export async function createAgentSessionFromServices(
 		additionalSystemPrompt: options.additionalSystemPrompt,
 		includeAutoMemory: options.includeAutoMemory,
 		permissionModeCeiling: options.permissionModeCeiling,
+		unattendedExecution: options.unattendedExecution,
 		sessionStartEvent: options.sessionStartEvent,
 	});
 }

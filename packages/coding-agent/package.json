@@ -43,6 +43,8 @@
 		"prepublishOnly": "npm run clean && npm run build && npm run shrinkwrap"
 	},
 	"dependencies": {
+		"@anthropic-ai/sandbox-runtime": "0.0.67",
+		"@js-temporal/polyfill": "0.5.1",
 		"@arcmind/agent-core": "^0.80.6",
 		"@arcmind/ai": "^0.80.6",
 		"@arcmind/tui": "^0.80.6",

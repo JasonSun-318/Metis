@@ -136,7 +136,7 @@ describe("AgentSessionRuntime characterization", () => {
 				diagnostics: services.diagnostics,
 			};
 		};
-		const sessionManager = options?.sessionManager ?? SessionManager.create(tempDir);
+		const sessionManager = options?.sessionManager ?? SessionManager.create(tempDir, join(tempDir, "sessions"));
 		sessionManager.setPermissionSettings({ mode: "full" });
 		const sessionCwd = sessionManager.getCwd();
 		const runtime = await createAgentSessionRuntime(createRuntime, {
@@ -738,7 +738,7 @@ describe("AgentSessionRuntime characterization", () => {
 			`arcmind-runtime-accepted-prefix-${Date.now()}-${Math.random().toString(36).slice(2)}`,
 		);
 		mkdirSync(tempDir, { recursive: true });
-		const manager = SessionManager.create(tempDir);
+		const manager = SessionManager.create(tempDir, join(tempDir, "sessions"));
 		const input = { text: "hello" } as const;
 		const identity = identifySubmitPromptRequest("request-accepted-prefix", input);
 		manager.appendRuntimeControl({
@@ -1519,7 +1519,7 @@ describe("AgentSessionRuntime characterization", () => {
 	it("repairs an unfinished tool before session creation without replaying provider or tool", async () => {
 		const tempDir = join(tmpdir(), `arcmind-runtime-recovery-${Date.now()}-${Math.random().toString(36).slice(2)}`);
 		mkdirSync(tempDir, { recursive: true });
-		const manager = SessionManager.create(tempDir);
+		const manager = SessionManager.create(tempDir, join(tempDir, "sessions"));
 		const input = { text: "recover" } as const;
 		const identity = identifySubmitPromptRequest("request-recovery-tool", input);
 		manager.appendRuntimeControl({
@@ -1788,7 +1788,7 @@ describe("AgentSessionRuntime characterization", () => {
 		events.length = 0;
 		const otherDir = join(tmpdir(), `arcmind-runtime-other-${Date.now()}-${Math.random().toString(36).slice(2)}`);
 		mkdirSync(otherDir, { recursive: true });
-		const otherSession = SessionManager.create(otherDir);
+		const otherSession = SessionManager.create(otherDir, join(otherDir, "sessions"));
 		otherSession.appendMessage({ role: "user", content: [{ type: "text", text: "other" }], timestamp: Date.now() });
 		const otherSessionFile = otherSession.getSessionFile();
 		cancelReason = "resume";
@@ -2708,7 +2708,7 @@ describe("AgentSessionRuntime characterization", () => {
 		const otherRuntime = await createAgentSessionRuntime(createOtherRuntime, {
 			cwd: secondDir,
 			agentDir: tempDir,
-			sessionManager: SessionManager.create(secondDir),
+			sessionManager: SessionManager.create(secondDir, join(secondDir, "sessions")),
 		});
 		await otherRuntime.session.prompt("other");
 		const otherSessionFile = otherRuntime.session.sessionFile!;
@@ -2784,7 +2784,7 @@ describe("AgentSessionRuntime characterization", () => {
 		const otherRuntime = await createAgentSessionRuntime(createOtherRuntime, {
 			cwd: otherDir,
 			agentDir: tempDir,
-			sessionManager: SessionManager.create(otherDir),
+			sessionManager: SessionManager.create(otherDir, join(otherDir, "sessions")),
 		});
 		await otherRuntime.session.setModel(faux.getModel("faux-2")!);
 		otherRuntime.session.setThinkingLevel("off");

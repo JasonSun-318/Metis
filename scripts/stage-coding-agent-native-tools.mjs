@@ -10,6 +10,7 @@ import {
 	readFileSync,
 	renameSync,
 	rmSync,
+	statSync,
 	writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -118,16 +119,58 @@ for (const pair of selectedPairs) {
 	if (!supportedPairs.includes(pair)) throw new Error(`Unsupported native-tool target: ${pair}`);
 }
 
+function stageSandboxRuntime() {
+	const source = join(repoRoot, "node_modules", "@anthropic-ai", "sandbox-runtime");
+	const destination = join(dirname(outputDir), "sandbox-runtime");
+	const staged = `${destination}.tmp-${process.pid}`;
+	const architectures =
+		target === "all"
+			? ["x64", "arm64"]
+			: [...new Set(selectedPairs.map((pair) => pair.split("-").at(-1)).filter(Boolean))];
+	rmSync(staged, { recursive: true, force: true });
+	try {
+		for (const architecture of architectures) {
+			for (const [kind, executable] of [
+				["seccomp", "apply-seccomp"],
+				["srt-win", "srt-win.exe"],
+			]) {
+				const input = join(source, "vendor", kind, architecture, executable);
+				if (!statSync(input).isFile()) throw new Error(`Sandbox runtime helper is missing: ${input}`);
+				const output = join(staged, kind, architecture, executable);
+				mkdirSync(dirname(output), { recursive: true });
+				cpSync(input, output);
+				if (kind === "seccomp") chmodSync(output, 0o755);
+			}
+		}
+		const license = join(source, "LICENSE");
+		if (!statSync(license).isFile()) throw new Error(`Sandbox runtime license is missing: ${license}`);
+		mkdirSync(join(staged, "licenses"), { recursive: true });
+		cpSync(license, join(staged, "licenses", "LICENSE"));
+		rmSync(destination, { recursive: true, force: true });
+		renameSync(staged, destination);
+	} catch (error) {
+		rmSync(staged, { recursive: true, force: true });
+		throw error;
+	}
+}
+
 function sha256(data) {
 	return createHash("sha256").update(data).digest("hex");
 }
 
 async function download(url) {
-	const response = await fetch(url, {
-		dispatcher,
-		redirect: "follow",
-		signal: AbortSignal.timeout(120_000),
-	});
+	let response;
+	try {
+		response = await fetch(url, {
+			dispatcher,
+			redirect: "follow",
+			signal: AbortSignal.timeout(120_000),
+		});
+	} catch (error) {
+		throw new Error(`Download failed: ${url}: ${error instanceof Error ? error.message : String(error)}`, {
+			cause: error,
+		});
+	}
 	if (!response.ok) throw new Error(`Download failed (${response.status}): ${url}`);
 	return Buffer.from(await response.arrayBuffer());
 }
@@ -252,16 +295,24 @@ async function stageTools() {
 	rmSync(staged, { recursive: true, force: true });
 	mkdirSync(staged, { recursive: true });
 	try {
-		for (const pair of selectedPairs) {
-			const destination = join(staged, pair);
-			mkdirSync(destination, { recursive: true });
-			const manifest = { schemaVersion: 1, pair, tools: {} };
-			if (pairs[pair]) {
-				for (const tool of ["rg", "fd"]) manifest.tools[tool] = await stageTool(pair, tool, destination);
-			}
-			if (officeCliPairs[pair]) manifest.tools.officecli = await stageOfficeCli(pair, destination);
-			writeFileSync(join(destination, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
-		}
+		const queue = [...selectedPairs];
+		// ponytail: two workers avoid overloading common developer proxies; raise only after measured CI need.
+		await Promise.all(
+			Array.from({ length: Math.min(2, queue.length) }, async () => {
+				while (queue.length > 0) {
+					const pair = queue.shift();
+					if (!pair) return;
+					const destination = join(staged, pair);
+					mkdirSync(destination, { recursive: true });
+					const manifest = { schemaVersion: 1, pair, tools: {} };
+					if (pairs[pair]) {
+						for (const tool of ["rg", "fd"]) manifest.tools[tool] = await stageTool(pair, tool, destination);
+					}
+					if (officeCliPairs[pair]) manifest.tools.officecli = await stageOfficeCli(pair, destination);
+					writeFileSync(join(destination, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
+				}
+			}),
+		);
 		rmSync(outputDir, { recursive: true, force: true });
 		renameSync(staged, outputDir);
 	} catch (error) {
@@ -271,6 +322,7 @@ async function stageTools() {
 }
 
 try {
+	stageSandboxRuntime();
 	await stageTools();
 } finally {
 	await dispatcher.close();

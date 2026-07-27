@@ -73,7 +73,7 @@ import { CorruptSessionError, openSessionJournal, type SessionJournal } from "./
 import { SessionLease, SessionLeaseError } from "./session-lease.ts";
 import { type CwdOrigin, getOwnedManagedWorkspace, publishManagedWorkspaceCopy } from "./session-workspace.ts";
 
-export const CURRENT_SESSION_VERSION = 8;
+export const CURRENT_SESSION_VERSION = 11;
 
 interface ImageReference {
 	type: "image_ref";
@@ -603,6 +603,10 @@ export interface SessionHeader {
 		name: string;
 		parentSessionId: string;
 	};
+	scheduled?: {
+		taskId: string;
+		runId: string;
+	};
 }
 
 export type { CwdOrigin } from "./session-workspace.ts";
@@ -616,6 +620,7 @@ export interface NewSessionOptions {
 	/** @deprecated Ignored. Ask/Full has no reviewer. */
 	reviewerEnabled?: boolean;
 	subagent?: SessionHeader["subagent"];
+	scheduled?: SessionHeader["scheduled"];
 }
 
 export interface ImportSessionOptions {
@@ -747,7 +752,7 @@ export type RuntimeControlPayload = RuntimePayload<RuntimeControlEntry>;
 export interface PermissionDecisionPayload {
 	readonly actionId: string;
 	readonly toolName: string;
-	readonly source: "user";
+	readonly source: "user" | "policy";
 	readonly decision: "allow" | "deny";
 	readonly reason?: string;
 }
@@ -957,6 +962,37 @@ function migrateV7ToV8(entries: FileEntry[]): void {
 	}
 }
 
+/** Migrate v8 → v9: reserve policy-owned unattended permission decisions. */
+function migrateV8ToV9(entries: FileEntry[]): void {
+	for (const entry of entries) {
+		if (entry.type === "session") entry.version = 9;
+	}
+}
+
+/** Migrate v9 → v10: reserve hidden scheduled-session ownership markers. */
+function migrateV9ToV10(entries: FileEntry[]): void {
+	for (const entry of entries) {
+		if (entry.type === "session") entry.version = 10;
+	}
+}
+
+/** Migrate v10 → v11: reserve durable Subagent mailbox delivery controls. */
+function migrateV10ToV11(entries: FileEntry[]): void {
+	for (const entry of entries) {
+		if (entry.type === "session") entry.version = 11;
+	}
+}
+
+function isV11SubagentRecord(entry: unknown): boolean {
+	if (typeof entry !== "object" || entry === null) return false;
+	const value = entry as { type?: unknown; background?: unknown };
+	return (
+		value.type === "subagent_mailbox_event" ||
+		value.type === "subagent_mailbox_delivery" ||
+		(value.type === "subagent_state" && Object.hasOwn(value, "background"))
+	);
+}
+
 /**
  * Run all necessary migrations to bring entries to current version.
  * Mutates entries in place. Returns true if any migration was applied.
@@ -984,6 +1020,18 @@ function migrateToCurrentVersion(entries: FileEntry[]): boolean {
 	if (version < 8 && entries.some((entry) => isSessionDirectoryControlEntryType(entry.type))) {
 		throw new TypeError("Directory control entries require a v8 session header");
 	}
+	if (
+		version < 9 &&
+		entries.some((entry) => entry.type === "session_permission_decision" && entry.source === "policy")
+	) {
+		throw new TypeError("Policy permission decisions require a v9 session header");
+	}
+	if (version < 10 && header?.scheduled !== undefined) {
+		throw new TypeError("Scheduled session markers require a v10 session header");
+	}
+	if (version < 11 && entries.some(isV11SubagentRecord)) {
+		throw new TypeError("Subagent mailbox controls require a v11 session header");
+	}
 
 	if (version >= CURRENT_SESSION_VERSION) return false;
 
@@ -994,6 +1042,9 @@ function migrateToCurrentVersion(entries: FileEntry[]): boolean {
 	if (version < 6) migrateV5ToV6(entries);
 	if (version < 7) migrateV6ToV7(entries);
 	if (version < 8) migrateV7ToV8(entries);
+	if (version < 9) migrateV8ToV9(entries);
+	if (version < 10) migrateV9ToV10(entries);
+	if (version < 11) migrateV10ToV11(entries);
 
 	return true;
 }
@@ -1306,6 +1357,23 @@ function validateSessionHeader(record: Record<string, unknown>, filePath: string
 			corruptSession(filePath, 1, "Session header has an invalid subagent name");
 		}
 	}
+	if (header.scheduled !== undefined) {
+		if (!isJsonObject(header.scheduled))
+			corruptSession(filePath, 1, "Session header has an invalid scheduled marker");
+		const fields = Object.keys(header.scheduled);
+		if (fields.length !== 2 || !fields.includes("taskId") || !fields.includes("runId")) {
+			corruptSession(filePath, 1, "Session header has an invalid scheduled marker");
+		}
+		try {
+			assertValidSessionId(header.scheduled.taskId);
+			assertValidSessionId(header.scheduled.runId);
+		} catch (error) {
+			throw new CorruptSessionError(filePath, 1, "Session header has an invalid scheduled id", { cause: error });
+		}
+		if (header.subagent !== undefined) {
+			corruptSession(filePath, 1, "Session header cannot be both scheduled and a subagent");
+		}
+	}
 
 	const version = header.version ?? 1;
 	if (!Number.isInteger(version) || version < 1) {
@@ -1326,6 +1394,9 @@ function validateSessionHeader(record: Record<string, unknown>, filePath: string
 	}
 	if (version < 7 && header.subagent !== undefined) {
 		corruptSession(filePath, 1, "Subagent header fields require a v7 session header");
+	}
+	if (version < 10 && header.scheduled !== undefined) {
+		corruptSession(filePath, 1, "Scheduled header fields require a v10 session header");
 	}
 	return header;
 }
@@ -1350,6 +1421,9 @@ function validateRawSessionRecords(records: readonly unknown[], filePath: string
 			continue;
 		}
 		if (isSessionControlEntryType(type)) {
+			if (version < 11 && isV11SubagentRecord(records[index])) {
+				corruptSession(filePath, index + 1, "Subagent mailbox controls require a v11 session header");
+			}
 			if (isSessionDirectoryControlEntryType(type) && version < 8) {
 				corruptSession(filePath, index + 1, "Directory control entries require a v8 session header");
 			}
@@ -1943,6 +2017,7 @@ async function scanSessionCatalog(filePath: string): Promise<{ state: SessionCat
 
 async function buildSessionInfo(filePath: string): Promise<SessionInfo | null> {
 	try {
+		if (readSessionHeaderInfo(filePath)?.header.scheduled) return null;
 		const { state, mtime } = await scanSessionCatalog(filePath);
 		const header = state.header!;
 		const headerTime = new Date(header.timestamp).getTime();
@@ -2470,6 +2545,11 @@ export class SessionManager {
 				throw new TypeError("Invalid subagent name");
 			}
 		}
+		if (options?.scheduled) {
+			if (options.subagent) throw new TypeError("A session cannot be both scheduled and a subagent");
+			assertValidSessionId(options.scheduled.taskId);
+			assertValidSessionId(options.scheduled.runId);
+		}
 		const header: SessionHeader = {
 			type: "session",
 			version: CURRENT_SESSION_VERSION,
@@ -2481,6 +2561,7 @@ export class SessionManager {
 			permissionMode,
 			parentSession: options?.parentSession,
 			subagent: options?.subagent,
+			scheduled: options?.scheduled,
 		};
 		let state: ManagedSessionState;
 		if (this.persist) {
@@ -3301,6 +3382,7 @@ export class SessionManager {
 	/** Create an independent candidate containing the path from root to the selected leaf. */
 	createBranchedSessionManager(leafId: string | null): SessionManager {
 		this._assertOpen();
+		if (this.getHeader()?.scheduled) throw new Error("Scheduled sessions are read-only and cannot be branched");
 		let sourceStoragePath: string | undefined;
 		let path: SessionEntry[];
 		if (this.persist) {
@@ -3550,6 +3632,7 @@ export class SessionManager {
 		const resolvedTargetCwd = resolvePath(targetCwd);
 		const source = readSessionRecordsReadOnly(sourceStoragePath);
 		const sourceHeader = source.records[0] as SessionHeader;
+		if (sourceHeader.scheduled) throw new Error("Scheduled sessions are read-only and cannot be forked");
 		const sourcePermissions = reducePermissionSettings(source.records);
 
 		const dir = sessionDir ? normalizePath(sessionDir) : getDefaultSessionDir(resolvedTargetCwd);
@@ -3615,6 +3698,7 @@ export class SessionManager {
 		const source = readSessionRecordsReadOnly(sourceStoragePath);
 		const records = source.records.filter((entry) => !isSessionDirectoryControlEntryType(entry.type));
 		const header = records[0] as SessionHeader;
+		if (header.scheduled) throw new Error("Scheduled sessions are read-only and cannot be imported");
 		const mode =
 			options.destinationMode === "create-exclusive"
 				? "create"
@@ -3632,7 +3716,13 @@ export class SessionManager {
 	}
 
 	/** Delete one closed session and only the assets ArcMind can prove it owns. */
-	static async deleteSession(sessionPath: string, options: { agentDir?: string } = {}): Promise<DeleteSessionResult> {
+	static async deleteSession(
+		sessionPath: string,
+		options: { agentDir?: string; permanent?: boolean; expectedScheduled?: SessionHeader["scheduled"] } = {},
+	): Promise<DeleteSessionResult> {
+		if (options.permanent && !options.expectedScheduled) {
+			return { ok: false, method: "unlink", error: "Permanent deletion requires scheduled-session ownership" };
+		}
 		const unresolvedPath = resolvePath(sessionPath);
 		let before: ReturnType<typeof lstatSync>;
 		try {
@@ -3641,6 +3731,9 @@ export class SessionManager {
 				throw new Error("Session path must be a single-link regular file");
 			}
 		} catch (error) {
+			if (options.permanent && (error as NodeJS.ErrnoException).code === "ENOENT") {
+				return { ok: true, method: "unlink" };
+			}
 			return { ok: false, method: "unlink", error: error instanceof Error ? error.message : String(error) };
 		}
 
@@ -3665,6 +3758,13 @@ export class SessionManager {
 			}
 			const records = readSessionRecordsReadOnly(storagePath, { followSymlinkAlias: false }).records;
 			const header = records[0] as SessionHeader;
+			if (
+				options.permanent &&
+				(header.scheduled?.taskId !== options.expectedScheduled?.taskId ||
+					header.scheduled?.runId !== options.expectedScheduled?.runId)
+			) {
+				throw new Error("Scheduled session ownership marker does not match the requested task and run");
+			}
 			const imageDir = getSessionImageDir(storagePath);
 			const toolOutputDir = getSessionToolOutputDir(storagePath);
 			const agentDir = options.agentDir ?? getDefaultAgentDir();
@@ -3701,6 +3801,26 @@ export class SessionManager {
 				}
 			};
 			const trashTargets = [storagePath, ...ownedTargets.filter(({ path }) => exists(path)).map(({ path }) => path)];
+			if (options.permanent) {
+				for (const target of ownedTargets) {
+					try {
+						rmSync(target.path, { recursive: true, force: true });
+						if (exists(target.path)) throw new Error("target still exists after removal");
+					} catch (error) {
+						return {
+							ok: false,
+							method: "unlink",
+							error: `${target.label}: ${error instanceof Error ? error.message : String(error)}`,
+						};
+					}
+				}
+				try {
+					unlinkSync(storagePath);
+					return { ok: true, method: "unlink" };
+				} catch (error) {
+					return { ok: false, method: "unlink", error: error instanceof Error ? error.message : String(error) };
+				}
+			}
 			const trashArgs = trashTargets.some((path) => path.startsWith("-")) ? ["--", ...trashTargets] : trashTargets;
 			const trashResult = spawnSync("trash", trashArgs, { encoding: "utf8" });
 			if (!exists(storagePath) && ownedTargets.every(({ path }) => !exists(path))) {

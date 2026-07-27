@@ -22,7 +22,7 @@ Approval means host execution. It does not add filesystem, process, credential, 
 Ask automatically permits only:
 
 - built-in `read`, `grep`, `find`, and `ls` calls inside the primary or an explicitly added Code root whose target can be proven to be an ordinary readable regular file or directory;
-- fixed no-host controls such as `update_plan`, `tool_search`, `inspect_agents`, and `wait_agents`.
+- fixed no-host controls such as `update_plan`, `tool_search`, and `inspect_agents`.
 
 Structured reads require an existing, canonical target. A target outside every effective root asks even when it is otherwise ordinary. Traversal reads such as `grep`, `find`, and `ls` ask when the target intersects a sensitive location. Direct reads of known credential/configuration locations and every effective root's `.env*` files also ask. Device nodes, sockets, FIFOs, broken links, missing paths, unreadable objects, and targets whose type cannot be proven are not automatic.
 

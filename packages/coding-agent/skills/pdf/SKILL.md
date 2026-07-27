@@ -10,9 +10,10 @@ Use local tools already present in ArcMind. Never upload a PDF, page image, or e
 ## Paths and lifecycle
 
 - Use the exact absolute PDF path from the `<attachment>` or `<attachments>` block.
-- Create `$ARCMIND_ATTACHMENTS_DIR` and `$ARCMIND_WORK_DIR` before writing.
+- A simple read must stream results to stdout. Do not create a work directory, extracted-text file, rendered page, or copied PDF for metadata, text extraction, search, Q&A, or summary.
 - Final PDFs and other user-requested deliverables go only in `$ARCMIND_ATTACHMENTS_DIR`.
-- Temporary text, page renders, extracted images, overlays, and conversion files go only in `$ARCMIND_WORK_DIR`. ArcMind clears this directory when the agent run ends.
+- ArcMind creates a unique `$ARCMIND_WORK_DIR` for the current run. Temporary page renders, extracted images, overlays, and conversion files go only there; never create `.work`, `work`, `tmp`, or another scratch directory beside an attachment.
+- For an operation that produces temporary files, start from `cd "$ARCMIND_WORK_DIR"`. ArcMind clears the directory when the agent run ends.
 - Preserve the input by default. Write modifications to a new final file unless the user explicitly requests an in-place change to an ArcMind-owned attachment.
 
 ## Choose the smallest sufficient operation
@@ -35,13 +36,12 @@ Check a tool before relying on it. If the required local capability is absent, e
 Start with structural and text inspection. Do not render the whole document by default.
 
 ```bash
-mkdir -p "$ARCMIND_ATTACHMENTS_DIR" "$ARCMIND_WORK_DIR"
 pdfinfo "$PDF"
-pdftotext -layout "$PDF" "$ARCMIND_WORK_DIR/document.txt"
-pdfimages -list "$PDF"
+pdftotext -layout "$PDF" -
 ```
 
 - Keep page numbers with extracted text and citations.
+- Run `pdfimages -list "$PDF"` only when the question involves embedded images.
 - Use `pdfplumber` only when tables, bounding boxes, or reading order require it.
 - Extract or render only images/pages relevant to the question. Do not describe every visual for a focused Q&A or summary.
 - For a complete accessible export, process pages in order and place each image description or placeholder at its page and figure position.
@@ -51,7 +51,8 @@ pdfimages -list "$PDF"
 Scanned content is vision-only. Do not use Tesseract, PaddleOCR, system OCR APIs, cloud OCR, or hidden OCR fallbacks.
 
 ```bash
-pdftoppm -png -r 144 -f "$FIRST" -l "$LAST" "$PDF" "$ARCMIND_WORK_DIR/page"
+cd "$ARCMIND_WORK_DIR"
+pdftoppm -png -r 144 -f "$FIRST" -l "$LAST" "$PDF" page
 ```
 
 - If the current model accepts image input, read only the needed rendered pages.
@@ -75,7 +76,7 @@ Always run structural checks appropriate to the change:
 ```bash
 pdfinfo "$OUTPUT"
 qpdf --check "$OUTPUT"   # when qpdf is available
-pdftotext -layout "$OUTPUT" "$ARCMIND_WORK_DIR/output.txt"
+pdftotext -layout "$OUTPUT" -
 ```
 
 Confirm page count/order, expected text, metadata, form values, encryption, crop, or rotation as relevant.

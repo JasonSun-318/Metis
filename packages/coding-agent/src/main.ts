@@ -36,7 +36,14 @@ import type { ModelRegistry } from "./core/model-registry.ts";
 import { resolveCliModel, resolveModelScope, type ScopedModel } from "./core/model-resolver.ts";
 import { restoreStdout, takeOverStdout } from "./core/output-guard.ts";
 import { type AppMode, resolveProjectTrusted } from "./core/project-trust.ts";
+import {
+	createScheduledRunExecutor,
+	installScheduleHost,
+	SCHEDULE_MAIN_PROMPT,
+	ScheduleManager,
+} from "./core/schedules/index.ts";
 import type { CreateAgentSessionOptions } from "./core/sdk.ts";
+import { pruneStaleSessionWorkDirs } from "./core/session-attachments.ts";
 import {
 	formatMissingSessionCwdPrompt,
 	getMissingSessionCwdIssue,
@@ -605,6 +612,7 @@ export async function main(args: string[], options?: MainOptions) {
 
 	const cwd = process.cwd();
 	const agentDir = getAgentDir();
+	pruneStaleSessionWorkDirs(agentDir);
 	const bootstrapSettingsManager = SettingsManager.create(cwd, agentDir, { projectTrusted: false });
 	applyHttpProxySettings(bootstrapSettingsManager.getGlobalSettings().httpProxy);
 	configureHttpDispatcher();
@@ -699,6 +707,7 @@ export async function main(args: string[], options?: MainOptions) {
 		startupSettingsManager.getSessionDir();
 	let sessionManager = await createSessionManager(parsed, cwd, sessionDir, startupSettingsManager, agentDir);
 	let runtimeOwnsSessionManager = false;
+	let scheduleManager: ScheduleManager | undefined;
 	try {
 		const missingSessionCwdIssue = getMissingSessionCwdIssue(sessionManager, cwd);
 		if (missingSessionCwdIssue) {
@@ -728,6 +737,18 @@ export async function main(args: string[], options?: MainOptions) {
 			sessionManager.appendSessionInfo(name);
 		}
 		time("createSessionManager");
+		if (!parsed.help && parsed.listModels === undefined) {
+			scheduleManager = ScheduleManager.create({
+				agentDir,
+				execute: createScheduledRunExecutor({ agentDir }),
+			});
+			await scheduleManager.start();
+			try {
+				await scheduleManager.list({ limit: 1 });
+			} catch (error) {
+				console.error(chalk.yellow(`Warning: ${error instanceof Error ? error.message : String(error)}`));
+			}
+		}
 
 		const trustStore = new ProjectTrustStore(agentDir);
 		const sessionCwd = sessionManager.getCwd();
@@ -883,12 +904,19 @@ export async function main(args: string[], options?: MainOptions) {
 					noTools: childConfig ? undefined : sessionOptions.noTools,
 					customTools: childConfig ? [] : sessionOptions.customTools,
 					ultraAvailable,
-					additionalSystemPrompt: childConfig ? buildChildSystemPrompt(childConfig) : undefined,
+					additionalSystemPrompt: childConfig ? buildChildSystemPrompt(childConfig) : SCHEDULE_MAIN_PROMPT,
 					includeAutoMemory: childConfig ? false : undefined,
 					permissionModeCeiling,
 				});
 				servicesTransferred = true;
 				try {
+					if (!childConfig && scheduleManager) {
+						installScheduleHost({
+							session: created.session,
+							manager: scheduleManager,
+							timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+						});
+					}
 					const cliThinkingOverride = parsed.thinking !== undefined || cliThinkingFromModel;
 					if (created.session.model && cliThinkingOverride) {
 						if (sessionOptions.thinkingSelection === "ultra") created.session.setThinkingSelection("ultra");
@@ -991,6 +1019,7 @@ export async function main(args: string[], options?: MainOptions) {
 				await runRpcMode(runtime);
 			} else if (appMode === "interactive") {
 				const interactiveMode = new InteractiveMode(runtime, {
+					scheduleManager,
 					migratedProviders,
 					modelFallbackMessage,
 					autoTrustOnReloadCwd,
@@ -1036,9 +1065,12 @@ export async function main(args: string[], options?: MainOptions) {
 				return;
 			}
 		} finally {
+			await scheduleManager?.stop();
+			scheduleManager = undefined;
 			await runtime.dispose();
 		}
 	} finally {
+		await scheduleManager?.stop();
 		if (!runtimeOwnsSessionManager) closeSessionManagerQuietly(sessionManager);
 	}
 }

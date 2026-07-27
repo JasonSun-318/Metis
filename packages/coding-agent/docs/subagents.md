@@ -7,12 +7,12 @@ Ultra is available only in persisted primary **Code** sessions. It is unavailabl
 | Session state | Subagent tools |
 |---|---|
 | Persisted primary Code + Ultra, not activated, no children | `activate_subagents` |
-| Persisted primary Code + Ultra, not activated, residual children | `activate_subagents`, inspect, wait, interrupt, close |
-| Persisted primary Code + Ultra, activated | All six orchestration tools |
+| Persisted primary Code + Ultra, not activated, residual children | `activate_subagents`, inspect, interrupt, close |
+| Persisted primary Code + Ultra, activated | All five orchestration tools |
 | Persisted primary Code, normal thinking, no children | None |
-| Persisted primary Code, normal thinking, residual children | Inspect, wait, interrupt, close |
-| Legacy Chat with residual children | Inspect, wait, interrupt, close |
-| Ordinary Chat, child, raw, in-memory, or `--no-session` | None |
+| Persisted primary Code, normal thinking, residual children | Inspect, interrupt, close |
+| Legacy Chat with residual children | Inspect, interrupt, close |
+| Ordinary Chat, child, scheduled, raw, in-memory, or `--no-session` | None |
 
 ## Model-visible tools
 
@@ -20,14 +20,13 @@ While Ultra is selected but orchestration is inactive, the main agent receives o
 
 The first successful call returns `{ "activated": true, "alreadyActivated": false }`. A repeated call from an already-issued or batched tool call is harmless and returns `alreadyActivated: true`. Activation refreshes tools before the next automatic provider request in the same user turn, so no second user message is required.
 
-After activation, `activate_subagents` is hidden and the main agent receives these six normal tools:
+After activation, `activate_subagents` is hidden and the main agent receives these five normal tools:
 
 | Tool | Purpose |
 |---|---|
-| `spawn_agent` | Create a child with a unique name, task, explicit tool list, cwd, and optional role/model/thinking/permission/fork/timeout snapshot |
+| `spawn_agent` | Create a child and explicitly choose foreground (`background: false`) or background (`background: true`) delivery |
 | `inspect_agents` | List compact summaries or page through one child's recent visible activity |
-| `message_agent` | Steer a running child or queue a follow-up that rehydrates a cold child under the same ID |
-| `wait_agents` | Wait for a selected child event without polling |
+| `message_agent` | Steer a running child, or follow up with an explicit foreground/background choice |
 | `interrupt_agent` | Stop queued/running work while preserving its recoverable session |
 | `close_agent` | Permanently delete a child and retain only a parent tombstone |
 
@@ -35,9 +34,9 @@ The main agent may own at most 10 non-closed children. The process runs at most 
 
 Activation is runtime-only and is not written to the session journal or settings. Leaving Ultra clears it immediately. Re-entering Ultra, replacing or reopening a session, or constructing a new runtime requires `activate_subagents` again. Ordinary provider requests, context compaction, and prompt rebuilding within the same active runtime keep it enabled.
 
-Leaving Ultra does not interrupt existing children. Until all children are closed, the main agent keeps only `inspect_agents`, `wait_agents`, `interrupt_agent`, and `close_agent`; creation and messaging remain hidden. Re-entering Ultra adds `activate_subagents` beside those cleanup controls, and successful activation restores all six orchestration tools.
+Leaving Ultra does not interrupt existing children. Until all children are closed, the main agent keeps only `inspect_agents`, `interrupt_agent`, and `close_agent`; creation and messaging remain hidden. Re-entering Ultra adds `activate_subagents` beside those cleanup controls, and successful activation restores all five orchestration tools.
 
-The six tool schemas are the detailed lazy-loaded usage contract: they describe assignment shape, least-capability tools, permission/model/thinking defaults, cwd, forked turns, timeout, inspection, messaging, waiting, interruption, and deletion. Version 1 does not add a separate subagent index or inject child prompts/transcripts into the parent context.
+The five tool schemas are the detailed lazy-loaded usage contract: they describe foreground/background delivery, assignment shape, least-capability tools, permission/model/thinking defaults, cwd, forked turns, timeout, inspection, messaging, interruption, and deletion. Version 1 does not add a separate subagent index or inject child prompts/transcripts into the parent context.
 
 A typical creation request is:
 
@@ -46,6 +45,7 @@ A typical creation request is:
   "name": "frontend-reviewer",
   "task": "Review the frontend change and report concrete defects.",
   "tools": ["read", "grep", "bash"],
+  "background": true,
   "cwd": "./frontend",
   "permissionMode": "ask",
   "timeoutSeconds": 1800
@@ -64,17 +64,22 @@ The runtime-owned coordinator prompt and child contract have one implementation 
 
 `forkTurns` defaults to `0`. A positive number or `"all"` copies only visible parent conversation turns and strips hidden thinking. The child's initial task is always a new user message.
 
-Before activation, the compact activation tool definition is the only subagent-specific model context. After activation, the parent receives the six tool definitions plus the compact runtime-owned coordinator block. Tool changes are recorded on the activation result and are used by the next automatic provider request; neither activation nor a child completion mutates a request already in flight.
+Before activation, the compact activation tool definition is the only subagent-specific model context. After activation, the parent receives the five tool definitions plus the compact runtime-owned coordinator block. Tool changes are recorded on the activation result and are used by the next automatic provider request; neither activation nor a child completion mutates a request already in flight.
 
 ## Asynchronous results
 
 Queued/running progress is visible to the host but is not inserted into the parent model context. Only bounded terminal mailbox events are model-visible. A terminal event contains identity/status and a UTF-8-safe 4 KiB final/error prefix, never thinking, tool arguments, credentials, prompts, or the full transcript. Child permission requests go directly to the active user approval UI, remain audited in the child session, and never enter the parent mailbox.
 
-Mailbox events are persisted first and injected FIFO at the next provider boundary that was already going to occur. A completion cannot mutate an in-flight request and never wakes an idle parent model by itself. `wait_agents` is therefore not the normal next step after spawn: continue useful independent work, and wait only when the next critical step depends on a new event. Wait returns updated agent IDs, not transcript content. Use `inspect_agents` or the host's paginated child activity view for the full visible record.
+Foreground and background delivery are explicit per run:
+
+- Foreground: the tool call remains active, child approvals go to the user, terminal state is persisted, and the terminal summary returns as the tool result. No mailbox event is created.
+- Background: admission returns immediately, the parent continues useful work, terminal state and mailbox event are persisted, and Runtime resumes the parent at the next safe point. Full activity remains behind `inspect_agents`.
+
+A completion cannot mutate an in-flight request. Background events are persisted FIFO; the runtime waits for the current request to settle, coalesces available events, and starts one hidden continuation. If a user turn starts first, that turn consumes the events and the scheduled continuation becomes a no-op. A failed automatic continuation is not retried in a loop; its durable event remains available to the next user turn or reopened runtime.
 
 ## Lifecycle and storage
 
-Each active child is a normal v8 JSONL session under:
+Each active child is a normal v11 JSONL session under:
 
 ```text
 <agentDir>/subagents/<parentSessionId>/
@@ -82,7 +87,7 @@ Each active child is a normal v8 JSONL session under:
 
 Only a running child owns an in-memory runtime/model context. `done`, `failed`, and `stopped` children are cold but resumable. Restart never silently resumes work: prior `queued` and `running` states become `stopped`, and a follow-up is required to run again.
 
-First-class subagent ownership and control records were introduced in session format v7; v8 is the current format.
+First-class subagent ownership and control records were introduced in session format v7. Per-run delivery mode and durable two-phase mailbox controls were added in v11, the current format.
 
 | State | Meaning |
 |---|---|
@@ -111,13 +116,15 @@ Child permissions inherit or narrow the parent's current mode. Each child has a 
 
 When the parent changes from Full to Ask, ArcMind immediately lowers every non-closed child's in-memory ceiling and durably appends Ask to hot, cold, and queued child sessions. A child starting during the transition sees Ask before its first prompt. Changing the parent back to Full never re-upgrades an existing child.
 
-Ask automatically permits only proven safe structured reads and `inspect_agents`/`wait_agents`; other model-facing child calls ask. Approved built-ins execute directly as the current OS user, and installed integrations use their configured runtime. Extension, SDK, and MCP code is trusted when installed/configured, but their model-facing tools still follow Ask/Full.
+Ask automatically permits only proven safe structured reads and `inspect_agents`; other model-facing calls ask. Approved built-ins execute directly as the current OS user, and installed integrations use their configured runtime. Extension, SDK, and MCP code is trusted when installed/configured, but their model-facing tools still follow Ask/Full.
 
 When a child needs approval, only that child pauses. The request uses the parent's single approval queue and identifies the child name/ID plus the exact tool, arguments, risks, paths, and network targets. With no owner, it fails closed. The decision is audited in the child journal and never grants authority to a sibling or enters the parent model transcript.
 
 Children share the host filesystem. Spawn does not detect overlap, lock, serialize, create a worktree, or promise conflict-free writes. The main agent should assign disjoint directories/worktrees when isolation matters; every child must preserve unrelated changes and report unresolved concurrent edits.
 
 Runs are never retried automatically because tool side effects may already have happened. Per-run usage is recorded in the child projection and aggregated into the parent session accounting without replaying transcript content into the parent model.
+
+Scheduled/unattended sessions never bind or activate the Subagent manager and do not expose Subagent tools. The Subagent path does not use the scheduled/unattended workspace sandbox.
 
 ## Built-in runtime versus the legacy extension
 

@@ -1,11 +1,11 @@
-import type { SubagentConfig } from "./types.ts";
+import type { SubagentConfig, SubagentMailboxEvent } from "./types.ts";
 
 export const SUBAGENT_COORDINATION_PROMPT = `<subagent_coordination>
-- Delegate only independent, bounded work.
-- Reuse an existing agent instead of spawning duplicate work.
-- Launch independent agents together when parallel execution helps.
-- Do not duplicate delegated work in the parent.
-- Continue useful work instead of immediately waiting.
+- You may delegate independent, bounded work and should reuse an existing agent when its responsibility is unchanged.
+- Set background to false when your next step requires that result; the tool call will return the terminal result directly.
+- Set background to true for work that can run in parallel; you will automatically receive its terminal notification in a later turn.
+- While background work runs, continue other useful work. Do not poll, wait repeatedly, duplicate delegated work, or assume it succeeded.
+- Before giving the final user answer, make sure every delegated result required by that answer has arrived and been considered.
 - Verify important agent results before relying on them.
 - You remain responsible for the overall task and final answer.
 </subagent_coordination>`;
@@ -16,6 +16,15 @@ export function safePromptJson(value: unknown): string {
 		if (character === ">") return "\\u003e";
 		return "\\u0026";
 	});
+}
+
+export function buildSubagentMailboxContent(event: SubagentMailboxEvent): Array<{ type: "text"; text: string }> {
+	return [
+		{
+			type: "text",
+			text: `<subagent_mailbox_event encoding="json">\n${safePromptJson(event)}\n</subagent_mailbox_event>`,
+		},
+	];
 }
 
 export function buildSubagentContract(config: SubagentConfig): string {

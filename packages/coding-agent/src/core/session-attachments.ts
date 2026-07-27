@@ -6,6 +6,8 @@ import {
 	constants as fsConstants,
 	lstatSync,
 	mkdirSync,
+	mkdtempSync,
+	readdirSync,
 	realpathSync,
 	rmSync,
 } from "node:fs";
@@ -16,6 +18,7 @@ import { assertValidSessionId } from "./session-id.ts";
 export const MAX_SESSION_ATTACHMENTS = 16;
 export const MAX_SESSION_ATTACHMENT_BYTES = 128 * 1024 * 1024;
 export const MAX_SESSION_ATTACHMENTS_BYTES = 256 * 1024 * 1024;
+export const SESSION_WORK_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
 export interface SessionAttachmentInput {
 	readonly path: string;
@@ -64,8 +67,32 @@ export function getSessionAttachmentDir(agentDir: string, sessionId: string): st
 	return join(canonicalizePathForCreation(resolvePath(agentDir)), "attachments", sessionId);
 }
 
-export function getSessionAttachmentWorkDir(agentDir: string, sessionId: string): string {
-	return join(getSessionAttachmentDir(agentDir, sessionId), ".work");
+function getOwnedSessionWorkRoot(agentDir: string, create: boolean): string | undefined {
+	try {
+		const resolvedAgentDir = resolvePath(agentDir);
+		if (create) mkdirSync(resolvedAgentDir, { recursive: true });
+		const canonicalAgentDir = assertRealDirectory(resolvedAgentDir, "Agent directory");
+		const tmpRoot = join(resolvedAgentDir, "tmp");
+		if (create) mkdirSync(tmpRoot, { recursive: true });
+		const canonicalTmpRoot = assertRealDirectory(tmpRoot, "Temporary root");
+		if (dirname(canonicalTmpRoot) !== canonicalAgentDir) return undefined;
+
+		const workRoot = join(tmpRoot, "document-work");
+		if (create) mkdirSync(workRoot, { recursive: true });
+		const canonicalWorkRoot = assertRealDirectory(workRoot, "Document work root");
+		if (dirname(canonicalWorkRoot) !== canonicalTmpRoot) return undefined;
+		return canonicalWorkRoot;
+	} catch {
+		return undefined;
+	}
+}
+
+/** Create one ArcMind-owned disposable directory for an agent run. */
+export function createSessionWorkDir(agentDir: string, sessionId: string): string {
+	assertValidSessionId(sessionId);
+	const root = getOwnedSessionWorkRoot(agentDir, true);
+	if (!root) throw new Error("Unable to create the ArcMind document work root");
+	return mkdtempSync(join(root, `${sessionId}-`));
 }
 
 /** Return an exact ArcMind-owned attachment directory, or undefined if ownership cannot be proven. */
@@ -86,17 +113,73 @@ export function getOwnedSessionAttachmentDir(agentDir: string, sessionId: string
 	}
 }
 
-/** Best-effort removal of disposable files without following symlinks. */
-export function clearSessionAttachmentWorkDir(agentDir: string, sessionId: string): boolean {
+/**
+ * Remove directories and other non-file entries accidentally created beside
+ * attachments. Uploaded files and final deliverables are regular files.
+ */
+export function clearSessionAttachmentNonFiles(agentDir: string, sessionId: string): number {
 	const directory = getOwnedSessionAttachmentDir(agentDir, sessionId);
-	if (!directory) return false;
-	const workDir = join(directory, ".work");
+	if (!directory) return 0;
+	let removed = 0;
+	let names: string[];
 	try {
-		rmSync(workDir, { recursive: true, force: true });
-		return !existsSync(workDir);
+		names = readdirSync(directory);
+	} catch {
+		return 0;
+	}
+	for (const name of names) {
+		const path = join(directory, name);
+		try {
+			if (lstatSync(path).isFile()) continue;
+			rmSync(path, { recursive: true, force: true });
+			removed += 1;
+		} catch {
+			// Best effort: a later run or session deletion can retry.
+		}
+	}
+	return removed;
+}
+
+/** Remove one exact ArcMind-owned run directory without following symlinks. */
+export function clearSessionWorkDir(agentDir: string, workDir: string): boolean {
+	const root = getOwnedSessionWorkRoot(agentDir, false);
+	if (!root) return false;
+	const target = resolvePath(workDir);
+	if (dirname(target) !== root) return false;
+	try {
+		rmSync(target, { recursive: true, force: true });
+		return !existsSync(target);
 	} catch {
 		return false;
 	}
+}
+
+/** Best-effort crash recovery for run directories older than the retention window. */
+export function pruneStaleSessionWorkDirs(
+	agentDir: string,
+	maxAgeMs = SESSION_WORK_MAX_AGE_MS,
+	now = Date.now(),
+): number {
+	const root = getOwnedSessionWorkRoot(agentDir, false);
+	if (!root) return 0;
+	let removed = 0;
+	let names: string[];
+	try {
+		names = readdirSync(root);
+	} catch {
+		return 0;
+	}
+	for (const name of names) {
+		const path = join(root, name);
+		try {
+			if (now - lstatSync(path).mtimeMs < maxAgeMs) continue;
+			rmSync(path, { recursive: true, force: true });
+			removed += 1;
+		} catch {
+			// Best effort: active or locked entries are retried on a later startup.
+		}
+	}
+	return removed;
 }
 
 export function importSessionAttachments(options: {

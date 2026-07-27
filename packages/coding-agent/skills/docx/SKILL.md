@@ -11,15 +11,16 @@ This file embeds the official `word` skill from the bundled OfficeCLI 1.0.140.
 - For an academic paper, journal article, conference paper, or thesis, run `officecli load_skill academic-paper` once. For a fillable form, questionnaire, contract with input fields, or mail-merge template, run `officecli load_skill word-form` once. Treat the selected specialized skill as overriding the generic guidance below. The ArcMind integration rules in this section still take priority.
 - Use the exact absolute path from the `<attachment>` or `<attachments>` block.
 - Put every new deliverable under `$ARCMIND_ATTACHMENTS_DIR`; create the directory first.
-- Put disposable previews, rendered pages, extracted media, conversion files, and other intermediates under `$ARCMIND_WORK_DIR`; create it before use and pass `-o "$ARCMIND_WORK_DIR/<name>"` to `officecli view` modes that accept an output path. ArcMind clears this directory when the agent run ends. Never put a deliverable there.
+- A simple read must print content to stdout, normally with `officecli view "$FILE" text`, `get`, or `query`. Do not create a work directory, preview, HTML file, rendered page, extracted-media directory, or copied document for reading, Q&A, or summary.
+- ArcMind creates a unique `$ARCMIND_WORK_DIR` for the current run. Put previews, rendered pages, extracted media, conversions, and other intermediates only there; never create `.work`, `work`, or `tmp` beside an attachment. Start file-producing operations from `cd "$ARCMIND_WORK_DIR"` and pass `-o "$ARCMIND_WORK_DIR/<name>"` when supported. ArcMind clears the directory after the run.
 - Preserve the input by default and write modifications to a new deliverable unless the user explicitly requests an in-place change to an ArcMind-owned attachment.
 - Use the fewest sufficient operations and stop when the request is answered. For reading or summarizing, prefer one targeted `view`, `get`, or `query`; do not validate or render unless needed.
-- Use `batch` for multiple related changes. Explicit `open` and `save` are unnecessary for simple tasks because ArcMind sets `OFFICECLI_RESIDENT_FLUSH=each`.
-- Never call a remote document, image, OCR, or vision service.
+- ArcMind disables OfficeCLI auto-resident mode. Each command is self-contained and file-changing commands persist before returning. Ignore later resident lifecycle instructions: do not use `open`, `save`, `close`, or `watch`. Use `batch` for multiple related changes.
+- Never call a separate remote document, image, OCR, or vision service. When visual confirmation is needed, use only the current ArcMind model's image input as described below.
 
 ### Conditional visual confirmation
 
-The official visual-delivery guidance below is conditional in ArcMind, not universal. Render and read images only when the task needs confirmation of image content, layout, overlap, overflow, or final visual appearance. If visual confirmation is unnecessary, do not render.
+The official visual-delivery guidance below is conditional in ArcMind, not universal. Ignore later rules that say every document must be rendered. Render and read images only when the task needs confirmation of image content, layout, overlap, overflow, or final visual appearance. If visual confirmation is unnecessary, do not render.
 
 When visual confirmation is needed and the current model accepts image input, render only the relevant pages and use the `read` tool on the resulting PNG files. A printed image path is not image input.
 
@@ -58,7 +59,7 @@ If in doubt, `view text` after writing and compare character-for-character.
 
 **Incremental execution.** `officecli` mutates the file on every call. Run commands one at a time and check each exit code — a 50-command script that fails at command 3 cascades silently. After any structural op (new style, table, TOC, section break) run `get` on it before stacking more.
 
-**Open/save lifecycle:** `officecli open <file>` at the start, `officecli save <file>` at the end to flush to disk — `save` only writes and leaves the resident warm for follow-up edits; reach for `officecli close <file>` only to release the resident on a one-shot handoff. Both are always safe (never error or lose work). For many paragraphs of one style, use `batch` (one pass for the whole array). **Flush only at the non-officecli boundary:** officecli's own reads always see your edits; run `save`/`close` only before a non-officecli program reads the file (python-docx, Word, a renderer, delivery).
+**ArcMind lifecycle:** Do not open a resident. Every mutating command persists before it returns. For many paragraphs of one style, use `batch` (one pass for the whole array).
 
 **`$FILE` convention.** All commands use `"$FILE"` — set it once (`FILE="your-doc.docx"`). Never copy a literal `doc.docx` / `review.docx` into output — always substitute your actual target.
 
@@ -80,9 +81,9 @@ Deliverable standards every document MUST meet — know these before reaching fo
 
 **Preserve existing templates.** When editing a file that already has a look, match it — existing conventions override these guidelines.
 
-### Visual delivery floor (applies to EVERY document)
+### Conditional visual-preview reference
 
-Before declaring done, run `officecli view "$FILE" html` and Read the returned HTML path to confirm ALL of these:
+When the task needs visual confirmation, run `officecli view "$FILE" html` and inspect the returned preview for:
 
 - **No placeholder tokens rendered as data.** `$xxx$`, `{var}`, `{{name}}`, `<TODO>`, `lorem`, `xxxx` must never appear in a heading, body, cover, TOC, caption, header, or footer. A literal `{name}` meant for a human to fill belongs inside a visible instruction paragraph ("Replace `{name}` before sending"), never as finished content.
 - **No truncated titles or overflowing cells.** Widen the column or set `wrapText` rather than trimming content.
@@ -96,11 +97,11 @@ If any fails, STOP and fix before declaring done.
 
 Six steps. Every non-trivial build follows this shape.
 
-1. **Open the file.** `officecli open "$FILE"` (resident default). New file: `officecli create "$FILE"` first.
+1. **Select the file.** New file: `officecli create "$FILE"`. Existing file: inspect it before editing.
 2. **Orient.** Existing file: `officecli view "$FILE" outline` — heading tree, section count, whether a TOC / watermark / tracked changes already exist. Never edit blind.
 3. **Build incrementally.** Structural first, content next, formatting last: styles & numbering defs → sections / page setup → headings & body → tables / images / fields / TOC → headers / footers → comments. After each structural op, `get` it back before stacking on top.
 4. **Format to spec.** Explicit heading sizes, spacing, widths, alignment, tabs, list indents — formatting is part of the deliverable, not optional polish.
-5. **Save, then trust structure over cached text.** `officecli save "$FILE"` writes the XML. TOC / PAGE / NUMPAGES / SEQ / PAGEREF fields carry **cached values** that may be stale or empty until a human recalculates (F9 in Word). Confirm fields *exist* (`get --depth 3` finds `<w:fldChar>`) rather than trusting the visible text.
+5. **Trust structure over cached text.** Mutating commands already write the XML. TOC / PAGE / NUMPAGES / SEQ / PAGEREF fields carry **cached values** that may be stale or empty until a human recalculates (F9 in Word). Confirm fields *exist* (`get --depth 3` finds `<w:fldChar>`) rather than trusting the visible text.
 6. **QA — assume there are problems.** You are done after one fix-and-verify cycle finds zero new issues, not when your last command exited 0. See QA.
 
 ## Quick Start
@@ -110,14 +111,12 @@ Minimal viable docx: a heading, a body paragraph, a subheading, and a footer wit
 ```bash
 FILE="review.docx"
 officecli create "$FILE"
-officecli open "$FILE"
 officecli add "$FILE" /body --type paragraph --prop text="Q4 2026 Review" --prop style=Heading1 --prop size=20pt --prop bold=true --prop spaceAfter=12pt
 officecli add "$FILE" /body --type paragraph --prop text="Revenue grew 18% year-over-year, ahead of plan." --prop size=11pt --prop spaceAfter=8pt
 officecli add "$FILE" /body --type paragraph --prop text="Key Drivers" --prop style=Heading2 --prop size=14pt --prop bold=true --prop spaceBefore=12pt --prop spaceAfter=6pt
 officecli add "$FILE" /body --type paragraph --prop text="Enterprise renewals, upsell, and a new EMEA region." --prop size=11pt
 officecli add "$FILE" / --type footer --prop type=default --prop size=9pt --prop text="Page " --prop field=page
 officecli set "$FILE" "/footer[1]/p[1]" --prop align=center
-officecli save "$FILE"
 officecli validate "$FILE"
 ```
 
@@ -136,7 +135,7 @@ officecli view "$FILE" stats              # paragraph counts, font usage, style 
 officecli view "$FILE" issues             # empty paras, missing alt text, spacing anomalies
 ```
 
-`officecli watch "$FILE"` keeps a live preview running for the human user to open at their discretion — agent self-check uses `view html`. Final visual verification is the user opening the `.docx` in Word / WPS / Pages.
+Do not launch `officecli watch` from ArcMind. If the user wants a live viewer, ask them to open the `.docx` in Word / WPS / Pages.
 
 **Inspect one element.** XPath-style semantic paths (1-based). Always quote — shells glob `[N]`. Use `[last()]` (with parens) for the last element; `[last]` errors. Add `--json` for machine output.
 
@@ -455,7 +454,7 @@ Borders use the format `style;size;color;space`: `single;4;FF0000;1`. Hex colors
 2. `officecli view "$FILE" outline` — heading hierarchy (no H1 → H3 skips), TOC presence, section count.
 3. `officecli view "$FILE" text --max-lines 400` — typos, stray `\$`/`\t`/`\n` literals, placeholder tokens.
 4. `officecli validate "$FILE"` — schema check (the Delivery Gate re-runs this on the closed, on-disk file).
-5. **Visual pass — whole document as a contact sheet** (vision-capable agents only — if you cannot interpret images, skip this step: steps 1–4 are your ceiling, and flag the document "not visually verified" at handoff). `officecli view "$FILE" screenshot --grid auto -o "$ARCMIND_WORK_DIR/sheet.png"`, then Read it. `--grid auto` tiles **every page** into one image (auto column count; `--grid 4` to force) — you *see* pagination, blank pages, heading rhythm, lopsided margins, and TOC/cover placement, not just the DOM. Windows+Word renders each page through real Word; elsewhere HTML. If the screenshot fails, fall back to `view html` and flag cross-page breaks / alignment / rhythm as "not visually verified". Thumbnails only **locate**: confirm any fine call (column alignment, line spacing, indents, dark-on-dark, caption placement) on the suspect page at full resolution with `screenshot --page N` (no `--grid`; real Word on Windows). "validate pass" is not delivery; "looks like a real document" is.
+5. **Conditional visual pass.** Only when the task needs visual confirmation and the current model can inspect images, run `officecli view "$FILE" screenshot --grid auto -o "$ARCMIND_WORK_DIR/sheet.png"` and read it. `--grid auto` tiles every page into one image; use `screenshot --page N` for fine checks on a suspect page. If visual confirmation is needed but unavailable, report the unverified visual aspects. If it is not needed, skip this step without rendering.
 6. If anything failed, fix, then **rerun the full cycle** — one fix commonly creates another problem.
 
 ### Delivery Gate (run before handing off — any failure = REJECT, do NOT deliver)
@@ -466,7 +465,6 @@ Copy-paste, set `FILE`, and refuse to declare done until every gate prints OK.
 FILE="your-file.docx"
 
 # Gate 1 — schema.
-officecli close "$FILE" 2>/dev/null
 officecli validate "$FILE" | grep -q "no errors found" || { echo "REJECT Gate 1: validate failed"; exit 1; }
 echo "Gate 1 OK"
 
@@ -580,4 +578,4 @@ When in doubt: `officecli help docx`, `officecli help docx <element>`, `officecl
 
 ## ArcMind final override
 
-ArcMind's integration rules above take priority over conflicting generic requirements: do not install or update tools, do not use remote services, save deliverables under `$ARCMIND_ATTACHMENTS_DIR`, keep intermediates under `$ARCMIND_WORK_DIR`, and do not render when visual confirmation is unnecessary.
+ArcMind's integration rules above take priority over conflicting generic requirements: simple reads use stdout without intermediate files; OfficeCLI is non-resident; do not install or update tools; do not use separate remote services; save deliverables under `$ARCMIND_ATTACHMENTS_DIR`; keep intermediates under the runtime-created `$ARCMIND_WORK_DIR`; and do not render when visual confirmation is unnecessary.

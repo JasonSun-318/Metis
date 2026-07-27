@@ -363,7 +363,7 @@ export function classifyAction(input: ClassifyActionInput): PermissionAction {
 		if (input.mcpAnnotations?.destructiveHint) risks.push("destructive", "external-side-effect");
 		return action(input, risks);
 	}
-	if (["update_plan", "tool_search", "inspect_agents", "wait_agents"].includes(input.toolName)) {
+	if (["update_plan", "tool_search", "inspect_agents"].includes(input.toolName)) {
 		return action(input, ["ordinary-read"]);
 	}
 	const args = record(input.args);

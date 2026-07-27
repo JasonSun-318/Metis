@@ -62,6 +62,36 @@ describe("SubagentStore", () => {
 		parent.close();
 	});
 
+	it("persists delivery mode for one run and defaults legacy runs to background", () => {
+		const { root, parent, store } = setup();
+		const created = store.create(config(root), []);
+		store.appendState(created.agentId, {
+			type: "subagent_state",
+			agentId: created.agentId,
+			runId: "run-foreground",
+			status: "queued",
+			background: false,
+		});
+		const terminal = store.appendState(created.agentId, {
+			type: "subagent_state",
+			agentId: created.agentId,
+			runId: "run-foreground",
+			status: "done",
+			reason: "completed",
+			finalSummary: "done",
+		});
+		expect(terminal).toMatchObject({ runId: "run-foreground", status: "done", background: false });
+
+		const legacy = store.appendState(created.agentId, {
+			type: "subagent_state",
+			agentId: created.agentId,
+			runId: "run-legacy",
+			status: "queued",
+		});
+		expect(legacy.background).toBe(true);
+		parent.close();
+	});
+
 	it("forks only visible messages and strips assistant thinking and custom details", () => {
 		const { root, parent, store } = setup();
 		const assistant = assistantMsg("visible answer");

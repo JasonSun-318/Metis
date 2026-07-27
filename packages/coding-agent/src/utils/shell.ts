@@ -135,7 +135,8 @@ export function getShellEnv(): NodeJS.ProcessEnv {
 		[pathKey]: updatedPath,
 		OFFICECLI_SKIP_UPDATE: "1",
 		OFFICECLI_NO_AUTO_INSTALL: "1",
-		OFFICECLI_RESIDENT_FLUSH: "each",
+		OFFICECLI_NO_AUTO_RESIDENT: "1",
+		OFFICECLI_RESIDENT_FLUSH: undefined,
 	};
 }
 

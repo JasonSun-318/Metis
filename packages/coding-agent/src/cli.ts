@@ -6,15 +6,17 @@
  * Test with: npx tsx src/cli-new.ts [args...]
  */
 import { APP_NAME } from "./config.ts";
-import { configureHttpDispatcher } from "./core/http-dispatcher.ts";
-import { main } from "./main.ts";
 
 process.title = APP_NAME;
 process.env.ARCMIND_CODING_AGENT = "true";
 process.emitWarning = (() => {}) as typeof process.emitWarning;
 
-const args = process.argv.slice(2);
-// Configure undici's global dispatcher before provider SDKs issue requests.
-// Runtime settings are applied once SettingsManager has loaded global/project settings.
-configureHttpDispatcher();
-main(args);
+if (process.argv[2] === "--internal-workspace-sandbox-broker") {
+	await (await import("./core/workspace-sandbox-broker.ts")).runWorkspaceSandboxBroker();
+} else {
+	// Keep the broker path isolated from ordinary CLI/provider initialization.
+	const { configureHttpDispatcher } = await import("./core/http-dispatcher.ts");
+	configureHttpDispatcher();
+	const { main } = await import("./main.ts");
+	await main(process.argv.slice(2));
+}

@@ -169,6 +169,27 @@ describe("SessionManager permission settings", () => {
 			{ ...control, reviewerEnabled: "yes" },
 		]);
 		expect(() => SessionManager.open(malformedPath, directory)).toThrow("Invalid session control entry");
+
+		const policyDecision = {
+			type: "session_permission_decision",
+			id: "policy-1",
+			parentId: null,
+			timestamp,
+			actionId: "write-1",
+			toolName: "write",
+			source: "policy",
+			decision: "deny",
+			reason: "outside workspace",
+		};
+		const oldPolicyPath = join(directory, "old-policy.jsonl");
+		writeRecords(oldPolicyPath, [{ ...baseHeader, version: 8 }, policyDecision]);
+		expect(() => SessionManager.open(oldPolicyPath, directory)).toThrow("require a v9 session header");
+
+		const currentPolicyPath = join(directory, "current-policy.jsonl");
+		writeRecords(currentPolicyPath, [{ ...baseHeader, version: CURRENT_SESSION_VERSION }, policyDecision]);
+		const current = SessionManager.open(currentPolicyPath, directory);
+		expect(current.getDurableJournalSnapshot().at(-1)).toMatchObject({ source: "policy", decision: "deny" });
+		current.close();
 	});
 
 	it("inherits only effective settings when branching and forking", () => {

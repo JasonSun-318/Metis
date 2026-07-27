@@ -19,6 +19,7 @@ export interface SubagentDiskRecord {
 	readonly name: string;
 	readonly path: string;
 	readonly status: Exclude<SubagentStatus, "closed">;
+	readonly background: boolean;
 	readonly taskSummary: string;
 	readonly createdAt: string;
 	readonly updatedAt: string;
@@ -89,6 +90,7 @@ function reduceRecord(path: string, parentSessionId: string, includeConfig: bool
 		throw new Error("Child session mode disagrees with its creation record");
 	let status: Exclude<SubagentStatus, "closed"> = "queued";
 	let runId = `legacy-created-${header.id}`;
+	let background = true;
 	let updatedAt = created.timestamp;
 	let finalSummary: string | undefined;
 	let error: string | undefined;
@@ -97,11 +99,12 @@ function reduceRecord(path: string, parentSessionId: string, includeConfig: bool
 	for (const entry of entries) {
 		if (entry.type !== "subagent_state" || entry.agentId !== header.id) continue;
 		if (entry.runId !== runId) {
+			background = entry.background ?? true;
 			finalSummary = undefined;
 			error = undefined;
 			residualPath = undefined;
 			usage = undefined;
-		}
+		} else background = entry.background ?? background;
 		status = entry.status;
 		runId = entry.runId;
 		updatedAt = entry.timestamp;
@@ -116,6 +119,7 @@ function reduceRecord(path: string, parentSessionId: string, includeConfig: bool
 		name: header.subagent.name,
 		path,
 		status,
+		background,
 		taskSummary: created.config.taskSummary,
 		createdAt: created.timestamp,
 		updatedAt,

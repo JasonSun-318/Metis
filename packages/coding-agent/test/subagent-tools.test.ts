@@ -31,6 +31,7 @@ function setup() {
 		spawn: vi.fn(async (input) => ({
 			...input,
 			agentId: "child-1",
+			runId: "run-1",
 			status: "running",
 			taskSummary: input.task,
 			mode: "code",
@@ -41,8 +42,13 @@ function setup() {
 			agents: [],
 			usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, elapsedMs: 0 },
 		})),
-		message: vi.fn(async (input) => ({ agentId: input.agentId, status: "running", delivery: "accepted" })),
-		wait: vi.fn(async () => ({ agents: [] })),
+		message: vi.fn(async (input) => ({
+			agentId: input.agentId,
+			runId: "run-1",
+			...(input.mode === "follow_up" ? { background: input.background } : {}),
+			status: input.mode === "follow_up" && input.background === false ? "done" : "running",
+			delivery: "accepted",
+		})),
 		interrupt: vi.fn(async (agentId) => ({ agentId, status: "stopped" })),
 		close: vi.fn(async (agentId) => ({ agentId, status: "closed" })),
 	} as unknown as SubagentManager;
@@ -100,9 +106,16 @@ describe("subagent control tools", () => {
 		expect(stripAnsi(component.render(120).join("\n"))).toContain("Subagents activated");
 	});
 
-	it("keeps six strict post-activation schemas with concise usage descriptions", async () => {
+	it("keeps five strict post-activation schemas with recipient-facing descriptions", async () => {
 		const { manager, tools } = setup();
 		expect(tools.map((tool) => tool.name)).toEqual([SUBAGENT_ACTIVATION_TOOL_NAME, ...SUBAGENT_TOOL_NAMES]);
+		expect(SUBAGENT_TOOL_NAMES).toEqual([
+			"spawn_agent",
+			"inspect_agents",
+			"message_agent",
+			"interrupt_agent",
+			"close_agent",
+		]);
 		const spawn = tools.find((tool) => tool.name === "spawn_agent")!;
 		expect(spawn.description).toBe(
 			"Create one child agent for independent, bounded work. Use a unique name, a self-contained task, and the minimum necessary tools.",
@@ -111,24 +124,41 @@ describe("subagent control tools", () => {
 		expect(properties.task?.description).toBe(
 			"Self-contained assignment with the objective, owned scope, non-goals, expected handoff, and focused verification.",
 		);
+		expect(properties.name?.description).toBe("Unique short name for this child in your session.");
 		expect(properties.tools?.description).toBe(
-			"Minimum subset of the parent's active tools required for the assignment.",
+			"Minimum subset of your currently active tools required for the assignment.",
 		);
 		expect(properties.forkTurns?.description).toBe(
-			'Number of visible parent turns to copy, or "all"; omit to copy none.',
+			'Number of your visible turns to copy, or "all"; omit to copy none.',
 		);
-		expect(Value.Check(spawn.parameters, { name: "researcher", task: "inspect", tools: [] })).toBe(true);
-		expect(Value.Check(spawn.parameters, { name: "researcher", task: "inspect", tools: [], extra: true })).toBe(
-			false,
+		expect(Value.Check(spawn.parameters, { name: "researcher", task: "inspect", tools: [], background: true })).toBe(
+			true,
 		);
-		expect(Value.Check(spawn.parameters, { name: "researcher", task: "inspect", tools: [], forkTurns: 0 })).toBe(
-			false,
-		);
+		expect(Value.Check(spawn.parameters, { name: "researcher", task: "inspect", tools: [] })).toBe(false);
 		expect(
 			Value.Check(spawn.parameters, {
 				name: "researcher",
 				task: "inspect",
 				tools: [],
+				background: true,
+				extra: true,
+			}),
+		).toBe(false);
+		expect(
+			Value.Check(spawn.parameters, {
+				name: "researcher",
+				task: "inspect",
+				tools: [],
+				background: true,
+				forkTurns: 0,
+			}),
+		).toBe(false);
+		expect(
+			Value.Check(spawn.parameters, {
+				name: "researcher",
+				task: "inspect",
+				tools: [],
+				background: true,
 				permissionMode: "auto",
 			}),
 		).toBe(false);
@@ -137,17 +167,61 @@ describe("subagent control tools", () => {
 				name: "researcher",
 				task: "inspect",
 				tools: [],
+				background: true,
 				readPaths: ["/tmp"],
 			}),
 		).toBe(false);
 
-		const response = await execute(spawn, { name: "researcher", task: "inspect", tools: [] });
-		expect(manager.spawn).toHaveBeenCalledWith({
+		const message = tools.find((tool) => tool.name === "message_agent")!;
+		expect(
+			Value.Check(message.parameters, {
+				agentId: "child-1",
+				mode: "steer",
+				message: "focus on tests",
+			}),
+		).toBe(true);
+		expect(
+			Value.Check(message.parameters, {
+				agentId: "child-1",
+				mode: "steer",
+				message: "focus on tests",
+				background: true,
+			}),
+		).toBe(false);
+		expect(
+			Value.Check(message.parameters, {
+				agentId: "child-1",
+				mode: "follow_up",
+				message: "verify again",
+				background: false,
+			}),
+		).toBe(true);
+		expect(
+			Value.Check(message.parameters, {
+				agentId: "child-1",
+				mode: "follow_up",
+				message: "verify again",
+			}),
+		).toBe(false);
+		expect(tools.some((tool) => tool.name === "wait_agents")).toBe(false);
+		expect(JSON.stringify([spawn.parameters, message.parameters])).not.toMatch(/parent|runtime-owned/iu);
+
+		const response = await execute(spawn, {
 			name: "researcher",
 			task: "inspect",
 			tools: [],
-			thinkingLevel: undefined,
+			background: true,
 		});
+		expect(manager.spawn).toHaveBeenCalledWith(
+			{
+				name: "researcher",
+				task: "inspect",
+				tools: [],
+				background: true,
+				thinkingLevel: undefined,
+			},
+			undefined,
+		);
 		expect(response.details).toMatchObject({ agentId: "child-1", status: "running" });
 		expect(JSON.parse(response.content[0]!.type === "text" ? response.content[0]!.text : "null")).toMatchObject({
 			agentId: "child-1",
@@ -162,13 +236,19 @@ describe("subagent control tools", () => {
 		);
 		expect(activateSubagents).not.toHaveBeenCalled();
 		await expect(
-			execute(tools.find((tool) => tool.name === "spawn_agent")!, { name: "child", task: "task", tools: [] }),
+			execute(tools.find((tool) => tool.name === "spawn_agent")!, {
+				name: "child",
+				task: "task",
+				tools: [],
+				background: true,
+			}),
 		).rejects.toThrow("Ultra is required");
 		await expect(
 			execute(tools.find((tool) => tool.name === "message_agent")!, {
 				agentId: "child-1",
 				mode: "follow_up",
 				message: "next",
+				background: false,
 			}),
 		).rejects.toThrow("Ultra is required");
 		await execute(tools.find((tool) => tool.name === "inspect_agents")!, {});
@@ -177,11 +257,28 @@ describe("subagent control tools", () => {
 		expect(manager.interrupt).toHaveBeenCalledWith("child-1");
 	});
 
-	it("passes only wait's abort signal to the manager", async () => {
+	it("forwards abort signals for spawn and follow-up joins", async () => {
 		const { manager, tools } = setup();
 		const controller = new AbortController();
-		await execute(tools.find((tool) => tool.name === "wait_agents")!, { agentIds: ["child-1"] }, controller.signal);
-		expect(manager.wait).toHaveBeenCalledWith({ agentIds: ["child-1"] }, controller.signal);
+		await execute(
+			tools.find((tool) => tool.name === "spawn_agent")!,
+			{ name: "child", task: "inspect", tools: [], background: true },
+			controller.signal,
+		);
+		expect(manager.spawn).toHaveBeenCalledWith(
+			{ name: "child", task: "inspect", tools: [], background: true, thinkingLevel: undefined },
+			controller.signal,
+		);
+
+		await execute(
+			tools.find((tool) => tool.name === "message_agent")!,
+			{ agentId: "child-1", mode: "follow_up", message: "verify", background: false },
+			controller.signal,
+		);
+		expect(manager.message).toHaveBeenCalledWith(
+			{ agentId: "child-1", mode: "follow_up", message: "verify", background: false },
+			controller.signal,
+		);
 	});
 
 	it("collapses structured results until the user expands them", async () => {
@@ -216,6 +313,49 @@ describe("subagent control tools", () => {
 		const expanded = stripAnsi(component.render(120).join("\n"));
 		expect(expanded).toContain(marker);
 		expect(expanded).toContain('"usage"');
+	});
+
+	it("shows foreground and background delivery mode in collapsed spawn results", async () => {
+		const { manager, tools } = setup();
+		const spawn = tools.find((tool) => tool.name === "spawn_agent")!;
+		const render = async (background: boolean) => {
+			const response = await execute(spawn, { name: "child", task: "inspect", tools: [], background });
+			const component = new ToolExecutionComponent(
+				"spawn_agent",
+				"call",
+				{ background },
+				{},
+				spawn,
+				createFakeTui(),
+				process.cwd(),
+			);
+			component.updateResult({ ...response, isError: false });
+			return component;
+		};
+
+		const background = await render(true);
+		expect(stripAnsi(background.render(120).join("\n"))).toContain("background");
+		background.setExpanded(true);
+		expect(stripAnsi(background.render(120).join("\n"))).toContain('"background": true');
+
+		vi.mocked(manager.spawn).mockResolvedValueOnce({
+			agentId: "child-2",
+			runId: "run-2",
+			name: "child",
+			taskSummary: "inspect",
+			mode: "code",
+			tools: [],
+			permissionMode: "ask",
+			cwd: process.cwd(),
+			forkTurns: 0,
+			background: false,
+			status: "done",
+			finalSummary: "verified",
+		});
+		const foreground = await render(false);
+		expect(stripAnsi(foreground.render(120).join("\n"))).toContain("foreground");
+		foreground.setExpanded(true);
+		expect(stripAnsi(foreground.render(120).join("\n"))).toContain('"finalSummary": "verified"');
 	});
 
 	it("shows the real error in collapsed output", () => {

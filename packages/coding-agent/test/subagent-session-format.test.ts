@@ -36,6 +36,130 @@ function config(): SubagentConfig {
 }
 
 describe("v7 first-class subagent records", () => {
+	it("parses v11 run delivery and two-phase mailbox controls", () => {
+		const base = { id: "record-1", parentId: null, timestamp: new Date(0).toISOString() };
+		const event = {
+			eventId: "subagent:agent-child-1:run-1:terminal",
+			runId: "run-1",
+			agentId: "agent-child-1",
+			name: "researcher",
+			type: "terminal" as const,
+			status: "done" as const,
+			finalMessage: "verified",
+			completedAt: new Date(0).toISOString(),
+		};
+
+		expect(
+			parseSessionControlEntry({
+				...base,
+				type: "subagent_state",
+				agentId: "agent-child-1",
+				runId: "run-1",
+				status: "queued",
+				background: false,
+			}),
+		).toMatchObject({ type: "subagent_state", background: false });
+
+		const eventEntry = parseSessionControlEntry({ ...base, type: "subagent_mailbox_event", event });
+		expect(eventEntry).toMatchObject({ type: "subagent_mailbox_event", event });
+
+		for (const state of ["started", "completed"] as const) {
+			const delivery = parseSessionControlEntry({
+				...base,
+				type: "subagent_mailbox_delivery",
+				deliveryId: "delivery-1",
+				eventIds: [event.eventId],
+				state,
+			});
+			expect(delivery).toMatchObject({
+				type: "subagent_mailbox_delivery",
+				state,
+				eventIds: [event.eventId],
+			});
+		}
+	});
+
+	it("rejects malformed v11 mailbox controls", () => {
+		const base = { id: "record-1", parentId: null, timestamp: new Date(0).toISOString() };
+		expect(() =>
+			parseSessionControlEntry({
+				...base,
+				type: "subagent_state",
+				agentId: "agent-child-1",
+				runId: "run-1",
+				status: "queued",
+				background: "yes",
+			}),
+		).toThrow("background must be a boolean");
+		expect(() =>
+			parseSessionControlEntry({
+				...base,
+				type: "subagent_mailbox_delivery",
+				deliveryId: "delivery-1",
+				eventIds: [],
+				state: "started",
+			}),
+		).toThrow("eventIds must contain at least one event ID");
+		expect(() =>
+			parseSessionControlEntry({
+				...base,
+				type: "subagent_mailbox_delivery",
+				deliveryId: "delivery-1",
+				eventIds: ["event-1", "event-1"],
+				state: "completed",
+			}),
+		).toThrow("eventIds must not contain duplicates");
+	});
+
+	it("requires v11 for mailbox controls and migrates an ordinary v10 journal", () => {
+		const root = tempRoot();
+		const ordinaryPath = join(root, "ordinary-v10.jsonl");
+		const badPath = join(root, "bad-v10-mailbox.jsonl");
+		const badBackgroundPath = join(root, "bad-v10-background.jsonl");
+		const header = {
+			type: "session",
+			version: 10,
+			id: "parent-v10",
+			timestamp: new Date(0).toISOString(),
+			cwd: root,
+			mode: "code",
+		};
+		writeFileSync(ordinaryPath, `${JSON.stringify(header)}\n`);
+		writeFileSync(
+			badPath,
+			`${JSON.stringify(header)}\n${JSON.stringify({
+				type: "subagent_mailbox_delivery",
+				id: "record-1",
+				parentId: null,
+				timestamp: new Date(0).toISOString(),
+				deliveryId: "delivery-1",
+				eventIds: ["event-1"],
+				state: "started",
+			})}\n`,
+		);
+		writeFileSync(
+			badBackgroundPath,
+			`${JSON.stringify(header)}\n${JSON.stringify({
+				type: "subagent_state",
+				id: "record-1",
+				parentId: null,
+				timestamp: new Date(0).toISOString(),
+				agentId: "agent-child-1",
+				runId: "run-1",
+				status: "queued",
+				background: true,
+			})}\n`,
+		);
+
+		const migrated = SessionManager.open(ordinaryPath);
+		expect(migrated.getHeader()?.version).toBe(11);
+		migrated.close();
+		expect(() => SessionManager.open(badPath)).toThrow("Subagent mailbox controls require a v11 session header");
+		expect(() => SessionManager.open(badBackgroundPath)).toThrow(
+			"Subagent mailbox controls require a v11 session header",
+		);
+	});
+
 	it("persists an immutable child marker and strict subagent controls", () => {
 		const root = tempRoot();
 		mkdirSync(join(root, "project"));
@@ -200,7 +324,7 @@ describe("v7 first-class subagent records", () => {
 		const goodPath = join(root, "ordinary-v7.jsonl");
 		writeFileSync(goodPath, `${JSON.stringify(header)}\n`);
 		const manager = SessionManager.open(goodPath);
-		expect(manager.getHeader()?.version).toBe(8);
+		expect(manager.getHeader()?.version).toBe(CURRENT_SESSION_VERSION);
 		manager.close();
 	});
 });

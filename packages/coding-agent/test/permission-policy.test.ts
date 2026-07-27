@@ -241,6 +241,11 @@ describe("Ask/Full permission policy", () => {
 		expect(routeAction(settings("ask"), action("unknown_builtin", {}))).toBe("user");
 	});
 
+	it("does not retain the removed wait_agents read exemption", () => {
+		expect(action("inspect_agents", {}).risks).toEqual(["ordinary-read"]);
+		expect(action("wait_agents", {}).risks).toEqual(["unknown"]);
+	});
+
 	it("fails closed when UI is missing, throws, or is aborted", async () => {
 		const value = action("write", { path: "new.txt", content: "x" });
 		await expect(

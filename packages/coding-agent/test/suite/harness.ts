@@ -20,6 +20,7 @@ import type { RequestPermissionApproval } from "../../src/core/permission-policy
 import { SessionManager } from "../../src/core/session-manager.ts";
 import type { Settings } from "../../src/core/settings-manager.ts";
 import { SettingsManager } from "../../src/core/settings-manager.ts";
+import type { UnattendedExecutionProfile } from "../../src/core/unattended-execution.ts";
 import type { InlineExtension, ResourceLoader } from "../../src/index.ts";
 import {
 	type CreateTestExtensionsResultInput,
@@ -74,6 +75,7 @@ export interface HarnessOptions {
 	mcpManager?: McpManager;
 	permissionModeCeiling?: () => PermissionSettings["mode"];
 	includeAutoMemory?: boolean;
+	unattendedExecution?: UnattendedExecutionProfile;
 	/** Optional caller-owned manager; cleanup does not close it. */
 	sessionManager?: SessionManager;
 }
@@ -196,6 +198,7 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
 		requestPermissionApproval: options.requestPermissionApproval,
 		permissionModeCeiling: options.permissionModeCeiling,
 		includeAutoMemory: options.includeAutoMemory,
+		unattendedExecution: options.unattendedExecution,
 	});
 
 	const events: AgentSessionEvent[] = [];

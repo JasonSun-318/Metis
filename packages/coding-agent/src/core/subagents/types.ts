@@ -13,7 +13,6 @@ export const SUBAGENT_TOOL_NAMES = [
 	"spawn_agent",
 	"inspect_agents",
 	"message_agent",
-	"wait_agents",
 	"interrupt_agent",
 	"close_agent",
 ] as const;
@@ -82,8 +81,10 @@ export interface SubagentDisplayConfig {
 
 export interface SubagentSummary {
 	readonly agentId: string;
+	readonly runId?: string;
 	readonly name: string;
 	readonly status: SubagentStatus;
+	readonly background?: boolean;
 	readonly taskSummary: string;
 	readonly configuration?: SubagentDisplayConfig;
 	readonly finalSummary?: string;
@@ -105,4 +106,6 @@ export interface SubagentTombstone {
 
 export type SubagentManagerEvent =
 	| { readonly type: "updated"; readonly summary: SubagentSummary }
-	| { readonly type: "approval_required"; readonly summary: SubagentSummary; readonly toolName: string };
+	| { readonly type: "approval_required"; readonly summary: SubagentSummary; readonly toolName: string }
+	| { readonly type: "notification_ready"; readonly event: SubagentMailboxEvent }
+	| { readonly type: "notification_failed"; readonly event: SubagentMailboxEvent; readonly error: string };

@@ -258,6 +258,7 @@ export {
 	reduceRuntimeJournal,
 } from "./core/runtime-recovery.ts";
 export type { RecoverablePromptDraft } from "./core/runtime-recovery-materializer.ts";
+export * from "./core/schedules/index.ts";
 // SDK for programmatic usage
 export {
 	AgentSessionRuntime,
@@ -301,6 +302,7 @@ export {
 	MAX_SESSION_ATTACHMENT_BYTES,
 	MAX_SESSION_ATTACHMENTS,
 	MAX_SESSION_ATTACHMENTS_BYTES,
+	pruneStaleSessionWorkDirs,
 	removeSessionAttachment,
 	type SessionAttachment,
 	type SessionAttachmentInput,
@@ -483,7 +485,19 @@ export {
 	type ProjectTrustStoreEntry,
 	type ProjectTrustUpdate,
 } from "./core/trust-manager.ts";
+export {
+	authorizeUnattendedAction,
+	createUnattendedExecutionProfile,
+	revalidateUnattendedAction,
+	UNATTENDED_TOOL_NAMES,
+	type UnattendedExecutionProfile,
+} from "./core/unattended-execution.ts";
 export type { WebSearchProvider } from "./core/web-search-config.ts";
+export {
+	createWorkspaceSandbox,
+	type WorkspaceSandbox,
+	WorkspaceSandboxError,
+} from "./core/workspace-sandbox.ts";
 // Main entry point
 export { type MainOptions, main } from "./main.ts";
 // Run modes for programmatic SDK usage

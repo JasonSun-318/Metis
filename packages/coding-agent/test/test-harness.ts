@@ -336,6 +336,8 @@ export interface HarnessOptions {
 	resourceLoader?: ResourceLoader;
 	/** Inline extensions to load into the session resource loader. */
 	extensionFactories?: Array<InlineExtension | CreateTestExtensionsResultInput>;
+	/** Use the harness temp directory as AgentSession's persistent agent directory. */
+	agentDir?: "temp";
 }
 
 export interface Harness {
@@ -401,6 +403,7 @@ function createHarnessWithResourceLoader(
 		modelRegistry,
 		resourceLoader,
 		baseToolsOverride: options.baseToolsOverride,
+		agentDir: options.agentDir === "temp" ? tempDir : undefined,
 	});
 
 	const events: AgentSessionEvent[] = [];

@@ -46,6 +46,58 @@ function assertExactRootChild(root: string, canonicalRoot: string, child: string
 	if (canonicalParent !== canonicalRoot) throw new Error("Managed workspace parent does not match its root");
 }
 
+export function createExactOwnedDirectory(root: string, name: string): string {
+	assertValidSessionId(name);
+	const resolvedRoot = resolvePath(root);
+	mkdirSync(resolvedRoot, { recursive: true, mode: 0o700 });
+	const canonicalRoot = assertRealDirectory(resolvedRoot, "Owned directory root");
+	const target = join(resolvedRoot, name);
+	assertExactRootChild(resolvedRoot, canonicalRoot, target, name);
+	if (existsSync(target)) throw new Error(`Owned directory already exists: ${target}`);
+	try {
+		mkdirSync(target, { mode: 0o700 });
+		const canonicalTarget = assertRealDirectory(target, "Owned directory");
+		if (dirname(canonicalTarget) !== canonicalRoot) throw new Error("Owned directory was created outside its root");
+		return canonicalTarget;
+	} catch (error) {
+		rmSync(target, { recursive: true, force: true });
+		throw error;
+	}
+}
+
+export function getExactOwnedDirectory(root: string, name: string, candidate: string): string | undefined {
+	try {
+		assertValidSessionId(name);
+		const resolvedRoot = resolvePath(root);
+		const canonicalRoot = assertRealDirectory(resolvedRoot, "Owned directory root");
+		const expected = join(resolvedRoot, name);
+		assertExactRootChild(resolvedRoot, canonicalRoot, expected, name);
+		const canonicalTarget = assertRealDirectory(expected, "Owned directory");
+		if (dirname(canonicalTarget) !== canonicalRoot) return undefined;
+		if (assertRealDirectory(candidate, "Stored owned directory") !== canonicalTarget) return undefined;
+		return expected;
+	} catch {
+		return undefined;
+	}
+}
+
+export function removeExactOwnedDirectory(root: string, name: string, candidate: string): boolean {
+	try {
+		assertValidSessionId(name);
+		const resolvedRoot = resolvePath(root);
+		const canonicalRoot = assertRealDirectory(resolvedRoot, "Owned directory root");
+		const expected = join(resolvedRoot, name);
+		assertExactRootChild(resolvedRoot, canonicalRoot, expected, name);
+		if (canonicalizePathForCreation(candidate) !== canonicalizePathForCreation(expected)) return false;
+		if (!existsSync(expected)) return true;
+		if (!getExactOwnedDirectory(resolvedRoot, name, candidate)) return false;
+		rmSync(expected, { recursive: true, force: true });
+		return !existsSync(expected);
+	} catch {
+		return false;
+	}
+}
+
 function resolveExistingDirectory(path: string, baseDir: string): string {
 	const resolvedPath = resolvePath(path, baseDir, { trim: true });
 	if (!statSync(resolvedPath).isDirectory()) throw new Error(`Working directory is not a directory: ${resolvedPath}`);
@@ -70,19 +122,8 @@ export function resolveNewSessionWorkspace(options: {
 		return { cwd: resolveExistingDirectory(options.hostCwd, options.hostCwd), cwdOrigin: "user-selected" };
 	}
 
-	const { root, canonicalRoot } = ensureManagedWorkspaceRoot(options.agentDir);
-	const target = getManagedWorkspaceDir(options.id, options.agentDir);
-	assertExactRootChild(root, canonicalRoot, target, options.id);
-	if (existsSync(target)) throw new Error(`Managed workspace already exists: ${target}`);
-	try {
-		mkdirSync(target);
-		const canonicalTarget = assertRealDirectory(target, "Managed workspace");
-		if (dirname(canonicalTarget) !== canonicalRoot) throw new Error("Managed workspace was created outside its root");
-		return { cwd: canonicalTarget, cwdOrigin: "managed" };
-	} catch (error) {
-		rmSync(target, { recursive: true, force: true });
-		throw error;
-	}
+	const { root } = ensureManagedWorkspaceRoot(options.agentDir);
+	return { cwd: createExactOwnedDirectory(root, options.id), cwdOrigin: "managed" };
 }
 
 /** Return the exact ArcMind-owned workspace, or undefined for external/forged ownership. */
@@ -97,14 +138,7 @@ export function getOwnedManagedWorkspace(options: {
 		assertValidSessionId(options.id);
 		const resolvedAgentDir = resolvePath(options.agentDir);
 		assertRealDirectory(resolvedAgentDir, "Agent directory");
-		const root = getWorkspacesDir(resolvedAgentDir);
-		const canonicalRoot = assertRealDirectory(root, "Managed workspace root");
-		const expected = getManagedWorkspaceDir(options.id, resolvedAgentDir);
-		assertExactRootChild(root, canonicalRoot, expected, options.id);
-		const canonicalWorkspace = assertRealDirectory(expected, "Managed workspace");
-		if (dirname(canonicalWorkspace) !== canonicalRoot) return undefined;
-		if (assertRealDirectory(options.cwd, "Stored managed workspace") !== canonicalWorkspace) return undefined;
-		return expected;
+		return getExactOwnedDirectory(getWorkspacesDir(resolvedAgentDir), options.id, options.cwd);
 	} catch {
 		return undefined;
 	}
@@ -116,10 +150,8 @@ export function removeOwnedManagedWorkspace(options: {
 	cwdOrigin: CwdOrigin;
 	agentDir: string;
 }): boolean {
-	const workspace = getOwnedManagedWorkspace(options);
-	if (!workspace) return false;
-	rmSync(workspace, { recursive: true, force: true });
-	return !existsSync(workspace);
+	if (options.cwdOrigin !== "managed") return false;
+	return removeExactOwnedDirectory(getWorkspacesDir(options.agentDir), options.id, options.cwd);
 }
 
 /** Copy one owned workspace and publish its derivative as one application transaction. */

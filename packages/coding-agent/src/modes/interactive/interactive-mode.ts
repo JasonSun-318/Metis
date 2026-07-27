@@ -3,6 +3,7 @@
  * Handles TUI rendering and user interaction, delegating business logic to AgentSession.
  */
 
+import { randomUUID } from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -94,6 +95,10 @@ import {
 import { parseCommandArgs } from "../../core/prompt-templates.ts";
 import { BUILT_IN_PROVIDER_DISPLAY_NAMES } from "../../core/provider-display-names.ts";
 import type { ResourceDiagnostic } from "../../core/resource-loader.ts";
+import type { ScheduleManager } from "../../core/schedules/manager.ts";
+import { getScheduleSessionDir } from "../../core/schedules/paths.ts";
+import { validateScheduleInputSpec } from "../../core/schedules/time.ts";
+import type { ScheduleCreateTarget, ScheduleInputSpec, ScheduleRun, ScheduleTask } from "../../core/schedules/types.ts";
 import {
 	formatSessionAttachment,
 	formatSessionAttachmentDisplayText,
@@ -125,7 +130,7 @@ import { copyToClipboard, readClipboardText } from "../../utils/clipboard.ts";
 import { readClipboardImage } from "../../utils/clipboard-image.ts";
 import { parseGitUrl } from "../../utils/git.ts";
 import { processImage } from "../../utils/image-process.ts";
-import { canonicalizePath, getCwdRelativePath, resolvePath } from "../../utils/paths.ts";
+import { canonicalizePath, getCwdRelativePath, isPathInside, resolvePath } from "../../utils/paths.ts";
 import { killTrackedDetachedChildren } from "../../utils/shell.ts";
 import { ensureTool } from "../../utils/tools-manager.ts";
 import { AssistantMessageComponent } from "./components/assistant-message.ts";
@@ -213,6 +218,31 @@ function formatDreamHistoryLine(record: DreamHistoryRecord): string {
 	].length;
 	const reason = record.reason ? ` · ${record.reason.slice(0, 160)}` : "";
 	return `${symbol} ${record.status} · ${record.completedAt} · ${record.trigger} · ${formatDreamDuration(record.durationMs)} · ${record.project} · global ${globalChanged} / project ${projectChanged}${reason}`;
+}
+
+const SCHEDULE_WEEKDAYS = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"] as const;
+
+function formatScheduleSpec(schedule: ScheduleTask["schedule"]): string {
+	switch (schedule.kind) {
+		case "once":
+			return `${schedule.date} ${schedule.time}`;
+		case "daily":
+			return `每天 ${schedule.time}`;
+		case "weekly":
+			return `每周 ${schedule.weekdays.map((day) => SCHEDULE_WEEKDAYS[day - 1]).join("、")} ${schedule.time}`;
+		case "monthly":
+			return `每月 ${schedule.day} 日 ${schedule.time}`;
+		case "interval":
+			return `每 ${schedule.every} ${schedule.unit === "minute" ? "分钟" : "小时"}，从 ${schedule.startAt} 开始`;
+	}
+}
+
+function scheduleMessageText(message: AssistantMessage): string {
+	if (typeof message.content === "string") return message.content;
+	return message.content
+		.filter((item): item is Extract<(typeof message.content)[number], { type: "text" }> => item.type === "text")
+		.map((item) => item.text)
+		.join("\n");
 }
 
 class ExpandableText extends Text implements Expandable {
@@ -421,6 +451,8 @@ function formatLoginProviderCompletionDescription(provider: LoginProviderComplet
  * Options for InteractiveMode initialization.
  */
 export interface InteractiveModeOptions {
+	/** Shared scheduled-task manager owned by the CLI host. */
+	scheduleManager?: ScheduleManager;
 	/** Providers that were migrated to auth.json (shows warning) */
 	migratedProviders?: string[];
 	/** Warning message if session model couldn't be restored */
@@ -498,6 +530,7 @@ export class InteractiveMode {
 
 	// Agent subscription unsubscribe function
 	private unsubscribe?: () => void;
+	private scheduleUnsubscribe?: () => void;
 	private signalCleanupHandlers: Array<() => void> = [];
 
 	// Track if editor is in bash mode (text starts with !)
@@ -844,6 +877,26 @@ export class InteractiveMode {
 		// Start the UI before initializing extensions so session_start handlers can use interactive dialogs
 		this.ui.start();
 		this.isInitialized = true;
+		if (this.options.scheduleManager) {
+			try {
+				this.scheduleUnsubscribe = this.options.scheduleManager.subscribe((event) => {
+					if (event.type !== "schedule/run-updated" || !event.run.unread) return;
+					const label =
+						event.run.status === "succeeded"
+							? "已完成"
+							: event.run.status === "failed"
+								? `失败：${event.run.error?.message ?? "未知错误"}`
+								: event.run.status === "missed"
+									? `未执行：${event.run.reason ?? "错过执行时间"}`
+									: event.run.status === "skipped"
+										? `已跳过：${event.run.reason ?? "任务正在运行"}`
+										: undefined;
+					if (label) this.showStatus(`定时任务“${event.task.title}”${label}（${event.task.unreadCount} 条未读）`);
+				});
+			} catch (error) {
+				this.showWarning(error instanceof Error ? error.message : String(error));
+			}
+		}
 
 		await this.themeController.applyFromSettings();
 
@@ -3071,6 +3124,16 @@ export class InteractiveMode {
 			}
 			if (text.startsWith("/dream ")) {
 				this.showWarning("Usage: /dream");
+				return;
+			}
+			if (text === "/schedule") {
+				this.editor.setText("");
+				await this.handleScheduleCommand();
+				return;
+			}
+			if (text.startsWith("/schedule ")) {
+				this.editor.setText("");
+				this.showWarning("Usage: /schedule");
 				return;
 			}
 			if (text === "/mcp") {
@@ -5727,6 +5790,260 @@ export class InteractiveMode {
 		this.ui.requestRender();
 	}
 
+	private scheduleTarget(): ScheduleCreateTarget {
+		if (this.sessionManager.getMode() === "code") {
+			return { kind: "project", cwd: this.sessionManager.getCwd() };
+		}
+		return this.sessionManager.getCwdOrigin() === "user-selected"
+			? { kind: "general", workspace: "fixed", cwd: this.sessionManager.getCwd() }
+			: { kind: "general", workspace: "task" };
+	}
+
+	private async askScheduleValue(title: string, pattern: RegExp, hint: string): Promise<string | undefined> {
+		while (true) {
+			const value = (await this.showExtensionInput(`${title}\n${hint}`))?.trim();
+			if (value === undefined) return undefined;
+			if (pattern.test(value)) return value;
+			this.showWarning(`格式不正确：${hint}`);
+		}
+	}
+
+	private async askScheduleSpec(): Promise<ScheduleInputSpec | undefined> {
+		const recurrence = await this.showExtensionSelector("执行周期", ["仅一次", "每天", "每周", "每月", "按间隔"]);
+		if (!recurrence) return undefined;
+		const askTime = () =>
+			this.askScheduleValue("执行时间", /^(?:[01]\d|2[0-3]):[0-5]\d$/, "请输入 HH:mm，例如 09:30");
+		let schedule: ScheduleInputSpec | undefined;
+		if (recurrence === "仅一次") {
+			const date = await this.askScheduleValue("执行日期", /^\d{4}-\d{2}-\d{2}$/, "请输入 YYYY-MM-DD");
+			if (!date) return undefined;
+			const time = await askTime();
+			if (!time) return undefined;
+			schedule = { kind: "once", date, time };
+		} else if (recurrence === "每天") {
+			const time = await askTime();
+			if (!time) return undefined;
+			schedule = { kind: "daily", time };
+		} else if (recurrence === "每周") {
+			const selected = new Set<number>();
+			while (true) {
+				const remaining = SCHEDULE_WEEKDAYS.map((label, index) => ({ label, day: index + 1 })).filter(
+					({ day }) => !selected.has(day),
+				);
+				const choice = await this.showExtensionSelector(
+					`选择星期${selected.size ? `（已选：${[...selected].map((day) => SCHEDULE_WEEKDAYS[day - 1]).join("、")}）` : ""}`,
+					[...remaining.map(({ label }) => label), ...(selected.size ? ["完成选择"] : [])],
+				);
+				if (!choice) return undefined;
+				if (choice === "完成选择") break;
+				const day = remaining.find(({ label }) => label === choice)?.day;
+				if (day) selected.add(day);
+			}
+			const time = await askTime();
+			if (!time) return undefined;
+			schedule = { kind: "weekly", weekdays: [...selected].sort((a, b) => a - b), time };
+		} else if (recurrence === "每月") {
+			const value = await this.askScheduleValue("每月执行日", /^(?:[1-9]|[12]\d|3[01])$/, "请输入 1 到 31");
+			if (!value) return undefined;
+			const time = await askTime();
+			if (!time) return undefined;
+			schedule = { kind: "monthly", day: Number(value), time };
+		} else {
+			const value = await this.askScheduleValue("执行间隔", /^[1-9]\d{0,3}$/, "请输入 1 到 10000 的整数");
+			if (!value || Number(value) > 10_000) return undefined;
+			const unit = await this.showExtensionSelector("间隔单位", ["分钟", "小时"]);
+			if (!unit) return undefined;
+			const startDate = await this.askScheduleValue("开始日期", /^\d{4}-\d{2}-\d{2}$/, "请输入 YYYY-MM-DD");
+			if (!startDate) return undefined;
+			const startTime = await askTime();
+			if (!startTime) return undefined;
+			schedule = {
+				kind: "interval",
+				every: Number(value),
+				unit: unit === "分钟" ? "minute" : "hour",
+				startDate,
+				startTime,
+			};
+		}
+		try {
+			return validateScheduleInputSpec(schedule);
+		} catch (error) {
+			this.showWarning(error instanceof Error ? error.message : String(error));
+			return undefined;
+		}
+	}
+
+	private async createScheduleTask(manager: ScheduleManager): Promise<void> {
+		const instruction = (await this.showExtensionEditor("任务内容"))?.trim();
+		if (!instruction) return;
+		const schedule = await this.askScheduleSpec();
+		if (!schedule) return;
+		const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+		const confirmation = await this.showExtensionSelector(
+			`确认创建\n任务：${instruction}\n周期：${formatScheduleSpec(
+				schedule.kind === "interval"
+					? { ...schedule, startAt: `${schedule.startDate} ${schedule.startTime}` }
+					: schedule,
+			)}\n时区：${timezone}`,
+			["创建", "取消"],
+		);
+		if (confirmation !== "创建") return;
+		const task = await manager.create({
+			id: randomUUID(),
+			instruction,
+			schedule,
+			timezone,
+			target: this.scheduleTarget(),
+			createdFromSessionId: this.sessionManager.getSessionId(),
+		});
+		this.showStatus(`已创建定时任务“${task.title}”，下次执行：${task.nextRunAt ?? "无"}`);
+	}
+
+	private async showScheduleRun(manager: ScheduleManager, task: ScheduleTask, run: ScheduleRun): Promise<void> {
+		if (run.unread) run = await manager.markRunRead(task.id, run.id);
+		let result = run.resultPreview ?? run.error?.message ?? run.reason ?? "暂无结果";
+		if (run.sessionFile) {
+			try {
+				const sessionFile = fs.realpathSync(run.sessionFile);
+				const sessionRoot = fs.realpathSync(getScheduleSessionDir(manager.agentDir, task.id));
+				if (!isPathInside(sessionRoot, sessionFile))
+					throw new Error("Scheduled session is outside its task directory");
+				const session = SessionManager.openReadOnly(sessionFile);
+				const marker = session.getHeader()?.scheduled;
+				if (marker?.taskId !== task.id || marker.runId !== run.id) {
+					throw new Error("Scheduled session identity does not match its run");
+				}
+				const assistant = session
+					.getBranch()
+					.flatMap(sessionEntryToContextMessages)
+					.filter((message) => message.role === "assistant")
+					.at(-1);
+				if (assistant) result = scheduleMessageText(assistant);
+			} catch {
+				// The run summary remains useful if its immutable session cannot be opened.
+			}
+		}
+		await this.showExtensionSelector(
+			`任务结果 · ${task.title}\n状态：${run.status}\n时间：${run.completedAt ?? run.createdAt}\n\n${result}`,
+			["返回"],
+		);
+	}
+
+	private async showScheduleRuns(manager: ScheduleManager, task: ScheduleTask): Promise<void> {
+		let beforeRunId: string | undefined;
+		while (true) {
+			const page = await manager.listRuns(task.id, { beforeRunId, limit: 20 });
+			const labels = new Map<string, ScheduleRun>();
+			for (const run of page.runs) {
+				labels.set(
+					`${run.unread ? "● " : ""}${run.status} · ${run.completedAt ?? run.createdAt} · ${run.id.slice(0, 8)}`,
+					run,
+				);
+			}
+			const choice = await this.showExtensionSelector(`执行记录 · ${task.title}`, [
+				...labels.keys(),
+				...(page.nextBeforeRunId ? ["下一页"] : []),
+				"返回",
+			]);
+			if (!choice || choice === "返回") return;
+			if (choice === "下一页") {
+				beforeRunId = page.nextBeforeRunId ?? undefined;
+				continue;
+			}
+			const run = labels.get(choice);
+			if (run) await this.showScheduleRun(manager, task, run);
+		}
+	}
+
+	private async showScheduleTask(manager: ScheduleManager, taskId: string): Promise<void> {
+		while (true) {
+			const task = await manager.get(taskId);
+			const editable = task.status !== "completed" && task.status !== "deleting";
+			const statusAction = task.status === "paused" ? "恢复" : task.status === "active" ? "暂停" : undefined;
+			const action = await this.showExtensionSelector(
+				`${task.title}\n任务：${task.instruction}\n周期：${formatScheduleSpec(task.schedule)}\n状态：${task.status}\n下次执行：${task.nextRunAt ?? "无"}`,
+				[
+					"查看执行记录",
+					...(editable ? ["修改任务内容", "修改时间和周期"] : []),
+					...(statusAction ? [statusAction] : []),
+					"立即运行",
+					"删除",
+					"返回",
+				],
+			);
+			if (!action || action === "返回") return;
+			if (action === "查看执行记录") {
+				await this.showScheduleRuns(manager, task);
+			} else if (action === "修改任务内容") {
+				const instruction = (await this.showExtensionEditor("任务内容", task.instruction))?.trim();
+				if (instruction) await manager.update(task.id, { instruction });
+			} else if (action === "修改时间和周期") {
+				const schedule = await this.askScheduleSpec();
+				if (schedule) await manager.update(task.id, { schedule });
+			} else if (action === "暂停") {
+				await manager.pause(task.id);
+			} else if (action === "恢复") {
+				await manager.resume(task.id);
+			} else if (action === "立即运行") {
+				await manager.runNow(task.id, randomUUID());
+				this.showStatus(`定时任务“${task.title}”已加入执行队列`);
+			} else if (action === "删除") {
+				const confirmed = await this.showExtensionSelector(
+					`删除“${task.title}”？\n将删除该任务的全部执行记录、隐藏会话和任务专属目录；不会删除项目或用户固定目录。`,
+					["确认删除", "取消"],
+				);
+				if (confirmed === "确认删除") {
+					await manager.delete(task.id);
+					this.showStatus(`已删除定时任务“${task.title}”`);
+					return;
+				}
+			}
+		}
+	}
+
+	private async handleScheduleCommand(): Promise<void> {
+		if (this.guardSessionMutation()) return;
+		const manager = this.options.scheduleManager;
+		if (!manager) {
+			this.showWarning("当前进程未启用定时任务");
+			return;
+		}
+		let afterTaskId: string | undefined;
+		let unreadOnly = false;
+		try {
+			while (true) {
+				const page = await manager.list({ afterTaskId, limit: 50, unreadOnly });
+				const labels = new Map<string, string>();
+				for (const task of page.tasks) {
+					const label = `${task.unreadCount ? `●${task.unreadCount} ` : ""}${task.title} · ${task.status} · ${task.nextRunAt ?? "无下次执行"} · ${task.id.slice(0, 8)}`;
+					labels.set(label, task.id);
+				}
+				const choice = await this.showExtensionSelector(unreadOnly ? "定时任务 · 未读结果" : "定时任务", [
+					"创建任务",
+					unreadOnly ? "查看全部任务" : "只看未读结果",
+					...labels.keys(),
+					...(page.nextAfterTaskId ? ["下一页"] : []),
+					"关闭",
+				]);
+				if (!choice || choice === "关闭") return;
+				if (choice === "创建任务") {
+					await this.createScheduleTask(manager);
+					afterTaskId = undefined;
+				} else if (choice === "只看未读结果" || choice === "查看全部任务") {
+					unreadOnly = !unreadOnly;
+					afterTaskId = undefined;
+				} else if (choice === "下一页") {
+					afterTaskId = page.nextAfterTaskId ?? undefined;
+				} else {
+					const taskId = labels.get(choice);
+					if (taskId) await this.showScheduleTask(manager, taskId);
+				}
+			}
+		} catch (error) {
+			this.showError(error instanceof Error ? error.message : String(error));
+		}
+	}
+
 	private async handleMcpCommand(): Promise<void> {
 		await this.showMcpManager();
 	}
@@ -6702,6 +7019,8 @@ export class InteractiveMode {
 		if (this.unsubscribe) {
 			this.unsubscribe();
 		}
+		this.scheduleUnsubscribe?.();
+		this.scheduleUnsubscribe = undefined;
 		if (this.isInitialized) {
 			this.ui.stop();
 			this.isInitialized = false;

@@ -1,0 +1,170 @@
+export type SandboxErrorCode = "SANDBOX_UNAVAILABLE" | "SANDBOX_PROTOCOL" | "SANDBOX_CLOSED";
+
+export type SandboxRequest =
+	| { type: "init"; cwd: string; workspaceRoots: string[] }
+	| { type: "exec"; id: string; command: string; cwd: string; timeoutMs?: number; env: Record<string, string> }
+	| { type: "cancel"; id: string }
+	| { type: "close" };
+
+export type SandboxResponse =
+	| { type: "ready" }
+	| { type: "closed" }
+	| { type: "data"; id: string; data: string }
+	| { type: "result"; id: string; exitCode: number | null }
+	| { type: "error"; id?: string; code: SandboxErrorCode; message: string };
+
+const MAX_LINE_BYTES = 1024 * 1024;
+const MAX_COMMAND_BYTES = 256 * 1024;
+const MAX_ENV_BYTES = 256 * 1024;
+const MAX_ENV_ENTRIES = 256;
+const MAX_TIMEOUT_MS = 2_147_483_647;
+
+function parseLine(line: string): unknown {
+	if (Buffer.byteLength(line, "utf8") > MAX_LINE_BYTES) throw new TypeError("Sandbox message exceeds 1 MiB");
+	return JSON.parse(line);
+}
+
+function strictRecord(value: unknown, keys: readonly string[]): Record<string, unknown> {
+	if (typeof value !== "object" || value === null || Array.isArray(value)) {
+		throw new TypeError("Sandbox message must be an object");
+	}
+	const record = value as Record<string, unknown>;
+	for (const key of Object.keys(record)) {
+		if (!keys.includes(key)) throw new TypeError(`Unknown sandbox field: ${key}`);
+	}
+	return record;
+}
+
+function nonEmptyString(value: unknown, field: string): string {
+	if (typeof value !== "string" || value.length === 0 || value.includes("\0")) {
+		throw new TypeError(`Sandbox ${field} must be a non-empty string without NUL bytes`);
+	}
+	return value;
+}
+
+function environment(value: unknown): Record<string, string> {
+	const record = strictRecord(value, typeof value === "object" && value !== null ? Object.keys(value) : []);
+	const entries = Object.entries(record);
+	if (entries.length > MAX_ENV_ENTRIES) throw new TypeError("Sandbox environment has too many entries");
+	let bytes = 0;
+	const result: Record<string, string> = Object.create(null) as Record<string, string>;
+	for (const [key, rawValue] of entries) {
+		if (
+			key.length === 0 ||
+			key.includes("=") ||
+			key.includes("\0") ||
+			typeof rawValue !== "string" ||
+			rawValue.includes("\0")
+		) {
+			throw new TypeError("Sandbox environment must contain valid strings");
+		}
+		bytes += Buffer.byteLength(key, "utf8") + Buffer.byteLength(rawValue, "utf8");
+		result[key] = rawValue;
+	}
+	if (bytes > MAX_ENV_BYTES) throw new TypeError("Sandbox environment exceeds 256 KiB");
+	return result;
+}
+
+function timeout(value: unknown): number | undefined {
+	if (value === undefined) return undefined;
+	if (!Number.isInteger(value) || (value as number) < 0 || (value as number) > MAX_TIMEOUT_MS) {
+		throw new TypeError("Sandbox timeout is invalid");
+	}
+	return value as number;
+}
+
+export function parseSandboxRequest(line: string): SandboxRequest {
+	const value = strictRecord(parseLine(line), ["type", "cwd", "workspaceRoots", "id", "command", "timeoutMs", "env"]);
+	const type = nonEmptyString(value.type, "request type");
+	switch (type) {
+		case "init": {
+			const record = strictRecord(value, ["type", "cwd", "workspaceRoots"]);
+			if (!Array.isArray(record.workspaceRoots) || record.workspaceRoots.length === 0) {
+				throw new TypeError("Sandbox workspaceRoots must be a non-empty array");
+			}
+			return {
+				type,
+				cwd: nonEmptyString(record.cwd, "cwd"),
+				workspaceRoots: record.workspaceRoots.map((root) => nonEmptyString(root, "workspace root")),
+			};
+		}
+		case "exec": {
+			const record = strictRecord(value, ["type", "id", "command", "cwd", "timeoutMs", "env"]);
+			const command = nonEmptyString(record.command, "command");
+			if (Buffer.byteLength(command, "utf8") > MAX_COMMAND_BYTES) {
+				throw new TypeError("Sandbox command exceeds 256 KiB");
+			}
+			const timeoutMs = timeout(record.timeoutMs);
+			return {
+				type,
+				id: nonEmptyString(record.id, "request id"),
+				command,
+				cwd: nonEmptyString(record.cwd, "cwd"),
+				...(timeoutMs === undefined ? {} : { timeoutMs }),
+				env: environment(record.env),
+			};
+		}
+		case "cancel": {
+			const record = strictRecord(value, ["type", "id"]);
+			return { type, id: nonEmptyString(record.id, "request id") };
+		}
+		case "close":
+			strictRecord(value, ["type"]);
+			return { type };
+		default:
+			throw new TypeError(`Unknown sandbox request type: ${type}`);
+	}
+}
+
+export function parseSandboxResponse(line: string): SandboxResponse {
+	const value = strictRecord(parseLine(line), ["type", "id", "data", "exitCode", "code", "message"]);
+	const type = nonEmptyString(value.type, "response type");
+	switch (type) {
+		case "ready":
+		case "closed":
+			strictRecord(value, ["type"]);
+			return { type };
+		case "data": {
+			const record = strictRecord(value, ["type", "id", "data"]);
+			const data = nonEmptyString(record.data, "data");
+			if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(data)) {
+				throw new TypeError("Sandbox data must be base64");
+			}
+			return {
+				type,
+				id: nonEmptyString(record.id, "request id"),
+				data,
+			};
+		}
+		case "result": {
+			const record = strictRecord(value, ["type", "id", "exitCode"]);
+			if (
+				record.exitCode !== null &&
+				(!Number.isInteger(record.exitCode) ||
+					(record.exitCode as number) < 0 ||
+					(record.exitCode as number) > MAX_TIMEOUT_MS)
+			) {
+				throw new TypeError("Sandbox exitCode is invalid");
+			}
+			return {
+				type,
+				id: nonEmptyString(record.id, "request id"),
+				exitCode: record.exitCode as number | null,
+			};
+		}
+		case "error": {
+			const record = strictRecord(value, ["type", "id", "code", "message"]);
+			if (!new Set(["SANDBOX_UNAVAILABLE", "SANDBOX_PROTOCOL", "SANDBOX_CLOSED"]).has(String(record.code))) {
+				throw new TypeError("Sandbox error code is invalid");
+			}
+			return {
+				type,
+				...(record.id === undefined ? {} : { id: nonEmptyString(record.id, "request id") }),
+				code: record.code as SandboxErrorCode,
+				message: nonEmptyString(record.message, "error message"),
+			};
+		}
+		default:
+			throw new TypeError(`Unknown sandbox response type: ${type}`);
+	}
+}

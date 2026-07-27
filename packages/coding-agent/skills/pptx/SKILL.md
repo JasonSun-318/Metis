@@ -19,15 +19,16 @@ This file embeds the official `pptx` skill from the bundled OfficeCLI 1.0.140.
 - For a 3D Morph presentation, run `officecli load_skill morph-ppt-3d` once. For another Morph presentation, run `officecli load_skill morph-ppt` once. Treat the selected specialized skill as overriding the generic guidance below; the ArcMind integration rules in this section still take priority.
 - Use the exact absolute path from the `<attachment>` or `<attachments>` block.
 - Put every new deliverable under `$ARCMIND_ATTACHMENTS_DIR`; create the directory first.
-- Put disposable previews, rendered slides, extracted media, conversion files, and other intermediates under `$ARCMIND_WORK_DIR`; create it before use and pass `-o "$ARCMIND_WORK_DIR/<name>"` to `officecli view` modes that accept an output path. ArcMind clears this directory when the agent run ends. Never put a deliverable there.
+- A simple read must print content to stdout, normally with `officecli view "$FILE" text`, `get`, or `query`. Do not create a work directory, preview, HTML file, rendered slide, extracted-media directory, or copied presentation for reading, Q&A, or summary.
+- ArcMind creates a unique `$ARCMIND_WORK_DIR` for the current run. Put previews, rendered slides, extracted media, conversions, and other intermediates only there; never create `.work`, `work`, or `tmp` beside an attachment. Start file-producing operations from `cd "$ARCMIND_WORK_DIR"` and pass `-o "$ARCMIND_WORK_DIR/<name>"` when supported. ArcMind clears the directory after the run.
 - Preserve the input by default and write modifications to a new deliverable unless the user explicitly requests an in-place change to an ArcMind-owned attachment.
 - Use the fewest sufficient operations and stop when the request is answered. For reading or summarizing, prefer one targeted `view`, `get`, or `query`; do not validate or render unless needed.
-- Use `batch` for multiple related changes. Explicit `open` and `save` are unnecessary for simple tasks because ArcMind sets `OFFICECLI_RESIDENT_FLUSH=each`.
-- Never call a remote document, image, OCR, or vision service.
+- ArcMind disables OfficeCLI auto-resident mode. Each command is self-contained and file-changing commands persist before returning. Ignore later resident lifecycle instructions: do not use `open`, `save`, `close`, or `watch`. Use `batch` for multiple related changes.
+- Never call a separate remote document, image, OCR, or vision service. When visual confirmation is needed, use only the current ArcMind model's image input as described below.
 
 ### Conditional visual confirmation
 
-The official visual-delivery guidance below is conditional in ArcMind, not universal. Render and read images only when the task needs confirmation of image content, layout, overlap, overflow, or final visual appearance. If visual confirmation is unnecessary, do not render.
+The official visual-delivery guidance below is conditional in ArcMind, not universal. Ignore later rules that say every presentation must be rendered. Render and read images only when the task needs confirmation of image content, layout, overlap, overflow, or final visual appearance. If visual confirmation is unnecessary, do not render.
 
 When visual confirmation is needed and the current model accepts image input, render a contact sheet or only the relevant slides and use the `read` tool on the resulting PNG files. A printed image path is not image input.
 
@@ -95,16 +96,16 @@ Title must be **≥ 2× body size** (36pt over 20pt works; 28pt over 20pt looks 
 
 **Preserve existing templates.** When a file already has a theme and masters, match them. Existing conventions override these guidelines.
 
-### Visual delivery floor (applies to EVERY deck)
+### Conditional visual-delivery reference
 
-Before declaring done, the per-slide render (see QA) MUST satisfy:
+When the task needs visual confirmation, use the per-slide render (see QA) to check:
 
 - **No placeholder tokens rendered as content.** `{{name}}`, `$fy$24`, `<TODO>`, `lorem`, `xxxx`, empty `()`/`[]` in chart titles never appear.
 - **No overflow off-edge, no clipped text in shapes.** `view issues` flags both (`shape_off_slide` + a text-fit hint). To fix a clip: grow the box or shorten the value — never trim content to fit.
 - **Cover carries its orienting elements.** Title + subtitle + presenter/client + date + a brand band or key-takeaway strap — a title-only cover reads as a stub. Generous whitespace around them is still right; rich ≠ crowded.
 - **Contrast.** `view issues` auto-flags the common case — opaque dark text on a shape's own dark fill (`low_contrast`). It can't see the rest: icon / chart-series fills, scheme/inherited colors, or text over a *separate* background shape. So on any fill with brightness < 30% (`1E2761`, `36454F`, deep forest / berry / cherry), still confirm every body run, card body, chart series, and icon is `FFFFFF` or brightness > 80% — mid-gray (`6B7B8D` ≈ 44%) reads on a laptop and vanishes on projection. Spot-check via `view html` after the dark-fill pass.
 
-If any fails, STOP and fix before declaring done.
+If visual confirmation is part of the task, fix any failure before declaring it visually verified.
 
 ## Design Principles
 
@@ -223,13 +224,13 @@ Copy-level tells live in "Copy reads human".
 
 ## Common Workflow
 
-1. **Open/save lifecycle.** `officecli open <file>` at the start, `officecli save <file>` at the end to flush your edits to disk. `save` only writes — it leaves the resident warm for any follow-up edit; reach for `officecli close <file>` only when you want to release the resident immediately (a one-shot handoff). Both are always safe — they never error or lose work. Use `batch` for repetitive shape grids. **Flush only at the non-officecli boundary:** officecli's own reads always see your edits; run `save`/`close` only before a non-officecli program reads the file (python-pptx, PowerPoint, a renderer, delivery).
+1. **ArcMind lifecycle.** Do not open a resident. Every mutating command persists before it returns. Use `batch` for repetitive shape grids.
 2. **Orient.** New deck: `officecli create "$FILE"`. Existing: `officecli view "$FILE" outline` first. Never edit blind.
 3. **Title sequence first (plan, don't build yet).** Before creating any slide or shape, write out the full ordered list of slide titles. If someone reading ONLY the titles can't follow the argument, fix the arc now — cheaper in a list than after 14 slides. Pick ONE title grammar — all topic noun-phrases or all action statements, never a mix — and hold it throughout (see "Copy reads human").
-4. **Build in display order.** Add slides in audience-view order: cover → agenda → section-1 divider → section-1 content → section-2 divider → … → closing. `--index` on slide add works, but linear append keeps the build script readable and avoids index-arithmetic bugs. **Before final delivery, confirm slide count + narrative arc match your build plan.** Gate 3's order-sanity check catches cases where the cover ends up as slide 11 of 14 instead of slide 1.
+4. **Build in display order.** Add slides in audience-view order: cover → agenda → section-1 divider → section-1 content → section-2 divider → … → closing. `--index` on slide add works, but linear append keeps the build script readable and avoids index-arithmetic bugs. **Before final delivery, confirm slide count + narrative arc match your build plan.** Use the outline for this structural check; a conditional Gate 3 visual audit can confirm it when visual review is needed.
 5. **Incremental per slide.** Create slide + background, then title, then supporting shapes / charts / connectors. Always `layout=blank` for custom designs. After each structural op, `get /slide[N] --depth 1` to confirm shape IDs.
 6. **Format to spec.** Per the Requirements table; formatting is deliverable, not polish.
-7. **Save + verify.** `officecli save` flushes the file to disk (or `officecli close` to flush and also end the session). Always open in the target presentation viewer before shipping — chart colors, animations, fonts, and zoom are runtime features `view html` can't render. Full verification in QA below.
+7. **Verify.** Mutating commands already persist the file. When the task needs runtime visual confirmation, inspect it in the target presentation viewer because chart colors, animations, fonts, and zoom are runtime features `view html` cannot prove. See QA below.
 8. **QA — assume there are problems.** Fix-and-verify until a cycle finds zero new issues.
 
 ## Quick Start
@@ -239,7 +240,6 @@ Minimal viable deck: cover + one content slide + notes. `$FILE` stands in for yo
 ```bash
 FILE="deck.pptx"
 officecli create "$FILE"
-officecli open "$FILE"
 
 # Cover — dark fill, centered title
 officecli add "$FILE" / --type slide --prop layout=blank --prop background=1E2761
@@ -257,11 +257,10 @@ officecli add "$FILE" /slide[2] --type shape --prop text="Enterprise renewals + 
   --prop font=Calibri --prop size=20 --prop color=333333
 officecli add "$FILE" /slide[2] --type notes --prop text="Lead with the 18% beat, preview EMEA."
 
-officecli save "$FILE"
 officecli validate "$FILE"
 ```
 
-Shape of every build: open → slide+background → title → body → notes → save → validate.
+Shape of every build: create/orient → slide+background → title → body → notes → validate.
 
 ## Reading & Analysis
 
@@ -530,13 +529,13 @@ EOF
 
 Then 4 connectors (`Decide→YesBox`, `Decide→NoBox`, `YesBox→Done`, `NoBox→Done`) using the connector loop pattern from (c).
 
-## QA (Required)
+## QA (required for creation/editing)
 
 **Assume there are problems.** First render is almost never correct. If you found zero issues, you were not looking hard enough.
 
 ### Delivery Gate (any failure = REJECT, do NOT deliver)
 
-Gates 1–2b are text/schema-level (cannot see a rendered slide); Gate 3 is the only visual check. Done = every gate PASS **and** Gate 3 loop converged.
+Gates 1–2b are text/schema-level and required for creation/editing. Gate 3 is conditional: run it only when the task needs visual confirmation. A structural delivery is done when Gates 1–2b pass; a visually verified delivery also requires Gate 3 to converge.
 
 Each gate is **run a command, judge its output** — the officecli commands are identical on every OS (macOS / Linux / Windows), so no shell scripting is needed; the judging is yours.
 
@@ -544,13 +543,13 @@ Each gate is **run a command, judge its output** — the officecli commands are 
 - **Gate 2 — overflow / format / structure.** `officecli view "<file>" issues`. If it lists *any* issue (lines tagged `[O1]`, `[C1]`, `[S1]`, …) → REJECT, fix, re-run until clean.
 - **Gate 2b — leftover placeholders.** `officecli view "<file>" text`, then scan the output for `xxxx`, `lorem` / `ipsum`, `<TODO>`, `placeholder`, "this slide layout", or empty `()` / `[]`. Any hit → REJECT.
 
-### Gate 3 — Visual audit (MANDATORY)
+### Gate 3 — Conditional visual audit
 
-Pick **one** path:
+Run this gate only when visual confirmation is needed. Pick **one** path:
 
-**Screenshot (default)** — for vision-capable agents. Screenshot each slide in turn — `officecli view "<file>" screenshot --page 1 -o "$ARCMIND_WORK_DIR/slide1.png"`, then `--page 2`, … — until the page index runs past the deck (one screenshot = one slide). If it errors on page 1, use the fallback below.
+**Screenshot** — when the current model can inspect images. Screenshot each slide in turn — `officecli view "<file>" screenshot --page 1 -o "$ARCMIND_WORK_DIR/slide1.png"`, then `--page 2`, … — until the page index runs past the deck (one screenshot = one slide). If it errors on page 1, use the fallback below.
 
-**Judge every PNG against the checklist, adversarially** — "assume problems exist; finding none means you didn't look hard enough." Report one `slide N: <issue>` line per problem, or `PASS`. This step is required however you run it. **If** your harness can spawn a subagent, delegate the judging to a *fresh, independent* one — the agent that built the deck is biased toward "looks fine", a separate pair of eyes is more critical — handing it the screenshots + this checklist and the same adversarial framing. No subagent? Do exactly the same yourself.
+**Judge every generated PNG against the checklist.** Report one `slide N: <issue>` line per problem, or `PASS`.
 
 **Fallback — HTML-text** (no vision, or screenshot failed): read `view "$FILE" html` as text. DOM cannot prove **dark-on-dark / fine overlap / arrowheads / gap-margin metrics / column alignment** — flag these as "not visually verified" rather than PASS.
 
@@ -573,9 +572,9 @@ Pick **one** path:
 
 REJECT with `slide N: <issue>` lines, else "Gate 3 PASS" (HTML-text fallback adds "<unverified-items> not visually verified").
 
-**Fix-verify (mandatory, max 3 cycles).** Fix → re-run Gate 3 → repeat until zero new issues; one fix often surfaces another. After 3 rounds without convergence, **stop** — likely seesaw, template-level cause, or agent misread. Report `slide N: <issue> — attempted: <fixes> — likely root: <template|design-conflict|ambiguous>` and let the user decide.
+**Fix-verify (when Gate 3 is used, max 3 cycles).** Fix → re-run Gate 3 → repeat until zero new issues. After 3 rounds without convergence, **stop** and report `slide N: <issue> — attempted: <fixes> — likely root: <template|design-conflict|ambiguous>`.
 
-**Then flush (part of the gate).** Once Gate 3 converges, end with `officecli save "<file>"` — this guarantees your edits are written to disk before delivery (use `officecli close "<file>"` instead to also release the resident on a one-shot handoff). Required final step, not optional. Always safe: never errors or loses work.
+**Then deliver.** Mutating commands already persist before returning; no separate flush command is needed.
 
 ## Common Pitfalls
 
@@ -594,4 +593,4 @@ Sanity-check cheatsheet — what breaks on the first try. Design + shell traps.
 
 ## ArcMind final override
 
-ArcMind's integration rules above take priority over conflicting generic requirements: do not install or update tools, do not use remote services, save deliverables under `$ARCMIND_ATTACHMENTS_DIR`, keep intermediates under `$ARCMIND_WORK_DIR`, and do not render when visual confirmation is unnecessary.
+ArcMind's integration rules above take priority over conflicting generic requirements: simple reads use stdout without intermediate files; OfficeCLI is non-resident; do not install or update tools; do not use separate remote services; save deliverables under `$ARCMIND_ATTACHMENTS_DIR`; keep intermediates under the runtime-created `$ARCMIND_WORK_DIR`; and do not render when visual confirmation is unnecessary.
