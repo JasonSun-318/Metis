@@ -136,6 +136,58 @@ describe("TranscriptTurn", () => {
 		await act(async () => root.unmount());
 	});
 
+	it("does not repeat a thinking echo as intermediate assistant text", async () => {
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		const echoedPrefix = "我需要先检查当前工具并确认配置。".repeat(8);
+		await act(async () => root.render(<TranscriptTurn items={[
+			item("echo-user", "user", [{ type: "text", text: "检查工具" }]),
+			item("echo-assistant", "assistant", [
+				{ type: "thinking", text: `${echoedPrefix}重新启动会话或重新加载配置` },
+				{ type: "text", text: `${echoedPrefix}重新启动会话或重新配置\n` },
+				{ type: "tool_call", toolCallId: "echo-tool", name: "read", state: "completed" },
+			]),
+			item("echo-result", "tool", [
+				{ type: "tool_result", toolCallId: "echo-tool", name: "read", isError: false, output: "ok" },
+			]),
+			item("echo-final", "assistant", [{ type: "text", text: "工具检查完成。" }]),
+		]} />));
+
+		expect(container.querySelector(".turn-intermediate")).toBeNull();
+		expect(container.querySelector(".execution-chain")?.textContent).toContain("重新加载配置");
+		expect(container.querySelector("[data-transcript-answer]")?.textContent).toContain("工具检查完成。");
+		await act(async () => root.unmount());
+	});
+
+	it("does not flash a streaming thinking echo as the final answer", async () => {
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		const echoed = "我需要先检查当前工具并确认配置。".repeat(8);
+		await act(async () => root.render(<TranscriptTurn items={[
+			item("stream-echo-user", "user", [{ type: "text", text: "检查工具" }]),
+			item("stream-echo-assistant", "assistant", [
+				{ type: "thinking", text: echoed },
+				{ type: "text", text: echoed },
+			], "streaming"),
+		]} />));
+
+		expect(container.querySelector("[data-transcript-answer]")).toBeNull();
+		expect(container.querySelector(".execution-chain")?.textContent).toContain(echoed);
+		await act(async () => root.render(<TranscriptTurn items={[
+			item("stream-echo-user", "user", [{ type: "text", text: "检查工具" }]),
+			item("stream-echo-assistant", "assistant", [
+				{ type: "thinking", text: echoed },
+				{ type: "text", text: echoed },
+				{ type: "tool_call", toolCallId: "stream-echo-tool", name: "read", state: "running" },
+			], "streaming"),
+		]} />));
+		expect(container.querySelector(".execution-chain")?.textContent).toContain(echoed);
+		expect(container.querySelector(".turn-intermediate")).toBeNull();
+		await act(async () => root.unmount());
+	});
+
 	it("does not invent a result for a running tool call", async () => {
 		const running = [
 			turnItems[0]!,

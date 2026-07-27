@@ -18,10 +18,15 @@
 	--warning: #e59a56;
 	--focus: #d88a72;
 	--sidebar-width: 302px;
-	--header-height: 64px;
+	--header-height: 46px;
 	--conversation-width: 770px;
 	--transcript-width: 730px;
 	--composer-radius: 21px;
+	--sidebar-item-size: clamp(13px, calc(8px + .47vw), 14px);
+	--chat-meta-size: clamp(13px, calc(8px + .47vw), 14px);
+	--chat-body-size: clamp(14px, calc(9px + .47vw), 15px);
+	--chat-answer-size: clamp(15px, calc(10px + .47vw), 16px);
+	--chat-control-size: clamp(15px, calc(10px + .47vw), 16px);
 	--shadow: 0 22px 58px rgb(0 0 0 / 30%), 0 4px 14px rgb(0 0 0 / 16%);
 	--shadow-hover: 0 26px 68px rgb(0 0 0 / 36%), 0 6px 18px rgb(0 0 0 / 20%);
 	font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;

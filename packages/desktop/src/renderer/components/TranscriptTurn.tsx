@@ -20,6 +20,19 @@ function textBlocks(item: ItemView): TextBlock[] {
 	return item.content.filter((block): block is TextBlock => block.type === "text");
 }
 
+function isThinkingEcho(text: string, thinking: string): boolean {
+	const visible = text.replace(/\s/gu, "");
+	const internal = thinking.replace(/\s/gu, "");
+	if (visible === internal) return true;
+	const shorter = Math.min(visible.length, internal.length);
+	if (shorter < 80 || Math.max(visible.length, internal.length) > shorter * 1.2) return false;
+	let prefix = 0;
+	while (prefix < shorter && visible[prefix] === internal[prefix]) prefix += 1;
+	let suffix = 0;
+	while (suffix < shorter - prefix && visible[visible.length - 1 - suffix] === internal[internal.length - 1 - suffix]) suffix += 1;
+	return prefix + suffix >= shorter * 0.8;
+}
+
 function toolCalls(item: ItemView): ToolCall[] {
 	return item.content.filter((block): block is ToolCall => block.type === "tool_call");
 }
@@ -33,7 +46,9 @@ function finalResponseIndex(items: readonly ItemView[]): number {
 	}
 	for (let index = items.length - 1; index > lastToolIndex; index -= 1) {
 		const item = items[index]!;
-		if (item.role === "assistant" && textBlocks(item).length > 0 && toolCalls(item).length === 0) return index;
+		if (item.role !== "assistant" || toolCalls(item).length > 0) continue;
+		const thinking = item.content.filter((block): block is ThinkingBlock => block.type === "thinking");
+		if (textBlocks(item).some((block) => !thinking.some((candidate) => isThinkingEcho(block.text, candidate.text)))) return index;
 	}
 	return -1;
 }
@@ -150,9 +165,11 @@ export function TranscriptTurn({ items }: { readonly items: readonly ItemView[] 
 			(block): block is ThinkingBlock | ToolCall | ToolResult =>
 				block.type === "thinking" || block.type === "tool_call" || (block.type === "tool_result" && !callIds.has(block.toolCallId)),
 		);
-	const intermediateText = items.flatMap((item, index) =>
-		item.role === "assistant" && index !== finalIndex ? textBlocks(item) : [],
-	);
+	const intermediateText = items.flatMap((item, index) => {
+		if (item.role !== "assistant" || index === finalIndex) return [];
+		const thinking = item.content.filter((block): block is ThinkingBlock => block.type === "thinking");
+		return textBlocks(item).filter((block) => !thinking.some((candidate) => isThinkingEcho(block.text, candidate.text)));
+	});
 	const final = finalIndex >= 0 ? items[finalIndex] : undefined;
 	const running = calls.some((call) => call.state === "running" || call.state === "pending");
 	// ponytail: content-size heuristic avoids layout observers; measure actual overflow if transcript typography becomes user-configurable.

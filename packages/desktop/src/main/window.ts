@@ -15,7 +15,7 @@ export function createMainWindow(): BrowserWindow {
 		...(process.platform === "darwin"
 			? {
 					titleBarStyle: "hiddenInset" as const,
-					trafficLightPosition: { x: 22, y: 28 },
+					trafficLightPosition: { x: 13, y: 16 },
 				}
 			: {}),
 		webPreferences: {

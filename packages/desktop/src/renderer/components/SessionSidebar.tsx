@@ -1,6 +1,6 @@
 import type { AgentMode, SessionSummary } from "@arcmind/app-protocol";
 import { ChatCircleDots, Code, FolderSimple, MagnifyingGlass, NotePencil, SidebarSimple, Sparkle } from "@phosphor-icons/react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { AppStoreSnapshot } from "../store/app-store.ts";
 
 export type SidebarDestination = "tasks" | "skills";
@@ -55,6 +55,19 @@ export function buildSessionTree(state: AppStoreSnapshot, mode: AgentMode): Sess
 function taskTitle(session: SessionSummary): string {
 	if (session.name) return session.name;
 	return `Task · ${new Date(session.createdAt).toLocaleDateString([], { month: "short", day: "numeric" })}`;
+}
+
+interface RendererWindowView {
+	readonly innerWidth?: number;
+	readonly innerHeight?: number;
+	readonly screen?: { readonly width: number; readonly height: number };
+	addEventListener?(type: "resize", listener: () => void): void;
+	removeEventListener?(type: "resize", listener: () => void): void;
+}
+
+function windowIsFullscreen(): boolean {
+	const runtime = globalThis as RendererWindowView;
+	return runtime.screen !== undefined && runtime.innerWidth === runtime.screen.width && runtime.innerHeight === runtime.screen.height;
 }
 
 function SessionButton({ busy, selected, session, onOpen }: {
@@ -113,9 +126,16 @@ export function SessionSidebar({
 }: SessionSidebarProps) {
 	const tree = buildSessionTree(state, mode);
 	const hasSessions = tree.projects.length > 0 || tree.tasks.length > 0;
+	const [fullscreen, setFullscreen] = useState(windowIsFullscreen);
+	useEffect(() => {
+		const runtime = globalThis as RendererWindowView;
+		const updateFullscreen = () => setFullscreen(windowIsFullscreen());
+		runtime.addEventListener?.("resize", updateFullscreen);
+		return () => runtime.removeEventListener?.("resize", updateFullscreen);
+	}, []);
 
 	return (
-		<aside className="session-sidebar" aria-label="Tasks">
+		<aside className="session-sidebar" aria-label="Tasks" data-fullscreen={fullscreen || undefined}>
 			<div className="window-drag-region">
 				<div className="sidebar-titlebar-controls">
 					<button aria-label="Hide sessions sidebar" onClick={onToggle} type="button">

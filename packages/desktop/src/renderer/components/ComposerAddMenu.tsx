@@ -79,7 +79,7 @@ export function ComposerAddMenu({ disabled, skills, onAddFiles, onManageSkills, 
 				<div className="composer-add-popover">
 					<div className="composer-add-menu" role="menu">
 						<button aria-label="Add files or photos" onClick={() => { close(); onAddFiles(); }} role="menuitem" type="button">
-							<Paperclip aria-hidden="true" size={18} />
+							<Paperclip aria-hidden="true" size={16} />
 							<span>Add files or photos</span>
 							<span aria-hidden="true" className="composer-menu-shortcut">⌘U</span>
 						</button>
@@ -91,7 +91,7 @@ export function ComposerAddMenu({ disabled, skills, onAddFiles, onManageSkills, 
 							role="menuitem"
 							type="button"
 						>
-							<Scroll aria-hidden="true" size={18} />
+							<Scroll aria-hidden="true" size={16} />
 							<span>Skills</span>
 							<CaretRight aria-hidden="true" className="composer-menu-caret" size={14} />
 						</button>
@@ -99,13 +99,13 @@ export function ComposerAddMenu({ disabled, skills, onAddFiles, onManageSkills, 
 							<div className="composer-skill-menu" role="menu">
 								{skills.map((skill) => (
 									<button key={skill.name} onClick={() => { close(); onSelectSkill(skill); }} role="menuitem" type="button">
-										<Scroll aria-hidden="true" size={18} />
+										<Scroll aria-hidden="true" size={16} />
 										<span>{skill.name}</span>
 									</button>
 								))}
 								<div className="composer-menu-separator" role="separator" />
 								<button onClick={() => { close(); onManageSkills(); }} role="menuitem" type="button">
-									<Briefcase aria-hidden="true" size={18} />
+									<Briefcase aria-hidden="true" size={16} />
 									<span>Manage skills</span>
 								</button>
 							</div>

@@ -1,71 +1,99 @@
-# Desktop MVP Design QA
-
-Source visual truth: `/var/folders/l4/qhmjdv2d42b6wx8xm8t18cb80000gn/T/codex-clipboard-c316780e-44ee-46f0-9095-00ea70507560.png`
-
-Implementation screenshot: `/Users/ent/ArcMind/packages/desktop/test-results/mvp-implementation.png`
-
-Viewport: 1429 × 767 CSS pixels, dark theme. The implementation capture was normalized to the source image density for comparison.
-
-State: packaged ARM64 Electron app with three projects, five persisted tasks, an active task, user and assistant messages, tool-call rows, and an enabled composer.
-
-Full-view comparison evidence: `/Users/ent/ArcMind/packages/desktop/test-results/mvp-comparison.png`
-
-Focused composer comparison evidence: `/Users/ent/ArcMind/packages/desktop/test-results/mvp-composer-comparison.png`
-
-## Findings
-
-- No actionable P0, P1, or P2 differences remain in the requested MVP surfaces.
-- Fonts and typography: the implementation uses the native system sans stack with comparable 15px conversation text, compact sidebar labels, matching hierarchy, truncation, and line-height. Dynamic content and product language intentionally differ from the Codex reference.
-- Spacing and layout rhythm: the 240px sidebar, 62px header, centered 760px conversation column, bottom composer, radii, dividers, and dark-surface spacing now follow the source composition without overlap or clipped persistent controls.
-- Colors and visual tokens: sidebar, workspace, elevated composer, text, muted text, borders, selected task, and user-bubble tones closely track the inferred neutral dark palette. The small `ready` state is an intentional ArcMind runtime indicator.
-- Image quality and asset fidelity: the target contains no required photographic or illustrative assets. Visible UI icons use one real Phosphor icon family; no custom SVG, CSS art, emoji, or placeholder imagery is used.
-- Copy and content: ArcMind branding and English labels are intentional product content. Conversation and task content are realistic persisted data rather than a static mock.
-- P3 follow-up: the source includes secondary Codex navigation and account chrome outside this MVP's requested projects/tasks/conversation scope; these are intentionally deferred.
-
-## Comparison History
-
-1. P1 — the composer dock stretched across the lower half of the workspace when optional banners were absent. Fixed the workspace from a fixed-row grid to a vertical flex layout. Post-fix evidence: the final full-view comparison shows the transcript filling available height and the composer anchored naturally at the bottom.
-2. P2 — the first pass used a 300px sidebar and 900px content column, producing visibly different major-region proportions. Fixed them to 240px and 760px after matching the source's logical viewport. Post-fix evidence: `/Users/ent/ArcMind/packages/desktop/test-results/mvp-comparison.png`.
-3. P2 — the composer was taller and sat higher than the source. Reduced textarea height, internal gap, padding, and dock bottom spacing. Post-fix evidence: `/Users/ent/ArcMind/packages/desktop/test-results/mvp-composer-comparison.png`.
-
-## Interaction and Runtime Checks
-
-- Tested real new-task creation, persisted project/session listing, opening a task, sending a message, streaming completion, renderer reload, App Server crash recovery, and 10,000-delta slow-client catch-up in the packaged Electron app.
-- Keyboard send and Shift+Enter behavior are implemented in the composer; send/stop controls retain accessible names and focus states.
-- Renderer console and page errors were monitored during recovery E2E and remained empty.
-- The final package executable was verified as native macOS ARM64.
+# Desktop model and effort controls — Design QA
 
 final result: passed
 
-## Composer add menu follow-up
+## Evidence
 
-Source visual truth: `/var/folders/l4/qhmjdv2d42b6wx8xm8t18cb80000gn/T/codex-clipboard-36459ce7-e608-470a-bc16-b7142663e93d.png`
+- Model reference: `/var/folders/l4/qhmjdv2d42b6wx8xm8t18cb80000gn/T/codex-clipboard-01cc9ac8-503a-4cb8-bce1-5301bafccdd1.png` (`2762 × 1572` physical px).
+- Effort reference: `/var/folders/l4/qhmjdv2d42b6wx8xm8t18cb80000gn/T/codex-clipboard-85b1bcac-7246-42d1-9311-9f029fb51099.png` (`2760 × 1572` physical px).
+- Ultra reference: `/var/folders/l4/qhmjdv2d42b6wx8xm8t18cb80000gn/T/codex-clipboard-ae273fa1-9936-439e-a84b-41f616b2de92.png` (`2762 × 1560` physical px).
+- Model implementation: `/tmp/arcmind-model-selector-final.png`.
+- Effort implementation: `/tmp/arcmind-effort-selector-final.png`.
+- Ultra implementation: `/tmp/arcmind-effort-ultra-final.png`.
+- Implementation viewport: `1280 × 791` CSS px at DPR `2` (`2560 × 1582` physical px).
+- Normalization: reference and implementation were compared together at CSS scale, using the open popover state and the same lower-right composer region.
 
-Implementation screenshot: `/tmp/arcmind-final-submenu-open.png`
+## Full-view and focused comparison
 
-Viewport and normalization: the source is 1560 × 858 pixels and the implementation capture is 2880 × 1800 pixels from a 1440 × 900 Retina desktop. The menus were compared as equal-density focused regions: 450 × 170 pixels for the primary menu and 388 × 360 pixels for the skills menu.
+- Full-view comparison confirmed the selectors remain anchored to the existing ArcMind composer without changing its dimensions or surrounding layout.
+- Focused measurements: model menu `156 × 114` CSS px; effort menu `220 × 96` CSS px; effort track `196 × 20` CSS px.
+- Typography hierarchy, row density, selected checkmark, border, radius, shadow, tick spacing, thumb proportions, active label, and Ultra field match the supplied references at normalized scale.
+- Model rows intentionally use the three models returned by the authenticated ArcMind session instead of the reference repository's six demo rows.
+- Effort labels intentionally use ArcMind's real model contract (`High`, `Ultra`) rather than the reference labels (`Max`, `Ultracode`).
 
-State: packaged ARM64 Electron app, Chat composer open, primary menu open, Skills active, and the installed-skills submenu open with pointer interaction.
+## Comparison history
 
-Full-view evidence: `/tmp/arcmind-final-submenu-open.png`
+1. Initial implementation review found an oversized effort track and thumb relative to the reference (P2).
+2. The track, thumb, panel spacing, type scale, and shadow were corrected and recaptured.
+3. Final model, normal-effort, and Ultra states were compared again in paired reference/implementation passes; no actionable P0, P1, or P2 issue remained.
+4. Final code review found and corrected stale preview restoration after an external value change plus pending-frame cleanup on disabled state; the focused regression passed without changing the verified visuals.
 
-Focused primary-menu comparison: `/tmp/arcmind-menu-final-compare.png`
+## Interaction and runtime verification
 
-Focused skills-menu comparison: `/tmp/arcmind-submenu-final-compare.png`
+- A real installed ARM64 app switched `MiMo-V2.5-Pro → MiMo-V2.5 → MiMo-V2.5-Pro`; the App Server snapshot and visible trigger stayed synchronized.
+- A native pointer drag switched `Ultra → High → Ultra`; the panel stayed open, the real session value changed, and the Ultra canvas appeared only at the real `ultra` stop.
+- Fractional drag preview, magnetic attraction, velocity-aware spring settlement, keyboard selection, outside click, Escape, and reduced-motion behavior are covered by component tests.
+- Package verification, ARM64 architecture check, and strict code-sign verification passed.
+- Final installed-app console check: no errors.
+- The QA session was restored to its original model and `Ultra` effort.
 
-### Findings
+## Findings
 
-- No actionable P0, P1, or P2 differences remain in the requested menu surfaces.
-- Fonts and typography: menu labels now use an explicit 16px system sans, 400 weight, 1.25 line-height, and bright foreground instead of inheriting the composer's 11px muted style. Shortcut text remains muted and right-aligned.
-- Spacing and layout rhythm: row centers match the reference's 64-pixel backing-pixel cadence; reduced outer padding aligns the divider and active-row position. Both menus keep the reference radius, border, active fill, and layered shadow shape.
-- Colors and visual tokens: menu `#383835`, active row `#42423f`, bright labels, muted caret/shortcut, border opacity, and shadow layers visibly track the reference.
-- Image quality and asset fidelity: the add, paperclip, scroll, caret, and briefcase marks are real Phosphor icons. No text glyph or handmade SVG substitutes are used for icons.
-- Copy and content: the primary menu contains only the approved Add files or photos and Skills entries. The submenu uses ArcMind's live installed skills and intentionally omits Browse skills, Add connector, and Add plugins.
+- P0: none.
+- P1: none.
+- P2: none.
+- P3: the surrounding ArcMind screen is not a clone of the reference application's screen; this is expected because the requested scope preserves ArcMind's current composer and layout.
 
-### Comparison history
+---
 
-1. P1 — menu labels inherited the composer's 11px muted toolbar style, making them visibly too small and grey. Fixed with an explicit 16px, 400-weight, bright menu type rule. Post-fix evidence: `/tmp/arcmind-menu-final-compare.png`.
-2. P2 — menu rows lacked the reference divider and the active Skills state. Added the separator and persistent active fill while the submenu is open. Post-fix evidence: `/tmp/arcmind-menu-final-compare.png`.
-3. P2 — icon scale, outer padding, and the missing Command-U affordance left the menu visibly different. Matched icon scale and padding, added `⌘U`, and wired it to the real file picker. Post-fix evidence: `/tmp/arcmind-menu-final-compare.png` and `/tmp/arcmind-submenu-final-compare.png`.
+# Desktop conversation typography and shell alignment — Design QA
+
+## Evidence
+
+- Source visual truth: `/var/folders/l4/qhmjdv2d42b6wx8xm8t18cb80000gn/T/codex-clipboard-6ddc2405-7485-4b3e-b1a1-2860ccfbc2cc.png` (`2560 × 1440` px).
+- Installed-app implementation: `/Users/ent/ArcMind/packages/desktop/test-results/typography-layout-full.png` (`2560 × 1440` px).
+- Same-size combined comparison: `/Users/ent/ArcMind/packages/desktop/test-results/typography-layout-comparison.png` (`5120 × 1440` px, source left and implementation right).
+- Focused header evidence: `/Users/ent/ArcMind/packages/desktop/test-results/typography-layout-reference-header.png` and `/Users/ent/ArcMind/packages/desktop/test-results/typography-layout-implementation-header.png` (each `1200 × 220` px).
+- Responsive implementation: `/Users/ent/ArcMind/packages/desktop/test-results/typography-layout-narrow.png` (`900 × 720` px).
+- Computed renderer evidence: `/Users/ent/ArcMind/packages/desktop/test-results/typography-layout-metrics.json`.
+- Viewport and normalization: source and full implementation were compared at the same `2560 × 1440` CSS/pixel viewport at DPR `1`; no density scaling was used. The narrow pass used `900 × 720` CSS px at DPR `1`.
+- State: both captures use dark Chat mode with the sidebar, transcript, and composer visible. Session copy differs because the implementation uses a real ArcMind session; copy-specific wrapping was excluded from geometric comparisons.
+
+## Full-view and focused comparison
+
+- Full-view evidence confirms the sidebar track, centered `730px` transcript, user-message alignment, and `770px` composer preserve the reference composition.
+- Focused header evidence confirms the sidebar frame begins at `7px`, the mode switch begins at `x=16`, the workspace title begins at `x=326`, and the title baseline aligns with the reference. Fullscreen titlebar controls now begin at `x=16`; the corresponding normal-window control position remains `x=92` to clear macOS traffic lights.
+- The reference's unbroken workspace background is preserved by removing the previous `1px` workspace-header divider.
+- The transcript's `36px` top inset and `46px` header reproduce the reference's vertical start without changing composer dimensions.
+
+## Required fidelity surfaces
+
+- Fonts and typography: the existing Inter/system UI and serif final-answer stacks were retained. Full-view computed sizes are `14px` metadata/sidebar, `15px` activity body, and `16px` final answer/user/composer, with `21px`, `24px`, and `24.8px` line heights respectively. At `900px` width they resolve to `13px`, `14px`, and `15px`, proving bounded responsive scaling without dropping below readable sizes.
+- Spacing and layout rhythm: the sidebar uses `7px` outer margins, asymmetric `8px/6px` inner padding, a `47px` drag region, a `46px` main header, and the existing composer dimensions. The one-pixel antialiasing difference on the sidebar border is acceptable P3 rendering variance.
+- Colors and visual tokens: the existing ArcMind dark tokens, selected-row contrast, muted metadata color, user bubble, border opacity, and composer elevation were unchanged because they already match the source closely.
+- Image quality and asset fidelity: this surface has no raster product imagery. Existing Phosphor icons remain vector-sharp at both tested sizes; no placeholder or hand-drawn replacement asset was introduced.
+- Copy and content: reference-specific labels and messages intentionally differ from the authenticated ArcMind session. Shared interface copy and hierarchy remain stable; no layout conclusion depends on matching transcript text.
+
+## Comparison history
+
+1. Initial source/current comparison found a P2 density mismatch: the final answer rendered at `18px`, activity text at `16px`, and the chat transcript used an independent `744px` width.
+2. Shared bounded type tokens were applied and the transcript was routed through the existing `730px` token. The header, sidebar gutter, divider, and vertical inset were corrected and recaptured.
+3. The first same-size post-fix comparison found one remaining P2 shell mismatch: fullscreen macOS titlebar controls retained a `76px` traffic-light offset after the traffic lights disappeared.
+4. Fullscreen detection now removes only that offset; normal windows retain it. The final installed application was repackaged and recaptured. No actionable P0, P1, or P2 mismatch remains.
+
+## Runtime verification
+
+- Desktop tests: `10` files and `95` tests passed.
+- Desktop renderer/main TypeScript checks passed.
+- Package verification confirmed the packaged App Server assets; strict deep code-sign verification passed; installed version is `0.80.6`.
+- The real packaged renderer reported fullscreen controls at `x=16` and normal/narrow controls at `x=92`.
+- The real packaged renderer reported the expected full/narrow computed type values, and the final console-error capture was empty.
+
+## Findings
+
+- P0: none.
+- P1: none.
+- P2: none.
+- P3: session content differs from the source capture by design, and the sidebar border has a one-pixel rasterization variance that does not alter its perceived width.
 
 final result: passed
