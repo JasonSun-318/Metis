@@ -10,6 +10,7 @@ const repoRoot = resolve(dirname(scriptPath), "..");
 const packageDir = join(repoRoot, "packages", "coding-agent");
 const distRpcEntry = join(packageDir, "dist", "rpc-entry.js");
 const distIndex = join(packageDir, "dist", "index.js");
+const distAppServerIndex = join(repoRoot, "packages", "app-server", "dist", "index.js");
 const startupProfiler = join(repoRoot, "scripts", "profile-coding-agent-node.mjs");
 const agentDirEnvName = "ARCMIND_CODING_AGENT_DIR";
 const minimalResourceArgs = [
@@ -30,7 +31,16 @@ function parseInteger(value, flag, minimum = 0) {
 }
 
 function parseArgs(argv) {
-	const options = { runs: 5, warmup: 1, output: undefined, runtimeHost: undefined, agentDir: undefined };
+	const options = {
+		runs: 5,
+		warmup: 1,
+		output: undefined,
+		runtimeHost: undefined,
+		agentDir: undefined,
+		sandbox: false,
+		scheduleIdle: false,
+		scheduleDue: false,
+	};
 	for (let index = 0; index < argv.length; index++) {
 		const arg = argv[index];
 		if (arg === "--help" || arg === "-h") {
@@ -40,12 +50,18 @@ function parseArgs(argv) {
 		if (["--runs", "--warmup", "--output", "--runtime-host", "--agent-dir"].includes(arg) && index + 1 >= argv.length) {
 			throw new Error(`Missing value for ${arg}`);
 		}
-		if (arg === "--runs") options.runs = parseInteger(argv[++index], arg, 1);
+		if (arg === "--sandbox") options.sandbox = true;
+		else if (arg === "--schedule-idle") options.scheduleIdle = true;
+		else if (arg === "--schedule-due") options.scheduleDue = true;
+		else if (arg === "--runs") options.runs = parseInteger(argv[++index], arg, 1);
 		else if (arg === "--warmup") options.warmup = parseInteger(argv[++index], arg);
 		else if (arg === "--output") options.output = resolve(argv[++index]);
 		else if (arg === "--runtime-host") options.runtimeHost = parseInteger(argv[++index], arg, 1);
 		else if (arg === "--agent-dir") options.agentDir = resolve(argv[++index]);
 		else throw new Error(`Unknown option: ${arg}`);
+	}
+	if ([options.sandbox, options.scheduleIdle, options.scheduleDue].filter(Boolean).length > 1) {
+		throw new Error("Choose only one opt-in measurement case");
 	}
 	return options;
 }
@@ -55,6 +71,9 @@ function printHelp() {
 	process.stdout.write(`  --runs <n>       Measured cold-ready runs (default: 5)\n`);
 	process.stdout.write(`  --warmup <n>     Warm-up runs (default: 1)\n`);
 	process.stdout.write(`  --output <file>  JSON result path (default: profiles-node/desktop-baseline-<time>.json)\n`);
+	process.stdout.write(`  --sandbox       Measure one isolated workspace-sandbox lifecycle\n`);
+	process.stdout.write(`  --schedule-idle Measure 10,000 idle scheduled tasks for 60 seconds\n`);
+	process.stdout.write(`  --schedule-due  Measure 100 fake due scheduled tasks\n`);
 }
 
 function execFileAsync(file, args) {
@@ -438,6 +457,299 @@ async function runRuntimeHost(runtimeCount, agentDir) {
 	for (const runtime of runtimes.reverse()) await runtime.dispose();
 }
 
+async function measureWorkspaceSandbox() {
+	const codingAgent = await import(pathToFileURL(distIndex).href);
+	const root = mkdtempSync(join(tmpdir(), "arcmind-sandbox-profile-"));
+	const cwd = join(root, "workspace");
+	const outside = join(root, "outside");
+	mkdirSync(cwd);
+	mkdirSync(outside);
+	const handlesBefore = process._getActiveHandles().length;
+	const rssBefore = process.memoryUsage().rss;
+	let sandbox;
+	try {
+		const startupStartedAt = performance.now();
+		sandbox = await codingAgent.createWorkspaceSandbox({ cwd, workspaceRoots: [cwd] });
+		const startupMs = performance.now() - startupStartedAt;
+
+		const output = [];
+		const commandStartedAt = performance.now();
+		const commandResult = await sandbox.operations.exec("printf ok", cwd, {
+			onData: (chunk) => output.push(chunk),
+		});
+		const commandMs = performance.now() - commandStartedAt;
+		if (commandResult.exitCode !== 0 || Buffer.concat(output).toString() !== "ok") {
+			throw new Error("Sandbox command probe failed");
+		}
+
+		const outsidePath = join(outside, "blocked.txt");
+		const outsideResult = await sandbox.operations.exec(
+			`printf blocked > ${JSON.stringify(outsidePath)}`,
+			cwd,
+			{ onData: () => {} },
+		);
+		if (outsideResult.exitCode === 0 || existsSync(outsidePath)) {
+			throw new Error("Sandbox outside-write probe escaped the workspace");
+		}
+
+		const disposeStartedAt = performance.now();
+		await sandbox.dispose();
+		sandbox = undefined;
+		const disposeMs = performance.now() - disposeStartedAt;
+		const settleStartedAt = performance.now();
+		let activeHandlesAfterDispose = process._getActiveHandles().length;
+		while (activeHandlesAfterDispose > handlesBefore && performance.now() - settleStartedAt < 250) {
+			await new Promise((resolvePromise) => setTimeout(resolvePromise, 10));
+			activeHandlesAfterDispose = process._getActiveHandles().length;
+		}
+		const cleanupSettleMs = performance.now() - settleStartedAt;
+		if (activeHandlesAfterDispose > handlesBefore) {
+			throw new Error(
+				`Sandbox leaked active handles: before=${handlesBefore}, after=${activeHandlesAfterDispose}`,
+			);
+		}
+		process.stdout.write(
+			`${JSON.stringify({
+				case: "workspace-sandbox",
+				startupMs,
+				commandMs,
+				disposeMs,
+				cleanupSettleMs,
+				rssDeltaBytes: process.memoryUsage().rss - rssBefore,
+				activeHandlesAfterDispose,
+			})}\n`,
+		);
+	} finally {
+		await sandbox?.dispose().catch(() => undefined);
+		rmSync(root, { recursive: true, force: true });
+	}
+}
+
+function seedIdleScheduleIndex(agentDir, workspace, taskCount) {
+	const createdAt = "2026-07-26T00:00:00.000Z";
+	const tasks = Array.from({ length: taskCount }, (_, index) => ({
+		id: `t${index.toString(36)}`,
+		title: "i",
+		instruction: "i",
+		schedule: { kind: "daily", time: "23:59" },
+		timezone: "UTC",
+		target: { kind: "project", cwd: workspace },
+		status: "active",
+		createdAt,
+		updatedAt: createdAt,
+		nextRunAt: "2099-01-01T23:59:00.000Z",
+		unreadCount: 0,
+		nextRunSequence: 1,
+	}));
+	writeFileSync(join(agentDir, "schedules.json"), `${JSON.stringify({ version: 1, revision: 0, tasks, events: [] })}\n`);
+}
+
+function instrumentScheduleStore(manager) {
+	const store = manager.store;
+	let indexReadCount = 0;
+	let runDirectoryScanCount = 0;
+	const readIndex = store.readIndex.bind(store);
+	const indexFingerprint = store.indexFingerprint.bind(store);
+	const runFileNames = store.runFileNames.bind(store);
+	store.readIndex = (...args) => {
+		indexReadCount += 1;
+		return readIndex(...args);
+	};
+	store.indexFingerprint = (...args) => {
+		indexReadCount += 1;
+		return indexFingerprint(...args);
+	};
+	store.runFileNames = (...args) => {
+		runDirectoryScanCount += 1;
+		return runFileNames(...args);
+	};
+	return {
+		reset() {
+			indexReadCount = 0;
+			runDirectoryScanCount = 0;
+		},
+		snapshot: () => ({ indexReadCount, runDirectoryScanCount }),
+	};
+}
+
+async function waitUntil(predicate, timeoutMs, description) {
+	const deadline = performance.now() + timeoutMs;
+	while (!predicate()) {
+		if (performance.now() >= deadline) throw new Error(`${description} timed out after ${timeoutMs}ms`);
+		await new Promise((resolvePromise) => setTimeout(resolvePromise, 10));
+	}
+}
+
+async function handlesAfterStop(baseline) {
+	const deadline = performance.now() + 1_000;
+	let current = process._getActiveHandles().length;
+	while (current > baseline && performance.now() < deadline) {
+		await new Promise((resolvePromise) => setTimeout(resolvePromise, 10));
+		current = process._getActiveHandles().length;
+	}
+	return current;
+}
+
+function percentile(values, fraction) {
+	if (values.length === 0) return 0;
+	const sorted = [...values].sort((left, right) => left - right);
+	return sorted[Math.max(0, Math.ceil(sorted.length * fraction) - 1)];
+}
+
+async function measureScheduleIdle() {
+	if (!existsSync(distAppServerIndex)) throw new Error("Built app-server entrypoint is missing. Run its build first.");
+	const [{ ScheduleManager }, { AppServer }] = await Promise.all([
+		import(pathToFileURL(distIndex).href),
+		import(pathToFileURL(distAppServerIndex).href),
+	]);
+	const root = mkdtempSync(join(tmpdir(), "arcmind-schedule-idle-profile-"));
+	const agentDir = join(root, "agent");
+	const workspace = tmpdir();
+	mkdirSync(agentDir);
+	seedIdleScheduleIndex(agentDir, workspace, 10_000);
+	let executorCalls = 0;
+	const manager = ScheduleManager.create({
+		agentDir,
+		execute: async () => {
+			executorCalls += 1;
+			throw new Error("Idle profile unexpectedly executed a task");
+		},
+	});
+	const metrics = instrumentScheduleStore(manager);
+	const handlesBefore = process._getActiveHandles().length;
+	let server;
+	try {
+		server = await AppServer.create({ agentDir, scheduleManager: manager });
+		await waitUntil(() => manager.leaderRelease && !manager.leaderTickRunning, 60_000, "schedule leader startup");
+		metrics.reset();
+		const rssBefore = process.memoryUsage().rss;
+		const cpuBefore = process.cpuUsage();
+		const page = await manager.list({ limit: 200 });
+		await new Promise((resolvePromise) => setTimeout(resolvePromise, 60_000));
+		const cpu = process.cpuUsage(cpuBefore);
+		const measured = metrics.snapshot();
+		server.beginShutdown();
+		await server.waitForShutdown();
+		server = undefined;
+		const activeHandlesAfterStop = await handlesAfterStop(handlesBefore);
+		if (page.tasks.length !== 200) throw new Error("Idle task list did not return the requested page");
+		if (measured.indexReadCount > 31) {
+			throw new Error(`Idle schedule performed too many index checks: ${measured.indexReadCount}`);
+		}
+		if (measured.runDirectoryScanCount !== 0) throw new Error("Idle schedule scanned run directories");
+		if (executorCalls !== 0) throw new Error("Idle schedule created an executor/runtime");
+		if (activeHandlesAfterStop > handlesBefore) throw new Error("Schedule idle profile leaked active handles");
+		process.stdout.write(
+			`${JSON.stringify({
+				case: "schedule-idle",
+				idleCpuMs: (cpu.user + cpu.system) / 1_000,
+				idleRssDeltaBytes: process.memoryUsage().rss - rssBefore,
+				...measured,
+				maxConcurrentExecutors: 0,
+				p50ClaimMs: null,
+				p95ClaimMs: null,
+				eventDeliveryP95Ms: null,
+				modelRuntimeCreationCount: executorCalls,
+				brokerCreationCount: executorCalls,
+				activeHandlesAfterStop,
+			})}\n`,
+		);
+	} finally {
+		server?.beginShutdown();
+		await server?.waitForShutdown().catch(() => undefined);
+		await manager.stop().catch(() => undefined);
+		rmSync(root, { recursive: true, force: true });
+	}
+}
+
+async function measureScheduleDue() {
+	const { ScheduleManager } = await import(pathToFileURL(distIndex).href);
+	const root = mkdtempSync(join(tmpdir(), "arcmind-schedule-due-profile-"));
+	const agentDir = join(root, "agent");
+	const workspace = join(root, "workspace");
+	mkdirSync(agentDir);
+	mkdirSync(workspace);
+	let clock = new Date("2026-07-26T00:00:00.000Z");
+	let active = 0;
+	let maxConcurrentExecutors = 0;
+	let dueStartedAt = 0;
+	const claimMs = [];
+	const completionStartedAt = new Map();
+	const eventDeliveryMs = [];
+	const claimedRuns = new Set();
+	const completedRuns = new Set();
+	const pending = [];
+	const execute = (claim) =>
+		new Promise((resolvePromise) => {
+			active += 1;
+			maxConcurrentExecutors = Math.max(maxConcurrentExecutors, active);
+			claimMs.push(performance.now() - dueStartedAt);
+			claimedRuns.add(claim.runId);
+			pending.push({ claim, resolvePromise });
+			if (pending.length !== 2) return;
+			const batch = pending.splice(0);
+			setTimeout(() => {
+				for (const entry of batch) {
+					completionStartedAt.set(entry.claim.runId, performance.now());
+					active -= 1;
+					entry.resolvePromise({
+						runId: entry.claim.runId,
+						sessionId: `profile-session-${entry.claim.runId}`,
+						sessionFile: join(agentDir, `${entry.claim.runId}.jsonl`),
+						result: "ok",
+					});
+				}
+			}, 2);
+		});
+	const manager = ScheduleManager.create({ agentDir, now: () => clock, execute });
+	const handlesBefore = process._getActiveHandles().length;
+	try {
+		for (let index = 0; index < 100; index += 1) {
+			await manager.create({
+				id: `profile-task-${String(index).padStart(3, "0")}`,
+				instruction: "profile",
+				schedule: { kind: "once", date: "2026-07-26", time: "08:01" },
+				timezone: "Asia/Shanghai",
+				target: { kind: "project", cwd: workspace },
+			});
+		}
+		manager.subscribe((event) => {
+			if (event.type !== "schedule/run-updated" || event.run.status !== "succeeded") return;
+			const startedAt = completionStartedAt.get(event.run.id);
+			if (startedAt !== undefined) eventDeliveryMs.push(performance.now() - startedAt);
+			completedRuns.add(event.run.id);
+		});
+		clock = new Date("2026-07-26T00:01:00.000Z");
+		dueStartedAt = performance.now();
+		await manager.start();
+		await waitUntil(() => completedRuns.size === 100, 120_000, "100 scheduled runs");
+		await manager.stop();
+		const activeHandlesAfterStop = await handlesAfterStop(handlesBefore);
+		if (claimedRuns.size !== 100 || completedRuns.size !== 100) throw new Error("Due profile found duplicate claims");
+		if (maxConcurrentExecutors !== 2) {
+			throw new Error(`Expected executor concurrency 2, observed ${maxConcurrentExecutors}`);
+		}
+		if (activeHandlesAfterStop > handlesBefore) throw new Error("Schedule due profile leaked active handles");
+		process.stdout.write(
+			`${JSON.stringify({
+				case: "schedule-due",
+				idleCpuMs: null,
+				idleRssDeltaBytes: null,
+				indexReadCount: null,
+				runDirectoryScanCount: null,
+				maxConcurrentExecutors,
+				p50ClaimMs: percentile(claimMs, 0.5),
+				p95ClaimMs: percentile(claimMs, 0.95),
+				eventDeliveryP95Ms: percentile(eventDeliveryMs, 0.95),
+				activeHandlesAfterStop,
+			})}\n`,
+		);
+	} finally {
+		await manager.stop().catch(() => undefined);
+		rmSync(root, { recursive: true, force: true });
+	}
+}
+
 function formatMiB(bytes) {
 	return `${(bytes / 1024 / 1024).toFixed(1)} MiB`;
 }
@@ -450,6 +762,18 @@ async function main() {
 	}
 	if (!existsSync(distRpcEntry) || !existsSync(distIndex)) {
 		throw new Error("Built coding-agent entrypoints are missing. Run npm run build first.");
+	}
+	if (options.sandbox) {
+		await measureWorkspaceSandbox();
+		return;
+	}
+	if (options.scheduleIdle) {
+		await measureScheduleIdle();
+		return;
+	}
+	if (options.scheduleDue) {
+		await measureScheduleDue();
+		return;
 	}
 	if (options.runtimeHost !== undefined) {
 		await runRuntimeHost(options.runtimeHost, options.agentDir);
