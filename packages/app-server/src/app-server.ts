@@ -8,13 +8,20 @@ import {
 	validateHostRequest,
 	validateResponseFor,
 } from "@arcmind/app-protocol";
-import { VERSION } from "@arcmind/coding-agent";
+import {
+	createScheduledRunExecutor,
+	pruneStaleSessionWorkDirs,
+	ScheduleManager,
+	type ScheduleManagerOptions,
+	VERSION,
+} from "@arcmind/coding-agent";
 import { AgentSessionRuntimeHost } from "./agent-session-runtime-host.ts";
 import { AppServerConnection } from "./connection.ts";
 import { CredentialCoordinator } from "./credential-coordinator.ts";
 import { Dispatcher } from "./dispatcher.ts";
 import { InteractionBroker } from "./interactions.ts";
 import type { OutboundQueueLimits } from "./outbound-queue.ts";
+import { scheduleEventView } from "./schedule-projection.ts";
 import { SessionCatalog } from "./session-catalog.ts";
 import { SessionRegistry, type SessionRegistryOptions } from "./session-registry.ts";
 import { AppServerError, type SessionRuntimeHost } from "./session-runtime-host.ts";
@@ -25,6 +32,8 @@ export interface AppServerOptions extends SessionRegistryOptions, OutboundQueueL
 	readonly sessionsRoot?: string;
 	readonly runtimeHost?: SessionRuntimeHost;
 	readonly serverVersion?: string;
+	readonly scheduleManager?: ScheduleManager;
+	readonly scheduleExecute?: ScheduleManagerOptions["execute"];
 }
 
 /** Parent-owned application server hosting all open ArcMind sessions. */
@@ -35,14 +44,23 @@ export class AppServer {
 	readonly dispatcher: Dispatcher;
 	readonly subscriptions: SessionSubscriptions;
 	readonly interactions: InteractionBroker;
+	readonly scheduleManager: ScheduleManager;
 	private readonly connections = new Set<AppServerConnection>();
 	private readonly serverVersion: string;
 	private readonly outboundQueueLimits: OutboundQueueLimits;
 	private shutdownPromise?: Promise<void>;
+	private scheduleUnsubscribe?: () => void;
+	private scheduleEventTail: Promise<void> = Promise.resolve();
 
 	private constructor(options: AppServerOptions) {
 		this.serverVersion = options.serverVersion ?? VERSION;
 		this.catalog = new SessionCatalog({ agentDir: options.agentDir, sessionsRoot: options.sessionsRoot });
+		this.scheduleManager =
+			options.scheduleManager ??
+			ScheduleManager.create({
+				agentDir: options.agentDir,
+				execute: options.scheduleExecute ?? createScheduledRunExecutor({ agentDir: options.agentDir }),
+			});
 		this.interactions = new InteractionBroker({ serverEpoch: this.serverEpoch });
 		const credentials = new CredentialCoordinator({ agentDir: options.agentDir });
 		this.registry = new SessionRegistry(
@@ -51,13 +69,20 @@ export class AppServer {
 					agentDir: options.agentDir,
 					interactions: this.interactions,
 					credentials,
+					scheduleManager: this.scheduleManager,
 				}),
 			{
 				maxQueuedOperationsPerSession: options.maxQueuedOperationsPerSession,
 			},
 		);
 		this.subscriptions = new SessionSubscriptions(this.serverEpoch);
-		this.dispatcher = new Dispatcher(this.catalog, this.registry, this.subscriptions, this.interactions);
+		this.dispatcher = new Dispatcher(
+			this.catalog,
+			this.registry,
+			this.subscriptions,
+			this.interactions,
+			this.scheduleManager,
+		);
 		this.outboundQueueLimits = {
 			maxUnacknowledgedBytes: options.maxUnacknowledgedBytes,
 			maxUnacknowledgedEvents: options.maxUnacknowledgedEvents,
@@ -66,8 +91,30 @@ export class AppServer {
 	}
 
 	static async create(options: AppServerOptions): Promise<AppServer> {
+		pruneStaleSessionWorkDirs(options.agentDir);
 		const server = new AppServer(options);
 		await server.catalog.refresh();
+		await server.scheduleManager.start();
+		try {
+			server.scheduleUnsubscribe = server.scheduleManager.subscribe((event) => {
+				server.scheduleEventTail = server.scheduleEventTail
+					.then(async () => {
+						if (event.type === "schedule/deleted") {
+							for (const sessionId of await server.catalog.removeScheduledTask(event.taskId)) {
+								server.subscriptions.removeSession(sessionId);
+								await server.registry.close(sessionId);
+							}
+						} else if (event.type === "schedule/run-updated" && event.run.sessionId) {
+							await server.catalog.registerScheduledRun(event.run).catch(() => undefined);
+						}
+						const view = scheduleEventView(event);
+						if (view) server.subscriptions.publishSchedule(view);
+					})
+					.catch(() => undefined);
+			});
+		} catch {
+			// Schedule RPCs report SCHEDULE_STORE_CORRUPT; ordinary sessions remain available.
+		}
 		return server;
 	}
 
@@ -93,7 +140,13 @@ export class AppServer {
 		for (const connection of this.connections) connection.close();
 		this.connections.clear();
 		this.subscriptions.close();
-		this.shutdownPromise = this.registry.shutdown();
+		this.shutdownPromise = (async () => {
+			await this.scheduleManager.stop();
+			await this.scheduleEventTail;
+			this.scheduleUnsubscribe?.();
+			this.scheduleUnsubscribe = undefined;
+			await this.registry.shutdown();
+		})();
 	}
 
 	waitForShutdown(): Promise<void> {

@@ -1,4 +1,4 @@
-import type { DomainEvent, SessionSnapshot } from "@arcmind/app-protocol";
+import type { DomainEvent, ScheduleSnapshotView, SessionSnapshot } from "@arcmind/app-protocol";
 import type { OutboundQueue, OutboundStage } from "./outbound-queue.ts";
 import { AppServerError, type OpenedSessionRuntime } from "./session-runtime-host.ts";
 
@@ -26,10 +26,16 @@ export interface PendingSessionSubscription {
 	unsubscribe(): void;
 }
 
+interface PendingScheduleSubscription {
+	readonly snapshot: Promise<ScheduleSnapshotView>;
+	unsubscribe(): void;
+}
+
 /** Owns the one global event sequence and listener-first snapshot handoff. */
 export class SessionSubscriptions {
 	readonly serverEpoch: string;
 	private readonly channels = new Map<string, SessionChannel>();
+	private readonly scheduleSubscribers = new Set<Subscriber>();
 	private cursor = 0;
 
 	constructor(serverEpoch: string) {
@@ -67,6 +73,43 @@ export class SessionSubscriptions {
 			if (subscriber.buffering) subscriber.stage.enqueue(published.cursor, published.event);
 			else subscriber.outbound.enqueue(published.cursor, published.event);
 		}
+	}
+
+	publishSchedule(event: DomainEvent): void {
+		this.publish(this.scheduleSubscribers, event);
+	}
+
+	subscribeSchedule(
+		outbound: OutboundQueue,
+		invalidate: () => void,
+		loadSnapshot: (cursor: number) => Promise<ScheduleSnapshotView>,
+	): PendingScheduleSubscription {
+		const subscriber: Subscriber = {
+			outbound,
+			stage: outbound.createStage(),
+			invalidate,
+			active: true,
+			buffering: true,
+		};
+		this.scheduleSubscribers.add(subscriber);
+		const unsubscribe = () => {
+			if (!subscriber.active) return;
+			subscriber.active = false;
+			subscriber.stage.abort();
+			this.scheduleSubscribers.delete(subscriber);
+		};
+		const snapshot = loadSnapshot(this.cursor)
+			.then((value) => {
+				if (!subscriber.active) throw new AppServerError("BUSY");
+				subscriber.buffering = false;
+				subscriber.stage.commit(value.cursor);
+				return value;
+			})
+			.catch((error) => {
+				unsubscribe();
+				throw error;
+			});
+		return { snapshot, unsubscribe };
 	}
 
 	subscribe(
@@ -126,6 +169,12 @@ export class SessionSubscriptions {
 
 	close(): void {
 		for (const sessionId of [...this.channels.keys()]) this.removeSession(sessionId);
+		for (const subscriber of this.scheduleSubscribers) {
+			subscriber.active = false;
+			subscriber.stage.abort();
+			subscriber.invalidate();
+		}
+		this.scheduleSubscribers.clear();
 	}
 }
 
@@ -139,6 +188,7 @@ export class ConnectionSubscriptions {
 	private readonly hub: SessionSubscriptions;
 	private readonly outbound: OutboundQueue;
 	private readonly sessions = new Map<string, ConnectionSubscription>();
+	private schedule?: ConnectionSubscription;
 	private closed = false;
 
 	constructor(hub: SessionSubscriptions, outbound: OutboundQueue) {
@@ -169,6 +219,35 @@ export class ConnectionSubscriptions {
 		}
 	}
 
+	async subscribeSchedule(
+		loadSnapshot: (cursor: number) => Promise<ScheduleSnapshotView>,
+	): Promise<ScheduleSnapshotView> {
+		if (this.closed) throw new AppServerError("BUSY");
+		this.unsubscribeSchedule();
+		const token = {};
+		const pending = this.hub.subscribeSchedule(
+			this.outbound,
+			() => {
+				if (this.schedule?.token === token) this.schedule = undefined;
+			},
+			loadSnapshot,
+		);
+		const entry = { token, unsubscribe: pending.unsubscribe };
+		this.schedule = entry;
+		try {
+			const snapshot = await pending.snapshot;
+			if (this.closed || this.schedule !== entry) {
+				pending.unsubscribe();
+				throw new AppServerError("BUSY");
+			}
+			return snapshot;
+		} catch (error) {
+			if (this.schedule === entry) this.schedule = undefined;
+			pending.unsubscribe();
+			throw error;
+		}
+	}
+
 	has(sessionId: string): boolean {
 		return this.sessions.has(sessionId);
 	}
@@ -181,6 +260,14 @@ export class ConnectionSubscriptions {
 		return true;
 	}
 
+	unsubscribeSchedule(): boolean {
+		if (!this.schedule) return false;
+		const subscription = this.schedule;
+		this.schedule = undefined;
+		subscription.unsubscribe();
+		return true;
+	}
+
 	acknowledge(serverEpoch: string, cursor: number): number {
 		return this.outbound.acknowledge(serverEpoch, cursor);
 	}
@@ -189,5 +276,6 @@ export class ConnectionSubscriptions {
 		if (this.closed) return;
 		this.closed = true;
 		for (const sessionId of [...this.sessions.keys()]) this.unsubscribe(sessionId);
+		this.unsubscribeSchedule();
 	}
 }

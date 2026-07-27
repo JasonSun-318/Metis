@@ -4,6 +4,7 @@ import {
 	CursorSchema,
 	MAX_CAPABILITIES,
 	MAX_HISTORY_ITEMS,
+	MAX_SCHEDULE_INSTRUCTION_UTF8_BYTES,
 	NameSchema,
 	OpaqueIdSchema,
 	OptionalNameSchema,
@@ -13,6 +14,7 @@ import {
 	PublicTextSchema,
 	SessionIdSchema,
 	StrictObject,
+	Utf8String,
 	UuidSchema,
 } from "./schema.ts";
 import {
@@ -22,9 +24,14 @@ import {
 	DurableImageRefViewSchema,
 	InteractionViewSchema,
 	ItemViewSchema,
+	ScheduleInputSpecSchema,
+	ScheduleRunViewSchema,
+	ScheduleSnapshotViewSchema,
+	ScheduleTaskViewSchema,
 	SessionSnapshotSchema,
 	SessionSummarySchema,
 	SkillSummaryViewSchema,
+	SubagentModelRefSchema,
 	ThinkingSelectionSchema,
 } from "./views.ts";
 
@@ -131,6 +138,19 @@ export const SessionThinkingSelectionResultSchema = StrictObject({
 	availableThinkingSelections: Type.Array(ThinkingSelectionSchema, { minItems: 1, maxItems: 8, uniqueItems: true }),
 });
 
+export const SessionSetModelParamsSchema = StrictObject({
+	sessionId: SessionIdSchema,
+	requestId: UuidSchema,
+	provider: NameSchema,
+	modelId: NameSchema,
+});
+export const SessionModelResultSchema = StrictObject({
+	model: SubagentModelRefSchema,
+	thinkingSelection: ThinkingSelectionSchema,
+	actualThinkingLevel: ActualThinkingLevelSchema,
+	availableThinkingSelections: Type.Array(ThinkingSelectionSchema, { minItems: 1, maxItems: 8, uniqueItems: true }),
+});
+
 export const SubagentReadItemsParamsSchema = StrictObject({
 	sessionId: SessionIdSchema,
 	agentId: SessionIdSchema,
@@ -173,6 +193,62 @@ export const ConnectionAckParamsSchema = StrictObject({
 	cursor: CursorSchema,
 });
 export const ConnectionAckResultSchema = StrictObject({ acknowledgedCursor: CursorSchema });
+
+const ScheduleInstructionSchema = Utf8String(MAX_SCHEDULE_INSTRUCTION_UTF8_BYTES, { minLength: 1 });
+
+export const ScheduleCreateParamsSchema = StrictObject({
+	requestId: UuidSchema,
+	sourceSessionId: Type.Optional(SessionIdSchema),
+	instruction: ScheduleInstructionSchema,
+	schedule: ScheduleInputSpecSchema,
+});
+export const ScheduleTaskResultSchema = StrictObject({ task: ScheduleTaskViewSchema });
+export const ScheduleListParamsSchema = StrictObject({
+	afterTaskId: Type.Optional(Type.Union([SessionIdSchema, Type.Null()])),
+	limit: Type.Optional(Type.Integer({ minimum: 1, maximum: MAX_HISTORY_ITEMS })),
+	unreadOnly: Type.Optional(Type.Boolean()),
+});
+export const ScheduleListResultSchema = StrictObject({
+	tasks: Type.Array(ScheduleTaskViewSchema, { maxItems: MAX_HISTORY_ITEMS }),
+	nextAfterTaskId: Type.Union([SessionIdSchema, Type.Null()]),
+	unreadCount: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
+});
+export const ScheduleTaskRefParamsSchema = StrictObject({ taskId: SessionIdSchema });
+export const ScheduleUpdateParamsSchema = Type.Refine(
+	StrictObject({
+		requestId: UuidSchema,
+		taskId: SessionIdSchema,
+		instruction: Type.Optional(ScheduleInstructionSchema),
+		schedule: Type.Optional(ScheduleInputSpecSchema),
+	}),
+	(value) => value.instruction !== undefined || value.schedule !== undefined,
+	"schedule update must include instruction or schedule",
+);
+export const ScheduleMutationParamsSchema = StrictObject({ requestId: UuidSchema, taskId: SessionIdSchema });
+export const ScheduleDeleteResultSchema = StrictObject({ taskId: SessionIdSchema, deleted: Type.Literal(true) });
+export const ScheduleRunResultSchema = StrictObject({ run: ScheduleRunViewSchema });
+export const ScheduleRunListParamsSchema = StrictObject({
+	taskId: SessionIdSchema,
+	beforeRunId: Type.Optional(Type.Union([SessionIdSchema, Type.Null()])),
+	limit: Type.Optional(Type.Integer({ minimum: 1, maximum: MAX_HISTORY_ITEMS })),
+});
+export const ScheduleRunListResultSchema = StrictObject({
+	runs: Type.Array(ScheduleRunViewSchema, { maxItems: MAX_HISTORY_ITEMS }),
+	nextBeforeRunId: Type.Union([SessionIdSchema, Type.Null()]),
+});
+export const ScheduleRunRefParamsSchema = StrictObject({ taskId: SessionIdSchema, runId: SessionIdSchema });
+export const ScheduleRunMarkReadParamsSchema = StrictObject({
+	requestId: UuidSchema,
+	taskId: SessionIdSchema,
+	runId: SessionIdSchema,
+});
+export const ScheduleRunMarkReadResultSchema = StrictObject({
+	run: ScheduleRunViewSchema,
+	unreadCount: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
+});
+export const ScheduleSubscribeParamsSchema = StrictObject({});
+export const ScheduleSubscribeResultSchema = StrictObject({ snapshot: ScheduleSnapshotViewSchema });
+export const ScheduleUnsubscribeResultSchema = StrictObject({ unsubscribed: Type.Literal(true) });
 
 export const ServerShutdownParamsSchema = StrictObject({
 	requestId: UuidSchema,
@@ -227,10 +303,24 @@ export const ClientRequestMethods = {
 		SessionSetThinkingSelectionParamsSchema,
 		SessionThinkingSelectionResultSchema,
 	),
+	"session/setModel": method(SessionSetModelParamsSchema, SessionModelResultSchema),
 	"subagent/readItems": method(SubagentReadItemsParamsSchema, SessionReadItemsResultSchema),
 	"turn/start": method(TurnInputSchema, AcceptedOperationSchema),
 	"turn/steer": method(TurnSteerParamsSchema, AcceptedOperationSchema),
 	"turn/interrupt": method(SessionMutationParamsSchema, AcceptedOperationSchema),
+	"schedule/create": method(ScheduleCreateParamsSchema, ScheduleTaskResultSchema),
+	"schedule/list": method(ScheduleListParamsSchema, ScheduleListResultSchema),
+	"schedule/get": method(ScheduleTaskRefParamsSchema, ScheduleTaskResultSchema),
+	"schedule/update": method(ScheduleUpdateParamsSchema, ScheduleTaskResultSchema),
+	"schedule/pause": method(ScheduleMutationParamsSchema, ScheduleTaskResultSchema),
+	"schedule/resume": method(ScheduleMutationParamsSchema, ScheduleTaskResultSchema),
+	"schedule/delete": method(ScheduleMutationParamsSchema, ScheduleDeleteResultSchema),
+	"schedule/run-now": method(ScheduleMutationParamsSchema, ScheduleRunResultSchema),
+	"schedule/run/list": method(ScheduleRunListParamsSchema, ScheduleRunListResultSchema),
+	"schedule/run/get": method(ScheduleRunRefParamsSchema, ScheduleRunResultSchema),
+	"schedule/run/mark-read": method(ScheduleRunMarkReadParamsSchema, ScheduleRunMarkReadResultSchema),
+	"schedule/subscribe": method(ScheduleSubscribeParamsSchema, ScheduleSubscribeResultSchema),
+	"schedule/unsubscribe": method(ScheduleSubscribeParamsSchema, ScheduleUnsubscribeResultSchema),
 	"connection/ack": method(ConnectionAckParamsSchema, ConnectionAckResultSchema),
 } as const;
 

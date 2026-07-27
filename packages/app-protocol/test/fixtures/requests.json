@@ -87,6 +87,21 @@
 	},
 	{
 		"direction": "client",
+		"method": "session/setModel",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "client-model",
+			"method": "session/setModel",
+			"params": {
+				"sessionId": "11111111-1111-4111-8111-111111111111",
+				"requestId": "22222222-2222-4222-8222-222222222221",
+				"provider": "openai",
+				"modelId": "gpt-test"
+			}
+		}
+	},
+	{
+		"direction": "client",
 		"method": "subagent/readItems",
 		"envelope": {
 			"jsonrpc": "2.0",

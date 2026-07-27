@@ -52,6 +52,20 @@
 	},
 	{
 		"direction": "client",
+		"method": "session/setModel",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "client-model",
+			"result": {
+				"model": { "provider": "openai", "modelId": "gpt-test" },
+				"thinkingSelection": "high",
+				"actualThinkingLevel": "high",
+				"availableThinkingSelections": ["off", "high", "max"]
+			}
+		}
+	},
+	{
+		"direction": "client",
 		"method": "subagent/readItems",
 		"envelope": {
 			"jsonrpc": "2.0",

@@ -9,6 +9,7 @@ export const MAX_NAME_UTF16_UNITS = 256;
 export const MAX_PATH_UTF8_BYTES = 32 * 1024;
 export const MAX_PROMPT_UTF8_BYTES = 2 * 1024 * 1024;
 export const MAX_PUBLIC_TEXT_UTF8_BYTES = 64 * 1024;
+export const MAX_SCHEDULE_INSTRUCTION_UTF8_BYTES = 64 * 1024;
 export const MAX_DELTA_UTF8_BYTES = 256 * 1024;
 export const MAX_HISTORY_ITEMS = 200;
 export const MAX_EVENT_BATCH = 256;

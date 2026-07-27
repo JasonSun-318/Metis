@@ -87,6 +87,7 @@ export class SessionProjection {
 			case "interaction/notify":
 				return clone(event);
 			case "session/thinkingSelectionChanged":
+			case "session/modelChanged":
 			case "subagent/updated":
 				this.assertSession(event.sessionId);
 				return clone(event);
@@ -150,7 +151,12 @@ export class SessionProjection {
 		cursor: number,
 		runtime: Pick<
 			SessionSnapshot,
-			"thinkingSelection" | "actualThinkingLevel" | "availableThinkingSelections" | "subagents" | "model"
+			| "thinkingSelection"
+			| "actualThinkingLevel"
+			| "availableThinkingSelections"
+			| "subagents"
+			| "model"
+			| "availableModels"
 		> = {
 			thinkingSelection: "off",
 			actualThinkingLevel: "off",

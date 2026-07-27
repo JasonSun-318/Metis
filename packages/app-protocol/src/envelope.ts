@@ -338,6 +338,61 @@ function validateClientResultCorrelation(request: ClientRpcRequest, result: unkn
 				failResponseCorrelation("Unsubscribed session does not match its request");
 			}
 			return;
+		case "schedule/create":
+			if ((result as ClientResult<"schedule/create">).task.id !== request.params.requestId) {
+				failResponseCorrelation("Created schedule does not match its request");
+			}
+			return;
+		case "schedule/list": {
+			const tasks = (result as ClientResult<"schedule/list">).tasks;
+			if (!hasUniqueIds(tasks.map((task) => task.id)))
+				failResponseCorrelation("Schedule list contains duplicate tasks");
+			return;
+		}
+		case "schedule/get":
+		case "schedule/update":
+		case "schedule/pause":
+		case "schedule/resume":
+			if ((result as ClientResult<typeof request.method>).task.id !== request.params.taskId) {
+				failResponseCorrelation("Scheduled task does not match its request");
+			}
+			return;
+		case "schedule/delete":
+			if ((result as ClientResult<"schedule/delete">).taskId !== request.params.taskId) {
+				failResponseCorrelation("Deleted schedule does not match its request");
+			}
+			return;
+		case "schedule/run-now": {
+			const run = (result as ClientResult<"schedule/run-now">).run;
+			if (run.taskId !== request.params.taskId || run.id !== request.params.requestId) {
+				failResponseCorrelation("Scheduled run does not match its request");
+			}
+			return;
+		}
+		case "schedule/run/list": {
+			const runs = (result as ClientResult<"schedule/run/list">).runs;
+			if (runs.some((run) => run.taskId !== request.params.taskId) || !hasUniqueIds(runs.map((run) => run.id))) {
+				failResponseCorrelation("Scheduled run page does not match its task");
+			}
+			return;
+		}
+		case "schedule/run/get":
+		case "schedule/run/mark-read": {
+			const run = (result as ClientResult<typeof request.method>).run;
+			if (run.taskId !== request.params.taskId || run.id !== request.params.runId) {
+				failResponseCorrelation("Scheduled run does not match its request");
+			}
+			return;
+		}
+		case "schedule/subscribe": {
+			const tasks = (result as ClientResult<"schedule/subscribe">).snapshot.tasks;
+			if (!hasUniqueIds(tasks.map((task) => task.id))) {
+				failResponseCorrelation("Schedule snapshot contains duplicate tasks");
+			}
+			return;
+		}
+		case "schedule/unsubscribe":
+			return;
 		case "connection/ack":
 			if ((result as ClientResult<"connection/ack">).acknowledgedCursor !== request.params.cursor) {
 				failResponseCorrelation("Acknowledged cursor does not match its request");
@@ -352,7 +407,12 @@ function validateErrorCorrelation(request: PendingRpcRequest, error: RpcErrorObj
 		request.method === "interaction/request"
 			? (request.params as ServerParams<"interaction/request">).interaction
 			: undefined;
-	const expectedSessionId = typeof params.sessionId === "string" ? params.sessionId : interaction?.sessionId;
+	const expectedSessionId =
+		typeof params.sessionId === "string"
+			? params.sessionId
+			: typeof params.sourceSessionId === "string"
+				? params.sourceSessionId
+				: interaction?.sessionId;
 	if (error.data.requestId !== undefined && error.data.requestId !== params.requestId) {
 		failResponseCorrelation("Error request id does not match its pending request");
 	}

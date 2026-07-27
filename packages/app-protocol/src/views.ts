@@ -4,6 +4,7 @@ import {
 	DeltaTextSchema,
 	MAX_HISTORY_ITEMS,
 	MAX_INTERACTION_CHOICES,
+	MAX_SCHEDULE_INSTRUCTION_UTF8_BYTES,
 	NameSchema,
 	OpaqueIdSchema,
 	OptionalNameSchema,
@@ -14,6 +15,7 @@ import {
 	Sha256Schema,
 	StrictObject,
 	TimestampSchema,
+	Utf8String,
 	UuidSchema,
 } from "./schema.ts";
 
@@ -209,6 +211,11 @@ export const SubagentStatusSchema = Type.Union([
 	Type.Literal("closed"),
 ]);
 export const SubagentModelRefSchema = StrictObject({ provider: NameSchema, modelId: NameSchema });
+export const ModelOptionViewSchema = StrictObject({
+	provider: NameSchema,
+	modelId: NameSchema,
+	name: NameSchema,
+});
 export const SubagentUsageSchema = StrictObject({
 	model: SubagentModelRefSchema,
 	input: Type.Number({ minimum: 0 }),
@@ -262,6 +269,7 @@ export const SubagentSummarySchema = Type.Union([
 export const SessionSnapshotSchema = StrictObject({
 	session: SessionSummarySchema,
 	model: Type.Optional(SubagentModelRefSchema),
+	availableModels: Type.Optional(Type.Array(ModelOptionViewSchema, { maxItems: 512 })),
 	turns: Type.Array(TurnViewSchema, { maxItems: MAX_HISTORY_ITEMS }),
 	recentItems: Type.Array(ItemViewSchema, { maxItems: MAX_HISTORY_ITEMS }),
 	nextBeforeItemId: Type.Union([OpaqueIdSchema, Type.Null()]),
@@ -278,6 +286,15 @@ export const SessionSnapshotSchema = StrictObject({
 export const ThinkingSelectionChangedEventSchema = StrictObject({
 	type: Type.Literal("session/thinkingSelectionChanged"),
 	sessionId: SessionIdSchema,
+	thinkingSelection: ThinkingSelectionSchema,
+	actualThinkingLevel: ActualThinkingLevelSchema,
+	availableThinkingSelections: Type.Array(ThinkingSelectionSchema, { minItems: 1, maxItems: 8, uniqueItems: true }),
+});
+
+export const ModelChangedEventSchema = StrictObject({
+	type: Type.Literal("session/modelChanged"),
+	sessionId: SessionIdSchema,
+	model: SubagentModelRefSchema,
 	thinkingSelection: ThinkingSelectionSchema,
 	actualThinkingLevel: ActualThinkingLevelSchema,
 	availableThinkingSelections: Type.Array(ThinkingSelectionSchema, { minItems: 1, maxItems: 8, uniqueItems: true }),
@@ -352,6 +369,171 @@ export const ServerStateEventSchema = StrictObject({
 	message: Type.Optional(PublicTextSchema),
 });
 
+const ScheduleTimeSchema = Type.String({ pattern: "^(?:[01]\\d|2[0-3]):[0-5]\\d$" });
+const ScheduleDateSchema = Type.String({ pattern: "^\\d{4}-\\d{2}-\\d{2}$" });
+
+export const ScheduleInputSpecSchema = Type.Union([
+	StrictObject({ kind: Type.Literal("once"), date: ScheduleDateSchema, time: ScheduleTimeSchema }),
+	StrictObject({ kind: Type.Literal("daily"), time: ScheduleTimeSchema }),
+	StrictObject({
+		kind: Type.Literal("weekly"),
+		weekdays: Type.Array(Type.Integer({ minimum: 1, maximum: 7 }), { minItems: 1, maxItems: 7, uniqueItems: true }),
+		time: ScheduleTimeSchema,
+	}),
+	StrictObject({
+		kind: Type.Literal("monthly"),
+		day: Type.Integer({ minimum: 1, maximum: 31 }),
+		time: ScheduleTimeSchema,
+	}),
+	StrictObject({
+		kind: Type.Literal("interval"),
+		every: Type.Integer({ minimum: 1, maximum: 10_000 }),
+		unit: Type.Union([Type.Literal("minute"), Type.Literal("hour")]),
+		startDate: ScheduleDateSchema,
+		startTime: ScheduleTimeSchema,
+	}),
+]);
+
+export const ScheduleSpecSchema = Type.Union([
+	ScheduleInputSpecSchema.anyOf[0],
+	ScheduleInputSpecSchema.anyOf[1],
+	ScheduleInputSpecSchema.anyOf[2],
+	ScheduleInputSpecSchema.anyOf[3],
+	StrictObject({
+		kind: Type.Literal("interval"),
+		every: Type.Integer({ minimum: 1, maximum: 10_000 }),
+		unit: Type.Union([Type.Literal("minute"), Type.Literal("hour")]),
+		startAt: TimestampSchema,
+	}),
+]);
+
+export const ScheduleTargetViewSchema = Type.Union([
+	StrictObject({ kind: Type.Literal("project"), cwd: PathSchema }),
+	StrictObject({ kind: Type.Literal("general"), workspace: Type.Literal("fixed"), cwd: PathSchema }),
+	StrictObject({ kind: Type.Literal("general"), workspace: Type.Literal("task") }),
+]);
+
+export const ScheduleErrorViewSchema = StrictObject({
+	code: Type.String({ minLength: 1, maxLength: 64, pattern: "^[A-Z][A-Z0-9_]*$" }),
+	message: PublicTextSchema,
+});
+
+const ScheduleRunStatusSchema = Type.Union([
+	Type.Literal("queued"),
+	Type.Literal("running"),
+	Type.Literal("succeeded"),
+	Type.Literal("failed"),
+	Type.Literal("missed"),
+	Type.Literal("skipped"),
+	Type.Literal("cancelled"),
+]);
+
+const ScheduleRunReasonSchema = Type.Union([
+	Type.Literal("overlap"),
+	Type.Literal("offline"),
+	Type.Literal("interrupted"),
+	Type.Literal("deleted"),
+]);
+
+export const ScheduleTaskSnapshotViewSchema = StrictObject({
+	instruction: Utf8String(MAX_SCHEDULE_INSTRUCTION_UTF8_BYTES, { minLength: 1 }),
+	schedule: ScheduleSpecSchema,
+	timezone: Type.String({ minLength: 1, maxLength: 255 }),
+	target: ScheduleTargetViewSchema,
+});
+
+const ScheduleRunSummaryFields = {
+	id: SessionIdSchema,
+	taskId: SessionIdSchema,
+	status: ScheduleRunStatusSchema,
+	scheduledFor: TimestampSchema,
+	createdAt: TimestampSchema,
+	startedAt: Type.Optional(TimestampSchema),
+	completedAt: Type.Optional(TimestampSchema),
+	sessionId: Type.Optional(SessionIdSchema),
+	resultPreview: Type.Optional(PublicTextSchema),
+	error: Type.Optional(ScheduleErrorViewSchema),
+	reason: Type.Optional(ScheduleRunReasonSchema),
+	skippedCount: Type.Optional(Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER })),
+	unread: Type.Boolean(),
+} as const;
+
+export const ScheduleRunViewSchema = StrictObject({
+	...ScheduleRunSummaryFields,
+	trigger: Type.Union([Type.Literal("scheduled"), Type.Literal("manual")]),
+	snapshot: ScheduleTaskSnapshotViewSchema,
+});
+
+export const ScheduleRunSummaryViewSchema = StrictObject(ScheduleRunSummaryFields);
+
+export const ScheduleTaskViewSchema = StrictObject({
+	id: SessionIdSchema,
+	title: NameSchema,
+	instruction: Utf8String(MAX_SCHEDULE_INSTRUCTION_UTF8_BYTES, { minLength: 1 }),
+	schedule: ScheduleSpecSchema,
+	timezone: Type.String({ minLength: 1, maxLength: 255 }),
+	target: ScheduleTargetViewSchema,
+	status: Type.Union([
+		Type.Literal("active"),
+		Type.Literal("paused"),
+		Type.Literal("completed"),
+		Type.Literal("deleting"),
+	]),
+	createdAt: TimestampSchema,
+	updatedAt: TimestampSchema,
+	nextRunAt: Type.Union([TimestampSchema, Type.Null()]),
+	unreadCount: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
+	lastRun: Type.Optional(ScheduleRunSummaryViewSchema),
+	pauseReason: Type.Optional(Type.Union([Type.Literal("user"), Type.Literal("workspace_missing")])),
+	createdFromSessionId: Type.Optional(SessionIdSchema),
+});
+
+export const ScheduleSnapshotViewSchema = StrictObject({
+	tasks: Type.Array(ScheduleTaskViewSchema, { maxItems: MAX_HISTORY_ITEMS }),
+	unreadCount: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
+	cursor: CursorSchema,
+});
+
+export const ScheduleUpdatedEventSchema = StrictObject({
+	type: Type.Literal("schedule/updated"),
+	task: ScheduleTaskViewSchema,
+});
+export const ScheduleDeletedEventSchema = StrictObject({
+	type: Type.Literal("schedule/deleted"),
+	taskId: SessionIdSchema,
+});
+
+const ScheduleRunEventFields = {
+	taskId: SessionIdSchema,
+	runId: SessionIdSchema,
+	unread: Type.Boolean(),
+	createdAt: TimestampSchema,
+	sessionId: Type.Optional(SessionIdSchema),
+} as const;
+
+export const ScheduleRunCompletedEventSchema = StrictObject({
+	type: Type.Literal("schedule/runCompleted"),
+	...ScheduleRunEventFields,
+	resultPreview: Type.Optional(PublicTextSchema),
+});
+export const ScheduleRunFailedEventSchema = StrictObject({
+	type: Type.Literal("schedule/runFailed"),
+	...ScheduleRunEventFields,
+	error: ScheduleErrorViewSchema,
+});
+export const ScheduleRunMissedEventSchema = StrictObject({
+	type: Type.Literal("schedule/runMissed"),
+	...ScheduleRunEventFields,
+	reason: Type.Literal("offline"),
+	skippedCount: Type.Optional(Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER })),
+});
+export const ScheduleRunSkippedEventSchema = StrictObject({
+	type: Type.Literal("schedule/runSkipped"),
+	...ScheduleRunEventFields,
+	reason: Type.Literal("overlap"),
+});
+export const ScheduleRefreshedEventSchema = StrictObject({ type: Type.Literal("schedule/refreshed") });
+
 export const DomainEventSchema = Type.Union([
 	SessionUpdatedEventSchema,
 	TurnStartedEventSchema,
@@ -363,7 +545,15 @@ export const DomainEventSchema = Type.Union([
 	InteractionNotifyEventSchema,
 	ServerStateEventSchema,
 	ThinkingSelectionChangedEventSchema,
+	ModelChangedEventSchema,
 	SubagentUpdatedEventSchema,
+	ScheduleUpdatedEventSchema,
+	ScheduleDeletedEventSchema,
+	ScheduleRunCompletedEventSchema,
+	ScheduleRunFailedEventSchema,
+	ScheduleRunMissedEventSchema,
+	ScheduleRunSkippedEventSchema,
+	ScheduleRefreshedEventSchema,
 ]);
 
 export const ConnectionEventsParamsSchema = Type.Refine(
@@ -390,6 +580,12 @@ export type InteractionChoice = Static<typeof InteractionChoiceSchema>;
 export type InteractionView = Static<typeof InteractionViewSchema>;
 export type SessionSnapshot = Static<typeof SessionSnapshotSchema>;
 export type ThinkingSelectionView = Static<typeof ThinkingSelectionSchema>;
+export type ModelOptionView = Static<typeof ModelOptionViewSchema>;
 export type SubagentSummaryView = Static<typeof SubagentSummarySchema>;
+export type ScheduleInputSpecView = Static<typeof ScheduleInputSpecSchema>;
+export type ScheduleTaskView = Static<typeof ScheduleTaskViewSchema>;
+export type ScheduleRunView = Static<typeof ScheduleRunViewSchema>;
+export type ScheduleSnapshotView = Static<typeof ScheduleSnapshotViewSchema>;
+export type ScheduleTaskSnapshotView = Static<typeof ScheduleTaskSnapshotViewSchema>;
 export type DomainEvent = Static<typeof DomainEventSchema>;
 export type ConnectionEventsParams = Static<typeof ConnectionEventsParamsSchema>;

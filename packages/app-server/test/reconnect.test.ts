@@ -117,6 +117,15 @@ class PausableRuntime implements OpenedSessionRuntime {
 		};
 	}
 
+	async setModel(input: ClientParams<"session/setModel">): Promise<ClientResult<"session/setModel">> {
+		return {
+			model: { provider: input.provider, modelId: input.modelId },
+			thinkingSelection: "high",
+			actualThinkingLevel: "high",
+			availableThinkingSelections: ["off", "high", "max"],
+		};
+	}
+
 	async snapshot(serverEpoch: string, currentCursor: () => number): Promise<SessionSnapshot> {
 		const result = this.projection.snapshot(serverEpoch, currentCursor());
 		this.snapshotMaterialized?.();
@@ -310,6 +319,20 @@ describe("gap-free reconnect", () => {
 			itemId: "item-stream",
 			content: [{ type: "text", text: "hello world" }],
 		});
+	});
+
+	it("forwards model changes through the session projection", () => {
+		const projection = new SessionProjection({ session: summary() });
+		const event = {
+			type: "session/modelChanged",
+			sessionId: SESSION_ID,
+			model: { provider: "test", modelId: "model-b" },
+			thinkingSelection: "high",
+			actualThinkingLevel: "high",
+			availableThinkingSelections: ["off", "high", "max"],
+		} as const satisfies DomainEvent;
+
+		expect(projection.apply(event)).toEqual(event);
 	});
 
 	it("reserves visible-answer capacity after a long thinking stream", () => {

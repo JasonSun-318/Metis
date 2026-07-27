@@ -15,9 +15,11 @@ import {
 	CURRENT_SESSION_VERSION,
 	getDefaultSessionDir,
 	getOwnedManagedWorkspace,
+	getScheduleSessionDir,
 	moveSessionFileWithLease,
 	removeOwnedManagedWorkspace,
 	resolveNewSessionWorkspace,
+	type ScheduleRun,
 	SessionManager,
 } from "@arcmind/coding-agent";
 import {
@@ -43,6 +45,7 @@ interface ScannedSession {
 		readonly cwd: string;
 		readonly mode: AgentMode;
 		readonly cwdOrigin: CwdOrigin;
+		readonly scheduled?: { readonly taskId: string; readonly runId: string };
 	};
 	readonly updatedAt: string;
 }
@@ -104,6 +107,7 @@ async function readHeader(path: string): Promise<{
 	cwd: string;
 	mode: AgentMode;
 	cwdOrigin: CwdOrigin;
+	scheduled?: { taskId: string; runId: string };
 }> {
 	const before = await lstat(path);
 	if (!before.isFile() || before.nlink !== 1) throw new Error("Session journal is not a single-link regular file");
@@ -136,6 +140,24 @@ async function readHeader(path: string): Promise<{
 		}
 		if (typeof value.id !== "string") throw new Error("Session header id is invalid");
 		assertValidSessionId(value.id);
+		let scheduled: { taskId: string; runId: string } | undefined;
+		if (value.scheduled !== undefined) {
+			if (
+				typeof value.scheduled !== "object" ||
+				value.scheduled === null ||
+				Array.isArray(value.scheduled) ||
+				Object.keys(value.scheduled).some((key) => key !== "taskId" && key !== "runId")
+			) {
+				throw new Error("Session scheduled metadata is invalid");
+			}
+			const marker = value.scheduled as Record<string, unknown>;
+			if (typeof marker.taskId !== "string" || typeof marker.runId !== "string") {
+				throw new Error("Session scheduled metadata is invalid");
+			}
+			assertValidSessionId(marker.taskId);
+			assertValidSessionId(marker.runId);
+			scheduled = { taskId: marker.taskId, runId: marker.runId };
+		}
 		if (!safeIsoTimestamp(value.timestamp)) throw new Error("Session header timestamp is invalid");
 		if (typeof value.cwd !== "string" || Buffer.byteLength(value.cwd, "utf8") > 32 * 1024) {
 			throw new Error("Session header cwd is invalid");
@@ -158,6 +180,7 @@ async function readHeader(path: string): Promise<{
 			mode: value.mode === "chat" || value.mode === "code" ? value.mode : "code",
 			cwdOrigin:
 				value.cwdOrigin === "managed" || value.cwdOrigin === "user-selected" ? value.cwdOrigin : "user-selected",
+			...(scheduled ? { scheduled } : {}),
 		};
 	} finally {
 		await handle.close();
@@ -243,14 +266,15 @@ export class SessionCatalog {
 			...activeFiles.map((path) => this.scanOne(path, false)),
 			...archivedFiles.map((path) => this.scanOne(path, true)),
 		]);
+		const ordinary = scanned.filter((item) => !item.header?.scheduled);
 		const idCounts = new Map<string, number>();
-		for (const item of scanned) {
+		for (const item of ordinary) {
 			if (item.header) idCounts.set(item.header.id, (idCounts.get(item.header.id) ?? 0) + 1);
 		}
 		this.claimedSessionIds = new Set(idCounts.keys());
 
 		const next = new Map<string, SessionRef>();
-		for (const item of scanned) {
+		for (const item of ordinary) {
 			const duplicate = item.header !== undefined && idCounts.get(item.header.id)! > 1;
 			let sessionId = item.header && !duplicate ? item.header.id : corruptId(item.relativePath);
 			if (next.has(sessionId)) sessionId = corruptId(item.relativePath, item.key);
@@ -267,9 +291,84 @@ export class SessionCatalog {
 							archived: item.archived,
 						}
 					: corruptSummary(sessionId, item);
-			next.set(sessionId, { path: item.path, relativePath: item.relativePath, summary });
+			next.set(sessionId, {
+				path: item.path,
+				relativePath: item.relativePath,
+				summary,
+				...(item.header?.scheduled ? { scheduled: item.header.scheduled } : {}),
+			});
 		}
 		this.sessions = next;
+	}
+
+	async registerScheduledRun(run: ScheduleRun): Promise<void> {
+		if (!run.sessionId || !run.sessionFile) return;
+		const sessionId = run.sessionId;
+		const sessionFile = run.sessionFile;
+		await this.mutate(async () => {
+			try {
+				const expectedRoot = await realpath(getScheduleSessionDir(this.agentDir, run.taskId));
+				const expectedMode = run.snapshot.target.kind === "project" ? "code" : "chat";
+				const expectedCwdOrigin =
+					run.snapshot.target.kind === "general" && run.snapshot.target.workspace === "task"
+						? "managed"
+						: "user-selected";
+				const path = resolve(sessionFile);
+				const canonicalPath = await realpath(path);
+				if (!isInside(expectedRoot, canonicalPath)) throw new Error("Session is outside its task directory");
+				const header = await readHeader(path);
+				if (
+					header.id !== sessionId ||
+					header.scheduled?.taskId !== run.taskId ||
+					header.scheduled.runId !== run.id ||
+					header.mode !== expectedMode ||
+					header.cwdOrigin !== expectedCwdOrigin ||
+					header.cwd !== run.snapshot.target.cwd
+				) {
+					throw new Error("Session identity does not match its run");
+				}
+				const existing = this.sessions.get(sessionId);
+				if (existing && existing.path !== path) throw new Error("Session id is already claimed");
+				const updatedAt = new Date((await lstat(path)).mtimeMs).toISOString();
+				this.sessions.set(sessionId, {
+					path,
+					relativePath: relative(this.agentDir, path),
+					scheduled: header.scheduled,
+					summary: {
+						sessionId,
+						mode: header.mode,
+						cwdOrigin: header.cwdOrigin,
+						cwd: header.cwd || null,
+						createdAt: header.timestamp,
+						updatedAt,
+						state: "idle",
+						archived: false,
+					},
+				});
+				this.claimedSessionIds.add(sessionId);
+			} catch {
+				throw new AppServerError("SESSION_CORRUPT");
+			}
+		});
+	}
+
+	async removeScheduledTask(taskId: string): Promise<string[]> {
+		return await this.mutate(async () => {
+			const removed: string[] = [];
+			for (const [sessionId, ref] of this.sessions) {
+				if (ref.scheduled?.taskId !== taskId) continue;
+				this.sessions.delete(sessionId);
+				this.claimedSessionIds.delete(sessionId);
+				removed.push(sessionId);
+			}
+			return removed;
+		});
+	}
+
+	scheduledSessionIds(taskId: string): string[] {
+		return [...this.sessions.entries()]
+			.filter(([, ref]) => ref.scheduled?.taskId === taskId)
+			.map(([sessionId]) => sessionId);
 	}
 
 	private mutate<T>(operation: () => Promise<T>): Promise<T> {
@@ -289,6 +388,7 @@ export class SessionCatalog {
 
 	list(input: ClientParams<"session/list">): ClientResult<"session/list"> {
 		const sessions = [...this.sessions.values()]
+			.filter((ref) => !ref.scheduled)
 			.map((ref) => ref.summary)
 			.filter((summary) => input.includeArchived === true || !summary.archived)
 			.sort(

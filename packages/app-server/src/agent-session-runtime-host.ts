@@ -25,8 +25,11 @@ import {
 	getProjectTrustOptions,
 	hasTrustRequiringProjectResources,
 	importSessionAttachments,
+	installScheduleHost,
 	ProjectTrustStore,
 	reduceRuntimeJournal,
+	SCHEDULE_MAIN_PROMPT,
+	type ScheduleManager,
 	SessionManager,
 	SettingsManager,
 	type SubagentSummary,
@@ -60,6 +63,7 @@ export interface AgentSessionRuntimeHostOptions {
 	readonly agentDir: string;
 	readonly interactions?: InteractionBroker;
 	readonly credentials?: CredentialCoordinator;
+	readonly scheduleManager?: ScheduleManager;
 }
 
 function boundedText(value: string, maximumBytes: number): string {
@@ -400,6 +404,7 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 		this.session = session;
 		this.unsubscribeAgent = session.subscribe((event) => this.onAgentEvent(event));
 		this.unsubscribeSubagents = this.runtime.subagentManager?.subscribe((event) => {
+			if (!("summary" in event)) return;
 			this.publish({ type: "subagent/updated", sessionId: this.sessionId, subagent: subagentView(event.summary) });
 		});
 	}
@@ -714,12 +719,36 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 		};
 	}
 
+	async setModel(input: ClientParams<"session/setModel">): Promise<ClientResult<"session/setModel">> {
+		const model = this.session.modelRegistry.find(input.provider, input.modelId);
+		if (!model || !this.session.modelRegistry.hasConfiguredAuth(model)) {
+			throw new AppServerError("NOT_FOUND", { sessionId: input.sessionId, requestId: input.requestId });
+		}
+		await this.session.setModel(model);
+		const result = {
+			model: { provider: model.provider, modelId: model.id },
+			thinkingSelection: this.session.getThinkingSelection(),
+			actualThinkingLevel: this.session.thinkingLevel,
+			availableThinkingSelections: this.session.getAvailableThinkingSelections(),
+		} satisfies ClientResult<"session/setModel">;
+		this.publish({ type: "session/modelChanged", sessionId: this.sessionId, ...result });
+		return result;
+	}
+
 	async snapshot(serverEpoch: string, currentCursor: () => number): Promise<SessionSnapshot> {
 		this.refreshLifecycleProjection();
 		return this.projection.snapshot(serverEpoch, currentCursor(), {
 			...(this.session.model
 				? { model: { provider: this.session.model.provider, modelId: this.session.model.id } }
 				: {}),
+			availableModels: this.session.modelRegistry
+				.getAvailable()
+				.slice(0, 512)
+				.map((model) => ({
+					provider: model.provider,
+					modelId: model.id,
+					name: name(model.name, model.id),
+				})),
 			thinkingSelection: this.session.getThinkingSelection(),
 			actualThinkingLevel: this.session.thinkingLevel,
 			availableThinkingSelections: this.session.getAvailableThinkingSelections(),
@@ -800,6 +829,107 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 	}
 }
 
+class ReadonlyScheduledSessionRuntime implements OpenedSessionRuntime {
+	readonly sessionId: string;
+	private readonly projection: SessionProjection;
+
+	constructor(ref: SessionRef) {
+		this.sessionId = ref.summary.sessionId;
+		let manager: ReturnType<typeof SessionManager.openReadOnly>;
+		try {
+			manager = SessionManager.openReadOnly(ref.path);
+			const header = manager.getHeader();
+			if (
+				header?.id !== this.sessionId ||
+				header.scheduled?.taskId !== ref.scheduled?.taskId ||
+				header.scheduled?.runId !== ref.scheduled?.runId ||
+				header.mode !== ref.summary.mode ||
+				header.cwdOrigin !== ref.summary.cwdOrigin ||
+				(header.cwd || null) !== ref.summary.cwd ||
+				header.timestamp !== ref.summary.createdAt
+			) {
+				throw new Error("Scheduled session identity changed");
+			}
+		} catch {
+			throw new AppServerError("SESSION_CORRUPT", { sessionId: this.sessionId });
+		}
+		const journal = manager.getDurableJournalSnapshot();
+		const reduced = reduceRuntimeJournal(journal);
+		const turnStates = new Map(reduced.turns.map((turn) => [opaqueId(turn.turnId, "turn"), turn.state]));
+		const toolStates = new Map(reduced.tools.map((tool) => [opaqueId(tool.toolCallId, "tool"), tool.state]));
+		const items = journal
+			.map((entry) =>
+				mapMessageEntry(
+					entry as unknown as Record<string, unknown>,
+					this.sessionId,
+					turnStates,
+					toolStates,
+					ref.summary.createdAt,
+				),
+			)
+			.filter((item): item is ItemView => item !== undefined);
+		this.projection = new SessionProjection({ session: ref.summary, items });
+	}
+
+	isActive(): boolean {
+		return false;
+	}
+
+	hasPendingInteractions(): boolean {
+		return false;
+	}
+
+	getSummary(): SessionSummary {
+		return this.projection.getSummary();
+	}
+
+	async listSkills(): Promise<ClientResult<"skill/list">> {
+		return { skills: [] };
+	}
+
+	async readItems(input: ClientParams<"session/readItems">): Promise<ClientResult<"session/readItems">> {
+		return this.projection.readItems(input);
+	}
+
+	async readSubagentItems(): Promise<ClientResult<"subagent/readItems">> {
+		throw new AppServerError("NOT_FOUND", { sessionId: this.sessionId });
+	}
+
+	async setThinkingSelection(): Promise<ClientResult<"session/setThinkingSelection">> {
+		throw new AppServerError("READ_ONLY_SESSION", { sessionId: this.sessionId });
+	}
+
+	async setModel(): Promise<ClientResult<"session/setModel">> {
+		throw new AppServerError("READ_ONLY_SESSION", { sessionId: this.sessionId });
+	}
+
+	async snapshot(serverEpoch: string, currentCursor: () => number): Promise<SessionSnapshot> {
+		return this.projection.snapshot(serverEpoch, currentCursor());
+	}
+
+	async startTurn(): Promise<ClientResult<"turn/start">> {
+		throw new AppServerError("READ_ONLY_SESSION", { sessionId: this.sessionId });
+	}
+
+	async steer(): Promise<ClientResult<"turn/steer">> {
+		throw new AppServerError("READ_ONLY_SESSION", { sessionId: this.sessionId });
+	}
+
+	async interrupt(): Promise<ClientResult<"turn/interrupt">> {
+		throw new AppServerError("READ_ONLY_SESSION", { sessionId: this.sessionId });
+	}
+
+	async prepareMutation(): Promise<PreparedSessionMutation> {
+		throw new AppServerError("READ_ONLY_SESSION", { sessionId: this.sessionId });
+	}
+
+	subscribe(): () => void {
+		return () => {};
+	}
+
+	async close(): Promise<void> {}
+}
+
 function toRuntimeImage(image: DurableImageRefView) {
 	return { type: "image_ref" as const, hash: image.hash, mimeType: image.mediaType, size: image.byteLength };
 }
@@ -878,8 +1008,17 @@ export class AgentSessionRuntimeHost implements SessionRuntimeHost {
 							includeAutoMemory: false,
 							permissionModeCeiling: options.permissionModeCeiling,
 						}
-					: {}),
+					: this.options.scheduleManager
+						? { additionalSystemPrompt: SCHEDULE_MAIN_PROMPT }
+						: {}),
 			});
+			if (!child && this.options.scheduleManager) {
+				installScheduleHost({
+					session: result.session,
+					manager: this.options.scheduleManager,
+					timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+				});
+			}
 			return { ...result, services, diagnostics: services.diagnostics };
 		} catch (error) {
 			services.resourceLoader.dispose?.();
@@ -911,6 +1050,7 @@ export class AgentSessionRuntimeHost implements SessionRuntimeHost {
 
 	async open(ref: SessionRef): Promise<OpenedSessionRuntime> {
 		if (ref.summary.archived) throw new AppServerError("NOT_FOUND", { sessionId: ref.summary.sessionId });
+		if (ref.scheduled) return new ReadonlyScheduledSessionRuntime(ref);
 		let manager: SessionManager;
 		try {
 			manager = SessionManager.open(ref.path);

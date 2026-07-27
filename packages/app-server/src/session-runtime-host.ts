@@ -13,6 +13,7 @@ export interface SessionRef {
 	readonly path: string;
 	readonly relativePath: string;
 	readonly summary: SessionSummary;
+	readonly scheduled?: { readonly taskId: string; readonly runId: string };
 }
 
 export type SessionEventListener = (event: DomainEvent) => void;
@@ -29,6 +30,7 @@ export interface OpenedSessionRuntime {
 	setThinkingSelection(
 		input: ClientParams<"session/setThinkingSelection">,
 	): Promise<ClientResult<"session/setThinkingSelection">>;
+	setModel(input: ClientParams<"session/setModel">): Promise<ClientResult<"session/setModel">>;
 	snapshot(serverEpoch: string, currentCursor: () => number): Promise<SessionSnapshot>;
 	startTurn(input: ClientParams<"turn/start">): Promise<ClientResult<"turn/start">>;
 	steer(input: ClientParams<"turn/steer">): Promise<ClientResult<"turn/steer">>;

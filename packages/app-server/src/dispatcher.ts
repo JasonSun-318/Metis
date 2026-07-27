@@ -1,7 +1,9 @@
 import { createHash } from "node:crypto";
 import type { ClientRpcRequest } from "@arcmind/app-protocol";
+import type { ScheduleCreateTarget, ScheduleManager } from "@arcmind/coding-agent";
 import type { DurableSessionMutation, PreparedSessionMutation } from "./durable-mutation.ts";
 import type { InteractionBroker, InteractionPeer } from "./interactions.ts";
+import { scheduleRunView, scheduleTaskView } from "./schedule-projection.ts";
 import type { SessionCatalog } from "./session-catalog.ts";
 import type { SessionRegistry } from "./session-registry.ts";
 import { AppServerError, type SessionRef } from "./session-runtime-host.ts";
@@ -51,17 +53,54 @@ export class Dispatcher {
 	private readonly registry: SessionRegistry;
 	private readonly subscriptionHub: SessionSubscriptions;
 	private readonly interactions: InteractionBroker;
+	private readonly scheduleManager: ScheduleManager;
 
 	constructor(
 		catalog: SessionCatalog,
 		registry: SessionRegistry,
 		subscriptionHub: SessionSubscriptions,
 		interactions: InteractionBroker,
+		scheduleManager: ScheduleManager,
 	) {
 		this.catalog = catalog;
 		this.registry = registry;
 		this.subscriptionHub = subscriptionHub;
 		this.interactions = interactions;
+		this.scheduleManager = scheduleManager;
+	}
+
+	private scheduleTarget(sourceSessionId?: string): {
+		target: ScheduleCreateTarget;
+		createdFromSessionId?: string;
+	} {
+		if (!sourceSessionId) return { target: { kind: "general", workspace: "task" } };
+		const ref = this.catalog.get(sourceSessionId);
+		if (ref.scheduled || ref.summary.archived || ref.summary.state === "corrupt" || !ref.summary.cwd) {
+			throw new AppServerError("NOT_FOUND", { sessionId: sourceSessionId });
+		}
+		const target: ScheduleCreateTarget =
+			ref.summary.mode === "code"
+				? { kind: "project", cwd: ref.summary.cwd }
+				: ref.summary.cwdOrigin === "user-selected"
+					? { kind: "general", workspace: "fixed", cwd: ref.summary.cwd }
+					: { kind: "general", workspace: "task" };
+		return { target, createdFromSessionId: sourceSessionId };
+	}
+
+	private async scheduleSnapshot(cursor: number) {
+		const page = await this.scheduleManager.list({ limit: 200 });
+		return {
+			tasks: page.tasks.map(scheduleTaskView),
+			unreadCount: this.scheduleManager.unreadCount(),
+			cursor,
+		};
+	}
+
+	private async closeScheduledTaskSessions(taskId: string): Promise<void> {
+		for (const sessionId of this.catalog.scheduledSessionIds(taskId)) {
+			this.subscriptionHub.removeSession(sessionId);
+			if (this.registry.has(sessionId)) await this.registry.close(sessionId);
+		}
 	}
 
 	private runtimeRef(sessionId: string): SessionRef {
@@ -69,6 +108,10 @@ export class Dispatcher {
 		if (ref.summary.archived) throw new AppServerError("NOT_FOUND", { sessionId });
 		if (ref.summary.state === "corrupt") throw new AppServerError("SESSION_CORRUPT", { sessionId });
 		return ref;
+	}
+
+	private assertMutableSession(sessionId: string): void {
+		if (this.catalog.get(sessionId).scheduled) throw new AppServerError("READ_ONLY_SESSION", { sessionId });
 	}
 
 	private replayMutation(request: ClientRpcRequest, operation: () => Promise<unknown>): Promise<unknown> {
@@ -144,8 +187,23 @@ export class Dispatcher {
 					const ref = this.runtimeRef(request.params.sessionId);
 					return await this.registry.run(ref, (runtime) => runtime.setThinkingSelection(request.params));
 				});
+			case "session/setModel":
+				return await this.replayMutation(request, async () => {
+					const ref = this.runtimeRef(request.params.sessionId);
+					return await this.registry.run(ref, (runtime) => runtime.setModel(request.params));
+				});
 			case "session/close": {
-				this.catalog.get(request.params.sessionId);
+				const ref = this.catalog.get(request.params.sessionId);
+				if (ref.scheduled) {
+					const result = await this.replayMutation(request, async () => {
+						await this.registry.close(request.params.sessionId);
+						this.subscriptionHub.removeSession(request.params.sessionId);
+						return { sessionId: request.params.sessionId, closed: true };
+					});
+					connection.subscriptions.unsubscribe(request.params.sessionId);
+					this.interactions.release(request.params.sessionId, connection.interactionPeer);
+					return result;
+				}
 				const result = await this.replayMutation(request, async () => {
 					const mutation: DurableSessionMutation = {
 						method: "session/close",
@@ -175,11 +233,13 @@ export class Dispatcher {
 			}
 			case "session/archive":
 				return await this.replayMutation(request, async () => {
+					this.assertMutableSession(request.params.sessionId);
 					this.registry.assertClosed(request.params.sessionId);
 					return { session: await this.catalog.archive(request.params.sessionId, request.params.requestId) };
 				});
 			case "session/unarchive":
 				return await this.replayMutation(request, async () => {
+					this.assertMutableSession(request.params.sessionId);
 					this.registry.assertClosed(request.params.sessionId);
 					return { session: await this.catalog.unarchive(request.params.sessionId, request.params.requestId) };
 				});
@@ -214,6 +274,91 @@ export class Dispatcher {
 					const ref = this.runtimeRef(request.params.sessionId);
 					return await this.registry.run(ref, (runtime) => runtime.interrupt(request.params));
 				});
+			case "schedule/create":
+				return await this.replayMutation(request, async () => {
+					const source = this.scheduleTarget(request.params.sourceSessionId);
+					return {
+						task: scheduleTaskView(
+							await this.scheduleManager.create({
+								id: request.params.requestId,
+								instruction: request.params.instruction,
+								schedule: request.params.schedule,
+								timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+								...source,
+							}),
+						),
+					};
+				});
+			case "schedule/list": {
+				const page = await this.scheduleManager.list({
+					...(request.params.afterTaskId ? { afterTaskId: request.params.afterTaskId } : {}),
+					...(request.params.limit === undefined ? {} : { limit: request.params.limit }),
+					...(request.params.unreadOnly === undefined ? {} : { unreadOnly: request.params.unreadOnly }),
+				});
+				return {
+					tasks: page.tasks.map(scheduleTaskView),
+					nextAfterTaskId: page.nextAfterTaskId,
+					unreadCount: this.scheduleManager.unreadCount(),
+				};
+			}
+			case "schedule/get":
+				return { task: scheduleTaskView(await this.scheduleManager.get(request.params.taskId)) };
+			case "schedule/update":
+				return await this.replayMutation(request, async () => ({
+					task: scheduleTaskView(
+						await this.scheduleManager.update(request.params.taskId, {
+							...(request.params.instruction === undefined ? {} : { instruction: request.params.instruction }),
+							...(request.params.schedule === undefined ? {} : { schedule: request.params.schedule }),
+						}),
+					),
+				}));
+			case "schedule/pause":
+				return await this.replayMutation(request, async () => ({
+					task: scheduleTaskView(await this.scheduleManager.pause(request.params.taskId)),
+				}));
+			case "schedule/resume":
+				return await this.replayMutation(request, async () => ({
+					task: scheduleTaskView(await this.scheduleManager.resume(request.params.taskId)),
+				}));
+			case "schedule/delete":
+				return await this.replayMutation(request, async () => {
+					await this.closeScheduledTaskSessions(request.params.taskId);
+					const result = await this.scheduleManager.delete(request.params.taskId);
+					for (const sessionId of await this.catalog.removeScheduledTask(request.params.taskId)) {
+						this.subscriptionHub.removeSession(sessionId);
+						await this.registry.close(sessionId);
+					}
+					return result;
+				});
+			case "schedule/run-now":
+				return await this.replayMutation(request, async () => ({
+					run: scheduleRunView(await this.scheduleManager.runNow(request.params.taskId, request.params.requestId)),
+				}));
+			case "schedule/run/list": {
+				const page = await this.scheduleManager.listRuns(request.params.taskId, {
+					...(request.params.beforeRunId ? { beforeRunId: request.params.beforeRunId } : {}),
+					...(request.params.limit === undefined ? {} : { limit: request.params.limit }),
+				});
+				return { runs: page.runs.map(scheduleRunView), nextBeforeRunId: page.nextBeforeRunId };
+			}
+			case "schedule/run/get": {
+				const run = await this.scheduleManager.getRun(request.params.taskId, request.params.runId);
+				await this.catalog.registerScheduledRun(run);
+				return { run: scheduleRunView(run) };
+			}
+			case "schedule/run/mark-read":
+				return await this.replayMutation(request, async () => {
+					const run = await this.scheduleManager.markRunRead(request.params.taskId, request.params.runId);
+					const task = await this.scheduleManager.get(request.params.taskId);
+					return { run: scheduleRunView(run), unreadCount: task.unreadCount };
+				});
+			case "schedule/subscribe":
+				return {
+					snapshot: await connection.subscriptions.subscribeSchedule((cursor) => this.scheduleSnapshot(cursor)),
+				};
+			case "schedule/unsubscribe":
+				connection.subscriptions.unsubscribeSchedule();
+				return { unsubscribed: true };
 			case "connection/ack":
 				return {
 					acknowledgedCursor: connection.subscriptions.acknowledge(

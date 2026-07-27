@@ -6,6 +6,7 @@ import {
 	realpathSync,
 	rmSync,
 	symlinkSync,
+	utimesSync,
 	writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -81,6 +82,15 @@ class FakeRuntime implements OpenedSessionRuntime {
 			thinkingSelection: input.selection,
 			actualThinkingLevel: input.selection === "ultra" ? "max" : input.selection,
 			availableThinkingSelections: ["off", "high", "ultra"],
+		};
+	}
+
+	async setModel(input: ClientParams<"session/setModel">): Promise<ClientResult<"session/setModel">> {
+		return {
+			model: { provider: input.provider, modelId: input.modelId },
+			thinkingSelection: "high",
+			actualThinkingLevel: "high",
+			availableThinkingSelections: ["off", "high", "max"],
 		};
 	}
 
@@ -196,6 +206,17 @@ describe("AppServer", () => {
 		rmSync(tempDir, { recursive: true, force: true });
 	});
 
+	it("prunes stale document work directories on startup", async () => {
+		const stale = join(agentDir, "tmp", "document-work", "stale");
+		mkdirSync(stale, { recursive: true });
+		const expired = new Date(Date.now() - 25 * 60 * 60 * 1000);
+		utimesSync(stale, expired, expired);
+
+		await AppServer.create({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
+
+		expect(existsSync(stale)).toBe(false);
+	});
+
 	it("enforces initialization and protocol version per connection", async () => {
 		const server = await AppServer.create({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
 		const connection = server.connect();
@@ -276,6 +297,38 @@ describe("AppServer", () => {
 		});
 		expect(host.runtimes.get("session-a")?.closed).toBe(true);
 		expect(host.runtimes.get("session-b")?.closed).toBe(false);
+	});
+
+	it("routes replay-protected model selection through the opened runtime", async () => {
+		writeSession(sessionsRoot, "session-a", projectDir);
+		const server = await AppServer.create({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
+		const connection = server.connect();
+		await connection.handle(initialize());
+		await connection.handle({
+			jsonrpc: "2.0",
+			id: "open",
+			method: "session/open",
+			params: { sessionId: "session-a" },
+		});
+
+		const response = await connection.handle({
+			jsonrpc: "2.0",
+			id: "set-model",
+			method: "session/setModel",
+			params: {
+				sessionId: "session-a",
+				requestId: REQUEST_A,
+				provider: "xiaomi",
+				modelId: "mimo-v2.5-pro",
+			},
+		});
+
+		expect(response).toMatchObject({
+			result: {
+				model: { provider: "xiaomi", modelId: "mimo-v2.5-pro" },
+				availableThinkingSelections: ["off", "high", "max"],
+			},
+		});
 	});
 
 	it("lists draft and opened-session skills through their owning runtime boundary", async () => {

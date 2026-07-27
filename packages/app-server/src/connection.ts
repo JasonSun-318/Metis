@@ -23,6 +23,7 @@ import { ConnectionSubscriptions, type SessionSubscriptions } from "./subscripti
 const SERVER_CAPABILITIES = [
 	"archive.v1",
 	"recovery.v1",
+	"schedules.v1",
 	"session.cursor.v1",
 	"sessions.v1",
 	"subagents.v1",
@@ -72,6 +73,13 @@ function normalizedError(error: unknown): { name: RpcErrorName; context: RpcErro
 	if (typeof error === "object" && error !== null) {
 		const code = "code" in error ? String(error.code) : undefined;
 		if (code === "REQUEST_ID_REUSED") return { name: "REQUEST_ID_REUSED", context: {} };
+		if (code === "TASK_ID_REUSED" || code === "RUN_ID_REUSED") {
+			return { name: "REQUEST_ID_REUSED", context: {} };
+		}
+		if (code === "SCHEDULE_NOT_FOUND" || code === "RUN_NOT_FOUND") return { name: "NOT_FOUND", context: {} };
+		if (code === "TASK_BUSY" || code === "TASK_DELETING") return { name: "BUSY", context: {} };
+		if (code === "INVALID_SCHEDULE") return { name: "INVALID_PARAMS", context: {} };
+		if (code === "STORE_CORRUPT") return { name: "SCHEDULE_STORE_CORRUPT", context: {} };
 		if (code === "SESSION_IN_USE" || ("name" in error && error.name === "SessionLeaseError")) {
 			return { name: "SESSION_IN_USE", context: {} };
 		}

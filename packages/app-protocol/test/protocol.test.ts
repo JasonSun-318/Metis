@@ -14,6 +14,7 @@ import {
 	MAX_NAME_UTF16_UNITS,
 	MAX_PATH_UTF8_BYTES,
 	MAX_PROMPT_UTF8_BYTES,
+	MAX_SCHEDULE_INSTRUCTION_UTF8_BYTES,
 	ProtocolValidationError,
 	parseRawEnvelope,
 	RPC_ERROR_CODES,
@@ -30,6 +31,8 @@ import {
 const fixturesDir = join(fileURLToPath(new URL(".", import.meta.url)), "fixtures");
 const SESSION_ID = "11111111-1111-4111-8111-111111111111";
 const EPOCH = "33333333-3333-4333-8333-333333333333";
+const TASK_ID = "66666666-6666-4666-8666-666666666666";
+const RUN_ID = "77777777-7777-4777-8777-777777777777";
 
 interface RequestFixture {
 	direction: "client" | "host";
@@ -90,16 +93,140 @@ function makeServerInteraction(interaction: Record<string, unknown>): Record<str
 	};
 }
 
+const scheduleTask = {
+	id: TASK_ID,
+	title: "生成日报",
+	instruction: "生成日报",
+	schedule: { kind: "daily", time: "09:00" },
+	timezone: "Asia/Shanghai",
+	target: { kind: "project", cwd: "/tmp/arcmind-project" },
+	status: "active",
+	createdAt: "2026-07-26T00:00:00.000Z",
+	updatedAt: "2026-07-26T00:00:00.000Z",
+	nextRunAt: "2026-07-27T01:00:00.000Z",
+	unreadCount: 0,
+} as const;
+
+const scheduleRun = {
+	id: RUN_ID,
+	taskId: TASK_ID,
+	trigger: "manual",
+	status: "succeeded",
+	scheduledFor: "2026-07-26T00:00:00.000Z",
+	createdAt: "2026-07-26T00:00:00.000Z",
+	completedAt: "2026-07-26T00:01:00.000Z",
+	sessionId: "scheduled-session",
+	resultPreview: "日报已生成",
+	unread: true,
+	snapshot: {
+		instruction: "生成日报",
+		schedule: { kind: "daily", time: "09:00" },
+		timezone: "Asia/Shanghai",
+		target: { kind: "project", cwd: "/tmp/arcmind-project" },
+	},
+} as const;
+
+const scheduleCases = [
+	[
+		"schedule/create",
+		{
+			requestId: TASK_ID,
+			sourceSessionId: SESSION_ID,
+			instruction: "生成日报",
+			schedule: { kind: "daily", time: "09:00" },
+		},
+		{ task: scheduleTask },
+	],
+	[
+		"schedule/list",
+		{ afterTaskId: null, limit: 20, unreadOnly: false },
+		{ tasks: [scheduleTask], nextAfterTaskId: null, unreadCount: 0 },
+	],
+	["schedule/get", { taskId: TASK_ID }, { task: scheduleTask }],
+	[
+		"schedule/update",
+		{ requestId: "88888888-8888-4888-8888-888888888888", taskId: TASK_ID, instruction: "生成项目日报" },
+		{ task: scheduleTask },
+	],
+	["schedule/pause", { requestId: "99999999-9999-4999-8999-999999999999", taskId: TASK_ID }, { task: scheduleTask }],
+	["schedule/resume", { requestId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", taskId: TASK_ID }, { task: scheduleTask }],
+	[
+		"schedule/delete",
+		{ requestId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", taskId: TASK_ID },
+		{ taskId: TASK_ID, deleted: true },
+	],
+	["schedule/run-now", { requestId: RUN_ID, taskId: TASK_ID }, { run: scheduleRun }],
+	[
+		"schedule/run/list",
+		{ taskId: TASK_ID, beforeRunId: null, limit: 20 },
+		{ runs: [scheduleRun], nextBeforeRunId: null },
+	],
+	["schedule/run/get", { taskId: TASK_ID, runId: RUN_ID }, { run: scheduleRun }],
+	[
+		"schedule/run/mark-read",
+		{ requestId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc", taskId: TASK_ID, runId: RUN_ID },
+		{ run: { ...scheduleRun, unread: false }, unreadCount: 0 },
+	],
+	["schedule/subscribe", {}, { snapshot: { tasks: [scheduleTask], unreadCount: 0, cursor: 53 } }],
+	["schedule/unsubscribe", {}, { unsubscribed: true }],
+] as const;
+
+const scheduleEvents = [
+	{ type: "schedule/updated", task: scheduleTask },
+	{ type: "schedule/deleted", taskId: TASK_ID },
+	{
+		type: "schedule/runCompleted",
+		taskId: TASK_ID,
+		runId: RUN_ID,
+		unread: true,
+		createdAt: scheduleRun.createdAt,
+		sessionId: scheduleRun.sessionId,
+		resultPreview: scheduleRun.resultPreview,
+	},
+	{
+		type: "schedule/runFailed",
+		taskId: TASK_ID,
+		runId: RUN_ID,
+		unread: true,
+		createdAt: scheduleRun.createdAt,
+		error: { code: "EXECUTION_FAILED", message: "failed" },
+	},
+	{
+		type: "schedule/runMissed",
+		taskId: TASK_ID,
+		runId: RUN_ID,
+		unread: true,
+		createdAt: scheduleRun.createdAt,
+		reason: "offline",
+		skippedCount: 2,
+	},
+	{
+		type: "schedule/runSkipped",
+		taskId: TASK_ID,
+		runId: RUN_ID,
+		unread: true,
+		createdAt: scheduleRun.createdAt,
+		reason: "overlap",
+	},
+	{ type: "schedule/refreshed" },
+] as const;
+
 describe("golden protocol fixtures", () => {
 	it("covers and validates every client and host request method", () => {
 		const clientMethods = requests.filter((entry) => entry.direction === "client").map((entry) => entry.method);
 		const hostMethods = requests.filter((entry) => entry.direction === "host").map((entry) => entry.method);
-		expect(new Set(clientMethods)).toEqual(new Set(Object.keys(ClientRequestMethods)));
+		expect(new Set([...clientMethods, ...scheduleCases.map(([method]) => method)])).toEqual(
+			new Set(Object.keys(ClientRequestMethods)),
+		);
 		expect(new Set(hostMethods)).toEqual(new Set(Object.keys(HostRequestMethods)));
 		for (const entry of requests) {
 			const validated =
 				entry.direction === "client" ? validateClientRequest(entry.envelope) : validateHostRequest(entry.envelope);
 			expect(validated).toEqual(entry.envelope);
+		}
+		for (const [method, params] of scheduleCases) {
+			const request = makeClientRequest(method, params);
+			expect(validateClientRequest(request)).toEqual(request);
 		}
 	});
 
@@ -108,6 +235,11 @@ describe("golden protocol fixtures", () => {
 		for (const entry of responses) {
 			const request = requestFor(entry.direction, entry.method);
 			expect(validateResponseFor(entry.direction, request.envelope, entry.envelope)).toEqual(entry.envelope);
+		}
+		for (const [method, params, result] of scheduleCases) {
+			const request = makeClientRequest(method, params);
+			const response = { jsonrpc: "2.0", id: "limit-test", result };
+			expect(validateResponseFor("client", request, response)).toEqual(response);
 		}
 	});
 
@@ -130,9 +262,18 @@ describe("golden protocol fixtures", () => {
 			new Set(Object.keys(ServerNotificationMethods)),
 		);
 		for (const entry of notifications) expect(validateServerNotification(entry.envelope)).toEqual(entry.envelope);
-		const eventTypes = (notifications[0]!.envelope.params as { events: Array<{ type: string }> }).events.map(
-			(event) => event.type,
-		);
+		const scheduleNotification = {
+			jsonrpc: "2.0",
+			method: "connection/events",
+			params: { serverEpoch: EPOCH, fromCursor: 100, toCursor: 106, events: scheduleEvents },
+		};
+		expect(validateServerNotification(scheduleNotification)).toEqual(scheduleNotification);
+		const eventTypes = [
+			...(notifications[0]!.envelope.params as { events: Array<{ type: string }> }).events.map(
+				(event) => event.type,
+			),
+			...scheduleEvents.map((event) => event.type),
+		];
 		expect(new Set(eventTypes)).toEqual(
 			new Set([
 				"session/updated",
@@ -144,8 +285,16 @@ describe("golden protocol fixtures", () => {
 				"item/completed",
 				"interaction/notify",
 				"session/thinkingSelectionChanged",
+				"session/modelChanged",
 				"subagent/updated",
 				"server/state",
+				"schedule/updated",
+				"schedule/deleted",
+				"schedule/runCompleted",
+				"schedule/runFailed",
+				"schedule/runMissed",
+				"schedule/runSkipped",
+				"schedule/refreshed",
 			]),
 		);
 	});
@@ -191,6 +340,29 @@ describe("golden protocol fixtures", () => {
 });
 
 describe("exact limits", () => {
+	it("keeps scheduled-task execution fields host-owned and bounds instructions", () => {
+		const valid = makeClientRequest("schedule/create", {
+			requestId: TASK_ID,
+			instruction: "a".repeat(MAX_SCHEDULE_INSTRUCTION_UTF8_BYTES),
+			schedule: { kind: "once", date: "2026-08-03", time: "09:30" },
+		});
+		expect(() => validateClientRequest(valid)).not.toThrow();
+		(valid.params as Record<string, unknown>).cwd = "/forbidden";
+		expect(() => validateClientRequest(valid)).toThrow(ProtocolValidationError);
+		delete (valid.params as Record<string, unknown>).cwd;
+		(valid.params as Record<string, unknown>).instruction = `${"a".repeat(MAX_SCHEDULE_INSTRUCTION_UTF8_BYTES)}a`;
+		expect(() => validateClientRequest(valid)).toThrow(ProtocolValidationError);
+
+		const [method, params, result] = scheduleCases.find(([name]) => name === "schedule/run/get")!;
+		const response = { jsonrpc: "2.0", id: "limit-test", result: structuredClone(result) } as {
+			result: { run: Record<string, unknown> };
+		};
+		response.result.run.sessionFile = "/internal/session.jsonl";
+		expect(() => validateResponseFor("client", makeClientRequest(method, params), response)).toThrow(
+			ProtocolValidationError,
+		);
+	});
+
 	it("enforces names in UTF-16 code units, including emoji and combining marks", () => {
 		const base = structuredClone(requestFor("client", "initialize").envelope) as {
 			params: { client: { name: string } };

@@ -71,6 +71,15 @@ class FakeRuntime implements OpenedSessionRuntime {
 		};
 	}
 
+	async setModel(input: ClientParams<"session/setModel">): Promise<ClientResult<"session/setModel">> {
+		return {
+			model: { provider: input.provider, modelId: input.modelId },
+			thinkingSelection: "high",
+			actualThinkingLevel: "high",
+			availableThinkingSelections: ["off", "high", "max"],
+		};
+	}
+
 	async snapshot(serverEpoch: string, currentCursor: () => number): Promise<SessionSnapshot> {
 		return {
 			session: this.getSummary(),
