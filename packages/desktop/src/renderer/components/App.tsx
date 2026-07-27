@@ -7,6 +7,7 @@ import type { AppStore, AppStoreSnapshot } from "../store/app-store.ts";
 import { ChatHome } from "./ChatHome.tsx";
 import { Composer, type ComposerSubmission } from "./Composer.tsx";
 import { InteractionHost } from "./InteractionHost.tsx";
+import { ModelSelector } from "./ModelSelector.tsx";
 import { RecoveryBanner } from "./RecoveryBanner.tsx";
 import { type SidebarDestination, SessionSidebar } from "./SessionSidebar.tsx";
 import { ThinkingSelector } from "./ThinkingSelector.tsx";
@@ -396,6 +397,7 @@ export function App({ api, store }: AppProps) {
 			await api.interruptTurn({ sessionId: visibleActiveSession.sessionId, requestId: crypto.randomUUID() });
 		} catch (cause) {
 			reportError(cause);
+			throw cause;
 		}
 	};
 
@@ -418,9 +420,26 @@ export function App({ api, store }: AppProps) {
 
 	const changeThinking = async (selection: AppStoreSnapshot["thinkingSelection"]) => {
 		if (!visibleActiveSession) return;
+		const sessionId = visibleActiveSession.sessionId;
+		store.setOptimisticThinkingSelection(selection);
+		try {
+			await api.setThinkingSelection({ sessionId, requestId: crypto.randomUUID(), selection });
+		} catch (cause) {
+			if (store.getSnapshot().activeSessionId === sessionId) await requestResnapshot(sessionId);
+			reportError(cause);
+		}
+	};
+
+	const changeModel = async (model: AppStoreSnapshot["availableModels"][number]) => {
+		if (!visibleActiveSession) return;
 		setBusy(true);
 		try {
-			await api.setThinkingSelection({ sessionId: visibleActiveSession.sessionId, requestId: crypto.randomUUID(), selection });
+			await api.setModel({
+				sessionId: visibleActiveSession.sessionId,
+				requestId: crypto.randomUUID(),
+				provider: model.provider,
+				modelId: model.modelId,
+			});
 		} catch (cause) {
 			reportError(cause);
 		} finally {
@@ -428,12 +447,20 @@ export function App({ api, store }: AppProps) {
 		}
 	};
 
+	const modelControl = visibleActiveSession ? (
+		<ModelSelector
+			available={state.availableModels}
+			disabled={busy || !serverReady}
+			onChange={(model) => void changeModel(model)}
+			value={state.model}
+		/>
+	) : undefined;
+
 	const thinkingControl = visibleActiveSession ? (
 		<ThinkingSelector
 			actualThinkingLevel={state.actualThinkingLevel}
 			available={state.availableThinkingSelections}
 			disabled={busy || !serverReady}
-			model={state.model}
 			onChange={(selection) => void changeThinking(selection)}
 			value={state.thinkingSelection}
 		/>
@@ -516,7 +543,7 @@ export function App({ api, store }: AppProps) {
 						<div className="conversation-column">
 							<RecoveryBanner session={visibleActiveSession} />
 								<Transcript appearance={visibleActiveSession.mode} hasOlder={state.nextBeforeItemId !== null} itemIds={state.itemOrder} itemsById={state.itemsById} loadingOlder={loadingOlder} onLoadOlder={loadOlder} />
-							<Composer appearance={visibleActiveSession.mode} disabled={!serverReady || state.syncStatus !== "ready"} key={visibleActiveSession.sessionId} onInterrupt={interrupt} onManageSkills={() => setDestination("skills")} onPickFiles={pickAttachmentFiles} onSubmit={submit} running={running} skills={skills} thinkingControl={thinkingControl} placeholder="Write a message…" />
+							<Composer appearance={visibleActiveSession.mode} disabled={!serverReady || state.syncStatus !== "ready"} key={visibleActiveSession.sessionId} modelControl={modelControl} onInterrupt={interrupt} onManageSkills={() => setDestination("skills")} onPickFiles={pickAttachmentFiles} onSubmit={submit} running={running} skills={skills} thinkingControl={thinkingControl} placeholder="Write a message…" />
 						</div>
 					</div>
 				) : (

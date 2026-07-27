@@ -43,6 +43,7 @@ export interface AppStoreSnapshot {
 	readonly actualThinkingLevel: SessionSnapshot["actualThinkingLevel"];
 	readonly availableThinkingSelections: SessionSnapshot["availableThinkingSelections"];
 	readonly model: SessionSnapshot["model"];
+	readonly availableModels: NonNullable<SessionSnapshot["availableModels"]>;
 	readonly subagents: SessionSnapshot["subagents"];
 	readonly supervisor: SupervisorView;
 }
@@ -65,6 +66,12 @@ export class AppStore {
 	};
 
 	getSnapshot = (): AppStoreSnapshot => this.snapshot;
+
+	setOptimisticThinkingSelection(selection: SessionSnapshot["thinkingSelection"]): void {
+		if (this.state.thinkingSelection === selection) return;
+		this.state.thinkingSelection = selection;
+		this.commit();
+	}
 
 	setSessions(result: ClientResult<"session/list">): void {
 		replaceSessionList(this.state, result.sessions);
@@ -152,6 +159,7 @@ export class AppStore {
 			actualThinkingLevel: this.state.actualThinkingLevel,
 			availableThinkingSelections: this.state.availableThinkingSelections,
 			model: this.state.model,
+			availableModels: this.state.availableModels,
 			subagents: this.state.subagents,
 			supervisor: this.supervisor,
 		};

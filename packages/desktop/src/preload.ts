@@ -39,6 +39,8 @@ const api = {
 		invoke(DESKTOP_IPC_CHANNELS.setThinkingSelection, "session/setThinkingSelection", input) as ReturnType<
 			ArcMindDesktopApi["setThinkingSelection"]
 		>,
+	setModel: (input: ClientParams<"session/setModel">) =>
+		invoke(DESKTOP_IPC_CHANNELS.setModel, "session/setModel", input) as ReturnType<ArcMindDesktopApi["setModel"]>,
 	startTurn: (input: ClientParams<"turn/start">) =>
 		invoke(DESKTOP_IPC_CHANNELS.startTurn, "turn/start", input) as ReturnType<ArcMindDesktopApi["startTurn"]>,
 	steerTurn: (input: ClientParams<"turn/steer">) =>

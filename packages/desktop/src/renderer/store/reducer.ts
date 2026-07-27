@@ -33,6 +33,7 @@ export interface MutableProjectionState {
 	actualThinkingLevel: Exclude<ThinkingSelectionView, "ultra">;
 	availableThinkingSelections: ThinkingSelectionView[];
 	model: SessionSnapshot["model"];
+	availableModels: NonNullable<SessionSnapshot["availableModels"]>;
 	subagents: SubagentSummaryView[];
 }
 
@@ -57,6 +58,7 @@ export function createProjectionState(): MutableProjectionState {
 		actualThinkingLevel: "off",
 		availableThinkingSelections: ["off"],
 		model: undefined,
+		availableModels: [],
 		subagents: [],
 	};
 }
@@ -113,6 +115,7 @@ export function replaceProjectionSnapshot(state: MutableProjectionState, snapsho
 	state.actualThinkingLevel = snapshot.actualThinkingLevel;
 	state.availableThinkingSelections = snapshot.availableThinkingSelections;
 	state.model = snapshot.model;
+	state.availableModels = snapshot.availableModels ?? [];
 	state.subagents = snapshot.subagents;
 }
 
@@ -150,6 +153,7 @@ function eventSessionId(event: DomainEvent): string | undefined {
 			return event.sessionId;
 		case "session/thinkingSelectionChanged":
 		case "subagent/updated":
+		case "session/modelChanged":
 			return event.sessionId;
 		case "interaction/notify":
 			return event.sessionId;
@@ -208,6 +212,12 @@ function applyEvent(state: MutableProjectionState, event: DomainEvent): void {
 			state.sessionsById.set(event.session.sessionId, structuredClone(event.session));
 			return;
 		case "session/thinkingSelectionChanged":
+			state.thinkingSelection = event.thinkingSelection;
+			state.actualThinkingLevel = event.actualThinkingLevel;
+			state.availableThinkingSelections = event.availableThinkingSelections;
+			return;
+		case "session/modelChanged":
+			state.model = event.model;
 			state.thinkingSelection = event.thinkingSelection;
 			state.actualThinkingLevel = event.actualThinkingLevel;
 			state.availableThinkingSelections = event.availableThinkingSelections;

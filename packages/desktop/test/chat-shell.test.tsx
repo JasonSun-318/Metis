@@ -33,6 +33,10 @@ function snapshot(summary: SessionSummary): SessionSnapshot {
 	return {
 		session: summary,
 		model: { provider: "test-provider", modelId: "test-model" },
+		availableModels: [
+			{ provider: "test-provider", modelId: "test-model", name: "Test model" },
+			{ provider: "test-provider", modelId: "other-model", name: "Other model" },
+		],
 		turns: [],
 		recentItems: [],
 		nextBeforeItemId: null,
@@ -135,6 +139,7 @@ function createHarness(options: {
 		readItems: vi.fn().mockResolvedValue({ items: [], nextBeforeItemId: null }),
 		readSubagentItems: vi.fn().mockResolvedValue({ items: [], nextBeforeItemId: null }),
 		setThinkingSelection: vi.fn().mockResolvedValue({}),
+		setModel: vi.fn().mockResolvedValue({}),
 		respondToInteraction: vi.fn().mockResolvedValue(undefined),
 		retryServer: vi.fn().mockResolvedValue(undefined),
 		subscribe: vi.fn((listener) => {
@@ -347,6 +352,8 @@ describe("Chat desktop shell", () => {
 		const root = createRoot(container);
 		await act(async () => root.render(<App api={api} store={new AppStore()} />));
 		await flush();
+		expect(container.querySelector(".model-control")?.textContent).toBe("Test model");
+		expect(button(container, "Select effort, current Off")).not.toBeNull();
 
 		const add = () => container.querySelector<HTMLButtonElement>('[aria-label="Add to message"]')!;
 		await act(async () => add().click());
@@ -380,6 +387,51 @@ describe("Chat desktop shell", () => {
 		}));
 		expect(textarea.value).toBe("");
 		expect(container.querySelector(".composer-chips")).toBeNull();
+		await act(async () => root.unmount());
+	});
+
+	it("keeps an optimistic effort visible and resnapshots after a failed change", async () => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(null);
+		localStorage.setItem("arcmind.activeSessionId.code", "code-existing");
+		const { api } = createHarness();
+		const codeSnapshot = {
+			...snapshot(session("code-existing", "code", "/work/code-project", "Code project task")),
+			thinkingSelection: "high" as const,
+			actualThinkingLevel: "high" as const,
+			availableThinkingSelections: ["off", "low", "medium", "high", "ultra"] as const,
+		};
+		vi.mocked(api.openSession).mockResolvedValue(codeSnapshot);
+		let rejectChange!: (reason: Error) => void;
+		vi.mocked(api.setThinkingSelection).mockImplementation(() => new Promise((_resolve, reject) => {
+			rejectChange = reject;
+		}));
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<App api={api} store={new AppStore()} />));
+		await flush();
+		await act(async () => button(container, "Code").click());
+		await flush();
+
+		const trigger = button(container, "Select effort, current High");
+		await act(async () => trigger.click());
+		const range = container.querySelector<HTMLInputElement>('.thinking-control input[type="range"]')!;
+		await act(async () => {
+			range.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+			Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(range, "3.8");
+			range.dispatchEvent(new Event("input", { bubbles: true }));
+			range.dispatchEvent(new Event("pointerup", { bubbles: true }));
+			trigger.click();
+		});
+
+		expect(api.setThinkingSelection).toHaveBeenCalledWith(expect.objectContaining({ selection: "ultra" }));
+		expect(trigger.textContent).toContain("Ultra");
+		await act(async () => rejectChange(new Error("selection failed")));
+		await flush();
+		await flush();
+		expect(trigger.textContent).toContain("High");
+		expect(container.textContent).toContain("selection failed");
 		await act(async () => root.unmount());
 	});
 
@@ -765,7 +817,7 @@ describe("Chat desktop shell", () => {
 		expect(container.textContent).toContain("Code project task");
 		expect(container.textContent).not.toContain("Chat project task");
 		expect(api.openSession).toHaveBeenLastCalledWith({ sessionId: "code-existing" });
-		expect(container.textContent).toContain("test-model");
+		expect(container.textContent).toContain("Test model");
 		expect(container.querySelector('[aria-label="Add to message"]')).toBeNull();
 
 		await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Hide sessions sidebar"]')!.click());

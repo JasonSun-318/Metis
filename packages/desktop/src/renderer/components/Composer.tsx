@@ -18,6 +18,7 @@ interface ComposerProps {
 	readonly onManageSkills?: () => void;
 	readonly onPickFiles?: () => Promise<readonly DesktopAttachmentSelection[]>;
 	readonly appearance?: "chat" | "code";
+	readonly modelControl?: ReactNode;
 	readonly placeholder?: string;
 	readonly skills?: readonly SkillSummaryView[];
 	readonly thinkingControl?: ReactNode;
@@ -31,6 +32,7 @@ export function Composer({
 	onManageSkills,
 	onPickFiles,
 	appearance = "code",
+	modelControl,
 	placeholder,
 	skills = [],
 	thinkingControl,
@@ -121,6 +123,7 @@ export function Composer({
 						)}
 					</div>
 					<div className="composer-trailing">
+						{modelControl}
 						{thinkingControl}
 						{running && (
 							<button aria-label="Stop task" className="composer-icon-button button-secondary" disabled={disabled} onClick={() => void onInterrupt()} type="button">

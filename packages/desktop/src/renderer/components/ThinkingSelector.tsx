@@ -1,37 +1,334 @@
 import type { SessionSnapshot } from "@arcmind/app-protocol";
+import { CaretDown, Question } from "@phosphor-icons/react";
+import { useEffect, useRef, useState } from "react";
 
 interface ThinkingSelectorProps {
 	readonly actualThinkingLevel: SessionSnapshot["actualThinkingLevel"];
 	readonly available: SessionSnapshot["availableThinkingSelections"];
 	readonly disabled: boolean;
-	readonly model?: SessionSnapshot["model"];
 	readonly onChange: (selection: SessionSnapshot["thinkingSelection"]) => void;
 	readonly value: SessionSnapshot["thinkingSelection"];
 }
 
-export function ThinkingSelector({ actualThinkingLevel, available, disabled, model, onChange, value }: ThinkingSelectorProps) {
+const clamp = (value: number, minimum: number, maximum: number) => Math.min(maximum, Math.max(minimum, value));
+const mix = (from: number, to: number, amount: number) => from + (to - from) * amount;
+const smoothstep = (minimum: number, maximum: number, value: number) => {
+	const progress = clamp((value - minimum) / (maximum - minimum), 0, 1);
+	return progress * progress * (3 - 2 * progress);
+};
+const hash = (x: number, y: number, seed = 0) => Math.abs(Math.sin(x * 12.9898 + y * 78.233 + seed) * 43758.5453) % 1;
+
+const prefersReducedMotion = () => window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+
+function UltraEffortField() {
+	const canvasRef = useRef<HTMLCanvasElement>(null);
+
+	useEffect(() => {
+		const canvas = canvasRef.current;
+		const context = canvas?.getContext("2d");
+		if (!canvas || !context) return;
+		const reducedMotion = prefersReducedMotion();
+		let frame = 0;
+		let lastDrawnAt = 0;
+		const startedAt = performance.now();
+
+		const draw = (time: number) => {
+			const rect = canvas.getBoundingClientRect();
+			const ratio = Math.min(window.devicePixelRatio || 1, 2);
+			const width = Math.max(1, rect.width);
+			const height = Math.max(1, rect.height);
+			const pixelWidth = Math.round(width * ratio);
+			const pixelHeight = Math.round(height * ratio);
+			if (canvas.width !== pixelWidth || canvas.height !== pixelHeight) {
+				canvas.width = pixelWidth;
+				canvas.height = pixelHeight;
+			}
+			context.setTransform(ratio, 0, 0, ratio, 0, 0);
+			context.clearRect(0, 0, width, height);
+			const elapsed = reducedMotion ? 4000 : Math.max(0, time - startedAt);
+			const cell = width < 190 ? 3 : 4;
+			const gap = .8;
+			const columns = Math.ceil(width / cell);
+			const rows = Math.ceil(height / cell);
+			const reveal = reducedMotion ? 1 : smoothstep(0, 1, elapsed / 1000);
+			const frontier = 1 - reveal;
+			const flow = reducedMotion ? 1 : elapsed / 4000;
+
+			context.save();
+			context.beginPath();
+			context.roundRect(0, 0, width, height, 10);
+			context.clip();
+
+			for (let row = 0; row < rows; row += 1) {
+				for (let column = 0; column < columns; column += 1) {
+					const x = column * cell;
+					const y = row * cell;
+					const normalizedX = (x + cell / 2) / width;
+					const revealAlpha = smoothstep(frontier - .1, frontier + .07, normalizedX);
+					if (revealAlpha <= .002) continue;
+
+					const base = hash(column, row);
+					const phase = hash(column, row, 31.17);
+					const tempo = 500 + hash(column, row, 7.13) * 1500;
+					const cycleProgress = ((elapsed + phase * tempo) % tempo) / tempo;
+					const pulseCenter = .2 + hash(column, row, Math.floor(elapsed / tempo) * 13.11) * .55;
+					const pulseDistance = (cycleProgress - pulseCenter) / (.09 + hash(column, row, 5.37) * .08);
+					const pulse = Math.exp(-pulseDistance * pulseDistance * 1.45);
+					const wave = Math.pow(.5 + .5 * Math.cos((normalizedX + flow + row * .06 + base * .02) * Math.PI * 2), 5);
+					const brightness = Math.max(pulse * (.42 + wave * .58), wave * (.38 + base * .28));
+					const revealGlow = reveal < .995
+						? Math.exp(-((normalizedX - frontier) ** 2) / .012) * (1 - smoothstep(.7, 1, reveal))
+						: 0;
+					const highlight = clamp(Math.max(brightness, revealGlow * (.4 + base * .4)), 0, 1);
+					const purple = smoothstep(.1, .88, normalizedX);
+					const red = mix(78, 94 + base * 28, purple);
+					const green = mix(78, 70 + phase * 28, purple);
+					const blue = mix(76, 114 + base * 34, purple);
+					const peak = highlight > .68;
+					context.fillStyle = `rgb(${Math.round(mix(red, peak ? 226 : 181, highlight))} ${Math.round(mix(green, peak ? 214 : 163, highlight))} ${Math.round(mix(blue, peak ? 240 : 211, highlight))})`;
+					context.globalAlpha = revealAlpha * smoothstep(.04, .38, normalizedX) * (.7 + base * .2);
+					context.fillRect(x + gap / 2, y + gap / 2, cell - gap, cell - gap);
+				}
+			}
+
+			context.restore();
+			context.globalAlpha = 1;
+		};
+
+		const animate = (time: number) => {
+			if (time - lastDrawnAt >= 33) {
+				lastDrawnAt = time;
+				draw(time);
+			}
+			frame = requestAnimationFrame(animate);
+		};
+		if (reducedMotion) draw(startedAt + 4000);
+		else frame = requestAnimationFrame(animate);
+		return () => cancelAnimationFrame(frame);
+	}, []);
+
+	return <canvas aria-hidden="true" className="effort-ultra-field" ref={canvasRef} />;
+}
+
+export function ThinkingSelector({ actualThinkingLevel, available, disabled, onChange, value }: ThinkingSelectorProps) {
+	const currentIndex = Math.max(0, available.indexOf(value));
+	const [open, setOpen] = useState(false);
+	const [previewIndex, setPreviewIndex] = useState(currentIndex);
+	const [previewDirection, setPreviewDirection] = useState<"backward" | "forward">("forward");
+	const rootRef = useRef<HTMLDivElement>(null);
+	const triggerRef = useRef<HTMLButtonElement>(null);
+	const previewRef = useRef(currentIndex);
+	const draggingRef = useRef(false);
+	const samplesRef = useRef<Array<{ readonly time: number; readonly value: number }>>([]);
+	const springFrameRef = useRef(0);
+	const maximumIndex = Math.max(0, available.length - 1);
+	const label = value === "xhigh" ? "XHigh" : value.charAt(0).toUpperCase() + value.slice(1);
+	const previewSelection = available[Math.round(previewIndex)] ?? value;
+	const previewLabel = previewSelection === "xhigh"
+		? "XHigh"
+		: previewSelection.charAt(0).toUpperCase() + previewSelection.slice(1);
+	const fill = maximumIndex === 0 ? 0 : (previewIndex / maximumIndex) * 100;
+	const ultraActive = previewSelection === "ultra";
+	const commit = (index: number) => {
+		const selection = available[index];
+		if (selection && selection !== value) onChange(selection);
+	};
+
+	const close = (restoreFocus = false, commitPending = true) => {
+		const pendingIndex = commitPending && (draggingRef.current || springFrameRef.current !== 0)
+			? Math.round(previewRef.current)
+			: undefined;
+		cancelAnimationFrame(springFrameRef.current);
+		springFrameRef.current = 0;
+		draggingRef.current = false;
+		previewRef.current = currentIndex;
+		setPreviewIndex(currentIndex);
+		setOpen(false);
+		if (pendingIndex !== undefined) commit(pendingIndex);
+		if (restoreFocus) triggerRef.current?.focus();
+	};
+
+	useEffect(() => {
+		if (disabled) close(false, false);
+	}, [disabled]);
+
+	useEffect(() => {
+		if (draggingRef.current) return;
+		cancelAnimationFrame(springFrameRef.current);
+		springFrameRef.current = 0;
+		previewRef.current = currentIndex;
+		setPreviewIndex(currentIndex);
+	}, [available, currentIndex, value]);
+
+	useEffect(() => () => cancelAnimationFrame(springFrameRef.current), []);
+
+	useEffect(() => {
+		if (!open) return;
+		const onPointerDown = (event: PointerEvent) => {
+			if (!rootRef.current?.contains(event.target as Node)) close();
+		};
+		const onKeyDown = (event: KeyboardEvent) => {
+			if (event.key !== "Escape") return;
+			event.preventDefault();
+			close(true);
+		};
+		document.addEventListener("pointerdown", onPointerDown);
+		document.addEventListener("keydown", onKeyDown);
+		return () => {
+			document.removeEventListener("pointerdown", onPointerDown);
+			document.removeEventListener("keydown", onKeyDown);
+		};
+	}, [currentIndex, open]);
+
+	const updatePreview = (nextValue: number) => {
+		const next = clamp(nextValue, 0, maximumIndex);
+		const previousStop = Math.round(previewRef.current);
+		const nextStop = Math.round(next);
+		if (nextStop !== previousStop) setPreviewDirection(nextStop > previousStop ? "forward" : "backward");
+		previewRef.current = next;
+		setPreviewIndex(next);
+	};
+
+	const snapToNearest = () => {
+		const target = Math.round(previewRef.current);
+		const samples = samplesRef.current;
+		let velocity = 0;
+		if (samples.length > 1) {
+			const first = samples[0];
+			const last = samples.at(-1)!;
+			velocity = clamp((last.value - first.value) / Math.max((last.time - first.time) / 1000, .016), -8, 8);
+		}
+		if (Math.abs(target - previewRef.current) < .001 || prefersReducedMotion()) {
+			updatePreview(target);
+			commit(target);
+			return;
+		}
+		let position = previewRef.current;
+		let previousTime = performance.now();
+		const animate = (time: number) => {
+			const delta = Math.min((time - previousTime) / 1000, .032);
+			previousTime = time;
+			velocity += (-920 * (position - target) - 40 * velocity) * delta;
+			position = clamp(position + velocity * delta, 0, maximumIndex);
+			updatePreview(position);
+			if (Math.abs(position - target) < .001 && Math.abs(velocity) < .01) {
+				springFrameRef.current = 0;
+				updatePreview(target);
+				commit(target);
+				return;
+			}
+			springFrameRef.current = requestAnimationFrame(animate);
+		};
+		cancelAnimationFrame(springFrameRef.current);
+		springFrameRef.current = requestAnimationFrame(animate);
+	};
+
+	const applyMagnet = (rawValue: number) => {
+		const nearest = Math.round(rawValue);
+		const delta = rawValue - nearest;
+		const distance = Math.abs(delta);
+		if (distance < .001 || distance > .5) return rawValue;
+		const pull = 1 - distance / .5;
+		return rawValue - delta * (.68 + .42 * pull) * pull * pull;
+	};
+
 	return (
-		<label className={`thinking-control${value === "ultra" ? " thinking-ultra" : ""}`}>
-			<span>Thinking</span>
-			<select
+		<div className={`composer-selector thinking-control${(open ? ultraActive : value === "ultra") ? " thinking-ultra" : ""}`} ref={rootRef}>
+			<button
 				aria-describedby="thinking-selection-detail"
+				aria-expanded={open}
+				aria-haspopup="dialog"
+				aria-label={`Select effort, current ${label}`}
+				className="composer-selector-trigger"
 				disabled={disabled}
-				onChange={(event) => onChange(event.target.value as SessionSnapshot["thinkingSelection"])}
-				value={value}
+				onClick={() => open ? close() : setOpen(true)}
+				ref={triggerRef}
+				type="button"
 			>
-				{available.map((selection) => (
-					<option key={selection} value={selection}>
-						{model
-							? `${model.modelId}${selection === "off" ? "" : ` · ${selection}`}`
-							: selection === "ultra" ? "Ultra · Multi-agent" : selection}
-					</option>
-				))}
-			</select>
+				<span>{open ? previewLabel : label}</span>
+				<CaretDown aria-hidden="true" size={12} />
+			</button>
+			{open && (
+				<div aria-label="Effort" className="effort-popover" role="dialog">
+					<div className="effort-title">
+						<span>Effort <strong className={ultraActive ? "is-ultra" : undefined}><span className={`effort-label is-${previewDirection}`} key={previewSelection}>{previewLabel}</span></strong></span>
+						<span title="Higher effort can improve difficult answers but may take longer.">
+							<Question aria-hidden="true" size={16} />
+						</span>
+					</div>
+					<div className="effort-axis"><span>Faster</span><span>Smarter</span></div>
+					<div className={`effort-slider-shell${ultraActive ? " is-ultra" : ""}`}>
+						<span aria-hidden="true" className="effort-slider-fill" style={{ width: `calc(8px + (100% - 16px) * ${fill / 100})` }} />
+						{ultraActive && <UltraEffortField />}
+					<div aria-hidden="true" className="effort-ticks">
+							{available.map((selection) => <span className={selection === "ultra" ? "is-ultra" : undefined} key={selection} />)}
+						</div>
+						<input
+							aria-label="Effort"
+							aria-valuetext={previewLabel}
+							disabled={disabled || available.length < 2}
+							max={maximumIndex}
+							min={0}
+							onChange={(event) => {
+								const rawValue = Number(event.currentTarget.value);
+								const nextValue = draggingRef.current ? applyMagnet(rawValue) : rawValue;
+								updatePreview(nextValue);
+								if (draggingRef.current) {
+									const now = performance.now();
+									samplesRef.current = [...samplesRef.current, { time: now, value: nextValue }]
+										.filter((sample) => now - sample.time < 90)
+										.slice(-5);
+								}
+							}}
+							onKeyDown={(event) => {
+								const current = Math.round(previewRef.current);
+								const targets: Partial<Record<string, number>> = {
+									ArrowDown: current - 1,
+									ArrowLeft: current - 1,
+									ArrowRight: current + 1,
+									ArrowUp: current + 1,
+									End: maximumIndex,
+									Home: 0,
+									PageDown: current - 1,
+									PageUp: current + 1,
+								};
+								const target = targets[event.key];
+								if (target === undefined) return;
+								event.preventDefault();
+								cancelAnimationFrame(springFrameRef.current);
+								springFrameRef.current = 0;
+								const next = clamp(target, 0, maximumIndex);
+								updatePreview(next);
+								commit(next);
+							}}
+							onPointerCancel={() => {
+								draggingRef.current = false;
+								snapToNearest();
+							}}
+							onPointerDown={(event) => {
+								event.currentTarget.setPointerCapture?.(event.pointerId);
+								cancelAnimationFrame(springFrameRef.current);
+								springFrameRef.current = 0;
+								draggingRef.current = true;
+								samplesRef.current = [{ time: performance.now(), value: previewRef.current }];
+							}}
+							onPointerUp={() => {
+								if (!draggingRef.current) return;
+								draggingRef.current = false;
+								snapToNearest();
+							}}
+							step={0.001}
+							type="range"
+							value={previewIndex}
+						/>
+					</div>
+				</div>
+			)}
 			<span className="sr-only" id="thinking-selection-detail">
 				{value === "ultra"
 					? `Uses ${actualThinkingLevel}, multiple model calls, and subagent orchestration.`
 					: `Provider thinking level ${actualThinkingLevel}.`}
 			</span>
-		</label>
+		</div>
 	);
 }

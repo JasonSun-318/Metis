@@ -178,6 +178,9 @@ export class ClientBroker {
 		this.register(DESKTOP_IPC_CHANNELS.setThinkingSelection, 1, async (_event, [input]) =>
 			this.clientCall("session/setThinkingSelection", input),
 		);
+		this.register(DESKTOP_IPC_CHANNELS.setModel, 1, async (_event, [input]) =>
+			this.clientCall("session/setModel", input),
+		);
 		this.register(DESKTOP_IPC_CHANNELS.startTurn, 1, async (_event, [input]) => this.clientCall("turn/start", input));
 		this.register(DESKTOP_IPC_CHANNELS.steerTurn, 1, async (_event, [input]) => this.clientCall("turn/steer", input));
 		this.register(DESKTOP_IPC_CHANNELS.interruptTurn, 1, async (_event, [input]) =>

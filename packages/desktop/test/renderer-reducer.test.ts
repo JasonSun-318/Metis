@@ -41,6 +41,7 @@ function snapshot(serverEpoch = EPOCH_A, cursor = 0, recentItems: ItemView[] = [
 		thinkingSelection: "off",
 		actualThinkingLevel: "off",
 		availableThinkingSelections: ["off"],
+		availableModels: [{ provider: "test", modelId: "model-a", name: "Model A" }],
 		subagents: [],
 		serverEpoch,
 		cursor,
@@ -195,6 +196,30 @@ describe("renderer projection reducer", () => {
 
 		store.restoreSyncStatusAfterFailedOpen(previous);
 		expect(store.getSnapshot().syncStatus).toBe("ready");
+	});
+
+	it("projects model changes with the selected model's real effort levels", () => {
+		const store = new AppStore();
+		store.applySnapshot(snapshot());
+		expect(
+			store.applyBatch({
+				serverEpoch: EPOCH_A,
+				fromCursor: 1,
+				toCursor: 1,
+				events: [
+					{
+						type: "session/modelChanged",
+						sessionId: "session-1",
+						model: { provider: "test", modelId: "model-b" },
+						thinkingSelection: "max",
+						actualThinkingLevel: "max",
+						availableThinkingSelections: ["off", "low", "high", "max"],
+					},
+				],
+			}),
+		).toBe("applied");
+		expect(store.getSnapshot().model).toEqual({ provider: "test", modelId: "model-b" });
+		expect(store.getSnapshot().availableThinkingSelections).toEqual(["off", "low", "high", "max"]);
 	});
 
 	it("prepends a backward history page without duplicating existing items", () => {
