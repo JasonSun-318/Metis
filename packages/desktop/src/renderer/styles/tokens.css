@@ -1,11 +1,11 @@
 :root {
 	color-scheme: dark;
-	--app-bg: #1f201e;
+	--app-bg: #202020;
 	--bg: var(--app-bg);
 	--sidebar: #252525;
-	--panel: #2e2e2c;
-	--panel-raised: #323230;
-	--panel-hover: #373735;
+	--panel: #2e2e2e;
+	--panel-raised: #323232;
+	--panel-hover: #373737;
 	--panel-selected: #404040;
 	--hover: var(--panel-hover);
 	--border: rgb(255 255 255 / 9%);
@@ -27,6 +27,9 @@
 	--chat-body-size: clamp(14px, calc(9px + .47vw), 15px);
 	--chat-answer-size: clamp(15px, calc(10px + .47vw), 16px);
 	--chat-control-size: clamp(15px, calc(10px + .47vw), 16px);
+	--code-body-size: clamp(14px, calc(10px + .35vw), 15px);
+	--code-meta-size: clamp(13px, calc(9px + .32vw), 14px);
+	--code-mono-size: clamp(12px, calc(9px + .25vw), 13px);
 	--shadow: 0 22px 58px rgb(0 0 0 / 30%), 0 4px 14px rgb(0 0 0 / 16%);
 	--shadow-hover: 0 26px 68px rgb(0 0 0 / 36%), 0 6px 18px rgb(0 0 0 / 20%);
 	font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;

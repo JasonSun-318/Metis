@@ -1,7 +1,7 @@
-import { ImageSquare, TerminalWindow } from "@phosphor-icons/react";
-import type { AgentMode, ItemContentBlockView, ItemView } from "@arcmind/app-protocol";
+import type { AgentMode, ItemView } from "@arcmind/app-protocol";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useLayoutEffect, useMemo, useRef } from "react";
+import { CodeTranscriptTurn } from "./CodeTranscriptTurn.tsx";
 import { TranscriptTurn } from "./TranscriptTurn.tsx";
 
 interface TranscriptProps {
@@ -33,11 +33,9 @@ function transcriptRows(appearance: AgentMode, itemIds: readonly string[], items
 	for (const itemId of itemIds) {
 		const item = itemsById.get(itemId);
 		if (!item) continue;
-		if (appearance === "code") {
-			rows.push({ key: `${item.sessionId}:${item.itemId}`, itemIds: [item.itemId] });
-			continue;
-		}
-		const key = item.turnId ? `${item.sessionId}:${item.turnId}` : `${item.sessionId}:${item.itemId}`;
+		const key = item.turnId
+			? `${item.sessionId}:${appearance}:${item.turnId}`
+			: `${item.sessionId}:${appearance}:${item.itemId}`;
 		const existingIndex = byKey.get(key);
 		if (existingIndex === undefined) {
 			byKey.set(key, rows.length);
@@ -47,33 +45,6 @@ function transcriptRows(appearance: AgentMode, itemIds: readonly string[], items
 		}
 	}
 	return rows;
-}
-
-function ContentBlock({ block }: { readonly block: ItemContentBlockView }) {
-	switch (block.type) {
-		case "text":
-			return <p>{block.text}</p>;
-		case "image":
-			return <p className="transcript-attachment"><ImageSquare aria-hidden="true" size={18} /> Image · {block.image.mediaType}</p>;
-		case "tool_call":
-			return (
-				<details className="tool-block" open={block.state === "running"}>
-					<summary><TerminalWindow aria-hidden="true" size={17} /> {block.name}</summary>
-					{block.inputPreview && <pre>{block.inputPreview}</pre>}
-				</details>
-			);
-		case "tool_result":
-			return (
-				<details className={block.isError ? "tool-block tool-block-error" : "tool-block"}>
-					<summary><TerminalWindow aria-hidden="true" size={17} /> {block.name} result</summary>
-					<pre>{block.output}</pre>
-				</details>
-			);
-		case "notice":
-			return <p className={`notice notice-${block.level}`}>{block.text}</p>;
-		case "thinking":
-			return null;
-	}
 }
 
 export function Transcript({ appearance, hasOlder, itemIds, itemsById, loadingOlder, onLoadOlder, olderLabel = "Load older messages" }: TranscriptProps) {
@@ -89,9 +60,8 @@ export function Transcript({ appearance, hasOlder, itemIds, itemsById, loadingOl
 		overscan: 8,
 		initialRect: { width: 760, height: 640 },
 	});
-	virtualizer.shouldAdjustScrollPositionOnItemSizeChange = appearance === "chat"
-		? (item) => shouldAdjustTranscriptScroll(item.end, scrollRef.current?.scrollTop ?? 0)
-		: undefined;
+	virtualizer.shouldAdjustScrollPositionOnItemSizeChange = (item) =>
+		shouldAdjustTranscriptScroll(item.end, scrollRef.current?.scrollTop ?? 0);
 	const lastItemId = itemIds.at(-1);
 	const lastItem = lastItemId ? itemsById.get(lastItemId) : undefined;
 	useLayoutEffect(() => {
@@ -143,28 +113,18 @@ export function Transcript({ appearance, hasOlder, itemIds, itemsById, loadingOl
 							const item = itemsById.get(itemId);
 							return item ? [item] : [];
 						});
-						const item = items[0];
-						if (!item) return null;
+						if (items.length === 0) return null;
 						return (
 							<article
-								className={appearance === "chat" ? "transcript-turn" : `message message-${item.role}`}
+								className={appearance === "chat" ? "transcript-turn" : "code-transcript-turn"}
 								data-index={row.index}
-								data-transcript-item={appearance === "code" ? item.itemId : undefined}
-								data-transcript-turn={appearance === "chat" ? transcriptRow.key : undefined}
+								data-transcript-item={appearance === "code" ? transcriptRow.itemIds.at(-1) : undefined}
+								data-transcript-turn={transcriptRow.key}
 								key={row.key}
 								ref={virtualizer.measureElement}
 								style={{ transform: `translateY(${row.start}px)` }}
 							>
-								{appearance === "chat" ? (
-									<TranscriptTurn items={items} />
-								) : (
-									<>
-										{item.role === "tool" && <header>Tool</header>}
-										{item.content.map((block, index) => (
-											<ContentBlock block={block} key={`${block.type}-${index}`} />
-										))}
-									</>
-								)}
+								{appearance === "chat" ? <TranscriptTurn items={items} /> : <CodeTranscriptTurn items={items} />}
 							</article>
 						);
 					})}

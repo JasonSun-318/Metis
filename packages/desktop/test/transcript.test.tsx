@@ -287,7 +287,7 @@ describe("Transcript", () => {
 		await act(async () => root.unmount());
 	});
 
-	it("keeps Code mode on the existing raw-item transcript", async () => {
+	it("groups a Code turn and renders a compact tool execution disclosure", async () => {
 		const container = document.createElement("div");
 		document.body.append(container);
 		const root = createRoot(container);
@@ -296,8 +296,128 @@ describe("Transcript", () => {
 			<Transcript appearance="code" hasOlder={false} itemIds={turnItems.map((entry) => entry.itemId)} itemsById={itemsById} loadingOlder={false} onLoadOlder={async () => undefined} />,
 		));
 		expect(container.querySelector(".execution-chain")).toBeNull();
-		expect(container.querySelectorAll("[data-transcript-item]")).toHaveLength(turnItems.length);
-		expect(container.querySelectorAll(".tool-block")).toHaveLength(4);
+		expect(container.querySelectorAll("[data-transcript-turn]")).toHaveLength(1);
+		expect(container.querySelector(".code-turn-user")?.textContent).toContain("看看桌面有什么");
+		expect(container.querySelector(".code-execution > summary")?.textContent).toContain("Ran a command, used a tool");
+		expect(container.querySelector(".code-turn-answer")?.textContent).toContain("桌面上有 file.txt");
+		expect(container.textContent).not.toContain(LONG_THINKING);
+
+		const execution = container.querySelector<HTMLDetailsElement>(".code-execution")!;
+		expect(execution.open).toBe(false);
+		expect(execution.querySelector(".code-execution-card")).toBeNull();
+		await act(async () => execution.querySelector(":scope > summary")!.click());
+		expect(execution.open).toBe(true);
+		const command = execution.querySelector<HTMLDetailsElement>(".code-command-shell")!;
+		expect(command.open).toBe(true);
+		expect(command.textContent).toContain("ls -la /Users/ent/Desktop");
+		expect(command.textContent).toContain("file.txt");
+		await act(async () => root.unmount());
+	});
+
+	it("groups consecutive Code tools in the current turn until public assistant text appears", async () => {
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		const withCodeTurn = (entry: ItemView): ItemView => ({ ...entry, turnId: "code-turn" });
+		const codeItems = [
+			withCodeTurn(item("code-user", "user", [{ type: "text", text: "重试并检查工具" }])),
+			withCodeTurn(item("code-tool-1", "assistant", [
+				{ type: "tool_call", toolCallId: "tool-1", name: "read", state: "completed" },
+			])),
+			withCodeTurn(item("code-result-1", "tool", [
+				{ type: "tool_result", toolCallId: "tool-1", name: "read", isError: false, output: "one" },
+			])),
+			withCodeTurn(item("code-tool-2", "assistant", [
+				{ type: "tool_call", toolCallId: "tool-2", name: "grep", state: "completed" },
+			])),
+			withCodeTurn(item("code-result-2", "tool", [
+				{ type: "tool_result", toolCallId: "tool-2", name: "grep", isError: false, output: "two" },
+			])),
+			withCodeTurn(item("code-tool-3", "assistant", [
+				{ type: "tool_call", toolCallId: "tool-3", name: "web_fetch", state: "completed" },
+			])),
+			withCodeTurn(item("code-result-3", "tool", [
+				{ type: "tool_result", toolCallId: "tool-3", name: "web_fetch", isError: false, output: "three" },
+			])),
+		];
+		const itemsById = new Map(codeItems.map((entry) => [entry.itemId, entry]));
+
+		await act(async () => root.render(
+			<Transcript appearance="code" hasOlder={false} itemIds={codeItems.map((entry) => entry.itemId)} itemsById={itemsById} loadingOlder={false} onLoadOlder={async () => undefined} />,
+		));
+
+		expect(container.querySelectorAll(".code-execution")).toHaveLength(1);
+		expect(container.querySelector(".code-execution > summary")?.textContent).toContain("Used 3 tools");
+
+		const separatedItems = [
+			...codeItems.slice(0, 5),
+			withCodeTurn(item("code-public-text", "assistant", [{ type: "text", text: "前两个工具完成，继续检查。" }])),
+			...codeItems.slice(5),
+		];
+		const separatedById = new Map(separatedItems.map((entry) => [entry.itemId, entry]));
+		await act(async () => root.render(
+			<Transcript appearance="code" hasOlder={false} itemIds={separatedItems.map((entry) => entry.itemId)} itemsById={separatedById} loadingOlder={false} onLoadOlder={async () => undefined} />,
+		));
+		expect(container.querySelectorAll(".code-execution")).toHaveLength(2);
+		expect(container.textContent).toContain("前两个工具完成，继续检查。");
+		await act(async () => root.unmount());
+	});
+
+	it("keeps Code disclosure state across streaming updates and never invents tool output", async () => {
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		const running = item("assistant-code-running", "assistant", [
+			{ type: "tool_call", toolCallId: "code-running", name: "bash", state: "running", inputPreview: "pwd" },
+		], "streaming");
+		const itemIds = [turnItems[0]!.itemId, running.itemId];
+		const itemsById = new Map([turnItems[0]!, running].map((entry) => [entry.itemId, entry]));
+
+		await act(async () => root.render(
+			<Transcript appearance="code" hasOlder={false} itemIds={itemIds} itemsById={itemsById} loadingOlder={false} onLoadOlder={async () => undefined} />,
+		));
+		const execution = container.querySelector<HTMLDetailsElement>(".code-execution")!;
+		expect(execution.open).toBe(true);
+		expect(execution.textContent).toContain("Running a command");
+		expect(execution.querySelector(".code-command-output")).toBeNull();
+
+		itemsById.set(running.itemId, {
+			...running,
+			content: [{ type: "tool_call", toolCallId: "code-running", name: "bash", state: "running", inputPreview: "pwd && whoami" }],
+		});
+		await act(async () => root.render(
+			<Transcript appearance="code" hasOlder={false} itemIds={itemIds} itemsById={itemsById} loadingOlder={false} onLoadOlder={async () => undefined} />,
+		));
+		expect(container.querySelectorAll("[data-transcript-turn]")).toHaveLength(1);
+		expect(container.querySelector<HTMLDetailsElement>(".code-execution")!.open).toBe(true);
+		expect(container.textContent).toContain("pwd && whoami");
+		await act(async () => root.unmount());
+	});
+
+	it("renders Code errors and completed Markdown tables without exposing thinking", async () => {
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		const codeItems = [
+			item("code-error-user", "user", [{ type: "text", text: "Count files" }]),
+			item("code-error-call", "assistant", [
+				{ type: "thinking", text: LONG_THINKING },
+				{ type: "tool_call", toolCallId: "code-error", name: "bash", state: "completed", inputPreview: "find data" },
+			]),
+			item("code-error-result", "tool", [
+				{ type: "tool_result", toolCallId: "code-error", name: "bash", isError: true, output: "Permission denied" },
+			]),
+			item("code-error-final", "assistant", [{ type: "text", text: "| Type | Count |\n| --- | ---: |\n| video | 10 |" }]),
+		];
+		const itemsById = new Map(codeItems.map((entry) => [entry.itemId, entry]));
+		await act(async () => root.render(
+			<Transcript appearance="code" hasOlder={false} itemIds={codeItems.map((entry) => entry.itemId)} itemsById={itemsById} loadingOlder={false} onLoadOlder={async () => undefined} />,
+		));
+		const execution = container.querySelector<HTMLDetailsElement>(".code-execution")!;
+		await act(async () => execution.querySelector(":scope > summary")!.click());
+		expect(container.querySelector(".code-command-output-error")?.textContent).toContain("Permission denied");
+		expect(container.querySelector(".code-turn-answer table")?.textContent).toContain("video");
+		expect(container.textContent).not.toContain(LONG_THINKING);
 		await act(async () => root.unmount());
 	});
 });
