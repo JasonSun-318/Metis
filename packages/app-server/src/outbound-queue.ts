@@ -151,7 +151,6 @@ export class OutboundQueue {
 		if (!Number.isSafeInteger(cursor) || cursor < 1 || cursor <= this.lastObservedCursor) {
 			throw new TypeError("Outbound cursors must be positive and strictly increasing");
 		}
-		this.lastObservedCursor = cursor;
 
 		const incoming: QueuedEvent = {
 			cursor,
@@ -161,7 +160,14 @@ export class OutboundQueue {
 			...(hold === undefined ? {} : { hold }),
 			...(event.type === "item/delta" ? { deltaParts: [{ cursor, text: event.delta.text }] } : {}),
 		};
+		const single = notification(this.serverEpoch, [incoming]);
+		if (envelopeBytes(single) > this.maxEnvelopeBytes) {
+			this.overload();
+			return false;
+		}
+
 		let previous: QueuedEvent | undefined;
+		let merged: QueuedEvent | undefined;
 		const last = this.records.at(-1);
 		if (last && canCoalesce(last, incoming)) {
 			previous = {
@@ -171,39 +177,34 @@ export class OutboundQueue {
 			};
 			const prior = last.event as Extract<DomainEvent, { type: "item/delta" }>;
 			const next = incoming.event as Extract<DomainEvent, { type: "item/delta" }>;
-			last.cursor = cursor;
-			last.event = { ...prior, delta: { type: "text", text: prior.delta.text + next.delta.text } };
-			last.deltaParts = [
-				...(last.deltaParts ?? [{ cursor: previous.cursor, text: prior.delta.text }]),
-				{
-					cursor,
-					text: next.delta.text,
-				},
-			];
-			last.bytes = eventBytes(last.event);
-			this.unacknowledgedBytes += last.bytes - previous.bytes;
-			try {
-				const single = notification(this.serverEpoch, [last]);
-				if (envelopeBytes(single) > this.maxEnvelopeBytes) throw new Error("envelope too large");
-			} catch {
-				const mergedBytes = last.bytes;
-				last.cursor = previous.cursor;
-				last.event = previous.event;
-				last.bytes = previous.bytes;
-				last.deltaParts = previous.deltaParts;
-				this.unacknowledgedBytes -= mergedBytes - previous.bytes;
+			const mergedEvent: DomainEvent = {
+				...prior,
+				delta: { type: "text", text: prior.delta.text + next.delta.text },
+			};
+			merged = {
+				...last,
+				cursor,
+				event: mergedEvent,
+				bytes: eventBytes(mergedEvent),
+				deltaParts: [
+					...(last.deltaParts ?? [{ cursor: previous.cursor, text: prior.delta.text }]),
+					{ cursor, text: next.delta.text },
+				],
+			};
+			if (envelopeBytes(notification(this.serverEpoch, [merged])) > this.maxEnvelopeBytes) {
 				previous = undefined;
+				merged = undefined;
 			}
 		}
 
-		if (!previous) {
-			try {
-				const single = notification(this.serverEpoch, [incoming]);
-				if (envelopeBytes(single) > this.maxEnvelopeBytes) throw new Error("envelope too large");
-			} catch {
-				this.overload();
-				return false;
-			}
+		this.lastObservedCursor = cursor;
+		if (previous && merged && last) {
+			last.cursor = merged.cursor;
+			last.event = merged.event;
+			last.bytes = merged.bytes;
+			last.deltaParts = merged.deltaParts;
+			this.unacknowledgedBytes += merged.bytes - previous.bytes;
+		} else {
 			this.records.push(incoming);
 			this.unacknowledgedBytes += incoming.bytes;
 		}

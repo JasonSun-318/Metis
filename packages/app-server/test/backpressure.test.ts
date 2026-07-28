@@ -1,4 +1,9 @@
-import type { DomainEvent, ItemView, ServerRpcNotification } from "@arcmind/app-protocol";
+import {
+	type DomainEvent,
+	type ItemView,
+	ProtocolValidationError,
+	type ServerRpcNotification,
+} from "@arcmind/app-protocol";
 import { describe, expect, it, vi } from "vitest";
 import { type OutboundEnvelope, OutboundQueue } from "../src/outbound-queue.ts";
 
@@ -32,6 +37,18 @@ function notifications(messages: readonly OutboundEnvelope[]): ServerRpcNotifica
 }
 
 describe("OutboundQueue backpressure", () => {
+	it("does not misclassify an invalid internal event as connection overload", () => {
+		const queue = new OutboundQueue({ serverEpoch: EPOCH });
+		const invalid = {
+			type: "subagent/updated",
+			subagent: { agentId: "agent-invalid" },
+		} as unknown as DomainEvent;
+
+		expect(() => queue.enqueue(1, invalid)).toThrow(ProtocolValidationError);
+		expect(queue.getStats()).toMatchObject({ unacknowledgedEvents: 0, overloaded: false });
+		expect(queue.enqueue(1, { type: "server/state", state: "ready" })).toBe(true);
+	});
+
 	it("coalesces only adjacent unsent deltas for the same item", async () => {
 		const queue = new OutboundQueue({ serverEpoch: EPOCH });
 		const sent: OutboundEnvelope[] = [];
