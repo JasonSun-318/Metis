@@ -10,6 +10,7 @@ interface SessionSidebarProps {
 	readonly busy: boolean;
 	readonly mode: AgentMode;
 	readonly destination: SidebarDestination;
+	readonly newTaskOpen: boolean;
 	readonly onModeChange: (mode: AgentMode) => void;
 	readonly onNewTask: () => void;
 	readonly onOpen: (sessionId: string) => Promise<void>;
@@ -118,6 +119,7 @@ export function SessionSidebar({
 	busy,
 	mode,
 	destination,
+	newTaskOpen,
 	onModeChange,
 	onNewTask,
 	onOpen,
@@ -157,7 +159,7 @@ export function SessionSidebar({
 					Code
 				</button>
 			</div>
-			<button className="new-task-button" disabled={busy} onClick={onNewTask} type="button">
+			<button aria-current={newTaskOpen ? "page" : undefined} className="new-task-button" disabled={busy} onClick={onNewTask} type="button">
 				<NotePencil aria-hidden="true" size={18} />
 				New task
 			</button>
@@ -173,14 +175,14 @@ export function SessionSidebar({
 						group={group}
 						key={group.cwd}
 						onOpen={onOpen}
-						selectedSessionId={destination === "tasks" ? state.activeSessionId : null}
+						selectedSessionId={!newTaskOpen && destination === "tasks" ? state.activeSessionId : null}
 					/>
 				))}
 				{tree.tasks.length > 0 && (
 					<section className="loose-tasks">
 						<h2>Tasks</h2>
 						{tree.tasks.map((session) => (
-							<SessionButton busy={busy} key={session.sessionId} onOpen={onOpen} selected={destination === "tasks" && state.activeSessionId === session.sessionId} session={session} />
+							<SessionButton busy={busy} key={session.sessionId} onOpen={onOpen} selected={!newTaskOpen && destination === "tasks" && state.activeSessionId === session.sessionId} session={session} />
 						))}
 					</section>
 				)}

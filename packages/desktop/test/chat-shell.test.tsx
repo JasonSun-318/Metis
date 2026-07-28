@@ -102,8 +102,14 @@ function createHarness(options: {
 		]),
 		createSession: vi.fn(async (input) => {
 			order.push("create");
+			const createdMode = input.mode ?? "code";
 			const created = createdByRequestId.get(input.requestId) ?? {
-				...session("chat-created", "chat", input.cwd ?? "/managed/chat-created", input.name ?? "Untitled"),
+				...session(
+					createdMode === "chat" ? "chat-created" : "code-created",
+					createdMode,
+					input.cwd ?? `/managed/${createdMode}-created`,
+					input.name ?? "Untitled",
+				),
 				cwdOrigin: input.cwd ? "user-selected" : "managed",
 			};
 			if (!createdByRequestId.has(input.requestId)) {
@@ -213,6 +219,8 @@ describe("Chat desktop shell", () => {
 		expect(api.openSession).not.toHaveBeenCalled();
 		await act(async () => button(container, "New task").click());
 		expect(api.createSession).not.toHaveBeenCalled();
+		expect(button(container, "New task").getAttribute("aria-current")).toBe("page");
+		expect(container.querySelector('.session-button[aria-current="page"]')).toBeNull();
 
 		await act(async () => button(container, "Work in a project or folder").click());
 		await flush();
@@ -238,6 +246,162 @@ describe("Chat desktop shell", () => {
 		}));
 		expect(order).toEqual(["create", "list", "open", "start"]);
 
+		await act(async () => root.unmount());
+	});
+
+	it("creates an unfoldered Chat task only on its first send", async () => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		const { api } = createHarness();
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<App api={api} store={new AppStore()} />));
+		await flush();
+
+		expect(container.querySelectorAll("#composer-input")).toHaveLength(1);
+		expect(container.querySelectorAll('[aria-label="Add to message"]')).toHaveLength(1);
+		expect(api.createSession).not.toHaveBeenCalled();
+		const textarea = container.querySelector<HTMLTextAreaElement>("textarea")!;
+		await act(async () => changeTextarea(textarea, "Start without a folder"));
+		await act(async () => textarea.form!.requestSubmit());
+		await flush();
+		await flush();
+
+		const createInput = vi.mocked(api.createSession).mock.calls[0]![0];
+		expect(createInput).toMatchObject({
+			mode: "chat",
+			name: "Start without a folder",
+		});
+		expect(createInput).not.toHaveProperty("cwd");
+		expect(api.startTurn).toHaveBeenCalledTimes(1);
+		await act(async () => root.unmount());
+	});
+
+	it("keeps Code New task local until a folder-backed first send", async () => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		localStorage.setItem("arcmind.activeSessionId.code", "code-existing");
+		const { api, order } = createHarness();
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<App api={api} store={new AppStore()} />));
+		await flush();
+
+		await act(async () => button(container, "Code").click());
+		await flush();
+		await act(async () => button(container, "New task").click());
+
+		expect(container.textContent).toContain("What can I take off your plate?");
+		expect(container.querySelectorAll("#composer-input")).toHaveLength(1);
+		expect(container.querySelectorAll('[aria-label="Add to message"]')).toHaveLength(1);
+		expect(container.querySelector(".model-control")?.textContent).toBe("Test model");
+		expect(button(container, "Select effort, current Off")).not.toBeNull();
+		expect(api.selectProjectFolder).not.toHaveBeenCalled();
+		expect(api.createSession).not.toHaveBeenCalled();
+
+		const textarea = container.querySelector<HTMLTextAreaElement>("textarea")!;
+		await act(async () => changeTextarea(textarea, "Inspect this repository"));
+		expect(button(container, "Send message").disabled).toBe(true);
+		await act(async () => button(container, "Work in a project or folder").click());
+		await flush();
+		expect(api.createSession).not.toHaveBeenCalled();
+		expect(button(container, "Send message").disabled).toBe(false);
+
+		order.length = 0;
+		await act(async () => textarea.form!.requestSubmit());
+		await flush();
+		await flush();
+
+		expect(api.createSession).toHaveBeenCalledWith(expect.objectContaining({
+			mode: "code",
+			cwd: "/work/selected-project",
+			name: "Inspect this repository",
+		}));
+		expect(api.startTurn).toHaveBeenCalledWith(expect.objectContaining({
+			sessionId: "code-created",
+			text: "Inspect this repository",
+		}));
+		expect(order).toEqual(["create", "list", "open", "start"]);
+		await act(async () => root.unmount());
+	});
+
+	it("keeps the add menu in an existing Code session composer", async () => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		localStorage.setItem("arcmind.activeSessionId.code", "code-existing");
+		const { api } = createHarness();
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<App api={api} store={new AppStore()} />));
+		await flush();
+		vi.mocked(api.listSkills).mockClear();
+
+		await act(async () => button(container, "Code").click());
+		await flush();
+
+		expect(container.querySelector('[data-active-session-id="code-existing"]')).not.toBeNull();
+		expect(api.listSkills).toHaveBeenCalledWith({ sessionId: "code-existing" });
+		expect(container.querySelectorAll('[aria-label="Add to message"]')).toHaveLength(1);
+		await act(async () => button(container, "Add to message").click());
+		await act(async () => button(container.querySelector<HTMLElement>(".composer-add-menu")!, "Skills").click());
+		expect(container.querySelector(".composer-skill-menu")?.textContent).toContain("pdf");
+		await act(async () => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
+		await act(async () => button(container, "Add to message").click());
+		await act(async () => button(container.querySelector<HTMLElement>(".composer-add-menu")!, "Add files or photos").click());
+		await flush();
+		expect(container.querySelector(".composer-chips")?.textContent).toContain("report.pdf");
+		await act(async () => root.unmount());
+	});
+
+	it("clears skills while the newly visible session skills are loading", async () => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		localStorage.setItem("arcmind.activeSessionId.chat", "chat-existing");
+		localStorage.setItem("arcmind.activeSessionId.code", "code-existing");
+		const { api } = createHarness();
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<App api={api} store={new AppStore()} />));
+		await flush();
+
+		await act(async () => button(container, "Add to message").click());
+		await act(async () => button(container.querySelector<HTMLElement>(".composer-add-menu")!, "Skills").click());
+		expect(container.querySelector(".composer-skill-menu")?.textContent).toContain("pdf");
+		await act(async () => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
+
+		vi.mocked(api.listSkills).mockImplementationOnce(() => new Promise(() => undefined));
+		await act(async () => button(container, "Code").click());
+		await flush();
+		await act(async () => button(container, "Add to message").click());
+		await act(async () => button(container.querySelector<HTMLElement>(".composer-add-menu")!, "Skills").click());
+
+		expect(container.querySelector(".composer-skill-menu")?.textContent).not.toContain("pdf");
+		await act(async () => root.unmount());
+	});
+
+	it("reports a failed interrupt without leaving an unhandled rejection", async () => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		localStorage.setItem("arcmind.activeSessionId.chat", "chat-existing");
+		const { api } = createHarness();
+		vi.mocked(api.openSession).mockImplementation(async ({ sessionId }) => {
+			const summary = session(sessionId, "chat", "/work/chat-project", "Chat project task");
+			return {
+				...snapshot({ ...summary, state: "running" }),
+				activeTurnId: "00000000-0000-4000-8000-000000000301",
+			};
+		});
+		vi.mocked(api.interruptTurn).mockRejectedValueOnce(new Error("interrupt failed"));
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<App api={api} store={new AppStore()} />));
+		await flush();
+
+		await act(async () => button(container, "Stop task").click());
+		await flush();
+
+		expect(api.interruptTurn).toHaveBeenCalledWith(expect.objectContaining({ sessionId: "chat-existing" }));
+		expect(container.textContent).toContain("interrupt failed");
 		await act(async () => root.unmount());
 	});
 
@@ -489,6 +653,39 @@ describe("Chat desktop shell", () => {
 
 		expect(container.textContent).toContain("open failed once");
 		expect(textarea.value).toBe("Keep this draft");
+		expect(api.createSession).toHaveBeenCalledTimes(1);
+		await act(async () => textarea.form!.requestSubmit());
+		await flush();
+		await flush();
+
+		expect(api.createSession).toHaveBeenCalledTimes(1);
+		expect(api.startTurn).toHaveBeenCalledTimes(1);
+		await act(async () => root.unmount());
+	});
+
+	it("keeps a folder-backed Code draft after its created session fails to open", async () => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		localStorage.setItem("arcmind.activeSessionId.code", "code-existing");
+		const { api } = createHarness({ failOpenSessionIds: ["code-created"] });
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<App api={api} store={new AppStore()} />));
+		await flush();
+		await act(async () => button(container, "Code").click());
+		await flush();
+		await act(async () => button(container, "New task").click());
+		await act(async () => button(container, "Work in a project or folder").click());
+		await flush();
+
+		const textarea = container.querySelector<HTMLTextAreaElement>("textarea")!;
+		await act(async () => changeTextarea(textarea, "Keep this Code draft"));
+		await act(async () => textarea.form!.requestSubmit());
+		await flush();
+
+		expect(container.textContent).toContain("open failed once");
+		expect(textarea.value).toBe("Keep this Code draft");
+		expect(button(container, "selected-project").disabled).toBe(true);
 		expect(api.createSession).toHaveBeenCalledTimes(1);
 		await act(async () => textarea.form!.requestSubmit());
 		await flush();
@@ -818,7 +1015,7 @@ describe("Chat desktop shell", () => {
 		expect(container.textContent).not.toContain("Chat project task");
 		expect(api.openSession).toHaveBeenLastCalledWith({ sessionId: "code-existing" });
 		expect(container.textContent).toContain("Test model");
-		expect(container.querySelector('[aria-label="Add to message"]')).toBeNull();
+		expect(container.querySelector('[aria-label="Add to message"]')).not.toBeNull();
 
 		await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Hide sessions sidebar"]')!.click());
 		expect(container.querySelector(".session-sidebar")).toBeNull();

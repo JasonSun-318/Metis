@@ -1,38 +1,52 @@
-import type { SkillSummaryView } from "@arcmind/app-protocol";
-import { CaretDown, FolderSimple, Sparkle } from "@phosphor-icons/react";
+import type { AgentMode, SkillSummaryView } from "@arcmind/app-protocol";
+import { CaretDown, FolderSimple } from "@phosphor-icons/react";
+import type { ReactNode } from "react";
 import type { DesktopAttachmentSelection } from "../../shared/desktop-api.ts";
 import { Composer, type ComposerSubmission } from "./Composer.tsx";
 
-interface ChatHomeProps {
+interface NewTaskHomeProps {
 	readonly busy: boolean;
 	readonly folder: string | null;
 	readonly folderLocked: boolean;
+	readonly mode: AgentMode;
+	readonly modelControl?: ReactNode;
 	readonly onChooseFolder: () => Promise<void>;
 	readonly onManageSkills: () => void;
 	readonly onPickFiles: () => Promise<readonly DesktopAttachmentSelection[]>;
 	readonly onSubmit: (input: ComposerSubmission) => Promise<void>;
 	readonly skills: readonly SkillSummaryView[];
+	readonly thinkingControl?: ReactNode;
 }
 
 function folderName(folder: string): string {
 	return folder.split(/[\\/]/u).filter(Boolean).at(-1) ?? folder;
 }
 
-export function ChatHome({ busy, folder, folderLocked, onChooseFolder, onManageSkills, onPickFiles, onSubmit, skills }: ChatHomeProps) {
+export function NewTaskHome({
+	busy,
+	folder,
+	folderLocked,
+	mode,
+	modelControl,
+	onChooseFolder,
+	onManageSkills,
+	onPickFiles,
+	onSubmit,
+	skills,
+	thinkingControl,
+}: NewTaskHomeProps) {
 	return (
-		<section className="chat-home">
-			<div className="chat-home-content">
-				<div className="chat-home-heading">
-					<Sparkle aria-hidden="true" size={30} weight="fill" />
-					<div>
-						<h1>What can I take off your plate?</h1>
-						<p>Ask a question, explore an idea, or get help with your work.</p>
-					</div>
+		<section className="new-task-home">
+			<div className="new-task-home-content">
+				<div className="new-task-home-heading">
+					<h1>What can I take off your plate?</h1>
+					<p>Ask a question, explore an idea, or get help with your work.</p>
 				</div>
-				<div className="chat-home-composer">
+				<div className="new-task-home-composer">
 					<Composer
 						appearance="chat"
 						disabled={busy}
+						modelControl={modelControl}
 						onInterrupt={async () => {}}
 						onManageSkills={onManageSkills}
 						onPickFiles={onPickFiles}
@@ -40,6 +54,8 @@ export function ChatHome({ busy, folder, folderLocked, onChooseFolder, onManageS
 						placeholder="How can I help you today?"
 						running={false}
 						skills={skills}
+						submitDisabled={mode === "code" && folder === null}
+						thinkingControl={thinkingControl}
 					/>
 					<button
 						className="folder-picker"

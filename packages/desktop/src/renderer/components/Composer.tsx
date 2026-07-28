@@ -21,6 +21,7 @@ interface ComposerProps {
 	readonly modelControl?: ReactNode;
 	readonly placeholder?: string;
 	readonly skills?: readonly SkillSummaryView[];
+	readonly submitDisabled?: boolean;
 	readonly thinkingControl?: ReactNode;
 }
 
@@ -35,6 +36,7 @@ export function Composer({
 	modelControl,
 	placeholder,
 	skills = [],
+	submitDisabled = false,
 	thinkingControl,
 }: ComposerProps) {
 	const [text, setText] = useState("");
@@ -56,7 +58,7 @@ export function Composer({
 	const submit = async (event: FormEvent) => {
 		event.preventDefault();
 		const prompt = text.trim();
-		if ((!prompt && attachments.length === 0) || disabled || submitting) return;
+		if ((!prompt && attachments.length === 0) || disabled || submitDisabled || submitting) return;
 		setSubmitting(true);
 		try {
 			await onSubmit({
@@ -90,7 +92,7 @@ export function Composer({
 					rows={1}
 					value={text}
 				/>
-				{appearance === "chat" && (selectedSkill || attachments.length > 0) && (
+				{(selectedSkill || attachments.length > 0) && (
 					<div aria-label="Message additions" className="composer-chips">
 						{selectedSkill && (
 							<button aria-label={`Remove skill ${selectedSkill.name}`} onClick={() => setSelectedSkill(undefined)} type="button">
@@ -110,27 +112,23 @@ export function Composer({
 				)}
 				<div className="composer-actions">
 					<div className="composer-leading">
-						{appearance === "chat" ? (
-							<ComposerAddMenu
-								disabled={disabled || submitting}
-								onAddFiles={() => void addFiles().catch(() => undefined)}
-								onManageSkills={() => onManageSkills?.()}
-								onSelectSkill={setSelectedSkill}
-								skills={skills}
-							/>
-						) : (
-							<span>Enter to send · Shift+Enter for a new line</span>
-						)}
+						<ComposerAddMenu
+							disabled={disabled || submitting}
+							onAddFiles={() => void addFiles().catch(() => undefined)}
+							onManageSkills={() => onManageSkills?.()}
+							onSelectSkill={setSelectedSkill}
+							skills={skills}
+						/>
 					</div>
 					<div className="composer-trailing">
 						{modelControl}
 						{thinkingControl}
 						{running && (
-							<button aria-label="Stop task" className="composer-icon-button button-secondary" disabled={disabled} onClick={() => void onInterrupt()} type="button">
+							<button aria-label="Stop task" className="composer-icon-button button-secondary" disabled={disabled} onClick={() => void onInterrupt().catch(() => undefined)} type="button">
 								<Stop aria-hidden="true" size={16} weight="fill" />
 							</button>
 						)}
-						<button aria-label={running ? "Steer task" : "Send message"} className="composer-icon-button composer-send" disabled={disabled || submitting || (text.trim().length === 0 && attachments.length === 0)} type="submit">
+						<button aria-label={running ? "Steer task" : "Send message"} className="composer-icon-button composer-send" disabled={disabled || submitDisabled || submitting || (text.trim().length === 0 && attachments.length === 0)} type="submit">
 							<ArrowUp aria-hidden="true" size={19} weight="bold" />
 						</button>
 					</div>

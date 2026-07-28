@@ -49,4 +49,27 @@ describe("Composer visual states", () => {
 		expect(item.gap).toBe("8px");
 		expect(item.padding).toBe("0px 8px");
 	});
+
+	it("uses a stationary composer and a stable fading New Task dot field", () => {
+		expect(rule(".new-task-home").alignItems).toBe("flex-start");
+
+		const dots = rule(".new-task-home::before");
+		expect(dots.pointerEvents).toBe("none");
+		expect(dots.willChange).toBe("");
+		expect(dots.backgroundImage).toContain("radial-gradient(circle at 2px 2px");
+		expect(dots.backgroundImage).toContain("1.5px");
+		expect(dots.backgroundSize).toBe("21px 21px");
+		expect(dots.maskImage).toContain("radial-gradient");
+		expect(dots.animationName).toBe("");
+		expect(css).not.toContain("new-task-vortex");
+	});
+
+	it("removes the decorative New Task logo slot", () => {
+		expect(css).not.toContain(".new-task-home-heading > svg");
+	});
+
+	it("keeps the New Task folder row translucent and separate from the composer", () => {
+		expect(css).toContain("background: rgb(32 32 32 / 58%)");
+		expect(rule(".new-task-home .composer").background).toBe("var(--panel)");
+	});
 });

@@ -4,10 +4,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { ArcMindDesktopApi } from "../../shared/desktop-api.ts";
 import { useAppStore } from "../hooks/use-app-store.ts";
 import type { AppStore, AppStoreSnapshot } from "../store/app-store.ts";
-import { ChatHome } from "./ChatHome.tsx";
 import { Composer, type ComposerSubmission } from "./Composer.tsx";
 import { InteractionHost } from "./InteractionHost.tsx";
 import { ModelSelector } from "./ModelSelector.tsx";
+import { NewTaskHome } from "./NewTaskHome.tsx";
 import { RecoveryBanner } from "./RecoveryBanner.tsx";
 import { type SidebarDestination, SessionSidebar } from "./SessionSidebar.tsx";
 import { ThinkingSelector } from "./ThinkingSelector.tsx";
@@ -16,6 +16,12 @@ import { Transcript } from "./Transcript.tsx";
 interface AppProps {
 	readonly api: ArcMindDesktopApi;
 	readonly store: AppStore;
+}
+
+interface NewTaskDraft {
+	readonly mode: AgentMode;
+	readonly folder: string | null;
+	readonly sessionId: string | null;
 }
 
 function activeSessionKey(mode: AgentMode): string {
@@ -79,9 +85,11 @@ export function App({ api, store }: AppProps) {
 	const state = useAppStore(store);
 	const [mode, setMode] = useState<AgentMode>("chat");
 	const [destination, setDestination] = useState<SidebarDestination>("tasks");
-	const [chatDraftOpen, setChatDraftOpen] = useState(true);
-	const [chatDraftFolder, setChatDraftFolder] = useState<string | null>(null);
-	const [chatDraftSessionId, setChatDraftSessionId] = useState<string | null>(null);
+	const [newTaskDraft, setNewTaskDraft] = useState<NewTaskDraft | null>({
+		mode: "chat",
+		folder: null,
+		sessionId: null,
+	});
 	const [sessionsSidebarOpen, setSessionsSidebarOpen] = useState(true);
 	const [toolsSidebarOpen, setToolsSidebarOpen] = useState(false);
 	const [bootstrapped, setBootstrapped] = useState(false);
@@ -93,8 +101,8 @@ export function App({ api, store }: AppProps) {
 	const openGeneration = useRef(0);
 	const openingSessionId = useRef<string | null>(null);
 	const resnapshots = useRef(new Map<string, Promise<void>>());
-	const chatDraftCreateRequest = useRef<{ key: string; requestId: string } | null>(null);
-	const chatDraftTurnRequest = useRef<{ key: string; requestId: string } | null>(null);
+	const newTaskCreateRequest = useRef<{ key: string; requestId: string } | null>(null);
+	const newTaskTurnRequest = useRef<{ key: string; requestId: string } | null>(null);
 	const activeTurnRequest = useRef<{
 		key: string;
 		method: "start" | "steer";
@@ -197,7 +205,7 @@ export function App({ api, store }: AppProps) {
 				const rememberedSessionId = localStorage.getItem(activeSessionKey("chat"));
 				if (rememberedSessionId && sessions.sessions.some((session) => session.mode === "chat" && session.sessionId === rememberedSessionId)) {
 					await openSession(rememberedSessionId);
-					if (active) setChatDraftOpen(false);
+					if (active) setNewTaskDraft(null);
 				} else {
 					setMessage("Start a new Chat task");
 				}
@@ -223,18 +231,22 @@ export function App({ api, store }: AppProps) {
 		setDestination("tasks");
 		try {
 			await openSession(sessionId);
-			if (mode === "chat") setChatDraftOpen(false);
+			setNewTaskDraft(null);
+			newTaskCreateRequest.current = null;
+			newTaskTurnRequest.current = null;
 		} catch {
 			// openSession already reports the error while preserving the current projection.
 		}
 	};
 
-	const chooseChatFolder = async () => {
+	const chooseNewTaskFolder = async () => {
 		setBusy(true);
 		setError(null);
 		try {
 			const folder = await api.selectProjectFolder();
-			if (folder) setChatDraftFolder(folder);
+			if (folder) {
+				setNewTaskDraft((draft) => draft?.mode === mode ? { ...draft, folder } : draft);
+			}
 		} catch (cause) {
 			reportError(cause);
 		} finally {
@@ -245,28 +257,9 @@ export function App({ api, store }: AppProps) {
 	const startNewTask = () => {
 		setDestination("tasks");
 		setError(null);
-		if (mode === "chat") {
-			setChatDraftFolder(null);
-			setChatDraftSessionId(null);
-			chatDraftCreateRequest.current = null;
-			chatDraftTurnRequest.current = null;
-			setChatDraftOpen(true);
-			return;
-		}
-		void (async () => {
-			setBusy(true);
-			try {
-				const cwd = await api.selectProjectFolder();
-				if (!cwd) return;
-				const created = await api.createSession({ requestId: crypto.randomUUID(), mode: "code", cwd });
-				await refreshSessions();
-				await openSession(created.session.sessionId);
-			} catch (cause) {
-				reportError(cause);
-			} finally {
-				setBusy(false);
-			}
-		})();
+		setNewTaskDraft({ mode, folder: null, sessionId: null });
+		newTaskCreateRequest.current = null;
+		newTaskTurnRequest.current = null;
 	};
 
 	const changeMode = (nextMode: AgentMode) => {
@@ -277,51 +270,61 @@ export function App({ api, store }: AppProps) {
 		const rememberedSessionId = localStorage.getItem(activeSessionKey(nextMode));
 		const rememberedSession = rememberedSessionId ? state.sessionsById.get(rememberedSessionId) : undefined;
 		if (!rememberedSession || rememberedSession.mode !== nextMode) {
-			if (nextMode === "chat") setChatDraftOpen(true);
+			setNewTaskDraft({ mode: nextMode, folder: null, sessionId: null });
+			newTaskCreateRequest.current = null;
+			newTaskTurnRequest.current = null;
 			return;
 		}
 		void openSession(rememberedSession.sessionId)
 			.then(() => {
-				if (nextMode === "chat") setChatDraftOpen(false);
+				setNewTaskDraft(null);
+				newTaskCreateRequest.current = null;
+				newTaskTurnRequest.current = null;
 			})
-			.catch(() => undefined);
+			.catch(() => {
+				setNewTaskDraft({ mode: nextMode, folder: null, sessionId: null });
+				newTaskCreateRequest.current = null;
+				newTaskTurnRequest.current = null;
+			});
 	};
 
-	const submitChatDraft = async (input: ComposerSubmission) => {
+	const visibleNewTaskDraft = destination === "tasks" && newTaskDraft?.mode === mode ? newTaskDraft : null;
+
+	const submitNewTaskDraft = async (input: ComposerSubmission) => {
+		if (!visibleNewTaskDraft || (visibleNewTaskDraft.mode === "code" && !visibleNewTaskDraft.folder)) return;
 		setBusy(true);
 		setError(null);
 		try {
-			let sessionId = chatDraftSessionId;
+			let sessionId = visibleNewTaskDraft.sessionId;
 			if (!sessionId) {
-				const name = titleFromPrompt(input.text || input.skill?.name || input.attachments[0]?.name || "Chat");
-				const createKey = JSON.stringify({ cwd: chatDraftFolder, name });
-				const createRequest = chatDraftCreateRequest.current?.key === createKey
-					? chatDraftCreateRequest.current
+				const name = titleFromPrompt(input.text || input.skill?.name || input.attachments[0]?.name || (visibleNewTaskDraft.mode === "chat" ? "Chat" : "Code"));
+				const createKey = JSON.stringify({ mode: visibleNewTaskDraft.mode, cwd: visibleNewTaskDraft.folder, name });
+				const createRequest = newTaskCreateRequest.current?.key === createKey
+					? newTaskCreateRequest.current
 					: { key: createKey, requestId: crypto.randomUUID() };
-				chatDraftCreateRequest.current = createRequest;
+				newTaskCreateRequest.current = createRequest;
 				const created = await api.createSession({
 					requestId: createRequest.requestId,
-					mode: "chat",
-					...(chatDraftFolder ? { cwd: chatDraftFolder } : {}),
+					mode: visibleNewTaskDraft.mode,
+					...(visibleNewTaskDraft.folder ? { cwd: visibleNewTaskDraft.folder } : {}),
 					name,
 				});
 				sessionId = created.session.sessionId;
-				setChatDraftSessionId(sessionId);
-				chatDraftCreateRequest.current = null;
+				setNewTaskDraft((draft) => draft?.mode === visibleNewTaskDraft.mode ? { ...draft, sessionId } : draft);
+				newTaskCreateRequest.current = null;
 			}
 			await refreshSessions();
 			await openSession(sessionId);
 			setBusy(true);
 			const turnKey = JSON.stringify({ sessionId, input: composerRequestKey(input) });
-			const turnRequest = chatDraftTurnRequest.current?.key === turnKey
-				? chatDraftTurnRequest.current
+			const turnRequest = newTaskTurnRequest.current?.key === turnKey
+				? newTaskTurnRequest.current
 				: { key: turnKey, requestId: crypto.randomUUID() };
-			chatDraftTurnRequest.current = turnRequest;
+			newTaskTurnRequest.current = turnRequest;
 			await api.startTurn({ sessionId, requestId: turnRequest.requestId, ...composerPayload(input) });
-			setChatDraftOpen(false);
-			setChatDraftSessionId(null);
-			chatDraftCreateRequest.current = null;
-			chatDraftTurnRequest.current = null;
+			setNewTaskDraft(null);
+			newTaskCreateRequest.current = null;
+			newTaskTurnRequest.current = null;
 		} catch (cause) {
 			reportError(cause);
 			throw cause;
@@ -332,19 +335,22 @@ export function App({ api, store }: AppProps) {
 
 	const activeSession = state.activeSessionId ? state.sessionsById.get(state.activeSessionId) : undefined;
 	const openingSession = openingSessionId.current ? state.sessionsById.get(openingSessionId.current) : undefined;
-	const visibleActiveSession = destination === "tasks" && activeSession && (activeSession.mode === mode || openingSession?.mode === mode) && !(mode === "chat" && chatDraftOpen)
+	const newTaskOpen = visibleNewTaskDraft !== null;
+	const visibleActiveSession = destination === "tasks" && activeSession && (activeSession.mode === mode || openingSession?.mode === mode) && !newTaskOpen
 		? activeSession
 		: undefined;
 	const running = visibleActiveSession?.state === "running" || (visibleActiveSession !== undefined && state.activeTurnId !== null);
 	const serverReady = state.supervisor.state === "ready";
-	const skillSessionId = visibleActiveSession?.sessionId ?? chatDraftSessionId;
+	const skillSessionId = visibleActiveSession?.sessionId ?? visibleNewTaskDraft?.sessionId;
+	const shouldListSkills = destination === "tasks" && (newTaskOpen || visibleActiveSession !== undefined);
 	useEffect(() => {
 		const generation = ++skillListGeneration.current;
-		if (!bootstrapped || !serverReady || mode !== "chat" || destination !== "tasks") {
+		if (!bootstrapped || !serverReady || !shouldListSkills) {
 			setSkills([]);
 			return;
 		}
-		void api.listSkills(skillSessionId ? { sessionId: skillSessionId } : { cwd: chatDraftFolder })
+		setSkills([]);
+		void api.listSkills(skillSessionId ? { sessionId: skillSessionId } : { cwd: visibleNewTaskDraft?.folder ?? null })
 			.then((result) => {
 				if (generation === skillListGeneration.current) setSkills(result.skills);
 			})
@@ -356,7 +362,7 @@ export function App({ api, store }: AppProps) {
 		return () => {
 			if (generation === skillListGeneration.current) skillListGeneration.current += 1;
 		};
-	}, [api, bootstrapped, chatDraftFolder, destination, mode, reportError, serverReady, skillSessionId]);
+	}, [api, bootstrapped, reportError, serverReady, shouldListSkills, skillSessionId, visibleNewTaskDraft?.folder]);
 	const interactiveSessionId =
 		destination === "tasks" && openingSession?.mode === mode
 			? openingSession.sessionId
@@ -418,9 +424,7 @@ export function App({ api, store }: AppProps) {
 		store.removeInteraction(response.interactionId);
 	};
 
-	const changeThinking = async (selection: AppStoreSnapshot["thinkingSelection"]) => {
-		if (!visibleActiveSession) return;
-		const sessionId = visibleActiveSession.sessionId;
+	const changeThinking = async (sessionId: string, selection: AppStoreSnapshot["thinkingSelection"]) => {
 		store.setOptimisticThinkingSelection(selection);
 		try {
 			await api.setThinkingSelection({ sessionId, requestId: crypto.randomUUID(), selection });
@@ -430,12 +434,11 @@ export function App({ api, store }: AppProps) {
 		}
 	};
 
-	const changeModel = async (model: AppStoreSnapshot["availableModels"][number]) => {
-		if (!visibleActiveSession) return;
+	const changeModel = async (sessionId: string, model: AppStoreSnapshot["availableModels"][number]) => {
 		setBusy(true);
 		try {
 			await api.setModel({
-				sessionId: visibleActiveSession.sessionId,
+				sessionId,
 				requestId: crypto.randomUUID(),
 				provider: model.provider,
 				modelId: model.modelId,
@@ -447,21 +450,24 @@ export function App({ api, store }: AppProps) {
 		}
 	};
 
-	const modelControl = visibleActiveSession ? (
+	const configurationSession = visibleActiveSession ?? (
+		newTaskOpen && activeSession?.mode === mode ? activeSession : undefined
+	);
+	const modelControl = configurationSession ? (
 		<ModelSelector
 			available={state.availableModels}
 			disabled={busy || !serverReady}
-			onChange={(model) => void changeModel(model)}
+			onChange={(model) => void changeModel(configurationSession.sessionId, model)}
 			value={state.model}
 		/>
 	) : undefined;
 
-	const thinkingControl = visibleActiveSession ? (
+	const thinkingControl = configurationSession ? (
 		<ThinkingSelector
 			actualThinkingLevel={state.actualThinkingLevel}
 			available={state.availableThinkingSelections}
 			disabled={busy || !serverReady}
-			onChange={(selection) => void changeThinking(selection)}
+			onChange={(selection) => void changeThinking(configurationSession.sessionId, selection)}
 			value={state.thinkingSelection}
 		/>
 	) : undefined;
@@ -480,6 +486,7 @@ export function App({ api, store }: AppProps) {
 				busy={!bootstrapped || busy || !serverReady}
 				destination={destination}
 				mode={mode}
+				newTaskOpen={newTaskOpen}
 				onModeChange={changeMode}
 				onNewTask={startNewTask}
 				onOpen={openVisibleSession}
@@ -527,16 +534,19 @@ export function App({ api, store }: AppProps) {
 						<h1>Skills</h1>
 						<p>Skills are coming to Desktop.</p>
 					</section>
-				) : mode === "chat" && chatDraftOpen ? (
-					<ChatHome
+				) : newTaskOpen ? (
+					<NewTaskHome
 						busy={busy || !serverReady}
-						folder={chatDraftFolder}
-						folderLocked={chatDraftSessionId !== null}
-						onChooseFolder={chooseChatFolder}
+						folder={visibleNewTaskDraft.folder}
+						folderLocked={visibleNewTaskDraft.sessionId !== null}
+						mode={mode}
+						modelControl={modelControl}
+						onChooseFolder={chooseNewTaskFolder}
 						onManageSkills={() => setDestination("skills")}
 						onPickFiles={pickAttachmentFiles}
-						onSubmit={submitChatDraft}
+						onSubmit={submitNewTaskDraft}
 						skills={skills}
+						thinkingControl={thinkingControl}
 					/>
 				) : visibleActiveSession ? (
 					<div className="workspace-body">
@@ -546,13 +556,7 @@ export function App({ api, store }: AppProps) {
 							<Composer appearance={visibleActiveSession.mode} disabled={!serverReady || state.syncStatus !== "ready"} key={visibleActiveSession.sessionId} modelControl={modelControl} onInterrupt={interrupt} onManageSkills={() => setDestination("skills")} onPickFiles={pickAttachmentFiles} onSubmit={submit} running={running} skills={skills} thinkingControl={thinkingControl} placeholder="Write a message…" />
 						</div>
 					</div>
-				) : (
-					<section className="welcome-panel">
-						<p className="eyebrow">ArcMind Code</p>
-						<h2>Start a new task.</h2>
-						<p>Choose a project folder to begin. Your work stays recoverable when this window reloads.</p>
-					</section>
-				)}
+				) : null}
 				{toolsSidebarOpen && (
 					<aside aria-label={`${mode === "chat" ? "Chat" : "Code"} tools`} className="tool-sidebar">
 						<nav className="tool-sidebar-menu">
