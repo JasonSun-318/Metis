@@ -250,9 +250,8 @@ export class ClientBroker {
 			throw new TypeError("Invalid app-server message");
 		if (Object.hasOwn(value, "id")) {
 			const request = validateServerRequest(value);
-			if (request.params.serverEpoch !== this.supervisor.view().serverEpoch) {
-				throw new Error("App-server interaction epoch does not match the active child");
-			}
+			const view = this.supervisor.view();
+			if (view.state !== "ready" || request.params.serverEpoch !== view.serverEpoch) return;
 			if (this.pendingInteractions.has(request.params.interaction.interactionId)) {
 				throw new Error("App-server reused a pending interaction id");
 			}
@@ -268,9 +267,8 @@ export class ClientBroker {
 			return;
 		}
 		const notification = validateServerNotification(value);
-		if (notification.params.serverEpoch !== this.supervisor.view().serverEpoch) {
-			throw new Error("App-server event epoch does not match the active child");
-		}
+		const view = this.supervisor.view();
+		if (view.state !== "ready" || notification.params.serverEpoch !== view.serverEpoch) return;
 		this.sendEvent({ type: "app-server", envelope: notification });
 		void this.clientCall("connection/ack", {
 			serverEpoch: notification.params.serverEpoch,

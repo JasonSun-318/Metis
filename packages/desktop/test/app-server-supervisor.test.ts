@@ -228,6 +228,35 @@ describe("AppServerSupervisor", () => {
 		expect(supervisor.view()).toMatchObject({ state: "ready", serverEpoch: EPOCHS[0] });
 	});
 
+	it("isolates a failing message listener without restarting the utility process", async () => {
+		const diagnostics = { append: vi.fn().mockResolvedValue(undefined) };
+		const { children, supervisor } = harness({ diagnostics });
+		const child = await reachReady(supervisor, children);
+		supervisor.onMessage(() => {
+			throw new Error("renderer listener failed");
+		});
+
+		child.emit("message", {
+			jsonrpc: "2.0",
+			method: "connection/events",
+			params: {
+				serverEpoch: EPOCHS[0],
+				fromCursor: 1,
+				toCursor: 1,
+				events: [{ type: "server/state", state: "ready" }],
+			},
+		});
+
+		expect(child.killCount).toBe(0);
+		expect(supervisor.view()).toMatchObject({ state: "ready", serverEpoch: EPOCHS[0] });
+		await vi.waitFor(() =>
+			expect(diagnostics.append).toHaveBeenCalledWith(
+				"supervisor",
+				expect.stringContaining("renderer listener failed"),
+			),
+		);
+	});
+
 	it("keeps server requests separate from pending client response ids", async () => {
 		const { children, supervisor } = harness();
 		const child = await reachReady(supervisor, children);

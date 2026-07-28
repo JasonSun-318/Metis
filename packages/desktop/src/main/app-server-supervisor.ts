@@ -123,6 +123,7 @@ export class AppServerSupervisor {
 	}>();
 	private readonly stateListeners = new Set<(view: SupervisorView) => void>();
 	private readonly messageListeners = new Set<(message: unknown) => void>();
+	private readonly failedMessageListeners = new WeakSet<(message: unknown) => void>();
 	private shutdownPromise?: Promise<void>;
 	private resolveShutdown?: () => void;
 
@@ -350,7 +351,18 @@ export class AppServerSupervisor {
 
 			if (Object.hasOwn(record, "id")) validateServerRequest(message);
 			else validateServerNotification(message);
-			for (const listener of this.messageListeners) listener(message);
+			for (const listener of this.messageListeners) {
+				try {
+					listener(message);
+					this.failedMessageListeners.delete(listener);
+				} catch (error) {
+					if (this.failedMessageListeners.has(listener)) continue;
+					this.failedMessageListeners.add(listener);
+					void this.diagnostics
+						?.append("supervisor", `app-server message listener failed: ${this.publicError(error)}\n`)
+						.catch(() => undefined);
+				}
+			}
 		} catch (error) {
 			this.failCurrentChild(`invalid app-server message: ${this.publicError(error)}`, true);
 		}

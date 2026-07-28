@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import { resolveRendererAsset } from "../src/main/app-protocol-scheme.ts";
 import { ClientBroker, isTrustedRendererUrl } from "../src/main/client-broker.ts";
 import { isSafeExternalUrl } from "../src/main/external-url.ts";
-import { DESKTOP_IPC_CHANNELS } from "../src/shared/desktop-api.ts";
+import { DESKTOP_IPC_CHANNELS, type SupervisorView } from "../src/shared/desktop-api.ts";
 
 const desktopRoot = join(import.meta.dirname, "..");
 
@@ -64,15 +64,16 @@ class FakeWebContents {
 }
 
 function supervisorHarness() {
-	let stateListener: ((view: ReturnType<typeof supervisor.view>) => void) | undefined;
+	let view: SupervisorView = {
+		state: "ready",
+		serverEpoch: "11111111-1111-4111-8111-111111111111",
+		restartAttempt: 0,
+		failure: null,
+	};
+	let stateListener: ((view: SupervisorView) => void) | undefined;
 	let messageListener: ((message: unknown) => void) | undefined;
 	const supervisor = {
-		view: () => ({
-			state: "ready" as const,
-			serverEpoch: "11111111-1111-4111-8111-111111111111",
-			restartAttempt: 0,
-			failure: null,
-		}),
+		view: () => view,
 		onState: (listener: typeof stateListener) => {
 			stateListener = listener;
 			return () => {
@@ -92,6 +93,10 @@ function supervisorHarness() {
 	return {
 		supervisor,
 		emitMessage: (message: unknown) => messageListener?.(message),
+		setView: (next: Partial<SupervisorView>) => {
+			view = { ...view, ...next };
+			stateListener?.(view);
+		},
 	};
 }
 
@@ -486,6 +491,64 @@ describe("desktop trust boundaries", () => {
 			}),
 		);
 		expect(Object.values(DESKTOP_IPC_CHANNELS)).not.toContain("arcmind:connection-ack");
+		broker.dispose();
+	});
+
+	it("drops stale interactions and event batches across a supervisor reconnect", async () => {
+		const ipcMain = new FakeIpcMain();
+		const { emitMessage, setView, supervisor } = supervisorHarness();
+		const broker = new ClientBroker({ ipcMain: ipcMain as never, supervisor });
+		const webContents = new FakeWebContents();
+		broker.attach({ webContents: webContents as never });
+		await ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.subscribe)!({
+			sender: webContents,
+			senderFrame: webContents.mainFrame,
+		});
+		supervisor.request.mockClear();
+		setView({ state: "restarting", serverEpoch: null, failure: "overloaded" });
+		webContents.sent.length = 0;
+
+		const interaction = {
+			jsonrpc: "2.0" as const,
+			id: "stale-interaction-rpc",
+			method: "interaction/request" as const,
+			params: {
+				serverEpoch: "11111111-1111-4111-8111-111111111111",
+				interaction: {
+					interactionId: "22222222-2222-4222-8222-222222222222",
+					sessionId: "session-1",
+					title: "Confirm",
+					message: "Continue?",
+					createdAt: "2026-07-16T00:00:00.000Z",
+					kind: "confirm" as const,
+				},
+			},
+		};
+		const events = {
+			jsonrpc: "2.0" as const,
+			method: "connection/events" as const,
+			params: {
+				serverEpoch: "11111111-1111-4111-8111-111111111111",
+				fromCursor: 1,
+				toCursor: 1,
+				events: [{ type: "server/state" as const, state: "ready" as const }],
+			},
+		};
+
+		expect(() => emitMessage(interaction)).not.toThrow();
+		expect(() => emitMessage(events)).not.toThrow();
+		expect(webContents.sent).toHaveLength(0);
+		expect(supervisor.request).not.toHaveBeenCalled();
+
+		setView({
+			state: "ready",
+			serverEpoch: "33333333-3333-4333-8333-333333333333",
+			failure: null,
+		});
+		webContents.sent.length = 0;
+		expect(() => emitMessage(events)).not.toThrow();
+		expect(webContents.sent).toHaveLength(0);
+		expect(supervisor.request).not.toHaveBeenCalled();
 		broker.dispose();
 	});
 
