@@ -220,20 +220,74 @@ function formatDreamHistoryLine(record: DreamHistoryRecord): string {
 	return `${symbol} ${record.status} · ${record.completedAt} · ${record.trigger} · ${formatDreamDuration(record.durationMs)} · ${record.project} · global ${globalChanged} / project ${projectChanged}${reason}`;
 }
 
-const SCHEDULE_WEEKDAYS = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"] as const;
+const SCHEDULE_WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] as const;
 
 function formatScheduleSpec(schedule: ScheduleTask["schedule"]): string {
 	switch (schedule.kind) {
 		case "once":
 			return `${schedule.date} ${schedule.time}`;
 		case "daily":
-			return `每天 ${schedule.time}`;
+			return `Daily at ${schedule.time}`;
 		case "weekly":
-			return `每周 ${schedule.weekdays.map((day) => SCHEDULE_WEEKDAYS[day - 1]).join("、")} ${schedule.time}`;
+			return `Weekly on ${schedule.weekdays.map((day) => SCHEDULE_WEEKDAYS[day - 1]).join(", ")} at ${schedule.time}`;
 		case "monthly":
-			return `每月 ${schedule.day} 日 ${schedule.time}`;
-		case "interval":
-			return `每 ${schedule.every} ${schedule.unit === "minute" ? "分钟" : "小时"}，从 ${schedule.startAt} 开始`;
+			return `Monthly on day ${schedule.day} at ${schedule.time}`;
+		case "interval": {
+			const unit =
+				schedule.unit === "minute"
+					? schedule.every === 1
+						? "minute"
+						: "minutes"
+					: schedule.every === 1
+						? "hour"
+						: "hours";
+			return `Every ${schedule.every} ${unit} from ${schedule.startAt}`;
+		}
+	}
+}
+
+function formatScheduleTaskStatus(status: ScheduleTask["status"]): string {
+	switch (status) {
+		case "active":
+			return "Active";
+		case "paused":
+			return "Paused";
+		case "completed":
+			return "Completed";
+		case "deleting":
+			return "Deleting";
+	}
+}
+
+function formatScheduleRunStatus(status: ScheduleRun["status"]): string {
+	switch (status) {
+		case "queued":
+			return "Queued";
+		case "running":
+			return "Running";
+		case "succeeded":
+			return "Succeeded";
+		case "failed":
+			return "Failed";
+		case "missed":
+			return "Missed";
+		case "skipped":
+			return "Skipped";
+		case "cancelled":
+			return "Cancelled";
+	}
+}
+
+function formatScheduleRunReason(reason: NonNullable<ScheduleRun["reason"]>): string {
+	switch (reason) {
+		case "overlap":
+			return "Another execution was already running";
+		case "offline":
+			return "The scheduler was offline";
+		case "interrupted":
+			return "Execution was interrupted";
+		case "deleted":
+			return "The task was deleted";
 	}
 }
 
@@ -883,15 +937,16 @@ export class InteractiveMode {
 					if (event.type !== "schedule/run-updated" || !event.run.unread) return;
 					const label =
 						event.run.status === "succeeded"
-							? "已完成"
+							? "completed"
 							: event.run.status === "failed"
-								? `失败：${event.run.error?.message ?? "未知错误"}`
+								? `failed: ${event.run.error?.message ?? "Unknown error"}`
 								: event.run.status === "missed"
-									? `未执行：${event.run.reason ?? "错过执行时间"}`
+									? `missed: ${event.run.reason ? formatScheduleRunReason(event.run.reason) : "The scheduled time was missed"}`
 									: event.run.status === "skipped"
-										? `已跳过：${event.run.reason ?? "任务正在运行"}`
+										? `skipped: ${event.run.reason ? formatScheduleRunReason(event.run.reason) : "Another execution is running"}`
 										: undefined;
-					if (label) this.showStatus(`定时任务“${event.task.title}”${label}（${event.task.unreadCount} 条未读）`);
+					if (label)
+						this.showStatus(`Scheduled task “${event.task.title}” ${label} (${event.task.unreadCount} unread)`);
 				});
 			} catch (error) {
 				this.showWarning(error instanceof Error ? error.message : String(error));
@@ -5767,63 +5822,77 @@ export class InteractiveMode {
 			const value = (await this.showExtensionInput(`${title}\n${hint}`))?.trim();
 			if (value === undefined) return undefined;
 			if (pattern.test(value)) return value;
-			this.showWarning(`格式不正确：${hint}`);
+			this.showWarning(`Invalid format: ${hint}`);
 		}
 	}
 
 	private async askScheduleSpec(): Promise<ScheduleInputSpec | undefined> {
-		const recurrence = await this.showExtensionSelector("执行周期", ["仅一次", "每天", "每周", "每月", "按间隔"]);
+		const recurrence = await this.showExtensionSelector("Recurrence", [
+			"Once",
+			"Daily",
+			"Weekly",
+			"Monthly",
+			"Interval",
+		]);
 		if (!recurrence) return undefined;
 		const askTime = () =>
-			this.askScheduleValue("执行时间", /^(?:[01]\d|2[0-3]):[0-5]\d$/, "请输入 HH:mm，例如 09:30");
+			this.askScheduleValue("Run time", /^(?:[01]\d|2[0-3]):[0-5]\d$/, "Enter HH:mm, for example 09:30");
 		let schedule: ScheduleInputSpec | undefined;
-		if (recurrence === "仅一次") {
-			const date = await this.askScheduleValue("执行日期", /^\d{4}-\d{2}-\d{2}$/, "请输入 YYYY-MM-DD");
+		if (recurrence === "Once") {
+			const date = await this.askScheduleValue("Run date", /^\d{4}-\d{2}-\d{2}$/, "Enter YYYY-MM-DD");
 			if (!date) return undefined;
 			const time = await askTime();
 			if (!time) return undefined;
 			schedule = { kind: "once", date, time };
-		} else if (recurrence === "每天") {
+		} else if (recurrence === "Daily") {
 			const time = await askTime();
 			if (!time) return undefined;
 			schedule = { kind: "daily", time };
-		} else if (recurrence === "每周") {
+		} else if (recurrence === "Weekly") {
 			const selected = new Set<number>();
 			while (true) {
 				const remaining = SCHEDULE_WEEKDAYS.map((label, index) => ({ label, day: index + 1 })).filter(
 					({ day }) => !selected.has(day),
 				);
 				const choice = await this.showExtensionSelector(
-					`选择星期${selected.size ? `（已选：${[...selected].map((day) => SCHEDULE_WEEKDAYS[day - 1]).join("、")}）` : ""}`,
-					[...remaining.map(({ label }) => label), ...(selected.size ? ["完成选择"] : [])],
+					`Select weekdays${selected.size ? ` (selected: ${[...selected].map((day) => SCHEDULE_WEEKDAYS[day - 1]).join(", ")})` : ""}`,
+					[...remaining.map(({ label }) => label), ...(selected.size ? ["Done"] : [])],
 				);
 				if (!choice) return undefined;
-				if (choice === "完成选择") break;
+				if (choice === "Done") break;
 				const day = remaining.find(({ label }) => label === choice)?.day;
 				if (day) selected.add(day);
 			}
 			const time = await askTime();
 			if (!time) return undefined;
 			schedule = { kind: "weekly", weekdays: [...selected].sort((a, b) => a - b), time };
-		} else if (recurrence === "每月") {
-			const value = await this.askScheduleValue("每月执行日", /^(?:[1-9]|[12]\d|3[01])$/, "请输入 1 到 31");
+		} else if (recurrence === "Monthly") {
+			const value = await this.askScheduleValue(
+				"Day of month",
+				/^(?:[1-9]|[12]\d|3[01])$/,
+				"Enter an integer from 1 to 31",
+			);
 			if (!value) return undefined;
 			const time = await askTime();
 			if (!time) return undefined;
 			schedule = { kind: "monthly", day: Number(value), time };
 		} else {
-			const value = await this.askScheduleValue("执行间隔", /^[1-9]\d{0,3}$/, "请输入 1 到 10000 的整数");
+			const value = await this.askScheduleValue(
+				"Run interval",
+				/^(?:[1-9]\d{0,3}|10000)$/,
+				"Enter an integer from 1 to 10000",
+			);
 			if (!value || Number(value) > 10_000) return undefined;
-			const unit = await this.showExtensionSelector("间隔单位", ["分钟", "小时"]);
+			const unit = await this.showExtensionSelector("Interval unit", ["Minutes", "Hours"]);
 			if (!unit) return undefined;
-			const startDate = await this.askScheduleValue("开始日期", /^\d{4}-\d{2}-\d{2}$/, "请输入 YYYY-MM-DD");
+			const startDate = await this.askScheduleValue("Start date", /^\d{4}-\d{2}-\d{2}$/, "Enter YYYY-MM-DD");
 			if (!startDate) return undefined;
 			const startTime = await askTime();
 			if (!startTime) return undefined;
 			schedule = {
 				kind: "interval",
 				every: Number(value),
-				unit: unit === "分钟" ? "minute" : "hour",
+				unit: unit === "Minutes" ? "minute" : "hour",
 				startDate,
 				startTime,
 			};
@@ -5837,20 +5906,20 @@ export class InteractiveMode {
 	}
 
 	private async createScheduleTask(manager: ScheduleManager): Promise<void> {
-		const instruction = (await this.showExtensionEditor("任务内容"))?.trim();
-		if (!instruction) return;
 		const schedule = await this.askScheduleSpec();
 		if (!schedule) return;
+		const instruction = (await this.showExtensionEditor("Task instructions"))?.trim();
+		if (!instruction) return;
 		const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 		const confirmation = await this.showExtensionSelector(
-			`确认创建\n任务：${instruction}\n周期：${formatScheduleSpec(
+			`Create task\nInstructions: ${instruction}\nSchedule: ${formatScheduleSpec(
 				schedule.kind === "interval"
 					? { ...schedule, startAt: `${schedule.startDate} ${schedule.startTime}` }
 					: schedule,
-			)}\n时区：${timezone}`,
-			["创建", "取消"],
+			)}\nTime zone: ${timezone}`,
+			["Create"],
 		);
-		if (confirmation !== "创建") return;
+		if (confirmation !== "Create") return;
 		const task = await manager.create({
 			id: randomUUID(),
 			instruction,
@@ -5859,12 +5928,16 @@ export class InteractiveMode {
 			target: this.scheduleTarget(),
 			createdFromSessionId: this.sessionManager.getSessionId(),
 		});
-		this.showStatus(`已创建定时任务“${task.title}”，下次执行：${task.nextRunAt ?? "无"}`);
+		this.showStatus(`Created scheduled task “${task.title}”. Next run: ${task.nextRunAt ?? "none"}`);
 	}
 
 	private async showScheduleRun(manager: ScheduleManager, task: ScheduleTask, run: ScheduleRun): Promise<void> {
 		if (run.unread) run = await manager.markRunRead(task.id, run.id);
-		let result = run.resultPreview ?? run.error?.message ?? run.reason ?? "暂无结果";
+		let result =
+			run.resultPreview ??
+			run.error?.message ??
+			(run.reason ? formatScheduleRunReason(run.reason) : undefined) ??
+			"No result";
 		if (run.sessionFile) {
 			try {
 				const sessionFile = fs.realpathSync(run.sessionFile);
@@ -5887,8 +5960,8 @@ export class InteractiveMode {
 			}
 		}
 		await this.showExtensionSelector(
-			`任务结果 · ${task.title}\n状态：${run.status}\n时间：${run.completedAt ?? run.createdAt}\n\n${result}`,
-			["返回"],
+			`Execution result · ${task.title}\nTask instructions: ${run.snapshot.instruction}\nStatus: ${formatScheduleRunStatus(run.status)}\nTime: ${run.completedAt ?? run.createdAt}\n\nResult:\n${result}`,
+			[],
 		);
 	}
 
@@ -5897,19 +5970,18 @@ export class InteractiveMode {
 		while (true) {
 			const page = await manager.listRuns(task.id, { beforeRunId, limit: 20 });
 			const labels = new Map<string, ScheduleRun>();
-			for (const run of page.runs) {
+			for (const [index, run] of page.runs.entries()) {
 				labels.set(
-					`${run.unread ? "● " : ""}${run.status} · ${run.completedAt ?? run.createdAt} · ${run.id.slice(0, 8)}`,
+					`${index + 1}. ${run.unread ? "● " : ""}${formatScheduleRunStatus(run.status)} · ${run.completedAt ?? run.createdAt}`,
 					run,
 				);
 			}
-			const choice = await this.showExtensionSelector(`执行记录 · ${task.title}`, [
+			const choice = await this.showExtensionSelector(`Execution history · ${task.title}`, [
 				...labels.keys(),
-				...(page.nextBeforeRunId ? ["下一页"] : []),
-				"返回",
+				...(page.nextBeforeRunId ? ["Next page"] : []),
 			]);
-			if (!choice || choice === "返回") return;
-			if (choice === "下一页") {
+			if (!choice) return;
+			if (choice === "Next page") {
 				beforeRunId = page.nextBeforeRunId ?? undefined;
 				continue;
 			}
@@ -5922,45 +5994,91 @@ export class InteractiveMode {
 		while (true) {
 			const task = await manager.get(taskId);
 			const editable = task.status !== "completed" && task.status !== "deleting";
-			const statusAction = task.status === "paused" ? "恢复" : task.status === "active" ? "暂停" : undefined;
+			const statusAction = task.status === "paused" ? "Resume" : task.status === "active" ? "Pause" : undefined;
 			const action = await this.showExtensionSelector(
-				`${task.title}\n任务：${task.instruction}\n周期：${formatScheduleSpec(task.schedule)}\n状态：${task.status}\n下次执行：${task.nextRunAt ?? "无"}`,
+				`${task.title}\nInstructions: ${task.instruction}\nSchedule: ${formatScheduleSpec(task.schedule)}\nStatus: ${formatScheduleTaskStatus(task.status)}\nNext run: ${task.nextRunAt ?? "none"}`,
 				[
-					"查看执行记录",
-					...(editable ? ["修改任务内容", "修改时间和周期"] : []),
+					"View execution history",
+					...(editable ? ["Edit instructions", "Edit schedule"] : []),
 					...(statusAction ? [statusAction] : []),
-					"立即运行",
-					"删除",
-					"返回",
+					"Run now",
+					"Delete",
 				],
 			);
-			if (!action || action === "返回") return;
-			if (action === "查看执行记录") {
+			if (!action) return;
+			if (action === "View execution history") {
 				await this.showScheduleRuns(manager, task);
-			} else if (action === "修改任务内容") {
-				const instruction = (await this.showExtensionEditor("任务内容", task.instruction))?.trim();
+			} else if (action === "Edit instructions") {
+				const instruction = (await this.showExtensionEditor("Task instructions", task.instruction))?.trim();
 				if (instruction) await manager.update(task.id, { instruction });
-			} else if (action === "修改时间和周期") {
+			} else if (action === "Edit schedule") {
 				const schedule = await this.askScheduleSpec();
 				if (schedule) await manager.update(task.id, { schedule });
-			} else if (action === "暂停") {
+			} else if (action === "Pause") {
 				await manager.pause(task.id);
-			} else if (action === "恢复") {
+			} else if (action === "Resume") {
 				await manager.resume(task.id);
-			} else if (action === "立即运行") {
+			} else if (action === "Run now") {
 				await manager.runNow(task.id, randomUUID());
-				this.showStatus(`定时任务“${task.title}”已加入执行队列`);
-			} else if (action === "删除") {
+				this.showStatus(`Scheduled task “${task.title}” was queued to run`);
+			} else if (action === "Delete") {
 				const confirmed = await this.showExtensionSelector(
-					`删除“${task.title}”？\n将删除该任务的全部执行记录、隐藏会话和任务专属目录；不会删除项目或用户固定目录。`,
-					["确认删除", "取消"],
+					`Delete “${task.title}”?\nThis removes all execution history, hidden sessions, and the task-owned directory. It does not delete the project or a user-selected directory.`,
+					["Delete"],
 				);
-				if (confirmed === "确认删除") {
+				if (confirmed === "Delete") {
 					await manager.delete(task.id);
-					this.showStatus(`已删除定时任务“${task.title}”`);
+					this.showStatus(`Deleted scheduled task “${task.title}”`);
 					return;
 				}
 			}
+		}
+	}
+
+	private async showScheduleTasks(manager: ScheduleManager): Promise<void> {
+		let afterTaskId: string | undefined;
+		while (true) {
+			const page = await manager.list({ afterTaskId, limit: 50 });
+			const labels = new Map<string, string>();
+			for (const [index, task] of page.tasks.entries()) {
+				const label = `${index + 1}. ${task.unreadCount ? `●${task.unreadCount} ` : ""}${task.title} · ${formatScheduleTaskStatus(task.status)} · ${formatScheduleSpec(task.schedule)} · ${task.nextRunAt ?? "No next run"}`;
+				labels.set(label, task.id);
+			}
+			const choice = await this.showExtensionSelector(
+				labels.size ? "Scheduled tasks" : "Scheduled tasks\nNo scheduled tasks",
+				[...labels.keys(), ...(page.nextAfterTaskId ? ["Next page"] : [])],
+			);
+			if (!choice) return;
+			if (choice === "Next page") {
+				afterTaskId = page.nextAfterTaskId ?? undefined;
+				continue;
+			}
+			const taskId = labels.get(choice);
+			if (taskId) await this.showScheduleTask(manager, taskId);
+		}
+	}
+
+	private async showScheduleHistory(manager: ScheduleManager): Promise<void> {
+		let afterTaskId: string | undefined;
+		while (true) {
+			const page = await manager.list({ afterTaskId, limit: 50, withRunsOnly: true });
+			const labels = new Map<string, ScheduleTask>();
+			for (const [index, task] of page.tasks.entries()) {
+				if (!task.lastRun) continue;
+				const label = `${index + 1}. ${task.unreadCount ? `●${task.unreadCount} ` : ""}${task.title} · ${formatScheduleRunStatus(task.lastRun.status)} · ${task.lastRun.completedAt ?? task.lastRun.createdAt}`;
+				labels.set(label, task);
+			}
+			const choice = await this.showExtensionSelector(
+				labels.size ? "Execution history" : "Execution history\nNo execution history",
+				[...labels.keys(), ...(page.nextAfterTaskId ? ["Next page"] : [])],
+			);
+			if (!choice) return;
+			if (choice === "Next page") {
+				afterTaskId = page.nextAfterTaskId ?? undefined;
+				continue;
+			}
+			const task = labels.get(choice);
+			if (task) await this.showScheduleRuns(manager, task);
 		}
 	}
 
@@ -5968,39 +6086,21 @@ export class InteractiveMode {
 		if (this.guardSessionMutation()) return;
 		const manager = this.options.scheduleManager;
 		if (!manager) {
-			this.showWarning("当前进程未启用定时任务");
+			this.showWarning("Scheduled tasks are not enabled in this process");
 			return;
 		}
-		let afterTaskId: string | undefined;
-		let unreadOnly = false;
 		try {
 			while (true) {
-				const page = await manager.list({ afterTaskId, limit: 50, unreadOnly });
-				const labels = new Map<string, string>();
-				for (const task of page.tasks) {
-					const label = `${task.unreadCount ? `●${task.unreadCount} ` : ""}${task.title} · ${task.status} · ${task.nextRunAt ?? "无下次执行"} · ${task.id.slice(0, 8)}`;
-					labels.set(label, task.id);
-				}
-				const choice = await this.showExtensionSelector(unreadOnly ? "定时任务 · 未读结果" : "定时任务", [
-					"创建任务",
-					unreadOnly ? "查看全部任务" : "只看未读结果",
-					...labels.keys(),
-					...(page.nextAfterTaskId ? ["下一页"] : []),
-					"关闭",
+				const choice = await this.showExtensionSelector("Schedule", [
+					"Create task",
+					"Scheduled tasks",
+					"Execution history",
 				]);
-				if (!choice || choice === "关闭") return;
-				if (choice === "创建任务") {
+				if (!choice) return;
+				if (choice === "Create task") {
 					await this.createScheduleTask(manager);
-					afterTaskId = undefined;
-				} else if (choice === "只看未读结果" || choice === "查看全部任务") {
-					unreadOnly = !unreadOnly;
-					afterTaskId = undefined;
-				} else if (choice === "下一页") {
-					afterTaskId = page.nextAfterTaskId ?? undefined;
-				} else {
-					const taskId = labels.get(choice);
-					if (taskId) await this.showScheduleTask(manager, taskId);
-				}
+				} else if (choice === "Scheduled tasks") await this.showScheduleTasks(manager);
+				else if (choice === "Execution history") await this.showScheduleHistory(manager);
 			}
 		} catch (error) {
 			this.showError(error instanceof Error ? error.message : String(error));

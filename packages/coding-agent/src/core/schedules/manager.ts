@@ -352,13 +352,16 @@ export class ScheduleManager {
 		}
 	}
 
-	async list(input: { afterTaskId?: string; limit?: number; unreadOnly?: boolean } = {}): Promise<ScheduleTaskPage> {
+	async list(
+		input: { afterTaskId?: string; limit?: number; unreadOnly?: boolean; withRunsOnly?: boolean } = {},
+	): Promise<ScheduleTaskPage> {
 		this.assertHealthy();
 		if (input.afterTaskId) assertValidSessionId(input.afterTaskId);
 		const limit = Math.min(input.limit ?? 50, MAX_LIST_ITEMS);
 		if (!Number.isSafeInteger(limit) || limit < 1) throw new TypeError("Invalid task page limit");
 		let tasks = [...this.callStore(() => this.store.readIndex().tasks)]
 			.filter((task) => !input.unreadOnly || task.unreadCount > 0)
+			.filter((task) => !input.withRunsOnly || task.lastRun !== undefined)
 			.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt) || right.id.localeCompare(left.id));
 		if (input.afterTaskId) {
 			const cursor = tasks.findIndex(({ id }) => id === input.afterTaskId);

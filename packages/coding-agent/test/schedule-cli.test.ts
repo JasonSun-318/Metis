@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import type { ScheduleManager } from "../src/core/schedules/manager.ts";
-import type { ScheduleRun, ScheduleTask } from "../src/core/schedules/types.ts";
+import type { ScheduleInputSpec, ScheduleRun, ScheduleTask } from "../src/core/schedules/types.ts";
 import { SessionManager } from "../src/core/session-manager.ts";
 import { BUILTIN_SLASH_COMMANDS } from "../src/core/slash-commands.ts";
 import { InteractiveMode } from "../src/modes/interactive/interactive-mode.ts";
@@ -13,8 +13,8 @@ const TASK_ID = "20000000-0000-4000-8000-000000000001";
 function task(): ScheduleTask {
 	return {
 		id: TASK_ID,
-		title: "提交报告",
-		instruction: "提交报告",
+		title: "Submit report",
+		instruction: "Submit report",
 		schedule: { kind: "once", date: "2026-08-03", time: "09:30" },
 		timezone: "Asia/Shanghai",
 		target: { kind: "project", cwd: "/project" },
@@ -33,12 +33,31 @@ describe("/schedule", () => {
 		expect(commands).toEqual([{ name: "schedule", description: "Manage scheduled tasks" }]);
 	});
 
+	it("opens exactly three root choices and closes with Esc", async () => {
+		let title = "";
+		let choices: string[] = [];
+		const mode = Object.create(InteractiveMode.prototype) as InteractiveMode & Record<string, unknown>;
+		Object.assign(mode, {
+			options: { scheduleManager: {} as ScheduleManager },
+			guardSessionMutation: () => false,
+			showExtensionSelector: vi.fn(async (nextTitle: string, nextChoices: string[]) => {
+				title = nextTitle;
+				choices = nextChoices;
+				return undefined;
+			}),
+			showError: vi.fn(),
+		});
+
+		await (mode as unknown as { handleScheduleCommand(): Promise<void> }).handleScheduleCommand();
+		expect(title).toBe("Schedule");
+		expect(choices).toEqual(["Create task", "Scheduled tasks", "Execution history"]);
+	});
+
 	it("creates through structured instruction, recurrence, date, and time fields only", async () => {
 		const manager = {
-			list: vi.fn(async () => ({ tasks: [], nextAfterTaskId: null })),
 			create: vi.fn(async () => task()),
 		} as unknown as ScheduleManager;
-		const selectorChoices = ["创建任务", "仅一次", "创建", "关闭"];
+		const selectorChoices: Array<string | undefined> = ["Create task", "Once", "Create", undefined];
 		const inputValues = ["2026-08-03", "09:30"];
 		const dialogs: string[] = [];
 		const mode = Object.create(InteractiveMode.prototype) as InteractiveMode & Record<string, unknown>;
@@ -57,7 +76,7 @@ describe("/schedule", () => {
 			guardSessionMutation: () => false,
 			showExtensionEditor: vi.fn(async (title: string) => {
 				dialogs.push(title);
-				return "提交报告";
+				return "Submit report";
 			}),
 			showExtensionInput: vi.fn(async (title: string) => {
 				dialogs.push(title);
@@ -76,17 +95,179 @@ describe("/schedule", () => {
 		await (mode as unknown as { handleScheduleCommand(): Promise<void> }).handleScheduleCommand();
 		expect(manager.create).toHaveBeenCalledWith(
 			expect.objectContaining({
-				instruction: "提交报告",
+				instruction: "Submit report",
 				schedule: { kind: "once", date: "2026-08-03", time: "09:30" },
 				target: { kind: "project", cwd: "/project" },
 				createdFromSessionId: "source-session",
 			}),
 		);
-		expect(dialogs.join("\n")).toContain("任务内容");
-		expect(dialogs.join("\n")).toContain("执行周期");
-		expect(dialogs.join("\n")).toContain("执行日期");
-		expect(dialogs.join("\n")).toContain("执行时间");
-		expect(dialogs.join("\n")).not.toMatch(/模式|项目路径|模型|权限|沙箱|设置/);
+		expect(dialogs.join("\n")).toContain("Task instructions");
+		expect(dialogs.join("\n")).toContain("Recurrence");
+		expect(dialogs.join("\n")).toContain("Run date");
+		expect(dialogs.join("\n")).toContain("Run time");
+		expect(dialogs.findIndex((title) => title.includes("Recurrence"))).toBeLessThan(
+			dialogs.findIndex((title) => title.includes("Task instructions")),
+		);
+		expect(dialogs.join("\n")).not.toMatch(/mode|project path|model|permission|sandbox|settings/i);
+	});
+
+	it("accepts the documented maximum interval", async () => {
+		const selectorChoices = ["Interval", "Minutes"];
+		const inputValues = ["10000", "2026-08-03", "09:30"];
+		const mode = Object.create(InteractiveMode.prototype) as InteractiveMode & Record<string, unknown>;
+		Object.assign(mode, {
+			showExtensionSelector: vi.fn(async () => selectorChoices.shift()),
+			showExtensionInput: vi.fn(async () => inputValues.shift()),
+			showWarning: vi.fn(),
+		});
+
+		const schedule = await (
+			mode as unknown as { askScheduleSpec(): Promise<ScheduleInputSpec | undefined> }
+		).askScheduleSpec();
+		expect(schedule).toEqual({
+			kind: "interval",
+			every: 10_000,
+			unit: "minute",
+			startDate: "2026-08-03",
+			startTime: "09:30",
+		});
+		expect(inputValues).toEqual([]);
+	});
+
+	it("separates task plans from execution history, keeps duplicate rows, and localizes statuses", async () => {
+		const latestRun: ScheduleRun = {
+			id: "run-latest",
+			taskId: TASK_ID,
+			sequence: 1,
+			trigger: "scheduled",
+			status: "succeeded",
+			scheduledFor: "2026-08-03T01:30:00.000Z",
+			createdAt: "2026-08-03T01:30:00.000Z",
+			completedAt: "2026-08-03T01:31:00.000Z",
+			resultPreview: "Submitted",
+			unread: true,
+			snapshot: {
+				instruction: "Submit report",
+				schedule: task().schedule,
+				timezone: "Asia/Shanghai",
+				target: { kind: "project", cwd: "/project" },
+			},
+		};
+		const duplicateTask = {
+			...task(),
+			id: "20000000-0000-4000-8000-000000000002",
+			lastRun: { ...latestRun, taskId: "20000000-0000-4000-8000-000000000002" },
+		};
+		const manager = {
+			list: vi.fn(async () => ({
+				tasks: [
+					{ ...task(), unreadCount: 1, lastRun: latestRun },
+					{ ...duplicateTask, unreadCount: 1 },
+				],
+				nextAfterTaskId: null,
+			})),
+		} as unknown as ScheduleManager;
+		const dialogs: Array<{ title: string; choices: string[] }> = [];
+		const mode = Object.create(InteractiveMode.prototype) as InteractiveMode & Record<string, unknown>;
+		Object.assign(mode, {
+			showExtensionSelector: vi.fn(async (title: string, choices: string[]) => {
+				dialogs.push({ title, choices });
+				return undefined;
+			}),
+		});
+
+		await (mode as unknown as { showScheduleTasks(manager: ScheduleManager): Promise<void> }).showScheduleTasks(
+			manager,
+		);
+		await (mode as unknown as { showScheduleHistory(manager: ScheduleManager): Promise<void> }).showScheduleHistory(
+			manager,
+		);
+		expect(dialogs[0]).toMatchObject({ title: "Scheduled tasks" });
+		expect(dialogs[0]!.choices).toHaveLength(2);
+		expect(dialogs[0]!.choices[0]).toContain("Active");
+		expect(dialogs[1]).toMatchObject({ title: "Execution history" });
+		expect(dialogs[1]!.choices).toHaveLength(2);
+		expect(dialogs[1]!.choices[0]).toContain("Succeeded");
+		expect(manager.list).toHaveBeenNthCalledWith(2, { afterTaskId: undefined, limit: 50, withRunsOnly: true });
+		for (const dialog of dialogs)
+			expect(dialog.choices).not.toEqual(expect.arrayContaining(["Close", "Back", "Cancel"]));
+	});
+
+	it("renders internal run reasons as user-facing English", async () => {
+		const run: ScheduleRun = {
+			id: "run-overlap",
+			taskId: TASK_ID,
+			sequence: 1,
+			trigger: "scheduled",
+			status: "skipped",
+			scheduledFor: "2026-08-03T01:30:00.000Z",
+			createdAt: "2026-08-03T01:30:00.000Z",
+			completedAt: "2026-08-03T01:30:00.000Z",
+			reason: "overlap",
+			unread: false,
+			snapshot: {
+				instruction: "Submit report",
+				schedule: task().schedule,
+				timezone: "Asia/Shanghai",
+				target: { kind: "project", cwd: "/project" },
+			},
+		};
+		let dialog = "";
+		const mode = Object.create(InteractiveMode.prototype) as InteractiveMode & Record<string, unknown>;
+		Object.assign(mode, {
+			showExtensionSelector: vi.fn(async (title: string) => {
+				dialog = title;
+				return undefined;
+			}),
+		});
+
+		await (
+			mode as unknown as {
+				showScheduleRun(manager: ScheduleManager, task: ScheduleTask, run: ScheduleRun): Promise<void>;
+			}
+		).showScheduleRun({ agentDir: "/tmp/unused" } as ScheduleManager, task(), run);
+		expect(dialog).toContain("Another execution was already running");
+		expect(dialog).not.toContain("overlap");
+	});
+
+	it("keeps execution rows selectable when run IDs share a prefix", async () => {
+		const firstRun: ScheduleRun = {
+			id: "run-prefix-0001",
+			taskId: TASK_ID,
+			sequence: 1,
+			trigger: "scheduled",
+			status: "succeeded",
+			scheduledFor: "2026-08-03T01:30:00.000Z",
+			createdAt: "2026-08-03T01:30:00.000Z",
+			completedAt: "2026-08-03T01:31:00.000Z",
+			resultPreview: "Submitted",
+			unread: false,
+			snapshot: {
+				instruction: task().instruction,
+				schedule: task().schedule,
+				timezone: task().timezone,
+				target: task().target,
+			},
+		};
+		const manager = {
+			listRuns: vi.fn(async () => ({
+				runs: [firstRun, { ...firstRun, id: "run-prefix-0002", sequence: 2 }],
+				nextBeforeRunId: null,
+			})),
+		} as unknown as ScheduleManager;
+		let choices: string[] = [];
+		const mode = Object.create(InteractiveMode.prototype) as InteractiveMode & Record<string, unknown>;
+		Object.assign(mode, {
+			showExtensionSelector: vi.fn(async (_title: string, nextChoices: string[]) => {
+				choices = nextChoices;
+				return undefined;
+			}),
+		});
+
+		await (
+			mode as unknown as { showScheduleRuns(manager: ScheduleManager, task: ScheduleTask): Promise<void> }
+		).showScheduleRuns(manager, task());
+		expect(choices).toHaveLength(2);
 	});
 
 	it("does not offer invalid edit or pause actions after a one-time task completes", async () => {
@@ -98,15 +279,16 @@ describe("/schedule", () => {
 		Object.assign(mode, {
 			showExtensionSelector: vi.fn(async (_title: string, choices: string[]) => {
 				actions = choices;
-				return "返回";
+				return undefined;
 			}),
 		});
 
 		await (
 			mode as unknown as { showScheduleTask(manager: ScheduleManager, taskId: string): Promise<void> }
 		).showScheduleTask(manager, TASK_ID);
-		expect(actions).not.toEqual(expect.arrayContaining(["修改任务内容", "修改时间和周期", "暂停", "恢复"]));
-		expect(actions).toEqual(expect.arrayContaining(["查看执行记录", "立即运行", "删除", "返回"]));
+		expect(actions).not.toEqual(expect.arrayContaining(["Edit instructions", "Edit schedule", "Pause", "Resume"]));
+		expect(actions).toEqual(expect.arrayContaining(["View execution history", "Run now", "Delete"]));
+		expect(actions).not.toContain("Back");
 	});
 
 	it("never opens a result journal outside the task-owned session directory", async () => {
@@ -145,21 +327,23 @@ describe("/schedule", () => {
 				completedAt: "2026-07-26T00:01:00Z",
 				sessionId: "forged-session",
 				sessionFile,
-				resultPreview: "安全摘要",
+				resultPreview: "Safe summary",
 				unread: false,
 				snapshot: {
-					instruction: task().instruction,
+					instruction: "Original task instructions",
 					schedule: task().schedule,
 					timezone: task().timezone,
 					target: task().target,
 				},
 			};
 			let dialog = "";
+			let choices: string[] = [];
 			const mode = Object.create(InteractiveMode.prototype) as InteractiveMode & Record<string, unknown>;
 			Object.assign(mode, {
-				showExtensionSelector: vi.fn(async (title: string) => {
+				showExtensionSelector: vi.fn(async (title: string, nextChoices: string[]) => {
 					dialog = title;
-					return "返回";
+					choices = nextChoices;
+					return undefined;
 				}),
 			});
 
@@ -168,8 +352,11 @@ describe("/schedule", () => {
 					showScheduleRun(manager: ScheduleManager, task: ScheduleTask, run: ScheduleRun): Promise<void>;
 				}
 			).showScheduleRun({ agentDir: join(root, "agent") } as ScheduleManager, task(), run);
-			expect(dialog).toContain("安全摘要");
+			expect(dialog).toContain("Safe summary");
+			expect(dialog).toContain("Task instructions: Original task instructions");
+			expect(dialog).toContain("Status: Succeeded");
 			expect(dialog).not.toContain("FORGED SECRET");
+			expect(choices).toEqual([]);
 		} finally {
 			rmSync(root, { recursive: true, force: true });
 		}

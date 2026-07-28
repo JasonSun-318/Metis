@@ -636,6 +636,48 @@ describe("schedule manager", () => {
 		await manager.stop();
 	});
 
+	it("filters execution history before pagination", async () => {
+		const agentDir = tempDir();
+		const fixed = join(agentDir, "fixed");
+		mkdirSync(fixed);
+		const manager = ScheduleManager.create({ agentDir, now: fixedNow });
+		const target = { kind: "general", workspace: "fixed", cwd: fixed } as const;
+		await manager.create({
+			id: "z-no-run",
+			instruction: "No run",
+			schedule: { kind: "daily", time: "10:00" },
+			timezone: "Asia/Shanghai",
+			target,
+		});
+		const withRun = await manager.create({
+			id: "a-with-run",
+			instruction: "Has run",
+			schedule: { kind: "daily", time: "11:00" },
+			timezone: "Asia/Shanghai",
+			target,
+		});
+		await ScheduleStore.open(agentDir).mutate((draft) => {
+			const index = draft.tasks.findIndex(({ id }) => id === withRun.id);
+			draft.tasks[index] = {
+				...draft.tasks[index],
+				lastRun: {
+					id: "run-history",
+					taskId: withRun.id,
+					sequence: 1,
+					status: "succeeded",
+					scheduledFor: fixedNow().toISOString(),
+					createdAt: fixedNow().toISOString(),
+					completedAt: fixedNow().toISOString(),
+					unread: false,
+				},
+			};
+		});
+
+		const page = await manager.list({ limit: 1, withRunsOnly: true });
+		expect(page.tasks.map(({ id }) => id)).toEqual([withRun.id]);
+		expect(page.nextAfterTaskId).toBeNull();
+	});
+
 	it("validates once schedules, fixed workspaces, pagination, and event delivery", async () => {
 		const agentDir = tempDir();
 		const fixed = join(agentDir, "fixed");
