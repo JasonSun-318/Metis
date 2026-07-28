@@ -136,7 +136,6 @@ function isPlainRuntimeMetadataCommand(parsed: Args): boolean {
 
 async function prepareInitialMessage(
 	parsed: Args,
-	autoResizeImages: boolean,
 	stdinContent?: string,
 ): Promise<{
 	initialMessage?: string;
@@ -146,7 +145,7 @@ async function prepareInitialMessage(
 		return buildInitialMessage({ parsed, stdinContent });
 	}
 
-	const { text, images } = await processFileArguments(parsed.fileArgs, { autoResizeImages });
+	const { text, images } = await processFileArguments(parsed.fileArgs);
 	return buildInitialMessage({
 		parsed,
 		fileText: text,
@@ -976,11 +975,7 @@ export async function main(args: string[], options?: MainOptions) {
 			}
 			time("readPipedStdin");
 
-			const { initialMessage, initialImages } = await prepareInitialMessage(
-				parsed,
-				settingsManager.getImageAutoResize(),
-				stdinContent,
-			);
+			const { initialMessage, initialImages } = await prepareInitialMessage(parsed, stdinContent);
 			time("prepareInitialMessage");
 			initTheme(settingsManager.getTheme(), appMode === "interactive");
 			time("initTheme");

@@ -367,7 +367,6 @@ export {
 export {
 	type CompactionSettings,
 	type DefaultProjectTrust,
-	type ImageSettings,
 	type McpCommonServerSettings,
 	type McpHttpServerSettings,
 	type McpServerSettings,

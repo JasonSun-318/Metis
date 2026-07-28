@@ -4218,7 +4218,6 @@ export class AgentSession {
 		flagValues?: Map<string, boolean | string>;
 		includeAllExtensionTools?: boolean;
 	}): void {
-		const autoResizeImages = this.settingsManager.getImageAutoResize();
 		const shellCommandPrefix = this._unattendedExecution ? undefined : this.settingsManager.getShellCommandPrefix();
 		const shellPath = this._unattendedExecution ? undefined : this.settingsManager.getShellPath();
 		this._runtimeShellCommandPrefix = shellCommandPrefix;
@@ -4230,7 +4229,6 @@ export class AgentSession {
 					]),
 				)
 			: createAllToolDefinitions(this._cwd, {
-					read: { autoResizeImages },
 					bash: {
 						operations: this._unattendedExecution?.bashOperations,
 						commandPrefix: shellCommandPrefix,

@@ -2719,9 +2719,7 @@ export class InteractiveMode {
 					);
 					return;
 				}
-				const processed = await processImage(image.bytes, image.mimeType, {
-					autoResizeImages: this.settingsManager.getImageAutoResize(),
-				});
+				const processed = await processImage(image.bytes, image.mimeType);
 				if (!processed.ok) {
 					this.showWarning(processed.message);
 					return;
@@ -3317,10 +3315,7 @@ export class InteractiveMode {
 									content.name,
 									content.id,
 									content.arguments,
-									{
-										showImages: this.settingsManager.getShowImages(),
-										imageWidthCells: this.settingsManager.getImageWidthCells(),
-									},
+									{},
 									this.getRegisteredToolDefinition(content.name),
 									this.ui,
 									this.sessionManager.getCwd(),
@@ -3387,10 +3382,7 @@ export class InteractiveMode {
 						event.toolName,
 						event.toolCallId,
 						event.args,
-						{
-							showImages: this.settingsManager.getShowImages(),
-							imageWidthCells: this.settingsManager.getImageWidthCells(),
-						},
+						{},
 						this.getRegisteredToolDefinition(event.toolName),
 						this.ui,
 						this.sessionManager.getCwd(),
@@ -3716,10 +3708,7 @@ export class InteractiveMode {
 							content.name,
 							content.id,
 							content.arguments,
-							{
-								showImages: this.settingsManager.getShowImages(),
-								imageWidthCells: this.settingsManager.getImageWidthCells(),
-							},
+							{},
 							this.getRegisteredToolDefinition(content.name),
 							this.ui,
 							this.sessionManager.getCwd(),
@@ -4506,10 +4495,6 @@ export class InteractiveMode {
 			const selector = new SettingsSelectorComponent(
 				{
 					autoCompact: this.session.autoCompactionEnabled,
-					showImages: this.settingsManager.getShowImages(),
-					imageWidthCells: this.settingsManager.getImageWidthCells(),
-					autoResizeImages: this.settingsManager.getImageAutoResize(),
-					blockImages: this.settingsManager.getBlockImages(),
 					enableSkillCommands: this.settingsManager.getEnableSkillCommands(),
 					steeringMode: this.session.steeringMode,
 					followUpMode: this.session.followUpMode,
@@ -4540,28 +4525,6 @@ export class InteractiveMode {
 					onAutoCompactChange: (enabled) => {
 						this.session.setAutoCompactionEnabled(enabled);
 						this.footer.setAutoCompactEnabled(enabled);
-					},
-					onShowImagesChange: (enabled) => {
-						this.settingsManager.setShowImages(enabled);
-						for (const child of this.chatContainer.children) {
-							if (child instanceof ToolExecutionComponent) {
-								child.setShowImages(enabled);
-							}
-						}
-					},
-					onImageWidthCellsChange: (width) => {
-						this.settingsManager.setImageWidthCells(width);
-						for (const child of this.chatContainer.children) {
-							if (child instanceof ToolExecutionComponent) {
-								child.setImageWidthCells(width);
-							}
-						}
-					},
-					onAutoResizeImagesChange: (enabled) => {
-						this.settingsManager.setImageAutoResize(enabled);
-					},
-					onBlockImagesChange: (blocked) => {
-						this.settingsManager.setBlockImages(blocked);
 					},
 					onEnableSkillCommandsChange: (enabled) => {
 						this.settingsManager.setEnableSkillCommands(enabled);

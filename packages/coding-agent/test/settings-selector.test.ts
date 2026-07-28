@@ -11,10 +11,6 @@ import { stripAnsi } from "../src/utils/ansi.ts";
 
 const config = {
 	autoCompact: true,
-	showImages: true,
-	imageWidthCells: 60,
-	autoResizeImages: true,
-	blockImages: false,
 	enableSkillCommands: true,
 	steeringMode: "one-at-a-time",
 	followUpMode: "one-at-a-time",
@@ -52,6 +48,10 @@ describe("settings selector web search controls", () => {
 		const text = stripAnsi(new SettingsSelectorComponent(config, callbacks).render(120).join("\n"));
 		expect(text).toContain("Web search");
 		expect(text).toContain("Disabled");
+		expect(text).not.toContain("Show images");
+		expect(text).not.toContain("Image width");
+		expect(text).not.toContain("Auto-resize images");
+		expect(text).not.toContain("Block images");
 	});
 
 	it("routes provider and disable choices through one submenu", () => {

@@ -2,7 +2,6 @@ import type { Transport } from "@arcmind/ai";
 import {
 	type Component,
 	Container,
-	getCapabilities,
 	type SelectItem,
 	SelectList,
 	type SelectListLayoutOptions,
@@ -57,10 +56,6 @@ const DEFAULT_PROJECT_TRUST_BY_LABEL = new Map(
 
 export interface SettingsConfig {
 	autoCompact: boolean;
-	showImages: boolean;
-	imageWidthCells: number;
-	autoResizeImages: boolean;
-	blockImages: boolean;
 	enableSkillCommands: boolean;
 	steeringMode: "all" | "one-at-a-time";
 	followUpMode: "all" | "one-at-a-time";
@@ -90,10 +85,6 @@ export interface SettingsConfig {
 
 export interface SettingsCallbacks {
 	onAutoCompactChange: (enabled: boolean) => void;
-	onShowImagesChange: (enabled: boolean) => void;
-	onImageWidthCellsChange: (width: number) => void;
-	onAutoResizeImagesChange: (enabled: boolean) => void;
-	onBlockImagesChange: (blocked: boolean) => void;
 	onEnableSkillCommandsChange: (enabled: boolean) => void;
 	onSteeringModeChange: (mode: "all" | "one-at-a-time") => void;
 	onFollowUpModeChange: (mode: "all" | "one-at-a-time") => void;
@@ -436,7 +427,6 @@ export class SettingsSelectorComponent extends Container {
 	constructor(config: SettingsConfig, callbacks: SettingsCallbacks) {
 		super();
 
-		const supportsImages = getCapabilities().images;
 		const followUpKey = keyDisplayText("app.message.followUp");
 		const items: SettingItem[] = [
 			{
@@ -557,47 +547,7 @@ export class SettingsSelectorComponent extends Container {
 			},
 		];
 
-		// Only show image toggle if terminal supports it
-		if (supportsImages) {
-			// Insert after autocompact
-			items.splice(1, 0, {
-				id: "show-images",
-				label: "Show images",
-				description: "Render images inline in terminal",
-				currentValue: config.showImages ? "true" : "false",
-				values: ["true", "false"],
-			});
-			items.splice(2, 0, {
-				id: "image-width-cells",
-				label: "Image width",
-				description: "Preferred inline image width in terminal cells",
-				currentValue: String(config.imageWidthCells),
-				values: ["60", "80", "120"],
-			});
-		}
-
-		// Image auto-resize toggle (always available, affects both attached and read images)
-		items.splice(supportsImages ? 3 : 1, 0, {
-			id: "auto-resize-images",
-			label: "Auto-resize images",
-			description: "Resize large images to 2000x2000 max for better model compatibility",
-			currentValue: config.autoResizeImages ? "true" : "false",
-			values: ["true", "false"],
-		});
-
-		// Block images toggle (always available, insert after auto-resize-images)
-		const autoResizeIndex = items.findIndex((item) => item.id === "auto-resize-images");
-		items.splice(autoResizeIndex + 1, 0, {
-			id: "block-images",
-			label: "Block images",
-			description: "Prevent images from being sent to LLM providers",
-			currentValue: config.blockImages ? "true" : "false",
-			values: ["true", "false"],
-		});
-
-		// Skill commands toggle (insert after block-images)
-		const blockImagesIndex = items.findIndex((item) => item.id === "block-images");
-		items.splice(blockImagesIndex + 1, 0, {
+		items.splice(1, 0, {
 			id: "skill-commands",
 			label: "Skill commands",
 			description: "Register skills as /skill:name commands",
@@ -710,18 +660,6 @@ export class SettingsSelectorComponent extends Container {
 						if (provider) callbacks.onWebSearchProviderChange(provider);
 						break;
 					}
-					case "show-images":
-						callbacks.onShowImagesChange(newValue === "true");
-						break;
-					case "image-width-cells":
-						callbacks.onImageWidthCellsChange(parseInt(newValue, 10));
-						break;
-					case "auto-resize-images":
-						callbacks.onAutoResizeImagesChange(newValue === "true");
-						break;
-					case "block-images":
-						callbacks.onBlockImagesChange(newValue === "true");
-						break;
 					case "skill-commands":
 						callbacks.onEnableSkillCommandsChange(newValue === "true");
 						break;

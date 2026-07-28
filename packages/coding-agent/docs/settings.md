@@ -169,15 +169,13 @@ Keep `retry.provider.maxRetries` at `0` unless provider-level retries are explic
 | `httpIdleTimeoutMs` | number | `300000` | HTTP header/body idle timeout in milliseconds, also used by providers with explicit stream idle timeouts. Set to `0` to disable. |
 | `websocketConnectTimeoutMs` | number | `15000` | WebSocket connect/open handshake timeout in milliseconds for providers that support WebSocket transports. Set to `0` to disable. |
 
-### Terminal & Images
+### Terminal
 
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|
-| `terminal.showImages` | boolean | `true` | Show images in terminal (if supported) |
-| `terminal.imageWidthCells` | number | `60` | Preferred inline image width in terminal cells |
 | `terminal.clearOnShrink` | boolean | `false` | Clear empty rows when content shrinks (can cause flicker) |
-| `images.autoResize` | boolean | `true` | Resize images to 2000x2000 max |
-| `images.blockImages` | boolean | `false` | Block all images from being sent to LLM |
+
+Supported terminals always render images with an adaptive maximum width of 60 cells. Built-in attachment and read paths always normalize and resize images to provider-safe dimensions and payload sizes when necessary, and image content is preserved for the model.
 
 ### Shell
 
