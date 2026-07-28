@@ -315,6 +315,39 @@ describe("golden protocol fixtures", () => {
 		expect(validateServerNotification(envelope)).toEqual(envelope);
 	});
 
+	it("accepts runtime identity fields in active subagent snapshots", () => {
+		const request = requestFor("client", "session/subscribe");
+		const response = structuredClone(
+			responses.find((entry) => entry.direction === "client" && entry.method === "session/subscribe")!.envelope,
+		) as {
+			result: { snapshot: { subagents: Array<Record<string, unknown>> } };
+		};
+		response.result.snapshot.subagents = [
+			{
+				agentId: "22222222-2222-4222-8222-222222222222",
+				runId: RUN_ID,
+				name: "researcher",
+				status: "stopped",
+				background: false,
+				taskSummary: "Inspect the runtime",
+				configuration: {
+					mode: "code",
+					tools: ["read"],
+					permissionMode: "ask",
+					model: { provider: "openai", modelId: "gpt-test" },
+					thinkingLevel: "max",
+					cwd: "/tmp/arcmind-project",
+					forkTurns: 0,
+					timeoutSeconds: 1800,
+				},
+				createdAt: "2026-07-16T00:00:12.000Z",
+				updatedAt: "2026-07-16T00:00:13.000Z",
+			},
+		];
+
+		expect(validateResponseFor("client", request.envelope, response)).toEqual(response);
+	});
+
 	it.each([
 		["auto", "permissionMode", "auto"],
 		["readPaths", "readPaths", ["/tmp/project"]],

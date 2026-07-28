@@ -4019,6 +4019,11 @@
                                     "format": "date-time",
                                     "maxLength": 40
                                   },
+                                  "runId": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                                  },
                                   "status": {
                                     "anyOf": [
                                       {
@@ -4046,6 +4051,9 @@
                                         "const": "close_failed"
                                       }
                                     ]
+                                  },
+                                  "background": {
+                                    "type": "boolean"
                                   },
                                   "configuration": {
                                     "type": "object",
@@ -7270,6 +7278,11 @@
                                     "format": "date-time",
                                     "maxLength": 40
                                   },
+                                  "runId": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                                  },
                                   "status": {
                                     "anyOf": [
                                       {
@@ -7297,6 +7310,9 @@
                                         "const": "close_failed"
                                       }
                                     ]
+                                  },
+                                  "background": {
+                                    "type": "boolean"
                                   },
                                   "configuration": {
                                     "type": "object",
@@ -18797,6 +18813,11 @@
                                 "format": "date-time",
                                 "maxLength": 40
                               },
+                              "runId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                              },
                               "status": {
                                 "anyOf": [
                                   {
@@ -18824,6 +18845,9 @@
                                     "const": "close_failed"
                                   }
                                 ]
+                              },
+                              "background": {
+                                "type": "boolean"
                               },
                               "configuration": {
                                 "type": "object",
@@ -26699,6 +26723,11 @@
                             "format": "date-time",
                             "maxLength": 40
                           },
+                          "runId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                          },
                           "status": {
                             "anyOf": [
                               {
@@ -26726,6 +26755,9 @@
                                 "const": "close_failed"
                               }
                             ]
+                          },
+                          "background": {
+                            "type": "boolean"
                           },
                           "configuration": {
                             "type": "object",
@@ -29291,6 +29323,11 @@
                       "format": "date-time",
                       "maxLength": 40
                     },
+                    "runId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                    },
                     "status": {
                       "anyOf": [
                         {
@@ -29318,6 +29355,9 @@
                           "const": "close_failed"
                         }
                       ]
+                    },
+                    "background": {
+                      "type": "boolean"
                     },
                     "configuration": {
                       "type": "object",
@@ -34346,6 +34386,11 @@
                                 "format": "date-time",
                                 "maxLength": 40
                               },
+                              "runId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                              },
                               "status": {
                                 "anyOf": [
                                   {
@@ -34373,6 +34418,9 @@
                                     "const": "close_failed"
                                   }
                                 ]
+                              },
+                              "background": {
+                                "type": "boolean"
                               },
                               "configuration": {
                                 "type": "object",
@@ -36820,6 +36868,11 @@
                     "format": "date-time",
                     "maxLength": 40
                   },
+                  "runId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                  },
                   "status": {
                     "anyOf": [
                       {
@@ -36847,6 +36900,9 @@
                         "const": "close_failed"
                       }
                     ]
+                  },
+                  "background": {
+                    "type": "boolean"
                   },
                   "configuration": {
                     "type": "object",

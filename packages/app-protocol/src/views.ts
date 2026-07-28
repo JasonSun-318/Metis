@@ -254,7 +254,9 @@ const SubagentConfigurationSchema = StrictObject({
 export const SubagentSummarySchema = Type.Union([
 	StrictObject({
 		...SubagentIdentityFields,
+		runId: Type.Optional(SessionIdSchema),
 		status: ActiveSubagentStatusSchema,
+		background: Type.Optional(Type.Boolean()),
 		configuration: SubagentConfigurationSchema,
 		error: Type.Optional(PublicTextSchema),
 		residualPath: Type.Optional(PathSchema),
