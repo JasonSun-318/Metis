@@ -114,6 +114,10 @@ function canonicalProjectCwd(cwd: string): string {
 	return canonicalizePathForCreation(resolve(cwd));
 }
 
+function summaryCwd(cwd: string): string | null {
+	return cwd ? canonicalProjectCwd(cwd) : null;
+}
+
 function isSameProjectCwd(cwd: string, canonicalCwd: string, cache: Map<string, string>): boolean {
 	let candidate = cache.get(cwd);
 	if (candidate === undefined) {
@@ -348,7 +352,7 @@ export class SessionCatalog {
 							sessionId,
 							mode: item.header.mode,
 							cwdOrigin: item.header.cwdOrigin,
-							cwd: item.header.cwd || null,
+							cwd: summaryCwd(item.header.cwd),
 							createdAt: item.header.timestamp,
 							updatedAt: item.updatedAt,
 							state: "idle" as const,
@@ -412,7 +416,7 @@ export class SessionCatalog {
 								sessionId,
 								mode: item.header.mode,
 								cwdOrigin: item.header.cwdOrigin,
-								cwd: item.header.cwd || null,
+								cwd: summaryCwd(item.header.cwd),
 								createdAt: item.header.timestamp,
 								updatedAt: item.updatedAt,
 								state: "idle" as const,
@@ -466,7 +470,7 @@ export class SessionCatalog {
 						sessionId,
 						mode: header.mode,
 						cwdOrigin: header.cwdOrigin,
-						cwd: header.cwd || null,
+						cwd: summaryCwd(header.cwd),
 						createdAt: header.timestamp,
 						updatedAt,
 						state: "idle",
@@ -503,6 +507,33 @@ export class SessionCatalog {
 	modeProjectSnapshot(mode: AgentMode, cwd: string): ModeProjectSnapshot {
 		const canonicalCwd = canonicalProjectCwd(cwd);
 		return this.snapshotModeProject(mode, canonicalCwd);
+	}
+
+	private async existingProjectStorageCwd(canonicalCwd: string): Promise<string | undefined> {
+		const refs = [...this.sessions.values()].filter(
+			(ref) =>
+				!ref.scheduled &&
+				ref.summary.state !== "corrupt" &&
+				ref.summary.cwdOrigin === "user-selected" &&
+				ref.summary.cwd !== null &&
+				canonicalProjectCwd(ref.summary.cwd) === canonicalCwd,
+		);
+		if (refs.length === 0) return undefined;
+		const roots = new Set(refs.map((ref) => storageRoot(ref.relativePath)));
+		if (roots.size !== 1) throw new AppServerError("SESSION_CORRUPT");
+		try {
+			const header = await readHeader(refs[0]!.path);
+			if (
+				header.cwdOrigin !== "user-selected" ||
+				canonicalProjectCwd(header.cwd) !== canonicalCwd ||
+				encodePathForStorage(header.cwd) !== roots.values().next().value
+			) {
+				throw new Error("Project storage identity does not match its journal");
+			}
+			return header.cwd;
+		} catch {
+			throw new AppServerError("SESSION_CORRUPT");
+		}
 	}
 
 	async withModeProjectBlocked<T>(
@@ -723,13 +754,16 @@ export class SessionCatalog {
 				throw new AppServerError("REQUEST_ID_REUSED", { requestId: input.requestId });
 			}
 
-			const workspace = resolveNewSessionWorkspace({
-				id: input.requestId,
-				mode,
-				requestedCwd: input.cwd,
-				hostCwd: process.cwd(),
-				agentDir: this.agentDir,
-			});
+			const existingStorageCwd = projectCwd ? await this.existingProjectStorageCwd(projectCwd) : undefined;
+			const workspace = existingStorageCwd
+				? { cwd: existingStorageCwd, cwdOrigin: "user-selected" as const }
+				: resolveNewSessionWorkspace({
+						id: input.requestId,
+						mode,
+						requestedCwd: input.cwd,
+						hostCwd: process.cwd(),
+						agentDir: this.agentDir,
+					});
 			let manager: SessionManager | undefined;
 			try {
 				try {

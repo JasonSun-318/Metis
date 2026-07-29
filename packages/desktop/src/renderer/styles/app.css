@@ -374,7 +374,7 @@ textarea { resize: none; }
 .interaction-actions button, .interaction-dialog form button { border-radius: 7px; background: #f1f0ec; color: #242422; padding: 9px 14px; }
 .interaction-dialog form { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; margin-top: 18px; }
 .interaction-dialog input { min-width: 0; border: 1px solid var(--border-strong); border-radius: 8px; background: #191919; padding: 9px 11px; }
-.project-dialog { width: min(540px, 100%); border: 1px solid var(--border-strong); border-radius: 14px; background: var(--panel-raised); box-shadow: var(--shadow); padding: 22px; }
+.project-dialog { width: min(540px, 100%); max-height: calc(100vh - 48px); overflow-y: auto; border: 1px solid var(--border-strong); border-radius: 14px; background: var(--panel-raised); box-shadow: var(--shadow); padding: 22px; }
 .project-dialog h2 { margin: 0 0 8px; color: var(--text); font-size: 18px; font-weight: 560; }
 .project-dialog p, .project-dialog li { color: var(--muted); font-size: 13px; line-height: 1.55; }
 .project-dialog p { margin: 8px 0; }

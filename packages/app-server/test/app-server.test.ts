@@ -347,6 +347,55 @@ describe("AppServer", () => {
 		expect(host.runtimes.get("session-b")?.closed).toBe(false);
 	});
 
+	it("publishes one canonical cwd for aliased project journals", async () => {
+		const alias = join(tempDir, "project-alias");
+		symlinkSync(projectDir, alias, "dir");
+		writeModeSession(agentDir, sessionsRoot, "aliased-project", alias, "chat");
+		const server = await AppServer.create({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
+		const connection = server.connect();
+		await connection.handle(initialize());
+
+		const listed = await connection.handle({ jsonrpc: "2.0", id: "list-alias", method: "session/list", params: {} });
+		expect(listed).toMatchObject({
+			result: { sessions: [{ sessionId: "aliased-project", cwd: realpathSync(projectDir) }] },
+		});
+	});
+
+	it("creates new sessions in an aliased project's existing storage directory", async () => {
+		const alias = join(tempDir, "project-alias");
+		symlinkSync(projectDir, alias, "dir");
+		const existingPath = writeModeSession(agentDir, sessionsRoot, "aliased-project", alias, "chat");
+		const server = await AppServer.create({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
+		const connection = server.connect();
+		await connection.handle(initialize());
+
+		expect(
+			await connection.handle({
+				jsonrpc: "2.0",
+				id: "create-in-alias",
+				method: "session/create",
+				params: { requestId: REQUEST_A, mode: "chat", cwd: realpathSync(projectDir) },
+			}),
+		).toMatchObject({ result: { session: { sessionId: REQUEST_A, cwd: realpathSync(projectDir) } } });
+		expect(dirname(server.catalog.get(REQUEST_A).path)).toBe(dirname(existingPath));
+
+		const preview = await connection.handle({
+			jsonrpc: "2.0",
+			id: "preview-alias",
+			method: "project/deletePreview",
+			params: { mode: "chat", cwd: realpathSync(projectDir) },
+		});
+		const revision = (preview as { result: ClientResult<"project/deletePreview"> }).result.revision;
+		expect(
+			await connection.handle({
+				jsonrpc: "2.0",
+				id: "delete-alias",
+				method: "project/delete",
+				params: { requestId: REQUEST_B, mode: "chat", cwd: realpathSync(projectDir), expectedRevision: revision },
+			}),
+		).toMatchObject({ result: { deletedSessionCount: 2 } });
+	});
+
 	it("routes replay-protected model selection through the opened runtime", async () => {
 		writeSession(sessionsRoot, "session-a", projectDir);
 		const server = await AppServer.create({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
@@ -689,7 +738,7 @@ describe("AppServer", () => {
 		expect(existsSync(archivedPath)).toBe(false);
 		expect(() => server.catalog.get("chat-active")).toThrowError(expect.objectContaining({ code: "NOT_FOUND" }));
 		expect(server.catalog.get("code-preserved").summary.mode).toBe("code");
-		expect(server.catalog.get("chat-child").summary.cwd).toBe(child);
+		expect(server.catalog.get("chat-child").summary.cwd).toBe(realpathSync(child));
 		expect(server.catalog.get("scheduled-preserved").scheduled).toEqual({ taskId: REQUEST_A, runId: REQUEST_B });
 
 		expect(await connection.handle({ ...request, id: "delete-chat-replay" })).toEqual({

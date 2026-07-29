@@ -113,20 +113,26 @@ function createHarness(options: {
 			],
 		}),
 		previewProjectDelete: vi.fn(async (input) => ({
-			mode: input.mode,
-			cwd: input.cwd,
-			sessionCount: sessions.filter(
-				(candidate) => candidate.mode === input.mode && candidate.cwd === input.cwd && !candidate.scheduled,
-			).length,
-			blockingScheduleCount: 0,
-			revision: "a".repeat(64),
+			ok: true as const,
+			result: {
+				mode: input.mode,
+				cwd: input.cwd,
+				sessionCount: sessions.filter(
+					(candidate) => candidate.mode === input.mode && candidate.cwd === input.cwd && !candidate.scheduled,
+				).length,
+				blockingScheduleCount: 0,
+				revision: "a".repeat(64),
+			},
 		})),
 		deleteProject: vi.fn(async (input) => {
 			const before = sessions.length;
 			sessions = sessions.filter(
 				(candidate) => candidate.mode !== input.mode || candidate.cwd !== input.cwd || candidate.scheduled !== undefined,
 			);
-			return { mode: input.mode, cwd: input.cwd, deletedSessionCount: before - sessions.length };
+			return {
+				ok: true as const,
+				result: { mode: input.mode, cwd: input.cwd, deletedSessionCount: before - sessions.length },
+			};
 		}),
 		selectProjectFolder: vi.fn().mockResolvedValue("/work/selected-project"),
 		selectAttachmentFiles: vi.fn().mockResolvedValue([
@@ -461,18 +467,24 @@ describe("Chat desktop shell", () => {
 		const { api } = createHarness({ sessions: [chatActive, chatArchived, code] });
 		vi.mocked(api.previewProjectDelete)
 			.mockResolvedValueOnce({
-				mode: "chat",
-				cwd: "/canonical/shared",
-				sessionCount: 2,
-				blockingScheduleCount: 1,
-				revision: "a".repeat(64),
+				ok: true,
+				result: {
+					mode: "chat",
+					cwd: "/canonical/shared",
+					sessionCount: 2,
+					blockingScheduleCount: 1,
+					revision: "a".repeat(64),
+				},
 			})
 			.mockResolvedValueOnce({
-				mode: "chat",
-				cwd: "/canonical/shared",
-				sessionCount: 2,
-				blockingScheduleCount: 0,
-				revision: "b".repeat(64),
+				ok: true,
+				result: {
+					mode: "chat",
+					cwd: "/canonical/shared",
+					sessionCount: 2,
+					blockingScheduleCount: 0,
+					revision: "b".repeat(64),
+				},
 			});
 		const container = document.createElement("div");
 		document.body.append(container);
@@ -520,8 +532,8 @@ describe("Chat desktop shell", () => {
 		const chat = session("chat-delete-failure", "chat", "/work/failure", "Keep me");
 		localStorage.setItem("arcmind.activeSessionId.chat", chat.sessionId);
 		const { api } = createHarness({ sessions: [chat] });
-		const busyError = Object.assign(new Error("busy"), { code: -32004 });
-		vi.mocked(api.deleteProject).mockRejectedValueOnce(busyError);
+		const lostResponse = new Error("delete response was lost");
+		vi.mocked(api.deleteProject).mockRejectedValueOnce(lostResponse);
 		const container = document.createElement("div");
 		document.body.append(container);
 		const root = createRoot(container);
@@ -533,7 +545,7 @@ describe("Chat desktop shell", () => {
 		await flush();
 		await act(async () => button(container, "Move to Trash").click());
 		await flush();
-		expect(container.querySelector(".project-dialog")?.textContent).toContain("changed or is busy");
+		expect(container.querySelector(".project-dialog")?.textContent).toContain("delete response was lost");
 		expect(container.textContent).toContain("Keep me");
 		expect(localStorage.getItem("arcmind.activeSessionId.chat")).toBe(chat.sessionId);
 		await act(async () => button(container, "Retry").click());
@@ -558,12 +570,15 @@ describe("Chat desktop shell", () => {
 				session("chat-preview-b", "chat", "/work/b", "B"),
 			],
 		});
-		let resolveA!: (value: ClientResult<"project/deletePreview">) => void;
+		let resolveA!: (value: { ok: true; result: ClientResult<"project/deletePreview"> }) => void;
 		vi.mocked(api.previewProjectDelete).mockImplementation(async ({ mode, cwd }) => {
 			if (cwd === "/work/a") return await new Promise((resolve) => {
 				resolveA = resolve;
 			});
-			return { mode, cwd: "/canonical/b", sessionCount: 1, blockingScheduleCount: 0, revision: "b".repeat(64) };
+			return {
+				ok: true,
+				result: { mode, cwd: "/canonical/b", sessionCount: 1, blockingScheduleCount: 0, revision: "b".repeat(64) },
+			};
 		});
 		const container = document.createElement("div");
 		document.body.append(container);
@@ -581,11 +596,14 @@ describe("Chat desktop shell", () => {
 		await flush();
 		expect(container.querySelector(".project-dialog")?.textContent).toContain("/canonical/b");
 		await act(async () => resolveA({
-			mode: "chat",
-			cwd: "/canonical/a",
-			sessionCount: 99,
-			blockingScheduleCount: 0,
-			revision: "a".repeat(64),
+			ok: true,
+			result: {
+				mode: "chat",
+				cwd: "/canonical/a",
+				sessionCount: 99,
+				blockingScheduleCount: 0,
+				revision: "a".repeat(64),
+			},
 		}));
 		await flush();
 		expect(container.querySelector(".project-dialog")?.textContent).toContain("/canonical/b");

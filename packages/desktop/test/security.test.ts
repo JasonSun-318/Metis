@@ -246,9 +246,8 @@ describe("desktop trust boundaries", () => {
 			"Invalid project/deletePreview params",
 		);
 		await expect(previewProjectDelete(event, { mode: "chat", cwd: "/work/project" })).resolves.toMatchObject({
-			mode: "chat",
-			cwd: "/work/project",
-			sessionCount: 2,
+			ok: true,
+			result: { mode: "chat", cwd: "/work/project", sessionCount: 2 },
 		});
 		const deleteInput = {
 			requestId: "11111111-1111-4111-8111-111111111301",
@@ -260,9 +259,17 @@ describe("desktop trust boundaries", () => {
 			"Invalid project/delete params",
 		);
 		await expect(deleteProject(event, deleteInput)).resolves.toEqual({
-			mode: "chat",
-			cwd: "/work/project",
-			deletedSessionCount: 2,
+			ok: true,
+			result: { mode: "chat", cwd: "/work/project", deletedSessionCount: 2 },
+		});
+		supervisor.request.mockImplementationOnce(async (request) => ({
+			jsonrpc: "2.0",
+			id: request.id,
+			error: { code: -32009, message: "Session is already in use" },
+		}));
+		await expect(deleteProject(event, deleteInput)).resolves.toEqual({
+			ok: false,
+			error: { code: -32009, message: "Session is already in use" },
 		});
 		expect(supervisor.request).toHaveBeenCalledWith(
 			expect.objectContaining({ method: "project/deletePreview", params: { mode: "chat", cwd: "/work/project" } }),

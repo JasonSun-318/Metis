@@ -297,7 +297,9 @@ export function App({ api, store }: AppProps) {
 	};
 	const previewProjectDelete = async (group: ProjectSessionGroup) => {
 		try {
-			return await api.previewProjectDelete({ mode: group.mode, cwd: group.cwd });
+			const outcome = await api.previewProjectDelete({ mode: group.mode, cwd: group.cwd });
+			if (!outcome.ok) throw outcome.error;
+			return outcome.result;
 		} catch (cause) {
 			throw projectActionError(cause);
 		}
@@ -346,12 +348,16 @@ export function App({ api, store }: AppProps) {
 		setProjectBusy(key, true);
 		setError(null);
 		try {
-			await api.deleteProject({
+			const outcome = await api.deleteProject({
 				requestId,
 				mode: group.mode,
 				cwd: group.cwd,
 				expectedRevision: preview.revision,
 			});
+			if (!outcome.ok) {
+				projectDeleteRequests.current.delete(key);
+				throw outcome.error;
+			}
 			projectDeleteRequests.current.delete(key);
 			const before = store.getSnapshot();
 			const active = before.activeSessionId ? before.sessionsById.get(before.activeSessionId) : undefined;

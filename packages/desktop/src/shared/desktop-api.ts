@@ -58,11 +58,17 @@ export interface DesktopAttachmentSelection {
 	readonly name: string;
 }
 
+export type DesktopRpcOutcome<Result> =
+	| { readonly ok: true; readonly result: Result }
+	| { readonly ok: false; readonly error: { readonly code: number; readonly message: string } };
+
 export interface ArcMindDesktopApi {
 	listSessions(input?: ClientParams<"session/list">): Promise<ClientResult<"session/list">>;
 	listSkills(input: ClientParams<"skill/list">): Promise<ClientResult<"skill/list">>;
-	previewProjectDelete(input: ClientParams<"project/deletePreview">): Promise<ClientResult<"project/deletePreview">>;
-	deleteProject(input: ClientParams<"project/delete">): Promise<ClientResult<"project/delete">>;
+	previewProjectDelete(
+		input: ClientParams<"project/deletePreview">,
+	): Promise<DesktopRpcOutcome<ClientResult<"project/deletePreview">>>;
+	deleteProject(input: ClientParams<"project/delete">): Promise<DesktopRpcOutcome<ClientResult<"project/delete">>>;
 	createSession(input: ClientParams<"session/create">): Promise<ClientResult<"session/create">>;
 	openSession(input: ClientParams<"session/open">): Promise<ClientResult<"session/subscribe">["snapshot"]>;
 	readItems(input: ClientParams<"session/readItems">): Promise<ClientResult<"session/readItems">>;

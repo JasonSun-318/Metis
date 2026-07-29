@@ -19,6 +19,7 @@ import {
 	DESKTOP_IPC_CHANNELS,
 	type DesktopApiEvent,
 	type DesktopAttachmentSelection,
+	type DesktopRpcOutcome,
 	type SupervisorView,
 	validateInteractionResponseInput,
 } from "../shared/desktop-api.ts";
@@ -150,10 +151,10 @@ export class ClientBroker {
 			this.clientCall("skill/list", input),
 		);
 		this.register(DESKTOP_IPC_CHANNELS.previewProjectDelete, 1, async (_event, [input]) =>
-			this.clientCall("project/deletePreview", input),
+			this.projectCall("project/deletePreview", input),
 		);
 		this.register(DESKTOP_IPC_CHANNELS.deleteProject, 1, async (_event, [input]) =>
-			this.clientCall("project/delete", input),
+			this.projectCall("project/delete", input),
 		);
 		this.register(DESKTOP_IPC_CHANNELS.createSession, 1, async (_event, [input]) =>
 			this.clientCall("session/create", input),
@@ -249,6 +250,27 @@ export class ClientBroker {
 		const response = await this.supervisor.request(request);
 		if ("error" in response) throw rpcFailure(response);
 		return response.result as ClientResult<Method>;
+	}
+
+	private async projectCall<Method extends "project/deletePreview" | "project/delete">(
+		method: Method,
+		params: unknown,
+	): Promise<DesktopRpcOutcome<ClientResult<Method>>> {
+		try {
+			return { ok: true, result: await this.clientCall(method, params) };
+		} catch (cause) {
+			if (
+				cause instanceof Error &&
+				cause.name === "ArcMindRpcError" &&
+				typeof (cause as Error & { code?: unknown }).code === "number"
+			) {
+				return {
+					ok: false,
+					error: { code: (cause as Error & { code: number }).code, message: cause.message },
+				};
+			}
+			throw cause;
+		}
 	}
 
 	private handleServerMessage(value: unknown): void {
