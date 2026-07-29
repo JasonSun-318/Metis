@@ -1,32 +1,38 @@
-import { createHash, randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
 import {
-	appendFileSync,
 	chmodSync,
 	closeSync,
 	existsSync,
+	constants as fsConstants,
+	fstatSync,
 	lstatSync,
-	mkdirSync,
 	openSync,
 	readdirSync,
 	readFileSync,
 	readSync,
-	renameSync,
 	rmSync,
 	statSync,
-	writeFileSync,
 } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { Agent, type AgentMessage, type StreamFn, type ThinkingLevel } from "@arcmind/agent-core";
 import type { Model } from "@arcmind/ai/compat";
 import lockfile from "proper-lockfile";
+import type { AgentMode } from "./agent-mode.ts";
 import {
 	AUTO_MEMORY_MAX_BYTES,
 	AUTO_MEMORY_MAX_LINES,
-	type AutoMemorySnapshot,
+	type AutoMemoryIndex,
 	getAutoMemoryPaths,
 	getAutoMemoryRoot,
 } from "./auto-memory.ts";
 import { serializeConversation } from "./compaction/utils.ts";
+import {
+	ensureRealDirectoryDurablySync,
+	replaceFileAtomicallySync,
+	syncDirectorySync,
+	syncFileSync,
+	writeAllSync,
+} from "./durable-file.ts";
 import { convertToLlm } from "./messages.ts";
 import { createGrepTool } from "./tools/grep.ts";
 import { createLsTool } from "./tools/ls.ts";
@@ -37,13 +43,11 @@ export type DreamTrigger = "manual" | "threshold" | "overflow";
 export type DreamRunStatus = "success" | "skipped" | "failed" | "cancelled";
 
 export interface DreamPlanWrite {
-	scope: DreamScope;
 	file: string;
 	content: string;
 }
 
 export interface DreamPlanDelete {
-	scope: DreamScope;
 	file: string;
 }
 
@@ -58,25 +62,27 @@ export interface DreamScopeChanges {
 	deleted: string[];
 }
 
-export interface DreamChanges {
-	global: DreamScopeChanges;
-	project: DreamScopeChanges;
-}
-
 export interface DreamActiveRun {
 	id: string;
 	sessionId: string;
-	project: string;
+	mode: AgentMode;
+	cwd: string;
 	trigger: DreamTrigger;
 	startedAt: string;
+}
+
+export interface DreamScopeResult {
+	status: DreamRunStatus;
+	changes: DreamScopeChanges;
+	durationMs: number;
+	reason?: string;
 }
 
 export interface DreamHistoryRecord extends DreamActiveRun {
 	completedAt: string;
 	durationMs: number;
-	status: DreamRunStatus;
-	changes: DreamChanges;
-	reason?: string;
+	global: DreamScopeResult;
+	project: DreamScopeResult;
 }
 
 export interface DreamStatusSnapshot {
@@ -85,35 +91,34 @@ export interface DreamStatusSnapshot {
 	recent: DreamHistoryRecord[];
 }
 
-interface DreamScopeSnapshot {
+export interface DreamMemorySnapshot {
+	agentDir: string;
+	cwd: string;
+	mode: AgentMode;
+	scope: DreamScope;
 	root: string;
 	indexFile: "MEMORY.md" | "project.md";
 	files: ReadonlyMap<string, string>;
 	fingerprint: string;
 }
 
-export interface DreamMemorySnapshot {
-	agentDir: string;
-	cwd: string;
-	global: DreamScopeSnapshot;
-	project: DreamScopeSnapshot;
-}
-
 export interface PreparedDreamCommit {
-	next: {
-		global: ReadonlyMap<string, string>;
-		project: ReadonlyMap<string, string>;
-	};
-	changes: DreamChanges;
+	next: ReadonlyMap<string, string>;
+	changes: DreamScopeChanges;
 }
 
 const SAFE_MEMORY_FILE = /^(?!\.)(?!.*\.\.)([A-Za-z0-9][A-Za-z0-9._-]*)\.md$/;
 const INDEX_ENTRY = /^- \[([^\]]+\.md)\]\(\1\) — (.{1,120})$/u;
-// ponytail: one memory-root lock keeps global/project commits atomic; split only after measured contention.
 const DREAM_LOCK_OPTIONS = {
 	realpath: false,
 	stale: 10_000,
-	retries: { retries: 8, factor: 1.5, minTimeout: 25, maxTimeout: 250, randomize: true },
+	retries: {
+		retries: 8,
+		factor: 1.5,
+		minTimeout: 25,
+		maxTimeout: 250,
+		randomize: true,
+	},
 } as const;
 
 async function releaseDreamLock(release: () => Promise<void>): Promise<void> {
@@ -124,27 +129,35 @@ async function releaseDreamLock(release: () => Promise<void>): Promise<void> {
 	}
 }
 
-export const DREAM_SYSTEM_PROMPT = `You are ArcMind's silent long-term memory maintainer.
+const DREAM_PROMPT_COMMON = `Use only verified, durable evidence from explicit user statements or authoritative tool/file results. Assistant proposals are not facts unless the user adopted them. The supplied conversation excludes compaction and branch summaries; never reconstruct or invent missing facts.
 
-Use only verified, durable evidence from explicit user statements or authoritative tool/file results. Assistant proposals are not facts unless the user adopted them. The supplied conversation excludes compaction and branch summaries; never reconstruct or invent missing facts.
+Inspect the existing index first. Use ls only on the supplied memory directory, grep only on a specific allowed .md file, and read with bounded offset/limit values. Do not read every detail file unless necessary.
 
-Global facts apply across projects. Project facts are useful only in the current project. The current working directory defines the project and need not be software. Put uncertain scope in project memory and never duplicate a fact across scopes.
-
-Inspect the existing indexes first. Use ls only on the two supplied memory directories, grep only on a specific allowed .md file, and read with bounded offset/limit values. Do not read every detail file unless necessary.
-
-Each scope is flat. MEMORY.md and project.md are link-only indexes containing one optional # title, blank lines, then entries in this exact form:
+The scope is flat. Its index is link-only and contains one optional # title, blank lines, then entries in this exact form:
 - [file.md](file.md) — an accurate retrieval sentence of at most 120 characters
 
-Store facts only in nonempty detail files, one topic per file. Every detail file has exactly one index entry. Leave no duplicate topics, broken links, or orphan files. Keep each index within 200 lines and 25KB. Never store secrets, guesses, temporary state, raw conversation, raw tool output, system prompts, or unrelated projects.
+Store facts only in nonempty detail files, one topic per file. Every detail file has exactly one index entry. Leave no duplicate topics, broken links, or orphan files. Keep the index within 200 lines and 25KB. Never store secrets, guesses, temporary state, raw conversation, raw tool output, or system prompts.
 
 Return exactly one JSON object and no prose:
-{"writes":[{"scope":"global|project","file":"basename.md","content":"complete file content"}],"deletes":[{"scope":"global|project","file":"basename.md"}]}
+{"writes":[{"file":"basename.md","content":"complete file content"}],"deletes":[{"file":"basename.md"}]}
 
 Use empty arrays when no verified change is needed. Include complete content for every written file. Paths are flat basenames only.`;
 
-export function emptyDreamChanges(): DreamChanges {
-	const scope = (): DreamScopeChanges => ({ created: [], updated: [], deleted: [] });
-	return { global: scope(), project: scope() };
+export const DREAM_SYSTEM_PROMPTS: Readonly<Record<DreamScope, string>> = {
+	global: `You are ArcMind's silent global long-term memory maintainer.
+
+Store only facts that remain useful across projects. Never store project-specific facts or duplicate project memory.
+
+${DREAM_PROMPT_COMMON}`,
+	project: `You are ArcMind's silent project memory maintainer.
+
+Store only facts useful to the supplied working directory and mode. Never store facts from another project or mode, or general facts better suited to global memory.
+
+${DREAM_PROMPT_COMMON}`,
+};
+
+export function emptyDreamScopeChanges(): DreamScopeChanges {
+	return { created: [], updated: [], deleted: [] };
 }
 
 function assertNoSymlink(path: string): void {
@@ -161,7 +174,10 @@ function fingerprint(files: ReadonlyMap<string, string>): string {
 	return hash.digest("hex");
 }
 
-function snapshotScope(root: string, indexFile: "MEMORY.md" | "project.md"): DreamScopeSnapshot {
+function snapshotScope(
+	root: string,
+	indexFile: "MEMORY.md" | "project.md",
+): Pick<DreamMemorySnapshot, "root" | "indexFile" | "files" | "fingerprint"> {
 	const files = new Map<string, string>();
 	if (existsSync(root)) {
 		const stat = lstatSync(root);
@@ -178,17 +194,27 @@ function snapshotScope(root: string, indexFile: "MEMORY.md" | "project.md"): Dre
 	return { root, indexFile, files, fingerprint: fingerprint(files) };
 }
 
-export function snapshotDreamMemory(agentDir: string, cwd: string): DreamMemorySnapshot {
-	const paths = getAutoMemoryPaths(agentDir, cwd);
+export function snapshotDreamMemory(
+	agentDir: string,
+	cwd: string,
+	mode: AgentMode,
+	scope: DreamScope,
+): DreamMemorySnapshot {
+	const paths = getAutoMemoryPaths(agentDir, cwd, mode);
 	const memoryRoot = getAutoMemoryRoot(agentDir);
 	assertNoSymlink(memoryRoot);
-	assertNoSymlink(join(memoryRoot, "projects"));
-	assertNoSymlink(paths.project.directory);
+	if (scope === "project") {
+		assertNoSymlink(join(memoryRoot, "projects"));
+		assertNoSymlink(dirname(paths.project.directory));
+		assertNoSymlink(paths.project.directory);
+	}
+	const selected = scope === "global" ? paths.global : paths.project;
 	return {
 		agentDir,
 		cwd,
-		global: snapshotScope(paths.global.directory, "MEMORY.md"),
-		project: snapshotScope(paths.project.directory, "project.md"),
+		mode,
+		scope,
+		...snapshotScope(selected.directory, scope === "global" ? "MEMORY.md" : "project.md"),
 	};
 }
 
@@ -258,130 +284,96 @@ function diffScope(before: ReadonlyMap<string, string>, after: ReadonlyMap<strin
 	return { created: created.sort(), updated: updated.sort(), deleted: deleted.sort() };
 }
 
-function isDreamScope(value: unknown): value is DreamScope {
-	return value === "global" || value === "project";
-}
-
 export function prepareDreamCommit(snapshot: DreamMemorySnapshot, plan: DreamPlan): PreparedDreamCommit {
-	const next = {
-		global: new Map(snapshot.global.files),
-		project: new Map(snapshot.project.files),
-	};
+	const next = new Map(snapshot.files);
 	const operations = new Set<string>();
-	const applyOperation = (scope: unknown, file: unknown, action: "write" | "delete", content?: unknown): void => {
-		if (!isDreamScope(scope)) throw new Error("Dream plan contains an unknown scope");
+	const applyOperation = (file: unknown, action: "write" | "delete", content?: unknown): void => {
 		if (typeof file !== "string" || !SAFE_MEMORY_FILE.test(file)) {
 			throw new Error("Dream file names must be flat .md basenames");
 		}
-		const key = `${scope}:${file}`;
-		if (operations.has(key)) throw new Error("Dream plan contains duplicate operations for the same file");
-		operations.add(key);
+		if (operations.has(file)) throw new Error("Dream plan contains duplicate operations for the same file");
+		operations.add(file);
 		if (action === "write") {
 			if (typeof content !== "string") throw new Error("Dream write content must be a string");
-			next[scope].set(file, content);
+			next.set(file, content);
 		} else {
-			next[scope].delete(file);
+			next.delete(file);
 		}
 	};
 
-	for (const write of plan.writes) applyOperation(write.scope, write.file, "write", write.content);
-	for (const deletion of plan.deletes) applyOperation(deletion.scope, deletion.file, "delete");
-	validateScope("global", next.global, snapshot.global.indexFile);
-	validateScope("project", next.project, snapshot.project.indexFile);
-	return {
-		next,
-		changes: {
-			global: diffScope(snapshot.global.files, next.global),
-			project: diffScope(snapshot.project.files, next.project),
-		},
-	};
-}
-
-function atomicWrite(path: string, content: string): void {
-	mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
-	const temporary = join(dirname(path), `.${randomUUID()}.tmp`);
-	try {
-		writeFileSync(temporary, content, { encoding: "utf8", mode: 0o600, flag: "wx" });
-		renameSync(temporary, path);
-		chmodSync(path, 0o600);
-	} finally {
-		rmSync(temporary, { force: true });
-	}
+	for (const write of plan.writes) applyOperation(write.file, "write", write.content);
+	for (const deletion of plan.deletes) applyOperation(deletion.file, "delete");
+	validateScope(snapshot.scope, next, snapshot.indexFile);
+	return { next, changes: diffScope(snapshot.files, next) };
 }
 
 function changedFiles(changes: DreamScopeChanges): string[] {
 	return [...changes.created, ...changes.updated, ...changes.deleted];
 }
 
-function applyScope(scope: DreamScopeSnapshot, next: ReadonlyMap<string, string>, changes: DreamScopeChanges): void {
+function writeMemoryFile(path: string, content: string): void {
+	replaceFileAtomicallySync(path, content, { mode: 0o600 });
+}
+
+function applyScope(scope: DreamMemorySnapshot, next: ReadonlyMap<string, string>, changes: DreamScopeChanges): void {
 	const details = changedFiles(changes).filter((file) => file !== scope.indexFile);
 	for (const file of details) {
 		const content = next.get(file);
-		if (content !== undefined) atomicWrite(join(scope.root, file), content);
+		if (content !== undefined) writeMemoryFile(join(scope.root, file), content);
 	}
 	if (changedFiles(changes).includes(scope.indexFile)) {
 		const index = next.get(scope.indexFile);
 		if (index === undefined) rmSync(join(scope.root, scope.indexFile), { force: true });
-		else atomicWrite(join(scope.root, scope.indexFile), index);
+		else writeMemoryFile(join(scope.root, scope.indexFile), index);
 	}
 	for (const file of changes.deleted) {
 		if (file !== scope.indexFile) rmSync(join(scope.root, file), { force: true });
 	}
+	if (changes.deleted.length > 0) syncDirectorySync(scope.root);
 }
 
-function restoreScope(scope: DreamScopeSnapshot, changes: DreamScopeChanges): void {
+function restoreScope(scope: DreamMemorySnapshot, changes: DreamScopeChanges): void {
 	const files = changedFiles(changes);
 	for (const file of files.filter((name) => name !== scope.indexFile)) {
 		const content = scope.files.get(file);
 		if (content === undefined) rmSync(join(scope.root, file), { force: true });
-		else atomicWrite(join(scope.root, file), content);
+		else writeMemoryFile(join(scope.root, file), content);
 	}
 	if (files.includes(scope.indexFile)) {
 		const content = scope.files.get(scope.indexFile);
 		if (content === undefined) rmSync(join(scope.root, scope.indexFile), { force: true });
-		else atomicWrite(join(scope.root, scope.indexFile), content);
+		else writeMemoryFile(join(scope.root, scope.indexFile), content);
 	}
+	syncDirectorySync(scope.root);
 }
 
 export async function commitDreamPlan(
 	snapshot: DreamMemorySnapshot,
 	prepared: PreparedDreamCommit,
 	signal?: AbortSignal,
-): Promise<{ status: "success" | "skipped"; changes: DreamChanges; reason?: string }> {
-	const root = getAutoMemoryRoot(snapshot.agentDir);
-	assertNoSymlink(root);
-	mkdirSync(root, { recursive: true, mode: 0o700 });
-	const release = await lockfile.lock(root, DREAM_LOCK_OPTIONS);
+): Promise<Omit<DreamScopeResult, "durationMs">> {
+	signal?.throwIfAborted();
+	assertNoSymlink(snapshot.root);
+	ensureRealDirectoryDurablySync(snapshot.root, 0o700);
+	chmodSync(snapshot.root, 0o700);
+	const release = await lockfile.lock(snapshot.root, DREAM_LOCK_OPTIONS);
 	try {
 		signal?.throwIfAborted();
-		const live = snapshotDreamMemory(snapshot.agentDir, snapshot.cwd);
-		if (
-			live.global.fingerprint !== snapshot.global.fingerprint ||
-			live.project.fingerprint !== snapshot.project.fingerprint
-		) {
+		const live = snapshotDreamMemory(snapshot.agentDir, snapshot.cwd, snapshot.mode, snapshot.scope);
+		if (live.fingerprint !== snapshot.fingerprint) {
 			return {
 				status: "skipped",
-				changes: emptyDreamChanges(),
+				changes: emptyDreamScopeChanges(),
 				reason: "Memory changed while Dream was running",
 			};
 		}
 		try {
-			applyScope(snapshot.global, prepared.next.global, prepared.changes.global);
-			applyScope(snapshot.project, prepared.next.project, prepared.changes.project);
+			applyScope(snapshot, prepared.next, prepared.changes);
 		} catch (error) {
-			const rollbackErrors: unknown[] = [];
-			for (const [scope, changes] of [
-				[snapshot.global, prepared.changes.global],
-				[snapshot.project, prepared.changes.project],
-			] as const) {
-				try {
-					restoreScope(scope, changes);
-				} catch (rollbackError) {
-					rollbackErrors.push(rollbackError);
-				}
-			}
-			if (rollbackErrors.length > 0) {
-				throw new AggregateError([error, ...rollbackErrors], "Dream commit failed and rollback was incomplete");
+			try {
+				restoreScope(snapshot, prepared.changes);
+			} catch (rollbackError) {
+				throw new AggregateError([error, rollbackError], "Dream commit failed and rollback was incomplete");
 			}
 			throw error;
 		}
@@ -398,13 +390,30 @@ export function getDreamHistoryPath(agentDir: string): string {
 export async function appendDreamHistory(agentDir: string, record: DreamHistoryRecord): Promise<void> {
 	const root = getAutoMemoryRoot(agentDir);
 	assertNoSymlink(root);
-	mkdirSync(root, { recursive: true, mode: 0o700 });
+	ensureRealDirectoryDurablySync(root, 0o700);
 	const release = await lockfile.lock(root, DREAM_LOCK_OPTIONS);
 	try {
 		const path = getDreamHistoryPath(agentDir);
 		assertNoSymlink(path);
-		appendFileSync(path, `${JSON.stringify(record)}\n`, { encoding: "utf8", mode: 0o600 });
+		const contents = Buffer.from(`${JSON.stringify(record)}\n`, "utf8");
+		const existed = existsSync(path);
+		const noFollow = typeof fsConstants.O_NOFOLLOW === "number" ? fsConstants.O_NOFOLLOW : 0;
+		const nonBlocking = typeof fsConstants.O_NONBLOCK === "number" ? fsConstants.O_NONBLOCK : 0;
+		const fd = openSync(
+			path,
+			fsConstants.O_WRONLY | fsConstants.O_APPEND | fsConstants.O_CREAT | noFollow | nonBlocking,
+			0o600,
+		);
+		try {
+			const stats = fstatSync(fd);
+			if (!stats.isFile() || stats.nlink !== 1) throw new Error(`Refusing to append aliased Dream history: ${path}`);
+			writeAllSync(fd, contents);
+			syncFileSync(fd);
+		} finally {
+			closeSync(fd);
+		}
 		chmodSync(path, 0o600);
+		if (!existed) syncDirectorySync(root);
 	} finally {
 		await releaseDreamLock(release);
 	}
@@ -420,26 +429,36 @@ function isScopeChanges(value: unknown): value is DreamScopeChanges {
 	return isStringArray(record.created) && isStringArray(record.updated) && isStringArray(record.deleted);
 }
 
+function isScopeResult(value: unknown): value is DreamScopeResult {
+	if (!value || typeof value !== "object") return false;
+	const record = value as Record<string, unknown>;
+	return (
+		isDreamRunStatus(record.status) &&
+		isScopeChanges(record.changes) &&
+		typeof record.durationMs === "number" &&
+		Number.isFinite(record.durationMs) &&
+		record.durationMs >= 0 &&
+		(record.reason === undefined || typeof record.reason === "string")
+	);
+}
+
 function parseHistoryRecord(line: string): DreamHistoryRecord | undefined {
 	try {
 		const value = JSON.parse(line) as Record<string, unknown>;
 		if (!value || typeof value !== "object") return undefined;
-		const changes = value.changes as Record<string, unknown> | undefined;
 		if (
 			typeof value.id !== "string" ||
 			typeof value.sessionId !== "string" ||
-			typeof value.project !== "string" ||
+			(value.mode !== "chat" && value.mode !== "code") ||
+			typeof value.cwd !== "string" ||
 			!isDreamTrigger(value.trigger) ||
 			typeof value.startedAt !== "string" ||
 			typeof value.completedAt !== "string" ||
 			typeof value.durationMs !== "number" ||
 			!Number.isFinite(value.durationMs) ||
 			value.durationMs < 0 ||
-			!isDreamRunStatus(value.status) ||
-			!changes ||
-			!isScopeChanges(changes.global) ||
-			!isScopeChanges(changes.project) ||
-			(value.reason !== undefined && typeof value.reason !== "string")
+			!isScopeResult(value.global) ||
+			!isScopeResult(value.project)
 		) {
 			return undefined;
 		}
@@ -524,20 +543,18 @@ export function parseDreamPlan(text: string): DreamPlan {
 	const writes = record.writes.map((item): DreamPlanWrite => {
 		if (!item || typeof item !== "object" || Array.isArray(item)) throw new Error("Dream write is invalid");
 		const write = item as Record<string, unknown>;
-		if (!exactKeys(write, ["content", "file", "scope"])) throw new Error("Dream plan contains unknown fields");
-		if (!isDreamScope(write.scope) || typeof write.file !== "string" || typeof write.content !== "string") {
+		if (!exactKeys(write, ["content", "file"])) throw new Error("Dream plan contains unknown fields");
+		if (typeof write.file !== "string" || typeof write.content !== "string") {
 			throw new Error("Dream write is invalid");
 		}
-		return { scope: write.scope, file: write.file, content: write.content };
+		return { file: write.file, content: write.content };
 	});
 	const deletes = record.deletes.map((item): DreamPlanDelete => {
 		if (!item || typeof item !== "object" || Array.isArray(item)) throw new Error("Dream delete is invalid");
 		const deletion = item as Record<string, unknown>;
-		if (!exactKeys(deletion, ["file", "scope"])) throw new Error("Dream plan contains unknown fields");
-		if (!isDreamScope(deletion.scope) || typeof deletion.file !== "string") {
-			throw new Error("Dream delete is invalid");
-		}
-		return { scope: deletion.scope, file: deletion.file };
+		if (!exactKeys(deletion, ["file"])) throw new Error("Dream plan contains unknown fields");
+		if (typeof deletion.file !== "string") throw new Error("Dream delete is invalid");
+		return { file: deletion.file };
 	});
 	return { writes, deletes };
 }
@@ -545,13 +562,12 @@ export function parseDreamPlan(text: string): DreamPlan {
 export function isAllowedDreamToolPath(
 	inputPath: string,
 	toolName: "read" | "grep" | "ls",
-	paths: AutoMemorySnapshot,
+	memory: AutoMemoryIndex,
 ): boolean {
-	const path = resolve(isAbsolute(inputPath) ? inputPath : join(paths.global.directory, inputPath));
-	const globalDirectory = resolve(paths.global.directory);
-	const projectDirectory = resolve(paths.project.directory);
-	if (toolName === "ls") return path === globalDirectory || path === projectDirectory;
-	if (dirname(path) !== globalDirectory && dirname(path) !== projectDirectory) return false;
+	const directory = resolve(memory.directory);
+	const path = resolve(isAbsolute(inputPath) ? inputPath : join(directory, inputPath));
+	if (toolName === "ls") return path === directory;
+	if (dirname(path) !== directory) return false;
 	if (!path.endsWith(".md") || !existsSync(path)) return false;
 	const stat = lstatSync(path);
 	return stat.isFile() && !stat.isSymbolicLink();
@@ -567,40 +583,36 @@ export interface GenerateMemoryDreamPlanOptions {
 	maxRetryDelayMs?: number;
 	sessionId: string;
 	cwd: string;
-	messages: AgentMessage[];
-	paths: AutoMemorySnapshot;
+	mode: AgentMode;
+	scope: DreamScope;
+	evidence: string;
+	memory: AutoMemoryIndex;
 	signal: AbortSignal;
 }
 
 export async function generateMemoryDreamPlan(options: GenerateMemoryDreamPlanOptions): Promise<DreamPlan> {
-	const memoryRoot = resolve(options.paths.global.directory);
-	assertNoSymlink(memoryRoot);
-	assertNoSymlink(join(memoryRoot, "projects"));
-	assertNoSymlink(resolve(options.paths.project.directory));
-	const evidence = options.messages.filter(
-		(message) => message.role !== "compactionSummary" && message.role !== "branchSummary",
-	);
-	const conversation = serializeConversation(convertToLlm(evidence));
+	const memoryDirectory = resolve(options.memory.directory);
+	assertNoSymlink(memoryDirectory);
 	const prompt = `<dream_scope>
-Global directory: ${options.paths.global.directory}
-Global index: ${options.paths.global.indexPath}
-Project directory: ${options.paths.project.directory}
-Project index: ${options.paths.project.indexPath}
-Current project: ${options.cwd}
+Scope: ${options.scope}
+Directory: ${options.memory.directory}
+Index: ${options.memory.indexPath}
+Current mode: ${options.mode}
+Current working directory: ${options.cwd}
 </dream_scope>
 
 <conversation_evidence>
-${conversation}
+${options.evidence}
 </conversation_evidence>`;
 	const dreamAgent = new Agent({
 		initialState: {
-			systemPrompt: DREAM_SYSTEM_PROMPT,
+			systemPrompt: DREAM_SYSTEM_PROMPTS[options.scope],
 			model: options.model,
 			thinkingLevel: options.thinkingLevel,
 			tools: [
-				createReadTool(options.paths.global.directory),
-				createGrepTool(options.paths.global.directory),
-				createLsTool(options.paths.global.directory),
+				createReadTool(options.memory.directory),
+				createGrepTool(options.memory.directory),
+				createLsTool(options.memory.directory),
 			],
 		},
 		streamFn: options.streamFn,
@@ -608,7 +620,7 @@ ${conversation}
 		...(options.transport ? { transport: options.transport } : {}),
 		...(options.thinkingBudgets ? { thinkingBudgets: options.thinkingBudgets } : {}),
 		...(options.maxRetryDelayMs !== undefined ? { maxRetryDelayMs: options.maxRetryDelayMs } : {}),
-		sessionId: `${options.sessionId}:dream`,
+		sessionId: `${options.sessionId}:dream:${options.scope}`,
 		toolExecution: "sequential",
 		beforeToolCall: async ({ toolCall, args }) => {
 			const toolName = toolCall.name;
@@ -616,11 +628,11 @@ ${conversation}
 			if (
 				(toolName !== "read" && toolName !== "grep" && toolName !== "ls") ||
 				typeof path !== "string" ||
-				!isAllowedDreamToolPath(path, toolName, options.paths)
+				!isAllowedDreamToolPath(path, toolName, options.memory)
 			) {
 				return {
 					block: true,
-					reason: "Dream can access only global and current-project memory Markdown files",
+					reason: `Dream can access only ${options.scope} memory Markdown files`,
 				};
 			}
 			return undefined;
@@ -645,9 +657,15 @@ ${conversation}
 	return parseDreamPlan(output);
 }
 
+export function serializeDreamEvidence(messages: AgentMessage[]): string {
+	const evidence = messages.filter(
+		(message) => message.role !== "compactionSummary" && message.role !== "branchSummary",
+	);
+	return serializeConversation(convertToLlm(evidence));
+}
+
 export interface MemoryDreamRunOptions extends DreamActiveRun {
 	agentDir: string;
-	cwd: string;
 	model: Model<any>;
 	thinkingLevel: ThinkingLevel;
 	streamFn: StreamFn;
@@ -658,10 +676,11 @@ export interface MemoryDreamRunOptions extends DreamActiveRun {
 	messages: AgentMessage[];
 	signal: AbortSignal;
 	generatePlan?: typeof generateMemoryDreamPlan;
+	serializeEvidence?: typeof serializeDreamEvidence;
 }
 
-function hasDreamChanges(changes: DreamChanges): boolean {
-	return [...changedFiles(changes.global), ...changedFiles(changes.project)].length > 0;
+function hasDreamChanges(changes: DreamScopeChanges): boolean {
+	return changedFiles(changes).length > 0;
 }
 
 function errorReason(error: unknown): string {
@@ -673,13 +692,19 @@ function isAbortError(error: unknown, signal: AbortSignal): boolean {
 	return signal.aborted || (error instanceof Error && error.name === "AbortError");
 }
 
-export async function runMemoryDream(options: MemoryDreamRunOptions): Promise<DreamHistoryRecord> {
+async function runDreamScope(
+	options: MemoryDreamRunOptions,
+	scope: DreamScope,
+	evidence: string,
+): Promise<DreamScopeResult> {
+	const scopeStartedAt = Date.now();
 	let status: DreamRunStatus = "failed";
-	let changes = emptyDreamChanges();
+	let changes = emptyDreamScopeChanges();
 	let reason: string | undefined;
 	try {
 		options.signal.throwIfAborted();
-		const snapshot = snapshotDreamMemory(options.agentDir, options.cwd);
+		const snapshot = snapshotDreamMemory(options.agentDir, options.cwd, options.mode, scope);
+		const memory = getAutoMemoryPaths(options.agentDir, options.cwd, options.mode)[scope];
 		const plan = await (options.generatePlan ?? generateMemoryDreamPlan)({
 			model: options.model,
 			thinkingLevel: options.thinkingLevel,
@@ -690,8 +715,10 @@ export async function runMemoryDream(options: MemoryDreamRunOptions): Promise<Dr
 			...(options.maxRetryDelayMs !== undefined ? { maxRetryDelayMs: options.maxRetryDelayMs } : {}),
 			sessionId: options.sessionId,
 			cwd: options.cwd,
-			messages: options.messages,
-			paths: getAutoMemoryPaths(options.agentDir, options.cwd),
+			mode: options.mode,
+			scope,
+			evidence,
+			memory,
 			signal: options.signal,
 		});
 		options.signal.throwIfAborted();
@@ -709,19 +736,48 @@ export async function runMemoryDream(options: MemoryDreamRunOptions): Promise<Dr
 		status = isAbortError(error, options.signal) ? "cancelled" : "failed";
 		reason = status === "cancelled" ? "Dream cancelled" : errorReason(error);
 	}
+	return {
+		status,
+		changes,
+		durationMs: Math.max(0, Date.now() - scopeStartedAt),
+		...(reason ? { reason } : {}),
+	};
+}
+
+export async function runMemoryDream(options: MemoryDreamRunOptions): Promise<DreamHistoryRecord> {
+	let global: DreamScopeResult;
+	let project: DreamScopeResult;
+	try {
+		const evidence = (options.serializeEvidence ?? serializeDreamEvidence)(options.messages);
+		[global, project] = await Promise.all([
+			runDreamScope(options, "global", evidence),
+			runDreamScope(options, "project", evidence),
+		]);
+	} catch (error) {
+		const status = isAbortError(error, options.signal) ? "cancelled" : "failed";
+		const reason = status === "cancelled" ? "Dream cancelled" : errorReason(error);
+		const result = (): DreamScopeResult => ({
+			status,
+			changes: emptyDreamScopeChanges(),
+			durationMs: 0,
+			reason,
+		});
+		global = result();
+		project = result();
+	}
 	const completedAt = new Date().toISOString();
 	const startedAtMs = Date.parse(options.startedAt);
 	const record: DreamHistoryRecord = {
 		id: options.id,
 		sessionId: options.sessionId,
-		project: options.project,
+		mode: options.mode,
+		cwd: options.cwd,
 		trigger: options.trigger,
 		startedAt: options.startedAt,
 		completedAt,
 		durationMs: Number.isFinite(startedAtMs) ? Math.max(0, Date.now() - startedAtMs) : 0,
-		status,
-		changes,
-		...(reason ? { reason } : {}),
+		global,
+		project,
 	};
 	try {
 		await appendDreamHistory(options.agentDir, record);

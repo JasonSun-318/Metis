@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { getModel } from "@arcmind/ai/compat";
 import { afterEach, describe, expect, it } from "vitest";
-import { getAutoMemoryPaths } from "../src/core/auto-memory.ts";
+import { ensureModeScopedMemoryLayout, getAutoMemoryPaths } from "../src/core/auto-memory.ts";
 import { createAgentSession } from "../src/core/sdk.ts";
 import { SettingsManager } from "../src/core/settings-manager.ts";
 
@@ -24,7 +24,8 @@ describe("AgentSession auto memory", () => {
 		const agentDir = join(root, "agent");
 		const cwd = join(root, "project");
 		mkdirSync(cwd, { recursive: true });
-		const paths = getAutoMemoryPaths(agentDir, cwd);
+		await ensureModeScopedMemoryLayout(agentDir);
+		const paths = getAutoMemoryPaths(agentDir, cwd, "code");
 		mkdirSync(dirname(paths.global.indexPath), { recursive: true });
 		mkdirSync(dirname(paths.project.indexPath), { recursive: true });
 		writeFileSync(paths.global.indexPath, "global-memory-v1");
@@ -50,29 +51,39 @@ describe("AgentSession auto memory", () => {
 		}
 	});
 
-	it("shares global memory but isolates project memory by exact cwd", async () => {
+	it("shares global memory but isolates project memory by exact cwd and mode", async () => {
 		const root = makeTemp();
 		const agentDir = join(root, "agent");
 		const firstCwd = join(root, "first");
 		const secondCwd = join(root, "second");
 		mkdirSync(firstCwd, { recursive: true });
 		mkdirSync(secondCwd, { recursive: true });
-		const firstPaths = getAutoMemoryPaths(agentDir, firstCwd);
+		await ensureModeScopedMemoryLayout(agentDir);
+		const firstPaths = getAutoMemoryPaths(agentDir, firstCwd, "code");
+		const firstChatPaths = getAutoMemoryPaths(agentDir, firstCwd, "chat");
 		mkdirSync(dirname(firstPaths.global.indexPath), { recursive: true });
 		mkdirSync(dirname(firstPaths.project.indexPath), { recursive: true });
+		mkdirSync(dirname(firstChatPaths.project.indexPath), { recursive: true });
 		writeFileSync(firstPaths.global.indexPath, "shared-global-memory");
-		writeFileSync(firstPaths.project.indexPath, "first-project-memory");
+		writeFileSync(firstPaths.project.indexPath, "first-code-project-memory");
+		writeFileSync(firstChatPaths.project.indexPath, "first-chat-project-memory");
 
 		const model = getModel("anthropic", "claude-sonnet-4-5")!;
 		const first = await createAgentSession({ agentDir, cwd: firstCwd, model });
+		const firstChat = await createAgentSession({ agentDir, cwd: firstCwd, agentMode: "chat", model });
 		const second = await createAgentSession({ agentDir, cwd: secondCwd, model });
 		try {
 			expect(first.session.systemPrompt).toContain("shared-global-memory");
+			expect(firstChat.session.systemPrompt).toContain("shared-global-memory");
 			expect(second.session.systemPrompt).toContain("shared-global-memory");
-			expect(first.session.systemPrompt).toContain("first-project-memory");
-			expect(second.session.systemPrompt).not.toContain("first-project-memory");
+			expect(first.session.systemPrompt).toContain("first-code-project-memory");
+			expect(first.session.systemPrompt).not.toContain("first-chat-project-memory");
+			expect(firstChat.session.systemPrompt).toContain("first-chat-project-memory");
+			expect(firstChat.session.systemPrompt).not.toContain("first-code-project-memory");
+			expect(second.session.systemPrompt).not.toContain("first-code-project-memory");
 		} finally {
 			first.session.dispose();
+			firstChat.session.dispose();
 			second.session.dispose();
 		}
 	});
@@ -82,7 +93,8 @@ describe("AgentSession auto memory", () => {
 		const agentDir = join(root, "agent");
 		const cwd = join(root, "project");
 		mkdirSync(cwd, { recursive: true });
-		const paths = getAutoMemoryPaths(agentDir, cwd);
+		await ensureModeScopedMemoryLayout(agentDir);
+		const paths = getAutoMemoryPaths(agentDir, cwd, "code");
 		mkdirSync(dirname(paths.global.indexPath), { recursive: true });
 		writeFileSync(paths.global.indexPath, "toggle-memory-marker");
 		const settingsManager = SettingsManager.inMemory();

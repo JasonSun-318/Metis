@@ -211,19 +211,13 @@ function formatDreamDuration(durationMs: number): string {
 }
 
 function formatDreamHistoryLine(record: DreamHistoryRecord): string {
-	const symbol = record.status === "success" ? "✓" : record.status === "failed" ? "✗" : "–";
-	const globalChanged = [
-		...record.changes.global.created,
-		...record.changes.global.updated,
-		...record.changes.global.deleted,
-	].length;
-	const projectChanged = [
-		...record.changes.project.created,
-		...record.changes.project.updated,
-		...record.changes.project.deleted,
-	].length;
-	const reason = record.reason ? ` · ${record.reason.slice(0, 160)}` : "";
-	return `${symbol} ${record.status} · ${record.completedAt} · ${record.trigger} · ${formatDreamDuration(record.durationMs)} · ${record.project} · global ${globalChanged} / project ${projectChanged}${reason}`;
+	const scope = (label: string, result: DreamHistoryRecord["global"]): string => {
+		const symbol = result.status === "success" ? "✓" : result.status === "failed" ? "✗" : "–";
+		const changed = [...result.changes.created, ...result.changes.updated, ...result.changes.deleted].length;
+		const reason = result.reason ? ` · ${result.reason.slice(0, 160)}` : "";
+		return `  ${symbol} ${label} ${result.status} · ${changed} files · ${formatDreamDuration(result.durationMs)}${reason}`;
+	};
+	return `${record.completedAt} · ${record.mode} · ${record.trigger} · ${formatDreamDuration(record.durationMs)} · ${record.cwd}\n${scope("Global", record.global)}\n${scope("Project", record.project)}`;
 }
 
 const SCHEDULE_WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] as const;
@@ -5777,7 +5771,7 @@ export class InteractiveMode {
 		if (snapshot.active) {
 			const elapsed = Math.max(0, Date.now() - new Date(snapshot.active.startedAt).getTime());
 			lines.push(
-				`${theme.fg("warning", "running")} · ${snapshot.active.trigger} · ${formatDreamDuration(elapsed)} · ${snapshot.active.project}`,
+				`${theme.fg("warning", "running")} · ${snapshot.active.mode} · ${snapshot.active.trigger} · ${formatDreamDuration(elapsed)} · ${snapshot.active.cwd}`,
 			);
 		} else {
 			lines.push(theme.fg("dim", "idle"));

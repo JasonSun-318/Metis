@@ -7,7 +7,12 @@ import { getModel } from "@arcmind/ai/compat";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AgentSession, type AgentSessionEvent } from "../src/core/agent-session.ts";
 import { AuthStorage } from "../src/core/auth-storage.ts";
-import type { DreamChanges, DreamHistoryRecord, MemoryDreamRunOptions } from "../src/core/memory-dream.ts";
+import type {
+	DreamHistoryRecord,
+	DreamRunStatus,
+	DreamScopeChanges,
+	MemoryDreamRunOptions,
+} from "../src/core/memory-dream.ts";
 import { ModelRegistry } from "../src/core/model-registry.ts";
 import { SessionManager } from "../src/core/session-manager.ts";
 import { SettingsManager } from "../src/core/settings-manager.ts";
@@ -20,34 +25,32 @@ afterEach(() => {
 	for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
-function emptyChanges(): DreamChanges {
-	return {
-		global: { created: [], updated: [], deleted: [] },
-		project: { created: [], updated: [], deleted: [] },
-	};
+function emptyChanges(): DreamScopeChanges {
+	return { created: [], updated: [], deleted: [] };
 }
 
 function dreamRecord(
-	status: DreamHistoryRecord["status"],
-	project: string,
+	status: DreamRunStatus,
+	cwd: string,
 	options: { reason?: string; changed?: boolean } = {},
 ): DreamHistoryRecord {
+	const result = (file: "MEMORY.md" | "project.md") => ({
+		status,
+		changes: options.changed ? { created: [], updated: [file], deleted: [] } : emptyChanges(),
+		durationMs: 500,
+		...(options.reason ? { reason: options.reason } : {}),
+	});
 	return {
 		id: "dream-test",
 		sessionId: "session-test",
-		project,
+		mode: "code",
+		cwd,
 		trigger: "manual",
 		startedAt: "2026-07-15T00:00:00.000Z",
 		completedAt: "2026-07-15T00:00:01.000Z",
 		durationMs: 1000,
-		status,
-		changes: options.changed
-			? {
-					global: { created: [], updated: ["MEMORY.md"], deleted: [] },
-					project: { created: [], updated: ["project.md"], deleted: [] },
-				}
-			: emptyChanges(),
-		...(options.reason ? { reason: options.reason } : {}),
+		global: result("MEMORY.md"),
+		project: result("project.md"),
 	};
 }
 
@@ -153,7 +156,7 @@ describe("AgentSession memory Dream", () => {
 		const compactPromise = session.compact();
 		await expect(session.compact()).rejects.toThrow("Compaction already in progress");
 		await vi.waitFor(() => expect(runner).toHaveBeenCalledOnce());
-		expect(session.getDreamStatus().active?.project).toBe(cwd);
+		expect(session.getDreamStatus().active).toMatchObject({ cwd, mode: "code" });
 		expect(events.some((event) => event.type === "compaction_end")).toBe(false);
 
 		finishDream(dreamRecord("success", cwd, { changed: true }));

@@ -1989,7 +1989,7 @@ export class AgentSession {
 	}
 
 	getAutoMemorySnapshot(): AutoMemorySnapshot | undefined {
-		return this._agentDir ? loadAutoMemory(this._agentDir, this._cwd) : undefined;
+		return this._agentDir ? loadAutoMemory(this._agentDir, this._cwd, this.mode) : undefined;
 	}
 
 	getDreamStatus(limit = 10): DreamStatusSnapshot {
@@ -3359,13 +3359,13 @@ export class AgentSession {
 		const active: DreamActiveRun = {
 			id: randomUUID(),
 			sessionId: this.sessionId,
-			project: this._cwd,
+			mode: this.mode,
+			cwd: this._cwd,
 			trigger: reason,
 			startedAt: new Date().toISOString(),
 		};
 		this._activeDream = active;
 		const agentDir = this._agentDir;
-		const cwd = this._cwd;
 		const model = this.model;
 		const thinkingLevel = this.thinkingLevel;
 		const streamFn = this.agent.streamFn;
@@ -3378,7 +3378,6 @@ export class AgentSession {
 			this._memoryDreamRunner({
 				...active,
 				agentDir,
-				cwd,
 				model,
 				thinkingLevel,
 				streamFn,
@@ -3392,7 +3391,12 @@ export class AgentSession {
 		);
 		const trackedDream = dreamPromise
 			.then((dream) => {
-				if (dream.status === "success" || dream.reason === "Memory changed while Dream was running") {
+				if (
+					dream.global.status === "success" ||
+					dream.project.status === "success" ||
+					dream.global.reason === "Memory changed while Dream was running" ||
+					dream.project.reason === "Memory changed while Dream was running"
+				) {
 					this.refreshSystemPrompt();
 				}
 				return dream;

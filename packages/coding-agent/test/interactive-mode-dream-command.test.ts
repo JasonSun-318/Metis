@@ -14,22 +14,29 @@ describe("InteractiveMode /dream", () => {
 			active: {
 				id: "active",
 				sessionId: "session",
-				project: "/Users/ent/ArcMind",
+				mode: "chat" as const,
+				cwd: "/Users/ent/ArcMind",
 				trigger: "manual" as const,
 				startedAt: "2026-07-15T06:00:00.000Z",
 			},
 			recent: Array.from({ length: 10 }, (_, index) => ({
 				id: `run-${index}`,
 				sessionId: "session",
-				project: "/Users/ent/ArcMind",
+				mode: "chat" as const,
+				cwd: "/Users/ent/ArcMind",
 				trigger: "threshold" as const,
 				startedAt: "2026-07-15T05:00:00.000Z",
 				completedAt: "2026-07-15T05:00:01.000Z",
 				durationMs: 1000,
-				status: "success" as const,
-				changes: {
-					global: { created: [], updated: ["MEMORY.md"], deleted: [] },
-					project: { created: [], updated: ["project.md"], deleted: [] },
+				global: {
+					status: "success" as const,
+					changes: { created: [], updated: ["MEMORY.md"], deleted: [] },
+					durationMs: 500,
+				},
+				project: {
+					status: "success" as const,
+					changes: { created: [], updated: ["project.md"], deleted: [] },
+					durationMs: 500,
 				},
 			})),
 		}));

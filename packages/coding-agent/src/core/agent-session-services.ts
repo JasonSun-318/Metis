@@ -4,6 +4,7 @@ import type { Model } from "@arcmind/ai";
 import { getAgentDir } from "../config.ts";
 import { resolvePath } from "../utils/paths.ts";
 import { AuthStorage } from "./auth-storage.ts";
+import { ensureModeScopedMemoryLayout } from "./auto-memory.ts";
 import type { SessionStartEvent, ToolDefinition } from "./extensions/index.ts";
 import { ModelRegistry } from "./model-registry.ts";
 import {
@@ -150,6 +151,7 @@ export async function createAgentSessionServices(
 ): Promise<AgentSessionServices> {
 	const cwd = resolvePath(options.cwd);
 	const agentDir = options.agentDir ? resolvePath(options.agentDir) : getAgentDir();
+	await ensureModeScopedMemoryLayout(agentDir);
 	if (options.authStorage && options.modelRegistry && options.modelRegistry.authStorage !== options.authStorage) {
 		throw new Error("authStorage must match modelRegistry.authStorage");
 	}

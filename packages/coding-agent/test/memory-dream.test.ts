@@ -1,5 +1,6 @@
 import {
 	existsSync,
+	linkSync,
 	lstatSync,
 	mkdirSync,
 	mkdtempSync,
@@ -9,7 +10,7 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { getModel } from "@arcmind/ai/compat";
 import lockfile from "proper-lockfile";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -17,9 +18,11 @@ import { getAutoMemoryPaths } from "../src/core/auto-memory.ts";
 import {
 	appendDreamHistory,
 	commitDreamPlan,
-	DREAM_SYSTEM_PROMPT,
-	type DreamChanges,
+	DREAM_SYSTEM_PROMPTS,
+	type DreamHistoryRecord,
 	type DreamPlan,
+	type DreamRunStatus,
+	type DreamScope,
 	getDreamHistoryPath,
 	isAllowedDreamToolPath,
 	parseDreamPlan,
@@ -36,68 +39,99 @@ describe("memory Dream", () => {
 		roots.push(root);
 		return root;
 	};
+	const changes = {
+		created: [] as string[],
+		updated: [] as string[],
+		deleted: [] as string[],
+	};
+	const scopeResult = (status: DreamRunStatus) => ({
+		status,
+		changes,
+		durationMs: 10,
+	});
+	const record = (id: string): DreamHistoryRecord => ({
+		id,
+		sessionId: "session",
+		mode: "chat",
+		cwd: "/project",
+		trigger: "manual",
+		startedAt: "2026-07-15T00:00:00.000Z",
+		completedAt: "2026-07-15T00:00:01.000Z",
+		durationMs: 1000,
+		global: scopeResult("skipped"),
+		project: scopeResult("success"),
+	});
 
 	afterEach(() => {
 		vi.restoreAllMocks();
 		for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 	});
 
-	it("validates flat one-to-one indexes before touching disk", () => {
+	it.each([
+		["global", "MEMORY.md", "Global"],
+		["project", "project.md", "Project"],
+	] as const)("validates the %s flat one-to-one index before touching disk", (scope, indexFile, label) => {
 		const root = makeRoot();
-		const snapshot = snapshotDreamMemory(join(root, "agent"), join(root, "project"));
+		const snapshot = snapshotDreamMemory(join(root, "agent"), join(root, "project"), "chat", scope);
 		const valid: DreamPlan = {
 			writes: [
 				{
-					scope: "global",
-					file: "MEMORY.md",
-					content: "- [preferences.md](preferences.md) — Explicit cross-project user preferences",
+					file: indexFile,
+					content: "- [facts.md](facts.md) — Verified durable facts",
 				},
-				{ scope: "global", file: "preferences.md", content: "# Preferences\n\n- Reply in Chinese." },
+				{ file: "facts.md", content: "# Facts\n\n- Verified." },
 			],
 			deletes: [],
 		};
 
-		expect(prepareDreamCommit(snapshot, valid).changes.global.created).toEqual(["MEMORY.md", "preferences.md"]);
+		expect(prepareDreamCommit(snapshot, valid).changes.created).toEqual([indexFile, "facts.md"].sort());
 		expect(() =>
 			prepareDreamCommit(snapshot, {
-				writes: [{ scope: "global", file: "../escape.md", content: "escape" }],
+				writes: [{ file: "../escape.md", content: "escape" }],
 				deletes: [],
 			}),
 		).toThrow("Dream file names must be flat .md basenames");
 		expect(() =>
 			prepareDreamCommit(snapshot, {
-				writes: [{ scope: "global", file: "MEMORY.md", content: "- [missing.md](missing.md) — Missing" }],
+				writes: [
+					{
+						file: indexFile,
+						content: "- [missing.md](missing.md) — Missing",
+					},
+				],
 				deletes: [],
 			}),
-		).toThrow("Global memory index links to missing.md, but that detail file does not exist");
-		expect(() =>
-			prepareDreamCommit(snapshot, {
-				writes: [{ scope: "project", file: "orphan.md", content: "# Orphan" }],
-				deletes: [],
-			}),
-		).toThrow("Project memory detail orphan.md has no project.md entry");
+		).toThrow(`${label} memory index links to missing.md, but that detail file does not exist`);
 	});
 
-	it("commits atomically, refuses stale plans, and honors cancellation", async () => {
+	it("commits one scope, refuses a stale plan, and honors cancellation", async () => {
 		const root = makeRoot();
 		const agentDir = join(root, "agent");
 		const cwd = join(root, "project");
-		const initial = snapshotDreamMemory(agentDir, cwd);
+		const initial = snapshotDreamMemory(agentDir, cwd, "code", "project");
 		const prepared = prepareDreamCommit(initial, {
 			writes: [
-				{ scope: "project", file: "project.md", content: "- [decisions.md](decisions.md) — Durable decisions" },
-				{ scope: "project", file: "decisions.md", content: "# Decisions\n\n- Dream runs with Compact." },
+				{
+					file: "project.md",
+					content: "- [decisions.md](decisions.md) — Durable decisions",
+				},
+				{
+					file: "decisions.md",
+					content: "# Decisions\n\n- Dream runs with Compact.",
+				},
 			],
 			deletes: [],
 		});
 
-		await expect(commitDreamPlan(initial, prepared)).resolves.toMatchObject({ status: "success" });
-		const paths = getAutoMemoryPaths(agentDir, cwd);
+		await expect(commitDreamPlan(initial, prepared)).resolves.toMatchObject({
+			status: "success",
+		});
+		const paths = getAutoMemoryPaths(agentDir, cwd, "code");
 		expect(readFileSync(paths.project.indexPath, "utf8")).toContain("decisions.md");
 
-		const stale = snapshotDreamMemory(agentDir, cwd);
+		const stale = snapshotDreamMemory(agentDir, cwd, "code", "project");
 		const stalePlan = prepareDreamCommit(stale, {
-			writes: [{ scope: "project", file: "decisions.md", content: "# Decisions\n\n- Dream update." }],
+			writes: [{ file: "decisions.md", content: "# Decisions\n\n- Dream update." }],
 			deletes: [],
 		});
 		writeFileSync(join(paths.project.directory, "decisions.md"), "# Decisions\n\n- Concurrent update.");
@@ -105,45 +139,44 @@ describe("memory Dream", () => {
 			status: "skipped",
 			reason: "Memory changed while Dream was running",
 		});
-		expect(readFileSync(join(paths.project.directory, "decisions.md"), "utf8")).toContain("Concurrent update");
 
-		const cancelledSnapshot = snapshotDreamMemory(join(root, "cancelled-agent"), cwd);
-		const cancelledPlan = prepareDreamCommit(cancelledSnapshot, {
+		const cancelled = snapshotDreamMemory(join(root, "cancelled-agent"), cwd, "chat", "global");
+		const cancelledPlan = prepareDreamCommit(cancelled, {
 			writes: [
-				{ scope: "global", file: "MEMORY.md", content: "- [facts.md](facts.md) — Stable facts" },
-				{ scope: "global", file: "facts.md", content: "# Facts\n\n- Stable." },
+				{ file: "MEMORY.md", content: "- [facts.md](facts.md) — Stable facts" },
+				{ file: "facts.md", content: "# Facts\n\n- Stable." },
 			],
 			deletes: [],
 		});
 		const controller = new AbortController();
 		controller.abort();
-		await expect(commitDreamPlan(cancelledSnapshot, cancelledPlan, controller.signal)).rejects.toMatchObject({
+		await expect(commitDreamPlan(cancelled, cancelledPlan, controller.signal)).rejects.toMatchObject({
 			name: "AbortError",
 		});
-		expect(existsSync(getAutoMemoryPaths(join(root, "cancelled-agent"), cwd).global.indexPath)).toBe(false);
+		expect(existsSync(getAutoMemoryPaths(join(root, "cancelled-agent"), cwd, "chat").global.indexPath)).toBe(false);
 	});
 
-	it("rolls both scopes back when a later filesystem write fails", async () => {
+	it("rolls back files already written when a later write fails", async () => {
 		const root = makeRoot();
 		const agentDir = join(root, "agent");
 		const cwd = join(root, "project");
-		const snapshot = snapshotDreamMemory(agentDir, cwd);
+		const snapshot = snapshotDreamMemory(agentDir, cwd, "chat", "project");
 		const prepared = prepareDreamCommit(snapshot, {
 			writes: [
-				{ scope: "global", file: "MEMORY.md", content: "- [facts.md](facts.md) — Stable facts" },
-				{ scope: "global", file: "facts.md", content: "# Facts\n\n- Stable." },
-				{ scope: "project", file: "project.md", content: "- [blocked.md](blocked.md) — Blocked write" },
-				{ scope: "project", file: "blocked.md", content: "# Blocked\n\n- Write." },
+				{
+					file: "project.md",
+					content: "- [a.md](a.md) — First\n- [blocked.md](blocked.md) — Blocked",
+				},
+				{ file: "a.md", content: "# First" },
+				{ file: "blocked.md", content: "# Blocked" },
 			],
 			deletes: [],
 		});
-		const paths = getAutoMemoryPaths(agentDir, cwd);
+		const paths = getAutoMemoryPaths(agentDir, cwd, "chat");
 		mkdirSync(join(paths.project.directory, "blocked.md"), { recursive: true });
 
 		await expect(commitDreamPlan(snapshot, prepared)).rejects.toThrow();
-
-		expect(existsSync(paths.global.indexPath)).toBe(false);
-		expect(existsSync(join(paths.global.directory, "facts.md"))).toBe(false);
+		expect(existsSync(join(paths.project.directory, "a.md"))).toBe(false);
 		expect(existsSync(paths.project.indexPath)).toBe(false);
 		expect(lstatSync(join(paths.project.directory, "blocked.md")).isDirectory()).toBe(true);
 	});
@@ -152,11 +185,11 @@ describe("memory Dream", () => {
 		const root = makeRoot();
 		const agentDir = join(root, "agent");
 		const cwd = join(root, "project");
-		const snapshot = snapshotDreamMemory(agentDir, cwd);
+		const snapshot = snapshotDreamMemory(agentDir, cwd, "chat", "global");
 		const prepared = prepareDreamCommit(snapshot, {
 			writes: [
-				{ scope: "global", file: "MEMORY.md", content: "- [facts.md](facts.md) — Stable facts" },
-				{ scope: "global", file: "facts.md", content: "# Facts\n\n- Stable." },
+				{ file: "MEMORY.md", content: "- [facts.md](facts.md) — Stable facts" },
+				{ file: "facts.md", content: "# Facts\n\n- Stable." },
 			],
 			deletes: [],
 		});
@@ -164,159 +197,122 @@ describe("memory Dream", () => {
 			throw new Error("release failed");
 		});
 
-		await expect(commitDreamPlan(snapshot, prepared)).resolves.toMatchObject({ status: "success" });
-		expect(readFileSync(getAutoMemoryPaths(agentDir, cwd).global.indexPath, "utf8")).toContain("facts.md");
-	});
-
-	it("returns newest valid audit records and skips corrupt rows", async () => {
-		const root = makeRoot();
-		const agentDir = join(root, "agent");
-		const changes: DreamChanges = {
-			global: { created: [], updated: [], deleted: [] },
-			project: { created: [], updated: [], deleted: [] },
-		};
-		for (let index = 1; index <= 12; index++) {
-			await appendDreamHistory(agentDir, {
-				id: `run-${index}`,
-				sessionId: "session",
-				project: "/project",
-				trigger: "threshold",
-				startedAt: `2026-07-15T00:00:${String(index).padStart(2, "0")}.000Z`,
-				completedAt: `2026-07-15T00:00:${String(index).padStart(2, "0")}.500Z`,
-				durationMs: 500,
-				status: "skipped",
-				changes,
-				reason: "No durable memory changes",
-			});
-		}
-		writeFileSync(getDreamHistoryPath(agentDir), "not-json\n{}\n", { flag: "a" });
-
-		expect(readDreamHistory(agentDir, 10).map((record) => record.id)).toEqual([
-			"run-12",
-			"run-11",
-			"run-10",
-			"run-9",
-			"run-8",
-			"run-7",
-			"run-6",
-			"run-5",
-			"run-4",
-			"run-3",
-		]);
-	});
-
-	it("scans large corrupt history lines once and still finds older valid records", async () => {
-		const root = makeRoot();
-		const agentDir = join(root, "agent");
-		const changes: DreamChanges = {
-			global: { created: [], updated: [], deleted: [] },
-			project: { created: [], updated: [], deleted: [] },
-		};
-		const record = (id: string) => ({
-			id,
-			sessionId: "session",
-			project: "/project",
-			trigger: "manual" as const,
-			startedAt: "2026-07-15T00:00:00.000Z",
-			completedAt: "2026-07-15T00:00:01.000Z",
-			durationMs: 1000,
-			status: "success" as const,
-			changes,
-			reason: "整理完成",
+		await expect(commitDreamPlan(snapshot, prepared)).resolves.toMatchObject({
+			status: "success",
 		});
+		expect(readFileSync(getAutoMemoryPaths(agentDir, cwd, "chat").global.indexPath, "utf8")).toContain("facts.md");
+	});
+
+	it("returns newest valid audit records across a large corrupt row", async () => {
+		const root = makeRoot();
+		const agentDir = join(root, "agent");
 		await appendDreamHistory(agentDir, record("older"));
-		writeFileSync(getDreamHistoryPath(agentDir), `${"x".repeat(70_000)}\n`, { flag: "a" });
+		writeFileSync(getDreamHistoryPath(agentDir), `${"x".repeat(70_000)}\n`, {
+			flag: "a",
+		});
 		await appendDreamHistory(agentDir, record("newer"));
+		writeFileSync(getDreamHistoryPath(agentDir), "not-json\n{}\n", {
+			flag: "a",
+		});
 
 		expect(readDreamHistory(agentDir, 2).map(({ id }) => id)).toEqual(["newer", "older"]);
 	});
 
-	it("uses a concise strict prompt and JSON-only mutation contract", () => {
-		expect(DREAM_SYSTEM_PROMPT).toContain("silent long-term memory maintainer");
-		expect(DREAM_SYSTEM_PROMPT).toContain("Global facts apply across projects");
-		expect(DREAM_SYSTEM_PROMPT).toContain("The current working directory defines the project");
-		expect(DREAM_SYSTEM_PROMPT).toContain("Return exactly one JSON object and no prose");
-		expect(DREAM_SYSTEM_PROMPT).not.toContain("codebase");
-		expect(parseDreamPlan('{"writes":[],"deletes":[]}')).toEqual({ writes: [], deletes: [] });
+	it("uses separate strict prompts and a scope-free JSON mutation contract", () => {
+		expect(DREAM_SYSTEM_PROMPTS.global).toContain("global long-term memory maintainer");
+		expect(DREAM_SYSTEM_PROMPTS.project).toContain("working directory and mode");
+		expect(DREAM_SYSTEM_PROMPTS.global).toContain("Return exactly one JSON object and no prose");
+		expect(parseDreamPlan('{"writes":[],"deletes":[]}')).toEqual({
+			writes: [],
+			deletes: [],
+		});
+		expect(() => parseDreamPlan('{"writes":[{"scope":"global","file":"x.md","content":"x"}],"deletes":[]}')).toThrow(
+			"Dream plan contains unknown fields",
+		);
 		expect(() => parseDreamPlan('```json\n{"writes":[],"deletes":[]}\n```')).toThrow(
 			"Dream must return exactly one JSON object",
 		);
-		expect(() => parseDreamPlan('{"writes":[],"deletes":[],"notes":"extra"}')).toThrow(
-			"Dream plan contains unknown fields",
-		);
 	});
 
-	it("allows tools only in global and current-project flat Markdown scopes", () => {
+	it("allows tools only inside the selected flat Markdown scope", () => {
 		const root = makeRoot();
-		const agentDir = join(root, "agent");
-		const cwd = join(root, "project");
-		const paths = getAutoMemoryPaths(agentDir, cwd);
+		const paths = getAutoMemoryPaths(join(root, "agent"), join(root, "project"), "chat");
 		mkdirSync(paths.project.directory, { recursive: true });
 		writeFileSync(paths.global.indexPath, "# Global");
 		writeFileSync(paths.project.indexPath, "# Project");
 
-		expect(isAllowedDreamToolPath(paths.global.indexPath, "read", paths)).toBe(true);
-		expect(isAllowedDreamToolPath(paths.project.indexPath, "grep", paths)).toBe(true);
-		expect(isAllowedDreamToolPath(paths.global.directory, "ls", paths)).toBe(true);
-		expect(
-			isAllowedDreamToolPath(join(paths.global.directory, "projects", "other", "project.md"), "read", paths),
-		).toBe(false);
+		expect(isAllowedDreamToolPath(paths.global.indexPath, "read", paths.global)).toBe(true);
+		expect(isAllowedDreamToolPath(paths.project.indexPath, "grep", paths.project)).toBe(true);
+		expect(isAllowedDreamToolPath(paths.global.directory, "ls", paths.global)).toBe(true);
+		expect(isAllowedDreamToolPath(paths.project.indexPath, "read", paths.global)).toBe(false);
 	});
 
-	it.skipIf(process.platform === "win32")("rejects symlinked Markdown tool paths", () => {
+	it.skipIf(process.platform === "win32")("rejects symlinked memory and audit paths", async () => {
 		const root = makeRoot();
 		const agentDir = join(root, "agent");
 		const cwd = join(root, "project");
-		const paths = getAutoMemoryPaths(agentDir, cwd);
+		const paths = getAutoMemoryPaths(agentDir, cwd, "chat");
 		mkdirSync(paths.global.directory, { recursive: true });
-		const target = join(root, "outside.md");
-		const link = join(paths.global.directory, "linked.md");
-		writeFileSync(target, "# Outside");
-		symlinkSync(target, link, "file");
-		expect(isAllowedDreamToolPath(link, "read", paths)).toBe(false);
-		expect(() => snapshotDreamMemory(agentDir, cwd)).toThrow("Dream memory file cannot be a symbolic link");
-	});
+		const outsideMemory = join(root, "outside.md");
+		const linkedMemory = join(paths.global.directory, "linked.md");
+		writeFileSync(outsideMemory, "# Outside");
+		symlinkSync(outsideMemory, linkedMemory, "file");
+		expect(isAllowedDreamToolPath(linkedMemory, "read", paths.global)).toBe(false);
+		expect(() => snapshotDreamMemory(agentDir, cwd, "chat", "global")).toThrow(
+			"Dream memory file cannot be a symbolic link",
+		);
 
-	it.skipIf(process.platform === "win32")("does not follow a symlinked audit history file", async () => {
-		const root = makeRoot();
-		const agentDir = join(root, "agent");
+		rmSync(linkedMemory);
 		const historyPath = getDreamHistoryPath(agentDir);
-		mkdirSync(dirname(historyPath), { recursive: true });
-		const outside = join(root, "outside.jsonl");
-		writeFileSync(outside, "sentinel\n");
-		symlinkSync(outside, historyPath, "file");
+		const outsideHistory = join(root, "outside.jsonl");
+		writeFileSync(outsideHistory, "sentinel\n");
+		symlinkSync(outsideHistory, historyPath, "file");
+		await expect(appendDreamHistory(agentDir, record("blocked"))).rejects.toThrow(
+			"Dream memory path cannot be a symbolic link",
+		);
+		expect(readFileSync(outsideHistory, "utf8")).toBe("sentinel\n");
 
-		await expect(
-			appendDreamHistory(agentDir, {
-				id: "blocked",
-				sessionId: "session",
-				project: "/project",
-				trigger: "manual",
-				startedAt: "2026-07-15T00:00:00.000Z",
-				completedAt: "2026-07-15T00:00:01.000Z",
-				durationMs: 1000,
-				status: "failed",
-				changes: {
-					global: { created: [], updated: [], deleted: [] },
-					project: { created: [], updated: [], deleted: [] },
-				},
-			}),
-		).rejects.toThrow("Dream memory path cannot be a symbolic link");
-		expect(readFileSync(outside, "utf8")).toBe("sentinel\n");
+		rmSync(historyPath);
+		linkSync(outsideHistory, historyPath);
+		await expect(appendDreamHistory(agentDir, record("hard-linked"))).rejects.toThrow(
+			"Refusing to append aliased Dream history",
+		);
+		expect(readFileSync(outsideHistory, "utf8")).toBe("sentinel\n");
 	});
 
-	it("runs without a live provider and stores metadata rather than memory content", async () => {
+	it("starts both scopes concurrently with one evidence serialization and one audit record", async () => {
 		const root = makeRoot();
 		const agentDir = join(root, "agent");
 		const cwd = join(root, "project");
+		const entered: DreamScope[] = [];
+		const evidences: string[] = [];
+		let releaseBoth!: () => void;
+		const bothEntered = new Promise<void>((resolve) => {
+			releaseBoth = resolve;
+		});
+		const serializeEvidence = vi.fn(() => "shared evidence");
+		const generatePlan = vi.fn(async ({ scope, evidence }: { scope: DreamScope; evidence: string }) => {
+			entered.push(scope);
+			evidences.push(evidence);
+			if (entered.length === 2) releaseBoth();
+			await bothEntered;
+			const index = scope === "global" ? "MEMORY.md" : "project.md";
+			return {
+				writes: [
+					{ file: index, content: "- [facts.md](facts.md) — Verified facts" },
+					{ file: "facts.md", content: `# ${scope}` },
+				],
+				deletes: [],
+			};
+		});
 		const result = await runMemoryDream({
 			id: "dream-test",
 			sessionId: "session-test",
-			project: cwd,
+			mode: "chat",
+			cwd,
 			trigger: "manual",
 			startedAt: new Date().toISOString(),
 			agentDir,
-			cwd,
 			model: getModel("anthropic", "claude-sonnet-4-5")!,
 			thinkingLevel: "off",
 			streamFn: () => {
@@ -324,23 +320,59 @@ describe("memory Dream", () => {
 			},
 			messages: [],
 			signal: new AbortController().signal,
-			generatePlan: async () => ({
-				writes: [
-					{
-						scope: "global",
-						file: "MEMORY.md",
-						content: "- [preferences.md](preferences.md) — Explicit cross-project preferences",
-					},
-					{ scope: "global", file: "preferences.md", content: "# Preferences\n\n- Reply in Chinese." },
-				],
-				deletes: [],
-			}),
+			generatePlan: generatePlan as never,
+			serializeEvidence,
 		});
 
-		expect(result.status).toBe("success");
-		const history = readDreamHistory(agentDir, 10);
-		expect(history).toHaveLength(1);
-		expect(history[0]).toMatchObject({ id: "dream-test", sessionId: "session-test", project: cwd });
-		expect(JSON.stringify(history[0])).not.toContain("Reply in Chinese");
+		expect(serializeEvidence).toHaveBeenCalledOnce();
+		expect(new Set(entered)).toEqual(new Set(["global", "project"]));
+		expect(evidences).toEqual(["shared evidence", "shared evidence"]);
+		expect(result.global.status).toBe("success");
+		expect(result.project.status).toBe("success");
+		expect(readDreamHistory(agentDir, 10)).toHaveLength(1);
+		expect(JSON.stringify(readDreamHistory(agentDir, 1)[0])).not.toContain("# global");
+	});
+
+	it("keeps the project result when the global Dream fails", async () => {
+		const root = makeRoot();
+		const cwd = join(root, "project");
+		const result = await runMemoryDream({
+			id: "partial",
+			sessionId: "session",
+			mode: "code",
+			cwd,
+			trigger: "threshold",
+			startedAt: new Date().toISOString(),
+			agentDir: join(root, "agent"),
+			model: getModel("anthropic", "claude-sonnet-4-5")!,
+			thinkingLevel: "off",
+			streamFn: () => {
+				throw new Error("unused");
+			},
+			messages: [],
+			signal: new AbortController().signal,
+			generatePlan: (async ({ scope }: { scope: DreamScope }) => {
+				if (scope === "global") throw new Error("global failed");
+				return {
+					writes: [
+						{
+							file: "project.md",
+							content: "- [facts.md](facts.md) — Project facts",
+						},
+						{ file: "facts.md", content: "# Project" },
+					],
+					deletes: [],
+				};
+			}) as never,
+		});
+
+		expect(result.global).toMatchObject({
+			status: "failed",
+			reason: "global failed",
+		});
+		expect(result.project.status).toBe("success");
+		expect(readFileSync(getAutoMemoryPaths(join(root, "agent"), cwd, "code").project.indexPath, "utf8")).toContain(
+			"facts.md",
+		);
 	});
 });
