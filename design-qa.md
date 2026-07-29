@@ -97,3 +97,51 @@ final result: passed
 - P3: session content differs from the source capture by design, and the sidebar border has a one-pixel rasterization variance that does not alter its perceived width.
 
 final result: passed
+
+---
+
+# Desktop mode project actions — Design QA
+
+## Build and evidence
+
+- Reviewed bundle: `/Users/ent/ArcMind/packages/desktop/out/ArcMind-darwin-arm64/ArcMind.app`, built `2026-07-30 03:55:17 CST` from the current workspace rather than `/Applications/ArcMind.app`.
+- ASAR verification found `project/deletePreview` and `project/delete` in the protocol, App Server, main, preload, and renderer bundles; `Project actions` and `Rename project` were present in the renderer bundle.
+- Packaged screenshots: `/Users/ent/ArcMind/packages/desktop/test-results/design-qa/project-actions/project-menu-normal.png`, `rename-dialog-normal.png`, `delete-loading-normal.png`, `delete-blocker-normal.png`, `delete-ready-narrow.png`, `delete-ready-zoom-200.png`, `delete-deleting-narrow.png`, `delete-error-held-lease.png`, and `delete-success-narrow.png`.
+- The Loading capture pauses the real packaged App Server process around the request; it is not a renderer mock. The 200% equivalent uses a `450 × 360` CSS viewport, verifies the dialog and confirmation control are in the viewport, and confirms vertically scrollable reflow.
+
+## Packaged behavior
+
+- The real packaged lifecycle covered mode-scoped rename/pin, a same-folder empty Chat task, active-plus-archived preview, fixed-schedule blocking, schedule removal through the fixture API, one confirmed Trash operation, and exact disk inspection.
+- Chat journals, Chat memory, attachments, images, tool outputs, Subagent data, and document-work files moved away. The same-cwd Code journal/memory, source sentinel, Project Skill, trust decision, and global memory remained and reopened successfully.
+- A held session lease produced a friendly fail-closed dialog, retained every owned file, and succeeded only after releasing the lease and loading a fresh preview.
+- Full packaged E2E passed `5/5` including App Server restart recovery and a blocked renderer catching up with `10,000` deltas. The final plan-scoped packaged smoke passed `3/3` in `39.9s`.
+
+## Performance evidence
+
+- Baseline: RPC cold-ready median `1233.4ms`; one idle RPC process `210.3 MiB`; three idle RPC processes `646.5 MiB`; one idle in-process runtime `207.6 MiB`; three idle in-process runtimes `203.8 MiB`.
+- Current Desktop: launch-to-usable median `1068.3ms`; App Server ready median `743.8ms`; three-session RSS ratio `1.012` against a `1.25` budget; first-delta server overhead P95 `54.9ms` against `100ms`; crash recovery P95 `1026.8ms` against `3000ms`; minimum history scroll `60.9 FPS`; maximum virtualized DOM count `22`.
+- Every recorded Desktop performance budget passed. Project deletion remains one renderer request and one Trash command; catalog and runtime exclusion locks are project/session scoped, not held globally over Trash or Dream model work.
+
+## Review passes
+
+1. Destructive safety: traced canonical identity, complete active/archive membership, hard-link/symlink and TOCTOU checks, session/project leases, durable manifest staging, reverse rollback, startup recovery, Trash-only success, missing source folders, and every preserved root. Review found and fixed alias/realpath sessions splitting one logical project across storage directories; a red-to-green App Server regression now locks that boundary.
+2. Concurrency and recovery: traced catalog project blocking, grouped runtime quiescence, Chat schedule cwd locking, replay IDs, renderer generation guards, Dream scope locks, one evidence serialization, concurrent global/project Dream, and concurrent compaction. Review fixed structured RPC error transport across Electron and distinguishes known server failure (new retry ID) from a lost response (same replay ID).
+3. Product and accessibility: traced Chat/Code identity, shared cwd Skills, local mode-scoped rename/pin, active-session cleanup, icon order, keyboard menu navigation, Escape/focus restoration, dialog names/status announcements, reduced motion, narrow layout, and newly built bundle selection. Review added bounded dialog scrolling for high zoom; no P0/P1/P2 issue remains.
+
+## Validation
+
+- Generated protocol check and Protocol tests: `49/49` passed.
+- Focused Coding Agent memory/Dream/delete/schedule suites: `124/124` passed.
+- Focused App Server: `37/37` passed. Focused Desktop: `70/70` passed.
+- Full workspace: Agent `202/202`; AI `493` passed and `733` conditionally skipped; App Server `112/112`; Coding Agent `2417` passed and `52` skipped; Desktop `129/129`; TUI exited `0`.
+- Full TypeScript, Desktop main/renderer types, Biome over `251` affected source files, generated schema, package verification, dependency-lock checks, browser smoke, and `git diff --check` passed.
+- Root `npm run build` is blocked outside this feature by current remote catalog generation: without proxy, `models.dev` times out and the existing generator removes 26 catalogs; with a curl-captured official response, generation completes but current OpenCode Go metadata adds `openai-responses`, which the existing AI provider type rejects. Generated drift was fully restored. The checked-in AI catalog and every remaining workspace were built successfully offline, and the final packaged bundle/E2E passed afterward.
+
+## Findings
+
+- P0: none.
+- P1: none in mode project actions, memory, Dream, schedules, protocol, App Server, Desktop, or packaged behavior.
+- P2: none after the alias-storage, IPC error transport, and zoom-reflow fixes.
+- External release-infrastructure blocker: current live AI model catalog is incompatible with the existing OpenCode Go provider type; resolving that model-system issue is outside the mode-project plan.
+
+final result: mode-project feature passed; root online model-generation build remains externally blocked as documented above
