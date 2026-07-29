@@ -237,7 +237,7 @@ describe("InteractionBroker", () => {
 			jsonrpc: "2.0",
 			id: "initialize",
 			method: "initialize",
-			params: { protocolVersion: 6, client: { name: "test", version: "1" }, capabilities: [] },
+			params: { protocolVersion: 7, client: { name: "test", version: "1" }, capabilities: [] },
 		});
 		const ids = ["00000000-0000-4000-8000-000000000307", "00000000-0000-4000-8000-000000000308"];
 		const broker = new InteractionBroker({ serverEpoch: EPOCH, createId: () => ids.shift()! });
@@ -275,7 +275,7 @@ describe("InteractionBroker", () => {
 			jsonrpc: "2.0",
 			id: "initialize",
 			method: "initialize",
-			params: { protocolVersion: 6, client: { name: "test", version: "1" }, capabilities: [] },
+			params: { protocolVersion: 7, client: { name: "test", version: "1" }, capabilities: [] },
 		});
 		const ids = ["00000000-0000-4000-8000-000000000309", "00000000-0000-4000-8000-000000000310"];
 		const broker = new InteractionBroker({ serverEpoch: EPOCH, createId: () => ids.shift()! });

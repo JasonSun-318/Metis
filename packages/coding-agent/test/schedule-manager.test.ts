@@ -138,6 +138,11 @@ describe("schedule manager", () => {
 		expect(manager.countFixedWorkspaceTasks(child)).toBe(1);
 		expect((await manager.get(first.id)).status).toBe("active");
 		expect((await manager.get(second.id)).status).toBe("paused");
+		rmSync(project, { recursive: true, force: true });
+		expect(manager.countFixedWorkspaceTasks(project)).toBe(2);
+		await expect(manager.withNoFixedWorkspaceTasks(project, async () => undefined)).rejects.toMatchObject({
+			code: "TASK_BUSY",
+		});
 	});
 
 	it("fails fast when fixed-schedule creation and project deletion race", async () => {

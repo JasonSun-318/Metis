@@ -93,6 +93,10 @@ export class InteractionBroker {
 		if (this.owners.get(sessionId) === peer) this.owners.delete(sessionId);
 	}
 
+	releaseSession(sessionId: string): void {
+		this.owners.delete(sessionId);
+	}
+
 	releasePeer(peer: InteractionPeer): void {
 		for (const [sessionId, owner] of this.owners) {
 			if (owner === peer) this.owners.delete(sessionId);

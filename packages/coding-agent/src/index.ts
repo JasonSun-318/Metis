@@ -39,6 +39,7 @@ export {
 	mcpCredentialKey,
 	type OAuthCredential,
 } from "./core/auth-storage.ts";
+export { ensureModeScopedMemoryLayout } from "./core/auto-memory.ts";
 // Compaction
 export {
 	type BranchPreparation,
@@ -576,5 +577,6 @@ export { copyToClipboard } from "./utils/clipboard.ts";
 export { parseFrontmatter, stripFrontmatter } from "./utils/frontmatter.ts";
 export { convertToPng } from "./utils/image-convert.ts";
 export { formatDimensionNote, type ResizedImage, resizeImage } from "./utils/image-resize.ts";
+export { canonicalizePathForCreation, encodePathForStorage } from "./utils/paths.ts";
 // Shell utilities
 export { getShellConfig } from "./utils/shell.ts";

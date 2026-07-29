@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { existsSync, lstatSync, readdirSync, realpathSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import lockfile from "proper-lockfile";
-import { resolvePath } from "../../utils/paths.ts";
+import { canonicalizePathForCreation, resolvePath } from "../../utils/paths.ts";
 import {
 	createFileAtomicallySync,
 	ensureRealDirectoryDurablySync,
@@ -361,7 +361,7 @@ export class ScheduleManager {
 
 	countFixedWorkspaceTasks(cwd: string): number {
 		this.assertHealthy();
-		const canonicalCwd = existingRealDirectory(cwd);
+		const canonicalCwd = canonicalizePathForCreation(resolvePath(cwd));
 		return this.callStore(
 			() =>
 				this.store
@@ -377,7 +377,7 @@ export class ScheduleManager {
 
 	async withNoFixedWorkspaceTasks<T>(cwd: string, operation: () => Promise<T>): Promise<T> {
 		this.assertHealthy();
-		const canonicalCwd = existingRealDirectory(cwd);
+		const canonicalCwd = canonicalizePathForCreation(resolvePath(cwd));
 		return this.withFixedWorkspaceCwdLock(canonicalCwd, async () => {
 			if (this.countFixedWorkspaceTasks(canonicalCwd) > 0) {
 				throw new ScheduleError("TASK_BUSY", "Project has fixed-workspace scheduled tasks");

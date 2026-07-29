@@ -40,6 +40,7 @@ export interface ModeProjectSessionTarget {
 	readonly path: string;
 	readonly relativePath: string;
 	readonly archived: boolean;
+	readonly updatedAt?: string;
 }
 
 export interface TrashModeProjectDataInput {
@@ -256,6 +257,9 @@ function validateInputTargets(
 		if (typeof target.archived !== "boolean") {
 			throw new ProjectDeleteError("SESSION_CORRUPT", "Invalid project session archive marker");
 		}
+		if (target.updatedAt !== undefined && !Number.isFinite(Date.parse(target.updatedAt))) {
+			throw new ProjectDeleteError("SESSION_CORRUPT", "Invalid project session update time");
+		}
 		if (!safeRelativePath(target.relativePath) || !target.relativePath.endsWith(".jsonl")) {
 			throw new ProjectDeleteError("SESSION_CORRUPT", "Invalid project session relative path");
 		}
@@ -279,8 +283,8 @@ function scanProjectStorage(
 	mode: AgentMode,
 	cwd: string,
 	ids: Set<string>,
-): Map<string, { id: string; archived: boolean }> {
-	const result = new Map<string, { id: string; archived: boolean }>();
+): Map<string, { id: string; archived: boolean; updatedAt: string }> {
+	const result = new Map<string, { id: string; archived: boolean; updatedAt: string }>();
 	if (!existsSync(directory)) return result;
 	const canonicalDirectory = strictDirectory(directory, "Project session directory");
 	if (canonicalDirectory !== resolve(directory)) throw new Error("Project session directory is aliased");
@@ -301,7 +305,7 @@ function scanProjectStorage(
 			throw new ProjectDeleteError("SESSION_CORRUPT", `Duplicate session id in project storage: ${header.id}`);
 		}
 		ids.add(header.id);
-		result.set(path, { id: header.id, archived });
+		result.set(path, { id: header.id, archived, updatedAt: new Date(lstatSync(path).mtimeMs).toISOString() });
 	}
 	return result;
 }
@@ -319,7 +323,12 @@ function verifySnapshot(
 	if (scanned.size !== expected.size) throw new ProjectDeleteError("PROJECT_CHANGED", "Project sessions changed");
 	for (const [path, entry] of scanned) {
 		const target = expected.get(path);
-		if (!target || target.sessionId !== entry.id || target.archived !== entry.archived) {
+		if (
+			!target ||
+			target.sessionId !== entry.id ||
+			target.archived !== entry.archived ||
+			(target.updatedAt !== undefined && target.updatedAt !== entry.updatedAt)
+		) {
 			throw new ProjectDeleteError("PROJECT_CHANGED", "Project sessions changed");
 		}
 	}
@@ -405,6 +414,9 @@ async function collectTargets(
 		const before = lstatSync(path);
 		if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1) {
 			throw new ProjectDeleteError("SESSION_CORRUPT", `Unsafe session journal: ${path}`);
+		}
+		if (target.updatedAt !== undefined && new Date(before.mtimeMs).toISOString() !== target.updatedAt) {
+			throw new ProjectDeleteError("PROJECT_CHANGED", `Project session changed: ${path}`);
 		}
 		let header: SessionHeaderView;
 		try {
@@ -728,12 +740,12 @@ export async function trashModeProjectData(
 		const roots = verifyRoots(input);
 		const expected = validateInputTargets(input, roots);
 		leases.push(acquireModeProjectMutationLease(roots.projectDirectory, input.mode));
-		verifySnapshot(input, roots, expected);
 		let acquired = 0;
 		for (const path of [...expected.keys()].sort()) {
 			leases.push(SessionLease.acquireTransient(path));
 			if (++acquired % 32 === 0) await yieldToEventLoop();
 		}
+		verifySnapshot(input, roots, expected);
 		let collected: Awaited<ReturnType<typeof collectTargets>>;
 		try {
 			collected = await collectTargets(input, roots, hooks, expected);

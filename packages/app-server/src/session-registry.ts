@@ -1,4 +1,5 @@
 import type { ClientResult } from "@arcmind/app-protocol";
+import { assertValidSessionId } from "@arcmind/coding-agent";
 import {
 	AppServerError,
 	type OpenedSessionRuntime,
@@ -22,6 +23,7 @@ export interface SessionRegistryOptions {
 export class SessionRegistry {
 	private readonly host: SessionRuntimeHost;
 	private readonly slots = new Map<string, RuntimeSlot>();
+	private readonly blockedSessionIds = new Set<string>();
 	private readonly maxQueuedOperationsPerSession: number;
 	private accepting = true;
 	private shutdownPromise?: Promise<void>;
@@ -44,6 +46,9 @@ export class SessionRegistry {
 	}
 
 	private slotFor(ref: SessionRef): RuntimeSlot {
+		if (this.blockedSessionIds.has(ref.summary.sessionId)) {
+			throw new AppServerError("BUSY", { sessionId: ref.summary.sessionId });
+		}
 		const existing = this.slots.get(ref.summary.sessionId);
 		if (existing) return existing;
 		if (!this.accepting) throw new AppServerError("BUSY", { sessionId: ref.summary.sessionId });
@@ -101,6 +106,7 @@ export class SessionRegistry {
 		sessionId: string,
 		prepareClose?: (runtime: OpenedSessionRuntime) => Promise<boolean> | boolean,
 	): Promise<void> {
+		if (this.blockedSessionIds.has(sessionId)) throw new AppServerError("BUSY", { sessionId });
 		const slot = this.slots.get(sessionId);
 		if (!slot) return;
 		if (!slot.accepting) throw new AppServerError("BUSY", { sessionId });
@@ -137,6 +143,47 @@ export class SessionRegistry {
 			throw error;
 		} finally {
 			slot.pending -= 1;
+		}
+	}
+
+	async withSessionsQuiesced<T>(
+		sessionIds: readonly string[],
+		operation: () => Promise<T>,
+		beforeClose?: () => void,
+	): Promise<T> {
+		const ids = [...new Set(sessionIds)];
+		for (const sessionId of ids) assertValidSessionId(sessionId);
+		if (ids.some((sessionId) => this.blockedSessionIds.has(sessionId))) throw new AppServerError("BUSY");
+		for (const sessionId of ids) this.blockedSessionIds.add(sessionId);
+		try {
+			const slots = ids.flatMap((sessionId) => {
+				const slot = this.slots.get(sessionId);
+				return slot ? [slot] : [];
+			});
+			if (slots.some((slot) => !slot.accepting || slot.pending > 0)) {
+				throw new AppServerError("SESSION_IN_USE");
+			}
+			const runtimes = await Promise.all(slots.map((slot) => slot.runtime));
+			if (runtimes.some((runtime) => runtime.isActive() || runtime.hasPendingInteractions())) {
+				throw new AppServerError("SESSION_IN_USE");
+			}
+			beforeClose?.();
+			for (const slot of slots) slot.accepting = false;
+			const closed = await Promise.allSettled(runtimes.map((runtime) => runtime.close()));
+			let failed = false;
+			for (let index = 0; index < slots.length; index += 1) {
+				const slot = slots[index]!;
+				if (closed[index]?.status === "fulfilled") {
+					if (this.slots.get(slot.ref.summary.sessionId) === slot) this.slots.delete(slot.ref.summary.sessionId);
+				} else {
+					failed = true;
+					slot.accepting = true;
+				}
+			}
+			if (failed) throw new AppServerError("OPERATION_FAILED");
+			return await operation();
+		} finally {
+			for (const sessionId of ids) this.blockedSessionIds.delete(sessionId);
 		}
 	}
 

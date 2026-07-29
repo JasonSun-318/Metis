@@ -1,6 +1,11 @@
 import { createHash } from "node:crypto";
 import type { ClientRpcRequest } from "@arcmind/app-protocol";
-import { resolveScheduleCreateTarget, type ScheduleCreateTarget, type ScheduleManager } from "@arcmind/coding-agent";
+import {
+	resolveScheduleCreateTarget,
+	type ScheduleCreateTarget,
+	type ScheduleManager,
+	SessionManager,
+} from "@arcmind/coding-agent";
 import type { DurableSessionMutation, PreparedSessionMutation } from "./durable-mutation.ts";
 import type { InteractionBroker, InteractionPeer } from "./interactions.ts";
 import { scheduleRunView, scheduleTaskView } from "./schedule-projection.ts";
@@ -140,6 +145,55 @@ export class Dispatcher {
 		return entry.result;
 	}
 
+	private async deleteModeProject(request: Extract<ClientRpcRequest, { method: "project/delete" }>): Promise<unknown> {
+		return await this.replayMutation(request, () =>
+			this.catalog.withModeProjectBlocked(request.params, async (snapshot) => {
+				const deleteSessions = () =>
+					this.registry.withSessionsQuiesced(
+						snapshot.refs.map((ref) => ref.summary.sessionId),
+						async () => {
+							const result = await SessionManager.trashModeProjectData({
+								agentDir: this.catalog.agentDir,
+								sessionsRoot: this.catalog.sessionsRoot,
+								mode: snapshot.mode,
+								cwd: snapshot.cwd,
+								sessions: snapshot.refs.map((ref) => ({
+									sessionId: ref.summary.sessionId,
+									path: ref.path,
+									relativePath: ref.relativePath,
+									archived: ref.summary.archived,
+									updatedAt: ref.summary.updatedAt,
+								})),
+							});
+							if (!result.ok) {
+								if (result.code === "PROJECT_CHANGED") {
+									throw new AppServerError("BUSY");
+								}
+								if (result.code === "SESSION_IN_USE") throw new AppServerError("SESSION_IN_USE");
+								if (result.code === "SESSION_CORRUPT") throw new AppServerError("SESSION_CORRUPT");
+								throw new AppServerError("OPERATION_FAILED");
+							}
+							return {
+								mode: snapshot.mode,
+								cwd: snapshot.cwd,
+								deletedSessionCount: result.deletedSessionCount,
+							};
+						},
+						() => {
+							for (const ref of snapshot.refs) {
+								const sessionId = ref.summary.sessionId;
+								this.subscriptionHub.removeSession(sessionId);
+								this.interactions.releaseSession(sessionId);
+							}
+						},
+					);
+				return snapshot.mode === "chat"
+					? this.scheduleManager.withNoFixedWorkspaceTasks(snapshot.cwd, deleteSessions)
+					: deleteSessions();
+			}),
+		);
+	}
+
 	async dispatch(request: ClientRpcRequest, connection: ConnectionState): Promise<unknown> {
 		switch (request.method) {
 			case "initialize":
@@ -152,6 +206,20 @@ export class Dispatcher {
 					return await this.registry.run(ref, (runtime) => runtime.listSkills());
 				}
 				return await this.registry.listDraftSkills(request.params.cwd);
+			case "project/deletePreview": {
+				const cwd = await this.catalog.refreshModeProjectStorage(request.params.cwd);
+				const snapshot = this.catalog.modeProjectSnapshot(request.params.mode, cwd);
+				return {
+					mode: snapshot.mode,
+					cwd: snapshot.cwd,
+					sessionCount: snapshot.refs.length,
+					blockingScheduleCount:
+						snapshot.mode === "chat" ? this.scheduleManager.countFixedWorkspaceTasks(snapshot.cwd) : 0,
+					revision: snapshot.revision,
+				};
+			}
+			case "project/delete":
+				return await this.deleteModeProject(request);
 			case "session/create":
 				return await this.replayMutation(request, async () => ({
 					session: await this.catalog.create(request.params),
@@ -191,6 +259,7 @@ export class Dispatcher {
 				});
 			case "session/close": {
 				const ref = this.catalog.get(request.params.sessionId);
+				this.catalog.assertSessionProjectMutable(request.params.sessionId);
 				if (ref.scheduled) {
 					const result = await this.replayMutation(request, async () => {
 						await this.registry.close(request.params.sessionId);

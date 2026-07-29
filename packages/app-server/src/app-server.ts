@@ -10,9 +10,11 @@ import {
 } from "@arcmind/app-protocol";
 import {
 	createScheduledRunExecutor,
+	ensureModeScopedMemoryLayout,
 	pruneStaleSessionWorkDirs,
 	ScheduleManager,
 	type ScheduleManagerOptions,
+	SessionManager,
 	VERSION,
 } from "@arcmind/coding-agent";
 import { AgentSessionRuntimeHost } from "./agent-session-runtime-host.ts";
@@ -91,6 +93,8 @@ export class AppServer {
 	}
 
 	static async create(options: AppServerOptions): Promise<AppServer> {
+		SessionManager.recoverInterruptedProjectTrash(options.agentDir);
+		await ensureModeScopedMemoryLayout(options.agentDir);
 		pruneStaleSessionWorkDirs(options.agentDir);
 		const server = new AppServer(options);
 		await server.catalog.refresh();

@@ -284,6 +284,7 @@ describe("mode project Trash", () => {
 			path,
 			relativePath: relative(layout.sessionsRoot, path),
 			archived: false,
+			updatedAt: "2000-01-01T00:00:00.000Z",
 		};
 
 		const result = await trashModeProjectData(input(layout, [target]), hooks());

@@ -135,6 +135,119 @@ class FakeHost implements SessionRuntimeHost {
 }
 
 describe("SessionRegistry", () => {
+	it("blocks the whole selected set, closes idle runtimes concurrently, then runs the operation", async () => {
+		const host = new FakeHost();
+		const registry = new SessionRegistry(host);
+		const first = (await registry.open(ref("session-a"))) as FakeRuntime;
+		const second = (await registry.open(ref("session-b"))) as FakeRuntime;
+		await registry.open(ref("session-other"));
+		let releaseFirst!: () => void;
+		let releaseSecond!: () => void;
+		let firstClosing!: () => void;
+		let secondClosing!: () => void;
+		const firstGate = new Promise<void>((resolve) => {
+			releaseFirst = resolve;
+		});
+		const secondGate = new Promise<void>((resolve) => {
+			releaseSecond = resolve;
+		});
+		const firstStarted = new Promise<void>((resolve) => {
+			firstClosing = resolve;
+		});
+		const secondStarted = new Promise<void>((resolve) => {
+			secondClosing = resolve;
+		});
+		first.close = vi.fn(async () => {
+			firstClosing();
+			await firstGate;
+			first.closed = true;
+		});
+		second.close = vi.fn(async () => {
+			secondClosing();
+			await secondGate;
+			second.closed = true;
+		});
+		const operation = vi.fn(async () => "deleted");
+		const result = registry.withSessionsQuiesced(
+			["session-a", "session-b", "session-unopened", "session-a"],
+			operation,
+		);
+
+		await expect(registry.open(ref("session-unopened"))).rejects.toMatchObject({ code: "BUSY" });
+		await expect(registry.run(ref("session-a"), () => undefined)).rejects.toMatchObject({ code: "BUSY" });
+		await registry.run(ref("session-other"), () => undefined);
+		await Promise.all([firstStarted, secondStarted]);
+		expect(operation).not.toHaveBeenCalled();
+		releaseFirst();
+		await Promise.resolve();
+		expect(operation).not.toHaveBeenCalled();
+		releaseSecond();
+		await expect(result).resolves.toBe("deleted");
+		expect(operation).toHaveBeenCalledOnce();
+		expect(first.close).toHaveBeenCalledOnce();
+		expect(second.close).toHaveBeenCalledOnce();
+		await expect(registry.open(ref("session-unopened"))).resolves.toBeDefined();
+	});
+
+	it.each(["queued", "active", "interaction"] as const)(
+		"preflights a %s selected runtime before closing any runtime",
+		async (state) => {
+			const host = new FakeHost();
+			const registry = new SessionRegistry(host);
+			const first = (await registry.open(ref("session-a"))) as FakeRuntime;
+			const second = (await registry.open(ref("session-b"))) as FakeRuntime;
+			let release!: () => void;
+			let queued: Promise<void> | undefined;
+			if (state === "queued") {
+				const gate = new Promise<void>((resolve) => {
+					release = resolve;
+				});
+				queued = registry.run(ref("session-a"), () => gate);
+			} else if (state === "active") first.active = true;
+			else first.pendingInteractions = true;
+
+			await expect(
+				registry.withSessionsQuiesced(["session-a", "session-b"], async () => undefined),
+			).rejects.toMatchObject({ code: "SESSION_IN_USE" });
+			expect(first.closed).toBe(false);
+			expect(second.closed).toBe(false);
+			if (queued) {
+				release();
+				await queued;
+			}
+			first.active = false;
+			first.pendingInteractions = false;
+			await expect(registry.run(ref("session-a"), () => "available")).resolves.toBe("available");
+		},
+	);
+
+	it("does not run the operation after a close failure and re-enables every selected id", async () => {
+		const host = new FakeHost();
+		const registry = new SessionRegistry(host);
+		const first = (await registry.open(ref("session-a"))) as FakeRuntime;
+		const second = (await registry.open(ref("session-b"))) as FakeRuntime;
+		second.close = vi.fn(async () => {
+			throw new Error("close failed");
+		});
+		const operation = vi.fn(async () => undefined);
+
+		await expect(
+			registry.withSessionsQuiesced(["session-a", "session-b", "session-unopened"], operation),
+		).rejects.toMatchObject({ code: "OPERATION_FAILED" });
+		expect(operation).not.toHaveBeenCalled();
+		expect(first.closed).toBe(true);
+		await expect(registry.open(ref("session-a"))).resolves.toBeDefined();
+		await expect(registry.run(ref("session-b"), () => "available")).resolves.toBe("available");
+		await expect(registry.open(ref("session-unopened"))).resolves.toBeDefined();
+
+		await expect(
+			registry.withSessionsQuiesced(["session-a"], async () => {
+				throw new Error("operation failed");
+			}),
+		).rejects.toThrow("operation failed");
+		await expect(registry.open(ref("session-a"))).resolves.toBeDefined();
+	});
+
 	it("opens each session lazily and only once", async () => {
 		const host = new FakeHost();
 		const registry = new SessionRegistry(host);
