@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import type { SessionSnapshot, SessionSummary } from "@arcmind/app-protocol";
+import type { ClientResult, SessionSnapshot, SessionSummary } from "@arcmind/app-protocol";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -77,15 +77,21 @@ function changeTextarea(textarea: HTMLTextAreaElement, value: string) {
 	textarea.dispatchEvent(new Event("input", { bubbles: true }));
 }
 
+function changeInput(input: HTMLInputElement, value: string) {
+	Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(input, value);
+	input.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
 function createHarness(options: {
 	failFirstOpen?: boolean;
 	failOpenSessionIds?: readonly string[];
 	loseFirstCreateResponse?: boolean;
 	loseFirstStartResponse?: boolean;
+	sessions?: readonly SessionSummary[];
 } = {}) {
 	const chat = session("chat-existing", "chat", "/work/chat-project", "Chat project task");
 	const code = session("code-existing", "code", "/work/code-project", "Code project task");
-	let sessions = [chat, code];
+	let sessions = options.sessions ? [...options.sessions] : [chat, code];
 	let failFirstOpen = options.failFirstOpen ?? false;
 	let loseFirstCreateResponse = options.loseFirstCreateResponse ?? false;
 	let loseFirstStartResponse = options.loseFirstStartResponse ?? false;
@@ -105,6 +111,22 @@ function createHarness(options: {
 				{ name: "xlsx", description: "Read and create spreadsheets", source: "user" },
 				{ name: "project-helper", description: "Inspect this project", source: "project" },
 			],
+		}),
+		previewProjectDelete: vi.fn(async (input) => ({
+			mode: input.mode,
+			cwd: input.cwd,
+			sessionCount: sessions.filter(
+				(candidate) => candidate.mode === input.mode && candidate.cwd === input.cwd && !candidate.scheduled,
+			).length,
+			blockingScheduleCount: 0,
+			revision: "a".repeat(64),
+		})),
+		deleteProject: vi.fn(async (input) => {
+			const before = sessions.length;
+			sessions = sessions.filter(
+				(candidate) => candidate.mode !== input.mode || candidate.cwd !== input.cwd || candidate.scheduled !== undefined,
+			);
+			return { mode: input.mode, cwd: input.cwd, deletedSessionCount: before - sessions.length };
 		}),
 		selectProjectFolder: vi.fn().mockResolvedValue("/work/selected-project"),
 		selectAttachmentFiles: vi.fn().mockResolvedValue([
@@ -291,6 +313,283 @@ describe("Chat desktop shell", () => {
 		await flush();
 		expect(listSkills).toHaveBeenLastCalledWith({ cwd: "/work/shared" });
 		expect(listSkills).toHaveBeenCalledTimes(2);
+		await act(async () => root.unmount());
+	});
+
+	it("keeps project row actions separate from folder toggling and creates one empty session", async () => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		const { api, order } = createHarness();
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<App api={api} store={new AppStore()} />));
+		await flush();
+		const group = container.querySelector<HTMLDetailsElement>('.project-heading[title="/work/chat-project"]')!.closest("details")!;
+		expect(group.open).toBe(true);
+		const actionButtons = [...group.querySelectorAll<HTMLButtonElement>(".project-action-buttons > button")];
+		expect(actionButtons.map((candidate) => candidate.getAttribute("aria-label"))).toEqual([
+			"Project actions",
+			"New task in chat-project",
+		]);
+
+		await act(async () => actionButtons[0]!.click());
+		await flush();
+		expect(group.open).toBe(true);
+		expect([...group.querySelectorAll("[role=menuitem]")].map((item) => item.textContent?.trim())).toEqual([
+			"Rename",
+			"Pin",
+			"Delete",
+		]);
+		expect(document.activeElement?.textContent?.trim()).toBe("Rename");
+		await act(async () => document.activeElement?.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true })));
+		expect(document.activeElement?.textContent?.trim()).toBe("Pin");
+		await act(async () => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
+		await flush();
+		expect(group.querySelector("[role=menu]")).toBeNull();
+		expect(document.activeElement?.getAttribute("aria-label")).toBe("Project actions");
+
+		order.length = 0;
+		await act(async () => actionButtons[1]!.click());
+		await flush();
+		await flush();
+		expect(api.createSession).toHaveBeenCalledWith(expect.objectContaining({
+			mode: "chat",
+			cwd: "/work/chat-project",
+		}));
+		expect(order).toEqual(["create", "open", "list"]);
+		expect(api.startTurn).not.toHaveBeenCalled();
+		expect(container.querySelector('[data-active-session-id="chat-created"]')).not.toBeNull();
+		expect(container.querySelector(".transcript")?.textContent ?? "").toBe("");
+		expect(localStorage.getItem("arcmind.activeSessionId.chat")).toBe("chat-created");
+		await act(async () => root.unmount());
+	});
+
+	it("reuses the project create request id when its first response is lost", async () => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		const { api } = createHarness({ loseFirstCreateResponse: true });
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<App api={api} store={new AppStore()} />));
+		await flush();
+		const create = () => button(
+			container.querySelector<HTMLDetailsElement>('.project-heading[title="/work/chat-project"]')!.closest("details")!,
+			"New task in chat-project",
+		);
+		await act(async () => create().click());
+		await flush();
+		await act(async () => create().click());
+		await flush();
+		await flush();
+
+		expect(api.createSession).toHaveBeenCalledTimes(2);
+		expect(vi.mocked(api.createSession).mock.calls[0]![0].requestId).toBe(
+			vi.mocked(api.createSession).mock.calls[1]![0].requestId,
+		);
+		expect(api.startTurn).not.toHaveBeenCalled();
+		expect(container.querySelector('[data-active-session-id="chat-created"]')).not.toBeNull();
+		await act(async () => root.unmount());
+	});
+
+	it("renames and pins only the exact mode without mutating sessions or Desktop APIs", async () => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		const sharedSessions = [
+			session("chat-shared-row", "chat", "/work/shared", "Chat session"),
+			session("code-shared-row", "code", "/work/shared", "Code session"),
+		];
+		const journalFixture = JSON.stringify(sharedSessions);
+		const { api } = createHarness({ sessions: sharedSessions });
+		const container = document.createElement("div");
+		document.body.append(container);
+		let root = createRoot(container);
+		await act(async () => root.render(<App api={api} store={new AppStore()} />));
+		await flush();
+		let chatGroup = container.querySelector<HTMLDetailsElement>('.project-heading[title="/work/shared"]')!.closest("details")!;
+		await act(async () => button(chatGroup, "Project actions").click());
+		await act(async () => button(chatGroup, "Rename").click());
+		await flush();
+		const input = container.querySelector<HTMLInputElement>("#project-rename-input")!;
+		expect(document.activeElement).toBe(input);
+		await act(async () => input.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
+		await flush();
+		expect(container.querySelector(".project-dialog")).toBeNull();
+		expect(document.activeElement?.textContent?.trim()).toBe("Rename");
+		await act(async () => button(chatGroup, "Rename").click());
+		await flush();
+		const reopenedInput = container.querySelector<HTMLInputElement>("#project-rename-input")!;
+		await act(async () => changeInput(reopenedInput, "  Chat alias  "));
+		await act(async () => button(container.querySelector<HTMLElement>(".project-dialog")!, "Rename").click());
+		await flush();
+		chatGroup = container.querySelector<HTMLDetailsElement>('.project-heading[title="/work/shared"]')!.closest("details")!;
+		expect(chatGroup.querySelector(".project-heading span")?.textContent).toBe("Chat alias");
+		await act(async () => button(chatGroup, "Pin").click());
+		await act(async () => button(container, "Code").click());
+		await flush();
+		const codeGroup = container.querySelector<HTMLDetailsElement>('.project-heading[title="/work/shared"]')!.closest("details")!;
+		expect(codeGroup.querySelector(".project-heading span")?.textContent).toBe("shared");
+		await act(async () => button(codeGroup, "Project actions").click());
+		expect(button(codeGroup, "Pin")).not.toBeNull();
+		await act(async () => button(container, "Chat").click());
+		await flush();
+		chatGroup = container.querySelector<HTMLDetailsElement>('.project-heading[title="/work/shared"]')!.closest("details")!;
+		expect(chatGroup.querySelector(".project-heading span")?.textContent).toBe("Chat alias");
+		await act(async () => button(chatGroup, "Project actions").click());
+		expect(button(chatGroup, "Unpin")).not.toBeNull();
+		expect(JSON.stringify(sharedSessions)).toBe(journalFixture);
+		expect(api.createSession).not.toHaveBeenCalled();
+		expect(api.previewProjectDelete).not.toHaveBeenCalled();
+		expect(api.deleteProject).not.toHaveBeenCalled();
+
+		await act(async () => root.unmount());
+		root = createRoot(container);
+		await act(async () => root.render(<App api={api} store={new AppStore()} />));
+		await flush();
+		expect(container.querySelector('.project-heading[title="/work/shared"] span')?.textContent).toBe("Chat alias");
+		await act(async () => root.unmount());
+	});
+
+	it("shows a complete mode-specific delete preview, blocks schedules, then removes only Chat", async () => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		const chatActive = session("chat-delete-active", "chat", "/work/shared", "Chat active");
+		const chatArchived = { ...session("chat-delete-archived", "chat", "/work/shared", "Chat archived"), archived: true };
+		const code = session("code-delete-preserved", "code", "/work/shared", "Code preserved");
+		let preferences = setProjectAlias(new Map(), "chat", "/work/shared", "Chat local");
+		preferences = setProjectPinned(preferences, "chat", "/work/shared", true);
+		preferences = setProjectAlias(preferences, "code", "/work/shared", "Code local");
+		saveProjectPreferences(localStorage, preferences);
+		localStorage.setItem("arcmind.activeSessionId.chat", chatActive.sessionId);
+		const { api } = createHarness({ sessions: [chatActive, chatArchived, code] });
+		vi.mocked(api.previewProjectDelete)
+			.mockResolvedValueOnce({
+				mode: "chat",
+				cwd: "/canonical/shared",
+				sessionCount: 2,
+				blockingScheduleCount: 1,
+				revision: "a".repeat(64),
+			})
+			.mockResolvedValueOnce({
+				mode: "chat",
+				cwd: "/canonical/shared",
+				sessionCount: 2,
+				blockingScheduleCount: 0,
+				revision: "b".repeat(64),
+			});
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<App api={api} store={new AppStore()} />));
+		await flush();
+		const group = container.querySelector<HTMLDetailsElement>('.project-heading[title="/work/shared"]')!.closest("details")!;
+		await act(async () => button(group, "Project actions").click());
+		await act(async () => button(group, "Delete").click());
+		await flush();
+		expect(container.querySelector(".project-dialog")?.textContent).toContain("2 Chat sessions");
+		expect(container.querySelector(".project-dialog")?.textContent).toContain("/canonical/shared");
+		expect(container.querySelector(".project-dialog")?.textContent).toContain("Code project and its memory are unchanged");
+		expect(container.querySelector(".project-dialog")?.textContent).toContain("source folder and its files are unchanged");
+		expect(container.querySelector(".project-dialog")?.textContent).toContain("Schedules are not deleted automatically");
+		expect(button(container, "Move to Trash").disabled).toBe(true);
+		await act(async () => button(container, "Cancel").click());
+		await act(async () => button(group, "Delete").click());
+		await flush();
+		expect(button(container, "Move to Trash").disabled).toBe(false);
+		await act(async () => button(container, "Move to Trash").click());
+		await flush();
+		await flush();
+
+		expect(api.deleteProject).toHaveBeenCalledWith(expect.objectContaining({
+			mode: "chat",
+			cwd: "/work/shared",
+			expectedRevision: "b".repeat(64),
+		}));
+		expect(container.textContent).not.toContain("Chat local");
+		expect(container.textContent).toContain("What can I take off your plate?");
+		expect(localStorage.getItem("arcmind.activeSessionId.chat")).toBeNull();
+		expect([...loadProjectPreferences(localStorage).values()]).toEqual([
+			{ mode: "code", cwd: "/work/shared", alias: "Code local", pinned: false },
+		]);
+		await act(async () => button(container, "Code").click());
+		await flush();
+		expect(container.textContent).toContain("Code local");
+		expect(container.textContent).toContain("Code preserved");
+		await act(async () => root.unmount());
+	});
+
+	it("keeps renderer evidence on delete failure and reloads a fresh preview on Retry", async () => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		const chat = session("chat-delete-failure", "chat", "/work/failure", "Keep me");
+		localStorage.setItem("arcmind.activeSessionId.chat", chat.sessionId);
+		const { api } = createHarness({ sessions: [chat] });
+		const busyError = Object.assign(new Error("busy"), { code: -32004 });
+		vi.mocked(api.deleteProject).mockRejectedValueOnce(busyError);
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<App api={api} store={new AppStore()} />));
+		await flush();
+		const group = container.querySelector<HTMLDetailsElement>('.project-heading[title="/work/failure"]')!.closest("details")!;
+		await act(async () => button(group, "Project actions").click());
+		await act(async () => button(group, "Delete").click());
+		await flush();
+		await act(async () => button(container, "Move to Trash").click());
+		await flush();
+		expect(container.querySelector(".project-dialog")?.textContent).toContain("changed or is busy");
+		expect(container.textContent).toContain("Keep me");
+		expect(localStorage.getItem("arcmind.activeSessionId.chat")).toBe(chat.sessionId);
+		await act(async () => button(container, "Retry").click());
+		await flush();
+		expect(api.previewProjectDelete).toHaveBeenCalledTimes(2);
+		await act(async () => button(container, "Move to Trash").click());
+		await flush();
+		await flush();
+		expect(api.deleteProject).toHaveBeenCalledTimes(2);
+		expect(vi.mocked(api.deleteProject).mock.calls[0]![0].requestId).toBe(
+			vi.mocked(api.deleteProject).mock.calls[1]![0].requestId,
+		);
+		expect(container.textContent).not.toContain("Keep me");
+		await act(async () => root.unmount());
+	});
+
+	it("ignores a delayed preview after another project becomes active", async () => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		const { api } = createHarness({
+			sessions: [
+				session("chat-preview-a", "chat", "/work/a", "A"),
+				session("chat-preview-b", "chat", "/work/b", "B"),
+			],
+		});
+		let resolveA!: (value: ClientResult<"project/deletePreview">) => void;
+		vi.mocked(api.previewProjectDelete).mockImplementation(async ({ mode, cwd }) => {
+			if (cwd === "/work/a") return await new Promise((resolve) => {
+				resolveA = resolve;
+			});
+			return { mode, cwd: "/canonical/b", sessionCount: 1, blockingScheduleCount: 0, revision: "b".repeat(64) };
+		});
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<App api={api} store={new AppStore()} />));
+		await flush();
+		const groupA = container.querySelector<HTMLDetailsElement>('.project-heading[title="/work/a"]')!.closest("details")!;
+		const groupB = container.querySelector<HTMLDetailsElement>('.project-heading[title="/work/b"]')!.closest("details")!;
+		await act(async () => button(groupA, "Project actions").click());
+		await act(async () => button(groupA, "Delete").click());
+		expect(container.querySelector(".project-dialog")?.textContent).toContain("Checking project data");
+		await act(async () => button(container, "Cancel").click());
+		await act(async () => button(groupB, "Project actions").click());
+		await act(async () => button(groupB, "Delete").click());
+		await flush();
+		expect(container.querySelector(".project-dialog")?.textContent).toContain("/canonical/b");
+		await act(async () => resolveA({
+			mode: "chat",
+			cwd: "/canonical/a",
+			sessionCount: 99,
+			blockingScheduleCount: 0,
+			revision: "a".repeat(64),
+		}));
+		await flush();
+		expect(container.querySelector(".project-dialog")?.textContent).toContain("/canonical/b");
+		expect(container.querySelector(".project-dialog")?.textContent).not.toContain("/canonical/a");
 		await act(async () => root.unmount());
 	});
 

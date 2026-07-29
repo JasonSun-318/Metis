@@ -149,6 +149,12 @@ export class ClientBroker {
 		this.register(DESKTOP_IPC_CHANNELS.listSkills, 1, async (_event, [input]) =>
 			this.clientCall("skill/list", input),
 		);
+		this.register(DESKTOP_IPC_CHANNELS.previewProjectDelete, 1, async (_event, [input]) =>
+			this.clientCall("project/deletePreview", input),
+		);
+		this.register(DESKTOP_IPC_CHANNELS.deleteProject, 1, async (_event, [input]) =>
+			this.clientCall("project/delete", input),
+		);
 		this.register(DESKTOP_IPC_CHANNELS.createSession, 1, async (_event, [input]) =>
 			this.clientCall("session/create", input),
 		);

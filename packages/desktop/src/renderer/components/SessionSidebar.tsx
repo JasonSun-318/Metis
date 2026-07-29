@@ -1,8 +1,9 @@
-import type { AgentMode, SessionSummary } from "@arcmind/app-protocol";
+import type { AgentMode, ClientResult, SessionSummary } from "@arcmind/app-protocol";
 import { ChatCircleDots, Code, FolderSimple, MagnifyingGlass, NotePencil, SidebarSimple, Sparkle } from "@phosphor-icons/react";
 import { useEffect, useState } from "react";
 import type { AppStoreSnapshot } from "../store/app-store.ts";
 import type { ProjectPreference, ProjectPreferenceMap } from "../store/project-preferences.ts";
+import { ProjectActions } from "./ProjectActions.tsx";
 
 export type SidebarDestination = "tasks" | "skills";
 
@@ -15,8 +16,19 @@ interface SessionSidebarProps {
 	readonly onModeChange: (mode: AgentMode) => void;
 	readonly onNewTask: () => void;
 	readonly onOpen: (sessionId: string) => Promise<void>;
+	readonly onCreateProjectSession: (group: ProjectSessionGroup) => Promise<void>;
+	readonly onDeleteProject: (
+		group: ProjectSessionGroup,
+		preview: ClientResult<"project/deletePreview">,
+	) => Promise<void>;
+	readonly onPinProject: (group: ProjectSessionGroup, pinned: boolean) => void;
+	readonly onPreviewProjectDelete: (
+		group: ProjectSessionGroup,
+	) => Promise<ClientResult<"project/deletePreview">>;
+	readonly onRenameProject: (group: ProjectSessionGroup, alias: string) => void;
 	readonly onSkills: () => void;
 	readonly onToggle: () => void;
+	readonly projectBusy: (group: ProjectSessionGroup) => boolean;
 	readonly preferences: ProjectPreferenceMap;
 }
 
@@ -108,10 +120,36 @@ function SessionButton({ busy, selected, session, onOpen }: {
 	);
 }
 
-function ProjectGroup({ busy, group, onOpen, selectedSessionId }: {
+function ProjectGroup({
+	actionsActive,
+	busy,
+	group,
+	onActivateActions,
+	onCreateProjectSession,
+	onDeactivateActions,
+	onDeleteProject,
+	onOpen,
+	onPinProject,
+	onPreviewProjectDelete,
+	onRenameProject,
+	selectedSessionId,
+}: {
+	readonly actionsActive: boolean;
 	readonly busy: boolean;
 	readonly group: ProjectSessionGroup;
+	readonly onActivateActions: () => void;
+	readonly onCreateProjectSession: (group: ProjectSessionGroup) => Promise<void>;
+	readonly onDeactivateActions: () => void;
+	readonly onDeleteProject: (
+		group: ProjectSessionGroup,
+		preview: ClientResult<"project/deletePreview">,
+	) => Promise<void>;
 	readonly onOpen: (sessionId: string) => Promise<void>;
+	readonly onPinProject: (group: ProjectSessionGroup, pinned: boolean) => void;
+	readonly onPreviewProjectDelete: (
+		group: ProjectSessionGroup,
+	) => Promise<ClientResult<"project/deletePreview">>;
+	readonly onRenameProject: (group: ProjectSessionGroup, alias: string) => void;
 	readonly selectedSessionId: string | null;
 }) {
 	const [open, setOpen] = useState(true);
@@ -121,6 +159,18 @@ function ProjectGroup({ busy, group, onOpen, selectedSessionId }: {
 				<FolderSimple aria-hidden="true" size={17} />
 				<span>{group.name}</span>
 			</summary>
+			<ProjectActions
+				active={actionsActive}
+				busy={busy}
+				group={group}
+				onActivate={onActivateActions}
+				onCreate={onCreateProjectSession}
+				onDeactivate={onDeactivateActions}
+				onDelete={onDeleteProject}
+				onPin={onPinProject}
+				onPreviewDelete={onPreviewProjectDelete}
+				onRename={onRenameProject}
+			/>
 			<div className="project-sessions">
 				{group.sessions.map((session) => (
 					<SessionButton busy={busy} key={session.sessionId} onOpen={onOpen} selected={selectedSessionId === session.sessionId} session={session} />
@@ -139,19 +189,27 @@ export function SessionSidebar({
 	onModeChange,
 	onNewTask,
 	onOpen,
+	onCreateProjectSession,
+	onDeleteProject,
+	onPinProject,
+	onPreviewProjectDelete,
+	onRenameProject,
 	onSkills,
 	onToggle,
+	projectBusy,
 	preferences,
 }: SessionSidebarProps) {
 	const tree = buildSessionTree(state, mode, preferences);
 	const hasSessions = tree.projects.length > 0 || tree.tasks.length > 0;
 	const [fullscreen, setFullscreen] = useState(windowIsFullscreen);
+	const [activeProjectActions, setActiveProjectActions] = useState<string | null>(null);
 	useEffect(() => {
 		const runtime = globalThis as RendererWindowView;
 		const updateFullscreen = () => setFullscreen(windowIsFullscreen());
 		runtime.addEventListener?.("resize", updateFullscreen);
 		return () => runtime.removeEventListener?.("resize", updateFullscreen);
 	}, []);
+	useEffect(() => setActiveProjectActions(null), [destination, mode]);
 
 	return (
 		<aside className="session-sidebar" aria-label="Tasks" data-fullscreen={fullscreen || undefined}>
@@ -188,10 +246,18 @@ export function SessionSidebar({
 				{!hasSessions && <p className="empty-copy">No {mode} tasks yet.</p>}
 				{tree.projects.map((group) => (
 					<ProjectGroup
-						busy={busy}
+						actionsActive={activeProjectActions === JSON.stringify([group.mode, group.cwd])}
+						busy={busy || projectBusy(group)}
 						group={group}
-						key={group.cwd}
+						key={JSON.stringify([group.mode, group.cwd])}
+						onActivateActions={() => setActiveProjectActions(JSON.stringify([group.mode, group.cwd]))}
+						onCreateProjectSession={onCreateProjectSession}
+						onDeactivateActions={() => setActiveProjectActions(null)}
+						onDeleteProject={onDeleteProject}
 						onOpen={onOpen}
+						onPinProject={onPinProject}
+						onPreviewProjectDelete={onPreviewProjectDelete}
+						onRenameProject={onRenameProject}
 						selectedSessionId={!newTaskOpen && destination === "tasks" ? state.activeSessionId : null}
 					/>
 				))}

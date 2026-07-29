@@ -1,4 +1,5 @@
 import type {
+	AgentMode,
 	ClientResult,
 	ConnectionEventsParams,
 	DomainEvent,
@@ -16,6 +17,7 @@ import {
 	createProjectionState,
 	markProjectionResubscribing,
 	prependProjectionItems,
+	removeModeProjectSessions,
 	removePendingInteraction,
 	replaceProjectionSnapshot,
 	replaceSessionList,
@@ -76,6 +78,10 @@ export class AppStore {
 	setSessions(result: ClientResult<"session/list">): void {
 		replaceSessionList(this.state, result.sessions);
 		this.commit();
+	}
+
+	removeModeProject(mode: AgentMode, cwd: string): void {
+		if (removeModeProjectSessions(this.state, mode, cwd)) this.commit();
 	}
 
 	applySnapshot(snapshot: SessionSnapshot): void {

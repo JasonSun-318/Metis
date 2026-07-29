@@ -1,16 +1,35 @@
-import type { AgentMode, InteractionResponseInput, InteractionView, SessionSummary, SkillSummaryView } from "@arcmind/app-protocol";
+import {
+	type AgentMode,
+	type ClientResult,
+	type InteractionResponseInput,
+	type InteractionView,
+	RPC_ERROR_CODES,
+	type SessionSummary,
+	type SkillSummaryView,
+} from "@arcmind/app-protocol";
 import { CaretDown, ClipboardText, FolderSimple, Globe, PlusCircle, Robot, SidebarSimple, TerminalWindow } from "@phosphor-icons/react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ArcMindDesktopApi } from "../../shared/desktop-api.ts";
 import { useAppStore } from "../hooks/use-app-store.ts";
 import type { AppStore, AppStoreSnapshot } from "../store/app-store.ts";
-import { loadProjectPreferences } from "../store/project-preferences.ts";
+import {
+	loadProjectPreferences,
+	type ProjectPreferenceMap,
+	removeProjectPreference,
+	saveProjectPreferences,
+	setProjectAlias,
+	setProjectPinned,
+} from "../store/project-preferences.ts";
 import { Composer, type ComposerSubmission } from "./Composer.tsx";
 import { InteractionHost } from "./InteractionHost.tsx";
 import { ModelSelector } from "./ModelSelector.tsx";
 import { NewTaskHome } from "./NewTaskHome.tsx";
 import { RecoveryBanner } from "./RecoveryBanner.tsx";
-import { type SidebarDestination, SessionSidebar } from "./SessionSidebar.tsx";
+import {
+	type ProjectSessionGroup,
+	type SidebarDestination,
+	SessionSidebar,
+} from "./SessionSidebar.tsx";
 import { SkillsPanel } from "./SkillsPanel.tsx";
 import { ThinkingSelector } from "./ThinkingSelector.tsx";
 import { Transcript } from "./Transcript.tsx";
@@ -28,6 +47,20 @@ interface NewTaskDraft {
 
 function activeSessionKey(mode: AgentMode): string {
 	return `arcmind.activeSessionId.${mode}`;
+}
+
+function projectKey(mode: AgentMode, cwd: string): string {
+	return JSON.stringify([mode, cwd]);
+}
+
+function projectActionError(cause: unknown): Error {
+	const code = typeof cause === "object" && cause !== null && "code" in cause ? Number(cause.code) : undefined;
+	if (code === RPC_ERROR_CODES.BUSY) return new Error("The project changed or is busy. Load a fresh preview and retry.");
+	if (code === RPC_ERROR_CODES.SESSION_IN_USE) return new Error("A project session is still in use. Close it and retry.");
+	if (code === RPC_ERROR_CODES.SESSION_CORRUPT) return new Error("A project session is corrupt or ambiguous. Nothing was removed.");
+	if (code === RPC_ERROR_CODES.SCHEDULE_STORE_CORRUPT) return new Error("Scheduled tasks could not be checked safely. Repair them before retrying.");
+	if (code === RPC_ERROR_CODES.OPERATION_FAILED) return new Error("The project could not be moved to Trash. Nothing was permanently deleted.");
+	return cause instanceof Error ? cause : new Error("The project operation could not be completed.");
 }
 
 export function titleFromPrompt(prompt: string): string {
@@ -87,7 +120,8 @@ export function App({ api, store }: AppProps) {
 	const state = useAppStore(store);
 	const [mode, setMode] = useState<AgentMode>("chat");
 	const [destination, setDestination] = useState<SidebarDestination>("tasks");
-	const [projectPreferences] = useState(() => loadProjectPreferences(localStorage));
+	const [projectPreferences, setProjectPreferences] = useState(() => loadProjectPreferences(localStorage));
+	const [busyProjectKeys, setBusyProjectKeys] = useState<ReadonlySet<string>>(new Set());
 	const [newTaskDraft, setNewTaskDraft] = useState<NewTaskDraft | null>({
 		mode: "chat",
 		folder: null,
@@ -112,6 +146,10 @@ export function App({ api, store }: AppProps) {
 		requestId: string;
 	} | null>(null);
 	const skillListGeneration = useRef(0);
+	const projectCreateRequests = useRef(
+		new Map<string, { requestId: string; promise?: Promise<void> }>(),
+	);
+	const projectDeleteRequests = useRef(new Map<string, { requestId: string; revision: string }>());
 
 	const reportError = useCallback((cause: unknown) => {
 		setError(cause instanceof Error ? cause.message : "ArcMind could not complete the request.");
@@ -228,6 +266,134 @@ export function App({ api, store }: AppProps) {
 
 	const refreshSessions = async () => {
 		store.setSessions(await api.listSessions({ limit: 200 }));
+	};
+
+	const setProjectBusy = (key: string, value: boolean) => {
+		setBusyProjectKeys((current) => {
+			const next = new Set(current);
+			if (value) next.add(key);
+			else next.delete(key);
+			return next;
+		});
+	};
+	const updateProjectPreferences = (
+		update: (value: ProjectPreferenceMap) => ProjectPreferenceMap,
+	) => {
+		setProjectPreferences((current) => {
+			const next = update(current);
+			try {
+				saveProjectPreferences(localStorage, next);
+			} catch (cause) {
+				reportError(cause);
+			}
+			return next;
+		});
+	};
+	const renameProject = (group: ProjectSessionGroup, alias: string) => {
+		updateProjectPreferences((current) => setProjectAlias(current, group.mode, group.cwd, alias));
+	};
+	const pinProject = (group: ProjectSessionGroup, pinned: boolean) => {
+		updateProjectPreferences((current) => setProjectPinned(current, group.mode, group.cwd, pinned));
+	};
+	const previewProjectDelete = async (group: ProjectSessionGroup) => {
+		try {
+			return await api.previewProjectDelete({ mode: group.mode, cwd: group.cwd });
+		} catch (cause) {
+			throw projectActionError(cause);
+		}
+	};
+	const createEmptyProjectSession = async (group: ProjectSessionGroup): Promise<void> => {
+		const key = projectKey(group.mode, group.cwd);
+		const existing = projectCreateRequests.current.get(key);
+		if (existing?.promise) return existing.promise;
+		const requestId = existing?.requestId ?? crypto.randomUUID();
+		const promise = (async () => {
+			setProjectBusy(key, true);
+			setError(null);
+			try {
+				const created = await api.createSession({ requestId, mode: group.mode, cwd: group.cwd });
+				setMode(group.mode);
+				setDestination("tasks");
+				await openSession(created.session.sessionId);
+				setNewTaskDraft(null);
+				projectCreateRequests.current.delete(key);
+				try {
+					await refreshSessions();
+				} catch (cause) {
+					reportError(cause);
+				}
+			} catch (cause) {
+				projectCreateRequests.current.set(key, { requestId });
+				reportError(cause);
+				throw cause;
+			} finally {
+				setProjectBusy(key, false);
+			}
+		})();
+		projectCreateRequests.current.set(key, { requestId, promise });
+		return promise;
+	};
+	const deleteProject = async (
+		group: ProjectSessionGroup,
+		preview: ClientResult<"project/deletePreview">,
+	): Promise<void> => {
+		const key = projectKey(group.mode, group.cwd);
+		const previousRequest = projectDeleteRequests.current.get(key);
+		const requestId = previousRequest?.revision === preview.revision
+			? previousRequest.requestId
+			: crypto.randomUUID();
+		projectDeleteRequests.current.set(key, { requestId, revision: preview.revision });
+		setProjectBusy(key, true);
+		setError(null);
+		try {
+			await api.deleteProject({
+				requestId,
+				mode: group.mode,
+				cwd: group.cwd,
+				expectedRevision: preview.revision,
+			});
+			projectDeleteRequests.current.delete(key);
+			const before = store.getSnapshot();
+			const active = before.activeSessionId ? before.sessionsById.get(before.activeSessionId) : undefined;
+			const removedActive = active?.mode === group.mode && active.cwd === group.cwd && active.scheduled === undefined;
+			let clearRememberedSession = false;
+			try {
+				const rememberedId = localStorage.getItem(activeSessionKey(group.mode));
+				const remembered = rememberedId ? before.sessionsById.get(rememberedId) : undefined;
+				clearRememberedSession =
+					remembered?.mode === group.mode &&
+					remembered.cwd === group.cwd &&
+					remembered.scheduled === undefined;
+			} catch (cause) {
+				reportError(cause);
+			}
+			if (removedActive) openGeneration.current += 1;
+			store.removeModeProject(group.mode, group.cwd);
+			if (clearRememberedSession) {
+				try {
+					localStorage.removeItem(activeSessionKey(group.mode));
+				} catch (cause) {
+					reportError(cause);
+				}
+			}
+			updateProjectPreferences((current) => removeProjectPreference(current, group.mode, group.cwd));
+			if (removedActive) {
+				setMode(group.mode);
+				setDestination("tasks");
+				setNewTaskDraft({ mode: group.mode, folder: null, sessionId: null });
+			}
+			try {
+				await refreshSessions();
+			} catch (cause) {
+				reportError(cause);
+			}
+		} catch (cause) {
+			const error = projectActionError(cause);
+			reportError(error);
+			throw error;
+		} finally {
+			setProjectBusy(key, false);
+		}
 	};
 
 	const openVisibleSession = async (sessionId: string) => {
@@ -490,12 +656,18 @@ export function App({ api, store }: AppProps) {
 				destination={destination}
 				mode={mode}
 				newTaskOpen={newTaskOpen}
+				onCreateProjectSession={createEmptyProjectSession}
+				onDeleteProject={deleteProject}
 				onModeChange={changeMode}
 				onNewTask={startNewTask}
 				onOpen={openVisibleSession}
+				onPinProject={pinProject}
+				onPreviewProjectDelete={previewProjectDelete}
+				onRenameProject={renameProject}
 				onSkills={() => setDestination("skills")}
 				onToggle={() => setSessionsSidebarOpen(false)}
 				preferences={projectPreferences}
+				projectBusy={(group) => busyProjectKeys.has(projectKey(group.mode, group.cwd))}
 				state={state}
 			/>}
 			<main className={`workspace${toolsSidebarOpen ? " tools-sidebar-open" : ""}`}>

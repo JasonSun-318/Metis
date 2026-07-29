@@ -1,4 +1,5 @@
 import type {
+	AgentMode,
 	ConnectionEventsParams,
 	DomainEvent,
 	InteractionView,
@@ -75,6 +76,37 @@ export function replaceSessionList(state: MutableProjectionState, sessions: read
 		state.sessionsById.set(active.sessionId, active);
 		state.sessionOrder.unshift(active.sessionId);
 	}
+}
+
+export function removeModeProjectSessions(state: MutableProjectionState, mode: AgentMode, cwd: string): boolean {
+	const removed = new Set(
+		state.sessionOrder.filter((sessionId) => {
+			const session = state.sessionsById.get(sessionId);
+			return session?.mode === mode && session.cwd === cwd && session.scheduled === undefined;
+		}),
+	);
+	if (removed.size === 0) return false;
+	for (const sessionId of removed) state.sessionsById.delete(sessionId);
+	state.sessionOrder = state.sessionOrder.filter((sessionId) => !removed.has(sessionId));
+	state.notifications = state.notifications.filter(
+		(notification) => notification.sessionId === undefined || !removed.has(notification.sessionId),
+	);
+	if (!state.activeSessionId || !removed.has(state.activeSessionId)) return true;
+
+	state.activeSessionId = null;
+	state.turnsById.clear();
+	state.turnOrder = [];
+	state.itemsById.clear();
+	state.itemOrder = [];
+	state.interactionsById.clear();
+	state.interactionOrder = [];
+	state.nextBeforeItemId = null;
+	state.activeTurnId = null;
+	state.serverEpoch = null;
+	state.cursor = 0;
+	state.syncStatus = "empty";
+	state.subagents = [];
+	return true;
 }
 
 export function replaceProjectionSnapshot(state: MutableProjectionState, snapshotValue: SessionSnapshot): void {

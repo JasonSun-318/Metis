@@ -60,7 +60,7 @@ describe("SkillsPanel", () => {
 		const container = document.createElement("div");
 		document.body.append(container);
 		const root = createRoot(container);
-		await act(async () => root.render(<SkillsPanel api={api} serverReady state={store.getSnapshot()} />));
+		await act(async () => root.render(<SkillsPanel api={api} preferences={new Map()} serverReady state={store.getSnapshot()} />));
 
 		await act(async () => button(container, "System").click());
 		await flush();
@@ -89,7 +89,7 @@ describe("SkillsPanel", () => {
 		const container = document.createElement("div");
 		document.body.append(container);
 		const root = createRoot(container);
-		await act(async () => root.render(<SkillsPanel api={api} serverReady state={new AppStore().getSnapshot()} />));
+		await act(async () => root.render(<SkillsPanel api={api} preferences={new Map()} serverReady state={new AppStore().getSnapshot()} />));
 
 		await act(async () => button(container, "User").click());
 		await flush();

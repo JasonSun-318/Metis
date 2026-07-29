@@ -146,7 +146,12 @@ describe("desktop trust boundaries", () => {
 			expect(rendererSource).not.toMatch(
 				/from\s+["'](?:node:|electron|@arcmind\/(?:agent|coding-agent|app-server))/u,
 			);
+			expect(rendererSource).not.toMatch(/ipcRenderer|\.invoke\(|shell\.open|moveToTrash/u);
 		}
+		const preload = source("src/preload.ts");
+		expect(preload).toContain('"project/deletePreview"');
+		expect(preload).toContain('"project/delete"');
+		expect(preload).not.toContain('exposeInMainWorld("arcMind", ipcRenderer');
 	});
 
 	it("accepts only the exact privileged renderer document", () => {
@@ -193,20 +198,31 @@ describe("desktop trust boundaries", () => {
 	it("maps only typed calls and revalidates their parameters in main", async () => {
 		const ipcMain = new FakeIpcMain();
 		const { supervisor } = supervisorHarness();
-		supervisor.request.mockImplementation(async (request) => ({
-			jsonrpc: "2.0",
-			id: request.id,
-			result:
-				request.method === "skill/list"
-					? { skills: [{ name: "pdf", description: "Read PDF files" }] }
-					: { sessions: [], nextAfterSessionId: null },
-		}));
+		supervisor.request.mockImplementation(async (request) => {
+			let result: unknown = { sessions: [], nextAfterSessionId: null };
+			if (request.method === "skill/list") result = { skills: [{ name: "pdf", description: "Read PDF files" }] };
+			if (request.method === "project/deletePreview") {
+				result = {
+					mode: request.params.mode,
+					cwd: request.params.cwd,
+					sessionCount: 2,
+					blockingScheduleCount: 0,
+					revision: "a".repeat(64),
+				};
+			}
+			if (request.method === "project/delete") {
+				result = { mode: request.params.mode, cwd: request.params.cwd, deletedSessionCount: 2 };
+			}
+			return { jsonrpc: "2.0", id: request.id, result };
+		});
 		const broker = new ClientBroker({ ipcMain: ipcMain as never, supervisor });
 		const webContents = new FakeWebContents();
 		broker.attach({ webContents: webContents as never });
 		const event = { sender: webContents, senderFrame: webContents.mainFrame };
 		const listSessions = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.listSessions)!;
 		const listSkills = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.listSkills)!;
+		const previewProjectDelete = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.previewProjectDelete)!;
+		const deleteProject = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.deleteProject)!;
 
 		await expect(listSessions(event, { limit: 0 })).rejects.toThrow("Invalid session/list params");
 		expect(supervisor.request).not.toHaveBeenCalled();
@@ -225,6 +241,34 @@ describe("desktop trust boundaries", () => {
 		});
 		expect(supervisor.request).toHaveBeenCalledWith(
 			expect.objectContaining({ method: "skill/list", params: { cwd: null } }),
+		);
+		await expect(previewProjectDelete(event, { mode: "all", cwd: "/work/project" })).rejects.toThrow(
+			"Invalid project/deletePreview params",
+		);
+		await expect(previewProjectDelete(event, { mode: "chat", cwd: "/work/project" })).resolves.toMatchObject({
+			mode: "chat",
+			cwd: "/work/project",
+			sessionCount: 2,
+		});
+		const deleteInput = {
+			requestId: "11111111-1111-4111-8111-111111111301",
+			mode: "chat",
+			cwd: "/work/project",
+			expectedRevision: "a".repeat(64),
+		};
+		await expect(deleteProject(event, { ...deleteInput, expectedRevision: "short" })).rejects.toThrow(
+			"Invalid project/delete params",
+		);
+		await expect(deleteProject(event, deleteInput)).resolves.toEqual({
+			mode: "chat",
+			cwd: "/work/project",
+			deletedSessionCount: 2,
+		});
+		expect(supervisor.request).toHaveBeenCalledWith(
+			expect.objectContaining({ method: "project/deletePreview", params: { mode: "chat", cwd: "/work/project" } }),
+		);
+		expect(supervisor.request).toHaveBeenCalledWith(
+			expect.objectContaining({ method: "project/delete", params: deleteInput }),
 		);
 		broker.dispose();
 	});

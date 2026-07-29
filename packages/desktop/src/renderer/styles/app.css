@@ -31,11 +31,22 @@ textarea { resize: none; }
 .new-task-button:hover:not(:disabled), .sidebar-nav-button:hover:not(:disabled) { background: #404040; box-shadow: 0 3px 10px rgb(0 0 0 / 14%), inset 0 1px rgb(255 255 255 / 4%); color: #fafafa; }
 .new-task-button[aria-current="page"], .sidebar-nav-button[aria-current="page"] { background: var(--panel-selected); box-shadow: 0 3px 10px rgb(0 0 0 / 14%), inset 0 1px rgb(255 255 255 / 4%); color: #fafafa; }
 .project-list { min-height: 0; flex: 1; overflow-y: auto; padding: 16px 0 18px; scrollbar-color: #555551 transparent; }
-.project-group { margin: 0 0 9px; }
-.project-heading { display: flex; height: 27px; min-width: 0; list-style: none; align-items: center; gap: 8px; border-radius: 6px; color: #c1c1c1; cursor: pointer; padding: 0 7px; font-size: var(--sidebar-item-size); font-weight: 400; transition: none; }
+.project-group { position: relative; margin: 0 0 9px; }
+.project-heading { display: flex; height: 28px; min-width: 0; list-style: none; align-items: center; gap: 8px; border-radius: 6px; color: #c1c1c1; cursor: pointer; padding: 0 60px 0 7px; font-size: var(--sidebar-item-size); font-weight: 400; transition: none; }
 .project-heading::-webkit-details-marker { display: none; }
 .project-heading:hover { background: #404040; box-shadow: 0 3px 10px rgb(0 0 0 / 14%), inset 0 1px rgb(255 255 255 / 4%); color: #fafafa; }
 .project-heading span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.project-actions { position: absolute; z-index: 30; top: 0; right: 3px; }
+.project-action-buttons { display: flex; height: 28px; align-items: center; gap: 1px; }
+.project-action-buttons > button { display: grid; width: 28px; height: 28px; place-items: center; border-radius: 5px; color: #96958f; }
+.project-action-buttons > button:hover:not(:disabled), .project-action-buttons > button[aria-expanded="true"] { background: #505050; color: #f2f1ec; }
+.project-action-buttons > button:disabled, .project-action-menu button:disabled { opacity: .35; }
+.project-action-menu { position: absolute; z-index: 25; top: 28px; right: 0; display: grid; width: 146px; gap: 2px; border: 1px solid rgb(255 255 255 / 15%); border-radius: 9px; background: #373737; box-shadow: 0 14px 34px rgb(0 0 0 / 38%), inset 0 1px rgb(255 255 255 / 4%); padding: 4px; }
+.project-action-menu button { display: flex; width: 100%; min-height: 30px; align-items: center; gap: 8px; border-radius: 6px; color: #e5e3dd; padding: 0 8px; text-align: left; font-size: 12px; }
+.project-action-menu button:hover:not(:disabled), .project-action-menu button:focus-visible { background: #484848; }
+.project-action-menu button svg { flex: none; color: #b9b7b1; }
+.project-action-menu .project-delete-menu-item { color: #ffaaa3; }
+.project-action-menu .project-delete-menu-item svg { color: #ff8f86; }
 .project-sessions { padding-left: 24px; }
 .session-button { display: flex; width: 100%; height: 28px; min-width: 0; align-items: center; justify-content: space-between; gap: 8px; border-radius: 6px; color: #c1bfb9; padding: 0 8px; text-align: left; font-size: var(--sidebar-item-size); font-weight: 400; transition: none; }
 .session-button:hover:not(:disabled) { background: #404040; box-shadow: 0 3px 10px rgb(0 0 0 / 14%), inset 0 1px rgb(255 255 255 / 4%); color: #fafafa; }
@@ -363,6 +374,21 @@ textarea { resize: none; }
 .interaction-actions button, .interaction-dialog form button { border-radius: 7px; background: #f1f0ec; color: #242422; padding: 9px 14px; }
 .interaction-dialog form { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; margin-top: 18px; }
 .interaction-dialog input { min-width: 0; border: 1px solid var(--border-strong); border-radius: 8px; background: #191919; padding: 9px 11px; }
+.project-dialog { width: min(540px, 100%); border: 1px solid var(--border-strong); border-radius: 14px; background: var(--panel-raised); box-shadow: var(--shadow); padding: 22px; }
+.project-dialog h2 { margin: 0 0 8px; color: var(--text); font-size: 18px; font-weight: 560; }
+.project-dialog p, .project-dialog li { color: var(--muted); font-size: 13px; line-height: 1.55; }
+.project-dialog p { margin: 8px 0; }
+.project-dialog ul { display: grid; gap: 5px; margin: 14px 0 0; padding-left: 20px; }
+.project-dialog form { display: grid; gap: 8px; margin-top: 18px; }
+.project-dialog label { color: #bdbbb5; font-size: 12px; }
+.project-dialog input { width: 100%; border: 1px solid var(--border-strong); border-radius: 8px; background: #191919; padding: 9px 11px; }
+.project-dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 19px; }
+.project-dialog-actions button { min-height: 34px; border-radius: 7px; background: #f1f0ec; color: #242422; padding: 7px 13px; }
+.project-dialog-actions .button-secondary { border: 1px solid var(--border-strong); background: transparent; color: var(--text); }
+.project-dialog-actions .project-delete-confirm { background: #b7433d; color: #fff; }
+.project-dialog-actions button:disabled { opacity: .45; }
+.project-delete-path { overflow: hidden; border-radius: 6px; background: #202020; padding: 7px 9px; text-overflow: ellipsis; white-space: nowrap; }
+.project-delete-blocker { border: 1px solid #765d2d; border-radius: 8px; background: #2a2113; color: #ffe1a9 !important; padding: 9px 11px; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); clip-path: inset(50%); white-space: nowrap; }
 
 @media (max-width: 980px) {

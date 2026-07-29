@@ -92,6 +92,43 @@ describe("renderer projection reducer", () => {
 		expect(codeTree.tasks.map((item) => item.sessionId)).toEqual(["session-5"]);
 	});
 
+	it("removes only one mode-project and clears its active projection idempotently", () => {
+		const store = new AppStore();
+		const active = { ...session("chat-active"), mode: "chat" as const, cwd: "/work/root" };
+		store.applySnapshot({
+			...snapshot(EPOCH_A, 4, [{ ...item("active-item", "visible"), sessionId: active.sessionId }]),
+			session: active,
+			model: { provider: "test", modelId: "model-a" },
+		});
+		store.setSessions({
+			sessions: [
+				active,
+				{ ...session("chat-archived"), mode: "chat", cwd: "/work/root", archived: true },
+				{ ...session("code-same"), cwd: "/work/root" },
+				{ ...session("chat-child"), mode: "chat", cwd: "/work/root/child" },
+				{
+					...session("chat-scheduled"),
+					mode: "chat",
+					cwd: "/work/root",
+					scheduled: { taskId: "task", runId: "run" },
+				},
+			],
+			nextAfterSessionId: null,
+		});
+
+		store.removeModeProject("chat", "/work/root");
+		const state = store.getSnapshot();
+		expect([...state.sessionsById.keys()]).toEqual(["code-same", "chat-child", "chat-scheduled"]);
+		expect(state.activeSessionId).toBeNull();
+		expect(state.itemOrder).toEqual([]);
+		expect(state.subagents).toEqual([]);
+		expect(state.availableModels).toEqual([{ provider: "test", modelId: "model-a", name: "Model A" }]);
+		expect(state.model).toEqual({ provider: "test", modelId: "model-a" });
+		const afterFirst = store.getSnapshot();
+		store.removeModeProject("chat", "/work/root");
+		expect(store.getSnapshot()).toBe(afterFirst);
+	});
+
 	it("replaces the complete active projection on every snapshot", () => {
 		const store = new AppStore();
 		store.applySnapshot(snapshot(EPOCH_A, 3, [item("old-item", "old", "completed")]));

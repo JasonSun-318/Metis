@@ -23,6 +23,14 @@ const api = {
 		invoke(DESKTOP_IPC_CHANNELS.listSessions, "session/list", input) as ReturnType<ArcMindDesktopApi["listSessions"]>,
 	listSkills: (input: ClientParams<"skill/list">) =>
 		invoke(DESKTOP_IPC_CHANNELS.listSkills, "skill/list", input) as ReturnType<ArcMindDesktopApi["listSkills"]>,
+	previewProjectDelete: (input: ClientParams<"project/deletePreview">) =>
+		invoke(DESKTOP_IPC_CHANNELS.previewProjectDelete, "project/deletePreview", input) as ReturnType<
+			ArcMindDesktopApi["previewProjectDelete"]
+		>,
+	deleteProject: (input: ClientParams<"project/delete">) =>
+		invoke(DESKTOP_IPC_CHANNELS.deleteProject, "project/delete", input) as ReturnType<
+			ArcMindDesktopApi["deleteProject"]
+		>,
 	createSession: (input: ClientParams<"session/create">) =>
 		invoke(DESKTOP_IPC_CHANNELS.createSession, "session/create", input) as ReturnType<
 			ArcMindDesktopApi["createSession"]

@@ -32,6 +32,8 @@ export type DesktopApiEvent =
 export const DESKTOP_IPC_CHANNELS = {
 	listSessions: "arcmind:list-sessions",
 	listSkills: "arcmind:list-skills",
+	previewProjectDelete: "arcmind:preview-project-delete",
+	deleteProject: "arcmind:delete-project",
 	createSession: "arcmind:create-session",
 	openSession: "arcmind:open-session",
 	readItems: "arcmind:read-items",
@@ -59,6 +61,8 @@ export interface DesktopAttachmentSelection {
 export interface ArcMindDesktopApi {
 	listSessions(input?: ClientParams<"session/list">): Promise<ClientResult<"session/list">>;
 	listSkills(input: ClientParams<"skill/list">): Promise<ClientResult<"skill/list">>;
+	previewProjectDelete(input: ClientParams<"project/deletePreview">): Promise<ClientResult<"project/deletePreview">>;
+	deleteProject(input: ClientParams<"project/delete">): Promise<ClientResult<"project/delete">>;
 	createSession(input: ClientParams<"session/create">): Promise<ClientResult<"session/create">>;
 	openSession(input: ClientParams<"session/open">): Promise<ClientResult<"session/subscribe">["snapshot"]>;
 	readItems(input: ClientParams<"session/readItems">): Promise<ClientResult<"session/readItems">>;
