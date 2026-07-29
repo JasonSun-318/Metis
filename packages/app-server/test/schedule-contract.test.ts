@@ -2,21 +2,18 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync,
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type ClientRpcSuccessResponse, PROTOCOL_VERSION, RPC_ERROR_CODES } from "@arcmind/app-protocol";
-import {
-	createSessionId,
-	ensureScheduleSessionDirectory,
-	type ScheduleRunClaim,
-	SessionManager,
-} from "@arcmind/coding-agent";
+import { createSessionId, getDefaultSessionDir, type ScheduleRunClaim, SessionManager } from "@arcmind/coding-agent";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AppServer } from "../src/app-server.ts";
 import type { OutboundEnvelope } from "../src/outbound-queue.ts";
 
 const SOURCE_ID = "10000000-0000-4000-8000-000000000001";
 const CHAT_ID = "10000000-0000-4000-8000-000000000002";
+const MANAGED_CHAT_ID = "10000000-0000-4000-8000-000000000003";
 const TASK_ID = "20000000-0000-4000-8000-000000000001";
 const FIXED_TASK_ID = "20000000-0000-4000-8000-000000000002";
 const GLOBAL_TASK_ID = "20000000-0000-4000-8000-000000000003";
+const MANAGED_TASK_ID = "20000000-0000-4000-8000-000000000004";
 const RUN_ID = "30000000-0000-4000-8000-000000000001";
 const MISSING_SESSION_ID = "60000000-0000-4000-8000-000000000001";
 
@@ -71,6 +68,7 @@ describe("AppServer schedule contract", () => {
 
 		await connection.handle(request("session/create", { requestId: SOURCE_ID, mode: "code", cwd: projectDir }));
 		await connection.handle(request("session/create", { requestId: CHAT_ID, mode: "chat", cwd: chatDir }));
+		await connection.handle(request("session/create", { requestId: MANAGED_CHAT_ID, mode: "chat" }));
 		const create = async (taskId: string, sourceSessionId?: string) =>
 			connection.handle(
 				request("schedule/create", {
@@ -80,16 +78,17 @@ describe("AppServer schedule contract", () => {
 					schedule: { kind: "daily", time: "09:00" },
 				}),
 			);
-		const project = await create(TASK_ID, SOURCE_ID);
+		const code = await create(TASK_ID, SOURCE_ID);
 		const fixed = await create(FIXED_TASK_ID, CHAT_ID);
+		const managed = await create(MANAGED_TASK_ID, MANAGED_CHAT_ID);
 		const global = await create(GLOBAL_TASK_ID);
 
-		expect(project).toMatchObject({
-			result: { task: { target: { kind: "project", cwd: realpathSync(projectDir) } } },
-		});
+		expect(code).toMatchObject({ error: { code: RPC_ERROR_CODES.INVALID_REQUEST } });
 		expect(fixed).toMatchObject({
 			result: { task: { target: { kind: "general", workspace: "fixed", cwd: realpathSync(chatDir) } } },
 		});
+		expect(managed).toMatchObject({ result: { task: { target: { kind: "general", workspace: "task" } } } });
+		expect(JSON.stringify(managed)).not.toContain("schedule-workspaces");
 		expect(global).toMatchObject({ result: { task: { target: { kind: "general", workspace: "task" } } } });
 		expect(JSON.stringify(global)).not.toContain("schedule-workspaces");
 		expect(
@@ -107,7 +106,7 @@ describe("AppServer schedule contract", () => {
 		});
 	});
 
-	it("runs into a fresh hidden read-only session and deletes the whole task history", async () => {
+	it("runs into a fresh visible read-only Chat session and deletes the whole task history", async () => {
 		tempDir = mkdtempSync(join(tmpdir(), "app-server-schedule-run-"));
 		const agentDir = join(tempDir, "agent");
 		const projectDir = join(tempDir, "project");
@@ -118,10 +117,10 @@ describe("AppServer schedule contract", () => {
 				const sessionId = createSessionId();
 				const manager = SessionManager.create(
 					claim.snapshot.target.cwd,
-					ensureScheduleSessionDirectory(agentDir, claim.taskId),
+					getDefaultSessionDir(claim.snapshot.target.cwd, agentDir),
 					{
 						id: sessionId,
-						mode: claim.snapshot.target.kind === "project" ? "code" : "chat",
+						mode: "chat",
 						cwdOrigin: "user-selected",
 						scheduled: { taskId: claim.taskId, runId: claim.runId },
 					},
@@ -154,7 +153,7 @@ describe("AppServer schedule contract", () => {
 			if ("method" in message && message.method === "connection/events") events.push(message);
 		});
 		await connection.handle(initialize());
-		await connection.handle(request("session/create", { requestId: SOURCE_ID, mode: "code", cwd: projectDir }));
+		await connection.handle(request("session/create", { requestId: SOURCE_ID, mode: "chat", cwd: projectDir }));
 		await connection.handle(
 			request("schedule/create", {
 				requestId: TASK_ID,
@@ -178,7 +177,17 @@ describe("AppServer schedule contract", () => {
 		}
 
 		const listed = await connection.handle(request("session/list", {}));
-		expect(JSON.stringify(listed)).not.toContain(run.sessionId!);
+		expect(listed).toMatchObject({
+			result: {
+				sessions: expect.arrayContaining([
+					expect.objectContaining({
+						sessionId: run.sessionId!,
+						mode: "chat",
+						scheduled: { taskId: TASK_ID, runId: RUN_ID },
+					}),
+				]),
+			},
+		});
 		expect(await connection.handle(request("session/open", { sessionId: run.sessionId! }))).toMatchObject({
 			result: { session: { sessionId: run.sessionId! } },
 		});
@@ -216,40 +225,46 @@ describe("AppServer schedule contract", () => {
 			).toBe(true),
 		);
 		expect(refresh).not.toHaveBeenCalled();
-		const hiddenFile = server.catalog.get(run.sessionId!).path;
+		const visibleFile = server.catalog.get(run.sessionId!).path;
 
 		server.beginShutdown();
 		await server.waitForShutdown();
 		server = await AppServer.create({ agentDir, scheduleExecute: async () => Promise.reject(new Error("unused")) });
 		connection = server.connect();
 		await connection.handle(initialize());
-		expect(JSON.stringify(await connection.handle(request("session/list", {})))).not.toContain(run.sessionId!);
+		expect(JSON.stringify(await connection.handle(request("session/list", {})))).toContain(run.sessionId!);
 		expect(await connection.handle(request("session/open", { sessionId: run.sessionId! }))).toMatchObject({
-			error: { code: RPC_ERROR_CODES.NOT_FOUND },
+			result: { session: { sessionId: run.sessionId!, scheduled: { taskId: TASK_ID, runId: RUN_ID } } },
 		});
-		const originalJournal = readFileSync(hiddenFile, "utf8");
-		const wrongModeJournal = originalJournal.replace('"mode":"code"', '"mode":"chat"');
+		const originalJournal = readFileSync(visibleFile, "utf8");
+		const wrongModeJournal = originalJournal.replace('"mode":"chat"', '"mode":"code"');
 		expect(wrongModeJournal).not.toBe(originalJournal);
-		writeFileSync(hiddenFile, wrongModeJournal);
+		writeFileSync(visibleFile, wrongModeJournal);
 		expect(await connection.handle(request("schedule/run/get", { taskId: TASK_ID, runId: RUN_ID }))).toMatchObject({
 			error: { code: RPC_ERROR_CODES.SESSION_CORRUPT },
 		});
-		writeFileSync(hiddenFile, originalJournal);
+		writeFileSync(visibleFile, originalJournal);
 		const forgedJournal = originalJournal.replace(RUN_ID, FIXED_TASK_ID);
-		writeFileSync(hiddenFile, forgedJournal);
+		writeFileSync(visibleFile, forgedJournal);
 		expect(await connection.handle(request("schedule/run/get", { taskId: TASK_ID, runId: RUN_ID }))).toMatchObject({
 			error: { code: RPC_ERROR_CODES.SESSION_CORRUPT },
 		});
-		writeFileSync(hiddenFile, originalJournal);
+		writeFileSync(visibleFile, originalJournal);
 		expect(await connection.handle(request("schedule/run/get", { taskId: TASK_ID, runId: RUN_ID }))).toHaveProperty(
 			"result.run.sessionId",
 			run.sessionId,
 		);
-		writeFileSync(hiddenFile, forgedJournal);
+		await connection.handle(
+			request("session/close", {
+				sessionId: run.sessionId!,
+				requestId: "50000000-0000-4000-8000-000000000005",
+			}),
+		);
+		writeFileSync(visibleFile, forgedJournal);
 		expect(await connection.handle(request("session/open", { sessionId: run.sessionId! }))).toMatchObject({
 			error: { code: RPC_ERROR_CODES.SESSION_CORRUPT },
 		});
-		writeFileSync(hiddenFile, originalJournal);
+		writeFileSync(visibleFile, originalJournal);
 		await connection.handle(request("schedule/run/get", { taskId: TASK_ID, runId: RUN_ID }));
 		expect(await connection.handle(request("session/open", { sessionId: run.sessionId! }))).toMatchObject({
 			result: { session: { sessionId: run.sessionId! } },
@@ -270,7 +285,7 @@ describe("AppServer schedule contract", () => {
 		expect(deleted).toMatchObject({ result: { taskId: TASK_ID, deleted: true } });
 		expect(listRuns).not.toHaveBeenCalled();
 		expect(server.registry.has(run.sessionId!)).toBe(false);
-		expect(existsSync(hiddenFile)).toBe(false);
+		expect(existsSync(visibleFile)).toBe(false);
 		expect(existsSync(projectDir)).toBe(true);
 	});
 

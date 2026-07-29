@@ -1,11 +1,11 @@
 import { randomUUID } from "node:crypto";
-import { existsSync, lstatSync, realpathSync } from "node:fs";
-import { isAbsolute } from "node:path";
+import { existsSync, lstatSync, readdirSync, realpathSync } from "node:fs";
+import { isAbsolute, join } from "node:path";
 import lockfile from "proper-lockfile";
 import { resolvePath } from "../../utils/paths.ts";
 import { createFileAtomicallySync, readSingleLinkTextFileSync } from "../durable-file.ts";
-import { assertValidSessionId } from "../session-id.ts";
-import { SessionManager } from "../session-manager.ts";
+import { assertValidSessionId, createSessionId } from "../session-id.ts";
+import { getDefaultSessionDir, SessionManager } from "../session-manager.ts";
 import { createScheduleWorkspace, getScheduleLeaderPath, removeOwnedScheduleWorkspace } from "./paths.ts";
 import { ScheduleStore } from "./store.ts";
 import {
@@ -86,15 +86,21 @@ function existingRealDirectory(path: string): string {
 	}
 }
 
+function resolveRunSessionFile(agentDir: string, run: ScheduleRun): string | undefined {
+	if (run.sessionFile) return run.sessionFile;
+	if (!run.sessionId) return undefined;
+	const sessionDir = getDefaultSessionDir(run.snapshot.target.cwd, agentDir);
+	const suffix = `_${run.sessionId}.jsonl`;
+	const matches = readdirSync(sessionDir).filter((name) => name.endsWith(suffix));
+	if (matches.length > 1) {
+		throw new ScheduleError("TASK_DELETING", "Scheduled session identity is ambiguous");
+	}
+	return matches[0] ? join(sessionDir, matches[0]) : undefined;
+}
+
 function validateCreateTarget(target: ScheduleCreateTarget): ScheduleCreateTarget {
 	if (typeof target !== "object" || target === null)
 		throw new ScheduleError("INVALID_SCHEDULE", "Invalid task target");
-	if (target.kind === "project") {
-		if (Object.keys(target).some((key) => key !== "kind" && key !== "cwd") || !isAbsolute(target.cwd)) {
-			throw new ScheduleError("INVALID_SCHEDULE", "Invalid project task target");
-		}
-		return { kind: "project", cwd: existingRealDirectory(target.cwd) };
-	}
 	if (target.kind === "general" && target.workspace === "fixed") {
 		if (
 			Object.keys(target).some((key) => key !== "kind" && key !== "workspace" && key !== "cwd") ||
@@ -121,23 +127,17 @@ function creationMatches(
 		schedule: ScheduleTask["schedule"];
 		timezone: string;
 		target: ScheduleCreateTarget;
-		createdFromSessionId?: string;
 	},
 ): boolean {
 	const targetMatches =
-		input.target.kind === "project"
-			? task.target.kind === "project" && task.target.cwd === input.target.cwd
-			: input.target.workspace === "fixed"
-				? task.target.kind === "general" &&
-					task.target.workspace === "fixed" &&
-					task.target.cwd === input.target.cwd
-				: task.target.kind === "general" && task.target.workspace === "task";
+		input.target.workspace === "fixed"
+			? task.target.kind === "general" && task.target.workspace === "fixed" && task.target.cwd === input.target.cwd
+			: task.target.kind === "general" && task.target.workspace === "task";
 	return (
 		task.instruction === input.instruction &&
 		JSON.stringify(task.schedule) === JSON.stringify(input.schedule) &&
 		task.timezone === input.timezone &&
-		targetMatches &&
-		task.createdFromSessionId === input.createdFromSessionId
+		targetMatches
 	);
 }
 
@@ -266,7 +266,6 @@ export class ScheduleManager {
 	async create(input: ScheduleCreateInput): Promise<ScheduleTask> {
 		this.assertHealthy();
 		assertValidSessionId(input.id);
-		if (input.createdFromSessionId) assertValidSessionId(input.createdFromSessionId);
 		const instruction = validateInstruction(input.instruction);
 		let schedule: ScheduleTask["schedule"];
 		let timezone: string;
@@ -286,7 +285,6 @@ export class ScheduleManager {
 					schedule,
 					timezone,
 					target: targetInput,
-					createdFromSessionId: input.createdFromSessionId,
 				})
 			) {
 				return current;
@@ -308,7 +306,6 @@ export class ScheduleManager {
 								schedule,
 								timezone,
 								target: targetInput,
-								createdFromSessionId: input.createdFromSessionId,
 							})
 						) {
 							return existing;
@@ -316,7 +313,7 @@ export class ScheduleManager {
 						throw new ScheduleError("TASK_ID_REUSED", "Task id was already used for different input");
 					}
 					let target: ScheduleTarget;
-					if (targetInput.kind === "general" && targetInput.workspace === "task") {
+					if (targetInput.workspace === "task") {
 						try {
 							ownedWorkspace = createScheduleWorkspace(this.agentDir, input.id);
 							target = { kind: "general", workspace: "task", cwd: ownedWorkspace };
@@ -336,7 +333,6 @@ export class ScheduleManager {
 						updatedAt: now.toISOString(),
 						nextRunAt,
 						unreadCount: 0,
-						...(input.createdFromSessionId ? { createdFromSessionId: input.createdFromSessionId } : {}),
 						nextRunSequence: 1,
 					};
 					draft.tasks.push(task);
@@ -803,6 +799,7 @@ export class ScheduleManager {
 				status: "running",
 				startedAt: this.now().toISOString(),
 				runnerId: this.runnerId,
+				sessionId: current.sessionId ?? createSessionId(),
 			};
 			files.replaceRun(next);
 			files.appendEvent({ type: "run-updated", taskId: task.id, runId: next.id });
@@ -833,6 +830,7 @@ export class ScheduleManager {
 			const run: ScheduleRun = {
 				id: runId,
 				taskId: current.id,
+				sessionId: createSessionId(),
 				sequence: current.nextRunSequence,
 				trigger: "scheduled",
 				status: "running",
@@ -883,8 +881,15 @@ export class ScheduleManager {
 	private async performExecution(run: ScheduleRun, signal: AbortSignal): Promise<void> {
 		try {
 			if (!this.execute) throw new ScheduleError("SANDBOX_UNAVAILABLE", "Scheduled executor is unavailable");
+			if (!run.sessionId) throw new ScheduleError("STORE_CORRUPT", "Scheduled run is missing its session id");
 			const result = await this.execute(
-				{ taskId: run.taskId, runId: run.id, scheduledFor: run.scheduledFor, snapshot: run.snapshot },
+				{
+					taskId: run.taskId,
+					runId: run.id,
+					sessionId: run.sessionId,
+					scheduledFor: run.scheduledFor,
+					snapshot: run.snapshot,
+				},
 				signal,
 			);
 			if (result.runId !== run.id) throw new Error("Scheduled executor returned the wrong run id");
@@ -1124,8 +1129,9 @@ export class ScheduleManager {
 			});
 		}
 		for (const run of this.store.listAllRuns(taskId)) {
-			if (!run.sessionFile) continue;
-			const result = await SessionManager.deleteSession(run.sessionFile, {
+			const sessionFile = resolveRunSessionFile(this.agentDir, run);
+			if (!sessionFile) continue;
+			const result = await SessionManager.deleteSession(sessionFile, {
 				agentDir: this.agentDir,
 				permanent: true,
 				expectedScheduled: { taskId, runId: run.id },

@@ -789,6 +789,8 @@ export interface SessionInfo {
 	name?: string;
 	/** Path to the parent session (if this session was forked). */
 	parentSessionPath?: string;
+	/** Scheduled execution identity. These sessions are visible but read-only. */
+	scheduled?: { taskId: string; runId: string };
 	created: Date;
 	modified: Date;
 	messageCount: number;
@@ -2017,7 +2019,6 @@ async function scanSessionCatalog(filePath: string): Promise<{ state: SessionCat
 
 async function buildSessionInfo(filePath: string): Promise<SessionInfo | null> {
 	try {
-		if (readSessionHeaderInfo(filePath)?.header.scheduled) return null;
 		const { state, mtime } = await scanSessionCatalog(filePath);
 		const header = state.header!;
 		const headerTime = new Date(header.timestamp).getTime();
@@ -2034,6 +2035,7 @@ async function buildSessionInfo(filePath: string): Promise<SessionInfo | null> {
 			mode: header.mode ?? DEFAULT_AGENT_MODE,
 			name: state.name,
 			parentSessionPath: header.parentSession,
+			...(header.scheduled ? { scheduled: header.scheduled } : {}),
 			created: new Date(header.timestamp),
 			modified,
 			messageCount: state.messageCount,
@@ -3511,6 +3513,11 @@ export class SessionManager {
 		return new SessionManager(cwd, dir, true, { newSessionOptions: options });
 	}
 
+	/** Header-only check used before routing a visible scheduled session to the read-only viewer. */
+	static isScheduledSession(path: string): boolean {
+		return readSessionHeader(canonicalPath(resolvePath(path)))?.scheduled !== undefined;
+	}
+
 	private static openPinned(
 		resolvedPath: string,
 		storagePath: string,
@@ -3521,6 +3528,7 @@ export class SessionManager {
 		const dir = sessionDir ? normalizePath(sessionDir) : resolve(resolvedPath, "..");
 		ensureDirectoryDurablySync(dir);
 		const headerHint = readSessionHeader(storagePath);
+		if (headerHint?.scheduled) throw new Error("Scheduled sessions are read-only; use openReadOnly");
 		const initialCwd = cwdOverride ?? headerHint?.cwd ?? process.cwd();
 		const createHeader = (): SessionHeader => ({
 			type: "session",
@@ -3758,6 +3766,9 @@ export class SessionManager {
 			}
 			const records = readSessionRecordsReadOnly(storagePath, { followSymlinkAlias: false }).records;
 			const header = records[0] as SessionHeader;
+			if (header.scheduled && (!options.permanent || !options.expectedScheduled)) {
+				throw new Error("Scheduled sessions can only be deleted with their task");
+			}
 			if (
 				options.permanent &&
 				(header.scheduled?.taskId !== options.expectedScheduled?.taskId ||

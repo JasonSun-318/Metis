@@ -21,7 +21,7 @@ afterEach(() => {
 });
 
 describe("scheduled session metadata", () => {
-	it("persists hidden metadata, excludes ordinary lists, and permits exact read-only open", async () => {
+	it("persists visible metadata in ordinary lists and permits exact read-only open", async () => {
 		const { cwd, sessionDir } = fixture();
 		const manager = SessionManager.create(cwd, sessionDir, {
 			id: "session-scheduled",
@@ -35,8 +35,14 @@ describe("scheduled session metadata", () => {
 			scheduled: { taskId: "task-1", runId: "run-1" },
 		});
 		manager.close();
-		expect(await SessionManager.list(cwd, sessionDir)).toEqual([]);
-		expect(await SessionManager.listAll(sessionDir)).toEqual([]);
+		expect(() => SessionManager.open(path)).toThrow(/openReadOnly/);
+		expect(await SessionManager.list(cwd, sessionDir)).toEqual([
+			expect.objectContaining({
+				id: "session-scheduled",
+				scheduled: { taskId: "task-1", runId: "run-1" },
+			}),
+		]);
+		expect(await SessionManager.listAll(sessionDir)).toEqual([expect.objectContaining({ id: "session-scheduled" })]);
 		expect(SessionManager.openReadOnly(path).getHeader()?.scheduled).toEqual({ taskId: "task-1", runId: "run-1" });
 	});
 
@@ -86,6 +92,11 @@ describe("scheduled session metadata", () => {
 		manager.close();
 		expect(() => SessionManager.forkFrom(path, cwd, sessionDir)).toThrow(/read-only/);
 		expect(() => SessionManager.importFrom(path, join(root, "copy.jsonl"))).toThrow(/read-only/);
+		expect(await SessionManager.deleteSession(path)).toMatchObject({
+			ok: false,
+			error: expect.stringMatching(/task/),
+		});
+		expect(existsSync(path)).toBe(true);
 
 		expect(
 			await SessionManager.deleteSession(path, {

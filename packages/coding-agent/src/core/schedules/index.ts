@@ -1,6 +1,5 @@
 export { createScheduledRunExecutor, SCHEDULE_EXECUTION_PROMPT } from "./executor.ts";
 export { ScheduleManager, type ScheduleManagerOptions } from "./manager.ts";
-export { ensureScheduleSessionDirectory, getScheduleSessionDir } from "./paths.ts";
 export {
 	advancePastNow,
 	firstOccurrence,
@@ -10,7 +9,13 @@ export {
 	validateScheduleSpec,
 	validateScheduleTimezone,
 } from "./time.ts";
-export { installScheduleHost, SCHEDULE_MAIN_PROMPT, ScheduleToolInputSchema } from "./tool.ts";
+export {
+	installScheduleHost,
+	isScheduleSessionEligible,
+	resolveScheduleCreateTarget,
+	SCHEDULE_MAIN_PROMPT,
+	ScheduleToolInputSchema,
+} from "./tool.ts";
 export type {
 	ScheduleCreateInput,
 	ScheduleCreateTarget,

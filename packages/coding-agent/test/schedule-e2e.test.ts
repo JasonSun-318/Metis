@@ -27,7 +27,7 @@ async function waitForRun(manager: ScheduleManager, taskId: string, runId: strin
 }
 
 describe.runIf(process.env.ARCMIND_TEST_OS_SANDBOX === "1")("scheduled task end to end", () => {
-	it("runs through the real model, sandbox, hidden session, inbox, and owned cleanup", async () => {
+	it("runs through the real model, sandbox, visible session, inbox, and owned cleanup", async () => {
 		const root = mkdtempSync(join(tmpdir(), "arcmind-schedule-e2e-"));
 		roots.push(root);
 		const agentDirPath = join(root, "agent");
@@ -82,17 +82,12 @@ describe.runIf(process.env.ARCMIND_TEST_OS_SANDBOX === "1")("scheduled task end 
 
 			expect(run).toMatchObject({ status: "succeeded", unread: true, resultPreview: "定时任务执行完成" });
 			expect(existsSync(join(task.target.cwd, "result.txt"))).toBe(true);
-			expect(relative(agentDir, run.sessionFile!).split(sep).slice(0, 3)).toEqual([
-				"schedule-runs",
-				task.id,
-				"sessions",
-			]);
-			const hidden = SessionManager.openReadOnly(run.sessionFile!);
-			expect(hidden.getHeader()?.scheduled).toEqual({ taskId: task.id, runId: run.id });
-			expect(JSON.stringify(hidden.getBranch())).toContain("定时任务执行完成");
-			expect(await SessionManager.list(task.target.cwd, getDefaultSessionDir(task.target.cwd, agentDir))).toEqual(
-				[],
-			);
+			const normalRoot = getDefaultSessionDir(task.target.cwd, agentDir);
+			expect(relative(normalRoot, run.sessionFile!).startsWith(`..${sep}`)).toBe(false);
+			const visible = SessionManager.openReadOnly(run.sessionFile!);
+			expect(visible.getHeader()?.scheduled).toEqual({ taskId: task.id, runId: run.id });
+			expect(JSON.stringify(visible.getBranch())).toContain("定时任务执行完成");
+			expect((await SessionManager.list(task.target.cwd, normalRoot)).map(({ id }) => id)).toContain(run.sessionId);
 			expect((await manager.markRunRead(task.id, run.id)).unread).toBe(false);
 
 			const sessionFile = run.sessionFile!;

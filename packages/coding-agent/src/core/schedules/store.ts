@@ -136,10 +136,6 @@ function parseTarget(value: unknown): ScheduleTask["target"] {
 	const input = record(value, "schedule target", ["kind", "workspace", "cwd"]);
 	const cwd = string(input.cwd, "schedule target cwd", 32 * 1024);
 	if (!isAbsolute(cwd) || cwd.includes("\0")) throw new Error("Invalid schedule target cwd");
-	if (input.kind === "project") {
-		record(value, "project schedule target", ["kind", "cwd"]);
-		return { kind: "project", cwd };
-	}
 	if (input.kind === "general" && (input.workspace === "task" || input.workspace === "fixed")) {
 		return { kind: "general", workspace: input.workspace, cwd };
 	}
@@ -207,7 +203,6 @@ function parseTask(value: unknown): ScheduleTask {
 		"unreadCount",
 		"lastRun",
 		"pauseReason",
-		"createdFromSessionId",
 		"deletingSince",
 		"nextRunSequence",
 	]);
@@ -235,7 +230,6 @@ function parseTask(value: unknown): ScheduleTask {
 		unreadCount: integer(input.unreadCount, "schedule unread count"),
 		...optional(input.lastRun, (item) => ({ lastRun: parseRunSummary(item) })),
 		...(input.pauseReason === undefined ? {} : { pauseReason: input.pauseReason }),
-		...optional(input.createdFromSessionId, (item) => ({ createdFromSessionId: id(item, "source session id") })),
 		...optional(input.deletingSince, (item) => ({ deletingSince: timestamp(item, "schedule deletion time") })),
 		nextRunSequence: integer(input.nextRunSequence, "schedule next run sequence", 1),
 	};

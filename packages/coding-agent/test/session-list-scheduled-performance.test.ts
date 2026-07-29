@@ -27,7 +27,7 @@ afterEach(() => {
 });
 
 describe("scheduled session catalog performance", () => {
-	it("skips scheduled journals after the header without scanning their transcripts", async () => {
+	it("loads visible scheduled journals through the same bounded catalog path", async () => {
 		root = mkdtempSync(join(tmpdir(), "arcmind-scheduled-catalog-"));
 		const cwd = join(root, "workspace");
 		const sessionDir = join(root, "sessions");
@@ -40,11 +40,15 @@ describe("scheduled session catalog performance", () => {
 			scheduled: { taskId: "scheduled-task", runId: "scheduled-run" },
 		});
 		const ordinaryPath = ordinary.getSessionFile()!;
+		const scheduledPath = scheduled.getSessionFile()!;
 		ordinary.close();
 		scheduled.close();
 		opened.length = 0;
 
-		expect((await SessionManager.list(cwd, sessionDir)).map(({ id }) => id)).toEqual(["ordinary-session"]);
-		expect(opened).toEqual([ordinaryPath]);
+		expect((await SessionManager.list(cwd, sessionDir)).map(({ id }) => id)).toEqual([
+			"scheduled-session",
+			"ordinary-session",
+		]);
+		expect(opened.sort()).toEqual([ordinaryPath, scheduledPath].sort());
 	});
 });

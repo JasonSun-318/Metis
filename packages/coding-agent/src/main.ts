@@ -39,6 +39,7 @@ import { type AppMode, resolveProjectTrusted } from "./core/project-trust.ts";
 import {
 	createScheduledRunExecutor,
 	installScheduleHost,
+	isScheduleSessionEligible,
 	SCHEDULE_MAIN_PROMPT,
 	ScheduleManager,
 } from "./core/schedules/index.ts";
@@ -890,6 +891,8 @@ export async function main(args: string[], options?: MainOptions) {
 						`Child model is unavailable: ${childConfig.model.provider}/${childConfig.model.modelId}`,
 					);
 				}
+				const scheduleEligible =
+					!childConfig && scheduleManager !== undefined && isScheduleSessionEligible(sessionManager);
 				const created = await createAgentSessionFromServices({
 					services,
 					sessionManager,
@@ -903,16 +906,20 @@ export async function main(args: string[], options?: MainOptions) {
 					noTools: childConfig ? undefined : sessionOptions.noTools,
 					customTools: childConfig ? [] : sessionOptions.customTools,
 					ultraAvailable,
-					additionalSystemPrompt: childConfig ? buildChildSystemPrompt(childConfig) : SCHEDULE_MAIN_PROMPT,
+					...(childConfig
+						? { additionalSystemPrompt: buildChildSystemPrompt(childConfig) }
+						: scheduleEligible
+							? { additionalSystemPrompt: SCHEDULE_MAIN_PROMPT }
+							: {}),
 					includeAutoMemory: childConfig ? false : undefined,
 					permissionModeCeiling,
 				});
 				servicesTransferred = true;
 				try {
-					if (!childConfig && scheduleManager) {
+					if (scheduleEligible) {
 						installScheduleHost({
 							session: created.session,
-							manager: scheduleManager,
+							manager: scheduleManager!,
 							timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
 						});
 					}

@@ -52,6 +52,7 @@ export const SessionSummarySchema = StrictObject({
 	state: SessionStateSchema,
 	archived: Type.Boolean(),
 	recoveryNotice: Type.Optional(PublicTextSchema),
+	scheduled: Type.Optional(StrictObject({ taskId: SessionIdSchema, runId: SessionIdSchema })),
 });
 
 export const SkillSummaryViewSchema = StrictObject({
@@ -410,7 +411,6 @@ export const ScheduleSpecSchema = Type.Union([
 ]);
 
 export const ScheduleTargetViewSchema = Type.Union([
-	StrictObject({ kind: Type.Literal("project"), cwd: PathSchema }),
 	StrictObject({ kind: Type.Literal("general"), workspace: Type.Literal("fixed"), cwd: PathSchema }),
 	StrictObject({ kind: Type.Literal("general"), workspace: Type.Literal("task") }),
 ]);
@@ -487,7 +487,6 @@ export const ScheduleTaskViewSchema = StrictObject({
 	unreadCount: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
 	lastRun: Type.Optional(ScheduleRunSummaryViewSchema),
 	pauseReason: Type.Optional(Type.Union([Type.Literal("user"), Type.Literal("workspace_missing")])),
-	createdFromSessionId: Type.Optional(SessionIdSchema),
 });
 
 export const ScheduleSnapshotViewSchema = StrictObject({

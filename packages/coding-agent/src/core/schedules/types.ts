@@ -16,7 +16,6 @@ export type ScheduleInputSpec =
 	  };
 
 export type ScheduleTarget =
-	| { readonly kind: "project"; readonly cwd: string }
 	| { readonly kind: "general"; readonly workspace: "task"; readonly cwd: string }
 	| { readonly kind: "general"; readonly workspace: "fixed"; readonly cwd: string };
 
@@ -84,7 +83,6 @@ export interface ScheduleTask {
 	readonly unreadCount: number;
 	readonly lastRun?: ScheduleRunSummary;
 	readonly pauseReason?: "user" | "workspace_missing";
-	readonly createdFromSessionId?: string;
 	readonly deletingSince?: string;
 	readonly nextRunSequence: number;
 }
@@ -118,7 +116,6 @@ export interface ScheduleRun {
 }
 
 export type ScheduleCreateTarget =
-	| { readonly kind: "project"; readonly cwd: string }
 	| { readonly kind: "general"; readonly workspace: "fixed"; readonly cwd: string }
 	| { readonly kind: "general"; readonly workspace: "task" };
 
@@ -128,7 +125,6 @@ export interface ScheduleCreateInput {
 	readonly schedule: ScheduleInputSpec;
 	readonly timezone: string;
 	readonly target: ScheduleCreateTarget;
-	readonly createdFromSessionId?: string;
 }
 
 export interface ScheduleUpdateInput {
@@ -154,6 +150,7 @@ export interface ScheduleRunPage {
 export interface ScheduleRunClaim {
 	readonly taskId: string;
 	readonly runId: string;
+	readonly sessionId: string;
 	readonly scheduledFor: string;
 	readonly snapshot: ScheduleTaskSnapshot;
 }

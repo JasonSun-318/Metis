@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { ScheduleManager } from "../src/core/schedules/manager.ts";
 import type { ScheduleInputSpec, ScheduleRun, ScheduleTask } from "../src/core/schedules/types.ts";
 import { SessionManager } from "../src/core/session-manager.ts";
-import { BUILTIN_SLASH_COMMANDS } from "../src/core/slash-commands.ts";
+import { BUILTIN_SLASH_COMMANDS, getBuiltinSlashCommands } from "../src/core/slash-commands.ts";
 import { InteractiveMode } from "../src/modes/interactive/interactive-mode.ts";
 
 const TASK_ID = "20000000-0000-4000-8000-000000000001";
@@ -17,7 +17,7 @@ function task(): ScheduleTask {
 		instruction: "Submit report",
 		schedule: { kind: "once", date: "2026-08-03", time: "09:30" },
 		timezone: "Asia/Shanghai",
-		target: { kind: "project", cwd: "/project" },
+		target: { kind: "general", workspace: "fixed", cwd: "/project" },
 		status: "active",
 		createdAt: "2026-07-26T00:00:00.000Z",
 		updatedAt: "2026-07-26T00:00:00.000Z",
@@ -30,7 +30,9 @@ function task(): ScheduleTask {
 describe("/schedule", () => {
 	it("is one argument-free built-in command", () => {
 		const commands = BUILTIN_SLASH_COMMANDS.filter(({ name }) => name === "schedule");
-		expect(commands).toEqual([{ name: "schedule", description: "Manage scheduled tasks" }]);
+		expect(commands).toEqual([{ name: "schedule", description: "Manage scheduled tasks", modes: ["chat"] }]);
+		expect(getBuiltinSlashCommands("chat").some(({ name }) => name === "schedule")).toBe(true);
+		expect(getBuiltinSlashCommands("code").some(({ name }) => name === "schedule")).toBe(false);
 	});
 
 	it("opens exactly three root choices and closes with Esc", async () => {
@@ -39,6 +41,7 @@ describe("/schedule", () => {
 		const mode = Object.create(InteractiveMode.prototype) as InteractiveMode & Record<string, unknown>;
 		Object.assign(mode, {
 			options: { scheduleManager: {} as ScheduleManager },
+			runtimeHost: { session: { sessionManager: { getMode: () => "chat" } } },
 			guardSessionMutation: () => false,
 			showExtensionSelector: vi.fn(async (nextTitle: string, nextChoices: string[]) => {
 				title = nextTitle;
@@ -51,6 +54,22 @@ describe("/schedule", () => {
 		await (mode as unknown as { handleScheduleCommand(): Promise<void> }).handleScheduleCommand();
 		expect(title).toBe("Schedule");
 		expect(choices).toEqual(["Create task", "Scheduled tasks", "Execution history"]);
+	});
+
+	it("rejects a pasted /schedule command in Code mode", async () => {
+		const showExtensionSelector = vi.fn();
+		const showWarning = vi.fn();
+		const mode = Object.create(InteractiveMode.prototype) as InteractiveMode & Record<string, unknown>;
+		Object.assign(mode, {
+			options: { scheduleManager: {} as ScheduleManager },
+			runtimeHost: { session: { sessionManager: { getMode: () => "code" } } },
+			guardSessionMutation: () => false,
+			showExtensionSelector,
+			showWarning,
+		});
+		await (mode as unknown as { handleScheduleCommand(): Promise<void> }).handleScheduleCommand();
+		expect(showWarning).toHaveBeenCalledWith("Scheduled tasks are only available in Chat mode");
+		expect(showExtensionSelector).not.toHaveBeenCalled();
 	});
 
 	it("creates through structured instruction, recurrence, date, and time fields only", async () => {
@@ -66,7 +85,7 @@ describe("/schedule", () => {
 			runtimeHost: {
 				session: {
 					sessionManager: {
-						getMode: () => "code",
+						getMode: () => "chat",
 						getCwd: () => "/project",
 						getCwdOrigin: () => "user-selected",
 						getSessionId: () => "source-session",
@@ -97,8 +116,7 @@ describe("/schedule", () => {
 			expect.objectContaining({
 				instruction: "Submit report",
 				schedule: { kind: "once", date: "2026-08-03", time: "09:30" },
-				target: { kind: "project", cwd: "/project" },
-				createdFromSessionId: "source-session",
+				target: { kind: "general", workspace: "fixed", cwd: "/project" },
 			}),
 		);
 		expect(dialogs.join("\n")).toContain("Task instructions");
@@ -150,7 +168,7 @@ describe("/schedule", () => {
 				instruction: "Submit report",
 				schedule: task().schedule,
 				timezone: "Asia/Shanghai",
-				target: { kind: "project", cwd: "/project" },
+				target: { kind: "general", workspace: "fixed", cwd: "/project" },
 			},
 		};
 		const duplicateTask = {
@@ -209,7 +227,7 @@ describe("/schedule", () => {
 				instruction: "Submit report",
 				schedule: task().schedule,
 				timezone: "Asia/Shanghai",
-				target: { kind: "project", cwd: "/project" },
+				target: { kind: "general", workspace: "fixed", cwd: "/project" },
 			},
 		};
 		let dialog = "";
@@ -289,6 +307,42 @@ describe("/schedule", () => {
 		expect(actions).not.toEqual(expect.arrayContaining(["Edit instructions", "Edit schedule", "Pause", "Resume"]));
 		expect(actions).toEqual(expect.arrayContaining(["View execution history", "Run now", "Delete"]));
 		expect(actions).not.toContain("Back");
+	});
+
+	it("opens scheduled entries as read-only results without switching the active session", async () => {
+		const root = mkdtempSync(join(tmpdir(), "arcmind-schedule-resume-"));
+		try {
+			const cwd = join(root, "workspace");
+			const sessionDir = join(root, "sessions");
+			mkdirSync(cwd);
+			const scheduled = SessionManager.create(cwd, sessionDir, {
+				id: "scheduled-result",
+				mode: "chat",
+				scheduled: { taskId: TASK_ID, runId: "run-result" },
+			});
+			scheduled.appendMessage({ role: "user", content: [{ type: "text", text: "Generate report" }], timestamp: 1 });
+			const sessionFile = scheduled.getSessionFile()!;
+			scheduled.close();
+			const switchSession = vi.fn();
+			let dialog = "";
+			const mode = Object.create(InteractiveMode.prototype) as InteractiveMode & Record<string, unknown>;
+			Object.assign(mode, {
+				runtimeHost: { switchSession },
+				clearStatusIndicator: vi.fn(),
+				showExtensionSelector: vi.fn(async (title: string) => {
+					dialog = title;
+					return undefined;
+				}),
+			});
+			await (
+				mode as unknown as { handleResumeSession(path: string): Promise<{ cancelled: boolean }> }
+			).handleResumeSession(sessionFile);
+			expect(dialog).toContain("Scheduled execution");
+			expect(dialog).toContain("Generate report");
+			expect(switchSession).not.toHaveBeenCalled();
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
 	});
 
 	it("never opens a result journal outside the task-owned session directory", async () => {

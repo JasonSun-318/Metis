@@ -2512,6 +2512,26 @@
                               "recoveryNotice": {
                                 "type": "string",
                                 "x-arcmind-maxUtf8Bytes": 65536
+                              },
+                              "scheduled": {
+                                "type": "object",
+                                "required": [
+                                  "taskId",
+                                  "runId"
+                                ],
+                                "properties": {
+                                  "taskId": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                                  },
+                                  "runId": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                                  }
+                                },
+                                "additionalProperties": false
                               }
                             },
                             "additionalProperties": false
@@ -4498,25 +4518,6 @@
                                     "type": "object",
                                     "required": [
                                       "kind",
-                                      "cwd"
-                                    ],
-                                    "properties": {
-                                      "kind": {
-                                        "type": "string",
-                                        "const": "project"
-                                      },
-                                      "cwd": {
-                                        "type": "string",
-                                        "minLength": 1,
-                                        "x-arcmind-maxUtf8Bytes": 32768
-                                      }
-                                    },
-                                    "additionalProperties": false
-                                  },
-                                  {
-                                    "type": "object",
-                                    "required": [
-                                      "kind",
                                       "workspace",
                                       "cwd"
                                     ],
@@ -4748,11 +4749,6 @@
                                     "const": "workspace_missing"
                                   }
                                 ]
-                              },
-                              "createdFromSessionId": {
-                                "type": "string",
-                                "minLength": 1,
-                                "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
                               }
                             },
                             "additionalProperties": false
@@ -5202,6 +5198,26 @@
                           "recoveryNotice": {
                             "type": "string",
                             "x-arcmind-maxUtf8Bytes": 65536
+                          },
+                          "scheduled": {
+                            "type": "object",
+                            "required": [
+                              "taskId",
+                              "runId"
+                            ],
+                            "properties": {
+                              "taskId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                              },
+                              "runId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                              }
+                            },
+                            "additionalProperties": false
                           }
                         },
                         "additionalProperties": false
@@ -5403,6 +5419,26 @@
                         "recoveryNotice": {
                           "type": "string",
                           "x-arcmind-maxUtf8Bytes": 65536
+                        },
+                        "scheduled": {
+                          "type": "object",
+                          "required": [
+                            "taskId",
+                            "runId"
+                          ],
+                          "properties": {
+                            "taskId": {
+                              "type": "string",
+                              "minLength": 1,
+                              "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                            },
+                            "runId": {
+                              "type": "string",
+                              "minLength": 1,
+                              "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                            }
+                          },
+                          "additionalProperties": false
                         }
                       },
                       "additionalProperties": false
@@ -5536,6 +5572,26 @@
                         "recoveryNotice": {
                           "type": "string",
                           "x-arcmind-maxUtf8Bytes": 65536
+                        },
+                        "scheduled": {
+                          "type": "object",
+                          "required": [
+                            "taskId",
+                            "runId"
+                          ],
+                          "properties": {
+                            "taskId": {
+                              "type": "string",
+                              "minLength": 1,
+                              "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                            },
+                            "runId": {
+                              "type": "string",
+                              "minLength": 1,
+                              "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                            }
+                          },
+                          "additionalProperties": false
                         }
                       },
                       "additionalProperties": false
@@ -6055,6 +6111,26 @@
                         "recoveryNotice": {
                           "type": "string",
                           "x-arcmind-maxUtf8Bytes": 65536
+                        },
+                        "scheduled": {
+                          "type": "object",
+                          "required": [
+                            "taskId",
+                            "runId"
+                          ],
+                          "properties": {
+                            "taskId": {
+                              "type": "string",
+                              "minLength": 1,
+                              "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                            },
+                            "runId": {
+                              "type": "string",
+                              "minLength": 1,
+                              "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                            }
+                          },
+                          "additionalProperties": false
                         }
                       },
                       "additionalProperties": false
@@ -6188,6 +6264,26 @@
                         "recoveryNotice": {
                           "type": "string",
                           "x-arcmind-maxUtf8Bytes": 65536
+                        },
+                        "scheduled": {
+                          "type": "object",
+                          "required": [
+                            "taskId",
+                            "runId"
+                          ],
+                          "properties": {
+                            "taskId": {
+                              "type": "string",
+                              "minLength": 1,
+                              "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                            },
+                            "runId": {
+                              "type": "string",
+                              "minLength": 1,
+                              "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                            }
+                          },
+                          "additionalProperties": false
                         }
                       },
                       "additionalProperties": false
@@ -6338,6 +6434,26 @@
                             "recoveryNotice": {
                               "type": "string",
                               "x-arcmind-maxUtf8Bytes": 65536
+                            },
+                            "scheduled": {
+                              "type": "object",
+                              "required": [
+                                "taskId",
+                                "runId"
+                              ],
+                              "properties": {
+                                "taskId": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                                },
+                                "runId": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                                }
+                              },
+                              "additionalProperties": false
                             }
                           },
                           "additionalProperties": false
@@ -8679,25 +8795,6 @@
                               "type": "object",
                               "required": [
                                 "kind",
-                                "cwd"
-                              ],
-                              "properties": {
-                                "kind": {
-                                  "type": "string",
-                                  "const": "project"
-                                },
-                                "cwd": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "x-arcmind-maxUtf8Bytes": 32768
-                                }
-                              },
-                              "additionalProperties": false
-                            },
-                            {
-                              "type": "object",
-                              "required": [
-                                "kind",
                                 "workspace",
                                 "cwd"
                               ],
@@ -8929,11 +9026,6 @@
                               "const": "workspace_missing"
                             }
                           ]
-                        },
-                        "createdFromSessionId": {
-                          "type": "string",
-                          "minLength": 1,
-                          "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
                         }
                       },
                       "additionalProperties": false
@@ -9148,25 +9240,6 @@
                           },
                           "target": {
                             "anyOf": [
-                              {
-                                "type": "object",
-                                "required": [
-                                  "kind",
-                                  "cwd"
-                                ],
-                                "properties": {
-                                  "kind": {
-                                    "type": "string",
-                                    "const": "project"
-                                  },
-                                  "cwd": {
-                                    "type": "string",
-                                    "minLength": 1,
-                                    "x-arcmind-maxUtf8Bytes": 32768
-                                  }
-                                },
-                                "additionalProperties": false
-                              },
                               {
                                 "type": "object",
                                 "required": [
@@ -9402,11 +9475,6 @@
                                 "const": "workspace_missing"
                               }
                             ]
-                          },
-                          "createdFromSessionId": {
-                            "type": "string",
-                            "minLength": 1,
-                            "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
                           }
                         },
                         "additionalProperties": false
@@ -9640,25 +9708,6 @@
                               "type": "object",
                               "required": [
                                 "kind",
-                                "cwd"
-                              ],
-                              "properties": {
-                                "kind": {
-                                  "type": "string",
-                                  "const": "project"
-                                },
-                                "cwd": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "x-arcmind-maxUtf8Bytes": 32768
-                                }
-                              },
-                              "additionalProperties": false
-                            },
-                            {
-                              "type": "object",
-                              "required": [
-                                "kind",
                                 "workspace",
                                 "cwd"
                               ],
@@ -9890,11 +9939,6 @@
                               "const": "workspace_missing"
                             }
                           ]
-                        },
-                        "createdFromSessionId": {
-                          "type": "string",
-                          "minLength": 1,
-                          "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
                         }
                       },
                       "additionalProperties": false
@@ -10109,25 +10153,6 @@
                               "type": "object",
                               "required": [
                                 "kind",
-                                "cwd"
-                              ],
-                              "properties": {
-                                "kind": {
-                                  "type": "string",
-                                  "const": "project"
-                                },
-                                "cwd": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "x-arcmind-maxUtf8Bytes": 32768
-                                }
-                              },
-                              "additionalProperties": false
-                            },
-                            {
-                              "type": "object",
-                              "required": [
-                                "kind",
                                 "workspace",
                                 "cwd"
                               ],
@@ -10359,11 +10384,6 @@
                               "const": "workspace_missing"
                             }
                           ]
-                        },
-                        "createdFromSessionId": {
-                          "type": "string",
-                          "minLength": 1,
-                          "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
                         }
                       },
                       "additionalProperties": false
@@ -10578,25 +10598,6 @@
                               "type": "object",
                               "required": [
                                 "kind",
-                                "cwd"
-                              ],
-                              "properties": {
-                                "kind": {
-                                  "type": "string",
-                                  "const": "project"
-                                },
-                                "cwd": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "x-arcmind-maxUtf8Bytes": 32768
-                                }
-                              },
-                              "additionalProperties": false
-                            },
-                            {
-                              "type": "object",
-                              "required": [
-                                "kind",
                                 "workspace",
                                 "cwd"
                               ],
@@ -10828,11 +10829,6 @@
                               "const": "workspace_missing"
                             }
                           ]
-                        },
-                        "createdFromSessionId": {
-                          "type": "string",
-                          "minLength": 1,
-                          "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
                         }
                       },
                       "additionalProperties": false
@@ -11047,25 +11043,6 @@
                               "type": "object",
                               "required": [
                                 "kind",
-                                "cwd"
-                              ],
-                              "properties": {
-                                "kind": {
-                                  "type": "string",
-                                  "const": "project"
-                                },
-                                "cwd": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "x-arcmind-maxUtf8Bytes": 32768
-                                }
-                              },
-                              "additionalProperties": false
-                            },
-                            {
-                              "type": "object",
-                              "required": [
-                                "kind",
                                 "workspace",
                                 "cwd"
                               ],
@@ -11297,11 +11274,6 @@
                               "const": "workspace_missing"
                             }
                           ]
-                        },
-                        "createdFromSessionId": {
-                          "type": "string",
-                          "minLength": 1,
-                          "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
                         }
                       },
                       "additionalProperties": false
@@ -11678,25 +11650,6 @@
                             },
                             "target": {
                               "anyOf": [
-                                {
-                                  "type": "object",
-                                  "required": [
-                                    "kind",
-                                    "cwd"
-                                  ],
-                                  "properties": {
-                                    "kind": {
-                                      "type": "string",
-                                      "const": "project"
-                                    },
-                                    "cwd": {
-                                      "type": "string",
-                                      "minLength": 1,
-                                      "x-arcmind-maxUtf8Bytes": 32768
-                                    }
-                                  },
-                                  "additionalProperties": false
-                                },
                                 {
                                   "type": "object",
                                   "required": [
@@ -12082,25 +12035,6 @@
                               },
                               "target": {
                                 "anyOf": [
-                                  {
-                                    "type": "object",
-                                    "required": [
-                                      "kind",
-                                      "cwd"
-                                    ],
-                                    "properties": {
-                                      "kind": {
-                                        "type": "string",
-                                        "const": "project"
-                                      },
-                                      "cwd": {
-                                        "type": "string",
-                                        "minLength": 1,
-                                        "x-arcmind-maxUtf8Bytes": 32768
-                                      }
-                                    },
-                                    "additionalProperties": false
-                                  },
                                   {
                                     "type": "object",
                                     "required": [
@@ -12501,25 +12435,6 @@
                                   "type": "object",
                                   "required": [
                                     "kind",
-                                    "cwd"
-                                  ],
-                                  "properties": {
-                                    "kind": {
-                                      "type": "string",
-                                      "const": "project"
-                                    },
-                                    "cwd": {
-                                      "type": "string",
-                                      "minLength": 1,
-                                      "x-arcmind-maxUtf8Bytes": 32768
-                                    }
-                                  },
-                                  "additionalProperties": false
-                                },
-                                {
-                                  "type": "object",
-                                  "required": [
-                                    "kind",
                                     "workspace",
                                     "cwd"
                                   ],
@@ -12903,25 +12818,6 @@
                                   "type": "object",
                                   "required": [
                                     "kind",
-                                    "cwd"
-                                  ],
-                                  "properties": {
-                                    "kind": {
-                                      "type": "string",
-                                      "const": "project"
-                                    },
-                                    "cwd": {
-                                      "type": "string",
-                                      "minLength": 1,
-                                      "x-arcmind-maxUtf8Bytes": 32768
-                                    }
-                                  },
-                                  "additionalProperties": false
-                                },
-                                {
-                                  "type": "object",
-                                  "required": [
-                                    "kind",
                                     "workspace",
                                     "cwd"
                                   ],
@@ -13193,25 +13089,6 @@
                                     "type": "object",
                                     "required": [
                                       "kind",
-                                      "cwd"
-                                    ],
-                                    "properties": {
-                                      "kind": {
-                                        "type": "string",
-                                        "const": "project"
-                                      },
-                                      "cwd": {
-                                        "type": "string",
-                                        "minLength": 1,
-                                        "x-arcmind-maxUtf8Bytes": 32768
-                                      }
-                                    },
-                                    "additionalProperties": false
-                                  },
-                                  {
-                                    "type": "object",
-                                    "required": [
-                                      "kind",
                                       "workspace",
                                       "cwd"
                                     ],
@@ -13443,11 +13320,6 @@
                                     "const": "workspace_missing"
                                   }
                                 ]
-                              },
-                              "createdFromSessionId": {
-                                "type": "string",
-                                "minLength": 1,
-                                "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
                               }
                             },
                             "additionalProperties": false
@@ -16737,6 +16609,26 @@
                       "recoveryNotice": {
                         "type": "string",
                         "x-arcmind-maxUtf8Bytes": 65536
+                      },
+                      "scheduled": {
+                        "type": "object",
+                        "required": [
+                          "taskId",
+                          "runId"
+                        ],
+                        "properties": {
+                          "taskId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                          },
+                          "runId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                          }
+                        },
+                        "additionalProperties": false
                       }
                     },
                     "additionalProperties": false
@@ -16938,6 +16830,26 @@
                     "recoveryNotice": {
                       "type": "string",
                       "x-arcmind-maxUtf8Bytes": 65536
+                    },
+                    "scheduled": {
+                      "type": "object",
+                      "required": [
+                        "taskId",
+                        "runId"
+                      ],
+                      "properties": {
+                        "taskId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                        },
+                        "runId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                        }
+                      },
+                      "additionalProperties": false
                     }
                   },
                   "additionalProperties": false
@@ -17071,6 +16983,26 @@
                     "recoveryNotice": {
                       "type": "string",
                       "x-arcmind-maxUtf8Bytes": 65536
+                    },
+                    "scheduled": {
+                      "type": "object",
+                      "required": [
+                        "taskId",
+                        "runId"
+                      ],
+                      "properties": {
+                        "taskId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                        },
+                        "runId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                        }
+                      },
+                      "additionalProperties": false
                     }
                   },
                   "additionalProperties": false
@@ -17590,6 +17522,26 @@
                     "recoveryNotice": {
                       "type": "string",
                       "x-arcmind-maxUtf8Bytes": 65536
+                    },
+                    "scheduled": {
+                      "type": "object",
+                      "required": [
+                        "taskId",
+                        "runId"
+                      ],
+                      "properties": {
+                        "taskId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                        },
+                        "runId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                        }
+                      },
+                      "additionalProperties": false
                     }
                   },
                   "additionalProperties": false
@@ -17723,6 +17675,26 @@
                     "recoveryNotice": {
                       "type": "string",
                       "x-arcmind-maxUtf8Bytes": 65536
+                    },
+                    "scheduled": {
+                      "type": "object",
+                      "required": [
+                        "taskId",
+                        "runId"
+                      ],
+                      "properties": {
+                        "taskId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                        },
+                        "runId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                        }
+                      },
+                      "additionalProperties": false
                     }
                   },
                   "additionalProperties": false
@@ -17873,6 +17845,26 @@
                         "recoveryNotice": {
                           "type": "string",
                           "x-arcmind-maxUtf8Bytes": 65536
+                        },
+                        "scheduled": {
+                          "type": "object",
+                          "required": [
+                            "taskId",
+                            "runId"
+                          ],
+                          "properties": {
+                            "taskId": {
+                              "type": "string",
+                              "minLength": 1,
+                              "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                            },
+                            "runId": {
+                              "type": "string",
+                              "minLength": 1,
+                              "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                            }
+                          },
+                          "additionalProperties": false
                         }
                       },
                       "additionalProperties": false
@@ -20214,25 +20206,6 @@
                           "type": "object",
                           "required": [
                             "kind",
-                            "cwd"
-                          ],
-                          "properties": {
-                            "kind": {
-                              "type": "string",
-                              "const": "project"
-                            },
-                            "cwd": {
-                              "type": "string",
-                              "minLength": 1,
-                              "x-arcmind-maxUtf8Bytes": 32768
-                            }
-                          },
-                          "additionalProperties": false
-                        },
-                        {
-                          "type": "object",
-                          "required": [
-                            "kind",
                             "workspace",
                             "cwd"
                           ],
@@ -20464,11 +20437,6 @@
                           "const": "workspace_missing"
                         }
                       ]
-                    },
-                    "createdFromSessionId": {
-                      "type": "string",
-                      "minLength": 1,
-                      "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
                     }
                   },
                   "additionalProperties": false
@@ -20683,25 +20651,6 @@
                       },
                       "target": {
                         "anyOf": [
-                          {
-                            "type": "object",
-                            "required": [
-                              "kind",
-                              "cwd"
-                            ],
-                            "properties": {
-                              "kind": {
-                                "type": "string",
-                                "const": "project"
-                              },
-                              "cwd": {
-                                "type": "string",
-                                "minLength": 1,
-                                "x-arcmind-maxUtf8Bytes": 32768
-                              }
-                            },
-                            "additionalProperties": false
-                          },
                           {
                             "type": "object",
                             "required": [
@@ -20937,11 +20886,6 @@
                             "const": "workspace_missing"
                           }
                         ]
-                      },
-                      "createdFromSessionId": {
-                        "type": "string",
-                        "minLength": 1,
-                        "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
                       }
                     },
                     "additionalProperties": false
@@ -21175,25 +21119,6 @@
                           "type": "object",
                           "required": [
                             "kind",
-                            "cwd"
-                          ],
-                          "properties": {
-                            "kind": {
-                              "type": "string",
-                              "const": "project"
-                            },
-                            "cwd": {
-                              "type": "string",
-                              "minLength": 1,
-                              "x-arcmind-maxUtf8Bytes": 32768
-                            }
-                          },
-                          "additionalProperties": false
-                        },
-                        {
-                          "type": "object",
-                          "required": [
-                            "kind",
                             "workspace",
                             "cwd"
                           ],
@@ -21425,11 +21350,6 @@
                           "const": "workspace_missing"
                         }
                       ]
-                    },
-                    "createdFromSessionId": {
-                      "type": "string",
-                      "minLength": 1,
-                      "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
                     }
                   },
                   "additionalProperties": false
@@ -21644,25 +21564,6 @@
                           "type": "object",
                           "required": [
                             "kind",
-                            "cwd"
-                          ],
-                          "properties": {
-                            "kind": {
-                              "type": "string",
-                              "const": "project"
-                            },
-                            "cwd": {
-                              "type": "string",
-                              "minLength": 1,
-                              "x-arcmind-maxUtf8Bytes": 32768
-                            }
-                          },
-                          "additionalProperties": false
-                        },
-                        {
-                          "type": "object",
-                          "required": [
-                            "kind",
                             "workspace",
                             "cwd"
                           ],
@@ -21894,11 +21795,6 @@
                           "const": "workspace_missing"
                         }
                       ]
-                    },
-                    "createdFromSessionId": {
-                      "type": "string",
-                      "minLength": 1,
-                      "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
                     }
                   },
                   "additionalProperties": false
@@ -22113,25 +22009,6 @@
                           "type": "object",
                           "required": [
                             "kind",
-                            "cwd"
-                          ],
-                          "properties": {
-                            "kind": {
-                              "type": "string",
-                              "const": "project"
-                            },
-                            "cwd": {
-                              "type": "string",
-                              "minLength": 1,
-                              "x-arcmind-maxUtf8Bytes": 32768
-                            }
-                          },
-                          "additionalProperties": false
-                        },
-                        {
-                          "type": "object",
-                          "required": [
-                            "kind",
                             "workspace",
                             "cwd"
                           ],
@@ -22363,11 +22240,6 @@
                           "const": "workspace_missing"
                         }
                       ]
-                    },
-                    "createdFromSessionId": {
-                      "type": "string",
-                      "minLength": 1,
-                      "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
                     }
                   },
                   "additionalProperties": false
@@ -22582,25 +22454,6 @@
                           "type": "object",
                           "required": [
                             "kind",
-                            "cwd"
-                          ],
-                          "properties": {
-                            "kind": {
-                              "type": "string",
-                              "const": "project"
-                            },
-                            "cwd": {
-                              "type": "string",
-                              "minLength": 1,
-                              "x-arcmind-maxUtf8Bytes": 32768
-                            }
-                          },
-                          "additionalProperties": false
-                        },
-                        {
-                          "type": "object",
-                          "required": [
-                            "kind",
                             "workspace",
                             "cwd"
                           ],
@@ -22832,11 +22685,6 @@
                           "const": "workspace_missing"
                         }
                       ]
-                    },
-                    "createdFromSessionId": {
-                      "type": "string",
-                      "minLength": 1,
-                      "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
                     }
                   },
                   "additionalProperties": false
@@ -23213,25 +23061,6 @@
                         },
                         "target": {
                           "anyOf": [
-                            {
-                              "type": "object",
-                              "required": [
-                                "kind",
-                                "cwd"
-                              ],
-                              "properties": {
-                                "kind": {
-                                  "type": "string",
-                                  "const": "project"
-                                },
-                                "cwd": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "x-arcmind-maxUtf8Bytes": 32768
-                                }
-                              },
-                              "additionalProperties": false
-                            },
                             {
                               "type": "object",
                               "required": [
@@ -23617,25 +23446,6 @@
                           },
                           "target": {
                             "anyOf": [
-                              {
-                                "type": "object",
-                                "required": [
-                                  "kind",
-                                  "cwd"
-                                ],
-                                "properties": {
-                                  "kind": {
-                                    "type": "string",
-                                    "const": "project"
-                                  },
-                                  "cwd": {
-                                    "type": "string",
-                                    "minLength": 1,
-                                    "x-arcmind-maxUtf8Bytes": 32768
-                                  }
-                                },
-                                "additionalProperties": false
-                              },
                               {
                                 "type": "object",
                                 "required": [
@@ -24036,25 +23846,6 @@
                               "type": "object",
                               "required": [
                                 "kind",
-                                "cwd"
-                              ],
-                              "properties": {
-                                "kind": {
-                                  "type": "string",
-                                  "const": "project"
-                                },
-                                "cwd": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "x-arcmind-maxUtf8Bytes": 32768
-                                }
-                              },
-                              "additionalProperties": false
-                            },
-                            {
-                              "type": "object",
-                              "required": [
-                                "kind",
                                 "workspace",
                                 "cwd"
                               ],
@@ -24438,25 +24229,6 @@
                               "type": "object",
                               "required": [
                                 "kind",
-                                "cwd"
-                              ],
-                              "properties": {
-                                "kind": {
-                                  "type": "string",
-                                  "const": "project"
-                                },
-                                "cwd": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "x-arcmind-maxUtf8Bytes": 32768
-                                }
-                              },
-                              "additionalProperties": false
-                            },
-                            {
-                              "type": "object",
-                              "required": [
-                                "kind",
                                 "workspace",
                                 "cwd"
                               ],
@@ -24728,25 +24500,6 @@
                                 "type": "object",
                                 "required": [
                                   "kind",
-                                  "cwd"
-                                ],
-                                "properties": {
-                                  "kind": {
-                                    "type": "string",
-                                    "const": "project"
-                                  },
-                                  "cwd": {
-                                    "type": "string",
-                                    "minLength": 1,
-                                    "x-arcmind-maxUtf8Bytes": 32768
-                                  }
-                                },
-                                "additionalProperties": false
-                              },
-                              {
-                                "type": "object",
-                                "required": [
-                                  "kind",
                                   "workspace",
                                   "cwd"
                                 ],
@@ -24978,11 +24731,6 @@
                                 "const": "workspace_missing"
                               }
                             ]
-                          },
-                          "createdFromSessionId": {
-                            "type": "string",
-                            "minLength": 1,
-                            "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
                           }
                         },
                         "additionalProperties": false
@@ -25216,6 +24964,26 @@
                       "recoveryNotice": {
                         "type": "string",
                         "x-arcmind-maxUtf8Bytes": 65536
+                      },
+                      "scheduled": {
+                        "type": "object",
+                        "required": [
+                          "taskId",
+                          "runId"
+                        ],
+                        "properties": {
+                          "taskId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                          },
+                          "runId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                          }
+                        },
+                        "additionalProperties": false
                       }
                     },
                     "additionalProperties": false
@@ -27202,25 +26970,6 @@
                             "type": "object",
                             "required": [
                               "kind",
-                              "cwd"
-                            ],
-                            "properties": {
-                              "kind": {
-                                "type": "string",
-                                "const": "project"
-                              },
-                              "cwd": {
-                                "type": "string",
-                                "minLength": 1,
-                                "x-arcmind-maxUtf8Bytes": 32768
-                              }
-                            },
-                            "additionalProperties": false
-                          },
-                          {
-                            "type": "object",
-                            "required": [
-                              "kind",
                               "workspace",
                               "cwd"
                             ],
@@ -27452,11 +27201,6 @@
                             "const": "workspace_missing"
                           }
                         ]
-                      },
-                      "createdFromSessionId": {
-                        "type": "string",
-                        "minLength": 1,
-                        "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
                       }
                     },
                     "additionalProperties": false
@@ -27816,6 +27560,26 @@
                 "recoveryNotice": {
                   "type": "string",
                   "x-arcmind-maxUtf8Bytes": 65536
+                },
+                "scheduled": {
+                  "type": "object",
+                  "required": [
+                    "taskId",
+                    "runId"
+                  ],
+                  "properties": {
+                    "taskId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                    },
+                    "runId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                    }
+                  },
+                  "additionalProperties": false
                 }
               },
               "additionalProperties": false
@@ -29802,25 +29566,6 @@
                       "type": "object",
                       "required": [
                         "kind",
-                        "cwd"
-                      ],
-                      "properties": {
-                        "kind": {
-                          "type": "string",
-                          "const": "project"
-                        },
-                        "cwd": {
-                          "type": "string",
-                          "minLength": 1,
-                          "x-arcmind-maxUtf8Bytes": 32768
-                        }
-                      },
-                      "additionalProperties": false
-                    },
-                    {
-                      "type": "object",
-                      "required": [
-                        "kind",
                         "workspace",
                         "cwd"
                       ],
@@ -30052,11 +29797,6 @@
                       "const": "workspace_missing"
                     }
                   ]
-                },
-                "createdFromSessionId": {
-                  "type": "string",
-                  "minLength": 1,
-                  "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
                 }
               },
               "additionalProperties": false
@@ -32879,6 +32619,26 @@
                           "recoveryNotice": {
                             "type": "string",
                             "x-arcmind-maxUtf8Bytes": 65536
+                          },
+                          "scheduled": {
+                            "type": "object",
+                            "required": [
+                              "taskId",
+                              "runId"
+                            ],
+                            "properties": {
+                              "taskId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                              },
+                              "runId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                              }
+                            },
+                            "additionalProperties": false
                           }
                         },
                         "additionalProperties": false
@@ -34865,25 +34625,6 @@
                                 "type": "object",
                                 "required": [
                                   "kind",
-                                  "cwd"
-                                ],
-                                "properties": {
-                                  "kind": {
-                                    "type": "string",
-                                    "const": "project"
-                                  },
-                                  "cwd": {
-                                    "type": "string",
-                                    "minLength": 1,
-                                    "x-arcmind-maxUtf8Bytes": 32768
-                                  }
-                                },
-                                "additionalProperties": false
-                              },
-                              {
-                                "type": "object",
-                                "required": [
-                                  "kind",
                                   "workspace",
                                   "cwd"
                                 ],
@@ -35115,11 +34856,6 @@
                                 "const": "workspace_missing"
                               }
                             ]
-                          },
-                          "createdFromSessionId": {
-                            "type": "string",
-                            "minLength": 1,
-                            "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
                           }
                         },
                         "additionalProperties": false
@@ -35928,6 +35664,26 @@
             "recoveryNotice": {
               "type": "string",
               "x-arcmind-maxUtf8Bytes": 65536
+            },
+            "scheduled": {
+              "type": "object",
+              "required": [
+                "taskId",
+                "runId"
+              ],
+              "properties": {
+                "taskId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                },
+                "runId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                }
+              },
+              "additionalProperties": false
             }
           },
           "additionalProperties": false
@@ -37266,6 +37022,26 @@
         "recoveryNotice": {
           "type": "string",
           "x-arcmind-maxUtf8Bytes": 65536
+        },
+        "scheduled": {
+          "type": "object",
+          "required": [
+            "taskId",
+            "runId"
+          ],
+          "properties": {
+            "taskId": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+            },
+            "runId": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+            }
+          },
+          "additionalProperties": false
         }
       },
       "additionalProperties": false

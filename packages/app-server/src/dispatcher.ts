@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type { ClientRpcRequest } from "@arcmind/app-protocol";
-import type { ScheduleCreateTarget, ScheduleManager } from "@arcmind/coding-agent";
+import { resolveScheduleCreateTarget, type ScheduleCreateTarget, type ScheduleManager } from "@arcmind/coding-agent";
 import type { DurableSessionMutation, PreparedSessionMutation } from "./durable-mutation.ts";
 import type { InteractionBroker, InteractionPeer } from "./interactions.ts";
 import { scheduleRunView, scheduleTaskView } from "./schedule-projection.ts";
@@ -69,22 +69,19 @@ export class Dispatcher {
 		this.scheduleManager = scheduleManager;
 	}
 
-	private scheduleTarget(sourceSessionId?: string): {
-		target: ScheduleCreateTarget;
-		createdFromSessionId?: string;
-	} {
+	private scheduleTarget(sourceSessionId?: string): { target: ScheduleCreateTarget } {
 		if (!sourceSessionId) return { target: { kind: "general", workspace: "task" } };
 		const ref = this.catalog.get(sourceSessionId);
 		if (ref.scheduled || ref.summary.archived || ref.summary.state === "corrupt" || !ref.summary.cwd) {
 			throw new AppServerError("NOT_FOUND", { sessionId: sourceSessionId });
 		}
-		const target: ScheduleCreateTarget =
-			ref.summary.mode === "code"
-				? { kind: "project", cwd: ref.summary.cwd }
-				: ref.summary.cwdOrigin === "user-selected"
-					? { kind: "general", workspace: "fixed", cwd: ref.summary.cwd }
-					: { kind: "general", workspace: "task" };
-		return { target, createdFromSessionId: sourceSessionId };
+		const target = resolveScheduleCreateTarget({
+			mode: ref.summary.mode,
+			cwdOrigin: ref.summary.cwdOrigin,
+			cwd: ref.summary.cwd,
+		});
+		if (!target) throw new AppServerError("INVALID_REQUEST", { sessionId: sourceSessionId });
+		return { target };
 	}
 
 	private async scheduleSnapshot(cursor: number) {

@@ -30,7 +30,7 @@ function task(id: string): ScheduleTask {
 		instruction: `Run ${id}`,
 		schedule: { kind: "daily", time: "09:00" },
 		timezone: "Asia/Shanghai",
-		target: { kind: "project", cwd: tempDir() },
+		target: { kind: "general", workspace: "fixed", cwd: tempDir() },
 		status: "active",
 		createdAt: "2026-07-26T00:00:00Z",
 		updatedAt: "2026-07-26T00:00:00Z",
@@ -67,6 +67,18 @@ afterEach(() => {
 });
 
 describe("schedule store", () => {
+	it("rejects removed Code targets and source-session fields", async () => {
+		for (const legacy of [
+			{ ...task("legacy-project"), target: { kind: "project", cwd: tempDir() } },
+			{ ...task("legacy-source"), createdFromSessionId: "source-session" },
+		]) {
+			const store = ScheduleStore.open(tempDir());
+			await expect(
+				store.mutate((draft) => draft.tasks.push(legacy as unknown as ScheduleTask)),
+			).rejects.toMatchObject({ code: "STORE_CORRUPT" });
+		}
+	});
+
 	it("keeps unbounded run history out of the bounded task index", async () => {
 		const agentDir = tempDir();
 		const store = ScheduleStore.open(agentDir);
@@ -110,7 +122,7 @@ describe("schedule store", () => {
 		expect(store.getRun(taskValue.id, queued.id).status).toBe("failed");
 	});
 
-	it("never removes a project directory or a forged schedule workspace", () => {
+	it("never removes a fixed directory or a forged schedule workspace", () => {
 		const agentDir = tempDir();
 		const project = tempDir();
 		expect(removeOwnedScheduleWorkspace(agentDir, "task-1", project)).toBe(false);

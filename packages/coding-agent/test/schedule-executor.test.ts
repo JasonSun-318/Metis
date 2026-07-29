@@ -39,16 +39,17 @@ function tempWorkspace(): string {
 	return realpathSync(workspace);
 }
 
-function claim(cwd: string, runId: string, project = false): ScheduleRunClaim {
+function claim(cwd: string, runId: string, fixed = false): ScheduleRunClaim {
 	return {
 		taskId: "task-executor",
 		runId,
+		sessionId: `session-${runId}`,
 		scheduledFor: "2026-07-26T00:00:00Z",
 		snapshot: {
 			instruction: "生成日报",
 			schedule: { kind: "daily", time: "09:00" },
 			timezone: "Asia/Shanghai",
-			target: project ? { kind: "project", cwd } : { kind: "general", workspace: "task", cwd },
+			target: { kind: "general", workspace: fixed ? "fixed" : "task", cwd },
 		},
 	};
 }
@@ -113,7 +114,7 @@ afterEach(() => {
 });
 
 describe("scheduled run executor", () => {
-	it("creates a fresh hidden session with only the saved instruction", async () => {
+	it("creates a fresh visible Chat session with only the saved instruction", async () => {
 		const cwd = tempWorkspace();
 		const agentDir = join(cwd, ".agent");
 		const executor = createScheduledRunExecutor({ agentDir });
@@ -121,11 +122,8 @@ describe("scheduled run executor", () => {
 		const second = await executor(claim(cwd, "run-second"), new AbortController().signal);
 		expect(first.sessionId).not.toBe(second.sessionId);
 		for (const result of [first, second]) {
-			expect(relative(agentDir, result.sessionFile).split(sep).slice(0, 3)).toEqual([
-				"schedule-runs",
-				"task-executor",
-				"sessions",
-			]);
+			const normalRoot = getDefaultSessionDir(cwd, agentDir);
+			expect(relative(normalRoot, result.sessionFile).startsWith(`..${sep}`)).toBe(false);
 			const session = SessionManager.openReadOnly(result.sessionFile);
 			expect(session.getHeader()?.scheduled).toEqual({ taskId: "task-executor", runId: result.runId });
 			expect(session.getHeader()?.mode).toBe("chat");
@@ -146,7 +144,17 @@ describe("scheduled run executor", () => {
 			{ text: "生成日报", options: { expandPromptTemplates: false, source: "rpc" } },
 			{ text: "生成日报", options: { expandPromptTemplates: false, source: "rpc" } },
 		]);
-		expect(await SessionManager.list(cwd, getDefaultSessionDir(cwd, agentDir))).toEqual([]);
+		expect(
+			(await SessionManager.list(cwd, getDefaultSessionDir(cwd, agentDir))).map(({ id, scheduled }) => ({
+				id,
+				scheduled,
+			})),
+		).toEqual(
+			expect.arrayContaining([
+				{ id: first.sessionId, scheduled: { taskId: "task-executor", runId: "run-first" } },
+				{ id: second.sessionId, scheduled: { taskId: "task-executor", runId: "run-second" } },
+			]),
+		);
 	});
 
 	it("derives mode and excludes extensions, skills, schedule, MCP, and subagents", async () => {
@@ -158,7 +166,7 @@ describe("scheduled run executor", () => {
 		);
 		const options = mocks.sessionOptions[0] as Record<string, unknown>;
 		expect(SessionManager.openReadOnly(result.sessionFile).getHeader()).toMatchObject({
-			mode: "code",
+			mode: "chat",
 			cwdOrigin: "user-selected",
 		});
 		expect(options.additionalSystemPrompt).toBe(SCHEDULE_EXECUTION_PROMPT);
@@ -198,7 +206,7 @@ describe("scheduled run executor", () => {
 			message: "Scheduled task model execution did not complete successfully",
 			executionSession: {
 				sessionId: expect.any(String),
-				sessionFile: expect.stringContaining("schedule-runs/task-executor/sessions"),
+				sessionFile: expect.stringContaining(`${sep}sessions${sep}`),
 			},
 		});
 

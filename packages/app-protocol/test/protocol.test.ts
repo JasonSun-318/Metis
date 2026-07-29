@@ -99,7 +99,7 @@ const scheduleTask = {
 	instruction: "生成日报",
 	schedule: { kind: "daily", time: "09:00" },
 	timezone: "Asia/Shanghai",
-	target: { kind: "project", cwd: "/tmp/arcmind-project" },
+	target: { kind: "general", workspace: "fixed", cwd: "/tmp/arcmind-project" },
 	status: "active",
 	createdAt: "2026-07-26T00:00:00.000Z",
 	updatedAt: "2026-07-26T00:00:00.000Z",
@@ -122,7 +122,7 @@ const scheduleRun = {
 		instruction: "生成日报",
 		schedule: { kind: "daily", time: "09:00" },
 		timezone: "Asia/Shanghai",
-		target: { kind: "project", cwd: "/tmp/arcmind-project" },
+		target: { kind: "general", workspace: "fixed", cwd: "/tmp/arcmind-project" },
 	},
 } as const;
 
@@ -392,6 +392,22 @@ describe("exact limits", () => {
 		};
 		response.result.run.sessionFile = "/internal/session.jsonl";
 		expect(() => validateResponseFor("client", makeClientRequest(method, params), response)).toThrow(
+			ProtocolValidationError,
+		);
+
+		const [createMethod, createParams, createResult] = scheduleCases.find(([name]) => name === "schedule/create")!;
+		const oldTarget = { jsonrpc: "2.0", id: "old-target", result: structuredClone(createResult) } as {
+			result: { task: Record<string, unknown> };
+		};
+		oldTarget.result.task.target = { kind: "project", cwd: "/tmp/arcmind-project" };
+		expect(() => validateResponseFor("client", makeClientRequest(createMethod, createParams), oldTarget)).toThrow(
+			ProtocolValidationError,
+		);
+		const oldSource = { jsonrpc: "2.0", id: "old-source", result: structuredClone(createResult) } as {
+			result: { task: Record<string, unknown> };
+		};
+		oldSource.result.task.createdFromSessionId = SESSION_ID;
+		expect(() => validateResponseFor("client", makeClientRequest(createMethod, createParams), oldSource)).toThrow(
 			ProtocolValidationError,
 		);
 	});

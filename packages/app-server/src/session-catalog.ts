@@ -15,7 +15,6 @@ import {
 	CURRENT_SESSION_VERSION,
 	getDefaultSessionDir,
 	getOwnedManagedWorkspace,
-	getScheduleSessionDir,
 	moveSessionFileWithLease,
 	removeOwnedManagedWorkspace,
 	resolveNewSessionWorkspace,
@@ -266,7 +265,7 @@ export class SessionCatalog {
 			...activeFiles.map((path) => this.scanOne(path, false)),
 			...archivedFiles.map((path) => this.scanOne(path, true)),
 		]);
-		const ordinary = scanned.filter((item) => !item.header?.scheduled);
+		const ordinary = scanned;
 		const idCounts = new Map<string, number>();
 		for (const item of ordinary) {
 			if (item.header) idCounts.set(item.header.id, (idCounts.get(item.header.id) ?? 0) + 1);
@@ -289,6 +288,7 @@ export class SessionCatalog {
 							updatedAt: item.updatedAt,
 							state: "idle" as const,
 							archived: item.archived,
+							...(item.header.scheduled ? { scheduled: item.header.scheduled } : {}),
 						}
 					: corruptSummary(sessionId, item);
 			next.set(sessionId, {
@@ -307,12 +307,8 @@ export class SessionCatalog {
 		const sessionFile = run.sessionFile;
 		await this.mutate(async () => {
 			try {
-				const expectedRoot = await realpath(getScheduleSessionDir(this.agentDir, run.taskId));
-				const expectedMode = run.snapshot.target.kind === "project" ? "code" : "chat";
-				const expectedCwdOrigin =
-					run.snapshot.target.kind === "general" && run.snapshot.target.workspace === "task"
-						? "managed"
-						: "user-selected";
+				const expectedRoot = await realpath(getDefaultSessionDir(run.snapshot.target.cwd, this.agentDir));
+				const expectedCwdOrigin = run.snapshot.target.workspace === "task" ? "managed" : "user-selected";
 				const path = resolve(sessionFile);
 				const canonicalPath = await realpath(path);
 				if (!isInside(expectedRoot, canonicalPath)) throw new Error("Session is outside its task directory");
@@ -321,7 +317,7 @@ export class SessionCatalog {
 					header.id !== sessionId ||
 					header.scheduled?.taskId !== run.taskId ||
 					header.scheduled.runId !== run.id ||
-					header.mode !== expectedMode ||
+					header.mode !== "chat" ||
 					header.cwdOrigin !== expectedCwdOrigin ||
 					header.cwd !== run.snapshot.target.cwd
 				) {
@@ -343,6 +339,7 @@ export class SessionCatalog {
 						updatedAt,
 						state: "idle",
 						archived: false,
+						scheduled: header.scheduled,
 					},
 				});
 				this.claimedSessionIds.add(sessionId);
@@ -388,7 +385,6 @@ export class SessionCatalog {
 
 	list(input: ClientParams<"session/list">): ClientResult<"session/list"> {
 		const sessions = [...this.sessions.values()]
-			.filter((ref) => !ref.scheduled)
 			.map((ref) => ref.summary)
 			.filter((summary) => input.includeArchived === true || !summary.archived)
 			.sort(

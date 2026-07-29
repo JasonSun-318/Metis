@@ -26,6 +26,7 @@ import {
 	hasTrustRequiringProjectResources,
 	importSessionAttachments,
 	installScheduleHost,
+	isScheduleSessionEligible,
 	ProjectTrustStore,
 	reduceRuntimeJournal,
 	SCHEDULE_MAIN_PROMPT,
@@ -994,6 +995,8 @@ export class AgentSessionRuntimeHost implements SessionRuntimeHost {
 				throw new Error("Legacy Chat subagents are cleanup-only and cannot start a runtime");
 			if (child && (!childModel || !services.modelRegistry.hasConfiguredAuth(childModel)))
 				throw new Error(`Child model is unavailable: ${child.model.provider}/${child.model.modelId}`);
+			const scheduleEligible =
+				!child && this.options.scheduleManager !== undefined && isScheduleSessionEligible(options.sessionManager);
 			const result = await createAgentSessionFromServices({
 				services,
 				sessionManager: options.sessionManager,
@@ -1008,14 +1011,14 @@ export class AgentSessionRuntimeHost implements SessionRuntimeHost {
 							includeAutoMemory: false,
 							permissionModeCeiling: options.permissionModeCeiling,
 						}
-					: this.options.scheduleManager
+					: scheduleEligible
 						? { additionalSystemPrompt: SCHEDULE_MAIN_PROMPT }
 						: {}),
 			});
-			if (!child && this.options.scheduleManager) {
+			if (scheduleEligible) {
 				installScheduleHost({
 					session: result.session,
-					manager: this.options.scheduleManager,
+					manager: this.options.scheduleManager!,
 					timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
 				});
 			}

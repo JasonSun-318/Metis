@@ -96,9 +96,9 @@ import { parseCommandArgs } from "../../core/prompt-templates.ts";
 import { BUILT_IN_PROVIDER_DISPLAY_NAMES } from "../../core/provider-display-names.ts";
 import type { ResourceDiagnostic } from "../../core/resource-loader.ts";
 import type { ScheduleManager } from "../../core/schedules/manager.ts";
-import { getScheduleSessionDir } from "../../core/schedules/paths.ts";
 import { validateScheduleInputSpec } from "../../core/schedules/time.ts";
-import type { ScheduleCreateTarget, ScheduleInputSpec, ScheduleRun, ScheduleTask } from "../../core/schedules/types.ts";
+import { resolveScheduleCreateTarget } from "../../core/schedules/tool.ts";
+import type { ScheduleInputSpec, ScheduleRun, ScheduleTask } from "../../core/schedules/types.ts";
 import {
 	formatSessionAttachment,
 	formatSessionAttachmentDisplayText,
@@ -109,7 +109,12 @@ import {
 	type SessionAttachment,
 } from "../../core/session-attachments.ts";
 import { formatMissingSessionCwdPrompt, MissingSessionCwdError } from "../../core/session-cwd.ts";
-import { type SessionEntry, SessionManager, sessionEntryToContextMessages } from "../../core/session-manager.ts";
+import {
+	getDefaultSessionDir,
+	type SessionEntry,
+	SessionManager,
+	sessionEntryToContextMessages,
+} from "../../core/session-manager.ts";
 import type {
 	McpHttpServerSettings,
 	McpServerSettings,
@@ -291,7 +296,9 @@ function formatScheduleRunReason(reason: NonNullable<ScheduleRun["reason"]>): st
 	}
 }
 
-function scheduleMessageText(message: AssistantMessage): string {
+type ScheduleDisplayMessage = Extract<AgentMessage, { role: "user" | "assistant" }>;
+
+function scheduleMessageText(message: ScheduleDisplayMessage): string {
 	if (typeof message.content === "string") return message.content;
 	return message.content
 		.filter((item): item is Extract<(typeof message.content)[number], { type: "text" }> => item.type === "text")
@@ -5158,6 +5165,10 @@ export class InteractiveMode {
 					renameSession: async (sessionFilePath: string, nextName: string | undefined) => {
 						const next = (nextName ?? "").trim();
 						if (!next) return;
+						if (SessionManager.isScheduledSession(sessionFilePath)) {
+							this.showWarning("Scheduled execution sessions are read-only");
+							return;
+						}
 						const currentPath = this.sessionManager.getSessionFile();
 						if (currentPath && canonicalizePath(currentPath) === canonicalizePath(sessionFilePath)) {
 							this.sessionManager.appendSessionInfo(next);
@@ -5188,6 +5199,21 @@ export class InteractiveMode {
 	): Promise<{ cancelled: boolean }> {
 		this.clearStatusIndicator();
 		try {
+			if (SessionManager.isScheduledSession(sessionPath)) {
+				const readOnly = SessionManager.openReadOnly(sessionPath);
+				const messages = readOnly.getBranch().flatMap(sessionEntryToContextMessages);
+				const instruction = messages.find(
+					(message): message is Extract<AgentMessage, { role: "user" }> => message.role === "user",
+				);
+				const answer = messages
+					.filter((message): message is AssistantMessage => message.role === "assistant")
+					.at(-1);
+				await this.showExtensionSelector(
+					`Scheduled execution\nTask instructions: ${instruction ? scheduleMessageText(instruction) : "Unavailable"}\n\nResult:\n${answer ? scheduleMessageText(answer) : "No result"}`,
+					[],
+				);
+				return { cancelled: false };
+			}
 			const result = await this.runtimeHost.switchSession(sessionPath, {
 				withSession: options?.withSession,
 				projectTrustContextFactory: (cwd) => this.createProjectTrustContext(cwd),
@@ -5808,15 +5834,6 @@ export class InteractiveMode {
 		this.ui.requestRender();
 	}
 
-	private scheduleTarget(): ScheduleCreateTarget {
-		if (this.sessionManager.getMode() === "code") {
-			return { kind: "project", cwd: this.sessionManager.getCwd() };
-		}
-		return this.sessionManager.getCwdOrigin() === "user-selected"
-			? { kind: "general", workspace: "fixed", cwd: this.sessionManager.getCwd() }
-			: { kind: "general", workspace: "task" };
-	}
-
 	private async askScheduleValue(title: string, pattern: RegExp, hint: string): Promise<string | undefined> {
 		while (true) {
 			const value = (await this.showExtensionInput(`${title}\n${hint}`))?.trim();
@@ -5911,12 +5928,21 @@ export class InteractiveMode {
 		const instruction = (await this.showExtensionEditor("Task instructions"))?.trim();
 		if (!instruction) return;
 		const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+		const target = resolveScheduleCreateTarget({
+			mode: this.sessionManager.getMode(),
+			cwdOrigin: this.sessionManager.getCwdOrigin(),
+			cwd: this.sessionManager.getCwd(),
+		});
+		if (!target) {
+			this.showWarning("Scheduled tasks are only available in Chat mode");
+			return;
+		}
 		const confirmation = await this.showExtensionSelector(
 			`Create task\nInstructions: ${instruction}\nSchedule: ${formatScheduleSpec(
 				schedule.kind === "interval"
 					? { ...schedule, startAt: `${schedule.startDate} ${schedule.startTime}` }
 					: schedule,
-			)}\nTime zone: ${timezone}`,
+			)}\nTime zone: ${timezone}\nExecution directory: ${target.workspace === "fixed" ? target.cwd : "task default directory"}`,
 			["Create"],
 		);
 		if (confirmation !== "Create") return;
@@ -5925,8 +5951,7 @@ export class InteractiveMode {
 			instruction,
 			schedule,
 			timezone,
-			target: this.scheduleTarget(),
-			createdFromSessionId: this.sessionManager.getSessionId(),
+			target,
 		});
 		this.showStatus(`Created scheduled task “${task.title}”. Next run: ${task.nextRunAt ?? "none"}`);
 	}
@@ -5941,7 +5966,7 @@ export class InteractiveMode {
 		if (run.sessionFile) {
 			try {
 				const sessionFile = fs.realpathSync(run.sessionFile);
-				const sessionRoot = fs.realpathSync(getScheduleSessionDir(manager.agentDir, task.id));
+				const sessionRoot = fs.realpathSync(getDefaultSessionDir(task.target.cwd, manager.agentDir));
 				if (!isPathInside(sessionRoot, sessionFile))
 					throw new Error("Scheduled session is outside its task directory");
 				const session = SessionManager.openReadOnly(sessionFile);
@@ -6023,7 +6048,7 @@ export class InteractiveMode {
 				this.showStatus(`Scheduled task “${task.title}” was queued to run`);
 			} else if (action === "Delete") {
 				const confirmed = await this.showExtensionSelector(
-					`Delete “${task.title}”?\nThis removes all execution history, hidden sessions, and the task-owned directory. It does not delete the project or a user-selected directory.`,
+					`Delete “${task.title}”?\nThis removes all execution history, execution sessions, and the task-owned directory. It does not delete a user-selected directory.`,
 					["Delete"],
 				);
 				if (confirmed === "Delete") {
@@ -6084,6 +6109,10 @@ export class InteractiveMode {
 
 	private async handleScheduleCommand(): Promise<void> {
 		if (this.guardSessionMutation()) return;
+		if (this.sessionManager.getMode() !== "chat") {
+			this.showWarning("Scheduled tasks are only available in Chat mode");
+			return;
+		}
 		const manager = this.options.scheduleManager;
 		if (!manager) {
 			this.showWarning("Scheduled tasks are not enabled in this process");

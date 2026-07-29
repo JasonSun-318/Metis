@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ScheduleManager } from "../src/core/schedules/manager.ts";
 import { ScheduleStore } from "../src/core/schedules/store.ts";
 import { ScheduleError, type ScheduleRun } from "../src/core/schedules/types.ts";
-import { SessionManager } from "../src/core/session-manager.ts";
+import { getDefaultSessionDir, SessionManager } from "../src/core/session-manager.ts";
 
 const roots: string[] = [];
 const fixedNow = () => new Date("2026-07-26T00:00:00Z");
@@ -73,7 +73,7 @@ function deferredExecutor() {
 			const entry = pending[index];
 			entry.resolve({
 				runId: entry.claim.runId,
-				sessionId: `session-${entry.claim.runId}`,
+				sessionId: entry.claim.sessionId,
 				sessionFile: join(tempDir(), `${entry.claim.runId}.jsonl`),
 				result: "ok",
 			});
@@ -173,7 +173,7 @@ describe("schedule manager", () => {
 			instruction: "once",
 			schedule: { kind: "once", date: "2026-07-26", time: "08:01" },
 			timezone: "Asia/Shanghai",
-			target: { kind: "project", cwd: project },
+			target: { kind: "general", workspace: "fixed", cwd: project },
 		});
 		await ScheduleStore.open(agentDir).mutate((draft) => {
 			const index = draft.tasks.findIndex(({ id }) => id === task.id);
@@ -225,6 +225,42 @@ describe("schedule manager", () => {
 		});
 		await manager.runNow(fixed.id, "run-fixed");
 		await manager.delete(fixed.id);
+		expect(existsSync(fixedCwd)).toBe(true);
+	});
+
+	it("deletes a run session created before an interrupted executor returned its file", async () => {
+		const agentDir = tempDir();
+		const fixedCwd = tempDir();
+		const executor = deferredExecutor();
+		const manager = ScheduleManager.create({ agentDir, now: fixedNow, execute: executor.run });
+		const task = await manager.create({
+			id: "018f0000-0000-7000-8000-000000000021",
+			instruction: "interrupted",
+			schedule: { kind: "daily", time: "09:00" },
+			timezone: "Asia/Shanghai",
+			target: { kind: "general", workspace: "fixed", cwd: fixedCwd },
+		});
+		await manager.start();
+		const runId = "018f0000-0000-7000-8000-000000000022";
+		await manager.runNow(task.id, runId);
+		await eventually(() => expect(executor.pending).toHaveLength(1));
+
+		const run = await manager.getRun(task.id, runId);
+		expect(run.sessionId).toBe(executor.pending[0].claim.sessionId);
+		if (!run.sessionId) throw new Error("running schedule did not reserve a session id");
+		const session = SessionManager.create(task.target.cwd, getDefaultSessionDir(task.target.cwd, agentDir), {
+			id: run.sessionId,
+			mode: "chat",
+			cwdOrigin: "user-selected",
+			scheduled: { taskId: task.id, runId },
+		});
+		const sessionFile = session.getSessionFile()!;
+		session.close();
+
+		await manager.stop();
+		expect(await manager.getRun(task.id, runId)).not.toHaveProperty("sessionFile");
+		await manager.delete(task.id);
+		expect(existsSync(sessionFile)).toBe(false);
 		expect(existsSync(fixedCwd)).toBe(true);
 	});
 

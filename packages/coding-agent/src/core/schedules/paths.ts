@@ -16,10 +16,6 @@ export function getScheduleRunDir(agentDir: string, taskId: string): string {
 	return join(getScheduleRunsRoot(agentDir), taskId);
 }
 
-export function getScheduleSessionDir(agentDir: string, taskId: string): string {
-	return join(getScheduleRunDir(agentDir, taskId), "sessions");
-}
-
 export function getScheduleRunPath(agentDir: string, taskId: string, sequence: number, runId: string): string {
 	assertValidSessionId(taskId);
 	assertValidSessionId(runId);
@@ -48,15 +44,6 @@ export function ensureScheduleRunDirectory(agentDir: string, taskId: string): st
 	if (!existsSync(expected)) return createExactOwnedDirectory(root, taskId);
 	const owned = getExactOwnedDirectory(root, taskId, expected);
 	if (!owned) throw new Error("Schedule run directory is not an exact owned directory");
-	return owned;
-}
-
-export function ensureScheduleSessionDirectory(agentDir: string, taskId: string): string {
-	const runDir = ensureScheduleRunDirectory(agentDir, taskId);
-	const expected = getScheduleSessionDir(agentDir, taskId);
-	if (!existsSync(expected)) return createExactOwnedDirectory(runDir, "sessions");
-	const owned = getExactOwnedDirectory(runDir, "sessions", expected);
-	if (!owned) throw new Error("Schedule session directory is not an exact owned directory");
 	return owned;
 }
 

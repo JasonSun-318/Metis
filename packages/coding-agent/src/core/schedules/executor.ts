@@ -1,10 +1,8 @@
 import { lstatSync, realpathSync } from "node:fs";
 import { createAgentSessionFromServices, createAgentSessionServices } from "../agent-session-services.ts";
-import { createSessionId } from "../session-id.ts";
-import { SessionManager } from "../session-manager.ts";
+import { getDefaultSessionDir, SessionManager } from "../session-manager.ts";
 import { createUnattendedExecutionProfile, UNATTENDED_TOOL_NAMES } from "../unattended-execution.ts";
 import { createWorkspaceSandbox, WorkspaceSandboxError } from "../workspace-sandbox.ts";
-import { ensureScheduleSessionDirectory } from "./paths.ts";
 import { ScheduleError, type ScheduleExecutionResult, type ScheduleRunClaim } from "./types.ts";
 
 export const SCHEDULE_EXECUTION_PROMPT =
@@ -40,12 +38,8 @@ export function createScheduledRunExecutor(options: {
 			);
 		}
 
-		const sessionId = createSessionId();
-		const mode = claim.snapshot.target.kind === "project" ? "code" : "chat";
-		const cwdOrigin =
-			claim.snapshot.target.kind === "general" && claim.snapshot.target.workspace === "task"
-				? "managed"
-				: "user-selected";
+		const sessionId = claim.sessionId;
+		const cwdOrigin = claim.snapshot.target.workspace === "task" ? "managed" : "user-selected";
 		let sessionManager: SessionManager | undefined;
 		let services: Awaited<ReturnType<typeof createAgentSessionServices>> | undefined;
 		let created: Awaited<ReturnType<typeof createAgentSessionFromServices>> | undefined;
@@ -53,9 +47,9 @@ export function createScheduledRunExecutor(options: {
 		let executionResult: ScheduleExecutionResult | undefined;
 		let executionError: unknown;
 		try {
-			sessionManager = SessionManager.create(cwd, ensureScheduleSessionDirectory(options.agentDir, claim.taskId), {
+			sessionManager = SessionManager.create(cwd, getDefaultSessionDir(cwd, options.agentDir), {
 				id: sessionId,
-				mode,
+				mode: "chat",
 				cwdOrigin,
 				permissionMode: "ask",
 				scheduled: { taskId: claim.taskId, runId: claim.runId },

@@ -13,7 +13,6 @@ function scheduleView(schedule: ScheduleSpec): ScheduleTaskView["schedule"] {
 }
 
 function targetView(target: ScheduleTarget): ScheduleTaskView["target"] {
-	if (target.kind === "project") return { kind: "project", cwd: target.cwd };
 	return target.workspace === "fixed"
 		? { kind: "general", workspace: "fixed", cwd: target.cwd }
 		: { kind: "general", workspace: "task" };
@@ -51,7 +50,6 @@ export function scheduleTaskView(task: ScheduleTask): ScheduleTaskView {
 		unreadCount: task.unreadCount,
 		...(task.lastRun ? { lastRun: runSummaryView(task.lastRun) } : {}),
 		...(task.pauseReason ? { pauseReason: task.pauseReason } : {}),
-		...(task.createdFromSessionId ? { createdFromSessionId: task.createdFromSessionId } : {}),
 	};
 }
 
