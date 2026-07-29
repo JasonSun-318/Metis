@@ -480,6 +480,90 @@ describe("exact limits", () => {
 		expect(() => validateResponseFor("client", request, response)).toThrow(ProtocolValidationError);
 	});
 
+	it("keeps project deletion requests and results strict and fixed-size", () => {
+		const revision = "a".repeat(64);
+		const preview = makeClientRequest("project/deletePreview", { mode: "chat", cwd: "/canonical/project" });
+		const deletion = makeClientRequest("project/delete", {
+			requestId: "00000000-0000-4000-8000-000000000001",
+			mode: "chat",
+			cwd: "/canonical/project",
+			expectedRevision: revision,
+		});
+		expect(validateClientRequest(preview)).toEqual(preview);
+		expect(validateClientRequest(deletion)).toEqual(deletion);
+
+		const invalidRequests = [
+			makeClientRequest("project/deletePreview", { mode: "chat", cwd: "/canonical/project", extra: true }),
+			makeClientRequest("project/deletePreview", { mode: "chat", cwd: "" }),
+			makeClientRequest("project/deletePreview", { mode: "chat", cwd: "a".repeat(MAX_PATH_UTF8_BYTES + 1) }),
+			makeClientRequest("project/deletePreview", { mode: "cowork", cwd: "/canonical/project" }),
+			makeClientRequest("project/delete", {
+				requestId: "not-a-uuid",
+				mode: "chat",
+				cwd: "/canonical/project",
+				expectedRevision: revision,
+			}),
+			makeClientRequest("project/delete", {
+				requestId: "00000000-0000-4000-8000-000000000001",
+				mode: "chat",
+				cwd: "/canonical/project",
+				expectedRevision: "g".repeat(64),
+			}),
+			makeClientRequest("project/delete", {
+				requestId: "00000000-0000-4000-8000-000000000001",
+				mode: "chat",
+				cwd: "/canonical/project",
+				expectedRevision: "a".repeat(63),
+			}),
+		];
+		for (const request of invalidRequests) {
+			expect(() => validateClientRequest(request)).toThrow(ProtocolValidationError);
+		}
+
+		const previewResult = (extra: Record<string, unknown> = {}) => ({
+			jsonrpc: "2.0",
+			id: "limit-test",
+			result: {
+				mode: "chat",
+				cwd: "/canonical/project",
+				sessionCount: 1,
+				blockingScheduleCount: 0,
+				revision,
+				...extra,
+			},
+		});
+		expect(() => validateResponseFor("client", preview, previewResult())).not.toThrow();
+		for (const result of [
+			previewResult({ sessionCount: -1 }),
+			previewResult({ sessionCount: 100_001 }),
+			previewResult({ sessionCount: Number.MAX_SAFE_INTEGER + 1 }),
+			previewResult({ blockingScheduleCount: -1 }),
+			previewResult({ blockingScheduleCount: 100_001 }),
+			previewResult({ mode: "cowork" }),
+			previewResult({ cwd: "" }),
+			previewResult({ revision: "g".repeat(64) }),
+			previewResult({ sessionIds: [SESSION_ID] }),
+			previewResult({ paths: ["/private/session.jsonl"] }),
+		]) {
+			expect(() => validateResponseFor("client", preview, result)).toThrow(ProtocolValidationError);
+		}
+
+		const deleteResult = {
+			jsonrpc: "2.0",
+			id: "limit-test",
+			result: { mode: "chat", cwd: "/canonical/project", deletedSessionCount: 1 },
+		};
+		expect(() => validateResponseFor("client", deletion, deleteResult)).not.toThrow();
+		for (const deletedSessionCount of [-1, 100_001, Number.MAX_SAFE_INTEGER + 1]) {
+			const invalid = structuredClone(deleteResult);
+			invalid.result.deletedSessionCount = deletedSessionCount;
+			expect(() => validateResponseFor("client", deletion, invalid)).toThrow(ProtocolValidationError);
+		}
+		const leaked = structuredClone(deleteResult) as typeof deleteResult & { result: { sessionIds: string[] } };
+		leaked.result.sessionIds = [SESSION_ID];
+		expect(() => validateResponseFor("client", deletion, leaked)).toThrow(ProtocolValidationError);
+	});
+
 	it("accepts bounded local file attachments on turns", () => {
 		const request = makeClientRequest("turn/start", {
 			sessionId: SESSION_ID,

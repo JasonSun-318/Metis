@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://arcmind.dev/schemas/app-server-v6.json",
-  "title": "ArcMind App-Server Protocol v6",
+  "$id": "https://arcmind.dev/schemas/app-server-v7.json",
+  "title": "ArcMind App-Server Protocol v7",
   "$ref": "#/$defs/AppProtocolEnvelope",
   "$defs": {
     "AppProtocolEnvelope": {
@@ -195,6 +195,122 @@
                       "additionalProperties": false
                     }
                   ]
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "jsonrpc",
+                "id",
+                "method",
+                "params"
+              ],
+              "properties": {
+                "jsonrpc": {
+                  "type": "string",
+                  "const": "2.0"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "x-arcmind-maxUtf16Units": 128
+                },
+                "method": {
+                  "type": "string",
+                  "const": "project/deletePreview"
+                },
+                "params": {
+                  "type": "object",
+                  "required": [
+                    "mode",
+                    "cwd"
+                  ],
+                  "properties": {
+                    "mode": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "const": "chat"
+                        },
+                        {
+                          "type": "string",
+                          "const": "code"
+                        }
+                      ]
+                    },
+                    "cwd": {
+                      "type": "string",
+                      "minLength": 1,
+                      "x-arcmind-maxUtf8Bytes": 32768
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "jsonrpc",
+                "id",
+                "method",
+                "params"
+              ],
+              "properties": {
+                "jsonrpc": {
+                  "type": "string",
+                  "const": "2.0"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "x-arcmind-maxUtf16Units": 128
+                },
+                "method": {
+                  "type": "string",
+                  "const": "project/delete"
+                },
+                "params": {
+                  "type": "object",
+                  "required": [
+                    "requestId",
+                    "mode",
+                    "cwd",
+                    "expectedRevision"
+                  ],
+                  "properties": {
+                    "requestId": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "mode": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "const": "chat"
+                        },
+                        {
+                          "type": "string",
+                          "const": "code"
+                        }
+                      ]
+                    },
+                    "cwd": {
+                      "type": "string",
+                      "minLength": 1,
+                      "x-arcmind-maxUtf8Bytes": 32768
+                    },
+                    "expectedRevision": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    }
+                  },
+                  "additionalProperties": false
                 }
               },
               "additionalProperties": false
@@ -5030,7 +5146,7 @@
                   "properties": {
                     "protocolVersion": {
                       "type": "number",
-                      "const": 6
+                      "const": 7
                     },
                     "server": {
                       "type": "object",
@@ -5305,6 +5421,125 @@
                         "additionalProperties": false
                       },
                       "maxItems": 256
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "jsonrpc",
+                "id",
+                "result"
+              ],
+              "properties": {
+                "jsonrpc": {
+                  "type": "string",
+                  "const": "2.0"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "x-arcmind-maxUtf16Units": 128
+                },
+                "result": {
+                  "type": "object",
+                  "required": [
+                    "mode",
+                    "cwd",
+                    "sessionCount",
+                    "blockingScheduleCount",
+                    "revision"
+                  ],
+                  "properties": {
+                    "mode": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "const": "chat"
+                        },
+                        {
+                          "type": "string",
+                          "const": "code"
+                        }
+                      ]
+                    },
+                    "cwd": {
+                      "type": "string",
+                      "minLength": 1,
+                      "x-arcmind-maxUtf8Bytes": 32768
+                    },
+                    "sessionCount": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 100000
+                    },
+                    "blockingScheduleCount": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 100000
+                    },
+                    "revision": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "jsonrpc",
+                "id",
+                "result"
+              ],
+              "properties": {
+                "jsonrpc": {
+                  "type": "string",
+                  "const": "2.0"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "x-arcmind-maxUtf16Units": 128
+                },
+                "result": {
+                  "type": "object",
+                  "required": [
+                    "mode",
+                    "cwd",
+                    "deletedSessionCount"
+                  ],
+                  "properties": {
+                    "mode": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "const": "chat"
+                        },
+                        {
+                          "type": "string",
+                          "const": "code"
+                        }
+                      ]
+                    },
+                    "cwd": {
+                      "type": "string",
+                      "minLength": 1,
+                      "x-arcmind-maxUtf8Bytes": 32768
+                    },
+                    "deletedSessionCount": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 100000
                     }
                   },
                   "additionalProperties": false
@@ -14652,6 +14887,122 @@
             },
             "method": {
               "type": "string",
+              "const": "project/deletePreview"
+            },
+            "params": {
+              "type": "object",
+              "required": [
+                "mode",
+                "cwd"
+              ],
+              "properties": {
+                "mode": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "const": "chat"
+                    },
+                    {
+                      "type": "string",
+                      "const": "code"
+                    }
+                  ]
+                },
+                "cwd": {
+                  "type": "string",
+                  "minLength": 1,
+                  "x-arcmind-maxUtf8Bytes": 32768
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "type": "string",
+              "const": "2.0"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "x-arcmind-maxUtf16Units": 128
+            },
+            "method": {
+              "type": "string",
+              "const": "project/delete"
+            },
+            "params": {
+              "type": "object",
+              "required": [
+                "requestId",
+                "mode",
+                "cwd",
+                "expectedRevision"
+              ],
+              "properties": {
+                "requestId": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "mode": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "const": "chat"
+                    },
+                    {
+                      "type": "string",
+                      "const": "code"
+                    }
+                  ]
+                },
+                "cwd": {
+                  "type": "string",
+                  "minLength": 1,
+                  "x-arcmind-maxUtf8Bytes": 32768
+                },
+                "expectedRevision": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "type": "string",
+              "const": "2.0"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "x-arcmind-maxUtf16Units": 128
+            },
+            "method": {
+              "type": "string",
               "const": "session/create"
             },
             "params": {
@@ -16457,7 +16808,7 @@
               "properties": {
                 "protocolVersion": {
                   "type": "number",
-                  "const": 6
+                  "const": 7
                 },
                 "server": {
                   "type": "object",
@@ -16732,6 +17083,125 @@
                     "additionalProperties": false
                   },
                   "maxItems": 256
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "jsonrpc",
+            "id",
+            "result"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "type": "string",
+              "const": "2.0"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "x-arcmind-maxUtf16Units": 128
+            },
+            "result": {
+              "type": "object",
+              "required": [
+                "mode",
+                "cwd",
+                "sessionCount",
+                "blockingScheduleCount",
+                "revision"
+              ],
+              "properties": {
+                "mode": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "const": "chat"
+                    },
+                    {
+                      "type": "string",
+                      "const": "code"
+                    }
+                  ]
+                },
+                "cwd": {
+                  "type": "string",
+                  "minLength": 1,
+                  "x-arcmind-maxUtf8Bytes": 32768
+                },
+                "sessionCount": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 100000
+                },
+                "blockingScheduleCount": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 100000
+                },
+                "revision": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "jsonrpc",
+            "id",
+            "result"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "type": "string",
+              "const": "2.0"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "x-arcmind-maxUtf16Units": 128
+            },
+            "result": {
+              "type": "object",
+              "required": [
+                "mode",
+                "cwd",
+                "deletedSessionCount"
+              ],
+              "properties": {
+                "mode": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "const": "chat"
+                    },
+                    {
+                      "type": "string",
+                      "const": "code"
+                    }
+                  ]
+                },
+                "cwd": {
+                  "type": "string",
+                  "minLength": 1,
+                  "x-arcmind-maxUtf8Bytes": 32768
+                },
+                "deletedSessionCount": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 100000
                 }
               },
               "additionalProperties": false

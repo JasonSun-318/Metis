@@ -7,7 +7,7 @@
 			"id": "client-1",
 			"method": "initialize",
 			"params": {
-				"protocolVersion": 6,
+				"protocolVersion": 7,
 				"client": { "name": "ArcMind Desktop", "version": "0.80.6" },
 				"capabilities": ["interaction.v1", "session.cursor.v1"]
 			}
@@ -21,6 +21,31 @@
 			"id": "client-skills",
 			"method": "skill/list",
 			"params": { "cwd": null }
+		}
+	},
+	{
+		"direction": "client",
+		"method": "project/deletePreview",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "project-preview",
+			"method": "project/deletePreview",
+			"params": { "mode": "chat", "cwd": "/tmp/arcmind-project" }
+		}
+	},
+	{
+		"direction": "client",
+		"method": "project/delete",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "project-delete",
+			"method": "project/delete",
+			"params": {
+				"requestId": "00000000-0000-4000-8000-000000000001",
+				"mode": "chat",
+				"cwd": "/tmp/arcmind-project",
+				"expectedRevision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+			}
 		}
 	},
 	{

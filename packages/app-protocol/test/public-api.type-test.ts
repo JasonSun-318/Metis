@@ -1,4 +1,6 @@
 import type {
+	ClientParams,
+	ClientResult,
 	ConnectionEventsParams,
 	InteractionResponseInput,
 	ItemView,
@@ -7,6 +9,25 @@ import type {
 	SkillSummaryView,
 	TurnView,
 } from "@arcmind/app-protocol";
+
+const projectDelete = {
+	requestId: "00000000-0000-4000-8000-000000000001",
+	mode: "chat",
+	cwd: "/tmp/project",
+	expectedRevision: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+} satisfies ClientParams<"project/delete">;
+const projectDeletePreview = {
+	mode: "chat",
+	cwd: "/tmp/project",
+	sessionCount: 1,
+	blockingScheduleCount: 0,
+	revision: projectDelete.expectedRevision,
+} satisfies ClientResult<"project/deletePreview">;
+const projectDeleteResult = {
+	mode: "chat",
+	cwd: "/tmp/project",
+	deletedSessionCount: 1,
+} satisfies ClientResult<"project/delete">;
 
 const session = {
 	sessionId: "11111111-1111-4111-8111-111111111111",
@@ -55,3 +76,6 @@ const interactionResponse: InteractionResponseInput = {
 void events;
 void interactionResponse;
 void skill;
+void projectDelete;
+void projectDeletePreview;
+void projectDeleteResult;

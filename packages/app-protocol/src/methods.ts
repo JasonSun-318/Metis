@@ -13,6 +13,7 @@ import {
 	PromptTextSchema,
 	PublicTextSchema,
 	SessionIdSchema,
+	Sha256Schema,
 	StrictObject,
 	Utf8String,
 	UuidSchema,
@@ -86,6 +87,30 @@ export const SkillListParamsSchema = Type.Union([
 
 export const SkillListResultSchema = StrictObject({
 	skills: Type.Array(SkillSummaryViewSchema, { maxItems: 256 }),
+});
+
+export const ProjectRevisionSchema = Sha256Schema;
+export const ProjectDeletePreviewParamsSchema = StrictObject({
+	mode: AgentModeSchema,
+	cwd: PathSchema,
+});
+export const ProjectDeletePreviewResultSchema = StrictObject({
+	mode: AgentModeSchema,
+	cwd: PathSchema,
+	sessionCount: Type.Integer({ minimum: 0, maximum: 100_000 }),
+	blockingScheduleCount: Type.Integer({ minimum: 0, maximum: 100_000 }),
+	revision: ProjectRevisionSchema,
+});
+export const ProjectDeleteParamsSchema = StrictObject({
+	requestId: UuidSchema,
+	mode: AgentModeSchema,
+	cwd: PathSchema,
+	expectedRevision: ProjectRevisionSchema,
+});
+export const ProjectDeleteResultSchema = StrictObject({
+	mode: AgentModeSchema,
+	cwd: PathSchema,
+	deletedSessionCount: Type.Integer({ minimum: 0, maximum: 100_000 }),
 });
 
 export const SessionCreateParamsSchema = StrictObject({
@@ -291,6 +316,8 @@ export const ClientRequestMethods = {
 	initialize: method(InitializeParamsSchema, InitializeResultSchema),
 	"session/list": method(SessionListParamsSchema, SessionListResultSchema),
 	"skill/list": method(SkillListParamsSchema, SkillListResultSchema),
+	"project/deletePreview": method(ProjectDeletePreviewParamsSchema, ProjectDeletePreviewResultSchema),
+	"project/delete": method(ProjectDeleteParamsSchema, ProjectDeleteResultSchema),
 	"session/create": method(SessionCreateParamsSchema, SessionCreateResultSchema),
 	"session/open": method(SessionRefParamsSchema, SessionOpenResultSchema),
 	"session/readItems": method(SessionReadItemsParamsSchema, SessionReadItemsResultSchema),

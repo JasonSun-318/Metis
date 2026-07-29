@@ -6,7 +6,7 @@
 			"jsonrpc": "2.0",
 			"id": "client-1",
 			"result": {
-				"protocolVersion": 6,
+				"protocolVersion": 7,
 				"server": {
 					"name": "arcmind-app-server",
 					"version": "0.80.6"
@@ -16,6 +16,34 @@
 					"interaction.v1",
 					"session.cursor.v1"
 				]
+			}
+		}
+	},
+	{
+		"direction": "client",
+		"method": "project/deletePreview",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "project-preview",
+			"result": {
+				"mode": "chat",
+				"cwd": "/tmp/arcmind-project",
+				"sessionCount": 3,
+				"blockingScheduleCount": 1,
+				"revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+			}
+		}
+	},
+	{
+		"direction": "client",
+		"method": "project/delete",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "project-delete",
+			"result": {
+				"mode": "chat",
+				"cwd": "/tmp/arcmind-project",
+				"deletedSessionCount": 3
 			}
 		}
 	},
