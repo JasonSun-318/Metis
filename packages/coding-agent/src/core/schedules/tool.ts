@@ -55,6 +55,12 @@ const TaskId = Type.String({
 	maxLength: 255,
 });
 
+const TaskCursor = Type.String({
+	description: "上一页返回的 nextAfterTaskId。",
+	minLength: 1,
+	maxLength: 255,
+});
+
 export const ScheduleToolInputSchema = Type.Union([
 	StrictObject({
 		action: Type.Literal("create"),
@@ -65,7 +71,7 @@ export const ScheduleToolInputSchema = Type.Union([
 		}),
 		schedule: ScheduleInput,
 	}),
-	StrictObject({ action: Type.Literal("list") }),
+	StrictObject({ action: Type.Literal("list"), afterTaskId: Type.Optional(TaskCursor) }),
 	StrictObject({ action: Type.Literal("get"), taskId: TaskId }),
 	StrictObject({
 		action: Type.Literal("update"),
@@ -205,7 +211,7 @@ export function installScheduleHost(input: {
 						return output({ taskId: task.id, status: task.status, nextRunAt: task.nextRunAt });
 					}
 					case "list": {
-						const page = await input.manager.list({ limit: 100 });
+						const page = await input.manager.list({ afterTaskId: params.afterTaskId, limit: 100 });
 						return output({ tasks: page.tasks.map(listTaskView), nextAfterTaskId: page.nextAfterTaskId });
 					}
 					case "get":

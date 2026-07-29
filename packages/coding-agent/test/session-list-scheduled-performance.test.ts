@@ -1,17 +1,32 @@
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const opened = vi.hoisted(() => [] as string[]);
+const readBytes = vi.hoisted(() => new Map<string, number>());
 
 vi.mock("fs/promises", async (importOriginal) => {
 	const actual = await importOriginal<typeof import("fs/promises")>();
 	return {
 		...actual,
 		open: async (...args: Parameters<typeof actual.open>) => {
-			opened.push(String(args[0]));
-			return actual.open(...args);
+			const path = String(args[0]);
+			opened.push(path);
+			const handle = await actual.open(...args);
+			return new Proxy(handle, {
+				get(target, property) {
+					if (property === "read") {
+						return async (...readArgs: Parameters<typeof target.read>) => {
+							const result = await target.read(...readArgs);
+							readBytes.set(path, (readBytes.get(path) ?? 0) + result.bytesRead);
+							return result;
+						};
+					}
+					const value = Reflect.get(target, property, target);
+					return typeof value === "function" ? value.bind(target) : value;
+				},
+			});
 		},
 	};
 });
@@ -24,6 +39,7 @@ afterEach(() => {
 	if (root) rmSync(root, { recursive: true, force: true });
 	root = undefined;
 	opened.length = 0;
+	readBytes.clear();
 });
 
 describe("scheduled session catalog performance", () => {
@@ -41,14 +57,21 @@ describe("scheduled session catalog performance", () => {
 		});
 		const ordinaryPath = ordinary.getSessionFile()!;
 		const scheduledPath = scheduled.getSessionFile()!;
+		scheduled.appendMessage({ role: "user", content: "Generate report", timestamp: Date.now() });
+		scheduled.appendMessage({ role: "user", content: "x".repeat(2 * 1024 * 1024), timestamp: Date.now() });
 		ordinary.close();
 		scheduled.close();
 		opened.length = 0;
 
-		expect((await SessionManager.list(cwd, sessionDir)).map(({ id }) => id)).toEqual([
-			"scheduled-session",
-			"ordinary-session",
-		]);
+		const sessions = await SessionManager.list(cwd, sessionDir);
+		expect(sessions.map(({ id }) => id)).toEqual(["scheduled-session", "ordinary-session"]);
+		const scheduledInfo = sessions.find(({ id }) => id === "scheduled-session")!;
+		expect(scheduledInfo).toMatchObject({
+			messageCount: 0,
+			firstMessage: "Generate report",
+			allMessagesText: "Generate report",
+		});
+		expect(readBytes.get(scheduledPath)).toBeLessThan(statSync(scheduledPath).size);
 		expect(opened.sort()).toEqual([ordinaryPath, scheduledPath].sort());
 	});
 });

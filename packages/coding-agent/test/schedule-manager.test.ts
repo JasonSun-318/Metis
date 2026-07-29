@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ScheduleManager } from "../src/core/schedules/manager.ts";
 import { ScheduleStore } from "../src/core/schedules/store.ts";
-import { ScheduleError, type ScheduleRun } from "../src/core/schedules/types.ts";
+import { ScheduleError, type ScheduleEvent, type ScheduleRun } from "../src/core/schedules/types.ts";
 import { getDefaultSessionDir, SessionManager } from "../src/core/session-manager.ts";
 
 const roots: string[] = [];
@@ -147,6 +147,49 @@ describe("schedule manager", () => {
 		]);
 		expect(second).toEqual(first);
 		expect((await firstHost.listRuns(task.id)).runs).toHaveLength(1);
+	});
+
+	it("returns promptly when deletion is delegated to another process leader", async () => {
+		const agentDir = tempDir();
+		const leader = ScheduleManager.create({ agentDir, now: fixedNow });
+		const task = await leader.create({
+			id: "task-follower-delete",
+			instruction: "delete me",
+			schedule: { kind: "daily", time: "09:00" },
+			timezone: "Asia/Shanghai",
+			target: { kind: "general", workspace: "task" },
+		});
+		const follower = ScheduleManager.create({ agentDir, now: fixedNow });
+		await leader.start();
+		await eventually(() =>
+			expect((leader as unknown as { leaderRelease?: () => Promise<void> }).leaderRelease).toBeTypeOf("function"),
+		);
+		await follower.start();
+		const events: ScheduleEvent[] = [];
+		follower.subscribe((event) => events.push(event));
+		try {
+			const deletion = follower.delete(task.id);
+			const outcome = await Promise.race([
+				deletion.then(
+					() => ({ code: "resolved" }),
+					(error: unknown) => error,
+				),
+				new Promise((resolvePromise) => setTimeout(() => resolvePromise({ code: "timeout" }), 150)),
+			]);
+
+			expect(outcome).toMatchObject({ code: "TASK_DELETING" });
+			expect((await follower.get(task.id)).status).toBe("deleting");
+			expect(events).toContainEqual(
+				expect.objectContaining({
+					type: "schedule/updated",
+					task: expect.objectContaining({ id: task.id, status: "deleting" }),
+				}),
+			);
+			await leader.delete(task.id);
+		} finally {
+			await follower.stop();
+			await leader.stop();
+		}
 	});
 
 	it("edits only future claims and pause leaves the active run untouched", async () => {

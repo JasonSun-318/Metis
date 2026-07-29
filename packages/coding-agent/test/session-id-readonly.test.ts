@@ -59,7 +59,7 @@ interface CliDirs {
 async function runCli(
 	args: string[] | ((dirs: CliDirs) => string[]),
 	setup?: (dirs: CliDirs) => void,
-): Promise<{ code: number | null; agentDir: string; stderr: string }> {
+): Promise<{ code: number | null; agentDir: string; stderr: string; stdout: string }> {
 	const tempRoot = createTempDir();
 	const dirs: CliDirs = {
 		agentDir: join(tempRoot, "agent"),
@@ -72,6 +72,7 @@ async function runCli(
 	const resolvedArgs = typeof args === "function" ? args(dirs) : args;
 
 	let stderr = "";
+	let stdout = "";
 	const code = await new Promise<number | null>((resolvePromise, reject) => {
 		const child = spawn(process.execPath, [cliPath, ...resolvedArgs], {
 			cwd: dirs.projectDir,
@@ -81,7 +82,10 @@ async function runCli(
 				ARCMIND_OFFLINE: "1",
 				TSX_TSCONFIG_PATH: resolve(__dirname, "../../../tsconfig.json"),
 			},
-			stdio: ["ignore", "ignore", "pipe"],
+			stdio: ["ignore", "pipe", "pipe"],
+		});
+		child.stdout.on("data", (chunk) => {
+			stdout += chunk.toString();
 		});
 		child.stderr.on("data", (chunk) => {
 			stderr += chunk.toString();
@@ -90,7 +94,7 @@ async function runCli(
 		child.on("close", resolvePromise);
 	});
 
-	return { code, agentDir: dirs.agentDir, stderr };
+	return { code, agentDir: dirs.agentDir, stderr, stdout };
 }
 
 function writeSession(sessionDir: string, cwd: string, id: string): void {
@@ -100,7 +104,102 @@ function writeSession(sessionDir: string, cwd: string, id: string): void {
 	);
 }
 
+function writeScheduledSession(sessionDir: string, cwd: string, id: string): void {
+	const timestamp = new Date().toISOString();
+	writeFileSync(
+		join(sessionDir, `${id}.jsonl`),
+		`${[
+			{
+				type: "session",
+				version: 11,
+				id,
+				timestamp,
+				cwd,
+				mode: "chat",
+				cwdOrigin: "user-selected",
+				permissionMode: "ask",
+				scheduled: { taskId: "scheduled-task", runId: "scheduled-run" },
+			},
+			{
+				type: "message",
+				id: "user-message",
+				parentId: null,
+				timestamp,
+				message: { role: "user", content: "Generate the daily report", timestamp: Date.now() },
+			},
+			{
+				type: "message",
+				id: "assistant-message",
+				parentId: "user-message",
+				timestamp,
+				message: {
+					role: "assistant",
+					content: [{ type: "text", text: "The daily report is ready" }],
+					api: "openai-completions",
+					provider: "openai",
+					model: "test",
+					usage: {
+						input: 1,
+						output: 1,
+						cacheRead: 0,
+						cacheWrite: 0,
+						totalTokens: 2,
+						cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+					},
+					stopReason: "stop",
+					timestamp: Date.now(),
+				},
+			},
+		]
+			.map((entry) => JSON.stringify(entry))
+			.join("\n")}\n`,
+	);
+}
+
 describe("--session-id read-only commands", () => {
+	it("prints a scheduled execution instead of opening it for mutation", async () => {
+		const result = await runCli(
+			(dirs) => ["--session-dir", dirs.sessionDir, "--session-id", "scheduled-session"],
+			(dirs) => {
+				mkdirSync(dirs.sessionDir, { recursive: true });
+				writeScheduledSession(dirs.sessionDir, dirs.projectDir, "scheduled-session");
+			},
+		);
+
+		expect(result.code).toBe(0);
+		expect(result.stdout).toContain("Generate the daily report");
+		expect(result.stdout).toContain("The daily report is ready");
+		expect(result.stderr).not.toContain("Scheduled sessions are read-only");
+	});
+
+	it("prints a scheduled execution selected by file path", async () => {
+		const result = await runCli(
+			(dirs) => ["--session", join(dirs.sessionDir, "scheduled-session.jsonl")],
+			(dirs) => {
+				mkdirSync(dirs.sessionDir, { recursive: true });
+				writeScheduledSession(dirs.sessionDir, dirs.projectDir, "scheduled-session");
+			},
+		);
+
+		expect(result.code).toBe(0);
+		expect(result.stdout).toContain("Generate the daily report");
+		expect(result.stdout).toContain("The daily report is ready");
+	});
+
+	it("rejects new messages for a scheduled execution", async () => {
+		const result = await runCli(
+			(dirs) => ["--session-dir", dirs.sessionDir, "--session-id", "scheduled-session", "-p", "run again"],
+			(dirs) => {
+				mkdirSync(dirs.sessionDir, { recursive: true });
+				writeScheduledSession(dirs.sessionDir, dirs.projectDir, "scheduled-session");
+			},
+		);
+
+		expect(result.code).toBe(1);
+		expect(result.stderr).toContain("Scheduled execution sessions are read-only and cannot accept new messages");
+		expect(result.stdout).not.toContain("The daily report is ready");
+	});
+
 	it("does not reserve a session for --help", async () => {
 		const result = await runCli(["--session-id", "read-only-help", "--help"]);
 

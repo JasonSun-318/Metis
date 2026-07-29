@@ -1,4 +1,4 @@
-export { createScheduledRunExecutor, SCHEDULE_EXECUTION_PROMPT } from "./executor.ts";
+export { createScheduledRunExecutor, readScheduledSessionView, SCHEDULE_EXECUTION_PROMPT } from "./executor.ts";
 export { ScheduleManager, type ScheduleManagerOptions } from "./manager.ts";
 export {
 	advancePastNow,

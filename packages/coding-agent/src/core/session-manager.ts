@@ -793,6 +793,7 @@ export interface SessionInfo {
 	scheduled?: { taskId: string; runId: string };
 	created: Date;
 	modified: Date;
+	/** Zero is a not-loaded sentinel when `scheduled` is present. */
 	messageCount: number;
 	firstMessage: string;
 	allMessagesText: string;
@@ -1954,6 +1955,7 @@ async function scanSessionCatalog(filePath: string): Promise<{ state: SessionCat
 		let position = 0;
 		let lineNumber = 1;
 		let bytesSinceYield = 0;
+		let scheduledSummaryComplete = false;
 		const readBuffer = Buffer.allocUnsafe(SESSION_READ_BUFFER_BYTES);
 
 		while (position < opened.size) {
@@ -1976,9 +1978,14 @@ async function scanSessionCatalog(filePath: string): Promise<{ state: SessionCat
 				pending.length = 0;
 				pendingBytes = 0;
 				lineNumber++;
+				if (state.header?.scheduled && state.firstMessage) {
+					scheduledSummaryComplete = true;
+					break;
+				}
 				segmentStart = lineEnd + 1;
 				lineEnd = chunk.indexOf(0x0a, segmentStart);
 			}
+			if (scheduledSummaryComplete) break;
 
 			const remainder = chunk.subarray(segmentStart);
 			if (remainder.byteLength > 0) {
@@ -2022,8 +2029,9 @@ async function buildSessionInfo(filePath: string): Promise<SessionInfo | null> {
 		const { state, mtime } = await scanSessionCatalog(filePath);
 		const header = state.header!;
 		const headerTime = new Date(header.timestamp).getTime();
-		const modified =
-			typeof state.lastActivityTime === "number" && state.lastActivityTime > 0
+		const modified = header.scheduled
+			? mtime
+			: typeof state.lastActivityTime === "number" && state.lastActivityTime > 0
 				? new Date(state.lastActivityTime)
 				: !Number.isNaN(headerTime)
 					? new Date(headerTime)
@@ -2038,9 +2046,11 @@ async function buildSessionInfo(filePath: string): Promise<SessionInfo | null> {
 			...(header.scheduled ? { scheduled: header.scheduled } : {}),
 			created: new Date(header.timestamp),
 			modified,
-			messageCount: state.messageCount,
+			// Scheduled sessions are immutable and list by their instruction; their
+			// complete transcript is loaded only when the user opens the result.
+			messageCount: header.scheduled ? 0 : state.messageCount,
 			firstMessage: state.firstMessage || "(no messages)",
-			allMessagesText: state.allMessages.join(" "),
+			allMessagesText: header.scheduled ? state.firstMessage : state.allMessages.join(" "),
 		};
 	} catch {
 		return null;

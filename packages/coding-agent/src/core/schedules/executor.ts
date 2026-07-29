@@ -1,12 +1,45 @@
 import { lstatSync, realpathSync } from "node:fs";
+import type { AgentMessage } from "@arcmind/agent-core";
 import { createAgentSessionFromServices, createAgentSessionServices } from "../agent-session-services.ts";
-import { getDefaultSessionDir, SessionManager } from "../session-manager.ts";
+import { getDefaultSessionDir, SessionManager, sessionEntryToContextMessages } from "../session-manager.ts";
 import { createUnattendedExecutionProfile, UNATTENDED_TOOL_NAMES } from "../unattended-execution.ts";
 import { createWorkspaceSandbox, WorkspaceSandboxError } from "../workspace-sandbox.ts";
 import { ScheduleError, type ScheduleExecutionResult, type ScheduleRunClaim } from "./types.ts";
 
 export const SCHEDULE_EXECUTION_PROMPT =
 	"你正在独立执行一个定时任务。请完成下面的任务，并在最终回复中清楚说明执行结果。不要假设你能看到创建任务时的对话。";
+
+type ScheduledDisplayMessage = Extract<AgentMessage, { role: "user" | "assistant" }>;
+
+function messageText(message: ScheduledDisplayMessage | undefined): string {
+	if (!message) return "";
+	if (typeof message.content === "string") return message.content;
+	return message.content
+		.filter((item): item is Extract<(typeof message.content)[number], { type: "text" }> => item.type === "text")
+		.map((item) => item.text)
+		.join("\n");
+}
+
+/** Read the immutable user instruction and final answer from a scheduled execution journal. */
+export function readScheduledSessionView(path: string): { instruction: string; result: string } {
+	const session = SessionManager.openReadOnly(path);
+	if (!session.getHeader()?.scheduled) throw new Error("Session is not a scheduled execution");
+	const messages = session.getBranch().flatMap(sessionEntryToContextMessages);
+	return {
+		instruction:
+			messageText(
+				messages.find((message): message is Extract<AgentMessage, { role: "user" }> => message.role === "user"),
+			) || "Unavailable",
+		result:
+			messageText(
+				messages
+					.filter(
+						(message): message is Extract<AgentMessage, { role: "assistant" }> => message.role === "assistant",
+					)
+					.at(-1),
+			) || "No result",
+	};
+}
 
 function assertWorkspace(cwd: string): string {
 	try {

@@ -5,6 +5,7 @@
  * createAgentSession() options. The SDK does the heavy lifting.
  */
 
+import { writeSync } from "node:fs";
 import { createInterface } from "node:readline";
 import { type ImageContent, modelsAreEqual } from "@arcmind/ai";
 import chalk from "chalk";
@@ -40,6 +41,7 @@ import {
 	createScheduledRunExecutor,
 	installScheduleHost,
 	isScheduleSessionEligible,
+	readScheduledSessionView,
 	SCHEDULE_MAIN_PROMPT,
 	ScheduleManager,
 } from "./core/schedules/index.ts";
@@ -301,8 +303,19 @@ function rejectCreationOverridesForExistingSession(parsed: Args): void {
 	process.exit(1);
 }
 
-function openSessionOrExit(path: string, sessionDir?: string): SessionManager {
+function openSessionOrExit(path: string, sessionDir: string | undefined, hasInitialInput: boolean): SessionManager {
 	try {
+		if (SessionManager.isScheduledSession(path)) {
+			if (hasInitialInput) {
+				throw new Error("Scheduled execution sessions are read-only and cannot accept new messages");
+			}
+			const view = readScheduledSessionView(path);
+			writeSync(
+				process.stdout.fd,
+				`Scheduled execution\nTask instructions: ${view.instruction}\n\nResult:\n${view.result}\n`,
+			);
+			process.exit(0);
+		}
 		return SessionManager.open(path, sessionDir);
 	} catch (error: unknown) {
 		const message = error instanceof Error ? error.message : String(error);
@@ -327,6 +340,7 @@ async function createSessionManager(
 	sessionDir: string | undefined,
 	settingsManager: SettingsManager,
 	agentDir: string,
+	hasInitialInput: boolean,
 ): Promise<SessionManager> {
 	if (parsed.noSession || parsed.help || parsed.listModels !== undefined) {
 		const ephemeralCwd = parsed.cwd
@@ -374,9 +388,12 @@ async function createSessionManager(
 		switch (resolved.type) {
 			case "path":
 			case "local":
-				return openSessionOrExit(resolved.path, sessionDir);
+				return openSessionOrExit(resolved.path, sessionDir, hasInitialInput);
 
 			case "global": {
+				if (SessionManager.isScheduledSession(resolved.path)) {
+					return openSessionOrExit(resolved.path, sessionDir, hasInitialInput);
+				}
 				console.log(chalk.yellow(`Session found in different project: ${resolved.cwd}`));
 				const shouldFork = await promptConfirm("Fork this session into current directory?");
 				if (!shouldFork) {
@@ -403,7 +420,7 @@ async function createSessionManager(
 				console.log(chalk.dim("No session selected"));
 				process.exit(0);
 			}
-			return SessionManager.open(selectedPath, sessionDir);
+			return openSessionOrExit(selectedPath, sessionDir, hasInitialInput);
 		} finally {
 			stopThemeWatcher();
 		}
@@ -417,7 +434,7 @@ async function createSessionManager(
 		const existingSession = await findSessionByExactId(parsed.sessionId, cwd, sessionDir);
 		if (existingSession) {
 			rejectCreationOverridesForExistingSession(parsed);
-			return SessionManager.open(existingSession.path, sessionDir);
+			return openSessionOrExit(existingSession.path, sessionDir, hasInitialInput);
 		}
 		console.error(
 			chalk.yellow(
@@ -681,6 +698,20 @@ export async function main(args: string[], options?: MainOptions) {
 	validateSessionIdFlags(parsed);
 	validateCreationOnlyFlags(parsed);
 
+	const readStdinBeforeSession =
+		appMode !== "rpc" &&
+		!parsed.help &&
+		parsed.listModels === undefined &&
+		(parsed.session !== undefined || parsed.sessionId !== undefined || parsed.resume === true);
+	let stdinContent: string | undefined;
+	if (readStdinBeforeSession) {
+		stdinContent = await readPipedStdin();
+		if (stdinContent !== undefined && appMode === "interactive") {
+			appMode = "print";
+		}
+		time("readPipedStdin");
+	}
+
 	// Run migrations (pass cwd for project-local migrations)
 	const { migratedAuthProviders: migratedProviders, deprecationWarnings } = runMigrations(cwd);
 	time("runMigrations");
@@ -705,7 +736,15 @@ export async function main(args: string[], options?: MainOptions) {
 		(parsed.sessionDir ? normalizePath(parsed.sessionDir) : undefined) ??
 		(envSessionDir ? expandTildePath(envSessionDir) : undefined) ??
 		startupSettingsManager.getSessionDir();
-	let sessionManager = await createSessionManager(parsed, cwd, sessionDir, startupSettingsManager, agentDir);
+	const hasInitialInput = parsed.messages.length > 0 || parsed.fileArgs.length > 0 || stdinContent !== undefined;
+	let sessionManager = await createSessionManager(
+		parsed,
+		cwd,
+		sessionDir,
+		startupSettingsManager,
+		agentDir,
+		hasInitialInput,
+	);
 	let runtimeOwnsSessionManager = false;
 	let scheduleManager: ScheduleManager | undefined;
 	try {
@@ -972,15 +1011,13 @@ export async function main(args: string[], options?: MainOptions) {
 				process.exit(0);
 			}
 
-			// Read piped stdin content (if any) - skip for RPC mode which uses stdin for JSON-RPC
-			let stdinContent: string | undefined;
-			if (appMode !== "rpc") {
+			if (appMode !== "rpc" && !readStdinBeforeSession) {
 				stdinContent = await readPipedStdin();
 				if (stdinContent !== undefined && appMode === "interactive") {
 					appMode = "print";
 				}
+				time("readPipedStdin");
 			}
-			time("readPipedStdin");
 
 			const { initialMessage, initialImages } = await prepareInitialMessage(parsed, stdinContent);
 			time("prepareInitialMessage");

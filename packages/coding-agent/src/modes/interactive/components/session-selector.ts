@@ -465,7 +465,7 @@ class SessionList implements Component, Focusable {
 
 			// Right side: message count and age
 			const age = formatSessionDate(session.modified);
-			const msgCount = String(session.messageCount);
+			const msgCount = session.scheduled ? "scheduled" : String(session.messageCount);
 			let rightPart = `${msgCount} ${age}`;
 			if (this.showCwd && session.cwd) {
 				rightPart = `${shortenPath(session.cwd)} ${rightPart}`;

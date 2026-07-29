@@ -486,6 +486,54 @@ describe("AppServer", () => {
 		);
 	});
 
+	it("rejects a scheduled session id before mutable create replay", async () => {
+		const server = await AppServer.create({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
+		const connection = server.connect();
+		await connection.handle(initialize());
+		const scheduled = SessionManager.create(projectDir, join(sessionsRoot, "scheduled"), {
+			id: REQUEST_C,
+			mode: "chat",
+			cwdOrigin: "user-selected",
+			scheduled: { taskId: REQUEST_A, runId: REQUEST_B },
+		});
+		scheduled.close();
+		await server.catalog.refresh();
+		expectError(
+			await connection.handle({
+				jsonrpc: "2.0",
+				id: "create-scheduled-collision",
+				method: "session/create",
+				params: { requestId: REQUEST_C, mode: "chat", cwd: projectDir },
+			}),
+			RPC_ERROR_CODES.REQUEST_ID_REUSED,
+		);
+	});
+
+	it("bounds catalog refresh concurrency", async () => {
+		const server = await AppServer.create({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
+		for (let index = 0; index < 64; index += 1) {
+			writeSession(sessionsRoot, `catalog-session-${index}`, projectDir);
+		}
+		type ScanOne = (path: string, archived: boolean) => Promise<unknown>;
+		const catalog = server.catalog as unknown as { scanOne: ScanOne };
+		const original = catalog.scanOne.bind(server.catalog);
+		let active = 0;
+		let maximum = 0;
+		catalog.scanOne = async (path, archived) => {
+			active += 1;
+			maximum = Math.max(maximum, active);
+			await new Promise((resolvePromise) => setImmediate(resolvePromise));
+			try {
+				return await original(path, archived);
+			} finally {
+				active -= 1;
+			}
+		};
+
+		await server.catalog.refresh();
+		expect(maximum).toBeLessThanOrEqual(32);
+	});
+
 	it("replays a completed create after its working directory is removed", async () => {
 		const firstServer = await AppServer.create({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
 		const first = firstServer.connect();

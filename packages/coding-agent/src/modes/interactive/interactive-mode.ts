@@ -95,6 +95,7 @@ import {
 import { parseCommandArgs } from "../../core/prompt-templates.ts";
 import { BUILT_IN_PROVIDER_DISPLAY_NAMES } from "../../core/provider-display-names.ts";
 import type { ResourceDiagnostic } from "../../core/resource-loader.ts";
+import { readScheduledSessionView } from "../../core/schedules/executor.ts";
 import type { ScheduleManager } from "../../core/schedules/manager.ts";
 import { validateScheduleInputSpec } from "../../core/schedules/time.ts";
 import { resolveScheduleCreateTarget } from "../../core/schedules/tool.ts";
@@ -5200,16 +5201,9 @@ export class InteractiveMode {
 		this.clearStatusIndicator();
 		try {
 			if (SessionManager.isScheduledSession(sessionPath)) {
-				const readOnly = SessionManager.openReadOnly(sessionPath);
-				const messages = readOnly.getBranch().flatMap(sessionEntryToContextMessages);
-				const instruction = messages.find(
-					(message): message is Extract<AgentMessage, { role: "user" }> => message.role === "user",
-				);
-				const answer = messages
-					.filter((message): message is AssistantMessage => message.role === "assistant")
-					.at(-1);
+				const view = readScheduledSessionView(sessionPath);
 				await this.showExtensionSelector(
-					`Scheduled execution\nTask instructions: ${instruction ? scheduleMessageText(instruction) : "Unavailable"}\n\nResult:\n${answer ? scheduleMessageText(answer) : "No result"}`,
+					`Scheduled execution\nTask instructions: ${view.instruction}\n\nResult:\n${view.result}`,
 					[],
 				);
 				return { cancelled: false };

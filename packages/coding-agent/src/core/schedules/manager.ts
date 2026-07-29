@@ -462,8 +462,9 @@ export class ScheduleManager {
 		);
 		if (!this.started || this.leaderRelease) await this.finishDelete(taskId);
 		else {
+			await this.drainEvents();
 			this.wakeLeader();
-			await this.waitForDeletion(taskId);
+			throw new ScheduleError("TASK_DELETING", "Scheduled task deletion is pending in the scheduler leader");
 		}
 		await this.drainEvents();
 		return { taskId, deleted: true };
@@ -1088,18 +1089,6 @@ export class ScheduleManager {
 		const matching = [...this.ownedRuns.values()].filter((run) => taskId === undefined || run.taskId === taskId);
 		for (const run of matching) run.controller.abort(reason);
 		await Promise.allSettled(matching.map(({ promise }) => promise));
-	}
-
-	private async waitForDeletion(taskId: string): Promise<void> {
-		while (true) {
-			try {
-				this.store.getTask(taskId);
-			} catch (error) {
-				if (error instanceof ScheduleError && error.code === "SCHEDULE_NOT_FOUND") return;
-				throw error;
-			}
-			await new Promise((resolvePromise) => setTimeout(resolvePromise, 50));
-		}
 	}
 
 	private async finishDelete(taskId: string): Promise<void> {

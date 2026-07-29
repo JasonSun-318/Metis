@@ -32,6 +32,7 @@ import { AppServerError, type SessionRef } from "./session-runtime-host.ts";
 const MAX_HEADER_BYTES = 64 * 1024;
 const DEFAULT_LIST_LIMIT = 50;
 const MAX_CATALOG_FILES = 100_000;
+const MAX_CONCURRENT_CATALOG_SCANS = 32;
 
 interface ScannedSession {
 	readonly key: string;
@@ -261,10 +262,21 @@ export class SessionCatalog {
 			collectJsonlFiles(this.sessionsRoot, true),
 			collectJsonlFiles(this.archiveRoot, false),
 		]);
-		const scanned = await Promise.all([
-			...activeFiles.map((path) => this.scanOne(path, false)),
-			...archivedFiles.map((path) => this.scanOne(path, true)),
-		]);
+		const candidates = [
+			...activeFiles.map((path) => ({ path, archived: false })),
+			...archivedFiles.map((path) => ({ path, archived: true })),
+		];
+		const scanned = new Array<ScannedSession>(candidates.length);
+		let nextCandidate = 0;
+		await Promise.all(
+			Array.from({ length: Math.min(MAX_CONCURRENT_CATALOG_SCANS, candidates.length) }, async () => {
+				while (nextCandidate < candidates.length) {
+					const index = nextCandidate++;
+					const candidate = candidates[index]!;
+					scanned[index] = await this.scanOne(candidate.path, candidate.archived);
+				}
+			}),
+		);
 		const ordinary = scanned;
 		const idCounts = new Map<string, number>();
 		for (const item of ordinary) {
@@ -420,6 +432,9 @@ export class SessionCatalog {
 				},
 			};
 			const existing = this.sessions.get(input.requestId);
+			if (existing?.scheduled) {
+				throw new AppServerError("REQUEST_ID_REUSED", { requestId: input.requestId });
+			}
 			if (existing) {
 				const manager = SessionManager.open(existing.path);
 				try {

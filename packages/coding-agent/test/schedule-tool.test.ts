@@ -136,6 +136,7 @@ describe("schedule host tool", () => {
 			}),
 		).toBe(true);
 		expect(Value.Check(ScheduleToolInputSchema, { action: "get", taskId: "task-created" })).toBe(true);
+		expect(Value.Check(ScheduleToolInputSchema, { action: "list", afterTaskId: "task-page-1" })).toBe(true);
 		expect(Value.Check(ScheduleToolInputSchema, { action: "get" })).toBe(false);
 		expect(
 			Value.Check(ScheduleToolInputSchema, {
@@ -268,7 +269,8 @@ describe("schedule host tool", () => {
 
 	it("returns machine-readable creation and latest-run status", async () => {
 		const host = fakeSession({ mode: "chat", cwdOrigin: "managed", cwd: "/managed" });
-		installScheduleHost({ session: host.session, manager: fakeManager(), timezone: "Asia/Shanghai" });
+		const manager = fakeManager();
+		installScheduleHost({ session: host.session, manager, timezone: "Asia/Shanghai" });
 		const created = await host.tool!.execute(
 			"create",
 			{ action: "create", instruction: "生成摘要", schedule: { kind: "daily", time: "09:00" } },
@@ -281,6 +283,14 @@ describe("schedule host tool", () => {
 			status: "active",
 			nextRunAt: "2026-07-27T01:00:00Z",
 		});
+		await host.tool!.execute(
+			"list",
+			{ action: "list", afterTaskId: "task-page-1" } as never,
+			undefined,
+			undefined,
+			{} as never,
+		);
+		expect(manager.list).toHaveBeenCalledWith({ afterTaskId: "task-page-1", limit: 100 });
 		const detail = await host.tool!.execute(
 			"get",
 			{ action: "get", taskId: "task-created" },
