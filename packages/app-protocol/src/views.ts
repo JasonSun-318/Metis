@@ -58,6 +58,7 @@ export const SessionSummarySchema = StrictObject({
 export const SkillSummaryViewSchema = StrictObject({
 	name: NameSchema,
 	description: PublicTextSchema,
+	source: Type.Optional(Type.Union([Type.Literal("system"), Type.Literal("user"), Type.Literal("project")])),
 });
 
 export const DurableImageRefViewSchema = StrictObject({
@@ -573,6 +574,7 @@ export type AgentMode = Static<typeof AgentModeSchema>;
 export type CwdOrigin = Static<typeof CwdOriginSchema>;
 export type SessionSummary = Static<typeof SessionSummarySchema>;
 export type SkillSummaryView = Static<typeof SkillSummaryViewSchema>;
+export type SkillSourceView = NonNullable<SkillSummaryView["source"]>;
 export type DurableImageRefView = Static<typeof DurableImageRefViewSchema>;
 export type ItemContentBlockView = Static<typeof ItemContentBlockViewSchema>;
 export type ItemView = Static<typeof ItemViewSchema>;

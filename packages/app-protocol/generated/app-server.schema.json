@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://arcmind.dev/schemas/app-server-v5.json",
-  "title": "ArcMind App-Server Protocol v5",
+  "$id": "https://arcmind.dev/schemas/app-server-v6.json",
+  "title": "ArcMind App-Server Protocol v6",
   "$ref": "#/$defs/AppProtocolEnvelope",
   "$defs": {
     "AppProtocolEnvelope": {
@@ -5030,7 +5030,7 @@
                   "properties": {
                     "protocolVersion": {
                       "type": "number",
-                      "const": 5
+                      "const": 6
                     },
                     "server": {
                       "type": "object",
@@ -5284,6 +5284,22 @@
                           "description": {
                             "type": "string",
                             "x-arcmind-maxUtf8Bytes": 65536
+                          },
+                          "source": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "const": "system"
+                              },
+                              {
+                                "type": "string",
+                                "const": "user"
+                              },
+                              {
+                                "type": "string",
+                                "const": "project"
+                              }
+                            ]
                           }
                         },
                         "additionalProperties": false
@@ -16441,7 +16457,7 @@
               "properties": {
                 "protocolVersion": {
                   "type": "number",
-                  "const": 5
+                  "const": 6
                 },
                 "server": {
                   "type": "object",
@@ -16695,6 +16711,22 @@
                       "description": {
                         "type": "string",
                         "x-arcmind-maxUtf8Bytes": 65536
+                      },
+                      "source": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "const": "system"
+                          },
+                          {
+                            "type": "string",
+                            "const": "user"
+                          },
+                          {
+                            "type": "string",
+                            "const": "project"
+                          }
+                        ]
                       }
                     },
                     "additionalProperties": false

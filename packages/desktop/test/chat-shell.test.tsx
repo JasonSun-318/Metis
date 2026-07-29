@@ -92,8 +92,9 @@ function createHarness(options: {
 		}),
 		listSkills: vi.fn().mockResolvedValue({
 			skills: [
-				{ name: "pdf", description: "Read and create PDF documents" },
-				{ name: "xlsx", description: "Read and create spreadsheets" },
+				{ name: "pdf", description: "Read and create PDF documents", source: "system" },
+				{ name: "xlsx", description: "Read and create spreadsheets", source: "user" },
+				{ name: "project-helper", description: "Inspect this project", source: "project" },
 			],
 		}),
 		selectProjectFolder: vi.fn().mockResolvedValue("/work/selected-project"),
@@ -480,7 +481,7 @@ describe("Chat desktop shell", () => {
 		await act(async () => add().click());
 		await act(async () => button(container.querySelector<HTMLElement>(".composer-add-menu")!, "Skills").click());
 		await act(async () => button(container.querySelector<HTMLElement>(".composer-skill-menu")!, "Manage skills").click());
-		expect(container.textContent).toContain("Skills are coming to Desktop.");
+		expect(container.textContent).toContain("Skills included with ArcMind");
 		await act(async () => root.unmount());
 	});
 
@@ -1029,7 +1030,7 @@ describe("Chat desktop shell", () => {
 
 		const backendCalls = vi.mocked(api.createSession).mock.calls.length + vi.mocked(api.openSession).mock.calls.length;
 		await act(async () => button(container, "Skills").click());
-		expect(container.textContent).toContain("Skills are coming to Desktop.");
+		expect(container.textContent).toContain("Skills included with ArcMind");
 		expect(vi.mocked(api.createSession).mock.calls.length + vi.mocked(api.openSession).mock.calls.length).toBe(backendCalls);
 
 		await act(async () => button(container, "Chat").click());

@@ -162,7 +162,7 @@ function initialize(id = "initialize") {
 		jsonrpc: "2.0" as const,
 		id,
 		method: "initialize" as const,
-		params: { protocolVersion: 5, client: { name: "test", version: "1" }, capabilities: [] },
+		params: { protocolVersion: 6, client: { name: "test", version: "1" }, capabilities: [] },
 	};
 }
 
@@ -234,7 +234,7 @@ describe("AppServer", () => {
 		);
 		const initialized = await connection.handle(initialize());
 		expect(initialized).toMatchObject({
-			result: { protocolVersion: 5, server: { name: "arcmind-app-server" }, serverEpoch: server.serverEpoch },
+			result: { protocolVersion: 6, server: { name: "arcmind-app-server" }, serverEpoch: server.serverEpoch },
 		});
 		expectError(await connection.handle(initialize("again")), RPC_ERROR_CODES.INVALID_REQUEST);
 	});
@@ -385,8 +385,12 @@ describe("AppServer", () => {
 			method: "skill/list",
 			params: { cwd: projectDir },
 		});
-		const trustedNames = (trusted as { result: ClientResult<"skill/list"> }).result.skills.map((skill) => skill.name);
+		const trustedSkills = (trusted as { result: ClientResult<"skill/list"> }).result.skills;
+		const trustedNames = trustedSkills.map((skill) => skill.name);
 		expect(trustedNames).toEqual(expect.arrayContaining(["global-skill", "project-skill"]));
+		expect(trustedSkills.find((skill) => skill.name === "global-skill")?.source).toBe("user");
+		expect(trustedSkills.find((skill) => skill.name === "project-skill")?.source).toBe("project");
+		expect(trustedSkills.find((skill) => skill.name === "pdf")?.source).toBe("system");
 	});
 
 	it("replays an identical mutation and rejects changed parameters", async () => {

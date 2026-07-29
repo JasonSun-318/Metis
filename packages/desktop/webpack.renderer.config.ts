@@ -18,6 +18,7 @@ const config: Configuration = {
 				},
 			},
 			{ test: /\.css$/u, use: [MiniCssExtractPlugin.loader, "css-loader"] },
+			{ test: /\.png$/u, type: "asset/resource" },
 		],
 	},
 	plugins: [new MiniCssExtractPlugin()],

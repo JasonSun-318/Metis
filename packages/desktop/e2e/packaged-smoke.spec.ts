@@ -30,10 +30,18 @@ test("packaged worker, WASM, trusted extension, and utility lifecycle stay funct
 
 	const tempRoot = await mkdtemp(path.join(tmpdir(), "arcmind-packaged-smoke-"));
 	const agentDir = path.join(tempRoot, "agent");
+	const homeDir = path.join(tempRoot, "home");
 	const projectDir = path.join(tempRoot, "project");
 	const extensionDir = path.join(projectDir, ".arcmind", "extensions");
+	const projectSkillDir = path.join(projectDir, ".arcmind", "skills", "packaged-project-skill");
 	const userDataDir = path.join(tempRoot, "electron");
-	await Promise.all([mkdir(agentDir), mkdir(extensionDir, { recursive: true }), mkdir(userDataDir)]);
+	await Promise.all([
+		mkdir(agentDir),
+		mkdir(homeDir),
+		mkdir(extensionDir, { recursive: true }),
+		mkdir(projectSkillDir, { recursive: true }),
+		mkdir(userDataDir),
+	]);
 
 	let providerRequests = 0;
 	const providerToolNames: string[][] = [];
@@ -124,6 +132,10 @@ test("packaged worker, WASM, trusted extension, and utility lifecycle stay funct
 }
 `,
 		),
+		writeFile(
+			path.join(projectSkillDir, "SKILL.md"),
+			"---\nname: packaged-project-skill\ndescription: Visible in the packaged Project catalog\n---\n",
+		),
 	]);
 
 	const debuggingPort = await reservePort();
@@ -134,9 +146,11 @@ test("packaged worker, WASM, trusted extension, and utility lifecycle stay funct
 			...process.env,
 			ALL_PROXY: "",
 			ARCMIND_CODING_AGENT_DIR: agentDir,
+			HOME: homeDir,
 			HTTP_PROXY: "",
 			HTTPS_PROXY: "",
 			NO_PROXY: "127.0.0.1,localhost",
+			USERPROFILE: homeDir,
 		},
 		stdio: ["ignore", "pipe", "pipe"],
 	});
@@ -151,6 +165,17 @@ test("packaged worker, WASM, trusted extension, and utility lifecycle stay funct
 		({ browser, page } = await connectToApp(debuggingPort));
 		phase = "verifying draft creation timing";
 		await waitForServerReady(page);
+		phase = "verifying packaged Skills catalog";
+		await page.getByRole("button", { name: "Skills", exact: true }).click();
+		await page.getByRole("button", { name: "System", exact: true }).click();
+		await expect(page.getByText("pdf", { exact: true })).toBeVisible();
+		await page.locator(".skills-breadcrumbs").getByRole("button", { name: "Skills", exact: true }).click();
+		await page.getByRole("button", { name: "User", exact: true }).click();
+		await expect(page.locator(".skills-empty-state img")).toBeVisible();
+		await expect(page.getByText("No user skills", { exact: true })).toBeVisible();
+		await page.getByRole("button", { name: "New task", exact: true }).click();
+
+		phase = "verifying draft creation timing";
 		const bridge = await page.evaluate(() => {
 			const api = (globalThis as unknown as { arcMind: ArcMindDesktopApi }).arcMind;
 			return {
@@ -189,6 +214,16 @@ test("packaged worker, WASM, trusted extension, and utility lifecycle stay funct
 		await expect(page.getByText("Worker and WASM returned 1x1", { exact: true })).toBeVisible();
 		await page.getByRole("button", { name: "Confirm" }).click();
 		await page.locator(`[data-active-session-id="${trustedSessionId}"]`).waitFor({ state: "visible", timeout: 15_000 });
+
+		phase = "verifying packaged Project Skill catalog";
+		await page.getByRole("button", { name: "Skills", exact: true }).click();
+		await page.getByRole("button", { name: "Project", exact: true }).click();
+		await page.locator(".skills-directory-list").getByRole("button", { name: "Chat", exact: true }).click();
+		await page.getByRole("button", { name: path.basename(projectDir), exact: true }).click();
+		await expect(page.getByText("packaged-project-skill", { exact: true })).toBeVisible();
+		await page.locator(".project-group").filter({ hasText: path.basename(projectDir) }).locator(".session-button").click();
+		await page.locator(`[data-active-session-id="${trustedSessionId}"]`).waitFor({ state: "visible", timeout: 15_000 });
+
 		const rootPid = app.pid;
 		if (!rootPid) throw new Error("Packaged app has no process id");
 		await expect.poll(() => appServerPid(rootPid)).not.toBeUndefined();

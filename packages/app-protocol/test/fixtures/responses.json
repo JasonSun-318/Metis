@@ -6,7 +6,7 @@
 			"jsonrpc": "2.0",
 			"id": "client-1",
 			"result": {
-				"protocolVersion": 5,
+				"protocolVersion": 6,
 				"server": {
 					"name": "arcmind-app-server",
 					"version": "0.80.6"

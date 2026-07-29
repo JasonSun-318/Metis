@@ -10,6 +10,7 @@ import { ModelSelector } from "./ModelSelector.tsx";
 import { NewTaskHome } from "./NewTaskHome.tsx";
 import { RecoveryBanner } from "./RecoveryBanner.tsx";
 import { type SidebarDestination, SessionSidebar } from "./SessionSidebar.tsx";
+import { SkillsPanel } from "./SkillsPanel.tsx";
 import { ThinkingSelector } from "./ThinkingSelector.tsx";
 import { Transcript } from "./Transcript.tsx";
 
@@ -529,11 +530,7 @@ export function App({ api, store }: AppProps) {
 					<div className="server-banner" role="status">App Server is recovering. Your saved session is safe.</div>
 				)}
 				{!bootstrapped ? null : destination === "skills" ? (
-					<section className="skills-panel">
-						<p className="eyebrow">ArcMind Desktop</p>
-						<h1>Skills</h1>
-						<p>Skills are coming to Desktop.</p>
-					</section>
+					<SkillsPanel api={api} serverReady={serverReady} state={state} />
 				) : newTaskOpen ? (
 					<NewTaskHome
 						busy={busy || !serverReady}

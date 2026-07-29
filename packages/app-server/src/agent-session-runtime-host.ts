@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { isAbsolute, relative, resolve, sep } from "node:path";
 import type {
 	ClientParams,
 	ClientResult,
@@ -8,6 +9,7 @@ import type {
 	ItemView,
 	SessionSnapshot,
 	SessionSummary,
+	SkillSourceView,
 	TurnView,
 } from "@arcmind/app-protocol";
 import {
@@ -23,6 +25,7 @@ import {
 	formatSessionAttachmentDisplayText,
 	formatSessionAttachments,
 	getProjectTrustOptions,
+	getSkillsDir,
 	hasTrustRequiringProjectResources,
 	importSessionAttachments,
 	installScheduleHost,
@@ -33,6 +36,7 @@ import {
 	type ScheduleManager,
 	SessionManager,
 	SettingsManager,
+	type Skill,
 	type SubagentSummary,
 } from "@arcmind/coding-agent";
 import type { CredentialCoordinator } from "./credential-coordinator.ts";
@@ -935,8 +939,28 @@ function toRuntimeImage(image: DurableImageRefView) {
 	return { type: "image_ref" as const, hash: image.hash, mimeType: image.mediaType, size: image.byteLength };
 }
 
-function publicSkills(skills: readonly { name: string; description: string }[]): ClientResult<"skill/list"> {
-	return { skills: skills.slice(0, 256).map(({ name, description }) => ({ name, description })) };
+function pathIsInside(root: string, target: string): boolean {
+	const relativePath = relative(resolve(root), resolve(target));
+	return (
+		relativePath === "" ||
+		(!isAbsolute(relativePath) && relativePath !== ".." && !relativePath.startsWith(`..${sep}`))
+	);
+}
+
+function publicSkillSource(skill: Skill): SkillSourceView | undefined {
+	if (pathIsInside(getSkillsDir(), skill.filePath)) return "system";
+	return skill.sourceInfo.scope === "user" || skill.sourceInfo.scope === "project"
+		? skill.sourceInfo.scope
+		: undefined;
+}
+
+function publicSkills(skills: readonly Skill[]): ClientResult<"skill/list"> {
+	return {
+		skills: skills.slice(0, 256).map((skill) => {
+			const source = publicSkillSource(skill);
+			return { name: skill.name, description: skill.description, ...(source ? { source } : {}) };
+		}),
+	};
 }
 
 export class AgentSessionRuntimeHost implements SessionRuntimeHost {

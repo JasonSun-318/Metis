@@ -469,6 +469,17 @@ describe("exact limits", () => {
 		).toThrow(ProtocolValidationError);
 	});
 
+	it("accepts public Skill sources and rejects unknown sources", () => {
+		const request = requestFor("client", "skill/list").envelope;
+		const response = structuredClone(responses.find((entry) => entry.method === "skill/list")!.envelope) as {
+			result: { skills: Array<{ name: string; description: string; source?: string }> };
+		};
+		response.result.skills[0]!.source = "system";
+		expect(() => validateResponseFor("client", request, response)).not.toThrow();
+		response.result.skills[0]!.source = "temporary";
+		expect(() => validateResponseFor("client", request, response)).toThrow(ProtocolValidationError);
+	});
+
 	it("accepts bounded local file attachments on turns", () => {
 		const request = makeClientRequest("turn/start", {
 			sessionId: SESSION_ID,

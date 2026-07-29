@@ -4,6 +4,7 @@ import type {
 	ItemView,
 	SessionSnapshot,
 	SessionSummary,
+	SkillSummaryView,
 	TurnView,
 } from "@arcmind/app-protocol";
 
@@ -20,6 +21,11 @@ const session = {
 
 const turns: TurnView[] = [];
 const items: ItemView[] = [];
+const skill = {
+	name: "pdf",
+	description: "Read PDF documents",
+	source: "system",
+} satisfies SkillSummaryView;
 const snapshot: SessionSnapshot = {
 	session,
 	turns,
@@ -48,3 +54,4 @@ const interactionResponse: InteractionResponseInput = {
 
 void events;
 void interactionResponse;
+void skill;
