@@ -12,6 +12,7 @@ import {
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import emptyStateImage from "../assets/skills-empty-state.png";
 import type { AppStoreSnapshot } from "../store/app-store.ts";
+import type { ProjectPreferenceMap } from "../store/project-preferences.ts";
 import type { ArcMindDesktopApi } from "../../shared/desktop-api.ts";
 import { buildSessionTree } from "./SessionSidebar.tsx";
 
@@ -20,7 +21,7 @@ type CatalogRoute =
 	| { readonly kind: "source"; readonly source: "system" | "user" }
 	| { readonly kind: "project-modes" }
 	| { readonly kind: "projects"; readonly mode: AgentMode }
-	| { readonly kind: "project-skills"; readonly mode: AgentMode; readonly cwd: string; readonly name: string };
+	| { readonly kind: "project-skills"; readonly mode: AgentMode; readonly cwd: string };
 
 type RequestState =
 	| { readonly status: "idle" | "loading" }
@@ -29,6 +30,7 @@ type RequestState =
 
 interface SkillsPanelProps {
 	readonly api: Pick<ArcMindDesktopApi, "listSkills">;
+	readonly preferences: ProjectPreferenceMap;
 	readonly serverReady: boolean;
 	readonly state: AppStoreSnapshot;
 }
@@ -85,23 +87,40 @@ function modeLabel(mode: AgentMode): string {
 	return mode === "chat" ? "Chat" : "Code";
 }
 
-export function SkillsPanel({ api, serverReady, state }: SkillsPanelProps) {
+export function SkillsPanel({ api, preferences, serverReady, state }: SkillsPanelProps) {
 	const [route, setRoute] = useState<CatalogRoute>({ kind: "root" });
 	const [requestState, setRequestState] = useState<RequestState>({ status: "idle" });
 	const [retry, setRetry] = useState(0);
 	const requestGeneration = useRef(0);
 	const activeSession = state.activeSessionId ? state.sessionsById.get(state.activeSessionId) : undefined;
+	const projectTree = useMemo(
+		() => route.kind === "projects" || route.kind === "project-skills"
+			? buildSessionTree(state, route.mode, preferences)
+			: null,
+		[preferences, route, state],
+	);
+	const projects = projectTree?.projects ?? [];
+	const selectedProject = route.kind === "project-skills"
+		? projects.find((project) => project.cwd === route.cwd)
+		: undefined;
+	const projectExists = selectedProject !== undefined;
 
 	const requestTarget = useMemo(() => {
 		if (route.kind === "source") {
 			return { input: { cwd: null } as const, source: route.source as SkillSourceView };
 		}
-		if (route.kind !== "project-skills") return null;
+		if (route.kind !== "project-skills" || !projectExists) return null;
 		const input = activeSession?.mode === route.mode && activeSession.cwd === route.cwd
 			? { sessionId: activeSession.sessionId }
 			: { cwd: route.cwd };
 		return { input, source: "project" as const };
-	}, [activeSession?.cwd, activeSession?.mode, activeSession?.sessionId, route]);
+	}, [activeSession?.cwd, activeSession?.mode, activeSession?.sessionId, projectExists, route]);
+
+	useEffect(() => {
+		if (route.kind === "project-skills" && !selectedProject) {
+			setRoute({ kind: "projects", mode: route.mode });
+		}
+	}, [route, selectedProject]);
 
 	useEffect(() => {
 		const generation = ++requestGeneration.current;
@@ -136,11 +155,6 @@ export function SkillsPanel({ api, serverReady, state }: SkillsPanelProps) {
 		};
 	}, [api, requestTarget, retry, serverReady]);
 
-	const projects = useMemo(
-		() => route.kind === "projects" ? buildSessionTree(state, route.mode).projects : [],
-		[route, state],
-	);
-
 	const breadcrumbs: Array<{ label: string; route?: CatalogRoute }> = [{ label: "Skills", route: { kind: "root" } }];
 	if (route.kind === "source") breadcrumbs.push({ label: route.source === "system" ? "System" : "User" });
 	if (route.kind === "project-modes") breadcrumbs.push({ label: "Project" });
@@ -151,7 +165,7 @@ export function SkillsPanel({ api, serverReady, state }: SkillsPanelProps) {
 		breadcrumbs.push(
 			{ label: "Project", route: { kind: "project-modes" } },
 			{ label: modeLabel(route.mode), route: { kind: "projects", mode: route.mode } },
-			{ label: route.name },
+			{ label: selectedProject?.name ?? route.cwd },
 		);
 	}
 
@@ -185,7 +199,7 @@ export function SkillsPanel({ api, serverReady, state }: SkillsPanelProps) {
 							icon={<FolderSimple aria-hidden="true" size={22} />}
 							key={project.cwd}
 							name={project.name}
-							onClick={() => setRoute({ kind: "project-skills", mode: route.mode, cwd: project.cwd, name: project.name })}
+							onClick={() => setRoute({ kind: "project-skills", mode: route.mode, cwd: project.cwd })}
 							title={project.cwd}
 						/>
 					))}

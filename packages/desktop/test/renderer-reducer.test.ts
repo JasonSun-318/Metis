@@ -80,14 +80,14 @@ describe("renderer projection reducer", () => {
 		const legacy = { ...session("session-5"), cwd: null, name: "Legacy" };
 		store.setSessions({ sessions: [first, code, third, managed, legacy], nextAfterSessionId: null });
 
-		const chat = buildSessionTree(store.getSnapshot(), "chat");
+		const chat = buildSessionTree(store.getSnapshot(), "chat", new Map());
 		expect(chat.projects.map(({ name, sessions }) => [name, sessions.map((item) => item.sessionId)])).toEqual([
 			["alpha", ["session-1", "session-3"]],
 		]);
 		expect(chat.tasks.map((item) => item.sessionId)).toEqual(["session-4"]);
 		expect(chat.projects[0]?.sessions[0]).toBe(store.getSnapshot().sessionsById.get("session-1"));
 
-		const codeTree = buildSessionTree(store.getSnapshot(), "code");
+		const codeTree = buildSessionTree(store.getSnapshot(), "code", new Map());
 		expect(codeTree.projects.map((group) => group.name)).toEqual(["beta"]);
 		expect(codeTree.tasks.map((item) => item.sessionId)).toEqual(["session-5"]);
 	});

@@ -10,7 +10,16 @@ import {
 	sessionDisplayTitle,
 	titleFromPrompt,
 } from "../src/renderer/components/App.tsx";
+import { buildSessionTree } from "../src/renderer/components/SessionSidebar.tsx";
+import { SkillsPanel } from "../src/renderer/components/SkillsPanel.tsx";
 import { AppStore } from "../src/renderer/store/app-store.ts";
+import {
+	loadProjectPreferences,
+	removeProjectPreference,
+	saveProjectPreferences,
+	setProjectAlias,
+	setProjectPinned,
+} from "../src/renderer/store/project-preferences.ts";
 import type { ArcMindDesktopApi } from "../src/shared/desktop-api.ts";
 
 const EPOCH = "11111111-1111-4111-8111-111111111111";
@@ -166,6 +175,125 @@ afterEach(() => {
 });
 
 describe("Chat desktop shell", () => {
+	it("round-trips strict mode-scoped project preferences without splitting Unicode aliases", () => {
+		let preferences = setProjectAlias(new Map(), "chat", "/work/shared", `  ${"🚀".repeat(81)}  `);
+		preferences = setProjectPinned(preferences, "chat", "/work/shared", true);
+		preferences = setProjectAlias(preferences, "code", "/work/shared", "Code alias");
+		saveProjectPreferences(localStorage, preferences);
+
+		const loaded = loadProjectPreferences(localStorage);
+		expect([...loaded.values()]).toEqual(expect.arrayContaining([
+			{ mode: "chat", cwd: "/work/shared", alias: "🚀".repeat(80), pinned: true },
+			{ mode: "code", cwd: "/work/shared", alias: "Code alias", pinned: false },
+		]));
+		const withoutChat = removeProjectPreference(loaded, "chat", "/work/shared");
+		expect([...withoutChat.values()]).toEqual([
+			{ mode: "code", cwd: "/work/shared", alias: "Code alias", pinned: false },
+		]);
+	});
+
+	it("ignores malformed project preference documents and invalid entries", () => {
+		for (const value of [
+			"{broken",
+			JSON.stringify({ version: 2, entries: [] }),
+			JSON.stringify({ version: 1, entries: [], unknown: true }),
+			JSON.stringify({ version: 1, entries: [{ mode: "other", cwd: "/work/a", pinned: false }] }),
+			JSON.stringify({ version: 1, entries: [{ mode: "chat", cwd: "", pinned: false }] }),
+			JSON.stringify({ version: 1, entries: [{ mode: "chat", cwd: "/work/a", pinned: "yes" }] }),
+			JSON.stringify({ version: 1, entries: [{ mode: "chat", cwd: "/work/a", pinned: false, extra: 1 }] }),
+		]) {
+			localStorage.setItem("arcmind.projectPreferences.v1", value);
+			expect(loadProjectPreferences(localStorage).size).toBe(0);
+		}
+	});
+
+	it("applies aliases per mode, clears blank aliases, and stably partitions pinned projects", () => {
+		const store = new AppStore();
+		store.setSessions({
+			sessions: [
+				session("chat-a", "chat", "/work/a", "A"),
+				session("chat-b", "chat", "/work/b", "B"),
+				session("chat-c", "chat", "/work/c", "C"),
+				session("code-a", "code", "/work/a", "Code A"),
+			],
+			nextAfterSessionId: null,
+		});
+		let preferences = setProjectAlias(new Map(), "chat", "/work/a", "Chat A");
+		preferences = setProjectAlias(preferences, "code", "/work/a", "Code A alias");
+		preferences = setProjectPinned(preferences, "chat", "/work/b", true);
+		preferences = setProjectPinned(preferences, "chat", "/work/c", true);
+		preferences = setProjectAlias(preferences, "chat", "/work/a", "   ");
+
+		expect(buildSessionTree(store.getSnapshot(), "chat", preferences).projects.map((project) => project.name)).toEqual([
+			"b",
+			"c",
+			"a",
+		]);
+		expect(buildSessionTree(store.getSnapshot(), "code", preferences).projects[0]).toMatchObject({
+			name: "Code A alias",
+			pinned: false,
+		});
+	});
+
+	it("uses mode-specific project labels while requesting shared cwd Skills", async () => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		const store = new AppStore();
+		store.setSessions({
+			sessions: [
+				session("chat-shared", "chat", "/work/shared", "Chat"),
+				session("code-shared", "code", "/work/shared", "Code"),
+			],
+			nextAfterSessionId: null,
+		});
+		let preferences = setProjectAlias(new Map(), "chat", "/work/shared", "Chat label");
+		preferences = setProjectAlias(preferences, "code", "/work/shared", "Code label");
+		const listSkills = vi.fn().mockResolvedValue({
+			skills: [{ name: "shared", description: "Shared", source: "project" }],
+		});
+		const skillApi = { listSkills };
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(
+			<SkillsPanel api={skillApi} preferences={preferences} serverReady state={store.getSnapshot()} />,
+		));
+
+		await act(async () => button(container, "Project").click());
+		await act(async () => button(container, "Chat").click());
+		await act(async () => button(container, "Chat label").click());
+		await flush();
+		expect(listSkills).toHaveBeenLastCalledWith({ cwd: "/work/shared" });
+		preferences = setProjectAlias(preferences, "chat", "/work/shared", "Renamed Chat label");
+		await act(async () => root.render(
+			<SkillsPanel api={skillApi} preferences={preferences} serverReady state={store.getSnapshot()} />,
+		));
+		expect(container.textContent).toContain("Renamed Chat label");
+		store.setSessions({
+			sessions: [session("code-shared", "code", "/work/shared", "Code")],
+			nextAfterSessionId: null,
+		});
+		await act(async () => root.render(
+			<SkillsPanel api={skillApi} preferences={preferences} serverReady state={store.getSnapshot()} />,
+		));
+		await flush();
+		expect(container.textContent).toContain("No Chat projects yet.");
+		store.setSessions({
+			sessions: [
+				session("chat-shared", "chat", "/work/shared", "Chat"),
+				session("code-shared", "code", "/work/shared", "Code"),
+			],
+			nextAfterSessionId: null,
+		});
+		await act(async () => button(container, "Skills").click());
+		await act(async () => button(container, "Project").click());
+		await act(async () => button(container, "Code").click());
+		await act(async () => button(container, "Code label").click());
+		await flush();
+		expect(listSkills).toHaveBeenLastCalledWith({ cwd: "/work/shared" });
+		expect(listSkills).toHaveBeenCalledTimes(2);
+		await act(async () => root.unmount());
+	});
+
 	it("builds a compact Unicode-safe title from the first prompt", () => {
 		expect(titleFromPrompt("  分析这个项目\n carefully  ")).toBe("分析这个项目 carefully");
 		expect(titleFromPrompt("🚀".repeat(49))).toBe(`${"🚀".repeat(47)}…`);

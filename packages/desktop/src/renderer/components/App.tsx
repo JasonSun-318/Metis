@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { ArcMindDesktopApi } from "../../shared/desktop-api.ts";
 import { useAppStore } from "../hooks/use-app-store.ts";
 import type { AppStore, AppStoreSnapshot } from "../store/app-store.ts";
+import { loadProjectPreferences } from "../store/project-preferences.ts";
 import { Composer, type ComposerSubmission } from "./Composer.tsx";
 import { InteractionHost } from "./InteractionHost.tsx";
 import { ModelSelector } from "./ModelSelector.tsx";
@@ -86,6 +87,7 @@ export function App({ api, store }: AppProps) {
 	const state = useAppStore(store);
 	const [mode, setMode] = useState<AgentMode>("chat");
 	const [destination, setDestination] = useState<SidebarDestination>("tasks");
+	const [projectPreferences] = useState(() => loadProjectPreferences(localStorage));
 	const [newTaskDraft, setNewTaskDraft] = useState<NewTaskDraft | null>({
 		mode: "chat",
 		folder: null,
@@ -493,6 +495,7 @@ export function App({ api, store }: AppProps) {
 				onOpen={openVisibleSession}
 				onSkills={() => setDestination("skills")}
 				onToggle={() => setSessionsSidebarOpen(false)}
+				preferences={projectPreferences}
 				state={state}
 			/>}
 			<main className={`workspace${toolsSidebarOpen ? " tools-sidebar-open" : ""}`}>
@@ -530,7 +533,7 @@ export function App({ api, store }: AppProps) {
 					<div className="server-banner" role="status">App Server is recovering. Your saved session is safe.</div>
 				)}
 				{!bootstrapped ? null : destination === "skills" ? (
-					<SkillsPanel api={api} serverReady={serverReady} state={state} />
+					<SkillsPanel api={api} preferences={projectPreferences} serverReady={serverReady} state={state} />
 				) : newTaskOpen ? (
 					<NewTaskHome
 						busy={busy || !serverReady}

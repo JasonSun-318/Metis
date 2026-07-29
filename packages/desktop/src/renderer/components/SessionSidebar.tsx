@@ -2,6 +2,7 @@ import type { AgentMode, SessionSummary } from "@arcmind/app-protocol";
 import { ChatCircleDots, Code, FolderSimple, MagnifyingGlass, NotePencil, SidebarSimple, Sparkle } from "@phosphor-icons/react";
 import { useEffect, useState } from "react";
 import type { AppStoreSnapshot } from "../store/app-store.ts";
+import type { ProjectPreference, ProjectPreferenceMap } from "../store/project-preferences.ts";
 
 export type SidebarDestination = "tasks" | "skills";
 
@@ -16,11 +17,14 @@ interface SessionSidebarProps {
 	readonly onOpen: (sessionId: string) => Promise<void>;
 	readonly onSkills: () => void;
 	readonly onToggle: () => void;
+	readonly preferences: ProjectPreferenceMap;
 }
 
 export interface ProjectSessionGroup {
+	readonly mode: AgentMode;
 	readonly cwd: string;
 	readonly name: string;
+	readonly pinned: boolean;
 	readonly sessions: readonly SessionSummary[];
 }
 
@@ -33,7 +37,15 @@ function projectName(cwd: string): string {
 	return cwd.split(/[\\/]/u).filter(Boolean).at(-1) ?? cwd;
 }
 
-export function buildSessionTree(state: AppStoreSnapshot, mode: AgentMode): SessionTree {
+export function buildSessionTree(
+	state: AppStoreSnapshot,
+	mode: AgentMode,
+	preferences: ProjectPreferenceMap,
+): SessionTree {
+	const modePreferences = new Map<string, ProjectPreference>();
+	for (const preference of preferences.values()) {
+		if (preference.mode === mode) modePreferences.set(preference.cwd, preference);
+	}
 	const projects = new Map<string, SessionSummary[]>();
 	const tasks: SessionSummary[] = [];
 	for (const sessionId of state.sessionOrder) {
@@ -47,8 +59,12 @@ export function buildSessionTree(state: AppStoreSnapshot, mode: AgentMode): Sess
 		sessions.push(session);
 		projects.set(session.cwd, sessions);
 	}
+	const groups = [...projects].map(([cwd, sessions]) => {
+		const preference = modePreferences.get(cwd);
+		return { mode, cwd, name: preference?.alias ?? projectName(cwd), pinned: preference?.pinned ?? false, sessions };
+	});
 	return {
-		projects: [...projects].map(([cwd, sessions]) => ({ cwd, name: projectName(cwd), sessions })),
+		projects: [...groups.filter((group) => group.pinned), ...groups.filter((group) => !group.pinned)],
 		tasks,
 	};
 }
@@ -125,8 +141,9 @@ export function SessionSidebar({
 	onOpen,
 	onSkills,
 	onToggle,
+	preferences,
 }: SessionSidebarProps) {
-	const tree = buildSessionTree(state, mode);
+	const tree = buildSessionTree(state, mode, preferences);
 	const hasSessions = tree.projects.length > 0 || tree.tasks.length > 0;
 	const [fullscreen, setFullscreen] = useState(windowIsFullscreen);
 	useEffect(() => {
