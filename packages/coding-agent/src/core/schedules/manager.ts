@@ -1,9 +1,13 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { existsSync, lstatSync, readdirSync, realpathSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import lockfile from "proper-lockfile";
 import { resolvePath } from "../../utils/paths.ts";
-import { createFileAtomicallySync, readSingleLinkTextFileSync } from "../durable-file.ts";
+import {
+	createFileAtomicallySync,
+	ensureRealDirectoryDurablySync,
+	readSingleLinkTextFileSync,
+} from "../durable-file.ts";
 import { assertValidSessionId, createSessionId } from "../session-id.ts";
 import { getDefaultSessionDir, SessionManager } from "../session-manager.ts";
 import { createScheduleWorkspace, getScheduleLeaderPath, removeOwnedScheduleWorkspace } from "./paths.ts";
@@ -38,6 +42,8 @@ const LEADER_POLL_MS = 15_000;
 const OBSERVER_POLL_MS = 2_000;
 const MAX_CONCURRENT_RUNS = 2;
 const MISSED_GRACE_MS = 60_000;
+const CWD_LOCK_STALE_MS = 10_000;
+const CWD_LOCK_UPDATE_MS = 3_000;
 
 type OwnedRun = {
 	readonly taskId: string;
@@ -296,56 +302,88 @@ export class ScheduleManager {
 		try {
 			const now = this.now();
 			const nextRunAt = calculateNextRunAt(schedule, timezone, now);
-			const result = await this.callStoreAsync(() =>
-				this.store.mutate((draft, files) => {
-					const existing = draft.tasks.find(({ id }) => id === input.id);
-					if (existing) {
-						if (
-							creationMatches(existing, {
-								instruction,
-								schedule,
-								timezone,
-								target: targetInput,
-							})
-						) {
-							return existing;
+			const commit = () =>
+				this.callStoreAsync(() =>
+					this.store.mutate((draft, files) => {
+						const existing = draft.tasks.find(({ id }) => id === input.id);
+						if (existing) {
+							if (
+								creationMatches(existing, {
+									instruction,
+									schedule,
+									timezone,
+									target: targetInput,
+								})
+							) {
+								return existing;
+							}
+							throw new ScheduleError("TASK_ID_REUSED", "Task id was already used for different input");
 						}
-						throw new ScheduleError("TASK_ID_REUSED", "Task id was already used for different input");
-					}
-					let target: ScheduleTarget;
-					if (targetInput.workspace === "task") {
-						try {
-							ownedWorkspace = createScheduleWorkspace(this.agentDir, input.id);
-							target = { kind: "general", workspace: "task", cwd: ownedWorkspace };
-						} catch (error) {
-							throw new ScheduleError("TASK_ID_REUSED", "Task workspace already exists", { cause: error });
-						}
-					} else target = targetInput;
-					const task: ScheduleTask = {
-						id: input.id,
-						title: titleFromInstruction(instruction),
-						instruction,
-						schedule,
-						timezone,
-						target,
-						status: "active",
-						createdAt: now.toISOString(),
-						updatedAt: now.toISOString(),
-						nextRunAt,
-						unreadCount: 0,
-						nextRunSequence: 1,
-					};
-					draft.tasks.push(task);
-					files.appendEvent({ type: "task-updated", taskId: task.id });
-					return task;
-				}),
-			);
+						let target: ScheduleTarget;
+						if (targetInput.workspace === "task") {
+							try {
+								ownedWorkspace = createScheduleWorkspace(this.agentDir, input.id);
+								target = { kind: "general", workspace: "task", cwd: ownedWorkspace };
+							} catch (error) {
+								throw new ScheduleError("TASK_ID_REUSED", "Task workspace already exists", { cause: error });
+							}
+						} else target = targetInput;
+						const task: ScheduleTask = {
+							id: input.id,
+							title: titleFromInstruction(instruction),
+							instruction,
+							schedule,
+							timezone,
+							target,
+							status: "active",
+							createdAt: now.toISOString(),
+							updatedAt: now.toISOString(),
+							nextRunAt,
+							unreadCount: 0,
+							nextRunSequence: 1,
+						};
+						draft.tasks.push(task);
+						files.appendEvent({ type: "task-updated", taskId: task.id });
+						return task;
+					}),
+				);
+			const result =
+				targetInput.workspace === "fixed"
+					? await this.withFixedWorkspaceCwdLock(targetInput.cwd, commit)
+					: await commit();
 			await this.drainEvents();
 			return result;
 		} catch (error) {
 			if (ownedWorkspace) removeOwnedScheduleWorkspace(this.agentDir, input.id, ownedWorkspace);
 			throw error;
 		}
+	}
+
+	countFixedWorkspaceTasks(cwd: string): number {
+		this.assertHealthy();
+		const canonicalCwd = existingRealDirectory(cwd);
+		return this.callStore(
+			() =>
+				this.store
+					.readIndex()
+					.tasks.filter(
+						(task) =>
+							task.target.kind === "general" &&
+							task.target.workspace === "fixed" &&
+							task.target.cwd === canonicalCwd,
+					).length,
+		);
+	}
+
+	async withNoFixedWorkspaceTasks<T>(cwd: string, operation: () => Promise<T>): Promise<T> {
+		this.assertHealthy();
+		const canonicalCwd = existingRealDirectory(cwd);
+		return this.withFixedWorkspaceCwdLock(canonicalCwd, async () => {
+			if (this.countFixedWorkspaceTasks(canonicalCwd) > 0) {
+				throw new ScheduleError("TASK_BUSY", "Project has fixed-workspace scheduled tasks");
+			}
+			return operation();
+		});
 	}
 
 	async list(
@@ -1138,6 +1176,46 @@ export class ScheduleManager {
 			files.appendEvent({ type: "task-deleted", taskId });
 			draft.tasks = draft.tasks.filter(({ id }) => id !== taskId);
 		});
+	}
+
+	private async withFixedWorkspaceCwdLock<T>(canonicalCwd: string, operation: () => Promise<T>): Promise<T> {
+		const digest = createHash("sha256").update(canonicalCwd).digest("hex");
+		const path = join(this.agentDir, `schedules.cwd.${digest}`);
+		try {
+			ensureRealDirectoryDurablySync(this.agentDir, 0o700);
+			if (!existsSync(path)) {
+				try {
+					createFileAtomicallySync(path, "", { mode: 0o600 });
+				} catch (error) {
+					if (errorCode(error) !== "EEXIST") throw error;
+				}
+			}
+			if (readSingleLinkTextFileSync(path, { maxBytes: 0 }) === undefined) {
+				throw new Error("Schedule cwd lock target disappeared");
+			}
+		} catch (error) {
+			throw new ScheduleError("STORE_CORRUPT", "Schedule cwd lock target is unsafe", { cause: error });
+		}
+
+		let release: (() => Promise<void>) | undefined;
+		try {
+			release = await lockfile.lock(path, {
+				realpath: false,
+				stale: CWD_LOCK_STALE_MS,
+				update: CWD_LOCK_UPDATE_MS,
+				retries: 0,
+			});
+		} catch (error) {
+			if (errorCode(error) === "ELOCKED") {
+				throw new ScheduleError("TASK_BUSY", "Project schedule state is busy", { cause: error });
+			}
+			throw new ScheduleError("STORE_CORRUPT", "Schedule cwd lock is unavailable", { cause: error });
+		}
+		try {
+			return await operation();
+		} finally {
+			await release().catch(() => undefined);
+		}
 	}
 
 	private assertHealthy(): void {

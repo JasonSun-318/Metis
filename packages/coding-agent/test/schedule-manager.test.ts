@@ -1,4 +1,14 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import {
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	realpathSync,
+	rmSync,
+	symlinkSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -93,6 +103,164 @@ afterEach(() => {
 });
 
 describe("schedule manager", () => {
+	it("counts every fixed-workspace blocker for one canonical cwd", async () => {
+		const agentDir = tempDir();
+		const project = tempDir();
+		const child = join(project, "child");
+		mkdirSync(child);
+		const manager = ScheduleManager.create({ agentDir, now: fixedNow });
+		const create = (id: string, target: { kind: "general"; workspace: "fixed"; cwd: string }) =>
+			manager.create({
+				id,
+				instruction: id,
+				schedule: { kind: "daily", time: "09:00" },
+				timezone: "Asia/Shanghai",
+				target,
+			});
+		const first = await create("fixed-blocker-active", { kind: "general", workspace: "fixed", cwd: project });
+		const second = await create("fixed-blocker-paused", {
+			kind: "general",
+			workspace: "fixed",
+			cwd: join(project, "."),
+		});
+		await manager.pause(second.id);
+		await create("fixed-child", { kind: "general", workspace: "fixed", cwd: child });
+		await manager.create({
+			id: "task-owned-not-blocking",
+			instruction: "task owned",
+			schedule: { kind: "daily", time: "09:00" },
+			timezone: "Asia/Shanghai",
+			target: { kind: "general", workspace: "task" },
+		});
+
+		expect((await manager.list({ limit: 1 })).nextAfterTaskId).not.toBeNull();
+		expect(manager.countFixedWorkspaceTasks(project)).toBe(2);
+		expect(manager.countFixedWorkspaceTasks(child)).toBe(1);
+		expect((await manager.get(first.id)).status).toBe("active");
+		expect((await manager.get(second.id)).status).toBe("paused");
+	});
+
+	it("fails fast when fixed-schedule creation and project deletion race", async () => {
+		const agentDir = tempDir();
+		const project = tempDir();
+		const otherProject = tempDir();
+		const retryProject = tempDir();
+		const deletionHost = ScheduleManager.create({ agentDir, now: fixedNow });
+		const creationHost = ScheduleManager.create({ agentDir, now: fixedNow });
+		let enterDeletion!: () => void;
+		let releaseDeletion!: () => void;
+		const deletionEntered = new Promise<void>((resolve) => {
+			enterDeletion = resolve;
+		});
+		const deletionGate = new Promise<void>((resolve) => {
+			releaseDeletion = resolve;
+		});
+		const deletion = deletionHost.withNoFixedWorkspaceTasks(project, async () => {
+			enterDeletion();
+			await deletionGate;
+			return "deleted";
+		});
+		await deletionEntered;
+
+		try {
+			await expect(
+				creationHost.create({
+					id: "fixed-create-loses-race",
+					instruction: "same cwd",
+					schedule: { kind: "daily", time: "09:00" },
+					timezone: "Asia/Shanghai",
+					target: { kind: "general", workspace: "fixed", cwd: project },
+				}),
+			).rejects.toMatchObject({ code: "TASK_BUSY" });
+			await expect(
+				creationHost.create({
+					id: "fixed-create-other-cwd",
+					instruction: "other cwd",
+					schedule: { kind: "daily", time: "09:00" },
+					timezone: "Asia/Shanghai",
+					target: { kind: "general", workspace: "fixed", cwd: otherProject },
+				}),
+			).resolves.toMatchObject({ target: { workspace: "fixed", cwd: realpathSync(otherProject) } });
+			await expect(
+				creationHost.create({
+					id: "task-create-during-delete",
+					instruction: "task workspace",
+					schedule: { kind: "daily", time: "09:00" },
+					timezone: "Asia/Shanghai",
+					target: { kind: "general", workspace: "task" },
+				}),
+			).resolves.toMatchObject({ target: { workspace: "task" } });
+		} finally {
+			releaseDeletion();
+			await deletion;
+		}
+
+		let mutationEntered!: () => void;
+		let releaseMutation!: () => void;
+		const entered = new Promise<void>((resolve) => {
+			mutationEntered = resolve;
+		});
+		const mutationGate = new Promise<void>((resolve) => {
+			releaseMutation = resolve;
+		});
+		const creationStore = (creationHost as unknown as { store: ScheduleStore }).store;
+		const originalMutate = creationStore.mutate.bind(creationStore);
+		vi.spyOn(creationStore, "mutate").mockImplementationOnce(async (mutation) => {
+			mutationEntered();
+			await mutationGate;
+			return originalMutate(mutation);
+		});
+		const committedFirst = creationHost.create({
+			id: "fixed-create-wins-race",
+			instruction: "create first",
+			schedule: { kind: "daily", time: "09:00" },
+			timezone: "Asia/Shanghai",
+			target: { kind: "general", workspace: "fixed", cwd: project },
+		});
+		await entered;
+		const operation = vi.fn(async () => undefined);
+		try {
+			await expect(deletionHost.withNoFixedWorkspaceTasks(project, operation)).rejects.toMatchObject({
+				code: "TASK_BUSY",
+			});
+			expect(operation).not.toHaveBeenCalled();
+		} finally {
+			releaseMutation();
+			await committedFirst;
+		}
+		await expect(deletionHost.withNoFixedWorkspaceTasks(project, operation)).rejects.toMatchObject({
+			code: "TASK_BUSY",
+		});
+		expect(operation).not.toHaveBeenCalled();
+
+		await expect(
+			deletionHost.withNoFixedWorkspaceTasks(retryProject, async () => {
+				throw new Error("delete failed");
+			}),
+		).rejects.toThrow("delete failed");
+		await expect(
+			creationHost.create({
+				id: "fixed-create-after-release",
+				instruction: "retry",
+				schedule: { kind: "daily", time: "09:00" },
+				timezone: "Asia/Shanghai",
+				target: { kind: "general", workspace: "fixed", cwd: retryProject },
+			}),
+		).resolves.toMatchObject({ target: { workspace: "fixed", cwd: realpathSync(retryProject) } });
+	});
+
+	it("rejects an unsafe fixed-workspace lock target", async () => {
+		const agentDir = tempDir();
+		const project = tempDir();
+		const canonicalCwd = realpathSync(project);
+		const digest = createHash("sha256").update(canonicalCwd).digest("hex");
+		symlinkSync(project, join(agentDir, `schedules.cwd.${digest}`));
+
+		await expect(
+			ScheduleManager.create({ agentDir, now: fixedNow }).withNoFixedWorkspaceTasks(project, async () => undefined),
+		).rejects.toMatchObject({ code: "STORE_CORRUPT" });
+	});
+
 	it("derives a deterministic title and creates the task-owned workspace once", async () => {
 		const agentDir = tempDir();
 		const manager = ScheduleManager.create({ agentDir, now: fixedNow });
