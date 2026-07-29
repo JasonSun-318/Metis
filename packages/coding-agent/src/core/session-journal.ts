@@ -509,6 +509,48 @@ function replacementArtifacts(filePath: string): { temporary: ReplacementArtifac
 	return { temporary, backups };
 }
 
+/** Enumerate only artifacts produced by the journal and lease recovery grammars. */
+export function getOwnedSessionJournalArtifacts(filePath: string): readonly string[] {
+	const resolvedPath = join(dirname(filePath), parse(filePath).base);
+	const replacements = replacementArtifacts(resolvedPath);
+	const result = [...replacements.temporary, ...replacements.backups].map((artifact) => artifact.path);
+	const recoveryDirectory = join(dirname(resolvedPath), ".recovery");
+	if (!existsSync(recoveryDirectory)) return result.sort();
+	const recoveryStats = lstatSync(recoveryDirectory);
+	if (!recoveryStats.isDirectory() || recoveryStats.isSymbolicLink()) {
+		throw new Error(`Unsafe session recovery directory: ${recoveryDirectory}`);
+	}
+
+	const tailPrefix = `${parse(resolvedPath).name}-`;
+	const leasePrefix = `${parse(resolvedPath).base}.`;
+	for (const name of readdirSync(recoveryDirectory).sort()) {
+		const tailTransaction =
+			name.startsWith(tailPrefix) && name.endsWith(".partial")
+				? name.slice(tailPrefix.length, -".partial".length)
+				: undefined;
+		const leaseSuffix = [".reclaim.json", ".force-claim.json", ".lease"].find((suffix) => name.endsWith(suffix));
+		const leaseTransaction =
+			leaseSuffix && name.startsWith(leasePrefix) ? name.slice(leasePrefix.length, -leaseSuffix.length) : undefined;
+		const validTail =
+			tailTransaction !== undefined &&
+			/^\d+-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(tailTransaction);
+		const validLease =
+			leaseTransaction !== undefined && /^\d+\.[A-Za-z0-9._-]+$/.test(leaseTransaction) && leaseSuffix !== undefined;
+		if (!validTail && !validLease) continue;
+		const path = join(recoveryDirectory, name);
+		const metadata = lstatSync(path);
+		if (leaseSuffix === ".lease") {
+			if (!metadata.isDirectory() || metadata.isSymbolicLink()) {
+				throw new Error(`Unsafe session lease recovery artifact: ${path}`);
+			}
+		} else if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.nlink !== 1) {
+			throw new Error(`Unsafe session recovery artifact: ${path}`);
+		}
+		result.push(path);
+	}
+	return result.sort();
+}
+
 function latestArtifact(artifacts: ReplacementArtifact[]): ReplacementArtifact | undefined {
 	return artifacts.sort((left, right) => right.modifiedAt - left.modifiedAt || right.path.localeCompare(left.path))[0];
 }

@@ -42,6 +42,12 @@ import {
 	createCustomMessage,
 } from "./messages.ts";
 import {
+	recoverInterruptedProjectTrash as recoverProjectTrash,
+	type TrashModeProjectDataInput,
+	type TrashModeProjectDataResult,
+	trashModeProjectData as trashProjectData,
+} from "./mode-project-delete.ts";
+import {
 	defaultPermissionSettings,
 	isPermissionMode,
 	isPersistedPermissionMode,
@@ -70,7 +76,7 @@ import {
 } from "./session-control.ts";
 import { assertValidSessionId, createSessionId } from "./session-id.ts";
 import { CorruptSessionError, openSessionJournal, type SessionJournal } from "./session-journal.ts";
-import { SessionLease, SessionLeaseError } from "./session-lease.ts";
+import { acquireModeProjectMutationLease, SessionLease, SessionLeaseError } from "./session-lease.ts";
 import { type CwdOrigin, getOwnedManagedWorkspace, publishManagedWorkspaceCopy } from "./session-workspace.ts";
 
 export const CURRENT_SESSION_VERSION = 11;
@@ -2264,6 +2270,14 @@ function journalOptions(_storagePath: string, lease: SessionLease, displayPath: 
 	};
 }
 
+function projectSessionDirForCreate(storagePath: string, header: SessionHeader): string {
+	const namespaceRoot = dirname(dirname(storagePath));
+	const namespace = basename(namespaceRoot);
+	return namespace === "sessions" || namespace === "subagents"
+		? getDefaultSessionDir(header.cwd, dirname(namespaceRoot))
+		: dirname(storagePath);
+}
+
 function createPersistedSessionState(
 	filePath: string,
 	fileEntries: FileEntry[],
@@ -2274,9 +2288,18 @@ function createPersistedSessionState(
 ): ManagedSessionState {
 	validateSessionGraph(fileEntries, filePath);
 	ensureDirectoryDurablySync(dirname(storagePath));
-	const lease = SessionLease.acquire(storagePath);
+	const header = fileEntries[0] as SessionHeader;
+	let projectLease =
+		mode === "create"
+			? acquireModeProjectMutationLease(
+					projectSessionDirForCreate(storagePath, header),
+					header.mode ?? DEFAULT_AGENT_MODE,
+				)
+			: undefined;
+	let lease: SessionLease | undefined;
 	let journal: SessionJournal<FileEntry> | undefined;
 	try {
+		lease = SessionLease.acquire(storagePath);
 		if (mode === "create") {
 			try {
 				lstatSync(storagePath);
@@ -2313,12 +2336,23 @@ function createPersistedSessionState(
 		}
 		const state = buildManagedSessionState(durableFileEntries, filePath, journal, lease, storagePath);
 		if (mode === "replace") appendPendingRecoveryNotices(state);
+		projectLease?.close();
+		projectLease = undefined;
 		return state;
 	} catch (error) {
+		const cleanupErrors: unknown[] = [];
 		try {
 			closeManagedSessionState({ journal, lease });
 		} catch (cleanupError) {
-			throw new AggregateError([error, cleanupError], `Failed to publish and clean up session: ${filePath}`);
+			cleanupErrors.push(cleanupError);
+		}
+		try {
+			projectLease?.close();
+		} catch (cleanupError) {
+			cleanupErrors.push(cleanupError);
+		}
+		if (cleanupErrors.length > 0) {
+			throw new AggregateError([error, ...cleanupErrors], `Failed to publish and clean up session: ${filePath}`);
 		}
 		throw error;
 	}
@@ -2387,6 +2421,7 @@ function openPersistedSessionState(
 	options: { createIfMissing?: boolean; externalizeInlineImages?: boolean } = {},
 ): ManagedSessionState {
 	const lease = SessionLease.acquire(storagePath);
+	let projectLease: SessionLease | undefined;
 	let journal: SessionJournal<FileEntry> | undefined;
 	try {
 		let records: FileEntry[] | undefined;
@@ -2394,7 +2429,12 @@ function openPersistedSessionState(
 			journal = openSessionJournal<FileEntry>(storagePath, journalOptions(storagePath, lease, filePath));
 		} catch (error) {
 			if (!options.createIfMissing || (error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-			records = [emptyHeader()];
+			const header = emptyHeader();
+			projectLease = acquireModeProjectMutationLease(
+				projectSessionDirForCreate(storagePath, header),
+				header.mode ?? DEFAULT_AGENT_MODE,
+			);
+			records = [header];
 			journal = openSessionJournal<FileEntry>(storagePath, {
 				...journalOptions(storagePath, lease, filePath),
 				create: true,
@@ -2404,7 +2444,12 @@ function openPersistedSessionState(
 		if (!records) {
 			const result = journal.readStrict();
 			if (result.records.length === 0) {
-				records = [emptyHeader()];
+				const header = emptyHeader();
+				projectLease = acquireModeProjectMutationLease(
+					projectSessionDirForCreate(storagePath, header),
+					header.mode ?? DEFAULT_AGENT_MODE,
+				);
+				records = [header];
 				journal.replaceAtomically(records);
 			} else {
 				const sourceVersion = (result.records[0] as SessionHeader | undefined)?.version ?? 1;
@@ -2425,12 +2470,23 @@ function openPersistedSessionState(
 
 		const state = buildManagedSessionState(records, filePath, journal, lease, storagePath);
 		appendPendingRecoveryNotices(state);
+		projectLease?.close();
+		projectLease = undefined;
 		return state;
 	} catch (error) {
+		const cleanupErrors: unknown[] = [];
 		try {
 			closeManagedSessionState({ journal, lease });
 		} catch (cleanupError) {
-			throw new AggregateError([error, cleanupError], `Failed to open and clean up session: ${filePath}`);
+			cleanupErrors.push(cleanupError);
+		}
+		try {
+			projectLease?.close();
+		} catch (cleanupError) {
+			cleanupErrors.push(cleanupError);
+		}
+		if (cleanupErrors.length > 0) {
+			throw new AggregateError([error, ...cleanupErrors], `Failed to open and clean up session: ${filePath}`);
 		}
 		throw error;
 	}
@@ -3880,6 +3936,24 @@ export class SessionManager {
 		} finally {
 			lease.close();
 		}
+	}
+
+	/** Move one closed mode-project and its proven-owned data to the OS Trash atomically. */
+	static async trashModeProjectData(input: TrashModeProjectDataInput): Promise<TrashModeProjectDataResult> {
+		return trashProjectData(input, {
+			readSessionHeader: (path) =>
+				structuredClone(
+					readSessionRecordsReadOnly(path, { followSymlinkAlias: false }).records[0] as SessionHeader,
+				),
+			getSessionImageDir,
+			getSessionToolOutputDir,
+			getSessionSubagentDir,
+		});
+	}
+
+	/** Restore any project deletion that was interrupted before reaching the OS Trash. */
+	static recoverInterruptedProjectTrash(agentDir: string): void {
+		recoverProjectTrash(agentDir);
 	}
 
 	/**

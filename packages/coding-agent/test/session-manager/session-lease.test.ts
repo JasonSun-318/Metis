@@ -305,6 +305,39 @@ describe("SessionLease", () => {
 		expect(existsSync(`${sessionFile}.lease`)).toBe(false);
 	});
 
+	it("fences transient and durable leases in both directions without residue", () => {
+		const sessionFile = createSessionFile();
+		const durable = SessionLease.acquire(sessionFile, options(identity()));
+		expect(() => SessionLease.acquireTransient(sessionFile, options(identity({ pid: 202 })))).toThrowError(
+			expect.objectContaining({ code: "SESSION_IN_USE" }),
+		);
+		durable.close();
+
+		const transient = SessionLease.acquireTransient(sessionFile, options(identity({ pid: 202 })));
+		expect(readOwner(sessionFile)).toMatchObject({ pid: 202, nonce: "nonce-202-2" });
+		expect(() => SessionLease.acquire(sessionFile, options(identity({ pid: 303 })))).toThrowError(
+			expect.objectContaining({ code: "SESSION_IN_USE" }),
+		);
+		transient.close();
+
+		expect(existsSync(`${sessionFile}.lease`)).toBe(false);
+		expect(readdirSync(join(sessionFile, "..")).filter((name) => name.includes(".transient.tmp"))).toEqual([]);
+	});
+
+	it("lets a transient lease reclaim only a confirmed-dead durable owner", () => {
+		const sessionFile = createSessionFile();
+		const oldLease = SessionLease.acquire(sessionFile, options(identity()));
+		const replacement = SessionLease.acquireTransient(
+			sessionFile,
+			options(identity({ pid: 202 }), () => ({ status: "dead" })),
+		);
+
+		expect(() => oldLease.withWritePermit(() => undefined)).toThrowError(
+			expect.objectContaining({ code: "LEASE_LOST" }),
+		);
+		replacement.close();
+	});
+
 	it("retries only the pending parent sync after lease removal", () => {
 		const sessionFile = createSessionFile();
 		const leaseOptions = options(identity());

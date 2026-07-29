@@ -1,9 +1,10 @@
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, unlinkSync } from "node:fs";
+import { existsSync, linkSync, mkdirSync, readFileSync, renameSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { hostname } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { canonicalizePathForCreation } from "../utils/paths.ts";
+import { type AgentMode, isAgentMode } from "./agent-mode.ts";
 import {
 	cleanupPublishedAliasesSync,
 	createFileAtomicallySync,
@@ -73,11 +74,13 @@ interface ResolvedOptions {
 	randomNonce: () => string;
 	syncDirectory: (directory: string) => void;
 	heartbeatIntervalMs: number;
+	durable: boolean;
 }
 
 interface GateToken {
 	bytes: string;
 	reclaimArtifactPath?: string;
+	durable?: boolean;
 }
 
 function errorCode(error: unknown): string | undefined {
@@ -168,7 +171,7 @@ function assertIdentity(identity: LeaseProcessIdentity): void {
 	}
 }
 
-function resolveOptions(options: SessionLeaseOptions): ResolvedOptions {
+function resolveOptions(options: SessionLeaseOptions, durable = true): ResolvedOptions {
 	const identity = { ...(options.identity ?? defaultIdentity) };
 	assertIdentity(identity);
 	const heartbeatIntervalMs = options.heartbeatIntervalMs ?? DEFAULT_HEARTBEAT_INTERVAL_MS;
@@ -182,6 +185,7 @@ function resolveOptions(options: SessionLeaseOptions): ResolvedOptions {
 		randomNonce: options.randomNonce ?? randomUUID,
 		syncDirectory: options.syncDirectory ?? syncDirectorySync,
 		heartbeatIntervalMs,
+		durable,
 	};
 }
 
@@ -298,7 +302,7 @@ function releaseOwnedFile(path: string, token: GateToken): boolean {
 	if (bytes === undefined) return false;
 	if (bytes !== token.bytes) return false;
 	unlinkSync(path);
-	syncDirectorySync(dirname(path));
+	if (token.durable !== false) syncDirectorySync(dirname(path));
 	return true;
 }
 
@@ -372,6 +376,39 @@ function recoverForceClaimForForce(
 	createFileAtomicallySync(artifactPath, claimBytes, { mode: 0o600 });
 	if (!releaseOwnedFile(paths.reclaimForceFile, { bytes: claimBytes })) throw sessionInUse(sessionFile);
 	return artifactPath;
+}
+
+function createTransientLeaseFile(path: string, bytes: string): void {
+	const temporary = join(dirname(path), `.${basename(path)}.${randomUUID()}.transient.tmp`);
+	try {
+		writeFileSync(temporary, bytes, { flag: "wx", mode: 0o600 });
+		linkSync(temporary, path);
+	} finally {
+		rmSync(temporary, { force: true });
+	}
+}
+
+function acquireTransientGate(sessionFile: string, paths: LeasePaths, options: ResolvedOptions): GateToken {
+	const token: GateToken = { bytes: serializeOwner(createOwner(options)), durable: false };
+	try {
+		createTransientLeaseFile(paths.gateFile, token.bytes);
+	} catch (error) {
+		if (errorCode(error) === "EEXIST") return acquireGate(sessionFile, paths, { ...options, durable: true });
+		throw error;
+	}
+	try {
+		if (
+			existsSync(paths.reclaimFile) ||
+			existsSync(paths.reclaimForceFile) ||
+			readFileIfPresent(paths.gateFile) !== token.bytes
+		) {
+			throw sessionInUse(sessionFile);
+		}
+		return token;
+	} catch (error) {
+		releaseAfterFailure(paths.gateFile, token);
+		throw error;
+	}
 }
 
 function acquireGate(
@@ -468,7 +505,9 @@ function withGate<T>(
 	operation: (token: GateToken) => T,
 	allowReclaimMarkerRecovery = false,
 ): T {
-	const token = acquireGate(sessionFile, paths, options, allowReclaimMarkerRecovery);
+	const token = options.durable
+		? acquireGate(sessionFile, paths, options, allowReclaimMarkerRecovery)
+		: acquireTransientGate(sessionFile, paths, options);
 	let result: T;
 	try {
 		result = operation(token);
@@ -499,29 +538,47 @@ export class SessionLease {
 	}
 
 	static acquire(sessionFile: string, leaseOptions: SessionLeaseOptions = {}): SessionLease {
+		return SessionLease.acquireResolved(sessionFile, resolveOptions(leaseOptions));
+	}
+
+	/**
+	 * Process-lifetime fence for a batch already protected by one durable project
+	 * lease and recovery manifest. It shares the normal gate/owner/liveness format.
+	 */
+	static acquireTransient(sessionFile: string, leaseOptions: SessionLeaseOptions = {}): SessionLease {
+		return SessionLease.acquireResolved(
+			sessionFile,
+			resolveOptions({ ...leaseOptions, heartbeatIntervalMs: 0 }, false),
+		);
+	}
+
+	private static acquireResolved(sessionFile: string, options: ResolvedOptions): SessionLease {
 		const paths = pathsFor(sessionFile);
-		const options = resolveOptions(leaseOptions);
 		const owner = withGate(paths.sessionFile, paths, options, () => {
 			if (existsSync(paths.leaseDirectory)) {
 				const currentOwner = readOwner(paths.ownerFile);
 				if (!currentOwner || !canReclaim(currentOwner, options)) throw sessionInUse(paths.sessionFile);
 				rmSync(paths.leaseDirectory, { recursive: true, force: true });
-				syncDirectorySync(dirname(paths.leaseDirectory));
+				if (options.durable) syncDirectorySync(dirname(paths.leaseDirectory));
 			}
 
 			mkdirSync(paths.leaseDirectory, { mode: 0o700 });
-			syncDirectorySync(dirname(paths.leaseDirectory));
+			if (options.durable) syncDirectorySync(dirname(paths.leaseDirectory));
 			const owner = createOwner(options);
 			try {
-				createFileAtomicallySync(paths.ownerFile, serializeOwner(owner), { mode: 0o600 });
+				if (options.durable) {
+					createFileAtomicallySync(paths.ownerFile, serializeOwner(owner), { mode: 0o600 });
+				} else {
+					createTransientLeaseFile(paths.ownerFile, serializeOwner(owner));
+				}
 			} catch (error) {
 				rmSync(paths.leaseDirectory, { recursive: true, force: true });
-				syncDirectorySync(dirname(paths.leaseDirectory));
+				if (options.durable) syncDirectorySync(dirname(paths.leaseDirectory));
 				throw error;
 			}
 			return owner;
 		});
-		// Do not start heartbeats until the acquisition gate is durably released.
+		// Do not start heartbeats until the acquisition gate is released.
 		return new SessionLease(paths.sessionFile, paths, options, owner);
 	}
 
@@ -578,8 +635,8 @@ export class SessionLease {
 			withGate(this.sessionFile, this.paths, this.options, () => {
 				this.assertOwnership();
 				rmSync(this.paths.leaseDirectory, { recursive: true, force: true });
-				this.releasePhase = "parent_sync_pending";
-				this.options.syncDirectory(dirname(this.paths.leaseDirectory));
+				this.releasePhase = this.options.durable ? "parent_sync_pending" : "released";
+				if (this.options.durable) this.options.syncDirectory(dirname(this.paths.leaseDirectory));
 				this.releasePhase = "released";
 			});
 			this.closed = true;
@@ -616,4 +673,16 @@ export class SessionLease {
 		clearInterval(this.heartbeatTimer);
 		this.heartbeatTimer = undefined;
 	}
+}
+
+/** Fence creation and destructive mutation for one mode within one project session directory. */
+export function acquireModeProjectMutationLease(
+	projectSessionDir: string,
+	mode: AgentMode,
+	options: SessionLeaseOptions = {},
+): SessionLease {
+	if (!isAgentMode(mode)) throw new TypeError("Project mutation lease mode must be chat or code");
+	const directory = canonicalizePathForCreation(projectSessionDir);
+	ensureRealDirectoryDurablySync(directory, 0o700);
+	return SessionLease.acquire(join(directory, `.mode-${mode}-project.mutation`), options);
 }

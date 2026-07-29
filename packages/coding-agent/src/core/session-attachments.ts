@@ -113,6 +113,39 @@ export function getOwnedSessionAttachmentDir(agentDir: string, sessionId: string
 	}
 }
 
+/** Return only direct mkdtemp work directories owned by one session. */
+export function getOwnedSessionWorkDirs(agentDir: string, sessionId: string): readonly string[] {
+	assertValidSessionId(sessionId);
+	const resolvedAgentDir = resolvePath(agentDir);
+	if (!existsSync(resolvedAgentDir)) return [];
+	const canonicalAgentDir = assertRealDirectory(resolvedAgentDir, "Agent directory");
+	const tmpRoot = join(resolvedAgentDir, "tmp");
+	if (!existsSync(tmpRoot)) return [];
+	const canonicalTmpRoot = assertRealDirectory(tmpRoot, "Temporary root");
+	if (dirname(canonicalTmpRoot) !== canonicalAgentDir) throw new Error("Temporary root escapes the agent directory");
+	const workRoot = join(tmpRoot, "document-work");
+	if (!existsSync(workRoot)) return [];
+	const canonicalWorkRoot = assertRealDirectory(workRoot, "Document work root");
+	if (dirname(canonicalWorkRoot) !== canonicalTmpRoot)
+		throw new Error("Document work root escapes the temporary root");
+
+	const prefix = `${sessionId}-`;
+	const result: string[] = [];
+	for (const name of readdirSync(workRoot).sort()) {
+		if (!name.startsWith(prefix) || !/^[A-Za-z0-9]{6}$/.test(name.slice(prefix.length))) continue;
+		const path = join(canonicalWorkRoot, name);
+		const metadata = lstatSync(path);
+		if (!metadata.isDirectory() || metadata.isSymbolicLink()) {
+			throw new Error(`Session document work path must be a real directory: ${path}`);
+		}
+		if (dirname(realpathSync(path)) !== canonicalWorkRoot) {
+			throw new Error(`Session document work path escapes its root: ${path}`);
+		}
+		result.push(path);
+	}
+	return result;
+}
+
 /**
  * Remove directories and other non-file entries accidentally created beside
  * attachments. Uploaded files and final deliverables are regular files.

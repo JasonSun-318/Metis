@@ -83,6 +83,11 @@ export {
 	type WorkingIndicatorOptions,
 } from "./extensions/index.ts";
 export type { McpConnectionState, McpServerStatus, McpToolRecord } from "./mcp/index.ts";
+export type {
+	ModeProjectSessionTarget,
+	TrashModeProjectDataInput,
+	TrashModeProjectDataResult,
+} from "./mode-project-delete.ts";
 export {
 	defaultPermissionSettings,
 	isPermissionMode,

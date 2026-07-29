@@ -1,9 +1,22 @@
 import { execFileSync, spawnSync } from "node:child_process";
-import { linkSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import {
+	linkSync,
+	mkdirSync,
+	mkdtempSync,
+	readdirSync,
+	readFileSync,
+	renameSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { openSessionJournal, SessionJournalPoisonedError } from "../../src/core/session-journal.ts";
+import {
+	getOwnedSessionJournalArtifacts,
+	openSessionJournal,
+	SessionJournalPoisonedError,
+} from "../../src/core/session-journal.ts";
 
 describe("session journal", () => {
 	let directory: string;
@@ -246,5 +259,25 @@ describe("session journal", () => {
 		expect(backup).toMatch(/\.replace\.bak$/);
 		expect(readFileSync(join(directory, backup!), "utf8")).toBe(`${JSON.stringify({ version: 3 })}\n`);
 		expect(journal.readStrict().records).toEqual([{ version: 4 }]);
+	});
+
+	it("enumerates only exact journal replacement and recovery artifacts", () => {
+		const transaction = "12345678-1234-4234-8234-123456789abc";
+		writeFileSync(path, "{}\n");
+		const recovery = join(directory, ".recovery");
+		mkdirSync(recovery);
+		const owned = [
+			join(directory, `.session.jsonl.${transaction}.replace.tmp`),
+			join(directory, `.session.jsonl.keep-v11.${transaction}.replace.bak`),
+			join(recovery, `session-42-${transaction}.partial`),
+			join(recovery, "session.jsonl.42.nonce.reclaim.json"),
+		];
+		for (const artifact of owned) writeFileSync(artifact, "owned");
+		const leaseArtifact = join(recovery, "session.jsonl.42.nonce.lease");
+		mkdirSync(leaseArtifact);
+		writeFileSync(join(directory, ".session.jsonl.invalid.replace.tmp"), "lookalike");
+		writeFileSync(join(recovery, "session-not-owned.partial"), "lookalike");
+
+		expect(getOwnedSessionJournalArtifacts(path)).toEqual([...owned, leaseArtifact].sort());
 	});
 });

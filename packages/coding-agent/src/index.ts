@@ -176,6 +176,11 @@ export {
 export type { ReadonlyFooterDataProvider } from "./core/footer-data-provider.ts";
 export type { McpConnectionState, McpServerStatus, McpToolRecord } from "./core/mcp/index.ts";
 export { convertToLlm } from "./core/messages.ts";
+export type {
+	ModeProjectSessionTarget,
+	TrashModeProjectDataInput,
+	TrashModeProjectDataResult,
+} from "./core/mode-project-delete.ts";
 export { ModelRegistry } from "./core/model-registry.ts";
 export {
 	type ModelScopeDiagnostic,

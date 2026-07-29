@@ -19,6 +19,7 @@ import {
 	formatSessionAttachment,
 	formatSessionAttachmentDisplayText,
 	formatSessionAttachments,
+	getOwnedSessionWorkDirs,
 	getSessionAttachmentDir,
 	importSessionAttachments,
 	pruneStaleSessionWorkDirs,
@@ -147,6 +148,20 @@ describe("session attachments", () => {
 		expect(existsSync(first)).toBe(false);
 		expect(existsSync(second)).toBe(true);
 		expect(existsSync(attachment.path)).toBe(true);
+	});
+
+	it("enumerates only exact real work directories for one session", () => {
+		const first = createSessionWorkDir(agentDir, "session-owned");
+		const second = createSessionWorkDir(agentDir, "session-owned");
+		const other = createSessionWorkDir(agentDir, "session-other");
+		mkdirSync(join(agentDir, "tmp", "document-work", "session-owned-short"));
+
+		expect(getOwnedSessionWorkDirs(agentDir, "session-owned")).toEqual([first, second].sort());
+		expect(getOwnedSessionWorkDirs(agentDir, "session-other")).toEqual([other]);
+
+		rmSync(first, { recursive: true });
+		symlinkSync(other, first);
+		expect(() => getOwnedSessionWorkDirs(agentDir, "session-owned")).toThrow("real directory");
 	});
 
 	it.skipIf(process.platform === "win32")("does not follow a replaced work-directory symlink", () => {
