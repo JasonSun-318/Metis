@@ -146,7 +146,7 @@ describe("managed session workspaces", () => {
 		source.close();
 	});
 
-	it("deletes only a proven managed workspace with its session", async () => {
+	it("keeps a proven managed workspace retryable when Trash is unavailable", async () => {
 		const workspace = resolveNewSessionWorkspace({ id: "owned", mode: "chat", hostCwd, agentDir });
 		writeFileSync(join(workspace.cwd, "owned.txt"), "owned");
 		const session = SessionManager.create(workspace.cwd, getDefaultSessionDir(workspace.cwd, agentDir), {
@@ -160,17 +160,17 @@ describe("managed session workspaces", () => {
 		const previousPath = process.env.PATH;
 		process.env.PATH = "";
 		try {
-			expect(await SessionManager.deleteSession(sessionFile, { agentDir })).toEqual({
-				ok: true,
-				method: "unlink",
-				warning: undefined,
+			expect(await SessionManager.deleteSession(sessionFile, { agentDir })).toMatchObject({
+				ok: false,
+				method: "trash",
+				code: "OPERATION_FAILED",
 			});
 		} finally {
 			if (previousPath === undefined) delete process.env.PATH;
 			else process.env.PATH = previousPath;
 		}
-		expect(existsSync(sessionFile)).toBe(false);
-		expect(existsSync(workspace.cwd)).toBe(false);
+		expect(existsSync(sessionFile)).toBe(true);
+		expect(existsSync(workspace.cwd)).toBe(true);
 	});
 
 	it("never treats an external or forged cwd as an owned deletion target", async () => {

@@ -1,13 +1,25 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import type { SpawnSyncReturns } from "node:child_process";
+import {
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	renameSync,
+	rmSync,
+	symlinkSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { setKeybindings } from "@arcmind/tui";
-import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { KeybindingsManager } from "../src/core/keybindings.ts";
 import { persistToolOutputText } from "../src/core/large-tool-output.ts";
 import { getSessionAttachmentDir, importSessionAttachments } from "../src/core/session-attachments.ts";
 import {
+	getSessionDisplayMetadataPath,
 	getSessionImageDir,
+	getSessionSubagentDir,
 	getSessionToolOutputDir,
 	type SessionInfo,
 	SessionManager,
@@ -15,6 +27,15 @@ import {
 import { deleteSessionFile, SessionSelectorComponent } from "../src/modes/interactive/components/session-selector.ts";
 import { initTheme } from "../src/modes/interactive/theme/theme.ts";
 import { assistantMsg } from "./utilities.ts";
+
+const childProcessMocks = vi.hoisted(() => ({
+	spawnSync: vi.fn<(...args: unknown[]) => SpawnSyncReturns<string>>(),
+}));
+
+vi.mock("node:child_process", async (importOriginal) => ({
+	...(await importOriginal<typeof import("node:child_process")>()),
+	spawnSync: childProcessMocks.spawnSync,
+}));
 
 type Deferred<T> = {
 	promise: Promise<T>;
@@ -43,13 +64,22 @@ function stripAnsi(text: string): string {
 }
 
 async function withoutTrash<T>(callback: () => Promise<T>): Promise<T> {
-	const previousPath = process.env.PATH;
-	process.env.PATH = "";
+	const previous = childProcessMocks.spawnSync.getMockImplementation();
+	const error = Object.assign(new Error("spawn trash ENOENT"), { code: "ENOENT" });
+	childProcessMocks.spawnSync.mockReturnValue({
+		pid: 0,
+		output: [null, "", ""],
+		stdout: "",
+		stderr: "",
+		status: null,
+		signal: null,
+		error,
+	});
 	try {
 		return await callback();
 	} finally {
-		if (previousPath === undefined) delete process.env.PATH;
-		else process.env.PATH = previousPath;
+		if (previous) childProcessMocks.spawnSync.mockImplementation(previous);
+		else childProcessMocks.spawnSync.mockReset();
 	}
 }
 
@@ -119,6 +149,25 @@ describe("session selector path/delete interactions", () => {
 	beforeEach(() => {
 		// Ensure test isolation: keybindings are a global singleton
 		setKeybindings(new KeybindingsManager());
+		childProcessMocks.spawnSync.mockReset();
+		childProcessMocks.spawnSync.mockImplementation((_command, rawArgs) => {
+			const args = rawArgs as readonly string[];
+			try {
+				for (const path of args) {
+					if (path !== "--") rmSync(path, { recursive: true, force: true });
+				}
+				return { pid: 1, output: [null, "", ""], stdout: "", stderr: "", status: 0, signal: null };
+			} catch (error) {
+				return {
+					pid: 1,
+					output: [null, "", String(error)],
+					stdout: "",
+					stderr: String(error),
+					status: 1,
+					signal: null,
+				};
+			}
+		});
 	});
 
 	beforeAll(() => {
@@ -219,8 +268,8 @@ describe("session selector path/delete interactions", () => {
 		const imageDir = getSessionImageDir(sessionFile);
 		session.close();
 
-		const result = await withoutTrash(() => deleteSessionFile(sessionFile));
-		expect(result).toEqual({ ok: true, method: "unlink", warning: undefined });
+		const result = await deleteSessionFile(sessionFile);
+		expect(result).toEqual({ ok: true, method: "trash" });
 		expect(existsSync(sessionFile)).toBe(false);
 		expect(existsSync(imageDir)).toBe(false);
 	});
@@ -239,8 +288,8 @@ describe("session selector path/delete interactions", () => {
 		expect(readFileSync(outputPath, "utf8")).toBe("large result");
 		resumed.close();
 
-		const result = await withoutTrash(() => deleteSessionFile(sessionFile));
-		expect(result).toEqual({ ok: true, method: "unlink", warning: undefined });
+		const result = await deleteSessionFile(sessionFile);
+		expect(result).toEqual({ ok: true, method: "trash" });
 		expect(existsSync(sessionFile)).toBe(false);
 		expect(existsSync(outputPath)).toBe(false);
 		expect(existsSync(toolOutputDir)).toBe(false);
@@ -265,10 +314,97 @@ describe("session selector path/delete interactions", () => {
 		const attachmentDir = getSessionAttachmentDir(agentDir, sessionId);
 		session.close();
 
-		const result = await withoutTrash(() => deleteSessionFile(sessionFile, agentDir));
-		expect(result).toEqual({ ok: true, method: "unlink", warning: undefined });
+		const result = await deleteSessionFile(sessionFile, agentDir);
+		expect(result).toEqual({ ok: true, method: "trash" });
 		expect(existsSync(sessionFile)).toBe(false);
 		expect(existsSync(attachmentDir)).toBe(false);
+	});
+
+	it("deletes only owned Subagent, document-work, and journal recovery artifacts", async () => {
+		const baseDir = mkdtempSync(join(tmpdir(), "arcmind-session-delete-owned-"));
+		tempDirs.push(baseDir);
+		const agentDir = join(baseDir, "agent");
+		mkdirSync(agentDir);
+		const session = SessionManager.create(baseDir, baseDir);
+		session.appendMessage(assistantMsg("ok"));
+		const sessionFile = session.getSessionFile()!;
+		const sessionId = session.getSessionId();
+		const subagentDir = getSessionSubagentDir(agentDir, sessionId);
+		const workRoot = join(agentDir, "tmp", "document-work");
+		const workDir = join(workRoot, `${sessionId}-ABC123`);
+		const unrelatedWorkDir = join(workRoot, "unrelated-session-ABC123");
+		const recoveryArtifact = join(
+			dirname(sessionFile),
+			`.${basename(sessionFile)}.00000000-0000-4000-8000-000000000001.replace.bak`,
+		);
+		const memorySentinel = join(agentDir, "memory", "keep.txt");
+		mkdirSync(subagentDir, { recursive: true });
+		mkdirSync(workDir, { recursive: true });
+		mkdirSync(unrelatedWorkDir, { recursive: true });
+		mkdirSync(dirname(memorySentinel), { recursive: true });
+		writeFileSync(join(subagentDir, "child.jsonl"), "child");
+		writeFileSync(join(workDir, "document.txt"), "work");
+		writeFileSync(join(unrelatedWorkDir, "keep.txt"), "keep");
+		writeFileSync(recoveryArtifact, readFileSync(sessionFile));
+		writeFileSync(memorySentinel, "keep");
+		session.close();
+
+		const result = await deleteSessionFile(sessionFile, agentDir);
+
+		expect(result).toEqual({ ok: true, method: "trash" });
+		for (const removed of [sessionFile, subagentDir, workDir, recoveryArtifact]) {
+			expect(existsSync(removed), removed).toBe(false);
+		}
+		expect(readFileSync(join(unrelatedWorkDir, "keep.txt"), "utf8")).toBe("keep");
+		expect(readFileSync(memorySentinel, "utf8")).toBe("keep");
+	});
+
+	it("deletes active-path assets when the journal is archived", async () => {
+		const baseDir = mkdtempSync(join(tmpdir(), "arcmind-session-delete-archived-"));
+		tempDirs.push(baseDir);
+		const agentDir = join(baseDir, "agent");
+		const sessionsRoot = join(agentDir, "sessions");
+		const activeDir = join(sessionsRoot, "project");
+		const archivedDir = join(sessionsRoot, ".archive", "project");
+		mkdirSync(activeDir, { recursive: true });
+		mkdirSync(archivedDir, { recursive: true });
+		const session = SessionManager.create(baseDir, activeDir);
+		session.appendSessionInfo("Archived name");
+		session.appendMessage({
+			role: "user",
+			content: [{ type: "image", data: Buffer.from("image").toString("base64"), mimeType: "image/png" }],
+			timestamp: 1,
+		});
+		const activePath = session.getSessionFile()!;
+		const activeMetadata = getSessionDisplayMetadataPath(activePath);
+		const activeImageDir = getSessionImageDir(activePath);
+		const activeToolDir = getSessionToolOutputDir(activePath);
+		await persistToolOutputText("large result", activeToolDir);
+		session.close();
+		const archivedPath = join(archivedDir, basename(activePath));
+		renameSync(activePath, archivedPath);
+
+		const options = { agentDir, sessionsRoot };
+		const result = await SessionManager.deleteSession(archivedPath, options);
+
+		expect(result.ok).toBe(true);
+		expect(existsSync(archivedPath)).toBe(false);
+		expect(existsSync(activeImageDir)).toBe(false);
+		expect(existsSync(activeToolDir)).toBe(false);
+		expect(existsSync(activeMetadata)).toBe(false);
+	});
+
+	it("keeps the journal retryable when Trash is unavailable", async () => {
+		const baseDir = mkdtempSync(join(tmpdir(), "arcmind-session-delete-no-trash-"));
+		tempDirs.push(baseDir);
+		const session = SessionManager.create(baseDir, baseDir);
+		const sessionFile = session.getSessionFile()!;
+		session.close();
+
+		const result = await withoutTrash(() => deleteSessionFile(sessionFile));
+
+		expect(result).toMatchObject({ ok: false, method: "trash" });
+		expect(existsSync(sessionFile)).toBe(true);
 	});
 
 	it("succeeds when the session tool output directory is missing", async () => {
@@ -280,13 +416,13 @@ describe("session selector path/delete interactions", () => {
 		const toolOutputDir = getSessionToolOutputDir(sessionFile);
 		session.close();
 
-		const result = await withoutTrash(() => deleteSessionFile(sessionFile));
-		expect(result).toEqual({ ok: true, method: "unlink", warning: undefined });
+		const result = await deleteSessionFile(sessionFile);
+		expect(result).toEqual({ ok: true, method: "trash" });
 		expect(existsSync(sessionFile)).toBe(false);
 		expect(existsSync(toolOutputDir)).toBe(false);
 	});
 
-	it("warns when the session tool output directory cannot be removed", async () => {
+	it("keeps the session retryable when an owned target cannot be trashed", async () => {
 		const baseDir = mkdtempSync(join(tmpdir(), "arcmind-session-delete-tool-output-failure-"));
 		tempDirs.push(baseDir);
 		const session = SessionManager.create(baseDir, baseDir);
@@ -296,10 +432,9 @@ describe("session selector path/delete interactions", () => {
 		writeFileSync(toolOutputRoot, "not a directory");
 		session.close();
 
-		const result = await withoutTrash(() => deleteSessionFile(sessionFile));
-		expect(result).toMatchObject({ ok: true, method: "unlink" });
-		expect(result.warning).toContain("tool output");
-		expect(existsSync(sessionFile)).toBe(false);
+		const result = await deleteSessionFile(sessionFile);
+		expect(result).toMatchObject({ ok: false, method: "trash" });
+		expect(existsSync(sessionFile)).toBe(true);
 		expect(existsSync(toolOutputRoot)).toBe(true);
 	});
 
@@ -318,8 +453,8 @@ describe("session selector path/delete interactions", () => {
 		symlinkSync(externalDir, toolOutputDir, "dir");
 		session.close();
 
-		const result = await withoutTrash(() => deleteSessionFile(sessionFile));
-		expect(result).toEqual({ ok: true, method: "unlink", warning: undefined });
+		const result = await deleteSessionFile(sessionFile);
+		expect(result).toEqual({ ok: true, method: "trash" });
 		expect(existsSync(sessionFile)).toBe(false);
 		expect(existsSync(toolOutputDir)).toBe(false);
 		expect(existsSync(sentinel)).toBe(true);

@@ -228,7 +228,7 @@ describe("session attachments", () => {
 		).toThrow("regular file");
 	});
 
-	it("removes pending files and all submitted copies when the session is permanently deleted", async () => {
+	it("keeps submitted copies retryable when Trash is unavailable", async () => {
 		const source = join(cwd, "notes.docx");
 		writeFileSync(source, "document");
 		const session = SessionManager.create(cwd, join(root, "sessions"), { id: "session-3" });
@@ -251,12 +251,16 @@ describe("session attachments", () => {
 		const previousPath = process.env.PATH;
 		process.env.PATH = "";
 		try {
-			expect((await SessionManager.deleteSession(sessionFile, { agentDir })).ok).toBe(true);
+			expect(await SessionManager.deleteSession(sessionFile, { agentDir })).toMatchObject({
+				ok: false,
+				method: "trash",
+				code: "OPERATION_FAILED",
+			});
 		} finally {
 			if (previousPath === undefined) delete process.env.PATH;
 			else process.env.PATH = previousPath;
 		}
-		expect(existsSync(submitted.path)).toBe(false);
+		expect(existsSync(submitted.path)).toBe(true);
 		expect(existsSync(source)).toBe(true);
 	});
 });

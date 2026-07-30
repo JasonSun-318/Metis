@@ -66,7 +66,11 @@ import {
 	parseRuntimeControlEntry,
 	type RuntimeControlEntry,
 } from "./runtime-recovery.ts";
-import { formatSessionAttachmentDisplayText, getOwnedSessionAttachmentDir } from "./session-attachments.ts";
+import {
+	formatSessionAttachmentDisplayText,
+	getOwnedSessionAttachmentDir,
+	getOwnedSessionWorkDirs,
+} from "./session-attachments.ts";
 import {
 	isSessionControlEntryType,
 	isSessionDirectoryControlEntryType,
@@ -77,7 +81,12 @@ import {
 	type SubagentControlPayload,
 } from "./session-control.ts";
 import { assertValidSessionId, createSessionId } from "./session-id.ts";
-import { CorruptSessionError, openSessionJournal, type SessionJournal } from "./session-journal.ts";
+import {
+	CorruptSessionError,
+	getOwnedSessionJournalArtifacts,
+	openSessionJournal,
+	type SessionJournal,
+} from "./session-journal.ts";
 import { acquireModeProjectMutationLease, SessionLease, SessionLeaseError } from "./session-lease.ts";
 import { type CwdOrigin, getOwnedManagedWorkspace, publishManagedWorkspaceCopy } from "./session-workspace.ts";
 
@@ -750,8 +759,28 @@ export interface ImportSessionOptions {
 export interface DeleteSessionResult {
 	ok: boolean;
 	method: "trash" | "unlink";
+	code?: "SESSION_IN_USE" | "OPERATION_FAILED";
 	error?: string;
 	warning?: string;
+}
+
+function isSafeRelativePath(value: string): boolean {
+	return value !== "" && value !== ".." && !value.startsWith(`..${sep}`) && !isAbsolute(value);
+}
+
+function sessionStoragePathVariants(storagePath: string, sessionsRoot: string | undefined): readonly string[] {
+	if (!sessionsRoot) return [storagePath];
+	const root = canonicalPath(resolvePath(sessionsRoot));
+	const archiveRoot = join(root, ".archive");
+	const archivedRelative = relative(archiveRoot, storagePath);
+	if (isSafeRelativePath(archivedRelative)) {
+		return [join(root, archivedRelative), join(archiveRoot, archivedRelative)];
+	}
+	const activeRelative = relative(root, storagePath);
+	if (isSafeRelativePath(activeRelative) && !activeRelative.startsWith(`.archive${sep}`)) {
+		return [join(root, activeRelative), join(archiveRoot, activeRelative)];
+	}
+	return [storagePath];
 }
 
 export interface SessionEntryBase {
@@ -3927,7 +3956,12 @@ export class SessionManager {
 	/** Delete one closed session and only the assets ArcMind can prove it owns. */
 	static async deleteSession(
 		sessionPath: string,
-		options: { agentDir?: string; permanent?: boolean; expectedScheduled?: SessionHeader["scheduled"] } = {},
+		options: {
+			agentDir?: string;
+			sessionsRoot?: string;
+			permanent?: boolean;
+			expectedScheduled?: SessionHeader["scheduled"];
+		} = {},
 	): Promise<DeleteSessionResult> {
 		if (options.permanent && !options.expectedScheduled) {
 			return { ok: false, method: "unlink", error: "Permanent deletion requires scheduled-session ownership" };
@@ -3951,7 +3985,12 @@ export class SessionManager {
 		try {
 			lease = SessionLease.acquire(storagePath);
 		} catch (error) {
-			return { ok: false, method: "unlink", error: error instanceof Error ? error.message : String(error) };
+			return {
+				ok: false,
+				method: "unlink",
+				code: error instanceof SessionLeaseError ? "SESSION_IN_USE" : "OPERATION_FAILED",
+				error: error instanceof Error ? error.message : String(error),
+			};
 		}
 
 		try {
@@ -3977,8 +4016,6 @@ export class SessionManager {
 			) {
 				throw new Error("Scheduled session ownership marker does not match the requested task and run");
 			}
-			const imageDir = getSessionImageDir(storagePath);
-			const toolOutputDir = getSessionToolOutputDir(storagePath);
 			const agentDir = options.agentDir ?? getDefaultAgentDir();
 			const attachmentDir = getOwnedSessionAttachmentDir(agentDir, header.id);
 			const workspace = getOwnedManagedWorkspace({
@@ -3988,22 +4025,21 @@ export class SessionManager {
 				agentDir,
 			});
 			const subagentDir = getSessionSubagentDir(agentDir, header.id);
-			try {
-				rmSync(subagentDir, { recursive: true, force: true });
-				if (existsSync(subagentDir)) throw new Error("subagent directory still exists after removal");
-			} catch (error) {
-				return {
-					ok: false,
-					method: "unlink",
-					error: `subagents: ${error instanceof Error ? error.message : String(error)}`,
-				};
-			}
+			const pathDerivedTargets = sessionStoragePathVariants(storagePath, options.sessionsRoot).flatMap((path) => [
+				{ label: "display metadata", path: getSessionDisplayMetadataPath(path) },
+				{ label: "image", path: getSessionImageDir(path) },
+				{ label: "tool output", path: getSessionToolOutputDir(path) },
+				...getOwnedSessionJournalArtifacts(path).map((artifact) => ({ label: "journal recovery", path: artifact })),
+			]);
 			const ownedTargets = [
-				{ label: "image", path: imageDir },
-				{ label: "tool output", path: toolOutputDir },
+				...pathDerivedTargets,
+				{ label: "subagents", path: subagentDir },
 				...(attachmentDir ? [{ label: "attachment", path: attachmentDir }] : []),
 				...(workspace ? [{ label: "managed workspace", path: workspace }] : []),
-			];
+				...getOwnedSessionWorkDirs(agentDir, header.id).map((path) => ({ label: "document work", path })),
+			].filter(
+				(target, index, targets) => targets.findIndex((candidate) => candidate.path === target.path) === index,
+			);
 			const exists = (path: string): boolean => {
 				try {
 					lstatSync(path);
@@ -4012,7 +4048,6 @@ export class SessionManager {
 					return (error as NodeJS.ErrnoException).code !== "ENOENT";
 				}
 			};
-			const trashTargets = [storagePath, ...ownedTargets.filter(({ path }) => exists(path)).map(({ path }) => path)];
 			if (options.permanent) {
 				for (const target of ownedTargets) {
 					try {
@@ -4033,39 +4068,21 @@ export class SessionManager {
 					return { ok: false, method: "unlink", error: error instanceof Error ? error.message : String(error) };
 				}
 			}
-			const trashArgs = trashTargets.some((path) => path.startsWith("-")) ? ["--", ...trashTargets] : trashTargets;
-			const trashResult = spawnSync("trash", trashArgs, { encoding: "utf8" });
-			if (!exists(storagePath) && ownedTargets.every(({ path }) => !exists(path))) {
-				return { ok: true, method: "trash" };
-			}
-
-			try {
-				if (exists(storagePath)) unlinkSync(storagePath);
-			} catch (error) {
-				const trashHint = [trashResult.error?.message, trashResult.stderr?.trim().split("\n")[0]]
-					.filter(Boolean)
-					.join(" · ");
-				const message = error instanceof Error ? error.message : String(error);
-				return { ok: false, method: "unlink", error: trashHint ? `${message} (trash: ${trashHint})` : message };
-			}
-
-			const cleanupErrors: string[] = [];
-			for (const target of ownedTargets) {
-				try {
-					rmSync(target.path, { recursive: true, force: true });
-					if (exists(target.path)) throw new Error("target still exists after removal");
-				} catch (error) {
-					cleanupErrors.push(`${target.label}: ${error instanceof Error ? error.message : String(error)}`);
-				}
-			}
-			return {
-				ok: true,
-				method: "unlink",
-				warning:
-					cleanupErrors.length > 0
-						? `Some session asset directories could not be deleted: ${cleanupErrors.join("; ")}`
-						: undefined,
+			const moveToTrash = (targets: readonly string[]): string | undefined => {
+				if (targets.length === 0) return undefined;
+				const trashArgs = targets.some((path) => path.startsWith("-")) ? ["--", ...targets] : [...targets];
+				const result = spawnSync("trash", trashArgs, { encoding: "utf8" });
+				const remaining = targets.filter(exists);
+				if (remaining.length === 0) return undefined;
+				const detail = [result.error?.message, result.stderr?.trim().split("\n")[0]].filter(Boolean).join(" · ");
+				return `Trash did not remove ${remaining.length} target(s)${detail ? `: ${detail}` : ""}`;
 			};
+			const assetPaths = ownedTargets.filter(({ path }) => exists(path)).map(({ path }) => path);
+			const assetError = moveToTrash(assetPaths);
+			if (assetError) return { ok: false, method: "trash", code: "OPERATION_FAILED", error: assetError };
+			const journalError = moveToTrash([storagePath]);
+			if (journalError) return { ok: false, method: "trash", code: "OPERATION_FAILED", error: journalError };
+			return { ok: true, method: "trash" };
 		} catch (error) {
 			return { ok: false, method: "unlink", error: error instanceof Error ? error.message : String(error) };
 		} finally {
