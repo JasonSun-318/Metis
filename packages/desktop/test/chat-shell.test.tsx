@@ -1287,6 +1287,68 @@ describe("Chat desktop shell", () => {
 		await act(async () => root.unmount());
 	});
 
+	it("keeps unrelated navigation enabled while a model change is pending", async () => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		localStorage.setItem("arcmind.activeSessionId.chat", "chat-existing");
+		const { api } = createHarness();
+		let resolveChange!: () => void;
+		vi.mocked(api.setModel).mockImplementationOnce(() => new Promise<void>((resolve) => {
+			resolveChange = resolve;
+		}));
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<App api={api} store={new AppStore()} />));
+		await flush();
+
+		await act(async () => button(container, "Select model").click());
+		const otherModel = [...container.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')]
+			.find((candidate) => candidate.textContent?.includes("Other model"));
+		if (!otherModel) throw new Error("Missing Other model option");
+		act(() => otherModel.click());
+		await flush();
+
+		expect(button(container, "Select model").disabled).toBe(true);
+		expect(container.querySelectorAll(".session-sidebar button:disabled")).toHaveLength(0);
+		for (const label of ["Chat", "Code", "New task", "Skills", "Chat project task"]) {
+			expect(button(container, label).disabled, label).toBe(false);
+		}
+
+		await act(async () => resolveChange());
+		expect(button(container, "Select model").disabled).toBe(false);
+		await act(async () => root.unmount());
+	});
+
+	it("keeps unrelated navigation enabled while another session is opening", async () => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		localStorage.setItem("arcmind.activeSessionId.chat", "chat-existing");
+		const first = session("chat-existing", "chat", "/work/chat-project", "Chat project task");
+		const second = session("chat-other", "chat", "/work/chat-project", "Other chat task");
+		const { api } = createHarness({ sessions: [first, second] });
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<App api={api} store={new AppStore()} />));
+		await flush();
+		let resolveOpen!: (value: SessionSnapshot) => void;
+		vi.mocked(api.openSession).mockImplementationOnce(() => new Promise((resolve) => {
+			resolveOpen = resolve;
+		}));
+
+		act(() => button(container, "Other chat task").click());
+		await flush();
+
+		expect(container.textContent).toContain("Chat project task");
+		expect(container.querySelectorAll(".session-sidebar button:disabled")).toHaveLength(0);
+		for (const label of ["Chat", "Code", "New task", "Skills", "Chat project task"]) {
+			expect(button(container, label).disabled, label).toBe(false);
+		}
+
+		await act(async () => resolveOpen(snapshot(second)));
+		expect(container.querySelector('[data-active-session-id="chat-other"]')).not.toBeNull();
+		await act(async () => root.unmount());
+	});
+
 	it("resnapshots the current session when events race with a failed open", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 		localStorage.setItem("arcmind.activeSessionId.chat", "chat-existing");

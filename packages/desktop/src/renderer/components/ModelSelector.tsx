@@ -1,16 +1,17 @@
 import type { ModelOptionView, SessionSnapshot } from "@arcmind/app-protocol";
 import { CaretDown, Check } from "@phosphor-icons/react";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 interface ModelSelectorProps {
 	readonly available: readonly ModelOptionView[];
 	readonly disabled: boolean;
-	readonly onChange: (model: ModelOptionView) => void;
+	readonly onChange: (model: ModelOptionView) => void | Promise<void>;
 	readonly value: SessionSnapshot["model"];
 }
 
 export function ModelSelector({ available, disabled, onChange, value }: ModelSelectorProps) {
 	const [open, setOpen] = useState(false);
+	const [pending, setPending] = useState(false);
 	const rootRef = useRef<HTMLDivElement>(null);
 	const triggerRef = useRef<HTMLButtonElement>(null);
 	const selected = available.find((model) => model.provider === value?.provider && model.modelId === value.modelId);
@@ -19,6 +20,15 @@ export function ModelSelector({ available, disabled, onChange, value }: ModelSel
 		setOpen(false);
 		if (restoreFocus) triggerRef.current?.focus();
 	};
+	const selectModel = useCallback(async (model: ModelOptionView) => {
+		setOpen(false);
+		setPending(true);
+		try {
+			await onChange(model);
+		} finally {
+			setPending(false);
+		}
+	}, [onChange]);
 
 	useEffect(() => {
 		if (disabled) setOpen(false);
@@ -39,7 +49,7 @@ export function ModelSelector({ available, disabled, onChange, value }: ModelSel
 			if (!model) return;
 			event.preventDefault();
 			close(true);
-			onChange(model);
+			void selectModel(model).catch(() => undefined);
 		};
 		document.addEventListener("pointerdown", onPointerDown);
 		document.addEventListener("keydown", onKeyDown);
@@ -47,7 +57,7 @@ export function ModelSelector({ available, disabled, onChange, value }: ModelSel
 			document.removeEventListener("pointerdown", onPointerDown);
 			document.removeEventListener("keydown", onKeyDown);
 		};
-	}, [available, onChange, open]);
+	}, [available, open, selectModel]);
 
 	return (
 		<div className="composer-selector model-selector model-control" ref={rootRef}>
@@ -56,7 +66,7 @@ export function ModelSelector({ available, disabled, onChange, value }: ModelSel
 				aria-haspopup="menu"
 				aria-label="Select model"
 				className="composer-selector-trigger"
-				disabled={disabled || available.length === 0}
+				disabled={disabled || pending || available.length === 0}
 				onClick={() => setOpen((value) => !value)}
 				ref={triggerRef}
 				type="button"
@@ -74,8 +84,7 @@ export function ModelSelector({ available, disabled, onChange, value }: ModelSel
 								aria-checked={isSelected}
 								key={`${model.provider}/${model.modelId}`}
 								onClick={() => {
-									close();
-									if (!isSelected) onChange(model);
+									if (!isSelected) void selectModel(model).catch(() => undefined);
 								}}
 								role="menuitemradio"
 								type="button"
