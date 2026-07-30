@@ -10,6 +10,7 @@ interface NewTaskHomeProps {
 	readonly folderLocked: boolean;
 	readonly mode: AgentMode;
 	readonly modelControl?: ReactNode;
+	readonly permissionControl?: ReactNode;
 	readonly onChooseFolder: () => Promise<void>;
 	readonly onManageSkills: () => void;
 	readonly onPickFiles: () => Promise<readonly DesktopAttachmentSelection[]>;
@@ -28,6 +29,7 @@ export function NewTaskHome({
 	folderLocked,
 	mode,
 	modelControl,
+	permissionControl,
 	onChooseFolder,
 	onManageSkills,
 	onPickFiles,
@@ -47,6 +49,7 @@ export function NewTaskHome({
 						appearance="chat"
 						disabled={busy}
 						modelControl={modelControl}
+						permissionControl={permissionControl}
 						onInterrupt={async () => {}}
 						onManageSkills={onManageSkills}
 						onPickFiles={onPickFiles}

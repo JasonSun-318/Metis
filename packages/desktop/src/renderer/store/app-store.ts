@@ -19,6 +19,7 @@ import {
 	prependProjectionItems,
 	removeModeProjectSessions,
 	removePendingInteraction,
+	removeSession,
 	replaceProjectionSnapshot,
 	replaceSessionList,
 	restoreProjectionSyncStatus,
@@ -41,6 +42,7 @@ export interface AppStoreSnapshot {
 	readonly serverEpoch: string | null;
 	readonly cursor: number;
 	readonly syncStatus: "empty" | "ready" | "resubscribing" | "resnapshot_required";
+	readonly permissionMode: SessionSnapshot["permissionMode"];
 	readonly thinkingSelection: SessionSnapshot["thinkingSelection"];
 	readonly actualThinkingLevel: SessionSnapshot["actualThinkingLevel"];
 	readonly availableThinkingSelections: SessionSnapshot["availableThinkingSelections"];
@@ -82,6 +84,10 @@ export class AppStore {
 
 	removeModeProject(mode: AgentMode, cwd: string): void {
 		if (removeModeProjectSessions(this.state, mode, cwd)) this.commit();
+	}
+
+	removeSession(sessionId: string): void {
+		if (removeSession(this.state, sessionId)) this.commit();
 	}
 
 	applySnapshot(snapshot: SessionSnapshot): void {
@@ -161,6 +167,7 @@ export class AppStore {
 			serverEpoch: this.state.serverEpoch,
 			cursor: this.state.cursor,
 			syncStatus: this.state.syncStatus,
+			permissionMode: this.state.permissionMode,
 			thinkingSelection: this.state.thinkingSelection,
 			actualThinkingLevel: this.state.actualThinkingLevel,
 			availableThinkingSelections: this.state.availableThinkingSelections,

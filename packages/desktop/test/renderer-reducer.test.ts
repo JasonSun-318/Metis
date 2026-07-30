@@ -33,6 +33,7 @@ function item(itemId: string, text: string, state: ItemView["state"] = "streamin
 function snapshot(serverEpoch = EPOCH_A, cursor = 0, recentItems: ItemView[] = [item("item-1", "A")]): SessionSnapshot {
 	return {
 		session: session(),
+		permissionMode: "ask",
 		turns: [],
 		recentItems,
 		nextBeforeItemId: null,
@@ -122,11 +123,115 @@ describe("renderer projection reducer", () => {
 		expect(state.activeSessionId).toBeNull();
 		expect(state.itemOrder).toEqual([]);
 		expect(state.subagents).toEqual([]);
+		expect(state.permissionMode).toBe("ask");
 		expect(state.availableModels).toEqual([{ provider: "test", modelId: "model-a", name: "Model A" }]);
 		expect(state.model).toEqual({ provider: "test", modelId: "model-a" });
 		const afterFirst = store.getSnapshot();
 		store.removeModeProject("chat", "/work/root");
 		expect(store.getSnapshot()).toBe(afterFirst);
+	});
+
+	it("removes one session without clearing another active projection", () => {
+		const store = new AppStore();
+		store.applySnapshot(snapshot());
+		store.setSessions({ sessions: [session(), session("session-2")], nextAfterSessionId: null });
+
+		store.removeSession("session-2");
+		expect(store.getSnapshot().activeSessionId).toBe("session-1");
+		expect(store.getSnapshot().sessionOrder).toEqual(["session-1"]);
+		const afterFirst = store.getSnapshot();
+		store.removeSession("session-2");
+		expect(store.getSnapshot()).toBe(afterFirst);
+
+		store.addInteraction({
+			interactionId: "33333333-3333-4333-8333-333333333333",
+			sessionId: "other-session",
+			title: "Keep",
+			message: "Keep this interaction",
+			createdAt: "2026-07-16T00:00:00.000Z",
+			kind: "confirm",
+		});
+		store.removeSession("session-1");
+		expect(store.getSnapshot().activeSessionId).toBeNull();
+		expect(store.getSnapshot().syncStatus).toBe("empty");
+		expect(store.getSnapshot().interactionOrder).toEqual(["33333333-3333-4333-8333-333333333333"]);
+	});
+
+	it("applies terminal deletion and reload invalidations", () => {
+		const deleted = new AppStore();
+		deleted.applySnapshot(snapshot(EPOCH_A, 2));
+		deleted.setSessions({ sessions: [session(), session("session-2")], nextAfterSessionId: null });
+		expect(
+			deleted.applyBatch({
+				serverEpoch: EPOCH_A,
+				fromCursor: 3,
+				toCursor: 4,
+				events: [
+					{ type: "session/invalidated", sessionId: "session-2", reason: "deleted" },
+					{ type: "session/invalidated", sessionId: "session-1", reason: "deleted" },
+				],
+			}),
+		).toBe("applied");
+		expect(deleted.getSnapshot().activeSessionId).toBeNull();
+		expect(deleted.getSnapshot().syncStatus).toBe("empty");
+
+		const reload = new AppStore();
+		reload.applySnapshot(snapshot(EPOCH_A, 2));
+		expect(
+			reload.applyBatch({
+				serverEpoch: EPOCH_A,
+				fromCursor: 3,
+				toCursor: 3,
+				events: [{ type: "session/invalidated", sessionId: "session-1", reason: "reload_required" }],
+			}),
+		).toBe("resnapshot_required");
+		expect(reload.getSnapshot().syncStatus).toBe("resnapshot_required");
+	});
+
+	it("applies one project invalidation without removing the other mode", () => {
+		const store = new AppStore();
+		const chat = { ...session("chat-active"), mode: "chat" as const };
+		store.applySnapshot({ ...snapshot(EPOCH_A, 2), session: chat });
+		store.setSessions({
+			sessions: [chat, { ...session("code-preserved"), mode: "code", cwd: chat.cwd }],
+			nextAfterSessionId: null,
+		});
+
+		expect(
+			store.applyBatch({
+				serverEpoch: EPOCH_A,
+				fromCursor: 3,
+				toCursor: 3,
+				events: [{ type: "project/invalidated", mode: "chat", cwd: chat.cwd!, reason: "deleted" }],
+			}),
+		).toBe("applied");
+		expect(store.getSnapshot().activeSessionId).toBeNull();
+		expect(store.getSnapshot().sessionOrder).toEqual(["code-preserved"]);
+	});
+
+	it("replaces and streams the active session permission mode", () => {
+		const store = new AppStore();
+		store.applySnapshot(snapshot(EPOCH_A, 0));
+		expect(store.getSnapshot().permissionMode).toBe("ask");
+
+		expect(
+			store.applyBatch({
+				serverEpoch: EPOCH_A,
+				fromCursor: 1,
+				toCursor: 1,
+				events: [
+					{
+						type: "session/permissionModeChanged",
+						sessionId: "session-1",
+						permissionMode: "full",
+					},
+				],
+			}),
+		).toBe("applied");
+		expect(store.getSnapshot().permissionMode).toBe("full");
+
+		store.applySnapshot({ ...snapshot(EPOCH_B, 4), permissionMode: "ask" });
+		expect(store.getSnapshot().permissionMode).toBe("ask");
 	});
 
 	it("replaces the complete active projection on every snapshot", () => {

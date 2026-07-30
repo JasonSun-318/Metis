@@ -30,6 +30,7 @@ export interface MutableProjectionState {
 	serverEpoch: string | null;
 	cursor: number;
 	syncStatus: ProjectionSyncStatus;
+	permissionMode: SessionSnapshot["permissionMode"];
 	thinkingSelection: ThinkingSelectionView;
 	actualThinkingLevel: Exclude<ThinkingSelectionView, "ultra">;
 	availableThinkingSelections: ThinkingSelectionView[];
@@ -55,6 +56,7 @@ export function createProjectionState(): MutableProjectionState {
 		serverEpoch: null,
 		cursor: 0,
 		syncStatus: "empty",
+		permissionMode: "ask",
 		thinkingSelection: "off",
 		actualThinkingLevel: "off",
 		availableThinkingSelections: ["off"],
@@ -76,6 +78,33 @@ export function replaceSessionList(state: MutableProjectionState, sessions: read
 		state.sessionsById.set(active.sessionId, active);
 		state.sessionOrder.unshift(active.sessionId);
 	}
+}
+
+export function removeSession(state: MutableProjectionState, sessionId: string): boolean {
+	if (!state.sessionsById.delete(sessionId)) return false;
+	state.sessionOrder = state.sessionOrder.filter((candidate) => candidate !== sessionId);
+	state.notifications = state.notifications.filter((notification) => notification.sessionId !== sessionId);
+	for (const interactionId of state.interactionOrder) {
+		if (state.interactionsById.get(interactionId)?.sessionId === sessionId) {
+			state.interactionsById.delete(interactionId);
+		}
+	}
+	state.interactionOrder = state.interactionOrder.filter((interactionId) => state.interactionsById.has(interactionId));
+	if (state.activeSessionId !== sessionId) return true;
+
+	state.activeSessionId = null;
+	state.turnsById.clear();
+	state.turnOrder = [];
+	state.itemsById.clear();
+	state.itemOrder = [];
+	state.nextBeforeItemId = null;
+	state.activeTurnId = null;
+	state.serverEpoch = null;
+	state.cursor = 0;
+	state.syncStatus = "empty";
+	state.permissionMode = "ask";
+	state.subagents = [];
+	return true;
 }
 
 export function removeModeProjectSessions(state: MutableProjectionState, mode: AgentMode, cwd: string): boolean {
@@ -105,6 +134,7 @@ export function removeModeProjectSessions(state: MutableProjectionState, mode: A
 	state.serverEpoch = null;
 	state.cursor = 0;
 	state.syncStatus = "empty";
+	state.permissionMode = "ask";
 	state.subagents = [];
 	return true;
 }
@@ -143,6 +173,7 @@ export function replaceProjectionSnapshot(state: MutableProjectionState, snapsho
 	state.serverEpoch = snapshot.serverEpoch;
 	state.cursor = snapshot.cursor;
 	state.syncStatus = "ready";
+	state.permissionMode = snapshot.permissionMode;
 	state.thinkingSelection = snapshot.thinkingSelection;
 	state.actualThinkingLevel = snapshot.actualThinkingLevel;
 	state.availableThinkingSelections = snapshot.availableThinkingSelections;
@@ -174,6 +205,8 @@ function eventSessionId(event: DomainEvent): string | undefined {
 	switch (event.type) {
 		case "session/updated":
 			return event.session.sessionId;
+		case "session/invalidated":
+			return event.sessionId;
 		case "turn/started":
 		case "turn/completed":
 		case "turn/interrupted":
@@ -183,15 +216,25 @@ function eventSessionId(event: DomainEvent): string | undefined {
 			return event.item.sessionId;
 		case "item/delta":
 			return event.sessionId;
+		case "session/permissionModeChanged":
 		case "session/thinkingSelectionChanged":
 		case "subagent/updated":
 		case "session/modelChanged":
 			return event.sessionId;
 		case "interaction/notify":
 			return event.sessionId;
+		case "project/invalidated":
 		case "server/state":
 			return undefined;
 	}
+}
+
+function targetsActiveProject(
+	state: MutableProjectionState,
+	event: Extract<DomainEvent, { type: "project/invalidated" }>,
+): boolean {
+	const active = state.activeSessionId ? state.sessionsById.get(state.activeSessionId) : undefined;
+	return active?.scheduled === undefined && active?.mode === event.mode && active.cwd === event.cwd;
 }
 
 function canApplyEvents(state: MutableProjectionState, events: readonly DomainEvent[]): boolean {
@@ -200,6 +243,7 @@ function canApplyEvents(state: MutableProjectionState, events: readonly DomainEv
 	const itemStates = new Map<string, ItemView["state"]>();
 	for (const event of events) {
 		const sessionId = eventSessionId(event);
+		if (event.type === "session/invalidated") continue;
 		if (sessionId !== undefined && sessionId !== activeSessionId) return false;
 		switch (event.type) {
 			case "item/started":
@@ -240,8 +284,19 @@ function applyEvent(state: MutableProjectionState, event: DomainEvent): void {
 		case "interaction/notify":
 			state.notifications = [...state.notifications.slice(-99), structuredClone(event)];
 			return;
+		case "session/invalidated":
+			if (event.reason === "deleted") removeSession(state, event.sessionId);
+			else if (state.activeSessionId === event.sessionId) state.syncStatus = "resnapshot_required";
+			return;
+		case "project/invalidated":
+			if (event.reason === "deleted") removeModeProjectSessions(state, event.mode, event.cwd);
+			else if (targetsActiveProject(state, event)) state.syncStatus = "resnapshot_required";
+			return;
 		case "session/updated":
 			state.sessionsById.set(event.session.sessionId, structuredClone(event.session));
+			return;
+		case "session/permissionModeChanged":
+			state.permissionMode = event.permissionMode;
 			return;
 		case "session/thinkingSelectionChanged":
 			state.thinkingSelection = event.thinkingSelection;
@@ -302,7 +357,18 @@ export function applyConnectionEvents(state: MutableProjectionState, batch: Conn
 		return "resnapshot_required";
 	}
 
+	const reloadRequired = batch.events.some(
+		(event) =>
+			(event.type === "session/invalidated" &&
+				event.reason === "reload_required" &&
+				event.sessionId === state.activeSessionId) ||
+			(event.type === "project/invalidated" &&
+				event.reason === "reload_required" &&
+				targetsActiveProject(state, event)),
+	);
 	for (const event of batch.events) applyEvent(state, event);
+	if (reloadRequired) return "resnapshot_required";
+	if (state.activeSessionId === null) return "applied";
 	state.cursor = batch.toCursor;
 	return "applied";
 }

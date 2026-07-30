@@ -19,6 +19,7 @@ interface ComposerProps {
 	readonly onPickFiles?: () => Promise<readonly DesktopAttachmentSelection[]>;
 	readonly appearance?: "chat" | "code";
 	readonly modelControl?: ReactNode;
+	readonly permissionControl?: ReactNode;
 	readonly placeholder?: string;
 	readonly skills?: readonly SkillSummaryView[];
 	readonly submitDisabled?: boolean;
@@ -34,6 +35,7 @@ export function Composer({
 	onPickFiles,
 	appearance = "code",
 	modelControl,
+	permissionControl,
 	placeholder,
 	skills = [],
 	submitDisabled = false,
@@ -119,6 +121,7 @@ export function Composer({
 							onSelectSkill={setSelectedSkill}
 							skills={skills}
 						/>
+						{permissionControl}
 					</div>
 					<div className="composer-trailing">
 						{modelControl}

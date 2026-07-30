@@ -1,9 +1,10 @@
 import type { AgentMode, ClientResult, SessionSummary } from "@arcmind/app-protocol";
-import { ChatCircleDots, Code, FolderSimple, MagnifyingGlass, NotePencil, SidebarSimple, Sparkle } from "@phosphor-icons/react";
+import { ChatCircleDots, ClockCountdown, Code, FolderSimple, MagnifyingGlass, NotePencil, SidebarSimple, Sparkle } from "@phosphor-icons/react";
 import { useEffect, useState } from "react";
 import type { AppStoreSnapshot } from "../store/app-store.ts";
 import type { ProjectPreference, ProjectPreferenceMap } from "../store/project-preferences.ts";
 import { ProjectActions } from "./ProjectActions.tsx";
+import { SessionActions } from "./SessionActions.tsx";
 
 export type SidebarDestination = "tasks" | "skills";
 
@@ -16,6 +17,8 @@ interface SessionSidebarProps {
 	readonly onModeChange: (mode: AgentMode) => void;
 	readonly onNewTask: () => void;
 	readonly onOpen: (sessionId: string) => Promise<void>;
+	readonly onDeleteSession: (session: SessionSummary) => Promise<void>;
+	readonly onRenameSession: (session: SessionSummary, name: string) => Promise<void>;
 	readonly onCreateProjectSession: (group: ProjectSessionGroup) => Promise<void>;
 	readonly onDeleteProject: (
 		group: ProjectSessionGroup,
@@ -81,7 +84,7 @@ export function buildSessionTree(
 	};
 }
 
-function taskTitle(session: SessionSummary): string {
+export function taskTitle(session: SessionSummary): string {
 	if (session.name) return session.name;
 	return `Task · ${new Date(session.createdAt).toLocaleDateString([], { month: "short", day: "numeric" })}`;
 }
@@ -99,24 +102,43 @@ function windowIsFullscreen(): boolean {
 	return runtime.screen !== undefined && runtime.innerWidth === runtime.screen.width && runtime.innerHeight === runtime.screen.height;
 }
 
-function SessionButton({ busy, selected, session, onOpen }: {
+function SessionButton({ busy, deleteDisabled, onDelete, onRename, selected, session, onOpen }: {
 	readonly busy: boolean;
+	readonly deleteDisabled: boolean;
+	readonly onDelete: (session: SessionSummary) => Promise<void>;
+	readonly onRename: (session: SessionSummary, name: string) => Promise<void>;
 	readonly selected: boolean;
 	readonly session: SessionSummary;
 	readonly onOpen: (sessionId: string) => Promise<void>;
 }) {
+	const title = taskTitle(session);
 	return (
-		<button
-			aria-current={selected ? "page" : undefined}
-			className="session-button"
-			disabled={busy}
-			onClick={() => void onOpen(session.sessionId)}
-			title={taskTitle(session)}
-			type="button"
-		>
-			<span>{taskTitle(session)}</span>
-			{session.state !== "idle" && <small>{session.state.replace("_", " ")}</small>}
-		</button>
+		<div className="session-row" data-scheduled={session.scheduled ? "true" : undefined}>
+			<button
+				aria-current={selected ? "page" : undefined}
+				aria-label={title}
+				className="session-button"
+				disabled={busy}
+				onClick={() => void onOpen(session.sessionId)}
+				title={title}
+				type="button"
+			>
+				<span>{title}</span>
+				{session.scheduled
+					? <small className="session-scheduled-badge"><ClockCountdown aria-hidden="true" size={11} /> Scheduled</small>
+					: session.state !== "idle" && <small>{session.state.replace("_", " ")}</small>}
+			</button>
+			{!session.scheduled && (
+				<SessionActions
+					deleteDisabled={deleteDisabled}
+					disabled={busy}
+					displayName={title}
+					onDelete={onDelete}
+					onRename={onRename}
+					session={session}
+				/>
+			)}
+		</div>
 	);
 }
 
@@ -128,10 +150,13 @@ function ProjectGroup({
 	onCreateProjectSession,
 	onDeactivateActions,
 	onDeleteProject,
+	onDeleteSession,
 	onOpen,
 	onPinProject,
 	onPreviewProjectDelete,
 	onRenameProject,
+	onRenameSession,
+	isDeleteDisabled,
 	selectedSessionId,
 }: {
 	readonly actionsActive: boolean;
@@ -144,21 +169,31 @@ function ProjectGroup({
 		group: ProjectSessionGroup,
 		preview: ClientResult<"project/deletePreview">,
 	) => Promise<void>;
+	readonly onDeleteSession: (session: SessionSummary) => Promise<void>;
 	readonly onOpen: (sessionId: string) => Promise<void>;
 	readonly onPinProject: (group: ProjectSessionGroup, pinned: boolean) => void;
 	readonly onPreviewProjectDelete: (
 		group: ProjectSessionGroup,
 	) => Promise<ClientResult<"project/deletePreview">>;
 	readonly onRenameProject: (group: ProjectSessionGroup, alias: string) => void;
+	readonly onRenameSession: (session: SessionSummary, name: string) => Promise<void>;
+	readonly isDeleteDisabled: (session: SessionSummary) => boolean;
 	readonly selectedSessionId: string | null;
 }) {
 	const [open, setOpen] = useState(true);
 	return (
-		<details className="project-group" onToggle={(event) => setOpen((event.currentTarget as unknown as { open: boolean }).open)} open={open}>
-			<summary className="project-heading" title={group.cwd}>
+		<div className="project-group" data-open={open}>
+			<button
+				aria-expanded={open}
+				aria-label={`${open ? "Collapse" : "Expand"} ${group.name} project`}
+				className="project-heading"
+				onClick={() => setOpen((current) => !current)}
+				title={group.cwd}
+				type="button"
+			>
 				<FolderSimple aria-hidden="true" size={17} />
 				<span>{group.name}</span>
-			</summary>
+			</button>
 			<ProjectActions
 				active={actionsActive}
 				busy={busy}
@@ -171,12 +206,14 @@ function ProjectGroup({
 				onPreviewDelete={onPreviewProjectDelete}
 				onRename={onRenameProject}
 			/>
-			<div className="project-sessions">
-				{group.sessions.map((session) => (
-					<SessionButton busy={busy} key={session.sessionId} onOpen={onOpen} selected={selectedSessionId === session.sessionId} session={session} />
-				))}
+			<div className="project-drawer" inert={!open}>
+				<div className="project-sessions">
+					{group.sessions.map((session) => (
+						<SessionButton busy={busy} deleteDisabled={isDeleteDisabled(session)} key={session.sessionId} onDelete={onDeleteSession} onOpen={onOpen} onRename={onRenameSession} selected={selectedSessionId === session.sessionId} session={session} />
+					))}
+				</div>
 			</div>
-		</details>
+		</div>
 	);
 }
 
@@ -189,11 +226,13 @@ export function SessionSidebar({
 	onModeChange,
 	onNewTask,
 	onOpen,
+	onDeleteSession,
 	onCreateProjectSession,
 	onDeleteProject,
 	onPinProject,
 	onPreviewProjectDelete,
 	onRenameProject,
+	onRenameSession,
 	onSkills,
 	onToggle,
 	projectBusy,
@@ -210,6 +249,12 @@ export function SessionSidebar({
 		return () => runtime.removeEventListener?.("resize", updateFullscreen);
 	}, []);
 	useEffect(() => setActiveProjectActions(null), [destination, mode]);
+	const isDeleteDisabled = (session: SessionSummary) =>
+		session.state === "running" ||
+		(state.activeSessionId === session.sessionId && state.activeTurnId !== null) ||
+		state.interactionOrder.some((interactionId) =>
+			state.interactionsById.get(interactionId)?.sessionId === session.sessionId,
+		);
 
 	return (
 		<aside className="session-sidebar" aria-label="Tasks" data-fullscreen={fullscreen || undefined}>
@@ -254,10 +299,13 @@ export function SessionSidebar({
 						onCreateProjectSession={onCreateProjectSession}
 						onDeactivateActions={() => setActiveProjectActions(null)}
 						onDeleteProject={onDeleteProject}
+						onDeleteSession={onDeleteSession}
+						isDeleteDisabled={isDeleteDisabled}
 						onOpen={onOpen}
 						onPinProject={onPinProject}
 						onPreviewProjectDelete={onPreviewProjectDelete}
 						onRenameProject={onRenameProject}
+						onRenameSession={onRenameSession}
 						selectedSessionId={!newTaskOpen && destination === "tasks" ? state.activeSessionId : null}
 					/>
 				))}
@@ -265,7 +313,7 @@ export function SessionSidebar({
 					<section className="loose-tasks">
 						<h2>Tasks</h2>
 						{tree.tasks.map((session) => (
-							<SessionButton busy={busy} key={session.sessionId} onOpen={onOpen} selected={!newTaskOpen && destination === "tasks" && state.activeSessionId === session.sessionId} session={session} />
+							<SessionButton busy={busy} deleteDisabled={isDeleteDisabled(session)} key={session.sessionId} onDelete={onDeleteSession} onOpen={onOpen} onRename={onRenameSession} selected={!newTaskOpen && destination === "tasks" && state.activeSessionId === session.sessionId} session={session} />
 						))}
 					</section>
 				)}

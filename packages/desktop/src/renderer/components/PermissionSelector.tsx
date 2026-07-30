@@ -1,0 +1,116 @@
+import type { PermissionModeView } from "@arcmind/app-protocol";
+import { CaretDown, Check, Shield } from "@phosphor-icons/react";
+import { useCallback, useEffect, useRef, useState } from "react";
+
+interface PermissionSelectorProps {
+	readonly disabled: boolean;
+	readonly onChange: (mode: PermissionModeView) => void | Promise<void>;
+	readonly value: PermissionModeView;
+}
+
+const OPTIONS: ReadonlyArray<{
+	readonly value: PermissionModeView;
+	readonly label: string;
+	readonly description: string;
+}> = [
+	{
+		value: "ask",
+		label: "Ask before changes",
+		description: "Safe reads run directly; other model actions ask first.",
+	},
+	{
+		value: "full",
+		label: "Full access",
+		description: "Run model tools directly as your OS user without ArcMind approval.",
+	},
+];
+
+export function PermissionSelector({ disabled, onChange, value }: PermissionSelectorProps) {
+	const [open, setOpen] = useState(false);
+	const [pending, setPending] = useState(false);
+	const rootRef = useRef<HTMLDivElement>(null);
+	const triggerRef = useRef<HTMLButtonElement>(null);
+	const label = value === "ask" ? "Ask" : "Full";
+
+	const close = useCallback((restoreFocus = false) => {
+		setOpen(false);
+		if (restoreFocus) triggerRef.current?.focus();
+	}, []);
+	const select = useCallback(
+		async (mode: PermissionModeView) => {
+			setOpen(false);
+			if (mode === value) return;
+			setPending(true);
+			try {
+				await onChange(mode);
+			} finally {
+				setPending(false);
+			}
+		},
+		[onChange, value],
+	);
+
+	useEffect(() => {
+		if (disabled) close();
+	}, [close, disabled]);
+
+	useEffect(() => {
+		if (!open) return;
+		const onPointerDown = (event: PointerEvent) => {
+			if (!rootRef.current?.contains(event.target as Node)) close();
+		};
+		const onKeyDown = (event: KeyboardEvent) => {
+			if (event.key !== "Escape") return;
+			event.preventDefault();
+			close(true);
+		};
+		document.addEventListener("pointerdown", onPointerDown);
+		document.addEventListener("keydown", onKeyDown);
+		return () => {
+			document.removeEventListener("pointerdown", onPointerDown);
+			document.removeEventListener("keydown", onKeyDown);
+		};
+	}, [close, open]);
+
+	return (
+		<div className={`composer-selector permission-selector permission-${value}`} ref={rootRef}>
+			<button
+				aria-expanded={open}
+				aria-haspopup="menu"
+				aria-label={`Select permissions, current ${label}`}
+				className="composer-selector-trigger"
+				disabled={disabled || pending}
+				onClick={() => setOpen((current) => !current)}
+				ref={triggerRef}
+				type="button"
+			>
+				<Shield aria-hidden="true" size={14} weight={value === "full" ? "fill" : "regular"} />
+				<span>{label}</span>
+				<CaretDown aria-hidden="true" size={12} />
+			</button>
+			{open && (
+				<div aria-label="Permissions" className="permission-selector-popover" role="menu">
+					{OPTIONS.map((option) => {
+						const selected = option.value === value;
+						return (
+							<button
+								aria-checked={selected}
+								className={option.value === "full" ? "permission-full-option" : undefined}
+								key={option.value}
+								onClick={() => void select(option.value).catch(() => undefined)}
+								role="menuitemradio"
+								type="button"
+							>
+								<span>
+									<strong>{option.label}</strong>
+									<small>{option.description}</small>
+								</span>
+								{selected && <Check aria-hidden="true" size={16} weight="bold" />}
+							</button>
+						);
+					})}
+				</div>
+			)}
+		</div>
+	);
+}

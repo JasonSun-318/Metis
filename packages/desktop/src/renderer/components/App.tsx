@@ -1,8 +1,10 @@
 import {
 	type AgentMode,
 	type ClientResult,
+	type DomainEvent,
 	type InteractionResponseInput,
 	type InteractionView,
+	type PermissionModeView,
 	RPC_ERROR_CODES,
 	type SessionSummary,
 	type SkillSummaryView,
@@ -21,9 +23,11 @@ import {
 	setProjectPinned,
 } from "../store/project-preferences.ts";
 import { Composer, type ComposerSubmission } from "./Composer.tsx";
+import { CodeProjectSetup } from "./CodeProjectSetup.tsx";
 import { InteractionHost } from "./InteractionHost.tsx";
 import { ModelSelector } from "./ModelSelector.tsx";
 import { NewTaskHome } from "./NewTaskHome.tsx";
+import { PermissionSelector } from "./PermissionSelector.tsx";
 import { RecoveryBanner } from "./RecoveryBanner.tsx";
 import {
 	type ProjectSessionGroup,
@@ -43,6 +47,11 @@ interface NewTaskDraft {
 	readonly mode: AgentMode;
 	readonly folder: string | null;
 	readonly sessionId: string | null;
+	readonly permissionMode: PermissionModeView;
+}
+
+function emptyNewTaskDraft(mode: AgentMode): NewTaskDraft {
+	return { mode, folder: null, sessionId: null, permissionMode: "ask" };
 }
 
 function activeSessionKey(mode: AgentMode): string {
@@ -54,13 +63,27 @@ function projectKey(mode: AgentMode, cwd: string): string {
 }
 
 function projectActionError(cause: unknown): Error {
-	const code = typeof cause === "object" && cause !== null && "code" in cause ? Number(cause.code) : undefined;
+	const code = rpcErrorCode(cause);
 	if (code === RPC_ERROR_CODES.BUSY) return new Error("The project changed or is busy. Load a fresh preview and retry.");
 	if (code === RPC_ERROR_CODES.SESSION_IN_USE) return new Error("A project session is still in use. Close it and retry.");
 	if (code === RPC_ERROR_CODES.SESSION_CORRUPT) return new Error("A project session is corrupt or ambiguous. Nothing was removed.");
 	if (code === RPC_ERROR_CODES.SCHEDULE_STORE_CORRUPT) return new Error("Scheduled tasks could not be checked safely. Repair them before retrying.");
 	if (code === RPC_ERROR_CODES.OPERATION_FAILED) return new Error("The project could not be moved to Trash. Nothing was permanently deleted.");
 	return cause instanceof Error ? cause : new Error("The project operation could not be completed.");
+}
+
+function rpcErrorCode(cause: unknown): number | undefined {
+	return typeof cause === "object" && cause !== null && "code" in cause ? Number(cause.code) : undefined;
+}
+
+function sessionActionError(cause: unknown, action: "rename" | "delete"): Error {
+	const code = rpcErrorCode(cause);
+	if (code === RPC_ERROR_CODES.SESSION_IN_USE) return new Error("This session is still running or waiting for input.");
+	if (code === RPC_ERROR_CODES.READ_ONLY_SESSION) return new Error("Scheduled sessions are read-only.");
+	if (code === RPC_ERROR_CODES.OPERATION_FAILED) {
+		return new Error(action === "delete" ? "The session could not be moved to Trash." : "The session could not be renamed.");
+	}
+	return cause instanceof Error ? cause : new Error("The session operation could not be completed.");
 }
 
 export function titleFromPrompt(prompt: string): string {
@@ -122,15 +145,11 @@ export function App({ api, store }: AppProps) {
 	const [destination, setDestination] = useState<SidebarDestination>("tasks");
 	const [projectPreferences, setProjectPreferences] = useState(() => loadProjectPreferences(localStorage));
 	const [busyProjectKeys, setBusyProjectKeys] = useState<ReadonlySet<string>>(new Set());
-	const [newTaskDraft, setNewTaskDraft] = useState<NewTaskDraft | null>({
-		mode: "chat",
-		folder: null,
-		sessionId: null,
-	});
+	const [newTaskDraft, setNewTaskDraft] = useState<NewTaskDraft | null>(() => emptyNewTaskDraft("chat"));
 	const [sessionsSidebarOpen, setSessionsSidebarOpen] = useState(true);
 	const [toolsSidebarOpen, setToolsSidebarOpen] = useState(false);
 	const [bootstrapped, setBootstrapped] = useState(false);
-	const [busy, setBusy] = useState(false);
+	const [draftBusy, setDraftBusy] = useState(false);
 	const [loadingOlder, setLoadingOlder] = useState(false);
 	const [skills, setSkills] = useState<readonly SkillSummaryView[]>([]);
 	const [message, setMessage] = useState("Starting ArcMind…");
@@ -150,6 +169,8 @@ export function App({ api, store }: AppProps) {
 		new Map<string, { requestId: string; promise?: Promise<void> }>(),
 	);
 	const projectDeleteRequests = useRef(new Map<string, { requestId: string; revision: string }>());
+	const sessionRenameRequests = useRef(new Map<string, { name: string; requestId: string }>());
+	const sessionDeleteRequests = useRef(new Map<string, string>());
 
 	const reportError = useCallback((cause: unknown) => {
 		setError(cause instanceof Error ? cause.message : "ArcMind could not complete the request.");
@@ -160,7 +181,6 @@ export function App({ api, store }: AppProps) {
 			const projectionBeforeOpen = store.getSnapshot();
 			const generation = ++openGeneration.current;
 			openingSessionId.current = sessionId;
-			setBusy(true);
 			setError(null);
 			store.markResubscribing();
 			try {
@@ -188,7 +208,6 @@ export function App({ api, store }: AppProps) {
 			} finally {
 				if (generation === openGeneration.current) {
 					openingSessionId.current = null;
-					setBusy(false);
 				}
 			}
 		},
@@ -230,7 +249,75 @@ export function App({ api, store }: AppProps) {
 				store.addInteraction(envelope.params.interaction);
 				return;
 			}
-			if (store.applyBatch(envelope.params) === "resnapshot_required") {
+			const before = store.getSnapshot();
+			const activeSessionBefore = before.activeSessionId ? before.sessionsById.get(before.activeSessionId) : undefined;
+			const deletedInvalidations = envelope.params.events.filter(
+				(candidate): candidate is Extract<DomainEvent, { type: "session/invalidated" }> =>
+					candidate.type === "session/invalidated" && candidate.reason === "deleted",
+			);
+			const deletedProjects = envelope.params.events.filter(
+				(candidate): candidate is Extract<DomainEvent, { type: "project/invalidated" }> =>
+					candidate.type === "project/invalidated" && candidate.reason === "deleted",
+			);
+			if (
+				before.activeSessionId === null &&
+				envelope.params.events.every(
+					(candidate) => candidate.type === "session/invalidated" || candidate.type === "project/invalidated",
+				)
+			) {
+				for (const deleted of deletedInvalidations) store.removeSession(deleted.sessionId);
+				for (const deleted of deletedProjects) store.removeModeProject(deleted.mode, deleted.cwd);
+				return;
+			}
+			const sessionInvalidations = envelope.params.events.filter(
+				(candidate): candidate is Extract<DomainEvent, { type: "session/invalidated" }> =>
+					candidate.type === "session/invalidated" && candidate.sessionId === before.activeSessionId,
+			);
+			const invalidation =
+				sessionInvalidations.find((candidate) => candidate.reason === "deleted") ?? sessionInvalidations[0];
+			const invalidatedSession =
+				invalidation?.type === "session/invalidated" ? before.sessionsById.get(invalidation.sessionId) : undefined;
+			const projectInvalidations = activeSessionBefore && activeSessionBefore.scheduled === undefined
+				? envelope.params.events.filter(
+						(candidate): candidate is Extract<DomainEvent, { type: "project/invalidated" }> =>
+							candidate.type === "project/invalidated" &&
+							candidate.mode === activeSessionBefore.mode &&
+							candidate.cwd === activeSessionBefore.cwd,
+					)
+				: [];
+			const projectInvalidation =
+				projectInvalidations.find((candidate) => candidate.reason === "deleted") ?? projectInvalidations[0];
+			const applyResult = store.applyBatch(envelope.params);
+			for (const deleted of deletedInvalidations) store.removeSession(deleted.sessionId);
+			for (const deleted of deletedProjects) store.removeModeProject(deleted.mode, deleted.cwd);
+			if (
+				(invalidation?.type === "session/invalidated" &&
+					invalidation.reason === "deleted" &&
+					before.activeSessionId === invalidation.sessionId) ||
+				(projectInvalidation?.type === "project/invalidated" && projectInvalidation.reason === "deleted")
+			) {
+				const removedSession = invalidatedSession ?? activeSessionBefore;
+				openGeneration.current += 1;
+				openingSessionId.current = null;
+				if (before.activeSessionId) resnapshots.current.delete(before.activeSessionId);
+				activeTurnRequest.current = null;
+				newTaskCreateRequest.current = null;
+				newTaskTurnRequest.current = null;
+				if (removedSession) {
+					try {
+						if (localStorage.getItem(activeSessionKey(removedSession.mode)) === removedSession.sessionId) {
+							localStorage.removeItem(activeSessionKey(removedSession.mode));
+						}
+					} catch (cause) {
+						reportError(cause);
+					}
+					setMode(removedSession.mode);
+					setDestination("tasks");
+					setNewTaskDraft(emptyNewTaskDraft(removedSession.mode));
+				}
+				return;
+			}
+			if (applyResult === "resnapshot_required") {
 				if (openingSessionId.current) return;
 				const sessionId = store.getSnapshot().activeSessionId;
 				if (sessionId) void requestResnapshot(sessionId);
@@ -386,7 +473,7 @@ export function App({ api, store }: AppProps) {
 			if (removedActive) {
 				setMode(group.mode);
 				setDestination("tasks");
-				setNewTaskDraft({ mode: group.mode, folder: null, sessionId: null });
+				setNewTaskDraft(emptyNewTaskDraft(group.mode));
 			}
 			try {
 				await refreshSessions();
@@ -399,6 +486,65 @@ export function App({ api, store }: AppProps) {
 			throw error;
 		} finally {
 			setProjectBusy(key, false);
+		}
+	};
+	const renameSession = async (session: SessionSummary, name: string): Promise<void> => {
+		setError(null);
+		const previous = sessionRenameRequests.current.get(session.sessionId);
+		const requestId = previous?.name === name ? previous.requestId : crypto.randomUUID();
+		sessionRenameRequests.current.set(session.sessionId, { name, requestId });
+		try {
+			await api.renameSession({ sessionId: session.sessionId, requestId, name });
+			sessionRenameRequests.current.delete(session.sessionId);
+			await refreshSessions();
+		} catch (cause) {
+			const error = sessionActionError(cause, "rename");
+			reportError(error);
+			throw error;
+		}
+	};
+	const deleteSession = async (session: SessionSummary): Promise<void> => {
+		setError(null);
+		const removedActive = store.getSnapshot().activeSessionId === session.sessionId;
+		const requestId = sessionDeleteRequests.current.get(session.sessionId) ?? crypto.randomUUID();
+		sessionDeleteRequests.current.set(session.sessionId, requestId);
+		try {
+			const deleted = await api.deleteSession({ sessionId: session.sessionId, requestId });
+			sessionDeleteRequests.current.delete(session.sessionId);
+			if (removedActive) {
+				openGeneration.current += 1;
+				openingSessionId.current = null;
+				resnapshots.current.delete(session.sessionId);
+			}
+			store.removeSession(session.sessionId);
+			try {
+				if (localStorage.getItem(activeSessionKey(session.mode)) === session.sessionId) {
+					localStorage.removeItem(activeSessionKey(session.mode));
+				}
+			} catch (cause) {
+				reportError(cause);
+			}
+			if (removedActive) {
+				setMode(session.mode);
+				setDestination("tasks");
+				setNewTaskDraft(emptyNewTaskDraft(session.mode));
+				activeTurnRequest.current = null;
+				newTaskCreateRequest.current = null;
+				newTaskTurnRequest.current = null;
+			}
+			if (deleted.warning) setError(deleted.warning);
+			try {
+				await refreshSessions();
+			} catch (cause) {
+				reportError(cause);
+			}
+		} catch (cause) {
+			if (removedActive && rpcErrorCode(cause) === RPC_ERROR_CODES.OPERATION_FAILED) {
+				await requestResnapshot(session.sessionId);
+			}
+			const error = sessionActionError(cause, "delete");
+			reportError(error);
+			throw error;
 		}
 	};
 
@@ -415,7 +561,7 @@ export function App({ api, store }: AppProps) {
 	};
 
 	const chooseNewTaskFolder = async () => {
-		setBusy(true);
+		setDraftBusy(true);
 		setError(null);
 		try {
 			const folder = await api.selectProjectFolder();
@@ -445,7 +591,7 @@ export function App({ api, store }: AppProps) {
 		const rememberedSessionId = localStorage.getItem(activeSessionKey(nextMode));
 		const rememberedSession = rememberedSessionId ? state.sessionsById.get(rememberedSessionId) : undefined;
 		if (!rememberedSession || rememberedSession.mode !== nextMode) {
-			setNewTaskDraft({ mode: nextMode, folder: null, sessionId: null });
+			setNewTaskDraft(emptyNewTaskDraft(nextMode));
 			newTaskCreateRequest.current = null;
 			newTaskTurnRequest.current = null;
 			return;
@@ -457,7 +603,7 @@ export function App({ api, store }: AppProps) {
 				newTaskTurnRequest.current = null;
 			})
 			.catch(() => {
-				setNewTaskDraft({ mode: nextMode, folder: null, sessionId: null });
+				setNewTaskDraft(emptyNewTaskDraft(nextMode));
 				newTaskCreateRequest.current = null;
 				newTaskTurnRequest.current = null;
 			});
@@ -467,13 +613,18 @@ export function App({ api, store }: AppProps) {
 
 	const submitNewTaskDraft = async (input: ComposerSubmission) => {
 		if (!visibleNewTaskDraft || (visibleNewTaskDraft.mode === "code" && !visibleNewTaskDraft.folder)) return;
-		setBusy(true);
+		setDraftBusy(true);
 		setError(null);
 		try {
 			let sessionId = visibleNewTaskDraft.sessionId;
 			if (!sessionId) {
 				const name = titleFromPrompt(input.text || input.skill?.name || input.attachments[0]?.name || (visibleNewTaskDraft.mode === "chat" ? "Chat" : "Code"));
-				const createKey = JSON.stringify({ mode: visibleNewTaskDraft.mode, cwd: visibleNewTaskDraft.folder, name });
+				const createKey = JSON.stringify({
+					mode: visibleNewTaskDraft.mode,
+					cwd: visibleNewTaskDraft.folder,
+					name,
+					permissionMode: visibleNewTaskDraft.permissionMode,
+				});
 				const createRequest = newTaskCreateRequest.current?.key === createKey
 					? newTaskCreateRequest.current
 					: { key: createKey, requestId: crypto.randomUUID() };
@@ -483,6 +634,7 @@ export function App({ api, store }: AppProps) {
 					mode: visibleNewTaskDraft.mode,
 					...(visibleNewTaskDraft.folder ? { cwd: visibleNewTaskDraft.folder } : {}),
 					name,
+					permissionMode: visibleNewTaskDraft.permissionMode,
 				});
 				sessionId = created.session.sessionId;
 				setNewTaskDraft((draft) => draft?.mode === visibleNewTaskDraft.mode ? { ...draft, sessionId } : draft);
@@ -490,7 +642,6 @@ export function App({ api, store }: AppProps) {
 			}
 			await refreshSessions();
 			await openSession(sessionId);
-			setBusy(true);
 			const turnKey = JSON.stringify({ sessionId, input: composerRequestKey(input) });
 			const turnRequest = newTaskTurnRequest.current?.key === turnKey
 				? newTaskTurnRequest.current
@@ -504,7 +655,7 @@ export function App({ api, store }: AppProps) {
 			reportError(cause);
 			throw cause;
 		} finally {
-			setBusy(false);
+			setDraftBusy(false);
 		}
 	};
 
@@ -541,7 +692,7 @@ export function App({ api, store }: AppProps) {
 	const interactiveSessionId =
 		destination === "tasks" && openingSession?.mode === mode
 			? openingSession.sessionId
-			: visibleActiveSession?.sessionId;
+			: visibleActiveSession?.sessionId ?? visibleNewTaskDraft?.sessionId ?? undefined;
 	const visibleInteraction = firstInteractionForSession(
 		state.interactionOrder,
 		state.interactionsById,
@@ -555,6 +706,14 @@ export function App({ api, store }: AppProps) {
 		if (!visibleActiveSession) return;
 		setError(null);
 		try {
+			if (!running && !visibleActiveSession.name) {
+				const name = titleFromPrompt(input.text || input.skill?.name || input.attachments[0]?.name || (visibleActiveSession.mode === "chat" ? "Chat" : "Code"));
+				try {
+					await renameSession(visibleActiveSession, name);
+				} catch {
+					// A display-only name must not block the submitted turn.
+				}
+			}
 			const key = JSON.stringify({ sessionId: visibleActiveSession.sessionId, input: composerRequestKey(input) });
 			const request = activeTurnRequest.current?.key === key
 				? activeTurnRequest.current
@@ -610,7 +769,6 @@ export function App({ api, store }: AppProps) {
 	};
 
 	const changeModel = async (sessionId: string, model: AppStoreSnapshot["availableModels"][number]) => {
-		setBusy(true);
 		try {
 			await api.setModel({
 				sessionId,
@@ -620,8 +778,16 @@ export function App({ api, store }: AppProps) {
 			});
 		} catch (cause) {
 			reportError(cause);
-		} finally {
-			setBusy(false);
+		}
+	};
+
+	const changePermissionMode = async (sessionId: string, permissionMode: PermissionModeView) => {
+		try {
+			await api.setPermissionMode({ sessionId, requestId: crypto.randomUUID(), permissionMode });
+		} catch (cause) {
+			if (store.getSnapshot().activeSessionId === sessionId) await requestResnapshot(sessionId);
+			reportError(cause);
+			throw cause;
 		}
 	};
 
@@ -631,8 +797,8 @@ export function App({ api, store }: AppProps) {
 	const modelControl = configurationSession ? (
 		<ModelSelector
 			available={state.availableModels}
-			disabled={busy || !serverReady}
-			onChange={(model) => void changeModel(configurationSession.sessionId, model)}
+			disabled={!serverReady}
+			onChange={(model) => changeModel(configurationSession.sessionId, model)}
 			value={state.model}
 		/>
 	) : undefined;
@@ -641,9 +807,37 @@ export function App({ api, store }: AppProps) {
 		<ThinkingSelector
 			actualThinkingLevel={state.actualThinkingLevel}
 			available={state.availableThinkingSelections}
-			disabled={busy || !serverReady}
+			disabled={!serverReady}
 			onChange={(selection) => void changeThinking(configurationSession.sessionId, selection)}
 			value={state.thinkingSelection}
+		/>
+	) : undefined;
+	const permissionSessionId = visibleNewTaskDraft?.sessionId ?? visibleActiveSession?.sessionId;
+	const permissionSession = permissionSessionId ? state.sessionsById.get(permissionSessionId) : undefined;
+	const permissionSessionOpen = permissionSessionId === undefined || state.activeSessionId === permissionSessionId;
+	const permissionSessionRunning = permissionSession?.state === "running" ||
+		(permissionSessionId !== undefined && state.activeSessionId === permissionSessionId && state.activeTurnId !== null);
+	const draftCreatePending = visibleNewTaskDraft?.sessionId === null && newTaskCreateRequest.current !== null;
+	const permissionControl = visibleNewTaskDraft ? (
+		<PermissionSelector
+			disabled={
+				draftBusy ||
+				!serverReady ||
+				draftCreatePending ||
+				!permissionSessionOpen ||
+				permissionSessionRunning ||
+				visibleInteraction !== undefined
+			}
+			onChange={(permissionMode) => permissionSessionId
+				? changePermissionMode(permissionSessionId, permissionMode)
+				: setNewTaskDraft((draft) => draft?.mode === mode ? { ...draft, permissionMode } : draft)}
+			value={permissionSessionId && permissionSessionOpen ? state.permissionMode : visibleNewTaskDraft.permissionMode}
+		/>
+	) : visibleActiveSession ? (
+		<PermissionSelector
+			disabled={!serverReady || running || visibleInteraction !== undefined}
+			onChange={(permissionMode) => changePermissionMode(visibleActiveSession.sessionId, permissionMode)}
+			value={state.permissionMode}
 		/>
 	) : undefined;
 	const pickAttachmentFiles = async () => {
@@ -658,18 +852,20 @@ export function App({ api, store }: AppProps) {
 	return (
 		<div className={`app-shell${sessionsSidebarOpen ? "" : " sessions-sidebar-collapsed"}`}>
 			{sessionsSidebarOpen && <SessionSidebar
-				busy={!bootstrapped || busy || !serverReady}
+				busy={!bootstrapped || draftBusy || !serverReady}
 				destination={destination}
 				mode={mode}
 				newTaskOpen={newTaskOpen}
 				onCreateProjectSession={createEmptyProjectSession}
 				onDeleteProject={deleteProject}
+				onDeleteSession={deleteSession}
 				onModeChange={changeMode}
 				onNewTask={startNewTask}
 				onOpen={openVisibleSession}
 				onPinProject={pinProject}
 				onPreviewProjectDelete={previewProjectDelete}
 				onRenameProject={renameProject}
+				onRenameSession={renameSession}
 				onSkills={() => setDestination("skills")}
 				onToggle={() => setSessionsSidebarOpen(false)}
 				preferences={projectPreferences}
@@ -712,13 +908,26 @@ export function App({ api, store }: AppProps) {
 				)}
 				{!bootstrapped ? null : destination === "skills" ? (
 					<SkillsPanel api={api} preferences={projectPreferences} serverReady={serverReady} state={state} />
+				) : newTaskOpen && mode === "code" ? (
+					<CodeProjectSetup
+						busy={draftBusy || !serverReady}
+						onCancel={cancelNewTask}
+						onChooseExisting={chooseCodeProjectFolder}
+						onChooseLocation={chooseCodeProjectFolder}
+						onCreateProject={createCodeProjectFolder}
+						onGetDefaultLocation={api.getDefaultProjectLocation}
+						onOpenProject={(cwd) => createEmptySessionInProject("code", cwd)}
+						onPickFiles={pickAttachmentFiles}
+						onResolveDroppedFiles={api.resolveDroppedFiles}
+					/>
 				) : newTaskOpen ? (
 					<NewTaskHome
-						busy={busy || !serverReady}
+						busy={draftBusy || !serverReady}
 						folder={visibleNewTaskDraft.folder}
 						folderLocked={visibleNewTaskDraft.sessionId !== null}
 						mode={mode}
 						modelControl={modelControl}
+						permissionControl={permissionControl}
 						onChooseFolder={chooseNewTaskFolder}
 						onManageSkills={() => setDestination("skills")}
 						onPickFiles={pickAttachmentFiles}
