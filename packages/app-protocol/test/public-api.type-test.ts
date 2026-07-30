@@ -4,6 +4,7 @@ import type {
 	ConnectionEventsParams,
 	InteractionResponseInput,
 	ItemView,
+	PermissionModeView,
 	SessionSnapshot,
 	SessionSummary,
 	SkillSummaryView,
@@ -29,6 +30,21 @@ const projectDeleteResult = {
 	deletedSessionCount: 1,
 } satisfies ClientResult<"project/delete">;
 
+const sessionRename = {
+	sessionId: "11111111-1111-4111-8111-111111111111",
+	requestId: "00000000-0000-4000-8000-000000000002",
+	name: "Renamed session",
+} satisfies ClientParams<"session/rename">;
+const sessionDelete = {
+	sessionId: sessionRename.sessionId,
+	requestId: "00000000-0000-4000-8000-000000000003",
+} satisfies ClientParams<"session/delete">;
+const _sessionDeleteResult = {
+	sessionId: sessionDelete.sessionId,
+	deleted: true,
+	method: "trash",
+} satisfies ClientResult<"session/delete">;
+
 const session = {
 	sessionId: "11111111-1111-4111-8111-111111111111",
 	mode: "code",
@@ -49,6 +65,7 @@ const skill = {
 } satisfies SkillSummaryView;
 const snapshot: SessionSnapshot = {
 	session,
+	permissionMode: "ask",
 	turns,
 	recentItems: items,
 	nextBeforeItemId: null,
@@ -61,6 +78,7 @@ const snapshot: SessionSnapshot = {
 	serverEpoch: "33333333-3333-4333-8333-333333333333",
 	cursor: 0,
 };
+const permissionMode: PermissionModeView = snapshot.permissionMode;
 const events: ConnectionEventsParams = {
 	serverEpoch: snapshot.serverEpoch,
 	fromCursor: 1,
@@ -79,3 +97,4 @@ void skill;
 void projectDelete;
 void projectDeletePreview;
 void projectDeleteResult;
+void permissionMode;

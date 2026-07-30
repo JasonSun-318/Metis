@@ -277,6 +277,8 @@ describe("golden protocol fixtures", () => {
 		expect(new Set(eventTypes)).toEqual(
 			new Set([
 				"session/updated",
+				"session/invalidated",
+				"project/invalidated",
 				"turn/started",
 				"turn/completed",
 				"turn/interrupted",
@@ -284,6 +286,7 @@ describe("golden protocol fixtures", () => {
 				"item/delta",
 				"item/completed",
 				"interaction/notify",
+				"session/permissionModeChanged",
 				"session/thinkingSelectionChanged",
 				"session/modelChanged",
 				"subagent/updated",
@@ -297,6 +300,21 @@ describe("golden protocol fixtures", () => {
 				"schedule/refreshed",
 			]),
 		);
+	});
+
+	it("accepts terminal session invalidation notifications", () => {
+		const notification = {
+			jsonrpc: "2.0",
+			method: "connection/events",
+			params: {
+				serverEpoch: EPOCH,
+				fromCursor: 1,
+				toCursor: 1,
+				events: [{ type: "session/invalidated", sessionId: SESSION_ID, reason: "deleted" }],
+			},
+		};
+
+		expect(validateServerNotification(notification)).toEqual(notification);
 	});
 
 	it("requires configuration only for non-closed subagent summaries", () => {
@@ -364,6 +382,44 @@ describe("golden protocol fixtures", () => {
 		const event = envelope.params.events.find((candidate) => candidate.type === "subagent/updated")!;
 		event.subagent!.configuration![field] = value;
 		expect(() => validateServerNotification(envelope)).toThrow(ProtocolValidationError);
+	});
+
+	it("rejects legacy auto for primary session permissions", () => {
+		const request = structuredClone(requestFor("client", "session/setPermissionMode").envelope) as {
+			params: { permissionMode: string };
+		};
+		request.params.permissionMode = "auto";
+		expect(() => validateClientRequest(request)).toThrow(ProtocolValidationError);
+	});
+
+	it("rejects invalid session action parameters", () => {
+		expect(() =>
+			validateClientRequest(
+				makeClientRequest("session/rename", {
+					sessionId: "session-a",
+					requestId: RUN_ID,
+					name: "",
+				}),
+			),
+		).toThrow(ProtocolValidationError);
+		expect(() =>
+			validateClientRequest(
+				makeClientRequest("session/rename", {
+					sessionId: "session-a",
+					requestId: RUN_ID,
+					name: "Renamed",
+					extra: true,
+				}),
+			),
+		).toThrow(ProtocolValidationError);
+		expect(() =>
+			validateClientRequest(
+				makeClientRequest("session/delete", {
+					sessionId: "bad/session",
+					requestId: RUN_ID,
+				}),
+			),
+		).toThrow(ProtocolValidationError);
 	});
 
 	it("pins every standard and ArcMind error", () => {

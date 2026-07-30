@@ -369,6 +369,18 @@
                       "type": "string",
                       "maxLength": 256,
                       "x-arcmind-maxUtf16Units": 256
+                    },
+                    "permissionMode": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "const": "ask"
+                        },
+                        {
+                          "type": "string",
+                          "const": "full"
+                        }
+                      ]
                     }
                   },
                   "additionalProperties": false
@@ -497,6 +509,103 @@
                 "method": {
                   "type": "string",
                   "const": "session/close"
+                },
+                "params": {
+                  "type": "object",
+                  "required": [
+                    "requestId",
+                    "sessionId"
+                  ],
+                  "properties": {
+                    "requestId": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "sessionId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "jsonrpc",
+                "id",
+                "method",
+                "params"
+              ],
+              "properties": {
+                "jsonrpc": {
+                  "type": "string",
+                  "const": "2.0"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "x-arcmind-maxUtf16Units": 128
+                },
+                "method": {
+                  "type": "string",
+                  "const": "session/rename"
+                },
+                "params": {
+                  "type": "object",
+                  "required": [
+                    "sessionId",
+                    "requestId",
+                    "name"
+                  ],
+                  "properties": {
+                    "sessionId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                    },
+                    "requestId": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "name": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256,
+                      "x-arcmind-maxUtf16Units": 256
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "jsonrpc",
+                "id",
+                "method",
+                "params"
+              ],
+              "properties": {
+                "jsonrpc": {
+                  "type": "string",
+                  "const": "2.0"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "x-arcmind-maxUtf16Units": 128
+                },
+                "method": {
+                  "type": "string",
+                  "const": "session/delete"
                 },
                 "params": {
                   "type": "object",
@@ -767,6 +876,64 @@
                         {
                           "type": "string",
                           "const": "ultra"
+                        }
+                      ]
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "jsonrpc",
+                "id",
+                "method",
+                "params"
+              ],
+              "properties": {
+                "jsonrpc": {
+                  "type": "string",
+                  "const": "2.0"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "x-arcmind-maxUtf16Units": 128
+                },
+                "method": {
+                  "type": "string",
+                  "const": "session/setPermissionMode"
+                },
+                "params": {
+                  "type": "object",
+                  "required": [
+                    "sessionId",
+                    "requestId",
+                    "permissionMode"
+                  ],
+                  "properties": {
+                    "sessionId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                    },
+                    "requestId": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "permissionMode": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "const": "ask"
+                        },
+                        {
+                          "type": "string",
+                          "const": "full"
                         }
                       ]
                     }
@@ -2659,6 +2826,83 @@
                         "type": "object",
                         "required": [
                           "type",
+                          "sessionId",
+                          "reason"
+                        ],
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "const": "session/invalidated"
+                          },
+                          "sessionId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                          },
+                          "reason": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "const": "deleted"
+                              },
+                              {
+                                "type": "string",
+                                "const": "reload_required"
+                              }
+                            ]
+                          }
+                        },
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "required": [
+                          "type",
+                          "mode",
+                          "cwd",
+                          "reason"
+                        ],
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "const": "project/invalidated"
+                          },
+                          "mode": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "const": "chat"
+                              },
+                              {
+                                "type": "string",
+                                "const": "code"
+                              }
+                            ]
+                          },
+                          "cwd": {
+                            "type": "string",
+                            "minLength": 1,
+                            "x-arcmind-maxUtf8Bytes": 32768
+                          },
+                          "reason": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "const": "deleted"
+                              },
+                              {
+                                "type": "string",
+                                "const": "reload_required"
+                              }
+                            ]
+                          }
+                        },
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "required": [
+                          "type",
                           "turn"
                         ],
                         "properties": {
@@ -3788,6 +4032,38 @@
                           "message": {
                             "type": "string",
                             "x-arcmind-maxUtf8Bytes": 65536
+                          }
+                        },
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "required": [
+                          "type",
+                          "sessionId",
+                          "permissionMode"
+                        ],
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "const": "session/permissionModeChanged"
+                          },
+                          "sessionId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                          },
+                          "permissionMode": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "const": "ask"
+                              },
+                              {
+                                "type": "string",
+                                "const": "full"
+                              }
+                            ]
                           }
                         },
                         "additionalProperties": false
@@ -6413,6 +6689,216 @@
                 "result": {
                   "type": "object",
                   "required": [
+                    "sessionId",
+                    "deleted",
+                    "method"
+                  ],
+                  "properties": {
+                    "sessionId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                    },
+                    "deleted": {
+                      "type": "boolean",
+                      "const": true
+                    },
+                    "method": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "const": "trash"
+                        },
+                        {
+                          "type": "string",
+                          "const": "unlink"
+                        }
+                      ]
+                    },
+                    "warning": {
+                      "type": "string",
+                      "x-arcmind-maxUtf8Bytes": 65536
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "jsonrpc",
+                "id",
+                "result"
+              ],
+              "properties": {
+                "jsonrpc": {
+                  "type": "string",
+                  "const": "2.0"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "x-arcmind-maxUtf16Units": 128
+                },
+                "result": {
+                  "type": "object",
+                  "required": [
+                    "session"
+                  ],
+                  "properties": {
+                    "session": {
+                      "type": "object",
+                      "required": [
+                        "sessionId",
+                        "mode",
+                        "cwdOrigin",
+                        "cwd",
+                        "createdAt",
+                        "updatedAt",
+                        "state",
+                        "archived"
+                      ],
+                      "properties": {
+                        "sessionId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                        },
+                        "name": {
+                          "type": "string",
+                          "maxLength": 256,
+                          "x-arcmind-maxUtf16Units": 256
+                        },
+                        "mode": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "const": "chat"
+                            },
+                            {
+                              "type": "string",
+                              "const": "code"
+                            }
+                          ]
+                        },
+                        "cwdOrigin": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "const": "managed"
+                            },
+                            {
+                              "type": "string",
+                              "const": "user-selected"
+                            }
+                          ]
+                        },
+                        "cwd": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "minLength": 1,
+                              "x-arcmind-maxUtf8Bytes": 32768
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time",
+                          "maxLength": 40
+                        },
+                        "updatedAt": {
+                          "type": "string",
+                          "format": "date-time",
+                          "maxLength": 40
+                        },
+                        "state": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "const": "idle"
+                            },
+                            {
+                              "type": "string",
+                              "const": "running"
+                            },
+                            {
+                              "type": "string",
+                              "const": "interrupted"
+                            },
+                            {
+                              "type": "string",
+                              "const": "corrupt"
+                            },
+                            {
+                              "type": "string",
+                              "const": "in_use"
+                            }
+                          ]
+                        },
+                        "archived": {
+                          "type": "boolean"
+                        },
+                        "recoveryNotice": {
+                          "type": "string",
+                          "x-arcmind-maxUtf8Bytes": 65536
+                        },
+                        "scheduled": {
+                          "type": "object",
+                          "required": [
+                            "taskId",
+                            "runId"
+                          ],
+                          "properties": {
+                            "taskId": {
+                              "type": "string",
+                              "minLength": 1,
+                              "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                            },
+                            "runId": {
+                              "type": "string",
+                              "minLength": 1,
+                              "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                            }
+                          },
+                          "additionalProperties": false
+                        }
+                      },
+                      "additionalProperties": false
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "jsonrpc",
+                "id",
+                "result"
+              ],
+              "properties": {
+                "jsonrpc": {
+                  "type": "string",
+                  "const": "2.0"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "x-arcmind-maxUtf16Units": 128
+                },
+                "result": {
+                  "type": "object",
+                  "required": [
                     "session"
                   ],
                   "properties": {
@@ -6573,6 +7059,7 @@
                       "type": "object",
                       "required": [
                         "session",
+                        "permissionMode",
                         "turns",
                         "recentItems",
                         "nextBeforeItemId",
@@ -6708,6 +7195,18 @@
                             }
                           },
                           "additionalProperties": false
+                        },
+                        "permissionMode": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "const": "ask"
+                            },
+                            {
+                              "type": "string",
+                              "const": "full"
+                            }
+                          ]
                         },
                         "model": {
                           "type": "object",
@@ -8133,6 +8632,48 @@
                       "minItems": 1,
                       "maxItems": 8,
                       "uniqueItems": true
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "jsonrpc",
+                "id",
+                "result"
+              ],
+              "properties": {
+                "jsonrpc": {
+                  "type": "string",
+                  "const": "2.0"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "x-arcmind-maxUtf16Units": 128
+                },
+                "result": {
+                  "type": "object",
+                  "required": [
+                    "permissionMode"
+                  ],
+                  "properties": {
+                    "permissionMode": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "const": "ask"
+                        },
+                        {
+                          "type": "string",
+                          "const": "full"
+                        }
+                      ]
                     }
                   },
                   "additionalProperties": false
@@ -15036,6 +15577,18 @@
                   "type": "string",
                   "maxLength": 256,
                   "x-arcmind-maxUtf16Units": 256
+                },
+                "permissionMode": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "const": "ask"
+                    },
+                    {
+                      "type": "string",
+                      "const": "full"
+                    }
+                  ]
                 }
               },
               "additionalProperties": false
@@ -15164,6 +15717,103 @@
             "method": {
               "type": "string",
               "const": "session/close"
+            },
+            "params": {
+              "type": "object",
+              "required": [
+                "requestId",
+                "sessionId"
+              ],
+              "properties": {
+                "requestId": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "sessionId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "type": "string",
+              "const": "2.0"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "x-arcmind-maxUtf16Units": 128
+            },
+            "method": {
+              "type": "string",
+              "const": "session/rename"
+            },
+            "params": {
+              "type": "object",
+              "required": [
+                "sessionId",
+                "requestId",
+                "name"
+              ],
+              "properties": {
+                "sessionId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                },
+                "requestId": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "name": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256,
+                  "x-arcmind-maxUtf16Units": 256
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "type": "string",
+              "const": "2.0"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "x-arcmind-maxUtf16Units": 128
+            },
+            "method": {
+              "type": "string",
+              "const": "session/delete"
             },
             "params": {
               "type": "object",
@@ -15434,6 +16084,64 @@
                     {
                       "type": "string",
                       "const": "ultra"
+                    }
+                  ]
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "type": "string",
+              "const": "2.0"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "x-arcmind-maxUtf16Units": 128
+            },
+            "method": {
+              "type": "string",
+              "const": "session/setPermissionMode"
+            },
+            "params": {
+              "type": "object",
+              "required": [
+                "sessionId",
+                "requestId",
+                "permissionMode"
+              ],
+              "properties": {
+                "sessionId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                },
+                "requestId": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "permissionMode": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "const": "ask"
+                    },
+                    {
+                      "type": "string",
+                      "const": "full"
                     }
                   ]
                 }
@@ -18075,6 +18783,216 @@
             "result": {
               "type": "object",
               "required": [
+                "sessionId",
+                "deleted",
+                "method"
+              ],
+              "properties": {
+                "sessionId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                },
+                "deleted": {
+                  "type": "boolean",
+                  "const": true
+                },
+                "method": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "const": "trash"
+                    },
+                    {
+                      "type": "string",
+                      "const": "unlink"
+                    }
+                  ]
+                },
+                "warning": {
+                  "type": "string",
+                  "x-arcmind-maxUtf8Bytes": 65536
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "jsonrpc",
+            "id",
+            "result"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "type": "string",
+              "const": "2.0"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "x-arcmind-maxUtf16Units": 128
+            },
+            "result": {
+              "type": "object",
+              "required": [
+                "session"
+              ],
+              "properties": {
+                "session": {
+                  "type": "object",
+                  "required": [
+                    "sessionId",
+                    "mode",
+                    "cwdOrigin",
+                    "cwd",
+                    "createdAt",
+                    "updatedAt",
+                    "state",
+                    "archived"
+                  ],
+                  "properties": {
+                    "sessionId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                    },
+                    "name": {
+                      "type": "string",
+                      "maxLength": 256,
+                      "x-arcmind-maxUtf16Units": 256
+                    },
+                    "mode": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "const": "chat"
+                        },
+                        {
+                          "type": "string",
+                          "const": "code"
+                        }
+                      ]
+                    },
+                    "cwdOrigin": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "const": "managed"
+                        },
+                        {
+                          "type": "string",
+                          "const": "user-selected"
+                        }
+                      ]
+                    },
+                    "cwd": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "minLength": 1,
+                          "x-arcmind-maxUtf8Bytes": 32768
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time",
+                      "maxLength": 40
+                    },
+                    "updatedAt": {
+                      "type": "string",
+                      "format": "date-time",
+                      "maxLength": 40
+                    },
+                    "state": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "const": "idle"
+                        },
+                        {
+                          "type": "string",
+                          "const": "running"
+                        },
+                        {
+                          "type": "string",
+                          "const": "interrupted"
+                        },
+                        {
+                          "type": "string",
+                          "const": "corrupt"
+                        },
+                        {
+                          "type": "string",
+                          "const": "in_use"
+                        }
+                      ]
+                    },
+                    "archived": {
+                      "type": "boolean"
+                    },
+                    "recoveryNotice": {
+                      "type": "string",
+                      "x-arcmind-maxUtf8Bytes": 65536
+                    },
+                    "scheduled": {
+                      "type": "object",
+                      "required": [
+                        "taskId",
+                        "runId"
+                      ],
+                      "properties": {
+                        "taskId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                        },
+                        "runId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                        }
+                      },
+                      "additionalProperties": false
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "jsonrpc",
+            "id",
+            "result"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "type": "string",
+              "const": "2.0"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "x-arcmind-maxUtf16Units": 128
+            },
+            "result": {
+              "type": "object",
+              "required": [
                 "session"
               ],
               "properties": {
@@ -18235,6 +19153,7 @@
                   "type": "object",
                   "required": [
                     "session",
+                    "permissionMode",
                     "turns",
                     "recentItems",
                     "nextBeforeItemId",
@@ -18370,6 +19289,18 @@
                         }
                       },
                       "additionalProperties": false
+                    },
+                    "permissionMode": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "const": "ask"
+                        },
+                        {
+                          "type": "string",
+                          "const": "full"
+                        }
+                      ]
                     },
                     "model": {
                       "type": "object",
@@ -19795,6 +20726,48 @@
                   "minItems": 1,
                   "maxItems": 8,
                   "uniqueItems": true
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "jsonrpc",
+            "id",
+            "result"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "type": "string",
+              "const": "2.0"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "x-arcmind-maxUtf16Units": 128
+            },
+            "result": {
+              "type": "object",
+              "required": [
+                "permissionMode"
+              ],
+              "properties": {
+                "permissionMode": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "const": "ask"
+                    },
+                    {
+                      "type": "string",
+                      "const": "full"
+                    }
+                  ]
                 }
               },
               "additionalProperties": false
@@ -25497,6 +26470,83 @@
                 "type": "object",
                 "required": [
                   "type",
+                  "sessionId",
+                  "reason"
+                ],
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "session/invalidated"
+                  },
+                  "sessionId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                  },
+                  "reason": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "const": "deleted"
+                      },
+                      {
+                        "type": "string",
+                        "const": "reload_required"
+                      }
+                    ]
+                  }
+                },
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "required": [
+                  "type",
+                  "mode",
+                  "cwd",
+                  "reason"
+                ],
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "project/invalidated"
+                  },
+                  "mode": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "const": "chat"
+                      },
+                      {
+                        "type": "string",
+                        "const": "code"
+                      }
+                    ]
+                  },
+                  "cwd": {
+                    "type": "string",
+                    "minLength": 1,
+                    "x-arcmind-maxUtf8Bytes": 32768
+                  },
+                  "reason": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "const": "deleted"
+                      },
+                      {
+                        "type": "string",
+                        "const": "reload_required"
+                      }
+                    ]
+                  }
+                },
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "required": [
+                  "type",
                   "turn"
                 ],
                 "properties": {
@@ -26626,6 +27676,38 @@
                   "message": {
                     "type": "string",
                     "x-arcmind-maxUtf8Bytes": 65536
+                  }
+                },
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "required": [
+                  "type",
+                  "sessionId",
+                  "permissionMode"
+                ],
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "session/permissionModeChanged"
+                  },
+                  "sessionId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                  },
+                  "permissionMode": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "const": "ask"
+                      },
+                      {
+                        "type": "string",
+                        "const": "full"
+                      }
+                    ]
                   }
                 },
                 "additionalProperties": false
@@ -28093,6 +29175,83 @@
           "type": "object",
           "required": [
             "type",
+            "sessionId",
+            "reason"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "session/invalidated"
+            },
+            "sessionId": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+            },
+            "reason": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "const": "deleted"
+                },
+                {
+                  "type": "string",
+                  "const": "reload_required"
+                }
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "mode",
+            "cwd",
+            "reason"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "project/invalidated"
+            },
+            "mode": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "const": "chat"
+                },
+                {
+                  "type": "string",
+                  "const": "code"
+                }
+              ]
+            },
+            "cwd": {
+              "type": "string",
+              "minLength": 1,
+              "x-arcmind-maxUtf8Bytes": 32768
+            },
+            "reason": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "const": "deleted"
+                },
+                {
+                  "type": "string",
+                  "const": "reload_required"
+                }
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
             "turn"
           ],
           "properties": {
@@ -29222,6 +30381,38 @@
             "message": {
               "type": "string",
               "x-arcmind-maxUtf8Bytes": 65536
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "sessionId",
+            "permissionMode"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "session/permissionModeChanged"
+            },
+            "sessionId": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+            },
+            "permissionMode": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "const": "ask"
+                },
+                {
+                  "type": "string",
+                  "const": "full"
+                }
+              ]
             }
           },
           "additionalProperties": false
@@ -33152,6 +34343,83 @@
                     "type": "object",
                     "required": [
                       "type",
+                      "sessionId",
+                      "reason"
+                    ],
+                    "properties": {
+                      "type": {
+                        "type": "string",
+                        "const": "session/invalidated"
+                      },
+                      "sessionId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                      },
+                      "reason": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "const": "deleted"
+                          },
+                          {
+                            "type": "string",
+                            "const": "reload_required"
+                          }
+                        ]
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "required": [
+                      "type",
+                      "mode",
+                      "cwd",
+                      "reason"
+                    ],
+                    "properties": {
+                      "type": {
+                        "type": "string",
+                        "const": "project/invalidated"
+                      },
+                      "mode": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "const": "chat"
+                          },
+                          {
+                            "type": "string",
+                            "const": "code"
+                          }
+                        ]
+                      },
+                      "cwd": {
+                        "type": "string",
+                        "minLength": 1,
+                        "x-arcmind-maxUtf8Bytes": 32768
+                      },
+                      "reason": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "const": "deleted"
+                          },
+                          {
+                            "type": "string",
+                            "const": "reload_required"
+                          }
+                        ]
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "required": [
+                      "type",
                       "turn"
                     ],
                     "properties": {
@@ -34281,6 +35549,38 @@
                       "message": {
                         "type": "string",
                         "x-arcmind-maxUtf8Bytes": 65536
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "required": [
+                      "type",
+                      "sessionId",
+                      "permissionMode"
+                    ],
+                    "properties": {
+                      "type": {
+                        "type": "string",
+                        "const": "session/permissionModeChanged"
+                      },
+                      "sessionId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                      },
+                      "permissionMode": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "const": "ask"
+                          },
+                          {
+                            "type": "string",
+                            "const": "full"
+                          }
+                        ]
                       }
                     },
                     "additionalProperties": false
@@ -36054,6 +37354,7 @@
       "type": "object",
       "required": [
         "session",
+        "permissionMode",
         "turns",
         "recentItems",
         "nextBeforeItemId",
@@ -36189,6 +37490,18 @@
             }
           },
           "additionalProperties": false
+        },
+        "permissionMode": {
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "ask"
+            },
+            {
+              "type": "string",
+              "const": "full"
+            }
+          ]
         },
         "model": {
           "type": "object",

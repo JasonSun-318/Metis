@@ -80,6 +80,15 @@
 	},
 	{
 		"direction": "client",
+		"method": "session/setPermissionMode",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "client-permissions",
+			"result": { "permissionMode": "full" }
+		}
+	},
+	{
+		"direction": "client",
 		"method": "session/setModel",
 		"envelope": {
 			"jsonrpc": "2.0",
@@ -194,6 +203,40 @@
 	},
 	{
 		"direction": "client",
+		"method": "session/rename",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "client-rename",
+			"result": {
+				"session": {
+					"sessionId": "11111111-1111-4111-8111-111111111111",
+					"name": "Renamed session",
+					"cwd": "/tmp/arcmind-project",
+					"createdAt": "2026-07-16T00:00:00.000Z",
+					"updatedAt": "2026-07-16T00:00:03.000Z",
+					"state": "idle",
+					"archived": false,
+					"mode": "code",
+					"cwdOrigin": "user-selected"
+				}
+			}
+		}
+	},
+	{
+		"direction": "client",
+		"method": "session/delete",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "client-delete",
+			"result": {
+				"sessionId": "11111111-1111-4111-8111-111111111111",
+				"deleted": true,
+				"method": "trash"
+			}
+		}
+	},
+	{
+		"direction": "client",
 		"method": "session/archive",
 		"envelope": {
 			"jsonrpc": "2.0",
@@ -250,6 +293,7 @@
 						"mode": "code",
 						"cwdOrigin": "user-selected"
 					},
+					"permissionMode": "ask",
 					"turns": [],
 					"recentItems": [],
 					"nextBeforeItemId": null,

@@ -28,6 +28,7 @@ export const SessionStateSchema = Type.Union([
 ]);
 
 export const AgentModeSchema = Type.Union([Type.Literal("chat"), Type.Literal("code")]);
+export const PermissionModeSchema = Type.Union([Type.Literal("ask"), Type.Literal("full")]);
 export const CwdOriginSchema = Type.Union([Type.Literal("managed"), Type.Literal("user-selected")]);
 
 export const PublicErrorDataSchema = StrictObject({
@@ -246,7 +247,7 @@ const ActiveSubagentStatusSchema = Type.Union([
 const SubagentConfigurationSchema = StrictObject({
 	mode: Type.Union([Type.Literal("chat"), Type.Literal("code")]),
 	tools: Type.Array(NameSchema, { maxItems: 128, uniqueItems: true }),
-	permissionMode: Type.Union([Type.Literal("ask"), Type.Literal("full")]),
+	permissionMode: PermissionModeSchema,
 	model: SubagentModelRefSchema,
 	thinkingLevel: ActualThinkingLevelSchema,
 	cwd: PathSchema,
@@ -272,6 +273,7 @@ export const SubagentSummarySchema = Type.Union([
 
 export const SessionSnapshotSchema = StrictObject({
 	session: SessionSummarySchema,
+	permissionMode: PermissionModeSchema,
 	model: Type.Optional(SubagentModelRefSchema),
 	availableModels: Type.Optional(Type.Array(ModelOptionViewSchema, { maxItems: 512 })),
 	turns: Type.Array(TurnViewSchema, { maxItems: MAX_HISTORY_ITEMS }),
@@ -295,6 +297,12 @@ export const ThinkingSelectionChangedEventSchema = StrictObject({
 	availableThinkingSelections: Type.Array(ThinkingSelectionSchema, { minItems: 1, maxItems: 8, uniqueItems: true }),
 });
 
+export const PermissionModeChangedEventSchema = StrictObject({
+	type: Type.Literal("session/permissionModeChanged"),
+	sessionId: SessionIdSchema,
+	permissionMode: PermissionModeSchema,
+});
+
 export const ModelChangedEventSchema = StrictObject({
 	type: Type.Literal("session/modelChanged"),
 	sessionId: SessionIdSchema,
@@ -313,6 +321,19 @@ export const SubagentUpdatedEventSchema = StrictObject({
 export const SessionUpdatedEventSchema = StrictObject({
 	type: Type.Literal("session/updated"),
 	session: SessionSummarySchema,
+});
+
+export const SessionInvalidatedEventSchema = StrictObject({
+	type: Type.Literal("session/invalidated"),
+	sessionId: SessionIdSchema,
+	reason: Type.Union([Type.Literal("deleted"), Type.Literal("reload_required")]),
+});
+
+export const ProjectInvalidatedEventSchema = StrictObject({
+	type: Type.Literal("project/invalidated"),
+	mode: AgentModeSchema,
+	cwd: PathSchema,
+	reason: Type.Union([Type.Literal("deleted"), Type.Literal("reload_required")]),
 });
 
 export const TurnStartedEventSchema = StrictObject({
@@ -538,6 +559,8 @@ export const ScheduleRefreshedEventSchema = StrictObject({ type: Type.Literal("s
 
 export const DomainEventSchema = Type.Union([
 	SessionUpdatedEventSchema,
+	SessionInvalidatedEventSchema,
+	ProjectInvalidatedEventSchema,
 	TurnStartedEventSchema,
 	TurnCompletedEventSchema,
 	TurnInterruptedEventSchema,
@@ -546,6 +569,7 @@ export const DomainEventSchema = Type.Union([
 	ItemCompletedEventSchema,
 	InteractionNotifyEventSchema,
 	ServerStateEventSchema,
+	PermissionModeChangedEventSchema,
 	ThinkingSelectionChangedEventSchema,
 	ModelChangedEventSchema,
 	SubagentUpdatedEventSchema,
@@ -583,6 +607,7 @@ export type InteractionChoice = Static<typeof InteractionChoiceSchema>;
 export type InteractionView = Static<typeof InteractionViewSchema>;
 export type SessionSnapshot = Static<typeof SessionSnapshotSchema>;
 export type ThinkingSelectionView = Static<typeof ThinkingSelectionSchema>;
+export type PermissionModeView = Static<typeof PermissionModeSchema>;
 export type ModelOptionView = Static<typeof ModelOptionViewSchema>;
 export type SubagentSummaryView = Static<typeof SubagentSummarySchema>;
 export type ScheduleInputSpecView = Static<typeof ScheduleInputSpecSchema>;

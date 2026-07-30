@@ -25,6 +25,7 @@ import {
 	DurableImageRefViewSchema,
 	InteractionViewSchema,
 	ItemViewSchema,
+	PermissionModeSchema,
 	ScheduleInputSpecSchema,
 	ScheduleRunViewSchema,
 	ScheduleSnapshotViewSchema,
@@ -119,6 +120,7 @@ export const SessionCreateParamsSchema = StrictObject({
 	mode: Type.Optional(AgentModeSchema),
 	cwd: Type.Optional(PathSchema),
 	name: Type.Optional(OptionalNameSchema),
+	permissionMode: Type.Optional(PermissionModeSchema),
 });
 export const SessionCreateResultSchema = StrictObject({ session: SessionSummarySchema });
 
@@ -145,6 +147,17 @@ export const SessionCloseResultSchema = StrictObject({
 	closed: Type.Literal(true),
 });
 export const SessionMutationResultSchema = StrictObject({ session: SessionSummarySchema });
+export const SessionRenameParamsSchema = StrictObject({
+	sessionId: SessionIdSchema,
+	requestId: UuidSchema,
+	name: NameSchema,
+});
+export const SessionDeleteResultSchema = StrictObject({
+	sessionId: SessionIdSchema,
+	deleted: Type.Literal(true),
+	method: Type.Union([Type.Literal("trash"), Type.Literal("unlink")]),
+	warning: Type.Optional(PublicTextSchema),
+});
 
 export const SessionSubscribeResultSchema = StrictObject({ snapshot: SessionSnapshotSchema });
 export const SessionUnsubscribeResultSchema = StrictObject({
@@ -162,6 +175,13 @@ export const SessionThinkingSelectionResultSchema = StrictObject({
 	actualThinkingLevel: ActualThinkingLevelSchema,
 	availableThinkingSelections: Type.Array(ThinkingSelectionSchema, { minItems: 1, maxItems: 8, uniqueItems: true }),
 });
+
+export const SessionSetPermissionModeParamsSchema = StrictObject({
+	sessionId: SessionIdSchema,
+	requestId: UuidSchema,
+	permissionMode: PermissionModeSchema,
+});
+export const SessionPermissionModeResultSchema = StrictObject({ permissionMode: PermissionModeSchema });
 
 export const SessionSetModelParamsSchema = StrictObject({
 	sessionId: SessionIdSchema,
@@ -322,6 +342,8 @@ export const ClientRequestMethods = {
 	"session/open": method(SessionRefParamsSchema, SessionOpenResultSchema),
 	"session/readItems": method(SessionReadItemsParamsSchema, SessionReadItemsResultSchema),
 	"session/close": method(SessionMutationParamsSchema, SessionCloseResultSchema),
+	"session/rename": method(SessionRenameParamsSchema, SessionMutationResultSchema),
+	"session/delete": method(SessionMutationParamsSchema, SessionDeleteResultSchema),
 	"session/archive": method(SessionMutationParamsSchema, SessionMutationResultSchema),
 	"session/unarchive": method(SessionMutationParamsSchema, SessionMutationResultSchema),
 	"session/subscribe": method(SessionRefParamsSchema, SessionSubscribeResultSchema),
@@ -330,6 +352,7 @@ export const ClientRequestMethods = {
 		SessionSetThinkingSelectionParamsSchema,
 		SessionThinkingSelectionResultSchema,
 	),
+	"session/setPermissionMode": method(SessionSetPermissionModeParamsSchema, SessionPermissionModeResultSchema),
 	"session/setModel": method(SessionSetModelParamsSchema, SessionModelResultSchema),
 	"subagent/readItems": method(SubagentReadItemsParamsSchema, SessionReadItemsResultSchema),
 	"turn/start": method(TurnInputSchema, AcceptedOperationSchema),
