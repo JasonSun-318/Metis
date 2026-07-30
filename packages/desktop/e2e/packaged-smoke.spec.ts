@@ -1,11 +1,11 @@
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { expect, test, type Browser, type Page } from "@playwright/test";
+import { expect, test, type Browser, type Locator, type Page } from "@playwright/test";
 import type { ArcMindDesktopApi } from "../src/shared/desktop-api.ts";
 import {
 	appServerPid,
@@ -29,8 +29,10 @@ const CHAT_ACTIVE_ID = "10000000-0000-4000-8000-000000000001";
 const CHAT_ARCHIVED_ID = "10000000-0000-4000-8000-000000000002";
 const CODE_ID = "10000000-0000-4000-8000-000000000003";
 const SCHEDULE_ID = "10000000-0000-4000-8000-000000000004";
+const SESSION_ACTION_ID = "10000000-0000-4000-8000-000000000005";
 
 interface FixtureSessionManager {
+	appendSessionInfo(name: string): string;
 	close(): void;
 	getSessionFile(): string | undefined;
 }
@@ -101,11 +103,13 @@ function createStoredSession(
 	sessionId: string,
 	mode: "chat" | "code",
 	archived = false,
+	name?: string,
 ): string {
 	const manager = fixtures.SessionManager.create(projectDir, fixtures.getDefaultSessionDir(projectDir, agentDir), {
 		id: sessionId,
 		mode,
 	});
+	if (name) manager.appendSessionInfo(name);
 	const activePath = manager.getSessionFile();
 	manager.close();
 	if (!activePath) throw new Error(`Session fixture was not persisted: ${sessionId}`);
@@ -147,6 +151,11 @@ async function seedOwnedSessionData(
 
 function projectGroup(page: Page, name: string) {
 	return page.locator(".project-group").filter({ has: page.locator(".project-heading", { hasText: name }) });
+}
+
+async function showProjectActions(group: Locator) {
+	await group.locator(".project-heading").hover();
+	await expect(group.locator(".project-action-buttons")).toHaveCSS("opacity", "1");
 }
 
 function launchPackagedApp(
@@ -401,6 +410,84 @@ test("packaged worker, WASM, trusted extension, and utility lifecycle stay funct
 	}
 });
 
+test("packaged Code project setup creates and opens a project", async () => {
+	test.setTimeout(60_000);
+	const executable = packagedExecutable();
+	expect(existsSync(executable), `Package the desktop app first: ${executable}`).toBe(true);
+
+	const tempRoot = await mkdtemp(path.join(tmpdir(), "arcmind-code-project-"));
+	const agentDir = path.join(tempRoot, "agent");
+	const homeDir = path.join(tempRoot, "home");
+	const projectDir = path.join(tempRoot, "launch-cwd");
+	const userDataDir = path.join(tempRoot, "electron");
+	await Promise.all([mkdir(agentDir), mkdir(homeDir), mkdir(projectDir), mkdir(userDataDir)]);
+
+	const debuggingPort = await reservePort();
+	const diagnostics: string[] = [];
+	const app = launchPackagedApp(executable, debuggingPort, userDataDir, projectDir, agentDir, homeDir, diagnostics);
+	let browser: Browser | undefined;
+	let page: Page | undefined;
+	let phase = "connecting";
+	try {
+		({ browser, page } = await connectToApp(debuggingPort));
+		page.setDefaultTimeout(10_000);
+		await waitForServerReady(page);
+		phase = "opening Code project setup";
+		const codeProjectName = "Packaged Code project";
+		const codeProjectRoot = path.join(tempRoot, "ArcMind Projects");
+		const codeProjectDir = path.join(codeProjectRoot, codeProjectName);
+		const defaultLocation = await page.evaluate(() =>
+			(globalThis as unknown as { arcMind: ArcMindDesktopApi }).arcMind.getDefaultProjectLocation(),
+		);
+		expect(path.isAbsolute(defaultLocation)).toBe(true);
+		expect(path.basename(defaultLocation)).toBe("ArcMind Projects");
+		await page.evaluate((location) => localStorage.setItem("arcmind.codeProjectLocation", location), codeProjectRoot);
+		await page.getByRole("button", { name: "Code", exact: true }).click();
+		await expect(page.getByRole("dialog", { name: "Create a new project" })).toBeVisible();
+
+		phase = "checking the existing-folder page";
+		await page.getByRole("button", { name: "Use an existing folder", exact: true }).click();
+		await expect(page.getByRole("dialog", { name: "Use an existing folder" })).toBeVisible();
+		await page.keyboard.press("Escape");
+		await expect(page.getByRole("dialog", { name: "Create a new project" })).toBeVisible();
+
+		phase = "creating the project";
+		expect(existsSync(codeProjectRoot)).toBe(false);
+		await page.getByRole("button", { name: "Start from scratch", exact: true }).click();
+		await expect(page.getByRole("dialog", { name: "Start a new project" })).toBeVisible();
+		await expect(page.locator(".code-project-location")).toContainText(codeProjectRoot);
+		await expect(page.getByText("Memory is on", { exact: true })).toHaveCount(0);
+		await expect(page.getByText("Instructions", { exact: true })).toHaveCount(0);
+		expect(existsSync(codeProjectRoot)).toBe(false);
+		await page.locator("#code-project-name").fill(codeProjectName);
+		await page.getByRole("button", { name: "Create", exact: true }).click();
+		await expect(page.locator("#composer-input")).toBeVisible();
+		expect(existsSync(codeProjectDir)).toBe(true);
+		const canonicalCodeProjectDir = await realpath(codeProjectDir);
+		const codeSession = await page.evaluate(async (cwd) => {
+			const api = (globalThis as unknown as { arcMind: ArcMindDesktopApi }).arcMind;
+			return (await api.listSessions({ limit: 200 })).sessions.find(
+				(session) => session.mode === "code" && session.cwd === cwd,
+			);
+		}, canonicalCodeProjectDir);
+		expect(codeSession).toMatchObject({ mode: "code", cwd: canonicalCodeProjectDir, cwdOrigin: "user-selected" });
+		await expect(page.locator(".workspace-header")).toHaveAttribute("data-active-session-id", codeSession!.sessionId);
+		await page.getByRole("button", { name: "New task", exact: true }).click();
+		await expect(page.getByRole("dialog", { name: "Create a new project" })).toBeVisible();
+		await page.keyboard.press("Escape");
+		await expect(page.getByRole("dialog")).toHaveCount(0);
+	} catch (error) {
+		const bodyText = await page?.locator("body").innerText().catch(() => "renderer unavailable");
+		throw new Error(
+			`${error instanceof Error ? error.message : String(error)}\nphase=${phase}\nrenderer body:\n${bodyText ?? "unavailable"}\n${diagnostics.join("").slice(-8_000)}`,
+		);
+	} finally {
+		await browser?.close().catch(() => undefined);
+		await stopProcess(app);
+		await rm(tempRoot, { recursive: true, force: true });
+	}
+});
+
 test("packaged mode project actions preserve the other mode and shared project data", async () => {
 	test.setTimeout(90_000);
 	const fixtures = await loadCodingFixtures();
@@ -428,6 +515,26 @@ test("packaged mode project actions preserve the other mode and shared project d
 	const chatActivePath = createStoredSession(fixtures, agentDir, projectDir, CHAT_ACTIVE_ID, "chat");
 	const chatArchivedPath = createStoredSession(fixtures, agentDir, projectDir, CHAT_ARCHIVED_ID, "chat", true);
 	const codePath = createStoredSession(fixtures, agentDir, projectDir, CODE_ID, "code");
+	const sessionActionPath = createStoredSession(
+		fixtures,
+		agentDir,
+		projectDir,
+		SESSION_ACTION_ID,
+		"chat",
+		false,
+		"Session action target",
+	);
+	const sessionActionOwnedPaths = await seedOwnedSessionData(
+		fixtures,
+		agentDir,
+		SESSION_ACTION_ID,
+		sessionActionPath,
+	);
+	const sessionActionRecoveryPath = path.join(
+		path.dirname(sessionActionPath),
+		`.${path.basename(sessionActionPath)}.00000000-0000-4000-8000-000000000001.replace.bak`,
+	);
+	await writeFixtureFile(sessionActionRecoveryPath, await readFile(sessionActionPath, "utf8"));
 	const ownedPaths = [
 		...(await seedOwnedSessionData(fixtures, agentDir, CHAT_ACTIVE_ID, chatActivePath)),
 		...(await seedOwnedSessionData(fixtures, agentDir, CHAT_ARCHIVED_ID, chatArchivedPath)),
@@ -463,12 +570,85 @@ test("packaged mode project actions preserve the other mode and shared project d
 	let scheduleRemoved = false;
 	try {
 		({ browser, page } = await connectToApp(debuggingPort));
+		page.setDefaultTimeout(10_000);
 		await waitForServerReady(page);
 		const projectName = path.basename(projectDir);
 		let group = projectGroup(page, projectName);
 		await expect(group).toBeVisible();
+		phase = "renaming and deleting one idle session";
+		let sessionActionRow = group.locator(
+			'.session-row:has(.session-button[aria-label="Session action target"])',
+		);
+		const sessionActionButton = sessionActionRow.locator(".session-actions > button");
+		const sessionButton = sessionActionRow.locator(".session-button");
+		await expect(sessionActionButton).toHaveCSS("opacity", "0");
+		await sessionActionRow.hover();
+		await expect(sessionActionButton).toHaveCSS("opacity", "1");
+		await sessionActionButton.hover();
+		await expect(sessionButton).toHaveCSS("background-color", "rgb(64, 64, 64)");
+		await expect(sessionActionButton).toHaveCSS("background-color", "rgb(104, 104, 104)");
+		await page.locator(".session-sidebar").screenshot({ path: path.join(qaDir, "session-row-hover-inactive.png") });
+		await sessionActionRow.getByRole("button", { name: "Session action target", exact: true }).click();
+		await expect(page.locator(".workspace-header")).toHaveAttribute("data-active-session-id", SESSION_ACTION_ID);
+		await sessionActionButton.hover();
+		await expect(sessionButton).toHaveCSS("background-color", "rgb(88, 88, 88)");
+		await expect(sessionActionButton).toHaveCSS("background-color", "rgb(104, 104, 104)");
+		await page.locator(".session-sidebar").screenshot({ path: path.join(qaDir, "session-row-hover-current.png") });
+		await sessionActionRow.getByRole("button", { name: "Actions for Session action target" }).click();
+		await expect(sessionActionRow.getByRole("menuitem")).toHaveText(["Rename", "Delete"]);
+		await sessionActionRow.getByRole("menuitem", { name: "Rename" }).click();
+		const renameSessionDialog = page.getByRole("dialog", { name: "Rename session" });
+		await renameSessionDialog.locator("#session-rename-input").fill("Renamed session target");
+		await renameSessionDialog.getByRole("button", { name: "Rename", exact: true }).click();
+		await expect.poll(async () => readFile(sessionActionPath, "utf8")).toContain("Renamed session target");
+		sessionActionRow = group.locator(
+			'.session-row:has(.session-button[aria-label="Renamed session target"])',
+		);
+		await sessionActionRow.hover();
+		await sessionActionRow.getByRole("button", { name: "Actions for Renamed session target" }).click();
+		await sessionActionRow.getByRole("menuitem", { name: "Delete" }).click();
+		const deleteSessionDialog = page.getByRole("dialog", { name: "Delete session?" });
+		await expect(deleteSessionDialog).toContainText("Project memory, Skills, schedules, other sessions, and source files are unchanged");
+		await deleteSessionDialog.getByRole("button", { name: "Move to Trash" }).click();
+		await expect(page.getByText("What can I take off your plate?", { exact: true })).toBeVisible();
+		for (const removedPath of [sessionActionPath, sessionActionRecoveryPath, ...sessionActionOwnedPaths]) {
+			expect(existsSync(removedPath), removedPath).toBe(false);
+		}
+		group = projectGroup(page, projectName);
+		phase = "changing persisted session permissions";
+		await group.locator(".session-button").first().click();
+		await expect(page.locator(".workspace-header")).toHaveAttribute("data-active-session-id", CHAT_ACTIVE_ID);
+		await page.getByRole("button", { name: "Select permissions, current Ask" }).click();
+		await page.getByRole("menuitemradio", { name: /Full access/u }).click();
+		await expect(page.getByRole("button", { name: "Select permissions, current Full" })).toBeVisible();
+		await expect(page.getByRole("dialog")).toHaveCount(0);
+		await expect.poll(async () => readFile(chatActivePath, "utf8")).toContain('"permissionMode":"full"');
+		await page.getByRole("button", { name: "Select permissions, current Full" }).click();
+		await page.locator(".permission-selector-popover").evaluate(
+			(element) => Promise.all(element.getAnimations().map((animation) => animation.finished)),
+		);
+		await page.screenshot({ path: path.join(qaDir, "permission-menu-normal.png") });
+		await page.getByRole("menuitemradio", { name: /Ask before changes/u }).click();
+		await expect(page.getByRole("button", { name: "Select permissions, current Ask" })).toBeVisible();
+		await expect.poll(async () => readFile(chatActivePath, "utf8")).toContain('"permissionMode":"ask"');
+
+		const actionButtons = group.locator(".project-action-buttons");
+		await expect(actionButtons).toHaveCSS("opacity", "0");
+		await showProjectActions(group);
+		await group.locator(".project-heading").click();
+		await expect(group.locator(".project-heading")).toHaveAttribute("aria-expanded", "false");
+		await expect(group.locator(".project-drawer")).toHaveAttribute("inert", "");
+		await expect(group.locator(".project-sessions")).toHaveCSS("transform", /matrix\(1, 0, 0, 1, 0, -9\)/u);
+		await showProjectActions(group);
+		await group.getByRole("button", { name: "Project actions" }).click();
+		await expect(group.getByRole("menuitem", { name: "Rename" })).toBeVisible();
+		await page.keyboard.press("Escape");
+		await group.locator(".project-heading").click();
+		await expect(group.locator(".project-heading")).toHaveAttribute("aria-expanded", "true");
+		await expect(group.locator(".project-sessions")).toHaveCSS("transform", "none");
 
 		phase = "renaming and pinning Chat";
+		await showProjectActions(group);
 		await group.getByRole("button", { name: "Project actions" }).click();
 		await expect(group.getByRole("menuitem")).toHaveText(["Rename", "Pin", "Delete"]);
 		await page.screenshot({ path: path.join(qaDir, "project-menu-normal.png") });
@@ -482,10 +662,13 @@ test("packaged mode project actions preserve the other mode and shared project d
 		await expect(group).toBeVisible();
 
 		phase = "checking mode-scoped preferences";
+		await page.evaluate((sessionId) => localStorage.setItem("arcmind.activeSessionId.code", sessionId), CODE_ID);
 		await page.getByRole("button", { name: "Code", exact: true }).click();
+		await expect(page.locator(".workspace-header")).toHaveAttribute("data-active-session-id", CODE_ID);
 		const codeGroup = projectGroup(page, projectName);
 		await expect(codeGroup).toBeVisible();
 		await expect(codeGroup.locator(".project-heading span")).toHaveText(projectName);
+		await showProjectActions(codeGroup);
 		await codeGroup.getByRole("button", { name: "Project actions" }).click();
 		await expect(codeGroup.getByRole("menuitem", { name: "Pin" })).toBeVisible();
 		await page.keyboard.press("Escape");
@@ -493,9 +676,13 @@ test("packaged mode project actions preserve the other mode and shared project d
 
 		phase = "creating an empty Chat session";
 		group = projectGroup(page, "Pinned Chat Project");
+		await showProjectActions(group);
 		await group.getByRole("button", { name: "New task in Pinned Chat Project" }).click();
-		await expect(page.locator(".workspace-header")).toHaveAttribute("data-active-session-id", /.+/u);
-		const createdSessionId = await page.locator(".workspace-header").getAttribute("data-active-session-id");
+		const workspaceHeader = page.locator(".workspace-header");
+		await expect.poll(
+			() => workspaceHeader.getAttribute("data-active-session-id"),
+		).not.toBe(CHAT_ACTIVE_ID);
+		const createdSessionId = await workspaceHeader.getAttribute("data-active-session-id");
 		expect(createdSessionId).not.toBeNull();
 		expect([CHAT_ACTIVE_ID, CHAT_ARCHIVED_ID, CODE_ID]).not.toContain(createdSessionId);
 		await expect(page.locator(".transcript-turn")).toHaveCount(0);
@@ -503,6 +690,7 @@ test("packaged mode project actions preserve the other mode and shared project d
 		phase = "checking the schedule blocker";
 		group = projectGroup(page, "Pinned Chat Project");
 		const projectActions = group.getByRole("button", { name: "Project actions" });
+		await showProjectActions(group);
 		await expect(projectActions).toBeEnabled();
 		await projectActions.click({ timeout: 10_000 });
 		phase = "opening the blocked delete dialog";
@@ -540,6 +728,7 @@ test("packaged mode project actions preserve the other mode and shared project d
 		await expect(projectGroup(page, "Pinned Chat Project")).toBeVisible();
 		await page.setViewportSize({ width: 900, height: 720 });
 		group = projectGroup(page, "Pinned Chat Project");
+		await showProjectActions(group);
 		await group.getByRole("button", { name: "Project actions" }).click();
 		await group.getByRole("menuitem", { name: "Delete" }).click();
 		const readyDeleteDialog = page.getByRole("dialog", { name: "Delete Chat project?" });
@@ -626,6 +815,7 @@ test("packaged project delete fails closed for a held session lease and retries"
 		await waitForServerReady(page);
 		const group = projectGroup(page, path.basename(projectDir));
 		await expect(group).toBeVisible();
+		await showProjectActions(group);
 		await group.getByRole("button", { name: "Project actions" }).click();
 		await group.getByRole("menuitem", { name: "Delete" }).click();
 		const dialog = page.getByRole("dialog", { name: "Delete Chat project?" });
