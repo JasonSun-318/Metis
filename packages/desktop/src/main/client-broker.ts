@@ -159,6 +159,12 @@ export class ClientBroker {
 		this.register(DESKTOP_IPC_CHANNELS.createSession, 1, async (_event, [input]) =>
 			this.clientCall("session/create", input),
 		);
+		this.register(DESKTOP_IPC_CHANNELS.renameSession, 1, async (_event, [input]) =>
+			this.clientCall("session/rename", input),
+		);
+		this.register(DESKTOP_IPC_CHANNELS.deleteSession, 1, async (_event, [input]) =>
+			this.clientCall("session/delete", input),
+		);
 		this.register(DESKTOP_IPC_CHANNELS.openSession, 1, async (_event, [input]) => {
 			const params = this.validatedParams("session/open", input);
 			return this.enqueueSubscriptionMutation(async () => {
@@ -184,6 +190,9 @@ export class ClientBroker {
 		);
 		this.register(DESKTOP_IPC_CHANNELS.setThinkingSelection, 1, async (_event, [input]) =>
 			this.clientCall("session/setThinkingSelection", input),
+		);
+		this.register(DESKTOP_IPC_CHANNELS.setPermissionMode, 1, async (_event, [input]) =>
+			this.clientCall("session/setPermissionMode", input),
 		);
 		this.register(DESKTOP_IPC_CHANNELS.setModel, 1, async (_event, [input]) =>
 			this.clientCall("session/setModel", input),

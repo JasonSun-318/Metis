@@ -35,6 +35,14 @@ const api = {
 		invoke(DESKTOP_IPC_CHANNELS.createSession, "session/create", input) as ReturnType<
 			ArcMindDesktopApi["createSession"]
 		>,
+	renameSession: (input: ClientParams<"session/rename">) =>
+		invoke(DESKTOP_IPC_CHANNELS.renameSession, "session/rename", input) as ReturnType<
+			ArcMindDesktopApi["renameSession"]
+		>,
+	deleteSession: (input: ClientParams<"session/delete">) =>
+		invoke(DESKTOP_IPC_CHANNELS.deleteSession, "session/delete", input) as ReturnType<
+			ArcMindDesktopApi["deleteSession"]
+		>,
 	openSession: (input: ClientParams<"session/open">) =>
 		invoke(DESKTOP_IPC_CHANNELS.openSession, "session/open", input) as ReturnType<ArcMindDesktopApi["openSession"]>,
 	readItems: (input: ClientParams<"session/readItems">) =>
@@ -46,6 +54,10 @@ const api = {
 	setThinkingSelection: (input: ClientParams<"session/setThinkingSelection">) =>
 		invoke(DESKTOP_IPC_CHANNELS.setThinkingSelection, "session/setThinkingSelection", input) as ReturnType<
 			ArcMindDesktopApi["setThinkingSelection"]
+		>,
+	setPermissionMode: (input: ClientParams<"session/setPermissionMode">) =>
+		invoke(DESKTOP_IPC_CHANNELS.setPermissionMode, "session/setPermissionMode", input) as ReturnType<
+			ArcMindDesktopApi["setPermissionMode"]
 		>,
 	setModel: (input: ClientParams<"session/setModel">) =>
 		invoke(DESKTOP_IPC_CHANNELS.setModel, "session/setModel", input) as ReturnType<ArcMindDesktopApi["setModel"]>,

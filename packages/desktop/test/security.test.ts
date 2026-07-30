@@ -151,6 +151,8 @@ describe("desktop trust boundaries", () => {
 		const preload = source("src/preload.ts");
 		expect(preload).toContain('"project/deletePreview"');
 		expect(preload).toContain('"project/delete"');
+		expect(preload).toContain('"session/rename"');
+		expect(preload).toContain('"session/delete"');
 		expect(preload).not.toContain('exposeInMainWorld("arcMind", ipcRenderer');
 	});
 
@@ -213,6 +215,27 @@ describe("desktop trust boundaries", () => {
 			if (request.method === "project/delete") {
 				result = { mode: request.params.mode, cwd: request.params.cwd, deletedSessionCount: 2 };
 			}
+			if (request.method === "session/rename") {
+				result = {
+					session: {
+						sessionId: request.params.sessionId,
+						mode: "chat",
+						cwdOrigin: "user-selected",
+						cwd: "/work/project",
+						name: request.params.name,
+						createdAt: "2026-07-30T00:00:00.000Z",
+						updatedAt: "2026-07-30T00:00:00.000Z",
+						state: "idle",
+						archived: false,
+					},
+				};
+			}
+			if (request.method === "session/delete") {
+				result = { sessionId: request.params.sessionId, deleted: true, method: "trash" };
+			}
+			if (request.method === "session/setPermissionMode") {
+				result = { permissionMode: request.params.permissionMode };
+			}
 			return { jsonrpc: "2.0", id: request.id, result };
 		});
 		const broker = new ClientBroker({ ipcMain: ipcMain as never, supervisor });
@@ -223,6 +246,9 @@ describe("desktop trust boundaries", () => {
 		const listSkills = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.listSkills)!;
 		const previewProjectDelete = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.previewProjectDelete)!;
 		const deleteProject = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.deleteProject)!;
+		const renameSession = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.renameSession)!;
+		const deleteSession = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.deleteSession)!;
+		const setPermissionMode = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.setPermissionMode)!;
 
 		await expect(listSessions(event, { limit: 0 })).rejects.toThrow("Invalid session/list params");
 		expect(supervisor.request).not.toHaveBeenCalled();
@@ -262,6 +288,36 @@ describe("desktop trust boundaries", () => {
 			ok: true,
 			result: { mode: "chat", cwd: "/work/project", deletedSessionCount: 2 },
 		});
+		const sessionInput = {
+			sessionId: "session-a",
+			requestId: "11111111-1111-4111-8111-111111111402",
+		};
+		await expect(renameSession(event, { ...sessionInput, name: "" })).rejects.toThrow(
+			"Invalid session/rename params",
+		);
+		await expect(renameSession(event, { ...sessionInput, name: "Renamed" })).resolves.toMatchObject({
+			session: { sessionId: "session-a", name: "Renamed" },
+		});
+		await expect(deleteSession(event, sessionInput)).resolves.toEqual({
+			sessionId: "session-a",
+			deleted: true,
+			method: "trash",
+		});
+		expect(supervisor.request).toHaveBeenCalledWith(
+			expect.objectContaining({ method: "session/delete", params: sessionInput }),
+		);
+		const permissionInput = {
+			sessionId: "session-a",
+			requestId: "11111111-1111-4111-8111-111111111401",
+			permissionMode: "full",
+		};
+		await expect(setPermissionMode(event, { ...permissionInput, permissionMode: "auto" })).rejects.toThrow(
+			"Invalid session/setPermissionMode params",
+		);
+		await expect(setPermissionMode(event, permissionInput)).resolves.toEqual({ permissionMode: "full" });
+		expect(supervisor.request).toHaveBeenCalledWith(
+			expect.objectContaining({ method: "session/setPermissionMode", params: permissionInput }),
+		);
 		supervisor.request.mockImplementationOnce(async (request) => ({
 			jsonrpc: "2.0",
 			id: request.id,

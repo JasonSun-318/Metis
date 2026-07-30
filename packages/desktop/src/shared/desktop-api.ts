@@ -35,10 +35,13 @@ export const DESKTOP_IPC_CHANNELS = {
 	previewProjectDelete: "arcmind:preview-project-delete",
 	deleteProject: "arcmind:delete-project",
 	createSession: "arcmind:create-session",
+	renameSession: "arcmind:rename-session",
+	deleteSession: "arcmind:delete-session",
 	openSession: "arcmind:open-session",
 	readItems: "arcmind:read-items",
 	readSubagentItems: "arcmind:read-subagent-items",
 	setThinkingSelection: "arcmind:set-thinking-selection",
+	setPermissionMode: "arcmind:set-permission-mode",
 	setModel: "arcmind:set-model",
 	startTurn: "arcmind:start-turn",
 	steerTurn: "arcmind:steer-turn",
@@ -70,12 +73,17 @@ export interface ArcMindDesktopApi {
 	): Promise<DesktopRpcOutcome<ClientResult<"project/deletePreview">>>;
 	deleteProject(input: ClientParams<"project/delete">): Promise<DesktopRpcOutcome<ClientResult<"project/delete">>>;
 	createSession(input: ClientParams<"session/create">): Promise<ClientResult<"session/create">>;
+	renameSession(input: ClientParams<"session/rename">): Promise<ClientResult<"session/rename">>;
+	deleteSession(input: ClientParams<"session/delete">): Promise<ClientResult<"session/delete">>;
 	openSession(input: ClientParams<"session/open">): Promise<ClientResult<"session/subscribe">["snapshot"]>;
 	readItems(input: ClientParams<"session/readItems">): Promise<ClientResult<"session/readItems">>;
 	readSubagentItems(input: ClientParams<"subagent/readItems">): Promise<ClientResult<"subagent/readItems">>;
 	setThinkingSelection(
 		input: ClientParams<"session/setThinkingSelection">,
 	): Promise<ClientResult<"session/setThinkingSelection">>;
+	setPermissionMode(
+		input: ClientParams<"session/setPermissionMode">,
+	): Promise<ClientResult<"session/setPermissionMode">>;
 	setModel(input: ClientParams<"session/setModel">): Promise<ClientResult<"session/setModel">>;
 	startTurn(input: ClientParams<"turn/start">): Promise<ClientResult<"turn/start">>;
 	steerTurn(input: ClientParams<"turn/steer">): Promise<ClientResult<"turn/steer">>;
