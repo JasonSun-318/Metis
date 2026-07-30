@@ -95,6 +95,12 @@ class PausableRuntime implements OpenedSessionRuntime {
 		return this.projection.getSummary();
 	}
 
+	async renameSession(name: string): Promise<SessionSummary> {
+		const session = { ...this.getSummary(), name };
+		this.emit({ type: "session/updated", session });
+		return session;
+	}
+
 	async listSkills(): Promise<ClientResult<"skill/list">> {
 		return { skills: [] };
 	}
@@ -115,6 +121,12 @@ class PausableRuntime implements OpenedSessionRuntime {
 			actualThinkingLevel: input.selection === "ultra" ? "max" : input.selection,
 			availableThinkingSelections: ["off", "high", "ultra"],
 		};
+	}
+
+	async setPermissionMode(
+		input: ClientParams<"session/setPermissionMode">,
+	): Promise<ClientResult<"session/setPermissionMode">> {
+		return { permissionMode: input.permissionMode };
 	}
 
 	async setModel(input: ClientParams<"session/setModel">): Promise<ClientResult<"session/setModel">> {

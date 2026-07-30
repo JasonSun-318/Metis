@@ -252,14 +252,101 @@ export class Dispatcher {
 					const ref = this.runtimeRef(request.params.sessionId);
 					return await this.registry.run(ref, (runtime) => runtime.setThinkingSelection(request.params));
 				});
+			case "session/setPermissionMode":
+				return await this.replayMutation(request, async () => {
+					const ref = this.runtimeRef(request.params.sessionId);
+					return await this.registry.run(ref, (runtime) => runtime.setPermissionMode(request.params));
+				});
 			case "session/setModel":
 				return await this.replayMutation(request, async () => {
 					const ref = this.runtimeRef(request.params.sessionId);
 					return await this.registry.run(ref, (runtime) => runtime.setModel(request.params));
 				});
+			case "session/rename":
+				return await this.replayMutation(request, async () => {
+					this.assertMutableSession(request.params.sessionId);
+					return await this.catalog.withSessionProjectMutable(request.params.sessionId, async (ref) => {
+						if (ref.summary.state === "corrupt") {
+							throw new AppServerError("SESSION_CORRUPT", {
+								sessionId: request.params.sessionId,
+							});
+						}
+						const session = this.registry.has(request.params.sessionId)
+							? await this.registry.run(ref, (runtime) => runtime.renameSession(request.params.name))
+							: await this.catalog.renameClosedSession(request.params.sessionId, request.params.name);
+						return {
+							session: this.catalog.updateSummary(request.params.sessionId, session),
+						};
+					});
+				});
+			case "session/delete": {
+				let quiesced = false;
+				let result: unknown;
+				try {
+					result = await this.replayMutation(request, async () => {
+						this.assertMutableSession(request.params.sessionId);
+						return await this.catalog.withSessionProjectMutable(request.params.sessionId, async (ref) => {
+							if (ref.summary.state === "corrupt") {
+								throw new AppServerError("SESSION_CORRUPT", {
+									sessionId: request.params.sessionId,
+								});
+							}
+							return await this.registry.withSessionsQuiesced(
+								[request.params.sessionId],
+								async () => {
+									quiesced = true;
+									const deleted = await SessionManager.deleteSession(ref.path, {
+										agentDir: this.catalog.agentDir,
+										sessionsRoot: this.catalog.sessionsRoot,
+									});
+									if (!deleted.ok) {
+										throw new AppServerError(
+											deleted.code === "SESSION_IN_USE" ? "SESSION_IN_USE" : "OPERATION_FAILED",
+											{
+												sessionId: request.params.sessionId,
+												requestId: request.params.requestId,
+											},
+										);
+									}
+									await this.catalog.removeDeletedSession(request.params.sessionId, ref.path);
+									this.subscriptionHub.removeSession(request.params.sessionId, {
+										type: "session/invalidated",
+										sessionId: request.params.sessionId,
+										reason: "deleted",
+									});
+									return {
+										sessionId: request.params.sessionId,
+										deleted: true as const,
+										method: deleted.method,
+										...(deleted.warning
+											? {
+													warning: "Some session-owned files could not be removed.",
+												}
+											: {}),
+									};
+								},
+								() => {
+									this.interactions.releaseSession(request.params.sessionId);
+								},
+							);
+						});
+					});
+				} catch (error) {
+					if (quiesced) {
+						this.subscriptionHub.removeSession(request.params.sessionId, {
+							type: "session/invalidated",
+							sessionId: request.params.sessionId,
+							reason: "reload_required",
+						});
+					}
+					throw error;
+				}
+				connection.subscriptions.unsubscribe(request.params.sessionId);
+				this.interactions.release(request.params.sessionId, connection.interactionPeer);
+				return result;
+			}
 			case "session/close": {
 				const ref = this.catalog.get(request.params.sessionId);
-				this.catalog.assertSessionProjectMutable(request.params.sessionId);
 				if (ref.scheduled) {
 					const result = await this.replayMutation(request, async () => {
 						await this.registry.close(request.params.sessionId);
@@ -270,29 +357,34 @@ export class Dispatcher {
 					this.interactions.release(request.params.sessionId, connection.interactionPeer);
 					return result;
 				}
-				const result = await this.replayMutation(request, async () => {
-					const mutation: DurableSessionMutation = {
-						method: "session/close",
-						kind: "session_close",
-						requestId: request.params.requestId,
-						params: { sessionId: request.params.sessionId },
-					};
-					let prepared: PreparedSessionMutation | undefined;
-					let closedRuntime = false;
-					if (this.registry.has(request.params.sessionId)) {
-						await this.registry.close(request.params.sessionId, async (runtime) => {
-							prepared = await runtime.prepareMutation(mutation);
-							closedRuntime = prepared.state !== "completed";
-							return closedRuntime;
-						});
-					} else {
-						prepared = this.catalog.prepareDurableMutation(request.params.sessionId, mutation);
-					}
-					if (closedRuntime) this.subscriptionHub.removeSession(request.params.sessionId);
-					if (prepared?.state === "completed") return prepared.result;
-					const response = { sessionId: request.params.sessionId, closed: true };
-					return this.catalog.completeDurableMutation(request.params.sessionId, mutation, response);
-				});
+				const result = await this.replayMutation(request, () =>
+					this.catalog.withSessionProjectMutable(request.params.sessionId, async () => {
+						const mutation: DurableSessionMutation = {
+							method: "session/close",
+							kind: "session_close",
+							requestId: request.params.requestId,
+							params: { sessionId: request.params.sessionId },
+						};
+						let prepared: PreparedSessionMutation | undefined;
+						let closedRuntime = false;
+						if (this.registry.has(request.params.sessionId)) {
+							await this.registry.close(request.params.sessionId, async (runtime) => {
+								prepared = await runtime.prepareMutation(mutation);
+								closedRuntime = prepared.state !== "completed";
+								return closedRuntime;
+							});
+						} else {
+							prepared = this.catalog.prepareDurableMutation(request.params.sessionId, mutation);
+						}
+						if (closedRuntime) this.subscriptionHub.removeSession(request.params.sessionId);
+						if (prepared?.state === "completed") return prepared.result;
+						const response = {
+							sessionId: request.params.sessionId,
+							closed: true,
+						};
+						return this.catalog.completeDurableMutation(request.params.sessionId, mutation, response);
+					}),
+				);
 				connection.subscriptions.unsubscribe(request.params.sessionId);
 				this.interactions.release(request.params.sessionId, connection.interactionPeer);
 				return result;
@@ -300,14 +392,22 @@ export class Dispatcher {
 			case "session/archive":
 				return await this.replayMutation(request, async () => {
 					this.assertMutableSession(request.params.sessionId);
-					this.registry.assertClosed(request.params.sessionId);
-					return { session: await this.catalog.archive(request.params.sessionId, request.params.requestId) };
+					return await this.catalog.withSessionProjectMutable(request.params.sessionId, async () => {
+						this.registry.assertClosed(request.params.sessionId);
+						return {
+							session: await this.catalog.archive(request.params.sessionId, request.params.requestId),
+						};
+					});
 				});
 			case "session/unarchive":
 				return await this.replayMutation(request, async () => {
 					this.assertMutableSession(request.params.sessionId);
-					this.registry.assertClosed(request.params.sessionId);
-					return { session: await this.catalog.unarchive(request.params.sessionId, request.params.requestId) };
+					return await this.catalog.withSessionProjectMutable(request.params.sessionId, async () => {
+						this.registry.assertClosed(request.params.sessionId);
+						return {
+							session: await this.catalog.unarchive(request.params.sessionId, request.params.requestId),
+						};
+					});
 				});
 			case "session/subscribe": {
 				const ref = this.runtimeRef(request.params.sessionId);

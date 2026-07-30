@@ -647,7 +647,7 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 	}
 
 	isActive(): boolean {
-		return this.session.isStreaming || this.session.activeDurableTurnId !== undefined;
+		return this.session.isStreaming || this.session.isCompacting || this.session.activeDurableTurnId !== undefined;
 	}
 
 	hasPendingInteractions(): boolean {
@@ -656,6 +656,14 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 
 	getSummary(): SessionSummary {
 		return this.projection.getSummary();
+	}
+
+	async renameSession(value: string): Promise<SessionSummary> {
+		const next = optionalName(value);
+		if (!next) throw new AppServerError("INVALID_REQUEST", { sessionId: this.sessionId });
+		this.session.setSessionName(next);
+		this.refreshLifecycleProjection();
+		return this.getSummary();
 	}
 
 	async listSkills(): Promise<ClientResult<"skill/list">> {
@@ -678,7 +686,6 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 		return {
 			...base,
 			...(sessionName === undefined ? {} : { name: sessionName }),
-			cwd: manager.getCwd() || null,
 			updatedAt: timestamp(lastEntry?.timestamp, this.ref.summary.updatedAt),
 			state: this.isActive() ? "running" : lastTurn?.state === "interrupted" ? "interrupted" : "idle",
 			...(recoveryNotice === undefined ? {} : { recoveryNotice }),
@@ -724,6 +731,27 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 		};
 	}
 
+	async setPermissionMode(
+		input: ClientParams<"session/setPermissionMode">,
+	): Promise<ClientResult<"session/setPermissionMode">> {
+		if (this.isActive() || this.hasPendingInteractions()) {
+			throw new AppServerError("BUSY", { sessionId: input.sessionId, requestId: input.requestId });
+		}
+		try {
+			this.session.sessionManager.setPermissionSettings({ mode: input.permissionMode });
+		} catch {
+			const permissionMode = this.session.sessionManager.getPermissionSettings().mode;
+			this.publish({ type: "session/permissionModeChanged", sessionId: this.sessionId, permissionMode });
+			throw new AppServerError("OPERATION_FAILED", {
+				sessionId: input.sessionId,
+				requestId: input.requestId,
+			});
+		}
+		const permissionMode = this.session.sessionManager.getPermissionSettings().mode;
+		this.publish({ type: "session/permissionModeChanged", sessionId: this.sessionId, permissionMode });
+		return { permissionMode };
+	}
+
 	async setModel(input: ClientParams<"session/setModel">): Promise<ClientResult<"session/setModel">> {
 		const model = this.session.modelRegistry.find(input.provider, input.modelId);
 		if (!model || !this.session.modelRegistry.hasConfiguredAuth(model)) {
@@ -743,6 +771,7 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 	async snapshot(serverEpoch: string, currentCursor: () => number): Promise<SessionSnapshot> {
 		this.refreshLifecycleProjection();
 		return this.projection.snapshot(serverEpoch, currentCursor(), {
+			permissionMode: this.session.sessionManager.getPermissionSettings().mode,
 			...(this.session.model
 				? { model: { provider: this.session.model.provider, modelId: this.session.model.id } }
 				: {}),
@@ -888,6 +917,10 @@ class ReadonlyScheduledSessionRuntime implements OpenedSessionRuntime {
 		return this.projection.getSummary();
 	}
 
+	async renameSession(): Promise<SessionSummary> {
+		throw new AppServerError("READ_ONLY_SESSION", { sessionId: this.sessionId });
+	}
+
 	async listSkills(): Promise<ClientResult<"skill/list">> {
 		return { skills: [] };
 	}
@@ -901,6 +934,10 @@ class ReadonlyScheduledSessionRuntime implements OpenedSessionRuntime {
 	}
 
 	async setThinkingSelection(): Promise<ClientResult<"session/setThinkingSelection">> {
+		throw new AppServerError("READ_ONLY_SESSION", { sessionId: this.sessionId });
+	}
+
+	async setPermissionMode(): Promise<ClientResult<"session/setPermissionMode">> {
 		throw new AppServerError("READ_ONLY_SESSION", { sessionId: this.sessionId });
 	}
 

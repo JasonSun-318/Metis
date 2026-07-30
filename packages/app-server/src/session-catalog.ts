@@ -357,6 +357,7 @@ export class SessionCatalog {
 	private sessions = new Map<string, SessionRef>();
 	private claimedSessionIds = new Set<string>();
 	private readonly blockedProjectKeys = new Set<string>();
+	private readonly activeSessionMutations = new Set<string>();
 	private readonly sessionNames = new Map<string, CachedSessionName>();
 	private mutationTail: Promise<void> = Promise.resolve();
 
@@ -441,7 +442,10 @@ export class SessionCatalog {
 	}
 
 	private async scanCandidates(
-		candidates: readonly { readonly path: string; readonly archived: boolean }[],
+		candidates: readonly {
+			readonly path: string;
+			readonly archived: boolean;
+		}[],
 	): Promise<ScannedSession[]> {
 		const scanned = new Array<ScannedSession>(candidates.length);
 		let nextCandidate = 0;
@@ -676,7 +680,11 @@ export class SessionCatalog {
 	}
 
 	async withModeProjectBlocked<T>(
-		input: { readonly mode: AgentMode; readonly cwd: string; readonly expectedRevision: string },
+		input: {
+			readonly mode: AgentMode;
+			readonly cwd: string;
+			readonly expectedRevision: string;
+		},
 		operation: (snapshot: ModeProjectSnapshot) => Promise<T>,
 	): Promise<T> {
 		const canonicalCwd = canonicalProjectCwd(input.cwd);
@@ -685,6 +693,9 @@ export class SessionCatalog {
 			if (this.blockedProjectKeys.has(key)) throw new AppServerError("BUSY");
 			const value = this.snapshotModeProject(input.mode, canonicalCwd);
 			if (value.revision !== input.expectedRevision) throw new AppServerError("BUSY");
+			if (value.refs.some((ref) => this.activeSessionMutations.has(ref.summary.sessionId))) {
+				throw new AppServerError("BUSY");
+			}
 			this.blockedProjectKeys.add(key);
 			return value;
 		});
@@ -737,11 +748,24 @@ export class SessionCatalog {
 		}
 	}
 
-	assertSessionProjectMutable(sessionId: string): void {
-		const ref = this.get(sessionId);
-		if (ref.scheduled || ref.summary.cwdOrigin !== "user-selected" || !ref.summary.cwd) return;
-		const key = projectKey(ref.summary.mode, canonicalProjectCwd(ref.summary.cwd));
-		if (this.blockedProjectKeys.has(key)) throw new AppServerError("BUSY", { sessionId });
+	async withSessionProjectMutable<T>(sessionId: string, operation: (ref: SessionRef) => Promise<T>): Promise<T> {
+		const ref = await this.mutate(() => {
+			const current = this.get(sessionId);
+			if (!current.scheduled && current.summary.cwdOrigin === "user-selected" && current.summary.cwd) {
+				const key = projectKey(current.summary.mode, canonicalProjectCwd(current.summary.cwd));
+				if (this.blockedProjectKeys.has(key)) throw new AppServerError("BUSY", { sessionId });
+			}
+			if (this.activeSessionMutations.has(sessionId)) throw new AppServerError("BUSY", { sessionId });
+			this.activeSessionMutations.add(sessionId);
+			return current;
+		});
+		try {
+			return await operation(ref);
+		} finally {
+			await this.mutate(() => {
+				this.activeSessionMutations.delete(sessionId);
+			});
+		}
 	}
 
 	private snapshotModeProject(mode: AgentMode, canonicalCwd: string): ModeProjectSnapshot {
@@ -779,7 +803,9 @@ export class SessionCatalog {
 		}
 		for (const ref of refs) {
 			if (dirname(ref.relativePath) !== storageRoot(ref.relativePath)) {
-				throw new AppServerError("SESSION_CORRUPT", { sessionId: ref.summary.sessionId });
+				throw new AppServerError("SESSION_CORRUPT", {
+					sessionId: ref.summary.sessionId,
+				});
 			}
 		}
 		refs.sort((left, right) => left.summary.sessionId.localeCompare(right.summary.sessionId));
@@ -824,7 +850,10 @@ export class SessionCatalog {
 		let offset = 0;
 		if (input.afterSessionId) {
 			const index = sessions.findIndex((summary) => summary.sessionId === input.afterSessionId);
-			if (index < 0) throw new AppServerError("NOT_FOUND", { sessionId: input.afterSessionId });
+			if (index < 0)
+				throw new AppServerError("NOT_FOUND", {
+					sessionId: input.afterSessionId,
+				});
 			offset = index + 1;
 		}
 		const limit = input.limit ?? DEFAULT_LIST_LIMIT;
@@ -848,6 +877,7 @@ export class SessionCatalog {
 				throw new AppServerError("BUSY", { requestId: input.requestId });
 			}
 			const requestedName = normalizedSessionName(input.name);
+			const requestedPermissionMode = input.permissionMode ?? "ask";
 			const mutation: DurableSessionMutation = {
 				method: "session/create",
 				kind: "session_create",
@@ -856,11 +886,14 @@ export class SessionCatalog {
 					...(input.mode === undefined ? {} : { mode: input.mode }),
 					...(input.cwd === undefined ? {} : { cwd: input.cwd }),
 					...(input.name === undefined ? {} : { name: input.name }),
+					...(input.permissionMode === undefined ? {} : { permissionMode: input.permissionMode }),
 				},
 			};
 			const existing = this.sessions.get(input.requestId);
 			if (existing?.scheduled) {
-				throw new AppServerError("REQUEST_ID_REUSED", { requestId: input.requestId });
+				throw new AppServerError("REQUEST_ID_REUSED", {
+					requestId: input.requestId,
+				});
 			}
 			if (existing) {
 				const manager = SessionManager.open(existing.path);
@@ -880,17 +913,29 @@ export class SessionCatalog {
 								}) !== undefined
 							: manager.getCwd() === (await realpath(process.cwd())) &&
 								manager.getCwdOrigin() === "user-selected";
-					if (manager.getMode() !== mode || !workspaceMatches || name !== requestedName) {
-						throw new AppServerError("REQUEST_ID_REUSED", { requestId: input.requestId });
+					if (
+						manager.getMode() !== mode ||
+						!workspaceMatches ||
+						name !== requestedName ||
+						manager.getPermissionSettings().mode !== requestedPermissionMode
+					) {
+						throw new AppServerError("REQUEST_ID_REUSED", {
+							requestId: input.requestId,
+						});
 					}
-					const summary = { ...existing.summary, ...(name === undefined ? {} : { name }) };
+					const summary = {
+						...existing.summary,
+						...(name === undefined ? {} : { name }),
+					};
 					return completeSessionMutation(manager, mutation, summary) as SessionSummary;
 				} finally {
 					manager.close();
 				}
 			}
 			if (this.claimedSessionIds.has(input.requestId)) {
-				throw new AppServerError("REQUEST_ID_REUSED", { requestId: input.requestId });
+				throw new AppServerError("REQUEST_ID_REUSED", {
+					requestId: input.requestId,
+				});
 			}
 
 			const existingStorageCwd = projectCwd ? await this.existingProjectStorageCwd(projectCwd) : undefined;
@@ -910,6 +955,7 @@ export class SessionCatalog {
 						id: input.requestId,
 						mode,
 						cwdOrigin: workspace.cwdOrigin,
+						...(input.permissionMode === undefined ? {} : { permissionMode: input.permissionMode }),
 					});
 				} catch (error) {
 					if (workspace.cwdOrigin === "managed") {
@@ -962,16 +1008,42 @@ export class SessionCatalog {
 
 	updateSummary(sessionId: string, update: Partial<SessionSummary>): SessionSummary {
 		const ref = this.get(sessionId);
-		const { name, ...merged } = { ...ref.summary, ...update };
+		const { cwd, name, ...merged } = { ...ref.summary, ...update };
 		const normalizedName = normalizedSessionName(name);
 		const summary: SessionSummary = {
 			...merged,
+			cwd: cwd && merged.cwdOrigin === "user-selected" ? summaryCwd(cwd) : cwd,
 			...(normalizedName === undefined ? {} : { name: normalizedName }),
 			sessionId,
 			archived: ref.summary.archived,
 		};
 		this.sessions.set(sessionId, { ...ref, summary });
 		return summary;
+	}
+
+	renameClosedSession(sessionId: string, value: string): Promise<SessionSummary> {
+		return this.mutate(() => {
+			const ref = this.get(sessionId);
+			if (ref.summary.state === "corrupt") throw new AppServerError("SESSION_CORRUPT", { sessionId });
+			if (ref.scheduled) throw new AppServerError("READ_ONLY_SESSION", { sessionId });
+			const name = normalizedSessionName(value);
+			if (!name) throw new AppServerError("INVALID_REQUEST", { sessionId });
+			const manager = SessionManager.open(ref.path);
+			try {
+				manager.appendSessionInfo(name);
+			} finally {
+				manager.close();
+			}
+			return this.updateSummary(sessionId, { name });
+		});
+	}
+
+	removeDeletedSession(sessionId: string, path: string): Promise<void> {
+		return this.mutate(() => {
+			if (this.sessions.get(sessionId)?.path !== path) return;
+			this.sessions.delete(sessionId);
+			this.claimedSessionIds.delete(sessionId);
+		});
 	}
 
 	markCorrupt(sessionId: string): void {

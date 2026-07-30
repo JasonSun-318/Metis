@@ -86,6 +86,7 @@ export class SessionProjection {
 			case "server/state":
 			case "interaction/notify":
 				return clone(event);
+			case "session/permissionModeChanged":
 			case "session/thinkingSelectionChanged":
 			case "session/modelChanged":
 			case "subagent/updated":
@@ -152,12 +153,14 @@ export class SessionProjection {
 		runtime: Pick<
 			SessionSnapshot,
 			| "thinkingSelection"
+			| "permissionMode"
 			| "actualThinkingLevel"
 			| "availableThinkingSelections"
 			| "subagents"
 			| "model"
 			| "availableModels"
 		> = {
+			permissionMode: "ask",
 			thinkingSelection: "off",
 			actualThinkingLevel: "off",
 			availableThinkingSelections: ["off"],

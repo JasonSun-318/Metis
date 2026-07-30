@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { createServer, type Server, type ServerResponse } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { ItemView } from "@arcmind/app-protocol";
+import { type ItemView, RPC_ERROR_CODES } from "@arcmind/app-protocol";
 import { afterEach, describe, expect, it } from "vitest";
 import { AppServer } from "../src/app-server.ts";
 
@@ -129,6 +129,18 @@ describe("production runtime streaming", () => {
 				},
 			});
 			await connected;
+			expect(
+				await connection.handle({
+					jsonrpc: "2.0",
+					id: "permissions-running",
+					method: "session/setPermissionMode",
+					params: {
+						sessionId: SESSION_REQUEST,
+						requestId: "00000000-0000-4000-8000-000000000103",
+						permissionMode: "full",
+					},
+				}),
+			).toMatchObject({ error: { code: RPC_ERROR_CODES.BUSY } });
 			const requestStrings: string[] = [];
 			const collectStrings = (value: unknown): void => {
 				if (typeof value === "string") requestStrings.push(value);
@@ -242,6 +254,40 @@ describe("production runtime streaming", () => {
 						{ type: "text", text: "visible-before-end" },
 					],
 				});
+
+			expect(
+				await connection.handle({
+					jsonrpc: "2.0",
+					id: "permissions-idle",
+					method: "session/setPermissionMode",
+					params: {
+						sessionId: SESSION_REQUEST,
+						requestId: "00000000-0000-4000-8000-000000000104",
+						permissionMode: "full",
+					},
+				}),
+			).toMatchObject({ result: { permissionMode: "full" } });
+			expect(readFileSync(server.catalog.get(SESSION_REQUEST).path, "utf8")).toContain('"permissionMode":"full"');
+			expect(
+				await connection.handle({
+					jsonrpc: "2.0",
+					id: "rename-idle",
+					method: "session/rename",
+					params: {
+						sessionId: SESSION_REQUEST,
+						requestId: "00000000-0000-4000-8000-000000000105",
+						name: "Renamed production session",
+					},
+				}),
+			).toMatchObject({ result: { session: { name: "Renamed production session" } } });
+			expect(readFileSync(server.catalog.get(SESSION_REQUEST).path, "utf8")).toContain('"type":"session_info"');
+			const subscribed = await connection.handle({
+				jsonrpc: "2.0",
+				id: "subscribe-permissions",
+				method: "session/subscribe",
+				params: { sessionId: SESSION_REQUEST },
+			});
+			expect(subscribed).toMatchObject({ result: { snapshot: { permissionMode: "full" } } });
 		} finally {
 			server.beginShutdown();
 			await server.waitForShutdown();

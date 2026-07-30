@@ -49,6 +49,10 @@ class FakeRuntime implements OpenedSessionRuntime {
 		return { ...summary(this.sessionId), state: this.active ? "running" : "idle" };
 	}
 
+	async renameSession(name: string): Promise<SessionSummary> {
+		return { ...this.getSummary(), name };
+	}
+
 	async listSkills(): Promise<ClientResult<"skill/list">> {
 		return { skills: [] };
 	}
@@ -71,6 +75,12 @@ class FakeRuntime implements OpenedSessionRuntime {
 		};
 	}
 
+	async setPermissionMode(
+		input: ClientParams<"session/setPermissionMode">,
+	): Promise<ClientResult<"session/setPermissionMode">> {
+		return { permissionMode: input.permissionMode };
+	}
+
 	async setModel(input: ClientParams<"session/setModel">): Promise<ClientResult<"session/setModel">> {
 		return {
 			model: { provider: input.provider, modelId: input.modelId },
@@ -91,6 +101,7 @@ class FakeRuntime implements OpenedSessionRuntime {
 			thinkingSelection: "high",
 			actualThinkingLevel: "high",
 			availableThinkingSelections: ["off", "high", "ultra"],
+			permissionMode: "ask",
 			subagents: [],
 			serverEpoch,
 			cursor: currentCursor(),

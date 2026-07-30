@@ -35,6 +35,7 @@ interface PendingScheduleSubscription {
 export class SessionSubscriptions {
 	readonly serverEpoch: string;
 	private readonly channels = new Map<string, SessionChannel>();
+	private readonly connectionOutbounds = new Set<OutboundQueue>();
 	private readonly scheduleSubscribers = new Set<Subscriber>();
 	private cursor = 0;
 
@@ -77,6 +78,20 @@ export class SessionSubscriptions {
 
 	publishSchedule(event: DomainEvent): void {
 		this.publish(this.scheduleSubscribers, event);
+	}
+
+	registerConnection(outbound: OutboundQueue): () => void {
+		this.connectionOutbounds.add(outbound);
+		return () => this.connectionOutbounds.delete(outbound);
+	}
+
+	private publishToConnections(event: DomainEvent): void {
+		this.cursor += 1;
+		for (const outbound of this.connectionOutbounds) outbound.enqueue(this.cursor, structuredClone(event));
+	}
+
+	invalidateProject(event: Extract<DomainEvent, { type: "project/invalidated" }>): void {
+		this.publishToConnections(event);
 	}
 
 	subscribeSchedule(
@@ -154,7 +169,8 @@ export class SessionSubscriptions {
 		return { snapshot, unsubscribe };
 	}
 
-	removeSession(sessionId: string): void {
+	removeSession(sessionId: string, event?: Extract<DomainEvent, { type: "session/invalidated" }>): void {
+		if (event) this.publishToConnections(event);
 		const channel = this.channels.get(sessionId);
 		if (!channel) return;
 		this.channels.delete(sessionId);
@@ -169,6 +185,7 @@ export class SessionSubscriptions {
 
 	close(): void {
 		for (const sessionId of [...this.channels.keys()]) this.removeSession(sessionId);
+		this.connectionOutbounds.clear();
 		for (const subscriber of this.scheduleSubscribers) {
 			subscriber.active = false;
 			subscriber.stage.abort();
@@ -188,12 +205,14 @@ export class ConnectionSubscriptions {
 	private readonly hub: SessionSubscriptions;
 	private readonly outbound: OutboundQueue;
 	private readonly sessions = new Map<string, ConnectionSubscription>();
+	private readonly unregisterConnection: () => void;
 	private schedule?: ConnectionSubscription;
 	private closed = false;
 
 	constructor(hub: SessionSubscriptions, outbound: OutboundQueue) {
 		this.hub = hub;
 		this.outbound = outbound;
+		this.unregisterConnection = hub.registerConnection(outbound);
 	}
 
 	async subscribe(runtime: OpenedSessionRuntime): Promise<SessionSnapshot> {
@@ -275,6 +294,7 @@ export class ConnectionSubscriptions {
 	close(): void {
 		if (this.closed) return;
 		this.closed = true;
+		this.unregisterConnection();
 		for (const sessionId of [...this.sessions.keys()]) this.unsubscribe(sessionId);
 		this.unsubscribeSchedule();
 	}

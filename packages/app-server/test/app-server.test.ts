@@ -47,6 +47,7 @@ import type {
 const REQUEST_A = "00000000-0000-4000-8000-000000000001";
 const REQUEST_B = "00000000-0000-4000-8000-000000000002";
 const REQUEST_C = "00000000-0000-4000-8000-000000000003";
+const REQUEST_D = "00000000-0000-4000-8000-000000000004";
 
 class FakeRuntime implements OpenedSessionRuntime {
 	readonly sessionId: string;
@@ -55,6 +56,7 @@ class FakeRuntime implements OpenedSessionRuntime {
 	pendingInteractions = false;
 	closed = false;
 	startCalls = 0;
+	sessionName: string | undefined;
 
 	constructor(ref: SessionRef) {
 		this.ref = ref;
@@ -70,7 +72,16 @@ class FakeRuntime implements OpenedSessionRuntime {
 	}
 
 	getSummary(): SessionSummary {
-		return { ...this.ref.summary, state: this.active ? "running" : "idle" };
+		return {
+			...this.ref.summary,
+			...(this.sessionName ? { name: this.sessionName } : {}),
+			state: this.active ? "running" : "idle",
+		};
+	}
+
+	async renameSession(name: string): Promise<SessionSummary> {
+		this.sessionName = name.trim();
+		return this.getSummary();
 	}
 
 	async listSkills(): Promise<ClientResult<"skill/list">> {
@@ -95,6 +106,12 @@ class FakeRuntime implements OpenedSessionRuntime {
 		};
 	}
 
+	async setPermissionMode(
+		input: ClientParams<"session/setPermissionMode">,
+	): Promise<ClientResult<"session/setPermissionMode">> {
+		return { permissionMode: input.permissionMode };
+	}
+
 	async setModel(input: ClientParams<"session/setModel">): Promise<ClientResult<"session/setModel">> {
 		return {
 			model: { provider: input.provider, modelId: input.modelId },
@@ -107,6 +124,7 @@ class FakeRuntime implements OpenedSessionRuntime {
 	async snapshot(serverEpoch: string, currentCursor: () => number): Promise<SessionSnapshot> {
 		return {
 			session: this.getSummary(),
+			permissionMode: "ask",
 			turns: [],
 			recentItems: [],
 			nextBeforeItemId: null,
@@ -515,6 +533,208 @@ describe("AppServer", () => {
 		});
 	});
 
+	it("routes replay-protected permission selection through the opened runtime", async () => {
+		writeSession(sessionsRoot, "session-a", projectDir);
+		const server = await AppServer.create({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
+		const connection = server.connect();
+		await connection.handle(initialize());
+		await connection.handle({
+			jsonrpc: "2.0",
+			id: "open",
+			method: "session/open",
+			params: { sessionId: "session-a" },
+		});
+
+		const request = {
+			jsonrpc: "2.0" as const,
+			id: "set-permissions",
+			method: "session/setPermissionMode" as const,
+			params: { sessionId: "session-a", requestId: REQUEST_A, permissionMode: "full" as const },
+		};
+		expect(await connection.handle(request)).toMatchObject({ result: { permissionMode: "full" } });
+		expect(await connection.handle({ ...request, id: "set-permissions-replay" })).toMatchObject({
+			result: { permissionMode: "full" },
+		});
+		expectError(
+			await connection.handle({
+				...request,
+				id: "set-permissions-conflict",
+				params: { ...request.params, permissionMode: "ask" },
+			}),
+			RPC_ERROR_CODES.REQUEST_ID_REUSED,
+		);
+	});
+
+	it("renames ordinary sessions and rejects scheduled session actions", async () => {
+		writeSession(sessionsRoot, "session-a", projectDir);
+		writeSession(sessionsRoot, "session-archived", projectDir);
+		writeModeSession(agentDir, sessionsRoot, "scheduled-session", projectDir, "chat", {
+			scheduled: { taskId: REQUEST_A, runId: REQUEST_B },
+		});
+		const server = await AppServer.create({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
+		const connection = server.connect();
+		await connection.handle(initialize());
+		await connection.handle({
+			jsonrpc: "2.0",
+			id: "open-session-a",
+			method: "session/open",
+			params: { sessionId: "session-a" },
+		});
+		await connection.handle({
+			jsonrpc: "2.0",
+			id: "archive-session",
+			method: "session/archive",
+			params: { sessionId: "session-archived", requestId: REQUEST_C },
+		});
+
+		const rename = {
+			jsonrpc: "2.0" as const,
+			id: "rename",
+			method: "session/rename" as const,
+			params: { sessionId: "session-a", requestId: REQUEST_A, name: "Renamed session" },
+		};
+		expect(await connection.handle(rename)).toMatchObject({
+			result: { session: { sessionId: "session-a", name: "Renamed session" } },
+		});
+		expect(await connection.handle({ ...rename, id: "rename-replay" })).toMatchObject({
+			result: { session: { name: "Renamed session" } },
+		});
+		expect(
+			await connection.handle({
+				jsonrpc: "2.0",
+				id: "rename-archived",
+				method: "session/rename",
+				params: { sessionId: "session-archived", requestId: REQUEST_B, name: "Renamed archived" },
+			}),
+		).toMatchObject({ result: { session: { archived: true, name: "Renamed archived" } } });
+		const archivedPath = server.catalog.get("session-archived").path;
+		const deleteSession = vi.spyOn(SessionManager, "deleteSession").mockImplementation(async (path) => {
+			unlinkSync(path);
+			return { ok: true, method: "trash" };
+		});
+		try {
+			expect(
+				await connection.handle({
+					jsonrpc: "2.0",
+					id: "delete-archived",
+					method: "session/delete",
+					params: { sessionId: "session-archived", requestId: REQUEST_D },
+				}),
+			).toMatchObject({ result: { sessionId: "session-archived", deleted: true } });
+			expect(existsSync(archivedPath)).toBe(false);
+		} finally {
+			deleteSession.mockRestore();
+		}
+
+		for (const method of ["session/rename", "session/delete"] as const) {
+			expectError(
+				await connection.handle({
+					jsonrpc: "2.0",
+					id: `scheduled-${method}`,
+					method,
+					params: {
+						sessionId: "scheduled-session",
+						requestId: method === "session/rename" ? REQUEST_C : REQUEST_A,
+						...(method === "session/rename" ? { name: "Nope" } : {}),
+					},
+				}),
+				RPC_ERROR_CODES.READ_ONLY_SESSION,
+			);
+		}
+	});
+
+	it("closes and deletes an idle opened session but rejects active work", async () => {
+		const idlePath = writeSession(sessionsRoot, "session-idle", projectDir);
+		const activePath = writeSession(sessionsRoot, "session-active", projectDir);
+		const host = new FakeHost();
+		const server = await AppServer.create({ agentDir, sessionsRoot, runtimeHost: host });
+		const connection = server.connect();
+		await connection.handle(initialize());
+		for (const sessionId of ["session-idle", "session-active"]) {
+			await connection.handle({
+				jsonrpc: "2.0",
+				id: `open-${sessionId}`,
+				method: "session/open",
+				params: { sessionId },
+			});
+		}
+		host.runtimes.get("session-active")!.active = true;
+		const deleteSession = vi.spyOn(SessionManager, "deleteSession").mockImplementation(async (path) => {
+			unlinkSync(path);
+			return { ok: true, method: "trash" };
+		});
+		try {
+			const request = {
+				jsonrpc: "2.0" as const,
+				id: "delete-idle",
+				method: "session/delete" as const,
+				params: { sessionId: "session-idle", requestId: REQUEST_A },
+			};
+			expect(await connection.handle(request)).toMatchObject({
+				result: { sessionId: "session-idle", deleted: true, method: "trash" },
+			});
+			expect(await connection.handle({ ...request, id: "delete-idle-replay" })).toMatchObject({
+				result: { sessionId: "session-idle", deleted: true },
+			});
+			expect(host.runtimes.get("session-idle")?.closed).toBe(true);
+			expect(existsSync(idlePath)).toBe(false);
+			expectError(
+				await connection.handle({
+					jsonrpc: "2.0",
+					id: "delete-active",
+					method: "session/delete",
+					params: { sessionId: "session-active", requestId: REQUEST_B },
+				}),
+				RPC_ERROR_CODES.SESSION_IN_USE,
+			);
+			expect(existsSync(activePath)).toBe(true);
+		} finally {
+			deleteSession.mockRestore();
+		}
+	});
+
+	it("notifies every subscribed client when a session is deleted", async () => {
+		const path = writeSession(sessionsRoot, "session-shared", projectDir);
+		const server = await AppServer.create({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
+		const first = server.connect();
+		const second = server.connect();
+		const firstMessages: unknown[] = [];
+		const secondMessages: unknown[] = [];
+		first.onMessage((message) => {
+			firstMessages.push(message);
+		});
+		second.onMessage((message) => {
+			secondMessages.push(message);
+		});
+		await Promise.all([first.handle(initialize("first")), second.handle(initialize("second"))]);
+		await first.handle({
+			jsonrpc: "2.0",
+			id: "first-subscribe",
+			method: "session/subscribe",
+			params: { sessionId: "session-shared" },
+		});
+		const deleteSession = vi.spyOn(SessionManager, "deleteSession").mockImplementation(async () => {
+			unlinkSync(path);
+			return { ok: true, method: "trash" };
+		});
+
+		try {
+			await first.handle({
+				jsonrpc: "2.0",
+				id: "delete-shared",
+				method: "session/delete",
+				params: { sessionId: "session-shared", requestId: REQUEST_A },
+			});
+			await new Promise<void>((resolve) => setImmediate(resolve));
+			for (const messages of [firstMessages, secondMessages]) {
+				expect(JSON.stringify(messages)).toContain('"type":"session/invalidated"');
+				expect(JSON.stringify(messages)).toContain('"reason":"deleted"');
+			}
+		} finally {
+			deleteSession.mockRestore();
+		}
+	});
+
 	it("lists draft and opened-session skills through their owning runtime boundary", async () => {
 		writeSession(sessionsRoot, "session-a", projectDir);
 		const host = new FakeHost();
@@ -665,6 +885,37 @@ describe("AppServer", () => {
 				...create,
 				id: "create-duplicate",
 				params: { requestId: REQUEST_B, cwd: projectDir },
+			}),
+			RPC_ERROR_CODES.REQUEST_ID_REUSED,
+		);
+	});
+
+	it("creates a session with its initial permission atomically and rejects conflicting replay", async () => {
+		const server = await AppServer.create({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
+		const connection = server.connect();
+		await connection.handle(initialize());
+		const create = {
+			jsonrpc: "2.0" as const,
+			id: "create-full",
+			method: "session/create" as const,
+			params: { requestId: REQUEST_A, mode: "chat" as const, cwd: projectDir, permissionMode: "full" as const },
+		};
+
+		expect(await connection.handle(create)).toMatchObject({ result: { session: { sessionId: REQUEST_A } } });
+		const manager = SessionManager.open(server.catalog.get(REQUEST_A).path);
+		try {
+			expect(manager.getPermissionSettings()).toEqual({ mode: "full" });
+		} finally {
+			manager.close();
+		}
+		expect(await connection.handle({ ...create, id: "create-full-replay" })).toMatchObject({
+			result: { session: { sessionId: REQUEST_A } },
+		});
+		expectError(
+			await connection.handle({
+				...create,
+				id: "create-full-conflict",
+				params: { ...create.params, permissionMode: "ask" },
 			}),
 			RPC_ERROR_CODES.REQUEST_ID_REUSED,
 		);
