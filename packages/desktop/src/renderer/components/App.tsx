@@ -391,8 +391,8 @@ export function App({ api, store }: AppProps) {
 			throw projectActionError(cause);
 		}
 	};
-	const createEmptyProjectSession = async (group: ProjectSessionGroup): Promise<void> => {
-		const key = projectKey(group.mode, group.cwd);
+	const createEmptySessionInProject = async (projectMode: AgentMode, cwd: string): Promise<void> => {
+		const key = projectKey(projectMode, cwd);
 		const existing = projectCreateRequests.current.get(key);
 		if (existing?.promise) return existing.promise;
 		const requestId = existing?.requestId ?? crypto.randomUUID();
@@ -400,8 +400,8 @@ export function App({ api, store }: AppProps) {
 			setProjectBusy(key, true);
 			setError(null);
 			try {
-				const created = await api.createSession({ requestId, mode: group.mode, cwd: group.cwd });
-				setMode(group.mode);
+				const created = await api.createSession({ requestId, mode: projectMode, cwd });
+				setMode(projectMode);
 				setDestination("tasks");
 				await openSession(created.session.sessionId);
 				setNewTaskDraft(null);
@@ -422,6 +422,8 @@ export function App({ api, store }: AppProps) {
 		projectCreateRequests.current.set(key, { requestId, promise });
 		return promise;
 	};
+	const createEmptyProjectSession = (group: ProjectSessionGroup): Promise<void> =>
+		createEmptySessionInProject(group.mode, group.cwd);
 	const deleteProject = async (
 		group: ProjectSessionGroup,
 		preview: ClientResult<"project/deletePreview">,
@@ -571,14 +573,23 @@ export function App({ api, store }: AppProps) {
 		} catch (cause) {
 			reportError(cause);
 		} finally {
-			setBusy(false);
+			setDraftBusy(false);
 		}
 	};
+	const chooseCodeProjectFolder = () => api.selectProjectFolder();
+	const createCodeProjectFolder = (input: Parameters<ArcMindDesktopApi["createProjectFolder"]>[0]) =>
+		api.createProjectFolder(input);
 
 	const startNewTask = () => {
 		setDestination("tasks");
 		setError(null);
-		setNewTaskDraft({ mode, folder: null, sessionId: null });
+		setNewTaskDraft(emptyNewTaskDraft(mode));
+		newTaskCreateRequest.current = null;
+		newTaskTurnRequest.current = null;
+	};
+	const cancelNewTask = () => {
+		setError(null);
+		setNewTaskDraft(null);
 		newTaskCreateRequest.current = null;
 		newTaskTurnRequest.current = null;
 	};
@@ -940,7 +951,7 @@ export function App({ api, store }: AppProps) {
 						<div className="conversation-column">
 							<RecoveryBanner session={visibleActiveSession} />
 								<Transcript appearance={visibleActiveSession.mode} hasOlder={state.nextBeforeItemId !== null} itemIds={state.itemOrder} itemsById={state.itemsById} loadingOlder={loadingOlder} onLoadOlder={loadOlder} />
-							<Composer appearance={visibleActiveSession.mode} disabled={!serverReady || state.syncStatus !== "ready"} key={visibleActiveSession.sessionId} modelControl={modelControl} onInterrupt={interrupt} onManageSkills={() => setDestination("skills")} onPickFiles={pickAttachmentFiles} onSubmit={submit} running={running} skills={skills} thinkingControl={thinkingControl} placeholder="Write a message…" />
+							<Composer appearance={visibleActiveSession.mode} disabled={!serverReady || state.syncStatus !== "ready"} key={visibleActiveSession.sessionId} modelControl={modelControl} onInterrupt={interrupt} onManageSkills={() => setDestination("skills")} onPickFiles={pickAttachmentFiles} onSubmit={submit} permissionControl={permissionControl} running={running} skills={skills} thinkingControl={thinkingControl} placeholder="Write a message…" />
 						</div>
 					</div>
 				) : null}

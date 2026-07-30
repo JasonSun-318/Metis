@@ -1,5 +1,5 @@
 import type { ClientParams, ClientRequestMethod, InteractionResponseInput } from "@arcmind/app-protocol";
-import { contextBridge, type IpcRendererEvent, ipcRenderer } from "electron";
+import { contextBridge, type IpcRendererEvent, ipcRenderer, webUtils } from "electron";
 import {
 	type ArcMindDesktopApi,
 	DESKTOP_EVENT_CHANNEL,
@@ -74,6 +74,10 @@ const api = {
 	},
 	selectProjectFolder: () => ipcRenderer.invoke(DESKTOP_IPC_CHANNELS.selectProjectFolder),
 	selectAttachmentFiles: () => ipcRenderer.invoke(DESKTOP_IPC_CHANNELS.selectAttachmentFiles),
+	resolveDroppedFiles: (files: readonly File[]) =>
+		files.map((file) => ({ path: webUtils.getPathForFile(file), name: file.name })),
+	getDefaultProjectLocation: () => ipcRenderer.invoke(DESKTOP_IPC_CHANNELS.getDefaultProjectLocation),
+	createProjectFolder: (input) => ipcRenderer.invoke(DESKTOP_IPC_CHANNELS.createProjectFolder, input),
 	subscribe: (listener: (event: DesktopApiEvent) => void) => {
 		if (typeof listener !== "function") throw new TypeError("ArcMind event listener must be a function");
 		const onEvent = (_event: IpcRendererEvent, value: unknown) => {

@@ -129,6 +129,7 @@ export async function connectToApp(port: number): Promise<{ browser: Browser; pa
 	if (!context) throw new Error("Packaged app did not expose a browser context");
 	const page = context.pages()[0];
 	if (!page) throw new Error("Packaged app did not expose a renderer page");
+	await page.bringToFront();
 	return { browser, page };
 }
 

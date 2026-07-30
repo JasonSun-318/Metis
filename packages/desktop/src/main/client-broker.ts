@@ -19,6 +19,7 @@ import {
 	DESKTOP_IPC_CHANNELS,
 	type DesktopApiEvent,
 	type DesktopAttachmentSelection,
+	type DesktopCreateProjectFolderInput,
 	type DesktopRpcOutcome,
 	type SupervisorView,
 	validateInteractionResponseInput,
@@ -38,6 +39,8 @@ interface ClientBrokerOptions {
 	readonly supervisor: BrokerSupervisor;
 	readonly selectProjectFolder?: () => Promise<string | null>;
 	readonly selectAttachmentFiles?: () => Promise<DesktopAttachmentSelection[]>;
+	readonly getDefaultProjectLocation?: () => Promise<string>;
+	readonly createProjectFolder?: (input: DesktopCreateProjectFolderInput) => Promise<string>;
 }
 
 type InvokeHandler = (event: IpcMainInvokeEvent, ...args: unknown[]) => Promise<unknown>;
@@ -78,6 +81,8 @@ export class ClientBroker {
 	private readonly supervisor: BrokerSupervisor;
 	private readonly selectProjectFolder: () => Promise<string | null>;
 	private readonly selectAttachmentFiles: () => Promise<DesktopAttachmentSelection[]>;
+	private readonly getDefaultProjectLocation: () => Promise<string>;
+	private readonly createProjectFolder: (input: DesktopCreateProjectFolderInput) => Promise<string>;
 	private readonly pendingInteractions = new Map<string, PendingInteraction>();
 	private readonly subscribedSessions = new Set<string>();
 	private subscriptionMutation = Promise.resolve();
@@ -92,6 +97,12 @@ export class ClientBroker {
 		this.supervisor = options.supervisor;
 		this.selectProjectFolder = options.selectProjectFolder ?? (async () => null);
 		this.selectAttachmentFiles = options.selectAttachmentFiles ?? (async () => []);
+		this.getDefaultProjectLocation = options.getDefaultProjectLocation ?? (async () => "");
+		this.createProjectFolder =
+			options.createProjectFolder ??
+			(async () => {
+				throw new Error("Project folder creation is unavailable");
+			});
 		this.registerHandlers();
 		this.removeSupervisorListeners = [
 			this.supervisor.onState((view) => {
@@ -207,6 +218,10 @@ export class ClientBroker {
 		});
 		this.register(DESKTOP_IPC_CHANNELS.selectProjectFolder, 0, async () => this.selectProjectFolder());
 		this.register(DESKTOP_IPC_CHANNELS.selectAttachmentFiles, 0, async () => this.selectAttachmentFiles());
+		this.register(DESKTOP_IPC_CHANNELS.getDefaultProjectLocation, 0, async () => this.getDefaultProjectLocation());
+		this.register(DESKTOP_IPC_CHANNELS.createProjectFolder, 1, async (_event, [input]) =>
+			this.createProjectFolder(input as DesktopCreateProjectFolderInput),
+		);
 		this.register(DESKTOP_IPC_CHANNELS.getServerState, 0, async () => this.supervisor.view());
 		this.register(DESKTOP_IPC_CHANNELS.retryServer, 0, async () => {
 			await this.supervisor.retry();

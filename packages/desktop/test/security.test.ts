@@ -568,6 +568,35 @@ describe("desktop trust boundaries", () => {
 		broker.dispose();
 	});
 
+	it("guards the default location and bounded project creation capabilities", async () => {
+		const ipcMain = new FakeIpcMain();
+		const { supervisor } = supervisorHarness();
+		const getDefaultProjectLocation = vi.fn().mockResolvedValue("/Users/test/ArcMind Projects");
+		const createProjectFolder = vi.fn().mockResolvedValue("/Users/test/ArcMind Projects/Demo");
+		const broker = new ClientBroker({
+			ipcMain: ipcMain as never,
+			supervisor,
+			getDefaultProjectLocation,
+			createProjectFolder,
+		});
+		const webContents = new FakeWebContents();
+		broker.attach({ webContents: webContents as never });
+		const event = { sender: webContents, senderFrame: webContents.mainFrame };
+		const input = { parentDirectory: "/Users/test/ArcMind Projects", name: "Demo", files: [] };
+
+		await expect(ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.getDefaultProjectLocation)!(event)).resolves.toBe(
+			"/Users/test/ArcMind Projects",
+		);
+		await expect(ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.createProjectFolder)!(event, input)).resolves.toBe(
+			"/Users/test/ArcMind Projects/Demo",
+		);
+		expect(createProjectFolder).toHaveBeenCalledWith(input);
+		await expect(ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.createProjectFolder)!(event)).rejects.toThrow(
+			"Invalid desktop IPC arguments",
+		);
+		broker.dispose();
+	});
+
 	it("acknowledges each validated event batch without exposing ack to the renderer", async () => {
 		const ipcMain = new FakeIpcMain();
 		const { emitMessage, supervisor } = supervisorHarness();

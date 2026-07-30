@@ -49,6 +49,8 @@ export const DESKTOP_IPC_CHANNELS = {
 	respondToInteraction: "arcmind:respond-to-interaction",
 	selectProjectFolder: "arcmind:select-project-folder",
 	selectAttachmentFiles: "arcmind:select-attachment-files",
+	getDefaultProjectLocation: "arcmind:get-default-project-location",
+	createProjectFolder: "arcmind:create-project-folder",
 	getServerState: "arcmind:get-server-state",
 	retryServer: "arcmind:retry-server",
 	subscribe: "arcmind:subscribe",
@@ -59,6 +61,12 @@ export const DESKTOP_EVENT_CHANNEL = "arcmind:event";
 export interface DesktopAttachmentSelection {
 	readonly path: string;
 	readonly name: string;
+}
+
+export interface DesktopCreateProjectFolderInput {
+	readonly parentDirectory: string;
+	readonly name: string;
+	readonly files: readonly DesktopAttachmentSelection[];
 }
 
 export type DesktopRpcOutcome<Result> =
@@ -91,6 +99,9 @@ export interface ArcMindDesktopApi {
 	respondToInteraction(input: InteractionResponseInput): Promise<void>;
 	selectProjectFolder(): Promise<string | null>;
 	selectAttachmentFiles(): Promise<DesktopAttachmentSelection[]>;
+	resolveDroppedFiles(files: readonly File[]): DesktopAttachmentSelection[];
+	getDefaultProjectLocation(): Promise<string>;
+	createProjectFolder(input: DesktopCreateProjectFolderInput): Promise<string>;
 	subscribe(listener: (event: DesktopApiEvent) => void): () => void;
 	getServerState(): Promise<SupervisorView>;
 	retryServer(): Promise<void>;

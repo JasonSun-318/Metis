@@ -13,6 +13,7 @@ import { installAppProtocol, registerAppScheme } from "./app-protocol-scheme.ts"
 import { AppServerSupervisor, type UtilityChild } from "./app-server-supervisor.ts";
 import { ClientBroker } from "./client-broker.ts";
 import { DiagnosticLog } from "./diagnostic-log.ts";
+import { createProjectFolder } from "./project-folder.ts";
 import { DesktopUpdater } from "./updater.ts";
 import { createMainWindow, loadMainWindow } from "./window.ts";
 
@@ -75,6 +76,8 @@ async function launch(): Promise<void> {
 				: await dialog.showOpenDialog(options);
 			return result.canceled ? [] : result.filePaths.map((path) => ({ path, name: basename(path) }));
 		},
+		getDefaultProjectLocation: async () => join(app.getPath("home"), "ArcMind Projects"),
+		createProjectFolder,
 	});
 	const openMainWindow = async (): Promise<void> => {
 		const window = createMainWindow();

@@ -32,9 +32,10 @@ function focusable(dialog: HTMLElement): HTMLElement[] {
 	return Array.from(dialog.querySelectorAll<HTMLElement>("button:not(:disabled), input:not(:disabled)"));
 }
 
-function DialogFrame({
+export function DialogFrame({
 	cancellable,
 	children,
+	className = "project-dialog",
 	descriptionId,
 	initialFocus,
 	onCancel,
@@ -42,6 +43,7 @@ function DialogFrame({
 }: {
 	readonly cancellable: boolean;
 	readonly children: React.ReactNode;
+	readonly className?: string;
 	readonly descriptionId: string;
 	readonly initialFocus: RefObject<HTMLElement | null>;
 	readonly onCancel: () => void;
@@ -89,7 +91,7 @@ function DialogFrame({
 				aria-describedby={descriptionId}
 				aria-labelledby={titleId}
 				aria-modal="true"
-				className="project-dialog"
+				className={className}
 				ref={dialog}
 				role="dialog"
 			>
