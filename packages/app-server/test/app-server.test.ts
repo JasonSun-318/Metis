@@ -1036,6 +1036,10 @@ describe("AppServer", () => {
 		const host = new FakeHost();
 		const server = await AppServer.create({ agentDir, sessionsRoot, runtimeHost: host });
 		const connection = server.connect();
+		const messages: unknown[] = [];
+		connection.onMessage((message) => {
+			messages.push(message);
+		});
 		await connection.handle(initialize());
 		await connection.handle({
 			jsonrpc: "2.0",
@@ -1069,7 +1073,10 @@ describe("AppServer", () => {
 		};
 
 		const deleted = await connection.handle(request);
+		await new Promise<void>((resolve) => setImmediate(resolve));
 		expect(deleted).toMatchObject({ result: { mode: "chat", deletedSessionCount: 2 } });
+		expect(JSON.stringify(messages)).toContain('"type":"project/invalidated"');
+		expect(JSON.stringify(messages)).toContain('"reason":"deleted"');
 		expect(connection.state.subscriptions.has("chat-active")).toBe(false);
 		expect(host.runtimes.get("chat-active")?.closed).toBe(true);
 		expect(existsSync(activePath)).toBe(false);
@@ -1209,6 +1216,51 @@ describe("AppServer", () => {
 		expect(server.catalog.get("00000000-0000-4000-8000-000000000004").summary.mode).toBe("code");
 	});
 
+	it("admits only one same-tick project delete or session rename", async () => {
+		writeModeSession(agentDir, sessionsRoot, "chat-race", projectDir, "chat");
+		const server = await AppServer.create({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
+		const first = server.connect();
+		const second = server.connect();
+		await Promise.all([first.handle(initialize("race-first")), second.handle(initialize("race-second"))]);
+		const preview = await first.handle({
+			jsonrpc: "2.0",
+			id: "race-preview",
+			method: "project/deletePreview",
+			params: { mode: "chat", cwd: projectDir },
+		});
+		const revision = (preview as { result: ClientResult<"project/deletePreview"> }).result.revision;
+		let trashEntered!: () => void;
+		let releaseTrash!: () => void;
+		const entered = new Promise<void>((resolve) => {
+			trashEntered = resolve;
+		});
+		const gate = new Promise<void>((resolve) => {
+			releaseTrash = resolve;
+		});
+		vi.spyOn(SessionManager, "trashModeProjectData").mockImplementation(async (input) => {
+			trashEntered();
+			await gate;
+			return { ok: true, method: "trash", deletedSessionCount: input.sessions.length };
+		});
+
+		const deletion = first.handle({
+			jsonrpc: "2.0",
+			id: "race-delete",
+			method: "project/delete",
+			params: { requestId: REQUEST_A, mode: "chat", cwd: projectDir, expectedRevision: revision },
+		});
+		const rename = second.handle({
+			jsonrpc: "2.0",
+			id: "race-rename",
+			method: "session/rename",
+			params: { requestId: REQUEST_B, sessionId: "chat-race", name: "Must not race" },
+		});
+		await entered;
+		expectError(await rename, RPC_ERROR_CODES.BUSY);
+		releaseTrash();
+		await expect(deletion).resolves.toMatchObject({ result: { deletedSessionCount: 1 } });
+	});
+
 	it("moves nothing for stale, active, pending-interaction, and Trash failures", async () => {
 		const sessionPath = writeModeSession(agentDir, sessionsRoot, "chat-failure", projectDir, "chat");
 		const host = new FakeHost();
@@ -1261,7 +1313,7 @@ describe("AppServer", () => {
 			RPC_ERROR_CODES.OPERATION_FAILED,
 		);
 		expect(trash).not.toHaveBeenCalled();
-		expect(connection.state.subscriptions.has("chat-failure")).toBe(false);
+		expect(connection.state.subscriptions.has("chat-failure")).toBe(true);
 		runtime.close = close;
 		trash.mockResolvedValue({
 			ok: false,
@@ -1273,6 +1325,7 @@ describe("AppServer", () => {
 			await connection.handle(request("00000000-0000-4000-8000-000000000005")),
 			RPC_ERROR_CODES.OPERATION_FAILED,
 		);
+		expect(connection.state.subscriptions.has("chat-failure")).toBe(false);
 		expect(existsSync(sessionPath)).toBe(true);
 		const retryPreview = await connection.handle({
 			jsonrpc: "2.0",
@@ -1927,7 +1980,7 @@ describe("AppServer", () => {
 			method: "session/open",
 			params: { sessionId },
 		});
-		expect(opened).toMatchObject({ result: { session: { sessionId, cwd: projectDir } } });
+		expect(opened).toMatchObject({ result: { session: { sessionId, cwd: realpathSync(projectDir) } } });
 		const subscribed = await connection.handle({
 			jsonrpc: "2.0",
 			id: "subscribe-production",

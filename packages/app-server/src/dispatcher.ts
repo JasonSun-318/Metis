@@ -74,7 +74,9 @@ export class Dispatcher {
 		this.scheduleManager = scheduleManager;
 	}
 
-	private scheduleTarget(sourceSessionId?: string): { target: ScheduleCreateTarget } {
+	private scheduleTarget(sourceSessionId?: string): {
+		target: ScheduleCreateTarget;
+	} {
 		if (!sourceSessionId) return { target: { kind: "general", workspace: "task" } };
 		const ref = this.catalog.get(sourceSessionId);
 		if (ref.scheduled || ref.summary.archived || ref.summary.state === "corrupt" || !ref.summary.cwd) {
@@ -85,7 +87,10 @@ export class Dispatcher {
 			cwdOrigin: ref.summary.cwdOrigin,
 			cwd: ref.summary.cwd,
 		});
-		if (!target) throw new AppServerError("INVALID_REQUEST", { sessionId: sourceSessionId });
+		if (!target)
+			throw new AppServerError("INVALID_REQUEST", {
+				sessionId: sourceSessionId,
+			});
 		return { target };
 	}
 
@@ -132,7 +137,11 @@ export class Dispatcher {
 			if (!evictable) throw new AppServerError("OVERLOADED", { requestId: id });
 			this.replay.delete(evictable[0]);
 		}
-		const entry: ReplayEntry = { fingerprint: digest, result: Promise.resolve().then(operation), settled: false };
+		const entry: ReplayEntry = {
+			fingerprint: digest,
+			result: Promise.resolve().then(operation),
+			settled: false,
+		};
 		this.replay.set(key, entry);
 		void entry.result.then(
 			() => {
@@ -146,52 +155,80 @@ export class Dispatcher {
 	}
 
 	private async deleteModeProject(request: Extract<ClientRpcRequest, { method: "project/delete" }>): Promise<unknown> {
-		return await this.replayMutation(request, () =>
-			this.catalog.withModeProjectBlocked(request.params, async (snapshot) => {
-				const deleteSessions = () =>
-					this.registry.withSessionsQuiesced(
-						snapshot.refs.map((ref) => ref.summary.sessionId),
-						async () => {
-							const result = await SessionManager.trashModeProjectData({
-								agentDir: this.catalog.agentDir,
-								sessionsRoot: this.catalog.sessionsRoot,
-								mode: snapshot.mode,
-								cwd: snapshot.cwd,
-								sessions: snapshot.refs.map((ref) => ({
-									sessionId: ref.summary.sessionId,
-									path: ref.path,
-									relativePath: ref.relativePath,
-									archived: ref.summary.archived,
-									updatedAt: ref.summary.updatedAt,
-								})),
-							});
-							if (!result.ok) {
-								if (result.code === "PROJECT_CHANGED") {
-									throw new AppServerError("BUSY");
+		let invalidation: { mode: "chat" | "code"; cwd: string; reason: "deleted" | "reload_required" } | undefined;
+		const publishInvalidation = () => {
+			const event = invalidation;
+			invalidation = undefined;
+			if (event) this.subscriptionHub.invalidateProject({ type: "project/invalidated", ...event });
+		};
+		try {
+			const result = await this.replayMutation(request, () =>
+				this.catalog.withModeProjectBlocked(request.params, async (snapshot) => {
+					const deleteSessions = async () => {
+						let quiesced = false;
+						try {
+							return await this.registry.withSessionsQuiesced(
+								snapshot.refs.map((ref) => ref.summary.sessionId),
+								async () => {
+									quiesced = true;
+									const result = await SessionManager.trashModeProjectData({
+										agentDir: this.catalog.agentDir,
+										sessionsRoot: this.catalog.sessionsRoot,
+										mode: snapshot.mode,
+										cwd: snapshot.cwd,
+										sessions: snapshot.refs.map((ref) => ({
+											sessionId: ref.summary.sessionId,
+											path: ref.path,
+											relativePath: ref.relativePath,
+											archived: ref.summary.archived,
+											updatedAt: ref.summary.updatedAt,
+										})),
+									});
+									if (!result.ok) {
+										if (result.code === "PROJECT_CHANGED") {
+											throw new AppServerError("BUSY");
+										}
+										if (result.code === "SESSION_IN_USE") throw new AppServerError("SESSION_IN_USE");
+										if (result.code === "SESSION_CORRUPT") throw new AppServerError("SESSION_CORRUPT");
+										throw new AppServerError("OPERATION_FAILED");
+									}
+									for (const ref of snapshot.refs) {
+										this.subscriptionHub.removeSession(ref.summary.sessionId);
+									}
+									invalidation = { mode: snapshot.mode, cwd: snapshot.cwd, reason: "deleted" };
+									return {
+										mode: snapshot.mode,
+										cwd: snapshot.cwd,
+										deletedSessionCount: result.deletedSessionCount,
+									};
+								},
+								() => {
+									for (const ref of snapshot.refs) {
+										this.interactions.releaseSession(ref.summary.sessionId);
+									}
+								},
+							);
+						} catch (error) {
+							if (quiesced) {
+								for (const ref of snapshot.refs) {
+									this.subscriptionHub.removeSession(ref.summary.sessionId);
 								}
-								if (result.code === "SESSION_IN_USE") throw new AppServerError("SESSION_IN_USE");
-								if (result.code === "SESSION_CORRUPT") throw new AppServerError("SESSION_CORRUPT");
-								throw new AppServerError("OPERATION_FAILED");
+								invalidation = { mode: snapshot.mode, cwd: snapshot.cwd, reason: "reload_required" };
 							}
-							return {
-								mode: snapshot.mode,
-								cwd: snapshot.cwd,
-								deletedSessionCount: result.deletedSessionCount,
-							};
-						},
-						() => {
-							for (const ref of snapshot.refs) {
-								const sessionId = ref.summary.sessionId;
-								this.subscriptionHub.removeSession(sessionId);
-								this.interactions.releaseSession(sessionId);
-							}
-						},
-					);
-				return snapshot.mode === "chat"
-					? this.scheduleManager.withNoFixedWorkspaceTasks(snapshot.cwd, deleteSessions)
-					: deleteSessions();
-			}),
-		);
+							throw error;
+						}
+					};
+					return snapshot.mode === "chat"
+						? this.scheduleManager.withNoFixedWorkspaceTasks(snapshot.cwd, deleteSessions)
+						: deleteSessions();
+				}),
+			);
+			publishInvalidation();
+			return result;
+		} catch (error) {
+			publishInvalidation();
+			throw error;
+		}
 	}
 
 	async dispatch(request: ClientRpcRequest, connection: ConnectionState): Promise<unknown> {
@@ -468,7 +505,9 @@ export class Dispatcher {
 				};
 			}
 			case "schedule/get":
-				return { task: scheduleTaskView(await this.scheduleManager.get(request.params.taskId)) };
+				return {
+					task: scheduleTaskView(await this.scheduleManager.get(request.params.taskId)),
+				};
 			case "schedule/update":
 				return await this.replayMutation(request, async () => ({
 					task: scheduleTaskView(
@@ -505,7 +544,10 @@ export class Dispatcher {
 					...(request.params.beforeRunId ? { beforeRunId: request.params.beforeRunId } : {}),
 					...(request.params.limit === undefined ? {} : { limit: request.params.limit }),
 				});
-				return { runs: page.runs.map(scheduleRunView), nextBeforeRunId: page.nextBeforeRunId };
+				return {
+					runs: page.runs.map(scheduleRunView),
+					nextBeforeRunId: page.nextBeforeRunId,
+				};
 			}
 			case "schedule/run/get": {
 				const run = await this.scheduleManager.getRun(request.params.taskId, request.params.runId);
