@@ -31,6 +31,7 @@ import {
 import { getOwnedSessionJournalArtifacts } from "../src/core/session-journal.ts";
 import {
 	getDefaultSessionDir,
+	getSessionDisplayMetadataPath,
 	getSessionImageDir,
 	getSessionSubagentDir,
 	getSessionToolOutputDir,
@@ -107,6 +108,7 @@ function hooks(overrides: Partial<ModeProjectDeleteHooks> = {}): ModeProjectDele
 			if (!header) throw new Error("Missing session header");
 			return header;
 		},
+		getSessionDisplayMetadataPath,
 		getSessionImageDir,
 		getSessionToolOutputDir,
 		getSessionSubagentDir,
@@ -160,6 +162,12 @@ describe("mode project Trash", () => {
 		const scheduled = createSession(layout, "chat-scheduled", "chat", { scheduled: true });
 
 		const owned = new Set<string>();
+		for (const session of [active, archived]) {
+			const manager = SessionManager.open(session.path);
+			manager.appendSessionInfo(session.target.sessionId);
+			manager.close();
+			owned.add(getSessionDisplayMetadataPath(session.path));
+		}
 		const decoys: string[] = [];
 		for (const session of [active, archived]) {
 			for (const path of [session.path, join(layout.sessionsRoot, session.target.relativePath)]) {

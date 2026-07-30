@@ -31,6 +31,8 @@ import {
 	createFileAtomicallySync,
 	ensureDirectoryDurablySync,
 	ensureRealDirectoryDurablySync,
+	readSingleLinkTextFileSync,
+	replaceFileAtomicallySync,
 	syncDirectorySync,
 } from "./durable-file.ts";
 import type { PersistedToolOutput } from "./large-tool-output.ts";
@@ -139,6 +141,105 @@ export function getSessionToolOutputDir(sessionFile: string): string {
 	return getSessionAssetDir(sessionFile, "tool-results");
 }
 
+const SESSION_DISPLAY_METADATA_SUFFIX = ".metadata.json";
+const MAX_SESSION_DISPLAY_METADATA_BYTES = 16 * 1024;
+
+export interface SessionDisplayMetadata {
+	readonly sessionId: string;
+	readonly name?: string;
+}
+
+export function getSessionDisplayMetadataPath(sessionFile: string): string {
+	return `${canonicalPath(sessionFile)}${SESSION_DISPLAY_METADATA_SUFFIX}`;
+}
+
+export function readSessionDisplayMetadata(sessionFile: string): SessionDisplayMetadata | undefined {
+	try {
+		const text = readSingleLinkTextFileSync(getSessionDisplayMetadataPath(sessionFile), {
+			maxBytes: MAX_SESSION_DISPLAY_METADATA_BYTES,
+		});
+		if (text === undefined) return undefined;
+		const value = JSON.parse(text) as Record<string, unknown>;
+		if (value.version !== 1 || typeof value.sessionId !== "string") return undefined;
+		assertValidSessionId(value.sessionId);
+		if (value.name !== null && typeof value.name !== "string") return undefined;
+		const name = typeof value.name === "string" ? value.name.trim() : "";
+		if (Buffer.byteLength(name, "utf8") > MAX_SESSION_DISPLAY_METADATA_BYTES / 2) return undefined;
+		return { sessionId: value.sessionId, ...(name ? { name } : {}) };
+	} catch {
+		return undefined;
+	}
+}
+
+function removeSessionDisplayMetadata(sessionFile: string): void {
+	const path = getSessionDisplayMetadataPath(sessionFile);
+	try {
+		const stats = lstatSync(path);
+		if (!stats.isFile() || stats.isSymbolicLink() || stats.nlink !== 1) {
+			throw new Error("Session display metadata must be a single-link regular file");
+		}
+		unlinkSync(path);
+		syncDirectorySync(dirname(path));
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+	}
+}
+
+function writeSessionDisplayMetadata(sessionFile: string, metadata: SessionDisplayMetadata): void {
+	assertValidSessionId(metadata.sessionId);
+	const name = metadata.name?.replace(/[\r\n]+/g, " ").trim();
+	const contents = `${JSON.stringify({ version: 1, sessionId: metadata.sessionId, name: name || null })}\n`;
+	if (Buffer.byteLength(contents, "utf8") > MAX_SESSION_DISPLAY_METADATA_BYTES) {
+		throw new Error("Session display metadata exceeds its size limit");
+	}
+	replaceFileAtomicallySync(getSessionDisplayMetadataPath(sessionFile), contents, { mode: 0o600 });
+}
+
+export function migrateSessionDisplayMetadata(
+	sessionFile: string,
+	expected: SessionDisplayMetadata & {
+		readonly dev: number;
+		readonly ino: number;
+		readonly size: number;
+		readonly mtimeMs: number;
+		readonly ctimeMs: number;
+	},
+): boolean {
+	let lease: SessionLease;
+	try {
+		lease = SessionLease.acquireTransient(sessionFile);
+	} catch {
+		return false;
+	}
+	let migrated = false;
+	try {
+		const current = lstatSync(sessionFile);
+		if (
+			!current.isFile() ||
+			current.isSymbolicLink() ||
+			current.nlink !== 1 ||
+			current.dev !== expected.dev ||
+			current.ino !== expected.ino ||
+			current.size !== expected.size ||
+			current.mtimeMs !== expected.mtimeMs ||
+			current.ctimeMs !== expected.ctimeMs
+		) {
+			return false;
+		}
+		writeSessionDisplayMetadata(sessionFile, expected);
+		migrated = true;
+	} catch {
+		return false;
+	} finally {
+		try {
+			lease.close();
+		} catch {
+			migrated = false;
+		}
+	}
+	return migrated;
+}
+
 /** Parent-ID-owned directory for first-class child session journals. */
 export function getSessionSubagentDir(agentDir: string, parentSessionId: string): string {
 	assertValidSessionId(parentSessionId);
@@ -191,7 +292,20 @@ export function moveSessionFileWithLease(sourcePath: string, destinationPath: st
 				if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
 			}
 
-			renameSync(source, destination);
+			const metadata = readSessionDisplayMetadata(source);
+			removeSessionDisplayMetadata(destination);
+			if (metadata) writeSessionDisplayMetadata(destination, metadata);
+			try {
+				renameSync(source, destination);
+			} catch (error) {
+				removeSessionDisplayMetadata(destination);
+				throw error;
+			}
+			try {
+				removeSessionDisplayMetadata(source);
+			} catch {
+				// Derived metadata at the old path is harmless; the destination is authoritative.
+			}
 			const sourceDirectory = dirname(source);
 			syncDirectorySync(sourceDirectory);
 			if (destinationDirectory !== sourceDirectory) syncDirectorySync(destinationDirectory);
@@ -2324,6 +2438,7 @@ function createPersistedSessionState(
 		}
 		const durableFileEntries = prepareDurableRecords(destinationEntries, storagePath);
 		validateSessionGraph(durableFileEntries, filePath);
+		removeSessionDisplayMetadata(storagePath);
 		if (mode === "create" || !existsSync(storagePath)) {
 			journal = openSessionJournal<FileEntry>(storagePath, {
 				...journalOptions(storagePath, lease, filePath),
@@ -2336,6 +2451,15 @@ function createPersistedSessionState(
 		}
 		const state = buildManagedSessionState(durableFileEntries, filePath, journal, lease, storagePath);
 		if (mode === "replace") appendPendingRecoveryNotices(state);
+		let name: string | undefined;
+		for (const entry of durableFileEntries) {
+			if (entry.type === "session_info") name = entry.name?.trim() || undefined;
+		}
+		try {
+			writeSessionDisplayMetadata(storagePath, { sessionId: header.id, ...(name ? { name } : {}) });
+		} catch {
+			// The journal is authoritative; a missing derived cache is rebuilt on the next safe catalog scan.
+		}
 		projectLease?.close();
 		projectLease = undefined;
 		return state;
@@ -3086,7 +3210,18 @@ export class SessionManager {
 			timestamp: new Date().toISOString(),
 			name: sanitizedName,
 		};
+		if (this.persist && this.storagePath) removeSessionDisplayMetadata(this.storagePath);
 		this._appendEntry(entry);
+		if (this.persist && this.storagePath) {
+			try {
+				writeSessionDisplayMetadata(this.storagePath, {
+					sessionId: this.sessionId,
+					...(sanitizedName ? { name: sanitizedName } : {}),
+				});
+			} catch {
+				// The journal is authoritative; a missing derived cache is rebuilt on the next safe catalog scan.
+			}
+		}
 		return entry.id;
 	}
 
@@ -3945,6 +4080,7 @@ export class SessionManager {
 				structuredClone(
 					readSessionRecordsReadOnly(path, { followSymlinkAlias: false }).records[0] as SessionHeader,
 				),
+			getSessionDisplayMetadataPath,
 			getSessionImageDir,
 			getSessionToolOutputDir,
 			getSessionSubagentDir,

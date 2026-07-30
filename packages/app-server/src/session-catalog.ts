@@ -17,7 +17,9 @@ import {
 	encodePathForStorage,
 	getDefaultSessionDir,
 	getOwnedManagedWorkspace,
+	migrateSessionDisplayMetadata,
 	moveSessionFileWithLease,
+	readSessionDisplayMetadata,
 	removeOwnedManagedWorkspace,
 	resolveNewSessionWorkspace,
 	type ScheduleRun,
@@ -32,6 +34,7 @@ import {
 import { AppServerError, type SessionRef } from "./session-runtime-host.ts";
 
 const MAX_HEADER_BYTES = 64 * 1024;
+const MAX_SESSION_INFO_BYTES = 8 * 1024;
 const DEFAULT_LIST_LIMIT = 50;
 const MAX_CATALOG_FILES = 100_000;
 const MAX_CONCURRENT_CATALOG_SCANS = 32;
@@ -41,6 +44,7 @@ interface ScannedSession {
 	readonly path: string;
 	readonly relativePath: string;
 	readonly archived: boolean;
+	readonly name?: string;
 	readonly header?: {
 		readonly id: string;
 		readonly timestamp: string;
@@ -50,6 +54,14 @@ interface ScannedSession {
 		readonly scheduled?: { readonly taskId: string; readonly runId: string };
 	};
 	readonly updatedAt: string;
+}
+
+interface CachedSessionName {
+	readonly fingerprint: string;
+	readonly dev: number;
+	readonly ino: number;
+	readonly scannedBytes: number;
+	readonly name?: string;
 }
 
 export interface SessionCatalogOptions {
@@ -150,12 +162,17 @@ async function isAbsent(path: string): Promise<boolean> {
 	}
 }
 
-async function readHeader(path: string): Promise<{
+async function readHeader(
+	path: string,
+	nameStart: number | false | undefined = undefined,
+): Promise<{
 	id: string;
 	timestamp: string;
 	cwd: string;
 	mode: AgentMode;
 	cwdOrigin: CwdOrigin;
+	name?: string;
+	nameScannedThrough: number;
 	scheduled?: { taskId: string; runId: string };
 }> {
 	const before = await lstat(path);
@@ -211,16 +228,74 @@ async function readHeader(path: string): Promise<{
 		if (typeof value.cwd !== "string" || Buffer.byteLength(value.cwd, "utf8") > 32 * 1024) {
 			throw new Error("Session header cwd is invalid");
 		}
+		let name: string | undefined;
+		const scanStart = nameStart === false ? undefined : Math.max(newline + 1, nameStart ?? newline + 1);
+		let nameScannedThrough = nameStart === false ? opened.size : (scanStart ?? newline + 1);
+		if (scanStart !== undefined && newline >= 0 && scanStart < opened.size) {
+			const buffer = Buffer.allocUnsafe(64 * 1024);
+			let position = scanStart;
+			let chunks: Buffer[] = [];
+			let chunkBytes = 0;
+			let oversized = false;
+			const finishLine = () => {
+				if (!oversized && chunkBytes > 0) {
+					const line = Buffer.concat(chunks, chunkBytes);
+					if (line.includes("session_info")) {
+						try {
+							const record = JSON.parse(line.toString("utf8")) as Record<string, unknown>;
+							if (record.type === "session_info" && typeof record.name === "string") {
+								name = normalizedSessionName(record.name);
+							}
+						} catch {
+							// Transcript corruption remains an open-time concern; catalog identity is header-only.
+						}
+					}
+				}
+				chunks = [];
+				chunkBytes = 0;
+				oversized = false;
+			};
+			while (position < opened.size) {
+				const { bytesRead: chunkLength } = await handle.read(
+					buffer,
+					0,
+					Math.min(buffer.byteLength, opened.size - position),
+					position,
+				);
+				if (chunkLength === 0) break;
+				const chunk = buffer.subarray(0, chunkLength);
+				let segmentStart = 0;
+				let lineEnd = chunk.indexOf(0x0a);
+				while (lineEnd >= 0) {
+					const segment = chunk.subarray(segmentStart, lineEnd);
+					if (!oversized && chunkBytes + segment.byteLength <= MAX_SESSION_INFO_BYTES) {
+						chunks.push(Buffer.from(segment));
+						chunkBytes += segment.byteLength;
+					} else {
+						chunks = [];
+						chunkBytes = 0;
+						oversized = true;
+					}
+					finishLine();
+					nameScannedThrough = position + lineEnd + 1;
+					segmentStart = lineEnd + 1;
+					lineEnd = chunk.indexOf(0x0a, segmentStart);
+				}
+				const remainder = chunk.subarray(segmentStart);
+				if (!oversized && chunkBytes + remainder.byteLength <= MAX_SESSION_INFO_BYTES) {
+					chunks.push(Buffer.from(remainder));
+					chunkBytes += remainder.byteLength;
+				} else if (remainder.byteLength > 0) {
+					chunks = [];
+					chunkBytes = 0;
+					oversized = true;
+				}
+				position += chunkLength;
+			}
+		}
 		const current = await lstat(path);
-		if (
-			!current.isFile() ||
-			current.nlink !== 1 ||
-			current.dev !== opened.dev ||
-			current.ino !== opened.ino ||
-			current.size !== opened.size ||
-			current.mtimeMs !== opened.mtimeMs
-		) {
-			throw new Error("Session journal changed while reading its header");
+		if (!current.isFile() || current.nlink !== 1 || current.dev !== opened.dev || current.ino !== opened.ino) {
+			throw new Error("Session journal identity changed while reading its header");
 		}
 		return {
 			id: value.id,
@@ -229,6 +304,8 @@ async function readHeader(path: string): Promise<{
 			mode: value.mode === "chat" || value.mode === "code" ? value.mode : "code",
 			cwdOrigin:
 				value.cwdOrigin === "managed" || value.cwdOrigin === "user-selected" ? value.cwdOrigin : "user-selected",
+			...(name ? { name } : {}),
+			nameScannedThrough,
 			...(scheduled ? { scheduled } : {}),
 		};
 	} finally {
@@ -272,7 +349,7 @@ async function collectJsonlFiles(root: string, skipArchive: boolean): Promise<st
 	return result;
 }
 
-/** Header-only catalog reconstructed from the session roots. */
+/** Bounded catalog reconstructed from session identity plus persisted display metadata. */
 export class SessionCatalog {
 	readonly agentDir: string;
 	readonly sessionsRoot: string;
@@ -280,6 +357,7 @@ export class SessionCatalog {
 	private sessions = new Map<string, SessionRef>();
 	private claimedSessionIds = new Set<string>();
 	private readonly blockedProjectKeys = new Set<string>();
+	private readonly sessionNames = new Map<string, CachedSessionName>();
 	private mutationTail: Promise<void> = Promise.resolve();
 
 	constructor(options: SessionCatalogOptions) {
@@ -294,9 +372,64 @@ export class SessionCatalog {
 		const key = `${archived ? "archive" : "active"}:${relativePath}`;
 		try {
 			const stats = await lstat(path);
-			const updatedAt = new Date(stats.mtimeMs).toISOString();
-			return { key, path, relativePath, archived, header: await readHeader(path), updatedAt };
+			const fingerprint = `${stats.dev}:${stats.ino}:${stats.size}:${stats.mtimeMs}`;
+			const cachedName = this.sessionNames.get(path);
+			const sameIdentity = cachedName?.dev === stats.dev && cachedName.ino === stats.ino;
+			const canContinueNameScan = sameIdentity && stats.size > cachedName.scannedBytes;
+			let persistedName = cachedName ? undefined : readSessionDisplayMetadata(path);
+			const nameStart =
+				cachedName?.fingerprint === fingerprint
+					? false
+					: canContinueNameScan
+						? cachedName.scannedBytes
+						: persistedName
+							? false
+							: undefined;
+			let metadata = await readHeader(path, nameStart);
+			if (persistedName && persistedName.sessionId !== metadata.id) {
+				persistedName = undefined;
+				metadata = await readHeader(path);
+			}
+			const { name: scannedName, nameScannedThrough, ...header } = metadata;
+			const name =
+				cachedName?.fingerprint === fingerprint || canContinueNameScan
+					? (scannedName ?? cachedName.name)
+					: (persistedName?.name ?? scannedName);
+			const after = await lstat(path);
+			if (!after.isFile() || after.nlink !== 1 || after.dev !== stats.dev || after.ino !== stats.ino) {
+				throw new Error("Session journal identity changed while reading its metadata");
+			}
+			if (cachedName?.fingerprint !== fingerprint) {
+				this.sessionNames.set(path, {
+					fingerprint,
+					dev: stats.dev,
+					ino: stats.ino,
+					scannedBytes: nameScannedThrough,
+					...(name ? { name } : {}),
+				});
+			}
+			if (nameStart === undefined) {
+				migrateSessionDisplayMetadata(path, {
+					sessionId: header.id,
+					...(name ? { name } : {}),
+					dev: stats.dev,
+					ino: stats.ino,
+					size: stats.size,
+					mtimeMs: stats.mtimeMs,
+					ctimeMs: stats.ctimeMs,
+				});
+			}
+			return {
+				key,
+				path,
+				relativePath,
+				archived,
+				header,
+				...(name ? { name } : {}),
+				updatedAt: new Date(after.mtimeMs).toISOString(),
+			};
 		} catch {
+			this.sessionNames.delete(path);
 			let updatedAt = new Date(0).toISOString();
 			try {
 				updatedAt = new Date((await lstat(path)).mtimeMs).toISOString();
@@ -333,6 +466,10 @@ export class SessionCatalog {
 			...activeFiles.map((path) => ({ path, archived: false })),
 			...archivedFiles.map((path) => ({ path, archived: true })),
 		];
+		const candidatePaths = new Set(candidates.map((candidate) => candidate.path));
+		for (const path of this.sessionNames.keys()) {
+			if (!candidatePaths.has(path)) this.sessionNames.delete(path);
+		}
 		const scanned = await this.scanCandidates(candidates);
 		const ordinary = scanned;
 		const idCounts = new Map<string, number>();
@@ -357,6 +494,7 @@ export class SessionCatalog {
 							updatedAt: item.updatedAt,
 							state: "idle" as const,
 							archived: item.archived,
+							...(item.name ? { name: item.name } : {}),
 							...(item.header.scheduled ? { scheduled: item.header.scheduled } : {}),
 						}
 					: corruptSummary(sessionId, item);
@@ -421,6 +559,7 @@ export class SessionCatalog {
 								updatedAt: item.updatedAt,
 								state: "idle" as const,
 								archived: item.archived,
+								...(item.name ? { name: item.name } : {}),
 								...(item.header.scheduled ? { scheduled: item.header.scheduled } : {}),
 							}
 						: corruptSummary(sessionId, item);
@@ -448,7 +587,7 @@ export class SessionCatalog {
 				const path = resolve(sessionFile);
 				const canonicalPath = await realpath(path);
 				if (!isInside(expectedRoot, canonicalPath)) throw new Error("Session is outside its task directory");
-				const header = await readHeader(path);
+				const header = await readHeader(path, false);
 				if (
 					header.id !== sessionId ||
 					header.scheduled?.taskId !== run.taskId ||
@@ -522,7 +661,7 @@ export class SessionCatalog {
 		const roots = new Set(refs.map((ref) => storageRoot(ref.relativePath)));
 		if (roots.size !== 1) throw new AppServerError("SESSION_CORRUPT");
 		try {
-			const header = await readHeader(refs[0]!.path);
+			const header = await readHeader(refs[0]!.path, false);
 			if (
 				header.cwdOrigin !== "user-selected" ||
 				canonicalProjectCwd(header.cwd) !== canonicalCwd ||

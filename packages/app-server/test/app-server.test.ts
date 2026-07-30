@@ -23,7 +23,13 @@ import type {
 	SessionSummary,
 } from "@arcmind/app-protocol";
 import { RPC_ERROR_CODES } from "@arcmind/app-protocol";
-import { getDefaultSessionDir, getManagedWorkspaceDir, ProjectTrustStore, SessionManager } from "@arcmind/coding-agent";
+import {
+	getDefaultSessionDir,
+	getManagedWorkspaceDir,
+	getSessionDisplayMetadataPath,
+	ProjectTrustStore,
+	SessionManager,
+} from "@arcmind/coding-agent";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AppServer } from "../src/app-server.ts";
 import {
@@ -263,6 +269,87 @@ describe("AppServer", () => {
 		await AppServer.create({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
 
 		expect(existsSync(stale)).toBe(false);
+	});
+
+	it("restores persisted session names and caches unchanged journal metadata", async () => {
+		const path = writeSession(sessionsRoot, "named-session", projectDir);
+		const manager = SessionManager.open(path);
+		manager.appendSessionInfo("Persisted name");
+		manager.close();
+
+		const server = await AppServer.create({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
+		expect(server.catalog.list({}).sessions).toMatchObject([{ sessionId: "named-session", name: "Persisted name" }]);
+		expect(server.catalog.updateSummary("named-session", { cwd: projectDir }).cwd).toBe(realpathSync(projectDir));
+		const cache = (server.catalog as unknown as { sessionNames: Map<string, unknown> }).sessionNames;
+		const cached = cache.get(path);
+		expect(cached).toBeDefined();
+		await server.catalog.refresh();
+		expect(server.catalog.list({}).sessions).toMatchObject([{ sessionId: "named-session", name: "Persisted name" }]);
+		expect(cache.get(path)).toBe(cached);
+	});
+
+	it("migrates a legacy session name once into bounded display metadata", async () => {
+		const path = writeSession(sessionsRoot, "legacy-named-session", projectDir);
+		appendFileSync(
+			path,
+			`${JSON.stringify({
+				type: "session_info",
+				id: "legacy-name-entry",
+				parentId: null,
+				timestamp: new Date().toISOString(),
+				name: "Legacy name",
+			})}\n`,
+		);
+		const metadataPath = getSessionDisplayMetadataPath(path);
+		expect(existsSync(metadataPath)).toBe(false);
+
+		const server = await AppServer.create({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
+		expect(server.catalog.list({}).sessions).toMatchObject([
+			{ sessionId: "legacy-named-session", name: "Legacy name" },
+		]);
+		expect(existsSync(metadataPath)).toBe(true);
+
+		const cold = await AppServer.create({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
+		expect(cold.catalog.list({}).sessions).toMatchObject([
+			{ sessionId: "legacy-named-session", name: "Legacy name" },
+		]);
+	});
+
+	it("drops a cached name when the same journal inode is truncated", async () => {
+		const path = writeSession(sessionsRoot, "truncated-name", projectDir);
+		const manager = SessionManager.open(path);
+		manager.appendSessionInfo("Old name");
+		manager.close();
+		const server = await AppServer.create({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
+		expect(server.catalog.get("truncated-name").summary.name).toBe("Old name");
+
+		const [header] = readFileSync(path, "utf8").split("\n");
+		writeFileSync(path, `${header}\n`);
+		await server.catalog.refresh();
+
+		expect(server.catalog.get("truncated-name").summary.name).toBeUndefined();
+	});
+
+	it("keeps a growing journal idle when optional name discovery races an append", async () => {
+		const path = writeSession(
+			sessionsRoot,
+			"growing-session",
+			projectDir,
+			`${`${"x".repeat(8 * 1024)}\n`.repeat(1024)}`,
+		);
+		let writing = true;
+		const writer = (async () => {
+			while (writing) {
+				appendFileSync(path, '{"type":"message"}\n');
+				await new Promise<void>((resolve) => setImmediate(resolve));
+			}
+		})();
+
+		const server = await AppServer.create({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
+		writing = false;
+		await writer;
+
+		expect(server.catalog.list({}).sessions).toMatchObject([{ sessionId: "growing-session", state: "idle" }]);
 	});
 
 	it("enforces initialization and protocol version per connection", async () => {
