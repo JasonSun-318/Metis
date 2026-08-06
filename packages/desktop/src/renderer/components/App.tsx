@@ -6,14 +6,18 @@ import {
 	type InteractionView,
 	type PermissionModeView,
 	RPC_ERROR_CODES,
+	type ScheduleTaskView,
 	type SessionSummary,
 	type SkillSummaryView,
 } from "@arcmind/app-protocol";
-import { CaretDown, ClipboardText, FolderSimple, Globe, PlusCircle, Robot, SidebarSimple, TerminalWindow } from "@phosphor-icons/react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { CaretDown, SidebarSimple } from "@phosphor-icons/react";
+import { type CSSProperties, useCallback, useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import type { ArcMindDesktopApi } from "../../shared/desktop-api.ts";
 import { useAppStore } from "../hooks/use-app-store.ts";
+import { useScheduleStore } from "../hooks/use-schedule-store.ts";
 import type { AppStore, AppStoreSnapshot } from "../store/app-store.ts";
+import { ScheduleStore } from "../store/schedule-store.ts";
 import {
 	loadProjectPreferences,
 	type ProjectPreferenceMap,
@@ -28,6 +32,7 @@ import { InteractionHost } from "./InteractionHost.tsx";
 import { ModelSelector } from "./ModelSelector.tsx";
 import { NewTaskHome } from "./NewTaskHome.tsx";
 import { PermissionSelector } from "./PermissionSelector.tsx";
+import { ProfilePanel } from "./ProfilePanel.tsx";
 import { RecoveryBanner } from "./RecoveryBanner.tsx";
 import {
 	type ProjectSessionGroup,
@@ -35,7 +40,9 @@ import {
 	SessionSidebar,
 } from "./SessionSidebar.tsx";
 import { SkillsPanel } from "./SkillsPanel.tsx";
+import { SCHEDULE_KEEP_AWAKE_KEY, ScheduledTasksPanel } from "./ScheduledTasksPanel.tsx";
 import { ThinkingSelector } from "./ThinkingSelector.tsx";
+import { clampToolsSidebarWidth, ToolsSidebar } from "./ToolsSidebar.tsx";
 import { Transcript } from "./Transcript.tsx";
 
 interface AppProps {
@@ -49,6 +56,9 @@ interface NewTaskDraft {
 	readonly sessionId: string | null;
 	readonly permissionMode: PermissionModeView;
 }
+
+const ASSISTED_SCHEDULE_PROMPT =
+	"I want to set up a scheduled task. Briefly explain how scheduled tasks work in ArcMind, then ask me a few concise questions to determine what it should do, when it should run, and whether it should use an available Skill. Do not create the task until I confirm the details.";
 
 function emptyNewTaskDraft(mode: AgentMode): NewTaskDraft {
 	return { mode, folder: null, sessionId: null, permissionMode: "ask" };
@@ -139,42 +149,123 @@ export function firstInteractionForSession(
 	return undefined;
 }
 
+const TOOLS_SIDEBAR_WIDTH_PREFIX = "arcmind.tools-sidebar-width.v2:";
+
+function loadToolsSidebarPreferredWidth(sessionId: string, workspaceWidth: number): number {
+	const value = Number.parseInt(localStorage.getItem(`${TOOLS_SIDEBAR_WIDTH_PREFIX}${sessionId}`) ?? "", 10);
+	return Number.isInteger(value) && value >= 280 ? value : Math.round(workspaceWidth * 0.44);
+}
+
 export function App({ api, store }: AppProps) {
+	const { i18n, t } = useTranslation();
 	const state = useAppStore(store);
+	const scheduleStoreRef = useRef<ScheduleStore | null>(null);
+	if (!scheduleStoreRef.current) scheduleStoreRef.current = new ScheduleStore();
+	const scheduleStore = scheduleStoreRef.current;
+	const scheduleState = useScheduleStore(scheduleStore);
 	const [mode, setMode] = useState<AgentMode>("chat");
 	const [destination, setDestination] = useState<SidebarDestination>("tasks");
+	const [selectedScheduleTaskId, setSelectedScheduleTaskId] = useState<string | null>(null);
 	const [projectPreferences, setProjectPreferences] = useState(() => loadProjectPreferences(localStorage));
 	const [busyProjectKeys, setBusyProjectKeys] = useState<ReadonlySet<string>>(new Set());
 	const [newTaskDraft, setNewTaskDraft] = useState<NewTaskDraft | null>(() => emptyNewTaskDraft("chat"));
 	const [sessionsSidebarOpen, setSessionsSidebarOpen] = useState(true);
 	const [toolsSidebarOpen, setToolsSidebarOpen] = useState(false);
+	const [toolsSidebarPreferredWidth, setToolsSidebarPreferredWidth] = useState(393);
+	const [toolsSidebarWidth, setToolsSidebarWidth] = useState(393);
 	const [bootstrapped, setBootstrapped] = useState(false);
 	const [draftBusy, setDraftBusy] = useState(false);
 	const [loadingOlder, setLoadingOlder] = useState(false);
 	const [skills, setSkills] = useState<readonly SkillSummaryView[]>([]);
 	const [message, setMessage] = useState("Starting ArcMind…");
 	const [error, setError] = useState<string | null>(null);
+	const [dirtyToolSessionIds, setDirtyToolSessionIds] = useState<readonly string[]>([]);
+	const [toolCleanupSessionIds, setToolCleanupSessionIds] = useState<readonly string[]>([]);
 	const openGeneration = useRef(0);
 	const openingSessionId = useRef<string | null>(null);
 	const resnapshots = useRef(new Map<string, Promise<void>>());
 	const newTaskCreateRequest = useRef<{ key: string; requestId: string } | null>(null);
 	const newTaskTurnRequest = useRef<{ key: string; requestId: string } | null>(null);
+	const updateToolsSidebarWidth = useCallback((width: number, persist = true) => {
+		setToolsSidebarWidth(width);
+		if (persist && state.activeSessionId) {
+			setToolsSidebarPreferredWidth(width);
+			localStorage.setItem(`${TOOLS_SIDEBAR_WIDTH_PREFIX}${state.activeSessionId}`, String(width));
+		}
+	}, [state.activeSessionId]);
+	const showToolsSidebar = useCallback(() => {
+		if (state.activeSessionId) {
+			const workspaceWidth = document.querySelector<HTMLElement>(".workspace")?.clientWidth ?? window.innerWidth;
+			const preferredWidth = loadToolsSidebarPreferredWidth(state.activeSessionId, workspaceWidth);
+			setToolsSidebarPreferredWidth(preferredWidth);
+			setToolsSidebarWidth(clampToolsSidebarWidth(preferredWidth, workspaceWidth));
+		}
+		setToolsSidebarOpen(true);
+	}, [state.activeSessionId]);
+	useEffect(() => {
+		if (!toolsSidebarOpen || !state.activeSessionId) return;
+		const workspaceWidth = document.querySelector<HTMLElement>(".workspace")?.clientWidth || window.innerWidth;
+		const preferredWidth = loadToolsSidebarPreferredWidth(state.activeSessionId, workspaceWidth);
+		setToolsSidebarPreferredWidth(preferredWidth);
+		setToolsSidebarWidth(clampToolsSidebarWidth(preferredWidth, workspaceWidth));
+	}, [state.activeSessionId, toolsSidebarOpen]);
 	const activeTurnRequest = useRef<{
 		key: string;
 		method: "start" | "steer";
 		requestId: string;
 	} | null>(null);
 	const skillListGeneration = useRef(0);
+	const scheduleSubscriptionGeneration = useRef(0);
+	const scheduleSnapshotRequest = useRef<Promise<void> | null>(null);
 	const projectCreateRequests = useRef(
 		new Map<string, { requestId: string; promise?: Promise<void> }>(),
 	);
 	const projectDeleteRequests = useRef(new Map<string, { requestId: string; revision: string }>());
 	const sessionRenameRequests = useRef(new Map<string, { name: string; requestId: string }>());
 	const sessionDeleteRequests = useRef(new Map<string, string>());
+	const sessionMarkReadRequests = useRef(new Set<string>());
+	const visibleSessionId = destination === "tasks" && newTaskDraft === null ? state.activeSessionId : null;
+	const visibleSessionIdRef = useRef<string | null>(visibleSessionId);
+	visibleSessionIdRef.current = visibleSessionId;
 
 	const reportError = useCallback((cause: unknown) => {
 		setError(cause instanceof Error ? cause.message : "ArcMind could not complete the request.");
 	}, []);
+	const queueToolCleanup = useCallback((sessionIds: readonly string[]) => {
+		if (sessionIds.length === 0) return;
+		setToolCleanupSessionIds((current) => [...new Set([...current, ...sessionIds])]);
+	}, []);
+	const handleDirtySessionIdsChange = useCallback((sessionIds: readonly string[]) => {
+		setDirtyToolSessionIds((current) => current.join("\0") === sessionIds.join("\0") ? current : sessionIds);
+	}, []);
+	const handleToolCleanupHandled = useCallback((sessionIds: readonly string[]) => {
+		const handled = new Set(sessionIds);
+		setToolCleanupSessionIds((current) => current.filter((sessionId) => !handled.has(sessionId)));
+	}, []);
+
+	useEffect(() => {
+		void api.setWorkspaceEditState({
+			dirty: dirtyToolSessionIds.length > 0,
+			language: i18n.resolvedLanguage?.startsWith("zh") ? "zh" : "en",
+		}).catch(reportError);
+	}, [api, dirtyToolSessionIds.length, i18n.resolvedLanguage, reportError]);
+
+	const markSessionRead = useCallback(
+		async (sessionId: string): Promise<void> => {
+			if (sessionMarkReadRequests.current.has(sessionId)) return;
+			if (!store.getSnapshot().sessionsById.get(sessionId)?.unread) return;
+			sessionMarkReadRequests.current.add(sessionId);
+			try {
+				const result = await api.markSessionRead({ sessionId });
+				store.upsertSession(result.session);
+			} catch (cause) {
+				reportError(cause);
+			} finally {
+				sessionMarkReadRequests.current.delete(sessionId);
+			}
+		},
+		[api, reportError, store],
+	);
 
 	const openSession = useCallback(
 		async (sessionId: string) => {
@@ -187,6 +278,8 @@ export function App({ api, store }: AppProps) {
 				const snapshot = await api.openSession({ sessionId });
 				if (generation !== openGeneration.current) return snapshot;
 				store.applySnapshot(snapshot);
+				if (snapshot.session.unread) await markSessionRead(sessionId);
+				if (generation !== openGeneration.current) return snapshot;
 				localStorage.setItem(activeSessionKey(snapshot.session.mode), sessionId);
 				setMessage("Session ready");
 				return snapshot;
@@ -211,7 +304,7 @@ export function App({ api, store }: AppProps) {
 				}
 			}
 		},
-		[api, reportError, store],
+		[api, markSessionRead, reportError, store],
 	);
 
 	const requestResnapshot = useCallback(
@@ -229,9 +322,38 @@ export function App({ api, store }: AppProps) {
 		},
 		[openSession],
 	);
+	const requestScheduleSnapshot = useCallback(
+		(replace = false): Promise<void> => {
+			const supervisorEpoch = store.getSnapshot().supervisor.serverEpoch;
+			const current = scheduleStore.getSnapshot();
+			if (!replace && current.syncStatus === "ready" && current.serverEpoch === supervisorEpoch) {
+				return Promise.resolve();
+			}
+			if (scheduleSnapshotRequest.current) return scheduleSnapshotRequest.current;
+			const generation = ++scheduleSubscriptionGeneration.current;
+			let pending!: Promise<void>;
+			pending = (async () => {
+				try {
+					if (replace) await api.unsubscribeSchedule().catch(() => undefined);
+					const result = await api.subscribeSchedule();
+					if (generation === scheduleSubscriptionGeneration.current) scheduleStore.applySnapshot(result.snapshot);
+				} catch (cause) {
+					if (generation === scheduleSubscriptionGeneration.current) reportError(cause);
+				} finally {
+					if (scheduleSnapshotRequest.current === pending) scheduleSnapshotRequest.current = null;
+				}
+			})();
+			scheduleSnapshotRequest.current = pending;
+			return pending;
+		},
+		[api, reportError, scheduleStore, store],
+	);
 
 	useEffect(() => {
 		let active = true;
+		void api
+			.setScheduleKeepAwake(localStorage.getItem(SCHEDULE_KEEP_AWAKE_KEY) === "true")
+			.catch(reportError);
 		const unsubscribe = api.subscribe((event) => {
 			if (!active) return;
 			if (event.type === "interaction-cancelled") {
@@ -242,6 +364,12 @@ export function App({ api, store }: AppProps) {
 				const before = store.getSnapshot();
 				store.setSupervisor(event.view);
 				if (shouldResnapshotAfterReady(before, event.view)) void requestResnapshot(before.activeSessionId!);
+				if (
+					event.view.state === "ready" &&
+					(before.supervisor.state !== "ready" || before.supervisor.serverEpoch !== event.view.serverEpoch)
+				) {
+					void requestScheduleSnapshot();
+				}
 				return;
 			}
 			const envelope = event.envelope;
@@ -250,6 +378,8 @@ export function App({ api, store }: AppProps) {
 				return;
 			}
 			const before = store.getSnapshot();
+			scheduleStore.applyBatch(envelope.params);
+			if (scheduleStore.getSnapshot().syncStatus === "resnapshot_required") void requestScheduleSnapshot(true);
 			const activeSessionBefore = before.activeSessionId ? before.sessionsById.get(before.activeSessionId) : undefined;
 			const deletedInvalidations = envelope.params.events.filter(
 				(candidate): candidate is Extract<DomainEvent, { type: "session/invalidated" }> =>
@@ -259,12 +389,19 @@ export function App({ api, store }: AppProps) {
 				(candidate): candidate is Extract<DomainEvent, { type: "project/invalidated" }> =>
 					candidate.type === "project/invalidated" && candidate.reason === "deleted",
 			);
-			if (
-				before.activeSessionId === null &&
-				envelope.params.events.every(
-					(candidate) => candidate.type === "session/invalidated" || candidate.type === "project/invalidated",
-				)
-			) {
+			const deletedSessionIds = new Set(deletedInvalidations.map((event) => event.sessionId));
+			for (const project of deletedProjects) {
+				for (const session of before.sessionsById.values()) {
+					if (session.mode === project.mode && session.cwd === project.cwd && session.scheduled === undefined) {
+						deletedSessionIds.add(session.sessionId);
+					}
+				}
+			}
+			queueToolCleanup([...deletedSessionIds]);
+			if (before.activeSessionId === null) {
+				for (const updated of envelope.params.events) {
+					if (updated.type === "session/updated") store.upsertSession(updated.session);
+				}
 				for (const deleted of deletedInvalidations) store.removeSession(deleted.sessionId);
 				for (const deleted of deletedProjects) store.removeModeProject(deleted.mode, deleted.cwd);
 				return;
@@ -290,6 +427,13 @@ export function App({ api, store }: AppProps) {
 			const applyResult = store.applyBatch(envelope.params);
 			for (const deleted of deletedInvalidations) store.removeSession(deleted.sessionId);
 			for (const deleted of deletedProjects) store.removeModeProject(deleted.mode, deleted.cwd);
+			const visibleUnread = envelope.params.events.find(
+				(candidate): candidate is Extract<DomainEvent, { type: "session/updated" }> =>
+					candidate.type === "session/updated" &&
+					candidate.session.sessionId === visibleSessionIdRef.current &&
+					candidate.session.unread,
+			);
+			if (visibleUnread) void markSessionRead(visibleUnread.session.sessionId);
 			if (
 				(invalidation?.type === "session/invalidated" &&
 					invalidation.reason === "deleted" &&
@@ -328,6 +472,7 @@ export function App({ api, store }: AppProps) {
 			try {
 				store.setSupervisor(await api.getServerState());
 				const sessions = await api.listSessions({ limit: 200 });
+				await requestScheduleSnapshot();
 				if (!active) return;
 				store.setSessions(sessions);
 				const rememberedSessionId = localStorage.getItem(activeSessionKey("chat"));
@@ -347,9 +492,11 @@ export function App({ api, store }: AppProps) {
 		return () => {
 			active = false;
 			openGeneration.current += 1;
+			scheduleSubscriptionGeneration.current += 1;
+			void api.unsubscribeSchedule().catch(() => undefined);
 			unsubscribe();
 		};
-	}, [api, openSession, reportError, requestResnapshot, store]);
+	}, [api, markSessionRead, openSession, queueToolCleanup, reportError, requestResnapshot, requestScheduleSnapshot, scheduleStore, store]);
 
 	const refreshSessions = async () => {
 		store.setSessions(await api.listSessions({ limit: 200 }));
@@ -428,6 +575,14 @@ export function App({ api, store }: AppProps) {
 		group: ProjectSessionGroup,
 		preview: ClientResult<"project/deletePreview">,
 	): Promise<void> => {
+		const projectSessionIds = [...store.getSnapshot().sessionsById.values()]
+			.filter((session) => session.mode === group.mode && session.cwd === group.cwd && session.scheduled === undefined)
+			.map((session) => session.sessionId);
+		if (projectSessionIds.some((sessionId) => dirtyToolSessionIds.includes(sessionId))) {
+			const cause = new Error("Save or close unsaved files before deleting this task or project.");
+			reportError(cause);
+			throw cause;
+		}
 		const key = projectKey(group.mode, group.cwd);
 		const previousRequest = projectDeleteRequests.current.get(key);
 		const requestId = previousRequest?.revision === preview.revision
@@ -448,6 +603,7 @@ export function App({ api, store }: AppProps) {
 				throw outcome.error;
 			}
 			projectDeleteRequests.current.delete(key);
+			queueToolCleanup(projectSessionIds);
 			const before = store.getSnapshot();
 			const active = before.activeSessionId ? before.sessionsById.get(before.activeSessionId) : undefined;
 			const removedActive = active?.mode === group.mode && active.cwd === group.cwd && active.scheduled === undefined;
@@ -506,6 +662,11 @@ export function App({ api, store }: AppProps) {
 		}
 	};
 	const deleteSession = async (session: SessionSummary): Promise<void> => {
+		if (dirtyToolSessionIds.includes(session.sessionId)) {
+			const cause = new Error("Save or close unsaved files before deleting this task or project.");
+			reportError(cause);
+			throw cause;
+		}
 		setError(null);
 		const removedActive = store.getSnapshot().activeSessionId === session.sessionId;
 		const requestId = sessionDeleteRequests.current.get(session.sessionId) ?? crypto.randomUUID();
@@ -513,6 +674,7 @@ export function App({ api, store }: AppProps) {
 		try {
 			const deleted = await api.deleteSession({ sessionId: session.sessionId, requestId });
 			sessionDeleteRequests.current.delete(session.sessionId);
+			queueToolCleanup([session.sessionId]);
 			if (removedActive) {
 				openGeneration.current += 1;
 				openingSessionId.current = null;
@@ -560,6 +722,11 @@ export function App({ api, store }: AppProps) {
 		} catch {
 			// openSession already reports the error while preserving the current projection.
 		}
+	};
+	const openScheduledSession = (sessionId: string) => {
+		setMode("chat");
+		setDestination("tasks");
+		void openVisibleSession(sessionId);
 	};
 
 	const chooseNewTaskFolder = async () => {
@@ -622,19 +789,19 @@ export function App({ api, store }: AppProps) {
 
 	const visibleNewTaskDraft = destination === "tasks" && newTaskDraft?.mode === mode ? newTaskDraft : null;
 
-	const submitNewTaskDraft = async (input: ComposerSubmission) => {
-		if (!visibleNewTaskDraft || (visibleNewTaskDraft.mode === "code" && !visibleNewTaskDraft.folder)) return;
+	const submitNewTask = async (draft: NewTaskDraft, input: ComposerSubmission, sessionName?: string) => {
+		if (draft.mode === "code" && !draft.folder) return;
 		setDraftBusy(true);
 		setError(null);
 		try {
-			let sessionId = visibleNewTaskDraft.sessionId;
+			let sessionId = draft.sessionId;
 			if (!sessionId) {
-				const name = titleFromPrompt(input.text || input.skill?.name || input.attachments[0]?.name || (visibleNewTaskDraft.mode === "chat" ? "Chat" : "Code"));
+				const name = sessionName ?? titleFromPrompt(input.text || input.skill?.name || input.attachments[0]?.name || t(draft.mode === "chat" ? "Chat" : "Code"));
 				const createKey = JSON.stringify({
-					mode: visibleNewTaskDraft.mode,
-					cwd: visibleNewTaskDraft.folder,
+					mode: draft.mode,
+					cwd: draft.folder,
 					name,
-					permissionMode: visibleNewTaskDraft.permissionMode,
+					permissionMode: draft.permissionMode,
 				});
 				const createRequest = newTaskCreateRequest.current?.key === createKey
 					? newTaskCreateRequest.current
@@ -642,13 +809,13 @@ export function App({ api, store }: AppProps) {
 				newTaskCreateRequest.current = createRequest;
 				const created = await api.createSession({
 					requestId: createRequest.requestId,
-					mode: visibleNewTaskDraft.mode,
-					...(visibleNewTaskDraft.folder ? { cwd: visibleNewTaskDraft.folder } : {}),
+					mode: draft.mode,
+					...(draft.folder ? { cwd: draft.folder } : {}),
 					name,
-					permissionMode: visibleNewTaskDraft.permissionMode,
+					permissionMode: draft.permissionMode,
 				});
 				sessionId = created.session.sessionId;
-				setNewTaskDraft((draft) => draft?.mode === visibleNewTaskDraft.mode ? { ...draft, sessionId } : draft);
+				setNewTaskDraft((current) => current?.mode === draft.mode ? { ...current, sessionId } : current);
 				newTaskCreateRequest.current = null;
 			}
 			await refreshSessions();
@@ -668,6 +835,25 @@ export function App({ api, store }: AppProps) {
 		} finally {
 			setDraftBusy(false);
 		}
+	};
+
+	const submitNewTaskDraft = async (input: ComposerSubmission) => {
+		if (!visibleNewTaskDraft) return;
+		await submitNewTask(visibleNewTaskDraft, input);
+	};
+
+	const createScheduleWithArcMind = async (cwd: string | null) => {
+		const draft = { ...emptyNewTaskDraft("chat"), folder: cwd };
+		setMode("chat");
+		setDestination("tasks");
+		setNewTaskDraft(draft);
+		newTaskCreateRequest.current = null;
+		newTaskTurnRequest.current = null;
+		await submitNewTask(
+			draft,
+			{ text: ASSISTED_SCHEDULE_PROMPT, attachments: [] },
+			t("Set up a scheduled task"),
+		);
 	};
 
 	const activeSession = state.activeSessionId ? state.sessionsById.get(state.activeSessionId) : undefined;
@@ -718,7 +904,7 @@ export function App({ api, store }: AppProps) {
 		setError(null);
 		try {
 			if (!running && !visibleActiveSession.name) {
-				const name = titleFromPrompt(input.text || input.skill?.name || input.attachments[0]?.name || (visibleActiveSession.mode === "chat" ? "Chat" : "Code"));
+				const name = titleFromPrompt(input.text || input.skill?.name || input.attachments[0]?.name || t(visibleActiveSession.mode === "chat" ? "Chat" : "Code"));
 				try {
 					await renameSession(visibleActiveSession, name);
 				} catch {
@@ -876,29 +1062,37 @@ export function App({ api, store }: AppProps) {
 				onPinProject={pinProject}
 				onPreviewProjectDelete={previewProjectDelete}
 				onRenameProject={renameProject}
-				onRenameSession={renameSession}
-				onSkills={() => setDestination("skills")}
+					onRenameSession={renameSession}
+					onSettings={() => setDestination("settings")}
+					onSkills={() => setDestination("skills")}
+					onSchedules={() => { setDestination("schedules"); setSelectedScheduleTaskId(null); }}
+					onOpenSchedule={(taskId) => { setDestination("schedules"); setSelectedScheduleTaskId(taskId); }}
 				onToggle={() => setSessionsSidebarOpen(false)}
 				preferences={projectPreferences}
-				projectBusy={(group) => busyProjectKeys.has(projectKey(group.mode, group.cwd))}
+					projectBusy={(group) => busyProjectKeys.has(projectKey(group.mode, group.cwd))}
+					scheduleTasks={scheduleState.taskOrder.map((id) => scheduleState.tasksById.get(id)).filter((task): task is ScheduleTaskView => task !== undefined && (task.status === "active" || task.status === "paused"))}
+					selectedScheduleTaskId={selectedScheduleTaskId}
 				state={state}
 			/>}
-			<main className={`workspace${toolsSidebarOpen ? " tools-sidebar-open" : ""}`}>
+			<main
+				className={`workspace${destination === "tasks" && toolsSidebarOpen ? " tools-sidebar-open" : ""}`}
+				style={{ "--tool-sidebar-width": `${toolsSidebarWidth}px` } as CSSProperties}
+			>
 				<div className="workspace-titlebar-actions">
 					{!sessionsSidebarOpen && (
-						<button aria-label="Show sessions sidebar" onClick={() => setSessionsSidebarOpen(true)} type="button">
+						<button aria-label={t("Show sessions sidebar")} onClick={() => setSessionsSidebarOpen(true)} type="button">
 							<SidebarSimple aria-hidden="true" size={17} />
 						</button>
 					)}
-					<button
-						aria-label={toolsSidebarOpen ? "Hide tools sidebar" : "Show tools sidebar"}
+					{destination === "tasks" && !toolsSidebarOpen && <button
+						aria-label={t(toolsSidebarOpen ? "Hide tools sidebar" : "Show tools sidebar")}
 						aria-pressed={toolsSidebarOpen}
 						className="details-sidebar-toggle"
-						onClick={() => setToolsSidebarOpen((open) => !open)}
+						onClick={showToolsSidebar}
 						type="button"
 					>
 						<SidebarSimple aria-hidden="true" size={17} />
-					</button>
+					</button>}
 				</div>
 				{visibleActiveSession && (
 					<header className="workspace-header" data-active-session-id={visibleActiveSession.sessionId}>
@@ -910,15 +1104,19 @@ export function App({ api, store }: AppProps) {
 				)}
 				{state.supervisor.state === "failed" && (
 					<div className="server-banner" role="alert">
-						<span>{state.supervisor.failure || "App Server could not recover."}</span>
-						<button onClick={() => void api.retryServer().catch(reportError)} type="button">Retry</button>
+						<span>{t(state.supervisor.failure || "App Server could not recover.")}</span>
+						<button onClick={() => void api.retryServer().catch(reportError)} type="button">{t("Retry")}</button>
 					</div>
 				)}
 				{state.supervisor.state === "restarting" && (
-					<div className="server-banner" role="status">App Server is recovering. Your saved session is safe.</div>
+					<div className="server-banner" role="status">{t("App Server is recovering. Your saved session is safe.")}</div>
 				)}
-				{!bootstrapped ? null : destination === "skills" ? (
+				{!bootstrapped ? null : destination === "settings" ? (
+					<ProfilePanel api={api} serverReady={serverReady} />
+				) : destination === "skills" ? (
 					<SkillsPanel api={api} preferences={projectPreferences} serverReady={serverReady} state={state} />
+				) : destination === "schedules" && mode === "chat" ? (
+					<ScheduledTasksPanel api={api} onCreateWithArcMind={createScheduleWithArcMind} onOpenSession={openScheduledSession} onSelectTask={setSelectedScheduleTaskId} selectedTaskId={selectedScheduleTaskId} serverReady={serverReady} sessions={state.sessionOrder.map((id) => state.sessionsById.get(id)).filter((session): session is SessionSummary => session !== undefined)} store={scheduleStore} />
 				) : newTaskOpen && mode === "code" ? (
 					<CodeProjectSetup
 						busy={draftBusy || !serverReady}
@@ -951,25 +1149,28 @@ export function App({ api, store }: AppProps) {
 						<div className="conversation-column">
 							<RecoveryBanner session={visibleActiveSession} />
 								<Transcript appearance={visibleActiveSession.mode} hasOlder={state.nextBeforeItemId !== null} itemIds={state.itemOrder} itemsById={state.itemsById} loadingOlder={loadingOlder} onLoadOlder={loadOlder} />
-							<Composer appearance={visibleActiveSession.mode} disabled={!serverReady || state.syncStatus !== "ready"} key={visibleActiveSession.sessionId} modelControl={modelControl} onInterrupt={interrupt} onManageSkills={() => setDestination("skills")} onPickFiles={pickAttachmentFiles} onSubmit={submit} permissionControl={permissionControl} running={running} skills={skills} thinkingControl={thinkingControl} placeholder="Write a message…" />
+							<Composer appearance={visibleActiveSession.mode} disabled={!serverReady || state.syncStatus !== "ready"} key={visibleActiveSession.sessionId} modelControl={modelControl} onInterrupt={interrupt} onManageSkills={() => setDestination("skills")} onPickFiles={pickAttachmentFiles} onSubmit={submit} permissionControl={permissionControl} running={running} skills={skills} thinkingControl={thinkingControl} placeholder={t("Write a message…")} />
 						</div>
 					</div>
 				) : null}
-				{toolsSidebarOpen && (
-					<aside aria-label={`${mode === "chat" ? "Chat" : "Code"} tools`} className="tool-sidebar">
-						<nav className="tool-sidebar-menu">
-							{mode === "code" && <button type="button"><ClipboardText aria-hidden="true" size={14} /><span>审阅</span><kbd>⌃⇧G</kbd></button>}
-							<button type="button"><TerminalWindow aria-hidden="true" size={14} /><span>终端</span></button>
-							<button type="button"><Globe aria-hidden="true" size={14} /><span>浏览器</span><kbd>⌘T</kbd></button>
-							{mode === "code" && <button type="button"><FolderSimple aria-hidden="true" size={14} /><span>文件</span><kbd>⌘P</kbd></button>}
-							<button type="button"><PlusCircle aria-hidden="true" size={14} /><span>侧边任务</span><kbd>⌥⌘S</kbd></button>
-							{mode === "code" && <button type="button"><Robot aria-hidden="true" size={14} /><span>Subagent</span></button>}
-						</nav>
-					</aside>
-				)}
-				<div className="sr-only" aria-live="polite">{error || latestNotification?.message || message}</div>
-				{error && <div className="toast toast-error" role="alert">{error}</div>}
-				{latestNotification && !error && <div className="toast" role="status">{latestNotification.message}</div>}
+				<ToolsSidebar
+					activeSession={visibleActiveSession ?? null}
+					api={api}
+					cleanupSessionIds={toolCleanupSessionIds}
+					mode={mode}
+					onClose={() => setToolsSidebarOpen(false)}
+					onCleanupSessionIdsHandled={handleToolCleanupHandled}
+					onDirtySessionIdsChange={handleDirtySessionIdsChange}
+					onError={reportError}
+					onWidthChange={updateToolsSidebarWidth}
+					open={destination === "tasks" && toolsSidebarOpen}
+					preferredWidth={toolsSidebarPreferredWidth}
+					store={store}
+					width={toolsSidebarWidth}
+				/>
+				<div className="sr-only" aria-live="polite">{t(error || latestNotification?.message || message)}</div>
+				{error && <div className="toast toast-error" role="alert">{t(error)}</div>}
+				{latestNotification && !error && <div className="toast" role="status">{t(latestNotification.message)}</div>}
 			</main>
 			<InteractionHost interaction={visibleInteraction} key={visibleInteraction?.interactionId ?? "none"} onRespond={respond} />
 		</div>

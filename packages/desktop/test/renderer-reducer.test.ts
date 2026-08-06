@@ -16,6 +16,7 @@ function session(sessionId = "session-1"): SessionSummary {
 		updatedAt: "2026-07-16T00:00:00.000Z",
 		state: "running",
 		archived: false,
+		unread: false,
 	};
 }
 
@@ -28,6 +29,10 @@ function item(itemId: string, text: string, state: ItemView["state"] = "streamin
 		content: [{ type: "text", text }],
 		createdAt: "2026-07-16T00:00:00.000Z",
 	};
+}
+
+function childItem(itemId: string, text: string, state: ItemView["state"] = "streaming"): ItemView {
+	return { ...item(itemId, text, state), sessionId: "child-1" };
 }
 
 function snapshot(serverEpoch = EPOCH_A, cursor = 0, recentItems: ItemView[] = [item("item-1", "A")]): SessionSnapshot {
@@ -66,6 +71,98 @@ function batch(serverEpoch: string, fromCursor: number, toCursor: number, text =
 }
 
 describe("renderer projection reducer", () => {
+	it("keeps the selected child transcript separate from the parent", () => {
+		const store = new AppStore();
+		store.applySnapshot(snapshot(EPOCH_A, 0));
+		store.selectSubagentTranscript("child-1");
+
+		expect(
+			store.applyBatch({
+				serverEpoch: EPOCH_A,
+				fromCursor: 1,
+				toCursor: 4,
+				events: [
+					{
+						type: "subagent/item/started",
+						sessionId: "session-1",
+						agentId: "child-1",
+						item: childItem("child-live", ""),
+					},
+					{
+						type: "subagent/item/delta",
+						sessionId: "session-1",
+						agentId: "child-1",
+						itemId: "child-live",
+						delta: { type: "text", text: "hello" },
+					},
+					{
+						type: "subagent/item/completed",
+						sessionId: "session-1",
+						agentId: "child-1",
+						item: childItem("child-live", "hello", "completed"),
+					},
+					{
+						type: "subagent/itemsChanged",
+						sessionId: "session-1",
+						agentId: "child-1",
+					},
+				],
+			}),
+		).toBe("applied");
+
+		const state = store.getSnapshot();
+		expect(state.subagentTranscript.itemsById.get("child-live")?.content).toEqual([{ type: "text", text: "hello" }]);
+		expect(state.subagentTranscript.journalRevision).toBe(1);
+		expect(state.itemsById.has("child-live")).toBe(false);
+
+		expect(
+			store.applyBatch({
+				serverEpoch: EPOCH_A,
+				fromCursor: 5,
+				toCursor: 5,
+				events: [
+					{
+						type: "subagent/item/started",
+						sessionId: "session-1",
+						agentId: "child-2",
+						item: { ...childItem("ignored", "ignored"), sessionId: "child-2" },
+					},
+				],
+			}),
+		).toBe("applied");
+		expect(store.getSnapshot().subagentTranscript.itemsById.has("ignored")).toBe(false);
+	});
+
+	it("replaces and paginates child history, then clears it on session switch", () => {
+		const store = new AppStore();
+		store.applySnapshot(snapshot());
+		store.selectSubagentTranscript("child-1");
+		store.replaceSubagentItems("child-1", {
+			items: [childItem("durable", "new", "completed")],
+			nextBeforeItemId: "durable",
+		});
+		store.prependSubagentItems("child-1", {
+			items: [childItem("older", "old", "completed")],
+			nextBeforeItemId: null,
+		});
+		expect(store.getSnapshot().subagentTranscript.itemOrder).toEqual(["older", "durable"]);
+
+		store.applySnapshot({ ...snapshot(EPOCH_B), session: session("session-2") });
+		expect(store.getSnapshot().subagentTranscript).toMatchObject({
+			agentId: null,
+			itemOrder: [],
+			nextBeforeItemId: null,
+		});
+	});
+
+	it("requests a selected-child refresh after a same-session resnapshot", () => {
+		const store = new AppStore();
+		store.applySnapshot(snapshot(EPOCH_A));
+		store.selectSubagentTranscript("child-1");
+		store.applySnapshot(snapshot(EPOCH_B));
+		expect(store.getSnapshot().subagentTranscript).toMatchObject({ agentId: "child-1", journalRevision: 1 });
+	});
+
 	it("filters sessions by mode and separates managed tasks from project folders", () => {
 		const store = new AppStore();
 		const first = { ...session("session-1"), mode: "chat" as const, cwd: "/work/alpha", name: "First" };
@@ -186,6 +283,24 @@ describe("renderer projection reducer", () => {
 			}),
 		).toBe("resnapshot_required");
 		expect(reload.getSnapshot().syncStatus).toBe("resnapshot_required");
+	});
+
+	it("updates a background session without invalidating the active transcript", () => {
+		const store = new AppStore();
+		const background = session("session-2");
+		store.applySnapshot(snapshot(EPOCH_A, 0));
+		store.setSessions({ sessions: [session(), background], nextAfterSessionId: null });
+		expect(
+			store.applyBatch({
+				serverEpoch: EPOCH_A,
+				fromCursor: 1,
+				toCursor: 1,
+				events: [{ type: "session/updated", session: { ...background, unread: true } }],
+			}),
+		).toBe("applied");
+		expect(store.getSnapshot().sessionsById.get("session-2")?.unread).toBe(true);
+		expect(store.getSnapshot().activeSessionId).toBe("session-1");
+		expect(store.getSnapshot().syncStatus).toBe("ready");
 	});
 
 	it("applies one project invalidation without removing the other mode", () => {

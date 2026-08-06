@@ -1,6 +1,8 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./components/App.tsx";
+import { AppErrorBoundary } from "./components/AppErrorBoundary.tsx";
+import "./i18n.ts";
 import { AppStore } from "./store/app-store.ts";
 import "./styles/tokens.css";
 import "./styles/app.css";
@@ -12,6 +14,8 @@ const store = new AppStore();
 
 createRoot(root).render(
 	<StrictMode>
-		<App api={window.arcMind} store={store} />
+		<AppErrorBoundary>
+			<App api={window.arcMind} store={store} />
+		</AppErrorBoundary>
 	</StrictMode>,
 );

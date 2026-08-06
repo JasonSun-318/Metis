@@ -17,13 +17,24 @@ import {
 	createProjectionState,
 	markProjectionResubscribing,
 	prependProjectionItems,
+	prependSubagentItems,
 	removeModeProjectSessions,
 	removePendingInteraction,
 	removeSession,
 	replaceProjectionSnapshot,
 	replaceSessionList,
+	replaceSubagentItems,
 	restoreProjectionSyncStatus,
+	selectSubagentTranscript,
 } from "./reducer.ts";
+
+export interface SubagentTranscriptState {
+	readonly agentId: string | null;
+	readonly itemsById: ReadonlyMap<string, ItemView>;
+	readonly itemOrder: readonly string[];
+	readonly nextBeforeItemId: string | null;
+	readonly journalRevision: number;
+}
 
 export interface AppStoreSnapshot {
 	readonly version: number;
@@ -49,6 +60,7 @@ export interface AppStoreSnapshot {
 	readonly model: SessionSnapshot["model"];
 	readonly availableModels: NonNullable<SessionSnapshot["availableModels"]>;
 	readonly subagents: SessionSnapshot["subagents"];
+	readonly subagentTranscript: SubagentTranscriptState;
 	readonly supervisor: SupervisorView;
 }
 
@@ -82,6 +94,13 @@ export class AppStore {
 		this.commit();
 	}
 
+	upsertSession(session: SessionSummary): void {
+		const existed = this.state.sessionsById.has(session.sessionId);
+		this.state.sessionsById.set(session.sessionId, structuredClone(session));
+		if (!existed) this.state.sessionOrder.unshift(session.sessionId);
+		this.commit();
+	}
+
 	removeModeProject(mode: AgentMode, cwd: string): void {
 		if (removeModeProjectSessions(this.state, mode, cwd)) this.commit();
 	}
@@ -105,6 +124,18 @@ export class AppStore {
 	prependItems(page: ClientResult<"session/readItems">): void {
 		prependProjectionItems(this.state, page);
 		this.commit();
+	}
+
+	selectSubagentTranscript(agentId: string | null): void {
+		if (selectSubagentTranscript(this.state, agentId)) this.commit();
+	}
+
+	replaceSubagentItems(agentId: string, page: ClientResult<"subagent/readItems">): void {
+		if (replaceSubagentItems(this.state, agentId, page)) this.commit();
+	}
+
+	prependSubagentItems(agentId: string, page: ClientResult<"subagent/readItems">): void {
+		if (prependSubagentItems(this.state, agentId, page)) this.commit();
 	}
 
 	markResubscribing(): void {
@@ -174,6 +205,7 @@ export class AppStore {
 			model: this.state.model,
 			availableModels: this.state.availableModels,
 			subagents: this.state.subagents,
+			subagentTranscript: this.state.subagentTranscript,
 			supervisor: this.supervisor,
 		};
 	}

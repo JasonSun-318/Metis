@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
 
 import type { ClientResult, SessionSnapshot, SessionSummary } from "@arcmind/app-protocol";
+import { EditorView } from "@codemirror/view";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	App,
 	firstInteractionForSession,
@@ -12,6 +13,7 @@ import {
 } from "../src/renderer/components/App.tsx";
 import { buildSessionTree } from "../src/renderer/components/SessionSidebar.tsx";
 import { SkillsPanel } from "../src/renderer/components/SkillsPanel.tsx";
+import { setLocale } from "../src/renderer/i18n.ts";
 import { AppStore } from "../src/renderer/store/app-store.ts";
 import {
 	loadProjectPreferences,
@@ -35,6 +37,7 @@ function session(sessionId: string, mode: "chat" | "code", cwd: string, name?: s
 		updatedAt: "2026-07-20T00:00:00.000Z",
 		state: "idle",
 		archived: false,
+		unread: false,
 	};
 }
 
@@ -62,7 +65,9 @@ function snapshot(summary: SessionSummary): SessionSnapshot {
 }
 
 function button(container: HTMLElement, label: string): HTMLButtonElement {
-	const match = [...container.querySelectorAll("button")].find((candidate) => candidate.getAttribute("aria-label") === label || candidate.textContent?.trim() === label);
+	const matches = (root: ParentNode) => [...root.querySelectorAll<HTMLButtonElement>("button")]
+		.find((candidate) => candidate.getAttribute("aria-label") === label || candidate.textContent?.trim() === label);
+	const match = matches(container) ?? matches(document.querySelector(".session-action-menu, .project-action-menu") ?? document.createDocumentFragment());
 	if (!match) throw new Error(`Missing button: ${label}`);
 	return match;
 }
@@ -98,6 +103,27 @@ function changeInput(input: HTMLInputElement, value: string) {
 	input.dispatchEvent(new Event("input", { bubbles: true }));
 }
 
+function codeEditor(container: ParentNode, label: string): EditorView {
+	const content = [...container.querySelectorAll<HTMLElement>(".cm-content")]
+		.find((element) => element.getAttribute("aria-label") === label);
+	const editor = content?.closest<HTMLElement>(".cm-editor");
+	const view = editor ? EditorView.findFromDOM(editor) : null;
+	if (!view) throw new Error(`Missing CodeMirror editor: ${label}`);
+	return view;
+}
+
+function changeCodeEditor(view: EditorView, value: string): void {
+	view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: value } });
+}
+
+async function openTreeMenu(container: HTMLElement, title: string): Promise<void> {
+	const label = [...container.querySelectorAll<HTMLElement>(".file-tree-row [title]")]
+		.find((element) => element.title === title);
+	const trigger = label?.closest(".file-tree-row")?.querySelector<HTMLButtonElement>(".file-tree-row-actions");
+	if (!trigger) throw new Error(`Missing tree actions for ${title}`);
+	await act(async () => trigger.click());
+}
+
 function createHarness(options: {
 	failFirstOpen?: boolean;
 	failOpenSessionIds?: readonly string[];
@@ -105,6 +131,10 @@ function createHarness(options: {
 	loseFirstStartResponse?: boolean;
 	sessions?: readonly SessionSummary[];
 } = {}) {
+	localStorage.setItem(
+		"arcmind.session-grouping.v1",
+		localStorage.getItem("arcmind.session-grouping.v1") ?? '{"chat":"project","code":"project"}',
+	);
 	const chat = session("chat-existing", "chat", "/work/chat-project", "Chat project task");
 	const code = session("code-existing", "code", "/work/code-project", "Code project task");
 	let sessions = options.sessions ? [...options.sessions] : [chat, code];
@@ -115,6 +145,8 @@ function createHarness(options: {
 	const createdByRequestId = new Map<string, SessionSummary>();
 	const order: string[] = [];
 	let subscriber: Parameters<ArcMindDesktopApi["subscribe"]>[0] | undefined;
+	const terminalSubscribers = new Set<Parameters<ArcMindDesktopApi["subscribeTerminal"]>[0]>();
+	const browserSubscribers = new Set<Parameters<ArcMindDesktopApi["subscribeBrowser"]>[0]>();
 	const api = {
 		getServerState: vi.fn().mockResolvedValue({ state: "ready", serverEpoch: EPOCH, restartAttempt: 0, failure: null }),
 		listSessions: vi.fn(async () => {
@@ -128,6 +160,36 @@ function createHarness(options: {
 				{ name: "project-helper", description: "Inspect this project", source: "project" },
 			],
 		}),
+		getProfile: vi.fn().mockResolvedValue({
+			generatedAt: "2026-08-01T12:00:00.000Z",
+			totalTokens: 1200,
+			peakDailyTokens: 600,
+			longestSessionMs: 3_600_000,
+			currentStreakDays: 1,
+			longestStreakDays: 2,
+			sessionCount: 2,
+			usedSkillCount: 1,
+			skillUseCount: 3,
+			activity: [{ date: "2026-08-01", tokens: 600 }],
+			topSkills: [{ name: "pdf", count: 3 }],
+		}),
+		listModels: vi.fn().mockResolvedValue({ models: [] }),
+		createSchedule: vi.fn(),
+		listSchedules: vi.fn().mockResolvedValue({ tasks: [], nextAfterTaskId: null, unreadCount: 0 }),
+		getSchedule: vi.fn(),
+		updateSchedule: vi.fn(),
+		pauseSchedule: vi.fn(),
+		resumeSchedule: vi.fn(),
+		deleteSchedule: vi.fn(),
+		runScheduleNow: vi.fn(),
+		listScheduleRuns: vi.fn().mockResolvedValue({ runs: [], nextBeforeRunId: null }),
+		getScheduleRun: vi.fn(),
+		markScheduleRunRead: vi.fn(),
+		subscribeSchedule: vi.fn().mockResolvedValue({
+			snapshot: { serverEpoch: EPOCH, tasks: [], unreadCount: 0, cursor: 0 },
+		}),
+		unsubscribeSchedule: vi.fn().mockResolvedValue({ unsubscribed: true }),
+		setScheduleKeepAwake: vi.fn().mockResolvedValue(undefined),
 		previewProjectDelete: vi.fn(async (input) => ({
 			ok: true as const,
 			result: {
@@ -157,6 +219,94 @@ function createHarness(options: {
 		resolveDroppedFiles: vi.fn().mockReturnValue([]),
 		getDefaultProjectLocation: vi.fn().mockResolvedValue("/Users/test/ArcMind Projects"),
 		createProjectFolder: vi.fn(async ({ parentDirectory, name }) => `${parentDirectory}/${name}`),
+		createTerminal: vi.fn(async (input) => ({
+			terminalId: input.terminalId,
+			pid: 1234,
+			cwd: input.cwd,
+			shell: "/bin/zsh",
+		})),
+		writeTerminal: vi.fn().mockResolvedValue(undefined),
+		resizeTerminal: vi.fn().mockResolvedValue(undefined),
+		closeTerminal: vi.fn().mockResolvedValue(undefined),
+		subscribeTerminal: vi.fn((listener) => {
+			terminalSubscribers.add(listener);
+			return () => terminalSubscribers.delete(listener);
+		}),
+		createBrowser: vi.fn(async (input) => ({
+			browserId: input.browserId,
+			url: "",
+			title: "New tab",
+			faviconUrl: null,
+			loading: false,
+			canGoBack: false,
+			canGoForward: false,
+			zoomPercent: 100,
+		})),
+		captureBrowserPreview: vi.fn().mockResolvedValue("data:image/png;base64,cHJldmlldw=="),
+		controlBrowser: vi.fn().mockResolvedValue(undefined),
+		closeBrowser: vi.fn().mockResolvedValue(undefined),
+		subscribeBrowser: vi.fn((listener) => {
+			browserSubscribers.add(listener);
+			return () => browserSubscribers.delete(listener);
+		}),
+		listWorkspaceDirectory: vi.fn(async ({ relativePath }) => relativePath === "docs"
+			? [{ name: "guide.md", relativePath: "docs/guide.md", kind: "file" as const }]
+			: [
+				{ name: "docs", relativePath: "docs", kind: "directory" as const },
+				{ name: ".env", relativePath: ".env", kind: "file" as const },
+				{ name: "notes.txt", relativePath: "notes.txt", kind: "file" as const },
+				{ name: "README.md", relativePath: "README.md", kind: "file" as const },
+			]),
+		searchWorkspaceFiles: vi.fn().mockResolvedValue(["docs/guide.md"]),
+		getWorkspaceReview: vi.fn().mockResolvedValue({
+			kind: "review" as const,
+			repositoryRoot: "/work/code-project",
+			branch: "main",
+			head: null,
+			revision: "working-tree" as const,
+			files: [],
+			commits: [],
+		}),
+		getWorkspaceReviewFileDiff: vi.fn().mockResolvedValue({ kind: "text" as const, patch: "" }),
+		readWorkspaceFile: vi.fn(async ({ relativePath }) => ({
+			kind: "text" as const,
+			relativePath,
+			absolutePath: `/work/code-project/${relativePath}`,
+			byteLength: 24,
+			text: relativePath.endsWith(".md") ? `# ${relativePath}\n\nWorkspace preview.` : `contents of ${relativePath}`,
+			revision: "a".repeat(64),
+		})),
+		writeWorkspaceFile: vi.fn(async ({ text }) => ({ revision: "b".repeat(64), byteLength: new TextEncoder().encode(text).byteLength })),
+		openWorkspaceFile: vi.fn().mockResolvedValue(undefined),
+		mutateWorkspaceEntry: vi.fn(async (input) => {
+			if (input.action === "create") {
+				const relativePath = input.parentRelativePath ? `${input.parentRelativePath}/${input.name}` : input.name;
+				return { action: "create" as const, kind: input.kind, relativePath, absolutePath: `/work/code-project/${relativePath}` };
+			}
+			if (input.action === "trash") {
+				return {
+					action: "trash" as const,
+					kind: "file" as const,
+					previousRelativePath: input.relativePath,
+					previousAbsolutePath: `/work/code-project/${input.relativePath}`,
+				};
+			}
+			const name = input.action === "rename" ? input.name : input.relativePath.split("/").at(-1)!;
+			const parent = input.action === "rename"
+				? input.relativePath.split("/").slice(0, -1).join("/")
+				: input.destinationDirectoryRelativePath;
+			const relativePath = parent ? `${parent}/${name}` : name;
+			return {
+				action: input.action,
+				kind: "file" as const,
+				previousRelativePath: input.relativePath,
+				previousAbsolutePath: `/work/code-project/${input.relativePath}`,
+				relativePath,
+				absolutePath: `/work/code-project/${relativePath}`,
+			};
+		}),
+		writeClipboardText: vi.fn().mockResolvedValue(undefined),
+		setWorkspaceEditState: vi.fn().mockResolvedValue(undefined),
 		createSession: vi.fn(async (input) => {
 			order.push("create");
 			const createdMode = input.mode ?? "code";
@@ -201,6 +351,13 @@ function createHarness(options: {
 			if (!summary) throw new Error("missing session");
 			return snapshot(summary);
 		}),
+		markSessionRead: vi.fn(async ({ sessionId }) => {
+			const current = sessions.find((candidate) => candidate.sessionId === sessionId);
+			if (!current) throw new Error("missing session");
+			const read = { ...current, unread: false };
+			sessions = sessions.map((candidate) => candidate.sessionId === sessionId ? read : candidate);
+			return { session: read };
+		}),
 		startTurn: vi.fn(async () => {
 			order.push("start");
 			if (loseFirstStartResponse) {
@@ -213,6 +370,7 @@ function createHarness(options: {
 		interruptTurn: vi.fn().mockResolvedValue({}),
 		readItems: vi.fn().mockResolvedValue({ items: [], nextBeforeItemId: null }),
 		readSubagentItems: vi.fn().mockResolvedValue({ items: [], nextBeforeItemId: null }),
+		interruptSubagent: vi.fn().mockResolvedValue({}),
 		setThinkingSelection: vi.fn().mockResolvedValue({}),
 		setPermissionMode: vi.fn(async ({ permissionMode }) => ({ permissionMode })),
 		setModel: vi.fn().mockResolvedValue({}),
@@ -225,8 +383,19 @@ function createHarness(options: {
 			};
 		}),
 	} as unknown as ArcMindDesktopApi;
-	return { api, emitEvent: (event: Parameters<NonNullable<typeof subscriber>>[0]) => subscriber?.(event), order };
+	return {
+		api,
+		emitBrowser: (event: Parameters<ArcMindDesktopApi["subscribeBrowser"]>[0] extends (event: infer Event) => void ? Event : never) => {
+			for (const listener of browserSubscribers) listener(event);
+		},
+		emitEvent: (event: Parameters<NonNullable<typeof subscriber>>[0]) => subscriber?.(event),
+		order,
+	};
 }
+
+beforeEach(async () => {
+	await setLocale("en");
+});
 
 afterEach(() => {
 	vi.restoreAllMocks();
@@ -235,6 +404,216 @@ afterEach(() => {
 });
 
 describe("Chat desktop shell", () => {
+	it("groups each mode independently from the nested Date, Project, Unread, or None menu", async () => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		const now = new Date();
+		const yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1, 12);
+		const sessions = [
+			{ ...session("chat-today", "chat", "/work/shared", "Today unread"), updatedAt: now.toISOString(), unread: true },
+			{ ...session("chat-yesterday", "chat", "/work/shared", "Yesterday read"), updatedAt: yesterday.toISOString() },
+			{ ...session("code-today", "code", "/work/shared", "Code today"), updatedAt: now.toISOString() },
+		];
+		const { api } = createHarness({ sessions });
+		localStorage.removeItem("arcmind.session-grouping.v1");
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<App api={api} store={new AppStore()} />));
+		await flush();
+
+		expect(button(container, "Group sessions")).toBeTruthy();
+		expect(button(container, "Today").getAttribute("aria-expanded")).toBe("true");
+		expect(button(container, "Yesterday")).toBeTruthy();
+		expect(button(container, "Today unread").querySelector(".session-button-title i")?.className).toBe("unread");
+		await act(async () => button(container, "Today").click());
+		expect(button(container, "Today").getAttribute("aria-expanded")).toBe("false");
+		expect(button(container, "Today").closest(".session-section")?.querySelector(".session-section-drawer")?.hasAttribute("inert")).toBe(true);
+
+		await act(async () => button(container, "Group sessions").click());
+		expect(button(document.body, "Group by Date")).toBeTruthy();
+		await act(async () => button(document.body, "Group by Date").click());
+		await act(async () => menuOption(document.body, "Unread").click());
+		expect(button(container, "Unread")).toBeTruthy();
+		expect(button(container, "Read")).toBeTruthy();
+
+		await act(async () => button(container, "Group sessions").click());
+		await act(async () => button(document.body, "Group by Unread").click());
+		await act(async () => menuOption(document.body, "Project").click());
+		expect(projectRow(container, "/work/shared")).toBeTruthy();
+		expect(container.querySelector(".session-grouping-label")?.textContent).toBe("Projects");
+		expect(localStorage.getItem("arcmind.session-grouping.v1")).toBe('{"chat":"project","code":"date"}');
+
+		await act(async () => button(container, "Code").click());
+		await flush();
+		expect(button(container, "Group sessions")).toBeTruthy();
+		expect(container.querySelector(".project-heading")).toBeNull();
+		expect(localStorage.getItem("arcmind.session-grouping.v1")).toBe('{"chat":"project","code":"date"}');
+
+		await act(async () => button(container, "Group sessions").click());
+		await act(async () => button(document.body, "Group by Date").click());
+		await act(async () => menuOption(document.body, "None").click());
+		expect(container.querySelector(".session-section")).toBeNull();
+		expect(container.querySelectorAll(".session-row")).toHaveLength(1);
+		expect(localStorage.getItem("arcmind.session-grouping.v1")).toBe('{"chat":"project","code":"none"}');
+
+		await act(async () => root.unmount());
+	});
+
+	it("keeps session and project action menus outside clipping sidebar containers", async () => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		localStorage.setItem("arcmind.session-grouping.v1", '{"chat":"date","code":"date"}');
+		const bottom = { bottom: 754, height: 24, left: 260, right: 284, top: 730, width: 24, x: 260, y: 730, toJSON: () => ({}) } as DOMRect;
+		const { api } = createHarness({ sessions: [session("chat-bottom", "chat", "/work/bottom", "Bottom task")] });
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<App api={api} store={new AppStore()} />));
+		await flush();
+
+		const sessionRow = button(container, "Bottom task").closest<HTMLElement>(".session-row")!;
+		const sessionTrigger = button(sessionRow, "Actions for Bottom task");
+		vi.spyOn(sessionTrigger, "getBoundingClientRect").mockReturnValue(bottom);
+		await act(async () => sessionTrigger.click());
+		const sessionMenu = document.body.querySelector<HTMLElement>('[role="menu"][aria-label="Bottom task session actions"]')!;
+		expect(sessionMenu).not.toBeNull();
+		expect(sessionRow.contains(sessionMenu)).toBe(false);
+		expect(sessionMenu.style.position).toBe("fixed");
+		expect(Number.parseFloat(sessionMenu.style.top)).toBeLessThan(bottom.top);
+		await act(async () => window.dispatchEvent(new Event("scroll")));
+		expect(document.body.contains(sessionMenu)).toBe(true);
+		await act(async () => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
+
+		await act(async () => button(container, "Group sessions").click());
+		await act(async () => button(document.body, "Group by Date").click());
+		await act(async () => menuOption(document.body, "Project").click());
+		const group = projectRow(container, "/work/bottom");
+		const projectTrigger = button(group, "Project actions");
+		vi.spyOn(projectTrigger, "getBoundingClientRect").mockReturnValue(bottom);
+		await act(async () => projectTrigger.click());
+		const projectMenu = document.body.querySelector<HTMLElement>('[role="menu"][aria-label="bottom project actions"]')!;
+		expect(projectMenu).not.toBeNull();
+		expect(group.contains(projectMenu)).toBe(false);
+		expect(projectMenu.style.position).toBe("fixed");
+		expect(Number.parseFloat(projectMenu.style.top)).toBeLessThan(bottom.top);
+		await act(async () => window.dispatchEvent(new Event("scroll")));
+		expect(document.body.contains(projectMenu)).toBe(true);
+		await act(async () => root.unmount());
+	});
+
+	it("restores Keep Awake during bootstrap without opening Scheduled tasks", async () => {
+		localStorage.setItem("arcmind.scheduleKeepAwake.v1", "true");
+		const { api } = createHarness();
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<App api={api} store={new AppStore()} />));
+		await flush();
+		expect(api.setScheduleKeepAwake).toHaveBeenCalledWith(true);
+		await act(async () => root.unmount());
+	});
+
+	it("shows Scheduled tasks only in Chat mode", async () => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		const { api } = createHarness();
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<App api={api} store={new AppStore()} />));
+		await flush();
+		expect(button(container, "Scheduled tasks")).toBeTruthy();
+		await act(async () => button(container, "Code").click());
+		expect([...container.querySelectorAll("button")].some((candidate) => candidate.textContent?.trim() === "Scheduled tasks")).toBe(false);
+		await act(async () => root.unmount());
+	});
+
+	it("opens the personal profile from the ArcMind Settings menu", async () => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		const { api } = createHarness();
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<App api={api} store={new AppStore()} />));
+		await flush();
+
+		await act(async () => button(container, "ArcMind").click());
+		expect(document.activeElement?.textContent).toBe("Settings");
+		await act(async () => button(container, "Settings").click());
+		await flush();
+		expect(api.getProfile).toHaveBeenCalledTimes(1);
+		expect(container.textContent).toContain("Personal profile");
+		expect(container.textContent).toContain("Most used Skills");
+		expect(container.querySelector('[aria-label="Show tools sidebar"]')).toBeNull();
+		await act(async () => root.unmount());
+	});
+
+	it("creates a folder-bound Chat and sends the assisted schedule prompt", async () => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		const { api } = createHarness();
+		api.listModels = vi.fn().mockResolvedValue({
+			models: [{ provider: "test-provider", modelId: "test-model", name: "Test model" }],
+		});
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<App api={api} store={new AppStore()} />));
+		await flush();
+
+		await act(async () => button(container, "Scheduled tasks").click());
+		await act(async () => { await new Promise((resolve) => setTimeout(resolve, 220)); });
+		await act(async () => button(container, "Create scheduled task").click());
+		const assisted = [...document.querySelectorAll<HTMLButtonElement>('[role="option"]')]
+			.find((candidate) => candidate.textContent?.trim() === "Create with ArcMind")!;
+		await act(async () => assisted.click());
+		const chooseFolder = [...container.querySelectorAll<HTMLButtonElement>("dialog button")]
+			.find((candidate) => candidate.textContent?.includes("Choose folder"))!;
+		await act(async () => chooseFolder.click());
+		await flush();
+		await flush();
+
+		expect(api.createSession).toHaveBeenCalledWith(expect.objectContaining({
+			mode: "chat",
+			cwd: "/work/selected-project",
+			name: "Set up a scheduled task",
+		}));
+		expect(api.startTurn).toHaveBeenCalledWith(expect.objectContaining({
+			sessionId: "chat-created",
+			text: "I want to set up a scheduled task. Briefly explain how scheduled tasks work in ArcMind, then ask me a few concise questions to determine what it should do, when it should run, and whether it should use an available Skill. Do not create the task until I confirm the details.",
+		}));
+		await act(async () => root.unmount());
+	});
+
+	it("uses a managed Chat when assisted schedule setup skips folder selection", async () => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		const { api } = createHarness();
+		api.listModels = vi.fn().mockResolvedValue({
+			models: [{ provider: "test-provider", modelId: "test-model", name: "Test model" }],
+		});
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<App api={api} store={new AppStore()} />));
+		await flush();
+
+		await act(async () => button(container, "Scheduled tasks").click());
+		await act(async () => { await new Promise((resolve) => setTimeout(resolve, 220)); });
+		await act(async () => button(container, "Create scheduled task").click());
+		const assisted = [...document.querySelectorAll<HTMLButtonElement>('[role="option"]')]
+			.find((candidate) => candidate.textContent?.trim() === "Create with ArcMind")!;
+		await act(async () => assisted.click());
+		const useDefault = [...container.querySelectorAll<HTMLButtonElement>("dialog button")]
+			.find((candidate) => candidate.textContent?.includes("Use default workspace"))!;
+		await act(async () => useDefault.click());
+		await flush();
+		await flush();
+
+		const create = vi.mocked(api.createSession).mock.calls[0]![0];
+		expect(create).toMatchObject({ mode: "chat", name: "Set up a scheduled task" });
+		expect(create).not.toHaveProperty("cwd");
+		expect(api.selectProjectFolder).not.toHaveBeenCalled();
+		expect(api.startTurn).toHaveBeenCalledTimes(1);
+		await act(async () => root.unmount());
+	});
+
 	it("round-trips strict mode-scoped project preferences without splitting Unicode aliases", () => {
 		let preferences = setProjectAlias(new Map(), "chat", "/work/shared", `  ${"🚀".repeat(81)}  `);
 		preferences = setProjectPinned(preferences, "chat", "/work/shared", true);
@@ -373,7 +752,7 @@ describe("Chat desktop shell", () => {
 		await act(async () => actionButtons[0]!.click());
 		await flush();
 		expect(group.querySelector(".project-heading")?.getAttribute("aria-expanded")).toBe("true");
-		expect([...group.querySelectorAll("[role=menuitem]")].map((item) => item.textContent?.trim())).toEqual([
+		expect([...document.body.querySelectorAll(".project-action-menu [role=menuitem]")].map((item) => item.textContent?.trim())).toEqual([
 			"Rename",
 			"Pin",
 			"Delete",
@@ -466,8 +845,8 @@ describe("Chat desktop shell", () => {
 
 		let otherRow = button(container, "Other task").closest<HTMLElement>(".session-row")!;
 		await act(async () => button(otherRow, "Actions for Other task").click());
-		expect([...otherRow.querySelectorAll("[role=menuitem]")].map((item) => item.textContent?.trim())).toEqual(["Rename", "Delete"]);
-		await act(async () => button(otherRow, "Rename").click());
+		expect([...document.body.querySelectorAll(".session-action-menu [role=menuitem]")].map((item) => item.textContent?.trim())).toEqual(["Rename", "Delete"]);
+		await act(async () => button(document.body, "Rename").click());
 		await flush();
 		const input = container.querySelector<HTMLInputElement>("#session-rename-input")!;
 		expect(input.value).toBe("Other task");
@@ -479,7 +858,7 @@ describe("Chat desktop shell", () => {
 
 		otherRow = button(container, "Renamed task").closest<HTMLElement>(".session-row")!;
 		await act(async () => button(otherRow, "Actions for Renamed task").click());
-		await act(async () => button(otherRow, "Delete").click());
+		await act(async () => button(document.body, "Delete").click());
 		await flush();
 		expect(container.querySelector(".project-dialog")?.textContent).toContain("Project memory, Skills, schedules, other sessions, and source files are unchanged");
 		await act(async () => button(container, "Move to Trash").click());
@@ -490,12 +869,12 @@ describe("Chat desktop shell", () => {
 
 		const runningRow = button(container, "Running task").closest<HTMLElement>(".session-row")!;
 		await act(async () => button(runningRow, "Actions for Running task").click());
-		expect(button(runningRow, "Delete").disabled).toBe(true);
+		expect(button(document.body, "Delete").disabled).toBe(true);
 		await act(async () => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
 
 		const activeRow = button(container, "Active task").closest<HTMLElement>(".session-row")!;
 		await act(async () => button(activeRow, "Actions for Active task").click());
-		await act(async () => button(activeRow, "Delete").click());
+		await act(async () => button(document.body, "Delete").click());
 		await flush();
 		await act(async () => button(container, "Move to Trash").click());
 		await flush();
@@ -1051,6 +1430,62 @@ describe("Chat desktop shell", () => {
 		expect(store.getSnapshot().sessionsById.has("code-existing")).toBe(true);
 		expect(localStorage.getItem("arcmind.activeSessionId.chat")).toBeNull();
 		expect(container.querySelector(".new-task-home")).not.toBeNull();
+		await act(async () => root.unmount());
+	});
+
+	it("marks opened and visibly completed sessions read but preserves background unread state", async () => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		const active = { ...session("chat-existing", "chat", "/work/chat-project", "Active"), unread: true };
+		const background = session("chat-background", "chat", "/work/other", "Background");
+		localStorage.setItem("arcmind.activeSessionId.chat", active.sessionId);
+		const { api, emitEvent } = createHarness({ sessions: [active, background] });
+		const store = new AppStore();
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<App api={api} store={store} />));
+		await flush();
+
+		expect(api.markSessionRead).toHaveBeenCalledWith({ sessionId: active.sessionId });
+		expect(store.getSnapshot().sessionsById.get(active.sessionId)?.unread).toBe(false);
+		vi.mocked(api.markSessionRead).mockClear();
+
+		await act(async () =>
+			emitEvent({
+				type: "app-server",
+				envelope: {
+					jsonrpc: "2.0",
+					method: "connection/events",
+					params: {
+						serverEpoch: EPOCH,
+						fromCursor: 1,
+						toCursor: 1,
+						events: [{ type: "session/updated", session: { ...background, unread: true } }],
+					},
+				},
+			}),
+		);
+		expect(api.markSessionRead).not.toHaveBeenCalled();
+		expect(store.getSnapshot().sessionsById.get(background.sessionId)?.unread).toBe(true);
+
+		await act(async () =>
+			emitEvent({
+				type: "app-server",
+				envelope: {
+					jsonrpc: "2.0",
+					method: "connection/events",
+					params: {
+						serverEpoch: EPOCH,
+						fromCursor: 2,
+						toCursor: 2,
+						events: [{ type: "session/updated", session: { ...active, unread: true } }],
+					},
+				},
+			}),
+		);
+		await flush();
+		expect(api.markSessionRead).toHaveBeenCalledWith({ sessionId: active.sessionId });
+		expect(store.getSnapshot().sessionsById.get(active.sessionId)?.unread).toBe(false);
 		await act(async () => root.unmount());
 	});
 
@@ -1962,9 +2397,16 @@ describe("Chat desktop shell", () => {
 		expect(container.querySelector(".session-sidebar")).not.toBeNull();
 		expect(container.querySelector('[aria-label="Search"]')).not.toBeNull();
 		await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Show tools sidebar"]')!.click());
-		expect(container.textContent).toContain("审阅");
-		expect(container.textContent).toContain("文件");
+		expect(container.textContent).toContain("Review");
+		expect(container.textContent).toContain("Files");
 		expect(container.textContent).toContain("Subagent");
+		await act(async () => button(container, "Subagent").click());
+		expect(container.querySelectorAll('[role="tab"]')).toHaveLength(1);
+		await act(async () => button(container, "Add tool").click());
+		const subagentMenuItem = [...container.querySelectorAll<HTMLButtonElement>('.tool-add-menu [role="menuitem"]')]
+			.find((candidate) => candidate.textContent?.includes("Subagent"))!;
+		await act(async () => subagentMenuItem.click());
+		expect(container.querySelectorAll('[role="tab"]')).toHaveLength(1);
 
 		const backendCalls = vi.mocked(api.createSession).mock.calls.length + vi.mocked(api.openSession).mock.calls.length;
 		await act(async () => button(container, "Skills").click());
@@ -1976,13 +2418,795 @@ describe("Chat desktop shell", () => {
 		expect(api.openSession).toHaveBeenLastCalledWith({ sessionId: "chat-existing" });
 		expect(container.textContent).toContain("Chat project task");
 		expect(container.textContent).not.toContain("Code project task");
-		expect(container.textContent).toContain("终端");
-		expect(container.textContent).toContain("浏览器");
-		expect(container.textContent).toContain("侧边任务");
-		expect(container.textContent).not.toContain("审阅");
-		expect(container.textContent).not.toContain("文件");
+		expect(container.textContent).toContain("Terminal");
+		expect(container.textContent).toContain("Browser");
+		expect(container.textContent).not.toContain("Side tasks");
+		expect(container.textContent).not.toContain("Review");
+		expect(container.textContent).not.toContain("Files");
 		expect(container.textContent).not.toContain("Subagent");
 		expect(container.querySelector('[aria-label="Add to message"]')).not.toBeNull();
+		await act(async () => root.unmount());
+	});
+
+	it("opens independent terminal tabs and keeps them mounted while the sidebar is collapsed", async () => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		localStorage.setItem("arcmind.activeSessionId.chat", "chat-existing");
+		localStorage.setItem("arcmind.activeSessionId.code", "code-existing");
+		const { api } = createHarness();
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<App api={api} store={new AppStore()} />));
+		await flush();
+
+		await act(async () => button(container, "Show tools sidebar").click());
+		await act(async () => button(container, "Terminal").click());
+		await flush();
+		expect(api.createTerminal).toHaveBeenCalledTimes(1);
+		expect(api.createTerminal).toHaveBeenCalledWith(expect.objectContaining({ cwd: "/work/chat-project" }));
+		expect(container.querySelectorAll('[role="tab"]')).toHaveLength(1);
+		const toolSidebar = container.querySelector<HTMLElement>(".tool-sidebar")!;
+		expect(button(toolSidebar, "Hide tools sidebar")).toBeTruthy();
+		expect(container.querySelector('.workspace-titlebar-actions [aria-label="Hide tools sidebar"]')).toBeNull();
+		expect([...container.querySelector<HTMLElement>(".tool-tabbar")!.children].map((child) => child.className)).toEqual([
+			"tool-tabs-scroll",
+			"tool-add",
+		]);
+
+		await act(async () => button(container, "Code").click());
+		await flush();
+		await act(async () => button(container, "Chat").click());
+		await flush();
+		expect(api.createTerminal).toHaveBeenCalledTimes(1);
+		expect(container.querySelectorAll('[role="tab"]')).toHaveLength(1);
+
+		await act(async () => button(container, "Hide tools sidebar").click());
+		expect(container.querySelector(".tool-sidebar")?.hasAttribute("hidden")).toBe(true);
+		await act(async () => button(container, "Show tools sidebar").click());
+		expect(api.createTerminal).toHaveBeenCalledTimes(1);
+		expect(container.querySelectorAll('[role="tab"]')).toHaveLength(1);
+
+		await act(async () => button(container, "Add tool").click());
+		const addMenu = container.querySelector<HTMLElement>(".tool-add-menu")!;
+		await act(async () => button(addMenu, "Terminal").click());
+		await flush();
+		expect(api.createTerminal).toHaveBeenCalledTimes(2);
+		expect(container.querySelectorAll('[role="tab"]')).toHaveLength(2);
+
+		await act(async () => button(container, "Close Terminal 2").click());
+		expect(api.closeTerminal).toHaveBeenCalledTimes(1);
+		await act(async () => button(container, "Close Terminal").click());
+		expect(api.closeTerminal).toHaveBeenCalledTimes(2);
+		expect(container.querySelectorAll('[role="tab"]')).toHaveLength(0);
+		expect(container.querySelector(".tool-sidebar-menu")).not.toBeNull();
+
+		await act(async () => root.unmount());
+	});
+
+	it("opens one Review tab in Code mode and reselects it instead of duplicating it", async () => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		localStorage.setItem("arcmind.activeSessionId.code", "code-existing");
+		const { api } = createHarness();
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<App api={api} store={new AppStore()} />));
+		await flush();
+
+		await act(async () => button(container, "Code").click());
+		await flush();
+		await act(async () => button(container, "Show tools sidebar").click());
+		expect(container.querySelector(".tool-sidebar")?.textContent).toContain("Review");
+		await act(async () => [...container.querySelectorAll<HTMLButtonElement>(".tool-sidebar-menu button")]
+			.find((candidate) => candidate.querySelector("span")?.textContent === "Review")!.click());
+		await flush();
+		expect(api.getWorkspaceReview).toHaveBeenCalledWith({ sessionId: "code-existing", revision: "working-tree" });
+		expect(container.querySelectorAll('[role="tab"]')).toHaveLength(1);
+		expect(container.querySelector(".review-panel.is-visible")?.textContent).toContain("No changes");
+
+		await act(async () => button(container, "Add tool").click());
+		await act(async () => [...container.querySelectorAll<HTMLButtonElement>(".tool-add-menu button")]
+			.find((candidate) => candidate.querySelector("span")?.textContent === "Review")!.click());
+		expect(container.querySelectorAll('[role="tab"]')).toHaveLength(1);
+		expect(api.getWorkspaceReview).toHaveBeenCalledTimes(1);
+		await act(async () => button(container, "Close Review").click());
+		expect(container.querySelectorAll('[role="tab"]')).toHaveLength(0);
+		await act(async () => root.unmount());
+	});
+
+	it("closes native tools and removes stored file state when a session is deleted", async () => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		localStorage.setItem("arcmind.activeSessionId.code", "code-existing");
+		const { api } = createHarness();
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<App api={api} store={new AppStore()} />));
+		await flush();
+		await act(async () => button(container, "Code").click());
+		await flush();
+		await act(async () => button(container, "Show tools sidebar").click());
+		await act(async () => button(container, "Terminal").click());
+		await flush();
+		await act(async () => button(container, "Add tool").click());
+		await act(async () => [...container.querySelectorAll<HTMLButtonElement>(".tool-add-menu button")]
+			.find((candidate) => candidate.textContent?.includes("Browser"))!.click());
+		await flush();
+		await act(async () => button(container, "Add tool").click());
+		await act(async () => button(container.querySelector<HTMLElement>(".tool-add-menu")!, "Files").click());
+		await flush();
+		await act(async () => container.querySelector<HTMLButtonElement>('.file-tree-row [title="README.md"]')!.click());
+		await flush();
+		expect(localStorage.getItem("arcmind.file-browser.v1:code-existing")).not.toBeNull();
+
+		const activeRow = button(container, "Code project task").closest<HTMLElement>(".session-row")!;
+		await act(async () => button(activeRow, "Actions for Code project task").click());
+		await act(async () => button(activeRow, "Delete").click());
+		await flush();
+		await act(async () => button(container, "Move to Trash").click());
+		await flush();
+
+		expect(api.closeTerminal).toHaveBeenCalledWith({
+			terminalId: vi.mocked(api.createTerminal).mock.calls[0]![0].terminalId,
+		});
+		expect(api.closeBrowser).toHaveBeenCalledWith({
+			browserId: vi.mocked(api.createBrowser).mock.calls[0]![0].browserId,
+		});
+		expect(localStorage.getItem("arcmind.file-browser.v1:code-existing")).toBeNull();
+		expect(container.querySelectorAll('[role="tab"]')).toHaveLength(0);
+		await act(async () => root.unmount());
+	});
+
+	it("browses the active Code workspace with replaceable previews and fixed file tabs", async () => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
+			x: 0, y: 0, top: 0, right: 320, bottom: 600, left: 0, width: 320, height: 600,
+			toJSON: () => ({}),
+		});
+		localStorage.setItem("arcmind.activeSessionId.chat", "chat-existing");
+		localStorage.setItem("arcmind.activeSessionId.code", "code-existing");
+		const { api } = createHarness();
+		const container = document.createElement("div");
+		document.body.append(container);
+		let root = createRoot(container);
+		await act(async () => root.render(<App api={api} store={new AppStore()} />));
+		await flush();
+		Object.defineProperty(container.querySelector(".workspace"), "clientWidth", { configurable: true, value: 1_200 });
+
+		await act(async () => button(container, "Code").click());
+		await flush();
+		await act(async () => button(container, "Show tools sidebar").click());
+		expect(container.querySelector<HTMLElement>(".tool-sidebar")?.style.width).toBe("528px");
+		await act(async () => button(container, "Files").click());
+		await flush();
+		expect(api.listWorkspaceDirectory).toHaveBeenCalledWith({ sessionId: "code-existing", relativePath: "" });
+		expect(container.querySelector('[role="tab"]')?.textContent).toContain("Open file");
+		expect(container.querySelector('.file-tree-row [title=".env"]')).not.toBeNull();
+
+		await act(async () => container.querySelector<HTMLButtonElement>('.file-tree-row [title="README.md"]')!.click());
+		await flush();
+		expect(api.readWorkspaceFile).toHaveBeenCalledWith({ sessionId: "code-existing", relativePath: "README.md" });
+		expect(codeEditor(container, "Edit README.md").state.doc.toString()).toBe("# README.md\n\nWorkspace preview.");
+		await act(async () => button(container, "Show preview").click());
+		expect(container.querySelector(".file-markdown h1")?.textContent).toBe("README.md");
+		await act(async () => button(container, "View source").click());
+		expect(codeEditor(container, "Edit README.md").state.doc.toString()).toBe("# README.md\n\nWorkspace preview.");
+		expect(container.querySelector(".tool-tab")?.classList.contains("is-preview")).toBe(true);
+
+		await act(async () =>
+			container.querySelector<HTMLButtonElement>('.file-tree-row [title="README.md"]')!
+				.dispatchEvent(new MouseEvent("dblclick", { bubbles: true })),
+		);
+		expect(container.querySelector(".tool-tab")?.classList.contains("is-preview")).toBe(false);
+		await act(async () => container.querySelector<HTMLButtonElement>('.file-tree-row [title="notes.txt"]')!.click());
+		await flush();
+		expect(container.querySelectorAll('[role="tab"]')).toHaveLength(2);
+		expect(container.querySelectorAll(".tool-tab.is-preview")).toHaveLength(1);
+		await act(async () => container.querySelector<HTMLButtonElement>('.file-tree-row [title="README.md"]')!.click());
+		await flush();
+		expect(container.querySelectorAll('[role="tab"]')).toHaveLength(2);
+
+		await act(async () => button(container, "Copy path").click());
+		expect(api.writeClipboardText).toHaveBeenCalledWith({ text: "/work/code-project/README.md" });
+		await act(async () => button(container, "Copy contents").click());
+		expect(api.writeClipboardText).toHaveBeenCalledWith({ text: "# README.md\n\nWorkspace preview." });
+		await act(async () => button(container, "Open file actions").click());
+		await act(async () => button(container, "Open in default app").click());
+		expect(api.openWorkspaceFile).toHaveBeenCalledWith({ sessionId: "code-existing", relativePath: "README.md", action: "default" });
+
+		await act(async () => container.querySelector<HTMLButtonElement>('.file-tree-row [title="docs"]')!.click());
+		await flush();
+		expect(api.listWorkspaceDirectory).toHaveBeenCalledWith({ sessionId: "code-existing", relativePath: "docs" });
+		expect(container.querySelector('.file-tree-row [title="docs/guide.md"]')).not.toBeNull();
+		const search = container.querySelector<HTMLInputElement>('[aria-label="Filter files"]')!;
+		changeInput(search, "guide");
+		await act(async () => new Promise((resolve) => setTimeout(resolve, 140)));
+		expect(api.searchWorkspaceFiles).toHaveBeenCalledWith({ sessionId: "code-existing", query: "guide" });
+		expect(container.querySelector('.file-tree-row [title="docs/guide.md"]')).not.toBeNull();
+
+		await act(async () =>
+			container.querySelector<HTMLElement>('[role="separator"][aria-label="Resize tools sidebar"]')!
+				.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true })),
+		);
+		expect(localStorage.getItem("arcmind.tools-sidebar-width.v2:code-existing")).toBe("544");
+		expect(container.querySelectorAll(".cm-editor")).toHaveLength(1);
+		const workspace = container.querySelector<HTMLElement>(".workspace")!;
+		Object.defineProperty(workspace, "clientWidth", { configurable: true, value: 560 });
+		await act(async () => window.dispatchEvent(new Event("resize")));
+		expect(container.querySelector<HTMLElement>(".tool-sidebar")?.style.width).toBe("280px");
+		expect(localStorage.getItem("arcmind.tools-sidebar-width.v2:code-existing")).toBe("544");
+		Object.defineProperty(workspace, "clientWidth", { configurable: true, value: 1_746 });
+		await act(async () => window.dispatchEvent(new Event("resize")));
+		expect(container.querySelector<HTMLElement>(".tool-sidebar")?.style.width).toBe("544px");
+		Object.defineProperty(workspace, "clientWidth", { configurable: true, value: 1_200 });
+		await act(async () => button(container, "Chat").click());
+		await flush();
+		expect(container.querySelector<HTMLElement>(".tool-sidebar")?.style.width).toBe("528px");
+		expect(localStorage.getItem("arcmind.tools-sidebar-width.v2:chat-existing")).toBeNull();
+		expect(container.querySelectorAll(".cm-editor")).toHaveLength(0);
+		await act(async () => button(container, "Code").click());
+		await flush();
+		expect(container.querySelector<HTMLElement>(".tool-sidebar")?.style.width).toBe("544px");
+		expect(container.querySelectorAll(".cm-editor")).toHaveLength(1);
+		await act(async () => root.unmount());
+
+		root = createRoot(container);
+		await act(async () => root.render(<App api={api} store={new AppStore()} />));
+		await flush();
+		await act(async () => button(container, "Code").click());
+		await flush();
+		await act(async () => button(container, "Show tools sidebar").click());
+		expect(container.querySelector<HTMLElement>(".tool-sidebar")?.style.width).toBe("544px");
+		await act(async () => button(container, "Files").click());
+		await flush();
+		expect(container.querySelectorAll('[role="tab"]')).toHaveLength(1);
+		expect(container.querySelector('[role="tab"]')?.textContent).toContain("README.md");
+		expect(container.querySelector(".tool-tab")?.classList.contains("is-preview")).toBe(false);
+		await act(async () => root.unmount());
+	});
+
+	it("edits workspace text safely and protects unsaved file tabs", async () => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
+			x: 0, y: 0, top: 0, right: 320, bottom: 600, left: 0, width: 320, height: 600,
+			toJSON: () => ({}),
+		});
+		localStorage.setItem("arcmind.activeSessionId.code", "code-existing");
+		const { api } = createHarness();
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<App api={api} store={new AppStore()} />));
+		await flush();
+
+		await act(async () => button(container, "Code").click());
+		await flush();
+		await act(async () => button(container, "Show tools sidebar").click());
+		await act(async () => button(container, "Files").click());
+		await flush();
+		await act(async () => container.querySelector<HTMLButtonElement>('.file-tree-row [title="README.md"]')!.click());
+		await flush();
+
+		let editor = codeEditor(container, "Edit README.md");
+		await act(async () => changeCodeEditor(editor, "# Edited README"));
+		await flush();
+		expect(container.querySelector(".tool-tab.is-dirty")).not.toBeNull();
+		expect(api.setWorkspaceEditState).toHaveBeenLastCalledWith({ dirty: true, language: "en" });
+		expect(container.querySelector(".tool-tab.is-preview")).toBeNull();
+		const activeRow = button(container, "Code project task").closest<HTMLElement>(".session-row")!;
+		await act(async () => button(activeRow, "Actions for Code project task").click());
+		await act(async () => button(activeRow, "Delete").click());
+		await flush();
+		await act(async () => button(container, "Move to Trash").click());
+		await flush();
+		expect(api.deleteSession).not.toHaveBeenCalled();
+		expect(container.querySelector('[role="alert"]')?.textContent).toBe(
+			"Save or close unsaved files before deleting this task or project.",
+		);
+		await act(async () => button(container.querySelector<HTMLElement>(".project-dialog")!, "Cancel").click());
+		await act(async () => button(container, "Show preview").click());
+		expect(container.querySelector(".file-markdown h1")?.textContent).toBe("Edited README");
+		await act(async () => button(container, "View source").click());
+		editor = codeEditor(container, "Edit README.md");
+		expect(editor.state.doc.toString()).toBe("# Edited README");
+		await act(async () => button(container, "Hide tools sidebar").click());
+		expect(container.querySelectorAll(".cm-editor")).toHaveLength(0);
+		await act(async () => button(container, "Show tools sidebar").click());
+		editor = codeEditor(container, "Edit README.md");
+		expect(editor.state.doc.toString()).toBe("# Edited README");
+		await act(async () => button(container, "Chat").click());
+		await flush();
+		expect(container.querySelectorAll(".cm-editor")).toHaveLength(0);
+		await act(async () => button(container, "Code").click());
+		await flush();
+		editor = codeEditor(container, "Edit README.md");
+		expect(editor.state.doc.toString()).toBe("# Edited README");
+		await act(async () => editor.contentDOM.dispatchEvent(new KeyboardEvent("keydown", { key: "s", ctrlKey: true, bubbles: true, cancelable: true })));
+		await flush();
+		expect(api.writeWorkspaceFile).toHaveBeenLastCalledWith({
+			sessionId: "code-existing",
+			relativePath: "README.md",
+			text: "# Edited README",
+			expectedRevision: "a".repeat(64),
+		});
+		expect(container.querySelector(".tool-tab.is-dirty")).toBeNull();
+		expect(api.setWorkspaceEditState).toHaveBeenLastCalledWith({ dirty: false, language: "en" });
+		expect(container.querySelector(".file-preview-notice")?.textContent).toBe("File saved");
+
+		let finishWrite!: (result: { readonly revision: string; readonly byteLength: number }) => void;
+		vi.mocked(api.writeWorkspaceFile).mockImplementationOnce(() => new Promise((resolve) => { finishWrite = resolve; }));
+		await act(async () => changeCodeEditor(editor, "first version"));
+		await act(async () => button(container, "Save file").click());
+		await flush();
+		expect(api.writeWorkspaceFile).toHaveBeenLastCalledWith(expect.objectContaining({ text: "first version" }));
+		expect(finishWrite).toBeTypeOf("function");
+		expect(button(container, "Close README.md").disabled).toBe(true);
+		await act(async () => changeCodeEditor(editor, "newer version"));
+		await act(async () => finishWrite({ revision: "c".repeat(64), byteLength: 13 }));
+		await flush();
+		expect(editor.state.doc.toString()).toBe("newer version");
+		expect(container.querySelector(".tool-tab.is-dirty")).not.toBeNull();
+		expect(button(container, "Close README.md").disabled).toBe(false);
+		await act(async () => editor.contentDOM.dispatchEvent(new KeyboardEvent("keydown", { key: "s", ctrlKey: true, bubbles: true, cancelable: true })));
+		await flush();
+		expect(container.querySelector(".tool-tab.is-dirty")).toBeNull();
+		await act(async () => button(container, "Copy contents").click());
+		expect(api.writeClipboardText).toHaveBeenLastCalledWith({ text: "newer version" });
+
+		await act(async () => changeCodeEditor(editor, "discard me"));
+		await act(async () => button(container, "Close README.md").click());
+		expect(container.querySelector('[role="dialog"][aria-label="Unsaved changes"]')).not.toBeNull();
+		await act(async () => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
+		expect(container.querySelector('[role="dialog"][aria-label="Unsaved changes"]')).toBeNull();
+		await act(async () => button(container, "Close README.md").click());
+		await act(async () => button(container, "Cancel").click());
+		expect(container.querySelector('[aria-label="Edit README.md"]')).not.toBeNull();
+		await act(async () => button(container, "Close README.md").click());
+		await act(async () => button(container, "Don’t Save").click());
+		expect(container.querySelector('[aria-label="Edit README.md"]')).toBeNull();
+
+		await act(async () => button(container, "Files").click());
+		await flush();
+		await act(async () => container.querySelector<HTMLButtonElement>('.file-tree-row [title="README.md"]')!.click());
+		await flush();
+		editor = codeEditor(container, "Edit README.md");
+		await act(async () => changeCodeEditor(editor, "save before close"));
+		await act(async () => button(container, "Close README.md").click());
+		await act(async () => button(container, "Save").click());
+		await flush();
+		expect(container.querySelector('[aria-label="Edit README.md"]')).toBeNull();
+
+		await act(async () => button(container, "Files").click());
+		await flush();
+		await act(async () => container.querySelector<HTMLButtonElement>('.file-tree-row [title="README.md"]')!.click());
+		await flush();
+		editor = codeEditor(container, "Edit README.md");
+		await act(async () => changeCodeEditor(editor, "stale draft"));
+		vi.mocked(api.writeWorkspaceFile).mockRejectedValueOnce(new Error("Workspace file changed on disk"));
+		await act(async () => button(container, "Close README.md").click());
+		await act(async () => button(container, "Save").click());
+		await flush();
+		expect(container.querySelector('[role="dialog"][aria-label="Unsaved changes"]')).not.toBeNull();
+		expect(codeEditor(container, "Edit README.md").state.doc.toString()).toBe("stale draft");
+		expect(container.querySelector('[role="alert"]')?.textContent).toBe("Workspace file changed on disk");
+		await act(async () => button(container, "Don’t Save").click());
+		await flush();
+		expect(api.setWorkspaceEditState).toHaveBeenLastCalledWith({ dirty: false, language: "en" });
+		await act(async () => root.unmount());
+	});
+
+	it("creates, renames, moves, and trashes workspace files without losing drafts", async () => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
+			x: 0, y: 0, top: 0, right: 320, bottom: 600, left: 0, width: 320, height: 600,
+			toJSON: () => ({}),
+		});
+		localStorage.setItem("arcmind.activeSessionId.code", "code-existing");
+		const { api } = createHarness();
+		const directories = new Set(["docs", "src", "src/nested"]);
+		const files = new Set([".env", "notes.txt", "README.md", "docs/guide.md", "src/a.ts", "src/nested/b.ts"]);
+		const parent = (path: string) => path.split("/").slice(0, -1).join("/");
+		const remapEntries = (values: Set<string>, previous: string, next: string) => {
+			for (const value of [...values]) {
+				if (value !== previous && !value.startsWith(`${previous}/`)) continue;
+				values.delete(value);
+				values.add(`${next}${value.slice(previous.length)}`);
+			}
+		};
+		vi.mocked(api.listWorkspaceDirectory).mockImplementation(async ({ relativePath }) => {
+			const entries = [
+				...[...directories].filter((path) => parent(path) === relativePath).map((path) => ({
+					name: path.split("/").at(-1)!, relativePath: path, kind: "directory" as const,
+				})),
+				...[...files].filter((path) => parent(path) === relativePath).map((path) => ({
+					name: path.split("/").at(-1)!, relativePath: path, kind: "file" as const,
+				})),
+			];
+			return entries;
+		});
+		vi.mocked(api.mutateWorkspaceEntry).mockImplementation(async (input) => {
+			if (input.action === "create") {
+				const relativePath = input.parentRelativePath ? `${input.parentRelativePath}/${input.name}` : input.name;
+				(input.kind === "directory" ? directories : files).add(relativePath);
+				return { action: "create", kind: input.kind, relativePath, absolutePath: `/work/code-project/${relativePath}` };
+			}
+			const kind = directories.has(input.relativePath) ? "directory" as const : "file" as const;
+			if (input.action === "trash") {
+				for (const values of [directories, files]) {
+					for (const value of [...values]) {
+						if (value === input.relativePath || value.startsWith(`${input.relativePath}/`)) values.delete(value);
+					}
+				}
+				return {
+					action: "trash", kind, previousRelativePath: input.relativePath,
+					previousAbsolutePath: `/work/code-project/${input.relativePath}`,
+				};
+			}
+			const nextParent = input.action === "rename" ? parent(input.relativePath) : input.destinationDirectoryRelativePath;
+			const name = input.action === "rename" ? input.name : input.relativePath.split("/").at(-1)!;
+			const relativePath = nextParent ? `${nextParent}/${name}` : name;
+			remapEntries(directories, input.relativePath, relativePath);
+			remapEntries(files, input.relativePath, relativePath);
+			return {
+				action: input.action,
+				kind,
+				previousRelativePath: input.relativePath,
+				previousAbsolutePath: `/work/code-project/${input.relativePath}`,
+				relativePath,
+				absolutePath: `/work/code-project/${relativePath}`,
+			};
+		});
+
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<App api={api} store={new AppStore()} />));
+		await flush();
+		await act(async () => button(container, "Code").click());
+		await flush();
+		await act(async () => button(container, "Show tools sidebar").click());
+		await act(async () => button(container, "Files").click());
+		await flush();
+
+		await act(async () => button(container, "New file").click());
+		let dialog = container.querySelector<HTMLElement>('[role="dialog"][aria-label="New file"]')!;
+		await act(async () => changeInput(dialog.querySelector<HTMLInputElement>('[aria-label="Name"]')!, "scratch.ts"));
+		await act(async () => button(dialog, "Create").click());
+		await flush();
+		expect(api.mutateWorkspaceEntry).toHaveBeenLastCalledWith({
+			action: "create", sessionId: "code-existing", parentRelativePath: "", name: "scratch.ts", kind: "file",
+		});
+		expect(container.querySelector('[role="tab"]')?.textContent).toContain("scratch.ts");
+		expect(container.querySelector(".tool-tab.is-preview")).toBeNull();
+		let editor = codeEditor(container, "Edit scratch.ts");
+		await act(async () => changeCodeEditor(editor, "export const draft = true;"));
+
+		await openTreeMenu(container, "scratch.ts");
+		await act(async () => button(container.querySelector<HTMLElement>('[role="menu"][aria-label="File actions"]')!, "Rename").click());
+		dialog = container.querySelector<HTMLElement>('[role="dialog"][aria-label="Rename"]')!;
+		await act(async () => changeInput(dialog.querySelector<HTMLInputElement>('[aria-label="Name"]')!, "renamed.ts"));
+		await act(async () => button(dialog, "Rename").click());
+		await flush();
+		expect(container.querySelector('[role="tab"]')?.textContent).toContain("renamed.ts");
+		editor = codeEditor(container, "Edit renamed.ts");
+		expect(editor.state.doc.toString()).toBe("export const draft = true;");
+
+		await openTreeMenu(container, "renamed.ts");
+		await act(async () => button(container.querySelector<HTMLElement>('[role="menu"][aria-label="File actions"]')!, "Move to…").click());
+		dialog = container.querySelector<HTMLElement>('[role="dialog"][aria-label="Move to…"]')!;
+		await act(async () => changeInput(dialog.querySelector<HTMLInputElement>('[aria-label="Destination folder"]')!, "docs"));
+		await act(async () => button(dialog, "Move").click());
+		await flush();
+		editor = codeEditor(container, "Edit renamed.ts");
+		expect(editor.state.doc.toString()).toBe("export const draft = true;");
+		await act(async () => button(container, "Save file").click());
+		await flush();
+		expect(api.writeWorkspaceFile).toHaveBeenLastCalledWith(expect.objectContaining({
+			relativePath: "docs/renamed.ts", text: "export const draft = true;",
+		}));
+
+		await act(async () => changeCodeEditor(editor, "discard this draft"));
+		await act(async () => container.querySelector<HTMLButtonElement>('.file-tree-row [title="docs"]')!.click());
+		await flush();
+		await openTreeMenu(container, "docs/renamed.ts");
+		await act(async () => button(container.querySelector<HTMLElement>('[role="menu"][aria-label="File actions"]')!, "Move to Trash").click());
+		dialog = container.querySelector<HTMLElement>('[role="dialog"][aria-label="Move to Trash"]')!;
+		expect(dialog.textContent).toContain("Unsaved changes in 1 open file will be discarded.");
+		await act(async () => button(dialog, "Cancel").click());
+		expect(codeEditor(container, "Edit renamed.ts").state.doc.toString()).toBe("discard this draft");
+		await openTreeMenu(container, "docs/renamed.ts");
+		await act(async () => button(container.querySelector<HTMLElement>('[role="menu"][aria-label="File actions"]')!, "Move to Trash").click());
+		dialog = container.querySelector<HTMLElement>('[role="dialog"][aria-label="Move to Trash"]')!;
+		await act(async () => button(dialog, "Move to Trash").click());
+		await flush();
+		expect(container.querySelector('[role="tab"]')?.textContent).toContain("Open file");
+		expect(container.querySelector('[aria-label="Edit renamed.ts"]')).toBeNull();
+
+		await act(async () => container.querySelector<HTMLButtonElement>('.file-tree-row [title="src"]')!.click());
+		await flush();
+		const sourceA = container.querySelector<HTMLButtonElement>('.file-tree-row [title="src/a.ts"]')!;
+		expect(sourceA.querySelector(".file-kind-icon.is-typescript")).not.toBeNull();
+		await act(async () => sourceA.click());
+		await flush();
+		await act(async () => sourceA.dispatchEvent(new MouseEvent("dblclick", { bubbles: true })));
+		await act(async () => container.querySelector<HTMLButtonElement>('.file-tree-row [title="src/nested"]')!.click());
+		await flush();
+		const sourceB = container.querySelector<HTMLButtonElement>('.file-tree-row [title="src/nested/b.ts"]')!;
+		await act(async () => sourceB.click());
+		await flush();
+		await act(async () => sourceB.dispatchEvent(new MouseEvent("dblclick", { bubbles: true })));
+		expect(container.querySelectorAll(".tool-tab.is-preview")).toHaveLength(0);
+
+		await openTreeMenu(container, "src");
+		await act(async () => button(container.querySelector<HTMLElement>('[role="menu"][aria-label="File actions"]')!, "Rename").click());
+		dialog = container.querySelector<HTMLElement>('[role="dialog"][aria-label="Rename"]')!;
+		await act(async () => changeInput(dialog.querySelector<HTMLInputElement>('[aria-label="Name"]')!, "source"));
+		await act(async () => button(dialog, "Rename").click());
+		await flush();
+		let stored = JSON.parse(localStorage.getItem("arcmind.file-browser.v1:code-existing")!) as {
+			fixedPaths: string[]; expandedPaths: string[];
+		};
+		expect(stored.fixedPaths).toEqual(expect.arrayContaining(["source/a.ts", "source/nested/b.ts"]));
+		expect(stored.expandedPaths).toContain("source/nested");
+
+		await openTreeMenu(container, "source");
+		await act(async () => button(container.querySelector<HTMLElement>('[role="menu"][aria-label="File actions"]')!, "Move to…").click());
+		dialog = container.querySelector<HTMLElement>('[role="dialog"][aria-label="Move to…"]')!;
+		await act(async () => changeInput(dialog.querySelector<HTMLInputElement>('[aria-label="Destination folder"]')!, "docs"));
+		await act(async () => button(dialog, "Move").click());
+		await flush();
+		stored = JSON.parse(localStorage.getItem("arcmind.file-browser.v1:code-existing")!) as {
+			fixedPaths: string[]; expandedPaths: string[];
+		};
+		expect(stored.fixedPaths).toEqual(expect.arrayContaining(["docs/source/a.ts", "docs/source/nested/b.ts"]));
+		expect(stored.expandedPaths).toContain("docs/source/nested");
+
+		await flush();
+		await flush();
+		await openTreeMenu(container, "docs/source");
+		await act(async () => button(container.querySelector<HTMLElement>('[role="menu"][aria-label="File actions"]')!, "Move to Trash").click());
+		dialog = container.querySelector<HTMLElement>('[role="dialog"][aria-label="Move to Trash"]')!;
+		await act(async () => button(dialog, "Move to Trash").click());
+		await flush();
+		expect([...container.querySelectorAll('[role="tab"]')].some((tab) => /a\.ts|b\.ts/u.test(tab.textContent ?? ""))).toBe(false);
+		stored = JSON.parse(localStorage.getItem("arcmind.file-browser.v1:code-existing")!) as {
+			fixedPaths: string[]; expandedPaths: string[];
+		};
+		expect(stored.expandedPaths.some((path) => path.startsWith("docs/source"))).toBe(false);
+		await act(async () => root.unmount());
+	});
+
+	it("retries a failed workspace tree load", async () => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		localStorage.setItem("arcmind.activeSessionId.code", "code-existing");
+		const { api } = createHarness();
+		vi.mocked(api.listWorkspaceDirectory).mockRejectedValueOnce(new Error("tree unavailable"));
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<App api={api} store={new AppStore()} />));
+		await flush();
+
+		await act(async () => button(container, "Code").click());
+		await flush();
+		await act(async () => button(container, "Show tools sidebar").click());
+		await act(async () => button(container, "Files").click());
+		await flush();
+		expect(container.querySelector(".file-tree-empty")?.textContent).toContain("tree unavailable");
+
+		await act(async () => button(container, "Retry").click());
+		await flush();
+		expect(api.listWorkspaceDirectory).toHaveBeenCalledTimes(2);
+		expect(container.querySelector('.file-tree-row [title="README.md"]')).not.toBeNull();
+		await act(async () => root.unmount());
+	});
+
+	it("opens a real browser tab, navigates it, and keeps native presentation behind overlays", async () => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		localStorage.setItem("arcmind.activeSessionId.chat", "chat-existing");
+		const { api, emitBrowser } = createHarness();
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<App api={api} store={new AppStore()} />));
+		await flush();
+
+		await act(async () => button(container, "Show tools sidebar").click());
+		expect(container.querySelector(".tool-sidebar")?.textContent).toContain("Browser");
+		const browserButton = [...container.querySelectorAll<HTMLButtonElement>(".tool-sidebar-menu button")]
+			.find((candidate) => candidate.querySelector("span")?.textContent === "Browser")!;
+		await act(async () => browserButton.click());
+		await flush();
+		expect(api.createBrowser).toHaveBeenCalledTimes(1);
+		expect(container.querySelector('[aria-label="Browser address"]')).not.toBeNull();
+		expect(container.textContent).toContain("Start browsing");
+		const browserId = vi.mocked(api.createBrowser).mock.calls[0]![0].browserId;
+		const address = container.querySelector<HTMLInputElement>('[aria-label="Browser address"]')!;
+		changeInput(address, "example.com");
+		await act(async () => container.querySelector<HTMLFormElement>(".browser-address-form")!.requestSubmit());
+		expect(api.controlBrowser).toHaveBeenCalledWith({ type: "navigate", browserId, url: "example.com" });
+
+		act(() => emitBrowser({
+			type: "state",
+			state: {
+				browserId,
+				url: "https://example.com/",
+				title: "Example Domain",
+				faviconUrl: null,
+				loading: false,
+				canGoBack: true,
+				canGoForward: false,
+				zoomPercent: 100,
+			},
+		}));
+		await flush();
+		expect(container.querySelector('[role="tab"]')?.textContent).toContain("Example Domain");
+		expect(button(container, "Back").disabled).toBe(false);
+		expect(button(container, "Forward").disabled).toBe(true);
+
+		vi.mocked(api.controlBrowser).mockClear();
+		await act(async () => button(container, "More browser actions").click());
+		await flush();
+		expect(api.captureBrowserPreview).toHaveBeenCalledWith({ browserId });
+		expect(container.querySelector<HTMLImageElement>(".browser-view-preview")?.src).toBe(
+			"data:image/png;base64,cHJldmlldw==",
+		);
+		expect(api.controlBrowser).toHaveBeenCalledWith(expect.objectContaining({
+			type: "present",
+			browserId,
+			visible: false,
+		}));
+		const menu = container.querySelector('[role="menu"]')!;
+		expect(menu.textContent).toContain("Find in page");
+		expect(menu.textContent).toContain("Print");
+		expect(container.querySelector<HTMLInputElement>('input[aria-label="Zoom percentage"]')?.value).toBe("100");
+		expect(menu.textContent).toContain("Screenshot");
+		expect(menu.textContent).toContain("Clear browsing data");
+		expect(menu.textContent).not.toContain("Open in default browser");
+		expect(menu.textContent).not.toContain("Downloads");
+		expect(menu.textContent).not.toContain("History");
+		expect(menu.textContent).not.toContain("Developer Tools");
+		expect(menu.textContent).not.toContain("Settings");
+
+		await act(async () => container.querySelector<HTMLButtonElement>('[data-browser-action="find"]')!.click());
+		await flush();
+		const findInput = container.querySelector<HTMLInputElement>('input[aria-label="Find in page"]')!;
+		changeInput(findInput, "open");
+		expect(api.controlBrowser).toHaveBeenCalledWith({
+			type: "find",
+			browserId,
+			text: "open",
+			forward: true,
+			findNext: true,
+		});
+		act(() => emitBrowser({ type: "find-result", browserId, activeMatchOrdinal: 2, matches: 52 }));
+		expect(container.querySelector(".browser-find-count")?.textContent).toBe("2 / 52 results");
+		await act(async () =>
+			findInput.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", shiftKey: true, bubbles: true })),
+		);
+		expect(api.controlBrowser).toHaveBeenLastCalledWith({
+			type: "find",
+			browserId,
+			text: "open",
+			forward: false,
+			findNext: false,
+		});
+		await act(async () =>
+			findInput.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })),
+		);
+		expect(api.controlBrowser).toHaveBeenLastCalledWith({ type: "stop-find", browserId });
+		expect(container.querySelector(".browser-find-panel")).toBeNull();
+
+		act(() => emitBrowser({ type: "command", browserId, command: "find" }));
+		await flush();
+		expect(container.querySelector<HTMLInputElement>('input[aria-label="Find in page"]')).not.toBeNull();
+		await act(async () =>
+			container
+				.querySelector<HTMLInputElement>('input[aria-label="Find in page"]')!
+				.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })),
+		);
+		act(() => emitBrowser({ type: "command", browserId, command: "print" }));
+		expect(api.controlBrowser).toHaveBeenCalledWith({ type: "print", browserId });
+
+		await act(async () => button(container, "More browser actions").click());
+		await act(async () => button(container, "Zoom in").click());
+		await flush();
+		expect(api.controlBrowser).toHaveBeenCalledWith({ type: "zoom-in", browserId });
+		expect(container.querySelector(".browser-more-menu")).not.toBeNull();
+		const zoomInput = container.querySelector<HTMLInputElement>('input[aria-label="Zoom percentage"]')!;
+		expect(zoomInput).not.toBeNull();
+		changeInput(zoomInput, "137");
+		await act(async () =>
+			zoomInput.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })),
+		);
+		expect(api.controlBrowser).toHaveBeenCalledWith({ type: "set-zoom", browserId, zoomPercent: 137 });
+		act(() => emitBrowser({
+			type: "state",
+			state: {
+				browserId,
+				url: "https://example.com/",
+				title: "Example Domain",
+				faviconUrl: null,
+				loading: false,
+				canGoBack: true,
+				canGoForward: false,
+				zoomPercent: 110,
+			},
+		}));
+		await flush();
+		expect(container.querySelector<HTMLInputElement>('input[aria-label="Zoom percentage"]')?.value).toBe("110");
+		await act(async () => button(container, "More browser actions").click());
+
+		await act(async () => button(container, "More browser actions").click());
+		await act(async () => container.querySelector<HTMLButtonElement>('[data-browser-action="clear-data"]')!.click());
+		expect(container.querySelector(".browser-clear-dialog")).not.toBeNull();
+		await act(async () => container.querySelector<HTMLButtonElement>('[data-browser-confirm-clear]')!.click());
+		await flush();
+		expect(api.controlBrowser).toHaveBeenCalledWith({ type: "clear-data", browserId });
+		expect(container.querySelector(".browser-toolbar-notice")?.textContent).toContain("Browser data cleared");
+
+		await act(async () =>
+			window.dispatchEvent(new KeyboardEvent("keydown", { key: "f", metaKey: true })),
+		);
+		await flush();
+		expect(container.querySelector('input[aria-label="Find in page"]')).not.toBeNull();
+		await act(async () => button(container, "Close find").click());
+		for (const [key, type] of [
+			["p", "print"],
+			["-", "zoom-out"],
+			["=", "zoom-in"],
+			["0", "zoom-reset"],
+		] as const) {
+			await act(async () =>
+				window.dispatchEvent(new KeyboardEvent("keydown", { key, metaKey: true })),
+			);
+			expect(api.controlBrowser).toHaveBeenCalledWith({ type, browserId });
+		}
+
+		await act(async () => button(container, "Add tool").click());
+		await flush();
+		expect(api.controlBrowser).toHaveBeenLastCalledWith(expect.objectContaining({
+			type: "present",
+			browserId,
+			visible: false,
+		}));
+		const callsWhileHidden = vi.mocked(api.controlBrowser).mock.calls.length;
+		window.dispatchEvent(new KeyboardEvent("keydown", { key: "p", metaKey: true }));
+		expect(api.controlBrowser).toHaveBeenCalledTimes(callsWhileHidden);
+		const secondBrowserButton = [...container.querySelectorAll<HTMLButtonElement>(".tool-add-menu button")]
+			.find((candidate) => candidate.querySelector("span")?.textContent === "Browser")!;
+		await act(async () => secondBrowserButton.click());
+		await flush();
+		expect(api.createBrowser).toHaveBeenCalledTimes(2);
+		expect(container.querySelectorAll('[role="tab"]')).toHaveLength(2);
+		await act(async () => button(container, "Close New tab").click());
+		await act(async () => button(container, "Close Example Domain").click());
+		expect(api.closeBrowser).toHaveBeenCalledTimes(2);
+		expect(api.closeBrowser).toHaveBeenCalledWith({ browserId });
+		expect(container.querySelectorAll('[role="tab"]')).toHaveLength(0);
+
+		await act(async () => root.unmount());
+	});
+
+	it("switches the full shell to Chinese immediately", async () => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		const { api } = createHarness();
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<App api={api} store={new AppStore()} />));
+		await flush();
+
+		await act(async () => button(container, "ArcMind").click());
+		await act(async () => button(container, "Language").click());
+		await act(async () => button(container, "中文").click());
+
+		expect(document.documentElement.lang).toBe("zh-CN");
+		expect(container.textContent).toContain("新建任务");
+		expect(container.textContent).toContain("技能");
+		expect(container.textContent).toContain("定时任务");
+		expect(container.textContent).toContain("有什么我可以替你分担的？");
+		expect(container.querySelector('[aria-label="隐藏会话侧边栏"]')).not.toBeNull();
 		await act(async () => root.unmount());
 	});
 });

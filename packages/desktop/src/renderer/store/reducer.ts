@@ -14,6 +14,14 @@ import type {
 export type ProjectionSyncStatus = "empty" | "ready" | "resubscribing" | "resnapshot_required";
 export type BatchApplyResult = "applied" | "resnapshot_required";
 
+export interface MutableSubagentTranscriptState {
+	agentId: string | null;
+	readonly itemsById: Map<string, ItemView>;
+	itemOrder: string[];
+	nextBeforeItemId: string | null;
+	journalRevision: number;
+}
+
 export interface MutableProjectionState {
 	readonly sessionsById: Map<string, SessionSummary>;
 	sessionOrder: string[];
@@ -37,6 +45,15 @@ export interface MutableProjectionState {
 	model: SessionSnapshot["model"];
 	availableModels: NonNullable<SessionSnapshot["availableModels"]>;
 	subagents: SubagentSummaryView[];
+	readonly subagentTranscript: MutableSubagentTranscriptState;
+}
+
+function clearSubagentTranscript(state: MutableSubagentTranscriptState, agentId: string | null = null): void {
+	state.agentId = agentId;
+	state.itemsById.clear();
+	state.itemOrder = [];
+	state.nextBeforeItemId = null;
+	state.journalRevision = 0;
 }
 
 export function createProjectionState(): MutableProjectionState {
@@ -63,6 +80,13 @@ export function createProjectionState(): MutableProjectionState {
 		model: undefined,
 		availableModels: [],
 		subagents: [],
+		subagentTranscript: {
+			agentId: null,
+			itemsById: new Map(),
+			itemOrder: [],
+			nextBeforeItemId: null,
+			journalRevision: 0,
+		},
 	};
 }
 
@@ -104,6 +128,7 @@ export function removeSession(state: MutableProjectionState, sessionId: string):
 	state.syncStatus = "empty";
 	state.permissionMode = "ask";
 	state.subagents = [];
+	clearSubagentTranscript(state.subagentTranscript);
 	return true;
 }
 
@@ -136,12 +161,14 @@ export function removeModeProjectSessions(state: MutableProjectionState, mode: A
 	state.syncStatus = "empty";
 	state.permissionMode = "ask";
 	state.subagents = [];
+	clearSubagentTranscript(state.subagentTranscript);
 	return true;
 }
 
 export function replaceProjectionSnapshot(state: MutableProjectionState, snapshotValue: SessionSnapshot): void {
 	const snapshot = structuredClone(snapshotValue);
 	const sessionId = snapshot.session.sessionId;
+	const sessionChanged = state.activeSessionId !== sessionId;
 	state.sessionsById.set(sessionId, snapshot.session);
 	if (!state.sessionOrder.includes(sessionId)) state.sessionOrder.unshift(sessionId);
 	state.activeSessionId = sessionId;
@@ -180,6 +207,8 @@ export function replaceProjectionSnapshot(state: MutableProjectionState, snapsho
 	state.model = snapshot.model;
 	state.availableModels = snapshot.availableModels ?? [];
 	state.subagents = snapshot.subagents;
+	if (sessionChanged) clearSubagentTranscript(state.subagentTranscript);
+	else if (state.subagentTranscript.agentId) state.subagentTranscript.journalRevision += 1;
 }
 
 export function markProjectionResubscribing(state: MutableProjectionState): void {
@@ -219,6 +248,10 @@ function eventSessionId(event: DomainEvent): string | undefined {
 		case "session/permissionModeChanged":
 		case "session/thinkingSelectionChanged":
 		case "subagent/updated":
+		case "subagent/item/started":
+		case "subagent/item/delta":
+		case "subagent/item/completed":
+		case "subagent/itemsChanged":
 		case "session/modelChanged":
 			return event.sessionId;
 		case "interaction/notify":
@@ -244,7 +277,7 @@ function canApplyEvents(state: MutableProjectionState, events: readonly DomainEv
 	for (const event of events) {
 		const sessionId = eventSessionId(event);
 		if (event.type === "session/invalidated") continue;
-		if (sessionId !== undefined && sessionId !== activeSessionId) return false;
+		if (sessionId !== undefined && sessionId !== activeSessionId && event.type !== "session/updated") return false;
 		switch (event.type) {
 			case "item/started":
 			case "item/completed":
@@ -269,7 +302,10 @@ function upsertOrdered<T>(map: Map<string, T>, order: string[], id: string, valu
 	return [...order, id];
 }
 
-function appendItemDelta(item: ItemView, delta: Extract<DomainEvent, { type: "item/delta" }>["delta"]): ItemView {
+function appendItemDelta(
+	item: ItemView,
+	delta: { readonly type: "text" | "thinking"; readonly text: string },
+): ItemView {
 	const content = [...item.content];
 	const last = content.at(-1);
 	if (last?.type === delta.type) content[content.length - 1] = { ...last, text: last.text + delta.text };
@@ -293,7 +329,12 @@ function applyEvent(state: MutableProjectionState, event: DomainEvent): void {
 			else if (targetsActiveProject(state, event)) state.syncStatus = "resnapshot_required";
 			return;
 		case "session/updated":
-			state.sessionsById.set(event.session.sessionId, structuredClone(event.session));
+			state.sessionOrder = upsertOrdered(
+				state.sessionsById,
+				state.sessionOrder,
+				event.session.sessionId,
+				structuredClone(event.session),
+			);
 			return;
 		case "session/permissionModeChanged":
 			state.permissionMode = event.permissionMode;
@@ -319,6 +360,28 @@ function applyEvent(state: MutableProjectionState, event: DomainEvent): void {
 						);
 			return;
 		}
+		case "subagent/item/started":
+		case "subagent/item/completed":
+			if (state.subagentTranscript.agentId === event.agentId) {
+				state.subagentTranscript.itemOrder = upsertOrdered(
+					state.subagentTranscript.itemsById,
+					state.subagentTranscript.itemOrder,
+					event.item.itemId,
+					structuredClone(event.item),
+				);
+			}
+			return;
+		case "subagent/item/delta": {
+			if (state.subagentTranscript.agentId !== event.agentId) return;
+			const item = state.subagentTranscript.itemsById.get(event.itemId);
+			if (item?.state === "streaming") {
+				state.subagentTranscript.itemsById.set(event.itemId, appendItemDelta(item, event.delta));
+			}
+			return;
+		}
+		case "subagent/itemsChanged":
+			if (state.subagentTranscript.agentId === event.agentId) state.subagentTranscript.journalRevision += 1;
+			return;
 		case "turn/started":
 		case "turn/completed":
 		case "turn/interrupted":
@@ -368,7 +431,6 @@ export function applyConnectionEvents(state: MutableProjectionState, batch: Conn
 	);
 	for (const event of batch.events) applyEvent(state, event);
 	if (reloadRequired) return "resnapshot_required";
-	if (state.activeSessionId === null) return "applied";
 	state.cursor = batch.toCursor;
 	return "applied";
 }
@@ -388,6 +450,48 @@ export function prependProjectionItems(
 	}
 	state.itemOrder = [...added, ...state.itemOrder];
 	state.nextBeforeItemId = page.nextBeforeItemId;
+}
+
+export function selectSubagentTranscript(state: MutableProjectionState, agentId: string | null): boolean {
+	if (state.subagentTranscript.agentId === agentId) return false;
+	clearSubagentTranscript(state.subagentTranscript, agentId);
+	return true;
+}
+
+export function replaceSubagentItems(
+	state: MutableProjectionState,
+	agentId: string,
+	page: { readonly items: readonly ItemView[]; readonly nextBeforeItemId: string | null },
+): boolean {
+	if (state.subagentTranscript.agentId !== agentId) return false;
+	if (page.items.some((item) => item.sessionId !== agentId))
+		throw new TypeError("History page does not belong to child");
+	state.subagentTranscript.itemsById.clear();
+	state.subagentTranscript.itemOrder = [];
+	for (const item of page.items) {
+		state.subagentTranscript.itemsById.set(item.itemId, structuredClone(item));
+		state.subagentTranscript.itemOrder.push(item.itemId);
+	}
+	state.subagentTranscript.nextBeforeItemId = page.nextBeforeItemId;
+	return true;
+}
+
+export function prependSubagentItems(
+	state: MutableProjectionState,
+	agentId: string,
+	page: { readonly items: readonly ItemView[]; readonly nextBeforeItemId: string | null },
+): boolean {
+	if (state.subagentTranscript.agentId !== agentId) return false;
+	if (page.items.some((item) => item.sessionId !== agentId))
+		throw new TypeError("History page does not belong to child");
+	const added: string[] = [];
+	for (const item of page.items) {
+		if (!state.subagentTranscript.itemsById.has(item.itemId)) added.push(item.itemId);
+		state.subagentTranscript.itemsById.set(item.itemId, structuredClone(item));
+	}
+	state.subagentTranscript.itemOrder = [...added, ...state.subagentTranscript.itemOrder];
+	state.subagentTranscript.nextBeforeItemId = page.nextBeforeItemId;
+	return true;
 }
 
 export function addPendingInteraction(state: MutableProjectionState, interaction: InteractionView): void {
