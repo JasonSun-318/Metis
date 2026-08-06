@@ -16,11 +16,27 @@ export type ScheduleInputSpec =
 	  };
 
 export type ScheduleTarget =
-	| { readonly kind: "general"; readonly workspace: "task"; readonly cwd: string }
+	| {
+			readonly kind: "general";
+			readonly workspace: "task";
+			readonly cwd: string;
+			readonly additionalWorkspaceCwd?: string;
+	  }
 	| { readonly kind: "general"; readonly workspace: "fixed"; readonly cwd: string };
+
+export function scheduleWorkspaceRoots(target: ScheduleTarget): readonly string[] {
+	return [
+		target.cwd,
+		...(target.workspace === "task" && target.additionalWorkspaceCwd ? [target.additionalWorkspaceCwd] : []),
+	];
+}
 
 export type ScheduleTaskStatus = "active" | "paused" | "completed" | "deleting";
 export type ScheduleRunStatus = "queued" | "running" | "succeeded" | "failed" | "missed" | "skipped" | "cancelled";
+export interface ScheduleModelRef {
+	readonly provider: string;
+	readonly modelId: string;
+}
 
 export type ScheduleErrorCode =
 	| "SCHEDULE_NOT_FOUND"
@@ -33,6 +49,7 @@ export type ScheduleErrorCode =
 	| "EXECUTION_FAILED"
 	| "WORKSPACE_MISSING"
 	| "SANDBOX_UNAVAILABLE"
+	| "MODEL_UNAVAILABLE"
 	| "STORE_LIMIT"
 	| "STORE_CORRUPT";
 
@@ -71,7 +88,9 @@ export interface ScheduleRunSummary {
 export interface ScheduleTask {
 	readonly id: string;
 	readonly title: string;
+	readonly description?: string;
 	readonly instruction: string;
+	readonly model: ScheduleModelRef;
 	readonly schedule: ScheduleSpec;
 	readonly timezone: string;
 	readonly target: ScheduleTarget;
@@ -82,13 +101,22 @@ export interface ScheduleTask {
 	readonly activeRunId?: string;
 	readonly unreadCount: number;
 	readonly lastRun?: ScheduleRunSummary;
-	readonly pauseReason?: "user" | "workspace_missing";
+	readonly pauseReason?: "user" | "workspace_missing" | "model_unavailable";
 	readonly deletingSince?: string;
+	readonly deletionDeleteSessions?: boolean;
+	readonly deletionPreviousState?: {
+		readonly status: "active" | "paused" | "completed";
+		readonly nextRunAt: string | null;
+		readonly pauseReason?: "user" | "workspace_missing" | "model_unavailable";
+	};
 	readonly nextRunSequence: number;
 }
 
 export interface ScheduleTaskSnapshot {
+	readonly name: string;
+	readonly description?: string;
 	readonly instruction: string;
+	readonly model: ScheduleModelRef;
 	readonly schedule: ScheduleSpec;
 	readonly timezone: string;
 	readonly target: ScheduleTarget;
@@ -117,19 +145,41 @@ export interface ScheduleRun {
 
 export type ScheduleCreateTarget =
 	| { readonly kind: "general"; readonly workspace: "fixed"; readonly cwd: string }
-	| { readonly kind: "general"; readonly workspace: "task" };
+	| {
+			readonly kind: "general";
+			readonly workspace: "task";
+			readonly additionalWorkspaceCwd?: string;
+	  };
 
 export interface ScheduleCreateInput {
 	readonly id: string;
+	readonly name: string;
+	readonly description?: string;
 	readonly instruction: string;
+	readonly model: ScheduleModelRef;
 	readonly schedule: ScheduleInputSpec;
 	readonly timezone: string;
 	readonly target: ScheduleCreateTarget;
 }
 
 export interface ScheduleUpdateInput {
+	readonly name?: string;
+	readonly description?: string | null;
 	readonly instruction?: string;
+	readonly model?: ScheduleModelRef;
 	readonly schedule?: ScheduleInputSpec;
+	readonly target?: ScheduleCreateTarget;
+}
+
+export interface ScheduleDeleteInput {
+	readonly deleteSessions: boolean;
+}
+
+export interface ScheduleDeleteResult {
+	readonly taskId: string;
+	readonly deleted: true;
+	readonly deletedSessionCount: number;
+	readonly retainedSessionCount: number;
 }
 
 export interface ScheduleTaskPage {

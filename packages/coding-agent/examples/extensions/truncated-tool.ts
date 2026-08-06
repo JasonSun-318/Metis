@@ -14,6 +14,7 @@
  * built-in `grep` tool in src/core/tools/grep.ts for a more complete implementation.
  */
 
+import { execFileSync } from "node:child_process";
 import { mkdtemp, writeFile } from "node:fs/promises";
 import type { ExtensionAPI } from "@arcmind/coding-agent";
 import {
@@ -25,7 +26,6 @@ import {
 	withFileMutationQueue,
 } from "@arcmind/coding-agent";
 import { Text } from "@arcmind/tui";
-import { execSync } from "child_process";
 import { tmpdir } from "os";
 import { join } from "path";
 import { Type } from "typebox";
@@ -57,27 +57,31 @@ export default function (arcmind: ExtensionAPI) {
 			const { pattern, path: searchPath, glob } = params;
 
 			// Build the ripgrep command
-			const args = ["rg", "--line-number", "--color=never"];
+			const args = ["--line-number", "--color=never"];
 			if (glob) args.push("--glob", glob);
-			args.push(pattern);
-			args.push(searchPath || ".");
+			args.push("--", pattern, searchPath || ".");
 
 			let output: string;
 			try {
-				output = execSync(args.join(" "), {
+				output = execFileSync("rg", args, {
 					cwd: ctx.cwd,
 					encoding: "utf-8",
 					maxBuffer: 100 * 1024 * 1024, // 100MB buffer to capture full output
 				});
-			} catch (err: any) {
+			} catch (error: unknown) {
 				// ripgrep exits with 1 when no matches found
-				if (err.status === 1) {
+				const status =
+					typeof error === "object" && error !== null && "status" in error
+						? (error as { status?: unknown }).status
+						: undefined;
+				if (status === 1) {
 					return {
 						content: [{ type: "text", text: "No matches found" }],
 						details: { pattern, path: searchPath, glob, matchCount: 0 } as RgDetails,
 					};
 				}
-				throw new Error(`ripgrep failed: ${err.message}`);
+				const message = error instanceof Error ? error.message : String(error);
+				throw new Error(`ripgrep failed: ${message}`);
 			}
 
 			if (!output.trim()) {

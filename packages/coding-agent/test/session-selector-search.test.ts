@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import type { SessionInfo } from "../src/core/session-manager.ts";
-import { filterAndSortSessions } from "../src/modes/interactive/components/session-selector-search.ts";
+import {
+	filterAndSortSessions,
+	parseSearchQuery,
+} from "../src/modes/interactive/components/session-selector-search.ts";
 
 function makeSession(
 	overrides: Partial<SessionInfo> & { id: string; modified: Date; allMessagesText: string },
@@ -38,22 +41,10 @@ describe("session selector search", () => {
 		expect(result.map((s) => s.id)).toEqual(["a"]);
 	});
 
-	it("filters by regex (re:) and is case-insensitive", () => {
-		const sessions: SessionInfo[] = [
-			makeSession({
-				id: "a",
-				modified: new Date("2026-01-02T00:00:00.000Z"),
-				allMessagesText: "Brave is great",
-			}),
-			makeSession({
-				id: "b",
-				modified: new Date("2026-01-03T00:00:00.000Z"),
-				allMessagesText: "bravery is not the same",
-			}),
-		];
-
-		const result = filterAndSortSessions(sessions, "re:\\bbrave\\b", "recent");
-		expect(result.map((s) => s.id)).toEqual(["a"]);
+	it("treats an re: prefix as ordinary search text", () => {
+		expect(parseSearchQuery("re:(a+)+$")).toEqual({
+			tokens: [{ kind: "fuzzy", value: "re:(a+)+$" }],
+		});
 	});
 
 	it("recent sort preserves input order", () => {
@@ -111,19 +102,6 @@ describe("session selector search", () => {
 
 		const result2 = filterAndSortSessions(tieSessions, '"brave"', "relevance");
 		expect(result2.map((s) => s.id)).toEqual(["newer", "older"]);
-	});
-
-	it("returns empty list for invalid regex", () => {
-		const sessions: SessionInfo[] = [
-			makeSession({
-				id: "a",
-				modified: new Date("2026-01-01T00:00:00.000Z"),
-				allMessagesText: "brave",
-			}),
-		];
-
-		const result = filterAndSortSessions(sessions, "re:(", "recent");
-		expect(result).toEqual([]);
 	});
 
 	describe("name filter", () => {

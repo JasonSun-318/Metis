@@ -1,5 +1,6 @@
 import type { ThinkingLevel } from "@arcmind/agent-core";
 import type { AgentMode } from "../agent-mode.ts";
+import type { AgentSessionEvent } from "../agent-session.ts";
 import type { PermissionMode } from "../permission-mode.ts";
 
 export const SUBAGENT_ACTIVATION_TOOL_NAME = "activate_subagents" as const;
@@ -65,6 +66,7 @@ export interface SubagentUsage {
 	readonly cacheRead: number;
 	readonly cacheWrite: number;
 	readonly elapsedMs: number;
+	readonly toolCalls?: number;
 	readonly cost?: number;
 }
 
@@ -104,8 +106,19 @@ export interface SubagentTombstone {
 	readonly closedAt: string;
 }
 
+export type SubagentVisibleActivity = Extract<
+	AgentSessionEvent,
+	{ type: "message_start" | "message_update" | "message_end" }
+>;
+
 export type SubagentManagerEvent =
 	| { readonly type: "updated"; readonly summary: SubagentSummary }
+	| {
+			readonly type: "activity";
+			readonly agentId: string;
+			readonly turnId?: string;
+			readonly event: SubagentVisibleActivity;
+	  }
 	| { readonly type: "approval_required"; readonly summary: SubagentSummary; readonly toolName: string }
 	| { readonly type: "notification_ready"; readonly event: SubagentMailboxEvent }
 	| { readonly type: "notification_failed"; readonly event: SubagentMailboxEvent; readonly error: string };

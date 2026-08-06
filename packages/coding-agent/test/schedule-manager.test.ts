@@ -12,6 +12,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { trashScheduledTaskData } from "../src/core/schedules/delete.ts";
 import { ScheduleManager } from "../src/core/schedules/manager.ts";
 import { ScheduleStore } from "../src/core/schedules/store.ts";
 import { ScheduleError, type ScheduleEvent, type ScheduleRun } from "../src/core/schedules/types.ts";
@@ -19,6 +20,9 @@ import { getDefaultSessionDir, SessionManager } from "../src/core/session-manage
 
 const roots: string[] = [];
 const fixedNow = () => new Date("2026-07-26T00:00:00Z");
+const TASK_DEFAULTS = { name: "Test task", model: { provider: "openai", modelId: "gpt-test" } } as const;
+const testTrashScheduledData: typeof trashScheduledTaskData = (input) =>
+	trashScheduledTaskData(input, { trash: (payload) => rmSync(payload, { recursive: true }) });
 
 async function eventually(assertion: () => void | Promise<void>, timeoutMs = 5_000): Promise<void> {
 	const deadline = Date.now() + timeoutMs;
@@ -111,6 +115,7 @@ describe("schedule manager", () => {
 		const manager = ScheduleManager.create({ agentDir, now: fixedNow });
 		const create = (id: string, target: { kind: "general"; workspace: "fixed"; cwd: string }) =>
 			manager.create({
+				...TASK_DEFAULTS,
 				id,
 				instruction: id,
 				schedule: { kind: "daily", time: "09:00" },
@@ -126,6 +131,7 @@ describe("schedule manager", () => {
 		await manager.pause(second.id);
 		await create("fixed-child", { kind: "general", workspace: "fixed", cwd: child });
 		await manager.create({
+			...TASK_DEFAULTS,
 			id: "task-owned-not-blocking",
 			instruction: "task owned",
 			schedule: { kind: "daily", time: "09:00" },
@@ -170,6 +176,7 @@ describe("schedule manager", () => {
 		try {
 			await expect(
 				creationHost.create({
+					...TASK_DEFAULTS,
 					id: "fixed-create-loses-race",
 					instruction: "same cwd",
 					schedule: { kind: "daily", time: "09:00" },
@@ -179,6 +186,7 @@ describe("schedule manager", () => {
 			).rejects.toMatchObject({ code: "TASK_BUSY" });
 			await expect(
 				creationHost.create({
+					...TASK_DEFAULTS,
 					id: "fixed-create-other-cwd",
 					instruction: "other cwd",
 					schedule: { kind: "daily", time: "09:00" },
@@ -188,6 +196,7 @@ describe("schedule manager", () => {
 			).resolves.toMatchObject({ target: { workspace: "fixed", cwd: realpathSync(otherProject) } });
 			await expect(
 				creationHost.create({
+					...TASK_DEFAULTS,
 					id: "task-create-during-delete",
 					instruction: "task workspace",
 					schedule: { kind: "daily", time: "09:00" },
@@ -216,6 +225,7 @@ describe("schedule manager", () => {
 			return originalMutate(mutation);
 		});
 		const committedFirst = creationHost.create({
+			...TASK_DEFAULTS,
 			id: "fixed-create-wins-race",
 			instruction: "create first",
 			schedule: { kind: "daily", time: "09:00" },
@@ -245,6 +255,7 @@ describe("schedule manager", () => {
 		).rejects.toThrow("delete failed");
 		await expect(
 			creationHost.create({
+				...TASK_DEFAULTS,
 				id: "fixed-create-after-release",
 				instruction: "retry",
 				schedule: { kind: "daily", time: "09:00" },
@@ -266,10 +277,12 @@ describe("schedule manager", () => {
 		).rejects.toMatchObject({ code: "STORE_CORRUPT" });
 	});
 
-	it("derives a deterministic title and creates the task-owned workspace once", async () => {
+	it("uses the explicit display name and creates the task-owned workspace once", async () => {
 		const agentDir = tempDir();
 		const manager = ScheduleManager.create({ agentDir, now: fixedNow });
 		const input = {
+			...TASK_DEFAULTS,
+			name: "每天整理下载目录并输出摘要",
 			id: "018f0000-0000-7000-8000-000000000001",
 			instruction: "每天整理下载目录并输出摘要",
 			schedule: { kind: "daily", time: "09:00" } as const,
@@ -286,9 +299,61 @@ describe("schedule manager", () => {
 		});
 	});
 
+	it("persists and replaces the optional task workspace access root", async () => {
+		const agentDir = tempDir();
+		const firstAccessRoot = tempDir();
+		const secondAccessRoot = tempDir();
+		const manager = ScheduleManager.create({ agentDir, now: fixedNow });
+		const task = await manager.create({
+			...TASK_DEFAULTS,
+			id: "018f0000-0000-7000-8000-000000000002",
+			instruction: "Work in the granted folder",
+			schedule: { kind: "daily", time: "09:00" },
+			timezone: "Asia/Shanghai",
+			target: {
+				kind: "general",
+				workspace: "task",
+				additionalWorkspaceCwd: firstAccessRoot,
+			},
+		});
+		expect(task.target).toMatchObject({
+			workspace: "task",
+			additionalWorkspaceCwd: realpathSync(firstAccessRoot),
+		});
+		expect((await ScheduleManager.create({ agentDir, now: fixedNow }).get(task.id)).target).toMatchObject({
+			workspace: "task",
+			additionalWorkspaceCwd: realpathSync(firstAccessRoot),
+		});
+
+		const replaced = await manager.update(task.id, {
+			target: {
+				kind: "general",
+				workspace: "task",
+				additionalWorkspaceCwd: secondAccessRoot,
+			},
+		});
+		expect(replaced.target).toMatchObject({
+			workspace: "task",
+			additionalWorkspaceCwd: realpathSync(secondAccessRoot),
+		});
+		expect(await manager.update(task.id, { target: { kind: "general", workspace: "task" } })).not.toHaveProperty(
+			"target.additionalWorkspaceCwd",
+		);
+		await expect(
+			manager.update(task.id, {
+				target: {
+					kind: "general",
+					workspace: "task",
+					additionalWorkspaceCwd: "relative/folder",
+				},
+			}),
+		).rejects.toMatchObject({ code: "INVALID_SCHEDULE" });
+	});
+
 	it("idempotently creates one task-owned workspace across concurrent hosts", async () => {
 		const agentDir = tempDir();
 		const input = {
+			...TASK_DEFAULTS,
 			id: "task-create-race",
 			instruction: "same request",
 			schedule: { kind: "daily", time: "09:00" } as const,
@@ -308,6 +373,7 @@ describe("schedule manager", () => {
 		const firstHost = ScheduleManager.create({ agentDir, now: fixedNow });
 		const secondHost = ScheduleManager.create({ agentDir, now: fixedNow });
 		const task = await firstHost.create({
+			...TASK_DEFAULTS,
 			id: "task-run-race",
 			instruction: "same run request",
 			schedule: { kind: "daily", time: "09:00" },
@@ -324,15 +390,16 @@ describe("schedule manager", () => {
 
 	it("returns promptly when deletion is delegated to another process leader", async () => {
 		const agentDir = tempDir();
-		const leader = ScheduleManager.create({ agentDir, now: fixedNow });
+		const leader = ScheduleManager.create({ agentDir, now: fixedNow, trashScheduledData: testTrashScheduledData });
 		const task = await leader.create({
+			...TASK_DEFAULTS,
 			id: "task-follower-delete",
 			instruction: "delete me",
 			schedule: { kind: "daily", time: "09:00" },
 			timezone: "Asia/Shanghai",
 			target: { kind: "general", workspace: "task" },
 		});
-		const follower = ScheduleManager.create({ agentDir, now: fixedNow });
+		const follower = ScheduleManager.create({ agentDir, now: fixedNow, trashScheduledData: testTrashScheduledData });
 		await leader.start();
 		await eventually(() =>
 			expect((leader as unknown as { leaderRelease?: () => Promise<void> }).leaderRelease).toBeTypeOf("function"),
@@ -341,7 +408,7 @@ describe("schedule manager", () => {
 		const events: ScheduleEvent[] = [];
 		follower.subscribe((event) => events.push(event));
 		try {
-			const deletion = follower.delete(task.id);
+			const deletion = follower.delete(task.id, { deleteSessions: true });
 			const outcome = await Promise.race([
 				deletion.then(
 					() => ({ code: "resolved" }),
@@ -358,16 +425,18 @@ describe("schedule manager", () => {
 					task: expect.objectContaining({ id: task.id, status: "deleting" }),
 				}),
 			);
-			await leader.delete(task.id);
+			await leader.delete(task.id, { deleteSessions: true });
 		} finally {
 			await follower.stop();
 			await leader.stop();
 		}
 	});
 
-	it("edits only future claims and pause leaves the active run untouched", async () => {
-		const manager = ScheduleManager.create({ agentDir: tempDir(), now: fixedNow });
+	it("rejects edits while running and keeps completed run snapshots immutable", async () => {
+		const agentDir = tempDir();
+		const manager = ScheduleManager.create({ agentDir, now: fixedNow });
 		const task = await manager.create({
+			...TASK_DEFAULTS,
 			id: "task-edit",
 			instruction: "old",
 			schedule: { kind: "daily", time: "09:00" },
@@ -375,9 +444,50 @@ describe("schedule manager", () => {
 			target: { kind: "general", workspace: "task" },
 		});
 		const running = await manager.runNow(task.id, "run-edit");
+		await expect(
+			manager.update(task.id, { instruction: "new", schedule: { kind: "daily", time: "10:00" } }),
+		).rejects.toMatchObject({ code: "TASK_BUSY" });
+		expect((await manager.pause(task.id)).activeRunId).toBe(running.id);
+		await ScheduleStore.open(agentDir).mutate((draft, files) => {
+			files.replaceRun({ ...running, status: "succeeded", completedAt: fixedNow().toISOString(), unread: true });
+			const index = draft.tasks.findIndex(({ id }) => id === task.id);
+			draft.tasks[index] = { ...draft.tasks[index], activeRunId: undefined };
+		});
 		await manager.update(task.id, { instruction: "new", schedule: { kind: "daily", time: "10:00" } });
 		expect((await manager.getRun(task.id, running.id)).snapshot.instruction).toBe("old");
-		expect((await manager.pause(task.id)).activeRunId).toBe(running.id);
+	});
+
+	it("reactivates a completed one-time task when it is rescheduled", async () => {
+		const agentDir = tempDir();
+		const manager = ScheduleManager.create({ agentDir, now: fixedNow });
+		const task = await manager.create({
+			...TASK_DEFAULTS,
+			id: "task-rescheduled",
+			instruction: "once",
+			schedule: { kind: "once", date: "2026-07-26", time: "08:01" },
+			timezone: "Asia/Shanghai",
+			target: { kind: "general", workspace: "task" },
+		});
+		await ScheduleStore.open(agentDir).mutate((draft) => {
+			const index = draft.tasks.findIndex(({ id }) => id === task.id);
+			draft.tasks[index] = { ...draft.tasks[index], status: "completed", nextRunAt: null };
+		});
+
+		await expect(
+			manager.update(task.id, { model: { provider: "openai", modelId: "gpt-next" } }),
+		).rejects.toMatchObject({
+			code: "INVALID_SCHEDULE",
+		});
+		const updated = await manager.update(task.id, {
+			model: { provider: "openai", modelId: "gpt-next" },
+			schedule: { kind: "once", date: "2026-07-27", time: "09:00" },
+		});
+
+		expect(updated).toMatchObject({
+			status: "active",
+			nextRunAt: "2026-07-27T01:00:00Z",
+			model: { provider: "openai", modelId: "gpt-next" },
+		});
 	});
 
 	it("keeps a completed one-time task completed when a manual run loses its workspace", async () => {
@@ -385,6 +495,7 @@ describe("schedule manager", () => {
 		const project = tempDir();
 		const manager = ScheduleManager.create({ agentDir, now: fixedNow });
 		const task = await manager.create({
+			...TASK_DEFAULTS,
 			id: "task-completed-missing",
 			instruction: "once",
 			schedule: { kind: "once", date: "2026-07-26", time: "08:01" },
@@ -407,11 +518,11 @@ describe("schedule manager", () => {
 		await manager.stop();
 	});
 
-	it("deletes every run session and owned workspace but never a fixed cwd", async () => {
-		const deleteSession = vi.spyOn(SessionManager, "deleteSession").mockResolvedValue({ ok: true, method: "unlink" });
+	it("deletes an owned workspace but never a fixed cwd", async () => {
 		const agentDir = tempDir();
-		const manager = ScheduleManager.create({ agentDir, now: fixedNow });
+		const manager = ScheduleManager.create({ agentDir, now: fixedNow, trashScheduledData: testTrashScheduledData });
 		const owned = await manager.create({
+			...TASK_DEFAULTS,
 			id: "task-owned",
 			instruction: "owned",
 			schedule: { kind: "daily", time: "09:00" },
@@ -420,27 +531,30 @@ describe("schedule manager", () => {
 		});
 		const ownedRun = await manager.runNow(owned.id, "run-owned");
 		const store = ScheduleStore.open(agentDir);
-		await store.mutate((_draft, files) =>
-			files.replaceRun({ ...ownedRun, sessionId: "session-owned", sessionFile: join(agentDir, "session.jsonl") }),
-		);
-		await manager.delete(owned.id);
-		expect(deleteSession).toHaveBeenCalledWith(join(agentDir, "session.jsonl"), {
-			agentDir,
-			permanent: true,
-			expectedScheduled: { taskId: owned.id, runId: ownedRun.id },
+		await store.mutate((draft, files) => {
+			files.replaceRun({
+				...ownedRun,
+				status: "succeeded",
+				completedAt: fixedNow().toISOString(),
+				sessionId: "session-owned",
+				sessionFile: join(agentDir, "session.jsonl"),
+			});
+			const index = draft.tasks.findIndex(({ id }) => id === owned.id);
+			draft.tasks[index] = { ...draft.tasks[index], activeRunId: undefined };
 		});
+		await manager.delete(owned.id, { deleteSessions: true });
 		expect(existsSync(owned.target.cwd)).toBe(false);
 
 		const fixedCwd = tempDir();
 		const fixed = await manager.create({
+			...TASK_DEFAULTS,
 			id: "task-fixed",
 			instruction: "fixed",
 			schedule: { kind: "daily", time: "09:00" },
 			timezone: "Asia/Shanghai",
 			target: { kind: "general", workspace: "fixed", cwd: fixedCwd },
 		});
-		await manager.runNow(fixed.id, "run-fixed");
-		await manager.delete(fixed.id);
+		await manager.delete(fixed.id, { deleteSessions: true });
 		expect(existsSync(fixedCwd)).toBe(true);
 	});
 
@@ -448,8 +562,14 @@ describe("schedule manager", () => {
 		const agentDir = tempDir();
 		const fixedCwd = tempDir();
 		const executor = deferredExecutor();
-		const manager = ScheduleManager.create({ agentDir, now: fixedNow, execute: executor.run });
+		const manager = ScheduleManager.create({
+			agentDir,
+			now: fixedNow,
+			execute: executor.run,
+			trashScheduledData: testTrashScheduledData,
+		});
 		const task = await manager.create({
+			...TASK_DEFAULTS,
 			id: "018f0000-0000-7000-8000-000000000021",
 			instruction: "interrupted",
 			schedule: { kind: "daily", time: "09:00" },
@@ -475,7 +595,7 @@ describe("schedule manager", () => {
 
 		await manager.stop();
 		expect(await manager.getRun(task.id, runId)).not.toHaveProperty("sessionFile");
-		await manager.delete(task.id);
+		await manager.delete(task.id, { deleteSessions: true });
 		expect(existsSync(sessionFile)).toBe(false);
 		expect(existsSync(fixedCwd)).toBe(true);
 	});
@@ -484,6 +604,7 @@ describe("schedule manager", () => {
 		const agentDir = tempDir();
 		const manager = ScheduleManager.create({ agentDir, now: fixedNow });
 		const task = await manager.create({
+			...TASK_DEFAULTS,
 			id: "task-deleting",
 			instruction: "delete me",
 			schedule: { kind: "daily", time: "09:00" },
@@ -494,7 +615,11 @@ describe("schedule manager", () => {
 			const index = draft.tasks.findIndex(({ id }) => id === task.id);
 			draft.tasks[index] = { ...draft.tasks[index], status: "deleting", nextRunAt: null };
 		});
-		const reopened = ScheduleManager.create({ agentDir, now: fixedNow });
+		const reopened = ScheduleManager.create({
+			agentDir,
+			now: fixedNow,
+			trashScheduledData: testTrashScheduledData,
+		});
 		await reopened.start();
 		await eventually(async () => {
 			await expect(reopened.get(task.id)).rejects.toMatchObject({ code: "SCHEDULE_NOT_FOUND" });
@@ -507,6 +632,7 @@ describe("schedule manager", () => {
 		let clock = new Date("2026-07-26T00:00:00Z");
 		const setup = ScheduleManager.create({ agentDir, now: () => clock });
 		const task = await setup.create({
+			...TASK_DEFAULTS,
 			id: "task-one-leader",
 			instruction: "run once",
 			schedule: { kind: "once", date: "2026-07-26", time: "08:01" },
@@ -543,6 +669,7 @@ describe("schedule manager", () => {
 		const manager = ScheduleManager.create({ agentDir, now: () => clock });
 		for (const id of ["task-cap-a", "task-cap-b", "task-cap-c"]) {
 			await manager.create({
+				...TASK_DEFAULTS,
 				id,
 				instruction: id,
 				schedule: { kind: "once", date: "2026-07-26", time: "08:01" },
@@ -571,6 +698,7 @@ describe("schedule manager", () => {
 		let clock = new Date("2026-07-20T00:00:00Z");
 		const manager = ScheduleManager.create({ agentDir, now: () => clock });
 		const task = await manager.create({
+			...TASK_DEFAULTS,
 			id: "task-overlap",
 			instruction: "daily",
 			schedule: { kind: "daily", time: "08:01" },
@@ -595,6 +723,7 @@ describe("schedule manager", () => {
 		clock = new Date("2026-07-20T00:00:00Z");
 		const offlineSetup = ScheduleManager.create({ agentDir: offlineAgentDir, now: () => clock });
 		const offline = await offlineSetup.create({
+			...TASK_DEFAULTS,
 			id: "task-offline",
 			instruction: "daily offline",
 			schedule: { kind: "daily", time: "08:01" },
@@ -620,6 +749,7 @@ describe("schedule manager", () => {
 		const setup = ScheduleManager.create({ agentDir, now: () => clock });
 		const fixed = tempDir();
 		const task = await setup.create({
+			...TASK_DEFAULTS,
 			id: "task-missing",
 			instruction: "fixed",
 			schedule: { kind: "daily", time: "08:01" },
@@ -646,6 +776,7 @@ describe("schedule manager", () => {
 		const agentDir = tempDir();
 		const manager = ScheduleManager.create({ agentDir, now: fixedNow });
 		const queuedTask = await manager.create({
+			...TASK_DEFAULTS,
 			id: "task-queued-restart",
 			instruction: "queued",
 			schedule: { kind: "daily", time: "09:00" },
@@ -666,6 +797,7 @@ describe("schedule manager", () => {
 		const orphanAgentDir = tempDir();
 		const orphanSetup = ScheduleManager.create({ agentDir: orphanAgentDir, now: fixedNow });
 		const orphanTask = await orphanSetup.create({
+			...TASK_DEFAULTS,
 			id: "task-orphan-running",
 			instruction: "orphan",
 			schedule: { kind: "daily", time: "09:00" },
@@ -697,6 +829,7 @@ describe("schedule manager", () => {
 		let clock = new Date("2026-07-26T00:00:00Z");
 		const setup = ScheduleManager.create({ agentDir, now: () => clock });
 		const task = await setup.create({
+			...TASK_DEFAULTS,
 			id: "task-orphan-scheduled",
 			instruction: "do not retry",
 			schedule: { kind: "daily", time: "08:01" },
@@ -715,7 +848,9 @@ describe("schedule manager", () => {
 			runnerId: "dead-runner",
 			unread: false,
 			snapshot: {
+				name: task.title,
 				instruction: task.instruction,
+				model: task.model,
 				schedule: task.schedule,
 				timezone: task.timezone,
 				target: task.target,
@@ -737,10 +872,11 @@ describe("schedule manager", () => {
 		await recovered.stop();
 	});
 
-	it("pause lets an active run finish while delete aborts it", async () => {
+	it("pause lets an active run finish while delete rejects a running task", async () => {
 		const agentDir = tempDir();
 		const setup = ScheduleManager.create({ agentDir, now: fixedNow });
 		const pausedTask = await setup.create({
+			...TASK_DEFAULTS,
 			id: "task-pause-active",
 			instruction: "pause active",
 			schedule: { kind: "daily", time: "09:00" },
@@ -749,7 +885,12 @@ describe("schedule manager", () => {
 		});
 		await setup.runNow(pausedTask.id, "run-pause-active");
 		const executor = deferredExecutor();
-		const runner = ScheduleManager.create({ agentDir, now: fixedNow, execute: executor.run });
+		const runner = ScheduleManager.create({
+			agentDir,
+			now: fixedNow,
+			execute: executor.run,
+			trashScheduledData: testTrashScheduledData,
+		});
 		await runner.start();
 		await eventually(() => expect(executor.pending).toHaveLength(1));
 		await runner.pause(pausedTask.id);
@@ -758,6 +899,7 @@ describe("schedule manager", () => {
 		await eventually(async () => expect((await runner.get(pausedTask.id)).status).toBe("paused"));
 
 		const deletedTask = await runner.create({
+			...TASK_DEFAULTS,
 			id: "task-delete-active",
 			instruction: "delete active",
 			schedule: { kind: "daily", time: "09:00" },
@@ -766,8 +908,13 @@ describe("schedule manager", () => {
 		});
 		await runner.runNow(deletedTask.id, "run-delete-active");
 		await eventually(() => expect(executor.pending).toHaveLength(2));
-		await runner.delete(deletedTask.id);
-		expect(executor.aborted).toBe(1);
+		await expect(runner.delete(deletedTask.id, { deleteSessions: true })).rejects.toMatchObject({
+			code: "TASK_BUSY",
+		});
+		expect(executor.aborted).toBe(0);
+		executor.finish(1);
+		await eventually(async () => expect((await runner.get(deletedTask.id)).activeRunId).toBeUndefined());
+		await runner.delete(deletedTask.id, { deleteSessions: true });
 		await expect(runner.get(deletedTask.id)).rejects.toMatchObject({ code: "SCHEDULE_NOT_FOUND" });
 		await runner.stop();
 	});
@@ -777,6 +924,7 @@ describe("schedule manager", () => {
 		let clock = new Date("2026-07-26T00:00:00Z");
 		const setup = ScheduleManager.create({ agentDir, now: () => clock });
 		const task = await setup.create({
+			...TASK_DEFAULTS,
 			id: "task-provider-failure",
 			instruction: "fail once",
 			schedule: { kind: "daily", time: "08:01" },
@@ -806,11 +954,45 @@ describe("schedule manager", () => {
 		await runner.stop();
 	});
 
+	it("pauses a task when its pinned model becomes unavailable", async () => {
+		const agentDir = tempDir();
+		let clock = new Date("2026-07-26T00:00:00Z");
+		const setup = ScheduleManager.create({ agentDir, now: () => clock });
+		const task = await setup.create({
+			...TASK_DEFAULTS,
+			id: "task-model-unavailable",
+			instruction: "use the pinned model",
+			schedule: { kind: "daily", time: "08:01" },
+			timezone: "Asia/Shanghai",
+			target: { kind: "general", workspace: "task" },
+		});
+		clock = new Date("2026-07-26T00:01:00Z");
+		const execute = vi.fn().mockRejectedValue(new ScheduleError("MODEL_UNAVAILABLE", "model removed"));
+		const runner = ScheduleManager.create({ agentDir, now: () => clock, execute });
+		await runner.start();
+		await eventually(async () => {
+			const paused = await runner.get(task.id);
+			expect(paused).toMatchObject({
+				status: "paused",
+				pauseReason: "model_unavailable",
+			});
+			expect(paused).not.toHaveProperty("activeRunId");
+			expect((await runner.listRuns(task.id)).runs[0]).toMatchObject({
+				status: "failed",
+				error: { code: "MODEL_UNAVAILABLE" },
+			});
+		});
+		await new Promise((resolve) => setTimeout(resolve, 100));
+		expect(execute).toHaveBeenCalledTimes(1);
+		await runner.stop();
+	});
+
 	it("fails closed and releases a detached run when terminal persistence breaks", async () => {
 		const agentDir = tempDir();
 		const executor = deferredExecutor();
 		const manager = ScheduleManager.create({ agentDir, now: fixedNow, execute: executor.run });
 		const task = await manager.create({
+			...TASK_DEFAULTS,
 			id: "task-finalize-corrupt",
 			instruction: "persist result",
 			schedule: { kind: "daily", time: "09:00" },
@@ -838,6 +1020,7 @@ describe("schedule manager", () => {
 		const firstHost = ScheduleManager.create({ agentDir, now: fixedNow });
 		const secondHost = ScheduleManager.create({ agentDir, now: fixedNow });
 		const task = await firstHost.create({
+			...TASK_DEFAULTS,
 			id: "task-read-race",
 			instruction: "read race",
 			schedule: { kind: "daily", time: "09:00" },
@@ -856,7 +1039,9 @@ describe("schedule manager", () => {
 			reason: "offline",
 			unread: true,
 			snapshot: {
+				name: task.title,
 				instruction: task.instruction,
+				model: task.model,
 				schedule: task.schedule,
 				timezone: task.timezone,
 				target: task.target,
@@ -895,6 +1080,7 @@ describe("schedule manager", () => {
 		const manager = ScheduleManager.create({ agentDir, now: fixedNow });
 		const target = { kind: "general", workspace: "fixed", cwd: fixed } as const;
 		await manager.create({
+			...TASK_DEFAULTS,
 			id: "z-no-run",
 			instruction: "No run",
 			schedule: { kind: "daily", time: "10:00" },
@@ -902,6 +1088,7 @@ describe("schedule manager", () => {
 			target,
 		});
 		const withRun = await manager.create({
+			...TASK_DEFAULTS,
 			id: "a-with-run",
 			instruction: "Has run",
 			schedule: { kind: "daily", time: "11:00" },
@@ -938,6 +1125,8 @@ describe("schedule manager", () => {
 		const events: string[] = [];
 		manager.subscribe((event) => events.push(event.type));
 		const task = await manager.create({
+			...TASK_DEFAULTS,
+			name: "Create one report",
 			id: "task-once",
 			instruction: "  Create   one report  ",
 			schedule: { kind: "once", date: "2026-08-03", time: "09:30" },
@@ -956,6 +1145,7 @@ describe("schedule manager", () => {
 		await expect(manager.resume(task.id)).rejects.toMatchObject({ code: "INVALID_SCHEDULE" });
 		await expect(
 			manager.create({
+				...TASK_DEFAULTS,
 				id: "task-past",
 				instruction: "past",
 				schedule: { kind: "once", date: "2026-07-25", time: "09:30" },

@@ -11,7 +11,12 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { createScheduleWorkspace, removeOwnedScheduleWorkspace } from "../src/core/schedules/paths.ts";
+import {
+	createScheduleWorkspace,
+	ensureScheduleRunDirectory,
+	getScheduleRunPath,
+	removeOwnedScheduleWorkspace,
+} from "../src/core/schedules/paths.ts";
 import { ScheduleStore } from "../src/core/schedules/store.ts";
 import type { ScheduleRun, ScheduleTask } from "../src/core/schedules/types.ts";
 
@@ -28,6 +33,7 @@ function task(id: string): ScheduleTask {
 		id,
 		title: `Task ${id}`,
 		instruction: `Run ${id}`,
+		model: { provider: "openai", modelId: "gpt-test" },
 		schedule: { kind: "daily", time: "09:00" },
 		timezone: "Asia/Shanghai",
 		target: { kind: "general", workspace: "fixed", cwd: tempDir() },
@@ -54,7 +60,9 @@ function run(taskValue: ScheduleTask, index: number): ScheduleRun {
 		resultPreview: `result ${index}`,
 		unread: true,
 		snapshot: {
+			name: taskValue.title,
 			instruction: taskValue.instruction,
+			model: taskValue.model,
 			schedule: taskValue.schedule,
 			timezone: taskValue.timezone,
 			target: taskValue.target,
@@ -67,6 +75,43 @@ afterEach(() => {
 });
 
 describe("schedule store", () => {
+	it("reads v1 tasks and runs without writing, then persists v2 on the next mutation", async () => {
+		const agentDir = tempDir();
+		const currentTask = task("legacy-task");
+		const legacyTask = { ...currentTask } as unknown as Record<string, unknown>;
+		delete legacyTask.model;
+		writeFileSync(
+			join(agentDir, "schedules.json"),
+			JSON.stringify({ version: 1, revision: 0, tasks: [legacyTask], events: [] }),
+		);
+		const store = ScheduleStore.open(agentDir);
+		const migrated = store.readIndex().tasks[0];
+		expect(migrated).toMatchObject({
+			title: currentTask.title,
+			model: { provider: "legacy", modelId: "unassigned" },
+			status: "paused",
+			pauseReason: "model_unavailable",
+			nextRunAt: null,
+		});
+		expect(JSON.parse(readFileSync(join(agentDir, "schedules.json"), "utf8")).version).toBe(1);
+
+		const legacyRun = run(currentTask, 0) as unknown as Record<string, unknown>;
+		const legacySnapshot = legacyRun.snapshot as Record<string, unknown>;
+		delete legacySnapshot.name;
+		delete legacySnapshot.model;
+		ensureScheduleRunDirectory(agentDir, currentTask.id);
+		writeFileSync(getScheduleRunPath(agentDir, currentTask.id, 1, "run-000"), JSON.stringify(legacyRun));
+		expect(store.getRun(currentTask.id, "run-000").snapshot).toMatchObject({
+			name: currentTask.title,
+			model: { provider: "legacy", modelId: "unassigned" },
+		});
+
+		await store.mutate((draft) => {
+			draft.tasks[0] = { ...draft.tasks[0], description: "migrated" };
+		});
+		expect(JSON.parse(readFileSync(join(agentDir, "schedules.json"), "utf8")).version).toBe(2);
+	});
+
 	it("rejects removed Code targets and source-session fields", async () => {
 		for (const legacy of [
 			{ ...task("legacy-project"), target: { kind: "project", cwd: tempDir() } },
@@ -164,7 +209,7 @@ describe("schedule store", () => {
 		const versionAgentDir = tempDir();
 		writeFileSync(
 			join(versionAgentDir, "schedules.json"),
-			JSON.stringify({ version: 2, revision: 0, tasks: [], events: [] }),
+			JSON.stringify({ version: 3, revision: 0, tasks: [], events: [] }),
 		);
 		expect(() => ScheduleStore.open(versionAgentDir).readIndex()).toThrowError(
 			expect.objectContaining({ code: "STORE_CORRUPT" }),

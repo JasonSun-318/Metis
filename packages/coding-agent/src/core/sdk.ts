@@ -337,11 +337,8 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			await resourceLoader.reload();
 			time("resourceLoader.reload");
 		}
-		if (
-			options.unattendedExecution &&
-			(resourceLoader.getExtensions().extensions.length > 0 || resourceLoader.getSkills().skills.length > 0)
-		) {
-			throw new TypeError("Unattended execution requires extensions and skills to be disabled");
+		if (options.unattendedExecution && resourceLoader.getExtensions().extensions.length > 0) {
+			throw new TypeError("Unattended execution requires extensions to be disabled");
 		}
 
 		// Check if session has existing data to restore

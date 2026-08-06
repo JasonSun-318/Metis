@@ -15,6 +15,7 @@ function task(): ScheduleTask {
 		id: TASK_ID,
 		title: "Submit report",
 		instruction: "Submit report",
+		model: { provider: "openai", modelId: "gpt-test" },
 		schedule: { kind: "once", date: "2026-08-03", time: "09:30" },
 		timezone: "Asia/Shanghai",
 		target: { kind: "general", workspace: "fixed", cwd: "/project" },
@@ -72,18 +73,19 @@ describe("/schedule", () => {
 		expect(showExtensionSelector).not.toHaveBeenCalled();
 	});
 
-	it("creates through structured instruction, recurrence, date, and time fields only", async () => {
+	it("creates through explicit display metadata, instruction, model, and recurrence", async () => {
 		const manager = {
 			create: vi.fn(async () => task()),
 		} as unknown as ScheduleManager;
 		const selectorChoices: Array<string | undefined> = ["Create task", "Once", "Create", undefined];
-		const inputValues = ["2026-08-03", "09:30"];
+		const inputValues = ["Submit report", "", "2026-08-03", "09:30"];
 		const dialogs: string[] = [];
 		const mode = Object.create(InteractiveMode.prototype) as InteractiveMode & Record<string, unknown>;
 		Object.assign(mode, {
 			options: { scheduleManager: manager },
 			runtimeHost: {
 				session: {
+					model: { provider: "openai", id: "gpt-test" },
 					sessionManager: {
 						getMode: () => "chat",
 						getCwd: () => "/project",
@@ -114,7 +116,9 @@ describe("/schedule", () => {
 		await (mode as unknown as { handleScheduleCommand(): Promise<void> }).handleScheduleCommand();
 		expect(manager.create).toHaveBeenCalledWith(
 			expect.objectContaining({
+				name: "Submit report",
 				instruction: "Submit report",
+				model: { provider: "openai", modelId: "gpt-test" },
 				schedule: { kind: "once", date: "2026-08-03", time: "09:30" },
 				target: { kind: "general", workspace: "fixed", cwd: "/project" },
 			}),
@@ -123,10 +127,13 @@ describe("/schedule", () => {
 		expect(dialogs.join("\n")).toContain("Recurrence");
 		expect(dialogs.join("\n")).toContain("Run date");
 		expect(dialogs.join("\n")).toContain("Run time");
-		expect(dialogs.findIndex((title) => title.includes("Recurrence"))).toBeLessThan(
+		expect(dialogs.findIndex((title) => title.includes("Task name"))).toBeLessThan(
 			dialogs.findIndex((title) => title.includes("Task instructions")),
 		);
-		expect(dialogs.join("\n")).not.toMatch(/mode|project path|model|permission|sandbox|settings/i);
+		expect(dialogs.findIndex((title) => title.includes("Task instructions"))).toBeLessThan(
+			dialogs.findIndex((title) => title.includes("Recurrence")),
+		);
+		expect(dialogs.join("\n")).not.toMatch(/project path|permission|sandbox|settings/i);
 	});
 
 	it("accepts the documented maximum interval", async () => {
@@ -165,6 +172,8 @@ describe("/schedule", () => {
 			resultPreview: "Submitted",
 			unread: true,
 			snapshot: {
+				name: "Submit report",
+				model: { provider: "openai", modelId: "gpt-test" },
 				instruction: "Submit report",
 				schedule: task().schedule,
 				timezone: "Asia/Shanghai",
@@ -224,6 +233,8 @@ describe("/schedule", () => {
 			reason: "overlap",
 			unread: false,
 			snapshot: {
+				name: "Submit report",
+				model: { provider: "openai", modelId: "gpt-test" },
 				instruction: "Submit report",
 				schedule: task().schedule,
 				timezone: "Asia/Shanghai",
@@ -261,6 +272,8 @@ describe("/schedule", () => {
 			resultPreview: "Submitted",
 			unread: false,
 			snapshot: {
+				name: "Submit report",
+				model: { provider: "openai", modelId: "gpt-test" },
 				instruction: task().instruction,
 				schedule: task().schedule,
 				timezone: task().timezone,
@@ -384,6 +397,8 @@ describe("/schedule", () => {
 				resultPreview: "Safe summary",
 				unread: false,
 				snapshot: {
+					name: "Submit report",
+					model: { provider: "openai", modelId: "gpt-test" },
 					instruction: "Original task instructions",
 					schedule: task().schedule,
 					timezone: task().timezone,

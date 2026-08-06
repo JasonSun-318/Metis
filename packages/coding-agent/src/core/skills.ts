@@ -80,6 +80,24 @@ export interface Skill {
 	disableModelInvocation: boolean;
 }
 
+export const SKILL_USAGE_CUSTOM_TYPE = "arcmind.skill_usage.v1" as const;
+
+export interface SkillUsageRecord {
+	readonly name: string;
+	readonly trigger: "command" | "read";
+}
+
+export function parseSkillUsageRecord(value: unknown): SkillUsageRecord | undefined {
+	if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
+	const record = value as Record<string, unknown>;
+	if (Object.keys(record).length !== 2) return undefined;
+	if (typeof record.name !== "string" || record.name.length < 1 || record.name.length > MAX_NAME_LENGTH) {
+		return undefined;
+	}
+	if (record.trigger !== "command" && record.trigger !== "read") return undefined;
+	return { name: record.name, trigger: record.trigger };
+}
+
 export interface LoadSkillsResult {
 	skills: Skill[];
 	diagnostics: ResourceDiagnostic[];
@@ -269,7 +287,13 @@ function loadSkillsFromDirInternal(
 			}
 			diagnostics.push(...result.diagnostics);
 		}
-	} catch {}
+	} catch (error: unknown) {
+		diagnostics.push({
+			type: "error",
+			path: dir,
+			message: `Could not read skills directory: ${error instanceof Error ? error.message : String(error)}`,
+		});
+	}
 
 	return { skills, diagnostics };
 }

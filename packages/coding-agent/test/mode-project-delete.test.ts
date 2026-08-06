@@ -35,6 +35,7 @@ import {
 	getSessionImageDir,
 	getSessionSubagentDir,
 	getSessionToolOutputDir,
+	getSessionUnreadStatePath,
 	moveSessionFileWithLease,
 	SessionManager,
 } from "../src/core/session-manager.ts";
@@ -109,6 +110,7 @@ function hooks(overrides: Partial<ModeProjectDeleteHooks> = {}): ModeProjectDele
 			return header;
 		},
 		getSessionDisplayMetadataPath,
+		getSessionUnreadStatePath,
 		getSessionImageDir,
 		getSessionToolOutputDir,
 		getSessionSubagentDir,
@@ -165,8 +167,10 @@ describe("mode project Trash", () => {
 		for (const session of [active, archived]) {
 			const manager = SessionManager.open(session.path);
 			manager.appendSessionInfo(session.target.sessionId);
+			manager.setSessionUnread(true);
 			manager.close();
 			owned.add(getSessionDisplayMetadataPath(session.path));
+			owned.add(getSessionUnreadStatePath(session.path));
 		}
 		const decoys: string[] = [];
 		for (const session of [active, archived]) {

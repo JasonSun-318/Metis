@@ -23,26 +23,28 @@ import {
 	type ScheduleTask,
 } from "./types.ts";
 
-const INDEX_VERSION = 1;
+const INDEX_VERSION = 2;
 const MAX_TASKS = 10_000;
 const MAX_EVENTS = 256;
 const MAX_INDEX_BYTES = 4 * 1024 * 1024;
 const MAX_RUN_BYTES = 256 * 1024;
 const MAX_INSTRUCTION_BYTES = 64 * 1024;
+const MAX_NAME_BYTES = 1024;
+const MAX_DESCRIPTION_BYTES = 64 * 1024;
 const MAX_PREVIEW_BYTES = 4 * 1024;
 const MAX_ERROR_BYTES = 4 * 1024;
 const ORPHAN_GRACE_MS = 10 * 60 * 1000;
 const TIMESTAMP_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
 
 export interface ScheduleIndex {
-	readonly version: 1;
+	readonly version: 2;
 	readonly revision: number;
 	readonly tasks: readonly ScheduleTask[];
 	readonly events: readonly ScheduleStoreEvent[];
 }
 
 export interface MutableScheduleIndex {
-	version: 1;
+	version: 2;
 	revision: number;
 	tasks: ScheduleTask[];
 	events: ScheduleStoreEvent[];
@@ -133,19 +135,66 @@ function parseRunReason(value: unknown): ScheduleRun["reason"] {
 }
 
 function parseTarget(value: unknown): ScheduleTask["target"] {
-	const input = record(value, "schedule target", ["kind", "workspace", "cwd"]);
+	const input = record(value, "schedule target", ["kind", "workspace", "cwd", "additionalWorkspaceCwd"]);
 	const cwd = string(input.cwd, "schedule target cwd", 32 * 1024);
 	if (!isAbsolute(cwd) || cwd.includes("\0")) throw new Error("Invalid schedule target cwd");
 	if (input.kind === "general" && (input.workspace === "task" || input.workspace === "fixed")) {
-		return { kind: "general", workspace: input.workspace, cwd };
+		if (input.workspace === "fixed") {
+			if (input.additionalWorkspaceCwd !== undefined)
+				throw new Error("Fixed schedule target has an additional workspace");
+			return { kind: "general", workspace: "fixed", cwd };
+		}
+		const additionalWorkspaceCwd =
+			input.additionalWorkspaceCwd === undefined
+				? undefined
+				: string(input.additionalWorkspaceCwd, "schedule target additional workspace cwd", 32 * 1024);
+		if (
+			additionalWorkspaceCwd !== undefined &&
+			(!isAbsolute(additionalWorkspaceCwd) || additionalWorkspaceCwd.includes("\0"))
+		) {
+			throw new Error("Invalid schedule target additional workspace cwd");
+		}
+		return {
+			kind: "general",
+			workspace: "task",
+			cwd,
+			...(additionalWorkspaceCwd === undefined ? {} : { additionalWorkspaceCwd }),
+		};
 	}
 	throw new Error("Invalid schedule target");
 }
 
-function parseSnapshot(value: unknown): ScheduleRun["snapshot"] {
-	const input = record(value, "schedule snapshot", ["instruction", "schedule", "timezone", "target"]);
+function parseModel(value: unknown): ScheduleTask["model"] {
+	const input = record(value, "schedule model", ["provider", "modelId"]);
 	return {
+		provider: nonemptyString(input.provider, "schedule model provider", 255),
+		modelId: nonemptyString(input.modelId, "schedule model id", 255),
+	};
+}
+
+function parseSnapshot(value: unknown, legacyTask?: ScheduleTask): ScheduleRun["snapshot"] {
+	const input = record(value, "schedule snapshot", [
+		"name",
+		"description",
+		"instruction",
+		"model",
+		"schedule",
+		"timezone",
+		"target",
+	]);
+	return {
+		name:
+			input.name === undefined
+				? (legacyTask?.title ?? "Scheduled task")
+				: nonemptyString(input.name, "schedule name", MAX_NAME_BYTES),
+		...optional(input.description, (item) => ({
+			description: string(item, "schedule description", MAX_DESCRIPTION_BYTES),
+		})),
 		instruction: nonemptyString(input.instruction, "schedule instruction", MAX_INSTRUCTION_BYTES),
+		model:
+			input.model === undefined
+				? (legacyTask?.model ?? { provider: "legacy", modelId: "unassigned" })
+				: parseModel(input.model),
 		schedule: validateScheduleSpec(input.schedule),
 		timezone: validateScheduleTimezone(input.timezone),
 		target: parseTarget(input.target),
@@ -187,11 +236,13 @@ function parseRunSummary(value: unknown): ScheduleRunSummary {
 	};
 }
 
-function parseTask(value: unknown): ScheduleTask {
+function parseTask(value: unknown, legacy = false): ScheduleTask {
 	const input = record(value, "schedule task", [
 		"id",
 		"title",
+		"description",
 		"instruction",
+		"model",
 		"schedule",
 		"timezone",
 		"target",
@@ -204,6 +255,8 @@ function parseTask(value: unknown): ScheduleTask {
 		"lastRun",
 		"pauseReason",
 		"deletingSince",
+		"deletionDeleteSessions",
+		"deletionPreviousState",
 		"nextRunSequence",
 	]);
 	if (typeof input.status !== "string" || !TASK_STATUSES.has(input.status))
@@ -212,30 +265,71 @@ function parseTask(value: unknown): ScheduleTask {
 		throw new Error("Invalid schedule task title");
 	}
 	if (input.nextRunAt !== null && input.nextRunAt === undefined) throw new Error("Invalid schedule next run time");
-	if (input.pauseReason !== undefined && input.pauseReason !== "user" && input.pauseReason !== "workspace_missing") {
+	if (
+		input.pauseReason !== undefined &&
+		input.pauseReason !== "user" &&
+		input.pauseReason !== "workspace_missing" &&
+		input.pauseReason !== "model_unavailable"
+	) {
 		throw new Error("Invalid schedule pause reason");
 	}
 	return {
 		id: id(input.id, "schedule task id"),
 		title: input.title,
+		...optional(input.description, (item) => ({
+			description: string(item, "schedule description", MAX_DESCRIPTION_BYTES),
+		})),
 		instruction: nonemptyString(input.instruction, "schedule instruction", MAX_INSTRUCTION_BYTES),
+		model:
+			input.model === undefined && legacy ? { provider: "legacy", modelId: "unassigned" } : parseModel(input.model),
 		schedule: validateScheduleSpec(input.schedule),
 		timezone: validateScheduleTimezone(input.timezone),
 		target: parseTarget(input.target),
-		status: input.status as ScheduleTask["status"],
+		status: legacy ? "paused" : (input.status as ScheduleTask["status"]),
 		createdAt: timestamp(input.createdAt, "schedule task creation time"),
 		updatedAt: timestamp(input.updatedAt, "schedule task update time"),
-		nextRunAt: input.nextRunAt === null ? null : timestamp(input.nextRunAt, "schedule next run time"),
-		...optional(input.activeRunId, (item) => ({ activeRunId: id(item, "active schedule run id") })),
+		nextRunAt: legacy ? null : input.nextRunAt === null ? null : timestamp(input.nextRunAt, "schedule next run time"),
+		...(legacy ? {} : optional(input.activeRunId, (item) => ({ activeRunId: id(item, "active schedule run id") }))),
 		unreadCount: integer(input.unreadCount, "schedule unread count"),
 		...optional(input.lastRun, (item) => ({ lastRun: parseRunSummary(item) })),
-		...(input.pauseReason === undefined ? {} : { pauseReason: input.pauseReason }),
+		...(legacy
+			? { pauseReason: "model_unavailable" as const }
+			: input.pauseReason === undefined
+				? {}
+				: { pauseReason: input.pauseReason }),
 		...optional(input.deletingSince, (item) => ({ deletingSince: timestamp(item, "schedule deletion time") })),
+		...optional(input.deletionDeleteSessions, (item) => ({
+			deletionDeleteSessions: boolean(item, "schedule delete sessions flag"),
+		})),
+		...optional(input.deletionPreviousState, (item) => {
+			const previous = record(item, "schedule deletion previous state", ["status", "nextRunAt", "pauseReason"]);
+			if (previous.status !== "active" && previous.status !== "paused" && previous.status !== "completed") {
+				throw new Error("Invalid schedule deletion previous status");
+			}
+			if (
+				previous.pauseReason !== undefined &&
+				previous.pauseReason !== "user" &&
+				previous.pauseReason !== "workspace_missing" &&
+				previous.pauseReason !== "model_unavailable"
+			) {
+				throw new Error("Invalid schedule deletion previous pause reason");
+			}
+			return {
+				deletionPreviousState: {
+					status: previous.status,
+					nextRunAt:
+						previous.nextRunAt === null
+							? null
+							: timestamp(previous.nextRunAt, "schedule deletion previous next run time"),
+					...(previous.pauseReason === undefined ? {} : { pauseReason: previous.pauseReason }),
+				},
+			};
+		}),
 		nextRunSequence: integer(input.nextRunSequence, "schedule next run sequence", 1),
 	};
 }
 
-function parseRun(value: unknown): ScheduleRun {
+function parseRun(value: unknown, legacyTask?: ScheduleTask): ScheduleRun {
 	const input = record(value, "schedule run", [
 		"id",
 		"taskId",
@@ -277,7 +371,7 @@ function parseRun(value: unknown): ScheduleRun {
 		...optional(input.reason, (item) => ({ reason: parseRunReason(item) })),
 		...optional(input.skippedCount, (item) => ({ skippedCount: integer(item, "schedule skipped count") })),
 		unread: boolean(input.unread, "schedule unread state"),
-		snapshot: parseSnapshot(input.snapshot),
+		snapshot: parseSnapshot(input.snapshot, legacyTask),
 	};
 }
 
@@ -305,11 +399,12 @@ function parseIndexText(contents: string): MutableScheduleIndex {
 	}
 	try {
 		const input = record(parsed, "schedule index", ["version", "revision", "tasks", "events"]);
-		if (input.version !== INDEX_VERSION) throw new Error("Unsupported schedule index version");
+		if (input.version !== 1 && input.version !== INDEX_VERSION) throw new Error("Unsupported schedule index version");
 		if (!Array.isArray(input.tasks) || input.tasks.length > MAX_TASKS) throw new Error("Invalid schedule task list");
 		if (!Array.isArray(input.events) || input.events.length > MAX_EVENTS)
 			throw new Error("Invalid schedule event list");
-		const tasks = input.tasks.map(parseTask);
+		const legacy = input.version === 1;
+		const tasks = input.tasks.map((task) => parseTask(task, legacy));
 		if (new Set(tasks.map(({ id: taskId }) => taskId)).size !== tasks.length)
 			throw new Error("Duplicate schedule task id");
 		const events = input.events.map(parseEvent);
@@ -317,7 +412,7 @@ function parseIndexText(contents: string): MutableScheduleIndex {
 			if (events[index].sequence <= events[index - 1].sequence)
 				throw new Error("Schedule event sequence is not monotonic");
 		}
-		return { version: 1, revision: integer(input.revision, "schedule revision"), tasks, events };
+		return { version: 2, revision: integer(input.revision, "schedule revision"), tasks, events };
 	} catch (error) {
 		if (error instanceof ScheduleError) throw error;
 		throw storeCorrupt(error instanceof Error ? error.message : "Schedule index is invalid", error);
@@ -500,7 +595,7 @@ export class ScheduleStore {
 			if (JSON.stringify(draft.events) !== originalEvents)
 				throw new TypeError("Schedule events must be appended through files.appendEvent()");
 			if (draft.tasks.length > MAX_TASKS) throw new ScheduleError("STORE_LIMIT", "Too many scheduled tasks");
-			const tasks = draft.tasks.map(parseTask);
+			const tasks = draft.tasks.map((task) => parseTask(task));
 			if (new Set(tasks.map(({ id: taskId }) => taskId)).size !== tasks.length) {
 				throw storeCorrupt("Duplicate schedule task id");
 			}
@@ -523,7 +618,7 @@ export class ScheduleStore {
 					}),
 				),
 			].slice(-MAX_EVENTS);
-			const next: MutableScheduleIndex = { version: 1, revision, tasks, events };
+			const next: MutableScheduleIndex = { version: 2, revision, tasks, events };
 			const contents = `${JSON.stringify(next)}\n`;
 			if (Buffer.byteLength(contents, "utf8") > MAX_INDEX_BYTES) {
 				throw new ScheduleError("STORE_LIMIT", "Schedule index is too large");
@@ -589,7 +684,7 @@ export class ScheduleStore {
 				try {
 					createFileAtomicallySync(
 						this.indexPath,
-						`${JSON.stringify({ version: 1, revision: 0, tasks: [], events: [] })}\n`,
+						`${JSON.stringify({ version: 2, revision: 0, tasks: [], events: [] })}\n`,
 						{ mode: 0o600 },
 					);
 				} catch (error) {
@@ -641,7 +736,13 @@ export class ScheduleStore {
 				maxBytes: MAX_RUN_BYTES,
 			});
 			if (contents === undefined) throw new Error("Schedule run file is missing");
-			const run = parseRun(JSON.parse(contents));
+			const raw = JSON.parse(contents) as unknown;
+			const taskIdValue = isRecord(raw) ? raw.taskId : undefined;
+			const legacyTask =
+				typeof taskIdValue === "string"
+					? this.readIndexFile().tasks.find(({ id: candidate }) => candidate === taskIdValue)
+					: undefined;
+			const run = parseRun(raw, legacyTask);
 			const match = /^(\d{16})_(.+)\.json$/.exec(name);
 			if (!match || run.taskId !== taskId || run.sequence !== Number(match[1]) || run.id !== match[2]) {
 				throw new Error("Schedule run identity does not match its file");

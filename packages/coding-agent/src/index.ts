@@ -344,6 +344,7 @@ export {
 	getLatestCompactionEntry,
 	getSessionDisplayMetadataPath,
 	getSessionSubagentDir,
+	getSessionUnreadStatePath,
 	type ModelChangeEntry,
 	migrateSessionDisplayMetadata,
 	migrateSessionEntries,
@@ -353,6 +354,7 @@ export {
 	parseSessionEntries,
 	type RuntimeControlPayload,
 	readSessionDisplayMetadata,
+	readSessionUnreadState,
 	type SessionContext,
 	type SessionDisplayMetadata,
 	type SessionEntry,
@@ -395,8 +397,11 @@ export {
 	type LoadSkillsResult,
 	loadSkills,
 	loadSkillsFromDir,
+	parseSkillUsageRecord,
+	SKILL_USAGE_CUSTOM_TYPE,
 	type Skill,
 	type SkillFrontmatter,
+	type SkillUsageRecord,
 } from "./core/skills.ts";
 export { createSyntheticSourceInfo } from "./core/source-info.ts";
 export {
@@ -414,10 +419,12 @@ export {
 	type SubagentDisplayConfig,
 	type SubagentMailboxEvent,
 	type SubagentMailboxTerminalEvent,
+	type SubagentManagerEvent,
 	type SubagentStatus,
 	type SubagentSummary,
 	type SubagentTombstone,
 	type SubagentUsage,
+	type SubagentVisibleActivity,
 } from "./core/subagents/types.ts";
 export {
 	canUseUltra,

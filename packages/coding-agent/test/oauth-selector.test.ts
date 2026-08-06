@@ -4,7 +4,11 @@ import { AuthStorage } from "../src/core/auth-storage.ts";
 import { KeybindingsManager } from "../src/core/keybindings.ts";
 import { BUILT_IN_PROVIDER_DISPLAY_NAMES } from "../src/core/provider-display-names.ts";
 import { OAuthSelectorComponent } from "../src/modes/interactive/components/oauth-selector.ts";
-import { getWebSearchLoginProviderOptions, isApiKeyLoginProvider } from "../src/modes/interactive/interactive-mode.ts";
+import {
+	getLoginProviderCompletionOptions,
+	getWebSearchLoginProviderOptions,
+	isApiKeyLoginProvider,
+} from "../src/modes/interactive/provider-auth-options.ts";
 import { initTheme } from "../src/modes/interactive/theme/theme.ts";
 import { stripAnsi } from "../src/utils/ansi.ts";
 
@@ -46,6 +50,15 @@ describe("OAuthSelectorComponent", () => {
 			{ id: "web-search:serpapi", name: "SerpApi", authType: "api_key" },
 			{ id: "web-search:tavily", name: "Tavily", authType: "api_key" },
 		]);
+	});
+
+	it("merges provider login methods into one completion entry", () => {
+		expect(
+			getLoginProviderCompletionOptions([
+				{ id: "anthropic", name: "Anthropic", authType: "api_key" },
+				{ id: "anthropic", name: "Anthropic", authType: "oauth" },
+			]),
+		).toEqual([{ id: "anthropic", name: "Anthropic", authTypes: ["oauth", "api_key"] }]);
 	});
 
 	it("shows stored OAuth auth distinctly in the API key selector", () => {

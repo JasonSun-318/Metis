@@ -70,6 +70,7 @@ interface SessionHeaderView {
 export interface ModeProjectDeleteHooks {
 	readonly readSessionHeader: (path: string) => SessionHeaderView;
 	readonly getSessionDisplayMetadataPath: (path: string) => string;
+	readonly getSessionUnreadStatePath: (path: string) => string;
 	readonly getSessionImageDir: (path: string) => string;
 	readonly getSessionToolOutputDir: (path: string) => string;
 	readonly getSessionSubagentDir: (agentDir: string, sessionId: string) => string;
@@ -451,6 +452,7 @@ async function collectTargets(
 		const archivedPath = join(roots.sessionsRoot, ".archive", target.relativePath);
 		for (const counterpart of [activePath, archivedPath]) {
 			addOwnedTarget(targets, roots.agentDir, hooks.getSessionDisplayMetadataPath(counterpart));
+			addOwnedTarget(targets, roots.agentDir, hooks.getSessionUnreadStatePath(counterpart));
 			addOwnedTarget(targets, roots.agentDir, hooks.getSessionImageDir(counterpart), "directory");
 			addOwnedTarget(targets, roots.agentDir, hooks.getSessionToolOutputDir(counterpart), "directory");
 			for (const artifact of getOwnedSessionJournalArtifacts(counterpart)) {

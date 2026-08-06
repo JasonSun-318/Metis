@@ -7,6 +7,7 @@ import type { ResourceLoader } from "../src/core/resource-loader.ts";
 import { createAgentSession } from "../src/core/sdk.ts";
 import { SessionManager } from "../src/core/session-manager.ts";
 import { createSyntheticSourceInfo } from "../src/core/source-info.ts";
+import { createUnattendedExecutionProfile } from "../src/core/unattended-execution.ts";
 
 describe("createAgentSession skills option", () => {
 	let tempDir: string;
@@ -74,7 +75,7 @@ This is a test skill.
 		expect(session.resourceLoader.getSkills().diagnostics).toEqual([]);
 	});
 
-	it("should use provided skills when resource loader supplies them", async () => {
+	it("should use provided skills in an unattended session", async () => {
 		const customSkill = {
 			name: "custom-skill",
 			description: "A custom skill",
@@ -101,6 +102,10 @@ This is a test skill.
 			agentDir: tempDir,
 			sessionManager: SessionManager.inMemory(tempDir),
 			resourceLoader,
+			unattendedExecution: createUnattendedExecutionProfile({
+				workspaceRoots: [tempDir],
+				bashOperations: { exec: async () => ({ exitCode: 0 }) },
+			}),
 		});
 
 		expect(session.resourceLoader.getSkills().skills).toEqual([customSkill]);

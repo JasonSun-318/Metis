@@ -189,6 +189,74 @@ describe("AgentSession prompt characterization", () => {
 		expect(expandedPrompt).toContain('<skill name="test" location="');
 		expect(expandedPrompt).toContain("Use the skill body.");
 		expect(expandedPrompt).toContain("explain this");
+		expect(
+			harness.sessionManager
+				.getEntries()
+				.filter((entry) => entry.type === "custom" && entry.customType === "arcmind.skill_usage.v1"),
+		).toEqual([
+			expect.objectContaining({
+				data: { name: "test", trigger: "command" },
+			}),
+		]);
+	});
+
+	it("records only successful reads of registered Skill files", async () => {
+		const tempDir = join(tmpdir(), `arcmind-skill-read-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+		const skillDir = join(tempDir, "skills", "test");
+		mkdirSync(skillDir, { recursive: true });
+		tempDirs.push(tempDir);
+		const skillPath = join(skillDir, "SKILL.md");
+		const unrelatedPath = join(tempDir, "unrelated", "SKILL.md");
+		mkdirSync(join(tempDir, "unrelated"), { recursive: true });
+		writeFileSync(skillPath, "---\nname: test\ndescription: Test Skill\n---\n\nUse it.");
+		writeFileSync(unrelatedPath, "# Not registered");
+		const resourceLoader = {
+			...createTestResourceLoader(),
+			getSkills: () => ({
+				skills: [
+					{
+						name: "test",
+						description: "Test Skill",
+						filePath: skillPath,
+						disableModelInvocation: false,
+						baseDir: skillDir,
+						sourceInfo: createSyntheticSourceInfo(skillPath, {
+							source: "local",
+							scope: "project",
+							origin: "top-level",
+							baseDir: skillDir,
+						}),
+					},
+				],
+				diagnostics: [],
+			}),
+		};
+		const harness = await createHarness({ resourceLoader });
+		harnesses.push(harness);
+		harness.setResponses([
+			fauxAssistantMessage(fauxToolCall("read", { path: unrelatedPath }), { stopReason: "toolUse" }),
+			() => {
+				rmSync(skillPath);
+				return fauxAssistantMessage(fauxToolCall("read", { path: skillPath }), { stopReason: "toolUse" });
+			},
+			() => {
+				writeFileSync(skillPath, "---\nname: test\ndescription: Test Skill\n---\n\nUse it.");
+				return fauxAssistantMessage(fauxToolCall("read", { path: skillPath }), { stopReason: "toolUse" });
+			},
+			fauxAssistantMessage("done"),
+		]);
+
+		await harness.session.prompt("Use the Skill");
+
+		expect(
+			harness.sessionManager
+				.getEntries()
+				.filter((entry) => entry.type === "custom" && entry.customType === "arcmind.skill_usage.v1"),
+		).toEqual([
+			expect.objectContaining({
+				data: { name: "test", trigger: "read" },
+			}),
+		]);
 	});
 
 	it("expands prompt templates before sending the prompt", async () => {

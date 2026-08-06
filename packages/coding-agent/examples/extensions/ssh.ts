@@ -11,6 +11,11 @@
  * Requirements:
  *   - SSH key-based auth (no password prompts)
  *   - bash on remote
+ *
+ * Security:
+ *   - Model-generated bash commands execute on the remote host with the SSH account's permissions.
+ *   - Use a dedicated least-privilege account and connect only to a host you trust.
+ *   - This example is a remote execution adapter, not a sandbox.
  */
 
 import { spawn } from "node:child_process";

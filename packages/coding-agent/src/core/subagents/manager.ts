@@ -913,8 +913,17 @@ export class SubagentManager implements SubagentManagerApi {
 				resolveCompletion,
 				unsubscribe: () => undefined,
 			};
-			hot.unsubscribe = runtime.session.subscribe((event) => {
+			const childSession = runtime.session;
+			hot.unsubscribe = childSession.subscribe((event) => {
 				if (event.type === "agent_settled") hot.resolveSettled();
+				if (event.type === "message_start" || event.type === "message_update" || event.type === "message_end") {
+					this.emitEvent({
+						type: "activity",
+						agentId,
+						...(childSession.activeDurableTurnId ? { turnId: childSession.activeDurableTurnId } : {}),
+						event,
+					});
+				}
 			});
 			this.hot.set(agentId, hot);
 			markReady();
@@ -986,6 +995,7 @@ export class SubagentManager implements SubagentManagerApi {
 				cacheRead: stats.tokens.cacheRead,
 				cacheWrite: stats.tokens.cacheWrite,
 				elapsedMs: Math.max(0, this.now() - hot.startedAt),
+				toolCalls: stats.toolCalls,
 				...(Number.isFinite(stats.cost) ? { cost: stats.cost } : {}),
 			};
 			const finalSummary = assistantText(runtime.session);

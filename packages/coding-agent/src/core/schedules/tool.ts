@@ -64,6 +64,8 @@ const TaskCursor = Type.String({
 export const ScheduleToolInputSchema = Type.Union([
 	StrictObject({
 		action: Type.Literal("create"),
+		name: Type.String({ description: "定时任务在桌面端显示的名称。", minLength: 1, maxLength: 256 }),
+		description: Type.Optional(Type.String({ description: "桌面端显示的可选说明。", maxLength: 64 * 1024 })),
 		instruction: Type.String({
 			description: "每次执行时需要完成的完整任务说明。不得依赖当前对话中的省略信息。",
 			minLength: 1,
@@ -76,6 +78,8 @@ export const ScheduleToolInputSchema = Type.Union([
 	StrictObject({
 		action: Type.Literal("update"),
 		taskId: TaskId,
+		name: Type.Optional(Type.String({ description: "定时任务在桌面端显示的名称。", minLength: 1, maxLength: 256 })),
+		description: Type.Optional(Type.String({ description: "桌面端显示的可选说明。", maxLength: 64 * 1024 })),
 		instruction: Type.Optional(
 			Type.String({
 				description: "每次执行时需要完成的完整任务说明。不得依赖当前对话中的省略信息。",
@@ -127,7 +131,8 @@ export function isScheduleSessionEligible(manager: Pick<SessionManager, "getHead
 function compactTaskView(task: ScheduleTask) {
 	return {
 		id: task.id,
-		title: task.title,
+		name: task.title,
+		description: task.description,
 		status: task.status,
 		schedule: task.schedule,
 		nextRunAt: task.nextRunAt,
@@ -146,6 +151,7 @@ async function detailTaskView(manager: ScheduleManager, task: ScheduleTask) {
 	return {
 		...compactTaskView(task),
 		instruction: task.instruction,
+		model: task.model,
 		timezone: task.timezone,
 		...(lastRun
 			? {
@@ -201,9 +207,14 @@ export function installScheduleHost(input: {
 							cwd: manager.getCwd(),
 						});
 						if (!target) return output("定时任务只能在 Chat 中创建。", true);
+						const model = input.session.model;
+						if (!model) return output("当前会话尚未配置模型，无法创建定时任务。", true);
 						const task = await input.manager.create({
 							id: randomUUID(),
+							name: params.name,
+							description: params.description,
 							instruction: params.instruction,
+							model: { provider: model.provider, modelId: model.id },
 							schedule: params.schedule,
 							timezone: input.timezone,
 							target,
@@ -217,12 +228,19 @@ export function installScheduleHost(input: {
 					case "get":
 						return output(await detailTaskView(input.manager, await input.manager.get(params.taskId)));
 					case "update": {
-						if (params.instruction === undefined && params.schedule === undefined) {
-							return output("更新定时任务时至少需要提供任务内容或时间周期。", true);
+						if (
+							params.name === undefined &&
+							params.description === undefined &&
+							params.instruction === undefined &&
+							params.schedule === undefined
+						) {
+							return output("更新定时任务时至少需要提供一个字段。", true);
 						}
 						return output(
 							compactTaskView(
 								await input.manager.update(params.taskId, {
+									name: params.name,
+									description: params.description,
 									instruction: params.instruction,
 									schedule: params.schedule,
 								}),
@@ -234,7 +252,7 @@ export function installScheduleHost(input: {
 					case "resume":
 						return output(compactTaskView(await input.manager.resume(params.taskId)));
 					case "delete":
-						return output(await input.manager.delete(params.taskId));
+						return output(await input.manager.delete(params.taskId, { deleteSessions: false }));
 					case "run_now":
 						return output(runView(await input.manager.runNow(params.taskId, randomUUID())));
 				}

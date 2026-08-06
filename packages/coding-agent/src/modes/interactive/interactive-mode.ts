@@ -8,14 +8,13 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import type { AgentMessage } from "@arcmind/agent-core";
-import {
-	type AssistantMessage,
-	getProviders,
-	type ImageContent,
-	type Message,
-	type Model,
-	type OAuthProviderId,
-	type OAuthSelectPrompt,
+import type {
+	AssistantMessage,
+	ImageContent,
+	Message,
+	Model,
+	OAuthProviderId,
+	OAuthSelectPrompt,
 } from "@arcmind/ai/compat";
 import type {
 	AutocompleteItem,
@@ -93,7 +92,6 @@ import {
 	type PermissionApprovalRequest,
 } from "../../core/permission-policy.ts";
 import { parseCommandArgs } from "../../core/prompt-templates.ts";
-import { BUILT_IN_PROVIDER_DISPLAY_NAMES } from "../../core/provider-display-names.ts";
 import type { ResourceDiagnostic } from "../../core/resource-loader.ts";
 import { readScheduledSessionView } from "../../core/schedules/executor.ts";
 import type { ScheduleManager } from "../../core/schedules/manager.ts";
@@ -128,7 +126,6 @@ import type { TruncationResult } from "../../core/tools/truncate.ts";
 import { hasTrustRequiringProjectResources, ProjectTrustStore } from "../../core/trust-manager.ts";
 import {
 	WEB_SEARCH_PROVIDER_INFO,
-	WEB_SEARCH_PROVIDERS,
 	webSearchCredentialId,
 	webSearchProviderFromCredentialId,
 } from "../../core/web-search-config.ts";
@@ -154,11 +151,7 @@ import { FooterComponent, formatTokens } from "./components/footer.ts";
 import { formatKeyText, keyDisplayText, keyHint, keyText, rawKeyHint } from "./components/keybinding-hints.ts";
 import { LoginDialogComponent } from "./components/login-dialog.ts";
 import { ModelSelectorComponent } from "./components/model-selector.ts";
-import {
-	type AuthSelectorProvider,
-	formatAuthSelectorProviderType,
-	OAuthSelectorComponent,
-} from "./components/oauth-selector.ts";
+import { type AuthSelectorProvider, OAuthSelectorComponent } from "./components/oauth-selector.ts";
 import { PermissionsSelectorComponent } from "./components/permissions-selector.ts";
 import { ScopedModelsSelectorComponent } from "./components/scoped-models-selector.ts";
 import { SessionSelectorComponent } from "./components/session-selector.ts";
@@ -178,6 +171,14 @@ import { TrustSelectorComponent } from "./components/trust-selector.ts";
 import { UserMessageComponent } from "./components/user-message.ts";
 import { UserMessageSelectorComponent } from "./components/user-message-selector.ts";
 import { getModelSearchText } from "./model-search.ts";
+import {
+	findLoginProviderOptions,
+	formatLoginProviderCompletionDescription,
+	getLoginProviderCompletionOptions,
+	getLoginProviderSearchText,
+	listLoginProviderOptions,
+	listLogoutProviderOptions,
+} from "./provider-auth-options.ts";
 import {
 	getAvailableThemes,
 	getAvailableThemesWithPaths,
@@ -426,38 +427,6 @@ function hasDefaultModelProvider(providerId: string): providerId is keyof typeof
 	return providerId in defaultModelPerProvider;
 }
 
-const BUILT_IN_MODEL_PROVIDERS = new Set<string>(getProviders());
-
-export function isApiKeyLoginProvider(
-	providerId: string,
-	oauthProviderIds: ReadonlySet<string>,
-	builtInProviderIds: ReadonlySet<string> = BUILT_IN_MODEL_PROVIDERS,
-): boolean {
-	if (BUILT_IN_PROVIDER_DISPLAY_NAMES[providerId]) {
-		return true;
-	}
-	if (builtInProviderIds.has(providerId)) {
-		return false;
-	}
-	return !oauthProviderIds.has(providerId);
-}
-
-export function getWebSearchLoginProviderOptions(): AuthSelectorProvider[] {
-	return WEB_SEARCH_PROVIDERS.map((provider) => ({
-		id: webSearchCredentialId(provider),
-		name: WEB_SEARCH_PROVIDER_INFO[provider].label,
-		authType: "api_key" as const,
-	})).sort((left, right) => left.name.localeCompare(right.name));
-}
-
-type LoginProviderCompletionOption = {
-	id: string;
-	name: string;
-	authTypes: AuthSelectorProvider["authType"][];
-};
-
-const AUTH_TYPE_ORDER = { oauth: 0, api_key: 1 } satisfies Record<AuthSelectorProvider["authType"], number>;
-
 function createFuzzyAutocompleteItems<T>(
 	items: T[],
 	prefix: string,
@@ -467,40 +436,6 @@ function createFuzzyAutocompleteItems<T>(
 	const filtered = fuzzyFilter(items, prefix, getSearchText);
 	if (filtered.length === 0) return null;
 	return filtered.map(toAutocompleteItem);
-}
-
-function getLoginProviderCompletionOptions(
-	providerOptions: readonly AuthSelectorProvider[],
-): LoginProviderCompletionOption[] {
-	const byId = new Map<string, LoginProviderCompletionOption>();
-	for (const provider of providerOptions) {
-		const existing = byId.get(provider.id);
-		if (existing) {
-			if (!existing.authTypes.includes(provider.authType)) {
-				existing.authTypes.push(provider.authType);
-				existing.authTypes.sort((a, b) => AUTH_TYPE_ORDER[a] - AUTH_TYPE_ORDER[b]);
-			}
-			continue;
-		}
-		byId.set(provider.id, {
-			id: provider.id,
-			name: provider.name,
-			authTypes: [provider.authType],
-		});
-	}
-	return Array.from(byId.values()).sort((a, b) => a.name.localeCompare(b.name));
-}
-
-function getLoginProviderSearchText(provider: LoginProviderCompletionOption): string {
-	const authTypes = provider.authTypes
-		.map((authType) => `${authType} ${formatAuthSelectorProviderType(authType)}`)
-		.join(" ");
-	return `${provider.id} ${provider.name} ${authTypes}`;
-}
-
-function formatLoginProviderCompletionDescription(provider: LoginProviderCompletionOption): string {
-	const authTypes = provider.authTypes.map(formatAuthSelectorProviderType).join("/");
-	return provider.name === provider.id ? authTypes : `${provider.name} · ${authTypes}`;
 }
 
 /**
@@ -5233,66 +5168,16 @@ export class InteractiveMode {
 		}
 	}
 
-	private getLoginProviderOptions(authType?: "oauth" | "api_key"): AuthSelectorProvider[] {
-		const authStorage = this.session.modelRegistry.authStorage;
-		const oauthProviders = authStorage.getOAuthProviders();
-		const oauthProviderIds = new Set(oauthProviders.map((provider) => provider.id));
-		const options: AuthSelectorProvider[] = oauthProviders.map((provider) => ({
-			id: provider.id,
-			name: provider.name,
-			authType: "oauth",
-		}));
-
-		const modelProviders = new Set(this.session.modelRegistry.getAll().map((model) => model.provider));
-		for (const providerId of modelProviders) {
-			if (!isApiKeyLoginProvider(providerId, oauthProviderIds)) {
-				continue;
-			}
-			options.push({
-				id: providerId,
-				name: this.session.modelRegistry.getProviderDisplayName(providerId),
-				authType: "api_key",
-			});
-		}
-		options.push(...getWebSearchLoginProviderOptions());
-
-		const filteredOptions = authType ? options.filter((option) => option.authType === authType) : options;
-		return filteredOptions.sort((a, b) => a.name.localeCompare(b.name));
+	private getLoginProviderOptions(authType?: AuthSelectorProvider["authType"]): AuthSelectorProvider[] {
+		return listLoginProviderOptions(this.session.modelRegistry, authType);
 	}
 
 	private getLogoutProviderOptions(): AuthSelectorProvider[] {
-		const authStorage = this.session.modelRegistry.authStorage;
-		const options: AuthSelectorProvider[] = [];
-
-		for (const providerId of authStorage.list()) {
-			const credential = authStorage.get(providerId);
-			if (!credential || credential.type === "mcp_oauth" || credential.type === "mcp_secret") {
-				continue;
-			}
-			const searchProvider = webSearchProviderFromCredentialId(providerId);
-			options.push({
-				id: providerId,
-				name: searchProvider
-					? WEB_SEARCH_PROVIDER_INFO[searchProvider].label
-					: this.session.modelRegistry.getProviderDisplayName(providerId),
-				authType: credential.type,
-			});
-		}
-
-		return options.sort((a, b) => a.name.localeCompare(b.name));
+		return listLogoutProviderOptions(this.session.modelRegistry);
 	}
 
 	private findLoginProviderOptions(providerRef: string): AuthSelectorProvider[] {
-		const normalizedProviderRef = providerRef.trim().toLowerCase();
-		if (!normalizedProviderRef) {
-			return [];
-		}
-
-		return this.getLoginProviderOptions().filter(
-			(provider) =>
-				provider.id.toLowerCase() === normalizedProviderRef ||
-				provider.name.toLowerCase() === normalizedProviderRef,
-		);
+		return findLoginProviderOptions(this.session.modelRegistry, providerRef);
 	}
 
 	private async handleLoginCommand(providerRef?: string): Promise<void> {
@@ -5911,10 +5796,18 @@ export class InteractiveMode {
 	}
 
 	private async createScheduleTask(manager: ScheduleManager): Promise<void> {
-		const schedule = await this.askScheduleSpec();
-		if (!schedule) return;
+		const name = (await this.showExtensionInput("Task name"))?.trim();
+		if (!name) return;
+		const description = (await this.showExtensionInput("Description (optional)"))?.trim() || undefined;
 		const instruction = (await this.showExtensionEditor("Task instructions"))?.trim();
 		if (!instruction) return;
+		const schedule = await this.askScheduleSpec();
+		if (!schedule) return;
+		const model = this.session.model;
+		if (!model) {
+			this.showWarning("Configure a model before creating a scheduled task");
+			return;
+		}
 		const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 		const target = resolveScheduleCreateTarget({
 			mode: this.sessionManager.getMode(),
@@ -5926,7 +5819,7 @@ export class InteractiveMode {
 			return;
 		}
 		const confirmation = await this.showExtensionSelector(
-			`Create task\nInstructions: ${instruction}\nSchedule: ${formatScheduleSpec(
+			`Create task\nName: ${name}\nInstructions: ${instruction}\nModel: ${model.provider}/${model.id}\nSchedule: ${formatScheduleSpec(
 				schedule.kind === "interval"
 					? { ...schedule, startAt: `${schedule.startDate} ${schedule.startTime}` }
 					: schedule,
@@ -5936,7 +5829,10 @@ export class InteractiveMode {
 		if (confirmation !== "Create") return;
 		const task = await manager.create({
 			id: randomUUID(),
+			name,
+			description,
 			instruction,
+			model: { provider: model.provider, modelId: model.id },
 			schedule,
 			timezone,
 			target,
@@ -6035,12 +5931,12 @@ export class InteractiveMode {
 				await manager.runNow(task.id, randomUUID());
 				this.showStatus(`Scheduled task “${task.title}” was queued to run`);
 			} else if (action === "Delete") {
-				const confirmed = await this.showExtensionSelector(
-					`Delete “${task.title}”?\nThis removes all execution history, execution sessions, and the task-owned directory. It does not delete a user-selected directory.`,
-					["Delete"],
+				const choice = await this.showExtensionSelector(
+					`Delete “${task.title}”?\nThe task-owned directory is always removed. A user-selected project is never changed.`,
+					["Delete task only", "Delete task and generated sessions"],
 				);
-				if (confirmed === "Delete") {
-					await manager.delete(task.id);
+				if (choice) {
+					await manager.delete(task.id, { deleteSessions: choice === "Delete task and generated sessions" });
 					this.showStatus(`Deleted scheduled task “${task.title}”`);
 					return;
 				}

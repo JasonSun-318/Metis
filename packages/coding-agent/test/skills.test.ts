@@ -1,4 +1,5 @@
-import { homedir } from "os";
+import { mkdtempSync, rmSync, writeFileSync } from "fs";
+import { homedir, tmpdir } from "os";
 import { join, resolve } from "path";
 import { describe, expect, it } from "vitest";
 import type { ResourceDiagnostic } from "../src/core/diagnostics.ts";
@@ -28,6 +29,39 @@ function createTestSkill(options: {
 
 describe("skills", () => {
 	describe("loadSkillsFromDir", () => {
+		it("keeps a missing optional directory silent", () => {
+			const root = mkdtempSync(join(tmpdir(), "arcmind-skills-missing-"));
+			try {
+				expect(loadSkillsFromDir({ dir: join(root, "missing"), source: "test" })).toEqual({
+					skills: [],
+					diagnostics: [],
+				});
+			} finally {
+				rmSync(root, { recursive: true, force: true });
+			}
+		});
+
+		it("reports an existing path that cannot be enumerated", () => {
+			const root = mkdtempSync(join(tmpdir(), "arcmind-skills-read-"));
+			try {
+				const filePath = join(root, "not-a-directory");
+				writeFileSync(filePath, "not a directory");
+
+				const result = loadSkillsFromDir({ dir: filePath, source: "test" });
+
+				expect(result.skills).toEqual([]);
+				expect(result.diagnostics).toEqual([
+					{
+						type: "error",
+						path: filePath,
+						message: expect.stringContaining("Could not read skills directory"),
+					},
+				]);
+			} finally {
+				rmSync(root, { recursive: true, force: true });
+			}
+		});
+
 		it("should load a valid skill", () => {
 			const { skills, diagnostics } = loadSkillsFromDir({
 				dir: join(fixturesDir, "valid-skill"),

@@ -11,6 +11,7 @@ function task(id = "task-created"): ScheduleTask {
 		id,
 		title: "生成摘要",
 		instruction: "生成摘要",
+		model: { provider: "openai", modelId: "gpt-test" },
 		schedule: { kind: "daily", time: "09:00" },
 		timezone: "Asia/Shanghai",
 		target: { kind: "general", workspace: "fixed", cwd: "/project" },
@@ -56,7 +57,9 @@ function fakeManager() {
 			resultPreview: "done",
 			unread: true,
 			snapshot: {
+				name: "生成摘要",
 				instruction: "生成摘要",
+				model: { provider: "openai", modelId: "gpt-test" },
 				schedule: { kind: "daily" as const, time: "09:00" },
 				timezone: "Asia/Shanghai",
 				target: { kind: "general" as const, workspace: "fixed" as const, cwd: "/project" },
@@ -76,7 +79,9 @@ function fakeManager() {
 			createdAt: "2026-07-26T00:00:00Z",
 			unread: false,
 			snapshot: {
+				name: "生成摘要",
 				instruction: "生成摘要",
+				model: { provider: "openai", modelId: "gpt-test" },
 				schedule: { kind: "daily" as const, time: "09:00" },
 				timezone: "Asia/Shanghai",
 				target: { kind: "general" as const, workspace: "fixed" as const, cwd: "/project" },
@@ -98,6 +103,7 @@ function fakeSession(input: {
 	let installOptions: unknown;
 	const removeHostTools = vi.fn();
 	const session = {
+		model: { provider: "openai", id: "gpt-test" },
 		sessionManager: {
 			getHeader: () => input.header,
 			getMode: () => input.mode,
@@ -131,6 +137,7 @@ describe("schedule host tool", () => {
 		expect(
 			Value.Check(ScheduleToolInputSchema, {
 				action: "create",
+				name: "日报",
 				instruction: "日报",
 				schedule: { kind: "daily", time: "09:00" },
 			}),
@@ -141,6 +148,7 @@ describe("schedule host tool", () => {
 		expect(
 			Value.Check(ScheduleToolInputSchema, {
 				action: "create",
+				name: "日报",
 				instruction: "日报",
 				schedule: { kind: "daily", time: "09:00" },
 				cwd: "/forbidden",
@@ -178,11 +186,13 @@ describe("schedule host tool", () => {
 		installScheduleHost({ session: host.session, manager: fakeManager(), timezone: "Asia/Shanghai" });
 		const prepared = host.tool!.prepareArguments!({
 			action: "create",
+			name: "创建桌面留言文件",
 			instruction: "创建桌面留言文件",
 			schedule: '{"kind":"once","date":"2026-07-27","time":"11:52"}',
 		});
 		expect(prepared).toEqual({
 			action: "create",
+			name: "创建桌面留言文件",
 			instruction: "创建桌面留言文件",
 			schedule: { kind: "once", date: "2026-07-27", time: "11:52" },
 		});
@@ -211,7 +221,7 @@ describe("schedule host tool", () => {
 		expect(host.installOptions).toEqual({ automaticPermissionToolNames: ["schedule"] });
 		await host.tool!.execute(
 			"call-1",
-			{ action: "create", instruction: "生成摘要", schedule: { kind: "daily", time: "09:00" } },
+			{ action: "create", name: "生成摘要", instruction: "生成摘要", schedule: { kind: "daily", time: "09:00" } },
 			undefined,
 			undefined,
 			{} as never,
@@ -273,7 +283,7 @@ describe("schedule host tool", () => {
 		installScheduleHost({ session: host.session, manager, timezone: "Asia/Shanghai" });
 		const created = await host.tool!.execute(
 			"create",
-			{ action: "create", instruction: "生成摘要", schedule: { kind: "daily", time: "09:00" } },
+			{ action: "create", name: "生成摘要", instruction: "生成摘要", schedule: { kind: "daily", time: "09:00" } },
 			undefined,
 			undefined,
 			{} as never,
@@ -329,7 +339,9 @@ describe("schedule host tool", () => {
 			sessionId: "session-active",
 			unread: false,
 			snapshot: {
+				name: "生成摘要",
 				instruction: "生成摘要",
+				model: { provider: "openai", modelId: "gpt-test" },
 				schedule: { kind: "daily", time: "09:00" },
 				timezone: "Asia/Shanghai",
 				target: { kind: "general", workspace: "fixed", cwd: "/project" },

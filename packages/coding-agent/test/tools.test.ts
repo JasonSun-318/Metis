@@ -729,6 +729,36 @@ describe("Coding Agent Tools", () => {
 			expect(result.output).toBe("red\n");
 		});
 
+		it("returns a cancelled result when custom bash operations reject after abort", async () => {
+			const controller = new AbortController();
+			let markStarted!: () => void;
+			const started = new Promise<void>((resolve) => {
+				markStarted = resolve;
+			});
+			const operations: BashOperations = {
+				exec: async (_command, _cwd, { onData, signal }) =>
+					new Promise((_resolve, reject) => {
+						onData(Buffer.from("before abort\n"));
+						signal?.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+						markStarted();
+					}),
+			};
+
+			const pending = executeBashWithOperations("unused", process.cwd(), operations, {
+				signal: controller.signal,
+			});
+			await started;
+			controller.abort();
+			const result = await pending;
+
+			expect(result).toMatchObject({
+				output: "before abort\n",
+				exitCode: undefined,
+				cancelled: true,
+				truncated: false,
+			});
+		});
+
 		it("should persist full output in the requested directory when truncation happens by line count", async () => {
 			const outputDir = join(testDir, "tool-results-agent-bash");
 			const bash = createBashTool(testDir, { outputDir });

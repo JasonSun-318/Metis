@@ -16,7 +16,6 @@ import {
 	readSync,
 	realpathSync,
 	renameSync,
-	rmSync,
 	statSync,
 	unlinkSync,
 } from "fs";
@@ -152,6 +151,8 @@ export function getSessionToolOutputDir(sessionFile: string): string {
 
 const SESSION_DISPLAY_METADATA_SUFFIX = ".metadata.json";
 const MAX_SESSION_DISPLAY_METADATA_BYTES = 16 * 1024;
+const SESSION_UNREAD_STATE_SUFFIX = ".unread.json";
+const MAX_SESSION_UNREAD_STATE_BYTES = 1024;
 
 export interface SessionDisplayMetadata {
 	readonly sessionId: string;
@@ -160,6 +161,24 @@ export interface SessionDisplayMetadata {
 
 export function getSessionDisplayMetadataPath(sessionFile: string): string {
 	return `${canonicalPath(sessionFile)}${SESSION_DISPLAY_METADATA_SUFFIX}`;
+}
+
+export function getSessionUnreadStatePath(sessionFile: string): string {
+	return `${canonicalPath(sessionFile)}${SESSION_UNREAD_STATE_SUFFIX}`;
+}
+
+export function readSessionUnreadState(sessionFile: string, sessionId: string): boolean {
+	try {
+		assertValidSessionId(sessionId);
+		const text = readSingleLinkTextFileSync(getSessionUnreadStatePath(sessionFile), {
+			maxBytes: MAX_SESSION_UNREAD_STATE_BYTES,
+		});
+		if (text === undefined) return false;
+		const value = JSON.parse(text) as Record<string, unknown>;
+		return value.version === 1 && value.sessionId === sessionId && value.unread === true;
+	} catch {
+		return false;
+	}
 }
 
 export function readSessionDisplayMetadata(sessionFile: string): SessionDisplayMetadata | undefined {
@@ -178,6 +197,26 @@ export function readSessionDisplayMetadata(sessionFile: string): SessionDisplayM
 	} catch {
 		return undefined;
 	}
+}
+
+function removeSessionUnreadState(sessionFile: string): void {
+	const path = getSessionUnreadStatePath(sessionFile);
+	try {
+		const stats = lstatSync(path);
+		if (!stats.isFile() || stats.isSymbolicLink() || stats.nlink !== 1) {
+			throw new Error("Session unread state must be a single-link regular file");
+		}
+		unlinkSync(path);
+		syncDirectorySync(dirname(path));
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+	}
+}
+
+function writeSessionUnreadState(sessionFile: string, sessionId: string): void {
+	assertValidSessionId(sessionId);
+	const contents = `${JSON.stringify({ version: 1, sessionId, unread: true })}\n`;
+	replaceFileAtomicallySync(getSessionUnreadStatePath(sessionFile), contents, { mode: 0o600 });
 }
 
 function removeSessionDisplayMetadata(sessionFile: string): void {
@@ -302,18 +341,28 @@ export function moveSessionFileWithLease(sourcePath: string, destinationPath: st
 			}
 
 			const metadata = readSessionDisplayMetadata(source);
+			const header = readSessionRecordsReadOnly(source, { followSymlinkAlias: false }).records[0] as SessionHeader;
+			const unread = readSessionUnreadState(source, header.id);
 			removeSessionDisplayMetadata(destination);
+			removeSessionUnreadState(destination);
 			if (metadata) writeSessionDisplayMetadata(destination, metadata);
+			if (unread) writeSessionUnreadState(destination, header.id);
 			try {
 				renameSync(source, destination);
 			} catch (error) {
 				removeSessionDisplayMetadata(destination);
+				removeSessionUnreadState(destination);
 				throw error;
 			}
 			try {
 				removeSessionDisplayMetadata(source);
 			} catch {
 				// Derived metadata at the old path is harmless; the destination is authoritative.
+			}
+			try {
+				removeSessionUnreadState(source);
+			} catch {
+				// The destination copy is authoritative after the journal move.
 			}
 			const sourceDirectory = dirname(source);
 			syncDirectorySync(sourceDirectory);
@@ -768,7 +817,7 @@ function isSafeRelativePath(value: string): boolean {
 	return value !== "" && value !== ".." && !value.startsWith(`..${sep}`) && !isAbsolute(value);
 }
 
-function sessionStoragePathVariants(storagePath: string, sessionsRoot: string | undefined): readonly string[] {
+export function sessionStoragePathVariants(storagePath: string, sessionsRoot: string | undefined): readonly string[] {
 	if (!sessionsRoot) return [storagePath];
 	const root = canonicalPath(resolvePath(sessionsRoot));
 	const archiveRoot = join(root, ".archive");
@@ -2468,6 +2517,7 @@ function createPersistedSessionState(
 		const durableFileEntries = prepareDurableRecords(destinationEntries, storagePath);
 		validateSessionGraph(durableFileEntries, filePath);
 		removeSessionDisplayMetadata(storagePath);
+		removeSessionUnreadState(storagePath);
 		if (mode === "create" || !existsSync(storagePath)) {
 			journal = openSessionJournal<FileEntry>(storagePath, {
 				...journalOptions(storagePath, lease, filePath),
@@ -3268,6 +3318,17 @@ export class SessionManager {
 		return undefined;
 	}
 
+	getSessionUnread(): boolean {
+		return this.persist && this.storagePath ? readSessionUnreadState(this.storagePath, this.sessionId) : false;
+	}
+
+	setSessionUnread(unread: boolean): void {
+		this._assertOpen();
+		if (!this.persist || !this.storagePath) return;
+		if (unread) writeSessionUnreadState(this.storagePath, this.sessionId);
+		else removeSessionUnreadState(this.storagePath);
+	}
+
 	/**
 	 * Append a custom message entry (for extensions) that participates in LLM context.
 	 * @param customType Extension identifier for filtering on reload
@@ -3959,13 +4020,8 @@ export class SessionManager {
 		options: {
 			agentDir?: string;
 			sessionsRoot?: string;
-			permanent?: boolean;
-			expectedScheduled?: SessionHeader["scheduled"];
 		} = {},
 	): Promise<DeleteSessionResult> {
-		if (options.permanent && !options.expectedScheduled) {
-			return { ok: false, method: "unlink", error: "Permanent deletion requires scheduled-session ownership" };
-		}
 		const unresolvedPath = resolvePath(sessionPath);
 		let before: ReturnType<typeof lstatSync>;
 		try {
@@ -3974,9 +4030,6 @@ export class SessionManager {
 				throw new Error("Session path must be a single-link regular file");
 			}
 		} catch (error) {
-			if (options.permanent && (error as NodeJS.ErrnoException).code === "ENOENT") {
-				return { ok: true, method: "unlink" };
-			}
 			return { ok: false, method: "unlink", error: error instanceof Error ? error.message : String(error) };
 		}
 
@@ -4006,16 +4059,7 @@ export class SessionManager {
 			}
 			const records = readSessionRecordsReadOnly(storagePath, { followSymlinkAlias: false }).records;
 			const header = records[0] as SessionHeader;
-			if (header.scheduled && (!options.permanent || !options.expectedScheduled)) {
-				throw new Error("Scheduled sessions can only be deleted with their task");
-			}
-			if (
-				options.permanent &&
-				(header.scheduled?.taskId !== options.expectedScheduled?.taskId ||
-					header.scheduled?.runId !== options.expectedScheduled?.runId)
-			) {
-				throw new Error("Scheduled session ownership marker does not match the requested task and run");
-			}
+			if (header.scheduled) throw new Error("Scheduled sessions can only be deleted with their task");
 			const agentDir = options.agentDir ?? getDefaultAgentDir();
 			const attachmentDir = getOwnedSessionAttachmentDir(agentDir, header.id);
 			const workspace = getOwnedManagedWorkspace({
@@ -4027,6 +4071,7 @@ export class SessionManager {
 			const subagentDir = getSessionSubagentDir(agentDir, header.id);
 			const pathDerivedTargets = sessionStoragePathVariants(storagePath, options.sessionsRoot).flatMap((path) => [
 				{ label: "display metadata", path: getSessionDisplayMetadataPath(path) },
+				{ label: "unread state", path: getSessionUnreadStatePath(path) },
 				{ label: "image", path: getSessionImageDir(path) },
 				{ label: "tool output", path: getSessionToolOutputDir(path) },
 				...getOwnedSessionJournalArtifacts(path).map((artifact) => ({ label: "journal recovery", path: artifact })),
@@ -4048,26 +4093,6 @@ export class SessionManager {
 					return (error as NodeJS.ErrnoException).code !== "ENOENT";
 				}
 			};
-			if (options.permanent) {
-				for (const target of ownedTargets) {
-					try {
-						rmSync(target.path, { recursive: true, force: true });
-						if (exists(target.path)) throw new Error("target still exists after removal");
-					} catch (error) {
-						return {
-							ok: false,
-							method: "unlink",
-							error: `${target.label}: ${error instanceof Error ? error.message : String(error)}`,
-						};
-					}
-				}
-				try {
-					unlinkSync(storagePath);
-					return { ok: true, method: "unlink" };
-				} catch (error) {
-					return { ok: false, method: "unlink", error: error instanceof Error ? error.message : String(error) };
-				}
-			}
 			const moveToTrash = (targets: readonly string[]): string | undefined => {
 				if (targets.length === 0) return undefined;
 				const trashArgs = targets.some((path) => path.startsWith("-")) ? ["--", ...targets] : [...targets];
@@ -4098,6 +4123,7 @@ export class SessionManager {
 					readSessionRecordsReadOnly(path, { followSymlinkAlias: false }).records[0] as SessionHeader,
 				),
 			getSessionDisplayMetadataPath,
+			getSessionUnreadStatePath,
 			getSessionImageDir,
 			getSessionToolOutputDir,
 			getSessionSubagentDir,

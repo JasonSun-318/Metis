@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { existsSync, lstatSync, readdirSync, realpathSync } from "node:fs";
+import { existsSync, lstatSync, realpathSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import lockfile from "proper-lockfile";
 import { canonicalizePathForCreation, resolvePath } from "../../utils/paths.ts";
@@ -9,7 +9,13 @@ import {
 	readSingleLinkTextFileSync,
 } from "../durable-file.ts";
 import { assertValidSessionId, createSessionId } from "../session-id.ts";
-import { getDefaultSessionDir, SessionManager } from "../session-manager.ts";
+import {
+	finalizeOrphanedScheduledTrash,
+	finalizeScheduledTaskTrash,
+	getScheduledTaskTrashPhase,
+	recoverInterruptedScheduleTrash,
+	trashScheduledTaskData,
+} from "./delete.ts";
 import { createScheduleWorkspace, getScheduleLeaderPath, removeOwnedScheduleWorkspace } from "./paths.ts";
 import { ScheduleStore } from "./store.ts";
 import {
@@ -23,6 +29,8 @@ import {
 import {
 	type ScheduleCreateInput,
 	type ScheduleCreateTarget,
+	type ScheduleDeleteInput,
+	type ScheduleDeleteResult,
 	ScheduleError,
 	type ScheduleEvent,
 	type ScheduleExecutionResult,
@@ -34,10 +42,12 @@ import {
 	type ScheduleTask,
 	type ScheduleTaskPage,
 	type ScheduleUpdateInput,
+	scheduleWorkspaceRoots,
 } from "./types.ts";
 
 const MAX_LIST_ITEMS = 200;
 const MAX_INSTRUCTION_BYTES = 64 * 1024;
+const MAX_DESCRIPTION_LENGTH = 512;
 const LEADER_POLL_MS = 15_000;
 const OBSERVER_POLL_MS = 2_000;
 const MAX_CONCURRENT_RUNS = 2;
@@ -56,6 +66,7 @@ export interface ScheduleManagerOptions {
 	readonly runnerId?: string;
 	readonly now?: () => Date;
 	readonly execute?: (claim: ScheduleRunClaim, signal: AbortSignal) => Promise<ScheduleExecutionResult>;
+	readonly trashScheduledData?: typeof trashScheduledTaskData;
 }
 
 function validateInstruction(value: unknown): string {
@@ -69,14 +80,35 @@ function validateInstruction(value: unknown): string {
 	return value;
 }
 
-function titleFromInstruction(instruction: string): string {
-	const collapsed = instruction.replace(/\s+/gu, " ").trim();
-	let title = "";
-	for (const character of collapsed) {
-		if (title.length + character.length > 120) break;
-		title += character;
+function validateName(value: unknown): string {
+	if (typeof value !== "string" || value.trim().length === 0 || value.length > 120) {
+		throw new ScheduleError("INVALID_SCHEDULE", "Task name must be non-empty and at most 120 characters");
 	}
-	return title;
+	return value.trim();
+}
+
+function validateDescription(value: unknown): string {
+	if (typeof value !== "string" || value.length > MAX_DESCRIPTION_LENGTH) {
+		throw new ScheduleError("INVALID_SCHEDULE", "Task description must be at most 512 characters");
+	}
+	return value;
+}
+
+function validateModel(value: unknown): ScheduleTask["model"] {
+	if (
+		typeof value !== "object" ||
+		value === null ||
+		Object.keys(value).some((key) => key !== "provider" && key !== "modelId") ||
+		!("provider" in value) ||
+		!("modelId" in value) ||
+		typeof value.provider !== "string" ||
+		value.provider.trim().length === 0 ||
+		typeof value.modelId !== "string" ||
+		value.modelId.trim().length === 0
+	) {
+		throw new ScheduleError("INVALID_SCHEDULE", "Task model must identify a provider and model");
+	}
+	return { provider: value.provider, modelId: value.modelId };
 }
 
 function existingRealDirectory(path: string): string {
@@ -92,16 +124,8 @@ function existingRealDirectory(path: string): string {
 	}
 }
 
-function resolveRunSessionFile(agentDir: string, run: ScheduleRun): string | undefined {
-	if (run.sessionFile) return run.sessionFile;
-	if (!run.sessionId) return undefined;
-	const sessionDir = getDefaultSessionDir(run.snapshot.target.cwd, agentDir);
-	const suffix = `_${run.sessionId}.jsonl`;
-	const matches = readdirSync(sessionDir).filter((name) => name.endsWith(suffix));
-	if (matches.length > 1) {
-		throw new ScheduleError("TASK_DELETING", "Scheduled session identity is ambiguous");
-	}
-	return matches[0] ? join(sessionDir, matches[0]) : undefined;
+function assertTargetWorkspaces(target: ScheduleTarget): void {
+	for (const path of scheduleWorkspaceRoots(target)) existingRealDirectory(path);
 }
 
 function validateCreateTarget(target: ScheduleCreateTarget): ScheduleCreateTarget {
@@ -119,9 +143,21 @@ function validateCreateTarget(target: ScheduleCreateTarget): ScheduleCreateTarge
 	if (
 		target.kind === "general" &&
 		target.workspace === "task" &&
-		Object.keys(target).every((key) => key === "kind" || key === "workspace")
+		Object.keys(target).every((key) => key === "kind" || key === "workspace" || key === "additionalWorkspaceCwd")
 	) {
-		return { kind: "general", workspace: "task" };
+		if (
+			target.additionalWorkspaceCwd !== undefined &&
+			(typeof target.additionalWorkspaceCwd !== "string" || !isAbsolute(target.additionalWorkspaceCwd))
+		) {
+			throw new ScheduleError("INVALID_SCHEDULE", "Invalid task workspace access root");
+		}
+		const additionalWorkspaceCwd =
+			target.additionalWorkspaceCwd === undefined ? undefined : existingRealDirectory(target.additionalWorkspaceCwd);
+		return {
+			kind: "general",
+			workspace: "task",
+			...(additionalWorkspaceCwd === undefined ? {} : { additionalWorkspaceCwd }),
+		};
 	}
 	throw new ScheduleError("INVALID_SCHEDULE", "Invalid task target");
 }
@@ -129,7 +165,10 @@ function validateCreateTarget(target: ScheduleCreateTarget): ScheduleCreateTarge
 function creationMatches(
 	task: ScheduleTask,
 	input: {
+		name: string;
+		description?: string;
 		instruction: string;
+		model: ScheduleTask["model"];
 		schedule: ScheduleTask["schedule"];
 		timezone: string;
 		target: ScheduleCreateTarget;
@@ -138,9 +177,14 @@ function creationMatches(
 	const targetMatches =
 		input.target.workspace === "fixed"
 			? task.target.kind === "general" && task.target.workspace === "fixed" && task.target.cwd === input.target.cwd
-			: task.target.kind === "general" && task.target.workspace === "task";
+			: task.target.kind === "general" &&
+				task.target.workspace === "task" &&
+				task.target.additionalWorkspaceCwd === input.target.additionalWorkspaceCwd;
 	return (
+		task.title === input.name &&
+		task.description === input.description &&
 		task.instruction === input.instruction &&
+		JSON.stringify(task.model) === JSON.stringify(input.model) &&
 		JSON.stringify(task.schedule) === JSON.stringify(input.schedule) &&
 		task.timezone === input.timezone &&
 		targetMatches
@@ -157,7 +201,10 @@ function calculateNextRunAt(schedule: ScheduleTask["schedule"], timezone: string
 
 function taskSnapshot(task: ScheduleTask): ScheduleRun["snapshot"] {
 	return {
+		name: task.title,
+		...(task.description === undefined ? {} : { description: task.description }),
 		instruction: task.instruction,
+		model: task.model,
 		schedule: task.schedule,
 		timezone: task.timezone,
 		target: task.target,
@@ -207,6 +254,7 @@ export class ScheduleManager {
 	private readonly store: ScheduleStore;
 	private readonly now: () => Date;
 	private readonly execute?: ScheduleManagerOptions["execute"];
+	private readonly trashScheduledData: typeof trashScheduledTaskData;
 	private readonly listeners = new Set<(event: ScheduleEvent) => void>();
 	private healthError?: ScheduleError;
 	private started = false;
@@ -222,10 +270,12 @@ export class ScheduleManager {
 
 	private constructor(options: ScheduleManagerOptions) {
 		this.agentDir = resolvePath(options.agentDir);
+		recoverInterruptedScheduleTrash(this.agentDir);
 		this.runnerId = options.runnerId ?? randomUUID();
 		assertValidSessionId(this.runnerId);
 		this.now = options.now ?? (() => new Date());
 		this.execute = options.execute;
+		this.trashScheduledData = options.trashScheduledData ?? trashScheduledTaskData;
 		this.store = ScheduleStore.open(this.agentDir);
 	}
 
@@ -238,6 +288,7 @@ export class ScheduleManager {
 		this.started = true;
 		try {
 			const index = this.store.readIndex();
+			finalizeOrphanedScheduledTrash(this.agentDir, new Set(index.tasks.map(({ id }) => id)));
 			this.eventCursor = index.events.at(-1)?.sequence ?? 0;
 			this.indexFingerprint = this.store.indexFingerprint();
 			this.taskSnapshot = index.tasks;
@@ -272,7 +323,10 @@ export class ScheduleManager {
 	async create(input: ScheduleCreateInput): Promise<ScheduleTask> {
 		this.assertHealthy();
 		assertValidSessionId(input.id);
+		const name = validateName(input.name);
+		const description = input.description === undefined ? undefined : validateDescription(input.description);
 		const instruction = validateInstruction(input.instruction);
+		const model = validateModel(input.model);
 		let schedule: ScheduleTask["schedule"];
 		let timezone: string;
 		try {
@@ -287,7 +341,10 @@ export class ScheduleManager {
 		if (current) {
 			if (
 				creationMatches(current, {
+					name,
+					description,
 					instruction,
+					model,
 					schedule,
 					timezone,
 					target: targetInput,
@@ -309,7 +366,10 @@ export class ScheduleManager {
 						if (existing) {
 							if (
 								creationMatches(existing, {
+									name,
+									description,
 									instruction,
+									model,
 									schedule,
 									timezone,
 									target: targetInput,
@@ -323,15 +383,24 @@ export class ScheduleManager {
 						if (targetInput.workspace === "task") {
 							try {
 								ownedWorkspace = createScheduleWorkspace(this.agentDir, input.id);
-								target = { kind: "general", workspace: "task", cwd: ownedWorkspace };
+								target = {
+									kind: "general",
+									workspace: "task",
+									cwd: ownedWorkspace,
+									...(targetInput.additionalWorkspaceCwd === undefined
+										? {}
+										: { additionalWorkspaceCwd: targetInput.additionalWorkspaceCwd }),
+								};
 							} catch (error) {
 								throw new ScheduleError("TASK_ID_REUSED", "Task workspace already exists", { cause: error });
 							}
 						} else target = targetInput;
 						const task: ScheduleTask = {
 							id: input.id,
-							title: titleFromInstruction(instruction),
+							title: name,
+							...(description === undefined ? {} : { description }),
 							instruction,
+							model,
 							schedule,
 							timezone,
 							target,
@@ -387,16 +456,39 @@ export class ScheduleManager {
 	}
 
 	async list(
-		input: { afterTaskId?: string; limit?: number; unreadOnly?: boolean; withRunsOnly?: boolean } = {},
+		input: {
+			afterTaskId?: string;
+			limit?: number;
+			unreadOnly?: boolean;
+			withRunsOnly?: boolean;
+			query?: string;
+			sort?: "next_run" | "updated" | "name";
+		} = {},
 	): Promise<ScheduleTaskPage> {
 		this.assertHealthy();
 		if (input.afterTaskId) assertValidSessionId(input.afterTaskId);
 		const limit = Math.min(input.limit ?? 50, MAX_LIST_ITEMS);
 		if (!Number.isSafeInteger(limit) || limit < 1) throw new TypeError("Invalid task page limit");
+		const query = input.query?.trim().toLocaleLowerCase();
+		const sort = input.sort ?? "updated";
 		let tasks = [...this.callStore(() => this.store.readIndex().tasks)]
 			.filter((task) => !input.unreadOnly || task.unreadCount > 0)
 			.filter((task) => !input.withRunsOnly || task.lastRun !== undefined)
-			.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt) || right.id.localeCompare(left.id));
+			.filter(
+				(task) =>
+					!query ||
+					task.title.toLocaleLowerCase().includes(query) ||
+					task.description?.toLocaleLowerCase().includes(query),
+			)
+			.sort((left, right) => {
+				if (sort === "name") return left.title.localeCompare(right.title) || left.id.localeCompare(right.id);
+				if (sort === "next_run") {
+					if (left.nextRunAt === null) return right.nextRunAt === null ? left.id.localeCompare(right.id) : 1;
+					if (right.nextRunAt === null) return -1;
+					return left.nextRunAt.localeCompare(right.nextRunAt) || left.id.localeCompare(right.id);
+				}
+				return right.updatedAt.localeCompare(left.updatedAt) || right.id.localeCompare(left.id);
+			});
 		if (input.afterTaskId) {
 			const cursor = tasks.findIndex(({ id }) => id === input.afterTaskId);
 			if (cursor === -1) throw new ScheduleError("SCHEDULE_NOT_FOUND", "Scheduled task cursor was not found");
@@ -422,49 +514,100 @@ export class ScheduleManager {
 	async update(taskId: string, input: ScheduleUpdateInput): Promise<ScheduleTask> {
 		this.assertHealthy();
 		assertValidSessionId(taskId);
-		if (input.instruction === undefined && input.schedule === undefined) {
+		const editableKeys = ["name", "description", "instruction", "model", "schedule", "target"];
+		if (!editableKeys.some((key) => key in input)) {
 			throw new ScheduleError("INVALID_SCHEDULE", "Task update is empty");
 		}
-		if (Object.keys(input).some((key) => key !== "instruction" && key !== "schedule")) {
+		if (Object.keys(input).some((key) => !editableKeys.includes(key))) {
 			throw new ScheduleError("INVALID_SCHEDULE", "Task update contains unsupported fields");
 		}
+		const targetInput = input.target === undefined ? undefined : validateCreateTarget(input.target);
 		this.ensureEventCursor();
-		const result = await this.callStoreAsync(() =>
-			this.store.mutate((draft, files) => {
-				const index = draft.tasks.findIndex(({ id }) => id === taskId);
-				if (index === -1) throw new ScheduleError("SCHEDULE_NOT_FOUND", "Scheduled task was not found");
-				const current = draft.tasks[index];
-				if (current.status === "deleting")
-					throw new ScheduleError("TASK_DELETING", "Scheduled task is being deleted");
-				if (current.status === "completed" && current.schedule.kind === "once") {
-					throw new ScheduleError("INVALID_SCHEDULE", "Completed one-time task cannot be edited");
-				}
-				const instruction =
-					input.instruction === undefined ? current.instruction : validateInstruction(input.instruction);
-				let schedule = current.schedule;
-				if (input.schedule !== undefined) {
-					try {
-						schedule = normalizeScheduleSpec(validateScheduleInputSpec(input.schedule), current.timezone);
-					} catch (error) {
-						throw new ScheduleError("INVALID_SCHEDULE", "Invalid task time or recurrence", { cause: error });
+		let createdOwnedWorkspace: string | undefined;
+		let oldOwnedWorkspace: string | undefined;
+		const commit = () =>
+			this.callStoreAsync(() =>
+				this.store.mutate((draft, files) => {
+					const index = draft.tasks.findIndex(({ id }) => id === taskId);
+					if (index === -1) throw new ScheduleError("SCHEDULE_NOT_FOUND", "Scheduled task was not found");
+					const current = draft.tasks[index];
+					if (current.status === "deleting")
+						throw new ScheduleError("TASK_DELETING", "Scheduled task is being deleted");
+					if (current.activeRunId) throw new ScheduleError("TASK_BUSY", "Scheduled task is running");
+					const reactivatingCompletedOnce = current.status === "completed" && current.schedule.kind === "once";
+					if (reactivatingCompletedOnce && input.schedule === undefined) {
+						throw new ScheduleError("INVALID_SCHEDULE", "Completed one-time task requires a new schedule");
 					}
-				}
-				const now = this.now();
-				const updated: ScheduleTask = {
-					...current,
-					instruction,
-					title: titleFromInstruction(instruction),
-					schedule,
-					updatedAt: now.toISOString(),
-					...(input.schedule === undefined
-						? {}
-						: { nextRunAt: calculateNextRunAt(schedule, current.timezone, now) }),
-				};
-				draft.tasks[index] = updated;
-				files.appendEvent({ type: "task-updated", taskId });
-				return updated;
-			}),
-		);
+					const title = input.name === undefined ? current.title : validateName(input.name);
+					const description =
+						input.description === undefined
+							? current.description
+							: input.description === null
+								? undefined
+								: validateDescription(input.description);
+					const instruction =
+						input.instruction === undefined ? current.instruction : validateInstruction(input.instruction);
+					const model = input.model === undefined ? current.model : validateModel(input.model);
+					let schedule = current.schedule;
+					if (input.schedule !== undefined) {
+						try {
+							schedule = normalizeScheduleSpec(validateScheduleInputSpec(input.schedule), current.timezone);
+						} catch (error) {
+							throw new ScheduleError("INVALID_SCHEDULE", "Invalid task time or recurrence", { cause: error });
+						}
+					}
+					let target = current.target;
+					if (targetInput?.workspace === "fixed") {
+						target = { ...targetInput, cwd: existingRealDirectory(targetInput.cwd) };
+						if (current.target.workspace === "task") oldOwnedWorkspace = current.target.cwd;
+					} else if (targetInput?.workspace === "task") {
+						if (current.target.workspace !== "task") {
+							try {
+								createdOwnedWorkspace = createScheduleWorkspace(this.agentDir, taskId);
+							} catch (error) {
+								throw new ScheduleError("TASK_ID_REUSED", "Task workspace already exists", { cause: error });
+							}
+						}
+						target = {
+							kind: "general",
+							workspace: "task",
+							cwd: createdOwnedWorkspace ?? current.target.cwd,
+							...(targetInput.additionalWorkspaceCwd === undefined
+								? {}
+								: { additionalWorkspaceCwd: targetInput.additionalWorkspaceCwd }),
+						};
+					}
+					const now = this.now();
+					const updated: ScheduleTask = {
+						...current,
+						title,
+						description,
+						instruction,
+						model,
+						schedule,
+						target,
+						status: reactivatingCompletedOnce ? "active" : current.status,
+						updatedAt: now.toISOString(),
+						...(input.schedule === undefined
+							? {}
+							: { nextRunAt: calculateNextRunAt(schedule, current.timezone, now) }),
+					};
+					draft.tasks[index] = updated;
+					files.appendEvent({ type: "task-updated", taskId });
+					return updated;
+				}),
+			);
+		let result: ScheduleTask;
+		try {
+			result =
+				targetInput?.workspace === "fixed"
+					? await this.withFixedWorkspaceCwdLock(targetInput.cwd, commit)
+					: await commit();
+		} catch (error) {
+			if (createdOwnedWorkspace) removeOwnedScheduleWorkspace(this.agentDir, taskId, createdOwnedWorkspace);
+			throw error;
+		}
+		if (oldOwnedWorkspace) removeOwnedScheduleWorkspace(this.agentDir, taskId, oldOwnedWorkspace);
 		await this.drainEvents();
 		return result;
 	}
@@ -477,35 +620,46 @@ export class ScheduleManager {
 		return this.setPaused(taskId, false);
 	}
 
-	async delete(taskId: string): Promise<{ taskId: string; deleted: true }> {
+	async delete(taskId: string, input: ScheduleDeleteInput): Promise<ScheduleDeleteResult> {
 		this.assertHealthy();
 		assertValidSessionId(taskId);
+		if (typeof input?.deleteSessions !== "boolean" || Object.keys(input).some((key) => key !== "deleteSessions")) {
+			throw new ScheduleError("INVALID_SCHEDULE", "Invalid scheduled task deletion options");
+		}
 		this.ensureEventCursor();
 		await this.callStoreAsync(() =>
 			this.store.mutate((draft, files) => {
 				const index = draft.tasks.findIndex(({ id }) => id === taskId);
 				if (index === -1) throw new ScheduleError("SCHEDULE_NOT_FOUND", "Scheduled task was not found");
 				const current = draft.tasks[index];
+				if (current.activeRunId) throw new ScheduleError("TASK_BUSY", "Scheduled task is running");
 				if (current.status !== "deleting") {
 					draft.tasks[index] = {
 						...current,
+						deletionPreviousState: {
+							status: current.status,
+							nextRunAt: current.nextRunAt,
+							...(current.pauseReason === undefined ? {} : { pauseReason: current.pauseReason }),
+						},
 						status: "deleting",
 						nextRunAt: null,
 						deletingSince: this.now().toISOString(),
+						deletionDeleteSessions: input.deleteSessions,
 						updatedAt: this.now().toISOString(),
 					};
 					files.appendEvent({ type: "task-updated", taskId });
 				}
 			}),
 		);
-		if (!this.started || this.leaderRelease) await this.finishDelete(taskId);
+		let result: Pick<ScheduleDeleteResult, "deletedSessionCount" | "retainedSessionCount">;
+		if (!this.started || this.leaderRelease) result = await this.finishDelete(taskId);
 		else {
 			await this.drainEvents();
 			this.wakeLeader();
 			throw new ScheduleError("TASK_DELETING", "Scheduled task deletion is pending in the scheduler leader");
 		}
 		await this.drainEvents();
-		return { taskId, deleted: true };
+		return { taskId, deleted: true, ...result! };
 	}
 
 	async runNow(taskId: string, runId: string): Promise<ScheduleRun> {
@@ -608,7 +762,7 @@ export class ScheduleManager {
 					throw new ScheduleError("INVALID_SCHEDULE", "Completed one-time task cannot be paused or resumed");
 				}
 				const now = this.now();
-				if (!paused) existingRealDirectory(current.target.cwd);
+				if (!paused) assertTargetWorkspaces(current.target);
 				const updated: ScheduleTask = paused
 					? { ...current, status: "paused", pauseReason: "user", updatedAt: now.toISOString() }
 					: {
@@ -823,7 +977,7 @@ export class ScheduleManager {
 
 	private async startQueuedRun(task: ScheduleTask, queued: ScheduleRun): Promise<void> {
 		try {
-			existingRealDirectory(task.target.cwd);
+			assertTargetWorkspaces(task.target);
 		} catch {
 			await this.failMissingWorkspace(task, queued);
 			return;
@@ -851,7 +1005,7 @@ export class ScheduleManager {
 
 	private async claimScheduledRun(task: ScheduleTask): Promise<void> {
 		try {
-			existingRealDirectory(task.target.cwd);
+			assertTargetWorkspaces(task.target);
 		} catch {
 			await this.failMissingWorkspace(task);
 			this.eligible.delete(task.id);
@@ -945,6 +1099,7 @@ export class ScheduleManager {
 			const deleted = abortReason === "deleted";
 			const interrupted = signal.aborted && !deleted;
 			const workspaceMissing = error instanceof ScheduleError && error.code === "WORKSPACE_MISSING";
+			const modelUnavailable = error instanceof ScheduleError && error.code === "MODEL_UNAVAILABLE";
 			const executionSession = error instanceof ScheduleError ? error.executionSession : undefined;
 			await this.finalizeExecution(
 				run,
@@ -978,7 +1133,7 @@ export class ScheduleManager {
 							...executionSession,
 							unread: true,
 						},
-				workspaceMissing,
+				workspaceMissing ? "workspace_missing" : modelUnavailable ? "model_unavailable" : undefined,
 			);
 		}
 	}
@@ -987,7 +1142,7 @@ export class ScheduleManager {
 		run: ScheduleRun,
 		patch: Pick<ScheduleRun, "status" | "completedAt" | "unread"> &
 			Partial<Pick<ScheduleRun, "sessionId" | "sessionFile" | "resultPreview" | "error" | "reason">>,
-		autoPause = false,
+		autoPause?: "workspace_missing" | "model_unavailable",
 	): Promise<void> {
 		await this.store.mutate((draft, files) => {
 			const taskIndex = draft.tasks.findIndex(({ id }) => id === run.taskId);
@@ -1007,7 +1162,7 @@ export class ScheduleManager {
 				...(task.status === "deleting"
 					? {}
 					: autoPause
-						? { status: "paused" as const, pauseReason: "workspace_missing" as const }
+						? { status: "paused" as const, pauseReason: autoPause }
 						: run.trigger === "scheduled" && run.snapshot.schedule.kind === "once"
 							? { status: "completed" as const }
 							: {}),
@@ -1129,13 +1284,17 @@ export class ScheduleManager {
 		await Promise.allSettled(matching.map(({ promise }) => promise));
 	}
 
-	private async finishDelete(taskId: string): Promise<void> {
+	private async finishDelete(
+		taskId: string,
+	): Promise<Pick<ScheduleDeleteResult, "deletedSessionCount" | "retainedSessionCount">> {
 		await this.abortOwnedRuns("deleted", taskId);
 		let task: ScheduleTask;
 		try {
 			task = this.store.getTask(taskId);
 		} catch (error) {
-			if (error instanceof ScheduleError && error.code === "SCHEDULE_NOT_FOUND") return;
+			if (error instanceof ScheduleError && error.code === "SCHEDULE_NOT_FOUND") {
+				return { deletedSessionCount: 0, retainedSessionCount: 0 };
+			}
 			throw error;
 		}
 		const runs = this.store.listAllRuns(taskId);
@@ -1155,20 +1314,40 @@ export class ScheduleManager {
 				draft.tasks[index] = { ...draft.tasks[index], activeRunId: undefined };
 			});
 		}
-		for (const run of this.store.listAllRuns(taskId)) {
-			const sessionFile = resolveRunSessionFile(this.agentDir, run);
-			if (!sessionFile) continue;
-			const result = await SessionManager.deleteSession(sessionFile, {
+		let deletedSessionCount: number;
+		let retainedSessionCount: number;
+		try {
+			({ deletedSessionCount, retainedSessionCount } = await this.trashScheduledData({
 				agentDir: this.agentDir,
-				permanent: true,
-				expectedScheduled: { taskId, runId: run.id },
-			});
-			if (!result.ok) throw new ScheduleError("TASK_DELETING", result.error ?? "Failed to delete scheduled session");
-		}
-		if (task.target.kind === "general" && task.target.workspace === "task") {
-			if (!removeOwnedScheduleWorkspace(this.agentDir, task.id, task.target.cwd)) {
-				throw new ScheduleError("TASK_DELETING", "Task workspace ownership check failed");
+				task,
+				runs: this.store.listAllRuns(taskId),
+				deleteSessions: task.deletionDeleteSessions ?? false,
+			}));
+		} catch (error) {
+			if (getScheduledTaskTrashPhase(this.agentDir, taskId) === undefined) {
+				await this.store.mutate((draft, files) => {
+					const index = draft.tasks.findIndex(({ id }) => id === taskId);
+					if (index === -1 || draft.tasks[index].status !== "deleting") return;
+					const current = draft.tasks[index];
+					const previous = current.deletionPreviousState ?? {
+						status: "paused" as const,
+						nextRunAt: null,
+						pauseReason: "user" as const,
+					};
+					draft.tasks[index] = {
+						...current,
+						status: previous.status,
+						nextRunAt: previous.nextRunAt,
+						pauseReason: previous.pauseReason,
+						deletingSince: undefined,
+						deletionDeleteSessions: undefined,
+						deletionPreviousState: undefined,
+						updatedAt: this.now().toISOString(),
+					};
+					files.appendEvent({ type: "task-updated", taskId });
+				});
 			}
+			throw error;
 		}
 		await this.store.mutate((draft, files) => {
 			if (!draft.tasks.some(({ id }) => id === taskId)) return;
@@ -1176,6 +1355,8 @@ export class ScheduleManager {
 			files.appendEvent({ type: "task-deleted", taskId });
 			draft.tasks = draft.tasks.filter(({ id }) => id !== taskId);
 		});
+		finalizeScheduledTaskTrash(this.agentDir, taskId);
+		return { deletedSessionCount, retainedSessionCount };
 	}
 
 	private async withFixedWorkspaceCwdLock<T>(canonicalCwd: string, operation: () => Promise<T>): Promise<T> {

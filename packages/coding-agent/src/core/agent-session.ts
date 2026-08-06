@@ -17,7 +17,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import type {
 	Agent,
@@ -141,6 +141,7 @@ import type { BranchSummaryEntry, CompactionEntry, SessionEntry, SessionManager 
 import { CURRENT_SESSION_VERSION, getLatestCompactionEntry, type SessionHeader } from "./session-manager.ts";
 import type { CwdOrigin } from "./session-workspace.ts";
 import type { SettingsManager } from "./settings-manager.ts";
+import { SKILL_USAGE_CUSTOM_TYPE, type SkillUsageRecord } from "./skills.ts";
 import type { SlashCommandInfo } from "./slash-commands.ts";
 import { createSyntheticSourceInfo, type SourceInfo } from "./source-info.ts";
 import { buildSubagentMailboxContent } from "./subagents/prompts.ts";
@@ -150,6 +151,7 @@ import { canUseUltra, getHighestSupportedThinkingLevel, type ThinkingSelection }
 import { createToolResultMicrocompactor } from "./tool-result-microcompaction.ts";
 import { type BashOperations, createLocalBashOperations } from "./tools/bash.ts";
 import { createAllToolDefinitions } from "./tools/index.ts";
+import { resolveReadPathAsync } from "./tools/path-utils.ts";
 import { createToolDefinitionFromAgentTool } from "./tools/tool-definition-wrapper.ts";
 import {
 	authorizeUnattendedAction,
@@ -553,9 +555,6 @@ export class AgentSession {
 			if (config.customTools?.length) throw new TypeError("Unattended execution cannot use custom tools");
 			if (config.resourceLoader.getExtensions().extensions.length > 0) {
 				throw new TypeError("Unattended execution cannot load extensions");
-			}
-			if (config.resourceLoader.getSkills().skills.length > 0) {
-				throw new TypeError("Unattended execution cannot load skills");
 			}
 			if (!config.unattendedExecution.workspaceRoots.some((root) => isPathInside(root, config.cwd))) {
 				throw new TypeError("Unattended execution cwd must be inside its workspace roots");
@@ -1122,6 +1121,9 @@ export class AgentSession {
 		};
 
 		this.agent.afterToolCall = async ({ toolCall, args, result, isError }) => {
+			if (toolCall.name === "read" && this._toolProvenance(toolCall.name) === "builtin") {
+				await this._recordSkillRead(args, isError);
+			}
 			const runner = this._extensionRunner;
 			if (!runner.hasHandlers("tool_result")) {
 				return undefined;
@@ -1147,6 +1149,26 @@ export class AgentSession {
 				isError: hookResult.isError ?? isError,
 			};
 		};
+	}
+
+	private _recordSkillUsage(name: string, trigger: SkillUsageRecord["trigger"]): void {
+		this.sessionManager.appendCustomEntry(SKILL_USAGE_CUSTOM_TYPE, { name, trigger } satisfies SkillUsageRecord);
+	}
+
+	private async _recordSkillRead(args: unknown, isError: boolean): Promise<void> {
+		if (isError || typeof args !== "object" || args === null || Array.isArray(args)) return;
+		const path = (args as Record<string, unknown>).path;
+		if (typeof path !== "string") return;
+		let absolutePath: string;
+		try {
+			absolutePath = await resolveReadPathAsync(path, this._cwd);
+		} catch {
+			return;
+		}
+		const skill = this.resourceLoader
+			.getSkills()
+			.skills.find((candidate) => resolve(candidate.filePath) === resolve(absolutePath));
+		if (skill) this._recordSkillUsage(skill.name, "read");
 	}
 
 	private _installAgentDurabilityHooks(): void {
@@ -2735,6 +2757,7 @@ export class AgentSession {
 				throw new Error(`Expanded durable prompt cannot exceed ${MAX_DURABLE_PROMPT_TEXT_BYTES} UTF-8 bytes`);
 			}
 			const skillBlock = `${prefix}${body}${suffix}`;
+			this._recordSkillUsage(skill.name, "command");
 			return args ? `${skillBlock}\n\n${args}` : skillBlock;
 		} catch (err) {
 			// Emit error like extension commands do
@@ -4285,9 +4308,6 @@ export class AgentSession {
 		const extensionsResult = this._resourceLoader.getExtensions();
 		if (this._unattendedExecution && extensionsResult.extensions.length > 0) {
 			throw new TypeError("Unattended execution cannot load extensions");
-		}
-		if (this._unattendedExecution && this._resourceLoader.getSkills().skills.length > 0) {
-			throw new TypeError("Unattended execution cannot load skills");
 		}
 		if (options.flagValues) {
 			for (const [name, value] of options.flagValues) {

@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { isAbsolute, join } from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import { fileURLToPath } from "node:url";
+import { Worker } from "node:worker_threads";
 import { getPackageDir, isBunBinary } from "../config.ts";
 import { spawnProcess } from "../utils/child-process.ts";
 import { canonicalizeActionPath, isPathInside } from "../utils/paths.ts";
@@ -50,6 +51,10 @@ type PendingCommand = {
 function brokerEntry(): string {
 	const sibling = fileURLToPath(new URL("./workspace-sandbox-broker.js", import.meta.url));
 	return existsSync(sibling) ? sibling : join(getPackageDir(), "dist", "core", "workspace-sandbox-broker.js");
+}
+
+function brokerWorkerEntry(): URL {
+	return new URL("./workspace-sandbox-worker.js", import.meta.url);
 }
 
 function minimalEnvironment(temporaryDir: string, preferred?: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
@@ -98,7 +103,7 @@ function controlTimeout<T>(promise: Promise<T>, message: string): Promise<T> {
 }
 
 class SandboxBroker {
-	private readonly child: ChildProcess;
+	private readonly child: ChildProcess | Worker;
 	private readonly temporaryDir: string;
 	private readonly readyPromise: Promise<void>;
 	private readyResolve!: () => void;
@@ -118,7 +123,7 @@ class SandboxBroker {
 	private hostAbort?: () => void;
 	private hostSignal?: AbortSignal;
 
-	private constructor(child: ChildProcess, temporaryDir: string) {
+	private constructor(child: ChildProcess | Worker, temporaryDir: string) {
 		this.child = child;
 		this.temporaryDir = temporaryDir;
 		this.readyPromise = new Promise((resolve, reject) => {
@@ -141,7 +146,8 @@ class SandboxBroker {
 				this.fail("SANDBOX_CLOSED", "Sandbox broker exited unexpectedly");
 			}
 		});
-		child.once("close", () => this.processClosedResolve());
+		if (child instanceof Worker) child.once("exit", () => this.processClosedResolve());
+		else child.once("close", () => this.processClosedResolve());
 	}
 
 	static async start(input: {
@@ -165,15 +171,27 @@ class SandboxBroker {
 
 		const temporaryDir = mkdtempSync(join(tmpdir(), "arcmind-sandbox-"));
 		const environment = minimalEnvironment(temporaryDir);
-		const target = isBunBinary
-			? { command: process.execPath, args: ["--internal-workspace-sandbox-broker"] }
-			: { command: process.execPath, args: [brokerEntry()] };
-		const child = spawnProcess(target.command, target.args, {
-			detached: process.platform !== "win32",
-			env: { ...environment, ELECTRON_RUN_AS_NODE: "1" },
-			stdio: ["pipe", "pipe", "pipe"],
-			windowsHide: true,
-		});
+		// ponytail: Electron disables RunAsNode, so use a per-run Worker; bundle Node only if native crash containment is required.
+		const child =
+			typeof process.versions.electron === "string" && !isBunBinary
+				? new Worker(brokerWorkerEntry(), {
+						execArgv: [],
+						env: environment,
+						stdin: true,
+						stdout: true,
+						stderr: true,
+					})
+				: (() => {
+						const target = isBunBinary
+							? { command: process.execPath, args: ["--internal-workspace-sandbox-broker"] }
+							: { command: process.execPath, args: [brokerEntry()] };
+						return spawnProcess(target.command, target.args, {
+							detached: process.platform !== "win32",
+							env: environment,
+							stdio: ["pipe", "pipe", "pipe"],
+							windowsHide: true,
+						});
+					})();
 		const broker = new SandboxBroker(child, temporaryDir);
 		if (input.signal) {
 			broker.hostAbort = () => broker.fail("SANDBOX_CLOSED", "Sandbox execution was aborted");
@@ -385,7 +403,8 @@ class SandboxBroker {
 	}
 
 	private terminate(): void {
-		if (this.child.pid) killProcessTree(this.child.pid);
+		if (this.child instanceof Worker) void this.child.terminate().catch(() => undefined);
+		else if (this.child.pid) killProcessTree(this.child.pid);
 		this.child.stdin?.destroy();
 	}
 }

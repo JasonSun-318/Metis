@@ -324,7 +324,15 @@ function parseConfig(value: unknown): SubagentConfig {
 function parseUsage(value: unknown): SubagentUsage {
 	const label = "Session control entry.usage";
 	const fields = dataFields(value, label);
-	assertOnlyFields(fields, ["model", "input", "output", "cacheRead", "cacheWrite", "elapsedMs", "cost"], label);
+	assertOnlyFields(
+		fields,
+		["model", "input", "output", "cacheRead", "cacheWrite", "elapsedMs", "toolCalls", "cost"],
+		label,
+	);
+	const toolCalls = fields.get("toolCalls");
+	if (toolCalls !== undefined && (!Number.isInteger(toolCalls) || (toolCalls as number) < 0)) {
+		invalid(`${label}.toolCalls must be a non-negative integer`);
+	}
 	return {
 		model: parseModel(fields.get("model"), `${label}.model`),
 		input: finiteNonNegative(fields, "input", label),
@@ -332,6 +340,7 @@ function parseUsage(value: unknown): SubagentUsage {
 		cacheRead: finiteNonNegative(fields, "cacheRead", label),
 		cacheWrite: finiteNonNegative(fields, "cacheWrite", label),
 		elapsedMs: finiteNonNegative(fields, "elapsedMs", label),
+		...(toolCalls !== undefined ? { toolCalls: toolCalls as number } : {}),
 		...(fields.has("cost") ? { cost: finiteNonNegative(fields, "cost", label) } : {}),
 	};
 }

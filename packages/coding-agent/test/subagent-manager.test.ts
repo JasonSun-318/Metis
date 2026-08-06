@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { getModel } from "@arcmind/ai/compat";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { AgentSession } from "../src/core/agent-session.ts";
+import type { AgentSession, AgentSessionEvent } from "../src/core/agent-session.ts";
 import type { AgentSessionRuntime } from "../src/core/agent-session-runtime.ts";
 import type { PermissionMode } from "../src/core/permission-mode.ts";
 import type { PermissionApprovalRequest } from "../src/core/permission-policy.ts";
@@ -34,8 +34,9 @@ class FakeChildSession {
 	readonly messages: unknown[] = [];
 	readonly model = getModel("anthropic", "claude-sonnet-4-5")!;
 	readonly sessionManager: SessionManager;
+	activeDurableTurnId: string | undefined;
 	private readonly activeTools: readonly string[];
-	private readonly listeners = new Set<(event: { type: string }) => void>();
+	private readonly listeners = new Set<(event: AgentSessionEvent) => void>();
 
 	constructor(sessionManager: SessionManager, activeTools: readonly string[]) {
 		this.sessionManager = sessionManager;
@@ -46,9 +47,13 @@ class FakeChildSession {
 		return [...this.activeTools];
 	}
 
-	subscribe(listener: (event: { type: string }) => void): () => void {
+	subscribe(listener: (event: AgentSessionEvent) => void): () => void {
 		this.listeners.add(listener);
 		return () => this.listeners.delete(listener);
+	}
+
+	emit(event: AgentSessionEvent): void {
+		for (const listener of this.listeners) listener(event);
 	}
 
 	appendUser(text: string): void {
@@ -65,11 +70,11 @@ class FakeChildSession {
 		};
 		this.messages.push(message);
 		this.sessionManager.appendMessage(message);
-		for (const listener of this.listeners) listener({ type: "agent_settled" });
+		this.emit({ type: "agent_settled" });
 	}
 
 	getSessionStats() {
-		return { tokens: { input: 3, output: 5, cacheRead: 1, cacheWrite: 2 }, cost: 0.25 };
+		return { tokens: { input: 3, output: 5, cacheRead: 1, cacheWrite: 2 }, cost: 0.25, toolCalls: 4 };
 	}
 }
 
@@ -225,6 +230,38 @@ describe("SubagentManager", () => {
 		harness.runtimes[1]!.session.settle("edge case checked");
 		await vi.waitFor(() => expect(harness.manager.listSummaries()[0]?.finalSummary).toBe("edge case checked"));
 		expect(harness.manager.listSummaries()[0]?.agentId).toBe(created.agentId);
+	});
+
+	it("forwards visible child activity from the owned listener and persists tool calls", async () => {
+		const harness = setup();
+		const events: SubagentManagerEvent[] = [];
+		harness.manager.subscribe((event) => events.push(event));
+		const created = await spawn(harness, true);
+		const session = harness.runtimes[0]!.session;
+		session.activeDurableTurnId = "child-turn";
+		const message = assistantMsg("partial");
+		session.emit({ type: "message_start", message });
+		session.emit({
+			type: "message_update",
+			message,
+			assistantMessageEvent: {
+				type: "text_delta",
+				contentIndex: 0,
+				delta: "partial",
+				partial: message,
+			},
+		});
+		session.emit({ type: "queue_update", steering: [], followUp: [] });
+		session.emit({ type: "message_end", message });
+
+		expect(events.filter((event) => event.type === "activity")).toEqual([
+			expect.objectContaining({ type: "activity", agentId: created.agentId, turnId: "child-turn" }),
+			expect.objectContaining({ type: "activity", agentId: created.agentId, turnId: "child-turn" }),
+			expect.objectContaining({ type: "activity", agentId: created.agentId, turnId: "child-turn" }),
+		]);
+		session.settle("done");
+		await vi.waitFor(() => expect(harness.manager.listSummaries()[0]?.status).toBe("done"));
+		expect(harness.manager.listSummaries()[0]?.usage?.toolCalls).toBe(4);
 	});
 
 	it("returns a foreground terminal result without publishing a mailbox event", async () => {

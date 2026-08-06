@@ -1,10 +1,11 @@
 import { lstatSync, realpathSync } from "node:fs";
 import type { AgentMessage } from "@arcmind/agent-core";
 import { createAgentSessionFromServices, createAgentSessionServices } from "../agent-session-services.ts";
+import { identifySubmitPromptRequest } from "../runtime-recovery.ts";
 import { getDefaultSessionDir, SessionManager, sessionEntryToContextMessages } from "../session-manager.ts";
 import { createUnattendedExecutionProfile, UNATTENDED_TOOL_NAMES } from "../unattended-execution.ts";
 import { createWorkspaceSandbox, WorkspaceSandboxError } from "../workspace-sandbox.ts";
-import { ScheduleError, type ScheduleExecutionResult, type ScheduleRunClaim } from "./types.ts";
+import { ScheduleError, type ScheduleExecutionResult, type ScheduleRunClaim, scheduleWorkspaceRoots } from "./types.ts";
 
 export const SCHEDULE_EXECUTION_PROMPT =
 	"你正在独立执行一个定时任务。请完成下面的任务，并在最终回复中清楚说明执行结果。不要假设你能看到创建任务时的对话。";
@@ -58,10 +59,11 @@ export function createScheduledRunExecutor(options: {
 }): (claim: ScheduleRunClaim, signal: AbortSignal) => Promise<ScheduleExecutionResult> {
 	return async (claim, signal) => {
 		if (signal.aborted) throw new Error("aborted");
-		const cwd = assertWorkspace(claim.snapshot.target.cwd);
+		const workspaceRoots = scheduleWorkspaceRoots(claim.snapshot.target).map(assertWorkspace);
+		const cwd = workspaceRoots[0]!;
 		let sandbox: Awaited<ReturnType<typeof createWorkspaceSandbox>>;
 		try {
-			sandbox = await createWorkspaceSandbox({ cwd, workspaceRoots: [cwd], signal });
+			sandbox = await createWorkspaceSandbox({ cwd, workspaceRoots, signal });
 		} catch (error) {
 			if (signal.aborted) throw new Error("aborted", { cause: error });
 			throw new ScheduleError(
@@ -80,6 +82,22 @@ export function createScheduledRunExecutor(options: {
 		let executionResult: ScheduleExecutionResult | undefined;
 		let executionError: unknown;
 		try {
+			services = await createAgentSessionServices({
+				cwd,
+				agentDir: options.agentDir,
+				resourceLoaderOptions: {
+					noExtensions: true,
+					noPromptTemplates: true,
+					noThemes: true,
+				},
+			});
+			const model = services.modelRegistry.find(claim.snapshot.model.provider, claim.snapshot.model.modelId);
+			if (!model || !services.modelRegistry.hasConfiguredAuth(model)) {
+				throw new ScheduleError(
+					"MODEL_UNAVAILABLE",
+					`Scheduled task model is unavailable: ${claim.snapshot.model.provider}/${claim.snapshot.model.modelId}`,
+				);
+			}
 			sessionManager = SessionManager.create(cwd, getDefaultSessionDir(cwd, options.agentDir), {
 				id: sessionId,
 				mode: "chat",
@@ -87,26 +105,18 @@ export function createScheduledRunExecutor(options: {
 				permissionMode: "ask",
 				scheduled: { taskId: claim.taskId, runId: claim.runId },
 			});
-			services = await createAgentSessionServices({
-				cwd,
-				agentDir: options.agentDir,
-				resourceLoaderOptions: {
-					noExtensions: true,
-					noSkills: true,
-					noPromptTemplates: true,
-					noThemes: true,
-				},
-			});
+			sessionManager.appendSessionInfo(claim.snapshot.name);
 			created = await createAgentSessionFromServices({
 				services,
 				sessionManager,
+				model,
 				thinkingSelection: undefined,
 				tools: [...UNATTENDED_TOOL_NAMES],
 				customTools: [],
 				additionalSystemPrompt: SCHEDULE_EXECUTION_PROMPT,
 				includeAutoMemory: false,
 				unattendedExecution: createUnattendedExecutionProfile({
-					workspaceRoots: [cwd],
+					workspaceRoots,
 					bashOperations: sandbox.operations,
 				}),
 			});
@@ -116,10 +126,22 @@ export function createScheduledRunExecutor(options: {
 				abortListener();
 				throw new Error("aborted");
 			}
-			await created.session.prompt(claim.snapshot.instruction, {
-				expandPromptTemplates: false,
-				source: "rpc",
+			const input = { text: claim.snapshot.instruction };
+			const identity = identifySubmitPromptRequest(claim.runId, input);
+			created.session.assertCanDrainAgentEventPersistence();
+			created.session.assertDurablePromptCapacity(input);
+			created.session.prepareDurablePrompt(input);
+			sessionManager.appendRuntimeControl({
+				type: "runtime_operation",
+				operationId: identity.operationId,
+				requestId: identity.requestId,
+				requestHash: identity.requestHash,
+				kind: "turn",
+				state: "accepted",
+				input,
 			});
+			created.session.beginDurableDirectTurn(identity, input);
+			await created.session.runAcceptedDurablePrompt(identity.turnId, input);
 			await created.session.waitForIdle();
 			if (signal.aborted) throw new Error("aborted");
 			const finalAssistant = [...created.session.messages].reverse().find((message) => message.role === "assistant");

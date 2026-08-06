@@ -81,7 +81,7 @@ describe("scheduled session metadata", () => {
 		expect(() => SessionManager.openReadOnly(mixed)).toThrow(/both scheduled and a subagent/);
 	});
 
-	it("rejects branch, fork, import, and mismatched permanent deletion", async () => {
+	it("rejects branch, fork, import, and every single-session deletion path", async () => {
 		const { root, cwd, sessionDir } = fixture();
 		const manager = SessionManager.create(cwd, sessionDir, {
 			id: "session-owned",
@@ -97,26 +97,5 @@ describe("scheduled session metadata", () => {
 			error: expect.stringMatching(/task/),
 		});
 		expect(existsSync(path)).toBe(true);
-
-		expect(
-			await SessionManager.deleteSession(path, {
-				permanent: true,
-				expectedScheduled: { taskId: "task-other", runId: "run-owned" },
-			}),
-		).toMatchObject({ ok: false });
-		expect(existsSync(path)).toBe(true);
-		expect(
-			await SessionManager.deleteSession(path, {
-				permanent: true,
-				expectedScheduled: { taskId: "task-owned", runId: "run-owned" },
-			}),
-		).toEqual({ ok: true, method: "unlink" });
-		expect(existsSync(path)).toBe(false);
-		expect(
-			await SessionManager.deleteSession(path, {
-				permanent: true,
-				expectedScheduled: { taskId: "task-owned", runId: "run-owned" },
-			}),
-		).toEqual({ ok: true, method: "unlink" });
 	});
 });

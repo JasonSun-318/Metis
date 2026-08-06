@@ -111,6 +111,32 @@ describe("v7 first-class subagent records", () => {
 		).toThrow("eventIds must not contain duplicates");
 	});
 
+	it("round-trips optional terminal tool-call usage and rejects fractions", () => {
+		const base = {
+			id: "record-usage",
+			parentId: null,
+			timestamp: new Date(0).toISOString(),
+			type: "subagent_state",
+			agentId: "agent-child-1",
+			runId: "run-1",
+			status: "done",
+			reason: "completed",
+		};
+		const usage = {
+			model: { provider: "openai", modelId: "gpt-test" },
+			input: 1,
+			output: 2,
+			cacheRead: 3,
+			cacheWrite: 4,
+			elapsedMs: 5,
+			toolCalls: 6,
+		};
+		expect(parseSessionControlEntry({ ...base, usage })).toMatchObject({ usage });
+		expect(() => parseSessionControlEntry({ ...base, usage: { ...usage, toolCalls: 1.5 } })).toThrow(
+			"toolCalls must be a non-negative integer",
+		);
+	});
+
 	it("requires v11 for mailbox controls and migrates an ordinary v10 journal", () => {
 		const root = tempRoot();
 		const ordinaryPath = join(root, "ordinary-v10.jsonl");
