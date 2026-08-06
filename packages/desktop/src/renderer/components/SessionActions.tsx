@@ -1,6 +1,9 @@
 import type { SessionSummary } from "@arcmind/app-protocol";
 import { DotsThree, PencilSimple, Trash } from "@phosphor-icons/react";
-import { type FormEvent, useEffect, useRef, useState } from "react";
+import { type CSSProperties, type FormEvent, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { useTranslation } from "react-i18next";
+import { actionMenuPosition } from "./action-menu-position.ts";
 import { DialogFrame } from "./ProjectActions.tsx";
 
 interface SessionActionsProps {
@@ -24,17 +27,23 @@ export function SessionActions({
 	onRename,
 	session,
 }: SessionActionsProps) {
+	const { t } = useTranslation();
 	const [menuOpen, setMenuOpen] = useState(false);
 	const [dialog, setDialog] = useState<"rename" | "delete" | null>(null);
 	const [name, setName] = useState(displayName);
 	const [pending, setPending] = useState(false);
 	const [error, setError] = useState<string | null>(null);
+	const [menuPosition, setMenuPosition] = useState<CSSProperties>({});
 	const root = useRef<HTMLDivElement>(null);
 	const trigger = useRef<HTMLButtonElement>(null);
+	const menu = useRef<HTMLDivElement>(null);
 	const renameItem = useRef<HTMLButtonElement>(null);
 	const deleteItem = useRef<HTMLButtonElement>(null);
 	const renameInput = useRef<HTMLInputElement>(null);
 	const cancelButton = useRef<HTMLButtonElement>(null);
+	const updateMenuPosition = useCallback(() => {
+		if (trigger.current) setMenuPosition(actionMenuPosition(trigger.current.getBoundingClientRect(), 146, 2));
+	}, []);
 
 	const closeMenu = (restoreFocus = true) => {
 		setMenuOpen(false);
@@ -51,7 +60,8 @@ export function SessionActions({
 		if (!menuOpen) return;
 		queueMicrotask(() => renameItem.current?.focus());
 		const onPointerDown = (event: PointerEvent) => {
-			if (!root.current?.contains(event.target as Node)) closeMenu(false);
+			const node = event.target as Node;
+			if (!root.current?.contains(node) && !menu.current?.contains(node)) closeMenu(false);
 		};
 		const onKeyDown = (event: KeyboardEvent) => {
 			if (event.key !== "Escape") return;
@@ -60,11 +70,18 @@ export function SessionActions({
 		};
 		document.addEventListener("pointerdown", onPointerDown);
 		document.addEventListener("keydown", onKeyDown);
+		window.addEventListener("resize", updateMenuPosition);
+		window.addEventListener("scroll", updateMenuPosition, true);
 		return () => {
 			document.removeEventListener("pointerdown", onPointerDown);
 			document.removeEventListener("keydown", onKeyDown);
+			window.removeEventListener("resize", updateMenuPosition);
+			window.removeEventListener("scroll", updateMenuPosition, true);
 		};
-	}, [menuOpen]);
+	}, [menuOpen, updateMenuPosition]);
+	useLayoutEffect(() => {
+		if (menuOpen) updateMenuPosition();
+	}, [menuOpen, updateMenuPosition]);
 
 	const submitRename = async (event: FormEvent) => {
 		event.preventDefault();
@@ -98,11 +115,11 @@ export function SessionActions({
 	};
 
 	return (
-		<div className="session-actions" ref={root}>
+		<div className="session-actions" data-open={menuOpen} ref={root}>
 			<button
 				aria-expanded={menuOpen}
 				aria-haspopup="menu"
-				aria-label={`Actions for ${displayName}`}
+				aria-label={t("Actions for {{name}}", { name: displayName })}
 				disabled={disabled}
 				onClick={() => setMenuOpen((open) => !open)}
 				ref={trigger}
@@ -110,9 +127,9 @@ export function SessionActions({
 			>
 				<DotsThree aria-hidden="true" size={17} weight="bold" />
 			</button>
-			{menuOpen && (
+			{menuOpen && createPortal((
 				<div
-					aria-label={`${displayName} session actions`}
+					aria-label={t("{{name}} session actions", { name: displayName })}
 					className="session-action-menu"
 					onKeyDown={(event) => {
 						if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
@@ -128,7 +145,9 @@ export function SessionActions({
 									: items[(current <= 0 ? items.length : current) - 1];
 						target?.focus();
 					}}
+					ref={menu}
 					role="menu"
+					style={menuPosition}
 				>
 					<button
 						onClick={() => {
@@ -141,7 +160,7 @@ export function SessionActions({
 						role="menuitem"
 						type="button"
 					>
-						<PencilSimple aria-hidden="true" size={15} /> Rename
+						<PencilSimple aria-hidden="true" size={15} /> {t("Rename")}
 					</button>
 					<button
 						className="session-delete-menu-item"
@@ -155,40 +174,40 @@ export function SessionActions({
 						role="menuitem"
 						type="button"
 					>
-						<Trash aria-hidden="true" size={15} /> Delete
+						<Trash aria-hidden="true" size={15} /> {t("Delete")}
 					</button>
 				</div>
-			)}
+			), document.body)}
 			{dialog === "rename" && (
 				<DialogFrame cancellable={!pending} descriptionId="session-rename-description" initialFocus={renameInput} onCancel={cancelDialog} titleId="session-rename-title">
-					<h2 id="session-rename-title">Rename session</h2>
-					<p id="session-rename-description">Change the session name shown in ArcMind. Messages are unchanged.</p>
+					<h2 id="session-rename-title">{t("Rename session")}</h2>
+					<p id="session-rename-description">{t("Change the session name shown in ArcMind. Messages are unchanged.")}</p>
 					<form onSubmit={(event) => void submitRename(event)}>
-						<label htmlFor="session-rename-input">Session name</label>
+						<label htmlFor="session-rename-input">{t("Session name")}</label>
 						<input autoComplete="off" id="session-rename-input" onChange={(event) => setName([...event.target.value].slice(0, 80).join(""))} ref={renameInput} value={name} />
-						{error && <p role="alert">{error}</p>}
+						{error && <p role="alert">{t(error)}</p>}
 						<div className="project-dialog-actions">
-							<button className="button-secondary" disabled={pending} onClick={cancelDialog} type="button">Cancel</button>
-							<button disabled={pending || !name.trim()} type="submit">{pending ? "Renaming…" : "Rename"}</button>
+							<button className="button-secondary" disabled={pending} onClick={cancelDialog} type="button">{t("Cancel")}</button>
+							<button disabled={pending || !name.trim()} type="submit">{t(pending ? "Renaming…" : "Rename")}</button>
 						</div>
 					</form>
 				</DialogFrame>
 			)}
 			{dialog === "delete" && (
 				<DialogFrame cancellable={!pending} descriptionId="session-delete-description" initialFocus={cancelButton} onCancel={cancelDialog} titleId="session-delete-title">
-					<h2 id="session-delete-title">Delete session?</h2>
+					<h2 id="session-delete-title">{t("Delete session?")}</h2>
 					<div id="session-delete-description">
-						<p><strong>{displayName}</strong> and its session-owned data will move to Trash.</p>
+						<p>{t("{{name}} and its session-owned data will move to Trash.", { name: displayName })}</p>
 						<ul>
-							<li>Images, attachments, tool outputs, Subagents, document work, and recovery files are included.</li>
-							<li>Project memory, Skills, schedules, other sessions, and source files are unchanged.</li>
+							<li>{t("Images, attachments, tool outputs, Subagents, document work, and recovery files are included.")}</li>
+							<li>{t("Project memory, Skills, schedules, other sessions, and source files are unchanged.")}</li>
 						</ul>
-						{error && <p role="alert">{error}</p>}
-						{pending && <p role="status">Moving session data to Trash…</p>}
+						{error && <p role="alert">{t(error)}</p>}
+						{pending && <p role="status">{t("Moving session data to Trash…")}</p>}
 					</div>
 					<div className="project-dialog-actions">
-						<button className="button-secondary" disabled={pending} onClick={cancelDialog} ref={cancelButton} type="button">Cancel</button>
-						<button className="project-delete-confirm" disabled={pending || deleteDisabled} onClick={() => void confirmDelete()} type="button">{pending ? "Deleting…" : "Move to Trash"}</button>
+						<button className="button-secondary" disabled={pending} onClick={cancelDialog} ref={cancelButton} type="button">{t("Cancel")}</button>
+						<button className="project-delete-confirm" disabled={pending || deleteDisabled} onClick={() => void confirmDelete()} type="button">{t(pending ? "Deleting…" : "Move to Trash")}</button>
 					</div>
 				</DialogFrame>
 			)}

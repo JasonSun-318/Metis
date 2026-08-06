@@ -1,6 +1,9 @@
 import type { ClientResult } from "@arcmind/app-protocol";
 import { DotsThree, NotePencil, PencilSimple, PushPin, PushPinSimple, Trash } from "@phosphor-icons/react";
-import { type FormEvent, type RefObject, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { type CSSProperties, type FormEvent, type RefObject, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { useTranslation } from "react-i18next";
+import { actionMenuPosition } from "./action-menu-position.ts";
 import type { ProjectSessionGroup } from "./SessionSidebar.tsx";
 
 type ProjectDeletePreview = ClientResult<"project/deletePreview">;
@@ -113,18 +116,24 @@ export function ProjectActions({
 	onPreviewDelete,
 	onRename,
 }: ProjectActionsProps) {
+	const { t } = useTranslation();
 	const [menuOpen, setMenuOpen] = useState(false);
 	const [dialog, setDialog] = useState<"rename" | "delete" | null>(null);
 	const [deleteState, setDeleteState] = useState<DeleteDialogState>({ status: "loading" });
 	const [alias, setAlias] = useState(group.name);
+	const [menuPosition, setMenuPosition] = useState<CSSProperties>({});
 	const root = useRef<HTMLDivElement>(null);
 	const actionsButton = useRef<HTMLButtonElement>(null);
+	const menu = useRef<HTMLDivElement>(null);
 	const renameMenuItem = useRef<HTMLButtonElement>(null);
 	const deleteMenuItem = useRef<HTMLButtonElement>(null);
 	const renameInput = useRef<HTMLInputElement>(null);
 	const deleteInitialFocus = useRef<HTMLButtonElement>(null);
 	const restoreMenuItem = useRef<"rename" | "delete" | null>(null);
 	const previewGeneration = useRef(0);
+	const updateMenuPosition = useCallback(() => {
+		if (actionsButton.current) setMenuPosition(actionMenuPosition(actionsButton.current.getBoundingClientRect(), 146, 3));
+	}, []);
 
 	const closeMenu = (restoreFocus = true) => {
 		setMenuOpen(false);
@@ -169,7 +178,8 @@ export function ProjectActions({
 			else renameMenuItem.current?.focus();
 		});
 		const onPointerDown = (event: PointerEvent) => {
-			if (!root.current?.contains(event.target as Node)) closeMenu(false);
+			const node = event.target as Node;
+			if (!root.current?.contains(node) && !menu.current?.contains(node)) closeMenu(false);
 		};
 		const onKeyDown = (event: KeyboardEvent) => {
 			if (event.key !== "Escape") return;
@@ -178,11 +188,18 @@ export function ProjectActions({
 		};
 		document.addEventListener("pointerdown", onPointerDown);
 		document.addEventListener("keydown", onKeyDown);
+		window.addEventListener("resize", updateMenuPosition);
+		window.addEventListener("scroll", updateMenuPosition, true);
 		return () => {
 			document.removeEventListener("pointerdown", onPointerDown);
 			document.removeEventListener("keydown", onKeyDown);
+			window.removeEventListener("resize", updateMenuPosition);
+			window.removeEventListener("scroll", updateMenuPosition, true);
 		};
-	}, [menuOpen]);
+	}, [menuOpen, updateMenuPosition]);
+	useLayoutEffect(() => {
+		if (menuOpen) updateMenuPosition();
+	}, [menuOpen, updateMenuPosition]);
 	useEffect(() => {
 		if (dialog !== "rename") return;
 		queueMicrotask(() => {
@@ -209,16 +226,16 @@ export function ProjectActions({
 			setDeleteState({ status: "error", message: errorMessage(cause) });
 		}
 	};
-	const modeLabel = group.mode === "chat" ? "Chat" : "Code";
-	const otherModeLabel = group.mode === "chat" ? "Code" : "Chat";
+	const modeLabel = t(group.mode === "chat" ? "Chat" : "Code");
+	const otherModeLabel = t(group.mode === "chat" ? "Code" : "Chat");
 
 	return (
-		<div className="project-actions" ref={root}>
+		<div className="project-actions" data-open={menuOpen} ref={root}>
 			<div className="project-action-buttons">
 				<button
 					aria-expanded={menuOpen}
 					aria-haspopup="menu"
-					aria-label="Project actions"
+					aria-label={t("Project actions")}
 					onClick={(event) => {
 						event.stopPropagation();
 						if (menuOpen) closeMenu();
@@ -234,7 +251,7 @@ export function ProjectActions({
 					<DotsThree aria-hidden="true" size={17} weight="bold" />
 				</button>
 				<button
-					aria-label={`New task in ${group.name}`}
+					aria-label={t("New task in {{name}}", { name: group.name })}
 					disabled={busy}
 					onClick={(event) => {
 						event.stopPropagation();
@@ -247,9 +264,9 @@ export function ProjectActions({
 					<NotePencil aria-hidden="true" size={15} />
 				</button>
 			</div>
-			{menuOpen && (
+			{menuOpen && createPortal((
 				<div
-					aria-label={`${group.name} project actions`}
+					aria-label={t("{{name}} project actions", { name: group.name })}
 					className="project-action-menu"
 					onKeyDown={(event) => {
 						if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
@@ -266,7 +283,9 @@ export function ProjectActions({
 									: items[(current <= 0 ? items.length : current) - 1];
 						target?.focus();
 					}}
+					ref={menu}
 					role="menu"
+					style={menuPosition}
 				>
 					<button
 						onClick={() => {
@@ -278,7 +297,7 @@ export function ProjectActions({
 						role="menuitem"
 						type="button"
 					>
-						<PencilSimple aria-hidden="true" size={15} /> Rename
+						<PencilSimple aria-hidden="true" size={15} /> {t("Rename")}
 					</button>
 					<button
 						onClick={() => {
@@ -291,7 +310,7 @@ export function ProjectActions({
 						{group.pinned
 							? <PushPin aria-hidden="true" size={15} />
 							: <PushPinSimple aria-hidden="true" size={15} />}
-						{group.pinned ? "Unpin" : "Pin"}
+						{t(group.pinned ? "Unpin" : "Pin")}
 					</button>
 					<button
 						className="project-delete-menu-item"
@@ -305,10 +324,10 @@ export function ProjectActions({
 						role="menuitem"
 						type="button"
 					>
-						<Trash aria-hidden="true" size={15} /> Delete
+						<Trash aria-hidden="true" size={15} /> {t("Delete")}
 					</button>
 				</div>
-			)}
+			), document.body)}
 			{dialog === "rename" && (
 				<DialogFrame
 					cancellable
@@ -317,10 +336,10 @@ export function ProjectActions({
 					onCancel={cancelDialog}
 					titleId="project-rename-title"
 				>
-					<h2 id="project-rename-title">Rename project</h2>
-					<p id="project-rename-description">Change this Desktop display name only. The folder and sessions are unchanged.</p>
+					<h2 id="project-rename-title">{t("Rename project")}</h2>
+					<p id="project-rename-description">{t("Change this Desktop display name only. The folder and sessions are unchanged.")}</p>
 					<form onSubmit={submitRename}>
-						<label htmlFor="project-rename-input">Display name</label>
+						<label htmlFor="project-rename-input">{t("Display name")}</label>
 						<input
 							autoComplete="off"
 							id="project-rename-input"
@@ -329,8 +348,8 @@ export function ProjectActions({
 							value={alias}
 						/>
 						<div className="project-dialog-actions">
-							<button className="button-secondary" onClick={cancelDialog} type="button">Cancel</button>
-							<button type="submit">Rename</button>
+							<button className="button-secondary" onClick={cancelDialog} type="button">{t("Cancel")}</button>
+							<button type="submit">{t("Rename")}</button>
 						</div>
 					</form>
 				</DialogFrame>
@@ -343,28 +362,28 @@ export function ProjectActions({
 					onCancel={cancelDialog}
 					titleId="project-delete-title"
 				>
-					<h2 id="project-delete-title">Delete {modeLabel} project?</h2>
+					<h2 id="project-delete-title">{t("Delete {{mode}} project?", { mode: modeLabel })}</h2>
 					<div id="project-delete-description">
-						{deleteState.status === "loading" && <p role="status">Checking project data…</p>}
+						{deleteState.status === "loading" && <p role="status">{t("Checking project data…")}</p>}
 						{deleteState.status === "error" && (
-							<><p role="alert">{deleteState.message}</p><p>No data was removed. Retry to load a fresh preview.</p></>
+							<><p role="alert">{t(deleteState.message)}</p><p>{t("No data was removed. Retry to load a fresh preview.")}</p></>
 						)}
 						{(deleteState.status === "ready" || deleteState.status === "deleting") && (
 							<>
-								<p><strong>{deleteState.preview.sessionCount} {modeLabel} sessions</strong>, including archived sessions, will move to Trash.</p>
+								<p>{t("{{count}} {{mode}} sessions, including archived sessions, will move to Trash.", { count: deleteState.preview.sessionCount, mode: modeLabel })}</p>
 								<p className="project-delete-path"><code>{deleteState.preview.cwd}</code></p>
 								<ul>
-									<li>Matching attachments, images, tool outputs, Subagents, document work, and {modeLabel} project memory are included.</li>
-									<li>The {otherModeLabel} project and its memory are unchanged.</li>
-									<li>The source folder and its files are unchanged.</li>
-									<li>Schedules are not deleted automatically.</li>
+									<li>{t("Matching attachments, images, tool outputs, Subagents, document work, and {{mode}} project memory are included.", { mode: modeLabel })}</li>
+									<li>{t("The {{mode}} project and its memory are unchanged.", { mode: otherModeLabel })}</li>
+									<li>{t("The source folder and its files are unchanged.")}</li>
+									<li>{t("Schedules are not deleted automatically.")}</li>
 								</ul>
 								{deleteState.preview.blockingScheduleCount > 0 && (
 									<p className="project-delete-blocker" role="alert">
-										{deleteState.preview.blockingScheduleCount} fixed-workspace schedules block deletion. Delete them from the schedule workflow first.
+										{t("{{count}} fixed-workspace schedules block deletion. Delete them from the schedule workflow first.", { count: deleteState.preview.blockingScheduleCount })}
 									</p>
 								)}
-								{deleteState.status === "deleting" && <p role="status">Moving project data to Trash…</p>}
+								{deleteState.status === "deleting" && <p role="status">{t("Moving project data to Trash…")}</p>}
 							</>
 						)}
 					</div>
@@ -376,9 +395,9 @@ export function ProjectActions({
 							ref={deleteInitialFocus}
 							type="button"
 						>
-							Cancel
+							{t("Cancel")}
 						</button>
-						{deleteState.status === "error" && <button onClick={loadDeletePreview} type="button">Retry</button>}
+						{deleteState.status === "error" && <button onClick={loadDeletePreview} type="button">{t("Retry")}</button>}
 						{(deleteState.status === "ready" || deleteState.status === "deleting") && (
 							<button
 								className="project-delete-confirm"
@@ -386,7 +405,7 @@ export function ProjectActions({
 								onClick={() => void confirmDelete()}
 								type="button"
 							>
-								{deleteState.status === "deleting" ? "Deleting…" : "Move to Trash"}
+								{t(deleteState.status === "deleting" ? "Deleting…" : "Move to Trash")}
 							</button>
 						)}
 					</div>

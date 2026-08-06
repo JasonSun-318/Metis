@@ -1,12 +1,26 @@
-import type { AgentMode, ClientResult, SessionSummary } from "@arcmind/app-protocol";
-import { ChatCircleDots, ClockCountdown, Code, FolderSimple, MagnifyingGlass, NotePencil, SidebarSimple, Sparkle } from "@phosphor-icons/react";
+import type { AgentMode, ClientResult, ScheduleTaskView, SessionSummary } from "@arcmind/app-protocol";
+import { CaretDown, CaretRight, ChatCircleDots, ClockCountdown, Code, FolderSimple, MagnifyingGlass, NotePencil, SidebarSimple, Sparkle } from "@phosphor-icons/react";
+import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { localeForIntl } from "../i18n.ts";
 import type { AppStoreSnapshot } from "../store/app-store.ts";
 import type { ProjectPreference, ProjectPreferenceMap } from "../store/project-preferences.ts";
+import {
+	DEFAULT_SESSION_GROUPING,
+	groupSessionsByDate,
+	groupSessionsByUnread,
+	loadSessionGroupingPreferences,
+	saveSessionGroupingPreferences,
+	type SessionGroupBy,
+	sessionsForMode,
+} from "../store/session-grouping.ts";
 import { ProjectActions } from "./ProjectActions.tsx";
+import { AccountMenu } from "./AccountMenu.tsx";
 import { SessionActions } from "./SessionActions.tsx";
+import { SessionGroupingMenu } from "./SessionGroupingMenu.tsx";
 
-export type SidebarDestination = "tasks" | "skills";
+export type SidebarDestination = "tasks" | "skills" | "schedules" | "settings";
 
 interface SessionSidebarProps {
 	readonly state: AppStoreSnapshot;
@@ -29,10 +43,15 @@ interface SessionSidebarProps {
 		group: ProjectSessionGroup,
 	) => Promise<ClientResult<"project/deletePreview">>;
 	readonly onRenameProject: (group: ProjectSessionGroup, alias: string) => void;
+	readonly onSettings: () => void;
 	readonly onSkills: () => void;
+	readonly onSchedules: () => void;
+	readonly onOpenSchedule: (taskId: string) => void;
 	readonly onToggle: () => void;
 	readonly projectBusy: (group: ProjectSessionGroup) => boolean;
 	readonly preferences: ProjectPreferenceMap;
+	readonly scheduleTasks: readonly ScheduleTaskView[];
+	readonly selectedScheduleTaskId: string | null;
 }
 
 export interface ProjectSessionGroup {
@@ -63,9 +82,7 @@ export function buildSessionTree(
 	}
 	const projects = new Map<string, SessionSummary[]>();
 	const tasks: SessionSummary[] = [];
-	for (const sessionId of state.sessionOrder) {
-		const session = state.sessionsById.get(sessionId);
-		if (!session || session.mode !== mode) continue;
+	for (const session of sessionsForMode(state, mode)) {
 		if (session.cwdOrigin === "managed" || !session.cwd) {
 			tasks.push(session);
 			continue;
@@ -84,9 +101,9 @@ export function buildSessionTree(
 	};
 }
 
-export function taskTitle(session: SessionSummary): string {
+export function taskTitle(session: SessionSummary, locale: Intl.LocalesArgument = "en-US", taskLabel = "Task"): string {
 	if (session.name) return session.name;
-	return `Task · ${new Date(session.createdAt).toLocaleDateString([], { month: "short", day: "numeric" })}`;
+	return `${taskLabel} · ${new Date(session.createdAt).toLocaleDateString(locale, { month: "short", day: "numeric" })}`;
 }
 
 interface RendererWindowView {
@@ -111,7 +128,8 @@ function SessionButton({ busy, deleteDisabled, onDelete, onRename, selected, ses
 	readonly session: SessionSummary;
 	readonly onOpen: (sessionId: string) => Promise<void>;
 }) {
-	const title = taskTitle(session);
+	const { t, i18n } = useTranslation();
+	const title = taskTitle(session, localeForIntl(i18n.resolvedLanguage), t("Task"));
 	return (
 		<div className="session-row" data-scheduled={session.scheduled ? "true" : undefined}>
 			<button
@@ -123,10 +141,10 @@ function SessionButton({ busy, deleteDisabled, onDelete, onRename, selected, ses
 				title={title}
 				type="button"
 			>
-				<span>{title}</span>
+				<span className="session-button-title"><i aria-hidden="true" className={session.unread ? "unread" : undefined} />{title}</span>
 				{session.scheduled
-					? <small className="session-scheduled-badge"><ClockCountdown aria-hidden="true" size={11} /> Scheduled</small>
-					: session.state !== "idle" && <small>{session.state.replace("_", " ")}</small>}
+					? <small className="session-scheduled-badge"><ClockCountdown aria-hidden="true" size={11} /> {t("Scheduled")}</small>
+					: session.state !== "idle" && <small>{t(session.state.replace("_", " "))}</small>}
 			</button>
 			{!session.scheduled && (
 				<SessionActions
@@ -139,6 +157,21 @@ function SessionButton({ busy, deleteDisabled, onDelete, onRename, selected, ses
 				/>
 			)}
 		</div>
+	);
+}
+
+function SessionSection({ children, label }: { readonly children: ReactNode; readonly label: string }) {
+	const [open, setOpen] = useState(true);
+	return (
+		<section className="session-section" data-open={open}>
+			<button aria-expanded={open} className="session-section-heading" onClick={() => setOpen((current) => !current)} type="button">
+				<span>{label}</span>
+				{open ? <CaretDown aria-hidden="true" size={12} /> : <CaretRight aria-hidden="true" size={12} />}
+			</button>
+			<div className="session-section-drawer" inert={!open}>
+				<div className="session-section-items">{children}</div>
+			</div>
+		</section>
 	);
 }
 
@@ -180,12 +213,13 @@ function ProjectGroup({
 	readonly isDeleteDisabled: (session: SessionSummary) => boolean;
 	readonly selectedSessionId: string | null;
 }) {
+	const { t } = useTranslation();
 	const [open, setOpen] = useState(true);
 	return (
 		<div className="project-group" data-open={open}>
 			<button
 				aria-expanded={open}
-				aria-label={`${open ? "Collapse" : "Expand"} ${group.name} project`}
+				aria-label={t(open ? "Collapse {{name}} project" : "Expand {{name}} project", { name: group.name })}
 				className="project-heading"
 				onClick={() => setOpen((current) => !current)}
 				title={group.cwd}
@@ -233,15 +267,31 @@ export function SessionSidebar({
 	onPreviewProjectDelete,
 	onRenameProject,
 	onRenameSession,
+	onSettings,
 	onSkills,
+	onSchedules,
+	onOpenSchedule,
 	onToggle,
 	projectBusy,
 	preferences,
+	scheduleTasks,
+	selectedScheduleTaskId,
 }: SessionSidebarProps) {
+	const { t, i18n } = useTranslation();
+	const locale = localeForIntl(i18n.resolvedLanguage);
 	const tree = buildSessionTree(state, mode, preferences);
-	const hasSessions = tree.projects.length > 0 || tree.tasks.length > 0;
 	const [fullscreen, setFullscreen] = useState(windowIsFullscreen);
 	const [activeProjectActions, setActiveProjectActions] = useState<string | null>(null);
+	const [groupingByMode, setGroupingByMode] = useState(() => {
+		try {
+			return loadSessionGroupingPreferences(localStorage);
+		} catch {
+			return DEFAULT_SESSION_GROUPING;
+		}
+	});
+	const grouping = groupingByMode[mode];
+	const sessions = sessionsForMode(state, mode);
+	const hasSessions = sessions.length > 0;
 	useEffect(() => {
 		const runtime = globalThis as RendererWindowView;
 		const updateFullscreen = () => setFullscreen(windowIsFullscreen());
@@ -255,41 +305,71 @@ export function SessionSidebar({
 		state.interactionOrder.some((interactionId) =>
 			state.interactionsById.get(interactionId)?.sessionId === session.sessionId,
 		);
+	const selectedSessionId = !newTaskOpen && destination === "tasks" ? state.activeSessionId : null;
+	const renderSession = (session: SessionSummary) => (
+		<SessionButton
+			busy={busy}
+			deleteDisabled={isDeleteDisabled(session)}
+			key={session.sessionId}
+			onDelete={onDeleteSession}
+			onOpen={onOpen}
+			onRename={onRenameSession}
+			selected={selectedSessionId === session.sessionId}
+			session={session}
+		/>
+	);
 
 	return (
-		<aside className="session-sidebar" aria-label="Tasks" data-fullscreen={fullscreen || undefined}>
+		<aside className="session-sidebar" aria-label={t("Tasks")} data-fullscreen={fullscreen || undefined}>
 			<div className="window-drag-region">
 				<div className="sidebar-titlebar-controls">
-					<button aria-label="Hide sessions sidebar" onClick={onToggle} type="button">
+					<button aria-label={t("Hide sessions sidebar")} onClick={onToggle} type="button">
 						<SidebarSimple aria-hidden="true" size={15} />
 					</button>
-					<button aria-label="Search" title="Search (coming soon)" type="button">
+					<button aria-label={t("Search")} title={t("Search (coming soon)")} type="button">
 						<MagnifyingGlass aria-hidden="true" size={15} />
 					</button>
 				</div>
 			</div>
-			<div className="mode-switch" data-mode={mode} aria-label="Workspace mode" role="group">
+			<div className="mode-switch" data-mode={mode} aria-label={t("Workspace mode")} role="group">
 				<span aria-hidden="true" className="mode-switch-indicator" />
 				<button aria-pressed={mode === "chat"} className={mode === "chat" ? "active" : ""} disabled={busy} onClick={() => onModeChange("chat")} type="button">
 					<ChatCircleDots aria-hidden="true" size={15} />
-					Chat
+					{t("Chat")}
 				</button>
 				<button aria-pressed={mode === "code"} className={mode === "code" ? "active" : ""} disabled={busy} onClick={() => onModeChange("code")} type="button">
 					<Code aria-hidden="true" size={15} />
-					Code
+					{t("Code")}
 				</button>
 			</div>
 			<button aria-current={newTaskOpen ? "page" : undefined} className="new-task-button" disabled={busy} onClick={onNewTask} type="button">
 				<NotePencil aria-hidden="true" size={18} />
-				New task
+				{t("New task")}
 			</button>
 			<button aria-current={destination === "skills" ? "page" : undefined} className="sidebar-nav-button" disabled={busy} onClick={onSkills} type="button">
 				<Sparkle aria-hidden="true" size={17} />
-				Skills
+				{t("Skills")}
 			</button>
-			<nav className="project-list" aria-label={`${mode === "chat" ? "Chat" : "Code"} sessions`}>
-				{!hasSessions && <p className="empty-copy">No {mode} tasks yet.</p>}
-				{tree.projects.map((group) => (
+			{mode === "chat" && <button aria-current={destination === "schedules" ? "page" : undefined} className="sidebar-nav-button" disabled={busy} onClick={onSchedules} type="button"><ClockCountdown aria-hidden="true" size={17} />{t("Scheduled tasks")}</button>}
+			{mode === "chat" && scheduleTasks.length > 0 && <section aria-label={t("Scheduled tasks")} className="scheduled-task-quick-list">{scheduleTasks.slice(0, 6).map((task) => <button aria-current={destination === "schedules" && task.id === selectedScheduleTaskId ? "page" : undefined} key={task.id} onClick={() => onOpenSchedule(task.id)} type="button"><span className={`scheduled-task-quick-dot state-${task.status}`} /><span>{task.name}</span><small>{t(task.schedule.kind === "once" ? "Once" : task.schedule.kind)}</small>{task.unreadCount > 0 && <i>{task.unreadCount}</i>}</button>)}</section>}
+			<nav aria-label={t("{{mode}} sessions", { mode: t(mode === "chat" ? "Chat" : "Code") })} className="project-list" data-empty={!hasSessions || undefined} data-grouping={grouping}>
+				{grouping === "project" && <span className="session-grouping-label">{t("Projects")}</span>}
+				<SessionGroupingMenu
+					onChange={(nextGrouping: SessionGroupBy) => {
+							setGroupingByMode((current) => {
+								const next = { ...current, [mode]: nextGrouping };
+								try {
+									saveSessionGroupingPreferences(localStorage, next);
+								} catch {
+									// The preference remains renderer-local when storage is unavailable.
+								}
+								return next;
+							});
+					}}
+					value={grouping}
+				/>
+				{!hasSessions && <p className="empty-copy">{t("No {{mode}} tasks yet.", { mode: t(mode === "chat" ? "Chat" : "Code") })}</p>}
+				{grouping === "project" && tree.projects.map((group) => (
 					<ProjectGroup
 						actionsActive={activeProjectActions === JSON.stringify([group.mode, group.cwd])}
 						busy={busy || projectBusy(group)}
@@ -306,22 +386,28 @@ export function SessionSidebar({
 						onPreviewProjectDelete={onPreviewProjectDelete}
 						onRenameProject={onRenameProject}
 						onRenameSession={onRenameSession}
-						selectedSessionId={!newTaskOpen && destination === "tasks" ? state.activeSessionId : null}
+						selectedSessionId={selectedSessionId}
 					/>
 				))}
-				{tree.tasks.length > 0 && (
+				{grouping === "project" && tree.tasks.length > 0 && (
 					<section className="loose-tasks">
-						<h2>Tasks</h2>
-						{tree.tasks.map((session) => (
-							<SessionButton busy={busy} deleteDisabled={isDeleteDisabled(session)} key={session.sessionId} onDelete={onDeleteSession} onOpen={onOpen} onRename={onRenameSession} selected={!newTaskOpen && destination === "tasks" && state.activeSessionId === session.sessionId} session={session} />
-						))}
+						<h2>{t("Tasks")}</h2>
+						{tree.tasks.map(renderSession)}
 					</section>
 				)}
+				{grouping === "date" && groupSessionsByDate(sessions, new Date(), locale).map((section) => (
+					<SessionSection key={`${mode}:date:${section.key}`} label={t(section.label)}>
+						{section.sessions.map(renderSession)}
+					</SessionSection>
+				))}
+				{grouping === "unread" && groupSessionsByUnread(sessions).map((section) => (
+					<SessionSection key={`${mode}:unread:${section.key}`} label={t(section.label)}>
+						{section.sessions.map(renderSession)}
+					</SessionSection>
+				))}
+				{grouping === "none" && sessions.map(renderSession)}
 			</nav>
-			<div className="sidebar-footer">
-				<span className="account-mark">A</span>
-				ArcMind
-			</div>
+			<div className="sidebar-footer"><AccountMenu onSettings={onSettings} /></div>
 		</aside>
 	);
 }

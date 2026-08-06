@@ -42,9 +42,31 @@ describe("Project sidebar motion", () => {
 		expect(tokens).toContain("--shadow: 0 1px 4px rgb(150 150 150 / 9%);");
 	});
 
-	it("routes every visible shadow through the shared theme token", () => {
+	it("routes visible shadows through the shared surface or overlay theme tokens", () => {
 		const values = [...css.matchAll(/box-shadow:\s*([^;}]+)/g)].map((match) => match[1].trim());
-		expect(values.every((value) => value === "none" || value === "var(--shadow)")).toBe(true);
+		expect(
+			values.every((value) => value === "none" || value === "var(--shadow)" || value === "var(--overlay-shadow)"),
+		).toBe(true);
+		expect(tokens).toContain("--overlay-shadow: 0 12px 28px rgb(0 0 0 / 35%), 0 2px 6px rgb(0 0 0 / 24%);");
+	});
+
+	it("matches the nested session grouping menu geometry and neutral palette", () => {
+		expect(rule(".session-grouping-label").top).toBe("12px");
+		expect(rule(".session-grouping-label").left).toBe("7px");
+		expect(rule(".session-grouping-label").height).toBe("24px");
+		expect(rule(".session-grouping-control").top).toBe("12px");
+		expect(rule(".session-grouping-control").right).toBe("4px");
+		expect(rule(".session-grouping-trigger").width).toBe("24px");
+		expect(rule(".session-grouping-trigger").height).toBe("24px");
+		expect(rule(".session-grouping-menu-primary, .session-grouping-menu-secondary").background).toBe(
+			"rgb(56, 56, 53)",
+		);
+		expect(rule(".session-grouping-menu-primary, .session-grouping-menu-secondary").boxShadow).toBe(
+			"var(--overlay-shadow)",
+		);
+		expect(rule(".session-grouping-menu-primary > button").height).toBe("25px");
+		expect(rule(".session-grouping-menu-secondary > div > button").minHeight).toBe("24px");
+		expect(rule(".session-grouping-menu-last").borderTopColor).toBe("rgb(77, 77, 73)");
 	});
 
 	it("reveals row actions on interaction and slides sessions into a collapsed drawer", () => {
@@ -79,7 +101,8 @@ describe("Project sidebar motion", () => {
 			"translateY(-9px)",
 		);
 		expect(rule(".session-actions > button").opacity).toBe("0");
-		expect(rule(".session-actions > button").pointerEvents).toBe("none");
+		expect(rule(".session-actions").pointerEvents).toBe("none");
+		expect(rule(".session-actions > button").pointerEvents).toBe("auto");
 		expect(rule(".session-actions").top).toBe("2px");
 		expect(rule(".session-actions").right).toBe("2px");
 		expect(rule(".session-actions > button").width).toBe("24px");
@@ -89,5 +112,9 @@ describe("Project sidebar motion", () => {
 		expect(
 			rule(".session-row:hover > .session-actions > button, .session-actions:focus-within > button").opacity,
 		).toBe("1");
+		expect(rule(".session-action-menu").position).toBe("fixed");
+		expect(rule(".project-action-menu").position).toBe("fixed");
+		expect(rule('.session-actions[data-open="true"] > button').opacity).toBe("1");
+		expect(rule('.project-actions[data-open="true"] .project-action-buttons').opacity).toBe("1");
 	});
 });

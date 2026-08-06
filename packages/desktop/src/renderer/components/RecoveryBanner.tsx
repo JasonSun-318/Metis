@@ -1,6 +1,8 @@
 import type { SessionSummary } from "@arcmind/app-protocol";
+import { useTranslation } from "react-i18next";
 
 export function RecoveryBanner({ session }: { readonly session: SessionSummary }) {
+	const { t } = useTranslation();
 	if (
 		!session.recoveryNotice &&
 		session.state !== "interrupted" &&
@@ -11,9 +13,9 @@ export function RecoveryBanner({ session }: { readonly session: SessionSummary }
 	const message =
 		session.recoveryNotice ??
 		(session.state === "interrupted"
-			? "The last turn was interrupted. Your saved work is intact; send a new message to continue."
+			? t("The last turn was interrupted. Your saved work is intact; send a new message to continue.")
 			: session.state === "corrupt"
-				? "This session is corrupt. ArcMind left the source data untouched."
-				: "This session is currently open in another process.");
+				? t("This session is corrupt. ArcMind left the source data untouched.")
+				: t("This session is currently open in another process."));
 	return <div className="recovery-banner" role="status">{message}</div>;
 }
