@@ -1,6 +1,7 @@
 import type { SkillSummaryView } from "@arcmind/app-protocol";
 import { Briefcase, CaretRight, Paperclip, Plus, Scroll } from "@phosphor-icons/react";
 import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 
 interface ComposerAddMenuProps {
 	readonly disabled: boolean;
@@ -11,6 +12,7 @@ interface ComposerAddMenuProps {
 }
 
 export function ComposerAddMenu({ disabled, skills, onAddFiles, onManageSkills, onSelectSkill }: ComposerAddMenuProps) {
+	const { t } = useTranslation();
 	const [open, setOpen] = useState(false);
 	const [skillsOpen, setSkillsOpen] = useState(false);
 	const rootRef = useRef<HTMLDivElement>(null);
@@ -63,7 +65,7 @@ export function ComposerAddMenu({ disabled, skills, onAddFiles, onManageSkills, 
 			<button
 				aria-expanded={open}
 				aria-haspopup="menu"
-				aria-label="Add to message"
+				aria-label={t("Add to message")}
 				className="composer-plain-button"
 				disabled={disabled}
 				onClick={() => {
@@ -78,9 +80,9 @@ export function ComposerAddMenu({ disabled, skills, onAddFiles, onManageSkills, 
 			{open && (
 				<div className="composer-add-popover">
 					<div className="composer-add-menu" role="menu">
-						<button aria-label="Add files or photos" onClick={() => { close(); onAddFiles(); }} role="menuitem" type="button">
+						<button aria-label={t("Add files or photos")} onClick={() => { close(); onAddFiles(); }} role="menuitem" type="button">
 							<Paperclip aria-hidden="true" size={16} />
-							<span>Add files or photos</span>
+							<span>{t("Add files or photos")}</span>
 							<span aria-hidden="true" className="composer-menu-shortcut">⌘U</span>
 						</button>
 						<div className="composer-menu-separator" role="separator" />
@@ -92,7 +94,7 @@ export function ComposerAddMenu({ disabled, skills, onAddFiles, onManageSkills, 
 							type="button"
 						>
 							<Scroll aria-hidden="true" size={16} />
-							<span>Skills</span>
+							<span>{t("Skills")}</span>
 							<CaretRight aria-hidden="true" className="composer-menu-caret" size={14} />
 						</button>
 						{skillsOpen && (
@@ -106,7 +108,7 @@ export function ComposerAddMenu({ disabled, skills, onAddFiles, onManageSkills, 
 								<div className="composer-menu-separator" role="separator" />
 								<button onClick={() => { close(); onManageSkills(); }} role="menuitem" type="button">
 									<Briefcase aria-hidden="true" size={16} />
-									<span>Manage skills</span>
+									<span>{t("Manage skills")}</span>
 								</button>
 							</div>
 						)}

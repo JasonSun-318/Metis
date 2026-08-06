@@ -5,6 +5,13 @@ export type ThinkingBlock = Extract<ItemContentBlockView, { type: "thinking" }>;
 export type ToolCallBlock = Extract<ItemContentBlockView, { type: "tool_call" }>;
 export type ToolResultBlock = Extract<ItemContentBlockView, { type: "tool_result" }>;
 export type VisibleCodeBlock = Extract<ItemContentBlockView, { type: "text" | "image" | "notice" }>;
+type Translator = (key: string, options?: Record<string, unknown>) => string;
+const identity: Translator = (key, options) =>
+	options?.name
+		? key.replace("{{name}}", String(options.name))
+		: options?.count
+			? key.replace("{{count}}", String(options.count))
+			: key;
 
 export type CodeTranscriptSegment =
 	| {
@@ -96,27 +103,34 @@ export function commandText(inputPreview: string | undefined): string | undefine
 	return inputPreview;
 }
 
-export function toolLabel(call: ToolCallBlock): string {
+export function toolLabel(call: ToolCallBlock, t: Translator = identity): string {
 	if (isCommandTool(call.name))
-		return call.state === "running" || call.state === "pending" ? "Running command" : "Ran command";
-	if (/request.*(?:directory|folder)|cowork.*directory/iu.test(call.name)) return "Asked to access a folder";
-	return call.state === "running" || call.state === "pending" ? `Using ${call.name}` : `Used ${call.name}`;
+		return t(call.state === "running" || call.state === "pending" ? "Running command" : "Ran command");
+	if (/request.*(?:directory|folder)|cowork.*directory/iu.test(call.name)) return t("Asked to access a folder");
+	return t(call.state === "running" || call.state === "pending" ? "Using {{name}}" : "Used {{name}}", {
+		name: call.name,
+	});
 }
 
-export function actionSummary(calls: readonly ToolCallBlock[]): string {
+export function actionSummary(calls: readonly ToolCallBlock[], t: Translator = identity): string {
 	const commands = calls.filter((call) => isCommandTool(call.name));
 	const others = calls.length - commands.length;
 	const running = calls.some((call) => call.state === "running" || call.state === "pending");
 	if (commands.length > 0 && others > 0)
-		return running ? "Running a command, using a tool" : "Ran a command, used a tool";
+		return t(running ? "Running a command, using a tool" : "Ran a command, used a tool");
 	if (commands.length > 0)
 		return running
-			? "Running a command"
+			? t("Running a command")
 			: commands.length === 1
-				? "Ran a command"
-				: `Ran ${commands.length} commands`;
-	if (others > 0) return running ? "Using a tool" : others === 1 ? "Used a tool" : `Used ${others} tools`;
-	return "Thought process";
+				? t("Ran a command")
+				: t("Ran {{count}} commands", { count: commands.length });
+	if (others > 0)
+		return running
+			? t("Using a tool")
+			: others === 1
+				? t("Used a tool")
+				: t("Used {{count}} tools", { count: others });
+	return t("Thought process");
 }
 
 export function buildTurnPresentation(items: readonly ItemView[]): TurnPresentation {

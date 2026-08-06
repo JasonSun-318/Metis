@@ -1,6 +1,7 @@
 import type { SessionSnapshot } from "@arcmind/app-protocol";
 import { CaretDown, Question } from "@phosphor-icons/react";
 import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 
 interface ThinkingSelectorProps {
 	readonly actualThinkingLevel: SessionSnapshot["actualThinkingLevel"];
@@ -111,6 +112,7 @@ function UltraEffortField() {
 }
 
 export function ThinkingSelector({ actualThinkingLevel, available, disabled, onChange, value }: ThinkingSelectorProps) {
+	const { t } = useTranslation();
 	const currentIndex = Math.max(0, available.indexOf(value));
 	const [open, setOpen] = useState(false);
 	const [previewIndex, setPreviewIndex] = useState(currentIndex);
@@ -122,11 +124,10 @@ export function ThinkingSelector({ actualThinkingLevel, available, disabled, onC
 	const samplesRef = useRef<Array<{ readonly time: number; readonly value: number }>>([]);
 	const springFrameRef = useRef(0);
 	const maximumIndex = Math.max(0, available.length - 1);
-	const label = value === "xhigh" ? "XHigh" : value.charAt(0).toUpperCase() + value.slice(1);
+	const selectionLabel = (selection: string) => t(selection === "xhigh" ? "XHigh" : `${selection.charAt(0).toUpperCase()}${selection.slice(1)}`);
+	const label = selectionLabel(value);
 	const previewSelection = available[Math.round(previewIndex)] ?? value;
-	const previewLabel = previewSelection === "xhigh"
-		? "XHigh"
-		: previewSelection.charAt(0).toUpperCase() + previewSelection.slice(1);
+	const previewLabel = selectionLabel(previewSelection);
 	const fill = maximumIndex === 0 ? 0 : (previewIndex / maximumIndex) * 100;
 	const ultraActive = previewSelection === "ultra";
 	const commit = (index: number) => {
@@ -238,7 +239,7 @@ export function ThinkingSelector({ actualThinkingLevel, available, disabled, onC
 				aria-describedby="thinking-selection-detail"
 				aria-expanded={open}
 				aria-haspopup="dialog"
-				aria-label={`Select effort, current ${label}`}
+				aria-label={t("Select effort, current {{label}}", { label })}
 				className="composer-selector-trigger"
 				disabled={disabled}
 				onClick={() => open ? close() : setOpen(true)}
@@ -249,14 +250,14 @@ export function ThinkingSelector({ actualThinkingLevel, available, disabled, onC
 				<CaretDown aria-hidden="true" size={12} />
 			</button>
 			{open && (
-				<div aria-label="Effort" className="effort-popover" role="dialog">
+				<div aria-label={t("Effort")} className="effort-popover" role="dialog">
 					<div className="effort-title">
-						<span>Effort <strong className={ultraActive ? "is-ultra" : undefined}><span className={`effort-label is-${previewDirection}`} key={previewSelection}>{previewLabel}</span></strong></span>
-						<span title="Higher effort can improve difficult answers but may take longer.">
+						<span>{t("Effort")} <strong className={ultraActive ? "is-ultra" : undefined}><span className={`effort-label is-${previewDirection}`} key={previewSelection}>{previewLabel}</span></strong></span>
+						<span title={t("Higher effort can improve difficult answers but may take longer.")}>
 							<Question aria-hidden="true" size={16} />
 						</span>
 					</div>
-					<div className="effort-axis"><span>Faster</span><span>Smarter</span></div>
+					<div className="effort-axis"><span>{t("Faster")}</span><span>{t("Smarter")}</span></div>
 					<div className={`effort-slider-shell${ultraActive ? " is-ultra" : ""}`}>
 						<span aria-hidden="true" className="effort-slider-fill" style={{ width: `calc(8px + (100% - 16px) * ${fill / 100})` }} />
 						{ultraActive && <UltraEffortField />}
@@ -264,7 +265,7 @@ export function ThinkingSelector({ actualThinkingLevel, available, disabled, onC
 							{available.map((selection) => <span className={selection === "ultra" ? "is-ultra" : undefined} key={selection} />)}
 						</div>
 						<input
-							aria-label="Effort"
+							aria-label={t("Effort")}
 							aria-valuetext={previewLabel}
 							disabled={disabled || available.length < 2}
 							max={maximumIndex}
@@ -326,8 +327,8 @@ export function ThinkingSelector({ actualThinkingLevel, available, disabled, onC
 			)}
 			<span className="sr-only" id="thinking-selection-detail">
 				{value === "ultra"
-					? `Uses ${actualThinkingLevel}, multiple model calls, and subagent orchestration.`
-					: `Provider thinking level ${actualThinkingLevel}.`}
+					? t("Uses {{level}}, multiple model calls, and subagent orchestration.", { level: selectionLabel(actualThinkingLevel) })
+					: t("Provider thinking level {{level}}.", { level: selectionLabel(actualThinkingLevel) })}
 			</span>
 		</div>
 	);

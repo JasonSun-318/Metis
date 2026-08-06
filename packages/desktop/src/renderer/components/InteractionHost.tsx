@@ -1,5 +1,6 @@
 import type { InteractionResponseInput, InteractionView } from "@arcmind/app-protocol";
 import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useTranslation } from "react-i18next";
 
 interface InteractionHostProps {
 	readonly interaction: InteractionView | undefined;
@@ -7,6 +8,7 @@ interface InteractionHostProps {
 }
 
 export function InteractionHost({ interaction, onRespond }: InteractionHostProps) {
+	const { t } = useTranslation();
 	const firstControl = useRef<HTMLElement>(null);
 	const [input, setInput] = useState("");
 	const [busy, setBusy] = useState(false);
@@ -39,8 +41,8 @@ export function InteractionHost({ interaction, onRespond }: InteractionHostProps
 	return (
 		<div className="modal-backdrop">
 		<section aria-describedby="interaction-message" aria-labelledby="interaction-title" aria-modal="true" className="interaction-dialog" role="dialog">
-			<h2 id="interaction-title">{interaction.title}</h2>
-			<p id="interaction-message">{interaction.message}</p>
+			<h2 id="interaction-title">{t(interaction.title)}</h2>
+			<p id="interaction-message">{t(interaction.message)}</p>
 			{(interaction.kind === "project_trust" || interaction.kind === "select") && (
 				<div className="interaction-options">
 					{interaction.choices.map((choice, index) => (
@@ -51,8 +53,8 @@ export function InteractionHost({ interaction, onRespond }: InteractionHostProps
 							ref={index === 0 ? (firstControl as React.RefObject<HTMLButtonElement>) : undefined}
 							type="button"
 						>
-							<strong>{choice.label}</strong>
-							{choice.description && <span>{choice.description}</span>}
+							<strong>{t(choice.label)}</strong>
+							{choice.description && <span>{t(choice.description)}</span>}
 						</button>
 					))}
 				</div>
@@ -66,30 +68,30 @@ export function InteractionHost({ interaction, onRespond }: InteractionHostProps
 						ref={firstControl as React.RefObject<HTMLButtonElement>}
 						type="button"
 					>
-						{interaction.cancelLabel || "Cancel"}
+						{interaction.cancelLabel ? t(interaction.cancelLabel) : t("Cancel")}
 					</button>
 					<button disabled={busy} onClick={() => void respond({ interactionId: interaction.interactionId, kind: "confirm", confirmed: true })} type="button">
-						{interaction.confirmLabel || "Confirm"}
+						{interaction.confirmLabel ? t(interaction.confirmLabel) : t("Confirm")}
 					</button>
 				</div>
 			)}
 			{interaction.kind === "input" && (
 				<form onSubmit={submitInput}>
-					<label className="sr-only" htmlFor="interaction-input">Response</label>
+					<label className="sr-only" htmlFor="interaction-input">{t("Response")}</label>
 					<input
 						autoComplete="off"
 						disabled={busy}
 						id="interaction-input"
 						onChange={(event) => setInput(event.target.value)}
-						placeholder={interaction.placeholder}
+						placeholder={interaction.placeholder ? t(interaction.placeholder) : undefined}
 						ref={firstControl as React.RefObject<HTMLInputElement>}
 						type={interaction.secret ? "password" : "text"}
 						value={input}
 					/>
-					<button disabled={busy} type="submit">Submit</button>
+					<button disabled={busy} type="submit">{t("Submit")}</button>
 				</form>
 			)}
-			{error && <p className="error-copy" role="alert">{error}</p>}
+			{error && <p className="error-copy" role="alert">{t(error)}</p>}
 		</section>
 	</div>
 	);

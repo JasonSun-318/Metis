@@ -9,6 +9,7 @@ import {
 	Wrench,
 } from "@phosphor-icons/react";
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Markdown } from "./Markdown.tsx";
 import {
 	actionSummary,
@@ -21,11 +22,12 @@ import {
 } from "./transcript-turn-model.ts";
 
 function StaticBlock({ block }: { readonly block: ItemContentBlockView }) {
+	const { t } = useTranslation();
 	switch (block.type) {
 		case "text":
 			return <p>{block.text}</p>;
 		case "image":
-			return <p className="transcript-attachment"><ImageSquare aria-hidden="true" size={18} /> Image · {block.image.mediaType}</p>;
+			return <p className="transcript-attachment"><ImageSquare aria-hidden="true" size={18} /> {t("Image")} · {block.image.mediaType}</p>;
 		case "notice":
 			return <p className={`notice notice-${block.level}`}>{block.text}</p>;
 		case "thinking":
@@ -36,14 +38,15 @@ function StaticBlock({ block }: { readonly block: ItemContentBlockView }) {
 }
 
 function ToolStep({ call, result }: { readonly call: ToolCallBlock; readonly result?: ToolResultBlock }) {
+	const { t } = useTranslation();
 	const commandTool = isCommandTool(call.name);
 	if (!commandTool) {
 		return (
 			<div className="tool-step tool-step-static">
 				<div className="tool-step-static-label">
 					<Wrench aria-hidden="true" size={17} />
-					<span>{toolLabel(call)}</span>
-					{call.state === "running" && <CircleNotch aria-label="Running" className="tool-step-spinner" size={15} />}
+					<span>{toolLabel(call, t)}</span>
+					{call.state === "running" && <CircleNotch aria-label={t("Running")} className="tool-step-spinner" size={15} />}
 				</div>
 				{result?.isError && <pre className="tool-step-output tool-step-output-error">{result.output}</pre>}
 			</div>
@@ -54,8 +57,8 @@ function ToolStep({ call, result }: { readonly call: ToolCallBlock; readonly res
 		<details className="tool-step tool-step-command">
 			<summary>
 				<TerminalWindow aria-hidden="true" size={17} />
-				<span>{toolLabel(call)}</span>
-				{call.state === "running" && <CircleNotch aria-label="Running" className="tool-step-spinner" size={15} />}
+				<span>{toolLabel(call, t)}</span>
+				{call.state === "running" && <CircleNotch aria-label={t("Running")} className="tool-step-spinner" size={15} />}
 			</summary>
 			{(command || result) && (
 				<div className="tool-step-details">
@@ -77,6 +80,7 @@ function activityLength(blocks: readonly ItemContentBlockView[], results: Readon
 }
 
 export function TranscriptTurn({ items }: { readonly items: readonly ItemView[] }) {
+	const { t } = useTranslation();
 	const [open, setOpen] = useState(false);
 	const [showAll, setShowAll] = useState(false);
 	const { users, calls, results, activity, intermediateText, final, running } = buildTurnPresentation(items);
@@ -110,7 +114,7 @@ export function TranscriptTurn({ items }: { readonly items: readonly ItemView[] 
 					<summary onClick={() => {
 						if (open) setShowAll(false);
 					}}>
-						<span>{actionSummary(calls)}</span>
+						<span>{actionSummary(calls, t)}</span>
 						<CaretRight aria-hidden="true" className="execution-chain-caret" size={16} />
 					</summary>
 					<div className={`execution-chain-content${canExpand && !showAll ? " is-capped" : ""}`}>
@@ -131,7 +135,7 @@ export function TranscriptTurn({ items }: { readonly items: readonly ItemView[] 
 									return (
 										<div className="activity-step tool-step-orphan" key={`result-${block.toolCallId}`}>
 											<span className="activity-step-icon"><CheckCircle aria-hidden="true" size={17} /></span>
-											<p>{block.name} result</p>
+											<p>{t("{{name}} result", { name: block.name })}</p>
 											<pre className={block.isError ? "tool-step-output tool-step-output-error" : "tool-step-output"}>{block.output}</pre>
 										</div>
 									);
@@ -144,14 +148,14 @@ export function TranscriptTurn({ items }: { readonly items: readonly ItemView[] 
 							onClick={() => setShowAll(true)}
 							type="button"
 						>
-							Show more
+							{t("Show more")}
 						</button>
 					)}
 					</div>
 					{(!canExpand || showAll) && (
 						<div className="execution-chain-done">
 							{running ? <CircleNotch aria-hidden="true" className="tool-step-spinner" size={17} /> : <CheckCircle aria-hidden="true" size={17} />}
-							<span>{running ? "Working" : "Done"}</span>
+							<span>{t(running ? "Working" : "Done")}</span>
 						</div>
 					)}
 					{canExpand && showAll && (
@@ -160,7 +164,7 @@ export function TranscriptTurn({ items }: { readonly items: readonly ItemView[] 
 							onClick={() => setShowAll(false)}
 							type="button"
 						>
-							Show less
+							{t("Show less")}
 						</button>
 					)}
 				</details>

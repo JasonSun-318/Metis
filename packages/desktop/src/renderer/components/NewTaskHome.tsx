@@ -1,6 +1,7 @@
 import type { AgentMode, SkillSummaryView } from "@arcmind/app-protocol";
 import { CaretDown, FolderSimple } from "@phosphor-icons/react";
 import type { ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import type { DesktopAttachmentSelection } from "../../shared/desktop-api.ts";
 import { Composer, type ComposerSubmission } from "./Composer.tsx";
 
@@ -37,12 +38,13 @@ export function NewTaskHome({
 	skills,
 	thinkingControl,
 }: NewTaskHomeProps) {
+	const { t } = useTranslation();
 	return (
 		<section className="new-task-home">
 			<div className="new-task-home-content">
 				<div className="new-task-home-heading">
-					<h1>What can I take off your plate?</h1>
-					<p>Ask a question, explore an idea, or get help with your work.</p>
+					<h1>{t("What can I take off your plate?")}</h1>
+					<p>{t("Ask a question, explore an idea, or get help with your work.")}</p>
 				</div>
 				<div className="new-task-home-composer">
 					<Composer
@@ -54,7 +56,7 @@ export function NewTaskHome({
 						onManageSkills={onManageSkills}
 						onPickFiles={onPickFiles}
 						onSubmit={onSubmit}
-						placeholder="How can I help you today?"
+						placeholder={t("How can I help you today?")}
 						running={false}
 						skills={skills}
 						submitDisabled={mode === "code" && folder === null}
@@ -64,11 +66,11 @@ export function NewTaskHome({
 						className="folder-picker"
 						disabled={busy || folderLocked}
 						onClick={() => void onChooseFolder()}
-						title={folder ?? (folderLocked ? "This task has no project folder" : "Choose a project or folder")}
+						title={folder ?? t(folderLocked ? "This task has no project folder" : "Choose a project or folder")}
 						type="button"
 					>
 						<FolderSimple aria-hidden="true" size={17} />
-						<span>{folder ? folderName(folder) : folderLocked ? "No project folder" : "Work in a project or folder"}</span>
+						<span>{folder ? folderName(folder) : t(folderLocked ? "No project folder" : "Work in a project or folder")}</span>
 						<CaretDown aria-hidden="true" size={13} />
 					</button>
 				</div>

@@ -1,6 +1,7 @@
 import type { ModelOptionView, SessionSnapshot } from "@arcmind/app-protocol";
 import { CaretDown, Check } from "@phosphor-icons/react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 
 interface ModelSelectorProps {
 	readonly available: readonly ModelOptionView[];
@@ -10,6 +11,7 @@ interface ModelSelectorProps {
 }
 
 export function ModelSelector({ available, disabled, onChange, value }: ModelSelectorProps) {
+	const { t } = useTranslation();
 	const [open, setOpen] = useState(false);
 	const [pending, setPending] = useState(false);
 	const rootRef = useRef<HTMLDivElement>(null);
@@ -64,19 +66,19 @@ export function ModelSelector({ available, disabled, onChange, value }: ModelSel
 			<button
 				aria-expanded={open}
 				aria-haspopup="menu"
-				aria-label="Select model"
+				aria-label={t("Select model")}
 				className="composer-selector-trigger"
 				disabled={disabled || pending || available.length === 0}
 				onClick={() => setOpen((value) => !value)}
 				ref={triggerRef}
 				type="button"
 			>
-				<span>{selected?.name ?? value?.modelId ?? "Model"}</span>
+				<span>{selected?.name ?? value?.modelId ?? t("Model")}</span>
 				<CaretDown aria-hidden="true" size={12} />
 			</button>
 			{open && (
-				<div aria-label="Models" className="model-selector-popover" role="menu">
-					<p>Models</p>
+				<div aria-label={t("Models")} className="model-selector-popover" role="menu">
+					<p>{t("Models")}</p>
 					{available.map((model, index) => {
 						const isSelected = model.provider === value?.provider && model.modelId === value.modelId;
 						return (

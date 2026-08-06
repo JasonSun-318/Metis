@@ -1,6 +1,7 @@
 import type { PermissionModeView } from "@arcmind/app-protocol";
 import { CaretDown, Check, Shield } from "@phosphor-icons/react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 
 interface PermissionSelectorProps {
 	readonly disabled: boolean;
@@ -26,11 +27,12 @@ const OPTIONS: ReadonlyArray<{
 ];
 
 export function PermissionSelector({ disabled, onChange, value }: PermissionSelectorProps) {
+	const { t } = useTranslation();
 	const [open, setOpen] = useState(false);
 	const [pending, setPending] = useState(false);
 	const rootRef = useRef<HTMLDivElement>(null);
 	const triggerRef = useRef<HTMLButtonElement>(null);
-	const label = value === "ask" ? "Ask" : "Full";
+	const label = t(value === "ask" ? "Ask" : "Full");
 
 	const close = useCallback((restoreFocus = false) => {
 		setOpen(false);
@@ -77,7 +79,7 @@ export function PermissionSelector({ disabled, onChange, value }: PermissionSele
 			<button
 				aria-expanded={open}
 				aria-haspopup="menu"
-				aria-label={`Select permissions, current ${label}`}
+				aria-label={t("Select permissions, current {{label}}", { label })}
 				className="composer-selector-trigger"
 				disabled={disabled || pending}
 				onClick={() => setOpen((current) => !current)}
@@ -89,7 +91,7 @@ export function PermissionSelector({ disabled, onChange, value }: PermissionSele
 				<CaretDown aria-hidden="true" size={12} />
 			</button>
 			{open && (
-				<div aria-label="Permissions" className="permission-selector-popover" role="menu">
+				<div aria-label={t("Permissions")} className="permission-selector-popover" role="menu">
 					{OPTIONS.map((option) => {
 						const selected = option.value === value;
 						return (
@@ -102,8 +104,8 @@ export function PermissionSelector({ disabled, onChange, value }: PermissionSele
 								type="button"
 							>
 								<span>
-									<strong>{option.label}</strong>
-									<small>{option.description}</small>
+									<strong>{t(option.label)}</strong>
+									<small>{t(option.description)}</small>
 								</span>
 								{selected && <Check aria-hidden="true" size={16} weight="bold" />}
 							</button>

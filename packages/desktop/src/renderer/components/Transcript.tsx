@@ -1,6 +1,7 @@
 import type { AgentMode, ItemView } from "@arcmind/app-protocol";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { useLayoutEffect, useMemo, useRef } from "react";
+import { useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { CodeTranscriptTurn } from "./CodeTranscriptTurn.tsx";
 import { TranscriptTurn } from "./TranscriptTurn.tsx";
 
@@ -11,6 +12,8 @@ interface TranscriptProps {
 	readonly itemsById: ReadonlyMap<string, ItemView>;
 	readonly loadingOlder: boolean;
 	readonly onLoadOlder: () => Promise<void>;
+	readonly ariaLabel?: string;
+	readonly latestLabel?: string;
 	readonly olderLabel?: string;
 }
 
@@ -47,10 +50,12 @@ function transcriptRows(appearance: AgentMode, itemIds: readonly string[], items
 	return rows;
 }
 
-export function Transcript({ appearance, hasOlder, itemIds, itemsById, loadingOlder, onLoadOlder, olderLabel = "Load older messages" }: TranscriptProps) {
+export function Transcript({ appearance, ariaLabel = "Conversation transcript", hasOlder, itemIds, itemsById, latestLabel, loadingOlder, onLoadOlder, olderLabel = "Load older messages" }: TranscriptProps) {
+	const { t } = useTranslation();
 	const scrollRef = useRef<HTMLDivElement>(null);
 	const followLatest = useRef(true);
 	const previousSessionId = useRef<string | undefined>(undefined);
+	const [hasNewItems, setHasNewItems] = useState(false);
 	const transcript = useMemo(() => transcriptRows(appearance, itemIds, itemsById), [appearance, itemIds, itemsById]);
 	const virtualizer = useVirtualizer({
 		count: transcript.length,
@@ -68,14 +73,26 @@ export function Transcript({ appearance, hasOlder, itemIds, itemsById, loadingOl
 		if (lastItem?.sessionId !== previousSessionId.current) {
 			previousSessionId.current = lastItem?.sessionId;
 			followLatest.current = true;
+			setHasNewItems(false);
 		}
 		const scroll = scrollRef.current;
-		if (!scroll || !lastItem || transcript.length === 0 || !followLatest.current) return;
+		if (!scroll || !lastItem || transcript.length === 0) return;
+		if (!followLatest.current) {
+			if (latestLabel) setHasNewItems(true);
+			return;
+		}
 		const frame = requestAnimationFrame(() => {
 			if (followLatest.current) scroll.scrollTop = scroll.scrollHeight;
 		});
 		return () => cancelAnimationFrame(frame);
-	}, [lastItem, transcript.length]);
+	}, [lastItem, latestLabel, transcript.length]);
+
+	const scrollToLatest = () => {
+		followLatest.current = true;
+		setHasNewItems(false);
+		const scroll = scrollRef.current;
+		if (scroll) scroll.scrollTop = scroll.scrollHeight;
+	};
 
 	const measuredRows = virtualizer.getVirtualItems();
 	const rows =
@@ -91,10 +108,10 @@ export function Transcript({ appearance, hasOlder, itemIds, itemsById, loadingOl
 				}));
 
 	return (
-		<section className={`transcript transcript-${appearance}`} aria-label="Conversation transcript">
+		<section className={`transcript transcript-${appearance}`} aria-label={t(ariaLabel)}>
 			{hasOlder && (
 				<button className="history-button button-secondary" disabled={loadingOlder} onClick={() => void onLoadOlder()} type="button">
-					{loadingOlder ? "Loading…" : olderLabel}
+					{loadingOlder ? t("Loading…") : t(olderLabel)}
 				</button>
 			)}
 			<div
@@ -102,6 +119,7 @@ export function Transcript({ appearance, hasOlder, itemIds, itemsById, loadingOl
 				onScroll={(event) => {
 					const scroll = event.currentTarget;
 					followLatest.current = shouldFollowTranscript(scroll.scrollHeight, scroll.scrollTop, scroll.clientHeight);
+					if (followLatest.current) setHasNewItems(false);
 				}}
 				ref={scrollRef}
 			>
@@ -130,6 +148,9 @@ export function Transcript({ appearance, hasOlder, itemIds, itemsById, loadingOl
 					})}
 				</div>
 			</div>
+			{latestLabel && hasNewItems && (
+				<button className="transcript-latest" onClick={scrollToLatest} type="button">{t(latestLabel)}</button>
+			)}
 		</section>
 	);
 }

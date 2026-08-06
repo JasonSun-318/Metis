@@ -1,6 +1,7 @@
 import type { SkillSummaryView } from "@arcmind/app-protocol";
 import { ArrowUp, Paperclip, Scroll, Stop, X } from "@phosphor-icons/react";
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import type { DesktopAttachmentSelection } from "../../shared/desktop-api.ts";
 import { ComposerAddMenu } from "./ComposerAddMenu.tsx";
 
@@ -41,6 +42,7 @@ export function Composer({
 	submitDisabled = false,
 	thinkingControl,
 }: ComposerProps) {
+	const { t } = useTranslation();
 	const [text, setText] = useState("");
 	const [attachments, setAttachments] = useState<readonly DesktopAttachmentSelection[]>([]);
 	const [selectedSkill, setSelectedSkill] = useState<SkillSummaryView>();
@@ -79,7 +81,7 @@ export function Composer({
 	return (
 		<div className="composer-dock">
 			<form className={`composer composer-${appearance}`} onSubmit={(event) => void submit(event).catch(() => undefined)}>
-				<label className="sr-only" htmlFor="composer-input">Message ArcMind</label>
+				<label className="sr-only" htmlFor="composer-input">{t("Message ArcMind")}</label>
 				<textarea
 					disabled={disabled || submitting}
 					id="composer-input"
@@ -90,21 +92,21 @@ export function Composer({
 							event.currentTarget.form?.requestSubmit();
 						}
 					}}
-					placeholder={placeholder ?? (running ? "Steer the active task…" : "Ask ArcMind anything, or describe a task…")}
+					placeholder={placeholder ?? t(running ? "Steer the active task…" : "Ask ArcMind anything, or describe a task…")}
 					rows={1}
 					value={text}
 				/>
 				{(selectedSkill || attachments.length > 0) && (
-					<div aria-label="Message additions" className="composer-chips">
+					<div aria-label={t("Message additions")} className="composer-chips">
 						{selectedSkill && (
-							<button aria-label={`Remove skill ${selectedSkill.name}`} onClick={() => setSelectedSkill(undefined)} type="button">
+							<button aria-label={t("Remove skill {{name}}", { name: selectedSkill.name })} onClick={() => setSelectedSkill(undefined)} type="button">
 								<Scroll aria-hidden="true" size={14} />
 								<span>{selectedSkill.name}</span>
 								<X aria-hidden="true" size={12} />
 							</button>
 						)}
 						{attachments.map((attachment) => (
-							<button aria-label={`Remove file ${attachment.name}`} key={attachment.path} onClick={() => setAttachments((current) => current.filter(({ path }) => path !== attachment.path))} type="button">
+							<button aria-label={t("Remove file {{name}}", { name: attachment.name })} key={attachment.path} onClick={() => setAttachments((current) => current.filter(({ path }) => path !== attachment.path))} type="button">
 								<Paperclip aria-hidden="true" size={14} />
 								<span>{attachment.name}</span>
 								<X aria-hidden="true" size={12} />
@@ -127,18 +129,18 @@ export function Composer({
 						{modelControl}
 						{thinkingControl}
 						{running && (
-							<button aria-label="Stop task" className="composer-icon-button button-secondary" disabled={disabled} onClick={() => void onInterrupt().catch(() => undefined)} type="button">
+							<button aria-label={t("Stop task")} className="composer-icon-button button-secondary" disabled={disabled} onClick={() => void onInterrupt().catch(() => undefined)} type="button">
 								<Stop aria-hidden="true" size={16} weight="fill" />
 							</button>
 						)}
-						<button aria-label={running ? "Steer task" : "Send message"} className="composer-icon-button composer-send" disabled={disabled || submitDisabled || submitting || (text.trim().length === 0 && attachments.length === 0)} type="submit">
+						<button aria-label={t(running ? "Steer task" : "Send message")} className="composer-icon-button composer-send" disabled={disabled || submitDisabled || submitting || (text.trim().length === 0 && attachments.length === 0)} type="submit">
 							<ArrowUp aria-hidden="true" size={19} weight="bold" />
 						</button>
 					</div>
 				</div>
 			</form>
 			{appearance === "chat" && (
-				<p className="composer-disclaimer">ArcMind is AI and can make mistakes. Please double-check responses.</p>
+				<p className="composer-disclaimer">{t("ArcMind is AI and can make mistakes. Please double-check responses.")}</p>
 			)}
 		</div>
 	);
