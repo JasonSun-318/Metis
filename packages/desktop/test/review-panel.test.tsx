@@ -1,0 +1,217 @@
+// @vitest-environment jsdom
+
+import { act, type ReactNode } from "react";
+import { createRoot } from "react-dom/client";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { ArcMindDesktopApi, DesktopWorkspaceReviewSnapshot } from "../src/shared/desktop-api.ts";
+
+vi.mock("@pierre/diffs/react", () => ({
+	PatchDiff: ({ options, patch }: {
+		readonly options: { readonly hunkSeparators?: string; readonly loadDiffFiles?: () => Promise<unknown> };
+		readonly patch: string;
+	}) => <pre data-hunk-separators={options.hunkSeparators} data-testid="patch">{patch}<button onClick={() => void options.loadDiffFiles?.()} type="button">Expand unchanged</button></pre>,
+	WorkerPoolContextProvider: ({ children }: { readonly children: ReactNode }) => <div data-testid="worker-provider">{children}</div>,
+}));
+
+import { ReviewPanel } from "../src/renderer/components/ReviewPanel.tsx";
+import { setLocale } from "../src/renderer/i18n.ts";
+
+const sessionId = "123e4567-e89b-42d3-a456-426614174000";
+const commitHash = "0123456789abcdef0123456789abcdef01234567";
+
+const workingTree: DesktopWorkspaceReviewSnapshot = {
+	kind: "review",
+	repositoryRoot: "/tmp/project",
+	branch: "main",
+	head: commitHash,
+	revision: "working-tree",
+	files: [
+		{ relativePath: "README.md", previousRelativePath: null, status: "modified", additions: 1, deletions: 1, binary: false },
+		{ relativePath: "packages/src/nested.ts", previousRelativePath: null, status: "modified", additions: 2, deletions: 0, binary: false },
+	],
+	commits: [{ hash: commitHash, shortHash: "0123456", subject: "Initial commit", authorName: "Ada", authoredAt: "2026-08-05T00:00:00Z" }],
+};
+
+const commitSnapshot: DesktopWorkspaceReviewSnapshot = {
+	...workingTree,
+	revision: commitHash,
+	files: [{ relativePath: "package.json", previousRelativePath: null, status: "added", additions: 3, deletions: 0, binary: false }],
+};
+
+async function flush() {
+	await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
+}
+
+function button(container: ParentNode, label: string): HTMLButtonElement {
+	const match = [...container.querySelectorAll("button")].find((candidate) =>
+		candidate.getAttribute("aria-label") === label || candidate.textContent?.trim() === label,
+	);
+	if (!match) throw new Error(`Missing button: ${label}`);
+	return match;
+}
+
+beforeEach(async () => {
+	(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+	await setLocale("en");
+});
+
+afterEach(() => {
+	vi.restoreAllMocks();
+	document.body.replaceChildren();
+});
+
+describe("ReviewPanel", () => {
+	it("keeps every diff collapsed and fetches only the file the user expands", async () => {
+		const api = {
+			getWorkspaceReview: vi.fn().mockResolvedValue(workingTree),
+			getWorkspaceReviewFileDiff: vi.fn().mockResolvedValue({ kind: "text", patch: "README patch" }),
+			getWorkspaceReviewFileContext: vi.fn().mockResolvedValue({
+				kind: "text",
+				oldFile: { name: "README.md", contents: "old", cacheKey: "old" },
+				newFile: { name: "README.md", contents: "new", cacheKey: "new" },
+			}),
+		} as unknown as ArcMindDesktopApi;
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<ReviewPanel api={api} sessionId={sessionId} visible />));
+		await flush();
+
+		const headers = [...container.querySelectorAll<HTMLButtonElement>(".review-file-header")];
+		expect(headers).toHaveLength(2);
+		expect(headers.every((header) => header.getAttribute("aria-expanded") === "false")).toBe(true);
+		expect(api.getWorkspaceReviewFileDiff).not.toHaveBeenCalled();
+
+		await act(async () => headers[0]!.click());
+		await flush();
+		expect(api.getWorkspaceReviewFileDiff).toHaveBeenCalledWith({ sessionId, revision: "working-tree", relativePath: "README.md" });
+		expect(container.querySelector('[data-testid="patch"]')?.getAttribute("data-hunk-separators")).toBe("line-info-basic");
+		expect(api.getWorkspaceReviewFileContext).not.toHaveBeenCalled();
+		await act(async () => button(container, "Expand unchanged").click());
+		await flush();
+		expect(api.getWorkspaceReviewFileContext).toHaveBeenCalledWith({ sessionId, revision: "working-tree", relativePath: "README.md" });
+		await act(async () => root.unmount());
+	});
+
+	it("opens full information only from the folder button and keeps expanded patches mounted", async () => {
+		const snapshot = {
+			...workingTree,
+			files: [
+				...workingTree.files,
+				{ relativePath: ".codegraph/.gitignore", previousRelativePath: null, status: "modified", additions: 1, deletions: 0, binary: false },
+			],
+		} satisfies DesktopWorkspaceReviewSnapshot;
+		const api = {
+			getWorkspaceReview: vi.fn().mockResolvedValue(snapshot),
+			getWorkspaceReviewFileDiff: vi.fn().mockResolvedValue({ kind: "text", patch: "README patch" }),
+		} as unknown as ArcMindDesktopApi;
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<ReviewPanel api={api} sessionId={sessionId} visible />));
+		await flush();
+
+		expect(container.querySelector(".review-details")).toBeNull();
+		await act(async () => container.querySelector<HTMLButtonElement>(".review-file-header")!.click());
+		await flush();
+		await act(async () => button(container, "Show review details").click());
+		expect(container.textContent).toContain("Recent commits");
+		expect(container.querySelector(".review-toolbar > span")?.textContent).toBe("main → project");
+		expect(container.querySelector(".review-toolbar > span")?.getAttribute("title")).toBe("/tmp/project");
+		const allChanges = button(container, "All Changes");
+		expect(allChanges.textContent).toBe("All Changes");
+		expect(container.querySelector(".review-details-scroll")?.compareDocumentPosition(allChanges) ?? 0)
+			.toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+		const directories = [...container.querySelectorAll<HTMLButtonElement>(".review-tree button[aria-expanded]")];
+		expect(directories.length).toBeGreaterThan(0);
+		expect(directories.every((directory) => directory.getAttribute("aria-expanded") === "true")).toBe(true);
+		expect(container.textContent).toContain(".codegraph");
+		expect(container.textContent).toContain(".gitignore");
+		expect(container.textContent).toContain("nested.ts");
+		await act(async () => button(container, "Hide review details").click());
+		expect(container.querySelector(".review-details")?.classList.contains("is-hidden")).toBe(true);
+		expect(container.querySelector('[data-testid="patch"]')?.textContent).toContain("README patch");
+		expect(api.getWorkspaceReviewFileDiff).toHaveBeenCalledTimes(1);
+		await act(async () => root.unmount());
+	});
+
+	it("keeps the rendered review and worker provider mounted until a revision replacement is ready", async () => {
+		let resolveCommit!: (value: DesktopWorkspaceReviewSnapshot) => void;
+		const api = {
+			getWorkspaceReview: vi.fn().mockImplementation(({ revision }: { readonly revision: string }) => revision === "working-tree"
+				? Promise.resolve(workingTree)
+				: new Promise<DesktopWorkspaceReviewSnapshot>((resolve) => { resolveCommit = resolve; })),
+			getWorkspaceReviewFileDiff: vi.fn(),
+		} as unknown as ArcMindDesktopApi;
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<ReviewPanel api={api} sessionId={sessionId} visible />));
+		await flush();
+		await act(async () => button(container, "Show review details").click());
+		const provider = container.querySelector('[data-testid="worker-provider"]');
+		expect(provider).not.toBeNull();
+
+		await act(async () => button(container, "Initial commit0123456 · Ada").click());
+		expect(container.querySelector('[data-testid="worker-provider"]')).toBe(provider);
+		expect(container.textContent).toContain("README.md");
+		expect(container.textContent).not.toContain("Loading review…");
+		await act(async () => resolveCommit(commitSnapshot));
+		await flush();
+		expect(container.querySelector('[data-testid="worker-provider"]')).toBe(provider);
+		expect(container.textContent).toContain("package.json");
+		expect(container.textContent).not.toContain("README.md");
+		await act(async () => root.unmount());
+	});
+
+	it("keeps file actions bound to the displayed revision after a replacement fails", async () => {
+		const api = {
+			getWorkspaceReview: vi.fn().mockImplementation(({ revision }: { readonly revision: string }) => revision === "working-tree"
+				? Promise.resolve(workingTree)
+				: Promise.reject(new Error("commit unavailable"))),
+			getWorkspaceReviewFileDiff: vi.fn().mockResolvedValue({ kind: "text", patch: "README patch" }),
+		} as unknown as ArcMindDesktopApi;
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<ReviewPanel api={api} sessionId={sessionId} visible />));
+		await flush();
+		await act(async () => button(container, "Show review details").click());
+		await act(async () => button(container, "Initial commit0123456 · Ada").click());
+		await flush();
+		expect(container.textContent).toContain("README.md");
+
+		await act(async () => container.querySelector<HTMLButtonElement>(".review-file-header")!.click());
+		await flush();
+		expect(api.getWorkspaceReviewFileDiff).toHaveBeenCalledWith({
+			sessionId,
+			revision: "working-tree",
+			relativePath: "README.md",
+		});
+		await act(async () => root.unmount());
+	});
+
+	it("switches to a commit snapshot collapsed and renders honest non-text states", async () => {
+		const api = {
+			getWorkspaceReview: vi.fn().mockImplementation(({ revision }: { readonly revision: string }) => Promise.resolve(revision === "working-tree" ? workingTree : commitSnapshot)),
+			getWorkspaceReviewFileDiff: vi.fn().mockResolvedValue({ kind: "binary" }),
+		} as unknown as ArcMindDesktopApi;
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<ReviewPanel api={api} sessionId={sessionId} visible />));
+		await flush();
+		await act(async () => button(container, "Show review details").click());
+		await act(async () => button(container, "Initial commit0123456 · Ada").click());
+		await flush();
+
+		expect(api.getWorkspaceReview).toHaveBeenLastCalledWith({ sessionId, revision: commitHash });
+		const header = container.querySelector<HTMLButtonElement>(".review-file-header")!;
+		expect(header.textContent).toContain("package.json");
+		expect(header.getAttribute("aria-expanded")).toBe("false");
+		await act(async () => header.click());
+		await flush();
+		expect(container.textContent).toContain("Binary file changed");
+		await act(async () => root.unmount());
+	});
+});
