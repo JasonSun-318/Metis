@@ -103,7 +103,7 @@ function option(name, fallback) {
 	return index === -1 ? fallback : process.argv[index + 1];
 }
 
-const target = option("--target", "all");
+const target = process.env.ARCMIND_NATIVE_TOOLS_TARGET ?? option("--target", "all");
 const outputDir = resolve(packageDir, option("--output", "dist/vendor/tools"));
 const dispatcher = new EnvHttpProxyAgent();
 
@@ -159,20 +159,41 @@ function sha256(data) {
 }
 
 async function download(url) {
-	let response;
-	try {
-		response = await fetch(url, {
-			dispatcher,
-			redirect: "follow",
-			signal: AbortSignal.timeout(120_000),
-		});
-	} catch (error) {
-		throw new Error(`Download failed: ${url}: ${error instanceof Error ? error.message : String(error)}`, {
-			cause: error,
-		});
+	let failure;
+	const chunks = [];
+	let received = 0;
+	for (let attempt = 1; attempt <= 3; attempt += 1) {
+		try {
+			const response = await fetch(url, {
+				dispatcher,
+				headers: {
+					"accept-encoding": "identity",
+					...(received > 0 ? { range: `bytes=${received}-` } : {}),
+				},
+				redirect: "follow",
+				signal: AbortSignal.timeout(120_000),
+			});
+			if (!response.ok) throw new Error(`HTTP ${response.status}`);
+			if (received > 0 && response.status !== 206) {
+				chunks.length = 0;
+				received = 0;
+			}
+			if (!response.body) throw new Error("Response body is missing");
+			const reader = response.body.getReader();
+			while (true) {
+				const { done, value } = await reader.read();
+				if (done) return Buffer.concat(chunks, received);
+				chunks.push(Buffer.from(value));
+				received += value.byteLength;
+			}
+		} catch (error) {
+			failure = error;
+			if (attempt < 3) await new Promise((resolve) => setTimeout(resolve, attempt * 500));
+		}
 	}
-	if (!response.ok) throw new Error(`Download failed (${response.status}): ${url}`);
-	return Buffer.from(await response.arrayBuffer());
+	throw new Error(`Download failed after 3 attempts: ${url}: ${failure instanceof Error ? failure.message : String(failure)}`, {
+		cause: failure,
+	});
 }
 
 function walk(root) {

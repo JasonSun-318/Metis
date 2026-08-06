@@ -5,6 +5,8 @@ const config: Configuration = {
 	devtool: false,
 	module: {
 		rules: [
+			// The package omits its worker entry from sideEffects, so production tree shaking would emit an empty worker.
+			{ test: /@pierre\/diffs\/dist\/worker\/worker\.js$/u, sideEffects: true },
 			{
 				test: /\.tsx?$/u,
 				exclude: /node_modules/u,
@@ -18,7 +20,7 @@ const config: Configuration = {
 				},
 			},
 			{ test: /\.css$/u, use: [MiniCssExtractPlugin.loader, "css-loader"] },
-			{ test: /\.png$/u, type: "asset/resource" },
+			{ test: /\.(?:png|svg)$/u, type: "asset/resource" },
 		],
 	},
 	plugins: [new MiniCssExtractPlugin()],

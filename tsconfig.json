@@ -19,9 +19,7 @@
 			"@arcmind/coding-agent/*": ["./packages/coding-agent/src/*"],
 			"typebox": ["./node_modules/typebox"],
 			"@arcmind/tui": ["./packages/tui/src/index.ts"],
-			"@arcmind/tui/*": ["./packages/tui/src/*"],
-			"@arcmind/arcmind-agent-old": ["./packages/agent-old/src/index.ts"],
-			"@arcmind/arcmind-agent-old/*": ["./packages/agent-old/src/*"]
+			"@arcmind/tui/*": ["./packages/tui/src/*"]
 		}
 	},
 	"include": ["packages/*/src/**/*", "packages/*/test/**/*", "packages/coding-agent/examples/**/*"],

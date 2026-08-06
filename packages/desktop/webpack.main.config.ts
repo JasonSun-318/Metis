@@ -3,6 +3,7 @@ import webpack, { type Configuration } from "webpack";
 const config: Configuration = {
 	entry: "./src/main/main.ts",
 	devtool: false,
+	externals: { "node-pty": "commonjs node-pty" },
 	module: {
 		rules: [
 			{

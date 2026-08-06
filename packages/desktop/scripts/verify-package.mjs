@@ -1,10 +1,11 @@
-import { access, lstat } from "node:fs/promises";
+import { access, lstat, readFile } from "node:fs/promises";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
-import { listPackage } from "@electron/asar";
+import { extractFile, listPackage } from "@electron/asar";
 import { FuseState, FuseV1Options, getCurrentFuseWire } from "@electron/fuses";
 
 const desktopRoot = path.resolve(import.meta.dirname, "..");
+const repoRoot = path.resolve(desktopRoot, "../..");
 
 function nativeArch() {
 	if (
@@ -80,13 +81,64 @@ for (const [fuse, expected] of [
 }
 
 const packagedPaths = new Set(listPackage(appAsar));
+const installLock = JSON.parse(
+	await readFile(path.join(repoRoot, "packages", "coding-agent", "install-lock", "package-lock.json"), "utf8"),
+);
+let lockedPackageCount = 0;
+for (const [lockPath, expected] of Object.entries(installLock.packages)) {
+	if (!lockPath || lockPath.startsWith("node_modules/@arcmind/")) continue;
+	const packagedPackagePath = `/.webpack/app-server/${lockPath}/package.json`;
+	if (!packagedPaths.has(packagedPackagePath)) {
+		throw new Error(`Locked App Server dependency is missing: ${lockPath}`);
+	}
+	const packagedPackage = JSON.parse(extractFile(appAsar, packagedPackagePath.slice(1)).toString("utf8"));
+	if (packagedPackage.version !== expected.version) {
+		throw new Error(`${packagedPackage.name} is ${packagedPackage.version}, expected ${expected.version}`);
+	}
+	lockedPackageCount += 1;
+}
+
 for (const required of [
 	"/.webpack/app-server/node_modules/@arcmind/app-server/dist/utility-entry.js",
+	"/.webpack/app-server/node_modules/@arcmind/coding-agent/dist/core/workspace-sandbox-worker.js",
 	"/.webpack/app-server/node_modules/@arcmind/coding-agent/dist/utils/image-resize-worker.js",
 	"/.webpack/app-server/node_modules/@silvia-odwyer/photon-node/photon_rs_bg.wasm",
 	"/.webpack/app-server/node_modules/jiti/lib/jiti.mjs",
 ]) {
 	if (!packagedPaths.has(required)) throw new Error(`Packaged App Server asset is missing: ${required}`);
+}
+
+const nodePtyPlatform = process.platform === "darwin" || process.platform === "win32";
+const nodePtyNative = nodePtyPlatform
+	? `/.webpack/main/node_modules/node-pty/prebuilds/${process.platform}-${expectedArch}/pty.node`
+	: "/.webpack/main/node_modules/node-pty/build/Release/pty.node";
+for (const required of [
+	"/.webpack/main/node_modules/node-pty/package.json",
+	"/.webpack/main/node_modules/node-pty/lib/index.js",
+	nodePtyNative,
+]) {
+	if (!packagedPaths.has(required)) throw new Error(`Packaged terminal runtime is missing: ${required}`);
+}
+await access(path.join(resourcesRoot, "app.asar.unpacked", nodePtyNative));
+if (process.platform === "darwin") {
+	const helper = path.join(
+			resourcesRoot,
+			"app.asar.unpacked",
+			`.webpack/main/node_modules/node-pty/prebuilds/darwin-${expectedArch}/spawn-helper`,
+		);
+	await access(helper);
+	if (((await lstat(helper)).mode & 0o111) === 0) throw new Error("Packaged terminal spawn-helper is not executable");
+}
+
+if (process.platform === "darwin" || process.platform === "win32") {
+	const ripgrepName = process.platform === "win32" ? "rg.exe" : "rg";
+	const ripgrepPath = `/.webpack/main/native-tools/${ripgrepName}`;
+	if (!packagedPaths.has(ripgrepPath)) throw new Error(`Packaged ripgrep is missing: ${ripgrepPath}`);
+	const unpackedRipgrep = path.join(resourcesRoot, "app.asar.unpacked", ripgrepPath);
+	await access(unpackedRipgrep);
+	if (process.platform !== "win32" && ((await lstat(unpackedRipgrep)).mode & 0o111) === 0) {
+		throw new Error("Packaged ripgrep is not executable");
+	}
 }
 
 try {
@@ -102,4 +154,6 @@ for (const asset of ["image-resize-worker.js", "photon_rs_bg.wasm"]) {
 	}
 }
 
-console.log(`Verified packaged App Server assets in ${appAsar}`);
+console.log(
+	`Verified ${lockedPackageCount} locked App Server dependencies, terminal, and workspace search assets in ${appAsar}`,
+);

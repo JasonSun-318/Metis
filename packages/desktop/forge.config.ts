@@ -1,6 +1,6 @@
 import path from "node:path";
 import { spawn } from "node:child_process";
-import { cp, rm } from "node:fs/promises";
+import { access, chmod, cp, mkdir, rm } from "node:fs/promises";
 import { type FuseConfig, FuseV1Options, FuseVersion, flipFuses } from "@electron/fuses";
 import { MakerDeb } from "@electron-forge/maker-deb";
 import { MakerDMG, type MakerDMGConfig } from "@electron-forge/maker-dmg";
@@ -82,10 +82,11 @@ const windowsSign = windowsCertificate
 // declaration omits the property.
 const apfsDmgConfig = { additionalDMGOptions: { filesystem: "APFS" } } as unknown as MakerDMGConfig;
 
-async function prepareAppServerRuntime(): Promise<void> {
+async function prepareAppServerRuntime(_forgeConfig: ForgeConfig, platform: string, arch: string): Promise<void> {
 	await new Promise<void>((resolve, reject) => {
 		const child = spawn(process.execPath, [path.join(desktopRoot, "scripts", "prepare-app-server-runtime.mjs")], {
 			cwd: repoRoot,
+			env: { ...process.env, ARCMIND_NATIVE_TOOLS_TARGET: `${platform}-${arch}` },
 			stdio: "inherit",
 		});
 		child.once("error", reject);
@@ -96,9 +97,53 @@ async function prepareAppServerRuntime(): Promise<void> {
 	});
 }
 
+async function stageNodePtyRuntime(buildPath: string, platform: string, arch: string): Promise<void> {
+	const source = path.join(repoRoot, "node_modules", "node-pty");
+	const target = path.join(buildPath, ".webpack", arch, "main", "node_modules", "node-pty");
+	const platformTag = platform === "mas" ? "darwin" : platform;
+	const prebuild = path.join(source, "prebuilds", `${platformTag}-${arch}`);
+	const compiled = path.join(source, "build", "Release");
+	const nativeSource = await access(prebuild).then(() => prebuild).catch(async () => {
+		await access(compiled);
+		return compiled;
+	});
+	const nativeTarget = nativeSource === prebuild
+		? path.join(target, "prebuilds", `${platformTag}-${arch}`)
+		: path.join(target, "build", "Release");
+	await rm(target, { recursive: true, force: true });
+	await mkdir(target, { recursive: true });
+	await Promise.all([
+		cp(path.join(source, "lib"), path.join(target, "lib"), { recursive: true }),
+		cp(path.join(source, "package.json"), path.join(target, "package.json")),
+		cp(path.join(source, "LICENSE"), path.join(target, "LICENSE")),
+		cp(nativeSource, nativeTarget, { recursive: true, filter: (entry) => !entry.endsWith(".pdb") }),
+	]);
+	if (platformTag !== "win32") await chmod(path.join(nativeTarget, "spawn-helper"), 0o755);
+}
+
+async function stageRipgrepRuntime(buildPath: string, platform: string, arch: string): Promise<void> {
+	const platformTag = platform === "mas" ? "darwin" : platform;
+	if (platformTag !== "darwin" && platformTag !== "win32") return;
+	const name = platformTag === "win32" ? "rg.exe" : "rg";
+	const source = path.join(
+		repoRoot,
+		"packages",
+		"coding-agent",
+		"dist",
+		"vendor",
+		"tools",
+		`${platformTag}-${arch}`,
+		name,
+	);
+	const target = path.join(buildPath, ".webpack", arch, "main", "native-tools", name);
+	await mkdir(path.dirname(target), { recursive: true });
+	await cp(source, target);
+	if (platformTag !== "win32") await chmod(target, 0o755);
+}
+
 const config: ForgeConfig = {
 	packagerConfig: {
-		asar: true,
+		asar: { unpackDir: "{.webpack/main/node_modules/node-pty,.webpack/main/native-tools}" },
 		appBundleId: "ai.arcmind.desktop",
 		appCategoryType: "public.app-category.developer-tools",
 		name: "ArcMind",
@@ -122,10 +167,14 @@ const config: ForgeConfig = {
 	},
 	hooks: {
 		generateAssets: prepareAppServerRuntime,
-		packageAfterCopy: async (_forgeConfig, buildPath, _electronVersion, _platform, arch) => {
+		packageAfterCopy: async (_forgeConfig, buildPath, _electronVersion, platform, arch) => {
 			const target = path.join(buildPath, ".webpack", arch, "app-server");
 			await rm(target, { recursive: true, force: true });
-			await cp(appServerRuntime, target, { recursive: true });
+			await Promise.all([
+				cp(appServerRuntime, target, { recursive: true }),
+				stageNodePtyRuntime(buildPath, platform, arch),
+				stageRipgrepRuntime(buildPath, platform, arch),
+			]);
 		},
 	},
 	makers: [
