@@ -5,7 +5,27 @@ import { describe, expect, it, vi } from "vitest";
 import { resolveRendererAsset } from "../src/main/app-protocol-scheme.ts";
 import { ClientBroker, isTrustedRendererUrl } from "../src/main/client-broker.ts";
 import { isSafeExternalUrl } from "../src/main/external-url.ts";
-import { DESKTOP_IPC_CHANNELS, type SupervisorView } from "../src/shared/desktop-api.ts";
+import {
+	DESKTOP_BROWSER_EVENT_CHANNEL,
+	DESKTOP_IPC_CHANNELS,
+	DESKTOP_TERMINAL_EVENT_CHANNEL,
+	type DesktopBrowserEvent,
+	type DesktopTerminalEvent,
+	type SupervisorView,
+	validateBrowserControlInput,
+	validateCreateBrowserInput,
+	validateDesktopBrowserEvent,
+	validateListWorkspaceDirectoryInput,
+	validateOpenWorkspaceFileInput,
+	validateReadWorkspaceFileInput,
+	validateSearchWorkspaceFilesInput,
+	validateWorkspaceEditState,
+	validateWorkspaceMutationInput,
+	validateWorkspaceReviewFileInput,
+	validateWorkspaceReviewInput,
+	validateWriteClipboardTextInput,
+	validateWriteWorkspaceFileInput,
+} from "../src/shared/desktop-api.ts";
 
 const desktopRoot = join(import.meta.dirname, "..");
 
@@ -101,6 +121,288 @@ function supervisorHarness() {
 }
 
 describe("desktop trust boundaries", () => {
+	it("accepts exact workspace file commands and rejects unsafe relative paths", () => {
+		const sessionId = "10000000-0000-4000-8000-000000000099";
+		const revision = "a".repeat(64);
+		expect(validateListWorkspaceDirectoryInput({ sessionId, relativePath: "" })).toEqual({
+			sessionId,
+			relativePath: "",
+		});
+		expect(validateSearchWorkspaceFilesInput({ sessionId, query: "profile" })).toEqual({
+			sessionId,
+			query: "profile",
+		});
+		expect(validateReadWorkspaceFileInput({ sessionId, relativePath: "src/App.tsx" })).toEqual({
+			sessionId,
+			relativePath: "src/App.tsx",
+		});
+		expect(validateWorkspaceReviewInput({ sessionId, revision: "working-tree" })).toEqual({
+			sessionId,
+			revision: "working-tree",
+		});
+		expect(
+			validateWorkspaceReviewFileInput({
+				sessionId,
+				revision: "b".repeat(40),
+				relativePath: "src/App.tsx",
+			}),
+		).toEqual({ sessionId, revision: "b".repeat(40), relativePath: "src/App.tsx" });
+		expect(() => validateWorkspaceReviewInput({ sessionId, revision: "HEAD" })).toThrow(
+			"Invalid workspace review revision",
+		);
+		expect(() =>
+			validateWorkspaceReviewFileInput({
+				sessionId,
+				revision: "working-tree",
+				relativePath: "../outside",
+			}),
+		).toThrow("Invalid workspace relative path");
+		expect(() =>
+			validateWorkspaceReviewFileInput({
+				sessionId,
+				revision: "working-tree",
+				relativePath: "README.md",
+				extra: true,
+			}),
+		).toThrow("Invalid workspace review file input");
+		expect(() => validateWorkspaceReviewInput({ sessionId, revision: "working-tree", extra: true })).toThrow(
+			"Invalid workspace review input",
+		);
+		expect(validateOpenWorkspaceFileInput({ sessionId, relativePath: "README.md", action: "reveal" })).toEqual({
+			sessionId,
+			relativePath: "README.md",
+			action: "reveal",
+		});
+		expect(
+			validateWriteWorkspaceFileInput({
+				sessionId,
+				relativePath: "src/App.tsx",
+				text: "export const App = 2;",
+				expectedRevision: revision,
+			}),
+		).toEqual({
+			sessionId,
+			relativePath: "src/App.tsx",
+			text: "export const App = 2;",
+			expectedRevision: revision,
+		});
+		expect(
+			validateWorkspaceMutationInput({
+				action: "create",
+				sessionId,
+				parentRelativePath: "src",
+				name: "new.ts",
+				kind: "file",
+			}),
+		).toEqual({ action: "create", sessionId, parentRelativePath: "src", name: "new.ts", kind: "file" });
+		expect(
+			validateWorkspaceMutationInput({
+				action: "rename",
+				sessionId,
+				relativePath: "src/old.ts",
+				name: "new.ts",
+			}),
+		).toEqual({ action: "rename", sessionId, relativePath: "src/old.ts", name: "new.ts" });
+		expect(
+			validateWorkspaceMutationInput({
+				action: "move",
+				sessionId,
+				relativePath: "src/new.ts",
+				destinationDirectoryRelativePath: "archive",
+			}),
+		).toEqual({ action: "move", sessionId, relativePath: "src/new.ts", destinationDirectoryRelativePath: "archive" });
+		expect(validateWorkspaceMutationInput({ action: "trash", sessionId, relativePath: "archive/new.ts" })).toEqual({
+			action: "trash",
+			sessionId,
+			relativePath: "archive/new.ts",
+		});
+
+		for (const value of [
+			{ sessionId: "not-a-uuid", relativePath: "" },
+			{ sessionId, relativePath: "../secret" },
+			{ sessionId, relativePath: "/etc/passwd" },
+			{ sessionId, relativePath: "C:/Windows/System32" },
+			{ sessionId, relativePath: "src\\secret" },
+			{ sessionId, relativePath: "src//secret" },
+			{ sessionId, relativePath: "a\0b" },
+			{ sessionId, relativePath: "a".repeat(4_097) },
+		]) {
+			expect(() => validateListWorkspaceDirectoryInput(value)).toThrow();
+		}
+		expect(() => validateSearchWorkspaceFilesInput({ sessionId, query: "" })).toThrow();
+		expect(() => validateSearchWorkspaceFilesInput({ sessionId, query: "x".repeat(257) })).toThrow();
+		expect(() =>
+			validateOpenWorkspaceFileInput({ sessionId, relativePath: "README.md", action: "delete" }),
+		).toThrow();
+		expect(() => validateReadWorkspaceFileInput({ sessionId, relativePath: "README.md", extra: true })).toThrow();
+		expect(() =>
+			validateWriteWorkspaceFileInput({
+				sessionId,
+				relativePath: "../outside.ts",
+				text: "x",
+				expectedRevision: revision,
+			}),
+		).toThrow();
+		expect(() =>
+			validateWriteWorkspaceFileInput({
+				sessionId,
+				relativePath: "src/App.tsx",
+				text: "x",
+				expectedRevision: "invalid",
+			}),
+		).toThrow();
+		expect(() =>
+			validateWriteWorkspaceFileInput({
+				sessionId,
+				relativePath: "src/App.tsx",
+				text: "x",
+				expectedRevision: revision,
+				extra: true,
+			}),
+		).toThrow();
+		expect(() =>
+			validateWriteWorkspaceFileInput({
+				sessionId,
+				relativePath: "src/App.tsx",
+				text: "x".repeat(2 * 1024 * 1024 + 1),
+				expectedRevision: revision,
+			}),
+		).toThrow();
+		for (const value of [
+			{ action: "create", sessionId, parentRelativePath: "../outside", name: "x", kind: "file" },
+			{ action: "create", sessionId, parentRelativePath: "", name: "a/b", kind: "file" },
+			{ action: "rename", sessionId, relativePath: "", name: "root" },
+			{ action: "move", sessionId, relativePath: "src/a", destinationDirectoryRelativePath: "../../outside" },
+			{ action: "trash", sessionId, relativePath: "", extra: true },
+			{ action: "copy", sessionId, relativePath: "src/a" },
+		])
+			expect(() => validateWorkspaceMutationInput(value)).toThrow();
+	});
+
+	it("accepts only exact clipboard write commands", () => {
+		expect(validateWriteClipboardTextInput({ text: "README.md" })).toEqual({ text: "README.md" });
+		expect(() => validateWriteClipboardTextInput({ text: "README.md", extra: true })).toThrow();
+		expect(() => validateWriteClipboardTextInput({ text: 42 })).toThrow();
+	});
+
+	it("accepts only exact workspace edit state reports", () => {
+		expect(validateWorkspaceEditState({ dirty: true, language: "zh" })).toEqual({ dirty: true, language: "zh" });
+		expect(validateWorkspaceEditState({ dirty: false, language: "en" })).toEqual({ dirty: false, language: "en" });
+		expect(() => validateWorkspaceEditState({ dirty: true, language: "zh-CN" })).toThrow();
+		expect(() => validateWorkspaceEditState({ dirty: true, language: "en", extra: true })).toThrow();
+	});
+
+	it("accepts exact browser commands and rejects unsafe renderer payloads", () => {
+		const browserId = "10000000-0000-4000-8000-000000000077";
+		expect(validateCreateBrowserInput({ browserId })).toEqual({ browserId });
+		expect(
+			validateBrowserControlInput({
+				type: "present",
+				browserId,
+				visible: true,
+				bounds: { x: 800, y: 86, width: 393, height: 747 },
+			}),
+		).toEqual({
+			type: "present",
+			browserId,
+			visible: true,
+			bounds: { x: 800, y: 86, width: 393, height: 747 },
+		});
+		expect(validateBrowserControlInput({ type: "navigate", browserId, url: "https://example.com" })).toEqual({
+			type: "navigate",
+			browserId,
+			url: "https://example.com",
+		});
+		expect(
+			validateBrowserControlInput({
+				type: "find",
+				browserId,
+				text: "openai",
+				forward: true,
+				findNext: false,
+			}),
+		).toEqual({ type: "find", browserId, text: "openai", forward: true, findNext: false });
+		expect(validateBrowserControlInput({ type: "set-zoom", browserId, zoomPercent: 137 })).toEqual({
+			type: "set-zoom",
+			browserId,
+			zoomPercent: 137,
+		});
+		for (const type of [
+			"stop-find",
+			"print",
+			"zoom-in",
+			"zoom-out",
+			"zoom-reset",
+			"capture-page",
+			"clear-data",
+		] as const) {
+			expect(validateBrowserControlInput({ type, browserId })).toEqual({ type, browserId });
+		}
+		for (const value of [
+			{ browserId: "not-a-uuid" },
+			{ type: "navigate", browserId, url: "x".repeat(8_193) },
+			{ type: "find", browserId, text: "x".repeat(2_049), forward: true, findNext: false },
+			{ type: "find", browserId, text: "x", forward: "yes", findNext: false },
+			{ type: "set-zoom", browserId, zoomPercent: 24 },
+			{ type: "set-zoom", browserId, zoomPercent: 501 },
+			{ type: "set-zoom", browserId, zoomPercent: 100.5 },
+			{ type: "present", browserId, visible: true, bounds: { x: -1, y: 0, width: 300, height: 300 } },
+		]) {
+			expect(() =>
+				Object.hasOwn(value, "type") ? validateBrowserControlInput(value) : validateCreateBrowserInput(value),
+			).toThrow();
+		}
+		expect(
+			validateDesktopBrowserEvent({
+				type: "state",
+				state: {
+					browserId,
+					url: "https://example.com/",
+					title: "Example",
+					faviconUrl: null,
+					loading: false,
+					canGoBack: false,
+					canGoForward: false,
+					zoomPercent: 100,
+				},
+			}),
+		).toMatchObject({ type: "state", state: { browserId, title: "Example" } });
+		expect(
+			validateDesktopBrowserEvent({
+				type: "find-result",
+				browserId,
+				activeMatchOrdinal: 2,
+				matches: 52,
+			}),
+		).toEqual({ type: "find-result", browserId, activeMatchOrdinal: 2, matches: 52 });
+		expect(validateDesktopBrowserEvent({ type: "command", browserId, command: "find" })).toEqual({
+			type: "command",
+			browserId,
+			command: "find",
+		});
+		for (const zoomPercent of [24, 501, 100.5]) {
+			expect(() =>
+				validateDesktopBrowserEvent({
+					type: "state",
+					state: {
+						browserId,
+						url: "https://example.com/",
+						title: "Example",
+						faviconUrl: null,
+						loading: false,
+						canGoBack: false,
+						canGoForward: false,
+						zoomPercent,
+					},
+				}),
+			).toThrow("Invalid browser zoom percent");
+		}
+		expect(() => validateDesktopBrowserEvent({ type: "command", browserId, command: "developer-tools" })).toThrow(
+			"Invalid browser command",
+		);
+		expect(DESKTOP_BROWSER_EVENT_CHANNEL).toBe("arcmind:browser-event");
+	});
+
 	it("keeps the BrowserWindow sandboxed and denies ambient browser capabilities", () => {
 		const windowSource = source("src/main/window.ts");
 		expect(windowSource).toContain("contextIsolation: true");
@@ -114,6 +416,7 @@ describe("desktop trust boundaries", () => {
 		expect(windowSource).toContain("isSafeExternalUrl");
 		expect(windowSource).toContain("shell.openExternal");
 		expect(windowSource).toContain("will-navigate");
+		expect(windowSource).toContain("will-redirect");
 		expect(windowSource).toContain("will-redirect");
 		expect(windowSource).toContain("will-attach-webview");
 		expect(windowSource).toContain("setPermissionRequestHandler");
@@ -139,8 +442,9 @@ describe("desktop trust boundaries", () => {
 		const html = source("src/renderer/index.html");
 		expect(html).toContain("default-src 'self'");
 		expect(html).toContain("script-src 'self'");
+		expect(html).toContain("style-src 'self' 'unsafe-inline'");
 		expect(html).not.toContain("'unsafe-eval'");
-		expect(html).not.toContain("'unsafe-inline'");
+		expect(html).not.toContain("script-src 'self' 'unsafe-inline'");
 
 		for (const rendererSource of rendererSources()) {
 			expect(rendererSource).not.toMatch(
@@ -197,12 +501,326 @@ describe("desktop trust boundaries", () => {
 		broker.dispose();
 	});
 
+	it("keeps PTY creation behind validated IPC and closes terminals with their renderer owner", async () => {
+		const ipcMain = new FakeIpcMain();
+		const { supervisor } = supervisorHarness();
+		let terminalListener: ((event: DesktopTerminalEvent) => void) | undefined;
+		const terminalManager = {
+			create: vi.fn(async (input) => ({ ...input, pid: 1234, shell: "/bin/zsh" })),
+			write: vi.fn(),
+			resize: vi.fn(),
+			close: vi.fn(),
+			closeAll: vi.fn(),
+			onEvent: vi.fn((listener) => {
+				terminalListener = listener;
+				return () => {
+					terminalListener = undefined;
+				};
+			}),
+		};
+		const broker = new ClientBroker({
+			ipcMain: ipcMain as never,
+			supervisor,
+			terminalManager: terminalManager as never,
+		});
+		const webContents = new FakeWebContents();
+		broker.attach({ webContents: webContents as never });
+		terminalManager.closeAll.mockClear();
+		const event = { sender: webContents, senderFrame: webContents.mainFrame };
+		const terminalId = "10000000-0000-4000-8000-000000000088";
+		const create = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.createTerminal)!;
+
+		await expect(create(event, { terminalId: "not-a-uuid", cwd: "/tmp", cols: 80, rows: 24 })).rejects.toThrow();
+		expect(terminalManager.create).not.toHaveBeenCalled();
+		await expect(create(event, { terminalId, cwd: "/tmp", cols: 80, rows: 24 })).resolves.toMatchObject({
+			terminalId,
+			pid: 1234,
+		});
+		await expect(
+			ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.writeTerminal)!(event, { terminalId, data: "x".repeat(65_537) }),
+		).rejects.toThrow("Invalid terminal input");
+
+		terminalListener?.({ type: "data", terminalId, data: "ready" });
+		expect(webContents.sent.at(-1)).toEqual([
+			DESKTOP_TERMINAL_EVENT_CHANNEL,
+			{ type: "data", terminalId, data: "ready" },
+		]);
+		webContents.emit("did-start-navigation", {}, "app://renderer/index.html", false, true);
+		expect(terminalManager.closeAll).toHaveBeenCalledTimes(1);
+		broker.dispose();
+	});
+
+	it("keeps browser views behind validated IPC and closes them with their renderer owner", async () => {
+		const ipcMain = new FakeIpcMain();
+		const { supervisor } = supervisorHarness();
+		let browserListener: ((event: DesktopBrowserEvent) => void) | undefined;
+		const browserManager = {
+			attach: vi.fn(),
+			create: vi.fn((input) => ({
+				browserId: input.browserId,
+				url: "",
+				title: "New tab",
+				faviconUrl: null,
+				loading: false,
+				canGoBack: false,
+				canGoForward: false,
+			})),
+			control: vi.fn(),
+			capturePreview: vi.fn().mockResolvedValue("data:image/png;base64,cHJldmlldw=="),
+			close: vi.fn(),
+			closeAll: vi.fn(),
+			onEvent: vi.fn((listener) => {
+				browserListener = listener;
+				return () => {
+					browserListener = undefined;
+				};
+			}),
+		};
+		const broker = new ClientBroker({
+			ipcMain: ipcMain as never,
+			supervisor,
+			browserManager: browserManager as never,
+		});
+		const webContents = new FakeWebContents();
+		const contentView = { addChildView: vi.fn(), removeChildView: vi.fn() };
+		broker.attach({ webContents: webContents as never, contentView } as never);
+		browserManager.closeAll.mockClear();
+		const event = { sender: webContents, senderFrame: webContents.mainFrame };
+		const browserId = "10000000-0000-4000-8000-000000000089";
+
+		expect(browserManager.attach).toHaveBeenCalledTimes(1);
+		await expect(
+			ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.createBrowser)!(event, { browserId }),
+		).resolves.toMatchObject({
+			browserId,
+			title: "New tab",
+		});
+		await expect(
+			ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.controlBrowser)!(event, {
+				type: "navigate",
+				browserId,
+				url: "https://example.com",
+			}),
+		).resolves.toBeUndefined();
+		await expect(
+			ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.captureBrowserPreview)!(event, { browserId }),
+		).resolves.toBe("data:image/png;base64,cHJldmlldw==");
+		expect(browserManager.capturePreview).toHaveBeenCalledWith(browserId);
+		browserListener?.({ type: "error", browserId, message: "fixture error" });
+		expect(webContents.sent.at(-1)).toEqual([
+			DESKTOP_BROWSER_EVENT_CHANNEL,
+			{ type: "error", browserId, message: "fixture error" },
+		]);
+		webContents.emit("did-start-navigation", {}, "app://renderer/index.html", false, true);
+		expect(browserManager.closeAll).toHaveBeenCalledTimes(1);
+		broker.dispose();
+	});
+
+	it("authorizes workspace files only from the subscribed Code session", async () => {
+		const ipcMain = new FakeIpcMain();
+		const { setView, supervisor } = supervisorHarness();
+		const codeSessionId = "10000000-0000-4000-8000-000000000091";
+		const chatSessionId = "10000000-0000-4000-8000-000000000092";
+		supervisor.request.mockImplementation(async (request) => ({
+			jsonrpc: "2.0",
+			id: request.id,
+			result:
+				request.method === "session/subscribe"
+					? {
+							snapshot: {
+								session:
+									request.params.sessionId === codeSessionId
+										? { sessionId: codeSessionId, mode: "code", cwd: "/work/project" }
+										: { sessionId: chatSessionId, mode: "chat", cwd: "/work/chat" },
+							},
+						}
+					: {},
+		}));
+		const workspaceFiles = {
+			authorize: vi.fn(),
+			revoke: vi.fn(),
+			clear: vi.fn(),
+			listDirectory: vi.fn(async () => [{ name: "src", relativePath: "src", kind: "directory" as const }]),
+			search: vi.fn(async () => ["src/App.tsx"]),
+			readFile: vi.fn(async () => ({
+				kind: "text" as const,
+				relativePath: "README.md",
+				absolutePath: "/work/project/README.md",
+				byteLength: 4,
+				text: "read",
+				revision: "a".repeat(64),
+			})),
+			writeFile: vi.fn(async () => ({ revision: "b".repeat(64), byteLength: 7 })),
+			openFile: vi.fn(async () => undefined),
+			mutateEntry: vi.fn(async () => ({
+				action: "create" as const,
+				kind: "file" as const,
+				relativePath: "new.ts",
+				absolutePath: "/work/project/new.ts",
+			})),
+			getReview: vi.fn(async () => ({
+				kind: "review" as const,
+				repositoryRoot: "/work/project",
+				branch: "main",
+				head: "a".repeat(40),
+				revision: "working-tree",
+				files: [],
+				commits: [],
+			})),
+			getReviewFileDiff: vi.fn(async () => ({ kind: "text" as const, patch: "@@ -1 +1 @@" })),
+			getReviewFileContext: vi.fn(async () => ({
+				kind: "text" as const,
+				oldFile: { name: "README.md", contents: "old", cacheKey: "old" },
+				newFile: { name: "README.md", contents: "new", cacheKey: "new" },
+			})),
+		};
+		const broker = new ClientBroker({ ipcMain: ipcMain as never, supervisor, workspaceFiles });
+		const webContents = new FakeWebContents();
+		broker.attach({ webContents: webContents as never });
+		workspaceFiles.clear.mockClear();
+		const event = { sender: webContents, senderFrame: webContents.mainFrame };
+		const openSession = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.openSession)!;
+
+		await openSession(event, { sessionId: codeSessionId });
+		expect(workspaceFiles.authorize).toHaveBeenCalledWith(codeSessionId, "/work/project");
+		await expect(
+			ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.listWorkspaceDirectory)!(event, {
+				sessionId: codeSessionId,
+				relativePath: "",
+			}),
+		).resolves.toEqual([{ name: "src", relativePath: "src", kind: "directory" }]);
+		expect(workspaceFiles.listDirectory).toHaveBeenCalledWith({ sessionId: codeSessionId, relativePath: "" });
+		await expect(
+			ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.readWorkspaceFile)!(event, {
+				sessionId: codeSessionId,
+				relativePath: "../outside",
+			}),
+		).rejects.toThrow("Invalid workspace relative path");
+		expect(workspaceFiles.readFile).not.toHaveBeenCalled();
+		await expect(
+			ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.writeWorkspaceFile)!(event, {
+				sessionId: codeSessionId,
+				relativePath: "README.md",
+				text: "changed",
+				expectedRevision: "a".repeat(64),
+			}),
+		).resolves.toEqual({ revision: "b".repeat(64), byteLength: 7 });
+		expect(workspaceFiles.writeFile).toHaveBeenCalledWith({
+			sessionId: codeSessionId,
+			relativePath: "README.md",
+			text: "changed",
+			expectedRevision: "a".repeat(64),
+		});
+		await expect(
+			ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.mutateWorkspaceEntry)!(event, {
+				action: "create",
+				sessionId: codeSessionId,
+				parentRelativePath: "",
+				name: "new.ts",
+				kind: "file",
+			}),
+		).resolves.toMatchObject({ action: "create", relativePath: "new.ts" });
+		expect(workspaceFiles.mutateEntry).toHaveBeenCalledWith({
+			action: "create",
+			sessionId: codeSessionId,
+			parentRelativePath: "",
+			name: "new.ts",
+			kind: "file",
+		});
+		await expect(
+			ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.getWorkspaceReview)!(event, {
+				sessionId: codeSessionId,
+				revision: "working-tree",
+			}),
+		).resolves.toMatchObject({ kind: "review", branch: "main" });
+		expect(workspaceFiles.getReview).toHaveBeenCalledWith({
+			sessionId: codeSessionId,
+			revision: "working-tree",
+		});
+		await expect(
+			ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.getWorkspaceReviewFileDiff)!(event, {
+				sessionId: codeSessionId,
+				revision: "a".repeat(40),
+				relativePath: "README.md",
+			}),
+		).resolves.toMatchObject({ kind: "text", patch: expect.stringContaining("@@") });
+		expect(workspaceFiles.getReviewFileDiff).toHaveBeenCalledWith({
+			sessionId: codeSessionId,
+			revision: "a".repeat(40),
+			relativePath: "README.md",
+		});
+		await expect(
+			ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.getWorkspaceReviewFileContext)!(event, {
+				sessionId: codeSessionId,
+				revision: "working-tree",
+				relativePath: "README.md",
+			}),
+		).resolves.toMatchObject({ kind: "text", oldFile: { contents: "old" }, newFile: { contents: "new" } });
+		expect(workspaceFiles.getReviewFileContext).toHaveBeenCalledWith({
+			sessionId: codeSessionId,
+			revision: "working-tree",
+			relativePath: "README.md",
+		});
+		await expect(
+			ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.getWorkspaceReviewFileContext)!(event, {
+				sessionId: codeSessionId,
+				revision: "working-tree",
+				relativePath: "../outside",
+			}),
+		).rejects.toThrow("Invalid workspace relative path");
+		expect(workspaceFiles.getReviewFileContext).toHaveBeenCalledTimes(1);
+		await expect(
+			ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.getWorkspaceReview)!(event, {
+				sessionId: codeSessionId,
+				revision: "HEAD",
+			}),
+		).rejects.toThrow("Invalid workspace review revision");
+		expect(workspaceFiles.getReview).toHaveBeenCalledTimes(1);
+		await ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.deleteProject)!(event, {
+			requestId: "11111111-1111-4111-8111-111111111391",
+			mode: "code",
+			cwd: "/work/project",
+			expectedRevision: "a".repeat(64),
+		});
+		expect(workspaceFiles.revoke).toHaveBeenCalledWith(codeSessionId);
+
+		await openSession(event, { sessionId: chatSessionId });
+		expect(workspaceFiles.revoke).toHaveBeenCalledWith(chatSessionId);
+		await ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.deleteSession)!(event, {
+			sessionId: chatSessionId,
+			requestId: "11111111-1111-4111-8111-111111111392",
+		});
+		expect(workspaceFiles.revoke).toHaveBeenCalledWith(chatSessionId);
+
+		setView({ state: "restarting" });
+		expect(workspaceFiles.clear).toHaveBeenCalledTimes(1);
+		webContents.emit("did-start-navigation", {}, "app://renderer/index.html", false, true);
+		expect(workspaceFiles.clear).toHaveBeenCalledTimes(2);
+		broker.dispose();
+		expect(workspaceFiles.clear).toHaveBeenCalledTimes(3);
+	});
+
 	it("maps only typed calls and revalidates their parameters in main", async () => {
 		const ipcMain = new FakeIpcMain();
 		const { supervisor } = supervisorHarness();
 		supervisor.request.mockImplementation(async (request) => {
 			let result: unknown = { sessions: [], nextAfterSessionId: null };
 			if (request.method === "skill/list") result = { skills: [{ name: "pdf", description: "Read PDF files" }] };
+			if (request.method === "profile/get") {
+				result = {
+					generatedAt: "2026-08-01T12:00:00.000Z",
+					totalTokens: 0,
+					peakDailyTokens: 0,
+					longestSessionMs: 0,
+					currentStreakDays: 0,
+					longestStreakDays: 0,
+					sessionCount: 0,
+					usedSkillCount: 0,
+					skillUseCount: 0,
+					activity: [],
+					topSkills: [],
+				};
+			}
 			if (request.method === "project/deletePreview") {
 				result = {
 					mode: request.params.mode,
@@ -236,19 +854,51 @@ describe("desktop trust boundaries", () => {
 			if (request.method === "session/setPermissionMode") {
 				result = { permissionMode: request.params.permissionMode };
 			}
+			if (request.method === "subagent/interrupt") {
+				result = {
+					subagent: {
+						agentId: request.params.agentId,
+						name: "Child",
+						status: "closed",
+						taskSummary: "Test child",
+						createdAt: "2026-07-30T00:00:00.000Z",
+						updatedAt: "2026-07-30T00:00:00.000Z",
+					},
+				};
+			}
 			return { jsonrpc: "2.0", id: request.id, result };
 		});
-		const broker = new ClientBroker({ ipcMain: ipcMain as never, supervisor });
+		const writeClipboardText = vi.fn();
+		const setWorkspaceEditState = vi.fn();
+		const broker = new ClientBroker({
+			ipcMain: ipcMain as never,
+			supervisor,
+			writeClipboardText,
+			setWorkspaceEditState,
+		});
 		const webContents = new FakeWebContents();
 		broker.attach({ webContents: webContents as never });
 		const event = { sender: webContents, senderFrame: webContents.mainFrame };
 		const listSessions = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.listSessions)!;
 		const listSkills = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.listSkills)!;
+		const getProfile = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.getProfile)!;
 		const previewProjectDelete = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.previewProjectDelete)!;
 		const deleteProject = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.deleteProject)!;
 		const renameSession = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.renameSession)!;
 		const deleteSession = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.deleteSession)!;
 		const setPermissionMode = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.setPermissionMode)!;
+		const interruptSubagent = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.interruptSubagent)!;
+		const copyText = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.writeClipboardText)!;
+		const reportEditState = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.setWorkspaceEditState)!;
+
+		await expect(copyText(event, { text: "copied" })).resolves.toBeUndefined();
+		expect(writeClipboardText).toHaveBeenCalledWith("copied");
+		await expect(copyText(event, { text: "copied", extra: true })).rejects.toThrow("Invalid clipboard write input");
+		await expect(reportEditState(event, { dirty: true, language: "zh" })).resolves.toBeUndefined();
+		expect(setWorkspaceEditState).toHaveBeenCalledWith({ dirty: true, language: "zh" });
+		await expect(reportEditState(event, { dirty: true, language: "zh-CN" })).rejects.toThrow(
+			"Invalid workspace edit state",
+		);
 
 		await expect(listSessions(event, { limit: 0 })).rejects.toThrow("Invalid session/list params");
 		expect(supervisor.request).not.toHaveBeenCalled();
@@ -268,6 +918,9 @@ describe("desktop trust boundaries", () => {
 		expect(supervisor.request).toHaveBeenCalledWith(
 			expect.objectContaining({ method: "skill/list", params: { cwd: null } }),
 		);
+		await expect(getProfile(event, { unexpected: true })).rejects.toThrow("Invalid profile/get params");
+		await expect(getProfile(event, {})).resolves.toMatchObject({ totalTokens: 0, topSkills: [] });
+		expect(supervisor.request).toHaveBeenCalledWith(expect.objectContaining({ method: "profile/get", params: {} }));
 		await expect(previewProjectDelete(event, { mode: "all", cwd: "/work/project" })).rejects.toThrow(
 			"Invalid project/deletePreview params",
 		);
@@ -318,6 +971,20 @@ describe("desktop trust boundaries", () => {
 		expect(supervisor.request).toHaveBeenCalledWith(
 			expect.objectContaining({ method: "session/setPermissionMode", params: permissionInput }),
 		);
+		const subagentInput = {
+			sessionId: "session-a",
+			agentId: "child-a",
+			requestId: "11111111-1111-4111-8111-111111111403",
+		};
+		await expect(interruptSubagent(event, { ...subagentInput, agentId: "" })).rejects.toThrow(
+			"Invalid subagent/interrupt params",
+		);
+		await expect(interruptSubagent(event, subagentInput)).resolves.toMatchObject({
+			subagent: { agentId: "child-a", status: "closed" },
+		});
+		expect(supervisor.request).toHaveBeenCalledWith(
+			expect.objectContaining({ method: "subagent/interrupt", params: subagentInput }),
+		);
 		supervisor.request.mockImplementationOnce(async (request) => ({
 			jsonrpc: "2.0",
 			id: request.id,
@@ -334,6 +1001,7 @@ describe("desktop trust boundaries", () => {
 			expect.objectContaining({ method: "project/delete", params: deleteInput }),
 		);
 		broker.dispose();
+		expect(setWorkspaceEditState).toHaveBeenLastCalledWith({ dirty: false, language: "en" });
 	});
 
 	it("keeps the current subscription when opening the replacement session fails", async () => {
