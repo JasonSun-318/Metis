@@ -10,11 +10,13 @@ import {
 	UserCircle,
 } from "@phosphor-icons/react";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
-import emptyStateImage from "../assets/skills-empty-state.png";
+import { useTranslation } from "react-i18next";
+import emptyStateImage from "../assets/skills-empty-state.svg";
 import type { AppStoreSnapshot } from "../store/app-store.ts";
 import type { ProjectPreferenceMap } from "../store/project-preferences.ts";
 import type { ArcMindDesktopApi } from "../../shared/desktop-api.ts";
 import { buildSessionTree } from "./SessionSidebar.tsx";
+import { TracedSvgIcon } from "./TracedSvgIcon.tsx";
 
 type CatalogRoute =
 	| { readonly kind: "root" }
@@ -55,8 +57,9 @@ function DirectoryRow({ description, icon, name, onClick, title }: {
 }
 
 function LoadingRows() {
+	const { t } = useTranslation();
 	return (
-		<div aria-label="Loading skills" className="skills-loading" role="status">
+		<div aria-label={t("Loading skills")} className="skills-loading" role="status">
 			{[0, 1, 2].map((row) => (
 				<div className="skills-loading-row" key={row}>
 					<span />
@@ -68,6 +71,7 @@ function LoadingRows() {
 }
 
 function EmptyState({ cwd, source }: { readonly cwd?: string; readonly source: SkillSourceView }) {
+	const { t } = useTranslation();
 	const title = source === "system" ? "No system skills" : source === "user" ? "No user skills" : "No project skills";
 	const hint = source === "user"
 		? "~/.arcmind/agent/skills/ or ~/.agents/skills/"
@@ -76,9 +80,9 @@ function EmptyState({ cwd, source }: { readonly cwd?: string; readonly source: S
 			: undefined;
 	return (
 		<div className="skills-empty-state">
-			<img alt="" aria-hidden="true" src={emptyStateImage} />
-			<h2>{title}</h2>
-			<p>{hint ? <>Add a Skill under <code>{hint}</code>.</> : "No Skills are available in this category."}</p>
+			<TracedSvgIcon src={emptyStateImage} />
+			<h2>{t(title)}</h2>
+			<p>{hint ? <>{t("Add a Skill under")} <code>{hint}</code>.</> : t("No Skills are available in this category.")}</p>
 		</div>
 	);
 }
@@ -88,6 +92,7 @@ function modeLabel(mode: AgentMode): string {
 }
 
 export function SkillsPanel({ api, preferences, serverReady, state }: SkillsPanelProps) {
+	const { t } = useTranslation();
 	const [route, setRoute] = useState<CatalogRoute>({ kind: "root" });
 	const [requestState, setRequestState] = useState<RequestState>({ status: "idle" });
 	const [retry, setRetry] = useState(0);
@@ -147,7 +152,7 @@ export function SkillsPanel({ api, preferences, serverReady, state }: SkillsPane
 				if (generation !== requestGeneration.current) return;
 				setRequestState({
 					status: "error",
-					message: cause instanceof Error ? cause.message : "The Skill catalog could not be read.",
+					message: cause instanceof Error ? cause.message : "",
 				});
 			});
 		return () => {
@@ -155,16 +160,16 @@ export function SkillsPanel({ api, preferences, serverReady, state }: SkillsPane
 		};
 	}, [api, requestTarget, retry, serverReady]);
 
-	const breadcrumbs: Array<{ label: string; route?: CatalogRoute }> = [{ label: "Skills", route: { kind: "root" } }];
-	if (route.kind === "source") breadcrumbs.push({ label: route.source === "system" ? "System" : "User" });
-	if (route.kind === "project-modes") breadcrumbs.push({ label: "Project" });
+	const breadcrumbs: Array<{ label: string; route?: CatalogRoute }> = [{ label: t("Skills"), route: { kind: "root" } }];
+	if (route.kind === "source") breadcrumbs.push({ label: t(route.source === "system" ? "System" : "User") });
+	if (route.kind === "project-modes") breadcrumbs.push({ label: t("Project") });
 	if (route.kind === "projects") {
-		breadcrumbs.push({ label: "Project", route: { kind: "project-modes" } }, { label: modeLabel(route.mode) });
+		breadcrumbs.push({ label: t("Project"), route: { kind: "project-modes" } }, { label: t(modeLabel(route.mode)) });
 	}
 	if (route.kind === "project-skills") {
 		breadcrumbs.push(
-			{ label: "Project", route: { kind: "project-modes" } },
-			{ label: modeLabel(route.mode), route: { kind: "projects", mode: route.mode } },
+			{ label: t("Project"), route: { kind: "project-modes" } },
+			{ label: t(modeLabel(route.mode)), route: { kind: "projects", mode: route.mode } },
 			{ label: selectedProject?.name ?? route.cwd },
 		);
 	}
@@ -173,24 +178,24 @@ export function SkillsPanel({ api, preferences, serverReady, state }: SkillsPane
 	if (route.kind === "root") {
 		content = (
 			<div className="skills-directory-list">
-				<DirectoryRow description="Skills included with ArcMind" icon={<Desktop aria-hidden="true" size={22} />} name="System" onClick={() => setRoute({ kind: "source", source: "system" })} />
-				<DirectoryRow description="Skills available across all projects" icon={<UserCircle aria-hidden="true" size={22} />} name="User" onClick={() => setRoute({ kind: "source", source: "user" })} />
-				<DirectoryRow description="Skills provided by project folders" icon={<Folders aria-hidden="true" size={22} />} name="Project" onClick={() => setRoute({ kind: "project-modes" })} />
+				<DirectoryRow description={t("Skills included with ArcMind")} icon={<Desktop aria-hidden="true" size={22} />} name={t("System")} onClick={() => setRoute({ kind: "source", source: "system" })} />
+				<DirectoryRow description={t("Skills available across all projects")} icon={<UserCircle aria-hidden="true" size={22} />} name={t("User")} onClick={() => setRoute({ kind: "source", source: "user" })} />
+				<DirectoryRow description={t("Skills provided by project folders")} icon={<Folders aria-hidden="true" size={22} />} name={t("Project")} onClick={() => setRoute({ kind: "project-modes" })} />
 			</div>
 		);
 	} else if (route.kind === "project-modes") {
 		content = (
 			<>
-				<p className="skills-shared-note">Project Skills are shared between Chat and Code when they use the same folder.</p>
+				<p className="skills-shared-note">{t("Project Skills are shared between Chat and Code when they use the same folder.")}</p>
 				<div className="skills-directory-list">
-					<DirectoryRow description="Projects used by Chat tasks" icon={<ChatCircleDots aria-hidden="true" size={22} />} name="Chat" onClick={() => setRoute({ kind: "projects", mode: "chat" })} />
-					<DirectoryRow description="Projects used by Code tasks" icon={<Code aria-hidden="true" size={22} />} name="Code" onClick={() => setRoute({ kind: "projects", mode: "code" })} />
+					<DirectoryRow description={t("Projects used by Chat tasks")} icon={<ChatCircleDots aria-hidden="true" size={22} />} name={t("Chat")} onClick={() => setRoute({ kind: "projects", mode: "chat" })} />
+					<DirectoryRow description={t("Projects used by Code tasks")} icon={<Code aria-hidden="true" size={22} />} name={t("Code")} onClick={() => setRoute({ kind: "projects", mode: "code" })} />
 				</div>
 			</>
 		);
 	} else if (route.kind === "projects") {
 		content = projects.length === 0
-			? <p className="skills-inline-empty">No {modeLabel(route.mode)} projects yet.</p>
+			? <p className="skills-inline-empty">{t("No {{mode}} projects yet.", { mode: t(modeLabel(route.mode)) })}</p>
 			: (
 				<div className="skills-directory-list">
 					{projects.map((project) => (
@@ -207,10 +212,10 @@ export function SkillsPanel({ api, preferences, serverReady, state }: SkillsPane
 			);
 	} else if (requestState.status === "error") {
 		content = (
-			<div className="skills-error-state" role="alert" title={requestState.message}>
-				<h2>Couldn’t load Skills</h2>
-				<p>The catalog could not be read.</p>
-				<button onClick={() => setRetry((value) => value + 1)} type="button">Retry</button>
+			<div className="skills-error-state" role="alert" title={requestState.message || t("The Skill catalog could not be read.")}>
+				<h2>{t("Couldn’t load Skills")}</h2>
+				<p>{t("The catalog could not be read.")}</p>
+				<button onClick={() => setRetry((value) => value + 1)} type="button">{t("Retry")}</button>
 			</div>
 		);
 	} else if (requestState.status !== "success") {
@@ -232,11 +237,11 @@ export function SkillsPanel({ api, preferences, serverReady, state }: SkillsPane
 
 	return (
 		<section aria-labelledby="skills-catalog-title" className="skills-panel">
-			<header className="skills-panel-header"><h1 id="skills-catalog-title">Skills</h1></header>
+			<header className="skills-panel-header"><h1 id="skills-catalog-title">{t("Skills")}</h1></header>
 			<div className="skills-panel-scroll">
 				<div className="skills-panel-content">
 					{route.kind !== "root" && (
-						<nav aria-label="Skill catalog path" className="skills-breadcrumbs">
+						<nav aria-label={t("Skill catalog path")} className="skills-breadcrumbs">
 							{breadcrumbs.map((crumb, index) => (
 								<span key={`${crumb.label}:${index}`}>
 									{index > 0 && <CaretRight aria-hidden="true" size={12} />}

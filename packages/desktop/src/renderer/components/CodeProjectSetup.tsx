@@ -1,11 +1,13 @@
 import { CaretLeft, CaretRight, FolderSimple, Plus, X } from "@phosphor-icons/react";
 import { type DragEvent, type FormEvent, useEffect, useRef, useState } from "react";
-import codeProjectHand from "../assets/code-project-hand.png";
+import { useTranslation } from "react-i18next";
+import codeProjectHand from "../assets/code-project-hand.svg";
 import type {
 	DesktopAttachmentSelection,
 	DesktopCreateProjectFolderInput,
 } from "../../shared/desktop-api.ts";
 import { DialogFrame } from "./ProjectActions.tsx";
+import { TracedSvgIcon } from "./TracedSvgIcon.tsx";
 
 type SetupStep = "choose" | "create" | "existing";
 
@@ -54,6 +56,7 @@ export function CodeProjectSetup({
 	onPickFiles,
 	onResolveDroppedFiles,
 }: CodeProjectSetupProps) {
+	const { t } = useTranslation();
 	const [step, setStep] = useState<SetupStep>("choose");
 	const [name, setName] = useState("");
 	const [files, setFiles] = useState<readonly DesktopAttachmentSelection[]>([]);
@@ -166,50 +169,50 @@ export function CodeProjectSetup({
 				{step === "choose" && (
 					<div className="code-project-choice-layout">
 						<div className="code-project-choice-copy">
-							<h2 id="code-project-choose-title">Create a new project</h2>
+							<h2 id="code-project-choose-title">{t("Create a new project")}</h2>
 							<p id="code-project-choose-description">
-								A dedicated place for ongoing work. Files stay in a folder on your computer, and ArcMind keeps the project context together.
+								{t("A dedicated place for ongoing work. Files stay in a folder on your computer, and ArcMind keeps the project context together.")}
 							</p>
 							<div className="code-project-options">
-								<button aria-label="Start from scratch" onClick={() => setStep("create")} ref={startButton} type="button">
+								<button aria-label={t("Start from scratch")} onClick={() => setStep("create")} ref={startButton} type="button">
 									<span className="code-project-option-icon"><Plus aria-hidden="true" size={24} /></span>
-									<span><strong>Start from scratch</strong><small>Create a new folder and add your files.</small></span>
+									<span><strong>{t("Start from scratch")}</strong><small>{t("Create a new folder and add your files.")}</small></span>
 									<CaretRight aria-hidden="true" size={17} />
 								</button>
-								<button aria-label="Use an existing folder" onClick={() => setStep("existing")} type="button">
+								<button aria-label={t("Use an existing folder")} onClick={() => setStep("existing")} type="button">
 									<span className="code-project-option-icon"><FolderSimple aria-hidden="true" size={22} /></span>
-									<span><strong>Use an existing folder</strong><small>Give ArcMind a folder you already work from.</small></span>
+									<span><strong>{t("Use an existing folder")}</strong><small>{t("Give ArcMind a folder you already work from.")}</small></span>
 									<CaretRight aria-hidden="true" size={17} />
 								</button>
 							</div>
 						</div>
 						<div className="code-project-illustration" aria-hidden="true">
-							<img alt="" src={codeProjectHand} />
+							<TracedSvgIcon src={codeProjectHand} />
 						</div>
 					</div>
 				)}
 
 				{step === "create" && (
 					<form className="code-project-form" onSubmit={(event) => void createProject(event)}>
-						<button aria-label="Back" className="code-project-back" disabled={pending} onClick={goBack} type="button">
+						<button aria-label={t("Back")} className="code-project-back" disabled={pending} onClick={goBack} type="button">
 							<CaretLeft aria-hidden="true" size={21} />
 						</button>
-						<h2 id="code-project-create-title">Start a new project</h2>
-						<p className="sr-only" id="code-project-create-description">Create a folder for a new ArcMind Code project.</p>
-						<label htmlFor="code-project-name">Name <span aria-hidden="true">*</span></label>
+						<h2 id="code-project-create-title">{t("Start a new project")}</h2>
+						<p className="sr-only" id="code-project-create-description">{t("Create a folder for a new ArcMind Code project.")}</p>
+						<label htmlFor="code-project-name">{t("Name")} <span aria-hidden="true">*</span></label>
 						<input
 							autoComplete="off"
 							disabled={pending || createdProject !== null}
 							id="code-project-name"
 							maxLength={120}
 							onChange={(event) => setName(event.target.value)}
-							placeholder="Project name"
+							placeholder={t("Project name")}
 							ref={nameInput}
 							value={name}
 						/>
-						<span className="code-project-field-label">Add files</span>
+						<span className="code-project-field-label">{t("Add files")}</span>
 						<button
-							aria-label="Add files"
+							aria-label={t("Add files")}
 							className="code-project-dropzone"
 							data-active={dropActive}
 							disabled={pending || createdProject !== null || files.length >= MAX_FILES}
@@ -224,30 +227,30 @@ export function CodeProjectSetup({
 							type="button"
 						>
 							<Plus aria-hidden="true" size={18} />
-							<span>{files.length > 0 ? `${files.length} file${files.length === 1 ? "" : "s"} selected` : "Drop files here or click to browse"}</span>
+							<span>{files.length > 0 ? t("{{count}} files selected", { count: files.length }) : t("Drop files here or click to browse")}</span>
 						</button>
 						{files.length > 0 && (
-							<ul className="code-project-files" aria-label="Files to add">
+							<ul className="code-project-files" aria-label={t("Files to add")}>
 								{files.map((file) => (
 									<li key={`${file.path}\u0000${file.name}`}>
 										<span>{file.name}</span>
-										<button aria-label={`Remove ${file.name}`} disabled={pending || createdProject !== null} onClick={() => setFiles((current) => current.filter((candidate) => candidate !== file))} type="button">
+									<button aria-label={t("Remove {{name}}", { name: file.name })} disabled={pending || createdProject !== null} onClick={() => setFiles((current) => current.filter((candidate) => candidate !== file))} type="button">
 											<X aria-hidden="true" size={14} />
 										</button>
 									</li>
 								))}
 							</ul>
 						)}
-						<span className="code-project-field-label">Choose project location</span>
-						<button aria-label={`Choose project location${location ? `, current ${location}` : ""}`} className="code-project-location" disabled={pending || createdProject !== null} onClick={() => void chooseLocation()} title={location} type="button">
+						<span className="code-project-field-label">{t("Choose project location")}</span>
+						<button aria-label={location ? t("Choose project location, current {{location}}", { location }) : t("Choose project location")} className="code-project-location" disabled={pending || createdProject !== null} onClick={() => void chooseLocation()} title={location} type="button">
 							<FolderSimple aria-hidden="true" size={18} />
-							<span>{location || "Loading location…"}</span>
+							<span>{location || t("Loading location…")}</span>
 						</button>
-						{error && <p className="code-project-error" role="alert">{error}</p>}
+						{error && <p className="code-project-error" role="alert">{t(error)}</p>}
 						<div className="code-project-form-actions">
-							<button className="button-secondary" disabled={pending} onClick={onCancel} type="button">Cancel</button>
+							<button className="button-secondary" disabled={pending} onClick={onCancel} type="button">{t("Cancel")}</button>
 							<button disabled={busy || pending || !name.trim() || !location} type="submit">
-								{pending ? (createdProject ? "Opening…" : "Creating…") : createdProject ? "Retry" : "Create"}
+								{t(pending ? (createdProject ? "Opening…" : "Creating…") : createdProject ? "Retry" : "Create")}
 							</button>
 						</div>
 					</form>
@@ -255,17 +258,17 @@ export function CodeProjectSetup({
 
 				{step === "existing" && (
 					<div className="code-project-existing">
-						<button aria-label="Back" className="code-project-back" disabled={pending} onClick={goBack} type="button">
+						<button aria-label={t("Back")} className="code-project-back" disabled={pending} onClick={goBack} type="button">
 							<CaretLeft aria-hidden="true" size={21} />
 						</button>
-						<h2 id="code-project-existing-title">Use an existing folder</h2>
+						<h2 id="code-project-existing-title">{t("Use an existing folder")}</h2>
 						<p id="code-project-existing-description">
-							Choose a folder and ArcMind will treat its files as project context. ArcMind will remember Code context across tasks in this project.
+							{t("Choose a folder and ArcMind will treat its files as project context. ArcMind will remember Code context across tasks in this project.")}
 						</p>
 						<button className="code-project-choose-folder" disabled={busy || pending} onClick={() => void openExisting()} ref={chooseFolderButton} type="button">
-							{pending ? "Opening…" : "Choose folder"}
+							{t(pending ? "Opening…" : "Choose folder")}
 						</button>
-						{error && <p className="code-project-error" role="alert">{error}</p>}
+						{error && <p className="code-project-error" role="alert">{t(error)}</p>}
 					</div>
 				)}
 			</DialogFrame>

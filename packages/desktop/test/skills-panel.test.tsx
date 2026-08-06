@@ -97,7 +97,8 @@ describe("SkillsPanel", () => {
 		await act(async () => button(container, "Retry").click());
 		await flush();
 		expect(container.textContent).toContain("No user skills");
-		expect(container.querySelector<HTMLImageElement>(".skills-empty-state img")?.src).toContain("skills-empty-state");
+		expect(container.querySelector<HTMLElement>(".skills-empty-state .traced-svg-icon")?.style.getPropertyValue("--traced-svg"))
+			.toMatch(/^url\("data:image\/svg\+xml/);
 		await act(async () => root.unmount());
 	});
 });

@@ -20,7 +20,10 @@ function rule(selector: string): CSSStyleDeclaration {
 describe("Skills catalog visual contract", () => {
 	it("keeps compact rows, a bounded empty illustration, and reduced motion", () => {
 		expect(rule(".skills-directory-row, .skills-skill-row").minHeight).toBe("68px");
-		expect(rule(".skills-empty-state img").width).toBe("88px");
+		const emptyIcon = rule(".skills-empty-state .traced-svg-icon");
+		expect(emptyIcon.width).toBe("88px");
+		expect(emptyIcon.height).toBe(emptyIcon.width);
+		expect(rule(".traced-svg-icon").maskComposite).toBe("exclude");
 		expect(css).toContain(".skills-panel-content { width: min(680px, calc(100% - 48px));");
 		expect(css).toContain(".skills-loading-row > span, .skills-loading-row i { animation: none; }");
 	});
