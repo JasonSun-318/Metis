@@ -7,6 +7,7 @@ import {
 	ClientRequestMethods,
 	createRpcError,
 	HostRequestMethods,
+	MAX_DELTA_UTF8_BYTES,
 	MAX_ENVELOPE_UTF8_BYTES,
 	MAX_EVENT_BATCH,
 	MAX_HISTORY_ITEMS,
@@ -95,8 +96,10 @@ function makeServerInteraction(interaction: Record<string, unknown>): Record<str
 
 const scheduleTask = {
 	id: TASK_ID,
-	title: "生成日报",
+	name: "生成日报",
+	description: "工作日早间摘要",
 	instruction: "生成日报",
+	model: { provider: "openai", modelId: "gpt-test" },
 	schedule: { kind: "daily", time: "09:00" },
 	timezone: "Asia/Shanghai",
 	target: { kind: "general", workspace: "fixed", cwd: "/tmp/arcmind-project" },
@@ -119,20 +122,39 @@ const scheduleRun = {
 	resultPreview: "日报已生成",
 	unread: true,
 	snapshot: {
+		name: "生成日报",
+		description: "工作日早间摘要",
 		instruction: "生成日报",
+		model: { provider: "openai", modelId: "gpt-test" },
 		schedule: { kind: "daily", time: "09:00" },
 		timezone: "Asia/Shanghai",
 		target: { kind: "general", workspace: "fixed", cwd: "/tmp/arcmind-project" },
 	},
 } as const;
 
+const scheduleRunSummary = {
+	id: scheduleRun.id,
+	taskId: scheduleRun.taskId,
+	status: scheduleRun.status,
+	scheduledFor: scheduleRun.scheduledFor,
+	createdAt: scheduleRun.createdAt,
+	completedAt: scheduleRun.completedAt,
+	sessionId: scheduleRun.sessionId,
+	resultPreview: scheduleRun.resultPreview,
+	unread: scheduleRun.unread,
+} as const;
+
 const scheduleCases = [
+	["model/list", {}, { models: [{ provider: "openai", modelId: "gpt-test", name: "GPT Test" }] }],
 	[
 		"schedule/create",
 		{
 			requestId: TASK_ID,
 			sourceSessionId: SESSION_ID,
+			name: "生成日报",
+			description: "工作日早间摘要",
 			instruction: "生成日报",
+			model: { provider: "openai", modelId: "gpt-test" },
 			schedule: { kind: "daily", time: "09:00" },
 		},
 		{ task: scheduleTask },
@@ -145,15 +167,15 @@ const scheduleCases = [
 	["schedule/get", { taskId: TASK_ID }, { task: scheduleTask }],
 	[
 		"schedule/update",
-		{ requestId: "88888888-8888-4888-8888-888888888888", taskId: TASK_ID, instruction: "生成项目日报" },
+		{ requestId: "88888888-8888-4888-8888-888888888888", taskId: TASK_ID, name: "生成项目日报" },
 		{ task: scheduleTask },
 	],
 	["schedule/pause", { requestId: "99999999-9999-4999-8999-999999999999", taskId: TASK_ID }, { task: scheduleTask }],
 	["schedule/resume", { requestId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", taskId: TASK_ID }, { task: scheduleTask }],
 	[
 		"schedule/delete",
-		{ requestId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", taskId: TASK_ID },
-		{ taskId: TASK_ID, deleted: true },
+		{ requestId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", taskId: TASK_ID, deleteSessions: false },
+		{ taskId: TASK_ID, deleted: true, deletedSessionCount: 0, retainedSessionCount: 1 },
 	],
 	["schedule/run-now", { requestId: RUN_ID, taskId: TASK_ID }, { run: scheduleRun }],
 	[
@@ -167,7 +189,7 @@ const scheduleCases = [
 		{ requestId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc", taskId: TASK_ID, runId: RUN_ID },
 		{ run: { ...scheduleRun, unread: false }, unreadCount: 0 },
 	],
-	["schedule/subscribe", {}, { snapshot: { tasks: [scheduleTask], unreadCount: 0, cursor: 53 } }],
+	["schedule/subscribe", {}, { snapshot: { serverEpoch: EPOCH, tasks: [scheduleTask], unreadCount: 0, cursor: 53 } }],
 	["schedule/unsubscribe", {}, { unsubscribed: true }],
 ] as const;
 
@@ -175,38 +197,9 @@ const scheduleEvents = [
 	{ type: "schedule/updated", task: scheduleTask },
 	{ type: "schedule/deleted", taskId: TASK_ID },
 	{
-		type: "schedule/runCompleted",
-		taskId: TASK_ID,
-		runId: RUN_ID,
-		unread: true,
-		createdAt: scheduleRun.createdAt,
-		sessionId: scheduleRun.sessionId,
-		resultPreview: scheduleRun.resultPreview,
-	},
-	{
-		type: "schedule/runFailed",
-		taskId: TASK_ID,
-		runId: RUN_ID,
-		unread: true,
-		createdAt: scheduleRun.createdAt,
-		error: { code: "EXECUTION_FAILED", message: "failed" },
-	},
-	{
-		type: "schedule/runMissed",
-		taskId: TASK_ID,
-		runId: RUN_ID,
-		unread: true,
-		createdAt: scheduleRun.createdAt,
-		reason: "offline",
-		skippedCount: 2,
-	},
-	{
-		type: "schedule/runSkipped",
-		taskId: TASK_ID,
-		runId: RUN_ID,
-		unread: true,
-		createdAt: scheduleRun.createdAt,
-		reason: "overlap",
+		type: "schedule/runUpdated",
+		task: structuredClone(scheduleTask),
+		run: structuredClone(scheduleRunSummary),
 	},
 	{ type: "schedule/refreshed" },
 ] as const;
@@ -265,7 +258,7 @@ describe("golden protocol fixtures", () => {
 		const scheduleNotification = {
 			jsonrpc: "2.0",
 			method: "connection/events",
-			params: { serverEpoch: EPOCH, fromCursor: 100, toCursor: 106, events: scheduleEvents },
+			params: { serverEpoch: EPOCH, fromCursor: 100, toCursor: 99 + scheduleEvents.length, events: scheduleEvents },
 		};
 		expect(validateServerNotification(scheduleNotification)).toEqual(scheduleNotification);
 		const eventTypes = [
@@ -290,13 +283,14 @@ describe("golden protocol fixtures", () => {
 				"session/thinkingSelectionChanged",
 				"session/modelChanged",
 				"subagent/updated",
+				"subagent/item/started",
+				"subagent/item/delta",
+				"subagent/item/completed",
+				"subagent/itemsChanged",
 				"server/state",
 				"schedule/updated",
 				"schedule/deleted",
-				"schedule/runCompleted",
-				"schedule/runFailed",
-				"schedule/runMissed",
-				"schedule/runSkipped",
+				"schedule/runUpdated",
 				"schedule/refreshed",
 			]),
 		);
@@ -315,6 +309,30 @@ describe("golden protocol fixtures", () => {
 		};
 
 		expect(validateServerNotification(notification)).toEqual(notification);
+	});
+
+	it("validates scoped subagent item events", () => {
+		const fixtureEnvelope = structuredClone(notifications[0]!.envelope) as {
+			params: { events: Array<Record<string, unknown>> };
+		};
+		const childEvents = fixtureEnvelope.params.events.filter((event) =>
+			String(event.type).startsWith("subagent/item"),
+		);
+		const envelope = {
+			jsonrpc: "2.0",
+			method: "connection/events",
+			params: { serverEpoch: EPOCH, fromCursor: 1, toCursor: childEvents.length, events: childEvents },
+		};
+		expect(validateServerNotification(envelope)).toEqual(envelope);
+
+		const mismatched = structuredClone(envelope);
+		(mismatched.params.events[0]!.item as Record<string, unknown>).sessionId = "different-child";
+		expect(() => validateServerNotification(mismatched)).toThrow(ProtocolValidationError);
+
+		const oversized = structuredClone(envelope);
+		const delta = oversized.params.events.find((event) => event.type === "subagent/item/delta")!;
+		(delta.delta as Record<string, unknown>).text = "x".repeat(MAX_DELTA_UTF8_BYTES + 1);
+		expect(() => validateServerNotification(oversized)).toThrow(ProtocolValidationError);
 	});
 
 	it("requires configuration only for non-closed subagent summaries", () => {
@@ -428,11 +446,22 @@ describe("golden protocol fixtures", () => {
 	});
 });
 
+describe("session read state", () => {
+	it("keeps mark-read strict and request-id free", () => {
+		const request = makeClientRequest("session/markRead", { sessionId: SESSION_ID });
+		expect(validateClientRequest(request)).toEqual(request);
+		(request.params as Record<string, unknown>).requestId = "00000000-0000-4000-8000-000000000001";
+		expect(() => validateClientRequest(request)).toThrow(ProtocolValidationError);
+	});
+});
+
 describe("exact limits", () => {
 	it("keeps scheduled-task execution fields host-owned and bounds instructions", () => {
 		const valid = makeClientRequest("schedule/create", {
 			requestId: TASK_ID,
+			name: "A",
 			instruction: "a".repeat(MAX_SCHEDULE_INSTRUCTION_UTF8_BYTES),
+			model: { provider: "openai", modelId: "gpt-test" },
 			schedule: { kind: "once", date: "2026-08-03", time: "09:30" },
 		});
 		expect(() => validateClientRequest(valid)).not.toThrow();
@@ -440,6 +469,12 @@ describe("exact limits", () => {
 		expect(() => validateClientRequest(valid)).toThrow(ProtocolValidationError);
 		delete (valid.params as Record<string, unknown>).cwd;
 		(valid.params as Record<string, unknown>).instruction = `${"a".repeat(MAX_SCHEDULE_INSTRUCTION_UTF8_BYTES)}a`;
+		expect(() => validateClientRequest(valid)).toThrow(ProtocolValidationError);
+		(valid.params as Record<string, unknown>).instruction = "run";
+		(valid.params as Record<string, unknown>).name = "a".repeat(121);
+		expect(() => validateClientRequest(valid)).toThrow(ProtocolValidationError);
+		(valid.params as Record<string, unknown>).name = "A";
+		(valid.params as Record<string, unknown>).description = "a".repeat(513);
 		expect(() => validateClientRequest(valid)).toThrow(ProtocolValidationError);
 
 		const [method, params, result] = scheduleCases.find(([name]) => name === "schedule/run/get")!;
@@ -534,6 +569,45 @@ describe("exact limits", () => {
 		expect(() => validateResponseFor("client", request, response)).not.toThrow();
 		response.result.skills[0]!.source = "temporary";
 		expect(() => validateResponseFor("client", request, response)).toThrow(ProtocolValidationError);
+	});
+
+	it("keeps profile summaries bounded, sorted, and internally consistent", () => {
+		const request = requestFor("client", "profile/get").envelope;
+		const fixture = responses.find((entry) => entry.method === "profile/get")!.envelope;
+		expect(() => validateResponseFor("client", request, fixture)).not.toThrow();
+		expect(() => validateClientRequest(makeClientRequest("profile/get", { extra: true }))).toThrow(
+			ProtocolValidationError,
+		);
+
+		const invalidCount = structuredClone(fixture) as { result: { totalTokens: number } };
+		invalidCount.result.totalTokens = -1;
+		expect(() => validateResponseFor("client", request, invalidCount)).toThrow(ProtocolValidationError);
+
+		const invalidDate = structuredClone(fixture) as { result: { activity: Array<{ date: string }> } };
+		invalidDate.result.activity[0]!.date = "2026-02-30";
+		expect(() => validateResponseFor("client", request, invalidDate)).toThrow(ProtocolValidationError);
+
+		const duplicateDate = structuredClone(fixture) as { result: { activity: Array<{ date: string }> } };
+		duplicateDate.result.activity[1]!.date = duplicateDate.result.activity[0]!.date;
+		expect(() => validateResponseFor("client", request, duplicateDate)).toThrow(ProtocolValidationError);
+
+		const duplicateSkill = structuredClone(fixture) as {
+			result: { topSkills: Array<{ name: string; count: number }> };
+		};
+		duplicateSkill.result.topSkills[1]!.name = duplicateSkill.result.topSkills[0]!.name;
+		expect(() => validateResponseFor("client", request, duplicateSkill)).toThrow(ProtocolValidationError);
+
+		const inconsistentStreak = structuredClone(fixture) as {
+			result: { currentStreakDays: number; longestStreakDays: number };
+		};
+		inconsistentStreak.result.currentStreakDays = inconsistentStreak.result.longestStreakDays + 1;
+		expect(() => validateResponseFor("client", request, inconsistentStreak)).toThrow(ProtocolValidationError);
+
+		const inconsistentInsight = structuredClone(fixture) as {
+			result: { mostUsedThinkingLevel: string | null; mostUsedThinkingLevelPercent: number };
+		};
+		inconsistentInsight.result.mostUsedThinkingLevel = null;
+		expect(() => validateResponseFor("client", request, inconsistentInsight)).toThrow(ProtocolValidationError);
 	});
 
 	it("keeps project deletion requests and results strict and fixed-size", () => {

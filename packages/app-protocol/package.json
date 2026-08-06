@@ -28,7 +28,7 @@
 		"typebox": "1.1.38"
 	},
 	"devDependencies": {
-		"@types/node": "24.12.4",
+		"@types/node": "22.19.19",
 		"shx": "0.4.0",
 		"typescript": "5.9.3",
 		"vitest": "4.1.9"

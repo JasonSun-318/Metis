@@ -24,10 +24,12 @@ export interface OpenedSessionRuntime {
 	isActive(): boolean;
 	hasPendingInteractions(): boolean;
 	getSummary(): SessionSummary;
+	markRead(): Promise<SessionSummary>;
 	renameSession(name: string): Promise<SessionSummary>;
 	listSkills(): Promise<ClientResult<"skill/list">>;
 	readItems(input: ClientParams<"session/readItems">): Promise<ClientResult<"session/readItems">>;
 	readSubagentItems(input: ClientParams<"subagent/readItems">): Promise<ClientResult<"subagent/readItems">>;
+	interruptSubagent(input: ClientParams<"subagent/interrupt">): Promise<ClientResult<"subagent/interrupt">>;
 	setThinkingSelection(
 		input: ClientParams<"session/setThinkingSelection">,
 	): Promise<ClientResult<"session/setThinkingSelection">>;

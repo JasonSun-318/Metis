@@ -20,6 +20,7 @@ import {
 	migrateSessionDisplayMetadata,
 	moveSessionFileWithLease,
 	readSessionDisplayMetadata,
+	readSessionUnreadState,
 	removeOwnedManagedWorkspace,
 	resolveNewSessionWorkspace,
 	type ScheduleRun,
@@ -45,6 +46,7 @@ interface ScannedSession {
 	readonly relativePath: string;
 	readonly archived: boolean;
 	readonly name?: string;
+	readonly unread: boolean;
 	readonly header?: {
 		readonly id: string;
 		readonly timestamp: string;
@@ -118,6 +120,7 @@ function corruptSummary(sessionId: string, scanned: ScannedSession): SessionSumm
 		updatedAt: scanned.updatedAt,
 		state: "corrupt",
 		archived: scanned.archived,
+		unread: false,
 		recoveryNotice: "Session journal could not be opened safely.",
 	};
 }
@@ -425,6 +428,7 @@ export class SessionCatalog {
 				path,
 				relativePath,
 				archived,
+				unread: readSessionUnreadState(path, header.id),
 				header,
 				...(name ? { name } : {}),
 				updatedAt: new Date(after.mtimeMs).toISOString(),
@@ -437,7 +441,7 @@ export class SessionCatalog {
 			} catch {
 				// Keep the deterministic epoch fallback for a disappearing file.
 			}
-			return { key, path, relativePath, archived, updatedAt };
+			return { key, path, relativePath, archived, unread: false, updatedAt };
 		}
 	}
 
@@ -498,6 +502,7 @@ export class SessionCatalog {
 							updatedAt: item.updatedAt,
 							state: "idle" as const,
 							archived: item.archived,
+							unread: item.unread,
 							...(item.name ? { name: item.name } : {}),
 							...(item.header.scheduled ? { scheduled: item.header.scheduled } : {}),
 						}
@@ -563,6 +568,7 @@ export class SessionCatalog {
 								updatedAt: item.updatedAt,
 								state: "idle" as const,
 								archived: item.archived,
+								unread: item.unread,
 								...(item.name ? { name: item.name } : {}),
 								...(item.header.scheduled ? { scheduled: item.header.scheduled } : {}),
 							}
@@ -580,11 +586,13 @@ export class SessionCatalog {
 		return canonicalCwd;
 	}
 
-	async registerScheduledRun(run: ScheduleRun): Promise<void> {
+	async registerScheduledRun(
+		run: ScheduleRun,
+	): Promise<{ readonly session: SessionSummary; readonly changed: boolean } | undefined> {
 		if (!run.sessionId || !run.sessionFile) return;
 		const sessionId = run.sessionId;
 		const sessionFile = run.sessionFile;
-		await this.mutate(async () => {
+		return await this.mutate(async () => {
 			try {
 				const expectedRoot = await realpath(getDefaultSessionDir(run.snapshot.target.cwd, this.agentDir));
 				const expectedCwdOrigin = run.snapshot.target.workspace === "task" ? "managed" : "user-selected";
@@ -605,23 +613,27 @@ export class SessionCatalog {
 				const existing = this.sessions.get(sessionId);
 				if (existing && existing.path !== path) throw new Error("Session id is already claimed");
 				const updatedAt = new Date((await lstat(path)).mtimeMs).toISOString();
+				const summary: SessionSummary = {
+					sessionId,
+					mode: header.mode,
+					cwdOrigin: header.cwdOrigin,
+					cwd: summaryCwd(header.cwd),
+					createdAt: header.timestamp,
+					updatedAt,
+					state: "idle",
+					archived: false,
+					unread: run.unread,
+					scheduled: header.scheduled,
+				};
+				const changed = JSON.stringify(existing?.summary) !== JSON.stringify(summary);
 				this.sessions.set(sessionId, {
 					path,
 					relativePath: relative(this.agentDir, path),
 					scheduled: header.scheduled,
-					summary: {
-						sessionId,
-						mode: header.mode,
-						cwdOrigin: header.cwdOrigin,
-						cwd: summaryCwd(header.cwd),
-						createdAt: header.timestamp,
-						updatedAt,
-						state: "idle",
-						archived: false,
-						scheduled: header.scheduled,
-					},
+					summary,
 				});
 				this.claimedSessionIds.add(sessionId);
+				return { session: summary, changed };
 			} catch {
 				throw new AppServerError("SESSION_CORRUPT");
 			}
@@ -1035,6 +1047,22 @@ export class SessionCatalog {
 				manager.close();
 			}
 			return this.updateSummary(sessionId, { name });
+		});
+	}
+
+	markClosedSessionRead(sessionId: string): Promise<{ readonly session: SessionSummary; readonly changed: boolean }> {
+		return this.mutate(() => {
+			const ref = this.get(sessionId);
+			if (ref.summary.state === "corrupt") throw new AppServerError("SESSION_CORRUPT", { sessionId });
+			if (ref.scheduled) throw new AppServerError("READ_ONLY_SESSION", { sessionId });
+			if (!ref.summary.unread) return { session: ref.summary, changed: false };
+			const manager = SessionManager.open(ref.path);
+			try {
+				manager.setSessionUnread(false);
+			} finally {
+				manager.close();
+			}
+			return { session: this.updateSummary(sessionId, { unread: false }), changed: true };
 		});
 	}
 

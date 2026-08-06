@@ -19,6 +19,7 @@ function summary(sessionId: string): SessionSummary {
 		updatedAt: "2026-01-01T00:00:00.000Z",
 		state: "idle",
 		archived: false,
+		unread: false,
 	};
 }
 
@@ -49,6 +50,10 @@ class FakeRuntime implements OpenedSessionRuntime {
 		return { ...summary(this.sessionId), state: this.active ? "running" : "idle" };
 	}
 
+	async markRead(): Promise<SessionSummary> {
+		return this.getSummary();
+	}
+
 	async renameSession(name: string): Promise<SessionSummary> {
 		return { ...this.getSummary(), name };
 	}
@@ -63,6 +68,10 @@ class FakeRuntime implements OpenedSessionRuntime {
 
 	async readSubagentItems(_input: ClientParams<"subagent/readItems">): Promise<ClientResult<"subagent/readItems">> {
 		return { items: [], nextBeforeItemId: null };
+	}
+
+	async interruptSubagent(): Promise<ClientResult<"subagent/interrupt">> {
+		throw new Error("No child runtime in registry fixture");
 	}
 
 	async setThinkingSelection(

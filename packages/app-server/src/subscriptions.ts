@@ -1,4 +1,4 @@
-import type { DomainEvent, ScheduleSnapshotView, SessionSnapshot } from "@arcmind/app-protocol";
+import type { DomainEvent, ScheduleSnapshotView, SessionSnapshot, SessionSummary } from "@arcmind/app-protocol";
 import type { OutboundQueue, OutboundStage } from "./outbound-queue.ts";
 import { AppServerError, type OpenedSessionRuntime } from "./session-runtime-host.ts";
 
@@ -37,10 +37,12 @@ export class SessionSubscriptions {
 	private readonly channels = new Map<string, SessionChannel>();
 	private readonly connectionOutbounds = new Set<OutboundQueue>();
 	private readonly scheduleSubscribers = new Set<Subscriber>();
+	private readonly onSessionUpdated?: (session: SessionSummary) => void;
 	private cursor = 0;
 
-	constructor(serverEpoch: string) {
+	constructor(serverEpoch: string, onSessionUpdated?: (session: SessionSummary) => void) {
 		this.serverEpoch = serverEpoch;
+		this.onSessionUpdated = onSessionUpdated;
 	}
 
 	currentCursor(): number {
@@ -60,7 +62,10 @@ export class SessionSubscriptions {
 		const channel: SessionChannel = {
 			runtime,
 			subscribers,
-			unsubscribeRuntime: runtime.subscribe((event) => this.publish(subscribers, event)),
+			unsubscribeRuntime: runtime.subscribe((event) => {
+				if (event.type === "session/updated") this.onSessionUpdated?.(event.session);
+				this.publish(subscribers, event);
+			}),
 		};
 		this.channels.set(runtime.sessionId, channel);
 		return channel;
@@ -69,11 +74,22 @@ export class SessionSubscriptions {
 	private publish(subscribers: ReadonlySet<Subscriber>, event: DomainEvent): void {
 		this.cursor += 1;
 		const published: PublishedEvent = { cursor: this.cursor, event: structuredClone(event) };
+		const delivered = new Set<OutboundQueue>();
 		for (const subscriber of subscribers) {
 			if (!subscriber.active) continue;
+			delivered.add(subscriber.outbound);
 			if (subscriber.buffering) subscriber.stage.enqueue(published.cursor, published.event);
 			else subscriber.outbound.enqueue(published.cursor, published.event);
 		}
+		if (event.type === "session/updated") {
+			for (const outbound of this.connectionOutbounds) {
+				if (!delivered.has(outbound)) outbound.enqueue(published.cursor, structuredClone(published.event));
+			}
+		}
+	}
+
+	publishSessionUpdated(session: SessionSummary): void {
+		this.publish(new Set(), { type: "session/updated", session });
 	}
 
 	publishSchedule(event: DomainEvent): void {
@@ -147,10 +163,6 @@ export class SessionSubscriptions {
 			subscriber.active = false;
 			subscriber.stage.abort();
 			channel.subscribers.delete(subscriber);
-			if (channel.subscribers.size === 0) {
-				channel.unsubscribeRuntime();
-				if (this.channels.get(runtime.sessionId) === channel) this.channels.delete(runtime.sessionId);
-			}
 		};
 
 		const snapshot = runtime

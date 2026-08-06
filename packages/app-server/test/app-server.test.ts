@@ -56,6 +56,7 @@ class FakeRuntime implements OpenedSessionRuntime {
 	pendingInteractions = false;
 	closed = false;
 	startCalls = 0;
+	subagentInterruptCalls = 0;
 	sessionName: string | undefined;
 
 	constructor(ref: SessionRef) {
@@ -79,6 +80,10 @@ class FakeRuntime implements OpenedSessionRuntime {
 		};
 	}
 
+	async markRead(): Promise<SessionSummary> {
+		return this.getSummary();
+	}
+
 	async renameSession(name: string): Promise<SessionSummary> {
 		this.sessionName = name.trim();
 		return this.getSummary();
@@ -94,6 +99,20 @@ class FakeRuntime implements OpenedSessionRuntime {
 
 	async readSubagentItems(_input: ClientParams<"subagent/readItems">): Promise<ClientResult<"subagent/readItems">> {
 		return { items: [], nextBeforeItemId: null };
+	}
+
+	async interruptSubagent(input: ClientParams<"subagent/interrupt">): Promise<ClientResult<"subagent/interrupt">> {
+		this.subagentInterruptCalls += 1;
+		return {
+			subagent: {
+				agentId: input.agentId,
+				name: "Child",
+				status: "closed",
+				taskSummary: "Test child",
+				createdAt: this.ref.summary.createdAt,
+				updatedAt: this.ref.summary.updatedAt,
+			},
+		};
 	}
 
 	async setThinkingSelection(
@@ -190,7 +209,7 @@ function initialize(id = "initialize") {
 		jsonrpc: "2.0" as const,
 		id,
 		method: "initialize" as const,
-		params: { protocolVersion: 7, client: { name: "test", version: "1" }, capabilities: [] },
+		params: { protocolVersion: 10, client: { name: "test", version: "1" }, capabilities: [] },
 	};
 }
 
@@ -306,6 +325,41 @@ describe("AppServer", () => {
 		expect(cache.get(path)).toBe(cached);
 	});
 
+	it("lists persisted unread state and marks a closed session read for every connection", async () => {
+		const path = writeSession(sessionsRoot, "session-unread", projectDir);
+		const manager = SessionManager.open(path);
+		manager.setSessionUnread(true);
+		manager.close();
+		const server = await AppServer.create({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
+		const first = server.connect();
+		const second = server.connect();
+		const messages: unknown[] = [];
+		first.onMessage((message) => {
+			messages.push(message);
+		});
+		second.onMessage((message) => {
+			messages.push(message);
+		});
+		await Promise.all([first.handle(initialize("first")), second.handle(initialize("second"))]);
+
+		expect(server.catalog.get("session-unread").summary.unread).toBe(true);
+		expect(
+			await first.handle({
+				jsonrpc: "2.0",
+				id: "mark-read",
+				method: "session/markRead",
+				params: { sessionId: "session-unread" },
+			}),
+		).toMatchObject({ result: { session: { sessionId: "session-unread", unread: false } } });
+		await new Promise<void>((resolve) => setImmediate(resolve));
+		expect(messages.filter((message) => JSON.stringify(message).includes('"type":"session/updated"'))).toHaveLength(
+			2,
+		);
+		const reopened = SessionManager.open(path);
+		expect(reopened.getSessionUnread()).toBe(false);
+		reopened.close();
+	});
+
 	it("migrates a legacy session name once into bounded display metadata", async () => {
 		const path = writeSession(sessionsRoot, "legacy-named-session", projectDir);
 		appendFileSync(
@@ -387,7 +441,7 @@ describe("AppServer", () => {
 		);
 		const initialized = await connection.handle(initialize());
 		expect(initialized).toMatchObject({
-			result: { protocolVersion: 7, server: { name: "arcmind-app-server" }, serverEpoch: server.serverEpoch },
+			result: { protocolVersion: 10, server: { name: "arcmind-app-server" }, serverEpoch: server.serverEpoch },
 		});
 		expectError(await connection.handle(initialize("again")), RPC_ERROR_CODES.INVALID_REQUEST);
 	});
@@ -757,6 +811,30 @@ describe("AppServer", () => {
 		expect(host.open).toHaveBeenCalledOnce();
 	});
 
+	it("serves the local profile from durable journals without opening a runtime", async () => {
+		const path = writeSession(sessionsRoot, "profile-session", projectDir);
+		const manager = SessionManager.open(path);
+		manager.appendMessage({ role: "user", content: "hello", timestamp: Date.now() });
+		manager.appendCustomEntry("arcmind.skill_usage.v1", { name: "pdf", trigger: "read" });
+		manager.close();
+		const host = new FakeHost();
+		const server = await AppServer.create({ agentDir, sessionsRoot, runtimeHost: host });
+		const connection = server.connect();
+		await connection.handle(initialize());
+
+		expect(
+			await connection.handle({ jsonrpc: "2.0", id: "profile", method: "profile/get", params: {} }),
+		).toMatchObject({
+			result: {
+				sessionCount: 1,
+				usedSkillCount: 1,
+				skillUseCount: 1,
+				topSkills: [{ name: "pdf", count: 1 }],
+			},
+		});
+		expect(host.open).not.toHaveBeenCalled();
+	});
+
 	it("lists draft skills without creating a session or trusting project resources", async () => {
 		const writeSkill = (root: string, name: string, description: string) => {
 			const directory = join(root, name);
@@ -818,6 +896,28 @@ describe("AppServer", () => {
 			await connection.handle({ ...request, id: "turn-1-reused", params: { ...request.params, text: "changed" } }),
 			RPC_ERROR_CODES.REQUEST_ID_REUSED,
 		);
+	});
+
+	it("interrupts a child idempotently", async () => {
+		writeSession(sessionsRoot, "session-a", projectDir);
+		const host = new FakeHost();
+		const server = await AppServer.create({ agentDir, sessionsRoot, runtimeHost: host });
+		const connection = server.connect();
+		await connection.handle(initialize());
+		const request = {
+			jsonrpc: "2.0" as const,
+			id: "interrupt-child",
+			method: "subagent/interrupt" as const,
+			params: { sessionId: "session-a", agentId: "child-a", requestId: REQUEST_A },
+		};
+
+		expect(await connection.handle(request)).toMatchObject({
+			result: { subagent: { agentId: "child-a", status: "closed" } },
+		});
+		expect(await connection.handle({ ...request, id: "interrupt-child-replay" })).toMatchObject({
+			result: { subagent: { agentId: "child-a" } },
+		});
+		expect(host.runtimes.get("session-a")?.subagentInterruptCalls).toBe(1);
 	});
 
 	it("applies replayed close cleanup to the calling connection and rejects unknown sessions", async () => {
@@ -1139,7 +1239,9 @@ describe("AppServer", () => {
 		await expect(
 			server.scheduleManager.create({
 				id: "fixed-create-during-project-delete",
+				name: "Fixed blocker",
 				instruction: "must retry",
+				model: { provider: "openai", modelId: "gpt-test" },
 				schedule: { kind: "daily", time: "09:00" },
 				timezone: "Asia/Shanghai",
 				target: { kind: "general", workspace: "fixed", cwd: projectDir },
@@ -1148,7 +1250,9 @@ describe("AppServer", () => {
 		await expect(
 			server.scheduleManager.create({
 				id: "task-create-during-project-delete",
+				name: "Task-owned schedule",
 				instruction: "independent",
+				model: { provider: "openai", modelId: "gpt-test" },
 				schedule: { kind: "daily", time: "09:00" },
 				timezone: "Asia/Shanghai",
 				target: { kind: "general", workspace: "task" },
@@ -1363,14 +1467,18 @@ describe("AppServer", () => {
 		await connection.handle(initialize());
 		const fixed = await server.scheduleManager.create({
 			id: "fixed-project-blocker",
+			name: "Fixed blocker",
 			instruction: "fixed",
+			model: { provider: "openai", modelId: "gpt-test" },
 			schedule: { kind: "daily", time: "09:00" },
 			timezone: "Asia/Shanghai",
 			target: { kind: "general", workspace: "fixed", cwd: projectDir },
 		});
 		await server.scheduleManager.create({
 			id: "task-owned-non-blocker",
+			name: "Task-owned schedule",
 			instruction: "task",
+			model: { provider: "openai", modelId: "gpt-test" },
 			schedule: { kind: "daily", time: "09:00" },
 			timezone: "Asia/Shanghai",
 			target: { kind: "general", workspace: "task" },
@@ -1425,7 +1533,7 @@ describe("AppServer", () => {
 		);
 		expect(trash).toHaveBeenCalledTimes(1);
 		await server.scheduleManager.stop();
-		await server.scheduleManager.delete(fixed.id);
+		await server.scheduleManager.delete(fixed.id, { deleteSessions: false });
 		const retry = await connection.handle({
 			jsonrpc: "2.0",
 			id: "preview-chat-retry",

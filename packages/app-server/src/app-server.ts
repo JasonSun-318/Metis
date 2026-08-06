@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { join } from "node:path";
 import {
 	createRpcError,
 	type HostRpcRequest,
@@ -11,6 +12,7 @@ import {
 import {
 	createScheduledRunExecutor,
 	ensureModeScopedMemoryLayout,
+	ModelRegistry,
 	pruneStaleSessionWorkDirs,
 	ScheduleManager,
 	type ScheduleManagerOptions,
@@ -64,7 +66,11 @@ export class AppServer {
 				execute: options.scheduleExecute ?? createScheduledRunExecutor({ agentDir: options.agentDir }),
 			});
 		this.interactions = new InteractionBroker({ serverEpoch: this.serverEpoch });
+		this.subscriptions = new SessionSubscriptions(this.serverEpoch, (session) => {
+			this.catalog.updateSummary(session.sessionId, session);
+		});
 		const credentials = new CredentialCoordinator({ agentDir: options.agentDir });
+		const modelRegistry = ModelRegistry.create(credentials.createView(), join(options.agentDir, "models.json"));
 		this.registry = new SessionRegistry(
 			options.runtimeHost ??
 				new AgentSessionRuntimeHost({
@@ -77,13 +83,13 @@ export class AppServer {
 				maxQueuedOperationsPerSession: options.maxQueuedOperationsPerSession,
 			},
 		);
-		this.subscriptions = new SessionSubscriptions(this.serverEpoch);
 		this.dispatcher = new Dispatcher(
 			this.catalog,
 			this.registry,
 			this.subscriptions,
 			this.interactions,
 			this.scheduleManager,
+			modelRegistry,
 		);
 		this.outboundQueueLimits = {
 			maxUnacknowledgedBytes: options.maxUnacknowledgedBytes,
@@ -104,12 +110,10 @@ export class AppServer {
 				server.scheduleEventTail = server.scheduleEventTail
 					.then(async () => {
 						if (event.type === "schedule/deleted") {
-							for (const sessionId of await server.catalog.removeScheduledTask(event.taskId)) {
-								server.subscriptions.removeSession(sessionId);
-								await server.registry.close(sessionId);
-							}
+							await server.dispatcher.reconcileScheduledTaskSessions(event.taskId);
 						} else if (event.type === "schedule/run-updated" && event.run.sessionId) {
-							await server.catalog.registerScheduledRun(event.run).catch(() => undefined);
+							const registered = await server.catalog.registerScheduledRun(event.run).catch(() => undefined);
+							if (registered?.changed) server.subscriptions.publishSessionUpdated(registered.session);
 						}
 						const view = scheduleEventView(event);
 						if (view) server.subscriptions.publishSchedule(view);

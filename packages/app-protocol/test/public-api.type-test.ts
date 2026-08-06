@@ -45,6 +45,22 @@ const _sessionDeleteResult = {
 	method: "trash",
 } satisfies ClientResult<"session/delete">;
 
+const subagentInterrupt = {
+	sessionId: "11111111-1111-4111-8111-111111111111",
+	agentId: "22222222-2222-4222-8222-222222222222",
+	requestId: "00000000-0000-4000-8000-000000000004",
+} satisfies ClientParams<"subagent/interrupt">;
+const subagentInterruptResult = {
+	subagent: {
+		agentId: subagentInterrupt.agentId,
+		name: "researcher",
+		status: "closed",
+		taskSummary: "Inspect runtime",
+		createdAt: "2026-08-06T00:00:00.000Z",
+		updatedAt: "2026-08-06T00:00:01.000Z",
+	},
+} satisfies ClientResult<"subagent/interrupt">;
+
 const session = {
 	sessionId: "11111111-1111-4111-8111-111111111111",
 	mode: "code",
@@ -54,6 +70,7 @@ const session = {
 	updatedAt: "2026-07-16T00:00:00.000Z",
 	state: "idle",
 	archived: false,
+	unread: false,
 } satisfies SessionSummary;
 
 const turns: TurnView[] = [];
@@ -63,6 +80,29 @@ const skill = {
 	description: "Read PDF documents",
 	source: "system",
 } satisfies SkillSummaryView;
+const profile = {
+	generatedAt: "2026-08-01T00:00:00.000Z",
+	totalTokens: 600,
+	peakDailyTokens: 400,
+	longestSessionMs: 3_600_000,
+	currentStreakDays: 2,
+	longestStreakDays: 3,
+	sessionCount: 2,
+	mostUsedMode: "chat",
+	mostUsedModePercent: 100,
+	mostUsedThinkingLevel: "high",
+	mostUsedThinkingLevelPercent: 75,
+	usedSkillCount: 2,
+	skillUseCount: 3,
+	activity: [
+		{ date: "2026-07-31", tokens: 200 },
+		{ date: "2026-08-01", tokens: 400 },
+	],
+	topSkills: [
+		{ name: "pdf", count: 2 },
+		{ name: "documents", count: 1 },
+	],
+} satisfies ClientResult<"profile/get">;
 const snapshot: SessionSnapshot = {
 	session,
 	permissionMode: "ask",
@@ -82,8 +122,15 @@ const permissionMode: PermissionModeView = snapshot.permissionMode;
 const events: ConnectionEventsParams = {
 	serverEpoch: snapshot.serverEpoch,
 	fromCursor: 1,
-	toCursor: 1,
-	events: [{ type: "server/state", state: "ready" }],
+	toCursor: 2,
+	events: [
+		{ type: "server/state", state: "ready" },
+		{
+			type: "subagent/itemsChanged",
+			sessionId: session.sessionId,
+			agentId: subagentInterrupt.agentId,
+		},
+	],
 };
 const interactionResponse: InteractionResponseInput = {
 	interactionId: "44444444-4444-4444-8444-444444444444",
@@ -94,7 +141,9 @@ const interactionResponse: InteractionResponseInput = {
 void events;
 void interactionResponse;
 void skill;
+void profile;
 void projectDelete;
 void projectDeletePreview;
 void projectDeleteResult;
 void permissionMode;
+void subagentInterruptResult;

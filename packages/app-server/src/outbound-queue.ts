@@ -35,6 +35,8 @@ interface QueuedEvent {
 	deltaParts?: Array<{ readonly cursor: number; readonly text: string }>;
 }
 
+type DeltaEvent = Extract<DomainEvent, { type: "item/delta" | "subagent/item/delta" }>;
+
 export interface OutboundStage {
 	enqueue(cursor: number, event: DomainEvent): boolean;
 	commit(snapshotCursor: number): void;
@@ -69,13 +71,21 @@ function envelopeBytes(value: OutboundEnvelope): number {
 }
 
 function canCoalesce(previous: QueuedEvent, next: QueuedEvent): boolean {
+	if (previous.sent || previous.hold !== next.hold || previous.event.type !== next.event.type) {
+		return false;
+	}
+	if (previous.event.type === "subagent/itemsChanged" && next.event.type === "subagent/itemsChanged") {
+		return previous.event.sessionId === next.event.sessionId && previous.event.agentId === next.event.agentId;
+	}
+	if (previous.event.type !== "item/delta" && previous.event.type !== "subagent/item/delta") return false;
+	const prior = previous.event as DeltaEvent;
+	const incoming = next.event as DeltaEvent;
 	return (
-		!previous.sent &&
-		previous.hold === next.hold &&
-		previous.event.type === "item/delta" &&
-		next.event.type === "item/delta" &&
-		previous.event.sessionId === next.event.sessionId &&
-		previous.event.itemId === next.event.itemId
+		prior.sessionId === incoming.sessionId &&
+		prior.itemId === incoming.itemId &&
+		prior.delta.type === incoming.delta.type &&
+		(prior.type !== "subagent/item/delta" ||
+			(incoming.type === "subagent/item/delta" && prior.agentId === incoming.agentId))
 	);
 }
 
@@ -158,7 +168,9 @@ export class OutboundQueue {
 			bytes: eventBytes(event),
 			sent: false,
 			...(hold === undefined ? {} : { hold }),
-			...(event.type === "item/delta" ? { deltaParts: [{ cursor, text: event.delta.text }] } : {}),
+			...(event.type === "item/delta" || event.type === "subagent/item/delta"
+				? { deltaParts: [{ cursor, text: event.delta.text }] }
+				: {}),
 		};
 		const single = notification(this.serverEpoch, [incoming]);
 		if (envelopeBytes(single) > this.maxEnvelopeBytes) {
@@ -175,22 +187,26 @@ export class OutboundQueue {
 				event: structuredClone(last.event),
 				...(last.deltaParts === undefined ? {} : { deltaParts: [...last.deltaParts] }),
 			};
-			const prior = last.event as Extract<DomainEvent, { type: "item/delta" }>;
-			const next = incoming.event as Extract<DomainEvent, { type: "item/delta" }>;
-			const mergedEvent: DomainEvent = {
-				...prior,
-				delta: { type: "text", text: prior.delta.text + next.delta.text },
-			};
-			merged = {
-				...last,
-				cursor,
-				event: mergedEvent,
-				bytes: eventBytes(mergedEvent),
-				deltaParts: [
-					...(last.deltaParts ?? [{ cursor: previous.cursor, text: prior.delta.text }]),
-					{ cursor, text: next.delta.text },
-				],
-			};
+			if (last.event.type === "subagent/itemsChanged") {
+				merged = { ...last, cursor, event: incoming.event, bytes: incoming.bytes };
+			} else {
+				const prior = last.event as DeltaEvent;
+				const next = incoming.event as DeltaEvent;
+				const mergedEvent: DomainEvent = {
+					...prior,
+					delta: { type: prior.delta.type, text: prior.delta.text + next.delta.text },
+				};
+				merged = {
+					...last,
+					cursor,
+					event: mergedEvent,
+					bytes: eventBytes(mergedEvent),
+					deltaParts: [
+						...(last.deltaParts ?? [{ cursor: previous.cursor, text: prior.delta.text }]),
+						{ cursor, text: next.delta.text },
+					],
+				};
+			}
 			if (envelopeBytes(notification(this.serverEpoch, [merged])) > this.maxEnvelopeBytes) {
 				previous = undefined;
 				merged = undefined;
@@ -249,12 +265,12 @@ export class OutboundQueue {
 			if (record.deltaParts) {
 				const remaining = record.deltaParts.filter((part) => part.cursor > snapshotCursor);
 				if (remaining.length > 0) {
-					const delta = record.event as Extract<DomainEvent, { type: "item/delta" }>;
+					const delta = record.event as DeltaEvent;
 					const previousBytes = record.bytes;
 					record.cursor = remaining.at(-1)!.cursor;
 					record.event = {
 						...delta,
-						delta: { type: "text", text: remaining.map((part) => part.text).join("") },
+						delta: { type: delta.delta.type, text: remaining.map((part) => part.text).join("") },
 					};
 					record.deltaParts = remaining;
 					record.bytes = eventBytes(record.event);

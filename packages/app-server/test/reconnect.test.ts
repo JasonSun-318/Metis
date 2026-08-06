@@ -12,8 +12,8 @@ import type {
 } from "@arcmind/app-protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AppServer } from "../src/app-server.ts";
+import type { ConnectionOutboundEnvelope } from "../src/connection.ts";
 import type { DurableSessionMutation, PreparedSessionMutation } from "../src/durable-mutation.ts";
-import type { OutboundEnvelope } from "../src/outbound-queue.ts";
 import { MAX_PROJECTED_THINKING_BYTES, SessionProjection } from "../src/projection/session-projection.ts";
 import type {
 	OpenedSessionRuntime,
@@ -37,6 +37,7 @@ function summary(): SessionSummary {
 		updatedAt: CREATED_AT,
 		state: "idle",
 		archived: false,
+		unread: false,
 	};
 }
 
@@ -95,6 +96,10 @@ class PausableRuntime implements OpenedSessionRuntime {
 		return this.projection.getSummary();
 	}
 
+	async markRead(): Promise<SessionSummary> {
+		return this.getSummary();
+	}
+
 	async renameSession(name: string): Promise<SessionSummary> {
 		const session = { ...this.getSummary(), name };
 		this.emit({ type: "session/updated", session });
@@ -111,6 +116,10 @@ class PausableRuntime implements OpenedSessionRuntime {
 
 	async readSubagentItems(_input: ClientParams<"subagent/readItems">): Promise<ClientResult<"subagent/readItems">> {
 		return { items: [], nextBeforeItemId: null };
+	}
+
+	async interruptSubagent(): Promise<ClientResult<"subagent/interrupt">> {
+		throw new Error("No child runtime in reconnect fixture");
 	}
 
 	async setThinkingSelection(
@@ -183,7 +192,7 @@ function initialize(id: string) {
 		jsonrpc: "2.0" as const,
 		id,
 		method: "initialize" as const,
-		params: { protocolVersion: 7, client: { name: "test", version: "1" }, capabilities: [] },
+		params: { protocolVersion: 10, client: { name: "test", version: "1" }, capabilities: [] },
 	};
 }
 
@@ -202,7 +211,7 @@ function writeSession(sessionsRoot: string): void {
 	);
 }
 
-function notificationItems(messages: readonly OutboundEnvelope[]): ItemView[] {
+function notificationItems(messages: readonly ConnectionOutboundEnvelope[]): ItemView[] {
 	return messages.flatMap((message) =>
 		"method" in message && message.method === "connection/events"
 			? message.params.events.flatMap((event) => (event.type === "item/completed" ? [event.item] : []))
@@ -226,6 +235,45 @@ describe("gap-free reconnect", () => {
 		tempDir = undefined;
 	});
 
+	it("keeps sidebar summary events global after transcript unsubscribe", async () => {
+		tempDir = mkdtempSync(join(tmpdir(), "app-server-summary-events-"));
+		const agentDir = join(tempDir, "agent");
+		const sessionsRoot = join(agentDir, "sessions");
+		writeSession(sessionsRoot);
+		const host = new PausableHost();
+		const server = await AppServer.create({ agentDir, sessionsRoot, runtimeHost: host });
+		const first = server.connect();
+		const second = server.connect();
+		const messages: ConnectionOutboundEnvelope[][] = [[], []];
+		first.onMessage((message) => {
+			messages[0]!.push(message);
+		});
+		second.onMessage((message) => {
+			messages[1]!.push(message);
+		});
+		await Promise.all([first.handle(initialize("first")), second.handle(initialize("second"))]);
+		await first.handle({
+			jsonrpc: "2.0",
+			id: "subscribe",
+			method: "session/subscribe",
+			params: { sessionId: SESSION_ID },
+		});
+		await first.handle({
+			jsonrpc: "2.0",
+			id: "unsubscribe",
+			method: "session/unsubscribe",
+			params: { sessionId: SESSION_ID },
+		});
+
+		host.runtime.emit({ type: "session/updated", session: { ...summary(), unread: true } });
+		await vi.waitFor(() => {
+			for (const connectionMessages of messages) {
+				expect(JSON.stringify(connectionMessages)).toContain('"unread":true');
+			}
+		});
+		expect(server.catalog.get(SESSION_ID).summary.unread).toBe(true);
+	});
+
 	it("delivers an event emitted after snapshot materialization exactly once", async () => {
 		tempDir = mkdtempSync(join(tmpdir(), "app-server-reconnect-"));
 		const agentDir = join(tempDir, "agent");
@@ -234,7 +282,7 @@ describe("gap-free reconnect", () => {
 		const host = new PausableHost();
 		const server = await AppServer.create({ agentDir, sessionsRoot, runtimeHost: host });
 		const first = server.connect();
-		const firstMessages: OutboundEnvelope[] = [];
+		const firstMessages: ConnectionOutboundEnvelope[] = [];
 		first.onMessage((message) => {
 			if ("method" in message && message.method === "interaction/request") return;
 			firstMessages.push(message);
@@ -282,7 +330,7 @@ describe("gap-free reconnect", () => {
 
 		first.close();
 		const reconnected = server.connect();
-		const reconnectMessages: OutboundEnvelope[] = [];
+		const reconnectMessages: ConnectionOutboundEnvelope[] = [];
 		reconnected.onMessage((message) => {
 			if ("method" in message && message.method === "interaction/request") return;
 			reconnectMessages.push(message);
@@ -392,7 +440,7 @@ describe("gap-free reconnect", () => {
 		const deliveryStarted = new Promise<void>((resolve) => {
 			started = resolve;
 		});
-		const slowMessages: OutboundEnvelope[] = [];
+		const slowMessages: ConnectionOutboundEnvelope[] = [];
 		slow.onMessage(async (message) => {
 			if ("method" in message && message.method === "interaction/request") return;
 			slowMessages.push(message);
@@ -467,7 +515,7 @@ describe("gap-free reconnect", () => {
 		await response("subscribe-first");
 
 		host.runtime.emit({ type: "item/completed", item: item("item-before-overload") });
-		await vi.waitFor(() => expect(notificationItems(port.sent as OutboundEnvelope[])).toHaveLength(1));
+		await vi.waitFor(() => expect(notificationItems(port.sent as ConnectionOutboundEnvelope[])).toHaveLength(1));
 		host.runtime.emit({ type: "item/completed", item: item("item-causing-overload") });
 		await vi.waitFor(() =>
 			expect(port.sent).toContainEqual(

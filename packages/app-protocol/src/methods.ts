@@ -25,8 +25,12 @@ import {
 	DurableImageRefViewSchema,
 	InteractionViewSchema,
 	ItemViewSchema,
+	ModelOptionViewSchema,
 	PermissionModeSchema,
+	ProfileUsageSummaryViewSchema,
+	ScheduleDescriptionInputSchema,
 	ScheduleInputSpecSchema,
+	ScheduleNameSchema,
 	ScheduleRunViewSchema,
 	ScheduleSnapshotViewSchema,
 	ScheduleTaskViewSchema,
@@ -34,6 +38,7 @@ import {
 	SessionSummarySchema,
 	SkillSummaryViewSchema,
 	SubagentModelRefSchema,
+	SubagentSummarySchema,
 	ThinkingSelectionSchema,
 } from "./views.ts";
 
@@ -90,6 +95,9 @@ export const SkillListResultSchema = StrictObject({
 	skills: Type.Array(SkillSummaryViewSchema, { maxItems: 256 }),
 });
 
+export const ProfileGetParamsSchema = StrictObject({});
+export const ProfileGetResultSchema = ProfileUsageSummaryViewSchema;
+
 export const ProjectRevisionSchema = Sha256Schema;
 export const ProjectDeletePreviewParamsSchema = StrictObject({
 	mode: AgentModeSchema,
@@ -126,6 +134,7 @@ export const SessionCreateResultSchema = StrictObject({ session: SessionSummaryS
 
 export const SessionRefParamsSchema = StrictObject({ sessionId: SessionIdSchema });
 export const SessionOpenResultSchema = StrictObject({ session: SessionSummarySchema });
+export const SessionMarkReadParamsSchema = StrictObject({ sessionId: SessionIdSchema });
 
 export const SessionReadItemsParamsSchema = StrictObject({
 	sessionId: SessionIdSchema,
@@ -202,6 +211,12 @@ export const SubagentReadItemsParamsSchema = StrictObject({
 	beforeItemId: Type.Optional(Type.Union([OpaqueIdSchema, Type.Null()])),
 	limit: Type.Integer({ minimum: 1, maximum: MAX_HISTORY_ITEMS }),
 });
+export const SubagentInterruptParamsSchema = StrictObject({
+	sessionId: SessionIdSchema,
+	agentId: SessionIdSchema,
+	requestId: UuidSchema,
+});
+export const SubagentResultSchema = StrictObject({ subagent: SubagentSummarySchema });
 
 export const FileAttachmentInputSchema = StrictObject({
 	path: PathSchema,
@@ -241,17 +256,32 @@ export const ConnectionAckResultSchema = StrictObject({ acknowledgedCursor: Curs
 
 const ScheduleInstructionSchema = Utf8String(MAX_SCHEDULE_INSTRUCTION_UTF8_BYTES, { minLength: 1 });
 
-export const ScheduleCreateParamsSchema = StrictObject({
-	requestId: UuidSchema,
-	sourceSessionId: Type.Optional(SessionIdSchema),
-	instruction: ScheduleInstructionSchema,
-	schedule: ScheduleInputSpecSchema,
+export const ModelListParamsSchema = StrictObject({});
+export const ModelListResultSchema = StrictObject({
+	models: Type.Array(ModelOptionViewSchema, { maxItems: 512 }),
 });
+
+export const ScheduleCreateParamsSchema = Type.Refine(
+	StrictObject({
+		requestId: UuidSchema,
+		sourceSessionId: Type.Optional(SessionIdSchema),
+		additionalWorkspaceCwd: Type.Optional(PathSchema),
+		name: ScheduleNameSchema,
+		description: Type.Optional(ScheduleDescriptionInputSchema),
+		instruction: ScheduleInstructionSchema,
+		model: SubagentModelRefSchema,
+		schedule: ScheduleInputSpecSchema,
+	}),
+	(value) => value.sourceSessionId === undefined || value.additionalWorkspaceCwd === undefined,
+	"fixed scheduled tasks cannot include an additional workspace",
+);
 export const ScheduleTaskResultSchema = StrictObject({ task: ScheduleTaskViewSchema });
 export const ScheduleListParamsSchema = StrictObject({
 	afterTaskId: Type.Optional(Type.Union([SessionIdSchema, Type.Null()])),
 	limit: Type.Optional(Type.Integer({ minimum: 1, maximum: MAX_HISTORY_ITEMS })),
 	unreadOnly: Type.Optional(Type.Boolean()),
+	query: Type.Optional(OptionalNameSchema),
+	sort: Type.Optional(Type.Union([Type.Literal("next_run"), Type.Literal("updated"), Type.Literal("name")])),
 });
 export const ScheduleListResultSchema = StrictObject({
 	tasks: Type.Array(ScheduleTaskViewSchema, { maxItems: MAX_HISTORY_ITEMS }),
@@ -263,14 +293,37 @@ export const ScheduleUpdateParamsSchema = Type.Refine(
 	StrictObject({
 		requestId: UuidSchema,
 		taskId: SessionIdSchema,
+		name: Type.Optional(ScheduleNameSchema),
+		description: Type.Optional(Type.Union([ScheduleDescriptionInputSchema, Type.Null()])),
 		instruction: Type.Optional(ScheduleInstructionSchema),
+		model: Type.Optional(SubagentModelRefSchema),
 		schedule: Type.Optional(ScheduleInputSpecSchema),
+		sourceSessionId: Type.Optional(Type.Union([SessionIdSchema, Type.Null()])),
+		additionalWorkspaceCwd: Type.Optional(Type.Union([PathSchema, Type.Null()])),
 	}),
-	(value) => value.instruction !== undefined || value.schedule !== undefined,
-	"schedule update must include instruction or schedule",
+	(value) =>
+		(value.name !== undefined ||
+			value.description !== undefined ||
+			value.instruction !== undefined ||
+			value.model !== undefined ||
+			value.schedule !== undefined ||
+			value.sourceSessionId !== undefined ||
+			value.additionalWorkspaceCwd !== undefined) &&
+		!(typeof value.sourceSessionId === "string" && typeof value.additionalWorkspaceCwd === "string"),
+	"schedule update must include at least one editable field",
 );
 export const ScheduleMutationParamsSchema = StrictObject({ requestId: UuidSchema, taskId: SessionIdSchema });
-export const ScheduleDeleteResultSchema = StrictObject({ taskId: SessionIdSchema, deleted: Type.Literal(true) });
+export const ScheduleDeleteParamsSchema = StrictObject({
+	requestId: UuidSchema,
+	taskId: SessionIdSchema,
+	deleteSessions: Type.Boolean(),
+});
+export const ScheduleDeleteResultSchema = StrictObject({
+	taskId: SessionIdSchema,
+	deleted: Type.Literal(true),
+	deletedSessionCount: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
+	retainedSessionCount: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
+});
 export const ScheduleRunResultSchema = StrictObject({ run: ScheduleRunViewSchema });
 export const ScheduleRunListParamsSchema = StrictObject({
 	taskId: SessionIdSchema,
@@ -336,10 +389,12 @@ export const ClientRequestMethods = {
 	initialize: method(InitializeParamsSchema, InitializeResultSchema),
 	"session/list": method(SessionListParamsSchema, SessionListResultSchema),
 	"skill/list": method(SkillListParamsSchema, SkillListResultSchema),
+	"profile/get": method(ProfileGetParamsSchema, ProfileGetResultSchema),
 	"project/deletePreview": method(ProjectDeletePreviewParamsSchema, ProjectDeletePreviewResultSchema),
 	"project/delete": method(ProjectDeleteParamsSchema, ProjectDeleteResultSchema),
 	"session/create": method(SessionCreateParamsSchema, SessionCreateResultSchema),
 	"session/open": method(SessionRefParamsSchema, SessionOpenResultSchema),
+	"session/markRead": method(SessionMarkReadParamsSchema, SessionMutationResultSchema),
 	"session/readItems": method(SessionReadItemsParamsSchema, SessionReadItemsResultSchema),
 	"session/close": method(SessionMutationParamsSchema, SessionCloseResultSchema),
 	"session/rename": method(SessionRenameParamsSchema, SessionMutationResultSchema),
@@ -354,7 +409,9 @@ export const ClientRequestMethods = {
 	),
 	"session/setPermissionMode": method(SessionSetPermissionModeParamsSchema, SessionPermissionModeResultSchema),
 	"session/setModel": method(SessionSetModelParamsSchema, SessionModelResultSchema),
+	"model/list": method(ModelListParamsSchema, ModelListResultSchema),
 	"subagent/readItems": method(SubagentReadItemsParamsSchema, SessionReadItemsResultSchema),
+	"subagent/interrupt": method(SubagentInterruptParamsSchema, SubagentResultSchema),
 	"turn/start": method(TurnInputSchema, AcceptedOperationSchema),
 	"turn/steer": method(TurnSteerParamsSchema, AcceptedOperationSchema),
 	"turn/interrupt": method(SessionMutationParamsSchema, AcceptedOperationSchema),
@@ -364,7 +421,7 @@ export const ClientRequestMethods = {
 	"schedule/update": method(ScheduleUpdateParamsSchema, ScheduleTaskResultSchema),
 	"schedule/pause": method(ScheduleMutationParamsSchema, ScheduleTaskResultSchema),
 	"schedule/resume": method(ScheduleMutationParamsSchema, ScheduleTaskResultSchema),
-	"schedule/delete": method(ScheduleMutationParamsSchema, ScheduleDeleteResultSchema),
+	"schedule/delete": method(ScheduleDeleteParamsSchema, ScheduleDeleteResultSchema),
 	"schedule/run-now": method(ScheduleMutationParamsSchema, ScheduleRunResultSchema),
 	"schedule/run/list": method(ScheduleRunListParamsSchema, ScheduleRunListResultSchema),
 	"schedule/run/get": method(ScheduleRunRefParamsSchema, ScheduleRunResultSchema),

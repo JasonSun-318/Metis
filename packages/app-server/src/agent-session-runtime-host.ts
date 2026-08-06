@@ -5,7 +5,6 @@ import type {
 	ClientResult,
 	DomainEvent,
 	DurableImageRefView,
-	ItemContentBlockView,
 	ItemView,
 	SessionSnapshot,
 	SessionSummary,
@@ -22,7 +21,6 @@ import {
 	createAgentSessionRuntime,
 	createAgentSessionServices,
 	DefaultResourceLoader,
-	formatSessionAttachmentDisplayText,
 	formatSessionAttachments,
 	getProjectTrustOptions,
 	getSkillsDir,
@@ -47,10 +45,12 @@ import {
 } from "./durable-mutation.ts";
 import type { InteractionBroker } from "./interactions.ts";
 import {
-	MAX_PROJECTED_THINKING_BYTES,
-	MAX_PROJECTED_VISIBLE_TEXT_BYTES,
-	SessionProjection,
-} from "./projection/session-projection.ts";
+	opaqueId,
+	projectLiveMessage as projectLiveItemMessage,
+	projectMessageEntry,
+	timestamp,
+} from "./item-projection.ts";
+import { SessionProjection } from "./projection/session-projection.ts";
 import {
 	AppServerError,
 	type OpenedSessionRuntime,
@@ -58,41 +58,15 @@ import {
 	type SessionRef,
 	type SessionRuntimeHost,
 } from "./session-runtime-host.ts";
+import { SubagentLiveProjector } from "./subagent-live-projector.ts";
 
 const MAX_TURNS = 200;
-const MAX_ITEM_BLOCKS = 16;
-const MAX_ITEM_TEXT_BYTES = 16 * 1024;
-const MAX_ASSISTANT_TOOL_INPUT_BYTES = 4 * 1024;
 
 export interface AgentSessionRuntimeHostOptions {
 	readonly agentDir: string;
 	readonly interactions?: InteractionBroker;
 	readonly credentials?: CredentialCoordinator;
 	readonly scheduleManager?: ScheduleManager;
-}
-
-function boundedText(value: string, maximumBytes: number): string {
-	if (maximumBytes <= 0) return "";
-	const bytes = Buffer.from(value, "utf8");
-	if (bytes.byteLength <= maximumBytes) return value;
-	const decoder = new TextDecoder("utf-8", { fatal: true });
-	const suffix = maximumBytes >= 3 ? "…" : "";
-	let end = maximumBytes - Buffer.byteLength(suffix, "utf8");
-	while (end > 0) {
-		try {
-			return `${decoder.decode(bytes.subarray(0, end))}${suffix}`;
-		} catch {
-			end -= 1;
-		}
-	}
-	return suffix;
-}
-
-function opaqueId(value: unknown, namespace: string): string {
-	if (typeof value === "string" && value.length <= 128 && /^[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(value)) {
-		return value;
-	}
-	return `${namespace}:${createHash("sha256").update(String(value)).digest("hex")}`;
 }
 
 function name(value: unknown, fallback: string): string {
@@ -111,6 +85,33 @@ function optionalName(value: unknown): string | undefined {
 		.trim()
 		.slice(0, 256);
 	return normalized.length > 0 ? normalized : undefined;
+}
+
+function completedTurnHasVisibleAssistantText(journal: readonly unknown[], turnId: string): boolean {
+	for (const candidate of journal) {
+		if (typeof candidate !== "object" || candidate === null) continue;
+		const entry = candidate as Record<string, unknown>;
+		if (entry.type !== "message" || entry.turnId !== turnId || typeof entry.message !== "object" || !entry.message) {
+			continue;
+		}
+		const message = entry.message as Record<string, unknown>;
+		if (message.role !== "assistant") continue;
+		if (typeof message.content === "string" && message.content.trim()) return true;
+		if (
+			Array.isArray(message.content) &&
+			message.content.some(
+				(block) =>
+					typeof block === "object" &&
+					block !== null &&
+					(block as { type?: unknown }).type === "text" &&
+					typeof (block as { text?: unknown }).text === "string" &&
+					(block as { text: string }).text.trim().length > 0,
+			)
+		) {
+			return true;
+		}
+	}
+	return false;
 }
 
 function subagentView(summary: SubagentSummary): SessionSnapshot["subagents"][number] {
@@ -136,213 +137,33 @@ function subagentView(summary: SubagentSummary): SessionSnapshot["subagents"][nu
 	};
 }
 
-function timestamp(value: unknown, fallback: string): string {
-	return typeof value === "string" &&
-		value.length <= 40 &&
-		/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(value) &&
-		Number.isFinite(Date.parse(value))
-		? value
-		: fallback;
-}
-
-function durableImage(value: Record<string, unknown>): DurableImageRefView | undefined {
-	const mediaType = value.mimeType;
-	if (
-		value.type !== "image_ref" ||
-		typeof value.hash !== "string" ||
-		!/^[a-f0-9]{64}$/.test(value.hash) ||
-		(mediaType !== "image/jpeg" &&
-			mediaType !== "image/png" &&
-			mediaType !== "image/gif" &&
-			mediaType !== "image/webp") ||
-		typeof value.size !== "number" ||
-		!Number.isSafeInteger(value.size) ||
-		value.size < 1 ||
-		value.size > 32 * 1024 * 1024
-	) {
-		return undefined;
-	}
-	return { hash: value.hash, mediaType, byteLength: value.size };
-}
-
-interface TextBudget {
-	remaining: number;
-}
-
-function takeText(value: string, budget: TextBudget): string | undefined {
-	if (budget.remaining <= 0) return undefined;
-	const text = boundedText(value, budget.remaining);
-	budget.remaining = Math.max(0, budget.remaining - Buffer.byteLength(text, "utf8"));
-	return text;
-}
-
-function textBlocks(content: unknown, budget: TextBudget): ItemContentBlockView[] {
-	if (typeof content === "string") {
-		const text = takeText(content, budget);
-		return text === undefined ? [] : [{ type: "text", text }];
-	}
-	if (!Array.isArray(content)) return [];
-	const blocks: ItemContentBlockView[] = [];
-	for (const candidate of content.slice(0, 256)) {
-		if (blocks.length >= MAX_ITEM_BLOCKS) break;
-		if (typeof candidate !== "object" || candidate === null) continue;
-		const block = candidate as Record<string, unknown>;
-		if (block.type === "text" && typeof block.text === "string") {
-			const text = takeText(block.text, budget);
-			if (text !== undefined) blocks.push({ type: "text", text });
-			continue;
-		}
-		const image = durableImage(block);
-		if (image) blocks.push({ type: "image", image });
-	}
-	return blocks;
-}
-
-function assistantBlocks(
-	content: unknown,
-	budgets: { readonly text: TextBudget; readonly thinking: TextBudget; readonly tool: TextBudget },
-	toolStates: ReadonlyMap<string, "active" | "completed" | "interrupted">,
-): ItemContentBlockView[] {
-	if (typeof content === "string") return textBlocks(content, budgets.text);
-	if (!Array.isArray(content)) return [];
-	const blocks: ItemContentBlockView[] = [];
-	for (const candidate of content.slice(0, 256)) {
-		if (blocks.length >= MAX_ITEM_BLOCKS) break;
-		if (typeof candidate !== "object" || candidate === null) continue;
-		const block = candidate as Record<string, unknown>;
-		if (block.type === "text" && typeof block.text === "string") {
-			const text = takeText(block.text, budgets.text);
-			if (text !== undefined) blocks.push({ type: "text", text });
-			continue;
-		}
-		if (block.type === "thinking" && block.redacted !== true && typeof block.thinking === "string") {
-			const text = takeText(block.thinking, budgets.thinking);
-			if (text) blocks.push({ type: "thinking", text });
-			continue;
-		}
-		const image = durableImage(block);
-		if (image) {
-			blocks.push({ type: "image", image });
-			continue;
-		}
-		if (block.type !== "toolCall") continue;
-		const toolCallId = opaqueId(block.id, "tool");
-		const toolState = toolStates.get(toolCallId) ?? "completed";
-		let inputPreview: string | undefined;
-		try {
-			if (block.arguments !== undefined) {
-				const serialized = JSON.stringify(block.arguments);
-				if (serialized !== undefined) inputPreview = takeText(serialized, budgets.tool);
-			}
-		} catch {
-			// Omit non-JSON tool details rather than leaking or stringifying them.
-		}
-		blocks.push({
-			type: "tool_call",
-			toolCallId,
-			name: name(block.name, "tool"),
-			state: toolState === "active" ? "running" : toolState,
-			...(inputPreview === undefined ? {} : { inputPreview }),
-		});
-	}
-	return blocks;
-}
-
-function userBlocks(content: unknown, budget: TextBudget): ItemContentBlockView[] {
-	if (typeof content === "string") return textBlocks(formatSessionAttachmentDisplayText(content), budget);
-	if (!Array.isArray(content)) return [];
-	return textBlocks(
-		content.map((candidate) =>
-			typeof candidate === "object" &&
-			candidate !== null &&
-			(candidate as Record<string, unknown>).type === "text" &&
-			typeof (candidate as Record<string, unknown>).text === "string"
-				? {
-						...candidate,
-						text: formatSessionAttachmentDisplayText((candidate as Record<string, unknown>).text as string),
-					}
-				: candidate,
-		),
-		budget,
-	);
-}
-
-function mapMessageEntry(
-	entry: Record<string, unknown>,
+function mapRuntimeTurns(
+	journal: readonly unknown[],
+	reduced: ReturnType<typeof reduceRuntimeJournal>,
 	sessionId: string,
-	turnStates: ReadonlyMap<string, "active" | "completed" | "interrupted">,
-	toolStates: ReadonlyMap<string, "active" | "completed" | "interrupted">,
 	fallbackTimestamp: string,
-): ItemView | undefined {
-	if (entry.type !== "message" || typeof entry.message !== "object" || entry.message === null) return undefined;
-	const message = entry.message as Record<string, unknown>;
-	const itemId = opaqueId(entry.id, "item");
-	const turnId = entry.turnId === undefined ? undefined : opaqueId(entry.turnId, "turn");
-	const turnState = turnId === undefined ? undefined : turnStates.get(turnId);
-	const createdAt = timestamp(entry.timestamp, fallbackTimestamp);
-	const state = turnState === "active" ? "streaming" : turnState === "interrupted" ? "interrupted" : "completed";
-
-	if (message.role === "user") {
-		const budget = { remaining: MAX_ITEM_TEXT_BYTES };
-		return {
-			itemId,
-			sessionId,
-			...(turnId === undefined ? {} : { turnId }),
-			role: "user",
-			state,
-			content: userBlocks(message.content, budget),
-			createdAt,
-			...(state === "streaming" ? {} : { completedAt: createdAt }),
-		};
+): TurnView[] {
+	const times = new Map<string, { startedAt: string; completedAt?: string }>();
+	for (const entry of journal) {
+		if (typeof entry !== "object" || entry === null) continue;
+		const record = entry as Record<string, unknown>;
+		if (record.type !== "runtime_turn" || typeof record.turnId !== "string") continue;
+		const at = timestamp(record.timestamp, fallbackTimestamp);
+		const current = times.get(record.turnId) ?? { startedAt: at };
+		if (record.state === "completed" || record.state === "interrupted") current.completedAt = at;
+		times.set(record.turnId, current);
 	}
-
-	if (message.role === "assistant") {
-		const content = assistantBlocks(
-			message.content,
-			{
-				text: { remaining: MAX_PROJECTED_VISIBLE_TEXT_BYTES },
-				thinking: { remaining: MAX_PROJECTED_THINKING_BYTES },
-				tool: { remaining: MAX_ASSISTANT_TOOL_INPUT_BYTES },
-			},
-			toolStates,
-		);
+	return reduced.turns.slice(-MAX_TURNS).map((turn) => {
+		const at = times.get(turn.turnId) ?? { startedAt: fallbackTimestamp };
 		return {
-			itemId,
+			turnId: opaqueId(turn.turnId, "turn"),
 			sessionId,
-			...(turnId === undefined ? {} : { turnId }),
-			role: "assistant",
-			state,
-			content,
-			createdAt,
-			...(state === "streaming" ? {} : { completedAt: createdAt }),
+			operationIds: [...new Set(turn.operationIds.map((id) => opaqueId(id, "operation")))].slice(-256),
+			state: turn.state === "active" ? "running" : turn.state,
+			startedAt: at.startedAt,
+			...(at.completedAt === undefined ? {} : { completedAt: at.completedAt }),
 		};
-	}
-
-	if (message.role === "toolResult") {
-		const budget = { remaining: MAX_ITEM_TEXT_BYTES };
-		const output = textBlocks(message.content, budget)
-			.filter((block): block is Extract<ItemContentBlockView, { type: "text" }> => block.type === "text")
-			.map((block) => block.text)
-			.join("\n");
-		return {
-			itemId,
-			sessionId,
-			...(turnId === undefined ? {} : { turnId }),
-			role: "tool",
-			state,
-			content: [
-				{
-					type: "tool_result",
-					toolCallId: opaqueId(message.toolCallId, "tool"),
-					name: name(message.toolName, "tool"),
-					isError: message.isError === true,
-					output: boundedText(output, MAX_ITEM_TEXT_BYTES),
-				},
-			],
-			createdAt,
-			...(state === "streaming" ? {} : { completedAt: createdAt }),
-		};
-	}
+	});
 }
 
 class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
@@ -351,6 +172,7 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 	private session: AgentSession;
 	private readonly ref: SessionRef;
 	private readonly projection: SessionProjection;
+	private readonly subagentLive: SubagentLiveProjector;
 	private readonly liveItemIds = new WeakMap<object, string>();
 	private liveAssistantItemId?: string;
 	private readonly projectedTurnStates = new Map<string, TurnView["state"]>();
@@ -361,6 +183,7 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 	private closePromise?: Promise<void>;
 	private readonly interactions?: InteractionBroker;
 	private readonly agentDir: string;
+	private unread: boolean;
 
 	constructor(runtime: AgentSessionRuntime, ref: SessionRef, agentDir: string, interactions?: InteractionBroker) {
 		this.runtime = runtime;
@@ -368,6 +191,7 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 		this.ref = ref;
 		this.agentDir = agentDir;
 		this.interactions = interactions;
+		this.unread = ref.summary.unread;
 		const journal = this.journal();
 		const reduced = reduceRuntimeJournal(journal);
 		const items = this.itemsFromJournal(journal, reduced);
@@ -378,6 +202,11 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 			turns,
 			items,
 		});
+		this.subagentLive = new SubagentLiveProjector(
+			this.sessionId,
+			(event) => this.publish(event),
+			this.ref.summary.updatedAt,
+		);
 		this.bind(this.session);
 	}
 
@@ -406,11 +235,30 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 	private bind(session: AgentSession): void {
 		this.unsubscribeAgent?.();
 		this.unsubscribeSubagents?.();
+		this.subagentLive.clear();
 		this.session = session;
 		this.unsubscribeAgent = session.subscribe((event) => this.onAgentEvent(event));
 		this.unsubscribeSubagents = this.runtime.subagentManager?.subscribe((event) => {
-			if (!("summary" in event)) return;
+			if (event.type === "activity") {
+				this.subagentLive.apply(event.agentId, event.turnId, event.event);
+				return;
+			}
+			if (event.type !== "updated") return;
 			this.publish({ type: "subagent/updated", sessionId: this.sessionId, subagent: subagentView(event.summary) });
+			if (
+				event.summary.status === "done" ||
+				event.summary.status === "failed" ||
+				event.summary.status === "stopped" ||
+				event.summary.status === "close_failed" ||
+				event.summary.status === "closed"
+			) {
+				this.subagentLive.clear(event.summary.agentId);
+				this.publish({
+					type: "subagent/itemsChanged",
+					sessionId: this.sessionId,
+					agentId: event.summary.agentId,
+				});
+			}
 		});
 	}
 
@@ -467,6 +315,16 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 			return;
 		}
 		if (event.type === "agent_settled") {
+			const journal = this.journal();
+			const lastTurn = reduceRuntimeJournal(journal).turns.at(-1);
+			if (lastTurn?.state === "completed" && completedTurnHasVisibleAssistantText(journal, lastTurn.turnId)) {
+				try {
+					this.session.sessionManager.setSessionUnread(true);
+					this.unread = true;
+				} catch {
+					// Unread persistence must not break a completed agent turn.
+				}
+			}
 			this.refreshLifecycleProjection();
 			return;
 		}
@@ -502,35 +360,15 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 	}
 
 	private projectLiveMessage(message: object, state: ItemView["state"]): ItemView | undefined {
-		const record = message as Record<string, unknown>;
-		const createdAt =
-			typeof record.timestamp === "number" && Number.isFinite(record.timestamp)
-				? new Date(record.timestamp).toISOString()
-				: this.ref.summary.updatedAt;
 		const turnId = this.currentTurnId();
-		const item = mapMessageEntry(
-			{
-				type: "message",
-				id: this.itemIdFor(message),
-				...(turnId === undefined ? {} : { turnId }),
-				timestamp: createdAt,
-				message,
-			},
-			this.sessionId,
-			turnId === undefined
-				? new Map()
-				: new Map([
-						[turnId, state === "streaming" ? "active" : state === "interrupted" ? "interrupted" : "completed"],
-					]),
-			new Map(),
-			createdAt,
-		);
-		if (!item) return undefined;
-		return {
-			...item,
+		return projectLiveItemMessage({
+			itemId: this.itemIdFor(message),
+			sessionId: this.sessionId,
+			...(turnId === undefined ? {} : { turnId }),
+			message,
 			state,
-			...(state === "streaming" ? {} : { completedAt: createdAt }),
-		};
+			fallbackTimestamp: this.ref.summary.updatedAt,
+		});
 	}
 
 	private publishStartedItem(message: object): string | undefined {
@@ -559,13 +397,13 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 
 	private projectJournalItem(entry: Record<string, unknown>): ItemView | undefined {
 		const reduced = this.reduced();
-		return mapMessageEntry(
+		return projectMessageEntry({
 			entry,
-			this.sessionId,
-			new Map(reduced.turns.map((turn) => [opaqueId(turn.turnId, "turn"), turn.state])),
-			new Map(reduced.tools.map((tool) => [opaqueId(tool.toolCallId, "tool"), tool.state])),
-			this.ref.summary.createdAt,
-		);
+			sessionId: this.sessionId,
+			turnStates: new Map(reduced.turns.map((turn) => [opaqueId(turn.turnId, "turn"), turn.state])),
+			toolStates: new Map(reduced.tools.map((tool) => [opaqueId(tool.toolCallId, "tool"), tool.state])),
+			fallbackTimestamp: this.ref.summary.createdAt,
+		});
 	}
 
 	private itemsFromJournal(
@@ -576,13 +414,13 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 		const toolStates = new Map(reduced.tools.map((tool) => [opaqueId(tool.toolCallId, "tool"), tool.state]));
 		return journal
 			.map((entry) =>
-				mapMessageEntry(
-					entry as unknown as Record<string, unknown>,
-					this.sessionId,
+				projectMessageEntry({
+					entry: entry as unknown as Record<string, unknown>,
+					sessionId: this.sessionId,
 					turnStates,
 					toolStates,
-					this.ref.summary.createdAt,
-				),
+					fallbackTimestamp: this.ref.summary.createdAt,
+				}),
 			)
 			.filter((item): item is ItemView => item !== undefined);
 	}
@@ -591,27 +429,7 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 		journal: readonly unknown[] = this.journal(),
 		reduced: ReturnType<typeof reduceRuntimeJournal> = reduceRuntimeJournal(journal),
 	): TurnView[] {
-		const times = new Map<string, { startedAt: string; completedAt?: string }>();
-		for (const entry of journal) {
-			if (typeof entry !== "object" || entry === null) continue;
-			const record = entry as Record<string, unknown>;
-			if (record.type !== "runtime_turn" || typeof record.turnId !== "string") continue;
-			const at = timestamp(record.timestamp, this.ref.summary.createdAt);
-			const current = times.get(record.turnId) ?? { startedAt: at };
-			if (record.state === "completed" || record.state === "interrupted") current.completedAt = at;
-			times.set(record.turnId, current);
-		}
-		return reduced.turns.slice(-MAX_TURNS).map((turn) => {
-			const at = times.get(turn.turnId) ?? { startedAt: this.ref.summary.createdAt };
-			return {
-				turnId: opaqueId(turn.turnId, "turn"),
-				sessionId: this.sessionId,
-				operationIds: [...new Set(turn.operationIds.map((id) => opaqueId(id, "operation")))].slice(-256),
-				state: turn.state === "active" ? "running" : turn.state,
-				startedAt: at.startedAt,
-				...(at.completedAt === undefined ? {} : { completedAt: at.completedAt }),
-			};
-		});
+		return mapRuntimeTurns(journal, reduced, this.sessionId, this.ref.summary.createdAt);
 	}
 
 	private publishCurrentTurn(
@@ -658,6 +476,18 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 		return this.projection.getSummary();
 	}
 
+	async markRead(): Promise<SessionSummary> {
+		if (!this.unread) return this.getSummary();
+		try {
+			this.session.sessionManager.setSessionUnread(false);
+		} catch {
+			throw new AppServerError("OPERATION_FAILED", { sessionId: this.sessionId });
+		}
+		this.unread = false;
+		this.refreshLifecycleProjection();
+		return this.getSummary();
+	}
+
 	async renameSession(value: string): Promise<SessionSummary> {
 		const next = optionalName(value);
 		if (!next) throw new AppServerError("INVALID_REQUEST", { sessionId: this.sessionId });
@@ -688,6 +518,7 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 			...(sessionName === undefined ? {} : { name: sessionName }),
 			updatedAt: timestamp(lastEntry?.timestamp, this.ref.summary.updatedAt),
 			state: this.isActive() ? "running" : lastTurn?.state === "interrupted" ? "interrupted" : "idle",
+			unread: this.unread,
 			...(recoveryNotice === undefined ? {} : { recoveryNotice }),
 		};
 	}
@@ -705,19 +536,26 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 		const tools = new Map(reduced.tools.map((tool) => [opaqueId(tool.toolCallId, "tool"), tool.state]));
 		const items = journal
 			.map((entry) =>
-				mapMessageEntry(
-					entry as unknown as Record<string, unknown>,
-					input.agentId,
-					turns,
-					tools,
-					this.ref.summary.createdAt,
-				),
+				projectMessageEntry({
+					entry: entry as unknown as Record<string, unknown>,
+					sessionId: input.agentId,
+					turnStates: turns,
+					toolStates: tools,
+					fallbackTimestamp: this.ref.summary.createdAt,
+				}),
 			)
-			.filter((item): item is ItemView => item !== undefined);
+			.filter((item): item is ItemView => item !== undefined)
+			.concat(this.subagentLive.currentItems(input.agentId));
 		const end = input.beforeItemId ? items.findIndex((item) => item.itemId === input.beforeItemId) : items.length;
 		if (input.beforeItemId && end < 0) throw new AppServerError("NOT_FOUND", { sessionId: input.sessionId });
 		const start = Math.max(0, end - input.limit);
 		return { items: items.slice(start, end), nextBeforeItemId: start > 0 ? items[start]!.itemId : null };
+	}
+
+	async interruptSubagent(input: ClientParams<"subagent/interrupt">): Promise<ClientResult<"subagent/interrupt">> {
+		const manager = this.runtime.subagentManager;
+		if (!manager) throw new AppServerError("NOT_FOUND", { sessionId: input.sessionId, requestId: input.requestId });
+		return { subagent: subagentView(await manager.interrupt(input.agentId)) };
 	}
 
 	async setThinkingSelection(
@@ -852,6 +690,7 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 					this.unsubscribeAgent = undefined;
 					this.unsubscribeSubagents?.();
 					this.unsubscribeSubagents = undefined;
+					this.subagentLive.clear();
 					this.listeners.clear();
 					this.closed = true;
 				})
@@ -889,20 +728,40 @@ class ReadonlyScheduledSessionRuntime implements OpenedSessionRuntime {
 		}
 		const journal = manager.getDurableJournalSnapshot();
 		const reduced = reduceRuntimeJournal(journal);
+		const legacyTurnId =
+			reduced.turns.length === 0 ? opaqueId(`scheduled-turn:${ref.scheduled!.runId}`, "turn") : undefined;
+		const turns =
+			legacyTurnId === undefined
+				? mapRuntimeTurns(journal, reduced, this.sessionId, ref.summary.createdAt)
+				: [
+						{
+							turnId: legacyTurnId,
+							sessionId: this.sessionId,
+							operationIds: [opaqueId(`scheduled-operation:${ref.scheduled!.runId}`, "operation")],
+							state: "completed" as const,
+							startedAt: ref.summary.createdAt,
+							completedAt: ref.summary.updatedAt,
+						},
+					];
 		const turnStates = new Map(reduced.turns.map((turn) => [opaqueId(turn.turnId, "turn"), turn.state]));
+		if (legacyTurnId !== undefined) turnStates.set(legacyTurnId, "completed");
 		const toolStates = new Map(reduced.tools.map((tool) => [opaqueId(tool.toolCallId, "tool"), tool.state]));
 		const items = journal
-			.map((entry) =>
-				mapMessageEntry(
-					entry as unknown as Record<string, unknown>,
-					this.sessionId,
+			.map((entry) => {
+				const record = entry as unknown as Record<string, unknown>;
+				return projectMessageEntry({
+					entry:
+						legacyTurnId !== undefined && record.type === "message" && record.turnId === undefined
+							? { ...record, turnId: legacyTurnId }
+							: record,
+					sessionId: this.sessionId,
 					turnStates,
 					toolStates,
-					ref.summary.createdAt,
-				),
-			)
+					fallbackTimestamp: ref.summary.createdAt,
+				});
+			})
 			.filter((item): item is ItemView => item !== undefined);
-		this.projection = new SessionProjection({ session: ref.summary, items });
+		this.projection = new SessionProjection({ session: ref.summary, turns, items });
 	}
 
 	isActive(): boolean {
@@ -915,6 +774,10 @@ class ReadonlyScheduledSessionRuntime implements OpenedSessionRuntime {
 
 	getSummary(): SessionSummary {
 		return this.projection.getSummary();
+	}
+
+	async markRead(): Promise<SessionSummary> {
+		throw new AppServerError("READ_ONLY_SESSION", { sessionId: this.sessionId });
 	}
 
 	async renameSession(): Promise<SessionSummary> {
@@ -931,6 +794,10 @@ class ReadonlyScheduledSessionRuntime implements OpenedSessionRuntime {
 
 	async readSubagentItems(): Promise<ClientResult<"subagent/readItems">> {
 		throw new AppServerError("NOT_FOUND", { sessionId: this.sessionId });
+	}
+
+	async interruptSubagent(): Promise<ClientResult<"subagent/interrupt">> {
+		throw new AppServerError("READ_ONLY_SESSION", { sessionId: this.sessionId });
 	}
 
 	async setThinkingSelection(): Promise<ClientResult<"session/setThinkingSelection">> {

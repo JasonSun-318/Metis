@@ -6,7 +6,7 @@
 			"jsonrpc": "2.0",
 			"id": "client-1",
 			"result": {
-				"protocolVersion": 7,
+				"protocolVersion": 10,
 				"server": {
 					"name": "arcmind-app-server",
 					"version": "0.80.6"
@@ -15,6 +15,37 @@
 				"capabilities": [
 					"interaction.v1",
 					"session.cursor.v1"
+				]
+			}
+		}
+	},
+	{
+		"direction": "client",
+		"method": "profile/get",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "client-profile",
+			"result": {
+				"generatedAt": "2026-08-01T00:00:00.000Z",
+				"totalTokens": 600,
+				"peakDailyTokens": 400,
+				"longestSessionMs": 3600000,
+				"currentStreakDays": 2,
+				"longestStreakDays": 3,
+				"sessionCount": 2,
+				"mostUsedMode": "chat",
+				"mostUsedModePercent": 100,
+				"mostUsedThinkingLevel": "high",
+				"mostUsedThinkingLevelPercent": 75,
+				"usedSkillCount": 2,
+				"skillUseCount": 3,
+				"activity": [
+					{ "date": "2026-07-31", "tokens": 200 },
+					{ "date": "2026-08-01", "tokens": 400 }
+				],
+				"topSkills": [
+					{ "name": "pdf", "count": 2 },
+					{ "name": "documents", "count": 1 }
 				]
 			}
 		}
@@ -115,6 +146,34 @@
 	},
 	{
 		"direction": "client",
+		"method": "subagent/interrupt",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "client-subagent-interrupt",
+			"result": {
+				"subagent": {
+					"agentId": "22222222-2222-4222-8222-222222222222",
+					"name": "researcher",
+					"status": "stopped",
+					"taskSummary": "Inspect the runtime",
+					"configuration": {
+						"mode": "code",
+						"tools": ["read"],
+						"permissionMode": "ask",
+						"model": { "provider": "openai", "modelId": "gpt-test" },
+						"thinkingLevel": "max",
+						"cwd": "/tmp/arcmind-project",
+						"forkTurns": 0,
+						"timeoutSeconds": 1800
+					},
+					"createdAt": "2026-07-16T00:00:12.000Z",
+					"updatedAt": "2026-07-16T00:00:13.000Z"
+				}
+			}
+		}
+	},
+	{
+		"direction": "client",
 		"method": "session/list",
 		"envelope": {
 			"jsonrpc": "2.0",
@@ -128,6 +187,7 @@
 						"updatedAt": "2026-07-15T00:00:00.000Z",
 						"state": "idle",
 						"archived": false,
+						"unread": false,
 						"mode": "code",
 						"cwdOrigin": "user-selected"
 					}
@@ -151,6 +211,7 @@
 					"updatedAt": "2026-07-16T00:00:00.000Z",
 					"state": "idle",
 					"archived": false,
+					"unread": false,
 					"mode": "code",
 					"cwdOrigin": "user-selected"
 				}
@@ -171,6 +232,28 @@
 					"updatedAt": "2026-07-16T00:00:00.000Z",
 					"state": "idle",
 					"archived": false,
+					"unread": false,
+					"mode": "code",
+					"cwdOrigin": "user-selected"
+				}
+			}
+		}
+	},
+	{
+		"direction": "client",
+		"method": "session/markRead",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "client-mark-read",
+			"result": {
+				"session": {
+					"sessionId": "my-custom-id",
+					"cwd": "/tmp/arcmind-project",
+					"createdAt": "2026-07-16T00:00:00.000Z",
+					"updatedAt": "2026-07-16T00:00:00.000Z",
+					"state": "idle",
+					"archived": false,
+					"unread": false,
 					"mode": "code",
 					"cwdOrigin": "user-selected"
 				}
@@ -216,6 +299,7 @@
 					"updatedAt": "2026-07-16T00:00:03.000Z",
 					"state": "idle",
 					"archived": false,
+					"unread": false,
 					"mode": "code",
 					"cwdOrigin": "user-selected"
 				}
@@ -249,6 +333,7 @@
 					"updatedAt": "2026-07-16T00:00:01.000Z",
 					"state": "idle",
 					"archived": true,
+					"unread": false,
 					"mode": "code",
 					"cwdOrigin": "user-selected"
 				}
@@ -269,6 +354,7 @@
 					"updatedAt": "2026-07-16T00:00:02.000Z",
 					"state": "idle",
 					"archived": false,
+					"unread": false,
 					"mode": "code",
 					"cwdOrigin": "user-selected"
 				}
@@ -290,6 +376,7 @@
 						"updatedAt": "2026-07-16T00:00:02.000Z",
 						"state": "idle",
 						"archived": false,
+						"unread": false,
 						"mode": "code",
 						"cwdOrigin": "user-selected"
 					},

@@ -20,6 +20,16 @@ function delta(text: string): DomainEvent {
 	};
 }
 
+function childDelta(agentId: string, text: string, type: "text" | "thinking" = "text"): DomainEvent {
+	return {
+		type: "subagent/item/delta",
+		sessionId: SESSION_ID,
+		agentId,
+		itemId: "child-item-stream",
+		delta: { type, text },
+	};
+}
+
 function completedItem(itemId = "item-stream"): ItemView {
 	return {
 		itemId,
@@ -90,6 +100,85 @@ describe("OutboundQueue backpressure", () => {
 			"item/completed",
 			"item/delta",
 		]);
+	});
+
+	it("coalesces child deltas only for the same child and preserves thinking", async () => {
+		const queue = new OutboundQueue({ serverEpoch: EPOCH });
+		const sent: OutboundEnvelope[] = [];
+		queue.enqueue(1, childDelta("child-a", "one", "thinking"));
+		queue.enqueue(2, childDelta("child-a", " two", "thinking"));
+		queue.enqueue(3, childDelta("child-b", "three", "thinking"));
+		expect(queue.getStats().unacknowledgedEvents).toBe(2);
+
+		queue.setSender((message) => {
+			sent.push(message);
+		});
+		await vi.waitFor(() => expect(notifications(sent)).toHaveLength(1));
+		expect(notifications(sent)[0]).toMatchObject({
+			params: {
+				fromCursor: 2,
+				toCursor: 3,
+				events: [
+					{
+						type: "subagent/item/delta",
+						agentId: "child-a",
+						delta: { type: "thinking", text: "one two" },
+					},
+					{ type: "subagent/item/delta", agentId: "child-b" },
+				],
+			},
+		});
+	});
+
+	it("preserves 500 child delta fragments while keeping one unsent record", async () => {
+		const queue = new OutboundQueue({ serverEpoch: EPOCH });
+		for (let cursor = 1; cursor <= 500; cursor += 1) {
+			queue.enqueue(cursor, childDelta("child-a", String(cursor % 10)));
+		}
+		expect(queue.getStats().unacknowledgedEvents).toBe(1);
+
+		const sent: OutboundEnvelope[] = [];
+		queue.setSender((message) => {
+			sent.push(message);
+		});
+		await vi.waitFor(() => expect(notifications(sent)).toHaveLength(1));
+		const event = notifications(sent)[0]?.params.events[0];
+		expect(event).toMatchObject({ type: "subagent/item/delta", agentId: "child-a" });
+		if (event?.type !== "subagent/item/delta") throw new TypeError("Expected child delta");
+		expect(event.delta.text).toBe(Array.from({ length: 500 }, (_, index) => String((index + 1) % 10)).join(""));
+	});
+
+	it("coalesces adjacent child journal notices without crossing child scope", async () => {
+		const queue = new OutboundQueue({ serverEpoch: EPOCH });
+		for (let cursor = 1; cursor <= 50; cursor += 1) {
+			queue.enqueue(cursor, {
+				type: "subagent/itemsChanged",
+				sessionId: SESSION_ID,
+				agentId: "child-a",
+			});
+		}
+		queue.enqueue(51, {
+			type: "subagent/itemsChanged",
+			sessionId: SESSION_ID,
+			agentId: "child-b",
+		});
+		expect(queue.getStats().unacknowledgedEvents).toBe(2);
+
+		const sent: OutboundEnvelope[] = [];
+		queue.setSender((message) => {
+			sent.push(message);
+		});
+		await vi.waitFor(() => expect(notifications(sent)).toHaveLength(1));
+		expect(notifications(sent)[0]).toMatchObject({
+			params: {
+				fromCursor: 50,
+				toCursor: 51,
+				events: [
+					{ type: "subagent/itemsChanged", agentId: "child-a" },
+					{ type: "subagent/itemsChanged", agentId: "child-b" },
+				],
+			},
+		});
 	});
 
 	it("bounds snapshot staging and retains only the post-snapshot delta suffix", async () => {

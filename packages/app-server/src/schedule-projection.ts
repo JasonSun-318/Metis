@@ -15,7 +15,13 @@ function scheduleView(schedule: ScheduleSpec): ScheduleTaskView["schedule"] {
 function targetView(target: ScheduleTarget): ScheduleTaskView["target"] {
 	return target.workspace === "fixed"
 		? { kind: "general", workspace: "fixed", cwd: target.cwd }
-		: { kind: "general", workspace: "task" };
+		: {
+				kind: "general",
+				workspace: "task",
+				...(target.additionalWorkspaceCwd === undefined
+					? {}
+					: { additionalWorkspaceCwd: target.additionalWorkspaceCwd }),
+			};
 }
 
 function runSummaryView(run: ScheduleRunSummary): NonNullable<ScheduleTaskView["lastRun"]> {
@@ -38,8 +44,10 @@ function runSummaryView(run: ScheduleRunSummary): NonNullable<ScheduleTaskView["
 export function scheduleTaskView(task: ScheduleTask): ScheduleTaskView {
 	return {
 		id: task.id,
-		title: task.title,
+		name: task.title,
+		...(task.description === undefined ? {} : { description: task.description }),
 		instruction: task.instruction,
+		model: task.model,
 		schedule: scheduleView(task.schedule),
 		timezone: task.timezone,
 		target: targetView(task.target),
@@ -47,6 +55,7 @@ export function scheduleTaskView(task: ScheduleTask): ScheduleTaskView {
 		createdAt: task.createdAt,
 		updatedAt: task.updatedAt,
 		nextRunAt: task.nextRunAt,
+		...(task.activeRunId ? { activeRunId: task.activeRunId } : {}),
 		unreadCount: task.unreadCount,
 		...(task.lastRun ? { lastRun: runSummaryView(task.lastRun) } : {}),
 		...(task.pauseReason ? { pauseReason: task.pauseReason } : {}),
@@ -59,7 +68,10 @@ export function scheduleRunView(run: ScheduleRun): ScheduleRunView {
 		...(run.startedAt ? { startedAt: run.startedAt } : {}),
 		trigger: run.trigger,
 		snapshot: {
+			name: run.snapshot.name,
+			...(run.snapshot.description === undefined ? {} : { description: run.snapshot.description }),
 			instruction: run.snapshot.instruction,
+			model: run.snapshot.model,
 			schedule: scheduleView(run.snapshot.schedule),
 			timezone: run.snapshot.timezone,
 			target: targetView(run.snapshot.target),
@@ -71,32 +83,9 @@ export function scheduleEventView(event: ScheduleEvent): DomainEvent | undefined
 	if (event.type === "schedule/updated") return { type: "schedule/updated", task: scheduleTaskView(event.task) };
 	if (event.type === "schedule/deleted") return { type: "schedule/deleted", taskId: event.taskId };
 	if (event.type === "schedule/refreshed") return { type: "schedule/refreshed" };
-	const run = event.run;
-	const common = {
-		taskId: run.taskId,
-		runId: run.id,
-		unread: run.unread,
-		createdAt: run.createdAt,
-		...(run.sessionId ? { sessionId: run.sessionId } : {}),
+	return {
+		type: "schedule/runUpdated",
+		task: scheduleTaskView(event.task),
+		run: runSummaryView(event.run),
 	};
-	if (run.status === "succeeded") {
-		return {
-			type: "schedule/runCompleted",
-			...common,
-			...(run.resultPreview ? { resultPreview: run.resultPreview } : {}),
-		};
-	}
-	if (run.status === "failed" && run.error) return { type: "schedule/runFailed", ...common, error: run.error };
-	if (run.status === "missed" && run.reason === "offline") {
-		return {
-			type: "schedule/runMissed",
-			...common,
-			reason: "offline",
-			...(run.skippedCount === undefined ? {} : { skippedCount: run.skippedCount }),
-		};
-	}
-	if (run.status === "skipped" && run.reason === "overlap") {
-		return { type: "schedule/runSkipped", ...common, reason: "overlap" };
-	}
-	return undefined;
 }

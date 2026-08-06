@@ -23,7 +23,9 @@ import { ConnectionSubscriptions, type SessionSubscriptions } from "./subscripti
 const SERVER_CAPABILITIES = [
 	"archive.v1",
 	"recovery.v1",
-	"schedules.v1",
+	"models.v1",
+	"profile.v1",
+	"schedules.v2",
 	"session.cursor.v1",
 	"sessions.v1",
 	"subagents.v1",
@@ -79,6 +81,7 @@ function normalizedError(error: unknown): { name: RpcErrorName; context: RpcErro
 		if (code === "SCHEDULE_NOT_FOUND" || code === "RUN_NOT_FOUND") return { name: "NOT_FOUND", context: {} };
 		if (code === "TASK_BUSY" || code === "TASK_DELETING") return { name: "BUSY", context: {} };
 		if (code === "INVALID_SCHEDULE") return { name: "INVALID_PARAMS", context: {} };
+		if (code === "MODEL_UNAVAILABLE") return { name: "INVALID_PARAMS", context: {} };
 		if (code === "STORE_CORRUPT") return { name: "SCHEDULE_STORE_CORRUPT", context: {} };
 		if (code === "SESSION_IN_USE" || ("name" in error && error.name === "SessionLeaseError")) {
 			return { name: "SESSION_IN_USE", context: {} };

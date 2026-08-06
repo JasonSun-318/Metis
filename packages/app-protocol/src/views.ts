@@ -30,6 +30,15 @@ export const SessionStateSchema = Type.Union([
 export const AgentModeSchema = Type.Union([Type.Literal("chat"), Type.Literal("code")]);
 export const PermissionModeSchema = Type.Union([Type.Literal("ask"), Type.Literal("full")]);
 export const CwdOriginSchema = Type.Union([Type.Literal("managed"), Type.Literal("user-selected")]);
+export const ActualThinkingLevelSchema = Type.Union([
+	Type.Literal("off"),
+	Type.Literal("minimal"),
+	Type.Literal("low"),
+	Type.Literal("medium"),
+	Type.Literal("high"),
+	Type.Literal("xhigh"),
+	Type.Literal("max"),
+]);
 
 export const PublicErrorDataSchema = StrictObject({
 	name: Type.String({ minLength: 1, maxLength: 64, pattern: "^[A-Z][A-Z0-9_]*$" }),
@@ -52,6 +61,7 @@ export const SessionSummarySchema = StrictObject({
 	updatedAt: TimestampSchema,
 	state: SessionStateSchema,
 	archived: Type.Boolean(),
+	unread: Type.Boolean(),
 	recoveryNotice: Type.Optional(PublicTextSchema),
 	scheduled: Type.Optional(StrictObject({ taskId: SessionIdSchema, runId: SessionIdSchema })),
 });
@@ -61,6 +71,70 @@ export const SkillSummaryViewSchema = StrictObject({
 	description: PublicTextSchema,
 	source: Type.Optional(Type.Union([Type.Literal("system"), Type.Literal("user"), Type.Literal("project")])),
 });
+
+function isCalendarDate(value: string): boolean {
+	const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+	if (!match) return false;
+	const year = Number(match[1]);
+	const month = Number(match[2]);
+	const day = Number(match[3]);
+	const date = new Date(Date.UTC(year, month - 1, day));
+	return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
+}
+
+export const ProfileActivityDayViewSchema = StrictObject({
+	date: Type.Refine(Type.String({ pattern: "^\\d{4}-\\d{2}-\\d{2}$" }), isCalendarDate, "invalid calendar date"),
+	tokens: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
+});
+
+export const ProfileSkillUsageViewSchema = StrictObject({
+	name: NameSchema,
+	count: Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }),
+});
+
+export const ProfileUsageSummaryViewSchema = Type.Refine(
+	StrictObject({
+		generatedAt: TimestampSchema,
+		totalTokens: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
+		peakDailyTokens: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
+		longestSessionMs: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
+		currentStreakDays: Type.Integer({ minimum: 0, maximum: 366_000 }),
+		longestStreakDays: Type.Integer({ minimum: 0, maximum: 366_000 }),
+		sessionCount: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
+		mostUsedMode: Type.Union([AgentModeSchema, Type.Null()]),
+		mostUsedModePercent: Type.Integer({ minimum: 0, maximum: 100 }),
+		mostUsedThinkingLevel: Type.Union([ActualThinkingLevelSchema, Type.Null()]),
+		mostUsedThinkingLevelPercent: Type.Integer({ minimum: 0, maximum: 100 }),
+		usedSkillCount: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
+		skillUseCount: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
+		activity: Type.Array(ProfileActivityDayViewSchema, { maxItems: 371 }),
+		topSkills: Type.Array(ProfileSkillUsageViewSchema, { maxItems: 5 }),
+	}),
+	(value) => {
+		const activitySorted = value.activity.every(
+			(day, index) => index === 0 || value.activity[index - 1]!.date < day.date,
+		);
+		const skillsUnique = new Set(value.topSkills.map((skill) => skill.name)).size === value.topSkills.length;
+		const skillsSorted = value.topSkills.every((skill, index) => {
+			if (index === 0) return true;
+			const previous = value.topSkills[index - 1]!;
+			return previous.count > skill.count || (previous.count === skill.count && previous.name < skill.name);
+		});
+		const listedSkillUses = value.topSkills.reduce((total, skill) => total + skill.count, 0);
+		return (
+			activitySorted &&
+			skillsUnique &&
+			skillsSorted &&
+			value.currentStreakDays <= value.longestStreakDays &&
+			value.peakDailyTokens <= value.totalTokens &&
+			(value.mostUsedMode === null) === (value.mostUsedModePercent === 0) &&
+			(value.mostUsedThinkingLevel === null) === (value.mostUsedThinkingLevelPercent === 0) &&
+			value.usedSkillCount >= value.topSkills.length &&
+			value.skillUseCount >= listedSkillUses
+		);
+	},
+	"profile summary fields are inconsistent",
+);
 
 export const DurableImageRefViewSchema = StrictObject({
 	hash: Sha256Schema,
@@ -194,15 +268,6 @@ export const InteractionViewSchema = Type.Union([
 	InputInteractionViewSchema,
 ]);
 
-export const ActualThinkingLevelSchema = Type.Union([
-	Type.Literal("off"),
-	Type.Literal("minimal"),
-	Type.Literal("low"),
-	Type.Literal("medium"),
-	Type.Literal("high"),
-	Type.Literal("xhigh"),
-	Type.Literal("max"),
-]);
 export const ThinkingSelectionSchema = Type.Union([ActualThinkingLevelSchema, Type.Literal("ultra")]);
 export const SubagentStatusSchema = Type.Union([
 	Type.Literal("queued"),
@@ -226,6 +291,7 @@ export const SubagentUsageSchema = StrictObject({
 	cacheRead: Type.Number({ minimum: 0 }),
 	cacheWrite: Type.Number({ minimum: 0 }),
 	elapsedMs: Type.Number({ minimum: 0 }),
+	toolCalls: Type.Optional(Type.Integer({ minimum: 0 })),
 	cost: Type.Optional(Type.Number({ minimum: 0 })),
 });
 const SubagentIdentityFields = {
@@ -318,6 +384,47 @@ export const SubagentUpdatedEventSchema = StrictObject({
 	subagent: SubagentSummarySchema,
 });
 
+const SubagentItemStartedEventObjectSchema = StrictObject({
+	type: Type.Literal("subagent/item/started"),
+	sessionId: SessionIdSchema,
+	agentId: SessionIdSchema,
+	item: ItemViewSchema,
+});
+export const SubagentItemStartedEventSchema = Type.Refine(
+	SubagentItemStartedEventObjectSchema,
+	(value) => value.item.sessionId === value.agentId,
+	"child item sessionId must equal agentId",
+);
+
+export const SubagentItemDeltaEventSchema = StrictObject({
+	type: Type.Literal("subagent/item/delta"),
+	sessionId: SessionIdSchema,
+	agentId: SessionIdSchema,
+	itemId: OpaqueIdSchema,
+	delta: Type.Union([
+		StrictObject({ type: Type.Literal("text"), text: DeltaTextSchema }),
+		StrictObject({ type: Type.Literal("thinking"), text: DeltaTextSchema }),
+	]),
+});
+
+const SubagentItemCompletedEventObjectSchema = StrictObject({
+	type: Type.Literal("subagent/item/completed"),
+	sessionId: SessionIdSchema,
+	agentId: SessionIdSchema,
+	item: ItemViewSchema,
+});
+export const SubagentItemCompletedEventSchema = Type.Refine(
+	SubagentItemCompletedEventObjectSchema,
+	(value) => value.item.sessionId === value.agentId,
+	"child item sessionId must equal agentId",
+);
+
+export const SubagentItemsChangedEventSchema = StrictObject({
+	type: Type.Literal("subagent/itemsChanged"),
+	sessionId: SessionIdSchema,
+	agentId: SessionIdSchema,
+});
+
 export const SessionUpdatedEventSchema = StrictObject({
 	type: Type.Literal("session/updated"),
 	session: SessionSummarySchema,
@@ -396,6 +503,8 @@ export const ServerStateEventSchema = StrictObject({
 
 const ScheduleTimeSchema = Type.String({ pattern: "^(?:[01]\\d|2[0-3]):[0-5]\\d$" });
 const ScheduleDateSchema = Type.String({ pattern: "^\\d{4}-\\d{2}-\\d{2}$" });
+export const ScheduleNameSchema = Type.String({ minLength: 1, maxLength: 120 });
+export const ScheduleDescriptionInputSchema = Type.String({ maxLength: 512 });
 
 export const ScheduleInputSpecSchema = Type.Union([
 	StrictObject({ kind: Type.Literal("once"), date: ScheduleDateSchema, time: ScheduleTimeSchema }),
@@ -434,7 +543,11 @@ export const ScheduleSpecSchema = Type.Union([
 
 export const ScheduleTargetViewSchema = Type.Union([
 	StrictObject({ kind: Type.Literal("general"), workspace: Type.Literal("fixed"), cwd: PathSchema }),
-	StrictObject({ kind: Type.Literal("general"), workspace: Type.Literal("task") }),
+	StrictObject({
+		kind: Type.Literal("general"),
+		workspace: Type.Literal("task"),
+		additionalWorkspaceCwd: Type.Optional(PathSchema),
+	}),
 ]);
 
 export const ScheduleErrorViewSchema = StrictObject({
@@ -460,7 +573,10 @@ const ScheduleRunReasonSchema = Type.Union([
 ]);
 
 export const ScheduleTaskSnapshotViewSchema = StrictObject({
+	name: ScheduleNameSchema,
+	description: Type.Optional(PublicTextSchema),
 	instruction: Utf8String(MAX_SCHEDULE_INSTRUCTION_UTF8_BYTES, { minLength: 1 }),
+	model: SubagentModelRefSchema,
 	schedule: ScheduleSpecSchema,
 	timezone: Type.String({ minLength: 1, maxLength: 255 }),
 	target: ScheduleTargetViewSchema,
@@ -492,8 +608,10 @@ export const ScheduleRunSummaryViewSchema = StrictObject(ScheduleRunSummaryField
 
 export const ScheduleTaskViewSchema = StrictObject({
 	id: SessionIdSchema,
-	title: NameSchema,
+	name: ScheduleNameSchema,
+	description: Type.Optional(PublicTextSchema),
 	instruction: Utf8String(MAX_SCHEDULE_INSTRUCTION_UTF8_BYTES, { minLength: 1 }),
+	model: SubagentModelRefSchema,
 	schedule: ScheduleSpecSchema,
 	timezone: Type.String({ minLength: 1, maxLength: 255 }),
 	target: ScheduleTargetViewSchema,
@@ -506,12 +624,16 @@ export const ScheduleTaskViewSchema = StrictObject({
 	createdAt: TimestampSchema,
 	updatedAt: TimestampSchema,
 	nextRunAt: Type.Union([TimestampSchema, Type.Null()]),
+	activeRunId: Type.Optional(SessionIdSchema),
 	unreadCount: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
 	lastRun: Type.Optional(ScheduleRunSummaryViewSchema),
-	pauseReason: Type.Optional(Type.Union([Type.Literal("user"), Type.Literal("workspace_missing")])),
+	pauseReason: Type.Optional(
+		Type.Union([Type.Literal("user"), Type.Literal("workspace_missing"), Type.Literal("model_unavailable")]),
+	),
 });
 
 export const ScheduleSnapshotViewSchema = StrictObject({
+	serverEpoch: UuidSchema,
 	tasks: Type.Array(ScheduleTaskViewSchema, { maxItems: MAX_HISTORY_ITEMS }),
 	unreadCount: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
 	cursor: CursorSchema,
@@ -526,34 +648,10 @@ export const ScheduleDeletedEventSchema = StrictObject({
 	taskId: SessionIdSchema,
 });
 
-const ScheduleRunEventFields = {
-	taskId: SessionIdSchema,
-	runId: SessionIdSchema,
-	unread: Type.Boolean(),
-	createdAt: TimestampSchema,
-	sessionId: Type.Optional(SessionIdSchema),
-} as const;
-
-export const ScheduleRunCompletedEventSchema = StrictObject({
-	type: Type.Literal("schedule/runCompleted"),
-	...ScheduleRunEventFields,
-	resultPreview: Type.Optional(PublicTextSchema),
-});
-export const ScheduleRunFailedEventSchema = StrictObject({
-	type: Type.Literal("schedule/runFailed"),
-	...ScheduleRunEventFields,
-	error: ScheduleErrorViewSchema,
-});
-export const ScheduleRunMissedEventSchema = StrictObject({
-	type: Type.Literal("schedule/runMissed"),
-	...ScheduleRunEventFields,
-	reason: Type.Literal("offline"),
-	skippedCount: Type.Optional(Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER })),
-});
-export const ScheduleRunSkippedEventSchema = StrictObject({
-	type: Type.Literal("schedule/runSkipped"),
-	...ScheduleRunEventFields,
-	reason: Type.Literal("overlap"),
+export const ScheduleRunUpdatedEventSchema = StrictObject({
+	type: Type.Literal("schedule/runUpdated"),
+	task: ScheduleTaskViewSchema,
+	run: ScheduleRunSummaryViewSchema,
 });
 export const ScheduleRefreshedEventSchema = StrictObject({ type: Type.Literal("schedule/refreshed") });
 
@@ -573,12 +671,13 @@ export const DomainEventSchema = Type.Union([
 	ThinkingSelectionChangedEventSchema,
 	ModelChangedEventSchema,
 	SubagentUpdatedEventSchema,
+	SubagentItemStartedEventSchema,
+	SubagentItemDeltaEventSchema,
+	SubagentItemCompletedEventSchema,
+	SubagentItemsChangedEventSchema,
 	ScheduleUpdatedEventSchema,
 	ScheduleDeletedEventSchema,
-	ScheduleRunCompletedEventSchema,
-	ScheduleRunFailedEventSchema,
-	ScheduleRunMissedEventSchema,
-	ScheduleRunSkippedEventSchema,
+	ScheduleRunUpdatedEventSchema,
 	ScheduleRefreshedEventSchema,
 ]);
 
@@ -599,6 +698,9 @@ export type CwdOrigin = Static<typeof CwdOriginSchema>;
 export type SessionSummary = Static<typeof SessionSummarySchema>;
 export type SkillSummaryView = Static<typeof SkillSummaryViewSchema>;
 export type SkillSourceView = NonNullable<SkillSummaryView["source"]>;
+export type ProfileActivityDayView = Static<typeof ProfileActivityDayViewSchema>;
+export type ProfileSkillUsageView = Static<typeof ProfileSkillUsageViewSchema>;
+export type ProfileUsageSummaryView = Static<typeof ProfileUsageSummaryViewSchema>;
 export type DurableImageRefView = Static<typeof DurableImageRefViewSchema>;
 export type ItemContentBlockView = Static<typeof ItemContentBlockViewSchema>;
 export type ItemView = Static<typeof ItemViewSchema>;

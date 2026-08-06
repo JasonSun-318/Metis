@@ -8,10 +8,14 @@ import type {
 	SessionSummary,
 	TurnView,
 } from "@arcmind/app-protocol";
+import {
+	appendProjectedDelta,
+	MAX_PROJECTED_THINKING_BYTES,
+	MAX_PROJECTED_VISIBLE_TEXT_BYTES,
+} from "../item-projection.ts";
 import { AppServerError } from "../session-runtime-host.ts";
 
-export const MAX_PROJECTED_THINKING_BYTES = 8 * 1024;
-export const MAX_PROJECTED_VISIBLE_TEXT_BYTES = 20 * 1024;
+export { MAX_PROJECTED_THINKING_BYTES, MAX_PROJECTED_VISIBLE_TEXT_BYTES };
 const MAX_SNAPSHOT_ITEMS = 200;
 const MAX_SNAPSHOT_TURNS = 200;
 
@@ -24,22 +28,6 @@ export interface SessionProjectionSeed {
 
 function clone<T>(value: T): T {
 	return structuredClone(value);
-}
-
-function textPrefixWithinBytes(value: string, maximumBytes: number): string {
-	if (maximumBytes <= 0) return "";
-	const bytes = Buffer.from(value, "utf8");
-	if (bytes.byteLength <= maximumBytes) return value;
-	const decoder = new TextDecoder("utf-8", { fatal: true });
-	let end = maximumBytes;
-	while (end > 0) {
-		try {
-			return decoder.decode(bytes.subarray(0, end));
-		} catch {
-			end -= 1;
-		}
-	}
-	return "";
 }
 
 /** Incremental, normalized state for one open session. */
@@ -90,6 +78,10 @@ export class SessionProjection {
 			case "session/thinkingSelectionChanged":
 			case "session/modelChanged":
 			case "subagent/updated":
+			case "subagent/item/started":
+			case "subagent/item/delta":
+			case "subagent/item/completed":
+			case "subagent/itemsChanged":
 				this.assertSession(event.sessionId);
 				return clone(event);
 			case "session/updated":
@@ -109,21 +101,10 @@ export class SessionProjection {
 				this.assertSession(event.sessionId);
 				const item = this.itemsById.get(event.itemId);
 				if (!item || item.state !== "streaming") return undefined;
-				const currentBytes = item.content.reduce(
-					(total, block) => total + (block.type === event.delta.type ? Buffer.byteLength(block.text, "utf8") : 0),
-					0,
-				);
-				const maximumBytes =
-					event.delta.type === "thinking" ? MAX_PROJECTED_THINKING_BYTES : MAX_PROJECTED_VISIBLE_TEXT_BYTES;
-				const accepted = textPrefixWithinBytes(event.delta.text, maximumBytes - currentBytes);
-				if (accepted.length === 0) return undefined;
-				const last = item.content.at(-1);
-				if (last?.type === event.delta.type) {
-					item.content[item.content.length - 1] = { ...last, text: last.text + accepted };
-				} else {
-					item.content.push({ type: event.delta.type, text: accepted });
-				}
-				return { ...event, delta: { type: event.delta.type, text: accepted } };
+				const projected = appendProjectedDelta(item, event.delta);
+				if (!projected) return undefined;
+				this.itemsById.set(event.itemId, projected.item);
+				return { ...event, delta: projected.delta };
 			}
 		}
 	}
