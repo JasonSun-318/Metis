@@ -2,8 +2,11 @@ import { type Static, Type } from "typebox";
 import {
 	CursorSchema,
 	DeltaTextSchema,
+	MAX_ASK_USER_OPTIONS,
+	MAX_ASK_USER_QUESTIONS,
 	MAX_HISTORY_ITEMS,
 	MAX_INTERACTION_CHOICES,
+	MAX_PERMISSION_OPERATION_ROWS,
 	MAX_SCHEDULE_INSTRUCTION_UTF8_BYTES,
 	NameSchema,
 	OpaqueIdSchema,
@@ -198,6 +201,10 @@ export const ItemContentBlockViewSchema = Type.Union([
 	NoticeBlockViewSchema,
 ]);
 
+export const ItemUsageViewSchema = StrictObject({
+	outputTokens: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
+});
+
 export const ItemViewSchema = StrictObject({
 	itemId: OpaqueIdSchema,
 	sessionId: SessionIdSchema,
@@ -205,6 +212,7 @@ export const ItemViewSchema = StrictObject({
 	role: Type.Union([Type.Literal("user"), Type.Literal("assistant"), Type.Literal("tool"), Type.Literal("system")]),
 	state: Type.Union([Type.Literal("streaming"), Type.Literal("completed"), Type.Literal("interrupted")]),
 	content: Type.Array(ItemContentBlockViewSchema, { maxItems: 256 }),
+	usage: Type.Optional(ItemUsageViewSchema),
 	createdAt: TimestampSchema,
 	completedAt: Type.Optional(TimestampSchema),
 });
@@ -241,9 +249,24 @@ export const TrustInteractionViewSchema = StrictObject({
 	choices: Type.Array(InteractionChoiceSchema, { minItems: 1, maxItems: MAX_INTERACTION_CHOICES }),
 });
 
+export const PermissionOperationRowViewSchema = StrictObject({
+	label: NameSchema,
+	value: PublicTextSchema,
+});
+
+export const PermissionOperationViewSchema = StrictObject({
+	toolName: NameSchema,
+	rows: Type.Array(PermissionOperationRowViewSchema, { maxItems: MAX_PERMISSION_OPERATION_ROWS }),
+	omittedRows: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
+	scopeComplete: Type.Boolean(),
+	irreversible: Type.Boolean(),
+});
+
 export const SelectInteractionViewSchema = StrictObject({
 	...InteractionBase,
 	kind: Type.Literal("select"),
+	presentation: Type.Optional(Type.Literal("permission_approval")),
+	operation: Type.Optional(PermissionOperationViewSchema),
 	choices: Type.Array(InteractionChoiceSchema, { minItems: 1, maxItems: MAX_INTERACTION_CHOICES }),
 });
 
@@ -261,11 +284,33 @@ export const InputInteractionViewSchema = StrictObject({
 	secret: Type.Boolean(),
 });
 
+export const AskUserQuestionViewSchema = Type.Refine(
+	StrictObject({
+		id: OpaqueIdSchema,
+		question: PublicTextSchema,
+		multiple: Type.Boolean(),
+		choices: Type.Array(InteractionChoiceSchema, { minItems: 2, maxItems: MAX_ASK_USER_OPTIONS }),
+	}),
+	(value) => new Set(value.choices.map((choice) => choice.id)).size === value.choices.length,
+	"ask_user choice ids must be unique within each question",
+);
+
+export const AskUserInteractionViewSchema = Type.Refine(
+	StrictObject({
+		...InteractionBase,
+		kind: Type.Literal("ask_user"),
+		questions: Type.Array(AskUserQuestionViewSchema, { minItems: 1, maxItems: MAX_ASK_USER_QUESTIONS }),
+	}),
+	(value) => new Set(value.questions.map((question) => question.id)).size === value.questions.length,
+	"ask_user question ids must be unique",
+);
+
 export const InteractionViewSchema = Type.Union([
 	TrustInteractionViewSchema,
 	SelectInteractionViewSchema,
 	ConfirmInteractionViewSchema,
 	InputInteractionViewSchema,
+	AskUserInteractionViewSchema,
 ]);
 
 export const ThinkingSelectionSchema = Type.Union([ActualThinkingLevelSchema, Type.Literal("ultra")]);
@@ -284,6 +329,75 @@ export const ModelOptionViewSchema = StrictObject({
 	modelId: NameSchema,
 	name: NameSchema,
 });
+export const ModelSettingsModelViewSchema = StrictObject({
+	provider: NameSchema,
+	modelId: NameSchema,
+	name: NameSchema,
+	contextWindow: Type.Integer({ minimum: 1, maximum: 10_000_000 }),
+	maxOutputTokens: Type.Integer({ minimum: 1, maximum: 10_000_000 }),
+	reasoning: Type.Boolean(),
+	imageInput: Type.Boolean(),
+	custom: Type.Boolean(),
+});
+export const ModelAuthStatusViewSchema = StrictObject({
+	configured: Type.Boolean(),
+	source: Type.Optional(Type.Union([Type.Literal("stored"), Type.Literal("environment"), Type.Literal("oauth")])),
+	label: Type.Optional(Type.String({ minLength: 1, maxLength: 160 })),
+});
+export const ModelSettingsProviderViewSchema = StrictObject({
+	provider: NameSchema,
+	name: NameSchema,
+	builtin: Type.Boolean(),
+	baseUrl: Type.Union([Type.String({ minLength: 1, maxLength: 2_048 }), Type.Null()]),
+	api: Type.Union([Type.Literal("openai-responses"), Type.Literal("openai-completions"), Type.Null()]),
+	auth: ModelAuthStatusViewSchema,
+	models: Type.Array(ModelSettingsModelViewSchema, { maxItems: 512 }),
+});
+export const ModelSettingsViewSchema = StrictObject({
+	defaultModel: Type.Union([SubagentModelRefSchema, Type.Null()]),
+	defaultThinkingSelection: ThinkingSelectionSchema,
+	providers: Type.Array(ModelSettingsProviderViewSchema, { maxItems: 128 }),
+	loadError: Type.Union([PublicTextSchema, Type.Null()]),
+});
+
+export const UsageRangeDaysSchema = Type.Union([Type.Literal(7), Type.Literal(30), Type.Literal(90)]);
+export const UsageDailyViewSchema = StrictObject({
+	date: Type.Refine(Type.String({ pattern: "^\\d{4}-\\d{2}-\\d{2}$" }), isCalendarDate, "invalid calendar date"),
+	chatTokens: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
+	codeTokens: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
+	inputTokens: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
+	outputTokens: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
+	cacheReadTokens: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
+	cacheWriteTokens: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
+});
+export const UsageModelViewSchema = StrictObject({
+	provider: NameSchema,
+	modelId: NameSchema,
+	totalTokens: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
+});
+export const UsageSummaryViewSchema = Type.Refine(
+	StrictObject({
+		generatedAt: TimestampSchema,
+		rangeDays: UsageRangeDaysSchema,
+		totalTokens: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
+		inputTokens: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
+		outputTokens: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
+		cacheReadTokens: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
+		cacheWriteTokens: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
+		chatTokens: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
+		codeTokens: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
+		sessionCount: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
+		chatSessionCount: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
+		codeSessionCount: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
+		daily: Type.Array(UsageDailyViewSchema, { minItems: 7, maxItems: 90 }),
+		topModels: Type.Array(UsageModelViewSchema, { maxItems: 8 }),
+	}),
+	(value) =>
+		value.daily.length === value.rangeDays &&
+		value.sessionCount === value.chatSessionCount + value.codeSessionCount &&
+		value.totalTokens === value.chatTokens + value.codeTokens,
+	"usage summary fields are inconsistent",
+);
 export const SubagentUsageSchema = StrictObject({
 	model: SubagentModelRefSchema,
 	input: Type.Number({ minimum: 0 }),
@@ -337,6 +451,13 @@ export const SubagentSummarySchema = Type.Union([
 	}),
 ]);
 
+export const SessionTaskViewSchema = StrictObject({
+	task: Type.String({ minLength: 1, maxLength: 512 }),
+	completed: Type.Boolean(),
+});
+
+export const SessionTasksSchema = Type.Array(SessionTaskViewSchema, { maxItems: 256 });
+
 export const SessionSnapshotSchema = StrictObject({
 	session: SessionSummarySchema,
 	permissionMode: PermissionModeSchema,
@@ -347,6 +468,7 @@ export const SessionSnapshotSchema = StrictObject({
 	nextBeforeItemId: Type.Union([OpaqueIdSchema, Type.Null()]),
 	activeTurnId: Type.Union([OpaqueIdSchema, Type.Null()]),
 	pendingInteractions: Type.Array(InteractionViewSchema, { maxItems: MAX_INTERACTION_CHOICES }),
+	tasks: SessionTasksSchema,
 	thinkingSelection: ThinkingSelectionSchema,
 	actualThinkingLevel: ActualThinkingLevelSchema,
 	availableThinkingSelections: Type.Array(ThinkingSelectionSchema, { minItems: 1, maxItems: 8, uniqueItems: true }),
@@ -376,6 +498,12 @@ export const ModelChangedEventSchema = StrictObject({
 	thinkingSelection: ThinkingSelectionSchema,
 	actualThinkingLevel: ActualThinkingLevelSchema,
 	availableThinkingSelections: Type.Array(ThinkingSelectionSchema, { minItems: 1, maxItems: 8, uniqueItems: true }),
+});
+
+export const TasksChangedEventSchema = StrictObject({
+	type: Type.Literal("session/tasksChanged"),
+	sessionId: SessionIdSchema,
+	tasks: SessionTasksSchema,
 });
 
 export const SubagentUpdatedEventSchema = StrictObject({
@@ -468,8 +596,16 @@ export const ItemDeltaEventSchema = StrictObject({
 	sessionId: SessionIdSchema,
 	itemId: OpaqueIdSchema,
 	delta: Type.Union([
-		StrictObject({ type: Type.Literal("text"), text: DeltaTextSchema }),
-		StrictObject({ type: Type.Literal("thinking"), text: DeltaTextSchema }),
+		StrictObject({
+			type: Type.Literal("text"),
+			text: DeltaTextSchema,
+			outputTokens: Type.Optional(Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER })),
+		}),
+		StrictObject({
+			type: Type.Literal("thinking"),
+			text: DeltaTextSchema,
+			outputTokens: Type.Optional(Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER })),
+		}),
 	]),
 });
 
@@ -670,6 +806,7 @@ export const DomainEventSchema = Type.Union([
 	PermissionModeChangedEventSchema,
 	ThinkingSelectionChangedEventSchema,
 	ModelChangedEventSchema,
+	TasksChangedEventSchema,
 	SubagentUpdatedEventSchema,
 	SubagentItemStartedEventSchema,
 	SubagentItemDeltaEventSchema,
@@ -703,14 +840,23 @@ export type ProfileSkillUsageView = Static<typeof ProfileSkillUsageViewSchema>;
 export type ProfileUsageSummaryView = Static<typeof ProfileUsageSummaryViewSchema>;
 export type DurableImageRefView = Static<typeof DurableImageRefViewSchema>;
 export type ItemContentBlockView = Static<typeof ItemContentBlockViewSchema>;
+export type ItemUsageView = Static<typeof ItemUsageViewSchema>;
 export type ItemView = Static<typeof ItemViewSchema>;
 export type TurnView = Static<typeof TurnViewSchema>;
 export type InteractionChoice = Static<typeof InteractionChoiceSchema>;
 export type InteractionView = Static<typeof InteractionViewSchema>;
+export type SessionTaskView = Static<typeof SessionTaskViewSchema>;
 export type SessionSnapshot = Static<typeof SessionSnapshotSchema>;
 export type ThinkingSelectionView = Static<typeof ThinkingSelectionSchema>;
 export type PermissionModeView = Static<typeof PermissionModeSchema>;
 export type ModelOptionView = Static<typeof ModelOptionViewSchema>;
+export type ModelSettingsModelView = Static<typeof ModelSettingsModelViewSchema>;
+export type ModelSettingsProviderView = Static<typeof ModelSettingsProviderViewSchema>;
+export type ModelSettingsView = Static<typeof ModelSettingsViewSchema>;
+export type UsageRangeDays = Static<typeof UsageRangeDaysSchema>;
+export type UsageDailyView = Static<typeof UsageDailyViewSchema>;
+export type UsageModelView = Static<typeof UsageModelViewSchema>;
+export type UsageSummaryView = Static<typeof UsageSummaryViewSchema>;
 export type SubagentSummaryView = Static<typeof SubagentSummarySchema>;
 export type ScheduleInputSpecView = Static<typeof ScheduleInputSpecSchema>;
 export type ScheduleTaskView = Static<typeof ScheduleTaskViewSchema>;

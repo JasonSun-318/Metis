@@ -3,7 +3,7 @@ import { Compile, type Validator } from "typebox/compile";
 
 export type EmptySchemaContext = Record<string, never>;
 
-export const PROTOCOL_VERSION = 10 as const;
+export const PROTOCOL_VERSION = 11 as const;
 export const MAX_ENVELOPE_UTF8_BYTES = 8 * 1024 * 1024;
 export const MAX_NAME_UTF16_UNITS = 256;
 export const MAX_PATH_UTF8_BYTES = 32 * 1024;
@@ -14,6 +14,10 @@ export const MAX_DELTA_UTF8_BYTES = 256 * 1024;
 export const MAX_HISTORY_ITEMS = 200;
 export const MAX_EVENT_BATCH = 256;
 export const MAX_INTERACTION_CHOICES = 100;
+export const MAX_PERMISSION_OPERATION_ROWS = 64;
+export const MAX_ASK_USER_QUESTIONS = 4;
+export const MAX_ASK_USER_OPTIONS = 4;
+export const MAX_ASK_USER_CUSTOM_ANSWER_UTF8_BYTES = 16 * 1024;
 export const MAX_CAPABILITIES = 128;
 export const MAX_SAFE_JSON_DEPTH = 64;
 export const MAX_SAFE_JSON_NODES = 100_000;
@@ -65,19 +69,19 @@ export function hasAtMostUtf8Bytes(value: string, maximum: number): boolean {
 
 export function Utf8String(maximum: number, options: Record<string, unknown> = {}) {
 	return Type.Refine(
-		Type.String({ ...options, "x-arcmind-maxUtf8Bytes": maximum }),
+		Type.String({ ...options, "x-metis-maxUtf8Bytes": maximum }),
 		(value) => hasAtMostUtf8Bytes(value, maximum),
 		`must not exceed ${maximum} UTF-8 bytes`,
 	);
 }
 
 export const NameSchema = Type.Refine(
-	Type.String({ minLength: 1, maxLength: MAX_NAME_UTF16_UNITS, "x-arcmind-maxUtf16Units": MAX_NAME_UTF16_UNITS }),
+	Type.String({ minLength: 1, maxLength: MAX_NAME_UTF16_UNITS, "x-metis-maxUtf16Units": MAX_NAME_UTF16_UNITS }),
 	(value) => value.length <= MAX_NAME_UTF16_UNITS,
 	`must not exceed ${MAX_NAME_UTF16_UNITS} UTF-16 code units`,
 );
 export const OptionalNameSchema = Type.Refine(
-	Type.String({ maxLength: MAX_NAME_UTF16_UNITS, "x-arcmind-maxUtf16Units": MAX_NAME_UTF16_UNITS }),
+	Type.String({ maxLength: MAX_NAME_UTF16_UNITS, "x-metis-maxUtf16Units": MAX_NAME_UTF16_UNITS }),
 	(value) => value.length <= MAX_NAME_UTF16_UNITS,
 	`must not exceed ${MAX_NAME_UTF16_UNITS} UTF-16 code units`,
 );

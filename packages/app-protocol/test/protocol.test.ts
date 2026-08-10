@@ -102,7 +102,7 @@ const scheduleTask = {
 	model: { provider: "openai", modelId: "gpt-test" },
 	schedule: { kind: "daily", time: "09:00" },
 	timezone: "Asia/Shanghai",
-	target: { kind: "general", workspace: "fixed", cwd: "/tmp/arcmind-project" },
+	target: { kind: "general", workspace: "fixed", cwd: "/tmp/metis-project" },
 	status: "active",
 	createdAt: "2026-07-26T00:00:00.000Z",
 	updatedAt: "2026-07-26T00:00:00.000Z",
@@ -128,7 +128,7 @@ const scheduleRun = {
 		model: { provider: "openai", modelId: "gpt-test" },
 		schedule: { kind: "daily", time: "09:00" },
 		timezone: "Asia/Shanghai",
-		target: { kind: "general", workspace: "fixed", cwd: "/tmp/arcmind-project" },
+		target: { kind: "general", workspace: "fixed", cwd: "/tmp/metis-project" },
 	},
 } as const;
 
@@ -146,6 +146,87 @@ const scheduleRunSummary = {
 
 const scheduleCases = [
 	["model/list", {}, { models: [{ provider: "openai", modelId: "gpt-test", name: "GPT Test" }] }],
+	[
+		"model/settings/get",
+		{},
+		{
+			defaultModel: { provider: "openai", modelId: "gpt-test" },
+			defaultThinkingSelection: "high",
+			providers: [
+				{
+					provider: "openai",
+					name: "OpenAI",
+					builtin: true,
+					baseUrl: null,
+					api: null,
+					auth: { configured: true, source: "stored", label: "Saved API key" },
+					models: [
+						{
+							provider: "openai",
+							modelId: "gpt-test",
+							name: "GPT Test",
+							contextWindow: 200_000,
+							maxOutputTokens: 32_000,
+							reasoning: true,
+							imageInput: true,
+							custom: false,
+						},
+					],
+				},
+			],
+			loadError: null,
+		},
+	],
+	[
+		"model/settings/update",
+		{
+			requestId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+			mutation: {
+				type: "set_defaults",
+				model: { provider: "openai", modelId: "gpt-test" },
+				thinkingSelection: "high",
+			},
+		},
+		{
+			defaultModel: { provider: "openai", modelId: "gpt-test" },
+			defaultThinkingSelection: "high",
+			providers: [],
+			loadError: null,
+		},
+	],
+	[
+		"model/testConnection",
+		{ requestId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee", provider: "openai", modelId: "gpt-test" },
+		{ ok: true, message: "Connection succeeded", latencyMs: 42 },
+	],
+	[
+		"usage/get",
+		{ rangeDays: 7 },
+		{
+			generatedAt: "2026-08-08T00:00:00.000Z",
+			rangeDays: 7,
+			totalTokens: 12,
+			inputTokens: 7,
+			outputTokens: 5,
+			cacheReadTokens: 0,
+			cacheWriteTokens: 0,
+			chatTokens: 5,
+			codeTokens: 7,
+			sessionCount: 2,
+			chatSessionCount: 1,
+			codeSessionCount: 1,
+			daily: Array.from({ length: 7 }, (_, index) => ({
+				date: `2026-08-0${index + 2}`,
+				chatTokens: index === 6 ? 5 : 0,
+				codeTokens: index === 6 ? 7 : 0,
+				inputTokens: index === 6 ? 7 : 0,
+				outputTokens: index === 6 ? 5 : 0,
+				cacheReadTokens: 0,
+				cacheWriteTokens: 0,
+			})),
+			topModels: [{ provider: "openai", modelId: "gpt-test", totalTokens: 12 }],
+		},
+	],
 	[
 		"schedule/create",
 		{
@@ -239,7 +320,7 @@ describe("golden protocol fixtures", () => {
 	it("validates every server request and kind-correlated response", () => {
 		expect(new Set(serverRequests.map((entry) => entry.method))).toEqual(new Set(Object.keys(ServerRequestMethods)));
 		expect(new Set(serverRequests.map((entry) => entry.kind))).toEqual(
-			new Set(["project_trust", "select", "confirm", "input"]),
+			new Set(["project_trust", "select", "confirm", "input", "ask_user"]),
 		);
 		for (const entry of serverRequests) {
 			expect(validateServerRequest(entry.request)).toEqual(entry.request);
@@ -282,6 +363,7 @@ describe("golden protocol fixtures", () => {
 				"session/permissionModeChanged",
 				"session/thinkingSelectionChanged",
 				"session/modelChanged",
+				"session/tasksChanged",
 				"subagent/updated",
 				"subagent/item/started",
 				"subagent/item/delta",
@@ -294,6 +376,34 @@ describe("golden protocol fixtures", () => {
 				"schedule/refreshed",
 			]),
 		);
+	});
+
+	it("keeps session task snapshots bounded and strictly typed", () => {
+		const request = requestFor("client", "session/subscribe").envelope;
+		const fixture = responses.find((entry) => entry.method === "session/subscribe")!.envelope;
+		const withTasks = structuredClone(fixture) as {
+			result: { snapshot: { tasks: Array<{ task: string; completed: unknown }> } };
+		};
+		withTasks.result.snapshot.tasks = [
+			{ task: "Inspect implementation", completed: true },
+			{ task: "Build task panel", completed: false },
+		];
+		expect(() => validateResponseFor("client", request, withTasks)).not.toThrow();
+
+		const blank = structuredClone(withTasks);
+		blank.result.snapshot.tasks[0]!.task = "";
+		expect(() => validateResponseFor("client", request, blank)).toThrow(ProtocolValidationError);
+
+		const oversized = structuredClone(withTasks);
+		oversized.result.snapshot.tasks = Array.from({ length: 257 }, (_, index) => ({
+			task: `Task ${index}`,
+			completed: false,
+		}));
+		expect(() => validateResponseFor("client", request, oversized)).toThrow(ProtocolValidationError);
+
+		const nonBoolean = structuredClone(withTasks);
+		nonBoolean.result.snapshot.tasks[0]!.completed = "yes";
+		expect(() => validateResponseFor("client", request, nonBoolean)).toThrow(ProtocolValidationError);
 	});
 
 	it("accepts terminal session invalidation notifications", () => {
@@ -372,7 +482,7 @@ describe("golden protocol fixtures", () => {
 					permissionMode: "ask",
 					model: { provider: "openai", modelId: "gpt-test" },
 					thinkingLevel: "max",
-					cwd: "/tmp/arcmind-project",
+					cwd: "/tmp/metis-project",
 					forkTurns: 0,
 					timeoutSeconds: 1800,
 				},
@@ -440,7 +550,7 @@ describe("golden protocol fixtures", () => {
 		).toThrow(ProtocolValidationError);
 	});
 
-	it("pins every standard and ArcMind error", () => {
+	it("pins every standard and Metis error", () => {
 		expect(new Set(errors.map((entry) => entry.name))).toEqual(new Set(Object.keys(RPC_ERROR_CODES)));
 		for (const entry of errors) expect(validateUncorrelatedErrorResponse(entry.envelope)).toEqual(entry.envelope);
 	});
@@ -490,7 +600,7 @@ describe("exact limits", () => {
 		const oldTarget = { jsonrpc: "2.0", id: "old-target", result: structuredClone(createResult) } as {
 			result: { task: Record<string, unknown> };
 		};
-		oldTarget.result.task.target = { kind: "project", cwd: "/tmp/arcmind-project" };
+		oldTarget.result.task.target = { kind: "project", cwd: "/tmp/metis-project" };
 		expect(() => validateResponseFor("client", makeClientRequest(createMethod, createParams), oldTarget)).toThrow(
 			ProtocolValidationError,
 		);
@@ -963,6 +1073,96 @@ describe("direction and response correlation", () => {
 		expect(() => validateResponseFor("server", fixture.request, unknownChoice)).toThrow("unknown choice");
 	});
 
+	it("correlates every ask_user answer with its question and selection mode", () => {
+		const fixture = serverRequests.find((entry) => entry.kind === "ask_user")!;
+		const request = () =>
+			structuredClone(fixture.request) as {
+				params: {
+					interaction: {
+						questions: Array<{
+							id: string;
+							choices: Array<{ id: string; label: string }>;
+						}>;
+					};
+				};
+			};
+		const invalidRequests = [
+			(value: ReturnType<typeof request>) => {
+				value.params.interaction.questions = [];
+			},
+			(value: ReturnType<typeof request>) => {
+				value.params.interaction.questions = Array.from({ length: 6 }, (_unused, index) => ({
+					...structuredClone(value.params.interaction.questions[0]!),
+					id: `question:${index}`,
+				}));
+			},
+			(value: ReturnType<typeof request>) => {
+				value.params.interaction.questions[0]!.choices.pop();
+			},
+			(value: ReturnType<typeof request>) => {
+				value.params.interaction.questions[0]!.choices = Array.from({ length: 6 }, (_unused, index) => ({
+					id: `choice:${index}`,
+					label: `Choice ${index}`,
+				}));
+			},
+			(value: ReturnType<typeof request>) => {
+				value.params.interaction.questions[1]!.id = value.params.interaction.questions[0]!.id;
+			},
+			(value: ReturnType<typeof request>) => {
+				value.params.interaction.questions[0]!.choices[1]!.id =
+					value.params.interaction.questions[0]!.choices[0]!.id;
+			},
+		];
+		for (const mutate of invalidRequests) {
+			const value = request();
+			mutate(value);
+			expect(() => validateServerRequest(value)).toThrow(ProtocolValidationError);
+		}
+		const response = () =>
+			structuredClone(fixture.response) as {
+				result: {
+					cancelled: boolean;
+					answers: Array<{ questionId: string; choiceIds: string[]; customAnswer?: string }>;
+				};
+			};
+		const invalid = [
+			(value: ReturnType<typeof response>) => {
+				value.result.answers[0]!.questionId = "question:missing";
+			},
+			(value: ReturnType<typeof response>) => {
+				value.result.answers[0]!.choiceIds = ["choice:missing"];
+			},
+			(value: ReturnType<typeof response>) => {
+				value.result.answers[1]!.questionId = "question:0";
+			},
+			(value: ReturnType<typeof response>) => {
+				value.result.answers[0]!.choiceIds = ["choice:0", "choice:1"];
+			},
+			(value: ReturnType<typeof response>) => {
+				value.result.answers[0]!.customAnswer = "also custom";
+			},
+			(value: ReturnType<typeof response>) => {
+				value.result.answers.pop();
+			},
+			(value: ReturnType<typeof response>) => {
+				value.result.cancelled = true;
+			},
+			(value: ReturnType<typeof response>) => {
+				value.result.answers[1]!.customAnswer = "x".repeat(4097);
+			},
+		];
+		for (const mutate of invalid) {
+			const value = response();
+			mutate(value);
+			expect(() => validateResponseFor("server", fixture.request, value)).toThrow(ProtocolValidationError);
+		}
+
+		const cancelled = response();
+		cancelled.result.cancelled = true;
+		cancelled.result.answers = [];
+		expect(() => validateResponseFor("server", fixture.request, cancelled)).not.toThrow();
+	});
+
 	it("only accepts a cancellation error correlated to its pending interaction", () => {
 		const fixture = serverRequests.find((entry) => entry.cancelResponse)!;
 		expect(() => validateResponseFor("server", fixture.request, fixture.cancelResponse)).not.toThrow();
@@ -1016,8 +1216,8 @@ describe("redacted errors and generated schema", () => {
 
 	it("publishes deterministic limit annotations without runtime type leaks", () => {
 		const generated = readFileSync(join(fixturesDir, "../../generated/app-server.schema.json"), "utf8");
-		expect(generated).toContain("x-arcmind-maxUtf16Units");
-		expect(generated).toContain("x-arcmind-maxUtf8Bytes");
+		expect(generated).toContain("x-metis-maxUtf16Units");
+		expect(generated).toContain("x-metis-maxUtf8Bytes");
 		for (const forbidden of [
 			"AgentSessionEvent",
 			"SessionEntry",

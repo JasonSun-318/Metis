@@ -9,7 +9,7 @@ import type {
 	SessionSummary,
 	SkillSummaryView,
 	TurnView,
-} from "@arcmind/app-protocol";
+} from "@metis/app-protocol";
 
 const projectDelete = {
 	requestId: "00000000-0000-4000-8000-000000000001",
@@ -111,6 +111,7 @@ const snapshot: SessionSnapshot = {
 	nextBeforeItemId: null,
 	activeTurnId: null,
 	pendingInteractions: [],
+	tasks: [],
 	thinkingSelection: "off",
 	actualThinkingLevel: "off",
 	availableThinkingSelections: ["off"],
@@ -137,9 +138,16 @@ const interactionResponse: InteractionResponseInput = {
 	kind: "confirm",
 	confirmed: true,
 };
+const askUserInteractionResponse: InteractionResponseInput = {
+	interactionId: "44444444-4444-4444-8444-444444444445",
+	kind: "ask_user",
+	cancelled: false,
+	answers: [{ questionId: "question:0", choiceIds: ["choice:1"] }],
+};
 
 void events;
 void interactionResponse;
+void askUserInteractionResponse;
 void skill;
 void profile;
 void projectDelete;

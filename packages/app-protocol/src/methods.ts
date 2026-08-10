@@ -2,6 +2,9 @@ import { type Static, type TSchema, Type } from "typebox";
 import {
 	CapabilitySchema,
 	CursorSchema,
+	MAX_ASK_USER_CUSTOM_ANSWER_UTF8_BYTES,
+	MAX_ASK_USER_OPTIONS,
+	MAX_ASK_USER_QUESTIONS,
 	MAX_CAPABILITIES,
 	MAX_HISTORY_ITEMS,
 	MAX_SCHEDULE_INSTRUCTION_UTF8_BYTES,
@@ -26,6 +29,7 @@ import {
 	InteractionViewSchema,
 	ItemViewSchema,
 	ModelOptionViewSchema,
+	ModelSettingsViewSchema,
 	PermissionModeSchema,
 	ProfileUsageSummaryViewSchema,
 	ScheduleDescriptionInputSchema,
@@ -40,6 +44,8 @@ import {
 	SubagentModelRefSchema,
 	SubagentSummarySchema,
 	ThinkingSelectionSchema,
+	UsageRangeDaysSchema,
+	UsageSummaryViewSchema,
 } from "./views.ts";
 
 export interface RpcMethodDefinition<Params extends TSchema = TSchema, Result extends TSchema = TSchema> {
@@ -68,7 +74,7 @@ export const InitializeParamsSchema = StrictObject({
 export const InitializeResultSchema = StrictObject({
 	protocolVersion: Type.Literal(PROTOCOL_VERSION),
 	server: StrictObject({
-		name: Type.Literal("arcmind-app-server"),
+		name: Type.Literal("metis-app-server"),
 		version: Type.String({ minLength: 1, maxLength: 64 }),
 	}),
 	serverEpoch: UuidSchema,
@@ -260,6 +266,52 @@ export const ModelListParamsSchema = StrictObject({});
 export const ModelListResultSchema = StrictObject({
 	models: Type.Array(ModelOptionViewSchema, { maxItems: 512 }),
 });
+const EditableModelInputSchema = StrictObject({
+	modelId: NameSchema,
+	name: NameSchema,
+	contextWindow: Type.Integer({ minimum: 1, maximum: 10_000_000 }),
+	maxOutputTokens: Type.Integer({ minimum: 1, maximum: 10_000_000 }),
+	reasoning: Type.Boolean(),
+	imageInput: Type.Boolean(),
+});
+const CredentialMutationSchema = Type.Union([
+	StrictObject({ action: Type.Literal("keep") }),
+	StrictObject({ action: Type.Literal("remove") }),
+	StrictObject({ action: Type.Literal("set"), value: Type.String({ minLength: 1, maxLength: 32_768 }) }),
+]);
+export const ModelSettingsMutationSchema = Type.Union([
+	StrictObject({
+		type: Type.Literal("save_provider"),
+		provider: NameSchema,
+		name: NameSchema,
+		baseUrl: Type.Union([Type.String({ minLength: 1, maxLength: 2_048 }), Type.Null()]),
+		api: Type.Union([Type.Literal("openai-responses"), Type.Literal("openai-completions"), Type.Null()]),
+		models: Type.Array(EditableModelInputSchema, { maxItems: 512 }),
+		credential: CredentialMutationSchema,
+	}),
+	StrictObject({ type: Type.Literal("remove_provider"), provider: NameSchema }),
+	StrictObject({
+		type: Type.Literal("set_defaults"),
+		model: Type.Union([SubagentModelRefSchema, Type.Null()]),
+		thinkingSelection: ThinkingSelectionSchema,
+	}),
+]);
+export const ModelSettingsGetParamsSchema = StrictObject({});
+export const ModelSettingsUpdateParamsSchema = StrictObject({
+	requestId: UuidSchema,
+	mutation: ModelSettingsMutationSchema,
+});
+export const ModelTestConnectionParamsSchema = StrictObject({
+	requestId: UuidSchema,
+	provider: NameSchema,
+	modelId: NameSchema,
+});
+export const ModelTestConnectionResultSchema = StrictObject({
+	ok: Type.Boolean(),
+	message: PublicTextSchema,
+	latencyMs: Type.Integer({ minimum: 0, maximum: 300_000 }),
+});
+export const UsageGetParamsSchema = StrictObject({ rangeDays: UsageRangeDaysSchema });
 
 export const ScheduleCreateParamsSchema = Type.Refine(
 	StrictObject({
@@ -378,11 +430,34 @@ export const InputInteractionResultSchema = StrictObject({
 	kind: Type.Literal("input"),
 	value: PublicTextSchema,
 });
+export const AskUserAnswerResultSchema = StrictObject({
+	questionId: OpaqueIdSchema,
+	choiceIds: Type.Array(OpaqueIdSchema, { maxItems: MAX_ASK_USER_OPTIONS, uniqueItems: true }),
+	customAnswer: Type.Optional(Utf8String(MAX_ASK_USER_CUSTOM_ANSWER_UTF8_BYTES, { minLength: 1, maxLength: 4096 })),
+});
+export const AskUserInteractionResultSchema = Type.Refine(
+	StrictObject({
+		interactionId: UuidSchema,
+		kind: Type.Literal("ask_user"),
+		cancelled: Type.Boolean(),
+		answers: Type.Array(AskUserAnswerResultSchema, { maxItems: MAX_ASK_USER_QUESTIONS }),
+	}),
+	(value) => {
+		if (value.cancelled) return value.answers.length === 0;
+		return (
+			value.answers.length > 0 &&
+			new Set(value.answers.map((answer) => answer.questionId)).size === value.answers.length &&
+			value.answers.every((answer) => answer.choiceIds.length > 0 || answer.customAnswer !== undefined)
+		);
+	},
+	"ask_user cancellation and answers are inconsistent",
+);
 export const InteractionResultSchema = Type.Union([
 	TrustInteractionResultSchema,
 	SelectInteractionResultSchema,
 	ConfirmInteractionResultSchema,
 	InputInteractionResultSchema,
+	AskUserInteractionResultSchema,
 ]);
 
 export const ClientRequestMethods = {
@@ -410,6 +485,10 @@ export const ClientRequestMethods = {
 	"session/setPermissionMode": method(SessionSetPermissionModeParamsSchema, SessionPermissionModeResultSchema),
 	"session/setModel": method(SessionSetModelParamsSchema, SessionModelResultSchema),
 	"model/list": method(ModelListParamsSchema, ModelListResultSchema),
+	"model/settings/get": method(ModelSettingsGetParamsSchema, ModelSettingsViewSchema),
+	"model/settings/update": method(ModelSettingsUpdateParamsSchema, ModelSettingsViewSchema),
+	"model/testConnection": method(ModelTestConnectionParamsSchema, ModelTestConnectionResultSchema),
+	"usage/get": method(UsageGetParamsSchema, UsageSummaryViewSchema),
 	"subagent/readItems": method(SubagentReadItemsParamsSchema, SessionReadItemsResultSchema),
 	"subagent/interrupt": method(SubagentInterruptParamsSchema, SubagentResultSchema),
 	"turn/start": method(TurnInputSchema, AcceptedOperationSchema),

@@ -28,8 +28,8 @@ const outputPath = resolve(root, "generated/app-server.schema.json");
 
 const document = {
 	$schema: "https://json-schema.org/draft/2020-12/schema",
-	$id: `https://arcmind.dev/schemas/app-server-v${PROTOCOL_VERSION}.json`,
-	title: `ArcMind App-Server Protocol v${PROTOCOL_VERSION}`,
+	$id: `urn:metis:schemas:app-server:v${PROTOCOL_VERSION}`,
+	title: `Metis App-Server Protocol v${PROTOCOL_VERSION}`,
 	$ref: "#/$defs/AppProtocolEnvelope",
 	$defs: {
 		AppProtocolEnvelope: AppProtocolEnvelopeSchema,
@@ -62,7 +62,7 @@ if (process.argv.includes("--check")) {
 		// Missing output is reported as stale below.
 	}
 	if (current !== serialized) {
-		console.error("generated/app-server.schema.json is stale; run npm run generate --workspace @arcmind/app-protocol");
+		console.error("generated/app-server.schema.json is stale; run npm run generate --workspace @metis/app-protocol");
 		process.exitCode = 1;
 	}
 } else {

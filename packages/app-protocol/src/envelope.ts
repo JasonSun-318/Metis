@@ -31,7 +31,7 @@ import {
 import type { InteractionView } from "./views.ts";
 
 const RPC_ID_SCHEMA = Type.Refine(
-	Type.String({ minLength: 1, maxLength: 128, "x-arcmind-maxUtf16Units": 128 }),
+	Type.String({ minLength: 1, maxLength: 128, "x-metis-maxUtf16Units": 128 }),
 	(value) => value.length <= 128,
 	"must not exceed 128 UTF-16 code units",
 );
@@ -250,6 +250,41 @@ function validateInteractionCorrelation(request: ServerRpcRequest, result: Inter
 	if (interaction.kind === "project_trust" || interaction.kind === "select") {
 		if (!("choiceId" in result) || !interaction.choices.some((choice) => choice.id === result.choiceId)) {
 			throw new ProtocolValidationError("invalid_response", "Interaction response selected an unknown choice");
+		}
+	}
+	if (interaction.kind === "ask_user") {
+		if (!("answers" in result) || !("cancelled" in result)) {
+			throw new ProtocolValidationError("invalid_response", "ask_user response is incomplete");
+		}
+		if (result.cancelled) {
+			if (result.answers.length !== 0) {
+				throw new ProtocolValidationError("invalid_response", "Cancelled ask_user response contains answers");
+			}
+			return;
+		}
+		if (result.answers.length !== interaction.questions.length) {
+			throw new ProtocolValidationError("invalid_response", "ask_user response must answer every question");
+		}
+		const questions = new Map(interaction.questions.map((question) => [question.id, question]));
+		for (const answer of result.answers) {
+			const question = questions.get(answer.questionId);
+			if (!question) {
+				throw new ProtocolValidationError("invalid_response", "ask_user response answered an unknown question");
+			}
+			questions.delete(answer.questionId);
+			if (answer.choiceIds.some((choiceId) => !question.choices.some((choice) => choice.id === choiceId))) {
+				throw new ProtocolValidationError("invalid_response", "ask_user response selected an unknown choice");
+			}
+			const answerSources = answer.choiceIds.length + (answer.customAnswer === undefined ? 0 : 1);
+			if (question.multiple ? answerSources === 0 : answerSources !== 1) {
+				throw new ProtocolValidationError(
+					"invalid_response",
+					"ask_user response violates the question selection mode",
+				);
+			}
+		}
+		if (questions.size !== 0) {
+			throw new ProtocolValidationError("invalid_response", "ask_user response omitted a question");
 		}
 	}
 }

@@ -7,8 +7,8 @@
 			"id": "client-1",
 			"method": "initialize",
 			"params": {
-				"protocolVersion": 10,
-				"client": { "name": "ArcMind Desktop", "version": "0.80.6" },
+				"protocolVersion": 11,
+				"client": { "name": "Metis Desktop", "version": "0.80.6" },
 				"capabilities": ["interaction.v1", "session.cursor.v1"]
 			}
 		}
@@ -40,7 +40,7 @@
 			"jsonrpc": "2.0",
 			"id": "project-preview",
 			"method": "project/deletePreview",
-			"params": { "mode": "chat", "cwd": "/tmp/arcmind-project" }
+			"params": { "mode": "chat", "cwd": "/tmp/metis-project" }
 		}
 	},
 	{
@@ -53,7 +53,7 @@
 			"params": {
 				"requestId": "00000000-0000-4000-8000-000000000001",
 				"mode": "chat",
-				"cwd": "/tmp/arcmind-project",
+				"cwd": "/tmp/metis-project",
 				"expectedRevision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 			}
 		}
@@ -77,7 +77,7 @@
 			"method": "session/create",
 			"params": {
 				"requestId": "22222222-2222-4222-8222-222222222203",
-				"cwd": "/tmp/arcmind-project",
+				"cwd": "/tmp/metis-project",
 				"name": "Desktop session",
 				"permissionMode": "full"
 			}

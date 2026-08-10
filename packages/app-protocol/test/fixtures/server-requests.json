@@ -15,7 +15,7 @@
 					"title": "Trust this project?",
 					"message": "Project resources can execute local code.",
 					"createdAt": "2026-07-16T00:00:03.000Z",
-					"projectPath": "/tmp/arcmind-project",
+					"projectPath": "/tmp/metis-project",
 					"choices": [
 						{
 							"id": "trust_once",
@@ -150,6 +150,64 @@
 				"interactionId": "44444444-4444-4444-8444-444444444444",
 				"kind": "input",
 				"value": "Recovered work"
+			}
+		}
+	},
+	{
+		"method": "interaction/request",
+		"kind": "ask_user",
+		"request": {
+			"jsonrpc": "2.0",
+			"id": "server-5",
+			"method": "interaction/request",
+			"params": {
+				"serverEpoch": "33333333-3333-4333-8333-333333333333",
+				"interaction": {
+					"interactionId": "44444444-4444-4444-8444-444444444445",
+					"sessionId": "11111111-1111-4111-8111-111111111111",
+					"kind": "ask_user",
+					"title": "Metis has questions",
+					"message": "Answer each question to continue.",
+					"createdAt": "2026-07-16T00:00:07.000Z",
+					"questions": [
+						{
+							"id": "question:0",
+							"question": "Where should task data be stored?",
+							"multiple": false,
+							"choices": [
+								{ "id": "choice:0", "label": "Local database", "description": "Works offline" },
+								{ "id": "choice:1", "label": "Cloud sync", "description": "Works across devices" }
+							]
+						},
+						{
+							"id": "question:1",
+							"question": "Which clients should be supported?",
+							"multiple": true,
+							"choices": [
+								{ "id": "choice:0", "label": "Desktop" },
+								{ "id": "choice:1", "label": "Web" },
+								{ "id": "choice:2", "label": "Mobile" }
+							]
+						}
+					]
+				}
+			}
+		},
+		"response": {
+			"jsonrpc": "2.0",
+			"id": "server-5",
+			"result": {
+				"interactionId": "44444444-4444-4444-8444-444444444445",
+				"kind": "ask_user",
+				"cancelled": false,
+				"answers": [
+					{ "questionId": "question:0", "choiceIds": ["choice:1"] },
+					{
+						"questionId": "question:1",
+						"choiceIds": ["choice:0", "choice:2"],
+						"customAnswer": "Linux later"
+					}
+				]
 			}
 		}
 	}
