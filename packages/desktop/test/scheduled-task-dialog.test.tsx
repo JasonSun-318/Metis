@@ -1,11 +1,11 @@
 // @vitest-environment jsdom
 
-import type { ScheduleTaskView } from "@arcmind/app-protocol";
+import type { ScheduleTaskView } from "@metis/app-protocol";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ScheduledTaskDialog } from "../src/renderer/components/ScheduledTaskDialog.tsx";
-import type { ArcMindDesktopApi } from "../src/shared/desktop-api.ts";
+import type { MetisDesktopApi } from "../src/shared/desktop-api.ts";
 
 const TASK: ScheduleTaskView = {
 	id: "20000000-0000-4000-8000-000000000001",
@@ -44,7 +44,7 @@ describe("ScheduledTaskDialog", () => {
 	it("submits required display metadata, only the instruction prompt, and a configured model", async () => {
 		const createSchedule = vi.fn().mockResolvedValue({ task: TASK });
 		const selectProjectFolder = vi.fn().mockResolvedValue("/Users/test/Desktop");
-		const api = { createSchedule, selectProjectFolder } as unknown as ArcMindDesktopApi;
+		const api = { createSchedule, selectProjectFolder } as unknown as MetisDesktopApi;
 		const onSaved = vi.fn();
 		const container = document.createElement("div");
 		document.body.append(container);
@@ -86,7 +86,7 @@ describe("ScheduledTaskDialog", () => {
 		};
 		const saved = { ...TASK, target: { kind: "general" as const, workspace: "task" as const } };
 		const updateSchedule = vi.fn().mockResolvedValue({ task: saved });
-		const api = { updateSchedule } as unknown as ArcMindDesktopApi;
+		const api = { updateSchedule } as unknown as MetisDesktopApi;
 		const onSaved = vi.fn();
 		const container = document.createElement("div");
 		document.body.append(container);

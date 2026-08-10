@@ -1,8 +1,8 @@
-import type { ModelOptionView, ScheduleTaskView, SessionSummary } from "@arcmind/app-protocol";
+import type { ModelOptionView, ScheduleTaskView, SessionSummary } from "@metis/app-protocol";
 import { ChatCircleDots, FolderSimple, Gear, Info, MagnifyingGlass, Plus, Sun, X } from "@phosphor-icons/react";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import type { ArcMindDesktopApi } from "../../shared/desktop-api.ts";
+import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
 import scheduleEmptyIcon from "../assets/scheduled-tasks-empty.svg";
 import { localeForIntl } from "../i18n.ts";
 import { useScheduleStore } from "../hooks/use-schedule-store.ts";
@@ -12,7 +12,7 @@ import { ScheduledTaskDetail, scheduleLabel } from "./ScheduledTaskDetail.tsx";
 import { ScheduledTaskDialog } from "./ScheduledTaskDialog.tsx";
 import { TracedSvgIcon } from "./TracedSvgIcon.tsx";
 
-export const SCHEDULE_KEEP_AWAKE_KEY = "arcmind.scheduleKeepAwake.v1";
+export const SCHEDULE_KEEP_AWAKE_KEY = "metis.scheduleKeepAwake.v1";
 type Sort = "next_run" | "updated" | "name";
 const SORT_OPTIONS = [
 	{ value: "next_run", label: "Next run" },
@@ -47,7 +47,7 @@ function NewTaskMenu({
 				else if (action === "manual") onManual();
 			}}
 			options={[
-				{ value: "assisted", label: t("Create with ArcMind"), icon: <ChatCircleDots aria-hidden="true" size={17} /> },
+				{ value: "assisted", label: t("Create with Metis"), icon: <ChatCircleDots aria-hidden="true" size={17} /> },
 				{ value: "manual", label: t("Set up manually"), icon: <Gear aria-hidden="true" size={17} /> },
 				]}
 				placeholder={t("New task")}
@@ -62,7 +62,7 @@ function AssistedScheduleWorkspaceDialog({
 	onClose,
 	onCreate,
 }: {
-	readonly api: ArcMindDesktopApi;
+	readonly api: MetisDesktopApi;
 	readonly onClose: () => void;
 	readonly onCreate: (cwd: string | null) => Promise<void>;
 }) {
@@ -134,7 +134,7 @@ function AssistedScheduleWorkspaceDialog({
 					</button>
 					<button disabled={busy} onClick={() => void create(null)} type="button">
 						<ChatCircleDots aria-hidden="true" size={21} />
-						<span><strong>{t("Use default workspace")}</strong><small>{t("Use a dedicated workspace managed by ArcMind.")}</small></span>
+						<span><strong>{t("Use default workspace")}</strong><small>{t("Use a dedicated workspace managed by Metis.")}</small></span>
 					</button>
 				</div>
 				{error && <p className="scheduled-task-form-error" role="alert">{t(error)}</p>}
@@ -148,9 +148,9 @@ function nextRunLabel(task: ScheduleTaskView, locale: string, t: (key: string) =
 	return new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short" }).format(new Date(task.nextRunAt));
 }
 
-export function ScheduledTasksPanel({ api, onCreateWithArcMind, onOpenSession, onSelectTask, selectedTaskId, serverReady, sessions, store }: {
-	readonly api: ArcMindDesktopApi;
-	readonly onCreateWithArcMind: (cwd: string | null) => Promise<void>;
+export function ScheduledTasksPanel({ api, onCreateWithMetis, onOpenSession, onSelectTask, selectedTaskId, serverReady, sessions, store }: {
+	readonly api: MetisDesktopApi;
+	readonly onCreateWithMetis: (cwd: string | null) => Promise<void>;
 	readonly onOpenSession: (sessionId: string) => void;
 	readonly onSelectTask: (taskId: string | null) => void;
 	readonly selectedTaskId: string | null;
@@ -282,7 +282,7 @@ export function ScheduledTasksPanel({ api, onCreateWithArcMind, onOpenSession, o
 					<header className="scheduled-tasks-header"><div><h1>{t("Scheduled tasks")}</h1><p>{t("Run tasks on a schedule or whenever you need them. Type /schedule in any existing task to set one up.")}</p></div><div><MenuSelect ariaLabel={t("Sort scheduled tasks")} className="scheduled-task-sort" onChange={setSort} options={SORT_OPTIONS.map((option) => ({ ...option, label: t(option.label) }))} prefix={t("Sort by ")} value={sort} /><NewTaskMenu disabled={!serverReady || modelsLoading || models.length === 0} onAssisted={() => setWorkspaceDialogOpen(true)} onManual={() => setDialogTask(null)} /></div></header>
 			<div className="scheduled-tasks-scroll"><div className="scheduled-tasks-layout">
 				<div className="scheduled-tasks-toolbar"><MagnifyingGlass aria-hidden="true" size={16} /><input aria-label={t("Search scheduled tasks")} onChange={(event) => setQuery(event.target.value)} placeholder={t("Search scheduled tasks…")} value={query} /></div>
-						<div className="scheduled-tasks-notice"><span><Info aria-hidden="true" size={16} />{t("Scheduled tasks run only while ArcMind is open and your computer is awake and online.")}</span><label><Sun aria-hidden="true" size={16} />{t("Keep awake")} <input checked={keepAwake} disabled={keepAwakeBusy} onChange={(event) => void toggleKeepAwake(event.target.checked)} role="switch" type="checkbox" /></label></div>
+						<div className="scheduled-tasks-notice"><span><Info aria-hidden="true" size={16} />{t("Scheduled tasks run only while Metis is open and your computer is awake and online.")}</span><label><Sun aria-hidden="true" size={16} />{t("Keep awake")} <input checked={keepAwake} disabled={keepAwakeBusy} onChange={(event) => void toggleKeepAwake(event.target.checked)} role="switch" type="checkbox" /></label></div>
 				{error && <div className="scheduled-tasks-error" role="alert"><span>{t(error)}</span><button onClick={retry} type="button">{t("Retry")}</button></div>}
 				{!modelsLoading && models.length === 0 && !modelError && <div className="scheduled-task-warning" role="status">{t("Configure a model provider before creating a scheduled task.")}</div>}
 				<div className="scheduled-tasks-content">
@@ -290,7 +290,7 @@ export function ScheduledTasksPanel({ api, onCreateWithArcMind, onOpenSession, o
 					{nextAfterTaskId && <button className="scheduled-task-load-more" disabled={loadingMore} onClick={() => void loadMore()} type="button">{t(loadingMore ? "Loading…" : "Load more")}</button>}
 				</div>
 				</div></div>
-				{workspaceDialogOpen && <AssistedScheduleWorkspaceDialog api={api} onClose={() => setWorkspaceDialogOpen(false)} onCreate={onCreateWithArcMind} />}
+				{workspaceDialogOpen && <AssistedScheduleWorkspaceDialog api={api} onClose={() => setWorkspaceDialogOpen(false)} onCreate={onCreateWithMetis} />}
 				{dialogTask !== undefined && <ScheduledTaskDialog api={api} models={models} onClose={() => setDialogTask(undefined)} onSaved={saveTask} sessions={sessions} {...(dialogTask ? { task: dialogTask } : {})} />}
 		</section>
 	);

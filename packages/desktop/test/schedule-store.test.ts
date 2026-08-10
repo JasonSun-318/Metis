@@ -1,4 +1,4 @@
-import type { ScheduleTaskView } from "@arcmind/app-protocol";
+import type { ScheduleTaskView } from "@metis/app-protocol";
 import { describe, expect, it, vi } from "vitest";
 import { ScheduleStore } from "../src/renderer/store/schedule-store.ts";
 

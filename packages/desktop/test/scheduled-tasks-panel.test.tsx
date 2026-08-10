@@ -1,12 +1,12 @@
 // @vitest-environment jsdom
 
-import type { ScheduleTaskView } from "@arcmind/app-protocol";
+import type { ScheduleTaskView } from "@metis/app-protocol";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ScheduledTasksPanel } from "../src/renderer/components/ScheduledTasksPanel.tsx";
 import { ScheduleStore } from "../src/renderer/store/schedule-store.ts";
-import type { ArcMindDesktopApi } from "../src/shared/desktop-api.ts";
+import type { MetisDesktopApi } from "../src/shared/desktop-api.ts";
 
 const EPOCH = "10000000-0000-4000-8000-000000000001";
 const TASK_ID = "20000000-0000-4000-8000-000000000001";
@@ -35,7 +35,7 @@ function harness(tasks: readonly ScheduleTaskView[] = [task()]) {
 		selectProjectFolder: vi.fn().mockResolvedValue("/work/project"),
 		listModels: vi.fn().mockResolvedValue({ models: [{ provider: "openai", modelId: "gpt-4", name: "GPT-4" }] }),
 		listSchedules: vi.fn().mockResolvedValue({ tasks, nextAfterTaskId: null, unreadCount: 0 }),
-	} as unknown as ArcMindDesktopApi;
+	} as unknown as MetisDesktopApi;
 	const store = new ScheduleStore();
 	store.applySnapshot({ serverEpoch: EPOCH, tasks, unreadCount: 0, cursor: 0 });
 	return { api, store };
@@ -57,7 +57,7 @@ describe("ScheduledTasksPanel", () => {
 		const container = document.createElement("div");
 		document.body.append(container);
 		const root = createRoot(container);
-		await act(async () => root.render(<ScheduledTasksPanel api={api} onCreateWithArcMind={async () => {}} onOpenSession={() => undefined} onSelectTask={() => undefined} selectedTaskId={null} serverReady sessions={[]} store={store} />));
+		await act(async () => root.render(<ScheduledTasksPanel api={api} onCreateWithMetis={async () => {}} onOpenSession={() => undefined} onSelectTask={() => undefined} selectedTaskId={null} serverReady sessions={[]} store={store} />));
 		await wait(220);
 		expect(container.textContent).toContain("Scheduled tasks");
 		expect(container.textContent).toContain("Morning brief");
@@ -85,16 +85,16 @@ describe("ScheduledTasksPanel", () => {
 		await act(async () => root.unmount());
 	});
 
-	it("creates with ArcMind only after an explicit folder or default-workspace choice", async () => {
+	it("creates with Metis only after an explicit folder or default-workspace choice", async () => {
 		const { api, store } = harness([]);
 		api.selectProjectFolder = vi.fn()
 			.mockResolvedValueOnce(null)
 			.mockResolvedValueOnce("/work/selected-project");
-		const onCreateWithArcMind = vi.fn().mockResolvedValue(undefined);
+		const onCreateWithMetis = vi.fn().mockResolvedValue(undefined);
 		const container = document.createElement("div");
 		document.body.append(container);
 		const root = createRoot(container);
-		await act(async () => root.render(<ScheduledTasksPanel api={api} onCreateWithArcMind={onCreateWithArcMind} onOpenSession={() => undefined} onSelectTask={() => undefined} selectedTaskId={null} serverReady sessions={[]} store={store} />));
+		await act(async () => root.render(<ScheduledTasksPanel api={api} onCreateWithMetis={onCreateWithMetis} onOpenSession={() => undefined} onSelectTask={() => undefined} selectedTaskId={null} serverReady sessions={[]} store={store} />));
 		await wait(220);
 
 		const openAssisted = async () => {
@@ -102,7 +102,7 @@ describe("ScheduledTasksPanel", () => {
 				.find((button) => button.textContent?.trim() === "New task")!;
 			await act(async () => newTask.click());
 			const assisted = [...document.querySelectorAll<HTMLButtonElement>('[role="option"]')]
-				.find((button) => button.textContent?.trim() === "Create with ArcMind")!;
+				.find((button) => button.textContent?.trim() === "Create with Metis")!;
 			await act(async () => assisted.click());
 		};
 
@@ -113,12 +113,12 @@ describe("ScheduledTasksPanel", () => {
 		await act(async () => chooseFolder.click());
 		await wait();
 		expect(api.selectProjectFolder).toHaveBeenCalledTimes(1);
-		expect(onCreateWithArcMind).not.toHaveBeenCalled();
+		expect(onCreateWithMetis).not.toHaveBeenCalled();
 		expect(container.querySelector("dialog")).not.toBeNull();
 
 		await act(async () => chooseFolder.click());
 		await wait();
-		expect(onCreateWithArcMind).toHaveBeenCalledWith("/work/selected-project");
+		expect(onCreateWithMetis).toHaveBeenCalledWith("/work/selected-project");
 		expect(container.querySelector("dialog")).toBeNull();
 
 		await openAssisted();
@@ -126,25 +126,25 @@ describe("ScheduledTasksPanel", () => {
 			.find((button) => button.textContent?.includes("Use default workspace"))!;
 		await act(async () => useDefault.click());
 		await wait();
-		expect(onCreateWithArcMind).toHaveBeenLastCalledWith(null);
+		expect(onCreateWithMetis).toHaveBeenLastCalledWith(null);
 		await act(async () => root.unmount());
 	});
 
 	it("shows the saved Keep Awake state and persists only a successful native change", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-		localStorage.setItem("arcmind.scheduleKeepAwake.v1", "true");
+		localStorage.setItem("metis.scheduleKeepAwake.v1", "true");
 		const { api, store } = harness([]);
 		const container = document.createElement("div");
 		document.body.append(container);
 		const root = createRoot(container);
-		await act(async () => root.render(<ScheduledTasksPanel api={api} onCreateWithArcMind={async () => {}} onOpenSession={() => undefined} onSelectTask={() => undefined} selectedTaskId={null} serverReady sessions={[]} store={store} />));
+		await act(async () => root.render(<ScheduledTasksPanel api={api} onCreateWithMetis={async () => {}} onOpenSession={() => undefined} onSelectTask={() => undefined} selectedTaskId={null} serverReady sessions={[]} store={store} />));
 		await wait(220);
 		expect(container.querySelector<HTMLInputElement>('[role="switch"]')?.checked).toBe(true);
 		const toggle = container.querySelector<HTMLInputElement>('[role="switch"]')!;
 		api.setScheduleKeepAwake = vi.fn().mockRejectedValue(new Error("native failure"));
 		await act(async () => toggle.click());
 		await wait();
-		expect(localStorage.getItem("arcmind.scheduleKeepAwake.v1")).toBe("true");
+		expect(localStorage.getItem("metis.scheduleKeepAwake.v1")).toBe("true");
 		const retry = [...container.querySelectorAll("button")].find((button) => button.textContent === "Retry")!;
 		await act(async () => retry.click());
 		expect(api.setScheduleKeepAwake).toHaveBeenLastCalledWith(true);
@@ -157,7 +157,7 @@ describe("ScheduledTasksPanel", () => {
 		const container = document.createElement("div");
 		document.body.append(container);
 		const root = createRoot(container);
-		await act(async () => root.render(<ScheduledTasksPanel api={api} onCreateWithArcMind={async () => {}} onOpenSession={() => undefined} onSelectTask={() => undefined} selectedTaskId={null} serverReady sessions={[]} store={store} />));
+		await act(async () => root.render(<ScheduledTasksPanel api={api} onCreateWithMetis={async () => {}} onOpenSession={() => undefined} onSelectTask={() => undefined} selectedTaskId={null} serverReady sessions={[]} store={store} />));
 		await wait(220);
 		expect(container.querySelector('[role="alert"]')?.textContent).toContain("model catalog failed");
 		const create = [...container.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent?.trim() === "New task")!;

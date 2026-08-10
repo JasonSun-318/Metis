@@ -1,11 +1,11 @@
 // @vitest-environment jsdom
 
-import type { ScheduleRunView, ScheduleTaskView } from "@arcmind/app-protocol";
+import type { ScheduleRunView, ScheduleTaskView } from "@metis/app-protocol";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ScheduledTaskDetail } from "../src/renderer/components/ScheduledTaskDetail.tsx";
-import type { ArcMindDesktopApi } from "../src/shared/desktop-api.ts";
+import type { MetisDesktopApi } from "../src/shared/desktop-api.ts";
 
 const TASK: ScheduleTaskView = {
 	id: "20000000-0000-4000-8000-000000000001",
@@ -64,7 +64,7 @@ describe("ScheduledTaskDetail", () => {
 			listScheduleRuns: vi.fn().mockResolvedValue({ runs: [], nextBeforeRunId: null }),
 			runScheduleNow,
 			getSchedule: vi.fn().mockResolvedValue({ task: TASK }),
-		} as unknown as ArcMindDesktopApi;
+		} as unknown as MetisDesktopApi;
 		const container = document.createElement("div");
 		document.body.append(container);
 		const root = createRoot(container);
@@ -88,7 +88,7 @@ describe("ScheduledTaskDetail", () => {
 			getScheduleRun: vi.fn().mockResolvedValue({ run: RUN }),
 			markScheduleRunRead: vi.fn().mockResolvedValue({ run: { ...RUN, unread: false }, unreadCount: 0 }),
 			deleteSchedule,
-		} as unknown as ArcMindDesktopApi;
+		} as unknown as MetisDesktopApi;
 		const onOpenSession = vi.fn();
 		const onDeleted = vi.fn();
 		const container = document.createElement("div");

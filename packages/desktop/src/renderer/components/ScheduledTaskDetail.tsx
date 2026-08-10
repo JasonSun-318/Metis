@@ -1,8 +1,8 @@
-import type { ScheduleRunView, ScheduleTaskView } from "@arcmind/app-protocol";
+import type { ScheduleRunView, ScheduleTaskView } from "@metis/app-protocol";
 import { ArrowLeft, NotePencil, Play, Trash } from "@phosphor-icons/react";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import type { ArcMindDesktopApi } from "../../shared/desktop-api.ts";
+import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
 import { localeForIntl } from "../i18n.ts";
 import { ScheduledTaskDeleteDialog } from "./ScheduledTaskDeleteDialog.tsx";
 
@@ -22,7 +22,7 @@ export function scheduleLabel(schedule: ScheduleTaskView["schedule"], t: Transla
 }
 
 export function ScheduledTaskDetail({ api, task, onBack, onChanged, onDeleted, onEdit, onOpenSession }: {
-	readonly api: ArcMindDesktopApi;
+	readonly api: MetisDesktopApi;
 	readonly task: ScheduleTaskView;
 	readonly onBack: () => void;
 	readonly onChanged: (task: ScheduleTaskView) => void;
@@ -137,7 +137,7 @@ export function ScheduledTaskDetail({ api, task, onBack, onChanged, onDeleted, o
 				<section aria-labelledby="schedule-history-heading"><h2 id="schedule-history-heading">{t("History")}</h2>{loading ? <div className="scheduled-task-loading" role="status">{t("Loading run history…")}</div> : runs.length === 0 ? <p className="scheduled-task-muted">{t("No runs yet.")}</p> : <ul className="scheduled-task-history">{runs.map((run) => <li key={run.id}><button disabled={busy} onClick={() => void openRun(run)} type="button"><span className={`scheduled-run-dot run-${run.status}`} /><span><strong>{t(run.status)}</strong><small>{dateTime(run.completedAt ?? run.createdAt, intlLocale)}{run.resultPreview ? ` · ${run.resultPreview}` : run.error ? ` · ${run.error.message}` : ""}</small></span>{run.unread && <i aria-label={t("Unread")} />}</button></li>)}</ul>}{nextBeforeRunId && <button className="scheduled-task-load-more" disabled={loading} onClick={() => void loadRuns(nextBeforeRunId)} type="button">{t("Load older runs")}</button>}</section>
 				<aside aria-labelledby="schedule-instructions-heading"><h2 id="schedule-instructions-heading">{t("Instructions")}</h2><p>{task.instruction}</p><h3>{t("Repeat")}</h3><p>{scheduleLabel(task.schedule, t)}</p><h3>{t("Model")}</h3><p>{task.model.provider} / {task.model.modelId}</p><h3>{t("Project")}</h3><p>{task.target.workspace === "fixed" ? task.target.cwd : t("Dedicated task workspace")}</p><h3>{t("Time zone")}</h3><p>{task.timezone}</p><h3>{t("Permissions")}</h3><p>{t("Workspace files, web access, and available Skills. No Connectors, Extensions, or project memory.")}</p></aside>
 			</div>
-			{confirmDelete && <ScheduledTaskDeleteDialog api={api} onClose={() => setConfirmDelete(false)} onDeleted={() => { setConfirmDelete(false); onDeleted(task.id); }} task={task} />}
+			{confirmDelete && <ScheduledTaskDeleteDialog deleteSchedule={(input) => api.deleteSchedule(input)} onClose={() => setConfirmDelete(false)} onDeleted={() => { setConfirmDelete(false); onDeleted(task.id); }} task={task} />}
 		</section>
 	);
 }

@@ -1,4 +1,4 @@
-import type { SessionSummary } from "@arcmind/app-protocol";
+import type { SessionSummary } from "@metis/app-protocol";
 import { DotsThree, PencilSimple, Trash } from "@phosphor-icons/react";
 import { type CSSProperties, type FormEvent, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -7,6 +7,7 @@ import { actionMenuPosition } from "./action-menu-position.ts";
 import { DialogFrame } from "./ProjectActions.tsx";
 
 interface SessionActionsProps {
+	readonly allowRename?: boolean;
 	readonly deleteDisabled: boolean;
 	readonly disabled: boolean;
 	readonly displayName: string;
@@ -20,6 +21,7 @@ function message(cause: unknown): string {
 }
 
 export function SessionActions({
+	allowRename = true,
 	deleteDisabled,
 	disabled,
 	displayName,
@@ -58,7 +60,7 @@ export function SessionActions({
 
 	useEffect(() => {
 		if (!menuOpen) return;
-		queueMicrotask(() => renameItem.current?.focus());
+		queueMicrotask(() => (allowRename ? renameItem : deleteItem).current?.focus());
 		const onPointerDown = (event: PointerEvent) => {
 			const node = event.target as Node;
 			if (!root.current?.contains(node) && !menu.current?.contains(node)) closeMenu(false);
@@ -78,7 +80,7 @@ export function SessionActions({
 			window.removeEventListener("resize", updateMenuPosition);
 			window.removeEventListener("scroll", updateMenuPosition, true);
 		};
-	}, [menuOpen, updateMenuPosition]);
+	}, [allowRename, menuOpen, updateMenuPosition]);
 	useLayoutEffect(() => {
 		if (menuOpen) updateMenuPosition();
 	}, [menuOpen, updateMenuPosition]);
@@ -149,19 +151,21 @@ export function SessionActions({
 					role="menu"
 					style={menuPosition}
 				>
-					<button
-						onClick={() => {
-							setName(displayName);
-							setError(null);
-							setMenuOpen(false);
-							setDialog("rename");
-						}}
-						ref={renameItem}
-						role="menuitem"
-						type="button"
-					>
-						<PencilSimple aria-hidden="true" size={15} /> {t("Rename")}
-					</button>
+					{allowRename && (
+						<button
+							onClick={() => {
+								setName(displayName);
+								setError(null);
+								setMenuOpen(false);
+								setDialog("rename");
+							}}
+							ref={renameItem}
+							role="menuitem"
+							type="button"
+						>
+							<PencilSimple aria-hidden="true" size={15} /> {t("Rename")}
+						</button>
+					)}
 					<button
 						className="session-delete-menu-item"
 						disabled={deleteDisabled}
@@ -181,7 +185,7 @@ export function SessionActions({
 			{dialog === "rename" && (
 				<DialogFrame cancellable={!pending} descriptionId="session-rename-description" initialFocus={renameInput} onCancel={cancelDialog} titleId="session-rename-title">
 					<h2 id="session-rename-title">{t("Rename session")}</h2>
-					<p id="session-rename-description">{t("Change the session name shown in ArcMind. Messages are unchanged.")}</p>
+					<p id="session-rename-description">{t("Change the session name shown in Metis. Messages are unchanged.")}</p>
 					<form onSubmit={(event) => void submitRename(event)}>
 						<label htmlFor="session-rename-input">{t("Session name")}</label>
 						<input autoComplete="off" id="session-rename-input" onChange={(event) => setName([...event.target.value].slice(0, 80).join(""))} ref={renameInput} value={name} />

@@ -4,11 +4,11 @@ import type {
 	ScheduleInputSpecView,
 	ScheduleTaskView,
 	SessionSummary,
-} from "@arcmind/app-protocol";
+} from "@metis/app-protocol";
 import { FolderSimple, X } from "@phosphor-icons/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import type { ArcMindDesktopApi } from "../../shared/desktop-api.ts";
+import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
 import { MenuSelect } from "./MenuSelect.tsx";
 
 const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] as const;
@@ -75,7 +75,7 @@ function parseModelKey(value: string): { provider: string; modelId: string } | u
 }
 
 export interface ScheduledTaskDialogProps {
-	readonly api: ArcMindDesktopApi;
+	readonly api: MetisDesktopApi;
 	readonly models: readonly ModelOptionView[];
 	readonly sessions: readonly SessionSummary[];
 	readonly task?: ScheduleTaskView;
@@ -286,7 +286,7 @@ export function ScheduledTaskDialog({ api, models, sessions, task, onClose, onSa
 								)}
 							</div>
 							<small>
-								{t("ArcMind can modify this folder and all of its subfolders. It is not copied or deleted with the task.")}
+								{t("Metis can modify this folder and all of its subfolders. It is not copied or deleted with the task.")}
 							</small>
 						</div>
 					)}

@@ -1,4 +1,4 @@
-import type { ConnectionEventsParams, ScheduleSnapshotView, ScheduleTaskView } from "@arcmind/app-protocol";
+import type { ConnectionEventsParams, ScheduleSnapshotView, ScheduleTaskView } from "@metis/app-protocol";
 
 export interface ScheduleStoreSnapshot {
 	readonly version: number;
