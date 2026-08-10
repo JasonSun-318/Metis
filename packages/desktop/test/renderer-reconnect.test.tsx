@@ -2,7 +2,7 @@
 
 import { act } from "react";
 import { createRoot } from "react-dom/client";
-import type { ConnectionEventsParams, ItemView, SessionSnapshot } from "@arcmind/app-protocol";
+import type { ConnectionEventsParams, ItemView, SessionSnapshot } from "@metis/app-protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { InteractionHost } from "../src/renderer/components/InteractionHost.tsx";
 import { shouldResnapshotAfterReady } from "../src/renderer/components/App.tsx";
@@ -42,6 +42,7 @@ function snapshot(serverEpoch: string, cursor: number, text: string): SessionSna
 		nextBeforeItemId: null,
 		activeTurnId: null,
 		pendingInteractions: [],
+		tasks: [],
 		thinkingSelection: "off",
 		actualThinkingLevel: "off",
 		availableThinkingSelections: ["off"],
@@ -173,6 +174,114 @@ describe("renderer reconnect behavior", () => {
 		});
 		await act(async () => root.unmount());
 		expect(document.activeElement).toBe(previous);
+	});
+
+	it("renders permission approval inline and denies it with Escape", async () => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		const onRespond = vi.fn().mockResolvedValue(undefined);
+
+		await act(async () => {
+			root.render(
+				<InteractionHost
+					interaction={{
+						interactionId: "00000000-0000-4000-8000-000000000203",
+						sessionId: "session-1",
+						title: "Approve bash?",
+						message: "Delete the generated cache file.\nRisk: destructive\nCommand: rm cache.tmp",
+						createdAt: "2026-07-16T00:00:00.000Z",
+						kind: "select",
+						presentation: "permission_approval",
+						operation: {
+							toolName: "bash",
+							rows: [
+								{ label: "Command", value: "rm cache.tmp" },
+								{ label: "Working directory", value: "/tmp/work" },
+							],
+							omittedRows: 0,
+							scopeComplete: true,
+							irreversible: true,
+						},
+						choices: [
+							{ id: "choice:0", label: "Allow once" },
+							{ id: "choice:1", label: "Deny" },
+						],
+					}}
+					onRespond={onRespond}
+				/>,
+			);
+		});
+
+		const panel = container.querySelector<HTMLElement>(".permission-approval-panel")!;
+		expect(panel).not.toBeNull();
+		expect(container.querySelector(".modal-backdrop")).toBeNull();
+		expect(panel.textContent).toContain("Metis wants to use bash");
+		expect(panel.textContent).toContain("Command");
+		expect(panel.textContent).toContain("rm cache.tmp");
+		expect(panel.textContent).toContain("Working directory");
+		expect(panel.textContent).toContain("/tmp/work");
+		expect(panel.textContent).toContain("This operation may not be reversible.");
+		expect(panel.textContent).not.toContain("Arguments:");
+		expect(panel.textContent).not.toContain('"command"');
+		expect(document.activeElement?.textContent).toContain("Deny");
+		await act(async () => panel.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "Escape" })));
+		expect(onRespond).toHaveBeenCalledWith({
+			interactionId: "00000000-0000-4000-8000-000000000203",
+			kind: "select",
+			choiceId: "choice:1",
+		});
+		await act(async () => root.unmount());
+	});
+
+	it("blocks approval when permission targets are hidden or incomplete", async () => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		for (const operation of [
+			{
+				toolName: "read",
+				rows: [{ label: "Path", value: "/tmp/target-0" }],
+				omittedRows: 2,
+				scopeComplete: true,
+				irreversible: false,
+			},
+			{
+				toolName: "mcp__service__publish",
+				rows: [{ label: "Details", value: "No target details were provided" }],
+				omittedRows: 0,
+				scopeComplete: false,
+				irreversible: true,
+			},
+		]) {
+			const container = document.createElement("div");
+			document.body.append(container);
+			const root = createRoot(container);
+			await act(async () => root.render(
+				<InteractionHost
+					interaction={{
+						interactionId: "00000000-0000-4000-8000-000000000209",
+						sessionId: "session-1",
+						title: "Approve operation?",
+						message: "Review the requested operation.",
+						createdAt: "2026-07-16T00:00:00.000Z",
+						kind: "select",
+						presentation: "permission_approval",
+						operation,
+						choices: [
+							{ id: "choice:0", label: "Allow once" },
+							{ id: "choice:1", label: "Deny" },
+						],
+					}}
+					onRespond={vi.fn().mockResolvedValue(undefined)}
+				/>,
+			));
+
+			expect([...container.querySelectorAll<HTMLButtonElement>("button")]
+				.find((button) => button.textContent?.includes("Allow once"))?.disabled).toBe(true);
+			expect(container.querySelector('[role="alert"]')).not.toBeNull();
+			await act(async () => root.unmount());
+			container.remove();
+		}
 	});
 
 	it("submits an extension input through the typed interaction response", async () => {
