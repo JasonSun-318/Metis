@@ -1,4 +1,4 @@
-import type { SessionSummary } from "@arcmind/app-protocol";
+import type { SessionSummary } from "@metis/app-protocol";
 import { describe, expect, it } from "vitest";
 import { AppStore } from "../src/renderer/store/app-store.ts";
 import {
@@ -68,9 +68,9 @@ describe("session grouping", () => {
 		expect(loadSessionGroupingPreferences(storage)).toEqual(DEFAULT_SESSION_GROUPING);
 		saveSessionGroupingPreferences(storage, { chat: "unread", code: "none" });
 		expect(loadSessionGroupingPreferences(storage)).toEqual({ chat: "unread", code: "none" });
-		values.set("arcmind.session-grouping.v1", '{"chat":"broken","code":"project"}');
+		values.set("metis.session-grouping.v1", '{"chat":"broken","code":"project"}');
 		expect(loadSessionGroupingPreferences(storage)).toEqual({ chat: "date", code: "project" });
-		values.set("arcmind.session-grouping.v1", "{");
+		values.set("metis.session-grouping.v1", "{");
 		expect(loadSessionGroupingPreferences(storage)).toEqual(DEFAULT_SESSION_GROUPING);
 	});
 });

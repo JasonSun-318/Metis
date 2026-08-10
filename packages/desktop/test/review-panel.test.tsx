@@ -3,7 +3,7 @@
 import { act, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ArcMindDesktopApi, DesktopWorkspaceReviewSnapshot } from "../src/shared/desktop-api.ts";
+import type { MetisDesktopApi, DesktopWorkspaceReviewSnapshot } from "../src/shared/desktop-api.ts";
 
 vi.mock("@pierre/diffs/react", () => ({
 	PatchDiff: ({ options, patch }: {
@@ -70,7 +70,7 @@ describe("ReviewPanel", () => {
 				oldFile: { name: "README.md", contents: "old", cacheKey: "old" },
 				newFile: { name: "README.md", contents: "new", cacheKey: "new" },
 			}),
-		} as unknown as ArcMindDesktopApi;
+		} as unknown as MetisDesktopApi;
 		const container = document.createElement("div");
 		document.body.append(container);
 		const root = createRoot(container);
@@ -104,7 +104,7 @@ describe("ReviewPanel", () => {
 		const api = {
 			getWorkspaceReview: vi.fn().mockResolvedValue(snapshot),
 			getWorkspaceReviewFileDiff: vi.fn().mockResolvedValue({ kind: "text", patch: "README patch" }),
-		} as unknown as ArcMindDesktopApi;
+		} as unknown as MetisDesktopApi;
 		const container = document.createElement("div");
 		document.body.append(container);
 		const root = createRoot(container);
@@ -142,7 +142,7 @@ describe("ReviewPanel", () => {
 				? Promise.resolve(workingTree)
 				: new Promise<DesktopWorkspaceReviewSnapshot>((resolve) => { resolveCommit = resolve; })),
 			getWorkspaceReviewFileDiff: vi.fn(),
-		} as unknown as ArcMindDesktopApi;
+		} as unknown as MetisDesktopApi;
 		const container = document.createElement("div");
 		document.body.append(container);
 		const root = createRoot(container);
@@ -170,7 +170,7 @@ describe("ReviewPanel", () => {
 				? Promise.resolve(workingTree)
 				: Promise.reject(new Error("commit unavailable"))),
 			getWorkspaceReviewFileDiff: vi.fn().mockResolvedValue({ kind: "text", patch: "README patch" }),
-		} as unknown as ArcMindDesktopApi;
+		} as unknown as MetisDesktopApi;
 		const container = document.createElement("div");
 		document.body.append(container);
 		const root = createRoot(container);
@@ -195,7 +195,7 @@ describe("ReviewPanel", () => {
 		const api = {
 			getWorkspaceReview: vi.fn().mockImplementation(({ revision }: { readonly revision: string }) => Promise.resolve(revision === "working-tree" ? workingTree : commitSnapshot)),
 			getWorkspaceReviewFileDiff: vi.fn().mockResolvedValue({ kind: "binary" }),
-		} as unknown as ArcMindDesktopApi;
+		} as unknown as MetisDesktopApi;
 		const container = document.createElement("div");
 		document.body.append(container);
 		const root = createRoot(container);

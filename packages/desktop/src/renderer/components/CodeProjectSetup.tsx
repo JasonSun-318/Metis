@@ -23,7 +23,7 @@ interface CodeProjectSetupProps {
 	readonly onResolveDroppedFiles: (files: readonly File[]) => readonly DesktopAttachmentSelection[];
 }
 
-const LOCATION_KEY = "arcmind.codeProjectLocation";
+const LOCATION_KEY = "metis.codeProjectLocation";
 const MAX_FILES = 16;
 
 function mergeFiles(
@@ -171,7 +171,7 @@ export function CodeProjectSetup({
 						<div className="code-project-choice-copy">
 							<h2 id="code-project-choose-title">{t("Create a new project")}</h2>
 							<p id="code-project-choose-description">
-								{t("A dedicated place for ongoing work. Files stay in a folder on your computer, and ArcMind keeps the project context together.")}
+								{t("A dedicated place for ongoing work. Files stay in a folder on your computer, and Metis keeps the project context together.")}
 							</p>
 							<div className="code-project-options">
 								<button aria-label={t("Start from scratch")} onClick={() => setStep("create")} ref={startButton} type="button">
@@ -181,7 +181,7 @@ export function CodeProjectSetup({
 								</button>
 								<button aria-label={t("Use an existing folder")} onClick={() => setStep("existing")} type="button">
 									<span className="code-project-option-icon"><FolderSimple aria-hidden="true" size={22} /></span>
-									<span><strong>{t("Use an existing folder")}</strong><small>{t("Give ArcMind a folder you already work from.")}</small></span>
+									<span><strong>{t("Use an existing folder")}</strong><small>{t("Give Metis a folder you already work from.")}</small></span>
 									<CaretRight aria-hidden="true" size={17} />
 								</button>
 							</div>
@@ -198,7 +198,7 @@ export function CodeProjectSetup({
 							<CaretLeft aria-hidden="true" size={21} />
 						</button>
 						<h2 id="code-project-create-title">{t("Start a new project")}</h2>
-						<p className="sr-only" id="code-project-create-description">{t("Create a folder for a new ArcMind Code project.")}</p>
+						<p className="sr-only" id="code-project-create-description">{t("Create a folder for a new Metis Code project.")}</p>
 						<label htmlFor="code-project-name">{t("Name")} <span aria-hidden="true">*</span></label>
 						<input
 							autoComplete="off"
@@ -263,7 +263,7 @@ export function CodeProjectSetup({
 						</button>
 						<h2 id="code-project-existing-title">{t("Use an existing folder")}</h2>
 						<p id="code-project-existing-description">
-							{t("Choose a folder and ArcMind will treat its files as project context. ArcMind will remember Code context across tasks in this project.")}
+							{t("Choose a folder and Metis will treat its files as project context. Metis will remember Code context across tasks in this project.")}
 						</p>
 						<button className="code-project-choose-folder" disabled={busy || pending} onClick={() => void openExisting()} ref={chooseFolderButton} type="button">
 							{t(pending ? "Opening…" : "Choose folder")}

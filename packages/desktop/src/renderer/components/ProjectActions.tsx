@@ -1,4 +1,4 @@
-import type { ClientResult } from "@arcmind/app-protocol";
+import type { ClientResult } from "@metis/app-protocol";
 import { DotsThree, NotePencil, PencilSimple, PushPin, PushPinSimple, Trash } from "@phosphor-icons/react";
 import { type CSSProperties, type FormEvent, type RefObject, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";

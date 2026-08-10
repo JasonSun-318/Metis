@@ -3,10 +3,10 @@ import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import type { ArcMindDesktopApi } from "../../shared/desktop-api.ts";
+import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
 
 interface TerminalPanelProps {
-	readonly api: ArcMindDesktopApi;
+	readonly api: MetisDesktopApi;
 	readonly cwd: string;
 	readonly terminalId: string;
 	readonly visible: boolean;

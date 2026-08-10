@@ -1,4 +1,4 @@
-import type { AgentMode, SkillSourceView, SkillSummaryView } from "@arcmind/app-protocol";
+import type { AgentMode, SkillSourceView, SkillSummaryView } from "@metis/app-protocol";
 import {
 	CaretRight,
 	ChatCircleDots,
@@ -14,7 +14,7 @@ import { useTranslation } from "react-i18next";
 import emptyStateImage from "../assets/skills-empty-state.svg";
 import type { AppStoreSnapshot } from "../store/app-store.ts";
 import type { ProjectPreferenceMap } from "../store/project-preferences.ts";
-import type { ArcMindDesktopApi } from "../../shared/desktop-api.ts";
+import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
 import { buildSessionTree } from "./SessionSidebar.tsx";
 import { TracedSvgIcon } from "./TracedSvgIcon.tsx";
 
@@ -31,7 +31,7 @@ type RequestState =
 	| { readonly status: "error"; readonly message: string };
 
 interface SkillsPanelProps {
-	readonly api: Pick<ArcMindDesktopApi, "listSkills">;
+	readonly api: Pick<MetisDesktopApi, "listSkills">;
 	readonly preferences: ProjectPreferenceMap;
 	readonly serverReady: boolean;
 	readonly state: AppStoreSnapshot;
@@ -74,9 +74,9 @@ function EmptyState({ cwd, source }: { readonly cwd?: string; readonly source: S
 	const { t } = useTranslation();
 	const title = source === "system" ? "No system skills" : source === "user" ? "No user skills" : "No project skills";
 	const hint = source === "user"
-		? "~/.arcmind/agent/skills/ or ~/.agents/skills/"
+		? "~/.metis/agent/skills/ or ~/.agents/skills/"
 		: source === "project" && cwd
-			? `${cwd}/.arcmind/skills/`
+			? `${cwd}/.metis/skills/`
 			: undefined;
 	return (
 		<div className="skills-empty-state">
@@ -178,7 +178,7 @@ export function SkillsPanel({ api, preferences, serverReady, state }: SkillsPane
 	if (route.kind === "root") {
 		content = (
 			<div className="skills-directory-list">
-				<DirectoryRow description={t("Skills included with ArcMind")} icon={<Desktop aria-hidden="true" size={22} />} name={t("System")} onClick={() => setRoute({ kind: "source", source: "system" })} />
+				<DirectoryRow description={t("Skills included with Metis")} icon={<Desktop aria-hidden="true" size={22} />} name={t("System")} onClick={() => setRoute({ kind: "source", source: "system" })} />
 				<DirectoryRow description={t("Skills available across all projects")} icon={<UserCircle aria-hidden="true" size={22} />} name={t("User")} onClick={() => setRoute({ kind: "source", source: "user" })} />
 				<DirectoryRow description={t("Skills provided by project folders")} icon={<Folders aria-hidden="true" size={22} />} name={t("Project")} onClick={() => setRoute({ kind: "project-modes" })} />
 			</div>

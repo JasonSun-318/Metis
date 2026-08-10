@@ -1,22 +1,28 @@
 // @vitest-environment jsdom
 
-import type { ItemView, SessionSnapshot, SubagentSummaryView } from "@arcmind/app-protocol";
+import type { ItemView, SessionSnapshot, SubagentSummaryView } from "@metis/app-protocol";
 import { act, StrictMode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SubagentPanel } from "../src/renderer/components/SubagentPanel.tsx";
 import { setLocale } from "../src/renderer/i18n.ts";
 import { AppStore } from "../src/renderer/store/app-store.ts";
-import type { ArcMindDesktopApi } from "../src/shared/desktop-api.ts";
+import type { MetisDesktopApi } from "../src/shared/desktop-api.ts";
 
 const EPOCH = "11111111-1111-4111-8111-111111111111";
 const CREATED_AT = "2026-08-06T00:00:00.000Z";
 type ActiveSubagent = Exclude<SubagentSummaryView, { status: "closed" }>;
 
-function subagent(agentId: string, taskSummary: string, status: ActiveSubagent["status"], usage?: ActiveSubagent["usage"]): ActiveSubagent {
+function subagent(
+	agentId: string,
+	taskSummary: string,
+	status: ActiveSubagent["status"],
+	usage?: ActiveSubagent["usage"],
+	name = taskSummary,
+): ActiveSubagent {
 	return {
 		agentId,
-		name: "Agent",
+		name,
 		taskSummary,
 		createdAt: CREATED_AT,
 		updatedAt: CREATED_AT,
@@ -36,10 +42,15 @@ function subagent(agentId: string, taskSummary: string, status: ActiveSubagent["
 	};
 }
 
-function closedSubagent(agentId: string, taskSummary: string, finalSummary?: string): SubagentSummaryView {
+function closedSubagent(
+	agentId: string,
+	taskSummary: string,
+	finalSummary?: string,
+	name = taskSummary,
+): SubagentSummaryView {
 	return {
 		agentId,
-		name: "Agent",
+		name,
 		taskSummary,
 		createdAt: CREATED_AT,
 		updatedAt: CREATED_AT,
@@ -67,6 +78,7 @@ function snapshot(sessionId: string, subagents: readonly SubagentSummaryView[], 
 		nextBeforeItemId: null,
 		activeTurnId: null,
 		pendingInteractions: [],
+		tasks: [],
 		thinkingSelection: "off",
 		actualThinkingLevel: "off",
 		availableThinkingSelections: ["off"],
@@ -110,7 +122,7 @@ async function flush() {
 	await act(async () => { await Promise.resolve(); });
 }
 
-function renderPanel(store: AppStore, api: ArcMindDesktopApi, onError = vi.fn()) {
+function renderPanel(store: AppStore, api: MetisDesktopApi, onError = vi.fn()) {
 	const container = document.createElement("div");
 	document.body.append(container);
 	const root = createRoot(container);
@@ -122,7 +134,7 @@ function api(readSubagentItems = vi.fn().mockResolvedValue({ items: [], nextBefo
 	return {
 		readSubagentItems,
 		interruptSubagent: vi.fn().mockResolvedValue({}),
-	} as unknown as ArcMindDesktopApi;
+	} as unknown as MetisDesktopApi;
 }
 
 let roots: Root[] = [];
@@ -141,6 +153,23 @@ afterEach(async () => {
 });
 
 describe("SubagentPanel", () => {
+	it("uses the assigned name instead of the first task text as the visible title", async () => {
+		const store = new AppStore();
+		store.applySnapshot(snapshot("parent", [
+			subagent("child", "你能创建 skill 吗", "running", undefined, "Skill creation"),
+		]));
+		const rendered = renderPanel(store, api());
+		roots.push(rendered.root);
+
+		const card = button(rendered.container, "View transcript for Skill creation");
+		expect(card.querySelector(".subagent-card-title")?.textContent).toBe("Skill creation");
+		expect(card.querySelector(".subagent-card-meta")?.textContent).toContain("你能创建 skill 吗");
+
+		await act(async () => card.click());
+		expect(rendered.container.querySelector(".subagent-detail-title strong")?.textContent).toBe("Skill creation");
+		expect(button(rendered.container, "Stop Skill creation")).toBeTruthy();
+	});
+
 	it("groups real summaries, uses one elapsed timer, and omits excluded controls", async () => {
 		const store = new AppStore();
 		store.applySnapshot(snapshot("parent", [
@@ -207,7 +236,7 @@ describe("SubagentPanel", () => {
 		store.applySnapshot(snapshot("parent", [subagent("child", "Analyze code", "running")]));
 		const stop = deferred<unknown>();
 		const desktopApi = api();
-		desktopApi.interruptSubagent = vi.fn().mockReturnValue(stop.promise) as ArcMindDesktopApi["interruptSubagent"];
+		desktopApi.interruptSubagent = vi.fn().mockReturnValue(stop.promise) as MetisDesktopApi["interruptSubagent"];
 		const rendered = renderPanel(store, desktopApi);
 		roots.push(rendered.root);
 		const card = button(rendered.container, "View transcript for Analyze code");
@@ -267,7 +296,7 @@ describe("SubagentPanel", () => {
 		store.applySnapshot(snapshot("parent", [subagent("child", "Analyze code", "running")]));
 		const pending = deferred<unknown>();
 		const desktopApi = api();
-		desktopApi.interruptSubagent = vi.fn().mockReturnValue(pending.promise) as ArcMindDesktopApi["interruptSubagent"];
+		desktopApi.interruptSubagent = vi.fn().mockReturnValue(pending.promise) as MetisDesktopApi["interruptSubagent"];
 		const container = document.createElement("div");
 		document.body.append(container);
 		const root = createRoot(container);
@@ -289,7 +318,7 @@ describe("SubagentPanel", () => {
 		store.applySnapshot(snapshot("parent", [subagent("child", "Analyze code", "running")]));
 		const pending = deferred<unknown>();
 		const desktopApi = api();
-		desktopApi.interruptSubagent = vi.fn().mockReturnValue(pending.promise) as ArcMindDesktopApi["interruptSubagent"];
+		desktopApi.interruptSubagent = vi.fn().mockReturnValue(pending.promise) as MetisDesktopApi["interruptSubagent"];
 		const rendered = renderPanel(store, desktopApi);
 		await act(async () => button(rendered.container, "Stop Analyze code").click());
 		await act(async () => rendered.root.unmount());
@@ -314,7 +343,7 @@ describe("SubagentPanel", () => {
 		const store = new AppStore();
 		store.applySnapshot(snapshot("parent", [subagent("child", "Analyze code", "running")]));
 		const desktopApi = api();
-		desktopApi.interruptSubagent = vi.fn().mockRejectedValue(new Error("stop failed")) as ArcMindDesktopApi["interruptSubagent"];
+		desktopApi.interruptSubagent = vi.fn().mockRejectedValue(new Error("stop failed")) as MetisDesktopApi["interruptSubagent"];
 		const rendered = renderPanel(store, desktopApi);
 		roots.push(rendered.root);
 		await act(async () => button(rendered.container, "Stop Analyze code").click());

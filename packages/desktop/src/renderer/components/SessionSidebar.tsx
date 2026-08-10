@@ -1,8 +1,9 @@
-import type { AgentMode, ClientResult, ScheduleTaskView, SessionSummary } from "@arcmind/app-protocol";
-import { CaretDown, CaretRight, ChatCircleDots, ClockCountdown, Code, FolderSimple, MagnifyingGlass, NotePencil, SidebarSimple, Sparkle } from "@phosphor-icons/react";
+import type { AgentMode, ClientResult, ScheduleTaskView, SessionSummary } from "@metis/app-protocol";
+import { ArrowRight, CaretDown, CaretRight, ChatCircleDots, ClockCountdown, Code, FolderSimple, MagnifyingGlass, NotePencil, SidebarSimple, Sparkle } from "@phosphor-icons/react";
 import type { ReactNode } from "react";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import type { DesktopUpdateState, MetisDesktopApi } from "../../shared/desktop-api.ts";
 import { localeForIntl } from "../i18n.ts";
 import type { AppStoreSnapshot } from "../store/app-store.ts";
 import type { ProjectPreference, ProjectPreferenceMap } from "../store/project-preferences.ts";
@@ -19,8 +20,27 @@ import { ProjectActions } from "./ProjectActions.tsx";
 import { AccountMenu } from "./AccountMenu.tsx";
 import { SessionActions } from "./SessionActions.tsx";
 import { SessionGroupingMenu } from "./SessionGroupingMenu.tsx";
+import { ScheduledTaskActions } from "./ScheduledTaskActions.tsx";
 
-export type SidebarDestination = "tasks" | "skills" | "schedules" | "settings";
+export type SidebarDestination = "tasks" | "skills" | "schedules";
+
+const SESSION_SIDEBAR_DEFAULT_WIDTH = 302;
+const SESSION_SIDEBAR_NARROW_WIDTH = 232;
+const SESSION_SIDEBAR_MAX_WIDTH = SESSION_SIDEBAR_DEFAULT_WIDTH * 2;
+
+/** Mirrors the @media (max-width: 980px) override in app.css. */
+export function sessionSidebarDefaultWidth(): number {
+	return window.innerWidth <= 980 ? SESSION_SIDEBAR_NARROW_WIDTH : SESSION_SIDEBAR_DEFAULT_WIDTH;
+}
+
+export function clampSessionSidebarPreferredWidth(value: number): number {
+	return Math.max(SESSION_SIDEBAR_NARROW_WIDTH, Math.min(SESSION_SIDEBAR_MAX_WIDTH, Math.round(value)));
+}
+
+export function clampSessionSidebarWidth(value: number, viewportWidth = window.innerWidth): number {
+	const maximum = Math.max(SESSION_SIDEBAR_NARROW_WIDTH, Math.min(SESSION_SIDEBAR_MAX_WIDTH, Math.floor(viewportWidth / 3)));
+	return Math.min(maximum, clampSessionSidebarPreferredWidth(value));
+}
 
 interface SessionSidebarProps {
 	readonly state: AppStoreSnapshot;
@@ -44,14 +64,19 @@ interface SessionSidebarProps {
 	) => Promise<ClientResult<"project/deletePreview">>;
 	readonly onRenameProject: (group: ProjectSessionGroup, alias: string) => void;
 	readonly onSettings: () => void;
+	readonly onUpdate: () => void;
 	readonly onSkills: () => void;
 	readonly onSchedules: () => void;
 	readonly onOpenSchedule: (taskId: string) => void;
+	readonly onDeleteSchedule: MetisDesktopApi["deleteSchedule"];
 	readonly onToggle: () => void;
+	readonly onWidthChange: (width: number, persist?: boolean) => void;
 	readonly projectBusy: (group: ProjectSessionGroup) => boolean;
 	readonly preferences: ProjectPreferenceMap;
 	readonly scheduleTasks: readonly ScheduleTaskView[];
 	readonly selectedScheduleTaskId: string | null;
+	readonly updateState: DesktopUpdateState;
+	readonly width: number;
 }
 
 export interface ProjectSessionGroup {
@@ -83,6 +108,7 @@ export function buildSessionTree(
 	const projects = new Map<string, SessionSummary[]>();
 	const tasks: SessionSummary[] = [];
 	for (const session of sessionsForMode(state, mode)) {
+		if (session.scheduled) continue;
 		if (session.cwdOrigin === "managed" || !session.cwd) {
 			tasks.push(session);
 			continue;
@@ -142,20 +168,17 @@ function SessionButton({ busy, deleteDisabled, onDelete, onRename, selected, ses
 				type="button"
 			>
 				<span className="session-button-title"><i aria-hidden="true" className={session.unread ? "unread" : undefined} />{title}</span>
-				{session.scheduled
-					? <small className="session-scheduled-badge"><ClockCountdown aria-hidden="true" size={11} /> {t("Scheduled")}</small>
-					: session.state !== "idle" && <small>{t(session.state.replace("_", " "))}</small>}
+				{session.state !== "idle" && <small>{t(session.state.replace("_", " "))}</small>}
 			</button>
-			{!session.scheduled && (
-				<SessionActions
-					deleteDisabled={deleteDisabled}
-					disabled={busy}
-					displayName={title}
-					onDelete={onDelete}
-					onRename={onRename}
-					session={session}
-				/>
-			)}
+			<SessionActions
+				allowRename={!session.scheduled}
+				deleteDisabled={deleteDisabled}
+				disabled={busy}
+				displayName={title}
+				onDelete={onDelete}
+				onRename={onRename}
+				session={session}
+			/>
 		</div>
 	);
 }
@@ -268,19 +291,32 @@ export function SessionSidebar({
 	onRenameProject,
 	onRenameSession,
 	onSettings,
+	onUpdate,
 	onSkills,
 	onSchedules,
 	onOpenSchedule,
+	onDeleteSchedule,
 	onToggle,
+	onWidthChange,
 	projectBusy,
 	preferences,
 	scheduleTasks,
 	selectedScheduleTaskId,
+	updateState,
+	width,
 }: SessionSidebarProps) {
 	const { t, i18n } = useTranslation();
 	const locale = localeForIntl(i18n.resolvedLanguage);
+	const scheduledTaskIds = useMemo(() => new Set(scheduleTasks.map(({ id }) => id)), [scheduleTasks]);
+	const visibleScheduleTasks = scheduleTasks.filter(
+		(task) => task.status === "active" || task.status === "paused",
+	);
+	const scheduledSessions = sessionsForMode(state, mode).filter(
+		(session) => session.scheduled && !scheduledTaskIds.has(session.scheduled.taskId),
+	);
 	const tree = buildSessionTree(state, mode, preferences);
 	const [fullscreen, setFullscreen] = useState(windowIsFullscreen);
+	const resizeRef = useRef<{ readonly pointerId: number; readonly x: number; readonly width: number } | null>(null);
 	const [activeProjectActions, setActiveProjectActions] = useState<string | null>(null);
 	const [groupingByMode, setGroupingByMode] = useState(() => {
 		try {
@@ -290,7 +326,7 @@ export function SessionSidebar({
 		}
 	});
 	const grouping = groupingByMode[mode];
-	const sessions = sessionsForMode(state, mode);
+	const sessions = sessionsForMode(state, mode).filter((session) => session.scheduled === undefined);
 	const hasSessions = sessions.length > 0;
 	useEffect(() => {
 		const runtime = globalThis as RendererWindowView;
@@ -306,6 +342,13 @@ export function SessionSidebar({
 			state.interactionsById.get(interactionId)?.sessionId === session.sessionId,
 		);
 	const selectedSessionId = !newTaskOpen && destination === "tasks" ? state.activeSessionId : null;
+	const updateLabel = updateState.status === "available"
+		? t("Update to new version")
+		: updateState.status === "downloading"
+			? t("Downloading update {{progress}}%", { progress: updateState.progress })
+			: updateState.status === "ready"
+				? t("Open installer")
+				: null;
 	const renderSession = (session: SessionSummary) => (
 		<SessionButton
 			busy={busy}
@@ -351,7 +394,6 @@ export function SessionSidebar({
 				{t("Skills")}
 			</button>
 			{mode === "chat" && <button aria-current={destination === "schedules" ? "page" : undefined} className="sidebar-nav-button" disabled={busy} onClick={onSchedules} type="button"><ClockCountdown aria-hidden="true" size={17} />{t("Scheduled tasks")}</button>}
-			{mode === "chat" && scheduleTasks.length > 0 && <section aria-label={t("Scheduled tasks")} className="scheduled-task-quick-list">{scheduleTasks.slice(0, 6).map((task) => <button aria-current={destination === "schedules" && task.id === selectedScheduleTaskId ? "page" : undefined} key={task.id} onClick={() => onOpenSchedule(task.id)} type="button"><span className={`scheduled-task-quick-dot state-${task.status}`} /><span>{task.name}</span><small>{t(task.schedule.kind === "once" ? "Once" : task.schedule.kind)}</small>{task.unreadCount > 0 && <i>{task.unreadCount}</i>}</button>)}</section>}
 			<nav aria-label={t("{{mode}} sessions", { mode: t(mode === "chat" ? "Chat" : "Code") })} className="project-list" data-empty={!hasSessions || undefined} data-grouping={grouping}>
 				{grouping === "project" && <span className="session-grouping-label">{t("Projects")}</span>}
 				<SessionGroupingMenu
@@ -406,8 +448,86 @@ export function SessionSidebar({
 					</SessionSection>
 				))}
 				{grouping === "none" && sessions.map(renderSession)}
+				{mode === "chat" && (visibleScheduleTasks.length > 0 || scheduledSessions.length > 0) && (
+					<section aria-label={t("Scheduled tasks")} className="scheduled-task-quick-list">
+						<h2>{t("Scheduled tasks")}</h2>
+						{visibleScheduleTasks.slice(0, 6).map((task) => (
+							<div className="session-row scheduled-task-quick-row" key={task.id}>
+								<button
+									aria-current={destination === "schedules" && task.id === selectedScheduleTaskId ? "page" : undefined}
+									aria-label={task.name}
+									className="scheduled-task-quick-open"
+									disabled={busy}
+									onClick={() => onOpenSchedule(task.id)}
+									type="button"
+								>
+									<span className={`scheduled-task-quick-dot state-${task.status}`} />
+									<span>{task.name}</span>
+									<small>{t(task.schedule.kind === "once" ? "Once" : task.schedule.kind)}</small>
+									{task.unreadCount > 0 && <i>{task.unreadCount}</i>}
+								</button>
+								<ScheduledTaskActions deleteDisabled={task.activeRunId !== undefined} disabled={busy} onDelete={onDeleteSchedule} task={task} />
+							</div>
+						))}
+						{scheduledSessions.map(renderSession)}
+					</section>
+				)}
 			</nav>
+			{updateLabel && (
+				<div className="sidebar-update-notice">
+					<button
+						aria-label={updateLabel}
+						className="sidebar-update-button"
+						disabled={updateState.status === "downloading"}
+						onClick={onUpdate}
+						type="button"
+					>
+						<span>{updateLabel}</span>
+						<ArrowRight aria-hidden="true" size={15} />
+					</button>
+				</div>
+			)}
 			<div className="sidebar-footer"><AccountMenu onSettings={onSettings} /></div>
+			<div
+				aria-label={t("Resize sessions sidebar")}
+				aria-orientation="vertical"
+				className="session-sidebar-resizer"
+				onKeyDown={(event) => {
+					if (event.key === "ArrowLeft") onWidthChange(width - 16);
+					else if (event.key === "ArrowRight") onWidthChange(width + 16);
+					else return;
+					event.preventDefault();
+				}}
+				onPointerDown={(event) => {
+					resizeRef.current = { pointerId: event.pointerId, x: event.clientX, width };
+					event.currentTarget.setPointerCapture(event.pointerId);
+				}}
+				onPointerMove={(event) => {
+					const start = resizeRef.current;
+					if (!start || start.pointerId !== event.pointerId) return;
+					onWidthChange(start.width + event.clientX - start.x, false);
+				}}
+				onPointerUp={(event) => {
+					const start = resizeRef.current;
+					if (start?.pointerId === event.pointerId) {
+						onWidthChange(start.width + event.clientX - start.x);
+						resizeRef.current = null;
+					}
+					if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+				}}
+				onPointerCancel={(event) => {
+					const start = resizeRef.current;
+					if (start?.pointerId === event.pointerId) onWidthChange(start.width, false);
+					resizeRef.current = null;
+				}}
+				onLostPointerCapture={(event) => {
+					const start = resizeRef.current;
+					if (start?.pointerId === event.pointerId) onWidthChange(start.width, false);
+					resizeRef.current = null;
+				}}
+				role="separator"
+				tabIndex={0}
+			/>
 		</aside>
 	);
 }

@@ -20,7 +20,7 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type {
-	ArcMindDesktopApi,
+	MetisDesktopApi,
 	DesktopWorkspaceEntry,
 	DesktopWorkspaceFile,
 	DesktopWorkspaceMutationInput,
@@ -50,7 +50,7 @@ export interface WorkspaceFileDraft {
 
 interface FilePanelProps {
 	readonly activePath: string | null;
-	readonly api: ArcMindDesktopApi;
+	readonly api: MetisDesktopApi;
 	readonly cwd: string;
 	readonly expandedPaths: readonly string[];
 	readonly draft: WorkspaceFileDraft | null;

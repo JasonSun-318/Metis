@@ -6,7 +6,7 @@ import { DiagnosticLog } from "../src/main/diagnostic-log.ts";
 
 describe("DiagnosticLog", () => {
 	it("redacts common credential shapes before they reach disk", async () => {
-		const root = await mkdtemp(join(tmpdir(), "arcmind-desktop-log-"));
+		const root = await mkdtemp(join(tmpdir(), "metis-desktop-log-"));
 		const path = join(root, "app-server.log");
 		const log = new DiagnosticLog({ path, maxBytes: 1_024, backups: 2 });
 
@@ -21,7 +21,7 @@ describe("DiagnosticLog", () => {
 	});
 
 	it("rotates at the byte limit and retains exactly two backups", async () => {
-		const root = await mkdtemp(join(tmpdir(), "arcmind-desktop-log-"));
+		const root = await mkdtemp(join(tmpdir(), "metis-desktop-log-"));
 		const path = join(root, "app-server.log");
 		const log = new DiagnosticLog({ path, maxBytes: 96, backups: 2 });
 
@@ -35,7 +35,7 @@ describe("DiagnosticLog", () => {
 	});
 
 	it("serializes concurrent writes without retaining oversized records", async () => {
-		const root = await mkdtemp(join(tmpdir(), "arcmind-desktop-log-"));
+		const root = await mkdtemp(join(tmpdir(), "metis-desktop-log-"));
 		const path = join(root, "app-server.log");
 		const log = new DiagnosticLog({ path, maxBytes: 128, backups: 2 });
 

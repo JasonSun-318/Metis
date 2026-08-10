@@ -291,7 +291,7 @@ describe("BrowserManager", () => {
 		expect(harness.webContents.printToPDF).toHaveBeenCalledWith({ printBackground: true });
 		expect(harness.savePdf).toHaveBeenCalledWith(
 			Buffer.from("pdf"),
-			expect.stringMatching(/^ArcMind-Print-\d{4}-\d{2}-\d{2}-\d{6}\.pdf$/u),
+			expect.stringMatching(/^Metis-Print-\d{4}-\d{2}-\d{2}-\d{6}\.pdf$/u),
 		);
 		harness.webContents.print.mockImplementationOnce((_options, callback) => callback(false, "Printer unavailable"));
 		await expect(harness.manager.control({ type: "print", browserId })).rejects.toThrow("Printer unavailable");
@@ -316,7 +316,7 @@ describe("BrowserManager", () => {
 		expect(harness.webContents.capturePage).toHaveBeenCalledWith();
 		expect(harness.saveScreenshot).toHaveBeenCalledWith(
 			harness.nativeImage,
-			expect.stringMatching(/^ArcMind-Screenshot-\d{4}-\d{2}-\d{2}-\d{6}\.png$/u),
+			expect.stringMatching(/^Metis-Screenshot-\d{4}-\d{2}-\d{2}-\d{6}\.png$/u),
 		);
 		await expect(harness.manager.capturePreview(browserId)).resolves.toBe("data:image/png;base64,cHJldmlldw==");
 		expect(harness.nativeImage.toDataURL).toHaveBeenCalledOnce();

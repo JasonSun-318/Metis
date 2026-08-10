@@ -1,4 +1,4 @@
-import type { ModelOptionView, SessionSnapshot } from "@arcmind/app-protocol";
+import type { ModelOptionView, SessionSnapshot } from "@metis/app-protocol";
 import { CaretDown, Check } from "@phosphor-icons/react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";

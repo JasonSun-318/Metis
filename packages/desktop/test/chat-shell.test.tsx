@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import type { ClientResult, SessionSnapshot, SessionSummary } from "@arcmind/app-protocol";
+import type { ClientResult, ScheduleTaskView, SessionSnapshot, SessionSummary } from "@metis/app-protocol";
 import { EditorView } from "@codemirror/view";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
@@ -11,7 +11,7 @@ import {
 	sessionDisplayTitle,
 	titleFromPrompt,
 } from "../src/renderer/components/App.tsx";
-import { buildSessionTree } from "../src/renderer/components/SessionSidebar.tsx";
+import { buildSessionTree, clampSessionSidebarWidth } from "../src/renderer/components/SessionSidebar.tsx";
 import { SkillsPanel } from "../src/renderer/components/SkillsPanel.tsx";
 import { setLocale } from "../src/renderer/i18n.ts";
 import { AppStore } from "../src/renderer/store/app-store.ts";
@@ -22,7 +22,7 @@ import {
 	setProjectAlias,
 	setProjectPinned,
 } from "../src/renderer/store/project-preferences.ts";
-import type { ArcMindDesktopApi } from "../src/shared/desktop-api.ts";
+import type { DesktopUpdateState, MetisDesktopApi } from "../src/shared/desktop-api.ts";
 
 const EPOCH = "11111111-1111-4111-8111-111111111111";
 
@@ -41,6 +41,24 @@ function session(sessionId: string, mode: "chat" | "code", cwd: string, name?: s
 	};
 }
 
+function scheduledTask(): ScheduleTaskView {
+	return {
+		id: "20000000-0000-4000-8000-000000000001",
+		name: "Morning brief",
+		description: "Calendar and inbox summary",
+		instruction: "Summarize today's calendar.",
+		model: { provider: "test-provider", modelId: "test-model" },
+		schedule: { kind: "daily", time: "08:00" },
+		timezone: "Asia/Shanghai",
+		target: { kind: "general", workspace: "task" },
+		status: "active",
+		createdAt: "2026-08-01T00:00:00.000Z",
+		updatedAt: "2026-08-01T00:00:00.000Z",
+		nextRunAt: "2026-08-10T00:00:00.000Z",
+		unreadCount: 0,
+	};
+}
+
 function snapshot(summary: SessionSummary): SessionSnapshot {
 	return {
 		session: summary,
@@ -55,6 +73,7 @@ function snapshot(summary: SessionSummary): SessionSnapshot {
 		nextBeforeItemId: null,
 		activeTurnId: null,
 		pendingInteractions: [],
+		tasks: [],
 		thinkingSelection: "off",
 		actualThinkingLevel: "off",
 		availableThinkingSelections: ["off"],
@@ -129,11 +148,13 @@ function createHarness(options: {
 	failOpenSessionIds?: readonly string[];
 	loseFirstCreateResponse?: boolean;
 	loseFirstStartResponse?: boolean;
+	scheduleTasks?: readonly ScheduleTaskView[];
 	sessions?: readonly SessionSummary[];
+	updateState?: DesktopUpdateState;
 } = {}) {
 	localStorage.setItem(
-		"arcmind.session-grouping.v1",
-		localStorage.getItem("arcmind.session-grouping.v1") ?? '{"chat":"project","code":"project"}',
+		"metis.session-grouping.v1",
+		localStorage.getItem("metis.session-grouping.v1") ?? '{"chat":"project","code":"project"}',
 	);
 	const chat = session("chat-existing", "chat", "/work/chat-project", "Chat project task");
 	const code = session("code-existing", "code", "/work/code-project", "Code project task");
@@ -141,12 +162,15 @@ function createHarness(options: {
 	let failFirstOpen = options.failFirstOpen ?? false;
 	let loseFirstCreateResponse = options.loseFirstCreateResponse ?? false;
 	let loseFirstStartResponse = options.loseFirstStartResponse ?? false;
+	let scheduleTasks = [...(options.scheduleTasks ?? [])];
 	const failOpenSessionIds = new Set(options.failOpenSessionIds ?? []);
 	const createdByRequestId = new Map<string, SessionSummary>();
 	const order: string[] = [];
-	let subscriber: Parameters<ArcMindDesktopApi["subscribe"]>[0] | undefined;
-	const terminalSubscribers = new Set<Parameters<ArcMindDesktopApi["subscribeTerminal"]>[0]>();
-	const browserSubscribers = new Set<Parameters<ArcMindDesktopApi["subscribeBrowser"]>[0]>();
+	let subscriber: Parameters<MetisDesktopApi["subscribe"]>[0] | undefined;
+	const terminalSubscribers = new Set<Parameters<MetisDesktopApi["subscribeTerminal"]>[0]>();
+	const browserSubscribers = new Set<Parameters<MetisDesktopApi["subscribeBrowser"]>[0]>();
+	const updateSubscribers = new Set<Parameters<MetisDesktopApi["subscribeUpdate"]>[0]>();
+	let updateState = options.updateState ?? { status: "unavailable" as const };
 	const api = {
 		getServerState: vi.fn().mockResolvedValue({ state: "ready", serverEpoch: EPOCH, restartAttempt: 0, failure: null }),
 		listSessions: vi.fn(async () => {
@@ -175,18 +199,28 @@ function createHarness(options: {
 		}),
 		listModels: vi.fn().mockResolvedValue({ models: [] }),
 		createSchedule: vi.fn(),
-		listSchedules: vi.fn().mockResolvedValue({ tasks: [], nextAfterTaskId: null, unreadCount: 0 }),
+		listSchedules: vi.fn(async () => ({ tasks: scheduleTasks, nextAfterTaskId: null, unreadCount: 0 })),
 		getSchedule: vi.fn(),
 		updateSchedule: vi.fn(),
 		pauseSchedule: vi.fn(),
 		resumeSchedule: vi.fn(),
-		deleteSchedule: vi.fn(),
+		deleteSchedule: vi.fn(async ({ taskId, deleteSessions }) => {
+			scheduleTasks = scheduleTasks.filter((task) => task.id !== taskId);
+			const ownedSessionCount = sessions.filter((session) => session.scheduled?.taskId === taskId).length;
+			if (deleteSessions) sessions = sessions.filter((session) => session.scheduled?.taskId !== taskId);
+			return {
+				taskId,
+				deleted: true as const,
+				deletedSessionCount: deleteSessions ? ownedSessionCount : 0,
+				retainedSessionCount: deleteSessions ? 0 : ownedSessionCount,
+			};
+		}),
 		runScheduleNow: vi.fn(),
 		listScheduleRuns: vi.fn().mockResolvedValue({ runs: [], nextBeforeRunId: null }),
 		getScheduleRun: vi.fn(),
 		markScheduleRunRead: vi.fn(),
 		subscribeSchedule: vi.fn().mockResolvedValue({
-			snapshot: { serverEpoch: EPOCH, tasks: [], unreadCount: 0, cursor: 0 },
+			snapshot: { serverEpoch: EPOCH, tasks: scheduleTasks, unreadCount: 0, cursor: 0 },
 		}),
 		unsubscribeSchedule: vi.fn().mockResolvedValue({ unsubscribed: true }),
 		setScheduleKeepAwake: vi.fn().mockResolvedValue(undefined),
@@ -217,7 +251,7 @@ function createHarness(options: {
 			{ path: "/tmp/report.pdf", name: "report.pdf" },
 		]),
 		resolveDroppedFiles: vi.fn().mockReturnValue([]),
-		getDefaultProjectLocation: vi.fn().mockResolvedValue("/Users/test/ArcMind Projects"),
+		getDefaultProjectLocation: vi.fn().mockResolvedValue("/Users/test/Metis Projects"),
 		createProjectFolder: vi.fn(async ({ parentDirectory, name }) => `${parentDirectory}/${name}`),
 		createTerminal: vi.fn(async (input) => ({
 			terminalId: input.terminalId,
@@ -307,6 +341,12 @@ function createHarness(options: {
 		}),
 		writeClipboardText: vi.fn().mockResolvedValue(undefined),
 		setWorkspaceEditState: vi.fn().mockResolvedValue(undefined),
+		getUpdateState: vi.fn(async () => updateState),
+		startUpdate: vi.fn().mockResolvedValue(undefined),
+		subscribeUpdate: vi.fn((listener) => {
+			updateSubscribers.add(listener);
+			return () => updateSubscribers.delete(listener);
+		}),
 		createSession: vi.fn(async (input) => {
 			order.push("create");
 			const createdMode = input.mode ?? "code";
@@ -382,13 +422,17 @@ function createHarness(options: {
 				if (subscriber === listener) subscriber = undefined;
 			};
 		}),
-	} as unknown as ArcMindDesktopApi;
+	} as unknown as MetisDesktopApi;
 	return {
 		api,
-		emitBrowser: (event: Parameters<ArcMindDesktopApi["subscribeBrowser"]>[0] extends (event: infer Event) => void ? Event : never) => {
+		emitBrowser: (event: Parameters<MetisDesktopApi["subscribeBrowser"]>[0] extends (event: infer Event) => void ? Event : never) => {
 			for (const listener of browserSubscribers) listener(event);
 		},
 		emitEvent: (event: Parameters<NonNullable<typeof subscriber>>[0]) => subscriber?.(event),
+		emitUpdate: (state: DesktopUpdateState) => {
+			updateState = state;
+			for (const listener of updateSubscribers) listener(state);
+		},
 		order,
 	};
 }
@@ -404,6 +448,54 @@ afterEach(() => {
 });
 
 describe("Chat desktop shell", () => {
+	it("resizes the sessions sidebar and restores its preferred width after window resizing", async () => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		const originalInnerWidth = window.innerWidth;
+		Object.defineProperty(window, "innerWidth", { configurable: true, value: 1_800 });
+		localStorage.setItem("metis.session-sidebar-width.v1", "560");
+		const { api } = createHarness();
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		try {
+			expect(clampSessionSidebarWidth(286)).toBe(286);
+			await act(async () => root.render(<App api={api} store={new AppStore()} />));
+			await flush();
+			expect(container.querySelector<HTMLElement>(".app-shell")?.style.getPropertyValue("--sidebar-width")).toBe("560px");
+			const resizer = container.querySelector<HTMLElement>('[role="separator"][aria-label="Resize sessions sidebar"]')!;
+			Object.defineProperties(resizer, {
+				hasPointerCapture: { configurable: true, value: () => false },
+				setPointerCapture: { configurable: true, value: vi.fn() },
+			});
+			const pointer = (type: string, clientX: number) => {
+				const event = new Event(type, { bubbles: true });
+				Object.defineProperties(event, {
+					clientX: { value: clientX },
+					pointerId: { value: 1 },
+				});
+				return event;
+			};
+			await act(async () => resizer.dispatchEvent(pointer("pointerdown", 560)));
+			await act(async () => resizer.dispatchEvent(pointer("pointermove", 544)));
+			expect(container.querySelector<HTMLElement>(".app-shell")?.style.getPropertyValue("--sidebar-width")).toBe("544px");
+			expect(localStorage.getItem("metis.session-sidebar-width.v1")).toBe("560");
+			await act(async () => resizer.dispatchEvent(pointer("pointerup", 544)));
+			expect(localStorage.getItem("metis.session-sidebar-width.v1")).toBe("544");
+
+			Object.defineProperty(window, "innerWidth", { configurable: true, value: 720 });
+			await act(async () => window.dispatchEvent(new Event("resize")));
+			expect(container.querySelector<HTMLElement>(".app-shell")?.style.getPropertyValue("--sidebar-width")).toBe("240px");
+			expect(localStorage.getItem("metis.session-sidebar-width.v1")).toBe("544");
+
+			Object.defineProperty(window, "innerWidth", { configurable: true, value: 1_800 });
+			await act(async () => window.dispatchEvent(new Event("resize")));
+			expect(container.querySelector<HTMLElement>(".app-shell")?.style.getPropertyValue("--sidebar-width")).toBe("544px");
+		} finally {
+			await act(async () => root.unmount());
+			Object.defineProperty(window, "innerWidth", { configurable: true, value: originalInnerWidth });
+		}
+	});
+
 	it("groups each mode independently from the nested Date, Project, Unread, or None menu", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 		const now = new Date();
@@ -414,7 +506,7 @@ describe("Chat desktop shell", () => {
 			{ ...session("code-today", "code", "/work/shared", "Code today"), updatedAt: now.toISOString() },
 		];
 		const { api } = createHarness({ sessions });
-		localStorage.removeItem("arcmind.session-grouping.v1");
+		localStorage.removeItem("metis.session-grouping.v1");
 		const container = document.createElement("div");
 		document.body.append(container);
 		const root = createRoot(container);
@@ -441,27 +533,27 @@ describe("Chat desktop shell", () => {
 		await act(async () => menuOption(document.body, "Project").click());
 		expect(projectRow(container, "/work/shared")).toBeTruthy();
 		expect(container.querySelector(".session-grouping-label")?.textContent).toBe("Projects");
-		expect(localStorage.getItem("arcmind.session-grouping.v1")).toBe('{"chat":"project","code":"date"}');
+		expect(localStorage.getItem("metis.session-grouping.v1")).toBe('{"chat":"project","code":"date"}');
 
 		await act(async () => button(container, "Code").click());
 		await flush();
 		expect(button(container, "Group sessions")).toBeTruthy();
 		expect(container.querySelector(".project-heading")).toBeNull();
-		expect(localStorage.getItem("arcmind.session-grouping.v1")).toBe('{"chat":"project","code":"date"}');
+		expect(localStorage.getItem("metis.session-grouping.v1")).toBe('{"chat":"project","code":"date"}');
 
 		await act(async () => button(container, "Group sessions").click());
 		await act(async () => button(document.body, "Group by Date").click());
 		await act(async () => menuOption(document.body, "None").click());
 		expect(container.querySelector(".session-section")).toBeNull();
 		expect(container.querySelectorAll(".session-row")).toHaveLength(1);
-		expect(localStorage.getItem("arcmind.session-grouping.v1")).toBe('{"chat":"project","code":"none"}');
+		expect(localStorage.getItem("metis.session-grouping.v1")).toBe('{"chat":"project","code":"none"}');
 
 		await act(async () => root.unmount());
 	});
 
 	it("keeps session and project action menus outside clipping sidebar containers", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-		localStorage.setItem("arcmind.session-grouping.v1", '{"chat":"date","code":"date"}');
+		localStorage.setItem("metis.session-grouping.v1", '{"chat":"date","code":"date"}');
 		const bottom = { bottom: 754, height: 24, left: 260, right: 284, top: 730, width: 24, x: 260, y: 730, toJSON: () => ({}) } as DOMRect;
 		const { api } = createHarness({ sessions: [session("chat-bottom", "chat", "/work/bottom", "Bottom task")] });
 		const container = document.createElement("div");
@@ -501,7 +593,7 @@ describe("Chat desktop shell", () => {
 	});
 
 	it("restores Keep Awake during bootstrap without opening Scheduled tasks", async () => {
-		localStorage.setItem("arcmind.scheduleKeepAwake.v1", "true");
+		localStorage.setItem("metis.scheduleKeepAwake.v1", "true");
 		const { api } = createHarness();
 		const container = document.createElement("div");
 		document.body.append(container);
@@ -526,7 +618,7 @@ describe("Chat desktop shell", () => {
 		await act(async () => root.unmount());
 	});
 
-	it("opens the personal profile from the ArcMind Settings menu", async () => {
+	it("opens the personal profile from the Metis Settings menu", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 		const { api } = createHarness();
 		const container = document.createElement("div");
@@ -535,14 +627,43 @@ describe("Chat desktop shell", () => {
 		await act(async () => root.render(<App api={api} store={new AppStore()} />));
 		await flush();
 
-		await act(async () => button(container, "ArcMind").click());
+		await act(async () => button(container, "Metis").click());
 		expect(document.activeElement?.textContent).toBe("Settings");
 		await act(async () => button(container, "Settings").click());
 		await flush();
 		expect(api.getProfile).toHaveBeenCalledTimes(1);
 		expect(container.textContent).toContain("Personal profile");
 		expect(container.textContent).toContain("Most used Skills");
-		expect(container.querySelector('[aria-label="Show tools sidebar"]')).toBeNull();
+		expect(container.querySelector('[role="dialog"][aria-label="Settings"]')).not.toBeNull();
+		expect(container.querySelector(".app-shell")?.hasAttribute("inert")).toBe(true);
+		await act(async () => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" })));
+		expect(container.querySelector('[role="dialog"][aria-label="Settings"]')).toBeNull();
+		await act(async () => root.unmount());
+	});
+
+	it("shows the update action above Metis only when a newer version is available", async () => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		const { api, emitUpdate } = createHarness();
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<App api={api} store={new AppStore()} />));
+		await flush();
+		expect(container.querySelector(".sidebar-update-notice")).toBeNull();
+
+		await act(async () => emitUpdate({ status: "available", version: "0.81.0" }));
+		const notice = container.querySelector<HTMLElement>(".sidebar-update-notice")!;
+		expect(notice.nextElementSibling?.classList.contains("sidebar-footer")).toBe(true);
+		const update = button(notice, "Update to new version");
+		expect(update.querySelector("svg")).not.toBeNull();
+		await act(async () => update.click());
+		expect(api.startUpdate).toHaveBeenCalledOnce();
+
+		await act(async () => emitUpdate({ status: "downloading", version: "0.81.0", progress: 42 }));
+		expect(button(notice, "Downloading update 42%").disabled).toBe(true);
+		await act(async () => emitUpdate({ status: "ready", version: "0.81.0" }));
+		expect(button(notice, "Open installer").disabled).toBe(false);
+
 		await act(async () => root.unmount());
 	});
 
@@ -562,7 +683,7 @@ describe("Chat desktop shell", () => {
 		await act(async () => { await new Promise((resolve) => setTimeout(resolve, 220)); });
 		await act(async () => button(container, "Create scheduled task").click());
 		const assisted = [...document.querySelectorAll<HTMLButtonElement>('[role="option"]')]
-			.find((candidate) => candidate.textContent?.trim() === "Create with ArcMind")!;
+			.find((candidate) => candidate.textContent?.trim() === "Create with Metis")!;
 		await act(async () => assisted.click());
 		const chooseFolder = [...container.querySelectorAll<HTMLButtonElement>("dialog button")]
 			.find((candidate) => candidate.textContent?.includes("Choose folder"))!;
@@ -577,7 +698,7 @@ describe("Chat desktop shell", () => {
 		}));
 		expect(api.startTurn).toHaveBeenCalledWith(expect.objectContaining({
 			sessionId: "chat-created",
-			text: "I want to set up a scheduled task. Briefly explain how scheduled tasks work in ArcMind, then ask me a few concise questions to determine what it should do, when it should run, and whether it should use an available Skill. Do not create the task until I confirm the details.",
+			text: "I want to set up a scheduled task. Briefly explain how scheduled tasks work in Metis, then ask me a few concise questions to determine what it should do, when it should run, and whether it should use an available Skill. Do not create the task until I confirm the details.",
 		}));
 		await act(async () => root.unmount());
 	});
@@ -598,7 +719,7 @@ describe("Chat desktop shell", () => {
 		await act(async () => { await new Promise((resolve) => setTimeout(resolve, 220)); });
 		await act(async () => button(container, "Create scheduled task").click());
 		const assisted = [...document.querySelectorAll<HTMLButtonElement>('[role="option"]')]
-			.find((candidate) => candidate.textContent?.trim() === "Create with ArcMind")!;
+			.find((candidate) => candidate.textContent?.trim() === "Create with Metis")!;
 		await act(async () => assisted.click());
 		const useDefault = [...container.querySelectorAll<HTMLButtonElement>("dialog button")]
 			.find((candidate) => candidate.textContent?.includes("Use default workspace"))!;
@@ -641,7 +762,7 @@ describe("Chat desktop shell", () => {
 			JSON.stringify({ version: 1, entries: [{ mode: "chat", cwd: "/work/a", pinned: "yes" }] }),
 			JSON.stringify({ version: 1, entries: [{ mode: "chat", cwd: "/work/a", pinned: false, extra: 1 }] }),
 		]) {
-			localStorage.setItem("arcmind.projectPreferences.v1", value);
+			localStorage.setItem("metis.projectPreferences.v1", value);
 			expect(loadProjectPreferences(localStorage).size).toBe(0);
 		}
 	});
@@ -777,7 +898,7 @@ describe("Chat desktop shell", () => {
 		expect(api.startTurn).not.toHaveBeenCalled();
 		expect(container.querySelector('[data-active-session-id="chat-created"]')).not.toBeNull();
 		expect(container.querySelector(".transcript")?.textContent ?? "").toBe("");
-		expect(localStorage.getItem("arcmind.activeSessionId.chat")).toBe("chat-created");
+		expect(localStorage.getItem("metis.activeSessionId.chat")).toBe("chat-created");
 
 		order.length = 0;
 		const textarea = container.querySelector<HTMLTextAreaElement>("#composer-input")!;
@@ -799,7 +920,7 @@ describe("Chat desktop shell", () => {
 	it("starts an unnamed session turn even when automatic display naming fails", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 		const unnamed = session("chat-unnamed", "chat", "/work/chat-project");
-		localStorage.setItem("arcmind.activeSessionId.chat", unnamed.sessionId);
+		localStorage.setItem("metis.activeSessionId.chat", unnamed.sessionId);
 		const { api } = createHarness({ sessions: [unnamed] });
 		vi.mocked(api.renameSession).mockRejectedValueOnce(new Error("rename unavailable"));
 		const container = document.createElement("div");
@@ -822,26 +943,100 @@ describe("Chat desktop shell", () => {
 		await act(async () => root.unmount());
 	});
 
-	it("renames and deletes ordinary sessions while scheduled sessions stay read-only", async () => {
+	it("groups scheduled tasks separately and deletes their generated sessions from the row action", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-		const active = session("chat-session-active", "chat", "/work/shared", "Active task");
-		const other = session("chat-session-other", "chat", "/work/shared", "Other task");
-		const running = { ...session("chat-session-running", "chat", "/work/shared", "Running task"), state: "running" as const };
-		const scheduled = {
-			...session("chat-session-scheduled", "chat", "/work/shared", "Scheduled task"),
-			scheduled: { taskId: "task-a", runId: "run-a" },
+		const ordinary = session("chat-session-ordinary", "chat", "/work/shared", "Ordinary task");
+		const loose = { ...session("chat-session-loose", "chat", "/work/managed", "Loose task"), cwdOrigin: "managed" as const };
+		const task = scheduledTask();
+		const scheduledRun = {
+			...session("chat-session-scheduled", "chat", "/work/shared", "Generated run"),
+			scheduled: { taskId: task.id, runId: "30000000-0000-4000-8000-000000000001" },
 		};
-		localStorage.setItem("arcmind.activeSessionId.chat", active.sessionId);
-		const { api } = createHarness({ sessions: [active, other, running, scheduled] });
+		const retainedScheduledRun = {
+			...session("chat-session-retained", "chat", "/work/retained", "检查桌面文件"),
+			scheduled: {
+				taskId: "40000000-0000-4000-8000-000000000001",
+				runId: "50000000-0000-4000-8000-000000000001",
+			},
+		};
+		localStorage.setItem("metis.activeSessionId.chat", ordinary.sessionId);
+		const { api, emitEvent } = createHarness({
+			sessions: [ordinary, loose, scheduledRun, retainedScheduledRun],
+			scheduleTasks: [task],
+		});
 		const container = document.createElement("div");
 		document.body.append(container);
 		const root = createRoot(container);
 		await act(async () => root.render(<App api={api} store={new AppStore()} />));
 		await flush();
 
-		const scheduledRow = button(container, "Scheduled task").closest<HTMLElement>(".session-row")!;
-		expect(scheduledRow.textContent).toContain("Scheduled");
-		expect(scheduledRow.querySelector(".session-actions")).toBeNull();
+		expect(container.querySelector(".scheduled-task-quick-list h2")?.textContent).toBe("Scheduled tasks");
+		expect(container.textContent).not.toContain("Generated run");
+		const sessionList = container.querySelector<HTMLElement>(".project-list")!;
+		const scheduledSection = container.querySelector<HTMLElement>(".scheduled-task-quick-list")!;
+		expect(sessionList.contains(scheduledSection)).toBe(true);
+		expect([
+			...sessionList.querySelectorAll(":scope > .session-grouping-label, :scope > .loose-tasks > h2, :scope > .scheduled-task-quick-list > h2"),
+		].map((element) => element.textContent)).toEqual(["Projects", "Tasks", "Scheduled tasks"]);
+		const retainedRow = button(scheduledSection, "检查桌面文件").closest<HTMLElement>(".session-row")!;
+		expect(retainedRow.querySelector(".session-scheduled-badge")).toBeNull();
+		expect(container.querySelector(".loose-tasks")?.textContent ?? "").not.toContain("检查桌面文件");
+		await act(async () => button(retainedRow, "Actions for 检查桌面文件").click());
+		expect([...document.body.querySelectorAll(".session-action-menu [role=menuitem]")].map((item) => item.textContent?.trim())).toEqual(["Delete"]);
+		await act(async () => button(document.body, "Delete").click());
+		await flush();
+		await act(async () => button(container, "Move to Trash").click());
+		await flush();
+		expect(api.deleteSession).toHaveBeenCalledWith(expect.objectContaining({ sessionId: retainedScheduledRun.sessionId }));
+		expect(scheduledSection.textContent).not.toContain("检查桌面文件");
+		const row = button(container, task.name).closest<HTMLElement>(".scheduled-task-quick-row")!;
+		expect(row).not.toBeNull();
+		await act(async () => button(row, `Actions for ${task.name}`).click());
+		expect(document.body.querySelector(".session-action-menu")?.textContent?.trim()).toBe("Delete");
+		await act(async () => button(document.body, "Delete").click());
+		expect(container.querySelector('.scheduled-task-delete-option input[type="checkbox"]')).toBeNull();
+		expect(container.querySelector(".scheduled-task-delete-dialog")?.textContent).toContain(
+			"Moves generated Scheduled sessions",
+		);
+		await act(async () => button(container, "Delete").click());
+		await flush();
+
+		expect(api.deleteSchedule).toHaveBeenCalledWith(expect.objectContaining({
+			taskId: task.id,
+			deleteSessions: true,
+		}));
+		await act(async () => emitEvent({
+			type: "app-server",
+			envelope: {
+				jsonrpc: "2.0",
+				method: "connection/events",
+				params: {
+					serverEpoch: EPOCH,
+					fromCursor: 1,
+					toCursor: 1,
+					events: [{ type: "session/invalidated", sessionId: scheduledRun.sessionId, reason: "deleted" }],
+				},
+			},
+		}));
+		await flush();
+		expect(container.textContent).not.toContain(task.name);
+		expect(container.querySelector(".scheduled-task-quick-list")).toBeNull();
+		expect(button(container, "Scheduled tasks")).not.toBeNull();
+		await act(async () => root.unmount());
+	});
+
+	it("renames and deletes ordinary sessions", async () => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		const active = session("chat-session-active", "chat", "/work/shared", "Active task");
+		const other = session("chat-session-other", "chat", "/work/shared", "Other task");
+		const running = { ...session("chat-session-running", "chat", "/work/shared", "Running task"), state: "running" as const };
+		localStorage.setItem("metis.activeSessionId.chat", active.sessionId);
+		const { api } = createHarness({ sessions: [active, other, running] });
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<App api={api} store={new AppStore()} />));
+		await flush();
 
 		let otherRow = button(container, "Other task").closest<HTMLElement>(".session-row")!;
 		await act(async () => button(otherRow, "Actions for Other task").click());
@@ -879,14 +1074,14 @@ describe("Chat desktop shell", () => {
 		await act(async () => button(container, "Move to Trash").click());
 		await flush();
 		expect(container.textContent).toContain("What can I take off your plate?");
-		expect(localStorage.getItem("arcmind.activeSessionId.chat")).toBeNull();
+		expect(localStorage.getItem("metis.activeSessionId.chat")).toBeNull();
 		await act(async () => root.unmount());
 	});
 
 	it("reuses the session delete request id after a lost response", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 		const active = session("chat-delete-retry", "chat", "/work/retry", "Retry task");
-		localStorage.setItem("arcmind.activeSessionId.chat", active.sessionId);
+		localStorage.setItem("metis.activeSessionId.chat", active.sessionId);
 		const { api } = createHarness({ sessions: [active] });
 		vi.mocked(api.deleteSession).mockRejectedValueOnce(new Error("delete response lost"));
 		const container = document.createElement("div");
@@ -1006,7 +1201,7 @@ describe("Chat desktop shell", () => {
 		preferences = setProjectPinned(preferences, "chat", "/work/shared", true);
 		preferences = setProjectAlias(preferences, "code", "/work/shared", "Code local");
 		saveProjectPreferences(localStorage, preferences);
-		localStorage.setItem("arcmind.activeSessionId.chat", chatActive.sessionId);
+		localStorage.setItem("metis.activeSessionId.chat", chatActive.sessionId);
 		const { api } = createHarness({ sessions: [chatActive, chatArchived, code] });
 		vi.mocked(api.previewProjectDelete)
 			.mockResolvedValueOnce({
@@ -1059,7 +1254,7 @@ describe("Chat desktop shell", () => {
 		}));
 		expect(container.textContent).not.toContain("Chat local");
 		expect(container.textContent).toContain("What can I take off your plate?");
-		expect(localStorage.getItem("arcmind.activeSessionId.chat")).toBeNull();
+		expect(localStorage.getItem("metis.activeSessionId.chat")).toBeNull();
 		expect([...loadProjectPreferences(localStorage).values()]).toEqual([
 			{ mode: "code", cwd: "/work/shared", alias: "Code local", pinned: false },
 		]);
@@ -1073,7 +1268,7 @@ describe("Chat desktop shell", () => {
 	it("keeps renderer evidence on delete failure and reloads a fresh preview on Retry", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 		const chat = session("chat-delete-failure", "chat", "/work/failure", "Keep me");
-		localStorage.setItem("arcmind.activeSessionId.chat", chat.sessionId);
+		localStorage.setItem("metis.activeSessionId.chat", chat.sessionId);
 		const { api } = createHarness({ sessions: [chat] });
 		const lostResponse = new Error("delete response was lost");
 		vi.mocked(api.deleteProject).mockRejectedValueOnce(lostResponse);
@@ -1090,7 +1285,7 @@ describe("Chat desktop shell", () => {
 		await flush();
 		expect(container.querySelector(".project-dialog")?.textContent).toContain("delete response was lost");
 		expect(container.textContent).toContain("Keep me");
-		expect(localStorage.getItem("arcmind.activeSessionId.chat")).toBe(chat.sessionId);
+		expect(localStorage.getItem("metis.activeSessionId.chat")).toBe(chat.sessionId);
 		await act(async () => button(container, "Retry").click());
 		await flush();
 		expect(api.previewProjectDelete).toHaveBeenCalledTimes(2);
@@ -1160,7 +1355,7 @@ describe("Chat desktop shell", () => {
 	});
 
 	it("never exposes the managed workspace path as the session title", () => {
-		expect(sessionDisplayTitle({ cwd: "/Users/example/.arcmind/agent/workspaces/session-id", cwdOrigin: "managed", name: "" })).toBe("Chat");
+		expect(sessionDisplayTitle({ cwd: "/Users/example/.metis/agent/workspaces/session-id", cwdOrigin: "managed", name: "" })).toBe("Chat");
 		expect(sessionDisplayTitle({ cwd: "/work/project", cwdOrigin: "user-selected", name: "" })).toBe("/work/project");
 	});
 
@@ -1193,9 +1388,137 @@ describe("Chat desktop shell", () => {
 		)).toBe(visible);
 	});
 
+	it("docks permission approval above the active composer", async () => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
+		const { api, emitEvent } = createHarness();
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<App api={api} store={new AppStore()} />));
+		await flush();
+
+		act(() => emitEvent({
+			type: "app-server",
+			envelope: {
+				jsonrpc: "2.0",
+				id: "00000000-0000-4000-8000-000000000203",
+				method: "interaction/request",
+				params: {
+					serverEpoch: EPOCH,
+					interaction: {
+						interactionId: "00000000-0000-4000-8000-000000000204",
+						sessionId: "chat-existing",
+						title: "Approve bash?",
+						message: "Remove the generated cache.\nRisk: destructive\nCommand: rm cache.tmp",
+						createdAt: "2026-07-20T00:00:00.000Z",
+						kind: "select",
+						presentation: "permission_approval",
+						operation: {
+							toolName: "bash",
+							rows: [
+								{ label: "Command", value: "rm cache.tmp" },
+								{ label: "Working directory", value: "/tmp/work" },
+							],
+							omittedRows: 0,
+							scopeComplete: true,
+							irreversible: true,
+						},
+						choices: [
+							{ id: "choice:0", label: "Allow once" },
+							{ id: "choice:1", label: "Deny" },
+						],
+					},
+				},
+			},
+		}));
+
+		const dock = container.querySelector<HTMLElement>(".composer-dock")!;
+		const panel = container.querySelector<HTMLElement>(".permission-approval-panel")!;
+		expect(panel).not.toBeNull();
+		expect(dock.contains(panel)).toBe(true);
+		expect(container.querySelector(".modal-backdrop")).toBeNull();
+		expect(panel.textContent).toContain("Metis wants to use bash");
+		expect(panel.textContent).toContain("Command");
+		expect(panel.textContent).toContain("rm cache.tmp");
+		expect(panel.textContent).toContain("Working directory");
+		expect(panel.textContent).toContain("/tmp/work");
+		expect(panel.textContent).not.toContain("Arguments:");
+		await act(async () => button(panel, "Allow once").click());
+		await flush();
+		expect(api.respondToInteraction).toHaveBeenCalledWith({
+			interactionId: "00000000-0000-4000-8000-000000000204",
+			kind: "select",
+			choiceId: "choice:0",
+		});
+		expect(container.querySelector(".permission-approval-panel")).toBeNull();
+		await act(async () => root.unmount());
+	});
+
+	it("docks ask_user above the active composer and returns a structured answer", async () => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
+		const { api, emitEvent } = createHarness();
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<App api={api} store={new AppStore()} />));
+		await flush();
+
+		act(() => emitEvent({
+			type: "app-server",
+			envelope: {
+				jsonrpc: "2.0",
+				id: "00000000-0000-4000-8000-000000000205",
+				method: "interaction/request",
+				params: {
+					serverEpoch: EPOCH,
+					interaction: {
+						interactionId: "00000000-0000-4000-8000-000000000206",
+						sessionId: "chat-existing",
+						title: "Metis has questions",
+						message: "Answer each question to continue.",
+						createdAt: "2026-08-10T00:00:00.000Z",
+						kind: "ask_user",
+						questions: [{
+							id: "question:0",
+							question: "Where should the data be stored?",
+							multiple: false,
+							choices: [
+								{ id: "choice:0", label: "Local" },
+								{ id: "choice:1", label: "Cloud" },
+							],
+						}],
+					},
+				},
+			},
+		}));
+
+		const dock = container.querySelector<HTMLElement>(".composer-dock")!;
+		const panel = container.querySelector<HTMLElement>(".ask-user-panel")!;
+		expect(panel).not.toBeNull();
+		expect(dock.contains(panel)).toBe(true);
+		expect(container.querySelector(".modal-backdrop")).toBeNull();
+		expect(container.querySelector(".composer-dock > .ask-user-slot + .composer-chat")).not.toBeNull();
+		expect(panel.textContent).toContain("Where should the data be stored?");
+		expect(panel.textContent).toContain("Something else");
+
+		await act(async () => [...panel.querySelectorAll<HTMLButtonElement>(".ask-user-option")]
+			.find((candidate) => candidate.textContent?.includes("Cloud"))?.click());
+		await flush();
+		expect(api.respondToInteraction).toHaveBeenCalledWith({
+			interactionId: "00000000-0000-4000-8000-000000000206",
+			kind: "ask_user",
+			cancelled: false,
+			answers: [{ questionId: "question:0", choiceIds: ["choice:1"] }],
+		});
+		expect(container.querySelector(".ask-user-panel")).toBeNull();
+		await act(async () => root.unmount());
+	});
+
 	it("filters the initial Chat tree and creates the real session only on first send", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-		localStorage.setItem("arcmind.activeSessionId.code", "code-existing");
+		localStorage.setItem("metis.activeSessionId.code", "code-existing");
 		const { api, order } = createHarness();
 		const container = document.createElement("div");
 		document.body.append(container);
@@ -1305,7 +1628,7 @@ describe("Chat desktop shell", () => {
 
 	it("keeps a session permission change local to its control until the server event arrives", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-		localStorage.setItem("arcmind.activeSessionId.chat", "chat-existing");
+		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
 		const { api, emitEvent } = createHarness();
 		let resolveChange!: (result: { permissionMode: "full" }) => void;
 		vi.mocked(api.setPermissionMode).mockImplementationOnce(() => new Promise((resolve) => {
@@ -1350,7 +1673,7 @@ describe("Chat desktop shell", () => {
 
 	it("returns to a fresh task when another client deletes the active session", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-		localStorage.setItem("arcmind.activeSessionId.chat", "chat-existing");
+		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
 		const { api, emitEvent } = createHarness();
 		const store = new AppStore();
 		const container = document.createElement("div");
@@ -1381,14 +1704,14 @@ describe("Chat desktop shell", () => {
 
 		expect(store.getSnapshot().activeSessionId).toBeNull();
 		expect(store.getSnapshot().sessionsById.has("code-existing")).toBe(false);
-		expect(localStorage.getItem("arcmind.activeSessionId.chat")).toBeNull();
+		expect(localStorage.getItem("metis.activeSessionId.chat")).toBeNull();
 		expect(container.querySelector(".new-task-home")).not.toBeNull();
 		await act(async () => root.unmount());
 	});
 
 	it("removes a remotely deleted project while preserving the other mode", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-		localStorage.setItem("arcmind.activeSessionId.chat", "chat-existing");
+		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
 		const { api, emitEvent } = createHarness();
 		const store = new AppStore();
 		const container = document.createElement("div");
@@ -1428,7 +1751,7 @@ describe("Chat desktop shell", () => {
 
 		expect(store.getSnapshot().activeSessionId).toBeNull();
 		expect(store.getSnapshot().sessionsById.has("code-existing")).toBe(true);
-		expect(localStorage.getItem("arcmind.activeSessionId.chat")).toBeNull();
+		expect(localStorage.getItem("metis.activeSessionId.chat")).toBeNull();
 		expect(container.querySelector(".new-task-home")).not.toBeNull();
 		await act(async () => root.unmount());
 	});
@@ -1437,7 +1760,7 @@ describe("Chat desktop shell", () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 		const active = { ...session("chat-existing", "chat", "/work/chat-project", "Active"), unread: true };
 		const background = session("chat-background", "chat", "/work/other", "Background");
-		localStorage.setItem("arcmind.activeSessionId.chat", active.sessionId);
+		localStorage.setItem("metis.activeSessionId.chat", active.sessionId);
 		const { api, emitEvent } = createHarness({ sessions: [active, background] });
 		const store = new AppStore();
 		const container = document.createElement("div");
@@ -1491,7 +1814,7 @@ describe("Chat desktop shell", () => {
 
 	it("resnapshots the real permission after a partial downgrade failure", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-		localStorage.setItem("arcmind.activeSessionId.chat", "chat-existing");
+		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
 		const { api } = createHarness();
 		const summary = session("chat-existing", "chat", "/work/chat-project", "Chat project task");
 		vi.mocked(api.openSession)
@@ -1517,7 +1840,7 @@ describe("Chat desktop shell", () => {
 
 	it("disables session permission changes while a turn is running", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-		localStorage.setItem("arcmind.activeSessionId.chat", "chat-existing");
+		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
 		const { api } = createHarness();
 		const running = { ...session("chat-existing", "chat", "/work/chat-project", "Chat project task"), state: "running" as const };
 		vi.mocked(api.openSession).mockResolvedValueOnce({
@@ -1536,7 +1859,7 @@ describe("Chat desktop shell", () => {
 
 	it("opens an empty Code session immediately after choosing an existing folder", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-		localStorage.setItem("arcmind.activeSessionId.code", "code-existing");
+		localStorage.setItem("metis.activeSessionId.code", "code-existing");
 		const { api, order } = createHarness();
 		const container = document.createElement("div");
 		document.body.append(container);
@@ -1554,7 +1877,7 @@ describe("Chat desktop shell", () => {
 		expect(api.createSession).not.toHaveBeenCalled();
 
 		await act(async () => button(container, "Use an existing folder").click());
-		expect(container.textContent).toContain("Choose a folder and ArcMind will treat its files as project context.");
+		expect(container.textContent).toContain("Choose a folder and Metis will treat its files as project context.");
 		order.length = 0;
 		await act(async () => button(container, "Choose folder").click());
 		await flush();
@@ -1595,7 +1918,7 @@ describe("Chat desktop shell", () => {
 
 	it("creates a new folder and immediately opens its empty Code session", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-		localStorage.setItem("arcmind.activeSessionId.code", "code-existing");
+		localStorage.setItem("metis.activeSessionId.code", "code-existing");
 		const { api } = createHarness();
 		const container = document.createElement("div");
 		document.body.append(container);
@@ -1609,20 +1932,20 @@ describe("Chat desktop shell", () => {
 		await flush();
 
 		expect(container.querySelector<HTMLInputElement>("#code-project-name")?.value).toBe("");
-		expect(container.textContent).toContain("/Users/test/ArcMind Projects");
+		expect(container.textContent).toContain("/Users/test/Metis Projects");
 		await act(async () => changeInput(container.querySelector<HTMLInputElement>("#code-project-name")!, "Desktop App"));
 		await act(async () => container.querySelector<HTMLFormElement>(".code-project-form")!.requestSubmit());
 		await flush();
 		await flush();
 
 		expect(api.createProjectFolder).toHaveBeenCalledWith({
-			parentDirectory: "/Users/test/ArcMind Projects",
+			parentDirectory: "/Users/test/Metis Projects",
 			name: "Desktop App",
 			files: [],
 		});
 		expect(api.createSession).toHaveBeenCalledWith(expect.objectContaining({
 			mode: "code",
-			cwd: "/Users/test/ArcMind Projects/Desktop App",
+			cwd: "/Users/test/Metis Projects/Desktop App",
 		}));
 		expect(api.startTurn).not.toHaveBeenCalled();
 		await act(async () => root.unmount());
@@ -1630,7 +1953,7 @@ describe("Chat desktop shell", () => {
 
 	it("keeps the add menu in an existing Code session composer", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-		localStorage.setItem("arcmind.activeSessionId.code", "code-existing");
+		localStorage.setItem("metis.activeSessionId.code", "code-existing");
 		const { api } = createHarness();
 		const container = document.createElement("div");
 		document.body.append(container);
@@ -1658,8 +1981,8 @@ describe("Chat desktop shell", () => {
 
 	it("clears skills while the newly visible session skills are loading", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-		localStorage.setItem("arcmind.activeSessionId.chat", "chat-existing");
-		localStorage.setItem("arcmind.activeSessionId.code", "code-existing");
+		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
+		localStorage.setItem("metis.activeSessionId.code", "code-existing");
 		const { api } = createHarness();
 		const container = document.createElement("div");
 		document.body.append(container);
@@ -1684,7 +2007,7 @@ describe("Chat desktop shell", () => {
 
 	it("reports a failed interrupt without leaving an unhandled rejection", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-		localStorage.setItem("arcmind.activeSessionId.chat", "chat-existing");
+		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
 		const { api } = createHarness();
 		vi.mocked(api.openSession).mockImplementation(async ({ sessionId }) => {
 			const summary = session(sessionId, "chat", "/work/chat-project", "Chat project task");
@@ -1700,6 +2023,14 @@ describe("Chat desktop shell", () => {
 		await act(async () => root.render(<App api={api} store={new AppStore()} />));
 		await flush();
 
+		const textarea = container.querySelector("textarea")!;
+		expect(button(container, "Stop task")).toBeTruthy();
+		expect(container.querySelector('[aria-label="Steer task"]')).toBeNull();
+		await act(async () => changeTextarea(textarea, "Follow up"));
+		expect(container.querySelector('[aria-label="Stop task"]')).toBeNull();
+		expect(button(container, "Steer task").disabled).toBe(false);
+		await act(async () => changeTextarea(textarea, ""));
+		expect(container.querySelector('[aria-label="Steer task"]')).toBeNull();
 		await act(async () => button(container, "Stop task").click());
 		await flush();
 
@@ -1783,7 +2114,7 @@ describe("Chat desktop shell", () => {
 		await act(async () => add().click());
 		await act(async () => button(container.querySelector<HTMLElement>(".composer-add-menu")!, "Skills").click());
 		await act(async () => button(container.querySelector<HTMLElement>(".composer-skill-menu")!, "Manage skills").click());
-		expect(container.textContent).toContain("Skills included with ArcMind");
+		expect(container.textContent).toContain("Skills included with Metis");
 		await act(async () => root.unmount());
 	});
 
@@ -1812,7 +2143,7 @@ describe("Chat desktop shell", () => {
 
 	it("retains additions after a failed active send and changes replay identity with the file", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-		localStorage.setItem("arcmind.activeSessionId.chat", "chat-existing");
+		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
 		const { api } = createHarness({ loseFirstStartResponse: true });
 		const container = document.createElement("div");
 		document.body.append(container);
@@ -1860,7 +2191,7 @@ describe("Chat desktop shell", () => {
 	it("keeps an optimistic effort visible and resnapshots after a failed change", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 		vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(null);
-		localStorage.setItem("arcmind.activeSessionId.code", "code-existing");
+		localStorage.setItem("metis.activeSessionId.code", "code-existing");
 		const { api } = createHarness();
 		const codeSnapshot = {
 			...snapshot(session("code-existing", "code", "/work/code-project", "Code project task")),
@@ -1979,7 +2310,7 @@ describe("Chat desktop shell", () => {
 
 	it("retries an existing Code folder with the same idempotent create request after open fails", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-		localStorage.setItem("arcmind.activeSessionId.code", "code-existing");
+		localStorage.setItem("metis.activeSessionId.code", "code-existing");
 		const { api } = createHarness({ failOpenSessionIds: ["code-created"] });
 		const container = document.createElement("div");
 		document.body.append(container);
@@ -2089,7 +2420,7 @@ describe("Chat desktop shell", () => {
 
 	it("reuses an active turn request ID when its first response is lost", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-		localStorage.setItem("arcmind.activeSessionId.chat", "chat-existing");
+		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
 		const { api } = createHarness({ loseFirstStartResponse: true });
 		const container = document.createElement("div");
 		document.body.append(container);
@@ -2126,13 +2457,13 @@ describe("Chat desktop shell", () => {
 
 		expect(container.textContent).toContain("open failed once");
 		expect(container.textContent).toContain("What can I take off your plate?");
-		expect(container.textContent).not.toContain("ArcMind Code");
+		expect(container.textContent).not.toContain("Metis Code");
 		await act(async () => root.unmount());
 	});
 
 	it("keeps the current session synchronized when reopening it fails", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-		localStorage.setItem("arcmind.activeSessionId.chat", "chat-existing");
+		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
 		const { api } = createHarness();
 		const store = new AppStore();
 		const container = document.createElement("div");
@@ -2149,13 +2480,13 @@ describe("Chat desktop shell", () => {
 		expect(container.textContent).toContain("reopen failed");
 		expect(store.getSnapshot().activeSessionId).toBe("chat-existing");
 		expect(store.getSnapshot().syncStatus).toBe("ready");
-		expect(localStorage.getItem("arcmind.activeSessionId.chat")).toBe("chat-existing");
+		expect(localStorage.getItem("metis.activeSessionId.chat")).toBe("chat-existing");
 		await act(async () => root.unmount());
 	});
 
 	it("keeps unrelated navigation enabled while a model change is pending", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-		localStorage.setItem("arcmind.activeSessionId.chat", "chat-existing");
+		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
 		const { api } = createHarness();
 		let resolveChange!: () => void;
 		vi.mocked(api.setModel).mockImplementationOnce(() => new Promise<void>((resolve) => {
@@ -2187,7 +2518,7 @@ describe("Chat desktop shell", () => {
 
 	it("keeps unrelated navigation enabled while another session is opening", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-		localStorage.setItem("arcmind.activeSessionId.chat", "chat-existing");
+		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
 		const first = session("chat-existing", "chat", "/work/chat-project", "Chat project task");
 		const second = session("chat-other", "chat", "/work/chat-project", "Other chat task");
 		const { api } = createHarness({ sessions: [first, second] });
@@ -2217,7 +2548,7 @@ describe("Chat desktop shell", () => {
 
 	it("resnapshots the current session when events race with a failed open", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-		localStorage.setItem("arcmind.activeSessionId.chat", "chat-existing");
+		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
 		const { api, emitEvent } = createHarness();
 		const store = new AppStore();
 		const container = document.createElement("div");
@@ -2259,14 +2590,14 @@ describe("Chat desktop shell", () => {
 
 	it("keeps the Chat home visible when restoring its remembered session fails", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-		localStorage.setItem("arcmind.activeSessionId.code", "code-existing");
+		localStorage.setItem("metis.activeSessionId.code", "code-existing");
 		const { api } = createHarness({ failOpenSessionIds: ["chat-existing"] });
 		const container = document.createElement("div");
 		document.body.append(container);
 		const root = createRoot(container);
 		await act(async () => root.render(<App api={api} store={new AppStore()} />));
 		await flush();
-		localStorage.setItem("arcmind.activeSessionId.chat", "chat-existing");
+		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
 		expect(container.querySelector(".mode-switch")?.getAttribute("data-mode")).toBe("chat");
 		expect(container.querySelectorAll(".mode-switch-indicator")).toHaveLength(1);
 
@@ -2278,14 +2609,14 @@ describe("Chat desktop shell", () => {
 
 		expect(container.textContent).toContain("open failed once");
 		expect(container.textContent).toContain("What can I take off your plate?");
-		expect(container.textContent).not.toContain("ArcMind Code");
+		expect(container.textContent).not.toContain("Metis Code");
 		await act(async () => root.unmount());
 	});
 
 	it("does not flash the mode home while restoring its remembered session", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-		localStorage.setItem("arcmind.activeSessionId.chat", "chat-existing");
-		localStorage.setItem("arcmind.activeSessionId.code", "code-existing");
+		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
+		localStorage.setItem("metis.activeSessionId.code", "code-existing");
 		const { api } = createHarness();
 		const container = document.createElement("div");
 		document.body.append(container);
@@ -2301,7 +2632,7 @@ describe("Chat desktop shell", () => {
 		act(() => button(container, "Code").click());
 
 		expect(container.textContent).toContain("Chat project task");
-		expect(container.textContent).not.toContain("ArcMind Code");
+		expect(container.textContent).not.toContain("Metis Code");
 
 		await act(async () => resolveCodeOpen(snapshot(session("code-existing", "code", "/work/code-project", "Code project task"))));
 		expect(container.textContent).toContain("Code project task");
@@ -2310,7 +2641,7 @@ describe("Chat desktop shell", () => {
 
 	it("does not expose a draft composer while the remembered session is bootstrapping", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-		localStorage.setItem("arcmind.activeSessionId.chat", "chat-existing");
+		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
 		const { api } = createHarness();
 		let resolveOpen!: (value: SessionSnapshot) => void;
 		vi.mocked(api.openSession).mockImplementationOnce(
@@ -2335,7 +2666,7 @@ describe("Chat desktop shell", () => {
 
 	it("shows an interaction required to finish remembered-session bootstrapping", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-		localStorage.setItem("arcmind.activeSessionId.chat", "chat-existing");
+		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
 		const { api, emitEvent } = createHarness();
 		vi.mocked(api.openSession).mockImplementationOnce(() => new Promise(() => undefined));
 		const container = document.createElement("div");
@@ -2374,14 +2705,14 @@ describe("Chat desktop shell", () => {
 
 	it("restores the remembered session per mode and keeps Skills visual-only", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-		localStorage.setItem("arcmind.activeSessionId.code", "code-existing");
+		localStorage.setItem("metis.activeSessionId.code", "code-existing");
 		const { api } = createHarness();
 		const container = document.createElement("div");
 		document.body.append(container);
 		const root = createRoot(container);
 		await act(async () => root.render(<App api={api} store={new AppStore()} />));
 		await flush();
-		localStorage.setItem("arcmind.activeSessionId.chat", "chat-existing");
+		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
 
 		await act(async () => button(container, "Code").click());
 		await flush();
@@ -2410,7 +2741,7 @@ describe("Chat desktop shell", () => {
 
 		const backendCalls = vi.mocked(api.createSession).mock.calls.length + vi.mocked(api.openSession).mock.calls.length;
 		await act(async () => button(container, "Skills").click());
-		expect(container.textContent).toContain("Skills included with ArcMind");
+		expect(container.textContent).toContain("Skills included with Metis");
 		expect(vi.mocked(api.createSession).mock.calls.length + vi.mocked(api.openSession).mock.calls.length).toBe(backendCalls);
 
 		await act(async () => button(container, "Chat").click());
@@ -2430,8 +2761,8 @@ describe("Chat desktop shell", () => {
 
 	it("opens independent terminal tabs and keeps them mounted while the sidebar is collapsed", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-		localStorage.setItem("arcmind.activeSessionId.chat", "chat-existing");
-		localStorage.setItem("arcmind.activeSessionId.code", "code-existing");
+		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
+		localStorage.setItem("metis.activeSessionId.code", "code-existing");
 		const { api } = createHarness();
 		const container = document.createElement("div");
 		document.body.append(container);
@@ -2485,7 +2816,7 @@ describe("Chat desktop shell", () => {
 
 	it("opens one Review tab in Code mode and reselects it instead of duplicating it", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-		localStorage.setItem("arcmind.activeSessionId.code", "code-existing");
+		localStorage.setItem("metis.activeSessionId.code", "code-existing");
 		const { api } = createHarness();
 		const container = document.createElement("div");
 		document.body.append(container);
@@ -2516,7 +2847,7 @@ describe("Chat desktop shell", () => {
 
 	it("closes native tools and removes stored file state when a session is deleted", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-		localStorage.setItem("arcmind.activeSessionId.code", "code-existing");
+		localStorage.setItem("metis.activeSessionId.code", "code-existing");
 		const { api } = createHarness();
 		const container = document.createElement("div");
 		document.body.append(container);
@@ -2537,7 +2868,7 @@ describe("Chat desktop shell", () => {
 		await flush();
 		await act(async () => container.querySelector<HTMLButtonElement>('.file-tree-row [title="README.md"]')!.click());
 		await flush();
-		expect(localStorage.getItem("arcmind.file-browser.v1:code-existing")).not.toBeNull();
+		expect(localStorage.getItem("metis.file-browser.v1:code-existing")).not.toBeNull();
 
 		const activeRow = button(container, "Code project task").closest<HTMLElement>(".session-row")!;
 		await act(async () => button(activeRow, "Actions for Code project task").click());
@@ -2552,7 +2883,7 @@ describe("Chat desktop shell", () => {
 		expect(api.closeBrowser).toHaveBeenCalledWith({
 			browserId: vi.mocked(api.createBrowser).mock.calls[0]![0].browserId,
 		});
-		expect(localStorage.getItem("arcmind.file-browser.v1:code-existing")).toBeNull();
+		expect(localStorage.getItem("metis.file-browser.v1:code-existing")).toBeNull();
 		expect(container.querySelectorAll('[role="tab"]')).toHaveLength(0);
 		await act(async () => root.unmount());
 	});
@@ -2563,8 +2894,8 @@ describe("Chat desktop shell", () => {
 			x: 0, y: 0, top: 0, right: 320, bottom: 600, left: 0, width: 320, height: 600,
 			toJSON: () => ({}),
 		});
-		localStorage.setItem("arcmind.activeSessionId.chat", "chat-existing");
-		localStorage.setItem("arcmind.activeSessionId.code", "code-existing");
+		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
+		localStorage.setItem("metis.activeSessionId.code", "code-existing");
 		const { api } = createHarness();
 		const container = document.createElement("div");
 		document.body.append(container);
@@ -2628,13 +2959,13 @@ describe("Chat desktop shell", () => {
 			container.querySelector<HTMLElement>('[role="separator"][aria-label="Resize tools sidebar"]')!
 				.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true })),
 		);
-		expect(localStorage.getItem("arcmind.tools-sidebar-width.v2:code-existing")).toBe("544");
+		expect(localStorage.getItem("metis.tools-sidebar-width.v2:code-existing")).toBe("544");
 		expect(container.querySelectorAll(".cm-editor")).toHaveLength(1);
 		const workspace = container.querySelector<HTMLElement>(".workspace")!;
 		Object.defineProperty(workspace, "clientWidth", { configurable: true, value: 560 });
 		await act(async () => window.dispatchEvent(new Event("resize")));
 		expect(container.querySelector<HTMLElement>(".tool-sidebar")?.style.width).toBe("280px");
-		expect(localStorage.getItem("arcmind.tools-sidebar-width.v2:code-existing")).toBe("544");
+		expect(localStorage.getItem("metis.tools-sidebar-width.v2:code-existing")).toBe("544");
 		Object.defineProperty(workspace, "clientWidth", { configurable: true, value: 1_746 });
 		await act(async () => window.dispatchEvent(new Event("resize")));
 		expect(container.querySelector<HTMLElement>(".tool-sidebar")?.style.width).toBe("544px");
@@ -2642,7 +2973,7 @@ describe("Chat desktop shell", () => {
 		await act(async () => button(container, "Chat").click());
 		await flush();
 		expect(container.querySelector<HTMLElement>(".tool-sidebar")?.style.width).toBe("528px");
-		expect(localStorage.getItem("arcmind.tools-sidebar-width.v2:chat-existing")).toBeNull();
+		expect(localStorage.getItem("metis.tools-sidebar-width.v2:chat-existing")).toBeNull();
 		expect(container.querySelectorAll(".cm-editor")).toHaveLength(0);
 		await act(async () => button(container, "Code").click());
 		await flush();
@@ -2671,7 +3002,7 @@ describe("Chat desktop shell", () => {
 			x: 0, y: 0, top: 0, right: 320, bottom: 600, left: 0, width: 320, height: 600,
 			toJSON: () => ({}),
 		});
-		localStorage.setItem("arcmind.activeSessionId.code", "code-existing");
+		localStorage.setItem("metis.activeSessionId.code", "code-existing");
 		const { api } = createHarness();
 		const container = document.createElement("div");
 		document.body.append(container);
@@ -2801,7 +3132,7 @@ describe("Chat desktop shell", () => {
 			x: 0, y: 0, top: 0, right: 320, bottom: 600, left: 0, width: 320, height: 600,
 			toJSON: () => ({}),
 		});
-		localStorage.setItem("arcmind.activeSessionId.code", "code-existing");
+		localStorage.setItem("metis.activeSessionId.code", "code-existing");
 		const { api } = createHarness();
 		const directories = new Set(["docs", "src", "src/nested"]);
 		const files = new Set([".env", "notes.txt", "README.md", "docs/guide.md", "src/a.ts", "src/nested/b.ts"]);
@@ -2943,7 +3274,7 @@ describe("Chat desktop shell", () => {
 		await act(async () => changeInput(dialog.querySelector<HTMLInputElement>('[aria-label="Name"]')!, "source"));
 		await act(async () => button(dialog, "Rename").click());
 		await flush();
-		let stored = JSON.parse(localStorage.getItem("arcmind.file-browser.v1:code-existing")!) as {
+		let stored = JSON.parse(localStorage.getItem("metis.file-browser.v1:code-existing")!) as {
 			fixedPaths: string[]; expandedPaths: string[];
 		};
 		expect(stored.fixedPaths).toEqual(expect.arrayContaining(["source/a.ts", "source/nested/b.ts"]));
@@ -2955,7 +3286,7 @@ describe("Chat desktop shell", () => {
 		await act(async () => changeInput(dialog.querySelector<HTMLInputElement>('[aria-label="Destination folder"]')!, "docs"));
 		await act(async () => button(dialog, "Move").click());
 		await flush();
-		stored = JSON.parse(localStorage.getItem("arcmind.file-browser.v1:code-existing")!) as {
+		stored = JSON.parse(localStorage.getItem("metis.file-browser.v1:code-existing")!) as {
 			fixedPaths: string[]; expandedPaths: string[];
 		};
 		expect(stored.fixedPaths).toEqual(expect.arrayContaining(["docs/source/a.ts", "docs/source/nested/b.ts"]));
@@ -2969,7 +3300,7 @@ describe("Chat desktop shell", () => {
 		await act(async () => button(dialog, "Move to Trash").click());
 		await flush();
 		expect([...container.querySelectorAll('[role="tab"]')].some((tab) => /a\.ts|b\.ts/u.test(tab.textContent ?? ""))).toBe(false);
-		stored = JSON.parse(localStorage.getItem("arcmind.file-browser.v1:code-existing")!) as {
+		stored = JSON.parse(localStorage.getItem("metis.file-browser.v1:code-existing")!) as {
 			fixedPaths: string[]; expandedPaths: string[];
 		};
 		expect(stored.expandedPaths.some((path) => path.startsWith("docs/source"))).toBe(false);
@@ -2978,7 +3309,7 @@ describe("Chat desktop shell", () => {
 
 	it("retries a failed workspace tree load", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-		localStorage.setItem("arcmind.activeSessionId.code", "code-existing");
+		localStorage.setItem("metis.activeSessionId.code", "code-existing");
 		const { api } = createHarness();
 		vi.mocked(api.listWorkspaceDirectory).mockRejectedValueOnce(new Error("tree unavailable"));
 		const container = document.createElement("div");
@@ -3003,7 +3334,7 @@ describe("Chat desktop shell", () => {
 
 	it("opens a real browser tab, navigates it, and keeps native presentation behind overlays", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-		localStorage.setItem("arcmind.activeSessionId.chat", "chat-existing");
+		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
 		const { api, emitBrowser } = createHarness();
 		const container = document.createElement("div");
 		document.body.append(container);
@@ -3197,7 +3528,7 @@ describe("Chat desktop shell", () => {
 		await act(async () => root.render(<App api={api} store={new AppStore()} />));
 		await flush();
 
-		await act(async () => button(container, "ArcMind").click());
+		await act(async () => button(container, "Metis").click());
 		await act(async () => button(container, "Language").click());
 		await act(async () => button(container, "中文").click());
 

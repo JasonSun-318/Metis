@@ -1,6 +1,6 @@
-import type { AgentMode } from "@arcmind/app-protocol";
+import type { AgentMode } from "@metis/app-protocol";
 
-const STORAGE_KEY = "arcmind.projectPreferences.v1";
+const STORAGE_KEY = "metis.projectPreferences.v1";
 const MAX_ALIAS_CODE_POINTS = 80;
 
 export interface ProjectPreference {

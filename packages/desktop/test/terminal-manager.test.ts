@@ -14,7 +14,7 @@ afterEach(async () => {
 
 describe("TerminalManager", () => {
 	it("owns one PTY and forwards only its data, input, resize, and close lifecycle", async () => {
-		const cwd = await mkdtemp(join(tmpdir(), "arcmind-terminal-"));
+		const cwd = await mkdtemp(join(tmpdir(), "metis-terminal-"));
 		temporaryDirectories.push(cwd);
 		let dataListener: ((data: string) => void) | undefined;
 		let exitListener: ((event: { exitCode: number; signal?: number }) => void) | undefined;

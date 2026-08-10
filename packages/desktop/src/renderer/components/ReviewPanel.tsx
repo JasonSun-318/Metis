@@ -3,7 +3,7 @@ import { ArrowClockwise, CaretDown, CaretRight, ClockCounterClockwise, FolderOpe
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type {
-	ArcMindDesktopApi,
+	MetisDesktopApi,
 	DesktopWorkspaceReviewCommit,
 	DesktopWorkspaceReviewFile,
 	DesktopWorkspaceReviewFileDiff,
@@ -39,7 +39,7 @@ type PatchState =
 	| { readonly kind: "error" };
 
 interface ReviewPanelProps {
-	readonly api: ArcMindDesktopApi;
+	readonly api: MetisDesktopApi;
 	readonly sessionId: string;
 	readonly visible: boolean;
 }
@@ -98,7 +98,7 @@ function CommitItem({ commit, onSelect, selected }: {
 }
 
 function PatchBody({ api, file, onRetry, revision, sessionId, state }: {
-	readonly api: ArcMindDesktopApi;
+	readonly api: MetisDesktopApi;
 	readonly file: DesktopWorkspaceReviewFile;
 	readonly onRetry: () => void;
 	readonly revision: DesktopWorkspaceReviewRevision;

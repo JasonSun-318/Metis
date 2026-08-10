@@ -9,11 +9,11 @@ import {
 	type ScheduleTaskView,
 	type SessionSummary,
 	type SkillSummaryView,
-} from "@arcmind/app-protocol";
+} from "@metis/app-protocol";
 import { CaretDown, SidebarSimple } from "@phosphor-icons/react";
 import { type CSSProperties, useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import type { ArcMindDesktopApi } from "../../shared/desktop-api.ts";
+import type { DesktopUpdateState, MetisDesktopApi } from "../../shared/desktop-api.ts";
 import { useAppStore } from "../hooks/use-app-store.ts";
 import { useScheduleStore } from "../hooks/use-schedule-store.ts";
 import type { AppStore, AppStoreSnapshot } from "../store/app-store.ts";
@@ -32,21 +32,24 @@ import { InteractionHost } from "./InteractionHost.tsx";
 import { ModelSelector } from "./ModelSelector.tsx";
 import { NewTaskHome } from "./NewTaskHome.tsx";
 import { PermissionSelector } from "./PermissionSelector.tsx";
-import { ProfilePanel } from "./ProfilePanel.tsx";
 import { RecoveryBanner } from "./RecoveryBanner.tsx";
 import {
+	clampSessionSidebarPreferredWidth,
+	clampSessionSidebarWidth,
+	sessionSidebarDefaultWidth,
 	type ProjectSessionGroup,
 	type SidebarDestination,
 	SessionSidebar,
 } from "./SessionSidebar.tsx";
 import { SkillsPanel } from "./SkillsPanel.tsx";
+import { SettingsDialog } from "./SettingsDialog.tsx";
 import { SCHEDULE_KEEP_AWAKE_KEY, ScheduledTasksPanel } from "./ScheduledTasksPanel.tsx";
 import { ThinkingSelector } from "./ThinkingSelector.tsx";
 import { clampToolsSidebarWidth, ToolsSidebar } from "./ToolsSidebar.tsx";
 import { Transcript } from "./Transcript.tsx";
 
 interface AppProps {
-	readonly api: ArcMindDesktopApi;
+	readonly api: MetisDesktopApi;
 	readonly store: AppStore;
 }
 
@@ -58,14 +61,14 @@ interface NewTaskDraft {
 }
 
 const ASSISTED_SCHEDULE_PROMPT =
-	"I want to set up a scheduled task. Briefly explain how scheduled tasks work in ArcMind, then ask me a few concise questions to determine what it should do, when it should run, and whether it should use an available Skill. Do not create the task until I confirm the details.";
+	"I want to set up a scheduled task. Briefly explain how scheduled tasks work in Metis, then ask me a few concise questions to determine what it should do, when it should run, and whether it should use an available Skill. Do not create the task until I confirm the details.";
 
 function emptyNewTaskDraft(mode: AgentMode): NewTaskDraft {
 	return { mode, folder: null, sessionId: null, permissionMode: "ask" };
 }
 
 function activeSessionKey(mode: AgentMode): string {
-	return `arcmind.activeSessionId.${mode}`;
+	return `metis.activeSessionId.${mode}`;
 }
 
 function projectKey(mode: AgentMode, cwd: string): string {
@@ -103,7 +106,7 @@ export function titleFromPrompt(prompt: string): string {
 }
 
 export function sessionDisplayTitle(session: Pick<SessionSummary, "cwd" | "cwdOrigin" | "name">): string {
-	return session.name || (session.cwdOrigin === "managed" ? "Chat" : session.cwd) || "ArcMind";
+	return session.name || (session.cwdOrigin === "managed" ? "Chat" : session.cwd) || "Metis";
 }
 
 function composerText(input: ComposerSubmission): string {
@@ -127,7 +130,7 @@ function composerRequestKey(input: ComposerSubmission): string {
 
 export function shouldResnapshotAfterReady(
 	before: AppStoreSnapshot,
-	next: Awaited<ReturnType<ArcMindDesktopApi["getServerState"]>>,
+	next: Awaited<ReturnType<MetisDesktopApi["getServerState"]>>,
 ): boolean {
 	return (
 		next.state === "ready" &&
@@ -149,7 +152,18 @@ export function firstInteractionForSession(
 	return undefined;
 }
 
-const TOOLS_SIDEBAR_WIDTH_PREFIX = "arcmind.tools-sidebar-width.v2:";
+const TOOLS_SIDEBAR_WIDTH_PREFIX = "metis.tools-sidebar-width.v2:";
+const SESSION_SIDEBAR_WIDTH_KEY = "metis.session-sidebar-width.v1";
+
+function loadSessionSidebarPreferredWidth(): number {
+	try {
+		const value = Number.parseInt(localStorage.getItem(SESSION_SIDEBAR_WIDTH_KEY) ?? "", 10);
+		if (!Number.isInteger(value)) return sessionSidebarDefaultWidth();
+		return clampSessionSidebarPreferredWidth(value);
+	} catch {
+		return sessionSidebarDefaultWidth();
+	}
+}
 
 function loadToolsSidebarPreferredWidth(sessionId: string, workspaceWidth: number): number {
 	const value = Number.parseInt(localStorage.getItem(`${TOOLS_SIDEBAR_WIDTH_PREFIX}${sessionId}`) ?? "", 10);
@@ -165,11 +179,15 @@ export function App({ api, store }: AppProps) {
 	const scheduleState = useScheduleStore(scheduleStore);
 	const [mode, setMode] = useState<AgentMode>("chat");
 	const [destination, setDestination] = useState<SidebarDestination>("tasks");
+	const [settingsOpen, setSettingsOpen] = useState(false);
+	const settingsReturnFocusRef = useRef<HTMLElement | null>(null);
 	const [selectedScheduleTaskId, setSelectedScheduleTaskId] = useState<string | null>(null);
 	const [projectPreferences, setProjectPreferences] = useState(() => loadProjectPreferences(localStorage));
 	const [busyProjectKeys, setBusyProjectKeys] = useState<ReadonlySet<string>>(new Set());
 	const [newTaskDraft, setNewTaskDraft] = useState<NewTaskDraft | null>(() => emptyNewTaskDraft("chat"));
 	const [sessionsSidebarOpen, setSessionsSidebarOpen] = useState(true);
+	const [sessionSidebarPreferredWidth, setSessionSidebarPreferredWidth] = useState(loadSessionSidebarPreferredWidth);
+	const [sessionSidebarWidth, setSessionSidebarWidth] = useState(() => clampSessionSidebarWidth(sessionSidebarPreferredWidth));
 	const [toolsSidebarOpen, setToolsSidebarOpen] = useState(false);
 	const [toolsSidebarPreferredWidth, setToolsSidebarPreferredWidth] = useState(393);
 	const [toolsSidebarWidth, setToolsSidebarWidth] = useState(393);
@@ -177,10 +195,11 @@ export function App({ api, store }: AppProps) {
 	const [draftBusy, setDraftBusy] = useState(false);
 	const [loadingOlder, setLoadingOlder] = useState(false);
 	const [skills, setSkills] = useState<readonly SkillSummaryView[]>([]);
-	const [message, setMessage] = useState("Starting ArcMind…");
+	const [message, setMessage] = useState("Starting Metis…");
 	const [error, setError] = useState<string | null>(null);
 	const [dirtyToolSessionIds, setDirtyToolSessionIds] = useState<readonly string[]>([]);
 	const [toolCleanupSessionIds, setToolCleanupSessionIds] = useState<readonly string[]>([]);
+	const [updateState, setUpdateState] = useState<DesktopUpdateState>({ status: "unavailable" });
 	const openGeneration = useRef(0);
 	const openingSessionId = useRef<string | null>(null);
 	const resnapshots = useRef(new Map<string, Promise<void>>());
@@ -202,6 +221,23 @@ export function App({ api, store }: AppProps) {
 		}
 		setToolsSidebarOpen(true);
 	}, [state.activeSessionId]);
+	const updateSessionSidebarWidth = useCallback((width: number, persist = true) => {
+		const clamped = clampSessionSidebarWidth(width);
+		setSessionSidebarWidth(clamped);
+		if (!persist) return;
+		setSessionSidebarPreferredWidth(clamped);
+		try {
+			localStorage.setItem(SESSION_SIDEBAR_WIDTH_KEY, String(clamped));
+		} catch {
+			// The preference remains renderer-local when storage is unavailable.
+		}
+	}, []);
+	useEffect(() => {
+		const resize = () => updateSessionSidebarWidth(sessionSidebarPreferredWidth, false);
+		window.addEventListener("resize", resize);
+		resize();
+		return () => window.removeEventListener("resize", resize);
+	}, [sessionSidebarPreferredWidth, updateSessionSidebarWidth]);
 	useEffect(() => {
 		if (!toolsSidebarOpen || !state.activeSessionId) return;
 		const workspaceWidth = document.querySelector<HTMLElement>(".workspace")?.clientWidth || window.innerWidth;
@@ -229,8 +265,28 @@ export function App({ api, store }: AppProps) {
 	visibleSessionIdRef.current = visibleSessionId;
 
 	const reportError = useCallback((cause: unknown) => {
-		setError(cause instanceof Error ? cause.message : "ArcMind could not complete the request.");
+		setError(cause instanceof Error ? cause.message : "Metis could not complete the request.");
 	}, []);
+	useEffect(() => {
+		let disposed = false;
+		let receivedEvent = false;
+		const unsubscribe = api.subscribeUpdate((state) => {
+			receivedEvent = true;
+			if (!disposed) setUpdateState(state);
+		});
+		void api.getUpdateState()
+			.then((state) => {
+				if (!disposed && !receivedEvent) setUpdateState(state);
+			})
+			.catch(() => undefined);
+		return () => {
+			disposed = true;
+			unsubscribe();
+		};
+	}, [api]);
+	const startDesktopUpdate = useCallback(() => {
+		void api.startUpdate().catch(reportError);
+	}, [api, reportError]);
 	const queueToolCleanup = useCallback((sessionIds: readonly string[]) => {
 		if (sessionIds.length === 0) return;
 		setToolCleanupSessionIds((current) => [...new Set([...current, ...sessionIds])]);
@@ -744,7 +800,7 @@ export function App({ api, store }: AppProps) {
 		}
 	};
 	const chooseCodeProjectFolder = () => api.selectProjectFolder();
-	const createCodeProjectFolder = (input: Parameters<ArcMindDesktopApi["createProjectFolder"]>[0]) =>
+	const createCodeProjectFolder = (input: Parameters<MetisDesktopApi["createProjectFolder"]>[0]) =>
 		api.createProjectFolder(input);
 
 	const startNewTask = () => {
@@ -842,7 +898,7 @@ export function App({ api, store }: AppProps) {
 		await submitNewTask(visibleNewTaskDraft, input);
 	};
 
-	const createScheduleWithArcMind = async (cwd: string | null) => {
+	const createScheduleWithMetis = async (cwd: string | null) => {
 		const draft = { ...emptyNewTaskDraft("chat"), folder: cwd };
 		setMode("chat");
 		setDestination("tasks");
@@ -895,6 +951,12 @@ export function App({ api, store }: AppProps) {
 		state.interactionsById,
 		interactiveSessionId,
 	);
+	const permissionApproval = visibleInteraction?.kind === "select" &&
+		visibleInteraction.presentation === "permission_approval"
+		? visibleInteraction
+		: undefined;
+	const askUserInteraction = visibleInteraction?.kind === "ask_user" ? visibleInteraction : undefined;
+	const inlineInteraction = permissionApproval ?? askUserInteraction;
 	const latestNotification = [...state.notifications]
 		.reverse()
 		.find((notification) => notification.sessionId === undefined || notification.sessionId === visibleActiveSession?.sessionId);
@@ -1045,9 +1107,29 @@ export function App({ api, store }: AppProps) {
 			return [];
 		}
 	};
+	const openSettings = useCallback(() => {
+		settingsReturnFocusRef.current = document.querySelector<HTMLElement>(".account-menu-trigger") ?? document.activeElement as HTMLElement | null;
+		setSettingsOpen(true);
+	}, []);
+	const closeSettings = useCallback(() => {
+		setSettingsOpen(false);
+		requestAnimationFrame(() => settingsReturnFocusRef.current?.focus());
+	}, []);
+	const deleteScheduledTask = useCallback(async (input: Parameters<MetisDesktopApi["deleteSchedule"]>[0]) => {
+		const result = await api.deleteSchedule(input);
+		scheduleStore.removeTask(result.taskId);
+		setSelectedScheduleTaskId((current) => current === result.taskId ? null : current);
+		return result;
+	}, [api, scheduleStore]);
 
 	return (
-		<div className={`app-shell${sessionsSidebarOpen ? "" : " sessions-sidebar-collapsed"}`}>
+		<>
+		<div
+			aria-hidden={settingsOpen || undefined}
+			className={`app-shell${sessionsSidebarOpen ? "" : " sessions-sidebar-collapsed"}`}
+			inert={settingsOpen || undefined}
+			style={{ "--sidebar-width": `${sessionSidebarWidth}px` } as CSSProperties}
+		>
 			{sessionsSidebarOpen && <SessionSidebar
 				busy={!bootstrapped || draftBusy || !serverReady}
 				destination={destination}
@@ -1055,6 +1137,7 @@ export function App({ api, store }: AppProps) {
 				newTaskOpen={newTaskOpen}
 				onCreateProjectSession={createEmptyProjectSession}
 				onDeleteProject={deleteProject}
+				onDeleteSchedule={deleteScheduledTask}
 				onDeleteSession={deleteSession}
 				onModeChange={changeMode}
 				onNewTask={startNewTask}
@@ -1063,16 +1146,20 @@ export function App({ api, store }: AppProps) {
 				onPreviewProjectDelete={previewProjectDelete}
 				onRenameProject={renameProject}
 					onRenameSession={renameSession}
-					onSettings={() => setDestination("settings")}
+					onSettings={openSettings}
+					onUpdate={startDesktopUpdate}
 					onSkills={() => setDestination("skills")}
 					onSchedules={() => { setDestination("schedules"); setSelectedScheduleTaskId(null); }}
 					onOpenSchedule={(taskId) => { setDestination("schedules"); setSelectedScheduleTaskId(taskId); }}
 				onToggle={() => setSessionsSidebarOpen(false)}
+				onWidthChange={updateSessionSidebarWidth}
 				preferences={projectPreferences}
 					projectBusy={(group) => busyProjectKeys.has(projectKey(group.mode, group.cwd))}
-					scheduleTasks={scheduleState.taskOrder.map((id) => scheduleState.tasksById.get(id)).filter((task): task is ScheduleTaskView => task !== undefined && (task.status === "active" || task.status === "paused"))}
+					scheduleTasks={scheduleState.taskOrder.map((id) => scheduleState.tasksById.get(id)).filter((task): task is ScheduleTaskView => task !== undefined)}
 					selectedScheduleTaskId={selectedScheduleTaskId}
-				state={state}
+					state={state}
+					updateState={updateState}
+				width={sessionSidebarWidth}
 			/>}
 			<main
 				className={`workspace${destination === "tasks" && toolsSidebarOpen ? " tools-sidebar-open" : ""}`}
@@ -1111,12 +1198,10 @@ export function App({ api, store }: AppProps) {
 				{state.supervisor.state === "restarting" && (
 					<div className="server-banner" role="status">{t("App Server is recovering. Your saved session is safe.")}</div>
 				)}
-				{!bootstrapped ? null : destination === "settings" ? (
-					<ProfilePanel api={api} serverReady={serverReady} />
-				) : destination === "skills" ? (
+				{!bootstrapped ? null : destination === "skills" ? (
 					<SkillsPanel api={api} preferences={projectPreferences} serverReady={serverReady} state={state} />
 				) : destination === "schedules" && mode === "chat" ? (
-					<ScheduledTasksPanel api={api} onCreateWithArcMind={createScheduleWithArcMind} onOpenSession={openScheduledSession} onSelectTask={setSelectedScheduleTaskId} selectedTaskId={selectedScheduleTaskId} serverReady={serverReady} sessions={state.sessionOrder.map((id) => state.sessionsById.get(id)).filter((session): session is SessionSummary => session !== undefined)} store={scheduleStore} />
+					<ScheduledTasksPanel api={api} onCreateWithMetis={createScheduleWithMetis} onOpenSession={openScheduledSession} onSelectTask={setSelectedScheduleTaskId} selectedTaskId={selectedScheduleTaskId} serverReady={serverReady} sessions={state.sessionOrder.map((id) => state.sessionsById.get(id)).filter((session): session is SessionSummary => session !== undefined)} store={scheduleStore} />
 				) : newTaskOpen && mode === "code" ? (
 					<CodeProjectSetup
 						busy={draftBusy || !serverReady}
@@ -1148,8 +1233,8 @@ export function App({ api, store }: AppProps) {
 					<div className="workspace-body">
 						<div className="conversation-column">
 							<RecoveryBanner session={visibleActiveSession} />
-								<Transcript appearance={visibleActiveSession.mode} hasOlder={state.nextBeforeItemId !== null} itemIds={state.itemOrder} itemsById={state.itemsById} loadingOlder={loadingOlder} onLoadOlder={loadOlder} />
-							<Composer appearance={visibleActiveSession.mode} disabled={!serverReady || state.syncStatus !== "ready"} key={visibleActiveSession.sessionId} modelControl={modelControl} onInterrupt={interrupt} onManageSkills={() => setDestination("skills")} onPickFiles={pickAttachmentFiles} onSubmit={submit} permissionControl={permissionControl} running={running} skills={skills} thinkingControl={thinkingControl} placeholder={t("Write a message…")} />
+								<Transcript activeTurnId={state.activeTurnId} activeTurnStartedAt={state.activeTurnId ? state.turnsById.get(state.activeTurnId)?.startedAt : undefined} appearance={visibleActiveSession.mode} autoLoadOlder hasOlder={state.nextBeforeItemId !== null} itemIds={state.itemOrder} itemsById={state.itemsById} loadingOlder={loadingOlder} onLoadOlder={loadOlder} />
+							<Composer appearance={visibleActiveSession.mode} interactionControl={inlineInteraction ? <InteractionHost interaction={inlineInteraction} key={inlineInteraction.interactionId} onRespond={respond} /> : undefined} disabled={!serverReady || state.syncStatus !== "ready"} key={visibleActiveSession.sessionId} modelControl={modelControl} onInterrupt={interrupt} onManageSkills={() => setDestination("skills")} onPickFiles={pickAttachmentFiles} onSubmit={submit} permissionControl={permissionControl} running={running} skills={skills} tasks={state.tasks} taskListEpoch={state.serverEpoch} thinkingControl={thinkingControl} placeholder={t("Write a message…")} />
 						</div>
 					</div>
 				) : null}
@@ -1163,7 +1248,7 @@ export function App({ api, store }: AppProps) {
 					onDirtySessionIdsChange={handleDirtySessionIdsChange}
 					onError={reportError}
 					onWidthChange={updateToolsSidebarWidth}
-					open={destination === "tasks" && toolsSidebarOpen}
+					open={destination === "tasks" && toolsSidebarOpen && !settingsOpen}
 					preferredWidth={toolsSidebarPreferredWidth}
 					store={store}
 					width={toolsSidebarWidth}
@@ -1172,7 +1257,9 @@ export function App({ api, store }: AppProps) {
 				{error && <div className="toast toast-error" role="alert">{t(error)}</div>}
 				{latestNotification && !error && <div className="toast" role="status">{t(latestNotification.message)}</div>}
 			</main>
-			<InteractionHost interaction={visibleInteraction} key={visibleInteraction?.interactionId ?? "none"} onRespond={respond} />
+			<InteractionHost interaction={inlineInteraction ? undefined : visibleInteraction} key={inlineInteraction ? "none" : visibleInteraction?.interactionId ?? "none"} onRespond={respond} />
 		</div>
+		{settingsOpen ? <SettingsDialog api={api} onClose={closeSettings} serverReady={serverReady} /> : null}
+		</>
 	);
 }

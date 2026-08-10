@@ -27,6 +27,10 @@ describe("Desktop locale preference", () => {
 		expect(i18n.t("Enter URL")).toBe("输入 URL");
 		expect(i18n.t("Start browsing")).toBe("开始浏览");
 		expect(i18n.t("Enter a URL to open a page")).toBe("输入 URL 以打开页面");
+		expect(i18n.t("About {{count}} tokens", { count: 44 })).toBe("约 44 个 Token");
+		expect(i18n.t("Thinking…")).toBe("思考中…");
+		expect(i18n.t("Completed")).toBe("已完成");
+		expect(i18n.t("Working")).toBe("进行中");
 
 		await setLocale("en", localStorage);
 		expect(localStorage.getItem(APP_LOCALE_STORAGE_KEY)).toBe("en");

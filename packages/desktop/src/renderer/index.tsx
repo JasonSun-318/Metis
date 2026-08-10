@@ -8,14 +8,14 @@ import "./styles/tokens.css";
 import "./styles/app.css";
 
 const root = document.getElementById("root");
-if (!root) throw new Error("ArcMind renderer root is missing");
+if (!root) throw new Error("Metis renderer root is missing");
 
 const store = new AppStore();
 
 createRoot(root).render(
 	<StrictMode>
 		<AppErrorBoundary>
-			<App api={window.arcMind} store={store} />
+			<App api={window.metis} store={store} />
 		</AppErrorBoundary>
 	</StrictMode>,
 );

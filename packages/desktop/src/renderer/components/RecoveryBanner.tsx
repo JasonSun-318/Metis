@@ -1,4 +1,4 @@
-import type { SessionSummary } from "@arcmind/app-protocol";
+import type { SessionSummary } from "@metis/app-protocol";
 import { useTranslation } from "react-i18next";
 
 export function RecoveryBanner({ session }: { readonly session: SessionSummary }) {
@@ -15,7 +15,7 @@ export function RecoveryBanner({ session }: { readonly session: SessionSummary }
 		(session.state === "interrupted"
 			? t("The last turn was interrupted. Your saved work is intact; send a new message to continue.")
 			: session.state === "corrupt"
-				? t("This session is corrupt. ArcMind left the source data untouched.")
+				? t("This session is corrupt. Metis left the source data untouched.")
 				: t("This session is currently open in another process."));
 	return <div className="recovery-banner" role="status">{message}</div>;
 }

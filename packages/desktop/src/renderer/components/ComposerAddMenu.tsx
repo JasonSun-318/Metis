@@ -1,4 +1,4 @@
-import type { SkillSummaryView } from "@arcmind/app-protocol";
+import type { SkillSummaryView } from "@metis/app-protocol";
 import { Briefcase, CaretRight, Paperclip, Plus, Scroll } from "@phosphor-icons/react";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";

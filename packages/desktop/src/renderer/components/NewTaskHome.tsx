@@ -1,4 +1,4 @@
-import type { AgentMode, SkillSummaryView } from "@arcmind/app-protocol";
+import type { AgentMode, SkillSummaryView } from "@metis/app-protocol";
 import { CaretDown, FolderSimple } from "@phosphor-icons/react";
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";

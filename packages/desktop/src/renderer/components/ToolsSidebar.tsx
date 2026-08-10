@@ -1,8 +1,8 @@
-import type { AgentMode, SessionSummary } from "@arcmind/app-protocol";
+import type { AgentMode, SessionSummary } from "@metis/app-protocol";
 import { ClipboardText, FileText, FolderSimple, Globe, Plus, Robot, SidebarSimple, TerminalWindow, X } from "@phosphor-icons/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import type { ArcMindDesktopApi, DesktopBrowserState, DesktopWorkspaceMutationResult } from "../../shared/desktop-api.ts";
+import type { MetisDesktopApi, DesktopBrowserState, DesktopWorkspaceMutationResult } from "../../shared/desktop-api.ts";
 import type { AppStore } from "../store/app-store.ts";
 import { BrowserPanel } from "./BrowserPanel.tsx";
 import { FilePanel, type WorkspaceFileDraft } from "./FilePanel.tsx";
@@ -11,7 +11,7 @@ import { SubagentPanel } from "./SubagentPanel.tsx";
 import { TerminalPanel } from "./TerminalPanel.tsx";
 import { WorkspaceFileIcon } from "./WorkspaceFileIcon.tsx";
 
-const FILE_BROWSER_STORAGE_PREFIX = "arcmind.file-browser.v1:";
+const FILE_BROWSER_STORAGE_PREFIX = "metis.file-browser.v1:";
 
 interface TerminalTab {
 	readonly kind: "terminal";
@@ -64,7 +64,7 @@ interface PendingFileClose {
 
 interface ToolsSidebarProps {
 	readonly activeSession: Pick<SessionSummary, "sessionId" | "cwd"> | null;
-	readonly api: ArcMindDesktopApi;
+	readonly api: MetisDesktopApi;
 	readonly cleanupSessionIds: readonly string[];
 	readonly mode: AgentMode;
 	readonly onClose: () => void;

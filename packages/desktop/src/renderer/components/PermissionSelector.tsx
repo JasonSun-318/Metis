@@ -1,4 +1,4 @@
-import type { PermissionModeView } from "@arcmind/app-protocol";
+import type { PermissionModeView } from "@metis/app-protocol";
 import { CaretDown, Check, Shield } from "@phosphor-icons/react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -22,7 +22,7 @@ const OPTIONS: ReadonlyArray<{
 	{
 		value: "full",
 		label: "Full access",
-		description: "Run model tools directly as your OS user without ArcMind approval.",
+		description: "Run model tools directly as your OS user without Metis approval.",
 	},
 ];
 

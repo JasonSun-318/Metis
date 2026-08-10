@@ -1,15 +1,15 @@
-import type { SubagentSummaryView } from "@arcmind/app-protocol";
+import type { SubagentSummaryView } from "@metis/app-protocol";
 import { ArrowLeft, CheckCircle, Clock, Robot, SpinnerGap, StopCircle, WarningCircle } from "@phosphor-icons/react";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useTranslation } from "react-i18next";
-import type { ArcMindDesktopApi } from "../../shared/desktop-api.ts";
+import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
 import { localeForIntl } from "../i18n.ts";
 import type { AppStore } from "../store/app-store.ts";
 import { Markdown } from "./Markdown.tsx";
 import { Transcript } from "./Transcript.tsx";
 
 interface SubagentPanelProps {
-	readonly api: ArcMindDesktopApi;
+	readonly api: MetisDesktopApi;
 	readonly onError: (cause: unknown) => void;
 	readonly sessionId: string;
 	readonly store: AppStore;
@@ -239,7 +239,7 @@ export function SubagentPanel({ api, onError, sessionId, store, visible }: Subag
 		return (
 			<article className="subagent-card" data-status={agent.status} key={agent.agentId}>
 				<button
-					aria-label={t(agent.status === "closed" ? "View summary for {{name}}" : "View transcript for {{name}}", { name: agent.taskSummary })}
+					aria-label={t(agent.status === "closed" ? "View summary for {{name}}" : "View transcript for {{name}}", { name: agent.name })}
 					className="subagent-card-open"
 					onClick={() => openTranscript(agent.agentId)}
 					ref={(node) => {
@@ -248,17 +248,17 @@ export function SubagentPanel({ api, onError, sessionId, store, visible }: Subag
 					}}
 					type="button"
 				>
-					<span className="subagent-card-title">{agent.taskSummary}</span>
+					<span className="subagent-card-title">{agent.name}</span>
 					<span className="subagent-card-meta">
 						<span className="subagent-status"><StatusIcon status={agent.status} />{t(statusLabel(agent.status))}</span>
-						<span>{agent.name || t("Agent")}</span>
+						<span>{agent.taskSummary}</span>
 						{elapsed && <span>{t("{{time}} elapsed", { time: elapsed })}</span>}
 						{usage && <span>{t("{{count}} tokens", { count: number.format(tokenTotal(usage)) })}</span>}
 						{usage?.toolCalls !== undefined && <span>{t("{{count}} tool uses", { count: number.format(usage.toolCalls) })}</span>}
 					</span>
 				</button>
 				{isActive(agent) && (
-					<button aria-label={t(stoppingAgent ? "Stopping…" : "Stop {{name}}", { name: agent.taskSummary })} className="subagent-stop" disabled={stoppingAgent} onClick={() => void stop(agent.agentId)} type="button">
+					<button aria-label={t(stoppingAgent ? "Stopping…" : "Stop {{name}}", { name: agent.name })} className="subagent-stop" disabled={stoppingAgent} onClick={() => void stop(agent.agentId)} type="button">
 						{stoppingAgent ? <SpinnerGap aria-hidden="true" className="is-spinning" size={14} /> : <StopCircle aria-hidden="true" size={14} />}
 					</button>
 				)}
@@ -273,11 +273,11 @@ export function SubagentPanel({ api, onError, sessionId, store, visible }: Subag
 					<header className="subagent-detail-header">
 						<button aria-label={t("Back to background tasks")} className="subagent-back" onClick={() => store.selectSubagentTranscript(null)} ref={backRef} type="button"><ArrowLeft aria-hidden="true" size={14} /></button>
 						<div className="subagent-detail-title">
-							<strong>{selectedAgent?.taskSummary ?? t("Subagent")}</strong>
+							<strong>{selectedAgent?.name ?? t("Subagent")}</strong>
 							{selectedAgent && <span><StatusIcon status={selectedAgent.status} />{t(statusLabel(selectedAgent.status))}</span>}
 						</div>
 						{selectedAgent && isActive(selectedAgent) && (
-							<button aria-label={t(stopping.has(selectedAgent.agentId) ? "Stopping…" : "Stop {{name}}", { name: selectedAgent.taskSummary })} className="subagent-detail-stop" disabled={stopping.has(selectedAgent.agentId)} onClick={() => void stop(selectedAgent.agentId)} type="button">
+							<button aria-label={t(stopping.has(selectedAgent.agentId) ? "Stopping…" : "Stop {{name}}", { name: selectedAgent.name })} className="subagent-detail-stop" disabled={stopping.has(selectedAgent.agentId)} onClick={() => void stop(selectedAgent.agentId)} type="button">
 								{stopping.has(selectedAgent.agentId) ? <SpinnerGap aria-hidden="true" className="is-spinning" size={14} /> : <StopCircle aria-hidden="true" size={14} />}
 							</button>
 						)}

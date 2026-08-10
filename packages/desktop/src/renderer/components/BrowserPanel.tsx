@@ -19,14 +19,14 @@ import {
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type {
-	ArcMindDesktopApi,
+	MetisDesktopApi,
 	DesktopBrowserBounds,
 	DesktopBrowserCommand,
 	DesktopBrowserState,
 } from "../../shared/desktop-api.ts";
 
 interface BrowserPanelProps {
-	readonly api: ArcMindDesktopApi;
+	readonly api: MetisDesktopApi;
 	readonly browserId: string;
 	readonly onError: (cause: unknown) => void;
 	readonly onState: (state: DesktopBrowserState) => void;
@@ -70,7 +70,7 @@ function BrowserClearDialog({ busy, onCancel, onConfirm }: {
 		>
 			<form method="dialog">
 				<h2 id="browser-clear-title">{t("Clear browsing data?")}</h2>
-				<p>{t("This clears cookies and site data for every ArcMind browser tab. Open tabs will stay open.")}</p>
+				<p>{t("This clears cookies and site data for every Metis browser tab. Open tabs will stay open.")}</p>
 				<div className="browser-clear-actions">
 					<button disabled={busy} onClick={onCancel} type="button">{t("Cancel")}</button>
 					<button className="is-danger" data-browser-confirm-clear disabled={busy} onClick={onConfirm} type="button">{t(busy ? "Clearing…" : "Clear data")}</button>

@@ -17,17 +17,17 @@ export class AppErrorBoundary extends Component<AppErrorBoundaryProps, AppErrorB
 	}
 
 	componentDidCatch(error: Error, info: ErrorInfo): void {
-		console.error("ArcMind renderer failed", error, info.componentStack);
+		console.error("Metis renderer failed", error, info.componentStack);
 	}
 
 	render(): ReactNode {
 		if (!this.state.failed) return this.props.children;
 		return (
 			<main className="app-error-boundary" role="alert">
-				<h1>{i18n.t("ArcMind encountered an unexpected error.")}</h1>
+				<h1>{i18n.t("Metis encountered an unexpected error.")}</h1>
 				<p>{i18n.t("Reload the app to continue. Your saved tasks are unchanged.")}</p>
 				<button onClick={() => window.location.reload()} type="button">
-					{i18n.t("Reload ArcMind")}
+					{i18n.t("Reload Metis")}
 				</button>
 			</main>
 		);

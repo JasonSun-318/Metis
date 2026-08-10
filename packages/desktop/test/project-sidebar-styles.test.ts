@@ -67,6 +67,27 @@ describe("Project sidebar motion", () => {
 		expect(rule(".session-grouping-menu-primary > button").height).toBe("25px");
 		expect(rule(".session-grouping-menu-secondary > div > button").minHeight).toBe("24px");
 		expect(rule(".session-grouping-menu-last").borderTopColor).toBe("rgb(77, 77, 73)");
+		const taskHeading = rule(".loose-tasks h2");
+		const scheduledHeading = rule(".scheduled-task-quick-list h2");
+		expect(rule(".scheduled-task-quick-list").marginTop).toBe("20px");
+		expect(rule(".scheduled-task-quick-open > i").minWidth).toBe("15px");
+		expect(rule(".session-button-title i").width).toBe("6px");
+		expect(rule(".session-button-title i").height).toBe("6px");
+		expect(scheduledHeading.margin).toBe(taskHeading.margin);
+		expect(scheduledHeading.color).toBe(taskHeading.color);
+		expect(scheduledHeading.fontSize).toBe(taskHeading.fontSize);
+		expect(scheduledHeading.fontWeight).toBe(taskHeading.fontWeight);
+	});
+
+	it("keeps the update action rectangular and aligned above the account footer", () => {
+		const notice = rule(".sidebar-update-notice");
+		const button = rule(".sidebar-update-button");
+		expect(notice.marginBottom).toBe("6px");
+		expect(button.width).toBe("100%");
+		expect(button.height).toBe("34px");
+		expect(button.borderRadius).toBe("7px");
+		expect(button.background).toBe("rgb(51, 51, 51)");
+		expect(button.border).toContain("var(--border-strong)");
 	});
 
 	it("reveals row actions on interaction and slides sessions into a collapsed drawer", () => {

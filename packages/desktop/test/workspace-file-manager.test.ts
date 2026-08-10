@@ -13,7 +13,7 @@ afterEach(async () => {
 });
 
 async function createHarness() {
-	const tempRoot = await mkdtemp(path.join(tmpdir(), "arcmind-workspace-files-"));
+	const tempRoot = await mkdtemp(path.join(tmpdir(), "metis-workspace-files-"));
 	roots.push(tempRoot);
 	const project = path.join(tempRoot, "project");
 	await Promise.all([
@@ -82,10 +82,10 @@ async function createReviewHarness() {
 	const harness = await createHarness();
 	const project = path.join(harness.project, "review-repository");
 	await mkdir(project);
-	await writeFile(path.join(project, "README.md"), "# ArcMind\n");
+	await writeFile(path.join(project, "README.md"), "# Metis\n");
 	git(project, "init");
 	git(project, "config", "user.email", "review@example.com");
-	git(project, "config", "user.name", "ArcMind Review");
+	git(project, "config", "user.name", "Metis Review");
 	git(project, "add", "README.md");
 	git(project, "commit", "-m", "initial");
 	harness.manager.authorize(SESSION_ID, project);
@@ -164,8 +164,8 @@ describe("WorkspaceFileManager", () => {
 			manager.getReviewFileContext({ sessionId: SESSION_ID, revision: head, relativePath: "Guide.md" }),
 		).resolves.toEqual({
 			kind: "text",
-			oldFile: expect.objectContaining({ name: "README.md", contents: "# ArcMind\n" }),
-			newFile: expect.objectContaining({ name: "Guide.md", contents: "# ArcMind\nRenamed\n" }),
+			oldFile: expect.objectContaining({ name: "README.md", contents: "# Metis\n" }),
+			newFile: expect.objectContaining({ name: "Guide.md", contents: "# Metis\nRenamed\n" }),
 		});
 	});
 

@@ -28,6 +28,12 @@ describe("Composer visual states", () => {
 		).toBe("1");
 	});
 
+	it("uses one compact square stop control for the running state", () => {
+		const stop = rule(".composer-stop.button-secondary");
+		expect(stop.borderRadius).toBe("9px");
+		expect(stop.background).toBe("rgb(85, 85, 85)");
+	});
+
 	it("uses the reference add button and compact menu scale", () => {
 		const addButton = rule(".composer-add > .composer-plain-button");
 		expect(addButton.background).toBe("transparent");
@@ -71,5 +77,57 @@ describe("Composer visual states", () => {
 	it("keeps the New Task folder row translucent and separate from the composer", () => {
 		expect(css).toContain("background: rgb(32 32 32 / 58%)");
 		expect(rule(".new-task-home .composer").background).toBe("var(--panel)");
+	});
+
+	it("uses the compact Metis task list above the composer", () => {
+		const slot = rule(".task-list-slot");
+		expect(slot.margin).toBe("0px 16px");
+		expect(slot.animation).toBe("task-list-enter 200ms cubic-bezier(.16, 1, .3, 1)");
+		expect(rule(".task-list-slot.is-closing").animation).toBe(
+			"task-list-exit 200ms cubic-bezier(.4, 0, 1, 1) forwards",
+		);
+
+		const panel = rule(".task-list-panel");
+		expect(panel.display).toBe("grid");
+		expect(panel.gridTemplateRows).toBe("36px 1fr");
+		expect(panel.transition).toContain("grid-template-rows");
+		expect(panel.borderRadius).toBe("12px 12px 0 0");
+		expect(panel.borderBottomWidth).toBe("0px");
+		expect(panel.background).toBe("var(--panel)");
+		expect(panel.marginBottom).toBe("0px");
+
+		const items = rule(".task-list-items");
+		expect(items.maxHeight).toBe("150px");
+		expect(rule(".task-list-row").height).toBe("30px");
+		expect(rule(".task-list-panel.is-collapsed").gridTemplateRows).toBe("36px 0fr");
+		expect(rule(".task-list-drawer").overflow).toBe("hidden");
+		expect(rule(".task-list-panel.is-collapsed .task-list-drawer").transform).toBe("translateY(5px)");
+		expect(css).toContain(".task-list-spinner { animation: browser-spin 900ms linear infinite; }");
+		expect(css).toContain(".task-list-spinner { animation: none; }");
+		expect(css).toContain(".task-list-slot { animation: none; }");
+	});
+
+	it("docks a non-collapsible permission approval above the composer", () => {
+		const slot = rule(".permission-approval-slot");
+		expect(slot.margin).toBe("0px 16px");
+		expect(slot.animation).toBe("task-list-enter 200ms cubic-bezier(.16, 1, .3, 1)");
+
+		const panel = rule(".permission-approval-panel");
+		expect(panel.borderRadius).toBe("12px 12px 0 0");
+		expect(panel.borderBottomWidth).toBe("0px");
+		expect(panel.background).toBe("var(--panel)");
+		expect(rule(".permission-approval-details > div").gridTemplateColumns).toBe("108px minmax(0, 1fr)");
+		expect(rule(".permission-approval-details dd code").whiteSpace).toBe("pre-wrap");
+		expect(css).not.toContain("permission-approval-toggle");
+		expect(css).toContain(".permission-approval-slot { animation: none; }");
+	});
+
+	it("wraps ask-user questions and answer text instead of hiding it", () => {
+		expect(rule(".ask-user-header h2").whiteSpace).toBe("normal");
+		expect(rule(".ask-user-header h2").maxHeight).toBe("74px");
+		expect(rule(".ask-user-header h2").overflowY).toBe("auto");
+		expect(rule(".ask-user-header h2").overflowWrap).toBe("anywhere");
+		expect(rule(".ask-user-option-copy strong").whiteSpace).toBe("normal");
+		expect(rule(".ask-user-option-copy small").whiteSpace).toBe("normal");
 	});
 });

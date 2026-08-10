@@ -24,7 +24,7 @@ import type {
 } from "../shared/desktop-api.ts";
 
 const BLANK_URL = "about:blank";
-const BROWSER_PARTITION = "persist:arcmind-browser";
+const BROWSER_PARTITION = "persist:metis-browser";
 const ZOOM_PERCENTAGES = [25, 33, 50, 67, 75, 80, 90, 100, 110, 125, 150, 175, 200, 250, 300, 400, 500] as const;
 
 interface BrowserRecord {
@@ -87,12 +87,12 @@ function initialState(browserId: string): DesktopBrowserState {
 
 function screenshotFilename(now = new Date()): string {
 	const pad = (value: number) => String(value).padStart(2, "0");
-	return `ArcMind-Screenshot-${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}.png`;
+	return `Metis-Screenshot-${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}.png`;
 }
 
 function printFilename(now = new Date()): string {
 	const pad = (value: number) => String(value).padStart(2, "0");
-	return `ArcMind-Print-${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}.pdf`;
+	return `Metis-Print-${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}.pdf`;
 }
 
 async function saveBuffer(data: Buffer, defaultFilename: string, name: string, extension: string): Promise<void> {

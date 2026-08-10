@@ -1,7 +1,7 @@
-import type { AgentMode, SessionSummary } from "@arcmind/app-protocol";
+import type { AgentMode, SessionSummary } from "@metis/app-protocol";
 import type { AppStoreSnapshot } from "./app-store.ts";
 
-const SESSION_GROUPING_KEY = "arcmind.session-grouping.v1";
+const SESSION_GROUPING_KEY = "metis.session-grouping.v1";
 const DAY_MS = 86_400_000;
 
 export type SessionGroupBy = "date" | "project" | "unread" | "none";

@@ -6,12 +6,12 @@ import { createProjectFolder } from "../src/main/project-folder.ts";
 
 describe("project folder creation", () => {
 	it("copies selected files into one new project without changing the originals", async () => {
-		const root = await mkdtemp(join(tmpdir(), "arcmind-project-"));
+		const root = await mkdtemp(join(tmpdir(), "metis-project-"));
 		const source = join(root, "brief.txt");
 		await writeFile(source, "original");
 
 		const project = await createProjectFolder({
-			parentDirectory: join(root, "ArcMind Projects"),
+			parentDirectory: join(root, "Metis Projects"),
 			name: "Launch plan",
 			files: [{ path: source, name: "ignored-name.txt" }],
 		});
@@ -21,7 +21,7 @@ describe("project folder creation", () => {
 	});
 
 	it("rejects unsafe input before creating a project", async () => {
-		const root = await mkdtemp(join(tmpdir(), "arcmind-project-"));
+		const root = await mkdtemp(join(tmpdir(), "metis-project-"));
 		await expect(createProjectFolder({ parentDirectory: root, name: "../escape", files: [] })).rejects.toThrow(
 			"valid project name",
 		);
@@ -29,7 +29,7 @@ describe("project folder creation", () => {
 	});
 
 	it("rejects duplicate destination names before creating a project", async () => {
-		const root = await mkdtemp(join(tmpdir(), "arcmind-project-"));
+		const root = await mkdtemp(join(tmpdir(), "metis-project-"));
 		const source = join(root, "brief.txt");
 		await writeFile(source, "original");
 		const parentDirectory = join(root, "projects");

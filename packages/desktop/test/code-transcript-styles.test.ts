@@ -25,7 +25,7 @@ describe("Code transcript visual contract", () => {
 			".transcript-code .transcript-scroll { padding: 15px max(24px, calc((100% - var(--conversation-width)) / 2)) 16px; }",
 		);
 		expect(rule(".transcript-code .code-transcript-turn").width).toBe("100%");
-		expect(rule(".transcript-code .code-turn-answer").fontFamily).toContain("ui-sans-serif");
+		expect(rule(".transcript-code :is(.code-turn-answer, .code-turn-status)").fontFamily).toContain("ui-sans-serif");
 		expect(rule(".transcript-code .code-command-output").maxHeight).toBe("310px");
 		expect(rule(".transcript-code .code-execution-card").borderRadius).toBe("8px");
 	});
@@ -35,10 +35,17 @@ describe("Code transcript visual contract", () => {
 		expect(tokens).toContain("--panel: #2e2e2e");
 		expect(rule(".message-user").background).toBe("rgb(23, 23, 23)");
 		expect(rule(".transcript-code .code-turn-user > div").background).toBe("rgb(54, 54, 54)");
-		expect(rule(".transcript-code .code-turn-answer table").borderCollapse).toBe("separate");
-		expect(rule(".transcript-code .code-turn-answer table").borderSpacing).toBe("2px");
-		expect(rule(".transcript-code .code-turn-answer th, .transcript-code .code-turn-answer td").borderWidth).toBe(
-			"0px",
-		);
+		expect(rule(".transcript-code :is(.code-turn-answer, .code-turn-status) table").borderCollapse).toBe("separate");
+		expect(rule(".transcript-code :is(.code-turn-answer, .code-turn-status) table").borderSpacing).toBe("2px");
+		expect(rule(".transcript-code :is(.code-turn-answer, .code-turn-status) :is(th, td)").borderWidth).toBe("0px");
+	});
+
+	it("keeps Markdown status headings at the compact Code scale", () => {
+		expect(rule(".transcript-code :is(.code-turn-answer, .code-turn-status) h2").fontSize).toBe("1.16em");
+	});
+
+	it("keeps the runtime spinner the same height as its status text", () => {
+		expect(rule(".turn-runtime-status").fontSize).toBe("12px");
+		expect(rule(".turn-runtime-spinner").getPropertyValue("--uib-size")).toBe("1em");
 	});
 });

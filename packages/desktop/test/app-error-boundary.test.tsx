@@ -41,9 +41,9 @@ describe("AppErrorBoundary", () => {
 		});
 
 		expect(host.querySelector('[role="alert"]')?.textContent).toContain(
-			"ArcMind encountered an unexpected error.",
+			"Metis encountered an unexpected error.",
 		);
-		expect(host.querySelector("button")?.textContent).toBe("Reload ArcMind");
+		expect(host.querySelector("button")?.textContent).toBe("Reload Metis");
 		expect(host.textContent).not.toContain("renderer exploded");
 	});
 });
