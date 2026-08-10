@@ -1,6 +1,11 @@
-import type { FileEntry } from "@arcmind/coding-agent";
+import type { FileEntry } from "@metis/coding-agent";
 import { describe, expect, it } from "vitest";
-import { buildProfileSummary, ProfileSummaryCache, reduceProfileEntries } from "../src/profile-summary.ts";
+import {
+	buildProfileSummary,
+	buildUsageSummary,
+	ProfileSummaryCache,
+	reduceProfileEntries,
+} from "../src/profile-summary.ts";
 import type { SessionRef } from "../src/session-runtime-host.ts";
 
 function localTime(year: number, month: number, day: number, hour = 12): number {
@@ -49,7 +54,7 @@ function skillEntry(id: string, name: string, trigger: "command" | "read" = "rea
 		id,
 		parentId: null,
 		timestamp: "2026-08-01T00:00:00.000Z",
-		customType: "arcmind.skill_usage.v1",
+		customType: "metis.skill_usage.v1",
 		data: { name, trigger },
 	};
 }
@@ -164,6 +169,54 @@ describe("profile summary", () => {
 			mostUsedThinkingLevel: "high",
 			mostUsedThinkingLevelPercent: 75,
 		});
+	});
+
+	it("builds range-scoped daily and model usage from the shared journal reduction", () => {
+		const chat = reduceProfileEntries([
+			sessionEntry("10000000-0000-4000-8000-000000000021", "chat"),
+			userEntry("u1", localTime(2026, 8, 7)),
+			assistantEntry("a1", localTime(2026, 8, 7), 20),
+		]);
+		const code = reduceProfileEntries([
+			sessionEntry("10000000-0000-4000-8000-000000000022", "code"),
+			userEntry("u2", localTime(2026, 8, 8)),
+			assistantEntry("a2", localTime(2026, 8, 8), 30),
+		]);
+
+		const summary = buildUsageSummary([chat, code], 7, localTime(2026, 8, 8, 18));
+		expect(summary).toMatchObject({
+			rangeDays: 7,
+			totalTokens: 50,
+			inputTokens: 50,
+			outputTokens: 0,
+			chatTokens: 20,
+			codeTokens: 30,
+			sessionCount: 2,
+			chatSessionCount: 1,
+			codeSessionCount: 1,
+			topModels: [{ provider: "openai", modelId: "gpt-test", totalTokens: 50 }],
+		});
+		expect(summary.daily).toHaveLength(7);
+		expect(summary.daily.slice(-2)).toEqual([
+			{
+				date: "2026-08-07",
+				chatTokens: 20,
+				codeTokens: 0,
+				inputTokens: 20,
+				outputTokens: 0,
+				cacheReadTokens: 0,
+				cacheWriteTokens: 0,
+			},
+			{
+				date: "2026-08-08",
+				chatTokens: 0,
+				codeTokens: 30,
+				inputTokens: 30,
+				outputTokens: 0,
+				cacheReadTokens: 0,
+				cacheWriteTokens: 0,
+			},
+		]);
 	});
 
 	it("keeps all-time totals while clipping the sparse heatmap to 53 weeks", () => {

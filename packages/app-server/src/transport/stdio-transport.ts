@@ -4,7 +4,7 @@ import {
 	MAX_ENVELOPE_UTF8_BYTES,
 	ProtocolValidationError,
 	parseRawEnvelope,
-} from "@arcmind/app-protocol";
+} from "@metis/app-protocol";
 import type { TransportConnection, TransportHandlers } from "./transport.ts";
 
 function oversizedFrame(): ProtocolValidationError {

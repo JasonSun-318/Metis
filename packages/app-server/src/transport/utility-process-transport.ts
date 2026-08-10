@@ -1,4 +1,4 @@
-import { assertEnvelopeByteLimit, ProtocolValidationError } from "@arcmind/app-protocol";
+import { assertEnvelopeByteLimit, ProtocolValidationError } from "@metis/app-protocol";
 import type { TransportConnection, TransportHandlers } from "./transport.ts";
 
 export interface UtilityParentPort {
@@ -14,7 +14,7 @@ export function requireUtilityParentPort(processValue: {
 	readonly parentPort?: UtilityParentPort | null;
 }): UtilityParentPort {
 	const port = processValue.parentPort;
-	if (!port) throw new Error("ArcMind utility entry requires Electron process.parentPort");
+	if (!port) throw new Error("Metis utility entry requires Electron process.parentPort");
 	return port;
 }
 

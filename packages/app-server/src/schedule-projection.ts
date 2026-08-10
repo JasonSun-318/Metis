@@ -1,4 +1,4 @@
-import type { DomainEvent, ScheduleRunView, ScheduleTaskView } from "@arcmind/app-protocol";
+import type { DomainEvent, ScheduleRunView, ScheduleTaskView } from "@metis/app-protocol";
 import type {
 	ScheduleEvent,
 	ScheduleRun,
@@ -6,7 +6,7 @@ import type {
 	ScheduleSpec,
 	ScheduleTarget,
 	ScheduleTask,
-} from "@arcmind/coding-agent";
+} from "@metis/coding-agent";
 
 function scheduleView(schedule: ScheduleSpec): ScheduleTaskView["schedule"] {
 	return schedule.kind === "weekly" ? { ...schedule, weekdays: [...schedule.weekdays] } : schedule;

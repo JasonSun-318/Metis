@@ -8,7 +8,7 @@ import {
 	type RpcErrorResponse,
 	validateHostRequest,
 	validateResponseFor,
-} from "@arcmind/app-protocol";
+} from "@metis/app-protocol";
 import {
 	createScheduledRunExecutor,
 	ensureModeScopedMemoryLayout,
@@ -17,13 +17,15 @@ import {
 	ScheduleManager,
 	type ScheduleManagerOptions,
 	SessionManager,
+	SettingsManager,
 	VERSION,
-} from "@arcmind/coding-agent";
+} from "@metis/coding-agent";
 import { AgentSessionRuntimeHost } from "./agent-session-runtime-host.ts";
 import { AppServerConnection } from "./connection.ts";
 import { CredentialCoordinator } from "./credential-coordinator.ts";
 import { Dispatcher } from "./dispatcher.ts";
 import { InteractionBroker } from "./interactions.ts";
+import { ModelSettingsService } from "./model-settings.ts";
 import type { OutboundQueueLimits } from "./outbound-queue.ts";
 import { scheduleEventView } from "./schedule-projection.ts";
 import { SessionCatalog } from "./session-catalog.ts";
@@ -40,7 +42,7 @@ export interface AppServerOptions extends SessionRegistryOptions, OutboundQueueL
 	readonly scheduleExecute?: ScheduleManagerOptions["execute"];
 }
 
-/** Parent-owned application server hosting all open ArcMind sessions. */
+/** Parent-owned application server hosting all open Metis sessions. */
 export class AppServer {
 	readonly serverEpoch = randomUUID();
 	readonly catalog: SessionCatalog;
@@ -70,7 +72,15 @@ export class AppServer {
 			this.catalog.updateSummary(session.sessionId, session);
 		});
 		const credentials = new CredentialCoordinator({ agentDir: options.agentDir });
-		const modelRegistry = ModelRegistry.create(credentials.createView(), join(options.agentDir, "models.json"));
+		const authStorage = credentials.createView();
+		const modelRegistry = ModelRegistry.create(authStorage, join(options.agentDir, "models.json"));
+		const settingsManager = SettingsManager.create(options.agentDir, options.agentDir, { projectTrusted: false });
+		const modelSettings = new ModelSettingsService({
+			agentDir: options.agentDir,
+			authStorage,
+			modelRegistry,
+			settingsManager,
+		});
 		this.registry = new SessionRegistry(
 			options.runtimeHost ??
 				new AgentSessionRuntimeHost({
@@ -90,6 +100,7 @@ export class AppServer {
 			this.interactions,
 			this.scheduleManager,
 			modelRegistry,
+			modelSettings,
 		);
 		this.outboundQueueLimits = {
 			maxUnacknowledgedBytes: options.maxUnacknowledgedBytes,

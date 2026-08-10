@@ -1,4 +1,4 @@
-import { RPC_ERROR_CODES } from "@arcmind/app-protocol";
+import { RPC_ERROR_CODES } from "@metis/app-protocol";
 import { describe, expect, it, vi } from "vitest";
 import type { TransportConnection, TransportHandlers } from "../src/transport/transport.ts";
 
@@ -33,11 +33,11 @@ export function runTransportConformance(name: string, createHarness: () => Trans
 				jsonrpc: "2.0",
 				id: "initialize",
 				method: "initialize",
-				params: { protocolVersion: 10, client: { name: "conformance", version: "1" }, capabilities: [] },
+				params: { protocolVersion: 11, client: { name: "conformance", version: "1" }, capabilities: [] },
 			});
 			await vi.waitFor(() => expect(harness.sent()).toHaveLength(2));
 			expect(harness.sent()[0]).toMatchObject({ error: { code: RPC_ERROR_CODES.NOT_INITIALIZED } });
-			expect(harness.sent()[1]).toMatchObject({ result: { protocolVersion: 10 } });
+			expect(harness.sent()[1]).toMatchObject({ result: { protocolVersion: 11 } });
 			await binding.close();
 		});
 

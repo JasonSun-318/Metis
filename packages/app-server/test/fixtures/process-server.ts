@@ -1,9 +1,9 @@
-import { getAgentDir, SessionManager } from "@arcmind/coding-agent";
+import { getAgentDir, SessionManager } from "@metis/coding-agent";
 import { AppServer } from "../../src/app-server.ts";
 import { StdioTransport } from "../../src/transport/stdio-transport.ts";
 import { bindAppServerTransport } from "../../src/transport/transport.ts";
 
-const crashPoint = process.env.ARCMIND_TEST_CRASH_POINT;
+const crashPoint = process.env.METIS_TEST_CRASH_POINT;
 let crashed = false;
 
 function crash(): void {

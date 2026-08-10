@@ -6,8 +6,9 @@ import type {
 	ItemView,
 	SessionSnapshot,
 	SessionSummary,
+	SessionTaskView,
 	TurnView,
-} from "@arcmind/app-protocol";
+} from "@metis/app-protocol";
 import {
 	appendProjectedDelta,
 	MAX_PROJECTED_THINKING_BYTES,
@@ -24,6 +25,7 @@ export interface SessionProjectionSeed {
 	readonly turns?: readonly TurnView[];
 	readonly items?: readonly ItemView[];
 	readonly pendingInteractions?: readonly InteractionView[];
+	readonly tasks?: readonly SessionTaskView[];
 }
 
 function clone<T>(value: T): T {
@@ -39,12 +41,14 @@ export class SessionProjection {
 	private readonly itemOrder: string[] = [];
 	private readonly itemIndexById = new Map<string, number>();
 	private pendingInteractions: InteractionView[];
+	private tasks: SessionTaskView[];
 
 	constructor(seed: SessionProjectionSeed) {
 		this.session = clone(seed.session);
 		for (const turn of seed.turns ?? []) this.upsertTurn(turn);
 		for (const item of seed.items ?? []) this.upsertItem(item);
 		this.pendingInteractions = clone([...(seed.pendingInteractions ?? [])]);
+		this.tasks = clone([...(seed.tasks ?? [])]);
 	}
 
 	private assertSession(sessionId: string): void {
@@ -83,6 +87,10 @@ export class SessionProjection {
 			case "subagent/item/completed":
 			case "subagent/itemsChanged":
 				this.assertSession(event.sessionId);
+				return clone(event);
+			case "session/tasksChanged":
+				this.assertSession(event.sessionId);
+				this.tasks = clone(event.tasks);
 				return clone(event);
 			case "session/updated":
 				this.assertSession(event.session.sessionId);
@@ -158,6 +166,7 @@ export class SessionProjection {
 				this.itemOrder.length > recentItemIds.length && recentItemIds.length > 0 ? recentItemIds[0]! : null,
 			activeTurnId: [...turns].reverse().find((turn) => turn.state === "running")?.turnId ?? null,
 			pendingInteractions: clone(this.pendingInteractions),
+			tasks: clone(this.tasks),
 			...clone(runtime),
 			serverEpoch,
 			cursor,

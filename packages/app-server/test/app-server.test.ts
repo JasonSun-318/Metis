@@ -21,15 +21,15 @@ import type {
 	ServerRpcRequest,
 	SessionSnapshot,
 	SessionSummary,
-} from "@arcmind/app-protocol";
-import { RPC_ERROR_CODES } from "@arcmind/app-protocol";
+} from "@metis/app-protocol";
+import { RPC_ERROR_CODES } from "@metis/app-protocol";
 import {
 	getDefaultSessionDir,
 	getManagedWorkspaceDir,
 	getSessionDisplayMetadataPath,
 	ProjectTrustStore,
 	SessionManager,
-} from "@arcmind/coding-agent";
+} from "@metis/coding-agent";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AppServer } from "../src/app-server.ts";
 import {
@@ -149,6 +149,7 @@ class FakeRuntime implements OpenedSessionRuntime {
 			nextBeforeItemId: null,
 			activeTurnId: null,
 			pendingInteractions: [],
+			tasks: [],
 			thinkingSelection: "high",
 			actualThinkingLevel: "high",
 			availableThinkingSelections: ["off", "high", "ultra"],
@@ -209,7 +210,7 @@ function initialize(id = "initialize") {
 		jsonrpc: "2.0" as const,
 		id,
 		method: "initialize" as const,
-		params: { protocolVersion: 10, client: { name: "test", version: "1" }, capabilities: [] },
+		params: { protocolVersion: 11, client: { name: "test", version: "1" }, capabilities: [] },
 	};
 }
 
@@ -441,7 +442,7 @@ describe("AppServer", () => {
 		);
 		const initialized = await connection.handle(initialize());
 		expect(initialized).toMatchObject({
-			result: { protocolVersion: 10, server: { name: "arcmind-app-server" }, serverEpoch: server.serverEpoch },
+			result: { protocolVersion: 11, server: { name: "metis-app-server" }, serverEpoch: server.serverEpoch },
 		});
 		expectError(await connection.handle(initialize("again")), RPC_ERROR_CODES.INVALID_REQUEST);
 	});
@@ -680,20 +681,36 @@ describe("AppServer", () => {
 			deleteSession.mockRestore();
 		}
 
-		for (const method of ["session/rename", "session/delete"] as const) {
-			expectError(
+		expectError(
+			await connection.handle({
+				jsonrpc: "2.0",
+				id: "scheduled-session/rename",
+				method: "session/rename",
+				params: { sessionId: "scheduled-session", requestId: REQUEST_C, name: "Nope" },
+			}),
+			RPC_ERROR_CODES.READ_ONLY_SESSION,
+		);
+		const scheduledPath = server.catalog.get("scheduled-session").path;
+		const deleteRetainedSession = vi.spyOn(SessionManager, "deleteSession").mockImplementation(async (path) => {
+			unlinkSync(path);
+			return { ok: true, method: "trash" };
+		});
+		try {
+			expect(
 				await connection.handle({
 					jsonrpc: "2.0",
-					id: `scheduled-${method}`,
-					method,
-					params: {
-						sessionId: "scheduled-session",
-						requestId: method === "session/rename" ? REQUEST_C : REQUEST_A,
-						...(method === "session/rename" ? { name: "Nope" } : {}),
-					},
+					id: "scheduled-session/delete",
+					method: "session/delete",
+					params: { sessionId: "scheduled-session", requestId: REQUEST_A },
 				}),
-				RPC_ERROR_CODES.READ_ONLY_SESSION,
+			).toMatchObject({ result: { sessionId: "scheduled-session", deleted: true } });
+			expect(deleteRetainedSession).toHaveBeenCalledWith(
+				scheduledPath,
+				expect.objectContaining({ allowRetainedScheduled: true }),
 			);
+			expect(existsSync(scheduledPath)).toBe(false);
+		} finally {
+			deleteRetainedSession.mockRestore();
 		}
 	});
 
@@ -815,7 +832,7 @@ describe("AppServer", () => {
 		const path = writeSession(sessionsRoot, "profile-session", projectDir);
 		const manager = SessionManager.open(path);
 		manager.appendMessage({ role: "user", content: "hello", timestamp: Date.now() });
-		manager.appendCustomEntry("arcmind.skill_usage.v1", { name: "pdf", trigger: "read" });
+		manager.appendCustomEntry("metis.skill_usage.v1", { name: "pdf", trigger: "read" });
 		manager.close();
 		const host = new FakeHost();
 		const server = await AppServer.create({ agentDir, sessionsRoot, runtimeHost: host });
@@ -842,7 +859,7 @@ describe("AppServer", () => {
 			writeFileSync(join(directory, "SKILL.md"), `---\nname: ${name}\ndescription: ${description}\n---\n`);
 		};
 		writeSkill(join(agentDir, "skills"), "global-skill", "Available to every session");
-		writeSkill(join(projectDir, ".arcmind", "skills"), "project-skill", "Available only after trust");
+		writeSkill(join(projectDir, ".metis", "skills"), "project-skill", "Available only after trust");
 		const server = await AppServer.create({ agentDir, sessionsRoot });
 		const connection = server.connect();
 		await connection.handle(initialize());
@@ -2063,7 +2080,7 @@ describe("AppServer", () => {
 	});
 
 	it("opens the production runtime offline without loading untrusted project resources", async () => {
-		const projectConfig = join(projectDir, ".arcmind");
+		const projectConfig = join(projectDir, ".metis");
 		mkdirSync(join(projectConfig, "extensions"), { recursive: true });
 		writeFileSync(
 			join(projectConfig, "extensions", "must-not-load.ts"),
@@ -2076,6 +2093,29 @@ describe("AppServer", () => {
 			role: "user",
 			content: `<attachment>${JSON.stringify({ name: "report.pdf", path: internalPath, size: 12 })}</attachment> ${"x".repeat(2 * 1024 * 1024)}`,
 			timestamp: Date.now(),
+		});
+		manager.appendMessage({
+			role: "toolResult",
+			toolCallId: "set-tasks-success",
+			toolName: "set_tasks",
+			content: [{ type: "text", text: "<task_list><task /></task_list>" }],
+			details: {
+				tasks: [
+					{ task: "Inspect implementation", completed: true },
+					{ task: "Build task panel", completed: false },
+				],
+			},
+			isError: false,
+			timestamp: Date.now() + 1,
+		});
+		manager.appendMessage({
+			role: "toolResult",
+			toolCallId: "set-tasks-error",
+			toolName: "set_tasks",
+			content: [{ type: "text", text: "invalid" }],
+			details: { tasks: [{ task: "Must not replace snapshot", completed: false }] },
+			isError: true,
+			timestamp: Date.now() + 2,
 		});
 		manager.close();
 		const server = await AppServer.create({ agentDir, sessionsRoot });
@@ -2096,13 +2136,23 @@ describe("AppServer", () => {
 			params: { sessionId },
 		});
 		expect(subscribed).toMatchObject({
-			result: { snapshot: { session: { sessionId }, pendingInteractions: [] } },
+			result: {
+				snapshot: {
+					session: { sessionId },
+					pendingInteractions: [],
+					tasks: [
+						{ task: "Inspect implementation", completed: true },
+						{ task: "Build task panel", completed: false },
+					],
+				},
+			},
 		});
 		const recentItems = (subscribed as { result: { snapshot: SessionSnapshot } }).result.snapshot.recentItems;
-		expect(recentItems).toHaveLength(1);
-		expect(Buffer.byteLength(JSON.stringify(recentItems[0]), "utf8")).toBeLessThan(20 * 1024);
-		expect(JSON.stringify(recentItems[0])).toContain("[report.pdf]");
-		expect(JSON.stringify(recentItems[0])).not.toContain(internalPath);
+		expect(recentItems).toHaveLength(3);
+		const userItem = recentItems.find((item) => item.role === "user");
+		expect(Buffer.byteLength(JSON.stringify(userItem), "utf8")).toBeLessThan(20 * 1024);
+		expect(JSON.stringify(userItem)).toContain("[report.pdf]");
+		expect(JSON.stringify(userItem)).not.toContain(internalPath);
 
 		await connection.handle({
 			jsonrpc: "2.0",
@@ -2119,12 +2169,12 @@ describe("AppServer", () => {
 		const parentProject = join(tempDir, "parent-scope", "project");
 		const sessionProject = join(tempDir, "session-scope", "project");
 		for (const cwd of [parentProject, sessionProject]) {
-			const extensionDir = join(cwd, ".arcmind", "extensions");
+			const extensionDir = join(cwd, ".metis", "extensions");
 			mkdirSync(extensionDir, { recursive: true });
 			writeFileSync(
 				join(extensionDir, "interaction.ts"),
-				`export default function (arcmind) {
-					arcmind.on("session_start", async (_event, ctx) => {
+				`export default function (metis) {
+					metis.on("session_start", async (_event, ctx) => {
 						await ctx.ui.confirm("Extension loaded", "The trusted project extension is active.");
 					});
 				}

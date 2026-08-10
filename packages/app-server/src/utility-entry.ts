@@ -1,4 +1,4 @@
-import { getAgentDir } from "@arcmind/coding-agent";
+import { getAgentDir } from "@metis/coding-agent";
 import { AppServer } from "./app-server.ts";
 import { bindAppServerTransport } from "./transport/transport.ts";
 import {
@@ -32,6 +32,6 @@ async function main(): Promise<void> {
 }
 
 void main().catch(() => {
-	console.error("ArcMind utility app server requires a live Electron parent process.");
+	console.error("Metis utility app server requires a live Electron parent process.");
 	process.exitCode = 1;
 });

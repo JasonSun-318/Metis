@@ -6,7 +6,7 @@ import {
 	type RpcErrorResponse,
 	type ServerRpcNotification,
 	validateServerNotification,
-} from "@arcmind/app-protocol";
+} from "@metis/app-protocol";
 import { AppServerError } from "./session-runtime-host.ts";
 
 export const DEFAULT_MAX_UNACKNOWLEDGED_BYTES = 4 * 1024 * 1024;
@@ -194,7 +194,7 @@ export class OutboundQueue {
 				const next = incoming.event as DeltaEvent;
 				const mergedEvent: DomainEvent = {
 					...prior,
-					delta: { type: prior.delta.type, text: prior.delta.text + next.delta.text },
+					delta: { ...next.delta, text: prior.delta.text + next.delta.text },
 				};
 				merged = {
 					...last,

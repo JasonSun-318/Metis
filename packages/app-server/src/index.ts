@@ -5,6 +5,7 @@ export * from "./credential-coordinator.ts";
 export * from "./dispatcher.ts";
 export * from "./durable-mutation.ts";
 export * from "./interactions.ts";
+export * from "./model-settings.ts";
 export * from "./outbound-queue.ts";
 export * from "./projection/session-projection.ts";
 export * from "./session-catalog.ts";

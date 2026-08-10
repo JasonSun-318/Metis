@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
-import type { DurableImageRefView, ItemContentBlockView, ItemView } from "@arcmind/app-protocol";
-import { formatSessionAttachmentDisplayText } from "@arcmind/coding-agent";
+import type { DurableImageRefView, ItemContentBlockView, ItemView, SessionTaskView } from "@metis/app-protocol";
+import { formatSessionAttachmentDisplayText } from "@metis/coding-agent";
 
 export const MAX_PROJECTED_THINKING_BYTES = 8 * 1024;
 export const MAX_PROJECTED_VISIBLE_TEXT_BYTES = 20 * 1024;
@@ -196,6 +196,49 @@ export interface MessageProjectionInput {
 	readonly fallbackTimestamp: string;
 }
 
+export function projectAssistantOutputTokens(message: object): number | undefined {
+	const record = message as Record<string, unknown>;
+	if (record.role !== "assistant" || typeof record.usage !== "object" || record.usage === null) return undefined;
+	const output = (record.usage as Record<string, unknown>).output;
+	return Number.isSafeInteger(output) && Number(output) >= 0 ? Number(output) : undefined;
+}
+
+export function projectTasksFromToolResult(message: unknown): SessionTaskView[] | undefined {
+	if (typeof message !== "object" || message === null) return undefined;
+	const record = message as Record<string, unknown>;
+	if (record.role !== "toolResult" || record.toolName !== "set_tasks" || record.isError !== false) return undefined;
+	if (typeof record.details !== "object" || record.details === null) return undefined;
+	const tasks = (record.details as Record<string, unknown>).tasks;
+	if (!Array.isArray(tasks) || tasks.length > 256) return undefined;
+	const projected: SessionTaskView[] = [];
+	for (const candidate of tasks) {
+		if (typeof candidate !== "object" || candidate === null) return undefined;
+		const item = candidate as Record<string, unknown>;
+		if (
+			typeof item.task !== "string" ||
+			item.task.trim().length < 1 ||
+			item.task.length > 512 ||
+			typeof item.completed !== "boolean"
+		) {
+			return undefined;
+		}
+		projected.push({ task: item.task.trim(), completed: item.completed });
+	}
+	return projected;
+}
+
+export function projectLatestTasks(entries: readonly unknown[]): SessionTaskView[] {
+	for (let index = entries.length - 1; index >= 0; index -= 1) {
+		const entry = entries[index];
+		if (typeof entry !== "object" || entry === null) continue;
+		const record = entry as Record<string, unknown>;
+		if (record.type !== "message") continue;
+		const tasks = projectTasksFromToolResult(record.message);
+		if (tasks !== undefined) return tasks;
+	}
+	return [];
+}
+
 export function projectMessageEntry(input: MessageProjectionInput): ItemView | undefined {
 	const { entry, sessionId, turnStates, toolStates, fallbackTimestamp } = input;
 	if (entry.type !== "message" || typeof entry.message !== "object" || entry.message === null) return undefined;
@@ -221,6 +264,7 @@ export function projectMessageEntry(input: MessageProjectionInput): ItemView | u
 	}
 
 	if (message.role === "assistant") {
+		const outputTokens = projectAssistantOutputTokens(message);
 		const content = assistantBlocks(
 			message.content,
 			{
@@ -237,6 +281,7 @@ export function projectMessageEntry(input: MessageProjectionInput): ItemView | u
 			role: "assistant",
 			state,
 			content,
+			...(outputTokens !== undefined && outputTokens > 0 ? { usage: { outputTokens } } : {}),
 			createdAt,
 			...(state === "streaming" ? {} : { completedAt: createdAt }),
 		};
@@ -318,9 +363,16 @@ export function projectLiveMessage(input: {
 
 export function appendProjectedDelta(
 	item: ItemView,
-	delta: { readonly type: "text" | "thinking"; readonly text: string },
+	delta: { readonly type: "text" | "thinking"; readonly text: string; readonly outputTokens?: number },
 ):
-	| { readonly item: ItemView; readonly delta: { readonly type: "text" | "thinking"; readonly text: string } }
+	| {
+			readonly item: ItemView;
+			readonly delta: {
+				readonly type: "text" | "thinking";
+				readonly text: string;
+				readonly outputTokens?: number;
+			};
+	  }
 	| undefined {
 	const maximum = delta.type === "thinking" ? MAX_PROJECTED_THINKING_BYTES : MAX_PROJECTED_VISIBLE_TEXT_BYTES;
 	const used = item.content.reduce(
@@ -333,5 +385,9 @@ export function appendProjectedDelta(
 	const last = content.at(-1);
 	if (last?.type === delta.type) content[content.length - 1] = { ...last, text: last.text + accepted };
 	else content.push({ type: delta.type, text: accepted });
-	return { item: { ...item, content }, delta: { type: delta.type, text: accepted } };
+	const usage = delta.outputTokens === undefined ? item.usage : { outputTokens: delta.outputTokens };
+	return {
+		item: { ...item, content, ...(usage === undefined ? {} : { usage }) },
+		delta: { ...delta, text: accepted },
+	};
 }

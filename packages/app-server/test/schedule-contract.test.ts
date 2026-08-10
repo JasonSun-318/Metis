@@ -1,14 +1,14 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type ClientRpcSuccessResponse, PROTOCOL_VERSION, RPC_ERROR_CODES } from "@arcmind/app-protocol";
+import { type ClientRpcSuccessResponse, PROTOCOL_VERSION, RPC_ERROR_CODES } from "@metis/app-protocol";
 import {
 	createSessionId,
 	getDefaultSessionDir,
 	ScheduleManager,
 	type ScheduleRunClaim,
 	SessionManager,
-} from "@arcmind/coding-agent";
+} from "@metis/coding-agent";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { trashScheduledTaskData } from "../../coding-agent/src/core/schedules/delete.ts";
 import { AppServer } from "../src/app-server.ts";
@@ -365,6 +365,26 @@ describe("AppServer schedule contract", () => {
 		expect(await connection.handle(request("session/open", { sessionId: run.sessionId! }))).toMatchObject({
 			result: { session: { sessionId: run.sessionId!, scheduled: { taskId: TASK_ID, runId: RUN_ID } } },
 		});
+		expect(
+			await connection.handle(
+				request("session/delete", {
+					sessionId: run.sessionId!,
+					requestId: "60000000-0000-4000-8000-000000000001",
+				}),
+			),
+		).toMatchObject({ error: { code: RPC_ERROR_CODES.READ_ONLY_SESSION } });
+		expect(
+			await connection.handle(
+				request("session/delete", {
+					sessionId: retainedRun.sessionId!,
+					requestId: "60000000-0000-4000-8000-000000000002",
+				}),
+			),
+		).toMatchObject({ result: { sessionId: retainedRun.sessionId!, deleted: true } });
+		expect(existsSync(retainedFile)).toBe(false);
+		expect(JSON.stringify(await connection.handle(request("session/list", {})))).not.toContain(
+			retainedRun.sessionId!,
+		);
 		const originalJournal = readFileSync(visibleFile, "utf8");
 		const wrongModeJournal = originalJournal.replace('"mode":"chat"', '"mode":"code"');
 		expect(wrongModeJournal).not.toBe(originalJournal);

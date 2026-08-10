@@ -1,21 +1,27 @@
 import { lstatSync } from "node:fs";
-import type { ClientResult } from "@arcmind/app-protocol";
-import {
-	DEFAULT_AGENT_MODE,
-	type FileEntry,
-	parseSkillUsageRecord,
-	SessionManager,
-	SKILL_USAGE_CUSTOM_TYPE,
-} from "@arcmind/coding-agent";
+import type { ClientResult } from "@metis/app-protocol";
+import { DEFAULT_AGENT_MODE, type FileEntry, parseSkillUsageRecord, SessionManager } from "@metis/coding-agent";
 import type { SessionRef } from "./session-runtime-host.ts";
 
 const DAY_MS = 86_400_000;
 const VISIBLE_WEEKS = 53;
+const SKILL_USAGE_TYPE = "metis.skill_usage.v1";
 
 interface SessionProfileContribution {
 	readonly mode: "chat" | "code";
 	readonly totalTokens: number;
 	readonly tokensByDate: readonly (readonly [date: string, tokens: number])[];
+	readonly usageByDate: readonly (readonly [
+		date: string,
+		usage: {
+			readonly total: number;
+			readonly input: number;
+			readonly output: number;
+			readonly cacheRead: number;
+			readonly cacheWrite: number;
+		},
+	])[];
+	readonly modelTokensByDate: readonly (readonly [date: string, provider: string, modelId: string, tokens: number])[];
 	readonly durationMs: number;
 	readonly hasUserMessage: boolean;
 	readonly thinkingCounts: readonly (readonly [level: ProfileThinkingLevel, count: number])[];
@@ -76,6 +82,11 @@ function dominant<Value extends string>(counts: ReadonlyMap<Value, number>): { v
 
 export function reduceProfileEntries(entries: readonly FileEntry[]): SessionProfileContribution {
 	const tokensByDate = new Map<string, number>();
+	const usageByDate = new Map<
+		string,
+		{ total: number; input: number; output: number; cacheRead: number; cacheWrite: number }
+	>();
+	const modelTokensByDate = new Map<string, { date: string; provider: string; modelId: string; tokens: number }>();
 	const skillCounts = new Map<string, number>();
 	const thinkingCounts = new Map<ProfileThinkingLevel, number>();
 	const header = entries.find((entry) => entry.type === "session");
@@ -93,7 +104,7 @@ export function reduceProfileEntries(entries: readonly FileEntry[]): SessionProf
 				: null;
 			continue;
 		}
-		if (entry.type === "custom" && entry.customType === SKILL_USAGE_CUSTOM_TYPE) {
+		if (entry.type === "custom" && entry.customType === SKILL_USAGE_TYPE) {
 			const usage = parseSkillUsageRecord(entry.data);
 			if (usage) skillCounts.set(usage.name, safeAdd(skillCounts.get(usage.name) ?? 0, 1));
 			continue;
@@ -111,6 +122,22 @@ export function reduceProfileEntries(entries: readonly FileEntry[]): SessionProf
 		if (tokens > 0) {
 			const date = localDateKey(timestamp);
 			tokensByDate.set(date, safeAdd(tokensByDate.get(date) ?? 0, tokens));
+			const daily = usageByDate.get(date) ?? { total: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+			daily.total = safeAdd(daily.total, tokens);
+			daily.input = safeAdd(daily.input, entry.message.usage.input);
+			daily.output = safeAdd(daily.output, entry.message.usage.output);
+			daily.cacheRead = safeAdd(daily.cacheRead, entry.message.usage.cacheRead);
+			daily.cacheWrite = safeAdd(daily.cacheWrite, entry.message.usage.cacheWrite);
+			usageByDate.set(date, daily);
+			const modelKey = `${date}\0${entry.message.provider}\0${entry.message.model}`;
+			const model = modelTokensByDate.get(modelKey) ?? {
+				date,
+				provider: entry.message.provider,
+				modelId: entry.message.model,
+				tokens: 0,
+			};
+			model.tokens = safeAdd(model.tokens, tokens);
+			modelTokensByDate.set(modelKey, model);
 		}
 	}
 
@@ -118,6 +145,15 @@ export function reduceProfileEntries(entries: readonly FileEntry[]): SessionProf
 		mode,
 		totalTokens,
 		tokensByDate: [...tokensByDate].sort(([left], [right]) => compareNames(left, right)),
+		usageByDate: [...usageByDate].sort(([left], [right]) => compareNames(left, right)),
+		modelTokensByDate: [...modelTokensByDate.values()]
+			.sort(
+				(left, right) =>
+					compareNames(left.date, right.date) ||
+					compareNames(left.provider, right.provider) ||
+					compareNames(left.modelId, right.modelId),
+			)
+			.map((entry) => [entry.date, entry.provider, entry.modelId, entry.tokens]),
 		durationMs:
 			hasUserMessage && Number.isFinite(firstMessageAt) && Number.isFinite(lastMessageAt)
 				? Math.max(0, lastMessageAt - firstMessageAt)
@@ -125,6 +161,95 @@ export function reduceProfileEntries(entries: readonly FileEntry[]): SessionProf
 		hasUserMessage,
 		thinkingCounts: [...thinkingCounts].sort(([left], [right]) => compareNames(left, right)),
 		skillCounts: [...skillCounts].sort(([left], [right]) => compareNames(left, right)),
+	};
+}
+
+export function buildUsageSummary(
+	contributions: readonly SessionProfileContribution[],
+	rangeDays: 7 | 30 | 90,
+	now = Date.now(),
+): ClientResult<"usage/get"> {
+	const todayDay = dateKeyDayNumber(localDateKey(now));
+	const firstDay = todayDay - rangeDays + 1;
+	const daily = Array.from({ length: rangeDays }, (_, index) => ({
+		date: new Date((firstDay + index) * DAY_MS).toISOString().slice(0, 10),
+		chatTokens: 0,
+		codeTokens: 0,
+		inputTokens: 0,
+		outputTokens: 0,
+		cacheReadTokens: 0,
+		cacheWriteTokens: 0,
+	}));
+	const byDate = new Map(daily.map((day) => [day.date, day]));
+	const modelTotals = new Map<string, { provider: string; modelId: string; totalTokens: number }>();
+	let totalTokens = 0;
+	let inputTokens = 0;
+	let outputTokens = 0;
+	let cacheReadTokens = 0;
+	let cacheWriteTokens = 0;
+	let chatTokens = 0;
+	let codeTokens = 0;
+	let chatSessionCount = 0;
+	let codeSessionCount = 0;
+
+	for (const contribution of contributions) {
+		let sessionTokens = 0;
+		for (const [date, usage] of contribution.usageByDate) {
+			const day = byDate.get(date);
+			if (!day) continue;
+			sessionTokens = safeAdd(sessionTokens, usage.total);
+			totalTokens = safeAdd(totalTokens, usage.total);
+			inputTokens = safeAdd(inputTokens, usage.input);
+			outputTokens = safeAdd(outputTokens, usage.output);
+			cacheReadTokens = safeAdd(cacheReadTokens, usage.cacheRead);
+			cacheWriteTokens = safeAdd(cacheWriteTokens, usage.cacheWrite);
+			day.inputTokens = safeAdd(day.inputTokens, usage.input);
+			day.outputTokens = safeAdd(day.outputTokens, usage.output);
+			day.cacheReadTokens = safeAdd(day.cacheReadTokens, usage.cacheRead);
+			day.cacheWriteTokens = safeAdd(day.cacheWriteTokens, usage.cacheWrite);
+			if (contribution.mode === "chat") {
+				chatTokens = safeAdd(chatTokens, usage.total);
+				day.chatTokens = safeAdd(day.chatTokens, usage.total);
+			} else {
+				codeTokens = safeAdd(codeTokens, usage.total);
+				day.codeTokens = safeAdd(day.codeTokens, usage.total);
+			}
+		}
+		if (contribution.hasUserMessage && sessionTokens > 0) {
+			if (contribution.mode === "chat") chatSessionCount += 1;
+			else codeSessionCount += 1;
+		}
+		for (const [date, provider, modelId, tokens] of contribution.modelTokensByDate) {
+			if (!byDate.has(date)) continue;
+			const key = `${provider}\0${modelId}`;
+			const model = modelTotals.get(key) ?? { provider, modelId, totalTokens: 0 };
+			model.totalTokens = safeAdd(model.totalTokens, tokens);
+			modelTotals.set(key, model);
+		}
+	}
+
+	return {
+		generatedAt: new Date(now).toISOString(),
+		rangeDays,
+		totalTokens,
+		inputTokens,
+		outputTokens,
+		cacheReadTokens,
+		cacheWriteTokens,
+		chatTokens,
+		codeTokens,
+		sessionCount: chatSessionCount + codeSessionCount,
+		chatSessionCount,
+		codeSessionCount,
+		daily,
+		topModels: [...modelTotals.values()]
+			.sort(
+				(left, right) =>
+					right.totalTokens - left.totalTokens ||
+					compareNames(left.provider, right.provider) ||
+					compareNames(left.modelId, right.modelId),
+			)
+			.slice(0, 8),
 	};
 }
 
@@ -239,7 +364,7 @@ export class ProfileSummaryCache {
 		this.readEntries = options.readEntries ?? defaultReadEntries;
 	}
 
-	summarize(refs: readonly SessionRef[], now = Date.now()): ClientResult<"profile/get"> {
+	private contributions(refs: readonly SessionRef[]): SessionProfileContribution[] {
 		const livePaths = new Set(refs.map((ref) => ref.path));
 		for (const path of this.cache.keys()) {
 			if (!livePaths.has(path)) this.cache.delete(path);
@@ -262,6 +387,14 @@ export class ProfileSummaryCache {
 				// One unreadable journal must not make the local profile unavailable.
 			}
 		}
-		return buildProfileSummary(contributions, now);
+		return contributions;
+	}
+
+	summarize(refs: readonly SessionRef[], now = Date.now()): ClientResult<"profile/get"> {
+		return buildProfileSummary(this.contributions(refs), now);
+	}
+
+	usage(refs: readonly SessionRef[], rangeDays: 7 | 30 | 90, now = Date.now()): ClientResult<"usage/get"> {
+		return buildUsageSummary(this.contributions(refs), rangeDays, now);
 	}
 }

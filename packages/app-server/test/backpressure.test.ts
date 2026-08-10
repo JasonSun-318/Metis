@@ -3,7 +3,7 @@ import {
 	type ItemView,
 	ProtocolValidationError,
 	type ServerRpcNotification,
-} from "@arcmind/app-protocol";
+} from "@metis/app-protocol";
 import { describe, expect, it, vi } from "vitest";
 import { type OutboundEnvelope, OutboundQueue } from "../src/outbound-queue.ts";
 
@@ -11,12 +11,12 @@ const EPOCH = "00000000-0000-4000-8000-000000000001";
 const SESSION_ID = "session-backpressure";
 const CREATED_AT = "2026-07-16T00:00:00.000Z";
 
-function delta(text: string): DomainEvent {
+function delta(text: string, outputTokens?: number): DomainEvent {
 	return {
 		type: "item/delta",
 		sessionId: SESSION_ID,
 		itemId: "item-stream",
-		delta: { type: "text", text },
+		delta: { type: "text", text, ...(outputTokens === undefined ? {} : { outputTokens }) },
 	};
 }
 
@@ -81,6 +81,23 @@ describe("OutboundQueue backpressure", () => {
 
 		expect(queue.acknowledge(EPOCH, 2)).toBe(2);
 		expect(queue.getStats()).toMatchObject({ unacknowledgedBytes: 0, unacknowledgedEvents: 0 });
+	});
+
+	it("keeps the newest usage when coalescing deltas", async () => {
+		const queue = new OutboundQueue({ serverEpoch: EPOCH });
+		const sent: OutboundEnvelope[] = [];
+		queue.enqueue(1, delta("hello", 7));
+		queue.enqueue(2, delta(" world", 12));
+		queue.setSender((message) => {
+			sent.push(message);
+		});
+
+		await vi.waitFor(() => expect(sent).toHaveLength(1));
+		expect(sent[0]).toMatchObject({
+			params: {
+				events: [{ type: "item/delta", delta: { text: "hello world", outputTokens: 12 } }],
+			},
+		});
 	});
 
 	it("does not coalesce across a terminal item event", async () => {

@@ -1,4 +1,4 @@
-import { createRpcError, type ProtocolValidationError, type RpcErrorResponse } from "@arcmind/app-protocol";
+import { createRpcError, type ProtocolValidationError, type RpcErrorResponse } from "@metis/app-protocol";
 import type { AppServer } from "../app-server.ts";
 
 export interface TransportHandlers {

@@ -1,5 +1,5 @@
-import type { DomainEvent } from "@arcmind/app-protocol";
-import type { SubagentVisibleActivity } from "@arcmind/coding-agent";
+import type { DomainEvent } from "@metis/app-protocol";
+import type { SubagentVisibleActivity } from "@metis/coding-agent";
 import { describe, expect, it } from "vitest";
 import { MAX_PROJECTED_VISIBLE_TEXT_BYTES } from "../src/item-projection.ts";
 import { SubagentLiveProjector } from "../src/subagent-live-projector.ts";

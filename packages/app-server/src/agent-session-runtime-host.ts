@@ -10,7 +10,7 @@ import type {
 	SessionSummary,
 	SkillSourceView,
 	TurnView,
-} from "@arcmind/app-protocol";
+} from "@metis/app-protocol";
 import {
 	type AgentSession,
 	type AgentSessionEvent,
@@ -20,6 +20,7 @@ import {
 	createAgentSessionFromServices,
 	createAgentSessionRuntime,
 	createAgentSessionServices,
+	createAskUserToolDefinition,
 	DefaultResourceLoader,
 	formatSessionAttachments,
 	getProjectTrustOptions,
@@ -36,7 +37,7 @@ import {
 	SettingsManager,
 	type Skill,
 	type SubagentSummary,
-} from "@arcmind/coding-agent";
+} from "@metis/coding-agent";
 import type { CredentialCoordinator } from "./credential-coordinator.ts";
 import {
 	type DurableSessionMutation,
@@ -46,8 +47,11 @@ import {
 import type { InteractionBroker } from "./interactions.ts";
 import {
 	opaqueId,
+	projectAssistantOutputTokens,
+	projectLatestTasks,
 	projectLiveMessage as projectLiveItemMessage,
 	projectMessageEntry,
+	projectTasksFromToolResult,
 	timestamp,
 } from "./item-projection.ts";
 import { SessionProjection } from "./projection/session-projection.ts";
@@ -201,6 +205,7 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 			session: this.summaryFromRuntime(journal, reduced),
 			turns,
 			items,
+			tasks: projectLatestTasks(this.session.sessionManager.getBranch()),
 		});
 		this.subagentLive = new SubagentLiveProjector(
 			this.sessionId,
@@ -220,6 +225,14 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 
 	private async bindExtensionUI(session: AgentSession): Promise<void> {
 		const uiContext = this.interactions?.createExtensionUIContext(this.sessionId, (event) => this.publish(event));
+		if (this.interactions) {
+			session.installHostTools(
+				[
+					createAskUserToolDefinition((request) => this.interactions!.requestUserInput(this.sessionId, request)),
+				] as never,
+				{ automaticPermissionToolNames: ["ask_user"] },
+			);
+		}
 		session.setPermissionApprovalHandler((request) =>
 			this.interactions
 				? this.interactions.requestPermissionApproval(this.sessionId, request)
@@ -288,6 +301,7 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 				event.assistantMessageEvent.type === "thinking_delta"
 			) {
 				const itemId = this.itemIdFor(event.message);
+				const outputTokens = projectAssistantOutputTokens(event.message);
 				this.publish({
 					type: "item/delta",
 					sessionId: this.sessionId,
@@ -295,6 +309,7 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 					delta: {
 						type: event.assistantMessageEvent.type === "text_delta" ? "text" : "thinking",
 						text: event.assistantMessageEvent.delta,
+						...(outputTokens !== undefined && outputTokens > 0 ? { outputTokens } : {}),
 					},
 				});
 			}
@@ -302,6 +317,10 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 		}
 		if (event.type === "message_end") {
 			this.publishCompletedItem(event.message);
+			const tasks = projectTasksFromToolResult(event.message);
+			if (tasks !== undefined) {
+				this.publish({ type: "session/tasksChanged", sessionId: this.sessionId, tasks });
+			}
 			if (event.message.role === "assistant") this.liveAssistantItemId = undefined;
 			return;
 		}
@@ -591,6 +610,7 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 	}
 
 	async setModel(input: ClientParams<"session/setModel">): Promise<ClientResult<"session/setModel">> {
+		this.session.modelRegistry.refresh();
 		const model = this.session.modelRegistry.find(input.provider, input.modelId);
 		if (!model || !this.session.modelRegistry.hasConfiguredAuth(model)) {
 			throw new AppServerError("NOT_FOUND", { sessionId: input.sessionId, requestId: input.requestId });
@@ -761,7 +781,12 @@ class ReadonlyScheduledSessionRuntime implements OpenedSessionRuntime {
 				});
 			})
 			.filter((item): item is ItemView => item !== undefined);
-		this.projection = new SessionProjection({ session: ref.summary, turns, items });
+		this.projection = new SessionProjection({
+			session: ref.summary,
+			turns,
+			items,
+			tasks: projectLatestTasks(manager.getBranch()),
+		});
 	}
 
 	isActive(): boolean {

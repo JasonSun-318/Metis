@@ -1,4 +1,4 @@
-import type { DomainEvent, ScheduleSnapshotView, SessionSnapshot, SessionSummary } from "@arcmind/app-protocol";
+import type { DomainEvent, ScheduleSnapshotView, SessionSnapshot, SessionSummary } from "@metis/app-protocol";
 import type { OutboundQueue, OutboundStage } from "./outbound-queue.ts";
 import { AppServerError, type OpenedSessionRuntime } from "./session-runtime-host.ts";
 

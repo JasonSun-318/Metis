@@ -1,4 +1,4 @@
-import type { ClientParams, ClientResult, SessionSnapshot, SessionSummary } from "@arcmind/app-protocol";
+import type { ClientParams, ClientResult, SessionSnapshot, SessionSummary } from "@metis/app-protocol";
 import { describe, expect, it, vi } from "vitest";
 import type { DurableSessionMutation, PreparedSessionMutation } from "../src/durable-mutation.ts";
 import { SessionRegistry } from "../src/session-registry.ts";
@@ -107,6 +107,7 @@ class FakeRuntime implements OpenedSessionRuntime {
 			nextBeforeItemId: null,
 			activeTurnId: null,
 			pendingInteractions: [],
+			tasks: [],
 			thinkingSelection: "high",
 			actualThinkingLevel: "high",
 			availableThinkingSelections: ["off", "high", "ultra"],

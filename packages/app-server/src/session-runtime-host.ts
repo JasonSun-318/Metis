@@ -6,7 +6,7 @@ import type {
 	RpcErrorName,
 	SessionSnapshot,
 	SessionSummary,
-} from "@arcmind/app-protocol";
+} from "@metis/app-protocol";
 import type { DurableSessionMutation, PreparedSessionMutation } from "./durable-mutation.ts";
 
 export interface SessionRef {

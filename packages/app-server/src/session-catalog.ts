@@ -9,7 +9,7 @@ import {
 	type CwdOrigin,
 	MAX_NAME_UTF16_UNITS,
 	type SessionSummary,
-} from "@arcmind/app-protocol";
+} from "@metis/app-protocol";
 import {
 	assertValidSessionId,
 	CURRENT_SESSION_VERSION,
@@ -25,7 +25,7 @@ import {
 	resolveNewSessionWorkspace,
 	type ScheduleRun,
 	SessionManager,
-} from "@arcmind/coding-agent";
+} from "@metis/coding-agent";
 import {
 	completeSessionMutation,
 	type DurableSessionMutation,

@@ -4,10 +4,10 @@ import {
 	type RuntimeRequestIdentity,
 	reduceRuntimeJournal,
 	type SessionManager,
-} from "@arcmind/coding-agent";
+} from "@metis/coding-agent";
 import { AppServerError } from "./session-runtime-host.ts";
 
-const RESULT_ENTRY_TYPE = "arcmind.app-server.mutation-result.v1";
+const RESULT_ENTRY_TYPE = "metis.app-server.mutation-result.v1";
 const MAX_RESULT_BYTES = 1024 * 1024;
 
 export interface DurableSessionMutation {
@@ -31,7 +31,9 @@ function storedResult(manager: SessionManager, request: RuntimeRequestIdentity):
 	for (const raw of manager.getDurableJournalSnapshot()) {
 		if (typeof raw !== "object" || raw === null || Array.isArray(raw)) continue;
 		const entry = raw as unknown as Record<string, unknown>;
-		if (entry.type !== "custom" || entry.customType !== RESULT_ENTRY_TYPE) continue;
+		if (entry.type !== "custom" || entry.customType !== RESULT_ENTRY_TYPE) {
+			continue;
+		}
 		if (typeof entry.data !== "object" || entry.data === null || Array.isArray(entry.data)) {
 			throw new AppServerError("SESSION_CORRUPT");
 		}

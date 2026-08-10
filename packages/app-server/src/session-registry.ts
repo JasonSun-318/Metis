@@ -1,5 +1,5 @@
-import type { ClientResult } from "@arcmind/app-protocol";
-import { assertValidSessionId } from "@arcmind/coding-agent";
+import type { ClientResult } from "@metis/app-protocol";
+import { assertValidSessionId } from "@metis/coding-agent";
 import {
 	AppServerError,
 	type OpenedSessionRuntime,

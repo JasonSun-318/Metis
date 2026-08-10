@@ -1,6 +1,6 @@
-# @arcmind/app-server
+# @metis/app-server
 
-Recoverable, multi-session application server shared by ArcMind desktop and automation transports.
+Recoverable, multi-session application server shared by Metis desktop and automation transports.
 
 The package owns agent runtimes and durable session mutations. It does not spawn one child process per session.
 

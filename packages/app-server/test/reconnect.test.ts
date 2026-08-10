@@ -9,11 +9,12 @@ import type {
 	ItemView,
 	SessionSnapshot,
 	SessionSummary,
-} from "@arcmind/app-protocol";
+} from "@metis/app-protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AppServer } from "../src/app-server.ts";
 import type { ConnectionOutboundEnvelope } from "../src/connection.ts";
 import type { DurableSessionMutation, PreparedSessionMutation } from "../src/durable-mutation.ts";
+import { projectLatestTasks, projectTasksFromToolResult } from "../src/item-projection.ts";
 import { MAX_PROJECTED_THINKING_BYTES, SessionProjection } from "../src/projection/session-projection.ts";
 import type {
 	OpenedSessionRuntime,
@@ -192,7 +193,7 @@ function initialize(id: string) {
 		jsonrpc: "2.0" as const,
 		id,
 		method: "initialize" as const,
-		params: { protocolVersion: 10, client: { name: "test", version: "1" }, capabilities: [] },
+		params: { protocolVersion: 11, client: { name: "test", version: "1" }, capabilities: [] },
 	};
 }
 
@@ -393,6 +394,56 @@ describe("gap-free reconnect", () => {
 		} as const satisfies DomainEvent;
 
 		expect(projection.apply(event)).toEqual(event);
+	});
+
+	it("keeps task snapshots independent of transcript pagination", () => {
+		const tasks = [
+			{ task: "Inspect implementation", completed: true },
+			{ task: "Build task panel", completed: false },
+		];
+		const projection = new SessionProjection({ session: summary(), tasks });
+
+		expect(projection.snapshot("00000000-0000-4000-8000-000000000001", 1).tasks).toEqual(tasks);
+		const event = {
+			type: "session/tasksChanged",
+			sessionId: SESSION_ID,
+			tasks: [...tasks, { task: "Run validation", completed: false }],
+		} as const satisfies DomainEvent;
+		expect(projection.apply(event)).toEqual(event);
+		expect(projection.snapshot("00000000-0000-4000-8000-000000000001", 2).tasks).toEqual(event.tasks);
+	});
+
+	it("projects only successful bounded task results from the selected branch", () => {
+		const first = {
+			role: "toolResult",
+			toolName: "set_tasks",
+			isError: false,
+			details: { tasks: [{ task: "  Inspect implementation  ", completed: false }] },
+		};
+		const latest = {
+			role: "toolResult",
+			toolName: "set_tasks",
+			isError: false,
+			details: { tasks: [{ task: "Build task panel", completed: true }] },
+		};
+
+		expect(projectTasksFromToolResult(first)).toEqual([{ task: "Inspect implementation", completed: false }]);
+		expect(
+			projectLatestTasks([
+				{ type: "message", message: first },
+				{ type: "message", message: latest },
+			]),
+		).toEqual([{ task: "Build task panel", completed: true }]);
+		expect(projectTasksFromToolResult({ ...latest, isError: true })).toBeUndefined();
+		expect(
+			projectTasksFromToolResult({ ...latest, details: { tasks: [{ task: "", completed: false }] } }),
+		).toBeUndefined();
+		expect(
+			projectTasksFromToolResult({
+				...latest,
+				details: { tasks: Array.from({ length: 257 }, () => ({ task: "x", completed: false })) },
+			}),
+		).toBeUndefined();
 	});
 
 	it("reserves visible-answer capacity after a long thinking stream", () => {

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
-import type { DomainEvent, ItemView } from "@arcmind/app-protocol";
-import type { SubagentVisibleActivity } from "@arcmind/coding-agent";
+import type { DomainEvent, ItemView } from "@metis/app-protocol";
+import type { SubagentVisibleActivity } from "@metis/coding-agent";
 import { appendProjectedDelta, opaqueId, projectLiveMessage } from "./item-projection.ts";
 
 interface ChildLiveState {

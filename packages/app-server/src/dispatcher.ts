@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { type ClientRpcRequest, MAX_HISTORY_ITEMS } from "@arcmind/app-protocol";
+import { type ClientRpcRequest, MAX_HISTORY_ITEMS } from "@metis/app-protocol";
 import {
 	type ModelRegistry,
 	resolveScheduleCreateTarget,
@@ -7,9 +7,10 @@ import {
 	ScheduleError,
 	type ScheduleManager,
 	SessionManager,
-} from "@arcmind/coding-agent";
+} from "@metis/coding-agent";
 import type { DurableSessionMutation, PreparedSessionMutation } from "./durable-mutation.ts";
 import type { InteractionBroker, InteractionPeer } from "./interactions.ts";
+import type { ModelSettingsService } from "./model-settings.ts";
 import { ProfileSummaryCache } from "./profile-summary.ts";
 import { scheduleRunView, scheduleTaskView } from "./schedule-projection.ts";
 import type { SessionCatalog } from "./session-catalog.ts";
@@ -63,6 +64,7 @@ export class Dispatcher {
 	private readonly interactions: InteractionBroker;
 	private readonly scheduleManager: ScheduleManager;
 	private readonly modelRegistry: ModelRegistry;
+	private readonly modelSettings: ModelSettingsService;
 	private readonly profileSummary = new ProfileSummaryCache();
 
 	constructor(
@@ -72,6 +74,7 @@ export class Dispatcher {
 		interactions: InteractionBroker,
 		scheduleManager: ScheduleManager,
 		modelRegistry: ModelRegistry,
+		modelSettings: ModelSettingsService,
 	) {
 		this.catalog = catalog;
 		this.registry = registry;
@@ -79,6 +82,7 @@ export class Dispatcher {
 		this.interactions = interactions;
 		this.scheduleManager = scheduleManager;
 		this.modelRegistry = modelRegistry;
+		this.modelSettings = modelSettings;
 	}
 
 	private availableModel(model: { provider: string; modelId: string }): void {
@@ -190,6 +194,18 @@ export class Dispatcher {
 
 	private assertMutableSession(sessionId: string): void {
 		if (this.catalog.get(sessionId).scheduled) throw new AppServerError("READ_ONLY_SESSION", { sessionId });
+	}
+
+	private async allowRetainedScheduledDelete(sessionId: string): Promise<boolean> {
+		const scheduled = this.catalog.get(sessionId).scheduled;
+		if (!scheduled) return false;
+		try {
+			await this.scheduleManager.get(scheduled.taskId);
+		} catch (error) {
+			if (error instanceof ScheduleError && error.code === "SCHEDULE_NOT_FOUND") return true;
+			throw error;
+		}
+		throw new AppServerError("READ_ONLY_SESSION", { sessionId });
 	}
 
 	private replayMutation(request: ClientRpcRequest, operation: () => Promise<unknown>): Promise<unknown> {
@@ -329,6 +345,8 @@ export class Dispatcher {
 				return await this.registry.listDraftSkills(request.params.cwd);
 			case "profile/get":
 				return this.profileSummary.summarize(this.allSessionRefs());
+			case "usage/get":
+				return this.profileSummary.usage(this.allSessionRefs(), request.params.rangeDays);
 			case "model/list":
 				this.modelRegistry.refresh();
 				return {
@@ -340,6 +358,14 @@ export class Dispatcher {
 								left.name.localeCompare(right.name) || left.provider.localeCompare(right.provider),
 						),
 				};
+			case "model/settings/get":
+				return this.modelSettings.view();
+			case "model/settings/update":
+				return await this.replayMutation(request, () => this.modelSettings.update(request.params.mutation));
+			case "model/testConnection":
+				return await this.replayMutation(request, () =>
+					this.modelSettings.testConnection(request.params.provider, request.params.modelId),
+				);
 			case "project/deletePreview": {
 				const cwd = await this.catalog.refreshModeProjectStorage(request.params.cwd);
 				const snapshot = this.catalog.modeProjectSnapshot(request.params.mode, cwd);
@@ -445,7 +471,7 @@ export class Dispatcher {
 				let result: unknown;
 				try {
 					result = await this.replayMutation(request, async () => {
-						this.assertMutableSession(request.params.sessionId);
+						const allowRetainedScheduled = await this.allowRetainedScheduledDelete(request.params.sessionId);
 						return await this.catalog.withSessionProjectMutable(request.params.sessionId, async (ref) => {
 							if (ref.summary.state === "corrupt") {
 								throw new AppServerError("SESSION_CORRUPT", {
@@ -458,6 +484,7 @@ export class Dispatcher {
 									quiesced = true;
 									const deleted = await SessionManager.deleteSession(ref.path, {
 										agentDir: this.catalog.agentDir,
+										allowRetainedScheduled,
 										sessionsRoot: this.catalog.sessionsRoot,
 									});
 									if (!deleted.ok) {

@@ -5,12 +5,15 @@ import {
 	type InteractionView,
 	MAX_INTERACTION_CHOICES,
 	MAX_NAME_UTF16_UNITS,
+	MAX_PERMISSION_OPERATION_ROWS,
 	MAX_PUBLIC_TEXT_UTF8_BYTES,
 	type ServerRpcRequest,
 	validateResponseFor,
 	validateServerRequest,
-} from "@arcmind/app-protocol";
+} from "@metis/app-protocol";
 import {
+	type AskUserRequest,
+	type AskUserResponse,
 	createDialogExtensionUIContext,
 	type ExtensionUIContext,
 	type ExtensionUIDialogOptions,
@@ -18,10 +21,13 @@ import {
 	type PermissionApprovalDecision,
 	type PermissionApprovalRequest,
 	type ProjectTrustOption,
-} from "@arcmind/coding-agent";
+} from "@metis/coding-agent";
 
 const DEFAULT_TIMEOUT_MS = 120_000;
+const ASK_USER_TIMEOUT_MS = 15 * 60_000;
 const MAX_TIMEOUT_MS = 2_147_483_647;
+const GENERIC_TARGET_KEY =
+	/^(action|address|branch|command|directory|file|folder|host|id|name|owner|path|port|project|query|repo|repository|resource|target|url|uri)$/iu;
 
 export interface InteractionPeer {
 	request(request: ServerRpcRequest, signal: AbortSignal): Promise<InteractionResponseInput>;
@@ -64,6 +70,56 @@ function boundedPublicText(value: string): string {
 
 function validTimeout(value: number): boolean {
 	return Number.isSafeInteger(value) && value >= 1 && value <= MAX_TIMEOUT_MS;
+}
+
+function permissionOperation(request: PermissionApprovalRequest) {
+	const rows: Array<{ label: string; value: string }> = [];
+	const args =
+		typeof request.args === "object" && request.args !== null && !Array.isArray(request.args)
+			? (request.args as Record<string, unknown>)
+			: undefined;
+	const push = (label: string, value: string) => {
+		const row = { label: boundedName(label, "Detail"), value: boundedPublicText(value) };
+		if (!rows.some((candidate) => candidate.label === row.label && candidate.value === row.value)) rows.push(row);
+	};
+
+	if (request.action.command) push("Command", request.action.command);
+	if (request.action.toolName === "bash" && request.cwd) push("Working directory", request.cwd);
+	const pathLabel = ["edit", "write", "read"].includes(request.action.toolName) ? "File" : "Path";
+	for (const path of request.action.paths) push(pathLabel, path);
+
+	const url = request.action.toolName === "web_fetch" && typeof args?.url === "string" ? args.url : undefined;
+	if (url) push("Address", url);
+	if (request.action.toolName === "web_search" && typeof args?.query === "string") push("Query", args.query);
+	if (["grep", "find"].includes(request.action.toolName) && typeof args?.pattern === "string") {
+		push("Pattern", args.pattern);
+	}
+	if (request.action.toolName === "edit" && Array.isArray(args?.edits) && args.edits.length > 0) {
+		push("Changes", String(args.edits.length));
+	}
+	if (!url) {
+		for (const { host, port } of request.action.networkTargets) push("Network", `${host}:${port}`);
+	}
+	if (request.action.provenance !== "builtin" && args) {
+		for (const [key, value] of Object.entries(args)) {
+			if (!GENERIC_TARGET_KEY.test(key) || !["string", "number", "boolean"].includes(typeof value)) continue;
+			const text = String(value).trim();
+			if (!text) continue;
+			const label = key.replaceAll(/[_-]+/gu, " ").replace(/^./u, (character) => character.toUpperCase());
+			push(label, text);
+		}
+	}
+	const scopeComplete = rows.length > 0;
+	if (!scopeComplete) push("Details", request.reason || "No target details were provided by this tool.");
+	const visibleRows = rows.slice(0, MAX_PERMISSION_OPERATION_ROWS);
+
+	return {
+		toolName: boundedName(request.action.toolName, "tool"),
+		rows: visibleRows,
+		omittedRows: rows.length - visibleRows.length,
+		scopeComplete,
+		irreversible: request.action.risks.some((risk) => risk === "destructive" || risk === "external-side-effect"),
+	};
 }
 
 /** Routes typed interaction requests to the client that owns a session. */
@@ -142,6 +198,7 @@ export class InteractionBroker {
 			throw new TypeError("Permission action exceeds the App Server protocol limit");
 		}
 		const interactionId = this.createId();
+		const operation = permissionOperation(approval);
 		const response = await this.request(
 			sessionId,
 			{
@@ -152,6 +209,8 @@ export class InteractionBroker {
 				createdAt: new Date(this.now()).toISOString(),
 				expiresAt: deadline(this.now(), this.defaultTimeoutMs),
 				kind: "select",
+				presentation: "permission_approval",
+				operation,
 				choices: [
 					{ id: choiceId(0), label: "Allow once" },
 					{ id: choiceId(1), label: "Deny" },
@@ -160,9 +219,53 @@ export class InteractionBroker {
 			{ signal: approval.signal },
 		);
 		if (response?.kind !== "select") throw new Error("Approval was unavailable or cancelled");
-		if (response.choiceId === choiceId(0)) return { decision: "allow" };
+		if (response.choiceId === choiceId(0)) {
+			if (!operation.scopeComplete || operation.omittedRows > 0) {
+				return { decision: "deny", reason: "Permission target details were incomplete" };
+			}
+			return { decision: "allow" };
+		}
 		if (response.choiceId === choiceId(1)) return { decision: "deny", reason: "Denied by the session owner" };
 		throw new Error("Approval returned an unknown choice");
+	}
+
+	async requestUserInput(sessionId: string, input: AskUserRequest): Promise<AskUserResponse> {
+		const interactionId = this.createId();
+		const response = await this.request(
+			sessionId,
+			{
+				interactionId,
+				sessionId,
+				title: "Metis has questions",
+				message: "Answer each question to continue.",
+				createdAt: new Date(this.now()).toISOString(),
+				expiresAt: deadline(this.now(), ASK_USER_TIMEOUT_MS),
+				kind: "ask_user",
+				questions: input.questions.map((question, questionIndex) => ({
+					id: `question:${questionIndex}`,
+					question: question.question,
+					multiple: question.multiple,
+					choices: question.options.map((option, optionIndex) => ({
+						id: choiceId(optionIndex),
+						label: option.label,
+						...(option.description === undefined ? {} : { description: option.description }),
+					})),
+				})),
+			},
+			{ signal: input.signal, timeout: ASK_USER_TIMEOUT_MS },
+		);
+		if (response?.kind !== "ask_user" || response.cancelled) return { cancelled: true, answers: [] };
+		const byQuestionId = new Map(response.answers.map((answer) => [answer.questionId, answer]));
+		return {
+			cancelled: false,
+			answers: input.questions.map((_question, questionIndex) => {
+				const answer = byQuestionId.get(`question:${questionIndex}`)!;
+				return {
+					selectedOptionIndexes: answer.choiceIds.map((id) => Number(id.slice("choice:".length))),
+					...(answer.customAnswer === undefined ? {} : { customAnswer: answer.customAnswer }),
+				};
+			}),
+		};
 	}
 
 	createExtensionUIContext(sessionId: string, publish: (event: NotificationEvent) => void): ExtensionUIContext {

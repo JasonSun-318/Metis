@@ -4,8 +4,8 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { ClientRpcRequest, HostRpcRequest, SessionSnapshot } from "@arcmind/app-protocol";
-import { identifySubmitPromptRequest } from "@arcmind/coding-agent";
+import type { ClientRpcRequest, HostRpcRequest, SessionSnapshot } from "@metis/app-protocol";
+import { identifySubmitPromptRequest } from "@metis/coding-agent";
 import { afterEach, describe, expect, it } from "vitest";
 
 const SESSION_ID = "00000000-0000-4000-8000-000000000201";
@@ -50,8 +50,8 @@ class RpcProcess {
 			cwd,
 			env: {
 				...process.env,
-				ARCMIND_CODING_AGENT_DIR: agentDir,
-				ARCMIND_TEST_CRASH_POINT: crashPoint ?? "",
+				METIS_CODING_AGENT_DIR: agentDir,
+				METIS_TEST_CRASH_POINT: crashPoint ?? "",
 				HTTP_PROXY: "",
 				HTTPS_PROXY: "",
 				NO_PROXY: "127.0.0.1,localhost",
@@ -118,7 +118,7 @@ function request(id: string, method: ClientRpcRequest["method"], params: unknown
 async function initialize(rpc: RpcProcess): Promise<void> {
 	await rpc.request(
 		request("initialize", "initialize", {
-			protocolVersion: 10,
+			protocolVersion: 11,
 			client: { name: "process-recovery-test", version: "1" },
 			capabilities: [],
 		}),
@@ -135,11 +135,11 @@ describe("real process recovery", () => {
 	it.each(crashPoints)(
 		"replays %s without repeating provider or tool work",
 		async (crashPoint) => {
-			const root = mkdtempSync(join(tmpdir(), `arcmind-process-recovery-${crashPoint}-`));
+			const root = mkdtempSync(join(tmpdir(), `metis-process-recovery-${crashPoint}-`));
 			roots.push(root);
 			const agentDir = join(root, "agent");
 			const projectDir = join(root, "project");
-			const extensionDir = join(projectDir, ".arcmind", "extensions");
+			const extensionDir = join(projectDir, ".metis", "extensions");
 			const sideEffects = join(root, "side-effects.txt");
 			mkdirSync(agentDir, { recursive: true });
 			mkdirSync(extensionDir, { recursive: true });
@@ -217,15 +217,15 @@ describe("real process recovery", () => {
 			writeFileSync(
 				join(extensionDir, "crash-tool.ts"),
 				`import { appendFileSync } from "node:fs";
-export default function (arcmind) {
-	arcmind.registerTool({
+export default function (metis) {
+	metis.registerTool({
 		name: "crash_side_effect",
 		label: "Crash side effect",
 		description: "Records one test side effect",
 		parameters: { type: "object", properties: {}, additionalProperties: false },
 		execute: async () => {
 			appendFileSync(${JSON.stringify(sideEffects)}, "run\\n");
-			if (process.env.ARCMIND_TEST_CRASH_POINT === "tool_side_effect") process.kill(process.pid, "SIGKILL");
+			if (process.env.METIS_TEST_CRASH_POINT === "tool_side_effect") process.kill(process.pid, "SIGKILL");
 			return { content: [{ type: "text", text: "ok" }], details: {} };
 		},
 	});

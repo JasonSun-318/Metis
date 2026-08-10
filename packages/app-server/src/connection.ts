@@ -14,7 +14,7 @@ import {
 	validateClientRequest,
 	validateResponseFor,
 	validateServerRequest,
-} from "@arcmind/app-protocol";
+} from "@metis/app-protocol";
 import type { ConnectionState, Dispatcher } from "./dispatcher.ts";
 import { type OutboundEnvelope, OutboundQueue, type OutboundQueueLimits } from "./outbound-queue.ts";
 import { AppServerError } from "./session-runtime-host.ts";
@@ -285,7 +285,7 @@ export class AppServerConnection {
 				id: request.id,
 				result: {
 					protocolVersion: PROTOCOL_VERSION,
-					server: { name: "arcmind-app-server", version: this.options.serverVersion },
+					server: { name: "metis-app-server", version: this.options.serverVersion },
 					serverEpoch: this.options.serverEpoch,
 					capabilities: [...SERVER_CAPABILITIES],
 				},

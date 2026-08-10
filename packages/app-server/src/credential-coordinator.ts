@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { type AuthStatus, AuthStorage, FileAuthStorageBackend } from "@arcmind/coding-agent";
+import { type AuthStatus, AuthStorage, FileAuthStorageBackend } from "@metis/coding-agent";
 
 export interface CredentialCoordinatorOptions {
 	readonly agentDir: string;

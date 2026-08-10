@@ -3,10 +3,16 @@ import {
 	type InteractionView,
 	MAX_INTERACTION_CHOICES,
 	MAX_NAME_UTF16_UNITS,
+	MAX_PERMISSION_OPERATION_ROWS,
 	MAX_PUBLIC_TEXT_UTF8_BYTES,
 	type ServerRpcRequest,
-} from "@arcmind/app-protocol";
-import type { PermissionApprovalRequest } from "@arcmind/coding-agent";
+} from "@metis/app-protocol";
+import {
+	type AskUserInput,
+	type AskUserRequest,
+	createAskUserToolDefinition,
+	type PermissionApprovalRequest,
+} from "@metis/coding-agent";
 import { describe, expect, it, vi } from "vitest";
 import { AppServerConnection } from "../src/connection.ts";
 import { InteractionBroker, type InteractionPeer } from "../src/interactions.ts";
@@ -18,6 +24,7 @@ const SESSION_ID = "session-1";
 class FakePeer implements InteractionPeer {
 	readonly requests: InteractionView[] = [];
 	response?: InteractionResponseInput;
+	responseFor?: (interaction: InteractionView) => InteractionResponseInput;
 	waitForever = false;
 
 	async request(request: ServerRpcRequest, signal: AbortSignal): Promise<InteractionResponseInput> {
@@ -27,9 +34,16 @@ class FakePeer implements InteractionPeer {
 				signal.addEventListener("abort", () => reject(signal.reason), { once: true });
 			});
 		}
-		if (!this.response) throw new Error("Interaction cancelled");
-		return this.response;
+		const response = this.responseFor?.(request.params.interaction) ?? this.response;
+		if (!response) throw new Error("Interaction cancelled");
+		return response;
 	}
+}
+
+function permissionInteraction(peer: FakePeer): Extract<InteractionView, { kind: "select" }> {
+	const interaction = peer.requests[0];
+	if (interaction?.kind !== "select") throw new TypeError("Expected a select interaction");
+	return interaction;
 }
 
 describe("InteractionBroker", () => {
@@ -45,8 +59,169 @@ describe("InteractionBroker", () => {
 		},
 		args: { command: "curl https://example.test" },
 		reason: "Network destination needs approval",
+		cwd: "/tmp/work",
 		actor: { type: "subagent", id: "agent-child-1", name: "researcher" },
 		...overrides,
+	});
+	const askUserRequest = (overrides: Partial<AskUserRequest> = {}): AskUserRequest => ({
+		questions: [
+			{
+				question: "Where should task data be stored?",
+				multiple: false,
+				options: [
+					{ label: "Local database", description: "Works offline" },
+					{ label: "Cloud sync", description: "Works across devices" },
+				],
+			},
+			{
+				question: "Which clients should be supported?",
+				multiple: true,
+				options: [{ label: "Desktop" }, { label: "Web" }, { label: "Mobile" }],
+			},
+		],
+		...overrides,
+	});
+	const askUserInput = (): AskUserInput => ({
+		questions: askUserRequest().questions.map((question) => ({
+			question: question.question,
+			multiple: question.multiple,
+			options: question.options.map((option) => ({ ...option })),
+		})),
+	});
+
+	it("routes ask_user questions and maps selected IDs back to ordered option indexes", async () => {
+		const interactionId = "00000000-0000-4000-8000-000000000350";
+		const now = Date.parse("2026-08-10T00:00:00.000Z");
+		const broker = new InteractionBroker({ serverEpoch: EPOCH, createId: () => interactionId, now: () => now });
+		const peer = new FakePeer();
+		broker.assign(SESSION_ID, peer);
+		peer.response = {
+			interactionId,
+			kind: "ask_user",
+			cancelled: false,
+			answers: [
+				{ questionId: "question:0", choiceIds: ["choice:1"] },
+				{
+					questionId: "question:1",
+					choiceIds: ["choice:0", "choice:2"],
+					customAnswer: "Linux later",
+				},
+			],
+		};
+
+		await expect(broker.requestUserInput(SESSION_ID, askUserRequest())).resolves.toEqual({
+			cancelled: false,
+			answers: [{ selectedOptionIndexes: [1] }, { selectedOptionIndexes: [0, 2], customAnswer: "Linux later" }],
+		});
+		expect(peer.requests).toEqual([
+			expect.objectContaining({
+				kind: "ask_user",
+				title: "Metis has questions",
+				message: "Answer each question to continue.",
+				expiresAt: "2026-08-10T00:15:00.000Z",
+				questions: [
+					{
+						id: "question:0",
+						question: "Where should task data be stored?",
+						multiple: false,
+						choices: [
+							{ id: "choice:0", label: "Local database", description: "Works offline" },
+							{ id: "choice:1", label: "Cloud sync", description: "Works across devices" },
+						],
+					},
+					{
+						id: "question:1",
+						question: "Which clients should be supported?",
+						multiple: true,
+						choices: [
+							{ id: "choice:0", label: "Desktop" },
+							{ id: "choice:1", label: "Web" },
+							{ id: "choice:2", label: "Mobile" },
+						],
+					},
+				],
+			}),
+		]);
+		expect(broker.hasPending(SESSION_ID)).toBe(false);
+	});
+
+	it("resumes the waiting tool call with the user answers returned by the owner", async () => {
+		const interactionId = "00000000-0000-4000-8000-000000000352";
+		const broker = new InteractionBroker({ serverEpoch: EPOCH, createId: () => interactionId });
+		const peer = new FakePeer();
+		broker.assign(SESSION_ID, peer);
+		peer.response = {
+			interactionId,
+			kind: "ask_user",
+			cancelled: false,
+			answers: [
+				{ questionId: "question:0", choiceIds: ["choice:1"] },
+				{ questionId: "question:1", choiceIds: [], customAnswer: "Desktop and CLI" },
+			],
+		};
+		const tool = createAskUserToolDefinition((request) => broker.requestUserInput(SESSION_ID, request));
+
+		const result = await tool.execute("ask-tool-1", askUserInput(), undefined, undefined, {} as never);
+
+		expect(result.details).toMatchObject({
+			cancelled: false,
+			answers: [{ selected: ["Cloud sync"] }, { selected: [], customAnswer: "Desktop and CLI" }],
+		});
+		expect(result.content[0]?.type === "text" ? result.content[0].text : "").toContain("Desktop and CLI");
+		expect(broker.hasPending(SESSION_ID)).toBe(false);
+	});
+
+	it("returns structured ask_user cancellation for user cancel, missing owner, and abort", async () => {
+		const interactionId = "00000000-0000-4000-8000-000000000351";
+		const broker = new InteractionBroker({ serverEpoch: EPOCH, createId: () => interactionId });
+		const peer = new FakePeer();
+		broker.assign(SESSION_ID, peer);
+		peer.response = { interactionId, kind: "ask_user", cancelled: true, answers: [] };
+		await expect(broker.requestUserInput(SESSION_ID, askUserRequest())).resolves.toEqual({
+			cancelled: true,
+			answers: [],
+		});
+
+		broker.releasePeer(peer);
+		await expect(broker.requestUserInput(SESSION_ID, askUserRequest())).resolves.toEqual({
+			cancelled: true,
+			answers: [],
+		});
+
+		broker.assign(SESSION_ID, peer);
+		peer.waitForever = true;
+		const controller = new AbortController();
+		const pending = broker.requestUserInput(SESSION_ID, askUserRequest({ signal: controller.signal }));
+		controller.abort();
+		await expect(pending).resolves.toEqual({ cancelled: true, answers: [] });
+		expect(broker.hasPending(SESSION_ID)).toBe(false);
+	});
+
+	it("completes 1,000 bounded ask_user round trips without polling or pending-request leaks", async () => {
+		let sequence = 400;
+		const broker = new InteractionBroker({
+			serverEpoch: EPOCH,
+			createId: () => `00000000-0000-4000-8000-${String(sequence++).padStart(12, "0")}`,
+		});
+		const peer = new FakePeer();
+		peer.responseFor = (interaction) => ({
+			interactionId: interaction.interactionId,
+			kind: "ask_user",
+			cancelled: false,
+			answers: [{ questionId: "question:0", choiceIds: ["choice:1"] }],
+		});
+		broker.assign(SESSION_ID, peer);
+		const request = askUserRequest({ questions: [askUserRequest().questions[0]!] });
+		const startedAt = performance.now();
+		for (let index = 0; index < 1_000; index += 1) {
+			const result = await broker.requestUserInput(SESSION_ID, request);
+			expect(result.answers[0]?.selectedOptionIndexes).toEqual([1]);
+		}
+		const elapsedMs = performance.now() - startedAt;
+
+		expect(peer.requests).toHaveLength(1_000);
+		expect(broker.hasPending(SESSION_ID)).toBe(false);
+		expect(elapsedMs).toBeLessThan(2_000);
 	});
 
 	it("routes complete child permission details to the owning peer", async () => {
@@ -61,6 +236,18 @@ describe("InteractionBroker", () => {
 		});
 		expect(peer.requests[0]).toMatchObject({
 			kind: "select",
+			presentation: "permission_approval",
+			operation: {
+				toolName: "bash",
+				rows: [
+					{ label: "Command", value: "curl https://example.test" },
+					{ label: "Working directory", value: "/tmp/work" },
+					{ label: "Path", value: "/tmp/work/result.txt" },
+				],
+				omittedRows: 0,
+				scopeComplete: true,
+				irreversible: false,
+			},
 			title: "Approve bash?",
 			choices: [
 				{ id: "choice:0", label: "Allow once" },
@@ -71,7 +258,188 @@ describe("InteractionBroker", () => {
 		expect(peer.requests[0]?.message).toContain("Risk: network");
 		expect(peer.requests[0]?.message).toContain('"command": "curl https://example.test"');
 		expect(peer.requests[0]?.message).toContain("Path: /tmp/work/result.txt");
-		expect(peer.requests[0]?.message).toContain("ArcMind does not sandbox this action");
+		expect(peer.requests[0]?.message).toContain("Metis does not sandbox this action");
+	});
+
+	it("summarizes an edit without exposing replacement text", async () => {
+		const interactionId = "00000000-0000-4000-8000-000000000321";
+		const broker = new InteractionBroker({ serverEpoch: EPOCH, createId: () => interactionId });
+		const peer = new FakePeer();
+		broker.assign(SESSION_ID, peer);
+		peer.response = { interactionId, kind: "select", choiceId: "choice:0" };
+
+		await broker.requestPermissionApproval(
+			SESSION_ID,
+			childApproval({
+				action: {
+					actionId: "action-2",
+					toolName: "edit",
+					provenance: "builtin",
+					risks: ["workspace-write"],
+					paths: ["/tmp/work/src/app.ts"],
+					networkTargets: [],
+				},
+				args: {
+					path: "src/app.ts",
+					edits: [
+						{ oldText: "before", newText: "after" },
+						{ oldText: "old", newText: "new" },
+					],
+				},
+			}),
+		);
+
+		expect(peer.requests[0]).toMatchObject({
+			operation: {
+				toolName: "edit",
+				rows: [
+					{ label: "File", value: "/tmp/work/src/app.ts" },
+					{ label: "Changes", value: "2" },
+				],
+				omittedRows: 0,
+				scopeComplete: true,
+				irreversible: false,
+			},
+		});
+		const operation = permissionInteraction(peer).operation;
+		expect(JSON.stringify(operation)).not.toContain("before");
+		expect(JSON.stringify(operation)).not.toContain("after");
+	});
+
+	it("summarizes known network, search, path, and external tool targets", async () => {
+		const cases: Array<{
+			request: PermissionApprovalRequest;
+			operation: NonNullable<Extract<InteractionView, { kind: "select" }>["operation"]>;
+		}> = [
+			{
+				request: childApproval({
+					action: {
+						actionId: "web-fetch-1",
+						toolName: "web_fetch",
+						provenance: "builtin",
+						risks: ["network"],
+						paths: [],
+						networkTargets: [{ host: "example.test", port: 443 }],
+					},
+					args: { url: "https://example.test/docs" },
+				}),
+				operation: {
+					toolName: "web_fetch",
+					rows: [{ label: "Address", value: "https://example.test/docs" }],
+					omittedRows: 0,
+					scopeComplete: true,
+					irreversible: false,
+				},
+			},
+			{
+				request: childApproval({
+					action: {
+						actionId: "web-search-1",
+						toolName: "web_search",
+						provenance: "builtin",
+						risks: ["network"],
+						paths: [],
+						networkTargets: [{ host: "search.example", port: 443 }],
+					},
+					args: { query: "Metis permissions" },
+				}),
+				operation: {
+					toolName: "web_search",
+					rows: [
+						{ label: "Query", value: "Metis permissions" },
+						{ label: "Network", value: "search.example:443" },
+					],
+					omittedRows: 0,
+					scopeComplete: true,
+					irreversible: false,
+				},
+			},
+			{
+				request: childApproval({
+					action: {
+						actionId: "grep-1",
+						toolName: "grep",
+						provenance: "builtin",
+						risks: ["outside-read"],
+						paths: ["/tmp/outside"],
+						networkTargets: [],
+					},
+					args: { pattern: "TOKEN", path: "/tmp/outside" },
+				}),
+				operation: {
+					toolName: "grep",
+					rows: [
+						{ label: "Path", value: "/tmp/outside" },
+						{ label: "Pattern", value: "TOKEN" },
+					],
+					omittedRows: 0,
+					scopeComplete: true,
+					irreversible: false,
+				},
+			},
+			{
+				request: childApproval({
+					action: {
+						actionId: "mcp-1",
+						toolName: "mcp__service__publish",
+						provenance: "mcp",
+						risks: ["custom", "external-side-effect"],
+						paths: [],
+						networkTargets: [],
+					},
+					args: { content: "private payload" },
+				}),
+				operation: {
+					toolName: "mcp__service__publish",
+					rows: [{ label: "Details", value: "Network destination needs approval" }],
+					omittedRows: 0,
+					scopeComplete: false,
+					irreversible: true,
+				},
+			},
+		];
+
+		for (const [index, sample] of cases.entries()) {
+			const interactionId = `00000000-0000-4000-8000-${String(330 + index).padStart(12, "0")}`;
+			const broker = new InteractionBroker({ serverEpoch: EPOCH, createId: () => interactionId });
+			const peer = new FakePeer();
+			broker.assign(SESSION_ID, peer);
+			peer.response = { interactionId, kind: "select", choiceId: "choice:1" };
+			await broker.requestPermissionApproval(SESSION_ID, sample.request);
+			const operation = permissionInteraction(peer).operation;
+			expect(operation).toEqual(sample.operation);
+			expect(JSON.stringify(operation)).not.toContain("private payload");
+		}
+	});
+
+	it("reports hidden permission targets instead of silently truncating them", async () => {
+		const interactionId = "00000000-0000-4000-8000-000000000339";
+		const broker = new InteractionBroker({ serverEpoch: EPOCH, createId: () => interactionId });
+		const peer = new FakePeer();
+		broker.assign(SESSION_ID, peer);
+		peer.response = { interactionId, kind: "select", choiceId: "choice:0" };
+		const paths = Array.from({ length: MAX_PERMISSION_OPERATION_ROWS + 3 }, (_, index) => `/tmp/target-${index}`);
+
+		await expect(
+			broker.requestPermissionApproval(
+				SESSION_ID,
+				childApproval({
+					action: {
+						actionId: "many-paths",
+						toolName: "read",
+						provenance: "builtin",
+						risks: ["outside-read"],
+						paths,
+						networkTargets: [],
+					},
+				}),
+			),
+		).resolves.toEqual({ decision: "deny", reason: "Permission target details were incomplete" });
+
+		const operation = permissionInteraction(peer).operation;
+		expect(operation?.rows).toHaveLength(MAX_PERMISSION_OPERATION_ROWS);
+		expect(operation?.omittedRows).toBe(3);
+		expect(operation?.scopeComplete).toBe(true);
 	});
 
 	it("fails a child permission request closed without an owning peer", async () => {
@@ -237,7 +605,7 @@ describe("InteractionBroker", () => {
 			jsonrpc: "2.0",
 			id: "initialize",
 			method: "initialize",
-			params: { protocolVersion: 10, client: { name: "test", version: "1" }, capabilities: [] },
+			params: { protocolVersion: 11, client: { name: "test", version: "1" }, capabilities: [] },
 		});
 		const ids = ["00000000-0000-4000-8000-000000000307", "00000000-0000-4000-8000-000000000308"];
 		const broker = new InteractionBroker({ serverEpoch: EPOCH, createId: () => ids.shift()! });
@@ -275,7 +643,7 @@ describe("InteractionBroker", () => {
 			jsonrpc: "2.0",
 			id: "initialize",
 			method: "initialize",
-			params: { protocolVersion: 10, client: { name: "test", version: "1" }, capabilities: [] },
+			params: { protocolVersion: 11, client: { name: "test", version: "1" }, capabilities: [] },
 		});
 		const ids = ["00000000-0000-4000-8000-000000000309", "00000000-0000-4000-8000-000000000310"];
 		const broker = new InteractionBroker({ serverEpoch: EPOCH, createId: () => ids.shift()! });
