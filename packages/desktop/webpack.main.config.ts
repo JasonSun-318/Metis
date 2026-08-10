@@ -1,5 +1,10 @@
 import webpack, { type Configuration } from "webpack";
 
+const updateBaseUrl =
+	process.env.METIS_UPDATE_BASE_URL ||
+	process.env.METIS_DOWNLOAD_BASE_URL ||
+	null;
+
 const config: Configuration = {
 	entry: "./src/main/main.ts",
 	devtool: false,
@@ -23,7 +28,7 @@ const config: Configuration = {
 	resolve: { extensions: [".ts", ".tsx", ".js"] },
 	plugins: [
 		new webpack.DefinePlugin({
-			ARCMIND_UPDATE_FEED_URL: JSON.stringify(process.env.ARCMIND_UPDATE_FEED_URL || null),
+			METIS_UPDATE_BASE_URL: JSON.stringify(updateBaseUrl),
 		}),
 	],
 };

@@ -39,9 +39,9 @@ class CompleteFusesPlugin extends PluginBase<FuseConfig> {
 	}
 }
 
-const desktopRoot = __dirname;
+const desktopRoot = import.meta.dirname;
 const repoRoot = path.resolve(desktopRoot, "../..");
-const appServerRuntime = path.join(repoRoot, "node_modules", ".cache", "arcmind-desktop", "app-server");
+const appServerRuntime = path.join(repoRoot, "node_modules", ".cache", "metis-desktop", "app-server");
 
 function completeCredentialGroup(names: readonly string[]): Record<string, string> | undefined {
 	const values = names.map((name) => process.env[name]);
@@ -75,18 +75,26 @@ const windowsSign = windowsCertificate
 	? {
 			certificateFile: windowsCertificate.WINDOWS_CERTIFICATE_FILE,
 			certificatePassword: windowsCertificate.WINDOWS_CERTIFICATE_PASSWORD,
-			description: "ArcMind",
+			description: "Metis",
 		}
 	: undefined;
 // appdmg's runtime schema supports `filesystem`, but its published TypeScript
 // declaration omits the property.
-const apfsDmgConfig = { additionalDMGOptions: { filesystem: "APFS" } } as unknown as MakerDMGConfig;
+const apfsDmgConfig = {
+	background: path.join(desktopRoot, "assets", "dmg-background.png"),
+	iconSize: 88,
+	contents: (options: { appPath: string }) => [
+		{ x: 178, y: 278, type: "file", path: options.appPath },
+		{ x: 480, y: 278, type: "link", path: "/Applications" },
+	],
+	additionalDMGOptions: { filesystem: "APFS" },
+} as unknown as MakerDMGConfig;
 
 async function prepareAppServerRuntime(_forgeConfig: ForgeConfig, platform: string, arch: string): Promise<void> {
 	await new Promise<void>((resolve, reject) => {
 		const child = spawn(process.execPath, [path.join(desktopRoot, "scripts", "prepare-app-server-runtime.mjs")], {
 			cwd: repoRoot,
-			env: { ...process.env, ARCMIND_NATIVE_TOOLS_TARGET: `${platform}-${arch}` },
+			env: { ...process.env, METIS_NATIVE_TOOLS_TARGET: `${platform}-${arch}` },
 			stdio: "inherit",
 		});
 		child.once("error", reject);
@@ -126,8 +134,9 @@ async function stageRipgrepRuntime(buildPath: string, platform: string, arch: st
 	if (platformTag !== "darwin" && platformTag !== "win32") return;
 	const name = platformTag === "win32" ? "rg.exe" : "rg";
 	const source = path.join(
-		repoRoot,
-		"packages",
+		appServerRuntime,
+		"node_modules",
+		"@metis",
 		"coding-agent",
 		"dist",
 		"vendor",
@@ -144,17 +153,19 @@ async function stageRipgrepRuntime(buildPath: string, platform: string, arch: st
 const config: ForgeConfig = {
 	packagerConfig: {
 		asar: { unpackDir: "{.webpack/main/node_modules/node-pty,.webpack/main/native-tools}" },
-		appBundleId: "ai.arcmind.desktop",
+		appBundleId: "ai.metis.desktop",
 		appCategoryType: "public.app-category.developer-tools",
-		name: "ArcMind",
-		executableName: "arcmind",
+		extraResource: process.platform === "darwin" ? [path.join(desktopRoot, "assets", "metis.icns")] : [],
+		name: "Metis",
+		executableName: "Metis",
 		extendInfo: {
-			NSDesktopFolderUsageDescription: "ArcMind needs access to Desktop files you choose for a task.",
-			NSDocumentsFolderUsageDescription: "ArcMind needs access to Documents files you choose for a task.",
-			NSDownloadsFolderUsageDescription: "ArcMind needs access to Downloads files you choose for a task.",
+			CFBundleIconFile: "metis.icns",
+			NSDesktopFolderUsageDescription: "Metis needs access to Desktop files you choose for a task.",
+			NSDocumentsFolderUsageDescription: "Metis needs access to Documents files you choose for a task.",
+			NSDownloadsFolderUsageDescription: "Metis needs access to Downloads files you choose for a task.",
 		},
 		// Even local builds need an app-owned identity so macOS TCC attributes
-		// protected-folder consent to ArcMind instead of the stock Electron bundle.
+		// protected-folder consent to Metis instead of the stock Electron bundle.
 		osxSign: macosSign,
 		osxNotarize: macosRelease
 			? {

@@ -15,7 +15,7 @@ import {
 	validateServerNotification,
 	validateServerRequest,
 	validateUncorrelatedErrorResponse,
-} from "@arcmind/app-protocol";
+} from "@metis/app-protocol";
 import type { SupervisorState, SupervisorView } from "../shared/desktop-api.ts";
 
 export type { SupervisorState, SupervisorView } from "../shared/desktop-api.ts";
@@ -78,7 +78,7 @@ export class ServerRestartedError extends Error {
 	readonly previousEpoch: string | null;
 
 	constructor(previousEpoch: string | null) {
-		super("ArcMind app-server restarted");
+		super("Metis app-server restarted");
 		this.name = "ServerRestartedError";
 		this.previousEpoch = previousEpoch;
 	}
@@ -87,7 +87,7 @@ export class ServerRestartedError extends Error {
 export class ServerUnavailableError extends Error {
 	readonly code = "SERVER_UNAVAILABLE";
 
-	constructor(message = "ArcMind app-server is not ready") {
+	constructor(message = "Metis app-server is not ready") {
 		super(message);
 		this.name = "ServerUnavailableError";
 	}
@@ -272,7 +272,7 @@ export class AppServerSupervisor {
 			method: "initialize",
 			params: {
 				protocolVersion: PROTOCOL_VERSION,
-				client: { name: "arcmind-desktop-main", version: "0.80.6" },
+				client: { name: "metis-desktop-main", version: "0.80.6" },
 				capabilities: [],
 			},
 		};
@@ -456,8 +456,8 @@ export class AppServerSupervisor {
 		if (this.shutdownTimer) clearTimeout(this.shutdownTimer);
 		this.shutdownTimer = undefined;
 		this.releaseChild();
-		this.rejectPending(new ServerUnavailableError("ArcMind app-server stopped"));
-		this.rejectReadyWaiters(new ServerUnavailableError("ArcMind app-server stopped"));
+		this.rejectPending(new ServerUnavailableError("Metis app-server stopped"));
+		this.rejectReadyWaiters(new ServerUnavailableError("Metis app-server stopped"));
 		this.serverEpoch = null;
 		this.restartAttempt = 0;
 		this.failure = null;

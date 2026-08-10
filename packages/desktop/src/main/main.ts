@@ -1,7 +1,6 @@
 import { basename, join } from "node:path";
 import {
 	app,
-	autoUpdater,
 	type BrowserWindow,
 	clipboard,
 	dialog,
@@ -12,7 +11,7 @@ import {
 	utilityProcess,
 } from "electron";
 import squirrelStartup from "electron-squirrel-startup";
-import type { DesktopWorkspaceEditState } from "../shared/desktop-api.ts";
+import { DESKTOP_UPDATE_EVENT_CHANNEL, type DesktopWorkspaceEditState } from "../shared/desktop-api.ts";
 import { installAppProtocol, registerAppScheme } from "./app-protocol-scheme.ts";
 import { AppServerSupervisor, type UtilityChild } from "./app-server-supervisor.ts";
 import { BrowserManager } from "./browser-manager.ts";
@@ -26,9 +25,11 @@ import { createMainWindow, loadMainWindow } from "./window.ts";
 import { resolveDesktopRipgrepPath, WorkspaceFileManager } from "./workspace-file-manager.ts";
 
 declare const MAIN_WINDOW_WEBPACK_ENTRY: string;
-declare const ARCMIND_UPDATE_FEED_URL: string | null;
+declare const METIS_UPDATE_BASE_URL: string | null;
 
 registerAppScheme();
+const explicitUserData = app.commandLine.hasSwitch("user-data-dir");
+if (!explicitUserData) app.setPath("userData", join(app.getPath("appData"), "Metis"));
 
 let mainWindow: BrowserWindow | null = null;
 let allowQuit = false;
@@ -62,14 +63,14 @@ function spawnAppServer(): UtilityChild {
 				".webpack",
 				"app-server",
 				"node_modules",
-				"@arcmind",
+				"@metis",
 				"app-server",
 				"dist",
 				"utility-entry.js",
 			)
 		: join(app.getAppPath(), "..", "app-server", "dist", "utility-entry.js");
 	return utilityProcess.fork(entry, [], {
-		serviceName: "ArcMind App Server",
+		serviceName: "Metis App Server",
 		stdio: "pipe",
 	}) as UtilityChild;
 }
@@ -90,6 +91,20 @@ async function launch(): Promise<void> {
 		openPath: (path) => shell.openPath(path),
 		showItemInFolder: (path) => shell.showItemInFolder(path),
 		trashItem: (path) => shell.trashItem(path),
+	});
+	const updater = new DesktopUpdater({
+		arch: process.arch,
+		baseUrl: METIS_UPDATE_BASE_URL,
+		currentVersion: app.getVersion(),
+		downloadsDirectory: join(app.getPath("temp"), "Metis", "updates"),
+		fetch: globalThis.fetch,
+		isPackaged: app.isPackaged,
+		onDiagnostic: (message) => void diagnostics.append("supervisor", `Updater: ${message}`),
+		onState: (state) => {
+			if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(DESKTOP_UPDATE_EVENT_CHANNEL, state);
+		},
+		openPath: (path) => shell.openPath(path),
+		platform: process.platform,
 	});
 	const broker = new ClientBroker({
 		ipcMain,
@@ -121,9 +136,10 @@ async function launch(): Promise<void> {
 				: await dialog.showOpenDialog(options);
 			return result.canceled ? [] : result.filePaths.map((path) => ({ path, name: basename(path) }));
 		},
-		getDefaultProjectLocation: async () => join(app.getPath("home"), "ArcMind Projects"),
+		getDefaultProjectLocation: async () => join(app.getPath("home"), "Metis Projects"),
 		createProjectFolder,
 		setScheduleKeepAwake: (enabled) => scheduleKeepAwake.set(enabled),
+		updater,
 	});
 	const openMainWindow = async (): Promise<void> => {
 		const window = createMainWindow();
@@ -140,43 +156,6 @@ async function launch(): Promise<void> {
 
 	await supervisor.start().catch(() => supervisor.view());
 	await openMainWindow();
-	const updater = new DesktopUpdater({
-		autoUpdater,
-		feedUrl: ARCMIND_UPDATE_FEED_URL,
-		isPackaged: app.isPackaged,
-		platform: process.platform,
-		confirmInstall: async () => {
-			const zh = workspaceEditState.language === "zh";
-			const options = {
-				type: "info" as const,
-				buttons: [zh ? "重新启动并安装" : "Restart and install", zh ? "稍后" : "Later"],
-				defaultId: 0,
-				cancelId: 1,
-				title: zh ? "ArcMind 更新已就绪" : "ArcMind update ready",
-				message: zh ? "重新启动 ArcMind 以安装更新？" : "Restart ArcMind to install the downloaded update?",
-				detail: workspaceEditState.dirty
-					? zh
-						? "重新启动会放弃未保存的文件修改，并安全停止 App Server。"
-						: "Restarting will discard unsaved file changes and safely stop the App Server."
-					: zh
-						? "ArcMind 将停止接受新操作，并安全停止 App Server 后重新启动。"
-						: "ArcMind will stop accepting new actions and safely stop the App Server before restarting.",
-			};
-			const result = mainWindow
-				? await dialog.showMessageBox(mainWindow, options)
-				: await dialog.showMessageBox(options);
-			if (result.response !== 0) return false;
-			workspaceEditState = { ...workspaceEditState, dirty: false };
-			return true;
-		},
-		prepareToInstall: async () => {
-			scheduleKeepAwake.set(false);
-			broker.dispose();
-			await supervisor.shutdown();
-			allowQuit = true;
-		},
-		onDiagnostic: (message) => void diagnostics.append("supervisor", `Updater: ${message}`),
-	});
 	updater.start();
 
 	app.on("activate", () => {
@@ -203,6 +182,6 @@ async function launch(): Promise<void> {
 if (squirrelStartup) app.quit();
 else
 	void launch().catch(() => {
-		console.error("ArcMind desktop failed to start.");
+		console.error("Metis desktop failed to start.");
 		app.quit();
 	});

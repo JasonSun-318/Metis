@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="658" height="498" viewBox="0 0 658 498">
+	<defs>
+		<linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+			<stop offset="0" stop-color="#252524" />
+			<stop offset="1" stop-color="#1d1d1c" />
+		</linearGradient>
+		<radialGradient id="iconGlow">
+			<stop offset="0" stop-color="#d28a54" stop-opacity="0.13" />
+			<stop offset="1" stop-color="#d28a54" stop-opacity="0" />
+		</radialGradient>
+		<filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+			<feDropShadow dx="0" dy="7" stdDeviation="12" flood-color="#000" flood-opacity="0.22" />
+		</filter>
+	</defs>
+
+	<rect width="658" height="498" fill="url(#background)" />
+	<path d="M0 0h658v108H0z" fill="#2a2a28" fill-opacity="0.48" />
+	<path d="M36 108h586" stroke="#41413e" />
+
+	<text x="329" y="46" fill="#f1f0ec" font-family="-apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif" font-size="23" font-weight="600" text-anchor="middle">安装或更新 Metis</text>
+	<text x="329" y="78" fill="#aaa9a4" font-family="-apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif" font-size="14" text-anchor="middle">请先退出正在运行的 Metis</text>
+
+	<text x="329" y="145" fill="#d7d6d1" font-family="-apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif" font-size="16" font-weight="500" text-anchor="middle">将 Metis 拖到“应用程序”</text>
+
+	<circle cx="178" cy="278" r="89" fill="url(#iconGlow)" />
+	<circle cx="480" cy="278" r="89" fill="url(#iconGlow)" />
+	<path d="M258 278h125" fill="none" stroke="#d28a54" stroke-linecap="round" stroke-width="3" />
+	<path d="m374 266 13 12-13 12" fill="none" stroke="#d28a54" stroke-linecap="round" stroke-linejoin="round" stroke-width="3" />
+	<text x="322" y="258" fill="#8f8e89" font-family="-apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif" font-size="12" text-anchor="middle">拖动安装</text>
+
+	<g filter="url(#shadow)">
+		<rect x="78" y="397" width="502" height="62" rx="14" fill="#292927" stroke="#44443f" />
+	</g>
+	<circle cx="108" cy="428" r="10" fill="none" stroke="#d28a54" stroke-width="1.5" />
+	<path d="M108 422v7m0 4v1" stroke="#d28a54" stroke-linecap="round" stroke-width="1.8" />
+	<text x="131" y="425" fill="#deddd8" font-family="-apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif" font-size="14">如果提示应用已存在，请选择“替换”</text>
+	<text x="131" y="446" fill="#8f8e89" font-family="-apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif" font-size="12">Finder 会完成替换，您的 Metis 数据不会存放在应用本体中</text>
+</svg>

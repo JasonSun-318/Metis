@@ -24,27 +24,30 @@ function nativeArch() {
 }
 
 const expectedArch = nativeArch();
-const packageRoot = path.join(desktopRoot, "out", `ArcMind-${process.platform}-${expectedArch}`);
+const packageRoot = path.join(desktopRoot, "out", `Metis-${process.platform}-${expectedArch}`);
 const resourcesRoot =
 	process.platform === "darwin"
-		? path.join(packageRoot, "ArcMind.app", "Contents", "Resources")
+		? path.join(packageRoot, "Metis.app", "Contents", "Resources")
 		: path.join(packageRoot, "resources");
 const appAsar = path.join(resourcesRoot, "app.asar");
 const executable =
 	process.platform === "darwin"
-		? path.join(packageRoot, "ArcMind.app", "Contents", "MacOS", "arcmind")
-		: path.join(packageRoot, process.platform === "win32" ? "arcmind.exe" : "arcmind");
+		? path.join(packageRoot, "Metis.app", "Contents", "MacOS", "Metis")
+		: path.join(packageRoot, process.platform === "win32" ? "Metis.exe" : "Metis");
 await access(appAsar);
 
 if (process.platform === "darwin") {
-	const appBundle = path.join(packageRoot, "ArcMind.app");
+	const appBundle = path.join(packageRoot, "Metis.app");
 	const infoPlist = path.join(appBundle, "Contents", "Info.plist");
 	const architecture = spawnSync("/usr/bin/lipo", ["-archs", executable], { encoding: "utf8" });
 	if (architecture.status !== 0 || !architecture.stdout.trim().split(/\s+/u).includes(expectedArch)) {
 		throw new Error(`Packaged macOS executable does not include the native ${expectedArch} architecture`);
 	}
 	for (const [key, expected] of [
-		["CFBundleIdentifier", "ai.arcmind.desktop"],
+		["CFBundleIdentifier", "ai.metis.desktop"],
+		["CFBundleName", "Metis"],
+		["CFBundleExecutable", "Metis"],
+		["CFBundleIconFile", "metis.icns"],
 		["NSDesktopFolderUsageDescription"],
 		["NSDocumentsFolderUsageDescription"],
 		["NSDownloadsFolderUsageDescription"],
@@ -53,9 +56,10 @@ if (process.platform === "darwin") {
 		const value = result.status === 0 ? result.stdout.trim() : "";
 		if (!value || (expected && value !== expected)) throw new Error(`Invalid packaged Info.plist value for ${key}`);
 	}
+	await access(path.join(resourcesRoot, "metis.icns"));
 	const signature = spawnSync("/usr/bin/codesign", ["-dvv", appBundle], { encoding: "utf8" });
-	if (signature.status !== 0 || !/^Identifier=ai\.arcmind\.desktop$/mu.test(signature.stderr)) {
-		throw new Error("Packaged macOS application is not signed with the ArcMind bundle identity");
+	if (signature.status !== 0 || !/^Identifier=ai\.metis\.desktop$/mu.test(signature.stderr)) {
+		throw new Error("Packaged macOS application is not signed with the Metis bundle identity");
 	}
 	const verification = spawnSync("/usr/bin/codesign", ["--verify", "--deep", "--strict", appBundle], {
 		encoding: "utf8",
@@ -86,7 +90,7 @@ const installLock = JSON.parse(
 );
 let lockedPackageCount = 0;
 for (const [lockPath, expected] of Object.entries(installLock.packages)) {
-	if (!lockPath || lockPath.startsWith("node_modules/@arcmind/")) continue;
+	if (!lockPath || lockPath.startsWith("node_modules/@metis/")) continue;
 	const packagedPackagePath = `/.webpack/app-server/${lockPath}/package.json`;
 	if (!packagedPaths.has(packagedPackagePath)) {
 		throw new Error(`Locked App Server dependency is missing: ${lockPath}`);
@@ -99,9 +103,9 @@ for (const [lockPath, expected] of Object.entries(installLock.packages)) {
 }
 
 for (const required of [
-	"/.webpack/app-server/node_modules/@arcmind/app-server/dist/utility-entry.js",
-	"/.webpack/app-server/node_modules/@arcmind/coding-agent/dist/core/workspace-sandbox-worker.js",
-	"/.webpack/app-server/node_modules/@arcmind/coding-agent/dist/utils/image-resize-worker.js",
+	"/.webpack/app-server/node_modules/@metis/app-server/dist/utility-entry.js",
+	"/.webpack/app-server/node_modules/@metis/coding-agent/dist/core/workspace-sandbox-worker.js",
+	"/.webpack/app-server/node_modules/@metis/coding-agent/dist/utils/image-resize-worker.js",
 	"/.webpack/app-server/node_modules/@silvia-odwyer/photon-node/photon_rs_bg.wasm",
 	"/.webpack/app-server/node_modules/jiti/lib/jiti.mjs",
 ]) {

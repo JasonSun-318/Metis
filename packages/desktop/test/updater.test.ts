@@ -1,115 +1,189 @@
-import { EventEmitter } from "node:events";
-import { describe, expect, it, vi } from "vitest";
-import { type AutoUpdaterAdapter, DesktopUpdater } from "../src/main/updater.ts";
+import { createHash } from "node:crypto";
+import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { DesktopUpdater } from "../src/main/updater.ts";
 
-class FakeAutoUpdater extends EventEmitter implements AutoUpdaterAdapter {
-	feedUrls: string[] = [];
-	checkCount = 0;
-	quitCount = 0;
-	checkError?: Error;
+const BASE_URL = "https://updates.example.test/metis";
+const VERSION = "0.80.6";
+const temporaryDirectories: string[] = [];
 
-	setFeedURL(options: { url: string }): void {
-		this.feedUrls.push(options.url);
-	}
+afterEach(async () => {
+	await Promise.all(
+		temporaryDirectories.splice(0).map((directory) => rm(directory, { force: true, recursive: true })),
+	);
+});
 
-	checkForUpdates(): void {
-		this.checkCount += 1;
-		if (this.checkError) throw this.checkError;
-	}
-
-	quitAndInstall(): void {
-		this.quitCount += 1;
-	}
+async function temporaryDirectory(): Promise<string> {
+	const directory = await mkdtemp(join(tmpdir(), "metis-updater-test-"));
+	temporaryDirectories.push(directory);
+	return directory;
 }
 
-function harness(overrides: Partial<ConstructorParameters<typeof DesktopUpdater>[0]> = {}) {
-	const autoUpdater = new FakeAutoUpdater();
-	const confirmInstall = vi.fn(async () => true);
-	const prepareToInstall = vi.fn(async () => undefined);
+function sha256(value: Uint8Array): string {
+	return createHash("sha256").update(value).digest("hex");
+}
+
+function manifest(version: string, dmg: Uint8Array, hash = sha256(dmg)) {
+	return {
+		schemaVersion: 1,
+		version,
+		publishedAt: "2026-08-10T00:00:00.000Z",
+		dmg: {
+			url: `${BASE_URL}/darwin/arm64/releases/${version}/Metis-${version}-darwin-arm64.dmg`,
+			size: dmg.byteLength,
+			sha256: hash,
+		},
+	};
+}
+
+async function harness(
+	options: {
+		readonly dmg?: Uint8Array;
+		readonly manifest?: ReturnType<typeof manifest>;
+		readonly isPackaged?: boolean;
+		readonly platform?: NodeJS.Platform;
+		readonly arch?: string;
+		readonly baseUrl?: string;
+	} = {},
+) {
+	const dmg = options.dmg ?? new TextEncoder().encode("verified Metis disk image");
+	const release = options.manifest ?? manifest("0.81.0", dmg);
+	const fetch = vi
+		.fn()
+		.mockResolvedValueOnce(
+			new Response(JSON.stringify(release), {
+				headers: { "content-type": "application/json" },
+				status: 200,
+			}),
+		)
+		.mockResolvedValueOnce(
+			new Response(dmg.buffer as ArrayBuffer, {
+				headers: { "content-length": String(dmg.byteLength) },
+				status: 200,
+			}),
+		);
+	const openPath = vi.fn(async (_path: string) => "");
 	const onDiagnostic = vi.fn();
+	const states: unknown[] = [];
+	const downloadsDirectory = await temporaryDirectory();
 	const updater = new DesktopUpdater({
-		autoUpdater,
-		feedUrl: "https://updates.example.test/arcmind",
-		isPackaged: true,
-		platform: "darwin",
-		confirmInstall,
-		prepareToInstall,
+		arch: options.arch ?? "arm64",
+		baseUrl: options.baseUrl ?? BASE_URL,
+		currentVersion: VERSION,
+		downloadsDirectory,
+		fetch,
+		isPackaged: options.isPackaged ?? true,
 		onDiagnostic,
-		...overrides,
+		onState: (state) => states.push(state),
+		openPath,
+		platform: options.platform ?? "darwin",
 	});
-	return { autoUpdater, confirmInstall, onDiagnostic, prepareToInstall, updater };
+	return { dmg, downloadsDirectory, fetch, onDiagnostic, openPath, states, updater };
 }
 
 describe("DesktopUpdater", () => {
-	it("stays disabled outside packaged macOS and Windows apps", () => {
-		for (const options of [
-			{ isPackaged: false, platform: "darwin" as const },
-			{ isPackaged: true, platform: "linux" as const },
+	it("stays unavailable outside packaged macOS on a supported architecture", async () => {
+		for (const options of [{ isPackaged: false }, { platform: "win32" as const }, { arch: "ia32" }]) {
+			const { fetch, updater } = await harness(options);
+			expect(updater.start()).toBe(false);
+			expect(updater.view()).toEqual({ status: "unavailable" });
+			expect(fetch).not.toHaveBeenCalled();
+		}
+	});
+
+	it("rejects update bases that are not credential-free HTTPS URLs", async () => {
+		for (const baseUrl of [
+			"http://updates.example.test/metis",
+			"https://token@updates.example.test/metis",
+			"not a URL",
 		]) {
-			const { autoUpdater, updater } = harness(options);
+			const { updater } = await harness({ baseUrl });
 			expect(updater.start()).toBe(false);
-			expect(autoUpdater.feedUrls).toEqual([]);
-			expect(autoUpdater.checkCount).toBe(0);
 		}
 	});
 
-	it("rejects update feeds that are not credential-free HTTPS URLs", () => {
-		for (const feedUrl of ["http://updates.example.test", "https://token@updates.example.test", "not a URL"]) {
-			const { autoUpdater, updater } = harness({ feedUrl });
-			expect(updater.start()).toBe(false);
-			expect(autoUpdater.checkCount).toBe(0);
-		}
-	});
-
-	it("checks a trusted feed without allowing failures to affect the app server", () => {
-		const { autoUpdater, onDiagnostic, prepareToInstall, updater } = harness();
-		autoUpdater.checkError = new Error("offline");
-
+	it.each(["0.80.5", "0.80.6"])("hides releases that are not newer than %s", async (remoteVersion) => {
+		const dmg = new TextEncoder().encode("old release");
+		const { updater } = await harness({ manifest: manifest(remoteVersion, dmg), dmg });
 		expect(updater.start()).toBe(true);
-		expect(autoUpdater.feedUrls).toEqual(["https://updates.example.test/arcmind"]);
-		expect(autoUpdater.checkCount).toBe(1);
-		expect(prepareToInstall).not.toHaveBeenCalled();
+		await vi.waitFor(() => expect(updater.view()).toEqual({ status: "unavailable" }));
+	});
+
+	it("announces a newer release after validating the manifest", async () => {
+		const { fetch, states, updater } = await harness();
+		expect(updater.start()).toBe(true);
+		expect(updater.view()).toEqual({ status: "checking" });
+		await vi.waitFor(() => expect(updater.view()).toEqual({ status: "available", version: "0.81.0" }));
+		expect(fetch).toHaveBeenCalledWith(`${BASE_URL}/darwin/arm64/latest.json`, { cache: "no-store" });
+		expect(states).toContainEqual({ status: "available", version: "0.81.0" });
+	});
+
+	it("hides malformed or cross-origin releases without interrupting the app", async () => {
+		const dmg = new TextEncoder().encode("untrusted release");
+		const release = manifest("0.81.0", dmg);
+		release.dmg.url = "https://attacker.example/Metis.dmg";
+		const { onDiagnostic, updater } = await harness({ dmg, manifest: release });
+		updater.start();
+		await vi.waitFor(() => expect(updater.view()).toEqual({ status: "unavailable" }));
 		expect(onDiagnostic).toHaveBeenCalledWith("Update check failed");
 	});
 
-	it("keeps a downloaded update inert when the user declines it", async () => {
-		const confirmInstall = vi.fn(async () => false);
-		const { autoUpdater, prepareToInstall, updater } = harness({ confirmInstall });
+	it("downloads once, reports progress, verifies the DMG, and reopens the verified file", async () => {
+		const { dmg, fetch, openPath, states, updater } = await harness();
 		updater.start();
+		await vi.waitFor(() => expect(updater.view()).toEqual({ status: "available", version: "0.81.0" }));
 
-		autoUpdater.emit("update-downloaded");
-		await vi.waitFor(() => expect(confirmInstall).toHaveBeenCalledOnce());
-		expect(prepareToInstall).not.toHaveBeenCalled();
-		expect(autoUpdater.quitCount).toBe(0);
+		await Promise.all([updater.downloadAndOpen(), updater.downloadAndOpen()]);
+
+		expect(fetch).toHaveBeenCalledTimes(2);
+		expect(openPath).toHaveBeenCalledTimes(1);
+		const openedPath = openPath.mock.calls[0]?.[0];
+		expect(openedPath).toMatch(/Metis-0\.81\.0-darwin-arm64\.dmg$/u);
+		expect(await readFile(openedPath!)).toEqual(Buffer.from(dmg));
+		expect(updater.view()).toEqual({ status: "ready", version: "0.81.0" });
+		expect(states).toContainEqual({ status: "downloading", version: "0.81.0", progress: 100 });
+
+		await updater.downloadAndOpen();
+		expect(fetch).toHaveBeenCalledTimes(2);
+		expect(openPath).toHaveBeenCalledTimes(2);
 	});
 
-	it("stops mutations and the app server before installing an approved update", async () => {
-		let finishPreparation: (() => void) | undefined;
-		const prepareToInstall = vi.fn(
-			async () =>
-				await new Promise<void>((resolve) => {
-					finishPreparation = resolve;
-				}),
+	it("re-verifies a ready DMG and downloads it again if the file was replaced", async () => {
+		const { dmg, fetch, openPath, updater } = await harness();
+		updater.start();
+		await vi.waitFor(() => expect(updater.view()).toEqual({ status: "available", version: "0.81.0" }));
+		await updater.downloadAndOpen();
+		const openedPath = openPath.mock.calls[0]?.[0];
+		await writeFile(openedPath!, "replaced after verification");
+		fetch.mockResolvedValueOnce(
+			new Response(dmg.buffer as ArrayBuffer, {
+				headers: { "content-length": String(dmg.byteLength) },
+				status: 200,
+			}),
 		);
-		const { autoUpdater, updater } = harness({ prepareToInstall });
-		updater.start();
 
-		autoUpdater.emit("update-downloaded");
-		await vi.waitFor(() => expect(prepareToInstall).toHaveBeenCalledOnce());
-		expect(autoUpdater.quitCount).toBe(0);
-		finishPreparation?.();
-		await vi.waitFor(() => expect(autoUpdater.quitCount).toBe(1));
+		await updater.downloadAndOpen();
+
+		expect(fetch).toHaveBeenCalledTimes(3);
+		expect(openPath).toHaveBeenCalledTimes(2);
+		expect(await readFile(openedPath!)).toEqual(Buffer.from(dmg));
+		expect(updater.view()).toEqual({ status: "ready", version: "0.81.0" });
 	});
 
-	it("does not install when graceful preparation fails", async () => {
-		const prepareToInstall = vi.fn(async () => {
-			throw new Error("could not stop app server");
-		});
-		const { autoUpdater, onDiagnostic, updater } = harness({ prepareToInstall });
+	it("deletes a corrupt partial download and keeps the update retryable", async () => {
+		const dmg = new TextEncoder().encode("corrupt release");
+		const release = manifest("0.81.0", dmg, "0".repeat(64));
+		const { downloadsDirectory, onDiagnostic, openPath, updater } = await harness({ dmg, manifest: release });
 		updater.start();
+		await vi.waitFor(() => expect(updater.view()).toEqual({ status: "available", version: "0.81.0" }));
 
-		autoUpdater.emit("update-downloaded");
-		await vi.waitFor(() => expect(onDiagnostic).toHaveBeenCalledWith("Update installation preparation failed"));
-		expect(autoUpdater.quitCount).toBe(0);
+		await expect(updater.downloadAndOpen()).rejects.toThrow("Downloaded update failed verification");
+		expect(updater.view()).toEqual({ status: "available", version: "0.81.0" });
+		expect(openPath).not.toHaveBeenCalled();
+		expect(onDiagnostic).toHaveBeenCalledWith("Update download failed");
+		const files = await readdir(downloadsDirectory);
+		expect(files).toEqual([]);
 	});
 });

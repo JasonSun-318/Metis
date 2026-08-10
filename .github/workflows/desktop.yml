@@ -27,7 +27,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     env:
-      ARCMIND_UPDATE_FEED_URL: ${{ startsWith(github.ref, 'refs/tags/v') && vars.ARCMIND_UPDATE_FEED_URL || '' }}
+      METIS_UPDATE_BASE_URL: ${{ startsWith(github.ref, 'refs/tags/v') && vars.METIS_UPDATE_BASE_URL || '' }}
       MACOS_SIGN_IDENTITY: ${{ startsWith(github.ref, 'refs/tags/v') && secrets.MACOS_SIGN_IDENTITY || '' }}
       APPLE_ID: ${{ startsWith(github.ref, 'refs/tags/v') && secrets.APPLE_ID || '' }}
       APPLE_APP_SPECIFIC_PASSWORD: ${{ startsWith(github.ref, 'refs/tags/v') && secrets.APPLE_APP_SPECIFIC_PASSWORD || '' }}
@@ -56,8 +56,8 @@ jobs:
         if: runner.os == 'macOS' && env.MACOS_CERTIFICATE_BASE64 != ''
         shell: bash
         run: |
-          CERTIFICATE_PATH="$RUNNER_TEMP/arcmind-signing.p12"
-          KEYCHAIN_PATH="$RUNNER_TEMP/arcmind-signing.keychain-db"
+          CERTIFICATE_PATH="$RUNNER_TEMP/metis-signing.p12"
+          KEYCHAIN_PATH="$RUNNER_TEMP/metis-signing.keychain-db"
           KEYCHAIN_PASSWORD="$(uuidgen)"
           echo "$MACOS_CERTIFICATE_BASE64" | base64 --decode > "$CERTIFICATE_PATH"
           security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
@@ -71,7 +71,7 @@ jobs:
         if: runner.os == 'Windows' && env.WINDOWS_CERTIFICATE_BASE64 != ''
         shell: pwsh
         run: |
-          $certificatePath = Join-Path $env:RUNNER_TEMP "arcmind-signing.pfx"
+          $certificatePath = Join-Path $env:RUNNER_TEMP "metis-signing.pfx"
           [IO.File]::WriteAllBytes($certificatePath, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE_BASE64))
           "WINDOWS_CERTIFICATE_FILE=$certificatePath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "WINDOWS_CERTIFICATE_PASSWORD=$env:WINDOWS_CERTIFICATE_PASSWORD_SECRET" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
@@ -83,25 +83,25 @@ jobs:
         run: npm run check:desktop
 
       - name: Run desktop foundation tests
-        run: npm test --workspace @arcmind/app-protocol && npm test --workspace @arcmind/app-server && npm test --workspace @arcmind/desktop
+        run: npm test --workspace @metis/app-protocol && npm test --workspace @metis/app-server && npm test --workspace @metis/desktop
 
       - name: Make native artifacts
-        run: npm run make --workspace @arcmind/desktop
+        run: npm run make --workspace @metis/desktop
 
       - name: Verify packaged runtime assets
-        run: npm run verify:package --workspace @arcmind/desktop
+        run: npm run verify:package --workspace @metis/desktop
 
       - name: Run packaged E2E (macOS and Windows)
         if: runner.os != 'Linux'
-        run: npm run test:e2e --workspace @arcmind/desktop
+        run: npm run test:e2e --workspace @metis/desktop
 
       - name: Run packaged E2E (Linux)
         if: runner.os == 'Linux'
-        run: xvfb-run -a npm run test:e2e --workspace @arcmind/desktop
+        run: xvfb-run -a npm run test:e2e --workspace @metis/desktop
 
       - name: Upload native artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: arcmind-${{ runner.os }}-${{ runner.arch }}
+          name: metis-${{ runner.os }}-${{ runner.arch }}
           path: packages/desktop/out/make/**
           if-no-files-found: error

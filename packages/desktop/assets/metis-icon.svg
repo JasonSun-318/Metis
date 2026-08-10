@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+	<defs>
+		<linearGradient id="surface" x1="144" y1="96" x2="880" y2="928" gradientUnits="userSpaceOnUse">
+			<stop stop-color="#343431" />
+			<stop offset="1" stop-color="#20201f" />
+		</linearGradient>
+		<linearGradient id="mark" x1="274" y1="304" x2="750" y2="720" gradientUnits="userSpaceOnUse">
+			<stop stop-color="#e0a06d" />
+			<stop offset="1" stop-color="#c86548" />
+		</linearGradient>
+		<filter id="shadow" x="-20%" y="-20%" width="140%" height="150%">
+			<feDropShadow dx="0" dy="24" stdDeviation="28" flood-color="#000" flood-opacity="0.34" />
+		</filter>
+	</defs>
+	<rect x="80" y="80" width="864" height="864" rx="206" fill="#171716" opacity="0.5" filter="url(#shadow)" />
+	<rect x="80" y="64" width="864" height="864" rx="206" fill="url(#surface)" />
+	<rect x="81" y="65" width="862" height="862" rx="205" fill="none" stroke="#fff" stroke-opacity="0.09" stroke-width="2" />
+	<path d="M274 706V322L512 626L750 322V706" fill="none" stroke="url(#mark)" stroke-linecap="round" stroke-linejoin="round" stroke-width="88" />
+	<path d="M274 322L512 626L750 322" fill="none" stroke="#f0b27e" stroke-linecap="round" stroke-linejoin="round" stroke-opacity="0.16" stroke-width="20" />
+</svg>

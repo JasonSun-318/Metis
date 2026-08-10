@@ -52,8 +52,8 @@ class FakeChild implements UtilityChild {
 			jsonrpc: "2.0",
 			id: request.id,
 			result: {
-				protocolVersion: 10,
-				server: { name: "arcmind-app-server", version: "0.80.6" },
+				protocolVersion: 11,
+				server: { name: "metis-app-server", version: "0.80.6" },
 				serverEpoch: epoch,
 				capabilities: [],
 			},
