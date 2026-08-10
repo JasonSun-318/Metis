@@ -8,7 +8,7 @@ import type {
 	SessionSnapshot,
 	SessionSummary,
 	TurnView,
-} from "@arcmind/app-protocol";
+} from "@metis/app-protocol";
 import type { SupervisorView } from "../../shared/desktop-api.ts";
 import {
 	addPendingInteraction,
@@ -60,6 +60,7 @@ export interface AppStoreSnapshot {
 	readonly model: SessionSnapshot["model"];
 	readonly availableModels: NonNullable<SessionSnapshot["availableModels"]>;
 	readonly subagents: SessionSnapshot["subagents"];
+	readonly tasks: SessionSnapshot["tasks"];
 	readonly subagentTranscript: SubagentTranscriptState;
 	readonly supervisor: SupervisorView;
 }
@@ -205,6 +206,7 @@ export class AppStore {
 			model: this.state.model,
 			availableModels: this.state.availableModels,
 			subagents: this.state.subagents,
+			tasks: this.state.tasks,
 			subagentTranscript: this.state.subagentTranscript,
 			supervisor: this.supervisor,
 		};

@@ -1,4 +1,4 @@
-import type { AgentMode, ItemView } from "@arcmind/app-protocol";
+import type { AgentMode, ItemView } from "@metis/app-protocol";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -6,7 +6,10 @@ import { CodeTranscriptTurn } from "./CodeTranscriptTurn.tsx";
 import { TranscriptTurn } from "./TranscriptTurn.tsx";
 
 interface TranscriptProps {
+	readonly activeTurnId?: string | null;
+	readonly activeTurnStartedAt?: string;
 	readonly appearance: AgentMode;
+	readonly autoLoadOlder?: boolean;
 	readonly hasOlder: boolean;
 	readonly itemIds: readonly string[];
 	readonly itemsById: ReadonlyMap<string, ItemView>;
@@ -50,9 +53,10 @@ function transcriptRows(appearance: AgentMode, itemIds: readonly string[], items
 	return rows;
 }
 
-export function Transcript({ appearance, ariaLabel = "Conversation transcript", hasOlder, itemIds, itemsById, latestLabel, loadingOlder, onLoadOlder, olderLabel = "Load older messages" }: TranscriptProps) {
+export function Transcript({ activeTurnId, activeTurnStartedAt, appearance, ariaLabel = "Conversation transcript", autoLoadOlder = false, hasOlder, itemIds, itemsById, latestLabel, loadingOlder, onLoadOlder, olderLabel = "Load older messages" }: TranscriptProps) {
 	const { t } = useTranslation();
 	const scrollRef = useRef<HTMLDivElement>(null);
+	const loadingOlderRef = useRef(false);
 	const followLatest = useRef(true);
 	const previousSessionId = useRef<string | undefined>(undefined);
 	const [hasNewItems, setHasNewItems] = useState(false);
@@ -86,12 +90,36 @@ export function Transcript({ appearance, ariaLabel = "Conversation transcript", 
 		});
 		return () => cancelAnimationFrame(frame);
 	}, [lastItem, latestLabel, transcript.length]);
+	useLayoutEffect(() => {
+		const scroll = scrollRef.current;
+		if (!scroll) return;
+		const observer = new ResizeObserver(() => {
+			if (followLatest.current) scroll.scrollTop = scroll.scrollHeight;
+		});
+		observer.observe(scroll);
+		return () => observer.disconnect();
+	}, []);
 
 	const scrollToLatest = () => {
 		followLatest.current = true;
 		setHasNewItems(false);
 		const scroll = scrollRef.current;
 		if (scroll) scroll.scrollTop = scroll.scrollHeight;
+	};
+	const loadOlderAtTop = async (scroll: HTMLDivElement) => {
+		if (!autoLoadOlder || !hasOlder || loadingOlder || loadingOlderRef.current || scroll.scrollTop > 48) return;
+		loadingOlderRef.current = true;
+		const previousHeight = scroll.scrollHeight;
+		const previousTop = scroll.scrollTop;
+		try {
+			await onLoadOlder();
+		} finally {
+			requestAnimationFrame(() => {
+				if (scrollRef.current === scroll)
+					scroll.scrollTop = previousTop + Math.max(0, scroll.scrollHeight - previousHeight);
+				loadingOlderRef.current = false;
+			});
+		}
 	};
 
 	const measuredRows = virtualizer.getVirtualItems();
@@ -109,17 +137,19 @@ export function Transcript({ appearance, ariaLabel = "Conversation transcript", 
 
 	return (
 		<section className={`transcript transcript-${appearance}`} aria-label={t(ariaLabel)}>
-			{hasOlder && (
+			{hasOlder && !autoLoadOlder && (
 				<button className="history-button button-secondary" disabled={loadingOlder} onClick={() => void onLoadOlder()} type="button">
 					{loadingOlder ? t("Loading…") : t(olderLabel)}
 				</button>
 			)}
 			<div
+				aria-busy={loadingOlder || undefined}
 				className="transcript-scroll"
 				onScroll={(event) => {
 					const scroll = event.currentTarget;
 					followLatest.current = shouldFollowTranscript(scroll.scrollHeight, scroll.scrollTop, scroll.clientHeight);
 					if (followLatest.current) setHasNewItems(false);
+					if (scroll.scrollTop <= 48) void loadOlderAtTop(scroll);
 				}}
 				ref={scrollRef}
 			>
@@ -132,6 +162,8 @@ export function Transcript({ appearance, ariaLabel = "Conversation transcript", 
 							return item ? [item] : [];
 						});
 						if (items.length === 0) return null;
+						const running = activeTurnId !== null && activeTurnId !== undefined &&
+							items.some((item) => item.turnId === activeTurnId);
 						return (
 							<article
 								className={appearance === "chat" ? "transcript-turn" : "code-transcript-turn"}
@@ -142,7 +174,9 @@ export function Transcript({ appearance, ariaLabel = "Conversation transcript", 
 								ref={virtualizer.measureElement}
 								style={{ transform: `translateY(${row.start}px)` }}
 							>
-								{appearance === "chat" ? <TranscriptTurn items={items} /> : <CodeTranscriptTurn items={items} />}
+								{appearance === "chat"
+									? <TranscriptTurn items={items} running={running} startedAt={activeTurnStartedAt} />
+									: <CodeTranscriptTurn items={items} running={running} startedAt={activeTurnStartedAt} />}
 							</article>
 						);
 					})}

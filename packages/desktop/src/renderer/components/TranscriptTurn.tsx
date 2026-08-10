@@ -1,4 +1,4 @@
-import type { ItemContentBlockView, ItemView } from "@arcmind/app-protocol";
+import type { ItemContentBlockView, ItemView } from "@metis/app-protocol";
 import {
 	CaretRight,
 	CheckCircle,
@@ -11,6 +11,7 @@ import {
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Markdown } from "./Markdown.tsx";
+import { TurnRuntimeStatus } from "./TurnRuntimeStatus.tsx";
 import {
 	actionSummary,
 	buildTurnPresentation,
@@ -79,7 +80,11 @@ function activityLength(blocks: readonly ItemContentBlockView[], results: Readon
 	}, 0);
 }
 
-export function TranscriptTurn({ items }: { readonly items: readonly ItemView[] }) {
+export function TranscriptTurn({ items, running: runtimeRunning = false, startedAt }: {
+	readonly items: readonly ItemView[];
+	readonly running?: boolean;
+	readonly startedAt?: string;
+}) {
 	const { t } = useTranslation();
 	const [open, setOpen] = useState(false);
 	const [showAll, setShowAll] = useState(false);
@@ -98,7 +103,7 @@ export function TranscriptTurn({ items }: { readonly items: readonly ItemView[] 
 			))}
 			{intermediateText.length > 0 && (
 				<div className="turn-intermediate">
-					{intermediateText.map((block, index) => <p key={`intermediate-${index}`}>{block.text}</p>)}
+					{intermediateText.map((block, index) => <Markdown key={`intermediate-${index}`} text={block.text} />)}
 				</div>
 			)}
 			{activity.length > 0 && (
@@ -173,13 +178,12 @@ export function TranscriptTurn({ items }: { readonly items: readonly ItemView[] 
 				<div className="turn-answer" data-transcript-answer>
 					{final.content.map((block, index) =>
 						block.type === "text"
-							? final.state === "streaming"
-								? <p key={`${block.type}-${index}`}>{block.text}</p>
-								: <Markdown key={`${block.type}-${index}`} text={block.text} />
+							? <Markdown key={`${block.type}-${index}`} text={block.text} />
 							: <StaticBlock block={block} key={`${block.type}-${index}`} />,
 					)}
 				</div>
 			)}
+			{runtimeRunning && <TurnRuntimeStatus items={items} running startedAt={startedAt} />}
 		</>
 	);
 }

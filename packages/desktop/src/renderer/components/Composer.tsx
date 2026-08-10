@@ -1,9 +1,10 @@
-import type { SkillSummaryView } from "@arcmind/app-protocol";
+import type { SessionTaskView, SkillSummaryView } from "@metis/app-protocol";
 import { ArrowUp, Paperclip, Scroll, Stop, X } from "@phosphor-icons/react";
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import type { DesktopAttachmentSelection } from "../../shared/desktop-api.ts";
 import { ComposerAddMenu } from "./ComposerAddMenu.tsx";
+import { TaskList } from "./TaskList.tsx";
 
 export interface ComposerSubmission {
 	readonly text: string;
@@ -19,11 +20,14 @@ interface ComposerProps {
 	readonly onManageSkills?: () => void;
 	readonly onPickFiles?: () => Promise<readonly DesktopAttachmentSelection[]>;
 	readonly appearance?: "chat" | "code";
+	readonly interactionControl?: ReactNode;
 	readonly modelControl?: ReactNode;
 	readonly permissionControl?: ReactNode;
 	readonly placeholder?: string;
 	readonly skills?: readonly SkillSummaryView[];
 	readonly submitDisabled?: boolean;
+	readonly tasks?: readonly SessionTaskView[];
+	readonly taskListEpoch?: string | null;
 	readonly thinkingControl?: ReactNode;
 }
 
@@ -35,11 +39,14 @@ export function Composer({
 	onManageSkills,
 	onPickFiles,
 	appearance = "code",
+	interactionControl,
 	modelControl,
 	permissionControl,
 	placeholder,
 	skills = [],
 	submitDisabled = false,
+	tasks = [],
+	taskListEpoch,
 	thinkingControl,
 }: ComposerProps) {
 	const { t } = useTranslation();
@@ -47,6 +54,7 @@ export function Composer({
 	const [attachments, setAttachments] = useState<readonly DesktopAttachmentSelection[]>([]);
 	const [selectedSkill, setSelectedSkill] = useState<SkillSummaryView>();
 	const [submitting, setSubmitting] = useState(false);
+	const hasInput = text.trim().length > 0 || attachments.length > 0;
 	useEffect(() => {
 		setSelectedSkill((current) => current && skills.some(({ name }) => name === current.name) ? current : undefined);
 	}, [skills]);
@@ -80,8 +88,10 @@ export function Composer({
 
 	return (
 		<div className="composer-dock">
+			<TaskList key={taskListEpoch ?? undefined} tasks={tasks} />
+			{interactionControl}
 			<form className={`composer composer-${appearance}`} onSubmit={(event) => void submit(event).catch(() => undefined)}>
-				<label className="sr-only" htmlFor="composer-input">{t("Message ArcMind")}</label>
+				<label className="sr-only" htmlFor="composer-input">{t("Message Metis")}</label>
 				<textarea
 					disabled={disabled || submitting}
 					id="composer-input"
@@ -92,7 +102,7 @@ export function Composer({
 							event.currentTarget.form?.requestSubmit();
 						}
 					}}
-					placeholder={placeholder ?? t(running ? "Steer the active task…" : "Ask ArcMind anything, or describe a task…")}
+					placeholder={placeholder ?? t(running ? "Steer the active task…" : "Ask Metis anything, or describe a task…")}
 					rows={1}
 					value={text}
 				/>
@@ -128,19 +138,18 @@ export function Composer({
 					<div className="composer-trailing">
 						{modelControl}
 						{thinkingControl}
-						{running && (
-							<button aria-label={t("Stop task")} className="composer-icon-button button-secondary" disabled={disabled} onClick={() => void onInterrupt().catch(() => undefined)} type="button">
+						{running && !hasInput ? (
+							<button aria-label={t("Stop task")} className="composer-icon-button composer-stop button-secondary" disabled={disabled} onClick={() => void onInterrupt().catch(() => undefined)} type="button">
 								<Stop aria-hidden="true" size={16} weight="fill" />
 							</button>
-						)}
-						<button aria-label={t(running ? "Steer task" : "Send message")} className="composer-icon-button composer-send" disabled={disabled || submitDisabled || submitting || (text.trim().length === 0 && attachments.length === 0)} type="submit">
+						) : <button aria-label={t(running ? "Steer task" : "Send message")} className="composer-icon-button composer-send" disabled={disabled || submitDisabled || submitting || !hasInput} type="submit">
 							<ArrowUp aria-hidden="true" size={19} weight="bold" />
-						</button>
+						</button>}
 					</div>
 				</div>
 			</form>
 			{appearance === "chat" && (
-				<p className="composer-disclaimer">{t("ArcMind is AI and can make mistakes. Please double-check responses.")}</p>
+				<p className="composer-disclaimer">{t("Metis is AI and can make mistakes. Please double-check responses.")}</p>
 			)}
 		</div>
 	);

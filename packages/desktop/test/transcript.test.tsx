@@ -1,15 +1,43 @@
 // @vitest-environment jsdom
 
-import type { ItemContentBlockView, ItemView } from "@arcmind/app-protocol";
+import type { ItemContentBlockView, ItemView } from "@metis/app-protocol";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { shouldAdjustTranscriptScroll, shouldFollowTranscript, Transcript } from "../src/renderer/components/Transcript.tsx";
 import { TranscriptTurn } from "../src/renderer/components/TranscriptTurn.tsx";
 
 const SESSION_ID = "11111111-1111-4111-8111-111111111111";
 const TURN_ID = "turn-1";
 const LONG_THINKING = "用户希望查看桌面内容。我需要先取得目录访问，然后运行命令确认文件列表。".repeat(12);
+
+class TriggerResizeObserver implements ResizeObserver {
+	static readonly instances: TriggerResizeObserver[] = [];
+	readonly targets = new Set<Element>();
+
+	constructor(private readonly callback: ResizeObserverCallback) {
+		TriggerResizeObserver.instances.push(this);
+	}
+
+	disconnect(): void {
+		this.targets.clear();
+	}
+
+	observe(target: Element): void {
+		this.targets.add(target);
+	}
+
+	unobserve(target: Element): void {
+		this.targets.delete(target);
+	}
+
+	static trigger(target: Element): void {
+		const entry = { target, contentRect: target.getBoundingClientRect() } as ResizeObserverEntry;
+		for (const observer of TriggerResizeObserver.instances) {
+			if (observer.targets.has(target)) observer.callback([entry], observer);
+		}
+	}
+}
 
 function item(
 	itemId: string,
@@ -230,7 +258,7 @@ describe("TranscriptTurn", () => {
 		await act(async () => root.unmount());
 	});
 
-	it("defers Markdown parsing until a streaming answer settles", async () => {
+	it("renders Markdown while an answer streams", async () => {
 		const container = document.createElement("div");
 		document.body.append(container);
 		const root = createRoot(container);
@@ -240,15 +268,57 @@ describe("TranscriptTurn", () => {
 		]} />);
 
 		await act(async () => render("streaming"));
-		expect(container.querySelector("[data-transcript-answer] strong")).toBeNull();
-		expect(container.querySelector("[data-transcript-answer]")?.textContent).toBe("**Working**");
+		expect(container.querySelector("[data-transcript-answer] strong")?.textContent).toBe("Working");
 		await act(async () => render("completed"));
 		expect(container.querySelector("[data-transcript-answer] strong")?.textContent).toBe("Working");
+		await act(async () => root.unmount());
+	});
+
+	it("renders Markdown in Chat assistant messages that also call tools", async () => {
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<TranscriptTurn items={[
+			item("mixed-user", "user", [{ type: "text", text: "Summarize" }]),
+			item("mixed-report", "assistant", [
+				{ type: "text", text: "**Summary**\n\n| Name | State |\n| --- | --- |\n| Child | Done |" },
+				{ type: "tool_call", toolCallId: "mixed-close", name: "close_agent", state: "completed" },
+			]),
+			item("mixed-result", "tool", [{ type: "tool_result", toolCallId: "mixed-close", name: "close_agent", isError: false, output: "closed" }]),
+		]} />));
+
+		expect(container.querySelector(".turn-intermediate strong")?.textContent).toBe("Summary");
+		expect(container.querySelector(".turn-intermediate table")?.textContent).toContain("Child");
 		await act(async () => root.unmount());
 	});
 });
 
 describe("Transcript", () => {
+	it.each(["chat", "code"] as const)("renders one active-turn status in %s mode", async (appearance) => {
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		const render = (activeTurnId: string | null | undefined) => root.render(
+			<Transcript
+				activeTurnId={activeTurnId}
+				activeTurnStartedAt="2026-07-22T00:00:00.000Z"
+				appearance={appearance}
+				hasOlder={false}
+				itemIds={turnItems.map((entry) => entry.itemId)}
+				itemsById={new Map(turnItems.map((entry) => [entry.itemId, entry]))}
+				loadingOlder={false}
+				onLoadOlder={async () => undefined}
+			/>,
+		);
+
+		await act(async () => render(TURN_ID));
+		expect(container.querySelectorAll(".turn-runtime-status")).toHaveLength(1);
+		expect(container.querySelector(`.${appearance === "chat" ? "transcript-turn" : "code-transcript-turn"} .turn-runtime-status`)).not.toBeNull();
+		await act(async () => render(null));
+		expect(container.querySelector(".turn-runtime-status")).toBeNull();
+		await act(async () => root.unmount());
+	});
+
 	it("only compensates row resizing when the entire row is above the viewport", () => {
 		expect(shouldAdjustTranscriptScroll(80, 82)).toBe(true);
 		expect(shouldAdjustTranscriptScroll(582, 82)).toBe(false);
@@ -257,6 +327,66 @@ describe("Transcript", () => {
 	it("follows streaming output only while the viewport is near the end", () => {
 		expect(shouldFollowTranscript(1_000, 352, 600)).toBe(true);
 		expect(shouldFollowTranscript(1_000, 351, 600)).toBe(false);
+	});
+
+	it("keeps the latest output anchored while its viewport resizes", async () => {
+		const defaultResizeObserver = globalThis.ResizeObserver;
+		Object.defineProperty(globalThis, "ResizeObserver", { configurable: true, value: TriggerResizeObserver });
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		try {
+			await act(async () => root.render(
+				<Transcript appearance="chat" hasOlder={false} itemIds={turnItems.map((entry) => entry.itemId)} itemsById={new Map(turnItems.map((entry) => [entry.itemId, entry]))} loadingOlder={false} onLoadOlder={async () => undefined} />,
+			));
+			const scroll = container.querySelector<HTMLDivElement>(".transcript-scroll")!;
+			Object.defineProperties(scroll, {
+				clientHeight: { configurable: true, value: 600 },
+				scrollHeight: { configurable: true, value: 1_000 },
+			});
+
+			scroll.scrollTop = 352;
+			await act(async () => scroll.dispatchEvent(new Event("scroll", { bubbles: true })));
+			act(() => TriggerResizeObserver.trigger(scroll));
+			expect(scroll.scrollTop).toBe(1_000);
+
+			scroll.scrollTop = 100;
+			await act(async () => scroll.dispatchEvent(new Event("scroll", { bubbles: true })));
+			act(() => TriggerResizeObserver.trigger(scroll));
+			expect(scroll.scrollTop).toBe(100);
+		} finally {
+			await act(async () => root.unmount());
+			Object.defineProperty(globalThis, "ResizeObserver", { configurable: true, value: defaultResizeObserver });
+			TriggerResizeObserver.instances.length = 0;
+		}
+	});
+
+	it("loads older messages at the top without showing a button or jumping", async () => {
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		let scrollHeight = 1_000;
+		const onLoadOlder = vi.fn(async () => { scrollHeight = 1_400; });
+		await act(async () => root.render(
+			<Transcript appearance="code" autoLoadOlder hasOlder itemIds={turnItems.map((entry) => entry.itemId)} itemsById={new Map(turnItems.map((entry) => [entry.itemId, entry]))} loadingOlder={false} onLoadOlder={onLoadOlder} />,
+		));
+		const scroll = container.querySelector<HTMLDivElement>(".transcript-scroll")!;
+		Object.defineProperties(scroll, {
+			clientHeight: { configurable: true, value: 600 },
+			scrollHeight: { configurable: true, get: () => scrollHeight },
+		});
+		expect(container.querySelector(".history-button")).toBeNull();
+
+		scroll.scrollTop = 80;
+		await act(async () => scroll.dispatchEvent(new Event("scroll", { bubbles: true })));
+		expect(onLoadOlder).not.toHaveBeenCalled();
+		scroll.scrollTop = 0;
+		await act(async () => scroll.dispatchEvent(new Event("scroll", { bubbles: true })));
+		await act(async () => scroll.dispatchEvent(new Event("scroll", { bubbles: true })));
+		await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
+		expect(onLoadOlder).toHaveBeenCalledOnce();
+		expect(scroll.scrollTop).toBe(400);
+		await act(async () => root.unmount());
 	});
 
 	it("groups a Chat turn and preserves disclosure state across streaming updates", async () => {
@@ -311,6 +441,41 @@ describe("Transcript", () => {
 		expect(command.open).toBe(true);
 		expect(command.textContent).toContain("ls -la /Users/ent/Desktop");
 		expect(command.textContent).toContain("file.txt");
+		await act(async () => root.unmount());
+	});
+
+	it("renders Code Markdown while streaming and in assistant messages that also call tools", async () => {
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		const user = item("markdown-code-user", "user", [{ type: "text", text: "Summarize" }]);
+		const report = item("markdown-code-report", "assistant", [
+			{ type: "tool_call", toolCallId: "close-child", name: "close_agent", state: "running" },
+			{ type: "text", text: "**Summary**\n\n| Name | State |\n| --- | --- |\n| Child | Done |" },
+		], "streaming");
+		const render = (entries: readonly ItemView[]) => root.render(
+			<Transcript appearance="code" hasOlder={false} itemIds={entries.map((entry) => entry.itemId)} itemsById={new Map(entries.map((entry) => [entry.itemId, entry]))} loadingOlder={false} onLoadOlder={async () => undefined} />,
+		);
+
+		await act(async () => render([user, report]));
+		expect(container.querySelector(".code-turn-status strong")?.textContent).toBe("Summary");
+		expect(container.querySelector(".code-turn-status table")?.textContent).toContain("Child");
+
+		const completedReport = {
+			...report,
+			state: "completed" as const,
+			completedAt: "2026-07-22T00:00:01.000Z",
+			content: report.content.map((block) => block.type === "tool_call" ? { ...block, state: "completed" as const } : block),
+		};
+		await act(async () => render([
+			user,
+			completedReport,
+			item("markdown-code-result", "tool", [{ type: "tool_result", toolCallId: "close-child", name: "close_agent", isError: false, output: "closed" }]),
+			item("markdown-code-final", "assistant", [{ type: "text", text: "All agents closed." }]),
+		]));
+		expect(container.querySelector(".code-turn-status strong")?.textContent).toBe("Summary");
+		expect(container.querySelector(".code-turn-status table")?.textContent).toContain("Child");
+		expect(container.querySelector(".code-turn-answer")?.textContent).toBe("All agents closed.");
 		await act(async () => root.unmount());
 	});
 

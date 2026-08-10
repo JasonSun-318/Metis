@@ -1,8 +1,9 @@
-import type { ItemContentBlockView, ItemView } from "@arcmind/app-protocol";
+import type { ItemContentBlockView, ItemView } from "@metis/app-protocol";
 import { CaretRight, CircleNotch, ImageSquare, TerminalWindow, Wrench } from "@phosphor-icons/react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Markdown } from "./Markdown.tsx";
+import { TurnRuntimeStatus } from "./TurnRuntimeStatus.tsx";
 import {
 	actionSummary,
 	buildCodeTurnPresentation,
@@ -105,7 +106,11 @@ function CodeExecution({ calls, results, orphanResults, running }: {
 	);
 }
 
-export function CodeTranscriptTurn({ items }: { readonly items: readonly ItemView[] }) {
+export function CodeTranscriptTurn({ items, running = false, startedAt }: {
+	readonly items: readonly ItemView[];
+	readonly running?: boolean;
+	readonly startedAt?: string;
+}) {
 	const { users, segments, results } = buildCodeTurnPresentation(items);
 
 	return (
@@ -136,6 +141,7 @@ export function CodeTranscriptTurn({ items }: { readonly items: readonly ItemVie
 					</div>
 				),
 			)}
+			{running && <TurnRuntimeStatus items={items} running startedAt={startedAt} />}
 		</>
 	);
 }

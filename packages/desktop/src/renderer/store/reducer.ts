@@ -9,7 +9,7 @@ import type {
 	SubagentSummaryView,
 	ThinkingSelectionView,
 	TurnView,
-} from "@arcmind/app-protocol";
+} from "@metis/app-protocol";
 
 export type ProjectionSyncStatus = "empty" | "ready" | "resubscribing" | "resnapshot_required";
 export type BatchApplyResult = "applied" | "resnapshot_required";
@@ -45,6 +45,7 @@ export interface MutableProjectionState {
 	model: SessionSnapshot["model"];
 	availableModels: NonNullable<SessionSnapshot["availableModels"]>;
 	subagents: SubagentSummaryView[];
+	tasks: SessionSnapshot["tasks"];
 	readonly subagentTranscript: MutableSubagentTranscriptState;
 }
 
@@ -80,6 +81,7 @@ export function createProjectionState(): MutableProjectionState {
 		model: undefined,
 		availableModels: [],
 		subagents: [],
+		tasks: [],
 		subagentTranscript: {
 			agentId: null,
 			itemsById: new Map(),
@@ -128,6 +130,7 @@ export function removeSession(state: MutableProjectionState, sessionId: string):
 	state.syncStatus = "empty";
 	state.permissionMode = "ask";
 	state.subagents = [];
+	state.tasks = [];
 	clearSubagentTranscript(state.subagentTranscript);
 	return true;
 }
@@ -161,6 +164,7 @@ export function removeModeProjectSessions(state: MutableProjectionState, mode: A
 	state.syncStatus = "empty";
 	state.permissionMode = "ask";
 	state.subagents = [];
+	state.tasks = [];
 	clearSubagentTranscript(state.subagentTranscript);
 	return true;
 }
@@ -207,6 +211,7 @@ export function replaceProjectionSnapshot(state: MutableProjectionState, snapsho
 	state.model = snapshot.model;
 	state.availableModels = snapshot.availableModels ?? [];
 	state.subagents = snapshot.subagents;
+	state.tasks = snapshot.tasks;
 	if (sessionChanged) clearSubagentTranscript(state.subagentTranscript);
 	else if (state.subagentTranscript.agentId) state.subagentTranscript.journalRevision += 1;
 }
@@ -253,6 +258,7 @@ function eventSessionId(event: DomainEvent): string | undefined {
 		case "subagent/item/completed":
 		case "subagent/itemsChanged":
 		case "session/modelChanged":
+		case "session/tasksChanged":
 			return event.sessionId;
 		case "interaction/notify":
 			return event.sessionId;
@@ -349,6 +355,9 @@ function applyEvent(state: MutableProjectionState, event: DomainEvent): void {
 			state.thinkingSelection = event.thinkingSelection;
 			state.actualThinkingLevel = event.actualThinkingLevel;
 			state.availableThinkingSelections = event.availableThinkingSelections;
+			return;
+		case "session/tasksChanged":
+			state.tasks = structuredClone(event.tasks);
 			return;
 		case "subagent/updated": {
 			const index = state.subagents.findIndex((candidate) => candidate.agentId === event.subagent.agentId);

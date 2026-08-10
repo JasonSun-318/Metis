@@ -1,4 +1,4 @@
-import type { ItemContentBlockView, ItemView } from "@arcmind/app-protocol";
+import type { ItemContentBlockView, ItemView } from "@metis/app-protocol";
 import { describe, expect, it } from "vitest";
 import { actionSummary, buildTurnPresentation, commandText } from "../src/renderer/components/transcript-turn-model.ts";
 

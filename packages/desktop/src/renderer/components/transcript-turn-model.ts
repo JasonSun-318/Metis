@@ -1,4 +1,4 @@
-import type { ItemContentBlockView, ItemView } from "@arcmind/app-protocol";
+import type { ItemContentBlockView, ItemView } from "@metis/app-protocol";
 
 export type TextBlock = Extract<ItemContentBlockView, { type: "text" }>;
 export type ThinkingBlock = Extract<ItemContentBlockView, { type: "thinking" }>;
@@ -214,7 +214,7 @@ export function buildCodeTurnPresentation(items: readonly ItemView[]): CodeTurnP
 		if (item.role === "user") continue;
 		const thinking = item.content.filter((block): block is ThinkingBlock => block.type === "thinking");
 		const answer = itemIndex === finalIndex;
-		const markdown = answer && item.state !== "streaming";
+		const markdown = item.role === "assistant";
 		for (const block of item.content) {
 			if (block.type === "thinking") continue;
 			if (block.type === "tool_call") {

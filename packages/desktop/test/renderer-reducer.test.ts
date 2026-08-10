@@ -1,4 +1,4 @@
-import type { ConnectionEventsParams, ItemView, SessionSnapshot, SessionSummary } from "@arcmind/app-protocol";
+import type { ConnectionEventsParams, ItemView, SessionSnapshot, SessionSummary } from "@metis/app-protocol";
 import { describe, expect, it } from "vitest";
 import { buildSessionTree } from "../src/renderer/components/SessionSidebar.tsx";
 import { AppStore } from "../src/renderer/store/app-store.ts";
@@ -44,6 +44,7 @@ function snapshot(serverEpoch = EPOCH_A, cursor = 0, recentItems: ItemView[] = [
 		nextBeforeItemId: null,
 		activeTurnId: null,
 		pendingInteractions: [],
+		tasks: [],
 		thinkingSelection: "off",
 		actualThinkingLevel: "off",
 		availableThinkingSelections: ["off"],
@@ -347,6 +348,40 @@ describe("renderer projection reducer", () => {
 
 		store.applySnapshot({ ...snapshot(EPOCH_B, 4), permissionMode: "ask" });
 		expect(store.getSnapshot().permissionMode).toBe("ask");
+	});
+
+	it("replaces, live-updates, and clears the active session task snapshot", () => {
+		const store = new AppStore();
+		store.applySnapshot({
+			...snapshot(EPOCH_A, 0),
+			tasks: [{ task: "Inspect implementation", completed: false }],
+		});
+		expect(store.getSnapshot().tasks).toEqual([{ task: "Inspect implementation", completed: false }]);
+
+		expect(
+			store.applyBatch({
+				serverEpoch: EPOCH_A,
+				fromCursor: 1,
+				toCursor: 1,
+				events: [
+					{
+						type: "session/tasksChanged",
+						sessionId: "session-1",
+						tasks: [{ task: "Inspect implementation", completed: true }],
+					},
+				],
+			}),
+		).toBe("applied");
+		expect(store.getSnapshot().tasks).toEqual([{ task: "Inspect implementation", completed: true }]);
+
+		store.applySnapshot({
+			...snapshot(EPOCH_B, 2, []),
+			session: session("session-2"),
+			tasks: [{ task: "Second session", completed: false }],
+		});
+		expect(store.getSnapshot().tasks).toEqual([{ task: "Second session", completed: false }]);
+		store.removeSession("session-2");
+		expect(store.getSnapshot().tasks).toEqual([]);
 	});
 
 	it("replaces the complete active projection on every snapshot", () => {
