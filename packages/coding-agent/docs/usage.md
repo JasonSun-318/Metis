@@ -1,4 +1,4 @@
-# Using ArcMind
+# Using Metis
 
 This page collects day-to-day usage details that do not fit on the quickstart page.
 
@@ -60,7 +60,7 @@ Type `/` in the editor to open command completion. Extensions can register custo
 | `/dream` | Show Dream status and the latest 10 memory-maintenance runs |
 | `/reload` | Reload resources, context files, and memory |
 | `/hotkeys` | Show all keyboard shortcuts |
-| `/quit` | Quit arcmind |
+| `/quit` | Quit metis |
 
 ## Message Queue
 
@@ -71,21 +71,21 @@ You can submit messages while the agent is still working:
 - **Escape** aborts and restores queued messages to the editor.
 - **Alt+Up** retrieves queued messages back to the editor.
 
-On Windows Terminal, Alt+Enter is fullscreen by default. Remap it as described in [Terminal setup](terminal-setup.md) if you want arcmind to receive the shortcut.
+On Windows Terminal, Alt+Enter is fullscreen by default. Remap it as described in [Terminal setup](terminal-setup.md) if you want metis to receive the shortcut.
 
 Configure delivery in [Settings](settings.md) with `steeringMode` and `followUpMode`.
 
 ## Sessions
 
-Sessions are saved automatically to `~/.arcmind/agent/sessions/`, organized by working directory.
+Sessions are saved automatically to `~/.metis/agent/sessions/`, organized by working directory.
 
 ```bash
-arcmind -c                  # Continue most recent session
-arcmind -r                  # Browse and select a session
-arcmind --no-session        # Ephemeral mode; do not save
-arcmind --name "my task"    # Set session display name at startup
-arcmind --session <path|id> # Use a specific session file or session ID
-arcmind --fork <path|id>    # Fork a session into a new session file
+metis -c                  # Continue most recent session
+metis -r                  # Browse and select a session
+metis --no-session        # Ephemeral mode; do not save
+metis --name "my task"    # Set session display name at startup
+metis --session <path|id> # Use a specific session file or session ID
+metis --fork <path|id>    # Fork a session into a new session file
 ```
 
 Useful session commands:
@@ -103,7 +103,7 @@ See [Sessions](sessions.md) and [Compaction](compaction.md) for details.
 Long-term memory is separate from session JSONL and compaction summaries:
 
 ```text
-~/.arcmind/agent/memory/
+~/.metis/agent/memory/
 ├── MEMORY.md
 ├── preferences.md
 └── projects/
@@ -116,20 +116,20 @@ Long-term memory is separate from session JSONL and compaction summaries:
 - `MEMORY.md` is the global index shared by all working directories and sessions.
 - `project.md` is the index for one exact absolute working directory. It is shared by `/new`, `/resume`, `/fork`, and `/tree` sessions using that cwd; a subdirectory is a different project.
 - Each index is limited to its first 200 lines or 25KB in the system prompt. Keep details in relative Markdown-linked topic files so the model can read them only when relevant.
-- `/memory` shows the active paths and load state. `/memory on` and `/memory off` persist a global switch and take effect immediately. `/reload` re-reads indexes changed outside ArcMind.
+- `/memory` shows the active paths and load state. `/memory on` and `/memory off` persist a global switch and take effect immediately. `/reload` re-reads indexes changed outside Metis.
 - Memory files are created only when something is saved. Session export, import, and deletion do not copy or remove them.
 
 Dream runs silently alongside manual and automatic context compaction when long-term memory is enabled. It reconciles only global memory and the project memory for the current working directory; other project directories are not scanned. Ordinary messages and images remain queued until both Compact and Dream settle.
 
-`/dream` is read-only and remains available while Dream is running. It shows live state and the latest 10 metadata-only records from `~/.arcmind/agent/memory/dream-history.jsonl`. Dream cannot be started manually.
+`/dream` is read-only and remains available while Dream is running. It shows live state and the latest 10 metadata-only records from `~/.metis/agent/memory/dream-history.jsonl`. Dream cannot be started manually.
 
 While Compact/Dream runs, Shell commands, extension commands, and built-ins that mutate model, settings, authentication, sessions, exports, imports, or memory state are rejected and left in the editor. Read-only `/dirs`, `/copy`, `/session`, `/hotkeys`, `/memory`, `/dream`, `/quit`, `/debug`, Escape, and display-only shortcuts remain available; `/add-dir` and `/remove-dir` remain blocked.
 
 ## Context Files
 
-ArcMind loads `AGENTS.md` or `CLAUDE.md` at startup from:
+Metis loads `AGENTS.md` or `CLAUDE.md` at startup from:
 
-- `~/.arcmind/agent/AGENTS.md` for global instructions
+- `~/.metis/agent/AGENTS.md` for global instructions
 - parent directories, walking up from the current working directory
 - the current directory
 
@@ -139,24 +139,24 @@ Use context files for project conventions, commands, safety rules, and preferenc
 
 Replace the default system prompt with:
 
-- `.arcmind/SYSTEM.md` for a project
-- `~/.arcmind/agent/SYSTEM.md` globally
+- `.metis/SYSTEM.md` for a project
+- `~/.metis/agent/SYSTEM.md` globally
 
 Append to the default prompt without replacing it with `APPEND_SYSTEM.md` in either location.
 
 ### Project Trust
 
-On interactive startup, arcmind asks before trusting a project folder that contains project-local settings, resources, or project `.agents/skills` and has no saved decision for the folder or a parent folder in `~/.arcmind/agent/trust.json`. Trusting a project allows arcmind to load `.arcmind/settings.json` and `.arcmind` resources, install missing project packages, and execute project extensions.
+On interactive startup, metis asks before trusting a project folder that contains project-local settings, resources, or project `.agents/skills` and has no saved decision for the folder or a parent folder in `~/.metis/agent/trust.json`. Trusting a project allows metis to load `.metis/settings.json` and `.metis` resources, install missing project packages, and execute project extensions.
 
-Before the trust decision, arcmind loads only context files, user/global extensions, and CLI `-e` extensions so they can handle the `project_trust` event. Project-local extensions, project package-managed extensions, and project settings are loaded only after the project is trusted. This split also applies when switching to a session from a different cwd whose trust has not been resolved in the current process.
+Before the trust decision, metis loads only context files, user/global extensions, and CLI `-e` extensions so they can handle the `project_trust` event. Project-local extensions, project package-managed extensions, and project settings are loaded only after the project is trusted. This split also applies when switching to a session from a different cwd whose trust has not been resolved in the current process.
 
 Non-interactive modes (`-p`, `--mode json`, and `--mode rpc`) do not show a trust prompt. Without an applicable saved trust decision, they use `defaultProjectTrust` from global settings: `ask` (default) and `never` ignore those project resources, while `always` trusts them. Pass `--approve`/`-a` or `--no-approve`/`-na` to override project trust for one run.
 
-If no extension or saved decision applies, `defaultProjectTrust` controls the fallback behavior. Set it to `"ask"`, `"always"`, or `"never"` in `~/.arcmind/agent/settings.json`, or change it with `/settings`.
+If no extension or saved decision applies, `defaultProjectTrust` controls the fallback behavior. Set it to `"ask"`, `"always"`, or `"never"` in `~/.metis/agent/settings.json`, or change it with `/settings`.
 
-`arcmind config` and package commands use the same project trust flow, except `arcmind update` never prompts. Pass `--approve` to trust project-local settings for one command or `--no-approve` to ignore them.
+`metis config` and package commands use the same project trust flow, except `metis update` never prompts. Pass `--approve` to trust project-local settings for one command or `--no-approve` to ignore them.
 
-Use `/trust` in interactive mode to save a project trust decision for future sessions, including trust for the immediate parent folder. It writes `~/.arcmind/agent/trust.json` only; the current session is not reloaded, so restart arcmind for changes to take effect.
+Use `/trust` in interactive mode to save a project trust decision for future sessions, including trust for the immediate parent folder. It writes `~/.metis/agent/trust.json` only; the current session is not reloaded, so restart metis for changes to take effect.
 
 
 ## Exporting Sessions
@@ -166,27 +166,27 @@ Use `/export [file]` to write a session to HTML.
 ## CLI Reference
 
 ```bash
-arcmind [options] [@files...] [messages...]
+metis [options] [@files...] [messages...]
 ```
 
 ### Package Commands
 
 ```bash
-arcmind install <source> [-l]     # Install package, -l for project-local
-arcmind remove <source> [-l]      # Remove package
-arcmind uninstall <source> [-l]   # Alias for remove
-arcmind update [source|self|arcmind]   # Update arcmind only, or one package source
-arcmind update --all              # Update arcmind and packages; reconcile pinned git refs
-arcmind update --extensions       # Update packages only; reconcile pinned git refs
-arcmind update --self             # Update arcmind only
-arcmind update --extension <src>  # Update one package
-arcmind list                      # List installed packages
-arcmind config                    # Enable/disable package resources
+metis install <source> [-l]     # Install package, -l for project-local
+metis remove <source> [-l]      # Remove package
+metis uninstall <source> [-l]   # Alias for remove
+metis update [source|self|metis]   # Update metis only, or one package source
+metis update --all              # Update metis and packages; reconcile pinned git refs
+metis update --extensions       # Update packages only; reconcile pinned git refs
+metis update --self             # Update metis only
+metis update --extension <src>  # Update one package
+metis list                      # List installed packages
+metis config                    # Enable/disable package resources
 ```
 
-These commands manage arcmind packages and `arcmind update` can update the arcmind CLI installation. To uninstall arcmind itself, see [Quickstart](quickstart.md#uninstall). `arcmind config` and project package commands accept `--approve`/`--no-approve` to trust or ignore project-local settings for one command. `arcmind update` never prompts for project trust.
+These commands manage metis packages and `metis update` can update the metis CLI installation. To uninstall metis itself, see [Quickstart](quickstart.md#uninstall). `metis config` and project package commands accept `--approve`/`--no-approve` to trust or ignore project-local settings for one command. `metis update` never prompts for project trust.
 
-See [ArcMind Packages](packages.md) for package sources and security notes.
+See [Metis Packages](packages.md) for package sources and security notes.
 
 ### Modes
 
@@ -198,10 +198,10 @@ See [ArcMind Packages](packages.md) for package sources and security notes.
 | `--mode rpc` | RPC mode over stdin/stdout; see [RPC mode](rpc.md) |
 | `--export <in> [out]` | Export a session to HTML |
 
-In print mode, arcmind also reads piped stdin and merges it into the initial prompt:
+In print mode, metis also reads piped stdin and merges it into the initial prompt:
 
 ```bash
-cat README.md | arcmind -p "Summarize this text"
+cat README.md | metis -p "Summarize this text"
 ```
 
 ### Model Options
@@ -239,9 +239,9 @@ cat README.md | arcmind -p "Summarize this text"
 | `--no-builtin-tools`, `-nbt` | Disable built-in tools but keep extension/custom tools enabled |
 | `--no-tools`, `-nt` | Disable all tools |
 
-Built-in tools: `read`, `bash`, `edit`, `write`, `grep`, `find`, `ls`, `web_fetch`, `web_search`, `update_plan`.
+Built-in tools: `read`, `bash`, `edit`, `write`, `grep`, `find`, `ls`, `web_fetch`, `web_search`, `set_tasks`.
 
-`web_fetch` is enabled by default and converts HTTP(S) pages to Markdown. Redirects that change the host or port require another `web_fetch` call so the new network target receives its own permission decision. `update_plan` is enabled by default for primary sessions and is intended only for complex multi-step work. Each plan call replaces the complete plan. Tool allowlists, exclusions, `--no-builtin-tools`, and `--no-tools` apply normally.
+`web_fetch` is enabled by default and converts HTTP(S) pages to Markdown. Redirects that change the host or port require another `web_fetch` call so the new network target receives its own permission decision. `set_tasks` is enabled by default for primary sessions and is intended only for complex multi-step work. Each call replaces the complete visible list with `{ task, completed }` items; multiple items may remain incomplete, and `[]` clears the list. Tool allowlists, exclusions, `--no-builtin-tools`, and `--no-tools` apply normally.
 
 `web_search` is disabled by default. Open **Web search** in `/settings`, choose a provider, and enter its API key in the masked prompt. Project settings cannot enable or switch this global paid-service choice. `/login web-search:<provider>` remains available for compatibility. The model-facing contract is:
 
@@ -254,7 +254,7 @@ type ImageOutput = { type: "images"; results: Array<{ url: string; title?: strin
 
 Search returns metadata and URLs; use `web_fetch` to retrieve a selected page as Markdown. Images are not downloaded, and returned image URLs may expire or reject hotlinking. Tavily's image mode returns images related to its search response rather than a dedicated image-only index, so it generally has no `sourceUrl`.
 
-When either web tool returns more than 50,000 characters, ArcMind immediately saves the full text under the session's `tool-results` directory and keeps a preview plus the file path in active model context. Press Ctrl+O to expand or collapse the visible TUI result.
+When either web tool returns more than 50,000 characters, Metis immediately saves the full text under the session's `tool-results` directory and keeps a preview plus the file path in active model context. Press Ctrl+O to expand or collapse the visible TUI result.
 
 ### Resource Options
 
@@ -273,7 +273,7 @@ When either web tool returns more than 50,000 characters, ArcMind immediately sa
 Combine `--no-*` with explicit flags to load exactly what you need, ignoring settings. Example:
 
 ```bash
-arcmind --no-extensions -e ./my-extension.ts
+metis --no-extensions -e ./my-extension.ts
 ```
 
 ### Other Options
@@ -293,59 +293,59 @@ arcmind --no-extensions -e ./my-extension.ts
 Prefix files with `@` to include them in the message:
 
 ```bash
-arcmind @prompt.md "Answer this"
-arcmind -p @screenshot.png "What's in this image?"
-arcmind @code.ts @test.ts "Review these files"
+metis @prompt.md "Answer this"
+metis -p @screenshot.png "What's in this image?"
+metis @code.ts @test.ts "Review these files"
 ```
 
 ### Examples
 
 ```bash
 # Interactive with initial prompt
-arcmind "List all .ts files in src/"
+metis "List all .ts files in src/"
 
 # Non-interactive
-arcmind -p "Summarize this codebase"
+metis -p "Summarize this codebase"
 
 # Non-interactive with piped stdin
-cat README.md | arcmind -p "Summarize this text"
+cat README.md | metis -p "Summarize this text"
 
 # Named one-shot session
-arcmind --name "release audit" -p "Audit this repository"
+metis --name "release audit" -p "Audit this repository"
 
 # Different model
-arcmind --provider openai --model gpt-4o "Help me refactor"
+metis --provider openai --model gpt-4o "Help me refactor"
 
 # Model with provider prefix
-arcmind --model openai/gpt-4o "Help me refactor"
+metis --model openai/gpt-4o "Help me refactor"
 
 # Model with thinking level shorthand
-arcmind --model sonnet:high "Solve this complex problem"
+metis --model sonnet:high "Solve this complex problem"
 
 # Limit model cycling
-arcmind --models "claude-*,gpt-4o"
+metis --models "claude-*,gpt-4o"
 
 # Read-only mode
-arcmind --tools read,grep,find,ls -p "Review the code"
+metis --tools read,grep,find,ls -p "Review the code"
 
 # Disable one extension or built-in tool while keeping the rest available
-arcmind --exclude-tools ask_question
+metis --exclude-tools ask_question
 ```
 
 ### Environment Variables
 
 | Variable | Description |
 |----------|-------------|
-| `ARCMIND_CODING_AGENT_DIR` | Override config directory; default is `~/.arcmind/agent` |
-| `ARCMIND_CODING_AGENT_SESSION_DIR` | Override session storage directory; overridden by `--session-dir` |
-| `ARCMIND_PACKAGE_DIR` | Override package directory, useful for Nix/Guix store paths |
-| `ARCMIND_OFFLINE` | Disable startup network operations, including package update checks |
-| `ARCMIND_PROVIDER_ATTRIBUTION` | Enable ArcMind attribution headers for supported model providers with `1`/`true`/`yes` |
-| `ARCMIND_CACHE_RETENTION` | Set to `long` for extended prompt cache where supported |
+| `METIS_CODING_AGENT_DIR` | Override config directory; default is `~/.metis/agent` |
+| `METIS_CODING_AGENT_SESSION_DIR` | Override session storage directory; overridden by `--session-dir` |
+| `METIS_PACKAGE_DIR` | Override package directory, useful for Nix/Guix store paths |
+| `METIS_OFFLINE` | Disable startup network operations, including package update checks |
+| `METIS_PROVIDER_ATTRIBUTION` | Enable Metis attribution headers for supported model providers with `1`/`true`/`yes` |
+| `METIS_CACHE_RETENTION` | Set to `long` for extended prompt cache where supported |
 | `VISUAL`, `EDITOR` | Fallback external editor for Ctrl+G when `externalEditor` is unset; defaults to Notepad on Windows and `nano` elsewhere |
 
 ## Design Principles
 
-ArcMind keeps the core small and pushes workflow-specific behavior into extensions, skills, prompt templates, and packages.
+Metis keeps the core small and pushes workflow-specific behavior into extensions, skills, prompt templates, and packages.
 
-It intentionally does not include built-in MCP, a separate plan mode, a manual to-do manager, or background bash. The core `update_plan` tool only tracks execution progress for complex work. Persisted primary Code sessions can select [Ultra](subagents.md) for first-class recoverable subagents. Ask provides one-action approval for model tool calls; Full skips that approval. Approved actions run on the host, so use containers or VMs when you need isolation. See [Permissions](permissions.md).
+It intentionally does not include built-in MCP, a separate plan mode, a manual to-do manager, or background bash. The core `set_tasks` tool only publishes the current visible checklist for complex work. Persisted primary Code sessions can select [Ultra](subagents.md) for first-class recoverable subagents. Ask provides one-action approval for model tool calls; Full skips that approval. Approved actions run on the host, so use containers or VMs when you need isolation. See [Permissions](permissions.md).

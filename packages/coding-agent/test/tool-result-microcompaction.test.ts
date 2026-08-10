@@ -1,7 +1,7 @@
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { AgentMessage } from "@arcmind/agent-core";
+import type { AgentMessage } from "@metis/agent-core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
 	createToolResultMicrocompactor,
@@ -36,7 +36,7 @@ describe("tool-result microcompaction", () => {
 	let outputDir: string;
 
 	beforeEach(() => {
-		root = mkdtempSync(join(tmpdir(), "arcmind-microcompaction-"));
+		root = mkdtempSync(join(tmpdir(), "metis-microcompaction-"));
 		outputDir = join(root, "tool-results");
 	});
 
@@ -102,7 +102,7 @@ describe("tool-result microcompaction", () => {
 		expect(projected.slice(1, 21)).toEqual(messages.slice(1, 21));
 	});
 
-	it.each(["update_plan", "spawn_agent", "mcp_search", "custom_tool"])("never clears %s results", async (toolName) => {
+	it.each(["set_tasks", "spawn_agent", "mcp_search", "custom_tool"])("never clears %s results", async (toolName) => {
 		const compact = createToolResultMicrocompactor({ outputDir, isBuiltinTool: () => true });
 		const messages = [result("old", "x".repeat(100_000), { toolName })];
 		for (let index = 0; index < 5; index++) messages.push(result(`recent-${index}`, "recent"));

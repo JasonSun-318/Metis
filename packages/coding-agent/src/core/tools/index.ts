@@ -89,9 +89,9 @@ export {
 	type WriteToolOptions,
 } from "./write.ts";
 
-import type { AgentTool } from "@arcmind/agent-core";
+import type { AgentTool } from "@metis/agent-core";
 import type { ToolDefinition } from "../extensions/types.ts";
-import { createUpdatePlanToolDefinition } from "../update-plan.ts";
+import { createSetTasksToolDefinition } from "../set-tasks.ts";
 import { type BashToolOptions, createBashTool, createBashToolDefinition } from "./bash.ts";
 import { createEditTool, createEditToolDefinition, type EditToolOptions } from "./edit.ts";
 import { createFindTool, createFindToolDefinition, type FindToolOptions } from "./find.ts";
@@ -115,7 +115,7 @@ export type ToolName =
 	| "ls"
 	| "web_fetch"
 	| "web_search"
-	| "update_plan";
+	| "set_tasks";
 export const allToolNames: Set<ToolName> = new Set([
 	"read",
 	"bash",
@@ -126,7 +126,7 @@ export const allToolNames: Set<ToolName> = new Set([
 	"ls",
 	"web_fetch",
 	"web_search",
-	"update_plan",
+	"set_tasks",
 ]);
 
 export interface ToolsOptions {
@@ -160,8 +160,8 @@ export function createToolDefinition(toolName: ToolName, cwd: string, options?: 
 			return createWebFetchToolDefinition();
 		case "web_search":
 			return createWebSearchToolDefinition(options?.webSearch);
-		case "update_plan":
-			return createUpdatePlanToolDefinition();
+		case "set_tasks":
+			return createSetTasksToolDefinition();
 		default:
 			throw new Error(`Unknown tool name: ${toolName}`);
 	}
@@ -187,8 +187,8 @@ export function createTool(toolName: ToolName, cwd: string, options?: ToolsOptio
 			return createWebFetchTool();
 		case "web_search":
 			return createWebSearchTool(options?.webSearch);
-		case "update_plan":
-			return wrapToolDefinition(createUpdatePlanToolDefinition());
+		case "set_tasks":
+			return wrapToolDefinition(createSetTasksToolDefinition());
 		default:
 			throw new Error(`Unknown tool name: ${toolName}`);
 	}
@@ -223,7 +223,7 @@ export function createAllToolDefinitions(cwd: string, options?: ToolsOptions): R
 		ls: createLsToolDefinition(cwd, options?.ls),
 		web_fetch: createWebFetchToolDefinition(),
 		web_search: createWebSearchToolDefinition(options?.webSearch),
-		update_plan: createUpdatePlanToolDefinition(),
+		set_tasks: createSetTasksToolDefinition(),
 	};
 }
 
@@ -256,6 +256,6 @@ export function createAllTools(cwd: string, options?: ToolsOptions): Record<Tool
 		ls: createLsTool(cwd, options?.ls),
 		web_fetch: createWebFetchTool(),
 		web_search: createWebSearchTool(options?.webSearch),
-		update_plan: wrapToolDefinition(createUpdatePlanToolDefinition()),
+		set_tasks: wrapToolDefinition(createSetTasksToolDefinition()),
 	};
 }

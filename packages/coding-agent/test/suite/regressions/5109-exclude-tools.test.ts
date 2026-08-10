@@ -9,9 +9,9 @@ function toolNames(tools: Array<{ name: string }>): string[] {
 
 describe("regression #5109: exclude tools", () => {
 	const extensionFactories: ExtensionFactory[] = [
-		(arcmind) => {
-			arcmind.on("session_start", () => {
-				arcmind.registerTool({
+		(metis) => {
+			metis.on("session_start", () => {
+				metis.registerTool({
 					name: "ask_question",
 					label: "Ask Question",
 					description: "Ask a question",
@@ -22,7 +22,7 @@ describe("regression #5109: exclude tools", () => {
 						details: {},
 					}),
 				});
-				arcmind.registerTool({
+				metis.registerTool({
 					name: "dynamic_tool",
 					label: "Dynamic Tool",
 					description: "Dynamic test tool",
@@ -55,7 +55,7 @@ describe("regression #5109: exclude tools", () => {
 				"dynamic_tool",
 				"edit",
 				"grep",
-				"update_plan",
+				"set_tasks",
 				"web_fetch",
 				"write",
 			]);

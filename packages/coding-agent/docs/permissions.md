@@ -4,25 +4,25 @@ Permissions belong to a session. Both new Chat and Code sessions default to Ask.
 
 | Mode | Automatic model actions | Actions that ask | Execution |
 |---|---|---|---|
-| **Ask** | Proven safe built-in structured reads inside the primary or an explicitly added Code root, plus safe internal controls | Every outside-root structured read, write/edit, Bash/Git/build/test, network, sensitive read, MCP/Extension/SDK/custom, destructive, elevated, external, or unknown action | After **Allow once**, the exact action runs directly as the current OS user without an ArcMind sandbox |
+| **Ask** | Proven safe built-in structured reads inside the primary or an explicitly added Code root, plus safe internal controls | Every outside-root structured read, write/edit, Bash/Git/build/test, network, sensitive read, MCP/Extension/SDK/custom, destructive, elevated, external, or unknown action | After **Allow once**, the exact action runs directly as the current OS user without an Metis sandbox |
 | **Full** | All model tool actions | None | Runs directly as the current OS user |
 
 The approval UI has two choices: **Allow once** and **Deny**. There is no automatic reviewer and no persistent approval created by either choice.
 
 ## One-action approval
 
-An approval is bound to one tool call, its complete arguments, the session working directory, the effective workspace-root snapshot, the permission mode, and any normalized network target. ArcMind snapshots the arguments before showing the dialog, consumes the approval once, and checks the binding again immediately before execution. A changed argument, path, workspace root, provider target, or Full-to-Ask downgrade invalidates it.
+An approval is bound to one tool call, its complete arguments, the session working directory, the effective workspace-root snapshot, the permission mode, and any normalized network target. Metis snapshots the arguments before showing the dialog, consumes the approval once, and checks the binding again immediately before execution. A changed argument, path, workspace root, provider target, or Full-to-Ask downgrade invalidates it.
 
 The dialog shows the complete Bash command or structured arguments, the affected paths/hosts, the requesting child identity when applicable, and a direct-host warning. It never silently truncates a command. Cancellation, timeout, disconnect, a missing UI, malformed UI output, or an aborted request denies the action without recording a false user decision.
 
-Approval means host execution. It does not add filesystem, process, credential, or network isolation. A command can affect anything available to the user account that started ArcMind, including data outside the session working directory.
+Approval means host execution. It does not add filesystem, process, credential, or network isolation. A command can affect anything available to the user account that started Metis, including data outside the session working directory.
 
 ## What Ask permits automatically
 
 Ask automatically permits only:
 
 - built-in `read`, `grep`, `find`, and `ls` calls inside the primary or an explicitly added Code root whose target can be proven to be an ordinary readable regular file or directory;
-- fixed no-host controls such as `update_plan`, `tool_search`, and `inspect_agents`.
+- fixed no-host controls such as `set_tasks`, `tool_search`, and `inspect_agents`.
 
 Structured reads require an existing, canonical target. A target outside every effective root asks even when it is otherwise ordinary. Traversal reads such as `grep`, `find`, and `ls` ask when the target intersects a sensitive location. Direct reads of known credential/configuration locations and every effective root's `.env*` files also ask. Device nodes, sockets, FIFOs, broken links, missing paths, unreadable objects, and targets whose type cannot be proven are not automatic.
 
@@ -32,17 +32,17 @@ Bash is never inferred to be safe from command text: even `pwd`, Git reads, buil
 
 `!command` and `!!command` are explicit user terminal actions, so they run directly in both modes. `!` adds the result to model context; `!!` does not. Extensions may still intercept the user-Bash event.
 
-ArcMind's own runtime bookkeeping—session journals, settings, caches, managed workspaces, tool-output storage, and similar internal writes—is not a model tool call. Provider API traffic, authentication, model discovery, package installation explicitly initiated by the user, and installed integration initialization likewise do not use the action dialog.
+Metis's own runtime bookkeeping—session journals, settings, caches, managed workspaces, tool-output storage, and similar internal writes—is not a model tool call. Provider API traffic, authentication, model discovery, package installation explicitly initiated by the user, and installed integration initialization likewise do not use the action dialog.
 
 Skills, prompts, context files, and model text receive no authority by themselves. Any model-facing tool call they cause still follows Ask or Full.
 
 ## Installed code and external isolation
 
-Installing or configuring an Extension, SDK integration, or MCP server means trusting its code and runtime. Load hooks and in-process code run with ArcMind's OS authority. Their model-facing tools still ask in Ask, but ArcMind cannot isolate what trusted integration code does internally.
+Installing or configuring an Extension, SDK integration, or MCP server means trusting its code and runtime. Load hooks and in-process code run with Metis's OS authority. Their model-facing tools still ask in Ask, but Metis cannot isolate what trusted integration code does internally.
 
 Project trust controls whether project-provided configuration and code are loaded; it is separate from action permissions.
 
-For hostile code, unattended work, or a real containment boundary, run the whole ArcMind process in a container, VM, micro-VM, remote sandbox, or separate OS account with limited mounts, credentials, and network access. See [Security](security.md) and [Containerization](containerization.md).
+For hostile code, unattended work, or a real containment boundary, run the whole Metis process in a container, VM, micro-VM, remote sandbox, or separate OS account with limited mounts, credentials, and network access. See [Security](security.md) and [Containerization](containerization.md).
 
 ## Child-agent permissions
 
@@ -52,4 +52,4 @@ Child approval requests use the same queue and dialog, labeled with the child na
 
 ## Native search helpers
 
-The npm package includes verified `rg` 15.2.0 and `fd` 10.4.2 executables for macOS and Windows on arm64 and x64. Upstream does not publish `fd` 10.4.2 for Intel macOS, so that pair uses `fd` 10.3.0. Release staging verifies pinned archive hashes and the installed executable manifest. Linux uses `rg` and `fd`/`fdfind` from `PATH`. ArcMind does not download or silently update these helpers at runtime.
+The npm package includes verified `rg` 15.2.0 and `fd` 10.4.2 executables for macOS and Windows on arm64 and x64. Upstream does not publish `fd` 10.4.2 for Intel macOS, so that pair uses `fd` 10.3.0. Release staging verifies pinned archive hashes and the installed executable manifest. Linux uses `rg` and `fd`/`fdfind` from `PATH`. Metis does not download or silently update these helpers at runtime.

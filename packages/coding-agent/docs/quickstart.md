@@ -1,68 +1,68 @@
 # Quickstart
 
-This page gets you from install to a useful first arcmind session.
+This page gets you from install to a useful first metis session.
 
 ## Install
 
-ArcMind is distributed as an npm package:
+Metis is distributed as an npm package:
 
 ```bash
-npm install -g --ignore-scripts @arcmind/coding-agent
+npm install -g --ignore-scripts @metis/coding-agent
 ```
 
-`--ignore-scripts` disables dependency lifecycle scripts during install. ArcMind does not require install scripts for normal npm installs.
+`--ignore-scripts` disables dependency lifecycle scripts during install. Metis does not require install scripts for normal npm installs.
 
 ### Uninstall
 
-Use the package manager that installed arcmind. The curl installer uses npm globally, so curl and npm installs are removed with npm:
+Use the package manager that installed metis. The curl installer uses npm globally, so curl and npm installs are removed with npm:
 
 ```bash
 # curl installer or npm install -g
-npm uninstall -g @arcmind/coding-agent
+npm uninstall -g @metis/coding-agent
 
 # pnpm
-pnpm remove -g @arcmind/coding-agent
+pnpm remove -g @metis/coding-agent
 
 # Yarn
-yarn global remove @arcmind/coding-agent
+yarn global remove @metis/coding-agent
 
 # Bun
-bun uninstall -g @arcmind/coding-agent
+bun uninstall -g @metis/coding-agent
 ```
 
-Uninstalling arcmind leaves settings, credentials, sessions, and installed arcmind packages in `~/.arcmind/agent/`.
+Uninstalling metis leaves settings, credentials, sessions, and installed metis packages in `~/.metis/agent/`.
 
-Then start arcmind in the directory or workspace you want it to work on:
+Then start metis in the directory or workspace you want it to work on:
 
 ```bash
 cd /path/to/project
-arcmind
+metis
 ```
 
 ## Authenticate
 
-ArcMind uses API keys supplied through environment variables or the auth file.
+Metis uses API keys supplied through environment variables or the auth file.
 
 ### Option 1: interactive API-key setup
 
-Start arcmind and run:
+Start metis and run:
 
 ```text
 /login
 ```
 
-Then select a provider and enter its API key. ArcMind stores it in `~/.arcmind/agent/auth.json`.
+Then select a provider and enter its API key. Metis stores it in `~/.metis/agent/auth.json`.
 
 ### Option 2: environment variable
 
-Set an API key before launching arcmind:
+Set an API key before launching metis:
 
 ```bash
 export ANTHROPIC_API_KEY=sk-ant-...
-arcmind
+metis
 ```
 
-You can also run `/login` and select an API-key provider to store the key in `~/.arcmind/agent/auth.json`.
+You can also run `/login` and select an API-key provider to store the key in `~/.metis/agent/auth.json`.
 
 See [Providers](providers.md) for all supported providers, environment variables, and cloud-provider setup.
 
@@ -74,7 +74,7 @@ Only one search provider is selected at a time, and the model receives `web_sear
 
 ## First session
 
-Once arcmind starts, type a request and press Enter:
+Once metis starts, type a request and press Enter:
 
 ```text
 Review this workspace and summarize its purpose, contents, and important next steps.
@@ -88,13 +88,13 @@ By default, a primary session gives the model seven tools:
 - `edit` - patch files
 - `bash` - run shell commands
 - `web_fetch` - fetch an HTTP(S) URL as Markdown
-- `update_plan` - track progress on complex multi-step work
+- `set_tasks` - show the current checklist for complex multi-step work
 
-Additional built-in read-only tools (`find`, `ls`, and opt-in `web_search`) are available through tool options and settings. ArcMind runs in your current working directory and can modify files there. Use git or another checkpointing workflow if you want easy rollback.
+Additional built-in read-only tools (`find`, `ls`, and opt-in `web_search`) are available through tool options and settings. Metis runs in your current working directory and can modify files there. Use git or another checkpointing workflow if you want easy rollback.
 
-## Give arcmind project instructions
+## Give metis project instructions
 
-ArcMind loads context files at startup. Add an `AGENTS.md` file to tell it how to work in a project:
+Metis loads context files at startup. Add an `AGENTS.md` file to tell it how to work in a project:
 
 ```markdown
 # Project Instructions
@@ -104,12 +104,12 @@ ArcMind loads context files at startup. Add an `AGENTS.md` file to tell it how t
 - Keep responses concise.
 ```
 
-ArcMind loads:
+Metis loads:
 
-- `~/.arcmind/agent/AGENTS.md` for global instructions
+- `~/.metis/agent/AGENTS.md` for global instructions
 - `AGENTS.md` or `CLAUDE.md` from parent directories and the current directory
 
-Restart arcmind, or run `/reload`, after changing context files.
+Restart metis, or run `/reload`, after changing context files.
 
 ## Common things to try
 
@@ -118,8 +118,8 @@ Restart arcmind, or run `/reload`, after changing context files.
 Type `@` in the editor to fuzzy-search files, or pass files on the command line:
 
 ```bash
-arcmind @README.md "Summarize this"
-arcmind @src/app.ts @src/app.test.ts "Review these together"
+metis @README.md "Summarize this"
+metis @src/app.ts @src/app.test.ts "Review these together"
 ```
 
 Images or text can be pasted with Ctrl+V (Alt+V on Windows); images can also be dragged into supported terminals.
@@ -143,32 +143,32 @@ Use `/model` or Ctrl+L to choose a model. Use Shift+Tab to cycle thinking level.
 Sessions are saved automatically:
 
 ```bash
-arcmind -c                  # Continue most recent session
-arcmind -r                  # Browse previous sessions
-arcmind --name "my task"    # Set session display name at startup
-arcmind --session <path|id> # Open a specific session
+metis -c                  # Continue most recent session
+metis -r                  # Browse previous sessions
+metis --name "my task"    # Set session display name at startup
+metis --session <path|id> # Open a specific session
 ```
 
-Inside arcmind, use `/resume`, `/new`, `/tree`, `/fork`, and `/clone` to manage sessions.
+Inside metis, use `/resume`, `/new`, `/tree`, `/fork`, and `/clone` to manage sessions.
 
 ### Non-interactive mode
 
 For one-shot prompts:
 
 ```bash
-arcmind -p "Summarize this codebase"
-cat README.md | arcmind -p "Summarize this text"
-arcmind -p @screenshot.png "What's in this image?"
+metis -p "Summarize this codebase"
+cat README.md | metis -p "Summarize this text"
+metis -p @screenshot.png "What's in this image?"
 ```
 
 Use `--mode json` for JSON event output or `--mode rpc` for process integration.
 
 ## Next steps
 
-- [Using ArcMind](usage.md) - interactive mode, slash commands, sessions, context files, and CLI reference.
+- [Using Metis](usage.md) - interactive mode, slash commands, sessions, context files, and CLI reference.
 - [Providers](providers.md) - authentication and model setup.
 - [Settings](settings.md) - global and project configuration.
 - [Keybindings](keybindings.md) - shortcuts and customization.
-- [ArcMind Packages](packages.md) - install shared extensions, skills, prompts, and themes.
+- [Metis Packages](packages.md) - install shared extensions, skills, prompts, and themes.
 
 Platform notes: [Windows](windows.md), [Termux](termux.md), [tmux](tmux.md), [Terminal setup](terminal-setup.md), [Shell aliases](shell-aliases.md).

@@ -38,17 +38,12 @@ function msg(id: string, parentId: string | null, role: "user" | "assistant", te
 	};
 }
 
-function planResult(
-	id: string,
-	parentId: string | null,
-	state: "active" | "completed" | "cleared",
-	lines: string[] = [],
-	isError = false,
-): SessionMessageEntry {
-	const text =
-		state === "cleared"
-			? '<latest_plan state="cleared" />'
-			: [`<latest_plan state="${state}">`, ...lines, "</latest_plan>"].join("\n");
+function taskResult(id: string, parentId: string | null, lines: string[], isError = false): SessionMessageEntry {
+	const text = lines.length === 0 ? "<task_list />" : ["<task_list>", ...lines, "</task_list>"].join("\n");
+	const tasks = lines.map((line) => ({
+		task: line.replace(/^- \[(?:x| )\] /u, ""),
+		completed: line.startsWith("- [x] "),
+	}));
 	return {
 		type: "message",
 		id,
@@ -57,8 +52,9 @@ function planResult(
 		message: {
 			role: "toolResult",
 			toolCallId: `call-${id}`,
-			toolName: "update_plan",
+			toolName: "set_tasks",
 			content: [{ type: "text", text }],
+			details: { tasks },
 			isError,
 			timestamp: 1,
 		},
@@ -234,10 +230,10 @@ describe("buildSessionContext", () => {
 			expect(ctx.messages.map((message) => message.role)).toEqual(["compactionSummary", "user"]);
 		});
 
-		it("restores a compacted active plan including completed steps", () => {
+		it("restores compacted tasks including completed items", () => {
 			const entries: SessionEntry[] = [
 				msg("1", null, "user", "start"),
-				planResult("2", "1", "active", ["1. [completed] Inspect", "2. [in_progress] Implement"]),
+				taskResult("2", "1", ["- [x] Inspect", "- [ ] Implement"]),
 				msg("3", "2", "assistant", "working"),
 				compaction("4", "3", "summary", "3"),
 			];
@@ -246,68 +242,59 @@ describe("buildSessionContext", () => {
 			expect(context.messages.map(({ role }) => role)).toEqual(["compactionSummary", "custom", "assistant"]);
 			expect(context.messages[1]).toMatchObject({
 				role: "custom",
-				customType: "latest_plan",
+				customType: "latest_tasks",
 				display: false,
 				content: expect.arrayContaining([
-					expect.objectContaining({ text: expect.stringContaining("1. [completed] Inspect") }),
+					expect.objectContaining({ text: expect.stringContaining("- [x] Inspect") }),
 				]),
 			});
 		});
 
-		it("restores a compacted completed plan", () => {
+		it("does not restore a compacted completed task list", () => {
 			const entries: SessionEntry[] = [
 				msg("1", null, "user", "start"),
-				planResult("2", "1", "completed", ["1. [completed] Inspect", "2. [completed] Implement"]),
+				taskResult("2", "1", ["- [x] Inspect", "- [x] Implement"]),
 				msg("3", "2", "assistant", "done"),
 				compaction("4", "3", "summary", "3"),
 			];
 
 			const recovered = buildSessionContext(entries).messages.find((message) => message.role === "custom");
-			expect(recovered).toMatchObject({
-				customType: "latest_plan",
-				display: false,
-				content: expect.arrayContaining([
-					expect.objectContaining({ text: expect.stringContaining('state="completed"') }),
-				]),
-			});
+			expect(recovered).toBeUndefined();
 		});
 
-		it("restores an explicit clear instead of an older plan", () => {
+		it("does not fall back to older incomplete tasks after completion", () => {
 			const entries: SessionEntry[] = [
 				msg("1", null, "user", "start"),
-				planResult("2", "1", "active", ["1. [in_progress] Implement"]),
-				planResult("3", "2", "cleared"),
-				msg("4", "3", "assistant", "cancelled"),
+				taskResult("2", "1", ["- [ ] Implement"]),
+				taskResult("3", "2", ["- [x] Implement"]),
+				msg("4", "3", "assistant", "done"),
 				compaction("5", "4", "summary", "4"),
 			];
 
 			const recovered = buildSessionContext(entries).messages.find((message) => message.role === "custom");
-			expect(recovered).toMatchObject({
-				customType: "latest_plan",
-				content: [{ type: "text", text: '<latest_plan state="cleared" />' }],
-			});
+			expect(recovered).toBeUndefined();
 		});
 
-		it("does not duplicate a plan result already in kept context", () => {
+		it("does not duplicate a task result already in kept context", () => {
 			const entries: SessionEntry[] = [
 				msg("1", null, "user", "start"),
 				msg("2", "1", "assistant", "working"),
 				compaction("3", "2", "summary", "2"),
-				planResult("4", "3", "active", ["1. [in_progress] Implement"]),
+				taskResult("4", "3", ["- [ ] Implement"]),
 			];
 
 			const messages = buildSessionContext(entries).messages;
 			expect(messages.filter((message) => message.role === "custom")).toEqual([]);
 			expect(
-				messages.filter((message) => message.role === "toolResult" && message.toolName === "update_plan"),
+				messages.filter((message) => message.role === "toolResult" && message.toolName === "set_tasks"),
 			).toHaveLength(1);
 		});
 
-		it("ignores failed updates and restores the previous successful plan", () => {
+		it("ignores failed updates and restores the previous successful task snapshot", () => {
 			const entries: SessionEntry[] = [
 				msg("1", null, "user", "start"),
-				planResult("2", "1", "active", ["1. [in_progress] Implement"]),
-				planResult("3", "2", "active", ["invalid"], true),
+				taskResult("2", "1", ["- [ ] Implement"]),
+				taskResult("3", "2", ["invalid"], true),
 				msg("4", "3", "assistant", "retrying"),
 				compaction("5", "4", "summary", "4"),
 			];
@@ -315,17 +302,17 @@ describe("buildSessionContext", () => {
 			const recovered = buildSessionContext(entries).messages.find((message) => message.role === "custom");
 			expect(recovered).toMatchObject({
 				content: expect.arrayContaining([
-					expect.objectContaining({ text: expect.stringContaining("1. [in_progress] Implement") }),
+					expect.objectContaining({ text: expect.stringContaining("- [ ] Implement") }),
 				]),
 			});
 		});
 	});
 
 	describe("with branches", () => {
-		it("restores plan state from the selected branch only", () => {
+		it("restores task state from the selected branch only", () => {
 			const entries: SessionEntry[] = [
 				msg("1", null, "user", "start"),
-				planResult("2", "1", "active", ["1. [in_progress] Branch A"]),
+				taskResult("2", "1", ["- [ ] Branch A"]),
 				msg("3", "2", "assistant", "working"),
 				compaction("4", "3", "summary", "3"),
 				msg("5", "1", "user", "branch B"),

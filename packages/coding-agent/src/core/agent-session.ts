@@ -30,8 +30,8 @@ import type {
 	BeforeToolExecuteContext,
 	PrepareNextTurnContext,
 	ThinkingLevel,
-} from "@arcmind/agent-core";
-import type { AssistantMessage, ImageContent, Message, Model, TextContent } from "@arcmind/ai/compat";
+} from "@metis/agent-core";
+import type { AssistantMessage, ImageContent, Message, Model, TextContent } from "@metis/ai/compat";
 import {
 	clampThinkingLevel,
 	cleanupSessionResources,
@@ -40,7 +40,7 @@ import {
 	isRetryableAssistantError,
 	modelsAreEqual,
 	streamSimple,
-} from "@arcmind/ai/compat";
+} from "@metis/ai/compat";
 import { getThemeByName, theme } from "../modes/interactive/theme/theme.ts";
 import { stripFrontmatter } from "../utils/frontmatter.ts";
 import { isPathInside, resolvePath } from "../utils/paths.ts";
@@ -235,7 +235,7 @@ export interface AgentSessionConfig {
 	sessionManager: SessionManager;
 	settingsManager: SettingsManager;
 	cwd: string;
-	/** ArcMind agent directory used for global and project memory. */
+	/** Metis agent directory used for global and project memory. */
 	agentDir?: string;
 	/** Models to cycle through with Ctrl+P (from --models flag) */
 	scopedModels?: Array<{ model: Model<any>; thinkingLevel?: ThinkingSelection }>;
@@ -247,7 +247,7 @@ export interface AgentSessionConfig {
 	modelRegistry: ModelRegistry;
 	/** MCP manager. A successfully constructed session owns and disposes it. */
 	mcpManager?: McpManager;
-	/** Initial active built-in tool names. Primary default: [read, grep, bash, edit, write, web_fetch, update_plan] */
+	/** Initial active built-in tool names. Primary default: [read, grep, bash, edit, write, web_fetch, set_tasks] */
 	initialActiveToolNames?: string[];
 	/** Whether settings may activate default built-ins omitted by noTools. Default: true. */
 	defaultBuiltinToolsEnabled?: boolean;
@@ -566,7 +566,7 @@ export class AgentSession {
 		const persistedToolOutputDir = this.sessionManager.getToolOutputDir();
 		this._ephemeralToolOutputDir = persistedToolOutputDir
 			? undefined
-			: join(tmpdir(), "arcmind-tool-results", this.sessionManager.getSessionId());
+			: join(tmpdir(), "metis-tool-results", this.sessionManager.getSessionId());
 		this._toolOutputDir = persistedToolOutputDir ?? this._ephemeralToolOutputDir!;
 		this.settingsManager = config.settingsManager;
 		this._scopedModels = config.scopedModels ?? [];
@@ -646,12 +646,13 @@ export class AgentSession {
 	private _queuePermissionApproval(
 		request: Parameters<RequestPermissionApproval>[0],
 	): ReturnType<RequestPermissionApproval> {
+		const approval = request.cwd === undefined ? { ...request, cwd: this._cwd } : request;
 		const pending = this._permissionApprovalTail.then(async () => {
-			if (request.signal?.aborted) throw new Error("Approval was aborted while queued");
+			if (approval.signal?.aborted) throw new Error("Approval was aborted while queued");
 			const handler = this._requestPermissionApproval;
 			if (!handler) throw new Error("No interactive session owner is available");
-			const decision = await handler(request);
-			if (request.signal?.aborted) throw new Error("Approval was aborted before completion");
+			const decision = await handler(approval);
+			if (approval.signal?.aborted) throw new Error("Approval was aborted before completion");
 			return decision;
 		});
 		this._permissionApprovalTail = pending.then(
@@ -1918,7 +1919,7 @@ export class AgentSession {
 				}
 
 				this._extensionRunner.invalidate(
-					"This extension ctx is stale after session replacement or reload. Do not use a captured arcmind or command ctx after ctx.newSession(), ctx.fork(), ctx.switchSession(), or ctx.reload(). For newSession, fork, and switchSession, move post-replacement work into withSession and use the ctx passed to withSession. For reload, do not use the old ctx after await ctx.reload().",
+					"This extension ctx is stale after session replacement or reload. Do not use a captured metis or command ctx after ctx.newSession(), ctx.fork(), ctx.switchSession(), or ctx.reload(). For newSession, fork, and switchSession, move post-replacement work into withSession and use the ctx passed to withSession. For reload, do not use the old ctx after await ctx.reload().",
 				);
 				this._disconnectFromAgent();
 				this._eventListeners = [];
@@ -2524,7 +2525,7 @@ export class AgentSession {
 
 	/**
 	 * Send a prompt to the agent.
-	 * - Handles extension commands (registered via arcmind.registerCommand) immediately, even during streaming
+	 * - Handles extension commands (registered via metis.registerCommand) immediately, even during streaming
 	 * - Expands file-based prompt templates by default
 	 * - During streaming, queues via steer() or followUp() based on streamingBehavior option
 	 * - Validates model and API key before sending (when not streaming)
@@ -2547,7 +2548,7 @@ export class AgentSession {
 			}
 
 			// Handle extension commands first (execute immediately, even during streaming)
-			// Extension commands manage their own LLM interaction via arcmind.sendMessage()
+			// Extension commands manage their own LLM interaction via metis.sendMessage()
 			if (expandPromptTemplates && text.startsWith("/")) {
 				const handled = await this._tryExecuteExtensionCommand(text);
 				if (handled) {
@@ -4264,7 +4265,7 @@ export class AgentSession {
 						...(!this._unattendedExecution && this._agentDir
 							? {
 									spawnHook: (context) => {
-										if (!this._activeWorkDir && context.command.includes("ARCMIND_WORK_DIR")) {
+										if (!this._activeWorkDir && context.command.includes("METIS_WORK_DIR")) {
 											this._activeWorkDir = createSessionWorkDir(
 												this._agentDir!,
 												this.sessionManager.getSessionId(),
@@ -4273,17 +4274,17 @@ export class AgentSession {
 										return {
 											...context,
 											command: this._activeWorkDir
-												? `readonly ARCMIND_WORK_DIR\n${context.command}`
+												? `readonly METIS_WORK_DIR\n${context.command}`
 												: context.command,
 											env: {
 												...context.env,
-												ARCMIND_ATTACHMENTS_DIR: getSessionAttachmentDir(
+												METIS_ATTACHMENTS_DIR: getSessionAttachmentDir(
 													this._agentDir!,
 													this.sessionManager.getSessionId(),
 												),
 												...(this._activeWorkDir
 													? {
-															ARCMIND_WORK_DIR: this._activeWorkDir,
+															METIS_WORK_DIR: this._activeWorkDir,
 															TMPDIR: this._activeWorkDir,
 															TMP: this._activeWorkDir,
 															TEMP: this._activeWorkDir,
@@ -4340,7 +4341,7 @@ export class AgentSession {
 					...(this.settingsManager.getWebSearchSettings().enabled && this._canActivateWebSearch()
 						? ["web_search"]
 						: []),
-					...(this.sessionManager.getHeader()?.subagent ? [] : ["update_plan"]),
+					...(this.sessionManager.getHeader()?.subagent ? [] : ["set_tasks"]),
 				];
 		const baseActiveToolNames = options.activeToolNames ?? defaultActiveToolNames;
 		const globallyEnabledToolNames = this.settingsManager.getWebSearchSettings().enabled

@@ -1,15 +1,15 @@
 # Extension Examples
 
-Example extensions for arcmind-coding-agent.
+Example extensions for metis-coding-agent.
 
 ## Usage
 
 ```bash
 # Load an extension with --extension flag
-arcmind --extension examples/extensions/permission-gate.ts
+metis --extension examples/extensions/permission-gate.ts
 
 # Or copy to extensions directory for auto-discovery
-cp permission-gate.ts ~/.arcmind/agent/extensions/
+cp permission-gate.ts ~/.metis/agent/extensions/
 ```
 
 ## Examples
@@ -29,7 +29,7 @@ cp permission-gate.ts ~/.arcmind/agent/extensions/
 
 | Extension | Description |
 |-----------|-------------|
-| `todo.ts` | Independent Todo manager with `/todos`; it does not share state with built-in `update_plan` |
+| `todo.ts` | Independent Todo manager with `/todos`; it does not share state with built-in `set_tasks` |
 | `hello.ts` | Minimal custom tool example |
 | `question.ts` | Demonstrates `ctx.ui.select()` for asking the user questions with custom UI |
 | `questionnaire.ts` | Multi-question input with tab bar navigation between questions |
@@ -47,7 +47,7 @@ cp permission-gate.ts ~/.arcmind/agent/extensions/
 | Extension | Description |
 |-----------|-------------|
 | `preset.ts` | Named presets for model, thinking level, tools, and instructions via `--preset` flag and `/preset` command |
-| `plan-mode/` | Independent read-only/review-first Plan Mode; built-in `update_plan` only tracks execution progress |
+| `plan-mode/` | Independent read-only/review-first Plan Mode; built-in `set_tasks` only publishes the visible execution checklist |
 | `tools.ts` | Interactive `/tools` command to enable/disable tools with session persistence |
 | `handoff.ts` | Transfer context to a new focused session via `/handoff <goal>` |
 | `qna.ts` | Extracts questions from last response into editor via `ctx.ui.setEditorText()` |
@@ -59,7 +59,7 @@ cp permission-gate.ts ~/.arcmind/agent/extensions/
 | `model-status.ts` | Shows model changes in status bar via `model_select` hook |
 | `snake.ts` | Snake game with custom UI, keyboard handling, and session persistence |
 | `tic-tac-toe.ts` | Tic-tac-toe vs the agent with `executionMode: "sequential"` tools to prevent race conditions on shared cursor state |
-| `send-user-message.ts` | Demonstrates `arcmind.sendUserMessage()` for sending user messages from extensions |
+| `send-user-message.ts` | Demonstrates `metis.sendUserMessage()` for sending user messages from extensions |
 | `timed-confirm.ts` | Demonstrates AbortSignal for auto-dismissing `ctx.ui.confirm()` and `ctx.ui.select()` dialogs |
 | `rpc-demo.ts` | Exercises all RPC-supported extension UI methods; pair with [`examples/rpc-extension-ui.ts`](../rpc-extension-ui.ts) |
 | `modal-editor.ts` | Custom vim-like modal editor via `ctx.ui.setEditorComponent()` |
@@ -98,7 +98,7 @@ cp permission-gate.ts ~/.arcmind/agent/extensions/
 
 | Extension | Description |
 |-----------|-------------|
-| `mac-system-theme.ts` | Syncs arcmind theme with macOS dark/light mode |
+| `mac-system-theme.ts` | Syncs metis theme with macOS dark/light mode |
 
 ### Resources
 
@@ -112,7 +112,7 @@ cp permission-gate.ts ~/.arcmind/agent/extensions/
 |-----------|-------------|
 | `message-renderer.ts` | Custom message rendering with colors and expandable details via `registerMessageRenderer` |
 | `entry-renderer.ts` | TUI-only session entry rendering via `appendEntry` and `registerEntryRenderer` |
-| `event-bus.ts` | Inter-extension communication via `arcmind.events` |
+| `event-bus.ts` | Inter-extension communication via `metis.events` |
 
 ### Session Metadata
 
@@ -126,7 +126,7 @@ cp permission-gate.ts ~/.arcmind/agent/extensions/
 | Extension | Description |
 |-----------|-------------|
 | `custom-provider-anthropic/` | Custom Anthropic provider with OAuth support and custom streaming implementation |
-| `custom-provider-gitlab-duo/` | GitLab Duo provider using arcmind-ai's built-in Anthropic/OpenAI streaming via proxy |
+| `custom-provider-gitlab-duo/` | GitLab Duo provider using metis-ai's built-in Anthropic/OpenAI streaming via proxy |
 
 ### External Dependencies
 
@@ -140,12 +140,12 @@ cp permission-gate.ts ~/.arcmind/agent/extensions/
 See [docs/extensions.md](../../docs/extensions.md) for full documentation.
 
 ```typescript
-import type { ExtensionAPI } from "@arcmind/coding-agent";
+import type { ExtensionAPI } from "@metis/coding-agent";
 import { Type } from "typebox";
 
-export default function (arcmind: ExtensionAPI) {
+export default function (metis: ExtensionAPI) {
   // Subscribe to lifecycle events
-  arcmind.on("tool_call", async (event, ctx) => {
+  metis.on("tool_call", async (event, ctx) => {
     if (event.toolName === "bash" && event.input.command?.includes("rm -rf")) {
       const ok = await ctx.ui.confirm("Dangerous!", "Allow rm -rf?");
       if (!ok) return { block: true, reason: "Blocked by user" };
@@ -153,7 +153,7 @@ export default function (arcmind: ExtensionAPI) {
   });
 
   // Register custom tools
-  arcmind.registerTool({
+  metis.registerTool({
     name: "greet",
     label: "Greeting",
     description: "Generate a greeting",
@@ -169,7 +169,7 @@ export default function (arcmind: ExtensionAPI) {
   });
 
   // Register commands
-  arcmind.registerCommand("hello", {
+  metis.registerCommand("hello", {
     description: "Say hello",
     handler: async (args, ctx) => {
       ctx.ui.notify("Hello!", "info");
@@ -182,7 +182,7 @@ export default function (arcmind: ExtensionAPI) {
 
 **Use StringEnum for string parameters** (required for Google API compatibility):
 ```typescript
-import { StringEnum } from "@arcmind/ai";
+import { StringEnum } from "@metis/ai";
 
 // Good
 action: StringEnum(["list", "add"] as const)
@@ -200,7 +200,7 @@ return {
 };
 
 // Reconstruct on session events
-arcmind.on("session_start", async (_event, ctx) => {
+metis.on("session_start", async (_event, ctx) => {
   for (const entry of ctx.sessionManager.getBranch()) {
     if (entry.type === "message" && entry.message.toolName === "my_tool") {
       const details = entry.message.details;

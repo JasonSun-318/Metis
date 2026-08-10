@@ -51,6 +51,7 @@ export interface PermissionApprovalRequest {
 	readonly action: PermissionAction;
 	readonly args: unknown;
 	readonly reason: string;
+	readonly cwd?: string;
 	readonly actor?: PermissionActor;
 	readonly signal?: AbortSignal;
 }
@@ -105,7 +106,7 @@ export interface PermissionAuthorizeInput {
 
 const MAX_PERMISSION_APPROVAL_UTF8_BYTES = 48 * 1024;
 const DIRECT_HOST_WARNING =
-	"ArcMind does not sandbox this action. Built-in tools run as your current OS user; installed integrations run with the authority you configured.";
+	"Metis does not sandbox this action. Built-in tools run as your current OS user; installed integrations run with the authority you configured.";
 const BASH_HOST_EFFECT_WARNING =
 	"Runs directly on your computer without a sandbox. It may read or change files, start processes, or access the network.";
 const IRREVERSIBLE_WARNING =
@@ -204,6 +205,7 @@ export function getSensitiveFilesystemPaths(
 		join(home, ".mozilla", "firefox"),
 		join(home, ".netrc"),
 		join(home, ".npmrc"),
+		join(home, ".metis", "agent", "auth.json"),
 		join(home, ".arcmind", "agent", "auth.json"),
 		...workspaceEnvironmentFiles,
 	];
@@ -363,7 +365,7 @@ export function classifyAction(input: ClassifyActionInput): PermissionAction {
 		if (input.mcpAnnotations?.destructiveHint) risks.push("destructive", "external-side-effect");
 		return action(input, risks);
 	}
-	if (["update_plan", "tool_search", "inspect_agents"].includes(input.toolName)) {
+	if (["set_tasks", "ask_user", "tool_search", "inspect_agents"].includes(input.toolName)) {
 		return action(input, ["ordinary-read"]);
 	}
 	const args = record(input.args);

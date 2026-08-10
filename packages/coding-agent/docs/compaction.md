@@ -1,29 +1,29 @@
 # Compaction & Branch Summarization
 
-LLMs have limited context windows. When conversations grow too long, arcmind uses compaction to summarize older content while preserving recent work. This page covers both auto-compaction and branch summarization.
+LLMs have limited context windows. When conversations grow too long, metis uses compaction to summarize older content while preserving recent work. This page covers both auto-compaction and branch summarization.
 
-**Source files** ([arcmind](https://github.com/arcmind/arcmind)):
-- [`packages/coding-agent/src/core/compaction/compaction.ts`](https://github.com/arcmind/arcmind/blob/main/packages/coding-agent/src/core/compaction/compaction.ts) - Auto-compaction logic
-- [`packages/coding-agent/src/core/compaction/branch-summarization.ts`](https://github.com/arcmind/arcmind/blob/main/packages/coding-agent/src/core/compaction/branch-summarization.ts) - Branch summarization
-- [`packages/coding-agent/src/core/compaction/utils.ts`](https://github.com/arcmind/arcmind/blob/main/packages/coding-agent/src/core/compaction/utils.ts) - Shared utilities (file tracking, serialization)
-- [`packages/coding-agent/src/core/session-manager.ts`](https://github.com/arcmind/arcmind/blob/main/packages/coding-agent/src/core/session-manager.ts) - Entry types (`CompactionEntry`, `BranchSummaryEntry`)
-- [`packages/coding-agent/src/core/extensions/types.ts`](https://github.com/arcmind/arcmind/blob/main/packages/coding-agent/src/core/extensions/types.ts) - Extension event types
+**Source files** ([metis](https://github.com/metis/metis)):
+- [`packages/coding-agent/src/core/compaction/compaction.ts`](https://github.com/metis/metis/blob/main/packages/coding-agent/src/core/compaction/compaction.ts) - Auto-compaction logic
+- [`packages/coding-agent/src/core/compaction/branch-summarization.ts`](https://github.com/metis/metis/blob/main/packages/coding-agent/src/core/compaction/branch-summarization.ts) - Branch summarization
+- [`packages/coding-agent/src/core/compaction/utils.ts`](https://github.com/metis/metis/blob/main/packages/coding-agent/src/core/compaction/utils.ts) - Shared utilities (file tracking, serialization)
+- [`packages/coding-agent/src/core/session-manager.ts`](https://github.com/metis/metis/blob/main/packages/coding-agent/src/core/session-manager.ts) - Entry types (`CompactionEntry`, `BranchSummaryEntry`)
+- [`packages/coding-agent/src/core/extensions/types.ts`](https://github.com/metis/metis/blob/main/packages/coding-agent/src/core/extensions/types.ts) - Extension event types
 
-For TypeScript definitions in your project, inspect `node_modules/@arcmind/coding-agent/dist/`.
+For TypeScript definitions in your project, inspect `node_modules/@metis/coding-agent/dist/`.
 
 ## Tool-result microcompaction
 
-Immediately before each main-model provider request, ArcMind inspects text results from its real built-in `read`, `bash`, `edit`, `write`, `grep`, `find`, `ls`, `web_fetch`, and `web_search` tools. Bash results are eligible only when they already declare a complete-output path. The newest five eligible results remain unchanged. When the older eligible results reach 20,000 estimated tokens, ArcMind saves each complete result under the session's `tool-results` directory and replaces its complete preview in that provider request with a short path reference.
+Immediately before each main-model provider request, Metis inspects text results from its real built-in `read`, `bash`, `edit`, `write`, `grep`, `find`, `ls`, `web_fetch`, and `web_search` tools. Bash results are eligible only when they already declare a complete-output path. The newest five eligible results remain unchanged. When the older eligible results reach 20,000 estimated tokens, Metis saves each complete result under the session's `tool-results` directory and replaces its complete preview in that provider request with a short path reference.
 
 `web_fetch` and `web_search` also use immediate large-output handling: a result over 50,000 characters is saved under the session's `tool-results` directory as soon as the tool finishes, before persistence or the next model request. The active result keeps a bounded preview and the full-output path so the model can read details on demand.
 
-This is an immutable context projection: agent state and the append-only session journal keep their original messages. A later request can project them again, and the model can use `read` on the saved path when detail is needed. Image results, `update_plan`, subagent, MCP, SDK, extension, custom, and unknown tools are excluded. Text error results from eligible built-ins are not specially excluded.
+This is an immutable context projection: agent state and the append-only session journal keep their original messages. A later request can project them again, and the model can use `read` on the saved path when detail is needed. Image results, `set_tasks`, subagent, MCP, SDK, extension, custom, and unknown tools are excluded. Text error results from eligible built-ins are not specially excluded.
 
-If a declared complete-output file is missing or cannot be copied into session-owned storage, ArcMind keeps that result unchanged. Microcompaction does not call a model and is separate from the summarizing compaction described below.
+If a declared complete-output file is missing or cannot be copied into session-owned storage, Metis keeps that result unchanged. Microcompaction does not call a model and is separate from the summarizing compaction described below.
 
 ## Overview
 
-ArcMind has two summarization mechanisms:
+Metis has two summarization mechanisms:
 
 | Mechanism | Trigger | Purpose |
 |-----------|---------|---------|
@@ -42,13 +42,13 @@ Auto-compaction triggers when:
 contextTokens > contextWindow - reserveTokens
 ```
 
-By default, `reserveTokens` is 16384 tokens (configurable in `~/.arcmind/agent/settings.json` or `<project-dir>/.arcmind/settings.json`). This leaves room for the LLM's response.
+By default, `reserveTokens` is 16384 tokens (configurable in `~/.metis/agent/settings.json` or `<project-dir>/.metis/settings.json`). This leaves room for the LLM's response.
 
 You can also trigger manually with `/compact [instructions]`, where optional instructions focus the summary.
 
 ### How It Works
 
-1. **Find cut point**: Walk backwards from newest message, accumulating token estimates until `keepRecentTokens` (default 20k, configurable in `~/.arcmind/agent/settings.json` or `<project-dir>/.arcmind/settings.json`) is reached
+1. **Find cut point**: Walk backwards from newest message, accumulating token estimates until `keepRecentTokens` (default 20k, configurable in `~/.metis/agent/settings.json` or `<project-dir>/.metis/settings.json`) is reached
 2. **Extract messages**: Collect messages from the previous kept boundary (or session start) up to the cut point
 3. **Generate summary**: Call LLM to summarize with structured format, passing the previous summary as iterative context when present
 4. **Append entry**: Save `CompactionEntry` with summary and `firstKeptEntryId`
@@ -86,9 +86,9 @@ What the LLM sees:
     prompt   from cmp          messages from firstKeptEntryId
 ```
 
-If the latest successful `update_plan` result falls outside the kept range, ArcMind adds that exact result back as a hidden `latest_plan` custom message immediately after the compaction summary. Active, completed, and explicitly cleared states are preserved. This message is visible to the model but not rendered as a new CLI event, so compaction does not duplicate the task list.
+If the latest successful `set_tasks` result falls outside the kept range and contains an incomplete task, Metis adds that exact result back as a hidden `latest_tasks` custom message immediately after the compaction summary. Completed lists remain durable in the session journal and available to client projections, but are no longer injected as current model context. The hidden message is visible to the model but not rendered as a new CLI event, so compaction does not duplicate the task list.
 
-On repeated compactions, the summarized span starts at the previous compaction's kept boundary (`firstKeptEntryId`), not at the compaction entry itself, falling back to the entry after the previous compaction if that kept entry cannot be found in the path. This preserves messages that survived the earlier compaction by including them in the next summarization pass as well. ArcMind also recalculates `tokensBefore` from the rebuilt session context before writing the new `CompactionEntry`, so the token count reflects the actual pre-compaction context being replaced.
+On repeated compactions, the summarized span starts at the previous compaction's kept boundary (`firstKeptEntryId`), not at the compaction entry itself, falling back to the entry after the previous compaction if that kept entry cannot be found in the path. This preserves messages that survived the earlier compaction by including them in the next summarization pass as well. Metis also recalculates `tokensBefore` from the rebuilt session context before writing the new `CompactionEntry`, so the token count reflects the actual pre-compaction context being replaced.
 
 ### Split Turns
 
@@ -114,7 +114,7 @@ Split turn (one huge turn exceeds budget):
   turnPrefixMessages = [usr, ass, tool, ass, tool, tool]
 ```
 
-For split turns, arcmind generates two summaries and merges them:
+For split turns, metis generates two summaries and merges them:
 1. **History summary**: Previous context (if any)
 2. **Turn prefix summary**: The early part of the split turn
 
@@ -130,7 +130,7 @@ Never cut at tool results (they must stay with their tool call).
 
 ### CompactionEntry Structure
 
-Defined in [`session-manager.ts`](https://github.com/arcmind/arcmind/blob/main/packages/coding-agent/src/core/session-manager.ts):
+Defined in [`session-manager.ts`](https://github.com/metis/metis/blob/main/packages/coding-agent/src/core/session-manager.ts):
 
 ```typescript
 interface CompactionEntry<T = unknown> {
@@ -154,13 +154,13 @@ interface CompactionDetails {
 
 Extensions can store any JSON-serializable data in `details`. The default compaction tracks file operations, but custom extension implementations can use their own structure.
 
-See [`prepareCompaction()`](https://github.com/arcmind/arcmind/blob/main/packages/coding-agent/src/core/compaction/compaction.ts) and [`compact()`](https://github.com/arcmind/arcmind/blob/main/packages/coding-agent/src/core/compaction/compaction.ts) for the implementation.
+See [`prepareCompaction()`](https://github.com/metis/metis/blob/main/packages/coding-agent/src/core/compaction/compaction.ts) and [`compact()`](https://github.com/metis/metis/blob/main/packages/coding-agent/src/core/compaction/compaction.ts) for the implementation.
 
 ## Branch Summarization
 
 ### When It Triggers
 
-When you use `/tree` to navigate to a different branch, arcmind offers to summarize the work you're leaving. This injects context from the left branch into the new branch.
+When you use `/tree` to navigate to a different branch, metis offers to summarize the work you're leaving. This injects context from the left branch into the new branch.
 
 ### How It Works
 
@@ -189,7 +189,7 @@ After navigation with summary:
 
 ### Cumulative File Tracking
 
-Both compaction and branch summarization track files cumulatively. When generating a summary, arcmind extracts file operations from:
+Both compaction and branch summarization track files cumulatively. When generating a summary, metis extracts file operations from:
 - Tool calls in the messages being summarized
 - Previous compaction or branch summary `details` (if any)
 
@@ -197,7 +197,7 @@ This means file tracking accumulates across multiple compactions or nested branc
 
 ### BranchSummaryEntry Structure
 
-Defined in [`session-manager.ts`](https://github.com/arcmind/arcmind/blob/main/packages/coding-agent/src/core/session-manager.ts):
+Defined in [`session-manager.ts`](https://github.com/metis/metis/blob/main/packages/coding-agent/src/core/session-manager.ts):
 
 ```typescript
 interface BranchSummaryEntry<T = unknown> {
@@ -220,7 +220,7 @@ interface BranchSummaryDetails {
 
 Same as compaction, extensions can store custom data in `details`.
 
-See [`collectEntriesForBranchSummary()`](https://github.com/arcmind/arcmind/blob/main/packages/coding-agent/src/core/compaction/branch-summarization.ts), [`prepareBranchEntries()`](https://github.com/arcmind/arcmind/blob/main/packages/coding-agent/src/core/compaction/branch-summarization.ts), and [`generateBranchSummary()`](https://github.com/arcmind/arcmind/blob/main/packages/coding-agent/src/core/compaction/branch-summarization.ts) for the implementation.
+See [`collectEntriesForBranchSummary()`](https://github.com/metis/metis/blob/main/packages/coding-agent/src/core/compaction/branch-summarization.ts), [`prepareBranchEntries()`](https://github.com/metis/metis/blob/main/packages/coding-agent/src/core/compaction/branch-summarization.ts), and [`generateBranchSummary()`](https://github.com/metis/metis/blob/main/packages/coding-agent/src/core/compaction/branch-summarization.ts) for the implementation.
 
 ## Summary Format
 
@@ -264,7 +264,7 @@ path/to/changed.ts
 
 ### Message Serialization
 
-Before summarization, messages are serialized to text via [`serializeConversation()`](https://github.com/arcmind/arcmind/blob/main/packages/coding-agent/src/core/compaction/utils.ts):
+Before summarization, messages are serialized to text via [`serializeConversation()`](https://github.com/metis/metis/blob/main/packages/coding-agent/src/core/compaction/utils.ts):
 
 ```
 [User]: What they said
@@ -280,14 +280,14 @@ Tool results are truncated to 2000 characters during serialization. Content beyo
 
 ## Custom Summarization via Extensions
 
-Extensions can intercept and customize both compaction and branch summarization. See [`extensions/types.ts`](https://github.com/arcmind/arcmind/blob/main/packages/coding-agent/src/core/extensions/types.ts) for event type definitions.
+Extensions can intercept and customize both compaction and branch summarization. See [`extensions/types.ts`](https://github.com/metis/metis/blob/main/packages/coding-agent/src/core/extensions/types.ts) for event type definitions.
 
 ### session_before_compact
 
 Fired before auto-compaction or `/compact`. Can cancel or provide custom summary. See `SessionBeforeCompactEvent` and `CompactionPreparation` in the types file.
 
 ```typescript
-arcmind.on("session_before_compact", async (event, ctx) => {
+metis.on("session_before_compact", async (event, ctx) => {
   const { preparation, branchEntries, customInstructions, reason, willRetry, signal } = event;
 
   // preparation.messagesToSummarize - messages to summarize
@@ -323,9 +323,9 @@ arcmind.on("session_before_compact", async (event, ctx) => {
 To generate a summary with your own model, convert messages to text using `serializeConversation`:
 
 ```typescript
-import { convertToLlm, serializeConversation } from "@arcmind/coding-agent";
+import { convertToLlm, serializeConversation } from "@metis/coding-agent";
 
-arcmind.on("session_before_compact", async (event, ctx) => {
+metis.on("session_before_compact", async (event, ctx) => {
   const { preparation } = event;
   
   // Convert AgentMessage[] to Message[], then serialize to text
@@ -359,7 +359,7 @@ See [custom-compaction.ts](../examples/extensions/custom-compaction.ts) for a co
 Fired before `/tree` navigation. Always fires regardless of whether user chose to summarize. Can cancel navigation or provide custom summary.
 
 ```typescript
-arcmind.on("session_before_tree", async (event, ctx) => {
+metis.on("session_before_tree", async (event, ctx) => {
   const { preparation, signal } = event;
 
   // preparation.targetId - where we're navigating to
@@ -387,7 +387,7 @@ See `SessionBeforeTreeEvent` and `TreePreparation` in the types file.
 
 ## Settings
 
-Configure compaction in `~/.arcmind/agent/settings.json` or `<project-dir>/.arcmind/settings.json`:
+Configure compaction in `~/.metis/agent/settings.json` or `<project-dir>/.metis/settings.json`:
 
 ```json
 {

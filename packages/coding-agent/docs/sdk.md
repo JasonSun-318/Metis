@@ -1,8 +1,8 @@
-> arcmind can help you use the SDK. Ask it to build an integration for your use case.
+> metis can help you use the SDK. Ask it to build an integration for your use case.
 
 # SDK
 
-The SDK provides programmatic access to arcmind's agent capabilities. Use it to embed arcmind in other applications, build custom interfaces, or integrate with automated workflows.
+The SDK provides programmatic access to metis's agent capabilities. Use it to embed metis in other applications, build custom interfaces, or integrate with automated workflows.
 
 **Example use cases:**
 - Build a custom UI (web, desktop, mobile)
@@ -16,7 +16,7 @@ See [examples/sdk/](../examples/sdk/) for working examples from minimal to full 
 ## Quick Start
 
 ```typescript
-import { AuthStorage, createAgentSession, ModelRegistry, SessionManager } from "@arcmind/coding-agent";
+import { AuthStorage, createAgentSession, ModelRegistry, SessionManager } from "@metis/coding-agent";
 
 // Set up credential storage and model registry
 const authStorage = AuthStorage.create();
@@ -40,7 +40,7 @@ await session.prompt("What files are in the current directory?");
 ## Installation
 
 ```bash
-npm install @arcmind/coding-agent
+npm install @metis/coding-agent
 ```
 
 The SDK is included in the main package. No separate installation needed.
@@ -54,7 +54,7 @@ The main factory function for a single `AgentSession`.
 `createAgentSession()` uses a `ResourceLoader` to supply extensions, skills, prompt templates, themes, and context files. If you do not provide one, it uses `DefaultResourceLoader` with standard discovery.
 
 ```typescript
-import { createAgentSession, SessionManager } from "@arcmind/coding-agent";
+import { createAgentSession, SessionManager } from "@metis/coding-agent";
 
 // Minimal: defaults with DefaultResourceLoader
 const { session } = await createAgentSession();
@@ -70,7 +70,7 @@ const { session } = await createAgentSession({
 const { session: chatSession } = await createAgentSession({ agentMode: "chat" });
 ```
 
-When no `sessionManager` is supplied, Chat without `cwd` creates `~/.arcmind/agent/workspaces/<session-id>/`; Code without `cwd` captures `process.cwd()`. Supplying `cwd` binds either mode to that existing directory. Both modes default to Ask permissions.
+When no `sessionManager` is supplied, Chat without `cwd` creates `~/.metis/agent/workspaces/<session-id>/`; Code without `cwd` captures `process.cwd()`. Supplying `cwd` binds either mode to that existing directory. Both modes default to Ask permissions.
 
 If you supply `sessionManager`, that manager owns the immutable mode/cwd and current permission setting. Conflicting `agentMode`, `cwd`, or normalized `permissionMode` options throw without mutating or closing the supplied manager. Deprecated `permissionMode: "auto"` is accepted as Ask; deprecated `reviewerEnabled` is accepted and ignored.
 
@@ -159,7 +159,7 @@ import {
   createAgentSessionServices,
   getAgentDir,
   SessionManager,
-} from "@arcmind/coding-agent";
+} from "@metis/coding-agent";
 
 const createRuntime: CreateAgentSessionRuntimeFactory = async ({ cwd, sessionManager, sessionStartEvent }) => {
   const services = await createAgentSessionServices({ cwd });
@@ -246,7 +246,7 @@ await session.prompt("After you're done, also check X", { streamingBehavior: "fo
 ```
 
 **Behavior:**
-- **Extension commands** (e.g., `/mycommand`): Execute immediately, even during streaming. They manage their own LLM interaction via `arcmind.sendMessage()`.
+- **Extension commands** (e.g., `/mycommand`): Execute immediately, even during streaming. They manage their own LLM interaction via `metis.sendMessage()`.
 - **File-based prompt templates** (from `.md` files): Expanded to their content before sending or queueing.
 - **During streaming without `streamingBehavior`**: Throws an error. Use `steer()` or `followUp()` directly, or specify the option.
 - **`preflightResult(true)`**: Means the prompt was accepted, queued, or handled immediately.
@@ -266,7 +266,7 @@ Both `steer()` and `followUp()` expand file-based prompt templates but error on 
 
 ### Agent and AgentState
 
-The `Agent` class (from `@arcmind/agent-core`) handles the core LLM interaction. Access it via `session.agent`.
+The `Agent` class (from `@metis/agent-core`) handles the core LLM interaction. Access it via `session.agent`.
 
 ```typescript
 // Access current state
@@ -365,25 +365,25 @@ const { session } = await createAgentSession({
   cwd: process.cwd(),
   
   // Global config directory
-  agentDir: "~/.arcmind/agent", // default (expands ~)
+  agentDir: "~/.metis/agent", // default (expands ~)
 });
 ```
 
 `thinkingSelection: "ultra"` is the composite runtime selection used only by persisted primary Code `AgentSessionRuntime` hosts. The session's `thinkingLevel` remains the resolved real provider value. Raw `createAgentSession`, Chat, child, and in-memory runtimes cannot enable Ultra; first-class children require a persisted Code `AgentSessionRuntime`. See [Ultra and Subagents](subagents.md).
 
 The effective session `cwd` is used by `DefaultResourceLoader` for:
-- Project extensions (`.arcmind/extensions/`)
+- Project extensions (`.metis/extensions/`)
 - Project skills:
-  - `.arcmind/skills/`
+  - `.metis/skills/`
   - `.agents/skills/` in `cwd` and ancestor directories (up to git repo root, or filesystem root when not in a repo)
-- Project prompts (`.arcmind/prompts/`)
+- Project prompts (`.metis/prompts/`)
 - Context files (`AGENTS.md` walking up from cwd)
 - Session directory naming
 
 `agentDir` is used by `DefaultResourceLoader` for:
 - Global extensions (`extensions/`)
 - Global skills:
-  - `skills/` under `agentDir` (for example `~/.arcmind/agent/skills/`)
+  - `skills/` under `agentDir` (for example `~/.metis/agent/skills/`)
   - `~/.agents/skills/`
 - Global prompts (`prompts/`)
 - Global context file (`AGENTS.md`)
@@ -397,8 +397,8 @@ When you pass a custom `ResourceLoader`, `cwd` and `agentDir` no longer control 
 ### Model
 
 ```typescript
-import { getModel } from "@arcmind/ai";
-import { AuthStorage, ModelRegistry } from "@arcmind/coding-agent";
+import { getModel } from "@metis/ai";
+import { AuthStorage, ModelRegistry } from "@metis/coding-agent";
 
 const authStorage = AuthStorage.create();
 const modelRegistry = ModelRegistry.create(authStorage);
@@ -440,7 +440,7 @@ To match CLI model parsing, use the exported resolver helpers:
 import {
   resolveCliModel,
   resolveModelScopeWithDiagnostics,
-} from "@arcmind/coding-agent";
+} from "@metis/coding-agent";
 
 const cliModel = resolveCliModel({
   cliModel: "anthropic/claude-opus-4-5:high",
@@ -471,9 +471,9 @@ API key resolution priority (handled by AuthStorage):
 4. Fallback resolver (for custom provider keys from `models.json`)
 
 ```typescript
-import { AuthStorage, ModelRegistry } from "@arcmind/coding-agent";
+import { AuthStorage, ModelRegistry } from "@metis/coding-agent";
 
-// Default: uses ~/.arcmind/agent/auth.json and ~/.arcmind/agent/models.json
+// Default: uses ~/.metis/agent/auth.json and ~/.metis/agent/models.json
 const authStorage = AuthStorage.create();
 const modelRegistry = ModelRegistry.create(authStorage);
 
@@ -507,7 +507,7 @@ const simpleRegistry = ModelRegistry.inMemory(authStorage);
 Use a `ResourceLoader` to override the system prompt:
 
 ```typescript
-import { createAgentSession, DefaultResourceLoader } from "@arcmind/coding-agent";
+import { createAgentSession, DefaultResourceLoader } from "@metis/coding-agent";
 
 const loader = new DefaultResourceLoader({
   systemPromptOverride: () => "You are a helpful assistant.",
@@ -523,16 +523,16 @@ const { session } = await createAgentSession({ resourceLoader: loader });
 
 Specify which built-in tools to enable:
 
-- Built-in tool names: `read`, `bash`, `edit`, `write`, `grep`, `find`, `ls`, `web_fetch`, `web_search`, `update_plan`
-- Default primary-session built-ins: `read`, `grep`, `bash`, `edit`, `write`, `web_fetch`, `update_plan`, plus `web_search` when globally enabled
+- Built-in tool names: `read`, `bash`, `edit`, `write`, `grep`, `find`, `ls`, `web_fetch`, `web_search`, `set_tasks`
+- Default primary-session built-ins: `read`, `grep`, `bash`, `edit`, `write`, `web_fetch`, `set_tasks`, plus `web_search` when globally enabled
 - `noTools: "all"` disables all tools
 - `noTools: "builtin"` disables default built-ins while keeping extension and custom tools enabled
 - `excludeTools` disables specific built-in, extension, or custom tool names after any `tools` allowlist is applied
 
-The `edit` tool returns `details.diff` for ArcMind's TUI display and `details.patch` as a standard unified patch for SDK consumers.
+The `edit` tool returns `details.diff` for Metis's TUI display and `details.patch` as a standard unified patch for SDK consumers.
 
 ```typescript
-import { createAgentSession } from "@arcmind/coding-agent";
+import { createAgentSession } from "@metis/coding-agent";
 
 // Read-only mode
 const { session } = await createAgentSession({
@@ -555,7 +555,7 @@ const { session } = await createAgentSession({
 When you pass a custom `cwd`, `createAgentSession()` builds selected built-in tools for that cwd.
 
 ```typescript
-import { createAgentSession, SessionManager } from "@arcmind/coding-agent";
+import { createAgentSession, SessionManager } from "@metis/coding-agent";
 
 const cwd = "/path/to/project";
 
@@ -579,7 +579,7 @@ const { session } = await createAgentSession({
 
 ```typescript
 import { Type } from "typebox";
-import { createAgentSession, defineTool } from "@arcmind/coding-agent";
+import { createAgentSession, defineTool } from "@metis/coding-agent";
 
 // Inline custom tool
 const myTool = defineTool({
@@ -601,9 +601,9 @@ const { session } = await createAgentSession({
 });
 ```
 
-Use `defineTool()` for standalone definitions and arrays like `customTools: [myTool]`. Inline `arcmind.registerTool({ ... })` already infers parameter types correctly.
+Use `defineTool()` for standalone definitions and arrays like `customTools: [myTool]`. Inline `metis.registerTool({ ... })` already infers parameter types correctly.
 
-Custom tools passed via `customTools` are combined with extension-registered tools. Extensions loaded by the ResourceLoader can also register tools via `arcmind.registerTool()`.
+Custom tools passed via `customTools` are combined with extension-registered tools. Extensions loaded by the ResourceLoader can also register tools via `metis.registerTool()`.
 
 If you pass `tools`, include each custom or extension tool name you want enabled, for example `tools: ["read", "bash", "my_tool"]`.
 
@@ -611,16 +611,16 @@ If you pass `tools`, include each custom or extension tool name you want enabled
 
 ### Extensions
 
-Extensions are loaded by the `ResourceLoader`. `DefaultResourceLoader` discovers extensions from `~/.arcmind/agent/extensions/`, `.arcmind/extensions/`, and settings.json extension sources.
+Extensions are loaded by the `ResourceLoader`. `DefaultResourceLoader` discovers extensions from `~/.metis/agent/extensions/`, `.metis/extensions/`, and settings.json extension sources.
 
 ```typescript
-import { createAgentSession, DefaultResourceLoader } from "@arcmind/coding-agent";
+import { createAgentSession, DefaultResourceLoader } from "@metis/coding-agent";
 
 const loader = new DefaultResourceLoader({
   additionalExtensionPaths: ["/path/to/my-extension.ts"],
   extensionFactories: [
-    (arcmind) => {
-      arcmind.on("agent_start", () => {
+    (metis) => {
+      metis.on("agent_start", () => {
         console.log("[Inline Extension] Agent starting");
       });
     },
@@ -636,12 +636,12 @@ Extensions can register tools, subscribe to events, add commands, and more. See 
 **Named inline extensions:** By default, inline factories display as `<inline:1>`, `<inline:2>`, etc. in the startup Extensions list. To show a descriptive name instead, wrap the factory:
 
 ```typescript
-import type { InlineExtension } from "@arcmind/coding-agent";
+import type { InlineExtension } from "@metis/coding-agent";
 
 const myProvider: InlineExtension = {
   name: "my-provider",
-  factory: (arcmind) => {
-    arcmind.on("agent_start", () => {
+  factory: (metis) => {
+    metis.on("agent_start", () => {
       console.log("[my-provider] Agent starting");
     });
   },
@@ -654,10 +654,10 @@ const loader = new DefaultResourceLoader({
 
 This displays as `<inline:my-provider>` instead of `<inline:1>`. Bare factory functions are still accepted for backward compatibility.
 
-**Event Bus:** Extensions can communicate via `arcmind.events`. Pass a shared `eventBus` to `DefaultResourceLoader` if you need to emit or listen from outside:
+**Event Bus:** Extensions can communicate via `metis.events`. Pass a shared `eventBus` to `DefaultResourceLoader` if you need to emit or listen from outside:
 
 ```typescript
-import { createEventBus, DefaultResourceLoader } from "@arcmind/coding-agent";
+import { createEventBus, DefaultResourceLoader } from "@metis/coding-agent";
 
 const eventBus = createEventBus();
 const loader = new DefaultResourceLoader({
@@ -677,7 +677,7 @@ import {
   createAgentSession,
   DefaultResourceLoader,
   type Skill,
-} from "@arcmind/coding-agent";
+} from "@metis/coding-agent";
 
 const customSkill: Skill = {
   name: "my-skill",
@@ -703,7 +703,7 @@ const { session } = await createAgentSession({ resourceLoader: loader });
 ### Context Files
 
 ```typescript
-import { createAgentSession, DefaultResourceLoader } from "@arcmind/coding-agent";
+import { createAgentSession, DefaultResourceLoader } from "@metis/coding-agent";
 
 const loader = new DefaultResourceLoader({
   agentsFilesOverride: (current) => ({
@@ -727,7 +727,7 @@ import {
   createAgentSession,
   DefaultResourceLoader,
   type PromptTemplate,
-} from "@arcmind/coding-agent";
+} from "@metis/coding-agent";
 
 const customCommand: PromptTemplate = {
   name: "deploy",
@@ -762,7 +762,7 @@ import {
   createAgentSessionServices,
   getAgentDir,
   SessionManager,
-} from "@arcmind/coding-agent";
+} from "@metis/coding-agent";
 
 // In-memory (no persistence)
 const { session } = await createAgentSession({
@@ -857,7 +857,7 @@ sm.createBranchedSession(leafId);       // Extract path to new file
 ### Settings Management
 
 ```typescript
-import { createAgentSession, SettingsManager, SessionManager } from "@arcmind/coding-agent";
+import { createAgentSession, SettingsManager, SessionManager } from "@metis/coding-agent";
 
 // Default: loads from files (global + project merged)
 const { session } = await createAgentSession({
@@ -891,8 +891,8 @@ const { session } = await createAgentSession({
 **Project-specific settings:**
 
 Settings load from two locations and merge:
-1. Global: `~/.arcmind/agent/settings.json`
-2. Project: `<cwd>/.arcmind/settings.json`
+1. Global: `~/.metis/agent/settings.json`
+2. Project: `<cwd>/.metis/settings.json`
 
 Project overrides global. Nested objects merge keys. Setters modify global settings by default.
 
@@ -913,7 +913,7 @@ Use `DefaultResourceLoader` to discover extensions, skills, prompts, themes, and
 import {
   DefaultResourceLoader,
   getAgentDir,
-} from "@arcmind/coding-agent";
+} from "@metis/coding-agent";
 
 const loader = new DefaultResourceLoader({
   cwd,
@@ -954,7 +954,7 @@ interface LoadExtensionsResult {
 ## Complete Example
 
 ```typescript
-import { getModel } from "@arcmind/ai";
+import { getModel } from "@metis/ai";
 import { Type } from "typebox";
 import {
   AuthStorage,
@@ -964,7 +964,7 @@ import {
   ModelRegistry,
   SessionManager,
   SettingsManager,
-} from "@arcmind/coding-agent";
+} from "@metis/coding-agent";
 
 // Set up auth storage (custom location)
 const authStorage = AuthStorage.create("/custom/agent/auth.json");
@@ -1049,7 +1049,7 @@ import {
   getAgentDir,
   InteractiveMode,
   SessionManager,
-} from "@arcmind/coding-agent";
+} from "@metis/coding-agent";
 
 const createRuntime: CreateAgentSessionRuntimeFactory = async ({ cwd, sessionManager, sessionStartEvent }) => {
   const services = await createAgentSessionServices({ cwd });
@@ -1089,7 +1089,7 @@ import {
   getAgentDir,
   runPrintMode,
   SessionManager,
-} from "@arcmind/coding-agent";
+} from "@metis/coding-agent";
 
 const createRuntime: CreateAgentSessionRuntimeFactory = async ({ cwd, sessionManager, sessionStartEvent }) => {
   const services = await createAgentSessionServices({ cwd });
@@ -1126,7 +1126,7 @@ import {
   getAgentDir,
   runRpcMode,
   SessionManager,
-} from "@arcmind/coding-agent";
+} from "@metis/coding-agent";
 
 const createRuntime: CreateAgentSessionRuntimeFactory = async ({ cwd, sessionManager, sessionStartEvent }) => {
   const services = await createAgentSessionServices({ cwd });
@@ -1152,7 +1152,7 @@ See [RPC documentation](rpc.md) for the JSON protocol.
 For subprocess-based integration without building with the SDK, use the CLI directly:
 
 ```bash
-arcmind --mode rpc --no-session
+metis --mode rpc --no-session
 ```
 
 See [RPC documentation](rpc.md) for the JSON protocol.

@@ -1,6 +1,6 @@
 import { join } from "node:path";
-import { Agent, type ThinkingLevel } from "@arcmind/agent-core";
-import { clampThinkingLevel, type Model } from "@arcmind/ai/compat";
+import { Agent, type ThinkingLevel } from "@metis/agent-core";
+import { clampThinkingLevel, type Model } from "@metis/ai/compat";
 import { getAgentDir } from "../config.ts";
 import { canonicalizeActionPath, resolvePath } from "../utils/paths.ts";
 import { type AgentMode, DEFAULT_AGENT_MODE } from "./agent-mode.ts";
@@ -45,7 +45,7 @@ import { UNATTENDED_TOOL_NAMES, type UnattendedExecutionProfile } from "./unatte
 export interface CreateAgentSessionOptions {
 	/** Working directory for project-local discovery. Default: process.cwd() */
 	cwd?: string;
-	/** Global config directory. Default: ~/.arcmind/agent */
+	/** Global config directory. Default: ~/.metis/agent */
 	agentDir?: string;
 	/** Classification mode for a newly-created default session manager. Default: code. */
 	agentMode?: AgentMode;
@@ -76,15 +76,15 @@ export interface CreateAgentSessionOptions {
 	 * Optional default tool suppression mode when no explicit allowlist is provided.
 	 *
 	 * - "all": start with no tools enabled
-	 * - "builtin": disable the default built-in tools (read, grep, bash, edit, write, web_fetch, update_plan,
+	 * - "builtin": disable the default built-in tools (read, grep, bash, edit, write, web_fetch, set_tasks,
 	 *   and web_search when globally enabled) but keep extension/custom tools enabled
 	 */
 	noTools?: "all" | "builtin";
 	/**
 	 * Optional allowlist of tool names.
 	 *
-	 * When omitted, arcmind enables the default built-in tools (read, grep, bash, edit, write, web_fetch,
-	 * update_plan, and web_search when globally enabled) and leaves extension/custom tools enabled unless
+	 * When omitted, metis enables the default built-in tools (read, grep, bash, edit, write, web_fetch,
+	 * set_tasks, and web_search when globally enabled) and leaves extension/custom tools enabled unless
 	 * `noTools` changes that default.
 	 * When provided, only the listed tool names are enabled.
 	 */
@@ -212,7 +212,7 @@ function restoredMcpToolNames(sessionManager: SessionManager, manager: McpManage
  * const { session } = await createAgentSession();
  *
  * // With explicit model
- * import { getModel } from '@arcmind/ai';
+ * import { getModel } from '@metis/ai';
  * const { session } = await createAgentSession({
  *   model: getModel('anthropic', 'claude-opus-4-5'),
  *   thinkingLevel: 'high',
@@ -459,13 +459,13 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			"write",
 			"web_fetch",
 			...(settingsManager.getWebSearchSettings().enabled ? (["web_search"] as const) : []),
-			...(isSubagent ? [] : (["update_plan"] as const)),
+			...(isSubagent ? [] : (["set_tasks"] as const)),
 		];
 		const allowedToolNames = options.unattendedExecution
 			? [...UNATTENDED_TOOL_NAMES]
 			: (options.tools ?? (options.noTools === "all" ? [] : undefined));
 		const excludedToolNames = isSubagent
-			? [...new Set([...(options.excludeTools ?? []), "update_plan"])]
+			? [...new Set([...(options.excludeTools ?? []), "set_tasks"])]
 			: options.excludeTools;
 		const excludedToolNameSet = excludedToolNames ? new Set(excludedToolNames) : undefined;
 		const initialActiveToolNames: string[] = (

@@ -26,6 +26,22 @@ export {
 	parseSkillBlock,
 	type SessionStats,
 } from "./core/agent-session.ts";
+export {
+	type AskUserAnswer,
+	type AskUserDetails,
+	type AskUserInput,
+	type AskUserOption,
+	AskUserParams,
+	type AskUserQuestion,
+	type AskUserRequest,
+	type AskUserResponse,
+	type AskUserResponseAnswer,
+	createAskUserToolDefinition,
+	MAX_ASK_USER_CUSTOM_ANSWER_LENGTH,
+	MAX_ASK_USER_OPTIONS,
+	MAX_ASK_USER_QUESTIONS,
+	type RequestUserInput,
+} from "./core/ask-user.ts";
 // Auth and model registry
 export {
 	type ApiKeyCredential,
@@ -393,6 +409,7 @@ export {
 // Skills
 export {
 	formatSkillsForPrompt,
+	isSkillUsageCustomType,
 	type LoadSkillsFromDirOptions,
 	type LoadSkillsResult,
 	loadSkills,

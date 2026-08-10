@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { getModel } from "@arcmind/ai/compat";
+import { getModel } from "@metis/ai/compat";
 import { Type } from "typebox";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
@@ -18,7 +18,7 @@ describe("regression #3592: no-builtin-tools keeps extension tools enabled", () 
 	let agentDir: string;
 
 	beforeEach(() => {
-		tempDir = join(tmpdir(), `arcmind-no-builtin-tools-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+		tempDir = join(tmpdir(), `metis-no-builtin-tools-${Date.now()}-${Math.random().toString(36).slice(2)}`);
 		agentDir = join(tempDir, "agent");
 		mkdirSync(agentDir, { recursive: true });
 	});
@@ -37,9 +37,9 @@ describe("regression #3592: no-builtin-tools keeps extension tools enabled", () 
 			agentDir,
 			settingsManager,
 			extensionFactories: [
-				(arcmind) => {
-					arcmind.on("session_start", () => {
-						arcmind.registerTool({
+				(metis) => {
+					metis.on("session_start", () => {
+						metis.registerTool({
 							name: "dynamic_tool",
 							label: "Dynamic Tool",
 							description: "Tool registered from session_start",
@@ -86,7 +86,7 @@ describe("regression #3592: no-builtin-tools keeps extension tools enabled", () 
 			"grep",
 			"ls",
 			"read",
-			"update_plan",
+			"set_tasks",
 			"web_fetch",
 			"web_search",
 			"write",

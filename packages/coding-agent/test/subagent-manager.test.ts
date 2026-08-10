@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { getModel } from "@arcmind/ai/compat";
+import { getModel } from "@metis/ai/compat";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AgentSession, AgentSessionEvent } from "../src/core/agent-session.ts";
 import type { AgentSessionRuntime } from "../src/core/agent-session-runtime.ts";
@@ -129,7 +129,7 @@ interface SetupOptions {
 }
 
 function setup(options: SetupOptions = {}): Harness {
-	const root = mkdtempSync(join(tmpdir(), "arcmind-subagent-manager-"));
+	const root = mkdtempSync(join(tmpdir(), "metis-subagent-manager-"));
 	const cwd = join(root, "project");
 	const agentDir = join(root, "agent");
 	mkdirSync(cwd);
@@ -148,7 +148,7 @@ function setup(options: SetupOptions = {}): Harness {
 		thinkingLevel: "high",
 		model,
 		modelRegistry: {},
-		getActiveToolNames: () => ["read", "bash", "update_plan"],
+		getActiveToolNames: () => ["read", "bash", "set_tasks"],
 		enqueueSubagentMailboxEvent: vi.fn((event: SubagentMailboxEvent) => {
 			if (knownMailbox.has(event.eventId)) return pendingMailbox.has(event.eventId);
 			parentManager.appendSubagentControl({ type: "subagent_mailbox_event", event });
@@ -880,7 +880,7 @@ describe("SubagentManager", () => {
 
 	it("keeps parent-only control tools out of child snapshots", async () => {
 		const harness = setup();
-		for (const tool of [SUBAGENT_ACTIVATION_TOOL_NAME, "update_plan"]) {
+		for (const tool of [SUBAGENT_ACTIVATION_TOOL_NAME, "set_tasks"]) {
 			await expect(
 				harness.manager.spawn({
 					name: `child-for-${tool}`,
