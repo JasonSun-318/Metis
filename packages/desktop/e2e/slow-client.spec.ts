@@ -5,7 +5,7 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { expect, test, type Browser, type Page } from "@playwright/test";
-import type { ArcMindDesktopApi } from "../src/shared/desktop-api.ts";
+import type { MetisDesktopApi } from "../src/shared/desktop-api.ts";
 import {
 	appServerPid,
 	closeServer,
@@ -20,7 +20,7 @@ import {
 
 async function projectedTextLength(page: Page, sessionId: string): Promise<number> {
 	return page.evaluate(async (id) => {
-		const api = (globalThis as unknown as { arcMind: ArcMindDesktopApi }).arcMind;
+		const api = (globalThis as unknown as { metis: MetisDesktopApi }).metis;
 		const items = await api.readItems({ sessionId: id, limit: 200 });
 		return items.items
 			.flatMap((item) => item.content)
@@ -48,7 +48,7 @@ test("a blocked renderer catches up with 10,000 deltas without losing its app se
 	const executable = packagedExecutable();
 	expect(existsSync(executable), `Package the desktop app first: ${executable}`).toBe(true);
 
-	const root = await mkdtemp(path.join(tmpdir(), "arcmind-slow-client-"));
+	const root = await mkdtemp(path.join(tmpdir(), "metis-slow-client-"));
 	const agentDir = path.join(root, "agent");
 	const projectDir = path.join(root, "project");
 	const userDataDir = path.join(root, "electron");
@@ -120,7 +120,7 @@ test("a blocked renderer catches up with 10,000 deltas without losing its app se
 		cwd: projectDir,
 		env: {
 			...process.env,
-			ARCMIND_CODING_AGENT_DIR: agentDir,
+			METIS_CODING_AGENT_DIR: agentDir,
 			HTTP_PROXY: "",
 			HTTPS_PROXY: "",
 			NO_PROXY: "127.0.0.1,localhost",

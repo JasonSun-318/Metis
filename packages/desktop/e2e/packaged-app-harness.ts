@@ -3,7 +3,7 @@ import { once } from "node:events";
 import { createServer, type Server } from "node:http";
 import path from "node:path";
 import { chromium, expect, type Browser, type Page } from "@playwright/test";
-import type { ArcMindDesktopApi } from "../src/shared/desktop-api.ts";
+import type { MetisDesktopApi } from "../src/shared/desktop-api.ts";
 
 export const desktopRoot = path.resolve(__dirname, "..");
 
@@ -23,16 +23,16 @@ export function nativePackageArch(): string {
 }
 
 export function packagedExecutable(): string {
-	const packageRoot = path.join(desktopRoot, "out", `ArcMind-${process.platform}-${nativePackageArch()}`);
-	if (process.platform === "darwin") return path.join(packageRoot, "ArcMind.app", "Contents", "MacOS", "arcmind");
-	if (process.platform === "win32") return path.join(packageRoot, "arcmind.exe");
-	return path.join(packageRoot, "arcmind");
+	const packageRoot = path.join(desktopRoot, "out", `Metis-${process.platform}-${nativePackageArch()}`);
+	if (process.platform === "darwin") return path.join(packageRoot, "Metis.app", "Contents", "MacOS", "Metis");
+	if (process.platform === "win32") return path.join(packageRoot, "Metis.exe");
+	return path.join(packageRoot, "Metis");
 }
 
 export function packagedAsar(): string {
-	const packageRoot = path.join(desktopRoot, "out", `ArcMind-${process.platform}-${nativePackageArch()}`);
+	const packageRoot = path.join(desktopRoot, "out", `Metis-${process.platform}-${nativePackageArch()}`);
 	return process.platform === "darwin"
-		? path.join(packageRoot, "ArcMind.app", "Contents", "Resources", "app.asar")
+		? path.join(packageRoot, "Metis.app", "Contents", "Resources", "app.asar")
 		: path.join(packageRoot, "resources", "app.asar");
 }
 
@@ -137,7 +137,7 @@ export async function waitForServerReady(page: Page): Promise<void> {
 	await expect
 		.poll(() =>
 			page.evaluate(async () => {
-				const api = (globalThis as unknown as { arcMind: ArcMindDesktopApi }).arcMind;
+				const api = (globalThis as unknown as { metis: MetisDesktopApi }).metis;
 				return (await api.getServerState()).state;
 			}),
 		)
@@ -150,9 +150,9 @@ export async function createAndRestoreChatSession(
 	waitForActive = true,
 ): Promise<string> {
 	const created = await page.evaluate(async (projectCwd) => {
-		const api = (globalThis as unknown as { arcMind: ArcMindDesktopApi }).arcMind;
+		const api = (globalThis as unknown as { metis: MetisDesktopApi }).metis;
 		const result = await api.createSession({ requestId: crypto.randomUUID(), mode: "chat", cwd: projectCwd });
-		localStorage.setItem("arcmind.activeSessionId.chat", result.session.sessionId);
+		localStorage.setItem("metis.activeSessionId.chat", result.session.sessionId);
 		return result.session;
 	}, cwd);
 	await page.reload({ waitUntil: "domcontentloaded", timeout: 15_000 });

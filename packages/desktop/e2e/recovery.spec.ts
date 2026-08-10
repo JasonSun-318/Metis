@@ -5,7 +5,7 @@ import { createServer, type Server, type ServerResponse } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { expect, test, type Browser, type Page } from "@playwright/test";
-import type { ArcMindDesktopApi } from "../src/shared/desktop-api.ts";
+import type { MetisDesktopApi } from "../src/shared/desktop-api.ts";
 import {
 	appServerPid,
 	closeServer,
@@ -74,7 +74,7 @@ class ControlledCompletion {
 
 async function serverProjectionText(page: Page, sessionId: string): Promise<string> {
 	return page.evaluate(async (id) => {
-		const api = (globalThis as unknown as { arcMind: ArcMindDesktopApi }).arcMind;
+		const api = (globalThis as unknown as { metis: MetisDesktopApi }).metis;
 		const page = await api.readItems({ sessionId: id, limit: 200 });
 		return page.items
 			.flatMap((item) => item.content)
@@ -88,7 +88,7 @@ test("packaged projection client recovers across renderer and app-server restart
 	const executable = packagedExecutable();
 	expect(existsSync(executable), `Package the desktop app first: ${executable}`).toBe(true);
 
-	const tempRoot = await mkdtemp(path.join(tmpdir(), "arcmind-gate-d-"));
+	const tempRoot = await mkdtemp(path.join(tmpdir(), "metis-gate-d-"));
 	const agentDir = path.join(tempRoot, "agent");
 	const projectDir = path.join(tempRoot, "project");
 	const userDataDir = path.join(tempRoot, "electron");
@@ -140,7 +140,7 @@ test("packaged projection client recovers across renderer and app-server restart
 		env: {
 			...process.env,
 			ALL_PROXY: "",
-			ARCMIND_CODING_AGENT_DIR: agentDir,
+			METIS_CODING_AGENT_DIR: agentDir,
 			HTTP_PROXY: "",
 			HTTPS_PROXY: "",
 			NO_PROXY: "127.0.0.1,localhost",

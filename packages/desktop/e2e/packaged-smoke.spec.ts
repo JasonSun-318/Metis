@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { expect, test, type Browser, type Locator, type Page } from "@playwright/test";
-import type { ArcMindDesktopApi } from "../src/shared/desktop-api.ts";
+import type { MetisDesktopApi } from "../src/shared/desktop-api.ts";
 import {
 	appServerPid,
 	closeServer,
@@ -30,6 +30,7 @@ const CHAT_ARCHIVED_ID = "10000000-0000-4000-8000-000000000002";
 const CODE_ID = "10000000-0000-4000-8000-000000000003";
 const SCHEDULE_ID = "10000000-0000-4000-8000-000000000004";
 const SESSION_ACTION_ID = "10000000-0000-4000-8000-000000000005";
+const COMPLETED_TASK_ID = "10000000-0000-4000-8000-000000000006";
 
 interface FixtureSessionManager {
 	appendCustomEntry(customType: string, data?: unknown): string;
@@ -169,12 +170,12 @@ async function seedOwnedSessionData(
 	sessionFile: string,
 ): Promise<string[]> {
 	const workDir = fixtures.createSessionWorkDir(agentDir, sessionId);
-	const previousAgentDir = process.env.ARCMIND_CODING_AGENT_DIR;
-	process.env.ARCMIND_CODING_AGENT_DIR = agentDir;
+	const previousAgentDir = process.env.METIS_CODING_AGENT_DIR;
+	process.env.METIS_CODING_AGENT_DIR = agentDir;
 	const imageDir = fixtures.getSessionImageDir(sessionFile);
 	const toolOutputDir = fixtures.getSessionToolOutputDir(sessionFile);
-	if (previousAgentDir === undefined) delete process.env.ARCMIND_CODING_AGENT_DIR;
-	else process.env.ARCMIND_CODING_AGENT_DIR = previousAgentDir;
+	if (previousAgentDir === undefined) delete process.env.METIS_CODING_AGENT_DIR;
+	else process.env.METIS_CODING_AGENT_DIR = previousAgentDir;
 	return Promise.all([
 		writeFixtureFile(path.join(imageDir, "image.png"), "chat image"),
 		writeFixtureFile(path.join(toolOutputDir, "tool.txt"), "chat tool output"),
@@ -246,7 +247,7 @@ function launchPackagedApp(
 		env: {
 			...process.env,
 			ALL_PROXY: "",
-			ARCMIND_CODING_AGENT_DIR: agentDir,
+			METIS_CODING_AGENT_DIR: agentDir,
 			HOME: homeDir,
 			HTTP_PROXY: "",
 			HTTPS_PROXY: "",
@@ -260,19 +261,199 @@ function launchPackagedApp(
 	return app;
 }
 
-test("packaged worker, WASM, trusted extension, and utility lifecycle stay functional", async () => {
+test("packaged task list uses the Metis composer UI in Chat and Code", async ({}, testInfo) => {
 	test.setTimeout(90_000);
+	const fixtures = await loadCodingFixtures();
 	const executable = packagedExecutable();
 	expect(existsSync(executable), `Package the desktop app first: ${executable}`).toBe(true);
 
-	const tempRoot = await mkdtemp(path.join(tmpdir(), "arcmind-packaged-smoke-"));
+	const tempRoot = await mkdtemp(path.join(tmpdir(), "metis-task-list-"));
 	const agentDir = path.join(tempRoot, "agent");
 	const homeDir = path.join(tempRoot, "home");
 	const projectDir = path.join(tempRoot, "project");
-	const extensionDir = path.join(projectDir, ".arcmind", "extensions");
-	const projectSkillDir = path.join(projectDir, ".arcmind", "skills", "packaged-project-skill");
+	const userDataDir = path.join(tempRoot, "electron");
+	await Promise.all([mkdir(agentDir), mkdir(homeDir), mkdir(projectDir), mkdir(userDataDir)]);
+
+	const taskItems = [
+		{ task: "Inspect implementation", completed: false },
+		{ task: "Confirm protocol projection", completed: true },
+		{ task: "Verify session isolation", completed: false },
+		{ task: "Polish Metis styling", completed: false },
+		{ task: "Run packaged checks", completed: false },
+		{ task: "Complete visual review", completed: false },
+	];
+	const createTaskSession = (
+		sessionId: string,
+		mode: "chat" | "code",
+		name: string,
+		tasks = taskItems,
+	) => {
+		const manager = fixtures.SessionManager.create(
+			projectDir,
+			fixtures.getDefaultSessionDir(projectDir, agentDir),
+			{ id: sessionId, mode },
+		);
+		manager.appendSessionInfo(name);
+		manager.appendMessage({
+			role: "toolResult",
+			toolCallId: `set-tasks-${mode}`,
+			toolName: "set_tasks",
+			content: [{ type: "text", text: "<task_list />" }],
+			details: { tasks },
+			isError: false,
+			timestamp: Date.now(),
+		});
+		manager.close();
+	};
+	createTaskSession(CHAT_ACTIVE_ID, "chat", "Task list Chat fixture");
+	createTaskSession(CODE_ID, "code", "Task list Code fixture");
+	createTaskSession(
+		COMPLETED_TASK_ID,
+		"chat",
+		"Completed task list fixture",
+		taskItems.map((task) => ({ ...task, completed: true })),
+	);
+	new fixtures.ProjectTrustStore(agentDir).set(projectDir, true);
+
+	const debuggingPort = await reservePort();
+	const diagnostics: string[] = [];
+	const app = launchPackagedApp(executable, debuggingPort, userDataDir, projectDir, agentDir, homeDir, diagnostics);
+	let browser: Browser | undefined;
+	let page: Page | undefined;
+	let phase = "connecting";
+	try {
+		({ browser, page } = await connectToApp(debuggingPort));
+		page.setDefaultTimeout(10_000);
+		await page.setViewportSize({ width: 1100, height: 760 });
+		await waitForServerReady(page);
+
+		phase = "checking expanded Chat task list";
+		await page.getByRole("button", { name: "Chat", exact: true }).click();
+		await page.getByRole("button", { name: "Task list Chat fixture", exact: true }).click();
+		await expect(page.locator(".workspace-header")).toHaveAttribute("data-active-session-id", CHAT_ACTIVE_ID);
+		let panel = page.getByRole("region", { name: "Tasks", exact: true });
+		await expect(panel).toBeVisible();
+		await expect(panel.locator(".task-list-row")).toHaveCount(6);
+		await expect(panel.locator(".task-list-items")).toHaveCSS("max-height", "150px");
+		await expect(panel.locator(".task-list-items")).toHaveCSS("overflow-y", "auto");
+		await expect(panel.locator(".task-list-spinner")).toHaveCount(5);
+		await expect(panel.locator(".task-list-row.is-completed")).toHaveCount(1);
+		await expect(panel.locator(".task-list-row.is-completed .task-list-text")).toHaveCSS(
+			"text-decoration-line",
+			"line-through",
+		);
+		await expect(panel).toHaveCSS("border-bottom-left-radius", "0px");
+		await expect(panel).toHaveCSS("border-bottom-right-radius", "0px");
+		await expect(panel).toHaveCSS("border-bottom-width", "0px");
+		const slot = page.locator(".composer-dock > .task-list-slot");
+		const composer = page.locator(".composer-dock > .composer-chat");
+		await expect(page.locator(".composer-dock > .task-list-slot + .composer-chat")).toHaveCount(1);
+		await expect(slot).toHaveCSS("opacity", "1");
+		const [slotBox, composerBox] = await Promise.all([slot.boundingBox(), composer.boundingBox()]);
+		expect(slotBox).not.toBeNull();
+		expect(composerBox).not.toBeNull();
+		expect(slotBox!.x - composerBox!.x).toBeCloseTo(16, 0);
+		expect(composerBox!.width - slotBox!.width).toBeCloseTo(32, 0);
+		expect(composerBox!.y - slotBox!.y - slotBox!.height).toBeCloseTo(0, 0);
+		await page.locator(".composer-dock").screenshot({
+			animations: "disabled",
+			path: testInfo.outputPath("task-list-expanded-chat.png"),
+		});
+		const transcriptScroll = page.locator(".transcript-scroll");
+		const expandedTranscriptHeight = await transcriptScroll.evaluate((element) => element.clientHeight);
+		await page.evaluate(() => {
+			const state = window as typeof window & { __taskListLongTasks?: number[]; __taskListLongTaskObserver?: PerformanceObserver };
+			state.__taskListLongTasks = [];
+			if (PerformanceObserver.supportedEntryTypes.includes("longtask")) {
+				state.__taskListLongTaskObserver = new PerformanceObserver((list) => {
+					state.__taskListLongTasks?.push(...list.getEntries().map((entry) => entry.duration));
+				});
+				state.__taskListLongTaskObserver.observe({ entryTypes: ["longtask"] });
+			}
+		});
+
+		phase = "checking collapsed task list";
+		await panel.getByRole("button", { name: "Collapse task list" }).click();
+		await expect(panel).toHaveClass(/\bis-collapsed\b/u);
+		await page.waitForTimeout(240);
+		await expect(panel.locator(".task-list-items .task-list-row")).toHaveCount(6);
+		await expect(panel.locator(".task-list-drawer")).toHaveAttribute("inert", "");
+		await expect(panel.locator(".task-list-summary .task-list-text")).toHaveText("Inspect implementation");
+		const summary = panel.getByRole("button", { name: /Working.*Inspect implementation.*Expand task list/u });
+		await expect(summary).toHaveAttribute("aria-expanded", "false");
+		await expect(summary).toHaveAttribute("aria-live", "polite");
+		await expect(summary).not.toHaveAttribute("aria-label");
+		const collapsedTranscriptHeight = await transcriptScroll.evaluate((element) => element.clientHeight);
+		expect(collapsedTranscriptHeight).toBeGreaterThan(expandedTranscriptHeight);
+		await page.locator(".composer-dock").screenshot({
+			animations: "disabled",
+			path: testInfo.outputPath("task-list-collapsed-chat.png"),
+		});
+		await summary.click();
+		await expect(panel).not.toHaveClass(/\bis-collapsed\b/u);
+		await page.waitForTimeout(240);
+		const expandedAgainTranscriptHeight = await transcriptScroll.evaluate((element) => element.clientHeight);
+		expect(expandedAgainTranscriptHeight).toBeCloseTo(expandedTranscriptHeight, 0);
+		const bottomGap = await transcriptScroll.evaluate((element) =>
+			Math.max(0, element.scrollHeight - element.scrollTop - element.clientHeight),
+		);
+		expect(bottomGap).toBeLessThanOrEqual(48);
+		const longestTaskListFrame = await page.evaluate(() => {
+			const state = window as typeof window & {
+				__taskListLongTaskObserver?: PerformanceObserver;
+				__taskListLongTasks?: number[];
+			};
+			state.__taskListLongTaskObserver?.disconnect();
+			return Math.max(0, ...(state.__taskListLongTasks ?? []));
+		});
+		expect(longestTaskListFrame).toBeLessThan(100);
+
+		phase = "checking Code task list";
+		await page.getByRole("button", { name: "Code", exact: true }).click();
+		await page.getByRole("dialog", { name: "Create a new project" }).waitFor();
+		await page.keyboard.press("Escape");
+		await page.getByRole("button", { name: "Task list Code fixture", exact: true }).click();
+		await expect(page.locator(".workspace-header")).toHaveAttribute("data-active-session-id", CODE_ID);
+		panel = page.getByRole("region", { name: "Tasks", exact: true });
+		await expect(panel.locator(".task-list-row")).toHaveCount(6);
+		await expect(page.locator(".composer-dock > .task-list-slot + .composer-code")).toHaveCount(1);
+		await page.locator(".composer-dock").screenshot({
+			animations: "disabled",
+			path: testInfo.outputPath("task-list-expanded-code.png"),
+		});
+
+		phase = "checking persisted completed task list stays closed";
+		await page.getByRole("button", { name: "Chat", exact: true }).click();
+		await page.getByRole("button", { name: "Completed task list fixture", exact: true }).click();
+		await expect(page.locator(".workspace-header")).toHaveAttribute("data-active-session-id", COMPLETED_TASK_ID);
+		await expect(page.getByRole("region", { name: "Tasks", exact: true })).toHaveCount(0);
+	} catch (error) {
+		const bodyText = await page?.locator("body").innerText().catch(() => "renderer unavailable");
+		throw new Error(
+			`${error instanceof Error ? error.message : String(error)}\nphase=${phase}\nrenderer body:\n${bodyText ?? "unavailable"}\n${diagnostics.join("").slice(-8_000)}`,
+		);
+	} finally {
+		await browser?.close().catch(() => undefined);
+		await stopProcess(app);
+		await rm(tempRoot, { recursive: true, force: true });
+	}
+});
+
+test("packaged worker, WASM, trusted extension, and utility lifecycle stay functional", async () => {
+	test.setTimeout(120_000);
+	const executable = packagedExecutable();
+	expect(existsSync(executable), `Package the desktop app first: ${executable}`).toBe(true);
+
+	const tempRoot = await mkdtemp(path.join(tmpdir(), "metis-packaged-smoke-"));
+	const agentDir = path.join(tempRoot, "agent");
+	const homeDir = path.join(tempRoot, "home");
+	const projectDir = path.join(tempRoot, "project");
+	const extensionDir = path.join(projectDir, ".metis", "extensions");
+	const projectSkillDir = path.join(projectDir, ".metis", "skills", "packaged-project-skill");
 	const userDataDir = path.join(tempRoot, "electron");
 	const scheduleQaDir = path.join(desktopRoot, "test-results", "design-qa", "scheduled-tasks");
+	const permissionQaDir = path.join(desktopRoot, "test-results", "design-qa", "permission-approval");
+	const askUserQaDir = path.join(desktopRoot, "test-results", "design-qa", "ask-user");
 	const assetQaDir = path.join(desktopRoot, "test-results", "design-qa", "assets");
 	const groupingQaDir = path.join(desktopRoot, "test-results", "design-qa", "session-grouping");
 	await Promise.all([
@@ -282,6 +463,8 @@ test("packaged worker, WASM, trusted extension, and utility lifecycle stay funct
 		mkdir(projectSkillDir, { recursive: true }),
 		mkdir(userDataDir),
 		mkdir(scheduleQaDir, { recursive: true }),
+		mkdir(permissionQaDir, { recursive: true }),
+		mkdir(askUserQaDir, { recursive: true }),
 		mkdir(assetQaDir, { recursive: true }),
 		mkdir(groupingQaDir, { recursive: true }),
 	]);
@@ -295,12 +478,128 @@ test("packaged worker, WASM, trusted extension, and utility lifecycle stay funct
 		}
 		let body = "";
 		for await (const chunk of request) body += chunk;
-		const payload = JSON.parse(body) as { tools?: Array<{ function?: { name?: string }; name?: string }> };
+		const payload = JSON.parse(body) as {
+			messages?: unknown[];
+			tools?: Array<{ function?: { name?: string }; name?: string }>;
+		};
 		providerToolNames.push(
 			(payload.tools ?? []).map((tool) => tool.function?.name ?? tool.name).filter((name): name is string => Boolean(name)),
 		);
 		providerRequests += 1;
 		response.writeHead(200, { "content-type": "text/event-stream" });
+		const providerTranscript = JSON.stringify(payload.messages ?? []);
+		if (providerTranscript.includes("request packaged questions") && !providerTranscript.includes("call-packaged-questions")) {
+			response.end(
+				`data: ${JSON.stringify({
+					id: "chatcmpl-packaged-questions",
+					object: "chat.completion.chunk",
+					created: 1,
+					model: "packaged-smoke-model",
+					choices: [{
+						index: 0,
+						delta: {
+							role: "assistant",
+							tool_calls: [{
+								index: 0,
+								id: "call-packaged-questions",
+								type: "function",
+								function: {
+									name: "ask_user",
+									arguments: JSON.stringify({
+										questions: [
+											{
+												question: "How should Metis answer?",
+												multiple: true,
+												options: [
+													{ label: "Fast and concise" },
+													{ label: "Detailed explanation" },
+													{ label: "Adapt to context" },
+													{ label: "Summary first" },
+												],
+											},
+											{
+												question: "Which communication style should Metis use?",
+												multiple: true,
+												options: [
+													{ label: "Professional" },
+													{ label: "Friendly" },
+													{ label: "Contextual" },
+													{ label: "Warm" },
+												],
+											},
+										],
+									}),
+								},
+							}],
+						},
+						finish_reason: "tool_calls",
+					}],
+				})}\n\ndata: [DONE]\n\n`,
+			);
+			return;
+		}
+		if (providerTranscript.includes("request packaged single question") && !providerTranscript.includes("call-packaged-single-question")) {
+			response.end(
+				`data: ${JSON.stringify({
+					id: "chatcmpl-packaged-single-question",
+					object: "chat.completion.chunk",
+					created: 1,
+					model: "packaged-smoke-model",
+					choices: [{
+						index: 0,
+						delta: {
+							role: "assistant",
+							tool_calls: [{
+								index: 0,
+								id: "call-packaged-single-question",
+								type: "function",
+								function: {
+									name: "ask_user",
+									arguments: JSON.stringify({
+										questions: [{
+											question: "Where should Metis store the task data?",
+											multiple: false,
+											options: [
+												{ label: "Local database" },
+												{ label: "Cloud sync" },
+												{ label: "Shared file" },
+												{ label: "Ask each time" },
+											],
+										}],
+									}),
+								},
+							}],
+						},
+						finish_reason: "tool_calls",
+					}],
+				})}\n\ndata: [DONE]\n\n`,
+			);
+			return;
+		}
+		if (providerTranscript.includes("request packaged approval") && !providerTranscript.includes("call-packaged-approval")) {
+			response.end(
+				`data: ${JSON.stringify({
+					id: "chatcmpl-packaged-approval",
+					object: "chat.completion.chunk",
+					created: 1,
+					model: "packaged-smoke-model",
+					choices: [{
+						index: 0,
+						delta: {
+							role: "assistant",
+							tool_calls: [{
+								index: 0,
+								id: "call-packaged-approval",
+								type: "function",
+								function: { name: "bash", arguments: '{"command":"pwd"}' },
+							}],
+						},
+						finish_reason: "tool_calls",
+					}],
+				})}\n\ndata: [DONE]\n\n`,
+			);
+			return;
+		}
 		response.end(
 			`data: ${JSON.stringify({
 				id: "chatcmpl-packaged-smoke",
@@ -321,7 +620,7 @@ test("packaged worker, WASM, trusted extension, and utility lifecycle stay funct
 	});
 	const providerPort = await listen(fakeProvider);
 	const codingAgentUrl = pathToFileURL(
-		path.join(packagedAsar(), ".webpack", "app-server", "node_modules", "@arcmind", "coding-agent", "dist", "index.js"),
+		path.join(packagedAsar(), ".webpack", "app-server", "node_modules", "@metis", "coding-agent", "dist", "index.js"),
 	).href;
 	await Promise.all([
 		writeFile(
@@ -355,8 +654,8 @@ test("packaged worker, WASM, trusted extension, and utility lifecycle stay funct
 		),
 		writeFile(
 			path.join(extensionDir, "packaged-image.ts"),
-			`export default function (arcmind) {
-	arcmind.on("session_start", async (_event, ctx) => {
+			`export default function (metis) {
+	metis.on("session_start", async (_event, ctx) => {
 		try {
 			const { resizeImage } = await import(${JSON.stringify(codingAgentUrl)});
 			const input = Uint8Array.from(Buffer.from(${JSON.stringify(TINY_PNG)}, "base64"));
@@ -406,7 +705,7 @@ test("packaged worker, WASM, trusted extension, and utility lifecycle stay funct
 
 		phase = "verifying draft creation timing";
 		const bridge = await page.evaluate(() => {
-			const api = (globalThis as unknown as { arcMind: ArcMindDesktopApi }).arcMind;
+			const api = (globalThis as unknown as { metis: MetisDesktopApi }).metis;
 			return {
 				hasAttachmentPicker: typeof api.selectAttachmentFiles === "function",
 				hasSkillList: typeof api.listSkills === "function",
@@ -414,20 +713,20 @@ test("packaged worker, WASM, trusted extension, and utility lifecycle stay funct
 		});
 		expect(bridge).toEqual({ hasAttachmentPicker: true, hasSkillList: true });
 		const sessionsBeforeDraft = await page.evaluate(() =>
-			(globalThis as unknown as { arcMind: ArcMindDesktopApi }).arcMind.listSessions({ limit: 200 }),
+			(globalThis as unknown as { metis: MetisDesktopApi }).metis.listSessions({ limit: 200 }),
 		);
 		expect(sessionsBeforeDraft.sessions).toHaveLength(0);
 		await page.getByRole("button", { name: "New task" }).click();
 		const sessionsAfterNewTask = await page.evaluate(() =>
-			(globalThis as unknown as { arcMind: ArcMindDesktopApi }).arcMind.listSessions({ limit: 200 }),
+			(globalThis as unknown as { metis: MetisDesktopApi }).metis.listSessions({ limit: 200 }),
 		);
 		expect(sessionsAfterNewTask.sessions).toHaveLength(0);
 		await page.locator("#composer-input").fill("managed packaged smoke");
 		await page.getByRole("button", { name: "Send message" }).click();
-		await expect(page.getByText("packaged-turn-ok", { exact: true })).toBeVisible();
-		expect(providerToolNames[0]).toEqual(expect.arrayContaining(["web_fetch", "web_search"]));
+		await expect(page.getByText("packaged-turn-ok", { exact: true }).first()).toBeVisible();
+		expect(providerToolNames[0]).toEqual(expect.arrayContaining(["ask_user", "web_fetch", "web_search"]));
 		const sessionsAfterFirstSend = await page.evaluate(() =>
-			(globalThis as unknown as { arcMind: ArcMindDesktopApi }).arcMind.listSessions({ limit: 200 }),
+			(globalThis as unknown as { metis: MetisDesktopApi }).metis.listSessions({ limit: 200 }),
 		);
 		expect(sessionsAfterFirstSend.sessions).toHaveLength(1);
 		expect(sessionsAfterFirstSend.sessions[0]).toMatchObject({ mode: "chat", cwdOrigin: "managed" });
@@ -479,6 +778,109 @@ test("packaged worker, WASM, trusted extension, and utility lifecycle stay funct
 		await expect(page.getByText("packaged-turn-ok", { exact: true })).toBeVisible();
 		expect(providerRequests).toBe(2);
 
+		phase = "answering packaged structured questions";
+		await page.setViewportSize({ width: 1097, height: 588 });
+		const transcriptScroll = page.locator(".transcript-scroll");
+		const transcriptHeightBeforeQuestions = await transcriptScroll.evaluate((element) => element.clientHeight);
+		await page.locator("#composer-input").fill("request packaged questions");
+		await page.getByRole("button", { name: "Send" }).click();
+		const questionPanel = page.locator(".ask-user-panel");
+		await expect(questionPanel).toBeVisible();
+		await expect(page.locator(".modal-backdrop")).toHaveCount(0);
+		await expect(questionPanel).toContainText("How should Metis answer?");
+		await expect(questionPanel).toContainText("Something else");
+		await expect(questionPanel.locator('[aria-expanded]')).toHaveCount(0);
+		const questionSlot = page.locator(".composer-dock > .ask-user-slot");
+		const questionComposer = page.locator(".composer-dock > .composer-chat");
+		await expect(page.locator(".composer-dock > .ask-user-slot + .composer-chat")).toHaveCount(1);
+		await questionSlot.evaluate(async (element) => {
+			await Promise.all(element.getAnimations().map((animation) => animation.finished));
+		});
+		const [questionSlotBox, questionComposerBox] = await Promise.all([
+			questionSlot.boundingBox(),
+			questionComposer.boundingBox(),
+		]);
+		expect(questionSlotBox).not.toBeNull();
+		expect(questionComposerBox).not.toBeNull();
+		expect(questionSlotBox!.x - questionComposerBox!.x).toBeCloseTo(16, 0);
+		expect(questionComposerBox!.width - questionSlotBox!.width).toBeCloseTo(32, 0);
+		expect(questionComposerBox!.y - questionSlotBox!.y - questionSlotBox!.height).toBeCloseTo(0, 0);
+		expect(await transcriptScroll.evaluate((element) => element.clientHeight)).toBeLessThan(transcriptHeightBeforeQuestions);
+		await questionPanel.getByRole("checkbox", { name: "Fast and concise", exact: true }).click();
+		await questionPanel.getByRole("checkbox", { name: "Adapt to context", exact: true }).click();
+		await questionPanel.getByRole("checkbox", { name: "Detailed explanation", exact: true }).focus();
+		await expect(questionPanel).toContainText("2 selected");
+		await page.screenshot({
+			animations: "disabled",
+			path: path.join(askUserQaDir, "inline-question-multi-first.png"),
+		});
+		await questionPanel.locator('.ask-user-step[aria-label="Next question"]').click();
+		await expect(questionPanel).toContainText("Which communication style should Metis use?");
+		await questionPanel.getByRole("checkbox", { name: "Friendly", exact: true }).click();
+		await questionPanel.getByRole("checkbox", { name: "Contextual", exact: true }).click();
+		await questionPanel.getByRole("checkbox", { name: "Friendly", exact: true }).focus();
+		await expect(questionPanel).toContainText("2 selected");
+		await page.screenshot({ animations: "disabled", path: path.join(askUserQaDir, "inline-question-multi-last.png") });
+		phase = "opening the packaged multi-select custom answer";
+		await questionPanel.getByRole("checkbox", { name: "Something else", exact: true }).click({ timeout: 5_000 });
+		phase = "filling the packaged multi-select custom answer";
+		await expect(questionPanel.getByLabel("Something else")).toBeVisible({ timeout: 5_000 });
+		await questionPanel.getByLabel("Something else").fill("Linux later", { timeout: 5_000 });
+		phase = "submitting packaged structured questions";
+		await page.screenshot({ animations: "disabled", path: path.join(askUserQaDir, "inline-question-multi-custom.png") });
+		await questionPanel.getByRole("button", { name: "Submit answers", exact: true }).click();
+		await expect(questionPanel).toHaveCount(0);
+		await expect.poll(() => providerRequests).toBe(4);
+		await expect.poll(() => transcriptScroll.evaluate((element) => element.clientHeight)).toBe(transcriptHeightBeforeQuestions);
+
+		phase = "answering a packaged single-select question";
+		await page.locator("#composer-input").fill("request packaged single question");
+		await page.getByRole("button", { name: "Send" }).click();
+		await expect(questionPanel).toContainText("Where should Metis store the task data?");
+		await page.screenshot({ animations: "disabled", path: path.join(askUserQaDir, "inline-question-single.png") });
+		await questionPanel.getByRole("radio", { name: "Cloud sync", exact: true }).click();
+		await expect(questionPanel).toHaveCount(0);
+		await expect.poll(() => providerRequests).toBe(6);
+
+		phase = "approving an inline packaged permission request";
+		const transcriptHeightBeforeApproval = await transcriptScroll.evaluate((element) => element.clientHeight);
+		await page.locator("#composer-input").fill("request packaged approval");
+		await page.getByRole("button", { name: "Send" }).click();
+		const approvalPanel = page.locator(".permission-approval-panel");
+		await expect(approvalPanel).toBeVisible();
+		await expect(page.locator(".modal-backdrop")).toHaveCount(0);
+		await expect(approvalPanel).toContainText("Metis wants to use bash");
+		await expect(approvalPanel.locator("dt", { hasText: "Command" })).toBeVisible();
+		await expect(approvalPanel.locator("dd code", { hasText: "pwd" })).toBeVisible();
+		await expect(approvalPanel.locator("dt", { hasText: "Working directory" })).toBeVisible();
+		await expect(approvalPanel).not.toContainText("Arguments:");
+		await expect(approvalPanel.locator('[aria-expanded]')).toHaveCount(0);
+		const approvalSlot = page.locator(".composer-dock > .permission-approval-slot");
+		const approvalComposer = page.locator(".composer-dock > .composer-chat");
+		await expect(page.locator(".composer-dock > .permission-approval-slot + .composer-chat")).toHaveCount(1);
+		await approvalSlot.evaluate(async (element) => {
+			await Promise.all(element.getAnimations().map((animation) => animation.finished));
+		});
+		const [approvalSlotBox, approvalComposerBox] = await Promise.all([
+			approvalSlot.boundingBox(),
+			approvalComposer.boundingBox(),
+		]);
+		expect(approvalSlotBox).not.toBeNull();
+		expect(approvalComposerBox).not.toBeNull();
+		expect(approvalSlotBox!.x - approvalComposerBox!.x).toBeCloseTo(16, 0);
+		expect(approvalComposerBox!.width - approvalSlotBox!.width).toBeCloseTo(32, 0);
+		expect(approvalComposerBox!.y - approvalSlotBox!.y - approvalSlotBox!.height).toBeCloseTo(0, 0);
+		expect(await transcriptScroll.evaluate((element) => element.clientHeight)).toBeLessThan(transcriptHeightBeforeApproval);
+		const denyButton = approvalPanel.getByRole("button", { name: /Deny/u });
+		const allowButton = approvalPanel.getByRole("button", { name: "Allow once", exact: true });
+		const [denyBox, allowBox] = await Promise.all([denyButton.boundingBox(), allowButton.boundingBox()]);
+		expect((allowBox?.x ?? 0)).toBeGreaterThan(denyBox?.x ?? 0);
+		await page.screenshot({ path: path.join(permissionQaDir, "inline-approval.png") });
+		await allowButton.click();
+		await expect(approvalPanel).toHaveCount(0);
+		await expect.poll(() => providerRequests).toBe(8);
+		await expect.poll(() => transcriptScroll.evaluate((element) => element.clientHeight)).toBe(transcriptHeightBeforeApproval);
+
 		phase = "creating and running a packaged scheduled task";
 		await page.getByRole("button", { name: "Scheduled tasks", exact: true }).click();
 		await expect(page.getByRole("heading", { name: "Create your first scheduled task" })).toBeVisible();
@@ -496,16 +898,17 @@ test("packaged worker, WASM, trusted extension, and utility lifecycle stay funct
 		await emptyNewTaskTrigger.click();
 		const newTaskMenu = page.getByRole("listbox", { name: "Create scheduled task" });
 		await expect(newTaskMenu).toBeVisible();
+		await expect.poll(async () => (await newTaskMenu.boundingBox())?.width ?? 0).toBeGreaterThanOrEqual(204);
 		const [newTaskTriggerBox, newTaskMenuBox] = await Promise.all([emptyNewTaskTrigger.boundingBox(), newTaskMenu.boundingBox()]);
 		expect(newTaskMenuBox?.width).toBeGreaterThanOrEqual(204);
 		expect(Math.abs((newTaskMenuBox?.x ?? 0) + (newTaskMenuBox?.width ?? 0) - ((newTaskTriggerBox?.x ?? 0) + (newTaskTriggerBox?.width ?? 0)))).toBeLessThanOrEqual(1);
 		await page.screenshot({ path: path.join(scheduleQaDir, "overview-new-task-menu.png") });
-		await page.getByRole("option", { name: "Create with ArcMind", exact: true }).click();
+		await page.getByRole("option", { name: "Create with Metis", exact: true }).click();
 		const workspaceDialog = page.getByRole("dialog", { name: "Where should this task work?" });
 		await expect(workspaceDialog).toBeVisible();
-		await page.screenshot({ path: path.join(scheduleQaDir, "create-with-arcmind-workspace.png") });
+		await page.screenshot({ path: path.join(scheduleQaDir, "create-with-metis-workspace.png") });
 		await workspaceDialog.getByRole("button", { name: /Use default workspace/u }).click();
-		await expect.poll(() => providerRequests).toBe(3);
+		await expect.poll(() => providerRequests).toBe(9);
 		await expect(page.getByRole("heading", { name: "Set up a scheduled task", exact: true })).toBeVisible();
 		await page.getByRole("button", { name: "Scheduled tasks", exact: true }).click();
 		await page.locator(".scheduled-tasks-empty").getByRole("button", { name: "Create scheduled task", exact: true }).click();
@@ -530,8 +933,8 @@ test("packaged worker, WASM, trusted extension, and utility lifecycle stay funct
 		await runNowButton.click();
 		await expect(runNowButton).toBeDisabled();
 		await expect(page.locator(".scheduled-task-history").getByText("succeeded", { exact: true })).toBeVisible({ timeout: 20_000 });
-		expect(providerRequests).toBe(4);
-		expect(providerToolNames[3]?.sort()).toEqual(
+		expect(providerRequests).toBe(10);
+		expect(providerToolNames[9]?.sort()).toEqual(
 			["bash", "edit", "find", "grep", "ls", "read", "web_fetch", "web_search", "write"].sort(),
 		);
 		await expect(runNowButton).toBeEnabled();
@@ -542,22 +945,41 @@ test("packaged worker, WASM, trusted extension, and utility lifecycle stay funct
 		})).toEqual({ backgroundColor: "rgb(239, 238, 233)", opacity: "1" });
 		await page.screenshot({ path: path.join(scheduleQaDir, "task-detail.png") });
 		await page.locator(".scheduled-task-history").getByRole("button").click();
-		await expect(page.locator('.session-row[data-scheduled="true"]')).toContainText("Scheduled");
+		await expect(page.locator(".scheduled-task-quick-list")).toContainText("Morning brief");
 
-		phase = "deleting the packaged task and its generated session";
+		phase = "retaining and deleting a packaged scheduled session from the sidebar";
 		await page.locator(".session-sidebar").getByRole("button", { name: "Scheduled tasks", exact: true }).click();
-		await page.locator(".scheduled-task-quick-list").getByRole("button", { name: /Morning brief/u }).click();
+		await page.locator(".scheduled-task-quick-list").getByRole("button", { name: "Morning brief", exact: true }).click();
 		await page.getByRole("button", { name: "Delete task" }).click();
 		const deleteTaskDialog = page.getByRole("dialog", { name: "Delete “Morning brief”?" });
 		const deleteSessions = deleteTaskDialog.getByRole("checkbox", {
 			name: /Also delete all session files generated by this task/u,
 		});
 		await expect(deleteSessions).not.toBeChecked();
-		await deleteSessions.check();
 		await deleteTaskDialog.getByRole("button", { name: "Delete", exact: true }).click();
-		await expect(page.locator('.session-row[data-scheduled="true"]')).toHaveCount(0);
+		const retainedSessionRow = page.locator('.scheduled-task-quick-list .session-row[data-scheduled="true"]');
+		await expect(retainedSessionRow.locator(".session-scheduled-badge")).toHaveCount(0);
+		const retainedSessionDot = retainedSessionRow.locator(".session-button-title i");
+		await expect(retainedSessionDot).toHaveCSS("width", "6px");
+		await expect(retainedSessionDot).toHaveCSS("height", "6px");
+		await expect(retainedSessionDot).toHaveCSS("border-radius", "50%");
+		await expect(page.locator(".scheduled-task-quick-list").getByRole("heading", { name: "Scheduled tasks" })).toBeVisible();
+		expect(await page.locator(".project-list").locator(
+			":scope > .session-grouping-label, :scope > .loose-tasks > h2, :scope > .scheduled-task-quick-list > h2",
+		).allTextContents()).toEqual(["Projects", "Tasks", "Scheduled tasks"]);
+		await page.locator(".session-sidebar").screenshot({ path: path.join(scheduleQaDir, "retained-session-sidebar.png") });
+		const retainedSessionName = await retainedSessionRow.locator(".session-button").getAttribute("aria-label");
+		expect(retainedSessionName).toBeTruthy();
+		await retainedSessionRow.hover();
+		await page.locator(".session-sidebar").screenshot({ path: path.join(scheduleQaDir, "retained-session-sidebar-actions.png") });
+		await retainedSessionRow.getByRole("button", { name: `Actions for ${retainedSessionName}`, exact: true }).click();
+		await expect(page.locator(".session-action-menu").getByRole("menuitem")).toHaveText(["Delete"]);
+		await page.locator(".session-action-menu").getByRole("menuitem", { name: "Delete" }).click();
+		await page.getByRole("dialog", { name: "Delete session?" }).getByRole("button", { name: "Move to Trash" }).click();
+		await expect(retainedSessionRow).toHaveCount(0);
+		await expect(page.locator(".scheduled-task-quick-list")).toHaveCount(0);
 		const remainingSessions = await page.evaluate(() =>
-			(globalThis as unknown as { arcMind: ArcMindDesktopApi }).arcMind.listSessions({ limit: 200 }),
+			(globalThis as unknown as { metis: MetisDesktopApi }).metis.listSessions({ limit: 200 }),
 		);
 		expect(remainingSessions.sessions).not.toEqual(
 			expect.arrayContaining([expect.objectContaining({ name: "Morning brief", scheduled: expect.any(Object) })]),
@@ -569,7 +991,7 @@ test("packaged worker, WASM, trusted extension, and utility lifecycle stay funct
 		phase = "reloading and restarting";
 		await page.reload({ waitUntil: "domcontentloaded" });
 		await page.locator(".session-row").filter({ hasText: "packaged smoke turn" }).click();
-		await expect(page.getByText("packaged-turn-ok", { exact: true })).toBeVisible();
+		await expect(page.getByText("packaged-turn-ok", { exact: true }).first()).toBeVisible();
 		const firstUtilityPid = appServerPid(rootPid);
 		if (!firstUtilityPid) throw new Error("Could not find the packaged App Server");
 		process.kill(firstUtilityPid, "SIGKILL");
@@ -602,20 +1024,22 @@ test("packaged personal profile renders cached Token and Skill activity", async 
 	const executable = packagedExecutable();
 	expect(existsSync(executable), `Package the desktop app first: ${executable}`).toBe(true);
 
-	const tempRoot = await mkdtemp(path.join(tmpdir(), "arcmind-profile-"));
+	const tempRoot = await mkdtemp(path.join(tmpdir(), "metis-profile-"));
 	const agentDir = path.join(tempRoot, "agent");
 	const homeDir = path.join(tempRoot, "home");
 	const projectDir = path.join(tempRoot, "profile-project");
 	const userDataDir = path.join(tempRoot, "electron");
 	const qaDir = path.join(desktopRoot, "test-results", "design-qa", "profile");
+	const settingsQaDir = path.join(desktopRoot, "test-results", "design-qa", "settings");
 	await Promise.all([
 		mkdir(agentDir),
 		mkdir(homeDir),
 		mkdir(projectDir),
 		mkdir(userDataDir),
 		mkdir(qaDir, { recursive: true }),
+		mkdir(settingsQaDir, { recursive: true }),
 	]);
-	const now = Date.now();
+	const now = Date.now() - 60 * 60_000;
 	const skillNames = ["pdf", "ponytail", "writing-plans"];
 	for (let index = 0; index < 18; index += 1) {
 		const mode = index < 12 ? "code" : "chat";
@@ -628,7 +1052,7 @@ test("packaged personal profile renders cached Token and Skill activity", async 
 		manager.appendMessage({ role: "user", content: `profile fixture ${index}`, timestamp });
 		manager.appendThinkingLevelChange(index < 12 ? "high" : "medium");
 		manager.appendMessage(assistantMessage(timestamp + 30 * 60_000, (index + 1) * 850));
-		manager.appendCustomEntry("arcmind.skill_usage.v1", { name: skillNames[index % skillNames.length], trigger: "read" });
+		manager.appendCustomEntry("metis.skill_usage.v1", { name: skillNames[index % skillNames.length], trigger: "read" });
 		manager.close();
 	}
 
@@ -647,18 +1071,21 @@ test("packaged personal profile renders cached Token and Skill activity", async 
 		await waitForServerReady(page);
 
 		phase = "opening Settings";
-		await page.getByRole("button", { name: "ArcMind", exact: true }).click();
+		await page.getByRole("button", { name: "Metis", exact: true }).click();
 		await expect(page.getByRole("menuitem", { name: "Settings", exact: true })).toBeFocused();
 		await page.screenshot({ path: path.join(qaDir, "account-menu.png") });
 		await page.getByRole("menuitem", { name: "Settings", exact: true }).click();
-		await expect(page.getByRole("heading", { name: "ArcMind User", exact: true })).toBeVisible();
+		await expect(page.getByRole("heading", { name: "Metis User", exact: true })).toBeVisible();
+		const settingsBox = await page.locator(".settings-dialog").boundingBox();
+		expect(settingsBox?.width).toBe(1_040);
+		expect(settingsBox?.height).toBe(720);
 		await expect(page.getByText("Most used Skills", { exact: true })).toBeVisible();
 		await expect(page.locator(".profile-heatmap-week")).toHaveCount(53);
 		await expect(page.getByText("pdf", { exact: true })).toBeVisible();
 
 		phase = "checking profile data and cache";
 		const measurements = await page.evaluate(async () => {
-			const api = (globalThis as unknown as { arcMind: ArcMindDesktopApi }).arcMind;
+			const api = (globalThis as unknown as { metis: MetisDesktopApi }).metis;
 			const firstStarted = performance.now();
 			const first = await api.getProfile();
 			const secondStarted = performance.now();
@@ -690,6 +1117,7 @@ test("packaged personal profile renders cached Token and Skill activity", async 
 		phase = "capturing the profile";
 		const activeCells = page.locator('.profile-heatmap-cell:not([data-level="0"])');
 		expect(await activeCells.count()).toBe(18);
+		await expect(page.locator('.profile-heatmap-cell[aria-label*="15.3K Tokens"]')).toHaveCount(1);
 		const heatmap = await page.locator(".profile-heatmap").evaluate((element) => ({
 			clientWidth: element.clientWidth,
 			scrollWidth: element.scrollWidth,
@@ -713,12 +1141,107 @@ test("packaged personal profile renders cached Token and Skill activity", async 
 			return opacity;
 		});
 		expect(revealWave.first).toBeGreaterThan(revealWave.last);
-		await activeCells.last().hover();
+		const tooltipCell = page.locator(".profile-heatmap-cell").nth(185);
+		await tooltipCell.hover();
+		await expect.poll(() => tooltipCell.evaluate((cell) => getComputedStyle(cell, "::after").opacity)).toBe("1");
+		expect.soft(await tooltipCell.evaluate((cell) => Number.parseInt(getComputedStyle(cell).zIndex, 10))).toBeGreaterThan(0);
+		expect.soft(await tooltipCell.evaluate((cell) => Number.parseInt(getComputedStyle(cell.parentElement!).zIndex, 10))).toBeGreaterThan(0);
+		expect(await page.locator(".profile-identity").evaluate((element) => getComputedStyle(element).borderBottomWidth)).not.toBe("0px");
+		expect(await page.locator(".profile-activity").evaluate((element) => getComputedStyle(element).borderTopWidth)).not.toBe("0px");
+		expect(await page.locator(".profile-details").evaluate((element) => getComputedStyle(element).borderTopWidth)).not.toBe("0px");
+		const profileOverflow = await page.locator(".settings-page-scroll").evaluate((element) => element.scrollHeight - element.clientHeight);
+		expect(profileOverflow).toBeLessThanOrEqual(1);
 		await page.screenshot({ path: path.join(qaDir, "profile-1440x900.png") });
+		await page.screenshot({ path: path.join(qaDir, "profile-tooltip-1440x900.png") });
+
+		phase = "checking Usage settings";
+		await page.getByRole("button", { name: "Usage", exact: true }).click();
+		await expect(page.locator(".settings-main-header").getByRole("heading", { name: "Usage", exact: true })).toBeVisible();
+		await expect(page.locator(".usage-bar")).toHaveCount(30);
+		const usage = await page.evaluate(() =>
+			(globalThis as unknown as { metis: MetisDesktopApi }).metis.getUsage({ rangeDays: 30 }),
+		);
+		expect(usage).toMatchObject({
+			rangeDays: 30,
+			totalTokens: 102_000,
+			chatTokens: 35_700,
+			codeTokens: 66_300,
+			chatSessionCount: 3,
+			codeSessionCount: 12,
+			topModels: [{ provider: "openai", modelId: "profile-fixture", totalTokens: 102_000 }],
+		});
+		await page.locator(".usage-bar").last().hover();
+		await page.setViewportSize({ width: 1440, height: 820 });
+		expect(await page.locator(".usage-toolbar").evaluate((element) => getComputedStyle(element).borderBottomWidth)).not.toBe("0px");
+		expect(await page.locator(".usage-details-grid").evaluate((element) => getComputedStyle(element).borderTopWidth)).not.toBe("0px");
+		expect.soft(await page.locator(".settings-page-scroll-usage").evaluate((element) => element.scrollHeight - element.clientHeight)).toBeLessThanOrEqual(1);
+		await page.screenshot({ path: path.join(settingsQaDir, "usage-1440x820.png") });
+		const tableView = page.getByRole("button", { name: "Table view", exact: true });
+		const chartView = page.getByRole("button", { name: "Chart view", exact: true });
+		await tableView.click();
+		await expect(tableView).toHaveAttribute("aria-pressed", "true");
+		expect(await page.locator(".usage-table-wrap tbody tr")).toHaveCount(30);
+		expect(await page.locator(".settings-page-scroll-usage").evaluate((element) => element.scrollHeight - element.clientHeight)).toBeLessThanOrEqual(1);
+		expect(await page.locator(".usage-view-toggle").evaluate((element) => getComputedStyle(element).backgroundColor)).toBe("rgba(0, 0, 0, 0)");
+		await page.screenshot({ path: path.join(settingsQaDir, "usage-table-30d-1440x820.png") });
+		await chartView.click();
+		await expect(chartView).toHaveAttribute("aria-pressed", "true");
+		await page.getByRole("button", { name: "7d", exact: true }).click();
+		await expect(page.locator(".usage-bar")).toHaveCount(7);
+		await tableView.click();
+		await expect(tableView).toHaveAttribute("aria-pressed", "true");
+		await expect(page.locator(".usage-table-wrap tbody tr")).toHaveCount(7);
+		expect(await page.locator(".settings-page-scroll-usage").evaluate((element) => element.scrollHeight - element.clientHeight)).toBeLessThanOrEqual(1);
+		await page.screenshot({ path: path.join(settingsQaDir, "usage-table-1440x820.png") });
+		await chartView.click();
+		await expect(chartView).toHaveAttribute("aria-pressed", "true");
+		await expect(page.locator(".usage-bar")).toHaveCount(7);
+
+		phase = "checking Model settings";
+		await page.getByRole("button", { name: "Model", exact: true }).click();
+		await expect(page.locator(".settings-main-header").getByRole("heading", { name: "Model", exact: true })).toBeVisible();
+		const providerGrid = page.locator(".model-provider-grid");
+		await expect(providerGrid.locator(".model-provider-card")).not.toHaveCount(0);
+		await page.screenshot({ path: path.join(settingsQaDir, "model-grid-1440x820.png") });
+		const openAiProvider = providerGrid.locator(".model-provider-card").filter({
+			has: page.getByText("OpenAI", { exact: true }),
+		});
+		await openAiProvider.click();
+		await expect(page.locator(".model-provider-dialog")).toBeVisible();
+		const builtinEditor = page.locator(".model-provider-editor");
+		await expect(builtinEditor.getByLabel("API key", { exact: true })).toBeVisible();
+		await expect(builtinEditor.getByLabel("Base URL", { exact: true })).toHaveCount(0);
+		await builtinEditor.getByLabel("API key", { exact: true }).fill("openai-settings-secret");
+		await builtinEditor.getByRole("button", { name: "Save API key", exact: true }).click();
+		await expect(page.getByText("Provider saved", { exact: true })).toBeVisible();
+		await expect(builtinEditor.getByText("••••••••••••", { exact: true })).toBeVisible();
+		await builtinEditor.getByRole("button", { name: "Use this model", exact: true }).click();
+		await expect(page.getByText("Defaults saved", { exact: true })).toBeVisible();
+		const modelLayout = await page.locator(".settings-page-scroll").evaluate((scroll) => {
+			const page = scroll.querySelector<HTMLElement>(".model-settings-page")!;
+			const grid = page.querySelector<HTMLElement>(".model-provider-grid")!;
+			return {
+				outerOverflow: scroll.scrollHeight - scroll.clientHeight,
+				columns: getComputedStyle(grid).gridTemplateColumns.split(" ").length,
+			};
+		});
+		expect(modelLayout.outerOverflow).toBeLessThanOrEqual(1);
+		expect(modelLayout.columns).toBeGreaterThanOrEqual(3);
+		expect((await page.evaluate(() =>
+			(globalThis as unknown as { metis: MetisDesktopApi }).metis.getModelSettings(),
+		)).defaultModel?.provider).toBe("openai");
+		await page.screenshot({ path: path.join(settingsQaDir, "model-builtin-1440x820.png") });
+		await builtinEditor.getByRole("button", { name: "Clear credentials", exact: true }).click();
+		await expect(page.getByText("Credentials cleared", { exact: true })).toBeVisible();
+		await page.getByRole("button", { name: "Close provider settings", exact: true }).click();
+		await expect(openAiProvider.getByText("Set up", { exact: true })).toBeVisible();
+		await expect(page.getByRole("button", { name: "Add provider", exact: true })).toHaveCount(0);
+		await expect(page.getByLabel("Provider ID", { exact: true })).toHaveCount(0);
 
 		phase = "checking compact layout";
+		await page.getByRole("button", { name: "Profile", exact: true }).click();
 		await page.setViewportSize({ width: 960, height: 720 });
-		await expect(page.getByRole("heading", { name: "ArcMind User", exact: true })).toBeVisible();
+		await expect(page.getByRole("heading", { name: "Metis User", exact: true })).toBeVisible();
 		expect(
 			await page.locator(".profile-stats").evaluate((element) =>
 				getComputedStyle(element).gridTemplateColumns.split(" ").length,
@@ -747,7 +1270,7 @@ test("packaged Code subagent sidebar lists durable work and opens its transcript
 	const executable = packagedExecutable();
 	expect(existsSync(executable), `Package the desktop app first: ${executable}`).toBe(true);
 
-	const tempRoot = await mkdtemp(path.join(tmpdir(), "arcmind-subagent-"));
+	const tempRoot = await mkdtemp(path.join(tmpdir(), "metis-subagent-"));
 	const agentDir = path.join(tempRoot, "agent");
 	const homeDir = path.join(tempRoot, "home");
 	const projectDir = path.join(tempRoot, "subagent-project");
@@ -766,7 +1289,7 @@ test("packaged Code subagent sidebar lists durable work and opens its transcript
 		type: "subagent_closed",
 		tombstone: {
 			agentId: "30000000-0000-4000-8000-000000000003",
-			name: "archived-inspector",
+			name: "Archived result reviewer",
 			status: "closed",
 			taskSummary: "Review archived result",
 			finalSummary: "## Archived result\n\nFound **no remaining issues**.",
@@ -783,12 +1306,12 @@ test("packaged Code subagent sidebar lists durable work and opens its transcript
 			id: childId,
 			mode: "code",
 			permissionMode: "ask",
-			subagent: { agentId: childId, name: "packaged-inspector", parentSessionId: CODE_ID },
+			subagent: { agentId: childId, name: "Packaged project inspector", parentSessionId: CODE_ID },
 		},
 	);
 	const config = {
 		agentId: childId,
-		name: "packaged-inspector",
+		name: "Packaged project inspector",
 		task: "Inspect packaged project",
 		taskSummary: "Inspect packaged project",
 		mode: "code",
@@ -879,7 +1402,7 @@ test("packaged Code subagent sidebar lists durable work and opens its transcript
 		await page.keyboard.press("Escape");
 		await page.getByRole("button", { name: "Subagent fixture", exact: true }).click();
 		await expect(page.locator(".workspace-header")).toHaveAttribute("data-active-session-id", CODE_ID);
-		expect(await page.evaluate(() => typeof (window as Window & { arcMind?: { interruptSubagent?: unknown } }).arcMind?.interruptSubagent)).toBe("function");
+		expect(await page.evaluate(() => typeof (window as Window & { metis?: { interruptSubagent?: unknown } }).metis?.interruptSubagent)).toBe("function");
 		await expect(page.locator(".conversation-column")).not.toContainText("Packaged child completed");
 		await expect(page.locator(".conversation-column")).not.toContainText("Packaged tool output");
 
@@ -891,7 +1414,7 @@ test("packaged Code subagent sidebar lists durable work and opens its transcript
 		await expect(page.getByText("Inspect packaged project", { exact: true })).toBeVisible();
 		await expect(page.getByText("35 tokens", { exact: true })).toBeVisible();
 		await expect(page.getByText("4 tool uses", { exact: true })).toBeVisible();
-		await page.getByRole("button", { name: "View summary for Review archived result", exact: true }).click();
+		await page.getByRole("button", { name: "View summary for Archived result reviewer", exact: true }).click();
 		await expect(page.getByRole("heading", { name: "Archived result", exact: true })).toBeVisible();
 		await expect(page.getByText("no remaining issues", { exact: true })).toBeVisible();
 		await expect(page.getByRole("region", { name: "Subagent transcript", exact: true })).toHaveCount(0);
@@ -907,7 +1430,7 @@ test("packaged Code subagent sidebar lists durable work and opens its transcript
 		await resizeToolsSidebar(page, 392);
 
 		phase = "opening the child transcript";
-		await page.getByRole("button", { name: "View transcript for Inspect packaged project", exact: true }).click();
+		await page.getByRole("button", { name: "View transcript for Packaged project inspector", exact: true }).click();
 		const transcript = page.getByRole("region", { name: "Subagent transcript", exact: true });
 		await expect(transcript).toBeVisible();
 		await expect(page.getByText("Packaged child completed", { exact: true })).toBeVisible();
@@ -927,8 +1450,8 @@ test("packaged Code subagent sidebar lists durable work and opens its transcript
 		phase = "reopening the Subagent tab";
 		await page.getByRole("button", { name: "Close Subagent", exact: true }).click();
 		await page.locator(".tool-sidebar-menu").getByRole("button", { name: "Subagent", exact: true }).click();
-		await expect(page.getByRole("button", { name: "View transcript for Inspect packaged project", exact: true })).toBeVisible();
-		await page.getByRole("button", { name: "View transcript for Inspect packaged project", exact: true }).click();
+		await expect(page.getByRole("button", { name: "View transcript for Packaged project inspector", exact: true })).toBeVisible();
+		await page.getByRole("button", { name: "View transcript for Packaged project inspector", exact: true }).click();
 		await expect(page.getByText("Packaged child completed", { exact: true })).toBeVisible();
 		await page.getByRole("region", { name: "Subagent transcript", exact: true }).locator(".code-execution > summary").last().click();
 		await expect(page.getByText("Packaged tool output", { exact: true })).toBeVisible();
@@ -959,13 +1482,13 @@ test("packaged Code subagent sidebar lists durable work and opens its transcript
 		await page.getByRole("button", { name: "Hide sessions sidebar", exact: true }).click();
 		await page.getByRole("button", { name: "Show tools sidebar", exact: true }).click();
 		await page.locator(".tool-sidebar-menu").getByRole("button", { name: "Subagent", exact: true }).click();
-		await expect(page.getByRole("button", { name: "View transcript for Inspect packaged project", exact: true })).toBeVisible();
-		await page.getByRole("button", { name: "View transcript for Inspect packaged project", exact: true }).click();
+		await expect(page.getByRole("button", { name: "View transcript for Packaged project inspector", exact: true })).toBeVisible();
+		await page.getByRole("button", { name: "View transcript for Packaged project inspector", exact: true }).click();
 		await expect(page.getByText("Packaged child completed", { exact: true })).toBeVisible();
 		await page.getByRole("region", { name: "Subagent transcript", exact: true }).locator(".code-execution > summary").last().click();
 		await expect(page.getByText("Packaged tool output", { exact: true })).toBeVisible();
 		await page.getByRole("button", { name: "Back to background tasks", exact: true }).click();
-		await expect(page.getByRole("button", { name: "View transcript for Inspect packaged project", exact: true })).toBeFocused();
+		await expect(page.getByRole("button", { name: "View transcript for Packaged project inspector", exact: true })).toBeFocused();
 		expect(consoleErrors).toEqual([]);
 	} catch (error) {
 		const bodyText = await page?.locator("body").innerText().catch(() => "renderer unavailable");
@@ -984,7 +1507,7 @@ test("packaged terminal sidebar runs a real PTY and keeps independent tabs", asy
 	const executable = packagedExecutable();
 	expect(existsSync(executable), `Package the desktop app first: ${executable}`).toBe(true);
 
-	const tempRoot = await mkdtemp(path.join(tmpdir(), "arcmind-terminal-"));
+	const tempRoot = await mkdtemp(path.join(tmpdir(), "metis-terminal-"));
 	const agentDir = path.join(tempRoot, "agent");
 	const homeDir = path.join(tempRoot, "home");
 	const projectDir = path.join(tempRoot, "terminal-project");
@@ -1024,19 +1547,19 @@ test("packaged terminal sidebar runs a real PTY and keeps independent tabs", asy
 		const terminalId = firstTerminalId.slice("terminal-panel-".length);
 		await expect.poll(async () => page!.evaluate(async (id) => {
 			try {
-				await (globalThis as unknown as { arcMind: ArcMindDesktopApi }).arcMind.writeTerminal({ terminalId: id, data: "" });
+				await (globalThis as unknown as { metis: MetisDesktopApi }).metis.writeTerminal({ terminalId: id, data: "" });
 				return true;
 			} catch {
 				return false;
 			}
 		}, terminalId)).toBe(true);
 		await page.evaluate(async (id) => {
-			await (globalThis as unknown as { arcMind: ArcMindDesktopApi }).arcMind.writeTerminal({
+			await (globalThis as unknown as { metis: MetisDesktopApi }).metis.writeTerminal({
 				terminalId: id,
-				data: "printf '\\x41\\x52\\x43\\x4d\\x49\\x4e\\x44\\x5f\\x54\\x45\\x52\\x4d\\x49\\x4e\\x41\\x4c\\x5f\\x45\\x32\\x45\\n'\r",
+				data: "printf '\\x4d\\x45\\x54\\x49\\x53\\x5f\\x54\\x45\\x52\\x4d\\x49\\x4e\\x41\\x4c\\x5f\\x45\\x32\\x45\\n'\r",
 			});
 		}, terminalId);
-		await expect(page.locator('.terminal-panel[aria-hidden="false"] .xterm-rows')).toContainText("ARCMIND_TERMINAL_E2E");
+		await expect(page.locator('.terminal-panel[aria-hidden="false"] .xterm-rows')).toContainText("METIS_TERMINAL_E2E");
 		const sidebar = page.locator(".tool-sidebar");
 		const [sidebarBox, firstTabBox, addButtonBox] = await Promise.all([
 			sidebar.boundingBox(),
@@ -1096,7 +1619,7 @@ test("packaged Code files edit the authorized workspace with safe saves and prev
 	const executable = packagedExecutable();
 	expect(existsSync(executable), `Package the desktop app first: ${executable}`).toBe(true);
 
-	const tempRoot = await mkdtemp(path.join(tmpdir(), "arcmind-files-"));
+	const tempRoot = await mkdtemp(path.join(tmpdir(), "metis-files-"));
 	const agentDir = path.join(tempRoot, "agent");
 	const homeDir = path.join(tempRoot, "home");
 	const projectDir = path.join(tempRoot, "files-project");
@@ -1112,10 +1635,10 @@ test("packaged Code files edit the authorized workspace with safe saves and prev
 	await mkdir(path.join(projectDir, ".git"));
 	await mkdir(path.join(projectDir, "archive"));
 	await Promise.all([
-		writeFixtureFile(path.join(projectDir, "README.md"), "# ArcMind workspace\n\nA real Markdown preview."),
+		writeFixtureFile(path.join(projectDir, "README.md"), "# Metis workspace\n\nA real Markdown preview."),
 		writeFixtureFile(path.join(projectDir, "notes.txt"), "plain text preview"),
 		writeFixtureFile(path.join(projectDir, "docs", "guide.md"), "# Guide\n\nNested file."),
-		writeFixtureFile(path.join(projectDir, ".env"), "ARCMIND_FILE_BROWSER=1"),
+		writeFixtureFile(path.join(projectDir, ".env"), "METIS_FILE_BROWSER=1"),
 		writeFixtureFile(path.join(projectDir, ".gitignore"), "ignored.log\n"),
 		writeFixtureFile(path.join(projectDir, "ignored.log"), "excluded from search"),
 		writeFile(path.join(projectDir, "pixel.png"), Buffer.from(TINY_PNG, "base64")),
@@ -1156,23 +1679,14 @@ test("packaged Code files edit the authorized workspace with safe saves and prev
 		await expect(readme.locator(".file-kind-icon.is-markdown")).toBeVisible();
 		await readme.click();
 		const editor = page.getByRole("textbox", { name: "Edit README.md", exact: true });
-		await expect.poll(() => codeEditorText(editor)).toBe("# ArcMind workspace\n\nA real Markdown preview.");
+		await expect.poll(() => codeEditorText(editor)).toBe("# Metis workspace\n\nA real Markdown preview.");
 		await sidebar.screenshot({ path: path.join(qaDir, "direct-editor-default-width.png") });
-		const resizeHandle = page.getByRole("separator", { name: "Resize tools sidebar" });
-		const resizeSidebar = async (targetWidth: number) => {
-			const [box, handle] = await Promise.all([sidebar.boundingBox(), resizeHandle.boundingBox()]);
-			if (!box || !handle) throw new Error("Files sidebar resize geometry is missing");
-			await page!.mouse.move(handle.x + handle.width / 2, handle.y + 100);
-			await page!.mouse.down();
-			await page!.mouse.move(handle.x + handle.width / 2 - (targetWidth - box.width), handle.y + 100);
-			await page!.mouse.up();
-			await expect.poll(async () => Math.round((await sidebar.boundingBox())?.width ?? 0)).toBe(targetWidth);
-		};
+		const resizeSidebar = (targetWidth: number) => resizeToolsSidebar(page!, targetWidth);
 		await resizeSidebar(520);
 		await page.getByRole("button", { name: "Hide tools sidebar", exact: true }).click();
 		await page.getByRole("button", { name: "Show tools sidebar", exact: true }).click();
 		await expect.poll(async () => Math.round((await sidebar.boundingBox())?.width ?? 0)).toBe(520);
-		await resizeSidebar(393);
+		await resizeSidebar(392);
 		let [previewBox, treeBox] = await Promise.all([
 			page.locator(".file-preview").boundingBox(),
 			page.locator(".file-tree").boundingBox(),
@@ -1188,7 +1702,7 @@ test("packaged Code files edit the authorized workspace with safe saves and prev
 		if (!previewBox || !treeBox) throw new Error("Files stacked layout is missing");
 		expect(treeBox.y).toBeGreaterThanOrEqual(previewBox.y + previewBox.height - 1);
 		await sidebar.screenshot({ path: path.join(qaDir, "direct-editor-stacked-280x986.png") });
-		await resizeSidebar(850);
+		await resizeSidebar(856);
 		await expect.poll(async () => (await sidebar.boundingBox())?.width ?? 0).toBeGreaterThan(800);
 		await expect(page.locator('.file-tree-row [title=".env"]')).toBeVisible();
 		await expect(page.locator('.file-tree-row [title="ignored.log"]')).toBeVisible();
@@ -1203,16 +1717,16 @@ test("packaged Code files edit the authorized workspace with safe saves and prev
 		await expect(page.locator(".tool-tab.is-preview")).toHaveCount(1);
 		await readme.click();
 		await expect(page.getByRole("tab")).toHaveCount(2);
-		await editor.fill("# Saved from ArcMind\n");
+		await editor.fill("# Saved from Metis\n");
 		await expect(page.locator(".tool-tab.is-dirty")).toHaveCount(1);
 		await editor.press("Meta+s");
 		await expect(page.locator(".file-preview-notice")).toHaveText("File saved");
-		await expect.poll(() => readFile(path.join(projectDir, "README.md"), "utf8")).toBe("# Saved from ArcMind\n");
+		await expect.poll(() => readFile(path.join(projectDir, "README.md"), "utf8")).toBe("# Saved from Metis\n");
 		await expect(page.locator(".tool-tab.is-dirty")).toHaveCount(0);
 		await page.getByRole("button", { name: "Show preview", exact: true }).click();
-		await expect(page.locator(".file-markdown h1")).toHaveText("Saved from ArcMind");
+		await expect(page.locator(".file-markdown h1")).toHaveText("Saved from Metis");
 		await page.getByRole("button", { name: "View source", exact: true }).click();
-		await expect.poll(() => codeEditorText(editor)).toBe("# Saved from ArcMind\n");
+		await expect.poll(() => codeEditorText(editor)).toBe("# Saved from Metis\n");
 		await page.getByRole("button", { name: "Copy path", exact: true }).click();
 		await expect(page.locator(".file-preview-notice")).toHaveText("Path copied");
 		await page.getByRole("button", { name: "Copy contents", exact: true }).click();
@@ -1270,11 +1784,11 @@ test("packaged Code files edit the authorized workspace with safe saves and prev
 		await page.getByRole("button", { name: "Close managed.ts", exact: true }).click();
 		await expect(page.getByRole("textbox", { name: "Edit managed.ts", exact: true })).toHaveCount(0);
 
-		await resizeSidebar(393);
-		await sidebar.screenshot({ path: path.join(qaDir, "markdown-tree-393x986.png") });
+		await resizeSidebar(392);
+		await sidebar.screenshot({ path: path.join(qaDir, "markdown-tree-392x986.png") });
 		await resizeSidebar(280);
 		await sidebar.screenshot({ path: path.join(qaDir, "markdown-tree-stacked-280x986.png") });
-		await resizeSidebar(850);
+		await resizeSidebar(856);
 
 		phase = "loading nested files and searching with packaged ripgrep";
 		await page.locator('.file-tree-row [title="docs"]').click();
@@ -1290,11 +1804,11 @@ test("packaged Code files edit the authorized workspace with safe saves and prev
 		await page.locator('.file-tree-row [title="binary.bin"]').click();
 		await expect(page.getByText("Binary file cannot be previewed", { exact: true })).toBeVisible();
 		await readme.click();
-		await expect.poll(() => codeEditorText(editor)).toBe("# Saved from ArcMind\n");
+		await expect.poll(() => codeEditorText(editor)).toBe("# Saved from Metis\n");
 		await page.getByRole("button", { name: "Close binary.bin", exact: true }).click();
 		await expect(page.getByRole("tab")).toHaveCount(1);
 		await page.setViewportSize({ width: 1220, height: 938 });
-		await resizeSidebar(900);
+		await resizeSidebar(904);
 		[previewBox, treeBox] = await Promise.all([
 			page.locator(".file-preview").boundingBox(),
 			page.locator(".file-tree").boundingBox(),
@@ -1302,16 +1816,16 @@ test("packaged Code files edit the authorized workspace with safe saves and prev
 		if (!previewBox || !treeBox) throw new Error("Files split layout is missing");
 		expect(previewBox.width).toBeGreaterThan(treeBox.width);
 		expect(treeBox.width).toBeGreaterThanOrEqual(220);
-		await sidebar.screenshot({ path: path.join(qaDir, "markdown-tree-900x924.png") });
+		await sidebar.screenshot({ path: path.join(qaDir, "markdown-tree-904x924.png") });
 
 		phase = "protecting an external file change";
 		await writeFile(path.join(projectDir, "README.md"), "# External change\n");
-		await editor.fill("# Stale ArcMind draft\n");
+		await editor.fill("# Stale Metis draft\n");
 		await sidebar.screenshot({ path: path.join(qaDir, "dirty-editor-900x924.png") });
 		await editor.press("Meta+s");
 		await expect(page.getByRole("alert")).toContainText("Workspace file changed on disk");
 		await expect.poll(() => readFile(path.join(projectDir, "README.md"), "utf8")).toBe("# External change\n");
-		await expect.poll(() => codeEditorText(editor)).toBe("# Stale ArcMind draft\n");
+		await expect.poll(() => codeEditorText(editor)).toBe("# Stale Metis draft\n");
 		await page.getByRole("button", { name: "Close README.md", exact: true }).click();
 		await page.screenshot({ path: path.join(qaDir, "unsaved-changes-dialog-1220x938.png") });
 		await page.getByRole("button", { name: "Cancel", exact: true }).click();
@@ -1338,7 +1852,7 @@ test("packaged Code review lazily renders diffs and keeps folder-controlled deta
 	const executable = packagedExecutable();
 	expect(existsSync(executable), `Package the desktop app first: ${executable}`).toBe(true);
 
-	const tempRoot = await mkdtemp(path.join(tmpdir(), "arcmind-review-"));
+	const tempRoot = await mkdtemp(path.join(tmpdir(), "metis-review-"));
 	const agentDir = path.join(tempRoot, "agent");
 	const homeDir = path.join(tempRoot, "home");
 	const projectDir = path.join(tempRoot, "review-project");
@@ -1360,7 +1874,7 @@ test("packaged Code review lazily renders diffs and keeps folder-controlled deta
 	]);
 	git(projectDir, "init");
 	git(projectDir, "config", "user.email", "review@example.com");
-	git(projectDir, "config", "user.name", "ArcMind Review");
+	git(projectDir, "config", "user.name", "Metis Review");
 	git(projectDir, "add", ".");
 	git(projectDir, "commit", "-m", "initial");
 	await writeFixtureFile(path.join(projectDir, "history-only.txt"), "history\n");
@@ -1541,12 +2055,12 @@ test("packaged browser sidebar loads real pages and persists its isolated profil
 			return;
 		}
 		if (request.url === "/set-cookie") {
-			response.setHeader("Set-Cookie", "arcmind-browser=ready; Max-Age=3600; Path=/; SameSite=Lax");
-			response.end("<!doctype html><title>ArcMind Browser Fixture</title><main>cookie stored</main>");
+			response.setHeader("Set-Cookie", "metis-browser=ready; Max-Age=3600; Path=/; SameSite=Lax");
+			response.end("<!doctype html><title>Metis Browser Fixture</title><main>cookie stored</main>");
 			return;
 		}
 		if (request.url === "/cookie") {
-			response.end(`<!doctype html><title>ArcMind Cookie Check</title><main>${request.headers.cookie ?? "missing"}</main>`);
+			response.end(`<!doctype html><title>Metis Cookie Check</title><main>${request.headers.cookie ?? "missing"}</main>`);
 			return;
 		}
 		if (request.url === "/searchable") {
@@ -1554,19 +2068,19 @@ test("packaged browser sidebar loads real pages and persists its isolated profil
 			return;
 		}
 		if (request.url === "/stateful") {
-			response.setHeader("Set-Cookie", "arcmind-browser=ready; Max-Age=3600; Path=/; SameSite=Lax");
-			response.end("<!doctype html><title>Stateful Fixture</title><script>localStorage.setItem('arcmind-browser','ready')</script><main>state stored</main>");
+			response.setHeader("Set-Cookie", "metis-browser=ready; Max-Age=3600; Path=/; SameSite=Lax");
+			response.end("<!doctype html><title>Stateful Fixture</title><script>localStorage.setItem('metis-browser','ready')</script><main>state stored</main>");
 			return;
 		}
 		if (request.url === "/inspect-state") {
-			response.end("<!doctype html><title>Inspect State</title><main></main><script>document.querySelector('main').textContent = document.cookie + '|' + (localStorage.getItem('arcmind-browser') || '')</script>");
+			response.end("<!doctype html><title>Inspect State</title><main></main><script>document.querySelector('main').textContent = document.cookie + '|' + (localStorage.getItem('metis-browser') || '')</script>");
 			return;
 		}
 		response.writeHead(404).end();
 	});
 	const fixturePort = await listen(fixtureServer);
 	const fixtureOrigin = `http://127.0.0.1:${fixturePort}`;
-	const tempRoot = await mkdtemp(path.join(tmpdir(), "arcmind-browser-"));
+	const tempRoot = await mkdtemp(path.join(tmpdir(), "metis-browser-"));
 	const agentDir = path.join(tempRoot, "agent");
 	const homeDir = path.join(tempRoot, "home");
 	const projectDir = path.join(tempRoot, "browser-project");
@@ -1659,7 +2173,7 @@ test("packaged browser sidebar loads real pages and persists its isolated profil
 			.find((candidate) => candidate.url() === `${fixtureOrigin}/set-cookie`);
 		if (!embeddedPage) throw new Error("Embedded browser did not navigate to the cookie fixture");
 		await expect(embeddedPage.locator("main")).toHaveText("cookie stored");
-		await expect(page.getByRole("tab", { name: "ArcMind Browser Fixture", exact: true })).toBeVisible();
+		await expect(page.getByRole("tab", { name: "Metis Browser Fixture", exact: true })).toBeVisible();
 		await expect(page.getByRole("button", { name: "Back", exact: true })).toBeEnabled();
 		await page.getByRole("button", { name: "Back", exact: true }).click();
 		await expect(embeddedPage).toHaveURL(`${fixtureOrigin}/first`);
@@ -1674,7 +2188,7 @@ test("packaged browser sidebar loads real pages and persists its isolated profil
 		await page.getByRole("button", { name: "Hide tools sidebar", exact: true }).click();
 		await expect(sidebar).toBeHidden();
 		await page.getByRole("button", { name: "Show tools sidebar", exact: true }).click();
-		await expect(page.getByRole("tab", { name: "ArcMind Browser Fixture", exact: true })).toBeVisible();
+		await expect(page.getByRole("tab", { name: "Metis Browser Fixture", exact: true })).toBeVisible();
 		expect(embeddedPage.isClosed()).toBe(false);
 		await expect(embeddedPage).toHaveURL(`${fixtureOrigin}/set-cookie`);
 
@@ -1711,8 +2225,8 @@ test("packaged browser sidebar loads real pages and persists its isolated profil
 		const cookiePage = browser.contexts().flatMap((context) => context.pages())
 			.find((candidate) => candidate.url() === `${fixtureOrigin}/cookie`);
 		if (!cookiePage) throw new Error("Restarted embedded browser target was not exposed");
-		await expect(cookiePage.locator("main")).toContainText("arcmind-browser=ready");
-		await expect(page.getByRole("tab", { name: "ArcMind Cookie Check", exact: true })).toBeVisible();
+		await expect(cookiePage.locator("main")).toContainText("metis-browser=ready");
+		await expect(page.getByRole("tab", { name: "Metis Cookie Check", exact: true })).toBeVisible();
 		await page.screenshot({ path: path.join(qaDir, "cookie-restored-1280x840.png") });
 
 		phase = "finding and zooming inside the native page";
@@ -1811,7 +2325,7 @@ test("packaged Language menu switches immediately and persists across restart", 
 	const executable = packagedExecutable();
 	expect(existsSync(executable), `Package the desktop app first: ${executable}`).toBe(true);
 
-	const tempRoot = await mkdtemp(path.join(tmpdir(), "arcmind-language-"));
+	const tempRoot = await mkdtemp(path.join(tmpdir(), "metis-language-"));
 	const agentDir = path.join(tempRoot, "agent");
 	const homeDir = path.join(tempRoot, "home");
 	const projectDir = path.join(tempRoot, "language-project");
@@ -1846,7 +2360,7 @@ test("packaged Language menu switches immediately and persists across restart", 
 		await waitForServerReady(page);
 
 		phase = "opening Language menu";
-		await page.getByRole("button", { name: "ArcMind", exact: true }).click();
+		await page.getByRole("button", { name: "Metis", exact: true }).click();
 		await page.getByRole("menuitem", { name: "Language", exact: true }).click();
 		await expect(page.getByRole("menuitemradio", { name: "English", exact: true })).toHaveAttribute("aria-checked", "true");
 		await expect(page.getByRole("menuitemradio")).toHaveCount(2);
@@ -1874,7 +2388,7 @@ test("packaged Language menu switches immediately and persists across restart", 
 		await expect(page.getByRole("button", { name: "新建任务", exact: true })).toBeVisible();
 		await expect(page.getByText("技能", { exact: true }).first()).toBeVisible();
 		expect(await page.evaluate(() => document.documentElement.lang)).toBe("zh-CN");
-		await page.getByRole("button", { name: "ArcMind", exact: true }).click();
+		await page.getByRole("button", { name: "Metis", exact: true }).click();
 		await page.getByRole("menuitem", { name: "语言", exact: true }).click();
 		await expect(page.getByRole("menuitemradio", { name: "中文", exact: true })).toHaveAttribute("aria-checked", "true");
 		await page.screenshot({ path: path.join(qaDir, "language-menu-chinese-1440x900.png") });
@@ -1890,7 +2404,7 @@ test("packaged Language menu switches immediately and persists across restart", 
 		await waitForServerReady(page);
 		await expect(page.getByRole("button", { name: "新建任务", exact: true })).toBeVisible();
 		expect(await page.evaluate(() => document.documentElement.lang)).toBe("zh-CN");
-		await page.getByRole("button", { name: "ArcMind", exact: true }).click();
+		await page.getByRole("button", { name: "Metis", exact: true }).click();
 		await expect(page.getByRole("menuitem", { name: "设置", exact: true })).toBeFocused();
 		await page.screenshot({ path: path.join(qaDir, "chinese-shell-960x720.png") });
 	} catch (error) {
@@ -1910,7 +2424,7 @@ test("packaged Code project setup creates and opens a project", async () => {
 	const executable = packagedExecutable();
 	expect(existsSync(executable), `Package the desktop app first: ${executable}`).toBe(true);
 
-	const tempRoot = await mkdtemp(path.join(tmpdir(), "arcmind-code-project-"));
+	const tempRoot = await mkdtemp(path.join(tmpdir(), "metis-code-project-"));
 	const agentDir = path.join(tempRoot, "agent");
 	const homeDir = path.join(tempRoot, "home");
 	const projectDir = path.join(tempRoot, "launch-cwd");
@@ -1930,14 +2444,14 @@ test("packaged Code project setup creates and opens a project", async () => {
 		await waitForServerReady(page);
 		phase = "opening Code project setup";
 		const codeProjectName = "Packaged Code project";
-		const codeProjectRoot = path.join(tempRoot, "ArcMind Projects");
+		const codeProjectRoot = path.join(tempRoot, "Metis Projects");
 		const codeProjectDir = path.join(codeProjectRoot, codeProjectName);
 		const defaultLocation = await page.evaluate(() =>
-			(globalThis as unknown as { arcMind: ArcMindDesktopApi }).arcMind.getDefaultProjectLocation(),
+			(globalThis as unknown as { metis: MetisDesktopApi }).metis.getDefaultProjectLocation(),
 		);
 		expect(path.isAbsolute(defaultLocation)).toBe(true);
-		expect(path.basename(defaultLocation)).toBe("ArcMind Projects");
-		await page.evaluate((location) => localStorage.setItem("arcmind.codeProjectLocation", location), codeProjectRoot);
+		expect(path.basename(defaultLocation)).toBe("Metis Projects");
+		await page.evaluate((location) => localStorage.setItem("metis.codeProjectLocation", location), codeProjectRoot);
 		await page.getByRole("button", { name: "Code", exact: true }).click();
 		await expect(page.getByRole("dialog", { name: "Create a new project" })).toBeVisible();
 		await page.screenshot({ path: path.join(assetQaDir, "code-project-choice.png") });
@@ -1962,7 +2476,7 @@ test("packaged Code project setup creates and opens a project", async () => {
 		expect(existsSync(codeProjectDir)).toBe(true);
 		const canonicalCodeProjectDir = await realpath(codeProjectDir);
 		const codeSession = await page.evaluate(async (cwd) => {
-			const api = (globalThis as unknown as { arcMind: ArcMindDesktopApi }).arcMind;
+			const api = (globalThis as unknown as { metis: MetisDesktopApi }).metis;
 			return (await api.listSessions({ limit: 200 })).sessions.find(
 				(session) => session.mode === "code" && session.cwd === cwd,
 			);
@@ -1991,13 +2505,13 @@ test("packaged mode project actions preserve the other mode and shared project d
 	const executable = packagedExecutable();
 	expect(existsSync(executable), `Package the desktop app first: ${executable}`).toBe(true);
 
-	const tempRoot = await mkdtemp(path.join(tmpdir(), "arcmind-project-actions-"));
+	const tempRoot = await mkdtemp(path.join(tmpdir(), "metis-project-actions-"));
 	const agentDir = path.join(tempRoot, "agent");
 	const homeDir = path.join(tempRoot, "home");
 	const projectDir = path.join(tempRoot, "shared-project");
 	const userDataDir = path.join(tempRoot, "electron");
 	const sourcePath = path.join(projectDir, "source-sentinel.txt");
-	const skillPath = path.join(projectDir, ".arcmind", "skills", "shared-project-skill", "SKILL.md");
+	const skillPath = path.join(projectDir, ".metis", "skills", "shared-project-skill", "SKILL.md");
 	const globalMemoryPath = path.join(agentDir, "memory", "MEMORY.md");
 	const qaDir = path.join(desktopRoot, "test-results", "design-qa", "project-actions");
 	await Promise.all([
@@ -2175,7 +2689,7 @@ test("packaged mode project actions preserve the other mode and shared project d
 		await expect(group).toBeVisible();
 
 		phase = "checking mode-scoped preferences";
-		await page.evaluate((sessionId) => localStorage.setItem("arcmind.activeSessionId.code", sessionId), CODE_ID);
+		await page.evaluate((sessionId) => localStorage.setItem("metis.activeSessionId.code", sessionId), CODE_ID);
 		await page.getByRole("button", { name: "Code", exact: true }).click();
 		await expect(page.locator(".workspace-header")).toHaveAttribute("data-active-session-id", CODE_ID);
 		await page.getByRole("button", { name: "Group sessions", exact: true }).click();
@@ -2304,7 +2818,7 @@ test("packaged project delete fails closed for a held session lease and retries"
 	const executable = packagedExecutable();
 	expect(existsSync(executable), `Package the desktop app first: ${executable}`).toBe(true);
 
-	const tempRoot = await mkdtemp(path.join(tmpdir(), "arcmind-project-lease-"));
+	const tempRoot = await mkdtemp(path.join(tmpdir(), "metis-project-lease-"));
 	const agentDir = path.join(tempRoot, "agent");
 	const homeDir = path.join(tempRoot, "home");
 	const projectDir = path.join(tempRoot, "lease-project");
