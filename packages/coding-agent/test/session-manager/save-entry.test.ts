@@ -58,7 +58,7 @@ describe("SessionManager.saveCustomEntry", () => {
 	});
 
 	it("stores tool-output metadata outside the model message", () => {
-		const tempDir = mkdtempSync(join(tmpdir(), "arcmind-tool-output-jsonl-"));
+		const tempDir = mkdtempSync(join(tmpdir(), "metis-tool-output-jsonl-"));
 		try {
 			const session = SessionManager.create(tempDir, tempDir);
 			session.appendMessage(assistantMsg("calling tool"));

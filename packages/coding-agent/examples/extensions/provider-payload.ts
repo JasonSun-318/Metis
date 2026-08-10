@@ -1,9 +1,9 @@
 import { appendFileSync } from "node:fs";
 import { join } from "node:path";
-import { CONFIG_DIR_NAME, type ExtensionAPI } from "@arcmind/coding-agent";
+import { CONFIG_DIR_NAME, type ExtensionAPI } from "@metis/coding-agent";
 
-export default function (arcmind: ExtensionAPI) {
-	arcmind.on("before_provider_request", (event, ctx) => {
+export default function (metis: ExtensionAPI) {
+	metis.on("before_provider_request", (event, ctx) => {
 		const logFile = join(ctx.cwd, CONFIG_DIR_NAME, "provider-payload.log");
 		appendFileSync(logFile, `${JSON.stringify(event.payload, null, 2)}\n\n`, "utf8");
 
@@ -11,7 +11,7 @@ export default function (arcmind: ExtensionAPI) {
 		// return { ...event.payload, temperature: 0 };
 	});
 
-	arcmind.on("after_provider_response", (event, ctx) => {
+	metis.on("after_provider_response", (event, ctx) => {
 		const logFile = join(ctx.cwd, CONFIG_DIR_NAME, "provider-payload.log");
 		appendFileSync(logFile, `[${event.status}] ${JSON.stringify(event.headers)}\n\n`, "utf8");
 	});

@@ -16,7 +16,7 @@
 
 import { execFileSync } from "node:child_process";
 import { mkdtemp, writeFile } from "node:fs/promises";
-import type { ExtensionAPI } from "@arcmind/coding-agent";
+import type { ExtensionAPI } from "@metis/coding-agent";
 import {
 	DEFAULT_MAX_BYTES,
 	DEFAULT_MAX_LINES,
@@ -24,8 +24,8 @@ import {
 	type TruncationResult,
 	truncateHead,
 	withFileMutationQueue,
-} from "@arcmind/coding-agent";
-import { Text } from "@arcmind/tui";
+} from "@metis/coding-agent";
+import { Text } from "@metis/tui";
 import { tmpdir } from "os";
 import { join } from "path";
 import { Type } from "typebox";
@@ -45,8 +45,8 @@ interface RgDetails {
 	fullOutputPath?: string;
 }
 
-export default function (arcmind: ExtensionAPI) {
-	arcmind.registerTool({
+export default function (metis: ExtensionAPI) {
+	metis.registerTool({
 		name: "rg",
 		label: "ripgrep",
 		// Document the truncation limits in the tool description so the LLM knows
@@ -113,7 +113,7 @@ export default function (arcmind: ExtensionAPI) {
 
 			if (truncation.truncated) {
 				// Save full output to a temp file so LLM can access it if needed
-				const tempDir = await mkdtemp(join(tmpdir(), "arcmind-rg-"));
+				const tempDir = await mkdtemp(join(tmpdir(), "metis-rg-"));
 				const tempFile = join(tempDir, "output.txt");
 				await withFileMutationQueue(tempFile, async () => {
 					await writeFile(tempFile, output, "utf8");

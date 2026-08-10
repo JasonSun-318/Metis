@@ -1,4 +1,4 @@
-import type { AssistantMessage, ImageContent } from "@arcmind/ai";
+import type { AssistantMessage, ImageContent } from "@metis/ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SessionShutdownEvent } from "../src/index.ts";
 import { runPrintMode } from "../src/modes/print-mode.ts";

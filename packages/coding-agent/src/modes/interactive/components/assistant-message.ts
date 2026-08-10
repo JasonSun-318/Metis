@@ -1,5 +1,5 @@
-import type { AssistantMessage } from "@arcmind/ai";
-import { Container, Markdown, type MarkdownTheme, Spacer, Text } from "@arcmind/tui";
+import type { AssistantMessage } from "@metis/ai";
+import { Container, Markdown, type MarkdownTheme, Spacer, Text } from "@metis/tui";
 import { getMarkdownTheme, theme } from "../theme/theme.ts";
 
 const OSC133_ZONE_START = "\x1b]133;A\x07";

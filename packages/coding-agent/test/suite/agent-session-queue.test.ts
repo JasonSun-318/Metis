@@ -1,6 +1,6 @@
-import type { AgentTool } from "@arcmind/agent-core";
-import { fauxAssistantMessage, fauxToolCall } from "@arcmind/ai";
-import type { ExtensionAPI } from "@arcmind/coding-agent";
+import type { AgentTool } from "@metis/agent-core";
+import { fauxAssistantMessage, fauxToolCall } from "@metis/ai";
+import type { ExtensionAPI } from "@metis/coding-agent";
 import { Type } from "typebox";
 import { afterEach, describe, expect, it } from "vitest";
 import { createHarness, getAssistantTexts, getMessageText, getUserTexts, type Harness } from "./harness.ts";
@@ -10,7 +10,7 @@ async function createWaitingHarness(
 		tools?: AgentTool[];
 		extensionFactories?: Harness["session"]["extensionRunner"] extends never
 			? never
-			: Array<(arcmind: ExtensionAPI) => void>;
+			: Array<(metis: ExtensionAPI) => void>;
 	} = {},
 ): Promise<{
 	harness: Harness;
@@ -70,8 +70,8 @@ describe("AgentSession queue characterization", () => {
 		const commandRuns: string[] = [];
 		const harness = await createHarness({
 			extensionFactories: [
-				(arcmind) => {
-					arcmind.registerCommand("testcmd", {
+				(metis) => {
+					metis.registerCommand("testcmd", {
 						description: "Test command",
 						handler: async (args) => {
 							commandRuns.push(args);
@@ -93,8 +93,8 @@ describe("AgentSession queue characterization", () => {
 		let extensionApi: ExtensionAPI | undefined;
 		const waiting = await createWaitingHarness({
 			extensionFactories: [
-				(arcmind) => {
-					extensionApi = arcmind;
+				(metis) => {
+					extensionApi = metis;
 				},
 			],
 		});
@@ -387,8 +387,8 @@ describe("AgentSession queue characterization", () => {
 	it("throws when queueing an extension command with steer", async () => {
 		const harness = await createHarness({
 			extensionFactories: [
-				(arcmind) => {
-					arcmind.registerCommand("testcmd", {
+				(metis) => {
+					metis.registerCommand("testcmd", {
 						description: "Test command",
 						handler: async () => {},
 					});
@@ -405,8 +405,8 @@ describe("AgentSession queue characterization", () => {
 	it("throws when queueing an extension command with followUp", async () => {
 		const harness = await createHarness({
 			extensionFactories: [
-				(arcmind) => {
-					arcmind.registerCommand("testcmd", {
+				(metis) => {
+					metis.registerCommand("testcmd", {
 						description: "Test command",
 						handler: async () => {},
 					});
@@ -424,11 +424,11 @@ describe("AgentSession queue characterization", () => {
 		let sent = false;
 		const harness = await createHarness({
 			extensionFactories: [
-				(arcmind: ExtensionAPI) => {
-					arcmind.on("agent_end", async () => {
+				(metis: ExtensionAPI) => {
+					metis.on("agent_end", async () => {
 						if (sent) return;
 						sent = true;
-						arcmind.sendUserMessage("conflict report", { deliverAs: "followUp" });
+						metis.sendUserMessage("conflict report", { deliverAs: "followUp" });
 					});
 				},
 			],

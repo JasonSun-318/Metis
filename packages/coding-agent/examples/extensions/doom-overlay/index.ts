@@ -1,7 +1,7 @@
 /**
  * DOOM Overlay Demo - Play DOOM as an overlay
  *
- * Usage: arcmind --extension ./examples/extensions/doom-overlay
+ * Usage: metis --extension ./examples/extensions/doom-overlay
  *
  * Commands:
  *   /doom-overlay - Play DOOM in an overlay (Q to pause/exit)
@@ -9,7 +9,7 @@
  * This demonstrates that overlays can handle real-time game rendering at 35 FPS.
  */
 
-import type { ExtensionAPI } from "@arcmind/coding-agent";
+import type { ExtensionAPI } from "@metis/coding-agent";
 import { DoomOverlayComponent } from "./doom-component.ts";
 import { DoomEngine } from "./doom-engine.ts";
 import { ensureWadFile } from "./wad-finder.ts";
@@ -18,8 +18,8 @@ import { ensureWadFile } from "./wad-finder.ts";
 let activeEngine: DoomEngine | null = null;
 let activeWadPath: string | null = null;
 
-export default function (arcmind: ExtensionAPI) {
-	arcmind.registerCommand("doom-overlay", {
+export default function (metis: ExtensionAPI) {
+	metis.registerCommand("doom-overlay", {
 		description: "Play DOOM as an overlay. Q to pause and exit.",
 
 		handler: async (args, ctx) => {

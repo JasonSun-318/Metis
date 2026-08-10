@@ -1,5 +1,5 @@
 import { lstatSync, realpathSync } from "node:fs";
-import type { AgentMessage } from "@arcmind/agent-core";
+import type { AgentMessage } from "@metis/agent-core";
 import { createAgentSessionFromServices, createAgentSessionServices } from "../agent-session-services.ts";
 import { identifySubmitPromptRequest } from "../runtime-recovery.ts";
 import { getDefaultSessionDir, SessionManager, sessionEntryToContextMessages } from "../session-manager.ts";

@@ -1,4 +1,4 @@
-import { type AssistantMessage, fauxAssistantMessage } from "@arcmind/ai";
+import { type AssistantMessage, fauxAssistantMessage } from "@metis/ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createHarness, getUserTexts, type Harness } from "../harness.ts";
 
@@ -28,8 +28,8 @@ describe("pre-prompt compaction regression", () => {
 			models: [{ id: "faux-1", contextWindow: 100, maxTokens: 100 }],
 			settings: { compaction: { enabled: true, keepRecentTokens: 1, reserveTokens: 0 } },
 			extensionFactories: [
-				(arcmind) => {
-					arcmind.on("session_before_compact", async (event) => ({
+				(metis) => {
+					metis.on("session_before_compact", async (event) => ({
 						compaction: {
 							summary: "pre-prompt summary",
 							firstKeptEntryId: event.preparation.firstKeptEntryId,

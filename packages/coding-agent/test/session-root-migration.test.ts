@@ -34,7 +34,7 @@ describe("legacy agent-root session migration", () => {
 	});
 
 	function fixture(): { agentDir: string; cwd: string; sourcePath: string; targetPath: string } {
-		const root = mkdtempSync(join(tmpdir(), "arcmind-session-root-migration-"));
+		const root = mkdtempSync(join(tmpdir(), "metis-session-root-migration-"));
 		tempDirs.push(root);
 		const agentDir = join(root, "agent");
 		const cwd = join(root, "project");

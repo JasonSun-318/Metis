@@ -1,11 +1,11 @@
 # DOOM Overlay Demo
 
-Play DOOM as an overlay in arcmind. Demonstrates that the overlay system can handle real-time game rendering at 35 FPS.
+Play DOOM as an overlay in metis. Demonstrates that the overlay system can handle real-time game rendering at 35 FPS.
 
 ## Usage
 
 ```bash
-arcmind --extension ./examples/extensions/doom-overlay
+metis --extension ./examples/extensions/doom-overlay
 ```
 
 Then run:

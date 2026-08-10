@@ -40,7 +40,7 @@ function sha256(path: string): string {
 
 function incompleteInstallation(message: string): Error {
 	return new Error(
-		`Incomplete ArcMind installation: ${message}. Reinstall ArcMind; no runtime download will be attempted.`,
+		`Incomplete Metis installation: ${message}. Reinstall Metis; no runtime download will be attempted.`,
 	);
 }
 

@@ -3,8 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { build } from "esbuild";
 
-const outputPath = join(tmpdir(), "arcmind-browser-smoke.js");
-const errorLogPath = join(tmpdir(), "arcmind-browser-smoke-errors.log");
+const outputPath = join(tmpdir(), "metis-browser-smoke.js");
+const errorLogPath = join(tmpdir(), "metis-browser-smoke-errors.log");
 
 try {
 	await build({

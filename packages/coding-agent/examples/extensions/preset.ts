@@ -6,8 +6,8 @@
  * and can be activated via CLI flag, /preset command, or Ctrl+Shift+U to cycle.
  *
  * Config files (merged, project takes precedence):
- * - ~/.arcmind/agent/presets.json (global)
- * - <cwd>/.arcmind/presets.json (project-local)
+ * - ~/.metis/agent/presets.json (global)
+ * - <cwd>/.metis/presets.json (project-local)
  *
  * Example presets.json:
  * ```json
@@ -30,7 +30,7 @@
  * ```
  *
  * Usage:
- * - `arcmind --preset plan` - start with plan preset
+ * - `metis --preset plan` - start with plan preset
  * - `/preset` - show selector to switch presets mid-session
  * - `/preset implement` - switch to implement preset directly
  * - `Ctrl+Shift+U` - cycle through presets
@@ -40,10 +40,10 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { Api, Model } from "@arcmind/ai";
-import type { ExtensionAPI, ExtensionContext } from "@arcmind/coding-agent";
-import { CONFIG_DIR_NAME, DynamicBorder, getAgentDir } from "@arcmind/coding-agent";
-import { Container, Key, type SelectItem, SelectList, Text } from "@arcmind/tui";
+import type { Api, Model } from "@metis/ai";
+import type { ExtensionAPI, ExtensionContext } from "@metis/coding-agent";
+import { CONFIG_DIR_NAME, DynamicBorder, getAgentDir } from "@metis/coding-agent";
+import { Container, Key, type SelectItem, SelectList, Text } from "@metis/tui";
 
 // Preset configuration
 interface Preset {
@@ -104,14 +104,14 @@ interface OriginalState {
 	tools: string[];
 }
 
-export default function presetExtension(arcmind: ExtensionAPI) {
+export default function presetExtension(metis: ExtensionAPI) {
 	let presets: PresetsConfig = {};
 	let activePresetName: string | undefined;
 	let activePreset: Preset | undefined;
 	let originalState: OriginalState | undefined;
 
 	// Register --preset CLI flag
-	arcmind.registerFlag("preset", {
+	metis.registerFlag("preset", {
 		description: "Preset configuration to use",
 		type: "string",
 	});
@@ -124,8 +124,8 @@ export default function presetExtension(arcmind: ExtensionAPI) {
 		if (activePresetName === undefined) {
 			originalState = {
 				model: ctx.model,
-				thinkingLevel: arcmind.getThinkingLevel(),
-				tools: arcmind.getActiveTools(),
+				thinkingLevel: metis.getThinkingLevel(),
+				tools: metis.getActiveTools(),
 			};
 		}
 
@@ -133,7 +133,7 @@ export default function presetExtension(arcmind: ExtensionAPI) {
 		if (preset.provider && preset.model) {
 			const model = ctx.modelRegistry.find(preset.provider, preset.model);
 			if (model) {
-				const success = await arcmind.setModel(model);
+				const success = await metis.setModel(model);
 				if (!success) {
 					ctx.ui.notify(`Preset "${name}": No API key for ${preset.provider}/${preset.model}`, "warning");
 				}
@@ -144,12 +144,12 @@ export default function presetExtension(arcmind: ExtensionAPI) {
 
 		// Apply thinking level if specified
 		if (preset.thinkingLevel) {
-			arcmind.setThinkingLevel(preset.thinkingLevel);
+			metis.setThinkingLevel(preset.thinkingLevel);
 		}
 
 		// Apply tools if specified
 		if (preset.tools && preset.tools.length > 0) {
-			const allToolNames = arcmind.getAllTools().map((t) => t.name);
+			const allToolNames = metis.getAllTools().map((t) => t.name);
 			const validTools = preset.tools.filter((t) => allToolNames.includes(t));
 			const invalidTools = preset.tools.filter((t) => !allToolNames.includes(t));
 
@@ -158,7 +158,7 @@ export default function presetExtension(arcmind: ExtensionAPI) {
 			}
 
 			if (validTools.length > 0) {
-				arcmind.setActiveTools(validTools);
+				metis.setActiveTools(validTools);
 			}
 		}
 
@@ -273,12 +273,12 @@ export default function presetExtension(arcmind: ExtensionAPI) {
 			activePreset = undefined;
 			if (originalState) {
 				if (originalState.model) {
-					await arcmind.setModel(originalState.model);
+					await metis.setModel(originalState.model);
 				}
-				arcmind.setThinkingLevel(originalState.thinkingLevel);
-				arcmind.setActiveTools(originalState.tools);
+				metis.setThinkingLevel(originalState.thinkingLevel);
+				metis.setActiveTools(originalState.tools);
 			} else {
-				arcmind.setActiveTools(["read", "bash", "edit", "write"]);
+				metis.setActiveTools(["read", "bash", "edit", "write"]);
 			}
 			ctx.ui.notify("Preset cleared, defaults restored", "info");
 			updateStatus(ctx);
@@ -329,12 +329,12 @@ export default function presetExtension(arcmind: ExtensionAPI) {
 			activePreset = undefined;
 			if (originalState) {
 				if (originalState.model) {
-					await arcmind.setModel(originalState.model);
+					await metis.setModel(originalState.model);
 				}
-				arcmind.setThinkingLevel(originalState.thinkingLevel);
-				arcmind.setActiveTools(originalState.tools);
+				metis.setThinkingLevel(originalState.thinkingLevel);
+				metis.setActiveTools(originalState.tools);
 			} else {
-				arcmind.setActiveTools(["read", "bash", "edit", "write"]);
+				metis.setActiveTools(["read", "bash", "edit", "write"]);
 			}
 			ctx.ui.notify("Preset cleared, defaults restored", "info");
 			updateStatus(ctx);
@@ -349,7 +349,7 @@ export default function presetExtension(arcmind: ExtensionAPI) {
 		updateStatus(ctx);
 	}
 
-	arcmind.registerShortcut(Key.ctrlShift("u"), {
+	metis.registerShortcut(Key.ctrlShift("u"), {
 		description: "Cycle presets",
 		handler: async (ctx) => {
 			await cyclePreset(ctx);
@@ -357,7 +357,7 @@ export default function presetExtension(arcmind: ExtensionAPI) {
 	});
 
 	// Register /preset command
-	arcmind.registerCommand("preset", {
+	metis.registerCommand("preset", {
 		description: "Switch preset configuration",
 		handler: async (args, ctx) => {
 			// If preset name provided, apply directly
@@ -383,7 +383,7 @@ export default function presetExtension(arcmind: ExtensionAPI) {
 	});
 
 	// Inject preset instructions into system prompt
-	arcmind.on("before_agent_start", async (event) => {
+	metis.on("before_agent_start", async (event) => {
 		if (activePreset?.instructions) {
 			return {
 				systemPrompt: `${event.systemPrompt}\n\n${activePreset.instructions}`,
@@ -392,12 +392,12 @@ export default function presetExtension(arcmind: ExtensionAPI) {
 	});
 
 	// Initialize on session start
-	arcmind.on("session_start", async (_event, ctx) => {
+	metis.on("session_start", async (_event, ctx) => {
 		// Load presets from config files
 		presets = loadPresets(ctx.cwd);
 
 		// Check for --preset flag
-		const presetFlag = arcmind.getFlag("preset");
+		const presetFlag = metis.getFlag("preset");
 		if (typeof presetFlag === "string" && presetFlag) {
 			const preset = presets[presetFlag];
 			if (preset) {
@@ -428,9 +428,9 @@ export default function presetExtension(arcmind: ExtensionAPI) {
 	});
 
 	// Persist preset state
-	arcmind.on("turn_start", async () => {
+	metis.on("turn_start", async () => {
 		if (activePresetName) {
-			arcmind.appendEntry("preset-state", { name: activePresetName });
+			metis.appendEntry("preset-state", { name: activePresetName });
 		}
 	});
 }

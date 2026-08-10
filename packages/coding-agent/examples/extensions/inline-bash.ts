@@ -1,8 +1,8 @@
 /**
  * Inline Bash Extension - expands inline bash commands in user prompts.
  *
- * Start arcmind with this extension:
- *   arcmind -e ./examples/extensions/inline-bash.ts
+ * Start metis with this extension:
+ *   metis -e ./examples/extensions/inline-bash.ts
  *
  * Then type prompts with inline bash:
  *   What's in !{pwd}?
@@ -14,13 +14,13 @@
  *
  * Note: Regular !command syntax (whole-line bash) is preserved and works as before.
  */
-import type { ExtensionAPI } from "@arcmind/coding-agent";
+import type { ExtensionAPI } from "@metis/coding-agent";
 
-export default function (arcmind: ExtensionAPI) {
+export default function (metis: ExtensionAPI) {
 	const PATTERN = /!\{([^}]+)\}/g;
 	const TIMEOUT_MS = 30000;
 
-	arcmind.on("input", async (event, ctx) => {
+	metis.on("input", async (event, ctx) => {
 		const text = event.text;
 
 		// Don't process if it's a whole-line bash command (starts with !)
@@ -51,7 +51,7 @@ export default function (arcmind: ExtensionAPI) {
 		// Execute each command and collect results
 		for (const { full, command } of matches) {
 			try {
-				const bashResult = await arcmind.exec("bash", ["-c", command], {
+				const bashResult = await metis.exec("bash", ["-c", command], {
 					timeout: TIMEOUT_MS,
 				});
 

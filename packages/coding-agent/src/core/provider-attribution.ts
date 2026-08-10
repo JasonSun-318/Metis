@@ -1,4 +1,4 @@
-import type { Api, Model, ProviderHeaders } from "@arcmind/ai";
+import type { Api, Model, ProviderHeaders } from "@metis/ai";
 import { isProviderAttributionEnabled } from "./provider-attribution-setting.ts";
 import type { SettingsManager } from "./settings-manager.ts";
 
@@ -43,21 +43,20 @@ function getDefaultAttributionHeaders(
 
 	if (isOpenRouterModel(model)) {
 		return {
-			"HTTP-Referer": "https://gitee.com/sun124578963_0/arc-mind",
-			"X-OpenRouter-Title": "arcmind",
+			"X-OpenRouter-Title": "metis",
 			"X-OpenRouter-Categories": "cli-agent",
 		};
 	}
 
 	if (isNvidiaNimModel(model)) {
 		return {
-			"X-BILLING-INVOKE-ORIGIN": "ArcMind",
+			"X-BILLING-INVOKE-ORIGIN": "Metis",
 		};
 	}
 
 	if (isCloudflareModel(model)) {
 		return {
-			"User-Agent": "arcmind-coding-agent",
+			"User-Agent": "metis-coding-agent",
 		};
 	}
 
@@ -73,7 +72,7 @@ function getSessionHeaders(model: Model<Api>, sessionId: string | undefined): Re
 	) {
 		return undefined;
 	}
-	return { "x-opencode-session": sessionId, "x-opencode-client": "arcmind" };
+	return { "x-opencode-session": sessionId, "x-opencode-client": "metis" };
 }
 
 export function mergeProviderAttributionHeaders(

@@ -1,8 +1,8 @@
 /**
- * TUI config selector for `arcmind config` command
+ * TUI config selector for `metis config` command
  */
 
-import { ProcessTerminal, TUI } from "@arcmind/tui";
+import { ProcessTerminal, TUI } from "@metis/tui";
 import type { SettingsManager } from "../core/settings-manager.ts";
 import { ConfigSelectorComponent, type ScopedResolvedPaths } from "../modes/interactive/components/config-selector.ts";
 import { initTheme, stopThemeWatcher } from "../modes/interactive/theme/theme.ts";

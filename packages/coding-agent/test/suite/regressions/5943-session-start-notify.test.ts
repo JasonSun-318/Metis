@@ -1,5 +1,5 @@
-import { fauxAssistantMessage } from "@arcmind/ai";
-import { Container, Text } from "@arcmind/tui";
+import { fauxAssistantMessage } from "@metis/ai";
+import { Container, Text } from "@metis/tui";
 import { describe, expect, it, vi } from "vitest";
 import type { AgentSessionEvent } from "../../../src/core/agent-session.ts";
 import type { ExtensionUIContext } from "../../../src/core/extensions/index.ts";
@@ -273,8 +273,8 @@ describe("regression #5943: session_start transient UI", () => {
 		const events: string[] = [];
 		const harness = await createHarness({
 			extensionFactories: [
-				(arcmind) => {
-					arcmind.on("session_start", (_event, ctx) => {
+				(metis) => {
+					metis.on("session_start", (_event, ctx) => {
 						ctx.ui.notify("Hello Error", "error");
 					});
 				},
@@ -310,9 +310,9 @@ describe("regression #5943: session_start transient UI", () => {
 		const events: string[] = [];
 		const harness = await createHarness({
 			extensionFactories: [
-				(arcmind) => {
-					arcmind.on("session_start", () => {
-						arcmind.sendMessage({
+				(metis) => {
+					metis.on("session_start", () => {
+						metis.sendMessage({
 							customType: "session-start",
 							content: "custom from start",
 							display: true,
@@ -365,9 +365,9 @@ describe("regression #5943: session_start transient UI", () => {
 		const events: string[] = [];
 		const harness = await createHarness({
 			extensionFactories: [
-				(arcmind) => {
-					arcmind.on("session_start", () => {
-						arcmind.sendUserMessage("user from start");
+				(metis) => {
+					metis.on("session_start", () => {
+						metis.sendUserMessage("user from start");
 					});
 				},
 			],
@@ -419,8 +419,8 @@ describe("regression #5943: session_start transient UI", () => {
 		});
 		const harness = await createHarness({
 			extensionFactories: [
-				(arcmind) => {
-					arcmind.on("session_start", (event, ctx) => {
+				(metis) => {
+					metis.on("session_start", (event, ctx) => {
 						events.push(`start:${event.reason}`);
 						ctx.ui.notify(`notify:${event.reason}`, "error");
 					});

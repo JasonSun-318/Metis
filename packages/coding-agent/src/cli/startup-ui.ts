@@ -1,4 +1,4 @@
-import { ProcessTerminal, setKeybindings, TUI } from "@arcmind/tui";
+import { ProcessTerminal, setKeybindings, TUI } from "@metis/tui";
 import { existsSync } from "fs";
 import { APP_NAME, CONFIG_DIR_NAME, ENV_AGENT_DIR, getAgentDir, getSettingsPath, PACKAGE_NAME } from "../config.ts";
 import { areExperimentalFeaturesEnabled } from "../core/experimental.ts";
@@ -23,9 +23,9 @@ import {
 	type Theme,
 } from "../modes/interactive/theme/theme.ts";
 
-const OFFICIAL_PACKAGE_NAME = "@arcmind/coding-agent";
-const OFFICIAL_APP_NAME = "arcmind";
-const OFFICIAL_CONFIG_DIR_NAME = ".arcmind";
+const OFFICIAL_PACKAGE_NAME = "@metis/coding-agent";
+const OFFICIAL_APP_NAME = "metis";
+const OFFICIAL_CONFIG_DIR_NAME = ".metis";
 
 interface DistributionMetadata {
 	packageName: string;
@@ -107,8 +107,8 @@ async function clearStartupTui(ui: TUI): Promise<void> {
 
 /**
  * First-time setup runs when all of these hold:
- * - this is the official ArcMind distribution (not a fork/rebrand)
- * - experimental features are enabled (ARCMIND_EXPERIMENTAL=1)
+ * - this is the official Metis distribution (not a fork/rebrand)
+ * - experimental features are enabled (METIS_EXPERIMENTAL=1)
  * - the default agent directory is used (no custom agent dir override)
  * - setup was not completed before (settings.json does not exist)
  */

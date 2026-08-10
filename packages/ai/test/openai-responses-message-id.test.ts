@@ -42,7 +42,7 @@ describe("OpenAI Responses message ID conversion", () => {
 			)
 			.map((item) => item.id);
 
-		expect(messageIds).toEqual(["msg_arcmind_1", "msg_arcmind_1_1"]);
+		expect(messageIds).toEqual(["msg_metis_1", "msg_metis_1_1"]);
 		expect(new Set(messageIds).size).toBe(messageIds.length);
 	});
 });

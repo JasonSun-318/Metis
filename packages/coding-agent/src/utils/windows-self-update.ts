@@ -3,17 +3,17 @@ import { copyFileSync, existsSync, mkdirSync, renameSync, rmSync } from "node:fs
 import { basename, dirname, join, relative, resolve, toNamespacedPath } from "node:path";
 import { getCwdRelativePath } from "./paths.ts";
 
-const QUARANTINE_DIR_NAME = ".arcmind-native-quarantine";
+const QUARANTINE_DIR_NAME = ".metis-native-quarantine";
 
 function normalizePath(path: string): string {
 	return toNamespacedPath(resolve(path));
 }
 
-function getQuarantineRoot(packageDir: string): string | undefined {
+function getQuarantineRoot(packageDir: string, directoryName = QUARANTINE_DIR_NAME): string | undefined {
 	let current = resolve(packageDir);
 	while (true) {
 		if (basename(current).toLowerCase() === "node_modules") {
-			return join(current, QUARANTINE_DIR_NAME);
+			return join(current, directoryName);
 		}
 		const parent = dirname(current);
 		if (parent === current) {
@@ -49,13 +49,11 @@ function getLoadedSharedObjectsInPackageDir(packageDir: string): string[] {
 
 export function cleanupWindowsSelfUpdateQuarantine(packageDir: string): void {
 	const quarantineRoot = getQuarantineRoot(packageDir);
-	if (!quarantineRoot) {
-		return;
-	}
+	if (!quarantineRoot) return;
 	try {
 		rmSync(quarantineRoot, { recursive: true, force: true });
 	} catch {
-		// A previous arcmind process may still be exiting and holding a native addon.
+		// A previous Metis process may still be exiting and holding a native addon.
 	}
 }
 

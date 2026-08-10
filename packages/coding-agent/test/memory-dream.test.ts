@@ -11,7 +11,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { getModel } from "@arcmind/ai/compat";
+import { getModel } from "@metis/ai/compat";
 import lockfile from "proper-lockfile";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { getAutoMemoryPaths } from "../src/core/auto-memory.ts";
@@ -35,7 +35,7 @@ import {
 describe("memory Dream", () => {
 	const roots: string[] = [];
 	const makeRoot = () => {
-		const root = mkdtempSync(join(tmpdir(), "arcmind-dream-"));
+		const root = mkdtempSync(join(tmpdir(), "metis-dream-"));
 		roots.push(root);
 		return root;
 	};

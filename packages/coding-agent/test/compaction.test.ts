@@ -1,6 +1,6 @@
-import type { AgentMessage } from "@arcmind/agent-core";
-import type { AssistantMessage, Usage } from "@arcmind/ai/compat";
-import { getModel } from "@arcmind/ai/compat";
+import type { AgentMessage } from "@metis/agent-core";
+import type { AssistantMessage, Usage } from "@metis/ai/compat";
+import { getModel } from "@metis/ai/compat";
 import { readFileSync } from "fs";
 import { join } from "path";
 import { beforeEach, describe, expect, it } from "vitest";

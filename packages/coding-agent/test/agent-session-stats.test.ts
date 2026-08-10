@@ -1,5 +1,5 @@
-import { Agent } from "@arcmind/agent-core";
-import { type AssistantMessage, getModel, type Usage } from "@arcmind/ai/compat";
+import { Agent } from "@metis/agent-core";
+import { type AssistantMessage, getModel, type Usage } from "@metis/ai/compat";
 import { describe, expect, it } from "vitest";
 import { AgentSession } from "../src/core/agent-session.ts";
 import { AuthStorage } from "../src/core/auth-storage.ts";

@@ -1,18 +1,18 @@
-# @arcmind/agent-core
+# @metis/agent-core
 
-Stateful agent with tool execution and event streaming. Built on `@arcmind/ai`.
+Stateful agent with tool execution and event streaming. Built on `@metis/ai`.
 
 ## Installation
 
 ```bash
-npm install @arcmind/agent-core
+npm install @metis/agent-core
 ```
 
 ## Quick Start
 
 ```typescript
-import { Agent } from "@arcmind/agent-core";
-import { getModel } from "@arcmind/ai";
+import { Agent } from "@metis/agent-core";
+import { getModel } from "@metis/ai";
 
 const agent = new Agent({
   initialState: {
@@ -355,7 +355,7 @@ Follow-up messages are checked only when there are no more tool calls and no ste
 Extend `AgentMessage` via declaration merging:
 
 ```typescript
-declare module "@arcmind/agent-core" {
+declare module "@metis/agent-core" {
   interface CustomAgentMessages {
     notification: { role: "notification"; text: string; timestamp: number };
   }
@@ -436,7 +436,7 @@ Return `terminate: true` from `execute()` or `afterToolCall` to hint that the ag
 For browser apps that proxy through a backend:
 
 ```typescript
-import { Agent, streamProxy } from "@arcmind/agent-core";
+import { Agent, streamProxy } from "@metis/agent-core";
 
 const agent = new Agent({
   streamFn: (model, context, options) =>
@@ -453,7 +453,7 @@ const agent = new Agent({
 For direct control without the Agent class:
 
 ```typescript
-import { agentLoop, agentLoopContinue } from "@arcmind/agent-core";
+import { agentLoop, agentLoopContinue } from "@metis/agent-core";
 
 const context: AgentContext = {
   systemPrompt: "You are helpful.",

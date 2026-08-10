@@ -1,10 +1,10 @@
 {
-	"name": "@arcmind/coding-agent-install",
-	"version": "0.80.6",
+	"name": "@metis/coding-agent-install",
+	"version": "0.0.3",
 	"private": true,
-	"description": "Lockfile root used by the ArcMind installer and updater.",
+	"description": "Lockfile root used by the Metis installer and updater.",
 	"dependencies": {
-		"@arcmind/coding-agent": "0.80.6"
+		"@metis/coding-agent": "0.0.3"
 	},
 	"overrides": {
 		"rimraf": "6.1.2",

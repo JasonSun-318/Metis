@@ -17,33 +17,33 @@
  * - setEditorText() - via /rpc-prefill command
  */
 
-import type { ExtensionAPI } from "@arcmind/coding-agent";
+import type { ExtensionAPI } from "@metis/coding-agent";
 
-export default function (arcmind: ExtensionAPI) {
+export default function (metis: ExtensionAPI) {
 	let turnCount = 0;
 
 	// -- setTitle, setWidget, setStatus on session lifecycle --
 
-	arcmind.on("session_start", async (event, ctx) => {
-		ctx.ui.setTitle(event.reason === "new" ? "arcmind RPC Demo (new session)" : "arcmind RPC Demo");
+	metis.on("session_start", async (event, ctx) => {
+		ctx.ui.setTitle(event.reason === "new" ? "metis RPC Demo (new session)" : "metis RPC Demo");
 		ctx.ui.setWidget("rpc-demo", ["--- RPC Extension UI Demo ---", "Loaded and ready."]);
 		ctx.ui.setStatus("rpc-demo", `Turns: ${turnCount}`);
 	});
 
 	// -- setStatus on turn lifecycle --
 
-	arcmind.on("turn_start", async (_event, ctx) => {
+	metis.on("turn_start", async (_event, ctx) => {
 		turnCount++;
 		ctx.ui.setStatus("rpc-demo", `Turn ${turnCount} running...`);
 	});
 
-	arcmind.on("turn_end", async (_event, ctx) => {
+	metis.on("turn_end", async (_event, ctx) => {
 		ctx.ui.setStatus("rpc-demo", `Turn ${turnCount} done`);
 	});
 
 	// -- select on dangerous tool calls --
 
-	arcmind.on("tool_call", async (event, ctx) => {
+	metis.on("tool_call", async (event, ctx) => {
 		if (event.toolName !== "bash") return undefined;
 
 		const command = event.input.command as string;
@@ -67,7 +67,7 @@ export default function (arcmind: ExtensionAPI) {
 
 	// -- confirm on session clear --
 
-	arcmind.on("session_before_switch", async (event, ctx) => {
+	metis.on("session_before_switch", async (event, ctx) => {
 		if (event.reason !== "new") return;
 		if (!ctx.hasUI) return;
 
@@ -80,7 +80,7 @@ export default function (arcmind: ExtensionAPI) {
 
 	// -- input via command --
 
-	arcmind.registerCommand("rpc-input", {
+	metis.registerCommand("rpc-input", {
 		description: "Prompt for text input (demonstrates ctx.ui.input in RPC)",
 		handler: async (_args, ctx) => {
 			const value = await ctx.ui.input("Enter a value", "type something...");
@@ -94,7 +94,7 @@ export default function (arcmind: ExtensionAPI) {
 
 	// -- editor via command --
 
-	arcmind.registerCommand("rpc-editor", {
+	metis.registerCommand("rpc-editor", {
 		description: "Open multi-line editor (demonstrates ctx.ui.editor in RPC)",
 		handler: async (_args, ctx) => {
 			const text = await ctx.ui.editor("Edit some text", "Line 1\nLine 2\nLine 3");
@@ -108,7 +108,7 @@ export default function (arcmind: ExtensionAPI) {
 
 	// -- setEditorText via command --
 
-	arcmind.registerCommand("rpc-prefill", {
+	metis.registerCommand("rpc-prefill", {
 		description: "Prefill the input editor (demonstrates ctx.ui.setEditorText in RPC)",
 		handler: async (_args, ctx) => {
 			ctx.ui.setEditorText("This text was set by the rpc-demo extension.");

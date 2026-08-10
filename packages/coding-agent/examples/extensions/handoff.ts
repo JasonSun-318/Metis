@@ -12,10 +12,10 @@
  * The generated prompt appears as a draft in the editor for review/editing.
  */
 
-import type { AgentMessage } from "@arcmind/agent-core";
-import { complete, type Message } from "@arcmind/ai/compat";
-import type { ExtensionAPI, SessionEntry } from "@arcmind/coding-agent";
-import { BorderedLoader, convertToLlm, serializeConversation } from "@arcmind/coding-agent";
+import type { AgentMessage } from "@metis/agent-core";
+import { complete, type Message } from "@metis/ai/compat";
+import type { ExtensionAPI, SessionEntry } from "@metis/coding-agent";
+import { BorderedLoader, convertToLlm, serializeConversation } from "@metis/coding-agent";
 
 const SYSTEM_PROMPT = `You are a context transfer assistant. Given a conversation history and the user's goal for a new thread, generate a focused prompt that:
 
@@ -77,8 +77,8 @@ function getHandoffMessages(branch: SessionEntry[]): AgentMessage[] {
 	return compactedBranch.map(entryToMessage).filter((message) => message !== undefined);
 }
 
-export default function (arcmind: ExtensionAPI) {
-	arcmind.registerCommand("handoff", {
+export default function (metis: ExtensionAPI) {
+	metis.registerCommand("handoff", {
 		description: "Transfer context to a new focused session",
 		handler: async (args, ctx) => {
 			if (ctx.mode !== "tui") {

@@ -15,7 +15,7 @@ afterEach(() => {
 });
 
 function createTempDir(): string {
-	const dir = realpathSync(mkdtempSync(join(tmpdir(), "arcmind-session-file-invalid-")));
+	const dir = realpathSync(mkdtempSync(join(tmpdir(), "metis-session-file-invalid-")));
 	tempDirs.push(dir);
 	return dir;
 }
@@ -28,7 +28,7 @@ async function runCli(args: string[], cwd: string, agentDir: string): Promise<{ 
 			env: {
 				...process.env,
 				[ENV_AGENT_DIR]: agentDir,
-				ARCMIND_OFFLINE: "1",
+				METIS_OFFLINE: "1",
 				TSX_TSCONFIG_PATH: resolve(__dirname, "../../../tsconfig.json"),
 			},
 			stdio: ["ignore", "ignore", "pipe"],
@@ -57,7 +57,7 @@ describe("--session invalid file handling", () => {
 		const result = await runCli(["--session", sessionFile, "-p", "hi"], projectDir, agentDir);
 
 		expect(result.code).toBe(1);
-		expect(result.stderr).toContain(`Error: Session file is not a valid arcmind session: ${sessionFile}`);
+		expect(result.stderr).toContain(`Error: Session file is not a valid metis session: ${sessionFile}`);
 		expect(result.stderr).not.toContain("SessionManager.open");
 		expect(result.stderr).not.toContain("at ");
 		expect(readFileSync(sessionFile, "utf8")).toBe(originalContent);

@@ -7,10 +7,10 @@
  * createAgentSession() applies that cwd when it builds the actual built-in tools.
  *
  * For custom tools, see 06-extensions.ts - custom tools are registered via the
- * extensions system using arcmind.registerTool().
+ * extensions system using metis.registerTool().
  */
 
-import { createAgentSession, SessionManager } from "@arcmind/coding-agent";
+import { createAgentSession, SessionManager } from "@metis/coding-agent";
 
 // Read-only mode (no edit/write)
 const { session: readOnlySession } = await createAgentSession({

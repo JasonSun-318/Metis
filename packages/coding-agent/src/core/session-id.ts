@@ -1,4 +1,4 @@
-import { uuidv7 } from "@arcmind/agent-core";
+import { uuidv7 } from "@metis/agent-core";
 
 export function createSessionId(): string {
 	return uuidv7();

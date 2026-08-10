@@ -5,7 +5,7 @@
  * when thinking blocks are hidden.
  *
  * Usage:
- *   arcmind --extension examples/extensions/hidden-thinking-label.ts
+ *   metis --extension examples/extensions/hidden-thinking-label.ts
  *
  * Test:
  *   1. Load this extension
@@ -18,22 +18,22 @@
  *   /thinking-label          Reset to the default label
  */
 
-import type { ExtensionAPI, ExtensionContext } from "@arcmind/coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@metis/coding-agent";
 
 const DEFAULT_LABEL = "Pondering...";
 
-export default function (arcmind: ExtensionAPI) {
+export default function (metis: ExtensionAPI) {
 	let label = DEFAULT_LABEL;
 
 	const applyLabel = (ctx: ExtensionContext) => {
 		ctx.ui.setHiddenThinkingLabel(label);
 	};
 
-	arcmind.on("session_start", async (_event, ctx) => {
+	metis.on("session_start", async (_event, ctx) => {
 		applyLabel(ctx);
 	});
 
-	arcmind.registerCommand("thinking-label", {
+	metis.registerCommand("thinking-label", {
 		description: "Set the hidden thinking label. Use without args to reset.",
 		handler: async (args, ctx) => {
 			const nextLabel = args.trim();

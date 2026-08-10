@@ -12,7 +12,7 @@ describe("extensions discovery", () => {
 	let extensionsDir: string;
 
 	beforeEach(() => {
-		tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "arcmind-ext-test-"));
+		tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "metis-ext-test-"));
 		extensionsDir = path.join(tempDir, "extensions");
 		fs.mkdirSync(extensionsDir);
 	});
@@ -22,15 +22,15 @@ describe("extensions discovery", () => {
 	});
 
 	const extensionCode = `
-		export default function(arcmind) {
-			arcmind.registerCommand("test", { handler: async () => {} });
+		export default function(metis) {
+			metis.registerCommand("test", { handler: async () => {} });
 		}
 	`;
 
 	const extensionCodeWithTool = (toolName: string) => `
 		import { Type } from "typebox";
-		export default function(arcmind) {
-			arcmind.registerTool({
+		export default function(metis) {
+			metis.registerTool({
 				name: "${toolName}",
 				label: "${toolName}",
 				description: "Test tool",
@@ -99,7 +99,7 @@ describe("extensions discovery", () => {
 		expect(result.extensions[0].path).toContain("index.ts");
 	});
 
-	it("discovers subdirectory with package.json arcmind field", async () => {
+	it("discovers subdirectory with package.json metis field", async () => {
 		const subdir = path.join(extensionsDir, "my-package");
 		const srcDir = path.join(subdir, "src");
 		fs.mkdirSync(subdir);
@@ -109,7 +109,7 @@ describe("extensions discovery", () => {
 			path.join(subdir, "package.json"),
 			JSON.stringify({
 				name: "my-package",
-				arcmind: {
+				metis: {
 					extensions: ["./src/main.ts"],
 				},
 			}),
@@ -123,7 +123,7 @@ describe("extensions discovery", () => {
 		expect(result.extensions[0].path).toContain("main.ts");
 	});
 
-	it("keeps package.json arcmind extension entries with leading tilde package-relative", async () => {
+	it("keeps package.json metis extension entries with leading tilde package-relative", async () => {
 		const subdir = path.join(extensionsDir, "tilde-package");
 		const directExtensionPath = path.join(subdir, "~entry.ts");
 		const slashExtensionPath = path.join(subdir, "~", "entry.ts");
@@ -134,7 +134,7 @@ describe("extensions discovery", () => {
 			path.join(subdir, "package.json"),
 			JSON.stringify({
 				name: "tilde-package",
-				arcmind: {
+				metis: {
 					extensions: ["~entry.ts", "~/entry.ts"],
 				},
 			}),
@@ -157,7 +157,7 @@ describe("extensions discovery", () => {
 			path.join(subdir, "package.json"),
 			JSON.stringify({
 				name: "my-package",
-				arcmind: {
+				metis: {
 					extensions: ["./ext1.ts", "./ext2.ts"],
 				},
 			}),
@@ -169,7 +169,7 @@ describe("extensions discovery", () => {
 		expect(result.extensions).toHaveLength(2);
 	});
 
-	it("package.json with arcmind field takes precedence over index.ts", async () => {
+	it("package.json with metis field takes precedence over index.ts", async () => {
 		const subdir = path.join(extensionsDir, "my-package");
 		fs.mkdirSync(subdir);
 		fs.writeFileSync(path.join(subdir, "index.ts"), extensionCodeWithTool("from-index"));
@@ -178,7 +178,7 @@ describe("extensions discovery", () => {
 			path.join(subdir, "package.json"),
 			JSON.stringify({
 				name: "my-package",
-				arcmind: {
+				metis: {
 					extensions: ["./custom.ts"],
 				},
 			}),
@@ -194,7 +194,7 @@ describe("extensions discovery", () => {
 		expect(result.extensions[0].tools.has("from-index")).toBe(false);
 	});
 
-	it("ignores package.json without arcmind field, falls back to index.ts", async () => {
+	it("ignores package.json without metis field, falls back to index.ts", async () => {
 		const subdir = path.join(extensionsDir, "my-package");
 		fs.mkdirSync(subdir);
 		fs.writeFileSync(path.join(subdir, "index.ts"), extensionCode);
@@ -211,6 +211,24 @@ describe("extensions discovery", () => {
 		expect(result.errors).toHaveLength(0);
 		expect(result.extensions).toHaveLength(1);
 		expect(result.extensions[0].path).toContain("index.ts");
+	});
+
+	it("ignores the retired arcmind manifest field", async () => {
+		const subdir = path.join(extensionsDir, "retired-manifest");
+		fs.mkdirSync(subdir);
+		fs.writeFileSync(path.join(subdir, "index.ts"), extensionCodeWithTool("from-index"));
+		fs.writeFileSync(path.join(subdir, "retired.ts"), extensionCodeWithTool("from-retired-manifest"));
+		fs.writeFileSync(
+			path.join(subdir, "package.json"),
+			JSON.stringify({ arcmind: { extensions: ["./retired.ts"] } }),
+		);
+
+		const result = await discoverAndLoadExtensions([], tempDir, tempDir);
+
+		expect(result.errors).toHaveLength(0);
+		expect(result.extensions).toHaveLength(1);
+		expect(result.extensions[0].tools.has("from-index")).toBe(true);
+		expect(result.extensions[0].tools.has("from-retired-manifest")).toBe(false);
 	});
 
 	it("ignores subdirectory without index or package.json", async () => {
@@ -252,7 +270,7 @@ describe("extensions discovery", () => {
 		const subdir2 = path.join(extensionsDir, "with-manifest");
 		fs.mkdirSync(subdir2);
 		fs.writeFileSync(path.join(subdir2, "entry.ts"), extensionCode);
-		fs.writeFileSync(path.join(subdir2, "package.json"), JSON.stringify({ arcmind: { extensions: ["./entry.ts"] } }));
+		fs.writeFileSync(path.join(subdir2, "package.json"), JSON.stringify({ metis: { extensions: ["./entry.ts"] } }));
 
 		const result = await discoverAndLoadExtensions([], tempDir, tempDir);
 
@@ -267,7 +285,7 @@ describe("extensions discovery", () => {
 		fs.writeFileSync(
 			path.join(subdir, "package.json"),
 			JSON.stringify({
-				arcmind: {
+				metis: {
 					extensions: ["./exists.ts", "./missing.ts"],
 				},
 			}),
@@ -337,11 +355,11 @@ describe("extensions discovery", () => {
 
 	it("registers message and entry renderers", async () => {
 		const extCode = `
-			export default function(arcmind) {
-				arcmind.registerMessageRenderer("my-custom-type", (message, options, theme) => {
+			export default function(metis) {
+				metis.registerMessageRenderer("my-custom-type", (message, options, theme) => {
 					return null; // Use default rendering
 				});
-				arcmind.registerEntryRenderer("my-entry-type", (entry, options, theme) => {
+				metis.registerEntryRenderer("my-entry-type", (entry, options, theme) => {
 					return null;
 				});
 			}
@@ -358,7 +376,7 @@ describe("extensions discovery", () => {
 
 	it("reports error when extension throws during initialization", async () => {
 		const extCode = `
-			export default function(arcmind) {
+			export default function(metis) {
 				throw new Error("Initialization failed!");
 			}
 		`;
@@ -373,8 +391,8 @@ describe("extensions discovery", () => {
 
 	it("reports error when extension has no default export", async () => {
 		const extCode = `
-			export function notDefault(arcmind) {
-				arcmind.registerCommand("test", { handler: async () => {} });
+			export function notDefault(metis) {
+				metis.registerCommand("test", { handler: async () => {} });
 			}
 		`;
 		fs.writeFileSync(path.join(extensionsDir, "no-default.ts"), extCode);
@@ -407,10 +425,10 @@ describe("extensions discovery", () => {
 
 	it("loads extension with event handlers", async () => {
 		const extCode = `
-			export default function(arcmind) {
-				arcmind.on("agent_start", async () => {});
-				arcmind.on("tool_call", async (event) => undefined);
-				arcmind.on("agent_end", async () => {});
+			export default function(metis) {
+				metis.on("agent_start", async () => {});
+				metis.on("tool_call", async (event) => undefined);
+				metis.on("agent_end", async () => {});
 			}
 		`;
 		fs.writeFileSync(path.join(extensionsDir, "with-handlers.ts"), extCode);
@@ -426,8 +444,8 @@ describe("extensions discovery", () => {
 
 	it("loads extension with shortcuts", async () => {
 		const extCode = `
-			export default function(arcmind) {
-				arcmind.registerShortcut("ctrl+t", {
+			export default function(metis) {
+				metis.registerShortcut("ctrl+t", {
 					description: "Test shortcut",
 					handler: async (ctx) => {},
 				});
@@ -444,8 +462,8 @@ describe("extensions discovery", () => {
 
 	it("loads extension with flags", async () => {
 		const extCode = `
-			export default function(arcmind) {
-				arcmind.registerFlag("my-flag", {
+			export default function(metis) {
+				metis.registerFlag("my-flag", {
 					description: "My custom flag",
 					handler: async (value) => {},
 				});

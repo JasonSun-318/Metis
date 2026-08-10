@@ -2,10 +2,10 @@
  * Minimal SDK Usage
  *
  * Uses all defaults: discovers skills, extensions, tools, context files
- * from cwd and ~/.arcmind/agent. Model chosen from settings or first available.
+ * from cwd and ~/.metis/agent. Model chosen from settings or first available.
  */
 
-import { createAgentSession } from "@arcmind/coding-agent";
+import { createAgentSession } from "@metis/coding-agent";
 
 const { session } = await createAgentSession();
 

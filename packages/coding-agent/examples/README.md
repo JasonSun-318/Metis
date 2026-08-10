@@ -1,6 +1,6 @@
 # Examples
 
-Example code for arcmind-coding-agent SDK and extensions.
+Example code for metis-coding-agent SDK and extensions.
 
 ## Directories
 

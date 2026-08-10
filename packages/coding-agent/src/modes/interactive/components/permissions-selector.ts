@@ -1,4 +1,4 @@
-import { Container, type SelectItem, SelectList, type SelectListLayoutOptions } from "@arcmind/tui";
+import { Container, type SelectItem, SelectList, type SelectListLayoutOptions } from "@metis/tui";
 import type { PermissionMode, PermissionSettings } from "../../../core/permission-mode.ts";
 import { getSelectListTheme } from "../theme/theme.ts";
 import { DynamicBorder } from "./dynamic-border.ts";
@@ -17,7 +17,7 @@ const MODE_ITEMS: SelectItem[] = [
 	{
 		value: "full",
 		label: "Full access",
-		description: "Run model tool actions directly with no ArcMind approval",
+		description: "Run model tool actions directly with no Metis approval",
 	},
 ];
 

@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative, sep } from "node:path";
-import { fauxAssistantMessage, fauxToolCall, registerFauxProvider } from "@arcmind/ai/compat";
+import { fauxAssistantMessage, fauxToolCall, registerFauxProvider } from "@metis/ai/compat";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AuthStorage } from "../src/core/auth-storage.ts";
 import { ModelRegistry } from "../src/core/model-registry.ts";
@@ -26,9 +26,9 @@ async function waitForRun(manager: ScheduleManager, taskId: string, runId: strin
 	throw new Error("scheduled run did not finish");
 }
 
-describe.runIf(process.env.ARCMIND_TEST_OS_SANDBOX === "1")("scheduled task end to end", () => {
+describe.runIf(process.env.METIS_TEST_OS_SANDBOX === "1")("scheduled task end to end", () => {
 	it("runs through the real model, sandbox, visible session, inbox, and owned cleanup", async () => {
-		const root = mkdtempSync(join(tmpdir(), "arcmind-schedule-e2e-"));
+		const root = mkdtempSync(join(tmpdir(), "metis-schedule-e2e-"));
 		roots.push(root);
 		const agentDirPath = join(root, "agent");
 		mkdirSync(agentDirPath);

@@ -1,4 +1,4 @@
-import { validateToolArguments } from "@arcmind/ai";
+import { validateToolArguments } from "@metis/ai";
 import { applyPatch } from "diff";
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
@@ -1100,12 +1100,12 @@ describe("edit tool fuzzy matching", () => {
 
 		const result = await editTool.execute("test-fuzzy-chinese", {
 			path: testFile,
-			edits: [{ oldText: "你好,世界\n你好(世界)\n", newText: "你好，arcmind\n你好(arcmind)\n" }],
+			edits: [{ oldText: "你好,世界\n你好(世界)\n", newText: "你好，metis\n你好(metis)\n" }],
 		});
 
 		expect(getTextOutput(result)).toContain("Successfully replaced");
 		const content = readFileSync(testFile, "utf-8");
-		expect(content).toBe("你好，arcmind\n你好(arcmind)\n");
+		expect(content).toBe("你好，metis\n你好(metis)\n");
 	});
 
 	it("should match compatibility-equivalent Unicode forms", async () => {

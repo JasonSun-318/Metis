@@ -1,4 +1,4 @@
-import type { AgentState } from "@arcmind/agent-core";
+import type { AgentState } from "@metis/agent-core";
 import { existsSync, readFileSync, realpathSync, statSync } from "fs";
 import { basename, join, resolve } from "path";
 import { APP_NAME, getExportTemplateDir } from "../../config.ts";

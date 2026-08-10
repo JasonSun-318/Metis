@@ -22,7 +22,7 @@ describe("issue #2791 fs.watch error event crashes process", () => {
 	let tempRoot: string;
 
 	beforeEach(() => {
-		tempRoot = mkdtempSync(join(tmpdir(), "arcmind-2791-"));
+		tempRoot = mkdtempSync(join(tmpdir(), "metis-2791-"));
 		const agentDir = join(tempRoot, "agent");
 		const themesDir = join(agentDir, "themes");
 		mkdirSync(themesDir, { recursive: true });
@@ -51,7 +51,7 @@ describe("issue #2791 fs.watch error event crashes process", () => {
 			`
 import { setTheme, stopThemeWatcher } from "${themeModulePath}";
 
-process.env.ARCMIND_CODING_AGENT_DIR = "${agentDir}";
+process.env.METIS_CODING_AGENT_DIR = "${agentDir}";
 
 setTheme("custom-test", true);
 
@@ -86,11 +86,13 @@ process.exit(0);
 		let _stdout = "";
 		let stderr = "";
 		let exitCode: number;
+		const childEnv: NodeJS.ProcessEnv = { ...process.env, METIS_CODING_AGENT_DIR: agentDir };
+		delete childEnv.METIS_CODING_AGENT_DIR;
 		try {
 			_stdout = execFileSync(process.execPath, [scriptPath], {
 				timeout: 10000,
 				encoding: "utf-8",
-				env: { ...process.env, ARCMIND_CODING_AGENT_DIR: agentDir },
+				env: childEnv,
 				stdio: ["pipe", "pipe", "pipe"],
 			});
 			exitCode = 0;

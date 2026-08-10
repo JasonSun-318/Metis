@@ -7,8 +7,8 @@
  * (issues #6259, #6276).
  */
 
-import type { AgentMessage, AgentToolResult } from "@arcmind/agent-core";
-import { fauxAssistantMessage, fauxToolCall } from "@arcmind/ai";
+import type { AgentMessage, AgentToolResult } from "@metis/agent-core";
+import { fauxAssistantMessage, fauxToolCall } from "@metis/ai";
 import { Type } from "typebox";
 import { describe, expect, it } from "vitest";
 import { prepareBranchEntries } from "../../src/core/compaction/branch-summarization.ts";
@@ -29,8 +29,8 @@ function messageEntry(message: Record<string, unknown>): SessionEntry {
 describe("lax message content handling", () => {
 	it("normalizes tool results from untyped tools that omit content", async () => {
 		const extensionFactories: ExtensionFactory[] = [
-			(arcmind) => {
-				arcmind.registerTool({
+			(metis) => {
+				metis.registerTool({
 					name: "web_search",
 					label: "Web Search",
 					description: "Custom tool that returns a result without content",
@@ -62,8 +62,8 @@ describe("lax message content handling", () => {
 
 	it("normalizes null content in message_end extension replacements", async () => {
 		const extensionFactories: ExtensionFactory[] = [
-			(arcmind) => {
-				arcmind.on("message_end", async (event) => {
+			(metis) => {
+				metis.on("message_end", async (event) => {
 					if (event.message.role !== "assistant") return undefined;
 					// Simulate an untyped JS extension replacing a message without content.
 					return { message: { ...event.message, content: null } as unknown as AgentMessage };

@@ -1,5 +1,5 @@
 {
-	"name": "arcmind",
+	"name": "metis",
 	"private": true,
 	"type": "module",
 	"workspaces": [
@@ -13,7 +13,7 @@
 		"clean": "npm run clean --workspaces",
 		"build": "cd packages/tui && npm run build && cd ../ai && npm run build && cd ../agent && npm run build && cd ../coding-agent && npm run build && cd ../app-protocol && npm run build && cd ../app-server && npm run build",
 		"check": "biome check --write --error-on-warnings . && npm run check:pinned-deps && npm run check:ts-imports && npm run check:shrinkwrap && npm run check:install-lock:coding-agent && tsgo --noEmit && npm run check:desktop && npm run check:browser-smoke",
-		"check:desktop": "npm run check:types --workspace @arcmind/desktop",
+		"check:desktop": "npm run check:types --workspace @metis/desktop",
 		"check:browser-smoke": "node scripts/check-browser-smoke.mjs",
 		"check:pinned-deps": "node scripts/check-pinned-deps.mjs",
 		"check:shrinkwrap": "node scripts/generate-coding-agent-shrinkwrap.mjs --check",
@@ -23,7 +23,7 @@
 		"profile:rpc": "node scripts/profile-coding-agent-node.mjs --mode rpc",
 		"profile:desktop-baseline": "node scripts/profile-app-server-baseline.mjs",
 		"profile:desktop": "node scripts/profile-desktop.mjs",
-		"test:desktop-foundation": "npm run test:harness --workspace @arcmind/agent-core && npm test --workspace @arcmind/coding-agent -- multi-session-isolation.test.ts",
+		"test:desktop-foundation": "npm run test:harness --workspace @metis/agent-core && npm test --workspace @metis/coding-agent -- multi-session-isolation.test.ts",
 		"test": "npm run test --workspaces --if-present",
 		"version:patch": "npm version patch -ws --no-git-tag-version && node scripts/sync-versions.js && npm install --package-lock-only --ignore-scripts",
 		"version:minor": "npm version minor -ws --no-git-tag-version && node scripts/sync-versions.js && npm install --package-lock-only --ignore-scripts",

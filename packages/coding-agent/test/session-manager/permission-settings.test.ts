@@ -14,7 +14,7 @@ describe("SessionManager permission settings", () => {
 	let directory: string;
 
 	beforeEach(() => {
-		directory = mkdtempSync(join(tmpdir(), "arcmind-permissions-"));
+		directory = mkdtempSync(join(tmpdir(), "metis-permissions-"));
 	});
 
 	afterEach(() => {

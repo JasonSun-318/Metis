@@ -1,5 +1,5 @@
-import type { ThinkingLevel } from "@arcmind/agent-core";
-import { getSupportedThinkingLevels, type Model } from "@arcmind/ai/compat";
+import type { ThinkingLevel } from "@metis/agent-core";
+import { getSupportedThinkingLevels, type Model } from "@metis/ai/compat";
 import type { AgentMode } from "./agent-mode.ts";
 
 export type ThinkingSelection = ThinkingLevel | "ultra";

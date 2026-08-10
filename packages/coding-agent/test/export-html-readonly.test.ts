@@ -34,7 +34,7 @@ vi.mock("../src/core/durable-file.ts", async (importOriginal) => {
 
 describe("standalone HTML export", () => {
 	it("reads a session while its live runtime holds the writer lease", async () => {
-		const directory = mkdtempSync(join(tmpdir(), "arcmind-export-readonly-"));
+		const directory = mkdtempSync(join(tmpdir(), "metis-export-readonly-"));
 		let manager: SessionManager | undefined;
 		try {
 			manager = SessionManager.create(directory, directory);
@@ -50,7 +50,7 @@ describe("standalone HTML export", () => {
 	});
 
 	it("refuses to overwrite the source journal", async () => {
-		const directory = mkdtempSync(join(tmpdir(), "arcmind-export-source-"));
+		const directory = mkdtempSync(join(tmpdir(), "metis-export-source-"));
 		let manager: SessionManager | undefined;
 		try {
 			manager = SessionManager.create(directory, directory);
@@ -69,7 +69,7 @@ describe("standalone HTML export", () => {
 	});
 
 	it("removes private attachment metadata from exported session data", async () => {
-		const directory = mkdtempSync(join(tmpdir(), "arcmind-export-attachments-"));
+		const directory = mkdtempSync(join(tmpdir(), "metis-export-attachments-"));
 		let manager: SessionManager | undefined;
 		try {
 			manager = SessionManager.create(directory, directory);
@@ -99,7 +99,7 @@ describe("standalone HTML export", () => {
 	it.each(["hardlink", "symlink"] as const)(
 		"atomically replaces a late %s alias without truncating the source journal",
 		async (kind) => {
-			const directory = mkdtempSync(join(tmpdir(), "arcmind-export-alias-race-"));
+			const directory = mkdtempSync(join(tmpdir(), "metis-export-alias-race-"));
 			let manager: SessionManager | undefined;
 			try {
 				manager = SessionManager.create(directory, directory);

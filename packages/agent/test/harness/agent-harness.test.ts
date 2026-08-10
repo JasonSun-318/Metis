@@ -5,8 +5,8 @@ import {
 	fauxProvider,
 	fauxToolCall,
 	type RegisterFauxProviderOptions,
-} from "@arcmind/ai";
-import { getModel } from "@arcmind/ai/compat";
+} from "@metis/ai";
+import { getModel } from "@metis/ai/compat";
 import { describe, expect, it } from "vitest";
 import { AgentHarness } from "../../src/harness/agent-harness.ts";
 import { NodeExecutionEnv } from "../../src/harness/env/nodejs.ts";

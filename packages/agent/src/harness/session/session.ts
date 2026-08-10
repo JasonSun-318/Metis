@@ -1,4 +1,4 @@
-import type { ImageContent, TextContent } from "@arcmind/ai";
+import type { ImageContent, TextContent } from "@metis/ai";
 import type { AgentMessage } from "../../types.ts";
 import { createBranchSummaryMessage, createCompactionSummaryMessage, createCustomMessage } from "../messages.ts";
 import type {

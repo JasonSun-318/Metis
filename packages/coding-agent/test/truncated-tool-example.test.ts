@@ -10,14 +10,14 @@ vi.mock("node:child_process", () => ({
 describe("truncated-tool example", () => {
 	it("passes model-controlled search values as argv instead of shell text", async () => {
 		let registered: ToolDefinition | undefined;
-		const arcmind = {
+		const metis = {
 			registerTool(tool: ToolDefinition) {
 				registered = tool;
 			},
 		} as unknown as ExtensionAPI;
-		truncatedTool(arcmind);
+		truncatedTool(metis);
 
-		const pattern = '"; touch /tmp/arcmind-example-pwn; #';
+		const pattern = '"; touch /tmp/metis-example-pwn; #';
 		await registered!.execute("call-1", { pattern, path: "src", glob: "*.ts" } as never, undefined, undefined, {
 			cwd: "/repo",
 		} as ExtensionContext);

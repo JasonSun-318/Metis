@@ -182,7 +182,7 @@ function hasAnyApiKey(): boolean {
 }
 
 function dumpFailurePayload(params: { label: string; error: string; payload?: unknown; messages: Message[] }): void {
-	const filename = `/tmp/arcmind-handoff-${params.label}-${Date.now()}.json`;
+	const filename = `/tmp/metis-handoff-${params.label}-${Date.now()}.json`;
 	const body = {
 		label: params.label,
 		error: params.error,

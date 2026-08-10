@@ -1,4 +1,4 @@
-import { visibleWidth } from "@arcmind/tui";
+import { visibleWidth } from "@metis/tui";
 import { beforeAll, describe, expect, it } from "vitest";
 import type { AgentMode } from "../src/core/agent-mode.ts";
 import type { AgentSession } from "../src/core/agent-session.ts";

@@ -1,4 +1,4 @@
-# @arcmind/tui
+# @metis/tui
 
 Minimal terminal UI framework with differential rendering and synchronized output for flicker-free interactive CLI applications.
 
@@ -16,7 +16,7 @@ Minimal terminal UI framework with differential rendering and synchronized outpu
 ## Quick Start
 
 ```typescript
-import { TUI, Text, Editor, ProcessTerminal, matchesKey } from "@arcmind/tui";
+import { TUI, Text, Editor, ProcessTerminal, matchesKey } from "@metis/tui";
 
 // Create terminal
 const terminal = new ProcessTerminal();
@@ -171,7 +171,7 @@ The TUI appends a full SGR reset and OSC 8 reset at the end of each rendered lin
 Components that display a text cursor and need IME (Input Method Editor) support should implement the `Focusable` interface:
 
 ```typescript
-import { CURSOR_MARKER, type Component, type Focusable } from "@arcmind/tui";
+import { CURSOR_MARKER, type Component, type Focusable } from "@metis/tui";
 
 class MyInput implements Component, Focusable {
   focused: boolean = false;  // Set by TUI when focus changes
@@ -190,12 +190,12 @@ When a `Focusable` component has focus, TUI:
 3. Positions the hardware terminal cursor at that location
 4. Shows the hardware cursor only when `showHardwareCursor` is enabled
 
-The cursor remains hidden by default. This keeps the fake cursor rendering, while still positioning the hardware cursor for terminals that track IME candidate windows with hidden cursors. Some terminals require a visible hardware cursor for IME positioning; enable it with the `TUI` constructor option, `setShowHardwareCursor(true)`, or `ARCMIND_HARDWARE_CURSOR=1`. The `Editor` and `Input` built-in components already implement this interface.
+The cursor remains hidden by default. This keeps the fake cursor rendering, while still positioning the hardware cursor for terminals that track IME candidate windows with hidden cursors. Some terminals require a visible hardware cursor for IME positioning; enable it with the `TUI` constructor option, `setShowHardwareCursor(true)`, or `METIS_HARDWARE_CURSOR=1`. The `Editor` and `Input` built-in components already implement this interface.
 
 **Container components with embedded inputs:** When a container component (dialog, selector, etc.) contains an `Input` or `Editor` child, the container must implement `Focusable` and propagate the focus state to the child:
 
 ```typescript
-import { Container, type Focusable, Input } from "@arcmind/tui";
+import { Container, type Focusable, Input } from "@metis/tui";
 
 class SearchDialog extends Container implements Focusable {
   private searchInput: Input;
@@ -542,7 +542,7 @@ Supported formats: PNG, JPEG, GIF, WebP. Dimensions are parsed from the image he
 Supports both slash commands and file paths.
 
 ```typescript
-import { CombinedAutocompleteProvider } from "@arcmind/tui";
+import { CombinedAutocompleteProvider } from "@metis/tui";
 
 const provider = new CombinedAutocompleteProvider(
   [
@@ -567,7 +567,7 @@ editor.setAutocompleteProvider(provider);
 Use `matchesKey()` with the `Key` helper for detecting keyboard input (supports Kitty keyboard protocol):
 
 ```typescript
-import { matchesKey, Key } from "@arcmind/tui";
+import { matchesKey, Key } from "@metis/tui";
 
 if (matchesKey(data, Key.ctrl("c"))) {
   process.exit(0);
@@ -625,7 +625,7 @@ interface Terminal {
 ## Utilities
 
 ```typescript
-import { visibleWidth, truncateToWidth, wrapTextWithAnsi } from "@arcmind/tui";
+import { visibleWidth, truncateToWidth, wrapTextWithAnsi } from "@metis/tui";
 
 // Get visible width of string (ignoring ANSI codes)
 const width = visibleWidth("\x1b[31mHello\x1b[0m"); // 5
@@ -650,8 +650,8 @@ When creating custom components, **each line returned by `render()` must not exc
 Use `matchesKey()` with the `Key` helper for keyboard input:
 
 ```typescript
-import { matchesKey, Key, truncateToWidth } from "@arcmind/tui";
-import type { Component } from "@arcmind/tui";
+import { matchesKey, Key, truncateToWidth } from "@metis/tui";
+import type { Component } from "@metis/tui";
 
 class MyInteractiveComponent implements Component {
   private selectedIndex = 0;
@@ -686,8 +686,8 @@ class MyInteractiveComponent implements Component {
 Use the provided utilities to ensure lines fit:
 
 ```typescript
-import { visibleWidth, truncateToWidth } from "@arcmind/tui";
-import type { Component } from "@arcmind/tui";
+import { visibleWidth, truncateToWidth } from "@metis/tui";
+import type { Component } from "@metis/tui";
 
 class MyComponent implements Component {
   private text: string;
@@ -784,8 +784,8 @@ npx tsx test/chat-simple.ts
 
 ### Debug logging
 
-Set `ARCMIND_TUI_WRITE_LOG` to capture the raw ANSI stream written to stdout.
+Set `METIS_TUI_WRITE_LOG` to capture the raw ANSI stream written to stdout.
 
 ```bash
-ARCMIND_TUI_WRITE_LOG=/tmp/tui-ansi.log npx tsx test/chat-simple.ts
+METIS_TUI_WRITE_LOG=/tmp/tui-ansi.log npx tsx test/chat-simple.ts
 ```

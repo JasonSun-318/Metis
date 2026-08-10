@@ -1,4 +1,4 @@
-import type { Component } from "@arcmind/tui";
+import type { Component } from "@metis/tui";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { InteractiveMode } from "../src/modes/interactive/interactive-mode.ts";
 import { initTheme } from "../src/modes/interactive/theme/theme.ts";
@@ -15,7 +15,7 @@ describe("InteractiveMode /dream", () => {
 				id: "active",
 				sessionId: "session",
 				mode: "chat" as const,
-				cwd: "/Users/ent/ArcMind",
+				cwd: "/Users/ent/Metis",
 				trigger: "manual" as const,
 				startedAt: "2026-07-15T06:00:00.000Z",
 			},
@@ -23,7 +23,7 @@ describe("InteractiveMode /dream", () => {
 				id: `run-${index}`,
 				sessionId: "session",
 				mode: "chat" as const,
-				cwd: "/Users/ent/ArcMind",
+				cwd: "/Users/ent/Metis",
 				trigger: "threshold" as const,
 				startedAt: "2026-07-15T05:00:00.000Z",
 				completedAt: "2026-07-15T05:00:01.000Z",
@@ -57,7 +57,7 @@ describe("InteractiveMode /dream", () => {
 			.join("\n");
 		expect(rendered).toContain("running");
 		expect(rendered).toContain("success");
-		expect(rendered).toContain("/Users/ent/ArcMind");
+		expect(rendered).toContain("/Users/ent/Metis");
 		expect(requestRender).toHaveBeenCalled();
 	});
 });

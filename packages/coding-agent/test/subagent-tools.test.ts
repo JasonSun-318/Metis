@@ -1,4 +1,4 @@
-import type { TUI } from "@arcmind/tui";
+import type { TUI } from "@metis/tui";
 import { Value } from "typebox/value";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import type { AgentSession } from "../src/core/agent-session.ts";
@@ -124,7 +124,9 @@ describe("subagent control tools", () => {
 		expect(properties.task?.description).toBe(
 			"Self-contained assignment with the objective, owned scope, non-goals, expected handoff, and focused verification.",
 		);
-		expect(properties.name?.description).toBe("Unique short name for this child in your session.");
+		expect(properties.name?.description).toBe(
+			"Unique human-readable 3-5 word session title for this child; describe its responsibility, not its first instruction.",
+		);
 		expect(properties.tools?.description).toBe(
 			"Minimum subset of your currently active tools required for the assignment.",
 		);
@@ -313,6 +315,62 @@ describe("subagent control tools", () => {
 		const expanded = stripAnsi(component.render(120).join("\n"));
 		expect(expanded).toContain(marker);
 		expect(expanded).toContain('"usage"');
+	});
+
+	it("returns a readable child transcript without tool results", async () => {
+		const { manager, tools } = setup();
+		const inspect = tools.find((tool) => tool.name === "inspect_agents")!;
+		vi.mocked(manager.inspect).mockResolvedValueOnce({
+			agents: [{ agentId: "child-1", name: "Skill creation", status: "done" }],
+			journal: [
+				{
+					type: "message",
+					message: { role: "user", content: "你能创建 skill 吗" },
+				},
+				{
+					type: "message",
+					message: {
+						role: "assistant",
+						content: [
+							{ type: "text", text: "是的，我可以创建技能！" },
+							{ type: "toolCall", id: "call-1", name: "mcp__cowork__save_skill", arguments: {} },
+						],
+					},
+				},
+				{
+					type: "message",
+					message: {
+						role: "toolResult",
+						toolCallId: "call-1",
+						toolName: "mcp__cowork__save_skill",
+						content: [{ type: "text", text: "INTERNAL_TOOL_RESULT" }],
+					},
+				},
+				{
+					type: "message",
+					message: { role: "assistant", content: [{ type: "text", text: "已创建！" }] },
+				},
+			],
+			usage: { input: 1, output: 2, cacheRead: 3, cacheWrite: 4, elapsedMs: 5 },
+		} as never);
+
+		const response = await execute(inspect, { agentId: "child-1" });
+		expect(response.content[0]).toEqual({
+			type: "text",
+			text: [
+				'Session "Skill creation": done',
+				"Agent ID: child-1",
+				"",
+				"[user] 你能创建 skill 吗",
+				"[assistant] 是的，我可以创建技能！",
+				"[assistant] (called mcp__cowork__save_skill)",
+				"[assistant] 已创建！",
+			].join("\n"),
+		});
+		expect(response.content[0]?.type === "text" ? response.content[0].text : "").not.toContain(
+			"INTERNAL_TOOL_RESULT",
+		);
+		expect(response.details).toHaveProperty("journal");
 	});
 
 	it("shows foreground and background delivery mode in collapsed spawn results", async () => {

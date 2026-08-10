@@ -255,7 +255,7 @@ export async function runWorkspaceSandboxBroker(): Promise<void> {
 					if (!workspaceRoots.some((root) => isPathInside(root, cwd))) {
 						throw new Error("Sandbox cwd is outside the workspace");
 					}
-					const temporaryDir = process.env.ARCMIND_SANDBOX_TEMP_DIR;
+					const temporaryDir = process.env.METIS_SANDBOX_TEMP_DIR;
 					if (!temporaryDir) throw new Error("Sandbox temporary directory is missing");
 					mkdirSync(temporaryDir, { recursive: true });
 					process.env.CLAUDE_CODE_TMPDIR = temporaryDir;

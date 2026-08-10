@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createFauxCore, fauxAssistantMessage } from "@arcmind/ai";
+import { createFauxCore, fauxAssistantMessage } from "@metis/ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	type AgentSessionRuntime,
@@ -109,10 +109,7 @@ describe("multi-session runtime isolation", () => {
 	});
 
 	async function createRuntimeFixture(label: string, streamGate: StreamGate): Promise<RuntimeFixture> {
-		const root = join(
-			tmpdir(),
-			`arcmind-multi-session-${label}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-		);
+		const root = join(tmpdir(), `metis-multi-session-${label}-${Date.now()}-${Math.random().toString(36).slice(2)}`);
 		const cwd = join(root, "project");
 		const agentDir = join(root, "agent");
 		const sessionDir = join(root, "sessions");
@@ -141,8 +138,8 @@ describe("multi-session runtime isolation", () => {
 			return fauxAssistantMessage(`${label}-reply`);
 		};
 		faux.setResponses(Array.from({ length: 8 }, () => response));
-		const extensionFactory: ExtensionFactory = (arcmind) => {
-			arcmind.registerProvider(PROVIDER_ID, {
+		const extensionFactory: ExtensionFactory = (metis) => {
+			metis.registerProvider(PROVIDER_ID, {
 				name: `${label} provider`,
 				baseUrl: `https://${label}.invalid/v1`,
 				api: "openai-completions",
@@ -289,7 +286,7 @@ describe("multi-session runtime isolation", () => {
 		function createLoader(label: "alpha" | "beta") {
 			const root = join(
 				tmpdir(),
-				`arcmind-multi-session-extension-${label}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+				`metis-multi-session-extension-${label}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
 			);
 			const cwd = join(root, "project");
 			const agentDir = join(root, "agent");
@@ -298,7 +295,7 @@ describe("multi-session runtime isolation", () => {
 			mkdirSync(extensionDir, { recursive: true });
 			writeFileSync(
 				join(extensionDir, "isolation.ts"),
-				`const state = (globalThis.__multiSessionExtensionLoads ??= {});\nstate.${label} = (state.${label} ?? 0) + 1;\nexport default function (arcmind) { arcmind.registerCommand("${label}-only", { description: "${label}", handler: async () => {} }); }\n`,
+				`const state = (globalThis.__multiSessionExtensionLoads ??= {});\nstate.${label} = (state.${label} ?? 0) + 1;\nexport default function (metis) { metis.registerCommand("${label}-only", { description: "${label}", handler: async () => {} }); }\n`,
 				"utf8",
 			);
 			roots.push(root);
@@ -330,10 +327,7 @@ describe("multi-session runtime isolation", () => {
 	});
 
 	it("rejects services assembled from different auth-storage ownership boundaries", async () => {
-		const root = join(
-			tmpdir(),
-			`arcmind-multi-session-ownership-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-		);
+		const root = join(tmpdir(), `metis-multi-session-ownership-${Date.now()}-${Math.random().toString(36).slice(2)}`);
 		const cwd = join(root, "project");
 		const agentDir = join(root, "agent");
 		mkdirSync(cwd, { recursive: true });
@@ -361,7 +355,7 @@ describe("multi-session runtime isolation", () => {
 	});
 
 	it("disposes its resource loader when service creation fails", async () => {
-		const root = join(tmpdir(), `arcmind-service-failure-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+		const root = join(tmpdir(), `metis-service-failure-${Date.now()}-${Math.random().toString(36).slice(2)}`);
 		const cwd = join(root, "project");
 		const agentDir = join(root, "agent");
 		mkdirSync(cwd, { recursive: true });
@@ -385,7 +379,7 @@ describe("multi-session runtime isolation", () => {
 	});
 
 	it("does not dispose an externally supplied service loader when session creation fails", async () => {
-		const root = join(tmpdir(), `arcmind-external-loader-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+		const root = join(tmpdir(), `metis-external-loader-${Date.now()}-${Math.random().toString(36).slice(2)}`);
 		const cwd = join(root, "project");
 		const agentDir = join(root, "agent");
 		mkdirSync(cwd, { recursive: true });
@@ -410,7 +404,7 @@ describe("multi-session runtime isolation", () => {
 	it("shares a credential file without sharing OAuth provider routing", async () => {
 		const root = join(
 			tmpdir(),
-			`arcmind-multi-session-auth-backend-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+			`metis-multi-session-auth-backend-${Date.now()}-${Math.random().toString(36).slice(2)}`,
 		);
 		mkdirSync(root, { recursive: true });
 		roots.push(root);

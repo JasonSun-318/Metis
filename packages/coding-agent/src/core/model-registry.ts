@@ -16,7 +16,7 @@ import {
 	type OpenAICompletionsCompat,
 	type OpenAIResponsesCompat,
 	type SimpleStreamOptions,
-} from "@arcmind/ai/compat";
+} from "@metis/ai/compat";
 import { existsSync, readFileSync } from "fs";
 import { join } from "path";
 import { type Static, Type } from "typebox";

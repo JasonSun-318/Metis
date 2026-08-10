@@ -45,7 +45,7 @@ function getPackageCommandUsage(command: PackageCommand): string {
 		case "remove":
 			return `${APP_NAME} remove <source> [-l] [--approve|--no-approve]`;
 		case "update":
-			return `${APP_NAME} update [source|self|arcmind] [--self|--extensions|--all] [--extension <source>] [--approve|--no-approve] [--force]`;
+			return `${APP_NAME} update [source|self|metis] [--self|--extensions|--all] [--extension <source>] [--approve|--no-approve] [--force]`;
 		case "list":
 			return `${APP_NAME} list [--approve|--no-approve]`;
 	}
@@ -113,22 +113,22 @@ Examples:
 			console.log(`${chalk.bold("Usage:")}
   ${getPackageCommandUsage("update")}
 
-Update arcmind and installed packages.
+Update Metis and installed packages.
 
 Options:
-  --self                  Update arcmind only (default when no target is given)
+  --self                  Update Metis only (default when no target is given)
   --extensions            Update installed packages only
-  --all                   Update arcmind and installed packages
+  --all                   Update Metis and installed packages
   --extension <source>    Update one package only
   -a, --approve           Trust project-local files for this command
   -na, --no-approve       Ignore project-local files for this command
-  --force                 Reinstall arcmind even if the current version is latest
+  --force                 Reinstall Metis even if the current version is latest
 
 Short forms:
-  ${APP_NAME} update                Update arcmind only
-  ${APP_NAME} update --all          Update arcmind and all extensions
+  ${APP_NAME} update                Update Metis only
+  ${APP_NAME} update --all          Update Metis and all extensions
   ${APP_NAME} update <source>       Update one package
-  ${APP_NAME} update arcmind             Update arcmind only (self works as alias to arcmind)
+  ${APP_NAME} update metis          Update Metis only (self works as an alias)
 `);
 			return;
 
@@ -286,7 +286,7 @@ function parsePackageCommand(args: string[]): PackageCommandOptions | undefined 
 			}
 			updateTarget = { type: "extensions", source: extensionFlagSource };
 		} else if (source) {
-			const sourceIsSelf = source === "self" || source === "arcmind";
+			const sourceIsSelf = source === "self" || source === "metis";
 			if (sourceIsSelf) {
 				updateTarget = extensionsFlag ? { type: "all" } : { type: "self" };
 			} else {
@@ -622,7 +622,7 @@ export async function handlePackageCommand(
 					}
 				}
 				if (updateTargetIncludesSelf(target)) {
-					console.error(chalk.yellow(`Self-update is disabled. Pull updates from the ArcMind repository.`));
+					console.error(chalk.yellow(`Self-update is disabled. Pull updates from the Metis repository.`));
 					process.exitCode = 1;
 				}
 				return true;

@@ -8,7 +8,7 @@ describe("SessionManager agent mode", () => {
 	let directory: string;
 
 	beforeEach(() => {
-		directory = mkdtempSync(join(tmpdir(), "arcmind-agent-mode-"));
+		directory = mkdtempSync(join(tmpdir(), "metis-agent-mode-"));
 	});
 
 	afterEach(() => {

@@ -1,4 +1,4 @@
-import { setKeybindings, type TUI } from "@arcmind/tui";
+import { setKeybindings, type TUI } from "@metis/tui";
 import { beforeAll, beforeEach, describe, expect, test, vi } from "vitest";
 import { KeybindingsManager } from "../../../src/core/keybindings.ts";
 import { LoginDialogComponent } from "../../../src/modes/interactive/components/login-dialog.ts";

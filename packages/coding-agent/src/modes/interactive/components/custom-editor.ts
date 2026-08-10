@@ -1,4 +1,4 @@
-import { Editor, type EditorOptions, type EditorTheme, type TUI } from "@arcmind/tui";
+import { Editor, type EditorOptions, type EditorTheme, type TUI } from "@metis/tui";
 import type { AppKeybinding, KeybindingsManager } from "../../../core/keybindings.ts";
 
 /**

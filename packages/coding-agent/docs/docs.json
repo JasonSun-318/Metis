@@ -12,7 +12,7 @@
           "path": "quickstart.md"
         },
         {
-          "title": "Using ArcMind",
+          "title": "Using Metis",
           "path": "usage.md"
         },
         {
@@ -77,7 +77,7 @@
           "path": "themes.md"
         },
         {
-          "title": "ArcMind Packages",
+          "title": "Metis Packages",
           "path": "packages.md"
         },
         {

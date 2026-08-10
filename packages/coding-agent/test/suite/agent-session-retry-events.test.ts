@@ -1,5 +1,5 @@
-import type { AgentTool } from "@arcmind/agent-core";
-import { fauxAssistantMessage, fauxThinking, fauxToolCall } from "@arcmind/ai";
+import type { AgentTool } from "@metis/agent-core";
+import { fauxAssistantMessage, fauxThinking, fauxToolCall } from "@metis/ai";
 import { Type } from "typebox";
 import { afterEach, describe, expect, it } from "vitest";
 import { createHarness, type Harness } from "./harness.ts";
@@ -100,8 +100,8 @@ describe("AgentSession retry and event characterization", () => {
 		const harness = await createHarness({
 			settings: { retry: { enabled: true, maxRetries: 3, baseDelayMs: 1 } },
 			extensionFactories: [
-				(arcmind) => {
-					arcmind.on("message_end", async (event) => {
+				(metis) => {
+					metis.on("message_end", async (event) => {
 						if (event.message.role === "assistant") {
 							await new Promise((resolve) => setTimeout(resolve, 40));
 						}
@@ -229,11 +229,11 @@ describe("AgentSession retry and event characterization", () => {
 		const order: string[] = [];
 		const harness = await createHarness({
 			extensionFactories: [
-				(arcmind) => {
-					arcmind.on("message_start", async (event) => {
+				(metis) => {
+					metis.on("message_start", async (event) => {
 						order.push(`extension:${event.type}:${event.message.role}`);
 					});
-					arcmind.on("message_end", async (event) => {
+					metis.on("message_end", async (event) => {
 						order.push(`extension:${event.type}:${event.message.role}`);
 					});
 				},

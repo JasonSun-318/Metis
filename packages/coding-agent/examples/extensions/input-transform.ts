@@ -1,18 +1,18 @@
 /**
  * Input Transform Example - demonstrates the `input` event for intercepting user input.
  *
- * Start arcmind with this extension:
- *   arcmind -e ./examples/extensions/input-transform.ts
+ * Start metis with this extension:
+ *   metis -e ./examples/extensions/input-transform.ts
  *
- * Then type these inside arcmind:
+ * Then type these inside metis:
  *   ?quick What is TypeScript?  → "Respond briefly: What is TypeScript?"
  *   ping                        → "pong" (instant, no LLM)
  *   time                        → current time (instant, no LLM)
  */
-import type { ExtensionAPI } from "@arcmind/coding-agent";
+import type { ExtensionAPI } from "@metis/coding-agent";
 
-export default function (arcmind: ExtensionAPI) {
-	arcmind.on("input", async (event, ctx) => {
+export default function (metis: ExtensionAPI) {
+	metis.on("input", async (event, ctx) => {
 		// Source-based logic: skip processing for extension-injected messages
 		if (event.source === "extension") {
 			return { action: "continue" };

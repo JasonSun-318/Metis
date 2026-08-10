@@ -11,7 +11,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
-import { setKeybindings } from "@arcmind/tui";
+import { setKeybindings } from "@metis/tui";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { KeybindingsManager } from "../src/core/keybindings.ts";
 import { persistToolOutputText } from "../src/core/large-tool-output.ts";
@@ -105,7 +105,7 @@ function createSymlinkedSessionPaths(): {
 	parentAliasB: string;
 	childAliasB: string;
 } {
-	const baseDir = mkdtempSync(join(tmpdir(), "arcmind-session-selector-"));
+	const baseDir = mkdtempSync(join(tmpdir(), "metis-session-selector-"));
 	const realDir = join(baseDir, "real");
 	const aliasADir = join(baseDir, "alias-a");
 	const aliasBDir = join(baseDir, "alias-b");
@@ -254,7 +254,7 @@ describe("session selector path/delete interactions", () => {
 	});
 
 	it("deletes the session image directory with the session file", async () => {
-		const baseDir = mkdtempSync(join(tmpdir(), "arcmind-session-delete-images-"));
+		const baseDir = mkdtempSync(join(tmpdir(), "metis-session-delete-images-"));
 		tempDirs.push(baseDir);
 		const session = SessionManager.create(baseDir, baseDir);
 		const data = Buffer.from("image").toString("base64");
@@ -275,7 +275,7 @@ describe("session selector path/delete interactions", () => {
 	});
 
 	it("deletes the session tool output directory with the session file", async () => {
-		const baseDir = mkdtempSync(join(tmpdir(), "arcmind-session-delete-tool-output-"));
+		const baseDir = mkdtempSync(join(tmpdir(), "metis-session-delete-tool-output-"));
 		tempDirs.push(baseDir);
 		const session = SessionManager.create(baseDir, baseDir);
 		session.appendMessage(assistantMsg("ok"));
@@ -296,7 +296,7 @@ describe("session selector path/delete interactions", () => {
 	});
 
 	it("deletes attachments from the runtime agent directory", async () => {
-		const baseDir = mkdtempSync(join(tmpdir(), "arcmind-session-delete-attachments-"));
+		const baseDir = mkdtempSync(join(tmpdir(), "metis-session-delete-attachments-"));
 		tempDirs.push(baseDir);
 		const agentDir = join(baseDir, "custom-agent");
 		const session = SessionManager.create(baseDir, baseDir);
@@ -321,7 +321,7 @@ describe("session selector path/delete interactions", () => {
 	});
 
 	it("deletes only owned Subagent, document-work, and journal recovery artifacts", async () => {
-		const baseDir = mkdtempSync(join(tmpdir(), "arcmind-session-delete-owned-"));
+		const baseDir = mkdtempSync(join(tmpdir(), "metis-session-delete-owned-"));
 		tempDirs.push(baseDir);
 		const agentDir = join(baseDir, "agent");
 		mkdirSync(agentDir);
@@ -360,7 +360,7 @@ describe("session selector path/delete interactions", () => {
 	});
 
 	it("deletes active-path assets when the journal is archived", async () => {
-		const baseDir = mkdtempSync(join(tmpdir(), "arcmind-session-delete-archived-"));
+		const baseDir = mkdtempSync(join(tmpdir(), "metis-session-delete-archived-"));
 		tempDirs.push(baseDir);
 		const agentDir = join(baseDir, "agent");
 		const sessionsRoot = join(agentDir, "sessions");
@@ -395,7 +395,7 @@ describe("session selector path/delete interactions", () => {
 	});
 
 	it("keeps the journal retryable when Trash is unavailable", async () => {
-		const baseDir = mkdtempSync(join(tmpdir(), "arcmind-session-delete-no-trash-"));
+		const baseDir = mkdtempSync(join(tmpdir(), "metis-session-delete-no-trash-"));
 		tempDirs.push(baseDir);
 		const session = SessionManager.create(baseDir, baseDir);
 		const sessionFile = session.getSessionFile()!;
@@ -408,7 +408,7 @@ describe("session selector path/delete interactions", () => {
 	});
 
 	it("succeeds when the session tool output directory is missing", async () => {
-		const baseDir = mkdtempSync(join(tmpdir(), "arcmind-session-delete-no-tool-output-"));
+		const baseDir = mkdtempSync(join(tmpdir(), "metis-session-delete-no-tool-output-"));
 		tempDirs.push(baseDir);
 		const session = SessionManager.create(baseDir, baseDir);
 		session.appendMessage(assistantMsg("ok"));
@@ -423,7 +423,7 @@ describe("session selector path/delete interactions", () => {
 	});
 
 	it("keeps the session retryable when an owned target cannot be trashed", async () => {
-		const baseDir = mkdtempSync(join(tmpdir(), "arcmind-session-delete-tool-output-failure-"));
+		const baseDir = mkdtempSync(join(tmpdir(), "metis-session-delete-tool-output-failure-"));
 		tempDirs.push(baseDir);
 		const session = SessionManager.create(baseDir, baseDir);
 		session.appendMessage(assistantMsg("ok"));
@@ -439,7 +439,7 @@ describe("session selector path/delete interactions", () => {
 	});
 
 	it("removes a tool output directory symlink without deleting its target", async () => {
-		const baseDir = mkdtempSync(join(tmpdir(), "arcmind-session-delete-tool-output-link-"));
+		const baseDir = mkdtempSync(join(tmpdir(), "metis-session-delete-tool-output-link-"));
 		tempDirs.push(baseDir);
 		const session = SessionManager.create(baseDir, baseDir);
 		session.appendMessage(assistantMsg("ok"));
@@ -461,7 +461,7 @@ describe("session selector path/delete interactions", () => {
 	});
 
 	it("refuses to delete a session while another live writer owns it", async () => {
-		const baseDir = mkdtempSync(join(tmpdir(), "arcmind-session-delete-live-"));
+		const baseDir = mkdtempSync(join(tmpdir(), "metis-session-delete-live-"));
 		tempDirs.push(baseDir);
 		const session = SessionManager.create(baseDir, baseDir);
 		const sessionFile = session.getSessionFile()!;

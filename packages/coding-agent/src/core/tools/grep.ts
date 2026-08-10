@@ -1,7 +1,7 @@
 import { readFile as fsReadFile, stat as fsStat } from "node:fs/promises";
 import { createInterface } from "node:readline";
-import type { AgentTool } from "@arcmind/agent-core";
-import { Text } from "@arcmind/tui";
+import type { AgentTool } from "@metis/agent-core";
+import { Text } from "@metis/tui";
 import { spawn } from "child_process";
 import path from "path";
 import { type Static, Type } from "typebox";

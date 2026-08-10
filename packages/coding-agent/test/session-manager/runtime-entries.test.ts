@@ -68,7 +68,7 @@ describe("SessionManager runtime journal", () => {
 	let directory: string;
 
 	beforeEach(() => {
-		directory = mkdtempSync(join(tmpdir(), "arcmind-runtime-journal-"));
+		directory = mkdtempSync(join(tmpdir(), "metis-runtime-journal-"));
 	});
 
 	afterEach(() => {

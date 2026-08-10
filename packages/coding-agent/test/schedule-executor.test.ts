@@ -34,7 +34,7 @@ import { getDefaultSessionDir, SessionManager } from "../src/core/session-manage
 const roots: string[] = [];
 
 function tempWorkspace(): string {
-	const root = mkdtempSync(join(tmpdir(), "arcmind-schedule-executor-"));
+	const root = mkdtempSync(join(tmpdir(), "metis-schedule-executor-"));
 	roots.push(root);
 	const workspace = join(root, "workspace");
 	mkdirSync(workspace);

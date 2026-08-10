@@ -3,25 +3,25 @@ name: xlsx
 description: "Create, read, analyze, or modify Microsoft Excel .xlsx workbooks, including formulas, charts, pivots, financial models, dashboards, templates, and CSV/TSV imports. Use when an .xlsx file is input or output, or the user explicitly asks for an Excel workbook."
 ---
 
-## ArcMind integration (overrides conflicting rules below)
+## Metis integration (overrides conflicting rules below)
 
 This file embeds the official `excel` skill from the bundled OfficeCLI 1.0.140.
 
-- OfficeCLI is already bundled. Never download, install, self-update, or run `officecli install`. If `officecli --version` fails, report an incomplete ArcMind installation.
-- For a financial model, scenarios, or projections, run `officecli load_skill financial-model` once. For a KPI, analytics, or executive dashboard, run `officecli load_skill data-dashboard` once. Treat the selected specialized skill as overriding the generic guidance below; the ArcMind integration rules in this section still take priority.
+- OfficeCLI is already bundled. Never download, install, self-update, or run `officecli install`. If `officecli --version` fails, report an incomplete Metis installation.
+- For a financial model, scenarios, or projections, run `officecli load_skill financial-model` once. For a KPI, analytics, or executive dashboard, run `officecli load_skill data-dashboard` once. Treat the selected specialized skill as overriding the generic guidance below; the Metis integration rules in this section still take priority.
 - Use the exact absolute path from the `<attachment>` or `<attachments>` block.
-- Put every new deliverable under `$ARCMIND_ATTACHMENTS_DIR`; create the directory first.
+- Put every new deliverable under `$METIS_ATTACHMENTS_DIR`; create the directory first.
 - A simple read must print content to stdout with a targeted `view`, `get`, or `query`. Do not create a work directory, preview, HTML file, rendered sheet, extracted-media directory, or copied workbook for reading, Q&A, or summary.
-- ArcMind creates a unique `$ARCMIND_WORK_DIR` for the current run. Put previews, rendered sheets, extracted media, conversions, and other intermediates only there; never create `.work`, `work`, or `tmp` beside an attachment. Start file-producing operations from `cd "$ARCMIND_WORK_DIR"` and pass `-o "$ARCMIND_WORK_DIR/<name>"` when supported. ArcMind clears the directory after the run.
-- Preserve the input by default and write modifications to a new deliverable unless the user explicitly requests an in-place change to an ArcMind-owned attachment.
+- Metis creates a unique `$METIS_WORK_DIR` for the current run. Put previews, rendered sheets, extracted media, conversions, and other intermediates only there; never create `.work`, `work`, or `tmp` beside an attachment. Start file-producing operations from `cd "$METIS_WORK_DIR"` and pass `-o "$METIS_WORK_DIR/<name>"` when supported. Metis clears the directory after the run.
+- Preserve the input by default and write modifications to a new deliverable unless the user explicitly requests an in-place change to an Metis-owned attachment.
 - Use the fewest sufficient operations and stop when the request is answered. Read only the ranges needed for the question; do not validate or render unless needed.
-- ArcMind disables OfficeCLI auto-resident mode. Each command is self-contained and file-changing commands persist before returning. Ignore later resident lifecycle instructions: do not use `open`, `save`, `close`, or `watch`. Use `batch` for multiple related changes.
+- Metis disables OfficeCLI auto-resident mode. Each command is self-contained and file-changing commands persist before returning. Ignore later resident lifecycle instructions: do not use `open`, `save`, `close`, or `watch`. Use `batch` for multiple related changes.
 - Preserve formulas separately from displayed values; never infer a computed value that OfficeCLI can return.
-- Never call a separate remote document, image, OCR, or vision service. When visual confirmation is needed, use only the current ArcMind model's image input as described below.
+- Never call a separate remote document, image, OCR, or vision service. When visual confirmation is needed, use only the current Metis model's image input as described below.
 
 ### Conditional visual confirmation
 
-The official visual-delivery guidance below is conditional in ArcMind, not universal. Ignore later rules that say every workbook must be rendered. Render and read images only when the task needs confirmation of charts, dashboard appearance, clipped text, column widths, overlap, or final visual appearance. If visual confirmation is unnecessary, do not render.
+The official visual-delivery guidance below is conditional in Metis, not universal. Ignore later rules that say every workbook must be rendered. Render and read images only when the task needs confirmation of charts, dashboard appearance, clipped text, column widths, overlap, or final visual appearance. If visual confirmation is unnecessary, do not render.
 
 When visual confirmation is needed and the current model accepts image input, render only the relevant sheets or ranges and use the `read` tool on the resulting PNG files. A printed image path is not image input.
 
@@ -134,7 +134,7 @@ Any hardcoded number without a source is an undocumented assumption — a review
 
 Six steps. Every non-trivial build follows this shape.
 
-1. **ArcMind lifecycle.** Do not open a resident. Every mutating command persists before it returns. For many cells, use `batch`: **≤ 50 ops/block recommended; tested up to 80+ ops per block on pure value-set payloads with zero failures.**
+1. **Metis lifecycle.** Do not open a resident. Every mutating command persists before it returns. For many cells, use `batch`: **≤ 50 ops/block recommended; tested up to 80+ ops per block on pure value-set payloads with zero failures.**
 2. **Create or load.** `officecli create "$FILE"` (new) or `officecli view "$FILE" outline` (existing — get the lay of the land first).
 3. **Build incrementally.** One command, read the output, continue. After any structural op (new sheet, chart, named range, pivot), run `get` on it to confirm shape before stacking more on top.
 4. **Format.** Column widths, number formats, freeze panes, tab colors, header fills. Formatting is not optional polish — per "Requirements for Outputs" it is part of the deliverable.
@@ -205,7 +205,7 @@ Start wide, then narrow. `outline` first tells you what sheets exist and where t
 
 **Open the rendered workbook to eyeball your own work.**
 - `officecli view $FILE html` — Read the returned HTML to audit the rendered output. Each sheet is addressable, charts render inline. Catches `###`, placeholder leakage, pivot layout, row-height clipping.
-- Do not launch `officecli watch` from ArcMind. If the user wants a live viewer, ask them to open the workbook in Excel / WPS / Numbers.
+- Do not launch `officecli watch` from Metis. If the user wants a live viewer, ask them to open the workbook in Excel / WPS / Numbers.
 Use `view html` as your **first visual check after a batch of edits** — fix at source. For final visual verification, the user opens the `.xlsx` in their Excel / WPS / Numbers viewer.
 
 **Orient.** Sheets, dimensions, formula counts.
@@ -225,8 +225,8 @@ Other `view` modes worth knowing: `annotated` (cell values + types/formulas + wa
 **Round-trip dump.** `officecli dump "$FILE" [path]` serializes the workbook — or one worksheet (`/Sheet1`, `/sheet[N]`) — into a replayable batch JSON; `officecli batch new.xlsx --input dump.json` replays it. Use it to learn from an existing workbook's structure or clone/adapt a template instead of reading raw OOXML. Coverage per `dump --help`; subtree dumps don't carry workbook-level resources (settings, named ranges) — the replay target must already define them.
 
 ```bash
-officecli dump "$FILE" -o "$ARCMIND_WORK_DIR/blueprint.json"            # whole workbook
-officecli dump "$FILE" /Sheet1 -o "$ARCMIND_WORK_DIR/sheet.json"        # one worksheet
+officecli dump "$FILE" -o "$METIS_WORK_DIR/blueprint.json"            # whole workbook
+officecli dump "$FILE" /Sheet1 -o "$METIS_WORK_DIR/sheet.json"        # one worksheet
 officecli batch new.xlsx --input blueprint.json
 ```
 
@@ -512,6 +512,6 @@ Before calling a color or chart "broken", open the file in the user's actual tar
 
 ---
 
-## ArcMind final override
+## Metis final override
 
-ArcMind's integration rules above take priority over conflicting generic requirements: simple reads use stdout without intermediate files; OfficeCLI is non-resident; do not install or update tools; do not use separate remote services; save deliverables under `$ARCMIND_ATTACHMENTS_DIR`; keep intermediates under the runtime-created `$ARCMIND_WORK_DIR`; and do not render when visual confirmation is unnecessary.
+Metis's integration rules above take priority over conflicting generic requirements: simple reads use stdout without intermediate files; OfficeCLI is non-resident; do not install or update tools; do not use separate remote services; save deliverables under `$METIS_ATTACHMENTS_DIR`; keep intermediates under the runtime-created `$METIS_WORK_DIR`; and do not render when visual confirmation is unnecessary.

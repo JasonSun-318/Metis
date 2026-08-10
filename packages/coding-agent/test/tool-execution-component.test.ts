@@ -1,5 +1,5 @@
 import { join, resolve } from "node:path";
-import { Text, type TUI } from "@arcmind/tui";
+import { Text, type TUI } from "@metis/tui";
 import { Type } from "typebox";
 import { beforeAll, describe, expect, test } from "vitest";
 import { getReadmePath } from "../src/config.ts";
@@ -466,7 +466,7 @@ describe("ToolExecutionComponent parity", () => {
 		const component = new ToolExecutionComponent(
 			"web_search",
 			"tool-web-search-collapsed",
-			{ query: "ArcMind", type: "images" },
+			{ query: "Metis", type: "images" },
 			{},
 			undefined,
 			createFakeTui(),
@@ -484,7 +484,7 @@ describe("ToolExecutionComponent parity", () => {
 		const collapsed = stripAnsi(component.render(120).join("\n"));
 		expect(collapsed).toContain("web_search");
 		expect(collapsed).toContain("images");
-		expect(collapsed).toContain("ArcMind");
+		expect(collapsed).toContain("Metis");
 		expect(collapsed).toContain("to expand");
 		expect(collapsed).not.toContain("https://example.com/a.png");
 
@@ -510,9 +510,9 @@ describe("ToolExecutionComponent parity", () => {
 		},
 		{
 			title: "AGENTS.md",
-			path: join(process.cwd(), ".arcmind", "AGENTS.md"),
+			path: join(process.cwd(), ".metis", "AGENTS.md"),
 			content: "Hidden resource instructions",
-			compact: "read resource .arcmind/AGENTS.md",
+			compact: "read resource .metis/AGENTS.md",
 			hidden: "Hidden resource instructions",
 			absent: undefined,
 		},
@@ -525,7 +525,7 @@ describe("ToolExecutionComponent parity", () => {
 			absent: undefined,
 		},
 		{
-			title: "ArcMind documentation",
+			title: "Metis documentation",
 			path: getReadmePath(),
 			content: "Hidden docs content",
 			compact: "read docs README.md",
@@ -563,7 +563,7 @@ describe("ToolExecutionComponent parity", () => {
 
 	for (const scenario of [
 		{ title: "SKILL.md", path: join(process.cwd(), "attio", "SKILL.md"), compact: "[skill] attio:120-329" },
-		{ title: "ArcMind documentation", path: getReadmePath(), compact: "read docs README.md:120-329" },
+		{ title: "Metis documentation", path: getReadmePath(), compact: "read docs README.md:120-329" },
 	] as const) {
 		test(`shows the read line range in compact ${scenario.title} reads before the expand hint`, () => {
 			const component = new ToolExecutionComponent(

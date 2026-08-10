@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { spawnProcess, waitForChildProcess } from "../../../src/utils/child-process.ts";
 
 /**
- * Regression test for https://gitee.com/sun124578963_0/arc-mind/issues/5303
+ * Regression test for https://gitee.com/sun124578963_0/metis/issues/5303
  *
  * waitForChildProcess armed a fixed 100ms timer on `exit` and destroyed the
  * stdio streams when it fired. When a short-lived detached descendant kept the

@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fauxAssistantMessage, fauxToolCall } from "@arcmind/ai";
+import { fauxAssistantMessage, fauxToolCall } from "@metis/ai";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { classifyAction, type PermissionAction, type ToolProvenance } from "../src/core/permission-policy.ts";
 import { SessionManager } from "../src/core/session-manager.ts";
@@ -21,12 +21,12 @@ describe("unattended workspace-write execution", () => {
 	const bashOperations = { exec: vi.fn() };
 
 	beforeEach(() => {
-		root = mkdtempSync(join(tmpdir(), "arcmind-unattended-"));
+		root = mkdtempSync(join(tmpdir(), "metis-unattended-"));
 		cwd = join(root, "workspace");
 		outside = join(root, "outside");
 		mkdirSync(cwd);
 		mkdirSync(outside);
-		writeFileSync(join(cwd, "README.md"), "ArcMind\n");
+		writeFileSync(join(cwd, "README.md"), "Metis\n");
 		writeFileSync(join(cwd, "result.txt"), "ok\n");
 	});
 
@@ -50,7 +50,7 @@ describe("unattended workspace-write execution", () => {
 
 	it.each([
 		["read", { path: "README.md" }],
-		["grep", { path: ".", pattern: "ArcMind" }],
+		["grep", { path: ".", pattern: "Metis" }],
 		["find", { path: ".", pattern: "*.ts" }],
 		["ls", { path: "." }],
 		["write", { path: "result.txt", content: "ok" }],
@@ -63,7 +63,7 @@ describe("unattended workspace-write execution", () => {
 		expect(decision("bash", { command: "pwd" })).toBe("allow");
 		expect(decision("bash", { command: "sudo true" })).toBe("deny");
 		expect(decision("web_fetch", { url: "https://example.test" })).toBe("allow");
-		expect(decision("web_search", { query: "ArcMind" })).toBe("allow");
+		expect(decision("web_search", { query: "Metis" })).toBe("allow");
 		expect(decision("schedule", {})).toBe("deny");
 		expect(decision("spawn_agent", {})).toBe("deny");
 		expect(decision("read", { path: join(outside, "value.txt") })).toBe("deny");

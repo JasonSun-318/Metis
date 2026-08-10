@@ -82,7 +82,7 @@ function minimalEnvironment(temporaryDir: string, preferred?: NodeJS.ProcessEnv)
 	environment.TMPDIR = temporaryDir;
 	environment.TMP = temporaryDir;
 	environment.TEMP = temporaryDir;
-	environment.ARCMIND_SANDBOX_TEMP_DIR = temporaryDir;
+	environment.METIS_SANDBOX_TEMP_DIR = temporaryDir;
 	return environment;
 }
 
@@ -169,7 +169,7 @@ class SandboxBroker {
 			throw new TypeError("Workspace sandbox cwd must be inside a workspace root");
 		}
 
-		const temporaryDir = mkdtempSync(join(tmpdir(), "arcmind-sandbox-"));
+		const temporaryDir = mkdtempSync(join(tmpdir(), "metis-sandbox-"));
 		const environment = minimalEnvironment(temporaryDir);
 		// ponytail: Electron disables RunAsNode, so use a per-run Worker; bundle Node only if native crash containment is required.
 		const child =

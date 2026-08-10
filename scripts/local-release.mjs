@@ -6,10 +6,10 @@ import { isAbsolute, join, relative, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 
 const packages = [
-	{ directory: "packages/ai", name: "@arcmind/ai" },
-	{ directory: "packages/tui", name: "@arcmind/tui" },
-	{ directory: "packages/agent", name: "@arcmind/agent-core" },
-	{ directory: "packages/coding-agent", name: "@arcmind/coding-agent" },
+	{ directory: "packages/ai", name: "@metis/ai" },
+	{ directory: "packages/tui", name: "@metis/tui" },
+	{ directory: "packages/agent", name: "@metis/agent-core" },
+	{ directory: "packages/coding-agent", name: "@metis/coding-agent" },
 ];
 
 function printUsage() {
@@ -111,7 +111,7 @@ function isInsidePath(child, parent) {
 
 function prepareOutputDirectory(options, repoRoot) {
 	if (!options.outDir) {
-		return mkdtempSync(join(tmpdir(), "arcmind-local-release-"));
+		return mkdtempSync(join(tmpdir(), "metis-local-release-"));
 	}
 
 	const outDir = resolve(options.outDir);
@@ -160,24 +160,24 @@ function buildBunBinaryRelease(targetDirectory, archiveDirectory) {
 	]);
 	rmSync(targetDirectory, { force: true, recursive: true });
 	cpSync(join(binaryBuildDirectory, platform), targetDirectory, { recursive: true });
-	const archiveName = platform.startsWith("windows-") ? `arcmind-${platform}.zip` : `arcmind-${platform}.tar.gz`;
+	const archiveName = platform.startsWith("windows-") ? `metis-${platform}.zip` : `metis-${platform}.tar.gz`;
 	cpSync(join(binaryBuildDirectory, archiveName), join(archiveDirectory, archiveName));
 	return platform;
 }
 
-function createArcMindShim(installDirectory) {
+function createMetisShim(installDirectory) {
 	const binDirectory = join(installDirectory, "node_modules", ".bin");
 	if (process.platform === "win32") {
-		if (existsSync(join(binDirectory, "arcmind.cmd"))) {
-			writeFileSync(join(installDirectory, "arcmind.cmd"), '@ECHO off\r\n"%~dp0node_modules\\.bin\\arcmind.cmd" %*\r\n');
-			writeFileSync(join(installDirectory, "arcmind.ps1"), '& "$PSScriptRoot/node_modules/.bin/arcmind.ps1" @args\n');
+		if (existsSync(join(binDirectory, "metis.cmd"))) {
+			writeFileSync(join(installDirectory, "metis.cmd"), '@ECHO off\r\n"%~dp0node_modules\\.bin\\metis.cmd" %*\r\n');
+			writeFileSync(join(installDirectory, "metis.ps1"), '& "$PSScriptRoot/node_modules/.bin/metis.ps1" @args\n');
 			return;
 		}
-		writeFileSync(join(installDirectory, "arcmind.cmd"), '@ECHO off\r\n"%~dp0node_modules\\.bin\\arcmind.exe" %*\r\n');
-		writeFileSync(join(installDirectory, "arcmind.ps1"), '& "$PSScriptRoot/node_modules/.bin/arcmind.exe" @args\n');
+		writeFileSync(join(installDirectory, "metis.cmd"), '@ECHO off\r\n"%~dp0node_modules\\.bin\\metis.exe" %*\r\n');
+		writeFileSync(join(installDirectory, "metis.ps1"), '& "$PSScriptRoot/node_modules/.bin/metis.exe" @args\n');
 		return;
 	}
-	symlinkSync(join("node_modules", ".bin", "arcmind"), join(installDirectory, "arcmind"));
+	symlinkSync(join("node_modules", ".bin", "metis"), join(installDirectory, "metis"));
 }
 
 function packPackage(pkg, tarballDirectory) {
@@ -198,7 +198,7 @@ const options = parseArgs();
 const repoRoot = process.cwd();
 const rootPackageJson = readPackageJson(repoRoot);
 
-if (rootPackageJson.name !== "arcmind") {
+if (rootPackageJson.name !== "metis") {
 	throw new Error("Run this script from the repository root");
 }
 
@@ -240,7 +240,7 @@ if (!options.skipInstall) {
 	writeFileSync(join(nodeInstallDirectory, "package.json"), installPackageJson);
 
 	run("npm", ["install", "--omit=dev", "--ignore-scripts"], { cwd: nodeInstallDirectory });
-	createArcMindShim(nodeInstallDirectory);
+	createMetisShim(nodeInstallDirectory);
 
 	if (!options.skipBunInstall) {
 		if (!commandExists("bun")) {
@@ -252,7 +252,7 @@ if (!options.skipInstall) {
 		);
 		writeFileSync(join(bunInstallDirectory, "package.json"), `${JSON.stringify({ private: true, dependencies: bunDependencies, overrides: bunDependencies }, undefined, "\t")}\n`);
 		run("bun", ["install", "--production", "--ignore-scripts"], { cwd: bunInstallDirectory });
-		createArcMindShim(bunInstallDirectory);
+		createMetisShim(bunInstallDirectory);
 	}
 }
 
@@ -266,19 +266,19 @@ for (const tarball of tarballs.values()) {
 if (!options.skipInstall) {
 	console.log("\nLocal Bun binary release:");
 	console.log(`  ${binaryDirectory}`);
-	console.log(`  ${join(outDir, `arcmind-${binaryPlatform}.${String(binaryPlatform).startsWith("windows-") ? "zip" : "tar.gz"}`)}`);
+	console.log(`  ${join(outDir, `metis-${binaryPlatform}.${String(binaryPlatform).startsWith("windows-") ? "zip" : "tar.gz"}`)}`);
 	console.log("\nRun the local Bun binary release from outside the repository:");
-	console.log(`  ${join(binaryDirectory, String(binaryPlatform).startsWith("windows-") ? "arcmind.exe" : "arcmind")} --help`);
+	console.log(`  ${join(binaryDirectory, String(binaryPlatform).startsWith("windows-") ? "metis.exe" : "metis")} --help`);
 
 	console.log("\nIsolated npm install:");
 	console.log(`  ${nodeInstallDirectory}`);
 	console.log("\nRun the locally packed npm CLI from outside the repository:");
-	console.log(`  ${join(nodeInstallDirectory, process.platform === "win32" ? "arcmind.cmd" : "arcmind")} --help`);
+	console.log(`  ${join(nodeInstallDirectory, process.platform === "win32" ? "metis.cmd" : "metis")} --help`);
 
 	if (!options.skipBunInstall) {
 		console.log("\nIsolated Bun package install:");
 		console.log(`  ${bunInstallDirectory}`);
 		console.log("\nRun the locally packed Bun package CLI from outside the repository:");
-		console.log(`  ${join(bunInstallDirectory, process.platform === "win32" ? "arcmind.cmd" : "arcmind")} --help`);
+		console.log(`  ${join(bunInstallDirectory, process.platform === "win32" ? "metis.cmd" : "metis")} --help`);
 	}
 }

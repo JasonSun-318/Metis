@@ -3,24 +3,24 @@ name: docx
 description: "Create, read, extract, or modify Microsoft Word .docx files, including templates, tracked changes, comments, headers, footers, tables, and tables of contents. Use when a .docx file is input or output, or the user explicitly asks for a Word document."
 ---
 
-## ArcMind integration (overrides conflicting rules below)
+## Metis integration (overrides conflicting rules below)
 
 This file embeds the official `word` skill from the bundled OfficeCLI 1.0.140.
 
-- OfficeCLI is already bundled. Never download, install, self-update, or run `officecli install`. If `officecli --version` fails, report an incomplete ArcMind installation.
-- For an academic paper, journal article, conference paper, or thesis, run `officecli load_skill academic-paper` once. For a fillable form, questionnaire, contract with input fields, or mail-merge template, run `officecli load_skill word-form` once. Treat the selected specialized skill as overriding the generic guidance below. The ArcMind integration rules in this section still take priority.
+- OfficeCLI is already bundled. Never download, install, self-update, or run `officecli install`. If `officecli --version` fails, report an incomplete Metis installation.
+- For an academic paper, journal article, conference paper, or thesis, run `officecli load_skill academic-paper` once. For a fillable form, questionnaire, contract with input fields, or mail-merge template, run `officecli load_skill word-form` once. Treat the selected specialized skill as overriding the generic guidance below. The Metis integration rules in this section still take priority.
 - Use the exact absolute path from the `<attachment>` or `<attachments>` block.
-- Put every new deliverable under `$ARCMIND_ATTACHMENTS_DIR`; create the directory first.
+- Put every new deliverable under `$METIS_ATTACHMENTS_DIR`; create the directory first.
 - A simple read must print content to stdout, normally with `officecli view "$FILE" text`, `get`, or `query`. Do not create a work directory, preview, HTML file, rendered page, extracted-media directory, or copied document for reading, Q&A, or summary.
-- ArcMind creates a unique `$ARCMIND_WORK_DIR` for the current run. Put previews, rendered pages, extracted media, conversions, and other intermediates only there; never create `.work`, `work`, or `tmp` beside an attachment. Start file-producing operations from `cd "$ARCMIND_WORK_DIR"` and pass `-o "$ARCMIND_WORK_DIR/<name>"` when supported. ArcMind clears the directory after the run.
-- Preserve the input by default and write modifications to a new deliverable unless the user explicitly requests an in-place change to an ArcMind-owned attachment.
+- Metis creates a unique `$METIS_WORK_DIR` for the current run. Put previews, rendered pages, extracted media, conversions, and other intermediates only there; never create `.work`, `work`, or `tmp` beside an attachment. Start file-producing operations from `cd "$METIS_WORK_DIR"` and pass `-o "$METIS_WORK_DIR/<name>"` when supported. Metis clears the directory after the run.
+- Preserve the input by default and write modifications to a new deliverable unless the user explicitly requests an in-place change to an Metis-owned attachment.
 - Use the fewest sufficient operations and stop when the request is answered. For reading or summarizing, prefer one targeted `view`, `get`, or `query`; do not validate or render unless needed.
-- ArcMind disables OfficeCLI auto-resident mode. Each command is self-contained and file-changing commands persist before returning. Ignore later resident lifecycle instructions: do not use `open`, `save`, `close`, or `watch`. Use `batch` for multiple related changes.
-- Never call a separate remote document, image, OCR, or vision service. When visual confirmation is needed, use only the current ArcMind model's image input as described below.
+- Metis disables OfficeCLI auto-resident mode. Each command is self-contained and file-changing commands persist before returning. Ignore later resident lifecycle instructions: do not use `open`, `save`, `close`, or `watch`. Use `batch` for multiple related changes.
+- Never call a separate remote document, image, OCR, or vision service. When visual confirmation is needed, use only the current Metis model's image input as described below.
 
 ### Conditional visual confirmation
 
-The official visual-delivery guidance below is conditional in ArcMind, not universal. Ignore later rules that say every document must be rendered. Render and read images only when the task needs confirmation of image content, layout, overlap, overflow, or final visual appearance. If visual confirmation is unnecessary, do not render.
+The official visual-delivery guidance below is conditional in Metis, not universal. Ignore later rules that say every document must be rendered. Render and read images only when the task needs confirmation of image content, layout, overlap, overflow, or final visual appearance. If visual confirmation is unnecessary, do not render.
 
 When visual confirmation is needed and the current model accepts image input, render only the relevant pages and use the `read` tool on the resulting PNG files. A printed image path is not image input.
 
@@ -59,7 +59,7 @@ If in doubt, `view text` after writing and compare character-for-character.
 
 **Incremental execution.** `officecli` mutates the file on every call. Run commands one at a time and check each exit code — a 50-command script that fails at command 3 cascades silently. After any structural op (new style, table, TOC, section break) run `get` on it before stacking more.
 
-**ArcMind lifecycle:** Do not open a resident. Every mutating command persists before it returns. For many paragraphs of one style, use `batch` (one pass for the whole array).
+**Metis lifecycle:** Do not open a resident. Every mutating command persists before it returns. For many paragraphs of one style, use `batch` (one pass for the whole array).
 
 **`$FILE` convention.** All commands use `"$FILE"` — set it once (`FILE="your-doc.docx"`). Never copy a literal `doc.docx` / `review.docx` into output — always substitute your actual target.
 
@@ -135,7 +135,7 @@ officecli view "$FILE" stats              # paragraph counts, font usage, style 
 officecli view "$FILE" issues             # empty paras, missing alt text, spacing anomalies
 ```
 
-Do not launch `officecli watch` from ArcMind. If the user wants a live viewer, ask them to open the `.docx` in Word / WPS / Pages.
+Do not launch `officecli watch` from Metis. If the user wants a live viewer, ask them to open the `.docx` in Word / WPS / Pages.
 
 **Inspect one element.** XPath-style semantic paths (1-based). Always quote — shells glob `[N]`. Use `[last()]` (with parens) for the last element; `[last]` errors. Add `--json` for machine output.
 
@@ -454,7 +454,7 @@ Borders use the format `style;size;color;space`: `single;4;FF0000;1`. Hex colors
 2. `officecli view "$FILE" outline` — heading hierarchy (no H1 → H3 skips), TOC presence, section count.
 3. `officecli view "$FILE" text --max-lines 400` — typos, stray `\$`/`\t`/`\n` literals, placeholder tokens.
 4. `officecli validate "$FILE"` — schema check (the Delivery Gate re-runs this on the closed, on-disk file).
-5. **Conditional visual pass.** Only when the task needs visual confirmation and the current model can inspect images, run `officecli view "$FILE" screenshot --grid auto -o "$ARCMIND_WORK_DIR/sheet.png"` and read it. `--grid auto` tiles every page into one image; use `screenshot --page N` for fine checks on a suspect page. If visual confirmation is needed but unavailable, report the unverified visual aspects. If it is not needed, skip this step without rendering.
+5. **Conditional visual pass.** Only when the task needs visual confirmation and the current model can inspect images, run `officecli view "$FILE" screenshot --grid auto -o "$METIS_WORK_DIR/sheet.png"` and read it. `--grid auto` tiles every page into one image; use `screenshot --page N` for fine checks on a suspect page. If visual confirmation is needed but unavailable, report the unverified visual aspects. If it is not needed, skip this step without rendering.
 6. If anything failed, fix, then **rerun the full cycle** — one fix commonly creates another problem.
 
 ### Delivery Gate (run before handing off — any failure = REJECT, do NOT deliver)
@@ -576,6 +576,6 @@ When in doubt: `officecli help docx`, `officecli help docx <element>`, `officecl
 
 ---
 
-## ArcMind final override
+## Metis final override
 
-ArcMind's integration rules above take priority over conflicting generic requirements: simple reads use stdout without intermediate files; OfficeCLI is non-resident; do not install or update tools; do not use separate remote services; save deliverables under `$ARCMIND_ATTACHMENTS_DIR`; keep intermediates under the runtime-created `$ARCMIND_WORK_DIR`; and do not render when visual confirmation is unnecessary.
+Metis's integration rules above take priority over conflicting generic requirements: simple reads use stdout without intermediate files; OfficeCLI is non-resident; do not install or update tools; do not use separate remote services; save deliverables under `$METIS_ATTACHMENTS_DIR`; keep intermediates under the runtime-created `$METIS_WORK_DIR`; and do not render when visual confirmation is unnecessary.

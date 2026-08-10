@@ -1,4 +1,4 @@
-import { type Component, Container, getKeybindings, Spacer, Text, truncateToWidth } from "@arcmind/tui";
+import { type Component, Container, getKeybindings, Spacer, Text, truncateToWidth } from "@metis/tui";
 import { theme } from "../theme/theme.ts";
 import { DynamicBorder } from "./dynamic-border.ts";
 

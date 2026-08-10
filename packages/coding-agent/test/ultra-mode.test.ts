@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { getModel, getSupportedThinkingLevels } from "@arcmind/ai/compat";
+import { getModel, getSupportedThinkingLevels } from "@metis/ai/compat";
 import { afterEach, describe, expect, it } from "vitest";
 import { parseModelPattern } from "../src/core/model-resolver.ts";
 import { createAgentSession } from "../src/core/sdk.ts";
@@ -15,7 +15,7 @@ afterEach(() => {
 });
 
 function setup(): { root: string; cwd: string; agentDir: string } {
-	const root = mkdtempSync(join(tmpdir(), "arcmind-ultra-"));
+	const root = mkdtempSync(join(tmpdir(), "metis-ultra-"));
 	roots.push(root);
 	const cwd = join(root, "project");
 	const agentDir = join(root, "agent");

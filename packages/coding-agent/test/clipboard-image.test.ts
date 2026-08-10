@@ -116,7 +116,7 @@ describe("readClipboardImage", () => {
 
 			if (command === "powershell.exe") {
 				const spawnOptions = options as { env?: NodeJS.ProcessEnv };
-				expect(spawnOptions.env?.ARCMIND_WSL_CLIPBOARD_IMAGE_PATH).toBeUndefined();
+				expect(spawnOptions.env?.METIS_WSL_CLIPBOARD_IMAGE_PATH).toBeUndefined();
 				expect(args[2]).toContain("$path = 'C:\\Users\\O''Hare\\clip.png'");
 				if (!tmpFile) {
 					throw new Error("wslpath should be called before powershell.exe");
@@ -171,7 +171,7 @@ describe("readClipboardImage", () => {
 	});
 
 	test("macOS: reads the original image when Finder copied a file", async () => {
-		const dir = mkdtempSync(join(tmpdir(), "arcmind-clipboard-"));
+		const dir = mkdtempSync(join(tmpdir(), "metis-clipboard-"));
 		const filePath = join(dir, "copied.png");
 		const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52]);
 		writeFileSync(filePath, png);

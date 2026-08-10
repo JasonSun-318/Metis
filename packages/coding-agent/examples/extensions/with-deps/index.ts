@@ -5,13 +5,13 @@
  * Requires: npm install in this directory
  */
 
-import type { ExtensionAPI } from "@arcmind/coding-agent";
+import type { ExtensionAPI } from "@metis/coding-agent";
 import ms from "ms";
 import { Type } from "typebox";
 
-export default function (arcmind: ExtensionAPI) {
+export default function (metis: ExtensionAPI) {
 	// Register a tool that uses ms
-	arcmind.registerTool({
+	metis.registerTool({
 		name: "parse_duration",
 		label: "Parse Duration",
 		description: "Parse a human-readable duration string (e.g., '2 days', '1h', '5m') to milliseconds",

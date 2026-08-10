@@ -1,5 +1,5 @@
-import type { AgentTool } from "@arcmind/agent-core";
-import { Text } from "@arcmind/tui";
+import type { AgentTool } from "@metis/agent-core";
+import { Text } from "@metis/tui";
 import { type Static, Type } from "typebox";
 import { keyText } from "../../modes/interactive/components/keybinding-hints.ts";
 import type { ToolDefinition } from "../extensions/types.ts";

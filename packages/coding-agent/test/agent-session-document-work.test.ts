@@ -43,7 +43,7 @@ describe("AgentSession document work directory", () => {
 						name: "bash",
 						args: {
 							command:
-								'test -d "$ARCMIND_WORK_DIR" && test "$TMPDIR" = "$ARCMIND_WORK_DIR" && test "$TMP" = "$ARCMIND_WORK_DIR" && test "$TEMP" = "$ARCMIND_WORK_DIR"',
+								'test -d "$METIS_WORK_DIR" && test "$TMPDIR" = "$METIS_WORK_DIR" && test "$TMP" = "$METIS_WORK_DIR" && test "$TEMP" = "$METIS_WORK_DIR"',
 						},
 					},
 				],
@@ -58,14 +58,14 @@ describe("AgentSession document work directory", () => {
 		expect(readdirSync(workRoot)).toEqual([]);
 	});
 
-	it("rejects rebinding the ArcMind-managed work directory", async () => {
+	it("rejects rebinding the Metis-managed work directory", async () => {
 		const harness = createDocumentHarness([
 			{
 				toolCalls: [
 					{
 						name: "bash",
 						args: {
-							command: 'export ARCMIND_WORK_DIR="$PWD/escaped-document-work"; mkdir -p "$ARCMIND_WORK_DIR"',
+							command: 'export METIS_WORK_DIR="$PWD/escaped-document-work"; mkdir -p "$METIS_WORK_DIR"',
 						},
 					},
 				],

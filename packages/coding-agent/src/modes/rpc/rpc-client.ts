@@ -5,8 +5,8 @@
  */
 
 import { type ChildProcess, spawn } from "node:child_process";
-import type { AgentMessage, ThinkingLevel } from "@arcmind/agent-core";
-import type { ImageContent } from "@arcmind/ai";
+import type { AgentMessage, ThinkingLevel } from "@metis/agent-core";
+import type { ImageContent } from "@metis/ai";
 import type { AgentSessionEvent, SessionStats } from "../../core/agent-session.ts";
 import type { BashResult } from "../../core/bash-executor.ts";
 import type { CompactionResult } from "../../core/compaction/index.ts";

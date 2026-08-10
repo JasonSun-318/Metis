@@ -17,9 +17,9 @@
  * separate variables. Only the agent cursor is ever exposed to the agent.
  */
 
-import { StringEnum } from "@arcmind/ai";
-import type { ExtensionAPI, ExtensionContext, Theme, ToolExecutionMode } from "@arcmind/coding-agent";
-import { type Component, matchesKey, Text, truncateToWidth, visibleWidth } from "@arcmind/tui";
+import { StringEnum } from "@metis/ai";
+import type { ExtensionAPI, ExtensionContext, Theme, ToolExecutionMode } from "@metis/coding-agent";
+import { type Component, matchesKey, Text, truncateToWidth, visibleWidth } from "@metis/tui";
 import { Type } from "typebox";
 
 // Thrown from the tool on illegal actions. The agent runtime surfaces thrown
@@ -655,9 +655,9 @@ function getBoardDetails(): BoardDetails {
 	};
 }
 
-export default function (arcmind: ExtensionAPI) {
-	arcmind.on("session_start", async (_event, ctx) => reconstructState(ctx));
-	arcmind.on("session_tree", async (_event, ctx) => reconstructState(ctx));
+export default function (metis: ExtensionAPI) {
+	metis.on("session_start", async (_event, ctx) => reconstructState(ctx));
+	metis.on("session_tree", async (_event, ctx) => reconstructState(ctx));
 
 	// Sent once per game at end-of-game. The custom renderer paints the banner;
 	// `content` is a plain-text fallback for any non-TUI consumer and for the
@@ -671,7 +671,7 @@ export default function (arcmind: ExtensionAPI) {
 					: gameState.status === "draw"
 						? "Draw"
 						: "Game over";
-		arcmind.sendMessage({
+		metis.sendMessage({
 			customType: GAME_OVER_MESSAGE_TYPE,
 			content: `Game over: ${label}.`,
 			display: true,
@@ -682,7 +682,7 @@ export default function (arcmind: ExtensionAPI) {
 	// -----------------------------------------------------------------------
 	// Custom message renderer for user move messages
 	// -----------------------------------------------------------------------
-	arcmind.registerMessageRenderer(MOVE_MESSAGE_TYPE, (message, { expanded }, theme) => {
+	metis.registerMessageRenderer(MOVE_MESSAGE_TYPE, (message, { expanded }, theme) => {
 		const details = message.details as BoardDetails | undefined;
 		const turnLabel =
 			details?.currentTurn === "O"
@@ -695,7 +695,7 @@ export default function (arcmind: ExtensionAPI) {
 	// -----------------------------------------------------------------------
 	// Custom message renderer for game-over messages
 	// -----------------------------------------------------------------------
-	arcmind.registerMessageRenderer(GAME_OVER_MESSAGE_TYPE, (message, _options, theme) => {
+	metis.registerMessageRenderer(GAME_OVER_MESSAGE_TYPE, (message, _options, theme) => {
 		const details = message.details as BoardDetails | undefined;
 		const status = (details?.status ?? "draw") as GameStatus;
 		return new GameOverMessageComponent(status, details, theme);
@@ -704,7 +704,7 @@ export default function (arcmind: ExtensionAPI) {
 	// -----------------------------------------------------------------------
 	// before_agent_start - inject game instructions each turn
 	// -----------------------------------------------------------------------
-	arcmind.on("before_agent_start", async (event) => {
+	metis.on("before_agent_start", async (event) => {
 		if (!gameActive) return undefined;
 
 		const instructions = `
@@ -775,7 +775,7 @@ Decide the target cell first, then dump every action for the turn in one go.
 	// -----------------------------------------------------------------------
 	// /tic-tac-toe command
 	// -----------------------------------------------------------------------
-	arcmind.registerCommand("tic-tac-toe", {
+	metis.registerCommand("tic-tac-toe", {
 		description: "Play tic-tac-toe against the agent",
 
 		handler: async (_args, ctx) => {
@@ -789,7 +789,7 @@ Decide the target cell first, then dump every action for the turn in one go.
 				gameState = createInitialState();
 			}
 			gameActive = true;
-			arcmind.setSessionName("Tic-Tac-Toe");
+			metis.setSessionName("Tic-Tac-Toe");
 
 			await ctx.ui.custom<void>((tui, _theme, _kb, done) => {
 				component = new TicTacToeComponent(
@@ -806,7 +806,7 @@ Decide the target cell first, then dump every action for the turn in one go.
 							gameState.currentTurn = gameState.agentMark;
 						}
 						component?.updateState(gameState);
-						arcmind.appendEntry(SAVE_TYPE, getBoardDetails());
+						metis.appendEntry(SAVE_TYPE, getBoardDetails());
 
 						if (gameState.status === "playing") {
 							// IMPORTANT: user play does NOT touch the agent cursor.
@@ -816,7 +816,7 @@ Decide the target cell first, then dump every action for the turn in one go.
 								gameState.agentCursorRow,
 								gameState.agentCursorCol,
 							);
-							arcmind.sendMessage(
+							metis.sendMessage(
 								{
 									customType: MOVE_MESSAGE_TYPE,
 									content:
@@ -856,7 +856,7 @@ Decide the target cell first, then dump every action for the turn in one go.
 		play: 0,
 	};
 
-	arcmind.registerTool({
+	metis.registerTool({
 		name: "tic_tac_toe",
 		label: "Tic-Tac-Toe",
 		description:
@@ -910,7 +910,7 @@ Decide the target cell first, then dump every action for the turn in one go.
 						// Do NOT reset the cursor on failure. The agent can retry
 						// from the cursor's current position.
 						component?.updateState(gameState);
-						arcmind.appendEntry(SAVE_TYPE, getBoardDetails());
+						metis.appendEntry(SAVE_TYPE, getBoardDetails());
 						throw new TicTacToeError(
 							`Cell (${r},${c}) is already ${gameState.board[r][c]}. Your cursor is still at (${r},${c}). Move to an empty cell and retry play.`,
 						);
@@ -939,7 +939,7 @@ Decide the target cell first, then dump every action for the turn in one go.
 			}
 
 			component?.updateState(gameState);
-			arcmind.appendEntry(SAVE_TYPE, getBoardDetails());
+			metis.appendEntry(SAVE_TYPE, getBoardDetails());
 
 			return {
 				content: [{ type: "text", text: result }],
@@ -969,7 +969,7 @@ Decide the target cell first, then dump every action for the turn in one go.
 	// -----------------------------------------------------------------------
 	// tic_tac_toe_see_board tool - inspect board + agent cursor.
 	// -----------------------------------------------------------------------
-	arcmind.registerTool({
+	metis.registerTool({
 		name: "tic_tac_toe_see_board",
 		label: "See Board",
 		description:

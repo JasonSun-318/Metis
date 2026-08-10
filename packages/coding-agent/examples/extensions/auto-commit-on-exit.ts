@@ -5,12 +5,12 @@
  * Uses the last assistant message to generate a commit message.
  */
 
-import type { ExtensionAPI } from "@arcmind/coding-agent";
+import type { ExtensionAPI } from "@metis/coding-agent";
 
-export default function (arcmind: ExtensionAPI) {
-	arcmind.on("session_shutdown", async (_event, ctx) => {
+export default function (metis: ExtensionAPI) {
+	metis.on("session_shutdown", async (_event, ctx) => {
 		// Check for uncommitted changes
-		const { stdout: status, code } = await arcmind.exec("git", ["status", "--porcelain"]);
+		const { stdout: status, code } = await metis.exec("git", ["status", "--porcelain"]);
 
 		if (code !== 0 || status.trim().length === 0) {
 			// Not a git repo or no changes
@@ -36,11 +36,11 @@ export default function (arcmind: ExtensionAPI) {
 
 		// Generate a simple commit message
 		const firstLine = lastAssistantText.split("\n")[0] || "Work in progress";
-		const commitMessage = `[arcmind] ${firstLine.slice(0, 50)}${firstLine.length > 50 ? "..." : ""}`;
+		const commitMessage = `[metis] ${firstLine.slice(0, 50)}${firstLine.length > 50 ? "..." : ""}`;
 
 		// Stage and commit
-		await arcmind.exec("git", ["add", "-A"]);
-		const { code: commitCode } = await arcmind.exec("git", ["commit", "-m", commitMessage]);
+		await metis.exec("git", ["add", "-A"]);
+		const { code: commitCode } = await metis.exec("git", ["commit", "-m", commitMessage]);
 
 		if (commitCode === 0 && ctx.hasUI) {
 			ctx.ui.notify(`Auto-committed: ${commitMessage}`, "info");

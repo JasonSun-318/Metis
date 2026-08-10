@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { getModel } from "@arcmind/ai/compat";
+import { getModel } from "@metis/ai/compat";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { ResourceLoader } from "../src/core/resource-loader.ts";
 import { createAgentSession, type PermissionRequest } from "../src/core/sdk.ts";
@@ -13,7 +13,7 @@ describe("createAgentSession session manager defaults", () => {
 	let agentDir: string;
 
 	beforeEach(() => {
-		tempDir = join(tmpdir(), `arcmind-sdk-session-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+		tempDir = join(tmpdir(), `metis-sdk-session-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
 		cwd = join(tempDir, "project");
 		agentDir = join(tempDir, "agent");
 		mkdirSync(cwd, { recursive: true });
@@ -53,7 +53,7 @@ describe("createAgentSession session manager defaults", () => {
 		const { session } = await createAgentSession({ cwd, agentDir, model, agentMode: "chat" });
 
 		expect(session.mode).toBe("chat");
-		expect(session.systemPrompt).toContain("You are ArcMind, a general-purpose AI agent");
+		expect(session.systemPrompt).toContain("You are Metis, a general-purpose AI agent");
 		expect(session.systemPrompt).toContain(
 			"do not assume it is a software project unless the user or its contents indicate that",
 		);
@@ -134,7 +134,7 @@ describe("createAgentSession session manager defaults", () => {
 			title: "Approve bash?",
 		});
 		expect(request?.details).toContain("Command: git push origin main");
-		expect(request?.details).toContain("ArcMind does not sandbox this action");
+		expect(request?.details).toContain("Metis does not sandbox this action");
 		session.dispose();
 	});
 

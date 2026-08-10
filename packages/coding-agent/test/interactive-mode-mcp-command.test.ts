@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { Component } from "@arcmind/tui";
+import type { Component } from "@metis/tui";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { AuthStorage, type McpSecretCredential } from "../src/core/auth-storage.ts";
 import { McpManager, type McpServerStatus } from "../src/core/mcp/index.ts";
@@ -300,7 +300,7 @@ describe("InteractiveMode /mcp", () => {
 	});
 
 	it("persists a TUI-entered token and reconnects after restart", async () => {
-		const root = mkdtempSync(join(tmpdir(), "arcmind-mcp-tui-"));
+		const root = mkdtempSync(join(tmpdir(), "metis-mcp-tui-"));
 		const agentDir = join(root, "agent");
 		const projectDir = join(root, "project");
 		mkdirSync(projectDir, { recursive: true });

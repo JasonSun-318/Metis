@@ -1,4 +1,4 @@
-import type { ThinkingLevel } from "@arcmind/agent-core";
+import type { ThinkingLevel } from "@metis/agent-core";
 import type { AgentMode } from "../agent-mode.ts";
 import type { AgentSessionEvent } from "../agent-session.ts";
 import type { PermissionMode } from "../permission-mode.ts";

@@ -1,5 +1,5 @@
-import type { AgentTool } from "@arcmind/agent-core";
-import { fauxAssistantMessage, fauxToolCall } from "@arcmind/ai";
+import type { AgentTool } from "@metis/agent-core";
+import { fauxAssistantMessage, fauxToolCall } from "@metis/ai";
 import { Type } from "typebox";
 import { afterEach, describe, expect, it } from "vitest";
 import { createHarness, type Harness } from "../harness.ts";
@@ -30,8 +30,8 @@ describe("regressions #1717/#2113: agent session event settlement", () => {
 		const harness = await createHarness({
 			tools: [createEchoTool()],
 			extensionFactories: [
-				(arcmind) => {
-					arcmind.on("message_end", async (event) => {
+				(metis) => {
+					metis.on("message_end", async (event) => {
 						if (event.message.role === "assistant") {
 							await new Promise((resolve) => setTimeout(resolve, 20));
 						}
@@ -70,8 +70,8 @@ describe("regressions #1717/#2113: agent session event settlement", () => {
 		harness = await createHarness({
 			tools: [createEchoTool()],
 			extensionFactories: [
-				(arcmind) => {
-					arcmind.on("tool_call", () => {
+				(metis) => {
+					metis.on("tool_call", () => {
 						branchRolesAtToolCall.push(
 							harness.sessionManager
 								.getBranch()

@@ -1,5 +1,5 @@
-import type { AgentMessage } from "@arcmind/agent-core";
-import type { AssistantMessage, Model } from "@arcmind/ai";
+import type { AgentMessage } from "@metis/agent-core";
+import type { AssistantMessage, Model } from "@metis/ai";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { type CompactionPreparation, compact, generateSummary } from "../src/core/compaction/index.ts";
 
@@ -7,8 +7,8 @@ const { completeSimpleMock } = vi.hoisted(() => ({
 	completeSimpleMock: vi.fn(),
 }));
 
-vi.mock("@arcmind/ai/compat", async (importOriginal) => {
-	const actual = await importOriginal<typeof import("@arcmind/ai/compat")>();
+vi.mock("@metis/ai/compat", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("@metis/ai/compat")>();
 	return {
 		...actual,
 		completeSimple: completeSimpleMock,

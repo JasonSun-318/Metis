@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -e
 
-AUTH_FILE="$HOME/.arcmind/agent/auth.json"
-AUTH_BACKUP="$HOME/.arcmind/agent/auth.json.bak"
+AUTH_FILE="$HOME/.metis/agent/auth.json"
+AUTH_BACKUP="$HOME/.metis/agent/auth.json.bak"
 
 # Restore auth.json on exit (success or failure)
 cleanup() {
@@ -20,7 +20,7 @@ if [[ -f "$AUTH_FILE" ]]; then
 fi
 
 # Skip local LLM tests (ollama, lmstudio)
-export ARCMIND_NO_LOCAL_LLM=1
+export METIS_NO_LOCAL_LLM=1
 
 # Unset API keys (see packages/ai/src/stream.ts getEnvApiKey)
 unset ANTHROPIC_API_KEY

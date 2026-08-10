@@ -96,7 +96,7 @@ function deferredExecutor() {
 }
 
 function tempDir(): string {
-	const path = mkdtempSync(join(tmpdir(), "arcmind-schedule-manager-"));
+	const path = mkdtempSync(join(tmpdir(), "metis-schedule-manager-"));
 	roots.push(path);
 	return path;
 }

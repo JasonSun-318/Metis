@@ -5,12 +5,12 @@
  * Useful for preventing accidental modifications to sensitive files.
  */
 
-import type { ExtensionAPI } from "@arcmind/coding-agent";
+import type { ExtensionAPI } from "@metis/coding-agent";
 
-export default function (arcmind: ExtensionAPI) {
+export default function (metis: ExtensionAPI) {
 	const protectedPaths = [".env", ".git/", "node_modules/"];
 
-	arcmind.on("tool_call", async (event, ctx) => {
+	metis.on("tool_call", async (event, ctx) => {
 		if (event.toolName !== "write" && event.toolName !== "edit") {
 			return undefined;
 		}

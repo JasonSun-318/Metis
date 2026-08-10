@@ -11,7 +11,7 @@ import {
 	truncateToWidth,
 	visibleWidth,
 	wrapTextWithAnsi,
-} from "@arcmind/tui";
+} from "@metis/tui";
 import { formatSessionAttachmentDisplayText } from "../../../core/session-attachments.ts";
 import type { SessionTreeNode } from "../../../core/session-manager.ts";
 import { theme } from "../theme/theme.ts";

@@ -15,6 +15,7 @@ profiles-*/
 
 # Environment
 .env
+.desktop-release/
 
 # Editor files
 .vscode/
@@ -29,17 +30,21 @@ profiles-*/
 .npm/
 coverage/
 .nyc_output/
+.metis_config/
 .arcmind_config/
 tui-debug.log
 compaction-results/
 .opencode/
 syntax.jsonl
 out.jsonl
+metis-*.html
 arcmind-*.html
 out.html
 packages/coding-agent/binaries/
 todo.md
 plans/
+.metis/hf-sessions/
+.metis/hf-sessions-backup/
 .arcmind/hf-sessions/
 .arcmind/hf-sessions-backup/
 collect.sh

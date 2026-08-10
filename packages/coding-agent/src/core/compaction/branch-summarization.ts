@@ -5,9 +5,9 @@
  * a summary of the branch being left so context isn't lost.
  */
 
-import type { AgentMessage, StreamFn } from "@arcmind/agent-core";
-import type { Model, SimpleStreamOptions } from "@arcmind/ai/compat";
-import { completeSimple } from "@arcmind/ai/compat";
+import type { AgentMessage, StreamFn } from "@metis/agent-core";
+import type { Model, SimpleStreamOptions } from "@metis/ai/compat";
+import { completeSimple } from "@metis/ai/compat";
 import { convertToLlm, createBranchSummaryMessage, createCompactionSummaryMessage } from "../messages.ts";
 import { type ReadonlySessionManager, type SessionEntry, sessionEntryToContextMessages } from "../session-manager.ts";
 import { estimateTokens } from "./compaction.ts";
@@ -188,7 +188,7 @@ export function prepareBranchEntries(entries: SessionEntry[], tokenBudget: numbe
 
 	// First pass: collect file ops from ALL entries (even if they don't fit in token budget)
 	// This ensures we capture cumulative file tracking from nested branch summaries
-	// Only extract from arcmind-generated summaries (fromHook !== true), not extension-generated ones
+	// Only extract from metis-generated summaries (fromHook !== true), not extension-generated ones
 	for (const entry of entries) {
 		if (entry.type === "branch_summary" && !entry.fromHook && entry.details) {
 			const details = entry.details as BranchSummaryDetails;

@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 #
-# Migrate sessions from ~/.arcmind/agent/*.jsonl to proper session directories.
+# Migrate sessions from ~/.metis/agent/*.jsonl to proper session directories.
 # This fixes sessions created by the bug in v0.30.0 where sessions were
-# saved to ~/.arcmind/agent/ instead of ~/.arcmind/agent/sessions/<encoded-cwd>/.
+# saved to ~/.metis/agent/ instead of ~/.metis/agent/sessions/<encoded-cwd>/.
 #
 # Usage: ./migrate-sessions.sh [--dry-run]
 #
 
 set -e
 
-AGENT_DIR="${ARCMIND_AGENT_DIR:-$HOME/.arcmind/agent}"
+AGENT_DIR="${METIS_AGENT_DIR:-$HOME/.metis/agent}"
 DRY_RUN=false
 
 if [[ "$1" == "--dry-run" ]]; then

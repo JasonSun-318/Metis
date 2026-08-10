@@ -1,4 +1,4 @@
-import type { ImageContent as AgentImageContent, TextContent as AgentTextContent } from "@arcmind/ai";
+import type { ImageContent as AgentImageContent, TextContent as AgentTextContent } from "@metis/ai";
 import type { CallToolResult, ContentBlock, ReadResourceResult } from "@modelcontextprotocol/sdk/types.js";
 import { Type } from "typebox";
 import type { ToolDefinition } from "../extensions/types.ts";

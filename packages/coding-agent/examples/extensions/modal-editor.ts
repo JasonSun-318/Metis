@@ -1,7 +1,7 @@
 /**
  * Modal Editor - vim-like modal editing example
  *
- * Usage: arcmind --extension ./examples/extensions/modal-editor.ts
+ * Usage: metis --extension ./examples/extensions/modal-editor.ts
  *
  * - Escape: insert → normal mode (in normal mode, aborts agent)
  * - i: normal → insert mode
@@ -9,8 +9,8 @@
  * - ctrl+c, ctrl+d, etc. work in both modes
  */
 
-import { CustomEditor, type ExtensionAPI } from "@arcmind/coding-agent";
-import { matchesKey, truncateToWidth, visibleWidth } from "@arcmind/tui";
+import { CustomEditor, type ExtensionAPI } from "@metis/coding-agent";
+import { matchesKey, truncateToWidth, visibleWidth } from "@metis/tui";
 
 // Normal mode key mappings: key -> escape sequence (or null for mode switch)
 const NORMAL_KEYS: Record<string, string | null> = {
@@ -78,8 +78,8 @@ class ModalEditor extends CustomEditor {
 	}
 }
 
-export default function (arcmind: ExtensionAPI) {
-	arcmind.on("session_start", (_event, ctx) => {
+export default function (metis: ExtensionAPI) {
+	metis.on("session_start", (_event, ctx) => {
 		ctx.ui.setEditorComponent((tui, theme, kb) => new ModalEditor(tui, theme, kb));
 	});
 }

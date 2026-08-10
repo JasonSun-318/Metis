@@ -1,6 +1,6 @@
 import { homedir } from "node:os";
 import * as path from "node:path";
-import { type AutocompleteProvider, CombinedAutocompleteProvider } from "@arcmind/tui";
+import { type AutocompleteProvider, CombinedAutocompleteProvider } from "@metis/tui";
 import { beforeAll, describe, expect, test, vi } from "vitest";
 import { type Component, Container, type Focusable, TUI } from "../../tui/src/tui.ts";
 import { VirtualTerminal } from "../../tui/test/virtual-terminal.ts";
@@ -588,21 +588,21 @@ describe("InteractiveMode.showLoadedResources", () => {
 	function createExtensionFixtures(): ExtensionFixture[] {
 		return [
 			{
-				path: "/tmp/project/.arcmind/extensions/answer.ts",
-				sourceInfo: createSourceInfo("/tmp/project/.arcmind/extensions/answer.ts", {
+				path: "/tmp/project/.metis/extensions/answer.ts",
+				sourceInfo: createSourceInfo("/tmp/project/.metis/extensions/answer.ts", {
 					source: "local",
 					scope: "project",
 					origin: "top-level",
-					baseDir: "/tmp/project/.arcmind/extensions",
+					baseDir: "/tmp/project/.metis/extensions",
 				}),
 			},
 			{
-				path: "/tmp/project/.arcmind/extensions/local-index/index.ts",
-				sourceInfo: createSourceInfo("/tmp/project/.arcmind/extensions/local-index/index.ts", {
+				path: "/tmp/project/.metis/extensions/local-index/index.ts",
+				sourceInfo: createSourceInfo("/tmp/project/.metis/extensions/local-index/index.ts", {
 					source: "local",
 					scope: "project",
 					origin: "top-level",
-					baseDir: "/tmp/project/.arcmind/extensions",
+					baseDir: "/tmp/project/.metis/extensions",
 				}),
 			},
 			{
@@ -615,50 +615,50 @@ describe("InteractiveMode.showLoadedResources", () => {
 				}),
 			},
 			{
-				path: "/tmp/project/.arcmind/npm/node_modules/arcmind-markdown-preview/extensions/index.ts",
+				path: "/tmp/project/.metis/npm/node_modules/metis-markdown-preview/extensions/index.ts",
 				sourceInfo: createSourceInfo(
-					"/tmp/project/.arcmind/npm/node_modules/arcmind-markdown-preview/extensions/index.ts",
+					"/tmp/project/.metis/npm/node_modules/metis-markdown-preview/extensions/index.ts",
 					{
-						source: "npm:arcmind-markdown-preview",
+						source: "npm:metis-markdown-preview",
 						scope: "project",
 						origin: "package",
-						baseDir: "/tmp/project/.arcmind/npm/node_modules/arcmind-markdown-preview",
+						baseDir: "/tmp/project/.metis/npm/node_modules/metis-markdown-preview",
 					},
 				),
 			},
 			{
-				path: "/tmp/project/.arcmind/npm/node_modules/@scope/arcmind-scoped/extensions/index.ts",
+				path: "/tmp/project/.metis/npm/node_modules/@scope/metis-scoped/extensions/index.ts",
 				sourceInfo: createSourceInfo(
-					"/tmp/project/.arcmind/npm/node_modules/@scope/arcmind-scoped/extensions/index.ts",
+					"/tmp/project/.metis/npm/node_modules/@scope/metis-scoped/extensions/index.ts",
 					{
-						source: "npm:@scope/arcmind-scoped",
+						source: "npm:@scope/metis-scoped",
 						scope: "project",
 						origin: "package",
-						baseDir: "/tmp/project/.arcmind/npm/node_modules/@scope/arcmind-scoped",
+						baseDir: "/tmp/project/.metis/npm/node_modules/@scope/metis-scoped",
 					},
 				),
 			},
 			{
-				path: "/tmp/project/.arcmind/git/github.com/HazAT/arcmind-interactive-subagents/extensions/index.ts",
+				path: "/tmp/project/.metis/git/github.com/HazAT/metis-interactive-subagents/extensions/index.ts",
 				sourceInfo: createSourceInfo(
-					"/tmp/project/.arcmind/git/github.com/HazAT/arcmind-interactive-subagents/extensions/index.ts",
+					"/tmp/project/.metis/git/github.com/HazAT/metis-interactive-subagents/extensions/index.ts",
 					{
-						source: "git:github.com/HazAT/arcmind-interactive-subagents",
+						source: "git:github.com/HazAT/metis-interactive-subagents",
 						scope: "project",
 						origin: "package",
-						baseDir: "/tmp/project/.arcmind/git/github.com/HazAT/arcmind-interactive-subagents",
+						baseDir: "/tmp/project/.metis/git/github.com/HazAT/metis-interactive-subagents",
 					},
 				),
 			},
 			{
-				path: "/tmp/project/.arcmind/git/github.com/HazAT/arcmind-interactive-subagents/extensions/subagents/index.ts",
+				path: "/tmp/project/.metis/git/github.com/HazAT/metis-interactive-subagents/extensions/subagents/index.ts",
 				sourceInfo: createSourceInfo(
-					"/tmp/project/.arcmind/git/github.com/HazAT/arcmind-interactive-subagents/extensions/subagents/index.ts",
+					"/tmp/project/.metis/git/github.com/HazAT/metis-interactive-subagents/extensions/subagents/index.ts",
 					{
-						source: "git:github.com/HazAT/arcmind-interactive-subagents",
+						source: "git:github.com/HazAT/metis-interactive-subagents",
 						scope: "project",
 						origin: "package",
-						baseDir: "/tmp/project/.arcmind/git/github.com/HazAT/arcmind-interactive-subagents",
+						baseDir: "/tmp/project/.metis/git/github.com/HazAT/metis-interactive-subagents",
 					},
 				),
 			},
@@ -754,7 +754,7 @@ describe("InteractiveMode.showLoadedResources", () => {
 
 		expect(normalizeRenderedOutput(fakeThis.loadedResourcesContainer)).toMatchInlineSnapshot(`
 "[Extensions]
-  @scope/arcmind-scoped, answer.ts, arcmind-markdown-preview, cli-extension.ts, HazAT/arcmind-interactive-subagents, HazAT/arcmind-interactive-subagents:subagents, local-index, user-index"`);
+  @scope/metis-scoped, answer.ts, cli-extension.ts, HazAT/metis-interactive-subagents, HazAT/metis-interactive-subagents:subagents, local-index, metis-markdown-preview, user-index"`);
 	});
 
 	test("adds more parent folders until local extension labels are unique", () => {
@@ -1001,14 +1001,14 @@ describe("InteractiveMode.showLoadedResources", () => {
 	test("package extensions still strip index.ts correctly (regression guard)", () => {
 		const extensions: ExtensionFixture[] = [
 			{
-				path: "/tmp/project/.arcmind/npm/node_modules/arcmind-markdown-preview/extensions/index.ts",
+				path: "/tmp/project/.metis/npm/node_modules/metis-markdown-preview/extensions/index.ts",
 				sourceInfo: createSourceInfo(
-					"/tmp/project/.arcmind/npm/node_modules/arcmind-markdown-preview/extensions/index.ts",
+					"/tmp/project/.metis/npm/node_modules/metis-markdown-preview/extensions/index.ts",
 					{
-						source: "npm:arcmind-markdown-preview",
+						source: "npm:metis-markdown-preview",
 						scope: "project",
 						origin: "package",
-						baseDir: "/tmp/project/.arcmind/npm/node_modules/arcmind-markdown-preview",
+						baseDir: "/tmp/project/.metis/npm/node_modules/metis-markdown-preview",
 					},
 				),
 			},
@@ -1026,7 +1026,7 @@ describe("InteractiveMode.showLoadedResources", () => {
 
 		expect(normalizeRenderedOutput(fakeThis.loadedResourcesContainer)).toMatchInlineSnapshot(`
 "[Extensions]
-  arcmind-markdown-preview"`);
+  metis-markdown-preview"`);
 	});
 	test("captures mixed extension layouts in expanded output", () => {
 		const fakeThis = createShowLoadedResourcesThis({
@@ -1043,14 +1043,14 @@ describe("InteractiveMode.showLoadedResources", () => {
 		expect(normalizeRenderedOutput(fakeThis.loadedResourcesContainer)).toMatchInlineSnapshot(`
 "[Extensions]
   project
-    /tmp/project/.arcmind/extensions/answer.ts
-    /tmp/project/.arcmind/extensions/local-index
-    git:github.com/HazAT/arcmind-interactive-subagents
+    /tmp/project/.metis/extensions/answer.ts
+    /tmp/project/.metis/extensions/local-index
+    git:github.com/HazAT/metis-interactive-subagents
       extensions
       extensions/subagents
-    npm:@scope/arcmind-scoped
+    npm:@scope/metis-scoped
       extensions
-    npm:arcmind-markdown-preview
+    npm:metis-markdown-preview
       extensions
   user
     /tmp/agent/extensions/user-index
@@ -1060,12 +1060,12 @@ describe("InteractiveMode.showLoadedResources", () => {
 
 	test("shows context paths relative to cwd while preserving full external paths", () => {
 		const home = homedir();
-		const cwd = path.join(home, "Development", "arcmind");
+		const cwd = path.join(home, "Development", "metis");
 		const fakeThis = createShowLoadedResourcesThis({
 			quietStartup: false,
 			cwd,
 			contextFiles: [
-				{ path: path.join(home, ".arcmind", "agent", "AGENTS.md") },
+				{ path: path.join(home, ".metis", "agent", "AGENTS.md") },
 				{ path: path.join(cwd, "AGENTS.md") },
 			],
 		});
@@ -1076,19 +1076,19 @@ describe("InteractiveMode.showLoadedResources", () => {
 
 		const output = renderAll(fakeThis.loadedResourcesContainer).replace(/\\/g, "/");
 		expect(output).toContain("[Context]");
-		expect(output).toContain("~/.arcmind/agent/AGENTS.md, AGENTS.md");
+		expect(output).toContain("~/.metis/agent/AGENTS.md, AGENTS.md");
 		expect(output).not.toContain(`${cwd.replace(/\\/g, "/")}/AGENTS.md`);
 	});
 
 	test("shows full context paths when expanded", () => {
 		const home = homedir();
-		const cwd = path.join(home, "Development", "arcmind");
+		const cwd = path.join(home, "Development", "metis");
 		const fakeThis = createShowLoadedResourcesThis({
 			quietStartup: false,
 			toolOutputExpanded: true,
 			cwd,
 			contextFiles: [
-				{ path: path.join(home, ".arcmind", "agent", "AGENTS.md") },
+				{ path: path.join(home, ".metis", "agent", "AGENTS.md") },
 				{ path: path.join(cwd, "AGENTS.md") },
 			],
 		});
@@ -1099,9 +1099,9 @@ describe("InteractiveMode.showLoadedResources", () => {
 
 		const output = renderAll(fakeThis.loadedResourcesContainer).replace(/\\/g, "/");
 		expect(output).toContain("[Context]");
-		expect(output).toContain("~/.arcmind/agent/AGENTS.md");
-		expect(output).toContain("~/Development/arcmind/AGENTS.md");
-		expect(output).not.toContain("~/.arcmind/agent/AGENTS.md, AGENTS.md");
+		expect(output).toContain("~/.metis/agent/AGENTS.md");
+		expect(output).toContain("~/Development/metis/AGENTS.md");
+		expect(output).not.toContain("~/.metis/agent/AGENTS.md, AGENTS.md");
 	});
 
 	test("does not show verbose listing on quiet startup during reload", () => {

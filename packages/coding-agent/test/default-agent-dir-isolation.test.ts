@@ -7,7 +7,7 @@ import { SessionManager } from "../src/core/session-manager.ts";
 
 describe("test session isolation", () => {
 	it("keeps default session journals out of the user's agent directory", () => {
-		const cwd = mkdtempSync(join(tmpdir(), "arcmind-session-isolation-"));
+		const cwd = mkdtempSync(join(tmpdir(), "metis-session-isolation-"));
 		try {
 			const agentDir = getAgentDir();
 			const fromTmp = relative(tmpdir(), agentDir);

@@ -1,5 +1,5 @@
 {
-	"$schema": "https://raw.githubusercontent.com/arcmind/arcmind/main/packages/coding-agent/src/modes/interactive/theme/theme-schema.json",
+	"$schema": "https://raw.githubusercontent.com/metis/metis/main/packages/coding-agent/src/modes/interactive/theme/theme-schema.json",
 	"name": "dynamic-resources",
 	"vars": {
 		"cyan": "#00d7ff",

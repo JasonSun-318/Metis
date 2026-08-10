@@ -1,9 +1,9 @@
-import type { Transport } from "@arcmind/ai";
+import type { Transport } from "@metis/ai";
 import { randomUUID } from "crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { dirname, join } from "path";
 import lockfile from "proper-lockfile";
-import { CONFIG_DIR_NAME, getAgentDir } from "../config.ts";
+import { getAgentDir, getMetisEnv, getProjectConfigDir } from "../config.ts";
 import { normalizePath, resolvePath } from "../utils/paths.ts";
 import { DEFAULT_HTTP_IDLE_TIMEOUT_MS, parseHttpIdleTimeoutMs } from "./http-dispatcher.ts";
 import type { ThinkingSelection } from "./thinking-selection.ts";
@@ -142,7 +142,7 @@ export interface Settings {
 	showHardwareCursor?: boolean; // Show terminal cursor while still positioning it for IME
 	markdown?: MarkdownSettings;
 	sessionDir?: string; // Custom session storage directory (same format as --session-dir CLI flag)
-	httpProxy?: string; // Proxy URL applied as HTTP_PROXY and HTTPS_PROXY for ArcMind-managed HTTP clients
+	httpProxy?: string; // Proxy URL applied as HTTP_PROXY and HTTPS_PROXY for Metis-managed HTTP clients
 	httpIdleTimeoutMs?: number; // HTTP header/body idle timeout in milliseconds; 0 disables it
 	websocketConnectTimeoutMs?: number; // WebSocket connect/open handshake timeout in milliseconds; 0 disables it
 	mcpServers?: Record<string, McpServerSettings>;
@@ -214,7 +214,7 @@ export class FileSettingsStorage implements SettingsStorage {
 		const resolvedCwd = resolvePath(cwd);
 		const resolvedAgentDir = resolvePath(agentDir);
 		this.globalSettingsPath = join(resolvedAgentDir, "settings.json");
-		this.projectSettingsPath = join(resolvedCwd, CONFIG_DIR_NAME, "settings.json");
+		this.projectSettingsPath = join(getProjectConfigDir(resolvedCwd), "settings.json");
 	}
 
 	private acquireLockSyncWithRetry(path: string): () => void {
@@ -775,6 +775,14 @@ export class SettingsManager {
 		this.save();
 	}
 
+	clearDefaultModelAndProvider(): void {
+		delete this.globalSettings.defaultProvider;
+		delete this.globalSettings.defaultModel;
+		this.markModified("defaultProvider");
+		this.markModified("defaultModel");
+		this.save();
+	}
+
 	getSteeringMode(): "all" | "one-at-a-time" {
 		return this.settings.steeringMode || "one-at-a-time";
 	}
@@ -1140,7 +1148,7 @@ export class SettingsManager {
 		if (this.settings.terminal?.clearOnShrink !== undefined) {
 			return this.settings.terminal.clearOnShrink;
 		}
-		return process.env.ARCMIND_CLEAR_ON_SHRINK === "1";
+		return getMetisEnv("CLEAR_ON_SHRINK") === "1";
 	}
 
 	setClearOnShrink(enabled: boolean): void {
@@ -1198,7 +1206,7 @@ export class SettingsManager {
 	}
 
 	getShowHardwareCursor(): boolean {
-		return this.settings.showHardwareCursor ?? process.env.ARCMIND_HARDWARE_CURSOR === "1";
+		return this.settings.showHardwareCursor ?? getMetisEnv("HARDWARE_CURSOR") === "1";
 	}
 
 	setShowHardwareCursor(enabled: boolean): void {

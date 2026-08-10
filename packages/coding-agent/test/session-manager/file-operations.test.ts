@@ -50,7 +50,7 @@ describe("loadEntriesFromFile", () => {
 	it("rejects a file without a valid session header", () => {
 		const file = join(tempDir, "no-header.jsonl");
 		writeFileSync(file, '{"type":"message","id":"1"}\n');
-		expect(() => loadEntriesFromFile(file)).toThrow("not a valid arcmind session");
+		expect(() => loadEntriesFromFile(file)).toThrow("not a valid metis session");
 	});
 
 	it("rejects malformed complete JSON", () => {
@@ -472,7 +472,7 @@ describe("findMostRecentSession", () => {
 		expect(resumed.getSessionFile()).toBe(newer);
 		expect(resumed.getEntries()).toMatchObject([
 			{ id: "complete", customType: "x" },
-			{ type: "custom", customType: "arcmind.session_recovery", parentId: "complete" },
+			{ type: "custom", customType: "metis.session_recovery", parentId: "complete" },
 		]);
 		resumed.close();
 	});
@@ -616,7 +616,7 @@ describe("SessionManager.setSessionFile with corrupted files", () => {
 		writeFileSync(noHeaderFile, originalContent);
 
 		expect(() => SessionManager.open(noHeaderFile, tempDir)).toThrow(
-			`Session file is not a valid arcmind session: ${noHeaderFile}`,
+			`Session file is not a valid metis session: ${noHeaderFile}`,
 		);
 		expect(readFileSync(noHeaderFile, "utf-8")).toBe(originalContent);
 	});
@@ -627,7 +627,7 @@ describe("SessionManager.setSessionFile with corrupted files", () => {
 		writeFileSync(nonSessionFile, originalContent);
 
 		expect(() => SessionManager.open(nonSessionFile, tempDir)).toThrow(
-			`Session file is not a valid arcmind session: ${nonSessionFile}`,
+			`Session file is not a valid metis session: ${nonSessionFile}`,
 		);
 		expect(readFileSync(nonSessionFile, "utf-8")).toBe(originalContent);
 	});

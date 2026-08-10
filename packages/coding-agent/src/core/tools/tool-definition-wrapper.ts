@@ -1,4 +1,4 @@
-import type { AgentTool } from "@arcmind/agent-core";
+import type { AgentTool } from "@metis/agent-core";
 import type { ExtensionContext, ToolDefinition } from "../extensions/types.ts";
 
 /** Wrap a ToolDefinition into an AgentTool for the core runtime. */

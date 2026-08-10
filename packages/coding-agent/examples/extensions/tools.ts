@@ -5,39 +5,39 @@
  * Tool selection persists across session reloads and respects branch navigation.
  *
  * Usage:
- * 1. Copy this file to ~/.arcmind/agent/extensions/ or your project's .arcmind/extensions/
+ * 1. Copy this file to ~/.metis/agent/extensions/ or your project's .metis/extensions/
  * 2. Use /tools to open the tool selector
  */
 
-import type { ExtensionAPI, ExtensionContext, ToolInfo } from "@arcmind/coding-agent";
-import { getSettingsListTheme } from "@arcmind/coding-agent";
-import { Container, type SettingItem, SettingsList } from "@arcmind/tui";
+import type { ExtensionAPI, ExtensionContext, ToolInfo } from "@metis/coding-agent";
+import { getSettingsListTheme } from "@metis/coding-agent";
+import { Container, type SettingItem, SettingsList } from "@metis/tui";
 
 // State persisted to session
 interface ToolsState {
 	enabledTools: string[];
 }
 
-export default function toolsExtension(arcmind: ExtensionAPI) {
+export default function toolsExtension(metis: ExtensionAPI) {
 	// Track enabled tools
 	let enabledTools: Set<string> = new Set();
 	let allTools: ToolInfo[] = [];
 
 	// Persist current state
 	function persistState() {
-		arcmind.appendEntry<ToolsState>("tools-config", {
+		metis.appendEntry<ToolsState>("tools-config", {
 			enabledTools: Array.from(enabledTools),
 		});
 	}
 
 	// Apply current tool selection
 	function applyTools() {
-		arcmind.setActiveTools(Array.from(enabledTools));
+		metis.setActiveTools(Array.from(enabledTools));
 	}
 
 	// Find the last tools-config entry in the current branch
 	function restoreFromBranch(ctx: ExtensionContext) {
-		allTools = arcmind.getAllTools();
+		allTools = metis.getAllTools();
 
 		// Get entries in current branch only
 		const branchEntries = ctx.sessionManager.getBranch();
@@ -59,12 +59,12 @@ export default function toolsExtension(arcmind: ExtensionAPI) {
 			applyTools();
 		} else {
 			// No saved state - sync with currently active tools
-			enabledTools = new Set(arcmind.getActiveTools());
+			enabledTools = new Set(metis.getActiveTools());
 		}
 	}
 
 	// Register /tools command
-	arcmind.registerCommand("tools", {
+	metis.registerCommand("tools", {
 		description: "Enable/disable tools",
 		handler: async (_args, ctx) => {
 			if (ctx.mode !== "tui") {
@@ -73,7 +73,7 @@ export default function toolsExtension(arcmind: ExtensionAPI) {
 			}
 
 			// Refresh tool list
-			allTools = arcmind.getAllTools();
+			allTools = metis.getAllTools();
 
 			await ctx.ui.custom((tui, theme, _kb, done) => {
 				// Build settings items for each tool
@@ -135,12 +135,12 @@ export default function toolsExtension(arcmind: ExtensionAPI) {
 	});
 
 	// Restore state on session start
-	arcmind.on("session_start", async (_event, ctx) => {
+	metis.on("session_start", async (_event, ctx) => {
 		restoreFromBranch(ctx);
 	});
 
 	// Restore state when navigating the session tree
-	arcmind.on("session_tree", async (_event, ctx) => {
+	metis.on("session_tree", async (_event, ctx) => {
 		restoreFromBranch(ctx);
 	});
 }

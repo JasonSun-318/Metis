@@ -5,8 +5,8 @@
  * Multiple questions: tab bar navigation between questions
  */
 
-import type { ExtensionAPI } from "@arcmind/coding-agent";
-import { Editor, type EditorTheme, Key, matchesKey, Text, visibleWidth, wrapTextWithAnsi } from "@arcmind/tui";
+import type { ExtensionAPI } from "@metis/coding-agent";
+import { Editor, type EditorTheme, Key, matchesKey, Text, visibleWidth, wrapTextWithAnsi } from "@metis/tui";
 import { Type } from "typebox";
 
 // Types
@@ -73,8 +73,8 @@ function errorResult(
 	};
 }
 
-export default function questionnaire(arcmind: ExtensionAPI) {
-	arcmind.registerTool({
+export default function questionnaire(metis: ExtensionAPI) {
+	metis.registerTool({
 		name: "questionnaire",
 		label: "Questionnaire",
 		description:

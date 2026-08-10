@@ -27,7 +27,7 @@ describe("ExtensionRunner", () => {
 	const defaultKeybindings = new KeybindingsManager().getEffectiveConfig();
 
 	beforeEach(() => {
-		tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "arcmind-runner-test-"));
+		tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "metis-runner-test-"));
 		extensionsDir = path.join(tempDir, "extensions");
 		fs.mkdirSync(extensionsDir);
 		sessionManager = SessionManager.inMemory();
@@ -106,14 +106,14 @@ describe("ExtensionRunner", () => {
 			const decidedPath = path.join(extensionsDir, "decided.ts");
 			fs.writeFileSync(
 				undecidedPath,
-				`export default function(arcmind) {
-	arcmind.on("project_trust", () => ({ trusted: "undecided", remember: true }));
+				`export default function(metis) {
+	metis.on("project_trust", () => ({ trusted: "undecided", remember: true }));
 }`,
 			);
 			fs.writeFileSync(
 				decidedPath,
-				`export default function(arcmind) {
-	arcmind.on("project_trust", () => ({ trusted: "no", remember: true }));
+				`export default function(metis) {
+	metis.on("project_trust", () => ({ trusted: "no", remember: true }));
 }`,
 			);
 
@@ -142,8 +142,8 @@ describe("ExtensionRunner", () => {
 	describe("shortcut conflicts", () => {
 		it("warns when extension shortcut conflicts with built-in", async () => {
 			const extCode = `
-				export default function(arcmind) {
-					arcmind.registerShortcut("ctrl+c", {
+				export default function(metis) {
+					metis.registerShortcut("ctrl+c", {
 						description: "Conflicts with built-in",
 						handler: async () => {},
 					});
@@ -165,8 +165,8 @@ describe("ExtensionRunner", () => {
 
 		it("allows a shortcut when the reserved set no longer contains the default key", async () => {
 			const extCode = `
-				export default function(arcmind) {
-					arcmind.registerShortcut("ctrl+p", {
+				export default function(metis) {
+					metis.registerShortcut("ctrl+p", {
 						description: "Uses freed default",
 						handler: async () => {},
 					});
@@ -192,8 +192,8 @@ describe("ExtensionRunner", () => {
 				? (defaultKeybindings["app.clipboard.pasteImage"][0] ?? "")
 				: defaultKeybindings["app.clipboard.pasteImage"];
 			const extCode = `
-				export default function(arcmind) {
-					arcmind.registerShortcut("${pasteImageKey}", {
+				export default function(metis) {
+					metis.registerShortcut("${pasteImageKey}", {
 						description: "Overrides non-reserved",
 						handler: async () => {},
 					});
@@ -217,8 +217,8 @@ describe("ExtensionRunner", () => {
 
 		it("blocks shortcuts for reserved actions even when rebound", async () => {
 			const extCode = `
-				export default function(arcmind) {
-					arcmind.registerShortcut("ctrl+x", {
+				export default function(metis) {
+					metis.registerShortcut("ctrl+x", {
 						description: "Conflicts with rebound reserved",
 						handler: async () => {},
 					});
@@ -241,8 +241,8 @@ describe("ExtensionRunner", () => {
 
 		it("blocks shortcuts when reserved key is also bound to non-reserved actions", async () => {
 			const extCode = `
-				export default function(arcmind) {
-					arcmind.registerShortcut("ctrl+p", {
+				export default function(metis) {
+					metis.registerShortcut("ctrl+p", {
 						description: "Conflicts with shared reserved default",
 						handler: async () => {},
 					});
@@ -264,8 +264,8 @@ describe("ExtensionRunner", () => {
 
 		it("blocks shortcuts when reserved action has multiple keys", async () => {
 			const extCode = `
-				export default function(arcmind) {
-					arcmind.registerShortcut("ctrl+y", {
+				export default function(metis) {
+					metis.registerShortcut("ctrl+y", {
 						description: "Conflicts with multi-key reserved",
 						handler: async () => {},
 					});
@@ -288,8 +288,8 @@ describe("ExtensionRunner", () => {
 
 		it("warns but allows when non-reserved action has multiple keys", async () => {
 			const extCode = `
-				export default function(arcmind) {
-					arcmind.registerShortcut("ctrl+y", {
+				export default function(metis) {
+					metis.registerShortcut("ctrl+y", {
 						description: "Overrides multi-key non-reserved",
 						handler: async () => {},
 					});
@@ -315,16 +315,16 @@ describe("ExtensionRunner", () => {
 		it("warns when two extensions register same shortcut", async () => {
 			// Use a non-reserved shortcut
 			const extCode1 = `
-				export default function(arcmind) {
-					arcmind.registerShortcut("ctrl+shift+x", {
+				export default function(metis) {
+					metis.registerShortcut("ctrl+shift+x", {
 						description: "First extension",
 						handler: async () => {},
 					});
 				}
 			`;
 			const extCode2 = `
-				export default function(arcmind) {
-					arcmind.registerShortcut("ctrl+shift+x", {
+				export default function(metis) {
+					metis.registerShortcut("ctrl+shift+x", {
 						description: "Second extension",
 						handler: async () => {},
 					});
@@ -351,8 +351,8 @@ describe("ExtensionRunner", () => {
 		it("collects tools from multiple extensions", async () => {
 			const toolCode = (name: string) => `
 				import { Type } from "typebox";
-				export default function(arcmind) {
-					arcmind.registerTool({
+				export default function(metis) {
+					metis.registerTool({
 						name: "${name}",
 						label: "${name}",
 						description: "Test tool",
@@ -375,8 +375,8 @@ describe("ExtensionRunner", () => {
 		it("keeps first tool when two extensions register the same name", async () => {
 			const first = `
 				import { Type } from "typebox";
-				export default function(arcmind) {
-					arcmind.registerTool({
+				export default function(metis) {
+					metis.registerTool({
 						name: "shared",
 						label: "shared",
 						description: "first",
@@ -387,8 +387,8 @@ describe("ExtensionRunner", () => {
 			`;
 			const second = `
 				import { Type } from "typebox";
-				export default function(arcmind) {
-					arcmind.registerTool({
+				export default function(metis) {
+					metis.registerTool({
 						name: "shared",
 						label: "shared",
 						description: "second",
@@ -412,8 +412,8 @@ describe("ExtensionRunner", () => {
 	describe("command collection", () => {
 		it("collects commands from multiple extensions", async () => {
 			const cmdCode = (name: string) => `
-				export default function(arcmind) {
-					arcmind.registerCommand("${name}", {
+				export default function(metis) {
+					metis.registerCommand("${name}", {
 						description: "Test command",
 						handler: async () => {},
 					});
@@ -433,8 +433,8 @@ describe("ExtensionRunner", () => {
 
 		it("gets command by invocation name", async () => {
 			const cmdCode = `
-				export default function(arcmind) {
-					arcmind.registerCommand("my-cmd", {
+				export default function(metis) {
+					metis.registerCommand("my-cmd", {
 						description: "My command",
 						handler: async () => {},
 					});
@@ -457,8 +457,8 @@ describe("ExtensionRunner", () => {
 
 		it("suffixes duplicate extension commands in insertion order", async () => {
 			const cmdCode = (description: string) => `
-				export default function(arcmind) {
-					arcmind.registerCommand("shared-cmd", {
+				export default function(metis) {
+					metis.registerCommand("shared-cmd", {
 						description: "${description}",
 						handler: async () => {},
 					});
@@ -549,8 +549,8 @@ describe("ExtensionRunner", () => {
 	describe("error handling", () => {
 		it("calls error listeners when handler throws", async () => {
 			const extCode = `
-				export default function(arcmind) {
-					arcmind.on("context", async () => {
+				export default function(metis) {
+					metis.on("context", async () => {
 						throw new Error("Handler error!");
 					});
 				}
@@ -577,8 +577,8 @@ describe("ExtensionRunner", () => {
 	describe("message and entry renderers", () => {
 		it("gets message renderer by type", async () => {
 			const extCode = `
-				export default function(arcmind) {
-					arcmind.registerMessageRenderer("my-type", (message, options, theme) => null);
+				export default function(metis) {
+					metis.registerMessageRenderer("my-type", (message, options, theme) => null);
 				}
 			`;
 			fs.writeFileSync(path.join(extensionsDir, "renderer.ts"), extCode);
@@ -595,8 +595,8 @@ describe("ExtensionRunner", () => {
 
 		it("gets entry renderer by type", async () => {
 			const extCode = `
-				export default function(arcmind) {
-					arcmind.registerEntryRenderer("my-entry", (entry, options, theme) => null);
+				export default function(metis) {
+					metis.registerEntryRenderer("my-entry", (entry, options, theme) => null);
 				}
 			`;
 			fs.writeFileSync(path.join(extensionsDir, "entry-renderer.ts"), extCode);
@@ -612,8 +612,8 @@ describe("ExtensionRunner", () => {
 	describe("flags", () => {
 		it("collects flags from extensions", async () => {
 			const extCode = `
-				export default function(arcmind) {
-					arcmind.registerFlag("my-flag", {
+				export default function(metis) {
+					metis.registerFlag("my-flag", {
 						description: "My flag",
 						handler: async () => {},
 					});
@@ -630,8 +630,8 @@ describe("ExtensionRunner", () => {
 
 		it("keeps first flag when two extensions register the same name", async () => {
 			const first = `
-				export default function(arcmind) {
-					arcmind.registerFlag("shared-flag", {
+				export default function(metis) {
+					metis.registerFlag("shared-flag", {
 						description: "first",
 						type: "boolean",
 						default: true,
@@ -639,8 +639,8 @@ describe("ExtensionRunner", () => {
 				}
 			`;
 			const second = `
-				export default function(arcmind) {
-					arcmind.registerFlag("shared-flag", {
+				export default function(metis) {
+					metis.registerFlag("shared-flag", {
 						description: "second",
 						type: "boolean",
 						default: false,
@@ -660,8 +660,8 @@ describe("ExtensionRunner", () => {
 
 		it("can set flag values", async () => {
 			const extCode = `
-				export default function(arcmind) {
-					arcmind.registerFlag("test-flag", {
+				export default function(metis) {
+					metis.registerFlag("test-flag", {
 						description: "Test flag",
 						handler: async () => {},
 					});
@@ -683,8 +683,8 @@ describe("ExtensionRunner", () => {
 	describe("before_agent_start", () => {
 		it("keeps ctx.getSystemPrompt() in sync with chained system prompt updates", async () => {
 			const extCode1 = `
-				export default function(arcmind) {
-					arcmind.on("before_agent_start", async (_event, ctx) => {
+				export default function(metis) {
+					metis.on("before_agent_start", async (_event, ctx) => {
 						return {
 							systemPrompt: ctx.getSystemPrompt() + "\\nfirst",
 						};
@@ -692,8 +692,8 @@ describe("ExtensionRunner", () => {
 				}
 			`;
 			const extCode2 = `
-				export default function(arcmind) {
-					arcmind.on("before_agent_start", async (_event, ctx) => {
+				export default function(metis) {
+					metis.on("before_agent_start", async (_event, ctx) => {
 						return {
 							systemPrompt: ctx.getSystemPrompt() + "\\nsecond",
 						};
@@ -727,8 +727,8 @@ describe("ExtensionRunner", () => {
 	describe("tool_result chaining", () => {
 		it("chains content modifications across handlers", async () => {
 			const extCode1 = `
-				export default function(arcmind) {
-					arcmind.on("tool_result", async (event) => {
+				export default function(metis) {
+					metis.on("tool_result", async (event) => {
 						return {
 							content: [...event.content, { type: "text", text: "ext1" }],
 						};
@@ -736,8 +736,8 @@ describe("ExtensionRunner", () => {
 				}
 			`;
 			const extCode2 = `
-				export default function(arcmind) {
-					arcmind.on("tool_result", async (event) => {
+				export default function(metis) {
+					metis.on("tool_result", async (event) => {
 						return {
 							content: [...event.content, { type: "text", text: "ext2" }],
 						};
@@ -774,8 +774,8 @@ describe("ExtensionRunner", () => {
 
 		it("preserves previous modifications when later handlers return partial patches", async () => {
 			const extCode1 = `
-				export default function(arcmind) {
-					arcmind.on("tool_result", async () => {
+				export default function(metis) {
+					metis.on("tool_result", async () => {
 						return {
 							content: [{ type: "text", text: "first" }],
 							details: { source: "ext1" },
@@ -784,8 +784,8 @@ describe("ExtensionRunner", () => {
 				}
 			`;
 			const extCode2 = `
-				export default function(arcmind) {
-					arcmind.on("tool_result", async () => {
+				export default function(metis) {
+					metis.on("tool_result", async () => {
 						return {
 							isError: true,
 						};
@@ -915,8 +915,8 @@ describe("ExtensionRunner", () => {
 	describe("hasHandlers", () => {
 		it("returns true when handlers exist for event type", async () => {
 			const extCode = `
-				export default function(arcmind) {
-					arcmind.on("tool_call", async () => undefined);
+				export default function(metis) {
+					metis.on("tool_call", async () => undefined);
 				}
 			`;
 			fs.writeFileSync(path.join(extensionsDir, "handler.ts"), extCode);
@@ -932,8 +932,8 @@ describe("ExtensionRunner", () => {
 	describe("before_provider_headers", () => {
 		it("lets a handler mutate headers in place and preserves existing headers", async () => {
 			const extCode = `
-				export default function(arcmind) {
-					arcmind.on("before_provider_headers", (event) => {
+				export default function(metis) {
+					metis.on("before_provider_headers", (event) => {
 						event.headers["X-Turn-Index"] = "3";
 					});
 				}
@@ -952,15 +952,15 @@ describe("ExtensionRunner", () => {
 
 		it("isolates a throwing handler and still applies the others", async () => {
 			const throwing = `
-				export default function(arcmind) {
-					arcmind.on("before_provider_headers", () => {
+				export default function(metis) {
+					metis.on("before_provider_headers", () => {
 						throw new Error("header handler boom");
 					});
 				}
 			`;
 			const good = `
-				export default function(arcmind) {
-					arcmind.on("before_provider_headers", (event) => {
+				export default function(metis) {
+					metis.on("before_provider_headers", (event) => {
 						event.headers["X-Good"] = "yes";
 					});
 				}

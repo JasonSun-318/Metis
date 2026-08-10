@@ -2,8 +2,8 @@
  * Shared utilities for compaction and branch summarization.
  */
 
-import type { AgentMessage } from "@arcmind/agent-core";
-import type { Message } from "@arcmind/ai";
+import type { AgentMessage } from "@metis/agent-core";
+import type { Message } from "@metis/ai";
 
 // ============================================================================
 // File Operation Tracking

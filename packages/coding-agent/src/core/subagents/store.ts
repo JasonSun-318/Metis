@@ -1,6 +1,6 @@
 import { existsSync, lstatSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import type { AgentMessage } from "@arcmind/agent-core";
+import type { AgentMessage } from "@metis/agent-core";
 import { createFileAtomicallySync, ensureDirectoryDurablySync, syncDirectorySync } from "../durable-file.ts";
 import type { SubagentFollowUpEntry, SubagentStateEntry } from "../session-control.ts";
 import { assertValidSessionId, createSessionId } from "../session-id.ts";

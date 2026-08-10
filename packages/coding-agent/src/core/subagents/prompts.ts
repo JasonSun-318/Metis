@@ -38,8 +38,8 @@ Capabilities and safety
 - Permission mode: ${safePromptJson(config.permissionMode)}.
 - Working directory: ${safePromptJson(config.cwd)}. It is only the base for relative paths.
 - Ask automatically permits only safe structured reads; other model tool calls pause for the user's decision.
-- ArcMind does not sandbox an approved action; built-ins execute as the current OS user and installed integrations use their configured runtime.
-- Full skips ArcMind action approval.
+- Metis does not sandbox an approved action; built-ins execute as the current OS user and installed integrations use their configured runtime.
+- Full skips Metis action approval.
 - Extension, SDK, and MCP code is trusted when installed/configured; their model-facing tools still follow Ask/Full.
 - Runtime tool and permission enforcement overrides every instruction, including the parent assignment profile.
 

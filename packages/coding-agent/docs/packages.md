@@ -1,14 +1,14 @@
-> arcmind can help you create arcmind packages. Ask it to bundle your extensions, skills, prompt templates, or themes.
+> metis can help you create metis packages. Ask it to bundle your extensions, skills, prompt templates, or themes.
 
-# ArcMind Packages
+# Metis Packages
 
-ArcMind packages bundle extensions, skills, prompt templates, and themes so you can share them through npm or git. A package can declare resources in `package.json` under the `arcmind` key, or use conventional directories.
+Metis packages bundle extensions, skills, prompt templates, and themes so you can share them through npm or git. A package can declare resources in `package.json` under the `metis` key, or use conventional directories.
 
 ## Table of Contents
 
 - [Install and Manage](#install-and-manage)
 - [Package Sources](#package-sources)
-- [Creating a ArcMind Package](#creating-a-arcmind-package)
+- [Creating a Metis Package](#creating-a-metis-package)
 - [Package Structure](#package-structure)
 - [Dependencies](#dependencies)
 - [Package Filtering](#package-filtering)
@@ -17,40 +17,40 @@ ArcMind packages bundle extensions, skills, prompt templates, and themes so you 
 
 ## Install and Manage
 
-> **Security:** ArcMind packages run with full system access. Extensions execute arbitrary code, and skills can instruct the model to perform any action including running executables. Review source code before installing third-party packages.
+> **Security:** Metis packages run with full system access. Extensions execute arbitrary code, and skills can instruct the model to perform any action including running executables. Review source code before installing third-party packages.
 
 ```bash
-arcmind install npm:@foo/bar@1.0.0
-arcmind install git:github.com/user/repo@v1
-arcmind install https://github.com/user/repo  # raw URLs work too
-arcmind install /absolute/path/to/package
-arcmind install ./relative/path/to/package
+metis install npm:@foo/bar@1.0.0
+metis install git:github.com/user/repo@v1
+metis install https://github.com/user/repo  # raw URLs work too
+metis install /absolute/path/to/package
+metis install ./relative/path/to/package
 
-arcmind remove npm:@foo/bar
-arcmind list                     # show installed packages from settings
-arcmind update                   # update arcmind only
-arcmind update --all             # update arcmind, update packages, and reconcile pinned git refs
-arcmind update --extensions      # update packages and reconcile pinned git refs only
-arcmind update --self            # update arcmind only
-arcmind update --self --force    # reinstall arcmind even if current
-arcmind update npm:@foo/bar      # update one package
-arcmind update --extension npm:@foo/bar
+metis remove npm:@foo/bar
+metis list                     # show installed packages from settings
+metis update                   # update metis only
+metis update --all             # update metis, update packages, and reconcile pinned git refs
+metis update --extensions      # update packages and reconcile pinned git refs only
+metis update --self            # update metis only
+metis update --self --force    # reinstall metis even if current
+metis update npm:@foo/bar      # update one package
+metis update --extension npm:@foo/bar
 ```
 
-These commands manage arcmind packages and `arcmind update` can update the arcmind CLI installation. To uninstall arcmind itself, see [Quickstart](quickstart.md#uninstall).
+These commands manage metis packages and `metis update` can update the metis CLI installation. To uninstall metis itself, see [Quickstart](quickstart.md#uninstall).
 
-By default, `install` and `remove` write to user settings (`~/.arcmind/agent/settings.json`). Use `-l` to write to project settings (`.arcmind/settings.json`) instead. Project settings can be shared with your team, and arcmind installs any missing packages automatically on startup after the project is trusted.
+By default, `install` and `remove` write to user settings (`~/.metis/agent/settings.json`). Use `-l` to write to project settings (`.metis/settings.json`) instead. Project settings can be shared with your team, and metis installs any missing packages automatically on startup after the project is trusted.
 
 To try a package without installing it, use `--extension` or `-e`. This installs to a temporary directory for the current run only:
 
 ```bash
-arcmind -e npm:@foo/bar
-arcmind -e git:github.com/user/repo
+metis -e npm:@foo/bar
+metis -e git:github.com/user/repo
 ```
 
 ## Package Sources
 
-ArcMind accepts three source types in settings and `arcmind install`.
+Metis accepts three source types in settings and `metis install`.
 
 ### npm
 
@@ -59,9 +59,9 @@ npm:@scope/pkg@1.2.3
 npm:pkg
 ```
 
-- Versioned specs are pinned and skipped by package updates (`arcmind update --extensions`, `arcmind update --all`).
-- User installs go under `~/.arcmind/agent/npm/`.
-- Project installs go under `.arcmind/npm/`.
+- Versioned specs are pinned and skipped by package updates (`metis update --extensions`, `metis update --all`).
+- User installs go under `~/.metis/agent/npm/`.
+- Project installs go under `.metis/npm/`.
 - Set `npmCommand` in `settings.json` to pin npm package lookup and install operations to a specific wrapper command such as `mise` or `asdf`.
 
 Example:
@@ -86,21 +86,21 @@ ssh://git@github.com/user/repo@v1
 - HTTPS and SSH URLs are both supported.
 - SSH URLs use your configured SSH keys automatically (respects `~/.ssh/config`).
 - For non-interactive runs (for example CI), you can set `GIT_TERMINAL_PROMPT=0` to disable credential prompts and set `GIT_SSH_COMMAND` (for example `ssh -o BatchMode=yes -o ConnectTimeout=5`) to fail fast.
-- Refs are pinned tags or commits. `arcmind update --extensions` and `arcmind update --all` do not move them to newer refs, but they do reconcile an existing clone to the configured ref.
-- Use `arcmind install git:host/user/repo@new-ref` to update settings and move an existing package to a new pinned ref.
-- Cloned to `~/.arcmind/agent/git/<host>/<path>` (global) or `.arcmind/git/<host>/<path>` (project).
-- When reconciliation changes the checkout, arcmind resets and cleans the clone, then runs `npm install` if `package.json` exists.
+- Refs are pinned tags or commits. `metis update --extensions` and `metis update --all` do not move them to newer refs, but they do reconcile an existing clone to the configured ref.
+- Use `metis install git:host/user/repo@new-ref` to update settings and move an existing package to a new pinned ref.
+- Cloned to `~/.metis/agent/git/<host>/<path>` (global) or `.metis/git/<host>/<path>` (project).
+- When reconciliation changes the checkout, metis resets and cleans the clone, then runs `npm install` if `package.json` exists.
 
 **SSH examples:**
 ```bash
 # git@host:path shorthand (requires git: prefix)
-arcmind install git:git@github.com:user/repo
+metis install git:git@github.com:user/repo
 
 # ssh:// protocol format
-arcmind install ssh://git@github.com/user/repo
+metis install ssh://git@github.com/user/repo
 
 # With version ref
-arcmind install git:git@github.com:user/repo@v1.0.0
+metis install git:git@github.com:user/repo@v1.0.0
 ```
 
 ### Local Paths
@@ -110,17 +110,17 @@ arcmind install git:git@github.com:user/repo@v1.0.0
 ./relative/path/to/package
 ```
 
-Local paths point to files or directories on disk and are added to settings without copying. Relative paths are resolved against the settings file they appear in. If the path is a file, it loads as a single extension. If it is a directory, arcmind loads resources using package rules.
+Local paths point to files or directories on disk and are added to settings without copying. Relative paths are resolved against the settings file they appear in. If the path is a file, it loads as a single extension. If it is a directory, metis loads resources using package rules.
 
-## Creating a ArcMind Package
+## Creating a Metis Package
 
-Add a `arcmind` manifest to `package.json` or use conventional directories. Include the `arcmind-package` keyword for discoverability.
+Add a `metis` manifest to `package.json` or use conventional directories. Include the `metis-package` keyword for discoverability.
 
 ```json
 {
   "name": "my-package",
-  "keywords": ["arcmind-package"],
-  "arcmind": {
+  "keywords": ["metis-package"],
+  "metis": {
     "extensions": ["./extensions"],
     "skills": ["./skills"],
     "prompts": ["./prompts"],
@@ -133,13 +133,13 @@ Paths are relative to the package root. Arrays support glob patterns and `!exclu
 
 ### Gallery Metadata
 
-The [package gallery](https://gitee.com/sun124578963_0/arc-mind/packages) displays packages tagged with `arcmind-package`. Add `video` or `image` fields to show a preview:
+The [package gallery](https://gitee.com/sun124578963_0/metis/packages) displays packages tagged with `metis-package`. Add `video` or `image` fields to show a preview:
 
 ```json
 {
   "name": "my-package",
-  "keywords": ["arcmind-package"],
-  "arcmind": {
+  "keywords": ["metis-package"],
+  "metis": {
     "extensions": ["./extensions"],
     "video": "https://example.com/demo.mp4",
     "image": "https://example.com/screenshot.png"
@@ -156,7 +156,7 @@ If both are set, video takes precedence.
 
 ### Convention Directories
 
-If no `arcmind` manifest is present, arcmind auto-discovers resources from these directories:
+If no `metis` manifest is present, metis auto-discovers resources from these directories:
 
 - `extensions/` loads `.ts` and `.js` files
 - `skills/` recursively finds `SKILL.md` folders and loads top-level `.md` files as skills
@@ -165,11 +165,11 @@ If no `arcmind` manifest is present, arcmind auto-discovers resources from these
 
 ## Dependencies
 
-Third party runtime dependencies belong in `dependencies` in `package.json`. Dependencies that do not register extensions, skills, prompt templates, or themes also belong in `dependencies`. When arcmind installs a package from npm or git, it runs `npm install`, so those dependencies are installed automatically.
+Third party runtime dependencies belong in `dependencies` in `package.json`. Dependencies that do not register extensions, skills, prompt templates, or themes also belong in `dependencies`. When metis installs a package from npm or git, it runs `npm install`, so those dependencies are installed automatically.
 
-ArcMind bundles core packages for extensions and skills. If you import any of these, list them in `peerDependencies` with a `"*"` range and do not bundle them: `@arcmind/ai`, `@arcmind/agent-core`, `@arcmind/coding-agent`, `@arcmind/tui`, `typebox`.
+Metis bundles core packages for extensions and skills. If you import any of these, list them in `peerDependencies` with a `"*"` range and do not bundle them: `@metis/ai`, `@metis/agent-core`, `@metis/coding-agent`, `@metis/tui`, `typebox`.
 
-Other arcmind packages must be bundled in your tarball. Add them to `dependencies` and `bundledDependencies`, then reference their resources through `node_modules/` paths. ArcMind loads packages with separate module roots, so separate installs do not collide or share modules.
+Other metis packages must be bundled in your tarball. Add them to `dependencies` and `bundledDependencies`, then reference their resources through `node_modules/` paths. Metis loads packages with separate module roots, so separate installs do not collide or share modules.
 
 Example:
 
@@ -179,7 +179,7 @@ Example:
     "shitty-extensions": "^1.0.1"
   },
   "bundledDependencies": ["shitty-extensions"],
-  "arcmind": {
+  "metis": {
     "extensions": ["extensions", "node_modules/shitty-extensions/extensions"],
     "skills": ["skills", "node_modules/shitty-extensions/skills"]
   }
@@ -216,7 +216,7 @@ Filter what a package loads using the object form in settings:
 
 ## Enable and Disable Resources
 
-Use `arcmind config` to enable or disable extensions, skills, prompt templates, and themes from installed packages and local directories. `arcmind config` starts in global settings (`~/.arcmind/agent/settings.json`); press Tab to switch between global and project-local modes. Use `arcmind config -l` to start in project overrides (`.arcmind/settings.json`) with inherited global resources dimmed.
+Use `metis config` to enable or disable extensions, skills, prompt templates, and themes from installed packages and local directories. `metis config` starts in global settings (`~/.metis/agent/settings.json`); press Tab to switch between global and project-local modes. Use `metis config -l` to start in project overrides (`.metis/settings.json`) with inherited global resources dimmed.
 
 ## Scope and Deduplication
 

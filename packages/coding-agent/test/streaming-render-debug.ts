@@ -4,8 +4,8 @@
  * Run with: npx tsx test/streaming-render-debug.ts
  */
 
-import type { AssistantMessage } from "@arcmind/ai";
-import { ProcessTerminal, TUI } from "@arcmind/tui";
+import type { AssistantMessage } from "@metis/ai";
+import { ProcessTerminal, TUI } from "@metis/tui";
 import { readFileSync } from "fs";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";

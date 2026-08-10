@@ -3,8 +3,8 @@
  * Uses Kitty keyboard protocol for smooth movement (press/release detection)
  */
 
-import type { ExtensionAPI } from "@arcmind/coding-agent";
-import { isKeyRelease, Key, matchesKey, visibleWidth } from "@arcmind/tui";
+import type { ExtensionAPI } from "@metis/coding-agent";
+import { isKeyRelease, Key, matchesKey, visibleWidth } from "@metis/tui";
 
 const GAME_WIDTH = 60;
 const GAME_HEIGHT = 24;
@@ -524,8 +524,8 @@ class SpaceInvadersComponent {
 
 const INVADERS_SAVE_TYPE = "space-invaders-save";
 
-export default function (arcmind: ExtensionAPI) {
-	arcmind.registerCommand("invaders", {
+export default function (metis: ExtensionAPI) {
+	metis.registerCommand("invaders", {
 		description: "Play Space Invaders!",
 
 		handler: async (_args, ctx) => {
@@ -550,7 +550,7 @@ export default function (arcmind: ExtensionAPI) {
 					tui,
 					() => done(undefined),
 					(state) => {
-						arcmind.appendEntry(INVADERS_SAVE_TYPE, state);
+						metis.appendEntry(INVADERS_SAVE_TYPE, state);
 					},
 					savedState,
 				);

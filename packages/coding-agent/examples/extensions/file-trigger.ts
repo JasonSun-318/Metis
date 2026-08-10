@@ -9,17 +9,17 @@
  */
 
 import * as fs from "node:fs";
-import type { ExtensionAPI } from "@arcmind/coding-agent";
+import type { ExtensionAPI } from "@metis/coding-agent";
 
-export default function (arcmind: ExtensionAPI) {
-	arcmind.on("session_start", async (_event, ctx) => {
+export default function (metis: ExtensionAPI) {
+	metis.on("session_start", async (_event, ctx) => {
 		const triggerFile = "/tmp/agent-trigger.txt";
 
 		fs.watch(triggerFile, () => {
 			try {
 				const content = fs.readFileSync(triggerFile, "utf-8").trim();
 				if (content) {
-					arcmind.sendMessage(
+					metis.sendMessage(
 						{
 							customType: "file-trigger",
 							content: `External trigger: ${content}`,

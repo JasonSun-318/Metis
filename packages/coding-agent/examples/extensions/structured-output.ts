@@ -5,8 +5,8 @@
  * without paying for an extra follow-up LLM turn.
  */
 
-import { defineTool, type ExtensionAPI } from "@arcmind/coding-agent";
-import { Text } from "@arcmind/tui";
+import { defineTool, type ExtensionAPI } from "@metis/coding-agent";
+import { Text } from "@metis/tui";
 import { Type } from "typebox";
 
 interface StructuredOutputDetails {
@@ -60,6 +60,6 @@ const structuredOutputTool = defineTool({
 	},
 });
 
-export default function (arcmind: ExtensionAPI) {
-	arcmind.registerTool(structuredOutputTool);
+export default function (metis: ExtensionAPI) {
+	metis.registerTool(structuredOutputTool);
 }

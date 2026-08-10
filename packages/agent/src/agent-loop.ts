@@ -10,7 +10,7 @@ import {
 	streamSimple,
 	type ToolResultMessage,
 	validateToolArguments,
-} from "@arcmind/ai/compat";
+} from "@metis/ai/compat";
 import { consumeQueueReservation } from "./pending-message-queue.ts";
 import type {
 	AgentContext,

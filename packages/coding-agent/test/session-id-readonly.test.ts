@@ -27,7 +27,7 @@ function createTempDir(): string {
 	// realpath: on macOS tmpdir() is a symlink (/var -> /private/var), but the
 	// spawned CLI sees the physical path via process.cwd(). Session cwd
 	// filtering compares paths textually, so the fixture must use physical paths.
-	const dir = realpathSync(mkdtempSync(join(tmpdir(), "arcmind-session-id-readonly-")));
+	const dir = realpathSync(mkdtempSync(join(tmpdir(), "metis-session-id-readonly-")));
 	tempDirs.push(dir);
 	return dir;
 }
@@ -79,7 +79,7 @@ async function runCli(
 			env: {
 				...process.env,
 				[ENV_AGENT_DIR]: dirs.agentDir,
-				ARCMIND_OFFLINE: "1",
+				METIS_OFFLINE: "1",
 				TSX_TSCONFIG_PATH: resolve(__dirname, "../../../tsconfig.json"),
 			},
 			stdio: ["ignore", "pipe", "pipe"],

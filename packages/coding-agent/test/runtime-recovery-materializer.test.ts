@@ -15,7 +15,7 @@ describe("runtime recovery materialization", () => {
 	});
 
 	it("surfaces a restarted queue draft again after its cancellation was already durable", () => {
-		tempDir = join(tmpdir(), `arcmind-runtime-materializer-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+		tempDir = join(tmpdir(), `metis-runtime-materializer-${Date.now()}-${Math.random().toString(36).slice(2)}`);
 		mkdirSync(tempDir, { recursive: true });
 		const manager = SessionManager.create(tempDir, join(tempDir, "sessions"));
 		const input = { text: "draft", streamingBehavior: "steer" } as const;

@@ -5,15 +5,15 @@
  * Useful to ensure work is committed before switching context.
  */
 
-import type { ExtensionAPI, ExtensionContext } from "@arcmind/coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@metis/coding-agent";
 
 async function checkDirtyRepo(
-	arcmind: ExtensionAPI,
+	metis: ExtensionAPI,
 	ctx: ExtensionContext,
 	action: string,
 ): Promise<{ cancel: boolean } | undefined> {
 	// Check for uncommitted changes
-	const { stdout, code } = await arcmind.exec("git", ["status", "--porcelain"]);
+	const { stdout, code } = await metis.exec("git", ["status", "--porcelain"]);
 
 	if (code !== 0) {
 		// Not a git repo, allow the action
@@ -44,13 +44,13 @@ async function checkDirtyRepo(
 	}
 }
 
-export default function (arcmind: ExtensionAPI) {
-	arcmind.on("session_before_switch", async (event, ctx) => {
+export default function (metis: ExtensionAPI) {
+	metis.on("session_before_switch", async (event, ctx) => {
 		const action = event.reason === "new" ? "new session" : "switch session";
-		return checkDirtyRepo(arcmind, ctx, action);
+		return checkDirtyRepo(metis, ctx, action);
 	});
 
-	arcmind.on("session_before_fork", async (_event, ctx) => {
-		return checkDirtyRepo(arcmind, ctx, "fork");
+	metis.on("session_before_fork", async (_event, ctx) => {
+		return checkDirtyRepo(metis, ctx, "fork");
 	});
 }

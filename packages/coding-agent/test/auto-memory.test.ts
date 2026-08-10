@@ -24,7 +24,7 @@ import { canonicalizePathForCreation } from "../src/utils/paths.ts";
 describe("auto memory", () => {
 	const tempDirs: string[] = [];
 	const makeTemp = (): string => {
-		const dir = mkdtempSync(join(tmpdir(), "arcmind-memory-"));
+		const dir = mkdtempSync(join(tmpdir(), "metis-memory-"));
 		tempDirs.push(dir);
 		return dir;
 	};

@@ -4,7 +4,7 @@
  * Override settings using SettingsManager.
  */
 
-import { createAgentSession, SessionManager, SettingsManager } from "@arcmind/coding-agent";
+import { createAgentSession, SessionManager, SettingsManager } from "@metis/coding-agent";
 
 const cwd = process.cwd();
 

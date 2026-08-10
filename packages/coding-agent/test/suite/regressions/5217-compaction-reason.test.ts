@@ -1,4 +1,4 @@
-import { fauxAssistantMessage } from "@arcmind/ai";
+import { fauxAssistantMessage } from "@metis/ai";
 import { afterEach, describe, expect, it } from "vitest";
 import type { ExtensionFactory } from "../../../src/index.ts";
 import { createHarness, type Harness } from "../harness.ts";
@@ -14,8 +14,8 @@ interface RecordedCompactionEvent {
 }
 
 function recordingExtension(recorded: RecordedCompactionEvent[]): ExtensionFactory {
-	return (arcmind) => {
-		arcmind.on("session_before_compact", async (event) => {
+	return (metis) => {
+		metis.on("session_before_compact", async (event) => {
 			recorded.push({ type: event.type, reason: event.reason, willRetry: event.willRetry });
 			return {
 				compaction: {
@@ -26,7 +26,7 @@ function recordingExtension(recorded: RecordedCompactionEvent[]): ExtensionFacto
 				},
 			};
 		});
-		arcmind.on("session_compact", async (event) => {
+		metis.on("session_compact", async (event) => {
 			recorded.push({ type: event.type, reason: event.reason, willRetry: event.willRetry });
 		});
 	};

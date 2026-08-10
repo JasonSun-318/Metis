@@ -17,7 +17,7 @@ afterEach(() => {
 
 describe("session unread state", () => {
 	it("defaults to read and survives rename, reopen, and move", () => {
-		const root = mkdtempSync(join(tmpdir(), "arcmind-unread-"));
+		const root = mkdtempSync(join(tmpdir(), "metis-unread-"));
 		roots.push(root);
 		const cwd = join(root, "project");
 		const agentDir = join(root, "agent");

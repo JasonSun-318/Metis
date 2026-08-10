@@ -1,8 +1,8 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { AgentTool } from "@arcmind/agent-core";
-import { fauxAssistantMessage } from "@arcmind/ai";
+import type { AgentTool } from "@metis/agent-core";
+import { fauxAssistantMessage } from "@metis/ai";
 import { Type } from "typebox";
 import { describe, expect, it } from "vitest";
 import { MICROCOMPACTION_KEEP_RECENT } from "../../src/core/tool-result-microcompaction.ts";
@@ -11,7 +11,7 @@ import { createHarness, getMessageText } from "./harness.ts";
 describe("AgentSession tool-result microcompaction", () => {
 	it("projects old builtin results only at the provider seam and removes ephemeral files on dispose", async () => {
 		const harness = await createHarness();
-		const outputDir = join(tmpdir(), "arcmind-tool-results", harness.sessionManager.getSessionId());
+		const outputDir = join(tmpdir(), "metis-tool-results", harness.sessionManager.getSessionId());
 		const original = "x".repeat(80_000);
 		try {
 			for (let index = 0; index < MICROCOMPACTION_KEEP_RECENT + 1; index++) {
@@ -62,7 +62,7 @@ describe("AgentSession tool-result microcompaction", () => {
 			execute: async () => ({ content: [{ type: "text", text: "unused" }], details: {} }),
 		};
 		const harness = await createHarness({ tools: [readOverride] });
-		const outputDir = join(tmpdir(), "arcmind-tool-results", harness.sessionManager.getSessionId());
+		const outputDir = join(tmpdir(), "metis-tool-results", harness.sessionManager.getSessionId());
 		try {
 			for (let index = 0; index < MICROCOMPACTION_KEEP_RECENT + 1; index++) {
 				harness.session.agent.state.messages.push({

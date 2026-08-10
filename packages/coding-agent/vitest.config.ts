@@ -23,11 +23,11 @@ export default defineConfig({
 	},
 	resolve: {
 		alias: [
-			{ find: /^@arcmind\/ai$/, replacement: aiSrcIndex },
-			{ find: /^@arcmind\/ai\/compat$/, replacement: aiSrcCompat },
-			{ find: /^@arcmind\/ai\/oauth$/, replacement: aiSrcOAuth },
-			{ find: /^@arcmind\/agent-core$/, replacement: agentSrcIndex },
-			{ find: /^@arcmind\/tui$/, replacement: tuiSrcIndex },
+			{ find: /^@metis\/ai$/, replacement: aiSrcIndex },
+			{ find: /^@metis\/ai\/compat$/, replacement: aiSrcCompat },
+			{ find: /^@metis\/ai\/oauth$/, replacement: aiSrcOAuth },
+			{ find: /^@metis\/agent-core$/, replacement: agentSrcIndex },
+			{ find: /^@metis\/tui$/, replacement: tuiSrcIndex },
 		],
 	},
 });

@@ -2,11 +2,11 @@
 
 Delegate tasks to specialized subagents with isolated context windows.
 
-> This is the legacy process-isolation extension, not the first-class Ultra runtime. Use it when you specifically want separate ArcMind OS processes, extension-defined agent files, or chain templates. For durable parent-owned child sessions, cold resume, permission routing, and `close_agent`, see [Ultra and Subagents](../../../docs/subagents.md).
+> This is the legacy process-isolation extension, not the first-class Ultra runtime. Use it when you specifically want separate Metis OS processes, extension-defined agent files, or chain templates. For durable parent-owned child sessions, cold resume, permission routing, and `close_agent`, see [Ultra and Subagents](../../../docs/subagents.md).
 
 ## Features
 
-- **Isolated context**: Each subagent runs in a separate `arcmind` process
+- **Isolated context**: Each subagent runs in a separate `metis` process
 - **Streaming output**: See tool calls and progress as they happen
 - **Parallel streaming**: All parallel tasks stream updates simultaneously
 - **Markdown rendering**: Final output rendered with proper formatting (expanded view)
@@ -37,30 +37,30 @@ From the repository root, symlink the files:
 
 ```bash
 # Symlink the extension (must be in a subdirectory with index.ts)
-mkdir -p ~/.arcmind/agent/extensions/subagent
-ln -sf "$(pwd)/packages/coding-agent/examples/extensions/subagent/index.ts" ~/.arcmind/agent/extensions/subagent/index.ts
-ln -sf "$(pwd)/packages/coding-agent/examples/extensions/subagent/agents.ts" ~/.arcmind/agent/extensions/subagent/agents.ts
+mkdir -p ~/.metis/agent/extensions/subagent
+ln -sf "$(pwd)/packages/coding-agent/examples/extensions/subagent/index.ts" ~/.metis/agent/extensions/subagent/index.ts
+ln -sf "$(pwd)/packages/coding-agent/examples/extensions/subagent/agents.ts" ~/.metis/agent/extensions/subagent/agents.ts
 
 # Symlink agents
-mkdir -p ~/.arcmind/agent/agents
+mkdir -p ~/.metis/agent/agents
 for f in packages/coding-agent/examples/extensions/subagent/agents/*.md; do
-  ln -sf "$(pwd)/$f" ~/.arcmind/agent/agents/$(basename "$f")
+  ln -sf "$(pwd)/$f" ~/.metis/agent/agents/$(basename "$f")
 done
 
 # Symlink workflow prompts
-mkdir -p ~/.arcmind/agent/prompts
+mkdir -p ~/.metis/agent/prompts
 for f in packages/coding-agent/examples/extensions/subagent/prompts/*.md; do
-  ln -sf "$(pwd)/$f" ~/.arcmind/agent/prompts/$(basename "$f")
+  ln -sf "$(pwd)/$f" ~/.metis/agent/prompts/$(basename "$f")
 done
 ```
 
 ## Security Model
 
-This tool executes a separate `arcmind` subprocess with a delegated system prompt and tool/model configuration.
+This tool executes a separate `metis` subprocess with a delegated system prompt and tool/model configuration.
 
-**Project-local agents** (`.arcmind/agents/*.md`) are repo-controlled prompts that can instruct the model to read files, run bash commands, etc.
+**Project-local agents** (`.metis/agents/*.md`) are repo-controlled prompts that can instruct the model to read files, run bash commands, etc.
 
-**Default behavior:** Only loads **user-level agents** from `~/.arcmind/agent/agents`.
+**Default behavior:** Only loads **user-level agents** from `~/.metis/agent/agents`.
 
 To enable project-local agents, pass `agentScope: "both"` (or `"project"`). Only do this for repositories you trust.
 
@@ -140,8 +140,8 @@ System prompt for the agent goes here.
 ```
 
 **Locations:**
-- `~/.arcmind/agent/agents/*.md` - User-level (always loaded)
-- `.arcmind/agents/*.md` - Project-level (only with `agentScope: "project"` or `"both"`)
+- `~/.metis/agent/agents/*.md` - User-level (always loaded)
+- `.metis/agents/*.md` - Project-level (only with `agentScope: "project"` or `"both"`)
 
 Project agents override user agents with the same name when `agentScope: "both"`.
 

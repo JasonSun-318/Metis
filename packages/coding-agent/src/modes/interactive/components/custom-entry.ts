@@ -1,5 +1,5 @@
-import type { Component } from "@arcmind/tui";
-import { Box, Container, Spacer, Text } from "@arcmind/tui";
+import type { Component } from "@metis/tui";
+import { Box, Container, Spacer, Text } from "@metis/tui";
 import type { EntryRenderer } from "../../../core/extensions/types.ts";
 import type { CustomEntry } from "../../../core/session-manager.ts";
 import { theme } from "../theme/theme.ts";

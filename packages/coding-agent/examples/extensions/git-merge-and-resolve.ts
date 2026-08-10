@@ -8,13 +8,13 @@
  * with file, line range, and ours/theirs sections so it can resolve them.
  * Also re-sends unresolved conflicts from a previous incomplete merge.
  *
- * Start arcmind with this extension:
- *   arcmind -e ./examples/extensions/git-merge-and-resolve.ts
+ * Start metis with this extension:
+ *   metis -e ./examples/extensions/git-merge-and-resolve.ts
  */
 import { createReadStream } from "node:fs";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
-import type { ExtensionAPI } from "@arcmind/coding-agent";
+import type { ExtensionAPI } from "@metis/coding-agent";
 
 interface ConflictBlock {
 	file: string;
@@ -24,8 +24,8 @@ interface ConflictBlock {
 }
 
 /** Parse conflict markers from working tree files with unmerged paths. */
-async function findConflicts(arcmind: ExtensionAPI, cwd: string): Promise<ConflictBlock[]> {
-	const { stdout, code } = await arcmind.exec("git", ["diff", "--name-only", "--diff-filter=U"]);
+async function findConflicts(metis: ExtensionAPI, cwd: string): Promise<ConflictBlock[]> {
+	const { stdout, code } = await metis.exec("git", ["diff", "--name-only", "--diff-filter=U"]);
 	if (code !== 0 || !stdout.trim()) return [];
 
 	const blocks: ConflictBlock[] = [];
@@ -70,21 +70,21 @@ function formatConflicts(ref: string, blocks: ConflictBlock[]): string {
 	return lines.join("\n");
 }
 
-export default function (arcmind: ExtensionAPI) {
-	arcmind.on("agent_end", async (_event, ctx) => {
-		const { code: revParseCode } = await arcmind.exec("git", ["rev-parse", "--git-dir"]);
+export default function (metis: ExtensionAPI) {
+	metis.on("agent_end", async (_event, ctx) => {
+		const { code: revParseCode } = await metis.exec("git", ["rev-parse", "--git-dir"]);
 		if (revParseCode !== 0) return;
 
 		let ref = "MERGE_HEAD";
 
 		// If not already in a merge, attempt one
-		const { code: mergeHeadCode } = await arcmind.exec("git", ["rev-parse", "MERGE_HEAD"]);
+		const { code: mergeHeadCode } = await metis.exec("git", ["rev-parse", "MERGE_HEAD"]);
 		if (mergeHeadCode !== 0) {
 			// Only attempt a new merge if the working tree is clean
-			const { stdout: status } = await arcmind.exec("git", ["status", "--porcelain"]);
+			const { stdout: status } = await metis.exec("git", ["status", "--porcelain"]);
 			if (status.trim()) return;
 
-			const { stdout: upstream, code: upstreamCode } = await arcmind.exec("git", [
+			const { stdout: upstream, code: upstreamCode } = await metis.exec("git", [
 				"rev-parse",
 				"--abbrev-ref",
 				"--symbolic-full-name",
@@ -96,20 +96,20 @@ export default function (arcmind: ExtensionAPI) {
 			const remote = ref.split("/")[0];
 			ctx.ui.notify(`git-merge-and-resolve: fetching ${remote}, merging ${ref}`, "info");
 
-			const { code: fetchCode, stderr: fetchErr } = await arcmind.exec("git", ["fetch", remote]);
+			const { code: fetchCode, stderr: fetchErr } = await metis.exec("git", ["fetch", remote]);
 			if (fetchCode !== 0) {
 				ctx.ui.notify(`git-merge-and-resolve: fetch failed: ${fetchErr.trim()}`, "warning");
 				return;
 			}
 
-			const { code: mergeCode } = await arcmind.exec("git", ["merge", "--no-ff", ref]);
+			const { code: mergeCode } = await metis.exec("git", ["merge", "--no-ff", ref]);
 			if (mergeCode === 0) return;
 		}
 
 		// Either we just merged with conflicts, or we were already in an unfinished merge
-		const conflicts = await findConflicts(arcmind, ctx.cwd);
+		const conflicts = await findConflicts(metis, ctx.cwd);
 		if (conflicts.length === 0) return;
 
-		arcmind.sendUserMessage(formatConflicts(ref, conflicts), { deliverAs: "followUp" });
+		metis.sendUserMessage(formatConflicts(ref, conflicts), { deliverAs: "followUp" });
 	});
 }

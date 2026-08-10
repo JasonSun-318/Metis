@@ -7,7 +7,7 @@ import { randomUUID } from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import type { AgentMessage } from "@arcmind/agent-core";
+import type { AgentMessage } from "@metis/agent-core";
 import type {
 	AssistantMessage,
 	ImageContent,
@@ -15,7 +15,7 @@ import type {
 	Model,
 	OAuthProviderId,
 	OAuthSelectPrompt,
-} from "@arcmind/ai/compat";
+} from "@metis/ai/compat";
 import type {
 	AutocompleteItem,
 	AutocompleteProvider,
@@ -26,7 +26,7 @@ import type {
 	OverlayHandle,
 	OverlayOptions,
 	SlashCommand,
-} from "@arcmind/tui";
+} from "@metis/tui";
 import {
 	CombinedAutocompleteProvider,
 	type Component,
@@ -41,7 +41,7 @@ import {
 	TruncatedText,
 	TUI,
 	visibleWidth,
-} from "@arcmind/tui";
+} from "@metis/tui";
 import chalk from "chalk";
 import { spawn } from "child_process";
 import {
@@ -52,6 +52,7 @@ import {
 	getAuthPath,
 	getDebugLogPath,
 	getDocsPath,
+	getMetisEnv,
 	VERSION,
 } from "../../config.ts";
 import { type AgentMode, isAgentMode } from "../../core/agent-mode.ts";
@@ -448,7 +449,7 @@ export interface InteractiveModeOptions {
 	migratedProviders?: string[];
 	/** Warning message if session model couldn't be restored */
 	modelFallbackMessage?: string;
-	/** Cwd to trust after reload if it gained a .arcmind directory during this implicitly trusted session. */
+	/** Cwd to trust after reload if it gained a .metis directory during this implicitly trusted session. */
 	autoTrustOnReloadCwd?: string;
 	/** Initial message to send on startup (can include @file content) */
 	initialMessage?: string;
@@ -933,7 +934,7 @@ export class InteractiveMode {
 			);
 			const onboarding = theme.fg(
 				"dim",
-				`ArcMind can explain its own features and look up its docs. Ask it how to use or extend ArcMind.`,
+				`Metis can explain its own features and look up its docs. Ask it how to use or extend Metis.`,
 			);
 			this.builtInHeader = new ExpandableText(
 				() => `${logo}\n${compactInstructions}\n${compactOnboarding}\n\n${onboarding}`,
@@ -1060,7 +1061,7 @@ export class InteractiveMode {
 	}
 
 	private async checkForPackageUpdates(): Promise<string[]> {
-		if (process.env.ARCMIND_OFFLINE) {
+		if (getMetisEnv("OFFLINE")) {
 			return [];
 		}
 
@@ -1118,7 +1119,7 @@ export class InteractiveMode {
 		}
 
 		if (extendedKeysFormat === "xterm") {
-			return "tmux extended-keys-format is xterm. ArcMind works best with csi-u. Add `set -g extended-keys-format csi-u` to ~/.tmux.conf and restart tmux.";
+			return "tmux extended-keys-format is xterm. Metis works best with csi-u. Add `set -g extended-keys-format csi-u` to ~/.tmux.conf and restart tmux.";
 		}
 
 		return undefined;
@@ -3825,7 +3826,7 @@ export class InteractiveMode {
 			new Text(
 				theme.fg(
 					"warning",
-					`This project is not trusted. Project ${CONFIG_DIR_NAME} resources and packages are ignored. Use /trust to save a trust decision, then restart arcmind.`,
+					`This project is not trusted. Project ${CONFIG_DIR_NAME} resources and packages are ignored. Use /trust to save a trust decision, then restart Metis.`,
 				),
 				1,
 				0,
@@ -3955,7 +3956,7 @@ export class InteractiveMode {
 			this.ui.stop();
 		} catch {}
 		this.cleanupClipboardAttachments();
-		console.error("arcmind exiting due to uncaughtException:");
+		console.error("Metis exiting due to uncaughtException:");
 		console.error(error);
 		process.exit(1);
 	}
@@ -4002,7 +4003,7 @@ export class InteractiveMode {
 
 		// Restore the terminal before the process dies on any uncaught throw.
 		// Without this, an unhandled exception from extension code (or anywhere
-		// in arcmind) leaves the terminal in raw mode with no cursor.
+		// in Metis) leaves the terminal in raw mode with no cursor.
 		const uncaughtExceptionHandler = (error: Error) => this.uncaughtCrash(error);
 		process.prependListener("uncaughtException", uncaughtExceptionHandler);
 		this.signalCleanupHandlers.push(() => process.off("uncaughtException", uncaughtExceptionHandler));
@@ -4179,7 +4180,7 @@ export class InteractiveMode {
 		}
 
 		const currentText = this.editor.getExpandedText?.() ?? this.editor.getText();
-		const tmpFile = path.join(os.tmpdir(), `arcmind-editor-${Date.now()}.arcmind.md`);
+		const tmpFile = path.join(os.tmpdir(), `metis-editor-${Date.now()}.metis.md`);
 
 		try {
 			// Write current content to temp file
@@ -4751,7 +4752,7 @@ export class InteractiveMode {
 					trustStore.setMany(selection.updates);
 					done();
 					this.showStatus(
-						`Saved trust decision: ${selection.trusted ? "trusted" : "untrusted"}. Restart arcmind for this to take effect.`,
+						`Saved trust decision: ${selection.trusted ? "trusted" : "untrusted"}. Restart Metis for this to take effect.`,
 					);
 				},
 				onCancel: () => {
@@ -5642,7 +5643,7 @@ export class InteractiveMode {
 		}\n`;
 		info += `${theme.fg("dim", "Global:")} ${snapshot.global.indexPath} ${state(snapshot.global)}\n`;
 		info += `${theme.fg("dim", "Project:")} ${snapshot.project.indexPath} ${state(snapshot.project)}\n`;
-		info += theme.fg("dim", "Use /reload after editing an index outside ArcMind.");
+		info += theme.fg("dim", "Use /reload after editing an index outside Metis.");
 		this.chatContainer.addChild(new Spacer(1));
 		this.chatContainer.addChild(new Text(info, 1, 0));
 		this.ui.requestRender();
@@ -6217,9 +6218,7 @@ export class InteractiveMode {
 					);
 					await this.session.logoutMcpServer(name);
 					if (process.env[envName] === undefined) {
-						this.showWarning(
-							`Environment variable ${envName} is not available. Restart ArcMind after setting it.`,
-						);
+						this.showWarning(`Environment variable ${envName} is not available. Restart Metis after setting it.`);
 					} else this.showMcpConnectionResult(name, `Updated authentication for MCP server "${name}"`);
 					return;
 				}
@@ -6307,7 +6306,7 @@ export class InteractiveMode {
 				if (Object.keys(remaining).length > 0) await this.session.setMcpSecret(name, { env: remaining });
 				else await this.session.logoutMcpServer(name);
 				if (process.env[envName] === undefined) {
-					this.showWarning(`Environment variable ${envName} is not available. Restart ArcMind after setting it.`);
+					this.showWarning(`Environment variable ${envName} is not available. Restart Metis after setting it.`);
 				} else this.showMcpConnectionResult(name, `Updated authentication for MCP server "${name}"`);
 				return true;
 			}
@@ -6807,7 +6806,7 @@ export class InteractiveMode {
 		}
 
 		const terminalCwd = this.runtimeHost.terminalCwd;
-		const managed = "ArcMind managed workspace";
+		const managed = "Metis managed workspace";
 		const terminal = `Terminal working directory (${terminalCwd})`;
 		const other = "Other directory";
 		const workspace = await this.showExtensionSelector(

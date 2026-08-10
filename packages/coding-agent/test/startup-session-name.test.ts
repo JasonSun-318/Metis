@@ -15,7 +15,7 @@ afterEach(() => {
 });
 
 function createTempDir(): string {
-	const dir = mkdtempSync(join(tmpdir(), "arcmind-startup-session-name-"));
+	const dir = mkdtempSync(join(tmpdir(), "metis-startup-session-name-"));
 	tempDirs.push(dir);
 	return dir;
 }
@@ -70,7 +70,7 @@ async function runCli(args: string[], dirs: CliDirs): Promise<CliResult> {
 		env: {
 			...process.env,
 			[ENV_AGENT_DIR]: dirs.agentDir,
-			ARCMIND_OFFLINE: "1",
+			METIS_OFFLINE: "1",
 			TSX_TSCONFIG_PATH: resolve(__dirname, "../../../tsconfig.json"),
 		},
 		stdio: ["ignore", "ignore", "pipe"],

@@ -1,6 +1,6 @@
 # Ultra and Subagents
 
-Ultra is ArcMind's highest execution tier. It combines the selected model's highest supported real thinking level with first-class subagent orchestration. `ultra` is a UI/runtime selection only: provider requests, child configuration, compaction, and the AI package continue to use the existing real levels through `max`.
+Ultra is Metis's highest execution tier. It combines the selected model's highest supported real thinking level with first-class subagent orchestration. `ultra` is a UI/runtime selection only: provider requests, child configuration, compaction, and the AI package continue to use the existing real levels through `max`.
 
 Ultra is available only in persisted primary **Code** sessions. It is unavailable in ordinary Chat, `--no-session`, raw/in-memory, and child sessions. A legacy Chat session that already owns children receives cleanup tools only; it cannot create, steer, or resume a child.
 
@@ -56,7 +56,7 @@ A typical creation request is:
 
 ## Context and prompt isolation
 
-A child receives ArcMind's normal Code base prompt, its actual tools/permission/cwd context, applicable `AGENTS.md`, a fixed runtime-owned child contract, and a subordinate JSON-encoded parent assignment profile. The task remains a separate user message. It does not copy the parent's assembled system prompt, skills, auto-memory block, prompt templates, Ultra coordinator block, or subagent tools.
+A child receives Metis's normal Code base prompt, its actual tools/permission/cwd context, applicable `AGENTS.md`, a fixed runtime-owned child contract, and a subordinate JSON-encoded parent assignment profile. The task remains a separate user message. It does not copy the parent's assembled system prompt, skills, auto-memory block, prompt templates, Ultra coordinator block, or subagent tools.
 
 The parent chooses a least-capability subset of its active tools. A child gets a fresh loader, extension/MCP runtime, tool registry, permission policy, listeners, and approval state. If a configured tool or exact model is unavailable on a later cold resume, that run fails visibly instead of silently changing configuration.
 
@@ -114,7 +114,7 @@ Child permissions inherit or narrow the parent's current mode. Each child has a 
 | `ask` | `ask` |
 | `full` | `ask`, `full` |
 
-When the parent changes from Full to Ask, ArcMind immediately lowers every non-closed child's in-memory ceiling and durably appends Ask to hot, cold, and queued child sessions. A child starting during the transition sees Ask before its first prompt. Changing the parent back to Full never re-upgrades an existing child.
+When the parent changes from Full to Ask, Metis immediately lowers every non-closed child's in-memory ceiling and durably appends Ask to hot, cold, and queued child sessions. A child starting during the transition sees Ask before its first prompt. Changing the parent back to Full never re-upgrades an existing child.
 
 Ask automatically permits only proven safe structured reads and `inspect_agents`; other model-facing calls ask. Approved built-ins execute directly as the current OS user, and installed integrations use their configured runtime. Extension, SDK, and MCP code is trusted when installed/configured, but their model-facing tools still follow Ask/Full.
 
@@ -128,4 +128,4 @@ Scheduled/unattended sessions never bind or activate the Subagent manager and do
 
 ## Built-in runtime versus the legacy extension
 
-The example at `examples/extensions/subagent/` remains available as a process-isolation and custom-workflow alternative. It spawns separate ArcMind processes and supports extension-defined agents/chains. The first-class Ultra runtime instead owns durable child sessions, recovery, parent-scoped events, permission routing, cold resume, and safe deletion in the core runtime. The two mechanisms are independent.
+The example at `examples/extensions/subagent/` remains available as a process-isolation and custom-workflow alternative. It spawns separate Metis processes and supports extension-defined agents/chains. The first-class Ultra runtime instead owns durable child sessions, recovery, parent-scoped events, permission routing, cold resume, and safe deletion in the core runtime. The two mechanisms are independent.

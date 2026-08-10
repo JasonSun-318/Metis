@@ -1,6 +1,6 @@
-import type { AgentTool } from "@arcmind/agent-core";
-import { fauxAssistantMessage, fauxToolCall } from "@arcmind/ai";
-import type { ExtensionAPI } from "@arcmind/coding-agent";
+import type { AgentTool } from "@metis/agent-core";
+import { fauxAssistantMessage, fauxToolCall } from "@metis/ai";
+import type { ExtensionAPI } from "@metis/coding-agent";
 import { Type } from "typebox";
 import { afterEach, describe, expect, it } from "vitest";
 import { createHarness, getAssistantTexts, getUserTexts, type Harness } from "../harness.ts";
@@ -37,9 +37,9 @@ describe("issue #2023 queued slash-command follow-up", () => {
 		const harness = await createHarness({
 			tools: [waitTool],
 			extensionFactories: [
-				(arcmind) => {
-					extensionApi = arcmind;
-					arcmind.registerCommand("testcmd", {
+				(metis) => {
+					extensionApi = metis;
+					metis.registerCommand("testcmd", {
 						description: "Test command",
 						handler: async (args) => {
 							commandRuns.push(args);

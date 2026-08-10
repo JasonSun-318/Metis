@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fauxAssistantMessage } from "@arcmind/ai/compat";
+import { fauxAssistantMessage } from "@metis/ai/compat";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SessionManager } from "../src/core/session-manager.ts";
 import {
@@ -83,7 +83,7 @@ describe("subagent runtime prompt and mailbox", () => {
 		expect(contract).toContain('Permission mode: "ask"');
 		expect(contract).toContain('Working directory: "/workspace/frontend". It is only the base for relative paths.');
 		expect(contract).toContain("Ask automatically permits only safe structured reads");
-		expect(contract).toContain("ArcMind does not sandbox an approved action");
+		expect(contract).toContain("Metis does not sandbox an approved action");
 		expect(contract).toContain("their model-facing tools still follow Ask/Full");
 		expect(contract).not.toContain("read roots");
 		expect(contract).not.toContain("write roots");
@@ -127,7 +127,7 @@ describe("subagent runtime prompt and mailbox", () => {
 	});
 
 	it("keeps an interrupted delivery pending across reopen without a visible user message", async () => {
-		const root = mkdtempSync(join(tmpdir(), "arcmind-mailbox-reopen-"));
+		const root = mkdtempSync(join(tmpdir(), "metis-mailbox-reopen-"));
 		roots.push(root);
 		const manager = SessionManager.create(root, join(root, "sessions"), {
 			id: "parent-mailbox",

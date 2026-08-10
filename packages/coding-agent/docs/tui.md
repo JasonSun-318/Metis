@@ -1,10 +1,10 @@
-> arcmind can create TUI components. Ask it to build one for your use case.
+> metis can create TUI components. Ask it to build one for your use case.
 
 # TUI Components
 
 Extensions and custom tools can render custom TUI components for interactive user interfaces. This page covers the component system and available building blocks.
 
-**Source:** [`@arcmind/tui`](https://github.com/arcmind/arcmind/tree/main/packages/tui)
+**Source:** [`@metis/tui`](https://github.com/metis/metis/tree/main/packages/tui)
 
 ## Component Interface
 
@@ -33,7 +33,7 @@ The TUI appends a full SGR reset and OSC 8 reset at the end of each rendered lin
 Components that display a text cursor and need IME (Input Method Editor) support should implement the `Focusable` interface:
 
 ```typescript
-import { CURSOR_MARKER, type Component, type Focusable } from "@arcmind/tui";
+import { CURSOR_MARKER, type Component, type Focusable } from "@metis/tui";
 
 class MyInput implements Component, Focusable {
   focused: boolean = false;  // Set by TUI when focus changes
@@ -52,14 +52,14 @@ When a `Focusable` component has focus, TUI:
 3. Positions the hardware terminal cursor at that location
 4. Shows the hardware cursor only when `showHardwareCursor` is enabled
 
-The cursor remains hidden by default. This keeps the fake cursor rendering, while still positioning the hardware cursor for terminals that track IME candidate windows with hidden cursors. Some terminals require a visible hardware cursor for IME positioning; enable it with `showHardwareCursor`, `setShowHardwareCursor(true)`, or `ARCMIND_HARDWARE_CURSOR=1`. The `Editor` and `Input` built-in components already implement this interface.
+The cursor remains hidden by default. This keeps the fake cursor rendering, while still positioning the hardware cursor for terminals that track IME candidate windows with hidden cursors. Some terminals require a visible hardware cursor for IME positioning; enable it with `showHardwareCursor`, `setShowHardwareCursor(true)`, or `METIS_HARDWARE_CURSOR=1`. The `Editor` and `Input` built-in components already implement this interface.
 
 ### Container Components with Embedded Inputs
 
 When a container component (dialog, selector, etc.) contains an `Input` or `Editor` child, the container must implement `Focusable` and propagate the focus state to the child. Otherwise, the hardware cursor won't be positioned correctly for IME input.
 
 ```typescript
-import { Container, type Focusable, Input } from "@arcmind/tui";
+import { Container, type Focusable, Input } from "@metis/tui";
 
 class SearchDialog extends Container implements Focusable {
   private searchInput: Input;
@@ -89,18 +89,18 @@ Without this propagation, typing with an IME (Chinese, Japanese, Korean, etc.) w
 **In extensions** via `ctx.ui.custom()`:
 
 ```typescript
-arcmind.on("session_start", async (_event, ctx) => {
+metis.on("session_start", async (_event, ctx) => {
   const handle = ctx.ui.custom(myComponent);
   // handle.requestRender() - trigger re-render
   // handle.close() - restore normal UI
 });
 ```
 
-**In custom tools** via `arcmind.ui.custom()`:
+**In custom tools** via `metis.ui.custom()`:
 
 ```typescript
 async execute(toolCallId, params, onUpdate, ctx, signal) {
-  const handle = arcmind.ui.custom(myComponent);
+  const handle = metis.ui.custom(myComponent);
   // ...
   handle.close();
 }
@@ -188,10 +188,10 @@ See [overlay-qa-tests.ts](../examples/extensions/overlay-qa-tests.ts) for compre
 
 ## Built-in Components
 
-Import from `@arcmind/tui`:
+Import from `@metis/tui`:
 
 ```typescript
-import { Text, Box, Container, Spacer, Markdown } from "@arcmind/tui";
+import { Text, Box, Container, Spacer, Markdown } from "@metis/tui";
 ```
 
 ### Text
@@ -273,7 +273,7 @@ const image = new Image(
 Use `matchesKey()` for key detection:
 
 ```typescript
-import { matchesKey, Key } from "@arcmind/tui";
+import { matchesKey, Key } from "@metis/tui";
 
 handleInput(data: string) {
   if (matchesKey(data, Key.up)) {
@@ -299,7 +299,7 @@ handleInput(data: string) {
 **Critical:** Each line from `render()` must not exceed the `width` parameter.
 
 ```typescript
-import { visibleWidth, truncateToWidth } from "@arcmind/tui";
+import { visibleWidth, truncateToWidth } from "@metis/tui";
 
 render(width: number): string[] {
   // Truncate long lines
@@ -320,7 +320,7 @@ Example: Interactive selector
 import {
   matchesKey, Key,
   truncateToWidth, visibleWidth
-} from "@arcmind/tui";
+} from "@metis/tui";
 
 class MySelector {
   private items: string[];
@@ -372,7 +372,7 @@ class MySelector {
 Usage in an extension:
 
 ```typescript
-arcmind.registerCommand("pick", {
+metis.registerCommand("pick", {
   description: "Pick an item",
   handler: async (args, ctx) => {
     const items = ["Option A", "Option B", "Option C"];
@@ -434,8 +434,8 @@ renderResult(result, options, theme, context) {
 **For Markdown**, use `getMarkdownTheme()`:
 
 ```typescript
-import { getMarkdownTheme } from "@arcmind/coding-agent";
-import { Markdown } from "@arcmind/tui";
+import { getMarkdownTheme } from "@metis/coding-agent";
+import { Markdown } from "@metis/tui";
 
 renderResult(result, options, theme, context) {
   const mdTheme = getMarkdownTheme();
@@ -454,10 +454,10 @@ interface MyTheme {
 
 ## Debug logging
 
-Set `ARCMIND_TUI_WRITE_LOG` to capture the raw ANSI stream written to stdout.
+Set `METIS_TUI_WRITE_LOG` to capture the raw ANSI stream written to stdout.
 
 ```bash
-ARCMIND_TUI_WRITE_LOG=/tmp/tui-ansi.log npx tsx packages/tui/test/chat-simple.ts
+METIS_TUI_WRITE_LOG=/tmp/tui-ansi.log npx tsx packages/tui/test/chat-simple.ts
 ```
 
 ## Performance
@@ -596,14 +596,14 @@ These patterns cover the most common UI needs in extensions. **Copy these patter
 
 ### Pattern 1: Selection Dialog (SelectList)
 
-For letting users pick from a list of options. Use `SelectList` from `@arcmind/tui` with `DynamicBorder` for framing.
+For letting users pick from a list of options. Use `SelectList` from `@metis/tui` with `DynamicBorder` for framing.
 
 ```typescript
-import type { ExtensionAPI } from "@arcmind/coding-agent";
-import { DynamicBorder } from "@arcmind/coding-agent";
-import { Container, type SelectItem, SelectList, Text } from "@arcmind/tui";
+import type { ExtensionAPI } from "@metis/coding-agent";
+import { DynamicBorder } from "@metis/coding-agent";
+import { Container, type SelectItem, SelectList, Text } from "@metis/tui";
 
-arcmind.registerCommand("pick", {
+metis.registerCommand("pick", {
   handler: async (_args, ctx) => {
     const items: SelectItem[] = [
       { value: "opt1", label: "Option 1", description: "First option" },
@@ -659,9 +659,9 @@ arcmind.registerCommand("pick", {
 For operations that take time and should be cancellable. `BorderedLoader` shows a spinner and handles escape to cancel.
 
 ```typescript
-import { BorderedLoader } from "@arcmind/coding-agent";
+import { BorderedLoader } from "@metis/coding-agent";
 
-arcmind.registerCommand("fetch", {
+metis.registerCommand("fetch", {
   handler: async (_args, ctx) => {
     const result = await ctx.ui.custom<string | null>((tui, theme, _kb, done) => {
       const loader = new BorderedLoader(tui, theme, "Fetching data...");
@@ -688,13 +688,13 @@ arcmind.registerCommand("fetch", {
 
 ### Pattern 3: Settings/Toggles (SettingsList)
 
-For toggling multiple settings. Use `SettingsList` from `@arcmind/tui` with `getSettingsListTheme()`.
+For toggling multiple settings. Use `SettingsList` from `@metis/tui` with `getSettingsListTheme()`.
 
 ```typescript
-import { getSettingsListTheme } from "@arcmind/coding-agent";
-import { Container, type SettingItem, SettingsList, Text } from "@arcmind/tui";
+import { getSettingsListTheme } from "@metis/coding-agent";
+import { Container, type SettingItem, SettingsList, Text } from "@metis/tui";
 
-arcmind.registerCommand("settings", {
+metis.registerCommand("settings", {
   handler: async (_args, ctx) => {
     const items: SettingItem[] = [
       { id: "verbose", label: "Verbose mode", currentValue: "off", values: ["on", "off"] },
@@ -746,7 +746,7 @@ ctx.ui.setStatus("my-ext", undefined);
 
 ### Pattern 4b: Working Indicator Customization
 
-Customize the inline working indicator shown while arcmind is streaming a response.
+Customize the inline working indicator shown while metis is streaming a response.
 
 ```typescript
 // Static indicator
@@ -766,7 +766,7 @@ ctx.ui.setWorkingIndicator({
 // Hide the indicator entirely
 ctx.ui.setWorkingIndicator({ frames: [] });
 
-// Restore arcmind's default spinner
+// Restore metis's default spinner
 ctx.ui.setWorkingIndicator();
 ```
 
@@ -831,8 +831,8 @@ Token stats available via `ctx.sessionManager.getBranch()` and `ctx.model`.
 Replace the main input editor with a custom implementation. Useful for modal editing (vim), different keybindings (emacs), or specialized input handling.
 
 ```typescript
-import { CustomEditor, type ExtensionAPI } from "@arcmind/coding-agent";
-import { matchesKey, truncateToWidth } from "@arcmind/tui";
+import { CustomEditor, type ExtensionAPI } from "@metis/coding-agent";
+import { matchesKey, truncateToWidth } from "@metis/tui";
 
 type Mode = "normal" | "insert";
 
@@ -883,8 +883,8 @@ class VimEditor extends CustomEditor {
   }
 }
 
-export default function (arcmind: ExtensionAPI) {
-  arcmind.on("session_start", (_event, ctx) => {
+export default function (metis: ExtensionAPI) {
+  metis.on("session_start", (_event, ctx) => {
     // Factory receives theme and keybindings from the app
     ctx.ui.setEditorComponent((tui, theme, keybindings) =>
       new VimEditor(theme, keybindings)

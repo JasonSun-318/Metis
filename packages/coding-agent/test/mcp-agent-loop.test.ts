@@ -1,5 +1,5 @@
-import { fauxAssistantMessage, fauxToolCall } from "@arcmind/ai";
-import { getModel } from "@arcmind/ai/compat";
+import { fauxAssistantMessage, fauxToolCall } from "@metis/ai";
+import { getModel } from "@metis/ai/compat";
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AuthStorage } from "../src/core/auth-storage.ts";

@@ -3,12 +3,12 @@ name: pptx
 description: "Create, read, extract, or modify Microsoft PowerPoint .pptx files, including slide decks, templates, layouts, notes, comments, merging, and splitting. Use when a .pptx file is input or output, or the user explicitly asks for PowerPoint slides."
 ---
 
-## ArcMind integration (overrides conflicting rules below)
+## Metis integration (overrides conflicting rules below)
 
 This file embeds the official `pptx` skill from the bundled OfficeCLI 1.0.140.
 
-- OfficeCLI is already bundled. Never download, install, self-update, or run `officecli install`. If `officecli --version` fails, report an incomplete ArcMind installation.
-- For a fundraising deck, load both chunks below in two separate shell tool calls (not one combined call), concatenate them in order, and treat the result as overriding the generic guidance below. The ArcMind integration rules in this section still take priority.
+- OfficeCLI is already bundled. Never download, install, self-update, or run `officecli install`. If `officecli --version` fails, report an incomplete Metis installation.
+- For a fundraising deck, load both chunks below in two separate shell tool calls (not one combined call), concatenate them in order, and treat the result as overriding the generic guidance below. The Metis integration rules in this section still take priority.
 
   ```bash
   set -o pipefail
@@ -16,19 +16,19 @@ This file embeds the official `pptx` skill from the bundled OfficeCLI 1.0.140.
   officecli load_skill pitch-deck | sed -n '401,900p'
   ```
 
-- For a 3D Morph presentation, run `officecli load_skill morph-ppt-3d` once. For another Morph presentation, run `officecli load_skill morph-ppt` once. Treat the selected specialized skill as overriding the generic guidance below; the ArcMind integration rules in this section still take priority.
+- For a 3D Morph presentation, run `officecli load_skill morph-ppt-3d` once. For another Morph presentation, run `officecli load_skill morph-ppt` once. Treat the selected specialized skill as overriding the generic guidance below; the Metis integration rules in this section still take priority.
 - Use the exact absolute path from the `<attachment>` or `<attachments>` block.
-- Put every new deliverable under `$ARCMIND_ATTACHMENTS_DIR`; create the directory first.
+- Put every new deliverable under `$METIS_ATTACHMENTS_DIR`; create the directory first.
 - A simple read must print content to stdout, normally with `officecli view "$FILE" text`, `get`, or `query`. Do not create a work directory, preview, HTML file, rendered slide, extracted-media directory, or copied presentation for reading, Q&A, or summary.
-- ArcMind creates a unique `$ARCMIND_WORK_DIR` for the current run. Put previews, rendered slides, extracted media, conversions, and other intermediates only there; never create `.work`, `work`, or `tmp` beside an attachment. Start file-producing operations from `cd "$ARCMIND_WORK_DIR"` and pass `-o "$ARCMIND_WORK_DIR/<name>"` when supported. ArcMind clears the directory after the run.
-- Preserve the input by default and write modifications to a new deliverable unless the user explicitly requests an in-place change to an ArcMind-owned attachment.
+- Metis creates a unique `$METIS_WORK_DIR` for the current run. Put previews, rendered slides, extracted media, conversions, and other intermediates only there; never create `.work`, `work`, or `tmp` beside an attachment. Start file-producing operations from `cd "$METIS_WORK_DIR"` and pass `-o "$METIS_WORK_DIR/<name>"` when supported. Metis clears the directory after the run.
+- Preserve the input by default and write modifications to a new deliverable unless the user explicitly requests an in-place change to an Metis-owned attachment.
 - Use the fewest sufficient operations and stop when the request is answered. For reading or summarizing, prefer one targeted `view`, `get`, or `query`; do not validate or render unless needed.
-- ArcMind disables OfficeCLI auto-resident mode. Each command is self-contained and file-changing commands persist before returning. Ignore later resident lifecycle instructions: do not use `open`, `save`, `close`, or `watch`. Use `batch` for multiple related changes.
-- Never call a separate remote document, image, OCR, or vision service. When visual confirmation is needed, use only the current ArcMind model's image input as described below.
+- Metis disables OfficeCLI auto-resident mode. Each command is self-contained and file-changing commands persist before returning. Ignore later resident lifecycle instructions: do not use `open`, `save`, `close`, or `watch`. Use `batch` for multiple related changes.
+- Never call a separate remote document, image, OCR, or vision service. When visual confirmation is needed, use only the current Metis model's image input as described below.
 
 ### Conditional visual confirmation
 
-The official visual-delivery guidance below is conditional in ArcMind, not universal. Ignore later rules that say every presentation must be rendered. Render and read images only when the task needs confirmation of image content, layout, overlap, overflow, or final visual appearance. If visual confirmation is unnecessary, do not render.
+The official visual-delivery guidance below is conditional in Metis, not universal. Ignore later rules that say every presentation must be rendered. Render and read images only when the task needs confirmation of image content, layout, overlap, overflow, or final visual appearance. If visual confirmation is unnecessary, do not render.
 
 When visual confirmation is needed and the current model accepts image input, render a contact sheet or only the relevant slides and use the `read` tool on the resulting PNG files. A printed image path is not image input.
 
@@ -224,7 +224,7 @@ Copy-level tells live in "Copy reads human".
 
 ## Common Workflow
 
-1. **ArcMind lifecycle.** Do not open a resident. Every mutating command persists before it returns. Use `batch` for repetitive shape grids.
+1. **Metis lifecycle.** Do not open a resident. Every mutating command persists before it returns. Use `batch` for repetitive shape grids.
 2. **Orient.** New deck: `officecli create "$FILE"`. Existing: `officecli view "$FILE" outline` first. Never edit blind.
 3. **Title sequence first (plan, don't build yet).** Before creating any slide or shape, write out the full ordered list of slide titles. If someone reading ONLY the titles can't follow the argument, fix the arc now — cheaper in a list than after 14 slides. Pick ONE title grammar — all topic noun-phrases or all action statements, never a mix — and hold it throughout (see "Copy reads human").
 4. **Build in display order.** Add slides in audience-view order: cover → agenda → section-1 divider → section-1 content → section-2 divider → … → closing. `--index` on slide add works, but linear append keeps the build script readable and avoids index-arithmetic bugs. **Before final delivery, confirm slide count + narrative arc match your build plan.** Use the outline for this structural check; a conditional Gate 3 visual audit can confirm it when visual review is needed.
@@ -547,13 +547,13 @@ Each gate is **run a command, judge its output** — the officecli commands are 
 
 Run this gate only when visual confirmation is needed. Pick **one** path:
 
-**Screenshot** — when the current model can inspect images. Screenshot each slide in turn — `officecli view "<file>" screenshot --page 1 -o "$ARCMIND_WORK_DIR/slide1.png"`, then `--page 2`, … — until the page index runs past the deck (one screenshot = one slide). If it errors on page 1, use the fallback below.
+**Screenshot** — when the current model can inspect images. Screenshot each slide in turn — `officecli view "<file>" screenshot --page 1 -o "$METIS_WORK_DIR/slide1.png"`, then `--page 2`, … — until the page index runs past the deck (one screenshot = one slide). If it errors on page 1, use the fallback below.
 
 **Judge every generated PNG against the checklist.** Report one `slide N: <issue>` line per problem, or `PASS`.
 
 **Fallback — HTML-text** (no vision, or screenshot failed): read `view "$FILE" html` as text. DOM cannot prove **dark-on-dark / fine overlap / arrowheads / gap-margin metrics / column alignment** — flag these as "not visually verified" rather than PASS.
 
-**Optional `--grid N`** — only on user request for layout-rhythm, or when `view outline` shows anomalous layout distribution: `officecli view "<file>" screenshot --grid 3 -o "$ARCMIND_WORK_DIR/grid.png"`.
+**Optional `--grid N`** — only on user request for layout-rhythm, or when `view outline` shows anomalous layout distribution: `officecli view "<file>" screenshot --grid 3 -o "$METIS_WORK_DIR/grid.png"`.
 
 **Per-slide checklist (assume issues exist):**
 
@@ -591,6 +591,6 @@ Sanity-check cheatsheet — what breaks on the first try. Design + shell traps.
 
 ---
 
-## ArcMind final override
+## Metis final override
 
-ArcMind's integration rules above take priority over conflicting generic requirements: simple reads use stdout without intermediate files; OfficeCLI is non-resident; do not install or update tools; do not use separate remote services; save deliverables under `$ARCMIND_ATTACHMENTS_DIR`; keep intermediates under the runtime-created `$ARCMIND_WORK_DIR`; and do not render when visual confirmation is unnecessary.
+Metis's integration rules above take priority over conflicting generic requirements: simple reads use stdout without intermediate files; OfficeCLI is non-resident; do not install or update tools; do not use separate remote services; save deliverables under `$METIS_ATTACHMENTS_DIR`; keep intermediates under the runtime-created `$METIS_WORK_DIR`; and do not render when visual confirmation is unnecessary.

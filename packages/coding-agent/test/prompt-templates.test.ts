@@ -507,7 +507,7 @@ describe("parseCommandArgs + substituteArgs integration", () => {
 // ============================================================================
 
 describe("loadPromptTemplates - argument-hint", () => {
-	const testDir = join(tmpdir(), `arcmind-test-prompts-${Date.now()}`);
+	const testDir = join(tmpdir(), `metis-test-prompts-${Date.now()}`);
 
 	function writeTemplate(name: string, content: string) {
 		mkdirSync(testDir, { recursive: true });

@@ -11,7 +11,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, parse } from "node:path";
-import { fauxAssistantMessage, fauxToolCall, registerFauxProvider } from "@arcmind/ai/compat";
+import { fauxAssistantMessage, fauxToolCall, registerFauxProvider } from "@metis/ai/compat";
 import { Type } from "typebox";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
@@ -72,7 +72,7 @@ describe("AgentSessionRuntime characterization", () => {
 		},
 	) {
 		const tempDir =
-			options?.cwd ?? join(tmpdir(), `arcmind-runtime-suite-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+			options?.cwd ?? join(tmpdir(), `metis-runtime-suite-${Date.now()}-${Math.random().toString(36).slice(2)}`);
 		mkdirSync(tempDir, { recursive: true });
 
 		const faux = registerFauxProvider({
@@ -94,8 +94,8 @@ describe("AgentSessionRuntime characterization", () => {
 			resourceLoaderOptions: {
 				additionalPromptTemplatePaths: options?.promptTemplatePaths,
 				extensionFactories: [
-					(arcmind: ExtensionAPI) => {
-						arcmind.registerProvider(faux.getModel().provider, {
+					(metis: ExtensionAPI) => {
+						metis.registerProvider(faux.getModel().provider, {
 							baseUrl: faux.getModel().baseUrl,
 							apiKey: "faux-key",
 							api: faux.api,
@@ -111,7 +111,7 @@ describe("AgentSessionRuntime characterization", () => {
 								maxTokens: registeredModel.maxTokens,
 							})),
 						});
-						extensionFactory(arcmind);
+						extensionFactory(metis);
 					},
 				],
 				noSkills: true,
@@ -158,8 +158,8 @@ describe("AgentSessionRuntime characterization", () => {
 	}
 
 	it("persists message_end assistant replacements to the session manager", async () => {
-		const { runtime } = await createRuntimeForTest((arcmind: ExtensionAPI) => {
-			arcmind.on("message_end", (event) => {
+		const { runtime } = await createRuntimeForTest((metis: ExtensionAPI) => {
+			metis.on("message_end", (event) => {
 				if (event.message.role !== "assistant") return;
 
 				return {
@@ -349,8 +349,8 @@ describe("AgentSessionRuntime characterization", () => {
 		const agentEndGate = new Promise<void>((resolve) => {
 			releaseAgentEnd = resolve;
 		});
-		const { runtime, faux } = await createRuntimeForTest((arcmind) => {
-			arcmind.on("agent_end", async () => {
+		const { runtime, faux } = await createRuntimeForTest((metis) => {
+			metis.on("agent_end", async () => {
 				markAgentEndStarted();
 				await agentEndGate;
 			});
@@ -394,8 +394,8 @@ describe("AgentSessionRuntime characterization", () => {
 		const agentSettledGate = new Promise<void>((resolve) => {
 			releaseAgentSettled = resolve;
 		});
-		const { runtime, faux } = await createRuntimeForTest((arcmind) => {
-			arcmind.on("agent_settled", async () => {
+		const { runtime, faux } = await createRuntimeForTest((metis) => {
+			metis.on("agent_settled", async () => {
 				markAgentSettledStarted();
 				await agentSettledGate;
 			});
@@ -487,7 +487,7 @@ describe("AgentSessionRuntime characterization", () => {
 		});
 		const tempDir = join(
 			tmpdir(),
-			`arcmind-runtime-missing-image-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+			`metis-runtime-missing-image-${Date.now()}-${Math.random().toString(36).slice(2)}`,
 		);
 		const { runtime, faux } = await createRuntimeForTest(() => {}, { cwd: tempDir });
 		const manager = runtime.session.sessionManager;
@@ -601,10 +601,7 @@ describe("AgentSessionRuntime characterization", () => {
 	});
 
 	it("bounds amplified durable templates before direct or queued provider work", async () => {
-		const tempDir = join(
-			tmpdir(),
-			`arcmind-runtime-template-cap-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-		);
+		const tempDir = join(tmpdir(), `metis-runtime-template-cap-${Date.now()}-${Math.random().toString(36).slice(2)}`);
 		const promptDir = join(tempDir, "prompts");
 		mkdirSync(promptDir, { recursive: true });
 		writeFileSync(join(promptDir, "amplify.md"), "$@ $@ $@");
@@ -663,11 +660,11 @@ describe("AgentSessionRuntime characterization", () => {
 	it("recovers a same-tick durable follow-up when direct provider-ready expansion fails", async () => {
 		const tempDir = join(
 			tmpdir(),
-			`arcmind-runtime-expanded-failure-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+			`metis-runtime-expanded-failure-${Date.now()}-${Math.random().toString(36).slice(2)}`,
 		);
 		const { runtime, faux } = await createRuntimeForTest(
-			(arcmind) => {
-				arcmind.on("input", (event) =>
+			(metis) => {
+				metis.on("input", (event) =>
 					event.text === "expand beyond cap"
 						? { action: "transform", text: "x".repeat(2 * 1024 * 1024 + 1) }
 						: { action: "continue" },
@@ -735,7 +732,7 @@ describe("AgentSessionRuntime characterization", () => {
 	it("does not invent a turn identity when reopening an accepted-only direct crash prefix", async () => {
 		const tempDir = join(
 			tmpdir(),
-			`arcmind-runtime-accepted-prefix-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+			`metis-runtime-accepted-prefix-${Date.now()}-${Math.random().toString(36).slice(2)}`,
 		);
 		mkdirSync(tempDir, { recursive: true });
 		const manager = SessionManager.create(tempDir, join(tempDir, "sessions"));
@@ -764,8 +761,8 @@ describe("AgentSessionRuntime characterization", () => {
 
 	it("rejects extension slash commands before durable admission or execution", async () => {
 		let commandRuns = 0;
-		const { runtime, faux } = await createRuntimeForTest((arcmind) => {
-			arcmind.registerCommand("danger", {
+		const { runtime, faux } = await createRuntimeForTest((metis) => {
+			metis.registerCommand("danger", {
 				description: "Must not run through durable prompt submission",
 				handler: async () => {
 					commandRuns += 1;
@@ -790,8 +787,8 @@ describe("AgentSessionRuntime characterization", () => {
 		const switchGate = new Promise<void>((resolve) => {
 			releaseSwitch = resolve;
 		});
-		const { runtime } = await createRuntimeForTest((arcmind) => {
-			arcmind.on("session_before_switch", async () => {
+		const { runtime } = await createRuntimeForTest((metis) => {
+			metis.on("session_before_switch", async () => {
 				await switchGate;
 			});
 		});
@@ -810,8 +807,8 @@ describe("AgentSessionRuntime characterization", () => {
 	it("starts a prompt submitted from agent_settled as a new direct turn", async () => {
 		let runtimeRef!: AgentSessionRuntime;
 		let submittedFromSettled: ReturnType<AgentSessionRuntime["submitPrompt"]> | undefined;
-		const { runtime, faux } = await createRuntimeForTest((arcmind) => {
-			arcmind.on("agent_settled", () => {
+		const { runtime, faux } = await createRuntimeForTest((metis) => {
+			metis.on("agent_settled", () => {
 				if (submittedFromSettled) return;
 				submittedFromSettled = runtimeRef.submitPrompt({
 					requestId: "request-from-settled",
@@ -844,8 +841,8 @@ describe("AgentSessionRuntime characterization", () => {
 			let runtimeRef!: AgentSessionRuntime;
 			let attempted = false;
 			let lifecycleError: unknown;
-			const { runtime, faux } = await createRuntimeForTest((arcmind) => {
-				arcmind.on("agent_settled", async () => {
+			const { runtime, faux } = await createRuntimeForTest((metis) => {
+				metis.on("agent_settled", async () => {
 					if (attempted) return;
 					attempted = true;
 					try {
@@ -1032,7 +1029,7 @@ describe("AgentSessionRuntime characterization", () => {
 			});
 			const tempDir = join(
 				tmpdir(),
-				`arcmind-runtime-stop-${stopKind}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+				`metis-runtime-stop-${stopKind}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
 			);
 			const { runtime, faux } = await createRuntimeForTest(() => {}, {
 				cwd: tempDir,
@@ -1183,8 +1180,8 @@ describe("AgentSessionRuntime characterization", () => {
 
 	it("persists tool start and completion around one side effect", async () => {
 		let toolRuns = 0;
-		const { runtime, faux } = await createRuntimeForTest((arcmind) => {
-			arcmind.registerTool({
+		const { runtime, faux } = await createRuntimeForTest((metis) => {
+			metis.registerTool({
 				name: "side_effect",
 				label: "Side effect",
 				description: "Count one side effect",
@@ -1236,8 +1233,8 @@ describe("AgentSessionRuntime characterization", () => {
 	it("rejects a tool call ID reused by a later agent continuation before persistence or execution", async () => {
 		let queuedFollowUp = false;
 		let toolRuns = 0;
-		const { runtime, faux } = await createRuntimeForTest((arcmind) => {
-			arcmind.registerTool({
+		const { runtime, faux } = await createRuntimeForTest((metis) => {
+			metis.registerTool({
 				name: "continued_side_effect",
 				label: "Continued side effect",
 				description: "Count one side effect",
@@ -1247,10 +1244,10 @@ describe("AgentSessionRuntime characterization", () => {
 					return { content: [{ type: "text", text: "ok" }], details: {} };
 				},
 			});
-			arcmind.on("agent_end", () => {
+			metis.on("agent_end", () => {
 				if (queuedFollowUp) return;
 				queuedFollowUp = true;
-				arcmind.sendUserMessage("continue", { deliverAs: "followUp" });
+				metis.sendUserMessage("continue", { deliverAs: "followUp" });
 			});
 		});
 		faux.setResponses([
@@ -1289,17 +1286,17 @@ describe("AgentSessionRuntime characterization", () => {
 		async (followUpKind) => {
 			const tempDir = join(
 				tmpdir(),
-				`arcmind-runtime-epoch-${followUpKind}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+				`metis-runtime-epoch-${followUpKind}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
 			);
 			let queued = false;
-			const extension: ExtensionFactory = (arcmind) => {
-				arcmind.on("agent_end", () => {
+			const extension: ExtensionFactory = (metis) => {
+				metis.on("agent_end", () => {
 					if (queued) return;
 					queued = true;
 					if (followUpKind === "user") {
-						arcmind.sendUserMessage("continue", { deliverAs: "followUp" });
+						metis.sendUserMessage("continue", { deliverAs: "followUp" });
 					} else {
-						arcmind.sendMessage(
+						metis.sendMessage(
 							{ customType: "continue", content: [{ type: "text", text: "continue" }], display: false },
 							{ deliverAs: "followUp" },
 						);
@@ -1374,8 +1371,8 @@ describe("AgentSessionRuntime characterization", () => {
 		{ label: "unknown top-level field", replacement: { unexpected: true } },
 	])("rejects a post-extension tool result with $label before persistence", async ({ label, replacement }) => {
 		let toolRuns = 0;
-		const { runtime, faux } = await createRuntimeForTest((arcmind) => {
-			arcmind.registerTool({
+		const { runtime, faux } = await createRuntimeForTest((metis) => {
+			metis.registerTool({
 				name: "replaceable_side_effect",
 				label: "Replaceable side effect",
 				description: "Count one side effect",
@@ -1385,7 +1382,7 @@ describe("AgentSessionRuntime characterization", () => {
 					return { content: [{ type: "text", text: "ok" }], details: {} };
 				},
 			});
-			arcmind.on("message_end", (event) => {
+			metis.on("message_end", (event) => {
 				if (event.message.role !== "toolResult") return;
 				return { message: { ...event.message, ...replacement } as typeof event.message };
 			});
@@ -1438,8 +1435,8 @@ describe("AgentSessionRuntime characterization", () => {
 			],
 		},
 	])("rejects $label injected into assistant evidence after low-level validation", async ({ content }) => {
-		const { runtime, faux } = await createRuntimeForTest((arcmind) => {
-			arcmind.on("message_end", (event) => {
+		const { runtime, faux } = await createRuntimeForTest((metis) => {
+			metis.on("message_end", (event) => {
 				if (event.message.role !== "assistant") return;
 				return {
 					message: {
@@ -1467,8 +1464,8 @@ describe("AgentSessionRuntime characterization", () => {
 
 	it("blocks a tool side effect and repairs its result when the start marker fails", async () => {
 		let toolRuns = 0;
-		const { runtime, faux } = await createRuntimeForTest((arcmind) => {
-			arcmind.registerTool({
+		const { runtime, faux } = await createRuntimeForTest((metis) => {
+			metis.registerTool({
 				name: "blocked_side_effect",
 				label: "Blocked side effect",
 				description: "Must not run without a durable marker",
@@ -1517,7 +1514,7 @@ describe("AgentSessionRuntime characterization", () => {
 	});
 
 	it("repairs an unfinished tool before session creation without replaying provider or tool", async () => {
-		const tempDir = join(tmpdir(), `arcmind-runtime-recovery-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+		const tempDir = join(tmpdir(), `metis-runtime-recovery-${Date.now()}-${Math.random().toString(36).slice(2)}`);
 		mkdirSync(tempDir, { recursive: true });
 		const manager = SessionManager.create(tempDir, join(tempDir, "sessions"));
 		const input = { text: "recover" } as const;
@@ -1558,8 +1555,8 @@ describe("AgentSessionRuntime characterization", () => {
 
 		let toolRuns = 0;
 		const { runtime, faux } = await createRuntimeForTest(
-			(arcmind) => {
-				arcmind.registerTool({
+			(metis) => {
+				metis.registerTool({
 					name: "side_effect",
 					label: "Side effect",
 					description: "Must not run during recovery",
@@ -1600,13 +1597,13 @@ describe("AgentSessionRuntime characterization", () => {
 	] as const)("reopens a fault injected at %s without replaying provider or tool work", async (crashPoint) => {
 		const tempDir = join(
 			tmpdir(),
-			`arcmind-runtime-crash-${crashPoint}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+			`metis-runtime-crash-${crashPoint}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
 		);
 		let crashed = false;
 		let toolRuns = 0;
 		const crashError = new Error(`simulated process crash at ${crashPoint}`);
-		const registerCrashTool: ExtensionFactory = (arcmind) => {
-			arcmind.registerTool({
+		const registerCrashTool: ExtensionFactory = (metis) => {
+			metis.registerTool({
 				name: "crash_side_effect",
 				label: "Crash side effect",
 				description: "Must not replay after reopen",
@@ -1697,8 +1694,8 @@ describe("AgentSessionRuntime characterization", () => {
 		crashedRuntime.session.disposeFromRuntime();
 
 		const { runtime, faux } = await createRuntimeForTest(
-			(arcmind) => {
-				registerCrashTool(arcmind);
+			(metis) => {
+				registerCrashTool(metis);
 			},
 			{ cwd: tempDir, sessionManager: SessionManager.open(sessionFile) },
 		);
@@ -1715,14 +1712,14 @@ describe("AgentSessionRuntime characterization", () => {
 
 	it("emits session_before_switch and session_start for new and resume flows", async () => {
 		const events: RecordedSessionEvent[] = [];
-		const { runtime } = await createRuntimeForTest((arcmind: ExtensionAPI) => {
-			arcmind.on("session_before_switch", (event) => {
+		const { runtime } = await createRuntimeForTest((metis: ExtensionAPI) => {
+			metis.on("session_before_switch", (event) => {
 				events.push(event);
 			});
-			arcmind.on("session_shutdown", (event) => {
+			metis.on("session_shutdown", (event) => {
 				events.push(event);
 			});
-			arcmind.on("session_start", (event) => {
+			metis.on("session_start", (event) => {
 				events.push(event);
 			});
 		});
@@ -1765,14 +1762,14 @@ describe("AgentSessionRuntime characterization", () => {
 	it("honors session_before_switch cancellation for new and resume", async () => {
 		const events: RecordedSessionEvent[] = [];
 		let cancelReason: "new" | "resume" | undefined;
-		const { runtime } = await createRuntimeForTest((arcmind: ExtensionAPI) => {
-			arcmind.on("session_before_switch", (event) => {
+		const { runtime } = await createRuntimeForTest((metis: ExtensionAPI) => {
+			metis.on("session_before_switch", (event) => {
 				events.push(event);
 				if (event.reason === cancelReason) {
 					return { cancel: true };
 				}
 			});
-			arcmind.on("session_start", (event) => {
+			metis.on("session_start", (event) => {
 				events.push(event);
 			});
 		});
@@ -1786,7 +1783,7 @@ describe("AgentSessionRuntime characterization", () => {
 		expect(runtime.session.sessionFile).toBe(originalSessionFile);
 
 		events.length = 0;
-		const otherDir = join(tmpdir(), `arcmind-runtime-other-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+		const otherDir = join(tmpdir(), `metis-runtime-other-${Date.now()}-${Math.random().toString(36).slice(2)}`);
 		mkdirSync(otherDir, { recursive: true });
 		const otherSession = SessionManager.create(otherDir, join(otherDir, "sessions"));
 		otherSession.appendMessage({ role: "user", content: [{ type: "text", text: "other" }], timestamp: Date.now() });
@@ -1800,18 +1797,18 @@ describe("AgentSessionRuntime characterization", () => {
 	it("emits session_before_fork and session_start and honors cancellation", async () => {
 		const events: RecordedSessionEvent[] = [];
 		let cancelNextFork = false;
-		const { runtime } = await createRuntimeForTest((arcmind: ExtensionAPI) => {
-			arcmind.on("session_before_fork", (event) => {
+		const { runtime } = await createRuntimeForTest((metis: ExtensionAPI) => {
+			metis.on("session_before_fork", (event) => {
 				events.push(event);
 				if (cancelNextFork) {
 					cancelNextFork = false;
 					return { cancel: true };
 				}
 			});
-			arcmind.on("session_shutdown", (event) => {
+			metis.on("session_shutdown", (event) => {
 				events.push(event);
 			});
-			arcmind.on("session_start", (event) => {
+			metis.on("session_start", (event) => {
 				events.push(event);
 			});
 		});
@@ -1896,7 +1893,7 @@ describe("AgentSessionRuntime characterization", () => {
 	it("duplicates the current active branch in-memory when forking at the current position", async () => {
 		const tempDir = join(
 			tmpdir(),
-			`arcmind-runtime-suite-in-memory-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+			`metis-runtime-suite-in-memory-${Date.now()}-${Math.random().toString(36).slice(2)}`,
 		);
 		mkdirSync(tempDir, { recursive: true });
 
@@ -1917,8 +1914,8 @@ describe("AgentSessionRuntime characterization", () => {
 			model: faux.getModel(),
 			resourceLoaderOptions: {
 				extensionFactories: [
-					(arcmind: ExtensionAPI) => {
-						arcmind.registerProvider(faux.getModel().provider, {
+					(metis: ExtensionAPI) => {
+						metis.registerProvider(faux.getModel().provider, {
 							baseUrl: faux.getModel().baseUrl,
 							apiKey: "faux-key",
 							api: faux.api,
@@ -2187,7 +2184,7 @@ describe("AgentSessionRuntime characterization", () => {
 	});
 
 	it("retries initial session cleanup when runtime creation fails", async () => {
-		const tempDir = join(tmpdir(), `arcmind-runtime-failure-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+		const tempDir = join(tmpdir(), `metis-runtime-failure-${Date.now()}-${Math.random().toString(36).slice(2)}`);
 		mkdirSync(tempDir, { recursive: true });
 		const sessionManager = SessionManager.create(tempDir, join(tempDir, "sessions"));
 		const sessionFile = sessionManager.getSessionFile()!;
@@ -2215,10 +2212,7 @@ describe("AgentSessionRuntime characterization", () => {
 	});
 
 	it("closes an initial session manager when cwd validation fails", async () => {
-		const tempDir = join(
-			tmpdir(),
-			`arcmind-runtime-cwd-failure-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-		);
+		const tempDir = join(tmpdir(), `metis-runtime-cwd-failure-${Date.now()}-${Math.random().toString(36).slice(2)}`);
 		mkdirSync(tempDir, { recursive: true });
 		const missingCwd = join(tempDir, "missing");
 		const sessionManager = SessionManager.create(missingCwd, join(tempDir, "sessions"));
@@ -2255,8 +2249,8 @@ describe("AgentSessionRuntime characterization", () => {
 
 	it("disposes the runtime only once", async () => {
 		let shutdownCount = 0;
-		const { runtime } = await createRuntimeForTest((arcmind) => {
-			arcmind.on("session_shutdown", () => {
+		const { runtime } = await createRuntimeForTest((metis) => {
+			metis.on("session_shutdown", () => {
 				shutdownCount++;
 			});
 		});
@@ -2285,8 +2279,8 @@ describe("AgentSessionRuntime characterization", () => {
 
 	it("serializes concurrent session replacements without leaking writer leases", async () => {
 		let shutdownCount = 0;
-		const { runtime } = await createRuntimeForTest((arcmind) => {
-			arcmind.on("session_shutdown", () => {
+		const { runtime } = await createRuntimeForTest((metis) => {
+			metis.on("session_shutdown", () => {
 				shutdownCount++;
 			});
 		});
@@ -2309,8 +2303,8 @@ describe("AgentSessionRuntime characterization", () => {
 
 	it("waits for an accepted replacement before disposing and rejects later replacements", async () => {
 		let shutdownCount = 0;
-		const { runtime } = await createRuntimeForTest((arcmind) => {
-			arcmind.on("session_shutdown", () => {
+		const { runtime } = await createRuntimeForTest((metis) => {
+			metis.on("session_shutdown", () => {
 				shutdownCount++;
 			});
 		});
@@ -2341,8 +2335,8 @@ describe("AgentSessionRuntime characterization", () => {
 				releaseMessageEnd = resolve;
 			});
 			let blocked = false;
-			const { runtime, tempDir } = await createRuntimeForTest((arcmind) => {
-				arcmind.on("message_end", async (event) => {
+			const { runtime, tempDir } = await createRuntimeForTest((metis) => {
+				metis.on("message_end", async (event) => {
 					if (blocked || event.message.role !== "assistant") return;
 					blocked = true;
 					markMessageEndStarted();
@@ -2408,14 +2402,14 @@ describe("AgentSessionRuntime characterization", () => {
 		});
 		let blocked = false;
 		let shutdownCount = 0;
-		const { runtime } = await createRuntimeForTest((arcmind) => {
-			arcmind.on("message_end", async (event) => {
+		const { runtime } = await createRuntimeForTest((metis) => {
+			metis.on("message_end", async (event) => {
 				if (blocked || event.message.role !== "assistant") return;
 				blocked = true;
 				markMessageEndStarted();
 				await messageEndGate;
 			});
-			arcmind.on("session_shutdown", () => {
+			metis.on("session_shutdown", () => {
 				shutdownCount++;
 			});
 		});
@@ -2465,14 +2459,14 @@ describe("AgentSessionRuntime characterization", () => {
 		});
 		let blocked = false;
 		let shutdownCount = 0;
-		const { runtime } = await createRuntimeForTest((arcmind) => {
-			arcmind.on("message_end", async (event) => {
+		const { runtime } = await createRuntimeForTest((metis) => {
+			metis.on("message_end", async (event) => {
 				if (blocked || event.message.role !== "assistant") return;
 				blocked = true;
 				markMessageEndStarted();
 				await messageEndGate;
 			});
-			arcmind.on("session_shutdown", () => {
+			metis.on("session_shutdown", () => {
 				shutdownCount++;
 			});
 		});
@@ -2503,8 +2497,8 @@ describe("AgentSessionRuntime characterization", () => {
 	it("rejects a reentrant lifecycle wait from message_end without deadlocking persistence", async () => {
 		let runtime!: AgentSessionRuntime;
 		let attempted = false;
-		const fixture = await createRuntimeForTest((arcmind) => {
-			arcmind.on("message_end", async (event) => {
+		const fixture = await createRuntimeForTest((metis) => {
+			metis.on("message_end", async (event) => {
 				if (attempted || event.message.role !== "assistant") return;
 				attempted = true;
 				await runtime.newSession();
@@ -2543,8 +2537,8 @@ describe("AgentSessionRuntime characterization", () => {
 	it("rejects a reentrant lifecycle wait from session_before_switch without deadlocking", async () => {
 		let runtime!: AgentSessionRuntime;
 		let attempted = false;
-		const fixture = await createRuntimeForTest((arcmind) => {
-			arcmind.on("session_before_switch", async () => {
+		const fixture = await createRuntimeForTest((metis) => {
+			metis.on("session_before_switch", async () => {
 				if (attempted) return;
 				attempted = true;
 				await runtime.newSession();
@@ -2575,8 +2569,8 @@ describe("AgentSessionRuntime characterization", () => {
 	it("rejects a reentrant dispose from session_shutdown without deadlocking", async () => {
 		let runtime!: AgentSessionRuntime;
 		let attempted = false;
-		const fixture = await createRuntimeForTest((arcmind) => {
-			arcmind.on("session_shutdown", async () => {
+		const fixture = await createRuntimeForTest((metis) => {
+			metis.on("session_shutdown", async () => {
 				if (attempted) return;
 				attempted = true;
 				await runtime.dispose();
@@ -2628,8 +2622,8 @@ describe("AgentSessionRuntime characterization", () => {
 
 	it("retries a failed manager close without repeating shutdown hooks", async () => {
 		let shutdownCount = 0;
-		const { runtime } = await createRuntimeForTest((arcmind) => {
-			arcmind.on("session_shutdown", () => {
+		const { runtime } = await createRuntimeForTest((metis) => {
+			metis.on("session_shutdown", () => {
 				shutdownCount++;
 			});
 		});
@@ -2650,8 +2644,8 @@ describe("AgentSessionRuntime characterization", () => {
 	});
 
 	it("updates the runtime session cwd on cross-cwd session replacement", async () => {
-		const firstDir = join(tmpdir(), `arcmind-runtime-cwd-a-${Date.now()}-${Math.random().toString(36).slice(2)}`);
-		const secondDir = join(tmpdir(), `arcmind-runtime-cwd-b-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+		const firstDir = join(tmpdir(), `metis-runtime-cwd-a-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+		const secondDir = join(tmpdir(), `metis-runtime-cwd-b-${Date.now()}-${Math.random().toString(36).slice(2)}`);
 		mkdirSync(firstDir, { recursive: true });
 		mkdirSync(secondDir, { recursive: true });
 		const { runtime, faux, tempDir } = await createRuntimeForTest(() => {}, { cwd: firstDir });
@@ -2662,8 +2656,8 @@ describe("AgentSessionRuntime characterization", () => {
 			authStorage: otherAuthStorage,
 			resourceLoaderOptions: {
 				extensionFactories: [
-					(arcmind: ExtensionAPI) => {
-						arcmind.registerProvider(faux.getModel().provider, {
+					(metis: ExtensionAPI) => {
+						metis.registerProvider(faux.getModel().provider, {
 							baseUrl: faux.getModel().baseUrl,
 							apiKey: "faux-key",
 							api: faux.api,
@@ -2738,8 +2732,8 @@ describe("AgentSessionRuntime characterization", () => {
 			authStorage: otherAuthStorage,
 			resourceLoaderOptions: {
 				extensionFactories: [
-					(arcmind: ExtensionAPI) => {
-						arcmind.registerProvider(faux.getModel().provider, {
+					(metis: ExtensionAPI) => {
+						metis.registerProvider(faux.getModel().provider, {
 							baseUrl: faux.getModel().baseUrl,
 							apiKey: "faux-key",
 							api: faux.api,

@@ -16,6 +16,7 @@ import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+	inspectSessionLease,
 	type LeaseProcessIdentity,
 	type LeaseProcessInspection,
 	SessionLease,
@@ -39,7 +40,7 @@ afterEach(async () => {
 });
 
 function createSessionFile(): string {
-	const directory = mkdtempSync(join(tmpdir(), "arcmind-session-lease-"));
+	const directory = mkdtempSync(join(tmpdir(), "metis-session-lease-"));
 	tempDirs.push(directory);
 	const sessionFile = join(directory, "session.jsonl");
 	writeFileSync(sessionFile, '{"type":"session"}\n');
@@ -289,6 +290,27 @@ function waitForExit(child: ChildProcess): Promise<unknown> {
 }
 
 describe("SessionLease", () => {
+	it("inspects leases without acquiring or deleting them", () => {
+		const sessionFile = createSessionFile();
+		expect(inspectSessionLease(sessionFile, options(identity({ pid: 202 })))).toBe("free");
+
+		const lease = SessionLease.acquire(
+			sessionFile,
+			options(identity(), () => ({ status: "dead" })),
+		);
+		try {
+			expect(
+				inspectSessionLease(
+					sessionFile,
+					options(identity({ pid: 202 }), () => ({ status: "alive", processStartedAt: 1_000 })),
+				),
+			).toBe("active");
+			expect(existsSync(ownerPath(sessionFile))).toBe(true);
+		} finally {
+			lease.close();
+		}
+	});
+
 	it("writes complete owner metadata and releases cleanly", () => {
 		const sessionFile = createSessionFile();
 		const lease = SessionLease.acquire(sessionFile, options(identity()));

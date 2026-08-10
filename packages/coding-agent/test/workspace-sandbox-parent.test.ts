@@ -43,7 +43,7 @@ function respond(child: FakeBroker, value: unknown): void {
 describe("workspace sandbox parent fail-closed behavior", () => {
 	const roots: string[] = [];
 	const cwd = () => {
-		const value = mkdtempSync(join(tmpdir(), "arcmind-sandbox-parent-test-"));
+		const value = mkdtempSync(join(tmpdir(), "metis-sandbox-parent-test-"));
 		roots.push(value);
 		return value;
 	};

@@ -2,8 +2,8 @@
  * Snake game extension - play snake with /snake command
  */
 
-import type { ExtensionAPI } from "@arcmind/coding-agent";
-import { matchesKey, visibleWidth } from "@arcmind/tui";
+import type { ExtensionAPI } from "@metis/coding-agent";
+import { matchesKey, visibleWidth } from "@metis/tui";
 
 const GAME_WIDTH = 40;
 const GAME_HEIGHT = 15;
@@ -306,8 +306,8 @@ class SnakeComponent {
 
 const SNAKE_SAVE_TYPE = "snake-save";
 
-export default function (arcmind: ExtensionAPI) {
-	arcmind.registerCommand("snake", {
+export default function (metis: ExtensionAPI) {
+	metis.registerCommand("snake", {
 		description: "Play Snake!",
 
 		handler: async (_args, ctx) => {
@@ -333,7 +333,7 @@ export default function (arcmind: ExtensionAPI) {
 					() => done(undefined),
 					(state) => {
 						// Save or clear state
-						arcmind.appendEntry(SNAKE_SAVE_TYPE, state);
+						metis.appendEntry(SNAKE_SAVE_TYPE, state);
 					},
 					savedState,
 				);

@@ -1,4 +1,4 @@
-import { setKeybindings } from "@arcmind/tui";
+import { setKeybindings } from "@metis/tui";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { KeybindingsManager } from "../src/core/keybindings.ts";
 import { PermissionsSelectorComponent } from "../src/modes/interactive/components/permissions-selector.ts";

@@ -1,7 +1,7 @@
 {
 	"$schema": "http://json-schema.org/draft-07/schema#",
-	"title": "ArcMind Coding Agent Theme",
-	"description": "Theme schema for ArcMind coding agent",
+	"title": "Metis Coding Agent Theme",
+	"description": "Theme schema for Metis coding agent",
 	"type": "object",
 	"required": ["name", "colors"],
 	"properties": {

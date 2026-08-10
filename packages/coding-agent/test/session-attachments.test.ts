@@ -33,7 +33,7 @@ describe("session attachments", () => {
 	let cwd: string;
 
 	beforeEach(() => {
-		root = mkdtempSync(join(tmpdir(), "arcmind-attachments-"));
+		root = mkdtempSync(join(tmpdir(), "metis-attachments-"));
 		agentDir = join(root, "agent");
 		cwd = join(root, "project");
 		mkdirSync(cwd);

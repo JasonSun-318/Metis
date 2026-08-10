@@ -1,7 +1,7 @@
 /**
  * Gondolin Tool Routing Example
  *
- * Runs arcmind's built-in tools inside a local Gondolin micro-VM. The host working
+ * Runs metis's built-in tools inside a local Gondolin micro-VM. The host working
  * directory is mounted at /workspace in the guest. File changes under
  * /workspace write through to the host; other guest filesystem changes are
  * isolated to the VM.
@@ -12,15 +12,15 @@
  *
  * Usage:
  *   cd /path/to/project
- *   arcmind -e /path/to/arcmind/packages/coding-agent/examples/extensions/gondolin
+ *   metis -e /path/to/metis/packages/coding-agent/examples/extensions/gondolin
  *
  * Requirements:
- *   - Node.js >= 23.6.0 for @arcmind/gondolin
+ *   - Node.js >= 23.6.0 for @metis/gondolin
  *   - QEMU installed (for example, `brew install qemu` on macOS)
  */
 
 import path from "node:path";
-import type { ExtensionAPI, ExtensionContext } from "@arcmind/coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@metis/coding-agent";
 import {
 	type BashOperations,
 	createBashTool,
@@ -41,8 +41,8 @@ import {
 	truncateHead,
 	truncateLine,
 	type WriteOperations,
-} from "@arcmind/coding-agent";
-import { RealFSProvider, VM } from "@arcmind/gondolin";
+} from "@metis/coding-agent";
+import { RealFSProvider, VM } from "@metis/gondolin";
 
 const GUEST_WORKSPACE = "/workspace";
 const DEFAULT_GREP_LIMIT = 100;
@@ -362,7 +362,7 @@ function createGondolinBashOps(vm: VM, localCwd: string, shellPath: string): Bas
 	};
 }
 
-export default function (arcmind: ExtensionAPI) {
+export default function (metis: ExtensionAPI) {
 	const localCwd = process.cwd();
 	const localRead = createReadTool(localCwd);
 	const localWrite = createWriteTool(localCwd);
@@ -379,7 +379,7 @@ export default function (arcmind: ExtensionAPI) {
 	async function startVm(ctx?: ExtensionContext): Promise<VM> {
 		ctx?.ui.setStatus("gondolin", ctx.ui.theme.fg("accent", `Gondolin: starting ${GUEST_WORKSPACE}`));
 		const created = await VM.create({
-			sessionLabel: `arcmind ${path.basename(localCwd)}`,
+			sessionLabel: `metis ${path.basename(localCwd)}`,
 			vfs: {
 				mounts: {
 					[GUEST_WORKSPACE]: new RealFSProvider(localCwd),
@@ -407,11 +407,11 @@ export default function (arcmind: ExtensionAPI) {
 		return vmStarting;
 	}
 
-	arcmind.on("session_start", async (_event, ctx) => {
+	metis.on("session_start", async (_event, ctx) => {
 		await ensureVm(ctx);
 	});
 
-	arcmind.on("session_shutdown", async (_event, ctx) => {
+	metis.on("session_shutdown", async (_event, ctx) => {
 		const activeVm = vm;
 		vm = undefined;
 		vmStarting = undefined;
@@ -424,7 +424,7 @@ export default function (arcmind: ExtensionAPI) {
 		}
 	});
 
-	arcmind.registerCommand("gondolin", {
+	metis.registerCommand("gondolin", {
 		description: "Show Gondolin VM status",
 		handler: async (_args, ctx) => {
 			const activeVm = await ensureVm(ctx);
@@ -440,7 +440,7 @@ export default function (arcmind: ExtensionAPI) {
 		},
 	});
 
-	arcmind.registerTool({
+	metis.registerTool({
 		...localRead,
 		async execute(id, params, signal, onUpdate, ctx) {
 			const activeVm = await ensureVm(ctx);
@@ -451,7 +451,7 @@ export default function (arcmind: ExtensionAPI) {
 		},
 	});
 
-	arcmind.registerTool({
+	metis.registerTool({
 		...localWrite,
 		async execute(id, params, signal, onUpdate, ctx) {
 			const activeVm = await ensureVm(ctx);
@@ -462,7 +462,7 @@ export default function (arcmind: ExtensionAPI) {
 		},
 	});
 
-	arcmind.registerTool({
+	metis.registerTool({
 		...localEdit,
 		async execute(id, params, signal, onUpdate, ctx) {
 			const activeVm = await ensureVm(ctx);
@@ -473,7 +473,7 @@ export default function (arcmind: ExtensionAPI) {
 		},
 	});
 
-	arcmind.registerTool({
+	metis.registerTool({
 		...localBash,
 		async execute(id, params, signal, onUpdate, ctx) {
 			const activeVm = await ensureVm(ctx);
@@ -484,7 +484,7 @@ export default function (arcmind: ExtensionAPI) {
 		},
 	});
 
-	arcmind.registerTool({
+	metis.registerTool({
 		...localLs,
 		async execute(id, params, signal, onUpdate, ctx) {
 			const activeVm = await ensureVm(ctx);
@@ -495,7 +495,7 @@ export default function (arcmind: ExtensionAPI) {
 		},
 	});
 
-	arcmind.registerTool({
+	metis.registerTool({
 		...localFind,
 		async execute(id, params, signal, onUpdate, ctx) {
 			const activeVm = await ensureVm(ctx);
@@ -506,7 +506,7 @@ export default function (arcmind: ExtensionAPI) {
 		},
 	});
 
-	arcmind.registerTool({
+	metis.registerTool({
 		...localGrep,
 		async execute(_id, params, signal, _onUpdate, ctx) {
 			const activeVm = await ensureVm(ctx);
@@ -514,12 +514,12 @@ export default function (arcmind: ExtensionAPI) {
 		},
 	});
 
-	arcmind.on("user_bash", async (_event, ctx) => {
+	metis.on("user_bash", async (_event, ctx) => {
 		const activeVm = await ensureVm(ctx);
 		return { operations: createGondolinBashOps(activeVm, localCwd, shellPath) };
 	});
 
-	arcmind.on("before_agent_start", async (event, ctx) => {
+	metis.on("before_agent_start", async (event, ctx) => {
 		await ensureVm(ctx);
 		const localLine = `Current working directory: ${localCwd}`;
 		const guestLine = `Current working directory: ${GUEST_WORKSPACE} (Gondolin VM; host workspace mounted from ${localCwd})`;

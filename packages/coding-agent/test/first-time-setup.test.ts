@@ -7,24 +7,24 @@ import { ENV_AGENT_DIR } from "../src/config.ts";
 import { SettingsManager } from "../src/core/settings-manager.ts";
 
 describe("shouldRunFirstTimeSetup", () => {
-	const originalArcMindExperimental = process.env.ARCMIND_EXPERIMENTAL;
+	const originalMetisExperimental = process.env.METIS_EXPERIMENTAL;
 	const originalAgentDir = process.env[ENV_AGENT_DIR];
 	let tempDir: string;
 	let settingsPath: string;
 
 	beforeEach(() => {
-		tempDir = mkdtempSync(join(tmpdir(), "arcmind-first-time-setup-"));
+		tempDir = mkdtempSync(join(tmpdir(), "metis-first-time-setup-"));
 		settingsPath = join(tempDir, "settings.json");
-		process.env.ARCMIND_EXPERIMENTAL = "1";
+		process.env.METIS_EXPERIMENTAL = "1";
 		delete process.env[ENV_AGENT_DIR];
 	});
 
 	afterEach(() => {
 		rmSync(tempDir, { recursive: true, force: true });
-		if (originalArcMindExperimental === undefined) {
-			delete process.env.ARCMIND_EXPERIMENTAL;
+		if (originalMetisExperimental === undefined) {
+			delete process.env.METIS_EXPERIMENTAL;
 		} else {
-			process.env.ARCMIND_EXPERIMENTAL = originalArcMindExperimental;
+			process.env.METIS_EXPERIMENTAL = originalMetisExperimental;
 		}
 		if (originalAgentDir === undefined) {
 			delete process.env[ENV_AGENT_DIR];
@@ -38,7 +38,7 @@ describe("shouldRunFirstTimeSetup", () => {
 	});
 
 	it("returns false when experimental features are disabled", () => {
-		delete process.env.ARCMIND_EXPERIMENTAL;
+		delete process.env.METIS_EXPERIMENTAL;
 
 		expect(shouldRunFirstTimeSetup(settingsPath)).toBe(false);
 	});

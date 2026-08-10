@@ -1,6 +1,6 @@
 import { createInterface } from "node:readline";
-import type { AgentTool } from "@arcmind/agent-core";
-import { Text } from "@arcmind/tui";
+import type { AgentTool } from "@metis/agent-core";
+import { Text } from "@metis/tui";
 import { spawn } from "child_process";
 import path from "path";
 import { type Static, Type } from "typebox";
@@ -231,7 +231,7 @@ export function createFindToolDefinition(
 						// fd normally ignores .gitignore outside git repos, so keep --no-require-git
 						// there. Inside repos, use fd's default git-aware behavior so parent
 						// .gitignore rules stop at nested repo boundaries:
-						// https://gitee.com/sun124578963_0/arc-mind/issues/5960
+						// https://gitee.com/sun124578963_0/metis/issues/5960
 						let insideGitRepo = false;
 						for (let current = searchPath; ; ) {
 							if (await pathExists(path.join(current, ".git"))) {

@@ -1,6 +1,6 @@
 # Terminal Setup
 
-ArcMind uses the [Kitty keyboard protocol](https://sw.kovidgoyal.net/kitty/keyboard-protocol/) for reliable modifier key detection. Most modern terminals support this protocol, but some require configuration.
+Metis uses the [Kitty keyboard protocol](https://sw.kovidgoyal.net/kitty/keyboard-protocol/) for reliable modifier key detection. Most modern terminals support this protocol, but some require configuration.
 
 ## Kitty, iTerm2
 
@@ -8,9 +8,9 @@ Work out of the box.
 
 ## Apple Terminal
 
-ArcMind enables enhanced key reporting when available. If Terminal.app still sends plain Return for `Shift+Enter`, arcmind uses a local macOS modifier fallback to treat that Return as `Shift+Enter`.
+Metis enables enhanced key reporting when available. If Terminal.app still sends plain Return for `Shift+Enter`, metis uses a local macOS modifier fallback to treat that Return as `Shift+Enter`.
 
-This fallback only works when arcmind runs on the same Mac as Terminal.app. It cannot detect the local keyboard over remote SSH.
+This fallback only works when metis runs on the same Mac as Terminal.app. It cannot detect the local keyboard over remote SSH.
 
 ## Ghostty
 
@@ -26,11 +26,11 @@ Older Claude Code versions may have added this Ghostty mapping:
 keybind = shift+enter=text:\n
 ```
 
-That mapping sends a raw linefeed byte. Inside arcmind, that is indistinguishable from `Ctrl+J`, so tmux and arcmind no longer see a real `shift+enter` key event.
+That mapping sends a raw linefeed byte. Inside metis, that is indistinguishable from `Ctrl+J`, so tmux and metis no longer see a real `shift+enter` key event.
 
 If Claude Code 2.x or newer is the only reason you added that mapping, you can remove it, unless you want to use Claude Code in tmux, where it still requires that Ghostty mapping.
 
-ArcMind binds `Ctrl+J` as a default newline alias, so `Shift+Enter` keeps working in tmux via that remap without extra arcmind configuration.
+Metis binds `Ctrl+J` as a default newline alias, so `Shift+Enter` keeps working in tmux via that remap without extra metis configuration.
 
 ## WezTerm
 
@@ -43,7 +43,7 @@ config.enable_kitty_keyboard = true
 return config
 ```
 
-On macOS, WezTerm binds `Option+Enter` to fullscreen by default. To use `Option+Enter` for arcmind follow-up queueing, add this key override:
+On macOS, WezTerm binds `Option+Enter` to fullscreen by default. To use `Option+Enter` for metis follow-up queueing, add this key override:
 
 ```lua
 local wezterm = require 'wezterm'
@@ -60,11 +60,11 @@ return config
 
 If you already have a `config.keys` table, add the entry to it.
 
-On WSL, WezTerm may require a visible hardware cursor for IME candidate window positioning. If CJK IME candidates do not follow the text cursor, set `ARCMIND_HARDWARE_CURSOR=1` before running arcmind or set `showHardwareCursor` to `true` in settings.
+On WSL, WezTerm may require a visible hardware cursor for IME candidate window positioning. If CJK IME candidates do not follow the text cursor, set `METIS_HARDWARE_CURSOR=1` before running metis or set `showHardwareCursor` to `true` in settings.
 
 ## Alacritty
 
-Alacritty usually works out of the box for `Shift+Enter`. On macOS, `Option+Enter` may arrive as plain `Enter`. To use `Option+Enter` for arcmind follow-up queueing, add to `~/.config/alacritty/alacritty.toml`:
+Alacritty usually works out of the box for `Shift+Enter`. On macOS, `Option+Enter` may arrive as plain `Enter`. To use `Option+Enter` for metis follow-up queueing, add to `~/.config/alacritty/alacritty.toml`:
 
 ```toml
 [[keyboard.bindings]]
@@ -99,7 +99,7 @@ Add to `keybindings.json`:
 
 ## Windows Terminal
 
-Add to `settings.json` (Ctrl+Shift+, or Settings → Open JSON file) to forward the modified Enter keys arcmind uses:
+Add to `settings.json` (Ctrl+Shift+, or Settings → Open JSON file) to forward the modified Enter keys metis uses:
 
 ```json
 {
@@ -117,8 +117,8 @@ Add to `settings.json` (Ctrl+Shift+, or Settings → Open JSON file) to forward 
 ```
 
 - `Shift+Enter` inserts a new line.
-- Windows Terminal binds `Alt+Enter` to fullscreen by default. That prevents arcmind from receiving `Alt+Enter` for follow-up queueing.
-- Remapping `Alt+Enter` to `sendInput` forwards the real key chord to arcmind instead.
+- Windows Terminal binds `Alt+Enter` to fullscreen by default. That prevents metis from receiving `Alt+Enter` for follow-up queueing.
+- Remapping `Alt+Enter` to `sendInput` forwards the real key chord to metis instead.
 
 If you already have an `actions` array, add the objects to it. If the old fullscreen behavior persists, fully close and reopen Windows Terminal.
 
@@ -137,6 +137,6 @@ For the best experience, use a terminal that supports the Kitty keyboard protoco
 
 The built-in terminal has limited escape sequence support. Shift+Enter cannot be distinguished from Enter in IntelliJ's terminal.
 
-If you want the hardware cursor visible, set `ARCMIND_HARDWARE_CURSOR=1` before running arcmind (disabled by default for compatibility).
+If you want the hardware cursor visible, set `METIS_HARDWARE_CURSOR=1` before running metis (disabled by default for compatibility).
 
 Consider using a dedicated terminal emulator for the best experience.

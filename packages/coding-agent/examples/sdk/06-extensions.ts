@@ -5,15 +5,15 @@
  * They provide a unified system for extensions, custom tools, commands, and more.
  *
  * By default, extension files are discovered from:
- * - ~/.arcmind/agent/extensions/
- * - <cwd>/.arcmind/extensions/
+ * - ~/.metis/agent/extensions/
+ * - <cwd>/.metis/extensions/
  * - Paths specified in settings.json "extensions" array
  *
  * An extension is a TypeScript file that exports a default function:
- *   export default function (arcmind: ExtensionAPI) { ... }
+ *   export default function (metis: ExtensionAPI) { ... }
  */
 
-import { createAgentSession, DefaultResourceLoader, getAgentDir, SessionManager } from "@arcmind/coding-agent";
+import { createAgentSession, DefaultResourceLoader, getAgentDir, SessionManager } from "@metis/coding-agent";
 
 // Extensions are discovered automatically from standard locations.
 // You can also add paths via settings.json or DefaultResourceLoader options.
@@ -23,8 +23,8 @@ const resourceLoader = new DefaultResourceLoader({
 	agentDir: getAgentDir(),
 	additionalExtensionPaths: ["./my-logging-extension.ts", "./my-safety-extension.ts"],
 	extensionFactories: [
-		(arcmind) => {
-			arcmind.on("agent_start", () => {
+		(metis) => {
+			metis.on("agent_start", () => {
 				console.log("[Inline Extension] Agent starting");
 			});
 		},
@@ -52,25 +52,25 @@ try {
 
 // Example extension file (./my-logging-extension.ts):
 /*
-import type { ExtensionAPI } from "@arcmind/coding-agent";
+import type { ExtensionAPI } from "@metis/coding-agent";
 
-export default function (arcmind: ExtensionAPI) {
-	arcmind.on("agent_start", async () => {
+export default function (metis: ExtensionAPI) {
+	metis.on("agent_start", async () => {
 		console.log("[Extension] Agent starting");
 	});
 
-	arcmind.on("tool_call", async (event) => {
+	metis.on("tool_call", async (event) => {
 		console.log(\`[Extension] Tool: \${event.toolName}\`);
 		// Return { block: true, reason: "..." } to block execution
 		return undefined;
 	});
 
-	arcmind.on("agent_end", async (event) => {
+	metis.on("agent_end", async (event) => {
 		console.log(\`[Extension] Done, \${event.messages.length} messages\`);
 	});
 
 	// Register a custom tool
-	arcmind.registerTool({
+	metis.registerTool({
 		name: "my_tool",
 		label: "My Tool",
 		description: "Does something useful",
@@ -84,7 +84,7 @@ export default function (arcmind: ExtensionAPI) {
 	});
 
 	// Register a command
-	arcmind.registerCommand("mycommand", {
+	metis.registerCommand("mycommand", {
 		description: "Do something",
 		handler: async (args, ctx) => {
 			ctx.ui.notify(\`Command executed with: \${args}\`);

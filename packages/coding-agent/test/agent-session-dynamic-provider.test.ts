@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { getModel } from "@arcmind/ai/compat";
+import { getModel } from "@metis/ai/compat";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { AuthStorage } from "../src/core/auth-storage.ts";
 import { ModelRegistry } from "../src/core/model-registry.ts";
@@ -16,7 +16,7 @@ describe("AgentSession dynamic provider registration", () => {
 	let agentDir: string;
 
 	beforeEach(() => {
-		tempDir = join(tmpdir(), `arcmind-dynamic-provider-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+		tempDir = join(tmpdir(), `metis-dynamic-provider-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
 		agentDir = join(tempDir, "agent");
 		mkdirSync(agentDir, { recursive: true });
 	});
@@ -73,8 +73,8 @@ describe("AgentSession dynamic provider registration", () => {
 
 	it("applies top-level registerProvider overrides to the active model", async () => {
 		const session = await createSession([
-			(arcmind) => {
-				arcmind.registerProvider("anthropic", { baseUrl: "http://localhost:8080/top-level" });
+			(metis) => {
+				metis.registerProvider("anthropic", { baseUrl: "http://localhost:8080/top-level" });
 			},
 		]);
 
@@ -86,9 +86,9 @@ describe("AgentSession dynamic provider registration", () => {
 
 	it("applies session_start registerProvider overrides to the active model", async () => {
 		const session = await createSession([
-			(arcmind) => {
-				arcmind.on("session_start", () => {
-					arcmind.registerProvider("anthropic", { baseUrl: "http://localhost:8080/session-start" });
+			(metis) => {
+				metis.on("session_start", () => {
+					metis.registerProvider("anthropic", { baseUrl: "http://localhost:8080/session-start" });
 				});
 			},
 		]);
@@ -103,11 +103,11 @@ describe("AgentSession dynamic provider registration", () => {
 
 	it("applies command-time registerProvider overrides without reload", async () => {
 		const session = await createSession([
-			(arcmind) => {
-				arcmind.registerCommand("use-proxy", {
+			(metis) => {
+				metis.registerCommand("use-proxy", {
 					description: "Use proxy",
 					handler: async () => {
-						arcmind.registerProvider("anthropic", { baseUrl: "http://localhost:8080/command" });
+						metis.registerProvider("anthropic", { baseUrl: "http://localhost:8080/command" });
 					},
 				});
 			},
@@ -125,9 +125,9 @@ describe("AgentSession dynamic provider registration", () => {
 	it("removes providers that are no longer registered after reload", async () => {
 		let enabled = true;
 		const session = await createSession([
-			(arcmind) => {
+			(metis) => {
 				if (enabled) {
-					arcmind.registerProvider("anthropic", { baseUrl: "http://localhost:8080/temporary" });
+					metis.registerProvider("anthropic", { baseUrl: "http://localhost:8080/temporary" });
 				}
 			},
 		]);

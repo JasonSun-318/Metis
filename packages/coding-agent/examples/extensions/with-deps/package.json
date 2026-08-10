@@ -1,14 +1,14 @@
 {
-  "name": "arcmind-extension-with-deps",
+  "name": "metis-extension-with-deps",
   "private": true,
-  "version": "0.80.6",
+  "version": "0.0.3",
   "type": "module",
   "scripts": {
     "clean": "echo 'nothing to clean'",
     "build": "echo 'nothing to build'",
     "check": "echo 'nothing to check'"
   },
-  "arcmind": {
+  "metis": {
     "extensions": [
       "./index.ts"
     ]

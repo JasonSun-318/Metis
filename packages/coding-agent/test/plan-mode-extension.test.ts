@@ -1,5 +1,5 @@
-import type { AgentMessage } from "@arcmind/agent-core";
-import type { AssistantMessage } from "@arcmind/ai";
+import type { AgentMessage } from "@metis/agent-core";
+import type { AssistantMessage } from "@metis/ai";
 import { describe, expect, it, vi } from "vitest";
 import planModeExtension from "../examples/extensions/plan-mode/index.ts";
 import type { ExtensionAPI, ExtensionContext } from "../src/core/extensions/index.ts";

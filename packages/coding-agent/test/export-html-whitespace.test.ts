@@ -1,4 +1,4 @@
-import type { Component } from "@arcmind/tui";
+import type { Component } from "@metis/tui";
 import { readFileSync } from "fs";
 import { describe, expect, it } from "vitest";
 import { ansiLinesToHtml } from "../src/core/export-html/ansi-to-html.ts";

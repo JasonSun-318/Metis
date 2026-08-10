@@ -46,7 +46,7 @@ describe("SessionInfo.modified", () => {
 	});
 
 	it("uses last user/assistant message timestamp instead of file mtime", async () => {
-		const filePath = join(tmpdir(), `arcmind-session-${Date.now()}-modified.jsonl`);
+		const filePath = join(tmpdir(), `metis-session-${Date.now()}-modified.jsonl`);
 		createSessionFile(filePath);
 
 		const before = await stat(filePath);

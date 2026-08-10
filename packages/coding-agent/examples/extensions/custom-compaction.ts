@@ -10,15 +10,15 @@
  * which can be cheaper/faster than the main conversation model.
  *
  * Usage:
- *   arcmind --extension examples/extensions/custom-compaction.ts
+ *   metis --extension examples/extensions/custom-compaction.ts
  */
 
-import { complete } from "@arcmind/ai/compat";
-import type { ExtensionAPI } from "@arcmind/coding-agent";
-import { convertToLlm, serializeConversation } from "@arcmind/coding-agent";
+import { complete } from "@metis/ai/compat";
+import type { ExtensionAPI } from "@metis/coding-agent";
+import { convertToLlm, serializeConversation } from "@metis/coding-agent";
 
-export default function (arcmind: ExtensionAPI) {
-	arcmind.on("session_before_compact", async (event, ctx) => {
+export default function (metis: ExtensionAPI) {
+	metis.on("session_before_compact", async (event, ctx) => {
 		ctx.ui.notify("Custom compaction extension triggered", "info");
 
 		const { preparation, branchEntries: _, signal } = event;

@@ -23,7 +23,7 @@ import type { ScheduleRun, ScheduleTask } from "../src/core/schedules/types.ts";
 const roots: string[] = [];
 
 function tempDir(): string {
-	const path = mkdtempSync(join(tmpdir(), "arcmind-schedules-"));
+	const path = mkdtempSync(join(tmpdir(), "metis-schedules-"));
 	roots.push(path);
 	return path;
 }

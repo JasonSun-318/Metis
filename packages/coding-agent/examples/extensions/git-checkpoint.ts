@@ -5,28 +5,28 @@
  * When forking, offers to restore code to that point in history.
  */
 
-import type { ExtensionAPI } from "@arcmind/coding-agent";
+import type { ExtensionAPI } from "@metis/coding-agent";
 
-export default function (arcmind: ExtensionAPI) {
+export default function (metis: ExtensionAPI) {
 	const checkpoints = new Map<string, string>();
 	let currentEntryId: string | undefined;
 
 	// Track the current entry ID when user messages are saved
-	arcmind.on("tool_result", async (_event, ctx) => {
+	metis.on("tool_result", async (_event, ctx) => {
 		const leaf = ctx.sessionManager.getLeafEntry();
 		if (leaf) currentEntryId = leaf.id;
 	});
 
-	arcmind.on("turn_start", async () => {
+	metis.on("turn_start", async () => {
 		// Create a git stash entry before LLM makes changes
-		const { stdout } = await arcmind.exec("git", ["stash", "create"]);
+		const { stdout } = await metis.exec("git", ["stash", "create"]);
 		const ref = stdout.trim();
 		if (ref && currentEntryId) {
 			checkpoints.set(currentEntryId, ref);
 		}
 	});
 
-	arcmind.on("session_before_fork", async (event, ctx) => {
+	metis.on("session_before_fork", async (event, ctx) => {
 		const ref = checkpoints.get(event.entryId);
 		if (!ref) return;
 
@@ -41,12 +41,12 @@ export default function (arcmind: ExtensionAPI) {
 		]);
 
 		if (choice?.startsWith("Yes")) {
-			await arcmind.exec("git", ["stash", "apply", ref]);
+			await metis.exec("git", ["stash", "apply", ref]);
 			ctx.ui.notify("Code restored to checkpoint", "info");
 		}
 	});
 
-	arcmind.on("agent_end", async () => {
+	metis.on("agent_end", async () => {
 		// Clear checkpoints after agent completes
 		checkpoints.clear();
 	});

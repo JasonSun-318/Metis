@@ -1,19 +1,19 @@
 /**
  * Commands Extension
  *
- * Demonstrates the arcmind.getCommands() API by providing a /commands command
+ * Demonstrates the metis.getCommands() API by providing a /commands command
  * that lists all available slash commands in the current session.
  *
  * Usage:
- * 1. Copy this file to ~/.arcmind/agent/extensions/ or your project's .arcmind/extensions/
+ * 1. Copy this file to ~/.metis/agent/extensions/ or your project's .metis/extensions/
  * 2. Use /commands to see available commands
  * 3. Use /commands extensions to filter by source
  */
 
-import type { ExtensionAPI, SlashCommandInfo } from "@arcmind/coding-agent";
+import type { ExtensionAPI, SlashCommandInfo } from "@metis/coding-agent";
 
-export default function commandsExtension(arcmind: ExtensionAPI) {
-	arcmind.registerCommand("commands", {
+export default function commandsExtension(metis: ExtensionAPI) {
+	metis.registerCommand("commands", {
 		description: "List available slash commands",
 		getArgumentCompletions: (prefix) => {
 			const sources = ["extension", "prompt", "skill"];
@@ -21,7 +21,7 @@ export default function commandsExtension(arcmind: ExtensionAPI) {
 			return filtered.length > 0 ? filtered.map((s) => ({ value: s, label: s })) : null;
 		},
 		handler: async (args, ctx) => {
-			const commands = arcmind.getCommands();
+			const commands = metis.getCommands();
 			const sourceFilter = args.trim() as "extension" | "prompt" | "skill" | "";
 
 			// Filter by source if specified

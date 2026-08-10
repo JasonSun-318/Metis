@@ -49,10 +49,10 @@ function nativeArch() {
 }
 
 function packagedExecutable() {
-	const root = join(desktopRoot, "out", `ArcMind-${process.platform}-${nativeArch()}`);
-	if (process.platform === "darwin") return join(root, "ArcMind.app", "Contents", "MacOS", "arcmind");
-	if (process.platform === "win32") return join(root, "arcmind.exe");
-	return join(root, "arcmind");
+	const root = join(desktopRoot, "out", `Metis-${process.platform}-${nativeArch()}`);
+	if (process.platform === "darwin") return join(root, "Metis.app", "Contents", "MacOS", "Metis");
+	if (process.platform === "win32") return join(root, "Metis.exe");
+	return join(root, "Metis");
 }
 
 function median(values) {
@@ -232,7 +232,7 @@ async function connect(port) {
 
 async function assistantTextLength(page, cwd) {
 	return page.evaluate(async (projectCwd) => {
-		const api = globalThis.arcMind;
+		const api = globalThis.metis;
 		const listed = await api.listSessions({ limit: 200 });
 		const session = listed.sessions.find((candidate) => candidate.cwd === projectCwd);
 		if (!session) return -1;
@@ -246,7 +246,7 @@ async function assistantTextLength(page, cwd) {
 }
 
 async function oneRun(executable, run) {
-	const root = mkdtempSync(join(tmpdir(), `arcmind-desktop-profile-${run}-`));
+	const root = mkdtempSync(join(tmpdir(), `metis-desktop-profile-${run}-`));
 	const agentDir = join(root, "agent");
 	const projectDir = join(root, "project-1");
 	const otherProjects = [join(root, "project-2"), join(root, "project-3")];
@@ -313,7 +313,7 @@ async function oneRun(executable, run) {
 		cwd: projectDir,
 		env: {
 			...process.env,
-			ARCMIND_CODING_AGENT_DIR: agentDir,
+			METIS_CODING_AGENT_DIR: agentDir,
 			HTTP_PROXY: "",
 			HTTPS_PROXY: "",
 			NO_PROXY: "127.0.0.1,localhost",
@@ -335,7 +335,7 @@ async function oneRun(executable, run) {
 		browser = connected.browser;
 		const page = connected.page;
 		await waitFor(
-			() => page.evaluate(() => globalThis.arcMind.getServerState()),
+			() => page.evaluate(() => globalThis.metis.getServerState()),
 			(value) => value.state === "ready",
 			"App Server ready",
 		);
@@ -346,8 +346,8 @@ async function oneRun(executable, run) {
 
 		const zeroSessionRss = await medianRss(initialUtilityPid);
 		const firstSessionId = await page.evaluate(async (cwd) => {
-			const created = await globalThis.arcMind.createSession({ requestId: crypto.randomUUID(), mode: "chat", cwd });
-			localStorage.setItem("arcmind.activeSessionId.chat", created.session.sessionId);
+			const created = await globalThis.metis.createSession({ requestId: crypto.randomUUID(), mode: "chat", cwd });
+			localStorage.setItem("metis.activeSessionId.chat", created.session.sessionId);
 			return created.session.sessionId;
 		}, projectCwd);
 		await page.reload({ waitUntil: "domcontentloaded" });
@@ -355,18 +355,18 @@ async function oneRun(executable, run) {
 		const oneSessionRss = await medianRss(initialUtilityPid);
 		await page.evaluate(async (paths) => {
 			for (const cwd of paths) {
-				const created = await globalThis.arcMind.createSession({ requestId: crypto.randomUUID(), mode: "chat", cwd });
-				await globalThis.arcMind.openSession({ sessionId: created.session.sessionId });
+				const created = await globalThis.metis.createSession({ requestId: crypto.randomUUID(), mode: "chat", cwd });
+				await globalThis.metis.openSession({ sessionId: created.session.sessionId });
 			}
 		}, otherProjectCwds);
 		const threeSessionRss = await medianRss(initialUtilityPid);
-		await page.evaluate((sessionId) => localStorage.setItem("arcmind.activeSessionId.chat", sessionId), firstSessionId);
+		await page.evaluate((sessionId) => localStorage.setItem("metis.activeSessionId.chat", sessionId), firstSessionId);
 		await page.reload({ waitUntil: "domcontentloaded" });
 		await waitFor(() => page.locator(".workspace-header h1").textContent(), (value) => value === projectCwd, "restore first session");
 
 		const turnAckMs = await page.evaluate(async (sessionId) => {
 			const before = performance.now();
-			await globalThis.arcMind.startTurn({ sessionId, requestId: crypto.randomUUID(), text: "profile first delta" });
+			await globalThis.metis.startTurn({ sessionId, requestId: crypto.randomUUID(), text: "profile first delta" });
 			return performance.now() - before;
 		}, firstSessionId);
 		await started[0].promise;
@@ -386,7 +386,7 @@ async function oneRun(executable, run) {
 		const firstVisibleDeltaMs = performance.now() - firstReleaseAt;
 		await waitFor(
 			async () => {
-				const sessions = await page.evaluate(() => globalThis.arcMind.listSessions({ limit: 200 }));
+				const sessions = await page.evaluate(() => globalThis.metis.listSessions({ limit: 200 }));
 				return sessions.sessions.find((session) => session.sessionId === firstSessionId)?.state;
 			},
 			(state) => state === "idle",
@@ -394,7 +394,7 @@ async function oneRun(executable, run) {
 		);
 
 		await page.evaluate(async (sessionId) => {
-			await globalThis.arcMind.startTurn({ sessionId, requestId: crypto.randomUUID(), text: "profile 10000 deltas" });
+			await globalThis.metis.startTurn({ sessionId, requestId: crypto.randomUUID(), text: "profile 10000 deltas" });
 		}, firstSessionId);
 		await started[1].promise;
 		const streamReleaseAt = performance.now();
@@ -428,7 +428,7 @@ async function oneRun(executable, run) {
 		);
 		const crashDetectedMs = performance.now() - crashAt;
 		await waitFor(
-			() => page.evaluate(() => globalThis.arcMind.getServerState()),
+			() => page.evaluate(() => globalThis.metis.getServerState()),
 			(value) => value.state === "ready",
 			"crash recovery ready",
 		);
@@ -436,7 +436,7 @@ async function oneRun(executable, run) {
 
 		const historyOpen = await page.evaluate(async (sessionId) => {
 			const before = performance.now();
-			const snapshot = await globalThis.arcMind.openSession({ sessionId });
+			const snapshot = await globalThis.metis.openSession({ sessionId });
 			return {
 				elapsedMs: performance.now() - before,
 				initialItems: snapshot.recentItems.length,
@@ -445,11 +445,11 @@ async function oneRun(executable, run) {
 		}, HISTORY_SESSION_ID);
 		const olderPage = await page.evaluate(async ({ sessionId, beforeItemId }) => {
 			const before = performance.now();
-			const page = await globalThis.arcMind.readItems({ sessionId, beforeItemId, limit: 200 });
+			const page = await globalThis.metis.readItems({ sessionId, beforeItemId, limit: 200 });
 			return { elapsedMs: performance.now() - before, items: page.items.length };
 		}, { sessionId: HISTORY_SESSION_ID, beforeItemId: historyOpen.nextBeforeItemId });
 
-		await page.evaluate((sessionId) => localStorage.setItem("arcmind.activeSessionId.chat", sessionId), HISTORY_SESSION_ID);
+		await page.evaluate((sessionId) => localStorage.setItem("metis.activeSessionId.chat", sessionId), HISTORY_SESSION_ID);
 		await page.reload({ waitUntil: "domcontentloaded" });
 		await waitFor(() => page.locator(".workspace-header h1").textContent(), (value) => value === "10,000 item profile", "history UI open");
 		const pagingAt = performance.now();

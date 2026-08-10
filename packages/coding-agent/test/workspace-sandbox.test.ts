@@ -4,10 +4,10 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { createWorkspaceSandbox, WorkspaceSandboxError } from "../src/core/workspace-sandbox.ts";
 
-describe.runIf(process.env.ARCMIND_TEST_OS_SANDBOX === "1")("workspace sandbox", () => {
+describe.runIf(process.env.METIS_TEST_OS_SANDBOX === "1")("workspace sandbox", () => {
 	const roots: string[] = [];
 	const temporaryDirectory = () => {
-		const directory = mkdtempSync(join(tmpdir(), "arcmind-workspace-sandbox-test-"));
+		const directory = mkdtempSync(join(tmpdir(), "metis-workspace-sandbox-test-"));
 		roots.push(directory);
 		return directory;
 	};

@@ -3,12 +3,12 @@
 	"compilerOptions": {
 		"outDir": "./dist",
 		"paths": {
-			"@arcmind/agent-core": ["../agent/dist/index.d.ts"],
-			"@arcmind/agent-core/*": ["../agent/dist/*.d.ts"],
-			"@arcmind/ai": ["../ai/dist/index.d.ts"],
-			"@arcmind/ai/*": ["../ai/dist/*.d.ts", "../ai/dist/providers/*.d.ts"],
-			"@arcmind/tui": ["../tui/dist/index.d.ts"],
-			"@arcmind/tui/*": ["../tui/dist/*.d.ts", "../tui/dist/components/*.d.ts"]
+			"@metis/agent-core": ["../agent/dist/index.d.ts"],
+			"@metis/agent-core/*": ["../agent/dist/*.d.ts"],
+			"@metis/ai": ["../ai/dist/index.d.ts"],
+			"@metis/ai/*": ["../ai/dist/*.d.ts", "../ai/dist/providers/*.d.ts"],
+			"@metis/tui": ["../tui/dist/index.d.ts"],
+			"@metis/tui/*": ["../tui/dist/*.d.ts", "../tui/dist/components/*.d.ts"]
 		},
 		"rootDir": "./src"
 	},

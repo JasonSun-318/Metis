@@ -1,6 +1,6 @@
 # Termux (Android) Setup
 
-ArcMind runs on Android via [Termux](https://termux.dev/), a terminal emulator and Linux environment for Android.
+Metis runs on Android via [Termux](https://termux.dev/), a terminal emulator and Linux environment for Android.
 
 ## Prerequisites
 
@@ -16,14 +16,14 @@ pkg update && pkg upgrade
 # Install dependencies
 pkg install nodejs termux-api git
 
-# Install arcmind
-npm install -g --ignore-scripts @arcmind/coding-agent
+# Install metis
+npm install -g --ignore-scripts @metis/coding-agent
 
 # Create config directory
-mkdir -p ~/.arcmind/agent
+mkdir -p ~/.metis/agent
 
-# Run arcmind
-arcmind
+# Run metis
+metis
 ```
 
 ## Clipboard Support
@@ -34,7 +34,7 @@ Image clipboard is not supported on Termux (the `ctrl+v` image paste feature wil
 
 ## Example AGENTS.md for Termux
 
-Create `~/.arcmind/agent/AGENTS.md` to help the agent understand the Termux environment:
+Create `~/.metis/agent/AGENTS.md` to help the agent understand the Termux environment:
 
 ````markdown
 # Agent Environment: Termux on Android

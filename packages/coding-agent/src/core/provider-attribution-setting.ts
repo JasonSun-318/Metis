@@ -1,3 +1,4 @@
+import { getMetisEnv } from "../config.ts";
 import type { SettingsManager } from "./settings-manager.ts";
 
 function isTruthyEnvFlag(value: string | undefined): boolean {
@@ -7,7 +8,7 @@ function isTruthyEnvFlag(value: string | undefined): boolean {
 
 export function isProviderAttributionEnabled(
 	settingsManager: SettingsManager,
-	envValue: string | undefined = process.env.ARCMIND_PROVIDER_ATTRIBUTION,
+	envValue: string | undefined = getMetisEnv("PROVIDER_ATTRIBUTION"),
 ): boolean {
 	return envValue !== undefined ? isTruthyEnvFlag(envValue) : settingsManager.getEnableProviderAttribution();
 }

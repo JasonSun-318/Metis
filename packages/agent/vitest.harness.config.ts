@@ -21,8 +21,6 @@ export default defineConfig({
 	},
 	resolve: {
 		alias: [
-			{ find: /^@arcmind\/arcmind-ai$/, replacement: aiSrcIndex },
-			{ find: /^@arcmind\/arcmind-ai\/compat$/, replacement: aiSrcCompat },
 		],
 	},
 });

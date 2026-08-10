@@ -1,5 +1,5 @@
-import type { AgentTool } from "@arcmind/agent-core";
-import { Container, Text } from "@arcmind/tui";
+import type { AgentTool } from "@metis/agent-core";
+import { Container, Text } from "@metis/tui";
 import { mkdir as fsMkdir, writeFile as fsWriteFile } from "fs/promises";
 import { dirname } from "path";
 import { type Static, Type } from "typebox";

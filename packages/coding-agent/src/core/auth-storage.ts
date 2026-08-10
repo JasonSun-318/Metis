@@ -2,7 +2,7 @@
  * Credential storage for API keys and OAuth tokens.
  * Handles loading, saving, and refreshing credentials from auth.json.
  *
- * Uses file locking to prevent race conditions when multiple arcmind instances
+ * Uses file locking to prevent race conditions when multiple metis instances
  * try to refresh tokens simultaneously.
  */
 
@@ -13,8 +13,8 @@ import {
 	type OAuthLoginCallbacks,
 	type OAuthProviderId,
 	type OAuthProviderInterface,
-} from "@arcmind/ai/compat";
-import { getOAuthProviders as getCompatibilityOAuthProviders } from "@arcmind/ai/oauth";
+} from "@metis/ai/compat";
+import { getOAuthProviders as getCompatibilityOAuthProviders } from "@metis/ai/oauth";
 import { existsSync } from "fs";
 import { dirname, join } from "path";
 import lockfile from "proper-lockfile";
@@ -466,7 +466,7 @@ export class AuthStorage {
 
 	/**
 	 * Refresh OAuth token with backend locking to prevent race conditions.
-	 * Multiple arcmind instances may try to refresh simultaneously when tokens expire.
+	 * Multiple metis instances may try to refresh simultaneously when tokens expire.
 	 */
 	private async refreshOAuthTokenWithLock(
 		providerId: OAuthProviderId,

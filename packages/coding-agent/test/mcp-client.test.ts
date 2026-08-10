@@ -61,7 +61,7 @@ describe("McpServerClient", () => {
 
 		expect(client.snapshot()).toMatchObject({
 			serverName: "docs",
-			serverInfo: { name: "arcmind-mcp-test", version: "1.0.0" },
+			serverInfo: { name: "metis-mcp-test", version: "1.0.0" },
 			instructions: "Use docs before guessing.",
 			tools: [{ name: "search_docs" }, { name: "read_docs" }],
 			resources: [{ uri: "docs://guide" }],

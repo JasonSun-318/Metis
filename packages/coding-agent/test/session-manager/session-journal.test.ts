@@ -23,7 +23,7 @@ describe("session journal", () => {
 	let path: string;
 
 	beforeEach(() => {
-		directory = mkdtempSync(join(tmpdir(), "arcmind-session-journal-"));
+		directory = mkdtempSync(join(tmpdir(), "metis-session-journal-"));
 		path = join(directory, "session.jsonl");
 	});
 

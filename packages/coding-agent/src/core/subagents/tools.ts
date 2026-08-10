@@ -1,10 +1,10 @@
-import type { ThinkingLevel } from "@arcmind/agent-core";
-import { Text } from "@arcmind/tui";
+import type { ThinkingLevel } from "@metis/agent-core";
+import { Text } from "@metis/tui";
 import { Type } from "typebox";
 import { keyHint } from "../../modes/interactive/components/keybinding-hints.ts";
 import type { AgentSession } from "../agent-session.ts";
 import { defineTool, type ToolDefinition } from "../extensions/types.ts";
-import type { SubagentManager } from "./manager.ts";
+import type { InspectSubagentsResult, SubagentManager } from "./manager.ts";
 import { type ActivateSubagentsResult, SUBAGENT_ACTIVATION_TOOL_NAME } from "./types.ts";
 
 const REAL_THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
@@ -15,7 +15,8 @@ const Spawn = Type.Object(
 		name: Type.String({
 			minLength: 1,
 			maxLength: 128,
-			description: "Unique short name for this child in your session.",
+			description:
+				"Unique human-readable 3-5 word session title for this child; describe its responsibility, not its first instruction.",
 		}),
 		task: Type.String({
 			minLength: 1,
@@ -134,9 +135,9 @@ const COMPACT_AGENT_LIMIT = 5;
 const COMPACT_TEXT_LINES = 10;
 const COMPACT_TEXT_CHARS = 2_000;
 
-function result(value: unknown, isError = false) {
+function result(value: unknown, isError = false, content = JSON.stringify(value, null, 2)) {
 	return {
-		content: [{ type: "text" as const, text: JSON.stringify(value, null, 2) }],
+		content: [{ type: "text" as const, text: content }],
 		details: value,
 		...(isError ? { isError: true } : {}),
 	};
@@ -156,6 +157,44 @@ function agentSummary(value: unknown): string | undefined {
 	const status = typeof agent.status === "string" ? agent.status : undefined;
 	const label = name && agentId ? `${name} (${agentId})` : (name ?? agentId ?? "Agent");
 	return status ? `${label} · ${status}` : label;
+}
+
+function textBlocks(content: unknown): string[] {
+	if (typeof content === "string") return content ? [content] : [];
+	if (!Array.isArray(content)) return [];
+	return content.flatMap((block) => {
+		const value = record(block);
+		return value?.type === "text" && typeof value.text === "string" && value.text ? [value.text] : [];
+	});
+}
+
+function transcriptLines(entry: unknown): string[] {
+	const value = record(entry);
+	if (value?.type === "custom_message") return textBlocks(value.content).map((text) => `[user] ${text}`);
+	if (value?.type !== "message") return [];
+	const message = record(value.message);
+	if (message?.role === "user") return textBlocks(message.content).map((text) => `[user] ${text}`);
+	if (message?.role !== "assistant" || !Array.isArray(message.content)) return [];
+	return message.content.flatMap((block) => {
+		const content = record(block);
+		if (content?.type === "text" && typeof content.text === "string" && content.text) {
+			return [`[assistant] ${content.text}`];
+		}
+		if (content?.type === "toolCall" && typeof content.name === "string") {
+			return [`[assistant] (called ${content.name})`];
+		}
+		return [];
+	});
+}
+
+function inspectText(inspected: InspectSubagentsResult): string {
+	if (inspected.agents.length === 0) return "No subagent sessions.";
+	const sessions = inspected.agents.flatMap((agent) => [
+		`Session ${JSON.stringify(agent.name)}: ${agent.status}`,
+		`Agent ID: ${agent.agentId}`,
+	]);
+	const transcript = inspected.journal?.flatMap(transcriptLines) ?? [];
+	return transcript.length > 0 ? [...sessions, "", ...transcript].join("\n") : sessions.join("\n");
 }
 
 function compactResult(value: unknown): string {
@@ -281,7 +320,8 @@ export function createSubagentTools(host: SubagentToolHost): ToolDefinition[] {
 			parameters: Inspect,
 			renderResult: renderSubagentResult,
 			async execute(_id, params) {
-				return result(await manager().inspect(params));
+				const inspected = await manager().inspect(params);
+				return result(inspected, false, inspectText(inspected));
 			},
 		}),
 		defineTool({

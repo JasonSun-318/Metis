@@ -3,7 +3,7 @@ import { constants as fsConstants, lstatSync, type Stats } from "node:fs";
 import { type FileHandle, open } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { StringDecoder } from "node:string_decoder";
-import type { ImageContent, TextContent } from "@arcmind/ai";
+import type { ImageContent, TextContent } from "@metis/ai";
 import { ensureDirectoryDurablySync } from "./durable-file.ts";
 
 export const LARGE_TOOL_OUTPUT_MAX_CHARS = 50_000;

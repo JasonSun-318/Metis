@@ -3,7 +3,14 @@ import { homedir, tmpdir } from "os";
 import { join, resolve } from "path";
 import { describe, expect, it } from "vitest";
 import type { ResourceDiagnostic } from "../src/core/diagnostics.ts";
-import { formatSkillsForPrompt, loadSkills, loadSkillsFromDir, type Skill } from "../src/core/skills.ts";
+import {
+	formatSkillsForPrompt,
+	isSkillUsageCustomType,
+	loadSkills,
+	loadSkillsFromDir,
+	SKILL_USAGE_CUSTOM_TYPE,
+	type Skill,
+} from "../src/core/skills.ts";
 import { createSyntheticSourceInfo } from "../src/core/source-info.ts";
 
 const fixturesDir = resolve(__dirname, "fixtures/skills");
@@ -28,9 +35,16 @@ function createTestSkill(options: {
 }
 
 describe("skills", () => {
+	it("accepts only the Metis skill usage identifier", () => {
+		expect(SKILL_USAGE_CUSTOM_TYPE).toBe("metis.skill_usage.v1");
+		expect(isSkillUsageCustomType(SKILL_USAGE_CUSTOM_TYPE)).toBe(true);
+		expect(isSkillUsageCustomType("arcmind.skill_usage.v1")).toBe(false);
+		expect(isSkillUsageCustomType("other")).toBe(false);
+	});
+
 	describe("loadSkillsFromDir", () => {
 		it("keeps a missing optional directory silent", () => {
-			const root = mkdtempSync(join(tmpdir(), "arcmind-skills-missing-"));
+			const root = mkdtempSync(join(tmpdir(), "metis-skills-missing-"));
 			try {
 				expect(loadSkillsFromDir({ dir: join(root, "missing"), source: "test" })).toEqual({
 					skills: [],
@@ -42,7 +56,7 @@ describe("skills", () => {
 		});
 
 		it("reports an existing path that cannot be enumerated", () => {
-			const root = mkdtempSync(join(tmpdir(), "arcmind-skills-read-"));
+			const root = mkdtempSync(join(tmpdir(), "metis-skills-read-"));
 			try {
 				const filePath = join(root, "not-a-directory");
 				writeFileSync(filePath, "not a directory");
@@ -407,11 +421,11 @@ describe("skills", () => {
 		});
 
 		it("should expand ~ in skillPaths", () => {
-			const homeSkillsDir = join(homedir(), ".arcmind/agent/skills");
+			const homeSkillsDir = join(homedir(), ".metis/agent/skills");
 			const { skills: withTilde } = loadSkills({
 				agentDir: emptyAgentDir,
 				cwd: emptyCwd,
-				skillPaths: ["~/.arcmind/agent/skills"],
+				skillPaths: ["~/.metis/agent/skills"],
 				includeDefaults: true,
 			});
 			const { skills: withoutTilde } = loadSkills({

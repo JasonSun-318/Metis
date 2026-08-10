@@ -142,7 +142,7 @@ export class McpServerClient {
 
 	private createClient(): Client {
 		return new Client(
-			{ name: "arcmind", version: VERSION },
+			{ name: "metis", version: VERSION },
 			{
 				capabilities: {},
 				listChanged: {

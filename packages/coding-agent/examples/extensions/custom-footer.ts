@@ -8,14 +8,14 @@
  * Token stats come from ctx.sessionManager/ctx.model (already accessible).
  */
 
-import type { AssistantMessage } from "@arcmind/ai";
-import type { ExtensionAPI } from "@arcmind/coding-agent";
-import { truncateToWidth, visibleWidth } from "@arcmind/tui";
+import type { AssistantMessage } from "@metis/ai";
+import type { ExtensionAPI } from "@metis/coding-agent";
+import { truncateToWidth, visibleWidth } from "@metis/tui";
 
-export default function (arcmind: ExtensionAPI) {
+export default function (metis: ExtensionAPI) {
 	let enabled = false;
 
-	arcmind.registerCommand("footer", {
+	metis.registerCommand("footer", {
 		description: "Toggle custom footer",
 		handler: async (_args, ctx) => {
 			enabled = !enabled;

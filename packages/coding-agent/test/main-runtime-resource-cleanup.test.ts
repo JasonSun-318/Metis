@@ -38,10 +38,10 @@ describe("main runtime resource ownership", () => {
 	let previousOffline: string | undefined;
 
 	beforeEach(() => {
-		agentDir = join(tmpdir(), `arcmind-main-resource-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+		agentDir = join(tmpdir(), `metis-main-resource-${Date.now()}-${Math.random().toString(36).slice(2)}`);
 		mkdirSync(agentDir, { recursive: true });
 		previousAgentDir = process.env[ENV_AGENT_DIR];
-		previousOffline = process.env.ARCMIND_OFFLINE;
+		previousOffline = process.env.METIS_OFFLINE;
 		process.env[ENV_AGENT_DIR] = agentDir;
 		state.dispose = undefined;
 		state.failSessionCreation = true;
@@ -52,8 +52,8 @@ describe("main runtime resource ownership", () => {
 		restoreStdout();
 		if (previousAgentDir === undefined) delete process.env[ENV_AGENT_DIR];
 		else process.env[ENV_AGENT_DIR] = previousAgentDir;
-		if (previousOffline === undefined) delete process.env.ARCMIND_OFFLINE;
-		else process.env.ARCMIND_OFFLINE = previousOffline;
+		if (previousOffline === undefined) delete process.env.METIS_OFFLINE;
+		else process.env.METIS_OFFLINE = previousOffline;
 		rmSync(agentDir, { recursive: true, force: true });
 	});
 

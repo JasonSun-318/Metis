@@ -1,7 +1,7 @@
 import * as os from "node:os";
 import { pathToFileURL } from "node:url";
-import type { ImageContent, TextContent } from "@arcmind/ai";
-import { getCapabilities, getImageDimensions, hyperlink, imageFallback } from "@arcmind/tui";
+import type { ImageContent, TextContent } from "@metis/ai";
+import { getCapabilities, getImageDimensions, hyperlink, imageFallback } from "@metis/tui";
 import type { Theme } from "../../modes/interactive/theme/theme.ts";
 import { stripAnsi } from "../../utils/ansi.ts";
 import { resolvePath } from "../../utils/paths.ts";

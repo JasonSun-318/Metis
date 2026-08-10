@@ -9,7 +9,7 @@ import {
 	Text,
 	truncateToWidth,
 	visibleWidth,
-} from "@arcmind/tui";
+} from "@metis/tui";
 import { KeybindingsManager } from "../../../core/keybindings.ts";
 import {
 	type DeleteSessionResult,
@@ -641,7 +641,7 @@ class SessionList implements Component, Focusable {
 type SessionsLoader = (onProgress?: SessionListProgress) => Promise<SessionInfo[]>;
 
 /**
- * Delete a session and its proven ArcMind-owned assets.
+ * Delete a session and its proven Metis-owned assets.
  */
 export async function deleteSessionFile(sessionPath: string, agentDir?: string): Promise<DeleteSessionResult> {
 	return SessionManager.deleteSession(sessionPath, { agentDir });

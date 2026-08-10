@@ -4,10 +4,10 @@
  * Configure API key resolution via AuthStorage and ModelRegistry.
  */
 
-import { AuthStorage, createAgentSession, ModelRegistry, SessionManager } from "@arcmind/coding-agent";
+import { AuthStorage, createAgentSession, ModelRegistry, SessionManager } from "@metis/coding-agent";
 
-// Default: AuthStorage uses ~/.arcmind/agent/auth.json
-// ModelRegistry loads built-in + custom models from ~/.arcmind/agent/models.json
+// Default: AuthStorage uses ~/.metis/agent/auth.json
+// ModelRegistry loads built-in + custom models from ~/.metis/agent/models.json
 const authStorage = AuthStorage.create();
 const modelRegistry = ModelRegistry.create(authStorage);
 

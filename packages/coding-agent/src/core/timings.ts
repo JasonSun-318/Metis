@@ -1,9 +1,11 @@
 /**
  * Central timing instrumentation for startup profiling.
- * Enable with ARCMIND_TIMING=1 environment variable.
+ * Enable with METIS_TIMING=1 environment variable.
  */
 
-const ENABLED = process.env.ARCMIND_TIMING === "1";
+import { getMetisEnv } from "../config.ts";
+
+const ENABLED = getMetisEnv("TIMING") === "1";
 interface TimingNamespace {
 	timings: Array<{ label: string; ms: number }>;
 	lastTime: number;

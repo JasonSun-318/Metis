@@ -1,4 +1,4 @@
-import type { AssistantMessage } from "@arcmind/ai";
+import type { AssistantMessage } from "@metis/ai";
 import type { SessionEntry } from "./session-manager.ts";
 
 /**

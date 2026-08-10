@@ -1,4 +1,4 @@
-import type { AssistantMessage, ImageContent, Model, Models, TextContent, Usage } from "@arcmind/ai";
+import type { AssistantMessage, ImageContent, Model, Models, TextContent, Usage } from "@metis/ai";
 import type { AgentMessage, ThinkingLevel } from "../../types.ts";
 import {
 	convertToLlm,

@@ -1,4 +1,4 @@
-import { Container, type SelectItem, SelectList, type SelectListLayoutOptions } from "@arcmind/tui";
+import { Container, type SelectItem, SelectList, type SelectListLayoutOptions } from "@metis/tui";
 import type { ThinkingSelection } from "../../../core/thinking-selection.ts";
 import { getSelectListTheme } from "../theme/theme.ts";
 import { DynamicBorder } from "./dynamic-border.ts";

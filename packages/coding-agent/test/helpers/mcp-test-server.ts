@@ -73,7 +73,7 @@ export async function createMcpTestServer(options: McpTestServerOptions = {}): P
 	let transport: StreamableHTTPServerTransport;
 	const createProtocolServer = () => {
 		const next = new Server(
-			{ name: "arcmind-mcp-test", version: "1.0.0" },
+			{ name: "metis-mcp-test", version: "1.0.0" },
 			{
 				capabilities: {
 					tools: { listChanged: true },

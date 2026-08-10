@@ -13,7 +13,7 @@ afterEach(() => {
 });
 
 function tempRoot(): string {
-	const root = mkdtempSync(join(tmpdir(), "arcmind-subagent-format-"));
+	const root = mkdtempSync(join(tmpdir(), "metis-subagent-format-"));
 	roots.push(root);
 	return root;
 }

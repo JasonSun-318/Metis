@@ -11,7 +11,7 @@ import type {
 	TextContent,
 	Tool,
 	ToolResultMessage,
-} from "@arcmind/ai";
+} from "@metis/ai";
 import type { Static, TSchema } from "typebox";
 
 /**
@@ -363,7 +363,7 @@ export interface AgentLoopConfig extends SimpleStreamOptions {
 /**
  * Thinking/reasoning level for models that support it.
  * Note: "xhigh" and "max" are only supported by selected model families. Use model
- * thinking-level metadata from @arcmind/ai to detect support for a concrete model.
+ * thinking-level metadata from @metis/ai to detect support for a concrete model.
  */
 export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 
@@ -373,7 +373,7 @@ export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhi
  *
  * @example
  * ```typescript
- * declare module "@arcmind/agent-core" {
+ * declare module "@metis/agent-core" {
  *   interface CustomAgentMessages {
  *     artifact: ArtifactMessage;
  *     notification: NotificationMessage;

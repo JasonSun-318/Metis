@@ -5,18 +5,18 @@
  * change agent behavior based on extension state.
  *
  * Usage:
- * 1. Copy this file to ~/.arcmind/agent/extensions/ or your project's .arcmind/extensions/
+ * 1. Copy this file to ~/.metis/agent/extensions/ or your project's .metis/extensions/
  * 2. Use /pirate to toggle pirate mode
  * 3. When enabled, the agent will respond like a pirate
  */
 
-import type { ExtensionAPI } from "@arcmind/coding-agent";
+import type { ExtensionAPI } from "@metis/coding-agent";
 
-export default function pirateExtension(arcmind: ExtensionAPI) {
+export default function pirateExtension(metis: ExtensionAPI) {
 	let pirateMode = false;
 
 	// Register /pirate command to toggle pirate mode
-	arcmind.registerCommand("pirate", {
+	metis.registerCommand("pirate", {
 		description: "Toggle pirate mode (agent speaks like a pirate)",
 		handler: async (_args, ctx) => {
 			pirateMode = !pirateMode;
@@ -25,7 +25,7 @@ export default function pirateExtension(arcmind: ExtensionAPI) {
 	});
 
 	// Append to system prompt when pirate mode is enabled
-	arcmind.on("before_agent_start", async (event) => {
+	metis.on("before_agent_start", async (event) => {
 		if (pirateMode) {
 			return {
 				systemPrompt:

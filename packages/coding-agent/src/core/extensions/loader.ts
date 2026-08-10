@@ -7,11 +7,11 @@ import * as fs from "node:fs";
 import { createRequire } from "node:module";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-import * as _bundledArcMindAgentCore from "@arcmind/agent-core";
-import * as _bundledArcMindAiCompat from "@arcmind/ai/compat";
-import * as _bundledArcMindAiOauth from "@arcmind/ai/oauth";
-import type { KeyId } from "@arcmind/tui";
-import * as _bundledArcMindTui from "@arcmind/tui";
+import * as _bundledMetisAgentCore from "@metis/agent-core";
+import * as _bundledMetisAiCompat from "@metis/ai/compat";
+import * as _bundledMetisAiOauth from "@metis/ai/oauth";
+import type { KeyId } from "@metis/tui";
+import * as _bundledMetisTui from "@metis/tui";
 import { createJiti } from "jiti/static";
 // Static imports of packages that extensions may use.
 // These MUST be static so Bun bundles them into the compiled binary.
@@ -19,10 +19,10 @@ import { createJiti } from "jiti/static";
 import * as _bundledTypebox from "typebox";
 import * as _bundledTypeboxCompile from "typebox/compile";
 import * as _bundledTypeboxValue from "typebox/value";
-import { CONFIG_DIR_NAME, getAgentDir, isBunBinary } from "../../config.ts";
+import { getAgentDir, getProjectConfigDir, isBunBinary } from "../../config.ts";
 // NOTE: This import works because loader.ts exports are NOT re-exported from index.ts,
-// avoiding a circular dependency. Extensions can import from @arcmind/coding-agent.
-import * as _bundledArcMindCodingAgent from "../../index.ts";
+// avoiding a circular dependency. Extensions can import from @metis/coding-agent.
+import * as _bundledMetisCodingAgent from "../../index.ts";
 import { resolvePath } from "../../utils/paths.ts";
 import { createEventBus, type EventBus } from "../event-bus.ts";
 import type { ExecOptions } from "../exec.ts";
@@ -50,15 +50,15 @@ const VIRTUAL_MODULES: Record<string, unknown> = {
 	"@sinclair/typebox": _bundledTypebox,
 	"@sinclair/typebox/compile": _bundledTypeboxCompile,
 	"@sinclair/typebox/value": _bundledTypeboxValue,
-	"@arcmind/agent-core": _bundledArcMindAgentCore,
-	"@arcmind/tui": _bundledArcMindTui,
-	// Extensions resolve the arcmind-ai root to the compat entrypoint (a strict
+	"@metis/agent-core": _bundledMetisAgentCore,
+	"@metis/tui": _bundledMetisTui,
+	// Extensions resolve the metis-ai root to the compat entrypoint (a strict
 	// superset of the core entrypoint): existing extensions using the old
 	// global API keep working at runtime until compat is removed.
-	"@arcmind/ai": _bundledArcMindAiCompat,
-	"@arcmind/ai/compat": _bundledArcMindAiCompat,
-	"@arcmind/ai/oauth": _bundledArcMindAiOauth,
-	"@arcmind/coding-agent": _bundledArcMindCodingAgent,
+	"@metis/ai": _bundledMetisAiCompat,
+	"@metis/ai/compat": _bundledMetisAiCompat,
+	"@metis/ai/oauth": _bundledMetisAiOauth,
+	"@metis/coding-agent": _bundledMetisCodingAgent,
 };
 
 const require = createRequire(import.meta.url);
@@ -88,22 +88,22 @@ function getAliases(): Record<string, string> {
 		return fileURLToPath(import.meta.resolve(specifier));
 	};
 
-	const arcmindCodingAgentEntry = packageIndex;
-	const arcmindAgentCoreEntry = resolveWorkspaceOrImport("agent/dist/index.js", "@arcmind/agent-core");
-	const arcmindTuiEntry = resolveWorkspaceOrImport("tui/dist/index.js", "@arcmind/tui");
-	// Extensions resolve the arcmind-ai root to the compat entrypoint (a strict
+	const metisCodingAgentEntry = packageIndex;
+	const metisAgentCoreEntry = resolveWorkspaceOrImport("agent/dist/index.js", "@metis/agent-core");
+	const metisTuiEntry = resolveWorkspaceOrImport("tui/dist/index.js", "@metis/tui");
+	// Extensions resolve the metis-ai root to the compat entrypoint (a strict
 	// superset of the core entrypoint): existing extensions using the old
 	// global API keep working at runtime until compat is removed.
-	const arcmindAiCompatEntry = resolveWorkspaceOrImport("ai/dist/compat.js", "@arcmind/ai/compat");
-	const arcmindAiOauthEntry = resolveWorkspaceOrImport("ai/dist/oauth.js", "@arcmind/ai/oauth");
+	const metisAiCompatEntry = resolveWorkspaceOrImport("ai/dist/compat.js", "@metis/ai/compat");
+	const metisAiOauthEntry = resolveWorkspaceOrImport("ai/dist/oauth.js", "@metis/ai/oauth");
 
 	_aliases = {
-		"@arcmind/coding-agent": arcmindCodingAgentEntry,
-		"@arcmind/agent-core": arcmindAgentCoreEntry,
-		"@arcmind/tui": arcmindTuiEntry,
-		"@arcmind/ai": arcmindAiCompatEntry,
-		"@arcmind/ai/compat": arcmindAiCompatEntry,
-		"@arcmind/ai/oauth": arcmindAiOauthEntry,
+		"@metis/coding-agent": metisCodingAgentEntry,
+		"@metis/agent-core": metisAgentCoreEntry,
+		"@metis/tui": metisTuiEntry,
+		"@metis/ai": metisAiCompatEntry,
+		"@metis/ai/compat": metisAiCompatEntry,
+		"@metis/ai/oauth": metisAiOauthEntry,
 		typebox: typeboxEntry,
 		"typebox/compile": typeboxCompileEntry,
 		"typebox/value": typeboxValueEntry,
@@ -201,7 +201,7 @@ export function createExtensionRuntime(): ExtensionRuntime {
 		invalidate: (message) => {
 			state.staleMessage ??=
 				message ??
-				"This extension ctx is stale after session replacement or reload. Do not use a captured arcmind or command ctx after ctx.newSession(), ctx.fork(), ctx.switchSession(), or ctx.reload(). For newSession, fork, and switchSession, move post-replacement work into withSession and use the ctx passed to withSession. For reload, do not use the old ctx after await ctx.reload().";
+				"This extension ctx is stale after session replacement or reload. Do not use a captured metis or command ctx after ctx.newSession(), ctx.fork(), ctx.switchSession(), or ctx.reload(). For newSession, fork, and switchSession, move post-replacement work into withSession and use the ctx passed to withSession. For reload, do not use the old ctx after await ctx.reload().";
 		},
 		// Pre-bind: queue registrations so bindCore() can flush them once the
 		// model registry is available. bindCore() replaces both with direct calls.
@@ -541,20 +541,18 @@ export async function loadExtensionsCached(
 	return loadExtensionsInternal(paths, cwd, eventBus, runtime, true, extensionCache);
 }
 
-interface ArcMindManifest {
+interface MetisManifest {
 	extensions?: string[];
 	themes?: string[];
 	skills?: string[];
 	prompts?: string[];
 }
 
-function readArcMindManifest(packageJsonPath: string): ArcMindManifest | null {
+function readMetisManifest(packageJsonPath: string): MetisManifest | null {
 	try {
 		const content = fs.readFileSync(packageJsonPath, "utf-8");
-		const pkg = JSON.parse(content);
-		if (pkg.arcmind && typeof pkg.arcmind === "object") {
-			return pkg.arcmind as ArcMindManifest;
-		}
+		const pkg = JSON.parse(content) as { metis?: unknown };
+		if (pkg.metis && typeof pkg.metis === "object") return pkg.metis as MetisManifest;
 		return null;
 	} catch {
 		return null;
@@ -569,16 +567,16 @@ function isExtensionFile(name: string): boolean {
  * Resolve extension entry points from a directory.
  *
  * Checks for:
- * 1. package.json with "arcmind.extensions" field -> returns declared paths
+ * 1. package.json with a "metis.extensions" field -> returns declared paths
  * 2. index.ts or index.js -> returns the index file
  *
  * Returns resolved paths or null if no entry points found.
  */
 function resolveExtensionEntries(dir: string): string[] | null {
-	// Check for package.json with "arcmind" field first
+	// Check for package.json with the Metis manifest field first.
 	const packageJsonPath = path.join(dir, "package.json");
 	if (fs.existsSync(packageJsonPath)) {
-		const manifest = readArcMindManifest(packageJsonPath);
+		const manifest = readMetisManifest(packageJsonPath);
 		if (manifest?.extensions?.length) {
 			const entries: string[] = [];
 			for (const extPath of manifest.extensions) {
@@ -612,7 +610,7 @@ function resolveExtensionEntries(dir: string): string[] | null {
  * Discovery rules:
  * 1. Direct files: `extensions/*.ts` or `*.js` → load
  * 2. Subdirectory with index: `extensions/* /index.ts` or `index.js` → load
- * 3. Subdirectory with package.json: `extensions/* /package.json` with "arcmind" field → load what it declares
+ * 3. Subdirectory with package.json: `extensions/* /package.json` with a "metis" field → load what it declares
  *
  * No recursion beyond one level. Complex packages must use package.json manifest.
  */
@@ -674,8 +672,8 @@ export async function discoverAndLoadExtensions(
 		}
 	};
 
-	// 1. Project-local extensions: cwd/${CONFIG_DIR_NAME}/extensions/
-	const localExtDir = path.join(resolvedCwd, CONFIG_DIR_NAME, "extensions");
+	// 1. Project-local extensions: cwd/.metis/extensions/
+	const localExtDir = path.join(getProjectConfigDir(resolvedCwd), "extensions");
 	addPaths(discoverExtensionsInDir(localExtDir));
 
 	// 2. Global extensions: agentDir/extensions/
@@ -686,7 +684,7 @@ export async function discoverAndLoadExtensions(
 	for (const p of configuredPaths) {
 		const resolved = resolvePath(p, resolvedCwd, { normalizeUnicodeSpaces: true });
 		if (fs.existsSync(resolved) && fs.statSync(resolved).isDirectory()) {
-			// Check for package.json with arcmind manifest or index.ts
+			// Check for package.json with a Metis manifest, or index.ts.
 			const entries = resolveExtensionEntries(resolved);
 			if (entries) {
 				addPaths(entries);

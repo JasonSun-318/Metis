@@ -2,8 +2,8 @@
  * Model resolution, scoping, and initial selection
  */
 
-import type { ThinkingLevel } from "@arcmind/agent-core";
-import { type Api, type KnownProvider, type Model, modelsAreEqual } from "@arcmind/ai";
+import type { ThinkingLevel } from "@metis/agent-core";
+import { type Api, type KnownProvider, type Model, modelsAreEqual } from "@metis/ai";
 import chalk from "chalk";
 import { minimatch } from "minimatch";
 import { isValidThinkingLevel } from "../cli/args.ts";

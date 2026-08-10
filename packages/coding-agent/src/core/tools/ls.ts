@@ -1,6 +1,6 @@
 import { readdir as fsReaddir, stat as fsStat } from "node:fs/promises";
-import type { AgentTool } from "@arcmind/agent-core";
-import { Text } from "@arcmind/tui";
+import type { AgentTool } from "@metis/agent-core";
+import { Text } from "@metis/tui";
 import nodePath from "path";
 import { type Static, Type } from "typebox";
 import { keyHint } from "../../modes/interactive/components/keybinding-hints.ts";

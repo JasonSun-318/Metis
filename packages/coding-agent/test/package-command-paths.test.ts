@@ -17,7 +17,7 @@ describe("package commands", () => {
 	let packageDir: string;
 	let originalCwd: string;
 	let originalAgentDir: string | undefined;
-	let originalArcMindPackageDir: string | undefined;
+	let originalMetisPackageDir: string | undefined;
 	let originalPath: string | undefined;
 	let originalExitCode: typeof process.exitCode;
 	let originalExecPath: string;
@@ -45,7 +45,7 @@ describe("package commands", () => {
 	}
 
 	beforeEach(() => {
-		tempDir = join(tmpdir(), `arcmind-package-commands-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+		tempDir = join(tmpdir(), `metis-package-commands-${Date.now()}-${Math.random().toString(36).slice(2)}`);
 		agentDir = join(tempDir, "agent");
 		projectDir = join(tempDir, "project");
 		packageDir = join(tempDir, "local-package");
@@ -55,7 +55,7 @@ describe("package commands", () => {
 
 		originalCwd = process.cwd();
 		originalAgentDir = process.env[ENV_AGENT_DIR];
-		originalArcMindPackageDir = process.env.ARCMIND_PACKAGE_DIR;
+		originalMetisPackageDir = process.env.METIS_PACKAGE_DIR;
 		originalPath = process.env.PATH;
 		originalExitCode = process.exitCode;
 		originalExecPath = process.execPath;
@@ -82,10 +82,10 @@ describe("package commands", () => {
 		} else {
 			process.env[ENV_AGENT_DIR] = originalAgentDir;
 		}
-		if (originalArcMindPackageDir === undefined) {
-			delete process.env.ARCMIND_PACKAGE_DIR;
+		if (originalMetisPackageDir === undefined) {
+			delete process.env.METIS_PACKAGE_DIR;
 		} else {
-			process.env.ARCMIND_PACKAGE_DIR = originalArcMindPackageDir;
+			process.env.METIS_PACKAGE_DIR = originalMetisPackageDir;
 		}
 		if (originalPath === undefined) {
 			delete process.env.PATH;
@@ -124,8 +124,8 @@ describe("package commands", () => {
 	});
 
 	it("skips untrusted project package settings", async () => {
-		mkdirSync(join(projectDir, ".arcmind"), { recursive: true });
-		writeFileSync(join(projectDir, ".arcmind", "settings.json"), JSON.stringify({ packages: ["npm:@project/pkg"] }));
+		mkdirSync(join(projectDir, ".metis"), { recursive: true });
+		writeFileSync(join(projectDir, ".metis", "settings.json"), JSON.stringify({ packages: ["npm:@project/pkg"] }));
 		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 
 		try {
@@ -140,8 +140,8 @@ describe("package commands", () => {
 	});
 
 	it("uses remembered project trust for list", async () => {
-		mkdirSync(join(projectDir, ".arcmind"), { recursive: true });
-		writeFileSync(join(projectDir, ".arcmind", "settings.json"), JSON.stringify({ packages: ["npm:@project/pkg"] }));
+		mkdirSync(join(projectDir, ".metis"), { recursive: true });
+		writeFileSync(join(projectDir, ".metis", "settings.json"), JSON.stringify({ packages: ["npm:@project/pkg"] }));
 		new ProjectTrustStore(agentDir).set(projectDir, true);
 		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 
@@ -159,8 +159,8 @@ describe("package commands", () => {
 	});
 
 	it("overrides remembered trust for list with --no-approve", async () => {
-		mkdirSync(join(projectDir, ".arcmind"), { recursive: true });
-		writeFileSync(join(projectDir, ".arcmind", "settings.json"), JSON.stringify({ packages: ["npm:@project/pkg"] }));
+		mkdirSync(join(projectDir, ".metis"), { recursive: true });
+		writeFileSync(join(projectDir, ".metis", "settings.json"), JSON.stringify({ packages: ["npm:@project/pkg"] }));
 		new ProjectTrustStore(agentDir).set(projectDir, true);
 		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 
@@ -177,8 +177,8 @@ describe("package commands", () => {
 	});
 
 	it("approves project trust for list with --approve", async () => {
-		mkdirSync(join(projectDir, ".arcmind"), { recursive: true });
-		writeFileSync(join(projectDir, ".arcmind", "settings.json"), JSON.stringify({ packages: ["npm:@project/pkg"] }));
+		mkdirSync(join(projectDir, ".metis"), { recursive: true });
+		writeFileSync(join(projectDir, ".metis", "settings.json"), JSON.stringify({ packages: ["npm:@project/pkg"] }));
 		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 
 		try {
@@ -195,9 +195,9 @@ describe("package commands", () => {
 	});
 
 	it("uses default project trust for list", async () => {
-		mkdirSync(join(projectDir, ".arcmind"), { recursive: true });
+		mkdirSync(join(projectDir, ".metis"), { recursive: true });
 		writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ defaultProjectTrust: "always" }));
-		writeFileSync(join(projectDir, ".arcmind", "settings.json"), JSON.stringify({ packages: ["npm:@project/pkg"] }));
+		writeFileSync(join(projectDir, ".metis", "settings.json"), JSON.stringify({ packages: ["npm:@project/pkg"] }));
 		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 
 		try {
@@ -214,16 +214,16 @@ describe("package commands", () => {
 	});
 
 	it("uses project_trust extensions for package commands", async () => {
-		mkdirSync(join(projectDir, ".arcmind"), { recursive: true });
-		writeFileSync(join(projectDir, ".arcmind", "settings.json"), JSON.stringify({ packages: ["npm:@project/pkg"] }));
+		mkdirSync(join(projectDir, ".metis"), { recursive: true });
+		writeFileSync(join(projectDir, ".metis", "settings.json"), JSON.stringify({ packages: ["npm:@project/pkg"] }));
 		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 
 		try {
 			await expect(
 				main(["list"], {
 					extensionFactories: [
-						(arcmind) => {
-							arcmind.on("project_trust", () => ({ trusted: "yes" }));
+						(metis) => {
+							metis.on("project_trust", () => ({ trusted: "yes" }));
 						},
 					],
 				}),
@@ -240,7 +240,7 @@ describe("package commands", () => {
 	});
 
 	it("does not prompt or ask extensions for project trust during update", async () => {
-		mkdirSync(join(projectDir, ".arcmind"), { recursive: true });
+		mkdirSync(join(projectDir, ".metis"), { recursive: true });
 		writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ defaultProjectTrust: "always" }));
 		const fakeNpmPath = join(tempDir, "fake-project-npm.cjs");
 		const recordPath = join(tempDir, "project-update.json");
@@ -249,7 +249,7 @@ describe("package commands", () => {
 			`const fs=require("node:fs");fs.writeFileSync(${JSON.stringify(recordPath)},JSON.stringify(process.argv.slice(2)));`,
 		);
 		writeFileSync(
-			join(projectDir, ".arcmind", "settings.json"),
+			join(projectDir, ".metis", "settings.json"),
 			JSON.stringify({ packages: ["npm:fake-package"], npmCommand: [originalExecPath, fakeNpmPath] }),
 		);
 		let projectTrustCalled = false;
@@ -259,8 +259,8 @@ describe("package commands", () => {
 			await expect(
 				main(["update", "--extensions"], {
 					extensionFactories: [
-						(arcmind) => {
-							arcmind.on("project_trust", () => {
+						(metis) => {
+							metis.on("project_trust", () => {
 								projectTrustCalled = true;
 								return { trusted: "yes" };
 							});
@@ -278,7 +278,7 @@ describe("package commands", () => {
 	});
 
 	it("uses saved project trust during update", async () => {
-		mkdirSync(join(projectDir, ".arcmind"), { recursive: true });
+		mkdirSync(join(projectDir, ".metis"), { recursive: true });
 		const fakeNpmPath = join(tempDir, "fake-trusted-project-npm.cjs");
 		const recordPath = join(tempDir, "trusted-project-update.json");
 		writeFileSync(
@@ -286,7 +286,7 @@ describe("package commands", () => {
 			`const fs=require("node:fs");fs.writeFileSync(${JSON.stringify(recordPath)},JSON.stringify(process.argv.slice(2)));`,
 		);
 		writeFileSync(
-			join(projectDir, ".arcmind", "settings.json"),
+			join(projectDir, ".metis", "settings.json"),
 			JSON.stringify({ packages: ["npm:fake-package"], npmCommand: [originalExecPath, fakeNpmPath] }),
 		);
 		new ProjectTrustStore(agentDir).set(projectDir, true);
@@ -303,9 +303,9 @@ describe("package commands", () => {
 	});
 
 	it("lets trust.json override default project trust", async () => {
-		mkdirSync(join(projectDir, ".arcmind"), { recursive: true });
+		mkdirSync(join(projectDir, ".metis"), { recursive: true });
 		writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ defaultProjectTrust: "always" }));
-		writeFileSync(join(projectDir, ".arcmind", "settings.json"), JSON.stringify({ packages: ["npm:@project/pkg"] }));
+		writeFileSync(join(projectDir, ".metis", "settings.json"), JSON.stringify({ packages: ["npm:@project/pkg"] }));
 		new ProjectTrustStore(agentDir).set(projectDir, false);
 		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 
@@ -322,8 +322,8 @@ describe("package commands", () => {
 	});
 
 	it("blocks local package changes when project is untrusted", async () => {
-		mkdirSync(join(projectDir, ".arcmind"), { recursive: true });
-		writeFileSync(join(projectDir, ".arcmind", "settings.json"), "{}");
+		mkdirSync(join(projectDir, ".metis"), { recursive: true });
+		writeFileSync(join(projectDir, ".metis", "settings.json"), "{}");
 		const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
 		try {
@@ -340,11 +340,11 @@ describe("package commands", () => {
 	it("allows local package install to initialize fresh project settings", async () => {
 		await main(["install", "-l", packageDir]);
 
-		const settingsPath = join(projectDir, ".arcmind", "settings.json");
+		const settingsPath = join(projectDir, ".metis", "settings.json");
 		const settings = JSON.parse(readFileSync(settingsPath, "utf-8")) as { packages?: string[] };
 		expect(settings.packages?.length).toBe(1);
 		const stored = settings.packages?.[0] ?? "";
-		expect(realpathSync(join(projectDir, ".arcmind", stored))).toBe(realpathSync(packageDir));
+		expect(realpathSync(join(projectDir, ".metis", stored))).toBe(realpathSync(packageDir));
 		expect(process.exitCode).toBeUndefined();
 	});
 
@@ -357,7 +357,7 @@ describe("package commands", () => {
 
 			const stdout = logSpy.mock.calls.map(([message]) => String(message)).join("\n");
 			expect(stdout).toContain("Usage:");
-			expect(stdout).toContain("arcmind install <source> [-l]");
+			expect(stdout).toContain("metis install <source> [-l]");
 			expect(errorSpy).not.toHaveBeenCalled();
 			expect(process.exitCode).toBeUndefined();
 		} finally {
@@ -368,9 +368,9 @@ describe("package commands", () => {
 
 	it("cycles project package overrides in config local mode", async () => {
 		const storage = new InMemorySettingsStorage();
-		storage.withLock("global", () => JSON.stringify({ packages: ["npm:arcmind-tools"] }));
+		storage.withLock("global", () => JSON.stringify({ packages: ["npm:metis-tools"] }));
 		const settingsManager = SettingsManager.fromStorage(storage, { projectTrusted: true });
-		const resolvedPaths = extensionPaths(join(tempDir, "pkg"), "npm:arcmind-tools", "user", ["bar.ts"]);
+		const resolvedPaths = extensionPaths(join(tempDir, "pkg"), "npm:metis-tools", "user", ["bar.ts"]);
 		const selector = new ConfigSelectorComponent(
 			{ global: resolvedPaths, project: resolvedPaths },
 			settingsManager,
@@ -385,12 +385,12 @@ describe("package commands", () => {
 
 		selector.getResourceList().handleInput(" ");
 		expect(settingsManager.getProjectSettings().packages).toEqual([
-			{ source: "npm:arcmind-tools", autoload: false, extensions: ["-extensions/bar.ts"] },
+			{ source: "npm:metis-tools", autoload: false, extensions: ["-extensions/bar.ts"] },
 		]);
 
 		selector.getResourceList().handleInput(" ");
 		expect(settingsManager.getProjectSettings().packages).toEqual([
-			{ source: "npm:arcmind-tools", autoload: false, extensions: ["+extensions/bar.ts"] },
+			{ source: "npm:metis-tools", autoload: false, extensions: ["+extensions/bar.ts"] },
 		]);
 
 		selector.getResourceList().handleInput(" ");
@@ -405,7 +405,7 @@ describe("package commands", () => {
 
 			const stderr = errorSpy.mock.calls.map(([message]) => String(message)).join("\n");
 			expect(stderr).toContain('Unknown option --unknown for "install".');
-			expect(stderr).toContain('Use "arcmind --help" or "arcmind install <source> [-l] [--approve|--no-approve]".');
+			expect(stderr).toContain('Use "metis --help" or "metis install <source> [-l] [--approve|--no-approve]".');
 			expect(process.exitCode).toBe(1);
 		} finally {
 			errorSpy.mockRestore();
@@ -420,7 +420,7 @@ describe("package commands", () => {
 
 			const stderr = errorSpy.mock.calls.map(([message]) => String(message)).join("\n");
 			expect(stderr).toContain("Missing install source.");
-			expect(stderr).toContain("Usage: arcmind install <source> [-l]");
+			expect(stderr).toContain("Usage: metis install <source> [-l]");
 			expect(stderr).not.toContain("at ");
 			expect(process.exitCode).toBe(1);
 		} finally {
@@ -436,7 +436,7 @@ describe("package commands", () => {
 
 			expect(process.exitCode).toBe(1);
 			expect(errorSpy.mock.calls.map(([message]) => String(message)).join("\n")).toContain(
-				"Self-update is disabled. Pull updates from the ArcMind repository.",
+				"Self-update is disabled. Pull updates from the Metis repository.",
 			);
 		} finally {
 			errorSpy.mockRestore();
@@ -445,22 +445,22 @@ describe("package commands", () => {
 
 	it("suggests the configured source when update input omits the npm prefix", async () => {
 		const settingsPath = join(agentDir, "settings.json");
-		writeFileSync(settingsPath, JSON.stringify({ packages: ["npm:arcmind-formatter"] }, null, 2));
+		writeFileSync(settingsPath, JSON.stringify({ packages: ["npm:metis-formatter"] }, null, 2));
 
 		const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 
 		try {
-			await expect(main(["update", "arcmind-formatter"])).resolves.toBeUndefined();
+			await expect(main(["update", "metis-formatter"])).resolves.toBeUndefined();
 
 			const stderr = errorSpy.mock.calls.map(([message]) => String(message)).join("\n");
 			const stdout = logSpy.mock.calls.map(([message]) => String(message)).join("\n");
-			expect(stderr).toContain("Did you mean npm:arcmind-formatter?");
-			expect(stdout).not.toContain("Updated arcmind-formatter");
+			expect(stderr).toContain("Did you mean npm:metis-formatter?");
+			expect(stdout).not.toContain("Updated metis-formatter");
 			expect(process.exitCode).toBe(1);
 
 			const settings = JSON.parse(readFileSync(settingsPath, "utf-8")) as { packages?: string[] };
-			expect(settings.packages).toContain("npm:arcmind-formatter");
+			expect(settings.packages).toContain("npm:metis-formatter");
 		} finally {
 			errorSpy.mockRestore();
 			logSpy.mockRestore();

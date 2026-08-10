@@ -47,6 +47,7 @@ export interface SessionLeaseOptions {
 }
 
 export type SessionLeaseErrorCode = "SESSION_IN_USE" | "LEASE_LOST";
+export type SessionLeaseInspection = "free" | "stale" | "active" | "unknown";
 
 export class SessionLeaseError extends Error {
 	readonly code: SessionLeaseErrorCode;
@@ -260,6 +261,15 @@ function readOwner(path: string): LeaseOwner | undefined {
 	}
 }
 
+function inspectOwnerFile(path: string): LeaseOwner | undefined {
+	try {
+		const bytes = readSingleLinkTextFileSync(path);
+		return bytes === undefined ? undefined : parseOwner(bytes);
+	} catch {
+		return undefined;
+	}
+}
+
 function isKnownBootId(value: string): boolean {
 	return value !== UNKNOWN_BOOT_ID;
 }
@@ -283,6 +293,56 @@ function canReclaim(owner: LeaseOwner, options: ResolvedOptions): boolean {
 	if (inspection.status === "dead") return true;
 	if (inspection.status !== "alive" || inspection.processStartedAt === undefined) return false;
 	return Math.abs(inspection.processStartedAt - owner.processStartedAt) > PROCESS_START_TOLERANCE_MS;
+}
+
+function inspectOwner(owner: LeaseOwner, options: ResolvedOptions): Exclude<SessionLeaseInspection, "free"> {
+	if (owner.hostname !== options.identity.hostname) return "unknown";
+	if (
+		isKnownBootId(owner.bootId) &&
+		isKnownBootId(options.identity.bootId) &&
+		owner.bootId !== options.identity.bootId
+	) {
+		return "stale";
+	}
+
+	let inspection: LeaseProcessInspection;
+	try {
+		inspection = options.inspectProcess(owner.pid);
+	} catch {
+		return "unknown";
+	}
+	if (inspection.status === "dead") return "stale";
+	if (inspection.status === "unknown") return "unknown";
+	if (inspection.processStartedAt === undefined) return "active";
+	return Math.abs(inspection.processStartedAt - owner.processStartedAt) > PROCESS_START_TOLERANCE_MS
+		? "stale"
+		: "active";
+}
+
+/** Inspect lease artifacts without acquiring, reclaiming, or deleting them. */
+export function inspectSessionLease(
+	sessionFile: string,
+	leaseOptions: SessionLeaseOptions = {},
+): SessionLeaseInspection {
+	const paths = pathsFor(sessionFile);
+	const artifacts = [paths.ownerFile, paths.gateFile, paths.reclaimFile, paths.reclaimForceFile];
+	if (!existsSync(paths.leaseDirectory) && artifacts.slice(1).every((path) => !existsSync(path))) return "free";
+
+	const owners: LeaseOwner[] = [];
+	for (const path of artifacts) {
+		if (!existsSync(path)) continue;
+		const owner = inspectOwnerFile(path);
+		if (!owner) return "unknown";
+		owners.push(owner);
+	}
+	if (existsSync(paths.leaseDirectory) && !existsSync(paths.ownerFile)) return "unknown";
+	if (owners.length === 0) return "unknown";
+
+	const options = resolveOptions({ ...leaseOptions, heartbeatIntervalMs: 0 });
+	const inspections = owners.map((owner) => inspectOwner(owner, options));
+	if (inspections.includes("active")) return "active";
+	if (inspections.includes("unknown")) return "unknown";
+	return "stale";
 }
 
 function sessionInUse(sessionFile: string): SessionLeaseError {

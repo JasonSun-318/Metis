@@ -40,7 +40,7 @@ function getBunSandboxEnvValue(name: string): string | undefined {
 
 /**
  * Resolve a provider env value from scoped overrides, normal process.env, then
- * the duplicated Bun sandbox fallback for direct arcmind-ai consumers.
+ * the duplicated Bun sandbox fallback for direct metis-ai consumers.
  */
 export function getProviderEnvValue(name: string, env?: ProviderEnv): string | undefined {
 	return (
@@ -49,4 +49,8 @@ export function getProviderEnvValue(name: string, env?: ProviderEnv): string | u
 		getBunSandboxEnvValue(name) ||
 		undefined
 	);
+}
+
+export function getMetisProviderEnvValue(suffix: string, env?: ProviderEnv): string | undefined {
+	return getProviderEnvValue(`METIS_${suffix}`, env);
 }

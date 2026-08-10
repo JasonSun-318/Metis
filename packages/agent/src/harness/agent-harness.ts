@@ -1,4 +1,4 @@
-import type { AssistantMessage, ImageContent, Model, Models, UserMessage } from "@arcmind/ai";
+import type { AssistantMessage, ImageContent, Model, Models, UserMessage } from "@metis/ai";
 import { runAgentLoop } from "../agent-loop.ts";
 import type {
 	AgentContext,

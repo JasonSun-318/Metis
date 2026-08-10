@@ -27,7 +27,7 @@ describe("managed session workspaces", () => {
 	let hostCwd: string;
 
 	beforeEach(() => {
-		root = mkdtempSync(join(tmpdir(), "arcmind-workspaces-"));
+		root = mkdtempSync(join(tmpdir(), "metis-workspaces-"));
 		agentDir = join(root, "agent");
 		hostCwd = join(root, "project");
 		mkdirSync(hostCwd);

@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fauxAssistantMessage, fauxToolCall, registerFauxProvider } from "@arcmind/ai/compat";
+import { fauxAssistantMessage, fauxToolCall, registerFauxProvider } from "@metis/ai/compat";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	type CreateAgentSessionRuntimeFactory,
@@ -31,7 +31,7 @@ function deferred<T>() {
 }
 
 async function createActivatedSubagentHarness() {
-	const root = mkdtempSync(join(tmpdir(), "arcmind-subagent-continuation-"));
+	const root = mkdtempSync(join(tmpdir(), "metis-subagent-continuation-"));
 	roots.push(root);
 	const cwd = join(root, "project");
 	const agentDir = join(root, "agent");
@@ -41,8 +41,8 @@ async function createActivatedSubagentHarness() {
 	const faux = registerFauxProvider({ models: [{ id: "faux-reasoning", reasoning: true }] });
 	const authStorage = AuthStorage.inMemory();
 	authStorage.setRuntimeApiKey(faux.getModel().provider, "faux-key");
-	const extensionFactory: ExtensionFactory = (arcmind: ExtensionAPI) => {
-		arcmind.registerProvider(faux.getModel().provider, {
+	const extensionFactory: ExtensionFactory = (metis: ExtensionAPI) => {
+		metis.registerProvider(faux.getModel().provider, {
 			baseUrl: faux.getModel().baseUrl,
 			apiKey: "faux-key",
 			api: faux.api,
@@ -132,7 +132,7 @@ async function createActivatedSubagentHarness() {
 
 describe("Ultra subagent end to end", () => {
 	it("activates orchestration, runs and resumes one durable child, then deletes it", async () => {
-		const root = mkdtempSync(join(tmpdir(), "arcmind-subagent-e2e-"));
+		const root = mkdtempSync(join(tmpdir(), "metis-subagent-e2e-"));
 		roots.push(root);
 		const cwd = join(root, "project");
 		const agentDir = join(root, "agent");
@@ -177,8 +177,8 @@ describe("Ultra subagent end to end", () => {
 		]);
 		const authStorage = AuthStorage.inMemory();
 		authStorage.setRuntimeApiKey(faux.getModel().provider, "faux-key");
-		const extensionFactory: ExtensionFactory = (arcmind: ExtensionAPI) => {
-			arcmind.registerProvider(faux.getModel().provider, {
+		const extensionFactory: ExtensionFactory = (metis: ExtensionAPI) => {
+			metis.registerProvider(faux.getModel().provider, {
 				baseUrl: faux.getModel().baseUrl,
 				apiKey: "faux-key",
 				api: faux.api,

@@ -1,4 +1,4 @@
-import { setKeybindings } from "@arcmind/tui";
+import { setKeybindings } from "@metis/tui";
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { AuthStorage } from "../src/core/auth-storage.ts";
 import { KeybindingsManager } from "../src/core/keybindings.ts";

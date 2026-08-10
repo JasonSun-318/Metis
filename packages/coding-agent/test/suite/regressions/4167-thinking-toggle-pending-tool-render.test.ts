@@ -1,6 +1,6 @@
-import type { AgentMessage } from "@arcmind/agent-core";
-import type { AssistantMessage, ToolResultMessage, Usage } from "@arcmind/ai";
-import { Container, Text, type TUI } from "@arcmind/tui";
+import type { AgentMessage } from "@metis/agent-core";
+import type { AssistantMessage, ToolResultMessage, Usage } from "@metis/ai";
+import { Container, Text, type TUI } from "@metis/tui";
 import { beforeAll, describe, expect, test, vi } from "vitest";
 import type { AgentSessionEvent } from "../../../src/core/agent-session.ts";
 import type { SessionEntry } from "../../../src/core/session-manager.ts";

@@ -1,5 +1,5 @@
-import { getOAuthProviders, type OAuthDeviceCodeInfo } from "@arcmind/ai/oauth";
-import { Container, type Focusable, getKeybindings, Input, Loader, Spacer, Text, type TUI } from "@arcmind/tui";
+import { getOAuthProviders, type OAuthDeviceCodeInfo } from "@metis/ai/oauth";
+import { Container, type Focusable, getKeybindings, Input, Loader, Spacer, Text, type TUI } from "@metis/tui";
 import { openBrowser } from "../../../utils/open-browser.ts";
 import { theme } from "../theme/theme.ts";
 import { DynamicBorder } from "./dynamic-border.ts";

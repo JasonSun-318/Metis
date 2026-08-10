@@ -1,6 +1,6 @@
 {
-	"name": "@arcmind/ai",
-	"version": "0.80.6",
+	"name": "@metis/ai",
+	"version": "0.0.3",
 	"description": "Unified LLM API with automatic model discovery and provider configuration",
 	"type": "module",
 	"main": "./dist/index.js",
@@ -37,7 +37,7 @@
 		}
 	},
 	"bin": {
-		"arcmind-ai": "./dist/cli.js"
+		"metis-ai": "./dist/cli.js"
 	},
 	"files": [
 		"dist",
@@ -47,7 +47,7 @@
 		"clean": "shx rm -rf dist",
 		"generate-models": "node scripts/generate-models.ts",
 		"generate-image-models": "node scripts/generate-image-models.ts",
-		"build": "npm run generate-models && npm run generate-image-models && tsgo -p tsconfig.build.json",
+		"build": "tsgo -p tsconfig.build.json",
 		"test": "vitest --run",
 		"prepublishOnly": "npm run clean && npm run build"
 	},
@@ -77,7 +77,7 @@
 	"license": "MIT",
 	"repository": {
 		"type": "git",
-		"url": "git+https://gitee.com/sun124578963_0/arc-mind.git",
+		"url": "git+https://gitee.com/sun124578963_0/metis.git",
 		"directory": "packages/ai"
 	},
 	"engines": {

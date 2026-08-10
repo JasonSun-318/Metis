@@ -85,7 +85,7 @@ export async function executeBashWithOperations(
 			return;
 		}
 		const id = randomBytes(8).toString("hex");
-		const path = join(outputDir, `arcmind-bash-${id}.log`);
+		const path = join(outputDir, `metis-bash-${id}.log`);
 		const noFollow = typeof fsConstants.O_NOFOLLOW === "number" ? fsConstants.O_NOFOLLOW : 0;
 		const fd = openSync(path, fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_EXCL | noFollow, 0o600);
 		try {

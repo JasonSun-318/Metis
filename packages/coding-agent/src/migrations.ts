@@ -6,7 +6,7 @@ import chalk from "chalk";
 import { createHash, randomUUID } from "crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "fs";
 import { basename, dirname, join } from "path";
-import { CONFIG_DIR_NAME, getAgentDir, getBinDir } from "./config.ts";
+import { getAgentDir, getBinDir, getProjectConfigDir } from "./config.ts";
 import {
 	cleanupPublishedAliasesSync,
 	createFileAtomicallySync,
@@ -21,8 +21,8 @@ import { SessionManager } from "./core/session-manager.ts";
 import { encodePathForStorage } from "./utils/paths.ts";
 
 const MIGRATION_GUIDE_URL =
-	"https://github.com/arcmind/arcmind/blob/main/packages/coding-agent/CHANGELOG.md#extensions-migration";
-const EXTENSIONS_DOC_URL = "https://github.com/arcmind/arcmind/blob/main/packages/coding-agent/docs/extensions.md";
+	"https://gitee.com/sun124578963_0/metis/blob/main/packages/coding-agent/docs/extensions.md#extension-locations";
+const EXTENSIONS_DOC_URL = "https://gitee.com/sun124578963_0/metis/blob/main/packages/coding-agent/docs/extensions.md";
 const RETIRED_SESSION_NAME =
 	/^\.(.+\.jsonl)\.([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.migrated$/i;
 const RETIRED_SESSION_CHECKPOINT_VERSION = 1;
@@ -473,7 +473,7 @@ function migrateToolsToBin(): void {
 
 /**
  * Check for deprecated hooks/ and tools/ directories.
- * Note: tools/ may contain fd/rg binaries extracted by arcmind, so only warn if it has other files.
+ * Note: tools/ may contain fd/rg binaries extracted by Metis, so only warn if it has other files.
  */
 function checkDeprecatedExtensionDirs(baseDir: string, label: string): string[] {
 	const hooksDir = join(baseDir, "hooks");
@@ -512,7 +512,7 @@ function checkDeprecatedExtensionDirs(baseDir: string, label: string): string[] 
  */
 function migrateExtensionSystem(cwd: string): string[] {
 	const agentDir = getAgentDir();
-	const projectDir = join(cwd, CONFIG_DIR_NAME);
+	const projectDir = getProjectConfigDir(cwd);
 
 	// Migrate commands/ to prompts/
 	migrateCommandsToPrompts(agentDir, "Global");

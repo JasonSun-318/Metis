@@ -291,7 +291,7 @@ ${chalk.bold("Commands:")}
   ${APP_NAME} install <source> [-l]     Install extension source and add to settings
   ${APP_NAME} remove <source> [-l]      Remove extension source from settings
   ${APP_NAME} uninstall <source> [-l]   Alias for remove
-  ${APP_NAME} update [source|self|arcmind]   Update arcmind (use --all for arcmind and extensions)
+  ${APP_NAME} update [source|self|metis]     Update Metis (use --all for Metis and extensions)
   ${APP_NAME} list                      List installed extensions from settings
   ${APP_NAME} config [-l]               Open TUI to enable/disable package resources (Tab switches scope)
   ${APP_NAME} mcp <add|list|get|remove>  Manage MCP server configuration
@@ -339,7 +339,7 @@ ${chalk.bold("Options:")}
   --verbose                      Force verbose startup (overrides quietStartup setting)
   --approve, -a                  Trust project-local files for this run
   --no-approve, -na              Ignore project-local files for this run
-  --offline                      Disable startup network operations (same as ARCMIND_OFFLINE=1)
+  --offline                      Disable startup network operations (same as METIS_OFFLINE=1)
   --help, -h                     Show this help
   --version, -v                  Show version number
 
@@ -444,9 +444,9 @@ ${chalk.bold("Environment Variables:")}
   AWS_REGION                       - AWS region for Amazon Bedrock (e.g., us-east-1)
   ${ENV_AGENT_DIR.padEnd(32)} - Config directory (default: ~/${CONFIG_DIR_NAME}/agent)
   ${ENV_SESSION_DIR.padEnd(32)} - Session storage directory (overridden by --session-dir)
-  ARCMIND_PACKAGE_DIR                   - Override package directory (for Nix/Guix store paths)
-  ARCMIND_OFFLINE                       - Disable startup network operations when set to 1/true/yes
-  ARCMIND_PROVIDER_ATTRIBUTION          - Enable provider attribution headers with 1/true/yes
+  METIS_PACKAGE_DIR                     - Override package directory (for Nix/Guix store paths)
+  METIS_OFFLINE                         - Disable startup network operations when set to 1/true/yes
+  METIS_PROVIDER_ATTRIBUTION            - Enable provider attribution headers with 1/true/yes
 ${chalk.bold("Built-in Tool Names:")}
   read   - Read file contents
   bash   - Execute bash commands

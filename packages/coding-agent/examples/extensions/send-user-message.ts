@@ -1,8 +1,8 @@
 /**
  * Send User Message Example
  *
- * Demonstrates arcmind.sendUserMessage() for sending user messages from extensions.
- * Unlike arcmind.sendMessage() which sends custom messages, sendUserMessage() sends
+ * Demonstrates metis.sendUserMessage() for sending user messages from extensions.
+ * Unlike metis.sendMessage() which sends custom messages, sendUserMessage() sends
  * actual user messages that appear in the conversation as if typed by the user.
  *
  * Usage:
@@ -11,11 +11,11 @@
  *   /followup And then?   - Sends while streaming with followUp delivery
  */
 
-import type { ExtensionAPI } from "@arcmind/coding-agent";
+import type { ExtensionAPI } from "@metis/coding-agent";
 
-export default function (arcmind: ExtensionAPI) {
+export default function (metis: ExtensionAPI) {
 	// Simple command that sends a user message
-	arcmind.registerCommand("ask", {
+	metis.registerCommand("ask", {
 		description: "Send a user message to the agent",
 		handler: async (args, ctx) => {
 			if (!args.trim()) {
@@ -30,12 +30,12 @@ export default function (arcmind: ExtensionAPI) {
 				return;
 			}
 
-			arcmind.sendUserMessage(args);
+			metis.sendUserMessage(args);
 		},
 	});
 
 	// Command that steers the agent mid-conversation
-	arcmind.registerCommand("steer", {
+	metis.registerCommand("steer", {
 		description: "Send a steering message (interrupts current processing)",
 		handler: async (args, ctx) => {
 			if (!args.trim()) {
@@ -45,16 +45,16 @@ export default function (arcmind: ExtensionAPI) {
 
 			if (ctx.isIdle()) {
 				// Not streaming, just send normally
-				arcmind.sendUserMessage(args);
+				metis.sendUserMessage(args);
 			} else {
 				// Streaming - use steer to interrupt
-				arcmind.sendUserMessage(args, { deliverAs: "steer" });
+				metis.sendUserMessage(args, { deliverAs: "steer" });
 			}
 		},
 	});
 
 	// Command that queues a follow-up message
-	arcmind.registerCommand("followup", {
+	metis.registerCommand("followup", {
 		description: "Queue a follow-up message (waits for current processing)",
 		handler: async (args, ctx) => {
 			if (!args.trim()) {
@@ -64,17 +64,17 @@ export default function (arcmind: ExtensionAPI) {
 
 			if (ctx.isIdle()) {
 				// Not streaming, just send normally
-				arcmind.sendUserMessage(args);
+				metis.sendUserMessage(args);
 			} else {
 				// Streaming - queue as follow-up
-				arcmind.sendUserMessage(args, { deliverAs: "followUp" });
+				metis.sendUserMessage(args, { deliverAs: "followUp" });
 				ctx.ui.notify("Follow-up queued", "info");
 			}
 		},
 	});
 
 	// Example with content array (text + images would go here)
-	arcmind.registerCommand("askwith", {
+	metis.registerCommand("askwith", {
 		description: "Send a user message with structured content",
 		handler: async (args, ctx) => {
 			if (!args.trim()) {
@@ -88,7 +88,7 @@ export default function (arcmind: ExtensionAPI) {
 			}
 
 			// sendUserMessage accepts string or (TextContent | ImageContent)[]
-			arcmind.sendUserMessage([
+			metis.sendUserMessage([
 				{ type: "text", text: `User request: ${args}` },
 				{ type: "text", text: "Please respond concisely." },
 			]);

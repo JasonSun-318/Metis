@@ -21,7 +21,7 @@ describe("Ask/Full permission policy", () => {
 	let outside: string;
 
 	beforeEach(() => {
-		root = mkdtempSync(join(tmpdir(), "arcmind-permission-policy-"));
+		root = mkdtempSync(join(tmpdir(), "metis-permission-policy-"));
 		cwd = join(root, "project");
 		outside = join(root, "outside");
 		mkdirSync(join(cwd, "src"), { recursive: true });
@@ -296,7 +296,7 @@ describe("Ask/Full permission policy", () => {
 		});
 		expect(view.title).toBe("Approve bash?");
 		expect(view.details).toContain(`Command: ${command}`);
-		expect(view.details).toContain("ArcMind does not sandbox this action");
+		expect(view.details).toContain("Metis does not sandbox this action");
 		expect(view.details).toContain("may be irreversible");
 		expect(view.details).toContain("Subagent: researcher (child-1)");
 

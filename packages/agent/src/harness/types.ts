@@ -1,4 +1,4 @@
-import type { ImageContent, Model, Models, SimpleStreamOptions, TextContent, Transport } from "@arcmind/ai";
+import type { ImageContent, Model, Models, SimpleStreamOptions, TextContent, Transport } from "@metis/ai";
 import type { AgentEvent, AgentMessage, AgentTool, QueueMode, ThinkingLevel } from "../index.ts";
 import type { Session } from "./session/session.ts";
 

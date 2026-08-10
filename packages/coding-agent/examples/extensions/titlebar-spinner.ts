@@ -5,21 +5,21 @@
  * Uses `ctx.ui.setTitle()` to update the terminal title via the extension API.
  *
  * Usage:
- *   arcmind --extension examples/extensions/titlebar-spinner.ts
+ *   metis --extension examples/extensions/titlebar-spinner.ts
  */
 
 import path from "node:path";
-import type { ExtensionAPI, ExtensionContext } from "@arcmind/coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@metis/coding-agent";
 
 const BRAILLE_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
-function getBaseTitle(arcmind: ExtensionAPI): string {
+function getBaseTitle(metis: ExtensionAPI): string {
 	const cwd = path.basename(process.cwd());
-	const session = arcmind.getSessionName();
-	return session ? `ArcMind - ${session} - ${cwd}` : `ArcMind - ${cwd}`;
+	const session = metis.getSessionName();
+	return session ? `Metis - ${session} - ${cwd}` : `Metis - ${cwd}`;
 }
 
-export default function (arcmind: ExtensionAPI) {
+export default function (metis: ExtensionAPI) {
 	let timer: ReturnType<typeof setInterval> | null = null;
 	let frameIndex = 0;
 
@@ -29,7 +29,7 @@ export default function (arcmind: ExtensionAPI) {
 			timer = null;
 		}
 		frameIndex = 0;
-		ctx.ui.setTitle(getBaseTitle(arcmind));
+		ctx.ui.setTitle(getBaseTitle(metis));
 	}
 
 	function startAnimation(ctx: ExtensionContext) {
@@ -37,22 +37,22 @@ export default function (arcmind: ExtensionAPI) {
 		timer = setInterval(() => {
 			const frame = BRAILLE_FRAMES[frameIndex % BRAILLE_FRAMES.length];
 			const cwd = path.basename(process.cwd());
-			const session = arcmind.getSessionName();
-			const title = session ? `${frame} ArcMind - ${session} - ${cwd}` : `${frame} ArcMind - ${cwd}`;
+			const session = metis.getSessionName();
+			const title = session ? `${frame} Metis - ${session} - ${cwd}` : `${frame} Metis - ${cwd}`;
 			ctx.ui.setTitle(title);
 			frameIndex++;
 		}, 80);
 	}
 
-	arcmind.on("agent_start", async (_event, ctx) => {
+	metis.on("agent_start", async (_event, ctx) => {
 		startAnimation(ctx);
 	});
 
-	arcmind.on("agent_end", async (_event, ctx) => {
+	metis.on("agent_end", async (_event, ctx) => {
 		stopAnimation(ctx);
 	});
 
-	arcmind.on("session_shutdown", async (_event, ctx) => {
+	metis.on("session_shutdown", async (_event, ctx) => {
 		stopAnimation(ctx);
 	});
 }

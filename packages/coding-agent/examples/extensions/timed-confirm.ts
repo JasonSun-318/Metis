@@ -7,11 +7,11 @@
  * - /timed-signal - Shows confirm using AbortSignal (manual approach)
  */
 
-import type { ExtensionAPI } from "@arcmind/coding-agent";
+import type { ExtensionAPI } from "@metis/coding-agent";
 
-export default function (arcmind: ExtensionAPI) {
+export default function (metis: ExtensionAPI) {
 	// Simple approach: use timeout option (recommended)
-	arcmind.registerCommand("timed", {
+	metis.registerCommand("timed", {
 		description: "Show a timed confirmation dialog (auto-cancels in 5s with countdown)",
 		handler: async (_args, ctx) => {
 			const confirmed = await ctx.ui.confirm(
@@ -28,7 +28,7 @@ export default function (arcmind: ExtensionAPI) {
 		},
 	});
 
-	arcmind.registerCommand("timed-select", {
+	metis.registerCommand("timed-select", {
 		description: "Show a timed select dialog (auto-cancels in 10s with countdown)",
 		handler: async (_args, ctx) => {
 			const choice = await ctx.ui.select("Pick an option", ["Option A", "Option B", "Option C"], { timeout: 10000 });
@@ -42,7 +42,7 @@ export default function (arcmind: ExtensionAPI) {
 	});
 
 	// Manual approach: use AbortSignal for more control
-	arcmind.registerCommand("timed-signal", {
+	metis.registerCommand("timed-signal", {
 		description: "Show a timed confirm using AbortSignal (manual approach)",
 		handler: async (_args, ctx) => {
 			const controller = new AbortController();

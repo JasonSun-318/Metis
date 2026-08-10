@@ -1,10 +1,10 @@
 /**
  * Rainbow Editor - highlights "ultrathink" with animated shine effect
  *
- * Usage: arcmind --extension ./examples/extensions/rainbow-editor.ts
+ * Usage: metis --extension ./examples/extensions/rainbow-editor.ts
  */
 
-import { CustomEditor, type ExtensionAPI } from "@arcmind/coding-agent";
+import { CustomEditor, type ExtensionAPI } from "@metis/coding-agent";
 
 // Base colors (coral → yellow → green → teal → blue → purple → pink)
 const COLORS: [number, number, number][] = [
@@ -81,8 +81,8 @@ class RainbowEditor extends CustomEditor {
 	}
 }
 
-export default function (arcmind: ExtensionAPI) {
-	arcmind.on("session_start", (_event, ctx) => {
+export default function (metis: ExtensionAPI) {
+	metis.on("session_start", (_event, ctx) => {
 		ctx.ui.setEditorComponent((tui, theme, kb) => new RainbowEditor(tui, theme, kb));
 	});
 }

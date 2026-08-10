@@ -8,7 +8,7 @@
 import { APP_NAME } from "./config.ts";
 
 process.title = APP_NAME;
-process.env.ARCMIND_CODING_AGENT = "true";
+process.env.METIS_CODING_AGENT = "true";
 process.emitWarning = (() => {}) as typeof process.emitWarning;
 
 if (process.argv[2] === "--internal-workspace-sandbox-broker") {

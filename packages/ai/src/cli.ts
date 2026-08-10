@@ -78,7 +78,7 @@ async function main(): Promise<void> {
 
 	if (!command || command === "help" || command === "--help" || command === "-h") {
 		const providerList = PROVIDERS.map((p) => `  ${p.id.padEnd(20)} ${p.name}`).join("\n");
-		console.log(`Usage: npx @arcmind/ai <command> [provider]
+		console.log(`Usage: npx @metis/ai <command> [provider]
 
 Commands:
   login [provider]  Login to an OAuth provider
@@ -88,9 +88,9 @@ Providers:
 ${providerList}
 
 Examples:
-  npx @arcmind/ai login              # interactive provider selection
-  npx @arcmind/ai login anthropic    # login to specific provider
-  npx @arcmind/ai list               # list providers
+  npx @metis/ai login              # interactive provider selection
+  npx @metis/ai login anthropic    # login to specific provider
+  npx @metis/ai list               # list providers
 `);
 		return;
 	}
@@ -127,7 +127,7 @@ Examples:
 
 		if (!PROVIDERS.some((p) => p.id === provider)) {
 			console.error(`Unknown provider: ${provider}`);
-			console.error(`Use 'npx @arcmind/ai list' to see available providers`);
+			console.error(`Use 'npx @metis/ai list' to see available providers`);
 			process.exit(1);
 		}
 
@@ -137,7 +137,7 @@ Examples:
 	}
 
 	console.error(`Unknown command: ${command}`);
-	console.error(`Use 'npx @arcmind/ai --help' for usage`);
+	console.error(`Use 'npx @metis/ai --help' for usage`);
 	process.exit(1);
 }
 

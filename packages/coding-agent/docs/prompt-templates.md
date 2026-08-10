@@ -1,4 +1,4 @@
-> arcmind can create prompt templates. Ask it to build one for your workflow.
+> metis can create prompt templates. Ask it to build one for your workflow.
 
 # Prompt Templates
 
@@ -6,11 +6,11 @@ Prompt templates are Markdown snippets that expand into full prompts. Type `/nam
 
 ## Locations
 
-ArcMind loads prompt templates from:
+Metis loads prompt templates from:
 
-- Global: `~/.arcmind/agent/prompts/*.md`
-- Project: `.arcmind/prompts/*.md` (only after the project is trusted)
-- Packages: `prompts/` directories or `arcmind.prompts` entries in `package.json`
+- Global: `~/.metis/agent/prompts/*.md`
+- Project: `.metis/prompts/*.md` (only after the project is trusted)
+- Packages: `prompts/` directories or `metis.prompts` entries in `package.json`
 - Settings: `prompts` array with files or directories
 - CLI: `--prompt-template <path>` (repeatable)
 

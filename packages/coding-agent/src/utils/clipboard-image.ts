@@ -174,7 +174,7 @@ function isWSL(env: NodeJS.ProcessEnv = process.env): boolean {
  * directly, so we use it as a fallback.
  */
 function readClipboardImageViaPowerShell(): ClipboardImage | null {
-	const tmpFile = join(tmpdir(), `arcmind-wsl-clip-${randomUUID()}.png`);
+	const tmpFile = join(tmpdir(), `metis-wsl-clip-${randomUUID()}.png`);
 
 	try {
 		const winPathResult = runCommand("wslpath", ["-w", tmpFile], { timeoutMs: DEFAULT_LIST_TIMEOUT_MS });
@@ -221,7 +221,7 @@ function readClipboardImageViaPowerShell(): ClipboardImage | null {
 }
 
 function readClipboardImageViaWindowsPowerShell(): ClipboardImage | null {
-	const tmpFile = join(tmpdir(), `arcmind-clip-${randomUUID()}.png`);
+	const tmpFile = join(tmpdir(), `metis-clip-${randomUUID()}.png`);
 	const quotedPath = tmpFile.replaceAll("'", "''");
 	const script = [
 		"Add-Type -AssemblyName System.Windows.Forms",
@@ -250,7 +250,7 @@ function readClipboardImageViaAppleScriptFormat(
 	clipboardClass: "PNGf" | "TIFF",
 	mimeType: "image/png" | "image/tiff",
 ): ClipboardImage | null {
-	const tmpFile = join(tmpdir(), `arcmind-clip-${randomUUID()}.${mimeType === "image/png" ? "png" : "tiff"}`);
+	const tmpFile = join(tmpdir(), `metis-clip-${randomUUID()}.${mimeType === "image/png" ? "png" : "tiff"}`);
 	const script = [
 		"on run argv",
 		"set outputPath to item 1 of argv",

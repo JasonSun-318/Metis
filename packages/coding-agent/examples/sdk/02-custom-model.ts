@@ -4,8 +4,8 @@
  * Shows how to select a specific model and thinking level.
  */
 
-import { getModel } from "@arcmind/ai/compat";
-import { AuthStorage, createAgentSession, ModelRegistry } from "@arcmind/coding-agent";
+import { getModel } from "@metis/ai/compat";
+import { AuthStorage, createAgentSession, ModelRegistry } from "@metis/coding-agent";
 
 // Set up auth storage and model registry
 const authStorage = AuthStorage.create();

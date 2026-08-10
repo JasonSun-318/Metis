@@ -8,15 +8,15 @@
  * file changes, giving the model immediate context. During steering the
  * exec call is skipped so the correction reaches the model without delay.
  *
- * Start arcmind with this extension:
- *   arcmind -e ./examples/extensions/input-transform-streaming.ts
+ * Start metis with this extension:
+ *   metis -e ./examples/extensions/input-transform-streaming.ts
  */
-import type { ExtensionAPI } from "@arcmind/coding-agent";
+import type { ExtensionAPI } from "@metis/coding-agent";
 
 const TRIGGER = /\b(changes?|diff|modified)\b/i;
 
-export default function (arcmind: ExtensionAPI) {
-	arcmind.on("input", async (event) => {
+export default function (metis: ExtensionAPI) {
+	metis.on("input", async (event) => {
 		// During steering, skip the exec call — corrections should be fast
 		if (event.streamingBehavior === "steer") {
 			return { action: "continue" };
@@ -26,7 +26,7 @@ export default function (arcmind: ExtensionAPI) {
 			return { action: "continue" };
 		}
 
-		const { stdout, code } = await arcmind.exec("git", ["diff", "--stat"]);
+		const { stdout, code } = await metis.exec("git", ["diff", "--stat"]);
 		if (code !== 0 || !stdout.trim()) {
 			return { action: "continue" };
 		}

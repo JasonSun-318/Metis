@@ -1,3 +1,5 @@
+import { getMetisEnv } from "../config.ts";
+
 export function areExperimentalFeaturesEnabled(): boolean {
-	return process.env.ARCMIND_EXPERIMENTAL === "1";
+	return getMetisEnv("EXPERIMENTAL") === "1";
 }

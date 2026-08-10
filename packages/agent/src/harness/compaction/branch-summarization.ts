@@ -1,4 +1,4 @@
-import type { Model, Models } from "@arcmind/ai";
+import type { Model, Models } from "@metis/ai";
 
 import type { AgentMessage } from "../../types.ts";
 import {

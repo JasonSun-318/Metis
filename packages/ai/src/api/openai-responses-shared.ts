@@ -186,7 +186,7 @@ export function convertResponsesMessages<TApi extends Api>(
 					const textBlock = block as TextContent;
 					const parsedSignature = parseTextSignature(textBlock.textSignature);
 					const fallbackMessageId =
-						textBlockIndex === 0 ? `msg_arcmind_${msgIndex}` : `msg_arcmind_${msgIndex}_${textBlockIndex}`;
+						textBlockIndex === 0 ? `msg_metis_${msgIndex}` : `msg_metis_${msgIndex}_${textBlockIndex}`;
 					textBlockIndex++;
 					// OpenAI requires id to be max 64 characters
 					let msgId = parsedSignature?.id;
@@ -276,7 +276,7 @@ export function convertResponsesMessages<TApi extends Api>(
 			}
 			if (deferredTools.length > 0) {
 				const names = deferredTools.map((tool) => tool.name);
-				const searchCallId = `arcmind_tool_load_${shortHash(`${msg.toolCallId}:${names.join(",")}`)}`;
+				const searchCallId = `metis_tool_load_${shortHash(`${msg.toolCallId}:${names.join(",")}`)}`;
 				messages.push({
 					type: "tool_search_call",
 					call_id: searchCallId,
@@ -392,7 +392,7 @@ export async function processResponsesStream<TApi extends Api>(
 	// Azure OpenAI can omit reasoning.encrypted_content from response.output_item.done
 	// and provide it only in response.completed.response.output. Backfill the
 	// persisted reasoning signature from the terminal response to keep store:false
-	// multi-turn replay stateless. See https://gitee.com/sun124578963_0/arc-mind/issues/6409.
+	// multi-turn replay stateless. See https://gitee.com/sun124578963_0/metis/issues/6409.
 	const backfillReasoningSignatures = (responseOutput: ResponseOutputItem[]): void => {
 		for (const item of responseOutput) {
 			if (item.type !== "reasoning" || !item.encrypted_content) continue;

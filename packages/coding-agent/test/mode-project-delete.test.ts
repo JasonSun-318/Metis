@@ -64,7 +64,7 @@ function write(path: string, content = "owned"): string {
 }
 
 function createLayout(): TestLayout {
-	const root = mkdtempSync(join(tmpdir(), "arcmind-project-delete-"));
+	const root = mkdtempSync(join(tmpdir(), "metis-project-delete-"));
 	const agentDir = join(root, "agent");
 	const sessionsRoot = join(agentDir, "sessions");
 	const cwd = join(root, "project");

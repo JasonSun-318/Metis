@@ -22,10 +22,10 @@ import { EnvHttpProxyAgent, fetch } from "undici";
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const packageDir = join(repoRoot, "packages", "coding-agent");
 const packageJson = JSON.parse(readFileSync(join(packageDir, "package.json"), "utf8"));
-const versions = packageJson.arcmindNativeTools;
+const versions = packageJson.metisNativeTools;
 
 if (versions?.rg !== "15.2.0" || versions?.fd !== "10.4.2" || versions?.officecli !== "1.0.140") {
-	throw new Error("Update the pinned native-tool archive table before changing arcmindNativeTools");
+	throw new Error("Update the pinned native-tool archive table before changing metisNativeTools");
 }
 
 const pairs = {
@@ -103,7 +103,7 @@ function option(name, fallback) {
 	return index === -1 ? fallback : process.argv[index + 1];
 }
 
-const target = process.env.ARCMIND_NATIVE_TOOLS_TARGET ?? option("--target", "all");
+const target = process.env.METIS_NATIVE_TOOLS_TARGET ?? option("--target", "all");
 const outputDir = resolve(packageDir, option("--output", "dist/vendor/tools"));
 const dispatcher = new EnvHttpProxyAgent();
 
@@ -235,7 +235,7 @@ async function stageTool(pair, tool, destination) {
 		throw new Error(`${archiveName} SHA-256 mismatch: expected ${expectedArchiveSha256}, got ${actualArchiveSha256}`);
 	}
 
-	const temporary = mkdtempSync(join(tmpdir(), `arcmind-${tool}-`));
+	const temporary = mkdtempSync(join(tmpdir(), `metis-${tool}-`));
 	try {
 		const archivePath = join(temporary, archiveName);
 		writeFileSync(archivePath, archive);

@@ -1,5 +1,5 @@
-import type { AgentMessage } from "@arcmind/agent-core";
-import type { ToolResultMessage } from "@arcmind/ai/compat";
+import type { AgentMessage } from "@metis/agent-core";
+import type { ToolResultMessage } from "@metis/ai/compat";
 import {
 	type DurablePromptInput,
 	type ReducedRuntimeOperation,

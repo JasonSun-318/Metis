@@ -1,13 +1,13 @@
 // Requires GitHub CLI (`gh`) and a GitHub repository checkout.
 // Preloads the latest open issues once per session, then filters them locally for fast `#...` completion.
 
-import type { ExtensionAPI } from "@arcmind/coding-agent";
+import type { ExtensionAPI } from "@metis/coding-agent";
 import {
 	type AutocompleteItem,
 	type AutocompleteProvider,
 	type AutocompleteSuggestions,
 	fuzzyFilter,
-} from "@arcmind/tui";
+} from "@metis/tui";
 
 type GitHubIssue = {
 	number: number;
@@ -39,8 +39,8 @@ function parseGitHubRepo(remoteUrl: string): string | undefined {
 	return undefined;
 }
 
-async function resolveGitHubRepo(arcmind: ExtensionAPI, cwd: string): Promise<RepoResolution> {
-	const result = await arcmind.exec("git", ["remote", "-v"], { cwd, timeout: 5_000 });
+async function resolveGitHubRepo(metis: ExtensionAPI, cwd: string): Promise<RepoResolution> {
+	const result = await metis.exec("git", ["remote", "-v"], { cwd, timeout: 5_000 });
 	if (result.code !== 0) {
 		return { ok: false, error: "github-issue-autocomplete: cwd is not a git repository" };
 	}
@@ -127,9 +127,9 @@ function createIssueAutocompleteProvider(
 	};
 }
 
-export default function (arcmind: ExtensionAPI): void {
-	arcmind.on("session_start", async (_event, ctx) => {
-		const resolvedRepo = await resolveGitHubRepo(arcmind, ctx.cwd);
+export default function (metis: ExtensionAPI): void {
+	metis.on("session_start", async (_event, ctx) => {
+		const resolvedRepo = await resolveGitHubRepo(metis, ctx.cwd);
 		if (!resolvedRepo.ok) {
 			ctx.ui.notify(resolvedRepo.error, "error");
 			return;
@@ -141,7 +141,7 @@ export default function (arcmind: ExtensionAPI): void {
 
 		const getIssues = async (): Promise<GitHubIssue[] | undefined> => {
 			issuesPromise ||= (async () => {
-				const result = await arcmind.exec(
+				const result = await metis.exec(
 					"gh",
 					[
 						"issue",

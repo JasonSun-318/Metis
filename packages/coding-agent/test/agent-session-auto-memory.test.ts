@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { getModel } from "@arcmind/ai/compat";
+import { getModel } from "@metis/ai/compat";
 import { afterEach, describe, expect, it } from "vitest";
 import { ensureModeScopedMemoryLayout, getAutoMemoryPaths } from "../src/core/auto-memory.ts";
 import { createAgentSession } from "../src/core/sdk.ts";
@@ -10,7 +10,7 @@ import { SettingsManager } from "../src/core/settings-manager.ts";
 describe("AgentSession auto memory", () => {
 	const tempDirs: string[] = [];
 	const makeTemp = (): string => {
-		const dir = mkdtempSync(join(tmpdir(), "arcmind-session-memory-"));
+		const dir = mkdtempSync(join(tmpdir(), "metis-session-memory-"));
 		tempDirs.push(dir);
 		return dir;
 	};

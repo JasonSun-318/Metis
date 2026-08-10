@@ -1,8 +1,8 @@
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { AgentTool } from "@arcmind/agent-core";
-import { fauxAssistantMessage, fauxToolCall } from "@arcmind/ai";
+import type { AgentTool } from "@metis/agent-core";
+import { fauxAssistantMessage, fauxToolCall } from "@metis/ai";
 import { Type } from "typebox";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { PermissionApprovalRequest } from "../src/core/permission-policy.ts";
@@ -47,6 +47,7 @@ describe("AgentSession permission enforcement", () => {
 		await harness.session.prompt("run it");
 
 		expect(requestApproval).toHaveBeenCalledOnce();
+		expect(requestApproval.mock.calls[0]?.[0].cwd).toBe(harness.tempDir);
 		expect(execute).toHaveBeenCalledOnce();
 		expect(
 			harness.sessionManager
@@ -81,6 +82,27 @@ describe("AgentSession permission enforcement", () => {
 				.getDurableJournalSnapshot()
 				.filter((entry) => entry.type === "session_permission_decision"),
 		).toEqual([expect.objectContaining({ source: "user", decision: "deny" })]);
+	});
+
+	it("adds the session cwd when forwarding an approval that does not include one", async () => {
+		const requestApproval = vi.fn(async (_request: PermissionApprovalRequest) => ({ decision: "deny" as const }));
+		const harness = await createHarness({ requestPermissionApproval: requestApproval });
+		harnesses.push(harness);
+
+		await harness.session.requestPermissionApproval({
+			action: {
+				actionId: "forwarded-action",
+				toolName: "custom_action",
+				provenance: "sdk",
+				risks: ["custom"],
+				paths: [],
+				networkTargets: [],
+			},
+			args: { value: "x" },
+			reason: "test",
+		});
+
+		expect(requestApproval.mock.calls[0]?.[0].cwd).toBe(harness.tempDir);
 	});
 
 	it("fails closed without UI and does not record a false user denial", async () => {
@@ -170,7 +192,7 @@ describe("AgentSession permission enforcement", () => {
 		expect(requestApproval).not.toHaveBeenCalled();
 		expect(
 			harness.session.messages.some(
-				(message) => message.role === "toolResult" && getMessageText(message).includes("arcmind"),
+				(message) => message.role === "toolResult" && getMessageText(message).includes("metis"),
 			),
 		).toBe(true);
 	});
@@ -182,7 +204,7 @@ describe("AgentSession permission enforcement", () => {
 			requestPermissionApproval: requestApproval,
 		});
 		harnesses.push(harness);
-		const external = mkdtempSync(join(tmpdir(), "arcmind-added-read-"));
+		const external = mkdtempSync(join(tmpdir(), "metis-added-read-"));
 		try {
 			const path = join(external, "safe.txt");
 			writeFileSync(path, "safe\n");
@@ -200,7 +222,7 @@ describe("AgentSession permission enforcement", () => {
 	});
 
 	it("invalidates an Ask grant when workspace roots change before execution", async () => {
-		const external = mkdtempSync(join(tmpdir(), "arcmind-root-revalidation-"));
+		const external = mkdtempSync(join(tmpdir(), "metis-root-revalidation-"));
 		try {
 			const path = join(external, "new.txt");
 			let harness!: Harness;

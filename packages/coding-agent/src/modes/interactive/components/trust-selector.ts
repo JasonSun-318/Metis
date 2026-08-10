@@ -1,4 +1,4 @@
-import { Container, getKeybindings, Spacer, Text } from "@arcmind/tui";
+import { Container, getKeybindings, Spacer, Text } from "@metis/tui";
 import {
 	getProjectTrustOptions,
 	type ProjectTrustOption,

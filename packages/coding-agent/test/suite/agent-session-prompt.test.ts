@@ -1,8 +1,8 @@
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { AgentTool } from "@arcmind/agent-core";
-import { fauxAssistantMessage, fauxToolCall, type Model } from "@arcmind/ai";
+import type { AgentTool } from "@metis/agent-core";
+import { fauxAssistantMessage, fauxToolCall, type Model } from "@metis/ai";
 import { Type } from "typebox";
 import { afterEach, describe, expect, it } from "vitest";
 import type { InputEvent } from "../../src/core/extensions/index.ts";
@@ -145,7 +145,7 @@ describe("AgentSession prompt characterization", () => {
 	});
 
 	it("expands skill commands before sending the prompt", async () => {
-		const tempDir = join(tmpdir(), `arcmind-skill-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+		const tempDir = join(tmpdir(), `metis-skill-${Date.now()}-${Math.random().toString(36).slice(2)}`);
 		mkdirSync(tempDir, { recursive: true });
 		tempDirs.push(tempDir);
 		const skillPath = join(tempDir, "test-skill.md");
@@ -192,7 +192,7 @@ describe("AgentSession prompt characterization", () => {
 		expect(
 			harness.sessionManager
 				.getEntries()
-				.filter((entry) => entry.type === "custom" && entry.customType === "arcmind.skill_usage.v1"),
+				.filter((entry) => entry.type === "custom" && entry.customType === "metis.skill_usage.v1"),
 		).toEqual([
 			expect.objectContaining({
 				data: { name: "test", trigger: "command" },
@@ -201,7 +201,7 @@ describe("AgentSession prompt characterization", () => {
 	});
 
 	it("records only successful reads of registered Skill files", async () => {
-		const tempDir = join(tmpdir(), `arcmind-skill-read-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+		const tempDir = join(tmpdir(), `metis-skill-read-${Date.now()}-${Math.random().toString(36).slice(2)}`);
 		const skillDir = join(tempDir, "skills", "test");
 		mkdirSync(skillDir, { recursive: true });
 		tempDirs.push(tempDir);
@@ -251,7 +251,7 @@ describe("AgentSession prompt characterization", () => {
 		expect(
 			harness.sessionManager
 				.getEntries()
-				.filter((entry) => entry.type === "custom" && entry.customType === "arcmind.skill_usage.v1"),
+				.filter((entry) => entry.type === "custom" && entry.customType === "metis.skill_usage.v1"),
 		).toEqual([
 			expect.objectContaining({
 				data: { name: "test", trigger: "read" },
@@ -296,8 +296,8 @@ describe("AgentSession prompt characterization", () => {
 		const commandRuns: string[] = [];
 		const harness = await createHarness({
 			extensionFactories: [
-				(arcmind) => {
-					arcmind.registerCommand("testcmd", {
+				(metis) => {
+					metis.registerCommand("testcmd", {
 						description: "Test command",
 						handler: async (args) => {
 							commandRuns.push(args);
@@ -332,8 +332,8 @@ describe("AgentSession prompt characterization", () => {
 		const inputEvents: InputEvent[] = [];
 		const harness = await createHarness({
 			extensionFactories: [
-				(arcmind) => {
-					arcmind.on("input", (event) => {
+				(metis) => {
+					metis.on("input", (event) => {
 						inputEvents.push(event);
 					});
 				},
@@ -370,8 +370,8 @@ describe("AgentSession prompt characterization", () => {
 		const harness = await createHarness({
 			tools: [waitTool],
 			extensionFactories: [
-				(arcmind) => {
-					arcmind.on("input", (event) => {
+				(metis) => {
+					metis.on("input", (event) => {
 						inputEvents.push(event);
 					});
 				},

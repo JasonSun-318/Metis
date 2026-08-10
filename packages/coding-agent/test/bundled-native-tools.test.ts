@@ -9,7 +9,7 @@ describe("bundled native tools", () => {
 	let packageDir: string;
 
 	beforeEach(() => {
-		packageDir = join(tmpdir(), `arcmind-native-tools-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+		packageDir = join(tmpdir(), `metis-native-tools-${Date.now()}-${Math.random().toString(36).slice(2)}`);
 		mkdirSync(packageDir, { recursive: true });
 	});
 

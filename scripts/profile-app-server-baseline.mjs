@@ -12,7 +12,7 @@ const distRpcEntry = join(packageDir, "dist", "rpc-entry.js");
 const distIndex = join(packageDir, "dist", "index.js");
 const distAppServerIndex = join(repoRoot, "packages", "app-server", "dist", "index.js");
 const startupProfiler = join(repoRoot, "scripts", "profile-coding-agent-node.mjs");
-const agentDirEnvName = "ARCMIND_CODING_AGENT_DIR";
+const agentDirEnvName = "METIS_CODING_AGENT_DIR";
 const minimalResourceArgs = [
 	"--no-extensions",
 	"--no-skills",
@@ -304,7 +304,7 @@ async function sampleChildren(children, rounds = 3) {
 }
 
 function isolatedEnv(agentDir) {
-	return { ...process.env, [agentDirEnvName]: agentDir, ARCMIND_OFFLINE: "1" };
+	return { ...process.env, [agentDirEnvName]: agentDir, METIS_OFFLINE: "1" };
 }
 
 async function startRpc(agentDir) {
@@ -392,7 +392,7 @@ async function measureStartup(options, root) {
 			"--json-output",
 			jsonOutput,
 		],
-		{ cwd: repoRoot, env: { ...process.env, ARCMIND_OFFLINE: "1" } },
+		{ cwd: repoRoot, env: { ...process.env, METIS_OFFLINE: "1" } },
 	);
 	let stderr = "";
 	child.stdout.resume();
@@ -459,7 +459,7 @@ async function runRuntimeHost(runtimeCount, agentDir) {
 
 async function measureWorkspaceSandbox() {
 	const codingAgent = await import(pathToFileURL(distIndex).href);
-	const root = mkdtempSync(join(tmpdir(), "arcmind-sandbox-profile-"));
+	const root = mkdtempSync(join(tmpdir(), "metis-sandbox-profile-"));
 	const cwd = join(root, "workspace");
 	const outside = join(root, "outside");
 	mkdirSync(cwd);
@@ -602,7 +602,7 @@ async function measureScheduleIdle() {
 		import(pathToFileURL(distIndex).href),
 		import(pathToFileURL(distAppServerIndex).href),
 	]);
-	const root = mkdtempSync(join(tmpdir(), "arcmind-schedule-idle-profile-"));
+	const root = mkdtempSync(join(tmpdir(), "metis-schedule-idle-profile-"));
 	const agentDir = join(root, "agent");
 	const workspace = tmpdir();
 	mkdirSync(agentDir);
@@ -664,7 +664,7 @@ async function measureScheduleIdle() {
 
 async function measureScheduleDue() {
 	const { ScheduleManager } = await import(pathToFileURL(distIndex).href);
-	const root = mkdtempSync(join(tmpdir(), "arcmind-schedule-due-profile-"));
+	const root = mkdtempSync(join(tmpdir(), "metis-schedule-due-profile-"));
 	const agentDir = join(root, "agent");
 	const workspace = join(root, "workspace");
 	mkdirSync(agentDir);
@@ -780,7 +780,7 @@ async function main() {
 		return;
 	}
 
-	const tempRoot = mkdtempSync(join(tmpdir(), "arcmind-desktop-baseline-"));
+	const tempRoot = mkdtempSync(join(tmpdir(), "metis-desktop-baseline-"));
 	try {
 		const startup = await measureStartup(options, tempRoot);
 		const oneRpcProcess = await measureRpcProcesses(1, join(tempRoot, "one-rpc"));

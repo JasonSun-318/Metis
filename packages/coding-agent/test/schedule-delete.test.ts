@@ -20,7 +20,7 @@ import { getDefaultSessionDir, getSessionImageDir, SessionManager } from "../src
 const roots: string[] = [];
 
 function tempDir(): string {
-	const path = mkdtempSync(join(tmpdir(), "arcmind-schedule-delete-"));
+	const path = mkdtempSync(join(tmpdir(), "metis-schedule-delete-"));
 	roots.push(path);
 	return path;
 }

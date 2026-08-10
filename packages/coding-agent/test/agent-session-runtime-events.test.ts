@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fauxAssistantMessage, registerFauxProvider } from "@arcmind/ai/compat";
+import { fauxAssistantMessage, registerFauxProvider } from "@metis/ai/compat";
 import { afterEach, describe, expect, it } from "vitest";
 import type { AgentMode } from "../src/core/agent-mode.ts";
 import {
@@ -37,7 +37,7 @@ describe("AgentSessionRuntime session lifecycle events", () => {
 	});
 
 	async function createRuntimeHost(extensionFactory: ExtensionFactory, initialMode: AgentMode = "code") {
-		const tempDir = join(tmpdir(), `arcmind-runtime-events-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+		const tempDir = join(tmpdir(), `metis-runtime-events-${Date.now()}-${Math.random().toString(36).slice(2)}`);
 		mkdirSync(tempDir, { recursive: true });
 
 		const faux = registerFauxProvider();
@@ -52,8 +52,8 @@ describe("AgentSessionRuntime session lifecycle events", () => {
 			model: faux.getModel(),
 			resourceLoaderOptions: {
 				extensionFactories: [
-					(arcmind: ExtensionAPI) => {
-						arcmind.registerProvider(faux.getModel().provider, {
+					(metis: ExtensionAPI) => {
+						metis.registerProvider(faux.getModel().provider, {
 							baseUrl: faux.getModel().baseUrl,
 							apiKey: "faux-key",
 							api: faux.api,
@@ -128,14 +128,14 @@ describe("AgentSessionRuntime session lifecycle events", () => {
 
 	it("emits session_before_switch and session_start for new and resume flows", async () => {
 		const events: RecordedSessionEvent[] = [];
-		const { runtimeHost } = await createRuntimeHost((arcmind) => {
-			arcmind.on("session_before_switch", (event) => {
+		const { runtimeHost } = await createRuntimeHost((metis) => {
+			metis.on("session_before_switch", (event) => {
 				events.push(event);
 			});
-			arcmind.on("session_shutdown", (event) => {
+			metis.on("session_shutdown", (event) => {
 				events.push(event);
 			});
-			arcmind.on("session_start", (event) => {
+			metis.on("session_start", (event) => {
 				events.push(event);
 			});
 		});
@@ -172,12 +172,12 @@ describe("AgentSessionRuntime session lifecycle events", () => {
 
 	it("honors session_before_switch cancellation", async () => {
 		const events: RecordedSessionEvent[] = [];
-		const { runtimeHost } = await createRuntimeHost((arcmind) => {
-			arcmind.on("session_before_switch", (event) => {
+		const { runtimeHost } = await createRuntimeHost((metis) => {
+			metis.on("session_before_switch", (event) => {
 				events.push(event);
 				return { cancel: true };
 			});
-			arcmind.on("session_start", (event) => {
+			metis.on("session_start", (event) => {
 				events.push(event);
 			});
 		});
@@ -196,8 +196,8 @@ describe("AgentSessionRuntime session lifecycle events", () => {
 
 	it("runs beforeSessionInvalidate after session_shutdown and before rebindSession", async () => {
 		const phases: string[] = [];
-		const { runtimeHost } = await createRuntimeHost((arcmind) => {
-			arcmind.on("session_shutdown", () => {
+		const { runtimeHost } = await createRuntimeHost((metis) => {
+			metis.on("session_shutdown", () => {
 				phases.push("session_shutdown");
 			});
 		});
@@ -214,7 +214,7 @@ describe("AgentSessionRuntime session lifecycle events", () => {
 
 		expect(phases).toEqual(["session_shutdown", "beforeSessionInvalidate", "rebindSession"]);
 		expect(() => oldSession.extensionRunner.createContext().cwd).toThrow(
-			"This extension ctx is stale after session replacement or reload. Do not use a captured arcmind or command ctx after ctx.newSession(), ctx.fork(), ctx.switchSession(), or ctx.reload(). For newSession, fork, and switchSession, move post-replacement work into withSession and use the ctx passed to withSession. For reload, do not use the old ctx after await ctx.reload().",
+			"This extension ctx is stale after session replacement or reload. Do not use a captured metis or command ctx after ctx.newSession(), ctx.fork(), ctx.switchSession(), or ctx.reload(). For newSession, fork, and switchSession, move post-replacement work into withSession and use the ctx passed to withSession. For reload, do not use the old ctx after await ctx.reload().",
 		);
 		runtimeHost.setBeforeSessionInvalidate(undefined);
 		runtimeHost.setRebindSession(undefined);
@@ -223,18 +223,18 @@ describe("AgentSessionRuntime session lifecycle events", () => {
 	it("emits session_before_fork and session_start and honors cancellation", async () => {
 		const events: RecordedSessionEvent[] = [];
 		let cancelNextFork = false;
-		const { runtimeHost } = await createRuntimeHost((arcmind) => {
-			arcmind.on("session_before_fork", (event) => {
+		const { runtimeHost } = await createRuntimeHost((metis) => {
+			metis.on("session_before_fork", (event) => {
 				events.push(event);
 				if (cancelNextFork) {
 					cancelNextFork = false;
 					return { cancel: true };
 				}
 			});
-			arcmind.on("session_shutdown", (event) => {
+			metis.on("session_shutdown", (event) => {
 				events.push(event);
 			});
-			arcmind.on("session_start", (event) => {
+			metis.on("session_start", (event) => {
 				events.push(event);
 			});
 		});

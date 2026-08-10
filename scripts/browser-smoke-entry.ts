@@ -1,5 +1,5 @@
-import { createAssistantMessageEventStream, Type } from "@arcmind/ai";
-import { complete, getModel, getProviders } from "@arcmind/ai/compat";
+import { createAssistantMessageEventStream, Type } from "@metis/ai";
+import { complete, getModel, getProviders } from "@metis/ai/compat";
 import {
 	Agent,
 	bashExecutionToText,
@@ -16,7 +16,7 @@ import {
 	streamProxy,
 	toError,
 	truncateHead,
-} from "@arcmind/agent-core";
+} from "@metis/agent-core";
 
 // Keep this entry browser-safe. It is bundled by scripts/check-browser-smoke.mjs
 // to catch accidental Node-only runtime imports in browser-facing package exports.

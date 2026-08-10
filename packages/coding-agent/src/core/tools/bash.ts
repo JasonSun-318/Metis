@@ -1,7 +1,7 @@
 import { constants } from "node:fs";
 import { access as fsAccess } from "node:fs/promises";
-import type { AgentTool } from "@arcmind/agent-core";
-import { Container, Text, truncateToWidth } from "@arcmind/tui";
+import type { AgentTool } from "@metis/agent-core";
+import { Container, Text, truncateToWidth } from "@metis/tui";
 import { spawn } from "child_process";
 import { type Static, Type } from "typebox";
 import { keyHint } from "../../modes/interactive/components/keybinding-hints.ts";
@@ -75,9 +75,9 @@ export interface BashOperations {
 }
 
 /**
- * Create bash operations using arcmind's built-in local shell execution backend.
+ * Create bash operations using Metis's built-in local shell execution backend.
  *
- * This is useful for extensions that intercept user_bash and still want arcmind's
+ * This is useful for extensions that intercept user_bash and still want Metis's
  * standard local shell behavior while wrapping or rewriting commands.
  */
 export function createLocalBashOperations(options?: { shellPath?: string }): BashOperations {
@@ -313,7 +313,7 @@ export function createBashToolDefinition(
 		) {
 			const resolvedCommand = commandPrefix ? `${commandPrefix}\n${command}` : command;
 			const spawnContext = resolveSpawnContext(resolvedCommand, cwd, spawnHook);
-			const output = new OutputAccumulator({ tempFilePrefix: "arcmind-bash", outputDir: options?.outputDir });
+			const output = new OutputAccumulator({ tempFilePrefix: "metis-bash", outputDir: options?.outputDir });
 			let acceptingOutput = true;
 			let updateTimer: NodeJS.Timeout | undefined;
 			let updateDirty = false;

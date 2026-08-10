@@ -2,8 +2,8 @@
  * List available models with optional fuzzy search
  */
 
-import type { Api, Model } from "@arcmind/ai";
-import { fuzzyFilter } from "@arcmind/tui";
+import type { Api, Model } from "@metis/ai";
+import { fuzzyFilter } from "@metis/tui";
 import chalk from "chalk";
 import { formatNoModelsAvailableMessage } from "../core/auth-guidance.ts";
 import type { ModelRegistry } from "../core/model-registry.ts";

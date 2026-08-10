@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { InteractiveMode } from "../../../src/modes/interactive/interactive-mode.ts";
 
-// Regression for https://gitee.com/sun124578963_0/arc-mind/issues/5724
+// Regression for https://gitee.com/sun124578963_0/metis/issues/5724
 //
 // `proper-lockfile` installs `signal-exit`, whose signal listener re-sends
 // SIGTERM/SIGHUP when it observes no other process listeners during the same

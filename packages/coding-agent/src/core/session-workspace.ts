@@ -126,7 +126,7 @@ export function resolveNewSessionWorkspace(options: {
 	return { cwd: createExactOwnedDirectory(root, options.id), cwdOrigin: "managed" };
 }
 
-/** Return the exact ArcMind-owned workspace, or undefined for external/forged ownership. */
+/** Return the exact Metis-owned workspace, or undefined for external/forged ownership. */
 export function getOwnedManagedWorkspace(options: {
 	id: string;
 	cwd: string;
@@ -168,7 +168,7 @@ export function publishManagedWorkspaceCopy<T>(options: {
 		cwdOrigin: "managed",
 		agentDir: options.agentDir,
 	});
-	if (!source) throw new Error("Source workspace is not owned by ArcMind");
+	if (!source) throw new Error("Source workspace is not owned by Metis");
 	assertValidSessionId(options.targetId);
 	const { root, canonicalRoot } = ensureManagedWorkspaceRoot(options.agentDir);
 	const target = getManagedWorkspaceDir(options.targetId, options.agentDir);

@@ -14,11 +14,11 @@ describe("createAgentSession skills option", () => {
 	let skillsDir: string;
 
 	beforeEach(() => {
-		tempDir = join(tmpdir(), `arcmind-sdk-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+		tempDir = join(tmpdir(), `metis-sdk-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
 		skillsDir = join(tempDir, "skills", "test-skill");
 		mkdirSync(skillsDir, { recursive: true });
 
-		// Create a test skill in the arcmind skills directory
+		// Create a test skill in the metis skills directory
 		writeFileSync(
 			join(skillsDir, "SKILL.md"),
 			`---

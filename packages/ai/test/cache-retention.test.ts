@@ -25,18 +25,18 @@ function stopAfterPayload<TPayload>(capture: (payload: TPayload) => void): (payl
 	};
 }
 
-describe("Cache Retention (ARCMIND_CACHE_RETENTION)", () => {
-	const originalEnv = process.env.ARCMIND_CACHE_RETENTION;
+describe("Cache Retention (METIS_CACHE_RETENTION)", () => {
+	const originalEnv = process.env.METIS_CACHE_RETENTION;
 
 	beforeEach(() => {
-		delete process.env.ARCMIND_CACHE_RETENTION;
+		delete process.env.METIS_CACHE_RETENTION;
 	});
 
 	afterEach(() => {
 		if (originalEnv !== undefined) {
-			process.env.ARCMIND_CACHE_RETENTION = originalEnv;
+			process.env.METIS_CACHE_RETENTION = originalEnv;
 		} else {
-			delete process.env.ARCMIND_CACHE_RETENTION;
+			delete process.env.METIS_CACHE_RETENTION;
 		}
 	});
 
@@ -47,7 +47,7 @@ describe("Cache Retention (ARCMIND_CACHE_RETENTION)", () => {
 
 	describe("Anthropic Provider", () => {
 		it.skipIf(!process.env.ANTHROPIC_API_KEY)(
-			"should use default cache TTL (no ttl field) when ARCMIND_CACHE_RETENTION is not set",
+			"should use default cache TTL (no ttl field) when METIS_CACHE_RETENTION is not set",
 			async () => {
 				const model = getModel("anthropic", "claude-haiku-4-5");
 				let capturedPayload: any = null;
@@ -70,33 +70,30 @@ describe("Cache Retention (ARCMIND_CACHE_RETENTION)", () => {
 			},
 		);
 
-		it.skipIf(!process.env.ANTHROPIC_API_KEY)(
-			"should use 1h cache TTL when ARCMIND_CACHE_RETENTION=long",
-			async () => {
-				process.env.ARCMIND_CACHE_RETENTION = "long";
-				const model = getModel("anthropic", "claude-haiku-4-5");
-				let capturedPayload: any = null;
+		it.skipIf(!process.env.ANTHROPIC_API_KEY)("should use 1h cache TTL when METIS_CACHE_RETENTION=long", async () => {
+			process.env.METIS_CACHE_RETENTION = "long";
+			const model = getModel("anthropic", "claude-haiku-4-5");
+			let capturedPayload: any = null;
 
-				const s = stream(model, context, {
-					onPayload: stopAfterPayload((payload) => {
-						capturedPayload = payload;
-					}),
-				});
+			const s = stream(model, context, {
+				onPayload: stopAfterPayload((payload) => {
+					capturedPayload = payload;
+				}),
+			});
 
-				// Consume the stream to trigger the request
-				for await (const _ of s) {
-					// Just consume
-				}
+			// Consume the stream to trigger the request
+			for await (const _ of s) {
+				// Just consume
+			}
 
-				expect(capturedPayload).not.toBeNull();
-				// System prompt should have cache_control with ttl: "1h"
-				expect(capturedPayload.system).toBeDefined();
-				expect(capturedPayload.system[0].cache_control).toEqual({ type: "ephemeral", ttl: "1h" });
-			},
-		);
+			expect(capturedPayload).not.toBeNull();
+			// System prompt should have cache_control with ttl: "1h"
+			expect(capturedPayload.system).toBeDefined();
+			expect(capturedPayload.system[0].cache_control).toEqual({ type: "ephemeral", ttl: "1h" });
+		});
 
 		it("should add ttl for non-api.anthropic.com baseUrl by default", async () => {
-			process.env.ARCMIND_CACHE_RETENTION = "long";
+			process.env.METIS_CACHE_RETENTION = "long";
 
 			// Create a model with a different baseUrl (simulating a proxy)
 			const baseModel = getModel("anthropic", "claude-haiku-4-5");
@@ -240,7 +237,7 @@ describe("Cache Retention (ARCMIND_CACHE_RETENTION)", () => {
 
 	describe("OpenAI Responses Provider", () => {
 		it.skipIf(!process.env.OPENAI_API_KEY)(
-			"should not set prompt_cache_retention when ARCMIND_CACHE_RETENTION is not set",
+			"should not set prompt_cache_retention when METIS_CACHE_RETENTION is not set",
 			async () => {
 				const model = getModel("openai", "gpt-4o-mini");
 				let capturedPayload: any = null;
@@ -262,9 +259,9 @@ describe("Cache Retention (ARCMIND_CACHE_RETENTION)", () => {
 		);
 
 		it.skipIf(!process.env.OPENAI_API_KEY)(
-			"should set prompt_cache_retention to 24h when ARCMIND_CACHE_RETENTION=long",
+			"should set prompt_cache_retention to 24h when METIS_CACHE_RETENTION=long",
 			async () => {
-				process.env.ARCMIND_CACHE_RETENTION = "long";
+				process.env.METIS_CACHE_RETENTION = "long";
 				const model = getModel("openai", "gpt-4o-mini");
 				let capturedPayload: any = null;
 
@@ -285,7 +282,7 @@ describe("Cache Retention (ARCMIND_CACHE_RETENTION)", () => {
 		);
 
 		it("should set prompt_cache_retention for non-api.openai.com baseUrl by default", async () => {
-			process.env.ARCMIND_CACHE_RETENTION = "long";
+			process.env.METIS_CACHE_RETENTION = "long";
 
 			// Create a model with a different baseUrl (simulating a proxy)
 			const baseModel = getModel("openai", "gpt-4o-mini");

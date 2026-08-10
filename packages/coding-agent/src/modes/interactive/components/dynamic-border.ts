@@ -1,4 +1,4 @@
-import type { Component } from "@arcmind/tui";
+import type { Component } from "@metis/tui";
 import { theme } from "../theme/theme.ts";
 
 /**

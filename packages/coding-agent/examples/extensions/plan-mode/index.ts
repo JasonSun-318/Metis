@@ -12,10 +12,10 @@
  * - Progress tracking widget during execution
  */
 
-import type { AgentMessage } from "@arcmind/agent-core";
-import type { AssistantMessage, TextContent } from "@arcmind/ai";
-import type { ExtensionAPI, ExtensionContext } from "@arcmind/coding-agent";
-import { Key } from "@arcmind/tui";
+import type { AgentMessage } from "@metis/agent-core";
+import type { AssistantMessage, TextContent } from "@metis/ai";
+import type { ExtensionAPI, ExtensionContext } from "@metis/coding-agent";
+import { Key } from "@metis/tui";
 import { extractTodoItems, isSafeCommand, markCompletedSteps, type TodoItem } from "./utils.ts";
 
 // Tools
@@ -44,13 +44,13 @@ function getTextContent(message: AssistantMessage): string {
 		.join("\n");
 }
 
-export default function planModeExtension(arcmind: ExtensionAPI): void {
+export default function planModeExtension(metis: ExtensionAPI): void {
 	let planModeEnabled = false;
 	let executionMode = false;
 	let todoItems: TodoItem[] = [];
 	let toolsBeforePlanMode: string[] | undefined;
 
-	arcmind.registerFlag("plan", {
+	metis.registerFlag("plan", {
 		description: "Start in plan mode (read-only exploration)",
 		type: "boolean",
 		default: false,
@@ -103,18 +103,18 @@ export default function planModeExtension(arcmind: ExtensionAPI): void {
 
 	function enablePlanModeTools(): void {
 		if (toolsBeforePlanMode === undefined) {
-			toolsBeforePlanMode = arcmind.getActiveTools();
+			toolsBeforePlanMode = metis.getActiveTools();
 		}
-		arcmind.setActiveTools(getPlanModeTools(toolsBeforePlanMode));
+		metis.setActiveTools(getPlanModeTools(toolsBeforePlanMode));
 	}
 
 	function restoreNormalModeTools(): void {
-		arcmind.setActiveTools(toolsBeforePlanMode ?? getNormalModeTools(arcmind.getActiveTools()));
+		metis.setActiveTools(toolsBeforePlanMode ?? getNormalModeTools(metis.getActiveTools()));
 		toolsBeforePlanMode = undefined;
 	}
 
 	function persistState(): void {
-		arcmind.appendEntry("plan-mode", {
+		metis.appendEntry("plan-mode", {
 			enabled: planModeEnabled,
 			todos: todoItems,
 			executing: executionMode,
@@ -138,12 +138,12 @@ export default function planModeExtension(arcmind: ExtensionAPI): void {
 		persistState();
 	}
 
-	arcmind.registerCommand("plan", {
+	metis.registerCommand("plan", {
 		description: "Toggle plan mode (read-only exploration)",
 		handler: async (_args, ctx) => togglePlanMode(ctx),
 	});
 
-	arcmind.registerCommand("todos", {
+	metis.registerCommand("todos", {
 		description: "Show current plan todo list",
 		handler: async (_args, ctx) => {
 			if (todoItems.length === 0) {
@@ -155,13 +155,13 @@ export default function planModeExtension(arcmind: ExtensionAPI): void {
 		},
 	});
 
-	arcmind.registerShortcut(Key.ctrlAlt("p"), {
+	metis.registerShortcut(Key.ctrlAlt("p"), {
 		description: "Toggle plan mode",
 		handler: async (ctx) => togglePlanMode(ctx),
 	});
 
 	// Block destructive bash commands in plan mode
-	arcmind.on("tool_call", async (event) => {
+	metis.on("tool_call", async (event) => {
 		if (!planModeEnabled || event.toolName !== "bash") return;
 
 		const command = event.input.command as string;
@@ -174,7 +174,7 @@ export default function planModeExtension(arcmind: ExtensionAPI): void {
 	});
 
 	// Filter out stale plan mode context when not in plan mode
-	arcmind.on("context", async (event) => {
+	metis.on("context", async (event) => {
 		if (planModeEnabled) return;
 
 		return {
@@ -198,7 +198,7 @@ export default function planModeExtension(arcmind: ExtensionAPI): void {
 	});
 
 	// Inject plan/execution context before agent starts
-	arcmind.on("before_agent_start", async () => {
+	metis.on("before_agent_start", async () => {
 		if (planModeEnabled) {
 			return {
 				message: {
@@ -247,7 +247,7 @@ After completing a step, include a [DONE:n] tag in your response.`,
 	});
 
 	// Track progress after each turn
-	arcmind.on("turn_end", async (event, ctx) => {
+	metis.on("turn_end", async (event, ctx) => {
 		if (!executionMode || todoItems.length === 0) return;
 		if (!isAssistantMessage(event.message)) return;
 
@@ -259,12 +259,12 @@ After completing a step, include a [DONE:n] tag in your response.`,
 	});
 
 	// Handle plan completion and plan mode UI
-	arcmind.on("agent_end", async (event, ctx) => {
+	metis.on("agent_end", async (event, ctx) => {
 		// Check if execution is complete
 		if (executionMode && todoItems.length > 0) {
 			if (todoItems.every((t) => t.completed)) {
 				const completedList = todoItems.map((t) => `~~${t.text}~~`).join("\n");
-				arcmind.sendMessage(
+				metis.sendMessage(
 					{ customType: "plan-complete", content: `**Plan Complete!** ✓\n\n${completedList}`, display: true },
 					{ triggerTurn: false },
 				);
@@ -322,23 +322,23 @@ ${remainingList}
 
 Start with: ${firstTodoItem.text}
 After completing a step, include a [DONE:n] tag in your response.`;
-			arcmind.sendMessage(planTodoListMessage, { deliverAs: "followUp" });
-			arcmind.sendMessage(
+			metis.sendMessage(planTodoListMessage, { deliverAs: "followUp" });
+			metis.sendMessage(
 				{ customType: "plan-mode-execute", content: execMessage, display: true },
 				{ triggerTurn: true, deliverAs: "followUp" },
 			);
 		} else if (choice === "Refine the plan") {
 			const refinement = await ctx.ui.editor("Refine the plan:", "");
 			if (refinement?.trim()) {
-				arcmind.sendMessage(planTodoListMessage, { deliverAs: "followUp" });
-				arcmind.sendUserMessage(refinement.trim(), { deliverAs: "followUp" });
+				metis.sendMessage(planTodoListMessage, { deliverAs: "followUp" });
+				metis.sendUserMessage(refinement.trim(), { deliverAs: "followUp" });
 			}
 		}
 	});
 
 	// Restore state on session start/resume
-	arcmind.on("session_start", async (_event, ctx) => {
-		if (arcmind.getFlag("plan") === true) {
+	metis.on("session_start", async (_event, ctx) => {
+		if (metis.getFlag("plan") === true) {
 			planModeEnabled = true;
 		}
 

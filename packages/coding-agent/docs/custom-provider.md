@@ -1,6 +1,6 @@
 # Custom Providers
 
-Extensions can register custom model providers via `arcmind.registerProvider()`. This enables:
+Extensions can register custom model providers via `metis.registerProvider()`. This enables:
 
 - **Proxies** - Route requests through corporate proxies or API gateways
 - **Custom endpoints** - Use self-hosted or private model deployments
@@ -30,16 +30,16 @@ See these complete provider examples:
 ## Quick Reference
 
 ```typescript
-import type { ExtensionAPI } from "@arcmind/coding-agent";
+import type { ExtensionAPI } from "@metis/coding-agent";
 
-export default function (arcmind: ExtensionAPI) {
+export default function (metis: ExtensionAPI) {
   // Override baseUrl for existing provider
-  arcmind.registerProvider("anthropic", {
+  metis.registerProvider("anthropic", {
     baseUrl: "https://proxy.example.com"
   });
 
   // Register new provider with models
-  arcmind.registerProvider("my-provider", {
+  metis.registerProvider("my-provider", {
     name: "My Provider",
     baseUrl: "https://api.example.com",
     apiKey: "$MY_API_KEY",
@@ -59,7 +59,7 @@ export default function (arcmind: ExtensionAPI) {
 }
 ```
 
-The extension factory can also be `async`. For dynamic model discovery, fetch and register models in the factory instead of `session_start`. arcmind waits for the factory before startup continues, so the provider is available during interactive startup and to `arcmind --list-models`.
+The extension factory can also be `async`. For dynamic model discovery, fetch and register models in the factory instead of `session_start`. metis waits for the factory before startup continues, so the provider is available during interactive startup and to `metis --list-models`.
 
 ## Override Existing Provider
 
@@ -67,19 +67,19 @@ The simplest use case: redirect an existing provider through a proxy.
 
 ```typescript
 // All Anthropic requests now go through your proxy
-arcmind.registerProvider("anthropic", {
+metis.registerProvider("anthropic", {
   baseUrl: "https://proxy.example.com"
 });
 
 // Add custom headers to OpenAI requests
-arcmind.registerProvider("openai", {
+metis.registerProvider("openai", {
   headers: {
     "X-Custom-Header": "value"
   }
 });
 
 // Both baseUrl and headers
-arcmind.registerProvider("google", {
+metis.registerProvider("google", {
   baseUrl: "https://ai-gateway.corp.com/google",
   headers: {
     "X-Corp-Auth": "$CORP_AUTH_TOKEN"  // env var or literal
@@ -96,9 +96,9 @@ To add a completely new provider, specify `models` along with the required confi
 If the model list comes from a remote endpoint, use an async extension factory:
 
 ```typescript
-import type { ExtensionAPI } from "@arcmind/coding-agent";
+import type { ExtensionAPI } from "@metis/coding-agent";
 
-export default async function (arcmind: ExtensionAPI) {
+export default async function (metis: ExtensionAPI) {
   const response = await fetch("http://localhost:1234/v1/models");
   const payload = (await response.json()) as {
     data: Array<{
@@ -109,7 +109,7 @@ export default async function (arcmind: ExtensionAPI) {
     }>;
   };
 
-  arcmind.registerProvider("local-openai", {
+  metis.registerProvider("local-openai", {
     baseUrl: "http://localhost:1234/v1",
     apiKey: "$LOCAL_OPENAI_API_KEY",
     api: "openai-completions",
@@ -129,7 +129,7 @@ export default async function (arcmind: ExtensionAPI) {
 This registers the fetched models before startup finishes.
 
 ```typescript
-arcmind.registerProvider("my-llm", {
+metis.registerProvider("my-llm", {
   baseUrl: "https://api.my-llm.com/v1",
   apiKey: "$MY_LLM_API_KEY",  // env var reference
   api: "openai-completions",  // which streaming API to use
@@ -158,11 +158,11 @@ When `models` is provided, it **replaces** all existing models for that provider
 
 ## Unregister Provider
 
-Use `arcmind.unregisterProvider(name)` to remove a provider that was previously registered via `arcmind.registerProvider(name, ...)`:
+Use `metis.unregisterProvider(name)` to remove a provider that was previously registered via `metis.registerProvider(name, ...)`:
 
 ```typescript
 // Register
-arcmind.registerProvider("my-llm", {
+metis.registerProvider("my-llm", {
   baseUrl: "https://api.my-llm.com/v1",
   apiKey: "$MY_LLM_API_KEY",
   api: "openai-completions",
@@ -180,7 +180,7 @@ arcmind.registerProvider("my-llm", {
 });
 
 // Later, remove it
-arcmind.unregisterProvider("my-llm");
+metis.unregisterProvider("my-llm");
 ```
 
 Unregistering removes that provider's dynamic models, API key fallback, OAuth provider registration, and custom stream handler registrations. Any built-in models or provider behavior that were overridden are restored.
@@ -210,7 +210,7 @@ models: [{
   id: "custom-model",
   // ...
   reasoning: true,
-  thinkingLevelMap: {              // map arcmind levels to provider values; null hides unsupported levels
+  thinkingLevelMap: {              // map metis levels to provider values; null hides unsupported levels
     minimal: null,
     low: null,
     medium: null,
@@ -243,7 +243,7 @@ For Anthropic-compatible providers using `api: "anthropic-messages"`, set `compa
 If your provider expects `Authorization: Bearer <key>` but doesn't use a standard API, set `authHeader: true`:
 
 ```typescript
-arcmind.registerProvider("custom-api", {
+metis.registerProvider("custom-api", {
   baseUrl: "https://api.example.com",
   apiKey: "$MY_API_KEY",
   authHeader: true,  // adds Authorization: Bearer header
@@ -257,9 +257,9 @@ arcmind.registerProvider("custom-api", {
 Add OAuth/SSO authentication that integrates with `/login`:
 
 ```typescript
-import type { OAuthCredentials, OAuthLoginCallbacks } from "@arcmind/ai";
+import type { OAuthCredentials, OAuthLoginCallbacks } from "@metis/ai";
 
-arcmind.registerProvider("corporate-ai", {
+metis.registerProvider("corporate-ai", {
   baseUrl: "https://ai.corp.com/v1",
   api: "openai-responses",
   models: [...],
@@ -357,7 +357,7 @@ interface OAuthLoginCallbacks {
 
 ### OAuthCredentials
 
-Credentials are persisted in `~/.arcmind/agent/auth.json`:
+Credentials are persisted in `~/.metis/agent/auth.json`:
 
 ```typescript
 interface OAuthCredentials {
@@ -372,12 +372,12 @@ interface OAuthCredentials {
 For providers with non-standard APIs, implement `streamSimple`. Study the existing provider implementations before writing your own:
 
 **Reference implementations:**
-- [anthropic.ts](https://github.com/arcmind/arcmind/blob/main/packages/ai/src/providers/anthropic.ts) - Anthropic Messages API
-- [mistral.ts](https://github.com/arcmind/arcmind/blob/main/packages/ai/src/providers/mistral.ts) - Mistral Conversations API
-- [openai-completions.ts](https://github.com/arcmind/arcmind/blob/main/packages/ai/src/providers/openai-completions.ts) - OpenAI Chat Completions
-- [openai-responses.ts](https://github.com/arcmind/arcmind/blob/main/packages/ai/src/providers/openai-responses.ts) - OpenAI Responses API
-- [google.ts](https://github.com/arcmind/arcmind/blob/main/packages/ai/src/providers/google.ts) - Google Generative AI
-- [amazon-bedrock.ts](https://github.com/arcmind/arcmind/blob/main/packages/ai/src/providers/amazon-bedrock.ts) - AWS Bedrock
+- [anthropic.ts](https://github.com/metis/metis/blob/main/packages/ai/src/providers/anthropic.ts) - Anthropic Messages API
+- [mistral.ts](https://github.com/metis/metis/blob/main/packages/ai/src/providers/mistral.ts) - Mistral Conversations API
+- [openai-completions.ts](https://github.com/metis/metis/blob/main/packages/ai/src/providers/openai-completions.ts) - OpenAI Chat Completions
+- [openai-responses.ts](https://github.com/metis/metis/blob/main/packages/ai/src/providers/openai-responses.ts) - OpenAI Responses API
+- [google.ts](https://github.com/metis/metis/blob/main/packages/ai/src/providers/google.ts) - Google Generative AI
+- [amazon-bedrock.ts](https://github.com/metis/metis/blob/main/packages/ai/src/providers/amazon-bedrock.ts) - AWS Bedrock
 
 ### Stream Pattern
 
@@ -392,7 +392,7 @@ import {
   type SimpleStreamOptions,
   calculateCost,
   createAssistantMessageEventStream,
-} from "@arcmind/ai";
+} from "@metis/ai";
 
 function streamMyProvider(
   model: Model<any>,
@@ -535,22 +535,22 @@ calculateCost(model, output.usage);
 
 ### Context Overflow Errors
 
-When a request exceeds the model's context window, arcmind can recover automatically by compacting the conversation and retrying. This recovery only kicks in if arcmind recognizes the failure as an overflow.
+When a request exceeds the model's context window, metis can recover automatically by compacting the conversation and retrying. This recovery only kicks in if metis recognizes the failure as an overflow.
 
 Detection runs on the finalized assistant message:
 
 - `stopReason === "error"`
-- `errorMessage` matches one of arcmind's known overflow patterns (see [`packages/ai/src/utils/overflow.ts`](https://github.com/arcmind/arcmind/blob/main/packages/ai/src/utils/overflow.ts))
+- `errorMessage` matches one of metis's known overflow patterns (see [`packages/ai/src/utils/overflow.ts`](https://github.com/metis/metis/blob/main/packages/ai/src/utils/overflow.ts))
 
-If your provider returns overflow errors with a message arcmind does not recognize, normalize the error from the same extension that registers the provider. Use a `message_end` handler to rewrite the assistant message so its `errorMessage` starts with a phrase arcmind recognizes. The generic fallback `context_length_exceeded` is the safest choice.
+If your provider returns overflow errors with a message metis does not recognize, normalize the error from the same extension that registers the provider. Use a `message_end` handler to rewrite the assistant message so its `errorMessage` starts with a phrase metis recognizes. The generic fallback `context_length_exceeded` is the safest choice.
 
 ```typescript
 const MY_PROVIDER_OVERFLOW_PATTERN = /your provider's overflow phrase/i;
 
-export default function (arcmind: ExtensionAPI) {
-  arcmind.registerProvider("my-provider", { /* ... */ });
+export default function (metis: ExtensionAPI) {
+  metis.registerProvider("my-provider", { /* ... */ });
 
-  arcmind.on("message_end", (event, ctx) => {
+  metis.on("message_end", (event, ctx) => {
     const message = event.message;
     if (message.role !== "assistant") return;
     if (message.stopReason !== "error") return;
@@ -574,7 +574,7 @@ export default function (arcmind: ExtensionAPI) {
 }
 ```
 
-`message_end` runs before arcmind tracks the assistant message for auto-compaction, so the rewritten `errorMessage` is what arcmind checks. With this in place, arcmind will:
+`message_end` runs before metis tracks the assistant message for auto-compaction, so the rewritten `errorMessage` is what metis checks. With this in place, metis will:
 
 1. Detect the overflow from `errorMessage`.
 2. Drop the failed assistant message from live context.
@@ -584,7 +584,7 @@ export default function (arcmind: ExtensionAPI) {
 Guard the rewrite carefully:
 
 - Scope it to your provider (`message.provider` and `ctx.model?.provider`) so unrelated errors from other providers are untouched.
-- Match a provider-specific pattern, not arcmind's generic overflow patterns. Rewriting rate-limit or throttling errors (`rate limit`, `too many requests`) would falsely trigger compaction instead of arcmind's normal retry-with-backoff path.
+- Match a provider-specific pattern, not metis's generic overflow patterns. Rewriting rate-limit or throttling errors (`rate limit`, `too many requests`) would falsely trigger compaction instead of metis's normal retry-with-backoff path.
 - Skip when `errorMessage` already includes `context_length_exceeded` so the handler is idempotent.
 
 ### Registration
@@ -592,7 +592,7 @@ Guard the rewrite carefully:
 Register your stream function:
 
 ```typescript
-arcmind.registerProvider("my-provider", {
+metis.registerProvider("my-provider", {
   baseUrl: "https://api.example.com",
   apiKey: "$MY_API_KEY",
   api: "my-custom-api",
@@ -603,7 +603,7 @@ arcmind.registerProvider("my-provider", {
 
 ## Testing Your Implementation
 
-Test your provider against the same test suites used by built-in providers. Copy and adapt these test files from [packages/ai/test/](https://github.com/arcmind/arcmind/tree/main/packages/ai/test):
+Test your provider against the same test suites used by built-in providers. Copy and adapt these test files from [packages/ai/test/](https://github.com/metis/metis/tree/main/packages/ai/test):
 
 | Test | Purpose |
 |------|---------|
@@ -683,7 +683,7 @@ interface ProviderModelConfig {
   /** Whether the model supports extended thinking. */
   reasoning: boolean;
 
-  /** Maps arcmind thinking levels to provider/model-specific values; null marks a level unsupported. */
+  /** Maps metis thinking levels to provider/model-specific values; null marks a level unsupported. */
   thinkingLevelMap?: Partial<Record<"off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max", string | null>>;
 
   /** Supported input types. */

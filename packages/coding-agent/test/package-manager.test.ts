@@ -74,8 +74,8 @@ describe("DefaultPackageManager", () => {
 	let previousOfflineEnv: string | undefined;
 
 	beforeEach(() => {
-		previousOfflineEnv = process.env.ARCMIND_OFFLINE;
-		delete process.env.ARCMIND_OFFLINE;
+		previousOfflineEnv = process.env.METIS_OFFLINE;
+		delete process.env.METIS_OFFLINE;
 		tempDir = join(tmpdir(), `pm-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
 		mkdirSync(tempDir, { recursive: true });
 		agentDir = join(tempDir, "agent");
@@ -91,9 +91,9 @@ describe("DefaultPackageManager", () => {
 
 	afterEach(() => {
 		if (previousOfflineEnv === undefined) {
-			delete process.env.ARCMIND_OFFLINE;
+			delete process.env.METIS_OFFLINE;
 		} else {
-			process.env.ARCMIND_OFFLINE = previousOfflineEnv;
+			process.env.METIS_OFFLINE = previousOfflineEnv;
 		}
 		vi.restoreAllMocks();
 		vi.unstubAllGlobals();
@@ -142,7 +142,7 @@ Content`,
 			expect(result.skills.some((r) => r.path === skillFile && r.enabled)).toBe(true);
 		});
 
-		it("should auto-discover root markdown skills from .arcmind skill dirs", async () => {
+		it("should auto-discover root markdown skills from .metis skill dirs", async () => {
 			const skillFile = join(agentDir, "skills", "single-file.md");
 			mkdirSync(join(agentDir, "skills"), { recursive: true });
 			writeFileSync(
@@ -158,8 +158,8 @@ Content`,
 			expect(result.skills.some((r) => r.path === skillFile && r.enabled)).toBe(true);
 		});
 
-		it("should resolve project paths relative to .arcmind", async () => {
-			const extDir = join(tempDir, ".arcmind", "extensions");
+		it("should resolve project paths relative to .metis", async () => {
+			const extDir = join(tempDir, ".metis", "extensions");
 			mkdirSync(extDir, { recursive: true });
 			const extPath = join(extDir, "project-ext.ts");
 			writeFileSync(extPath, "export default function() {}");
@@ -211,15 +211,15 @@ Content`,
 				writeFileSync(join(sharedThemesDir, "shared.json"), JSON.stringify({ name: "shared-theme" }));
 
 				mkdirSync(join(agentDir), { recursive: true });
-				mkdirSync(join(tempDir, ".arcmind"), { recursive: true });
+				mkdirSync(join(tempDir, ".metis"), { recursive: true });
 				symlinkSync(sharedExtensionsDir, join(agentDir, "extensions"), "dir");
 				symlinkSync(sharedSkillsDir, join(agentDir, "skills"), "dir");
 				symlinkSync(sharedPromptsDir, join(agentDir, "prompts"), "dir");
 				symlinkSync(sharedThemesDir, join(agentDir, "themes"), "dir");
-				symlinkSync(sharedExtensionsDir, join(tempDir, ".arcmind", "extensions"), "dir");
-				symlinkSync(sharedSkillsDir, join(tempDir, ".arcmind", "skills"), "dir");
-				symlinkSync(sharedPromptsDir, join(tempDir, ".arcmind", "prompts"), "dir");
-				symlinkSync(sharedThemesDir, join(tempDir, ".arcmind", "themes"), "dir");
+				symlinkSync(sharedExtensionsDir, join(tempDir, ".metis", "extensions"), "dir");
+				symlinkSync(sharedSkillsDir, join(tempDir, ".metis", "skills"), "dir");
+				symlinkSync(sharedPromptsDir, join(tempDir, ".metis", "prompts"), "dir");
+				symlinkSync(sharedThemesDir, join(tempDir, ".metis", "themes"), "dir");
 
 				const result = await packageManager.resolve();
 
@@ -251,7 +251,7 @@ Content`,
 		});
 
 		it("should auto-discover project prompts with overrides", async () => {
-			const promptsDir = join(tempDir, ".arcmind", "prompts");
+			const promptsDir = join(tempDir, ".metis", "prompts");
 			mkdirSync(promptsDir, { recursive: true });
 			const promptPath = join(promptsDir, "is.md");
 			writeFileSync(promptPath, "Is prompt");
@@ -262,15 +262,15 @@ Content`,
 			expect(result.prompts.some((r) => r.path === promptPath && !r.enabled)).toBe(true);
 		});
 
-		it("should resolve directory with package.json arcmind.extensions in extensions setting", async () => {
-			// Create a package with arcmind.extensions in package.json
+		it("should resolve directory with package.json metis.extensions in extensions setting", async () => {
+			// Create a package with metis.extensions in package.json
 			const pkgDir = join(tempDir, "my-extensions-pkg");
 			mkdirSync(join(pkgDir, "extensions"), { recursive: true });
 			writeFileSync(
 				join(pkgDir, "package.json"),
 				JSON.stringify({
 					name: "my-extensions-pkg",
-					arcmind: {
+					metis: {
 						extensions: ["./extensions/clip.ts", "./extensions/cost.ts"],
 					},
 				}),
@@ -284,7 +284,7 @@ Content`,
 
 			const result = await packageManager.resolve();
 
-			// Should find the extensions declared in package.json arcmind.extensions
+			// Should find the extensions declared in package.json metis.extensions
 			expect(result.extensions.some((r) => r.path === join(pkgDir, "extensions", "clip.ts") && r.enabled)).toBe(
 				true,
 			);
@@ -295,13 +295,32 @@ Content`,
 			// Should NOT find helper.ts (not declared in manifest)
 			expect(result.extensions.some((r) => pathEndsWith(r.path, "helper.ts"))).toBe(false);
 		});
+
+		it("prefers a Metis manifest when both manifest fields exist", async () => {
+			const pkgDir = join(tempDir, "dual-manifest-package");
+			mkdirSync(join(pkgDir, "extensions"), { recursive: true });
+			writeFileSync(join(pkgDir, "extensions", "metis.ts"), "export default function() {}");
+			writeFileSync(join(pkgDir, "extensions", "legacy.ts"), "export default function() {}");
+			writeFileSync(
+				join(pkgDir, "package.json"),
+				JSON.stringify({
+					metis: { extensions: ["./extensions/metis.ts"] },
+					arcmind: { extensions: ["./extensions/legacy.ts"] },
+				}),
+			);
+			settingsManager.setExtensionPaths([pkgDir]);
+
+			const result = await packageManager.resolve();
+			expect(result.extensions.some((entry) => entry.path.endsWith("/metis.ts"))).toBe(true);
+			expect(result.extensions.some((entry) => entry.path.endsWith("/legacy.ts"))).toBe(false);
+		});
 	});
 
 	describe("auto-discovered skill metadata", () => {
-		it("should use the agent dir as baseDir for user .arcmind/agent skills", async () => {
-			const skillPath = join(agentDir, "skills", "user-arcmind", "SKILL.md");
-			mkdirSync(join(agentDir, "skills", "user-arcmind"), { recursive: true });
-			writeFileSync(skillPath, "---\nname: user-arcmind\ndescription: user arcmind\n---\n");
+		it("should use the agent dir as baseDir for user .metis/agent skills", async () => {
+			const skillPath = join(agentDir, "skills", "user-metis", "SKILL.md");
+			mkdirSync(join(agentDir, "skills", "user-metis"), { recursive: true });
+			writeFileSync(skillPath, "---\nname: user-metis\ndescription: user metis\n---\n");
 
 			const result = await packageManager.resolve();
 			const skill = result.skills.find((r) => r.path === skillPath);
@@ -311,11 +330,11 @@ Content`,
 			expect(skill?.metadata.baseDir).toBe(agentDir);
 		});
 
-		it("should use the project .arcmind dir as baseDir for project .arcmind skills", async () => {
-			const projectBaseDir = join(tempDir, ".arcmind");
-			const skillPath = join(projectBaseDir, "skills", "project-arcmind", "SKILL.md");
-			mkdirSync(join(projectBaseDir, "skills", "project-arcmind"), { recursive: true });
-			writeFileSync(skillPath, "---\nname: project-arcmind\ndescription: project arcmind\n---\n");
+		it("should use the project .metis dir as baseDir for project .metis skills", async () => {
+			const projectBaseDir = join(tempDir, ".metis");
+			const skillPath = join(projectBaseDir, "skills", "project-metis", "SKILL.md");
+			mkdirSync(join(projectBaseDir, "skills", "project-metis"), { recursive: true });
+			writeFileSync(skillPath, "---\nname: project-metis\ndescription: project metis\n---\n");
 
 			const result = await packageManager.resolve();
 			const skill = result.skills.find((r) => r.path === skillPath);
@@ -466,7 +485,7 @@ Content`,
 
 			try {
 				const cwd = join(tempDir, "scratch", "nested");
-				const localAgentDir = join(tempDir, ".arcmind", "agent");
+				const localAgentDir = join(tempDir, ".metis", "agent");
 				const localSettingsManager = SettingsManager.inMemory();
 				mkdirSync(cwd, { recursive: true });
 				mkdirSync(localAgentDir, { recursive: true });
@@ -496,7 +515,7 @@ Content`,
 			}
 		});
 
-		it("should dedupe user skill entries when ~/.arcmind/agent/skills is a symlink to ~/.agents/skills", async () => {
+		it("should dedupe user skill entries when ~/.metis/agent/skills is a symlink to ~/.agents/skills", async () => {
 			const previousHome = process.env.HOME;
 			process.env.HOME = tempDir;
 
@@ -547,10 +566,10 @@ Content`,
 			expect(result.skills.some((r) => r.path.includes("venv") && r.enabled)).toBe(false);
 		});
 
-		it("should not apply parent .gitignore to .arcmind auto-discovery", async () => {
-			writeFileSync(join(tempDir, ".gitignore"), ".arcmind\n");
+		it("should not apply parent .gitignore to .metis auto-discovery", async () => {
+			writeFileSync(join(tempDir, ".gitignore"), ".metis\n");
 
-			const skillDir = join(tempDir, ".arcmind", "skills", "auto-skill");
+			const skillDir = join(tempDir, ".metis", "skills", "auto-skill");
 			mkdirSync(skillDir, { recursive: true });
 			const skillPath = join(skillDir, "SKILL.md");
 			writeFileSync(skillPath, "---\nname: auto-skill\ndescription: Auto\n---\nContent");
@@ -569,14 +588,14 @@ Content`,
 			expect(result.extensions.some((r) => r.path === extPath && r.enabled)).toBe(true);
 		});
 
-		it("should handle directories with arcmind manifest", async () => {
+		it("should handle directories with metis manifest", async () => {
 			const pkgDir = join(tempDir, "my-package");
 			mkdirSync(pkgDir, { recursive: true });
 			writeFileSync(
 				join(pkgDir, "package.json"),
 				JSON.stringify({
 					name: "my-package",
-					arcmind: {
+					metis: {
 						extensions: ["./src/index.ts"],
 						skills: ["./skills"],
 					},
@@ -598,7 +617,7 @@ Content`,
 			);
 		});
 
-		it("should keep arcmind manifest entries with leading tilde package-relative", async () => {
+		it("should keep metis manifest entries with leading tilde package-relative", async () => {
 			const pkgDir = join(tempDir, "tilde-manifest-package");
 			const directExtensionPath = join(pkgDir, "~extensions", "main.ts");
 			const slashExtensionPath = join(pkgDir, "~", "extensions", "alt.ts");
@@ -617,7 +636,7 @@ Content`,
 				join(pkgDir, "package.json"),
 				JSON.stringify({
 					name: "tilde-manifest-package",
-					arcmind: {
+					metis: {
 						extensions: ["~extensions/main.ts", "~/extensions/alt.ts"],
 						skills: ["~skills", "~/skills"],
 					},
@@ -679,7 +698,7 @@ Content`,
 			const managerWithInternals = packageManager as unknown as {
 				runCommandSync(command: string, args: string[]): string;
 			};
-			const valueWithSpace = "C:\\Users\\A B\\.arcmind\\npm";
+			const valueWithSpace = "C:\\Users\\A B\\.metis\\npm";
 			const output = managerWithInternals.runCommandSync(process.execPath, [
 				"-e",
 				"console.log(process.argv[1])",
@@ -863,7 +882,7 @@ Content`,
 
 		it("should update git package dependencies with --omit=dev", async () => {
 			const source = "git:github.com/user/repo";
-			const targetDir = join(tempDir, ".arcmind", "git", "github.com", "user", "repo");
+			const targetDir = join(tempDir, ".metis", "git", "github.com", "user", "repo");
 			mkdirSync(targetDir, { recursive: true });
 			writeFileSync(join(targetDir, "package.json"), JSON.stringify({ name: "repo", version: "1.0.0" }));
 			settingsManager.setProjectPackages([source]);
@@ -899,7 +918,7 @@ Content`,
 			});
 
 			const source = "git:github.com/user/repo";
-			const targetDir = join(tempDir, ".arcmind", "git", "github.com", "user", "repo");
+			const targetDir = join(tempDir, ".metis", "git", "github.com", "user", "repo");
 			mkdirSync(targetDir, { recursive: true });
 			writeFileSync(join(targetDir, "package.json"), JSON.stringify({ name: "repo", version: "1.0.0" }));
 			settingsManager.setProjectPackages([source]);
@@ -965,7 +984,7 @@ Content`,
 			expect(runCommandSyncSpy).toHaveBeenNthCalledWith(2, "mise", ["exec", "node@22", "--", "npm", "root", "-g"]);
 		});
 
-		it("should install user npm packages into the arcmind-managed npm root", async () => {
+		it("should install user npm packages into the Metis-managed npm root", async () => {
 			settingsManager = SettingsManager.inMemory({
 				npmCommand: ["pnpm"],
 				packages: ["npm:pnpm-pkg"],
@@ -1206,7 +1225,7 @@ Content`,
 
 			expect(pathEndsWith(installPath, "node_modules/left-pad")).toBe(true);
 			expect(relative(tempRoot, installPath).startsWith("..")).toBe(false);
-			expect(installPath.startsWith(join(tmpdir(), "arcmind-extensions"))).toBe(false);
+			expect(installPath.startsWith(join(tmpdir(), "metis-extensions"))).toBe(false);
 			if (process.platform !== "win32") {
 				expect(statSync(tempRoot).mode & 0o777).toBe(0o700);
 			}
@@ -1228,7 +1247,7 @@ Content`,
 			expect(settings.packages?.[0]).toBe(expected);
 		});
 
-		it("should store project local packages relative to .arcmind settings base", () => {
+		it("should store project local packages relative to .metis settings base", () => {
 			const projectPkgDir = join(tempDir, "project-local-pkg");
 			mkdirSync(join(projectPkgDir, "extensions"), { recursive: true });
 			writeFileSync(join(projectPkgDir, "extensions", "index.ts"), "export default function() {}");
@@ -1237,7 +1256,7 @@ Content`,
 			expect(added).toBe(true);
 
 			const settings = settingsManager.getProjectSettings();
-			const rel = relative(join(tempDir, ".arcmind"), projectPkgDir);
+			const rel = relative(join(tempDir, ".metis"), projectPkgDir);
 			const expected = rel.startsWith(".") ? rel : `./${rel}`;
 			expect(settings.packages?.[0]).toBe(expected);
 		});
@@ -1482,7 +1501,7 @@ Content`,
 		});
 	});
 
-	describe("pattern filtering in arcmind manifest", () => {
+	describe("pattern filtering in metis manifest", () => {
 		it("should support glob patterns in manifest extensions", async () => {
 			const pkgDir = join(tempDir, "manifest-pkg");
 			mkdirSync(join(pkgDir, "extensions"), { recursive: true });
@@ -1494,7 +1513,7 @@ Content`,
 				join(pkgDir, "package.json"),
 				JSON.stringify({
 					name: "manifest-pkg",
-					arcmind: {
+					metis: {
 						extensions: ["extensions", "node_modules/dep/extensions", "!**/skip.ts"],
 					},
 				}),
@@ -1522,7 +1541,7 @@ Content`,
 				join(pkgDir, "package.json"),
 				JSON.stringify({
 					name: "skill-manifest-pkg",
-					arcmind: {
+					metis: {
 						skills: ["skills", "!**/bad-skill"],
 					},
 				}),
@@ -1549,7 +1568,7 @@ Content`,
 				join(pkgDir, "package.json"),
 				JSON.stringify({
 					name: "skill-manifest-glob-pkg",
-					arcmind: {
+					metis: {
 						skills: ["./plugins/*/skills"],
 					},
 				}),
@@ -1574,7 +1593,7 @@ Content`,
 				join(pkgDir, "package.json"),
 				JSON.stringify({
 					name: "layered-pkg",
-					arcmind: {
+					metis: {
 						extensions: ["extensions", "!**/baz.ts"],
 					},
 				}),
@@ -1689,14 +1708,14 @@ Content`,
 		});
 
 		it("should resolve autoload-disabled project package entries as deltas over global packages", async () => {
-			const pkgDir = join(agentDir, "npm", "node_modules", "arcmind-tools");
+			const pkgDir = join(agentDir, "npm", "node_modules", "metis-tools");
 			mkdirSync(join(pkgDir, "extensions"), { recursive: true });
-			writeFileSync(join(pkgDir, "package.json"), JSON.stringify({ name: "arcmind-tools", version: "1.0.0" }));
+			writeFileSync(join(pkgDir, "package.json"), JSON.stringify({ name: "metis-tools", version: "1.0.0" }));
 			writeFileSync(join(pkgDir, "extensions", "foo.ts"), "export default function() {}");
 			writeFileSync(join(pkgDir, "extensions", "bar.ts"), "export default function() {}");
-			settingsManager.setPackages(["npm:arcmind-tools"]);
+			settingsManager.setPackages(["npm:metis-tools"]);
 			settingsManager.setProjectPackages([
-				{ source: "npm:arcmind-tools", autoload: false, extensions: ["-extensions/foo.ts"] },
+				{ source: "npm:metis-tools", autoload: false, extensions: ["-extensions/foo.ts"] },
 			]);
 			const runCommandSpy = vi
 				.spyOn(packageManager as unknown as PackageManagerInternals, "runCommand")
@@ -1723,7 +1742,7 @@ Content`,
 			writeFileSync(join(pkgDir, "skills", "foo", "SKILL.md"), "# Foo\n");
 			settingsManager.setProjectPackages([
 				{
-					source: relative(join(tempDir, ".arcmind"), pkgDir),
+					source: relative(join(tempDir, ".metis"), pkgDir),
 					autoload: false,
 					extensions: ["+extensions/foo.ts"],
 				},
@@ -1825,7 +1844,7 @@ Content`,
 				join(pkgDir, "package.json"),
 				JSON.stringify({
 					name: "manifest-force-pkg",
-					arcmind: {
+					metis: {
 						extensions: ["extensions", "!**/two.ts", "+extensions/two.ts"],
 					},
 				}),
@@ -2047,7 +2066,7 @@ export default function(api) { api.registerTool({ name: "test", description: "te
 			expect(result.extensions.some((r) => pathEndsWith(r.path, "agents.ts"))).toBe(false);
 		});
 
-		it("should respect package.json arcmind.extensions manifest in subdirectories", async () => {
+		it("should respect package.json metis.extensions manifest in subdirectories", async () => {
 			const pkgDir = join(tempDir, "manifest-subdir-pkg");
 			mkdirSync(join(pkgDir, "extensions", "custom"), { recursive: true });
 
@@ -2055,7 +2074,7 @@ export default function(api) { api.registerTool({ name: "test", description: "te
 			writeFileSync(
 				join(pkgDir, "extensions", "custom", "package.json"),
 				JSON.stringify({
-					arcmind: {
+					metis: {
 						extensions: ["./main.ts"],
 					},
 				}),
@@ -2122,7 +2141,7 @@ export default function(api) { api.registerTool({ name: "test", description: "te
 
 	describe("offline mode and network timeouts", () => {
 		it("should update npm range packages using the configured spec", async () => {
-			const installedPath = join(tempDir, ".arcmind", "npm", "node_modules", "example");
+			const installedPath = join(tempDir, ".metis", "npm", "node_modules", "example");
 			mkdirSync(installedPath, { recursive: true });
 			writeFileSync(join(installedPath, "package.json"), JSON.stringify({ name: "example", version: "1.0.0" }));
 			settingsManager.setProjectPackages(["npm:example@^1.0.0"]);
@@ -2141,13 +2160,13 @@ export default function(api) { api.registerTool({ name: "test", description: "te
 			);
 			expect(runCommandSpy).toHaveBeenCalledWith(
 				"npm",
-				["install", "example@^1.0.0", "--prefix", join(tempDir, ".arcmind", "npm"), "--legacy-peer-deps"],
+				["install", "example@^1.0.0", "--prefix", join(tempDir, ".metis", "npm"), "--legacy-peer-deps"],
 				undefined,
 			);
 		});
 
 		it("should skip project npm update when installed version matches latest", async () => {
-			const installedPath = join(tempDir, ".arcmind", "npm", "node_modules", "example");
+			const installedPath = join(tempDir, ".metis", "npm", "node_modules", "example");
 			mkdirSync(installedPath, { recursive: true });
 			writeFileSync(join(installedPath, "package.json"), JSON.stringify({ name: "example", version: "1.3.1" }));
 			settingsManager.setProjectPackages(["npm:example@^1.0.0"]);
@@ -2209,8 +2228,8 @@ export default function(api) { api.registerTool({ name: "test", description: "te
 			const userOldPath = join(agentDir, "npm", "node_modules", "user-old");
 			const userCurrentPath = join(agentDir, "npm", "node_modules", "user-current");
 			const userUnknownPath = join(agentDir, "npm", "node_modules", "user-unknown");
-			const projectOldPath = join(tempDir, ".arcmind", "npm", "node_modules", "project-old");
-			const projectCurrentPath = join(tempDir, ".arcmind", "npm", "node_modules", "project-current");
+			const projectOldPath = join(tempDir, ".metis", "npm", "node_modules", "project-old");
+			const projectCurrentPath = join(tempDir, ".metis", "npm", "node_modules", "project-current");
 			const installPaths = [userOldPath, userCurrentPath, userUnknownPath, projectOldPath, projectCurrentPath];
 			for (const installPath of installPaths) {
 				mkdirSync(installPath, { recursive: true });
@@ -2316,7 +2335,7 @@ export default function(api) { api.registerTool({ name: "test", description: "te
 					"project-old@latest",
 					"project-missing@latest",
 					"--prefix",
-					join(tempDir, ".arcmind", "npm"),
+					join(tempDir, ".metis", "npm"),
 					"--legacy-peer-deps",
 				],
 				undefined,
@@ -2343,7 +2362,7 @@ export default function(api) { api.registerTool({ name: "test", description: "te
 		});
 
 		it("should skip installing missing package sources when offline", async () => {
-			process.env.ARCMIND_OFFLINE = "1";
+			process.env.METIS_OFFLINE = "1";
 			settingsManager.setProjectPackages(["npm:missing-package", "git:github.com/example/missing-repo"]);
 
 			const installParsedSourceSpy = vi.spyOn(packageManager as any, "installParsedSource");
@@ -2355,7 +2374,7 @@ export default function(api) { api.registerTool({ name: "test", description: "te
 		});
 
 		it("should skip refreshing temporary git sources when offline", async () => {
-			process.env.ARCMIND_OFFLINE = "1";
+			process.env.METIS_OFFLINE = "1";
 			const gitSource = "git:github.com/example/repo";
 			const parsedGitSource = (packageManager as any).parseSource(gitSource);
 			const installedPath = (packageManager as any).getGitInstallPath(parsedGitSource, "temporary") as string;
@@ -2371,8 +2390,8 @@ export default function(api) { api.registerTool({ name: "test", description: "te
 		});
 
 		it("should not run npm view during resolve for installed unpinned packages", async () => {
-			process.env.ARCMIND_OFFLINE = "1";
-			const installedPath = join(tempDir, ".arcmind", "npm", "node_modules", "example");
+			process.env.METIS_OFFLINE = "1";
+			const installedPath = join(tempDir, ".metis", "npm", "node_modules", "example");
 			mkdirSync(join(installedPath, "extensions"), { recursive: true });
 			writeFileSync(join(installedPath, "package.json"), JSON.stringify({ name: "example", version: "1.0.0" }));
 			writeFileSync(join(installedPath, "extensions", "index.ts"), "export default function() {};");
@@ -2386,7 +2405,7 @@ export default function(api) { api.registerTool({ name: "test", description: "te
 		});
 
 		it("should reinstall pinned npm packages when installed version does not match", async () => {
-			const installedPath = join(tempDir, ".arcmind", "npm", "node_modules", "example");
+			const installedPath = join(tempDir, ".metis", "npm", "node_modules", "example");
 			mkdirSync(installedPath, { recursive: true });
 			writeFileSync(join(installedPath, "package.json"), JSON.stringify({ name: "example", version: "1.0.0" }));
 			settingsManager.setProjectPackages(["npm:example@2.0.0"]);
@@ -2400,7 +2419,7 @@ export default function(api) { api.registerTool({ name: "test", description: "te
 		});
 
 		it("should not check package updates when offline", async () => {
-			process.env.ARCMIND_OFFLINE = "1";
+			process.env.METIS_OFFLINE = "1";
 			const runCommandCaptureSpy = vi.spyOn(packageManager as any, "runCommandCapture");
 
 			const updates = await packageManager.checkForAvailableUpdates();
@@ -2409,7 +2428,7 @@ export default function(api) { api.registerTool({ name: "test", description: "te
 		});
 
 		it("should report updates for installed unpinned npm packages", async () => {
-			const installedPath = join(tempDir, ".arcmind", "npm", "node_modules", "example");
+			const installedPath = join(tempDir, ".metis", "npm", "node_modules", "example");
 			mkdirSync(installedPath, { recursive: true });
 			writeFileSync(join(installedPath, "package.json"), JSON.stringify({ name: "example", version: "1.0.0" }));
 			settingsManager.setProjectPackages(["npm:example"]);
@@ -2428,7 +2447,7 @@ export default function(api) { api.registerTool({ name: "test", description: "te
 		});
 
 		it("should skip pinned packages when checking for updates", async () => {
-			const installedNpmPath = join(tempDir, ".arcmind", "npm", "node_modules", "example");
+			const installedNpmPath = join(tempDir, ".metis", "npm", "node_modules", "example");
 			mkdirSync(installedNpmPath, { recursive: true });
 			writeFileSync(join(installedNpmPath, "package.json"), JSON.stringify({ name: "example", version: "1.0.0" }));
 			const parsedGitSource = (packageManager as any).parseSource("git:github.com/example/repo@v1");

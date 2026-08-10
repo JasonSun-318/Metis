@@ -1,6 +1,6 @@
 # Models architecture
 
-This document describes the target design for the next `arcmind-ai` model/provider refactor. It describes the desired shape, not the current implementation. It is intended to be complete enough to start implementing from a fresh session.
+This document describes the target design for the next `metis-ai` model/provider refactor. It describes the desired shape, not the current implementation. It is intended to be complete enough to start implementing from a fresh session.
 
 Goals:
 
@@ -14,7 +14,7 @@ Goals:
 - `models.json` and extensions layer by wrapping providers, not by mutating provider internals ad hoc.
 - Old global APIs survive only in an explicit, temporary `/compat` entrypoint.
 
-Non-goals for the immediate `arcmind-ai` pass:
+Non-goals for the immediate `metis-ai` pass:
 
 - Do not migrate coding-agent `ModelRegistry` yet.
 - Do not keep the stream/API registry inside `Models`.
@@ -87,8 +87,8 @@ Provider, API, and compat entrypoints are explicit subpath exports.
 Minimal provider usage:
 
 ```ts
-import { createModels } from "@arcmind/ai";
-import { openaiProvider } from "@arcmind/ai/providers/openai";
+import { createModels } from "@metis/ai";
+import { openaiProvider } from "@metis/ai/providers/openai";
 
 const models = createModels();
 models.setProvider(openaiProvider());
@@ -110,7 +110,7 @@ models.setProvider(openrouterProvider());
 All built-ins, explicitly heavy metadata entrypoint:
 
 ```ts
-import { builtinModels } from "@arcmind/ai/providers/all";
+import { builtinModels } from "@metis/ai/providers/all";
 
 const models = builtinModels();
 ```
@@ -471,7 +471,7 @@ export type Credential = ApiKeyCredential | OAuthCredential;
 
 ### Credential store
 
-The app injects storage; `arcmind-ai` ships an in-memory default. Keyed by provider id, one credential per provider:
+The app injects storage; `metis-ai` ships an in-memory default. Keyed by provider id, one credential per provider:
 
 ```ts
 export interface CredentialStore {
@@ -700,7 +700,7 @@ Built-in provider factories use `createProvider()` internally. models.json custo
 
 ## Compat entrypoint
 
-`@arcmind/ai/compat` preserves the old global API surface until the coding-agent migration deletes it. New code never imports it.
+`@metis/ai/compat` preserves the old global API surface until the coding-agent migration deletes it. New code never imports it.
 
 Old semantics being preserved: global `stream()` can still dispatch by `model.api` through the legacy api-registry for custom providers, mutated models, and tests/extensions that override a built-in API implementation.
 
@@ -710,9 +710,9 @@ Old semantics being preserved: global `stream()` can still dispatch by `model.ap
 - Re-exports the per-API lazy stream wrappers (incl. `setBedrockProviderModule`), `env-api-keys.ts`, and the image-generation registry/catalogs; none of these stay on the root barrel.
 - `export * from "./index.ts"`: compat is a strict superset of the core entrypoint, so consumers switch a file's import path wholesale without symbol surgery.
 
-coding-agent (and the interim agent package) switch imports of these symbols from `@arcmind/ai` to `@arcmind/ai/compat` (import-path-only change) and are otherwise untouched until the ModelManager migration.
+coding-agent (and the interim agent package) switch imports of these symbols from `@metis/ai` to `@metis/ai/compat` (import-path-only change) and are otherwise untouched until the ModelManager migration.
 
-Extension grace period: the coding-agent extension loader (jiti aliases + Bun `virtualModules`) resolves the `@arcmind/ai` ROOT specifier to the compat entrypoint. Existing user extensions using the old global API (`complete`, `getModel`, `registerApiProvider`, ...) keep working at runtime without changes; they break only when compat is removed at the ModelManager migration, with a migration guide in the changelog. Typechecking is the nudge: editors resolve the root to the slim core types, so extension sources that typecheck must import old globals from `/compat` — which is what the repo example extensions demonstrate.
+Extension grace period: the coding-agent extension loader (jiti aliases + Bun `virtualModules`) resolves the `@metis/ai` ROOT specifier to the compat entrypoint. Existing user extensions using the old global API (`complete`, `getModel`, `registerApiProvider`, ...) keep working at runtime without changes; they break only when compat is removed at the ModelManager migration, with a migration guide in the changelog. Typechecking is the nudge: editors resolve the root to the slim core types, so extension sources that typecheck must import old globals from `/compat` — which is what the repo example extensions demonstrate.
 
 ## Builtin static helpers
 
@@ -732,7 +732,7 @@ Generated catalogs are split per provider (`providers/<id>.models.ts`) by updati
 
 Rules:
 
-1. Main `@arcmind/ai` import is core-only.
+1. Main `@metis/ai` import is core-only.
 2. Provider modules import their catalog, auth helpers, and lazy API wrappers only.
 3. Lazy API wrappers dynamically import real API implementations.
 4. Real API implementations import SDK dependencies.
@@ -791,8 +791,8 @@ Current interim state:
 
 - `AgentHarness` already accepts a `Models` instance and uses it for turn streaming, compaction, and branch summaries.
 - coding-agent does not use `AgentHarness` yet; `AgentSession` still drives the low-level `Agent` with a `streamFn`.
-- coding-agent still uses legacy `AuthStorage` + `ModelRegistry` and imports old global arcmind-ai APIs through `@arcmind/ai/compat`.
-- The extension loader still aliases the arcmind-ai root to `/compat` as the runtime grace period for old extensions.
+- coding-agent still uses legacy `AuthStorage` + `ModelRegistry` and imports old global metis-ai APIs through `@metis/ai/compat`.
+- The extension loader still aliases the metis-ai root to `/compat` as the runtime grace period for old extensions.
 
 ## Implementation TODOs
 
@@ -844,20 +844,20 @@ Check items off as they land. Keep this list current; it is the working state fo
 
 ### Phase 7 — coding-agent bridge (minimal)
 
-- [x] Switch old-global imports to `@arcmind/ai/compat` (landed with Phase 5; compat is a superset so the switch was path-only). Extension loader resolves the arcmind-ai root to compat as the runtime grace period.
+- [x] Switch old-global imports to `@metis/ai/compat` (landed with Phase 5; compat is a superset so the switch was path-only). Extension loader resolves the metis-ai root to compat as the runtime grace period.
 - [x] Everything else originally sketched here is gated on coding-agent actually streaming through a `Models` instance — coding-agent's `AgentSession` drives the low-level `Agent` via `streamFn`, not the harness — and moved to Phase 9.
 
 ### Phase 8 — wrap-up
 
 - [x] Update/add tests; run affected suites (tests landed with each phase; `./test.sh` green throughout).
 - [x] `packages/ai/CHANGELOG.md`: `### Breaking Changes` with migration guide (compat entrypoint, `Provider` -> `ProviderId`, api module moves) + `### Added` for the new Models/provider/auth API.
-- [x] `packages/coding-agent/CHANGELOG.md`: `### Changed` entry for extension authors — runtime unaffected (loader resolves the arcmind-ai root to compat), typecheck nudges to `/compat` or the new API; removal happens later with a migration guide.
+- [x] `packages/coding-agent/CHANGELOG.md`: `### Changed` entry for extension authors — runtime unaffected (loader resolves the metis-ai root to compat), typecheck nudges to `/compat` or the new API; removal happens later with a migration guide.
 - [x] `packages/agent/CHANGELOG.md`: `### Breaking Changes` for required `AgentHarnessOptions.models`, compaction signature changes, structural `StreamFn`.
 - [x] `npm run check` clean.
 
 ### Phase 9 — coding-agent on Models + CredentialStore (in scope)
 
-coding-agent replaces AuthStorage and ModelRegistry's internals with `FileCredentialStore` + a `MutableModels` collection. AgentSession itself stays (AgentHarness adoption is arcmind 2.0); only its model/auth substrate swaps. Layering is strictly one-directional:
+coding-agent replaces AuthStorage and ModelRegistry's internals with `FileCredentialStore` + a `MutableModels` collection. AgentSession itself stays (AgentHarness adoption is metis 2.0); only its model/auth substrate swaps. Layering is strictly one-directional:
 
 ```txt
 FileCredentialStore (auth.json, locked, $ENV/!command resolution) + explicit --api-key overlay
@@ -882,10 +882,10 @@ Decisions:
 
 Ordering for new sessions:
 
-1. [x] arcmind-ai rework first: `Provider.getModels()` sync + optional `refreshModels()`; `Models.getModels`/`getModel` sync, `Models.refresh(provider?)` async; `createProvider` takes `models` array + optional `refreshModels` fetcher (in-flight dedupe). Reverses Phase 1's async-listing decision — see "Provider model listing" for rationale (sync-or-async unions breed latent sync assumptions; async-only breaks sync consumer surfaces like extension `find`/`getAll`).
-2. [x] Cloudflare provider auth in arcmind-ai factories: Workers AI and AI Gateway validate their required account/gateway env/config and return resolved `baseUrl`, provider-scoped env, and header suppression/override metadata from provider auth.
+1. [x] metis-ai rework first: `Provider.getModels()` sync + optional `refreshModels()`; `Models.getModels`/`getModel` sync, `Models.refresh(provider?)` async; `createProvider` takes `models` array + optional `refreshModels` fetcher (in-flight dedupe). Reverses Phase 1's async-listing decision — see "Provider model listing" for rationale (sync-or-async unions breed latent sync assumptions; async-only breaks sync consumer surfaces like extension `find`/`getAll`).
+2. [x] Cloudflare provider auth in metis-ai factories: Workers AI and AI Gateway validate their required account/gateway env/config and return resolved `baseUrl`, provider-scoped env, and header suppression/override metadata from provider auth.
 3. [ ] Add `FileCredentialStore` in coding-agent.
-   - Implement the arcmind-ai `CredentialStore` interface as a self-contained `auth.json` store; do not depend on the old `AuthStorageBackend` abstraction, though its lock/retry semantics may be ported.
+   - Implement the metis-ai `CredentialStore` interface as a self-contained `auth.json` store; do not depend on the old `AuthStorageBackend` abstraction, though its lock/retry semantics may be ported.
    - Preserve the existing file format. `ApiKeyCredential` uses `{ type: "api_key", key?, env? }`, matching today's `auth.json`; do not translate `env` into metadata or rewrite discriminators.
    - Resolve `$ENV`/`!command` in stored API-key `key` and `env` values out of the box using an injected execution/config environment. `$ENV` lookup should come from that environment, and `!command` should run through the shared shell execution path rather than direct `execSync`.
    - Persist raw config values; resolved credentials returned for auth use must be copies and must not rewrite `$ENV`/`!command` strings unless a caller explicitly stores new values.
@@ -910,7 +910,7 @@ Ordering for new sessions:
    - Keep API-key/env-token Copilot behavior unchanged.
    - Add tests for model metadata before login, after OAuth credential, after refresh/baseUrl change, and logout.
 7. [ ] Extension OAuth adapter.
-   - Adapt old extension `OAuthProviderInterface` configs to arcmind-ai `OAuthAuth`.
+   - Adapt old extension `OAuthProviderInterface` configs to metis-ai `OAuthAuth`.
    - `login` maps old callbacks/events to `prompt()/notify()`.
    - `refreshToken` maps to `refresh`.
    - `getApiKey` maps to `toAuth`.
@@ -935,11 +935,11 @@ Ordering for new sessions:
     - Update existing tests for sync last-known `ModelRegistry.getAll/find/getAvailable` plus explicit async refresh behavior.
     - Run targeted non-e2e suites plus tmux validation of login flows against real providers (Anthropic OAuth/API key, OpenAI Codex OAuth, GitHub Copilot OAuth, Cloudflare AI Gateway, Bedrock if credentials are available).
 
-### Phase 10 — compat deletion (arcmind 2.0 era, separate)
+### Phase 10 — compat deletion (metis 2.0 era, separate)
 
 - [ ] AgentSession -> AgentHarness; the registry facade dies in favor of harness `Models`.
 - [ ] Move ALL internal `/compat` imports to the new API: every package's src, all tests, and the example extensions (examples then demonstrate the new API). Nothing inside the repo may import `/compat` at that point.
-- [ ] Delete `/compat`, `env-api-keys.ts`, the extension-loader root-to-compat alias, the old `arcmind-ai/oauth` registry and `OAuthProviderInterface` (incl. `usesCallbackServer`), and the compat-local legacy API registry. This is the extension-author breaking release; changelog carries the migration guide.
+- [ ] Delete `/compat`, `env-api-keys.ts`, the extension-loader root-to-compat alias, the old `metis-ai/oauth` registry and `OAuthProviderInterface` (incl. `usesCallbackServer`), and the compat-local legacy API registry. This is the extension-author breaking release; changelog carries the migration guide.
 
 ### Deferred / follow-ups
 

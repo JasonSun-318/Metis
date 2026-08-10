@@ -2,8 +2,8 @@
  * Hello Tool - Minimal custom tool example
  */
 
-import { Type } from "@arcmind/ai";
-import { defineTool, type ExtensionAPI } from "@arcmind/coding-agent";
+import { Type } from "@metis/ai";
+import { defineTool, type ExtensionAPI } from "@metis/coding-agent";
 
 const helloTool = defineTool({
 	name: "hello",
@@ -21,6 +21,6 @@ const helloTool = defineTool({
 	},
 });
 
-export default function (arcmind: ExtensionAPI) {
-	arcmind.registerTool(helloTool);
+export default function (metis: ExtensionAPI) {
+	metis.registerTool(helloTool);
 }

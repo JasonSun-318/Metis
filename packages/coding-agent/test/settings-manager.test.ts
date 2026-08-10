@@ -16,7 +16,7 @@ describe("SettingsManager", () => {
 			rmSync(testDir, { recursive: true });
 		}
 		mkdirSync(agentDir, { recursive: true });
-		mkdirSync(join(projectDir, ".arcmind"), { recursive: true });
+		mkdirSync(join(projectDir, ".metis"), { recursive: true });
 	});
 
 	afterEach(() => {
@@ -54,7 +54,7 @@ describe("SettingsManager", () => {
 			manager.setProjectTrusted(true);
 			manager.setMcpServer("project", "local", { command: "node", args: ["server.mjs"] });
 			await manager.flush();
-			expect(JSON.parse(readFileSync(join(projectDir, ".arcmind", "settings.json"), "utf8"))).toMatchObject({
+			expect(JSON.parse(readFileSync(join(projectDir, ".metis", "settings.json"), "utf8"))).toMatchObject({
 				mcpServers: { local: { command: "node", args: ["server.mjs"] } },
 			});
 		});
@@ -70,7 +70,7 @@ describe("SettingsManager", () => {
 				}),
 			);
 
-			// Create SettingsManager (simulates arcmind starting up)
+			// Create SettingsManager (simulates metis starting up)
 			const manager = SettingsManager.create(projectDir, agentDir);
 
 			// Simulate user editing settings.json externally to add enabledModels
@@ -265,7 +265,7 @@ describe("SettingsManager", () => {
 	describe("error tracking", () => {
 		it("should collect and clear load errors via drainErrors", () => {
 			const globalSettingsPath = join(agentDir, "settings.json");
-			const projectSettingsPath = join(projectDir, ".arcmind", "settings.json");
+			const projectSettingsPath = join(projectDir, ".metis", "settings.json");
 			writeFileSync(globalSettingsPath, "{ invalid global json");
 			writeFileSync(projectSettingsPath, "{ invalid project json");
 
@@ -281,7 +281,7 @@ describe("SettingsManager", () => {
 	describe("project trust", () => {
 		it("should skip project settings when project is not trusted", () => {
 			writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ theme: "global" }));
-			writeFileSync(join(projectDir, ".arcmind", "settings.json"), JSON.stringify({ theme: "project" }));
+			writeFileSync(join(projectDir, ".metis", "settings.json"), JSON.stringify({ theme: "project" }));
 
 			const manager = SettingsManager.create(projectDir, agentDir, { projectTrusted: false });
 
@@ -292,7 +292,7 @@ describe("SettingsManager", () => {
 
 		it("should reload project settings after trust changes to true", () => {
 			writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ theme: "global" }));
-			writeFileSync(join(projectDir, ".arcmind", "settings.json"), JSON.stringify({ theme: "project" }));
+			writeFileSync(join(projectDir, ".metis", "settings.json"), JSON.stringify({ theme: "project" }));
 			const manager = SettingsManager.create(projectDir, agentDir, { projectTrusted: false });
 
 			manager.setProjectTrusted(true);
@@ -302,7 +302,7 @@ describe("SettingsManager", () => {
 		});
 
 		it("should fail project settings writes when project is not trusted", async () => {
-			const projectSettingsPath = join(projectDir, ".arcmind", "settings.json");
+			const projectSettingsPath = join(projectDir, ".metis", "settings.json");
 			writeFileSync(projectSettingsPath, JSON.stringify({ packages: ["npm:existing"] }));
 			const manager = SettingsManager.create(projectDir, agentDir, { projectTrusted: false });
 
@@ -317,7 +317,7 @@ describe("SettingsManager", () => {
 
 		it("should read default project trust from global settings only", () => {
 			writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ defaultProjectTrust: "always" }));
-			writeFileSync(join(projectDir, ".arcmind", "settings.json"), JSON.stringify({ defaultProjectTrust: "never" }));
+			writeFileSync(join(projectDir, ".metis", "settings.json"), JSON.stringify({ defaultProjectTrust: "never" }));
 
 			const manager = SettingsManager.create(projectDir, agentDir);
 
@@ -334,46 +334,46 @@ describe("SettingsManager", () => {
 	});
 
 	describe("project settings directory creation", () => {
-		it("should not create .arcmind folder when only reading project settings", () => {
-			// Create agent dir with global settings, but NO .arcmind folder in project
+		it("should not create .metis folder when only reading project settings", () => {
+			// Create agent dir with global settings, but NO .metis folder in project
 			const settingsPath = join(agentDir, "settings.json");
 			writeFileSync(settingsPath, JSON.stringify({ theme: "dark" }));
 
-			// Delete the .arcmind folder that beforeEach created
-			rmSync(join(projectDir, ".arcmind"), { recursive: true });
+			// Delete the .metis folder that beforeEach created
+			rmSync(join(projectDir, ".metis"), { recursive: true });
 
 			// Create SettingsManager (reads both global and project settings)
 			const manager = SettingsManager.create(projectDir, agentDir);
 
-			// .arcmind folder should NOT have been created just from reading
-			expect(existsSync(join(projectDir, ".arcmind"))).toBe(false);
+			// .metis folder should NOT have been created just from reading
+			expect(existsSync(join(projectDir, ".metis"))).toBe(false);
 
 			// Settings should still be loaded from global
 			expect(manager.getTheme()).toBe("dark");
 		});
 
-		it("should create .arcmind folder when writing project settings", async () => {
-			// Create agent dir with global settings, but NO .arcmind folder in project
+		it("should create .metis folder when writing project settings", async () => {
+			// Create agent dir with global settings, but NO .metis folder in project
 			const settingsPath = join(agentDir, "settings.json");
 			writeFileSync(settingsPath, JSON.stringify({ theme: "dark" }));
 
-			// Delete the .arcmind folder that beforeEach created
-			rmSync(join(projectDir, ".arcmind"), { recursive: true });
+			// Delete the .metis folder that beforeEach created
+			rmSync(join(projectDir, ".metis"), { recursive: true });
 
 			const manager = SettingsManager.create(projectDir, agentDir);
 
-			// .arcmind folder should NOT exist yet
-			expect(existsSync(join(projectDir, ".arcmind"))).toBe(false);
+			// .metis folder should NOT exist yet
+			expect(existsSync(join(projectDir, ".metis"))).toBe(false);
 
 			// Write a project-specific setting
 			manager.setProjectPackages([{ source: "npm:test-pkg" }]);
 			await manager.flush();
 
-			// Now .arcmind folder should exist
-			expect(existsSync(join(projectDir, ".arcmind"))).toBe(true);
+			// Now .metis folder should exist
+			expect(existsSync(join(projectDir, ".metis"))).toBe(true);
 
 			// And settings file should be created
-			expect(existsSync(join(projectDir, ".arcmind", "settings.json"))).toBe(true);
+			expect(existsSync(join(projectDir, ".metis", "settings.json"))).toBe(true);
 		});
 	});
 
@@ -385,7 +385,7 @@ describe("SettingsManager", () => {
 
 		it("should use merged global and project settings", () => {
 			writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ httpIdleTimeoutMs: 300000 }));
-			writeFileSync(join(projectDir, ".arcmind", "settings.json"), JSON.stringify({ httpIdleTimeoutMs: 0 }));
+			writeFileSync(join(projectDir, ".metis", "settings.json"), JSON.stringify({ httpIdleTimeoutMs: 0 }));
 
 			const manager = SettingsManager.create(projectDir, agentDir);
 
@@ -514,7 +514,7 @@ describe("SettingsManager", () => {
 
 		it("should return project sessionDir, overriding global", () => {
 			writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ sessionDir: "/global/sessions" }));
-			writeFileSync(join(projectDir, ".arcmind", "settings.json"), JSON.stringify({ sessionDir: "./sessions" }));
+			writeFileSync(join(projectDir, ".metis", "settings.json"), JSON.stringify({ sessionDir: "./sessions" }));
 			const manager = SettingsManager.create(projectDir, agentDir);
 			expect(manager.getSessionDir()).toBe("./sessions");
 		});

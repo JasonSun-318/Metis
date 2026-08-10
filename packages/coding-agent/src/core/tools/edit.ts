@@ -1,5 +1,5 @@
-import type { AgentTool } from "@arcmind/agent-core";
-import { Box, Container, Spacer, Text } from "@arcmind/tui";
+import type { AgentTool } from "@metis/agent-core";
+import { Box, Container, Spacer, Text } from "@metis/tui";
 import { constants } from "fs";
 import { access as fsAccess, readFile as fsReadFile, writeFile as fsWriteFile } from "fs/promises";
 import { type Static, Type } from "typebox";

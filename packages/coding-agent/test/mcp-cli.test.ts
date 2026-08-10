@@ -23,7 +23,7 @@ describe("MCP CLI", () => {
 	}
 
 	beforeEach(() => {
-		tempDir = join(tmpdir(), `arcmind-mcp-cli-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+		tempDir = join(tmpdir(), `metis-mcp-cli-${Date.now()}-${Math.random().toString(36).slice(2)}`);
 		agentDir = join(tempDir, "agent");
 		projectDir = join(tempDir, "project");
 		mkdirSync(agentDir, { recursive: true });
@@ -87,17 +87,17 @@ describe("MCP CLI", () => {
 	});
 
 	it("requires trust for project writes and accepts explicit approval", async () => {
-		mkdirSync(join(projectDir, ".arcmind"), { recursive: true });
-		writeFileSync(join(projectDir, ".arcmind", "settings.json"), "{}");
+		mkdirSync(join(projectDir, ".metis"), { recursive: true });
+		writeFileSync(join(projectDir, ".metis", "settings.json"), "{}");
 
 		await handleMcpCliCommand(["mcp", "add", "local", "--scope", "project", "--", "node", "server.mjs"]);
 		expect(process.exitCode).toBe(1);
-		expect(JSON.parse(readFileSync(join(projectDir, ".arcmind", "settings.json"), "utf8"))).toEqual({});
+		expect(JSON.parse(readFileSync(join(projectDir, ".metis", "settings.json"), "utf8"))).toEqual({});
 
 		process.exitCode = undefined;
 		await handleMcpCliCommand(["mcp", "add", "local", "--scope", "project", "--approve", "--", "node", "server.mjs"]);
 		expect(process.exitCode).toBeUndefined();
-		expect(JSON.parse(readFileSync(join(projectDir, ".arcmind", "settings.json"), "utf8"))).toMatchObject({
+		expect(JSON.parse(readFileSync(join(projectDir, ".metis", "settings.json"), "utf8"))).toMatchObject({
 			mcpServers: { local: { command: "node", args: ["server.mjs"], envVars: [] } },
 		});
 	});

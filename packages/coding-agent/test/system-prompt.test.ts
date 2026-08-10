@@ -49,13 +49,13 @@ describe("buildSystemPrompt", () => {
 			expect(prompt).toContain("- edit:");
 			expect(prompt).toContain("- write:");
 			expect(prompt).toContain("- web_fetch:");
-			expect(prompt).toContain("You are ArcMind, a general-purpose AI agent");
+			expect(prompt).toContain("You are Metis, a general-purpose AI agent");
 			expect(prompt).not.toContain("expert coding assistant");
 			expect(prompt).toContain("Use bash for file operations like ls, find");
 			expect(prompt).not.toContain("Use bash for file operations like ls, rg, find");
 		});
 
-		test("instructs models to resolve arcmind docs and examples under absolute base paths", () => {
+		test("instructs models to resolve metis docs and examples under absolute base paths", () => {
 			const prompt = buildSystemPrompt({
 				contextFiles: [],
 				skills: [],
@@ -63,7 +63,7 @@ describe("buildSystemPrompt", () => {
 			});
 
 			expect(prompt).toContain(
-				"- When reading arcmind docs or examples, resolve docs/... under Additional docs and examples/... under Examples, not the current working directory",
+				"- When reading Metis docs or examples, resolve docs/... under Additional docs and examples/... under Examples, not the current working directory",
 			);
 		});
 	});

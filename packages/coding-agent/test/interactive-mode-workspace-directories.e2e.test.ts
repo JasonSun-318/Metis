@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fauxAssistantMessage, fauxToolCall } from "@arcmind/ai";
+import { fauxAssistantMessage, fauxToolCall } from "@metis/ai";
 import { describe, expect, it, vi } from "vitest";
 import type { PermissionApprovalRequest } from "../src/core/permission-policy.ts";
 import { SessionManager } from "../src/core/session-manager.ts";
@@ -57,7 +57,7 @@ function successfulReadCount(harness: Harness, marker: string): number {
 
 describe("Code additional directories E2E", () => {
 	it("runs add, read, resume, list, remove, and denied outside-read through the TUI submit path", async () => {
-		const root = mkdtempSync(join(tmpdir(), "arcmind-add-dir-e2e-"));
+		const root = mkdtempSync(join(tmpdir(), "metis-add-dir-e2e-"));
 		const primary = join(root, "primary");
 		const external = join(root, "external with spaces");
 		const sessions = join(root, "sessions");

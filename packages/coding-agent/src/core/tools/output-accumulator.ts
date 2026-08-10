@@ -72,7 +72,7 @@ export class OutputAccumulator {
 		this.maxLines = options.maxLines ?? DEFAULT_MAX_LINES;
 		this.maxBytes = options.maxBytes ?? DEFAULT_MAX_BYTES;
 		this.maxRollingBytes = Math.max(this.maxBytes * 2, 1);
-		this.tempFilePrefix = options.tempFilePrefix ?? "arcmind-output";
+		this.tempFilePrefix = options.tempFilePrefix ?? "metis-output";
 		this.outputDir = options.outputDir ?? tmpdir();
 		ensureRealDirectoryDurablySync(this.outputDir);
 	}

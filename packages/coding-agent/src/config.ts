@@ -22,6 +22,11 @@ export const isBunBinary =
 /** Detect if Bun is the runtime (compiled binary or bun run) */
 export const isBunRuntime = !!process.versions.bun;
 
+/** Resolve a Metis environment variable. */
+export function getMetisEnv(suffix: string, env: NodeJS.ProcessEnv = process.env): string | undefined {
+	return env[`METIS_${suffix}`];
+}
+
 // =============================================================================
 // Install Method Detection
 // =============================================================================
@@ -333,7 +338,7 @@ export function getSelfUpdateUnavailableInstruction(
 	const method = detectInstallMethod();
 	const target = normalizeSelfUpdatePackageTarget(updatePackageTarget);
 	if (method === "bun-binary") {
-		return `Download from: https://github.com/arcmind/arcmind/releases/latest`;
+		return "Download the latest Metis release from the project release page.";
 	}
 	const command = getSelfUpdateCommandForMethod(method, packageName, target, npmCommand);
 	if (command) {
@@ -366,7 +371,7 @@ export function getUpdateInstruction(packageName: string): string {
  */
 export function getPackageDir(): string {
 	// Allow override via environment variable (useful for Nix/Guix where store paths tokenize poorly)
-	const envDir = process.env.ARCMIND_PACKAGE_DIR;
+	const envDir = getMetisEnv("PACKAGE_DIR");
 	if (envDir) {
 		return normalizePath(envDir);
 	}
@@ -459,13 +464,13 @@ export function getExamplesPath(): string {
 }
 
 // =============================================================================
-// App Config (from package.json arcmindConfig)
+// App Config (from package.json metisConfig)
 // =============================================================================
 
 interface PackageJson {
 	name?: string;
 	version?: string;
-	arcmindConfig?: {
+	metisConfig?: {
 		name?: string;
 		configDir?: string;
 	};
@@ -479,32 +484,43 @@ try {
 	if (err.code !== "ENOENT") throw e;
 }
 
-const arcmindConfigName: string | undefined = pkg.arcmindConfig?.name;
-export const PACKAGE_NAME: string = pkg.name || "@arcmind/coding-agent";
-export const APP_NAME: string = arcmindConfigName || "arcmind";
-export const APP_TITLE: string = arcmindConfigName ? APP_NAME : "ArcMind";
-export const CONFIG_DIR_NAME: string = pkg.arcmindConfig?.configDir || ".arcmind";
+const appConfig = pkg.metisConfig;
+const configuredAppName: string | undefined = appConfig?.name;
+export const PACKAGE_NAME: string = pkg.name || "@metis/coding-agent";
+export const APP_NAME: string = configuredAppName || "metis";
+export const APP_TITLE: string = configuredAppName ? APP_NAME : "Metis";
+export const CONFIG_DIR_NAME: string = appConfig?.configDir || ".metis";
 export const VERSION: string = pkg.version || "0.0.0";
 
-// e.g., ARCMIND_CODING_AGENT_DIR or TAU_CODING_AGENT_DIR
+// e.g., METIS_CODING_AGENT_DIR or TAU_CODING_AGENT_DIR
 export const ENV_AGENT_DIR = `${APP_NAME.toUpperCase()}_CODING_AGENT_DIR`;
 export const ENV_SESSION_DIR = `${APP_NAME.toUpperCase()}_CODING_AGENT_SESSION_DIR`;
-
 export function expandTildePath(path: string): string {
 	return normalizePath(path);
 }
 
 // =============================================================================
-// User Config Paths (~/.arcmind/agent/*)
+// User Config Paths (~/.metis/agent/*)
 // =============================================================================
 
-/** Get the agent config directory (e.g., ~/.arcmind/agent/) */
+/** Get the agent config directory (e.g., ~/.metis/agent/). */
 export function getAgentDir(): string {
 	const envDir = process.env[ENV_AGENT_DIR];
 	if (envDir) {
 		return expandTildePath(envDir);
 	}
 	return join(homedir(), CONFIG_DIR_NAME, "agent");
+}
+
+/** Resolve the configured session-directory override. */
+export function getSessionDirOverride(): string | undefined {
+	const configured = process.env[ENV_SESSION_DIR];
+	return configured ? expandTildePath(configured) : undefined;
+}
+
+/** Get the Metis project config directory. */
+export function getProjectConfigDir(cwd: string): string {
+	return join(resolve(cwd), CONFIG_DIR_NAME);
 }
 
 /** Get path to user's custom themes directory */
@@ -547,7 +563,7 @@ export function getSessionsDir(): string {
 	return join(getAgentDir(), "sessions");
 }
 
-/** Get path to ArcMind-owned Chat workspaces. */
+/** Get path to Metis-owned Chat workspaces. */
 export function getWorkspacesDir(agentDir: string = getAgentDir()): string {
 	return join(agentDir, "workspaces");
 }

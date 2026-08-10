@@ -8,7 +8,7 @@ import {
 	type Model,
 	type ProviderHeaders,
 	type SimpleStreamOptions,
-} from "@arcmind/ai";
+} from "@metis/ai";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { AuthStorage } from "../src/core/auth-storage.ts";
 import { ModelRegistry } from "../src/core/model-registry.ts";
@@ -23,20 +23,20 @@ describe("createAgentSession provider attribution headers", () => {
 	let originalTelemetryEnv: string | undefined;
 
 	beforeEach(() => {
-		tempDir = join(tmpdir(), `arcmind-sdk-attribution-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+		tempDir = join(tmpdir(), `metis-sdk-attribution-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
 		cwd = join(tempDir, "project");
 		agentDir = join(tempDir, "agent");
 		mkdirSync(cwd, { recursive: true });
 		mkdirSync(agentDir, { recursive: true });
-		originalTelemetryEnv = process.env.ARCMIND_PROVIDER_ATTRIBUTION;
-		delete process.env.ARCMIND_PROVIDER_ATTRIBUTION;
+		originalTelemetryEnv = process.env.METIS_PROVIDER_ATTRIBUTION;
+		delete process.env.METIS_PROVIDER_ATTRIBUTION;
 	});
 
 	afterEach(() => {
 		if (originalTelemetryEnv === undefined) {
-			delete process.env.ARCMIND_PROVIDER_ATTRIBUTION;
+			delete process.env.METIS_PROVIDER_ATTRIBUTION;
 		} else {
-			process.env.ARCMIND_PROVIDER_ATTRIBUTION = originalTelemetryEnv;
+			process.env.METIS_PROVIDER_ATTRIBUTION = originalTelemetryEnv;
 		}
 		if (tempDir && existsSync(tempDir)) {
 			rmSync(tempDir, { recursive: true, force: true });
@@ -148,8 +148,8 @@ describe("createAgentSession provider attribution headers", () => {
 	it("adds default attribution headers for OpenRouter models", async () => {
 		const headers = await captureHeaders(createModel("openrouter", "https://openrouter.ai/api/v1"));
 
-		expect(headers?.["HTTP-Referer"]).toBe("https://gitee.com/sun124578963_0/arc-mind");
-		expect(headers?.["X-OpenRouter-Title"]).toBe("arcmind");
+		expect(headers?.["HTTP-Referer"]).toBeUndefined();
+		expect(headers?.["X-OpenRouter-Title"]).toBe("metis");
 		expect(headers?.["X-OpenRouter-Categories"]).toBe("cli-agent");
 	});
 
@@ -166,16 +166,16 @@ describe("createAgentSession provider attribution headers", () => {
 	it("adds attribution headers for custom providers routed through OpenRouter", async () => {
 		const headers = await captureHeaders(createModel("custom-openrouter", "https://openrouter.ai/api/v1"));
 
-		expect(headers?.["HTTP-Referer"]).toBe("https://gitee.com/sun124578963_0/arc-mind");
-		expect(headers?.["X-OpenRouter-Title"]).toBe("arcmind");
+		expect(headers?.["HTTP-Referer"]).toBeUndefined();
+		expect(headers?.["X-OpenRouter-Title"]).toBe("metis");
 		expect(headers?.["X-OpenRouter-Categories"]).toBe("cli-agent");
 	});
 
 	it("preserves legacy OpenRouter base URL substring attribution matching", async () => {
 		const headers = await captureHeaders(createModel("custom-openrouter", "not-a-url-openrouter.ai"));
 
-		expect(headers?.["HTTP-Referer"]).toBe("https://gitee.com/sun124578963_0/arc-mind");
-		expect(headers?.["X-OpenRouter-Title"]).toBe("arcmind");
+		expect(headers?.["HTTP-Referer"]).toBeUndefined();
+		expect(headers?.["X-OpenRouter-Title"]).toBe("metis");
 		expect(headers?.["X-OpenRouter-Categories"]).toBe("cli-agent");
 	});
 
@@ -198,13 +198,13 @@ describe("createAgentSession provider attribution headers", () => {
 	it("adds default attribution headers for direct NVIDIA NIM endpoints", async () => {
 		const headers = await captureHeaders(createModel("custom-nim", "https://integrate.api.nvidia.com/v1"));
 
-		expect(headers?.["X-BILLING-INVOKE-ORIGIN"]).toBe("ArcMind");
+		expect(headers?.["X-BILLING-INVOKE-ORIGIN"]).toBe("Metis");
 	});
 
 	it("adds default attribution headers for the NVIDIA provider", async () => {
 		const headers = await captureHeaders(createModel("nvidia", "https://example.test/v1"));
 
-		expect(headers?.["X-BILLING-INVOKE-ORIGIN"]).toBe("ArcMind");
+		expect(headers?.["X-BILLING-INVOKE-ORIGIN"]).toBe("Metis");
 	});
 
 	it("does not add NVIDIA NIM attribution headers when attribution is disabled", async () => {
@@ -233,7 +233,7 @@ describe("createAgentSession provider attribution headers", () => {
 			createModel("openrouter", "https://openrouter.ai/api/v1", "nvidia/nemotron-3-super-120b-a12b"),
 		);
 
-		expect(headers?.["HTTP-Referer"]).toBe("https://gitee.com/sun124578963_0/arc-mind");
+		expect(headers?.["HTTP-Referer"]).toBeUndefined();
 		expect(headers?.["X-BILLING-INVOKE-ORIGIN"]).toBeUndefined();
 	});
 
@@ -251,7 +251,7 @@ describe("createAgentSession provider attribution headers", () => {
 		});
 
 		expect(headers?.["x-opencode-session"]).toBe("opencode-session");
-		expect(headers?.["x-opencode-client"]).toBe("arcmind");
+		expect(headers?.["x-opencode-client"]).toBe("metis");
 	});
 
 	it("lets configured OpenCode headers override the defaults", async () => {

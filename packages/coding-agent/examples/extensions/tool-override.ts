@@ -5,7 +5,7 @@
  * This is useful for:
  * - Adding logging or auditing to tool calls
  * - Implementing access control or sandboxing
- * - Routing tool calls to remote systems (e.g., arcmind-ssh-remote)
+ * - Routing tool calls to remote systems (e.g., metis-ssh-remote)
  * - Modifying tool behavior for specific workflows
  *
  * This example overrides the `read` tool to:
@@ -17,11 +17,11 @@
  * is used automatically (syntax highlighting, line numbers, truncation warnings).
  *
  * Usage:
- *   arcmind -e ./tool-override.ts
+ *   metis -e ./tool-override.ts
  */
 
-import type { TextContent } from "@arcmind/ai";
-import { type ExtensionAPI, getAgentDir, withFileMutationQueue } from "@arcmind/coding-agent";
+import type { TextContent } from "@metis/ai";
+import { type ExtensionAPI, getAgentDir, withFileMutationQueue } from "@metis/coding-agent";
 import { constants, readFileSync } from "fs";
 import { access, appendFile, readFile } from "fs/promises";
 import { join, resolve } from "path";
@@ -65,8 +65,8 @@ const readSchema = Type.Object({
 	limit: Type.Optional(Type.Number({ description: "Maximum number of lines to read" })),
 });
 
-export default function (arcmind: ExtensionAPI) {
-	arcmind.registerTool({
+export default function (metis: ExtensionAPI) {
+	metis.registerTool({
 		name: "read", // Same name as built-in - this will override it
 		label: "read (audited)",
 		description:
@@ -129,7 +129,7 @@ export default function (arcmind: ExtensionAPI) {
 	});
 
 	// Also register a command to view the access log
-	arcmind.registerCommand("read-log", {
+	metis.registerCommand("read-log", {
 		description: "View the file access log",
 		handler: async (_args, ctx) => {
 			try {

@@ -1,4 +1,4 @@
-# @arcmind/ai
+# @metis/ai
 
 Unified LLM API with provider collections, automatic auth resolution, token and cost tracking, and simple context persistence and hand-off to other models mid-session.
 
@@ -87,18 +87,18 @@ Unified LLM API with provider collections, automatic auth resolution, token and 
 ## Installation
 
 ```bash
-npm install @arcmind/ai
+npm install @metis/ai
 ```
 
-TypeBox exports are re-exported from `@arcmind/ai`: `Type`, `Static`, and `TSchema`.
+TypeBox exports are re-exported from `@metis/ai`: `Type`, `Static`, and `TSchema`.
 
 ## Quick Start
 
 You build a `Models` collection of providers and stream through it. The quickest start registers every built-in provider; apps that care about bundle size register individual providers instead (see [Provider Factories](#provider-factories) and [Bundling and Tree Shaking](#bundling-and-tree-shaking)).
 
 ```typescript
-import { Type, type Context, type Tool } from '@arcmind/ai';
-import { builtinModels } from '@arcmind/ai/providers/all';
+import { Type, type Context, type Tool } from '@metis/ai';
+import { builtinModels } from '@metis/ai/providers/all';
 
 // A Models collection with every built-in provider registered
 const models = builtinModels();
@@ -233,10 +233,10 @@ Providers internally share **API implementations** (the wire protocols): Anthrop
 For apps that only need specific providers, there is one factory per built-in provider, each a subpath import that pulls only that provider's catalog:
 
 ```typescript
-import { anthropicProvider } from '@arcmind/ai/providers/anthropic';
-import { openaiProvider } from '@arcmind/ai/providers/openai';
-import { openrouterProvider } from '@arcmind/ai/providers/openrouter';
-import { amazonBedrockProvider } from '@arcmind/ai/providers/amazon-bedrock';
+import { anthropicProvider } from '@metis/ai/providers/anthropic';
+import { openaiProvider } from '@metis/ai/providers/openai';
+import { openrouterProvider } from '@metis/ai/providers/openrouter';
+import { amazonBedrockProvider } from '@metis/ai/providers/amazon-bedrock';
 // ...one module per provider in the Supported Providers list
 
 const models = createModels();
@@ -251,7 +251,7 @@ Provider factories import their model catalog and a lazy API wrapper. They do no
 For apps that want everything (as in Quick Start):
 
 ```typescript
-import { builtinModels } from '@arcmind/ai/providers/all';
+import { builtinModels } from '@metis/ai/providers/all';
 
 const models = builtinModels(); // a Models collection with every built-in provider registered
 ```
@@ -282,7 +282,7 @@ for (const m of anthropicModels) {
 Dynamically listed models are typed `Model<Api>`. Narrow with the `hasApi()` guard when you need API-specific option typing:
 
 ```typescript
-import { hasApi } from '@arcmind/ai';
+import { hasApi } from '@metis/ai';
 
 const m = models.getModel('anthropic', 'claude-sonnet-4-5');
 if (m && hasApi(m, 'anthropic-messages')) {
@@ -296,7 +296,7 @@ if (m && hasApi(m, 'anthropic-messages')) {
 For tooling that wants the generated built-in catalog with full literal typing (provider and model IDs auto-complete), independent of any collection:
 
 ```typescript
-import { getBuiltinModel, getBuiltinModels, getBuiltinProviders } from '@arcmind/ai/providers/all';
+import { getBuiltinModel, getBuiltinModels, getBuiltinProviders } from '@metis/ai/providers/all';
 
 const model = getBuiltinModel('openai', 'gpt-4o-mini'); // typed Model<'openai-responses'>
 const providers = getBuiltinProviders();
@@ -347,10 +347,10 @@ if (auth) {
 
 ### Credential Store
 
-Stored credentials (API keys entered interactively, OAuth tokens) live in a `CredentialStore` — one type-tagged credential per provider. arcmind-ai ships an in-memory default; apps inject persistent storage:
+Stored credentials (API keys entered interactively, OAuth tokens) live in a `CredentialStore` — one type-tagged credential per provider. metis-ai ships an in-memory default; apps inject persistent storage:
 
 ```typescript
-import { createModels, type CredentialStore } from '@arcmind/ai';
+import { createModels, type CredentialStore } from '@metis/ai';
 
 const models = createModels({ credentials: myFileBackedStore });
 // builtinModels() takes the same options:
@@ -359,7 +359,7 @@ const models = createModels({ credentials: myFileBackedStore });
 
 The contract is small: `read(providerId)`, `modify(providerId, fn)` (the only write path — a serialized read-modify-write), and `delete(providerId)`. OAuth token refresh runs inside `modify`, so concurrent requests and processes cannot double-refresh a rotated token. A stored credential *owns* its provider: environment variables are only consulted when nothing is stored, and a failed refresh never silently falls back to an env key.
 
-API-key credentials use the same discriminator as arcmind's `auth.json` and can carry provider-scoped env/config values:
+API-key credentials use the same discriminator as metis's `auth.json` and can carry provider-scoped env/config values:
 
 ```typescript
 const credential = {
@@ -419,7 +419,7 @@ Tools enable LLMs to interact with external systems. This library uses TypeBox s
 ### Defining Tools
 
 ```typescript
-import { Type, type Tool, StringEnum } from '@arcmind/ai';
+import { Type, type Tool, StringEnum } from '@metis/ai';
 
 // Define tool parameters with TypeBox
 const weatherTool: Tool = {
@@ -543,7 +543,7 @@ for await (const event of s) {
 When implementing your own tool execution loop, use `validateToolCall` to validate arguments before passing them to your tools:
 
 ```typescript
-import { validateToolCall, type Tool } from '@arcmind/ai';
+import { validateToolCall, type Tool } from '@metis/ai';
 
 const tools: Tool[] = [weatherTool, calculatorTool];
 const s = models.stream(model, { messages, tools });
@@ -591,7 +591,7 @@ All streaming events emitted during assistant message generation:
 | `done` | Stream complete | `reason`: Stop reason ("stop", "length", "toolUse"), `message`: Final assistant message |
 | `error` | Error occurred | `reason`: Error type ("error" or "aborted"), `error`: AssistantMessage with partial content |
 
-Streaming events for different content blocks are not guaranteed to be contiguous. Providers may emit deltas for text, thinking, and tool calls in the same upstream chunk, and arcmind may surface corresponding events interleaved, for example `text_start`, `text_delta`, `toolcall_start`, `text_delta`, `toolcall_delta`. Consumers must use `contentIndex` to associate each delta/end event with its block and must not assume that a block's `*_start`/`*_delta`/`*_end` sequence is uninterrupted by events for other blocks.
+Streaming events for different content blocks are not guaranteed to be contiguous. Providers may emit deltas for text, thinking, and tool calls in the same upstream chunk, and metis may surface corresponding events interleaved, for example `text_start`, `text_delta`, `toolcall_start`, `text_delta`, `toolcall_delta`. Consumers must use `contentIndex` to associate each delta/end event with its block and must not assume that a block's `*_start`/`*_delta`/`*_end` sequence is uninterrupted by events for other blocks.
 
 ## Image Input
 
@@ -636,7 +636,7 @@ Image generation uses a separate API surface from text/chat generation, mirrorin
 ### Basic Image Generation
 
 ```typescript
-import { builtinImagesModels } from '@arcmind/ai/providers/all';
+import { builtinImagesModels } from '@metis/ai/providers/all';
 
 // Every built-in image-generation provider; accepts the same options as createModels()
 const imagesModels = builtinImagesModels();
@@ -658,12 +658,12 @@ for (const block of result.output) {
 }
 ```
 
-Like the chat side, you can build the collection from parts: `createImagesModels({ credentials?, authContext? })`, the `openrouterImagesProvider()` factory from `@arcmind/ai/providers/openrouter-images`, and `createImagesProvider({ id, auth, models, refreshModels?, api })` for custom image providers (with `imagesModels.refresh(provider?)` for dynamic lists). Failures never reject — they return an `AssistantImages` with `stopReason: "error"`. The collection's `getAuth(model)` works exactly like the chat-side one.
+Like the chat side, you can build the collection from parts: `createImagesModels({ credentials?, authContext? })`, the `openrouterImagesProvider()` factory from `@metis/ai/providers/openrouter-images`, and `createImagesProvider({ id, auth, models, refreshModels?, api })` for custom image providers (with `imagesModels.refresh(provider?)` for dynamic lists). Failures never reject — they return an `AssistantImages` with `stopReason: "error"`. The collection's `getAuth(model)` works exactly like the chat-side one.
 
 The old global API (`getImageModel()` / `getImageModels()` / `getImageProviders()` / `generateImages()`) remains available on the [compat entrypoint](#migrating-from-the-old-global-api):
 
 ```typescript
-import { getImageModel, generateImages } from '@arcmind/ai/compat';
+import { getImageModel, generateImages } from '@metis/ai/compat';
 
 const model = getImageModel('openrouter', 'google/gemini-2.5-flash-image');
 const result = await generateImages(model, {
@@ -748,7 +748,7 @@ for (const block of response.content) {
 `models.stream()`/`complete()` accept the owning API's full option set. Use `hasApi()` to narrow a dynamically looked-up model to its API for full option typing:
 
 ```typescript
-import { hasApi } from '@arcmind/ai';
+import { hasApi } from '@metis/ai';
 
 // OpenAI Reasoning (o1, o3, gpt-5)
 const openaiModel = models.getModel('openai', 'gpt-5-mini')!;
@@ -920,8 +920,8 @@ The callback is supported by `stream`, `complete`, `streamSimple`, and `complete
 `createProvider()` builds a provider from parts: identity, auth, a model list, and an API implementation. Use it for local inference servers, proxies, or any OpenAI/Anthropic-compatible endpoint:
 
 ```typescript
-import { createModels, createProvider, envApiKeyAuth, type Model } from '@arcmind/ai';
-import { openAICompletionsApi } from '@arcmind/ai/api/openai-completions.lazy';
+import { createModels, createProvider, envApiKeyAuth, type Model } from '@metis/ai';
+import { openAICompletionsApi } from '@metis/ai/api/openai-completions.lazy';
 
 const ollamaModel: Model<'openai-completions'> = {
   id: 'llama-3.1-8b',
@@ -966,8 +966,8 @@ const proxy = createProvider({
 Mixed-API providers pass a map keyed by `model.api`; each model dispatches to its API's implementation:
 
 ```typescript
-import { anthropicMessagesApi } from '@arcmind/ai/api/anthropic-messages.lazy';
-import { openAIResponsesApi } from '@arcmind/ai/api/openai-responses.lazy';
+import { anthropicMessagesApi } from '@metis/ai/api/anthropic-messages.lazy';
+import { openAIResponsesApi } from '@metis/ai/api/openai-responses.lazy';
 
 const gateway = createProvider({
   id: 'my-gateway',
@@ -999,7 +999,7 @@ Custom models can carry `headers` (e.g. proxies behind bot detection) and `compa
 
 Some OpenAI-compatible servers do not understand the `developer` role used for reasoning-capable models. For those providers, set `compat.supportsDeveloperRole` to `false` so the system prompt is sent as a `system` message instead. If the server also does not support `reasoning_effort`, set `compat.supportsReasoningEffort` to `false` too. This commonly applies to Ollama, vLLM, SGLang, and similar OpenAI-compatible servers.
 
-Use model-level `thinkingLevelMap` to describe model-specific thinking controls. Keys are arcmind thinking levels (`off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`). Missing standard levels through `high` use provider defaults; `xhigh` and `max` are opt-in and require a non-null map entry. String values are sent to the provider, `null` marks a level unsupported, and maps may skip levels.
+Use model-level `thinkingLevelMap` to describe model-specific thinking controls. Keys are metis thinking levels (`off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`). Missing standard levels through `high` use provider defaults; `xhigh` and `max` are opt-in and require a non-null map entry. String values are sent to the provider, `null` marks a level unsupported, and maps may skip levels.
 
 ```typescript
 const ollamaReasoningModel: Model<'openai-completions'> = {
@@ -1032,7 +1032,7 @@ const ollamaReasoningModel: Model<'openai-completions'> = {
 The API implementations are importable on their own. Each module exports exactly `stream` and `streamSimple` with that API's full option typing. Direct calls bypass provider auth — pass `apiKey` explicitly:
 
 ```typescript
-import { stream } from '@arcmind/ai/api/anthropic-messages';
+import { stream } from '@metis/ai/api/anthropic-messages';
 
 const s = stream(claudeModel, context, {
   apiKey: process.env.ANTHROPIC_API_KEY,
@@ -1055,7 +1055,7 @@ Built-in API implementations live under `./api/<api-id>`:
 | `mistral-conversations` | `MistralOptions` |
 | `bedrock-converse-stream` | `BedrockOptions` |
 
-Importing an implementation module loads its SDK. The `./api/<id>.lazy` wrappers (used by the provider factories) defer that load to the first request when the runtime or bundler supports dynamic import chunking. Legacy raw API subpaths from older releases (`./anthropic`, `./google`, `./mistral`, `./openai-completions`, ...) were removed; use `@arcmind/ai/api/<api-id>`.
+Importing an implementation module loads its SDK. The `./api/<id>.lazy` wrappers (used by the provider factories) defer that load to the first request when the runtime or bundler supports dynamic import chunking. Legacy raw API subpaths from older releases (`./anthropic`, `./google`, `./mistral`, `./openai-completions`, ...) were removed; use `@metis/ai/api/<api-id>`.
 
 ### OpenAI Compatibility Settings
 
@@ -1076,7 +1076,7 @@ interface OpenAICompletionsCompat {
   requiresThinkingAsText?: boolean;  // Whether thinking blocks must be converted to text (default: false)
   requiresReasoningContentOnAssistantMessages?: boolean; // Whether all replayed assistant messages must include empty reasoning_content when reasoning is enabled (default: auto-detected for DeepSeek)
   thinkingFormat?: 'openai' | 'openrouter' | 'deepseek' | 'together' | 'zai' | 'qwen' | 'chat-template' | 'qwen-chat-template' | 'string-thinking' | 'ant-ling'; // Format for reasoning param: 'openai' uses reasoning_effort, 'openrouter' uses reasoning: { effort }, 'deepseek' uses thinking: { type } plus reasoning_effort when supported, 'together' uses reasoning: { enabled } plus reasoning_effort when supported, 'zai' uses thinking: { type }, 'qwen' uses enable_thinking, 'chat-template' uses configurable chat_template_kwargs, 'qwen-chat-template' uses chat_template_kwargs.enable_thinking and preserve_thinking, 'string-thinking' uses top-level thinking, 'ant-ling' uses reasoning: { effort } only for mapped efforts (default: openai)
-  chatTemplateKwargs?: Record<string, string | number | boolean | null | { '$var': 'thinking.enabled' | 'thinking.effort'; omitWhenOff?: boolean }>; // chat_template_kwargs values; use $var for arcmind-controlled thinking values
+  chatTemplateKwargs?: Record<string, string | number | boolean | null | { '$var': 'thinking.enabled' | 'thinking.effort'; omitWhenOff?: boolean }>; // chat_template_kwargs values; use $var for metis-controlled thinking values
   cacheControlFormat?: 'anthropic';  // Anthropic-style cache_control on system prompt, last tool, and last user/assistant text content
   openRouterRouting?: OpenRouterRouting; // OpenRouter routing preferences (default: {})
   vercelGatewayRouting?: VercelGatewayRouting; // Vercel AI Gateway routing preferences (default: {})
@@ -1107,7 +1107,7 @@ import {
   fauxText,
   fauxThinking,
   fauxToolCall,
-} from '@arcmind/ai';
+} from '@metis/ai';
 
 const faux = fauxProvider({
   tokensPerSecond: 50 // optional
@@ -1194,10 +1194,10 @@ When messages from one provider are sent to a different provider, the library au
 - **Tool calls and regular text** are preserved unchanged
 
 ```typescript
-import { createModels, type Context } from '@arcmind/ai';
-import { anthropicProvider } from '@arcmind/ai/providers/anthropic';
-import { openaiProvider } from '@arcmind/ai/providers/openai';
-import { googleProvider } from '@arcmind/ai/providers/google';
+import { createModels, type Context } from '@metis/ai';
+import { anthropicProvider } from '@metis/ai/providers/anthropic';
+import { openaiProvider } from '@metis/ai/providers/openai';
+import { googleProvider } from '@metis/ai/providers/google';
 
 const models = createModels();
 models.setProvider(anthropicProvider());
@@ -1264,8 +1264,8 @@ Models are plain serializable data too — no functions or implementations attac
 The library supports browser environments. The core entrypoint and provider factories are side-effect free and bundle cleanly. Environment variables are not available in browsers, so pass API keys explicitly — or inject a `CredentialStore` (e.g. localStorage-backed) and let provider auth resolve from stored credentials:
 
 ```typescript
-import { createModels } from '@arcmind/ai';
-import { anthropicProvider } from '@arcmind/ai/providers/anthropic';
+import { createModels } from '@metis/ai';
+import { anthropicProvider } from '@metis/ai/providers/anthropic';
 
 const models = createModels();
 models.setProvider(anthropicProvider());
@@ -1290,8 +1290,8 @@ Browser compatibility notes:
 For small bundles, import only the providers you need:
 
 ```typescript
-import { createModels } from '@arcmind/ai';
-import { openaiProvider } from '@arcmind/ai/providers/openai';
+import { createModels } from '@metis/ai';
+import { openaiProvider } from '@metis/ai/providers/openai';
 
 const models = createModels();
 models.setProvider(openaiProvider());
@@ -1299,14 +1299,14 @@ models.setProvider(openaiProvider());
 
 Rules:
 
-- `@arcmind/ai` is the core entrypoint and does not import built-in catalogs, provider factories, or SDK implementations.
-- `@arcmind/ai/providers/<provider>` imports that provider's catalog and lazy API wrapper only.
-- `@arcmind/ai/providers/all` imports every built-in provider factory and all catalogs. Use it only when you want the full built-in set.
+- `@metis/ai` is the core entrypoint and does not import built-in catalogs, provider factories, or SDK implementations.
+- `@metis/ai/providers/<provider>` imports that provider's catalog and lazy API wrapper only.
+- `@metis/ai/providers/all` imports every built-in provider factory and all catalogs. Use it only when you want the full built-in set.
 - With code splitting, provider SDKs stay in lazy chunks and load on first request.
 - Without code splitting, bundlers fold reachable lazy API implementations into the single bundle. A single-provider bundle then includes that provider's SDK; `providers/all` includes all statically visible SDKs. Bedrock is the exception: its AWS SDK implementation is loaded through a bundler-opaque Node-only import.
-- Importing `@arcmind/ai/api/<api-id>` directly loads that API implementation and its SDK immediately.
+- Importing `@metis/ai/api/<api-id>` directly loads that API implementation and its SDK immediately.
 
-Avoid `@arcmind/ai/compat` in new bundled apps; it preserves the old global API and imports the full built-in catalog surface.
+Avoid `@metis/ai/compat` in new bundled apps; it preserves the old global API and imports the full built-in catalog surface.
 
 For single-file Node ESM bundles, some SDK dependencies may still use dynamic CommonJS `require()` internally. If you see errors such as `Dynamic require of "child_process" is not supported`, add a Node `require` shim to the bundle. With esbuild:
 
@@ -1321,8 +1321,8 @@ This is only for Node bundles; it is not a browser or Cloudflare Workers workaro
 Bedrock is Node-only. Add it like any other provider:
 
 ```typescript
-import { createModels } from '@arcmind/ai';
-import { amazonBedrockProvider } from '@arcmind/ai/providers/amazon-bedrock';
+import { createModels } from '@metis/ai';
+import { amazonBedrockProvider } from '@metis/ai/providers/amazon-bedrock';
 
 const models = createModels();
 models.setProvider(amazonBedrockProvider());
@@ -1331,8 +1331,8 @@ models.setProvider(amazonBedrockProvider());
 In normal Node package usage and code-split bundles, Bedrock loads its AWS SDK implementation lazily. For a standalone single-file bundle that must include Bedrock support, register the implementation module explicitly:
 
 ```typescript
-import { setBedrockProviderModule } from '@arcmind/ai/api/bedrock-converse-stream.lazy';
-import { bedrockProviderModule } from '@arcmind/ai/bedrock-provider';
+import { setBedrockProviderModule } from '@metis/ai/api/bedrock-converse-stream.lazy';
+import { bedrockProviderModule } from '@metis/ai/bedrock-provider';
 
 setBedrockProviderModule(bedrockProviderModule);
 ```
@@ -1341,7 +1341,7 @@ That explicit override bundles the AWS SDK. Without it, Bedrock's opaque runtime
 
 ### Provider-Scoped Environment Overrides
 
-Pass `env` in stream options to scope provider configuration to a request. Values in `env` are used before process environment variables for provider auth and configuration such as Cloudflare account IDs, Azure OpenAI settings, Vertex project/location, Bedrock settings, `ARCMIND_CACHE_RETENTION`, and `HTTP_PROXY`/`HTTPS_PROXY`.
+Pass `env` in stream options to scope provider configuration to a request. Values in `env` are used before process environment variables for provider auth and configuration such as Cloudflare account IDs, Azure OpenAI settings, Vertex project/location, Bedrock settings, `METIS_CACHE_RETENTION`, and `HTTP_PROXY`/`HTTPS_PROXY`.
 
 ```typescript
 const models = builtinModels();
@@ -1360,7 +1360,7 @@ Use this when one process needs different provider settings per request, or when
 
 ## Custom OAuth
 
-ArcMind does not bundle subscription OAuth clients for Anthropic, OpenAI Codex, or GitHub Copilot. Extensions may register their own OAuth implementation using client credentials owned by the extension author.
+Metis does not bundle subscription OAuth clients for Anthropic, OpenAI Codex, or GitHub Copilot. Extensions may register their own OAuth implementation using client credentials owned by the extension author.
 
 ### Vertex AI
 
@@ -1389,9 +1389,9 @@ Official docs: [Application Default Credentials](https://cloud.google.com/docs/a
 The quickest way to authenticate:
 
 ```bash
-npx @arcmind/ai login              # interactive provider selection
-npx @arcmind/ai login anthropic    # login to specific provider
-npx @arcmind/ai list               # list available providers
+npx @metis/ai login              # interactive provider selection
+npx @metis/ai login anthropic    # login to specific provider
+npx @metis/ai list               # list available providers
 ```
 
 Credentials are saved to `auth.json` in the current directory.
@@ -1406,10 +1406,10 @@ Older versions exposed a global API: `stream()`/`complete()` dispatching on `mod
 
 ```typescript
 // Before
-import { getModel, complete } from '@arcmind/ai';
+import { getModel, complete } from '@metis/ai';
 
 // After (verbatim behavior, one import-path change)
-import { getModel, complete } from '@arcmind/ai/compat';
+import { getModel, complete } from '@metis/ai/compat';
 ```
 
 Compat is a strict superset of the root entrypoint, so a file can switch its import path wholesale. It will be removed in a future release; migrate to `createModels()` + provider factories:
@@ -1421,7 +1421,7 @@ Compat is a strict superset of the root entrypoint, so a file can switch its imp
 | `stream(model, ctx, opts)` (env-key injection) | `models.stream(model, ctx, opts)` (provider auth resolution) |
 | `registerApiProvider({ api, stream, streamSimple })` | `createProvider({ id, auth, models, api })` + `models.setProvider()` |
 | `getEnvApiKey('openai')` | `await models.getAuth(model)` |
-| `streamAnthropic(model, ctx, opts)` | `stream` from `@arcmind/ai/api/anthropic-messages`, or a provider in a collection |
+| `streamAnthropic(model, ctx, opts)` | `stream` from `@metis/ai/api/anthropic-messages`, or a provider in a collection |
 | `registerFauxProvider()` | `fauxProvider()` + `models.setProvider()` |
 
 ## Development
@@ -1445,7 +1445,7 @@ Create a new API implementation file (for example `bedrock-converse-stream.ts`) 
 - Tool conversion if the provider supports tools
 - Response parsing to emit standardized events (`text`, `tool_call`, `thinking`, `usage`, `stop`)
 
-Add a lazy wrapper `src/api/<api-id>.lazy.ts` (`<name>Api()` via `lazyApi()`) so providers can reference the implementation without importing its SDK. Add any root-level `export type` re-exports in `src/index.ts` that should remain available from `@arcmind/ai`.
+Add a lazy wrapper `src/api/<api-id>.lazy.ts` (`<name>Api()` via `lazyApi()`) so providers can reference the implementation without importing its SDK. Add any root-level `export type` re-exports in `src/index.ts` that should remain available from `@metis/ai`.
 
 #### 3. Model Generation (`scripts/generate-models.ts`, `scripts/generate-image-models.ts`)
 

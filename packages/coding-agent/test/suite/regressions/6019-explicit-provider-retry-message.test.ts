@@ -1,4 +1,4 @@
-import { fauxAssistantMessage } from "@arcmind/ai";
+import { fauxAssistantMessage } from "@metis/ai";
 import { describe, expect, it } from "vitest";
 import { createHarness } from "../harness.ts";
 

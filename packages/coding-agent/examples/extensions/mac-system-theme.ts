@@ -1,13 +1,13 @@
 /**
- * Syncs arcmind theme with macOS system appearance (dark/light mode).
+ * Syncs metis theme with macOS system appearance (dark/light mode).
  *
  * Usage:
- *   arcmind -e examples/extensions/mac-system-theme.ts
+ *   metis -e examples/extensions/mac-system-theme.ts
  */
 
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
-import type { ExtensionAPI } from "@arcmind/coding-agent";
+import type { ExtensionAPI } from "@metis/coding-agent";
 
 const execAsync = promisify(exec);
 
@@ -22,10 +22,10 @@ async function isDarkMode(): Promise<boolean> {
 	}
 }
 
-export default function (arcmind: ExtensionAPI) {
+export default function (metis: ExtensionAPI) {
 	let intervalId: ReturnType<typeof setInterval> | null = null;
 
-	arcmind.on("session_start", async (_event, ctx) => {
+	metis.on("session_start", async (_event, ctx) => {
 		let currentTheme = (await isDarkMode()) ? "dark" : "light";
 		ctx.ui.setTheme(currentTheme);
 
@@ -38,7 +38,7 @@ export default function (arcmind: ExtensionAPI) {
 		}, 2000);
 	});
 
-	arcmind.on("session_shutdown", () => {
+	metis.on("session_shutdown", () => {
 		if (intervalId) {
 			clearInterval(intervalId);
 			intervalId = null;

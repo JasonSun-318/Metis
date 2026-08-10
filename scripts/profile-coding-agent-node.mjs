@@ -12,8 +12,8 @@ const distCliPath = join(packageDir, "dist", "cli.js");
 const srcCliPath = join(packageDir, "src", "cli.ts");
 const defaultNodeProfileDir = join(repoRoot, "profiles-node");
 const defaultBunProfileDir = join(repoRoot, "profiles-bun");
-const agentDirEnvName = "ARCMIND_CODING_AGENT_DIR";
-const startupBenchmarkEnvName = "ARCMIND_STARTUP_BENCHMARK";
+const agentDirEnvName = "METIS_CODING_AGENT_DIR";
+const startupBenchmarkEnvName = "METIS_STARTUP_BENCHMARK";
 const benchmarkTimeoutMs = 30_000;
 const buildTimeoutMs = 10 * 60_000;
 const benchmarkChildren = new Set();
@@ -37,11 +37,11 @@ Options:
                          Default: profiles-node for Node, profiles-bun for Bun
   --label <name>         Profile name prefix (default: <mode>-startup)
   --runtime <name>       node, bun, or auto (default: auto)
-  --agent-dir <dir>      Use a specific ARCMIND_CODING_AGENT_DIR for the benchmark run
+  --agent-dir <dir>      Use a specific METIS_CODING_AGENT_DIR for the benchmark run
   --json-output <file>   Write raw measured samples and summaries as JSON
   --isolated-agent-dir   Use a fresh temporary agent dir instead of the normal one
   --minimal-resources    Disable extensions, skills, prompts, themes, and context files
-  --no-offline           Do not force ARCMIND_OFFLINE=1
+  --no-offline           Do not force METIS_OFFLINE=1
   --skip-build           Reuse the current dist/cli.js without rebuilding first (Node only)
   --cpu-profile          Write CPU profiles for benchmark runs
   --help                 Show this help
@@ -583,7 +583,7 @@ function createBenchmarkEnv(options, isolatedAgentDir) {
 		env[startupBenchmarkEnvName] = "1";
 	}
 	if (options.offline) {
-		env.ARCMIND_OFFLINE = "1";
+		env.METIS_OFFLINE = "1";
 	}
 	return env;
 }
@@ -592,7 +592,7 @@ async function runTuiBenchmarkRun({ runtime, runIndex, measuredIndex, options, p
 	const runNumber = runIndex + 1;
 	const suffix = String(runNumber).padStart(3, "0");
 	const profileName = `${options.label}-${suffix}.cpuprofile`;
-	const tempRoot = options.isolatedAgentDir ? mkdtempSync(join(tmpdir(), "arcmind-startup-benchmark-")) : undefined;
+	const tempRoot = options.isolatedAgentDir ? mkdtempSync(join(tmpdir(), "metis-startup-benchmark-")) : undefined;
 	const isolatedAgentDir = tempRoot ? join(tempRoot, "agent") : undefined;
 	if (isolatedAgentDir) {
 		mkdirSync(isolatedAgentDir, { recursive: true });
@@ -659,7 +659,7 @@ async function runRpcBenchmarkRun({ runtime, runIndex, measuredIndex, options, p
 	const runNumber = runIndex + 1;
 	const suffix = String(runNumber).padStart(3, "0");
 	const profileName = `${options.label}-${suffix}.cpuprofile`;
-	const tempRoot = options.isolatedAgentDir ? mkdtempSync(join(tmpdir(), "arcmind-startup-benchmark-")) : undefined;
+	const tempRoot = options.isolatedAgentDir ? mkdtempSync(join(tmpdir(), "metis-startup-benchmark-")) : undefined;
 	const isolatedAgentDir = tempRoot ? join(tempRoot, "agent") : undefined;
 	if (isolatedAgentDir) {
 		mkdirSync(isolatedAgentDir, { recursive: true });

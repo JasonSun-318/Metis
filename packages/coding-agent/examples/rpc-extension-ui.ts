@@ -18,7 +18,7 @@ import { spawn } from "node:child_process";
 import { dirname, join } from "node:path";
 import * as readline from "node:readline";
 import { fileURLToPath } from "node:url";
-import { type Component, Container, Input, matchesKey, ProcessTerminal, SelectList, TUI } from "@arcmind/tui";
+import { type Component, Container, Input, matchesKey, ProcessTerminal, SelectList, TUI } from "@metis/tui";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 

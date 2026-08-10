@@ -5,8 +5,8 @@
  * When --ssh is provided, read/write/edit/bash run on the remote.
  *
  * Usage:
- *   arcmind -e ./ssh.ts --ssh user@host
- *   arcmind -e ./ssh.ts --ssh user@host:/remote/path
+ *   metis -e ./ssh.ts --ssh user@host
+ *   metis -e ./ssh.ts --ssh user@host:/remote/path
  *
  * Requirements:
  *   - SSH key-based auth (no password prompts)
@@ -19,7 +19,7 @@
  */
 
 import { spawn } from "node:child_process";
-import type { ExtensionAPI } from "@arcmind/coding-agent";
+import type { ExtensionAPI } from "@metis/coding-agent";
 import {
 	type BashOperations,
 	createBashTool,
@@ -29,7 +29,7 @@ import {
 	type EditOperations,
 	type ReadOperations,
 	type WriteOperations,
-} from "@arcmind/coding-agent";
+} from "@metis/coding-agent";
 
 function sshExec(remote: string, command: string): Promise<Buffer> {
 	return new Promise((resolve, reject) => {
@@ -116,8 +116,8 @@ function createRemoteBashOps(remote: string, remoteCwd: string, localCwd: string
 	};
 }
 
-export default function (arcmind: ExtensionAPI) {
-	arcmind.registerFlag("ssh", { description: "SSH remote: user@host or user@host:/path", type: "string" });
+export default function (metis: ExtensionAPI) {
+	metis.registerFlag("ssh", { description: "SSH remote: user@host or user@host:/path", type: "string" });
 
 	const localCwd = process.cwd();
 	const localRead = createReadTool(localCwd);
@@ -130,7 +130,7 @@ export default function (arcmind: ExtensionAPI) {
 
 	const getSsh = () => resolvedSsh;
 
-	arcmind.registerTool({
+	metis.registerTool({
 		...localRead,
 		async execute(id, params, signal, onUpdate, _ctx) {
 			const ssh = getSsh();
@@ -144,7 +144,7 @@ export default function (arcmind: ExtensionAPI) {
 		},
 	});
 
-	arcmind.registerTool({
+	metis.registerTool({
 		...localWrite,
 		async execute(id, params, signal, onUpdate, _ctx) {
 			const ssh = getSsh();
@@ -158,7 +158,7 @@ export default function (arcmind: ExtensionAPI) {
 		},
 	});
 
-	arcmind.registerTool({
+	metis.registerTool({
 		...localEdit,
 		async execute(id, params, signal, onUpdate, _ctx) {
 			const ssh = getSsh();
@@ -172,7 +172,7 @@ export default function (arcmind: ExtensionAPI) {
 		},
 	});
 
-	arcmind.registerTool({
+	metis.registerTool({
 		...localBash,
 		async execute(id, params, signal, onUpdate, _ctx) {
 			const ssh = getSsh();
@@ -186,9 +186,9 @@ export default function (arcmind: ExtensionAPI) {
 		},
 	});
 
-	arcmind.on("session_start", async (_event, ctx) => {
+	metis.on("session_start", async (_event, ctx) => {
 		// Resolve SSH config now that CLI flags are available
-		const arg = arcmind.getFlag("ssh") as string | undefined;
+		const arg = metis.getFlag("ssh") as string | undefined;
 		if (arg) {
 			if (arg.includes(":")) {
 				const [remote, path] = arg.split(":");
@@ -205,14 +205,14 @@ export default function (arcmind: ExtensionAPI) {
 	});
 
 	// Handle user ! commands via SSH
-	arcmind.on("user_bash", (_event) => {
+	metis.on("user_bash", (_event) => {
 		const ssh = getSsh();
 		if (!ssh) return; // No SSH, use local execution
 		return { operations: createRemoteBashOps(ssh.remote, ssh.remoteCwd, localCwd) };
 	});
 
 	// Replace local cwd with remote cwd in system prompt
-	arcmind.on("before_agent_start", async (event) => {
+	metis.on("before_agent_start", async (event) => {
 		const ssh = getSsh();
 		if (ssh) {
 			const modified = event.systemPrompt.replace(

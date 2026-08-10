@@ -1,4 +1,4 @@
-import type { Model } from "@arcmind/ai";
+import type { Model } from "@metis/ai";
 import {
 	Container,
 	type Focusable,
@@ -9,7 +9,7 @@ import {
 	matchesKey,
 	Spacer,
 	Text,
-} from "@arcmind/tui";
+} from "@metis/tui";
 import { getModelSearchText } from "../model-search.ts";
 import { theme } from "../theme/theme.ts";
 import { DynamicBorder } from "./dynamic-border.ts";

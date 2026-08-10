@@ -1,8 +1,8 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { createModels } from "@arcmind/ai";
-import { cloudflareAIGatewayProvider } from "@arcmind/ai/providers/cloudflare-ai-gateway";
-import { openaiProvider } from "@arcmind/ai/providers/openai";
+import { createModels } from "@metis/ai";
+import { cloudflareAIGatewayProvider } from "@metis/ai/providers/cloudflare-ai-gateway";
+import { openaiProvider } from "@metis/ai/providers/openai";
 import { NodeExecutionEnv } from "../../src/harness/env/nodejs.ts";
 import { InMemorySessionStorage } from "../../src/harness/session/memory-storage.ts";
 import {
@@ -25,15 +25,15 @@ const source = (type: Source["type"], dir: string) => ({ path: dir, source: { ty
 const { skills: sourcedSkills } = await loadSourcedSkills<Source, SourcedSkill>(
 	env,
 	[
-		source("project", join(env.cwd, ".arcmind/skills")),
-		source("user", join(homedir(), ".arcmind/agent/skills")),
-		source("path", join(env.cwd, "../../../arcmind-skills")),
+		source("project", join(env.cwd, ".metis/skills")),
+		source("user", join(homedir(), ".metis/agent/skills")),
+		source("path", join(env.cwd, "../../../metis-skills")),
 	],
 	(skill, source) => ({ ...skill, source }),
 );
 const { promptTemplates: sourcedPromptTemplates } = await loadSourcedPromptTemplates<Source, SourcedPromptTemplate>(
 	env,
-	[source("project", join(env.cwd, ".arcmind/prompts")), source("user", join(homedir(), ".arcmind/agent/prompts"))],
+	[source("project", join(env.cwd, ".metis/prompts")), source("user", join(homedir(), ".metis/agent/prompts"))],
 	(promptTemplate, source) => ({ ...promptTemplate, source }),
 );
 

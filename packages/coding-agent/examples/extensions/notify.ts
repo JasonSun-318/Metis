@@ -1,14 +1,14 @@
 /**
- * ArcMind Notify Extension
+ * Metis Notify Extension
  *
- * Sends a native terminal notification when ArcMind agent is done and waiting for input.
+ * Sends a native terminal notification when Metis agent is done and waiting for input.
  * Supports multiple terminal protocols:
  * - OSC 777: Ghostty, iTerm2, WezTerm, rxvt-unicode
  * - OSC 99: Kitty
  * - Windows toast: Windows Terminal (WSL)
  */
 
-import type { ExtensionAPI } from "@arcmind/coding-agent";
+import type { ExtensionAPI } from "@metis/coding-agent";
 
 function windowsToastScript(title: string, body: string): string {
 	const type = "Windows.UI.Notifications";
@@ -48,8 +48,8 @@ function notify(title: string, body: string): void {
 	}
 }
 
-export default function (arcmind: ExtensionAPI) {
-	arcmind.on("agent_end", async () => {
-		notify("ArcMind", "Ready for input");
+export default function (metis: ExtensionAPI) {
+	metis.on("agent_end", async () => {
+		notify("Metis", "Ready for input");
 	});
 }

@@ -2,26 +2,26 @@
  * Shutdown Command Extension
  *
  * Adds a /quit command that allows extensions to trigger clean shutdown.
- * Demonstrates how extensions can use ctx.shutdown() to exit arcmind cleanly.
+ * Demonstrates how extensions can use ctx.shutdown() to exit metis cleanly.
  */
 
-import type { ExtensionAPI } from "@arcmind/coding-agent";
+import type { ExtensionAPI } from "@metis/coding-agent";
 import { Type } from "typebox";
 
-export default function (arcmind: ExtensionAPI) {
-	// Register a /quit command that cleanly exits arcmind
-	arcmind.registerCommand("quit", {
-		description: "Exit arcmind cleanly",
+export default function (metis: ExtensionAPI) {
+	// Register a /quit command that cleanly exits metis
+	metis.registerCommand("quit", {
+		description: "Exit metis cleanly",
 		handler: async (_args, ctx) => {
 			ctx.shutdown();
 		},
 	});
 
 	// You can also create a tool that shuts down after completing work
-	arcmind.registerTool({
+	metis.registerTool({
 		name: "finish_and_exit",
 		label: "Finish and Exit",
-		description: "Complete a task and exit arcmind",
+		description: "Complete a task and exit metis",
 		parameters: Type.Object({}),
 		async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
 			// Do any final work here...
@@ -37,10 +37,10 @@ export default function (arcmind: ExtensionAPI) {
 	});
 
 	// You could also create a more complex tool with parameters
-	arcmind.registerTool({
+	metis.registerTool({
 		name: "deploy_and_exit",
 		label: "Deploy and Exit",
-		description: "Deploy the application and exit arcmind",
+		description: "Deploy the application and exit metis",
 		parameters: Type.Object({
 			environment: Type.String({ description: "Target environment (e.g., production, staging)" }),
 		}),
@@ -48,7 +48,7 @@ export default function (arcmind: ExtensionAPI) {
 			onUpdate?.({ content: [{ type: "text", text: `Deploying to ${params.environment}...` }], details: {} });
 
 			// Example deployment logic
-			// const result = await arcmind.exec("npm", ["run", "deploy", params.environment], { signal });
+			// const result = await metis.exec("npm", ["run", "deploy", params.environment], { signal });
 
 			// On success, request graceful shutdown
 			onUpdate?.({ content: [{ type: "text", text: "Deployment complete, exiting..." }], details: {} });

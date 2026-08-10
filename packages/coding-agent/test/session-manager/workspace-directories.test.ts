@@ -11,7 +11,7 @@ describe("SessionManager Code workspace directories", () => {
 	let external: string;
 
 	beforeEach(() => {
-		root = mkdtempSync(join(tmpdir(), "arcmind-workspace-directories-"));
+		root = mkdtempSync(join(tmpdir(), "metis-workspace-directories-"));
 		project = join(root, "project");
 		external = join(root, "external");
 		mkdirSync(project);

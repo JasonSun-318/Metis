@@ -1,4 +1,4 @@
-import type { ImageContent } from "@arcmind/ai";
+import type { ImageContent } from "@metis/ai";
 import type { Args } from "./args.ts";
 
 export interface InitialMessageInput {

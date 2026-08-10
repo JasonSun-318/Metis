@@ -52,7 +52,7 @@ import { AssistantMessageEventStream } from "../utils/event-stream.ts";
 import { providerHeadersToRecord } from "../utils/headers.ts";
 import { parseStreamingJson } from "../utils/json-parse.ts";
 import { resolveHttpProxyUrlForTarget } from "../utils/node-http-proxy.ts";
-import { getProviderEnvValue } from "../utils/provider-env.ts";
+import { getMetisProviderEnvValue, getProviderEnvValue } from "../utils/provider-env.ts";
 import { sanitizeSurrogates } from "../utils/sanitize-unicode.ts";
 import {
 	adjustMaxTokensForThinking,
@@ -386,7 +386,7 @@ function addCustomHeadersMiddleware(client: BedrockRuntimeClient, headers: Recor
 		}
 		return next(args);
 	};
-	client.middlewareStack.add(middleware, { step: "build", name: "arcmind-ai-custom-headers", priority: "low" });
+	client.middlewareStack.add(middleware, { step: "build", name: "metis-ai-custom-headers", priority: "low" });
 }
 
 export const streamSimple: StreamFunction<"bedrock-converse-stream", SimpleStreamOptions> = (
@@ -618,13 +618,13 @@ function mapThinkingLevelToEffort(
 
 /**
  * Resolve cache retention preference.
- * Defaults to "short" and uses ARCMIND_CACHE_RETENTION for backward compatibility.
+ * Defaults to "short" and accepts `METIS_CACHE_RETENTION=long`.
  */
 function resolveCacheRetention(cacheRetention?: CacheRetention, env?: ProviderEnv): CacheRetention {
 	if (cacheRetention) {
 		return cacheRetention;
 	}
-	if (getProviderEnvValue("ARCMIND_CACHE_RETENTION", env) === "long") {
+	if (getMetisProviderEnvValue("CACHE_RETENTION", env) === "long") {
 		return "long";
 	}
 	return "short";

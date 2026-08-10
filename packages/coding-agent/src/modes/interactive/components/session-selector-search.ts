@@ -1,4 +1,4 @@
-import { fuzzyMatch } from "@arcmind/tui";
+import { fuzzyMatch } from "@metis/tui";
 import type { SessionInfo } from "../../../core/session-manager.ts";
 
 export type SortMode = "threaded" | "recent" | "relevance";

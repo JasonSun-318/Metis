@@ -1,4 +1,4 @@
-import type { Transport } from "@arcmind/ai";
+import type { Transport } from "@metis/ai";
 import {
 	type Component,
 	Container,
@@ -9,7 +9,7 @@ import {
 	SettingsList,
 	Spacer,
 	Text,
-} from "@arcmind/tui";
+} from "@metis/tui";
 import { formatHttpIdleTimeoutMs, HTTP_IDLE_TIMEOUT_CHOICES } from "../../../core/http-dispatcher.ts";
 import type { DefaultProjectTrust } from "../../../core/settings-manager.ts";
 import type { ThinkingSelection } from "../../../core/thinking-selection.ts";
@@ -490,7 +490,7 @@ export class SettingsSelectorComponent extends Container {
 			{
 				id: "provider-attribution",
 				label: "Provider attribution",
-				description: "Send ArcMind attribution headers to supported model providers",
+				description: "Send Metis attribution headers to supported model providers",
 				currentValue: config.enableProviderAttribution ? "true" : "false",
 				values: ["true", "false"],
 			},

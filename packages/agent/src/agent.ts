@@ -7,7 +7,7 @@ import {
 	type TextContent,
 	type ThinkingBudgets,
 	type Transport,
-} from "@arcmind/ai/compat";
+} from "@metis/ai/compat";
 import { runAgentLoop, runAgentLoopContinue } from "./agent-loop.ts";
 import { consumeQueueReservation, PendingMessageQueue } from "./pending-message-queue.ts";
 import type {

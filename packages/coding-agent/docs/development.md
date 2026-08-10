@@ -1,12 +1,12 @@
 # Development
 
-See [AGENTS.md](https://github.com/arcmind/arcmind/blob/main/AGENTS.md) for additional guidelines.
+See [AGENTS.md](https://github.com/metis/metis/blob/main/AGENTS.md) for additional guidelines.
 
 ## Setup
 
 ```bash
-git clone https://github.com/arcmind/arcmind
-cd arcmind
+git clone https://github.com/metis/metis
+cd metis
 npm install
 npm run build
 ```
@@ -14,10 +14,10 @@ npm run build
 Run from source:
 
 ```bash
-/path/to/arcmind/arcmind-test.sh
+/path/to/metis/metis-test.sh
 ```
 
-The script can be run from any directory. ArcMind keeps the caller's current working directory.
+The script can be run from any directory. Metis keeps the caller's current working directory.
 
 ## Forking / Rebranding
 
@@ -25,9 +25,9 @@ Configure via `package.json`:
 
 ```json
 {
-  "arcmindConfig": {
-    "name": "arcmind",
-    "configDir": ".arcmind"
+  "metisConfig": {
+    "name": "metis",
+    "configDir": ".metis"
   }
 }
 ```
@@ -48,7 +48,7 @@ Never use `__dirname` directly for package assets.
 
 ## Debug Command
 
-`/debug` (hidden) writes to `~/.arcmind/agent/arcmind-debug.log`:
+`/debug` (hidden) writes to `~/.metis/agent/metis-debug.log`:
 - Rendered TUI lines with ANSI codes
 - Last messages sent to the LLM
 

@@ -5,16 +5,16 @@ description: Read, extract, analyze, create, edit, merge, split, rotate, crop, w
 
 # PDF
 
-Use local tools already present in ArcMind. Never upload a PDF, page image, or extracted asset to a remote service. Never install or update tools during a task, and never use OCR.
+Use local tools already present in Metis. Never upload a PDF, page image, or extracted asset to a remote service. Never install or update tools during a task, and never use OCR.
 
 ## Paths and lifecycle
 
 - Use the exact absolute PDF path from the `<attachment>` or `<attachments>` block.
 - A simple read must stream results to stdout. Do not create a work directory, extracted-text file, rendered page, or copied PDF for metadata, text extraction, search, Q&A, or summary.
-- Final PDFs and other user-requested deliverables go only in `$ARCMIND_ATTACHMENTS_DIR`.
-- ArcMind creates a unique `$ARCMIND_WORK_DIR` for the current run. Temporary page renders, extracted images, overlays, and conversion files go only there; never create `.work`, `work`, `tmp`, or another scratch directory beside an attachment.
-- For an operation that produces temporary files, start from `cd "$ARCMIND_WORK_DIR"`. ArcMind clears the directory when the agent run ends.
-- Preserve the input by default. Write modifications to a new final file unless the user explicitly requests an in-place change to an ArcMind-owned attachment.
+- Final PDFs and other user-requested deliverables go only in `$METIS_ATTACHMENTS_DIR`.
+- Metis creates a unique `$METIS_WORK_DIR` for the current run. Temporary page renders, extracted images, overlays, and conversion files go only there; never create `.work`, `work`, `tmp`, or another scratch directory beside an attachment.
+- For an operation that produces temporary files, start from `cd "$METIS_WORK_DIR"`. Metis clears the directory when the agent run ends.
+- Preserve the input by default. Write modifications to a new final file unless the user explicitly requests an in-place change to an Metis-owned attachment.
 
 ## Choose the smallest sufficient operation
 
@@ -51,7 +51,7 @@ pdftotext -layout "$PDF" -
 Scanned content is vision-only. Do not use Tesseract, PaddleOCR, system OCR APIs, cloud OCR, or hidden OCR fallbacks.
 
 ```bash
-cd "$ARCMIND_WORK_DIR"
+cd "$METIS_WORK_DIR"
 pdftoppm -png -r 144 -f "$FIRST" -l "$LAST" "$PDF" page
 ```
 
@@ -67,7 +67,7 @@ pdftoppm -png -r 144 -f "$FIRST" -l "$LAST" "$PDF" page
 - Preserve page boxes, rotation, bookmarks, form fields, and metadata unless the request says otherwise.
 - For filled forms, set field values and appearance-generation flags, then verify the values can be read back.
 - For redaction, do not cover text with an opaque rectangle and call it redacted. Remove the underlying content with a suitable installed tool or state that secure redaction is unavailable.
-- Write directly to a final path in `$ARCMIND_ATTACHMENTS_DIR`; keep overlay sources and scratch outputs in `$ARCMIND_WORK_DIR`.
+- Write directly to a final path in `$METIS_ATTACHMENTS_DIR`; keep overlay sources and scratch outputs in `$METIS_WORK_DIR`.
 
 ## Verification
 

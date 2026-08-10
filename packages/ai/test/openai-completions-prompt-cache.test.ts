@@ -64,19 +64,19 @@ vi.mock("openai", () => {
 });
 
 describe("openai-completions prompt caching", () => {
-	const originalEnv = process.env.ARCMIND_CACHE_RETENTION;
+	const originalEnv = process.env.METIS_CACHE_RETENTION;
 
 	beforeEach(() => {
 		mockState.lastParams = undefined;
 		mockState.lastClientOptions = undefined;
-		delete process.env.ARCMIND_CACHE_RETENTION;
+		delete process.env.METIS_CACHE_RETENTION;
 	});
 
 	afterEach(() => {
 		if (originalEnv === undefined) {
-			delete process.env.ARCMIND_CACHE_RETENTION;
+			delete process.env.METIS_CACHE_RETENTION;
 		} else {
-			process.env.ARCMIND_CACHE_RETENTION = originalEnv;
+			process.env.METIS_CACHE_RETENTION = originalEnv;
 		}
 	});
 
@@ -151,8 +151,8 @@ describe("openai-completions prompt caching", () => {
 		expect(payload?.prompt_cache_retention).toBeUndefined();
 	});
 
-	it("uses ARCMIND_CACHE_RETENTION for direct OpenAI requests", async () => {
-		process.env.ARCMIND_CACHE_RETENTION = "long";
+	it("uses METIS_CACHE_RETENTION for direct OpenAI requests", async () => {
+		process.env.METIS_CACHE_RETENTION = "long";
 		const { payload } = await captureRequest({ sessionId: "session-env" });
 
 		expect(payload?.prompt_cache_key).toBe("session-env");

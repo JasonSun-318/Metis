@@ -87,15 +87,15 @@ function getOwnedSessionWorkRoot(agentDir: string, create: boolean): string | un
 	}
 }
 
-/** Create one ArcMind-owned disposable directory for an agent run. */
+/** Create one Metis-owned disposable directory for an agent run. */
 export function createSessionWorkDir(agentDir: string, sessionId: string): string {
 	assertValidSessionId(sessionId);
 	const root = getOwnedSessionWorkRoot(agentDir, true);
-	if (!root) throw new Error("Unable to create the ArcMind document work root");
+	if (!root) throw new Error("Unable to create the Metis document work root");
 	return mkdtempSync(join(root, `${sessionId}-`));
 }
 
-/** Return an exact ArcMind-owned attachment directory, or undefined if ownership cannot be proven. */
+/** Return an exact Metis-owned attachment directory, or undefined if ownership cannot be proven. */
 export function getOwnedSessionAttachmentDir(agentDir: string, sessionId: string): string | undefined {
 	try {
 		assertValidSessionId(sessionId);
@@ -173,7 +173,7 @@ export function clearSessionAttachmentNonFiles(agentDir: string, sessionId: stri
 	return removed;
 }
 
-/** Remove one exact ArcMind-owned run directory without following symlinks. */
+/** Remove one exact Metis-owned run directory without following symlinks. */
 export function clearSessionWorkDir(agentDir: string, workDir: string): boolean {
 	const root = getOwnedSessionWorkRoot(agentDir, false);
 	if (!root) return false;

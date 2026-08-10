@@ -5,16 +5,16 @@ Sessions are stored as JSONL (JSON Lines) files. Each line is a JSON object with
 ## File Location
 
 ```
-~/.arcmind/agent/sessions/--<path>--/<timestamp>_<uuid>.jsonl
+~/.metis/agent/sessions/--<path>--/<timestamp>_<uuid>.jsonl
 ```
 
 Where `<path>` is the working directory with `/` replaced by `-`.
 
 ## Deleting Sessions
 
-Sessions can be removed from `/resume` by selecting a session and pressing `Ctrl+D`. ArcMind removes the JSONL file together with that session's image directory, tool-output directory, child-session directory, and ArcMind-owned managed workspace where applicable.
+Sessions can be removed from `/resume` by selecting a session and pressing `Ctrl+D`. Metis removes the JSONL file together with that session's image directory, tool-output directory, child-session directory, and Metis-owned managed workspace where applicable.
 
-When available, ArcMind uses the `trash` CLI instead of permanently deleting eligible files. Deleting a JSONL file manually does not clean up its owned assets.
+When available, Metis uses the `trash` CLI instead of permanently deleting eligible files. Deleting a JSONL file manually does not clean up its owned assets.
 
 ## Session Version
 
@@ -46,13 +46,13 @@ interface ImageReference {
 }
 ```
 
-For default sessions, the image bytes are stored under `~/.arcmind/agent/images/<session-key>/<sha256>.<ext>`. Custom session files use an `images/<session-key>/` directory beside the JSONL file. The `session-key` is derived from the absolute session-file path. Repeated copies of the same image within one session share the same file. ArcMind verifies the hash and restores the normal `ImageContent` before sending the conversation to a model. `/export file.jsonl` is intentionally self-contained and keeps image data inline; `/import` moves it back into the session's content-addressed image store.
+For default sessions, the image bytes are stored under `~/.metis/agent/images/<session-key>/<sha256>.<ext>`. Custom session files use an `images/<session-key>/` directory beside the JSONL file. The `session-key` is derived from the absolute session-file path. Repeated copies of the same image within one session share the same file. Metis verifies the hash and restores the normal `ImageContent` before sending the conversation to a model. `/export file.jsonl` is intentionally self-contained and keeps image data inline; `/import` moves it back into the session's content-addressed image store.
 
 ## Tool-output Storage
 
 Durable full tool results are stored under `tool-results/<session-key>/`, using the same session-key derivation as image storage. The latest five eligible results keep their preview in model context; older eligible results may be projected as a short path reference after their total reaches 20,000 estimated tokens.
 
-Closing the app, resuming a session, microcompaction, and full compaction do not remove these files. Fork and branch-copy operations copy proven session-owned references into the destination session directory and rewrite the destination paths. Explicit session deletion removes that session's tool-output directory. In-memory sessions use an isolated temporary directory that is removed when `AgentSession.dispose()` completes. ArcMind does not delete legacy paths outside a proven session-owned directory.
+Closing the app, resuming a session, microcompaction, and full compaction do not remove these files. Fork and branch-copy operations copy proven session-owned references into the destination session directory and rewrite the destination paths. Explicit session deletion removes that session's tool-output directory. In-memory sessions use an isolated temporary directory that is removed when `AgentSession.dispose()` completes. Metis does not delete legacy paths outside a proven session-owned directory.
 
 ## Source Files
 
@@ -94,7 +94,7 @@ interface ToolCall {
 }
 ```
 
-### Base Message Types (from arcmind-ai)
+### Base Message Types (from metis-ai)
 
 ```typescript
 interface UserMessage {
@@ -141,7 +141,7 @@ interface Usage {
 }
 ```
 
-### Extended Message Types (from arcmind-coding-agent)
+### Extended Message Types (from metis-coding-agent)
 
 ```typescript
 interface BashExecutionMessage {
@@ -216,7 +216,7 @@ First line of the file. Metadata only, not part of the tree (no `id`/`parentId`)
 {"type":"session","version":11,"id":"uuid","timestamp":"2026-07-17T14:00:00.000Z","cwd":"/path/to/project","mode":"code","cwdOrigin":"user-selected","permissionMode":"ask"}
 ```
 
-`mode` is `"chat"` or `"code"`. `cwdOrigin` is `"managed"` only for a workspace that ArcMind owns and may copy/delete; otherwise it is `"user-selected"`. New records write `permissionMode` as `"ask"` or `"full"`; both modes default to Ask. Legacy v6-v8 `"auto"` loads as Ask, and legacy `reviewerEnabled` is validated when present but ignored.
+`mode` is `"chat"` or `"code"`. `cwdOrigin` is `"managed"` only for a workspace that Metis owns and may copy/delete; otherwise it is `"user-selected"`. New records write `permissionMode` as `"ask"` or `"full"`; both modes default to Ask. Legacy v6-v8 `"auto"` loads as Ask, and legacy `reviewerEnabled` is validated when present but ignored.
 
 For sessions with a parent (created via `/fork`, `/clone`, or `newSession({ parentSession })`):
 
@@ -306,7 +306,7 @@ Created when context is compacted. Stores a summary of earlier messages.
 
 Optional fields:
 - `details`: Implementation-specific data (e.g., `{ readFiles: string[], modifiedFiles: string[] }` for default, or custom data for extensions)
-- `fromHook`: `true` if generated by an extension, `false`/`undefined` if arcmind-generated (legacy field name)
+- `fromHook`: `true` if generated by an extension, `false`/`undefined` if metis-generated (legacy field name)
 
 ### BranchSummaryEntry
 
@@ -318,7 +318,7 @@ Created when switching branches via `/tree` with an LLM generated summary of the
 
 Optional fields:
 - `details`: File tracking data (`{ readFiles: string[], modifiedFiles: string[] }`) for default, or custom data for extensions
-- `fromHook`: `true` if generated by an extension, `false`/`undefined` if arcmind-generated (legacy field name)
+- `fromHook`: `true` if generated by an extension, `false`/`undefined` if metis-generated (legacy field name)
 
 ### CustomEntry
 
@@ -328,7 +328,7 @@ Extension state persistence. Does NOT participate in LLM context.
 {"type":"custom","id":"h8i9j0k1","parentId":"g7h8i9j0","timestamp":"2024-12-03T14:20:00.000Z","customType":"my-extension","data":{"count":42}}
 ```
 
-Use `customType` to identify your extension's entries on reload. Interactive mode can render custom entries via `arcmind.registerEntryRenderer(customType, renderer)`, but they still do not participate in LLM context.
+Use `customType` to identify your extension's entries on reload. Interactive mode can render custom entries via `metis.registerEntryRenderer(customType, renderer)`, but they still do not participate in LLM context.
 
 ### CustomMessageEntry
 
@@ -355,7 +355,7 @@ Set `label` to `undefined` to clear a label.
 
 ### SessionInfoEntry
 
-Session metadata (e.g., user-defined display name). Set via `/name`, `--name` / `-n`, or `arcmind.setSessionName()` in extensions.
+Session metadata (e.g., user-defined display name). Set via `/name`, `--name` / `-n`, or `metis.setSessionName()` in extensions.
 
 ```json
 {"type":"session_info","id":"k1l2m3n4","parentId":"j0k1l2m3","timestamp":"2024-12-03T14:35:00.000Z","name":"Refactor auth module"}

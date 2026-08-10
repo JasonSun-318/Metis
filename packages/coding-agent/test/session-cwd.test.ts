@@ -35,9 +35,9 @@ describe("session cwd handling", () => {
 	});
 
 	it("detects missing session cwd from persisted sessions", () => {
-		const fallbackCwd = createTempDir("arcmind-session-cwd-fallback");
+		const fallbackCwd = createTempDir("metis-session-cwd-fallback");
 		const missingCwd = join(fallbackCwd, "does-not-exist");
-		const sessionDir = createTempDir("arcmind-session-cwd-session-dir");
+		const sessionDir = createTempDir("metis-session-cwd-session-dir");
 		const sessionFile = join(sessionDir, "session.jsonl");
 		cleanupPaths.push(fallbackCwd, sessionDir);
 		writeSessionFile(sessionFile, missingCwd);
@@ -52,9 +52,9 @@ describe("session cwd handling", () => {
 	});
 
 	it("supports overriding the effective cwd when opening a session", () => {
-		const fallbackCwd = createTempDir("arcmind-session-cwd-override");
+		const fallbackCwd = createTempDir("metis-session-cwd-override");
 		const missingCwd = join(fallbackCwd, "does-not-exist");
-		const sessionDir = createTempDir("arcmind-session-cwd-override-session-dir");
+		const sessionDir = createTempDir("metis-session-cwd-override-session-dir");
 		const sessionFile = join(sessionDir, "session.jsonl");
 		cleanupPaths.push(fallbackCwd, sessionDir);
 		writeSessionFile(sessionFile, missingCwd);
@@ -65,9 +65,9 @@ describe("session cwd handling", () => {
 	});
 
 	it("throws a controlled error before runtime creation when the stored cwd is missing", async () => {
-		const fallbackCwd = createTempDir("arcmind-session-cwd-runtime");
+		const fallbackCwd = createTempDir("metis-session-cwd-runtime");
 		const missingCwd = join(fallbackCwd, "does-not-exist");
-		const sessionDir = createTempDir("arcmind-session-cwd-runtime-session-dir");
+		const sessionDir = createTempDir("metis-session-cwd-runtime-session-dir");
 		const sessionFile = join(sessionDir, "session.jsonl");
 		cleanupPaths.push(fallbackCwd, sessionDir);
 		writeSessionFile(sessionFile, missingCwd);

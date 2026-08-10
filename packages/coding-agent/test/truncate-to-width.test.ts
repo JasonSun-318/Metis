@@ -1,4 +1,4 @@
-import { truncateToWidth, visibleWidth } from "@arcmind/tui";
+import { truncateToWidth, visibleWidth } from "@metis/tui";
 import { describe, expect, it } from "vitest";
 
 /**

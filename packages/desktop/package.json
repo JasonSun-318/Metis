@@ -1,7 +1,7 @@
 {
-	"name": "@arcmind/desktop",
-	"version": "0.80.6",
-	"description": "Secure Electron desktop shell for ArcMind",
+	"name": "@metis/desktop",
+	"version": "0.0.3",
+	"description": "Secure Electron desktop shell for Metis",
 	"private": true,
 	"main": ".webpack/main",
 	"scripts": {
@@ -16,8 +16,8 @@
 		"profile": "node ../../scripts/profile-desktop.mjs"
 	},
 	"dependencies": {
-		"@arcmind/app-protocol": "^0.80.6",
-		"@arcmind/app-server": "^0.80.6",
+		"@metis/app-protocol": "^0.0.3",
+		"@metis/app-server": "^0.0.3",
 		"@codemirror/lang-css": "6.3.1",
 		"@codemirror/lang-html": "6.4.12",
 		"@codemirror/lang-javascript": "6.2.5",

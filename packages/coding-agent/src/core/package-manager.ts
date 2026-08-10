@@ -28,7 +28,7 @@ import { globSync } from "glob";
 import ignore from "ignore";
 import { minimatch } from "minimatch";
 import { maxSatisfying, rcompare, satisfies, valid, validRange } from "semver";
-import { CONFIG_DIR_NAME } from "../config.ts";
+import { getMetisEnv, getProjectConfigDir } from "../config.ts";
 import { spawnProcess, spawnProcessSync } from "../utils/child-process.ts";
 import { type GitSource, parseGitUrl } from "../utils/git.ts";
 import { canonicalizePath, isLocalPath, markPathIgnoredByCloudSync, resolvePath } from "../utils/paths.ts";
@@ -40,7 +40,7 @@ const UPDATE_CHECK_CONCURRENCY = 4;
 const GIT_UPDATE_CONCURRENCY = 4;
 
 function isOfflineModeEnabled(): boolean {
-	const value = process.env.ARCMIND_OFFLINE;
+	const value = getMetisEnv("OFFLINE", getEnv());
 	if (!value) return false;
 	return value === "1" || value.toLowerCase() === "true" || value.toLowerCase() === "yes";
 }
@@ -155,7 +155,7 @@ interface GitUpdateTarget extends ConfiguredUpdateSource {
 	parsed: GitSource;
 }
 
-interface ArcMindManifest {
+interface MetisManifest {
 	extensions?: string[];
 	skills?: string[];
 	prompts?: string[];
@@ -344,7 +344,7 @@ function collectFiles(
 	return files;
 }
 
-type SkillDiscoveryMode = "arcmind" | "agents";
+type SkillDiscoveryMode = "metis" | "agents";
 
 function collectSkillEntries(
 	dir: string,
@@ -403,7 +403,7 @@ function collectSkillEntries(
 			}
 
 			const relPath = toPosixPath(relative(root, fullPath));
-			if (mode === "arcmind" && dir === root && isFile && entry.name.endsWith(".md") && !ig.ignores(relPath)) {
+			if (mode === "metis" && dir === root && isFile && entry.name.endsWith(".md") && !ig.ignores(relPath)) {
 				entries.push(fullPath);
 				continue;
 			}
@@ -533,11 +533,11 @@ function collectAutoThemeEntries(dir: string): string[] {
 	return entries;
 }
 
-function readArcMindManifestFile(packageJsonPath: string): ArcMindManifest | null {
+function readMetisManifestFile(packageJsonPath: string): MetisManifest | null {
 	try {
 		const content = readFileSync(packageJsonPath, "utf-8");
-		const pkg = JSON.parse(content) as { arcmind?: ArcMindManifest };
-		return pkg.arcmind ?? null;
+		const pkg = JSON.parse(content) as { metis?: MetisManifest };
+		return pkg.metis ?? null;
 	} catch {
 		return null;
 	}
@@ -546,7 +546,7 @@ function readArcMindManifestFile(packageJsonPath: string): ArcMindManifest | nul
 function resolveExtensionEntries(dir: string): string[] | null {
 	const packageJsonPath = join(dir, "package.json");
 	if (existsSync(packageJsonPath)) {
-		const manifest = readArcMindManifestFile(packageJsonPath);
+		const manifest = readMetisManifestFile(packageJsonPath);
 		if (manifest?.extensions?.length) {
 			const entries: string[] = [];
 			for (const extPath of manifest.extensions) {
@@ -633,7 +633,7 @@ function collectAutoExtensionEntries(dir: string): string[] {
  */
 function collectResourceFiles(dir: string, resourceType: ResourceType): string[] {
 	if (resourceType === "skills") {
-		return collectSkillEntries(dir, "arcmind");
+		return collectSkillEntries(dir, "metis");
 	}
 	if (resourceType === "extensions") {
 		return collectAutoExtensionEntries(dir);
@@ -917,7 +917,7 @@ export class DefaultPackageManager implements PackageManager {
 		await this.resolvePackageSources(packageSources, accumulator, onMissing);
 
 		const globalBaseDir = this.agentDir;
-		const projectBaseDir = join(this.cwd, CONFIG_DIR_NAME);
+		const projectBaseDir = getProjectConfigDir(this.cwd);
 
 		for (const resourceType of RESOURCE_TYPES) {
 			const target = this.getTargetMap(accumulator, resourceType);
@@ -1773,10 +1773,10 @@ export class DefaultPackageManager implements PackageManager {
 
 	private getNpmInstallArgs(specs: string[], installRoot: string): string[] {
 		const packageManagerName = this.getPackageManagerName();
-		// Extension packages run inside arcmind and resolve arcmind APIs through loader aliases/virtual modules.
+		// Extension packages run inside Metis and resolve Metis APIs through loader aliases/virtual modules.
 		// Disable peer dependency resolution for managed installs (npm's --legacy-peer-deps, and
 		// equivalent bun/pnpm settings) so package managers do not install or solve host-provided
-		// @arcmind/arcmind-* peers. Stale auto-installed arcmind peers can otherwise block updates.
+		// Metis peers. Stale auto-installed peers can otherwise block updates.
 		if (packageManagerName === "bun") {
 			return ["install", ...specs, "--cwd", installRoot, "--omit=peer"];
 		}
@@ -1938,7 +1938,7 @@ export class DefaultPackageManager implements PackageManager {
 		this.ensureGitIgnore(installRoot);
 		const packageJsonPath = join(installRoot, "package.json");
 		if (!existsSync(packageJsonPath)) {
-			const pkgJson = { name: "arcmind-extensions", private: true };
+			const pkgJson = { name: "metis-extensions", private: true };
 			writeFileSync(packageJsonPath, JSON.stringify(pkgJson, null, 2), "utf-8");
 		}
 	}
@@ -1959,7 +1959,7 @@ export class DefaultPackageManager implements PackageManager {
 		}
 		if (scope === "project") {
 			this.assertProjectTrustedForScope(scope);
-			return join(this.cwd, CONFIG_DIR_NAME, "npm");
+			return join(getProjectConfigDir(this.cwd), "npm");
 		}
 		return join(this.agentDir, "npm");
 	}
@@ -2000,7 +2000,7 @@ export class DefaultPackageManager implements PackageManager {
 		}
 		if (scope === "project") {
 			this.assertProjectTrustedForScope(scope);
-			return join(this.cwd, CONFIG_DIR_NAME, "npm", "node_modules", source.name);
+			return join(getProjectConfigDir(this.cwd), "npm", "node_modules", source.name);
 		}
 		return join(this.agentDir, "npm", "node_modules", source.name);
 	}
@@ -2039,7 +2039,7 @@ export class DefaultPackageManager implements PackageManager {
 		}
 		if (scope === "project") {
 			this.assertProjectTrustedForScope(scope);
-			return join(this.cwd, CONFIG_DIR_NAME, "git");
+			return join(getProjectConfigDir(this.cwd), "git");
 		}
 		return join(this.agentDir, "git");
 	}
@@ -2065,7 +2065,7 @@ export class DefaultPackageManager implements PackageManager {
 	private getBaseDirForScope(scope: SourceScope): string {
 		if (scope === "project") {
 			this.assertProjectTrustedForScope(scope);
-			return join(this.cwd, CONFIG_DIR_NAME);
+			return getProjectConfigDir(this.cwd);
 		}
 		if (scope === "user") {
 			return this.agentDir;
@@ -2102,10 +2102,10 @@ export class DefaultPackageManager implements PackageManager {
 			return true;
 		}
 
-		const manifest = this.readArcMindManifest(packageRoot);
+		const manifest = this.readMetisManifest(packageRoot);
 		if (manifest) {
 			for (const resourceType of RESOURCE_TYPES) {
-				const entries = manifest[resourceType as keyof ArcMindManifest];
+				const entries = manifest[resourceType as keyof MetisManifest];
 				this.addManifestEntries(
 					entries,
 					packageRoot,
@@ -2138,8 +2138,8 @@ export class DefaultPackageManager implements PackageManager {
 		target: Map<string, { metadata: PathMetadata; enabled: boolean }>,
 		metadata: PathMetadata,
 	): void {
-		const manifest = this.readArcMindManifest(packageRoot);
-		const entries = manifest?.[resourceType as keyof ArcMindManifest];
+		const manifest = this.readMetisManifest(packageRoot);
+		const entries = manifest?.[resourceType as keyof MetisManifest];
 		if (entries) {
 			this.addManifestEntries(entries, packageRoot, resourceType, target, metadata);
 			return;
@@ -2207,8 +2207,8 @@ export class DefaultPackageManager implements PackageManager {
 		packageRoot: string,
 		resourceType: ResourceType,
 	): { allFiles: string[]; enabledByManifest: Set<string> } {
-		const manifest = this.readArcMindManifest(packageRoot);
-		const entries = manifest?.[resourceType as keyof ArcMindManifest];
+		const manifest = this.readMetisManifest(packageRoot);
+		const entries = manifest?.[resourceType as keyof MetisManifest];
 		if (entries && entries.length > 0) {
 			const allFiles = this.collectFilesFromManifestEntries(entries, packageRoot, resourceType);
 			const manifestPatterns = entries.filter(isOverridePattern);
@@ -2225,7 +2225,7 @@ export class DefaultPackageManager implements PackageManager {
 		return { allFiles, enabledByManifest: new Set(allFiles) };
 	}
 
-	private readArcMindManifest(packageRoot: string): ArcMindManifest | null {
+	private readMetisManifest(packageRoot: string): MetisManifest | null {
 		const packageJsonPath = join(packageRoot, "package.json");
 		if (!existsSync(packageJsonPath)) {
 			return null;
@@ -2233,8 +2233,8 @@ export class DefaultPackageManager implements PackageManager {
 
 		try {
 			const content = readFileSync(packageJsonPath, "utf-8");
-			const pkg = JSON.parse(content) as { arcmind?: ArcMindManifest };
-			return pkg.arcmind ?? null;
+			const pkg = JSON.parse(content) as { metis?: MetisManifest };
+			return pkg.metis ?? null;
 		} catch {
 			return null;
 		}
@@ -2366,7 +2366,7 @@ export class DefaultPackageManager implements PackageManager {
 		};
 
 		if (projectTrusted) {
-			// Project extensions from .arcmind/
+			// Project extensions from .metis/
 			addResources(
 				"extensions",
 				collectAutoExtensionEntries(projectDirs.extensions),
@@ -2375,10 +2375,10 @@ export class DefaultPackageManager implements PackageManager {
 				projectBaseDir,
 			);
 
-			// Project skills from .arcmind/
+			// Project skills from .metis/
 			addResources(
 				"skills",
-				collectAutoSkillEntries(projectDirs.skills, "arcmind"),
+				collectAutoSkillEntries(projectDirs.skills, "metis"),
 				projectMetadata,
 				projectOverrides.skills,
 				projectBaseDir,
@@ -2418,7 +2418,7 @@ export class DefaultPackageManager implements PackageManager {
 			);
 		}
 
-		// User extensions from ~/.arcmind/agent/
+		// User extensions from ~/.metis/agent/
 		addResources(
 			"extensions",
 			collectAutoExtensionEntries(userDirs.extensions),
@@ -2427,10 +2427,10 @@ export class DefaultPackageManager implements PackageManager {
 			globalBaseDir,
 		);
 
-		// User skills from ~/.arcmind/agent/
+		// User skills from ~/.metis/agent/
 		addResources(
 			"skills",
-			collectAutoSkillEntries(userDirs.skills, "arcmind"),
+			collectAutoSkillEntries(userDirs.skills, "metis"),
 			userMetadata,
 			userOverrides.skills,
 			globalBaseDir,

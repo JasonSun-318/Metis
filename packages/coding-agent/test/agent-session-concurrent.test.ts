@@ -5,7 +5,7 @@
 import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Agent } from "@arcmind/agent-core";
+import { Agent } from "@metis/agent-core";
 import {
 	type AssistantMessage,
 	type AssistantMessageEvent,
@@ -13,7 +13,7 @@ import {
 	getModel,
 	type ImageContent,
 	type TextContent,
-} from "@arcmind/ai/compat";
+} from "@metis/ai/compat";
 import { Type } from "typebox";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { AgentSession } from "../src/core/agent-session.ts";
@@ -63,7 +63,7 @@ describe("AgentSession concurrent prompt guard", () => {
 	let tempDir: string;
 
 	beforeEach(() => {
-		tempDir = join(tmpdir(), `arcmind-concurrent-test-${Date.now()}`);
+		tempDir = join(tmpdir(), `metis-concurrent-test-${Date.now()}`);
 		mkdirSync(tempDir, { recursive: true });
 	});
 
@@ -248,11 +248,11 @@ describe("AgentSession concurrent prompt guard", () => {
 		authStorage.setRuntimeApiKey("anthropic", "test-key");
 
 		const extensionsResult = await createTestExtensionsResult([
-			(arcmind) => {
-				(globalThis as typeof globalThis & { testExtensionApi?: unknown }).testExtensionApi = arcmind;
+			(metis) => {
+				(globalThis as typeof globalThis & { testExtensionApi?: unknown }).testExtensionApi = metis;
 			},
-			(arcmind) => {
-				arcmind.on("input", async (event) => {
+			(metis) => {
+				metis.on("input", async (event) => {
 					lastInputSource = event.source;
 				});
 			},
@@ -276,16 +276,16 @@ describe("AgentSession concurrent prompt guard", () => {
 		await new Promise((resolve) => setTimeout(resolve, 10));
 		expect(session.isStreaming).toBe(true);
 
-		const arcmind = (
+		const metis = (
 			globalThis as typeof globalThis & {
 				testExtensionApi?: {
 					sendUserMessage: (content: string, options?: { deliverAs?: "steer" | "followUp" }) => void;
 				};
 			}
 		).testExtensionApi;
-		expect(arcmind).toBeDefined();
+		expect(metis).toBeDefined();
 
-		arcmind!.sendUserMessage("Steer from extension", { deliverAs: "steer" });
+		metis!.sendUserMessage("Steer from extension", { deliverAs: "steer" });
 		await new Promise((resolve) => setTimeout(resolve, 25));
 
 		expect(session.pendingMessageCount).toBe(1);

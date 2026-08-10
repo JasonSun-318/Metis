@@ -1,9 +1,9 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Agent, type AgentMessage } from "@arcmind/agent-core";
-import { createAssistantMessageEventStream, fauxAssistantMessage } from "@arcmind/ai";
-import { getModel } from "@arcmind/ai/compat";
+import { Agent, type AgentMessage } from "@metis/agent-core";
+import { createAssistantMessageEventStream, fauxAssistantMessage } from "@metis/ai";
+import { getModel } from "@metis/ai/compat";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AgentSession, type AgentSessionEvent } from "../src/core/agent-session.ts";
 import { AuthStorage } from "../src/core/auth-storage.ts";
@@ -67,7 +67,7 @@ function createCompactionSession(): {
 	cwd: string;
 	settingsManager: SettingsManager;
 } {
-	const root = mkdtempSync(join(tmpdir(), "arcmind-session-dream-"));
+	const root = mkdtempSync(join(tmpdir(), "metis-session-dream-"));
 	tempDirs.push(root);
 	const agentDir = join(root, "agent");
 	const cwd = join(root, "project");

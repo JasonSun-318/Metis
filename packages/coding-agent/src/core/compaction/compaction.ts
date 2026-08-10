@@ -5,9 +5,9 @@
  * and after compaction the session is reloaded.
  */
 
-import type { AgentMessage, StreamFn, ThinkingLevel } from "@arcmind/agent-core";
-import type { AssistantMessage, Context, Model, SimpleStreamOptions, Usage } from "@arcmind/ai/compat";
-import { completeSimple } from "@arcmind/ai/compat";
+import type { AgentMessage, StreamFn, ThinkingLevel } from "@metis/agent-core";
+import type { AssistantMessage, Context, Model, SimpleStreamOptions, Usage } from "@metis/ai/compat";
+import { completeSimple } from "@metis/ai/compat";
 import { convertToLlm } from "../messages.ts";
 import {
 	buildSessionContext,
@@ -45,7 +45,7 @@ function extractFileOperations(
 ): FileOperations {
 	const fileOps = createFileOps();
 
-	// Collect from previous compaction's details (if arcmind-generated)
+	// Collect from previous compaction's details (if metis-generated)
 	if (prevCompactionIndex >= 0) {
 		const prevCompaction = entries[prevCompactionIndex] as CompactionEntry;
 		if (!prevCompaction.fromHook && prevCompaction.details) {

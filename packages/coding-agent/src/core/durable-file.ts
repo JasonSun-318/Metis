@@ -137,6 +137,19 @@ export function readSingleLinkFileFingerprintSync(path: string): SingleLinkFileF
 	}
 }
 
+/** Read a single-link regular file as bytes without following the final path component. */
+export function readSingleLinkFileBytesSync(path: string): Buffer | undefined {
+	const opened = openSingleLinkFileSync(path);
+	if (!opened) return undefined;
+	try {
+		const contents = readFileSync(opened.fd);
+		assertOpenFileUnchanged(path, opened.fd, opened.fingerprint);
+		return contents;
+	} finally {
+		closeSync(opened.fd);
+	}
+}
+
 /** Read a single-link regular file without following the final path component. */
 export function readSingleLinkTextFileSync(path: string, options: { maxBytes?: number } = {}): string | undefined {
 	const { maxBytes } = options;

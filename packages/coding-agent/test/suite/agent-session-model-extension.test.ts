@@ -1,5 +1,5 @@
-import type { AgentTool, ThinkingLevel } from "@arcmind/agent-core";
-import { fauxAssistantMessage, fauxToolCall, type Model } from "@arcmind/ai";
+import type { AgentTool, ThinkingLevel } from "@metis/agent-core";
+import { fauxAssistantMessage, fauxToolCall, type Model } from "@metis/ai";
 import { Type } from "typebox";
 import { afterEach, describe, expect, it } from "vitest";
 import type { BuildSystemPromptOptions, ExtensionAPI } from "../../src/index.ts";
@@ -22,8 +22,8 @@ describe("AgentSession model and extension characterization", () => {
 				{ id: "faux-2", name: "Two", reasoning: true },
 			],
 			extensionFactories: [
-				(arcmind) => {
-					arcmind.on("model_select", async (event) => {
+				(metis) => {
+					metis.on("model_select", async (event) => {
 						modelEvents.push(`${event.previousModel?.id ?? "none"}->${event.model.id}:${event.source}`);
 					});
 				},
@@ -126,8 +126,8 @@ describe("AgentSession model and extension characterization", () => {
 		const harness = await createHarness({
 			tools: [echoTool],
 			extensionFactories: [
-				(arcmind) => {
-					arcmind.on("tool_call", async () => ({ block: true, reason: "Blocked by test" }));
+				(metis) => {
+					metis.on("tool_call", async () => ({ block: true, reason: "Blocked by test" }));
 				},
 			],
 		});
@@ -169,8 +169,8 @@ describe("AgentSession model and extension characterization", () => {
 		const harness = await createHarness({
 			tools: [echoTool],
 			extensionFactories: [
-				(arcmind) => {
-					arcmind.on("tool_result", async () => ({
+				(metis) => {
+					metis.on("tool_result", async () => ({
 						content: [{ type: "text", text: "patched result" }],
 						details: { patched: true },
 					}));
@@ -204,8 +204,8 @@ describe("AgentSession model and extension characterization", () => {
 	it("allows extension context handlers to modify messages before the LLM call", async () => {
 		const harness = await createHarness({
 			extensionFactories: [
-				(arcmind) => {
-					arcmind.on("context", async (event) => ({
+				(metis) => {
+					metis.on("context", async (event) => ({
 						messages: event.messages.map((message) =>
 							message.role === "user"
 								? { ...message, content: [{ type: "text", text: "rewritten" }], timestamp: message.timestamp }
@@ -245,9 +245,9 @@ describe("AgentSession model and extension characterization", () => {
 		let extensionApi: ExtensionAPI | undefined;
 		const transformedHarness = await createHarness({
 			extensionFactories: [
-				(arcmind) => {
-					extensionApi = arcmind;
-					arcmind.on("input", async (event) => {
+				(metis) => {
+					extensionApi = metis;
+					metis.on("input", async (event) => {
 						if (event.text === "ping") {
 							return { action: "handled" };
 						}
@@ -284,8 +284,8 @@ describe("AgentSession model and extension characterization", () => {
 		const seenOptions: BuildSystemPromptOptions[] = [];
 		const harness = await createHarness({
 			extensionFactories: [
-				(arcmind) => {
-					arcmind.registerCommand("inspect-options", {
+				(metis) => {
+					metis.registerCommand("inspect-options", {
 						description: "Inspect system prompt options",
 						handler: async (_args, ctx) => {
 							const options = ctx.getSystemPromptOptions();
@@ -311,8 +311,8 @@ describe("AgentSession model and extension characterization", () => {
 	it("allows before_agent_start handlers to inject custom messages and modify the system prompt", async () => {
 		const harness = await createHarness({
 			extensionFactories: [
-				(arcmind) => {
-					arcmind.on("before_agent_start", async (event) => ({
+				(metis) => {
+					metis.on("before_agent_start", async (event) => ({
 						message: {
 							customType: "before-start",
 							content: "injected",
@@ -353,11 +353,11 @@ describe("AgentSession model and extension characterization", () => {
 		const lifecycleEvents: string[] = [];
 		const harness = await createHarness({
 			extensionFactories: [
-				(arcmind) => {
-					arcmind.on("session_start", async (event) => {
+				(metis) => {
+					metis.on("session_start", async (event) => {
 						lifecycleEvents.push(`start:${event.reason}`);
 					});
-					arcmind.on("session_shutdown", async (event) => {
+					metis.on("session_shutdown", async (event) => {
 						lifecycleEvents.push(`shutdown:${event.reason}`);
 					});
 				},

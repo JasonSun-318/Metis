@@ -1,7 +1,7 @@
-import type { ExtensionAPI } from "@arcmind/coding-agent";
+import type { ExtensionAPI } from "@metis/coding-agent";
 
-export default function widgetPlacementExtension(arcmind: ExtensionAPI) {
-	arcmind.on("session_start", (_event, ctx) => {
+export default function widgetPlacementExtension(metis: ExtensionAPI) {
+	metis.on("session_start", (_event, ctx) => {
 		if (!ctx.hasUI) return;
 		ctx.ui.setWidget("widget-above", ["Above editor widget"]);
 		ctx.ui.setWidget("widget-below", ["Below editor widget"], { placement: "belowEditor" });

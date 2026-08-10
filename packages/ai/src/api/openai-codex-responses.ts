@@ -1527,8 +1527,8 @@ function buildBaseCodexHeaders(
 	}
 	headers.set("Authorization", `Bearer ${token}`);
 	headers.set("chatgpt-account-id", accountId);
-	headers.set("originator", "arcmind");
-	const userAgent = _os ? `arcmind (${_os.platform()} ${_os.release()}; ${_os.arch()})` : "arcmind (browser)";
+	headers.set("originator", "metis");
+	const userAgent = _os ? `metis (${_os.platform()} ${_os.release()}; ${_os.arch()})` : "metis (browser)";
 	headers.set("User-Agent", userAgent);
 	return headers;
 }

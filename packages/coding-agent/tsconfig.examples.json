@@ -3,10 +3,10 @@
 	"compilerOptions": {
 		"noEmit": true,
 		"paths": {
-			"@arcmind/coding-agent": ["./src/index.ts"],
-			"@arcmind/coding-agent/hooks": ["./src/core/hooks/index.ts"],
-			"@arcmind/tui": ["../tui/src/index.ts"],
-			"@arcmind/ai": ["../ai/src/index.ts"],
+			"@metis/coding-agent": ["./src/index.ts"],
+			"@metis/coding-agent/hooks": ["./src/core/hooks/index.ts"],
+			"@metis/tui": ["../tui/src/index.ts"],
+			"@metis/ai": ["../ai/src/index.ts"],
 			"typebox": ["../../node_modules/typebox"]
 		},
 		"skipLibCheck": true

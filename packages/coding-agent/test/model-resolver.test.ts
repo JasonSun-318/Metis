@@ -1,4 +1,4 @@
-import type { Model } from "@arcmind/ai";
+import type { Model } from "@metis/ai";
 import { describe, expect, test, vi } from "vitest";
 import {
 	defaultModelPerProvider,

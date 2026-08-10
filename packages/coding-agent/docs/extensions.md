@@ -1,18 +1,18 @@
-> arcmind can create extensions. Ask it to build one for your use case.
+> metis can create extensions. Ask it to build one for your use case.
 
 # Extensions
 
-Extensions are TypeScript modules that extend arcmind's behavior. They can subscribe to lifecycle events, register custom tools callable by the LLM, add commands, and more.
+Extensions are TypeScript modules that extend metis's behavior. They can subscribe to lifecycle events, register custom tools callable by the LLM, add commands, and more.
 
-> **Placement for /reload:** Put extensions in `~/.arcmind/agent/extensions/` (global) or `.arcmind/extensions/` (project-local) for auto-discovery. Use `arcmind -e ./path.ts` only for quick tests. Extensions in auto-discovered locations can be hot-reloaded with `/reload`.
+> **Placement for /reload:** Put extensions in `~/.metis/agent/extensions/` (global) or `.metis/extensions/` (project-local) for auto-discovery. Use `metis -e ./path.ts` only for quick tests. Extensions in auto-discovered locations can be hot-reloaded with `/reload`.
 
 **Key capabilities:**
-- **Custom tools** - Register tools the LLM can call via `arcmind.registerTool()`
+- **Custom tools** - Register tools the LLM can call via `metis.registerTool()`
 - **Event interception** - Block or modify tool calls, inject context, customize compaction
 - **User interaction** - Prompt users via `ctx.ui` (select, confirm, input, notify)
 - **Custom UI components** - Full TUI components with keyboard input via `ctx.ui.custom()` for complex interactions
-- **Custom commands** - Register commands like `/mycommand` via `arcmind.registerCommand()`
-- **Session persistence** - Store state that survives restarts via `arcmind.appendEntry()`
+- **Custom commands** - Register commands like `/mycommand` via `metis.registerCommand()`
+- **Session persistence** - Store state that survives restarts via `metis.appendEntry()`
 - **Custom rendering** - Control how tool calls/results and messages appear in TUI
 
 **Example use cases:**
@@ -55,19 +55,19 @@ See [examples/extensions/](../examples/extensions/) for working implementations.
 
 ## Quick Start
 
-Create `~/.arcmind/agent/extensions/my-extension.ts`:
+Create `~/.metis/agent/extensions/my-extension.ts`:
 
 ```typescript
-import type { ExtensionAPI } from "@arcmind/coding-agent";
+import type { ExtensionAPI } from "@metis/coding-agent";
 import { Type } from "typebox";
 
-export default function (arcmind: ExtensionAPI) {
+export default function (metis: ExtensionAPI) {
   // React to events
-  arcmind.on("session_start", async (_event, ctx) => {
+  metis.on("session_start", async (_event, ctx) => {
     ctx.ui.notify("Extension loaded!", "info");
   });
 
-  arcmind.on("tool_call", async (event, ctx) => {
+  metis.on("tool_call", async (event, ctx) => {
     if (event.toolName === "bash" && event.input.command?.includes("rm -rf")) {
       const ok = await ctx.ui.confirm("Dangerous!", "Allow rm -rf?");
       if (!ok) return { block: true, reason: "Blocked by user" };
@@ -75,7 +75,7 @@ export default function (arcmind: ExtensionAPI) {
   });
 
   // Register a custom tool
-  arcmind.registerTool({
+  metis.registerTool({
     name: "greet",
     label: "Greet",
     description: "Greet someone by name",
@@ -91,7 +91,7 @@ export default function (arcmind: ExtensionAPI) {
   });
 
   // Register a command
-  arcmind.registerCommand("hello", {
+  metis.registerCommand("hello", {
     description: "Say hello",
     handler: async (args, ctx) => {
       ctx.ui.notify(`Hello ${args || "world"}!`, "info");
@@ -103,21 +103,21 @@ export default function (arcmind: ExtensionAPI) {
 Test with `--extension` (or `-e`) flag:
 
 ```bash
-arcmind -e ./my-extension.ts
+metis -e ./my-extension.ts
 ```
 
 ## Extension Locations
 
 > **Security:** Extensions run with your full system permissions and can execute arbitrary code. Only install from sources you trust.
 
-Extensions are auto-discovered from trusted locations. Project-local `.arcmind/extensions` entries load only after the project is trusted.
+Extensions are auto-discovered from trusted locations. Project-local `.metis/extensions` entries load only after the project is trusted.
 
 | Location | Scope |
 |----------|-------|
-| `~/.arcmind/agent/extensions/*.ts` | Global (all projects) |
-| `~/.arcmind/agent/extensions/*/index.ts` | Global (subdirectory) |
-| `.arcmind/extensions/*.ts` | Project-local |
-| `.arcmind/extensions/*/index.ts` | Project-local (subdirectory) |
+| `~/.metis/agent/extensions/*.ts` | Global (all projects) |
+| `~/.metis/agent/extensions/*/index.ts` | Global (subdirectory) |
+| `.metis/extensions/*.ts` | Project-local |
+| `.metis/extensions/*/index.ts` | Project-local (subdirectory) |
 
 Additional paths via `settings.json`:
 
@@ -134,20 +134,20 @@ Additional paths via `settings.json`:
 }
 ```
 
-To share extensions via npm or git as arcmind packages, see [packages.md](packages.md).
+To share extensions via npm or git as metis packages, see [packages.md](packages.md).
 
 ## Available Imports
 
 | Package | Purpose |
 |---------|---------|
-| `@arcmind/coding-agent` | Extension types (`ExtensionAPI`, `ExtensionContext`, events) |
+| `@metis/coding-agent` | Extension types (`ExtensionAPI`, `ExtensionContext`, events) |
 | `typebox` | Schema definitions for tool parameters |
-| `@arcmind/ai` | AI utilities (`StringEnum` for Google-compatible enums) |
-| `@arcmind/tui` | TUI components for custom rendering |
+| `@metis/ai` | AI utilities (`StringEnum` for Google-compatible enums) |
+| `@metis/tui` | TUI components for custom rendering |
 
 npm dependencies work too. Add a `package.json` next to your extension (or in a parent directory), run `npm install`, and imports from `node_modules/` are resolved automatically.
 
-For distributed arcmind packages installed with `arcmind install` (npm or git), runtime deps must be in `dependencies`. Package installation uses production installs (`npm install --omit=dev`) by default, so `devDependencies` are not available at runtime; when `npmCommand` is configured, git packages use plain `install` for compatibility with wrappers.
+For distributed metis packages installed with `metis install` (npm or git), runtime deps must be in `dependencies`. Package installation uses production installs (`npm install --omit=dev`) by default, so `devDependencies` are not available at runtime; when `npmCommand` is configured, git packages use plain `install` for compatibility with wrappers.
 
 Node.js built-ins (`node:fs`, `node:path`, etc.) are also available.
 
@@ -156,11 +156,11 @@ Node.js built-ins (`node:fs`, `node:path`, etc.) are also available.
 An extension exports a default factory function that receives `ExtensionAPI`. The factory can be synchronous or asynchronous:
 
 ```typescript
-import type { ExtensionAPI } from "@arcmind/coding-agent";
+import type { ExtensionAPI } from "@metis/coding-agent";
 
-export default function (arcmind: ExtensionAPI) {
+export default function (metis: ExtensionAPI) {
   // Subscribe to events
-  arcmind.on("event_name", async (event, ctx) => {
+  metis.on("event_name", async (event, ctx) => {
     // ctx.ui for user interaction
     const ok = await ctx.ui.confirm("Title", "Are you sure?");
     ctx.ui.notify("Done!", "info");
@@ -169,25 +169,25 @@ export default function (arcmind: ExtensionAPI) {
   });
 
   // Register tools, commands, shortcuts, flags
-  arcmind.registerTool({ ... });
-  arcmind.registerCommand("name", { ... });
-  arcmind.registerShortcut("ctrl+x", { ... });
-  arcmind.registerFlag("my-flag", { ... });
+  metis.registerTool({ ... });
+  metis.registerCommand("name", { ... });
+  metis.registerShortcut("ctrl+x", { ... });
+  metis.registerFlag("my-flag", { ... });
 }
 ```
 
 Extensions are loaded via [jiti](https://github.com/unjs/jiti), so TypeScript works without compilation.
 
-If the factory returns a `Promise`, arcmind awaits it before continuing startup. That means async initialization completes before `session_start`, before `resources_discover`, and before provider registrations queued via `arcmind.registerProvider()` are flushed.
+If the factory returns a `Promise`, metis awaits it before continuing startup. That means async initialization completes before `session_start`, before `resources_discover`, and before provider registrations queued via `metis.registerProvider()` are flushed.
 
 ### Async factory functions
 
 Use an async factory for one-time startup work such as fetching remote configuration or dynamically discovering available models.
 
 ```typescript
-import type { ExtensionAPI } from "@arcmind/coding-agent";
+import type { ExtensionAPI } from "@metis/coding-agent";
 
-export default async function (arcmind: ExtensionAPI) {
+export default async function (metis: ExtensionAPI) {
   const response = await fetch("http://localhost:1234/v1/models");
   const payload = (await response.json()) as {
     data: Array<{
@@ -198,7 +198,7 @@ export default async function (arcmind: ExtensionAPI) {
     }>;
   };
 
-  arcmind.registerProvider("local-openai", {
+  metis.registerProvider("local-openai", {
     baseUrl: "http://localhost:1234/v1",
     apiKey: "$LOCAL_OPENAI_API_KEY",
     api: "openai-completions",
@@ -215,7 +215,7 @@ export default async function (arcmind: ExtensionAPI) {
 }
 ```
 
-This pattern makes the fetched models available during normal startup and to `arcmind --list-models`.
+This pattern makes the fetched models available during normal startup and to `metis --list-models`.
 
 ### Long-lived resources and shutdown
 
@@ -228,14 +228,14 @@ Defer background resource startup until `session_start` or the command/tool/even
 **Single file** - simplest, for small extensions:
 
 ```
-~/.arcmind/agent/extensions/
+~/.metis/agent/extensions/
 └── my-extension.ts
 ```
 
 **Directory with index.ts** - for multi-file extensions:
 
 ```
-~/.arcmind/agent/extensions/
+~/.metis/agent/extensions/
 └── my-extension/
     ├── index.ts        # Entry point (exports default function)
     ├── tools.ts        # Helper module
@@ -245,7 +245,7 @@ Defer background resource startup until `session_start` or the command/tool/even
 **Package with dependencies** - for extensions that need npm packages:
 
 ```
-~/.arcmind/agent/extensions/
+~/.metis/agent/extensions/
 └── my-extension/
     ├── package.json    # Declares dependencies and entry points
     ├── package-lock.json
@@ -262,7 +262,7 @@ Defer background resource startup until `session_start` or the command/tool/even
     "zod": "^3.0.0",
     "chalk": "^5.0.0"
   },
-  "arcmind": {
+  "metis": {
     "extensions": ["./src/index.ts"]
   }
 }
@@ -275,7 +275,7 @@ Run `npm install` in the extension directory, then imports from `node_modules/` 
 ### Lifecycle Overview
 
 ```
-arcmind starts
+metis starts
   │
   ├─► project_trust (user/global and CLI extensions only, before project resources load)
   ├─► session_start { reason: "startup" }
@@ -325,7 +325,7 @@ user sends another prompt ◄─────────────────
   ├─► session_start { reason: "fork", previousSessionFile }
   └─► resources_discover { reason: "startup" }
 
-/name or arcmind.setSessionName()
+/name or metis.setSessionName()
   └─► session_info_changed
 
 /compact or auto-compaction
@@ -340,7 +340,7 @@ user sends another prompt ◄─────────────────
   ├─► thinking_level_select (if model change changes/clamps thinking level)
   └─► model_select
 
-thinking level changes (settings, keybinding, arcmind.setThinkingLevel())
+thinking level changes (settings, keybinding, metis.setThinkingLevel())
   └─► thinking_level_select
 
 exit (Ctrl+C, Ctrl+D, SIGHUP, SIGTERM)
@@ -351,10 +351,10 @@ exit (Ctrl+C, Ctrl+D, SIGHUP, SIGTERM)
 
 #### project_trust
 
-Fired before arcmind decides whether to trust a project with dynamic configs (`.arcmind` or `.agents/skills`). It runs during startup and when session replacement (for example `/resume`) enters a cwd whose trust has not been resolved in the current process. Only user/global extensions and CLI `-e` extensions participate; project-local extensions are not loaded until after trust is resolved.
+Fired before metis decides whether to trust a project with dynamic configs (`.metis` or `.agents/skills`). It runs during startup and when session replacement (for example `/resume`) enters a cwd whose trust has not been resolved in the current process. Only user/global extensions and CLI `-e` extensions participate; project-local extensions are not loaded until after trust is resolved.
 
 ```typescript
-arcmind.on("project_trust", async (event, ctx) => {
+metis.on("project_trust", async (event, ctx) => {
   // event.cwd - current working directory
   // ctx has a limited trust context: cwd, mode, hasUI, and select/confirm/input/notify UI helpers
   if (await ctx.ui.confirm("Trust project?", event.cwd)) {
@@ -364,7 +364,7 @@ arcmind.on("project_trust", async (event, ctx) => {
 });
 ```
 
-A `project_trust` handler must return `{ trusted: "yes" | "no" | "undecided" }`. A user/global or CLI extension that returns `"yes"` or `"no"` owns the decision; the first yes/no decision wins and suppresses the built-in trust prompt. Use `remember: true` to persist a yes/no decision; otherwise it applies only to the current process. Return `"undecided"` to let later handlers or the built-in trust flow decide. Check `ctx.hasUI` before prompting. If no handler returns yes/no, normal trust resolution continues: saved `trust.json` decisions apply first, then `defaultProjectTrust` controls whether arcmind asks, trusts, or declines by default.
+A `project_trust` handler must return `{ trusted: "yes" | "no" | "undecided" }`. A user/global or CLI extension that returns `"yes"` or `"no"` owns the decision; the first yes/no decision wins and suppresses the built-in trust prompt. Use `remember: true` to persist a yes/no decision; otherwise it applies only to the current process. Return `"undecided"` to let later handlers or the built-in trust flow decide. Check `ctx.hasUI` before prompting. If no handler returns yes/no, normal trust resolution continues: saved `trust.json` decisions apply first, then `defaultProjectTrust` controls whether metis asks, trusts, or declines by default.
 
 ### Resource Events
 
@@ -374,7 +374,7 @@ Fired after `session_start` so extensions can contribute additional skill, promp
 The startup path uses `reason: "startup"`. Reload uses `reason: "reload"`.
 
 ```typescript
-arcmind.on("resources_discover", async (event, _ctx) => {
+metis.on("resources_discover", async (event, _ctx) => {
   // event.cwd - current working directory
   // event.reason - "startup" | "reload"
   return {
@@ -394,7 +394,7 @@ See [Session Format](session-format.md) for session storage internals and the Se
 Fired when a session is started, loaded, or reloaded.
 
 ```typescript
-arcmind.on("session_start", async (event, ctx) => {
+metis.on("session_start", async (event, ctx) => {
   // event.reason - "startup" | "reload" | "new" | "resume" | "fork"
   // event.previousSessionFile - present for "new", "resume", and "fork"
   ctx.ui.notify(`Session: ${ctx.sessionManager.getSessionFile() ?? "ephemeral"}`, "info");
@@ -403,10 +403,10 @@ arcmind.on("session_start", async (event, ctx) => {
 
 #### session_info_changed
 
-Fired when the current session display name is set via `/name`, RPC, or `arcmind.setSessionName()`.
+Fired when the current session display name is set via `/name`, RPC, or `metis.setSessionName()`.
 
 ```typescript
-arcmind.on("session_info_changed", async (event, ctx) => {
+metis.on("session_info_changed", async (event, ctx) => {
   // event.name - current normalized name, or undefined if cleared
   ctx.ui.notify(`Session renamed: ${event.name ?? "(none)"}`, "info");
 });
@@ -417,7 +417,7 @@ arcmind.on("session_info_changed", async (event, ctx) => {
 Fired before starting a new session (`/new`) or switching sessions (`/resume`).
 
 ```typescript
-arcmind.on("session_before_switch", async (event, ctx) => {
+metis.on("session_before_switch", async (event, ctx) => {
   // event.reason - "new" or "resume"
   // event.targetSessionFile - session we're switching to (only for "resume")
 
@@ -428,7 +428,7 @@ arcmind.on("session_before_switch", async (event, ctx) => {
 });
 ```
 
-After a successful switch or new-session action, arcmind emits `session_shutdown` for the old extension instance, reloads and rebinds extensions for the new session, then emits `session_start` with `reason: "new" | "resume"` and `previousSessionFile`.
+After a successful switch or new-session action, metis emits `session_shutdown` for the old extension instance, reloads and rebinds extensions for the new session, then emits `session_start` with `reason: "new" | "resume"` and `previousSessionFile`.
 Do cleanup work in `session_shutdown`, then reestablish any in-memory state in `session_start`.
 
 #### session_before_fork
@@ -436,7 +436,7 @@ Do cleanup work in `session_shutdown`, then reestablish any in-memory state in `
 Fired when forking via `/fork` or cloning via `/clone`.
 
 ```typescript
-arcmind.on("session_before_fork", async (event, ctx) => {
+metis.on("session_before_fork", async (event, ctx) => {
   // event.entryId - ID of the selected entry
   // event.position - "before" for /fork, "at" for /clone
   return { cancel: true }; // Cancel fork/clone
@@ -445,7 +445,7 @@ arcmind.on("session_before_fork", async (event, ctx) => {
 });
 ```
 
-After a successful fork or clone, arcmind emits `session_shutdown` for the old extension instance, reloads and rebinds extensions for the new session, then emits `session_start` with `reason: "fork"` and `previousSessionFile`.
+After a successful fork or clone, metis emits `session_shutdown` for the old extension instance, reloads and rebinds extensions for the new session, then emits `session_start` with `reason: "fork"` and `previousSessionFile`.
 Do cleanup work in `session_shutdown`, then reestablish any in-memory state in `session_start`.
 
 #### session_before_compact / session_compact
@@ -453,7 +453,7 @@ Do cleanup work in `session_shutdown`, then reestablish any in-memory state in `
 Fired on compaction. See [compaction.md](compaction.md) for details.
 
 ```typescript
-arcmind.on("session_before_compact", async (event, ctx) => {
+metis.on("session_before_compact", async (event, ctx) => {
   const { preparation, branchEntries, customInstructions, reason, willRetry, signal } = event;
 
   // reason - "manual" (/compact), "threshold", or "overflow"
@@ -472,7 +472,7 @@ arcmind.on("session_before_compact", async (event, ctx) => {
   };
 });
 
-arcmind.on("session_compact", async (event, ctx) => {
+metis.on("session_compact", async (event, ctx) => {
   // event.compactionEntry - the saved compaction
   // event.fromExtension - whether extension provided it
   // event.reason - "manual" (/compact), "threshold", or "overflow"
@@ -485,14 +485,14 @@ arcmind.on("session_compact", async (event, ctx) => {
 Fired on `/tree` navigation. See [Sessions](sessions.md) for tree navigation concepts.
 
 ```typescript
-arcmind.on("session_before_tree", async (event, ctx) => {
+metis.on("session_before_tree", async (event, ctx) => {
   const { preparation, signal } = event;
   return { cancel: true };
   // OR provide custom summary:
   return { summary: { summary: "...", details: {} } };
 });
 
-arcmind.on("session_tree", async (event, ctx) => {
+metis.on("session_tree", async (event, ctx) => {
   // event.newLeafId, oldLeafId, summaryEntry, fromExtension
 });
 ```
@@ -502,7 +502,7 @@ arcmind.on("session_tree", async (event, ctx) => {
 Fired before a started session runtime is torn down. Use this to clean up resources opened from `session_start` or other session-scoped hooks.
 
 ```typescript
-arcmind.on("session_shutdown", async (event, ctx) => {
+metis.on("session_shutdown", async (event, ctx) => {
   // event.reason - "quit" | "reload" | "new" | "resume" | "fork"
   // event.targetSessionFile - destination session for session replacement flows
   // Cleanup, save state, etc.
@@ -516,7 +516,7 @@ arcmind.on("session_shutdown", async (event, ctx) => {
 Fired after user submits prompt, before agent loop. Can inject a message and/or modify the system prompt.
 
 ```typescript
-arcmind.on("before_agent_start", async (event, ctx) => {
+metis.on("before_agent_start", async (event, ctx) => {
   // event.prompt - user's prompt text
   // event.images - attached images (if any)
   // event.systemPrompt - current chained system prompt for this handler
@@ -544,22 +544,22 @@ arcmind.on("before_agent_start", async (event, ctx) => {
 });
 ```
 
-The `systemPromptOptions` field gives extensions access to the same structured data ArcMind uses to build the system prompt. This lets you inspect what ArcMind has loaded — custom prompts, guidelines, tool snippets, context files, skills — without re-discovering resources or re-parsing flags. Use it when your extension needs to make deep, informed changes to the system prompt while respecting user-provided configuration.
+The `systemPromptOptions` field gives extensions access to the same structured data Metis uses to build the system prompt. This lets you inspect what Metis has loaded — custom prompts, guidelines, tool snippets, context files, skills — without re-discovering resources or re-parsing flags. Use it when your extension needs to make deep, informed changes to the system prompt while respecting user-provided configuration.
 
 Inside `before_agent_start`, `event.systemPrompt` and `ctx.getSystemPrompt()` both reflect the chained system prompt as of the current handler. Later `before_agent_start` handlers can still modify it again.
 
 #### agent_start / agent_end / agent_settled
 
-`agent_start` fires when a low-level agent run begins. `agent_end` fires when that run ends, but ArcMind may still auto-retry, auto-compact and retry, or continue with queued follow-up messages. Use `agent_settled` for status integrations that need to know ArcMind will not continue running automatically.
+`agent_start` fires when a low-level agent run begins. `agent_end` fires when that run ends, but Metis may still auto-retry, auto-compact and retry, or continue with queued follow-up messages. Use `agent_settled` for status integrations that need to know Metis will not continue running automatically.
 
 ```typescript
-arcmind.on("agent_start", async (_event, ctx) => {});
+metis.on("agent_start", async (_event, ctx) => {});
 
-arcmind.on("agent_end", async (event, ctx) => {
+metis.on("agent_end", async (event, ctx) => {
   // event.messages - messages from this low-level run
 });
 
-arcmind.on("agent_settled", async (_event, ctx) => {
+metis.on("agent_settled", async (_event, ctx) => {
   // ctx.isIdle() is true here unless another extension started a new run.
 });
 ```
@@ -569,11 +569,11 @@ arcmind.on("agent_settled", async (_event, ctx) => {
 Fired for each turn (one LLM response + tool calls).
 
 ```typescript
-arcmind.on("turn_start", async (event, ctx) => {
+metis.on("turn_start", async (event, ctx) => {
   // event.turnIndex, event.timestamp
 });
 
-arcmind.on("turn_end", async (event, ctx) => {
+metis.on("turn_end", async (event, ctx) => {
   // event.turnIndex, event.message, event.toolResults
 });
 ```
@@ -587,16 +587,16 @@ Fired for message lifecycle updates.
 - `message_end` handlers can return `{ message }` to replace the finalized message. The replacement must keep the same `role`.
 
 ```typescript
-arcmind.on("message_start", async (event, ctx) => {
+metis.on("message_start", async (event, ctx) => {
   // event.message
 });
 
-arcmind.on("message_update", async (event, ctx) => {
+metis.on("message_update", async (event, ctx) => {
   // event.message
   // event.assistantMessageEvent (token-by-token stream event)
 });
 
-arcmind.on("message_end", async (event, ctx) => {
+metis.on("message_end", async (event, ctx) => {
   if (event.message.role !== "assistant") return;
 
   return {
@@ -625,15 +625,15 @@ In parallel tool mode:
 - final `toolResult` message events are still emitted later in assistant source order
 
 ```typescript
-arcmind.on("tool_execution_start", async (event, ctx) => {
+metis.on("tool_execution_start", async (event, ctx) => {
   // event.toolCallId, event.toolName, event.args
 });
 
-arcmind.on("tool_execution_update", async (event, ctx) => {
+metis.on("tool_execution_update", async (event, ctx) => {
   // event.toolCallId, event.toolName, event.args, event.partialResult
 });
 
-arcmind.on("tool_execution_end", async (event, ctx) => {
+metis.on("tool_execution_end", async (event, ctx) => {
   // event.toolCallId, event.toolName, event.result, event.isError
 });
 ```
@@ -643,7 +643,7 @@ arcmind.on("tool_execution_end", async (event, ctx) => {
 Fired before each LLM call. Modify messages non-destructively. See [Session Format](session-format.md) for message types.
 
 ```typescript
-arcmind.on("context", async (event, ctx) => {
+metis.on("context", async (event, ctx) => {
   // event.messages - deep copy, safe to modify
   const filtered = event.messages.filter(m => !shouldPrune(m));
   return { messages: filtered };
@@ -657,11 +657,11 @@ Fired after the outgoing HTTP headers are assembled. Use it to add, override, or
 Handlers mutate `event.headers` in place. Set a key to a string to add or override it, or to `null` to delete it.
 
 ```typescript
-arcmind.on("before_provider_headers", (event, ctx) => {
+metis.on("before_provider_headers", (event, ctx) => {
   // Add or override — e.g. a session id for gateway tracing/attribution
   event.headers["x-session-id"] = ctx.sessionManager.getSessionId();
 
-  // Drop a tracking header arcmind adds for this call
+  // Drop a tracking header metis adds for this call
   event.headers["X-OpenRouter-Title"] = null;
 });
 ```
@@ -672,10 +672,10 @@ Runs once per provider request; retries reuse the same headers rather than re-fi
 
 Fired after the provider-specific payload is built, right before the request is sent. Handlers run in extension load order. Returning `undefined` keeps the payload unchanged. Returning any other value replaces the payload for later handlers and for the actual request.
 
-This hook can rewrite provider-level system instructions or remove them entirely. Those payload-level changes are not reflected by `ctx.getSystemPrompt()`, which reports ArcMind's system prompt string rather than the final serialized provider payload.
+This hook can rewrite provider-level system instructions or remove them entirely. Those payload-level changes are not reflected by `ctx.getSystemPrompt()`, which reports Metis's system prompt string rather than the final serialized provider payload.
 
 ```typescript
-arcmind.on("before_provider_request", (event, ctx) => {
+metis.on("before_provider_request", (event, ctx) => {
   console.log(JSON.stringify(event.payload, null, 2));
 
   // Optional: replace payload
@@ -690,7 +690,7 @@ This is mainly useful for debugging provider serialization and cache behavior.
 Fired after an HTTP response is received and before its stream body is consumed. Handlers run in extension load order.
 
 ```typescript
-arcmind.on("after_provider_response", (event, ctx) => {
+metis.on("after_provider_response", (event, ctx) => {
   // event.status - HTTP status code
   // event.headers - normalized response headers
   if (event.status === 429) {
@@ -708,7 +708,7 @@ Header availability depends on provider and transport. Providers that abstract H
 Fired when the model changes via `/model` command, model cycling (`Ctrl+P`), or session restore.
 
 ```typescript
-arcmind.on("model_select", async (event, ctx) => {
+metis.on("model_select", async (event, ctx) => {
   // event.model - newly selected model
   // event.previousModel - previous model (undefined if first selection)
   // event.source - "set" | "cycle" | "restore"
@@ -729,7 +729,7 @@ Use this to update UI elements (status bars, footers) or perform model-specific 
 Fired when the thinking level changes. This is notification-only; handler return values are ignored.
 
 ```typescript
-arcmind.on("thinking_level_select", async (event, ctx) => {
+metis.on("thinking_level_select", async (event, ctx) => {
   // event.level - newly selected thinking level
   // event.previousLevel - previous thinking level
 
@@ -737,7 +737,7 @@ arcmind.on("thinking_level_select", async (event, ctx) => {
 });
 ```
 
-Use this to update extension UI when `arcmind.setThinkingLevel()`, model changes, or built-in thinking-level controls change the active thinking level.
+Use this to update extension UI when `metis.setThinkingLevel()`, model changes, or built-in thinking-level controls change the active thinking level.
 
 ### Tool Events
 
@@ -745,7 +745,7 @@ Use this to update extension UI when `arcmind.setThinkingLevel()`, model changes
 
 Fired after `tool_execution_start`, before the tool executes. **Can block.** Use `isToolCallEventType` to narrow and get typed inputs.
 
-Before `tool_call` runs, arcmind waits for previously emitted Agent events to finish draining through `AgentSession`. This means `ctx.sessionManager` is up to date through the current assistant tool-calling message.
+Before `tool_call` runs, metis waits for previously emitted Agent events to finish draining through `AgentSession`. This means `ctx.sessionManager` is up to date through the current assistant tool-calling message.
 
 In the default parallel tool execution mode, sibling tool calls from the same assistant message are preflighted sequentially, then executed concurrently. `tool_call` is not guaranteed to see sibling tool results from that same assistant message in `ctx.sessionManager`.
 
@@ -758,9 +758,9 @@ Behavior guarantees:
 - Return values from `tool_call` only control blocking via `{ block: true, reason?: string }`
 
 ```typescript
-import { isToolCallEventType } from "@arcmind/coding-agent";
+import { isToolCallEventType } from "@metis/coding-agent";
 
-arcmind.on("tool_call", async (event, ctx) => {
+metis.on("tool_call", async (event, ctx) => {
   // event.toolName - "bash", "read", "write", "edit", etc.
   // event.toolCallId
   // event.input - tool parameters (mutable)
@@ -794,10 +794,10 @@ export type MyToolInput = Static<typeof myToolSchema>;
 Use `isToolCallEventType` with explicit type parameters:
 
 ```typescript
-import { isToolCallEventType } from "@arcmind/coding-agent";
+import { isToolCallEventType } from "@metis/coding-agent";
 import type { MyToolInput } from "my-extension";
 
-arcmind.on("tool_call", (event) => {
+metis.on("tool_call", (event) => {
   if (isToolCallEventType<"my_tool", MyToolInput>("my_tool", event)) {
     event.input.action;  // typed
   }
@@ -818,9 +818,9 @@ In parallel tool mode, `tool_result` and `tool_execution_end` may interleave in 
 Use `ctx.signal` for nested async work inside the handler. This lets Esc cancel model calls, `fetch()`, and other abort-aware operations started by the extension.
 
 ```typescript
-import { isBashToolResult } from "@arcmind/coding-agent";
+import { isBashToolResult } from "@metis/coding-agent";
 
-arcmind.on("tool_result", async (event, ctx) => {
+metis.on("tool_result", async (event, ctx) => {
   // event.toolName, event.toolCallId, event.input
   // event.content, event.details, event.isError
 
@@ -846,9 +846,9 @@ arcmind.on("tool_result", async (event, ctx) => {
 Fired when user executes `!` or `!!` commands. **Can intercept.**
 
 ```typescript
-import { createLocalBashOperations } from "@arcmind/coding-agent";
+import { createLocalBashOperations } from "@metis/coding-agent";
 
-arcmind.on("user_bash", (event, ctx) => {
+metis.on("user_bash", (event, ctx) => {
   // event.command - the bash command
   // event.excludeFromContext - true if !! prefix
   // event.cwd - working directory
@@ -856,7 +856,7 @@ arcmind.on("user_bash", (event, ctx) => {
   // Option 1: Provide custom operations (e.g., SSH)
   return { operations: remoteBashOps };
 
-  // Option 2: Wrap arcmind's built-in local bash backend
+  // Option 2: Wrap metis's built-in local bash backend
   const local = createLocalBashOperations();
   return {
     operations: {
@@ -885,7 +885,7 @@ Fired when user input is received, after extension commands are checked but befo
 5. Agent processing begins (`before_agent_start`, etc.)
 
 ```typescript
-arcmind.on("input", async (event, ctx) => {
+metis.on("input", async (event, ctx) => {
   // event.text - raw input (before skill/template expansion)
   // event.images - attached images, if any
   // event.source - "interactive" (typed), "rpc" (API), or "extension" (via sendUserMessage)
@@ -942,14 +942,14 @@ Current run mode: `"tui"`, `"rpc"`, `"json"`, or `"print"`. Use `ctx.mode === "t
 
 Current working directory.
 
-Use `CONFIG_DIR_NAME` instead of hardcoding `.arcmind` when constructing project-local config paths. Rebranded distributions can use a different config directory name.
+Use `CONFIG_DIR_NAME` instead of hardcoding `.metis` when constructing project-local config paths. Rebranded distributions can use a different config directory name.
 
 ```typescript
-import { CONFIG_DIR_NAME, type ExtensionAPI } from "@arcmind/coding-agent";
+import { CONFIG_DIR_NAME, type ExtensionAPI } from "@metis/coding-agent";
 import { join } from "node:path";
 
-export default function (arcmind: ExtensionAPI) {
-  arcmind.on("session_start", (_event, ctx) => {
+export default function (metis: ExtensionAPI) {
+  metis.on("session_start", (_event, ctx) => {
     const projectConfigPath = join(ctx.cwd, CONFIG_DIR_NAME, "my-extension.json");
     // ...
   });
@@ -989,10 +989,10 @@ Use this for abort-aware nested work started by extension handlers, for example:
 - file or process helpers that accept `AbortSignal`
 
 `ctx.signal` is typically defined during active turn events such as `tool_call`, `tool_result`, `message_update`, and `turn_end`.
-It is usually `undefined` in idle or non-turn contexts such as session events, extension commands, and shortcuts fired while arcmind is idle.
+It is usually `undefined` in idle or non-turn contexts such as session events, extension commands, and shortcuts fired while metis is idle.
 
 ```typescript
-arcmind.on("tool_result", async (event, ctx) => {
+metis.on("tool_result", async (event, ctx) => {
   const response = await fetch("https://example.com/api", {
     method: "POST",
     body: JSON.stringify(event),
@@ -1006,11 +1006,11 @@ arcmind.on("tool_result", async (event, ctx) => {
 
 ### ctx.isIdle() / ctx.abort() / ctx.hasPendingMessages()
 
-Control flow helpers. `ctx.isIdle()` is false while ArcMind is processing an agent run, automatic retry, auto-compaction retry, or queued continuation.
+Control flow helpers. `ctx.isIdle()` is false while Metis is processing an agent run, automatic retry, auto-compaction retry, or queued continuation.
 
 ### ctx.shutdown()
 
-Request a graceful shutdown of arcmind.
+Request a graceful shutdown of metis.
 
 - **Interactive mode:** Deferred until the agent becomes idle (after processing all queued steering and follow-up messages).
 - **RPC mode:** Deferred until the next idle state (after completing the current command response, when waiting for the next command).
@@ -1019,7 +1019,7 @@ Request a graceful shutdown of arcmind.
 Emits `session_shutdown` event to all extensions before exiting. Available in all contexts (event handlers, tools, commands, shortcuts).
 
 ```typescript
-arcmind.on("tool_call", (event, ctx) => {
+metis.on("tool_call", (event, ctx) => {
   if (isFatal(event.input)) {
     ctx.shutdown();
   }
@@ -1055,7 +1055,7 @@ ctx.compact({
 
 ### ctx.getSystemPrompt()
 
-Returns ArcMind's current system prompt string.
+Returns Metis's current system prompt string.
 
 - During `before_agent_start`, this reflects chained system-prompt changes made so far for the current turn.
 - It does not include later `context` message mutations.
@@ -1063,7 +1063,7 @@ Returns ArcMind's current system prompt string.
 - If later-loaded extensions run after yours, they can still change what is ultimately sent.
 
 ```typescript
-arcmind.on("before_agent_start", (event, ctx) => {
+metis.on("before_agent_start", (event, ctx) => {
   const prompt = ctx.getSystemPrompt();
   console.log(`System prompt length: ${prompt.length}`);
 });
@@ -1075,7 +1075,7 @@ Command handlers receive `ExtensionCommandContext`, which extends `ExtensionCont
 
 ### ctx.getSystemPromptOptions()
 
-Returns the base inputs ArcMind currently uses to build the system prompt.
+Returns the base inputs Metis currently uses to build the system prompt.
 
 ```typescript
 const options = ctx.getSystemPromptOptions();
@@ -1091,7 +1091,7 @@ This reports the current base prompt inputs. It does not include per-turn `befor
 Wait for the agent to fully settle, including automatic retries, auto-compaction retries, and queued continuations:
 
 ```typescript
-arcmind.registerCommand("my-cmd", {
+metis.registerCommand("my-cmd", {
   handler: async (args, ctx) => {
     await ctx.waitForIdle();
     // Agent is now idle, safe to modify session
@@ -1130,7 +1130,7 @@ if (result.cancelled) {
 Options:
 - `parentSession`: parent session file to record in the new session header
 - `setup`: mutate the new session's `SessionManager` before `withSession` runs
-- `withSession`: run post-switch work against a fresh replacement-session context. Do not use captured old `arcmind` / command `ctx`; see [Session replacement lifecycle and footguns](#session-replacement-lifecycle-and-footguns).
+- `withSession`: run post-switch work against a fresh replacement-session context. Do not use captured old `metis` / command `ctx`; see [Session replacement lifecycle and footguns](#session-replacement-lifecycle-and-footguns).
 
 ### ctx.fork(entryId, options?)
 
@@ -1156,7 +1156,7 @@ if (cloneResult.cancelled) {
 Options:
 - `position`: `"before"` (default) forks before the selected user message, restoring that prompt into the editor
 - `position`: `"at"` duplicates the active path through the selected entry without restoring editor text
-- `withSession`: run post-switch work against a fresh replacement-session context. Do not use captured old `arcmind` / command `ctx`; see [Session replacement lifecycle and footguns](#session-replacement-lifecycle-and-footguns).
+- `withSession`: run post-switch work against a fresh replacement-session context. Do not use captured old `metis` / command `ctx`; see [Session replacement lifecycle and footguns](#session-replacement-lifecycle-and-footguns).
 
 ### ctx.navigateTree(targetId, options?)
 
@@ -1193,14 +1193,14 @@ if (result.cancelled) {
 ```
 
 Options:
-- `withSession`: run post-switch work against a fresh replacement-session context. Do not use captured old `arcmind` / command `ctx`; see [Session replacement lifecycle and footguns](#session-replacement-lifecycle-and-footguns).
+- `withSession`: run post-switch work against a fresh replacement-session context. Do not use captured old `metis` / command `ctx`; see [Session replacement lifecycle and footguns](#session-replacement-lifecycle-and-footguns).
 
 To discover available sessions, use the static `SessionManager.list()` or `SessionManager.listAll()` methods:
 
 ```typescript
-import { SessionManager } from "@arcmind/coding-agent";
+import { SessionManager } from "@metis/coding-agent";
 
-arcmind.registerCommand("switch", {
+metis.registerCommand("switch", {
   description: "Switch to another session",
   handler: async (args, ctx) => {
     const sessions = await SessionManager.list(ctx.cwd);
@@ -1227,14 +1227,14 @@ arcmind.registerCommand("switch", {
 Lifecycle and footguns:
 - `withSession` runs only after the old session has emitted `session_shutdown`, the old runtime has been torn down, the replacement session has been rebound, and the new extension instance has already received `session_start`.
 - The callback still executes in the original closure, not inside the new extension instance. That means your old extension instance may already have run its shutdown cleanup before `withSession` starts.
-- Captured old `arcmind` / old command `ctx` session-bound objects are stale after replacement and will throw if used. Use only the `ctx` passed to `withSession` for session-bound work.
+- Captured old `metis` / old command `ctx` session-bound objects are stale after replacement and will throw if used. Use only the `ctx` passed to `withSession` for session-bound work.
 - Previously extracted raw objects are still your responsibility. For example, if you capture `const sm = ctx.sessionManager` before replacement, `sm` is still the old `SessionManager` object. Do not reuse it after replacement.
 - Code in `withSession` should assume any state invalidated by your `session_shutdown` handler is already gone. Only capture plain data that survives shutdown cleanly, such as strings, ids, and serialized config.
 
 Safe pattern:
 
 ```typescript
-arcmind.registerCommand("handoff", {
+metis.registerCommand("handoff", {
   handler: async (_args, ctx) => {
     const kickoff = "Continue from the replacement session";
     await ctx.newSession({
@@ -1249,14 +1249,14 @@ arcmind.registerCommand("handoff", {
 Unsafe pattern:
 
 ```typescript
-arcmind.registerCommand("handoff", {
+metis.registerCommand("handoff", {
   handler: async (_args, ctx) => {
     const oldSessionManager = ctx.sessionManager;
     await ctx.newSession({
       withSession: async (_ctx) => {
         // stale old objects: do not do this
         oldSessionManager.getSessionFile();
-        arcmind.sendUserMessage("wrong");
+        metis.sendUserMessage("wrong");
       },
     });
   },
@@ -1268,7 +1268,7 @@ arcmind.registerCommand("handoff", {
 Run the same reload flow as `/reload`.
 
 ```typescript
-arcmind.registerCommand("reload-runtime", {
+metis.registerCommand("reload-runtime", {
   description: "Reload extensions, skills, prompts, themes, and context files",
   handler: async (_args, ctx) => {
     await ctx.reload();
@@ -1292,11 +1292,11 @@ Tools run with `ExtensionContext`, so they cannot call `ctx.reload()` directly. 
 Example tool the LLM can call to trigger reload:
 
 ```typescript
-import type { ExtensionAPI } from "@arcmind/coding-agent";
+import type { ExtensionAPI } from "@metis/coding-agent";
 import { Type } from "typebox";
 
-export default function (arcmind: ExtensionAPI) {
-  arcmind.registerCommand("reload-runtime", {
+export default function (metis: ExtensionAPI) {
+  metis.registerCommand("reload-runtime", {
     description: "Reload extensions, skills, prompts, themes, and context files",
     handler: async (_args, ctx) => {
       await ctx.reload();
@@ -1304,13 +1304,13 @@ export default function (arcmind: ExtensionAPI) {
     },
   });
 
-  arcmind.registerTool({
+  metis.registerTool({
     name: "reload_runtime",
     label: "Reload Runtime",
     description: "Reload extensions, skills, prompts, themes, and context files",
     parameters: Type.Object({}),
     async execute() {
-      arcmind.sendUserMessage("/reload-runtime", { deliverAs: "followUp" });
+      metis.sendUserMessage("/reload-runtime", { deliverAs: "followUp" });
       return {
         content: [{ type: "text", text: "Queued /reload-runtime as a follow-up command." }],
       };
@@ -1321,17 +1321,17 @@ export default function (arcmind: ExtensionAPI) {
 
 ## ExtensionAPI Methods
 
-### arcmind.on(event, handler)
+### metis.on(event, handler)
 
 Subscribe to events. See [Events](#events) for event types and return values.
 
-### arcmind.registerTool(definition)
+### metis.registerTool(definition)
 
 Register a custom tool callable by the LLM. See [Custom Tools](#custom-tools) for full details.
 
-`arcmind.registerTool()` works both during extension load and after startup. You can call it inside `session_start`, command handlers, or other event handlers. New tools are refreshed immediately in the same session, so they appear in `arcmind.getAllTools()` and are callable by the LLM without `/reload`.
+`metis.registerTool()` works both during extension load and after startup. You can call it inside `session_start`, command handlers, or other event handlers. New tools are refreshed immediately in the same session, so they appear in `metis.getAllTools()` and are callable by the LLM without `/reload`.
 
-Use `arcmind.setActiveTools()` to enable or disable tools (including dynamically added tools) at runtime.
+Use `metis.setActiveTools()` to enable or disable tools (including dynamically added tools) at runtime.
 
 Use `promptSnippet` to opt a custom tool into a one-line entry in `Available tools`, and `promptGuidelines` to append tool-specific bullets to the default `Guidelines` section when the tool is active.
 
@@ -1341,9 +1341,9 @@ See [dynamic-tools.ts](../examples/extensions/dynamic-tools.ts) for a full examp
 
 ```typescript
 import { Type } from "typebox";
-import { StringEnum } from "@arcmind/ai";
+import { StringEnum } from "@metis/ai";
 
-arcmind.registerTool({
+metis.registerTool({
   name: "my_tool",
   label: "My Tool",
   description: "What this tool does",
@@ -1376,12 +1376,12 @@ arcmind.registerTool({
 });
 ```
 
-### arcmind.sendMessage(message, options?)
+### metis.sendMessage(message, options?)
 
-Inject a custom message into the session. Custom messages participate in LLM context. For durable TUI-only content that should not be sent to the LLM, use [`arcmind.appendEntry()`](#piappendentrycustomtype-data) with [`arcmind.registerEntryRenderer()`](#piregisterentryrenderercustomtype-renderer).
+Inject a custom message into the session. Custom messages participate in LLM context. For durable TUI-only content that should not be sent to the LLM, use [`metis.appendEntry()`](#piappendentrycustomtype-data) with [`metis.registerEntryRenderer()`](#piregisterentryrenderercustomtype-renderer).
 
 ```typescript
-arcmind.sendMessage({
+metis.sendMessage({
   customType: "my-extension",
   content: "Message text",
   display: true,
@@ -1399,23 +1399,23 @@ arcmind.sendMessage({
   - `"nextTurn"` - Queued for next user prompt. Does not interrupt or trigger anything.
 - `triggerTurn: true` - If agent is idle, trigger an LLM response immediately. Only applies to `"steer"` and `"followUp"` modes (ignored for `"nextTurn"`).
 
-### arcmind.sendUserMessage(content, options?)
+### metis.sendUserMessage(content, options?)
 
 Send a user message to the agent. Unlike `sendMessage()` which sends custom messages, this sends an actual user message that appears as if typed by the user. Always triggers a turn.
 
 ```typescript
 // Simple text message
-arcmind.sendUserMessage("What is 2+2?");
+metis.sendUserMessage("What is 2+2?");
 
 // With content array (text + images)
-arcmind.sendUserMessage([
+metis.sendUserMessage([
   { type: "text", text: "Describe this image:" },
   { type: "image", source: { type: "base64", mediaType: "image/png", data: "..." } },
 ]);
 
 // During streaming - must specify delivery mode
-arcmind.sendUserMessage("Focus on error handling", { deliverAs: "steer" });
-arcmind.sendUserMessage("And then summarize", { deliverAs: "followUp" });
+metis.sendUserMessage("Focus on error handling", { deliverAs: "steer" });
+metis.sendUserMessage("And then summarize", { deliverAs: "followUp" });
 ```
 
 **Options:**
@@ -1427,16 +1427,16 @@ When not streaming, the message is sent immediately and triggers a new turn. Whe
 
 See [send-user-message.ts](../examples/extensions/send-user-message.ts) for a complete example.
 
-### arcmind.appendEntry(customType, data?)
+### metis.appendEntry(customType, data?)
 
-Persist extension data. Custom entries do NOT participate in LLM context. In interactive mode, they can also render inside the chat transcript when paired with `arcmind.registerEntryRenderer()`.
+Persist extension data. Custom entries do NOT participate in LLM context. In interactive mode, they can also render inside the chat transcript when paired with `metis.registerEntryRenderer()`.
 
 ```typescript
-arcmind.appendEntry("my-state", { count: 42 });
-arcmind.appendEntry("status-card", { title: "Indexed files", count: 17 });
+metis.appendEntry("my-state", { count: 42 });
+metis.appendEntry("status-card", { title: "Indexed files", count: 17 });
 
 // Restore on reload
-arcmind.on("session_start", async (_event, ctx) => {
+metis.on("session_start", async (_event, ctx) => {
   for (const entry of ctx.sessionManager.getEntries()) {
     if (entry.type === "custom" && entry.customType === "my-state") {
       // Reconstruct from entry.data
@@ -1445,35 +1445,35 @@ arcmind.on("session_start", async (_event, ctx) => {
 });
 ```
 
-### arcmind.setSessionName(name)
+### metis.setSessionName(name)
 
 Set the session display name (shown in session selector instead of first message).
 
 ```typescript
-arcmind.setSessionName("Refactor auth module");
+metis.setSessionName("Refactor auth module");
 ```
 
-### arcmind.getSessionName()
+### metis.getSessionName()
 
 Get the current session name, if set.
 
 ```typescript
-const name = arcmind.getSessionName();
+const name = metis.getSessionName();
 if (name) {
   console.log(`Session: ${name}`);
 }
 ```
 
-### arcmind.setLabel(entryId, label)
+### metis.setLabel(entryId, label)
 
 Set or clear a label on an entry. Labels are user-defined markers for bookmarking and navigation (shown in `/tree` selector).
 
 ```typescript
 // Set a label
-arcmind.setLabel(entryId, "checkpoint-before-refactor");
+metis.setLabel(entryId, "checkpoint-before-refactor");
 
 // Clear a label
-arcmind.setLabel(entryId, undefined);
+metis.setLabel(entryId, undefined);
 
 // Read labels via sessionManager
 const label = ctx.sessionManager.getLabel(entryId);
@@ -1481,14 +1481,14 @@ const label = ctx.sessionManager.getLabel(entryId);
 
 Labels persist in the session and survive restarts. Use them to mark important points (turns, checkpoints) in the conversation tree.
 
-### arcmind.registerCommand(name, options)
+### metis.registerCommand(name, options)
 
 Register a command.
 
-If multiple extensions register the same command name, arcmind keeps them all and assigns numeric invocation suffixes in load order, for example `/review:1` and `/review:2`.
+If multiple extensions register the same command name, metis keeps them all and assigns numeric invocation suffixes in load order, for example `/review:1` and `/review:2`.
 
 ```typescript
-arcmind.registerCommand("stats", {
+metis.registerCommand("stats", {
   description: "Show session statistics",
   handler: async (args, ctx) => {
     const count = ctx.sessionManager.getEntries().length;
@@ -1500,9 +1500,9 @@ arcmind.registerCommand("stats", {
 Optional: add argument auto-completion for `/command ...`:
 
 ```typescript
-import type { AutocompleteItem } from "@arcmind/tui";
+import type { AutocompleteItem } from "@metis/tui";
 
-arcmind.registerCommand("deploy", {
+metis.registerCommand("deploy", {
   description: "Deploy to an environment",
   getArgumentCompletions: (prefix: string): AutocompleteItem[] | null => {
     const envs = ["dev", "staging", "prod"];
@@ -1516,13 +1516,13 @@ arcmind.registerCommand("deploy", {
 });
 ```
 
-### arcmind.getCommands()
+### metis.getCommands()
 
 Get the slash commands available for invocation via `prompt` in the current session. Includes extension commands, prompt templates, and skill commands.
 The list matches the RPC `get_commands` ordering: extensions first, then templates, then skills.
 
 ```typescript
-const commands = arcmind.getCommands();
+const commands = metis.getCommands();
 const bySource = commands.filter((command) => command.source === "extension");
 const userScoped = commands.filter((command) => command.sourceInfo.scope === "user");
 ```
@@ -1549,18 +1549,18 @@ Use `sourceInfo` as the canonical provenance field. Do not infer ownership from 
 Built-in interactive commands (like `/model` and `/settings`) are not included here. They are handled only in interactive
 mode and would not execute if sent via `prompt`.
 
-### arcmind.registerMessageRenderer(customType, renderer)
+### metis.registerMessageRenderer(customType, renderer)
 
-Register a custom TUI renderer for custom messages with your `customType`. Custom messages are created with `arcmind.sendMessage()` and participate in LLM context. See [Custom UI](#custom-ui).
+Register a custom TUI renderer for custom messages with your `customType`. Custom messages are created with `metis.sendMessage()` and participate in LLM context. See [Custom UI](#custom-ui).
 
-### arcmind.registerEntryRenderer(customType, renderer)
+### metis.registerEntryRenderer(customType, renderer)
 
-Register a custom TUI renderer for custom entries with your `customType`. Custom entries are created with `arcmind.appendEntry()` and do not participate in LLM context.
+Register a custom TUI renderer for custom entries with your `customType`. Custom entries are created with `metis.appendEntry()` and do not participate in LLM context.
 
 ```typescript
-import { Box, Text } from "@arcmind/tui";
+import { Box, Text } from "@metis/tui";
 
-arcmind.registerEntryRenderer("status-card", (entry, { expanded }, theme) => {
+metis.registerEntryRenderer("status-card", (entry, { expanded }, theme) => {
   const data = entry.data as { title: string; count: number };
   const box = new Box(1, 1, (text) => theme.bg("customMessageBg", text));
   box.addChild(new Text(`${theme.bold(data.title)}: ${data.count}`));
@@ -1570,15 +1570,15 @@ arcmind.registerEntryRenderer("status-card", (entry, { expanded }, theme) => {
   return box;
 });
 
-arcmind.appendEntry("status-card", { title: "Indexed files", count: 17 });
+metis.appendEntry("status-card", { title: "Indexed files", count: 17 });
 ```
 
-### arcmind.registerShortcut(shortcut, options)
+### metis.registerShortcut(shortcut, options)
 
 Register a keyboard shortcut. See [keybindings.md](keybindings.md) for the shortcut format and built-in keybindings.
 
 ```typescript
-arcmind.registerShortcut("ctrl+shift+p", {
+metis.registerShortcut("ctrl+shift+p", {
   description: "Toggle plan mode",
   handler: async (ctx) => {
     ctx.ui.notify("Toggled!");
@@ -1586,39 +1586,39 @@ arcmind.registerShortcut("ctrl+shift+p", {
 });
 ```
 
-### arcmind.registerFlag(name, options)
+### metis.registerFlag(name, options)
 
 Register a CLI flag.
 
 ```typescript
-arcmind.registerFlag("plan", {
+metis.registerFlag("plan", {
   description: "Start in plan mode",
   type: "boolean",
   default: false,
 });
 
 // Check value
-if (arcmind.getFlag("plan")) {
+if (metis.getFlag("plan")) {
   // Plan mode enabled
 }
 ```
 
-### arcmind.exec(command, args, options?)
+### metis.exec(command, args, options?)
 
 Execute a shell command.
 
 ```typescript
-const result = await arcmind.exec("git", ["status"], { signal, timeout: 5000 });
+const result = await metis.exec("git", ["status"], { signal, timeout: 5000 });
 // result.stdout, result.stderr, result.code, result.killed
 ```
 
-### arcmind.getActiveTools() / arcmind.getAllTools() / arcmind.setActiveTools(names)
+### metis.getActiveTools() / metis.getAllTools() / metis.setActiveTools(names)
 
-Manage active tools. This works for both built-in tools and dynamically registered tools. `arcmind.getActiveTools()` returns the active tool names as `string[]`; `arcmind.getAllTools()` returns metadata for all configured tools.
+Manage active tools. This works for both built-in tools and dynamically registered tools. `metis.getActiveTools()` returns the active tool names as `string[]`; `metis.getAllTools()` returns metadata for all configured tools.
 
 ```typescript
-const active = arcmind.getActiveTools(); // ["read", "bash", ...]
-const all = arcmind.getAllTools();
+const active = metis.getActiveTools(); // ["read", "bash", ...]
+const all = metis.getAllTools();
 // all = [{
 //   name: "read",
 //   description: "Read file contents...",
@@ -1628,60 +1628,60 @@ const all = arcmind.getAllTools();
 // }, ...]
 const builtinTools = all.filter((t) => t.sourceInfo.source === "builtin");
 const extensionTools = all.filter((t) => t.sourceInfo.source !== "builtin" && t.sourceInfo.source !== "sdk");
-arcmind.setActiveTools([...new Set([...active, "my_custom_tool"])]); // Keep current tools and enable my_custom_tool
-arcmind.setActiveTools(["read", "bash"]); // Switch to read-only
+metis.setActiveTools([...new Set([...active, "my_custom_tool"])]); // Keep current tools and enable my_custom_tool
+metis.setActiveTools(["read", "bash"]); // Switch to read-only
 ```
 
-`arcmind.getAllTools()` returns `name`, `description`, `parameters`, `promptGuidelines`, and `sourceInfo`.
+`metis.getAllTools()` returns `name`, `description`, `parameters`, `promptGuidelines`, and `sourceInfo`.
 
 Typical `sourceInfo.source` values:
 - `builtin` for built-in tools
 - `sdk` for tools passed via `createAgentSession({ customTools })`
 - extension source metadata for tools registered by extensions
 
-### arcmind.setModel(model)
+### metis.setModel(model)
 
 Set the current model. Returns `false` if no API key is available for the model. See [models.md](models.md) for configuring custom models.
 
 ```typescript
 const model = ctx.modelRegistry.find("anthropic", "claude-sonnet-4-5");
 if (model) {
-  const success = await arcmind.setModel(model);
+  const success = await metis.setModel(model);
   if (!success) {
     ctx.ui.notify("No API key for this model", "error");
   }
 }
 ```
 
-### arcmind.getThinkingLevel() / arcmind.setThinkingLevel(level)
+### metis.getThinkingLevel() / metis.setThinkingLevel(level)
 
 Get or set the thinking level. Level is clamped to model capabilities (non-reasoning models always use "off"). Changes emit `thinking_level_select`.
 
 ```typescript
-const current = arcmind.getThinkingLevel();  // "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max"
-arcmind.setThinkingLevel("high");
+const current = metis.getThinkingLevel();  // "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max"
+metis.setThinkingLevel("high");
 ```
 
-### arcmind.events
+### metis.events
 
 Shared event bus for communication between extensions:
 
 ```typescript
-arcmind.events.on("my:event", (data) => { ... });
-arcmind.events.emit("my:event", { ... });
+metis.events.on("my:event", (data) => { ... });
+metis.events.emit("my:event", { ... });
 ```
 
-### arcmind.registerProvider(name, config)
+### metis.registerProvider(name, config)
 
 Register or override a model provider dynamically. Useful for proxies, custom endpoints, or team-wide model configurations.
 
 Calls made during the extension factory function are queued and applied once the runner initialises. Calls made after that — for example from a command handler following a user setup flow — take effect immediately without requiring a `/reload`.
 
-If you need to discover models from a remote endpoint, prefer an async extension factory over deferring the fetch to `session_start`. arcmind waits for the factory before startup continues, so the registered models are available immediately, including to `arcmind --list-models`.
+If you need to discover models from a remote endpoint, prefer an async extension factory over deferring the fetch to `session_start`. metis waits for the factory before startup continues, so the registered models are available immediately, including to `metis --list-models`.
 
 ```typescript
 // Register a new provider with custom models
-arcmind.registerProvider("my-proxy", {
+metis.registerProvider("my-proxy", {
   name: "My Proxy",
   baseUrl: "https://proxy.example.com",
   apiKey: "$PROXY_API_KEY",  // env var reference
@@ -1700,12 +1700,12 @@ arcmind.registerProvider("my-proxy", {
 });
 
 // Override baseUrl for an existing provider (keeps all models)
-arcmind.registerProvider("anthropic", {
+metis.registerProvider("anthropic", {
   baseUrl: "https://proxy.example.com"
 });
 
 // Register provider with OAuth support for /login
-arcmind.registerProvider("corporate-ai", {
+metis.registerProvider("corporate-ai", {
   baseUrl: "https://ai.corp.com",
   api: "openai-responses",
   models: [...],
@@ -1741,17 +1741,17 @@ arcmind.registerProvider("corporate-ai", {
 
 See [custom-provider.md](custom-provider.md) for advanced topics: custom streaming APIs, OAuth details, model definition reference.
 
-### arcmind.unregisterProvider(name)
+### metis.unregisterProvider(name)
 
 Remove a previously registered provider and its models. Built-in models that were overridden by the provider are restored. Has no effect if the provider was not registered.
 
 Like `registerProvider`, this takes effect immediately when called after the initial load phase, so a `/reload` is not required.
 
 ```typescript
-arcmind.registerCommand("my-setup-teardown", {
+metis.registerCommand("my-setup-teardown", {
   description: "Remove the custom proxy provider",
   handler: async (_args, _ctx) => {
-    arcmind.unregisterProvider("my-proxy");
+    metis.unregisterProvider("my-proxy");
   },
 });
 ```
@@ -1761,11 +1761,11 @@ arcmind.registerCommand("my-setup-teardown", {
 Extensions with state should store it in tool result `details` for proper branching support:
 
 ```typescript
-export default function (arcmind: ExtensionAPI) {
+export default function (metis: ExtensionAPI) {
   let items: string[] = [];
 
   // Reconstruct state from session
-  arcmind.on("session_start", async (_event, ctx) => {
+  metis.on("session_start", async (_event, ctx) => {
     items = [];
     for (const entry of ctx.sessionManager.getBranch()) {
       if (entry.type === "message" && entry.message.role === "toolResult") {
@@ -1776,7 +1776,7 @@ export default function (arcmind: ExtensionAPI) {
     }
   });
 
-  arcmind.registerTool({
+  metis.registerTool({
     name: "my_tool",
     // ...
     async execute(toolCallId, params, signal, onUpdate, ctx) {
@@ -1792,11 +1792,11 @@ export default function (arcmind: ExtensionAPI) {
 
 ## Custom Tools
 
-Register tools the LLM can call via `arcmind.registerTool()`. Tools appear in the system prompt and can have custom rendering.
+Register tools the LLM can call via `metis.registerTool()`. Tools appear in the system prompt and can have custom rendering.
 
 Use `promptSnippet` for a short one-line entry in the `Available tools` section in the default system prompt. If omitted, custom tools are left out of that section.
 
-Use `promptGuidelines` to add tool-specific bullets to the default system prompt `Guidelines` section. These bullets are included only while the tool is active (for example, after `arcmind.setActiveTools([...])`).
+Use `promptGuidelines` to add tool-specific bullets to the default system prompt `Guidelines` section. These bullets are included only while the tool is active (for example, after `metis.setActiveTools([...])`).
 
 **Important:** `promptGuidelines` bullets are appended flat to the `Guidelines` section with no tool name prefix or grouping. Each guideline must name the tool it refers to — avoid "Use this tool when..." because the LLM cannot tell which tool "this" means. Write "Use my_tool when..." instead.
 
@@ -1811,7 +1811,7 @@ Pass the real target file path to `withFileMutationQueue()`, not the raw user ar
 Queue the entire mutation window on that target path. That includes read-modify-write logic, not just the final write.
 
 ```typescript
-import { withFileMutationQueue } from "@arcmind/coding-agent";
+import { withFileMutationQueue } from "@metis/coding-agent";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 
@@ -1836,10 +1836,10 @@ async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 
 ```typescript
 import { Type } from "typebox";
-import { StringEnum } from "@arcmind/ai";
-import { Text } from "@arcmind/tui";
+import { StringEnum } from "@metis/ai";
+import { Text } from "@metis/tui";
 
-arcmind.registerTool({
+metis.registerTool({
   name: "my_tool",
   label: "My Tool",
   description: "What this tool does (shown to LLM)",
@@ -1872,8 +1872,8 @@ arcmind.registerTool({
       details: { progress: 50 },
     });
 
-    // Run commands via arcmind.exec (captured from extension closure)
-    const result = await arcmind.exec("some-command", [], { signal });
+    // Run commands via metis.exec (captured from extension closure)
+    const result = await metis.exec("some-command", [], { signal });
 
     // Return result
     return {
@@ -1905,14 +1905,14 @@ async execute(toolCallId, params) {
 }
 ```
 
-**Important:** Use `StringEnum` from `@arcmind/ai` for string enums. `Type.Union`/`Type.Literal` doesn't work with Google's API.
+**Important:** Use `StringEnum` from `@metis/ai` for string enums. `Type.Union`/`Type.Literal` doesn't work with Google's API.
 
-**Argument preparation:** `prepareArguments(args)` is optional. If defined, it runs before schema validation and before `execute()`. Use it to mimic an older accepted input shape when arcmind resumes an older session whose stored tool call arguments no longer match the current schema. Return the object you want validated against `parameters`. Keep the public schema strict. Do not add deprecated compatibility fields to `parameters` just to keep old resumed sessions working.
+**Argument preparation:** `prepareArguments(args)` is optional. If defined, it runs before schema validation and before `execute()`. Use it to mimic an older accepted input shape when metis resumes an older session whose stored tool call arguments no longer match the current schema. Return the object you want validated against `parameters`. Keep the public schema strict. Do not add deprecated compatibility fields to `parameters` just to keep old resumed sessions working.
 
 Example: an older session may contain an `edit` tool call with top-level `oldText` and `newText`, while the current schema only accepts `edits: [{ oldText, newText }]`.
 
 ```typescript
-arcmind.registerTool({
+metis.registerTool({
   name: "edit",
   label: "Edit",
   description: "Edit a single file using exact text replacement",
@@ -1960,13 +1960,13 @@ Extensions can override built-in tools (`read`, `bash`, `edit`, `write`, `grep`,
 
 ```bash
 # Extension's read tool replaces built-in read
-arcmind -e ./tool-override.ts
+metis -e ./tool-override.ts
 ```
 
 Alternatively, use `--no-builtin-tools` to start without any built-in tools while keeping extension tools enabled:
 ```bash
 # No built-in tools, only extension tools
-arcmind --no-builtin-tools -e ./my-extension.ts
+metis --no-builtin-tools -e ./my-extension.ts
 ```
 
 See [examples/extensions/tool-override.ts](../examples/extensions/tool-override.ts) for a complete example that overrides `read` with logging and access control.
@@ -1978,22 +1978,22 @@ See [examples/extensions/tool-override.ts](../examples/extensions/tool-override.
 **Your implementation must match the exact result shape**, including the `details` type. The UI and session logic depend on these shapes for rendering and state tracking.
 
 Built-in tool implementations:
-- [read.ts](https://github.com/arcmind/arcmind/blob/main/packages/coding-agent/src/core/tools/read.ts) - `ReadToolDetails`
-- [bash.ts](https://github.com/arcmind/arcmind/blob/main/packages/coding-agent/src/core/tools/bash.ts) - `BashToolDetails`
-- [edit.ts](https://github.com/arcmind/arcmind/blob/main/packages/coding-agent/src/core/tools/edit.ts)
-- [write.ts](https://github.com/arcmind/arcmind/blob/main/packages/coding-agent/src/core/tools/write.ts)
-- [grep.ts](https://github.com/arcmind/arcmind/blob/main/packages/coding-agent/src/core/tools/grep.ts) - `GrepToolDetails`
-- [find.ts](https://github.com/arcmind/arcmind/blob/main/packages/coding-agent/src/core/tools/find.ts) - `FindToolDetails`
-- [ls.ts](https://github.com/arcmind/arcmind/blob/main/packages/coding-agent/src/core/tools/ls.ts) - `LsToolDetails`
-- [web-fetch.ts](https://github.com/arcmind/arcmind/blob/main/packages/coding-agent/src/core/tools/web-fetch.ts) - `WebFetchToolDetails`
-- [web-search.ts](https://github.com/arcmind/arcmind/blob/main/packages/coding-agent/src/core/tools/web-search.ts) - `WebSearchToolDetails`
+- [read.ts](https://github.com/metis/metis/blob/main/packages/coding-agent/src/core/tools/read.ts) - `ReadToolDetails`
+- [bash.ts](https://github.com/metis/metis/blob/main/packages/coding-agent/src/core/tools/bash.ts) - `BashToolDetails`
+- [edit.ts](https://github.com/metis/metis/blob/main/packages/coding-agent/src/core/tools/edit.ts)
+- [write.ts](https://github.com/metis/metis/blob/main/packages/coding-agent/src/core/tools/write.ts)
+- [grep.ts](https://github.com/metis/metis/blob/main/packages/coding-agent/src/core/tools/grep.ts) - `GrepToolDetails`
+- [find.ts](https://github.com/metis/metis/blob/main/packages/coding-agent/src/core/tools/find.ts) - `FindToolDetails`
+- [ls.ts](https://github.com/metis/metis/blob/main/packages/coding-agent/src/core/tools/ls.ts) - `LsToolDetails`
+- [web-fetch.ts](https://github.com/metis/metis/blob/main/packages/coding-agent/src/core/tools/web-fetch.ts) - `WebFetchToolDetails`
+- [web-search.ts](https://github.com/metis/metis/blob/main/packages/coding-agent/src/core/tools/web-search.ts) - `WebSearchToolDetails`
 
 ### Remote Execution
 
 Built-in tools support pluggable operations for delegating to remote systems (SSH, containers, etc.):
 
 ```typescript
-import { createReadTool, createBashTool, type ReadOperations } from "@arcmind/coding-agent";
+import { createReadTool, createBashTool, type ReadOperations } from "@metis/coding-agent";
 
 // Create tool with custom operations
 const remoteRead = createReadTool(cwd, {
@@ -2004,7 +2004,7 @@ const remoteRead = createReadTool(cwd, {
 });
 
 // Register, checking flag at execution time
-arcmind.registerTool({
+metis.registerTool({
   ...remoteRead,
   async execute(id, params, signal, onUpdate, _ctx) {
     const ssh = getSshConfig();
@@ -2019,12 +2019,12 @@ arcmind.registerTool({
 
 **Operations interfaces:** `ReadOperations`, `WriteOperations`, `EditOperations`, `BashOperations`, `LsOperations`, `GrepOperations`, `FindOperations`
 
-For `user_bash`, extensions can reuse arcmind's local shell backend via `createLocalBashOperations()` instead of reimplementing local process spawning, shell resolution, and process-tree termination.
+For `user_bash`, extensions can reuse metis's local shell backend via `createLocalBashOperations()` instead of reimplementing local process spawning, shell resolution, and process-tree termination.
 
 The bash tool also supports a spawn hook to adjust the command, cwd, or env before execution:
 
 ```typescript
-import { createBashTool } from "@arcmind/coding-agent";
+import { createBashTool } from "@metis/coding-agent";
 
 const bashTool = createBashTool(cwd, {
   spawnHook: ({ command, cwd, env }) => ({
@@ -2054,7 +2054,7 @@ import {
   formatSize,        // Human-readable size (e.g., "50KB", "1.5MB")
   DEFAULT_MAX_BYTES, // 50KB
   DEFAULT_MAX_LINES, // 2000
-} from "@arcmind/coding-agent";
+} from "@metis/coding-agent";
 
 async execute(toolCallId, params, signal, onUpdate, ctx) {
   const output = await runCommand();
@@ -2094,14 +2094,14 @@ See [examples/extensions/truncated-tool.ts](../examples/extensions/truncated-too
 One extension can register multiple tools with shared state:
 
 ```typescript
-export default function (arcmind: ExtensionAPI) {
+export default function (metis: ExtensionAPI) {
   let connection = null;
 
-  arcmind.registerTool({ name: "db_connect", ... });
-  arcmind.registerTool({ name: "db_query", ... });
-  arcmind.registerTool({ name: "db_close", ... });
+  metis.registerTool({ name: "db_connect", ... });
+  metis.registerTool({ name: "db_query", ... });
+  metis.registerTool({ name: "db_close", ... });
 
-  arcmind.on("session_shutdown", async () => {
+  metis.on("session_shutdown", async () => {
     connection?.close();
   });
 }
@@ -2109,14 +2109,14 @@ export default function (arcmind: ExtensionAPI) {
 
 ### Custom Rendering
 
-Tools can provide `renderCall` and `renderResult` for custom TUI display. See [tui.md](tui.md) for the full component API and [tool-execution.ts](https://github.com/arcmind/arcmind/blob/main/packages/coding-agent/src/modes/interactive/components/tool-execution.ts) for how tool rows are composed.
+Tools can provide `renderCall` and `renderResult` for custom TUI display. See [tui.md](tui.md) for the full component API and [tool-execution.ts](https://github.com/metis/metis/blob/main/packages/coding-agent/src/modes/interactive/components/tool-execution.ts) for how tool rows are composed.
 
 By default, tool output is wrapped in a `Box` that handles padding and background. A defined `renderCall` or `renderResult` must return a `Component`. If a slot renderer is not defined, `tool-execution.ts` uses fallback rendering for that slot.
 
 Set `renderShell: "self"` when the tool should render its own shell instead of using the default `Box`. This is useful for tools that need complete control over framing or background behavior, for example large previews that must stay visually stable after the tool settles.
 
 ```typescript
-arcmind.registerTool({
+metis.registerTool({
   name: "my_tool",
   label: "My Tool",
   description: "Custom shell example",
@@ -2145,7 +2145,7 @@ Use `context.state` for cross-slot shared state. Keep slot-local caches on the r
 Renders the tool call or header:
 
 ```typescript
-import { Text } from "@arcmind/tui";
+import { Text } from "@metis/tui";
 
 renderCall(args, theme, context) {
   const text = (context.lastComponent as Text | undefined) ?? new Text("", 0, 0);
@@ -2190,7 +2190,7 @@ If a slot intentionally has no visible content, return an empty `Component` such
 Use `keyHint()` to display keybinding hints that respect the active keybinding configuration:
 
 ```typescript
-import { keyHint } from "@arcmind/coding-agent";
+import { keyHint } from "@metis/coding-agent";
 
 renderResult(result, { expanded }, theme, context) {
   let text = theme.fg("success", "✓ Done");
@@ -2234,19 +2234,19 @@ If a slot renderer is not defined or throws:
 
 ### Dynamic Tool Loading
 
-Extensions can register many tools while keeping only a small initial set active. A tool can then add more tools with `arcmind.setActiveTools()` during execution. ArcMind detects purely additive changes, records the newly available tool names on that tool result, and applies the updated active set before the next model request.
+Extensions can register many tools while keeping only a small initial set active. A tool can then add more tools with `metis.setActiveTools()` during execution. Metis detects purely additive changes, records the newly available tool names on that tool result, and applies the updated active set before the next model request.
 
 This works with every model. Models with native deferred-loading support preserve the stable prompt prefix and load the new definitions at the tool-result position. Other models use the fallback described below.
 
 The lifecycle is:
 
-1. Register every tool with `arcmind.registerTool()` so it appears in `arcmind.getAllTools()`.
+1. Register every tool with `metis.registerTool()` so it appears in `metis.getAllTools()`.
 2. Keep loader tools, such as `search_tools`, active and leave searchable tools inactive.
-3. During loader execution, call `arcmind.setActiveTools([...currentTools, ...matchingTools])`. The change must be additive: do not remove currently active tools in the same call.
-4. ArcMind records which tools were added on the loader's tool result.
-5. Before the next model response, ArcMind exposes the added definitions using native deferred loading when supported, or the normal active tool list otherwise.
+3. During loader execution, call `metis.setActiveTools([...currentTools, ...matchingTools])`. The change must be additive: do not remove currently active tools in the same call.
+4. Metis records which tools were added on the loader's tool result.
+5. Before the next model response, Metis exposes the added definitions using native deferred loading when supported, or the normal active tool list otherwise.
 
-You do not need to return provider-specific tool references or mark the loader as a special search tool. The active-tool change is the signal. Names passed to `arcmind.setActiveTools()` must already be registered; unknown names are ignored.
+You do not need to return provider-specific tool references or mark the loader as a special search tool. The active-tool change is the signal. Names passed to `metis.setActiveTools()` must already be registered; unknown names are ignored.
 
 #### Models with native deferred loading
 
@@ -2255,15 +2255,15 @@ You do not need to return provider-specific tool references or mark the loader a
   - **Native representation:** Deferred definitions use `defer_loading`; the load point uses `tool_reference` content.
 - **OpenAI**
   - **Models:** `gpt-5.4` and newer family
-  - **Native representation:** ArcMind adds completed client `tool_search_call` and `tool_search_output` items at the load point.
+  - **Native representation:** Metis adds completed client `tool_search_call` and `tool_search_output` items at the load point.
 
 For a verified custom model or proxy, native handling can be enabled with `compat.supportsToolReferences: true` for `anthropic-messages`, or `compat.supportsToolSearch: true` for `openai-responses` and `openai-codex-responses`. Leave these disabled unless the endpoint and model accept the corresponding native protocol.
 
 #### Fallback behavior
 
-For all other models and providers, dynamic activation still works: ArcMind sends the complete current active tool list normally on the next request. The model can call the newly activated tools, but adding their definitions may invalidate the provider's cached prompt prefix.
+For all other models and providers, dynamic activation still works: Metis sends the complete current active tool list normally on the next request. The model can call the newly activated tools, but adding their definitions may invalidate the provider's cached prompt prefix.
 
-ArcMind also uses this safe fallback when the active set is not purely additive, such as replacing one group of tools with another. Tool removals therefore work, but they do not use deferred loading.
+Metis also uses this safe fallback when the active set is not purely additive, such as replacing one group of tools with another. Tool removals therefore work, but they do not use deferred loading.
 
 For the best cache behavior, keep the loader tool active for the whole session and add tools instead of replacing the active set. Also note that activating a tool with `promptSnippet` or `promptGuidelines` rebuilds the system prompt; that system-prompt change can invalidate the prefix even when the provider supports deferred schemas. Lazily loaded tools should usually rely on their tool `description` and omit active-only prompt metadata.
 
@@ -2272,13 +2272,13 @@ For the best cache behavior, keep the loader tool active for the whole session a
 The following extension registers two searchable tools, removes them from the initial active set, and keeps only `search_tools` as their loader. The example uses simple keyword matching, but the search implementation could use BM25, embeddings, a remote catalog, or project-specific routing.
 
 ```typescript
-import type { ExtensionAPI } from "@arcmind/coding-agent";
+import type { ExtensionAPI } from "@metis/coding-agent";
 import { Type } from "typebox";
 
 const SEARCHABLE_TOOL_NAMES = new Set(["lookup_weather", "search_issues"]);
 
-export default function (arcmind: ExtensionAPI) {
-  arcmind.registerTool({
+export default function (metis: ExtensionAPI) {
+  metis.registerTool({
     name: "lookup_weather",
     label: "Lookup Weather",
     description: "Look up the current weather for a city",
@@ -2291,7 +2291,7 @@ export default function (arcmind: ExtensionAPI) {
     },
   });
 
-  arcmind.registerTool({
+  metis.registerTool({
     name: "search_issues",
     label: "Search Issues",
     description: "Search project issues by keyword",
@@ -2304,7 +2304,7 @@ export default function (arcmind: ExtensionAPI) {
     },
   });
 
-  arcmind.registerTool({
+  metis.registerTool({
     name: "search_tools",
     label: "Search Tools",
     description: "Search for and enable tools relevant to a task",
@@ -2318,7 +2318,7 @@ export default function (arcmind: ExtensionAPI) {
     }),
     async execute(_toolCallId, params) {
       const terms = params.query.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
-      const matches = arcmind.getAllTools()
+      const matches = metis.getAllTools()
         .filter((tool) => SEARCHABLE_TOOL_NAMES.has(tool.name))
         .map((tool) => ({
           tool,
@@ -2340,9 +2340,9 @@ export default function (arcmind: ExtensionAPI) {
         };
       }
 
-      const active = arcmind.getActiveTools();
+      const active = metis.getActiveTools();
       const added = matches.filter((name) => !active.includes(name));
-      arcmind.setActiveTools([...new Set([...active, ...added])]);
+      metis.setActiveTools([...new Set([...active, ...added])]);
 
       return {
         content: [{
@@ -2356,13 +2356,13 @@ export default function (arcmind: ExtensionAPI) {
     },
   });
 
-  arcmind.on("session_start", () => {
+  metis.on("session_start", () => {
     // Keep searchable tools registered but initially inactive. Preserve built-ins
     // and tools owned by other extensions, and keep the loader itself active.
-    const initialTools = arcmind.getActiveTools().filter(
+    const initialTools = metis.getActiveTools().filter(
       (name) => !SEARCHABLE_TOOL_NAMES.has(name),
     );
-    arcmind.setActiveTools([...new Set([...initialTools, "search_tools"])]);
+    metis.setActiveTools([...new Set([...initialTools, "search_tools"])]);
   });
 }
 ```
@@ -2495,7 +2495,7 @@ ctx.ui.setFooter((tui, theme) => ({
 ctx.ui.setFooter(undefined);  // Restore built-in footer
 
 // Terminal title
-ctx.ui.setTitle("arcmind - my-project");
+ctx.ui.setTitle("metis - my-project");
 
 // Editor text
 ctx.ui.setEditorText("Prefill text");
@@ -2565,7 +2565,7 @@ Typical pattern:
 - delegate `applyCompletion(...)` unless you need custom insertion behavior
 
 ```typescript
-arcmind.on("session_start", (_event, ctx) => {
+metis.on("session_start", (_event, ctx) => {
   ctx.ui.addAutocompleteProvider((current) => ({
     triggerCharacters: ["#"],
     async getSuggestions(lines, cursorLine, cursorCol, options) {
@@ -2603,7 +2603,7 @@ See [github-issue-autocomplete.ts](../examples/extensions/github-issue-autocompl
 For complex UI, use `ctx.ui.custom()`. This temporarily replaces the editor with your component until `done()` is called:
 
 ```typescript
-import { Text, Component } from "@arcmind/tui";
+import { Text, Component } from "@metis/tui";
 
 const result = await ctx.ui.custom<boolean>((tui, theme, keybindings, done) => {
   const text = new Text("Press Enter to confirm, Escape to cancel", 1, 1);
@@ -2668,8 +2668,8 @@ See [tui.md](tui.md) for the full `OverlayOptions` and `OverlayHandle` API and [
 Replace the main input editor with a custom implementation (vim mode, emacs mode, etc.):
 
 ```typescript
-import { CustomEditor, type ExtensionAPI } from "@arcmind/coding-agent";
-import { matchesKey } from "@arcmind/tui";
+import { CustomEditor, type ExtensionAPI } from "@metis/coding-agent";
+import { matchesKey } from "@metis/tui";
 
 class VimEditor extends CustomEditor {
   private mode: "normal" | "insert" = "insert";
@@ -2687,8 +2687,8 @@ class VimEditor extends CustomEditor {
   }
 }
 
-export default function (arcmind: ExtensionAPI) {
-  arcmind.on("session_start", (_event, ctx) => {
+export default function (metis: ExtensionAPI) {
+  metis.on("session_start", (_event, ctx) => {
     ctx.ui.setEditorComponent((_tui, theme, keybindings) =>
       new VimEditor(theme, keybindings)
     );
@@ -2719,9 +2719,9 @@ See [tui.md](tui.md) Pattern 7 for a complete example with mode indicator.
 Register a custom renderer for messages with your `customType`. Use message renderers for content that should participate in LLM context:
 
 ```typescript
-import { Text } from "@arcmind/tui";
+import { Text } from "@metis/tui";
 
-arcmind.registerMessageRenderer("my-extension", (message, options, theme) => {
+metis.registerMessageRenderer("my-extension", (message, options, theme) => {
   const { expanded } = options;
   let text = theme.fg("accent", `[${message.customType}] `);
   text += message.content;
@@ -2734,10 +2734,10 @@ arcmind.registerMessageRenderer("my-extension", (message, options, theme) => {
 });
 ```
 
-Messages are sent via `arcmind.sendMessage()`:
+Messages are sent via `metis.sendMessage()`:
 
 ```typescript
-arcmind.sendMessage({
+metis.sendMessage({
   customType: "my-extension",  // Matches registerMessageRenderer
   content: "Status update",
   display: true,               // Show in TUI
@@ -2748,11 +2748,11 @@ arcmind.sendMessage({
 For TUI-only content that should not be sent to the LLM, render custom entries instead:
 
 ```typescript
-arcmind.registerEntryRenderer("my-card", (entry, options, theme) => {
+metis.registerEntryRenderer("my-card", (entry, options, theme) => {
   return new Text(theme.fg("accent", JSON.stringify(entry.data)));
 });
 
-arcmind.appendEntry("my-card", { status: "done" });
+metis.appendEntry("my-card", { status: "done" });
 ```
 
 ### Theme Colors
@@ -2778,7 +2778,7 @@ theme.strikethrough(text)
 For syntax highlighting in custom tool renderers:
 
 ```typescript
-import { highlightCode, getLanguageFromPath } from "@arcmind/coding-agent";
+import { highlightCode, getLanguageFromPath } from "@metis/coding-agent";
 
 // Highlight code with explicit language
 const highlighted = highlightCode("const x = 1;", "typescript", theme);
@@ -2880,7 +2880,7 @@ All examples in [examples/extensions/](../examples/extensions/).
 | **Messages & Communication** |||
 | `message-renderer.ts` | Custom message rendering | `registerMessageRenderer`, `sendMessage` |
 | `entry-renderer.ts` | TUI-only custom entry rendering | `registerEntryRenderer`, `appendEntry` |
-| `event-bus.ts` | Inter-extension events | `arcmind.events` |
+| `event-bus.ts` | Inter-extension events | `metis.events` |
 | **Session Metadata** |||
 | `session-name.ts` | Name sessions for selector | `setSessionName`, `getSessionName` |
 | `bookmark.ts` | Bookmark entries for /tree | `setLabel` |

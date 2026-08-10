@@ -7,29 +7,29 @@ vi.mock("../src/config.ts", async (importOriginal) => {
 	const actual = await importOriginal();
 	return {
 		...(actual as Record<string, unknown>),
-		PACKAGE_NAME: "@example/arcmind-coding-agent",
+		PACKAGE_NAME: "@example/metis-coding-agent",
 	};
 });
 
 import { shouldRunFirstTimeSetup } from "../src/cli/startup-ui.ts";
 
 describe("shouldRunFirstTimeSetup in forked distributions", () => {
-	const originalArcMindExperimental = process.env.ARCMIND_EXPERIMENTAL;
+	const originalMetisExperimental = process.env.METIS_EXPERIMENTAL;
 	let tempDir: string;
 	let settingsPath: string;
 
 	beforeEach(() => {
-		tempDir = mkdtempSync(join(tmpdir(), "arcmind-first-time-setup-fork-"));
+		tempDir = mkdtempSync(join(tmpdir(), "metis-first-time-setup-fork-"));
 		settingsPath = join(tempDir, "settings.json");
-		process.env.ARCMIND_EXPERIMENTAL = "1";
+		process.env.METIS_EXPERIMENTAL = "1";
 	});
 
 	afterEach(() => {
 		rmSync(tempDir, { recursive: true, force: true });
-		if (originalArcMindExperimental === undefined) {
-			delete process.env.ARCMIND_EXPERIMENTAL;
+		if (originalMetisExperimental === undefined) {
+			delete process.env.METIS_EXPERIMENTAL;
 		} else {
-			process.env.ARCMIND_EXPERIMENTAL = originalArcMindExperimental;
+			process.env.METIS_EXPERIMENTAL = originalMetisExperimental;
 		}
 	});
 

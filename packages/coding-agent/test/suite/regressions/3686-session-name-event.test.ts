@@ -21,12 +21,12 @@ describe("regression #3686: session name changes emit an event", () => {
 		expect(harness.eventsOfType("session_info_changed").map((event) => event.name)).toEqual(["hello world"]);
 	});
 
-	it("emits session_info_changed when an extension calls arcmind.setSessionName", async () => {
+	it("emits session_info_changed when an extension calls metis.setSessionName", async () => {
 		let api: ExtensionAPI | undefined;
 		const harness = await createHarness({
 			extensionFactories: [
-				(arcmind) => {
-					api = arcmind;
+				(metis) => {
+					api = metis;
 				},
 			],
 		});
@@ -43,9 +43,9 @@ describe("regression #3686: session name changes emit an event", () => {
 		const events: Array<{ name: string | undefined }> = [];
 		const harness = await createHarness({
 			extensionFactories: [
-				(arcmind) => {
-					api = arcmind;
-					arcmind.on("session_info_changed", (event) => {
+				(metis) => {
+					api = metis;
+					metis.on("session_info_changed", (event) => {
 						events.push({ name: event.name });
 					});
 				},

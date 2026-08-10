@@ -1,4 +1,4 @@
-import { type RgbColor, resetCapabilitiesCache, setCapabilities } from "@arcmind/tui";
+import { type RgbColor, resetCapabilitiesCache, setCapabilities } from "@metis/tui";
 import { afterEach, describe, expect, it } from "vitest";
 import {
 	detectTerminalBackgroundFromEnv,

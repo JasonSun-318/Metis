@@ -18,9 +18,9 @@ describe("theme picker", () => {
 	let tempRoot: string;
 
 	beforeEach(() => {
-		tempRoot = mkdtempSync(join(tmpdir(), "arcmind-theme-picker-"));
+		tempRoot = mkdtempSync(join(tmpdir(), "metis-theme-picker-"));
 		const agentDir = join(tempRoot, "agent");
-		vi.stubEnv("ARCMIND_CODING_AGENT_DIR", agentDir);
+		vi.stubEnv("METIS_CODING_AGENT_DIR", agentDir);
 		mkdirSync(join(agentDir, "themes"), { recursive: true });
 		setRegisteredThemes([]);
 	});
@@ -40,7 +40,7 @@ describe("theme picker", () => {
 			name: "bar",
 		};
 
-		const themePath = join(process.env.ARCMIND_CODING_AGENT_DIR!, "themes", "foo.json");
+		const themePath = join(process.env.METIS_CODING_AGENT_DIR!, "themes", "foo.json");
 		writeFileSync(themePath, JSON.stringify(customTheme, null, 2));
 
 		expect(getAvailableThemes()).toContain("bar");

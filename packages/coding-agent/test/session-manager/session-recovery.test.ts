@@ -25,7 +25,7 @@ describe("session journal recovery", () => {
 	let path: string;
 
 	beforeEach(() => {
-		directory = mkdtempSync(join(tmpdir(), "arcmind-session-recovery-"));
+		directory = mkdtempSync(join(tmpdir(), "metis-session-recovery-"));
 		path = join(directory, "session.jsonl");
 	});
 

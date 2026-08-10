@@ -2,11 +2,11 @@
  * Print mode (single-shot): Send prompts, output result, exit.
  *
  * Used for:
- * - `arcmind -p "prompt"` - text output
- * - `arcmind --mode json "prompt"` - JSON event stream
+ * - `metis -p "prompt"` - text output
+ * - `metis --mode json "prompt"` - JSON event stream
  */
 
-import type { AssistantMessage, ImageContent } from "@arcmind/ai";
+import type { AssistantMessage, ImageContent } from "@metis/ai";
 import type { AgentSessionRuntime } from "../core/agent-session-runtime.ts";
 import { flushRawStdout, writeRawStdout } from "../core/output-guard.ts";
 import { killTrackedDetachedChildren } from "../utils/shell.ts";

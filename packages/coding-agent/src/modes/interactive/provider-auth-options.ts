@@ -1,4 +1,4 @@
-import { getProviders } from "@arcmind/ai/compat";
+import { getProviders } from "@metis/ai/compat";
 import type { ModelRegistry } from "../../core/model-registry.ts";
 import { BUILT_IN_PROVIDER_DISPLAY_NAMES } from "../../core/provider-display-names.ts";
 import {

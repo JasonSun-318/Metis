@@ -10,9 +10,9 @@
  * correct for that point in history.
  */
 
-import { StringEnum } from "@arcmind/ai";
-import type { ExtensionAPI, ExtensionContext, Theme } from "@arcmind/coding-agent";
-import { matchesKey, Text, truncateToWidth } from "@arcmind/tui";
+import { StringEnum } from "@metis/ai";
+import type { ExtensionAPI, ExtensionContext, Theme } from "@metis/coding-agent";
+import { matchesKey, Text, truncateToWidth } from "@metis/tui";
 import { Type } from "typebox";
 
 interface Todo {
@@ -102,7 +102,7 @@ class TodoListComponent {
 	}
 }
 
-export default function (arcmind: ExtensionAPI) {
+export default function (metis: ExtensionAPI) {
 	// In-memory state (reconstructed from session on load)
 	let todos: Todo[] = [];
 	let nextId = 1;
@@ -129,11 +129,11 @@ export default function (arcmind: ExtensionAPI) {
 	};
 
 	// Reconstruct state on session events
-	arcmind.on("session_start", async (_event, ctx) => reconstructState(ctx));
-	arcmind.on("session_tree", async (_event, ctx) => reconstructState(ctx));
+	metis.on("session_start", async (_event, ctx) => reconstructState(ctx));
+	metis.on("session_tree", async (_event, ctx) => reconstructState(ctx));
 
 	// Register the todo tool for the LLM
-	arcmind.registerTool({
+	metis.registerTool({
 		name: "todo",
 		label: "Todo",
 		description: "Manage a todo list. Actions: list, add (text), toggle (id), clear",
@@ -281,7 +281,7 @@ export default function (arcmind: ExtensionAPI) {
 	});
 
 	// Register the /todos command for users
-	arcmind.registerCommand("todos", {
+	metis.registerCommand("todos", {
 		description: "Show all todos on the current branch",
 		handler: async (_args, ctx) => {
 			if (ctx.mode !== "tui") {

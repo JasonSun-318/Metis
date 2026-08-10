@@ -1,4 +1,4 @@
-import type { Message } from "@arcmind/ai";
+import type { Message } from "@metis/ai";
 import { describe, expect, it } from "vitest";
 import { serializeConversation } from "../src/core/compaction/utils.ts";
 
@@ -78,7 +78,7 @@ describe("serializeConversation", () => {
 	});
 
 	it("serializes a stored-output notice as an ordinary bounded tool result", () => {
-		const path = "/tmp/arcmind/tool-results/result.txt";
+		const path = "/tmp/metis/tool-results/result.txt";
 		const notice = [
 			"[Tool output truncated: preview only]",
 			"Original size: 60000 bytes",

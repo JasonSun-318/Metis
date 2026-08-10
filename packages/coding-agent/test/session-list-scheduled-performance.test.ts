@@ -44,7 +44,7 @@ afterEach(() => {
 
 describe("scheduled session catalog performance", () => {
 	it("loads visible scheduled journals through the same bounded catalog path", async () => {
-		root = mkdtempSync(join(tmpdir(), "arcmind-scheduled-catalog-"));
+		root = mkdtempSync(join(tmpdir(), "metis-scheduled-catalog-"));
 		const cwd = join(root, "workspace");
 		const sessionDir = join(root, "sessions");
 		mkdirSync(cwd);

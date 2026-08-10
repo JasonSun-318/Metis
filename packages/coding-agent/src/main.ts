@@ -7,7 +7,7 @@
 
 import { writeSync } from "node:fs";
 import { createInterface } from "node:readline";
-import { type ImageContent, modelsAreEqual } from "@arcmind/ai";
+import { type ImageContent, modelsAreEqual } from "@metis/ai";
 import chalk from "chalk";
 import { type Args, type Mode, parseArgs, printHelp } from "./cli/args.ts";
 import { processFileArguments } from "./cli/file-processor.ts";
@@ -16,7 +16,7 @@ import { listModels } from "./cli/list-models.ts";
 import { createProjectTrustContext } from "./cli/project-trust.ts";
 import { selectSession } from "./cli/session-picker.ts";
 import { shouldRunFirstTimeSetup, showFirstTimeSetup, showStartupSelector } from "./cli/startup-ui.ts";
-import { ENV_SESSION_DIR, expandTildePath, getAgentDir, getPackageDir, VERSION } from "./config.ts";
+import { getAgentDir, getMetisEnv, getPackageDir, getSessionDirOverride, VERSION } from "./config.ts";
 import { DEFAULT_AGENT_MODE } from "./core/agent-mode.ts";
 import {
 	type AgentSessionRuntime,
@@ -68,7 +68,7 @@ import { handleConfigCommand, handlePackageCommand } from "./package-manager-cli
 import { isLocalPath, normalizePath, resolvePath } from "./utils/paths.ts";
 import { cleanupWindowsSelfUpdateQuarantine } from "./utils/windows-self-update.ts";
 
-const EXTENSION_LOAD_FAILURE_HINT = 'Hint: Start without extensions using "arcmind -ne".';
+const EXTENSION_LOAD_FAILURE_HINT = 'Hint: Start without extensions using "metis -ne".';
 
 /**
  * Read all content from piped stdin.
@@ -618,9 +618,9 @@ export interface MainOptions {
 
 export async function main(args: string[], options?: MainOptions) {
 	resetTimings();
-	const offlineMode = args.includes("--offline") || isTruthyEnvFlag(process.env.ARCMIND_OFFLINE);
+	const offlineMode = args.includes("--offline") || isTruthyEnvFlag(getMetisEnv("OFFLINE"));
 	if (offlineMode) {
-		process.env.ARCMIND_OFFLINE = "1";
+		process.env.METIS_OFFLINE = "1";
 	}
 
 	if (process.platform === "win32") {
@@ -640,7 +640,7 @@ export async function main(args: string[], options?: MainOptions) {
 		if (process.platform === "win32" && exitCode === 0 && args[0] === "update") {
 			// We normally prefer process.exit(0) for package commands so bad extensions cannot keep
 			// one-shot commands alive. On Windows, Node can assert after fetch() if process.exit(0)
-			// runs during teardown; let successful `arcmind update` drain naturally instead.
+			// runs during teardown; let successful `metis update` drain naturally instead.
 			// https://github.com/nodejs/node/issues/56645
 			return;
 		}
@@ -731,10 +731,10 @@ export async function main(args: string[], options?: MainOptions) {
 	// settings, resources, provider registrations, and models must be resolved only after
 	// the target session cwd is known. The startup-cwd settings manager is used only for
 	// sessionDir lookup during session selection.
-	const envSessionDir = process.env[ENV_SESSION_DIR];
+	const envSessionDir = getSessionDirOverride();
 	const sessionDir =
 		(parsed.sessionDir ? normalizePath(parsed.sessionDir) : undefined) ??
-		(envSessionDir ? expandTildePath(envSessionDir) : undefined) ??
+		envSessionDir ??
 		startupSettingsManager.getSessionDir();
 	const hasInitialInput = parsed.messages.length > 0 || parsed.fileArgs.length > 0 || stdinContent !== undefined;
 	let sessionManager = await createSessionManager(
@@ -1046,9 +1046,9 @@ export async function main(args: string[], options?: MainOptions) {
 				process.exit(1);
 			}
 
-			const startupBenchmark = isTruthyEnvFlag(process.env.ARCMIND_STARTUP_BENCHMARK);
+			const startupBenchmark = isTruthyEnvFlag(getMetisEnv("STARTUP_BENCHMARK"));
 			if (startupBenchmark && appMode !== "interactive") {
-				console.error(chalk.red("Error: ARCMIND_STARTUP_BENCHMARK only supports interactive mode"));
+				console.error(chalk.red("Error: METIS_STARTUP_BENCHMARK only supports interactive mode"));
 				await disposeRuntimeQuietly(runtime);
 				process.exit(1);
 			}

@@ -8,8 +8,8 @@ import type { ExtensionAPI, SessionBeforeCompactEvent, SessionCompactEvent } fro
 describe("Documentation example", () => {
 	it("custom compaction example should type-check correctly", () => {
 		// This is the example from extensions.md - verify it compiles
-		const exampleExtension = (arcmind: ExtensionAPI) => {
-			arcmind.on("session_before_compact", async (event: SessionBeforeCompactEvent, ctx) => {
+		const exampleExtension = (metis: ExtensionAPI) => {
+			metis.on("session_before_compact", async (event: SessionBeforeCompactEvent, ctx) => {
 				// All these should be accessible on the event
 				const { preparation, branchEntries } = event;
 				// sessionManager, modelRegistry, and model come from ctx
@@ -48,8 +48,8 @@ describe("Documentation example", () => {
 	});
 
 	it("compact event should have correct fields", () => {
-		const checkCompactEvent = (arcmind: ExtensionAPI) => {
-			arcmind.on("session_compact", async (event: SessionCompactEvent) => {
+		const checkCompactEvent = (metis: ExtensionAPI) => {
+			metis.on("session_compact", async (event: SessionCompactEvent) => {
 				// These should all be accessible
 				const entry = event.compactionEntry;
 				const fromExtension = event.fromExtension;

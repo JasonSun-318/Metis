@@ -3,19 +3,19 @@
  *
  * Demonstrates the project_trust event. Install globally or pass via -e:
  *
- *   mkdir -p ~/.arcmind/agent/extensions
- *   cp packages/coding-agent/examples/extensions/project-trust.ts ~/.arcmind/agent/extensions/
+ *   mkdir -p ~/.metis/agent/extensions
+ *   cp packages/coding-agent/examples/extensions/project-trust.ts ~/.metis/agent/extensions/
  *
  * Or:
  *
- *   arcmind -e packages/coding-agent/examples/extensions/project-trust.ts
+ *   metis -e packages/coding-agent/examples/extensions/project-trust.ts
  *
- * Try it in a project containing .arcmind, AGENTS.md/CLAUDE.md, or .agents/skills.
+ * Try it in a project containing .metis, AGENTS.md/CLAUDE.md, or .agents/skills.
  */
 
-import type { ExtensionAPI, ProjectTrustEventResult } from "@arcmind/coding-agent";
+import type { ExtensionAPI, ProjectTrustEventResult } from "@metis/coding-agent";
 
-export default function (arcmind: ExtensionAPI) {
+export default function (metis: ExtensionAPI) {
 	let loadCount = 0;
 	loadCount++;
 
@@ -23,7 +23,7 @@ export default function (arcmind: ExtensionAPI) {
 	// { trusted: "yes" } or { trusted: "no" } wins and suppresses the built-in
 	// trust prompt. Return { trusted: "undecided" } to let another handler or the
 	// built-in flow decide.
-	arcmind.on("project_trust", async (event, ctx): Promise<ProjectTrustEventResult> => {
+	metis.on("project_trust", async (event, ctx): Promise<ProjectTrustEventResult> => {
 		ctx.ui.notify(`project_trust fired for ${event.cwd} (mode: ${ctx.mode}, load: ${loadCount})`, "info");
 
 		if (!ctx.hasUI) {
@@ -58,7 +58,7 @@ export default function (arcmind: ExtensionAPI) {
 		return { trusted: "undecided" };
 	});
 
-	arcmind.on("session_start", (_event, ctx) => {
+	metis.on("session_start", (_event, ctx) => {
 		ctx.ui.notify(`project-trust example loaded after trust resolution in ${ctx.cwd}`, "info");
 	});
 }

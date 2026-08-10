@@ -5,13 +5,13 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { DefaultResourceLoader } from "../../../src/core/resource-loader.ts";
 import type { ExtensionAPI } from "../../../src/index.ts";
 
-const noop: (arcmind: ExtensionAPI) => void = () => {};
+const noop: (metis: ExtensionAPI) => void = () => {};
 
 describe("inline extension naming", () => {
 	const roots: string[] = [];
 
 	function fixture(name: string) {
-		const root = join(tmpdir(), `arcmind-inline-naming-${name}-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+		const root = join(tmpdir(), `metis-inline-naming-${name}-${Date.now()}-${Math.random().toString(36).slice(2)}`);
 		const cwd = join(root, "project");
 		const agentDir = join(root, "agent");
 		mkdirSync(cwd, { recursive: true });

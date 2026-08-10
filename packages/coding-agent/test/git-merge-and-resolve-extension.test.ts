@@ -56,7 +56,7 @@ describe("git-merge-and-resolve example", () => {
 	});
 
 	function createTempDir() {
-		tempDir = mkdtempSync(join(tmpdir(), "arcmind-merge-test-"));
+		tempDir = mkdtempSync(join(tmpdir(), "metis-merge-test-"));
 		return tempDir;
 	}
 

@@ -596,7 +596,7 @@ describe("AI Providers Empty Message Tests", () => {
 	});
 
 	// =========================================================================
-	// OAuth-based providers (credentials from ~/.arcmind/agent/oauth.json)
+	// OAuth-based providers (credentials from ~/.metis/agent/oauth.json)
 	// =========================================================================
 
 	describe("Anthropic OAuth Provider Empty Messages", () => {

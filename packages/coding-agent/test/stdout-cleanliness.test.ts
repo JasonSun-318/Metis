@@ -16,7 +16,7 @@ afterEach(() => {
 });
 
 function createTempDir(): string {
-	const dir = mkdtempSync(join(tmpdir(), "arcmind-stdout-clean-"));
+	const dir = mkdtempSync(join(tmpdir(), "metis-stdout-clean-"));
 	tempDirs.push(dir);
 	return dir;
 }
@@ -25,7 +25,7 @@ async function runCli(args: string[]): Promise<{ stdout: string; stderr: string;
 	const tempRoot = createTempDir();
 	const agentDir = join(tempRoot, "agent");
 	const projectDir = join(tempRoot, "project");
-	const projectConfigDir = join(projectDir, ".arcmind");
+	const projectConfigDir = join(projectDir, ".metis");
 	mkdirSync(agentDir, { recursive: true });
 	mkdirSync(projectConfigDir, { recursive: true });
 

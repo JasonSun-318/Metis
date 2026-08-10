@@ -7,7 +7,7 @@ import {
 	type Message,
 	type Model,
 	type Usage,
-} from "@arcmind/ai";
+} from "@metis/ai";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
 	type CompactionPreparation,

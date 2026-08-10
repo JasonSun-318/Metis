@@ -5,13 +5,13 @@
  * tool that queues a follow-up command to trigger reload.
  */
 
-import type { ExtensionAPI } from "@arcmind/coding-agent";
+import type { ExtensionAPI } from "@metis/coding-agent";
 import { Type } from "typebox";
 
-export default function (arcmind: ExtensionAPI) {
+export default function (metis: ExtensionAPI) {
 	// Command entrypoint for reload.
 	// Treat reload as terminal for this handler.
-	arcmind.registerCommand("reload-runtime", {
+	metis.registerCommand("reload-runtime", {
 		description: "Reload extensions, skills, prompts, themes, and context files",
 		handler: async (_args, ctx) => {
 			await ctx.reload();
@@ -21,13 +21,13 @@ export default function (arcmind: ExtensionAPI) {
 
 	// LLM-callable tool. Tools get ExtensionContext, so they cannot call ctx.reload() directly.
 	// Instead, queue a follow-up user command that executes the command above.
-	arcmind.registerTool({
+	metis.registerTool({
 		name: "reload_runtime",
 		label: "Reload Runtime",
 		description: "Reload extensions, skills, prompts, themes, and context files",
 		parameters: Type.Object({}),
 		async execute() {
-			arcmind.sendUserMessage("/reload-runtime", { deliverAs: "followUp" });
+			metis.sendUserMessage("/reload-runtime", { deliverAs: "followUp" });
 			return {
 				content: [{ type: "text", text: "Queued /reload-runtime as a follow-up command." }],
 				details: {},

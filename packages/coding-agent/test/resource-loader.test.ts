@@ -75,7 +75,7 @@ Skill content here.`,
 				expect(instructions).toContain(heading);
 				expect(instructions.length).toBeGreaterThan(25_000);
 				expect(instructions).toContain("If visual confirmation is unnecessary, do not render.");
-				expect(instructions).toContain("ArcMind integration rules in this section still take priority");
+				expect(instructions).toContain("Metis integration rules in this section still take priority");
 			}
 			const pptxSkill = skills.find((skill) => skill.name === "pptx");
 			const pptxInstructions = readFileSync(pptxSkill!.filePath, "utf8");
@@ -86,7 +86,7 @@ Skill content here.`,
 		});
 
 		it("should let a project skill override a bundled skill", async () => {
-			const skillDir = join(cwd, ".arcmind", "skills", "pdf");
+			const skillDir = join(cwd, ".metis", "skills", "pdf");
 			mkdirSync(skillDir, { recursive: true });
 			const skillPath = join(skillDir, "SKILL.md");
 			writeFileSync(
@@ -104,7 +104,7 @@ Project PDF rules.`,
 		});
 
 		it("should ignore extra markdown files in auto-discovered skill dirs", async () => {
-			const skillDir = join(agentDir, "skills", "arcmind-skills", "browser-tools");
+			const skillDir = join(agentDir, "skills", "metis-skills", "browser-tools");
 			mkdirSync(skillDir, { recursive: true });
 			writeFileSync(
 				join(skillDir, "SKILL.md"),
@@ -144,7 +144,7 @@ Prompt content.`,
 
 		it("should prefer project resources over user on name collisions", async () => {
 			const userPromptsDir = join(agentDir, "prompts");
-			const projectPromptsDir = join(cwd, ".arcmind", "prompts");
+			const projectPromptsDir = join(cwd, ".metis", "prompts");
 			mkdirSync(userPromptsDir, { recursive: true });
 			mkdirSync(projectPromptsDir, { recursive: true });
 			const userPromptPath = join(userPromptsDir, "commit.md");
@@ -153,7 +153,7 @@ Prompt content.`,
 			writeFileSync(projectPromptPath, "Project prompt");
 
 			const userSkillDir = join(agentDir, "skills", "collision-skill");
-			const projectSkillDir = join(cwd, ".arcmind", "skills", "collision-skill");
+			const projectSkillDir = join(cwd, ".metis", "skills", "collision-skill");
 			mkdirSync(userSkillDir, { recursive: true });
 			mkdirSync(projectSkillDir, { recursive: true });
 			const userSkillPath = join(userSkillDir, "SKILL.md");
@@ -180,9 +180,9 @@ Project skill`,
 			) as { name: string; vars?: Record<string, string> };
 			baseTheme.name = "collision-theme";
 			const userThemePath = join(agentDir, "themes", "collision.json");
-			const projectThemePath = join(cwd, ".arcmind", "themes", "collision.json");
+			const projectThemePath = join(cwd, ".metis", "themes", "collision.json");
 			mkdirSync(join(agentDir, "themes"), { recursive: true });
-			mkdirSync(join(cwd, ".arcmind", "themes"), { recursive: true });
+			mkdirSync(join(cwd, ".metis", "themes"), { recursive: true });
 			writeFileSync(userThemePath, JSON.stringify(baseTheme, null, 2));
 			if (baseTheme.vars) {
 				baseTheme.vars.accent = "#ff00ff";
@@ -207,8 +207,8 @@ Project skill`,
 			mkdirSync(sharedExtDir, { recursive: true });
 			writeFileSync(
 				join(sharedExtDir, "shared.ts"),
-				`export default function(arcmind) {
-	arcmind.registerCommand("shared", {
+				`export default function(metis) {
+	metis.registerCommand("shared", {
 		description: "shared command",
 		handler: async () => {},
 	});
@@ -216,9 +216,9 @@ Project skill`,
 			);
 
 			mkdirSync(agentDir, { recursive: true });
-			mkdirSync(join(cwd, ".arcmind"), { recursive: true });
+			mkdirSync(join(cwd, ".metis"), { recursive: true });
 			symlinkSync(sharedExtDir, join(agentDir, "extensions"), "dir");
-			symlinkSync(sharedExtDir, join(cwd, ".arcmind", "extensions"), "dir");
+			symlinkSync(sharedExtDir, join(cwd, ".metis", "extensions"), "dir");
 
 			const loader = new DefaultResourceLoader({ cwd, agentDir });
 			await loader.reload();
@@ -229,12 +229,12 @@ Project skill`,
 
 			// mergePaths processes project paths before user paths, so the project
 			// alias is the canonical survivor.
-			expect(extensionsResult.extensions[0].path).toBe(join(cwd, ".arcmind", "extensions", "shared.ts"));
+			expect(extensionsResult.extensions[0].path).toBe(join(cwd, ".metis", "extensions", "shared.ts"));
 		});
 
 		it("should load user extensions before trust and reuse them after trust resolves", async () => {
 			const userExtDir = join(agentDir, "extensions");
-			const projectExtDir = join(cwd, ".arcmind", "extensions");
+			const projectExtDir = join(cwd, ".metis", "extensions");
 			mkdirSync(userExtDir, { recursive: true });
 			mkdirSync(projectExtDir, { recursive: true });
 			const loadCountKey = `__piTrustPreloadCount_${Date.now()}_${Math.random().toString(36).slice(2)}`;
@@ -243,9 +243,9 @@ Project skill`,
 			writeFileSync(
 				join(userExtDir, "user.ts"),
 				`globalThis[${JSON.stringify(loadCountKey)}] = (globalThis[${JSON.stringify(loadCountKey)}] ?? 0) + 1;
-export default function(arcmind) {
-	arcmind.on("project_trust", () => ({ trusted: "yes" }));
-	arcmind.registerCommand("user-trust", {
+export default function(metis) {
+	metis.on("project_trust", () => ({ trusted: "yes" }));
+	metis.registerCommand("user-trust", {
 		description: "user trust",
 		handler: async () => {},
 	});
@@ -253,8 +253,8 @@ export default function(arcmind) {
 			);
 			writeFileSync(
 				join(projectExtDir, "project.ts"),
-				`export default function(arcmind) {
-	arcmind.registerCommand("project-trusted", {
+				`export default function(metis) {
+	metis.registerCommand("project-trusted", {
 		description: "project trusted",
 		handler: async () => {},
 	});
@@ -273,7 +273,7 @@ export default function(arcmind) {
 
 			const extensionsResult = loader.getExtensions();
 			expect(extensionsResult.extensions.map((extension) => extension.path)).toEqual([
-				join(cwd, ".arcmind", "extensions", "project.ts"),
+				join(cwd, ".metis", "extensions", "project.ts"),
 				join(userExtDir, "user.ts"),
 			]);
 			expect(globalState[loadCountKey]).toBe(1);
@@ -281,18 +281,18 @@ export default function(arcmind) {
 
 		it("should keep both extensions loaded when command names collide", async () => {
 			const userExtDir = join(agentDir, "extensions");
-			const projectExtDir = join(cwd, ".arcmind", "extensions");
+			const projectExtDir = join(cwd, ".metis", "extensions");
 			mkdirSync(userExtDir, { recursive: true });
 			mkdirSync(projectExtDir, { recursive: true });
 
 			writeFileSync(
 				join(projectExtDir, "project.ts"),
-				`export default function(arcmind) {
-	arcmind.registerCommand("deploy", {
+				`export default function(metis) {
+	metis.registerCommand("deploy", {
 		description: "project deploy",
 		handler: async () => {},
 	});
-	arcmind.registerCommand("project-only", {
+	metis.registerCommand("project-only", {
 		description: "project only",
 		handler: async () => {},
 	});
@@ -301,12 +301,12 @@ export default function(arcmind) {
 
 			writeFileSync(
 				join(userExtDir, "user.ts"),
-				`export default function(arcmind) {
-	arcmind.registerCommand("deploy", {
+				`export default function(metis) {
+	metis.registerCommand("deploy", {
 		description: "user deploy",
 		handler: async () => {},
 	});
-	arcmind.registerCommand("user-only", {
+	metis.registerCommand("user-only", {
 		description: "user only",
 		handler: async () => {},
 	});
@@ -410,10 +410,10 @@ Content`,
 			expect(agentsFiles).toEqual([]);
 		});
 
-		it("should discover SYSTEM.md from cwd/.arcmind", async () => {
-			const arcmindDir = join(cwd, ".arcmind");
-			mkdirSync(arcmindDir, { recursive: true });
-			writeFileSync(join(arcmindDir, "SYSTEM.md"), "You are a helpful assistant.");
+		it("should discover SYSTEM.md from cwd/.metis", async () => {
+			const metisDir = join(cwd, ".metis");
+			mkdirSync(metisDir, { recursive: true });
+			writeFileSync(join(metisDir, "SYSTEM.md"), "You are a helpful assistant.");
 
 			const loader = new DefaultResourceLoader({ cwd, agentDir });
 			await loader.reload();
@@ -422,16 +422,16 @@ Content`,
 		});
 
 		it("should skip project resources that require trust when project is not trusted", async () => {
-			const arcmindDir = join(cwd, ".arcmind");
-			const extensionsDir = join(arcmindDir, "extensions");
-			const skillDir = join(arcmindDir, "skills", "project-skill");
-			const promptsDir = join(arcmindDir, "prompts");
-			const themesDir = join(arcmindDir, "themes");
+			const metisDir = join(cwd, ".metis");
+			const extensionsDir = join(metisDir, "extensions");
+			const skillDir = join(metisDir, "skills", "project-skill");
+			const promptsDir = join(metisDir, "prompts");
+			const themesDir = join(metisDir, "themes");
 			mkdirSync(extensionsDir, { recursive: true });
 			mkdirSync(skillDir, { recursive: true });
 			mkdirSync(promptsDir, { recursive: true });
 			mkdirSync(themesDir, { recursive: true });
-			writeFileSync(join(arcmindDir, "SYSTEM.md"), "Project system prompt.");
+			writeFileSync(join(metisDir, "SYSTEM.md"), "Project system prompt.");
 			writeFileSync(join(agentDir, "SYSTEM.md"), "Global system prompt.");
 			writeFileSync(join(agentDir, "AGENTS.md"), "Global instructions");
 			writeFileSync(join(cwd, "AGENTS.md"), "Project instructions");
@@ -468,9 +468,9 @@ Project skill content`,
 		});
 
 		it("should discover APPEND_SYSTEM.md", async () => {
-			const arcmindDir = join(cwd, ".arcmind");
-			mkdirSync(arcmindDir, { recursive: true });
-			writeFileSync(join(arcmindDir, "APPEND_SYSTEM.md"), "Additional instructions.");
+			const metisDir = join(cwd, ".metis");
+			mkdirSync(metisDir, { recursive: true });
+			writeFileSync(join(metisDir, "APPEND_SYSTEM.md"), "Additional instructions.");
 
 			const loader = new DefaultResourceLoader({ cwd, agentDir });
 			await loader.reload();
@@ -677,10 +677,10 @@ Content`,
 			writeFileSync(
 				join(ext1Dir, "index.ts"),
 				`
-import type { ExtensionAPI } from "@arcmind/coding-agent";
+import type { ExtensionAPI } from "@metis/coding-agent";
 import { Type } from "typebox";
-export default function(arcmind: ExtensionAPI) {
-  arcmind.registerTool({
+export default function(metis: ExtensionAPI) {
+  metis.registerTool({
     name: "duplicate-tool",
     description: "First",
     parameters: Type.Object({}),
@@ -692,10 +692,10 @@ export default function(arcmind: ExtensionAPI) {
 			writeFileSync(
 				join(ext2Dir, "index.ts"),
 				`
-import type { ExtensionAPI } from "@arcmind/coding-agent";
+import type { ExtensionAPI } from "@metis/coding-agent";
 import { Type } from "typebox";
-export default function(arcmind: ExtensionAPI) {
-  arcmind.registerTool({
+export default function(metis: ExtensionAPI) {
+  metis.registerTool({
     name: "duplicate-tool",
     description: "Second",
     parameters: Type.Object({}),
@@ -719,16 +719,16 @@ export default function(arcmind: ExtensionAPI) {
 			writeFileSync(
 				join(globalExtDir, "global.ts"),
 				`
-import type { ExtensionAPI } from "@arcmind/coding-agent";
+import type { ExtensionAPI } from "@metis/coding-agent";
 import { Type } from "typebox";
-export default function(arcmind: ExtensionAPI) {
-  arcmind.registerTool({
+export default function(metis: ExtensionAPI) {
+  metis.registerTool({
     name: "duplicate-tool",
     description: "global tool",
     parameters: Type.Object({}),
     execute: async () => ({ result: "global" }),
   });
-  arcmind.registerCommand("deploy", {
+  metis.registerCommand("deploy", {
     description: "global command",
     handler: async () => {},
   });
@@ -738,16 +738,16 @@ export default function(arcmind: ExtensionAPI) {
 			writeFileSync(
 				explicitExtPath,
 				`
-import type { ExtensionAPI } from "@arcmind/coding-agent";
+import type { ExtensionAPI } from "@metis/coding-agent";
 import { Type } from "typebox";
-export default function(arcmind: ExtensionAPI) {
-  arcmind.registerTool({
+export default function(metis: ExtensionAPI) {
+  metis.registerTool({
     name: "duplicate-tool",
     description: "explicit tool",
     parameters: Type.Object({}),
     execute: async () => ({ result: "explicit" }),
   });
-  arcmind.registerCommand("deploy", {
+  metis.registerCommand("deploy", {
     description: "explicit command",
     handler: async () => {},
   });

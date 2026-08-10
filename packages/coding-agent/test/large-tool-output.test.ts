@@ -28,7 +28,7 @@ describe("externalizeLargeToolOutput", () => {
 	let tempDir: string;
 
 	beforeEach(() => {
-		tempDir = mkdtempSync(join(tmpdir(), "arcmind-large-tool-output-"));
+		tempDir = mkdtempSync(join(tmpdir(), "metis-large-tool-output-"));
 	});
 
 	afterEach(() => {

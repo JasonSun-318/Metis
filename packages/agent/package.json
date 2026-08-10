@@ -1,6 +1,6 @@
 {
-	"name": "@arcmind/agent-core",
-	"version": "0.80.6",
+	"name": "@metis/agent-core",
+	"version": "0.0.3",
 	"description": "General-purpose agent with transport abstraction, state management, and attachment support",
 	"type": "module",
 	"main": "./dist/index.js",
@@ -29,7 +29,7 @@
 		"prepublishOnly": "npm run clean && npm run build"
 	},
 	"dependencies": {
-		"@arcmind/ai": "^0.80.6",
+		"@metis/ai": "^0.0.3",
 		"ignore": "7.0.5",
 		"typebox": "1.1.38",
 		"yaml": "2.9.0"
@@ -44,7 +44,7 @@
 	"license": "MIT",
 	"repository": {
 		"type": "git",
-		"url": "git+https://gitee.com/sun124578963_0/arc-mind.git",
+		"url": "git+https://gitee.com/sun124578963_0/metis.git",
 		"directory": "packages/agent"
 	},
 	"engines": {

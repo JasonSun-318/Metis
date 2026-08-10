@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { AgentMessage } from "@arcmind/agent-core";
+import type { AgentMessage } from "@metis/agent-core";
 import { estimateTokens } from "./compaction/index.ts";
 import { importToolOutputFile, isOwnedToolOutputFile, persistToolOutputText } from "./large-tool-output.ts";
 

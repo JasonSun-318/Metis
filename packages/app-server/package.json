@@ -1,7 +1,7 @@
 {
-	"name": "@arcmind/app-server",
-	"version": "0.80.6",
-	"description": "Recoverable multi-session application server for ArcMind clients",
+	"name": "@metis/app-server",
+	"version": "0.0.3",
+	"description": "Recoverable multi-session application server for Metis clients",
 	"type": "module",
 	"main": "./dist/index.js",
 	"types": "./dist/index.d.ts",
@@ -30,8 +30,8 @@
 		"prepublishOnly": "npm run clean && npm run build"
 	},
 	"dependencies": {
-		"@arcmind/app-protocol": "^0.80.6",
-		"@arcmind/coding-agent": "^0.80.6"
+		"@metis/app-protocol": "^0.0.3",
+		"@metis/coding-agent": "^0.0.3"
 	},
 	"devDependencies": {
 		"@types/node": "22.19.19",
@@ -45,7 +45,7 @@
 	"license": "MIT",
 	"repository": {
 		"type": "git",
-		"url": "git+https://gitee.com/sun124578963_0/arc-mind.git",
+		"url": "git+https://gitee.com/sun124578963_0/metis.git",
 		"directory": "packages/app-server"
 	}
 }

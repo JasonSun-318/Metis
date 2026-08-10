@@ -1,25 +1,25 @@
 # Settings
 
-ArcMind uses JSON settings files with project settings overriding global settings.
+Metis uses JSON settings files with project settings overriding global settings.
 
 | Location | Scope |
 |----------|-------|
-| `~/.arcmind/agent/settings.json` | Global (all projects) |
-| `.arcmind/settings.json` | Project (current directory) |
+| `~/.metis/agent/settings.json` | Global (all projects) |
+| `.metis/settings.json` | Project (current directory) |
 
 Edit directly or use `/settings` for common options.
 
 ## Project Trust
 
-On interactive startup, arcmind asks before trusting a project folder that contains project-local settings, resources, or project `.agents/skills` and has no saved decision for the folder or a parent folder in `~/.arcmind/agent/trust.json`. Trusting a project allows arcmind to load `.arcmind/settings.json` and `.arcmind` resources, install missing project packages, and execute project extensions.
+On interactive startup, metis asks before trusting a project folder that contains project-local settings, resources, or project `.agents/skills` and has no saved decision for the folder or a parent folder in `~/.metis/agent/trust.json`. Trusting a project allows metis to load `.metis/settings.json` and `.metis` resources, install missing project packages, and execute project extensions.
 
 Non-interactive modes (`-p`, `--mode json`, and `--mode rpc`) do not show a trust prompt. Without an applicable saved trust decision, they use `defaultProjectTrust` from global settings: `ask` (default) and `never` ignore those project resources, while `always` trusts them. Pass `--approve`/`-a` or `--no-approve`/`-na` to override project trust for one run.
 
-If no extension or saved decision applies, `defaultProjectTrust` controls the fallback behavior. Set it to `"ask"`, `"always"`, or `"never"` in `~/.arcmind/agent/settings.json`, or change it with `/settings`.
+If no extension or saved decision applies, `defaultProjectTrust` controls the fallback behavior. Set it to `"ask"`, `"always"`, or `"never"` in `~/.metis/agent/settings.json`, or change it with `/settings`.
 
-`arcmind config` and package commands use the same project trust flow, except `arcmind update` never prompts. Pass `--approve` to trust project-local settings for one command or `--no-approve` to ignore them.
+`metis config` and package commands use the same project trust flow, except `metis update` never prompts. Pass `--approve` to trust project-local settings for one command or `--no-approve` to ignore them.
 
-Use `/trust` in interactive mode to save a project trust decision for future sessions, including trust for the immediate parent folder. It writes `~/.arcmind/agent/trust.json` only; the current session is not reloaded, so restart arcmind for changes to take effect.
+Use `/trust` in interactive mode to save a project trust decision for future sessions, including trust for the immediate parent folder. It writes `~/.metis/agent/trust.json` only; the current session is not reloaded, so restart metis for changes to take effect.
 
 ## All Settings
 
@@ -55,8 +55,8 @@ Use `/trust` in interactive mode to save a project trust decision for future ses
 | `externalEditor` | string | `$VISUAL`, then `$EDITOR`, then Notepad on Windows or `nano` elsewhere | Command for Ctrl+G external editor; takes precedence over environment variables |
 | `quietStartup` | boolean | `false` | Hide startup header |
 | `defaultProjectTrust` | string | `"ask"` | Fallback project trust behavior: `"ask"`, `"always"`, or `"never"`. Global setting only |
-| `enableProviderAttribution` | boolean | `false` | Send ArcMind attribution headers to supported model providers |
-| `enableAnalytics` | boolean | `false` | Opt-in analytics data sharing. Currently only asked for during the experimental first-time setup (`ARCMIND_EXPERIMENTAL=1`) |
+| `enableProviderAttribution` | boolean | `false` | Send Metis attribution headers to supported model providers |
+| `enableAnalytics` | boolean | `false` | Opt-in analytics data sharing. Currently only asked for during the experimental first-time setup (`METIS_EXPERIMENTAL=1`) |
 | `trackingId` | string | - | Analytics tracking identifier, generated when `enableAnalytics` is turned on |
 | `doubleEscapeAction` | string | `"tree"` | Action for double-escape: `"tree"`, `"fork"`, or `"none"` |
 | `treeFilterMode` | string | `"default"` | Default filter for `/tree`: `"default"`, `"no-tools"`, `"user-only"`, `"labeled-only"`, `"all"` |
@@ -65,7 +65,7 @@ Use `/trust` in interactive mode to save a project trust decision for future ses
 | `autocompleteMaxVisible` | number | `5` | Max visible items in autocomplete dropdown (3-20) |
 | `showHardwareCursor` | boolean | `false` | Show the terminal cursor while TUI positions it for IME support |
 
-For VS Code, include `--wait` so arcmind resumes after the editor exits:
+For VS Code, include `--wait` so metis resumes after the editor exits:
 
 ```json
 {
@@ -75,7 +75,7 @@ For VS Code, include `--wait` so arcmind resumes after the editor exits:
 
 ### Network behavior
 
-ArcMind does not perform version checks or install telemetry. `enableProviderAttribution` is disabled by default and only adds ArcMind attribution headers to supported model-provider requests. Use `--offline` or `ARCMIND_OFFLINE=1` to disable startup package update checks.
+Metis does not perform version checks or install telemetry. `enableProviderAttribution` is disabled by default and only adds Metis attribution headers to supported model-provider requests. Use `--offline` or `METIS_OFFLINE=1` to disable startup package update checks.
 
 ### Network
 
@@ -91,7 +91,7 @@ ArcMind does not perform version checks or install telemetry. `enableProviderAtt
 
 ### Web Search
 
-`webSearch` is global-only so a project cannot silently enable a paid external search service or switch providers. It is disabled by default. Configure it through `/settings` or in `~/.arcmind/agent/settings.json`:
+`webSearch` is global-only so a project cannot silently enable a paid external search service or switch providers. It is disabled by default. Configure it through `/settings` or in `~/.metis/agent/settings.json`:
 
 ```json
 {
@@ -142,7 +142,7 @@ ArcMind does not perform version checks or install telemetry. `enableProviderAtt
 
 When a provider requests a retry delay longer than `retry.provider.maxRetryDelayMs` (e.g., Google's "quota will reset after 5h"), the request fails immediately with an informative error instead of waiting silently. Set to `0` to disable the cap.
 
-Keep `retry.provider.maxRetries` at `0` unless provider-level retries are explicitly needed. Setting it above `0` can make SDK/provider retries handle out-of-usage-limit errors before ArcMind sees them, which may block the agent until the provider quota resets in some circumstances.
+Keep `retry.provider.maxRetries` at `0` unless provider-level retries are explicitly needed. Setting it above `0` can make SDK/provider retries handle out-of-usage-limit errors before Metis sees them, which may block the agent until the provider quota resets in some circumstances.
 
 ```json
 {
@@ -191,7 +191,7 @@ Supported terminals always render images with an adaptive maximum width of 60 ce
 }
 ```
 
-`npmCommand` is used for all npm package-manager operations, including installs, uninstalls, and dependency installs inside git packages. User-scoped npm packages install under `~/.arcmind/agent/npm/`; project-scoped npm packages install under `.arcmind/npm/`. Use argv-style entries exactly as the process should be launched. When `npmCommand` is configured, git package dependency installs use plain `install` to avoid npm-specific flags in wrappers or alternate package managers.
+`npmCommand` is used for all npm package-manager operations, including installs, uninstalls, and dependency installs inside git packages. User-scoped npm packages install under `~/.metis/agent/npm/`; project-scoped npm packages install under `.metis/npm/`. Use argv-style entries exactly as the process should be launched. When `npmCommand` is configured, git package dependency installs use plain `install` to avoid npm-specific flags in wrappers or alternate package managers.
 
 ### Sessions
 
@@ -200,10 +200,10 @@ Supported terminals always render images with an adaptive maximum width of 60 ce
 | `sessionDir` | string | - | Directory where session files are stored. Accepts absolute or relative paths, plus `~`. |
 
 ```json
-{ "sessionDir": ".arcmind/sessions" }
+{ "sessionDir": ".metis/sessions" }
 ```
 
-When multiple sources specify a session directory, precedence is `--session-dir`, `ARCMIND_CODING_AGENT_SESSION_DIR`, then `sessionDir` in settings.json.
+When multiple sources specify a session directory, precedence is `--session-dir`, `METIS_CODING_AGENT_SESSION_DIR`, then `sessionDir` in settings.json.
 
 ### Model Cycling
 
@@ -235,7 +235,7 @@ Use `/memory on` or `/memory off` to update this setting. See [Usage](usage.md#l
 
 These settings define where to load extensions, skills, prompts, and themes from.
 
-Paths in `~/.arcmind/agent/settings.json` resolve relative to `~/.arcmind/agent`. Paths in `.arcmind/settings.json` resolve relative to `.arcmind`. Absolute paths and `~` are supported.
+Paths in `~/.metis/agent/settings.json` resolve relative to `~/.metis/agent`. Paths in `.metis/settings.json` resolve relative to `.metis`. Absolute paths and `~` are supported.
 
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|
@@ -254,7 +254,7 @@ String form loads all resources from a package:
 
 ```json
 {
-  "packages": ["arcmind-skills", "@org/my-extension"]
+  "packages": ["metis-skills", "@org/my-extension"]
 }
 ```
 
@@ -264,7 +264,7 @@ Object form filters which resources to load:
 {
   "packages": [
     {
-      "source": "arcmind-skills",
+      "source": "metis-skills",
       "skills": ["brave-search", "transcribe"],
       "extensions": []
     }
@@ -292,22 +292,22 @@ See [packages.md](packages.md) for package management details.
     "maxRetries": 3
   },
   "enabledModels": ["claude-*", "gpt-4o"],
-  "packages": ["arcmind-skills"]
+  "packages": ["metis-skills"]
 }
 ```
 
 ## Project Overrides
 
-Project settings (`.arcmind/settings.json`) override global settings. Nested objects are merged:
+Project settings (`.metis/settings.json`) override global settings. Nested objects are merged:
 
 ```json
-// ~/.arcmind/agent/settings.json (global)
+// ~/.metis/agent/settings.json (global)
 {
   "theme": "dark",
   "compaction": { "enabled": true, "reserveTokens": 16384 }
 }
 
-// .arcmind/settings.json (project)
+// .metis/settings.json (project)
 {
   "compaction": { "reserveTokens": 8192 }
 }

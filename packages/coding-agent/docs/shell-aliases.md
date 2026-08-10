@@ -1,8 +1,8 @@
 # Shell Aliases
 
-ArcMind runs bash in non-interactive mode (`bash -c`), which doesn't expand aliases by default.
+Metis runs bash in non-interactive mode (`bash -c`), which doesn't expand aliases by default.
 
-To enable your shell aliases, add to `~/.arcmind/agent/settings.json`:
+To enable your shell aliases, add to `~/.metis/agent/settings.json`:
 
 ```json
 {

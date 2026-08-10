@@ -7,7 +7,7 @@ import { CURRENT_SESSION_VERSION, SessionManager } from "../src/core/session-man
 const roots: string[] = [];
 
 function fixture() {
-	const root = mkdtempSync(join(tmpdir(), "arcmind-scheduled-session-"));
+	const root = mkdtempSync(join(tmpdir(), "metis-scheduled-session-"));
 	roots.push(root);
 	const cwd = join(root, "workspace");
 	const sessionDir = join(root, "sessions");

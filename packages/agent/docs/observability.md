@@ -1,12 +1,12 @@
 <!-- Synced from jot qe0ikdqs. Edit this file in-repo going forward. -->
 
-# ArcMind Observability Design Notes
+# Metis Observability Design Notes
 
 ## Goal
 
 Make `packages/ai` and `packages/agent`/harness observable without depending on OpenTelemetry, Sentry, or any APM vendor.
 
-ArcMind should emit stable, structured lifecycle events. External listeners can convert those events into OTel spans, Sentry spans, logs, metrics, or custom telemetry.
+Metis should emit stable, structured lifecycle events. External listeners can convert those events into OTel spans, Sentry spans, logs, metrics, or custom telemetry.
 
 ## Mental model
 
@@ -30,11 +30,11 @@ interface SpanRecord {
 Example tree:
 
 ```text
-traceId=t1 spanId=s1 parent=-  name=arcmind.agent.prompt
-traceId=t1 spanId=s2 parent=s1 name=arcmind.agent.turn
-traceId=t1 spanId=s3 parent=s2 name=arcmind.ai.provider.request
-traceId=t1 spanId=s4 parent=s2 name=arcmind.agent.tool_call
-traceId=t1 spanId=s5 parent=s4 name=arcmind.session.append_entry
+traceId=t1 spanId=s1 parent=-  name=metis.agent.prompt
+traceId=t1 spanId=s2 parent=s1 name=metis.agent.turn
+traceId=t1 spanId=s3 parent=s2 name=metis.ai.provider.request
+traceId=t1 spanId=s4 parent=s2 name=metis.agent.tool_call
+traceId=t1 spanId=s5 parent=s4 name=metis.session.append_entry
 ```
 
 ## Async context
@@ -45,27 +45,27 @@ JavaScript has one event loop but multiple async chains can interleave. A single
 
 ```ts
 await Promise.all([
-  runWithArcMindContext({ userId: "alice" }, () => harness.prompt("A")),
-  runWithArcMindContext({ userId: "bob" }, () => harness.prompt("B")),
+  runWithMetisContext({ userId: "alice" }, () => harness.prompt("A")),
+  runWithMetisContext({ userId: "bob" }, () => harness.prompt("B")),
 ]);
 ```
 
 Deep code can then read the correct current context for the active async chain.
 
-ArcMind must run in Node, Bun, browser, workers, and other JS runtimes, so ALS cannot be the core abstraction. It should be a runtime adapter.
+Metis must run in Node, Bun, browser, workers, and other JS runtimes, so ALS cannot be the core abstraction. It should be a runtime adapter.
 
 ## Core design
 
-ArcMind owns a small runtime-agnostic observability abstraction:
+Metis owns a small runtime-agnostic observability abstraction:
 
 ```ts
-export interface ArcMindObservabilityContext {
+export interface MetisObservabilityContext {
   traceId?: string;
   currentSpanId?: string;
   userContext?: Record<string, unknown>;
 }
 
-export interface ArcMindObservabilityEvent {
+export interface MetisObservabilityEvent {
   type: "start" | "end" | "error" | "event";
   name: string;
   traceId: string;
@@ -78,10 +78,10 @@ export interface ArcMindObservabilityEvent {
   error?: { name: string; message: string };
 }
 
-export interface ArcMindObservability {
-  getContext(): ArcMindObservabilityContext | undefined;
-  runWithContext<T>(context: ArcMindObservabilityContext, fn: () => T): T;
-  emit(event: ArcMindObservabilityEvent): void;
+export interface MetisObservability {
+  getContext(): MetisObservabilityContext | undefined;
+  runWithContext<T>(context: MetisObservabilityContext, fn: () => T): T;
+  emit(event: MetisObservabilityEvent): void;
   hasSubscribers(): boolean;
 }
 ```
@@ -89,9 +89,9 @@ export interface ArcMindObservability {
 Public API:
 
 ```ts
-export function configureArcMindObservability(observability: ArcMindObservability): void;
-export function subscribeArcMindObservability(listener: (event: ArcMindObservabilityEvent) => void): () => void;
-export function runWithArcMindContext<T>(userContext: Record<string, unknown>, fn: () => T): T;
+export function configureMetisObservability(observability: MetisObservability): void;
+export function subscribeMetisObservability(listener: (event: MetisObservabilityEvent) => void): () => void;
+export function runWithMetisContext<T>(userContext: Record<string, unknown>, fn: () => T): T;
 export function traceOperation<T>(name: string, payload: Record<string, unknown>, fn: () => T): T;
 ```
 
@@ -147,25 +147,25 @@ For Node, diagnostics channels can be used as a passive event bus:
 
 ```ts
 import { channel } from "diagnostics_channel";
-channel("arcmind.observability").publish(event);
+channel("metis.observability").publish(event);
 ```
 
-Subscribers can create OTel/Sentry spans without monkey-patching arcmind.
+Subscribers can create OTel/Sentry spans without monkey-patching metis.
 
-## What arcmind emits
+## What metis emits
 
-ArcMind emits what happened. It does not create OTel/Sentry spans directly.
+Metis emits what happened. It does not create OTel/Sentry spans directly.
 
 Initial minimal event names:
 
 ```text
-arcmind.agent.prompt
-arcmind.agent.skill
-arcmind.agent.prompt_template
-arcmind.agent.compaction
-arcmind.agent.branch_navigation
-arcmind.agent.session.append_entry
-arcmind.ai.provider.request
+metis.agent.prompt
+metis.agent.skill
+metis.agent.prompt_template
+metis.agent.compaction
+metis.agent.branch_navigation
+metis.agent.session.append_entry
+metis.ai.provider.request
 ```
 
 Each operation emits:
@@ -179,14 +179,14 @@ error
 Later additions:
 
 ```text
-arcmind.agent.turn
-arcmind.agent.tool_call
-arcmind.agent.queue_update
-arcmind.ai.provider.retry
-arcmind.ai.provider.first_token
-arcmind.ai.provider.usage
-arcmind.session.read
-arcmind.session.write
+metis.agent.turn
+metis.agent.tool_call
+metis.agent.queue_update
+metis.ai.provider.retry
+metis.ai.provider.first_token
+metis.ai.provider.usage
+metis.session.read
+metis.session.write
 ```
 
 ## Minimal instrumentation points
@@ -206,7 +206,7 @@ Example:
 
 ```ts
 return traceOperation(
-  "arcmind.agent.prompt",
+  "metis.agent.prompt",
   {
     sessionId: turnState.sessionId,
     provider: turnState.model.provider,
@@ -222,7 +222,7 @@ Session write:
 
 ```ts
 return traceOperation(
-  "arcmind.agent.session.append_entry",
+  "metis.agent.session.append_entry",
   { entryType: entry.type },
   async () => {
     await this.unwrap(this.storage.appendEntry(entry));
@@ -242,7 +242,7 @@ Example:
 
 ```ts
 return traceOperation(
-  "arcmind.ai.provider.request",
+  "metis.ai.provider.request",
   {
     api: model.api,
     provider: model.provider,
@@ -298,7 +298,7 @@ Content capture can be opt-in later with explicit redaction hooks.
 
 ## Listener behavior
 
-Observability must never affect arcmind execution.
+Observability must never affect metis execution.
 
 Subscriber errors should be swallowed or isolated. Harness hooks are control-plane and may affect execution; observability subscribers are passive and must not.
 
@@ -307,7 +307,7 @@ Subscriber errors should be swallowed or isolated. Harness hooks are control-pla
 Users can associate arbitrary context with a turn:
 
 ```ts
-await runWithArcMindContext(
+await runWithMetisContext(
   {
     userId: "u123",
     orgId: "acme",
@@ -322,7 +322,7 @@ Every emitted event inside that async chain includes the context:
 ```ts
 {
   type: "start",
-  name: "arcmind.ai.provider.request",
+  name: "metis.ai.provider.request",
   traceId: "t1",
   spanId: "s3",
   parentSpanId: "s1",
@@ -353,10 +353,10 @@ Then:
 
 ```text
 packages/ai
-  emits arcmind.ai.* events
+  emits metis.ai.* events
 
 packages/agent
-  emits arcmind.agent.* / arcmind.session.* events
+  emits metis.agent.* / metis.session.* events
 ```
 
 Optional later:
@@ -366,11 +366,11 @@ packages/observability-node
   AsyncLocalStorage + diagnostics_channel bridge
 
 packages/otel
-  subscribes to arcmind events and creates OpenTelemetry spans
+  subscribes to metis events and creates OpenTelemetry spans
 ```
 
 ## Thesis
 
-ArcMind defines a stable, safe event contract. Adapters define where events go.
+Metis defines a stable, safe event contract. Adapters define where events go.
 
 This makes ai/harness observable without binding core packages to OTel, Sentry, Node-only APIs, or monkey-patching.

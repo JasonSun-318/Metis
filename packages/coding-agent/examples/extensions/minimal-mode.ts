@@ -11,12 +11,12 @@
  * - Minimal: Shows only tool call, no output (this extension's collapsed mode)
  *
  * Usage:
- *   arcmind -e ./minimal-mode.ts
+ *   metis -e ./minimal-mode.ts
  *
  * Then use ctrl+o to toggle between minimal (collapsed) and full (expanded) views.
  */
 
-import type { ExtensionAPI } from "@arcmind/coding-agent";
+import type { ExtensionAPI } from "@metis/coding-agent";
 import {
 	createBashTool,
 	createEditTool,
@@ -25,8 +25,8 @@ import {
 	createLsTool,
 	createReadTool,
 	createWriteTool,
-} from "@arcmind/coding-agent";
-import { Text } from "@arcmind/tui";
+} from "@metis/coding-agent";
+import { Text } from "@metis/tui";
 import { homedir } from "os";
 
 /**
@@ -64,11 +64,11 @@ function getBuiltInTools(cwd: string) {
 	return tools;
 }
 
-export default function (arcmind: ExtensionAPI) {
+export default function (metis: ExtensionAPI) {
 	// =========================================================================
 	// Read Tool
 	// =========================================================================
-	arcmind.registerTool({
+	metis.registerTool({
 		name: "read",
 		label: "read",
 		description:
@@ -115,7 +115,7 @@ export default function (arcmind: ExtensionAPI) {
 	// =========================================================================
 	// Bash Tool
 	// =========================================================================
-	arcmind.registerTool({
+	metis.registerTool({
 		name: "bash",
 		label: "bash",
 		description:
@@ -164,7 +164,7 @@ export default function (arcmind: ExtensionAPI) {
 	// =========================================================================
 	// Write Tool
 	// =========================================================================
-	arcmind.registerTool({
+	metis.registerTool({
 		name: "write",
 		label: "write",
 		description:
@@ -206,7 +206,7 @@ export default function (arcmind: ExtensionAPI) {
 	// =========================================================================
 	// Edit Tool
 	// =========================================================================
-	arcmind.registerTool({
+	metis.registerTool({
 		name: "edit",
 		label: "edit",
 		description:
@@ -251,7 +251,7 @@ export default function (arcmind: ExtensionAPI) {
 	// =========================================================================
 	// Find Tool
 	// =========================================================================
-	arcmind.registerTool({
+	metis.registerTool({
 		name: "find",
 		label: "find",
 		description:
@@ -309,7 +309,7 @@ export default function (arcmind: ExtensionAPI) {
 	// =========================================================================
 	// Grep Tool
 	// =========================================================================
-	arcmind.registerTool({
+	metis.registerTool({
 		name: "grep",
 		label: "grep",
 		description:
@@ -371,7 +371,7 @@ export default function (arcmind: ExtensionAPI) {
 	// =========================================================================
 	// Ls Tool
 	// =========================================================================
-	arcmind.registerTool({
+	metis.registerTool({
 		name: "ls",
 		label: "ls",
 		description:

@@ -1,6 +1,6 @@
 import { join } from "node:path";
-import type { ThinkingLevel } from "@arcmind/agent-core";
-import type { Model } from "@arcmind/ai";
+import type { ThinkingLevel } from "@metis/agent-core";
+import type { Model } from "@metis/ai";
 import { getAgentDir } from "../config.ts";
 import { resolvePath } from "../utils/paths.ts";
 import { AuthStorage } from "./auth-storage.ts";

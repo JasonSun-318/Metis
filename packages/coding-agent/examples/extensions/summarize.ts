@@ -1,7 +1,7 @@
-import { complete, getModel } from "@arcmind/ai/compat";
-import type { ExtensionAPI, ExtensionCommandContext } from "@arcmind/coding-agent";
-import { DynamicBorder, getMarkdownTheme } from "@arcmind/coding-agent";
-import { Container, Markdown, matchesKey, Text } from "@arcmind/tui";
+import { complete, getModel } from "@metis/ai/compat";
+import type { ExtensionAPI, ExtensionCommandContext } from "@metis/coding-agent";
+import { DynamicBorder, getMarkdownTheme } from "@metis/coding-agent";
+import { Container, Markdown, matchesKey, Text } from "@metis/tui";
 
 type ContentBlock = {
 	type?: string;
@@ -142,8 +142,8 @@ const showSummaryUi = async (summary: string, ctx: ExtensionCommandContext) => {
 	});
 };
 
-export default function (arcmind: ExtensionAPI) {
-	arcmind.registerCommand("summarize", {
+export default function (metis: ExtensionAPI) {
+	metis.registerCommand("summarize", {
 		description: "Summarize the current conversation in a custom UI",
 		handler: async (_args, ctx) => {
 			const branch = ctx.sessionManager.getBranch();

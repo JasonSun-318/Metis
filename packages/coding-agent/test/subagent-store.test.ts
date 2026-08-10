@@ -14,7 +14,7 @@ afterEach(() => {
 });
 
 function setup(): { root: string; agentDir: string; parent: SessionManager; store: SubagentStore } {
-	const root = mkdtempSync(join(tmpdir(), "arcmind-subagent-store-"));
+	const root = mkdtempSync(join(tmpdir(), "metis-subagent-store-"));
 	roots.push(root);
 	const project = join(root, "project");
 	const agentDir = join(root, "agent");
@@ -125,7 +125,7 @@ describe("SubagentStore", () => {
 	});
 
 	it("rejects in-memory and nested parents", () => {
-		const root = mkdtempSync(join(tmpdir(), "arcmind-subagent-store-invalid-"));
+		const root = mkdtempSync(join(tmpdir(), "metis-subagent-store-invalid-"));
 		roots.push(root);
 		const memory = SessionManager.inMemory(root);
 		expect(() => new SubagentStore(memory, join(root, "agent"))).toThrow("persisted parent");

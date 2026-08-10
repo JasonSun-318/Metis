@@ -10,7 +10,7 @@
 import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { getModel } from "@arcmind/ai/compat";
+import { getModel } from "@metis/ai/compat";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { AgentSession } from "../src/core/agent-session.ts";
 import {
@@ -31,7 +31,7 @@ describe.skipIf(!API_KEY)("AgentSession forking", () => {
 	let sessionManager: SessionManager;
 
 	beforeEach(() => {
-		tempDir = join(tmpdir(), `arcmind-branching-test-${Date.now()}`);
+		tempDir = join(tmpdir(), `metis-branching-test-${Date.now()}`);
 		mkdirSync(tempDir, { recursive: true });
 	});
 

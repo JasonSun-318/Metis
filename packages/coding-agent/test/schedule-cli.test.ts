@@ -323,7 +323,7 @@ describe("/schedule", () => {
 	});
 
 	it("opens scheduled entries as read-only results without switching the active session", async () => {
-		const root = mkdtempSync(join(tmpdir(), "arcmind-schedule-resume-"));
+		const root = mkdtempSync(join(tmpdir(), "metis-schedule-resume-"));
 		try {
 			const cwd = join(root, "workspace");
 			const sessionDir = join(root, "sessions");
@@ -359,7 +359,7 @@ describe("/schedule", () => {
 	});
 
 	it("never opens a result journal outside the task-owned session directory", async () => {
-		const root = mkdtempSync(join(tmpdir(), "arcmind-schedule-cli-forged-"));
+		const root = mkdtempSync(join(tmpdir(), "metis-schedule-cli-forged-"));
 		try {
 			const cwd = join(root, "project");
 			mkdirSync(cwd);

@@ -1,6 +1,6 @@
-import type { TextContent } from "@arcmind/ai";
-import type { Component } from "@arcmind/tui";
-import { Box, Container, Markdown, type MarkdownTheme, Spacer, Text } from "@arcmind/tui";
+import type { TextContent } from "@metis/ai";
+import type { Component } from "@metis/tui";
+import { Box, Container, Markdown, type MarkdownTheme, Spacer, Text } from "@metis/tui";
 import type { MessageRenderer } from "../../../core/extensions/types.ts";
 import type { CustomMessage } from "../../../core/messages.ts";
 import { getMarkdownTheme, theme } from "../theme/theme.ts";

@@ -4,7 +4,7 @@
  * Shows how to replace or modify the default system prompt.
  */
 
-import { createAgentSession, DefaultResourceLoader, getAgentDir, SessionManager } from "@arcmind/coding-agent";
+import { createAgentSession, DefaultResourceLoader, getAgentDir, SessionManager } from "@metis/coding-agent";
 
 const cwd = process.cwd();
 const agentDir = getAgentDir();
@@ -15,7 +15,7 @@ const loader1 = new DefaultResourceLoader({
 	agentDir,
 	systemPromptOverride: () => `You are a helpful assistant that speaks like a pirate.
 Always end responses with "Arrr!"`,
-	// Needed to avoid DefaultResourceLoader appending APPEND_SYSTEM.md from ~/.arcmind/agent or <cwd>/.arcmind.
+	// Needed to avoid DefaultResourceLoader appending APPEND_SYSTEM.md from ~/.metis/agent or <cwd>/.metis.
 	appendSystemPromptOverride: () => [],
 });
 await loader1.reload();

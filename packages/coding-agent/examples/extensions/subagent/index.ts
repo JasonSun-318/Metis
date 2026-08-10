@@ -1,7 +1,7 @@
 /**
  * Subagent Tool - Delegate tasks to specialized agents
  *
- * Spawns a separate `arcmind` process for each subagent invocation,
+ * Spawns a separate `metis` process for each subagent invocation,
  * giving it an isolated context window.
  *
  * Supports three modes:
@@ -16,17 +16,17 @@ import { spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import type { AgentToolResult } from "@arcmind/agent-core";
-import type { Message } from "@arcmind/ai";
-import { StringEnum } from "@arcmind/ai";
+import type { AgentToolResult } from "@metis/agent-core";
+import type { Message } from "@metis/ai";
+import { StringEnum } from "@metis/ai";
 import {
 	CONFIG_DIR_NAME,
 	type ExtensionAPI,
 	getAgentDir,
 	getMarkdownTheme,
 	withFileMutationQueue,
-} from "@arcmind/coding-agent";
-import { Container, Markdown, Spacer, Text } from "@arcmind/tui";
+} from "@metis/coding-agent";
+import { Container, Markdown, Spacer, Text } from "@metis/tui";
 import { Type } from "typebox";
 import { type AgentConfig, type AgentScope, discoverAgents } from "./agents.ts";
 
@@ -237,7 +237,7 @@ async function mapWithConcurrencyLimit<TIn, TOut>(
 }
 
 async function writePromptToTempFile(agentName: string, prompt: string): Promise<{ dir: string; filePath: string }> {
-	const tmpDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "arcmind-subagent-"));
+	const tmpDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "metis-subagent-"));
 	const safeName = agentName.replace(/[^\w.-]+/g, "_");
 	const filePath = path.join(tmpDir, `prompt-${safeName}.md`);
 	await withFileMutationQueue(filePath, async () => {
@@ -246,7 +246,7 @@ async function writePromptToTempFile(agentName: string, prompt: string): Promise
 	return { dir: tmpDir, filePath };
 }
 
-function getArcMindInvocation(args: string[]): { command: string; args: string[] } {
+function getMetisInvocation(args: string[]): { command: string; args: string[] } {
 	const currentScript = process.argv[1];
 	const isBunVirtualScript = currentScript?.startsWith("/$bunfs/root/");
 	if (currentScript && !isBunVirtualScript && fs.existsSync(currentScript)) {
@@ -259,7 +259,7 @@ function getArcMindInvocation(args: string[]): { command: string; args: string[]
 		return { command: process.execPath, args };
 	}
 
-	return { command: "arcmind", args };
+	return { command: "metis", args };
 }
 
 type OnUpdateCallback = (partial: AgentToolResult<SubagentDetails>) => void;
@@ -331,7 +331,7 @@ async function runSingleAgent(
 		let wasAborted = false;
 
 		const exitCode = await new Promise<number>((resolve) => {
-			const invocation = getArcMindInvocation(args);
+			const invocation = getMetisInvocation(args);
 			const proc = spawn(invocation.command, invocation.args, {
 				cwd: cwd ?? defaultCwd,
 				shell: false,
@@ -457,8 +457,8 @@ const SubagentParams = Type.Object({
 	cwd: Type.Optional(Type.String({ description: "Working directory for the agent process (single mode)" })),
 });
 
-export default function (arcmind: ExtensionAPI) {
-	arcmind.registerTool({
+export default function (metis: ExtensionAPI) {
+	metis.registerTool({
 		name: "subagent",
 		label: "Subagent",
 		description: [

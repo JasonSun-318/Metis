@@ -51,7 +51,7 @@ describe("InteractiveMode /new", () => {
 	});
 
 	it("chooses mode first and keeps the current mode first", async () => {
-		const test = context(["Chat", "ArcMind managed workspace"], "chat");
+		const test = context(["Chat", "Metis managed workspace"], "chat");
 
 		await prototype.handleNewSessionCommand.call(test.value, "/new");
 
@@ -67,7 +67,7 @@ describe("InteractiveMode /new", () => {
 		await prototype.handleNewSessionCommand.call(test.value, "/new chat");
 
 		expect(test.showExtensionSelector).toHaveBeenCalledWith("Chat workspace", [
-			"ArcMind managed workspace",
+			"Metis managed workspace",
 			terminal,
 			"Other directory",
 		]);
@@ -86,7 +86,7 @@ describe("InteractiveMode /new", () => {
 	});
 
 	it("validates an entered directory before replacing the session", async () => {
-		const directory = mkdtempSync(join(tmpdir(), "arcmind-new-command-"));
+		const directory = mkdtempSync(join(tmpdir(), "metis-new-command-"));
 		tempDirs.push(directory);
 		const test = context(["Other directory", directory]);
 

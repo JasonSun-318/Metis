@@ -1,4 +1,4 @@
-import { type Component, Loader, type TUI } from "@arcmind/tui";
+import { type Component, Loader, type TUI } from "@metis/tui";
 import type { WorkingIndicatorOptions } from "../../../core/extensions/index.ts";
 import { theme } from "../theme/theme.ts";
 import { CountdownTimer } from "./countdown-timer.ts";

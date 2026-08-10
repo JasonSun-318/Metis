@@ -91,7 +91,7 @@ async function testEmojiInToolResults<TApi extends Api>(llm: Model<TApi>, option
 - Heart: ❤️
 - Thinking face: 🤔
 - Rocket: 🚀
-- Mixed text: ArcMind Developer wann? Wo? Bin grad äußersr eventuninformiert 🙈
+- Mixed text: Metis Developer wann? Wo? Bin grad äußersr eventuninformiert 🙈
 - Japanese: こんにちは
 - Chinese: 你好
 - Mathematical symbols: ∑∫∂√
@@ -182,7 +182,7 @@ Unanswered Comments: 2
     },
     {
       "author": "Matthias Neumayer's  graphic link",
-      "text": "ArcMind Developer wann? Wo? Bin grad äußersr eventuninformiert 🙈"
+      "text": "Metis Developer wann? Wo? Bin grad äußersr eventuninformiert 🙈"
     }
   ]
 }`,
@@ -366,7 +366,7 @@ describe("AI Providers Unicode Surrogate Pair Tests", () => {
 	});
 
 	// =========================================================================
-	// OAuth-based providers (credentials from ~/.arcmind/agent/oauth.json)
+	// OAuth-based providers (credentials from ~/.metis/agent/oauth.json)
 	// =========================================================================
 
 	describe("Anthropic OAuth Provider Unicode Handling", () => {

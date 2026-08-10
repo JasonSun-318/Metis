@@ -31,7 +31,7 @@ describe("SessionManager durable ownership and recovery", () => {
 	let directory: string;
 
 	beforeEach(() => {
-		directory = mkdtempSync(join(tmpdir(), "arcmind-session-manager-durable-"));
+		directory = mkdtempSync(join(tmpdir(), "metis-session-manager-durable-"));
 	});
 
 	afterEach(() => {
@@ -102,7 +102,7 @@ describe("SessionManager durable ownership and recovery", () => {
 
 		const manager = SessionManager.open(path);
 		const notice = manager.getEntries().at(-1);
-		expect(notice).toMatchObject({ type: "custom", customType: "arcmind.session_recovery", parentId: "one" });
+		expect(notice).toMatchObject({ type: "custom", customType: "metis.session_recovery", parentId: "one" });
 		expect(readFileSync(path, "utf8")).not.toContain('{"partial"');
 		expect(existsSync(join(directory, ".recovery"))).toBe(true);
 		manager.close();
@@ -115,7 +115,7 @@ describe("SessionManager durable ownership and recovery", () => {
 		const manager = SessionManager.open(path);
 		expect(manager.getHeader()).toMatchObject({ type: "session", version: CURRENT_SESSION_VERSION });
 		expect(manager.getEntries()).toMatchObject([
-			{ type: "custom", customType: "arcmind.session_recovery", parentId: null },
+			{ type: "custom", customType: "metis.session_recovery", parentId: null },
 		]);
 		expect(readFileSync(path, "utf8").trim().split("\n")).toHaveLength(2);
 		manager.close();
@@ -130,13 +130,13 @@ describe("SessionManager durable ownership and recovery", () => {
 
 		const first = SessionManager.open(path);
 		expect(
-			first.getEntries().filter((item) => item.type === "custom" && item.customType === "arcmind.session_recovery"),
+			first.getEntries().filter((item) => item.type === "custom" && item.customType === "metis.session_recovery"),
 		).toHaveLength(1);
 		first.close();
 
 		const second = SessionManager.open(path);
 		expect(
-			second.getEntries().filter((item) => item.type === "custom" && item.customType === "arcmind.session_recovery"),
+			second.getEntries().filter((item) => item.type === "custom" && item.customType === "metis.session_recovery"),
 		).toHaveLength(1);
 		second.close();
 	});

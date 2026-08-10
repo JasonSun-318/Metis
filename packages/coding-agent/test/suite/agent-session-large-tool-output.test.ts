@@ -1,8 +1,8 @@
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import type { AgentTool } from "@arcmind/agent-core";
-import { fauxAssistantMessage, fauxToolCall } from "@arcmind/ai";
+import type { AgentTool } from "@metis/agent-core";
+import { fauxAssistantMessage, fauxToolCall } from "@metis/ai";
 import { Type } from "typebox";
 import { describe, expect, it, vi } from "vitest";
 import { LARGE_TOOL_OUTPUT_MAX_CHARS } from "../../src/core/large-tool-output.ts";
@@ -94,8 +94,8 @@ describe("large tool output", () => {
 	it("externalizes the final message_end replacement before persistence and the next model call", async () => {
 		const fullText = "x".repeat(LARGE_TOOL_OUTPUT_MAX_CHARS + 1);
 		const extensionFactories: ExtensionFactory[] = [
-			(arcmind) => {
-				arcmind.registerTool({
+			(metis) => {
+				metis.registerTool({
 					name: "external_search",
 					label: "External Search",
 					description: "Return external search output",
@@ -105,7 +105,7 @@ describe("large tool output", () => {
 						details: { preserved: true },
 					}),
 				});
-				arcmind.on("message_end", (event) => {
+				metis.on("message_end", (event) => {
 					if (event.message.role !== "toolResult" || event.message.toolName !== "external_search") return;
 					return {
 						message: {
@@ -197,8 +197,8 @@ describe("large tool output", () => {
 	it("keeps the original external result when persistence fails", async () => {
 		const fullText = "f".repeat(LARGE_TOOL_OUTPUT_MAX_CHARS + 1);
 		const extensionFactories: ExtensionFactory[] = [
-			(arcmind) => {
-				arcmind.registerTool({
+			(metis) => {
+				metis.registerTool({
 					name: "external_failure",
 					label: "External Failure",
 					description: "Return output that cannot be persisted",
@@ -208,7 +208,7 @@ describe("large tool output", () => {
 			},
 		];
 		const harness = await createHarness({ extensionFactories });
-		const blockedOutputDir = join(tmpdir(), "arcmind-tool-results", harness.sessionManager.getSessionId());
+		const blockedOutputDir = join(tmpdir(), "metis-tool-results", harness.sessionManager.getSessionId());
 		try {
 			mkdirSync(dirname(blockedOutputDir), { recursive: true });
 			writeFileSync(blockedOutputDir, "blocked output directory");

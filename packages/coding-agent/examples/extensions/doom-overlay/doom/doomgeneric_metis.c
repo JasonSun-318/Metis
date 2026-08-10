@@ -1,5 +1,5 @@
 /**
- * arcmind-doom platform implementation for doomgeneric
+ * metis-doom platform implementation for doomgeneric
  *
  * Minimal implementation - no sound, just framebuffer and input.
  */

@@ -14,8 +14,8 @@ import {
 	statSync,
 } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
-import { Agent, type AgentMessage, type StreamFn, type ThinkingLevel } from "@arcmind/agent-core";
-import type { Model } from "@arcmind/ai/compat";
+import { Agent, type AgentMessage, type StreamFn, type ThinkingLevel } from "@metis/agent-core";
+import type { Model } from "@metis/ai/compat";
 import lockfile from "proper-lockfile";
 import type { AgentMode } from "./agent-mode.ts";
 import {
@@ -144,12 +144,12 @@ Return exactly one JSON object and no prose:
 Use empty arrays when no verified change is needed. Include complete content for every written file. Paths are flat basenames only.`;
 
 export const DREAM_SYSTEM_PROMPTS: Readonly<Record<DreamScope, string>> = {
-	global: `You are ArcMind's silent global long-term memory maintainer.
+	global: `You are Metis's silent global long-term memory maintainer.
 
 Store only facts that remain useful across projects. Never store project-specific facts or duplicate project memory.
 
 ${DREAM_PROMPT_COMMON}`,
-	project: `You are ArcMind's silent project memory maintainer.
+	project: `You are Metis's silent project memory maintainer.
 
 Store only facts useful to the supplied working directory and mode. Never store facts from another project or mode, or general facts better suited to global memory.
 

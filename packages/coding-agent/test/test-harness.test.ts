@@ -3,8 +3,8 @@
  * Validates that the faux provider and session factory work correctly.
  */
 
-import type { AgentTool } from "@arcmind/agent-core";
-import type { AssistantMessage } from "@arcmind/ai";
+import type { AgentTool } from "@metis/agent-core";
+import type { AssistantMessage } from "@metis/ai";
 import { Type } from "typebox";
 import { afterEach, describe, expect, it } from "vitest";
 import { createHarness, createHarnessWithExtensions, type Harness } from "./test-harness.ts";
@@ -264,8 +264,8 @@ describe("test harness", () => {
 			extensionFactories: [
 				{
 					path: "<alpha>",
-					factory: (arcmind) => {
-						arcmind.registerCommand("shared-cmd", {
+					factory: (metis) => {
+						metis.registerCommand("shared-cmd", {
 							description: "Alpha command",
 							handler: async (args) => {
 								calls.push(`alpha:${args}`);
@@ -275,8 +275,8 @@ describe("test harness", () => {
 				},
 				{
 					path: "<beta>",
-					factory: (arcmind) => {
-						arcmind.registerCommand("shared-cmd", {
+					factory: (metis) => {
+						metis.registerCommand("shared-cmd", {
 							description: "Beta command",
 							handler: async (args) => {
 								calls.push(`beta:${args}`);

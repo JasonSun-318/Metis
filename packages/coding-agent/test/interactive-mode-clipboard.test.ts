@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { ImageContent } from "@arcmind/ai/compat";
+import type { ImageContent } from "@metis/ai/compat";
 import { afterEach, expect, test, vi } from "vitest";
 import { InteractiveMode } from "../src/modes/interactive/interactive-mode.ts";
 
@@ -151,7 +151,7 @@ test("clearing the editor also clears pending clipboard images", () => {
 });
 
 test("keeps @ paths as ordinary text", () => {
-	const root = mkdtempSync(join(tmpdir(), "arcmind-cli-at-path-"));
+	const root = mkdtempSync(join(tmpdir(), "metis-cli-at-path-"));
 	temporaryDirectories.push(root);
 	const source = join(root, "report.docx");
 	writeFileSync(source, "docx");
@@ -178,7 +178,7 @@ test("keeps @ paths as ordinary text", () => {
 });
 
 test("turns a pasted file outside the project into an atomic marker and deletes its unsent copy", () => {
-	const root = mkdtempSync(join(tmpdir(), "arcmind-cli-marker-"));
+	const root = mkdtempSync(join(tmpdir(), "metis-cli-marker-"));
 	temporaryDirectories.push(root);
 	const cwd = join(root, "project");
 	const agentDir = join(root, "agent");
@@ -220,7 +220,7 @@ test("turns a pasted file outside the project into an atomic marker and deletes 
 });
 
 test("attaches multiple shell-escaped dropped file paths", () => {
-	const root = mkdtempSync(join(tmpdir(), "arcmind-cli-multiple-markers-"));
+	const root = mkdtempSync(join(tmpdir(), "metis-cli-multiple-markers-"));
 	temporaryDirectories.push(root);
 	const cwd = join(root, "project");
 	const agentDir = join(root, "agent");
@@ -258,7 +258,7 @@ test("attaches multiple shell-escaped dropped file paths", () => {
 });
 
 test("deletes an unreferenced pending file when submitting the remaining marker", () => {
-	const root = mkdtempSync(join(tmpdir(), "arcmind-cli-stale-marker-"));
+	const root = mkdtempSync(join(tmpdir(), "metis-cli-stale-marker-"));
 	temporaryDirectories.push(root);
 	const cwd = join(root, "project");
 	const agentDir = join(root, "agent");

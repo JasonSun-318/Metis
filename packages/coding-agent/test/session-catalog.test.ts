@@ -35,7 +35,7 @@ describe("session catalog", () => {
 	let directory: string;
 
 	beforeEach(() => {
-		directory = mkdtempSync(join(tmpdir(), "arcmind-session-catalog-"));
+		directory = mkdtempSync(join(tmpdir(), "metis-session-catalog-"));
 		journalOpens.readOnly = 0;
 		journalOpens.writable = 0;
 	});
@@ -132,7 +132,7 @@ describe("session catalog", () => {
 	});
 
 	it.skipIf(process.platform === "win32")("rejects final-component symlink and hardlink aliases", async () => {
-		const outside = join(tmpdir(), `arcmind-session-catalog-outside-${process.pid}-${Date.now()}.jsonl`);
+		const outside = join(tmpdir(), `metis-session-catalog-outside-${process.pid}-${Date.now()}.jsonl`);
 		writeRecords(outside, [header("outside", 4)]);
 		try {
 			symlinkSync(outside, join(directory, "symlink.jsonl"));
