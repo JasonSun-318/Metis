@@ -1,11 +1,16 @@
 // @vitest-environment jsdom
 
-import type { ProfileUsageSummaryView } from "@arcmind/app-protocol";
+import type { ProfileUsageSummaryView } from "@metis/app-protocol";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AccountMenu } from "../src/renderer/components/AccountMenu.tsx";
-import { buildActivityWeeks, formatDuration, ProfilePanel } from "../src/renderer/components/ProfilePanel.tsx";
+import {
+	buildActivityWeeks,
+	formatDuration,
+	PROFILE_IDENTITY_STORAGE_KEY,
+	ProfilePanel,
+} from "../src/renderer/components/ProfilePanel.tsx";
 import { APP_LOCALE_STORAGE_KEY, setLocale } from "../src/renderer/i18n.ts";
 
 const profile: ProfileUsageSummaryView = {
@@ -76,7 +81,7 @@ describe("ProfilePanel", () => {
 		await flush();
 
 		expect(api.getProfile).toHaveBeenCalledTimes(1);
-		expect(container.textContent).toContain("ArcMind User");
+		expect(container.textContent).toContain("Metis User");
 		expect(container.textContent).toContain("1.5M");
 		expect(container.textContent).toContain("Most used Skills");
 		expect(container.textContent).toContain("Most used reasoning effort");
@@ -88,6 +93,53 @@ describe("ProfilePanel", () => {
 		expect(animatedCells[0]?.style.getPropertyValue("--profile-cell-index")).toBe("0");
 		expect(animatedCells[animatedCells.length - 1]?.style.getPropertyValue("--profile-cell-index")).not.toBe("0");
 		expect(container.querySelector('[aria-label*="Aug 1, 2026: 500 Tokens"]')?.getAttribute("data-level")).toBe("4");
+		await act(async () => root.unmount());
+	});
+
+	it("compacts Token activity only from 10,000", async () => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		await setLocale("zh-CN");
+		const api = { getProfile: vi.fn().mockResolvedValue({
+			...profile,
+			peakDailyTokens: 10_000,
+			activity: [{ date: "2026-07-31", tokens: 9_999 }, { date: "2026-08-01", tokens: 10_000 }],
+		}) };
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<ProfilePanel api={api} serverReady />));
+		await flush();
+
+		expect(container.querySelector('[aria-label*="9999 个 Token"]')).not.toBeNull();
+		expect(container.querySelector('[aria-label*="1万 个 Token"]')).not.toBeNull();
+		await act(async () => root.unmount());
+	});
+
+	it("persists a local display name and avatar without changing profile usage data", async () => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		localStorage.setItem(PROFILE_IDENTITY_STORAGE_KEY, JSON.stringify({ displayName: "Barry", avatarDataUrl: null }));
+		const api = { getProfile: vi.fn().mockResolvedValue(profile) };
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<ProfilePanel api={api} serverReady />));
+		await flush();
+
+		expect(container.querySelector(".profile-identity h1")?.textContent).toBe("Barry");
+		await act(async () => button(container, "Edit display name").click());
+		const name = container.querySelector<HTMLInputElement>('input[aria-label="Display name"]')!;
+		await act(async () => {
+			Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(name, "Barry Bai");
+			name.dispatchEvent(new Event("input", { bubbles: true }));
+			name.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "Enter" }));
+		});
+		expect(JSON.parse(localStorage.getItem(PROFILE_IDENTITY_STORAGE_KEY)!).displayName).toBe("Barry Bai");
+
+		const avatar = container.querySelector<HTMLInputElement>('input[type="file"]')!;
+		Object.defineProperty(avatar, "files", { configurable: true, value: [new File(["avatar"], "avatar.png", { type: "image/png" })] });
+		await act(async () => avatar.dispatchEvent(new Event("change", { bubbles: true })));
+		await flush();
+		expect(JSON.parse(localStorage.getItem(PROFILE_IDENTITY_STORAGE_KEY)!).avatarDataUrl).toMatch(/^data:image\/png;base64,/u);
 		await act(async () => root.unmount());
 	});
 
@@ -121,12 +173,12 @@ describe("AccountMenu", () => {
 		const root = createRoot(container);
 		await act(async () => root.render(<AccountMenu onSettings={onSettings} />));
 
-		await act(async () => button(container, "ArcMind").click());
-		expect(button(container, "ArcMind").getAttribute("aria-expanded")).toBe("true");
+		await act(async () => button(container, "Metis").click());
+		expect(button(container, "Metis").getAttribute("aria-expanded")).toBe("true");
 		expect(document.activeElement?.textContent).toBe("Settings");
 		await act(async () => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" })));
-		expect(button(container, "ArcMind").getAttribute("aria-expanded")).toBe("false");
-		await act(async () => button(container, "ArcMind").click());
+		expect(button(container, "Metis").getAttribute("aria-expanded")).toBe("false");
+		await act(async () => button(container, "Metis").click());
 		await act(async () => button(container, "Settings").click());
 		expect(onSettings).toHaveBeenCalledTimes(1);
 		await act(async () => root.unmount());
@@ -139,16 +191,16 @@ describe("AccountMenu", () => {
 		const root = createRoot(container);
 		await act(async () => root.render(<AccountMenu onSettings={vi.fn()} />));
 
-		await act(async () => button(container, "ArcMind").click());
+		await act(async () => button(container, "Metis").click());
 		await act(async () => button(container, "Language").click());
 		expect(container.querySelectorAll('[role="menuitemradio"]')).toHaveLength(2);
 		expect(button(container, "English").getAttribute("aria-checked")).toBe("true");
 		await act(async () => button(container, "中文").click());
 		expect(localStorage.getItem(APP_LOCALE_STORAGE_KEY)).toBe("zh-CN");
 		expect(document.documentElement.lang).toBe("zh-CN");
-		expect(button(container, "ArcMind").getAttribute("aria-expanded")).toBe("false");
+		expect(button(container, "Metis").getAttribute("aria-expanded")).toBe("false");
 
-		await act(async () => button(container, "ArcMind").click());
+		await act(async () => button(container, "Metis").click());
 		expect(container.textContent).toContain("设置");
 		expect(container.textContent).toContain("语言");
 		await act(async () => root.unmount());

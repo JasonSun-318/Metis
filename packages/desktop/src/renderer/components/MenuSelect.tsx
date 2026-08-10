@@ -50,7 +50,7 @@ export function MenuSelect<T extends string>({
 		if (!rect) return;
 		const viewportWidth = document.documentElement.clientWidth || window.innerWidth;
 		const viewportHeight = document.documentElement.clientHeight || window.innerHeight;
-		const dialogRect = root.current?.closest("dialog")?.getBoundingClientRect();
+		const dialogRect = root.current?.closest<HTMLElement>('dialog, [role="dialog"]')?.getBoundingClientRect();
 		const boundaryLeft = dialogRect ? dialogRect.left + 8 : 8;
 		const boundaryRight = dialogRect ? dialogRect.right - 8 : viewportWidth - 8;
 		const boundaryTop = dialogRect ? dialogRect.top + 8 : 8;
@@ -152,7 +152,7 @@ export function MenuSelect<T extends string>({
 			})}
 		</div>
 	) : null;
-	const portalTarget = root.current?.closest("dialog") ?? document.body;
+	const portalTarget = root.current?.closest<HTMLElement>('dialog, [role="dialog"]') ?? document.body;
 
 	return (
 		<div className={`menu-select ${className}`.trim()} ref={root}>

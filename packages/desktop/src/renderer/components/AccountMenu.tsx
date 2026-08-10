@@ -54,7 +54,7 @@ export function AccountMenu({ onSettings }: { readonly onSettings: () => void })
 	return (
 		<div className="account-menu" ref={rootRef}>
 			{open && (
-				<div aria-label={t("ArcMind menu")} className="account-menu-popover" role="menu">
+				<div aria-label={t("Metis menu")} className="account-menu-popover" role="menu">
 					<button
 						className="account-menu-item"
 						onClick={() => {
@@ -113,7 +113,7 @@ export function AccountMenu({ onSettings }: { readonly onSettings: () => void })
 				</div>
 			)}
 			<button
-				aria-label="ArcMind"
+				aria-label="Metis"
 				aria-expanded={open}
 				aria-haspopup="menu"
 				className="account-menu-trigger"
@@ -125,7 +125,7 @@ export function AccountMenu({ onSettings }: { readonly onSettings: () => void })
 				type="button"
 			>
 				<span className="account-mark">A</span>
-				<span>ArcMind</span>
+				<span>Metis</span>
 				<CaretDown aria-hidden="true" size={14} />
 			</button>
 		</div>

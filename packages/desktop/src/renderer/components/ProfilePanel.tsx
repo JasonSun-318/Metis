@@ -1,12 +1,37 @@
-import type { ProfileUsageSummaryView } from "@arcmind/app-protocol";
-import { ArrowClockwise, Sparkle } from "@phosphor-icons/react";
-import { type CSSProperties, useCallback, useEffect, useMemo, useState } from "react";
+import type { ProfileUsageSummaryView } from "@metis/app-protocol";
+import { ArrowClockwise, Camera, PencilSimple, Sparkle, Trash } from "@phosphor-icons/react";
+import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import type { ArcMindDesktopApi } from "../../shared/desktop-api.ts";
+import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
 import { localeForIntl } from "../i18n.ts";
 
 const DAY_MS = 86_400_000;
 const VISIBLE_WEEKS = 53;
+const DEFAULT_DISPLAY_NAME = "Metis User";
+const MAX_AVATAR_BYTES = 2_000_000;
+const AVATAR_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
+export const PROFILE_IDENTITY_STORAGE_KEY = "metis.profile.identity.v1";
+
+interface ProfileIdentity {
+	readonly displayName: string;
+	readonly avatarDataUrl: string | null;
+}
+
+function readProfileIdentity(defaultDisplayName = DEFAULT_DISPLAY_NAME): ProfileIdentity {
+	try {
+		const value = JSON.parse(localStorage.getItem(PROFILE_IDENTITY_STORAGE_KEY) ?? "null") as Partial<ProfileIdentity> | null;
+		return {
+			displayName: typeof value?.displayName === "string" && value.displayName.trim() ? value.displayName.slice(0, 80) : defaultDisplayName,
+			avatarDataUrl: typeof value?.avatarDataUrl === "string" && /^data:image\/(?:jpeg|png|webp);base64,/u.test(value.avatarDataUrl) ? value.avatarDataUrl : null,
+		};
+	} catch {
+		return { displayName: defaultDisplayName, avatarDataUrl: null };
+	}
+}
+
+function writeProfileIdentity(identity: ProfileIdentity): void {
+	localStorage.setItem(PROFILE_IDENTITY_STORAGE_KEY, JSON.stringify(identity));
+}
 
 interface ActivityCell {
 	readonly date: string;
@@ -76,6 +101,10 @@ function intensity(tokens: number, peak: number): number {
 	return Math.min(4, Math.max(1, Math.ceil((tokens / peak) * 4)));
 }
 
+function formatActivityTokens(tokens: number, compact: Intl.NumberFormat): string {
+	return tokens < 10_000 ? String(tokens) : compact.format(tokens);
+}
+
 function ProfileLoading() {
 	const { t } = useTranslation();
 	return (
@@ -90,7 +119,7 @@ function ProfileLoading() {
 }
 
 export function ProfilePanel({ api, serverReady }: {
-	readonly api: Pick<ArcMindDesktopApi, "getProfile">;
+	readonly api: Pick<MetisDesktopApi, "getProfile">;
 	readonly serverReady: boolean;
 }) {
 	const { t, i18n } = useTranslation();
@@ -101,6 +130,11 @@ export function ProfilePanel({ api, serverReady }: {
 	const [profile, setProfile] = useState<ProfileUsageSummaryView | null>(null);
 	const [error, setError] = useState<string | null>(null);
 	const [request, setRequest] = useState(0);
+	const [identity, setIdentity] = useState(() => readProfileIdentity(t(DEFAULT_DISPLAY_NAME)));
+	const [editingName, setEditingName] = useState(false);
+	const [nameDraft, setNameDraft] = useState(identity.displayName);
+	const [identityError, setIdentityError] = useState<string | null>(null);
+	const avatarInputRef = useRef<HTMLInputElement>(null);
 
 	const load = useCallback(() => setRequest((current) => current + 1), []);
 	useEffect(() => {
@@ -115,6 +149,34 @@ export function ProfilePanel({ api, serverReady }: {
 	}, [api, request, serverReady]);
 
 	const weeks = useMemo(() => profile ? buildActivityWeeks(profile, locale) : [], [locale, profile]);
+	const saveIdentity = (next: ProfileIdentity) => {
+		try {
+			writeProfileIdentity(next);
+			setIdentity(next);
+			setIdentityError(null);
+		} catch {
+			setIdentityError(t("Profile could not be saved."));
+		}
+	};
+	const saveDisplayName = () => {
+		const displayName = nameDraft.trim().slice(0, 80) || t(DEFAULT_DISPLAY_NAME);
+		setNameDraft(displayName);
+		saveIdentity({ ...identity, displayName });
+		setEditingName(false);
+	};
+	const selectAvatar = (file: File | undefined) => {
+		if (!file) return;
+		if (!AVATAR_TYPES.has(file.type) || file.size > MAX_AVATAR_BYTES) {
+			setIdentityError(t("Choose a PNG, JPEG, or WebP image under 2 MB."));
+			return;
+		}
+		const reader = new FileReader();
+		reader.onload = () => {
+			if (typeof reader.result === "string") saveIdentity({ ...identity, avatarDataUrl: reader.result });
+		};
+		reader.onerror = () => setIdentityError(t("Profile image could not be saved."));
+		reader.readAsDataURL(file);
+	};
 	if (!profile && !error) return <section className="profile-panel"><ProfileLoading /></section>;
 	if (!profile) {
 		return (
@@ -156,9 +218,33 @@ export function ProfilePanel({ api, serverReady }: {
 				<div className="profile-content">
 					<header className="profile-identity">
 						<span className="profile-eyebrow">{t("Personal profile")}</span>
-						<span aria-hidden="true" className="profile-avatar">A</span>
-						<h1>{t("ArcMind User")}</h1>
-						<p>{t("Local profile")}</p>
+						<div className="profile-identity-copy">
+							<div className="profile-name-row">
+								{editingName ? <input
+									aria-label={t("Display name")}
+									autoFocus
+									maxLength={80}
+									onBlur={saveDisplayName}
+									onChange={(event) => setNameDraft(event.target.value)}
+									onKeyDown={(event) => {
+										if (event.key === "Enter") event.currentTarget.blur();
+										if (event.key === "Escape") { setNameDraft(identity.displayName); setEditingName(false); }
+									}}
+									value={nameDraft}
+								/> : <h1>{identity.displayName}</h1>}
+								<button aria-label={t("Edit display name")} onClick={() => setEditingName(true)} type="button"><PencilSimple aria-hidden="true" size={15} /></button>
+							</div>
+							<p>{t("Local profile")}</p>
+						</div>
+						<div className="profile-avatar-actions">
+							<button aria-label={t("Change avatar")} className="profile-avatar" onClick={() => avatarInputRef.current?.click()} type="button">
+								{identity.avatarDataUrl ? <img alt="" src={identity.avatarDataUrl} /> : <span aria-hidden="true">{identity.displayName.trim()[0]?.toUpperCase() ?? "A"}</span>}
+								<i aria-hidden="true"><Camera size={14} /></i>
+							</button>
+							{identity.avatarDataUrl ? <button aria-label={t("Remove avatar")} className="profile-avatar-remove" onClick={() => saveIdentity({ ...identity, avatarDataUrl: null })} type="button"><Trash aria-hidden="true" size={14} /></button> : null}
+							<input accept="image/png,image/jpeg,image/webp" hidden onChange={(event) => { selectAvatar(event.target.files?.[0]); event.target.value = ""; }} ref={avatarInputRef} type="file" />
+						</div>
+						{identityError ? <p className="profile-identity-error" role="alert">{identityError}</p> : null}
 					</header>
 					<div aria-label={t("Usage summary")} className="profile-stats">
 						{stats.map(([value, label]) => <div key={label}><strong>{value}</strong><span>{t(label)}</span></div>)}
@@ -172,16 +258,19 @@ export function ProfilePanel({ api, serverReady }: {
 							<div className="profile-heatmap">
 								{weeks.map((week, index) => (
 									<div className="profile-heatmap-week" key={week.days[0]?.date ?? index}>
-										{week.days.map((day) => day.future ? <span className="profile-heatmap-future" key={day.date} /> : (
-											<span
-												aria-label={t("{{date}}: {{tokens}} Tokens", { date: fullDate.format(dateFromDayNumber(dayNumber(day.date))), tokens: fullNumber.format(day.tokens) })}
-												className="profile-heatmap-cell"
-												data-level={intensity(day.tokens, profile.peakDailyTokens)}
-												data-tooltip={t("{{date}} · {{tokens}} Tokens", { date: fullDate.format(dateFromDayNumber(dayNumber(day.date))), tokens: fullNumber.format(day.tokens) })}
-												key={day.date}
-												style={{ "--profile-cell-index": index } as CSSProperties}
-											/>
-										))}
+									{week.days.map((day) => {
+										if (day.future) return <span className="profile-heatmap-future" key={day.date} />;
+										const tokens = formatActivityTokens(day.tokens, compactNumber);
+										const date = fullDate.format(dateFromDayNumber(dayNumber(day.date)));
+										return <span
+											aria-label={t("{{date}}: {{tokens}} Tokens", { date, tokens })}
+											className="profile-heatmap-cell"
+											data-level={intensity(day.tokens, profile.peakDailyTokens)}
+											data-tooltip={t("{{date}} · {{tokens}} Tokens", { date, tokens })}
+											key={day.date}
+											style={{ "--profile-cell-index": index } as CSSProperties}
+										/>;
+									})}
 										{week.month && <small>{week.month}</small>}
 									</div>
 								))}
