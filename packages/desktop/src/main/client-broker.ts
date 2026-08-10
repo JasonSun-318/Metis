@@ -12,7 +12,7 @@ import {
 	validateClientRequest,
 	validateServerNotification,
 	validateServerRequest,
-} from "@arcmind/app-protocol";
+} from "@metis/app-protocol";
 import type { BrowserWindow, IpcMain, IpcMainInvokeEvent, WebContents } from "electron";
 import {
 	DESKTOP_BROWSER_EVENT_CHANNEL,
@@ -25,6 +25,7 @@ import {
 	type DesktopCreateProjectFolderInput,
 	type DesktopRpcOutcome,
 	type DesktopTerminalEvent,
+	type DesktopUpdateState,
 	type DesktopWorkspaceEditState,
 	type SupervisorView,
 	validateBrowserControlInput,
@@ -59,6 +60,11 @@ interface BrokerSupervisor {
 	respondToServerRequest(request: ServerRpcRequest, response: ServerRpcSuccessResponse | RpcErrorResponse): void;
 }
 
+interface BrokerUpdater {
+	view(): DesktopUpdateState;
+	downloadAndOpen(): Promise<void>;
+}
+
 interface ClientBrokerOptions {
 	readonly ipcMain: Pick<IpcMain, "handle" | "removeHandler">;
 	readonly supervisor: BrokerSupervisor;
@@ -67,6 +73,7 @@ interface ClientBrokerOptions {
 	readonly getDefaultProjectLocation?: () => Promise<string>;
 	readonly createProjectFolder?: (input: DesktopCreateProjectFolderInput) => Promise<string>;
 	readonly setScheduleKeepAwake?: (enabled: boolean) => Promise<void> | void;
+	readonly updater?: BrokerUpdater;
 	readonly terminalManager?: Pick<TerminalManager, "create" | "write" | "resize" | "close" | "closeAll" | "onEvent">;
 	readonly browserManager?: Pick<
 		BrowserManager,
@@ -118,7 +125,7 @@ export function isTrustedRendererUrl(value: string): boolean {
 
 function rpcFailure(response: RpcErrorResponse): Error {
 	const error = new Error(response.error.message);
-	error.name = "ArcMindRpcError";
+	error.name = "MetisRpcError";
 	Object.defineProperty(error, "code", { value: response.error.code, enumerable: true });
 	return error;
 }
@@ -132,6 +139,7 @@ export class ClientBroker {
 	private readonly getDefaultProjectLocation: () => Promise<string>;
 	private readonly createProjectFolder: (input: DesktopCreateProjectFolderInput) => Promise<string>;
 	private readonly setScheduleKeepAwake: (enabled: boolean) => Promise<void> | void;
+	private readonly updater: BrokerUpdater;
 	private readonly terminalManager: Pick<
 		TerminalManager,
 		"create" | "write" | "resize" | "close" | "closeAll" | "onEvent"
@@ -182,6 +190,12 @@ export class ClientBroker {
 				throw new Error("Project folder creation is unavailable");
 			});
 		this.setScheduleKeepAwake = options.setScheduleKeepAwake ?? (() => undefined);
+		this.updater = options.updater ?? {
+			view: () => ({ status: "unavailable" }),
+			downloadAndOpen: async () => {
+				throw new Error("Desktop updates are unavailable");
+			},
+		};
 		this.terminalManager = options.terminalManager ?? {
 			create: async () => {
 				throw new Error("Terminal is unavailable");
@@ -320,6 +334,16 @@ export class ClientBroker {
 		this.register(DESKTOP_IPC_CHANNELS.listModels, 1, async (_event, [input]) =>
 			this.clientCall("model/list", input),
 		);
+		this.register(DESKTOP_IPC_CHANNELS.getModelSettings, 1, async (_event, [input]) =>
+			this.clientCall("model/settings/get", input),
+		);
+		this.register(DESKTOP_IPC_CHANNELS.updateModelSettings, 1, async (_event, [input]) =>
+			this.clientCall("model/settings/update", input),
+		);
+		this.register(DESKTOP_IPC_CHANNELS.testModelConnection, 1, async (_event, [input]) =>
+			this.clientCall("model/testConnection", input),
+		);
+		this.register(DESKTOP_IPC_CHANNELS.getUsage, 1, async (_event, [input]) => this.clientCall("usage/get", input));
 		this.register(DESKTOP_IPC_CHANNELS.createSchedule, 1, async (_event, [input]) =>
 			this.clientCall("schedule/create", input),
 		);
@@ -464,6 +488,10 @@ export class ClientBroker {
 		this.register(DESKTOP_IPC_CHANNELS.retryServer, 0, async () => {
 			await this.supervisor.retry();
 		});
+		this.register(DESKTOP_IPC_CHANNELS.getUpdateState, 0, async () => this.updater.view());
+		this.register(DESKTOP_IPC_CHANNELS.startUpdate, 0, async () => {
+			await this.updater.downloadAndOpen();
+		});
 		this.register(DESKTOP_IPC_CHANNELS.subscribe, 0, async () => {
 			this.ownerSubscribed = true;
 			this.sendEvent({ type: "supervisor", view: this.supervisor.view() });
@@ -580,7 +608,7 @@ export class ClientBroker {
 		} catch (cause) {
 			if (
 				cause instanceof Error &&
-				cause.name === "ArcMindRpcError" &&
+				cause.name === "MetisRpcError" &&
 				typeof (cause as Error & { code?: unknown }).code === "number"
 			) {
 				return {

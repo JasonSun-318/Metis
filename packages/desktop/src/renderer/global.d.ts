@@ -1,7 +1,7 @@
-import type { ArcMindDesktopApi } from "../shared/desktop-api.ts";
+import type { MetisDesktopApi } from "../shared/desktop-api.ts";
 
 declare global {
 	interface Window {
-		readonly arcMind: ArcMindDesktopApi;
+		readonly metis: MetisDesktopApi;
 	}
 }

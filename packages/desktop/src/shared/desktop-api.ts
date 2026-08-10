@@ -13,7 +13,7 @@ import {
 	validateClientRequest,
 	validateServerNotification,
 	validateServerRequest,
-} from "@arcmind/app-protocol";
+} from "@metis/app-protocol";
 
 export type SupervisorState = "stopped" | "starting" | "ready" | "restarting" | "failed" | "shuttingDown";
 
@@ -24,78 +24,90 @@ export interface SupervisorView {
 	readonly failure: string | null;
 }
 
+export type DesktopUpdateState =
+	| { readonly status: "unavailable" | "checking" }
+	| { readonly status: "available" | "ready"; readonly version: string }
+	| { readonly status: "downloading"; readonly version: string; readonly progress: number };
+
 export type DesktopApiEvent =
 	| { readonly type: "app-server"; readonly envelope: ServerRpcRequest | ServerRpcNotification }
 	| { readonly type: "interaction-cancelled"; readonly interactionId: string }
 	| { readonly type: "supervisor"; readonly view: SupervisorView };
 
 export const DESKTOP_IPC_CHANNELS = {
-	listSessions: "arcmind:list-sessions",
-	listSkills: "arcmind:list-skills",
-	getProfile: "arcmind:get-profile",
-	listModels: "arcmind:list-models",
-	createSchedule: "arcmind:create-schedule",
-	listSchedules: "arcmind:list-schedules",
-	getSchedule: "arcmind:get-schedule",
-	updateSchedule: "arcmind:update-schedule",
-	pauseSchedule: "arcmind:pause-schedule",
-	resumeSchedule: "arcmind:resume-schedule",
-	deleteSchedule: "arcmind:delete-schedule",
-	runScheduleNow: "arcmind:run-schedule-now",
-	listScheduleRuns: "arcmind:list-schedule-runs",
-	getScheduleRun: "arcmind:get-schedule-run",
-	markScheduleRunRead: "arcmind:mark-schedule-run-read",
-	subscribeSchedule: "arcmind:subscribe-schedule",
-	unsubscribeSchedule: "arcmind:unsubscribe-schedule",
-	setScheduleKeepAwake: "arcmind:set-schedule-keep-awake",
-	previewProjectDelete: "arcmind:preview-project-delete",
-	deleteProject: "arcmind:delete-project",
-	createSession: "arcmind:create-session",
-	renameSession: "arcmind:rename-session",
-	deleteSession: "arcmind:delete-session",
-	openSession: "arcmind:open-session",
-	markSessionRead: "arcmind:mark-session-read",
-	readItems: "arcmind:read-items",
-	readSubagentItems: "arcmind:read-subagent-items",
-	interruptSubagent: "arcmind:interrupt-subagent",
-	setThinkingSelection: "arcmind:set-thinking-selection",
-	setPermissionMode: "arcmind:set-permission-mode",
-	setModel: "arcmind:set-model",
-	startTurn: "arcmind:start-turn",
-	steerTurn: "arcmind:steer-turn",
-	interruptTurn: "arcmind:interrupt-turn",
-	respondToInteraction: "arcmind:respond-to-interaction",
-	selectProjectFolder: "arcmind:select-project-folder",
-	selectAttachmentFiles: "arcmind:select-attachment-files",
-	getDefaultProjectLocation: "arcmind:get-default-project-location",
-	createProjectFolder: "arcmind:create-project-folder",
-	getServerState: "arcmind:get-server-state",
-	retryServer: "arcmind:retry-server",
-	subscribe: "arcmind:subscribe",
-	createTerminal: "arcmind:create-terminal",
-	writeTerminal: "arcmind:write-terminal",
-	resizeTerminal: "arcmind:resize-terminal",
-	closeTerminal: "arcmind:close-terminal",
-	createBrowser: "arcmind:create-browser",
-	captureBrowserPreview: "arcmind:capture-browser-preview",
-	controlBrowser: "arcmind:control-browser",
-	closeBrowser: "arcmind:close-browser",
-	listWorkspaceDirectory: "arcmind:list-workspace-directory",
-	searchWorkspaceFiles: "arcmind:search-workspace-files",
-	readWorkspaceFile: "arcmind:read-workspace-file",
-	writeWorkspaceFile: "arcmind:write-workspace-file",
-	openWorkspaceFile: "arcmind:open-workspace-file",
-	mutateWorkspaceEntry: "arcmind:mutate-workspace-entry",
-	getWorkspaceReview: "arcmind:get-workspace-review",
-	getWorkspaceReviewFileDiff: "arcmind:get-workspace-review-file-diff",
-	getWorkspaceReviewFileContext: "arcmind:get-workspace-review-file-context",
-	writeClipboardText: "arcmind:write-clipboard-text",
-	setWorkspaceEditState: "arcmind:set-workspace-edit-state",
+	listSessions: "metis:list-sessions",
+	listSkills: "metis:list-skills",
+	getProfile: "metis:get-profile",
+	listModels: "metis:list-models",
+	getModelSettings: "metis:get-model-settings",
+	updateModelSettings: "metis:update-model-settings",
+	testModelConnection: "metis:test-model-connection",
+	getUsage: "metis:get-usage",
+	createSchedule: "metis:create-schedule",
+	listSchedules: "metis:list-schedules",
+	getSchedule: "metis:get-schedule",
+	updateSchedule: "metis:update-schedule",
+	pauseSchedule: "metis:pause-schedule",
+	resumeSchedule: "metis:resume-schedule",
+	deleteSchedule: "metis:delete-schedule",
+	runScheduleNow: "metis:run-schedule-now",
+	listScheduleRuns: "metis:list-schedule-runs",
+	getScheduleRun: "metis:get-schedule-run",
+	markScheduleRunRead: "metis:mark-schedule-run-read",
+	subscribeSchedule: "metis:subscribe-schedule",
+	unsubscribeSchedule: "metis:unsubscribe-schedule",
+	setScheduleKeepAwake: "metis:set-schedule-keep-awake",
+	previewProjectDelete: "metis:preview-project-delete",
+	deleteProject: "metis:delete-project",
+	createSession: "metis:create-session",
+	renameSession: "metis:rename-session",
+	deleteSession: "metis:delete-session",
+	openSession: "metis:open-session",
+	markSessionRead: "metis:mark-session-read",
+	readItems: "metis:read-items",
+	readSubagentItems: "metis:read-subagent-items",
+	interruptSubagent: "metis:interrupt-subagent",
+	setThinkingSelection: "metis:set-thinking-selection",
+	setPermissionMode: "metis:set-permission-mode",
+	setModel: "metis:set-model",
+	startTurn: "metis:start-turn",
+	steerTurn: "metis:steer-turn",
+	interruptTurn: "metis:interrupt-turn",
+	respondToInteraction: "metis:respond-to-interaction",
+	selectProjectFolder: "metis:select-project-folder",
+	selectAttachmentFiles: "metis:select-attachment-files",
+	getDefaultProjectLocation: "metis:get-default-project-location",
+	createProjectFolder: "metis:create-project-folder",
+	getServerState: "metis:get-server-state",
+	retryServer: "metis:retry-server",
+	subscribe: "metis:subscribe",
+	createTerminal: "metis:create-terminal",
+	writeTerminal: "metis:write-terminal",
+	resizeTerminal: "metis:resize-terminal",
+	closeTerminal: "metis:close-terminal",
+	createBrowser: "metis:create-browser",
+	captureBrowserPreview: "metis:capture-browser-preview",
+	controlBrowser: "metis:control-browser",
+	closeBrowser: "metis:close-browser",
+	listWorkspaceDirectory: "metis:list-workspace-directory",
+	searchWorkspaceFiles: "metis:search-workspace-files",
+	readWorkspaceFile: "metis:read-workspace-file",
+	writeWorkspaceFile: "metis:write-workspace-file",
+	openWorkspaceFile: "metis:open-workspace-file",
+	mutateWorkspaceEntry: "metis:mutate-workspace-entry",
+	getWorkspaceReview: "metis:get-workspace-review",
+	getWorkspaceReviewFileDiff: "metis:get-workspace-review-file-diff",
+	getWorkspaceReviewFileContext: "metis:get-workspace-review-file-context",
+	writeClipboardText: "metis:write-clipboard-text",
+	setWorkspaceEditState: "metis:set-workspace-edit-state",
+	getUpdateState: "metis:get-update-state",
+	startUpdate: "metis:start-update",
 } as const;
 
-export const DESKTOP_EVENT_CHANNEL = "arcmind:event";
-export const DESKTOP_TERMINAL_EVENT_CHANNEL = "arcmind:terminal-event";
-export const DESKTOP_BROWSER_EVENT_CHANNEL = "arcmind:browser-event";
+export const DESKTOP_EVENT_CHANNEL = "metis:event";
+export const DESKTOP_TERMINAL_EVENT_CHANNEL = "metis:terminal-event";
+export const DESKTOP_BROWSER_EVENT_CHANNEL = "metis:browser-event";
+export const DESKTOP_UPDATE_EVENT_CHANNEL = "metis:update-event";
 
 export interface DesktopCreateTerminalInput {
 	readonly terminalId: string;
@@ -381,11 +393,15 @@ export type DesktopRpcOutcome<Result> =
 	| { readonly ok: true; readonly result: Result }
 	| { readonly ok: false; readonly error: { readonly code: number; readonly message: string } };
 
-export interface ArcMindDesktopApi {
+export interface MetisDesktopApi {
 	listSessions(input?: ClientParams<"session/list">): Promise<ClientResult<"session/list">>;
 	listSkills(input: ClientParams<"skill/list">): Promise<ClientResult<"skill/list">>;
 	getProfile(): Promise<ClientResult<"profile/get">>;
 	listModels(): Promise<ClientResult<"model/list">>;
+	getModelSettings(): Promise<ClientResult<"model/settings/get">>;
+	updateModelSettings(input: ClientParams<"model/settings/update">): Promise<ClientResult<"model/settings/update">>;
+	testModelConnection(input: ClientParams<"model/testConnection">): Promise<ClientResult<"model/testConnection">>;
+	getUsage(input: ClientParams<"usage/get">): Promise<ClientResult<"usage/get">>;
 	createSchedule(input: ClientParams<"schedule/create">): Promise<ClientResult<"schedule/create">>;
 	listSchedules(input?: ClientParams<"schedule/list">): Promise<ClientResult<"schedule/list">>;
 	getSchedule(input: ClientParams<"schedule/get">): Promise<ClientResult<"schedule/get">>;
@@ -449,6 +465,9 @@ export interface ArcMindDesktopApi {
 	getWorkspaceReviewFileContext(input: DesktopWorkspaceReviewFileInput): Promise<DesktopWorkspaceReviewFileContext>;
 	writeClipboardText(input: DesktopWriteClipboardTextInput): Promise<void>;
 	setWorkspaceEditState(input: DesktopWorkspaceEditState): Promise<void>;
+	getUpdateState(): Promise<DesktopUpdateState>;
+	startUpdate(): Promise<void>;
+	subscribeUpdate(listener: (state: DesktopUpdateState) => void): () => void;
 	subscribe(listener: (event: DesktopApiEvent) => void): () => void;
 	getServerState(): Promise<SupervisorView>;
 	retryServer(): Promise<void>;
@@ -654,6 +673,38 @@ export function validateWorkspaceEditState(value: unknown): DesktopWorkspaceEdit
 		throw new TypeError("Invalid workspace edit state");
 	}
 	return { dirty: input.dirty, language: input.language };
+}
+
+export function validateDesktopUpdateState(value: unknown): DesktopUpdateState {
+	if (typeof value !== "object" || value === null || Array.isArray(value)) {
+		throw new TypeError("Invalid desktop update state");
+	}
+	const status = (value as { readonly status?: unknown }).status;
+	if (status === "unavailable" || status === "checking") {
+		exactRecord(value, ["status"], "desktop update state");
+		return { status };
+	}
+	if (status === "available" || status === "ready") {
+		const state = exactRecord(value, ["status", "version"], "desktop update state");
+		if (typeof state.version !== "string" || !/^\d+\.\d+\.\d+$/u.test(state.version)) {
+			throw new TypeError("Invalid desktop update version");
+		}
+		return { status, version: state.version };
+	}
+	if (status === "downloading") {
+		const state = exactRecord(value, ["status", "version", "progress"], "desktop update state");
+		if (
+			typeof state.version !== "string" ||
+			!/^\d+\.\d+\.\d+$/u.test(state.version) ||
+			!Number.isInteger(state.progress) ||
+			Number(state.progress) < 0 ||
+			Number(state.progress) > 100
+		) {
+			throw new TypeError("Invalid desktop update progress");
+		}
+		return { status, version: state.version, progress: Number(state.progress) };
+	}
+	throw new TypeError("Invalid desktop update state");
 }
 
 function terminalId(value: unknown): string {

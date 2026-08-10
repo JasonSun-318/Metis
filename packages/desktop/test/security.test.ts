@@ -41,6 +41,13 @@ function rendererSources(directory = join(desktopRoot, "src", "renderer")): stri
 	});
 }
 
+it("uses only the Metis Desktop profile", () => {
+	const main = source("src/main/main.ts");
+	expect(main).toContain('const explicitUserData = app.commandLine.hasSwitch("user-data-dir")');
+	expect(main).not.toContain("migrateDesktopUserData");
+	expect(main).toContain('app.setPath("userData", join(app.getPath("appData"), "Metis"))');
+});
+
 class FakeIpcMain {
 	readonly handlers = new Map<string, (event: unknown, ...args: unknown[]) => Promise<unknown>>();
 
@@ -400,7 +407,7 @@ describe("desktop trust boundaries", () => {
 		expect(() => validateDesktopBrowserEvent({ type: "command", browserId, command: "developer-tools" })).toThrow(
 			"Invalid browser command",
 		);
-		expect(DESKTOP_BROWSER_EVENT_CHANNEL).toBe("arcmind:browser-event");
+		expect(DESKTOP_BROWSER_EVENT_CHANNEL).toBe("metis:browser-event");
 	});
 
 	it("keeps the BrowserWindow sandboxed and denies ambient browser capabilities", () => {
@@ -448,7 +455,7 @@ describe("desktop trust boundaries", () => {
 
 		for (const rendererSource of rendererSources()) {
 			expect(rendererSource).not.toMatch(
-				/from\s+["'](?:node:|electron|@arcmind\/(?:agent|coding-agent|app-server))/u,
+				/from\s+["'](?:node:|electron|@(?:metis|arcmind)\/(?:agent|coding-agent|app-server))/u,
 			);
 			expect(rendererSource).not.toMatch(/ipcRenderer|\.invoke\(|shell\.open|moveToTrash/u);
 		}
@@ -457,7 +464,10 @@ describe("desktop trust boundaries", () => {
 		expect(preload).toContain('"project/delete"');
 		expect(preload).toContain('"session/rename"');
 		expect(preload).toContain('"session/delete"');
-		expect(preload).not.toContain('exposeInMainWorld("arcMind", ipcRenderer');
+		expect(preload).toContain("const frozenApi = Object.freeze(api)");
+		expect(preload).toContain('exposeInMainWorld("metis", frozenApi)');
+		expect(preload).not.toContain('exposeInMainWorld("arcMind"');
+		expect(preload).not.toContain('exposeInMainWorld("metis", ipcRenderer');
 	});
 
 	it("accepts only the exact privileged renderer document", () => {
@@ -821,6 +831,30 @@ describe("desktop trust boundaries", () => {
 					topSkills: [],
 				};
 			}
+			if (request.method === "model/settings/get" || request.method === "model/settings/update") {
+				result = { defaultModel: null, defaultThinkingSelection: "medium", providers: [], loadError: null };
+			}
+			if (request.method === "model/testConnection") {
+				result = { ok: true, message: "Connection succeeded", latencyMs: 12 };
+			}
+			if (request.method === "usage/get") {
+				result = {
+					generatedAt: "2026-08-08T12:00:00.000Z",
+					rangeDays: request.params.rangeDays,
+					totalTokens: 0,
+					inputTokens: 0,
+					outputTokens: 0,
+					cacheReadTokens: 0,
+					cacheWriteTokens: 0,
+					chatTokens: 0,
+					codeTokens: 0,
+					sessionCount: 0,
+					chatSessionCount: 0,
+					codeSessionCount: 0,
+					daily: [],
+					topModels: [],
+				};
+			}
 			if (request.method === "project/deletePreview") {
 				result = {
 					mode: request.params.mode,
@@ -882,6 +916,10 @@ describe("desktop trust boundaries", () => {
 		const listSessions = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.listSessions)!;
 		const listSkills = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.listSkills)!;
 		const getProfile = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.getProfile)!;
+		const getModelSettings = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.getModelSettings)!;
+		const updateModelSettings = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.updateModelSettings)!;
+		const testModelConnection = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.testModelConnection)!;
+		const getUsage = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.getUsage)!;
 		const previewProjectDelete = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.previewProjectDelete)!;
 		const deleteProject = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.deleteProject)!;
 		const renameSession = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.renameSession)!;
@@ -921,6 +959,29 @@ describe("desktop trust boundaries", () => {
 		await expect(getProfile(event, { unexpected: true })).rejects.toThrow("Invalid profile/get params");
 		await expect(getProfile(event, {})).resolves.toMatchObject({ totalTokens: 0, topSkills: [] });
 		expect(supervisor.request).toHaveBeenCalledWith(expect.objectContaining({ method: "profile/get", params: {} }));
+		await expect(getModelSettings(event, { unexpected: true })).rejects.toThrow("Invalid model/settings/get params");
+		await expect(getModelSettings(event, {})).resolves.toMatchObject({ providers: [], loadError: null });
+		await expect(
+			updateModelSettings(event, {
+				requestId: "bad",
+				mutation: { type: "set_defaults", model: null, thinkingSelection: "medium" },
+			}),
+		).rejects.toThrow("Invalid model/settings/update params");
+		await expect(
+			updateModelSettings(event, {
+				requestId: "11111111-1111-4111-8111-111111111321",
+				mutation: { type: "set_defaults", model: null, thinkingSelection: "medium" },
+			}),
+		).resolves.toMatchObject({ defaultModel: null });
+		await expect(
+			testModelConnection(event, {
+				requestId: "11111111-1111-4111-8111-111111111322",
+				provider: "openai",
+				modelId: "gpt-5",
+			}),
+		).resolves.toMatchObject({ ok: true, latencyMs: 12 });
+		await expect(getUsage(event, { rangeDays: 31 })).rejects.toThrow("Invalid usage/get params");
+		await expect(getUsage(event, { rangeDays: 7 })).resolves.toMatchObject({ rangeDays: 7, totalTokens: 0 });
 		await expect(previewProjectDelete(event, { mode: "all", cwd: "/work/project" })).rejects.toThrow(
 			"Invalid project/deletePreview params",
 		);
@@ -1239,8 +1300,8 @@ describe("desktop trust boundaries", () => {
 	it("guards the default location and bounded project creation capabilities", async () => {
 		const ipcMain = new FakeIpcMain();
 		const { supervisor } = supervisorHarness();
-		const getDefaultProjectLocation = vi.fn().mockResolvedValue("/Users/test/ArcMind Projects");
-		const createProjectFolder = vi.fn().mockResolvedValue("/Users/test/ArcMind Projects/Demo");
+		const getDefaultProjectLocation = vi.fn().mockResolvedValue("/Users/test/Metis Projects");
+		const createProjectFolder = vi.fn().mockResolvedValue("/Users/test/Metis Projects/Demo");
 		const broker = new ClientBroker({
 			ipcMain: ipcMain as never,
 			supervisor,
@@ -1250,13 +1311,13 @@ describe("desktop trust boundaries", () => {
 		const webContents = new FakeWebContents();
 		broker.attach({ webContents: webContents as never });
 		const event = { sender: webContents, senderFrame: webContents.mainFrame };
-		const input = { parentDirectory: "/Users/test/ArcMind Projects", name: "Demo", files: [] };
+		const input = { parentDirectory: "/Users/test/Metis Projects", name: "Demo", files: [] };
 
 		await expect(ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.getDefaultProjectLocation)!(event)).resolves.toBe(
-			"/Users/test/ArcMind Projects",
+			"/Users/test/Metis Projects",
 		);
 		await expect(ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.createProjectFolder)!(event, input)).resolves.toBe(
-			"/Users/test/ArcMind Projects/Demo",
+			"/Users/test/Metis Projects/Demo",
 		);
 		expect(createProjectFolder).toHaveBeenCalledWith(input);
 		await expect(ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.createProjectFolder)!(event)).rejects.toThrow(
@@ -1294,7 +1355,7 @@ describe("desktop trust boundaries", () => {
 				params: { serverEpoch: "11111111-1111-4111-8111-111111111111", cursor: 1 },
 			}),
 		);
-		expect(Object.values(DESKTOP_IPC_CHANNELS)).not.toContain("arcmind:connection-ack");
+		expect(Object.values(DESKTOP_IPC_CHANNELS)).not.toContain("metis:connection-ack");
 		broker.dispose();
 	});
 
@@ -1438,7 +1499,7 @@ describe("desktop trust boundaries", () => {
 				expect.objectContaining({ error: expect.objectContaining({ code: -32008 }) }),
 			);
 			expect(webContents.sent).toContainEqual([
-				"arcmind:event",
+				"metis:event",
 				{
 					type: "interaction-cancelled",
 					interactionId: "33333333-3333-4333-8333-333333333333",

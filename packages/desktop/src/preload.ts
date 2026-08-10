@@ -1,14 +1,16 @@
-import type { ClientParams, ClientRequestMethod, InteractionResponseInput } from "@arcmind/app-protocol";
+import type { ClientParams, ClientRequestMethod, InteractionResponseInput } from "@metis/app-protocol";
 import { contextBridge, type IpcRendererEvent, ipcRenderer, webUtils } from "electron";
 import {
-	type ArcMindDesktopApi,
 	DESKTOP_BROWSER_EVENT_CHANNEL,
 	DESKTOP_EVENT_CHANNEL,
 	DESKTOP_IPC_CHANNELS,
 	DESKTOP_TERMINAL_EVENT_CHANNEL,
+	DESKTOP_UPDATE_EVENT_CHANNEL,
 	type DesktopApiEvent,
 	type DesktopBrowserEvent,
 	type DesktopTerminalEvent,
+	type DesktopUpdateState,
+	type MetisDesktopApi,
 	validateBrowserControlInput,
 	validateCloseBrowserInput,
 	validateCloseTerminalInput,
@@ -18,6 +20,7 @@ import {
 	validateDesktopBrowserEvent,
 	validateDesktopClientParams,
 	validateDesktopTerminalEvent,
+	validateDesktopUpdateState,
 	validateInteractionResponseInput,
 	validateListWorkspaceDirectoryInput,
 	validateOpenWorkspaceFileInput,
@@ -43,62 +46,76 @@ function invoke<Method extends Exclude<ClientRequestMethod, "initialize">>(
 
 const api = {
 	listSessions: (input: ClientParams<"session/list"> = {}) =>
-		invoke(DESKTOP_IPC_CHANNELS.listSessions, "session/list", input) as ReturnType<ArcMindDesktopApi["listSessions"]>,
+		invoke(DESKTOP_IPC_CHANNELS.listSessions, "session/list", input) as ReturnType<MetisDesktopApi["listSessions"]>,
 	listSkills: (input: ClientParams<"skill/list">) =>
-		invoke(DESKTOP_IPC_CHANNELS.listSkills, "skill/list", input) as ReturnType<ArcMindDesktopApi["listSkills"]>,
+		invoke(DESKTOP_IPC_CHANNELS.listSkills, "skill/list", input) as ReturnType<MetisDesktopApi["listSkills"]>,
 	getProfile: () =>
-		invoke(DESKTOP_IPC_CHANNELS.getProfile, "profile/get", {}) as ReturnType<ArcMindDesktopApi["getProfile"]>,
+		invoke(DESKTOP_IPC_CHANNELS.getProfile, "profile/get", {}) as ReturnType<MetisDesktopApi["getProfile"]>,
 	listModels: () =>
-		invoke(DESKTOP_IPC_CHANNELS.listModels, "model/list", {}) as ReturnType<ArcMindDesktopApi["listModels"]>,
+		invoke(DESKTOP_IPC_CHANNELS.listModels, "model/list", {}) as ReturnType<MetisDesktopApi["listModels"]>,
+	getModelSettings: () =>
+		invoke(DESKTOP_IPC_CHANNELS.getModelSettings, "model/settings/get", {}) as ReturnType<
+			MetisDesktopApi["getModelSettings"]
+		>,
+	updateModelSettings: (input: ClientParams<"model/settings/update">) =>
+		invoke(DESKTOP_IPC_CHANNELS.updateModelSettings, "model/settings/update", input) as ReturnType<
+			MetisDesktopApi["updateModelSettings"]
+		>,
+	testModelConnection: (input: ClientParams<"model/testConnection">) =>
+		invoke(DESKTOP_IPC_CHANNELS.testModelConnection, "model/testConnection", input) as ReturnType<
+			MetisDesktopApi["testModelConnection"]
+		>,
+	getUsage: (input: ClientParams<"usage/get">) =>
+		invoke(DESKTOP_IPC_CHANNELS.getUsage, "usage/get", input) as ReturnType<MetisDesktopApi["getUsage"]>,
 	createSchedule: (input: ClientParams<"schedule/create">) =>
 		invoke(DESKTOP_IPC_CHANNELS.createSchedule, "schedule/create", input) as ReturnType<
-			ArcMindDesktopApi["createSchedule"]
+			MetisDesktopApi["createSchedule"]
 		>,
 	listSchedules: (input: ClientParams<"schedule/list"> = {}) =>
 		invoke(DESKTOP_IPC_CHANNELS.listSchedules, "schedule/list", input) as ReturnType<
-			ArcMindDesktopApi["listSchedules"]
+			MetisDesktopApi["listSchedules"]
 		>,
 	getSchedule: (input: ClientParams<"schedule/get">) =>
-		invoke(DESKTOP_IPC_CHANNELS.getSchedule, "schedule/get", input) as ReturnType<ArcMindDesktopApi["getSchedule"]>,
+		invoke(DESKTOP_IPC_CHANNELS.getSchedule, "schedule/get", input) as ReturnType<MetisDesktopApi["getSchedule"]>,
 	updateSchedule: (input: ClientParams<"schedule/update">) =>
 		invoke(DESKTOP_IPC_CHANNELS.updateSchedule, "schedule/update", input) as ReturnType<
-			ArcMindDesktopApi["updateSchedule"]
+			MetisDesktopApi["updateSchedule"]
 		>,
 	pauseSchedule: (input: ClientParams<"schedule/pause">) =>
 		invoke(DESKTOP_IPC_CHANNELS.pauseSchedule, "schedule/pause", input) as ReturnType<
-			ArcMindDesktopApi["pauseSchedule"]
+			MetisDesktopApi["pauseSchedule"]
 		>,
 	resumeSchedule: (input: ClientParams<"schedule/resume">) =>
 		invoke(DESKTOP_IPC_CHANNELS.resumeSchedule, "schedule/resume", input) as ReturnType<
-			ArcMindDesktopApi["resumeSchedule"]
+			MetisDesktopApi["resumeSchedule"]
 		>,
 	deleteSchedule: (input: ClientParams<"schedule/delete">) =>
 		invoke(DESKTOP_IPC_CHANNELS.deleteSchedule, "schedule/delete", input) as ReturnType<
-			ArcMindDesktopApi["deleteSchedule"]
+			MetisDesktopApi["deleteSchedule"]
 		>,
 	runScheduleNow: (input: ClientParams<"schedule/run-now">) =>
 		invoke(DESKTOP_IPC_CHANNELS.runScheduleNow, "schedule/run-now", input) as ReturnType<
-			ArcMindDesktopApi["runScheduleNow"]
+			MetisDesktopApi["runScheduleNow"]
 		>,
 	listScheduleRuns: (input: ClientParams<"schedule/run/list">) =>
 		invoke(DESKTOP_IPC_CHANNELS.listScheduleRuns, "schedule/run/list", input) as ReturnType<
-			ArcMindDesktopApi["listScheduleRuns"]
+			MetisDesktopApi["listScheduleRuns"]
 		>,
 	getScheduleRun: (input: ClientParams<"schedule/run/get">) =>
 		invoke(DESKTOP_IPC_CHANNELS.getScheduleRun, "schedule/run/get", input) as ReturnType<
-			ArcMindDesktopApi["getScheduleRun"]
+			MetisDesktopApi["getScheduleRun"]
 		>,
 	markScheduleRunRead: (input: ClientParams<"schedule/run/mark-read">) =>
 		invoke(DESKTOP_IPC_CHANNELS.markScheduleRunRead, "schedule/run/mark-read", input) as ReturnType<
-			ArcMindDesktopApi["markScheduleRunRead"]
+			MetisDesktopApi["markScheduleRunRead"]
 		>,
 	subscribeSchedule: () =>
 		invoke(DESKTOP_IPC_CHANNELS.subscribeSchedule, "schedule/subscribe", {}) as ReturnType<
-			ArcMindDesktopApi["subscribeSchedule"]
+			MetisDesktopApi["subscribeSchedule"]
 		>,
 	unsubscribeSchedule: () =>
 		invoke(DESKTOP_IPC_CHANNELS.unsubscribeSchedule, "schedule/unsubscribe", {}) as ReturnType<
-			ArcMindDesktopApi["unsubscribeSchedule"]
+			MetisDesktopApi["unsubscribeSchedule"]
 		>,
 	setScheduleKeepAwake: async (enabled: boolean) => {
 		if (typeof enabled !== "boolean") throw new TypeError("Keep Awake state must be a boolean");
@@ -106,57 +123,57 @@ const api = {
 	},
 	previewProjectDelete: (input: ClientParams<"project/deletePreview">) =>
 		invoke(DESKTOP_IPC_CHANNELS.previewProjectDelete, "project/deletePreview", input) as ReturnType<
-			ArcMindDesktopApi["previewProjectDelete"]
+			MetisDesktopApi["previewProjectDelete"]
 		>,
 	deleteProject: (input: ClientParams<"project/delete">) =>
 		invoke(DESKTOP_IPC_CHANNELS.deleteProject, "project/delete", input) as ReturnType<
-			ArcMindDesktopApi["deleteProject"]
+			MetisDesktopApi["deleteProject"]
 		>,
 	createSession: (input: ClientParams<"session/create">) =>
 		invoke(DESKTOP_IPC_CHANNELS.createSession, "session/create", input) as ReturnType<
-			ArcMindDesktopApi["createSession"]
+			MetisDesktopApi["createSession"]
 		>,
 	renameSession: (input: ClientParams<"session/rename">) =>
 		invoke(DESKTOP_IPC_CHANNELS.renameSession, "session/rename", input) as ReturnType<
-			ArcMindDesktopApi["renameSession"]
+			MetisDesktopApi["renameSession"]
 		>,
 	deleteSession: (input: ClientParams<"session/delete">) =>
 		invoke(DESKTOP_IPC_CHANNELS.deleteSession, "session/delete", input) as ReturnType<
-			ArcMindDesktopApi["deleteSession"]
+			MetisDesktopApi["deleteSession"]
 		>,
 	openSession: (input: ClientParams<"session/open">) =>
-		invoke(DESKTOP_IPC_CHANNELS.openSession, "session/open", input) as ReturnType<ArcMindDesktopApi["openSession"]>,
+		invoke(DESKTOP_IPC_CHANNELS.openSession, "session/open", input) as ReturnType<MetisDesktopApi["openSession"]>,
 	markSessionRead: (input: ClientParams<"session/markRead">) =>
 		invoke(DESKTOP_IPC_CHANNELS.markSessionRead, "session/markRead", input) as ReturnType<
-			ArcMindDesktopApi["markSessionRead"]
+			MetisDesktopApi["markSessionRead"]
 		>,
 	readItems: (input: ClientParams<"session/readItems">) =>
-		invoke(DESKTOP_IPC_CHANNELS.readItems, "session/readItems", input) as ReturnType<ArcMindDesktopApi["readItems"]>,
+		invoke(DESKTOP_IPC_CHANNELS.readItems, "session/readItems", input) as ReturnType<MetisDesktopApi["readItems"]>,
 	readSubagentItems: (input: ClientParams<"subagent/readItems">) =>
 		invoke(DESKTOP_IPC_CHANNELS.readSubagentItems, "subagent/readItems", input) as ReturnType<
-			ArcMindDesktopApi["readSubagentItems"]
+			MetisDesktopApi["readSubagentItems"]
 		>,
 	interruptSubagent: (input: ClientParams<"subagent/interrupt">) =>
 		invoke(DESKTOP_IPC_CHANNELS.interruptSubagent, "subagent/interrupt", input) as ReturnType<
-			ArcMindDesktopApi["interruptSubagent"]
+			MetisDesktopApi["interruptSubagent"]
 		>,
 	setThinkingSelection: (input: ClientParams<"session/setThinkingSelection">) =>
 		invoke(DESKTOP_IPC_CHANNELS.setThinkingSelection, "session/setThinkingSelection", input) as ReturnType<
-			ArcMindDesktopApi["setThinkingSelection"]
+			MetisDesktopApi["setThinkingSelection"]
 		>,
 	setPermissionMode: (input: ClientParams<"session/setPermissionMode">) =>
 		invoke(DESKTOP_IPC_CHANNELS.setPermissionMode, "session/setPermissionMode", input) as ReturnType<
-			ArcMindDesktopApi["setPermissionMode"]
+			MetisDesktopApi["setPermissionMode"]
 		>,
 	setModel: (input: ClientParams<"session/setModel">) =>
-		invoke(DESKTOP_IPC_CHANNELS.setModel, "session/setModel", input) as ReturnType<ArcMindDesktopApi["setModel"]>,
+		invoke(DESKTOP_IPC_CHANNELS.setModel, "session/setModel", input) as ReturnType<MetisDesktopApi["setModel"]>,
 	startTurn: (input: ClientParams<"turn/start">) =>
-		invoke(DESKTOP_IPC_CHANNELS.startTurn, "turn/start", input) as ReturnType<ArcMindDesktopApi["startTurn"]>,
+		invoke(DESKTOP_IPC_CHANNELS.startTurn, "turn/start", input) as ReturnType<MetisDesktopApi["startTurn"]>,
 	steerTurn: (input: ClientParams<"turn/steer">) =>
-		invoke(DESKTOP_IPC_CHANNELS.steerTurn, "turn/steer", input) as ReturnType<ArcMindDesktopApi["steerTurn"]>,
+		invoke(DESKTOP_IPC_CHANNELS.steerTurn, "turn/steer", input) as ReturnType<MetisDesktopApi["steerTurn"]>,
 	interruptTurn: (input: ClientParams<"turn/interrupt">) =>
 		invoke(DESKTOP_IPC_CHANNELS.interruptTurn, "turn/interrupt", input) as ReturnType<
-			ArcMindDesktopApi["interruptTurn"]
+			MetisDesktopApi["interruptTurn"]
 		>,
 	respondToInteraction: async (input: InteractionResponseInput) => {
 		await ipcRenderer.invoke(DESKTOP_IPC_CHANNELS.respondToInteraction, validateInteractionResponseInput(input));
@@ -179,7 +196,7 @@ const api = {
 		await ipcRenderer.invoke(DESKTOP_IPC_CHANNELS.closeTerminal, validateCloseTerminalInput(input));
 	},
 	subscribeTerminal: (listener: (event: DesktopTerminalEvent) => void) => {
-		if (typeof listener !== "function") throw new TypeError("ArcMind terminal listener must be a function");
+		if (typeof listener !== "function") throw new TypeError("Metis terminal listener must be a function");
 		const onEvent = (_event: IpcRendererEvent, value: unknown) => {
 			listener(structuredClone(validateDesktopTerminalEvent(value)));
 		};
@@ -228,8 +245,21 @@ const api = {
 	setWorkspaceEditState: async (input) => {
 		await ipcRenderer.invoke(DESKTOP_IPC_CHANNELS.setWorkspaceEditState, validateWorkspaceEditState(input));
 	},
+	getUpdateState: async () =>
+		validateDesktopUpdateState(await ipcRenderer.invoke(DESKTOP_IPC_CHANNELS.getUpdateState)),
+	startUpdate: async () => {
+		await ipcRenderer.invoke(DESKTOP_IPC_CHANNELS.startUpdate);
+	},
+	subscribeUpdate: (listener: (state: DesktopUpdateState) => void) => {
+		if (typeof listener !== "function") throw new TypeError("Metis update listener must be a function");
+		const onEvent = (_event: IpcRendererEvent, value: unknown) => {
+			listener(structuredClone(validateDesktopUpdateState(value)));
+		};
+		ipcRenderer.on(DESKTOP_UPDATE_EVENT_CHANNEL, onEvent);
+		return () => ipcRenderer.off(DESKTOP_UPDATE_EVENT_CHANNEL, onEvent);
+	},
 	subscribeBrowser: (listener: (event: DesktopBrowserEvent) => void) => {
-		if (typeof listener !== "function") throw new TypeError("ArcMind browser listener must be a function");
+		if (typeof listener !== "function") throw new TypeError("Metis browser listener must be a function");
 		const onEvent = (_event: IpcRendererEvent, value: unknown) => {
 			listener(structuredClone(validateDesktopBrowserEvent(value)));
 		};
@@ -237,7 +267,7 @@ const api = {
 		return () => ipcRenderer.off(DESKTOP_BROWSER_EVENT_CHANNEL, onEvent);
 	},
 	subscribe: (listener: (event: DesktopApiEvent) => void) => {
-		if (typeof listener !== "function") throw new TypeError("ArcMind event listener must be a function");
+		if (typeof listener !== "function") throw new TypeError("Metis event listener must be a function");
 		const onEvent = (_event: IpcRendererEvent, value: unknown) => {
 			listener(structuredClone(validateDesktopApiEvent(value)));
 		};
@@ -249,6 +279,7 @@ const api = {
 	retryServer: async () => {
 		await ipcRenderer.invoke(DESKTOP_IPC_CHANNELS.retryServer);
 	},
-} satisfies ArcMindDesktopApi;
+} satisfies MetisDesktopApi;
 
-contextBridge.exposeInMainWorld("arcMind", Object.freeze(api));
+const frozenApi = Object.freeze(api);
+contextBridge.exposeInMainWorld("metis", frozenApi);
