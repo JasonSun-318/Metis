@@ -42,6 +42,7 @@ function snapshot(serverEpoch: string, cursor: number, text: string): SessionSna
 		nextBeforeItemId: null,
 		activeTurnId: null,
 		pendingInteractions: [],
+		queuedTurns: [],
 		tasks: [],
 		thinkingSelection: "off",
 		actualThinkingLevel: "off",
@@ -203,10 +204,13 @@ describe("renderer reconnect behavior", () => {
 							omittedRows: 0,
 							scopeComplete: true,
 							irreversible: true,
+							executionTarget: "sandbox",
+							rememberProjectEligible: true,
 						},
 						choices: [
-							{ id: "choice:0", label: "Allow once" },
-							{ id: "choice:1", label: "Deny" },
+							{ id: "permission:allow-once", label: "Allow once" },
+							{ id: "permission:always-project", label: "Always allow for this project" },
+							{ id: "permission:deny", label: "Reject" },
 						],
 					}}
 					onRespond={onRespond}
@@ -225,34 +229,38 @@ describe("renderer reconnect behavior", () => {
 		expect(panel.textContent).toContain("This operation may not be reversible.");
 		expect(panel.textContent).not.toContain("Arguments:");
 		expect(panel.textContent).not.toContain('"command"');
-		expect(document.activeElement?.textContent).toContain("Deny");
+		expect(document.activeElement?.textContent).toContain("Reject");
 		await act(async () => panel.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "Escape" })));
 		expect(onRespond).toHaveBeenCalledWith({
 			interactionId: "00000000-0000-4000-8000-000000000203",
 			kind: "select",
-			choiceId: "choice:1",
+			choiceId: "permission:deny",
 		});
 		await act(async () => root.unmount());
 	});
 
-	it("blocks approval when permission targets are hidden or incomplete", async () => {
+	it("allows complete approvals with omitted summary rows but blocks genuinely incomplete approvals", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-		for (const operation of [
-			{
+		for (const [operation, blocked] of [
+			[{
 				toolName: "read",
 				rows: [{ label: "Path", value: "/tmp/target-0" }],
 				omittedRows: 2,
 				scopeComplete: true,
 				irreversible: false,
-			},
-			{
+				executionTarget: "sandbox" as const,
+				rememberProjectEligible: false,
+			}, false],
+			[{
 				toolName: "mcp__service__publish",
 				rows: [{ label: "Details", value: "No target details were provided" }],
 				omittedRows: 0,
 				scopeComplete: false,
 				irreversible: true,
-			},
-		]) {
+				executionTarget: "host" as const,
+				rememberProjectEligible: false,
+			}, true],
+		] as const) {
 			const container = document.createElement("div");
 			document.body.append(container);
 			const root = createRoot(container);
@@ -268,8 +276,8 @@ describe("renderer reconnect behavior", () => {
 						presentation: "permission_approval",
 						operation,
 						choices: [
-							{ id: "choice:0", label: "Allow once" },
-							{ id: "choice:1", label: "Deny" },
+							{ id: "permission:allow-once", label: "Allow once" },
+							{ id: "permission:deny", label: "Reject" },
 						],
 					}}
 					onRespond={vi.fn().mockResolvedValue(undefined)}
@@ -277,11 +285,51 @@ describe("renderer reconnect behavior", () => {
 			));
 
 			expect([...container.querySelectorAll<HTMLButtonElement>("button")]
-				.find((button) => button.textContent?.includes("Allow once"))?.disabled).toBe(true);
+				.find((button) => button.textContent?.includes("Allow once"))?.disabled).toBe(blocked);
 			expect(container.querySelector('[role="alert"]')).not.toBeNull();
 			await act(async () => root.unmount());
 			container.remove();
 		}
+	});
+
+	it("shows complete custom-tool arguments and permits the decision", async () => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(
+			<InteractionHost
+				interaction={{
+					interactionId: "00000000-0000-4000-8000-000000000210",
+					sessionId: "session-1",
+					title: "Approve publish?",
+					message: 'Risk: custom, external-side-effect\nArguments:\n{\n  "content": "private payload"\n}',
+					createdAt: "2026-07-16T00:00:00.000Z",
+					kind: "select",
+					presentation: "permission_approval",
+					operation: {
+						toolName: "mcp__service__publish",
+						rows: [{ label: "Details", value: "Publish content" }],
+						omittedRows: 0,
+						scopeComplete: true,
+						irreversible: true,
+						executionTarget: "host",
+						rememberProjectEligible: false,
+					},
+					choices: [
+						{ id: "permission:allow-once", label: "Allow once" },
+						{ id: "permission:deny", label: "Reject" },
+					],
+				}}
+				onRespond={vi.fn().mockResolvedValue(undefined)}
+			/>,
+		));
+
+		expect(container.querySelector(".permission-approval-complete-details")?.textContent).toContain("private payload");
+		expect([...container.querySelectorAll<HTMLButtonElement>("button")]
+			.find((button) => button.textContent?.includes("Allow once"))?.disabled).toBe(false);
+		await act(async () => root.unmount());
+		container.remove();
 	});
 
 	it("submits an extension input through the typed interaction response", async () => {

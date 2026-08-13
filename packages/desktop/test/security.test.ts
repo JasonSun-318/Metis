@@ -466,6 +466,23 @@ describe("desktop trust boundaries", () => {
 		expect(preload).toContain('"session/delete"');
 		expect(preload).toContain("const frozenApi = Object.freeze(api)");
 		expect(preload).toContain('exposeInMainWorld("metis", frozenApi)');
+		for (const method of [
+			'"skill/get"',
+			'"skill/upsert"',
+			'"skill/remove"',
+			'"skill/import/inspect"',
+			'"skill/import"',
+			'"mcp/list"',
+			'"mcp/get"',
+			'"mcp/catalog/get"',
+			'"mcp/upsert"',
+			'"mcp/remove"',
+			'"mcp/restart"',
+			'"mcp/credential/set"',
+			'"mcp/credential/clear"',
+		]) {
+			expect(preload).toContain(method);
+		}
 		expect(preload).not.toContain('exposeInMainWorld("arcMind"');
 		expect(preload).not.toContain('exposeInMainWorld("metis", ipcRenderer');
 	});
@@ -816,6 +833,83 @@ describe("desktop trust boundaries", () => {
 		supervisor.request.mockImplementation(async (request) => {
 			let result: unknown = { sessions: [], nextAfterSessionId: null };
 			if (request.method === "skill/list") result = { skills: [{ name: "pdf", description: "Read PDF files" }] };
+			if (request.method === "skill/get" || request.method === "skill/upsert") {
+				result = {
+					name: request.params.name,
+					description: "Write implementation plans",
+					source: request.params.source,
+					revision: "b".repeat(64),
+					directoryPath: "/safe/user/skills/writing-plans",
+					entryFile: "SKILL.md",
+					files: ["SKILL.md"],
+					content: "---\nname: writing-plans\ndescription: Write implementation plans\n---\n\nWrite plans.",
+					instructions: "Write plans.",
+					updatedAt: "2026-08-11T00:00:00.000Z",
+					editable: true,
+				};
+			}
+			if (request.method === "skill/remove") result = { skills: [] };
+			if (request.method === "skill/import/inspect") {
+				result = {
+					revision: "c".repeat(64),
+					candidates: [{ id: "demo", name: "demo", description: "Demo Skill", fileCount: 1 }],
+				};
+			}
+			if (request.method === "skill/import") result = { skills: [] };
+			if (request.method === "mcp/list" || request.method === "mcp/upsert" || request.method === "mcp/remove") {
+				result = { servers: [] };
+			}
+			if (request.method === "mcp/import/inspect") {
+				result = {
+					sourceRevision: "d".repeat(64),
+					candidates: [
+						{
+							id: "docs",
+							name: "docs",
+							transport: "http",
+							enabled: true,
+							existingRevision: null,
+							bearerTokenConfigured: false,
+							credentialNames: [],
+						},
+					],
+				};
+			}
+			if (request.method === "mcp/import") result = { servers: [] };
+			if (request.method === "mcp/catalog/get") {
+				result = { kind: "tool", id: "search", name: "Search", inputSchema: '{"type":"object"}' };
+			}
+			if (
+				request.method === "mcp/get" ||
+				request.method === "mcp/restart" ||
+				request.method === "mcp/credential/set" ||
+				request.method === "mcp/credential/clear"
+			) {
+				result = {
+					server: {
+						name: "web",
+						scope: "user",
+						effective: true,
+						revision: "a".repeat(64),
+						transport: "http",
+						enabled: true,
+						required: false,
+						url: "https://mcp.example.test/rpc",
+						disabledTools: [],
+						state: "inactive",
+						credentialConfigured: false,
+						toolCount: 0,
+						resourceCount: 0,
+						resourceTemplateCount: 0,
+						promptCount: 0,
+						capabilities: [],
+					},
+					tools: [],
+					resources: [],
+					resourceTemplates: [],
+					prompts: [],
+				};
+			}
 			if (request.method === "profile/get") {
 				result = {
 					generatedAt: "2026-08-01T12:00:00.000Z",
@@ -888,6 +982,9 @@ describe("desktop trust boundaries", () => {
 			if (request.method === "session/setPermissionMode") {
 				result = { permissionMode: request.params.permissionMode };
 			}
+			if (request.method.startsWith("permission/rules/")) {
+				result = { projectPath: "/work/project", rules: [] };
+			}
 			if (request.method === "subagent/interrupt") {
 				result = {
 					subagent: {
@@ -904,17 +1001,26 @@ describe("desktop trust boundaries", () => {
 		});
 		const writeClipboardText = vi.fn();
 		const setWorkspaceEditState = vi.fn();
+		const openPath = vi.fn(async () => "");
 		const broker = new ClientBroker({
 			ipcMain: ipcMain as never,
 			supervisor,
 			writeClipboardText,
 			setWorkspaceEditState,
+			openPath,
 		});
 		const webContents = new FakeWebContents();
 		broker.attach({ webContents: webContents as never });
 		const event = { sender: webContents, senderFrame: webContents.mainFrame };
 		const listSessions = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.listSessions)!;
 		const listSkills = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.listSkills)!;
+		const getSkill = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.getSkill)!;
+		const upsertSkill = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.upsertSkill)!;
+		const removeSkill = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.removeSkill)!;
+		const inspectSkillImport = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.inspectSkillImport)!;
+		const importSkills = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.importSkills)!;
+		const openSkillFolder = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.openSkillFolder)!;
+		const listMcpServers = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.listMcpServers)!;
 		const getProfile = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.getProfile)!;
 		const getModelSettings = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.getModelSettings)!;
 		const updateModelSettings = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.updateModelSettings)!;
@@ -925,6 +1031,9 @@ describe("desktop trust boundaries", () => {
 		const renameSession = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.renameSession)!;
 		const deleteSession = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.deleteSession)!;
 		const setPermissionMode = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.setPermissionMode)!;
+		const listPermissionRules = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.listPermissionRules)!;
+		const deletePermissionRule = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.deletePermissionRule)!;
+		const clearPermissionRules = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.clearPermissionRules)!;
 		const interruptSubagent = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.interruptSubagent)!;
 		const copyText = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.writeClipboardText)!;
 		const reportEditState = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.setWorkspaceEditState)!;
@@ -956,6 +1065,146 @@ describe("desktop trust boundaries", () => {
 		expect(supervisor.request).toHaveBeenCalledWith(
 			expect.objectContaining({ method: "skill/list", params: { cwd: null } }),
 		);
+		const skillTarget = { cwd: null, source: "user", name: "writing-plans" } as const;
+		await expect(getSkill(event, skillTarget)).resolves.toMatchObject({ name: "writing-plans", source: "user" });
+		const skillUpsert = {
+			...skillTarget,
+			requestId: "20000000-0000-4000-8000-000000000001",
+			expectedRevision: null,
+			content: "---\nname: writing-plans\ndescription: Write implementation plans\n---\n\nWrite plans.",
+		};
+		await expect(upsertSkill(event, skillUpsert)).resolves.toMatchObject({ name: "writing-plans" });
+		await expect(
+			removeSkill(event, {
+				...skillTarget,
+				requestId: "20000000-0000-4000-8000-000000000002",
+				expectedRevision: "b".repeat(64),
+			}),
+		).resolves.toEqual({ skills: [] });
+		const importInput = { cwd: null, source: "user", input: { kind: "archive", path: "/tmp/demo.skill" } } as const;
+		await expect(inspectSkillImport(event, importInput)).resolves.toMatchObject({ candidates: [{ name: "demo" }] });
+		await expect(
+			importSkills(event, {
+				...importInput,
+				requestId: "20000000-0000-4000-8000-000000000003",
+				sourceRevision: "c".repeat(64),
+				candidateIds: ["demo"],
+			}),
+		).resolves.toEqual({ skills: [] });
+		await expect(
+			inspectSkillImport(event, {
+				...importInput,
+				input: { kind: "github", url: "https://example.com/acme/skills" },
+			}),
+		).rejects.toThrow("Invalid skill/import/inspect params");
+		for (const invalid of [
+			{ path: "/etc" },
+			{ ...skillTarget, extra: true },
+			{ ...skillTarget, source: "temporary" },
+			{ cwd: null, source: "project", name: "writing-plans" },
+		]) {
+			await expect(openSkillFolder(event, invalid)).rejects.toThrow("Invalid skill/get params");
+		}
+		expect(openPath).not.toHaveBeenCalled();
+		await expect(openSkillFolder(event, skillTarget)).resolves.toBeUndefined();
+		expect(openPath).toHaveBeenCalledWith("/safe/user/skills/writing-plans");
+		const mcpInputs = [
+			[DESKTOP_IPC_CHANNELS.listMcpServers, "mcp/list", { cwd: null }],
+			[
+				DESKTOP_IPC_CHANNELS.inspectMcpImport,
+				"mcp/import/inspect",
+				{
+					cwd: null,
+					scope: "user",
+					text: '{"mcpServers":{"docs":{"url":"https://mcp.example.test"}}}',
+				},
+			],
+			[
+				DESKTOP_IPC_CHANNELS.importMcpServers,
+				"mcp/import",
+				{
+					requestId: "10000000-0000-4000-8000-000000000000",
+					cwd: null,
+					scope: "user",
+					text: '{"mcpServers":{"docs":{"url":"https://mcp.example.test"}}}',
+					sourceRevision: "d".repeat(64),
+					candidates: [{ id: "docs", expectedRevision: null }],
+				},
+			],
+			[DESKTOP_IPC_CHANNELS.getMcpServer, "mcp/get", { cwd: null, scope: "user", name: "web" }],
+			[
+				DESKTOP_IPC_CHANNELS.getMcpCatalogItem,
+				"mcp/catalog/get",
+				{
+					sessionId: "11111111-1111-4111-8111-111111111111",
+					server: "web",
+					kind: "tool",
+					id: "search",
+				},
+			],
+			[
+				DESKTOP_IPC_CHANNELS.upsertMcpServer,
+				"mcp/upsert",
+				{
+					requestId: "10000000-0000-4000-8000-000000000001",
+					cwd: null,
+					scope: "user",
+					name: "web",
+					expectedRevision: null,
+					server: { transport: "http", url: "https://mcp.example.test/rpc" },
+				},
+			],
+			[
+				DESKTOP_IPC_CHANNELS.removeMcpServer,
+				"mcp/remove",
+				{
+					requestId: "10000000-0000-4000-8000-000000000002",
+					cwd: null,
+					scope: "user",
+					name: "web",
+					expectedRevision: "a".repeat(64),
+				},
+			],
+			[
+				DESKTOP_IPC_CHANNELS.restartMcpServer,
+				"mcp/restart",
+				{
+					requestId: "10000000-0000-4000-8000-000000000003",
+					sessionId: "11111111-1111-4111-8111-111111111111",
+					scope: "user",
+					name: "web",
+					expectedRevision: "a".repeat(64),
+				},
+			],
+			[
+				DESKTOP_IPC_CHANNELS.clearMcpCredential,
+				"mcp/credential/clear",
+				{
+					requestId: "10000000-0000-4000-8000-000000000004",
+					sessionId: "11111111-1111-4111-8111-111111111111",
+					scope: "user",
+					name: "web",
+					expectedRevision: "a".repeat(64),
+				},
+			],
+			[
+				DESKTOP_IPC_CHANNELS.setMcpCredential,
+				"mcp/credential/set",
+				{
+					requestId: "10000000-0000-4000-8000-000000000005",
+					sessionId: "11111111-1111-4111-8111-111111111111",
+					scope: "user",
+					name: "web",
+					expectedRevision: "a".repeat(64),
+					credential: { bearerToken: "secret" },
+				},
+			],
+		] as const;
+		await expect(listMcpServers(event, { cwd: null, unexpected: true })).rejects.toThrow("Invalid mcp/list params");
+		for (const [channel, method, input] of mcpInputs) {
+			await expect(ipcMain.handlers.get(channel)!(event, input)).resolves.toBeDefined();
+			expect(supervisor.request).toHaveBeenLastCalledWith(expect.objectContaining({ method, params: input }));
+		}
 		await expect(getProfile(event, { unexpected: true })).rejects.toThrow("Invalid profile/get params");
 		await expect(getProfile(event, {})).resolves.toMatchObject({ totalTokens: 0, topSkills: [] });
 		expect(supervisor.request).toHaveBeenCalledWith(expect.objectContaining({ method: "profile/get", params: {} }));
@@ -1025,13 +1274,34 @@ describe("desktop trust boundaries", () => {
 			requestId: "11111111-1111-4111-8111-111111111401",
 			permissionMode: "full",
 		};
-		await expect(setPermissionMode(event, { ...permissionInput, permissionMode: "auto" })).rejects.toThrow(
+		await expect(setPermissionMode(event, { ...permissionInput, permissionMode: "automatic" })).rejects.toThrow(
 			"Invalid session/setPermissionMode params",
 		);
+		await expect(setPermissionMode(event, { ...permissionInput, permissionMode: "auto" })).resolves.toEqual({
+			permissionMode: "auto",
+		});
 		await expect(setPermissionMode(event, permissionInput)).resolves.toEqual({ permissionMode: "full" });
 		expect(supervisor.request).toHaveBeenCalledWith(
 			expect.objectContaining({ method: "session/setPermissionMode", params: permissionInput }),
 		);
+		await expect(listPermissionRules(event, { sessionId: "session-a", projectPath: "/forged" })).rejects.toThrow(
+			"Invalid permission/rules/list params",
+		);
+		await expect(listPermissionRules(event, { sessionId: "session-a" })).resolves.toEqual({
+			projectPath: "/work/project",
+			rules: [],
+		});
+		const ruleMutation = {
+			sessionId: "session-a",
+			requestId: "11111111-1111-4111-8111-111111111404",
+		};
+		await expect(deletePermissionRule(event, { ...ruleMutation, ruleId: "" })).rejects.toThrow(
+			"Invalid permission/rules/delete params",
+		);
+		await expect(deletePermissionRule(event, { ...ruleMutation, ruleId: "a".repeat(64) })).resolves.toMatchObject({
+			projectPath: "/work/project",
+		});
+		await expect(clearPermissionRules(event, ruleMutation)).resolves.toMatchObject({ projectPath: "/work/project" });
 		const subagentInput = {
 			sessionId: "session-a",
 			agentId: "child-a",

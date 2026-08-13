@@ -73,6 +73,7 @@ interface ClientBrokerOptions {
 	readonly getDefaultProjectLocation?: () => Promise<string>;
 	readonly createProjectFolder?: (input: DesktopCreateProjectFolderInput) => Promise<string>;
 	readonly setScheduleKeepAwake?: (enabled: boolean) => Promise<void> | void;
+	readonly openPath?: (path: string) => Promise<string>;
 	readonly updater?: BrokerUpdater;
 	readonly terminalManager?: Pick<TerminalManager, "create" | "write" | "resize" | "close" | "closeAll" | "onEvent">;
 	readonly browserManager?: Pick<
@@ -139,6 +140,7 @@ export class ClientBroker {
 	private readonly getDefaultProjectLocation: () => Promise<string>;
 	private readonly createProjectFolder: (input: DesktopCreateProjectFolderInput) => Promise<string>;
 	private readonly setScheduleKeepAwake: (enabled: boolean) => Promise<void> | void;
+	private readonly openPath: (path: string) => Promise<string>;
 	private readonly updater: BrokerUpdater;
 	private readonly terminalManager: Pick<
 		TerminalManager,
@@ -190,6 +192,7 @@ export class ClientBroker {
 				throw new Error("Project folder creation is unavailable");
 			});
 		this.setScheduleKeepAwake = options.setScheduleKeepAwake ?? (() => undefined);
+		this.openPath = options.openPath ?? (async () => "Skill folder opening is unavailable");
 		this.updater = options.updater ?? {
 			view: () => ({ status: "unavailable" }),
 			downloadAndOpen: async () => {
@@ -328,6 +331,52 @@ export class ClientBroker {
 		this.register(DESKTOP_IPC_CHANNELS.listSkills, 1, async (_event, [input]) =>
 			this.clientCall("skill/list", input),
 		);
+		this.register(DESKTOP_IPC_CHANNELS.getSkill, 1, async (_event, [input]) => this.clientCall("skill/get", input));
+		this.register(DESKTOP_IPC_CHANNELS.upsertSkill, 1, async (_event, [input]) =>
+			this.clientCall("skill/upsert", input),
+		);
+		this.register(DESKTOP_IPC_CHANNELS.removeSkill, 1, async (_event, [input]) =>
+			this.clientCall("skill/remove", input),
+		);
+		this.register(DESKTOP_IPC_CHANNELS.inspectSkillImport, 1, async (_event, [input]) =>
+			this.clientCall("skill/import/inspect", input),
+		);
+		this.register(DESKTOP_IPC_CHANNELS.importSkills, 1, async (_event, [input]) =>
+			this.clientCall("skill/import", input),
+		);
+		this.register(DESKTOP_IPC_CHANNELS.openSkillFolder, 1, async (_event, [input]) => {
+			const detail = await this.clientCall("skill/get", input);
+			const error = await this.openPath(detail.directoryPath);
+			if (error) throw new Error(error);
+		});
+		this.register(DESKTOP_IPC_CHANNELS.listMcpServers, 1, async (_event, [input]) =>
+			this.clientCall("mcp/list", input),
+		);
+		this.register(DESKTOP_IPC_CHANNELS.inspectMcpImport, 1, async (_event, [input]) =>
+			this.clientCall("mcp/import/inspect", input),
+		);
+		this.register(DESKTOP_IPC_CHANNELS.importMcpServers, 1, async (_event, [input]) =>
+			this.clientCall("mcp/import", input),
+		);
+		this.register(DESKTOP_IPC_CHANNELS.getMcpServer, 1, async (_event, [input]) => this.clientCall("mcp/get", input));
+		this.register(DESKTOP_IPC_CHANNELS.getMcpCatalogItem, 1, async (_event, [input]) =>
+			this.clientCall("mcp/catalog/get", input),
+		);
+		this.register(DESKTOP_IPC_CHANNELS.upsertMcpServer, 1, async (_event, [input]) =>
+			this.clientCall("mcp/upsert", input),
+		);
+		this.register(DESKTOP_IPC_CHANNELS.removeMcpServer, 1, async (_event, [input]) =>
+			this.clientCall("mcp/remove", input),
+		);
+		this.register(DESKTOP_IPC_CHANNELS.restartMcpServer, 1, async (_event, [input]) =>
+			this.clientCall("mcp/restart", input),
+		);
+		this.register(DESKTOP_IPC_CHANNELS.setMcpCredential, 1, async (_event, [input]) =>
+			this.clientCall("mcp/credential/set", input),
+		);
+		this.register(DESKTOP_IPC_CHANNELS.clearMcpCredential, 1, async (_event, [input]) =>
+			this.clientCall("mcp/credential/clear", input),
+		);
 		this.register(DESKTOP_IPC_CHANNELS.getProfile, 1, async (_event, [input]) =>
 			this.clientCall("profile/get", input),
 		);
@@ -455,6 +504,12 @@ export class ClientBroker {
 		this.register(DESKTOP_IPC_CHANNELS.readItems, 1, async (_event, [input]) =>
 			this.clientCall("session/readItems", input),
 		);
+		this.register(DESKTOP_IPC_CHANNELS.getSessionStatus, 1, async (_event, [input]) =>
+			this.clientCall("session/status", input),
+		);
+		this.register(DESKTOP_IPC_CHANNELS.compactSession, 1, async (_event, [input]) =>
+			this.clientCall("session/compact", input),
+		);
 		this.register(DESKTOP_IPC_CHANNELS.readSubagentItems, 1, async (_event, [input]) =>
 			this.clientCall("subagent/readItems", input),
 		);
@@ -467,11 +522,30 @@ export class ClientBroker {
 		this.register(DESKTOP_IPC_CHANNELS.setPermissionMode, 1, async (_event, [input]) =>
 			this.clientCall("session/setPermissionMode", input),
 		);
+		this.register(DESKTOP_IPC_CHANNELS.listPermissionRules, 1, async (_event, [input]) =>
+			this.clientCall("permission/rules/list", input),
+		);
+		this.register(DESKTOP_IPC_CHANNELS.deletePermissionRule, 1, async (_event, [input]) =>
+			this.clientCall("permission/rules/delete", input),
+		);
+		this.register(DESKTOP_IPC_CHANNELS.clearPermissionRules, 1, async (_event, [input]) =>
+			this.clientCall("permission/rules/clear", input),
+		);
 		this.register(DESKTOP_IPC_CHANNELS.setModel, 1, async (_event, [input]) =>
 			this.clientCall("session/setModel", input),
 		);
 		this.register(DESKTOP_IPC_CHANNELS.startTurn, 1, async (_event, [input]) => this.clientCall("turn/start", input));
 		this.register(DESKTOP_IPC_CHANNELS.steerTurn, 1, async (_event, [input]) => this.clientCall("turn/steer", input));
+		this.register(DESKTOP_IPC_CHANNELS.queueTurn, 1, async (_event, [input]) => this.clientCall("turn/queue", input));
+		this.register(DESKTOP_IPC_CHANNELS.updateQueuedTurn, 1, async (_event, [input]) =>
+			this.clientCall("turn/queue/update", input),
+		);
+		this.register(DESKTOP_IPC_CHANNELS.deleteQueuedTurn, 1, async (_event, [input]) =>
+			this.clientCall("turn/queue/delete", input),
+		);
+		this.register(DESKTOP_IPC_CHANNELS.sendQueuedTurn, 1, async (_event, [input]) =>
+			this.clientCall("turn/queue/send", input),
+		);
 		this.register(DESKTOP_IPC_CHANNELS.interruptTurn, 1, async (_event, [input]) =>
 			this.clientCall("turn/interrupt", input),
 		);

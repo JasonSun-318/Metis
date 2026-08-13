@@ -37,6 +37,22 @@ export type DesktopApiEvent =
 export const DESKTOP_IPC_CHANNELS = {
 	listSessions: "metis:list-sessions",
 	listSkills: "metis:list-skills",
+	getSkill: "metis:get-skill",
+	upsertSkill: "metis:upsert-skill",
+	removeSkill: "metis:remove-skill",
+	inspectSkillImport: "metis:inspect-skill-import",
+	importSkills: "metis:import-skills",
+	openSkillFolder: "metis:open-skill-folder",
+	listMcpServers: "metis:list-mcp-servers",
+	inspectMcpImport: "metis:inspect-mcp-import",
+	importMcpServers: "metis:import-mcp-servers",
+	getMcpServer: "metis:get-mcp-server",
+	getMcpCatalogItem: "metis:get-mcp-catalog-item",
+	upsertMcpServer: "metis:upsert-mcp-server",
+	removeMcpServer: "metis:remove-mcp-server",
+	restartMcpServer: "metis:restart-mcp-server",
+	setMcpCredential: "metis:set-mcp-credential",
+	clearMcpCredential: "metis:clear-mcp-credential",
 	getProfile: "metis:get-profile",
 	listModels: "metis:list-models",
 	getModelSettings: "metis:get-model-settings",
@@ -65,13 +81,22 @@ export const DESKTOP_IPC_CHANNELS = {
 	openSession: "metis:open-session",
 	markSessionRead: "metis:mark-session-read",
 	readItems: "metis:read-items",
+	getSessionStatus: "metis:get-session-status",
+	compactSession: "metis:compact-session",
 	readSubagentItems: "metis:read-subagent-items",
 	interruptSubagent: "metis:interrupt-subagent",
 	setThinkingSelection: "metis:set-thinking-selection",
 	setPermissionMode: "metis:set-permission-mode",
+	listPermissionRules: "metis:list-permission-rules",
+	deletePermissionRule: "metis:delete-permission-rule",
+	clearPermissionRules: "metis:clear-permission-rules",
 	setModel: "metis:set-model",
 	startTurn: "metis:start-turn",
 	steerTurn: "metis:steer-turn",
+	queueTurn: "metis:queue-turn",
+	updateQueuedTurn: "metis:update-queued-turn",
+	deleteQueuedTurn: "metis:delete-queued-turn",
+	sendQueuedTurn: "metis:send-queued-turn",
 	interruptTurn: "metis:interrupt-turn",
 	respondToInteraction: "metis:respond-to-interaction",
 	selectProjectFolder: "metis:select-project-folder",
@@ -396,6 +421,22 @@ export type DesktopRpcOutcome<Result> =
 export interface MetisDesktopApi {
 	listSessions(input?: ClientParams<"session/list">): Promise<ClientResult<"session/list">>;
 	listSkills(input: ClientParams<"skill/list">): Promise<ClientResult<"skill/list">>;
+	getSkill(input: ClientParams<"skill/get">): Promise<ClientResult<"skill/get">>;
+	upsertSkill(input: ClientParams<"skill/upsert">): Promise<ClientResult<"skill/upsert">>;
+	removeSkill(input: ClientParams<"skill/remove">): Promise<ClientResult<"skill/remove">>;
+	inspectSkillImport(input: ClientParams<"skill/import/inspect">): Promise<ClientResult<"skill/import/inspect">>;
+	importSkills(input: ClientParams<"skill/import">): Promise<ClientResult<"skill/import">>;
+	openSkillFolder(input: ClientParams<"skill/get">): Promise<void>;
+	listMcpServers(input: ClientParams<"mcp/list">): Promise<ClientResult<"mcp/list">>;
+	inspectMcpImport(input: ClientParams<"mcp/import/inspect">): Promise<ClientResult<"mcp/import/inspect">>;
+	importMcpServers(input: ClientParams<"mcp/import">): Promise<ClientResult<"mcp/import">>;
+	getMcpServer(input: ClientParams<"mcp/get">): Promise<ClientResult<"mcp/get">>;
+	getMcpCatalogItem(input: ClientParams<"mcp/catalog/get">): Promise<ClientResult<"mcp/catalog/get">>;
+	upsertMcpServer(input: ClientParams<"mcp/upsert">): Promise<ClientResult<"mcp/upsert">>;
+	removeMcpServer(input: ClientParams<"mcp/remove">): Promise<ClientResult<"mcp/remove">>;
+	restartMcpServer(input: ClientParams<"mcp/restart">): Promise<ClientResult<"mcp/restart">>;
+	setMcpCredential(input: ClientParams<"mcp/credential/set">): Promise<ClientResult<"mcp/credential/set">>;
+	clearMcpCredential(input: ClientParams<"mcp/credential/clear">): Promise<ClientResult<"mcp/credential/clear">>;
 	getProfile(): Promise<ClientResult<"profile/get">>;
 	listModels(): Promise<ClientResult<"model/list">>;
 	getModelSettings(): Promise<ClientResult<"model/settings/get">>;
@@ -426,6 +467,8 @@ export interface MetisDesktopApi {
 	openSession(input: ClientParams<"session/open">): Promise<ClientResult<"session/subscribe">["snapshot"]>;
 	markSessionRead(input: ClientParams<"session/markRead">): Promise<ClientResult<"session/markRead">>;
 	readItems(input: ClientParams<"session/readItems">): Promise<ClientResult<"session/readItems">>;
+	getSessionStatus(input: ClientParams<"session/status">): Promise<ClientResult<"session/status">>;
+	compactSession(input: ClientParams<"session/compact">): Promise<ClientResult<"session/compact">>;
 	readSubagentItems(input: ClientParams<"subagent/readItems">): Promise<ClientResult<"subagent/readItems">>;
 	interruptSubagent(input: ClientParams<"subagent/interrupt">): Promise<ClientResult<"subagent/interrupt">>;
 	setThinkingSelection(
@@ -434,9 +477,18 @@ export interface MetisDesktopApi {
 	setPermissionMode(
 		input: ClientParams<"session/setPermissionMode">,
 	): Promise<ClientResult<"session/setPermissionMode">>;
+	listPermissionRules(input: ClientParams<"permission/rules/list">): Promise<ClientResult<"permission/rules/list">>;
+	deletePermissionRule(
+		input: ClientParams<"permission/rules/delete">,
+	): Promise<ClientResult<"permission/rules/delete">>;
+	clearPermissionRules(input: ClientParams<"permission/rules/clear">): Promise<ClientResult<"permission/rules/clear">>;
 	setModel(input: ClientParams<"session/setModel">): Promise<ClientResult<"session/setModel">>;
 	startTurn(input: ClientParams<"turn/start">): Promise<ClientResult<"turn/start">>;
 	steerTurn(input: ClientParams<"turn/steer">): Promise<ClientResult<"turn/steer">>;
+	queueTurn(input: ClientParams<"turn/queue">): Promise<ClientResult<"turn/queue">>;
+	updateQueuedTurn(input: ClientParams<"turn/queue/update">): Promise<ClientResult<"turn/queue/update">>;
+	deleteQueuedTurn(input: ClientParams<"turn/queue/delete">): Promise<ClientResult<"turn/queue/delete">>;
+	sendQueuedTurn(input: ClientParams<"turn/queue/send">): Promise<ClientResult<"turn/queue/send">>;
 	interruptTurn(input: ClientParams<"turn/interrupt">): Promise<ClientResult<"turn/interrupt">>;
 	respondToInteraction(input: InteractionResponseInput): Promise<void>;
 	selectProjectFolder(): Promise<string | null>;

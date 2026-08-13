@@ -49,6 +49,57 @@ const api = {
 		invoke(DESKTOP_IPC_CHANNELS.listSessions, "session/list", input) as ReturnType<MetisDesktopApi["listSessions"]>,
 	listSkills: (input: ClientParams<"skill/list">) =>
 		invoke(DESKTOP_IPC_CHANNELS.listSkills, "skill/list", input) as ReturnType<MetisDesktopApi["listSkills"]>,
+	getSkill: (input: ClientParams<"skill/get">) =>
+		invoke(DESKTOP_IPC_CHANNELS.getSkill, "skill/get", input) as ReturnType<MetisDesktopApi["getSkill"]>,
+	upsertSkill: (input: ClientParams<"skill/upsert">) =>
+		invoke(DESKTOP_IPC_CHANNELS.upsertSkill, "skill/upsert", input) as ReturnType<MetisDesktopApi["upsertSkill"]>,
+	removeSkill: (input: ClientParams<"skill/remove">) =>
+		invoke(DESKTOP_IPC_CHANNELS.removeSkill, "skill/remove", input) as ReturnType<MetisDesktopApi["removeSkill"]>,
+	inspectSkillImport: (input: ClientParams<"skill/import/inspect">) =>
+		invoke(DESKTOP_IPC_CHANNELS.inspectSkillImport, "skill/import/inspect", input) as ReturnType<
+			MetisDesktopApi["inspectSkillImport"]
+		>,
+	importSkills: (input: ClientParams<"skill/import">) =>
+		invoke(DESKTOP_IPC_CHANNELS.importSkills, "skill/import", input) as ReturnType<MetisDesktopApi["importSkills"]>,
+	openSkillFolder: async (input: ClientParams<"skill/get">) => {
+		await invoke(DESKTOP_IPC_CHANNELS.openSkillFolder, "skill/get", input);
+	},
+	listMcpServers: (input: ClientParams<"mcp/list">) =>
+		invoke(DESKTOP_IPC_CHANNELS.listMcpServers, "mcp/list", input) as ReturnType<MetisDesktopApi["listMcpServers"]>,
+	inspectMcpImport: (input: ClientParams<"mcp/import/inspect">) =>
+		invoke(DESKTOP_IPC_CHANNELS.inspectMcpImport, "mcp/import/inspect", input) as ReturnType<
+			MetisDesktopApi["inspectMcpImport"]
+		>,
+	importMcpServers: (input: ClientParams<"mcp/import">) =>
+		invoke(DESKTOP_IPC_CHANNELS.importMcpServers, "mcp/import", input) as ReturnType<
+			MetisDesktopApi["importMcpServers"]
+		>,
+	getMcpServer: (input: ClientParams<"mcp/get">) =>
+		invoke(DESKTOP_IPC_CHANNELS.getMcpServer, "mcp/get", input) as ReturnType<MetisDesktopApi["getMcpServer"]>,
+	getMcpCatalogItem: (input: ClientParams<"mcp/catalog/get">) =>
+		invoke(DESKTOP_IPC_CHANNELS.getMcpCatalogItem, "mcp/catalog/get", input) as ReturnType<
+			MetisDesktopApi["getMcpCatalogItem"]
+		>,
+	upsertMcpServer: (input: ClientParams<"mcp/upsert">) =>
+		invoke(DESKTOP_IPC_CHANNELS.upsertMcpServer, "mcp/upsert", input) as ReturnType<
+			MetisDesktopApi["upsertMcpServer"]
+		>,
+	removeMcpServer: (input: ClientParams<"mcp/remove">) =>
+		invoke(DESKTOP_IPC_CHANNELS.removeMcpServer, "mcp/remove", input) as ReturnType<
+			MetisDesktopApi["removeMcpServer"]
+		>,
+	restartMcpServer: (input: ClientParams<"mcp/restart">) =>
+		invoke(DESKTOP_IPC_CHANNELS.restartMcpServer, "mcp/restart", input) as ReturnType<
+			MetisDesktopApi["restartMcpServer"]
+		>,
+	setMcpCredential: (input: ClientParams<"mcp/credential/set">) =>
+		invoke(DESKTOP_IPC_CHANNELS.setMcpCredential, "mcp/credential/set", input) as ReturnType<
+			MetisDesktopApi["setMcpCredential"]
+		>,
+	clearMcpCredential: (input: ClientParams<"mcp/credential/clear">) =>
+		invoke(DESKTOP_IPC_CHANNELS.clearMcpCredential, "mcp/credential/clear", input) as ReturnType<
+			MetisDesktopApi["clearMcpCredential"]
+		>,
 	getProfile: () =>
 		invoke(DESKTOP_IPC_CHANNELS.getProfile, "profile/get", {}) as ReturnType<MetisDesktopApi["getProfile"]>,
 	listModels: () =>
@@ -149,6 +200,14 @@ const api = {
 		>,
 	readItems: (input: ClientParams<"session/readItems">) =>
 		invoke(DESKTOP_IPC_CHANNELS.readItems, "session/readItems", input) as ReturnType<MetisDesktopApi["readItems"]>,
+	getSessionStatus: (input: ClientParams<"session/status">) =>
+		invoke(DESKTOP_IPC_CHANNELS.getSessionStatus, "session/status", input) as ReturnType<
+			MetisDesktopApi["getSessionStatus"]
+		>,
+	compactSession: (input: ClientParams<"session/compact">) =>
+		invoke(DESKTOP_IPC_CHANNELS.compactSession, "session/compact", input) as ReturnType<
+			MetisDesktopApi["compactSession"]
+		>,
 	readSubagentItems: (input: ClientParams<"subagent/readItems">) =>
 		invoke(DESKTOP_IPC_CHANNELS.readSubagentItems, "subagent/readItems", input) as ReturnType<
 			MetisDesktopApi["readSubagentItems"]
@@ -165,12 +224,38 @@ const api = {
 		invoke(DESKTOP_IPC_CHANNELS.setPermissionMode, "session/setPermissionMode", input) as ReturnType<
 			MetisDesktopApi["setPermissionMode"]
 		>,
+	listPermissionRules: (input: ClientParams<"permission/rules/list">) =>
+		invoke(DESKTOP_IPC_CHANNELS.listPermissionRules, "permission/rules/list", input) as ReturnType<
+			MetisDesktopApi["listPermissionRules"]
+		>,
+	deletePermissionRule: (input: ClientParams<"permission/rules/delete">) =>
+		invoke(DESKTOP_IPC_CHANNELS.deletePermissionRule, "permission/rules/delete", input) as ReturnType<
+			MetisDesktopApi["deletePermissionRule"]
+		>,
+	clearPermissionRules: (input: ClientParams<"permission/rules/clear">) =>
+		invoke(DESKTOP_IPC_CHANNELS.clearPermissionRules, "permission/rules/clear", input) as ReturnType<
+			MetisDesktopApi["clearPermissionRules"]
+		>,
 	setModel: (input: ClientParams<"session/setModel">) =>
 		invoke(DESKTOP_IPC_CHANNELS.setModel, "session/setModel", input) as ReturnType<MetisDesktopApi["setModel"]>,
 	startTurn: (input: ClientParams<"turn/start">) =>
 		invoke(DESKTOP_IPC_CHANNELS.startTurn, "turn/start", input) as ReturnType<MetisDesktopApi["startTurn"]>,
 	steerTurn: (input: ClientParams<"turn/steer">) =>
 		invoke(DESKTOP_IPC_CHANNELS.steerTurn, "turn/steer", input) as ReturnType<MetisDesktopApi["steerTurn"]>,
+	queueTurn: (input: ClientParams<"turn/queue">) =>
+		invoke(DESKTOP_IPC_CHANNELS.queueTurn, "turn/queue", input) as ReturnType<MetisDesktopApi["queueTurn"]>,
+	updateQueuedTurn: (input: ClientParams<"turn/queue/update">) =>
+		invoke(DESKTOP_IPC_CHANNELS.updateQueuedTurn, "turn/queue/update", input) as ReturnType<
+			MetisDesktopApi["updateQueuedTurn"]
+		>,
+	deleteQueuedTurn: (input: ClientParams<"turn/queue/delete">) =>
+		invoke(DESKTOP_IPC_CHANNELS.deleteQueuedTurn, "turn/queue/delete", input) as ReturnType<
+			MetisDesktopApi["deleteQueuedTurn"]
+		>,
+	sendQueuedTurn: (input: ClientParams<"turn/queue/send">) =>
+		invoke(DESKTOP_IPC_CHANNELS.sendQueuedTurn, "turn/queue/send", input) as ReturnType<
+			MetisDesktopApi["sendQueuedTurn"]
+		>,
 	interruptTurn: (input: ClientParams<"turn/interrupt">) =>
 		invoke(DESKTOP_IPC_CHANNELS.interruptTurn, "turn/interrupt", input) as ReturnType<
 			MetisDesktopApi["interruptTurn"]
