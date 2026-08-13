@@ -1,6 +1,6 @@
 # Containerization
 
-Metis runs with all permissions by default, but in some cases, you will want to have more control over what directories Metis can write to and which accesses it has.
+Metis defaults to Auto, which sandboxes ordinary model-initiated Bash and path-guards structured tools. Use whole-process isolation when installed integrations or other Metis runtime activity also need containment.
 
 There are two general options. You can either
 1. run the whole `metis` process inside an isolated environment, or

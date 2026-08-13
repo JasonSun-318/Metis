@@ -41,8 +41,8 @@ The two modes currently use the same general-purpose system prompt, tools, model
 
 | New session | No directory supplied | Directory supplied | Default permissions |
 |---|---|---|---|
-| Chat | Metis creates `~/.metis/agent/workspaces/<session-id>/` | The chosen existing directory is stored | Ask |
-| Code | The terminal working directory captured at startup is stored | The chosen existing directory is stored | Ask |
+| Chat | Metis creates `~/.metis/agent/workspaces/<session-id>/` | The chosen existing directory is stored | Auto |
+| Code | The terminal working directory captured at startup is stored | The chosen existing directory is stored | Auto |
 
 `/new` reuses the normal TUI option and input components. After the mode choice, Chat offers a managed workspace, the captured terminal directory, or another directory; Code offers the captured terminal directory or another directory. The selection is made only while creating the session. Cancelling or entering an invalid path leaves the current session unchanged.
 
@@ -66,7 +66,7 @@ Sessions for both modes remain JSONL files under `~/.metis/agent/sessions/<encod
 |---------|-------------|
 | `/resume` | Browse and select previous sessions |
 | `/new [chat\|code]` | Create a session and choose its immutable primary workspace |
-| `/permissions` | Change the current session's Ask or Full setting |
+| `/permissions` | Change the current session's Ask, Auto, or Full setting |
 | `/add-dir <path>` | Code only: add one existing directory as a file-access root for this session |
 | `/remove-dir <path>` | Code only: remove one previously added directory |
 | `/dirs` | Code only: list the primary and additional working directories |

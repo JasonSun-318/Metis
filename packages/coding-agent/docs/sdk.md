@@ -70,9 +70,9 @@ const { session } = await createAgentSession({
 const { session: chatSession } = await createAgentSession({ agentMode: "chat" });
 ```
 
-When no `sessionManager` is supplied, Chat without `cwd` creates `~/.metis/agent/workspaces/<session-id>/`; Code without `cwd` captures `process.cwd()`. Supplying `cwd` binds either mode to that existing directory. Both modes default to Ask permissions.
+When no `sessionManager` is supplied, Chat without `cwd` creates `~/.metis/agent/workspaces/<session-id>/`; Code without `cwd` captures `process.cwd()`. Supplying `cwd` binds either mode to that existing directory. Both modes default to Auto permissions.
 
-If you supply `sessionManager`, that manager owns the immutable mode/cwd and current permission setting. Conflicting `agentMode`, `cwd`, or normalized `permissionMode` options throw without mutating or closing the supplied manager. Deprecated `permissionMode: "auto"` is accepted as Ask; deprecated `reviewerEnabled` is accepted and ignored.
+If you supply `sessionManager`, that manager owns the immutable mode/cwd and current permission setting. Conflicting `agentMode`, `cwd`, or normalized `permissionMode` options throw without mutating or closing the supplied manager. Ask, Auto, and Full are first-class values; deprecated `reviewerEnabled` is accepted and ignored.
 
 Use `onPermissionRequest` when the host has approval UI:
 
@@ -87,7 +87,7 @@ const { session } = await createAgentSession({
 });
 ```
 
-The callback returns `"allow-once"` or `"deny"`. It must render `details` without omitting or truncating the command/arguments. Allowing executes the exact action directly on the host with the current user's authority. Without a callback, actions that require approval fail closed. See [Permissions](permissions.md).
+The callback returns `"allow-once"`, `"always-allow-project"`, or `"deny"`. It must render `details` without omitting or truncating the command, arguments, and sandbox/host disclosure. Project persistence succeeds only for an eligible exact primary-session action; an ineligible request fails closed. Without a callback, actions that require approval fail closed. See [Permissions](permissions.md).
 
 ### AgentSession
 

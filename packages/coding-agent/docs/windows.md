@@ -10,7 +10,7 @@ For most users, [Git for Windows](https://git-scm.com/download/win) is sufficien
 
 ## Permissions
 
-Ask/Full behavior is the same on Windows, macOS, and Linux: it is an application-level approval boundary. Ask requires one user decision for model actions other than proven safe structured reads and fixed internal controls; Full skips that approval. After approval, Metis provides no Windows-specific isolation—the action runs with the authority of the user account that started Metis. Use a container, VM, Windows Sandbox, or a separate OS account when isolation is required.
+Ask/Auto/Full routing is the same on Windows, macOS, and Linux. Ask and Auto use the packaged workspace sandbox for ordinary model-initiated Bash and fail closed if the platform helper is unavailable; actions explicitly shown as host execution use the current user account after approval. Full runs on the host without Metis approval. Use a container, VM, Windows Sandbox, or separate OS account when the entire Metis process or installed integrations must be isolated.
 
 ## Custom Shell Path
 

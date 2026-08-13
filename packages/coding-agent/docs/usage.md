@@ -42,7 +42,7 @@ Type `/` in the editor to open command completion. Extensions can register custo
 | `/settings` | Web search, thinking level, theme, message delivery, transport |
 | `/resume` | Pick from previous sessions |
 | `/new [chat\|code]` | Create a session and choose its immutable primary workspace |
-| `/permissions` | Choose Ask or Full for this session |
+| `/permissions` | Choose Ask, Auto, or Full for this session |
 | `/add-dir <path>` | Code only: add one existing directory as a file-access root for this session |
 | `/remove-dir <path>` | Code only: remove one previously added directory |
 | `/dirs` | Code only: list the primary and additional working directories |
@@ -221,7 +221,7 @@ cat README.md | metis -p "Summarize this text"
 |--------|-------------|
 | `--agent-mode <chat\|code>` | Classify a newly created session (default: `code`) |
 | `--cwd <path>` | Bind a newly created session to an existing directory |
-| `--permission-mode <ask\|full>` | Set permissions for a newly created session |
+| `--permission-mode <ask\|auto\|full>` | Set permissions for a newly created session (default: Auto) |
 | `-c`, `--continue` | Continue the most recent session |
 | `-r`, `--resume` | Browse and select a session |
 | `--session <path\|id>` | Use a specific session file or partial UUID |
@@ -348,4 +348,4 @@ metis --exclude-tools ask_question
 
 Metis keeps the core small and pushes workflow-specific behavior into extensions, skills, prompt templates, and packages.
 
-It intentionally does not include built-in MCP, a separate plan mode, a manual to-do manager, or background bash. The core `set_tasks` tool only publishes the current visible checklist for complex work. Persisted primary Code sessions can select [Ultra](subagents.md) for first-class recoverable subagents. Ask provides one-action approval for model tool calls; Full skips that approval. Approved actions run on the host, so use containers or VMs when you need isolation. See [Permissions](permissions.md).
+It intentionally does not include built-in MCP, a separate plan mode, a manual to-do manager, or background bash. The core `set_tasks` tool only publishes the current visible checklist for complex work. Persisted primary Code sessions can select [Ultra](subagents.md) for first-class recoverable subagents. Auto is the default; Ask prompts more often, and both sandbox ordinary model-initiated Bash. Full skips approval and runs on the host. See [Permissions](permissions.md).

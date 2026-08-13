@@ -19,7 +19,7 @@ Metis 只在 Chat 模式提供定时任务。桌面端通过左侧的 **Schedule
 
 调度器只在 Metis CLI 或 App Server 进程运行时工作，不安装系统服务。多个进程通过全局领导锁协调，最多并行两个不同任务，同一任务不会并行执行。
 
-无人值守执行只开放 `read`、`grep`、`find`、`ls`、`write`、`edit`、`bash`、`web_fetch` 和 `web_search`。文件写入受工作目录限制，不能提权，也不加载 Skills、Extensions、MCP/Connectors、提示词模板、主题、项目长期记忆或 Dream 自动记忆；隔离运行时不可用时直接失败，不回退到 Full 权限。
+无人值守执行只开放 `read`、`grep`、`find`、`ls`、`write`、`edit`、`bash`、`web_fetch` 和 `web_search`。文件写入受工作目录限制；Bash 拒绝网络、破坏性、提权和外部副作用命令；也不加载 Skills、Extensions、MCP/Connectors、提示词模板、主题、项目长期记忆或 Dream 自动记忆。隔离运行时不可用时直接失败，不回退到 Full 权限。
 
 桌面端的 Keep Awake 默认关闭。开启后仅在 Metis 运行期间使用 Electron `prevent-app-suspension` 防止系统睡眠，不阻止显示器休眠，也不能在应用退出后继续工作。
 

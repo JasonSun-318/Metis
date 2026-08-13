@@ -146,7 +146,7 @@ Type `/` in the editor to trigger commands. [Extensions](#extensions) can regist
 | `/settings` | Web search, thinking level, theme, message delivery, transport |
 | `/resume` | Pick from previous sessions |
 | [`/new [chat\|code]`](docs/sessions.md#chat-and-code-modes) | Create a session and choose its immutable primary workspace |
-| [`/permissions`](docs/permissions.md) | Choose Ask or Full for this session |
+| [`/permissions`](docs/permissions.md) | Choose Ask, Auto, or Full for this session |
 | `/add-dir <path>` | Code only: add one existing directory as a file-access root for this session |
 | `/remove-dir <path>` | Code only: remove one previously added directory |
 | `/dirs` | Code only: list the primary and additional working directories |
@@ -474,7 +474,7 @@ Metis is aggressively extensible so it doesn't have to dictate your workflow. Fe
 
 **Explicit multi-agent tier.** Persisted primary Code sessions can select Ultra for maximum model reasoning plus recoverable first-class subagents. The process-spawning extension remains available for custom isolation and chained workflows. See [Ultra and Subagents](docs/subagents.md).
 
-**Explicit permission boundary.** Ask automatically permits only proven safe structured reads and fixed internal controls; other model actions need one Allow-once decision. Approved actions and Full run directly with the current user's OS authority. Installed integration code remains trusted. See [Permissions](docs/permissions.md).
+**Explicit permission boundary.** Auto is the default. Ask and Auto sandbox model-initiated Bash unless an approved action explicitly shows host execution; exact current-project approvals can be revoked. Full runs directly with the current user's OS authority. Installed integration code remains trusted. See [Permissions](docs/permissions.md).
 
 **No separate plan mode.** The built-in `set_tasks` tool lets the model show a visible checklist for complex multi-step work. Use a plan file or the independent Plan Mode extension when you want a review-first or read-only planning workflow.
 
@@ -541,7 +541,7 @@ cat README.md | metis -p "Summarize this text"
 |--------|-------------|
 | `--agent-mode <chat\|code>` | Classify a newly created session (default: `code`) |
 | `--cwd <path>` | Bind a newly created session to an existing directory |
-| `--permission-mode <ask\|full>` | Set permissions for a newly created session |
+| `--permission-mode <ask\|auto\|full>` | Set permissions for a newly created session (default: `auto`) |
 | `-c`, `--continue` | Continue most recent session |
 | `-r`, `--resume` | Browse and select session |
 | `--session <path\|id>` | Use specific session file or partial UUID |

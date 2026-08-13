@@ -213,10 +213,10 @@ interface SessionEntryBase {
 First line of the file. Metadata only, not part of the tree (no `id`/`parentId`).
 
 ```json
-{"type":"session","version":11,"id":"uuid","timestamp":"2026-07-17T14:00:00.000Z","cwd":"/path/to/project","mode":"code","cwdOrigin":"user-selected","permissionMode":"ask"}
+{"type":"session","version":11,"id":"uuid","timestamp":"2026-07-17T14:00:00.000Z","cwd":"/path/to/project","mode":"code","cwdOrigin":"user-selected","permissionMode":"auto"}
 ```
 
-`mode` is `"chat"` or `"code"`. `cwdOrigin` is `"managed"` only for a workspace that Metis owns and may copy/delete; otherwise it is `"user-selected"`. New records write `permissionMode` as `"ask"` or `"full"`; both modes default to Ask. Legacy v6-v8 `"auto"` loads as Ask, and legacy `reviewerEnabled` is validated when present but ignored.
+`mode` is `"chat"` or `"code"`. `cwdOrigin` is `"managed"` only for a workspace that Metis owns and may copy/delete; otherwise it is `"user-selected"`. New records write `permissionMode` as `"ask"`, `"auto"`, or `"full"`; omitted values default to Auto. Auto remains Auto when reopened.
 
 For sessions with a parent (created via `/fork`, `/clone`, or `newSession({ parentSession })`):
 
@@ -258,7 +258,7 @@ A first-class child adds an immutable ownership marker to its normal session hea
 {"type":"session","version":11,"id":"child-id","timestamp":"2026-07-18T00:00:00.000Z","cwd":"/path/to/project","mode":"code","cwdOrigin":"user-selected","permissionMode":"ask","subagent":{"agentId":"child-id","name":"researcher","parentSessionId":"parent-id"}}
 ```
 
-Its journal begins with `subagent_created`, which snapshots inherited Code mode, exact model/real thinking level, tools, permission mode, cwd, fork policy, timeout, and optional assignment profile. Legacy child records may contain `auto`, `reviewerEnabled`, `readPaths`, and `writePaths`; the parser validates and discards those removed fields while normalizing Auto to Ask. Every admitted initial/follow-up run has an immutable `runId`; `subagent_state` and queued/accepted/cancelled `subagent_follow_up` records use that ID.
+Its journal begins with `subagent_created`, which snapshots inherited Code mode, exact model/real thinking level, tools, permission mode, cwd, fork policy, timeout, and optional assignment profile. Auto remains a first-class permission mode. Every admitted initial/follow-up run has an immutable `runId`; `subagent_state` and queued/accepted/cancelled `subagent_follow_up` records use that ID.
 
 The parent records `subagent_mode_change` for Ultra selection. Child permission requests go directly to the active user approval UI and remain audited only in the child session. Full child transcripts and configuration never enter the parent journal.
 
@@ -445,7 +445,7 @@ for (const line of lines) {
 Key methods for working with sessions programmatically.
 
 ### Static Creation Methods
-- `SessionManager.create(cwd, sessionDir?, { id?, mode?, cwdOrigin?, permissionMode? })` - Create a session; omitted permission mode defaults to Ask
+- `SessionManager.create(cwd, sessionDir?, { id?, mode?, cwdOrigin?, permissionMode? })` - Create a session; omitted permission mode defaults to Auto
 - `SessionManager.open(path, sessionDir?)` - Open existing session file
 - `SessionManager.continueRecent(cwd, sessionDir?, { mode? })` - Open the latest session; use the option only when no session exists
 - `SessionManager.inMemory(cwd?, options?)` - No file persistence
@@ -466,7 +466,7 @@ Key methods for working with sessions programmatically.
 - `getWorkspaceRoots()` - Return the immutable primary root followed by current additional roots
 - `addWorkspaceDirectory(path)` - Append one existing canonical Code root without changing cwd
 - `removeWorkspaceDirectory(path)` - Revoke one added Code root, including a temporarily missing root
-- `getPermissionSettings()` - Return the effective Ask/Full permission mode
+- `getPermissionSettings()` - Return the effective Ask/Auto/Full permission mode
 - `setPermissionSettings(settings)` - Append non-tree permission metadata
 
 ### Instance Methods - Appending (all return entry ID)

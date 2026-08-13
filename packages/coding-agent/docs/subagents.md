@@ -116,7 +116,7 @@ Child permissions inherit or narrow the parent's current mode. Each child has a 
 
 When the parent changes from Full to Ask, Metis immediately lowers every non-closed child's in-memory ceiling and durably appends Ask to hot, cold, and queued child sessions. A child starting during the transition sees Ask before its first prompt. Changing the parent back to Full never re-upgrades an existing child.
 
-Ask automatically permits only proven safe structured reads and `inspect_agents`; other model-facing calls ask. Approved built-ins execute directly as the current OS user, and installed integrations use their configured runtime. Extension, SDK, and MCP code is trusted when installed/configured, but their model-facing tools still follow Ask/Full.
+Ask automatically permits only proven safe structured reads and `inspect_agents`; other model-facing calls ask. Auto permits ordinary workspace work and trusted installed integrations, while ordinary Bash remains sandboxed. A child cannot exceed its parent's Ask < Auto < Full ceiling, and child sessions never consume current-project approval rules. Extension, SDK, and MCP code is trusted when installed/configured.
 
 When a child needs approval, only that child pauses. The request uses the parent's single approval queue and identifies the child name/ID plus the exact tool, arguments, risks, paths, and network targets. With no owner, it fails closed. The decision is audited in the child journal and never grants authority to a sibling or enters the parent model transcript.
 
