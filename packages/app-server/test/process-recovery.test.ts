@@ -118,7 +118,7 @@ function request(id: string, method: ClientRpcRequest["method"], params: unknown
 async function initialize(rpc: RpcProcess): Promise<void> {
 	await rpc.request(
 		request("initialize", "initialize", {
-			protocolVersion: 11,
+			protocolVersion: 17,
 			client: { name: "process-recovery-test", version: "1" },
 			capabilities: [],
 		}),

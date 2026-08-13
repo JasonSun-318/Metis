@@ -60,6 +60,7 @@ describe("InteractionBroker", () => {
 		args: { command: "curl https://example.test" },
 		reason: "Network destination needs approval",
 		cwd: "/tmp/work",
+		executionTarget: "host",
 		actor: { type: "subagent", id: "agent-child-1", name: "researcher" },
 		...overrides,
 	});
@@ -143,6 +144,31 @@ describe("InteractionBroker", () => {
 			}),
 		]);
 		expect(broker.hasPending(SESSION_ID)).toBe(false);
+	});
+
+	it("reports when a session starts and stops waiting for user input", async () => {
+		const interactionId = "00000000-0000-4000-8000-000000000353";
+		const changes: Array<[string, boolean]> = [];
+		const broker = new InteractionBroker({
+			serverEpoch: EPOCH,
+			createId: () => interactionId,
+			onPendingChange: (sessionId: string, pending: boolean) => changes.push([sessionId, pending]),
+		} as never);
+		const peer = new FakePeer();
+		broker.assign(SESSION_ID, peer);
+		peer.response = {
+			interactionId,
+			kind: "ask_user",
+			cancelled: true,
+			answers: [],
+		};
+
+		await broker.requestUserInput(SESSION_ID, askUserRequest());
+
+		expect(changes).toEqual([
+			[SESSION_ID, true],
+			[SESSION_ID, false],
+		]);
 	});
 
 	it("resumes the waiting tool call with the user answers returned by the owner", async () => {
@@ -229,7 +255,7 @@ describe("InteractionBroker", () => {
 		const broker = new InteractionBroker({ serverEpoch: EPOCH, createId: () => interactionId });
 		const peer = new FakePeer();
 		broker.assign(SESSION_ID, peer);
-		peer.response = { interactionId, kind: "select", choiceId: "choice:0" };
+		peer.response = { interactionId, kind: "select", choiceId: "permission:allow-once" };
 
 		await expect(broker.requestPermissionApproval(SESSION_ID, childApproval())).resolves.toEqual({
 			decision: "allow",
@@ -247,11 +273,13 @@ describe("InteractionBroker", () => {
 				omittedRows: 0,
 				scopeComplete: true,
 				irreversible: false,
+				executionTarget: "host",
+				rememberProjectEligible: false,
 			},
 			title: "Approve bash?",
 			choices: [
-				{ id: "choice:0", label: "Allow once" },
-				{ id: "choice:1", label: "Deny" },
+				{ id: "permission:allow-once", label: "Allow once" },
+				{ id: "permission:deny", label: "Reject" },
 			],
 		});
 		expect(peer.requests[0]?.message).toContain("Subagent: researcher (agent-child-1)");
@@ -261,12 +289,37 @@ describe("InteractionBroker", () => {
 		expect(peer.requests[0]?.message).toContain("Metis does not sandbox this action");
 	});
 
+	it("returns a project-scoped decision only for an eligible primary action", async () => {
+		const interactionId = "00000000-0000-4000-8000-000000000322";
+		const broker = new InteractionBroker({ serverEpoch: EPOCH, createId: () => interactionId });
+		const peer = new FakePeer();
+		broker.assign(SESSION_ID, peer);
+		peer.response = { interactionId, kind: "select", choiceId: "permission:always-project" };
+
+		await expect(
+			broker.requestPermissionApproval(
+				SESSION_ID,
+				childApproval({
+					actor: undefined,
+					executionTarget: "sandbox",
+					rememberProjectEligible: true,
+				}),
+			),
+		).resolves.toEqual({ decision: "allow", remember: "project" });
+		expect(permissionInteraction(peer)).toMatchObject({
+			operation: { executionTarget: "sandbox", rememberProjectEligible: true },
+			choices: [{ id: "permission:allow-once" }, { id: "permission:always-project" }, { id: "permission:deny" }],
+		});
+		expect(peer.requests[0]?.message).toContain("workspace sandbox");
+		expect(peer.requests[0]?.message).not.toContain("does not sandbox");
+	});
+
 	it("summarizes an edit without exposing replacement text", async () => {
 		const interactionId = "00000000-0000-4000-8000-000000000321";
 		const broker = new InteractionBroker({ serverEpoch: EPOCH, createId: () => interactionId });
 		const peer = new FakePeer();
 		broker.assign(SESSION_ID, peer);
-		peer.response = { interactionId, kind: "select", choiceId: "choice:0" };
+		peer.response = { interactionId, kind: "select", choiceId: "permission:allow-once" };
 
 		await broker.requestPermissionApproval(
 			SESSION_ID,
@@ -299,6 +352,8 @@ describe("InteractionBroker", () => {
 				omittedRows: 0,
 				scopeComplete: true,
 				irreversible: false,
+				executionTarget: "host",
+				rememberProjectEligible: false,
 			},
 		});
 		const operation = permissionInteraction(peer).operation;
@@ -329,6 +384,8 @@ describe("InteractionBroker", () => {
 					omittedRows: 0,
 					scopeComplete: true,
 					irreversible: false,
+					executionTarget: "host",
+					rememberProjectEligible: false,
 				},
 			},
 			{
@@ -352,6 +409,8 @@ describe("InteractionBroker", () => {
 					omittedRows: 0,
 					scopeComplete: true,
 					irreversible: false,
+					executionTarget: "host",
+					rememberProjectEligible: false,
 				},
 			},
 			{
@@ -375,6 +434,8 @@ describe("InteractionBroker", () => {
 					omittedRows: 0,
 					scopeComplete: true,
 					irreversible: false,
+					executionTarget: "host",
+					rememberProjectEligible: false,
 				},
 			},
 			{
@@ -393,8 +454,10 @@ describe("InteractionBroker", () => {
 					toolName: "mcp__service__publish",
 					rows: [{ label: "Details", value: "Network destination needs approval" }],
 					omittedRows: 0,
-					scopeComplete: false,
+					scopeComplete: true,
 					irreversible: true,
+					executionTarget: "host",
+					rememberProjectEligible: false,
 				},
 			},
 		];
@@ -404,11 +467,14 @@ describe("InteractionBroker", () => {
 			const broker = new InteractionBroker({ serverEpoch: EPOCH, createId: () => interactionId });
 			const peer = new FakePeer();
 			broker.assign(SESSION_ID, peer);
-			peer.response = { interactionId, kind: "select", choiceId: "choice:1" };
+			peer.response = { interactionId, kind: "select", choiceId: "permission:deny" };
 			await broker.requestPermissionApproval(SESSION_ID, sample.request);
 			const operation = permissionInteraction(peer).operation;
 			expect(operation).toEqual(sample.operation);
 			expect(JSON.stringify(operation)).not.toContain("private payload");
+			if (sample.request.action.actionId === "mcp-1") {
+				expect(peer.requests[0]?.message).toContain('"content": "private payload"');
+			}
 		}
 	});
 
@@ -417,13 +483,14 @@ describe("InteractionBroker", () => {
 		const broker = new InteractionBroker({ serverEpoch: EPOCH, createId: () => interactionId });
 		const peer = new FakePeer();
 		broker.assign(SESSION_ID, peer);
-		peer.response = { interactionId, kind: "select", choiceId: "choice:0" };
+		peer.response = { interactionId, kind: "select", choiceId: "permission:allow-once" };
 		const paths = Array.from({ length: MAX_PERMISSION_OPERATION_ROWS + 3 }, (_, index) => `/tmp/target-${index}`);
 
 		await expect(
 			broker.requestPermissionApproval(
 				SESSION_ID,
 				childApproval({
+					rememberProjectEligible: true,
 					action: {
 						actionId: "many-paths",
 						toolName: "read",
@@ -434,12 +501,14 @@ describe("InteractionBroker", () => {
 					},
 				}),
 			),
-		).resolves.toEqual({ decision: "deny", reason: "Permission target details were incomplete" });
+		).resolves.toEqual({ decision: "allow" });
 
 		const operation = permissionInteraction(peer).operation;
 		expect(operation?.rows).toHaveLength(MAX_PERMISSION_OPERATION_ROWS);
 		expect(operation?.omittedRows).toBe(3);
 		expect(operation?.scopeComplete).toBe(true);
+		expect(operation?.rememberProjectEligible).toBe(true);
+		expect(peer.requests[0]?.message).toContain(`/tmp/target-${MAX_PERMISSION_OPERATION_ROWS + 2}`);
 	});
 
 	it("fails a child permission request closed without an owning peer", async () => {
@@ -605,7 +674,7 @@ describe("InteractionBroker", () => {
 			jsonrpc: "2.0",
 			id: "initialize",
 			method: "initialize",
-			params: { protocolVersion: 11, client: { name: "test", version: "1" }, capabilities: [] },
+			params: { protocolVersion: 17, client: { name: "test", version: "1" }, capabilities: [] },
 		});
 		const ids = ["00000000-0000-4000-8000-000000000307", "00000000-0000-4000-8000-000000000308"];
 		const broker = new InteractionBroker({ serverEpoch: EPOCH, createId: () => ids.shift()! });
@@ -643,7 +712,7 @@ describe("InteractionBroker", () => {
 			jsonrpc: "2.0",
 			id: "initialize",
 			method: "initialize",
-			params: { protocolVersion: 11, client: { name: "test", version: "1" }, capabilities: [] },
+			params: { protocolVersion: 17, client: { name: "test", version: "1" }, capabilities: [] },
 		});
 		const ids = ["00000000-0000-4000-8000-000000000309", "00000000-0000-4000-8000-000000000310"];
 		const broker = new InteractionBroker({ serverEpoch: EPOCH, createId: () => ids.shift()! });

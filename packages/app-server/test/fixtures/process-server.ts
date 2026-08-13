@@ -57,6 +57,9 @@ SessionManager.prototype.appendMessage = function (...args) {
 	return result;
 };
 
-const server = await AppServer.create({ agentDir: getAgentDir() });
+const server = await AppServer.create({
+	agentDir: getAgentDir(),
+	titleGenerator: { generate: async () => undefined },
+});
 const binding = bindAppServerTransport(server, new StdioTransport(process.stdin, process.stdout));
 await binding.closed;

@@ -4,6 +4,7 @@ import type {
 	DomainEvent,
 	InteractionView,
 	ItemView,
+	QueuedTurnView,
 	SessionSnapshot,
 	SessionSummary,
 	SessionTaskView,
@@ -26,6 +27,7 @@ export interface SessionProjectionSeed {
 	readonly items?: readonly ItemView[];
 	readonly pendingInteractions?: readonly InteractionView[];
 	readonly tasks?: readonly SessionTaskView[];
+	readonly queuedTurns?: readonly QueuedTurnView[];
 }
 
 function clone<T>(value: T): T {
@@ -42,6 +44,7 @@ export class SessionProjection {
 	private readonly itemIndexById = new Map<string, number>();
 	private pendingInteractions: InteractionView[];
 	private tasks: SessionTaskView[];
+	private queuedTurns: QueuedTurnView[];
 
 	constructor(seed: SessionProjectionSeed) {
 		this.session = clone(seed.session);
@@ -49,6 +52,7 @@ export class SessionProjection {
 		for (const item of seed.items ?? []) this.upsertItem(item);
 		this.pendingInteractions = clone([...(seed.pendingInteractions ?? [])]);
 		this.tasks = clone([...(seed.tasks ?? [])]);
+		this.queuedTurns = clone([...(seed.queuedTurns ?? [])]);
 	}
 
 	private assertSession(sessionId: string): void {
@@ -91,6 +95,10 @@ export class SessionProjection {
 			case "session/tasksChanged":
 				this.assertSession(event.sessionId);
 				this.tasks = clone(event.tasks);
+				return clone(event);
+			case "turn/queueChanged":
+				this.assertSession(event.sessionId);
+				this.queuedTurns = clone(event.queuedTurns);
 				return clone(event);
 			case "session/updated":
 				this.assertSession(event.session.sessionId);
@@ -149,7 +157,7 @@ export class SessionProjection {
 			| "model"
 			| "availableModels"
 		> = {
-			permissionMode: "ask",
+			permissionMode: "auto",
 			thinkingSelection: "off",
 			actualThinkingLevel: "off",
 			availableThinkingSelections: ["off"],
@@ -166,6 +174,7 @@ export class SessionProjection {
 				this.itemOrder.length > recentItemIds.length && recentItemIds.length > 0 ? recentItemIds[0]! : null,
 			activeTurnId: [...turns].reverse().find((turn) => turn.state === "running")?.turnId ?? null,
 			pendingInteractions: clone(this.pendingInteractions),
+			queuedTurns: clone(this.queuedTurns),
 			tasks: clone(this.tasks),
 			...clone(runtime),
 			serverEpoch,

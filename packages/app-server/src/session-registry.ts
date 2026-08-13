@@ -1,4 +1,4 @@
-import type { ClientResult } from "@metis/app-protocol";
+import type { ClientParams, ClientResult } from "@metis/app-protocol";
 import { assertValidSessionId } from "@metis/coding-agent";
 import {
 	AppServerError,
@@ -43,6 +43,62 @@ export class SessionRegistry {
 
 	async listDraftSkills(cwd: string | null): Promise<ClientResult<"skill/list">> {
 		return this.host.listSkills ? await this.host.listSkills(cwd) : { skills: [] };
+	}
+
+	async getDraftSkill(input: ClientParams<"skill/get">): Promise<ClientResult<"skill/get">> {
+		if (!this.host.getSkill) throw new AppServerError("NOT_FOUND");
+		return await this.host.getSkill(input);
+	}
+
+	async upsertDraftSkill(input: ClientParams<"skill/upsert">): Promise<ClientResult<"skill/upsert">> {
+		if (!this.host.upsertSkill) throw new AppServerError("OPERATION_FAILED", { requestId: input.requestId });
+		return await this.host.upsertSkill(input);
+	}
+
+	async removeDraftSkill(input: ClientParams<"skill/remove">): Promise<ClientResult<"skill/remove">> {
+		if (!this.host.removeSkill) throw new AppServerError("OPERATION_FAILED", { requestId: input.requestId });
+		return await this.host.removeSkill(input);
+	}
+
+	async inspectDraftSkillImport(
+		input: ClientParams<"skill/import/inspect">,
+	): Promise<ClientResult<"skill/import/inspect">> {
+		if (!this.host.inspectSkillImport) throw new AppServerError("OPERATION_FAILED");
+		return await this.host.inspectSkillImport(input);
+	}
+
+	async importDraftSkills(input: ClientParams<"skill/import">): Promise<ClientResult<"skill/import">> {
+		if (!this.host.importSkills) throw new AppServerError("OPERATION_FAILED", { requestId: input.requestId });
+		return await this.host.importSkills(input);
+	}
+
+	async listDraftMcpServers(cwd: string | null): Promise<ClientResult<"mcp/list">> {
+		return this.host.listMcpServers ? await this.host.listMcpServers(cwd) : { servers: [] };
+	}
+
+	async inspectDraftMcpImport(input: ClientParams<"mcp/import/inspect">): Promise<ClientResult<"mcp/import/inspect">> {
+		if (!this.host.inspectMcpImport) throw new AppServerError("OPERATION_FAILED");
+		return await this.host.inspectMcpImport(input);
+	}
+
+	async importDraftMcpServers(input: ClientParams<"mcp/import">): Promise<ClientResult<"mcp/import">> {
+		if (!this.host.importMcpServers) throw new AppServerError("OPERATION_FAILED", { requestId: input.requestId });
+		return await this.host.importMcpServers(input);
+	}
+
+	async getDraftMcpServer(input: ClientParams<"mcp/get">): Promise<ClientResult<"mcp/get">> {
+		if (!this.host.getMcpServer) throw new AppServerError("NOT_FOUND");
+		return await this.host.getMcpServer(input);
+	}
+
+	async upsertDraftMcpServer(input: ClientParams<"mcp/upsert">): Promise<ClientResult<"mcp/upsert">> {
+		if (!this.host.upsertMcpServer) throw new AppServerError("OPERATION_FAILED", { requestId: input.requestId });
+		return await this.host.upsertMcpServer(input);
+	}
+
+	async removeDraftMcpServer(input: ClientParams<"mcp/remove">): Promise<ClientResult<"mcp/remove">> {
+		if (!this.host.removeMcpServer) throw new AppServerError("OPERATION_FAILED", { requestId: input.requestId });
+		return await this.host.removeMcpServer(input);
 	}
 
 	private slotFor(ref: SessionRef): RuntimeSlot {

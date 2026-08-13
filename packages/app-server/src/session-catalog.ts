@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { type Dir, constants as fsConstants } from "node:fs";
-import { lstat, open, opendir, realpath } from "node:fs/promises";
+import { type FileHandle, lstat, open, opendir, realpath } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
 	type AgentMode,
@@ -17,6 +17,7 @@ import {
 	encodePathForStorage,
 	getDefaultSessionDir,
 	getOwnedManagedWorkspace,
+	MAX_SESSION_RECORD_BYTES,
 	migrateSessionDisplayMetadata,
 	moveSessionFileWithLease,
 	readSessionDisplayMetadata,
@@ -35,6 +36,8 @@ import {
 import { AppServerError, type SessionRef } from "./session-runtime-host.ts";
 
 const MAX_HEADER_BYTES = 64 * 1024;
+const LAST_EVENT_READ_BUFFER_BYTES = 64 * 1024;
+const MAX_SESSION_OUTCOME_TAIL_BYTES = 1024 * 1024;
 const MAX_SESSION_INFO_BYTES = 8 * 1024;
 const DEFAULT_LIST_LIMIT = 50;
 const MAX_CATALOG_FILES = 100_000;
@@ -53,9 +56,11 @@ interface ScannedSession {
 		readonly cwd: string;
 		readonly mode: AgentMode;
 		readonly cwdOrigin: CwdOrigin;
+		readonly lastTurnOutcome?: "completed" | "failed";
 		readonly scheduled?: { readonly taskId: string; readonly runId: string };
 	};
 	readonly updatedAt: string;
+	readonly storageUpdatedAt: string;
 }
 
 interface CachedSessionName {
@@ -63,6 +68,8 @@ interface CachedSessionName {
 	readonly dev: number;
 	readonly ino: number;
 	readonly scannedBytes: number;
+	readonly updatedAt: string;
+	readonly lastTurnOutcome?: "completed" | "failed";
 	readonly name?: string;
 }
 
@@ -96,6 +103,82 @@ function safeIsoTimestamp(value: unknown): value is string {
 		/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(value) &&
 		Number.isFinite(Date.parse(value))
 	);
+}
+
+interface SessionTailMetadata {
+	readonly updatedAt?: string;
+	readonly lastTurnOutcome?: "completed" | "failed";
+}
+
+function eventMetadata(bytes: Buffer): SessionTailMetadata {
+	const line = bytes.toString("utf8").trim();
+	if (!line) return {};
+	try {
+		const value = JSON.parse(line) as Record<string, unknown>;
+		const lastTurnOutcome =
+			value.type === "runtime_turn" && value.state === "completed"
+				? "completed"
+				: value.type === "runtime_turn" && value.state === "interrupted"
+					? "failed"
+					: undefined;
+		return {
+			...(safeIsoTimestamp(value.timestamp) ? { updatedAt: value.timestamp } : {}),
+			...(lastTurnOutcome ? { lastTurnOutcome } : {}),
+		};
+	} catch {
+		return {};
+	}
+}
+
+async function readSessionTailMetadata(handle: FileHandle, size: number): Promise<SessionTailMetadata> {
+	let position = size;
+	let suffixBytes = 0;
+	let suffixChunks: Buffer[] = [];
+	let updatedAt: string | undefined;
+	let lastTurnOutcome: "completed" | "failed" | undefined;
+	const inspect = (line: Buffer) => {
+		const metadata = eventMetadata(line);
+		updatedAt ??= metadata.updatedAt;
+		lastTurnOutcome ??= metadata.lastTurnOutcome;
+	};
+	while (position > 0) {
+		const length = Math.min(position, LAST_EVENT_READ_BUFFER_BYTES);
+		position -= length;
+		const chunk = Buffer.allocUnsafe(length);
+		const { bytesRead } = await handle.read(chunk, 0, length, position);
+		if (bytesRead !== length) throw new Error("Session journal changed while reading its tail");
+		let lineEnd = chunk.length;
+		for (let index = chunk.length - 1; index >= 0; index -= 1) {
+			if (chunk[index] !== 0x0a) continue;
+			const segment = chunk.subarray(index + 1, lineEnd);
+			if (segment.byteLength > 0 || suffixBytes > 0) {
+				const line =
+					suffixBytes > 0 ? Buffer.concat([segment, ...suffixChunks], segment.byteLength + suffixBytes) : segment;
+				inspect(line);
+				if (updatedAt && lastTurnOutcome) return { updatedAt, lastTurnOutcome };
+			}
+			suffixBytes = 0;
+			suffixChunks = [];
+			lineEnd = index;
+		}
+		const prefix = chunk.subarray(0, lineEnd);
+		if (position === 0) {
+			const line =
+				suffixBytes > 0 ? Buffer.concat([prefix, ...suffixChunks], prefix.byteLength + suffixBytes) : prefix;
+			inspect(line);
+			break;
+		}
+		if (prefix.byteLength > 0) {
+			suffixChunks.unshift(prefix);
+			suffixBytes += prefix.byteLength;
+			if (suffixBytes > MAX_SESSION_RECORD_BYTES) break;
+		}
+		if (updatedAt && size - position >= MAX_SESSION_OUTCOME_TAIL_BYTES) break;
+	}
+	return {
+		...(updatedAt ? { updatedAt } : {}),
+		...(lastTurnOutcome ? { lastTurnOutcome } : {}),
+	};
 }
 
 function normalizedSessionName(value: string | undefined): string | undefined {
@@ -168,9 +251,12 @@ async function isAbsent(path: string): Promise<boolean> {
 async function readHeader(
 	path: string,
 	nameStart: number | false | undefined = undefined,
+	cachedTail?: SessionTailMetadata,
 ): Promise<{
 	id: string;
 	timestamp: string;
+	updatedAt: string;
+	lastTurnOutcome?: "completed" | "failed";
 	cwd: string;
 	mode: AgentMode;
 	cwdOrigin: CwdOrigin;
@@ -296,6 +382,8 @@ async function readHeader(
 				position += chunkLength;
 			}
 		}
+		const tail = cachedTail ?? (await readSessionTailMetadata(handle, opened.size));
+		const updatedAt = tail.updatedAt ?? value.timestamp;
 		const current = await lstat(path);
 		if (!current.isFile() || current.nlink !== 1 || current.dev !== opened.dev || current.ino !== opened.ino) {
 			throw new Error("Session journal identity changed while reading its header");
@@ -303,6 +391,8 @@ async function readHeader(
 		return {
 			id: value.id,
 			timestamp: value.timestamp,
+			updatedAt,
+			...(tail.lastTurnOutcome ? { lastTurnOutcome: tail.lastTurnOutcome } : {}),
 			cwd: value.cwd,
 			mode: value.mode === "chat" || value.mode === "code" ? value.mode : "code",
 			cwdOrigin:
@@ -389,12 +479,19 @@ export class SessionCatalog {
 						: persistedName
 							? false
 							: undefined;
-			let metadata = await readHeader(path, nameStart);
+			const unchanged = cachedName?.fingerprint === fingerprint;
+			const cachedTail = unchanged
+				? {
+						updatedAt: cachedName.updatedAt,
+						...(cachedName.lastTurnOutcome ? { lastTurnOutcome: cachedName.lastTurnOutcome } : {}),
+					}
+				: undefined;
+			let metadata = await readHeader(path, nameStart, cachedTail);
 			if (persistedName && persistedName.sessionId !== metadata.id) {
 				persistedName = undefined;
-				metadata = await readHeader(path);
+				metadata = await readHeader(path, undefined, cachedTail);
 			}
-			const { name: scannedName, nameScannedThrough, ...header } = metadata;
+			const { name: scannedName, nameScannedThrough, updatedAt, ...header } = metadata;
 			const name =
 				cachedName?.fingerprint === fingerprint || canContinueNameScan
 					? (scannedName ?? cachedName.name)
@@ -409,6 +506,8 @@ export class SessionCatalog {
 					dev: stats.dev,
 					ino: stats.ino,
 					scannedBytes: nameScannedThrough,
+					updatedAt,
+					...(header.lastTurnOutcome ? { lastTurnOutcome: header.lastTurnOutcome } : {}),
 					...(name ? { name } : {}),
 				});
 			}
@@ -431,17 +530,18 @@ export class SessionCatalog {
 				unread: readSessionUnreadState(path, header.id),
 				header,
 				...(name ? { name } : {}),
-				updatedAt: new Date(after.mtimeMs).toISOString(),
+				updatedAt,
+				storageUpdatedAt: new Date(after.mtimeMs).toISOString(),
 			};
 		} catch {
 			this.sessionNames.delete(path);
-			let updatedAt = new Date(0).toISOString();
+			let storageUpdatedAt = new Date(0).toISOString();
 			try {
-				updatedAt = new Date((await lstat(path)).mtimeMs).toISOString();
+				storageUpdatedAt = new Date((await lstat(path)).mtimeMs).toISOString();
 			} catch {
 				// Keep the deterministic epoch fallback for a disappearing file.
 			}
-			return { key, path, relativePath, archived, unread: false, updatedAt };
+			return { key, path, relativePath, archived, unread: false, updatedAt: storageUpdatedAt, storageUpdatedAt };
 		}
 	}
 
@@ -501,6 +601,7 @@ export class SessionCatalog {
 							createdAt: item.header.timestamp,
 							updatedAt: item.updatedAt,
 							state: "idle" as const,
+							...(item.header.lastTurnOutcome ? { lastTurnOutcome: item.header.lastTurnOutcome } : {}),
 							archived: item.archived,
 							unread: item.unread,
 							...(item.name ? { name: item.name } : {}),
@@ -510,6 +611,7 @@ export class SessionCatalog {
 			next.set(sessionId, {
 				path: item.path,
 				relativePath: item.relativePath,
+				storageUpdatedAt: item.storageUpdatedAt,
 				summary,
 				...(item.header?.scheduled ? { scheduled: item.header.scheduled } : {}),
 			});
@@ -567,6 +669,7 @@ export class SessionCatalog {
 								createdAt: item.header.timestamp,
 								updatedAt: item.updatedAt,
 								state: "idle" as const,
+								...(item.header.lastTurnOutcome ? { lastTurnOutcome: item.header.lastTurnOutcome } : {}),
 								archived: item.archived,
 								unread: item.unread,
 								...(item.name ? { name: item.name } : {}),
@@ -576,6 +679,7 @@ export class SessionCatalog {
 				next.set(sessionId, {
 					path: item.path,
 					relativePath: item.relativePath,
+					storageUpdatedAt: item.storageUpdatedAt,
 					summary,
 					...(item.header?.scheduled ? { scheduled: item.header.scheduled } : {}),
 				});
@@ -612,15 +716,16 @@ export class SessionCatalog {
 				}
 				const existing = this.sessions.get(sessionId);
 				if (existing && existing.path !== path) throw new Error("Session id is already claimed");
-				const updatedAt = new Date((await lstat(path)).mtimeMs).toISOString();
+				const storageUpdatedAt = new Date((await lstat(path)).mtimeMs).toISOString();
 				const summary: SessionSummary = {
 					sessionId,
 					mode: header.mode,
 					cwdOrigin: header.cwdOrigin,
 					cwd: summaryCwd(header.cwd),
 					createdAt: header.timestamp,
-					updatedAt,
+					updatedAt: header.updatedAt,
 					state: "idle",
+					...(header.lastTurnOutcome ? { lastTurnOutcome: header.lastTurnOutcome } : {}),
 					archived: false,
 					unread: run.unread,
 					scheduled: header.scheduled,
@@ -629,6 +734,7 @@ export class SessionCatalog {
 				this.sessions.set(sessionId, {
 					path,
 					relativePath: relative(this.agentDir, path),
+					storageUpdatedAt,
 					scheduled: header.scheduled,
 					summary,
 				});
@@ -733,7 +839,7 @@ export class SessionCatalog {
 					if (
 						current?.path === ref.path &&
 						current.relativePath === ref.relativePath &&
-						current.summary.updatedAt === ref.summary.updatedAt &&
+						current.storageUpdatedAt === ref.storageUpdatedAt &&
 						current.summary.archived === ref.summary.archived
 					) {
 						this.sessions.delete(sessionId);
@@ -830,7 +936,7 @@ export class SessionCatalog {
 				.update("\0")
 				.update(ref.relativePath)
 				.update("\0")
-				.update(ref.summary.updatedAt)
+				.update(ref.storageUpdatedAt ?? ref.summary.updatedAt)
 				.update("\0");
 		}
 		return { mode, cwd: canonicalCwd, refs, revision: hash.digest("hex") };
@@ -889,7 +995,7 @@ export class SessionCatalog {
 				throw new AppServerError("BUSY", { requestId: input.requestId });
 			}
 			const requestedName = normalizedSessionName(input.name);
-			const requestedPermissionMode = input.permissionMode ?? "ask";
+			const requestedPermissionMode = input.permissionMode ?? "auto";
 			const mutation: DurableSessionMutation = {
 				method: "session/create",
 				kind: "session_create",

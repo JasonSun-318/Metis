@@ -28,6 +28,9 @@ const ASK_USER_TIMEOUT_MS = 15 * 60_000;
 const MAX_TIMEOUT_MS = 2_147_483_647;
 const GENERIC_TARGET_KEY =
 	/^(action|address|branch|command|directory|file|folder|host|id|name|owner|path|port|project|query|repo|repository|resource|target|url|uri)$/iu;
+const ALLOW_ONCE = "permission:allow-once";
+const ALWAYS_PROJECT = "permission:always-project";
+const DENY = "permission:deny";
 
 export interface InteractionPeer {
 	request(request: ServerRpcRequest, signal: AbortSignal): Promise<InteractionResponseInput>;
@@ -38,6 +41,7 @@ export interface InteractionBrokerOptions {
 	readonly defaultTimeoutMs?: number;
 	readonly now?: () => number;
 	readonly createId?: () => string;
+	readonly onPendingChange?: (sessionId: string, pending: boolean) => void;
 }
 
 type NotificationEvent = Extract<DomainEvent, { type: "interaction/notify" }>;
@@ -109,16 +113,18 @@ function permissionOperation(request: PermissionApprovalRequest) {
 			push(label, text);
 		}
 	}
-	const scopeComplete = rows.length > 0;
-	if (!scopeComplete) push("Details", request.reason || "No target details were provided by this tool.");
+	if (rows.length === 0) push("Details", request.reason || "No target details were provided by this tool.");
 	const visibleRows = rows.slice(0, MAX_PERMISSION_OPERATION_ROWS);
+	const omittedRows = rows.length - visibleRows.length;
 
 	return {
 		toolName: boundedName(request.action.toolName, "tool"),
 		rows: visibleRows,
-		omittedRows: rows.length - visibleRows.length,
-		scopeComplete,
+		omittedRows,
+		scopeComplete: true,
 		irreversible: request.action.risks.some((risk) => risk === "destructive" || risk === "external-side-effect"),
+		executionTarget: request.executionTarget ?? "host",
+		rememberProjectEligible: request.rememberProjectEligible === true,
 	};
 }
 
@@ -128,6 +134,7 @@ export class InteractionBroker {
 	private readonly defaultTimeoutMs: number;
 	private readonly now: () => number;
 	private readonly createId: () => string;
+	private readonly onPendingChange?: (sessionId: string, pending: boolean) => void;
 	private readonly owners = new Map<string, InteractionPeer>();
 	private readonly pending = new Map<string, string>();
 
@@ -139,6 +146,7 @@ export class InteractionBroker {
 		this.defaultTimeoutMs = options.defaultTimeoutMs ?? DEFAULT_TIMEOUT_MS;
 		this.now = options.now ?? Date.now;
 		this.createId = options.createId ?? randomUUID;
+		this.onPendingChange = options.onPendingChange;
 	}
 
 	assign(sessionId: string, peer: InteractionPeer): void {
@@ -212,20 +220,27 @@ export class InteractionBroker {
 				presentation: "permission_approval",
 				operation,
 				choices: [
-					{ id: choiceId(0), label: "Allow once" },
-					{ id: choiceId(1), label: "Deny" },
+					{ id: ALLOW_ONCE, label: "Allow once" },
+					...(operation.rememberProjectEligible
+						? [{ id: ALWAYS_PROJECT, label: "Always allow for this project" }]
+						: []),
+					{ id: DENY, label: "Reject" },
 				],
 			},
 			{ signal: approval.signal },
 		);
 		if (response?.kind !== "select") throw new Error("Approval was unavailable or cancelled");
-		if (response.choiceId === choiceId(0)) {
-			if (!operation.scopeComplete || operation.omittedRows > 0) {
+		if (response.choiceId === ALLOW_ONCE || response.choiceId === ALWAYS_PROJECT) {
+			if (!operation.scopeComplete) {
 				return { decision: "deny", reason: "Permission target details were incomplete" };
+			}
+			if (response.choiceId === ALWAYS_PROJECT) {
+				if (!operation.rememberProjectEligible) throw new Error("Approval returned an ineligible project choice");
+				return { decision: "allow", remember: "project" };
 			}
 			return { decision: "allow" };
 		}
-		if (response.choiceId === choiceId(1)) return { decision: "deny", reason: "Denied by the session owner" };
+		if (response.choiceId === DENY) return { decision: "deny", reason: "Denied by the session owner" };
 		throw new Error("Approval returned an unknown choice");
 	}
 
@@ -377,7 +392,9 @@ export class InteractionBroker {
 		}
 		const timer = setTimeout(() => controller.abort(new Error("Interaction timed out")), timeout);
 		timer.unref?.();
+		const wasPending = this.hasPending(sessionId);
 		this.pending.set(interactionValue.interactionId, sessionId);
+		if (!wasPending) this.notifyPendingChange(sessionId, true);
 		try {
 			const aborted = new Promise<never>((_resolve, reject) => {
 				controller.signal.addEventListener("abort", () => reject(controller.signal.reason), { once: true });
@@ -390,7 +407,18 @@ export class InteractionBroker {
 		} finally {
 			clearTimeout(timer);
 			options?.signal?.removeEventListener("abort", abort);
+			const hadPending = this.hasPending(sessionId);
 			this.pending.delete(interactionValue.interactionId);
+			const pending = this.hasPending(sessionId);
+			if (hadPending !== pending) this.notifyPendingChange(sessionId, pending);
+		}
+	}
+
+	private notifyPendingChange(sessionId: string, pending: boolean): void {
+		try {
+			this.onPendingChange?.(sessionId, pending);
+		} catch {
+			// UI status projection cannot break an interaction request.
 		}
 	}
 }

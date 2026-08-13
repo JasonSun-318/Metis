@@ -116,12 +116,12 @@ describe("stdio app-server binding", () => {
 				jsonrpc: "2.0",
 				id: "initialize",
 				method: "initialize",
-				params: { protocolVersion: 11, client: { name: "stdio-test", version: "1" }, capabilities: [] },
+				params: { protocolVersion: 17, client: { name: "stdio-test", version: "1" }, capabilities: [] },
 			})}\n`,
 		);
 		await vi.waitFor(() => expect(output.envelopes).toHaveLength(2));
 		expect(output.envelopes[0]).toMatchObject({ error: { data: { name: "NOT_INITIALIZED" } } });
-		expect(output.envelopes[1]).toMatchObject({ result: { protocolVersion: 11 } });
+		expect(output.envelopes[1]).toMatchObject({ result: { protocolVersion: 17 } });
 
 		input.end();
 		await binding.closed;
@@ -140,12 +140,12 @@ describe("stdio app-server binding", () => {
 				jsonrpc: "2.0",
 				id: "initialize",
 				method: "initialize",
-				params: { protocolVersion: 11, client: { name: "stdio-test", version: "1" }, capabilities: [] },
+				params: { protocolVersion: 17, client: { name: "stdio-test", version: "1" }, capabilities: [] },
 			})}\n`,
 		);
 		await vi.waitFor(() => expect(output.envelopes).toHaveLength(2));
 		expect(output.envelopes[0]).toMatchObject({ error: { code: RPC_ERROR_CODES.PARSE_ERROR } });
-		expect(output.envelopes[1]).toMatchObject({ result: { protocolVersion: 11 } });
+		expect(output.envelopes[1]).toMatchObject({ result: { protocolVersion: 17 } });
 		input.end();
 		await binding.closed;
 	});
@@ -162,7 +162,7 @@ describe("stdio app-server binding", () => {
 			jsonrpc: "2.0",
 			id: "initialize",
 			method: "initialize",
-			params: { protocolVersion: 11, client: { name: "stdio-restart", version: "1" }, capabilities: [] },
+			params: { protocolVersion: 17, client: { name: "stdio-restart", version: "1" }, capabilities: [] },
 		};
 		const create = {
 			jsonrpc: "2.0",

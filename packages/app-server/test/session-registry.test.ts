@@ -62,8 +62,63 @@ class FakeRuntime implements OpenedSessionRuntime {
 		return { skills: [] };
 	}
 
+	async listMcpServers(): Promise<ClientResult<"mcp/list">> {
+		return { servers: [] };
+	}
+
+	async inspectMcpImport(): Promise<ClientResult<"mcp/import/inspect">> {
+		return { sourceRevision: "a".repeat(64), candidates: [] };
+	}
+
+	async importMcpServers(): Promise<ClientResult<"mcp/import">> {
+		return { servers: [] };
+	}
+
+	async getMcpServer(): Promise<ClientResult<"mcp/get">> {
+		throw new Error("No MCP server in fixture");
+	}
+
+	async getMcpCatalogItem(): Promise<ClientResult<"mcp/catalog/get">> {
+		throw new Error("No MCP catalog item in fixture");
+	}
+
+	async upsertMcpServer(): Promise<ClientResult<"mcp/upsert">> {
+		return { servers: [] };
+	}
+
+	async removeMcpServer(): Promise<ClientResult<"mcp/remove">> {
+		return { servers: [] };
+	}
+
+	async restartMcpServer(): Promise<ClientResult<"mcp/restart">> {
+		throw new Error("No MCP server in fixture");
+	}
+
+	async setMcpCredential(): Promise<ClientResult<"mcp/credential/set">> {
+		throw new Error("No MCP server in fixture");
+	}
+
+	async clearMcpCredential(): Promise<ClientResult<"mcp/credential/clear">> {
+		throw new Error("No MCP server in fixture");
+	}
+
 	async readItems(_input: ClientParams<"session/readItems">): Promise<ClientResult<"session/readItems">> {
 		return { items: [], nextBeforeItemId: null };
+	}
+
+	async getStatus(input: ClientParams<"session/status">): Promise<ClientResult<"session/status">> {
+		return {
+			sessionId: input.sessionId,
+			mode: "code",
+			contextTokens: 64_000,
+			contextWindow: 128_000,
+			remainingPercent: 50,
+			cacheHitPercent: 25,
+		};
+	}
+
+	async compact(input: ClientParams<"session/compact">): Promise<ClientResult<"session/compact">> {
+		return { sessionId: input.sessionId, tokensBefore: 64_000, estimatedTokensAfter: 8_000 };
 	}
 
 	async readSubagentItems(_input: ClientParams<"subagent/readItems">): Promise<ClientResult<"subagent/readItems">> {
@@ -107,6 +162,7 @@ class FakeRuntime implements OpenedSessionRuntime {
 			nextBeforeItemId: null,
 			activeTurnId: null,
 			pendingInteractions: [],
+			queuedTurns: [],
 			tasks: [],
 			thinkingSelection: "high",
 			actualThinkingLevel: "high",
@@ -126,6 +182,38 @@ class FakeRuntime implements OpenedSessionRuntime {
 	async steer(input: ClientParams<"turn/steer">): Promise<ClientResult<"turn/steer">> {
 		this.calls.push(input.text);
 		return { operationId: input.requestId, status: "accepted" };
+	}
+
+	async queueTurn(input: ClientParams<"turn/queue">): Promise<ClientResult<"turn/queue">> {
+		return {
+			queuedTurn: {
+				queueItemId: input.requestId,
+				revision: input.requestId,
+				state: "paused",
+				text: input.text,
+				attachments: [],
+			},
+		};
+	}
+
+	async updateQueuedTurn(input: ClientParams<"turn/queue/update">): Promise<ClientResult<"turn/queue/update">> {
+		return {
+			queuedTurn: {
+				queueItemId: input.queueItemId,
+				revision: input.requestId,
+				state: "paused",
+				text: input.text,
+				attachments: [],
+			},
+		};
+	}
+
+	async deleteQueuedTurn(input: ClientParams<"turn/queue/delete">): Promise<ClientResult<"turn/queue/delete">> {
+		return { queueItemId: input.queueItemId, deleted: true };
+	}
+
+	async sendQueuedTurn(input: ClientParams<"turn/queue/send">): Promise<ClientResult<"turn/queue/send">> {
+		return { operationId: input.requestId, queueItemId: input.queueItemId, status: "accepted" };
 	}
 
 	async interrupt(input: ClientParams<"turn/interrupt">): Promise<ClientResult<"turn/interrupt">> {
@@ -156,6 +244,66 @@ class FakeHost implements SessionRuntimeHost {
 }
 
 describe("SessionRegistry", () => {
+	it("forwards draft Skill operations without opening a session runtime", async () => {
+		const base = new FakeHost();
+		const detail: ClientResult<"skill/get"> = {
+			name: "writing-plans",
+			description: "Write plans",
+			source: "user",
+			revision: "a".repeat(64),
+			directoryPath: "/tmp/agent/skills/writing-plans",
+			entryFile: "SKILL.md",
+			files: ["SKILL.md"],
+			content: "---\nname: writing-plans\ndescription: Write plans\n---\n\nWrite plans.",
+			instructions: "Write plans.",
+			updatedAt: "2026-08-11T00:00:00.000Z",
+			editable: true,
+		};
+		const host: SessionRuntimeHost = {
+			open: base.open,
+			getSkill: vi.fn(async () => detail),
+			upsertSkill: vi.fn(async () => detail),
+			removeSkill: vi.fn(async () => ({ skills: [] })),
+		};
+		const registry = new SessionRegistry(host);
+		const target = { cwd: null, source: "user" as const, name: "writing-plans" };
+
+		await expect(registry.getDraftSkill(target)).resolves.toEqual(detail);
+		await expect(
+			registry.upsertDraftSkill({
+				...target,
+				requestId: "30000000-0000-4000-8000-000000000001",
+				expectedRevision: null,
+				content: detail.content,
+			}),
+		).resolves.toEqual(detail);
+		await expect(
+			registry.removeDraftSkill({
+				...target,
+				requestId: "30000000-0000-4000-8000-000000000002",
+				expectedRevision: detail.revision,
+			}),
+		).resolves.toEqual({ skills: [] });
+		expect(base.open).not.toHaveBeenCalled();
+	});
+
+	it("returns public errors when the host cannot manage draft Skills", async () => {
+		const registry = new SessionRegistry(new FakeHost());
+		await expect(registry.getDraftSkill({ cwd: null, source: "user", name: "writing-plans" })).rejects.toMatchObject({
+			code: "NOT_FOUND",
+		});
+		await expect(
+			registry.upsertDraftSkill({
+				cwd: null,
+				source: "user",
+				name: "writing-plans",
+				requestId: "30000000-0000-4000-8000-000000000001",
+				expectedRevision: null,
+				content: "---\nname: writing-plans\ndescription: Write plans\n---\n\nWrite plans.",
+			}),
+		).rejects.toMatchObject({ code: "OPERATION_FAILED" });
+	});
+
 	it("blocks the whole selected set, closes idle runtimes concurrently, then runs the operation", async () => {
 		const host = new FakeHost();
 		const registry = new SessionRegistry(host);

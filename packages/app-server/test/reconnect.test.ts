@@ -111,8 +111,63 @@ class PausableRuntime implements OpenedSessionRuntime {
 		return { skills: [] };
 	}
 
+	async listMcpServers(): Promise<ClientResult<"mcp/list">> {
+		return { servers: [] };
+	}
+
+	async inspectMcpImport(): Promise<ClientResult<"mcp/import/inspect">> {
+		return { sourceRevision: "a".repeat(64), candidates: [] };
+	}
+
+	async importMcpServers(): Promise<ClientResult<"mcp/import">> {
+		return { servers: [] };
+	}
+
+	async getMcpServer(): Promise<ClientResult<"mcp/get">> {
+		throw new Error("No MCP server in fixture");
+	}
+
+	async getMcpCatalogItem(): Promise<ClientResult<"mcp/catalog/get">> {
+		throw new Error("No MCP catalog item in fixture");
+	}
+
+	async upsertMcpServer(): Promise<ClientResult<"mcp/upsert">> {
+		return { servers: [] };
+	}
+
+	async removeMcpServer(): Promise<ClientResult<"mcp/remove">> {
+		return { servers: [] };
+	}
+
+	async restartMcpServer(): Promise<ClientResult<"mcp/restart">> {
+		throw new Error("No MCP server in fixture");
+	}
+
+	async setMcpCredential(): Promise<ClientResult<"mcp/credential/set">> {
+		throw new Error("No MCP server in fixture");
+	}
+
+	async clearMcpCredential(): Promise<ClientResult<"mcp/credential/clear">> {
+		throw new Error("No MCP server in fixture");
+	}
+
 	async readItems(input: ClientParams<"session/readItems">): Promise<ClientResult<"session/readItems">> {
 		return this.projection.readItems(input);
+	}
+
+	async getStatus(input: ClientParams<"session/status">): Promise<ClientResult<"session/status">> {
+		return {
+			sessionId: input.sessionId,
+			mode: "code",
+			contextTokens: 64_000,
+			contextWindow: 128_000,
+			remainingPercent: 50,
+			cacheHitPercent: 25,
+		};
+	}
+
+	async compact(input: ClientParams<"session/compact">): Promise<ClientResult<"session/compact">> {
+		return { sessionId: input.sessionId, tokensBefore: 64_000, estimatedTokensAfter: 8_000 };
 	}
 
 	async readSubagentItems(_input: ClientParams<"subagent/readItems">): Promise<ClientResult<"subagent/readItems">> {
@@ -165,6 +220,38 @@ class PausableRuntime implements OpenedSessionRuntime {
 		return { operationId: input.requestId, status: "accepted" };
 	}
 
+	async queueTurn(input: ClientParams<"turn/queue">): Promise<ClientResult<"turn/queue">> {
+		return {
+			queuedTurn: {
+				queueItemId: input.requestId,
+				revision: input.requestId,
+				state: "paused",
+				text: input.text,
+				attachments: [],
+			},
+		};
+	}
+
+	async updateQueuedTurn(input: ClientParams<"turn/queue/update">): Promise<ClientResult<"turn/queue/update">> {
+		return {
+			queuedTurn: {
+				queueItemId: input.queueItemId,
+				revision: input.requestId,
+				state: "paused",
+				text: input.text,
+				attachments: [],
+			},
+		};
+	}
+
+	async deleteQueuedTurn(input: ClientParams<"turn/queue/delete">): Promise<ClientResult<"turn/queue/delete">> {
+		return { queueItemId: input.queueItemId, deleted: true };
+	}
+
+	async sendQueuedTurn(input: ClientParams<"turn/queue/send">): Promise<ClientResult<"turn/queue/send">> {
+		return { operationId: input.requestId, queueItemId: input.queueItemId, status: "accepted" };
+	}
+
 	async interrupt(input: ClientParams<"turn/interrupt">): Promise<ClientResult<"turn/interrupt">> {
 		return { operationId: input.requestId, status: "accepted" };
 	}
@@ -193,7 +280,7 @@ function initialize(id: string) {
 		jsonrpc: "2.0" as const,
 		id,
 		method: "initialize" as const,
-		params: { protocolVersion: 11, client: { name: "test", version: "1" }, capabilities: [] },
+		params: { protocolVersion: 17, client: { name: "test", version: "1" }, capabilities: [] },
 	};
 }
 

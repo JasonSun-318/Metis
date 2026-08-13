@@ -3,6 +3,7 @@ import {
 	existsSync,
 	mkdirSync,
 	mkdtempSync,
+	readdirSync,
 	readFileSync,
 	realpathSync,
 	rmSync,
@@ -11,12 +12,14 @@ import {
 	utimesSync,
 	writeFileSync,
 } from "node:fs";
+import { open } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import type {
 	AgentMode,
 	ClientParams,
 	ClientResult,
+	InteractionResponseInput,
 	RpcErrorResponse,
 	ServerRpcRequest,
 	SessionSnapshot,
@@ -29,6 +32,7 @@ import {
 	getSessionDisplayMetadataPath,
 	ProjectTrustStore,
 	SessionManager,
+	SettingsManager,
 } from "@metis/coding-agent";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AppServer } from "../src/app-server.ts";
@@ -48,6 +52,10 @@ const REQUEST_A = "00000000-0000-4000-8000-000000000001";
 const REQUEST_B = "00000000-0000-4000-8000-000000000002";
 const REQUEST_C = "00000000-0000-4000-8000-000000000003";
 const REQUEST_D = "00000000-0000-4000-8000-000000000004";
+const REQUEST_E = "00000000-0000-4000-8000-000000000005";
+const REQUEST_F = "00000000-0000-4000-8000-000000000006";
+const REQUEST_G = "00000000-0000-4000-8000-000000000007";
+const REQUEST_H = "00000000-0000-4000-8000-000000000008";
 
 class FakeRuntime implements OpenedSessionRuntime {
 	readonly sessionId: string;
@@ -56,6 +64,7 @@ class FakeRuntime implements OpenedSessionRuntime {
 	pendingInteractions = false;
 	closed = false;
 	startCalls = 0;
+	compactCalls = 0;
 	subagentInterruptCalls = 0;
 	sessionName: string | undefined;
 
@@ -93,8 +102,70 @@ class FakeRuntime implements OpenedSessionRuntime {
 		return { skills: [{ name: "pdf", description: "Read and create PDF documents" }] };
 	}
 
+	async listMcpServers(): Promise<ClientResult<"mcp/list">> {
+		return { servers: [] };
+	}
+
+	async inspectMcpImport(): Promise<ClientResult<"mcp/import/inspect">> {
+		throw new Error("No MCP import in fixture");
+	}
+
+	async importMcpServers(): Promise<ClientResult<"mcp/import">> {
+		return { servers: [] };
+	}
+
+	async getMcpServer(): Promise<ClientResult<"mcp/get">> {
+		throw new Error("No MCP server in fixture");
+	}
+
+	async getMcpCatalogItem(): Promise<ClientResult<"mcp/catalog/get">> {
+		return {
+			kind: "tool",
+			id: "search_docs",
+			name: "Search docs",
+			description: "Search product documentation",
+			inputSchema: '{"type":"object"}',
+		};
+	}
+
+	async upsertMcpServer(): Promise<ClientResult<"mcp/upsert">> {
+		return { servers: [] };
+	}
+
+	async removeMcpServer(): Promise<ClientResult<"mcp/remove">> {
+		return { servers: [] };
+	}
+
+	async restartMcpServer(): Promise<ClientResult<"mcp/restart">> {
+		throw new Error("No MCP server in fixture");
+	}
+
+	async setMcpCredential(): Promise<ClientResult<"mcp/credential/set">> {
+		throw new Error("No MCP server in fixture");
+	}
+
+	async clearMcpCredential(): Promise<ClientResult<"mcp/credential/clear">> {
+		throw new Error("No MCP server in fixture");
+	}
+
 	async readItems(_input: ClientParams<"session/readItems">): Promise<ClientResult<"session/readItems">> {
 		return { items: [], nextBeforeItemId: null };
+	}
+
+	async getStatus(input: ClientParams<"session/status">): Promise<ClientResult<"session/status">> {
+		return {
+			sessionId: input.sessionId,
+			mode: "code",
+			contextTokens: 64_000,
+			contextWindow: 128_000,
+			remainingPercent: 50,
+			cacheHitPercent: 25,
+		};
+	}
+
+	async compact(input: ClientParams<"session/compact">): Promise<ClientResult<"session/compact">> {
+		this.compactCalls += 1;
+		return { sessionId: input.sessionId, tokensBefore: 64_000, estimatedTokensAfter: 8_000 };
 	}
 
 	async readSubagentItems(_input: ClientParams<"subagent/readItems">): Promise<ClientResult<"subagent/readItems">> {
@@ -149,6 +220,7 @@ class FakeRuntime implements OpenedSessionRuntime {
 			nextBeforeItemId: null,
 			activeTurnId: null,
 			pendingInteractions: [],
+			queuedTurns: [],
 			tasks: [],
 			thinkingSelection: "high",
 			actualThinkingLevel: "high",
@@ -166,6 +238,38 @@ class FakeRuntime implements OpenedSessionRuntime {
 
 	async steer(input: ClientParams<"turn/steer">): Promise<ClientResult<"turn/steer">> {
 		return { operationId: input.requestId, status: "accepted" };
+	}
+
+	async queueTurn(input: ClientParams<"turn/queue">): Promise<ClientResult<"turn/queue">> {
+		return {
+			queuedTurn: {
+				queueItemId: `queue_${input.requestId}`,
+				revision: `entry_${input.requestId}`,
+				state: this.active ? "queued" : "paused",
+				text: input.text,
+				attachments: [],
+			},
+		};
+	}
+
+	async updateQueuedTurn(input: ClientParams<"turn/queue/update">): Promise<ClientResult<"turn/queue/update">> {
+		return {
+			queuedTurn: {
+				queueItemId: input.queueItemId,
+				revision: `entry_${input.requestId}`,
+				state: "queued",
+				text: input.text,
+				attachments: [],
+			},
+		};
+	}
+
+	async deleteQueuedTurn(input: ClientParams<"turn/queue/delete">): Promise<ClientResult<"turn/queue/delete">> {
+		return { queueItemId: input.queueItemId, deleted: true };
+	}
+
+	async sendQueuedTurn(input: ClientParams<"turn/queue/send">): Promise<ClientResult<"turn/queue/send">> {
+		return { operationId: input.requestId, queueItemId: input.queueItemId, status: "accepted" };
 	}
 
 	async interrupt(input: ClientParams<"turn/interrupt">): Promise<ClientResult<"turn/interrupt">> {
@@ -198,6 +302,17 @@ class FakeHost implements SessionRuntimeHost {
 			skills: [{ name: "global", description: "A global Skill" }],
 		}),
 	);
+	readonly inspectSkillImport = vi.fn(
+		async (): Promise<ClientResult<"skill/import/inspect">> => ({
+			revision: "c".repeat(64),
+			candidates: [{ id: "demo", name: "demo", description: "Demo Skill", fileCount: 1 }],
+		}),
+	);
+	readonly importSkills = vi.fn(
+		async (): Promise<ClientResult<"skill/import">> => ({
+			skills: [{ name: "demo", description: "Demo Skill", source: "user" }],
+		}),
+	);
 	readonly open = vi.fn(async (ref: SessionRef): Promise<FakeRuntime> => {
 		const runtime = new FakeRuntime(ref);
 		this.runtimes.set(runtime.sessionId, runtime);
@@ -210,7 +325,7 @@ function initialize(id = "initialize") {
 		jsonrpc: "2.0" as const,
 		id,
 		method: "initialize" as const,
-		params: { protocolVersion: 11, client: { name: "test", version: "1" }, capabilities: [] },
+		params: { protocolVersion: 17, client: { name: "test", version: "1" }, capabilities: [] },
 	};
 }
 
@@ -273,6 +388,13 @@ describe("AppServer", () => {
 	let agentDir: string;
 	let sessionsRoot: string;
 	let projectDir: string;
+	const servers = new Set<AppServer>();
+
+	async function createTestServer(...args: Parameters<typeof AppServer.create>): Promise<AppServer> {
+		const server = await AppServer.create(...args);
+		servers.add(server);
+		return server;
+	}
 
 	beforeEach(() => {
 		tempDir = mkdtempSync(join(tmpdir(), "app-server-test-"));
@@ -282,9 +404,15 @@ describe("AppServer", () => {
 		mkdirSync(projectDir, { recursive: true });
 	});
 
-	afterEach(() => {
-		vi.restoreAllMocks();
-		rmSync(tempDir, { recursive: true, force: true });
+	afterEach(async () => {
+		for (const server of servers) server.beginShutdown();
+		try {
+			await Promise.all([...servers].map((server) => server.waitForShutdown()));
+		} finally {
+			servers.clear();
+			vi.restoreAllMocks();
+			rmSync(tempDir, { recursive: true, force: true });
+		}
 	});
 
 	it("fails startup visibly when interrupted project Trash recovery is ambiguous", async () => {
@@ -292,7 +420,7 @@ describe("AppServer", () => {
 			throw new Error("ambiguous project Trash manifest");
 		});
 
-		await expect(AppServer.create({ agentDir, sessionsRoot, runtimeHost: new FakeHost() })).rejects.toThrow(
+		await expect(createTestServer({ agentDir, sessionsRoot, runtimeHost: new FakeHost() })).rejects.toThrow(
 			"ambiguous project Trash manifest",
 		);
 		expect(recovery).toHaveBeenCalledWith(agentDir);
@@ -304,7 +432,7 @@ describe("AppServer", () => {
 		const expired = new Date(Date.now() - 25 * 60 * 60 * 1000);
 		utimesSync(stale, expired, expired);
 
-		await AppServer.create({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
+		await createTestServer({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
 
 		expect(existsSync(stale)).toBe(false);
 	});
@@ -313,17 +441,106 @@ describe("AppServer", () => {
 		const path = writeSession(sessionsRoot, "named-session", projectDir);
 		const manager = SessionManager.open(path);
 		manager.appendSessionInfo("Persisted name");
+		manager.appendMessage({ role: "user", content: "x".repeat(70 * 1024), timestamp: Date.now() });
 		manager.close();
 
-		const server = await AppServer.create({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
+		const server = await createTestServer({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
 		expect(server.catalog.list({}).sessions).toMatchObject([{ sessionId: "named-session", name: "Persisted name" }]);
 		expect(server.catalog.updateSummary("named-session", { cwd: projectDir }).cwd).toBe(realpathSync(projectDir));
 		const cache = (server.catalog as unknown as { sessionNames: Map<string, unknown> }).sessionNames;
 		const cached = cache.get(path);
 		expect(cached).toBeDefined();
+		const probe = await open(path);
+		const read = vi.spyOn(Object.getPrototypeOf(probe) as { read: typeof probe.read }, "read");
+		await probe.close();
 		await server.catalog.refresh();
 		expect(server.catalog.list({}).sessions).toMatchObject([{ sessionId: "named-session", name: "Persisted name" }]);
 		expect(cache.get(path)).toBe(cached);
+		expect(read.mock.calls.every((call) => (call as unknown[])[3] === 0)).toBe(true);
+	});
+
+	it("keeps copied sessions on their last journal event date instead of the file modification date", async () => {
+		const eventAt = "2026-07-31T12:34:56.000Z";
+		const path = writeSession(
+			sessionsRoot,
+			"copied-old-session",
+			projectDir,
+			`${JSON.stringify({ type: "session_info", id: "event", parentId: null, timestamp: eventAt, name: "Old session" })}\n`,
+		);
+		const copiedAt = new Date("2026-08-10T08:00:00.000Z");
+		utimesSync(path, copiedAt, copiedAt);
+
+		const server = await createTestServer({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
+
+		expect(server.catalog.get("copied-old-session").summary.updatedAt).toBe(eventAt);
+	});
+
+	it("reads the timestamp from a large final journal record", async () => {
+		const path = writeSession(sessionsRoot, "large-final-record", projectDir);
+		const manager = SessionManager.open(path);
+		manager.appendMessage({
+			role: "user",
+			content: "x".repeat(70 * 1024),
+			timestamp: Date.now(),
+		});
+		manager.close();
+		const eventAt = JSON.parse(readFileSync(path, "utf8").trim().split("\n").at(-1)!).timestamp as string;
+
+		const server = await createTestServer({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
+
+		expect(server.catalog.get("large-final-record").summary.updatedAt).toBe(eventAt);
+	});
+
+	it("projects the latest completed or failed turn from closed journals", async () => {
+		writeSession(
+			sessionsRoot,
+			"completed-session",
+			projectDir,
+			`${JSON.stringify({ type: "runtime_turn", id: "turn-1", timestamp: "2026-08-12T01:00:00.000Z", state: "completed" })}\n`,
+		);
+		writeSession(
+			sessionsRoot,
+			"failed-session",
+			projectDir,
+			`${JSON.stringify({ type: "runtime_turn", id: "turn-2", timestamp: "2026-08-12T02:00:00.000Z", state: "interrupted" })}\n`,
+		);
+
+		const server = await createTestServer({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
+
+		expect(server.catalog.get("completed-session").summary.lastTurnOutcome).toBe("completed");
+		expect(server.catalog.get("failed-session").summary.lastTurnOutcome).toBe("failed");
+	});
+
+	it("publishes pending user attention through the session summary", async () => {
+		writeSession(sessionsRoot, "attention-session", projectDir);
+		const server = await createTestServer({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
+		let finish!: () => void;
+		server.interactions.assign("attention-session", {
+			request: (request: ServerRpcRequest) =>
+				new Promise<InteractionResponseInput>((resolve) => {
+					finish = () =>
+						resolve({
+							interactionId: request.params.interaction.interactionId,
+							kind: "ask_user",
+							cancelled: true,
+							answers: [],
+						});
+				}),
+		});
+
+		const waiting = server.interactions.requestUserInput("attention-session", {
+			questions: [{ question: "Continue?", multiple: false, options: [{ label: "Yes" }, { label: "No" }] }],
+		});
+		await vi.waitFor(() =>
+			expect(server.catalog.get("attention-session").summary).toMatchObject({
+				attentionRequired: true,
+				unread: true,
+			}),
+		);
+		finish();
+		await waiting;
+
+		expect(server.catalog.get("attention-session").summary).toMatchObject({ attentionRequired: false, unread: true });
 	});
 
 	it("lists persisted unread state and marks a closed session read for every connection", async () => {
@@ -331,7 +548,7 @@ describe("AppServer", () => {
 		const manager = SessionManager.open(path);
 		manager.setSessionUnread(true);
 		manager.close();
-		const server = await AppServer.create({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
+		const server = await createTestServer({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
 		const first = server.connect();
 		const second = server.connect();
 		const messages: unknown[] = [];
@@ -376,13 +593,13 @@ describe("AppServer", () => {
 		const metadataPath = getSessionDisplayMetadataPath(path);
 		expect(existsSync(metadataPath)).toBe(false);
 
-		const server = await AppServer.create({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
+		const server = await createTestServer({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
 		expect(server.catalog.list({}).sessions).toMatchObject([
 			{ sessionId: "legacy-named-session", name: "Legacy name" },
 		]);
 		expect(existsSync(metadataPath)).toBe(true);
 
-		const cold = await AppServer.create({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
+		const cold = await createTestServer({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
 		expect(cold.catalog.list({}).sessions).toMatchObject([
 			{ sessionId: "legacy-named-session", name: "Legacy name" },
 		]);
@@ -393,7 +610,7 @@ describe("AppServer", () => {
 		const manager = SessionManager.open(path);
 		manager.appendSessionInfo("Old name");
 		manager.close();
-		const server = await AppServer.create({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
+		const server = await createTestServer({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
 		expect(server.catalog.get("truncated-name").summary.name).toBe("Old name");
 
 		const [header] = readFileSync(path, "utf8").split("\n");
@@ -418,7 +635,7 @@ describe("AppServer", () => {
 			}
 		})();
 
-		const server = await AppServer.create({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
+		const server = await createTestServer({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
 		writing = false;
 		await writer;
 
@@ -426,7 +643,7 @@ describe("AppServer", () => {
 	});
 
 	it("enforces initialization and protocol version per connection", async () => {
-		const server = await AppServer.create({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
+		const server = await createTestServer({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
 		const connection = server.connect();
 
 		expectError(
@@ -442,13 +659,13 @@ describe("AppServer", () => {
 		);
 		const initialized = await connection.handle(initialize());
 		expect(initialized).toMatchObject({
-			result: { protocolVersion: 11, server: { name: "metis-app-server" }, serverEpoch: server.serverEpoch },
+			result: { protocolVersion: 17, server: { name: "metis-app-server" }, serverEpoch: server.serverEpoch },
 		});
 		expectError(await connection.handle(initialize("again")), RPC_ERROR_CODES.INVALID_REQUEST);
 	});
 
 	it("does not invoke an invalid envelope id getter while correlating the error", async () => {
-		const server = await AppServer.create({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
+		const server = await createTestServer({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
 		const connection = server.connect();
 		let reads = 0;
 		const request = { jsonrpc: "invalid", method: "session/list", params: {} } as Record<string, unknown>;
@@ -469,7 +686,7 @@ describe("AppServer", () => {
 		writeSession(sessionsRoot, "session-a", projectDir);
 		writeSession(sessionsRoot, "session-b", projectDir);
 		const host = new FakeHost();
-		const server = await AppServer.create({ agentDir, sessionsRoot, runtimeHost: host });
+		const server = await createTestServer({ agentDir, sessionsRoot, runtimeHost: host });
 		const connection = server.connect();
 		await connection.handle(initialize());
 
@@ -495,6 +712,14 @@ describe("AppServer", () => {
 				params: { sessionId: "session-b" },
 			}),
 		]);
+		expect(
+			await connection.handle({
+				jsonrpc: "2.0",
+				id: "catalog-item",
+				method: "mcp/catalog/get",
+				params: { sessionId: "session-a", server: "docs", kind: "tool", id: "search_docs" },
+			}),
+		).toMatchObject({ result: { kind: "tool", id: "search_docs", inputSchema: '{"type":"object"}' } });
 		expect(host.open).toHaveBeenCalledTimes(2);
 
 		await connection.handle({
@@ -511,7 +736,7 @@ describe("AppServer", () => {
 		const alias = join(tempDir, "project-alias");
 		symlinkSync(projectDir, alias, "dir");
 		writeModeSession(agentDir, sessionsRoot, "aliased-project", alias, "chat");
-		const server = await AppServer.create({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
+		const server = await createTestServer({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
 		const connection = server.connect();
 		await connection.handle(initialize());
 
@@ -525,7 +750,7 @@ describe("AppServer", () => {
 		const alias = join(tempDir, "project-alias");
 		symlinkSync(projectDir, alias, "dir");
 		const existingPath = writeModeSession(agentDir, sessionsRoot, "aliased-project", alias, "chat");
-		const server = await AppServer.create({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
+		const server = await createTestServer({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
 		const connection = server.connect();
 		await connection.handle(initialize());
 
@@ -558,7 +783,7 @@ describe("AppServer", () => {
 
 	it("routes replay-protected model selection through the opened runtime", async () => {
 		writeSession(sessionsRoot, "session-a", projectDir);
-		const server = await AppServer.create({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
+		const server = await createTestServer({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
 		const connection = server.connect();
 		await connection.handle(initialize());
 		await connection.handle({
@@ -588,9 +813,57 @@ describe("AppServer", () => {
 		});
 	});
 
+	it("returns session status and replays manual compaction once", async () => {
+		writeSession(sessionsRoot, "session-a", projectDir);
+		const host = new FakeHost();
+		const server = await createTestServer({ agentDir, sessionsRoot, runtimeHost: host });
+		const connection = server.connect();
+		await connection.handle(initialize());
+		await connection.handle({
+			jsonrpc: "2.0",
+			id: "open-status",
+			method: "session/open",
+			params: { sessionId: "session-a" },
+		});
+
+		expect(
+			await connection.handle({
+				jsonrpc: "2.0",
+				id: "session-status",
+				method: "session/status",
+				params: { sessionId: "session-a" },
+			}),
+		).toMatchObject({
+			result: {
+				sessionId: "session-a",
+				mode: "code",
+				contextTokens: 64_000,
+				contextWindow: 128_000,
+				remainingPercent: 50,
+				cacheHitPercent: 25,
+			},
+		});
+
+		const compact = {
+			jsonrpc: "2.0" as const,
+			id: "session-compact",
+			method: "session/compact" as const,
+			params: { sessionId: "session-a", requestId: REQUEST_A },
+		};
+		const result = await connection.handle(compact);
+		expect(result).toMatchObject({
+			result: { sessionId: "session-a", tokensBefore: 64_000, estimatedTokensAfter: 8_000 },
+		});
+		expect(await connection.handle({ ...compact, id: "session-compact-replay" })).toEqual({
+			...(result as object),
+			id: "session-compact-replay",
+		});
+		expect(host.runtimes.get("session-a")?.compactCalls).toBe(1);
+	});
+
 	it("routes replay-protected permission selection through the opened runtime", async () => {
 		writeSession(sessionsRoot, "session-a", projectDir);
-		const server = await AppServer.create({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
+		const server = await createTestServer({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
 		const connection = server.connect();
 		await connection.handle(initialize());
 		await connection.handle({
@@ -626,7 +899,7 @@ describe("AppServer", () => {
 		writeModeSession(agentDir, sessionsRoot, "scheduled-session", projectDir, "chat", {
 			scheduled: { taskId: REQUEST_A, runId: REQUEST_B },
 		});
-		const server = await AppServer.create({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
+		const server = await createTestServer({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
 		const connection = server.connect();
 		await connection.handle(initialize());
 		await connection.handle({
@@ -690,6 +963,43 @@ describe("AppServer", () => {
 			}),
 			RPC_ERROR_CODES.READ_ONLY_SESSION,
 		);
+		for (const [method, params] of [
+			["turn/queue", { sessionId: "scheduled-session", requestId: REQUEST_E, text: "Nope" }],
+			[
+				"turn/queue/update",
+				{
+					sessionId: "scheduled-session",
+					requestId: REQUEST_F,
+					queueItemId: "queue-scheduled",
+					expectedRevision: "entry-scheduled",
+					text: "Nope",
+				},
+			],
+			[
+				"turn/queue/delete",
+				{
+					sessionId: "scheduled-session",
+					requestId: REQUEST_G,
+					queueItemId: "queue-scheduled",
+					expectedRevision: "entry-scheduled",
+				},
+			],
+			[
+				"turn/queue/send",
+				{
+					sessionId: "scheduled-session",
+					requestId: REQUEST_H,
+					queueItemId: "queue-scheduled",
+					expectedRevision: "entry-scheduled",
+					delivery: "start",
+				},
+			],
+		] as const) {
+			expectError(
+				await connection.handle({ jsonrpc: "2.0", id: `scheduled-${method}`, method, params }),
+				RPC_ERROR_CODES.READ_ONLY_SESSION,
+			);
+		}
 		const scheduledPath = server.catalog.get("scheduled-session").path;
 		const deleteRetainedSession = vi.spyOn(SessionManager, "deleteSession").mockImplementation(async (path) => {
 			unlinkSync(path);
@@ -718,7 +1028,7 @@ describe("AppServer", () => {
 		const idlePath = writeSession(sessionsRoot, "session-idle", projectDir);
 		const activePath = writeSession(sessionsRoot, "session-active", projectDir);
 		const host = new FakeHost();
-		const server = await AppServer.create({ agentDir, sessionsRoot, runtimeHost: host });
+		const server = await createTestServer({ agentDir, sessionsRoot, runtimeHost: host });
 		const connection = server.connect();
 		await connection.handle(initialize());
 		for (const sessionId of ["session-idle", "session-active"]) {
@@ -766,7 +1076,7 @@ describe("AppServer", () => {
 
 	it("notifies every subscribed client when a session is deleted", async () => {
 		const path = writeSession(sessionsRoot, "session-shared", projectDir);
-		const server = await AppServer.create({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
+		const server = await createTestServer({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
 		const first = server.connect();
 		const second = server.connect();
 		const firstMessages: unknown[] = [];
@@ -809,7 +1119,7 @@ describe("AppServer", () => {
 	it("lists draft and opened-session skills through their owning runtime boundary", async () => {
 		writeSession(sessionsRoot, "session-a", projectDir);
 		const host = new FakeHost();
-		const server = await AppServer.create({ agentDir, sessionsRoot, runtimeHost: host });
+		const server = await createTestServer({ agentDir, sessionsRoot, runtimeHost: host });
 		const connection = server.connect();
 		await connection.handle(initialize());
 
@@ -828,6 +1138,51 @@ describe("AppServer", () => {
 		expect(host.open).toHaveBeenCalledOnce();
 	});
 
+	it("inspects Skill imports read-only and replays identical imports once", async () => {
+		const host = new FakeHost();
+		const server = await createTestServer({ agentDir, sessionsRoot, runtimeHost: host });
+		const connection = server.connect();
+		await connection.handle(initialize());
+		const input = { kind: "archive" as const, path: "/tmp/demo.skill" };
+		await expect(
+			connection.handle({
+				jsonrpc: "2.0",
+				id: "skill-import-inspect",
+				method: "skill/import/inspect",
+				params: { cwd: null, source: "user", input },
+			}),
+		).resolves.toMatchObject({ result: { candidates: [{ name: "demo" }] } });
+		expect(host.inspectSkillImport).toHaveBeenCalledOnce();
+
+		const request = {
+			jsonrpc: "2.0" as const,
+			id: "skill-import",
+			method: "skill/import" as const,
+			params: {
+				requestId: REQUEST_A,
+				cwd: null,
+				source: "user" as const,
+				input,
+				sourceRevision: "c".repeat(64),
+				candidateIds: ["demo"],
+			},
+		};
+		const imported = await connection.handle(request);
+		expect(await connection.handle({ ...request, id: "skill-import-replay" })).toEqual({
+			...(imported as object),
+			id: "skill-import-replay",
+		});
+		expect(host.importSkills).toHaveBeenCalledOnce();
+		expectError(
+			await connection.handle({
+				...request,
+				id: "skill-import-reused",
+				params: { ...request.params, candidateIds: ["other"] },
+			}),
+			RPC_ERROR_CODES.REQUEST_ID_REUSED,
+		);
+	});
+
 	it("serves the local profile from durable journals without opening a runtime", async () => {
 		const path = writeSession(sessionsRoot, "profile-session", projectDir);
 		const manager = SessionManager.open(path);
@@ -835,7 +1190,7 @@ describe("AppServer", () => {
 		manager.appendCustomEntry("metis.skill_usage.v1", { name: "pdf", trigger: "read" });
 		manager.close();
 		const host = new FakeHost();
-		const server = await AppServer.create({ agentDir, sessionsRoot, runtimeHost: host });
+		const server = await createTestServer({ agentDir, sessionsRoot, runtimeHost: host });
 		const connection = server.connect();
 		await connection.handle(initialize());
 
@@ -860,7 +1215,7 @@ describe("AppServer", () => {
 		};
 		writeSkill(join(agentDir, "skills"), "global-skill", "Available to every session");
 		writeSkill(join(projectDir, ".metis", "skills"), "project-skill", "Available only after trust");
-		const server = await AppServer.create({ agentDir, sessionsRoot });
+		const server = await createTestServer({ agentDir, sessionsRoot });
 		const connection = server.connect();
 		await connection.handle(initialize());
 
@@ -892,10 +1247,121 @@ describe("AppServer", () => {
 		expect(trustedSkills.find((skill) => skill.name === "pdf")?.source).toBe("system");
 	});
 
+	it("gets, updates, replays, and recoverably removes a user Skill", async () => {
+		const skillDir = join(agentDir, "skills", "writing-plans");
+		mkdirSync(skillDir, { recursive: true });
+		const original = "---\nname: writing-plans\ndescription: Write plans\n---\n\n# Instructions\nWrite a plan.";
+		writeFileSync(join(skillDir, "SKILL.md"), original);
+		const server = await createTestServer({ agentDir, sessionsRoot });
+		const connection = server.connect();
+		await connection.handle(initialize());
+
+		const detailResponse = await connection.handle({
+			jsonrpc: "2.0",
+			id: "skill-get",
+			method: "skill/get",
+			params: { cwd: null, source: "user", name: "writing-plans" },
+		});
+		const detail = (detailResponse as { result: ClientResult<"skill/get"> }).result;
+		expect(detail).toMatchObject({ name: "writing-plans", source: "user", editable: true });
+
+		const edited =
+			"---\nname: writing-plans\ndescription: Write clear plans\n---\n\n# Instructions\nWrite a clear plan.";
+		const update = {
+			jsonrpc: "2.0" as const,
+			id: "skill-upsert",
+			method: "skill/upsert" as const,
+			params: {
+				requestId: REQUEST_A,
+				cwd: null,
+				source: "user" as const,
+				name: "writing-plans",
+				expectedRevision: detail.revision,
+				content: edited,
+			},
+		};
+		const updated = await connection.handle(update);
+		expect(updated).toMatchObject({ result: { description: "Write clear plans" } });
+		expect(await connection.handle({ ...update, id: "skill-upsert-replay" })).toEqual({
+			...(updated as object),
+			id: "skill-upsert-replay",
+		});
+		expectError(
+			await connection.handle({
+				...update,
+				id: "skill-upsert-reused",
+				params: { ...update.params, content: `${edited}\nChanged` },
+			}),
+			RPC_ERROR_CODES.REQUEST_ID_REUSED,
+		);
+
+		const current = (updated as { result: ClientResult<"skill/get"> }).result;
+		const removed = await connection.handle({
+			jsonrpc: "2.0",
+			id: "skill-remove",
+			method: "skill/remove",
+			params: {
+				requestId: REQUEST_B,
+				cwd: null,
+				source: "user",
+				name: "writing-plans",
+				expectedRevision: current.revision,
+			},
+		});
+		expect((removed as { result: ClientResult<"skill/remove"> }).result.skills).not.toEqual(
+			expect.arrayContaining([expect.objectContaining({ name: "writing-plans" })]),
+		);
+		expect(readdirSync(join(agentDir, "skills", ".trash")).some((name) => name.includes("writing-plans"))).toBe(true);
+	});
+
+	it("rejects project Skill mutation when the project is explicitly untrusted", async () => {
+		new ProjectTrustStore(agentDir).set(projectDir, false);
+		const server = await createTestServer({ agentDir, sessionsRoot });
+		const connection = server.connect();
+		await connection.handle(initialize());
+		const response = await connection.handle({
+			jsonrpc: "2.0",
+			id: "skill-project-upsert",
+			method: "skill/upsert",
+			params: {
+				requestId: REQUEST_A,
+				cwd: projectDir,
+				source: "project",
+				name: "project-skill",
+				expectedRevision: null,
+				content: "---\nname: project-skill\ndescription: Project helper\n---\n\nUse project rules.",
+			},
+		});
+		expectError(response, RPC_ERROR_CODES.OPERATION_FAILED);
+		expect(existsSync(join(projectDir, ".metis", "skills", "project-skill"))).toBe(false);
+		for (const [method, params] of [
+			[
+				"skill/import/inspect",
+				{ cwd: projectDir, source: "project", input: { kind: "archive", path: "/tmp/demo.skill" } },
+			],
+			[
+				"skill/import",
+				{
+					requestId: REQUEST_B,
+					cwd: projectDir,
+					source: "project",
+					input: { kind: "archive", path: "/tmp/demo.skill" },
+					sourceRevision: "c".repeat(64),
+					candidateIds: ["demo"],
+				},
+			],
+		] as const) {
+			expectError(
+				await connection.handle({ jsonrpc: "2.0", id: method, method, params }),
+				RPC_ERROR_CODES.OPERATION_FAILED,
+			);
+		}
+	});
+
 	it("replays an identical mutation and rejects changed parameters", async () => {
 		writeSession(sessionsRoot, "session-a", projectDir);
 		const host = new FakeHost();
-		const server = await AppServer.create({ agentDir, sessionsRoot, runtimeHost: host });
+		const server = await createTestServer({ agentDir, sessionsRoot, runtimeHost: host });
 		const connection = server.connect();
 		await connection.handle(initialize());
 		const request = {
@@ -915,10 +1381,103 @@ describe("AppServer", () => {
 		);
 	});
 
+	it("generates an unnamed session title in the background and publishes it", async () => {
+		writeSession(sessionsRoot, "session-title", projectDir);
+		const host = new FakeHost();
+		const generate = vi.fn(async () => "Session date grouping");
+		const server = await createTestServer({
+			agentDir,
+			sessionsRoot,
+			runtimeHost: host,
+			titleGenerator: { generate },
+		});
+		const connection = server.connect();
+		const messages: unknown[] = [];
+		connection.onMessage((message) => {
+			messages.push(message);
+		});
+		await connection.handle(initialize());
+		await connection.handle({
+			jsonrpc: "2.0",
+			id: "open-title",
+			method: "session/open",
+			params: { sessionId: "session-title" },
+		});
+		await connection.handle({
+			jsonrpc: "2.0",
+			id: "subscribe-title",
+			method: "session/subscribe",
+			params: { sessionId: "session-title" },
+		});
+
+		expect(
+			await connection.handle({
+				jsonrpc: "2.0",
+				id: "start-title",
+				method: "turn/start",
+				params: {
+					sessionId: "session-title",
+					requestId: REQUEST_A,
+					text: "Why are old sessions grouped under today?",
+					attachments: [{ path: join(projectDir, "report.pdf"), name: "report.pdf" }],
+				},
+			}),
+		).toMatchObject({ result: { status: "accepted" } });
+		await vi.waitFor(() => expect(server.catalog.get("session-title").summary.name).toBe("Session date grouping"));
+		expect(generate).toHaveBeenCalledOnce();
+		expect(generate).toHaveBeenCalledWith("Why are old sessions grouped under today?\nAttachment: report.pdf");
+		expect(JSON.stringify(messages)).toContain('"type":"session/updated"');
+		expect(JSON.stringify(messages)).toContain('"name":"Session date grouping"');
+	});
+
+	it("returns the turn before title generation settles and preserves a manual rename", async () => {
+		writeSession(sessionsRoot, "session-manual-title", projectDir);
+		const host = new FakeHost();
+		let resolveTitle!: (title: string) => void;
+		const generate = vi.fn(
+			() =>
+				new Promise<string>((resolve) => {
+					resolveTitle = resolve;
+				}),
+		);
+		const server = await createTestServer({
+			agentDir,
+			sessionsRoot,
+			runtimeHost: host,
+			titleGenerator: { generate },
+		});
+		const connection = server.connect();
+		await connection.handle(initialize());
+		await connection.handle({
+			jsonrpc: "2.0",
+			id: "open-manual-title",
+			method: "session/open",
+			params: { sessionId: "session-manual-title" },
+		});
+
+		expect(
+			await connection.handle({
+				jsonrpc: "2.0",
+				id: "start-manual-title",
+				method: "turn/start",
+				params: { sessionId: "session-manual-title", requestId: REQUEST_A, text: "Generate later" },
+			}),
+		).toMatchObject({ result: { status: "accepted" } });
+		expect(generate).toHaveBeenCalledOnce();
+		await connection.handle({
+			jsonrpc: "2.0",
+			id: "rename-before-title",
+			method: "session/rename",
+			params: { sessionId: "session-manual-title", requestId: REQUEST_B, name: "My manual title" },
+		});
+		resolveTitle("Generated title");
+		await vi.waitFor(() => expect(host.runtimes.get("session-manual-title")?.sessionName).toBe("My manual title"));
+	});
+
 	it("interrupts a child idempotently", async () => {
 		writeSession(sessionsRoot, "session-a", projectDir);
 		const host = new FakeHost();
-		const server = await AppServer.create({ agentDir, sessionsRoot, runtimeHost: host });
+		const server = await createTestServer({ agentDir, sessionsRoot, runtimeHost: host });
 		const connection = server.connect();
 		await connection.handle(initialize());
 		const request = {
@@ -939,7 +1498,7 @@ describe("AppServer", () => {
 
 	it("applies replayed close cleanup to the calling connection and rejects unknown sessions", async () => {
 		writeSession(sessionsRoot, "session-a", projectDir);
-		const server = await AppServer.create({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
+		const server = await createTestServer({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
 		const first = server.connect();
 		const second = server.connect();
 		await Promise.all([first.handle(initialize("first")), second.handle(initialize("second"))]);
@@ -979,7 +1538,7 @@ describe("AppServer", () => {
 	});
 
 	it("normalizes create names and refuses a request id already claimed by duplicate journals", async () => {
-		const server = await AppServer.create({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
+		const server = await createTestServer({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
 		const connection = server.connect();
 		await connection.handle(initialize());
 		const create = {
@@ -1008,7 +1567,7 @@ describe("AppServer", () => {
 	});
 
 	it("creates a session with its initial permission atomically and rejects conflicting replay", async () => {
-		const server = await AppServer.create({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
+		const server = await createTestServer({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
 		const connection = server.connect();
 		await connection.handle(initialize());
 		const create = {
@@ -1039,7 +1598,7 @@ describe("AppServer", () => {
 	});
 
 	it("rejects a scheduled session id before mutable create replay", async () => {
-		const server = await AppServer.create({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
+		const server = await createTestServer({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
 		const connection = server.connect();
 		await connection.handle(initialize());
 		const scheduled = SessionManager.create(projectDir, join(sessionsRoot, "scheduled"), {
@@ -1062,7 +1621,7 @@ describe("AppServer", () => {
 	});
 
 	it("bounds catalog refresh concurrency", async () => {
-		const server = await AppServer.create({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
+		const server = await createTestServer({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
 		for (let index = 0; index < 64; index += 1) {
 			writeSession(sessionsRoot, `catalog-session-${index}`, projectDir);
 		}
@@ -1108,7 +1667,7 @@ describe("AppServer", () => {
 		const other = writeModeSession(agentDir, sessionsRoot, "other-code", otherProject, "code");
 		writeFileSync(join(dirname(other), "broken.jsonl"), "not-json\n");
 
-		const server = await AppServer.create({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
+		const server = await createTestServer({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
 		const snapshot = server.catalog.modeProjectSnapshot("code", projectDir);
 		expect(snapshot.refs).toHaveLength(205);
 		expect(snapshot.refs.map((ref) => ref.summary.sessionId)).toEqual(
@@ -1151,7 +1710,7 @@ describe("AppServer", () => {
 			scheduled: { taskId: REQUEST_A, runId: REQUEST_B },
 		});
 		const host = new FakeHost();
-		const server = await AppServer.create({ agentDir, sessionsRoot, runtimeHost: host });
+		const server = await createTestServer({ agentDir, sessionsRoot, runtimeHost: host });
 		const connection = server.connect();
 		const messages: unknown[] = [];
 		connection.onMessage((message) => {
@@ -1222,7 +1781,7 @@ describe("AppServer", () => {
 		writeModeSession(agentDir, sessionsRoot, "chat-selected", projectDir, "chat");
 		const otherProject = join(tempDir, "other-project");
 		mkdirSync(otherProject);
-		const server = await AppServer.create({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
+		const server = await createTestServer({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
 		const first = server.connect();
 		const second = server.connect();
 		await Promise.all([first.handle(initialize("first")), second.handle(initialize("second"))]);
@@ -1339,7 +1898,7 @@ describe("AppServer", () => {
 
 	it("admits only one same-tick project delete or session rename", async () => {
 		writeModeSession(agentDir, sessionsRoot, "chat-race", projectDir, "chat");
-		const server = await AppServer.create({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
+		const server = await createTestServer({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
 		const first = server.connect();
 		const second = server.connect();
 		await Promise.all([first.handle(initialize("race-first")), second.handle(initialize("race-second"))]);
@@ -1385,7 +1944,7 @@ describe("AppServer", () => {
 	it("moves nothing for stale, active, pending-interaction, and Trash failures", async () => {
 		const sessionPath = writeModeSession(agentDir, sessionsRoot, "chat-failure", projectDir, "chat");
 		const host = new FakeHost();
-		const server = await AppServer.create({ agentDir, sessionsRoot, runtimeHost: host });
+		const server = await createTestServer({ agentDir, sessionsRoot, runtimeHost: host });
 		const connection = server.connect();
 		await connection.handle(initialize());
 		await connection.handle({
@@ -1479,7 +2038,7 @@ describe("AppServer", () => {
 	it("applies fixed-schedule blockers only to Chat project deletion", async () => {
 		writeModeSession(agentDir, sessionsRoot, "chat-scheduled-project", projectDir, "chat");
 		writeModeSession(agentDir, sessionsRoot, "code-scheduled-project", projectDir, "code");
-		const server = await AppServer.create({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
+		const server = await createTestServer({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
 		const connection = server.connect();
 		await connection.handle(initialize());
 		const fixed = await server.scheduleManager.create({
@@ -1579,7 +2138,7 @@ describe("AppServer", () => {
 		writeModeSession(agentDir, sessionsRoot, "code-corrupt-schedules", projectDir, "code");
 		mkdirSync(agentDir, { recursive: true });
 		writeFileSync(join(agentDir, "schedules.json"), "{broken");
-		const server = await AppServer.create({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
+		const server = await createTestServer({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
 		const connection = server.connect();
 		await connection.handle(initialize());
 
@@ -1604,7 +2163,7 @@ describe("AppServer", () => {
 
 	it("previews and deletes residual sessions after the source folder is removed", async () => {
 		writeModeSession(agentDir, sessionsRoot, "code-missing-source", projectDir, "code");
-		const server = await AppServer.create({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
+		const server = await createTestServer({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
 		const connection = server.connect();
 		await connection.handle(initialize());
 		rmSync(projectDir, { recursive: true, force: true });
@@ -1641,7 +2200,7 @@ describe("AppServer", () => {
 
 	it("returns BUSY when another process creates a matching journal after preview", async () => {
 		writeModeSession(agentDir, sessionsRoot, "chat-before-preview", projectDir, "chat");
-		const server = await AppServer.create({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
+		const server = await createTestServer({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
 		const connection = server.connect();
 		await connection.handle(initialize());
 		const preview = await connection.handle({
@@ -1683,7 +2242,7 @@ describe("AppServer", () => {
 
 	it("rejects a live journal lease before moving project data", async () => {
 		const path = writeModeSession(agentDir, sessionsRoot, "chat-live-lease", projectDir, "chat");
-		const server = await AppServer.create({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
+		const server = await createTestServer({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
 		const connection = server.connect();
 		await connection.handle(initialize());
 		const preview = await connection.handle({
@@ -1714,7 +2273,7 @@ describe("AppServer", () => {
 		for (let index = 0; index < 201; index += 1) {
 			writeModeSession(agentDir, sessionsRoot, `delete-bulk-${String(index).padStart(3, "0")}`, projectDir, "code");
 		}
-		const server = await AppServer.create({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
+		const server = await createTestServer({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
 		const connection = server.connect();
 		await connection.handle(initialize());
 		const preview = await connection.handle({
@@ -1748,7 +2307,7 @@ describe("AppServer", () => {
 	});
 
 	it("replays a completed create after its working directory is removed", async () => {
-		const firstServer = await AppServer.create({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
+		const firstServer = await createTestServer({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
 		const first = firstServer.connect();
 		await first.handle(initialize("first"));
 		const create = {
@@ -1761,7 +2320,7 @@ describe("AppServer", () => {
 		firstServer.beginShutdown();
 		await firstServer.waitForShutdown();
 		rmSync(projectDir, { recursive: true, force: true });
-		const secondServer = await AppServer.create({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
+		const secondServer = await createTestServer({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
 		const second = secondServer.connect();
 		await second.handle(initialize("second"));
 
@@ -1772,7 +2331,7 @@ describe("AppServer", () => {
 	});
 
 	it("creates managed and folder-backed chat sessions with durable mode metadata", async () => {
-		const server = await AppServer.create({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
+		const server = await createTestServer({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
 		const connection = server.connect();
 		await connection.handle(initialize());
 		const managedCreate = {
@@ -1835,7 +2394,7 @@ describe("AppServer", () => {
 	});
 
 	it("replays create durably and rejects reusing its id for a turn after restart", async () => {
-		const firstServer = await AppServer.create({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
+		const firstServer = await createTestServer({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
 		const first = firstServer.connect();
 		await first.handle(initialize("first"));
 		const create = {
@@ -1848,7 +2407,7 @@ describe("AppServer", () => {
 		firstServer.beginShutdown();
 		await firstServer.waitForShutdown();
 
-		const secondServer = await AppServer.create({ agentDir, sessionsRoot });
+		const secondServer = await createTestServer({ agentDir, sessionsRoot });
 		const second = secondServer.connect();
 		await second.handle(initialize("second"));
 		expect(await second.handle({ ...create, id: "create-replay" })).toMatchObject({
@@ -1878,7 +2437,7 @@ describe("AppServer", () => {
 		writeSession(outside, "outside-session", projectDir);
 		mkdirSync(sessionsRoot, { recursive: true });
 		symlinkSync(outside, join(sessionsRoot, "linked"), "dir");
-		const server = await AppServer.create({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
+		const server = await createTestServer({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
 		const connection = server.connect();
 		await connection.handle(initialize());
 
@@ -1891,7 +2450,7 @@ describe("AppServer", () => {
 		mkdirSync(sessionsRoot, { recursive: true });
 		writeFileSync(join(sessionsRoot, "broken.jsonl"), "not-json\n");
 		const host = new FakeHost();
-		const server = await AppServer.create({ agentDir, sessionsRoot, runtimeHost: host });
+		const server = await createTestServer({ agentDir, sessionsRoot, runtimeHost: host });
 		const connection = server.connect();
 		await connection.handle(initialize());
 
@@ -1914,7 +2473,7 @@ describe("AppServer", () => {
 
 	it("archives and restores a closed journal without deleting it", async () => {
 		const source = writeSession(sessionsRoot, "session-a", projectDir);
-		const server = await AppServer.create({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
+		const server = await createTestServer({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
 		const connection = server.connect();
 		await connection.handle(initialize());
 
@@ -1939,7 +2498,7 @@ describe("AppServer", () => {
 
 	it("replays completed session mutations from the journal after process restarts", async () => {
 		const source = writeSession(sessionsRoot, "session-a", projectDir);
-		const firstServer = await AppServer.create({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
+		const firstServer = await createTestServer({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
 		const first = firstServer.connect();
 		await first.handle(initialize("first"));
 		const archive = {
@@ -1958,7 +2517,7 @@ describe("AppServer", () => {
 		firstServer.beginShutdown();
 		await firstServer.waitForShutdown();
 
-		const secondServer = await AppServer.create({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
+		const secondServer = await createTestServer({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
 		const second = secondServer.connect();
 		await second.handle(initialize("second"));
 		const replayed = await second.handle({ ...archive, id: "archive-replay" });
@@ -1967,7 +2526,7 @@ describe("AppServer", () => {
 		secondServer.beginShutdown();
 		await secondServer.waitForShutdown();
 
-		const thirdServer = await AppServer.create({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
+		const thirdServer = await createTestServer({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
 		const third = thirdServer.connect();
 		await third.handle(initialize("third"));
 		expectError(
@@ -1990,7 +2549,7 @@ describe("AppServer", () => {
 			method: "session/archive" as const,
 			params: { sessionId, requestId: REQUEST_A },
 		});
-		const firstServer = await AppServer.create({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
+		const firstServer = await createTestServer({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
 		const first = firstServer.connect();
 		await first.handle(initialize("first"));
 		expect(await first.handle(archive("session-a", "archive-a"))).toMatchObject({
@@ -2002,7 +2561,7 @@ describe("AppServer", () => {
 		firstServer.beginShutdown();
 		await firstServer.waitForShutdown();
 
-		const secondServer = await AppServer.create({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
+		const secondServer = await createTestServer({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
 		const second = secondServer.connect();
 		await second.handle(initialize("second"));
 		expect(await second.handle(archive("session-a", "archive-a-replay"))).toMatchObject({
@@ -2025,7 +2584,7 @@ describe("AppServer", () => {
 	it("does not repeat a journal-completed close against a later reopened runtime", async () => {
 		writeSession(sessionsRoot, "session-a", projectDir);
 		const firstHost = new FakeHost();
-		const firstServer = await AppServer.create({ agentDir, sessionsRoot, runtimeHost: firstHost });
+		const firstServer = await createTestServer({ agentDir, sessionsRoot, runtimeHost: firstHost });
 		const first = firstServer.connect();
 		await first.handle(initialize("first"));
 		await first.handle({ jsonrpc: "2.0", id: "open", method: "session/open", params: { sessionId: "session-a" } });
@@ -2041,7 +2600,7 @@ describe("AppServer", () => {
 		await firstServer.waitForShutdown();
 
 		const secondHost = new FakeHost();
-		const secondServer = await AppServer.create({ agentDir, sessionsRoot, runtimeHost: secondHost });
+		const secondServer = await createTestServer({ agentDir, sessionsRoot, runtimeHost: secondHost });
 		const second = secondServer.connect();
 		await second.handle(initialize("second"));
 		await second.handle({ jsonrpc: "2.0", id: "reopen", method: "session/open", params: { sessionId: "session-a" } });
@@ -2054,7 +2613,7 @@ describe("AppServer", () => {
 		writeSession(sessionsRoot, "session-a", projectDir);
 		writeSession(sessionsRoot, "session-b", projectDir);
 		const host = new FakeHost();
-		const server = await AppServer.create({ agentDir, sessionsRoot, runtimeHost: host });
+		const server = await createTestServer({ agentDir, sessionsRoot, runtimeHost: host });
 		const connection = server.connect();
 		await connection.handle(initialize());
 		await Promise.all(
@@ -2118,7 +2677,7 @@ describe("AppServer", () => {
 			timestamp: Date.now() + 2,
 		});
 		manager.close();
-		const server = await AppServer.create({ agentDir, sessionsRoot });
+		const server = await createTestServer({ agentDir, sessionsRoot });
 		const connection = server.connect();
 		await connection.handle(initialize());
 
@@ -2165,6 +2724,173 @@ describe("AppServer", () => {
 		expect(() => server.connect()).toThrow(expect.objectContaining({ code: "BUSY" }));
 	});
 
+	it("manages a disabled MCP server through the production session runtime without exposing its credential", async () => {
+		const settings = SettingsManager.create(projectDir, agentDir, { projectTrusted: true });
+		settings.setMcpServer("global", "docs", {
+			url: "https://mcp.example.test/one",
+			enabled: false,
+		});
+		await settings.flush();
+		const manager = SessionManager.create(projectDir, join(sessionsRoot, "project"));
+		const sessionId = manager.getSessionId();
+		manager.close();
+		const server = await createTestServer({ agentDir, sessionsRoot });
+		const connection = server.connect();
+		await connection.handle(initialize());
+		await connection.handle({ jsonrpc: "2.0", id: "open-mcp", method: "session/open", params: { sessionId } });
+
+		const listed = await connection.handle({
+			jsonrpc: "2.0",
+			id: "list-mcp",
+			method: "mcp/list",
+			params: { sessionId },
+		});
+		const initial = (listed as { result: ClientResult<"mcp/list"> }).result.servers[0]!;
+		expect(initial).toMatchObject({ name: "docs", scope: "user", state: "disabled", credentialConfigured: false });
+
+		const upsert = {
+			jsonrpc: "2.0" as const,
+			id: "upsert-mcp",
+			method: "mcp/upsert" as const,
+			params: {
+				sessionId,
+				scope: "user" as const,
+				name: "docs",
+				requestId: REQUEST_A,
+				expectedRevision: initial.revision,
+				server: { transport: "http" as const, url: "https://mcp.example.test/two", enabled: false },
+			},
+		};
+		const updated = await connection.handle(upsert);
+		expect(await connection.handle({ ...upsert, id: "upsert-mcp-replay" })).toEqual({
+			...(updated as object),
+			id: "upsert-mcp-replay",
+		});
+		const current = (updated as { result: ClientResult<"mcp/upsert"> }).result.servers[0]!;
+		expect(current.url).toBe("https://mcp.example.test/two");
+
+		expectError(
+			await connection.handle({
+				...upsert,
+				id: "stale-mcp",
+				params: { ...upsert.params, requestId: REQUEST_B, expectedRevision: initial.revision },
+			}),
+			RPC_ERROR_CODES.CONFLICT,
+		);
+
+		const credential = await connection.handle({
+			jsonrpc: "2.0",
+			id: "set-mcp-credential",
+			method: "mcp/credential/set",
+			params: {
+				sessionId,
+				scope: "user",
+				name: "docs",
+				requestId: REQUEST_C,
+				expectedRevision: current.revision,
+				credential: { bearerToken: "stored-secret" },
+			},
+		});
+		expect(credential).toMatchObject({ result: { server: { credentialConfigured: true } } });
+		expect(JSON.stringify(credential)).not.toContain("stored-secret");
+
+		expect(
+			await connection.handle({
+				jsonrpc: "2.0",
+				id: "restart-mcp",
+				method: "mcp/restart",
+				params: {
+					sessionId,
+					scope: "user",
+					name: "docs",
+					requestId: REQUEST_D,
+					expectedRevision: current.revision,
+				},
+			}),
+		).toMatchObject({ result: { server: { state: "disabled" } } });
+
+		expect(
+			await connection.handle({
+				jsonrpc: "2.0",
+				id: "clear-mcp-credential",
+				method: "mcp/credential/clear",
+				params: {
+					sessionId,
+					scope: "user",
+					name: "docs",
+					requestId: "00000000-0000-4000-8000-000000000005",
+					expectedRevision: current.revision,
+				},
+			}),
+		).toMatchObject({ result: { server: { credentialConfigured: false } } });
+
+		expect(
+			await connection.handle({
+				jsonrpc: "2.0",
+				id: "remove-mcp",
+				method: "mcp/remove",
+				params: {
+					sessionId,
+					scope: "user",
+					name: "docs",
+					requestId: "00000000-0000-4000-8000-000000000006",
+					expectedRevision: current.revision,
+				},
+			}),
+		).toMatchObject({ result: { servers: [] } });
+
+		const importText = `{
+			// JSONC import stays inspection-only until explicitly applied.
+			"mcpServers": {
+				"github": {
+					"type": "streamable-http",
+					"url": "https://mcp.example.test/imported",
+					"enabled": false,
+					"headers": { "Authorization": "Bearer imported-secret" },
+				},
+			},
+		}`;
+		const inspection = await connection.handle({
+			jsonrpc: "2.0",
+			id: "inspect-mcp-import",
+			method: "mcp/import/inspect",
+			params: { sessionId, scope: "user", text: importText },
+		});
+		const inspectionResult = (inspection as { result: ClientResult<"mcp/import/inspect"> }).result;
+		expect(inspectionResult.candidates).toEqual([
+			expect.objectContaining({ name: "github", transport: "http", bearerTokenConfigured: true }),
+		]);
+		expect(JSON.stringify(inspection)).not.toContain("imported-secret");
+		const imported = await connection.handle({
+			jsonrpc: "2.0",
+			id: "apply-mcp-import",
+			method: "mcp/import",
+			params: {
+				sessionId,
+				scope: "user",
+				text: importText,
+				sourceRevision: inspectionResult.sourceRevision,
+				candidates: [{ id: "github", expectedRevision: null }],
+				requestId: "00000000-0000-4000-8000-000000000008",
+			},
+		});
+		expect(imported).toMatchObject({
+			result: {
+				servers: [expect.objectContaining({ name: "github", state: "disabled", credentialConfigured: true })],
+			},
+		});
+		expect(JSON.stringify(imported)).not.toContain("imported-secret");
+
+		await connection.handle({
+			jsonrpc: "2.0",
+			id: "close-mcp-session",
+			method: "session/close",
+			params: { sessionId, requestId: "00000000-0000-4000-8000-000000000007" },
+		});
+		server.beginShutdown();
+		await server.waitForShutdown();
+	});
+
 	it("resolves parent and session-only trust before binding project extension UI", async () => {
 		const parentProject = join(tempDir, "parent-scope", "project");
 		const sessionProject = join(tempDir, "session-scope", "project");
@@ -2182,7 +2908,7 @@ describe("AppServer", () => {
 			);
 		}
 
-		const server = await AppServer.create({ agentDir, sessionsRoot });
+		const server = await createTestServer({ agentDir, sessionsRoot });
 		const connection = server.connect();
 		const interactions: ServerRpcRequest[] = [];
 		connection.onMessage((envelope) => {

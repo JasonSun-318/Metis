@@ -1,6 +1,6 @@
 import type { ItemView } from "@metis/app-protocol";
 import { describe, expect, it } from "vitest";
-import { appendProjectedDelta, projectLiveMessage } from "../src/item-projection.ts";
+import { appendProjectedDelta, projectLiveMessage, projectSessionEntry } from "../src/item-projection.ts";
 
 const CREATED_AT = "2026-08-08T00:00:00.000Z";
 
@@ -42,5 +42,36 @@ describe("assistant usage projection", () => {
 
 		expect(projected?.item.usage).toEqual({ outputTokens: 51 });
 		expect(projected?.delta.outputTokens).toBe(51);
+	});
+});
+
+describe("session entry projection", () => {
+	it("projects compaction entries without exposing the private summary", () => {
+		const item = projectSessionEntry({
+			entry: {
+				type: "compaction",
+				id: "entry-compacted",
+				parentId: "entry-before",
+				timestamp: CREATED_AT,
+				summary: "private compacted context",
+				firstKeptEntryId: "entry-kept",
+				tokensBefore: 64_000,
+			},
+			sessionId: "session-1",
+			turnStates: new Map(),
+			toolStates: new Map(),
+			fallbackTimestamp: CREATED_AT,
+		});
+
+		expect(item).toEqual({
+			itemId: "entry-compacted",
+			sessionId: "session-1",
+			role: "system",
+			state: "completed",
+			content: [{ type: "compaction" }],
+			createdAt: CREATED_AT,
+			completedAt: CREATED_AT,
+		});
+		expect(JSON.stringify(item)).not.toContain("private compacted context");
 	});
 });

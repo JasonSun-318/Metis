@@ -27,10 +27,12 @@ import { Dispatcher } from "./dispatcher.ts";
 import { InteractionBroker } from "./interactions.ts";
 import { ModelSettingsService } from "./model-settings.ts";
 import type { OutboundQueueLimits } from "./outbound-queue.ts";
+import { PermissionRulesService } from "./permission-rules.ts";
 import { scheduleEventView } from "./schedule-projection.ts";
 import { SessionCatalog } from "./session-catalog.ts";
 import { SessionRegistry, type SessionRegistryOptions } from "./session-registry.ts";
 import { AppServerError, type SessionRuntimeHost } from "./session-runtime-host.ts";
+import { DefaultSessionTitleGenerator, type SessionTitleGenerator } from "./session-title-generator.ts";
 import { SessionSubscriptions } from "./subscriptions.ts";
 
 export interface AppServerOptions extends SessionRegistryOptions, OutboundQueueLimits {
@@ -40,6 +42,7 @@ export interface AppServerOptions extends SessionRegistryOptions, OutboundQueueL
 	readonly serverVersion?: string;
 	readonly scheduleManager?: ScheduleManager;
 	readonly scheduleExecute?: ScheduleManagerOptions["execute"];
+	readonly titleGenerator?: SessionTitleGenerator;
 }
 
 /** Parent-owned application server hosting all open Metis sessions. */
@@ -67,9 +70,22 @@ export class AppServer {
 				agentDir: options.agentDir,
 				execute: options.scheduleExecute ?? createScheduledRunExecutor({ agentDir: options.agentDir }),
 			});
-		this.interactions = new InteractionBroker({ serverEpoch: this.serverEpoch });
 		this.subscriptions = new SessionSubscriptions(this.serverEpoch, (session) => {
 			this.catalog.updateSummary(session.sessionId, session);
+		});
+		this.interactions = new InteractionBroker({
+			serverEpoch: this.serverEpoch,
+			onPendingChange: (sessionId, attentionRequired) => {
+				try {
+					const session = this.catalog.updateSummary(sessionId, {
+						attentionRequired,
+						...(attentionRequired ? { unread: true } : {}),
+					});
+					this.subscriptions.publishSessionUpdated(session);
+				} catch {
+					// A closing session may disappear before its pending interaction settles.
+				}
+			},
 		});
 		const credentials = new CredentialCoordinator({ agentDir: options.agentDir });
 		const authStorage = credentials.createView();
@@ -81,6 +97,7 @@ export class AppServer {
 			modelRegistry,
 			settingsManager,
 		});
+		const permissionRules = new PermissionRulesService(options.agentDir, this.catalog);
 		this.registry = new SessionRegistry(
 			options.runtimeHost ??
 				new AgentSessionRuntimeHost({
@@ -101,6 +118,8 @@ export class AppServer {
 			this.scheduleManager,
 			modelRegistry,
 			modelSettings,
+			permissionRules,
+			options.titleGenerator ?? new DefaultSessionTitleGenerator({ modelRegistry, settingsManager }),
 		);
 		this.outboundQueueLimits = {
 			maxUnacknowledgedBytes: options.maxUnacknowledgedBytes,

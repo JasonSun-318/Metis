@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { type ClientRpcRequest, MAX_HISTORY_ITEMS } from "@metis/app-protocol";
+import { type ClientParams, type ClientRpcRequest, MAX_HISTORY_ITEMS } from "@metis/app-protocol";
 import {
 	type ModelRegistry,
 	resolveScheduleCreateTarget,
@@ -11,11 +11,13 @@ import {
 import type { DurableSessionMutation, PreparedSessionMutation } from "./durable-mutation.ts";
 import type { InteractionBroker, InteractionPeer } from "./interactions.ts";
 import type { ModelSettingsService } from "./model-settings.ts";
+import type { PermissionRulesService } from "./permission-rules.ts";
 import { ProfileSummaryCache } from "./profile-summary.ts";
 import { scheduleRunView, scheduleTaskView } from "./schedule-projection.ts";
 import type { SessionCatalog } from "./session-catalog.ts";
 import type { SessionRegistry } from "./session-registry.ts";
 import { AppServerError, type SessionRef } from "./session-runtime-host.ts";
+import type { SessionTitleGenerator } from "./session-title-generator.ts";
 import type { ConnectionSubscriptions, SessionSubscriptions } from "./subscriptions.ts";
 
 const MAX_REPLAY_ENTRIES = 10_000;
@@ -65,6 +67,9 @@ export class Dispatcher {
 	private readonly scheduleManager: ScheduleManager;
 	private readonly modelRegistry: ModelRegistry;
 	private readonly modelSettings: ModelSettingsService;
+	private readonly permissionRules: PermissionRulesService;
+	private readonly titleGenerator: SessionTitleGenerator;
+	private readonly titleJobs = new Set<string>();
 	private readonly profileSummary = new ProfileSummaryCache();
 
 	constructor(
@@ -75,6 +80,8 @@ export class Dispatcher {
 		scheduleManager: ScheduleManager,
 		modelRegistry: ModelRegistry,
 		modelSettings: ModelSettingsService,
+		permissionRules: PermissionRulesService,
+		titleGenerator: SessionTitleGenerator,
 	) {
 		this.catalog = catalog;
 		this.registry = registry;
@@ -83,6 +90,40 @@ export class Dispatcher {
 		this.scheduleManager = scheduleManager;
 		this.modelRegistry = modelRegistry;
 		this.modelSettings = modelSettings;
+		this.permissionRules = permissionRules;
+		this.titleGenerator = titleGenerator;
+	}
+
+	private startTitleJob(sessionId: string, input: ClientParams<"turn/start">): void {
+		if (this.titleJobs.has(sessionId)) return;
+		const source = [
+			input.text.trim(),
+			...(input.attachments ?? []).map(
+				(attachment) => `Attachment: ${attachment.name ?? attachment.path.split(/[\\/]/).at(-1)}`,
+			),
+			...(!input.text.trim() && input.images?.length
+				? [`${input.images.length} image${input.images.length === 1 ? "" : "s"}`]
+				: []),
+		]
+			.filter(Boolean)
+			.join("\n");
+		if (!source) return;
+		this.titleJobs.add(sessionId);
+		void this.titleGenerator
+			.generate(source)
+			.then(async (title) => {
+				if (!title) return;
+				const ref = this.runtimeRef(sessionId);
+				const updated = await this.registry.run(ref, async (runtime) => {
+					if (runtime.getSummary().name) return undefined;
+					return await runtime.renameSession(title);
+				});
+				if (!updated || this.catalog.get(sessionId).summary.name === updated.name) return;
+				const session = this.catalog.updateSummary(sessionId, updated);
+				this.subscriptionHub.publishSessionUpdated(session);
+			})
+			.catch(() => undefined)
+			.finally(() => this.titleJobs.delete(sessionId));
 	}
 
 	private availableModel(model: { provider: string; modelId: string }): void {
@@ -268,7 +309,7 @@ export class Dispatcher {
 											path: ref.path,
 											relativePath: ref.relativePath,
 											archived: ref.summary.archived,
-											updatedAt: ref.summary.updatedAt,
+											updatedAt: ref.storageUpdatedAt ?? ref.summary.updatedAt,
 										})),
 									});
 									if (!result.ok) {
@@ -343,6 +384,77 @@ export class Dispatcher {
 					return await this.registry.run(ref, (runtime) => runtime.listSkills());
 				}
 				return await this.registry.listDraftSkills(request.params.cwd);
+			case "skill/get":
+				return await this.registry.getDraftSkill(request.params);
+			case "skill/upsert":
+				return await this.replayMutation(request, () => this.registry.upsertDraftSkill(request.params));
+			case "skill/remove":
+				return await this.replayMutation(request, () => this.registry.removeDraftSkill(request.params));
+			case "skill/import/inspect":
+				return await this.registry.inspectDraftSkillImport(request.params);
+			case "skill/import":
+				return await this.replayMutation(request, () => this.registry.importDraftSkills(request.params));
+			case "mcp/list":
+				if ("sessionId" in request.params) {
+					const ref = this.runtimeRef(request.params.sessionId);
+					return await this.registry.run(ref, (runtime) => runtime.listMcpServers());
+				}
+				return await this.registry.listDraftMcpServers(request.params.cwd);
+			case "mcp/import/inspect":
+				if ("sessionId" in request.params) {
+					const ref = this.runtimeRef(request.params.sessionId);
+					return await this.registry.run(ref, (runtime) => runtime.inspectMcpImport(request.params));
+				}
+				return await this.registry.inspectDraftMcpImport(request.params);
+			case "mcp/import":
+				return await this.replayMutation(request, async () => {
+					if ("sessionId" in request.params) {
+						const ref = this.runtimeRef(request.params.sessionId);
+						return await this.registry.run(ref, (runtime) => runtime.importMcpServers(request.params));
+					}
+					return await this.registry.importDraftMcpServers(request.params);
+				});
+			case "mcp/get":
+				if ("sessionId" in request.params) {
+					const ref = this.runtimeRef(request.params.sessionId);
+					return await this.registry.run(ref, (runtime) => runtime.getMcpServer(request.params));
+				}
+				return await this.registry.getDraftMcpServer(request.params);
+			case "mcp/catalog/get": {
+				const ref = this.runtimeRef(request.params.sessionId);
+				return await this.registry.run(ref, (runtime) => runtime.getMcpCatalogItem(request.params));
+			}
+			case "mcp/upsert":
+				return await this.replayMutation(request, async () => {
+					if ("sessionId" in request.params) {
+						const ref = this.runtimeRef(request.params.sessionId);
+						return await this.registry.run(ref, (runtime) => runtime.upsertMcpServer(request.params));
+					}
+					return await this.registry.upsertDraftMcpServer(request.params);
+				});
+			case "mcp/remove":
+				return await this.replayMutation(request, async () => {
+					if ("sessionId" in request.params) {
+						const ref = this.runtimeRef(request.params.sessionId);
+						return await this.registry.run(ref, (runtime) => runtime.removeMcpServer(request.params));
+					}
+					return await this.registry.removeDraftMcpServer(request.params);
+				});
+			case "mcp/restart":
+				return await this.replayMutation(request, async () => {
+					const ref = this.runtimeRef(request.params.sessionId);
+					return await this.registry.run(ref, (runtime) => runtime.restartMcpServer(request.params));
+				});
+			case "mcp/credential/set":
+				return await this.replayMutation(request, async () => {
+					const ref = this.runtimeRef(request.params.sessionId);
+					return await this.registry.run(ref, (runtime) => runtime.setMcpCredential(request.params));
+				});
+			case "mcp/credential/clear":
+				return await this.replayMutation(request, async () => {
+					const ref = this.runtimeRef(request.params.sessionId);
+					return await this.registry.run(ref, (runtime) => runtime.clearMcpCredential(request.params));
+				});
 			case "profile/get":
 				return this.profileSummary.summarize(this.allSessionRefs());
 			case "usage/get":
@@ -366,6 +478,12 @@ export class Dispatcher {
 				return await this.replayMutation(request, () =>
 					this.modelSettings.testConnection(request.params.provider, request.params.modelId),
 				);
+			case "permission/rules/list":
+				return this.permissionRules.list(request.params);
+			case "permission/rules/delete":
+				return await this.replayMutation(request, async () => this.permissionRules.delete(request.params));
+			case "permission/rules/clear":
+				return await this.replayMutation(request, async () => this.permissionRules.clear(request.params));
 			case "project/deletePreview": {
 				const cwd = await this.catalog.refreshModeProjectStorage(request.params.cwd);
 				const snapshot = this.catalog.modeProjectSnapshot(request.params.mode, cwd);
@@ -425,6 +543,15 @@ export class Dispatcher {
 				const ref = this.runtimeRef(request.params.sessionId);
 				return await this.registry.run(ref, (runtime) => runtime.readItems(request.params));
 			}
+			case "session/status": {
+				const ref = this.runtimeRef(request.params.sessionId);
+				return await this.registry.run(ref, (runtime) => runtime.getStatus(request.params));
+			}
+			case "session/compact":
+				return await this.replayMutation(request, async () => {
+					const ref = this.runtimeRef(request.params.sessionId);
+					return await this.registry.run(ref, (runtime) => runtime.compact(request.params));
+				});
 			case "subagent/readItems": {
 				const ref = this.runtimeRef(request.params.sessionId);
 				return await this.registry.run(ref, (runtime) => runtime.readSubagentItems(request.params));
@@ -616,12 +743,45 @@ export class Dispatcher {
 			case "turn/start":
 				return await this.replayMutation(request, async () => {
 					const ref = this.runtimeRef(request.params.sessionId);
-					return await this.registry.run(ref, (runtime) => runtime.startTurn(request.params));
+					return await this.registry.run(ref, async (runtime) => {
+						const unnamed = !runtime.getSummary().name;
+						const result = await runtime.startTurn(request.params);
+						if (unnamed) this.startTitleJob(request.params.sessionId, request.params);
+						return result;
+					});
 				});
 			case "turn/steer":
 				return await this.replayMutation(request, async () => {
 					const ref = this.runtimeRef(request.params.sessionId);
 					return await this.registry.run(ref, (runtime) => runtime.steer(request.params));
+				});
+			case "turn/queue":
+				return await this.replayMutation(request, () => {
+					this.assertMutableSession(request.params.sessionId);
+					return this.registry.run(this.runtimeRef(request.params.sessionId), (runtime) =>
+						runtime.queueTurn(request.params),
+					);
+				});
+			case "turn/queue/update":
+				return await this.replayMutation(request, () => {
+					this.assertMutableSession(request.params.sessionId);
+					return this.registry.run(this.runtimeRef(request.params.sessionId), (runtime) =>
+						runtime.updateQueuedTurn(request.params),
+					);
+				});
+			case "turn/queue/delete":
+				return await this.replayMutation(request, () => {
+					this.assertMutableSession(request.params.sessionId);
+					return this.registry.run(this.runtimeRef(request.params.sessionId), (runtime) =>
+						runtime.deleteQueuedTurn(request.params),
+					);
+				});
+			case "turn/queue/send":
+				return await this.replayMutation(request, () => {
+					this.assertMutableSession(request.params.sessionId);
+					return this.registry.run(this.runtimeRef(request.params.sessionId), (runtime) =>
+						runtime.sendQueuedTurn(request.params),
+					);
 				});
 			case "turn/interrupt":
 				return await this.replayMutation(request, async () => {

@@ -314,6 +314,23 @@ export function projectMessageEntry(input: MessageProjectionInput): ItemView | u
 	}
 }
 
+export function projectSessionEntry(input: MessageProjectionInput): ItemView | undefined {
+	const message = projectMessageEntry(input);
+	if (message) return message;
+	if (input.entry.type !== "compaction") return undefined;
+
+	const createdAt = timestamp(input.entry.timestamp, input.fallbackTimestamp);
+	return {
+		itemId: opaqueId(input.entry.id, "item"),
+		sessionId: input.sessionId,
+		role: "system",
+		state: "completed",
+		content: [{ type: "compaction" }],
+		createdAt,
+		completedAt: createdAt,
+	};
+}
+
 export function projectLiveMessage(input: {
 	readonly itemId: string;
 	readonly sessionId: string;
