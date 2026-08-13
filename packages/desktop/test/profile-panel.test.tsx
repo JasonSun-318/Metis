@@ -8,10 +8,14 @@ import { AccountMenu } from "../src/renderer/components/AccountMenu.tsx";
 import {
 	buildActivityWeeks,
 	formatDuration,
-	PROFILE_IDENTITY_STORAGE_KEY,
 	ProfilePanel,
 } from "../src/renderer/components/ProfilePanel.tsx";
 import { APP_LOCALE_STORAGE_KEY, setLocale } from "../src/renderer/i18n.ts";
+import {
+	DEFAULT_PROFILE_IDENTITY,
+	PROFILE_IDENTITY_STORAGE_KEY,
+	saveProfileIdentity,
+} from "../src/renderer/profile-identity.ts";
 
 const profile: ProfileUsageSummaryView = {
 	generatedAt: "2026-08-01T12:00:00.000Z",
@@ -51,6 +55,7 @@ function button(container: ParentNode, label: string): HTMLButtonElement {
 
 beforeEach(async () => {
 	localStorage.clear();
+	saveProfileIdentity(DEFAULT_PROFILE_IDENTITY);
 	await setLocale("en");
 });
 
@@ -117,15 +122,23 @@ describe("ProfilePanel", () => {
 
 	it("persists a local display name and avatar without changing profile usage data", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-		localStorage.setItem(PROFILE_IDENTITY_STORAGE_KEY, JSON.stringify({ displayName: "Barry", avatarDataUrl: null }));
+		const bitmap = { width: 4_000, height: 2_000, close: vi.fn() } as unknown as ImageBitmap;
+		const drawImage = vi.fn();
+		const createImageBitmap = vi.fn(async () => bitmap);
+		vi.stubGlobal("createImageBitmap", createImageBitmap);
+		vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({ drawImage } as unknown as CanvasRenderingContext2D);
+		vi.spyOn(HTMLCanvasElement.prototype, "toDataURL").mockReturnValue("data:image/webp;base64,resized");
+		saveProfileIdentity({ displayName: "Barry", avatarDataUrl: null });
 		const api = { getProfile: vi.fn().mockResolvedValue(profile) };
 		const container = document.createElement("div");
 		document.body.append(container);
 		const root = createRoot(container);
-		await act(async () => root.render(<ProfilePanel api={api} serverReady />));
+		await act(async () => root.render(<><AccountMenu onSettings={vi.fn()} /><ProfilePanel api={api} serverReady /></>));
 		await flush();
 
 		expect(container.querySelector(".profile-identity h1")?.textContent).toBe("Barry");
+		expect(container.querySelector(".account-menu-name")?.textContent).toBe("Barry");
+		expect(container.querySelector(".account-mark")?.textContent).toBe("B");
 		await act(async () => button(container, "Edit display name").click());
 		const name = container.querySelector<HTMLInputElement>('input[aria-label="Display name"]')!;
 		await act(async () => {
@@ -134,12 +147,17 @@ describe("ProfilePanel", () => {
 			name.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "Enter" }));
 		});
 		expect(JSON.parse(localStorage.getItem(PROFILE_IDENTITY_STORAGE_KEY)!).displayName).toBe("Barry Bai");
+		expect(container.querySelector(".account-menu-name")?.textContent).toBe("Barry Bai");
 
 		const avatar = container.querySelector<HTMLInputElement>('input[type="file"]')!;
 		Object.defineProperty(avatar, "files", { configurable: true, value: [new File(["avatar"], "avatar.png", { type: "image/png" })] });
 		await act(async () => avatar.dispatchEvent(new Event("change", { bubbles: true })));
 		await flush();
-		expect(JSON.parse(localStorage.getItem(PROFILE_IDENTITY_STORAGE_KEY)!).avatarDataUrl).toMatch(/^data:image\/png;base64,/u);
+		expect(createImageBitmap).toHaveBeenCalledOnce();
+		expect(drawImage).toHaveBeenCalledWith(bitmap, 0, 0, 256, 128);
+		expect(bitmap.close).toHaveBeenCalledOnce();
+		expect(JSON.parse(localStorage.getItem(PROFILE_IDENTITY_STORAGE_KEY)!).avatarDataUrl).toBe("data:image/webp;base64,resized");
+		expect(container.querySelector<HTMLImageElement>(".account-mark img")?.src).toBe("data:image/webp;base64,resized");
 		await act(async () => root.unmount());
 	});
 
@@ -173,12 +191,12 @@ describe("AccountMenu", () => {
 		const root = createRoot(container);
 		await act(async () => root.render(<AccountMenu onSettings={onSettings} />));
 
-		await act(async () => button(container, "Metis").click());
-		expect(button(container, "Metis").getAttribute("aria-expanded")).toBe("true");
+		await act(async () => button(container, "Metis User").click());
+		expect(button(container, "Metis User").getAttribute("aria-expanded")).toBe("true");
 		expect(document.activeElement?.textContent).toBe("Settings");
 		await act(async () => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" })));
-		expect(button(container, "Metis").getAttribute("aria-expanded")).toBe("false");
-		await act(async () => button(container, "Metis").click());
+		expect(button(container, "Metis User").getAttribute("aria-expanded")).toBe("false");
+		await act(async () => button(container, "Metis User").click());
 		await act(async () => button(container, "Settings").click());
 		expect(onSettings).toHaveBeenCalledTimes(1);
 		await act(async () => root.unmount());
@@ -191,16 +209,16 @@ describe("AccountMenu", () => {
 		const root = createRoot(container);
 		await act(async () => root.render(<AccountMenu onSettings={vi.fn()} />));
 
-		await act(async () => button(container, "Metis").click());
+		await act(async () => button(container, "Metis User").click());
 		await act(async () => button(container, "Language").click());
 		expect(container.querySelectorAll('[role="menuitemradio"]')).toHaveLength(2);
 		expect(button(container, "English").getAttribute("aria-checked")).toBe("true");
 		await act(async () => button(container, "中文").click());
 		expect(localStorage.getItem(APP_LOCALE_STORAGE_KEY)).toBe("zh-CN");
 		expect(document.documentElement.lang).toBe("zh-CN");
-		expect(button(container, "Metis").getAttribute("aria-expanded")).toBe("false");
+		expect(button(container, "Metis User").getAttribute("aria-expanded")).toBe("false");
 
-		await act(async () => button(container, "Metis").click());
+		await act(async () => button(container, "Metis User").click());
 		expect(container.textContent).toContain("设置");
 		expect(container.textContent).toContain("语言");
 		await act(async () => root.unmount());

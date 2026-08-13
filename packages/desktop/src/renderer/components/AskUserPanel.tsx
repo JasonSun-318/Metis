@@ -28,6 +28,10 @@ function blankDraft(): AnswerDraft {
 	return { choiceIds: [], customAnswer: "" };
 }
 
+function draftHasAnswer(draft: AnswerDraft): boolean {
+	return draft.choiceIds.length > 0 || draft.customAnswer.trim().length > 0;
+}
+
 export function AskUserPanel({ interaction, onRespond }: AskUserPanelProps) {
 	const { t } = useTranslation();
 	const [questionIndex, setQuestionIndex] = useState(0);
@@ -44,7 +48,8 @@ export function AskUserPanel({ interaction, onRespond }: AskUserPanelProps) {
 	const questionHeadingId = `ask-user-title-${interaction.interactionId}`;
 	const draft = drafts[questionIndex] ?? blankDraft();
 	const customOpen = customQuestionId === question.id || draft.customAnswer.length > 0;
-	const hasAnswer = draft.choiceIds.length > 0 || draft.customAnswer.trim().length > 0;
+	const hasAnswer = draftHasAnswer(draft);
+	const allAnswered = drafts.every(draftHasAnswer);
 	const selectedCount = draft.choiceIds.length + (draft.customAnswer.trim().length > 0 ? 1 : 0);
 
 	useEffect(() => {
@@ -93,6 +98,11 @@ export function AskUserPanel({ interaction, onRespond }: AskUserPanelProps) {
 	const continueWith = (nextDrafts: readonly AnswerDraft[]) => {
 		if (questionIndex < interaction.questions.length - 1) {
 			setQuestionIndex((current) => current + 1);
+			return;
+		}
+		const unansweredIndex = nextDrafts.findIndex((candidate) => !draftHasAnswer(candidate));
+		if (unansweredIndex >= 0) {
+			setQuestionIndex(unansweredIndex);
 			return;
 		}
 		void submitAnswers(nextDrafts);
@@ -144,6 +154,11 @@ export function AskUserPanel({ interaction, onRespond }: AskUserPanelProps) {
 		setQuestionIndex((current) => current - 1);
 	};
 
+	const nextQuestion = () => {
+		if (busy || questionIndex === interaction.questions.length - 1) return;
+		setQuestionIndex((current) => current + 1);
+	};
+
 	const submitCustom = (event: FormEvent) => {
 		event.preventDefault();
 		continueCurrent();
@@ -192,8 +207,8 @@ export function AskUserPanel({ interaction, onRespond }: AskUserPanelProps) {
 								</small>
 								<button
 									aria-label={t("Next question")}
-									disabled={busy || !hasAnswer || questionIndex === interaction.questions.length - 1}
-									onClick={continueCurrent}
+									disabled={busy || questionIndex === interaction.questions.length - 1}
+									onClick={nextQuestion}
 									type="button"
 								>
 									<CaretRight aria-hidden="true" size={14} />
@@ -298,13 +313,13 @@ export function AskUserPanel({ interaction, onRespond }: AskUserPanelProps) {
 								{t("Skip")}
 							</button>
 							<button
-								aria-label={t(questionIndex === interaction.questions.length - 1 ? "Submit answers" : "Next question")}
-								className={`ask-user-step${questionIndex === interaction.questions.length - 1 ? " is-submit" : ""}`}
+								aria-label={t(questionIndex === interaction.questions.length - 1 && allAnswered ? "Submit answers" : "Next question")}
+								className={`ask-user-step${questionIndex === interaction.questions.length - 1 && allAnswered ? " is-submit" : ""}`}
 								disabled={!hasAnswer || busy}
 								onClick={continueCurrent}
 								type="button"
 							>
-								{questionIndex === interaction.questions.length - 1
+								{questionIndex === interaction.questions.length - 1 && allAnswered
 									? <ArrowUp aria-hidden="true" size={16} />
 									: <ArrowRight aria-hidden="true" size={16} />}
 							</button>

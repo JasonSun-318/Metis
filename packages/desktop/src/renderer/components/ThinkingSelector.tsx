@@ -6,6 +6,7 @@ import { useTranslation } from "react-i18next";
 interface ThinkingSelectorProps {
 	readonly actualThinkingLevel: SessionSnapshot["actualThinkingLevel"];
 	readonly available: SessionSnapshot["availableThinkingSelections"];
+	readonly commandRequest?: { readonly id: number; readonly open: boolean };
 	readonly disabled: boolean;
 	readonly onChange: (selection: SessionSnapshot["thinkingSelection"]) => void;
 	readonly value: SessionSnapshot["thinkingSelection"];
@@ -111,7 +112,7 @@ function UltraEffortField() {
 	return <canvas aria-hidden="true" className="effort-ultra-field" ref={canvasRef} />;
 }
 
-export function ThinkingSelector({ actualThinkingLevel, available, disabled, onChange, value }: ThinkingSelectorProps) {
+export function ThinkingSelector({ actualThinkingLevel, available, commandRequest, disabled, onChange, value }: ThinkingSelectorProps) {
 	const { t } = useTranslation();
 	const currentIndex = Math.max(0, available.indexOf(value));
 	const [open, setOpen] = useState(false);
@@ -119,6 +120,7 @@ export function ThinkingSelector({ actualThinkingLevel, available, disabled, onC
 	const [previewDirection, setPreviewDirection] = useState<"backward" | "forward">("forward");
 	const rootRef = useRef<HTMLDivElement>(null);
 	const triggerRef = useRef<HTMLButtonElement>(null);
+	const lastCommandRequest = useRef(commandRequest?.id);
 	const previewRef = useRef(currentIndex);
 	const draggingRef = useRef(false);
 	const samplesRef = useRef<Array<{ readonly time: number; readonly value: number }>>([]);
@@ -152,6 +154,13 @@ export function ThinkingSelector({ actualThinkingLevel, available, disabled, onC
 	useEffect(() => {
 		if (disabled) close(false, false);
 	}, [disabled]);
+
+	useEffect(() => {
+		if (commandRequest === undefined || commandRequest.id === lastCommandRequest.current) return;
+		lastCommandRequest.current = commandRequest.id;
+		if (commandRequest.open && !disabled) setOpen(true);
+		else close(false, false);
+	}, [commandRequest, disabled]);
 
 	useEffect(() => {
 		if (draggingRef.current) return;

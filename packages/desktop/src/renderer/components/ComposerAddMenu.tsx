@@ -1,25 +1,31 @@
-import type { SkillSummaryView } from "@metis/app-protocol";
-import { Briefcase, CaretRight, Paperclip, Plus, Scroll } from "@phosphor-icons/react";
+import type { McpServerSummaryView, SkillSummaryView } from "@metis/app-protocol";
+import { Briefcase, CaretRight, Paperclip, Plug, Plus, Scroll } from "@phosphor-icons/react";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 interface ComposerAddMenuProps {
+	readonly commandRequest?: { readonly id: number; readonly open: boolean };
 	readonly disabled: boolean;
+	readonly mcpServers: readonly McpServerSummaryView[];
 	readonly skills: readonly SkillSummaryView[];
 	readonly onAddFiles: () => void;
+	readonly onManageMcp: () => void;
 	readonly onManageSkills: () => void;
 	readonly onSelectSkill: (skill: SkillSummaryView) => void;
 }
 
-export function ComposerAddMenu({ disabled, skills, onAddFiles, onManageSkills, onSelectSkill }: ComposerAddMenuProps) {
+export function ComposerAddMenu({ commandRequest, disabled, mcpServers, skills, onAddFiles, onManageMcp, onManageSkills, onSelectSkill }: ComposerAddMenuProps) {
 	const { t } = useTranslation();
 	const [open, setOpen] = useState(false);
+	const [mcpOpen, setMcpOpen] = useState(false);
 	const [skillsOpen, setSkillsOpen] = useState(false);
 	const rootRef = useRef<HTMLDivElement>(null);
 	const triggerRef = useRef<HTMLButtonElement>(null);
+	const lastCommandRequest = useRef(commandRequest?.id);
 
 	const close = (restoreFocus = false) => {
 		setOpen(false);
+		setMcpOpen(false);
 		setSkillsOpen(false);
 		if (restoreFocus) triggerRef.current?.focus();
 	};
@@ -27,8 +33,17 @@ export function ComposerAddMenu({ disabled, skills, onAddFiles, onManageSkills, 
 	useEffect(() => {
 		if (!disabled) return;
 		setOpen(false);
+		setMcpOpen(false);
 		setSkillsOpen(false);
 	}, [disabled]);
+
+	useEffect(() => {
+		if (commandRequest === undefined || commandRequest.id === lastCommandRequest.current) return;
+		lastCommandRequest.current = commandRequest.id;
+		setOpen(commandRequest.open && !disabled);
+		setMcpOpen(commandRequest.open && !disabled);
+		setSkillsOpen(false);
+	}, [commandRequest, disabled]);
 
 	useEffect(() => {
 		if (!open) return;
@@ -70,6 +85,7 @@ export function ComposerAddMenu({ disabled, skills, onAddFiles, onManageSkills, 
 				disabled={disabled}
 				onClick={() => {
 					setOpen((value) => !value);
+					setMcpOpen(false);
 					setSkillsOpen(false);
 				}}
 				ref={triggerRef}
@@ -89,7 +105,7 @@ export function ComposerAddMenu({ disabled, skills, onAddFiles, onManageSkills, 
 						<button
 							aria-expanded={skillsOpen}
 							className={skillsOpen ? "is-active" : undefined}
-							onClick={() => setSkillsOpen((value) => !value)}
+							onClick={() => { setSkillsOpen((value) => !value); setMcpOpen(false); }}
 							role="menuitem"
 							type="button"
 						>
@@ -109,6 +125,32 @@ export function ComposerAddMenu({ disabled, skills, onAddFiles, onManageSkills, 
 								<button onClick={() => { close(); onManageSkills(); }} role="menuitem" type="button">
 									<Briefcase aria-hidden="true" size={16} />
 									<span>{t("Manage skills")}</span>
+								</button>
+							</div>
+						)}
+						<button
+							aria-expanded={mcpOpen}
+							className={mcpOpen ? "is-active" : undefined}
+							onClick={() => { setMcpOpen((value) => !value); setSkillsOpen(false); }}
+							role="menuitem"
+							type="button"
+						>
+							<Plug aria-hidden="true" size={16} />
+							<span>{t("MCP")}</span>
+							<CaretRight aria-hidden="true" className="composer-menu-caret" size={14} />
+						</button>
+						{mcpOpen && (
+							<div className="composer-skill-menu composer-mcp-menu" role="menu">
+								{mcpServers.map((server) => (
+									<button key={`${server.scope}:${server.name}`} onClick={() => { close(); onManageMcp(); }} role="menuitem" type="button">
+										<Plug aria-hidden="true" size={16} />
+										<span>{server.name}</span>
+									</button>
+								))}
+								<div className="composer-menu-separator" role="separator" />
+								<button onClick={() => { close(); onManageMcp(); }} role="menuitem" type="button">
+									<Briefcase aria-hidden="true" size={16} />
+									<span>{t("Manage MCP")}</span>
 								</button>
 							</div>
 						)}

@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
-import { createServer } from "node:http";
+import { createServer, type ServerResponse } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { expect, test, type Browser, type Page } from "@playwright/test";
@@ -11,6 +11,7 @@ import {
 	closeServer,
 	connectToApp,
 	createAndRestoreChatSession,
+	desktopRoot,
 	listen,
 	packagedExecutable,
 	reservePort,
@@ -44,6 +45,19 @@ async function diagnosticWithin<T>(promise: Promise<T>, fallback: T, timeoutMs =
 	}
 }
 
+function respondTitle(response: ServerResponse): void {
+	response.writeHead(200, { "content-type": "text/event-stream" });
+	response.end(
+		`data: ${JSON.stringify({
+			id: "chatcmpl-slow-client-title",
+			object: "chat.completion.chunk",
+			created: 1,
+			model: "slow-client-model",
+			choices: [{ index: 0, delta: { role: "assistant", content: "Slow stream title" }, finish_reason: "stop" }],
+		})}\n\ndata: [DONE]\n\n`,
+	);
+}
+
 test("a blocked renderer catches up with 10,000 deltas without losing its app server", async () => {
 	const executable = packagedExecutable();
 	expect(existsSync(executable), `Package the desktop app first: ${executable}`).toBe(true);
@@ -52,7 +66,8 @@ test("a blocked renderer catches up with 10,000 deltas without losing its app se
 	const agentDir = path.join(root, "agent");
 	const projectDir = path.join(root, "project");
 	const userDataDir = path.join(root, "electron");
-	await Promise.all([mkdir(agentDir), mkdir(projectDir), mkdir(userDataDir)]);
+	const qaDir = path.join(desktopRoot, "test-results", "design-qa", "sidebar");
+	await Promise.all([mkdir(agentDir), mkdir(projectDir), mkdir(userDataDir), mkdir(qaDir, { recursive: true })]);
 
 	let releaseStream!: () => void;
 	const streamGate = new Promise<void>((resolve) => {
@@ -60,8 +75,14 @@ test("a blocked renderer catches up with 10,000 deltas without losing its app se
 	});
 	let providerRequests = 0;
 	const provider = createServer(async (request, response) => {
-		for await (const _chunk of request) {
+		let transcript = "";
+		for await (const chunk of request) {
 			// Drain the request before streaming.
+			transcript += String(chunk);
+		}
+		if (transcript.includes("conversation title generator")) {
+			respondTitle(response);
+			return;
 		}
 		providerRequests += 1;
 		await streamGate;
@@ -133,13 +154,39 @@ test("a blocked renderer catches up with 10,000 deltas without losing its app se
 	let browser: Browser | undefined;
 	let page: Page | undefined;
 	let sessionId = "";
+	let backgroundSessionId = "";
 	let phase = "connect to renderer";
+	const consoleErrors: string[] = [];
 	try {
 		({ browser, page } = await connectToApp(port));
+		page.on("console", (message) => {
+			if (message.type() === "error") consoleErrors.push(message.text());
+		});
+		await page.setViewportSize({ width: 1440, height: 900 });
 		phase = "wait for App Server";
 		await waitForServerReady(page);
 		phase = "restore Chat session";
 		sessionId = await createAndRestoreChatSession(page, projectDir);
+		backgroundSessionId = await page.evaluate(async ({ activeSessionId, cwd }) => {
+			const api = (globalThis as unknown as { metis: MetisDesktopApi }).metis;
+			await api.renameSession({
+				sessionId: activeSessionId,
+				requestId: crypto.randomUUID(),
+				name: "Streaming fixture",
+			});
+			const created = await api.createSession({
+				requestId: crypto.randomUUID(),
+				mode: "chat",
+				cwd,
+				name: "Background fixture",
+			});
+			return created.session.sessionId;
+		}, { activeSessionId: sessionId, cwd: projectDir });
+		await page.reload({ waitUntil: "domcontentloaded", timeout: 15_000 });
+		await page.locator(`[data-active-session-id="${sessionId}"]`).waitFor({ state: "visible", timeout: 15_000 });
+		const sidebar = page.locator(".session-sidebar");
+		await expect(sidebar.getByRole("button", { name: "Streaming fixture", exact: true })).toBeVisible();
+		await expect(sidebar.getByRole("button", { name: "Background fixture", exact: true })).toBeVisible();
 
 		phase = "inspect process tree";
 		const rootPid = app.pid;
@@ -152,6 +199,15 @@ test("a blocked renderer catches up with 10,000 deltas without losing its app se
 		await page.getByRole("button", { name: "Send" }).click({ timeout: 10_000 });
 		phase = "wait for provider request";
 		await expect.poll(() => providerRequests, { timeout: 10_000 }).toBe(1);
+		phase = "verify running session indicator";
+		const runningSession = page.locator('.session-button[aria-busy="true"]');
+		await expect(runningSession).toHaveCount(1);
+		await expect(runningSession.locator(".session-button-title i.running")).toBeVisible();
+		await expect(runningSession.locator("small")).toHaveCount(0);
+		await page.screenshot({ path: path.join(qaDir, "running-session.png"), animations: "disabled" });
+		phase = "switch away from running session";
+		await sidebar.getByRole("button", { name: "Background fixture", exact: true }).click();
+		await page.locator(`[data-active-session-id="${backgroundSessionId}"]`).waitFor({ state: "visible", timeout: 15_000 });
 		phase = "block renderer";
 		const blockingStarted = page.waitForEvent("console", {
 			predicate: (message) => message.text() === "slow-client-blocking",
@@ -168,6 +224,14 @@ test("a blocked renderer catches up with 10,000 deltas without losing its app se
 		releaseStream();
 		await blocked;
 
+		phase = "verify completed background session indicator";
+		const completedSession = sidebar.getByRole("button", { name: "Streaming fixture", exact: true });
+		await expect(completedSession.locator(".session-button-title i.completed")).toBeVisible({ timeout: 20_000 });
+		await expect(completedSession).not.toHaveAttribute("aria-busy", "true");
+		await completedSession.click();
+		await page.locator(`[data-active-session-id="${sessionId}"]`).waitFor({ state: "visible", timeout: 15_000 });
+		await expect(completedSession.locator(".session-button-title i.completed")).toHaveCount(0);
+
 		phase = "catch up streamed deltas";
 		await expect
 			.poll(async () => (await page!.locator("[data-transcript-answer]").last().textContent())?.length ?? 0, {
@@ -183,6 +247,7 @@ test("a blocked renderer catches up with 10,000 deltas without losing its app se
 		expect(appServerPid(rootPid)).toBe(originalServerPid);
 		expect(providerRequests).toBe(1);
 		await expect(page.locator("#composer-input")).toBeEnabled();
+		expect(consoleErrors).toEqual([]);
 	} catch (error) {
 		const body = page
 			? await diagnosticWithin(page.locator("body").innerText().catch(() => "renderer unavailable"), "renderer diagnostic timed out")

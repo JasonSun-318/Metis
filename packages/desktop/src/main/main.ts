@@ -112,6 +112,7 @@ async function launch(): Promise<void> {
 		terminalManager,
 		browserManager,
 		workspaceFiles,
+		openPath: (path) => shell.openPath(path),
 		writeClipboardText: (text) => clipboard.writeText(text),
 		setWorkspaceEditState: (state) => {
 			workspaceEditState = state;

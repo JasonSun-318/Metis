@@ -9,6 +9,10 @@ interface InteractionHostProps {
 	readonly onRespond: (response: InteractionResponseInput) => Promise<void>;
 }
 
+const ALLOW_ONCE = "permission:allow-once";
+const ALWAYS_PROJECT = "permission:always-project";
+const DENY = "permission:deny";
+
 export function InteractionHost({ interaction, onRespond }: InteractionHostProps) {
 	const { t } = useTranslation();
 	const firstControl = useRef<HTMLElement>(null);
@@ -46,12 +50,18 @@ export function InteractionHost({ interaction, onRespond }: InteractionHostProps
 		interaction.kind === "select" &&
 		interaction.presentation === "permission_approval" &&
 		interaction.operation &&
-		interaction.choices.length >= 2
+		interaction.choices.some((choice) => choice.id === ALLOW_ONCE) &&
+		interaction.choices.some((choice) => choice.id === DENY)
 	) {
-		const allow = interaction.choices[0]!;
-		const deny = interaction.choices[1]!;
-		const approvalBlocked = interaction.operation.omittedRows > 0 || !interaction.operation.scopeComplete;
+		const allow = interaction.choices.find((choice) => choice.id === ALLOW_ONCE)!;
+		const alwaysProject = interaction.operation.rememberProjectEligible
+			? interaction.choices.find((choice) => choice.id === ALWAYS_PROJECT)
+			: undefined;
+		const deny = interaction.choices.find((choice) => choice.id === DENY)!;
+		const approvalBlocked = !interaction.operation.scopeComplete;
 		const descriptionIds = [
+			"permission-approval-execution-target",
+			"permission-approval-complete-details",
 			interaction.operation.rows.length > 0 ? "permission-approval-details" : undefined,
 			interaction.operation.irreversible ? "permission-approval-irreversible" : undefined,
 			approvalBlocked ? "permission-approval-incomplete" : undefined,
@@ -75,6 +85,15 @@ export function InteractionHost({ interaction, onRespond }: InteractionHostProps
 							{t("Metis wants to use {{tool}}", { tool: interaction.operation.toolName })}
 						</h2>
 					</header>
+					<p
+						className={interaction.operation.executionTarget === "host" ? "permission-approval-warning" : "permission-approval-target"}
+						id="permission-approval-execution-target"
+					>
+						{interaction.operation.executionTarget === "host"
+							? t("This action will run outside the sandbox with your current user permissions.")
+							: t("This command remains limited to the displayed workspace sandbox.")}
+					</p>
+					<pre className="permission-approval-complete-details" id="permission-approval-complete-details">{interaction.message}</pre>
 					{interaction.operation.rows.length > 0 && (
 						<dl className="permission-approval-details" id="permission-approval-details">
 							{interaction.operation.rows.map((row, index) => (
@@ -92,7 +111,7 @@ export function InteractionHost({ interaction, onRespond }: InteractionHostProps
 					)}
 					{interaction.operation.omittedRows > 0 && (
 						<p className="permission-approval-warning" id="permission-approval-incomplete" role="alert">
-							{t("{{count}} additional operation targets are hidden. Deny and retry with a smaller operation.", {
+							{t("{{count}} additional targets are shown only in the complete details above.", {
 								count: interaction.operation.omittedRows,
 							})}
 						</p>
@@ -113,6 +132,16 @@ export function InteractionHost({ interaction, onRespond }: InteractionHostProps
 						>
 							{t(deny.label)} <kbd>Esc</kbd>
 						</button>
+						{alwaysProject && (
+							<button
+								className="button-secondary"
+								disabled={busy || approvalBlocked}
+								onClick={() => void respond({ interactionId: interaction.interactionId, kind: "select", choiceId: alwaysProject.id })}
+								type="button"
+							>
+								{t(alwaysProject.label)}
+							</button>
+						)}
 						<button
 							disabled={busy || approvalBlocked}
 							onClick={() => void respond({ interactionId: interaction.interactionId, kind: "select", choiceId: allow.id })}

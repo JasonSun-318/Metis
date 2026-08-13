@@ -7,11 +7,38 @@ export type ToolResultBlock = Extract<ItemContentBlockView, { type: "tool_result
 export type VisibleCodeBlock = Extract<ItemContentBlockView, { type: "text" | "image" | "notice" }>;
 type Translator = (key: string, options?: Record<string, unknown>) => string;
 const identity: Translator = (key, options) =>
-	options?.name
-		? key.replace("{{name}}", String(options.name))
-		: options?.count
-			? key.replace("{{count}}", String(options.count))
-			: key;
+	Object.entries(options ?? {}).reduce(
+		(text, [name, value]) => (value === undefined ? text : text.replaceAll(`{{${name}}}`, String(value))),
+		key,
+	);
+
+export interface ToolDetailLine {
+	readonly label?: string;
+	readonly value: string;
+}
+
+export interface ToolTranscriptPresentation {
+	readonly label: string;
+	readonly detailLines: readonly ToolDetailLine[];
+	readonly rawInput?: string;
+	readonly rawOutput?: string;
+	readonly rawOutputIsError: boolean;
+}
+
+const INTERNAL_TOOL_NAMES = new Set([
+	"set_tasks",
+	"ask_user",
+	"tool_search",
+	"activate_subagents",
+	"spawn_agent",
+	"inspect_agents",
+	"message_agent",
+	"interrupt_agent",
+	"close_agent",
+]);
+const TERMINAL_SUBAGENT_STATUSES = new Set(["done", "failed", "stopped"]);
+const PREVIEW_LINES = 10;
+const PREVIEW_CHARS = 2_000;
 
 export type CodeTranscriptSegment =
 	| {
@@ -33,14 +60,23 @@ export interface CodeTurnPresentation {
 	readonly results: ReadonlyMap<string, ToolResultBlock>;
 }
 
+export type ChatTranscriptSegment =
+	| {
+			readonly type: "activity";
+			readonly blocks: readonly (ThinkingBlock | ToolCallBlock | ToolResultBlock)[];
+			readonly calls: readonly ToolCallBlock[];
+			readonly running: boolean;
+	  }
+	| {
+			readonly type: "intermediate";
+			readonly blocks: readonly TextBlock[];
+	  };
+
 export interface TurnPresentation {
 	readonly users: readonly ItemView[];
-	readonly activity: readonly (ThinkingBlock | ToolCallBlock | ToolResultBlock)[];
-	readonly intermediateText: readonly TextBlock[];
+	readonly segments: readonly ChatTranscriptSegment[];
 	readonly final?: ItemView;
-	readonly calls: readonly ToolCallBlock[];
 	readonly results: ReadonlyMap<string, ToolResultBlock>;
-	readonly running: boolean;
 }
 
 function textBlocks(item: ItemView): TextBlock[] {
@@ -112,6 +148,373 @@ export function toolLabel(call: ToolCallBlock, t: Translator = identity): string
 	});
 }
 
+function record(value: unknown): Record<string, unknown> | undefined {
+	return typeof value === "object" && value !== null && !Array.isArray(value)
+		? (value as Record<string, unknown>)
+		: undefined;
+}
+
+function jsonValue(text: string | undefined): unknown {
+	if (!text) return undefined;
+	try {
+		return JSON.parse(text);
+	} catch {
+		return undefined;
+	}
+}
+
+function inputRecord(call: ToolCallBlock | undefined): Record<string, unknown> | undefined {
+	return record(jsonValue(call?.inputPreview));
+}
+
+function resultRecord(result: ToolResultBlock | undefined): Record<string, unknown> | undefined {
+	return record(jsonValue(result?.output));
+}
+
+function stringField(value: Record<string, unknown> | undefined, key: string): string | undefined {
+	const candidate = value?.[key];
+	return typeof candidate === "string" && candidate.trim() ? candidate.trim() : undefined;
+}
+
+function booleanField(value: Record<string, unknown> | undefined, key: string): boolean | undefined {
+	const candidate = value?.[key];
+	return typeof candidate === "boolean" ? candidate : undefined;
+}
+
+function boundedPreview(value: string): string {
+	const byCharacters = value.trim().slice(0, PREVIEW_CHARS);
+	const lines = byCharacters.split("\n");
+	const preview = lines.slice(0, PREVIEW_LINES).join("\n");
+	return value.trim().length > byCharacters.length || lines.length > PREVIEW_LINES ? `${preview}\n…` : preview;
+}
+
+function safeShortError(output: string | undefined): string | undefined {
+	const text = output?.trim();
+	if (!text || text.length > 240 || text.includes("\n") || /^(?:\{|\[)/u.test(text)) return undefined;
+	return text;
+}
+
+function detail(label: string | undefined, value: string | undefined): ToolDetailLine[] {
+	return value ? [{ ...(label ? { label } : {}), value }] : [];
+}
+
+function internalFailureLabel(name: string, t: Translator): string {
+	switch (name) {
+		case "set_tasks":
+			return t("Failed to update task list");
+		case "ask_user":
+			return t("Failed to ask user");
+		case "activate_subagents":
+			return t("Failed to activate subagents");
+		case "spawn_agent":
+			return t("Failed to spawn subagent");
+		case "inspect_agents":
+			return t("Failed to inspect subagents");
+		case "message_agent":
+			return t("Failed to message subagent");
+		case "interrupt_agent":
+			return t("Failed to interrupt subagent");
+		case "close_agent":
+			return t("Failed to close subagent");
+		case "tool_search":
+			return t("Tool search failed");
+		default:
+			return t("Folder access failed");
+	}
+}
+
+function setTasksPresentation(
+	call: ToolCallBlock | undefined,
+	result: ToolResultBlock | undefined,
+	t: Translator,
+): ToolTranscriptPresentation {
+	const input = inputRecord(call);
+	const inputTasks = Array.isArray(input?.tasks)
+		? input.tasks.flatMap((candidate) => {
+				const task = record(candidate);
+				const text = stringField(task, "task");
+				const completed = booleanField(task, "completed");
+				return text && completed !== undefined ? [{ task: text, completed }] : [];
+			})
+		: [];
+	const resultTasks =
+		result?.output.split("\n").flatMap((line) => {
+			const match = /^- \[([ x])\] (.+)$/u.exec(line.trim());
+			return match ? [{ task: match[2]!, completed: match[1] === "x" }] : [];
+		}) ?? [];
+	const tasks = inputTasks.length > 0 ? inputTasks : resultTasks;
+	const completed = tasks.filter((task) => task.completed).length;
+	const running = call?.state === "running" || call?.state === "pending";
+	const label = running
+		? t("Updating task list")
+		: tasks.length > 0
+			? t("Updated task list · {{completed}}/{{total}} completed", { completed, total: tasks.length })
+			: t("Updated task list");
+	return {
+		label,
+		detailLines: tasks.map((task) => ({ value: `${task.completed ? "✓" : "○"} ${task.task}` })),
+		rawOutputIsError: false,
+	};
+}
+
+interface AskAnswer {
+	readonly question: string;
+	readonly answer?: string;
+}
+
+function askAnswers(result: ToolResultBlock | undefined): AskAnswer[] {
+	const prefix = "User answers:\n";
+	if (!result?.output.startsWith(prefix)) return [];
+	const value = jsonValue(result.output.slice(prefix.length));
+	if (!Array.isArray(value)) return [];
+	return value.flatMap((candidate) => {
+		const answer = record(candidate);
+		const question = stringField(answer, "question");
+		if (!question) return [];
+		const selected = Array.isArray(answer?.selected)
+			? answer.selected.filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0)
+			: [];
+		const custom = stringField(answer, "customAnswer");
+		const parts = [...selected, ...(custom ? [custom] : [])];
+		return [{ question, ...(parts.length > 0 ? { answer: parts.join(" · ") } : {}) }];
+	});
+}
+
+function askUserPresentation(
+	call: ToolCallBlock | undefined,
+	result: ToolResultBlock | undefined,
+	t: Translator,
+): ToolTranscriptPresentation {
+	const input = inputRecord(call);
+	const questions = Array.isArray(input?.questions)
+		? input.questions.flatMap((candidate) => {
+				const question = stringField(record(candidate), "question");
+				return question ? [question] : [];
+			})
+		: [];
+	const answers = askAnswers(result);
+	const cancelled = result?.output.includes("cancelled these questions") === true;
+	const running = call?.state === "running" || call?.state === "pending";
+	const lines: ToolDetailLine[] = [];
+	if (answers.length > 0) {
+		for (const answer of answers) {
+			lines.push({ label: t("Question"), value: answer.question });
+			if (answer.answer) lines.push({ label: t("Answer"), value: answer.answer });
+		}
+	} else {
+		for (const question of questions) lines.push({ label: t("Question"), value: question });
+		if (cancelled) lines.push({ value: t("The user cancelled") });
+		else if (result && !running) lines.push({ value: t("Answer details unavailable") });
+	}
+	return {
+		label: t(running ? "Asking user" : "Asked user"),
+		detailLines: lines,
+		rawOutputIsError: false,
+	};
+}
+
+function subagentName(
+	input: Record<string, unknown> | undefined,
+	output: Record<string, unknown> | undefined,
+): string | undefined {
+	return stringField(input, "name") ?? stringField(output, "name");
+}
+
+function withName(label: string, name: string | undefined): string {
+	return name ? `${label} · ${name}` : label;
+}
+
+function spawnAgentPresentation(
+	call: ToolCallBlock | undefined,
+	result: ToolResultBlock | undefined,
+	t: Translator,
+): ToolTranscriptPresentation {
+	const input = inputRecord(call);
+	const output = resultRecord(result);
+	const name = subagentName(input, output);
+	const background = booleanField(input, "background") ?? booleanField(output, "background");
+	const status = stringField(output, "status");
+	const completed = background === false && status !== undefined && TERMINAL_SUBAGENT_STATUSES.has(status);
+	const task = stringField(output, "taskSummary") ?? stringField(input, "task");
+	const finalSummary = stringField(output, "finalSummary");
+	const lines = [
+		...detail(t("Task"), task && boundedPreview(task)),
+		...detail(t("Mode"), background === undefined ? undefined : t(background ? "Background" : "Foreground")),
+		...detail(t("Status"), status),
+	];
+	if (completed) lines.push(...detail(t("Result"), finalSummary && boundedPreview(finalSummary)));
+	return {
+		label: withName(t(completed ? "Subagent completed" : "Spawned subagent"), name),
+		detailLines: lines,
+		rawOutputIsError: false,
+	};
+}
+
+function inspectAgentsPresentation(result: ToolResultBlock | undefined, t: Translator): ToolTranscriptPresentation {
+	const lines: ToolDetailLine[] = [];
+	let count = 0;
+	for (const line of result?.output.split("\n") ?? []) {
+		const session = /^Session "(.+)": (\S+)$/u.exec(line);
+		if (session) {
+			count += 1;
+			lines.push({ value: `${session[1]} · ${session[2]}` });
+			continue;
+		}
+		if (/^Agent ID:/u.test(line) || !line.trim()) continue;
+		if (/^\[(?:user|assistant)\] /u.test(line)) lines.push({ value: boundedPreview(line) });
+		else if (line === "No subagent sessions.") lines.push({ value: line });
+	}
+	return {
+		label: count > 0 ? t("Inspected {{count}} subagents", { count }) : t("Inspected subagents"),
+		detailLines: lines.slice(0, PREVIEW_LINES),
+		rawOutputIsError: false,
+	};
+}
+
+function messageAgentPresentation(
+	call: ToolCallBlock | undefined,
+	result: ToolResultBlock | undefined,
+	t: Translator,
+): ToolTranscriptPresentation {
+	const input = inputRecord(call);
+	const output = resultRecord(result);
+	const mode = stringField(input, "mode");
+	const background = booleanField(input, "background") ?? booleanField(output, "background");
+	const status = [stringField(output, "status"), stringField(output, "delivery")].filter(Boolean).join(" · ");
+	const message = stringField(input, "message");
+	const finalSummary = stringField(output, "finalSummary");
+	const lines = [
+		...detail(t("Message"), message && boundedPreview(message)),
+		...detail(t("Mode"), background === undefined ? mode : t(background ? "Background" : "Foreground")),
+		...detail(t("Status"), status || undefined),
+	];
+	if (background === false) lines.push(...detail(t("Result"), finalSummary && boundedPreview(finalSummary)));
+	return {
+		label: t(mode === "follow_up" ? "Sent subagent follow-up" : "Messaged subagent"),
+		detailLines: lines,
+		rawOutputIsError: false,
+	};
+}
+
+function interruptAgentPresentation(result: ToolResultBlock | undefined, t: Translator): ToolTranscriptPresentation {
+	const output = resultRecord(result);
+	return {
+		label: withName(t("Interrupted subagent"), stringField(output, "name")),
+		detailLines: [
+			...detail(t("Task"), stringField(output, "taskSummary")),
+			...detail(t("Status"), stringField(output, "status")),
+		],
+		rawOutputIsError: false,
+	};
+}
+
+function closeAgentPresentation(result: ToolResultBlock | undefined, t: Translator): ToolTranscriptPresentation {
+	const output = resultRecord(result);
+	const status = booleanField(output, "alreadyClosed") ? "already closed" : stringField(output, "status");
+	return {
+		label: t("Closed subagent"),
+		detailLines: detail(t("Status"), status),
+		rawOutputIsError: false,
+	};
+}
+
+function toolSearchPresentation(
+	call: ToolCallBlock | undefined,
+	result: ToolResultBlock | undefined,
+	t: Translator,
+): ToolTranscriptPresentation {
+	const input = inputRecord(call);
+	const matches =
+		result?.output.split("\n").flatMap((line) => {
+			const separator = line.indexOf(":");
+			return separator > 0 ? [line.slice(0, separator).trim()] : [];
+		}) ?? [];
+	const running = call?.state === "running" || call?.state === "pending";
+	return {
+		label: t(running ? "Searching tools" : "Searched tools"),
+		detailLines: [
+			...detail(t("Query"), stringField(input, "query")),
+			...detail(t("Matches"), matches.length > 0 ? matches.join(", ") : undefined),
+		],
+		rawOutputIsError: false,
+	};
+}
+
+function folderAccessPresentation(
+	call: ToolCallBlock | undefined,
+	result: ToolResultBlock | undefined,
+	t: Translator,
+): ToolTranscriptPresentation {
+	const folder =
+		result && !result.isError && jsonValue(result.output) === undefined && !result.output.includes("\n")
+			? result.output.trim()
+			: undefined;
+	return {
+		label: call ? toolLabel(call, t) : t("Requested folder access"),
+		detailLines: detail(t("Folder"), folder),
+		rawOutputIsError: false,
+	};
+}
+
+function internalToolPresentation(
+	name: string,
+	call: ToolCallBlock | undefined,
+	result: ToolResultBlock | undefined,
+	t: Translator,
+): ToolTranscriptPresentation {
+	if (result?.isError) {
+		return {
+			label: internalFailureLabel(name, t),
+			detailLines: detail(undefined, safeShortError(result.output)),
+			rawOutputIsError: false,
+		};
+	}
+	switch (name) {
+		case "set_tasks":
+			return setTasksPresentation(call, result, t);
+		case "ask_user":
+			return askUserPresentation(call, result, t);
+		case "activate_subagents":
+			return { label: t("Activated subagents"), detailLines: [], rawOutputIsError: false };
+		case "spawn_agent":
+			return spawnAgentPresentation(call, result, t);
+		case "inspect_agents":
+			return inspectAgentsPresentation(result, t);
+		case "message_agent":
+			return messageAgentPresentation(call, result, t);
+		case "interrupt_agent":
+			return interruptAgentPresentation(result, t);
+		case "close_agent":
+			return closeAgentPresentation(result, t);
+		case "tool_search":
+			return toolSearchPresentation(call, result, t);
+		default:
+			return folderAccessPresentation(call, result, t);
+	}
+}
+
+export function toolTranscriptPresentation(
+	call: ToolCallBlock | undefined,
+	result: ToolResultBlock | undefined,
+	t: Translator = identity,
+): ToolTranscriptPresentation {
+	const name = call?.name ?? result?.name ?? "tool";
+	const internal = INTERNAL_TOOL_NAMES.has(name) || /request.*(?:directory|folder)|cowork.*directory/iu.test(name);
+	if (internal) {
+		const presentation = internalToolPresentation(name, call, result, t);
+		return result && !result.isError && name !== "activate_subagents" && presentation.detailLines.length === 0
+			? { ...presentation, detailLines: [{ value: t("Details unavailable") }] }
+			: presentation;
+	}
+	return {
+		label: call ? toolLabel(call, t) : t("{{name}} result", { name }),
+		detailLines: [],
+		...(call?.inputPreview ? { rawInput: call.inputPreview } : {}),
+		...(result ? { rawOutput: result.output } : {}),
+		rawOutputIsError: result?.isError ?? false,
+	};
+}
+
 export function actionSummary(calls: readonly ToolCallBlock[], t: Translator = identity): string {
 	const commands = calls.filter((call) => isCommandTool(call.name));
 	const others = calls.length - commands.length;
@@ -144,30 +547,57 @@ export function buildTurnPresentation(items: readonly ItemView[]): TurnPresentat
 			if (block.type === "tool_result") results.set(block.toolCallId, block);
 		}
 	}
-	const activity = items
-		.filter((item) => item.role !== "user")
-		.flatMap((item) => item.content)
-		.filter(
-			(block): block is ThinkingBlock | ToolCallBlock | ToolResultBlock =>
-				block.type === "thinking" ||
-				block.type === "tool_call" ||
-				(block.type === "tool_result" && !callIds.has(block.toolCallId)),
-		);
-	const intermediateText = items.flatMap((item, index) => {
-		if (item.role !== "assistant" || index === finalIndex) return [];
+	const segments: ChatTranscriptSegment[] = [];
+	let activity: (ThinkingBlock | ToolCallBlock | ToolResultBlock)[] = [];
+	let activityCalls: ToolCallBlock[] = [];
+	let intermediateText: TextBlock[] = [];
+	const flushActivity = () => {
+		if (activity.length === 0) return;
+		segments.push({
+			type: "activity",
+			blocks: activity,
+			calls: activityCalls,
+			running: activityCalls.some((call) => call.state === "running" || call.state === "pending"),
+		});
+		activity = [];
+		activityCalls = [];
+	};
+	const flushIntermediateText = () => {
+		if (intermediateText.length === 0) return;
+		segments.push({ type: "intermediate", blocks: intermediateText });
+		intermediateText = [];
+	};
+
+	for (let itemIndex = 0; itemIndex < items.length; itemIndex += 1) {
+		const item = items[itemIndex]!;
+		if (item.role === "user") continue;
 		const thinking = item.content.filter((block): block is ThinkingBlock => block.type === "thinking");
-		return textBlocks(item).filter(
-			(block) => !thinking.some((candidate) => isThinkingEcho(block.text, candidate.text)),
-		);
-	});
+		for (const block of item.content) {
+			if (block.type === "text") {
+				if (itemIndex === finalIndex || thinking.some((candidate) => isThinkingEcho(block.text, candidate.text)))
+					continue;
+				flushActivity();
+				intermediateText.push(block);
+				continue;
+			}
+			if (
+				block.type !== "thinking" &&
+				block.type !== "tool_call" &&
+				(block.type !== "tool_result" || callIds.has(block.toolCallId))
+			)
+				continue;
+			flushIntermediateText();
+			activity.push(block);
+			if (block.type === "tool_call") activityCalls.push(block);
+		}
+	}
+	flushActivity();
+	flushIntermediateText();
 	return {
 		users,
-		activity,
-		intermediateText,
+		segments,
 		final: finalIndex >= 0 ? items[finalIndex] : undefined,
-		calls,
 		results,
-		running: calls.some((call) => call.state === "running" || call.state === "pending"),
 	};
 }
 
@@ -216,7 +646,7 @@ export function buildCodeTurnPresentation(items: readonly ItemView[]): CodeTurnP
 		const answer = itemIndex === finalIndex;
 		const markdown = item.role === "assistant";
 		for (const block of item.content) {
-			if (block.type === "thinking") continue;
+			if (block.type === "thinking" || block.type === "compaction") continue;
 			if (block.type === "tool_call") {
 				flushContent();
 				calls.push(block);

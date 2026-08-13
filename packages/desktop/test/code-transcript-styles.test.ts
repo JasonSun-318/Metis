@@ -44,6 +44,18 @@ describe("Code transcript visual contract", () => {
 		expect(rule(".transcript-code :is(.code-turn-answer, .code-turn-status) h2").fontSize).toBe("1.16em");
 	});
 
+	it("slides the latest user bubble in from the right and respects reduced motion", () => {
+		expect(
+			rule(".turn-user.is-entering .message-user, .transcript-code .code-turn-user.is-entering > div").animation,
+		).toBe("user-message-enter 180ms cubic-bezier(.16, 1, .3, 1) both");
+		expect(css).toContain(
+			"@keyframes user-message-enter { from { opacity: 0; transform: translateX(12px); } to { opacity: 1; transform: none; } }",
+		);
+		expect(css).toContain(
+			".turn-user.is-entering .message-user, .transcript-code .code-turn-user.is-entering > div { animation: none; }",
+		);
+	});
+
 	it("keeps the runtime spinner the same height as its status text", () => {
 		expect(rule(".turn-runtime-status").fontSize).toBe("12px");
 		expect(rule(".turn-runtime-spinner").getPropertyValue("--uib-size")).toBe("1em");

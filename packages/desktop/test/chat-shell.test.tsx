@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import type { ClientResult, ScheduleTaskView, SessionSnapshot, SessionSummary } from "@metis/app-protocol";
+import type { ClientResult, McpServerSummaryView, ScheduleTaskView, SessionSnapshot, SessionSummary } from "@metis/app-protocol";
 import { EditorView } from "@codemirror/view";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
@@ -9,10 +9,9 @@ import {
 	App,
 	firstInteractionForSession,
 	sessionDisplayTitle,
-	titleFromPrompt,
 } from "../src/renderer/components/App.tsx";
 import { buildSessionTree, clampSessionSidebarWidth } from "../src/renderer/components/SessionSidebar.tsx";
-import { SkillsPanel } from "../src/renderer/components/SkillsPanel.tsx";
+import { PluginsPanel } from "../src/renderer/components/PluginsPanel.tsx";
 import { setLocale } from "../src/renderer/i18n.ts";
 import { AppStore } from "../src/renderer/store/app-store.ts";
 import {
@@ -22,6 +21,7 @@ import {
 	setProjectAlias,
 	setProjectPinned,
 } from "../src/renderer/store/project-preferences.ts";
+import { loadSessionPins, saveSessionPins } from "../src/renderer/store/session-pins.ts";
 import type { DesktopUpdateState, MetisDesktopApi } from "../src/shared/desktop-api.ts";
 
 const EPOCH = "11111111-1111-4111-8111-111111111111";
@@ -59,6 +59,31 @@ function scheduledTask(): ScheduleTaskView {
 	};
 }
 
+function mcpServer(
+	state: McpServerSummaryView["state"] = "connected",
+	lastError?: string,
+): McpServerSummaryView {
+	return {
+		name: "deepwiki",
+		scope: "user",
+		effective: true,
+		revision: "a".repeat(64),
+		transport: "http",
+		enabled: true,
+		required: false,
+		url: "https://mcp.deepwiki.com/mcp",
+		disabledTools: [],
+		state,
+		credentialConfigured: false,
+		toolCount: state === "connected" ? 3 : 0,
+		resourceCount: 0,
+		resourceTemplateCount: 0,
+		promptCount: 0,
+		capabilities: state === "connected" ? ["tools"] : [],
+		...(lastError ? { lastError } : {}),
+	};
+}
+
 function snapshot(summary: SessionSummary): SessionSnapshot {
 	return {
 		session: summary,
@@ -73,6 +98,7 @@ function snapshot(summary: SessionSummary): SessionSnapshot {
 		nextBeforeItemId: null,
 		activeTurnId: null,
 		pendingInteractions: [],
+		queuedTurns: [],
 		tasks: [],
 		thinkingSelection: "off",
 		actualThinkingLevel: "off",
@@ -122,6 +148,11 @@ function changeInput(input: HTMLInputElement, value: string) {
 	input.dispatchEvent(new Event("input", { bubbles: true }));
 }
 
+function changeSelect(select: HTMLSelectElement, value: string) {
+	Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")?.set?.call(select, value);
+	select.dispatchEvent(new Event("change", { bubbles: true }));
+}
+
 function codeEditor(container: ParentNode, label: string): EditorView {
 	const content = [...container.querySelectorAll<HTMLElement>(".cm-content")]
 		.find((element) => element.getAttribute("aria-label") === label);
@@ -150,6 +181,7 @@ function createHarness(options: {
 	loseFirstStartResponse?: boolean;
 	scheduleTasks?: readonly ScheduleTaskView[];
 	sessions?: readonly SessionSummary[];
+	mcpLists?: readonly (readonly McpServerSummaryView[])[];
 	updateState?: DesktopUpdateState;
 } = {}) {
 	localStorage.setItem(
@@ -171,6 +203,8 @@ function createHarness(options: {
 	const browserSubscribers = new Set<Parameters<MetisDesktopApi["subscribeBrowser"]>[0]>();
 	const updateSubscribers = new Set<Parameters<MetisDesktopApi["subscribeUpdate"]>[0]>();
 	let updateState = options.updateState ?? { status: "unavailable" as const };
+	let mcpListIndex = 0;
+	const mcpLists = options.mcpLists ?? [[mcpServer()]];
 	const api = {
 		getServerState: vi.fn().mockResolvedValue({ state: "ready", serverEpoch: EPOCH, restartAttempt: 0, failure: null }),
 		listSessions: vi.fn(async () => {
@@ -184,6 +218,15 @@ function createHarness(options: {
 				{ name: "project-helper", description: "Inspect this project", source: "project" },
 			],
 		}),
+		listMcpServers: vi.fn(async () => ({
+			servers: mcpLists[Math.min(mcpListIndex++, mcpLists.length - 1)] ?? [],
+		})),
+		getSkill: vi.fn(),
+		upsertSkill: vi.fn(),
+		removeSkill: vi.fn(),
+		inspectSkillImport: vi.fn(),
+		importSkills: vi.fn(),
+		openSkillFolder: vi.fn(),
 		getProfile: vi.fn().mockResolvedValue({
 			generatedAt: "2026-08-01T12:00:00.000Z",
 			totalTokens: 1200,
@@ -407,8 +450,25 @@ function createHarness(options: {
 			return {};
 		}),
 		steerTurn: vi.fn().mockResolvedValue({}),
+		queueTurn: vi.fn().mockResolvedValue({}),
+		updateQueuedTurn: vi.fn().mockResolvedValue({}),
+		deleteQueuedTurn: vi.fn().mockResolvedValue({}),
+		sendQueuedTurn: vi.fn().mockResolvedValue({}),
 		interruptTurn: vi.fn().mockResolvedValue({}),
 		readItems: vi.fn().mockResolvedValue({ items: [], nextBeforeItemId: null }),
+		getSessionStatus: vi.fn(async ({ sessionId }) => ({
+			sessionId,
+			mode: "code" as const,
+			contextTokens: 64_000,
+			contextWindow: 128_000,
+			remainingPercent: 50,
+			cacheHitPercent: 25,
+		})),
+		compactSession: vi.fn(async ({ sessionId }) => ({
+			sessionId,
+			tokensBefore: 64_000,
+			estimatedTokensAfter: 8_000,
+		})),
 		readSubagentItems: vi.fn().mockResolvedValue({ items: [], nextBeforeItemId: null }),
 		interruptSubagent: vi.fn().mockResolvedValue({}),
 		setThinkingSelection: vi.fn().mockResolvedValue({}),
@@ -627,7 +687,7 @@ describe("Chat desktop shell", () => {
 		await act(async () => root.render(<App api={api} store={new AppStore()} />));
 		await flush();
 
-		await act(async () => button(container, "Metis").click());
+		await act(async () => button(container, "Metis User").click());
 		expect(document.activeElement?.textContent).toBe("Settings");
 		await act(async () => button(container, "Settings").click());
 		await flush();
@@ -795,18 +855,16 @@ describe("Chat desktop shell", () => {
 		});
 	});
 
-	it("uses mode-specific project labels while requesting shared cwd Skills", async () => {
+	it("requests Plugin Skills through the active task runtime", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 		const store = new AppStore();
 		store.setSessions({
 			sessions: [
 				session("chat-shared", "chat", "/work/shared", "Chat"),
-				session("code-shared", "code", "/work/shared", "Code"),
+				session("code-other", "code", "/work/other", "Code"),
 			],
 			nextAfterSessionId: null,
 		});
-		let preferences = setProjectAlias(new Map(), "chat", "/work/shared", "Chat label");
-		preferences = setProjectAlias(preferences, "code", "/work/shared", "Code label");
 		const listSkills = vi.fn().mockResolvedValue({
 			skills: [{ name: "shared", description: "Shared", source: "project" }],
 		});
@@ -815,41 +873,15 @@ describe("Chat desktop shell", () => {
 		document.body.append(container);
 		const root = createRoot(container);
 		await act(async () => root.render(
-			<SkillsPanel api={skillApi} preferences={preferences} serverReady state={store.getSnapshot()} />,
+			<PluginsPanel api={skillApi} preferences={new Map()} serverReady state={{ ...store.getSnapshot(), activeSessionId: "chat-shared" }} />,
 		));
-
-		await act(async () => button(container, "Project").click());
-		await act(async () => button(container, "Chat").click());
-		await act(async () => button(container, "Chat label").click());
 		await flush();
-		expect(listSkills).toHaveBeenLastCalledWith({ cwd: "/work/shared" });
-		preferences = setProjectAlias(preferences, "chat", "/work/shared", "Renamed Chat label");
+		expect(listSkills).toHaveBeenLastCalledWith({ sessionId: "chat-shared" });
 		await act(async () => root.render(
-			<SkillsPanel api={skillApi} preferences={preferences} serverReady state={store.getSnapshot()} />,
-		));
-		expect(container.textContent).toContain("Renamed Chat label");
-		store.setSessions({
-			sessions: [session("code-shared", "code", "/work/shared", "Code")],
-			nextAfterSessionId: null,
-		});
-		await act(async () => root.render(
-			<SkillsPanel api={skillApi} preferences={preferences} serverReady state={store.getSnapshot()} />,
+			<PluginsPanel api={skillApi} preferences={new Map()} serverReady state={{ ...store.getSnapshot(), activeSessionId: "code-other" }} />,
 		));
 		await flush();
-		expect(container.textContent).toContain("No Chat projects yet.");
-		store.setSessions({
-			sessions: [
-				session("chat-shared", "chat", "/work/shared", "Chat"),
-				session("code-shared", "code", "/work/shared", "Code"),
-			],
-			nextAfterSessionId: null,
-		});
-		await act(async () => button(container, "Skills").click());
-		await act(async () => button(container, "Project").click());
-		await act(async () => button(container, "Code").click());
-		await act(async () => button(container, "Code label").click());
-		await flush();
-		expect(listSkills).toHaveBeenLastCalledWith({ cwd: "/work/shared" });
+		expect(listSkills).toHaveBeenLastCalledWith({ sessionId: "code-other" });
 		expect(listSkills).toHaveBeenCalledTimes(2);
 		await act(async () => root.unmount());
 	});
@@ -905,11 +937,8 @@ describe("Chat desktop shell", () => {
 		await act(async () => changeTextarea(textarea, "Inspect this project"));
 		await act(async () => textarea.form!.requestSubmit());
 		await flush();
-		expect(api.renameSession).toHaveBeenCalledWith(expect.objectContaining({
-			sessionId: "chat-created",
-			name: "Inspect this project",
-		}));
-		expect(order).toEqual(["rename", "list", "start"]);
+		expect(api.renameSession).not.toHaveBeenCalled();
+		expect(order).toEqual(["start"]);
 		expect(api.startTurn).toHaveBeenCalledWith(expect.objectContaining({
 			sessionId: "chat-created",
 			text: "Inspect this project",
@@ -917,12 +946,11 @@ describe("Chat desktop shell", () => {
 		await act(async () => root.unmount());
 	});
 
-	it("starts an unnamed session turn even when automatic display naming fails", async () => {
+	it("submits an unnamed session without renderer-side naming", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 		const unnamed = session("chat-unnamed", "chat", "/work/chat-project");
 		localStorage.setItem("metis.activeSessionId.chat", unnamed.sessionId);
 		const { api } = createHarness({ sessions: [unnamed] });
-		vi.mocked(api.renameSession).mockRejectedValueOnce(new Error("rename unavailable"));
 		const container = document.createElement("div");
 		document.body.append(container);
 		const root = createRoot(container);
@@ -932,10 +960,7 @@ describe("Chat desktop shell", () => {
 		await act(async () => changeTextarea(textarea, "Keep the turn"));
 		await act(async () => textarea.form!.requestSubmit());
 		await flush();
-		expect(api.renameSession).toHaveBeenCalledWith(expect.objectContaining({
-			sessionId: unnamed.sessionId,
-			name: "Keep the turn",
-		}));
+		expect(api.renameSession).not.toHaveBeenCalled();
 		expect(api.startTurn).toHaveBeenCalledWith(expect.objectContaining({
 			sessionId: unnamed.sessionId,
 			text: "Keep the turn",
@@ -982,7 +1007,7 @@ describe("Chat desktop shell", () => {
 		expect(retainedRow.querySelector(".session-scheduled-badge")).toBeNull();
 		expect(container.querySelector(".loose-tasks")?.textContent ?? "").not.toContain("检查桌面文件");
 		await act(async () => button(retainedRow, "Actions for 检查桌面文件").click());
-		expect([...document.body.querySelectorAll(".session-action-menu [role=menuitem]")].map((item) => item.textContent?.trim())).toEqual(["Delete"]);
+		expect([...document.body.querySelectorAll(".session-action-menu [role=menuitem]")].map((item) => item.textContent?.trim())).toEqual(["Pin", "Delete"]);
 		await act(async () => button(document.body, "Delete").click());
 		await flush();
 		await act(async () => button(container, "Move to Trash").click());
@@ -1040,7 +1065,14 @@ describe("Chat desktop shell", () => {
 
 		let otherRow = button(container, "Other task").closest<HTMLElement>(".session-row")!;
 		await act(async () => button(otherRow, "Actions for Other task").click());
-		expect([...document.body.querySelectorAll(".session-action-menu [role=menuitem]")].map((item) => item.textContent?.trim())).toEqual(["Rename", "Delete"]);
+		expect([...document.body.querySelectorAll(".session-action-menu [role=menuitem]")].map((item) => item.textContent?.trim())).toEqual(["Pin", "Rename", "Delete"]);
+		await act(async () => button(document.body, "Pin").click());
+		expect(button(container, "Pinned")).toBeTruthy();
+		otherRow = button(container, "Other task").closest<HTMLElement>(".session-row")!;
+		await act(async () => button(otherRow, "Actions for Other task").click());
+		await act(async () => button(document.body, "Unpin").click());
+		otherRow = button(container, "Other task").closest<HTMLElement>(".session-row")!;
+		await act(async () => button(otherRow, "Actions for Other task").click());
 		await act(async () => button(document.body, "Rename").click());
 		await flush();
 		const input = container.querySelector<HTMLInputElement>("#session-rename-input")!;
@@ -1063,6 +1095,10 @@ describe("Chat desktop shell", () => {
 		expect(container.querySelector('[data-active-session-id="chat-session-active"]')).not.toBeNull();
 
 		const runningRow = button(container, "Running task").closest<HTMLElement>(".session-row")!;
+		const runningButton = button(runningRow, "Running task");
+		expect(runningButton.getAttribute("aria-busy")).toBe("true");
+		expect(runningButton.querySelector(".session-button-title i.running")).not.toBeNull();
+		expect(runningButton.querySelector("small")).toBeNull();
 		await act(async () => button(runningRow, "Actions for Running task").click());
 		expect(button(document.body, "Delete").disabled).toBe(true);
 		await act(async () => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
@@ -1075,6 +1111,120 @@ describe("Chat desktop shell", () => {
 		await flush();
 		expect(container.textContent).toContain("What can I take off your plate?");
 		expect(localStorage.getItem("metis.activeSessionId.chat")).toBeNull();
+		await act(async () => root.unmount());
+	});
+
+	it("shows outcome notifications only until the user views that session", async () => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		const active = { ...session("chat-active", "chat", "/work/shared", "Active task"), unread: true, lastTurnOutcome: "completed" as const };
+		const completed = {
+			...session("chat-completed", "chat", "/work/shared", "Completed task"),
+			state: "running" as const,
+			unread: true,
+			lastTurnOutcome: "completed" as const,
+		};
+		const failed = { ...session("chat-failed", "chat", "/work/shared", "Failed task"), unread: true, lastTurnOutcome: "failed" as const };
+		const read = { ...session("chat-read", "chat", "/work/shared", "Read task"), lastTurnOutcome: "completed" as const };
+		const attention = {
+			...session("chat-attention", "chat", "/work/shared", "Attention task"),
+			state: "running" as const,
+			unread: true,
+			lastTurnOutcome: "failed" as const,
+			attentionRequired: true,
+		};
+		localStorage.setItem("metis.activeSessionId.chat", active.sessionId);
+		const { api } = createHarness({ sessions: [active, completed, failed, read, attention] });
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<App api={api} store={new AppStore()} />));
+		await flush();
+
+		expect(button(container, "Active task").querySelector("i.completed")).toBeNull();
+		expect(button(container, "Read task").querySelector("i.completed")).toBeNull();
+		expect(button(container, "Completed task").querySelector("i.completed")).not.toBeNull();
+		expect(button(container, "Failed task").querySelector("i.failed")).not.toBeNull();
+		const attentionButton = button(container, "Attention task");
+		expect(attentionButton.querySelector("i.attention")).not.toBeNull();
+		expect(attentionButton.getAttribute("aria-busy")).toBe("true");
+
+		await act(async () => button(container, "Completed task").click());
+		await flush();
+		expect(api.markSessionRead).toHaveBeenCalledWith({ sessionId: completed.sessionId });
+		expect(button(container, "Completed task").querySelector("i.completed")).toBeNull();
+		await act(async () => button(container, "Failed task").click());
+		await flush();
+		expect(button(container, "Completed task").querySelector("i.completed")).toBeNull();
+
+		await act(async () => root.unmount());
+	});
+
+	it("edits the active title inline and exposes the header session actions", async () => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		const active = session("chat-header-actions", "chat", "/work/shared", "Active task");
+		localStorage.setItem("metis.activeSessionId.chat", active.sessionId);
+		const { api } = createHarness({ sessions: [active] });
+		const container = document.createElement("div");
+		document.body.append(container);
+		let root = createRoot(container);
+		await act(async () => root.render(<App api={api} store={new AppStore()} />));
+		await flush();
+
+		let header = container.querySelector<HTMLElement>(".workspace-header")!;
+		await act(async () => button(header, "Active task").click());
+		let input = header.querySelector<HTMLInputElement>('input[aria-label="Session name"]')!;
+		expect(input.value).toBe("Active task");
+		await act(async () => {
+			input.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+		});
+		expect(api.renameSession).not.toHaveBeenCalled();
+
+		await act(async () => button(header, "Active task").click());
+		input = header.querySelector<HTMLInputElement>('input[aria-label="Session name"]')!;
+		await act(async () => changeInput(input, "Renamed active task"));
+		await act(async () => input.form!.requestSubmit());
+		await flush();
+		expect(api.renameSession).toHaveBeenCalledWith(expect.objectContaining({
+			sessionId: active.sessionId,
+			name: "Renamed active task",
+		}));
+
+		await act(async () => button(header, "Actions for Renamed active task").click());
+		expect([...document.body.querySelectorAll(".session-action-menu [role=menuitem]")].map((item) => item.textContent?.trim())).toEqual([
+			"Pin",
+			"Copy title",
+			"Delete",
+		]);
+		await act(async () => button(document.body, "Pin").click());
+		const pinnedSection = button(container, "Pinned").closest<HTMLElement>(".session-section")!;
+		expect(pinnedSection.textContent).toContain("Renamed active task");
+		expect([...container.querySelectorAll<HTMLButtonElement>(".session-button")].filter((candidate) => candidate.getAttribute("aria-label") === "Renamed active task")).toHaveLength(1);
+		const pinnedProject = projectRow(container, "/work/shared");
+		expect(button(pinnedProject, "New task in shared")).not.toBeNull();
+		expect(localStorage.getItem("metis.sessionPins.v1")).toBe(
+			'{"version":1,"sessionIds":["chat-header-actions"]}',
+		);
+
+		await act(async () => root.unmount());
+		root = createRoot(container);
+		await act(async () => root.render(<App api={api} store={new AppStore()} />));
+		await flush();
+		header = container.querySelector<HTMLElement>(".workspace-header")!;
+		expect(button(container, "Pinned")).toBeTruthy();
+		await act(async () => button(header, "Actions for Renamed active task").click());
+		expect(button(document.body, "Unpin")).toBeTruthy();
+		await act(async () => button(document.body, "Unpin").click());
+		expect([...container.querySelectorAll<HTMLButtonElement>(".session-section-heading")].some((candidate) => candidate.textContent?.trim() === "Pinned")).toBe(false);
+		expect(projectRow(container, "/work/shared").textContent).toContain("Renamed active task");
+
+		await act(async () => button(header, "Actions for Renamed active task").click());
+		await act(async () => button(document.body, "Copy title").click());
+		expect(api.writeClipboardText).toHaveBeenCalledWith({ text: "Renamed active task" });
+
+		await act(async () => button(header, "Actions for Renamed active task").click());
+		await act(async () => button(document.body, "Delete").click());
+		expect(container.querySelector(".project-dialog")?.textContent).toContain("Delete session?");
+		await act(async () => button(container, "Cancel").click());
 		await act(async () => root.unmount());
 	});
 
@@ -1201,6 +1351,7 @@ describe("Chat desktop shell", () => {
 		preferences = setProjectPinned(preferences, "chat", "/work/shared", true);
 		preferences = setProjectAlias(preferences, "code", "/work/shared", "Code local");
 		saveProjectPreferences(localStorage, preferences);
+		saveSessionPins(localStorage, new Set([chatActive.sessionId, chatArchived.sessionId, code.sessionId]));
 		localStorage.setItem("metis.activeSessionId.chat", chatActive.sessionId);
 		const { api } = createHarness({ sessions: [chatActive, chatArchived, code] });
 		vi.mocked(api.previewProjectDelete)
@@ -1258,6 +1409,7 @@ describe("Chat desktop shell", () => {
 		expect([...loadProjectPreferences(localStorage).values()]).toEqual([
 			{ mode: "code", cwd: "/work/shared", alias: "Code local", pinned: false },
 		]);
+		expect(loadSessionPins(localStorage)).toEqual(new Set([code.sessionId]));
 		await act(async () => button(container, "Code").click());
 		await flush();
 		expect(container.textContent).toContain("Code local");
@@ -1349,11 +1501,6 @@ describe("Chat desktop shell", () => {
 		await act(async () => root.unmount());
 	});
 
-	it("builds a compact Unicode-safe title from the first prompt", () => {
-		expect(titleFromPrompt("  分析这个项目\n carefully  ")).toBe("分析这个项目 carefully");
-		expect(titleFromPrompt("🚀".repeat(49))).toBe(`${"🚀".repeat(47)}…`);
-	});
-
 	it("never exposes the managed workspace path as the session title", () => {
 		expect(sessionDisplayTitle({ cwd: "/Users/example/.metis/agent/workspaces/session-id", cwdOrigin: "managed", name: "" })).toBe("Chat");
 		expect(sessionDisplayTitle({ cwd: "/work/project", cwdOrigin: "user-selected", name: "" })).toBe("/work/project");
@@ -1423,10 +1570,13 @@ describe("Chat desktop shell", () => {
 							omittedRows: 0,
 							scopeComplete: true,
 							irreversible: true,
+							executionTarget: "sandbox",
+							rememberProjectEligible: true,
 						},
 						choices: [
-							{ id: "choice:0", label: "Allow once" },
-							{ id: "choice:1", label: "Deny" },
+							{ id: "permission:allow-once", label: "Allow once" },
+							{ id: "permission:always-project", label: "Always allow for this project" },
+							{ id: "permission:deny", label: "Reject" },
 						],
 					},
 				},
@@ -1443,13 +1593,18 @@ describe("Chat desktop shell", () => {
 		expect(panel.textContent).toContain("rm cache.tmp");
 		expect(panel.textContent).toContain("Working directory");
 		expect(panel.textContent).toContain("/tmp/work");
+		expect(panel.textContent).toContain("workspace sandbox");
+		expect(panel.textContent).toContain("Always allow for this project");
+		expect(panel.querySelector(".permission-approval-complete-details")?.textContent).toContain(
+			"Remove the generated cache.",
+		);
 		expect(panel.textContent).not.toContain("Arguments:");
 		await act(async () => button(panel, "Allow once").click());
 		await flush();
 		expect(api.respondToInteraction).toHaveBeenCalledWith({
 			interactionId: "00000000-0000-4000-8000-000000000204",
 			kind: "select",
-			choiceId: "choice:0",
+			choiceId: "permission:allow-once",
 		});
 		expect(container.querySelector(".permission-approval-panel")).toBeNull();
 		await act(async () => root.unmount());
@@ -1533,6 +1688,9 @@ describe("Chat desktop shell", () => {
 		expect(api.createSession).not.toHaveBeenCalled();
 		expect(button(container, "New task").getAttribute("aria-current")).toBe("page");
 		expect(container.querySelector('.session-button[aria-current="page"]')).toBeNull();
+		expect(container.querySelector(".new-task-home")).not.toBeNull();
+		expect(container.querySelector('[aria-label="Show tools sidebar"]')).toBeNull();
+		expect(container.querySelector(".tool-sidebar:not([hidden])")).toBeNull();
 
 		await act(async () => button(container, "Work in a project or folder").click());
 		await flush();
@@ -1550,13 +1708,14 @@ describe("Chat desktop shell", () => {
 		expect(api.createSession).toHaveBeenCalledWith(expect.objectContaining({
 			mode: "chat",
 			cwd: "/work/selected-project",
-			name: "Analyze this repository carefully",
 		}));
+		expect(vi.mocked(api.createSession).mock.calls[0]![0]).not.toHaveProperty("name");
 		expect(api.startTurn).toHaveBeenCalledWith(expect.objectContaining({
 			sessionId: "chat-created",
 			text: "Analyze this repository\ncarefully",
 		}));
 		expect(order).toEqual(["create", "list", "open", "start"]);
+		expect(container.querySelector('[aria-label="Show tools sidebar"]')).not.toBeNull();
 
 		await act(async () => root.unmount());
 	});
@@ -1582,9 +1741,9 @@ describe("Chat desktop shell", () => {
 		const createInput = vi.mocked(api.createSession).mock.calls[0]![0];
 		expect(createInput).toMatchObject({
 			mode: "chat",
-			name: "Start without a folder",
 		});
 		expect(createInput).not.toHaveProperty("cwd");
+		expect(createInput).not.toHaveProperty("name");
 		expect(api.startTurn).toHaveBeenCalledTimes(1);
 		await act(async () => root.unmount());
 	});
@@ -1601,7 +1760,7 @@ describe("Chat desktop shell", () => {
 		const leading = container.querySelector(".composer-leading")!;
 		expect(leading.children[0]?.classList.contains("composer-add")).toBe(true);
 		expect(leading.children[1]?.classList.contains("permission-selector")).toBe(true);
-		const trigger = button(container, "Select permissions, current Ask");
+		const trigger = button(container, "Select permissions, current Auto");
 		await act(async () => trigger.click());
 		expect(container.querySelector('[role="menu"]')).not.toBeNull();
 		await act(async () => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" })));
@@ -1644,7 +1803,7 @@ describe("Chat desktop shell", () => {
 		await act(async () => menuOption(container, "Full access").click());
 		const pendingTrigger = button(container, "Select permissions, current Ask");
 		expect(pendingTrigger.disabled).toBe(true);
-		for (const label of ["Chat", "Code", "New task", "Skills", "Chat project task"]) {
+		for (const label of ["Chat", "Code", "New task", "Plugins", "Chat project task"]) {
 			expect(button(container, label).disabled, label).toBe(false);
 		}
 
@@ -1706,6 +1865,7 @@ describe("Chat desktop shell", () => {
 		expect(store.getSnapshot().sessionsById.has("code-existing")).toBe(false);
 		expect(localStorage.getItem("metis.activeSessionId.chat")).toBeNull();
 		expect(container.querySelector(".new-task-home")).not.toBeNull();
+		expect(container.querySelector(".new-task-side-rays")).not.toBeNull();
 		await act(async () => root.unmount());
 	});
 
@@ -1812,6 +1972,47 @@ describe("Chat desktop shell", () => {
 		await act(async () => root.unmount());
 	});
 
+	it("preserves a completion notification while switching away from the session", async () => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		const active = session("chat-active", "chat", "/work/shared", "Active task");
+		const next = session("chat-next", "chat", "/work/shared", "Next task");
+		localStorage.setItem("metis.activeSessionId.chat", active.sessionId);
+		const { api, emitEvent } = createHarness({ sessions: [active, next] });
+		const store = new AppStore();
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<App api={api} store={store} />));
+		await flush();
+
+		let resolveOpen!: (value: SessionSnapshot) => void;
+		vi.mocked(api.openSession).mockImplementationOnce(() => new Promise((resolve) => {
+			resolveOpen = resolve;
+		}));
+		act(() => button(container, "Next task").click());
+		await act(async () => resolveOpen(snapshot(next)));
+		await act(async () => emitEvent({
+			type: "app-server",
+			envelope: {
+				jsonrpc: "2.0",
+				method: "connection/events",
+				params: {
+					serverEpoch: EPOCH,
+					fromCursor: 3,
+					toCursor: 3,
+					events: [{
+						type: "session/updated",
+						session: { ...active, unread: true, lastTurnOutcome: "completed" },
+					}],
+				},
+			},
+		}));
+
+		expect(api.markSessionRead).not.toHaveBeenCalled();
+		expect(button(container, "Active task").querySelector("i.completed")).not.toBeNull();
+		await act(async () => root.unmount());
+	});
+
 	it("resnapshots the real permission after a partial downgrade failure", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
@@ -1828,7 +2029,7 @@ describe("Chat desktop shell", () => {
 		await flush();
 
 		await act(async () => button(container, "Select permissions, current Full").click());
-		await act(async () => menuOption(container, "Ask before changes").click());
+		await act(async () => menuOption(container, "Ask before every change").click());
 		await flush();
 		await flush();
 
@@ -2005,6 +2206,116 @@ describe("Chat desktop shell", () => {
 		await act(async () => root.unmount());
 	});
 
+	it("routes slash commands to existing controls and the session status panel", async () => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
+		const { api } = createHarness();
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<App api={api} store={new AppStore()} />));
+		await flush();
+		const textarea = container.querySelector("textarea")!;
+		const run = async (command: string) => {
+			await act(async () => changeTextarea(textarea, `/${command}`));
+			const option = [...container.querySelectorAll<HTMLButtonElement>('[role="option"]')]
+				.find((candidate) => candidate.querySelector("strong")?.textContent === `/${command}`)!;
+			await act(async () => option.click());
+			await flush();
+		};
+
+		await run("status");
+		expect(api.getSessionStatus).toHaveBeenCalledWith({ sessionId: "chat-existing" });
+		expect(container.querySelector(".session-status-panel")?.textContent).toContain("64,000 / 128,000");
+		expect(container.querySelector(".session-status-panel")?.textContent).toContain("Cache hit rate25%");
+
+		await run("model");
+		expect(container.querySelector(".session-status-panel")).toBeNull();
+		expect(container.querySelector('.model-selector-popover[role="menu"]')).not.toBeNull();
+		await run("thinking");
+		expect(container.querySelector(".model-selector-popover")).toBeNull();
+		expect(container.querySelector(".effort-popover")).not.toBeNull();
+		await run("mcp");
+		expect(container.querySelector(".effort-popover")).toBeNull();
+		expect(container.querySelector(".composer-mcp-menu")?.textContent).toContain("deepwiki");
+		await act(async () => root.unmount());
+	});
+
+	it("shows compacting progress, disables the composer, and projects the persisted divider", async () => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
+		const { api, emitEvent } = createHarness();
+		let resolveCompact!: (result: ClientResult<"session/compact">) => void;
+		vi.mocked(api.compactSession).mockImplementationOnce(() => new Promise((resolve) => {
+			resolveCompact = resolve;
+		}));
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<App api={api} store={new AppStore()} />));
+		await flush();
+		const textarea = container.querySelector("textarea")!;
+		await act(async () => changeTextarea(textarea, "/compact"));
+		const option = [...container.querySelectorAll<HTMLButtonElement>('[role="option"]')]
+			.find((candidate) => candidate.querySelector("strong")?.textContent === "/compact")!;
+		await act(async () => option.click());
+		expect(api.compactSession).toHaveBeenCalledWith(expect.objectContaining({ sessionId: "chat-existing" }));
+		expect(container.querySelector('[aria-label="Compacting conversation…"]')).not.toBeNull();
+		expect(textarea.disabled).toBe(true);
+
+		await act(async () => resolveCompact({ sessionId: "chat-existing", tokensBefore: 64_000, estimatedTokensAfter: 8_000 }));
+		await flush();
+		expect(container.querySelector('[aria-label="Compacting conversation…"]')).toBeNull();
+		expect(textarea.disabled).toBe(false);
+		await act(async () => emitEvent({
+			type: "app-server",
+			envelope: {
+				jsonrpc: "2.0",
+				method: "connection/events",
+				params: {
+					serverEpoch: EPOCH,
+					fromCursor: 1,
+					toCursor: 1,
+					events: [{
+						type: "item/completed",
+						item: {
+							itemId: "compaction-1",
+							sessionId: "chat-existing",
+							role: "system",
+							state: "completed",
+							content: [{ type: "compaction" }],
+							createdAt: "2026-08-13T00:00:00.000Z",
+							completedAt: "2026-08-13T00:00:00.000Z",
+						},
+					}],
+				},
+			},
+		}));
+		expect(container.querySelector(".transcript-compaction-row")?.textContent).toBe("Compacted");
+		await act(async () => root.unmount());
+	});
+
+	it("reports failed compaction without adding a false divider", async () => {
+		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
+		const { api } = createHarness();
+		vi.mocked(api.compactSession).mockRejectedValueOnce(new Error("Nothing to compact"));
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<App api={api} store={new AppStore()} />));
+		await flush();
+		const textarea = container.querySelector("textarea")!;
+		await act(async () => changeTextarea(textarea, "/compact"));
+		const option = [...container.querySelectorAll<HTMLButtonElement>('[role="option"]')]
+			.find((candidate) => candidate.querySelector("strong")?.textContent === "/compact")!;
+		await act(async () => option.click());
+		await flush();
+		expect(container.querySelector('[role="alert"]')?.textContent).toContain("Nothing to compact");
+		expect(container.querySelector(".transcript-compaction-row")).toBeNull();
+		expect(textarea.disabled).toBe(false);
+		await act(async () => root.unmount());
+	});
+
 	it("reports a failed interrupt without leaving an unhandled rejection", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
@@ -2025,17 +2336,90 @@ describe("Chat desktop shell", () => {
 
 		const textarea = container.querySelector("textarea")!;
 		expect(button(container, "Stop task")).toBeTruthy();
-		expect(container.querySelector('[aria-label="Steer task"]')).toBeNull();
+		expect(container.querySelector('[aria-label="Queue message"]')).toBeNull();
 		await act(async () => changeTextarea(textarea, "Follow up"));
 		expect(container.querySelector('[aria-label="Stop task"]')).toBeNull();
-		expect(button(container, "Steer task").disabled).toBe(false);
+		expect(button(container, "Queue message").disabled).toBe(false);
 		await act(async () => changeTextarea(textarea, ""));
-		expect(container.querySelector('[aria-label="Steer task"]')).toBeNull();
+		expect(container.querySelector('[aria-label="Queue message"]')).toBeNull();
 		await act(async () => button(container, "Stop task").click());
 		await flush();
 
 		expect(api.interruptTurn).toHaveBeenCalledWith(expect.objectContaining({ sessionId: "chat-existing" }));
 		expect(container.textContent).toContain("interrupt failed");
+		await act(async () => root.unmount());
+	});
+
+	it("queues a running-task message, then edits and promotes it as guidance", async () => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
+		const { api, emitEvent } = createHarness();
+		const running = { ...session("chat-existing", "chat", "/work/chat-project", "Chat project task"), state: "running" as const };
+		vi.mocked(api.openSession).mockResolvedValueOnce({
+			...snapshot(running),
+			activeTurnId: "turn-running",
+		});
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<App api={api} store={new AppStore()} />));
+		await flush();
+
+		const textarea = container.querySelector<HTMLTextAreaElement>("#composer-input")!;
+		await act(async () => changeTextarea(textarea, "Check the failing test next"));
+		await act(async () => button(container, "Queue message").click());
+		await flush();
+		expect(api.queueTurn).toHaveBeenCalledWith(expect.objectContaining({
+			sessionId: "chat-existing",
+			text: "Check the failing test next",
+		}));
+		expect(api.steerTurn).not.toHaveBeenCalled();
+		expect(textarea.value).toBe("");
+
+		await act(async () => emitEvent({
+			type: "app-server",
+			envelope: {
+				jsonrpc: "2.0",
+				method: "connection/events",
+				params: {
+					serverEpoch: EPOCH,
+					fromCursor: 1,
+					toCursor: 1,
+					events: [{
+						type: "turn/queueChanged",
+						sessionId: "chat-existing",
+						queuedTurns: [{
+							queueItemId: "queue-1",
+							revision: "revision-1",
+							state: "queued",
+							text: "Check the failing test next",
+							attachments: [],
+						}],
+					}],
+				},
+			},
+		}));
+		expect(container.querySelector(".queued-turn-text")?.textContent).toBe("Check the failing test next");
+
+		await act(async () => button(container, "Queued message actions").click());
+		await act(async () => button(document.body, "Edit").click());
+		const editor = container.querySelector<HTMLTextAreaElement>(".queued-turn-editor textarea")!;
+		await act(async () => changeTextarea(editor, "Inspect the reducer first"));
+		await act(async () => button(container, "Save").click());
+		await flush();
+		expect(api.updateQueuedTurn).toHaveBeenCalledWith(expect.objectContaining({
+			queueItemId: "queue-1",
+			expectedRevision: "revision-1",
+			text: "Inspect the reducer first",
+		}));
+
+		await act(async () => button(container, "Guide").click());
+		await flush();
+		expect(api.sendQueuedTurn).toHaveBeenCalledWith(expect.objectContaining({
+			queueItemId: "queue-1",
+			expectedRevision: "revision-1",
+			delivery: "steer",
+		}));
 		await act(async () => root.unmount());
 	});
 
@@ -2114,7 +2498,67 @@ describe("Chat desktop shell", () => {
 		await act(async () => add().click());
 		await act(async () => button(container.querySelector<HTMLElement>(".composer-add-menu")!, "Skills").click());
 		await act(async () => button(container.querySelector<HTMLElement>(".composer-skill-menu")!, "Manage skills").click());
-		expect(container.textContent).toContain("Skills included with Metis");
+		expect(container.textContent).toContain("Plugins");
+		expect(container.textContent).toContain("pdf");
+		await act(async () => root.unmount());
+	});
+
+	it("shows connected MCP servers in the add menu and opens MCP management", async () => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
+		const { api } = createHarness();
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<App api={api} store={new AppStore()} />));
+		await flush();
+
+		await act(async () => button(container, "Add to message").click());
+		await act(async () => button(container.querySelector<HTMLElement>(".composer-add-menu")!, "MCP").click());
+		expect(container.querySelector(".composer-mcp-menu")?.textContent).toContain("deepwiki");
+		await act(async () => button(container.querySelector<HTMLElement>(".composer-mcp-menu")!, "Manage MCP").click());
+		await flush();
+
+		expect(button(container, "MCP").getAttribute("aria-selected")).toBe("true");
+		expect(container.querySelector('[aria-label="Search MCP servers"]')).not.toBeNull();
+		await act(async () => root.unmount());
+	});
+
+	it("polls MCP only while it is connecting", async () => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
+		const { api } = createHarness({
+			mcpLists: [[mcpServer("connecting")], [mcpServer("connected")]],
+		});
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<App api={api} store={new AppStore()} />));
+		await flush();
+
+		expect(container.querySelector('[role="status"]')?.textContent).toContain("MCP connecting");
+		await act(async () => new Promise((resolve) => setTimeout(resolve, 550)));
+		expect(vi.mocked(api.listMcpServers)).toHaveBeenCalledTimes(2);
+		expect(container.textContent).not.toContain("MCP connecting");
+		await act(async () => new Promise((resolve) => setTimeout(resolve, 550)));
+		expect(vi.mocked(api.listMcpServers)).toHaveBeenCalledTimes(2);
+		await act(async () => root.unmount());
+	});
+
+	it("links MCP failures to management", async () => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
+		const { api } = createHarness({ mcpLists: [[mcpServer("reconnecting", "offline")]] });
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<App api={api} store={new AppStore()} />));
+		await flush();
+
+		expect(container.textContent).toContain("MCP connection failed");
+		await act(async () => button(container, "MCP connection failed").click());
+		await flush();
+		expect(button(container, "MCP").getAttribute("aria-selected")).toBe("true");
 		await act(async () => root.unmount());
 	});
 
@@ -2255,7 +2699,7 @@ describe("Chat desktop shell", () => {
 		expect(drawer.hasAttribute("inert")).toBe(true);
 		expect(api.openSession).not.toHaveBeenCalled();
 		expect(group.querySelector('.session-button[aria-current="page"]')).toBeNull();
-		await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Show tools sidebar"]')!.click());
+		await act(async () => button(container, "Metis User").click());
 		expect(container.querySelector(".project-heading")?.getAttribute("aria-expanded")).toBe("false");
 		expect(drawer.querySelectorAll(".session-button")).toHaveLength(sessionCount);
 
@@ -2298,7 +2742,7 @@ describe("Chat desktop shell", () => {
 		expect(container.textContent).toContain("open failed once");
 		expect(textarea.value).toBe("Keep this draft");
 		expect(api.createSession).toHaveBeenCalledTimes(1);
-		expect(button(container, "Select permissions, current Ask").disabled).toBe(true);
+		expect(button(container, "Select permissions, current Auto").disabled).toBe(true);
 		await act(async () => textarea.form!.requestSubmit());
 		await flush();
 		await flush();
@@ -2404,7 +2848,7 @@ describe("Chat desktop shell", () => {
 		await flush();
 		expect(container.textContent).toContain("create response lost");
 		expect(textarea.value).toBe("Retry the same create");
-		expect(button(container, "Select permissions, current Ask").disabled).toBe(true);
+		expect(button(container, "Select permissions, current Auto").disabled).toBe(true);
 
 		await act(async () => textarea.form!.requestSubmit());
 		await flush();
@@ -2507,7 +2951,7 @@ describe("Chat desktop shell", () => {
 
 		expect(button(container, "Select model").disabled).toBe(true);
 		expect(container.querySelectorAll(".session-sidebar button:disabled")).toHaveLength(0);
-		for (const label of ["Chat", "Code", "New task", "Skills", "Chat project task"]) {
+		for (const label of ["Chat", "Code", "New task", "Plugins", "Chat project task"]) {
 			expect(button(container, label).disabled, label).toBe(false);
 		}
 
@@ -2537,7 +2981,7 @@ describe("Chat desktop shell", () => {
 
 		expect(container.textContent).toContain("Chat project task");
 		expect(container.querySelectorAll(".session-sidebar button:disabled")).toHaveLength(0);
-		for (const label of ["Chat", "Code", "New task", "Skills", "Chat project task"]) {
+		for (const label of ["Chat", "Code", "New task", "Plugins", "Chat project task"]) {
 			expect(button(container, label).disabled, label).toBe(false);
 		}
 
@@ -2740,8 +3184,9 @@ describe("Chat desktop shell", () => {
 		expect(container.querySelectorAll('[role="tab"]')).toHaveLength(1);
 
 		const backendCalls = vi.mocked(api.createSession).mock.calls.length + vi.mocked(api.openSession).mock.calls.length;
-		await act(async () => button(container, "Skills").click());
-		expect(container.textContent).toContain("Skills included with Metis");
+		await act(async () => button(container, "Plugins").click());
+		expect(container.textContent).toContain("Plugins");
+		expect(container.textContent).toContain("pdf");
 		expect(vi.mocked(api.createSession).mock.calls.length + vi.mocked(api.openSession).mock.calls.length).toBe(backendCalls);
 
 		await act(async () => button(container, "Chat").click());
@@ -2756,6 +3201,64 @@ describe("Chat desktop shell", () => {
 		expect(container.textContent).not.toContain("Files");
 		expect(container.textContent).not.toContain("Subagent");
 		expect(container.querySelector('[aria-label="Add to message"]')).not.toBeNull();
+		await act(async () => root.unmount());
+	});
+
+	it("starts project Skill creation in a normal auto Chat bound to the chosen directory", async () => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		const { api } = createHarness();
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<App api={api} store={new AppStore()} />));
+		await flush();
+
+		await act(async () => button(container, "Plugins").click());
+		await act(async () => button(container, "New Skill").click());
+		await act(async () => button(document.body.querySelector<HTMLElement>(".plugins-new-menu")!, "Project").click());
+		const dialog = container.querySelector<HTMLElement>('[role="dialog"]')!;
+		await act(async () => button(dialog, "Choose folder…").click());
+		await flush();
+		await act(async () => {
+			button(dialog, "Create with Metis").click();
+			await new Promise((resolve) => setTimeout(resolve, 0));
+			await new Promise((resolve) => setTimeout(resolve, 0));
+		});
+
+		const create = vi.mocked(api.createSession).mock.calls.at(-1)![0];
+		expect(create).toMatchObject({ mode: "chat", cwd: "/work/selected-project", permissionMode: "auto" });
+		expect(create).not.toHaveProperty("name");
+		expect(api.startTurn).toHaveBeenLastCalledWith(expect.objectContaining({
+			sessionId: "chat-created",
+			text: "I want to create a project-level Skill in /work/selected-project. Use the create-skill Skill and ask me for the information you need before creating it.",
+		}));
+		await act(async () => root.unmount());
+	});
+
+	it("starts user Skill creation in a managed auto Chat without inventing a project", async () => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		const { api } = createHarness();
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<App api={api} store={new AppStore()} />));
+		await flush();
+
+		await act(async () => button(container, "Plugins").click());
+		await act(async () => button(container, "New Skill").click());
+		await act(async () => button(document.body.querySelector<HTMLElement>(".plugins-new-menu")!, "User").click());
+		await act(async () => {
+			button(container.querySelector<HTMLElement>('[role="dialog"]')!, "Create with Metis").click();
+			await new Promise((resolve) => setTimeout(resolve, 0));
+			await new Promise((resolve) => setTimeout(resolve, 0));
+		});
+
+		const create = vi.mocked(api.createSession).mock.calls.at(-1)![0];
+		expect(create).toMatchObject({ mode: "chat", permissionMode: "auto" });
+		expect(create).not.toHaveProperty("cwd");
+		expect(api.startTurn).toHaveBeenLastCalledWith(expect.objectContaining({
+			text: "I want to create a user-level Skill. Use the create-skill Skill and ask me for the information you need before creating it.",
+		}));
 		await act(async () => root.unmount());
 	});
 
@@ -3528,13 +4031,13 @@ describe("Chat desktop shell", () => {
 		await act(async () => root.render(<App api={api} store={new AppStore()} />));
 		await flush();
 
-		await act(async () => button(container, "Metis").click());
+		await act(async () => button(container, "Metis User").click());
 		await act(async () => button(container, "Language").click());
 		await act(async () => button(container, "中文").click());
 
 		expect(document.documentElement.lang).toBe("zh-CN");
 		expect(container.textContent).toContain("新建任务");
-		expect(container.textContent).toContain("技能");
+		expect(container.textContent).toContain("插件");
 		expect(container.textContent).toContain("定时任务");
 		expect(container.textContent).toContain("有什么我可以替你分担的？");
 		expect(container.querySelector('[aria-label="隐藏会话侧边栏"]')).not.toBeNull();

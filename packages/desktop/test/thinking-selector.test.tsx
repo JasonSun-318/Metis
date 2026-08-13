@@ -46,6 +46,26 @@ afterEach(() => {
 });
 
 describe("ThinkingSelector", () => {
+	it("opens and closes from an external command request", async () => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		const props = {
+			actualThinkingLevel: "high" as const,
+			available: ["off", "high"] as const,
+			disabled: false,
+			onChange: vi.fn(),
+			value: "high" as const,
+		};
+		await act(async () => root.render(<ThinkingSelector {...props} commandRequest={{ id: 0, open: false }} />));
+		await act(async () => root.render(<ThinkingSelector {...props} commandRequest={{ id: 1, open: true }} />));
+		expect(container.querySelector('[role="dialog"]')).not.toBeNull();
+		await act(async () => root.render(<ThinkingSelector {...props} commandRequest={{ id: 2, open: false }} />));
+		expect(container.querySelector('[role="dialog"]')).toBeNull();
+		await act(async () => root.unmount());
+	});
+
 	it("opens a horizontal effort control and emits the selected real level", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 		const container = document.createElement("div");

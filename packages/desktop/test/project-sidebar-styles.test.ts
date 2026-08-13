@@ -73,10 +73,38 @@ describe("Project sidebar motion", () => {
 		expect(rule(".scheduled-task-quick-open > i").minWidth).toBe("15px");
 		expect(rule(".session-button-title i").width).toBe("6px");
 		expect(rule(".session-button-title i").height).toBe("6px");
+		const runningDot = rule(".session-button-title i.running");
+		expect(runningDot.background).toBe("rgb(154, 153, 148)");
+		expect(runningDot.animation).toBe("session-running-pulse 1.4s ease-in-out infinite");
+		for (const [state, background] of [
+			["completed", "rgb(91, 166, 112)"],
+			["failed", "rgb(207, 101, 94)"],
+			["attention", "rgb(209, 164, 88)"],
+		] as const) {
+			const dot = rule(`.session-button-title i.${state}`);
+			expect(dot.background).toBe(background);
+			expect(dot.animation).toBe("session-running-pulse 1.4s ease-in-out infinite");
+		}
+		expect(css).toContain(
+			".session-button-title i.running, .session-button-title i.completed, .session-button-title i.failed, .session-button-title i.attention { animation: none; opacity: 1; transform: none; }",
+		);
 		expect(scheduledHeading.margin).toBe(taskHeading.margin);
 		expect(scheduledHeading.color).toBe(taskHeading.color);
 		expect(scheduledHeading.fontSize).toBe(taskHeading.fontSize);
 		expect(scheduledHeading.fontWeight).toBe(taskHeading.fontWeight);
+	});
+
+	it("keeps text controls neutral when focused", () => {
+		expect(rule("button:focus-visible, summary:focus-visible").outline).toContain("var(--focus)");
+		expect(rule("input:focus-visible, textarea:focus-visible, select:focus-visible").outline).toBe(
+			"1px solid var(--border-strong)",
+		);
+		expect(rule(".file-search-field:focus-within").borderColor).toBe("var(--border-strong)");
+		expect(rule(".browser-address-field:focus-within").borderColor).toBe("var(--border-strong)");
+		expect(rule(".workspace-title-editor input:focus").outline).toBe("none");
+		expect(rule(".plugins-search:focus-within").borderColor).toBe("var(--border-strong)");
+		expect(rule(".plugins-search:focus-within").boxShadow).toBe("none");
+		expect(rule(".composer:focus-within").borderColor).toBe("var(--border-strong)");
 	});
 
 	it("keeps the update action rectangular and aligned above the account footer", () => {
@@ -88,6 +116,32 @@ describe("Project sidebar motion", () => {
 		expect(button.borderRadius).toBe("7px");
 		expect(button.background).toBe("rgb(51, 51, 51)");
 		expect(button.border).toContain("var(--border-strong)");
+	});
+
+	it("shows profile avatars and matches the session action menu surface", () => {
+		expect(rule(".account-mark").overflow).toBe("hidden");
+		expect(rule(".account-mark img").objectFit).toBe("cover");
+		expect(rule(".account-menu-name").textOverflow).toBe("ellipsis");
+		for (const selector of [".account-menu-popover", ".account-language-popover"]) {
+			const accountMenu = rule(selector);
+			expect(accountMenu.background).toBe("rgb(55, 55, 55)");
+			expect(accountMenu.borderColor).toBe("rgba(255, 255, 255, 0.15)");
+			expect(accountMenu.borderRadius).toBe("9px");
+			expect(accountMenu.boxShadow).toBe("var(--shadow)");
+		}
+		const hover = rule(
+			".account-menu-item:hover, .account-menu-item:focus-visible, .account-language-option:hover, .account-language-option:focus-visible",
+		);
+		expect(hover.background).toBe("rgb(72, 72, 72)");
+		expect(hover.boxShadow).toBe("");
+		expect(hover.outline).toBe("0px");
+	});
+
+	it("keeps the workspace title and actions above the native window drag region", () => {
+		const title = rule(".workspace-title");
+		expect(title.position).toBe("relative");
+		expect(title.zIndex).toBe("8");
+		expect(css).toMatch(/\.workspace-title\s*\{[^}]*-webkit-app-region:\s*no-drag/u);
 	});
 
 	it("reveals row actions on interaction and slides sessions into a collapsed drawer", () => {

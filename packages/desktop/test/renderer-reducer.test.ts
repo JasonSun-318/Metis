@@ -44,6 +44,7 @@ function snapshot(serverEpoch = EPOCH_A, cursor = 0, recentItems: ItemView[] = [
 		nextBeforeItemId: null,
 		activeTurnId: null,
 		pendingInteractions: [],
+		queuedTurns: [],
 		tasks: [],
 		thinkingSelection: "off",
 		actualThinkingLevel: "off",
@@ -72,6 +73,53 @@ function batch(serverEpoch: string, fromCursor: number, toCursor: number, text =
 }
 
 describe("renderer projection reducer", () => {
+	it("replaces queued turns from snapshots and queue events", () => {
+		const store = new AppStore();
+		store.applySnapshot({
+			...snapshot(EPOCH_A, 0),
+			queuedTurns: [
+				{
+					queueItemId: "queue-1",
+					revision: "revision-1",
+					state: "queued",
+					text: "First",
+					attachments: [],
+				},
+			],
+		});
+		expect(store.getSnapshot().queuedTurns.map(({ text }) => text)).toEqual(["First"]);
+
+		expect(
+			store.applyBatch({
+				serverEpoch: EPOCH_A,
+				fromCursor: 1,
+				toCursor: 1,
+				events: [
+					{
+						type: "turn/queueChanged",
+						sessionId: "session-1",
+						queuedTurns: [
+							{
+								queueItemId: "queue-1",
+								revision: "revision-2",
+								state: "paused",
+								text: "Edited",
+								attachments: [{ name: "notes.txt", byteLength: 12 }],
+							},
+						],
+					},
+				],
+			}),
+		).toBe("applied");
+		expect(store.getSnapshot().queuedTurns).toEqual([
+			expect.objectContaining({
+				revision: "revision-2",
+				state: "paused",
+				text: "Edited",
+			}),
+		]);
+	});
+
 	it("keeps the selected child transcript separate from the parent", () => {
 		const store = new AppStore();
 		store.applySnapshot(snapshot(EPOCH_A, 0));
@@ -221,7 +269,7 @@ describe("renderer projection reducer", () => {
 		expect(state.activeSessionId).toBeNull();
 		expect(state.itemOrder).toEqual([]);
 		expect(state.subagents).toEqual([]);
-		expect(state.permissionMode).toBe("ask");
+		expect(state.permissionMode).toBe("auto");
 		expect(state.availableModels).toEqual([{ provider: "test", modelId: "model-a", name: "Model A" }]);
 		expect(state.model).toEqual({ provider: "test", modelId: "model-a" });
 		const afterFirst = store.getSnapshot();
@@ -471,12 +519,30 @@ describe("renderer projection reducer", () => {
 		expect(store.getSnapshot().itemsById.get("item-1")?.content).toEqual([{ type: "text", text: "A" }]);
 	});
 
-	it("never applies events received while resubscribing", () => {
+	it("preserves session summaries but not active projection events while resubscribing", () => {
 		const store = new AppStore();
 		store.applySnapshot(snapshot());
 		store.markResubscribing();
-		expect(store.applyBatch(batch(EPOCH_A, 1, 1))).toBe("resnapshot_required");
+		expect(
+			store.applyBatch({
+				...batch(EPOCH_A, 1, 2),
+				events: [
+					{
+						type: "session/updated",
+						session: { ...session(), state: "idle", unread: true, lastTurnOutcome: "completed" },
+					},
+					...batch(EPOCH_A, 1, 2).events,
+				],
+			}),
+		).toBe("resnapshot_required");
 		expect(store.getSnapshot().itemsById.get("item-1")?.content).toEqual([{ type: "text", text: "A" }]);
+		expect(store.getSnapshot().sessionsById.get("session-1")).toEqual(
+			expect.objectContaining({
+				state: "idle",
+				unread: true,
+				lastTurnOutcome: "completed",
+			}),
+		);
 	});
 
 	it("restores the previous projection status after an unchanged open fails", () => {

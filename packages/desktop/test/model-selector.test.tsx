@@ -8,6 +8,25 @@ import { ModelSelector } from "../src/renderer/components/ModelSelector.tsx";
 afterEach(() => document.body.replaceChildren());
 
 describe("ModelSelector", () => {
+	it("opens and closes from an external command request", async () => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		const props = {
+			available: [{ provider: "openai", modelId: "gpt-test", name: "GPT Test" }],
+			disabled: false,
+			onChange: vi.fn(),
+			value: { provider: "openai", modelId: "gpt-test" },
+		} as const;
+		await act(async () => root.render(<ModelSelector {...props} commandRequest={{ id: 0, open: false }} />));
+		await act(async () => root.render(<ModelSelector {...props} commandRequest={{ id: 1, open: true }} />));
+		expect(container.querySelector('[role="menu"]')).not.toBeNull();
+		await act(async () => root.render(<ModelSelector {...props} commandRequest={{ id: 2, open: false }} />));
+		expect(container.querySelector('[role="menu"]')).toBeNull();
+		await act(async () => root.unmount());
+	});
+
 	it("shows the real model list and selects by click or number shortcut", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 		const container = document.createElement("div");

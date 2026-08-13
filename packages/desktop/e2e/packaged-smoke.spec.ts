@@ -1,12 +1,13 @@
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { expect, test, type Browser, type Locator, type Page } from "@playwright/test";
 import type { MetisDesktopApi } from "../src/shared/desktop-api.ts";
+import { createMcpTestServer } from "../../coding-agent/test/helpers/mcp-test-server.ts";
 import {
 	appServerPid,
 	closeServer,
@@ -33,6 +34,7 @@ const SESSION_ACTION_ID = "10000000-0000-4000-8000-000000000005";
 const COMPLETED_TASK_ID = "10000000-0000-4000-8000-000000000006";
 
 interface FixtureSessionManager {
+	appendCompaction(summary: string, firstKeptEntryId: string, tokensBefore: number, details?: unknown, fromHook?: boolean): string;
 	appendCustomEntry(customType: string, data?: unknown): string;
 	appendMessage(message: object, toolOutput?: unknown): string;
 	appendSubagentControl(payload: object): string;
@@ -94,7 +96,7 @@ interface CodingFixtures {
 			options: {
 				id: string;
 				mode: "chat" | "code";
-				permissionMode?: "ask" | "full";
+				permissionMode?: "ask" | "auto" | "full";
 				subagent?: { agentId: string; name: string; parentSessionId: string };
 			},
 		): FixtureSessionManager;
@@ -287,6 +289,8 @@ test("packaged task list uses the Metis composer UI in Chat and Code", async ({}
 		mode: "chat" | "code",
 		name: string,
 		tasks = taskItems,
+		compacted = false,
+		withTranscriptFixture = false,
 	) => {
 		const manager = fixtures.SessionManager.create(
 			projectDir,
@@ -294,24 +298,66 @@ test("packaged task list uses the Metis composer UI in Chat and Code", async ({}
 			{ id: sessionId, mode },
 		);
 		manager.appendSessionInfo(name);
-		manager.appendMessage({
+		if (withTranscriptFixture) manager.appendMessage({
+			...assistantMessage(Date.now() - 3, 0),
+			content: [{ type: "toolCall", id: `set-tasks-${mode}`, name: "set_tasks", arguments: { tasks } }],
+			stopReason: "toolUse",
+		});
+		const taskEntryId = manager.appendMessage({
 			role: "toolResult",
 			toolCallId: `set-tasks-${mode}`,
 			toolName: "set_tasks",
-			content: [{ type: "text", text: "<task_list />" }],
+			content: [{
+				type: "text",
+				text: ["<task_list>", ...tasks.map(({ task, completed }) => `- [${completed ? "x" : " "}] ${task}`), "</task_list>"].join("\n"),
+			}],
 			details: { tasks },
 			isError: false,
 			timestamp: Date.now(),
 		});
+		if (compacted) manager.appendCompaction("private packaged summary", taskEntryId, 64_000, undefined, false);
+		if (withTranscriptFixture && mode === "chat") {
+			manager.appendMessage({
+				...assistantMessage(Date.now() + 1, 0),
+				content: [{
+					type: "toolCall",
+					id: "ask-user-chat",
+					name: "ask_user",
+					arguments: {
+						questions: [{
+							question: "How should Metis answer?",
+							multiple: false,
+							options: [{ label: "Concise", description: "Keep it short" }, { label: "Detailed", description: "Explain fully" }],
+						}],
+					},
+				}],
+				stopReason: "toolUse",
+			});
+			manager.appendMessage({
+				role: "toolResult",
+				toolCallId: "ask-user-chat",
+				toolName: "ask_user",
+				content: [{
+					type: "text",
+					text: `User answers:\n${JSON.stringify([{ question: "How should Metis answer?", selected: ["Concise"] }], null, 2)}`,
+				}],
+				isError: false,
+				timestamp: Date.now() + 2,
+			});
+		}
 		manager.close();
 	};
-	createTaskSession(CHAT_ACTIVE_ID, "chat", "Task list Chat fixture");
-	createTaskSession(CODE_ID, "code", "Task list Code fixture");
+	createTaskSession(CHAT_ACTIVE_ID, "chat", "Task list Chat fixture", taskItems, true, true);
+	createTaskSession(CODE_ID, "code", "Task list Code fixture", taskItems, false, true);
 	createTaskSession(
 		COMPLETED_TASK_ID,
 		"chat",
 		"Completed task list fixture",
 		taskItems.map((task) => ({ ...task, completed: true })),
+	);
+	await writeFixtureFile(
+		path.join(projectDir, ".metis", "skills", "e2e-skill", "SKILL.md"),
+		"---\nname: e2e-skill\ndescription: Packaged slash command fixture\n---\n\nUse this fixture for packaged testing.\n",
 	);
 	new fixtures.ProjectTrustStore(agentDir).set(projectDir, true);
 
@@ -331,6 +377,71 @@ test("packaged task list uses the Metis composer UI in Chat and Code", async ({}
 		await page.getByRole("button", { name: "Chat", exact: true }).click();
 		await page.getByRole("button", { name: "Task list Chat fixture", exact: true }).click();
 		await expect(page.locator(".workspace-header")).toHaveAttribute("data-active-session-id", CHAT_ACTIVE_ID);
+		const chatToolChain = page.locator(".execution-chain").last();
+		await expect(chatToolChain).not.toHaveAttribute("open", "");
+		await chatToolChain.locator(":scope > summary").click();
+		await expect(chatToolChain).toContainText("How should Metis answer?");
+		await expect(chatToolChain).toContainText("Concise");
+		await expect(chatToolChain).not.toContainText('"questions"');
+		await expect(chatToolChain).not.toContainText('"multiple"');
+		await expect(chatToolChain).not.toContainText('"selected"');
+
+		phase = "checking packaged slash commands and Skill chip";
+		const composerInput = page.getByRole("textbox", { name: "Message Metis", exact: true });
+		await composerInput.fill("/");
+		const slashMenu = page.getByRole("listbox", { name: "Slash commands", exact: true });
+		await expect(slashMenu).toBeVisible();
+		await expect(slashMenu.getByText("skill:e2e-skill", { exact: true })).toBeVisible();
+		const slashLabels = await slashMenu.locator("[role=option] strong").allTextContents();
+		expect(slashLabels.slice(0, 5)).toEqual([
+			"/compact",
+			"/model",
+			"/thinking",
+			"/status",
+			"/mcp",
+		]);
+		expect(slashLabels).toContain("skill:e2e-skill");
+		await expect(slashMenu).not.toContainText("/usage");
+		await page.locator(".composer-dock").screenshot({
+			animations: "disabled",
+			path: testInfo.outputPath("slash-command-menu.png"),
+		});
+		await composerInput.fill("/com");
+		await expect(slashMenu.getByRole("option")).toHaveCount(1);
+		await expect(slashMenu.locator("strong")).toHaveText("/compact");
+
+		await composerInput.fill("/status");
+		await slashMenu.getByRole("option").click();
+		const statusPanel = page.getByRole("dialog", { name: "Session status", exact: true });
+		await expect(statusPanel).toBeVisible();
+		await expect(statusPanel).toContainText(CHAT_ACTIVE_ID);
+		await expect(statusPanel).toContainText("Chat");
+		await page.locator(".composer-dock").screenshot({
+			animations: "disabled",
+			path: testInfo.outputPath("slash-status-panel.png"),
+		});
+		await page.keyboard.press("Escape");
+		await expect(statusPanel).toHaveCount(0);
+		await expect(page.locator(".transcript-compaction-row")).toHaveText("Compacted");
+		await expect(page.locator(".transcript")).not.toContainText("private packaged summary");
+		await page.locator(".transcript").screenshot({
+			animations: "disabled",
+			path: testInfo.outputPath("compacted-divider.png"),
+		});
+
+		await composerInput.fill("/skill:e2e");
+		await slashMenu.getByRole("option").click();
+		await expect(page.getByRole("button", { name: "Remove skill e2e-skill", exact: true })).toBeVisible();
+		await composerInput.fill("Use the packaged fixture");
+		await expect(page.locator(".composer-chips .is-skill")).toHaveCSS("color", "rgb(169, 201, 238)");
+		await page.locator(".composer-dock").screenshot({
+			animations: "disabled",
+			path: testInfo.outputPath("slash-skill-chip.png"),
+		});
+		await page.getByRole("button", { name: "Remove skill e2e-skill", exact: true }).click();
+		await composerInput.fill("");
+
+		phase = "checking expanded Chat task list";
 		let panel = page.getByRole("region", { name: "Tasks", exact: true });
 		await expect(panel).toBeVisible();
 		await expect(panel.locator(".task-list-row")).toHaveCount(6);
@@ -414,6 +525,14 @@ test("packaged task list uses the Metis composer UI in Chat and Code", async ({}
 		await page.keyboard.press("Escape");
 		await page.getByRole("button", { name: "Task list Code fixture", exact: true }).click();
 		await expect(page.locator(".workspace-header")).toHaveAttribute("data-active-session-id", CODE_ID);
+		const codeExecution = page.locator(".code-execution").first();
+		await expect(codeExecution).not.toHaveAttribute("open", "");
+		await codeExecution.locator(":scope > summary").click();
+		const codeTask = codeExecution.locator(".code-command").first();
+		await expect(codeTask).not.toHaveAttribute("open", "");
+		await codeTask.locator(":scope > summary").click();
+		await expect(codeTask).toContainText("○ Inspect implementation");
+		await expect(codeTask).not.toContainText('"tasks"');
 		panel = page.getByRole("region", { name: "Tasks", exact: true });
 		await expect(panel.locator(".task-list-row")).toHaveCount(6);
 		await expect(page.locator(".composer-dock > .task-list-slot + .composer-code")).toHaveCount(1);
@@ -427,6 +546,13 @@ test("packaged task list uses the Metis composer UI in Chat and Code", async ({}
 		await page.getByRole("button", { name: "Completed task list fixture", exact: true }).click();
 		await expect(page.locator(".workspace-header")).toHaveAttribute("data-active-session-id", COMPLETED_TASK_ID);
 		await expect(page.getByRole("region", { name: "Tasks", exact: true })).toHaveCount(0);
+
+		phase = "checking packaged New Task side rays";
+		await page.getByRole("button", { name: "New task", exact: true }).click();
+		await expect(page.getByRole("button", { name: "Show tools sidebar", exact: true })).toHaveCount(0);
+		await expect(page.locator(".tool-sidebar:not([hidden])")).toHaveCount(0);
+		await expect(page.locator(".new-task-side-rays canvas")).toBeVisible();
+		await page.locator(".new-task-home").screenshot({ path: testInfo.outputPath("new-task-side-rays.png") });
 	} catch (error) {
 		const bodyText = await page?.locator("body").innerText().catch(() => "renderer unavailable");
 		throw new Error(
@@ -439,8 +565,438 @@ test("packaged task list uses the Metis composer UI in Chat and Code", async ({}
 	}
 });
 
-test("packaged worker, WASM, trusted extension, and utility lifecycle stay functional", async () => {
-	test.setTimeout(120_000);
+test("packaged queued messages edit, guide, drain in order, and pause across App Server recovery", async ({}, testInfo) => {
+	test.setTimeout(180_000);
+	const fixtures = await loadCodingFixtures();
+	const executable = packagedExecutable();
+	expect(existsSync(executable), `Package the desktop app first: ${executable}`).toBe(true);
+
+	const tempRoot = await mkdtemp(path.join(tmpdir(), "metis-queued-turn-e2e-"));
+	const agentDir = path.join(tempRoot, "agent");
+	const homeDir = path.join(tempRoot, "home");
+	const projectDir = path.join(tempRoot, "project");
+	const userDataDir = path.join(tempRoot, "electron");
+	await Promise.all([mkdir(agentDir), mkdir(homeDir), mkdir(projectDir), mkdir(userDataDir)]);
+	const sessionId = "71000000-0000-4000-8000-000000000001";
+	const manager = fixtures.SessionManager.create(
+		projectDir,
+		fixtures.getDefaultSessionDir(projectDir, agentDir),
+		{ id: sessionId, mode: "chat", permissionMode: "full" },
+	);
+	manager.appendSessionInfo("Queued message session");
+	manager.close();
+	new fixtures.ProjectTrustStore(agentDir).set(projectDir, true);
+
+	const knownMarkers = [
+		"guide-first",
+		"guide-edited",
+		"fifo-first",
+		"fifo-second",
+		"fifo-third",
+		"restart-first",
+		"restart-queued",
+	] as const;
+	const heldMarkers = new Set(["guide-first", "fifo-first", "restart-first"]);
+	const requestMarkers: string[] = [];
+	const heldResponses = new Map<string, () => void>();
+	const fakeProvider = createServer(async (request, response) => {
+		if (request.method !== "POST" || request.url !== "/v1/chat/completions") {
+			response.writeHead(404).end();
+			return;
+		}
+		let body = "";
+		for await (const chunk of request) body += chunk;
+		const payload = JSON.parse(body) as { messages?: Array<{ role?: string; content?: unknown }> };
+		const transcript = JSON.stringify(payload.messages ?? []);
+		response.writeHead(200, { "content-type": "text/event-stream" });
+		if (transcript.includes("conversation title generator")) {
+			response.end(`data: ${JSON.stringify({
+				id: "queued-title",
+				object: "chat.completion.chunk",
+				created: 1,
+				model: "queued-model",
+				choices: [{ index: 0, delta: { role: "assistant", content: "Queued message session" }, finish_reason: "stop" }],
+			})}\n\ndata: [DONE]\n\n`);
+			return;
+		}
+		const lastUser = [...(payload.messages ?? [])].reverse().find((message) => message.role === "user");
+		const lastUserText = JSON.stringify(lastUser?.content ?? "");
+		const marker = knownMarkers.find((candidate) => lastUserText.includes(candidate));
+		if (!marker) {
+			response.end();
+			return;
+		}
+		requestMarkers.push(marker);
+		const complete = () => response.end(`data: ${JSON.stringify({
+			id: `queued-${marker}`,
+			object: "chat.completion.chunk",
+			created: 1,
+			model: "queued-model",
+			choices: [{ index: 0, delta: { role: "assistant", content: `done:${marker}` }, finish_reason: "stop" }],
+		})}\n\ndata: [DONE]\n\n`);
+		if (!heldMarkers.has(marker)) {
+			complete();
+			return;
+		}
+		const release = () => {
+			heldResponses.delete(marker);
+			if (!response.destroyed) complete();
+		};
+		heldResponses.set(marker, release);
+		response.once("close", () => {
+			if (heldResponses.get(marker) === release) heldResponses.delete(marker);
+		});
+	});
+	const providerPort = await listen(fakeProvider);
+	await Promise.all([
+		writeFile(path.join(agentDir, "models.json"), JSON.stringify({ providers: {
+			queued: {
+				baseUrl: `http://127.0.0.1:${providerPort}/v1`,
+				apiKey: "queued-key",
+				api: "openai-completions",
+				models: [{ id: "queued-model", name: "Queued Model", contextWindow: 32_000, maxTokens: 1_024 }],
+			},
+		} })),
+		writeFile(path.join(agentDir, "settings.json"), JSON.stringify({
+			defaultProvider: "queued",
+			defaultModel: "queued-model",
+			retry: { enabled: false },
+		})),
+	]);
+
+	const debuggingPort = await reservePort();
+	const diagnostics: string[] = [];
+	const app = launchPackagedApp(executable, debuggingPort, userDataDir, projectDir, agentDir, homeDir, diagnostics);
+	let browser: Browser | undefined;
+	let page: Page | undefined;
+	let phase = "connecting";
+	const waitForMarker = async (marker: string) => {
+		await expect.poll(() => requestMarkers.filter((current) => current === marker).length).toBe(1);
+	};
+	const release = (marker: string) => {
+		const complete = heldResponses.get(marker);
+		if (!complete) throw new Error(`Provider response is not held: ${marker}`);
+		complete();
+	};
+	try {
+		({ browser, page } = await connectToApp(debuggingPort));
+		page.setDefaultTimeout(12_000);
+		await page.setViewportSize({ width: 1100, height: 760 });
+		await waitForServerReady(page);
+		await page.locator('.session-button[aria-label="Queued message session"]').click();
+		await page.locator(`[data-active-session-id="${sessionId}"]`).waitFor({ state: "visible" });
+		const input = page.locator("#composer-input");
+		const queuedRows = page.getByRole("group", { name: /Queued message \d+/u });
+		const submit = async (text: string, action: "Send message" | "Queue message") => {
+			await input.fill(text);
+			await page!.getByRole("button", { name: action, exact: true }).click();
+		};
+
+		phase = "editing and guiding the active turn";
+		await submit("guide-first", "Send message");
+		await waitForMarker("guide-first");
+		await submit("guide-original", "Queue message");
+		await expect(queuedRows).toHaveCount(1);
+		const guideRow = page.getByRole("group", { name: "Queued message 1", exact: true });
+		await expect(guideRow).toContainText("guide-original");
+		await guideRow.getByRole("button", { name: "Queued message actions", exact: true }).click();
+		await page.locator(".queued-turn-popover").getByRole("menuitem", { name: "Edit", exact: true }).click();
+		await page.getByRole("textbox", { name: "Edit queued message", exact: true }).fill("guide-edited");
+		await guideRow.getByRole("button", { name: "Save", exact: true }).click();
+		await expect(guideRow).toContainText("guide-edited");
+		await expect(page.locator(".composer")).toHaveCSS("border-top-left-radius", "21px");
+		await expect(page.locator(".composer")).toHaveCSS("border-top-right-radius", "21px");
+		await page.locator(".composer-dock").screenshot({ animations: "disabled", path: testInfo.outputPath("queued-edited.png") });
+		await guideRow.getByRole("button", { name: "Guide with queued message", exact: true }).click();
+		await expect(guideRow).toContainText("Sending…");
+		await page.locator(".composer-dock").screenshot({ animations: "disabled", path: testInfo.outputPath("queued-guiding.png") });
+		release("guide-first");
+		await waitForMarker("guide-edited");
+		await expect(page.getByText("done:guide-edited", { exact: true })).toBeVisible();
+		await expect(queuedRows).toHaveCount(0);
+
+		phase = "draining queued messages in FIFO order";
+		await submit("fifo-first", "Send message");
+		await waitForMarker("fifo-first");
+		await submit("fifo-second", "Queue message");
+		await submit("fifo-third", "Queue message");
+		await expect(queuedRows).toHaveCount(2);
+		await expect(queuedRows.nth(0)).toContainText("fifo-second");
+		await expect(queuedRows.nth(1)).toContainText("fifo-third");
+		release("fifo-first");
+		await expect.poll(() => requestMarkers.filter((marker) => marker.startsWith("fifo-"))).toEqual([
+			"fifo-first",
+			"fifo-second",
+			"fifo-third",
+		]);
+		await expect(page.getByText("done:fifo-third", { exact: true })).toBeVisible();
+		await expect(queuedRows).toHaveCount(0);
+
+		phase = "recovering an interrupted queue as paused";
+		await submit("restart-first", "Send message");
+		await waitForMarker("restart-first");
+		await submit("restart-queued", "Queue message");
+		await expect(queuedRows).toHaveCount(1);
+		const rootPid = app.pid;
+		if (!rootPid) throw new Error("Packaged app did not expose a process id");
+		const firstUtilityPid = appServerPid(rootPid);
+		if (!firstUtilityPid) throw new Error("Could not find the packaged App Server");
+		process.kill(firstUtilityPid, "SIGKILL");
+		await expect.poll(() => {
+			const current = appServerPid(rootPid);
+			return current !== undefined && current !== firstUtilityPid;
+		}).toBe(true);
+		await waitForServerReady(page);
+		const pausedRow = page.getByRole("group", { name: "Queued message 1", exact: true });
+		await expect(pausedRow).toContainText("Paused", { timeout: 20_000 });
+		await expect(pausedRow).toContainText("restart-queued");
+		expect(requestMarkers.filter((marker) => marker.startsWith("restart-"))).toEqual(["restart-first"]);
+		await page.locator(".composer-dock").screenshot({ animations: "disabled", path: testInfo.outputPath("queued-paused-after-restart.png") });
+		await pausedRow.getByRole("button", { name: "Send queued message", exact: true }).click();
+		await waitForMarker("restart-queued");
+		await expect(page.getByText("done:restart-queued", { exact: true })).toBeVisible();
+		await expect(queuedRows).toHaveCount(0);
+	} catch (error) {
+		const bodyText = await page?.locator("body").innerText().catch(() => "renderer unavailable");
+		throw new Error(
+			`${error instanceof Error ? error.message : String(error)}\nphase=${phase} requests=${requestMarkers.join(",")}\nrenderer body:\n${bodyText ?? "unavailable"}\n${diagnostics.join("").slice(-8_000)}`,
+		);
+	} finally {
+		await browser?.close().catch(() => undefined);
+		await stopProcess(app);
+		await closeServer(fakeProvider);
+		await rm(tempRoot, { recursive: true, force: true });
+	}
+});
+
+test("packaged permission sandbox keeps Auto bounded and project rules revocable", async () => {
+	test.setTimeout(180_000);
+	const fixtures = await loadCodingFixtures();
+	const executable = packagedExecutable();
+	expect(existsSync(executable), `Package the desktop app first: ${executable}`).toBe(true);
+
+	const tempRoot = await mkdtemp(path.join(tmpdir(), "metis-permission-sandbox-e2e-"));
+	const agentDir = path.join(tempRoot, "agent");
+	const homeDir = path.join(tempRoot, "home");
+	const projectDir = path.join(tempRoot, "project");
+	const outsideDir = path.join(tempRoot, "outside");
+	const userDataDir = path.join(tempRoot, "electron");
+	await Promise.all([mkdir(agentDir), mkdir(homeDir), mkdir(projectDir), mkdir(outsideDir), mkdir(userDataDir)]);
+	const sessionId = "70000000-0000-4000-8000-000000000001";
+	const manager = fixtures.SessionManager.create(
+		projectDir,
+		fixtures.getDefaultSessionDir(projectDir, agentDir),
+		{ id: sessionId, mode: "chat", permissionMode: "auto" },
+	);
+	manager.appendSessionInfo("Permission sandbox session");
+	manager.close();
+	new fixtures.ProjectTrustStore(agentDir).set(projectDir, true);
+
+	const outsideFile = path.join(outsideDir, "blocked.txt");
+	const fullFile = path.join(outsideDir, "full.txt");
+	const cases = new Map([
+		["case-auto-pwd", "pwd"],
+		["case-auto-outside", `printf escaped > ${JSON.stringify(outsideFile)}`],
+		["case-exact-one", "rm -rf ./build"],
+		["case-exact-two", "rm -rf ./build"],
+		["case-exact-three", "rm -rf ./build"],
+		["case-exact-four", "rm -rf ./build"],
+		["case-changed", "rm -rf ./src"],
+		["case-ask-pwd", "pwd"],
+		["case-host-reject", "git push"],
+		["case-full-host", `printf full > ${JSON.stringify(fullFile)}`],
+	]);
+	const fakeProvider = createServer(async (request, response) => {
+		if (request.method !== "POST" || request.url !== "/v1/chat/completions") {
+			response.writeHead(404).end();
+			return;
+		}
+		let body = "";
+		for await (const chunk of request) body += chunk;
+		const payload = JSON.parse(body) as { messages?: Array<{ role?: string; content?: unknown }> };
+		const transcript = JSON.stringify(payload.messages ?? []);
+		response.writeHead(200, { "content-type": "text/event-stream" });
+		if (transcript.includes("conversation title generator")) {
+			response.end(`data: ${JSON.stringify({
+				id: "permission-title",
+				object: "chat.completion.chunk",
+				created: 1,
+				model: "permission-model",
+				choices: [{ index: 0, delta: { role: "assistant", content: "Permission test" }, finish_reason: "stop" }],
+			})}\n\ndata: [DONE]\n\n`);
+			return;
+		}
+		const lastUser = [...(payload.messages ?? [])].reverse().find((message) => message.role === "user");
+		const lastUserText = JSON.stringify(lastUser?.content ?? "");
+		const marker = [...cases.keys()].find((candidate) => lastUserText.includes(candidate));
+		const callId = marker ? `call-${marker}` : undefined;
+		if (marker && callId && !transcript.includes(callId)) {
+			response.end(`data: ${JSON.stringify({
+				id: `permission-${marker}`,
+				object: "chat.completion.chunk",
+				created: 1,
+				model: "permission-model",
+				choices: [{
+					index: 0,
+					delta: {
+						role: "assistant",
+						tool_calls: [{
+							index: 0,
+							id: callId,
+							type: "function",
+							function: { name: "bash", arguments: JSON.stringify({ command: cases.get(marker) }) },
+						}],
+					},
+					finish_reason: "tool_calls",
+				}],
+			})}\n\ndata: [DONE]\n\n`);
+			return;
+		}
+		response.end(`data: ${JSON.stringify({
+			id: `permission-done-${marker ?? "plain"}`,
+			object: "chat.completion.chunk",
+			created: 1,
+			model: "permission-model",
+			choices: [{ index: 0, delta: { role: "assistant", content: `done:${marker ?? "plain"}` }, finish_reason: "stop" }],
+		})}\n\ndata: [DONE]\n\n`);
+	});
+	const providerPort = await listen(fakeProvider);
+	await Promise.all([
+		writeFile(path.join(agentDir, "models.json"), JSON.stringify({ providers: {
+			permission: {
+				baseUrl: `http://127.0.0.1:${providerPort}/v1`,
+				apiKey: "permission-key",
+				api: "openai-completions",
+				models: [{ id: "permission-model", name: "Permission Model", contextWindow: 32_000, maxTokens: 1_024 }],
+			},
+		} })),
+		writeFile(path.join(agentDir, "settings.json"), JSON.stringify({
+			defaultProvider: "permission",
+			defaultModel: "permission-model",
+			retry: { enabled: false },
+		})),
+	]);
+
+	let app: ReturnType<typeof launchPackagedApp> | undefined;
+	let browser: Browser | undefined;
+	let page: Page | undefined;
+	let phase = "launching";
+	const diagnostics: string[] = [];
+	const launch = async () => {
+		const debuggingPort = await reservePort();
+		app = launchPackagedApp(executable, debuggingPort, userDataDir, projectDir, agentDir, homeDir, diagnostics);
+		({ browser, page } = await connectToApp(debuggingPort));
+		page.setDefaultTimeout(12_000);
+		await waitForServerReady(page);
+		await page.locator('.session-button[aria-label="Permission sandbox session"]').click();
+		await page.locator(`[data-active-session-id="${sessionId}"]`).waitFor({ state: "visible" });
+	};
+	const submit = async (marker: string) => {
+		await page!.locator("#composer-input").fill(marker);
+		await page!.getByRole("button", { name: "Send message", exact: true }).click();
+	};
+	const waitDone = async (marker: string) => {
+		await expect(page!.getByText(`done:${marker}`, { exact: true })).toBeVisible({ timeout: 20_000 });
+	};
+	const setMode = async (current: "Ask" | "Auto" | "Full", option: string, next: "Ask" | "Auto" | "Full") => {
+		await page!.getByRole("button", { name: `Select permissions, current ${current}`, exact: true }).click();
+		await page!.getByRole("menuitemradio", { name: new RegExp(option, "u") }).click();
+		await expect(page!.getByRole("button", { name: `Select permissions, current ${next}`, exact: true })).toBeVisible();
+	};
+	try {
+		await launch();
+		phase = "checking Auto default and ordinary sandbox Bash";
+		await expect(page!.getByRole("button", { name: "Select permissions, current Auto", exact: true })).toBeVisible();
+		await submit("case-auto-pwd");
+		await waitDone("case-auto-pwd");
+		await expect(page!.locator(".permission-approval-panel")).toHaveCount(0);
+
+		phase = "blocking Auto outside write without host fallback";
+		await submit("case-auto-outside");
+		await waitDone("case-auto-outside");
+		expect(existsSync(outsideFile)).toBe(false);
+		await expect(page!.locator(".permission-approval-panel")).toHaveCount(0);
+
+		phase = "remembering one exact destructive sandbox command";
+		await mkdir(path.join(projectDir, "build"));
+		await writeFile(path.join(projectDir, "build", "artifact.txt"), "artifact");
+		await submit("case-exact-one");
+		const approval = page!.locator(".permission-approval-panel");
+		await expect(approval).toContainText("workspace sandbox");
+		await approval.getByRole("button", { name: "Always allow for this project", exact: true }).click();
+		await waitDone("case-exact-one");
+		expect(existsSync(path.join(projectDir, "build"))).toBe(false);
+
+		await mkdir(path.join(projectDir, "build"));
+		await submit("case-exact-two");
+		await waitDone("case-exact-two");
+		await expect(approval).toHaveCount(0);
+		expect(existsSync(path.join(projectDir, "build"))).toBe(false);
+
+		phase = "requiring a new decision for changed command text";
+		await mkdir(path.join(projectDir, "src"));
+		await submit("case-changed");
+		await expect(approval).toBeVisible();
+		await approval.getByRole("button", { name: /Reject/u }).click();
+		await waitDone("case-changed");
+		expect(existsSync(path.join(projectDir, "src"))).toBe(true);
+
+		phase = "restarting and reusing the persisted exact project rule";
+		await browser?.close();
+		browser = undefined;
+		await stopProcess(app!);
+		app = undefined;
+		await launch();
+		await mkdir(path.join(projectDir, "build"));
+		await submit("case-exact-three");
+		await waitDone("case-exact-three");
+		await expect(page!.locator(".permission-approval-panel")).toHaveCount(0);
+
+		phase = "revoking the exact project rule from Settings";
+		await page!.locator(".account-menu-trigger").click();
+		await page!.getByRole("menuitem", { name: "Settings", exact: true }).click();
+		await page!.getByRole("button", { name: "Permissions", exact: true }).click();
+		await expect(page!.getByLabel("Settings", { exact: true }).getByText("rm -rf ./build", { exact: true })).toBeVisible();
+		await page!.getByRole("button", { name: "Remove bash permission", exact: true }).click();
+		await expect(page!.getByText("No actions are always allowed for this project.", { exact: true })).toBeVisible();
+		await page!.getByRole("button", { name: "Close settings", exact: true }).click();
+		await mkdir(path.join(projectDir, "build"));
+		await submit("case-exact-four");
+		await expect(page!.locator(".permission-approval-panel")).toBeVisible();
+		await page!.locator(".permission-approval-panel").getByRole("button", { name: "Allow once", exact: true }).click();
+		await waitDone("case-exact-four");
+
+		phase = "checking Ask sandbox and Auto host disclosure";
+		await setMode("Auto", "Ask before every change", "Ask");
+		await submit("case-ask-pwd");
+		await expect(page!.locator(".permission-approval-panel")).toContainText("workspace sandbox");
+		await page!.locator(".permission-approval-panel").getByRole("button", { name: "Allow once", exact: true }).click();
+		await waitDone("case-ask-pwd");
+		await setMode("Ask", "Auto", "Auto");
+		await submit("case-host-reject");
+		await expect(page!.locator(".permission-approval-panel")).toContainText("outside the sandbox");
+		await page!.locator(".permission-approval-panel").getByRole("button", { name: /Reject/u }).click();
+		await waitDone("case-host-reject");
+
+		phase = "checking Full direct host execution";
+		await setMode("Auto", "Full access", "Full");
+		await submit("case-full-host");
+		await waitDone("case-full-host");
+		expect(await readFile(fullFile, "utf8")).toBe("full");
+		await expect(page!.locator(".permission-approval-panel")).toHaveCount(0);
+	} catch (error) {
+		const bodyText = await page?.locator("body").innerText().catch(() => "renderer unavailable");
+		throw new Error(`${error instanceof Error ? error.message : String(error)}\nphase=${phase}\nrenderer body:\n${bodyText ?? "unavailable"}\n${diagnostics.join("").slice(-8_000)}`);
+	} finally {
+		await browser?.close().catch(() => undefined);
+		if (app) await stopProcess(app);
+		await closeServer(fakeProvider);
+		await rm(tempRoot, { recursive: true, force: true });
+	}
+});
+
+test("packaged Plugin Center, worker, WASM, trusted extension, and utility lifecycle stay functional", async () => {
+	test.setTimeout(180_000);
 	const executable = packagedExecutable();
 	expect(existsSync(executable), `Package the desktop app first: ${executable}`).toBe(true);
 
@@ -449,28 +1005,35 @@ test("packaged worker, WASM, trusted extension, and utility lifecycle stay funct
 	const homeDir = path.join(tempRoot, "home");
 	const projectDir = path.join(tempRoot, "project");
 	const extensionDir = path.join(projectDir, ".metis", "extensions");
+	const userSkillDir = path.join(agentDir, "skills", "writing-plans");
 	const projectSkillDir = path.join(projectDir, ".metis", "skills", "packaged-project-skill");
+	const importSourceDir = path.join(tempRoot, "skill-import-source");
+	const importArchive = path.join(tempRoot, "packaged-skills.skill");
 	const userDataDir = path.join(tempRoot, "electron");
 	const scheduleQaDir = path.join(desktopRoot, "test-results", "design-qa", "scheduled-tasks");
 	const permissionQaDir = path.join(desktopRoot, "test-results", "design-qa", "permission-approval");
 	const askUserQaDir = path.join(desktopRoot, "test-results", "design-qa", "ask-user");
 	const assetQaDir = path.join(desktopRoot, "test-results", "design-qa", "assets");
+	const pluginQaDir = path.join(desktopRoot, "test-results", "design-qa", "plugins");
 	const groupingQaDir = path.join(desktopRoot, "test-results", "design-qa", "session-grouping");
 	await Promise.all([
 		mkdir(agentDir),
 		mkdir(homeDir),
 		mkdir(extensionDir, { recursive: true }),
+		mkdir(userSkillDir, { recursive: true }),
 		mkdir(projectSkillDir, { recursive: true }),
 		mkdir(userDataDir),
 		mkdir(scheduleQaDir, { recursive: true }),
 		mkdir(permissionQaDir, { recursive: true }),
 		mkdir(askUserQaDir, { recursive: true }),
 		mkdir(assetQaDir, { recursive: true }),
+		mkdir(pluginQaDir, { recursive: true }),
 		mkdir(groupingQaDir, { recursive: true }),
 	]);
-
 	let providerRequests = 0;
+	let titleRequests = 0;
 	const providerToolNames: string[][] = [];
+	const providerTranscripts: string[] = [];
 	const fakeProvider = createServer(async (request, response) => {
 		if (request.method !== "POST" || request.url !== "/v1/chat/completions") {
 			response.writeHead(404).end();
@@ -482,12 +1045,27 @@ test("packaged worker, WASM, trusted extension, and utility lifecycle stay funct
 			messages?: unknown[];
 			tools?: Array<{ function?: { name?: string }; name?: string }>;
 		};
+		const providerTranscript = JSON.stringify(payload.messages ?? []);
+		if (providerTranscript.includes("conversation title generator")) {
+			titleRequests += 1;
+			response.writeHead(200, { "content-type": "text/event-stream" });
+			response.end(
+				`data: ${JSON.stringify({
+					id: "chatcmpl-packaged-title",
+					object: "chat.completion.chunk",
+					created: 1,
+					model: "packaged-smoke-model",
+					choices: [{ index: 0, delta: { role: "assistant", content: "Packaged smoke title" }, finish_reason: "stop" }],
+				})}\n\ndata: [DONE]\n\n`,
+			);
+			return;
+		}
+		providerTranscripts.push(providerTranscript);
 		providerToolNames.push(
 			(payload.tools ?? []).map((tool) => tool.function?.name ?? tool.name).filter((name): name is string => Boolean(name)),
 		);
 		providerRequests += 1;
 		response.writeHead(200, { "content-type": "text/event-stream" });
-		const providerTranscript = JSON.stringify(payload.messages ?? []);
 		if (providerTranscript.includes("request packaged questions") && !providerTranscript.includes("call-packaged-questions")) {
 			response.end(
 				`data: ${JSON.stringify({
@@ -648,6 +1226,11 @@ test("packaged worker, WASM, trusted extension, and utility lifecycle stay funct
 			JSON.stringify({
 				defaultProvider: "packaged-smoke",
 				defaultModel: "packaged-smoke-model",
+				mcpServers: {
+					browser: { enabled: false, url: "https://browser.example.test/mcp" },
+					filesystem: { command: process.execPath, enabled: false },
+					github: { enabled: false, url: "https://github.example.test/mcp" },
+				},
 				retry: { enabled: false },
 				webSearch: { enabled: true, provider: "brave" },
 			}),
@@ -675,13 +1258,31 @@ test("packaged worker, WASM, trusted extension, and utility lifecycle stay funct
 `,
 		),
 		writeFile(
+			path.join(userSkillDir, "SKILL.md"),
+			"---\nname: writing-plans\ndescription: Build a clear implementation plan\n---\n\n# Instructions\n\n## Workflow\n\n1. Clarify the goal.\n2. Write the plan.\n",
+		),
+		writeFile(
 			path.join(projectSkillDir, "SKILL.md"),
-			"---\nname: packaged-project-skill\ndescription: Visible in the packaged Project catalog\n---\n",
+			"---\nname: packaged-project-skill\ndescription: Visible in the packaged Project catalog\n---\n\n# Instructions\n\nUse project context.\n",
 		),
 	]);
+	await Promise.all([
+		writeFixtureFile(
+			path.join(importSourceDir, "packaged-alpha", "SKILL.md"),
+			"---\nname: packaged-alpha\ndescription: Imported packaged alpha Skill\n---\n\n# Instructions\n\nUse alpha.\n",
+		),
+		writeFixtureFile(path.join(importSourceDir, "packaged-alpha", "references", "example.md"), "alpha example"),
+		writeFixtureFile(
+			path.join(importSourceDir, "packaged-beta", "SKILL.md"),
+			"---\nname: packaged-beta\ndescription: Imported packaged beta Skill\n---\n\n# Instructions\n\nUse beta.\n",
+		),
+	]);
+	const zipped = spawnSync("zip", ["-q", "-r", importArchive, "."], { cwd: importSourceDir, encoding: "utf8" });
+	if (zipped.status !== 0) throw new Error(zipped.stderr || "Could not create packaged Skill fixture");
 
 	const debuggingPort = await reservePort();
 	const diagnostics: string[] = [];
+	const consoleErrors: string[] = [];
 	const app = launchPackagedApp(executable, debuggingPort, userDataDir, projectDir, agentDir, homeDir, diagnostics);
 
 	let browser: Browser | undefined;
@@ -690,17 +1291,189 @@ test("packaged worker, WASM, trusted extension, and utility lifecycle stay funct
 	let finalUtilityPid: number | undefined;
 	try {
 		({ browser, page } = await connectToApp(debuggingPort));
+		page.on("console", (entry) => { if (entry.type() === "error") consoleErrors.push(entry.text()); });
+		page.on("pageerror", (error) => consoleErrors.push(error.stack ?? error.message));
 		phase = "verifying draft creation timing";
 		await waitForServerReady(page);
-		phase = "verifying packaged Skills catalog";
-		await page.getByRole("button", { name: "Skills", exact: true }).click();
-		await page.getByRole("button", { name: "System", exact: true }).click();
-		await expect(page.getByText("pdf", { exact: true })).toBeVisible();
-		await page.locator(".skills-breadcrumbs").getByRole("button", { name: "Skills", exact: true }).click();
-		await page.getByRole("button", { name: "User", exact: true }).click();
-		await expect(page.locator(".skills-empty-state .traced-svg-icon")).toBeVisible();
-		await expect(page.getByText("No user skills", { exact: true })).toBeVisible();
-		await page.screenshot({ path: path.join(assetQaDir, "skills-empty.png") });
+		await page.setViewportSize({ width: 1556, height: 1011 });
+		phase = "verifying packaged Plugin Center Skill lifecycle";
+		await page.getByRole("button", { name: "Plugins", exact: true }).click();
+		await expect(page.locator(".plugins-section-switch").getByRole("tab")).toHaveCount(2);
+		await expect(page.locator(".plugins-section-switch").getByRole("tab", { name: "Skills", exact: true })).toBeVisible();
+		await expect(page.locator(".plugins-section-switch").getByRole("tab", { name: "MCP", exact: true })).toBeVisible();
+		await expect(page.getByRole("option", { name: "writing-plans", exact: true })).toBeVisible();
+
+		phase = "verifying packaged Skill creation methods and assisted Chat";
+		await page.getByRole("button", { name: "New Skill", exact: true }).click();
+		await page.getByRole("menu", { name: "New Skill", exact: true }).getByRole("menuitem", { name: "Project", exact: true }).click();
+		let createSkillDialog = page.getByRole("dialog", { name: "Create Project Skill" });
+		const projectSelector = createSkillDialog.getByRole("button", { name: "Create in", exact: true });
+		expect(await projectSelector.evaluate((element) => element.tagName)).toBe("BUTTON");
+		await projectSelector.click();
+		await expect(createSkillDialog.getByRole("listbox", { name: "Create in", exact: true })).toBeVisible();
+		await page.screenshot({ path: path.join(pluginQaDir, "actual-project-skill-menu.png"), animations: "disabled" });
+		await page.keyboard.press("Escape");
+		await expect(createSkillDialog.getByRole("button", { name: "Create with Metis", exact: true })).toBeDisabled();
+		await page.screenshot({ path: path.join(pluginQaDir, "actual-project-skill-target.png"), animations: "disabled" });
+		await createSkillDialog.getByRole("button", { name: "Cancel", exact: true }).click();
+		await page.getByRole("button", { name: "New Skill", exact: true }).click();
+		await page.getByRole("menu", { name: "New Skill", exact: true }).getByRole("menuitem", { name: "User", exact: true }).click();
+		createSkillDialog = page.getByRole("dialog", { name: "Create User Skill" });
+		await expect(createSkillDialog.locator(".skill-create-methods > button")).toHaveCount(4);
+		await expect(createSkillDialog.locator(".skill-create-methods > button strong")).toHaveText([
+			"Create with Metis",
+			"Upload Skill",
+			"Import from GitHub",
+			"Custom",
+		]);
+		await createSkillDialog.getByRole("button", { name: "Import from GitHub", exact: true }).click();
+		const githubInput = createSkillDialog.getByLabel("GitHub link", { exact: true });
+		await githubInput.fill("https://github.com/acme/skills");
+		const githubCancel = createSkillDialog.getByRole("button", { name: "Cancel", exact: true });
+		const githubInspect = createSkillDialog.getByRole("button", { name: "Inspect", exact: true });
+		const [cancelBox, inspectBox] = await Promise.all([githubCancel.boundingBox(), githubInspect.boundingBox()]);
+		expect(cancelBox).not.toBeNull();
+		expect(inspectBox).not.toBeNull();
+		expect(Math.abs(cancelBox!.y - inspectBox!.y)).toBeLessThanOrEqual(1);
+		await page.screenshot({ path: path.join(pluginQaDir, "actual-github-skill-import.png"), animations: "disabled" });
+		await createSkillDialog.getByRole("button", { name: "Back", exact: true }).click();
+		await createSkillDialog.getByRole("button", { name: "Create with Metis", exact: true }).click();
+		await expect(page.getByText("packaged-turn-ok", { exact: true }).first()).toBeVisible();
+		const assistedPrompt = "I want to create a user-level Skill. Use the create-skill Skill and ask me for the information you need before creating it.";
+		await expect.poll(() => providerTranscripts.some((transcript) => transcript.includes(assistedPrompt))).toBe(true);
+		await expect.poll(() => titleRequests).toBe(1);
+		const assistedSessions = await page.evaluate(() =>
+			(globalThis as unknown as { metis: MetisDesktopApi }).metis.listSessions({ limit: 200 }),
+		);
+		expect(assistedSessions.sessions).toHaveLength(1);
+		expect(assistedSessions.sessions[0]).toMatchObject({ mode: "chat", cwdOrigin: "managed" });
+		await page.evaluate(async (sessionId) => {
+			await (globalThis as unknown as { metis: MetisDesktopApi }).metis.deleteSession({
+				sessionId,
+				requestId: crypto.randomUUID(),
+			});
+		}, assistedSessions.sessions[0]!.sessionId);
+		await expect.poll(async () => (await page!.evaluate(() =>
+			(globalThis as unknown as { metis: MetisDesktopApi }).metis.listSessions({ limit: 200 }),
+		)).sessions.length).toBe(0);
+		await page.getByRole("button", { name: "Plugins", exact: true }).click();
+
+		phase = "creating a custom Skill from semantic fields";
+		await page.getByRole("button", { name: "New Skill", exact: true }).click();
+		await page.getByRole("menu", { name: "New Skill", exact: true }).getByRole("menuitem", { name: "User", exact: true }).click();
+		createSkillDialog = page.getByRole("dialog", { name: "Create User Skill" });
+		await createSkillDialog.getByRole("button", { name: "Custom", exact: true }).click();
+		const customSkillDialog = page.getByRole("dialog", { name: "Write skill instructions" });
+		await customSkillDialog.getByLabel("Skill name", { exact: true }).fill("packaged-custom");
+		await customSkillDialog.getByLabel("Description", { exact: true }).fill("A custom packaged Skill");
+		await customSkillDialog.getByLabel("Instructions", { exact: true }).fill("Write the requested packaged summary.");
+		await page.screenshot({ path: path.join(pluginQaDir, "actual-custom-skill.png"), animations: "disabled" });
+		await customSkillDialog.getByRole("button", { name: "Create", exact: true }).click();
+		await expect(customSkillDialog).toHaveCount(0);
+		expect(await readFile(path.join(agentDir, "skills", "packaged-custom", "SKILL.md"), "utf8")).toBe(
+			'---\nname: packaged-custom\ndescription: "A custom packaged Skill"\n---\n\nWrite the requested packaged summary.\n',
+		);
+		await page.getByRole("button", { name: "Back to Skills", exact: true }).click();
+
+		phase = "importing one selected Skill from a packaged multi-Skill archive";
+		const inspectedImport = await page.evaluate((archivePath) =>
+			(globalThis as unknown as { metis: MetisDesktopApi }).metis.inspectSkillImport({
+				cwd: null,
+				source: "user",
+				input: { kind: "archive", path: archivePath },
+			}), importArchive);
+		expect(inspectedImport.candidates.map((candidate) => candidate.name)).toEqual(["packaged-alpha", "packaged-beta"]);
+		const alphaCandidate = inspectedImport.candidates.find((candidate) => candidate.name === "packaged-alpha")!;
+		await page.evaluate(async ({ archivePath, candidateId, revision }) => {
+			await (globalThis as unknown as { metis: MetisDesktopApi }).metis.importSkills({
+				requestId: crypto.randomUUID(),
+				cwd: null,
+				source: "user",
+				input: { kind: "archive", path: archivePath },
+				sourceRevision: revision,
+				candidateIds: [candidateId],
+			});
+		}, { archivePath: importArchive, candidateId: alphaCandidate.id, revision: inspectedImport.revision });
+		expect(await readFile(path.join(agentDir, "skills", "packaged-alpha", "references", "example.md"), "utf8")).toBe("alpha example");
+		expect(existsSync(path.join(agentDir, "skills", "packaged-beta"))).toBe(false);
+		await expect(page.evaluate(async ({ archivePath, candidateId, revision }) => {
+			await (globalThis as unknown as { metis: MetisDesktopApi }).metis.importSkills({
+				requestId: crypto.randomUUID(),
+				cwd: null,
+				source: "user",
+				input: { kind: "archive", path: archivePath },
+				sourceRevision: revision,
+				candidateIds: [candidateId],
+			});
+		}, { archivePath: importArchive, candidateId: alphaCandidate.id, revision: inspectedImport.revision })).rejects.toThrow();
+		await page.getByRole("button", { name: "Reload Skills", exact: true }).click();
+		await expect(page.getByRole("option", { name: "packaged-alpha", exact: true })).toBeVisible();
+		await page.screenshot({ path: path.join(pluginQaDir, "actual-skill-list.png"), animations: "disabled" });
+		await page.getByRole("option", { name: "docx", exact: true }).click();
+		const packagedSkillDocument = page.locator('[data-plugin-detail="skill"] .plugins-detail-document');
+		await expect(packagedSkillDocument).toContainText("Quick Start");
+		const packagedSkillCodeBlock = packagedSkillDocument.locator("pre").first();
+		await expect(packagedSkillCodeBlock).toBeVisible();
+		expect(await packagedSkillCodeBlock.evaluate((element) => getComputedStyle(element).overflowX)).toBe("auto");
+		expect(await packagedSkillDocument.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
+		await expect(page.getByRole("button", { name: "Open containing folder", exact: true })).toHaveCount(0);
+		await page.getByRole("button", { name: "Back to Skills", exact: true }).click();
+		await page.getByRole("button", { name: "Skill sources", exact: true }).click();
+		await page.getByRole("option", { name: "User", exact: true }).click();
+		await expect(page.getByRole("option", { name: "writing-plans", exact: true })).toBeVisible();
+		await page.getByRole("button", { name: "Skill sources", exact: true }).click();
+		await page.getByRole("option", { name: "All sources", exact: true }).click();
+		await page.getByLabel("Search Skills").fill("writing");
+		await page.getByRole("option", { name: "writing-plans", exact: true }).click();
+		await expect(page.locator(".plugins-catalog-page")).toHaveCount(0);
+		await expect(page.locator('[data-plugin-detail="skill"]')).toContainText("Workflow");
+		await page.setViewportSize({ width: 1487, height: 1058 });
+		await page.screenshot({ path: path.join(pluginQaDir, "actual-skill-detail.png"), animations: "disabled" });
+		await page.getByRole("button", { name: "Edit", exact: true }).click();
+		const editSkillDialog = page.getByRole("dialog", { name: "Edit Skill" });
+		const editedSkillContent = "---\nname: writing-plans\ndescription: Build a clear implementation plan\n---\n\n# Instructions\n\n## Workflow\n\n1. Clarify the goal.\n2. Write the plan.\n3. Verify the result.\n";
+		await editSkillDialog.getByLabel("SKILL.md").fill(editedSkillContent);
+		await editSkillDialog.getByRole("button", { name: "Save", exact: true }).click();
+		await expect(editSkillDialog).toHaveCount(0);
+		expect(await readFile(path.join(userSkillDir, "SKILL.md"), "utf8")).toBe(editedSkillContent);
+		phase = "opening and recoverably deleting a packaged Skill";
+		await page.getByRole("button", { name: "Open containing folder", exact: true }).click();
+		await page.getByRole("button", { name: "Delete", exact: true }).click();
+		const removeSkillDialog = page.getByRole("dialog", { name: "Move Skill to Trash?" });
+		await removeSkillDialog.getByRole("button", { name: "Move to Trash", exact: true }).click();
+		await expect(removeSkillDialog).toHaveCount(0);
+		expect(existsSync(userSkillDir)).toBe(false);
+		expect((await readdir(path.join(agentDir, "skills", ".trash"))).some((entry) => entry.endsWith("-writing-plans"))).toBe(true);
+
+		phase = "adding and editing a packaged MCP definition";
+		await page.locator(".plugins-section-switch").getByRole("tab", { name: "MCP", exact: true }).click();
+		await page.getByRole("button", { name: "New MCP", exact: true }).click();
+		await page.getByRole("menu", { name: "New MCP", exact: true }).getByRole("menuitem", { name: "User", exact: true }).click();
+		await page.getByRole("dialog", { name: "Create User MCP" }).getByRole("button", { name: "Custom MCP", exact: true }).click();
+		const addMcpDialog = page.getByRole("dialog", { name: "MCP configuration" });
+		await addMcpDialog.getByLabel("Server name", { exact: true }).fill("packaged-http");
+		await addMcpDialog.getByLabel("Server URL").fill("https://mcp.example.test/rpc");
+		await addMcpDialog.getByRole("button", { name: "Save", exact: true }).click();
+		await expect(addMcpDialog).toHaveCount(0);
+		await page.getByRole("button", { name: "Back to MCP", exact: true }).click();
+		await page.setViewportSize({ width: 1272, height: 766 });
+		await page.screenshot({ path: path.join(pluginQaDir, "actual-mcp-list.png"), animations: "disabled" });
+		await page.getByLabel("Search MCP servers").fill("packaged");
+		await expect(page.getByRole("option", { name: "packaged-http", exact: true })).toBeVisible();
+		await page.getByRole("option", { name: "packaged-http", exact: true }).click();
+		await page.setViewportSize({ width: 900, height: 720 });
+		expect(await page.locator('[data-plugin-detail="mcp"] .plugins-detail-grid').evaluate((element) =>
+			getComputedStyle(element).gridTemplateColumns.split(" ").length,
+		)).toBe(1);
+		expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(900);
+		await page.setViewportSize({ width: 1440, height: 1024 });
+		await page.getByRole("button", { name: "Edit MCP server", exact: true }).click();
+		const editMcpDialog = page.getByRole("dialog", { name: "Edit MCP server" });
+		await editMcpDialog.getByLabel("Tool timeout (seconds)").fill("42");
+		await editMcpDialog.getByRole("button", { name: "Save", exact: true }).click();
+		await expect(editMcpDialog).toHaveCount(0);
+		await page.getByRole("button", { name: "Back to MCP", exact: true }).click();
+		await expect(page.getByLabel("Search MCP servers")).toHaveValue("packaged");
 		await page.getByRole("button", { name: "New task", exact: true }).click();
 
 		phase = "verifying draft creation timing";
@@ -708,10 +1481,14 @@ test("packaged worker, WASM, trusted extension, and utility lifecycle stay funct
 			const api = (globalThis as unknown as { metis: MetisDesktopApi }).metis;
 			return {
 				hasAttachmentPicker: typeof api.selectAttachmentFiles === "function",
+				hasSkillImport: typeof api.inspectSkillImport === "function" && typeof api.importSkills === "function",
 				hasSkillList: typeof api.listSkills === "function",
+				hasMcpImport: typeof api.inspectMcpImport === "function" && typeof api.importMcpServers === "function",
+				hasMcpList: typeof api.listMcpServers === "function",
+				hasMcpCatalogDetail: typeof api.getMcpCatalogItem === "function",
 			};
 		});
-		expect(bridge).toEqual({ hasAttachmentPicker: true, hasSkillList: true });
+		expect(bridge).toEqual({ hasAttachmentPicker: true, hasSkillImport: true, hasSkillList: true, hasMcpImport: true, hasMcpList: true, hasMcpCatalogDetail: true });
 		const sessionsBeforeDraft = await page.evaluate(() =>
 			(globalThis as unknown as { metis: MetisDesktopApi }).metis.listSessions({ limit: 200 }),
 		);
@@ -725,11 +1502,61 @@ test("packaged worker, WASM, trusted extension, and utility lifecycle stay funct
 		await page.getByRole("button", { name: "Send message" }).click();
 		await expect(page.getByText("packaged-turn-ok", { exact: true }).first()).toBeVisible();
 		expect(providerToolNames[0]).toEqual(expect.arrayContaining(["ask_user", "web_fetch", "web_search"]));
+		await expect.poll(() => titleRequests).toBe(2);
+		await expect.poll(async () => {
+			const sessions = await page!.evaluate(() =>
+				(globalThis as unknown as { metis: MetisDesktopApi }).metis.listSessions({ limit: 200 }),
+			);
+			return sessions.sessions[0]?.name;
+		}).toBe("Packaged smoke title");
 		const sessionsAfterFirstSend = await page.evaluate(() =>
 			(globalThis as unknown as { metis: MetisDesktopApi }).metis.listSessions({ limit: 200 }),
 		);
 		expect(sessionsAfterFirstSend.sessions).toHaveLength(1);
-		expect(sessionsAfterFirstSend.sessions[0]).toMatchObject({ mode: "chat", cwdOrigin: "managed" });
+		expect(sessionsAfterFirstSend.sessions[0]).toMatchObject({
+			mode: "chat",
+			cwdOrigin: "managed",
+			name: "Packaged smoke title",
+		});
+		await expect(page.locator(".session-sidebar").getByRole("button", { name: "Packaged smoke title", exact: true })).toBeVisible();
+		await page.screenshot({ path: path.join(groupingQaDir, "generated-title-and-message.png") });
+		await page.getByRole("main").getByRole("button", { name: "Packaged smoke title", exact: true }).click();
+		const titleInput = page.getByRole("textbox", { name: "Session name", exact: true });
+		await titleInput.fill("Pinned packaged title");
+		await titleInput.press("Enter");
+		await expect(page.getByRole("main").getByRole("button", { name: "Pinned packaged title", exact: true })).toBeVisible();
+		const titleActions = page.getByRole("main").getByRole("button", {
+			name: "Actions for Pinned packaged title",
+			exact: true,
+		});
+		await titleActions.click();
+		let titleMenu = page.getByRole("menu", { name: "Pinned packaged title session actions", exact: true });
+		await expect(titleMenu.getByRole("menuitem")).toHaveText(["Pin", "Copy title", "Delete"]);
+		await page.screenshot({ path: path.join(groupingQaDir, "header-actions.png") });
+		await titleMenu.getByRole("menuitem", { name: "Pin", exact: true }).click();
+		const pinnedSection = page.locator(".session-section").filter({
+			has: page.getByRole("button", { name: "Pinned", exact: true }),
+		});
+		await expect(pinnedSection.getByRole("button", { name: "Pinned packaged title", exact: true })).toBeVisible();
+		await expect(page.locator(".session-sidebar").getByRole("button", { name: "Pinned packaged title", exact: true })).toHaveCount(1);
+		await page.locator(".session-sidebar").screenshot({ path: path.join(groupingQaDir, "pinned-session.png") });
+		expect(await page.evaluate(() => localStorage.getItem("metis.sessionPins.v1"))).toBe(
+			JSON.stringify({ version: 1, sessionIds: [sessionsAfterFirstSend.sessions[0]!.sessionId] }),
+		);
+		await titleActions.click();
+		titleMenu = page.getByRole("menu", { name: "Pinned packaged title session actions", exact: true });
+		await titleMenu.getByRole("menuitem", { name: "Copy title", exact: true }).click();
+		await expect(titleMenu).not.toBeVisible();
+		await titleActions.click();
+		titleMenu = page.getByRole("menu", { name: "Pinned packaged title session actions", exact: true });
+		await titleMenu.getByRole("menuitem", { name: "Delete", exact: true }).click();
+		const deleteTitleDialog = page.getByRole("dialog", { name: "Delete session?", exact: true });
+		await expect(deleteTitleDialog).toBeVisible();
+		await deleteTitleDialog.getByRole("button", { name: "Cancel", exact: true }).click();
+		titleMenu = page.getByRole("menu", { name: "Pinned packaged title session actions", exact: true });
+		await titleMenu.getByRole("menuitem", { name: "Unpin", exact: true }).click();
+		await expect(pinnedSection).toHaveCount(0);
+		await expect(page.locator(".session-sidebar").getByRole("button", { name: "Pinned packaged title", exact: true })).toHaveCount(1);
 		const todaySection = page.locator(".session-section").filter({ has: page.getByRole("button", { name: "Today", exact: true }) });
 		await expect(todaySection).toBeVisible();
 		await page.locator(".session-sidebar").screenshot({ path: path.join(groupingQaDir, "date-default.png") });
@@ -751,7 +1578,7 @@ test("packaged worker, WASM, trusted extension, and utility lifecycle stay funct
 		phase = "creating trusted project session";
 		const trustedSessionId = await createAndRestoreChatSession(page, projectDir, false);
 		await expect(page.getByRole("heading", { name: "Trust this project?" })).toBeVisible();
-		await page.getByRole("button", { name: /Trust \(this session only\)/ }).click();
+		await page.getByRole("button", { name: "Trust", exact: true }).click();
 
 		phase = "running the packaged extension image pipeline";
 		await expect(page.getByRole("heading", { name: "Packaged image pipeline" })).toBeVisible();
@@ -760,11 +1587,84 @@ test("packaged worker, WASM, trusted extension, and utility lifecycle stay funct
 		await page.locator(`[data-active-session-id="${trustedSessionId}"]`).waitFor({ state: "visible", timeout: 15_000 });
 
 		phase = "verifying packaged Project Skill catalog";
-		await page.getByRole("button", { name: "Skills", exact: true }).click();
-		await page.getByRole("button", { name: "Project", exact: true }).click();
-		await page.locator(".skills-directory-list").getByRole("button", { name: "Chat", exact: true }).click();
-		await page.getByRole("button", { name: path.basename(projectDir), exact: true }).click();
-		await expect(page.getByText("packaged-project-skill", { exact: true })).toBeVisible();
+		await page.getByRole("button", { name: "Plugins", exact: true }).click();
+		await expect(page.locator('.plugins-list-row[aria-label="packaged-project-skill"]')).toBeVisible();
+
+		phase = "verifying packaged live MCP actions and secret redaction";
+		await page.locator(".plugins-section-switch").getByRole("tab", { name: "MCP", exact: true }).click();
+		await page.getByRole("option", { name: "packaged-http", exact: true }).click();
+		await page.getByRole("button", { name: "Authentication", exact: true }).click();
+		const userCredentialDialog = page.getByRole("dialog", { name: "Set authentication" });
+		await userCredentialDialog.getByLabel("Bearer token (optional)").fill("METIS_E2E_USER_MCP_SECRET");
+		await userCredentialDialog.getByRole("button", { name: "Save", exact: true }).click();
+		await expect(userCredentialDialog).toHaveCount(0);
+		await page.getByRole("button", { name: "Back to MCP", exact: true }).click();
+		await page.getByRole("button", { name: "New MCP", exact: true }).click();
+		await page.getByRole("menu", { name: "New MCP", exact: true }).getByRole("menuitem", { name: "Project", exact: true }).click();
+		const projectMcpDialog = page.getByRole("dialog", { name: "Create Project MCP" });
+		await projectMcpDialog.getByRole("button", { name: "Import JSON", exact: true }).click();
+		await projectMcpDialog.getByLabel("MCP JSON or JSONC", { exact: true }).fill(`{
+			// Intentionally shadows the User definition.
+			"mcpServers": {
+				"packaged-http": {
+					"type": "streamable-http",
+					"url": "https://mcp.example.test/project",
+					"enabled": false,
+					"headers": { "Authorization": "Bearer METIS_E2E_PROJECT_MCP_SECRET" },
+				},
+			},
+		}`);
+		await projectMcpDialog.getByRole("button", { name: "Inspect", exact: true }).click();
+		await expect(projectMcpDialog.locator(".mcp-import-candidate")).toHaveCount(1);
+		await projectMcpDialog.getByRole("button", { name: "Import selected", exact: true }).click();
+		await expect(projectMcpDialog).toHaveCount(0);
+		await expect(page.getByRole("option", { name: "packaged-http", exact: true })).toHaveCount(2);
+		expect(await page.locator("body").innerText()).not.toContain("METIS_E2E_USER_MCP_SECRET");
+		expect(await page.locator("body").innerText()).not.toContain("METIS_E2E_PROJECT_MCP_SECRET");
+		const globalSettingsText = await readFile(path.join(agentDir, "settings.json"), "utf8");
+		const projectSettingsText = await readFile(path.join(projectDir, ".metis", "settings.json"), "utf8");
+		expect(globalSettingsText).not.toContain("METIS_E2E_USER_MCP_SECRET");
+		expect(projectSettingsText).not.toContain("METIS_E2E_PROJECT_MCP_SECRET");
+		const authPath = path.join(agentDir, "auth.json");
+		const authText = await readFile(authPath, "utf8");
+		const auth = JSON.parse(authText) as Record<string, unknown>;
+		const packagedCredentialKeys = Object.keys(auth).filter((key) => key.endsWith(":packaged-http"));
+		expect(packagedCredentialKeys).toHaveLength(2);
+		expect(authText).toContain("METIS_E2E_USER_MCP_SECRET");
+		expect(authText).toContain("METIS_E2E_PROJECT_MCP_SECRET");
+		if (process.platform !== "win32") expect((await stat(authPath)).mode & 0o077).toBe(0);
+		await page.getByRole("button", { name: "MCP scopes", exact: true }).click();
+		await page.getByRole("option", { name: "Project", exact: true }).click();
+		await page.getByRole("option", { name: "packaged-http", exact: true }).click();
+		await page.setViewportSize({ width: 1487, height: 1058 });
+		await page.screenshot({ path: path.join(pluginQaDir, "actual-mcp-detail.png"), animations: "disabled" });
+		await page.setViewportSize({ width: 1440, height: 1024 });
+		await expect(page.getByRole("button", { name: "Restart", exact: true })).toBeVisible();
+		await page.getByRole("button", { name: "Restart", exact: true }).click();
+		await page.getByRole("button", { name: "Authentication", exact: true }).click();
+		const credentialDialog = page.getByRole("dialog", { name: "Set authentication" });
+		await credentialDialog.getByLabel("Bearer token (optional)").fill("METIS_E2E_PROJECT_REPLACEMENT");
+		await credentialDialog.getByRole("button", { name: "Save", exact: true }).click();
+		await expect(credentialDialog).toHaveCount(0);
+		expect(await page.locator("body").innerText()).not.toContain("METIS_E2E_PROJECT_REPLACEMENT");
+		await page.getByRole("button", { name: "Clear authentication", exact: true }).click();
+		await expect(page.getByRole("button", { name: "Clear authentication", exact: true })).toHaveCount(0);
+		await page.getByRole("button", { name: "Delete", exact: true }).click();
+		let removeMcpDialog = page.getByRole("dialog", { name: "Remove MCP server?" });
+		await removeMcpDialog.getByRole("button", { name: "Remove", exact: true }).click();
+		await page.getByRole("button", { name: "MCP scopes", exact: true }).click();
+		await page.getByRole("option", { name: "User", exact: true }).click();
+		await page.getByRole("option", { name: "packaged-http", exact: true }).click();
+		await expect(page.getByRole("button", { name: "Clear authentication", exact: true })).toBeVisible();
+		await page.getByRole("button", { name: "Clear authentication", exact: true }).click();
+		await page.getByRole("button", { name: "Delete", exact: true }).click();
+		removeMcpDialog = page.getByRole("dialog", { name: "Remove MCP server?" });
+		await removeMcpDialog.getByRole("button", { name: "Remove", exact: true }).click();
+		await expect(page.getByRole("option", { name: "packaged-http", exact: true })).toHaveCount(0);
+		const globalSettings = JSON.parse(await readFile(path.join(agentDir, "settings.json"), "utf8")) as { mcpServers?: Record<string, unknown> };
+		expect(globalSettings.mcpServers?.["packaged-http"]).toBeUndefined();
+		const projectSettings = JSON.parse(await readFile(path.join(projectDir, ".metis", "settings.json"), "utf8")) as { mcpServers?: Record<string, unknown> };
+		expect(projectSettings.mcpServers?.["packaged-http"]).toBeUndefined();
 		await page.locator(".project-group").filter({ hasText: path.basename(projectDir) }).locator(".session-button").click();
 		await page.locator(`[data-active-session-id="${trustedSessionId}"]`).waitFor({ state: "visible", timeout: 15_000 });
 
@@ -776,7 +1676,7 @@ test("packaged worker, WASM, trusted extension, and utility lifecycle stay funct
 		await page.locator("#composer-input").fill("packaged smoke turn");
 		await page.getByRole("button", { name: "Send" }).click();
 		await expect(page.getByText("packaged-turn-ok", { exact: true })).toBeVisible();
-		expect(providerRequests).toBe(2);
+		expect(providerRequests).toBe(3);
 
 		phase = "answering packaged structured questions";
 		await page.setViewportSize({ width: 1097, height: 588 });
@@ -830,7 +1730,7 @@ test("packaged worker, WASM, trusted extension, and utility lifecycle stay funct
 		await page.screenshot({ animations: "disabled", path: path.join(askUserQaDir, "inline-question-multi-custom.png") });
 		await questionPanel.getByRole("button", { name: "Submit answers", exact: true }).click();
 		await expect(questionPanel).toHaveCount(0);
-		await expect.poll(() => providerRequests).toBe(4);
+		await expect.poll(() => providerRequests).toBe(5);
 		await expect.poll(() => transcriptScroll.evaluate((element) => element.clientHeight)).toBe(transcriptHeightBeforeQuestions);
 
 		phase = "answering a packaged single-select question";
@@ -840,9 +1740,12 @@ test("packaged worker, WASM, trusted extension, and utility lifecycle stay funct
 		await page.screenshot({ animations: "disabled", path: path.join(askUserQaDir, "inline-question-single.png") });
 		await questionPanel.getByRole("radio", { name: "Cloud sync", exact: true }).click();
 		await expect(questionPanel).toHaveCount(0);
-		await expect.poll(() => providerRequests).toBe(6);
+		await expect.poll(() => providerRequests).toBe(7);
 
 		phase = "approving an inline packaged permission request";
+		await page.getByRole("button", { name: "Select permissions, current Auto", exact: true }).click();
+		await page.getByRole("menuitemradio", { name: /Ask before every change/u }).click();
+		await expect(page.getByRole("button", { name: "Select permissions, current Ask", exact: true })).toBeVisible();
 		const transcriptHeightBeforeApproval = await transcriptScroll.evaluate((element) => element.clientHeight);
 		await page.locator("#composer-input").fill("request packaged approval");
 		await page.getByRole("button", { name: "Send" }).click();
@@ -853,7 +1756,8 @@ test("packaged worker, WASM, trusted extension, and utility lifecycle stay funct
 		await expect(approvalPanel.locator("dt", { hasText: "Command" })).toBeVisible();
 		await expect(approvalPanel.locator("dd code", { hasText: "pwd" })).toBeVisible();
 		await expect(approvalPanel.locator("dt", { hasText: "Working directory" })).toBeVisible();
-		await expect(approvalPanel).not.toContainText("Arguments:");
+		await expect(approvalPanel.locator(".permission-approval-complete-details")).toContainText("Arguments:");
+		await expect(approvalPanel).toContainText("workspace sandbox");
 		await expect(approvalPanel.locator('[aria-expanded]')).toHaveCount(0);
 		const approvalSlot = page.locator(".composer-dock > .permission-approval-slot");
 		const approvalComposer = page.locator(".composer-dock > .composer-chat");
@@ -871,20 +1775,22 @@ test("packaged worker, WASM, trusted extension, and utility lifecycle stay funct
 		expect(approvalComposerBox!.width - approvalSlotBox!.width).toBeCloseTo(32, 0);
 		expect(approvalComposerBox!.y - approvalSlotBox!.y - approvalSlotBox!.height).toBeCloseTo(0, 0);
 		expect(await transcriptScroll.evaluate((element) => element.clientHeight)).toBeLessThan(transcriptHeightBeforeApproval);
-		const denyButton = approvalPanel.getByRole("button", { name: /Deny/u });
+		const denyButton = approvalPanel.getByRole("button", { name: /Reject/u });
 		const allowButton = approvalPanel.getByRole("button", { name: "Allow once", exact: true });
 		const [denyBox, allowBox] = await Promise.all([denyButton.boundingBox(), allowButton.boundingBox()]);
 		expect((allowBox?.x ?? 0)).toBeGreaterThan(denyBox?.x ?? 0);
 		await page.screenshot({ path: path.join(permissionQaDir, "inline-approval.png") });
 		await allowButton.click();
 		await expect(approvalPanel).toHaveCount(0);
-		await expect.poll(() => providerRequests).toBe(8);
+		await expect.poll(() => providerRequests).toBe(9);
 		await expect.poll(() => transcriptScroll.evaluate((element) => element.clientHeight)).toBe(transcriptHeightBeforeApproval);
 
 		phase = "creating and running a packaged scheduled task";
 		await page.getByRole("button", { name: "Scheduled tasks", exact: true }).click();
 		await expect(page.getByRole("heading", { name: "Create your first scheduled task" })).toBeVisible();
+		await page.setViewportSize({ width: 1272, height: 766 });
 		await page.screenshot({ path: path.join(scheduleQaDir, "overview-empty.png") });
+		await page.setViewportSize({ width: 1440, height: 1024 });
 		await page.getByLabel("Sort scheduled tasks").click();
 		await expect(page.getByRole("listbox", { name: "Sort scheduled tasks" })).toBeVisible();
 		await page.screenshot({ path: path.join(scheduleQaDir, "overview-sort-menu.png") });
@@ -908,7 +1814,7 @@ test("packaged worker, WASM, trusted extension, and utility lifecycle stay funct
 		await expect(workspaceDialog).toBeVisible();
 		await page.screenshot({ path: path.join(scheduleQaDir, "create-with-metis-workspace.png") });
 		await workspaceDialog.getByRole("button", { name: /Use default workspace/u }).click();
-		await expect.poll(() => providerRequests).toBe(9);
+		await expect.poll(() => providerRequests).toBe(10);
 		await expect(page.getByRole("heading", { name: "Set up a scheduled task", exact: true })).toBeVisible();
 		await page.getByRole("button", { name: "Scheduled tasks", exact: true }).click();
 		await page.locator(".scheduled-tasks-empty").getByRole("button", { name: "Create scheduled task", exact: true }).click();
@@ -933,8 +1839,8 @@ test("packaged worker, WASM, trusted extension, and utility lifecycle stay funct
 		await runNowButton.click();
 		await expect(runNowButton).toBeDisabled();
 		await expect(page.locator(".scheduled-task-history").getByText("succeeded", { exact: true })).toBeVisible({ timeout: 20_000 });
-		expect(providerRequests).toBe(10);
-		expect(providerToolNames[9]?.sort()).toEqual(
+		expect(providerRequests).toBe(11);
+		expect(providerToolNames.at(-1)?.sort()).toEqual(
 			["bash", "edit", "find", "grep", "ls", "read", "web_fetch", "web_search", "write"].sort(),
 		);
 		await expect(runNowButton).toBeEnabled();
@@ -973,7 +1879,7 @@ test("packaged worker, WASM, trusted extension, and utility lifecycle stay funct
 		await retainedSessionRow.hover();
 		await page.locator(".session-sidebar").screenshot({ path: path.join(scheduleQaDir, "retained-session-sidebar-actions.png") });
 		await retainedSessionRow.getByRole("button", { name: `Actions for ${retainedSessionName}`, exact: true }).click();
-		await expect(page.locator(".session-action-menu").getByRole("menuitem")).toHaveText(["Delete"]);
+		await expect(page.locator(".session-action-menu").getByRole("menuitem")).toHaveText(["Pin", "Delete"]);
 		await page.locator(".session-action-menu").getByRole("menuitem", { name: "Delete" }).click();
 		await page.getByRole("dialog", { name: "Delete session?" }).getByRole("button", { name: "Move to Trash" }).click();
 		await expect(retainedSessionRow).toHaveCount(0);
@@ -990,7 +1896,9 @@ test("packaged worker, WASM, trusted extension, and utility lifecycle stay funct
 
 		phase = "reloading and restarting";
 		await page.reload({ waitUntil: "domcontentloaded" });
-		await page.locator(".session-row").filter({ hasText: "packaged smoke turn" }).click();
+		await projectGroup(page, path.basename(projectDir))
+			.getByRole("button", { name: "Packaged smoke title", exact: true })
+			.click();
 		await expect(page.getByText("packaged-turn-ok", { exact: true }).first()).toBeVisible();
 		const firstUtilityPid = appServerPid(rootPid);
 		if (!firstUtilityPid) throw new Error("Could not find the packaged App Server");
@@ -1001,6 +1909,7 @@ test("packaged worker, WASM, trusted extension, and utility lifecycle stay funct
 		if (!finalUtilityPid) throw new Error("Packaged App Server did not restart");
 
 		phase = "quitting without an orphan";
+		expect(consoleErrors).toEqual([]);
 		await browser.close();
 		browser = undefined;
 		await stopProcess(app);
@@ -1008,7 +1917,7 @@ test("packaged worker, WASM, trusted extension, and utility lifecycle stay funct
 	} catch (error) {
 		const bodyText = await page?.locator("body").innerText().catch(() => "renderer unavailable");
 		throw new Error(
-			`${error instanceof Error ? error.message : String(error)}\nphase=${phase} requests=${providerRequests}\nrenderer body:\n${bodyText ?? "unavailable"}\n${diagnostics.join("").slice(-8_000)}`,
+			`${error instanceof Error ? error.message : String(error)}\nphase=${phase} requests=${providerRequests}\nrenderer body:\n${bodyText ?? "unavailable"}\nrenderer errors:\n${consoleErrors.join("\n").slice(-8_000)}\n${diagnostics.join("").slice(-8_000)}`,
 		);
 	} finally {
 		await browser?.close().catch(() => undefined);
@@ -1071,11 +1980,24 @@ test("packaged personal profile renders cached Token and Skill activity", async 
 		await waitForServerReady(page);
 
 		phase = "opening Settings";
-		await page.getByRole("button", { name: "Metis", exact: true }).click();
+		await page.getByRole("button", { name: "Metis User", exact: true }).click();
 		await expect(page.getByRole("menuitem", { name: "Settings", exact: true })).toBeFocused();
 		await page.screenshot({ path: path.join(qaDir, "account-menu.png") });
 		await page.getByRole("menuitem", { name: "Settings", exact: true }).click();
 		await expect(page.getByRole("heading", { name: "Metis User", exact: true })).toBeVisible();
+		await page.locator('.profile-avatar-actions input[type="file"]').setInputFiles({
+			name: "avatar.png",
+			mimeType: "image/png",
+			buffer: Buffer.from(TINY_PNG, "base64"),
+		});
+		await expect(page.locator(".profile-avatar img")).toBeVisible();
+		await expect(page.locator(".account-mark img")).toBeVisible();
+		const storedAvatar = await page.evaluate(() =>
+			(JSON.parse(localStorage.getItem("metis.profile.identity.v1") ?? "null") as { avatarDataUrl?: string } | null)
+				?.avatarDataUrl,
+		);
+		expect(storedAvatar).toMatch(/^data:image\/webp;base64,/u);
+		expect(storedAvatar!.length).toBeLessThan(50_000);
 		const settingsBox = await page.locator(".settings-dialog").boundingBox();
 		expect(settingsBox?.width).toBe(1_040);
 		expect(settingsBox?.height).toBe(720);
@@ -1178,9 +2100,12 @@ test("packaged personal profile renders cached Token and Skill activity", async 
 		await page.screenshot({ path: path.join(settingsQaDir, "usage-1440x820.png") });
 		const tableView = page.getByRole("button", { name: "Table view", exact: true });
 		const chartView = page.getByRole("button", { name: "Chart view", exact: true });
+		const chartCardHeight = await page.locator(".usage-chart-card").evaluate((element) => element.getBoundingClientRect().height);
 		await tableView.click();
 		await expect(tableView).toHaveAttribute("aria-pressed", "true");
 		expect(await page.locator(".usage-table-wrap tbody tr")).toHaveCount(30);
+		const tableCardHeight = await page.locator(".usage-chart-card").evaluate((element) => element.getBoundingClientRect().height);
+		expect(Math.abs(chartCardHeight - tableCardHeight)).toBeLessThanOrEqual(1);
 		expect(await page.locator(".settings-page-scroll-usage").evaluate((element) => element.scrollHeight - element.clientHeight)).toBeLessThanOrEqual(1);
 		expect(await page.locator(".usage-view-toggle").evaluate((element) => getComputedStyle(element).backgroundColor)).toBe("rgba(0, 0, 0, 0)");
 		await page.screenshot({ path: path.join(settingsQaDir, "usage-table-30d-1440x820.png") });
@@ -1260,6 +2185,228 @@ test("packaged personal profile renders cached Token and Skill activity", async 
 	} finally {
 		await browser?.close().catch(() => undefined);
 		await stopProcess(app);
+		await rm(tempRoot, { recursive: true, force: true });
+	}
+});
+
+test("packaged MCP creation matrix connects URL, custom, and JSON transports", async () => {
+	test.setTimeout(120_000);
+	const fixtures = await loadCodingFixtures();
+	const executable = packagedExecutable();
+	expect(existsSync(executable), `Package the desktop app first: ${executable}`).toBe(true);
+
+	const tempRoot = await mkdtemp(path.join(tmpdir(), "metis-mcp-matrix-"));
+	const agentDir = path.join(tempRoot, "agent");
+	const homeDir = path.join(tempRoot, "home");
+	const projectDir = path.join(tempRoot, "project");
+	const userDataDir = path.join(tempRoot, "electron");
+	const stdioFixture = path.resolve(desktopRoot, "../coding-agent/test/fixtures/mcp-stdio-server.mjs");
+	await Promise.all([mkdir(agentDir), mkdir(homeDir), mkdir(projectDir), mkdir(userDataDir)]);
+	await writeFile(path.join(agentDir, "settings.json"), JSON.stringify({ mcpServers: {} }));
+	createStoredSession(fixtures, agentDir, projectDir, CHAT_ACTIVE_ID, "chat", false, "MCP matrix fixture");
+	new fixtures.ProjectTrustStore(agentDir).set(projectDir, true);
+
+	const [urlServer, customServer, jsonServer] = await Promise.all([
+		createMcpTestServer({
+			requiredBearerToken: "url-bearer",
+			requiredHeaders: { "x-url-extra": "url-extra", "x-url-secret": "url-header" },
+		}),
+		createMcpTestServer({
+			requiredBearerToken: "custom-bearer",
+			requiredHeaders: { "x-custom-secret": "custom-header" },
+		}),
+		createMcpTestServer({
+			requiredBearerToken: "json-bearer",
+			requiredHeaders: { "x-json-secret": "json-header" },
+		}),
+	]);
+	const debuggingPort = await reservePort();
+	const diagnostics: string[] = [];
+	const app = launchPackagedApp(executable, debuggingPort, userDataDir, projectDir, agentDir, homeDir, diagnostics);
+
+	let browser: Browser | undefined;
+	let page: Page | undefined;
+	let phase = "connecting";
+	const secrets = [
+		"url-bearer",
+		"url-header",
+		"url-extra",
+		"custom-bearer",
+		"custom-header",
+		"stdio-user-secret",
+		"json-bearer",
+		"json-header",
+		"json-stdio-secret",
+	];
+	try {
+		({ browser, page } = await connectToApp(debuggingPort));
+		await waitForServerReady(page);
+		phase = "opening the MCP matrix fixture";
+		await page.getByRole("button", { name: "MCP matrix fixture", exact: true }).click();
+		await page.locator(`[data-active-session-id="${CHAT_ACTIVE_ID}"]`).waitFor({ state: "visible", timeout: 15_000 });
+		await page.getByRole("button", { name: "Plugins", exact: true }).click();
+		await page.locator(".plugins-section-switch").getByRole("tab", { name: "MCP", exact: true }).click();
+
+		const openCreation = async (scope: "User" | "Project") => {
+			await page!.getByRole("button", { name: "New MCP", exact: true }).click();
+			await page!.getByRole("menu", { name: "New MCP", exact: true }).getByRole("menuitem", { name: scope, exact: true }).click();
+			return page!.getByRole("dialog", { name: `Create ${scope} MCP` });
+		};
+		const expectConnected = async (name: string, tool: string, inspectCatalog = false) => {
+			const detail = page!.locator('[data-plugin-detail="mcp"]');
+			const toolLabel = tool === "search_docs" ? "Search docs" : tool;
+			await expect(detail.getByRole("heading", { name, exact: true })).toBeVisible();
+			await expect(detail).toContainText("Connected", { timeout: 15_000 });
+			await expect(detail.getByText(toolLabel, { exact: true })).toBeVisible();
+			if (inspectCatalog) {
+				await detail.getByRole("button", { name: toolLabel, exact: true }).click();
+				await expect(detail).toContainText("Input schema");
+				await expect(detail.locator(".mcp-catalog-item-detail")).toContainText("query");
+				await detail.getByRole("button", { name: "review", exact: true }).click();
+				await expect(detail).toContainText("target");
+				await expect(detail).toContainText("Required");
+			}
+			await page!.getByRole("button", { name: "Back to MCP", exact: true }).click();
+		};
+
+		phase = "creating URL HTTP MCP";
+		let dialog = await openCreation("User");
+		await dialog.getByRole("button", { name: "Add by URL", exact: true }).click();
+		await dialog.getByLabel("Name", { exact: true }).fill("url-http");
+		await dialog.getByLabel("Description (optional)").fill("URL smoke server");
+		await dialog.getByLabel("Server URL").fill(urlServer.url.toString());
+		await dialog.getByLabel("Bearer token (optional)").fill("url-bearer");
+		await dialog.getByRole("button", { name: "Add header", exact: true }).click();
+		await dialog.getByRole("button", { name: "Add header", exact: true }).click();
+		const urlHeaders = dialog.locator(".mcp-quick-header-row");
+		for (const [index, header, variable, value] of [
+			[0, "X-Url-Secret", "URL_HEADER", "url-header"],
+			[1, "X-Url-Extra", "URL_EXTRA", "url-extra"],
+		] as const) {
+			await urlHeaders.nth(index).getByLabel("Header name").fill(header);
+			await urlHeaders.nth(index).getByLabel("Environment name (optional)").fill(variable);
+			await urlHeaders.nth(index).getByLabel("Secret value").fill(value);
+		}
+		await dialog.getByRole("button", { name: "Inspect", exact: true }).click();
+		await expect(dialog.locator(".mcp-import-candidate")).toHaveCount(1);
+		await dialog.getByRole("button", { name: "Add selected", exact: true }).click();
+		await expect(dialog).toHaveCount(0);
+		await expectConnected("url-http", "search_docs", true);
+
+		phase = "creating custom HTTP MCP";
+		dialog = await openCreation("User");
+		await dialog.getByRole("button", { name: "Custom MCP", exact: true }).click();
+		dialog = page.getByRole("dialog", { name: "MCP configuration" });
+		await expect(dialog.getByLabel("Startup timeout (seconds)")).toHaveCount(0);
+		await expect(dialog.getByLabel("Tool timeout (seconds)")).toHaveCount(0);
+		await dialog.getByLabel("Server name", { exact: true }).fill("custom-http");
+		await dialog.getByLabel("Description (optional)").fill("Custom HTTP smoke server");
+		await dialog.getByLabel("Server URL").fill(customServer.url.toString());
+		await dialog.getByRole("button", { name: "Add header", exact: true }).click();
+		await dialog.getByRole("button", { name: "Add header", exact: true }).click();
+		const customHeaders = dialog.locator(".mcp-quick-header-row");
+		for (const [index, header, variable, value] of [
+			[0, "Authorization", "CUSTOM_BEARER", "Bearer custom-bearer"],
+			[1, "X-Custom-Secret", "CUSTOM_HEADER", "custom-header"],
+		] as const) {
+			await customHeaders.nth(index).getByLabel("Header name").fill(header);
+			await customHeaders.nth(index).getByLabel("Environment name (optional)").fill(variable);
+			await customHeaders.nth(index).getByLabel("Secret value").fill(value);
+		}
+		await dialog.getByRole("button", { name: "Save", exact: true }).click();
+		await expect(dialog).toHaveCount(0);
+		await expectConnected("custom-http", "search_docs");
+
+		phase = "creating custom STDIO MCP";
+		dialog = await openCreation("User");
+		await dialog.getByRole("button", { name: "Custom MCP", exact: true }).click();
+		dialog = page.getByRole("dialog", { name: "MCP configuration" });
+		await dialog.getByLabel("Transport").click();
+		await page.getByRole("option", { name: "STDIO", exact: true }).click();
+		await dialog.getByLabel("Server name", { exact: true }).fill("custom-stdio");
+		await dialog.getByLabel("Command").fill(process.execPath);
+		await dialog.getByLabel("Arguments, one per line").fill(stdioFixture);
+		await dialog.getByLabel("Forwarded variable names, one per line").fill("LOCAL_TOKEN");
+		await dialog.getByLabel("Working directory").fill(projectDir);
+		await dialog.getByRole("button", { name: "Add secret", exact: true }).click();
+		const stdioSecret = dialog.locator(".mcp-secret-row").first();
+		await stdioSecret.getByLabel("Variable name").fill("LOCAL_TOKEN");
+		await stdioSecret.getByLabel("Secret value").fill("stdio-user-secret");
+		await dialog.getByRole("button", { name: "Save", exact: true }).click();
+		await expect(dialog).toHaveCount(0);
+		await expectConnected("custom-stdio", "env_status");
+
+		phase = "batch importing JSONC HTTP and STDIO MCPs";
+		dialog = await openCreation("Project");
+		await dialog.getByRole("button", { name: "Import JSON", exact: true }).click();
+		await dialog.getByLabel("MCP JSON or JSONC", { exact: true }).fill(`{
+			// A single import must create both supported transports.
+			"mcpServers": {
+				"json-http": {
+					"type": "streamable-http",
+					"url": ${JSON.stringify(jsonServer.url.toString())},
+					"headers": {
+						"Authorization": "Bearer json-bearer",
+						"X-Json-Secret": "json-header",
+					},
+				},
+				"json-stdio": {
+					"command": ${JSON.stringify(process.execPath)},
+					"args": [${JSON.stringify(stdioFixture)}],
+					"cwd": ${JSON.stringify(projectDir)},
+					"env": { "LOCAL_TOKEN": "json-stdio-secret" },
+				},
+			},
+		}`);
+		await dialog.getByRole("button", { name: "Inspect", exact: true }).click();
+		await expect(dialog.locator(".mcp-import-candidate")).toHaveCount(2);
+		await expect(dialog.locator('.mcp-import-candidate input[type="checkbox"]:checked')).toHaveCount(2);
+		await dialog.getByRole("button", { name: "Import selected", exact: true }).click();
+		await expect(dialog).toHaveCount(0);
+
+		for (const [name, tool] of [["json-http", "search_docs"], ["json-stdio", "env_status"]] as const) {
+			await page.getByLabel("Search MCP servers").fill(name);
+			await page.getByRole("option", { name, exact: true }).click();
+			await expectConnected(name, tool);
+		}
+
+		phase = "checking MCP scope, persistence, and redaction";
+		const globalSettingsText = await readFile(path.join(agentDir, "settings.json"), "utf8");
+		const projectSettingsText = await readFile(path.join(projectDir, ".metis", "settings.json"), "utf8");
+		const globalSettings = JSON.parse(globalSettingsText) as { mcpServers?: Record<string, unknown> };
+		const projectSettings = JSON.parse(projectSettingsText) as { mcpServers?: Record<string, unknown> };
+		expect(Object.keys(globalSettings.mcpServers ?? {}).sort()).toEqual(["custom-http", "custom-stdio", "url-http"]);
+		expect(Object.keys(projectSettings.mcpServers ?? {}).sort()).toEqual(["json-http", "json-stdio"]);
+		expect(globalSettings.mcpServers?.["url-http"]).toMatchObject({ description: "URL smoke server" });
+		for (const server of Object.values({ ...(globalSettings.mcpServers ?? {}), ...(projectSettings.mcpServers ?? {}) })) {
+			expect(server).not.toHaveProperty("enabledTools");
+			expect(server).not.toHaveProperty("disabledTools");
+		}
+		const bodyText = await page.locator("body").innerText();
+		for (const secret of secrets) {
+			expect(globalSettingsText).not.toContain(secret);
+			expect(projectSettingsText).not.toContain(secret);
+			expect(bodyText).not.toContain(secret);
+			expect(diagnostics.join("\n")).not.toContain(secret);
+		}
+		const authPath = path.join(agentDir, "auth.json");
+		const authText = await readFile(authPath, "utf8");
+		const auth = JSON.parse(authText) as Record<string, unknown>;
+		expect(Object.keys(auth)).toHaveLength(5);
+		for (const name of ["url-http", "custom-http", "custom-stdio", "json-http", "json-stdio"]) {
+			expect(Object.keys(auth).some((key) => key.endsWith(`:${name}`))).toBe(true);
+		}
+		for (const secret of secrets) expect(authText).toContain(secret);
+		if (process.platform !== "win32") expect((await stat(authPath)).mode & 0o077).toBe(0);
+	} catch (error) {
+		const bodyText = await page?.locator("body").innerText().catch(() => "renderer unavailable");
+		throw new Error(
+			`${error instanceof Error ? error.message : String(error)}\nphase=${phase}\nrenderer body:\n${bodyText ?? "unavailable"}\n${diagnostics.join("").slice(-8_000)}`,
+		);
+	} finally {
+		await browser?.close().catch(() => undefined);
+		await stopProcess(app);
+		await Promise.all([urlServer.close(), customServer.close(), jsonServer.close()]);
 		await rm(tempRoot, { recursive: true, force: true });
 	}
 });
@@ -1437,6 +2584,7 @@ test("packaged Code subagent sidebar lists durable work and opens its transcript
 		expect(await transcript.locator("[data-transcript-item]").count()).toBeLessThanOrEqual(24);
 		expect(await transcript.locator(".code-execution > summary").count()).toBeGreaterThanOrEqual(2);
 		await transcript.locator(".code-execution > summary").last().click();
+		await transcript.locator(".code-execution").last().locator(".code-command > summary").last().click();
 		await expect(transcript.getByText("Packaged tool output", { exact: true })).toBeVisible();
 		expect(await transcript.locator(".code-command-output").evaluate((element) => getComputedStyle(element).overflow)).toBe("auto");
 		await page.locator(".tool-sidebar").screenshot({ path: path.join(qaDir, "detail-392x986.png") });
@@ -1453,7 +2601,9 @@ test("packaged Code subagent sidebar lists durable work and opens its transcript
 		await expect(page.getByRole("button", { name: "View transcript for Packaged project inspector", exact: true })).toBeVisible();
 		await page.getByRole("button", { name: "View transcript for Packaged project inspector", exact: true }).click();
 		await expect(page.getByText("Packaged child completed", { exact: true })).toBeVisible();
-		await page.getByRole("region", { name: "Subagent transcript", exact: true }).locator(".code-execution > summary").last().click();
+		const reopenedTranscript = page.getByRole("region", { name: "Subagent transcript", exact: true });
+		await reopenedTranscript.locator(".code-execution > summary").last().click();
+		await reopenedTranscript.locator(".code-execution").last().locator(".code-command > summary").last().click();
 		await expect(page.getByText("Packaged tool output", { exact: true })).toBeVisible();
 
 		phase = "checking a narrow app window";
@@ -1485,7 +2635,9 @@ test("packaged Code subagent sidebar lists durable work and opens its transcript
 		await expect(page.getByRole("button", { name: "View transcript for Packaged project inspector", exact: true })).toBeVisible();
 		await page.getByRole("button", { name: "View transcript for Packaged project inspector", exact: true }).click();
 		await expect(page.getByText("Packaged child completed", { exact: true })).toBeVisible();
-		await page.getByRole("region", { name: "Subagent transcript", exact: true }).locator(".code-execution > summary").last().click();
+		const restoredTranscript = page.getByRole("region", { name: "Subagent transcript", exact: true });
+		await restoredTranscript.locator(".code-execution > summary").last().click();
+		await restoredTranscript.locator(".code-execution").last().locator(".code-command > summary").last().click();
 		await expect(page.getByText("Packaged tool output", { exact: true })).toBeVisible();
 		await page.getByRole("button", { name: "Back to background tasks", exact: true }).click();
 		await expect(page.getByRole("button", { name: "View transcript for Packaged project inspector", exact: true })).toBeFocused();
@@ -2353,17 +3505,26 @@ test("packaged Language menu switches immediately and persists across restart", 
 	let browser: Browser | undefined;
 	let page: Page | undefined;
 	let phase = "connecting";
+	const consoleErrors: string[] = [];
+	const captureConsoleErrors = (target: Page) => target.on("console", (message) => {
+		if (message.type() === "error") consoleErrors.push(message.text());
+	});
 	try {
 		({ browser, page } = await connectToApp(firstPort));
+		captureConsoleErrors(page);
 		page.setDefaultTimeout(10_000);
 		await page.setViewportSize({ width: 1440, height: 900 });
 		await waitForServerReady(page);
 
 		phase = "opening Language menu";
-		await page.getByRole("button", { name: "Metis", exact: true }).click();
+		await page.getByRole("button", { name: "Metis User", exact: true }).click();
 		await page.getByRole("menuitem", { name: "Language", exact: true }).click();
 		await expect(page.getByRole("menuitemradio", { name: "English", exact: true })).toHaveAttribute("aria-checked", "true");
 		await expect(page.getByRole("menuitemradio")).toHaveCount(2);
+		expect(await page.locator(".account-menu-popover").evaluate((element) => {
+			const style = getComputedStyle(element);
+			return { background: style.backgroundColor, border: style.borderTopColor, radius: style.borderRadius };
+		})).toEqual({ background: "rgb(55, 55, 55)", border: "rgba(255, 255, 255, 0.15)", radius: "9px" });
 		const accountMenuBox = await page.locator(".account-menu-popover").boundingBox();
 		const languageMenuBox = await page.locator(".account-language-popover").boundingBox();
 		expect(accountMenuBox).not.toBeNull();
@@ -2386,9 +3547,9 @@ test("packaged Language menu switches immediately and persists across restart", 
 		phase = "switching to Chinese";
 		await page.getByRole("menuitemradio", { name: "中文", exact: true }).click();
 		await expect(page.getByRole("button", { name: "新建任务", exact: true })).toBeVisible();
-		await expect(page.getByText("技能", { exact: true }).first()).toBeVisible();
+		await expect(page.getByText("插件", { exact: true }).first()).toBeVisible();
 		expect(await page.evaluate(() => document.documentElement.lang)).toBe("zh-CN");
-		await page.getByRole("button", { name: "Metis", exact: true }).click();
+		await page.getByRole("button", { name: "Metis User", exact: true }).click();
 		await page.getByRole("menuitem", { name: "语言", exact: true }).click();
 		await expect(page.getByRole("menuitemradio", { name: "中文", exact: true })).toHaveAttribute("aria-checked", "true");
 		await page.screenshot({ path: path.join(qaDir, "language-menu-chinese-1440x900.png") });
@@ -2400,13 +3561,15 @@ test("packaged Language menu switches immediately and persists across restart", 
 		const restartPort = await reservePort();
 		app = launchPackagedApp(executable, restartPort, userDataDir, projectDir, agentDir, homeDir, diagnostics);
 		({ browser, page } = await connectToApp(restartPort));
+		captureConsoleErrors(page);
 		await page.setViewportSize({ width: 960, height: 720 });
 		await waitForServerReady(page);
 		await expect(page.getByRole("button", { name: "新建任务", exact: true })).toBeVisible();
 		expect(await page.evaluate(() => document.documentElement.lang)).toBe("zh-CN");
-		await page.getByRole("button", { name: "Metis", exact: true }).click();
+		await page.getByRole("button", { name: "Metis User", exact: true }).click();
 		await expect(page.getByRole("menuitem", { name: "设置", exact: true })).toBeFocused();
 		await page.screenshot({ path: path.join(qaDir, "chinese-shell-960x720.png") });
+		expect(consoleErrors).toEqual([]);
 	} catch (error) {
 		const bodyText = await page?.locator("body").innerText().catch(() => "renderer unavailable");
 		throw new Error(
@@ -2596,21 +3759,22 @@ test("packaged mode project actions preserve the other mode and shared project d
 		const sessionActionButton = sessionActionRow.locator(".session-actions > button");
 		const sessionButton = sessionActionRow.locator(".session-button");
 		await expect(sessionActionButton).toHaveCSS("opacity", "0");
-		await sessionActionRow.hover();
+		await sessionActionButton.focus();
 		await expect(sessionActionButton).toHaveCSS("opacity", "1");
-		await sessionActionButton.hover();
 		await expect(sessionButton).toHaveCSS("background-color", "rgb(64, 64, 64)");
+		await sessionActionButton.click();
 		await expect(sessionActionButton).toHaveCSS("background-color", "rgb(104, 104, 104)");
 		await page.locator(".session-sidebar").screenshot({ path: path.join(qaDir, "session-row-hover-inactive.png") });
+		await page.keyboard.press("Escape");
 		await sessionActionRow.getByRole("button", { name: "Session action target", exact: true }).click();
 		await expect(page.locator(".workspace-header")).toHaveAttribute("data-active-session-id", SESSION_ACTION_ID);
-		await sessionActionButton.hover();
+		await sessionActionButton.focus();
 		await expect(sessionButton).toHaveCSS("background-color", "rgb(88, 88, 88)");
+		await sessionActionButton.click();
 		await expect(sessionActionButton).toHaveCSS("background-color", "rgb(104, 104, 104)");
 		await page.locator(".session-sidebar").screenshot({ path: path.join(qaDir, "session-row-hover-current.png") });
-		await sessionActionRow.getByRole("button", { name: "Actions for Session action target" }).click();
 		const sessionActionMenu = page.getByRole("menu", { name: "Session action target session actions" });
-		await expect(sessionActionMenu.getByRole("menuitem")).toHaveText(["Rename", "Delete"]);
+		await expect(sessionActionMenu.getByRole("menuitem")).toHaveText(["Pin", "Rename", "Delete"]);
 		await expect(sessionActionRow.locator(".session-action-menu")).toHaveCount(0);
 		const sessionMenuBox = await sessionActionMenu.boundingBox();
 		const viewportHeight = await page.evaluate(() => window.innerHeight);
@@ -2639,7 +3803,7 @@ test("packaged mode project actions preserve the other mode and shared project d
 		phase = "changing persisted session permissions";
 		await group.locator(".session-button").first().click();
 		await expect(page.locator(".workspace-header")).toHaveAttribute("data-active-session-id", CHAT_ACTIVE_ID);
-		await page.getByRole("button", { name: "Select permissions, current Ask" }).click();
+		await page.getByRole("button", { name: "Select permissions, current Auto" }).click();
 		await page.getByRole("menuitemradio", { name: /Full access/u }).click();
 		await expect(page.getByRole("button", { name: "Select permissions, current Full" })).toBeVisible();
 		await expect(page.getByRole("dialog")).toHaveCount(0);
@@ -2649,7 +3813,7 @@ test("packaged mode project actions preserve the other mode and shared project d
 			(element) => Promise.all(element.getAnimations().map((animation) => animation.finished)),
 		);
 		await page.screenshot({ path: path.join(qaDir, "permission-menu-normal.png") });
-		await page.getByRole("menuitemradio", { name: /Ask before changes/u }).click();
+		await page.getByRole("menuitemradio", { name: /Ask before every change/u }).click();
 		await expect(page.getByRole("button", { name: "Select permissions, current Ask" })).toBeVisible();
 		await expect.poll(async () => readFile(chatActivePath, "utf8")).toContain('"permissionMode":"ask"');
 
@@ -2794,10 +3958,9 @@ test("packaged mode project actions preserve the other mode and shared project d
 		await page.getByRole("button", { name: "Code", exact: true }).click();
 		await projectGroup(page, projectName).locator(".session-button").click();
 		await expect(page.locator(`[data-active-session-id="${CODE_ID}"]`)).toBeVisible();
-		await page.getByRole("button", { name: "Skills", exact: true }).click();
-		await page.getByRole("button", { name: "Project", exact: true }).click();
-		await page.locator(".skills-directory-list").getByRole("button", { name: "Code", exact: true }).click();
-		await page.getByRole("button", { name: projectName, exact: true }).click();
+		await page.getByRole("button", { name: "Plugins", exact: true }).click();
+		await page.getByRole("button", { name: "Skill sources", exact: true }).click();
+		await page.getByRole("option", { name: "Project", exact: true }).click();
 		await expect(page.getByText("shared-project-skill", { exact: true })).toBeVisible();
 	} catch (error) {
 		const bodyText = await page?.locator("body").innerText().catch(() => "renderer unavailable");
@@ -2813,7 +3976,7 @@ test("packaged mode project actions preserve the other mode and shared project d
 });
 
 test("packaged project delete fails closed for a held session lease and retries", async () => {
-	test.setTimeout(60_000);
+	test.setTimeout(90_000);
 	const fixtures = await loadCodingFixtures();
 	const executable = packagedExecutable();
 	expect(existsSync(executable), `Package the desktop app first: ${executable}`).toBe(true);

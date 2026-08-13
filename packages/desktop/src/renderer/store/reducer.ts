@@ -4,6 +4,7 @@ import type {
 	DomainEvent,
 	InteractionView,
 	ItemView,
+	QueuedTurnView,
 	SessionSnapshot,
 	SessionSummary,
 	SubagentSummaryView,
@@ -46,6 +47,7 @@ export interface MutableProjectionState {
 	availableModels: NonNullable<SessionSnapshot["availableModels"]>;
 	subagents: SubagentSummaryView[];
 	tasks: SessionSnapshot["tasks"];
+	queuedTurns: QueuedTurnView[];
 	readonly subagentTranscript: MutableSubagentTranscriptState;
 }
 
@@ -74,7 +76,7 @@ export function createProjectionState(): MutableProjectionState {
 		serverEpoch: null,
 		cursor: 0,
 		syncStatus: "empty",
-		permissionMode: "ask",
+		permissionMode: "auto",
 		thinkingSelection: "off",
 		actualThinkingLevel: "off",
 		availableThinkingSelections: ["off"],
@@ -82,6 +84,7 @@ export function createProjectionState(): MutableProjectionState {
 		availableModels: [],
 		subagents: [],
 		tasks: [],
+		queuedTurns: [],
 		subagentTranscript: {
 			agentId: null,
 			itemsById: new Map(),
@@ -128,9 +131,10 @@ export function removeSession(state: MutableProjectionState, sessionId: string):
 	state.serverEpoch = null;
 	state.cursor = 0;
 	state.syncStatus = "empty";
-	state.permissionMode = "ask";
+	state.permissionMode = "auto";
 	state.subagents = [];
 	state.tasks = [];
+	state.queuedTurns = [];
 	clearSubagentTranscript(state.subagentTranscript);
 	return true;
 }
@@ -162,9 +166,10 @@ export function removeModeProjectSessions(state: MutableProjectionState, mode: A
 	state.serverEpoch = null;
 	state.cursor = 0;
 	state.syncStatus = "empty";
-	state.permissionMode = "ask";
+	state.permissionMode = "auto";
 	state.subagents = [];
 	state.tasks = [];
+	state.queuedTurns = [];
 	clearSubagentTranscript(state.subagentTranscript);
 	return true;
 }
@@ -212,6 +217,7 @@ export function replaceProjectionSnapshot(state: MutableProjectionState, snapsho
 	state.availableModels = snapshot.availableModels ?? [];
 	state.subagents = snapshot.subagents;
 	state.tasks = snapshot.tasks;
+	state.queuedTurns = snapshot.queuedTurns;
 	if (sessionChanged) clearSubagentTranscript(state.subagentTranscript);
 	else if (state.subagentTranscript.agentId) state.subagentTranscript.journalRevision += 1;
 }
@@ -259,6 +265,7 @@ function eventSessionId(event: DomainEvent): string | undefined {
 		case "subagent/itemsChanged":
 		case "session/modelChanged":
 		case "session/tasksChanged":
+		case "turn/queueChanged":
 			return event.sessionId;
 		case "interaction/notify":
 			return event.sessionId;
@@ -359,6 +366,9 @@ function applyEvent(state: MutableProjectionState, event: DomainEvent): void {
 		case "session/tasksChanged":
 			state.tasks = structuredClone(event.tasks);
 			return;
+		case "turn/queueChanged":
+			state.queuedTurns = structuredClone(event.queuedTurns);
+			return;
 		case "subagent/updated": {
 			const index = state.subagents.findIndex((candidate) => candidate.agentId === event.subagent.agentId);
 			state.subagents =
@@ -418,13 +428,22 @@ function applyEvent(state: MutableProjectionState, event: DomainEvent): void {
 }
 
 export function applyConnectionEvents(state: MutableProjectionState, batch: ConnectionEventsParams): BatchApplyResult {
-	if (
+	const invalid =
 		state.syncStatus !== "ready" ||
 		batch.serverEpoch !== state.serverEpoch ||
 		batch.fromCursor !== state.cursor + 1 ||
 		batch.toCursor < batch.fromCursor ||
-		!canApplyEvents(state, batch.events)
-	) {
+		!canApplyEvents(state, batch.events);
+	if (invalid) {
+		if (
+			batch.serverEpoch === state.serverEpoch &&
+			batch.fromCursor > state.cursor &&
+			batch.toCursor >= batch.fromCursor
+		) {
+			for (const event of batch.events) {
+				if (event.type === "session/updated") applyEvent(state, event);
+			}
+		}
 		state.syncStatus = "resnapshot_required";
 		return "resnapshot_required";
 	}

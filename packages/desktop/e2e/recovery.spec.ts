@@ -72,6 +72,19 @@ class ControlledCompletion {
 	}
 }
 
+function respondTitle(response: ServerResponse): void {
+	response.writeHead(200, { "content-type": "text/event-stream" });
+	response.end(
+		`data: ${JSON.stringify({
+			id: "chatcmpl-gate-d-title",
+			object: "chat.completion.chunk",
+			created: 1,
+			model: "gate-d-model",
+			choices: [{ index: 0, delta: { role: "assistant", content: "Recovery title" }, finish_reason: "stop" }],
+		})}\n\ndata: [DONE]\n\n`,
+	);
+}
+
 async function serverProjectionText(page: Page, sessionId: string): Promise<string> {
 	return page.evaluate(async (id) => {
 		const api = (globalThis as unknown as { metis: MetisDesktopApi }).metis;
@@ -101,8 +114,14 @@ test("packaged projection client recovers across renderer and app-server restart
 			response.writeHead(404).end();
 			return;
 		}
-		for await (const _chunk of request) {
+		let transcript = "";
+		for await (const chunk of request) {
 			// Drain the complete request before starting the SSE response, matching real HTTP servers.
+			transcript += String(chunk);
+		}
+		if (transcript.includes("conversation title generator")) {
+			respondTitle(response);
+			return;
 		}
 		const completion = completions[requestCount];
 		requestCount += 1;

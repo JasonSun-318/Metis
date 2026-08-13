@@ -167,11 +167,21 @@ describe("AskUserPanel", () => {
 		act(() => container.querySelector<HTMLButtonElement>('.ask-user-step[aria-label="Next question"]')?.click());
 		expect(container.textContent).toContain("Which platforms should launch first?");
 		expect(container.textContent).toContain("2 of 2");
+		expect(container.querySelector<HTMLButtonElement>('.ask-user-step[aria-label="Next question"]')?.disabled).toBe(true);
+		act(() => option(container, "Web").click());
 		expect(container.querySelector('.ask-user-step.is-submit[aria-label="Submit answers"]')).not.toBeNull();
 	});
 
 	it("restores previous answers and cancels the whole request with Escape", async () => {
 		const { container, onRespond } = mount();
+		const next = container.querySelector<HTMLButtonElement>('button[aria-label="Next question"]')!;
+		expect(next.disabled).toBe(false);
+		act(() => next.click());
+		expect(container.textContent).toContain("Which clients should be supported?");
+		act(() => option(container, "Desktop").click());
+		act(() => container.querySelector<HTMLButtonElement>('.ask-user-step[aria-label="Next question"]')?.click());
+		expect(container.textContent).toContain("Where should task data be stored?");
+		expect(onRespond).not.toHaveBeenCalled();
 		act(() => option(container, "Local database").click());
 		act(() => container.querySelector<HTMLButtonElement>('button[aria-label="Previous question"]')?.click());
 		expect(option(container, "Local database").getAttribute("aria-checked")).toBe("true");

@@ -4,14 +4,17 @@ import {
 	type DomainEvent,
 	type InteractionResponseInput,
 	type InteractionView,
+	type McpServerSummaryView,
 	type PermissionModeView,
+	type QueuedTurnView,
 	RPC_ERROR_CODES,
 	type ScheduleTaskView,
 	type SessionSummary,
+	type SessionStatusView,
 	type SkillSummaryView,
 } from "@metis/app-protocol";
-import { CaretDown, SidebarSimple } from "@phosphor-icons/react";
-import { type CSSProperties, useCallback, useEffect, useRef, useState } from "react";
+import { SidebarSimple } from "@phosphor-icons/react";
+import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { DesktopUpdateState, MetisDesktopApi } from "../../shared/desktop-api.ts";
 import { useAppStore } from "../hooks/use-app-store.ts";
@@ -26,12 +29,14 @@ import {
 	setProjectAlias,
 	setProjectPinned,
 } from "../store/project-preferences.ts";
+import { loadSessionPins, saveSessionPins, setSessionPinned } from "../store/session-pins.ts";
 import { Composer, type ComposerSubmission } from "./Composer.tsx";
 import { CodeProjectSetup } from "./CodeProjectSetup.tsx";
 import { InteractionHost } from "./InteractionHost.tsx";
 import { ModelSelector } from "./ModelSelector.tsx";
 import { NewTaskHome } from "./NewTaskHome.tsx";
 import { PermissionSelector } from "./PermissionSelector.tsx";
+import { QueuedTurnList } from "./QueuedTurnList.tsx";
 import { RecoveryBanner } from "./RecoveryBanner.tsx";
 import {
 	clampSessionSidebarPreferredWidth,
@@ -41,12 +46,17 @@ import {
 	type SidebarDestination,
 	SessionSidebar,
 } from "./SessionSidebar.tsx";
-import { SkillsPanel } from "./SkillsPanel.tsx";
+import { PluginsPanel } from "./PluginsPanel.tsx";
+import type { SkillCreationTarget } from "./SkillCreationDialog.tsx";
 import { SettingsDialog } from "./SettingsDialog.tsx";
+import { SessionStatusPanel } from "./SessionStatusPanel.tsx";
 import { SCHEDULE_KEEP_AWAKE_KEY, ScheduledTasksPanel } from "./ScheduledTasksPanel.tsx";
 import { ThinkingSelector } from "./ThinkingSelector.tsx";
+import { TurnRuntimeStatus } from "./TurnRuntimeStatus.tsx";
 import { clampToolsSidebarWidth, ToolsSidebar } from "./ToolsSidebar.tsx";
 import { Transcript } from "./Transcript.tsx";
+import { WorkspaceSessionHeader } from "./WorkspaceSessionHeader.tsx";
+import type { ComposerSlashCommand } from "./SlashCommandMenu.tsx";
 
 interface AppProps {
 	readonly api: MetisDesktopApi;
@@ -62,9 +72,11 @@ interface NewTaskDraft {
 
 const ASSISTED_SCHEDULE_PROMPT =
 	"I want to set up a scheduled task. Briefly explain how scheduled tasks work in Metis, then ask me a few concise questions to determine what it should do, when it should run, and whether it should use an available Skill. Do not create the task until I confirm the details.";
+const MCP_STATUS_POLL_MS = 500;
+const MCP_RECONNECT_POLL_MS = 4_000;
 
 function emptyNewTaskDraft(mode: AgentMode): NewTaskDraft {
-	return { mode, folder: null, sessionId: null, permissionMode: "ask" };
+	return { mode, folder: null, sessionId: null, permissionMode: "auto" };
 }
 
 function activeSessionKey(mode: AgentMode): string {
@@ -99,10 +111,13 @@ function sessionActionError(cause: unknown, action: "rename" | "delete"): Error 
 	return cause instanceof Error ? cause : new Error("The session operation could not be completed.");
 }
 
-export function titleFromPrompt(prompt: string): string {
-	const normalized = prompt.replace(/\s+/gu, " ").trim();
-	const characters = Array.from(normalized);
-	return characters.length <= 48 ? normalized : `${characters.slice(0, 47).join("")}…`;
+function queuedTurnActionError(cause: unknown): Error {
+	const code = rpcErrorCode(cause);
+	if (code === RPC_ERROR_CODES.CONFLICT) return new Error("This queued message changed. Review it and try again.");
+	if (code === RPC_ERROR_CODES.BUSY) return new Error("The task state changed before this message could be sent.");
+	if (code === RPC_ERROR_CODES.OVERLOADED) return new Error("The message queue is full.");
+	if (code === RPC_ERROR_CODES.READ_ONLY_SESSION) return new Error("Scheduled sessions are read-only.");
+	return cause instanceof Error ? cause : new Error("The queued message could not be changed.");
 }
 
 export function sessionDisplayTitle(session: Pick<SessionSummary, "cwd" | "cwdOrigin" | "name">): string {
@@ -183,6 +198,7 @@ export function App({ api, store }: AppProps) {
 	const settingsReturnFocusRef = useRef<HTMLElement | null>(null);
 	const [selectedScheduleTaskId, setSelectedScheduleTaskId] = useState<string | null>(null);
 	const [projectPreferences, setProjectPreferences] = useState(() => loadProjectPreferences(localStorage));
+	const [pinnedSessionIds, setPinnedSessionIds] = useState(() => loadSessionPins(localStorage));
 	const [busyProjectKeys, setBusyProjectKeys] = useState<ReadonlySet<string>>(new Set());
 	const [newTaskDraft, setNewTaskDraft] = useState<NewTaskDraft | null>(() => emptyNewTaskDraft("chat"));
 	const [sessionsSidebarOpen, setSessionsSidebarOpen] = useState(true);
@@ -195,12 +211,25 @@ export function App({ api, store }: AppProps) {
 	const [draftBusy, setDraftBusy] = useState(false);
 	const [loadingOlder, setLoadingOlder] = useState(false);
 	const [skills, setSkills] = useState<readonly SkillSummaryView[]>([]);
+	const [mcpServers, setMcpServers] = useState<readonly McpServerSummaryView[]>([]);
+	const [pluginSection, setPluginSection] = useState<"skills" | "mcp">("skills");
+	const [skillCatalogEpoch, setSkillCatalogEpoch] = useState(0);
 	const [message, setMessage] = useState("Starting Metis…");
 	const [error, setError] = useState<string | null>(null);
+	const [notice, setNotice] = useState<string | null>(null);
+	const [composerControl, setComposerControl] = useState<{ readonly id: number; readonly target: "model" | "thinking" | "mcp" | null }>({ id: 0, target: null });
+	const [sessionStatusPanel, setSessionStatusPanel] = useState<{
+		readonly sessionId: string;
+		readonly loading: boolean;
+		readonly status?: SessionStatusView;
+		readonly error?: string;
+	} | null>(null);
+	const [compactingSession, setCompactingSession] = useState<{ readonly sessionId: string; readonly startedAt: string } | null>(null);
 	const [dirtyToolSessionIds, setDirtyToolSessionIds] = useState<readonly string[]>([]);
 	const [toolCleanupSessionIds, setToolCleanupSessionIds] = useState<readonly string[]>([]);
 	const [updateState, setUpdateState] = useState<DesktopUpdateState>({ status: "unavailable" });
 	const openGeneration = useRef(0);
+	const mcpListGeneration = useRef(0);
 	const openingSessionId = useRef<string | null>(null);
 	const resnapshots = useRef(new Map<string, Promise<void>>());
 	const newTaskCreateRequest = useRef<{ key: string; requestId: string } | null>(null);
@@ -247,7 +276,7 @@ export function App({ api, store }: AppProps) {
 	}, [state.activeSessionId, toolsSidebarOpen]);
 	const activeTurnRequest = useRef<{
 		key: string;
-		method: "start" | "steer";
+		method: "start" | "queue";
 		requestId: string;
 	} | null>(null);
 	const skillListGeneration = useRef(0);
@@ -260,12 +289,25 @@ export function App({ api, store }: AppProps) {
 	const sessionRenameRequests = useRef(new Map<string, { name: string; requestId: string }>());
 	const sessionDeleteRequests = useRef(new Map<string, string>());
 	const sessionMarkReadRequests = useRef(new Set<string>());
+	const statusGeneration = useRef(0);
 	const visibleSessionId = destination === "tasks" && newTaskDraft === null ? state.activeSessionId : null;
 	const visibleSessionIdRef = useRef<string | null>(visibleSessionId);
 	visibleSessionIdRef.current = visibleSessionId;
 
 	const reportError = useCallback((cause: unknown) => {
 		setError(cause instanceof Error ? cause.message : "Metis could not complete the request.");
+	}, []);
+	useEffect(() => {
+		if (notice === null) return;
+		const timer = setTimeout(() => setNotice(null), 4000);
+		return () => clearTimeout(timer);
+	}, [notice]);
+	const requestComposerControl = useCallback((target: "model" | "thinking" | "mcp" | null) => {
+		setComposerControl((current) => ({ id: current.id + 1, target }));
+	}, []);
+	const closeSessionStatus = useCallback(() => {
+		statusGeneration.current += 1;
+		setSessionStatusPanel(null);
 	}, []);
 	useEffect(() => {
 		let disposed = false;
@@ -486,6 +528,7 @@ export function App({ api, store }: AppProps) {
 			const visibleUnread = envelope.params.events.find(
 				(candidate): candidate is Extract<DomainEvent, { type: "session/updated" }> =>
 					candidate.type === "session/updated" &&
+					openingSessionId.current === null &&
 					candidate.session.sessionId === visibleSessionIdRef.current &&
 					candidate.session.unread,
 			);
@@ -585,6 +628,21 @@ export function App({ api, store }: AppProps) {
 	const pinProject = (group: ProjectSessionGroup, pinned: boolean) => {
 		updateProjectPreferences((current) => setProjectPinned(current, group.mode, group.cwd, pinned));
 	};
+	const updateSessionPins = (update: (current: ReadonlySet<string>) => ReadonlySet<string>) => {
+		setPinnedSessionIds((current) => {
+			const next = update(current);
+			if (next === current) return current;
+			try {
+				saveSessionPins(localStorage, next);
+			} catch (cause) {
+				reportError(cause);
+			}
+			return next;
+		});
+	};
+	const pinSession = (session: SessionSummary, pinned: boolean) => {
+		updateSessionPins((current) => setSessionPinned(current, session.sessionId, pinned));
+	};
 	const previewProjectDelete = async (group: ProjectSessionGroup) => {
 		try {
 			const outcome = await api.previewProjectDelete({ mode: group.mode, cwd: group.cwd });
@@ -659,6 +717,11 @@ export function App({ api, store }: AppProps) {
 				throw outcome.error;
 			}
 			projectDeleteRequests.current.delete(key);
+			updateSessionPins((current) => {
+				const next = new Set(current);
+				for (const sessionId of projectSessionIds) next.delete(sessionId);
+				return next.size === current.size ? current : next;
+			});
 			queueToolCleanup(projectSessionIds);
 			const before = store.getSnapshot();
 			const active = before.activeSessionId ? before.sessionsById.get(before.activeSessionId) : undefined;
@@ -730,6 +793,7 @@ export function App({ api, store }: AppProps) {
 		try {
 			const deleted = await api.deleteSession({ sessionId: session.sessionId, requestId });
 			sessionDeleteRequests.current.delete(session.sessionId);
+			pinSession(session, false);
 			queueToolCleanup([session.sessionId]);
 			if (removedActive) {
 				openGeneration.current += 1;
@@ -852,11 +916,10 @@ export function App({ api, store }: AppProps) {
 		try {
 			let sessionId = draft.sessionId;
 			if (!sessionId) {
-				const name = sessionName ?? titleFromPrompt(input.text || input.skill?.name || input.attachments[0]?.name || t(draft.mode === "chat" ? "Chat" : "Code"));
 				const createKey = JSON.stringify({
 					mode: draft.mode,
 					cwd: draft.folder,
-					name,
+					name: sessionName ?? null,
 					permissionMode: draft.permissionMode,
 				});
 				const createRequest = newTaskCreateRequest.current?.key === createKey
@@ -867,7 +930,7 @@ export function App({ api, store }: AppProps) {
 					requestId: createRequest.requestId,
 					mode: draft.mode,
 					...(draft.folder ? { cwd: draft.folder } : {}),
-					name,
+					...(sessionName ? { name: sessionName } : {}),
 					permissionMode: draft.permissionMode,
 				});
 				sessionId = created.session.sessionId;
@@ -912,14 +975,34 @@ export function App({ api, store }: AppProps) {
 		);
 	};
 
+	const createSkillWithMetis = async (target: SkillCreationTarget) => {
+		const draft = { ...emptyNewTaskDraft("chat"), folder: target.cwd };
+		const prompt = target.source === "project"
+			? `I want to create a project-level Skill in ${target.cwd}. Use the create-skill Skill and ask me for the information you need before creating it.`
+			: "I want to create a user-level Skill. Use the create-skill Skill and ask me for the information you need before creating it.";
+		setMode("chat");
+		setDestination("tasks");
+		setNewTaskDraft(draft);
+		newTaskCreateRequest.current = null;
+		newTaskTurnRequest.current = null;
+		await submitNewTask(draft, { text: prompt, attachments: [] });
+	};
+
 	const activeSession = state.activeSessionId ? state.sessionsById.get(state.activeSessionId) : undefined;
 	const openingSession = openingSessionId.current ? state.sessionsById.get(openingSessionId.current) : undefined;
 	const newTaskOpen = visibleNewTaskDraft !== null;
 	const visibleActiveSession = destination === "tasks" && activeSession && (activeSession.mode === mode || openingSession?.mode === mode) && !newTaskOpen
 		? activeSession
 		: undefined;
+	const toolsSidebarAvailable = visibleActiveSession !== undefined;
 	const running = visibleActiveSession?.state === "running" || (visibleActiveSession !== undefined && state.activeTurnId !== null);
 	const serverReady = state.supervisor.state === "ready";
+	useEffect(() => {
+		statusGeneration.current += 1;
+		setSessionStatusPanel(null);
+		requestComposerControl(null);
+		setCompactingSession((current) => current?.sessionId === visibleActiveSession?.sessionId ? current : null);
+	}, [requestComposerControl, visibleActiveSession?.sessionId]);
 	const skillSessionId = visibleActiveSession?.sessionId ?? visibleNewTaskDraft?.sessionId;
 	const shouldListSkills = destination === "tasks" && (newTaskOpen || visibleActiveSession !== undefined);
 	useEffect(() => {
@@ -941,7 +1024,38 @@ export function App({ api, store }: AppProps) {
 		return () => {
 			if (generation === skillListGeneration.current) skillListGeneration.current += 1;
 		};
-	}, [api, bootstrapped, reportError, serverReady, shouldListSkills, skillSessionId, visibleNewTaskDraft?.folder]);
+	}, [api, bootstrapped, reportError, serverReady, shouldListSkills, skillCatalogEpoch, skillSessionId, visibleNewTaskDraft?.folder]);
+	const visibleMcpSessionId = destination === "tasks" ? visibleActiveSession?.sessionId : undefined;
+	useEffect(() => {
+		const generation = ++mcpListGeneration.current;
+		let timer: ReturnType<typeof setTimeout> | undefined;
+		if (!bootstrapped || !serverReady || !visibleMcpSessionId) {
+			setMcpServers([]);
+			return;
+		}
+		setMcpServers([]);
+		const refresh = () => {
+			void api.listMcpServers({ sessionId: visibleMcpSessionId }).then(
+				(result) => {
+					if (generation !== mcpListGeneration.current) return;
+					setMcpServers(result.servers);
+					const connecting = result.servers.some((server) => server.effective && server.enabled && server.state === "connecting");
+					const reconnecting = result.servers.some((server) => server.effective && server.enabled && server.state === "reconnecting");
+					if (connecting || reconnecting) timer = setTimeout(refresh, connecting ? MCP_STATUS_POLL_MS : MCP_RECONNECT_POLL_MS);
+				},
+				(cause) => {
+					if (generation !== mcpListGeneration.current) return;
+					setMcpServers([]);
+					reportError(cause);
+				},
+			);
+		};
+		refresh();
+		return () => {
+			if (generation === mcpListGeneration.current) mcpListGeneration.current += 1;
+			if (timer) clearTimeout(timer);
+		};
+	}, [api, bootstrapped, reportError, serverReady, visibleMcpSessionId]);
 	const interactiveSessionId =
 		destination === "tasks" && openingSession?.mode === mode
 			? openingSession.sessionId
@@ -965,21 +1079,13 @@ export function App({ api, store }: AppProps) {
 		if (!visibleActiveSession) return;
 		setError(null);
 		try {
-			if (!running && !visibleActiveSession.name) {
-				const name = titleFromPrompt(input.text || input.skill?.name || input.attachments[0]?.name || t(visibleActiveSession.mode === "chat" ? "Chat" : "Code"));
-				try {
-					await renameSession(visibleActiveSession, name);
-				} catch {
-					// A display-only name must not block the submitted turn.
-				}
-			}
 			const key = JSON.stringify({ sessionId: visibleActiveSession.sessionId, input: composerRequestKey(input) });
 			const request = activeTurnRequest.current?.key === key
 				? activeTurnRequest.current
-				: { key, method: running ? "steer" as const : "start" as const, requestId: crypto.randomUUID() };
+				: { key, method: running || state.queuedTurns.length > 0 ? "queue" as const : "start" as const, requestId: crypto.randomUUID() };
 			activeTurnRequest.current = request;
-			if (request.method === "steer") {
-				await api.steerTurn({ sessionId: visibleActiveSession.sessionId, requestId: request.requestId, ...composerPayload(input), delivery: "steer" });
+			if (request.method === "queue") {
+				await api.queueTurn({ sessionId: visibleActiveSession.sessionId, requestId: request.requestId, ...composerPayload(input) });
 			} else {
 				await api.startTurn({ sessionId: visibleActiveSession.sessionId, requestId: request.requestId, ...composerPayload(input) });
 			}
@@ -987,6 +1093,59 @@ export function App({ api, store }: AppProps) {
 		} catch (cause) {
 			reportError(cause);
 			throw cause;
+		}
+	};
+
+	const updateQueuedTurn = async (turn: QueuedTurnView, text: string) => {
+		if (!visibleActiveSession) return;
+		setError(null);
+		try {
+			await api.updateQueuedTurn({
+				sessionId: visibleActiveSession.sessionId,
+				requestId: crypto.randomUUID(),
+				queueItemId: turn.queueItemId,
+				expectedRevision: turn.revision,
+				text,
+			});
+		} catch (cause) {
+			const error = queuedTurnActionError(cause);
+			reportError(error);
+			throw error;
+		}
+	};
+
+	const deleteQueuedTurn = async (turn: QueuedTurnView) => {
+		if (!visibleActiveSession) return;
+		setError(null);
+		try {
+			await api.deleteQueuedTurn({
+				sessionId: visibleActiveSession.sessionId,
+				requestId: crypto.randomUUID(),
+				queueItemId: turn.queueItemId,
+				expectedRevision: turn.revision,
+			});
+		} catch (cause) {
+			const error = queuedTurnActionError(cause);
+			reportError(error);
+			throw error;
+		}
+	};
+
+	const sendQueuedTurn = async (turn: QueuedTurnView, delivery: "steer" | "start") => {
+		if (!visibleActiveSession) return;
+		setError(null);
+		try {
+			await api.sendQueuedTurn({
+				sessionId: visibleActiveSession.sessionId,
+				requestId: crypto.randomUUID(),
+				queueItemId: turn.queueItemId,
+				expectedRevision: turn.revision,
+				delivery,
+			});
+		} catch (cause) {
+			const error = queuedTurnActionError(cause);
+			reportError(error);
+			throw error;
 		}
 	};
 
@@ -1053,9 +1212,81 @@ export function App({ api, store }: AppProps) {
 	const configurationSession = visibleActiveSession ?? (
 		newTaskOpen && activeSession?.mode === mode ? activeSession : undefined
 	);
+	const writableSessionId = visibleActiveSession?.scheduled === undefined ? visibleActiveSession?.sessionId : undefined;
+	const compactBlocked = running || inlineInteraction !== undefined || compactingSession !== null;
+	const { disabledSlashCommands, disabledSlashReasons } = useMemo(() => {
+		const commands = new Set<ComposerSlashCommand>();
+		const reasons: Partial<Record<ComposerSlashCommand, string>> = {};
+		if (!writableSessionId) {
+			commands.add("compact");
+			commands.add("status");
+			reasons.compact = "Open a task to use this command";
+			reasons.status = "Open a task to use this command";
+		} else if (compactBlocked) {
+			commands.add("compact");
+			reasons.compact = compactingSession
+				? "Conversation compaction is already running"
+				: "Stop the active task before compacting";
+		}
+		if (!configurationSession) {
+			commands.add("model");
+			commands.add("thinking");
+			reasons.model = "Open a task to use this command";
+			reasons.thinking = "Open a task to use this command";
+		}
+		return { disabledSlashCommands: commands, disabledSlashReasons: reasons };
+	}, [compactBlocked, compactingSession, configurationSession, writableSessionId]);
+
+	const openSessionStatus = useCallback(async () => {
+		if (!writableSessionId) return;
+		requestComposerControl(null);
+		const generation = ++statusGeneration.current;
+		setSessionStatusPanel({ sessionId: writableSessionId, loading: true });
+		try {
+			const status = await api.getSessionStatus({ sessionId: writableSessionId });
+			if (generation === statusGeneration.current) setSessionStatusPanel({ sessionId: writableSessionId, loading: false, status });
+		} catch (cause) {
+			if (generation === statusGeneration.current) setSessionStatusPanel({
+				sessionId: writableSessionId,
+				loading: false,
+				error: cause instanceof Error ? cause.message : "Session status could not be loaded.",
+			});
+		}
+	}, [api, requestComposerControl, writableSessionId]);
+
+	const compactConversation = useCallback(async () => {
+		if (!writableSessionId || compactBlocked) return;
+		closeSessionStatus();
+		requestComposerControl(null);
+		setError(null);
+		setNotice(null);
+		setCompactingSession({ sessionId: writableSessionId, startedAt: new Date().toISOString() });
+		try {
+			const result = await api.compactSession({ sessionId: writableSessionId, requestId: crypto.randomUUID() });
+			if (result.message) setNotice(result.message);
+		} catch (cause) {
+			reportError(cause);
+		} finally {
+			setCompactingSession((current) => current?.sessionId === writableSessionId ? null : current);
+		}
+	}, [api, closeSessionStatus, compactBlocked, reportError, requestComposerControl, writableSessionId]);
+
+	const handleSlashCommand = useCallback(async (command: ComposerSlashCommand) => {
+		if (command === "status") {
+			await openSessionStatus();
+			return;
+		}
+		closeSessionStatus();
+		if (command === "compact") {
+			await compactConversation();
+			return;
+		}
+		requestComposerControl(command);
+	}, [closeSessionStatus, compactConversation, openSessionStatus, requestComposerControl]);
 	const modelControl = configurationSession ? (
 		<ModelSelector
 			available={state.availableModels}
+			commandRequest={{ id: composerControl.id, open: composerControl.target === "model" }}
 			disabled={!serverReady}
 			onChange={(model) => changeModel(configurationSession.sessionId, model)}
 			value={state.model}
@@ -1066,6 +1297,7 @@ export function App({ api, store }: AppProps) {
 		<ThinkingSelector
 			actualThinkingLevel={state.actualThinkingLevel}
 			available={state.availableThinkingSelections}
+			commandRequest={{ id: composerControl.id, open: composerControl.target === "thinking" }}
 			disabled={!serverReady}
 			onChange={(selection) => void changeThinking(configurationSession.sessionId, selection)}
 			value={state.thinkingSelection}
@@ -1099,6 +1331,22 @@ export function App({ api, store }: AppProps) {
 			value={state.permissionMode}
 		/>
 	) : undefined;
+	const connectedMcpServers = mcpServers.filter((server) => server.effective && server.enabled && server.state === "connected");
+	const mcpConnectionState = mcpServers.some((server) =>
+		server.effective && server.enabled && (
+			server.state === "auth_required" ||
+			server.state === "error" ||
+			(server.state === "reconnecting" && Boolean(server.lastError))
+		)
+	)
+		? "failed" as const
+		: mcpServers.some((server) => server.effective && server.enabled && (server.state === "connecting" || server.state === "reconnecting"))
+			? "connecting" as const
+			: undefined;
+	const openMcpManagement = () => {
+		setPluginSection("mcp");
+		setDestination("skills");
+	};
 	const pickAttachmentFiles = async () => {
 		try {
 			return await api.selectAttachmentFiles();
@@ -1142,18 +1390,20 @@ export function App({ api, store }: AppProps) {
 				onModeChange={changeMode}
 				onNewTask={startNewTask}
 				onOpen={openVisibleSession}
+				onPinSession={pinSession}
 				onPinProject={pinProject}
 				onPreviewProjectDelete={previewProjectDelete}
 				onRenameProject={renameProject}
 					onRenameSession={renameSession}
 					onSettings={openSettings}
 					onUpdate={startDesktopUpdate}
-					onSkills={() => setDestination("skills")}
+					onSkills={() => { setPluginSection("skills"); setDestination("skills"); }}
 					onSchedules={() => { setDestination("schedules"); setSelectedScheduleTaskId(null); }}
 					onOpenSchedule={(taskId) => { setDestination("schedules"); setSelectedScheduleTaskId(taskId); }}
 				onToggle={() => setSessionsSidebarOpen(false)}
 				onWidthChange={updateSessionSidebarWidth}
 				preferences={projectPreferences}
+				pinnedSessionIds={pinnedSessionIds}
 					projectBusy={(group) => busyProjectKeys.has(projectKey(group.mode, group.cwd))}
 					scheduleTasks={scheduleState.taskOrder.map((id) => scheduleState.tasksById.get(id)).filter((task): task is ScheduleTaskView => task !== undefined)}
 					selectedScheduleTaskId={selectedScheduleTaskId}
@@ -1162,7 +1412,7 @@ export function App({ api, store }: AppProps) {
 				width={sessionSidebarWidth}
 			/>}
 			<main
-				className={`workspace${destination === "tasks" && toolsSidebarOpen ? " tools-sidebar-open" : ""}`}
+				className={`workspace${toolsSidebarAvailable && toolsSidebarOpen ? " tools-sidebar-open" : ""}`}
 				style={{ "--tool-sidebar-width": `${toolsSidebarWidth}px` } as CSSProperties}
 			>
 				<div className="workspace-titlebar-actions">
@@ -1171,7 +1421,7 @@ export function App({ api, store }: AppProps) {
 							<SidebarSimple aria-hidden="true" size={17} />
 						</button>
 					)}
-					{destination === "tasks" && !toolsSidebarOpen && <button
+					{toolsSidebarAvailable && !toolsSidebarOpen && <button
 						aria-label={t(toolsSidebarOpen ? "Hide tools sidebar" : "Show tools sidebar")}
 						aria-pressed={toolsSidebarOpen}
 						className="details-sidebar-toggle"
@@ -1181,14 +1431,17 @@ export function App({ api, store }: AppProps) {
 						<SidebarSimple aria-hidden="true" size={17} />
 					</button>}
 				</div>
-				{visibleActiveSession && (
-					<header className="workspace-header" data-active-session-id={visibleActiveSession.sessionId}>
-						<div className="workspace-title">
-							<h1>{sessionDisplayTitle(visibleActiveSession)}</h1>
-							<CaretDown aria-hidden="true" size={13} />
-						</div>
-					</header>
-				)}
+				{visibleActiveSession && <WorkspaceSessionHeader
+					deleteDisabled={running || visibleInteraction !== undefined}
+					disabled={!serverReady || draftBusy}
+					displayName={sessionDisplayTitle(visibleActiveSession)}
+					onCopy={(displayName) => api.writeClipboardText({ text: displayName })}
+					onDelete={deleteSession}
+					onPin={pinSession}
+					onRename={renameSession}
+					pinned={pinnedSessionIds.has(visibleActiveSession.sessionId)}
+					session={visibleActiveSession}
+				/>}
 				{state.supervisor.state === "failed" && (
 					<div className="server-banner" role="alert">
 						<span>{t(state.supervisor.failure || "App Server could not recover.")}</span>
@@ -1199,7 +1452,7 @@ export function App({ api, store }: AppProps) {
 					<div className="server-banner" role="status">{t("App Server is recovering. Your saved session is safe.")}</div>
 				)}
 				{!bootstrapped ? null : destination === "skills" ? (
-					<SkillsPanel api={api} preferences={projectPreferences} serverReady={serverReady} state={state} />
+					<PluginsPanel api={api} initialSection={pluginSection} onCreateSkillWithMetis={createSkillWithMetis} onSkillsChanged={() => setSkillCatalogEpoch((value) => value + 1)} preferences={projectPreferences} serverReady={serverReady} state={state} />
 				) : destination === "schedules" && mode === "chat" ? (
 					<ScheduledTasksPanel api={api} onCreateWithMetis={createScheduleWithMetis} onOpenSession={openScheduledSession} onSelectTask={setSelectedScheduleTaskId} selectedTaskId={selectedScheduleTaskId} serverReady={serverReady} sessions={state.sessionOrder.map((id) => state.sessionsById.get(id)).filter((session): session is SessionSummary => session !== undefined)} store={scheduleStore} />
 				) : newTaskOpen && mode === "code" ? (
@@ -1217,14 +1470,19 @@ export function App({ api, store }: AppProps) {
 				) : newTaskOpen ? (
 					<NewTaskHome
 						busy={draftBusy || !serverReady}
+						commandRequest={{ id: composerControl.id, open: composerControl.target === "mcp" }}
+						disabledSlashCommands={disabledSlashCommands}
+						disabledSlashReasons={disabledSlashReasons}
 						folder={visibleNewTaskDraft.folder}
 						folderLocked={visibleNewTaskDraft.sessionId !== null}
 						mode={mode}
 						modelControl={modelControl}
 						permissionControl={permissionControl}
 						onChooseFolder={chooseNewTaskFolder}
-						onManageSkills={() => setDestination("skills")}
+						onManageMcp={openMcpManagement}
+						onManageSkills={() => { setPluginSection("skills"); setDestination("skills"); }}
 						onPickFiles={pickAttachmentFiles}
+						onSlashCommand={handleSlashCommand}
 						onSubmit={submitNewTaskDraft}
 						skills={skills}
 						thinkingControl={thinkingControl}
@@ -1233,8 +1491,38 @@ export function App({ api, store }: AppProps) {
 					<div className="workspace-body">
 						<div className="conversation-column">
 							<RecoveryBanner session={visibleActiveSession} />
-								<Transcript activeTurnId={state.activeTurnId} activeTurnStartedAt={state.activeTurnId ? state.turnsById.get(state.activeTurnId)?.startedAt : undefined} appearance={visibleActiveSession.mode} autoLoadOlder hasOlder={state.nextBeforeItemId !== null} itemIds={state.itemOrder} itemsById={state.itemsById} loadingOlder={loadingOlder} onLoadOlder={loadOlder} />
-							<Composer appearance={visibleActiveSession.mode} interactionControl={inlineInteraction ? <InteractionHost interaction={inlineInteraction} key={inlineInteraction.interactionId} onRespond={respond} /> : undefined} disabled={!serverReady || state.syncStatus !== "ready"} key={visibleActiveSession.sessionId} modelControl={modelControl} onInterrupt={interrupt} onManageSkills={() => setDestination("skills")} onPickFiles={pickAttachmentFiles} onSubmit={submit} permissionControl={permissionControl} running={running} skills={skills} tasks={state.tasks} taskListEpoch={state.serverEpoch} thinkingControl={thinkingControl} placeholder={t("Write a message…")} />
+							<Transcript activeTurnId={state.activeTurnId} activeTurnStartedAt={state.activeTurnId ? state.turnsById.get(state.activeTurnId)?.startedAt : undefined} appearance={visibleActiveSession.mode} autoLoadOlder hasOlder={state.nextBeforeItemId !== null} itemIds={state.itemOrder} itemsById={state.itemsById} loadingOlder={loadingOlder} onLoadOlder={loadOlder} />
+							{compactingSession?.sessionId === visibleActiveSession.sessionId && (
+								<TurnRuntimeStatus items={[]} running startedAt={compactingSession.startedAt} variant="compaction" />
+							)}
+							<Composer
+								appearance={visibleActiveSession.mode}
+								commandPanel={sessionStatusPanel?.sessionId === visibleActiveSession.sessionId ? <SessionStatusPanel error={sessionStatusPanel.error} loading={sessionStatusPanel.loading} onClose={closeSessionStatus} status={sessionStatusPanel.status} /> : undefined}
+								commandRequest={{ id: composerControl.id, open: composerControl.target === "mcp" }}
+								disabled={!serverReady || state.syncStatus !== "ready" || compactingSession !== null}
+								disabledSlashCommands={disabledSlashCommands}
+								disabledSlashReasons={disabledSlashReasons}
+								interactionControl={inlineInteraction ? <InteractionHost interaction={inlineInteraction} key={inlineInteraction.interactionId} onRespond={respond} /> : undefined}
+								key={visibleActiveSession.sessionId}
+								mcpConnectionState={mcpConnectionState}
+								mcpServers={connectedMcpServers}
+								modelControl={modelControl}
+								onInterrupt={interrupt}
+								onManageMcp={openMcpManagement}
+								onManageSkills={() => { setPluginSection("skills"); setDestination("skills"); }}
+								onPickFiles={pickAttachmentFiles}
+								onSlashCommand={handleSlashCommand}
+								onSubmit={submit}
+								permissionControl={permissionControl}
+								placeholder={t(running || state.queuedTurns.length > 0 ? "Add a queued message…" : "Write a message…")}
+								queuedTurnControl={<QueuedTurnList disabled={!serverReady || state.syncStatus !== "ready" || compactingSession !== null} onDelete={deleteQueuedTurn} onSend={sendQueuedTurn} onUpdate={updateQueuedTurn} running={running} turns={state.queuedTurns} />}
+								queueing={state.queuedTurns.length > 0}
+								running={running}
+								skills={skills}
+								taskListEpoch={state.serverEpoch}
+								tasks={state.tasks}
+								thinkingControl={thinkingControl}
+							/>
 						</div>
 					</div>
 				) : null}
@@ -1248,18 +1536,19 @@ export function App({ api, store }: AppProps) {
 					onDirtySessionIdsChange={handleDirtySessionIdsChange}
 					onError={reportError}
 					onWidthChange={updateToolsSidebarWidth}
-					open={destination === "tasks" && toolsSidebarOpen && !settingsOpen}
+					open={toolsSidebarAvailable && toolsSidebarOpen && !settingsOpen}
 					preferredWidth={toolsSidebarPreferredWidth}
 					store={store}
 					width={toolsSidebarWidth}
 				/>
-				<div className="sr-only" aria-live="polite">{t(error || latestNotification?.message || message)}</div>
-				{error && <div className="toast toast-error" role="alert">{t(error)}</div>}
-				{latestNotification && !error && <div className="toast" role="status">{t(latestNotification.message)}</div>}
+					<div className="sr-only" aria-live="polite">{t(error || notice || latestNotification?.message || message)}</div>
+					{error && <div className="toast toast-error" role="alert">{t(error)}</div>}
+					{!error && notice && <div className="toast" role="status">{t(notice)}</div>}
+					{latestNotification && !error && !notice && <div className="toast" role="status">{t(latestNotification.message)}</div>}
 			</main>
 			<InteractionHost interaction={inlineInteraction ? undefined : visibleInteraction} key={inlineInteraction ? "none" : visibleInteraction?.interactionId ?? "none"} onRespond={respond} />
 		</div>
-		{settingsOpen ? <SettingsDialog api={api} onClose={closeSettings} serverReady={serverReady} /> : null}
+		{settingsOpen ? <SettingsDialog activeSessionId={visibleActiveSession?.sessionId ?? null} api={api} onClose={closeSettings} serverReady={serverReady} /> : null}
 		</>
 	);
 }

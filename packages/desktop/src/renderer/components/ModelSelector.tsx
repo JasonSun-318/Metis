@@ -5,17 +5,19 @@ import { useTranslation } from "react-i18next";
 
 interface ModelSelectorProps {
 	readonly available: readonly ModelOptionView[];
+	readonly commandRequest?: { readonly id: number; readonly open: boolean };
 	readonly disabled: boolean;
 	readonly onChange: (model: ModelOptionView) => void | Promise<void>;
 	readonly value: SessionSnapshot["model"];
 }
 
-export function ModelSelector({ available, disabled, onChange, value }: ModelSelectorProps) {
+export function ModelSelector({ available, commandRequest, disabled, onChange, value }: ModelSelectorProps) {
 	const { t } = useTranslation();
 	const [open, setOpen] = useState(false);
 	const [pending, setPending] = useState(false);
 	const rootRef = useRef<HTMLDivElement>(null);
 	const triggerRef = useRef<HTMLButtonElement>(null);
+	const lastCommandRequest = useRef(commandRequest?.id);
 	const selected = available.find((model) => model.provider === value?.provider && model.modelId === value.modelId);
 
 	const close = (restoreFocus = false) => {
@@ -35,6 +37,12 @@ export function ModelSelector({ available, disabled, onChange, value }: ModelSel
 	useEffect(() => {
 		if (disabled) setOpen(false);
 	}, [disabled]);
+
+	useEffect(() => {
+		if (commandRequest === undefined || commandRequest.id === lastCommandRequest.current) return;
+		lastCommandRequest.current = commandRequest.id;
+		setOpen(commandRequest.open && !disabled);
+	}, [commandRequest, disabled]);
 
 	useEffect(() => {
 		if (!open) return;

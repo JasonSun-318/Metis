@@ -1,14 +1,16 @@
-import { ChartBar, Cpu, UserCircle, X } from "@phosphor-icons/react";
+import { ChartBar, Cpu, Shield, UserCircle, X } from "@phosphor-icons/react";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
 import { ModelSettingsPanel } from "./ModelSettingsPanel.tsx";
+import { PermissionRulesPanel } from "./PermissionRulesPanel.tsx";
 import { ProfilePanel } from "./ProfilePanel.tsx";
 import { UsagePanel } from "./UsagePanel.tsx";
 
-type SettingsPage = "profile" | "model" | "usage";
+type SettingsPage = "profile" | "model" | "usage" | "permissions";
 
-export function SettingsDialog({ api, onClose, serverReady }: {
+export function SettingsDialog({ activeSessionId, api, onClose, serverReady }: {
+	readonly activeSessionId: string | null;
 	readonly api: MetisDesktopApi;
 	readonly onClose: () => void;
 	readonly serverReady: boolean;
@@ -55,6 +57,7 @@ export function SettingsDialog({ api, onClose, serverReady }: {
 		{ id: "profile" as const, label: "Profile", icon: UserCircle },
 		{ id: "model" as const, label: "Model", icon: Cpu },
 		{ id: "usage" as const, label: "Usage", icon: ChartBar },
+		{ id: "permissions" as const, label: "Permissions", icon: Shield },
 	];
 	return (
 		<div className="settings-backdrop">
@@ -85,6 +88,7 @@ export function SettingsDialog({ api, onClose, serverReady }: {
 						{page === "profile" ? <ProfilePanel api={api} serverReady={serverReady} /> : null}
 						{page === "model" ? <ModelSettingsPanel api={api} serverReady={serverReady} /> : null}
 						{page === "usage" ? <UsagePanel api={api} serverReady={serverReady} /> : null}
+						{page === "permissions" ? <PermissionRulesPanel api={api} serverReady={serverReady} sessionId={activeSessionId} /> : null}
 					</div>
 				</div>
 			</div>

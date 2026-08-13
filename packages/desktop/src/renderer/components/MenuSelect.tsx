@@ -110,6 +110,12 @@ export function MenuSelect<T extends string>({
 			className="menu-select-popover"
 			id={id}
 			onKeyDown={(event) => {
+				if (event.key === "Escape") {
+					event.preventDefault();
+					event.stopPropagation();
+					close(true);
+					return;
+				}
 				if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
 				event.preventDefault();
 				const items = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>("button:not(:disabled)"));
@@ -164,6 +170,12 @@ export function MenuSelect<T extends string>({
 				className="menu-select-trigger"
 				disabled={disabled}
 				onClick={() => setOpen((current) => !current)}
+				onKeyDown={(event) => {
+					if (!open || event.key !== "Escape") return;
+					event.preventDefault();
+					event.stopPropagation();
+					close(true);
+				}}
 				ref={trigger}
 				type="button"
 			>

@@ -1,20 +1,17 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" role="img" aria-labelledby="title desc">
+	<title id="title">Metis</title>
+	<desc id="desc">Four interlocking charcoal and graphite planes on an ivory background.</desc>
 	<defs>
-		<linearGradient id="surface" x1="144" y1="96" x2="880" y2="928" gradientUnits="userSpaceOnUse">
-			<stop stop-color="#343431" />
-			<stop offset="1" stop-color="#20201f" />
-		</linearGradient>
-		<linearGradient id="mark" x1="274" y1="304" x2="750" y2="720" gradientUnits="userSpaceOnUse">
-			<stop stop-color="#e0a06d" />
-			<stop offset="1" stop-color="#c86548" />
-		</linearGradient>
 		<filter id="shadow" x="-20%" y="-20%" width="140%" height="150%">
-			<feDropShadow dx="0" dy="24" stdDeviation="28" flood-color="#000" flood-opacity="0.34" />
+			<feDropShadow dx="0" dy="18" stdDeviation="22" flood-color="#000" flood-opacity="0.22" />
 		</filter>
 	</defs>
-	<rect x="80" y="80" width="864" height="864" rx="206" fill="#171716" opacity="0.5" filter="url(#shadow)" />
-	<rect x="80" y="64" width="864" height="864" rx="206" fill="url(#surface)" />
-	<rect x="81" y="65" width="862" height="862" rx="205" fill="none" stroke="#fff" stroke-opacity="0.09" stroke-width="2" />
-	<path d="M274 706V322L512 626L750 322V706" fill="none" stroke="url(#mark)" stroke-linecap="round" stroke-linejoin="round" stroke-width="88" />
-	<path d="M274 322L512 626L750 322" fill="none" stroke="#f0b27e" stroke-linecap="round" stroke-linejoin="round" stroke-opacity="0.16" stroke-width="20" />
+	<rect x="64" y="64" width="896" height="896" rx="208" fill="#f5f1e8" filter="url(#shadow)" />
+	<rect x="65" y="65" width="894" height="894" rx="207" fill="none" stroke="#d8d1c3" stroke-width="2" />
+	<g transform="translate(-16 -5) scale(.55)">
+		<path fill="#272727" d="M 1227 878 L 1190 851 L 1165 837 L 1116 818 L 1079 809 L 1031 803 L 988 802 L 938 805 L 890 812 L 887 817 L 888 821 L 993 922 L 1044 978 L 1081 1025 L 1112 1072 L 1138 1123 L 1153 1169 L 1156 1204 L 1154 1221 L 1148 1240 L 1129 1269 L 1114 1283 L 1091 1298 L 1064 1310 L 1038 1318 L 985 1327 L 927 1328 L 858 1320 L 813 1310 L 736 1288 L 704 1282 L 679 1282 L 657 1288 L 642 1297 L 625 1316 L 613 1338 L 603 1369 L 600 1386 L 601 1424 L 607 1444 L 620 1465 L 643 1487 L 669 1504 L 709 1522 L 763 1538 L 810 1547 L 864 1553 L 920 1556 L 998 1556 L 1058 1553 L 1129 1546 L 1175 1539 L 1237 1525 L 1280 1511 L 1323 1491 L 1344 1478 L 1368 1459 L 1388 1438 L 1405 1414 L 1419 1386 L 1430 1350 L 1435 1322 L 1436 1279 L 1427 1220 L 1419 1190 L 1399 1134 L 1378 1087 L 1341 1018 L 1291 945 L 1255 904 Z" />
+		<path fill="#272727" d="M 1206 369 L 1175 355 L 1137 343 L 1091 333 L 1040 326 L 985 322 L 895 322 L 794 331 L 734 342 L 689 354 L 642 371 L 612 385 L 577 406 L 548 428 L 523 452 L 498 483 L 484 506 L 471 536 L 464 564 L 462 603 L 466 633 L 473 658 L 487 692 L 505 725 L 531 765 L 622 887 L 682 957 L 724 998 L 752 1020 L 774 1034 L 809 1049 L 840 1055 L 879 1054 L 915 1046 L 943 1036 L 979 1016 L 996 1001 L 1000 994 L 1001 986 L 974 953 L 816 789 L 783 750 L 758 716 L 741 686 L 732 655 L 735 630 L 744 613 L 773 584 L 814 562 L 860 548 L 919 540 L 988 539 L 1039 543 L 1115 555 L 1210 577 L 1231 573 L 1245 560 L 1260 532 L 1270 495 L 1271 454 L 1264 428 L 1250 404 L 1232 386 Z" />
+		<path fill="#646360" d="M 375 772 L 359 803 L 348 834 L 341 864 L 336 900 L 336 991 L 349 1081 L 372 1162 L 393 1211 L 423 1261 L 444 1287 L 468 1310 L 489 1325 L 507 1334 L 524 1339 L 542 1339 L 552 1336 L 562 1330 L 575 1317 L 595 1291 L 619 1267 L 647 1250 L 675 1242 L 699 1241 L 723 1244 L 838 1275 L 894 1286 L 928 1290 L 979 1290 L 1016 1285 L 1065 1269 L 1091 1253 L 1104 1241 L 1111 1231 L 1118 1214 L 1120 1196 L 1116 1165 L 1108 1140 L 1080 1084 L 1061 1055 L 1038 1028 L 1029 1028 L 1006 1046 L 972 1064 L 939 1076 L 906 1084 L 876 1088 L 843 1088 L 816 1084 L 777 1072 L 742 1054 L 718 1037 L 674 998 L 644 967 L 570 880 L 533 829 L 487 757 L 474 740 L 463 730 L 448 723 L 439 722 L 424 725 L 403 738 L 387 755 Z" />
+		<path fill="#646360" d="M 778 635 L 769 654 L 769 668 L 778 692 L 812 740 L 839 770 L 854 782 L 867 783 L 931 773 L 976 770 L 1037 771 L 1079 776 L 1127 787 L 1171 803 L 1201 818 L 1234 839 L 1260 860 L 1291 890 L 1319 923 L 1343 956 L 1385 1027 L 1409 1076 L 1445 1162 L 1456 1181 L 1464 1188 L 1472 1191 L 1486 1188 L 1498 1180 L 1521 1154 L 1540 1117 L 1555 1075 L 1575 989 L 1583 907 L 1582 854 L 1577 807 L 1562 736 L 1549 697 L 1532 660 L 1508 621 L 1491 599 L 1459 566 L 1433 545 L 1406 528 L 1373 514 L 1360 511 L 1332 513 L 1322 518 L 1308 532 L 1283 581 L 1271 598 L 1255 612 L 1229 621 L 1212 622 L 1180 618 L 1079 592 L 1037 584 L 975 577 L 932 577 L 882 583 L 839 595 L 804 612 L 788 624 Z" />
+	</g>
 </svg>

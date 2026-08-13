@@ -1,10 +1,12 @@
 import { CaretDown, CaretRight, Check, GearSix, Globe } from "@phosphor-icons/react";
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { APP_LOCALES, type AppLocale, setLocale } from "../i18n.ts";
+import { useProfileIdentity } from "../profile-identity.ts";
 
-export function AccountMenu({ onSettings }: { readonly onSettings: () => void }) {
+export const AccountMenu = memo(function AccountMenu({ onSettings }: { readonly onSettings: () => void }) {
 	const { t, i18n } = useTranslation();
+	const identity = useProfileIdentity();
 	const [open, setOpen] = useState(false);
 	const [languageOpen, setLanguageOpen] = useState(false);
 	const rootRef = useRef<HTMLDivElement>(null);
@@ -113,7 +115,7 @@ export function AccountMenu({ onSettings }: { readonly onSettings: () => void })
 				</div>
 			)}
 			<button
-				aria-label="Metis"
+				aria-label={identity.displayName}
 				aria-expanded={open}
 				aria-haspopup="menu"
 				className="account-menu-trigger"
@@ -124,10 +126,14 @@ export function AccountMenu({ onSettings }: { readonly onSettings: () => void })
 				ref={triggerRef}
 				type="button"
 			>
-				<span className="account-mark">A</span>
-				<span>Metis</span>
+				<span aria-hidden="true" className="account-mark">
+					{identity.avatarDataUrl
+						? <img alt="" src={identity.avatarDataUrl} />
+						: identity.displayName.trim()[0]?.toUpperCase() ?? "M"}
+				</span>
+				<span className="account-menu-name">{identity.displayName}</span>
 				<CaretDown aria-hidden="true" size={14} />
 			</button>
 		</div>
 	);
-}
+});

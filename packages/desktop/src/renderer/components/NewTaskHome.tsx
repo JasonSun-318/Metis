@@ -4,17 +4,24 @@ import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import type { DesktopAttachmentSelection } from "../../shared/desktop-api.ts";
 import { Composer, type ComposerSubmission } from "./Composer.tsx";
+import { SideRays } from "./SideRays.tsx";
+import type { ComposerSlashCommand } from "./SlashCommandMenu.tsx";
 
 interface NewTaskHomeProps {
 	readonly busy: boolean;
+	readonly commandRequest?: { readonly id: number; readonly open: boolean };
+	readonly disabledSlashCommands?: ReadonlySet<ComposerSlashCommand>;
+	readonly disabledSlashReasons?: Partial<Record<ComposerSlashCommand, string>>;
 	readonly folder: string | null;
 	readonly folderLocked: boolean;
 	readonly mode: AgentMode;
 	readonly modelControl?: ReactNode;
 	readonly permissionControl?: ReactNode;
 	readonly onChooseFolder: () => Promise<void>;
+	readonly onManageMcp: () => void;
 	readonly onManageSkills: () => void;
 	readonly onPickFiles: () => Promise<readonly DesktopAttachmentSelection[]>;
+	readonly onSlashCommand?: (command: ComposerSlashCommand) => void | Promise<void>;
 	readonly onSubmit: (input: ComposerSubmission) => Promise<void>;
 	readonly skills: readonly SkillSummaryView[];
 	readonly thinkingControl?: ReactNode;
@@ -26,14 +33,19 @@ function folderName(folder: string): string {
 
 export function NewTaskHome({
 	busy,
+	commandRequest,
+	disabledSlashCommands,
+	disabledSlashReasons,
 	folder,
 	folderLocked,
 	mode,
 	modelControl,
 	permissionControl,
 	onChooseFolder,
+	onManageMcp,
 	onManageSkills,
 	onPickFiles,
+	onSlashCommand,
 	onSubmit,
 	skills,
 	thinkingControl,
@@ -41,6 +53,7 @@ export function NewTaskHome({
 	const { t } = useTranslation();
 	return (
 		<section className="new-task-home">
+			<SideRays />
 			<div className="new-task-home-content">
 				<div className="new-task-home-heading">
 					<h1>{t("What can I take off your plate?")}</h1>
@@ -49,12 +62,17 @@ export function NewTaskHome({
 				<div className="new-task-home-composer">
 					<Composer
 						appearance="chat"
+						commandRequest={commandRequest}
 						disabled={busy}
+						disabledSlashCommands={disabledSlashCommands}
+						disabledSlashReasons={disabledSlashReasons}
 						modelControl={modelControl}
 						permissionControl={permissionControl}
 						onInterrupt={async () => {}}
+						onManageMcp={onManageMcp}
 						onManageSkills={onManageSkills}
 						onPickFiles={onPickFiles}
+						onSlashCommand={onSlashCommand}
 						onSubmit={onSubmit}
 						placeholder={t("How can I help you today?")}
 						running={false}

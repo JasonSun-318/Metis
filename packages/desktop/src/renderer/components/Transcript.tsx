@@ -162,11 +162,12 @@ export function Transcript({ activeTurnId, activeTurnStartedAt, appearance, aria
 							return item ? [item] : [];
 						});
 						if (items.length === 0) return null;
+						const compaction = items.some((item) => item.content.some((block) => block.type === "compaction"));
 						const running = activeTurnId !== null && activeTurnId !== undefined &&
 							items.some((item) => item.turnId === activeTurnId);
 						return (
 							<article
-								className={appearance === "chat" ? "transcript-turn" : "code-transcript-turn"}
+								className={compaction ? "transcript-compaction-row" : appearance === "chat" ? "transcript-turn" : "code-transcript-turn"}
 								data-index={row.index}
 								data-transcript-item={appearance === "code" ? transcriptRow.itemIds.at(-1) : undefined}
 								data-transcript-turn={transcriptRow.key}
@@ -174,7 +175,7 @@ export function Transcript({ activeTurnId, activeTurnStartedAt, appearance, aria
 								ref={virtualizer.measureElement}
 								style={{ transform: `translateY(${row.start}px)` }}
 							>
-								{appearance === "chat"
+								{compaction ? <div role="separator"><span>{t("Compacted")}</span></div> : appearance === "chat"
 									? <TranscriptTurn items={items} running={running} startedAt={activeTurnStartedAt} />
 									: <CodeTranscriptTurn items={items} running={running} startedAt={activeTurnStartedAt} />}
 							</article>

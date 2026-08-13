@@ -1,5 +1,5 @@
 import type { SessionSummary } from "@metis/app-protocol";
-import { DotsThree, PencilSimple, Trash } from "@phosphor-icons/react";
+import { CaretDown, CopySimple, DotsThree, PencilSimple, PushPin, PushPinSimple, Trash } from "@phosphor-icons/react";
 import { type CSSProperties, type FormEvent, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
@@ -12,8 +12,12 @@ interface SessionActionsProps {
 	readonly disabled: boolean;
 	readonly displayName: string;
 	readonly onDelete: (session: SessionSummary) => Promise<void>;
+	readonly onCopy?: (displayName: string) => Promise<void>;
+	readonly onPin?: (session: SessionSummary, pinned: boolean) => void;
 	readonly onRename: (session: SessionSummary, name: string) => Promise<void>;
+	readonly pinned?: boolean;
 	readonly session: SessionSummary;
+	readonly variant?: "sidebar" | "header";
 }
 
 function message(cause: unknown): string {
@@ -26,8 +30,12 @@ export function SessionActions({
 	disabled,
 	displayName,
 	onDelete,
+	onCopy,
+	onPin,
 	onRename,
+	pinned = false,
 	session,
+	variant = "sidebar",
 }: SessionActionsProps) {
 	const { t } = useTranslation();
 	const [menuOpen, setMenuOpen] = useState(false);
@@ -39,8 +47,6 @@ export function SessionActions({
 	const root = useRef<HTMLDivElement>(null);
 	const trigger = useRef<HTMLButtonElement>(null);
 	const menu = useRef<HTMLDivElement>(null);
-	const renameItem = useRef<HTMLButtonElement>(null);
-	const deleteItem = useRef<HTMLButtonElement>(null);
 	const renameInput = useRef<HTMLInputElement>(null);
 	const cancelButton = useRef<HTMLButtonElement>(null);
 	const updateMenuPosition = useCallback(() => {
@@ -60,7 +66,7 @@ export function SessionActions({
 
 	useEffect(() => {
 		if (!menuOpen) return;
-		queueMicrotask(() => (allowRename ? renameItem : deleteItem).current?.focus());
+		queueMicrotask(() => menu.current?.querySelector<HTMLButtonElement>("button:not(:disabled)")?.focus());
 		const onPointerDown = (event: PointerEvent) => {
 			const node = event.target as Node;
 			if (!root.current?.contains(node) && !menu.current?.contains(node)) closeMenu(false);
@@ -101,6 +107,19 @@ export function SessionActions({
 			setPending(false);
 		}
 	};
+	const copyTitle = async () => {
+		if (!onCopy || pending) return;
+		setPending(true);
+		setError(null);
+		try {
+			await onCopy(displayName);
+			closeMenu();
+		} catch (cause) {
+			setError(message(cause));
+		} finally {
+			setPending(false);
+		}
+	};
 	const confirmDelete = async () => {
 		if (deleteDisabled || pending) return;
 		setPending(true);
@@ -117,17 +136,22 @@ export function SessionActions({
 	};
 
 	return (
-		<div className="session-actions" data-open={menuOpen} ref={root}>
+		<div className={`session-actions${variant === "header" ? " session-actions-header" : ""}`} data-open={menuOpen} ref={root}>
 			<button
 				aria-expanded={menuOpen}
 				aria-haspopup="menu"
 				aria-label={t("Actions for {{name}}", { name: displayName })}
 				disabled={disabled}
-				onClick={() => setMenuOpen((open) => !open)}
+				onClick={() => {
+					setError(null);
+					setMenuOpen((open) => !open);
+				}}
 				ref={trigger}
 				type="button"
 			>
-				<DotsThree aria-hidden="true" size={17} weight="bold" />
+				{variant === "header"
+					? <CaretDown aria-hidden="true" size={13} />
+					: <DotsThree aria-hidden="true" size={17} weight="bold" />}
 			</button>
 			{menuOpen && createPortal((
 				<div
@@ -151,6 +175,27 @@ export function SessionActions({
 					role="menu"
 					style={menuPosition}
 				>
+					{onPin && (
+						<button
+							disabled={pending}
+							onClick={() => {
+								onPin(session, !pinned);
+								closeMenu();
+							}}
+							role="menuitem"
+							type="button"
+						>
+							{pinned
+								? <PushPin aria-hidden="true" size={15} />
+								: <PushPinSimple aria-hidden="true" size={15} />}
+							{t(pinned ? "Unpin" : "Pin")}
+						</button>
+					)}
+					{onCopy && (
+						<button disabled={pending} onClick={() => void copyTitle()} role="menuitem" type="button">
+							<CopySimple aria-hidden="true" size={15} /> {t("Copy title")}
+						</button>
+					)}
 					{allowRename && (
 						<button
 							onClick={() => {
@@ -159,7 +204,6 @@ export function SessionActions({
 								setMenuOpen(false);
 								setDialog("rename");
 							}}
-							ref={renameItem}
 							role="menuitem"
 							type="button"
 						>
@@ -174,12 +218,12 @@ export function SessionActions({
 							setMenuOpen(false);
 							setDialog("delete");
 						}}
-						ref={deleteItem}
 						role="menuitem"
 						type="button"
 					>
 						<Trash aria-hidden="true" size={15} /> {t("Delete")}
 					</button>
+					{error && <p className="session-action-menu-error" role="alert">{t(error)}</p>}
 				</div>
 			), document.body)}
 			{dialog === "rename" && (

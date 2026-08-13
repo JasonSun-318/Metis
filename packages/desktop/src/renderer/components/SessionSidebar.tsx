@@ -52,6 +52,7 @@ interface SessionSidebarProps {
 	readonly onNewTask: () => void;
 	readonly onOpen: (sessionId: string) => Promise<void>;
 	readonly onDeleteSession: (session: SessionSummary) => Promise<void>;
+	readonly onPinSession: (session: SessionSummary, pinned: boolean) => void;
 	readonly onRenameSession: (session: SessionSummary, name: string) => Promise<void>;
 	readonly onCreateProjectSession: (group: ProjectSessionGroup) => Promise<void>;
 	readonly onDeleteProject: (
@@ -73,6 +74,7 @@ interface SessionSidebarProps {
 	readonly onWidthChange: (width: number, persist?: boolean) => void;
 	readonly projectBusy: (group: ProjectSessionGroup) => boolean;
 	readonly preferences: ProjectPreferenceMap;
+	readonly pinnedSessionIds: ReadonlySet<string>;
 	readonly scheduleTasks: readonly ScheduleTaskView[];
 	readonly selectedScheduleTaskId: string | null;
 	readonly updateState: DesktopUpdateState;
@@ -100,6 +102,7 @@ export function buildSessionTree(
 	state: AppStoreSnapshot,
 	mode: AgentMode,
 	preferences: ProjectPreferenceMap,
+	excludedSessionIds: ReadonlySet<string> = new Set(),
 ): SessionTree {
 	const modePreferences = new Map<string, ProjectPreference>();
 	for (const preference of preferences.values()) {
@@ -110,11 +113,11 @@ export function buildSessionTree(
 	for (const session of sessionsForMode(state, mode)) {
 		if (session.scheduled) continue;
 		if (session.cwdOrigin === "managed" || !session.cwd) {
-			tasks.push(session);
+			if (!excludedSessionIds.has(session.sessionId)) tasks.push(session);
 			continue;
 		}
 		const sessions = projects.get(session.cwd) ?? [];
-		sessions.push(session);
+		if (!excludedSessionIds.has(session.sessionId)) sessions.push(session);
 		projects.set(session.cwd, sessions);
 	}
 	const groups = [...projects].map(([cwd, sessions]) => {
@@ -145,21 +148,47 @@ function windowIsFullscreen(): boolean {
 	return runtime.screen !== undefined && runtime.innerWidth === runtime.screen.width && runtime.innerHeight === runtime.screen.height;
 }
 
-function SessionButton({ busy, deleteDisabled, onDelete, onRename, selected, session, onOpen }: {
+function SessionButton({ busy, deleteDisabled, onDelete, onPin, onRename, pinned, selected, session, onOpen }: {
 	readonly busy: boolean;
 	readonly deleteDisabled: boolean;
 	readonly onDelete: (session: SessionSummary) => Promise<void>;
+	readonly onPin: (session: SessionSummary, pinned: boolean) => void;
 	readonly onRename: (session: SessionSummary, name: string) => Promise<void>;
+	readonly pinned: boolean;
 	readonly selected: boolean;
 	readonly session: SessionSummary;
 	readonly onOpen: (sessionId: string) => Promise<void>;
 }) {
 	const { t, i18n } = useTranslation();
 	const title = taskTitle(session, localeForIntl(i18n.resolvedLanguage), t("Task"));
+	const running = session.state === "running";
+	const notification = !selected && session.unread;
+	const indicator = notification && session.attentionRequired
+		? "attention"
+		: notification && session.lastTurnOutcome === "failed"
+			? "failed"
+			: notification && session.lastTurnOutcome === "completed"
+				? "completed"
+				: running
+					? "running"
+					: notification
+						? "unread"
+						: undefined;
+	const indicatorDescription = indicator === "attention"
+		? t("Needs attention")
+		: indicator === "running"
+			? t("Running")
+			: indicator === "failed"
+				? t("Failed")
+				: indicator === "completed"
+					? t("Completed")
+					: undefined;
 	return (
 		<div className="session-row" data-scheduled={session.scheduled ? "true" : undefined}>
 			<button
+				aria-busy={running || undefined}
 				aria-current={selected ? "page" : undefined}
+				aria-description={indicatorDescription}
 				aria-label={title}
 				className="session-button"
 				disabled={busy}
@@ -167,8 +196,7 @@ function SessionButton({ busy, deleteDisabled, onDelete, onRename, selected, ses
 				title={title}
 				type="button"
 			>
-				<span className="session-button-title"><i aria-hidden="true" className={session.unread ? "unread" : undefined} />{title}</span>
-				{session.state !== "idle" && <small>{t(session.state.replace("_", " "))}</small>}
+				<span className="session-button-title"><i aria-hidden="true" className={indicator} />{title}</span>
 			</button>
 			<SessionActions
 				allowRename={!session.scheduled}
@@ -176,7 +204,9 @@ function SessionButton({ busy, deleteDisabled, onDelete, onRename, selected, ses
 				disabled={busy}
 				displayName={title}
 				onDelete={onDelete}
+				onPin={onPin}
 				onRename={onRename}
+				pinned={pinned}
 				session={session}
 			/>
 		</div>
@@ -208,6 +238,7 @@ function ProjectGroup({
 	onDeleteProject,
 	onDeleteSession,
 	onOpen,
+	onPinSession,
 	onPinProject,
 	onPreviewProjectDelete,
 	onRenameProject,
@@ -227,6 +258,7 @@ function ProjectGroup({
 	) => Promise<void>;
 	readonly onDeleteSession: (session: SessionSummary) => Promise<void>;
 	readonly onOpen: (sessionId: string) => Promise<void>;
+	readonly onPinSession: (session: SessionSummary, pinned: boolean) => void;
 	readonly onPinProject: (group: ProjectSessionGroup, pinned: boolean) => void;
 	readonly onPreviewProjectDelete: (
 		group: ProjectSessionGroup,
@@ -266,7 +298,7 @@ function ProjectGroup({
 			<div className="project-drawer" inert={!open}>
 				<div className="project-sessions">
 					{group.sessions.map((session) => (
-						<SessionButton busy={busy} deleteDisabled={isDeleteDisabled(session)} key={session.sessionId} onDelete={onDeleteSession} onOpen={onOpen} onRename={onRenameSession} selected={selectedSessionId === session.sessionId} session={session} />
+						<SessionButton busy={busy} deleteDisabled={isDeleteDisabled(session)} key={session.sessionId} onDelete={onDeleteSession} onOpen={onOpen} onPin={onPinSession} onRename={onRenameSession} pinned={false} selected={selectedSessionId === session.sessionId} session={session} />
 					))}
 				</div>
 			</div>
@@ -284,6 +316,7 @@ export function SessionSidebar({
 	onNewTask,
 	onOpen,
 	onDeleteSession,
+	onPinSession,
 	onCreateProjectSession,
 	onDeleteProject,
 	onPinProject,
@@ -300,6 +333,7 @@ export function SessionSidebar({
 	onWidthChange,
 	projectBusy,
 	preferences,
+	pinnedSessionIds,
 	scheduleTasks,
 	selectedScheduleTaskId,
 	updateState,
@@ -314,7 +348,7 @@ export function SessionSidebar({
 	const scheduledSessions = sessionsForMode(state, mode).filter(
 		(session) => session.scheduled && !scheduledTaskIds.has(session.scheduled.taskId),
 	);
-	const tree = buildSessionTree(state, mode, preferences);
+	const tree = buildSessionTree(state, mode, preferences, pinnedSessionIds);
 	const [fullscreen, setFullscreen] = useState(windowIsFullscreen);
 	const resizeRef = useRef<{ readonly pointerId: number; readonly x: number; readonly width: number } | null>(null);
 	const [activeProjectActions, setActiveProjectActions] = useState<string | null>(null);
@@ -326,8 +360,10 @@ export function SessionSidebar({
 		}
 	});
 	const grouping = groupingByMode[mode];
-	const sessions = sessionsForMode(state, mode).filter((session) => session.scheduled === undefined);
-	const hasSessions = sessions.length > 0;
+	const allSessions = sessionsForMode(state, mode).filter((session) => session.scheduled === undefined);
+	const pinnedSessions = allSessions.filter((session) => pinnedSessionIds.has(session.sessionId));
+	const sessions = allSessions.filter((session) => !pinnedSessionIds.has(session.sessionId));
+	const hasSessions = allSessions.length > 0;
 	useEffect(() => {
 		const runtime = globalThis as RendererWindowView;
 		const updateFullscreen = () => setFullscreen(windowIsFullscreen());
@@ -356,7 +392,9 @@ export function SessionSidebar({
 			key={session.sessionId}
 			onDelete={onDeleteSession}
 			onOpen={onOpen}
+			onPin={onPinSession}
 			onRename={onRenameSession}
+			pinned={pinnedSessionIds.has(session.sessionId)}
 			selected={selectedSessionId === session.sessionId}
 			session={session}
 		/>
@@ -391,7 +429,7 @@ export function SessionSidebar({
 			</button>
 			<button aria-current={destination === "skills" ? "page" : undefined} className="sidebar-nav-button" disabled={busy} onClick={onSkills} type="button">
 				<Sparkle aria-hidden="true" size={17} />
-				{t("Skills")}
+				{t("Plugins")}
 			</button>
 			{mode === "chat" && <button aria-current={destination === "schedules" ? "page" : undefined} className="sidebar-nav-button" disabled={busy} onClick={onSchedules} type="button"><ClockCountdown aria-hidden="true" size={17} />{t("Scheduled tasks")}</button>}
 			<nav aria-label={t("{{mode}} sessions", { mode: t(mode === "chat" ? "Chat" : "Code") })} className="project-list" data-empty={!hasSessions || undefined} data-grouping={grouping}>
@@ -411,6 +449,11 @@ export function SessionSidebar({
 					value={grouping}
 				/>
 				{!hasSessions && <p className="empty-copy">{t("No {{mode}} tasks yet.", { mode: t(mode === "chat" ? "Chat" : "Code") })}</p>}
+				{pinnedSessions.length > 0 && (
+					<SessionSection label={t("Pinned")}>
+						{pinnedSessions.map(renderSession)}
+					</SessionSection>
+				)}
 				{grouping === "project" && tree.projects.map((group) => (
 					<ProjectGroup
 						actionsActive={activeProjectActions === JSON.stringify([group.mode, group.cwd])}
@@ -424,6 +467,7 @@ export function SessionSidebar({
 						onDeleteSession={onDeleteSession}
 						isDeleteDisabled={isDeleteDisabled}
 						onOpen={onOpen}
+						onPinSession={onPinSession}
 						onPinProject={onPinProject}
 						onPreviewProjectDelete={onPreviewProjectDelete}
 						onRenameProject={onRenameProject}

@@ -85,6 +85,20 @@ for (const [fuse, expected] of [
 }
 
 const packagedPaths = new Set(listPackage(appAsar));
+const tuiNativeRoot = "/.webpack/app-server/node_modules/@metis/tui/native/";
+const expectedTuiNativePrefix =
+	process.platform === "darwin" || process.platform === "win32"
+		? `${tuiNativeRoot}${process.platform}/prebuilds/${process.platform}-${expectedArch}/`
+		: undefined;
+for (const packagedPath of packagedPaths) {
+	const isTuiPrebuild = packagedPath.startsWith(tuiNativeRoot) && packagedPath.includes("/prebuilds/");
+	const isExpectedTuiPrebuild =
+		expectedTuiNativePrefix &&
+		(packagedPath === expectedTuiNativePrefix.slice(0, -1) || packagedPath.startsWith(expectedTuiNativePrefix));
+	if (isTuiPrebuild && !isExpectedTuiPrebuild) {
+		throw new Error(`Packaged TUI runtime contains a foreign native architecture: ${packagedPath}`);
+	}
+}
 const installLock = JSON.parse(
 	await readFile(path.join(repoRoot, "packages", "coding-agent", "install-lock", "package-lock.json"), "utf8"),
 );

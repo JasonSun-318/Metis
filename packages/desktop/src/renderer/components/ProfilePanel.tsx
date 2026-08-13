@@ -4,34 +4,18 @@ import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState }
 import { useTranslation } from "react-i18next";
 import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
 import { localeForIntl } from "../i18n.ts";
+import {
+	DEFAULT_PROFILE_IDENTITY,
+	saveProfileIdentity,
+	type ProfileIdentity,
+	useProfileIdentity,
+} from "../profile-identity.ts";
 
 const DAY_MS = 86_400_000;
 const VISIBLE_WEEKS = 53;
-const DEFAULT_DISPLAY_NAME = "Metis User";
 const MAX_AVATAR_BYTES = 2_000_000;
+const MAX_AVATAR_DIMENSION = 256;
 const AVATAR_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
-export const PROFILE_IDENTITY_STORAGE_KEY = "metis.profile.identity.v1";
-
-interface ProfileIdentity {
-	readonly displayName: string;
-	readonly avatarDataUrl: string | null;
-}
-
-function readProfileIdentity(defaultDisplayName = DEFAULT_DISPLAY_NAME): ProfileIdentity {
-	try {
-		const value = JSON.parse(localStorage.getItem(PROFILE_IDENTITY_STORAGE_KEY) ?? "null") as Partial<ProfileIdentity> | null;
-		return {
-			displayName: typeof value?.displayName === "string" && value.displayName.trim() ? value.displayName.slice(0, 80) : defaultDisplayName,
-			avatarDataUrl: typeof value?.avatarDataUrl === "string" && /^data:image\/(?:jpeg|png|webp);base64,/u.test(value.avatarDataUrl) ? value.avatarDataUrl : null,
-		};
-	} catch {
-		return { displayName: defaultDisplayName, avatarDataUrl: null };
-	}
-}
-
-function writeProfileIdentity(identity: ProfileIdentity): void {
-	localStorage.setItem(PROFILE_IDENTITY_STORAGE_KEY, JSON.stringify(identity));
-}
 
 interface ActivityCell {
 	readonly date: string;
@@ -130,7 +114,7 @@ export function ProfilePanel({ api, serverReady }: {
 	const [profile, setProfile] = useState<ProfileUsageSummaryView | null>(null);
 	const [error, setError] = useState<string | null>(null);
 	const [request, setRequest] = useState(0);
-	const [identity, setIdentity] = useState(() => readProfileIdentity(t(DEFAULT_DISPLAY_NAME)));
+	const identity = useProfileIdentity();
 	const [editingName, setEditingName] = useState(false);
 	const [nameDraft, setNameDraft] = useState(identity.displayName);
 	const [identityError, setIdentityError] = useState<string | null>(null);
@@ -151,31 +135,45 @@ export function ProfilePanel({ api, serverReady }: {
 	const weeks = useMemo(() => profile ? buildActivityWeeks(profile, locale) : [], [locale, profile]);
 	const saveIdentity = (next: ProfileIdentity) => {
 		try {
-			writeProfileIdentity(next);
-			setIdentity(next);
+			saveProfileIdentity(next);
 			setIdentityError(null);
 		} catch {
 			setIdentityError(t("Profile could not be saved."));
 		}
 	};
 	const saveDisplayName = () => {
-		const displayName = nameDraft.trim().slice(0, 80) || t(DEFAULT_DISPLAY_NAME);
+		const displayName = nameDraft.trim().slice(0, 80) || DEFAULT_PROFILE_IDENTITY.displayName;
 		setNameDraft(displayName);
 		saveIdentity({ ...identity, displayName });
 		setEditingName(false);
 	};
-	const selectAvatar = (file: File | undefined) => {
+	const selectAvatar = async (file: File | undefined) => {
 		if (!file) return;
 		if (!AVATAR_TYPES.has(file.type) || file.size > MAX_AVATAR_BYTES) {
 			setIdentityError(t("Choose a PNG, JPEG, or WebP image under 2 MB."));
 			return;
 		}
-		const reader = new FileReader();
-		reader.onload = () => {
-			if (typeof reader.result === "string") saveIdentity({ ...identity, avatarDataUrl: reader.result });
-		};
-		reader.onerror = () => setIdentityError(t("Profile image could not be saved."));
-		reader.readAsDataURL(file);
+		let bitmap: ImageBitmap | undefined;
+		try {
+			bitmap = await createImageBitmap(file);
+			if (bitmap.width < 1 || bitmap.height < 1) throw new Error("Invalid avatar dimensions");
+			const scale = Math.min(1, MAX_AVATAR_DIMENSION / Math.max(bitmap.width, bitmap.height));
+			const width = Math.max(1, Math.round(bitmap.width * scale));
+			const height = Math.max(1, Math.round(bitmap.height * scale));
+			const canvas = document.createElement("canvas");
+			canvas.width = width;
+			canvas.height = height;
+			const context = canvas.getContext("2d");
+			if (!context) throw new Error("Avatar canvas is unavailable");
+			context.drawImage(bitmap, 0, 0, width, height);
+			const avatarDataUrl = canvas.toDataURL("image/webp", 0.86);
+			if (!/^data:image\/(?:png|webp);base64,/u.test(avatarDataUrl)) throw new Error("Avatar encoding failed");
+			saveIdentity({ ...identity, avatarDataUrl });
+		} catch {
+			setIdentityError(t("Profile image could not be saved."));
+		} finally {
+			bitmap?.close();
+		}
 	};
 	if (!profile && !error) return <section className="profile-panel"><ProfileLoading /></section>;
 	if (!profile) {
@@ -242,7 +240,7 @@ export function ProfilePanel({ api, serverReady }: {
 								<i aria-hidden="true"><Camera size={14} /></i>
 							</button>
 							{identity.avatarDataUrl ? <button aria-label={t("Remove avatar")} className="profile-avatar-remove" onClick={() => saveIdentity({ ...identity, avatarDataUrl: null })} type="button"><Trash aria-hidden="true" size={14} /></button> : null}
-							<input accept="image/png,image/jpeg,image/webp" hidden onChange={(event) => { selectAvatar(event.target.files?.[0]); event.target.value = ""; }} ref={avatarInputRef} type="file" />
+				<input accept="image/png,image/jpeg,image/webp" hidden onChange={(event) => { void selectAvatar(event.target.files?.[0]); event.target.value = ""; }} ref={avatarInputRef} type="file" />
 						</div>
 						{identityError ? <p className="profile-identity-error" role="alert">{identityError}</p> : null}
 					</header>

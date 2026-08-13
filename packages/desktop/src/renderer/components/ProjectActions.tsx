@@ -32,7 +32,9 @@ function errorMessage(cause: unknown): string {
 }
 
 function focusable(dialog: HTMLElement): HTMLElement[] {
-	return Array.from(dialog.querySelectorAll<HTMLElement>("button:not(:disabled), input:not(:disabled)"));
+	return Array.from(dialog.querySelectorAll<HTMLElement>(
+		"button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href]",
+	));
 }
 
 export function DialogFrame({
@@ -57,8 +59,9 @@ export function DialogFrame({
 	const canCancel = useRef(cancellable);
 	cancel.current = onCancel;
 	canCancel.current = cancellable;
-	const handleKeyDown = (event: Pick<KeyboardEvent, "key" | "shiftKey" | "preventDefault">) => {
+	const handleKeyDown = (event: Pick<KeyboardEvent, "key" | "shiftKey" | "preventDefault" | "target">) => {
 		if (event.key === "Escape" && canCancel.current) {
+			if (dialog.current?.querySelector('[aria-haspopup][aria-expanded="true"]') || (event.target instanceof Element && event.target.closest('[role="listbox"], [role="menu"]'))) return;
 			event.preventDefault();
 			cancel.current();
 			return;

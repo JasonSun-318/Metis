@@ -16,6 +16,7 @@ const workspacePackages = new Map([
 ]);
 const installLockPath = join(repoRoot, "packages", "coding-agent", "install-lock", "package-lock.json");
 const npm = process.platform === "win32" ? "npm.cmd" : "npm";
+const packagedNativeTarget = process.env.METIS_NATIVE_TOOLS_TARGET;
 
 async function run(command, args, failure, env = process.env) {
 	await new Promise((resolveRun, rejectRun) => {
@@ -87,6 +88,26 @@ for (const [packageName, packageRoot] of workspacePackages) {
 	await copyWorkspacePackage(packageRoot, destination);
 }
 
+if (packagedNativeTarget) {
+	const [rawTargetPlatform, targetArch] = packagedNativeTarget.split("-");
+	const targetPlatform = rawTargetPlatform === "mas" ? "darwin" : rawTargetPlatform;
+	const tuiNativeRoot = join(runtimeRoot, "node_modules", "@metis", "tui", "native");
+	for (const platform of ["darwin", "win32"]) {
+		const platformRoot = join(tuiNativeRoot, platform);
+		if (platform !== targetPlatform) {
+			await rm(platformRoot, { recursive: true, force: true });
+			continue;
+		}
+		await rm(join(platformRoot, "src"), { recursive: true, force: true });
+		const prebuilds = join(platformRoot, "prebuilds");
+		for (const entry of await readdir(prebuilds, { withFileTypes: true }).catch(() => [])) {
+			if (entry.name !== `${targetPlatform}-${targetArch}`) {
+				await rm(join(prebuilds, entry.name), { recursive: true, force: true });
+			}
+		}
+	}
+}
+
 await rm(join(runtimeRoot, "node_modules", ".bin"), { recursive: true, force: true });
 
 const entry = join(runtimeRoot, "node_modules", "@metis", "app-server", "dist", "utility-entry.js");
@@ -95,7 +116,6 @@ if ((await lstat(join(runtimeRoot, "node_modules", "@metis", "app-server"))).isS
 	throw new Error("Packaged app-server runtime must not contain workspace symlinks");
 }
 
-const packagedNativeTarget = process.env.METIS_NATIVE_TOOLS_TARGET;
 const developmentNativeTarget = currentNativeTarget();
 if (
 	packagedNativeTarget &&

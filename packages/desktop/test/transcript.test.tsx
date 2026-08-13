@@ -9,7 +9,7 @@ import { TranscriptTurn } from "../src/renderer/components/TranscriptTurn.tsx";
 
 const SESSION_ID = "11111111-1111-4111-8111-111111111111";
 const TURN_ID = "turn-1";
-const LONG_THINKING = "用户希望查看桌面内容。我需要先取得目录访问，然后运行命令确认文件列表。".repeat(12);
+const LONG_THINKING = "用户希望查看桌面内容。我需要先取得目录访问，然后运行命令确认文件列表。".repeat(24);
 
 class TriggerResizeObserver implements ResizeObserver {
 	static readonly instances: TriggerResizeObserver[] = [];
@@ -92,6 +92,43 @@ const turnItems: ItemView[] = [
 afterEach(() => document.body.replaceChildren());
 
 describe("TranscriptTurn", () => {
+	it("keeps each execution chain after the intermediate reply that starts it", async () => {
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<TranscriptTurn items={[
+			item("ordered-user", "user", [{ type: "text", text: "继续处理" }]),
+			item("ordered-first", "assistant", [
+				{ type: "thinking", text: "先读取当前状态。" },
+				{ type: "tool_call", toolCallId: "ordered-read", name: "read", state: "completed" },
+			]),
+			item("ordered-read-result", "tool", [
+				{ type: "tool_result", toolCallId: "ordered-read", name: "read", isError: false, output: "ok" },
+			]),
+			item("ordered-update", "assistant", [{ type: "text", text: "状态已读取，现在继续修改。" }]),
+			item("ordered-second", "assistant", [
+				{ type: "thinking", text: "根据读取结果执行修改。" },
+				{ type: "tool_call", toolCallId: "ordered-edit", name: "edit", state: "completed" },
+			]),
+			item("ordered-edit-result", "tool", [
+				{ type: "tool_result", toolCallId: "ordered-edit", name: "edit", isError: false, output: "done" },
+			]),
+			item("ordered-final", "assistant", [{ type: "text", text: "修改完成。" }]),
+		]} />));
+
+		const chains = [...container.querySelectorAll<HTMLElement>(".execution-chain")];
+		const update = container.querySelector<HTMLElement>(".turn-intermediate");
+		const final = container.querySelector<HTMLElement>("[data-transcript-answer]");
+		expect(chains).toHaveLength(2);
+		expect(chains[0]!.textContent).toContain("先读取当前状态");
+		expect(chains[1]!.textContent).toContain("根据读取结果执行修改");
+		expect(chains[0]!.compareDocumentPosition(update!)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+		expect(update!.compareDocumentPosition(chains[1]!)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+		expect(chains[1]!.compareDocumentPosition(final!)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+
+		await act(async () => root.unmount());
+	});
+
 	it("matches the collapsed, capped, show-more, and nested-command states", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 		const container = document.createElement("div");
@@ -99,9 +136,12 @@ describe("TranscriptTurn", () => {
 		const root = createRoot(container);
 		await act(async () => root.render(<TranscriptTurn items={turnItems} />));
 
-		const chain = container.querySelector<HTMLDetailsElement>("details.execution-chain");
-		expect(chain).not.toBeNull();
-		expect(chain!.open).toBe(false);
+		const chains = [...container.querySelectorAll<HTMLDetailsElement>("details.execution-chain")];
+		expect(chains).toHaveLength(2);
+		const [thoughtChain, chain] = chains as [HTMLDetailsElement, HTMLDetailsElement];
+		expect(thoughtChain.open).toBe(false);
+		expect(thoughtChain.querySelector(":scope > summary")?.textContent).toContain("Thought process");
+		expect(chain.open).toBe(false);
 		expect(chain!.querySelector(":scope > summary")?.textContent).toContain("Ran a command, used a tool");
 		expect(chain!.querySelector(".execution-chain-caret")).not.toBeNull();
 		expect(chain!.querySelector(".tool-step-static")?.textContent).toContain("Asked to access a folder");
@@ -111,28 +151,30 @@ describe("TranscriptTurn", () => {
 		const intermediate = [...container.querySelectorAll("p")].find((node) => node.textContent?.startsWith("我需要先请求访问"));
 		expect(intermediate).toBeDefined();
 		expect(chain!.contains(intermediate!)).toBe(false);
+		expect(thoughtChain.compareDocumentPosition(intermediate!)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+		expect(intermediate!.compareDocumentPosition(chain)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
 
 		const final = [...container.querySelectorAll("p")].find((node) => node.textContent === "桌面上有 file.txt。");
 		expect(final).toBeDefined();
 		expect(final!.closest("[data-transcript-answer]")).not.toBeNull();
 		expect(chain!.contains(final!)).toBe(false);
 
-		await act(async () => chain!.querySelector(":scope > summary")!.click());
-		expect(chain!.open).toBe(true);
-		expect(chain!.textContent).toContain("用户希望查看桌面内容");
-		expect(chain!.querySelector(".execution-chain-content")?.classList.contains("is-capped")).toBe(true);
-		expect(chain!.querySelector(".execution-chain-done")).toBeNull();
-		const showMore = [...chain!.querySelectorAll("button")].find((node) => node.textContent === "Show more");
+		await act(async () => thoughtChain.querySelector(":scope > summary")!.click());
+		expect(thoughtChain.open).toBe(true);
+		expect(thoughtChain.textContent).toContain("用户希望查看桌面内容");
+		expect(thoughtChain.querySelector(".execution-chain-content")?.classList.contains("is-capped")).toBe(true);
+		expect(thoughtChain.querySelector(".execution-chain-done")).toBeNull();
+		const showMore = [...thoughtChain.querySelectorAll("button")].find((node) => node.textContent === "Show more");
 		expect(showMore).toBeDefined();
 		await act(async () => showMore!.click());
-		expect(chain!.querySelector(".execution-chain-content")?.classList.contains("is-capped")).toBe(false);
-		const showLess = [...chain!.querySelectorAll("button")].find((node) => node.textContent === "Show less");
+		expect(thoughtChain.querySelector(".execution-chain-content")?.classList.contains("is-capped")).toBe(false);
+		const showLess = [...thoughtChain.querySelectorAll("button")].find((node) => node.textContent === "Show less");
 		expect(showLess).toBeDefined();
-		const done = chain!.querySelector(".execution-chain-done");
+		const done = thoughtChain.querySelector(".execution-chain-done");
 		expect(done).not.toBeNull();
 		expect(done!.compareDocumentPosition(showLess!)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
 		await act(async () => showLess!.click());
-		expect(chain!.querySelector(".execution-chain-content")?.classList.contains("is-capped")).toBe(true);
+		expect(thoughtChain.querySelector(".execution-chain-content")?.classList.contains("is-capped")).toBe(true);
 
 		const command = chain!.querySelector<HTMLDetailsElement>("details.tool-step-command");
 		expect(command).not.toBeNull();
@@ -143,9 +185,9 @@ describe("TranscriptTurn", () => {
 		expect(command!.textContent).toContain("ls -la /Users/ent/Desktop");
 		expect(command!.textContent).toContain("file.txt");
 
-		await act(async () => chain!.querySelector(":scope > summary")!.click());
-		expect(chain!.open).toBe(false);
-		expect(chain!.querySelector(".execution-chain-content")?.classList.contains("is-capped")).toBe(true);
+		await act(async () => thoughtChain.querySelector(":scope > summary")!.click());
+		expect(thoughtChain.open).toBe(false);
+		expect(thoughtChain.querySelector(".execution-chain-content")?.classList.contains("is-capped")).toBe(true);
 
 		await act(async () => root.unmount());
 	});
@@ -161,6 +203,73 @@ describe("TranscriptTurn", () => {
 		expect(container.querySelector(".execution-chain")).toBeNull();
 		expect(container.querySelector(".turn-thought-label")).toBeNull();
 		expect(container.textContent).toContain("你好！");
+		await act(async () => root.unmount());
+	});
+
+	it("summarizes Chat internal tools without exposing failed or orphan JSON", async () => {
+		const askInput = JSON.stringify({ questions: [{
+			question: "How should Metis answer?",
+			multiple: false,
+			options: [{ label: "Concise" }, { label: "Detailed" }],
+		}] });
+		const askOutput = `User answers:\n${JSON.stringify([{
+			question: "How should Metis answer?",
+			selected: ["Concise"],
+		}], null, 2)}`;
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<TranscriptTurn items={[
+			item("chat-safe-user", "user", [{ type: "text", text: "Ask and continue" }]),
+			item("chat-safe-call", "assistant", [{
+				type: "tool_call",
+				toolCallId: "chat-safe-ask",
+				name: "ask_user",
+				state: "completed",
+				inputPreview: askInput,
+			}]),
+			item("chat-safe-result", "tool", [{
+				type: "tool_result",
+				toolCallId: "chat-safe-ask",
+				name: "ask_user",
+				isError: false,
+				output: askOutput,
+			}]),
+			item("chat-failed-call", "assistant", [{
+				type: "tool_call",
+				toolCallId: "chat-failed-task",
+				name: "set_tasks",
+				state: "completed",
+				inputPreview: JSON.stringify({ tasks: [{ task: "Run validation", completed: false }] }),
+			}]),
+			item("chat-failed-result", "tool", [{
+				type: "tool_result",
+				toolCallId: "chat-failed-task",
+				name: "set_tasks",
+				isError: true,
+				output: JSON.stringify({ internal_error_code: "TASK_FAILED", details: { retry: false } }),
+			}]),
+			item("chat-orphan-result", "tool", [{
+				type: "tool_result",
+				toolCallId: "chat-orphan-close",
+				name: "close_agent",
+				isError: false,
+				output: JSON.stringify({ agentId: "child-secret", status: "closed", secretField: "raw internal result" }),
+			}]),
+			item("chat-safe-final", "assistant", [{ type: "text", text: "Done" }]),
+		]} />));
+
+		for (const chain of container.querySelectorAll<HTMLDetailsElement>("details.execution-chain")) {
+			await act(async () => chain.querySelector(":scope > summary")!.click());
+		}
+		expect(container.textContent).toContain("How should Metis answer?");
+		expect(container.textContent).toContain("Concise");
+		expect(container.textContent).toContain("Failed to update task list");
+		expect(container.textContent).toContain("Closed subagent");
+		expect(container.textContent).not.toContain('"questions"');
+		expect(container.textContent).not.toContain("internal_error_code");
+		expect(container.textContent).not.toContain("secretField");
+		expect(container.textContent).not.toContain("child-secret");
 		await act(async () => root.unmount());
 	});
 
@@ -294,6 +403,57 @@ describe("TranscriptTurn", () => {
 });
 
 describe("Transcript", () => {
+	it.each(["chat", "code"] as const)("renders a persistent compacted divider in %s mode", async (appearance) => {
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		const compaction: ItemView = {
+			itemId: "compaction-1",
+			sessionId: SESSION_ID,
+			role: "system",
+			state: "completed",
+			content: [{ type: "compaction" }],
+			createdAt: "2026-07-22T00:00:00.000Z",
+			completedAt: "2026-07-22T00:00:01.000Z",
+		};
+		await act(async () => root.render(
+			<Transcript appearance={appearance} hasOlder={false} itemIds={[compaction.itemId]} itemsById={new Map([[compaction.itemId, compaction]])} loadingOlder={false} onLoadOlder={async () => undefined} />,
+		));
+		expect(container.querySelector(".transcript-compaction-row [role=separator]")?.textContent).toBe("Compacted");
+		expect(container.textContent).not.toContain("summary");
+		await act(async () => root.unmount());
+	});
+
+	it.each(["chat", "code"] as const)("animates only the latest user message in the active %s turn", async (appearance) => {
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		const items = [
+			item("user-first", "user", [{ type: "text", text: "First" }]),
+			item("user-latest", "user", [{ type: "text", text: "Latest" }]),
+		];
+		const render = (activeTurnId: string | null) => root.render(
+			<Transcript
+				activeTurnId={activeTurnId}
+				appearance={appearance}
+				hasOlder={false}
+				itemIds={items.map(({ itemId }) => itemId)}
+				itemsById={new Map(items.map((entry) => [entry.itemId, entry]))}
+				loadingOlder={false}
+				onLoadOlder={async () => undefined}
+			/>,
+		);
+
+		await act(async () => render(TURN_ID));
+		expect(container.querySelectorAll(appearance === "chat" ? ".turn-user" : ".code-turn-user")).toHaveLength(2);
+		expect(container.querySelectorAll(".is-entering")).toHaveLength(1);
+		expect(container.querySelector(".is-entering")?.textContent).toContain("Latest");
+
+		await act(async () => render(null));
+		expect(container.querySelector(".is-entering")).toBeNull();
+		await act(async () => root.unmount());
+	});
+
 	it.each(["chat", "code"] as const)("renders one active-turn status in %s mode", async (appearance) => {
 		const container = document.createElement("div");
 		document.body.append(container);
@@ -438,9 +598,67 @@ describe("Transcript", () => {
 		await act(async () => execution.querySelector(":scope > summary")!.click());
 		expect(execution.open).toBe(true);
 		const command = execution.querySelector<HTMLDetailsElement>(".code-command-shell")!;
+		expect(command.open).toBe(false);
+		expect(command.querySelector(".code-command-details")).toBeNull();
+		await act(async () => command.querySelector("summary")!.click());
 		expect(command.open).toBe(true);
 		expect(command.textContent).toContain("ls -la /Users/ent/Desktop");
 		expect(command.textContent).toContain("file.txt");
+		await act(async () => root.unmount());
+	});
+
+	it("renders safe Code summaries for internal tools while preserving operation and external details", async () => {
+		const askInput = JSON.stringify({ questions: [{
+			question: "How should Metis answer?",
+			multiple: false,
+			options: [{ label: "Concise", description: "Short" }, { label: "Detailed", description: "Long" }],
+		}] });
+		const askOutput = `User answers:\n${JSON.stringify([{
+			question: "How should Metis answer?",
+			selected: ["Concise"],
+		}], null, 2)}`;
+		const codeItems = [
+			item("code-safe-user", "user", [{ type: "text", text: "Use the tools" }]),
+			item("code-safe-calls", "assistant", [
+				{ type: "tool_call", toolCallId: "code-safe-ask", name: "ask_user", state: "completed", inputPreview: askInput },
+				{ type: "tool_call", toolCallId: "code-safe-tasks", name: "set_tasks", state: "completed", inputPreview: JSON.stringify({ tasks: [{ task: "Run validation", completed: false }] }) },
+				{ type: "tool_call", toolCallId: "code-safe-write", name: "write", state: "completed", inputPreview: JSON.stringify({ path: "report.txt", content: "verified" }) },
+				{ type: "tool_call", toolCallId: "code-safe-mcp", name: "mcp__docs__search", state: "completed", inputPreview: JSON.stringify({ query: "refresh token" }) },
+			]),
+			item("code-safe-results", "tool", [
+				{ type: "tool_result", toolCallId: "code-safe-ask", name: "ask_user", isError: false, output: askOutput },
+				{ type: "tool_result", toolCallId: "code-safe-tasks", name: "set_tasks", isError: false, output: "<task_list>\n- [ ] Run validation\n</task_list>" },
+				{ type: "tool_result", toolCallId: "code-safe-write", name: "write", isError: false, output: "Wrote report.txt" },
+				{ type: "tool_result", toolCallId: "code-safe-mcp", name: "mcp__docs__search", isError: false, output: "External result" },
+			]),
+		];
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(
+			<Transcript appearance="code" hasOlder={false} itemIds={codeItems.map((entry) => entry.itemId)} itemsById={new Map(codeItems.map((entry) => [entry.itemId, entry]))} loadingOlder={false} onLoadOlder={async () => undefined} />,
+		));
+
+		const execution = container.querySelector<HTMLDetailsElement>(".code-execution")!;
+		expect(execution.open).toBe(false);
+		await act(async () => execution.querySelector(":scope > summary")!.click());
+		const tools = [...execution.querySelectorAll<HTMLDetailsElement>(".code-command")];
+		expect(tools).toHaveLength(4);
+		for (const tool of tools) {
+			expect(tool.open).toBe(false);
+			await act(async () => tool.querySelector("summary")!.click());
+		}
+
+		expect(execution.textContent).toContain("How should Metis answer?");
+		expect(execution.textContent).toContain("Concise");
+		expect(execution.textContent).toContain("○ Run validation");
+		expect(execution.textContent).toContain('"path": "report.txt"');
+		expect(execution.textContent).toContain("Wrote report.txt");
+		expect(execution.textContent).toContain('"query": "refresh token"');
+		expect(execution.textContent).toContain("External result");
+		expect(execution.textContent).not.toContain('"questions"');
+		expect(execution.textContent).not.toContain('"multiple"');
+		expect(execution.textContent).not.toContain('"selected"');
 		await act(async () => root.unmount());
 	});
 
@@ -542,7 +760,12 @@ describe("Transcript", () => {
 			<Transcript appearance="code" hasOlder={false} itemIds={itemIds} itemsById={itemsById} loadingOlder={false} onLoadOlder={async () => undefined} />,
 		));
 		const execution = container.querySelector<HTMLDetailsElement>(".code-execution")!;
-		expect(execution.open).toBe(true);
+		expect(execution.open).toBe(false);
+		await act(async () => execution.querySelector(":scope > summary")!.click());
+		const command = execution.querySelector<HTMLDetailsElement>(".code-command-shell")!;
+		expect(command.open).toBe(false);
+		await act(async () => command.querySelector("summary")!.click());
+		expect(command.open).toBe(true);
 		expect(execution.textContent).toContain("Running a command");
 		expect(execution.querySelector(".code-command-output")).toBeNull();
 
@@ -555,6 +778,7 @@ describe("Transcript", () => {
 		));
 		expect(container.querySelectorAll("[data-transcript-turn]")).toHaveLength(1);
 		expect(container.querySelector<HTMLDetailsElement>(".code-execution")!.open).toBe(true);
+		expect(container.querySelector<HTMLDetailsElement>(".code-command-shell")!.open).toBe(true);
 		expect(container.textContent).toContain("pwd && whoami");
 		await act(async () => root.unmount());
 	});
@@ -580,6 +804,7 @@ describe("Transcript", () => {
 		));
 		const execution = container.querySelector<HTMLDetailsElement>(".code-execution")!;
 		await act(async () => execution.querySelector(":scope > summary")!.click());
+		await act(async () => execution.querySelector<HTMLDetailsElement>(".code-command")!.querySelector("summary")!.click());
 		expect(container.querySelector(".code-command-output-error")?.textContent).toContain("Permission denied");
 		expect(container.querySelector(".code-turn-answer table")?.textContent).toContain("video");
 		expect(container.textContent).not.toContain(LONG_THINKING);
