@@ -48,13 +48,15 @@ describe("ModelSelector", () => {
 		expect(providers[0]!.getAttribute("aria-checked")).toBe("true");
 		expect(container.querySelectorAll('[role="menuitemradio"]')).toHaveLength(2);
 
-		// Drill into the current provider and pick a model by number shortcut.
+		// Drill into the current provider: the provider menu stays open and the
+		// model submenu appears alongside it.
 		await act(async () => providers[0]!.click());
+		expect(container.querySelector(".model-selector-provider")).not.toBeNull();
 		expect(container.querySelector(".model-selector-back")?.textContent).toContain("Xiaomi MiMo");
-		expect([...container.querySelectorAll('[role="menuitemradio"]')].map((item) => item.textContent)).toEqual([
-			"mimo-v2.51",
-			"mimo-v2.5-pro",
-		]);
+		const modelOptions = [...container.querySelectorAll<HTMLButtonElement>(
+			".model-selector-submenu [role=menuitemradio]",
+		)];
+		expect(modelOptions.map((item) => item.textContent)).toEqual(["mimo-v2.51", "mimo-v2.5-pro"]);
 		await act(async () => document.dispatchEvent(new KeyboardEvent("keydown", { key: "1", bubbles: true })));
 		expect(onChange).toHaveBeenCalledWith(available[0]);
 
@@ -90,7 +92,10 @@ describe("ModelSelector", () => {
 		const azure = [...container.querySelectorAll<HTMLButtonElement>('.model-selector-provider')]
 			.find((item) => item.textContent?.includes("Azure OpenAI"));
 		await act(async () => azure!.click());
-		await act(async () => container.querySelector<HTMLButtonElement>('[role="menuitemradio"]')!.click());
+		expect(container.querySelector(".model-selector-provider")).not.toBeNull();
+		await act(async () => container.querySelector<HTMLButtonElement>(
+			".model-selector-submenu [role=menuitemradio]",
+		)!.click());
 		expect(onChange).toHaveBeenCalledWith(available[1]);
 		await act(async () => root.unmount());
 	});

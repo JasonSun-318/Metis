@@ -1548,7 +1548,7 @@ export function App({ api, store }: AppProps) {
 			</main>
 			<InteractionHost interaction={inlineInteraction ? undefined : visibleInteraction} key={inlineInteraction ? "none" : visibleInteraction?.interactionId ?? "none"} onRespond={respond} />
 		</div>
-		{settingsOpen ? <SettingsDialog activeSessionId={visibleActiveSession?.sessionId ?? null} api={api} onClose={closeSettings} serverReady={serverReady} /> : null}
+		{settingsOpen ? <SettingsDialog api={api} onClose={closeSettings} serverReady={serverReady} /> : null}
 		</>
 	);
 }

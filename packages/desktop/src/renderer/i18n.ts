@@ -347,6 +347,7 @@ const zhCN = {
 	Model: "模型",
 	Models: "模型",
 	"Back to providers": "返回供应商列表",
+	"Back to app": "返回应用",
 	Ask: "询问",
 	Auto: "自动",
 	Full: "完全访问",

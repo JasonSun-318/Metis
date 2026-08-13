@@ -1,16 +1,14 @@
-import { ChartBar, Cpu, Shield, UserCircle, X } from "@phosphor-icons/react";
+import { ArrowLeft, ChartBar, Cpu, UserCircle } from "@phosphor-icons/react";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
 import { ModelSettingsPanel } from "./ModelSettingsPanel.tsx";
-import { PermissionRulesPanel } from "./PermissionRulesPanel.tsx";
 import { ProfilePanel } from "./ProfilePanel.tsx";
 import { UsagePanel } from "./UsagePanel.tsx";
 
-type SettingsPage = "profile" | "model" | "usage" | "permissions";
+type SettingsPage = "profile" | "model" | "usage";
 
-export function SettingsDialog({ activeSessionId, api, onClose, serverReady }: {
-	readonly activeSessionId: string | null;
+export function SettingsDialog({ api, onClose, serverReady }: {
 	readonly api: MetisDesktopApi;
 	readonly onClose: () => void;
 	readonly serverReady: boolean;
@@ -57,13 +55,15 @@ export function SettingsDialog({ activeSessionId, api, onClose, serverReady }: {
 		{ id: "profile" as const, label: "Profile", icon: UserCircle },
 		{ id: "model" as const, label: "Model", icon: Cpu },
 		{ id: "usage" as const, label: "Usage", icon: ChartBar },
-		{ id: "permissions" as const, label: "Permissions", icon: Shield },
 	];
 	return (
 		<div className="settings-backdrop">
 			<div aria-label={t("Settings")} aria-modal="true" className="settings-dialog" ref={dialogRef} role="dialog">
 				<aside className="settings-navigation">
-					<span className="settings-navigation-label">{t("Settings")}</span>
+					<button aria-label={t("Back to app")} className="settings-back-button" onClick={onClose} type="button">
+						<ArrowLeft aria-hidden="true" size={18} />
+						<span>{t("Back to app")}</span>
+					</button>
 					<nav aria-label={t("Settings pages")}>
 						{pages.map(({ id, label, icon: Icon }, index) => (
 							<button
@@ -82,13 +82,11 @@ export function SettingsDialog({ activeSessionId, api, onClose, serverReady }: {
 				<div className="settings-main">
 					<header className="settings-main-header">
 						<h1>{t(pages.find((item) => item.id === page)!.label)}</h1>
-						<button aria-label={t("Close settings")} onClick={onClose} type="button"><X aria-hidden="true" size={20} /></button>
 					</header>
 					<div className={`settings-page-scroll settings-page-scroll-${page}`} ref={pageScrollRef}>
 						{page === "profile" ? <ProfilePanel api={api} serverReady={serverReady} /> : null}
 						{page === "model" ? <ModelSettingsPanel api={api} serverReady={serverReady} /> : null}
 						{page === "usage" ? <UsagePanel api={api} serverReady={serverReady} /> : null}
-						{page === "permissions" ? <PermissionRulesPanel api={api} serverReady={serverReady} sessionId={activeSessionId} /> : null}
 					</div>
 				</div>
 			</div>

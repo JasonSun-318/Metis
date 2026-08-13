@@ -1,5 +1,5 @@
 import type { ModelOptionView, SessionSnapshot } from "@metis/app-protocol";
-import { CaretDown, CaretLeft, CaretRight, Check } from "@phosphor-icons/react";
+import { CaretDown, CaretLeft, Check, CaretRight } from "@phosphor-icons/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { providerDisplayName } from "../provider-names.ts";
@@ -110,33 +110,32 @@ export function ModelSelector({ available, commandRequest, disabled, onChange, v
 				<CaretDown aria-hidden="true" size={12} />
 			</button>
 			{open && (
-				<div aria-label={t(activeProvider === null ? "Providers" : "Models")} className={activeProvider === null ? "model-selector-popover is-provider" : "model-selector-popover"} role="menu">
-					{activeProvider === null ? (
-						<>
-							<p>{t("Providers")}</p>
-							{providers.map(([provider, name]) => {
-								const isSelected = provider === value?.provider;
-								return (
-									<button
-										aria-checked={isSelected}
-										className="model-selector-provider"
-										key={provider}
-										onClick={() => setActiveProvider(provider)}
-										role="menuitemradio"
-										type="button"
-									>
-										<span>{name}</span>
-										{isSelected ? (
-											<Check aria-hidden="true" size={16} weight="bold" />
-										) : (
-											<CaretRight aria-hidden="true" size={14} />
-										)}
-									</button>
-								);
-							})}
-						</>
-					) : (
-						<>
+				<div aria-label={t("Providers")} className="model-selector-popover is-provider" role="menu">
+					<p>{t("Providers")}</p>
+					{providers.map(([provider, name]) => {
+						const isSelected = provider === value?.provider;
+						const expanded = provider === activeProvider;
+						return (
+							<button
+								aria-checked={isSelected}
+								aria-expanded={expanded}
+								className="model-selector-provider"
+								key={provider}
+								onClick={() => setActiveProvider(expanded ? null : provider)}
+								role="menuitemradio"
+								type="button"
+							>
+								<span>{name}</span>
+								{isSelected ? (
+									<Check aria-hidden="true" size={16} weight="bold" />
+								) : (
+									<CaretRight aria-hidden="true" size={14} />
+								)}
+							</button>
+						);
+					})}
+					{activeProvider !== null && (
+						<div aria-label={t("Models")} className="model-selector-submenu" role="menu">
 							<button
 								aria-label={t("Back to providers")}
 								className="model-selector-back"
@@ -168,7 +167,7 @@ export function ModelSelector({ available, commandRequest, disabled, onChange, v
 									</button>
 								);
 							})}
-						</>
+						</div>
 					)}
 				</div>
 			)}

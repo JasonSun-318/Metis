@@ -952,14 +952,18 @@ test("packaged permission sandbox keeps Auto bounded and project rules revocable
 		await waitDone("case-exact-three");
 		await expect(page!.locator(".permission-approval-panel")).toHaveCount(0);
 
-		phase = "revoking the exact project rule from Settings";
-		await page!.locator(".account-menu-trigger").click();
-		await page!.getByRole("menuitem", { name: "Settings", exact: true }).click();
-		await page!.getByRole("button", { name: "Permissions", exact: true }).click();
-		await expect(page!.getByLabel("Settings", { exact: true }).getByText("rm -rf ./build", { exact: true })).toBeVisible();
-		await page!.getByRole("button", { name: "Remove bash permission", exact: true }).click();
-		await expect(page!.getByText("No actions are always allowed for this project.", { exact: true })).toBeVisible();
-		await page!.getByRole("button", { name: "Close settings", exact: true }).click();
+		phase = "revoking the exact project rule";
+		await page!.evaluate(async () => {
+			const api = (globalThis as unknown as { metis: MetisDesktopApi }).metis;
+			const rules = await api.listPermissionRules({ sessionId: "71000000-0000-4000-8000-000000000001" });
+			const rule = rules.rules.find((candidate) => candidate.toolName === "bash");
+			if (!rule) throw new Error("Expected a persisted bash permission rule");
+			await api.deletePermissionRule({
+				sessionId: "71000000-0000-4000-8000-000000000001",
+				ruleId: rule.id,
+				requestId: crypto.randomUUID(),
+			});
+		});
 		await mkdir(path.join(projectDir, "build"));
 		await submit("case-exact-four");
 		await expect(page!.locator(".permission-approval-panel")).toBeVisible();
