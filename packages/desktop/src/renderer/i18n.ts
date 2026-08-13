@@ -346,6 +346,7 @@ const zhCN = {
 	"Select model": "选择模型",
 	Model: "模型",
 	Models: "模型",
+	"Back to providers": "返回供应商列表",
 	Ask: "询问",
 	Auto: "自动",
 	Full: "完全访问",

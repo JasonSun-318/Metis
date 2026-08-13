@@ -2943,6 +2943,10 @@ describe("Chat desktop shell", () => {
 		await flush();
 
 		await act(async () => button(container, "Select model").click());
+		const provider = [...container.querySelectorAll<HTMLButtonElement>(".model-selector-provider")]
+			.find((candidate) => candidate.textContent?.includes("Test Provider"));
+		if (!provider) throw new Error("Missing Test Provider option");
+		act(() => provider.click());
 		const otherModel = [...container.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')]
 			.find((candidate) => candidate.textContent?.includes("Other model"));
 		if (!otherModel) throw new Error("Missing Other model option");
