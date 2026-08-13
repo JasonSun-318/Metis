@@ -20,6 +20,8 @@ function rule(selector: string): CSSStyleDeclaration {
 describe("Composer visual states", () => {
 	it("keeps the composer and disabled chrome visually stationary", () => {
 		expect(rule(".composer").transition).not.toContain("transform");
+		expect(rule(".composer").borderRadius).toBe("var(--composer-radius)");
+		expect(css).not.toContain(".queued-turn-list + .composer");
 		expect(rule(".composer:hover").transform).toBe("");
 		expect(rule(".composer:focus-within").transform).toBe("");
 		expect(rule(".session-sidebar button:disabled").opacity).toBe("1");
@@ -56,18 +58,14 @@ describe("Composer visual states", () => {
 		expect(item.padding).toBe("0px 8px");
 	});
 
-	it("uses a stationary composer and a stable fading New Task dot field", () => {
+	it("uses a stationary composer over a full-screen New Task ray field", () => {
 		expect(rule(".new-task-home").alignItems).toBe("flex-start");
 
-		const dots = rule(".new-task-home::before");
-		expect(dots.pointerEvents).toBe("none");
-		expect(dots.willChange).toBe("");
-		expect(dots.backgroundImage).toContain("radial-gradient(circle at 2px 2px");
-		expect(dots.backgroundImage).toContain("1.5px");
-		expect(dots.backgroundSize).toBe("21px 21px");
-		expect(dots.maskImage).toContain("radial-gradient");
-		expect(dots.animationName).toBe("");
-		expect(css).not.toContain("new-task-vortex");
+		const rays = rule(".new-task-side-rays");
+		expect(rays.position).toBe("absolute");
+		expect(rays.pointerEvents).toBe("none");
+		expect(rays.zIndex).toBe("0");
+		expect(rule(".new-task-side-rays canvas").display).toBe("block");
 	});
 
 	it("removes the decorative New Task logo slot", () => {
@@ -129,5 +127,11 @@ describe("Composer visual states", () => {
 		expect(rule(".ask-user-header h2").overflowWrap).toBe("anywhere");
 		expect(rule(".ask-user-option-copy strong").whiteSpace).toBe("normal");
 		expect(rule(".ask-user-option-copy small").whiteSpace).toBe("normal");
+	});
+
+	it("uses the shared neutral hover surface for ask-user choices", () => {
+		const hover = rule(".ask-user-option:hover:not(:disabled), .ask-user-option:focus");
+		expect(hover.background).toBe("rgb(72, 72, 72)");
+		expect(hover.boxShadow).toBe("var(--shadow)");
 	});
 });
