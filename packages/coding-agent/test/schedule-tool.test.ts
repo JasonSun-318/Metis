@@ -144,7 +144,12 @@ describe("schedule host tool", () => {
 		).toBe(true);
 		expect(Value.Check(ScheduleToolInputSchema, { action: "get", taskId: "task-created" })).toBe(true);
 		expect(Value.Check(ScheduleToolInputSchema, { action: "list", afterTaskId: "task-page-1" })).toBe(true);
-		expect(Value.Check(ScheduleToolInputSchema, { action: "get" })).toBe(false);
+		// The top-level schema is a flat object (root unions are rejected by
+		// OpenAI-compatible providers); per-action required fields are enforced
+		// at runtime by the tool's execute().
+		expect(Value.Check(ScheduleToolInputSchema, { action: "get" })).toBe(true);
+		expect(Value.Check(ScheduleToolInputSchema, { action: "bogus" })).toBe(false);
+		expect(Value.Check(ScheduleToolInputSchema, { action: "get", taskId: 42 })).toBe(false);
 		expect(
 			Value.Check(ScheduleToolInputSchema, {
 				action: "create",

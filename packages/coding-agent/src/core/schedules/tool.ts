@@ -61,23 +61,22 @@ const TaskCursor = Type.String({
 	maxLength: 255,
 });
 
-export const ScheduleToolInputSchema = Type.Union([
-	StrictObject({
-		action: Type.Literal("create"),
-		name: Type.String({ description: "定时任务在桌面端显示的名称。", minLength: 1, maxLength: 256 }),
-		description: Type.Optional(Type.String({ description: "桌面端显示的可选说明。", maxLength: 64 * 1024 })),
-		instruction: Type.String({
-			description: "每次执行时需要完成的完整任务说明。不得依赖当前对话中的省略信息。",
-			minLength: 1,
-			maxLength: 64 * 1024,
-		}),
-		schedule: ScheduleInput,
-	}),
-	StrictObject({ action: Type.Literal("list"), afterTaskId: Type.Optional(TaskCursor) }),
-	StrictObject({ action: Type.Literal("get"), taskId: TaskId }),
-	StrictObject({
-		action: Type.Literal("update"),
-		taskId: TaskId,
+// The parameters schema must be a JSON object at the top level: OpenAI-compatible
+// providers such as DeepSeek reject root-level unions ("schema must be a JSON
+// Schema of 'type: "object"', got 'type: null'"). Per-action required fields are
+// enforced at runtime in execute() below.
+export const ScheduleToolInputSchema = Type.Object(
+	{
+		action: Type.Union([
+			Type.Literal("create"),
+			Type.Literal("list"),
+			Type.Literal("get"),
+			Type.Literal("update"),
+			Type.Literal("pause"),
+			Type.Literal("resume"),
+			Type.Literal("delete"),
+			Type.Literal("run_now"),
+		]),
 		name: Type.Optional(Type.String({ description: "定时任务在桌面端显示的名称。", minLength: 1, maxLength: 256 })),
 		description: Type.Optional(Type.String({ description: "桌面端显示的可选说明。", maxLength: 64 * 1024 })),
 		instruction: Type.Optional(
@@ -88,17 +87,11 @@ export const ScheduleToolInputSchema = Type.Union([
 			}),
 		),
 		schedule: Type.Optional(ScheduleInput),
-	}),
-	StrictObject({
-		action: Type.Union([
-			Type.Literal("pause"),
-			Type.Literal("resume"),
-			Type.Literal("delete"),
-			Type.Literal("run_now"),
-		]),
-		taskId: TaskId,
-	}),
-]);
+		taskId: Type.Optional(TaskId),
+		afterTaskId: Type.Optional(TaskCursor),
+	},
+	{ additionalProperties: false },
+);
 
 function prepareScheduleArguments(input: unknown): Static<typeof ScheduleToolInputSchema> {
 	if (!input || typeof input !== "object") return input as Static<typeof ScheduleToolInputSchema>;
@@ -200,6 +193,9 @@ export function installScheduleHost(input: {
 			try {
 				switch (params.action) {
 					case "create": {
+						if (!params.name || !params.instruction || !params.schedule) {
+							return output("创建定时任务必须提供 name、instruction 和 schedule 字段。", true);
+						}
 						const manager = input.session.sessionManager;
 						const target = resolveScheduleCreateTarget({
 							mode: manager.getMode(),
@@ -225,9 +221,12 @@ export function installScheduleHost(input: {
 						const page = await input.manager.list({ afterTaskId: params.afterTaskId, limit: 100 });
 						return output({ tasks: page.tasks.map(listTaskView), nextAfterTaskId: page.nextAfterTaskId });
 					}
-					case "get":
+					case "get": {
+						if (!params.taskId) return output("查询定时任务必须提供 taskId 字段。", true);
 						return output(await detailTaskView(input.manager, await input.manager.get(params.taskId)));
+					}
 					case "update": {
+						if (!params.taskId) return output("更新定时任务必须提供 taskId 字段。", true);
 						if (
 							params.name === undefined &&
 							params.description === undefined &&
@@ -248,13 +247,18 @@ export function installScheduleHost(input: {
 						);
 					}
 					case "pause":
-						return output(compactTaskView(await input.manager.pause(params.taskId)));
 					case "resume":
-						return output(compactTaskView(await input.manager.resume(params.taskId)));
 					case "delete":
-						return output(await input.manager.delete(params.taskId, { deleteSessions: false }));
-					case "run_now":
+					case "run_now": {
+						if (!params.taskId) return output("操作定时任务必须提供 taskId 字段。", true);
+						if (params.action === "pause")
+							return output(compactTaskView(await input.manager.pause(params.taskId)));
+						if (params.action === "resume")
+							return output(compactTaskView(await input.manager.resume(params.taskId)));
+						if (params.action === "delete")
+							return output(await input.manager.delete(params.taskId, { deleteSessions: false }));
 						return output(runView(await input.manager.runNow(params.taskId, randomUUID())));
+					}
 				}
 			} catch (error) {
 				return output(error instanceof Error ? error.message.split(/\r?\n/, 1)[0] : "定时任务操作失败。", true);
