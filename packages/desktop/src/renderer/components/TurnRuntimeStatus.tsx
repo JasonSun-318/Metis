@@ -42,10 +42,11 @@ export function advanceDisplayedTokens(current: number, target: number): number 
 	return current + Math.sign(difference) * Math.min(step, Math.abs(difference));
 }
 
-export function TurnRuntimeStatus({ items, running, startedAt }: {
+export function TurnRuntimeStatus({ items, running, startedAt, variant = "turn" }: {
 	readonly items: readonly ItemView[];
 	readonly running: boolean;
 	readonly startedAt?: string;
+	readonly variant?: "turn" | "compaction";
 }) {
 	const { t } = useTranslation();
 	const target = useMemo(() => turnTokenTarget(items), [items]);
@@ -63,27 +64,27 @@ export function TurnRuntimeStatus({ items, running, startedAt }: {
 	useEffect(() => {
 		if (!running) return;
 		const interval = window.setInterval(() => {
-			setDisplayedTokens((current) => advanceDisplayedTokens(current, targetRef.current));
+			if (variant === "turn") setDisplayedTokens((current) => advanceDisplayedTokens(current, targetRef.current));
 			setElapsedSeconds(Math.max(0, Math.floor((Date.now() - startedAtMs) / 1_000)));
 		}, 100);
 		return () => window.clearInterval(interval);
-	}, [running, startedAtMs]);
+	}, [running, startedAtMs, variant]);
 
 	if (!running) return null;
-	const exact = target.exact && displayedTokens === target.tokens;
 	return (
 		<div
-			aria-label={t("Thinking…")}
+			aria-label={t(variant === "compaction" ? "Compacting conversation…" : "Thinking…")}
 			className="turn-runtime-status"
-			data-runtime-tokens={displayedTokens}
+			data-runtime-tokens={variant === "turn" ? displayedTokens : undefined}
+			role="status"
 		>
 			<span aria-hidden="true" className="turn-runtime-spinner">
 				{[0, 1, 2, 3, 4, 5].map((dot) => <span key={dot} />)}
 			</span>
 			<span aria-hidden="true">
-				{elapsedSeconds}s · {exact
-					? t("{{count}} tokens", { count: displayedTokens })
-					: t("About {{count}} tokens", { count: displayedTokens })} · {t("Thinking…")}
+				{variant === "compaction"
+					? `${elapsedSeconds}s · ${t("Compacting conversation…")}`
+					: `${elapsedSeconds}s · ${t("{{count}} tokens", { count: displayedTokens })} · ${t("Thinking…")}`}
 			</span>
 		</div>
 	);

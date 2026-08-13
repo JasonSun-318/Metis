@@ -62,7 +62,7 @@ describe("TurnRuntimeStatus", () => {
 		));
 		const status = container.querySelector(".turn-runtime-status");
 		expect(status?.textContent).toContain("0s");
-		expect(status?.textContent).toContain("About");
+		expect(status?.textContent).toContain("0 tokens");
 		expect(status?.textContent).toContain("Thinking");
 		expect(container.querySelectorAll(".turn-runtime-spinner > span")).toHaveLength(6);
 
@@ -79,6 +79,21 @@ describe("TurnRuntimeStatus", () => {
 		));
 		expect(container.querySelector(".turn-runtime-status")).toBeNull();
 		expect(vi.getTimerCount()).toBe(0);
+		await act(async () => root.unmount());
+	});
+
+	it("replaces token progress with the compaction state", async () => {
+		vi.useFakeTimers();
+		vi.setSystemTime(new Date("2026-08-08T00:00:00.000Z"));
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(
+			<TurnRuntimeStatus items={[]} running startedAt="2026-08-08T00:00:00.000Z" variant="compaction" />,
+		));
+		expect(container.querySelector("[role=status]")?.textContent).toContain("Compacting conversation");
+		expect(container.querySelector("[data-runtime-tokens]")).toBeNull();
+		expect(container.textContent).not.toContain("tokens");
 		await act(async () => root.unmount());
 	});
 });
