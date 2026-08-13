@@ -5,6 +5,8 @@ import {
 	type InteractionResponseInput,
 	type InteractionView,
 	type McpServerSummaryView,
+	type ModelOptionView,
+	type ModelSettingsView,
 	type PermissionModeView,
 	type QueuedTurnView,
 	RPC_ERROR_CODES,
@@ -12,6 +14,7 @@ import {
 	type SessionSummary,
 	type SessionStatusView,
 	type SkillSummaryView,
+	type ThinkingSelectionView,
 } from "@metis/app-protocol";
 import { SidebarSimple } from "@phosphor-icons/react";
 import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -208,6 +211,7 @@ export function App({ api, store }: AppProps) {
 	const [toolsSidebarPreferredWidth, setToolsSidebarPreferredWidth] = useState(393);
 	const [toolsSidebarWidth, setToolsSidebarWidth] = useState(393);
 	const [bootstrapped, setBootstrapped] = useState(false);
+	const [modelSettings, setModelSettings] = useState<ModelSettingsView | null>(null);
 	const [draftBusy, setDraftBusy] = useState(false);
 	const [loadingOlder, setLoadingOlder] = useState(false);
 	const [skills, setSkills] = useState<readonly SkillSummaryView[]>([]);
@@ -230,6 +234,7 @@ export function App({ api, store }: AppProps) {
 	const [updateState, setUpdateState] = useState<DesktopUpdateState>({ status: "unavailable" });
 	const openGeneration = useRef(0);
 	const mcpListGeneration = useRef(0);
+	const modelSettingsGeneration = useRef(0);
 	const openingSessionId = useRef<string | null>(null);
 	const resnapshots = useRef(new Map<string, Promise<void>>());
 	const newTaskCreateRequest = useRef<{ key: string; requestId: string } | null>(null);
@@ -1025,6 +1030,25 @@ export function App({ api, store }: AppProps) {
 			if (generation === skillListGeneration.current) skillListGeneration.current += 1;
 		};
 	}, [api, bootstrapped, reportError, serverReady, shouldListSkills, skillCatalogEpoch, skillSessionId, visibleNewTaskDraft?.folder]);
+	// The new-task page configures the model and thinking effort through the
+	// global defaults (new sessions inherit them), so keep the settings view
+	// fresh whenever the server is ready and after the settings dialog closes.
+	useEffect(() => {
+		if (!bootstrapped || !serverReady || settingsOpen) return;
+		const generation = ++modelSettingsGeneration.current;
+		void api.getModelSettings()
+			.then((result) => {
+				if (generation === modelSettingsGeneration.current) setModelSettings(result);
+			})
+			.catch((cause) => {
+				if (generation !== modelSettingsGeneration.current) return;
+				setModelSettings(null);
+				reportError(cause);
+			});
+		return () => {
+			if (generation === modelSettingsGeneration.current) modelSettingsGeneration.current += 1;
+		};
+	}, [api, bootstrapped, reportError, serverReady, settingsOpen]);
 	const visibleMcpSessionId = destination === "tasks" ? visibleActiveSession?.sessionId : undefined;
 	useEffect(() => {
 		const generation = ++mcpListGeneration.current;
@@ -1199,6 +1223,56 @@ export function App({ api, store }: AppProps) {
 		}
 	};
 
+	// New sessions inherit the global defaults, so the new-task page edits them
+	// directly instead of requiring an existing configuration session.
+	const updateGlobalModelDefaults = useCallback(
+		async (model: { readonly provider: string; readonly modelId: string } | null, thinkingSelection: ThinkingSelectionView) => {
+			try {
+				const next = await api.updateModelSettings({
+					requestId: crypto.randomUUID(),
+					mutation: {
+						type: "set_defaults",
+						model: model ? { provider: model.provider, modelId: model.modelId } : null,
+						thinkingSelection,
+					},
+				});
+				setModelSettings(next);
+			} catch (cause) {
+				reportError(cause);
+			}
+		},
+		[api, reportError],
+	);
+	const changeGlobalModel = useCallback(
+		(model: ModelOptionView) => {
+			void updateGlobalModelDefaults(model, modelSettings?.defaultThinkingSelection ?? "off");
+		},
+		[modelSettings?.defaultThinkingSelection, updateGlobalModelDefaults],
+	);
+	const changeGlobalThinking = useCallback(
+		(selection: ThinkingSelectionView) => {
+			void updateGlobalModelDefaults(modelSettings?.defaultModel ?? null, selection);
+		},
+		[modelSettings?.defaultModel, updateGlobalModelDefaults],
+	);
+	const globalAvailableModels = useMemo<readonly ModelOptionView[]>(() => {
+		if (!modelSettings) return [];
+		return modelSettings.providers
+			.filter((provider) => provider.auth.configured)
+			.flatMap((provider) =>
+				provider.models.map((model) => ({
+					provider: model.provider,
+					modelId: model.modelId,
+					name: model.name,
+				})),
+			);
+	}, [modelSettings]);
+	const globalThinkingSelection = modelSettings?.defaultThinkingSelection ?? "off";
+	const globalThinkingAvailable = useMemo<ThinkingSelectionView[]>(() => {
+		const base: ThinkingSelectionView[] = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
+		return globalThinkingSelection === "ultra" ? [...base, "ultra"] : base;
+	}, [globalThinkingSelection]);
+
 	const changePermissionMode = async (sessionId: string, permissionMode: PermissionModeView) => {
 		try {
 			await api.setPermissionMode({ sessionId, requestId: crypto.randomUUID(), permissionMode });
@@ -1228,7 +1302,7 @@ export function App({ api, store }: AppProps) {
 				? "Conversation compaction is already running"
 				: "Stop the active task before compacting";
 		}
-		if (!configurationSession) {
+		if (!configurationSession && !newTaskOpen) {
 			commands.add("model");
 			commands.add("thinking");
 			reasons.model = "Open a task to use this command";
@@ -1291,6 +1365,14 @@ export function App({ api, store }: AppProps) {
 			onChange={(model) => changeModel(configurationSession.sessionId, model)}
 			value={state.model}
 		/>
+	) : newTaskOpen ? (
+		<ModelSelector
+			available={globalAvailableModels}
+			commandRequest={{ id: composerControl.id, open: composerControl.target === "model" }}
+			disabled={!serverReady}
+			onChange={changeGlobalModel}
+			value={modelSettings?.defaultModel ?? undefined}
+		/>
 	) : undefined;
 
 	const thinkingControl = configurationSession ? (
@@ -1301,6 +1383,15 @@ export function App({ api, store }: AppProps) {
 			disabled={!serverReady}
 			onChange={(selection) => void changeThinking(configurationSession.sessionId, selection)}
 			value={state.thinkingSelection}
+		/>
+	) : newTaskOpen ? (
+		<ThinkingSelector
+			actualThinkingLevel={globalThinkingSelection === "ultra" ? "max" : globalThinkingSelection}
+			available={globalThinkingAvailable}
+			commandRequest={{ id: composerControl.id, open: composerControl.target === "thinking" }}
+			disabled={!serverReady}
+			onChange={changeGlobalThinking}
+			value={globalThinkingSelection}
 		/>
 	) : undefined;
 	const permissionSessionId = visibleNewTaskDraft?.sessionId ?? visibleActiveSession?.sessionId;

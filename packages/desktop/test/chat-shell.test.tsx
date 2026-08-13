@@ -207,6 +207,13 @@ function createHarness(options: {
 	const mcpLists = options.mcpLists ?? [[mcpServer()]];
 	const api = {
 		getServerState: vi.fn().mockResolvedValue({ state: "ready", serverEpoch: EPOCH, restartAttempt: 0, failure: null }),
+		getModelSettings: vi.fn().mockResolvedValue({
+			defaultModel: null,
+			defaultThinkingSelection: "off",
+			providers: [],
+			loadError: null,
+		}),
+		updateModelSettings: vi.fn(),
 		listSessions: vi.fn(async () => {
 			order.push("list");
 			return { sessions, nextAfterSessionId: null };
