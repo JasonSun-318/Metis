@@ -45,6 +45,7 @@ export interface ResourceLoader {
 	getAppendSystemPrompt(): string[];
 	extendResources(paths: ResourceExtensionPaths): void;
 	reload(options?: ResourceLoaderReloadOptions): Promise<void>;
+	reloadSkills?(): Promise<void>;
 	dispose?(): void;
 }
 
@@ -342,6 +343,48 @@ export class DefaultResourceLoader implements ResourceLoader {
 		this.settingsManager.setProjectTrusted(false);
 		await this.settingsManager.reload();
 		return this.loadCurrentExtensionSet({ includeInlineFactories: true });
+	}
+
+	async reloadSkills(): Promise<void> {
+		if (!this.loaded) {
+			await this.reload();
+			return;
+		}
+
+		await this.settingsManager.reload();
+		const resolvedPaths = await this.packageManager.resolve();
+		const cliExtensionPaths = await this.packageManager.resolveExtensionSources(this.additionalExtensionPaths, {
+			temporary: true,
+		});
+		const metadataByPath = new Map<string, PathMetadata>();
+		const enabled = (resources: ResolvedResource[]): ResolvedResource[] => {
+			for (const resource of resources) metadataByPath.set(resource.path, resource.metadata);
+			return resources.filter((resource) => resource.enabled);
+		};
+		const enabledSkills = enabled(resolvedPaths.skills).map((resource) =>
+			this.mapSkillPath(resource, metadataByPath),
+		);
+		const cliEnabledSkills = enabled(cliExtensionPaths.skills).map((resource) => resource.path);
+		for (const resource of cliExtensionPaths.skills) {
+			metadataByPath.set(resource.path, { source: "cli", scope: "temporary", origin: "top-level" });
+		}
+		const extendedSkillPaths: string[] = [];
+		for (const [path, sourceInfo] of this.extensionSkillSourceInfos) {
+			if (sourceInfo.source === "auto") this.extensionSkillSourceInfos.delete(path);
+			else extendedSkillPaths.push(path);
+		}
+		const discoveredSkillPaths = this.noSkills
+			? this.mergePaths(cliEnabledSkills, this.additionalSkillPaths)
+			: this.mergePaths([...cliEnabledSkills, ...enabledSkills], this.additionalSkillPaths);
+		this.lastSkillPaths = this.mergePaths(discoveredSkillPaths, extendedSkillPaths);
+		this.updateSkillsFromPaths(this.lastSkillPaths, metadataByPath);
+		for (const path of this.additionalSkillPaths) {
+			if (!isLocalPath(path)) continue;
+			const resolved = this.resolveResourcePath(path);
+			if (!existsSync(resolved) && !this.skillDiagnostics.some((diagnostic) => diagnostic.path === resolved)) {
+				this.skillDiagnostics.push({ type: "error", message: "Skill path does not exist", path: resolved });
+			}
+		}
 	}
 
 	async reload(options?: ResourceLoaderReloadOptions): Promise<void> {

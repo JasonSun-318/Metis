@@ -1,6 +1,6 @@
 import { mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { AuthStorage } from "../src/core/auth-storage.ts";
@@ -58,6 +58,30 @@ Skill content here.`,
 			expect(skills.some((s) => s.name === "test-skill")).toBe(true);
 		});
 
+		it("should rescan Skills without reloading or dropping extension-provided resources", async () => {
+			const loader = new DefaultResourceLoader({ cwd, agentDir });
+			await loader.reload();
+			const extensionSkill = join(tempDir, "extension", "extension-skill", "SKILL.md");
+			mkdirSync(dirname(extensionSkill), { recursive: true });
+			writeFileSync(extensionSkill, "---\nname: extension-skill\ndescription: Extension-provided Skill\n---\n");
+			loader.extendResources({
+				skillPaths: [
+					{
+						path: extensionSkill,
+						metadata: { source: "test-extension", scope: "temporary", origin: "top-level" },
+					},
+				],
+			});
+
+			const userSkill = join(agentDir, "skills", "new-user-skill", "SKILL.md");
+			mkdirSync(dirname(userSkill), { recursive: true });
+			writeFileSync(userSkill, "---\nname: new-user-skill\ndescription: Newly discovered Skill\n---\n");
+			await loader.reloadSkills();
+
+			const names = loader.getSkills().skills.map((skill) => skill.name);
+			expect(names).toEqual(expect.arrayContaining(["extension-skill", "new-user-skill"]));
+		});
+
 		it("should load bundled OfficeCLI skills by default", async () => {
 			const loader = new DefaultResourceLoader({ cwd, agentDir });
 			await loader.reload();
@@ -83,6 +107,20 @@ Skill content here.`,
 			expect(pptxInstructions).toContain("sed -n '1,400p'");
 			expect(pptxInstructions).toContain("sed -n '401,900p'");
 			expect(skills.some((skill) => skill.name === "pdf")).toBe(true);
+
+			const createSkill = skills.find((skill) => skill.name === "create-skill");
+			expect(createSkill).toBeDefined();
+			const createSkillInstructions = readFileSync(createSkill!.filePath, "utf8");
+			expect(createSkillInstructions).toContain("explicit target project directory");
+			expect(createSkillInstructions).toContain(
+				"whether it should trigger automatically or only when explicitly selected",
+			);
+			expect(createSkillInstructions).toContain("<target project directory>/.metis/skills/<name>/SKILL.md");
+			expect(createSkillInstructions).toContain("disable-model-invocation: true");
+			expect(createSkillInstructions).toContain("scripts/");
+			expect(createSkillInstructions).toContain("references/");
+			expect(createSkillInstructions).toContain("assets/");
+			expect(createSkillInstructions).toContain("Write `SKILL.md` last");
 		});
 
 		it("should let a project skill override a bundled skill", async () => {
