@@ -31,7 +31,7 @@ export const SessionStateSchema = Type.Union([
 ]);
 
 export const AgentModeSchema = Type.Union([Type.Literal("chat"), Type.Literal("code")]);
-export const PermissionModeSchema = Type.Union([Type.Literal("ask"), Type.Literal("full")]);
+export const PermissionModeSchema = Type.Union([Type.Literal("ask"), Type.Literal("auto"), Type.Literal("full")]);
 export const CwdOriginSchema = Type.Union([Type.Literal("managed"), Type.Literal("user-selected")]);
 export const ActualThinkingLevelSchema = Type.Union([
 	Type.Literal("off"),
@@ -63,17 +63,256 @@ export const SessionSummarySchema = StrictObject({
 	createdAt: TimestampSchema,
 	updatedAt: TimestampSchema,
 	state: SessionStateSchema,
+	lastTurnOutcome: Type.Optional(Type.Union([Type.Literal("completed"), Type.Literal("failed")])),
+	attentionRequired: Type.Optional(Type.Boolean()),
 	archived: Type.Boolean(),
 	unread: Type.Boolean(),
 	recoveryNotice: Type.Optional(PublicTextSchema),
 	scheduled: Type.Optional(StrictObject({ taskId: SessionIdSchema, runId: SessionIdSchema })),
 });
 
+export const SkillSourceViewSchema = Type.Union([
+	Type.Literal("system"),
+	Type.Literal("user"),
+	Type.Literal("project"),
+]);
+export const WritableSkillSourceViewSchema = Type.Union([Type.Literal("user"), Type.Literal("project")]);
+export const SkillNameSchema = Type.String({
+	minLength: 1,
+	maxLength: 64,
+	pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+});
+export const SkillContentSchema = Utf8String(256 * 1024, { minLength: 1, maxLength: 256 * 1024 });
+
 export const SkillSummaryViewSchema = StrictObject({
 	name: NameSchema,
 	description: PublicTextSchema,
-	source: Type.Optional(Type.Union([Type.Literal("system"), Type.Literal("user"), Type.Literal("project")])),
+	source: Type.Optional(SkillSourceViewSchema),
 });
+
+export const SkillDetailViewSchema = Type.Refine(
+	StrictObject({
+		name: SkillNameSchema,
+		description: Utf8String(1024, { minLength: 1, maxLength: 1024 }),
+		source: SkillSourceViewSchema,
+		revision: Sha256Schema,
+		directoryPath: PathSchema,
+		entryFile: Utf8String(1024, { minLength: 1, maxLength: 1024 }),
+		files: Type.Array(Utf8String(4096, { minLength: 1, maxLength: 4096 }), {
+			maxItems: 256,
+			uniqueItems: true,
+		}),
+		content: SkillContentSchema,
+		instructions: SkillContentSchema,
+		updatedAt: TimestampSchema,
+		editable: Type.Boolean(),
+	}),
+	(value) => value.editable === (value.source !== "system"),
+	"Skill editability must match its source",
+);
+
+export const SkillImportInputViewSchema = Type.Union([
+	StrictObject({ kind: Type.Literal("archive"), path: PathSchema }),
+	StrictObject({
+		kind: Type.Literal("github"),
+		url: Type.String({
+			minLength: 1,
+			maxLength: 4096,
+			pattern: "^https://github\\.com/[^/]+/[^/]+(?:/.*)?$",
+		}),
+	}),
+]);
+
+export const SkillImportCandidateViewSchema = StrictObject({
+	id: Utf8String(4096, { minLength: 1, maxLength: 4096 }),
+	name: SkillNameSchema,
+	description: Utf8String(1024, { minLength: 1, maxLength: 1024 }),
+	fileCount: Type.Integer({ minimum: 1, maximum: 2048 }),
+});
+
+export const McpScopeViewSchema = Type.Union([Type.Literal("user"), Type.Literal("project")]);
+export const McpTransportViewSchema = Type.Union([Type.Literal("stdio"), Type.Literal("http")]);
+export const McpStateViewSchema = Type.Union([
+	Type.Literal("inactive"),
+	Type.Literal("disabled"),
+	Type.Literal("connecting"),
+	Type.Literal("connected"),
+	Type.Literal("auth_required"),
+	Type.Literal("reconnecting"),
+	Type.Literal("error"),
+	Type.Literal("closed"),
+	Type.Literal("shadowed"),
+]);
+
+export const McpHttpUrlSchema = Type.Refine(
+	Type.String({ minLength: 1, maxLength: 8192 }),
+	(value) => {
+		try {
+			const url = new URL(value);
+			return (url.protocol === "http:" || url.protocol === "https:") && !url.username && !url.password;
+		} catch {
+			return false;
+		}
+	},
+	"MCP URL must use HTTP(S) and must not contain credentials",
+);
+
+export const McpEnvironmentNameSchema = Type.String({
+	minLength: 1,
+	maxLength: 256,
+	pattern: "^[A-Za-z_][A-Za-z0-9_]*$",
+});
+
+export const McpEnvironmentMapSchema = Type.Refine(
+	Type.Record(Type.String({ minLength: 1, maxLength: 256 }), McpEnvironmentNameSchema),
+	(value) => Object.keys(value).length <= 128,
+	"MCP environment mapping has too many entries",
+);
+
+export const McpImportCandidateViewSchema = StrictObject({
+	id: NameSchema,
+	name: NameSchema,
+	transport: McpTransportViewSchema,
+	enabled: Type.Boolean(),
+	existingRevision: Type.Union([Sha256Schema, Type.Null()]),
+	bearerTokenConfigured: Type.Boolean(),
+	credentialNames: Type.Array(McpEnvironmentNameSchema, { maxItems: 128, uniqueItems: true }),
+});
+
+export const McpImportInspectionViewSchema = StrictObject({
+	sourceRevision: Sha256Schema,
+	candidates: Type.Array(McpImportCandidateViewSchema, { minItems: 1, maxItems: 128 }),
+});
+
+const McpServerViewFields = {
+	name: NameSchema,
+	description: Type.Optional(Utf8String(4096, { minLength: 1, maxLength: 4096 })),
+	scope: McpScopeViewSchema,
+	effective: Type.Boolean(),
+	revision: Sha256Schema,
+	transport: McpTransportViewSchema,
+	enabled: Type.Boolean(),
+	required: Type.Boolean(),
+	command: Type.Optional(PublicTextSchema),
+	args: Type.Optional(Type.Array(PublicTextSchema, { maxItems: 128 })),
+	envVars: Type.Optional(Type.Array(McpEnvironmentNameSchema, { maxItems: 128, uniqueItems: true })),
+	inlineEnvKeys: Type.Optional(Type.Array(NameSchema, { maxItems: 128, uniqueItems: true })),
+	cwd: Type.Optional(PathSchema),
+	url: Type.Optional(McpHttpUrlSchema),
+	bearerTokenEnvVar: Type.Optional(McpEnvironmentNameSchema),
+	envHttpHeaders: Type.Optional(McpEnvironmentMapSchema),
+	startupTimeoutSec: Type.Optional(Type.Number({ exclusiveMinimum: 0, maximum: 3_600 })),
+	toolTimeoutSec: Type.Optional(Type.Number({ exclusiveMinimum: 0, maximum: 86_400 })),
+	enabledTools: Type.Optional(Type.Array(NameSchema, { maxItems: 512, uniqueItems: true })),
+	disabledTools: Type.Array(NameSchema, { maxItems: 512, uniqueItems: true }),
+	state: McpStateViewSchema,
+	credentialConfigured: Type.Boolean(),
+	toolCount: Type.Integer({ minimum: 0, maximum: 100_000 }),
+	resourceCount: Type.Integer({ minimum: 0, maximum: 100_000 }),
+	resourceTemplateCount: Type.Integer({ minimum: 0, maximum: 100_000 }),
+	promptCount: Type.Integer({ minimum: 0, maximum: 100_000 }),
+	capabilities: Type.Array(NameSchema, { maxItems: 128, uniqueItems: true }),
+	serverInfo: Type.Optional(StrictObject({ name: NameSchema, version: PublicTextSchema })),
+	lastError: Type.Optional(PublicTextSchema),
+} as const;
+
+type McpTransportFields = Record<string, unknown> & {
+	transport: Static<typeof McpTransportViewSchema>;
+	state: Static<typeof McpStateViewSchema>;
+	effective: boolean;
+};
+
+function hasConsistentMcpTransport(value: McpTransportFields): boolean {
+	const stdioFields = ["command", "args", "envVars", "inlineEnvKeys", "cwd"];
+	const httpFields = ["url", "bearerTokenEnvVar", "envHttpHeaders"];
+	return value.transport === "stdio"
+		? httpFields.every((field) => value[field] === undefined)
+		: stdioFields.every((field) => value[field] === undefined);
+}
+
+export const McpServerSummaryViewSchema = Type.Refine(
+	StrictObject(McpServerViewFields),
+	(value) => {
+		const server = value as McpTransportFields;
+		return hasConsistentMcpTransport(server) && (server.state === "shadowed") === !server.effective;
+	},
+	"MCP server summary is inconsistent",
+);
+export const McpCatalogEntryViewSchema = StrictObject({
+	id: PublicTextSchema,
+	name: PublicTextSchema,
+	description: Type.Optional(PublicTextSchema),
+});
+export const McpCatalogItemKindViewSchema = Type.Union([
+	Type.Literal("tool"),
+	Type.Literal("prompt"),
+	Type.Literal("resource"),
+	Type.Literal("resourceTemplate"),
+]);
+const McpCatalogItemCommonFields = {
+	id: PublicTextSchema,
+	name: PublicTextSchema,
+	description: Type.Optional(PublicTextSchema),
+} as const;
+export const McpCatalogItemDetailViewSchema = Type.Union([
+	StrictObject({
+		...McpCatalogItemCommonFields,
+		kind: Type.Literal("tool"),
+		inputSchema: Utf8String(256 * 1024, { minLength: 1, maxLength: 256 * 1024 }),
+		outputSchema: Type.Optional(Utf8String(256 * 1024, { minLength: 1, maxLength: 256 * 1024 })),
+		annotations: Type.Optional(Utf8String(256 * 1024, { minLength: 1, maxLength: 256 * 1024 })),
+	}),
+	StrictObject({
+		...McpCatalogItemCommonFields,
+		kind: Type.Literal("prompt"),
+		arguments: Type.Array(
+			StrictObject({
+				name: NameSchema,
+				description: Type.Optional(PublicTextSchema),
+				required: Type.Boolean(),
+			}),
+			{ maxItems: 256 },
+		),
+	}),
+	StrictObject({
+		...McpCatalogItemCommonFields,
+		kind: Type.Literal("resource"),
+		uri: PublicTextSchema,
+		mimeType: Type.Optional(NameSchema),
+		size: Type.Optional(Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER })),
+	}),
+	StrictObject({
+		...McpCatalogItemCommonFields,
+		kind: Type.Literal("resourceTemplate"),
+		uriTemplate: PublicTextSchema,
+		mimeType: Type.Optional(NameSchema),
+	}),
+]);
+export const McpServerDetailViewSchema = Type.Refine(
+	StrictObject({
+		server: McpServerSummaryViewSchema,
+		tools: Type.Array(McpCatalogEntryViewSchema, { maxItems: 10_000 }),
+		resources: Type.Array(McpCatalogEntryViewSchema, { maxItems: 10_000 }),
+		resourceTemplates: Type.Array(McpCatalogEntryViewSchema, { maxItems: 10_000 }),
+		prompts: Type.Array(McpCatalogEntryViewSchema, { maxItems: 10_000 }),
+	}),
+	(value) => {
+		const detail = value as {
+			server: { toolCount: number; resourceCount: number; resourceTemplateCount: number; promptCount: number };
+			tools: unknown[];
+			resources: unknown[];
+			resourceTemplates: unknown[];
+			prompts: unknown[];
+		};
+		return (
+			detail.server.toolCount === detail.tools.length &&
+			detail.server.resourceCount === detail.resources.length &&
+			detail.server.resourceTemplateCount === detail.resourceTemplates.length &&
+			detail.server.promptCount === detail.prompts.length
+		);
+	},
+	"MCP server detail is inconsistent",
+);
 
 function isCalendarDate(value: string): boolean {
 	const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
@@ -192,6 +431,10 @@ export const NoticeBlockViewSchema = StrictObject({
 	text: PublicTextSchema,
 });
 
+export const CompactionBlockViewSchema = StrictObject({
+	type: Type.Literal("compaction"),
+});
+
 export const ItemContentBlockViewSchema = Type.Union([
 	TextBlockViewSchema,
 	ThinkingBlockViewSchema,
@@ -199,6 +442,7 @@ export const ItemContentBlockViewSchema = Type.Union([
 	ToolCallBlockViewSchema,
 	ToolResultBlockViewSchema,
 	NoticeBlockViewSchema,
+	CompactionBlockViewSchema,
 ]);
 
 export const ItemUsageViewSchema = StrictObject({
@@ -254,12 +498,28 @@ export const PermissionOperationRowViewSchema = StrictObject({
 	value: PublicTextSchema,
 });
 
+export const PermissionExecutionTargetSchema = Type.Union([Type.Literal("sandbox"), Type.Literal("host")]);
+
 export const PermissionOperationViewSchema = StrictObject({
 	toolName: NameSchema,
 	rows: Type.Array(PermissionOperationRowViewSchema, { maxItems: MAX_PERMISSION_OPERATION_ROWS }),
 	omittedRows: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
 	scopeComplete: Type.Boolean(),
 	irreversible: Type.Boolean(),
+	executionTarget: PermissionExecutionTargetSchema,
+	rememberProjectEligible: Type.Boolean(),
+});
+
+export const ProjectPermissionRuleViewSchema = StrictObject({
+	id: OpaqueIdSchema,
+	toolName: NameSchema,
+	command: Type.Optional(PublicTextSchema),
+	paths: Type.Array(PathSchema, { maxItems: MAX_PERMISSION_OPERATION_ROWS }),
+	details: Type.Array(PermissionOperationRowViewSchema, { maxItems: MAX_PERMISSION_OPERATION_ROWS }),
+	omittedDetails: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
+	risks: Type.Array(NameSchema, { maxItems: 16 }),
+	executionTarget: PermissionExecutionTargetSchema,
+	createdAt: TimestampSchema,
 });
 
 export const SelectInteractionViewSchema = StrictObject({
@@ -458,6 +718,30 @@ export const SessionTaskViewSchema = StrictObject({
 
 export const SessionTasksSchema = Type.Array(SessionTaskViewSchema, { maxItems: 256 });
 
+export const QueuedTurnAttachmentViewSchema = StrictObject({
+	name: Type.String({ minLength: 1, maxLength: 255 }),
+	byteLength: Type.Integer({ minimum: 1, maximum: 128 * 1024 * 1024 }),
+});
+
+export const QueuedTurnViewSchema = StrictObject({
+	queueItemId: OpaqueIdSchema,
+	revision: OpaqueIdSchema,
+	state: Type.Union([Type.Literal("queued"), Type.Literal("paused"), Type.Literal("sending")]),
+	text: PromptTextSchema,
+	attachments: Type.Array(QueuedTurnAttachmentViewSchema, { maxItems: 16 }),
+});
+
+export const QueuedTurnsSchema = Type.Array(QueuedTurnViewSchema, { maxItems: 32 });
+
+export const SessionStatusViewSchema = StrictObject({
+	sessionId: SessionIdSchema,
+	mode: AgentModeSchema,
+	contextTokens: Type.Union([Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }), Type.Null()]),
+	contextWindow: Type.Union([Type.Integer({ minimum: 1, maximum: 10_000_000 }), Type.Null()]),
+	remainingPercent: Type.Union([Type.Number({ minimum: 0, maximum: 100 }), Type.Null()]),
+	cacheHitPercent: Type.Union([Type.Number({ minimum: 0, maximum: 100 }), Type.Null()]),
+});
+
 export const SessionSnapshotSchema = StrictObject({
 	session: SessionSummarySchema,
 	permissionMode: PermissionModeSchema,
@@ -468,6 +752,7 @@ export const SessionSnapshotSchema = StrictObject({
 	nextBeforeItemId: Type.Union([OpaqueIdSchema, Type.Null()]),
 	activeTurnId: Type.Union([OpaqueIdSchema, Type.Null()]),
 	pendingInteractions: Type.Array(InteractionViewSchema, { maxItems: MAX_INTERACTION_CHOICES }),
+	queuedTurns: QueuedTurnsSchema,
 	tasks: SessionTasksSchema,
 	thinkingSelection: ThinkingSelectionSchema,
 	actualThinkingLevel: ActualThinkingLevelSchema,
@@ -504,6 +789,12 @@ export const TasksChangedEventSchema = StrictObject({
 	type: Type.Literal("session/tasksChanged"),
 	sessionId: SessionIdSchema,
 	tasks: SessionTasksSchema,
+});
+
+export const TurnQueueChangedEventSchema = StrictObject({
+	type: Type.Literal("turn/queueChanged"),
+	sessionId: SessionIdSchema,
+	queuedTurns: QueuedTurnsSchema,
 });
 
 export const SubagentUpdatedEventSchema = StrictObject({
@@ -807,6 +1098,7 @@ export const DomainEventSchema = Type.Union([
 	ThinkingSelectionChangedEventSchema,
 	ModelChangedEventSchema,
 	TasksChangedEventSchema,
+	TurnQueueChangedEventSchema,
 	SubagentUpdatedEventSchema,
 	SubagentItemStartedEventSchema,
 	SubagentItemDeltaEventSchema,
@@ -834,7 +1126,21 @@ export type AgentMode = Static<typeof AgentModeSchema>;
 export type CwdOrigin = Static<typeof CwdOriginSchema>;
 export type SessionSummary = Static<typeof SessionSummarySchema>;
 export type SkillSummaryView = Static<typeof SkillSummaryViewSchema>;
-export type SkillSourceView = NonNullable<SkillSummaryView["source"]>;
+export type SkillSourceView = Static<typeof SkillSourceViewSchema>;
+export type WritableSkillSourceView = Static<typeof WritableSkillSourceViewSchema>;
+export type SkillDetailView = Static<typeof SkillDetailViewSchema>;
+export type SkillImportInputView = Static<typeof SkillImportInputViewSchema>;
+export type SkillImportCandidateView = Static<typeof SkillImportCandidateViewSchema>;
+export type McpScopeView = Static<typeof McpScopeViewSchema>;
+export type McpTransportView = Static<typeof McpTransportViewSchema>;
+export type McpStateView = Static<typeof McpStateViewSchema>;
+export type McpServerSummaryView = Static<typeof McpServerSummaryViewSchema>;
+export type McpServerDetailView = Static<typeof McpServerDetailViewSchema>;
+export type McpCatalogEntryView = Static<typeof McpCatalogEntryViewSchema>;
+export type McpCatalogItemKindView = Static<typeof McpCatalogItemKindViewSchema>;
+export type McpCatalogItemDetailView = Static<typeof McpCatalogItemDetailViewSchema>;
+export type McpImportCandidateView = Static<typeof McpImportCandidateViewSchema>;
+export type McpImportInspectionView = Static<typeof McpImportInspectionViewSchema>;
 export type ProfileActivityDayView = Static<typeof ProfileActivityDayViewSchema>;
 export type ProfileSkillUsageView = Static<typeof ProfileSkillUsageViewSchema>;
 export type ProfileUsageSummaryView = Static<typeof ProfileUsageSummaryViewSchema>;
@@ -846,9 +1152,14 @@ export type TurnView = Static<typeof TurnViewSchema>;
 export type InteractionChoice = Static<typeof InteractionChoiceSchema>;
 export type InteractionView = Static<typeof InteractionViewSchema>;
 export type SessionTaskView = Static<typeof SessionTaskViewSchema>;
+export type QueuedTurnAttachmentView = Static<typeof QueuedTurnAttachmentViewSchema>;
+export type QueuedTurnView = Static<typeof QueuedTurnViewSchema>;
+export type SessionStatusView = Static<typeof SessionStatusViewSchema>;
 export type SessionSnapshot = Static<typeof SessionSnapshotSchema>;
 export type ThinkingSelectionView = Static<typeof ThinkingSelectionSchema>;
 export type PermissionModeView = Static<typeof PermissionModeSchema>;
+export type PermissionExecutionTargetView = Static<typeof PermissionExecutionTargetSchema>;
+export type ProjectPermissionRuleView = Static<typeof ProjectPermissionRuleViewSchema>;
 export type ModelOptionView = Static<typeof ModelOptionViewSchema>;
 export type ModelSettingsModelView = Static<typeof ModelSettingsModelViewSchema>;
 export type ModelSettingsProviderView = Static<typeof ModelSettingsProviderViewSchema>;

@@ -6,7 +6,7 @@
 			"jsonrpc": "2.0",
 			"id": "client-1",
 			"result": {
-				"protocolVersion": 11,
+				"protocolVersion": 17,
 				"server": {
 					"name": "metis-app-server",
 					"version": "0.80.6"
@@ -93,6 +93,322 @@
 	},
 	{
 		"direction": "client",
+		"method": "skill/get",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "client-skill-get",
+			"result": {
+				"name": "writing-plans",
+				"description": "Write implementation plans",
+				"source": "user",
+				"revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+				"directoryPath": "/Users/example/.metis/agent/skills/writing-plans",
+				"entryFile": "SKILL.md",
+				"files": ["SKILL.md", "templates/plan.md"],
+				"content": "---\nname: writing-plans\ndescription: Write implementation plans\n---\n\n# Instructions\nWrite the plan.",
+				"instructions": "# Instructions\nWrite the plan.",
+				"updatedAt": "2026-08-11T06:32:00.000Z",
+				"editable": true
+			}
+		}
+	},
+	{
+		"direction": "client",
+		"method": "skill/upsert",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "client-skill-upsert",
+			"result": {
+				"name": "writing-plans",
+				"description": "Write implementation plans",
+				"source": "user",
+				"revision": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+				"directoryPath": "/Users/example/.metis/agent/skills/writing-plans",
+				"entryFile": "SKILL.md",
+				"files": ["SKILL.md"],
+				"content": "---\nname: writing-plans\ndescription: Write implementation plans\n---\n\n# Instructions\nWrite the plan.",
+				"instructions": "# Instructions\nWrite the plan.",
+				"updatedAt": "2026-08-11T06:33:00.000Z",
+				"editable": true
+			}
+		}
+	},
+	{
+		"direction": "client",
+		"method": "skill/remove",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "client-skill-remove",
+			"result": {
+				"skills": [{ "name": "pdf", "description": "Read and create PDF documents", "source": "system" }]
+			}
+		}
+	},
+	{
+		"direction": "client",
+		"method": "skill/import/inspect",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "client-skill-import-inspect",
+			"result": {
+				"revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+				"candidates": [
+					{
+						"id": "skills/writing-plans",
+						"name": "writing-plans",
+						"description": "Write implementation plans",
+						"fileCount": 2
+					}
+				]
+			}
+		}
+	},
+	{
+		"direction": "client",
+		"method": "skill/import",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "client-skill-import",
+			"result": {
+				"skills": [
+					{ "name": "writing-plans", "description": "Write implementation plans", "source": "project" }
+				]
+			}
+		}
+	},
+	{
+		"direction": "client",
+		"method": "mcp/list",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "client-mcp-list",
+			"result": {
+				"servers": [
+					{
+						"name": "web",
+						"scope": "user",
+						"effective": true,
+						"revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+						"transport": "http",
+						"enabled": true,
+						"required": false,
+						"url": "https://mcp.example.test/rpc",
+						"bearerTokenEnvVar": "MCP_TOKEN",
+						"startupTimeoutSec": 10,
+						"toolTimeoutSec": 60,
+						"disabledTools": [],
+						"state": "inactive",
+						"credentialConfigured": false,
+						"toolCount": 0,
+						"resourceCount": 0,
+						"resourceTemplateCount": 0,
+						"promptCount": 0,
+						"capabilities": []
+					}
+				]
+			}
+		}
+	},
+	{
+		"direction": "client",
+		"method": "mcp/get",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "client-mcp-get",
+			"result": {
+				"server": {
+					"name": "web",
+					"scope": "user",
+					"effective": true,
+					"revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+					"transport": "http",
+					"enabled": true,
+					"required": false,
+					"url": "https://mcp.example.test/rpc",
+					"bearerTokenEnvVar": "MCP_TOKEN",
+					"startupTimeoutSec": 10,
+					"toolTimeoutSec": 60,
+					"disabledTools": [],
+					"state": "inactive",
+					"credentialConfigured": false,
+					"toolCount": 0,
+					"resourceCount": 0,
+					"resourceTemplateCount": 0,
+					"promptCount": 0,
+					"capabilities": []
+				},
+				"tools": [],
+				"resources": [],
+				"resourceTemplates": [],
+				"prompts": []
+			}
+		}
+	},
+	{
+		"direction": "client",
+		"method": "mcp/catalog/get",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "client-mcp-catalog-get",
+			"result": {
+				"kind": "tool",
+				"id": "search",
+				"name": "Search",
+				"description": "Search documentation",
+				"inputSchema": "{\"type\":\"object\"}"
+			}
+		}
+	},
+	{
+		"direction": "client",
+		"method": "mcp/upsert",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "client-mcp-upsert",
+			"result": {
+				"servers": [
+					{
+						"name": "web",
+						"scope": "user",
+						"effective": true,
+						"revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+						"transport": "http",
+						"enabled": true,
+						"required": false,
+						"url": "https://mcp.example.test/rpc",
+						"bearerTokenEnvVar": "MCP_TOKEN",
+						"startupTimeoutSec": 10,
+						"toolTimeoutSec": 60,
+						"disabledTools": [],
+						"state": "inactive",
+						"credentialConfigured": false,
+						"toolCount": 0,
+						"resourceCount": 0,
+						"resourceTemplateCount": 0,
+						"promptCount": 0,
+						"capabilities": []
+					}
+				]
+			}
+		}
+	},
+	{
+		"direction": "client",
+		"method": "mcp/remove",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "client-mcp-remove",
+			"result": { "servers": [] }
+		}
+	},
+	{
+		"direction": "client",
+		"method": "mcp/restart",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "client-mcp-restart",
+			"result": {
+				"server": {
+					"name": "web",
+					"scope": "user",
+					"effective": true,
+					"revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+					"transport": "http",
+					"enabled": true,
+					"required": false,
+					"url": "https://mcp.example.test/rpc",
+					"bearerTokenEnvVar": "MCP_TOKEN",
+					"startupTimeoutSec": 10,
+					"toolTimeoutSec": 60,
+					"disabledTools": [],
+					"state": "connected",
+					"credentialConfigured": false,
+					"toolCount": 1,
+					"resourceCount": 0,
+					"resourceTemplateCount": 0,
+					"promptCount": 0,
+					"capabilities": ["tools"],
+					"serverInfo": { "name": "web", "version": "1.0.0" }
+				},
+				"tools": [{ "id": "search", "name": "Search", "description": "Search documentation" }],
+				"resources": [],
+				"resourceTemplates": [],
+				"prompts": []
+			}
+		}
+	},
+	{
+		"direction": "client",
+		"method": "mcp/credential/set",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "client-mcp-credential-set",
+			"result": {
+				"server": {
+					"name": "web",
+					"scope": "user",
+					"effective": true,
+					"revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+					"transport": "http",
+					"enabled": true,
+					"required": false,
+					"url": "https://mcp.example.test/rpc",
+					"bearerTokenEnvVar": "MCP_TOKEN",
+					"startupTimeoutSec": 10,
+					"toolTimeoutSec": 60,
+					"disabledTools": [],
+					"state": "connected",
+					"credentialConfigured": true,
+					"toolCount": 1,
+					"resourceCount": 0,
+					"resourceTemplateCount": 0,
+					"promptCount": 0,
+					"capabilities": ["tools"]
+				},
+				"tools": [{ "id": "search", "name": "Search", "description": "Search documentation" }],
+				"resources": [],
+				"resourceTemplates": [],
+				"prompts": []
+			}
+		}
+	},
+	{
+		"direction": "client",
+		"method": "mcp/credential/clear",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "client-mcp-credential-clear",
+			"result": {
+				"server": {
+					"name": "web",
+					"scope": "user",
+					"effective": true,
+					"revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+					"transport": "http",
+					"enabled": true,
+					"required": false,
+					"url": "https://mcp.example.test/rpc",
+					"bearerTokenEnvVar": "MCP_TOKEN",
+					"startupTimeoutSec": 10,
+					"toolTimeoutSec": 60,
+					"disabledTools": [],
+					"state": "connected",
+					"credentialConfigured": false,
+					"toolCount": 1,
+					"resourceCount": 0,
+					"resourceTemplateCount": 0,
+					"promptCount": 0,
+					"capabilities": ["tools"]
+				},
+				"tools": [{ "id": "search", "name": "Search", "description": "Search documentation" }],
+				"resources": [],
+				"resourceTemplates": [],
+				"prompts": []
+			}
+		}
+	},
+	{
+		"direction": "client",
 		"method": "session/setThinkingSelection",
 		"envelope": {
 			"jsonrpc": "2.0",
@@ -116,6 +432,48 @@
 			"jsonrpc": "2.0",
 			"id": "client-permissions",
 			"result": { "permissionMode": "full" }
+		}
+	},
+	{
+		"direction": "client",
+		"method": "permission/rules/list",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "permission-rules-list",
+			"result": {
+				"projectPath": "/tmp/metis-project",
+				"rules": [
+					{
+						"id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+						"toolName": "bash",
+						"command": "npm test",
+						"paths": ["/tmp/metis-project"],
+						"details": [{ "label": "Command", "value": "npm test" }],
+						"omittedDetails": 0,
+						"risks": ["shell"],
+						"executionTarget": "sandbox",
+						"createdAt": "2026-08-11T00:00:00.000Z"
+					}
+				]
+			}
+		}
+	},
+	{
+		"direction": "client",
+		"method": "permission/rules/delete",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "permission-rules-delete",
+			"result": { "projectPath": "/tmp/metis-project", "rules": [] }
+		}
+	},
+	{
+		"direction": "client",
+		"method": "permission/rules/clear",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "permission-rules-clear",
+			"result": { "projectPath": "/tmp/metis-project", "rules": [] }
 		}
 	},
 	{
@@ -274,6 +632,35 @@
 	},
 	{
 		"direction": "client",
+		"method": "session/status",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "client-status",
+			"result": {
+				"sessionId": "11111111-1111-4111-8111-111111111111",
+				"mode": "code",
+				"contextTokens": 64000,
+				"contextWindow": 128000,
+				"remainingPercent": 50,
+				"cacheHitPercent": 25
+			}
+		}
+	},
+	{
+		"direction": "client",
+		"method": "session/compact",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "client-compact",
+			"result": {
+				"sessionId": "11111111-1111-4111-8111-111111111111",
+				"tokensBefore": 64000,
+				"estimatedTokensAfter": 8000
+			}
+		}
+	},
+	{
+		"direction": "client",
 		"method": "session/close",
 		"envelope": {
 			"jsonrpc": "2.0",
@@ -386,6 +773,7 @@
 					"nextBeforeItemId": null,
 					"activeTurnId": null,
 					"pendingInteractions": [],
+					"queuedTurns": [],
 					"tasks": [],
 					"thinkingSelection": "off",
 					"actualThinkingLevel": "off",
@@ -440,6 +828,65 @@
 	},
 	{
 		"direction": "client",
+		"method": "turn/queue",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "client-queue",
+			"result": {
+				"queuedTurn": {
+					"queueItemId": "queue_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+					"revision": "entry_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+					"state": "queued",
+					"text": "Run this next.",
+					"attachments": []
+				}
+			}
+		}
+	},
+	{
+		"direction": "client",
+		"method": "turn/queue/update",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "client-queue-update",
+			"result": {
+				"queuedTurn": {
+					"queueItemId": "queue_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+					"revision": "entry_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+					"state": "queued",
+					"text": "Run only the tests next.",
+					"attachments": []
+				}
+			}
+		}
+	},
+	{
+		"direction": "client",
+		"method": "turn/queue/delete",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "client-queue-delete",
+			"result": {
+				"queueItemId": "queue_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+				"deleted": true
+			}
+		}
+	},
+	{
+		"direction": "client",
+		"method": "turn/queue/send",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "client-queue-send",
+			"result": {
+				"operationId": "operation_dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+				"queueItemId": "queue_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+				"status": "accepted"
+			}
+		}
+	},
+	{
+		"direction": "client",
 		"method": "turn/interrupt",
 		"envelope": {
 			"jsonrpc": "2.0",
@@ -460,6 +907,37 @@
 			"result": {
 				"acknowledgedCursor": 42
 			}
+		}
+	},
+	{
+		"direction": "client",
+		"method": "mcp/import/inspect",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "client-mcp-import-inspect",
+			"result": {
+				"sourceRevision": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+				"candidates": [
+					{
+						"id": "web",
+						"name": "web",
+						"transport": "http",
+						"enabled": true,
+						"existingRevision": null,
+						"bearerTokenConfigured": false,
+						"credentialNames": []
+					}
+				]
+			}
+		}
+	},
+	{
+		"direction": "client",
+		"method": "mcp/import",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "client-mcp-import",
+			"result": { "servers": [] }
 		}
 	},
 	{

@@ -16,5 +16,6 @@
 	{ "name": "SESSION_CORRUPT", "envelope": { "jsonrpc": "2.0", "id": "client-x", "error": { "code": -32010, "message": "Session is corrupt", "data": { "name": "SESSION_CORRUPT", "retryable": false, "sessionId": "11111111-1111-4111-8111-111111111111" } } } },
 	{ "name": "OPERATION_FAILED", "envelope": { "jsonrpc": "2.0", "id": "client-x", "error": { "code": -32011, "message": "Operation failed", "data": { "name": "OPERATION_FAILED", "retryable": false, "operationId": "operation_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" } } } },
 	{ "name": "READ_ONLY_SESSION", "envelope": { "jsonrpc": "2.0", "id": "client-x", "error": { "code": -32012, "message": "Session is read-only", "data": { "name": "READ_ONLY_SESSION", "retryable": false, "sessionId": "11111111-1111-4111-8111-111111111111" } } } },
-	{ "name": "SCHEDULE_STORE_CORRUPT", "envelope": { "jsonrpc": "2.0", "id": "client-x", "error": { "code": -32013, "message": "Scheduled task store is corrupt", "data": { "name": "SCHEDULE_STORE_CORRUPT", "retryable": false } } } }
+	{ "name": "SCHEDULE_STORE_CORRUPT", "envelope": { "jsonrpc": "2.0", "id": "client-x", "error": { "code": -32013, "message": "Scheduled task store is corrupt", "data": { "name": "SCHEDULE_STORE_CORRUPT", "retryable": false } } } },
+	{ "name": "CONFLICT", "envelope": { "jsonrpc": "2.0", "id": "client-x", "error": { "code": -32014, "message": "Resource changed", "data": { "name": "CONFLICT", "retryable": false, "requestId": "22222222-2222-4222-8222-222222222222" } } } }
 ]

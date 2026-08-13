@@ -7,7 +7,7 @@
 			"id": "client-1",
 			"method": "initialize",
 			"params": {
-				"protocolVersion": 11,
+				"protocolVersion": 17,
 				"client": { "name": "Metis Desktop", "version": "0.80.6" },
 				"capabilities": ["interaction.v1", "session.cursor.v1"]
 			}
@@ -21,6 +21,204 @@
 			"id": "client-skills",
 			"method": "skill/list",
 			"params": { "cwd": null }
+		}
+	},
+	{
+		"direction": "client",
+		"method": "skill/get",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "client-skill-get",
+			"method": "skill/get",
+			"params": { "cwd": null, "source": "user", "name": "writing-plans" }
+		}
+	},
+	{
+		"direction": "client",
+		"method": "skill/upsert",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "client-skill-upsert",
+			"method": "skill/upsert",
+			"params": {
+				"requestId": "20000000-0000-4000-8000-000000000001",
+				"cwd": null,
+				"source": "user",
+				"name": "writing-plans",
+				"expectedRevision": null,
+				"content": "---\nname: writing-plans\ndescription: Write implementation plans\n---\n\n# Instructions\nWrite the plan."
+			}
+		}
+	},
+	{
+		"direction": "client",
+		"method": "skill/remove",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "client-skill-remove",
+			"method": "skill/remove",
+			"params": {
+				"requestId": "20000000-0000-4000-8000-000000000002",
+				"cwd": "/work/project",
+				"source": "project",
+				"name": "writing-plans",
+				"expectedRevision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+			}
+		}
+	},
+	{
+		"direction": "client",
+		"method": "skill/import/inspect",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "client-skill-import-inspect",
+			"method": "skill/import/inspect",
+			"params": {
+				"cwd": "/work/project",
+				"source": "project",
+				"input": { "kind": "github", "url": "https://github.com/example/skills" }
+			}
+		}
+	},
+	{
+		"direction": "client",
+		"method": "skill/import",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "client-skill-import",
+			"method": "skill/import",
+			"params": {
+				"requestId": "20000000-0000-4000-8000-000000000003",
+				"cwd": "/work/project",
+				"source": "project",
+				"input": { "kind": "github", "url": "https://github.com/example/skills" },
+				"sourceRevision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+				"candidateIds": ["skills/writing-plans"]
+			}
+		}
+	},
+	{
+		"direction": "client",
+		"method": "mcp/list",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "client-mcp-list",
+			"method": "mcp/list",
+			"params": { "cwd": null }
+		}
+	},
+	{
+		"direction": "client",
+		"method": "mcp/get",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "client-mcp-get",
+			"method": "mcp/get",
+			"params": { "cwd": null, "scope": "user", "name": "web" }
+		}
+	},
+	{
+		"direction": "client",
+		"method": "mcp/catalog/get",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "client-mcp-catalog-get",
+			"method": "mcp/catalog/get",
+			"params": {
+				"sessionId": "11111111-1111-4111-8111-111111111111",
+				"server": "web",
+				"kind": "tool",
+				"id": "search"
+			}
+		}
+	},
+	{
+		"direction": "client",
+		"method": "mcp/upsert",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "client-mcp-upsert",
+			"method": "mcp/upsert",
+			"params": {
+				"requestId": "10000000-0000-4000-8000-000000000001",
+				"cwd": null,
+				"scope": "user",
+				"name": "web",
+				"expectedRevision": null,
+				"server": {
+					"transport": "http",
+					"url": "https://mcp.example.test/rpc",
+					"bearerTokenEnvVar": "MCP_TOKEN"
+				}
+			}
+		}
+	},
+	{
+		"direction": "client",
+		"method": "mcp/remove",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "client-mcp-remove",
+			"method": "mcp/remove",
+			"params": {
+				"requestId": "10000000-0000-4000-8000-000000000002",
+				"cwd": null,
+				"scope": "user",
+				"name": "web",
+				"expectedRevision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+			}
+		}
+	},
+	{
+		"direction": "client",
+		"method": "mcp/restart",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "client-mcp-restart",
+			"method": "mcp/restart",
+			"params": {
+				"requestId": "10000000-0000-4000-8000-000000000003",
+				"sessionId": "11111111-1111-4111-8111-111111111111",
+				"scope": "user",
+				"name": "web",
+				"expectedRevision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+			}
+		}
+	},
+	{
+		"direction": "client",
+		"method": "mcp/credential/set",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "client-mcp-credential-set",
+			"method": "mcp/credential/set",
+			"params": {
+				"requestId": "10000000-0000-4000-8000-000000000004",
+				"sessionId": "11111111-1111-4111-8111-111111111111",
+				"scope": "user",
+				"name": "web",
+				"expectedRevision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+				"credential": {
+					"bearerToken": "fixture-secret",
+					"environment": { "MCP_TENANT": "fixture-tenant-secret" }
+				}
+			}
+		}
+	},
+	{
+		"direction": "client",
+		"method": "mcp/credential/clear",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "client-mcp-credential-clear",
+			"method": "mcp/credential/clear",
+			"params": {
+				"requestId": "10000000-0000-4000-8000-000000000005",
+				"sessionId": "11111111-1111-4111-8111-111111111111",
+				"scope": "user",
+				"name": "web",
+				"expectedRevision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+			}
 		}
 	},
 	{
@@ -119,6 +317,29 @@
 	},
 	{
 		"direction": "client",
+		"method": "session/status",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "client-status",
+			"method": "session/status",
+			"params": { "sessionId": "11111111-1111-4111-8111-111111111111" }
+		}
+	},
+	{
+		"direction": "client",
+		"method": "session/compact",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "client-compact",
+			"method": "session/compact",
+			"params": {
+				"sessionId": "11111111-1111-4111-8111-111111111111",
+				"requestId": "22222222-2222-4222-8222-222222222219"
+			}
+		}
+	},
+	{
+		"direction": "client",
 		"method": "session/setThinkingSelection",
 		"envelope": {
 			"jsonrpc": "2.0",
@@ -142,6 +363,43 @@
 				"sessionId": "11111111-1111-4111-8111-111111111111",
 				"requestId": "22222222-2222-4222-8222-222222222216",
 				"permissionMode": "full"
+			}
+		}
+	},
+	{
+		"direction": "client",
+		"method": "permission/rules/list",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "permission-rules-list",
+			"method": "permission/rules/list",
+			"params": { "sessionId": "11111111-1111-4111-8111-111111111111" }
+		}
+	},
+	{
+		"direction": "client",
+		"method": "permission/rules/delete",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "permission-rules-delete",
+			"method": "permission/rules/delete",
+			"params": {
+				"sessionId": "11111111-1111-4111-8111-111111111111",
+				"ruleId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+				"requestId": "22222222-2222-4222-8222-222222222217"
+			}
+		}
+	},
+	{
+		"direction": "client",
+		"method": "permission/rules/clear",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "permission-rules-clear",
+			"method": "permission/rules/clear",
+			"params": {
+				"sessionId": "11111111-1111-4111-8111-111111111111",
+				"requestId": "22222222-2222-4222-8222-222222222218"
 			}
 		}
 	},
@@ -306,6 +564,67 @@
 	},
 	{
 		"direction": "client",
+		"method": "turn/queue",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "client-queue",
+			"method": "turn/queue",
+			"params": {
+				"sessionId": "11111111-1111-4111-8111-111111111111",
+				"requestId": "22222222-2222-4222-8222-222222222220",
+				"text": "Run this next."
+			}
+		}
+	},
+	{
+		"direction": "client",
+		"method": "turn/queue/update",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "client-queue-update",
+			"method": "turn/queue/update",
+			"params": {
+				"sessionId": "11111111-1111-4111-8111-111111111111",
+				"requestId": "22222222-2222-4222-8222-222222222221",
+				"queueItemId": "queue_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+				"expectedRevision": "entry_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+				"text": "Run only the tests next."
+			}
+		}
+	},
+	{
+		"direction": "client",
+		"method": "turn/queue/delete",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "client-queue-delete",
+			"method": "turn/queue/delete",
+			"params": {
+				"sessionId": "11111111-1111-4111-8111-111111111111",
+				"requestId": "22222222-2222-4222-8222-222222222222",
+				"queueItemId": "queue_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+				"expectedRevision": "entry_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+			}
+		}
+	},
+	{
+		"direction": "client",
+		"method": "turn/queue/send",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "client-queue-send",
+			"method": "turn/queue/send",
+			"params": {
+				"sessionId": "11111111-1111-4111-8111-111111111111",
+				"requestId": "22222222-2222-4222-8222-222222222223",
+				"queueItemId": "queue_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+				"expectedRevision": "entry_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+				"delivery": "steer"
+			}
+		}
+	},
+	{
+		"direction": "client",
 		"method": "turn/interrupt",
 		"envelope": {
 			"jsonrpc": "2.0",
@@ -325,6 +644,37 @@
 			"id": "client-14",
 			"method": "connection/ack",
 			"params": { "serverEpoch": "33333333-3333-4333-8333-333333333333", "cursor": 42 }
+		}
+	},
+	{
+		"direction": "client",
+		"method": "mcp/import/inspect",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "client-mcp-import-inspect",
+			"method": "mcp/import/inspect",
+			"params": {
+				"cwd": "/tmp/project",
+				"scope": "project",
+				"text": "{ // comment\n \"mcpServers\": { \"web\": { \"url\": \"https://mcp.example.test/rpc\" } } }"
+			}
+		}
+	},
+	{
+		"direction": "client",
+		"method": "mcp/import",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "client-mcp-import",
+			"method": "mcp/import",
+			"params": {
+				"requestId": "10000000-0000-4000-8000-000000000006",
+				"cwd": "/tmp/project",
+				"scope": "project",
+				"text": "{ \"mcpServers\": { \"web\": { \"url\": \"https://mcp.example.test/rpc\" } } }",
+				"sourceRevision": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+				"candidates": [{ "id": "web", "expectedRevision": null }]
+			}
 		}
 	},
 	{

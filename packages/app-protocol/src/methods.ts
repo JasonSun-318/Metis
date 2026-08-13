@@ -28,10 +28,21 @@ import {
 	DurableImageRefViewSchema,
 	InteractionViewSchema,
 	ItemViewSchema,
+	McpCatalogItemDetailViewSchema,
+	McpCatalogItemKindViewSchema,
+	McpEnvironmentMapSchema,
+	McpEnvironmentNameSchema,
+	McpHttpUrlSchema,
+	McpImportInspectionViewSchema,
+	McpScopeViewSchema,
+	McpServerDetailViewSchema,
+	McpServerSummaryViewSchema,
 	ModelOptionViewSchema,
 	ModelSettingsViewSchema,
 	PermissionModeSchema,
 	ProfileUsageSummaryViewSchema,
+	ProjectPermissionRuleViewSchema,
+	QueuedTurnViewSchema,
 	ScheduleDescriptionInputSchema,
 	ScheduleInputSpecSchema,
 	ScheduleNameSchema,
@@ -39,13 +50,21 @@ import {
 	ScheduleSnapshotViewSchema,
 	ScheduleTaskViewSchema,
 	SessionSnapshotSchema,
+	SessionStatusViewSchema,
 	SessionSummarySchema,
+	SkillContentSchema,
+	SkillDetailViewSchema,
+	SkillImportCandidateViewSchema,
+	SkillImportInputViewSchema,
+	SkillNameSchema,
+	SkillSourceViewSchema,
 	SkillSummaryViewSchema,
 	SubagentModelRefSchema,
 	SubagentSummarySchema,
 	ThinkingSelectionSchema,
 	UsageRangeDaysSchema,
 	UsageSummaryViewSchema,
+	WritableSkillSourceViewSchema,
 } from "./views.ts";
 
 export interface RpcMethodDefinition<Params extends TSchema = TSchema, Result extends TSchema = TSchema> {
@@ -100,6 +119,206 @@ export const SkillListParamsSchema = Type.Union([
 export const SkillListResultSchema = StrictObject({
 	skills: Type.Array(SkillSummaryViewSchema, { maxItems: 256 }),
 });
+
+const SkillIdentityFields = { source: SkillSourceViewSchema, name: SkillNameSchema } as const;
+const WritableSkillIdentityFields = { source: WritableSkillSourceViewSchema, name: SkillNameSchema } as const;
+
+function skillDraftTarget<const Fields extends Record<string, TSchema>>(fields: Fields) {
+	return Type.Refine(
+		StrictObject({ cwd: Type.Union([PathSchema, Type.Null()]), ...fields }),
+		(value) => {
+			const target = value as { cwd: string | null; source: string };
+			return target.source !== "project" || target.cwd !== null;
+		},
+		"project Skills require a project cwd",
+	);
+}
+
+export const SkillGetParamsSchema = skillDraftTarget(SkillIdentityFields);
+export const SkillGetResultSchema = SkillDetailViewSchema;
+export const SkillUpsertParamsSchema = skillDraftTarget({
+	requestId: UuidSchema,
+	...WritableSkillIdentityFields,
+	expectedRevision: Type.Union([Sha256Schema, Type.Null()]),
+	content: SkillContentSchema,
+});
+export const SkillUpsertResultSchema = SkillDetailViewSchema;
+export const SkillRemoveParamsSchema = skillDraftTarget({
+	requestId: UuidSchema,
+	...WritableSkillIdentityFields,
+	expectedRevision: Sha256Schema,
+});
+export const SkillRemoveResultSchema = SkillListResultSchema;
+export const SkillImportInspectParamsSchema = skillDraftTarget({
+	source: WritableSkillSourceViewSchema,
+	input: SkillImportInputViewSchema,
+});
+export const SkillImportInspectResultSchema = StrictObject({
+	revision: Sha256Schema,
+	candidates: Type.Array(SkillImportCandidateViewSchema, { minItems: 1, maxItems: 64 }),
+});
+export const SkillImportParamsSchema = skillDraftTarget({
+	requestId: UuidSchema,
+	source: WritableSkillSourceViewSchema,
+	input: SkillImportInputViewSchema,
+	sourceRevision: Sha256Schema,
+	candidateIds: Type.Array(Utf8String(4096, { minLength: 1, maxLength: 4096 }), {
+		minItems: 1,
+		maxItems: 64,
+		uniqueItems: true,
+	}),
+});
+export const SkillImportResultSchema = SkillListResultSchema;
+
+function mcpSessionTarget<const Fields extends Record<string, TSchema>>(fields: Fields) {
+	return StrictObject({ sessionId: SessionIdSchema, ...fields });
+}
+
+function mcpDraftTarget<const Fields extends Record<string, TSchema>>(fields: Fields) {
+	return StrictObject({ cwd: Type.Union([PathSchema, Type.Null()]), ...fields });
+}
+
+const NonEmptyPublicTextSchema = Type.Refine(PublicTextSchema, (value) => value.length > 0, "value must not be empty");
+const CommandSchema = Type.Refine(PublicTextSchema, (value) => Boolean(value.trim()), "command must not be empty");
+
+const McpCommonServerInputFields = {
+	description: Type.Optional(Utf8String(4096, { minLength: 1, maxLength: 4096 })),
+	enabled: Type.Optional(Type.Boolean()),
+	required: Type.Optional(Type.Boolean()),
+	startupTimeoutSec: Type.Optional(Type.Number({ exclusiveMinimum: 0, maximum: 3_600 })),
+	toolTimeoutSec: Type.Optional(Type.Number({ exclusiveMinimum: 0, maximum: 86_400 })),
+	enabledTools: Type.Optional(Type.Array(NameSchema, { maxItems: 512, uniqueItems: true })),
+	disabledTools: Type.Optional(Type.Array(NameSchema, { maxItems: 512, uniqueItems: true })),
+} as const;
+
+export const McpServerInputSchema = Type.Union([
+	StrictObject({
+		...McpCommonServerInputFields,
+		transport: Type.Literal("stdio"),
+		command: CommandSchema,
+		args: Type.Optional(Type.Array(PublicTextSchema, { maxItems: 128 })),
+		envVars: Type.Optional(Type.Array(McpEnvironmentNameSchema, { maxItems: 128, uniqueItems: true })),
+		cwd: Type.Optional(PathSchema),
+	}),
+	StrictObject({
+		...McpCommonServerInputFields,
+		transport: Type.Literal("http"),
+		url: McpHttpUrlSchema,
+		bearerTokenEnvVar: Type.Optional(McpEnvironmentNameSchema),
+		envHttpHeaders: Type.Optional(McpEnvironmentMapSchema),
+	}),
+]);
+
+const McpSecretMapSchema = Type.Refine(
+	Type.Record(McpEnvironmentNameSchema, NonEmptyPublicTextSchema),
+	(value) => Object.keys(value).length <= 128,
+	"MCP credential has too many environment values",
+);
+export const McpCredentialInputSchema = Type.Refine(
+	StrictObject({
+		bearerToken: Type.Optional(NonEmptyPublicTextSchema),
+		environment: Type.Optional(McpSecretMapSchema),
+	}),
+	(value) => Boolean(value.bearerToken || Object.keys(value.environment ?? {}).length),
+	"MCP credential must contain a bearer token or environment value",
+);
+
+export const McpListParamsSchema = Type.Union([mcpSessionTarget({}), mcpDraftTarget({})]);
+export const McpListResultSchema = StrictObject({
+	servers: Type.Array(McpServerSummaryViewSchema, { maxItems: 512 }),
+});
+
+const McpDefinitionFields = { scope: McpScopeViewSchema, name: NameSchema } as const;
+const McpMutationBaseFields = {
+	requestId: UuidSchema,
+	...McpDefinitionFields,
+} as const;
+const McpUpsertMutationFields = {
+	...McpMutationBaseFields,
+	expectedRevision: Type.Union([Sha256Schema, Type.Null()]),
+} as const;
+const McpExistingMutationFields = { ...McpMutationBaseFields, expectedRevision: Sha256Schema } as const;
+
+function mcpScopedDraftTarget<const Fields extends Record<string, TSchema>>(fields: Fields) {
+	return Type.Refine(
+		mcpDraftTarget(fields),
+		(value) => {
+			const target = value as { cwd: string | null; scope: string };
+			return target.cwd !== null || target.scope === "user";
+		},
+		"project-scoped MCP servers require a project cwd",
+	);
+}
+
+export const McpGetParamsSchema = Type.Union([
+	mcpSessionTarget(McpDefinitionFields),
+	mcpScopedDraftTarget(McpDefinitionFields),
+]);
+export const McpGetResultSchema = McpServerDetailViewSchema;
+export const McpCatalogGetParamsSchema = mcpSessionTarget({
+	server: NameSchema,
+	kind: McpCatalogItemKindViewSchema,
+	id: PublicTextSchema,
+});
+export const McpCatalogGetResultSchema = McpCatalogItemDetailViewSchema;
+export const McpUpsertParamsSchema = Type.Union([
+	mcpSessionTarget({
+		...McpUpsertMutationFields,
+		server: McpServerInputSchema,
+		credential: Type.Optional(McpCredentialInputSchema),
+	}),
+	mcpScopedDraftTarget({
+		...McpUpsertMutationFields,
+		server: McpServerInputSchema,
+		credential: Type.Optional(McpCredentialInputSchema),
+	}),
+]);
+export const McpMutationResultSchema = McpListResultSchema;
+export const McpRemoveParamsSchema = Type.Union([
+	mcpSessionTarget(McpExistingMutationFields),
+	mcpScopedDraftTarget(McpExistingMutationFields),
+]);
+export const McpRestartParamsSchema = mcpSessionTarget(McpExistingMutationFields);
+export const McpRestartResultSchema = McpGetResultSchema;
+export const McpCredentialSetParamsSchema = mcpSessionTarget({
+	...McpExistingMutationFields,
+	credential: McpCredentialInputSchema,
+});
+export const McpCredentialSetResultSchema = McpGetResultSchema;
+export const McpCredentialClearParamsSchema = mcpSessionTarget(McpExistingMutationFields);
+export const McpCredentialClearResultSchema = McpGetResultSchema;
+
+const McpImportFields = {
+	scope: McpScopeViewSchema,
+	text: Utf8String(1024 * 1024, { minLength: 1, maxLength: 1024 * 1024 }),
+} as const;
+const McpImportSelectionSchema = StrictObject({
+	id: NameSchema,
+	expectedRevision: Type.Union([Sha256Schema, Type.Null()]),
+});
+const McpImportSelectionsSchema = Type.Refine(
+	Type.Array(McpImportSelectionSchema, { minItems: 1, maxItems: 128 }),
+	(value) => new Set(value.map((candidate) => candidate.id)).size === value.length,
+	"MCP import candidates must be unique",
+);
+export const McpImportInspectParamsSchema = Type.Union([
+	mcpSessionTarget(McpImportFields),
+	mcpScopedDraftTarget(McpImportFields),
+]);
+export const McpImportParamsSchema = Type.Union([
+	mcpSessionTarget({
+		requestId: UuidSchema,
+		...McpImportFields,
+		sourceRevision: Sha256Schema,
+		candidates: McpImportSelectionsSchema,
+	}),
+	mcpScopedDraftTarget({
+		requestId: UuidSchema,
+		...McpImportFields,
+		sourceRevision: Sha256Schema,
+		candidates: McpImportSelectionsSchema,
+	}),
+]);
 
 export const ProfileGetParamsSchema = StrictObject({});
 export const ProfileGetResultSchema = ProfileUsageSummaryViewSchema;
@@ -174,6 +393,16 @@ export const SessionDeleteResultSchema = StrictObject({
 	warning: Type.Optional(PublicTextSchema),
 });
 
+export const SessionCompactResultSchema = StrictObject({
+	sessionId: SessionIdSchema,
+	tokensBefore: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
+	estimatedTokensAfter: Type.Union([Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }), Type.Null()]),
+	// Present only when compaction was requested but there was nothing to do
+	// (e.g. the session is already compacted or too small). This is a success
+	// response carrying an informational notice, not a failure.
+	message: Type.Optional(PublicTextSchema),
+});
+
 export const SessionSubscribeResultSchema = StrictObject({ snapshot: SessionSnapshotSchema });
 export const SessionUnsubscribeResultSchema = StrictObject({
 	sessionId: SessionIdSchema,
@@ -197,6 +426,21 @@ export const SessionSetPermissionModeParamsSchema = StrictObject({
 	permissionMode: PermissionModeSchema,
 });
 export const SessionPermissionModeResultSchema = StrictObject({ permissionMode: PermissionModeSchema });
+
+export const PermissionRulesListParamsSchema = StrictObject({ sessionId: SessionIdSchema });
+export const PermissionRulesDeleteParamsSchema = StrictObject({
+	sessionId: SessionIdSchema,
+	ruleId: OpaqueIdSchema,
+	requestId: UuidSchema,
+});
+export const PermissionRulesClearParamsSchema = StrictObject({
+	sessionId: SessionIdSchema,
+	requestId: UuidSchema,
+});
+export const PermissionRulesResultSchema = StrictObject({
+	projectPath: PathSchema,
+	rules: Type.Array(ProjectPermissionRuleViewSchema, { maxItems: 256 }),
+});
 
 export const SessionSetModelParamsSchema = StrictObject({
 	sessionId: SessionIdSchema,
@@ -252,6 +496,28 @@ export const AcceptedOperationSchema = StrictObject({
 	queueItemId: Type.Optional(OpaqueIdSchema),
 	turnId: Type.Optional(OpaqueIdSchema),
 	status: Type.Union([Type.Literal("accepted"), Type.Literal("existing")]),
+});
+
+const QueueItemMutationFields = {
+	sessionId: SessionIdSchema,
+	requestId: UuidSchema,
+	queueItemId: OpaqueIdSchema,
+	expectedRevision: OpaqueIdSchema,
+} as const;
+
+export const TurnQueueUpdateParamsSchema = StrictObject({
+	...QueueItemMutationFields,
+	text: PromptTextSchema,
+});
+export const TurnQueueDeleteParamsSchema = StrictObject(QueueItemMutationFields);
+export const TurnQueueSendParamsSchema = StrictObject({
+	...QueueItemMutationFields,
+	delivery: Type.Union([Type.Literal("steer"), Type.Literal("start")]),
+});
+export const QueuedTurnResultSchema = StrictObject({ queuedTurn: QueuedTurnViewSchema });
+export const QueuedTurnDeleteResultSchema = StrictObject({
+	queueItemId: OpaqueIdSchema,
+	deleted: Type.Literal(true),
 });
 
 export const ConnectionAckParamsSchema = StrictObject({
@@ -464,6 +730,21 @@ export const ClientRequestMethods = {
 	initialize: method(InitializeParamsSchema, InitializeResultSchema),
 	"session/list": method(SessionListParamsSchema, SessionListResultSchema),
 	"skill/list": method(SkillListParamsSchema, SkillListResultSchema),
+	"skill/get": method(SkillGetParamsSchema, SkillGetResultSchema),
+	"skill/upsert": method(SkillUpsertParamsSchema, SkillUpsertResultSchema),
+	"skill/remove": method(SkillRemoveParamsSchema, SkillRemoveResultSchema),
+	"skill/import/inspect": method(SkillImportInspectParamsSchema, SkillImportInspectResultSchema),
+	"skill/import": method(SkillImportParamsSchema, SkillImportResultSchema),
+	"mcp/list": method(McpListParamsSchema, McpListResultSchema),
+	"mcp/get": method(McpGetParamsSchema, McpGetResultSchema),
+	"mcp/catalog/get": method(McpCatalogGetParamsSchema, McpCatalogGetResultSchema),
+	"mcp/upsert": method(McpUpsertParamsSchema, McpMutationResultSchema),
+	"mcp/remove": method(McpRemoveParamsSchema, McpMutationResultSchema),
+	"mcp/restart": method(McpRestartParamsSchema, McpRestartResultSchema),
+	"mcp/credential/set": method(McpCredentialSetParamsSchema, McpCredentialSetResultSchema),
+	"mcp/credential/clear": method(McpCredentialClearParamsSchema, McpCredentialClearResultSchema),
+	"mcp/import/inspect": method(McpImportInspectParamsSchema, McpImportInspectionViewSchema),
+	"mcp/import": method(McpImportParamsSchema, McpMutationResultSchema),
 	"profile/get": method(ProfileGetParamsSchema, ProfileGetResultSchema),
 	"project/deletePreview": method(ProjectDeletePreviewParamsSchema, ProjectDeletePreviewResultSchema),
 	"project/delete": method(ProjectDeleteParamsSchema, ProjectDeleteResultSchema),
@@ -471,6 +752,8 @@ export const ClientRequestMethods = {
 	"session/open": method(SessionRefParamsSchema, SessionOpenResultSchema),
 	"session/markRead": method(SessionMarkReadParamsSchema, SessionMutationResultSchema),
 	"session/readItems": method(SessionReadItemsParamsSchema, SessionReadItemsResultSchema),
+	"session/status": method(SessionRefParamsSchema, SessionStatusViewSchema),
+	"session/compact": method(SessionMutationParamsSchema, SessionCompactResultSchema),
 	"session/close": method(SessionMutationParamsSchema, SessionCloseResultSchema),
 	"session/rename": method(SessionRenameParamsSchema, SessionMutationResultSchema),
 	"session/delete": method(SessionMutationParamsSchema, SessionDeleteResultSchema),
@@ -483,6 +766,9 @@ export const ClientRequestMethods = {
 		SessionThinkingSelectionResultSchema,
 	),
 	"session/setPermissionMode": method(SessionSetPermissionModeParamsSchema, SessionPermissionModeResultSchema),
+	"permission/rules/list": method(PermissionRulesListParamsSchema, PermissionRulesResultSchema),
+	"permission/rules/delete": method(PermissionRulesDeleteParamsSchema, PermissionRulesResultSchema),
+	"permission/rules/clear": method(PermissionRulesClearParamsSchema, PermissionRulesResultSchema),
 	"session/setModel": method(SessionSetModelParamsSchema, SessionModelResultSchema),
 	"model/list": method(ModelListParamsSchema, ModelListResultSchema),
 	"model/settings/get": method(ModelSettingsGetParamsSchema, ModelSettingsViewSchema),
@@ -493,6 +779,10 @@ export const ClientRequestMethods = {
 	"subagent/interrupt": method(SubagentInterruptParamsSchema, SubagentResultSchema),
 	"turn/start": method(TurnInputSchema, AcceptedOperationSchema),
 	"turn/steer": method(TurnSteerParamsSchema, AcceptedOperationSchema),
+	"turn/queue": method(TurnInputSchema, QueuedTurnResultSchema),
+	"turn/queue/update": method(TurnQueueUpdateParamsSchema, QueuedTurnResultSchema),
+	"turn/queue/delete": method(TurnQueueDeleteParamsSchema, QueuedTurnDeleteResultSchema),
+	"turn/queue/send": method(TurnQueueSendParamsSchema, AcceptedOperationSchema),
 	"turn/interrupt": method(SessionMutationParamsSchema, AcceptedOperationSchema),
 	"schedule/create": method(ScheduleCreateParamsSchema, ScheduleTaskResultSchema),
 	"schedule/list": method(ScheduleListParamsSchema, ScheduleListResultSchema),
@@ -537,6 +827,7 @@ type DefinitionResult<Definition> = Definition extends RpcMethodDefinition<TSche
 
 export type ClientParams<Method extends ClientRequestMethod> = DefinitionParams<(typeof ClientRequestMethods)[Method]>;
 export type ClientResult<Method extends ClientRequestMethod> = DefinitionResult<(typeof ClientRequestMethods)[Method]>;
+export type McpCredentialInput = Static<typeof McpCredentialInputSchema>;
 export type HostParams<Method extends HostRequestMethod> = DefinitionParams<(typeof HostRequestMethods)[Method]>;
 export type HostResult<Method extends HostRequestMethod> = DefinitionResult<(typeof HostRequestMethods)[Method]>;
 export type ServerParams<Method extends ServerRequestMethod> = DefinitionParams<(typeof ServerRequestMethods)[Method]>;

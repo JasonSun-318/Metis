@@ -311,10 +311,74 @@ function validateClientResultCorrelation(request: ClientRpcRequest, result: unkn
 			}
 			return;
 		}
-		case "skill/list": {
+		case "skill/list":
+		case "skill/remove":
+		case "skill/import": {
 			const skills = (result as ClientResult<"skill/list">).skills;
 			if (!hasUniqueIds(skills.map((skill) => skill.name))) {
 				failResponseCorrelation("Skill list contains duplicate names");
+			}
+			if (
+				"cwd" in request.params &&
+				request.params.cwd === null &&
+				skills.some((skill) => skill.source === "project")
+			) {
+				failResponseCorrelation("Global Skill list contains a project Skill");
+			}
+			return;
+		}
+		case "skill/import/inspect": {
+			const candidates = (result as ClientResult<"skill/import/inspect">).candidates;
+			if (
+				!hasUniqueIds(candidates.map((candidate) => candidate.id)) ||
+				!hasUniqueIds(candidates.map((candidate) => candidate.name))
+			) {
+				failResponseCorrelation("Skill import candidates contain duplicate ids or names");
+			}
+			return;
+		}
+		case "skill/get":
+		case "skill/upsert": {
+			const detail = result as ClientResult<"skill/get">;
+			if (detail.name !== request.params.name || detail.source !== request.params.source) {
+				failResponseCorrelation("Skill result does not match its request");
+			}
+			return;
+		}
+		case "mcp/list":
+		case "mcp/upsert":
+		case "mcp/remove":
+		case "mcp/import": {
+			const servers = (result as ClientResult<"mcp/list">).servers;
+			if (!hasUniqueIds(servers.map((server) => `${server.scope}\0${server.name}`))) {
+				failResponseCorrelation("MCP server list contains duplicate scope/name pairs");
+			}
+			if (
+				"cwd" in request.params &&
+				request.params.cwd === null &&
+				servers.some((server) => server.scope !== "user")
+			) {
+				failResponseCorrelation("Global MCP server list contains a project-scoped server");
+			}
+			return;
+		}
+		case "mcp/import/inspect": {
+			const candidates = (result as ClientResult<"mcp/import/inspect">).candidates;
+			if (
+				!hasUniqueIds(candidates.map((candidate) => candidate.id)) ||
+				!hasUniqueIds(candidates.map((candidate) => candidate.name))
+			) {
+				failResponseCorrelation("MCP import candidates contain duplicate ids or names");
+			}
+			return;
+		}
+		case "mcp/get":
+		case "mcp/restart":
+		case "mcp/credential/set":
+		case "mcp/credential/clear": {
+			const server = (result as ClientResult<"mcp/get">).server;
+			if (server.name !== request.params.name || server.scope !== request.params.scope) {
+				failResponseCorrelation("MCP server result does not match its request");
 			}
 			return;
 		}
@@ -333,6 +397,16 @@ function validateClientResultCorrelation(request: ClientRpcRequest, result: unkn
 			}
 			return;
 		}
+		case "session/status":
+			if ((result as ClientResult<"session/status">).sessionId !== request.params.sessionId) {
+				failResponseCorrelation("Session status does not match its request");
+			}
+			return;
+		case "session/compact":
+			if ((result as ClientResult<"session/compact">).sessionId !== request.params.sessionId) {
+				failResponseCorrelation("Compacted session does not match its request");
+			}
+			return;
 		case "session/close":
 			if ((result as ClientResult<"session/close">).sessionId !== request.params.sessionId) {
 				failResponseCorrelation("Closed session does not match its request");
@@ -362,12 +436,28 @@ function validateClientResultCorrelation(request: ClientRpcRequest, result: unkn
 				!hasUniqueIds(snapshot.turns.map((turn) => turn.turnId)) ||
 				!hasUniqueIds(snapshot.recentItems.map((item) => item.itemId)) ||
 				!hasUniqueIds(snapshot.pendingInteractions.map((interaction) => interaction.interactionId)) ||
+				!hasUniqueIds(snapshot.queuedTurns.map((turn) => turn.queueItemId)) ||
 				(snapshot.activeTurnId !== null && !snapshot.turns.some((turn) => turn.turnId === snapshot.activeTurnId))
 			) {
 				failResponseCorrelation("Session snapshot does not match its subscription");
 			}
 			return;
 		}
+		case "turn/queue/update":
+			if ((result as ClientResult<"turn/queue/update">).queuedTurn.queueItemId !== request.params.queueItemId) {
+				failResponseCorrelation("Updated queued turn does not match its request");
+			}
+			return;
+		case "turn/queue/delete":
+			if ((result as ClientResult<"turn/queue/delete">).queueItemId !== request.params.queueItemId) {
+				failResponseCorrelation("Deleted queued turn does not match its request");
+			}
+			return;
+		case "turn/queue/send":
+			if ((result as ClientResult<"turn/queue/send">).queueItemId !== request.params.queueItemId) {
+				failResponseCorrelation("Sent queued turn does not match its request");
+			}
+			return;
 		case "session/unsubscribe":
 			if ((result as ClientResult<"session/unsubscribe">).sessionId !== request.params.sessionId) {
 				failResponseCorrelation("Unsubscribed session does not match its request");

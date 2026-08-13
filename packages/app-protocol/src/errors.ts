@@ -21,6 +21,7 @@ export const RPC_ERROR_CODES = {
 	OPERATION_FAILED: -32011,
 	READ_ONLY_SESSION: -32012,
 	SCHEDULE_STORE_CORRUPT: -32013,
+	CONFLICT: -32014,
 } as const;
 
 export type RpcErrorName = keyof typeof RPC_ERROR_CODES;
@@ -45,6 +46,7 @@ const ERROR_MESSAGES: Record<RpcErrorName, string> = {
 	OPERATION_FAILED: "Operation failed",
 	READ_ONLY_SESSION: "Session is read-only",
 	SCHEDULE_STORE_CORRUPT: "Scheduled task store is corrupt",
+	CONFLICT: "Resource changed",
 };
 
 const RETRYABLE: Record<RpcErrorName, boolean> = {
@@ -66,6 +68,7 @@ const RETRYABLE: Record<RpcErrorName, boolean> = {
 	OPERATION_FAILED: false,
 	READ_ONLY_SESSION: false,
 	SCHEDULE_STORE_CORRUPT: false,
+	CONFLICT: false,
 };
 
 const STANDARD_ERROR_NAMES = new Set<RpcErrorName>([
@@ -121,6 +124,7 @@ export const RpcErrorObjectSchema = Type.Union([
 	ApplicationErrorSchema("OPERATION_FAILED"),
 	ApplicationErrorSchema("READ_ONLY_SESSION"),
 	ApplicationErrorSchema("SCHEDULE_STORE_CORRUPT"),
+	ApplicationErrorSchema("CONFLICT"),
 ]);
 
 export interface RpcErrorContext {

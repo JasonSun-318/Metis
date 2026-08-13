@@ -4,9 +4,14 @@ import type {
 	ConnectionEventsParams,
 	InteractionResponseInput,
 	ItemView,
+	McpServerDetailView,
+	McpServerSummaryView,
 	PermissionModeView,
+	ProjectPermissionRuleView,
 	SessionSnapshot,
+	SessionStatusView,
 	SessionSummary,
+	SkillDetailView,
 	SkillSummaryView,
 	TurnView,
 } from "@metis/app-protocol";
@@ -39,6 +44,37 @@ const sessionDelete = {
 	sessionId: sessionRename.sessionId,
 	requestId: "00000000-0000-4000-8000-000000000003",
 } satisfies ClientParams<"session/delete">;
+
+const sessionStatusParams = {
+	sessionId: sessionRename.sessionId,
+} satisfies ClientParams<"session/status">;
+const sessionStatusResult = {
+	sessionId: sessionStatusParams.sessionId,
+	mode: "code",
+	contextTokens: 64_000,
+	contextWindow: 128_000,
+	remainingPercent: 50,
+	cacheHitPercent: 25,
+} satisfies ClientResult<"session/status">;
+const sessionStatusView: SessionStatusView = sessionStatusResult;
+const sessionCompact = {
+	sessionId: sessionRename.sessionId,
+	requestId: "00000000-0000-4000-8000-000000000005",
+} satisfies ClientParams<"session/compact">;
+const sessionCompactResult = {
+	sessionId: sessionCompact.sessionId,
+	tokensBefore: 64_000,
+	estimatedTokensAfter: 8_000,
+} satisfies ClientResult<"session/compact">;
+const compactedItem = {
+	itemId: "item-compacted",
+	sessionId: sessionRename.sessionId,
+	role: "system",
+	state: "completed",
+	content: [{ type: "compaction" }],
+	createdAt: "2026-08-13T00:00:00.000Z",
+	completedAt: "2026-08-13T00:00:00.000Z",
+} satisfies ItemView;
 const _sessionDeleteResult = {
 	sessionId: sessionDelete.sessionId,
 	deleted: true,
@@ -80,6 +116,111 @@ const skill = {
 	description: "Read PDF documents",
 	source: "system",
 } satisfies SkillSummaryView;
+const skillDetail = {
+	name: "writing-plans",
+	description: "Write implementation plans",
+	source: "user",
+	revision: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+	directoryPath: "/Users/example/.metis/agent/skills/writing-plans",
+	entryFile: "SKILL.md",
+	files: ["SKILL.md"],
+	content: "---\nname: writing-plans\ndescription: Write implementation plans\n---\n\nWrite the plan.",
+	instructions: "Write the plan.",
+	updatedAt: "2026-08-11T06:32:00.000Z",
+	editable: true,
+} satisfies SkillDetailView;
+const skillUpsert = {
+	requestId: "20000000-0000-4000-8000-000000000001",
+	cwd: null,
+	source: "user",
+	name: "writing-plans",
+	expectedRevision: null,
+	content: skillDetail.content,
+} satisfies ClientParams<"skill/upsert">;
+const skillGet = skillDetail satisfies ClientResult<"skill/get">;
+const skillImportInspect = {
+	cwd: "/tmp/project",
+	source: "project",
+	input: { kind: "github", url: "https://github.com/example/skills" },
+} satisfies ClientParams<"skill/import/inspect">;
+const skillImport = {
+	requestId: "20000000-0000-4000-8000-000000000003",
+	cwd: skillImportInspect.cwd,
+	source: skillImportInspect.source,
+	input: skillImportInspect.input,
+	sourceRevision: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+	candidateIds: ["skills/writing-plans"],
+} satisfies ClientParams<"skill/import">;
+const _skillImportInspectResult = {
+	revision: skillImport.sourceRevision,
+	candidates: [{ id: "skills/writing-plans", name: "writing-plans", description: "Write plans", fileCount: 2 }],
+} satisfies ClientResult<"skill/import/inspect">;
+const mcpSummary = {
+	name: "web",
+	scope: "user",
+	effective: true,
+	revision: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+	transport: "http",
+	description: "Repository documentation.",
+	enabled: true,
+	required: false,
+	url: "https://mcp.example.test/rpc",
+	startupTimeoutSec: 10,
+	toolTimeoutSec: 60,
+	disabledTools: [],
+	state: "inactive",
+	credentialConfigured: false,
+	toolCount: 0,
+	resourceCount: 0,
+	resourceTemplateCount: 0,
+	promptCount: 0,
+	capabilities: [],
+} satisfies McpServerSummaryView;
+const mcpDetail = {
+	server: mcpSummary,
+	tools: [],
+	resources: [],
+	resourceTemplates: [],
+	prompts: [],
+} satisfies McpServerDetailView;
+const mcpUpsert = {
+	requestId: "10000000-0000-4000-8000-000000000001",
+	cwd: null,
+	scope: "user",
+	name: "web",
+	expectedRevision: null,
+	server: { transport: "http", url: "https://mcp.example.test/rpc" },
+	credential: {
+		bearerToken: "secret",
+		environment: { MCP_TENANT: "tenant-secret" },
+	},
+} satisfies ClientParams<"mcp/upsert">;
+const mcpImportInspect = {
+	cwd: "/tmp/project",
+	scope: "project",
+	text: '{ // comment\n "mcpServers": { "web": { "url": "https://mcp.example.test/rpc" } } }',
+} satisfies ClientParams<"mcp/import/inspect">;
+const mcpImport = {
+	requestId: "10000000-0000-4000-8000-000000000002",
+	...mcpImportInspect,
+	sourceRevision: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+	candidates: [{ id: "web", expectedRevision: null }],
+} satisfies ClientParams<"mcp/import">;
+const _mcpImportInspectResult = {
+	sourceRevision: mcpImport.sourceRevision,
+	candidates: [
+		{
+			id: "web",
+			name: "web",
+			transport: "http",
+			enabled: true,
+			existingRevision: null,
+			bearerTokenConfigured: false,
+			credentialNames: [],
+		},
+	],
+} satisfies ClientResult<"mcp/import/inspect">;
+const mcpGet = mcpDetail satisfies ClientResult<"mcp/get">;
 const profile = {
 	generatedAt: "2026-08-01T00:00:00.000Z",
 	totalTokens: 600,
@@ -112,6 +253,7 @@ const snapshot: SessionSnapshot = {
 	activeTurnId: null,
 	pendingInteractions: [],
 	tasks: [],
+	queuedTurns: [],
 	thinkingSelection: "off",
 	actualThinkingLevel: "off",
 	availableThinkingSelections: ["off"],
@@ -120,6 +262,17 @@ const snapshot: SessionSnapshot = {
 	cursor: 0,
 };
 const permissionMode: PermissionModeView = snapshot.permissionMode;
+const permissionRule = {
+	id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+	toolName: "bash",
+	command: "npm test",
+	paths: ["/tmp/project"],
+	details: [{ label: "Command", value: "npm test" }],
+	omittedDetails: 0,
+	risks: ["shell"],
+	executionTarget: "sandbox",
+	createdAt: "2026-08-11T00:00:00.000Z",
+} satisfies ProjectPermissionRuleView;
 const events: ConnectionEventsParams = {
 	serverEpoch: snapshot.serverEpoch,
 	fromCursor: 1,
@@ -149,9 +302,20 @@ void events;
 void interactionResponse;
 void askUserInteractionResponse;
 void skill;
+void skillDetail;
+void skillUpsert;
+void skillGet;
+void mcpSummary;
+void mcpDetail;
+void mcpUpsert;
+void mcpGet;
 void profile;
 void projectDelete;
 void projectDeletePreview;
 void projectDeleteResult;
+void sessionStatusView;
+void sessionCompactResult;
+void compactedItem;
 void permissionMode;
+void permissionRule;
 void subagentInterruptResult;

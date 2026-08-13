@@ -317,6 +317,21 @@ describe("golden protocol fixtures", () => {
 		}
 	});
 
+	it("accepts the optional informational notice on a compact result", () => {
+		const request = requestFor("client", "session/compact");
+		const response = {
+			jsonrpc: "2.0",
+			id: request.envelope.id,
+			result: {
+				sessionId: "11111111-1111-4111-8111-111111111111",
+				tokensBefore: 0,
+				estimatedTokensAfter: null,
+				message: "Nothing to compact (session too small)",
+			},
+		};
+		expect(validateResponseFor("client", request.envelope, response)).toEqual(response);
+	});
+
 	it("validates every server request and kind-correlated response", () => {
 		expect(new Set(serverRequests.map((entry) => entry.method))).toEqual(new Set(Object.keys(ServerRequestMethods)));
 		expect(new Set(serverRequests.map((entry) => entry.kind))).toEqual(
@@ -364,6 +379,7 @@ describe("golden protocol fixtures", () => {
 				"session/thinkingSelectionChanged",
 				"session/modelChanged",
 				"session/tasksChanged",
+				"turn/queueChanged",
 				"subagent/updated",
 				"subagent/item/started",
 				"subagent/item/delta",
@@ -495,7 +511,6 @@ describe("golden protocol fixtures", () => {
 	});
 
 	it.each([
-		["auto", "permissionMode", "auto"],
 		["readPaths", "readPaths", ["/tmp/project"]],
 		["writePaths", "writePaths", ["/tmp/project"]],
 	])("rejects legacy %s in current subagent notifications", (_label, field, value) => {
@@ -512,11 +527,13 @@ describe("golden protocol fixtures", () => {
 		expect(() => validateServerNotification(envelope)).toThrow(ProtocolValidationError);
 	});
 
-	it("rejects legacy auto for primary session permissions", () => {
+	it("accepts auto and rejects unknown primary session permissions", () => {
 		const request = structuredClone(requestFor("client", "session/setPermissionMode").envelope) as {
 			params: { permissionMode: string };
 		};
 		request.params.permissionMode = "auto";
+		expect(() => validateClientRequest(request)).not.toThrow();
+		request.params.permissionMode = "automatic";
 		expect(() => validateClientRequest(request)).toThrow(ProtocolValidationError);
 	});
 
@@ -679,6 +696,157 @@ describe("exact limits", () => {
 		expect(() => validateResponseFor("client", request, response)).not.toThrow();
 		response.result.skills[0]!.source = "temporary";
 		expect(() => validateResponseFor("client", request, response)).toThrow(ProtocolValidationError);
+	});
+
+	it("validates bounded Skill detail and mutation targets", () => {
+		expect(() =>
+			validateClientRequest(makeClientRequest("skill/get", { cwd: null, source: "system", name: "pdf" })),
+		).not.toThrow();
+		expect(() =>
+			validateClientRequest(makeClientRequest("skill/get", { cwd: null, source: "project", name: "pdf" })),
+		).toThrow(ProtocolValidationError);
+
+		const upsert = structuredClone(requestFor("client", "skill/upsert").envelope) as {
+			params: { cwd: string | null; source: string; name: string; content: string };
+		};
+		upsert.params.source = "system";
+		expect(() => validateClientRequest(upsert)).toThrow(ProtocolValidationError);
+		upsert.params.source = "project";
+		upsert.params.cwd = null;
+		expect(() => validateClientRequest(upsert)).toThrow(ProtocolValidationError);
+		upsert.params.source = "user";
+		upsert.params.name = "Writing Plans";
+		expect(() => validateClientRequest(upsert)).toThrow(ProtocolValidationError);
+		upsert.params.name = "writing-plans";
+		upsert.params.content = "你".repeat(90_000);
+		expect(() => validateClientRequest(upsert)).toThrow(ProtocolValidationError);
+
+		const remove = structuredClone(requestFor("client", "skill/remove").envelope) as {
+			params: { expectedRevision: string | null };
+		};
+		remove.params.expectedRevision = null;
+		expect(() => validateClientRequest(remove)).toThrow(ProtocolValidationError);
+	});
+
+	it("keeps Skill detail bounded and correlated to its request", () => {
+		const request = requestFor("client", "skill/get").envelope;
+		const fixture = responses.find((entry) => entry.method === "skill/get")!.envelope;
+		const wrongName = structuredClone(fixture) as { result: { name: string } };
+		wrongName.result.name = "another-skill";
+		expect(() => validateResponseFor("client", request, wrongName)).toThrow("does not match its request");
+
+		const leaked = structuredClone(fixture) as { result: Record<string, unknown> };
+		leaked.result.secret = "must-not-cross-the-wire";
+		expect(() => validateResponseFor("client", request, leaked)).toThrow(ProtocolValidationError);
+	});
+
+	it("validates bounded Skill import inspection and installation", () => {
+		const inspect = requestFor("client", "skill/import/inspect").envelope;
+		expect(() => validateClientRequest(inspect)).not.toThrow();
+		const globalProject = structuredClone(inspect) as { params: { cwd: string | null } };
+		globalProject.params.cwd = null;
+		expect(() => validateClientRequest(globalProject)).toThrow(ProtocolValidationError);
+		const foreign = structuredClone(inspect) as { params: { input: { url: string } } };
+		foreign.params.input.url = "https://example.com/skills";
+		expect(() => validateClientRequest(foreign)).toThrow(ProtocolValidationError);
+
+		const install = structuredClone(requestFor("client", "skill/import").envelope) as {
+			params: { candidateIds: string[] };
+		};
+		install.params.candidateIds.push(install.params.candidateIds[0]!);
+		expect(() => validateClientRequest(install)).toThrow(ProtocolValidationError);
+
+		const response = responses.find((entry) => entry.method === "skill/import/inspect")!.envelope;
+		const duplicate = structuredClone(response) as { result: { candidates: Array<Record<string, unknown>> } };
+		duplicate.result.candidates.push({ ...duplicate.result.candidates[0] });
+		expect(() => validateResponseFor("client", inspect, duplicate)).toThrow("duplicate ids or names");
+	});
+
+	it("validates MCP targets, revisions, and credential-free URLs", () => {
+		expect(() =>
+			validateClientRequest(
+				makeClientRequest("mcp/get", { sessionId: SESSION_ID, scope: "project", name: "filesystem" }),
+			),
+		).not.toThrow();
+		expect(() =>
+			validateClientRequest(makeClientRequest("mcp/get", { cwd: null, scope: "project", name: "filesystem" })),
+		).toThrow(ProtocolValidationError);
+
+		const remove = structuredClone(requestFor("client", "mcp/remove").envelope) as {
+			params: { expectedRevision: string | null };
+		};
+		remove.params.expectedRevision = null;
+		expect(() => validateClientRequest(remove)).toThrow(ProtocolValidationError);
+
+		const upsert = structuredClone(requestFor("client", "mcp/upsert").envelope) as {
+			params: { server: { url: string } };
+		};
+		upsert.params.server.url = "https://user:password@mcp.example.test/rpc";
+		expect(() => validateClientRequest(upsert)).toThrow(ProtocolValidationError);
+		upsert.params.server.url = "https://mcp.example.test/rpc";
+		(upsert.params.server as { bearerTokenEnvVar?: string }).bearerTokenEnvVar = "literal-secret";
+		expect(() => validateClientRequest(upsert)).toThrow(ProtocolValidationError);
+	});
+
+	it("validates bounded MCP credentials and JSON import correlation", () => {
+		const upsert = structuredClone(requestFor("client", "mcp/upsert").envelope) as {
+			params: { credential?: { bearerToken?: string; environment?: Record<string, string> } };
+		};
+		upsert.params.credential = {};
+		expect(() => validateClientRequest(upsert)).toThrow(ProtocolValidationError);
+		upsert.params.credential = {
+			environment: Object.fromEntries(Array.from({ length: 129 }, (_, index) => [`SECRET_${index}`, "value"])),
+		};
+		expect(() => validateClientRequest(upsert)).toThrow(ProtocolValidationError);
+
+		const inspect = requestFor("client", "mcp/import/inspect").envelope;
+		expect(() => validateClientRequest(inspect)).not.toThrow();
+		const globalProject = structuredClone(inspect) as { params: { cwd: string | null } };
+		globalProject.params.cwd = null;
+		expect(() => validateClientRequest(globalProject)).toThrow(ProtocolValidationError);
+		const oversized = structuredClone(inspect) as { params: { text: string } };
+		oversized.params.text = "x".repeat(1024 * 1024 + 1);
+		expect(() => validateClientRequest(oversized)).toThrow(ProtocolValidationError);
+
+		const install = structuredClone(requestFor("client", "mcp/import").envelope) as {
+			params: { candidates: Array<{ id: string; expectedRevision: string | null }> };
+		};
+		install.params.candidates.push({ ...install.params.candidates[0]! });
+		expect(() => validateClientRequest(install)).toThrow(ProtocolValidationError);
+
+		const response = responses.find((entry) => entry.method === "mcp/import/inspect")!.envelope;
+		const duplicate = structuredClone(response) as { result: { candidates: Array<Record<string, unknown>> } };
+		duplicate.result.candidates.push(structuredClone(duplicate.result.candidates[0]!));
+		expect(() => validateResponseFor("client", inspect, duplicate)).toThrow("duplicate ids or names");
+		const leaked = structuredClone(response) as { result: { candidates: Array<Record<string, unknown>> } };
+		leaked.result.candidates[0]!.secret = "must-not-cross-the-wire";
+		expect(() => validateResponseFor("client", inspect, leaked)).toThrow(ProtocolValidationError);
+	});
+
+	it("keeps MCP secrets request-only and correlates server details", () => {
+		const request = requestFor("client", "mcp/get").envelope;
+		const fixture = responses.find((entry) => entry.method === "mcp/get")!.envelope;
+		const leaked = structuredClone(fixture) as { result: { server: Record<string, unknown> } };
+		leaked.result.server.bearerToken = "must-not-cross-the-wire";
+		expect(() => validateResponseFor("client", request, leaked)).toThrow(ProtocolValidationError);
+
+		const wrongServer = structuredClone(fixture) as { result: { server: { name: string } } };
+		wrongServer.result.server.name = "another-server";
+		expect(() => validateResponseFor("client", request, wrongServer)).toThrow("does not match its request");
+	});
+
+	it("rejects duplicate and out-of-scope MCP list rows", () => {
+		const request = requestFor("client", "mcp/list").envelope;
+		const fixture = responses.find((entry) => entry.method === "mcp/list")!.envelope;
+		const duplicate = structuredClone(fixture) as { result: { servers: Array<Record<string, unknown>> } };
+		duplicate.result.servers.push(structuredClone(duplicate.result.servers[0]!));
+		expect(() => validateResponseFor("client", request, duplicate)).toThrow("duplicate scope/name pairs");
+
+		const projectRow = structuredClone(fixture) as { result: { servers: Array<{ scope: string }> } };
+		projectRow.result.servers[0]!.scope = "project";
+		expect(() => validateResponseFor("client", request, projectRow)).toThrow(
+			"Global MCP server list contains a project-scoped server",
+		);
 	});
 
 	it("keeps profile summaries bounded, sorted, and internally consistent", () => {
@@ -1027,6 +1195,15 @@ describe("direction and response correlation", () => {
 		};
 		response.result.session.sessionId = "another-session";
 		expect(() => validateResponseFor("client", open, response)).toThrow("does not match");
+
+		for (const method of ["session/status", "session/compact"] as const) {
+			const request = requestFor("client", method).envelope;
+			const methodResponse = structuredClone(responses.find((entry) => entry.method === method)!.envelope) as {
+				result: { sessionId: string };
+			};
+			methodResponse.result.sessionId = "another-session";
+			expect(() => validateResponseFor("client", request, methodResponse)).toThrow("does not match");
+		}
 
 		const wrongError = {
 			jsonrpc: "2.0",

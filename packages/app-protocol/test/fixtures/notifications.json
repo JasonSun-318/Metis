@@ -7,7 +7,7 @@
 			"params": {
 				"serverEpoch": "33333333-3333-4333-8333-333333333333",
 				"fromCursor": 43,
-				"toCursor": 62,
+				"toCursor": 63,
 				"events": [
 					{
 						"type": "session/updated",
@@ -144,6 +144,33 @@
 						"tasks": [
 							{ "task": "Inspect implementation", "completed": true },
 							{ "task": "Build task panel", "completed": false }
+						]
+					},
+					{
+						"type": "turn/queueChanged",
+						"sessionId": "11111111-1111-4111-8111-111111111111",
+						"queuedTurns": [
+							{
+								"queueItemId": "queue_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+								"revision": "entry_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+								"state": "queued",
+								"text": "Run this next.",
+								"attachments": []
+							},
+							{
+								"queueItemId": "queue_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+								"revision": "entry_dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+								"state": "paused",
+								"text": "Review this later.",
+								"attachments": [{ "name": "design.png", "byteLength": 42 }]
+							},
+							{
+								"queueItemId": "queue_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+								"revision": "entry_ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+								"state": "sending",
+								"text": "Adjust direction.",
+								"attachments": []
+							}
 						]
 					},
 					{
