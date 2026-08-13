@@ -1999,8 +1999,8 @@ test("packaged personal profile renders cached Token and Skill activity", async 
 		expect(storedAvatar).toMatch(/^data:image\/webp;base64,/u);
 		expect(storedAvatar!.length).toBeLessThan(50_000);
 		const settingsBox = await page.locator(".settings-dialog").boundingBox();
-		expect(settingsBox?.width).toBe(1_040);
-		expect(settingsBox?.height).toBe(720);
+		expect(settingsBox?.width).toBe(1_440);
+		expect(settingsBox?.height).toBe(900);
 		await expect(page.getByText("Most used Skills", { exact: true })).toBeVisible();
 		await expect(page.locator(".profile-heatmap-week")).toHaveCount(53);
 		await expect(page.getByText("pdf", { exact: true })).toBeVisible();

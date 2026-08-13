@@ -1377,19 +1377,19 @@ textarea { resize: none; }
 .code-project-choose-folder { width: 100%; min-height: 50px; border-radius: 11px; background: #3b3b3a; color: #f1f0ec; font-size: 14px; font-weight: 560; }
 .code-project-choose-folder:hover:not(:disabled) { background: #474745; box-shadow: var(--shadow); }
 
-.settings-backdrop { position: fixed; z-index: 10020; display: grid; place-items: center; background: rgb(8 8 8 / 72%); padding: 28px; inset: 0; backdrop-filter: blur(8px); }
-.settings-dialog { display: grid; width: min(1040px, 100%); height: min(720px, 100%); min-height: 0; overflow: hidden; border: 1px solid rgb(255 255 255 / 13%); border-radius: 15px; background: #2d2d2b; box-shadow: var(--overlay-shadow); grid-template-columns: 180px minmax(0, 1fr); }
-.settings-navigation { min-width: 0; border-right: 1px solid rgb(255 255 255 / 8%); background: #1e1e1d; padding: 38px 14px 18px; }
+.settings-backdrop { position: fixed; z-index: 10020; display: grid; inset: 0; background: rgb(8 8 8 / 72%); backdrop-filter: blur(8px); }
+.settings-dialog { display: grid; width: 100vw; height: 100vh; min-height: 0; overflow: hidden; background: #2d2d2b; grid-template-columns: 180px minmax(0, 1fr); }
+.settings-navigation { min-width: 0; border-right: 1px solid rgb(255 255 255 / 8%); background: #1e1e1d; padding: 38px 14px 18px; -webkit-app-region: drag; }
 .settings-navigation-label { display: block; margin: 0 12px 15px; color: #85837d; font-size: 12px; }
 .settings-navigation nav { display: grid; gap: 2px; }
-.settings-navigation button { display: flex; width: 100%; min-height: 34px; align-items: center; gap: 10px; border-radius: 8px; color: #bbb9b3; padding: 0 11px; text-align: left; font-size: 13px; }
+.settings-navigation button { display: flex; width: 100%; min-height: 34px; align-items: center; gap: 10px; border-radius: 8px; color: #bbb9b3; padding: 0 11px; text-align: left; font-size: 13px; -webkit-app-region: no-drag; }
 .settings-navigation button:hover:not(:disabled) { background: #30302f; color: #eee; }
 .settings-navigation button[aria-current="page"] { background: #3b3b39; color: #f3f2ee; }
 .settings-navigation svg { flex: none; color: #aaa8a2; }
 .settings-main { display: grid; min-width: 0; min-height: 0; grid-template-rows: 64px minmax(0, 1fr); }
-.settings-main-header { display: flex; align-items: center; justify-content: space-between; padding: 0 20px 0 32px; }
+.settings-main-header { display: flex; align-items: center; justify-content: space-between; padding: 0 20px 0 32px; -webkit-app-region: drag; }
 .settings-main-header h1 { margin: 0; color: #f2f1ed; font-size: 18px; font-weight: 580; letter-spacing: -.015em; }
-.settings-main-header button { display: grid; width: 34px; height: 34px; place-items: center; color: #b2b0aa; }
+.settings-main-header button { display: grid; width: 34px; height: 34px; place-items: center; color: #b2b0aa; -webkit-app-region: no-drag; }
 .settings-page-scroll { min-width: 0; min-height: 0; overflow: auto; scrollbar-color: #565652 transparent; }
 .settings-page { width: min(100%, 740px); margin: 0 auto; padding: 28px 30px 42px; }
 .settings-page h2 { margin: 0; color: #efeee9; font-size: 15px; font-weight: 580; letter-spacing: -.01em; }
