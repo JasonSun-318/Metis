@@ -260,7 +260,13 @@ export async function handleMcpCliCommand(
 		await settingsManager.flush();
 		const errors = settingsManager.drainErrors();
 		if (errors.length > 0) throw errors[0]!.error;
-		AuthStorage.create(join(agentDir, "auth.json")).remove(mcpCredentialKey(command.name));
+		AuthStorage.create(join(agentDir, "auth.json")).remove(
+			mcpCredentialKey(
+				command.scope === "user"
+					? { scope: "user", name: command.name }
+					: { scope: "project", name: command.name, cwd },
+			),
+		);
 		console.log(chalk.green(`Removed MCP server "${command.name}" from ${command.scope} settings.`));
 		return true;
 	} catch (error) {

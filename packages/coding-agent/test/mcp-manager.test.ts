@@ -2,14 +2,15 @@ import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { AuthStorage, mcpCredentialKey } from "../src/core/auth-storage.ts";
-import { McpManager } from "../src/core/mcp/index.ts";
+import { AuthStorage, legacyMcpCredentialKey, mcpCredentialKey } from "../src/core/auth-storage.ts";
+import { McpManager, McpServerClient, mcpServerFingerprint, resolveMcpServerSettings } from "../src/core/mcp/index.ts";
 import type { McpHttpServerSettings } from "../src/core/settings-manager.ts";
 import { InMemorySettingsStorage, SettingsManager } from "../src/core/settings-manager.ts";
 import { createMcpTestServer, type McpTestServer } from "./helpers/mcp-test-server.ts";
 
 const managers: McpManager[] = [];
 const servers: McpTestServer[] = [];
+const userMcpKey = (name: string) => mcpCredentialKey({ scope: "user", name });
 
 async function managerWithTools(
 	serverName: string,
@@ -45,19 +46,158 @@ afterEach(async () => {
 });
 
 describe("McpManager", () => {
+	it("exposes only safe selected-server catalog names and fingerprint-bound credential state", async () => {
+		const server = await createMcpTestServer({
+			resources: [
+				{ uri: "docs://index", name: "Docs index" },
+				{ uri: "docs://mirror", name: "Docs index" },
+			],
+			resourceTemplates: [{ uriTemplate: "docs://{slug}", name: "" }],
+			prompts: [{ name: "summarize_docs" }],
+		});
+		servers.push(server);
+		const manager = await McpManager.create({
+			settingsManager: SettingsManager.inMemory({ mcpServers: { docs: { url: String(server.url) } } }),
+			authStorage: AuthStorage.inMemory(),
+			cwd: process.cwd(),
+		});
+		managers.push(manager);
+
+		await manager.setSecret("docs", { bearerToken: "secret-value" });
+		expect(manager.hasCredential("docs")).toBe(true);
+		expect(manager.getCatalog("docs")).toEqual({
+			tools: [{ id: "search_docs", name: "Search docs", description: "Search product documentation" }],
+			resources: [
+				{ id: "docs://index", name: "Docs index" },
+				{ id: "docs://mirror", name: "Docs index" },
+			],
+			resourceTemplates: [{ id: "docs://{slug}", name: "docs://{slug}" }],
+			prompts: [{ id: "summarize_docs", name: "summarize_docs" }],
+		});
+		expect(manager.getCatalogItem("docs", "tool", "search_docs")).toMatchObject({
+			kind: "tool",
+			id: "search_docs",
+			name: "Search docs",
+			inputSchema: expect.stringContaining('"query"'),
+		});
+		expect(manager.getCatalogItem("docs", "resource", "docs://mirror")).toMatchObject({
+			kind: "resource",
+			id: "docs://mirror",
+			uri: "docs://mirror",
+		});
+		expect(() => manager.getCatalogItem("docs", "prompt", "missing")).toThrow("Unknown MCP prompt");
+		expect(JSON.stringify(manager.getCatalog("docs"))).not.toContain("secret-value");
+
+		const first = resolveMcpServerSettings("docs", { url: "https://example.test/one" }, process.cwd());
+		const changed = resolveMcpServerSettings("docs", { url: "https://example.test/two" }, process.cwd());
+		expect(mcpServerFingerprint(first)).not.toBe(mcpServerFingerprint(changed));
+	});
+
+	it("keeps oversized resource identities stable and selectable", async () => {
+		const longUri = `docs://${"x".repeat(16_001)}`;
+		const server = await createMcpTestServer({ resources: [{ uri: longUri, name: "Large resource" }] });
+		servers.push(server);
+		const manager = await McpManager.create({
+			settingsManager: SettingsManager.inMemory({ mcpServers: { docs: { url: String(server.url) } } }),
+			authStorage: AuthStorage.inMemory(),
+			cwd: process.cwd(),
+		});
+		managers.push(manager);
+
+		const [entry] = manager.getCatalog("docs").resources;
+		expect(entry?.id).toMatch(/^sha256:[a-f0-9]{64}$/u);
+		expect(manager.getCatalogItem("docs", "resource", entry!.id)).toMatchObject({
+			kind: "resource",
+			id: entry!.id,
+			name: "Large resource",
+		});
+	});
+
 	it("does not forward a legacy stored secret without an identity binding", async () => {
 		const server = await createMcpTestServer({ requiredBearerToken: "legacy-secret" });
 		servers.push(server);
 		const manager = await McpManager.create({
 			settingsManager: SettingsManager.inMemory({ mcpServers: { docs: { url: String(server.url) } } }),
 			authStorage: AuthStorage.inMemory({
-				[mcpCredentialKey("docs")]: { type: "mcp_secret", bearerToken: "legacy-secret" },
+				[legacyMcpCredentialKey("docs")]: { type: "mcp_secret", bearerToken: "legacy-secret" },
 			}),
 			cwd: process.cwd(),
 		});
 		managers.push(manager);
 
 		expect(manager.getStatus()[0]).toMatchObject({ state: "auth_required" });
+	});
+
+	it("moves one fingerprint-matched legacy credential to the effective scope", async () => {
+		const server = await createMcpTestServer({ requiredBearerToken: "legacy-secret" });
+		servers.push(server);
+		const fingerprint = mcpServerFingerprint(
+			resolveMcpServerSettings("docs", { url: String(server.url) }, process.cwd()),
+		);
+		const storage = AuthStorage.inMemory({
+			[legacyMcpCredentialKey("docs")]: {
+				type: "mcp_secret",
+				serverFingerprint: fingerprint,
+				bearerToken: "legacy-secret",
+			},
+		});
+
+		const manager = await McpManager.create({
+			settingsManager: SettingsManager.inMemory({ mcpServers: { docs: { url: String(server.url) } } }),
+			authStorage: storage,
+			cwd: process.cwd(),
+		});
+		managers.push(manager);
+
+		expect(manager.getStatus()[0]).toMatchObject({ state: "connected" });
+		expect(storage.has(legacyMcpCredentialKey("docs"))).toBe(false);
+		expect(storage.get(userMcpKey("docs"))).toMatchObject({
+			type: "mcp_secret",
+			bearerToken: "legacy-secret",
+		});
+	});
+
+	it("keeps same-name user and project credentials isolated", async () => {
+		const userServer = await createMcpTestServer({ requiredBearerToken: "user-secret" });
+		const projectServer = await createMcpTestServer({ requiredBearerToken: "project-secret" });
+		servers.push(userServer, projectServer);
+		const cwd = process.cwd();
+		const storage = AuthStorage.inMemory({
+			[userMcpKey("docs")]: {
+				type: "mcp_secret",
+				serverFingerprint: mcpServerFingerprint(
+					resolveMcpServerSettings("docs", { url: String(userServer.url) }, cwd),
+				),
+				bearerToken: "user-secret",
+			},
+			[mcpCredentialKey({ scope: "project", name: "docs", cwd })]: {
+				type: "mcp_secret",
+				serverFingerprint: mcpServerFingerprint(
+					resolveMcpServerSettings("docs", { url: String(projectServer.url) }, cwd),
+				),
+				bearerToken: "project-secret",
+			},
+		});
+		const settingsStorage = new InMemorySettingsStorage();
+		settingsStorage.withLock("global", () =>
+			JSON.stringify({ mcpServers: { docs: { url: String(userServer.url) } } }),
+		);
+		settingsStorage.withLock("project", () =>
+			JSON.stringify({ mcpServers: { docs: { url: String(projectServer.url) } } }),
+		);
+
+		const manager = await McpManager.create({
+			settingsManager: SettingsManager.fromStorage(settingsStorage, { projectTrusted: true }),
+			authStorage: storage,
+			cwd,
+		});
+		managers.push(manager);
+
+		expect(manager.getStatus()[0]).toMatchObject({ state: "connected" });
+		expect(storage.get(userMcpKey("docs"))).toMatchObject({ bearerToken: "user-secret" });
+		expect(storage.get(mcpCredentialKey({ scope: "project", name: "docs", cwd }))).toMatchObject({
+			bearerToken: "project-secret",
+		});
 	});
 
 	it("reuses a stored bearer token after restart without exposing it in status", async () => {
@@ -85,6 +225,56 @@ describe("McpManager", () => {
 
 		expect(restarted.getStatus()[0]).toMatchObject({ state: "connected" });
 		expect(JSON.stringify(restarted.getStatus())).not.toContain("stored-secret");
+	});
+
+	it("injects stored environment values into HTTP headers", async () => {
+		const server = await createMcpTestServer({ requiredHeaders: { "x-tenant": "stored-tenant" } });
+		servers.push(server);
+		const cwd = process.cwd();
+		const definition = { url: String(server.url), envHttpHeaders: { "X-Tenant": "TENANT_SECRET" } };
+		const identity = { scope: "user", name: "docs" } as const;
+		const storage = AuthStorage.inMemory({
+			[mcpCredentialKey(identity)]: {
+				type: "mcp_secret",
+				serverFingerprint: mcpServerFingerprint(resolveMcpServerSettings("docs", definition, cwd, {}, identity)),
+				env: { TENANT_SECRET: "stored-tenant" },
+			},
+		});
+		const manager = await McpManager.create({
+			settingsManager: SettingsManager.inMemory({ mcpServers: { docs: definition } }),
+			authStorage: storage,
+			cwd,
+			environment: {},
+		});
+		managers.push(manager);
+
+		expect(manager.getStatus()[0]).toMatchObject({ state: "connected" });
+		expect(JSON.stringify(manager.getStatus())).not.toContain("stored-tenant");
+	});
+
+	it("injects a stored environment value into an HTTP bearer token", async () => {
+		const server = await createMcpTestServer({ requiredBearerToken: "stored-bearer" });
+		servers.push(server);
+		const cwd = process.cwd();
+		const definition = { url: String(server.url), bearerTokenEnvVar: "BEARER_SECRET" };
+		const identity = { scope: "user", name: "docs" } as const;
+		const storage = AuthStorage.inMemory({
+			[mcpCredentialKey(identity)]: {
+				type: "mcp_secret",
+				serverFingerprint: mcpServerFingerprint(resolveMcpServerSettings("docs", definition, cwd, {}, identity)),
+				env: { BEARER_SECRET: "stored-bearer" },
+			},
+		});
+		const manager = await McpManager.create({
+			settingsManager: SettingsManager.inMemory({ mcpServers: { docs: definition } }),
+			authStorage: storage,
+			cwd,
+			environment: {},
+		});
+		managers.push(manager);
+
+		expect(manager.getStatus()[0]).toMatchObject({ state: "connected" });
+		expect(JSON.stringify(manager.getStatus())).not.toContain("stored-bearer");
 	});
 
 	it("injects stored environment values into a stdio child", async () => {
@@ -186,11 +376,11 @@ describe("McpManager", () => {
 
 		await manager.setSecret("docs", { bearerToken: "stored-secret" });
 		expect(manager.getStatus()[0]).toMatchObject({ state: "connected" });
-		expect(storage.get(mcpCredentialKey("docs"))).toMatchObject({ type: "mcp_secret" });
+		expect(storage.get(userMcpKey("docs"))).toMatchObject({ type: "mcp_secret" });
 
 		await manager.logout("docs");
 		expect(manager.getStatus()[0]).toMatchObject({ state: "auth_required" });
-		expect(storage.has(mcpCredentialKey("docs"))).toBe(false);
+		expect(storage.has(userMcpKey("docs"))).toBe(false);
 	});
 
 	it("rejects empty static credentials without replacing the active auth state", async () => {
@@ -205,7 +395,7 @@ describe("McpManager", () => {
 		managers.push(manager);
 
 		await expect(manager.setSecret("docs", { bearerToken: "" })).rejects.toThrow("must not be empty");
-		expect(storage.has(mcpCredentialKey("docs"))).toBe(false);
+		expect(storage.has(userMcpKey("docs"))).toBe(false);
 		expect(manager.getStatus()[0]).toMatchObject({ state: "auth_required" });
 	});
 
@@ -233,7 +423,7 @@ describe("McpManager", () => {
 		await expect(manager.setSecret("docs", { bearerToken: "wrong-secret" })).rejects.toThrow(
 			'Failed to initialize required MCP server "docs"',
 		);
-		expect(storage.has(mcpCredentialKey("docs"))).toBe(false);
+		expect(storage.has(userMcpKey("docs"))).toBe(false);
 		expect(manager.getStatus()[0]).toMatchObject({ state: "connected" });
 	});
 
@@ -289,12 +479,18 @@ describe("McpManager", () => {
 	});
 
 	it("uses configured names and initialization instructions as source metadata", async () => {
-		const { manager } = await managerWithTools("docs", [{ name: "search" }], {}, "Use docs before guessing.");
+		const { manager } = await managerWithTools(
+			"docs",
+			[{ name: "search" }],
+			{ description: "Repository handbook lookup." },
+			"Use docs before guessing.",
+		);
 
 		expect(manager.getToolRecords()[0]).toMatchObject({
 			sourceName: "docs",
-			sourceDescription: "Use docs before guessing.",
+			sourceDescription: "Repository handbook lookup.\n\nUse docs before guessing.",
 		});
+		expect(manager.searchTools("handbook")[0]?.rawName).toBe("search");
 		expect(manager.getStatus()[0]).toMatchObject({
 			name: "docs",
 			state: "connected",
@@ -340,6 +536,25 @@ describe("McpManager", () => {
 				cwd: process.cwd(),
 			}),
 		).rejects.toThrow('Failed to initialize required MCP server "offline"');
+	});
+
+	it("does not wait for optional MCP startup", async () => {
+		const start = vi.spyOn(McpServerClient.prototype, "start").mockReturnValue(new Promise(() => {}));
+		let manager: McpManager;
+		try {
+			manager = await McpManager.create({
+				settingsManager: SettingsManager.inMemory({
+					mcpServers: { slow: { url: "https://example.test/mcp" } },
+				}),
+				authStorage: AuthStorage.inMemory(),
+				cwd: process.cwd(),
+				backgroundOptionalStartup: true,
+			});
+		} finally {
+			start.mockRestore();
+		}
+		managers.push(manager);
+		expect(manager.getStatus()[0]).toMatchObject({ name: "slow", required: false });
 	});
 
 	it("does not expose environment-backed credentials in status diagnostics", async () => {

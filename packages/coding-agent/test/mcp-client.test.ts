@@ -1,11 +1,12 @@
 import { fileURLToPath } from "node:url";
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { AuthStorage } from "../src/core/auth-storage.ts";
+import { AuthStorage, mcpCredentialKey } from "../src/core/auth-storage.ts";
 import { McpServerClient, type ResolvedMcpServerConfig } from "../src/core/mcp/index.ts";
 import { createMcpTestServer, type McpTestServer } from "./helpers/mcp-test-server.ts";
 
 function httpConfig(url: URL, overrides: Partial<ResolvedMcpServerConfig> = {}): ResolvedMcpServerConfig {
+	const credentialIdentity = overrides.credentialIdentity ?? { scope: "user", name: overrides.name ?? "docs" };
 	return {
 		name: "docs",
 		transport: "http",
@@ -18,6 +19,8 @@ function httpConfig(url: URL, overrides: Partial<ResolvedMcpServerConfig> = {}):
 		url,
 		httpHeaders: {},
 		...overrides,
+		credentialIdentity,
+		credentialKey: overrides.credentialKey ?? mcpCredentialKey(credentialIdentity),
 	};
 }
 
@@ -35,6 +38,8 @@ function stdioFixtureConfig(): ResolvedMcpServerConfig {
 		args: [fileURLToPath(new URL("./fixtures/mcp-stdio-server.mjs", import.meta.url))],
 		env: {},
 		cwd: process.cwd(),
+		credentialIdentity: { scope: "user", name: "fixture" },
+		credentialKey: mcpCredentialKey({ scope: "user", name: "fixture" }),
 	};
 }
 

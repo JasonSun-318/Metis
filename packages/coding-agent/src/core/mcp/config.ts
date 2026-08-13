@@ -1,4 +1,5 @@
 import { resolvePath } from "../../utils/paths.ts";
+import { type McpCredentialIdentity, mcpCredentialKey } from "../auth-storage.ts";
 import type {
 	McpHttpServerSettings,
 	McpServerSettings,
@@ -8,6 +9,9 @@ import type {
 
 export interface ResolvedMcpServerConfig {
 	name: string;
+	description?: string;
+	credentialIdentity: McpCredentialIdentity;
+	credentialKey: string;
 	transport: "stdio" | "http";
 	enabled: boolean;
 	required: boolean;
@@ -21,7 +25,9 @@ export interface ResolvedMcpServerConfig {
 	cwd?: string;
 	url?: URL;
 	bearerToken?: string;
+	bearerTokenEnvVar?: string;
 	httpHeaders?: Record<string, string>;
+	httpHeaderEnv?: Record<string, string>;
 }
 
 export interface ResolvedMcpSettings {
@@ -62,11 +68,23 @@ function optionalBoolean(value: unknown, key: string, fallback: boolean): boolea
 	return value;
 }
 
+function optionalDescription(value: unknown): string | undefined {
+	if (value === undefined) return undefined;
+	if (typeof value !== "string") throw new Error("Invalid MCP description; expected a string");
+	const description = value.trim();
+	if (!description) return undefined;
+	if (Buffer.byteLength(description, "utf8") > 4096) {
+		throw new Error("Invalid MCP description; expected at most 4096 UTF-8 bytes");
+	}
+	return description;
+}
+
 export function resolveMcpServerSettings(
 	name: string,
 	server: McpServerSettings,
 	cwd: string,
 	environment: NodeJS.ProcessEnv = process.env,
+	credentialIdentity: McpCredentialIdentity = { scope: "user", name },
 ): ResolvedMcpServerConfig {
 	if (!name.trim()) throw new Error("MCP server name must not be empty");
 	if (typeof server !== "object" || server === null || Array.isArray(server)) {
@@ -81,6 +99,9 @@ export function resolveMcpServerSettings(
 
 	const common = {
 		name,
+		description: optionalDescription(server.description),
+		credentialIdentity,
+		credentialKey: mcpCredentialKey(credentialIdentity),
 		enabled: optionalBoolean(server.enabled, "enabled", true),
 		required: optionalBoolean(server.required, "required", false),
 		startupTimeoutMs: positiveSeconds(server.startupTimeoutSec, "startupTimeoutSec", 10),
@@ -146,7 +167,9 @@ export function resolveMcpServerSettings(
 		transport: "http",
 		url,
 		bearerToken: http.bearerTokenEnvVar ? environment[http.bearerTokenEnvVar] : undefined,
+		bearerTokenEnvVar: http.bearerTokenEnvVar,
 		httpHeaders,
+		httpHeaderEnv: envHttpHeaders,
 	};
 }
 
@@ -155,9 +178,19 @@ export function resolveMcpSettings(
 	cwd: string,
 	environment: NodeJS.ProcessEnv = process.env,
 ): ResolvedMcpSettings {
+	const effective = new Map<
+		string,
+		{ readonly server: McpServerSettings; readonly credentialIdentity: McpCredentialIdentity }
+	>();
+	for (const [name, server] of Object.entries(settings.getGlobalSettings().mcpServers ?? {})) {
+		effective.set(name, { server, credentialIdentity: { scope: "user", name } });
+	}
+	for (const [name, server] of Object.entries(settings.getProjectSettings().mcpServers ?? {})) {
+		effective.set(name, { server, credentialIdentity: { scope: "project", name, cwd } });
+	}
 	return {
-		servers: Object.entries(settings.getMcpServers()).map(([name, server]) =>
-			resolveMcpServerSettings(name, server, cwd, environment),
+		servers: [...effective.entries()].map(([name, { server, credentialIdentity }]) =>
+			resolveMcpServerSettings(name, server, cwd, environment, credentialIdentity),
 		),
 	};
 }

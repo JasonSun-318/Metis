@@ -51,6 +51,7 @@ function createContext(
 	const session = {
 		settingsManager,
 		getMcpStatus: vi.fn(options.statuses ?? (() => (globalSettings.mcpServers.docs ? [connectedStatus] : []))),
+		hasMcpCredential: vi.fn((name: string) => credentials.has(`mcp:${name}`)),
 		reload: vi.fn().mockResolvedValue(undefined),
 		restartMcpServers: vi.fn().mockResolvedValue(undefined),
 		logoutMcpServer: vi.fn(async (name: string) => {
@@ -315,6 +316,7 @@ describe("InteractiveMode /mcp", () => {
 			Object.assign(context.target.runtimeHost.session, {
 				settingsManager,
 				getMcpStatus: () => manager!.getStatus(),
+				hasMcpCredential: (name: string) => manager!.hasCredential(name),
 				reload: () => manager!.reload(),
 				restartMcpServers: (name?: string) => manager!.restart(name),
 				logoutMcpServer: (name: string) => manager!.logout(name),

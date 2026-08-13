@@ -188,6 +188,11 @@ describe("MCP agent loop", () => {
 		const resourceLoader = { ...createTestResourceLoader(), reload: reloadResources };
 		const harness = await createHarness({ mcpManager: manager, resourceLoader });
 
+		await harness.session.reloadMcpServers();
+		expect(reloadMcp).toHaveBeenCalledOnce();
+		expect(reloadResources).not.toHaveBeenCalled();
+		reloadMcp.mockClear();
+
 		await harness.session.reload();
 		expect(reloadMcp).toHaveBeenCalledOnce();
 		expect(reloadResources).toHaveBeenCalledOnce();

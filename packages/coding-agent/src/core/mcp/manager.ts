@@ -6,7 +6,7 @@ import type {
 	Tool,
 	ToolAnnotations,
 } from "@modelcontextprotocol/sdk/types.js";
-import { type AuthStorage, type McpSecretCredential, mcpCredentialKey } from "../auth-storage.ts";
+import { type AuthStorage, legacyMcpCredentialKey, type McpSecretCredential } from "../auth-storage.ts";
 import type { SettingsManager } from "../settings-manager.ts";
 import { type McpConnectionState, McpServerClient } from "./client.ts";
 import { type ResolvedMcpServerConfig, type ResolvedMcpSettings, resolveMcpSettings } from "./config.ts";
@@ -28,6 +28,7 @@ export interface McpManagerCreateOptions {
 	authStorage: AuthStorage;
 	cwd: string;
 	environment?: NodeJS.ProcessEnv;
+	backgroundOptionalStartup?: boolean;
 }
 
 export interface McpServerStatus {
@@ -42,6 +43,35 @@ export interface McpServerStatus {
 	promptCount: number;
 	capabilities: string[];
 	lastError?: string;
+}
+
+export interface McpCatalogEntry {
+	id: string;
+	name: string;
+	description?: string;
+}
+
+export type McpCatalogItemKind = "tool" | "prompt" | "resource" | "resourceTemplate";
+
+export type McpCatalogItemDetail =
+	| (McpCatalogEntry & {
+			kind: "tool";
+			inputSchema: string;
+			outputSchema?: string;
+			annotations?: string;
+	  })
+	| (McpCatalogEntry & {
+			kind: "prompt";
+			arguments: Array<{ name: string; description?: string; required: boolean }>;
+	  })
+	| (McpCatalogEntry & { kind: "resource"; uri: string; mimeType?: string; size?: number })
+	| (McpCatalogEntry & { kind: "resourceTemplate"; uriTemplate: string; mimeType?: string });
+
+export interface McpCatalogSummary {
+	tools: McpCatalogEntry[];
+	resources: McpCatalogEntry[];
+	resourceTemplates: McpCatalogEntry[];
+	prompts: McpCatalogEntry[];
 }
 
 function sanitizeSegment(value: string): string {
@@ -165,7 +195,36 @@ function errorMessage(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
 }
 
-function serverFingerprint(config: ResolvedMcpServerConfig): string {
+function catalogIdentity(value: string, maximumCharacters: number): string {
+	return value.length <= maximumCharacters ? value : `sha256:${createHash("sha256").update(value).digest("hex")}`;
+}
+
+function catalogEntry(
+	id: string,
+	name: string,
+	description: string | undefined,
+	maximumCharacters: number,
+): McpCatalogEntry {
+	return {
+		id: catalogIdentity(id, maximumCharacters),
+		name: (name || id).slice(0, maximumCharacters),
+		...(description ? { description: description.slice(0, 16_000) } : {}),
+	};
+}
+
+function catalogEntries(items: McpCatalogEntry[]): McpCatalogEntry[] {
+	return [...new Map(items.filter((item) => item.id).map((item) => [item.id, item])).values()].sort(
+		(left, right) => left.name.localeCompare(right.name) || left.id.localeCompare(right.id),
+	);
+}
+
+function boundedJson(value: unknown, label: string): string {
+	const json = JSON.stringify(value);
+	if (Buffer.byteLength(json, "utf8") > 256 * 1024) throw new Error(`MCP ${label} is too large to display`);
+	return json;
+}
+
+export function mcpServerFingerprint(config: ResolvedMcpServerConfig): string {
 	const identity =
 		config.transport === "http"
 			? ["http", config.url?.href]
@@ -195,7 +254,10 @@ export class McpManager {
 
 	static async create(options: McpManagerCreateOptions): Promise<McpManager> {
 		const manager = new McpManager(options);
-		await manager.initialize(resolveMcpSettings(options.settingsManager, options.cwd, options.environment));
+		await manager.initialize(
+			resolveMcpSettings(options.settingsManager, options.cwd, options.environment),
+			options.backgroundOptionalStartup ?? false,
+		);
 		return manager;
 	}
 
@@ -209,31 +271,54 @@ export class McpManager {
 	}
 
 	private storedSecret(config: ResolvedMcpServerConfig): McpSecretCredential | undefined {
-		const credential = this.authStorage.get(mcpCredentialKey(config.name));
-		return credential?.type === "mcp_secret" && credential.serverFingerprint === serverFingerprint(config)
-			? credential
-			: undefined;
+		const fingerprint = mcpServerFingerprint(config);
+		const scoped = this.authStorage.get(config.credentialKey);
+		if (scoped?.type === "mcp_secret" && scoped.serverFingerprint === fingerprint) return scoped;
+		if (scoped) return undefined;
+		const legacyKey = legacyMcpCredentialKey(config.name);
+		const legacy = this.authStorage.get(legacyKey);
+		if (legacy?.type !== "mcp_secret" || legacy.serverFingerprint !== fingerprint) return undefined;
+		this.authStorage.applyChanges([
+			{ provider: legacyKey, credential: undefined },
+			{ provider: config.credentialKey, credential: legacy },
+		]);
+		return legacy;
 	}
 
 	private applyStoredCredential(config: ResolvedMcpServerConfig): ResolvedMcpServerConfig {
 		const credential = this.storedSecret(config);
 		if (!credential) return config;
+		const storedHeaders = Object.fromEntries(
+			Object.entries(config.httpHeaderEnv ?? {}).flatMap(([header, environmentName]) =>
+				credential.env?.[environmentName] === undefined
+					? []
+					: ([[header, credential.env[environmentName]]] as const),
+			),
+		);
 		return {
 			...config,
-			bearerToken: credential.bearerToken ?? config.bearerToken,
+			bearerToken:
+				credential.bearerToken ??
+				(config.bearerTokenEnvVar ? credential.env?.[config.bearerTokenEnvVar] : undefined) ??
+				config.bearerToken,
 			env: { ...(config.env ?? {}), ...(credential.env ?? {}) },
+			httpHeaders: { ...(config.httpHeaders ?? {}), ...storedHeaders },
 		};
 	}
 
-	private async startClients(clients: Map<string, McpServerClient>): Promise<void> {
+	private async startClients(clients: Map<string, McpServerClient>, backgroundOptionalStartup = false): Promise<void> {
 		const enabled = [...clients.values()].filter((client) => client.resolvedConfig.enabled);
-		const results = await Promise.allSettled(enabled.map((client) => client.start()));
-		const requiredFailure = results.findIndex(
-			(result, index) => result.status === "rejected" && enabled[index].resolvedConfig.required,
-		);
+		const required = enabled.filter((client) => client.resolvedConfig.required);
+		const optional = enabled.filter((client) => !client.resolvedConfig.required);
+		const optionalStartup = Promise.allSettled(optional.map((client) => client.start()));
+		const requiredStartup = Promise.allSettled(required.map((client) => client.start()));
+		if (backgroundOptionalStartup) void optionalStartup;
+		else await optionalStartup;
+		const results = await requiredStartup;
+		const requiredFailure = results.findIndex((result) => result.status === "rejected");
 		if (requiredFailure === -1) return;
 
-		const failedClient = enabled[requiredFailure];
+		const failedClient = required[requiredFailure];
 		const failure = results[requiredFailure] as PromiseRejectedResult;
 		await Promise.all([...clients.values()].map((client) => client.close()));
 		throw new Error(
@@ -252,9 +337,9 @@ export class McpManager {
 		);
 	}
 
-	private async initialize(settings: ResolvedMcpSettings): Promise<void> {
+	private async initialize(settings: ResolvedMcpSettings, backgroundOptionalStartup: boolean): Promise<void> {
 		const clients = this.createClients(settings);
-		await this.startClients(clients);
+		await this.startClients(clients, backgroundOptionalStartup);
 		this.clients = clients;
 		this.attachClientSubscriptions();
 		this.rebuildRecords();
@@ -273,14 +358,16 @@ export class McpManager {
 		);
 		this.records = candidates.map(({ config, snapshot, tool }) => {
 			const modelName = normalized.get(`${config.name}\0${tool.name}`)!;
+			const sourceDescription =
+				[config.description, snapshot.instructions].filter(Boolean).join("\n\n") || undefined;
 			return {
 				serverName: config.name,
 				rawName: tool.name,
 				modelName,
 				tool,
 				sourceName: config.name,
-				sourceDescription: snapshot.instructions,
-				searchText: buildSearchText(modelName, config.name, tool, snapshot.instructions),
+				sourceDescription,
+				searchText: buildSearchText(modelName, config.name, tool, sourceDescription),
 			};
 		});
 		this.recordByModelName = new Map(this.records.map((record) => [record.modelName, record]));
@@ -397,6 +484,79 @@ export class McpManager {
 		});
 	}
 
+	getCatalog(server: string): McpCatalogSummary {
+		const snapshot = this.clientFor(server).snapshot();
+		return {
+			tools: catalogEntries(
+				snapshot.tools.map((item) =>
+					catalogEntry(item.name, item.title ?? item.annotations?.title ?? item.name, item.description, 256),
+				),
+			),
+			resources: catalogEntries(
+				snapshot.resources.map((item) => catalogEntry(item.uri, item.title ?? item.name, item.description, 16_000)),
+			),
+			resourceTemplates: catalogEntries(
+				snapshot.resourceTemplates.map((item) =>
+					catalogEntry(item.uriTemplate, item.title ?? item.name, item.description, 16_000),
+				),
+			),
+			prompts: catalogEntries(
+				snapshot.prompts.map((item) => catalogEntry(item.name, item.title ?? item.name, item.description, 256)),
+			),
+		};
+	}
+
+	getCatalogItem(server: string, kind: McpCatalogItemKind, id: string): McpCatalogItemDetail {
+		const snapshot = this.clientFor(server).snapshot();
+		if (kind === "tool") {
+			const item = snapshot.tools.find((tool) => catalogIdentity(tool.name, 256) === id);
+			if (!item) throw new Error(`Unknown MCP tool: ${id}`);
+			return {
+				kind,
+				...catalogEntry(item.name, item.title ?? item.annotations?.title ?? item.name, item.description, 256),
+				inputSchema: boundedJson(item.inputSchema, "tool input schema"),
+				...(item.outputSchema ? { outputSchema: boundedJson(item.outputSchema, "tool output schema") } : {}),
+				...(item.annotations ? { annotations: boundedJson(item.annotations, "tool annotations") } : {}),
+			};
+		}
+		if (kind === "prompt") {
+			const item = snapshot.prompts.find((prompt) => catalogIdentity(prompt.name, 256) === id);
+			if (!item) throw new Error(`Unknown MCP prompt: ${id}`);
+			return {
+				kind,
+				...catalogEntry(item.name, item.title ?? item.name, item.description, 256),
+				arguments: (item.arguments ?? []).map((argument) => ({
+					name: argument.name.slice(0, 256),
+					...(argument.description ? { description: argument.description.slice(0, 16_000) } : {}),
+					required: argument.required ?? false,
+				})),
+			};
+		}
+		if (kind === "resource") {
+			const item = snapshot.resources.find((resource) => catalogIdentity(resource.uri, 16_000) === id);
+			if (!item) throw new Error(`Unknown MCP resource: ${id}`);
+			return {
+				kind,
+				...catalogEntry(item.uri, item.title ?? item.name, item.description, 16_000),
+				uri: item.uri.slice(0, 16_000),
+				...(item.mimeType ? { mimeType: item.mimeType.slice(0, 256) } : {}),
+				...(Number.isSafeInteger(item.size) && (item.size ?? -1) >= 0 ? { size: item.size } : {}),
+			};
+		}
+		const item = snapshot.resourceTemplates.find((template) => catalogIdentity(template.uriTemplate, 16_000) === id);
+		if (!item) throw new Error(`Unknown MCP resource template: ${id}`);
+		return {
+			kind,
+			...catalogEntry(item.uriTemplate, item.title ?? item.name, item.description, 16_000),
+			uriTemplate: item.uriTemplate.slice(0, 16_000),
+			...(item.mimeType ? { mimeType: item.mimeType.slice(0, 256) } : {}),
+		};
+	}
+
+	hasCredential(server: string): boolean {
+		return this.storedSecret(this.clientFor(server).resolvedConfig) !== undefined;
+	}
+
 	getSecretEnvironment(server: string): Record<string, string> {
 		const config = this.clientFor(server).resolvedConfig;
 		const credential = this.storedSecret(config);
@@ -430,12 +590,12 @@ export class McpManager {
 		if (!credential.bearerToken && environment.length === 0) {
 			throw new Error("MCP secret must contain a bearer token or environment value");
 		}
-		const key = mcpCredentialKey(server);
+		const key = client.resolvedConfig.credentialKey;
 		const previous = this.authStorage.get(key);
 		this.authStorage.set(key, {
 			type: "mcp_secret",
 			...credential,
-			serverFingerprint: serverFingerprint(client.resolvedConfig),
+			serverFingerprint: mcpServerFingerprint(client.resolvedConfig),
 		});
 		try {
 			await this.reload();
@@ -447,12 +607,12 @@ export class McpManager {
 	}
 
 	deleteCredential(server: string): void {
-		this.authStorage.remove(mcpCredentialKey(server));
+		this.authStorage.remove(this.clientFor(server).resolvedConfig.credentialKey);
 	}
 
 	async logout(server: string): Promise<void> {
 		this.clientFor(server);
-		const key = mcpCredentialKey(server);
+		const key = this.clientFor(server).resolvedConfig.credentialKey;
 		const previous = this.authStorage.get(key);
 		this.authStorage.remove(key);
 		try {

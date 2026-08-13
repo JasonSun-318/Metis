@@ -82,7 +82,21 @@ export {
 	type TurnStartEvent,
 	type WorkingIndicatorOptions,
 } from "./extensions/index.ts";
-export type { McpConnectionState, McpServerStatus, McpToolRecord } from "./mcp/index.ts";
+export {
+	createInteractiveBashBoundary,
+	type InteractiveBashBoundary,
+	type InteractiveBashContext,
+} from "./interactive-bash-boundary.ts";
+export {
+	type McpCatalogItemDetail,
+	type McpCatalogItemKind,
+	type McpCatalogSummary,
+	type McpConnectionState,
+	type McpServerStatus,
+	type McpToolRecord,
+	mcpServerFingerprint,
+	resolveMcpServerSettings,
+} from "./mcp/index.ts";
 export type {
 	ModeProjectSessionTarget,
 	TrashModeProjectDataInput,
@@ -103,6 +117,7 @@ export {
 	type ClassifiedAction,
 	type ClassifyActionInput,
 	classifyAction,
+	executionTargetFor,
 	formatPermissionApproval,
 	type NetworkTarget,
 	type PermissionAction,
@@ -111,6 +126,8 @@ export {
 	type PermissionApprovalRequest,
 	type PermissionApprovalView,
 	type PermissionAuthorization,
+	type PermissionAuthorizationSource,
+	type PermissionExecutionTarget,
 	PermissionPolicy,
 	type PermissionRoute,
 	type RequestPermissionApproval,
@@ -119,6 +136,20 @@ export {
 	type ToolProvenance,
 	unclassifiedAction,
 } from "./permission-policy.ts";
+export {
+	ProjectPermissionRuleStore,
+	type ProjectPermissionRuleView,
+	type ProjectPermissionSignatureInput,
+} from "./project-permission-rules.ts";
+export {
+	MAX_QUEUED_TURNS,
+	QueuedTurnConflictError,
+	type QueuedTurnDraft,
+	type QueuedTurnDraftState,
+	QueuedTurnLimitError,
+	QueuedTurnNotFoundError,
+	QueuedTurnQueue,
+} from "./queued-turn-queue.ts";
 export {
 	type DurableImageRef,
 	type DurablePromptInput,
@@ -165,6 +196,7 @@ export {
 	removeSessionAttachment,
 	type SessionAttachment,
 	type SessionAttachmentInput,
+	splitSessionAttachmentPrompt,
 } from "./session-attachments.ts";
 export {
 	isSessionControlEntryType,
@@ -190,6 +222,7 @@ export {
 	getSessionDisplayMetadataPath,
 	getSessionSubagentDir,
 	getSessionUnreadStatePath,
+	MAX_SESSION_RECORD_BYTES,
 	migrateSessionDisplayMetadata,
 	moveSessionFileWithLease,
 	type PermissionDecisionPayload,
@@ -242,6 +275,7 @@ export {
 export {
 	canUseUltra,
 	getHighestSupportedThinkingLevel,
+	getLowestSupportedThinkingLevel,
 	isThinkingSelection,
 	type ThinkingSelection,
 } from "./thinking-selection.ts";

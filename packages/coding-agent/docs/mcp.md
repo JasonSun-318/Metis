@@ -6,7 +6,7 @@ Metis connects to local MCP servers over stdio and remote MCP servers over Strea
 
 Run `/mcp`, then choose **Add server**:
 
-1. Choose **Personal** or **Project**. Project configuration is available only for a trusted project.
+1. Choose **User** or **Project**. Project configuration is available only for a trusted project.
 2. Enter a server name.
 3. Choose **Local command (stdio)** or **Remote URL (HTTP)**.
 4. Enter the executable and arguments, or the HTTP URL.
@@ -22,18 +22,28 @@ MCP OAuth is not currently supported. Use a server-issued token or an environmen
 
 For stdio, MCP has no protocol-level way to discover a credential name. Choose **Authentication** → **Set environment variable**, enter the name documented by that server, then either enter its value through the masked field or forward an existing environment variable.
 
-Select a configured server in `/mcp` to see its status and catalog counts, open details, change authentication, restart it, sign out, or remove it. **Sign out** deletes stored credentials but keeps the definition. **Remove** deletes the selected definition and its `mcp:<server>` credential.
+Select a configured server in `/mcp` to see its status and catalog counts, open details, change authentication, restart it, sign out, or remove it. **Sign out** deletes stored credentials but keeps the definition. **Remove** deletes the selected definition and its scoped credential.
+
+## Create MCP servers in Desktop
+
+The **Plugins → MCP → New MCP** menu supports three paths:
+
+- **Add by URL** creates a Streamable HTTP server with optional bearer and header credentials.
+- **Custom MCP** configures either a local STDIO command or advanced Streamable HTTP settings.
+- **Import JSON** accepts JSON or JSONC, including comments and trailing commas. It inspects a secret-free preview before importing selected servers and requires explicit confirmation before replacing an existing scoped definition.
+
+Project creation requires a selected project. That target remains fixed while the creation dialog is open, even if the active task changes. SSE is not supported.
 
 ## Where configuration and credentials are stored
 
-- Personal definitions: `~/.metis/agent/settings.json`
+- User definitions: `~/.metis/agent/settings.json`
 - Project definitions: `.metis/settings.json` in a trusted project
 - Directly entered tokens and directly entered stdio environment values: `~/.metis/agent/auth.json`, written with file mode `0600`
 - Environment-backed values: remain in the process environment and are not copied into Metis files
 
-`settings.json` stores server definitions and environment-variable references, never values entered in a masked field. `auth.json` is Metis's existing credential store; it is protected by filesystem permissions but is not encrypted or backed by an OS keychain. Keep the account and filesystem trusted.
+`settings.json` stores server definitions and environment-variable references, never values entered in a masked field. `auth.json` stores each User credential separately from credentials for every canonical Project path. It is protected by filesystem permissions but is not encrypted or backed by an OS keychain. Keep the account and filesystem trusted.
 
-Stored MCP credentials are bound to the configured HTTP URL or the stdio command, arguments, and working directory. Changing that server identity requires authentication again; credentials written by older builds without an identity binding are not forwarded automatically.
+Stored MCP credentials are bound to the configured HTTP URL or the stdio command, arguments, and working directory. Changing that server identity requires authentication again. A matching legacy name-only credential is moved once to the effective scoped key; mismatched legacy values are never forwarded.
 
 Secret values are not placed in model context, MCP status, diagnostics, logs, or `metis mcp` output. The target server still receives the credential when Metis connects or starts its process.
 
@@ -104,6 +114,23 @@ JSON remains available for timeouts, tool filters, custom header references, `cw
   }
 }
 ```
+
+Desktop import accepts either the wrapped form above or a direct server map such as:
+
+```jsonc
+{
+  // Environment references stay in settings; literal values move to auth.json.
+  "docs": {
+    "url": "https://mcp.example.com/mcp",
+    "headers": {
+      "Authorization": "Bearer literal-token",
+      "X-Tenant": "${COMPANY_TENANT}"
+    }
+  }
+}
+```
+
+Both `$NAME` and `${NAME}` are treated as environment references during import. Other values in `env` or `headers` are extracted into the scoped credential store and never returned in the inspection response.
 
 A server defines exactly one of `command` or `url`. Startup defaults to 10 seconds and tool calls default to 60 seconds. `enabledTools` is applied before `disabledTools`. Set `required` when Metis must refuse session startup if that server cannot initialize.
 

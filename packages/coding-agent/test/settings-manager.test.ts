@@ -3,7 +3,7 @@ import { homedir } from "os";
 import { join } from "path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { DEFAULT_HTTP_IDLE_TIMEOUT_MS } from "../src/core/http-dispatcher.ts";
-import { SettingsManager } from "../src/core/settings-manager.ts";
+import { InMemorySettingsStorage, SettingsManager, type SettingsScope } from "../src/core/settings-manager.ts";
 
 describe("SettingsManager", () => {
 	const testDir = join(process.cwd(), "test-settings-tmp");
@@ -26,6 +26,36 @@ describe("SettingsManager", () => {
 	});
 
 	describe("preserves externally added settings", () => {
+		it("applies several MCP changes in one batch", async () => {
+			const memory = new InMemorySettingsStorage();
+			let writes = 0;
+			const manager = SettingsManager.fromStorage(
+				{
+					withLock(scope: SettingsScope, fn: (current: string | undefined) => string | undefined) {
+						memory.withLock(scope, (current) => {
+							const next = fn(current);
+							if (next !== undefined) writes += 1;
+							return next;
+						});
+					},
+				},
+				{ projectTrusted: true },
+			);
+			manager.applyMcpServerChanges(
+				"project",
+				new Map([
+					["github", { url: "https://mcp.example.test/github" }],
+					["docs", { command: "node", args: ["docs.mjs"] }],
+				]),
+			);
+			await manager.flush();
+			expect(writes).toBe(1);
+			expect(manager.getProjectSettings().mcpServers).toEqual({
+				github: { url: "https://mcp.example.test/github" },
+				docs: { command: "node", args: ["docs.mjs"] },
+			});
+		});
+
 		it("adds and removes one global MCP server without replacing unrelated settings", async () => {
 			const settingsPath = join(agentDir, "settings.json");
 			writeFileSync(

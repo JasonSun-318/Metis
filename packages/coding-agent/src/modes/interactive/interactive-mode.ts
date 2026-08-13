@@ -58,7 +58,6 @@ import {
 import { type AgentMode, isAgentMode } from "../../core/agent-mode.ts";
 import { type AgentSession, type AgentSessionEvent, parseSkillBlock } from "../../core/agent-session.ts";
 import { type AgentSessionRuntime, SessionImportFileNotFoundError } from "../../core/agent-session-runtime.ts";
-import { mcpCredentialKey } from "../../core/auth-storage.ts";
 import {
 	CACHE_TTL_MS,
 	type CacheMiss,
@@ -6137,7 +6136,7 @@ export class InteractiveMode {
 		while (true) {
 			const status = this.session.getMcpStatus().find((item) => item.name === name);
 			if (!status || !this.getMcpDefinition(name)) return;
-			const stored = this.session.modelRegistry.authStorage.has(mcpCredentialKey(name));
+			const stored = this.session.hasMcpCredential(name);
 			const actions = ["Details", "Authentication", "Restart", ...(stored ? ["Sign out"] : []), "Remove", "Back"];
 			const selected = await this.showExtensionSelector(`MCP server · ${name}`, actions);
 			if (!selected || selected === "Back") return;

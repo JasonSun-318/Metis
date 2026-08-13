@@ -17,7 +17,7 @@ import {
 	type Tool,
 } from "@modelcontextprotocol/sdk/types.js";
 import { VERSION } from "../../config.ts";
-import { type AuthStorage, mcpCredentialKey } from "../auth-storage.ts";
+import { type AuthStorage, legacyMcpCredentialKey } from "../auth-storage.ts";
 import type { ResolvedMcpServerConfig } from "./config.ts";
 
 const MAX_CATALOG_ITEMS = 10_000;
@@ -116,7 +116,9 @@ export class McpServerClient {
 			...Object.values(this.config.env ?? {}),
 			...Object.values(this.config.httpHeaders ?? {}),
 		];
-		const credential = this.authStorage.get(mcpCredentialKey(this.config.name));
+		const credential =
+			this.authStorage.get(this.config.credentialKey) ??
+			this.authStorage.get(legacyMcpCredentialKey(this.config.name));
 		if (credential?.type === "mcp_oauth") {
 			values.push(credential.tokens?.access_token, credential.tokens?.refresh_token);
 		}

@@ -49,8 +49,11 @@ export {
 	type AuthStatus,
 	AuthStorage,
 	type AuthStorageBackend,
+	type AuthStorageChange,
 	FileAuthStorageBackend,
 	InMemoryAuthStorageBackend,
+	legacyMcpCredentialKey,
+	type McpCredentialIdentity,
 	type McpSecretCredential,
 	mcpCredentialKey,
 	type OAuthCredential,
@@ -191,7 +194,21 @@ export {
 } from "./core/extensions/index.ts";
 // Footer data provider (git branch + extension statuses - data not otherwise available to extensions)
 export type { ReadonlyFooterDataProvider } from "./core/footer-data-provider.ts";
-export type { McpConnectionState, McpServerStatus, McpToolRecord } from "./core/mcp/index.ts";
+export {
+	createInteractiveBashBoundary,
+	type InteractiveBashBoundary,
+	type InteractiveBashContext,
+} from "./core/interactive-bash-boundary.ts";
+export {
+	type McpCatalogItemDetail,
+	type McpCatalogItemKind,
+	type McpCatalogSummary,
+	type McpConnectionState,
+	type McpServerStatus,
+	type McpToolRecord,
+	mcpServerFingerprint,
+	resolveMcpServerSettings,
+} from "./core/mcp/index.ts";
 export { convertToLlm } from "./core/messages.ts";
 export type {
 	ModeProjectSessionTarget,
@@ -231,6 +248,7 @@ export {
 	type ClassifiedAction,
 	type ClassifyActionInput,
 	classifyAction,
+	executionTargetFor,
 	formatPermissionApproval,
 	type NetworkTarget,
 	type PermissionAction,
@@ -239,6 +257,8 @@ export {
 	type PermissionApprovalRequest,
 	type PermissionApprovalView,
 	type PermissionAuthorization,
+	type PermissionAuthorizationSource,
+	type PermissionExecutionTarget,
 	PermissionPolicy,
 	type PermissionRoute,
 	type RequestPermissionApproval,
@@ -247,6 +267,20 @@ export {
 	type ToolProvenance,
 	unclassifiedAction,
 } from "./core/permission-policy.ts";
+export {
+	ProjectPermissionRuleStore,
+	type ProjectPermissionRuleView,
+	type ProjectPermissionSignatureInput,
+} from "./core/project-permission-rules.ts";
+export {
+	MAX_QUEUED_TURNS,
+	QueuedTurnConflictError,
+	type QueuedTurnDraft,
+	type QueuedTurnDraftState,
+	QueuedTurnLimitError,
+	QueuedTurnNotFoundError,
+	QueuedTurnQueue,
+} from "./core/queued-turn-queue.ts";
 export type { ResourceCollision, ResourceDiagnostic, ResourceLoader } from "./core/resource-loader.ts";
 export { DefaultResourceLoader, loadProjectContextFiles } from "./core/resource-loader.ts";
 export {
@@ -311,6 +345,7 @@ export {
 	createWebSearchTool,
 	createWriteTool,
 	type PromptTemplate,
+	QueuedTurnBusyError,
 	type SubmitInterruptInput,
 	type SubmitInterruptResult,
 	type SubmitPromptInput,
@@ -329,6 +364,7 @@ export {
 	removeSessionAttachment,
 	type SessionAttachment,
 	type SessionAttachmentInput,
+	splitSessionAttachmentPrompt,
 } from "./core/session-attachments.ts";
 export {
 	isSessionControlEntryType,
@@ -361,6 +397,7 @@ export {
 	getSessionDisplayMetadataPath,
 	getSessionSubagentDir,
 	getSessionUnreadStatePath,
+	MAX_SESSION_RECORD_BYTES,
 	type ModelChangeEntry,
 	migrateSessionDisplayMetadata,
 	migrateSessionEntries,
@@ -446,6 +483,7 @@ export {
 export {
 	canUseUltra,
 	getHighestSupportedThinkingLevel,
+	getLowestSupportedThinkingLevel,
 	isThinkingSelection,
 	type ThinkingSelection,
 } from "./core/thinking-selection.ts";

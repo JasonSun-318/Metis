@@ -59,6 +59,7 @@ export type DefaultProjectTrust = "ask" | "always" | "never";
 export type TransportSetting = Transport;
 
 export interface McpCommonServerSettings {
+	description?: string;
 	enabled?: boolean;
 	required?: boolean;
 	startupTimeoutSec?: number;
@@ -492,39 +493,40 @@ export class SettingsManager {
 		return structuredClone(this.settings.mcpServers ?? {});
 	}
 
-	setMcpServer(scope: SettingsScope, name: string, server: McpServerSettings): void {
-		if (!name.trim()) throw new Error("MCP server name must not be empty");
-		const value = structuredClone(server);
+	applyMcpServerChanges(scope: SettingsScope, changes: ReadonlyMap<string, McpServerSettings | undefined>): void {
+		if (changes.size === 0) return;
+		for (const name of changes.keys()) {
+			if (!name.trim()) throw new Error("MCP server name must not be empty");
+		}
+		const apply = (settings: Settings) => {
+			const next = { ...(settings.mcpServers ?? {}) };
+			for (const [name, server] of changes) {
+				if (server) next[name] = structuredClone(server);
+				else delete next[name];
+			}
+			settings.mcpServers = next;
+		};
 		if (scope === "global") {
-			this.globalSettings.mcpServers = { ...(this.globalSettings.mcpServers ?? {}), [name]: value };
-			this.markModified("mcpServers", name);
+			apply(this.globalSettings);
+			for (const name of changes.keys()) this.markModified("mcpServers", name);
 			this.save();
 			return;
 		}
-		this.updateProjectSettings(
-			"mcpServers",
-			(settings) => {
-				settings.mcpServers = { ...(settings.mcpServers ?? {}), [name]: value };
-			},
-			name,
-		);
+		this.assertProjectTrustedForWrite();
+		const projectSettings = structuredClone(this.projectSettings);
+		apply(projectSettings);
+		for (const name of changes.keys()) this.markProjectModified("mcpServers", name);
+		this.saveProjectSettings(projectSettings);
+	}
+
+	setMcpServer(scope: SettingsScope, name: string, server: McpServerSettings): void {
+		this.applyMcpServerChanges(scope, new Map([[name, server]]));
 	}
 
 	removeMcpServer(scope: SettingsScope, name: string): boolean {
 		const source = scope === "global" ? this.globalSettings.mcpServers : this.projectSettings.mcpServers;
 		if (!source || !(name in source)) return false;
-		const remove = (settings: Settings) => {
-			const next = { ...(settings.mcpServers ?? {}) };
-			delete next[name];
-			settings.mcpServers = next;
-		};
-		if (scope === "global") {
-			remove(this.globalSettings);
-			this.markModified("mcpServers", name);
-			this.save();
-		} else {
-			this.updateProjectSettings("mcpServers", remove, name);
-		}
+		this.applyMcpServerChanges(scope, new Map([[name, undefined]]));
 		return true;
 	}
 

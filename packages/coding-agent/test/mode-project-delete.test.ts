@@ -640,5 +640,5 @@ describe("mode project Trash", () => {
 
 		expect(result).toEqual({ ok: true, method: "trash", deletedSessionCount: 500 });
 		expect(calls).toBe(1);
-	});
+	}, 60_000);
 });

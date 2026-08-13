@@ -55,18 +55,17 @@ describe("parseArgs", () => {
 	});
 
 	describe("new-session workspace and permissions", () => {
-		test("normalizes deprecated auto and consumes deprecated reviewer flags", () => {
+		test("accepts auto and consumes deprecated reviewer flags", () => {
 			const result = parseArgs(["--cwd", "./project", "--permission-mode", "auto", "--no-reviewer"]);
 			expect(result.cwd).toBe("./project");
-			expect(result.permissionMode).toBe("ask");
+			expect(result.permissionMode).toBe("auto");
 			expect(result).not.toHaveProperty("reviewerEnabled");
 			expect(result.diagnostics).toEqual([
-				{ type: "warning", message: '--permission-mode auto is deprecated; using "ask"' },
-				{ type: "warning", message: "--no-reviewer is deprecated and ignored; permissions use Ask or Full" },
+				{ type: "warning", message: "--no-reviewer is deprecated and ignored; permissions use Ask, Auto, or Full" },
 			]);
 		});
 
-		test.each(["ask", "full"] as const)("parses permission mode %s", (mode) => {
+		test.each(["ask", "auto", "full"] as const)("parses permission mode %s", (mode) => {
 			const result = parseArgs(["--permission-mode", mode]);
 			expect(result.permissionMode).toBe(mode);
 			expect(result.diagnostics).toEqual([]);
@@ -77,18 +76,18 @@ describe("parseArgs", () => {
 				{ type: "error", message: "--cwd requires a directory path" },
 			]);
 			expect(parseArgs(["--permission-mode"]).diagnostics).toEqual([
-				{ type: "error", message: "--permission-mode requires ask or full" },
+				{ type: "error", message: "--permission-mode requires ask, auto, or full" },
 			]);
 			expect(parseArgs(["--permission-mode", "trusted"]).diagnostics).toEqual([
-				{ type: "error", message: 'Invalid permission mode "trusted". Valid values: ask, full' },
+				{ type: "error", message: 'Invalid permission mode "trusted". Valid values: ask, auto, full' },
 			]);
 		});
 
 		test("warns for each deprecated reviewer flag", () => {
 			const result = parseArgs(["--reviewer", "--no-reviewer"]);
 			expect(result.diagnostics).toEqual([
-				{ type: "warning", message: "--reviewer is deprecated and ignored; permissions use Ask or Full" },
-				{ type: "warning", message: "--no-reviewer is deprecated and ignored; permissions use Ask or Full" },
+				{ type: "warning", message: "--reviewer is deprecated and ignored; permissions use Ask, Auto, or Full" },
+				{ type: "warning", message: "--no-reviewer is deprecated and ignored; permissions use Ask, Auto, or Full" },
 			]);
 		});
 	});

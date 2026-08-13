@@ -11,6 +11,7 @@ import { handleMcpCliCommand } from "../src/mcp-cli.ts";
 import { createMcpTestServer } from "./helpers/mcp-test-server.ts";
 
 describe("MCP CLI", () => {
+	const userMcpKey = (name: string) => mcpCredentialKey({ scope: "user", name });
 	let tempDir: string;
 	let agentDir: string;
 	let projectDir: string;
@@ -105,12 +106,12 @@ describe("MCP CLI", () => {
 	it("removes the selected definition and its namespaced credential", async () => {
 		await handleMcpCliCommand(["mcp", "add", "docs", "--url", "https://mcp.example.test/mcp"]);
 		const auth = AuthStorage.create(join(agentDir, "auth.json"));
-		auth.set(mcpCredentialKey("docs"), { type: "mcp_secret", bearerToken: "stored-secret" });
+		auth.set(userMcpKey("docs"), { type: "mcp_secret", bearerToken: "stored-secret" });
 
 		await handleMcpCliCommand(["mcp", "remove", "docs"]);
 
 		expect(readGlobalSettings().mcpServers?.docs).toBeUndefined();
-		expect(AuthStorage.create(join(agentDir, "auth.json")).has(mcpCredentialKey("docs"))).toBe(false);
+		expect(AuthStorage.create(join(agentDir, "auth.json")).has(userMcpKey("docs"))).toBe(false);
 	});
 
 	it("lists and gets configuration without reading auth.json or printing env values", async () => {
@@ -177,10 +178,10 @@ describe("MCP CLI", () => {
 
 			await manager.logout("protected");
 			expect(manager.getStatus()[0]).toMatchObject({ state: "auth_required" });
-			expect(authStorage.has(mcpCredentialKey("protected"))).toBe(false);
+			expect(authStorage.has(userMcpKey("protected"))).toBe(false);
 
 			await manager.setSecret("protected", { bearerToken: secret });
-			expect(authStorage.has(mcpCredentialKey("protected"))).toBe(true);
+			expect(authStorage.has(userMcpKey("protected"))).toBe(true);
 			await manager.close();
 			await handleMcpCliCommand(["mcp", "remove", "protected"]);
 
@@ -190,7 +191,7 @@ describe("MCP CLI", () => {
 				cwd: projectDir,
 			});
 			expect(manager.getStatus()).toEqual([]);
-			expect(AuthStorage.create(authPath).has(mcpCredentialKey("protected"))).toBe(false);
+			expect(AuthStorage.create(authPath).has(userMcpKey("protected"))).toBe(false);
 			expect(readFileSync(join(agentDir, "settings.json"), "utf8")).not.toContain(secret);
 		} finally {
 			await manager.close();

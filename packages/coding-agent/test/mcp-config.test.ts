@@ -20,6 +20,25 @@ describe("MCP settings", () => {
 		});
 	});
 
+	it("normalizes an optional bounded description", () => {
+		expect(
+			resolveMcpServerSettings(
+				"docs",
+				{ url: "https://example.test/mcp", description: "  Use for documentation lookup.  " },
+				"/repo",
+			),
+		).toMatchObject({
+			description: "Use for documentation lookup.",
+			enabled: true,
+			required: false,
+			enabledTools: undefined,
+			disabledTools: [],
+		});
+		expect(() =>
+			resolveMcpServerSettings("docs", { url: "https://example.test/mcp", description: "界".repeat(1366) }, "/repo"),
+		).toThrow("4096 UTF-8 bytes");
+	});
+
 	it("rejects one invalid server before persistence", () => {
 		expect(() => resolveMcpServerSettings("docs", { url: "file:///tmp/mcp" }, "/repo", {})).toThrow("http or https");
 	});
@@ -50,6 +69,7 @@ describe("MCP settings", () => {
 		expect(resolveMcpSettings(manager, "/repo", { DOCS_TOKEN: "secret" }).servers).toEqual([
 			expect.objectContaining({
 				name: "docs",
+				credentialIdentity: { scope: "user", name: "docs" },
 				transport: "stdio",
 				startupTimeoutMs: 10_000,
 				toolTimeoutMs: 60_000,
@@ -57,7 +77,31 @@ describe("MCP settings", () => {
 				enabledTools: undefined,
 				disabledTools: [],
 			}),
-			expect.objectContaining({ name: "figma", transport: "http", required: true }),
+			expect.objectContaining({
+				name: "figma",
+				credentialIdentity: { scope: "project", name: "figma", cwd: "/repo" },
+				transport: "http",
+				required: true,
+			}),
+		]);
+	});
+
+	it("retains project scope when it overrides a same-name user server", () => {
+		const storage = new InMemorySettingsStorage();
+		storage.withLock("global", () =>
+			JSON.stringify({ mcpServers: { github: { url: "https://user.example.test/mcp" } } }),
+		);
+		storage.withLock("project", () =>
+			JSON.stringify({ mcpServers: { github: { url: "https://project.example.test/mcp" } } }),
+		);
+		const manager = SettingsManager.fromStorage(storage, { projectTrusted: true });
+
+		expect(resolveMcpSettings(manager, "/repo", {}).servers).toEqual([
+			expect.objectContaining({
+				name: "github",
+				credentialIdentity: { scope: "project", name: "github", cwd: "/repo" },
+				url: new URL("https://project.example.test/mcp"),
+			}),
 		]);
 	});
 

@@ -10,17 +10,24 @@ import {
 	ListResourcesRequestSchema,
 	ListResourceTemplatesRequestSchema,
 	ListToolsRequestSchema,
+	type Prompt,
 	ReadResourceRequestSchema,
+	type Resource,
+	type ResourceTemplate,
 	type Tool,
 } from "@modelcontextprotocol/sdk/types.js";
 
 export interface McpTestServerOptions {
 	tools?: Tool[];
+	resources?: Resource[];
+	resourceTemplates?: ResourceTemplate[];
+	prompts?: Prompt[];
 	instructions?: string;
 	pageSize?: number;
 	closeDuringTool?: boolean;
 	callDelayMs?: number;
 	requiredBearerToken?: string;
+	requiredHeaders?: Record<string, string>;
 	advertiseOAuth?: boolean;
 }
 
@@ -61,8 +68,9 @@ export async function createMcpTestServer(options: McpTestServerOptions = {}): P
 			annotations: { readOnlyHint: true },
 		},
 	];
-	let currentResources = [{ uri: "docs://guide", name: "Guide", mimeType: "text/plain" }];
-	let currentPrompts = [
+	let currentResources = options.resources ?? [{ uri: "docs://guide", name: "Guide", mimeType: "text/plain" }];
+	const resourceTemplates = options.resourceTemplates ?? [];
+	let currentPrompts = options.prompts ?? [
 		{
 			name: "review",
 			description: "Review a change",
@@ -100,7 +108,7 @@ export async function createMcpTestServer(options: McpTestServerOptions = {}): P
 			return { content: [{ type: "text" as const, text: `match:${String(params.arguments?.query ?? "")}` }] };
 		});
 		next.setRequestHandler(ListResourcesRequestSchema, () => ({ resources: currentResources }));
-		next.setRequestHandler(ListResourceTemplatesRequestSchema, () => ({ resourceTemplates: [] }));
+		next.setRequestHandler(ListResourceTemplatesRequestSchema, () => ({ resourceTemplates }));
 		next.setRequestHandler(ReadResourceRequestSchema, () => ({
 			contents: [{ uri: "docs://guide", mimeType: "text/plain", text: "guide body" }],
 		}));
@@ -158,6 +166,14 @@ export async function createMcpTestServer(options: McpTestServerOptions = {}): P
 					? `Bearer resource_metadata="${origin}/.well-known/oauth-protected-resource"`
 					: "Bearer";
 				response.writeHead(401, { "www-authenticate": challenge }).end("Unauthorized");
+				return;
+			}
+			if (
+				Object.entries(options.requiredHeaders ?? {}).some(
+					([name, value]) => request.headers[name.toLowerCase()] !== value,
+				)
+			) {
+				response.writeHead(401, { "www-authenticate": "Bearer" }).end("Unauthorized");
 				return;
 			}
 			if (request.method === "POST" && !request.headers["mcp-session-id"] && transport.sessionId) {

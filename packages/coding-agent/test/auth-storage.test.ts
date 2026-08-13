@@ -15,7 +15,12 @@ import { join } from "node:path";
 import { registerOAuthProvider, unregisterOAuthProvider } from "@metis/ai/oauth";
 import lockfile from "proper-lockfile";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { AuthStorage, mcpCredentialKey } from "../src/core/auth-storage.ts";
+import {
+	AuthStorage,
+	InMemoryAuthStorageBackend,
+	legacyMcpCredentialKey,
+	mcpCredentialKey,
+} from "../src/core/auth-storage.ts";
 import { clearConfigValueCache, resolveConfigValueUncached } from "../src/core/resolve-config-value.ts";
 import * as shellModule from "../src/utils/shell.ts";
 
@@ -48,19 +53,61 @@ describe("AuthStorage", () => {
 
 	test("round-trips a namespaced MCP static credential without exposing its value in status", () => {
 		const storage = AuthStorage.inMemory();
-		storage.set(mcpCredentialKey("docs"), {
+		const key = mcpCredentialKey({ scope: "user", name: "docs" });
+		storage.set(key, {
 			type: "mcp_secret",
 			bearerToken: "stored-secret",
 			env: { DOCS_TOKEN: "stdio-secret" },
 		});
 
-		expect(storage.get(mcpCredentialKey("docs"))).toEqual({
+		expect(storage.get(key)).toEqual({
 			type: "mcp_secret",
 			bearerToken: "stored-secret",
 			env: { DOCS_TOKEN: "stdio-secret" },
 		});
-		expect(JSON.stringify(storage.getAuthStatus(mcpCredentialKey("docs")))).not.toContain("stored-secret");
-		expect(JSON.stringify(storage.getAuthStatus(mcpCredentialKey("docs")))).not.toContain("stdio-secret");
+		expect(JSON.stringify(storage.getAuthStatus(key))).not.toContain("stored-secret");
+		expect(JSON.stringify(storage.getAuthStatus(key))).not.toContain("stdio-secret");
+	});
+
+	test("isolates user and canonical project MCP credentials", () => {
+		const projectDir = join(tempDir, "project");
+		mkdirSync(projectDir);
+		const user = mcpCredentialKey({ scope: "user", name: "github" });
+		const project = mcpCredentialKey({ scope: "project", name: "github", cwd: projectDir });
+		const aliased = mcpCredentialKey({ scope: "project", name: "github", cwd: join(projectDir, ".") });
+
+		expect(user).toBe("mcp:v2:user:github");
+		expect(project).toBe(aliased);
+		expect(project).toMatch(/^mcp:v2:project:[a-f0-9]{64}:github$/u);
+		expect(project).not.toBe(user);
+	});
+
+	test("applies multiple credential changes with one persistence notification", () => {
+		const persisted = vi.fn();
+		const backend = new InMemoryAuthStorageBackend();
+		const storage = AuthStorage.fromStorage(backend, persisted);
+		const legacyKey = legacyMcpCredentialKey("github");
+		const userKey = mcpCredentialKey({ scope: "user", name: "github" });
+		const docsKey = mcpCredentialKey({ scope: "user", name: "docs" });
+		const legacy = { type: "mcp_secret", bearerToken: "legacy" } as const;
+		const docs = { type: "mcp_secret", env: { DOCS_TOKEN: "docs" } } as const;
+		storage.set(legacyKey, legacy);
+		persisted.mockClear();
+
+		storage.applyChanges([
+			{ provider: legacyKey, credential: undefined },
+			{ provider: userKey, credential: legacy },
+			{ provider: docsKey, credential: docs },
+		]);
+
+		expect(persisted).toHaveBeenCalledTimes(1);
+		expect(storage.get(legacyKey)).toBeUndefined();
+		expect(storage.get(userKey)).toEqual(legacy);
+		expect(storage.get(docsKey)).toEqual(docs);
+		const secondView = AuthStorage.fromStorage(backend);
+		expect(secondView.get(legacyKey)).toBeUndefined();
+		expect(secondView.get(userKey)).toEqual(legacy);
+		expect(secondView.get(docsKey)).toEqual(docs);
 	});
 
 	test("supports auth storage beneath an existing symlinked agent directory", ({ skip }) => {

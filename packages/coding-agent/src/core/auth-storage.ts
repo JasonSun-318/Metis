@@ -6,6 +6,7 @@
  * try to refresh tokens simultaneously.
  */
 
+import { createHash } from "node:crypto";
 import {
 	findEnvKeys,
 	getEnvApiKey,
@@ -19,7 +20,7 @@ import { existsSync } from "fs";
 import { dirname, join } from "path";
 import lockfile from "proper-lockfile";
 import { getAgentDir } from "../config.ts";
-import { normalizePath } from "../utils/paths.ts";
+import { canonicalizePathForCreation, normalizePath } from "../utils/paths.ts";
 import {
 	cleanupPublishedAliasesSync,
 	createFileAtomicallySync,
@@ -53,13 +54,32 @@ export type McpSecretCredential = {
 	env?: Record<string, string>;
 };
 
-export function mcpCredentialKey(serverName: string): string {
+export type McpCredentialIdentity =
+	| { readonly scope: "user"; readonly name: string }
+	| { readonly scope: "project"; readonly name: string; readonly cwd: string };
+
+export function legacyMcpCredentialKey(serverName: string): string {
 	return `mcp:${serverName}`;
+}
+
+export function mcpCredentialKey(identity: McpCredentialIdentity): string {
+	const name = encodeURIComponent(identity.name);
+	if (identity.scope === "user") return `mcp:v2:user:${name}`;
+	const canonicalCwd = canonicalizePathForCreation(identity.cwd);
+	const projectId = createHash("sha256")
+		.update(process.platform === "win32" ? canonicalCwd.toLowerCase() : canonicalCwd)
+		.digest("hex");
+	return `mcp:v2:project:${projectId}:${name}`;
 }
 
 export type AuthCredential = ApiKeyCredential | OAuthCredential | LegacyMcpOAuthCredential | McpSecretCredential;
 
 export type AuthStorageData = Record<string, AuthCredential>;
+
+export interface AuthStorageChange {
+	readonly provider: string;
+	readonly credential: AuthCredential | undefined;
+}
 
 export type AuthStatus = {
 	configured: boolean;
@@ -321,7 +341,7 @@ export class AuthStorage {
 		}
 	}
 
-	private persistProviderChange(provider: string, credential: AuthCredential | undefined): AuthStorageData {
+	private persistChanges(changes: readonly AuthStorageChange[]): AuthStorageData {
 		if (this.loadError) {
 			this.reload();
 		}
@@ -339,10 +359,9 @@ export class AuthStorage {
 			this.storage.withLock((current) => {
 				const currentData = this.parseStorageData(current);
 				const merged: AuthStorageData = { ...currentData };
-				if (credential) {
-					merged[provider] = credential;
-				} else {
-					delete merged[provider];
+				for (const { provider, credential } of changes) {
+					if (credential) merged[provider] = credential;
+					else delete merged[provider];
 				}
 				persistedData = merged;
 				return { result: undefined, next: JSON.stringify(merged, null, 2) };
@@ -374,15 +393,25 @@ export class AuthStorage {
 	 * Set credential for a provider.
 	 */
 	set(provider: string, credential: AuthCredential): void {
-		this.data = this.persistProviderChange(provider, credential);
-		this.notifyPersisted();
+		this.applyChanges([{ provider, credential }]);
 	}
 
 	/**
 	 * Remove credential for a provider.
 	 */
 	remove(provider: string): void {
-		this.data = this.persistProviderChange(provider, undefined);
+		this.applyChanges([{ provider, credential: undefined }]);
+	}
+
+	/** Apply several provider changes with one locked durable write. */
+	applyChanges(changes: readonly AuthStorageChange[]): void {
+		if (changes.length === 0) return;
+		const providers = new Set<string>();
+		for (const { provider } of changes) {
+			if (providers.has(provider)) throw new Error(`Duplicate auth change: ${provider}`);
+			providers.add(provider);
+		}
+		this.data = this.persistChanges(changes);
 		this.notifyPersisted();
 	}
 

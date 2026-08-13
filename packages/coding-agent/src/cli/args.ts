@@ -119,28 +119,22 @@ export function parseArgs(args: string[]): Args {
 		} else if (arg === "--permission-mode") {
 			const mode = args[i + 1];
 			if (mode === undefined || mode.startsWith("-")) {
-				result.diagnostics.push({ type: "error", message: "--permission-mode requires ask or full" });
+				result.diagnostics.push({ type: "error", message: "--permission-mode requires ask, auto, or full" });
 			} else {
 				i++;
-				if (mode === "auto") {
-					result.permissionMode = "ask";
-					result.diagnostics.push({
-						type: "warning",
-						message: '--permission-mode auto is deprecated; using "ask"',
-					});
-				} else if (isPermissionMode(mode)) {
+				if (isPermissionMode(mode)) {
 					result.permissionMode = mode;
 				} else {
 					result.diagnostics.push({
 						type: "error",
-						message: `Invalid permission mode "${mode}". Valid values: ask, full`,
+						message: `Invalid permission mode "${mode}". Valid values: ask, auto, full`,
 					});
 				}
 			}
 		} else if (arg === "--reviewer" || arg === "--no-reviewer") {
 			result.diagnostics.push({
 				type: "warning",
-				message: `${arg} is deprecated and ignored; permissions use Ask or Full`,
+				message: `${arg} is deprecated and ignored; permissions use Ask, Auto, or Full`,
 			});
 		} else if (arg === "--continue" || arg === "-c") {
 			result.continue = true;
@@ -306,7 +300,7 @@ ${chalk.bold("Options:")}
   --mode <mode>                  Output mode: text (default), json, or rpc
   --agent-mode <mode>            New-session classification: chat or code (default: code)
   --cwd <path>                   Bind a new session to an existing directory
-  --permission-mode <ask|full>   New-session approval mode
+  --permission-mode <ask|auto|full> New-session approval mode (default: auto)
   --print, -p                    Non-interactive mode: process prompt and exit
   --continue, -c                 Continue previous session
   --resume, -r                   Select a session to resume
