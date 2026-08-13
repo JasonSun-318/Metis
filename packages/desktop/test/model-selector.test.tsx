@@ -49,10 +49,10 @@ describe("ModelSelector", () => {
 		expect(container.querySelectorAll('[role="menuitemradio"]')).toHaveLength(2);
 
 		// Drill into the current provider: the provider menu stays open and the
-		// model submenu appears alongside it.
+		// model submenu appears alongside it with the models listed directly.
 		await act(async () => providers[0]!.click());
 		expect(container.querySelector(".model-selector-provider")).not.toBeNull();
-		expect(container.querySelector(".model-selector-back")?.textContent).toContain("Xiaomi MiMo");
+		expect(container.querySelector(".model-selector-submenu")).not.toBeNull();
 		const modelOptions = [...container.querySelectorAll<HTMLButtonElement>(
 			".model-selector-submenu [role=menuitemradio]",
 		)];
@@ -63,9 +63,9 @@ describe("ModelSelector", () => {
 		// Escape returns to the provider list instead of closing the popover.
 		await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Select model"]')!.click());
 		await act(async () => container.querySelector<HTMLButtonElement>('.model-selector-provider')!.click());
-		expect(container.querySelector(".model-selector-back")).not.toBeNull();
+		expect(container.querySelector(".model-selector-submenu")).not.toBeNull();
 		await act(async () => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
-		expect(container.querySelector(".model-selector-back")).toBeNull();
+		expect(container.querySelector(".model-selector-submenu")).toBeNull();
 		expect(container.querySelector(".model-selector-provider")).not.toBeNull();
 
 		// Escape on the provider list closes the popover entirely.

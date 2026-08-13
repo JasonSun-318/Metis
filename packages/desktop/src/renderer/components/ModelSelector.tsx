@@ -1,5 +1,5 @@
 import type { ModelOptionView, SessionSnapshot } from "@metis/app-protocol";
-import { CaretDown, CaretLeft, Check, CaretRight } from "@phosphor-icons/react";
+import { CaretDown, Check, CaretRight } from "@phosphor-icons/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { providerDisplayName } from "../provider-names.ts";
@@ -138,16 +138,6 @@ export function ModelSelector({ available, commandRequest, disabled, onChange, v
 			)}
 			{open && activeProvider !== null && (
 				<div aria-label={t("Models")} className="model-selector-submenu" role="menu">
-					<button
-						aria-label={t("Back to providers")}
-						className="model-selector-back"
-						onClick={() => setActiveProvider(null)}
-						role="menuitem"
-						type="button"
-					>
-						<CaretLeft aria-hidden="true" size={14} />
-						<span>{providerDisplayName(activeProvider)}</span>
-					</button>
 					{activeModels.map((model, index) => {
 						const isSelected = model.provider === value?.provider && model.modelId === value.modelId;
 						return (
