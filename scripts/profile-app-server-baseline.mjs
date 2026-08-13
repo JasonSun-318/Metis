@@ -38,6 +38,7 @@ function parseArgs(argv) {
 		runtimeHost: undefined,
 		agentDir: undefined,
 		sandbox: false,
+		permissionSandbox: false,
 		scheduleIdle: false,
 		scheduleDue: false,
 	};
@@ -51,6 +52,7 @@ function parseArgs(argv) {
 			throw new Error(`Missing value for ${arg}`);
 		}
 		if (arg === "--sandbox") options.sandbox = true;
+		else if (arg === "--permission-sandbox") options.permissionSandbox = true;
 		else if (arg === "--schedule-idle") options.scheduleIdle = true;
 		else if (arg === "--schedule-due") options.scheduleDue = true;
 		else if (arg === "--runs") options.runs = parseInteger(argv[++index], arg, 1);
@@ -60,7 +62,7 @@ function parseArgs(argv) {
 		else if (arg === "--agent-dir") options.agentDir = resolve(argv[++index]);
 		else throw new Error(`Unknown option: ${arg}`);
 	}
-	if ([options.sandbox, options.scheduleIdle, options.scheduleDue].filter(Boolean).length > 1) {
+	if ([options.sandbox, options.permissionSandbox, options.scheduleIdle, options.scheduleDue].filter(Boolean).length > 1) {
 		throw new Error("Choose only one opt-in measurement case");
 	}
 	return options;
@@ -72,6 +74,7 @@ function printHelp() {
 	process.stdout.write(`  --warmup <n>     Warm-up runs (default: 1)\n`);
 	process.stdout.write(`  --output <file>  JSON result path (default: profiles-node/desktop-baseline-<time>.json)\n`);
 	process.stdout.write(`  --sandbox       Measure one isolated workspace-sandbox lifecycle\n`);
+	process.stdout.write(`  --permission-sandbox Measure lazy/reused interactive sandbox and exact-rule lookup\n`);
 	process.stdout.write(`  --schedule-idle Measure 10,000 idle scheduled tasks for 60 seconds\n`);
 	process.stdout.write(`  --schedule-due  Measure 100 fake due scheduled tasks\n`);
 }
@@ -525,6 +528,99 @@ async function measureWorkspaceSandbox() {
 	}
 }
 
+async function measurePermissionSandbox() {
+	const codingAgent = await import(pathToFileURL(distIndex).href);
+	const root = mkdtempSync(join(tmpdir(), "metis-permission-sandbox-profile-"));
+	const agentDir = join(root, "agent");
+	const cwd = join(root, "workspace");
+	mkdirSync(agentDir);
+	mkdirSync(cwd);
+	const handlesBefore = process._getActiveHandles().length;
+	let brokerCreationCount = 0;
+	let hostExecutionCount = 0;
+	const openStartedAt = performance.now();
+	const boundary = codingAgent.createInteractiveBashBoundary({
+		hostOperations: {
+			exec: async () => {
+				hostExecutionCount += 1;
+				throw new Error("Permission sandbox profile unexpectedly used host Bash");
+			},
+		},
+		context: () => ({ cwd, workspaceRoots: [cwd], readOnlyRoots: [], writeRoots: [] }),
+		createSandbox: async (input) => {
+			brokerCreationCount += 1;
+			return codingAgent.createWorkspaceSandbox(input);
+		},
+	});
+	const sessionOpenBeforeBashMs = performance.now() - openStartedAt;
+	if (brokerCreationCount !== 0) throw new Error("Interactive sandbox was not lazy");
+	try {
+		const execute = async (actionId, command) => {
+			boundary.bind(actionId, "sandbox");
+			const output = [];
+			const startedAt = performance.now();
+			const result = await boundary.operations.exec(command, cwd, {
+				actionId,
+				onData: (chunk) => output.push(chunk),
+			});
+			if (result.exitCode !== 0) throw new Error(`Permission sandbox command failed: ${command}`);
+			return { durationMs: performance.now() - startedAt, output: Buffer.concat(output).toString() };
+		};
+		const first = await execute("profile-first", "printf first");
+		const reused = [];
+		for (let index = 0; index < 10; index++) reused.push(await execute(`profile-${index}`, `printf ${index}`));
+		if (brokerCreationCount !== 1) throw new Error(`Expected one reused broker, observed ${brokerCreationCount}`);
+
+		const rules = new codingAgent.ProjectPermissionRuleStore(agentDir);
+		let lastInput;
+		for (let index = 0; index < 256; index++) {
+			lastInput = {
+				projectPath: cwd,
+				cwd,
+				workspaceRoots: [cwd],
+				action: {
+					actionId: `rule-${index}`,
+					toolName: "bash",
+					provenance: "builtin",
+					risks: ["shell"],
+					paths: [],
+					networkTargets: [],
+					command: `printf ${index}`,
+				},
+				args: { command: `printf ${index}` },
+				executionTarget: "sandbox",
+			};
+			rules.remember(lastInput);
+		}
+		const ruleLookupStartedAt = performance.now();
+		if (!rules.match(lastInput)) throw new Error("Exact permission rule lookup missed");
+		const ruleLookup256Ms = performance.now() - ruleLookupStartedAt;
+
+		const fullSwitchStartedAt = performance.now();
+		await boundary.reset();
+		const fullSwitchDisposeMs = performance.now() - fullSwitchStartedAt;
+		await boundary.dispose();
+		const activeHandlesAfterDispose = await handlesAfterStop(handlesBefore);
+		if (activeHandlesAfterDispose > handlesBefore) throw new Error("Permission sandbox leaked active handles");
+		if (hostExecutionCount !== 0) throw new Error("Permission sandbox fell back to host execution");
+		process.stdout.write(`${JSON.stringify({
+			case: "permission-sandbox",
+			sessionOpenBeforeBashMs,
+			brokerCreationCountBeforeFirst: 0,
+			firstSandboxBashMs: first.durationMs,
+			reusedSandboxBashMs: reused.map((sample) => sample.durationMs),
+			brokerCreationCount,
+			ruleLookup256Ms,
+			fullSwitchDisposeMs,
+			hostExecutionCount,
+			activeHandlesAfterDispose,
+		})}\n`);
+	} finally {
+		await boundary.dispose().catch(() => undefined);
+		rmSync(root, { recursive: true, force: true });
+	}
+}
+
 function seedIdleScheduleIndex(agentDir, workspace, taskCount) {
 	const createdAt = "2026-07-26T00:00:00.000Z";
 	const tasks = Array.from({ length: taskCount }, (_, index) => ({
@@ -765,6 +861,10 @@ async function main() {
 	}
 	if (options.sandbox) {
 		await measureWorkspaceSandbox();
+		return;
+	}
+	if (options.permissionSandbox) {
+		await measurePermissionSandbox();
 		return;
 	}
 	if (options.scheduleIdle) {
