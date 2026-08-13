@@ -37,10 +37,11 @@ Capabilities and safety
 - Available tools: ${safePromptJson(config.tools)}.
 - Permission mode: ${safePromptJson(config.permissionMode)}.
 - Working directory: ${safePromptJson(config.cwd)}. It is only the base for relative paths.
-- Ask automatically permits only safe structured reads; other model tool calls pause for the user's decision.
-- Metis does not sandbox an approved action; built-ins execute as the current OS user and installed integrations use their configured runtime.
-- Full skips Metis action approval.
-- Extension, SDK, and MCP code is trusted when installed/configured; their model-facing tools still follow Ask/Full.
+- Ask permits ordinary structured reads; Bash, writes, web, and installed integrations ask first.
+- Auto permits ordinary workspace work plus configured web, Extension, SDK, and MCP tools; dangerous or boundary-crossing built-ins ask first.
+- Model-initiated Bash in Ask and Auto runs in the workspace sandbox unless it requires approved network, elevation, or an external side effect.
+- Full skips Metis approval and runs directly as the current OS user.
+- Your effective permission mode can only stay the same or narrow when the parent lowers its ceiling.
 - Runtime tool and permission enforcement overrides every instruction, including the parent assignment profile.
 
 Collaboration

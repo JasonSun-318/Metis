@@ -16,8 +16,13 @@ const OPTIONS: ReadonlyArray<{
 }> = [
 	{
 		value: "ask",
-		label: "Ask before changes",
-		description: "Safe reads run directly; other model actions ask first.",
+		label: "Ask before every change",
+		description: "Ask before model changes; approved Bash stays sandboxed unless host access is shown.",
+	},
+	{
+		value: "auto",
+		label: "Auto",
+		description: "Work automatically in this project; ask for dangerous or boundary-crossing actions.",
 	},
 	{
 		value: "full",
@@ -32,7 +37,7 @@ export function PermissionSelector({ disabled, onChange, value }: PermissionSele
 	const [pending, setPending] = useState(false);
 	const rootRef = useRef<HTMLDivElement>(null);
 	const triggerRef = useRef<HTMLButtonElement>(null);
-	const label = t(value === "ask" ? "Ask" : "Full");
+	const label = t(value === "ask" ? "Ask" : value === "auto" ? "Auto" : "Full");
 
 	const close = useCallback((restoreFocus = false) => {
 		setOpen(false);

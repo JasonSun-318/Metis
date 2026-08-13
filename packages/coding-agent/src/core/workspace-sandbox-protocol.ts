@@ -1,7 +1,14 @@
 export type SandboxErrorCode = "SANDBOX_UNAVAILABLE" | "SANDBOX_PROTOCOL" | "SANDBOX_CLOSED";
 
 export type SandboxRequest =
-	| { type: "init"; cwd: string; workspaceRoots: string[] }
+	| {
+			type: "init";
+			cwd: string;
+			workspaceRoots: string[];
+			readOnlyRoots: string[];
+			writeRoots: string[];
+			shellPath?: string;
+	  }
 	| { type: "exec"; id: string; command: string; cwd: string; timeoutMs?: number; env: Record<string, string> }
 	| { type: "cancel"; id: string }
 	| { type: "close" };
@@ -18,6 +25,8 @@ const MAX_COMMAND_BYTES = 256 * 1024;
 const MAX_ENV_BYTES = 256 * 1024;
 const MAX_ENV_ENTRIES = 256;
 const MAX_TIMEOUT_MS = 2_147_483_647;
+const MAX_PATHS = 128;
+const MAX_PATH_LENGTH = 4096;
 
 function parseLine(line: string): unknown {
 	if (Buffer.byteLength(line, "utf8") > MAX_LINE_BYTES) throw new TypeError("Sandbox message exceeds 1 MiB");
@@ -40,6 +49,17 @@ function nonEmptyString(value: unknown, field: string): string {
 		throw new TypeError(`Sandbox ${field} must be a non-empty string without NUL bytes`);
 	}
 	return value;
+}
+
+function paths(value: unknown, field: string, allowEmpty: boolean): string[] {
+	if (!Array.isArray(value) || (!allowEmpty && value.length === 0) || value.length > MAX_PATHS) {
+		throw new TypeError(`Sandbox ${field} must be a bounded array`);
+	}
+	return value.map((item) => {
+		const path = nonEmptyString(item, field);
+		if (path.length > MAX_PATH_LENGTH) throw new TypeError(`Sandbox ${field} path is too long`);
+		return path;
+	});
 }
 
 function environment(value: unknown): Record<string, string> {
@@ -74,18 +94,36 @@ function timeout(value: unknown): number | undefined {
 }
 
 export function parseSandboxRequest(line: string): SandboxRequest {
-	const value = strictRecord(parseLine(line), ["type", "cwd", "workspaceRoots", "id", "command", "timeoutMs", "env"]);
+	const value = strictRecord(parseLine(line), [
+		"type",
+		"cwd",
+		"workspaceRoots",
+		"readOnlyRoots",
+		"writeRoots",
+		"shellPath",
+		"id",
+		"command",
+		"timeoutMs",
+		"env",
+	]);
 	const type = nonEmptyString(value.type, "request type");
 	switch (type) {
 		case "init": {
-			const record = strictRecord(value, ["type", "cwd", "workspaceRoots"]);
-			if (!Array.isArray(record.workspaceRoots) || record.workspaceRoots.length === 0) {
-				throw new TypeError("Sandbox workspaceRoots must be a non-empty array");
-			}
+			const record = strictRecord(value, [
+				"type",
+				"cwd",
+				"workspaceRoots",
+				"readOnlyRoots",
+				"writeRoots",
+				"shellPath",
+			]);
 			return {
 				type,
 				cwd: nonEmptyString(record.cwd, "cwd"),
-				workspaceRoots: record.workspaceRoots.map((root) => nonEmptyString(root, "workspace root")),
+				workspaceRoots: paths(record.workspaceRoots, "workspaceRoots", false),
+				readOnlyRoots: paths(record.readOnlyRoots, "readOnlyRoots", true),
+				writeRoots: paths(record.writeRoots, "writeRoots", true),
+				...(record.shellPath === undefined ? {} : { shellPath: nonEmptyString(record.shellPath, "shellPath") }),
 			};
 		}
 		case "exec": {

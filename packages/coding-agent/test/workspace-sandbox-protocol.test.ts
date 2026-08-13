@@ -2,10 +2,24 @@ import { expect, it } from "vitest";
 import { parseSandboxRequest, parseSandboxResponse } from "../src/core/workspace-sandbox-protocol.ts";
 
 it("accepts only the bounded discriminated sandbox protocol", () => {
-	expect(parseSandboxRequest(JSON.stringify({ type: "init", cwd: "/work", workspaceRoots: ["/work"] }))).toEqual({
+	expect(
+		parseSandboxRequest(
+			JSON.stringify({
+				type: "init",
+				cwd: "/work",
+				workspaceRoots: ["/work"],
+				readOnlyRoots: ["/attachments"],
+				writeRoots: ["/workdir"],
+				shellPath: "/bin/zsh",
+			}),
+		),
+	).toEqual({
 		type: "init",
 		cwd: "/work",
 		workspaceRoots: ["/work"],
+		readOnlyRoots: ["/attachments"],
+		writeRoots: ["/workdir"],
+		shellPath: "/bin/zsh",
 	});
 	expect(
 		parseSandboxRequest(
@@ -26,7 +40,16 @@ it("accepts only the bounded discriminated sandbox protocol", () => {
 
 	for (const line of [
 		"{",
-		JSON.stringify({ type: "init", cwd: "/work", workspaceRoots: [] }),
+		JSON.stringify({ type: "init", cwd: "/work", workspaceRoots: [], readOnlyRoots: [], writeRoots: [] }),
+		JSON.stringify({ type: "init", cwd: "/work", workspaceRoots: ["/work"], writeRoots: [] }),
+		JSON.stringify({
+			type: "init",
+			cwd: "/work",
+			workspaceRoots: ["/work"],
+			readOnlyRoots: [],
+			writeRoots: [],
+			shellPath: "",
+		}),
 		JSON.stringify({ type: "exec", id: "1", command: "x".repeat(262_145), cwd: "/work", env: {} }),
 		JSON.stringify({ type: "exec", id: "1", command: "pwd", cwd: "/work", env: {}, extra: true }),
 		JSON.stringify({ type: "exec", id: "1", command: "pwd", cwd: "/work", env: {}, timeoutMs: -1 }),

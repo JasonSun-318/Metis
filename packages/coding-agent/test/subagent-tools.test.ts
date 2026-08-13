@@ -163,7 +163,7 @@ describe("subagent control tools", () => {
 				background: true,
 				permissionMode: "auto",
 			}),
-		).toBe(false);
+		).toBe(true);
 		expect(
 			Value.Check(spawn.parameters, {
 				name: "researcher",

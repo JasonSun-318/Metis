@@ -425,7 +425,7 @@ describe("SubagentManager", () => {
 		harness.runtimes[0]!.session.settle();
 	});
 
-	it("lets a Full parent choose Ask or Full for a new child", async () => {
+	it("lets a Full parent choose Ask, Auto, or Full for a new child", async () => {
 		const harness = setup({ parentPermissionMode: "full" });
 		const ask = await harness.manager.spawn({
 			name: "narrow",
@@ -441,14 +441,23 @@ describe("SubagentManager", () => {
 			background: true,
 			permissionMode: "full",
 		});
+		const auto = await harness.manager.spawn({
+			name: "automatic",
+			task: "work automatically",
+			tools: ["read"],
+			background: true,
+			permissionMode: "auto",
+		});
 		expect(ask.permissionMode).toBe("ask");
+		expect(auto.permissionMode).toBe("auto");
 		expect(full.permissionMode).toBe("full");
-		await vi.waitFor(() => expect(harness.runtimes).toHaveLength(2));
+		await vi.waitFor(() => expect(harness.runtimes).toHaveLength(3));
 		harness.runtimes[0]!.session.settle();
 		harness.runtimes[1]!.session.settle();
+		harness.runtimes[2]!.session.settle();
 	});
 
-	it("downgrades a running foreground Full child and never re-upgrades it", async () => {
+	it("narrows a running Full child through Auto and Ask without re-upgrading it", async () => {
 		const harness = setup({ parentPermissionMode: "full" });
 		const pending = harness.manager.spawn({
 			name: "foreground-permissions",
@@ -460,15 +469,18 @@ describe("SubagentManager", () => {
 		const childId = harness.factoryInputs[0]!.config.agentId;
 		expect(harness.runtimes[0]!.session.sessionManager.getPermissionSettings()).toEqual({ mode: "full" });
 
-		harness.parentManager.setPermissionSettings({ mode: "ask" });
-		expect(harness.factoryInputs[0]!.permissionModeCeiling()).toBe("ask");
-		expect(harness.runtimes[0]!.session.sessionManager.getPermissionSettings()).toEqual({ mode: "ask" });
+		harness.parentManager.setPermissionSettings({ mode: "auto" });
+		expect(harness.factoryInputs[0]!.permissionModeCeiling()).toBe("auto");
+		expect(harness.runtimes[0]!.session.sessionManager.getPermissionSettings()).toEqual({ mode: "auto" });
 		expect(harness.manager.listSummaries()[0]).toMatchObject({
 			agentId: childId,
-			configuration: { permissionMode: "ask" },
+			configuration: { permissionMode: "auto" },
 		});
 
 		harness.parentManager.setPermissionSettings({ mode: "full" });
+		expect(harness.factoryInputs[0]!.permissionModeCeiling()).toBe("auto");
+		expect(harness.runtimes[0]!.session.sessionManager.getPermissionSettings()).toEqual({ mode: "auto" });
+		harness.parentManager.setPermissionSettings({ mode: "ask" });
 		expect(harness.factoryInputs[0]!.permissionModeCeiling()).toBe("ask");
 		expect(harness.runtimes[0]!.session.sessionManager.getPermissionSettings()).toEqual({ mode: "ask" });
 		harness.runtimes[0]!.session.settle("foreground complete");
@@ -558,7 +570,7 @@ describe("SubagentManager", () => {
 		});
 
 		expect(() => harness.parentManager.setPermissionSettings({ mode: "ask" })).toThrow(
-			"Failed to persist Ask permission for every child session",
+			"Failed to persist narrowed permission for every child session",
 		);
 		expect(harness.manager.listSummaries()[0]).toMatchObject({
 			configuration: { permissionMode: "ask" },

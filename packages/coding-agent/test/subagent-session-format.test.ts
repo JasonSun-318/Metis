@@ -264,7 +264,7 @@ describe("v7 first-class subagent records", () => {
 		});
 		expect(legacy).toMatchObject({
 			type: "subagent_created",
-			config: { permissionMode: "ask" },
+			config: { permissionMode: "auto" },
 		});
 		expect(legacy.type === "subagent_created" ? legacy.config : {}).not.toHaveProperty("reviewerEnabled");
 		expect(legacy.type === "subagent_created" ? legacy.config : {}).not.toHaveProperty("readPaths");

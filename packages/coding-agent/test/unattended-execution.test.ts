@@ -59,9 +59,18 @@ describe("unattended workspace-write execution", () => {
 		expect(decision(toolName, args)).toBe("allow");
 	});
 
-	it("allows sandbox Bash and host web tools but denies elevation and unknown tools", () => {
+	it("allows ordinary sandbox Bash but denies dangerous commands", () => {
 		expect(decision("bash", { command: "pwd" })).toBe("allow");
+		expect(decision("bash", { command: "cat .env" })).toBe("deny");
+		expect(decision("bash", { command: `node -e "require('node:fs').rmSync('src',{recursive:true})"` })).toBe("deny");
+		expect(decision("bash", { command: `python3 -c "import shutil; shutil.rmtree('src')"` })).toBe("deny");
+		expect(decision("bash", { command: "./scripts/cleanup.sh" })).toBe("deny");
+		expect(decision("bash", { command: "cat $'\\x2eenv'" })).toBe("deny");
+		expect(decision("bash", { command: "npm install" })).toBe("deny");
+		expect(decision("bash", { command: "rm -rf ./src" })).toBe("deny");
+		expect(decision("bash", { command: "git reset --hard" })).toBe("deny");
 		expect(decision("bash", { command: "sudo true" })).toBe("deny");
+		expect(decision("bash", { command: "git push" })).toBe("deny");
 		expect(decision("web_fetch", { url: "https://example.test" })).toBe("allow");
 		expect(decision("web_search", { query: "Metis" })).toBe("allow");
 		expect(decision("schedule", {})).toBe("deny");

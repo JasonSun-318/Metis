@@ -325,21 +325,16 @@ export class SubagentManager implements SubagentManagerApi {
 		const parentMode = this.parentSessionManager.getPermissionSettings().mode;
 		for (const record of this.store.list().agents) {
 			const config = this.store.load(record.agentId).config;
-			this.childPermissionCeilings.set(
-				record.agentId,
-				narrowPermissionMode(config?.permissionMode ?? "ask", parentMode),
-			);
+			this.childPermissionCeilings.set(record.agentId, config?.permissionMode ?? "ask");
 		}
 		this.unsubscribeParentPermissions = this.parentSessionManager.subscribePermissionSettings((next) => {
-			if (next.mode === "ask") this.downgradeChildrenToAsk();
+			this.narrowChildrenTo(next.mode);
 		});
-		if (parentMode === "ask") {
-			try {
-				this.downgradeChildrenToAsk();
-			} catch (error) {
-				this.unsubscribeParentPermissions();
-				throw error;
-			}
+		try {
+			this.narrowChildrenTo(parentMode);
+		} catch (error) {
+			this.unsubscribeParentPermissions();
+			throw error;
 		}
 	}
 
@@ -393,7 +388,7 @@ export class SubagentManager implements SubagentManagerApi {
 		}
 		const parentMode = parent.sessionManager.getPermissionSettings().mode;
 		const permissionMode = input.permissionMode ?? parentMode;
-		if (parentMode === "ask" && permissionMode === "full") {
+		if (narrowPermissionMode(permissionMode, parentMode) !== permissionMode) {
 			throw new Error("Child permissions cannot be broader than parent permissions");
 		}
 		const model = this.resolveModel(parent, input.model);
@@ -1104,17 +1099,27 @@ export class SubagentManager implements SubagentManagerApi {
 		}
 	}
 
-	private downgradeChildrenToAsk(): void {
+	private narrowChildrenTo(parentMode: PermissionMode): void {
+		const records = this.store.list().agents;
+		const changed = records.filter((record) => {
+			const current = this.childPermissionCeilings.get(record.agentId) ?? "ask";
+			return narrowPermissionMode(current, parentMode) !== current;
+		});
+		if (changed.length === 0) return;
 		const failures: unknown[] = [];
-		for (const record of this.store.list().agents) {
-			this.childPermissionCeilings.set(record.agentId, "ask");
+		for (const record of changed) {
+			const current = this.childPermissionCeilings.get(record.agentId) ?? "ask";
+			this.childPermissionCeilings.set(record.agentId, narrowPermissionMode(current, parentMode));
 		}
-		for (const record of this.store.list().agents) {
+		for (const record of changed) {
+			const ceiling = this.childPermissionCeilings.get(record.agentId) ?? "ask";
 			const hot = this.hot.get(record.agentId);
 			if (hot) {
 				try {
-					if (hot.runtime.session.sessionManager.getPermissionSettings().mode !== "ask") {
-						hot.runtime.session.sessionManager.setPermissionSettings({ mode: "ask" });
+					const manager = hot.runtime.session.sessionManager;
+					const target = narrowPermissionMode(manager.getPermissionSettings().mode, ceiling);
+					if (manager.getPermissionSettings().mode !== target) {
+						manager.setPermissionSettings({ mode: target });
 					}
 				} catch (error) {
 					hot.lifecycleError = error instanceof Error ? error : new Error(String(error));
@@ -1129,7 +1134,8 @@ export class SubagentManager implements SubagentManagerApi {
 			let manager: SessionManager | undefined;
 			try {
 				manager = SessionManager.open(record.path);
-				if (manager.getPermissionSettings().mode !== "ask") manager.setPermissionSettings({ mode: "ask" });
+				const target = narrowPermissionMode(manager.getPermissionSettings().mode, ceiling);
+				if (manager.getPermissionSettings().mode !== target) manager.setPermissionSettings({ mode: target });
 			} catch (error) {
 				failures.push(error);
 			} finally {
@@ -1141,14 +1147,15 @@ export class SubagentManager implements SubagentManagerApi {
 			}
 		}
 		if (failures.length > 0) {
-			throw new AggregateError(failures, "Failed to persist Ask permission for every child session");
+			throw new AggregateError(failures, "Failed to persist narrowed permission for every child session");
 		}
 	}
 
 	private persistRuntimeCeiling(runtime: AgentSessionRuntime, agentId: string): void {
-		if (this.childPermissionCeilings.get(agentId) !== "ask") return;
+		const ceiling = this.childPermissionCeilings.get(agentId) ?? "ask";
 		const manager = runtime.session.sessionManager;
-		if (manager.getPermissionSettings().mode !== "ask") manager.setPermissionSettings({ mode: "ask" });
+		const target = narrowPermissionMode(manager.getPermissionSettings().mode, ceiling);
+		if (manager.getPermissionSettings().mode !== target) manager.setPermissionSettings({ mode: target });
 	}
 
 	private resolveModel(parent: AgentSession, requested: string | undefined): Model<any> {

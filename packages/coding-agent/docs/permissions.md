@@ -1,54 +1,56 @@
 # Permissions
 
-Permissions belong to a session. Both new Chat and Code sessions default to Ask. Use `/permissions` to select Ask or Full for the current session; the footer and `/session` show the stored mode. Switching sessions restores each session's own mode. Legacy `auto` records load as Ask.
+Permissions belong to a session. New Chat and Code sessions default to **Auto**. Use `/permissions` to select Ask, Auto, or Full; switching sessions restores that session's stored mode.
 
 | Mode | Automatic model actions | Actions that ask | Execution |
 |---|---|---|---|
-| **Ask** | Proven safe built-in structured reads inside the primary or an explicitly added Code root, plus safe internal controls | Every outside-root structured read, write/edit, Bash/Git/build/test, network, sensitive read, MCP/Extension/SDK/custom, destructive, elevated, external, or unknown action | After **Allow once**, the exact action runs directly as the current OS user without an Metis sandbox |
+| **Ask** | Proven ordinary built-in structured reads inside the workspace, plus fixed internal controls | Bash, writes, web, MCP, Extensions, SDK/custom tools, sensitive or outside access, and unknown actions | Approved ordinary/destructive Bash stays in the workspace sandbox; network, elevation, or external-side-effect Bash is explicitly shown as host execution |
+| **Auto** | Workspace reads/writes, ordinary sandboxed Bash, built-in web, and installed MCP/Extension/SDK tools | Dangerous Bash and sensitive, outside, or unknown built-in actions | Ordinary Bash runs in the workspace sandbox; structured tools remain path-guarded; approved boundary-crossing Bash runs on the host |
 | **Full** | All model tool actions | None | Runs directly as the current OS user |
 
-The approval UI has two choices: **Allow once** and **Deny**. There is no automatic reviewer and no persistent approval created by either choice.
+The approval UI offers **Reject**, **Always allow for this project** when eligible, and **Allow once**. It always states whether the action will run in the sandbox or directly on the host.
 
-## One-action approval
+## Bash sandbox
 
-An approval is bound to one tool call, its complete arguments, the session working directory, the effective workspace-root snapshot, the permission mode, and any normalized network target. Metis snapshots the arguments before showing the dialog, consumes the approval once, and checks the binding again immediately before execution. A changed argument, path, workspace root, provider target, or Full-to-Ask downgrade invalidates it.
+Ask and Auto share one lazy sandbox broker per interactive session. No broker is created until the first sandboxed Bash command. The broker is reused while the working directory, workspace roots, app-owned attachment/work roots, and shell stay unchanged; a boundary change rotates it. Switching to Full, replacing or closing the runtime, and application shutdown dispose it and its private temporary directory.
 
-The dialog shows the complete Bash command or structured arguments, the affected paths/hosts, the requesting child identity when applicable, and a direct-host warning. It never silently truncates a command. Cancellation, timeout, disconnect, a missing UI, malformed UI output, or an aborted request denies the action without recording a false user decision.
+The sandbox permits reads and writes in the active workspace roots and its private temporary directory. Session attachments are read-only; an active app-owned work directory is writable. Required runtime binaries and libraries are readable. Network access and local port binding are blocked. A command cannot use sandbox approval as a fallback to host execution: startup, protocol, timeout, or runtime failure denies the command.
 
-Approval means host execution. It does not add filesystem, process, credential, or network isolation. A command can affect anything available to the user account that started Metis, including data outside the session working directory.
+Ask prompts for every model-initiated Bash command, including `pwd`, builds, and tests. Auto runs ordinary shell commands automatically in the sandbox. Known destructive commands such as `rm`, `git reset --hard`, or `git clean`, sensitive-path references, and opaque inline or encoded execution prompt; destruction-only commands remain sandboxed. Commands classified as networked, elevated, or externally side-effecting prompt with a host warning and run on the host only after approval. Full Bash runs on the host without Metis approval.
 
-## What Ask permits automatically
+Bash classification is conservative command-text analysis, not program-behavior verification. A command such as `npm test` can execute project code, and the sandbox intentionally permits that code to mutate the active workspace. The security boundary is that Ask still requires approval, while Auto confines ordinary Bash from outside reads/writes and network access; use Ask when every shell invocation must be confirmed.
 
-Ask automatically permits only:
+The sandbox depends on the platform sandbox runtime and packaged helpers. If those are unavailable, Ask and Auto fail closed instead of changing the execution target.
 
-- built-in `read`, `grep`, `find`, and `ls` calls inside the primary or an explicitly added Code root whose target can be proven to be an ordinary readable regular file or directory;
-- fixed no-host controls such as `set_tasks`, `tool_search`, and `inspect_agents`.
+## Structured tools and integrations
 
-Structured reads require an existing, canonical target. A target outside every effective root asks even when it is otherwise ordinary. Traversal reads such as `grep`, `find`, and `ls` ask when the target intersects a sensitive location. Direct reads of known credential/configuration locations and every effective root's `.env*` files also ask. Device nodes, sockets, FIFOs, broken links, missing paths, unreadable objects, and targets whose type cannot be proven are not automatic.
+Structured file tools are path-guarded rather than shell-sandboxed. Ask automatically permits only proven ordinary built-in reads inside an effective workspace root; writes and other model tools ask. Auto permits ordinary workspace reads and writes automatically. Sensitive paths, outside-root targets, unprovable objects, and unknown built-in actions still ask.
 
-Bash is never inferred to be safe from command text: even `pwd`, Git reads, builds, and tests ask when initiated by the model. Workspace-root membership changes structured file authorization; it does not sandbox Bash or limit the OS paths a command can reach after approval. MCP `readOnlyHint` does not make an MCP call automatic; MCP annotations only improve the warning.
+Installing or configuring MCP, Extension, or SDK code means trusting that integration. Its model-facing tools ask in Ask and run automatically in Auto. Integration initialization and in-process hooks already run with Metis's OS authority; the Bash sandbox does not contain them. Built-in `web_fetch` and `web_search` also run automatically in Auto.
+
+Project trust controls whether project-provided configuration and code load. It is separate from action permissions. For hostile installed code or whole-process containment, use a container, VM, micro-VM, remote sandbox, or separate limited OS account. See [Security](security.md) and [Containerization](containerization.md).
+
+## One-action and current-project approval
+
+An Allow-once decision is bound to one action ID, tool and provenance, complete arguments, effective command, working directory, workspace-root snapshot, risks, normalized paths and network targets, current permission mode, and sandbox/host execution target. Metis consumes the binding once and rechecks it immediately before execution. Any change denies the action.
+
+**Always allow for this project** stores the same exact signature in the Metis user directory. Matching is equality-only: there are no command prefixes, wildcards, tool-family grants, or renderer-supplied project paths. A changed argument, command, directory, root, risk, provider target, or execution target prompts again. Rules are bounded, locked, atomically written, project-scoped, and revocable from Desktop Settings > Permissions. A corrupt or unreadable rule store fails closed.
+
+Project rules are available only to primary interactive sessions. Subagents and scheduled tasks cannot create or consume them.
+
+The approval dialog never silently authorizes truncated or incomplete targets. Cancellation, timeout, disconnect, a missing owner, malformed output, an aborted request, persistence failure, or sandbox failure denies the action.
 
 ## Actions outside the model-tool boundary
 
-`!command` and `!!command` are explicit user terminal actions, so they run directly in both modes. `!` adds the result to model context; `!!` does not. Extensions may still intercept the user-Bash event.
+`!command` and `!!command` are explicit user terminal actions, so they run directly on the host in every mode. `!` adds output to model context; `!!` does not. Extensions may still intercept the user-Bash event.
 
-Metis's own runtime bookkeeping—session journals, settings, caches, managed workspaces, tool-output storage, and similar internal writes—is not a model tool call. Provider API traffic, authentication, model discovery, package installation explicitly initiated by the user, and installed integration initialization likewise do not use the action dialog.
+Metis runtime bookkeeping, provider traffic, authentication, model discovery, and package installation explicitly initiated by the user do not use the model-action dialog. Skills, prompts, context files, and model text receive no authority by themselves; model-facing tool calls they cause still follow the selected mode.
 
-Skills, prompts, context files, and model text receive no authority by themselves. Any model-facing tool call they cause still follows Ask or Full.
+## Child agents and scheduled tasks
 
-## Installed code and external isolation
+Permission rank is Ask < Auto < Full. A child may start only at or below its parent's current mode. Parent downgrades immediately cap running, queued, and resumed children; later parent upgrades never re-upgrade them. Children use the same approval UI and Bash sandbox rules, but never inherit current-project rules.
 
-Installing or configuring an Extension, SDK integration, or MCP server means trusting its code and runtime. Load hooks and in-process code run with Metis's OS authority. Their model-facing tools still ask in Ask, but Metis cannot isolate what trusted integration code does internally.
-
-Project trust controls whether project-provided configuration and code are loaded; it is separate from action permissions.
-
-For hostile code, unattended work, or a real containment boundary, run the whole Metis process in a container, VM, micro-VM, remote sandbox, or separate OS account with limited mounts, credentials, and network access. See [Security](security.md) and [Containerization](containerization.md).
-
-## Child-agent permissions
-
-A child inherits the parent's current mode unless the parent chooses a narrower one. An Ask parent can create only Ask children; a Full parent can create Ask or Full children. When a parent changes from Full to Ask, every existing child is immediately capped at Ask and durably downgraded. Returning the parent to Full never re-upgrades those children.
-
-Child approval requests use the same queue and dialog, labeled with the child name and ID. The decision is audited in the child session, not inserted into the parent model transcript. See [Ultra and Subagents](subagents.md).
+Scheduled tasks use a separate non-interactive sandbox profile. They expose only the scheduled tool allowlist, restrict file writes to their task workspace, and deny dangerous, networked, elevated, or externally side-effecting Bash. They never show an approval UI and never fall back to Full. See [Scheduled tasks](scheduled-tasks.md).
 
 ## Native search helpers
 

@@ -30,7 +30,7 @@ Non-interactive modes (`-p`, `--mode json`, and `--mode rpc`) do not show a trus
 
 ## Action Permissions
 
-Every session stores Ask or Full. Ask automatically permits only proven safe built-in structured reads and fixed no-host controls; every other model tool action needs one explicit **Allow once** decision. Full skips Metis action approval. Approved built-ins run directly as the current OS user—Metis does not provide an OS sandbox. See [Permissions](permissions.md) for the exact decision table and fail-closed behavior.
+Every session stores Ask, Auto, or Full; Auto is the default. Ask and Auto use a fail-closed workspace sandbox for model-initiated Bash unless the approval UI explicitly identifies host execution. Structured tools remain path-guarded, while Full skips Metis approval and runs with current-user authority. See [Permissions](permissions.md) for the decision table, exact project rules, and sandbox boundary.
 
 This boundary limits model-initiated actions; it is not isolation for trusted in-process code. Extensions are TypeScript modules that run with the Metis process's OS permissions during load and event hooks. Installing or configuring an extension, SDK integration, or future MCP server means trusting that code. Model-facing calls exposed by those integrations are still treated as custom permission actions.
 

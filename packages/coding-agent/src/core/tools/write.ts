@@ -1,6 +1,6 @@
 import type { AgentTool } from "@metis/agent-core";
 import { Container, Text } from "@metis/tui";
-import { mkdir as fsMkdir, writeFile as fsWriteFile } from "fs/promises";
+import { mkdir as fsMkdir } from "fs/promises";
 import { dirname } from "path";
 import { type Static, Type } from "typebox";
 import { keyHint } from "../../modes/interactive/components/keybinding-hints.ts";
@@ -9,6 +9,7 @@ import type { ToolDefinition, ToolRenderResultOptions } from "../extensions/type
 import { withFileMutationQueue } from "./file-mutation-queue.ts";
 import { resolveToCwd } from "./path-utils.ts";
 import { normalizeDisplayText, renderToolPath, replaceTabs, str } from "./render-utils.ts";
+import { overwriteLocalSingleLinkFile } from "./safe-local-file.ts";
 import { wrapToolDefinition } from "./tool-definition-wrapper.ts";
 
 const writeSchema = Type.Object({
@@ -30,7 +31,7 @@ export interface WriteOperations {
 }
 
 const defaultWriteOperations: WriteOperations = {
-	writeFile: (path, content) => fsWriteFile(path, content, "utf-8"),
+	writeFile: overwriteLocalSingleLinkFile,
 	mkdir: (dir) => fsMkdir(dir, { recursive: true }).then(() => {}),
 };
 

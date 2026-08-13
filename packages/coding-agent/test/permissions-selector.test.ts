@@ -9,7 +9,7 @@ describe("PermissionsSelectorComponent", () => {
 	beforeAll(() => initTheme("dark"));
 	beforeEach(() => setKeybindings(new KeybindingsManager()));
 
-	it("reuses the current SelectList style for Ask and Full", () => {
+	it("reuses the current SelectList style for Ask, Auto, and Full", () => {
 		const selector = new PermissionsSelectorComponent(
 			{ mode: "ask" },
 			() => {},
@@ -17,20 +17,25 @@ describe("PermissionsSelectorComponent", () => {
 		);
 		const output = stripAnsi(selector.render(100).join("\n"));
 
-		expect(output).toContain("Ask before changes");
+		expect(output).toContain("Ask");
+		expect(output).toContain("Auto");
 		expect(output).toContain("Full access");
-		expect(output).toContain("Safe structured reads run directly");
-		expect(output).not.toContain("Auto");
-		expect(output).not.toContain("sandbox");
+		expect(output).toContain("project sandbox");
 	});
 
-	it("saves Ask or Full directly", () => {
+	it("saves Ask, Auto, or Full directly", () => {
 		const onSave = vi.fn();
 		const ask = new PermissionsSelectorComponent({ mode: "ask" }, onSave, () => {});
 		ask.handleInput("\n");
 		expect(onSave).toHaveBeenCalledWith({ mode: "ask" });
 
+		const auto = new PermissionsSelectorComponent({ mode: "ask" }, onSave, () => {});
+		auto.handleInput("\x1b[B");
+		auto.handleInput("\n");
+		expect(onSave).toHaveBeenLastCalledWith({ mode: "auto" });
+
 		const full = new PermissionsSelectorComponent({ mode: "ask" }, onSave, () => {});
+		full.handleInput("\x1b[B");
 		full.handleInput("\x1b[B");
 		full.handleInput("\n");
 		expect(onSave).toHaveBeenLastCalledWith({ mode: "full" });

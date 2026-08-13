@@ -22,6 +22,7 @@ import {
 import { withFileMutationQueue } from "./file-mutation-queue.ts";
 import { resolveToCwd } from "./path-utils.ts";
 import { renderToolPath, str } from "./render-utils.ts";
+import { updateLocalSingleLinkFile } from "./safe-local-file.ts";
 import { wrapToolDefinition } from "./tool-definition-wrapper.ts";
 
 type EditPreview = EditDiffResult | EditDiffError;
@@ -320,31 +321,38 @@ export function createEditToolDefinition(
 
 				throwIfAborted();
 
-				// Check if file exists.
-				try {
-					await ops.access(absolutePath);
-				} catch (error: unknown) {
+				let baseContent!: string;
+				let newContent!: string;
+				const prepare = (buffer: Buffer): string => {
+					const rawContent = buffer.toString("utf-8");
+					const { bom, text: content } = stripBom(rawContent);
+					const originalEnding = detectLineEnding(content);
+					const normalizedContent = normalizeToLF(content);
+					({ baseContent, newContent } = applyEditsToNormalizedContent(normalizedContent, edits, path));
+					return bom + restoreLineEndings(newContent, originalEnding);
+				};
+
+				if (options?.operations) {
+					try {
+						await ops.access(absolutePath);
+					} catch (error: unknown) {
+						throwIfAborted();
+						const errorMessage =
+							error instanceof Error && "code" in error ? `Error code: ${error.code}` : String(error);
+						throw new Error(`Could not edit file: ${path}. ${errorMessage}.`);
+					}
 					throwIfAborted();
-					const errorMessage =
-						error instanceof Error && "code" in error ? `Error code: ${error.code}` : String(error);
-					throw new Error(`Could not edit file: ${path}. ${errorMessage}.`);
+					const finalContent = prepare(await ops.readFile(absolutePath));
+					throwIfAborted();
+					await ops.writeFile(absolutePath, finalContent);
+				} else {
+					try {
+						await updateLocalSingleLinkFile(absolutePath, prepare);
+					} catch (error: unknown) {
+						if (!(error instanceof Error) || !("code" in error)) throw error;
+						throw new Error(`Could not edit file: ${path}. Error code: ${error.code}.`);
+					}
 				}
-				throwIfAborted();
-
-				// Read the file.
-				const buffer = await ops.readFile(absolutePath);
-				const rawContent = buffer.toString("utf-8");
-				throwIfAborted();
-
-				// Strip BOM before matching. The model will not include an invisible BOM in oldText.
-				const { bom, text: content } = stripBom(rawContent);
-				const originalEnding = detectLineEnding(content);
-				const normalizedContent = normalizeToLF(content);
-				const { baseContent, newContent } = applyEditsToNormalizedContent(normalizedContent, edits, path);
-				throwIfAborted();
-
-				const finalContent = bom + restoreLineEndings(newContent, originalEnding);
-				await ops.writeFile(absolutePath, finalContent);
 				throwIfAborted();
 
 				const diffResult = generateDiffString(baseContent, newContent);

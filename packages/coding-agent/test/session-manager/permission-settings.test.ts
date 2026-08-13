@@ -21,20 +21,20 @@ describe("SessionManager permission settings", () => {
 		rmSync(directory, { recursive: true, force: true });
 	});
 
-	it("defaults both Chat and Code to Ask", () => {
+	it("defaults both Chat and Code to Auto", () => {
 		const chat = SessionManager.inMemory(directory, { mode: "chat" });
 		const code = SessionManager.inMemory(directory, { mode: "code" });
 
-		expect(chat.getPermissionSettings()).toEqual({ mode: "ask" });
-		expect(code.getPermissionSettings()).toEqual({ mode: "ask" });
-		expect(chat.getHeader()).toMatchObject({ version: CURRENT_SESSION_VERSION, permissionMode: "ask" });
+		expect(chat.getPermissionSettings()).toEqual({ mode: "auto" });
+		expect(code.getPermissionSettings()).toEqual({ mode: "auto" });
+		expect(chat.getHeader()).toMatchObject({ version: CURRENT_SESSION_VERSION, permissionMode: "auto" });
 		expect(chat.getHeader()).not.toHaveProperty("reviewerEnabled");
 		expect(code.getHeader()).not.toHaveProperty("reviewerEnabled");
 		chat.close();
 		code.close();
 	});
 
-	it("normalizes legacy auto and ignores reviewerEnabled", () => {
+	it("loads Auto and ignores reviewerEnabled", () => {
 		const path = join(directory, "legacy-auto.jsonl");
 		writeRecords(path, [
 			{
@@ -70,18 +70,18 @@ describe("SessionManager permission settings", () => {
 		]);
 
 		const session = SessionManager.open(path, directory);
-		expect(session.getPermissionSettings()).toEqual({ mode: "ask" });
+		expect(session.getPermissionSettings()).toEqual({ mode: "auto" });
 		expect(session.getDurableJournalSnapshot()).toHaveLength(3);
 		session.close();
 	});
 
-	it("writes no legacy permission fields and normalizes deprecated creation input", () => {
+	it("writes no legacy permission fields and preserves Auto creation input", () => {
 		const session = SessionManager.create(directory, directory, { mode: "code", permissionMode: "auto" });
 		session.setPermissionSettings({ mode: "full" });
 		const records = session.getDurableJournalSnapshot();
 
 		expect(session.getPermissionSettings()).toEqual({ mode: "full" });
-		expect(records[0]).toMatchObject({ permissionMode: "ask" });
+		expect(records[0]).toMatchObject({ permissionMode: "auto" });
 		expect(records[0]).not.toHaveProperty("reviewerEnabled");
 		expect(records.at(-1)).toEqual(expect.objectContaining({ type: "session_permissions", permissionMode: "full" }));
 		expect(records.at(-1)).not.toHaveProperty("reviewerEnabled");
@@ -119,14 +119,14 @@ describe("SessionManager permission settings", () => {
 		const unsubscribe = session.subscribePermissionSettings(listener);
 
 		session.setPermissionSettings({ mode: "full" });
-		expect(listener).toHaveBeenCalledWith({ mode: "full" }, { mode: "ask" });
+		expect(listener).toHaveBeenCalledWith({ mode: "full" }, { mode: "auto" });
 		unsubscribe();
 		session.setPermissionSettings({ mode: "ask" });
 		expect(listener).toHaveBeenCalledOnce();
 		session.close();
 	});
 
-	it("derives Ask for legacy Chat and Code headers", () => {
+	it("derives Auto for legacy Chat and Code headers", () => {
 		for (const [id, mode] of [
 			["legacy-chat", "chat"],
 			["legacy-code", undefined],
@@ -143,7 +143,7 @@ describe("SessionManager permission settings", () => {
 				},
 			]);
 			const session = SessionManager.open(path, directory);
-			expect(session.getPermissionSettings()).toEqual({ mode: "ask" });
+			expect(session.getPermissionSettings()).toEqual({ mode: "auto" });
 			session.close();
 		}
 	});

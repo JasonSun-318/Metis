@@ -68,6 +68,8 @@ export interface CreateAgentSessionFromServicesOptions {
 	excludeTools?: CreateAgentSessionOptions["excludeTools"];
 	noTools?: CreateAgentSessionOptions["noTools"];
 	customTools?: ToolDefinition[];
+	/** @internal Allow host UIs to render before optional MCP servers finish connecting. */
+	backgroundOptionalMcpStartup?: boolean;
 	onPermissionRequest?: CreateAgentSessionOptions["onPermissionRequest"];
 	ultraAvailable?: boolean;
 	additionalSystemPrompt?: string | (() => string | undefined);
@@ -227,6 +229,7 @@ export async function createAgentSessionFromServices(
 		excludeTools: options.excludeTools,
 		noTools: options.noTools,
 		customTools: options.customTools,
+		backgroundOptionalMcpStartup: options.backgroundOptionalMcpStartup,
 		onPermissionRequest: options.onPermissionRequest,
 		ultraAvailable: options.ultraAvailable,
 		additionalSystemPrompt: options.additionalSystemPrompt,

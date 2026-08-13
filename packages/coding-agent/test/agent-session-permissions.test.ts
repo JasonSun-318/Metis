@@ -5,8 +5,12 @@ import type { AgentTool } from "@metis/agent-core";
 import { fauxAssistantMessage, fauxToolCall } from "@metis/ai";
 import { Type } from "typebox";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { createInteractiveBashBoundary } from "../src/core/interactive-bash-boundary.ts";
 import type { PermissionApprovalRequest } from "../src/core/permission-policy.ts";
+import type { BashOperations } from "../src/core/tools/bash.ts";
+import type { WorkspaceSandbox } from "../src/core/workspace-sandbox.ts";
 import { createHarness, getMessageText, type Harness } from "./suite/harness.ts";
+import { createTestResourceLoader } from "./utilities.ts";
 
 function customTool(name = "custom_action") {
 	const execute = vi.fn(async (_toolCallId: string, _params: unknown) => ({
@@ -23,11 +27,86 @@ function customTool(name = "custom_action") {
 	return { tool, execute };
 }
 
+function fakeBashBoundary() {
+	const hostExec = vi.fn(async () => ({ exitCode: 0 }));
+	const sandboxExec = vi.fn(async () => ({ exitCode: 0 }));
+	const sandbox: WorkspaceSandbox = {
+		operations: { exec: sandboxExec as BashOperations["exec"] },
+		dispose: vi.fn(async () => {}),
+		forceDispose: vi.fn(),
+	};
+	const createSandbox = vi.fn(async () => sandbox);
+	const boundary = createInteractiveBashBoundary({
+		hostOperations: { exec: hostExec as BashOperations["exec"] },
+		context: () => ({
+			cwd: process.cwd(),
+			workspaceRoots: [process.cwd()],
+			readOnlyRoots: [],
+			writeRoots: [],
+		}),
+		createSandbox: createSandbox as never,
+	});
+	return { boundary, hostExec, sandboxExec, createSandbox };
+}
+
 describe("AgentSession permission enforcement", () => {
 	const harnesses: Harness[] = [];
 
 	afterEach(async () => {
 		while (harnesses.length > 0) await harnesses.pop()?.cleanup();
+	});
+
+	it.each([
+		{ mode: "ask", command: "pwd", asks: true, target: "sandbox" },
+		{ mode: "ask", command: "rm -rf ./build", asks: true, target: "sandbox" },
+		{ mode: "auto", command: "pwd", asks: false, target: "sandbox" },
+		{ mode: "auto", command: "rm -rf ./build", asks: true, target: "sandbox" },
+		{ mode: "auto", command: "git push origin main", asks: true, target: "host" },
+		{ mode: "full", command: "rm -rf ./build", asks: false, target: "host" },
+	] as const)("routes $mode Bash '$command' to $target", async ({ mode, command, asks, target }) => {
+		const fake = fakeBashBoundary();
+		const requestApproval = vi.fn(async () => ({ decision: "allow" as const }));
+		const harness = await createHarness({
+			permissionSettings: { mode },
+			requestPermissionApproval: requestApproval,
+			interactiveBashBoundary: fake.boundary,
+		});
+		harnesses.push(harness);
+		harness.setResponses([
+			fauxAssistantMessage([fauxToolCall("bash", { command })], { stopReason: "toolUse" }),
+			fauxAssistantMessage("done"),
+		]);
+
+		await harness.session.prompt("run it");
+
+		expect(requestApproval).toHaveBeenCalledTimes(asks ? 1 : 0);
+		expect(fake.sandboxExec).toHaveBeenCalledTimes(target === "sandbox" ? 1 : 0);
+		expect(fake.hostExec).toHaveBeenCalledTimes(target === "host" ? 1 : 0);
+		expect(fake.createSandbox).toHaveBeenCalledTimes(target === "sandbox" ? 1 : 0);
+	});
+
+	it("reuses an exact remembered Bash approval but asks again when command text changes", async () => {
+		const fake = fakeBashBoundary();
+		const requestApproval = vi.fn(async () => ({ decision: "allow" as const, remember: "project" as const }));
+		const harness = await createHarness({
+			permissionSettings: { mode: "auto" },
+			requestPermissionApproval: requestApproval,
+			interactiveBashBoundary: fake.boundary,
+			withAgentDir: true,
+		});
+		harnesses.push(harness);
+
+		for (const command of ["rm -rf ./build", "rm -rf ./build", "rm -rf ./cache"]) {
+			harness.setResponses([
+				fauxAssistantMessage([fauxToolCall("bash", { command })], { stopReason: "toolUse" }),
+				fauxAssistantMessage("done"),
+			]);
+			await harness.session.prompt("run it");
+		}
+
+		expect(requestApproval).toHaveBeenCalledTimes(2);
+		expect(fake.sandboxExec).toHaveBeenCalledTimes(3);
+		expect(fake.hostExec).not.toHaveBeenCalled();
 	});
 
 	it("asks once, audits once, and executes a custom tool in Ask", async () => {
@@ -195,6 +274,50 @@ describe("AgentSession permission enforcement", () => {
 				(message) => message.role === "toolResult" && getMessageText(message).includes("metis"),
 			),
 		).toBe(true);
+	});
+
+	it("reads an installed Skill without approval", async () => {
+		const skillRoot = mkdtempSync(join(tmpdir(), "metis-installed-skill-"));
+		try {
+			const path = join(skillRoot, "SKILL.md");
+			writeFileSync(path, "# Create a Skill\n");
+			const baseResourceLoader = createTestResourceLoader();
+			const requestApproval = vi.fn(async () => ({ decision: "deny" as const }));
+			const harness = await createHarness({
+				permissionSettings: { mode: "ask" },
+				requestPermissionApproval: requestApproval,
+				resourceLoader: {
+					...baseResourceLoader,
+					getSkills: () => ({
+						diagnostics: [],
+						skills: [
+							{
+								name: "create-skill",
+								description: "Create a Skill",
+								filePath: path,
+								baseDir: skillRoot,
+								disableModelInvocation: false,
+								sourceInfo: { path, source: "local", scope: "user", origin: "top-level" },
+							},
+						],
+					}),
+				},
+			});
+			harnesses.push(harness);
+			harness.setResponses([
+				fauxAssistantMessage([fauxToolCall("read", { path })], { stopReason: "toolUse" }),
+				fauxAssistantMessage("done"),
+			]);
+
+			await harness.session.prompt("read the Skill");
+
+			expect(requestApproval).not.toHaveBeenCalled();
+			expect(harness.session.messages.some((message) => getMessageText(message).includes("Create a Skill"))).toBe(
+				true,
+			);
+		} finally {
+			rmSync(skillRoot, { recursive: true, force: true });
+		}
 	});
 
 	it("automatically reads from an added directory", async () => {

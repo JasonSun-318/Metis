@@ -41,7 +41,7 @@ export function createUnattendedExecutionProfile(input: {
 
 function isAllowed(profile: UnattendedExecutionProfile, action: PermissionAction): boolean {
 	if (action.provenance !== "builtin") return false;
-	if (action.toolName === "bash") return !action.risks.includes("elevation");
+	if (action.toolName === "bash") return action.risks.length === 1 && action.risks[0] === "shell";
 	if (HOST_NETWORK_TOOLS.has(action.toolName)) return action.risks.every((risk) => risk === "network");
 	if (!STRUCTURED_TOOLS.has(action.toolName)) return false;
 	if (action.risks.some((risk) => risk !== "ordinary-read" && risk !== "workspace-write")) return false;
@@ -57,18 +57,21 @@ export function authorizeUnattendedAction(input: {
 	readonly args: unknown;
 	readonly cwd: string;
 }): PermissionAuthorization {
+	const executionTarget = input.action.toolName === "bash" ? "sandbox" : "host";
 	return isAllowed(input.profile, input.action)
 		? {
 				decision: "allow",
 				source: "automatic",
 				reason: "Allowed by unattended workspace-write policy",
 				action: input.action,
+				executionTarget,
 			}
 		: {
 				decision: "deny",
 				source: "fallback",
 				reason: "Denied by unattended workspace-write policy",
 				action: input.action,
+				executionTarget,
 			};
 }
 

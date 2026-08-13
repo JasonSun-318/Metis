@@ -23,6 +23,11 @@ export function getHighestSupportedThinkingLevel(model: Model<any> | undefined):
 	return levels.at(-1) ?? "off";
 }
 
+export function getLowestSupportedThinkingLevel(model: Model<any> | undefined): ThinkingLevel {
+	if (!model) return "off";
+	return (getSupportedThinkingLevels(model) as ThinkingLevel[])[0] ?? "off";
+}
+
 export function canUseUltra(input: {
 	readonly hostAllowsUltra: boolean;
 	readonly persisted: boolean;

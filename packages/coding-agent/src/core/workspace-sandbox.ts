@@ -1,6 +1,6 @@
 import type { ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { isAbsolute, join } from "node:path";
 import { StringDecoder } from "node:string_decoder";
@@ -35,6 +35,7 @@ export class WorkspaceSandboxError extends Error {
 export interface WorkspaceSandbox {
 	readonly operations: BashOperations;
 	dispose(): Promise<void>;
+	forceDispose(): void;
 }
 
 type PendingCommand = {
@@ -43,6 +44,7 @@ type PendingCommand = {
 	resolve: (result: { exitCode: number | null }) => void;
 	reject: (error: Error) => void;
 	settled: boolean;
+	cancellationError?: Error;
 	timeoutHandle?: NodeJS.Timeout;
 	signal?: AbortSignal;
 	onAbort?: () => void;
@@ -153,20 +155,38 @@ class SandboxBroker {
 	static async start(input: {
 		cwd: string;
 		workspaceRoots: readonly string[];
+		readOnlyRoots?: readonly string[];
+		writeRoots?: readonly string[];
+		shellPath?: string;
 		signal?: AbortSignal;
 	}): Promise<SandboxBroker> {
 		if (input.signal?.aborted) throw new Error("aborted");
+		const allRoots = [...input.workspaceRoots, ...(input.readOnlyRoots ?? []), ...(input.writeRoots ?? [])];
 		if (
 			!isAbsolute(input.cwd) ||
+			input.cwd.includes("\0") ||
 			input.workspaceRoots.length === 0 ||
-			input.workspaceRoots.some((root) => !isAbsolute(root))
+			allRoots.some((root) => !root || !isAbsolute(root) || root.includes("\0"))
 		) {
 			throw new TypeError("Workspace sandbox paths must be absolute and non-empty");
 		}
 		const cwd = canonicalizeActionPath(input.cwd, input.cwd);
-		const workspaceRoots = [...new Set(input.workspaceRoots.map((root) => canonicalizeActionPath(root, root)))];
+		const normalizeRoots = (roots: readonly string[]) => [
+			...new Set(roots.map((root) => canonicalizeActionPath(root, root))),
+		];
+		const workspaceRoots = normalizeRoots(input.workspaceRoots);
+		const readOnlyRoots = normalizeRoots(input.readOnlyRoots ?? []);
+		const writeRoots = normalizeRoots(input.writeRoots ?? []);
 		if (!workspaceRoots.some((root) => isPathInside(root, cwd))) {
 			throw new TypeError("Workspace sandbox cwd must be inside a workspace root");
+		}
+		let shellPath: string | undefined;
+		if (input.shellPath !== undefined) {
+			if (!input.shellPath || !isAbsolute(input.shellPath) || input.shellPath.includes("\0")) {
+				throw new TypeError("Workspace sandbox shell path must be absolute");
+			}
+			shellPath = canonicalizeActionPath(input.shellPath, input.shellPath);
+			if (!statSync(shellPath).isFile()) throw new TypeError("Workspace sandbox shell path must be a file");
 		}
 
 		const temporaryDir = mkdtempSync(join(tmpdir(), "metis-sandbox-"));
@@ -199,7 +219,14 @@ class SandboxBroker {
 			input.signal.addEventListener("abort", broker.hostAbort, { once: true });
 		}
 		try {
-			broker.send({ type: "init", cwd, workspaceRoots });
+			broker.send({
+				type: "init",
+				cwd,
+				workspaceRoots,
+				readOnlyRoots,
+				writeRoots,
+				...(shellPath ? { shellPath } : {}),
+			});
 			await controlTimeout(broker.readyPromise, "Sandbox initialization timed out");
 			return broker;
 		} catch (error) {
@@ -236,19 +263,15 @@ class SandboxBroker {
 				settled: false,
 				signal: options.signal,
 			};
-			const cancel = (error: Error) => {
-				if (pending.settled) return;
-				pending.settled = true;
-				this.cleanupPending(pending, false);
-				this.send({ type: "cancel", id: pending.id });
-				reject(error);
-			};
 			if (options.signal) {
-				pending.onAbort = () => cancel(new Error("aborted"));
+				pending.onAbort = () => this.cancelPending(pending, new Error("aborted"));
 				options.signal.addEventListener("abort", pending.onAbort, { once: true });
 			}
 			if (timeoutMs !== undefined) {
-				pending.timeoutHandle = setTimeout(() => cancel(new Error(`timeout:${options.timeout}`)), timeoutMs);
+				pending.timeoutHandle = setTimeout(
+					() => this.cancelPending(pending, new Error(`timeout:${options.timeout}`)),
+					timeoutMs,
+				);
 			}
 			this.pending = pending;
 			try {
@@ -271,6 +294,26 @@ class SandboxBroker {
 	close(): Promise<void> {
 		this.closeTask ??= this.closeOnce();
 		return this.closeTask;
+	}
+
+	forceClose(): void {
+		if (this.dead) {
+			rmSync(this.temporaryDir, { recursive: true, force: true });
+			return;
+		}
+		this.dead = true;
+		this.closing = true;
+		const error = new WorkspaceSandboxError("SANDBOX_CLOSED", "Workspace sandbox was force-disposed");
+		if (!this.ready) this.readyReject(error);
+		if (this.pending && !this.pending.settled) {
+			this.pending.settled = true;
+			this.pending.reject(error);
+			this.cleanupPending(this.pending, true);
+		}
+		this.closedReject(error);
+		this.detachHostAbort();
+		this.terminate();
+		rmSync(this.temporaryDir, { recursive: true, force: true });
 	}
 
 	private async closeOnce(): Promise<void> {
@@ -355,14 +398,11 @@ class SandboxBroker {
 			throw new Error("Sandbox response id does not match the active command");
 		}
 		if (response.type === "data") {
-			if (!pending.settled) {
+			if (!pending.settled && !pending.cancellationError) {
 				try {
 					pending.onData(Buffer.from(response.data, "base64"));
 				} catch (error) {
-					pending.settled = true;
-					this.cleanupPending(pending, false);
-					this.send({ type: "cancel", id: pending.id });
-					pending.reject(error instanceof Error ? error : new Error(String(error)));
+					this.cancelPending(pending, error instanceof Error ? error : new Error(String(error)));
 				}
 			}
 			return;
@@ -371,8 +411,24 @@ class SandboxBroker {
 		this.cleanupPending(pending, true);
 		if (pending.settled) return;
 		pending.settled = true;
-		if (response.type === "result") pending.resolve({ exitCode: response.exitCode });
+		if (pending.cancellationError) pending.reject(pending.cancellationError);
+		else if (response.type === "result") pending.resolve({ exitCode: response.exitCode });
 		else pending.reject(new WorkspaceSandboxError(response.code, response.message));
+	}
+
+	private cancelPending(pending: PendingCommand, error: Error): void {
+		if (pending.settled || pending.cancellationError) return;
+		pending.cancellationError = error;
+		this.cleanupPending(pending, false);
+		try {
+			this.send({ type: "cancel", id: pending.id });
+			pending.timeoutHandle = setTimeout(
+				() => this.fail("SANDBOX_CLOSED", "Sandbox cancellation timed out"),
+				CONTROL_TIMEOUT_MS,
+			);
+		} catch (cause) {
+			this.fail("SANDBOX_CLOSED", "Sandbox cancellation failed", cause);
+		}
 	}
 
 	private cleanupPending(pending: PendingCommand, terminal: boolean): void {
@@ -388,12 +444,13 @@ class SandboxBroker {
 		if (!this.ready) this.readyReject(error);
 		if (this.pending && !this.pending.settled) {
 			this.pending.settled = true;
-			this.pending.reject(error);
+			this.pending.reject(this.pending.cancellationError ?? error);
 			this.cleanupPending(this.pending, true);
 		}
 		this.closedReject(error);
 		this.detachHostAbort();
 		this.terminate();
+		rmSync(this.temporaryDir, { recursive: true, force: true });
 	}
 
 	private detachHostAbort(): void {
@@ -412,6 +469,9 @@ class SandboxBroker {
 export async function createWorkspaceSandbox(input: {
 	cwd: string;
 	workspaceRoots: readonly string[];
+	readOnlyRoots?: readonly string[];
+	writeRoots?: readonly string[];
+	shellPath?: string;
 	signal?: AbortSignal;
 }): Promise<WorkspaceSandbox> {
 	const broker = await SandboxBroker.start(input);
@@ -422,6 +482,10 @@ export async function createWorkspaceSandbox(input: {
 			if (disposed) return;
 			disposed = true;
 			await broker.close();
+		},
+		forceDispose: () => {
+			disposed = true;
+			broker.forceClose();
 		},
 	};
 }

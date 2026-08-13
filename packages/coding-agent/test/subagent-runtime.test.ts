@@ -82,9 +82,10 @@ describe("subagent runtime prompt and mailbox", () => {
 		expect(contract).toContain('Available tools: ["read","grep"]');
 		expect(contract).toContain('Permission mode: "ask"');
 		expect(contract).toContain('Working directory: "/workspace/frontend". It is only the base for relative paths.');
-		expect(contract).toContain("Ask automatically permits only safe structured reads");
-		expect(contract).toContain("Metis does not sandbox an approved action");
-		expect(contract).toContain("their model-facing tools still follow Ask/Full");
+		expect(contract).toContain("Ask permits ordinary structured reads");
+		expect(contract).toContain("Auto permits ordinary workspace work");
+		expect(contract).toContain("Bash in Ask and Auto runs in the workspace sandbox");
+		expect(contract).toContain("parent lowers its ceiling");
 		expect(contract).not.toContain("read roots");
 		expect(contract).not.toContain("write roots");
 		expect(contract).toContain("You cannot create subagents or communicate with sibling agents");

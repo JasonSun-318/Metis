@@ -11,13 +11,18 @@ const PERMISSIONS_SELECT_LIST_LAYOUT: SelectListLayoutOptions = {
 const MODE_ITEMS: SelectItem[] = [
 	{
 		value: "ask",
-		label: "Ask before changes",
-		description: "Safe structured reads run directly; other model actions ask first",
+		label: "Ask",
+		description: "Read ordinary workspace files; ask before Bash, writes, web, and integrations",
+	},
+	{
+		value: "auto",
+		label: "Auto",
+		description: "Work in the project sandbox; ask for dangerous or boundary-crossing actions",
 	},
 	{
 		value: "full",
 		label: "Full access",
-		description: "Run model tool actions directly with no Metis approval",
+		description: "Run model tool actions directly on the host with no Metis approval",
 	},
 ];
 

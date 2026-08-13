@@ -2,10 +2,18 @@ import { chmodSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync }
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { PermissionSettings } from "../src/core/permission-mode.ts";
+import {
+	defaultPermissionSettings,
+	isPermissionMode,
+	isPersistedPermissionMode,
+	narrowPermissionMode,
+	normalizePermissionMode,
+	type PermissionSettings,
+} from "../src/core/permission-mode.ts";
 import {
 	type ClassifyActionInput,
 	classifyAction,
+	executionTargetFor,
 	formatPermissionApproval,
 	getSensitiveFilesystemPaths,
 	type PermissionAction,
@@ -14,8 +22,9 @@ import {
 	routeAction,
 	unclassifiedAction,
 } from "../src/core/permission-policy.ts";
+import { ProjectPermissionRuleStore } from "../src/core/project-permission-rules.ts";
 
-describe("Ask/Full permission policy", () => {
+describe("Ask/Auto/Full permission policy", () => {
 	let root: string;
 	let cwd: string;
 	let outside: string;
@@ -54,6 +63,65 @@ describe("Ask/Full permission policy", () => {
 		provenance: ClassifyActionInput["provenance"] = "builtin",
 	): PermissionAction => classifyAction(input(toolName, args, provenance));
 
+	it("uses Auto as the default and narrows modes by Ask < Auto < Full", () => {
+		expect(defaultPermissionSettings()).toEqual({ mode: "auto" });
+		expect(isPermissionMode("auto")).toBe(true);
+		expect(isPersistedPermissionMode("auto")).toBe(true);
+		expect(normalizePermissionMode("auto")).toBe("auto");
+		expect(narrowPermissionMode("full", "auto")).toBe("auto");
+		expect(narrowPermissionMode("auto", "ask")).toBe("ask");
+		expect(narrowPermissionMode("auto", "full")).toBe("auto");
+	});
+
+	it("routes the three permission modes and selects Bash execution targets", () => {
+		const cases = [
+			["ask", "read", "builtin", ["ordinary-read"], "allow"],
+			["ask", "write", "builtin", ["workspace-write"], "user"],
+			["ask", "bash", "builtin", ["shell"], "user"],
+			["ask", "web_fetch", "builtin", ["network"], "user"],
+			["ask", "mcp_tool", "mcp", ["custom"], "user"],
+			["auto", "read", "builtin", ["ordinary-read"], "allow"],
+			["auto", "write", "builtin", ["workspace-write"], "allow"],
+			["auto", "bash", "builtin", ["shell"], "allow"],
+			["auto", "bash", "builtin", ["shell", "destructive"], "user"],
+			["auto", "bash", "builtin", ["shell", "network"], "user"],
+			["auto", "web_fetch", "builtin", ["network"], "allow"],
+			["auto", "mcp_tool", "mcp", ["custom", "external-side-effect"], "allow"],
+			["auto", "extension_tool", "extension", ["custom"], "allow"],
+			["auto", "sdk_tool", "sdk", ["custom"], "allow"],
+			["auto", "read", "builtin", ["sensitive-read"], "user"],
+			["auto", "write", "builtin", ["outside-write"], "user"],
+			["full", "bash", "builtin", ["shell", "destructive"], "allow"],
+		] as const;
+		for (const [mode, toolName, provenance, risks, expected] of cases) {
+			expect(
+				routeAction(settings(mode), {
+					actionId: "table",
+					toolName,
+					provenance,
+					risks,
+					paths: [],
+					networkTargets: [],
+				}),
+				`${mode}:${toolName}:${risks.join(",")}`,
+			).toBe(expected);
+		}
+		const bash = (risks: PermissionAction["risks"]): PermissionAction => ({
+			actionId: "bash-target",
+			toolName: "bash",
+			provenance: "builtin",
+			risks,
+			paths: [],
+			networkTargets: [],
+		});
+		expect(executionTargetFor(settings("ask"), bash(["shell"]))).toBe("sandbox");
+		expect(executionTargetFor(settings("auto"), bash(["shell", "destructive"]))).toBe("sandbox");
+		expect(executionTargetFor(settings("auto"), bash(["shell", "network"]))).toBe("host");
+		expect(executionTargetFor(settings("auto"), bash(["shell", "elevation"]))).toBe("host");
+		expect(executionTargetFor(settings("auto"), bash(["shell", "external-side-effect"]))).toBe("host");
+		expect(executionTargetFor(settings("full"), bash(["shell"]))).toBe("host");
+	});
+
 	it("automatically allows only a proven built-in structured read", async () => {
 		const requestApproval = vi.fn(async () => ({ decision: "deny" as const }));
 		const value = action("read", { path: join(cwd, "src", "file.ts") });
@@ -82,6 +150,36 @@ describe("Ask/Full permission policy", () => {
 	});
 
 	it("uses shell parsing only to improve warning metadata", () => {
+		for (const command of ["pwd", "npm test"]) {
+			expect(action("bash", { command }).risks, command).toEqual(["shell"]);
+		}
+		for (const command of [
+			`node -e "require('node:fs').rmSync('src',{recursive:true})"`,
+			`python3 -c "import shutil; shutil.rmtree('src')"`,
+			`perl -e "use File::Path qw(remove_tree); remove_tree('src')"`,
+			"./scripts/cleanup.sh",
+			"cat $'\\x2eenv'",
+			"cat \\x2eenv",
+		]) {
+			const value = action("bash", { command });
+			expect(value.risks, command).toContain("unknown");
+			expect(routeAction(settings("auto"), value), command).toBe("user");
+		}
+		for (const command of ["cat .env", "grep TOKEN config/.env.production", "cat ~/.ssh/id_ed25519"]) {
+			const value = action("bash", { command });
+			expect(value.risks, command).toContain("sensitive-read");
+			expect(routeAction(settings("auto"), value), command).toBe("user");
+		}
+		for (const command of ["rm -rf build", "git clean -fd", "git reset --hard", "dd if=x of=y", "kill 42"]) {
+			expect(action("bash", { command }).risks, command).toContain("destructive");
+		}
+		for (const command of ["curl https://example.test", "npm install", "git fetch origin"]) {
+			expect(action("bash", { command }).risks, command).toContain("network");
+		}
+		for (const command of ["git push origin main", "npm publish", "deploy production"]) {
+			expect(action("bash", { command }).risks, command).toContain("external-side-effect");
+		}
+		expect(action("bash", { command: "sudo true" }).risks).toContain("elevation");
 		expect(action("bash", { command: "git push origin main" }).risks).toEqual([
 			"shell",
 			"network",
@@ -170,6 +268,21 @@ describe("Ask/Full permission policy", () => {
 		expect(routeAction(settings("full"), outsideAction)).toBe("allow");
 		expect(addedAction.risks).toEqual(["ordinary-read"]);
 		expect(routeAction(settings("ask"), addedAction)).toBe("allow");
+	});
+
+	it("allows structured reads from a read-only resource root without allowing writes", () => {
+		const outsideFile = join(outside, "outside.txt");
+		const read = classifyAction({
+			...input("read", { path: outsideFile }),
+			readOnlyRoots: [outside],
+		});
+		const write = classifyAction({
+			...input("write", { path: outsideFile }),
+			readOnlyRoots: [outside],
+		});
+
+		expect(read.risks).toEqual(["ordinary-read"]);
+		expect(write.risks).toEqual(["outside-write"]);
 	});
 
 	it("keeps sensitive reads protected inside an added root", () => {
@@ -267,6 +380,74 @@ describe("Ask/Full permission policy", () => {
 				signal: controller.signal,
 			}),
 		).resolves.toMatchObject({ decision: "deny", source: "fallback" });
+	});
+
+	it("remembers only an exact current-project action and honors revocation", async () => {
+		const agentDir = join(root, "agent-rules");
+		mkdirSync(agentDir);
+		const store = new ProjectPermissionRuleStore(agentDir);
+		const requestApproval = vi.fn(async () => ({ decision: "allow" as const, remember: "project" as const }));
+		const policy = new PermissionPolicy(requestApproval, store);
+		const args = { command: "rm -rf ./build" };
+		const value = action("bash", args);
+		const authorization = {
+			settings: settings("ask"),
+			action: value,
+			args,
+			projectPath: cwd,
+			cwd,
+			workspaceRoots: [cwd],
+			allowProjectRules: true,
+			executionTarget: executionTargetFor(settings("ask"), value),
+		} as const;
+
+		await expect(policy.authorize(authorization)).resolves.toMatchObject({ decision: "allow", source: "user" });
+		await expect(policy.authorize(authorization)).resolves.toMatchObject({
+			decision: "allow",
+			source: "project-rule",
+		});
+		expect(requestApproval).toHaveBeenCalledOnce();
+
+		const changedArgs = { command: "rm -rf ./cache" };
+		const changedAction = action("bash", changedArgs);
+		await policy.authorize({ ...authorization, action: changedAction, args: changedArgs });
+		expect(requestApproval).toHaveBeenCalledTimes(2);
+
+		const remembered = store.list(cwd).find((rule) => rule.command === args.command)!;
+		expect(store.delete(cwd, remembered.id)).toBe(true);
+		await policy.authorize(authorization);
+		expect(requestApproval).toHaveBeenCalledTimes(3);
+	});
+
+	it("does not apply parent project rules to subagents and denies a failed remember", async () => {
+		const agentDir = join(root, "agent-subagent-rules");
+		mkdirSync(agentDir);
+		const store = new ProjectPermissionRuleStore(agentDir);
+		const args = { command: "rm -rf ./build" };
+		const value = action("bash", args);
+		const base = {
+			settings: settings("ask"),
+			action: value,
+			args,
+			projectPath: cwd,
+			cwd,
+			workspaceRoots: [cwd],
+			executionTarget: executionTargetFor(settings("ask"), value),
+		} as const;
+		store.remember(base);
+		const subagentApproval = vi.fn(async () => ({ decision: "deny" as const }));
+		await new PermissionPolicy(subagentApproval, store).authorize({ ...base, allowProjectRules: false });
+		expect(subagentApproval).toHaveBeenCalledOnce();
+
+		const failingAgentDir = join(root, "agent-failing-rules");
+		mkdirSync(failingAgentDir);
+		const failingStore = new ProjectPermissionRuleStore(failingAgentDir);
+		const result = await new PermissionPolicy(async () => {
+			writeFileSync(join(failingAgentDir, "permission-rules.json"), "broken");
+			return { decision: "allow", remember: "project" };
+		}, failingStore).authorize({ ...base, allowProjectRules: true });
+		expect(result).toMatchObject({ decision: "deny", source: "fallback" });
+		expect(result.reason).toContain("could not be saved safely");
 	});
 
 	it("isolates mutable approval arguments and actions from enforcement", async () => {

@@ -44,7 +44,7 @@ const Spawn = Type.Object(
 			}),
 		),
 		permissionMode: Type.Optional(
-			Type.Union([Type.Literal("ask"), Type.Literal("full")], {
+			Type.Union([Type.Literal("ask"), Type.Literal("auto"), Type.Literal("full")], {
 				description:
 					"Optional child permission mode; cannot be broader than yours and defaults to your current mode.",
 			}),

@@ -4,6 +4,7 @@ import { basename, isAbsolute, join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { canonicalizeActionPath, isPathInside, pathsIntersect } from "../utils/paths.ts";
 import type { PermissionSettings } from "./permission-mode.ts";
+import type { ProjectPermissionRuleStore, ProjectPermissionSignatureInput } from "./project-permission-rules.ts";
 
 export type ToolProvenance = "builtin" | "extension" | "sdk" | "mcp";
 
@@ -40,6 +41,7 @@ export interface PermissionAction {
 export type ClassifiedAction = PermissionAction;
 
 export type PermissionRoute = "allow" | "user";
+export type PermissionExecutionTarget = "sandbox" | "host";
 
 export interface PermissionActor {
 	readonly type: "subagent";
@@ -52,12 +54,15 @@ export interface PermissionApprovalRequest {
 	readonly args: unknown;
 	readonly reason: string;
 	readonly cwd?: string;
+	readonly executionTarget?: PermissionExecutionTarget;
+	readonly rememberProjectEligible?: boolean;
 	readonly actor?: PermissionActor;
 	readonly signal?: AbortSignal;
 }
 
 export interface PermissionApprovalDecision {
 	readonly decision: "allow" | "deny";
+	readonly remember?: "project";
 	readonly reason?: string;
 }
 
@@ -69,18 +74,22 @@ export interface PermissionApprovalView {
 	readonly details: string;
 }
 
+export type PermissionAuthorizationSource = "automatic" | "user" | "project-rule" | "fallback";
+
 export type PermissionAuthorization =
 	| {
 			readonly decision: "allow";
-			readonly source: "automatic" | "user";
+			readonly source: Exclude<PermissionAuthorizationSource, "fallback">;
 			readonly reason: string;
 			readonly action: PermissionAction;
+			readonly executionTarget: PermissionExecutionTarget;
 	  }
 	| {
 			readonly decision: "deny";
 			readonly source: "user" | "fallback";
 			readonly reason: string;
 			readonly action: PermissionAction;
+			readonly executionTarget: PermissionExecutionTarget;
 	  };
 
 export interface ClassifyActionInput {
@@ -90,6 +99,7 @@ export interface ClassifyActionInput {
 	readonly args: unknown;
 	readonly cwd: string;
 	readonly workspaceRoots: readonly string[];
+	readonly readOnlyRoots?: readonly string[];
 	readonly mcpAnnotations?: {
 		readonly readOnlyHint?: boolean;
 		readonly destructiveHint?: boolean;
@@ -101,6 +111,11 @@ export interface PermissionAuthorizeInput {
 	readonly settings: PermissionSettings;
 	readonly action: PermissionAction;
 	readonly args: unknown;
+	readonly projectPath?: string;
+	readonly cwd?: string;
+	readonly workspaceRoots?: readonly string[];
+	readonly allowProjectRules?: boolean;
+	readonly executionTarget?: PermissionExecutionTarget;
 	readonly signal?: AbortSignal;
 }
 
@@ -109,6 +124,8 @@ const DIRECT_HOST_WARNING =
 	"Metis does not sandbox this action. Built-in tools run as your current OS user; installed integrations run with the authority you configured.";
 const BASH_HOST_EFFECT_WARNING =
 	"Runs directly on your computer without a sandbox. It may read or change files, start processes, or access the network.";
+const BASH_SANDBOX_WARNING =
+	"Runs in the Metis workspace sandbox. Reads and writes are limited to approved workspace and app-owned paths; network access is blocked.";
 const IRREVERSIBLE_WARNING =
 	"This action may be irreversible or affect an external target. Verify the command and target before allowing it.";
 
@@ -323,7 +340,7 @@ function classifyStructuredRead(input: ClassifyActionInput, rawPath: string, tra
 		input,
 		isSensitivePath(normalized.paths[0]!, input.cwd, traversal, input.workspaceRoots)
 			? ["sensitive-read"]
-			: isInsideWorkspaceRoots(normalized.paths[0]!, input.workspaceRoots)
+			: isInsideWorkspaceRoots(normalized.paths[0]!, [...input.workspaceRoots, ...(input.readOnlyRoots ?? [])])
 				? ["ordinary-read"]
 				: ["outside-read"],
 		normalized.paths,
@@ -340,22 +357,51 @@ function classifyStructuredWrite(input: ClassifyActionInput, rawPath: string): P
 	);
 }
 
-function classifyBashForDisplay(input: ClassifyActionInput, command: string): PermissionAction {
+function bashReferencesSensitivePath(command: string): boolean {
+	const normalized = command.toLowerCase().replaceAll("\\", "/");
+	const environmentFiles = normalized.match(/(?:^|[\s"'=:/])\.env(?:\.[a-z0-9_.-]+)?/gu) ?? [];
+	if (environmentFiles.some((value) => !value.endsWith(".example") && !value.endsWith(".sample"))) return true;
+	return /(?:^|[\s"'=:/])(?:\.ssh|\.aws|\.gnupg|\.kube|\.azure)(?:\/|\b)|(?:^|[\s"'=:/])(?:\.git-credentials|\.netrc|\.npmrc|\.pypirc|auth\.json|credentials(?:\.json)?)(?:\b|$)/u.test(
+		normalized,
+	);
+}
+
+function isOpaqueBashExecution(command: string): boolean {
+	return (
+		/(?:^|[;&|]\s*)(?:\.{1,2}[/\\]|(?:bash|sh|zsh|fish|pwsh|powershell|cmd)(?:\.exe)?\b)/iu.test(command) ||
+		/\b(?:node|nodejs|deno|python\d*|pypy\d*|perl|ruby|php|lua|osascript)\b[^\n]*(?:\s(?:-[ceEr]|--eval|--print|--input-type)(?:\s|=)|<<)/iu.test(
+			command,
+		) ||
+		/(?:^|[;&|]\s*)(?:eval|source)\b|(?:^|[;&|]\s*)\.\s+|\$\(|`|\$'|\\(?:x[\da-f]{2}|u[\da-f]{4}|u\{[\da-f]+\})/iu.test(
+			command,
+		)
+	);
+}
+
+function classifyBash(input: ClassifyActionInput, command: string): PermissionAction {
 	const risks: ActionRisk[] = ["shell"];
-	if (/(^|[;&|]\s*)(rm|rmdir|shred|del|erase|format)\b|\bgit\s+(reset\s+--hard|clean)\b/i.test(command)) {
+	if (bashReferencesSensitivePath(command)) risks.push("sensitive-read");
+	if (isOpaqueBashExecution(command)) risks.push("unknown");
+	if (
+		/\b(?:rm|rmdir|shred|truncate|dd|mkfs|del|erase|format)\b/iu.test(command) ||
+		/\bfind\b[^\n]*\s-delete\b/iu.test(command) ||
+		/\bgit\s+(?:reset\s+--hard|clean\b)/iu.test(command) ||
+		/\b(?:kill|pkill|killall|reboot|shutdown)\b/iu.test(command) ||
+		/\b(?:chmod|chown|chgrp)\b/iu.test(command)
+	) {
 		risks.push("destructive");
 	}
-	if (/\bgit\s+push\b|\b(?:npm|pnpm|yarn|bun|cargo)\s+publish\b|\bdeploy\b/i.test(command)) {
+	if (/\bgit\s+push\b|\b(?:npm|pnpm|yarn|bun|cargo)\s+publish\b|\bdeploy\b/iu.test(command)) {
 		risks.push("external-side-effect");
 	}
 	if (
-		/\b(?:curl|wget|ssh|scp|sftp|nc|ncat|telnet)\b|\bgit\s+(?:push|pull|fetch|clone)\b|\b(?:npm|pnpm|yarn|bun|pip|pip3|cargo|brew)\s+(?:install|add|update|publish)\b/i.test(
+		/\b(?:curl|wget|ssh|scp|sftp|nc|ncat|telnet)\b|\bgit\s+(?:push|pull|fetch|clone)\b|\b(?:npm|pnpm|yarn|bun|pip|pip3|cargo|brew)\s+(?:install|add|update|publish)\b/iu.test(
 			command,
 		)
 	) {
 		risks.push("network");
 	}
-	if (/\b(?:sudo|doas|runas)\b|\bStart-Process\b.*\b-Verb\s+RunAs\b/i.test(command)) risks.push("elevation");
+	if (/\b(?:sudo|doas|runas|su)\b|\bStart-Process\b.*\b-Verb\s+RunAs\b/iu.test(command)) risks.push("elevation");
 	return action(input, risks, [], command);
 }
 
@@ -390,9 +436,7 @@ export function classifyAction(input: ClassifyActionInput): PermissionAction {
 			: action(input, ["unknown"]);
 	}
 	if (input.toolName === "bash") {
-		return typeof args.command === "string"
-			? classifyBashForDisplay(input, args.command)
-			: action(input, ["unknown"]);
+		return typeof args.command === "string" ? classifyBash(input, args.command) : action(input, ["unknown"]);
 	}
 	if (STRUCTURED_READ_TOOLS.has(input.toolName)) {
 		if (args.path !== undefined && typeof args.path !== "string") return action(input, ["unknown"]);
@@ -411,7 +455,26 @@ export function classifyAction(input: ClassifyActionInput): PermissionAction {
 
 export function routeAction(settings: PermissionSettings, value: PermissionAction): PermissionRoute {
 	if (settings.mode === "full") return "allow";
-	return value.risks.length === 1 && value.risks[0] === "ordinary-read" ? "allow" : "user";
+	if (value.risks.length === 1 && value.risks[0] === "ordinary-read") return "allow";
+	if (settings.mode === "ask") return "user";
+	if (value.provenance !== "builtin") return "allow";
+	if (value.risks.length === 1 && value.risks[0] === "workspace-write") return "allow";
+	if (value.toolName === "bash") return value.risks.length === 1 && value.risks[0] === "shell" ? "allow" : "user";
+	if (value.toolName === "web_fetch" || value.toolName === "web_search") {
+		return value.risks.length === 1 && value.risks[0] === "network" ? "allow" : "user";
+	}
+	return "user";
+}
+
+export function executionTargetFor(settings: PermissionSettings, value: PermissionAction): PermissionExecutionTarget {
+	if (
+		settings.mode !== "full" &&
+		value.toolName === "bash" &&
+		!value.risks.some((risk) => ["network", "elevation", "external-side-effect"].includes(risk))
+	) {
+		return "sandbox";
+	}
+	return "host";
 }
 
 export function revalidateStructuredActionBinding(
@@ -419,6 +482,7 @@ export function revalidateStructuredActionBinding(
 	args: unknown,
 	cwd: string,
 	workspaceRoots: readonly string[],
+	readOnlyRoots: readonly string[] = [],
 ): boolean {
 	if (approved.paths.length === 0) return true;
 	if (
@@ -434,6 +498,7 @@ export function revalidateStructuredActionBinding(
 		args,
 		cwd,
 		workspaceRoots,
+		readOnlyRoots,
 	});
 	return isDeepStrictEqual(current.paths, approved.paths) && isDeepStrictEqual(current.risks, approved.risks);
 }
@@ -452,8 +517,12 @@ export function formatPermissionApproval(request: PermissionApprovalRequest): Pe
 	const { action: value } = request;
 	const lines = [
 		request.actor ? `Subagent: ${request.actor.name} (${request.actor.id})` : undefined,
-		DIRECT_HOST_WARNING,
-		value.toolName === "bash" ? BASH_HOST_EFFECT_WARNING : undefined,
+		request.executionTarget === "sandbox" ? undefined : DIRECT_HOST_WARNING,
+		value.toolName === "bash"
+			? request.executionTarget === "sandbox"
+				? BASH_SANDBOX_WARNING
+				: BASH_HOST_EFFECT_WARNING
+			: undefined,
 		value.risks.includes("destructive") || value.risks.includes("external-side-effect")
 			? IRREVERSIBLE_WARNING
 			: undefined,
@@ -479,9 +548,11 @@ export function formatPermissionApproval(request: PermissionApprovalRequest): Pe
 
 export class PermissionPolicy {
 	private requestApproval?: RequestPermissionApproval;
+	private readonly projectRules?: ProjectPermissionRuleStore;
 
-	constructor(requestApproval?: RequestPermissionApproval) {
+	constructor(requestApproval?: RequestPermissionApproval, projectRules?: ProjectPermissionRuleStore) {
 		this.requestApproval = requestApproval;
+		this.projectRules = projectRules;
 	}
 
 	setRequestApproval(requestApproval?: RequestPermissionApproval): void {
@@ -489,21 +560,71 @@ export class PermissionPolicy {
 	}
 
 	async authorize(input: PermissionAuthorizeInput): Promise<PermissionAuthorization> {
+		const executionTarget = executionTargetFor(input.settings, input.action);
+		if (input.executionTarget !== undefined && input.executionTarget !== executionTarget) {
+			return {
+				decision: "deny",
+				source: "fallback",
+				reason: "Permission execution target changed before authorization",
+				action: input.action,
+				executionTarget,
+			};
+		}
 		if (input.settings.mode === "full") {
 			return {
 				decision: "allow",
 				source: "automatic",
 				reason: "Full access is enabled",
 				action: input.action,
+				executionTarget,
 			};
 		}
 		if (routeAction(input.settings, input.action) === "allow") {
 			return {
 				decision: "allow",
 				source: "automatic",
-				reason: "Allowed safe structured read",
+				reason: input.settings.mode === "auto" ? "Allowed by Auto mode" : "Allowed safe structured read",
 				action: input.action,
+				executionTarget,
 			};
+		}
+		let signature: ProjectPermissionSignatureInput | undefined;
+		if (
+			input.allowProjectRules === true &&
+			this.projectRules &&
+			input.projectPath !== undefined &&
+			input.cwd !== undefined &&
+			input.workspaceRoots !== undefined &&
+			input.executionTarget !== undefined &&
+			!input.action.risks.includes("unknown")
+		) {
+			signature = {
+				projectPath: input.projectPath,
+				cwd: input.cwd,
+				workspaceRoots: input.workspaceRoots,
+				action: input.action,
+				args: input.args,
+				executionTarget,
+			};
+			try {
+				if (this.projectRules.match(signature)) {
+					return {
+						decision: "allow",
+						source: "project-rule",
+						reason: "Allowed by an exact current-project rule",
+						action: input.action,
+						executionTarget,
+					};
+				}
+			} catch {
+				return {
+					decision: "deny",
+					source: "fallback",
+					reason: "Current-project permission rules could not be read safely",
+					action: input.action,
+					executionTarget,
+				};
+			}
 		}
 		if (!this.requestApproval) {
 			return {
@@ -511,6 +632,7 @@ export class PermissionPolicy {
 				source: "fallback",
 				reason: "This action requires approval, but no approval UI is available",
 				action: input.action,
+				executionTarget,
 			};
 		}
 		try {
@@ -519,21 +641,47 @@ export class PermissionPolicy {
 				action: structuredClone(input.action),
 				args: structuredClone(input.args),
 				reason: "This model-initiated action can affect the host or access sensitive data",
+				executionTarget,
+				rememberProjectEligible: signature !== undefined && this.projectRules !== undefined,
 				signal: input.signal,
 			});
 			if (input.signal?.aborted) throw new Error("Approval was aborted");
+			if (approved.decision === "allow" && approved.remember === "project") {
+				if (!signature || !this.projectRules) {
+					return {
+						decision: "deny",
+						source: "fallback",
+						reason: "This action is not eligible for a current-project permission rule",
+						action: input.action,
+						executionTarget,
+					};
+				}
+				try {
+					this.projectRules.remember(signature);
+				} catch {
+					return {
+						decision: "deny",
+						source: "fallback",
+						reason: "The current-project permission rule could not be saved safely",
+						action: input.action,
+						executionTarget,
+					};
+				}
+			}
 			return approved.decision === "allow"
 				? {
 						decision: "allow",
 						source: "user",
 						reason: approved.reason ?? "Allowed once by the user",
 						action: input.action,
+						executionTarget,
 					}
 				: {
 						decision: "deny",
 						source: "user",
 						reason: approved.reason ?? "Denied by the user",
 						action: input.action,
+						executionTarget,
 					};
 		} catch {
 			return {
@@ -541,6 +689,7 @@ export class PermissionPolicy {
 				source: "fallback",
 				reason: "The approval UI closed or failed before a decision",
 				action: input.action,
+				executionTarget,
 			};
 		}
 	}

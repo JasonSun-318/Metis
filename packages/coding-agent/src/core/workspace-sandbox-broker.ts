@@ -28,12 +28,49 @@ function bundledHelperPath(kind: "seccomp" | "srt-win"): string {
 function runtimeReadPaths(): string[] {
 	const systemPaths =
 		process.platform === "darwin"
-			? ["/bin", "/sbin", "/usr", "/System", "/Library/Apple", "/opt/homebrew", "/opt/local"]
+			? [
+					"/bin",
+					"/sbin",
+					"/usr/bin",
+					"/usr/sbin",
+					"/usr/lib",
+					"/usr/libexec",
+					"/usr/share",
+					"/System",
+					"/Library/Apple",
+					"/opt/homebrew/bin",
+					"/opt/homebrew/sbin",
+					"/opt/homebrew/lib",
+					"/opt/homebrew/Cellar",
+					"/opt/homebrew/opt",
+					"/opt/homebrew/share",
+					"/usr/local/bin",
+					"/usr/local/sbin",
+					"/usr/local/lib",
+					"/usr/local/Cellar",
+					"/usr/local/opt",
+					"/usr/local/share",
+					"/opt/local/bin",
+					"/opt/local/sbin",
+					"/opt/local/lib",
+					"/opt/local/Library",
+					"/opt/local/share",
+				]
 			: process.platform === "linux"
 				? [
 						"/bin",
 						"/sbin",
-						"/usr",
+						"/usr/bin",
+						"/usr/sbin",
+						"/usr/lib",
+						"/usr/lib64",
+						"/usr/libexec",
+						"/usr/share",
+						"/usr/local/bin",
+						"/usr/local/sbin",
+						"/usr/local/lib",
+						"/usr/local/lib64",
+						"/usr/local/share",
 						"/lib",
 						"/lib64",
 						"/etc/alternatives",
@@ -79,18 +116,27 @@ function deniedReadRoots(callerHome: string): string[] {
 	return [...roots];
 }
 
-function runtimeConfig(workspaceRoots: readonly string[], temporaryDir: string): SandboxRuntimeConfig {
+function runtimeConfig(
+	workspaceRoots: readonly string[],
+	readOnlyRoots: readonly string[],
+	writeRoots: readonly string[],
+	temporaryDir: string,
+	shellPath?: string,
+): SandboxRuntimeConfig {
 	const callerHome = homedir();
 	const denyRead = deniedReadRoots(callerHome);
-	const allowed = [...workspaceRoots, temporaryDir];
+	const allowedWrite = [...new Set([...workspaceRoots, ...writeRoots, temporaryDir])];
+	const allowedRead = [
+		...new Set([...allowedWrite, ...readOnlyRoots, ...runtimeReadPaths(), ...(shellPath ? [shellPath] : [])]),
+	];
 	const denyWrite = getDefaultWritePaths().filter(
-		(path) => !path.startsWith("/dev/") && !allowed.some((root) => isPathInside(root, path)),
+		(path) => !path.startsWith("/dev/") && !allowedWrite.some((root) => isPathInside(root, path)),
 	);
 	return {
 		filesystem: {
 			denyRead,
-			allowRead: [...allowed, ...runtimeReadPaths()],
-			allowWrite: allowed,
+			allowRead: allowedRead,
+			allowWrite: allowedWrite,
 			denyWrite,
 		},
 		network: {
@@ -113,6 +159,7 @@ function sanitizedMessage(error: unknown, fallback: string): string {
 
 export async function runWorkspaceSandboxBroker(): Promise<void> {
 	let workspaceRoots: readonly string[] | undefined;
+	let shellPath: string | undefined;
 	let initializationStarted = false;
 	let active:
 		| {
@@ -166,7 +213,7 @@ export async function runWorkspaceSandboxBroker(): Promise<void> {
 		state.promise = (async () => {
 			let timeoutHandle: NodeJS.Timeout | undefined;
 			try {
-				const shell = getShellConfig();
+				const shell = getShellConfig(shellPath);
 				const wrapped = await SandboxManager.wrapWithSandboxArgv(
 					request.command,
 					shell.shell,
@@ -245,21 +292,35 @@ export async function runWorkspaceSandboxBroker(): Promise<void> {
 				}
 				initializationStarted = true;
 				try {
-					if (!isAbsolute(request.cwd) || request.workspaceRoots.some((root) => !isAbsolute(root))) {
+					if (
+						!isAbsolute(request.cwd) ||
+						[...request.workspaceRoots, ...request.readOnlyRoots, ...request.writeRoots].some(
+							(root) => !isAbsolute(root),
+						)
+					) {
 						throw new Error("Sandbox paths must be absolute");
 					}
-					workspaceRoots = Object.freeze([
-						...new Set(request.workspaceRoots.map((root) => canonicalizeActionPath(root, request.cwd))),
-					]);
+					const canonicalRoots = (roots: readonly string[]) =>
+						Object.freeze([...new Set(roots.map((root) => canonicalizeActionPath(root, request.cwd)))]);
+					workspaceRoots = canonicalRoots(request.workspaceRoots);
+					const readOnlyRoots = canonicalRoots(request.readOnlyRoots);
+					const writeRoots = canonicalRoots(request.writeRoots);
 					const cwd = canonicalizeActionPath(request.cwd, request.cwd);
 					if (!workspaceRoots.some((root) => isPathInside(root, cwd))) {
 						throw new Error("Sandbox cwd is outside the workspace");
+					}
+					if (request.shellPath !== undefined) {
+						if (!isAbsolute(request.shellPath)) throw new Error("Sandbox shell path must be absolute");
+						shellPath = canonicalizeActionPath(request.shellPath, request.shellPath);
+						if (!statSync(shellPath).isFile()) throw new Error("Sandbox shell path must be a file");
 					}
 					const temporaryDir = process.env.METIS_SANDBOX_TEMP_DIR;
 					if (!temporaryDir) throw new Error("Sandbox temporary directory is missing");
 					mkdirSync(temporaryDir, { recursive: true });
 					process.env.CLAUDE_CODE_TMPDIR = temporaryDir;
-					await SandboxManager.initialize(runtimeConfig(workspaceRoots, temporaryDir));
+					await SandboxManager.initialize(
+						runtimeConfig(workspaceRoots, readOnlyRoots, writeRoots, temporaryDir, shellPath),
+					);
 					send({ type: "ready" });
 				} catch (error) {
 					workspaceRoots = undefined;
