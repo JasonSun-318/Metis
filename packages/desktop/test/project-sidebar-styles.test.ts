@@ -124,15 +124,15 @@ describe("Project sidebar motion", () => {
 		expect(rule(".account-menu-name").textOverflow).toBe("ellipsis");
 		for (const selector of [".account-menu-popover", ".account-language-popover"]) {
 			const accountMenu = rule(selector);
-			expect(accountMenu.background).toBe("rgb(55, 55, 55)");
-			expect(accountMenu.borderColor).toBe("rgba(255, 255, 255, 0.15)");
-			expect(accountMenu.borderRadius).toBe("9px");
-			expect(accountMenu.boxShadow).toBe("var(--shadow)");
+			expect(accountMenu.background).toBe("rgb(45, 45, 45)");
+			expect(accountMenu.borderColor).toBe("rgba(255, 255, 255, 0.14)");
+			expect(accountMenu.borderRadius).toBe("12px");
+			expect(accountMenu.boxShadow).toBe("var(--overlay-shadow)");
 		}
 		const hover = rule(
 			".account-menu-item:hover, .account-menu-item:focus-visible, .account-language-option:hover, .account-language-option:focus-visible",
 		);
-		expect(hover.background).toBe("rgb(72, 72, 72)");
+		expect(hover.background).toBe("rgb(56, 56, 56)");
 		expect(hover.boxShadow).toBe("");
 		expect(hover.outline).toBe("0px");
 	});

@@ -3524,7 +3524,7 @@ test("packaged Language menu switches immediately and persists across restart", 
 		expect(await page.locator(".account-menu-popover").evaluate((element) => {
 			const style = getComputedStyle(element);
 			return { background: style.backgroundColor, border: style.borderTopColor, radius: style.borderRadius };
-		})).toEqual({ background: "rgb(55, 55, 55)", border: "rgba(255, 255, 255, 0.15)", radius: "9px" });
+		})).toEqual({ background: "rgb(45, 45, 45)", border: "rgba(255, 255, 255, 0.14)", radius: "12px" });
 		const accountMenuBox = await page.locator(".account-menu-popover").boundingBox();
 		const languageMenuBox = await page.locator(".account-language-popover").boundingBox();
 		expect(accountMenuBox).not.toBeNull();
