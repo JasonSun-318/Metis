@@ -1,4 +1,3 @@
-import { spawnSync } from "node:child_process";
 import type { AgentMessage } from "@metis/agent-core";
 import type { ImageContent, Message, TextContent } from "@metis/ai";
 import { createHash, randomUUID } from "crypto";
@@ -25,6 +24,7 @@ import { setImmediate as yieldToEventLoop } from "timers/promises";
 import { TextDecoder } from "util";
 import { getAgentDir as getDefaultAgentDir, getSessionsDir } from "../config.ts";
 import { canonicalizePathForCreation, encodePathForStorage, normalizePath, resolvePath } from "../utils/paths.ts";
+import { trashPathsSync } from "../utils/trash.ts";
 import { type AgentMode, DEFAULT_AGENT_MODE, isAgentMode } from "./agent-mode.ts";
 import {
 	createFileAtomicallySync,
@@ -4116,11 +4116,9 @@ export class SessionManager {
 			};
 			const moveToTrash = (targets: readonly string[]): string | undefined => {
 				if (targets.length === 0) return undefined;
-				const trashArgs = targets.some((path) => path.startsWith("-")) ? ["--", ...targets] : [...targets];
-				const result = spawnSync("trash", trashArgs, { encoding: "utf8" });
+				const detail = trashPathsSync(targets);
 				const remaining = targets.filter(exists);
 				if (remaining.length === 0) return undefined;
-				const detail = [result.error?.message, result.stderr?.trim().split("\n")[0]].filter(Boolean).join(" · ");
 				return `Trash did not remove ${remaining.length} target(s)${detail ? `: ${detail}` : ""}`;
 			};
 			const assetPaths = ownedTargets.filter(({ path }) => exists(path)).map(({ path }) => path);

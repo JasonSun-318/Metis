@@ -10,8 +10,8 @@ import {
 	unlinkSync,
 } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, sep } from "node:path";
-import { spawnProcess, waitForChildProcess } from "../../utils/child-process.ts";
 import { resolvePath } from "../../utils/paths.ts";
+import { trashPath } from "../../utils/trash.ts";
 import {
 	ensureDirectoryDurablySync,
 	ensureRealDirectoryDurablySync,
@@ -349,9 +349,7 @@ function restore(
 }
 
 async function trashPayload(payload: string): Promise<void> {
-	const child = spawnProcess("trash", [payload], { stdio: "ignore", timeout: 30_000 });
-	const exitCode = await waitForChildProcess(child);
-	if (exitCode !== 0) throw new Error(`Trash exited with status ${exitCode ?? "unknown"}`);
+	await trashPath(payload);
 }
 
 export async function trashScheduledTaskData(

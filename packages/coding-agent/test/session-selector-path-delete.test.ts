@@ -1,4 +1,3 @@
-import type { SpawnSyncReturns } from "node:child_process";
 import {
 	existsSync,
 	mkdirSync,
@@ -28,14 +27,14 @@ import { deleteSessionFile, SessionSelectorComponent } from "../src/modes/intera
 import { initTheme } from "../src/modes/interactive/theme/theme.ts";
 import { assistantMsg } from "./utilities.ts";
 
-const childProcessMocks = vi.hoisted(() => ({
-	spawnSync: vi.fn<(...args: unknown[]) => SpawnSyncReturns<string>>(),
+const trashMocks = vi.hoisted(() => ({
+	trashPathsSync: vi.fn<(paths: readonly string[]) => string | undefined>(),
+	trashPath: vi.fn<(path: string) => Promise<void>>(),
 }));
 
-vi.mock("node:child_process", async (importOriginal) => ({
-	...(await importOriginal<typeof import("node:child_process")>()),
-	spawnSync: childProcessMocks.spawnSync,
-}));
+// The trash helper is platform-specific (Recycle Bin via PowerShell on Windows,
+// the `trash` CLI elsewhere), so session deletion tests stub it directly.
+vi.mock("../src/utils/trash.ts", () => trashMocks);
 
 type Deferred<T> = {
 	promise: Promise<T>;
@@ -64,22 +63,13 @@ function stripAnsi(text: string): string {
 }
 
 async function withoutTrash<T>(callback: () => Promise<T>): Promise<T> {
-	const previous = childProcessMocks.spawnSync.getMockImplementation();
-	const error = Object.assign(new Error("spawn trash ENOENT"), { code: "ENOENT" });
-	childProcessMocks.spawnSync.mockReturnValue({
-		pid: 0,
-		output: [null, "", ""],
-		stdout: "",
-		stderr: "",
-		status: null,
-		signal: null,
-		error,
-	});
+	const previous = trashMocks.trashPathsSync.getMockImplementation();
+	trashMocks.trashPathsSync.mockReturnValue("spawn trash ENOENT");
 	try {
 		return await callback();
 	} finally {
-		if (previous) childProcessMocks.spawnSync.mockImplementation(previous);
-		else childProcessMocks.spawnSync.mockReset();
+		if (previous) trashMocks.trashPathsSync.mockImplementation(previous);
+		else trashMocks.trashPathsSync.mockReset();
 	}
 }
 
@@ -149,23 +139,15 @@ describe("session selector path/delete interactions", () => {
 	beforeEach(() => {
 		// Ensure test isolation: keybindings are a global singleton
 		setKeybindings(new KeybindingsManager());
-		childProcessMocks.spawnSync.mockReset();
-		childProcessMocks.spawnSync.mockImplementation((_command, rawArgs) => {
-			const args = rawArgs as readonly string[];
+		trashMocks.trashPathsSync.mockReset();
+		trashMocks.trashPathsSync.mockImplementation((paths) => {
 			try {
-				for (const path of args) {
-					if (path !== "--") rmSync(path, { recursive: true, force: true });
+				for (const path of paths) {
+					rmSync(path, { recursive: true, force: true });
 				}
-				return { pid: 1, output: [null, "", ""], stdout: "", stderr: "", status: 0, signal: null };
+				return undefined;
 			} catch (error) {
-				return {
-					pid: 1,
-					output: [null, "", String(error)],
-					stdout: "",
-					stderr: String(error),
-					status: 1,
-					signal: null,
-				};
+				return String(error);
 			}
 		});
 	});

@@ -19,8 +19,8 @@ import {
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { setImmediate as yieldToEventLoop } from "node:timers/promises";
 import { TextDecoder } from "node:util";
-import { spawnProcess, waitForChildProcess } from "../utils/child-process.ts";
 import { canonicalizePathForCreation, encodePathForStorage, resolvePath } from "../utils/paths.ts";
+import { trashPath } from "../utils/trash.ts";
 import { type AgentMode, DEFAULT_AGENT_MODE, isAgentMode } from "./agent-mode.ts";
 import { getAutoMemoryPaths } from "./auto-memory.ts";
 import {
@@ -639,9 +639,7 @@ function restoreManifest(operationDir: string, manifest: ProjectTrashManifest, r
 }
 
 async function moveToTrash(operationDir: string): Promise<void> {
-	const child = spawnProcess("trash", [operationDir], { stdio: "ignore", timeout: 30_000 });
-	const exitCode = await waitForChildProcess(child);
-	if (exitCode !== 0) throw new Error(`Trash exited with status ${exitCode ?? "unknown"}`);
+	await trashPath(operationDir);
 }
 
 async function stageAndTrash(
