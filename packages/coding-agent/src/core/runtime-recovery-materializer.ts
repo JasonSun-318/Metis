@@ -99,6 +99,23 @@ function appendQueueCancellation(sessionManager: SessionManager, queue: ReducedR
 	});
 }
 
+function appendQueuePause(sessionManager: SessionManager, queue: ReducedRuntimeQueueItem): void {
+	if (queue.queue !== "next_turn" || !queue.requestId || !queue.enqueueHash) {
+		throw new Error(`Cannot pause non-next-turn queue item: ${queue.queueItemId}`);
+	}
+	sessionManager.appendRuntimeControl({
+		type: "runtime_queue",
+		operationId: queue.operationId,
+		queueItemId: queue.queueItemId,
+		queue: "next_turn",
+		state: "paused",
+		requestId: queue.requestId,
+		enqueueHash: queue.enqueueHash,
+		...(queue.deliveryRequestId === undefined ? {} : { deliveryRequestId: queue.deliveryRequestId }),
+		reason: "server_restarted",
+	});
+}
+
 /**
  * Materialize reducer decisions in reducer order. Every mutation is synchronous;
  * a thrown append leaves only durable prefix work for the next invocation.
@@ -148,6 +165,12 @@ export function materializeRuntimeRecovery(sessionManager: SessionManager): Mate
 					decision.type === "complete_operation" ? "completed" : "interrupted",
 					decision.turnId,
 				);
+				break;
+			}
+			case "pause_queue": {
+				const queue = queues.get(decision.queueItemId);
+				if (!queue) throw new Error(`Missing reduced runtime queue item: ${decision.queueItemId}`);
+				appendQueuePause(sessionManager, queue);
 				break;
 			}
 			case "cancel_queue": {

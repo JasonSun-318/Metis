@@ -53,6 +53,10 @@ function createTinyBmp1x1Red24bpp(): Buffer {
 }
 
 describe("Coding Agent Tools", () => {
+	it("serializes any tool batch that contains Bash", () => {
+		expect(bashTool.executionMode).toBe("sequential");
+	});
+
 	let testDir: string;
 
 	beforeEach(() => {

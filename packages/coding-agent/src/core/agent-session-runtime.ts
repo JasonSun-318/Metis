@@ -13,6 +13,7 @@ import type {
 } from "./extensions/index.ts";
 import { emitSessionShutdownEvent } from "./extensions/runner.ts";
 import type { PermissionMode } from "./permission-mode.ts";
+import { QueuedTurnConflictError, type QueuedTurnDraft, QueuedTurnQueue } from "./queued-turn-queue.ts";
 import {
 	type DurableImageRef,
 	identifyRuntimeRequest,
@@ -68,6 +69,14 @@ export interface SubmitInterruptInput {
 export interface SubmitInterruptResult {
 	operationId: string;
 	status: "accepted" | "existing";
+}
+
+export class QueuedTurnBusyError extends Error {
+	readonly code = "BUSY";
+	constructor() {
+		super("The task state changed before the queued turn could be sent");
+		this.name = "QueuedTurnBusyError";
+	}
 }
 
 /**
@@ -224,6 +233,9 @@ export class AgentSessionRuntime {
 	private submissionDisabled = false;
 	private pendingLifecycleOperations = 0;
 	private readonly acceptedTasks = new Set<Promise<void>>();
+	private queuedTurnQueue: QueuedTurnQueue;
+	private readonly queuedTurnListeners = new Set<(turns: readonly QueuedTurnDraft[]) => void>();
+	private queuedTurnDrainTask?: Promise<void>;
 	private _recoverableDrafts: readonly RecoverablePromptDraft[];
 	private requestIndex: Map<string, IndexedRuntimeRequest>;
 	private operationIndex: Map<string, IndexedRuntimeRequest>;
@@ -252,6 +264,7 @@ export class AgentSessionRuntime {
 		this.requestIndex = _recovered?.requests ?? new Map();
 		this.operationIndex = _recovered?.operations ?? new Map();
 		this.hostCwd = resolvePath(hostCwd);
+		this.queuedTurnQueue = new QueuedTurnQueue(_session.sessionManager);
 		this.bindDurableSession(_session);
 		this.bindSubagents(_session);
 	}
@@ -289,6 +302,17 @@ export class AgentSessionRuntime {
 		return structuredClone(this._recoverableDrafts);
 	}
 
+	get queuedTurns(): readonly QueuedTurnDraft[] {
+		this.assertPubliclyAccessible();
+		return this.queuedTurnQueue.list();
+	}
+
+	subscribeQueuedTurns(listener: (turns: readonly QueuedTurnDraft[]) => void): () => void {
+		this.assertPubliclyAccessible();
+		this.queuedTurnListeners.add(listener);
+		return () => this.queuedTurnListeners.delete(listener);
+	}
+
 	get subagentManager(): SubagentManager | undefined {
 		this.assertPubliclyAccessible();
 		return this.subagentManagerValue;
@@ -303,6 +327,7 @@ export class AgentSessionRuntime {
 		session.setDurableOperationTurnListener((operationId, turnId) => {
 			const indexed = this.operationIndex.get(operationId);
 			if (indexed) indexed.turnId = turnId;
+			this.emitQueuedTurns();
 		});
 	}
 
@@ -490,6 +515,138 @@ export class AgentSessionRuntime {
 		this.beforeSessionInvalidate = beforeSessionInvalidate;
 	}
 
+	enqueueQueuedTurn(input: SubmitPromptInput): QueuedTurnDraft {
+		this.assertPubliclyAccessible();
+		if (!this.submissionGateOpen) throw new Error(RUNTIME_DISPOSING_ERROR);
+		const submission = parseDurablePromptSubmission(input);
+		this._session.prepareDurablePrompt(submission.input);
+		const queuedTurn = this.queuedTurnQueue.enqueue({
+			requestId: submission.requestId,
+			input: submission.input,
+			state: this._session.activeDurableTurnId !== undefined || this._session.isStreaming ? "enqueued" : "paused",
+		});
+		this.emitQueuedTurns();
+		return queuedTurn;
+	}
+
+	updateQueuedTurn(input: { queueItemId: string; expectedRevision: string; text: string }): QueuedTurnDraft {
+		this.assertPubliclyAccessible();
+		const queuedTurn = this.queuedTurnQueue.update(input);
+		this.emitQueuedTurns();
+		return queuedTurn;
+	}
+
+	deleteQueuedTurn(input: { queueItemId: string; expectedRevision: string }): void {
+		this.assertPubliclyAccessible();
+		this.queuedTurnQueue.delete(input);
+		this.emitQueuedTurns();
+	}
+
+	async sendQueuedTurn(input: {
+		queueItemId: string;
+		expectedRevision: string;
+		delivery: "steer" | "start";
+	}): Promise<SubmitPromptResult & { queueItemId: string }> {
+		this.assertPubliclyAccessible();
+		if (!this.submissionGateOpen) throw new Error(RUNTIME_DISPOSING_ERROR);
+		const active = this._session.activeDurableTurnId !== undefined || this._session.isStreaming;
+		if ((input.delivery === "steer" && !active) || (input.delivery === "start" && active)) {
+			throw new QueuedTurnBusyError();
+		}
+		const current = this.queuedTurnQueue.list().find((item) => item.queueItemId === input.queueItemId);
+		if (!current) throw new QueuedTurnConflictError(input.queueItemId);
+		if (input.delivery === "start" && this.queuedTurnQueue.list()[0]?.queueItemId !== input.queueItemId) {
+			throw new QueuedTurnConflictError(input.queueItemId);
+		}
+		this._session.assertCanDrainAgentEventPersistence();
+		this._session.assertDurablePromptCapacity(current.input);
+		this._session.prepareDurablePrompt(current.input);
+
+		const draft = this.queuedTurnQueue.markDispatching(input);
+		this.emitQueuedTurns();
+		if (!draft.deliveryRequestId) throw new Error("Queued turn delivery request was not created");
+		const identity = identifySubmitPromptRequest(draft.deliveryRequestId, draft.input);
+		if (identity.operationId !== draft.operationId) throw new Error("Queued turn delivery identity changed");
+		const indexed: IndexedRuntimeRequest = {
+			requestId: identity.requestId,
+			requestHash: identity.requestHash,
+			operationId: identity.operationId,
+			queueItemId: draft.queueItemId,
+		};
+		let operationAccepted = false;
+		let turnStarted = false;
+		try {
+			this._session.sessionManager.appendRuntimeControl({
+				type: "runtime_operation",
+				operationId: identity.operationId,
+				requestId: identity.requestId,
+				requestHash: identity.requestHash,
+				kind: input.delivery === "steer" ? "steer" : "next_turn",
+				state: "accepted",
+				input: draft.input,
+			});
+			operationAccepted = true;
+			this.requestIndex.set(identity.requestId, indexed);
+			this.operationIndex.set(identity.operationId, indexed);
+			if (input.delivery === "steer") {
+				this._session.enqueueAcceptedDurablePrompt(draft.input, identity, "steer", draft.queueItemId);
+				return { operationId: identity.operationId, queueItemId: draft.queueItemId, status: "accepted" };
+			}
+
+			const session = this._session;
+			const turnId = session.beginDurableQueuedTurn(identity, draft.input, draft.queueItemId);
+			turnStarted = true;
+			indexed.turnId = turnId;
+			this.trackAcceptedTask(turnId, session, async () => {
+				try {
+					const state = await session.runAcceptedDurablePrompt(turnId, draft.input);
+					this.afterQueuedTurnSettled(session, state);
+				} catch (error) {
+					this.afterQueuedTurnSettled(session, "interrupted");
+					throw error;
+				}
+			});
+			return { operationId: identity.operationId, queueItemId: draft.queueItemId, turnId, status: "accepted" };
+		} catch (error) {
+			if (operationAccepted && !turnStarted) {
+				this._session.sessionManager.appendRuntimeControl({
+					type: "runtime_operation",
+					operationId: identity.operationId,
+					requestId: identity.requestId,
+					requestHash: identity.requestHash,
+					kind: input.delivery === "steer" ? "steer" : "next_turn",
+					state: "interrupted",
+					error: { code: "ADMISSION_FAILED", message: "The queued turn could not be scheduled." },
+				});
+			}
+			if (!turnStarted) {
+				this.queuedTurnQueue.pause(draft.queueItemId, "delivery_failed");
+				this.emitQueuedTurns();
+			}
+			throw error;
+		}
+	}
+
+	async waitForIdle(): Promise<void> {
+		while (true) {
+			const session = this._session;
+			await session.waitForIdle();
+			await this.drainAcceptedTasks();
+			if (session !== this._session) continue;
+			if (
+				!this.queuedTurnDrainTask &&
+				!this.disposeRequested &&
+				!this.disposed &&
+				this.queuedTurnQueue.firstQueued()
+			) {
+				this.scheduleQueuedTurnDrain(session);
+			}
+			const drain = this.queuedTurnDrainTask;
+			if (!drain) return;
+			await drain;
+		}
+	}
+
 	async submitPrompt(input: SubmitPromptInput): Promise<SubmitPromptResult> {
 		this.assertPubliclyAccessible();
 		if (!this.submissionGateOpen) throw new Error(RUNTIME_DISPOSING_ERROR);
@@ -559,7 +716,13 @@ export class AgentSessionRuntime {
 			turnStarted = true;
 			this.trackAcceptedTask(identity.turnId, session, async () => {
 				await Promise.all(predecessors);
-				await session.runAcceptedDurablePrompt(identity.turnId, submission.input);
+				try {
+					const state = await session.runAcceptedDurablePrompt(identity.turnId, submission.input);
+					this.afterQueuedTurnSettled(session, state);
+				} catch (error) {
+					this.afterQueuedTurnSettled(session, "interrupted");
+					throw error;
+				}
 			});
 			return { operationId: identity.operationId, turnId: identity.turnId, status: "accepted" };
 		} catch (error) {
@@ -726,6 +889,60 @@ export class AgentSessionRuntime {
 			});
 		this.acceptedTasks.add(accepted);
 		void accepted.then(() => this.acceptedTasks.delete(accepted));
+	}
+
+	private emitQueuedTurns(): void {
+		if (this.queuedTurnListeners.size === 0) return;
+		const turns = this.queuedTurnQueue.list();
+		for (const listener of this.queuedTurnListeners) listener(structuredClone(turns));
+	}
+
+	private afterQueuedTurnSettled(session: AgentSession, state: "completed" | "interrupted"): void {
+		if (session !== this._session || this.disposeRequested || this.disposed) return;
+		if (state === "completed") {
+			this.scheduleQueuedTurnDrain(session);
+			return;
+		}
+		this.queuedTurnQueue.pauseUndispatched("turn_interrupted");
+		this.emitQueuedTurns();
+	}
+
+	private scheduleQueuedTurnDrain(session: AgentSession): void {
+		if (this.queuedTurnDrainTask || session !== this._session || this.disposeRequested || this.disposed) return;
+		let task!: Promise<void>;
+		task = this.drainQueuedTurns(session)
+			.catch((error) => {
+				if (error instanceof QueuedTurnBusyError || error instanceof QueuedTurnConflictError) return;
+				this._diagnostics = [
+					...this._diagnostics,
+					{
+						type: "warning",
+						message: `Automatic queued turn failed: ${error instanceof Error ? error.message : String(error)}`,
+					},
+				];
+			})
+			.finally(() => {
+				if (this.queuedTurnDrainTask !== task) return;
+				this.queuedTurnDrainTask = undefined;
+				if (session !== this._session || this.disposeRequested || this.disposed) return;
+				// A very fast queued turn can settle before this delivery task's
+				// finally handler runs. Re-arm here so the next FIFO item is not stranded.
+				if (this.queuedTurnQueue.firstQueued()) this.scheduleQueuedTurnDrain(session);
+			});
+		this.queuedTurnDrainTask = task;
+	}
+
+	private async drainQueuedTurns(session: AgentSession): Promise<void> {
+		await new Promise<void>((resolvePromise) => setImmediate(resolvePromise));
+		await session.waitForIdle();
+		if (session !== this._session || this.disposeRequested || this.disposed || session.isCompacting) return;
+		const next = this.queuedTurnQueue.firstQueued();
+		if (!next) return;
+		await this.sendQueuedTurn({
+			queueItemId: next.queueItemId,
+			expectedRevision: next.revision,
+			delivery: "start",
+		});
 	}
 
 	private async drainAcceptedTasks(): Promise<void> {
@@ -903,6 +1120,11 @@ export class AgentSessionRuntime {
 			errors.push(error);
 		}
 		try {
+			await session.disposeInteractiveExecution();
+		} catch (error) {
+			errors.push(error);
+		}
+		try {
 			this.beforeSessionInvalidate?.();
 		} catch (error) {
 			errors.push(error);
@@ -929,10 +1151,12 @@ export class AgentSessionRuntime {
 		this._recoverableDrafts = prepared.recovered.recoverableDrafts;
 		this.requestIndex = prepared.recovered.requests;
 		this.operationIndex = prepared.recovered.operations;
+		this.queuedTurnQueue = new QueuedTurnQueue(prepared.result.session.sessionManager);
 		this.submissionDisabled = false;
 		this.bindDurableSession(prepared.result.session);
 		this.bindSubagents(prepared.result.session);
 		await this.subagentManagerValue?.recoverCloseMarkers();
+		this.emitQueuedTurns();
 	}
 
 	private async prepareCandidate(
@@ -1374,6 +1598,11 @@ export class AgentSessionRuntime {
 			}
 		}
 		if (!this.beforeInvalidateAttempted) {
+			try {
+				await session.disposeInteractiveExecution();
+			} catch (error) {
+				errors.push(error);
+			}
 			this.beforeInvalidateAttempted = true;
 			try {
 				this.beforeSessionInvalidate?.();

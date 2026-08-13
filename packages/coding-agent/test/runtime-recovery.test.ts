@@ -230,6 +230,25 @@ function materializeRecovery(records: readonly unknown[]): unknown[] {
 				});
 				break;
 			}
+			case "pause_queue": {
+				const current = recovered.queues.find((candidate) => candidate.queueItemId === decision.queueItemId);
+				if (!current?.requestId || !current.enqueueHash) {
+					throw new Error(`Missing recovered queued turn ${decision.queueItemId}`);
+				}
+				materialized.push({
+					...entryBase(),
+					type: "runtime_queue",
+					operationId: current.operationId,
+					queueItemId: current.queueItemId,
+					queue: "next_turn",
+					state: "paused",
+					requestId: current.requestId,
+					enqueueHash: current.enqueueHash,
+					...(current.deliveryRequestId === undefined ? {} : { deliveryRequestId: current.deliveryRequestId }),
+					reason: decision.reason,
+				});
+				break;
+			}
 			case "cancel_queue": {
 				const current = recovered.queues.find((candidate) => candidate.queueItemId === decision.queueItemId);
 				if (!current) throw new Error(`Missing recovered queue item ${decision.queueItemId}`);
@@ -404,6 +423,51 @@ describe("durable runtime request identity", () => {
 });
 
 describe("runtime journal recovery reducer", () => {
+	it("reduces editable next-turn queues and pauses them on restart", () => {
+		const requestId = "00000000-0000-4000-8000-000000000001";
+		const initialInput = { text: "first" };
+		const queued = identifyRuntimeRequest("turn/queue", requestId, initialInput);
+		const first: RuntimeQueueEntry = {
+			...entryBase(),
+			id: "q1-v1",
+			type: "runtime_queue",
+			operationId: queued.operationId,
+			queueItemId: queued.queueItemId,
+			queue: "next_turn",
+			state: "enqueued",
+			input: initialInput,
+			requestId,
+			enqueueHash: queued.requestHash,
+		};
+		const edited: RuntimeQueueEntry = {
+			...first,
+			id: "q1-v2",
+			input: { text: "edited" },
+		};
+
+		const reduced = reduceRuntimeJournal([first, edited]);
+		expect(reduced.queues).toEqual([
+			expect.objectContaining({
+				queue: "next_turn",
+				state: "enqueued",
+				input: { text: "edited" },
+				revision: "q1-v2",
+				requestId,
+			}),
+		]);
+		expect(reduced.decisions).toContainEqual({
+			type: "pause_queue",
+			queueItemId: queued.queueItemId,
+			reason: "server_restarted",
+		});
+
+		const { input: _editedInput, ...editedWithoutInput } = edited;
+		const paused: RuntimeQueueEntry = { ...editedWithoutInput, id: "q1-v3", state: "paused" };
+		expect(reduceRuntimeJournal([first, edited, paused]).queues[0]?.state).toBe("paused");
+		const cancelled: RuntimeQueueEntry = { ...paused, id: "q1-v4", state: "cancelled" };
+		expect(() => reduceRuntimeJournal([first, cancelled, edited])).toThrow(/terminal/u);
+	});
+
 	it("exposes one strict parser seam for SessionManager v5 raw records", () => {
 		const request = identity("runtime-parser-seam");
 		const accepted = operation(request, "accepted");

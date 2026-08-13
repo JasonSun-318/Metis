@@ -1,4 +1,4 @@
-import { access, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { access, link, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -99,6 +99,52 @@ describe("withFileMutationQueue", () => {
 });
 
 describe("built-in edit and write tools", () => {
+	it("rejects hard-linked local mutation without changing the outside inode", async () => {
+		const dir = await createTempDir();
+		const workspace = join(dir, "workspace");
+		const outsidePath = join(dir, "outside.txt");
+		const writeAlias = join(workspace, "write-alias.txt");
+		const editAlias = join(workspace, "edit-alias.txt");
+		await mkdir(workspace);
+		await writeFile(outsidePath, "outside-original\n", "utf8");
+		await link(outsidePath, writeAlias);
+		await link(outsidePath, editAlias);
+
+		await expect(
+			createWriteTool(workspace).execute("write-hardlink", { path: writeAlias, content: "changed\n" }),
+		).rejects.toThrow(/single-link|aliased/u);
+		await expect(
+			createEditTool(workspace).execute("edit-hardlink", {
+				path: editAlias,
+				edits: [{ oldText: "outside-original", newText: "changed" }],
+			}),
+		).rejects.toThrow(/single-link|aliased/u);
+		expect(await readFile(outsidePath, "utf8")).toBe("outside-original\n");
+	});
+
+	it.skipIf(process.platform === "win32")("rejects final-component symlinks for local write and edit", async () => {
+		const dir = await createTempDir();
+		const workspace = join(dir, "workspace");
+		const outsidePath = join(dir, "outside.txt");
+		const writeAlias = join(workspace, "write-alias.txt");
+		const editAlias = join(workspace, "edit-alias.txt");
+		await mkdir(workspace);
+		await writeFile(outsidePath, "outside-original\n", "utf8");
+		await symlink(outsidePath, writeAlias);
+		await symlink(outsidePath, editAlias);
+
+		await expect(
+			createWriteTool(workspace).execute("write-symlink", { path: writeAlias, content: "changed\n" }),
+		).rejects.toThrow(/symbolic|single-link|aliased/u);
+		await expect(
+			createEditTool(workspace).execute("edit-symlink", {
+				path: editAlias,
+				edits: [{ oldText: "outside-original", newText: "changed" }],
+			}),
+		).rejects.toThrow(/symbolic|single-link|aliased/u);
+		expect(await readFile(outsidePath, "utf8")).toBe("outside-original\n");
+	});
+
 	it("preserves both parallel edits on the same file", async () => {
 		const dir = await createTempDir();
 		const filePath = join(dir, "parallel-edit.txt");

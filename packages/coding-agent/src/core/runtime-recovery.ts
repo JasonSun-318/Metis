@@ -44,6 +44,7 @@ export interface RuntimeRequestIdentity {
 export type RuntimeOperationKind =
 	| "turn"
 	| "steer"
+	| "next_turn"
 	| "interrupt"
 	| "compact"
 	| "navigate"
@@ -53,7 +54,7 @@ export type RuntimeOperationKind =
 	| "session_unarchive";
 export type RuntimeOperationState = "accepted" | "completed" | "interrupted";
 export type RuntimeQueueKind = "steer" | "follow_up" | "next_turn";
-export type RuntimeQueueState = "enqueued" | "consumed" | "cancelled";
+export type RuntimeQueueState = "enqueued" | "paused" | "dispatching" | "consumed" | "cancelled";
 export type RuntimeTurnState = "started" | "completed" | "interrupted";
 export type RuntimeToolState = "started" | "completed" | "interrupted";
 
@@ -82,6 +83,9 @@ export interface RuntimeQueueEntry extends RuntimeEntryBase {
 	readonly queue: RuntimeQueueKind;
 	readonly state: RuntimeQueueState;
 	readonly input?: DurablePromptInput;
+	readonly requestId?: string;
+	readonly enqueueHash?: string;
+	readonly deliveryRequestId?: string;
 	readonly turnId?: string;
 	readonly reason?: string;
 }
@@ -119,8 +123,12 @@ export interface ReducedRuntimeQueueItem {
 	readonly operationId: string;
 	readonly queueItemId: string;
 	readonly queue: RuntimeQueueKind;
-	readonly state: "enqueued" | "consumed" | "cancelled";
+	readonly state: RuntimeQueueState;
 	readonly input: DurablePromptInput;
+	readonly revision: string;
+	readonly requestId?: string;
+	readonly enqueueHash?: string;
+	readonly deliveryRequestId?: string;
 	readonly turnId?: string;
 	readonly reason?: string;
 }
@@ -168,6 +176,11 @@ export type RuntimeRecoveryDecision =
 			readonly turnId: string;
 			readonly toolCallId: string;
 			readonly toolName: string;
+			readonly reason: "server_restarted";
+	  }
+	| {
+			readonly type: "pause_queue";
+			readonly queueItemId: string;
 			readonly reason: "server_restarted";
 	  }
 	| {
@@ -461,6 +474,7 @@ export function identifySubmitPromptRequest(requestId: string, input: unknown): 
 const operationKinds = new Set<RuntimeOperationKind>([
 	"turn",
 	"steer",
+	"next_turn",
 	"interrupt",
 	"compact",
 	"navigate",
@@ -477,7 +491,7 @@ const appServerOperationKinds = new Set<RuntimeOperationKind>([
 ]);
 const operationStates = new Set<RuntimeOperationState>(["accepted", "completed", "interrupted"]);
 const queueKinds = new Set<RuntimeQueueKind>(["steer", "follow_up", "next_turn"]);
-const queueStates = new Set<RuntimeQueueState>(["enqueued", "consumed", "cancelled"]);
+const queueStates = new Set<RuntimeQueueState>(["enqueued", "paused", "dispatching", "consumed", "cancelled"]);
 const turnStates = new Set<RuntimeTurnState>(["started", "completed", "interrupted"]);
 const toolStates = new Set<RuntimeToolState>(["started", "completed", "interrupted"]);
 const runtimeControlEntryTypes = new Set<RuntimeControlEntry["type"]>([
@@ -562,12 +576,12 @@ function parseOperation(value: unknown): RuntimeOperationEntry {
 	const state = enumValue(fields, "state", operationStates, label);
 	const turnId = optionalString(fields, "turnId", label);
 	const input = optionalInput(fields, label);
-	if (state === "accepted" && (kind === "turn" || kind === "steer") && input === undefined) {
+	if (state === "accepted" && (kind === "turn" || kind === "steer" || kind === "next_turn") && input === undefined) {
 		invalid(`${label}.input is required when accepting a prompt operation`);
 	}
 	if (
 		state === "accepted" &&
-		(kind === "turn" || kind === "steer") &&
+		(kind === "turn" || kind === "steer" || kind === "next_turn") &&
 		requestHash !== hashRuntimeRequest(SUBMIT_PROMPT_METHOD, input)
 	) {
 		invalid(`${label}.requestHash does not match its durable input`);
@@ -614,24 +628,63 @@ function parseQueue(value: unknown): RuntimeQueueEntry {
 			"queue",
 			"state",
 			"input",
+			"requestId",
+			"enqueueHash",
+			"deliveryRequestId",
 			"turnId",
 			"reason",
 		],
 		label,
 	);
+	const queue = enumValue(fields, "queue", queueKinds, label);
 	const state = enumValue(fields, "state", queueStates, label);
 	const input = optionalInput(fields, label);
 	if (state === "enqueued" && input === undefined) invalid(`${label}.input is required when enqueued`);
+	if (queue !== "next_turn" && (state === "paused" || state === "dispatching")) {
+		invalid(`${label}.${state} is only valid for next_turn`);
+	}
 	const turnId = optionalString(fields, "turnId", label);
 	if (state === "consumed" && turnId === undefined) invalid(`${label}.turnId is required when consumed`);
+	let requestId: string | undefined;
+	let enqueueHash: string | undefined;
+	let deliveryRequestId: string | undefined;
+	const operationId = requiredString(fields, "operationId", label);
+	const queueItemId = requiredString(fields, "queueItemId", label);
+	if (queue === "next_turn") {
+		requestId = requiredString(fields, "requestId", label);
+		if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(requestId)) {
+			invalid(`${label}.requestId must be a UUID`);
+		}
+		enqueueHash = requiredString(fields, "enqueueHash", label);
+		if (!/^[a-f0-9]{64}$/.test(enqueueHash)) invalid(`${label}.enqueueHash must be a lowercase SHA-256 hash`);
+		deliveryRequestId = optionalString(fields, "deliveryRequestId", label);
+		if (
+			deliveryRequestId !== undefined &&
+			!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(deliveryRequestId)
+		) {
+			invalid(`${label}.deliveryRequestId must be a UUID`);
+		}
+		if (state === "dispatching" && deliveryRequestId === undefined) {
+			invalid(`${label}.deliveryRequestId is required when dispatching`);
+		}
+		const identity = identifyRuntimeRequest("turn/queue", deliveryRequestId ?? requestId, input ?? {});
+		if (operationId !== identity.operationId) invalid(`${label}.operationId is not derived from requestId`);
+		const queueIdentity = identifyRuntimeRequest("turn/queue", requestId, input ?? {});
+		if (queueItemId !== queueIdentity.queueItemId) invalid(`${label}.queueItemId is not derived from requestId`);
+	} else if (fields.has("requestId") || fields.has("enqueueHash") || fields.has("deliveryRequestId")) {
+		invalid(`${label}.requestId, enqueueHash, and deliveryRequestId are only valid for next_turn`);
+	}
 	return {
 		...parseEntryBase(fields, label),
 		type: "runtime_queue",
-		operationId: requiredString(fields, "operationId", label),
-		queueItemId: requiredString(fields, "queueItemId", label),
-		queue: enumValue(fields, "queue", queueKinds, label),
+		operationId,
+		queueItemId,
+		queue,
 		state,
 		...(input === undefined ? {} : { input }),
+		...(requestId === undefined ? {} : { requestId }),
+		...(enqueueHash === undefined ? {} : { enqueueHash }),
+		...(deliveryRequestId === undefined ? {} : { deliveryRequestId }),
 		...(turnId === undefined ? {} : { turnId }),
 		...(fields.has("reason") ? { reason: requiredString(fields, "reason", label) } : {}),
 	};
@@ -705,6 +758,10 @@ interface QueueAccumulator {
 	queue: RuntimeQueueKind;
 	input: DurablePromptInput;
 	journalState: RuntimeQueueState;
+	revision: string;
+	requestId?: string;
+	enqueueHash?: string;
+	deliveryRequestId?: string;
 	reason?: string;
 }
 
@@ -759,8 +816,35 @@ function mergeOperation(current: OperationAccumulator, entry: RuntimeOperationEn
 }
 
 function mergeQueue(current: QueueAccumulator, entry: RuntimeQueueEntry): void {
-	if (current.operationId !== entry.operationId || current.queue !== entry.queue) {
+	if (current.queue !== entry.queue || (current.queue !== "next_turn" && current.operationId !== entry.operationId)) {
 		invalid(`Conflicting immutable fields for queue item ${entry.queueItemId}`);
+	}
+	if (current.queue === "next_turn") {
+		if (entry.requestId !== current.requestId) invalid(`Queued turn ${entry.queueItemId} changed requestId`);
+		if (entry.enqueueHash !== current.enqueueHash) invalid(`Queued turn ${entry.queueItemId} changed enqueueHash`);
+		if (current.journalState === "consumed" || current.journalState === "cancelled") {
+			invalid(`Queued turn ${entry.queueItemId} is terminal`);
+		}
+		if (entry.operationId !== current.operationId) {
+			if (entry.state !== "dispatching" || !entry.deliveryRequestId) {
+				invalid(`Queued turn ${entry.queueItemId} changed operation outside dispatch`);
+			}
+			current.operationId = entry.operationId;
+		}
+		if (entry.deliveryRequestId !== current.deliveryRequestId) {
+			if (entry.state !== "dispatching" || !entry.deliveryRequestId) {
+				invalid(`Queued turn ${entry.queueItemId} changed delivery request outside dispatch`);
+			}
+			current.deliveryRequestId = entry.deliveryRequestId;
+		}
+		if (entry.state === "enqueued" && !entry.input) {
+			invalid(`Queued turn ${entry.queueItemId} edit is missing input`);
+		}
+		if ((entry.state === "enqueued" || entry.state === "paused") && entry.input) current.input = entry.input;
+		current.journalState = entry.state;
+		current.revision = entry.id;
+		current.reason = entry.reason;
+		return;
 	}
 	if (entry.input && !sameJson(current.input, entry.input))
 		invalid(`Conflicting queue input for ${entry.queueItemId}`);
@@ -769,6 +853,7 @@ function mergeQueue(current: QueueAccumulator, entry: RuntimeQueueEntry): void {
 	// cancellation must be able to supersede an orphan projection idempotently.
 	if (entry.state === "cancelled" || current.journalState !== "cancelled") current.journalState = entry.state;
 	if (entry.reason) current.reason = entry.reason;
+	current.revision = entry.id;
 }
 
 function isOrderedPrefix(prefix: readonly string[], value: readonly string[]): boolean {
@@ -1042,8 +1127,12 @@ export function reduceRuntimeJournal(entries: readonly unknown[]): RuntimeRecove
 			const entry = parseQueue(rawEntry);
 			const current = queues.get(entry.queueItemId);
 			if (!current) {
-				if (entry.state !== "enqueued" || !entry.input) {
+				const canStartQueuedTurn = entry.queue === "next_turn" && entry.state === "paused";
+				if ((entry.state !== "enqueued" && !canStartQueuedTurn) || !entry.input) {
 					invalid(`Runtime queue item ${entry.queueItemId} changed state before enqueue`);
+				}
+				if (entry.queue === "next_turn" && entry.enqueueHash !== hashRuntimeRequest("turn/queue", entry.input)) {
+					invalid(`Queued turn ${entry.queueItemId} enqueueHash does not match its initial input`);
 				}
 				queues.set(entry.queueItemId, {
 					operationId: entry.operationId,
@@ -1051,6 +1140,10 @@ export function reduceRuntimeJournal(entries: readonly unknown[]): RuntimeRecove
 					queue: entry.queue,
 					input: entry.input,
 					journalState: entry.state,
+					revision: entry.id,
+					...(entry.requestId === undefined ? {} : { requestId: entry.requestId }),
+					...(entry.enqueueHash === undefined ? {} : { enqueueHash: entry.enqueueHash }),
+					...(entry.deliveryRequestId === undefined ? {} : { deliveryRequestId: entry.deliveryRequestId }),
 				});
 			} else {
 				mergeQueue(current, entry);
@@ -1255,10 +1348,25 @@ export function reduceRuntimeJournal(entries: readonly unknown[]): RuntimeRecove
 
 	for (const queue of queues.values()) {
 		const operation = operations.get(queue.operationId);
-		if (!operation) invalid(`Queue item ${queue.queueItemId} references unknown operation ${queue.operationId}`);
-		if (operation.kind !== "steer") {
-			invalid(`Queue item ${queue.queueItemId} references a non-queued operation`);
+		if (queue.queue === "next_turn") {
+			const claimedTurn = claimedQueues.get(queue.queueItemId);
+			if (claimedTurn && !operation) {
+				invalid(`Queued turn ${queue.queueItemId} was consumed without a runtime operation`);
+			}
+			if (!operation) continue;
+			if (operation.kind !== "steer" && operation.kind !== "next_turn") {
+				invalid(`Queued turn ${queue.queueItemId} references a non-delivery operation`);
+			}
+			if (!operation.input || !sameJson(operation.input, queue.input)) {
+				invalid(`Queued turn ${queue.queueItemId} input does not match its operation`);
+			}
+			if (operation.requestId !== (queue.deliveryRequestId ?? queue.requestId)) {
+				invalid(`Queued turn ${queue.queueItemId} operation requestId does not match`);
+			}
+			continue;
 		}
+		if (!operation) invalid(`Queue item ${queue.queueItemId} references unknown operation ${queue.operationId}`);
+		if (operation.kind !== "steer") invalid(`Queue item ${queue.queueItemId} references a non-queued operation`);
 		if (!operation.input || !sameJson(operation.input, queue.input)) {
 			invalid(`Queue item ${queue.queueItemId} input does not match its operation`);
 		}
@@ -1309,7 +1417,7 @@ export function reduceRuntimeJournal(entries: readonly unknown[]): RuntimeRecove
 		}
 	}
 	for (const operation of operations.values()) {
-		if (operation.kind !== "turn" && operation.kind !== "steer") continue;
+		if (operation.kind !== "turn" && operation.kind !== "steer" && operation.kind !== "next_turn") continue;
 		const turn = operationTurns.get(operation.operationId);
 		if (operation.state === "completed" && (!turn || !turnIsProvablyCompleted(turn))) {
 			invalid(`Completed prompt operation ${operation.operationId} has no provably completed turn`);
@@ -1324,13 +1432,26 @@ export function reduceRuntimeJournal(entries: readonly unknown[]): RuntimeRecove
 		const claimedTurn = claimedQueues.get(queue.queueItemId);
 		if (claimedTurn && queue.journalState === "cancelled")
 			invalid(`Cancelled queue item ${queue.queueItemId} was consumed`);
-		const state = queue.journalState === "cancelled" ? "cancelled" : claimedTurn ? "consumed" : "enqueued";
+		const state =
+			queue.queue === "next_turn"
+				? claimedTurn
+					? "consumed"
+					: queue.journalState
+				: queue.journalState === "cancelled"
+					? "cancelled"
+					: claimedTurn
+						? "consumed"
+						: "enqueued";
 		reducedQueues.push({
 			operationId: queue.operationId,
 			queueItemId: queue.queueItemId,
 			queue: queue.queue,
 			state,
 			input: queue.input,
+			revision: queue.revision,
+			...(queue.requestId === undefined ? {} : { requestId: queue.requestId }),
+			...(queue.enqueueHash === undefined ? {} : { enqueueHash: queue.enqueueHash }),
+			...(queue.deliveryRequestId === undefined ? {} : { deliveryRequestId: queue.deliveryRequestId }),
 			...(claimedTurn === undefined ? {} : { turnId: claimedTurn.turnId }),
 			...(queue.reason === undefined ? {} : { reason: queue.reason }),
 		});
@@ -1436,7 +1557,15 @@ export function reduceRuntimeJournal(entries: readonly unknown[]): RuntimeRecove
 		);
 	}
 	for (const queue of reducedQueues) {
-		if (queue.state !== "enqueued") continue;
+		if (queue.state !== "enqueued" && queue.state !== "dispatching") continue;
+		if (queue.queue === "next_turn") {
+			decisions.push({
+				type: "pause_queue",
+				queueItemId: queue.queueItemId,
+				reason: "server_restarted",
+			});
+			continue;
+		}
 		decisions.push({
 			type: "cancel_queue",
 			queueItemId: queue.queueItemId,

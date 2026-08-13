@@ -12,6 +12,7 @@ import { registerFauxProvider } from "@metis/ai/compat";
 import { AgentSession, type AgentSessionEvent } from "../../src/core/agent-session.ts";
 import { AuthStorage } from "../../src/core/auth-storage.ts";
 import type { ExtensionRunner } from "../../src/core/extensions/index.ts";
+import type { InteractiveBashBoundary } from "../../src/core/interactive-bash-boundary.ts";
 import type { McpManager } from "../../src/core/mcp/index.ts";
 import { convertToLlm } from "../../src/core/messages.ts";
 import { ModelRegistry } from "../../src/core/model-registry.ts";
@@ -76,6 +77,8 @@ export interface HarnessOptions {
 	permissionModeCeiling?: () => PermissionSettings["mode"];
 	includeAutoMemory?: boolean;
 	unattendedExecution?: UnattendedExecutionProfile;
+	interactiveBashBoundary?: InteractiveBashBoundary;
+	withAgentDir?: boolean;
 	/** Optional caller-owned manager; cleanup does not close it. */
 	sessionManager?: SessionManager;
 }
@@ -187,6 +190,7 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
 		sessionManager,
 		settingsManager,
 		cwd: options.sessionManager ? sessionManager.getCwd() : tempDir,
+		agentDir: options.withAgentDir ? tempDir : undefined,
 		modelRegistry,
 		mcpManager: options.mcpManager,
 		resourceLoader,
@@ -199,6 +203,7 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
 		permissionModeCeiling: options.permissionModeCeiling,
 		includeAutoMemory: options.includeAutoMemory,
 		unattendedExecution: options.unattendedExecution,
+		interactiveBashBoundary: options.interactiveBashBoundary,
 	});
 
 	const events: AgentSessionEvent[] = [];

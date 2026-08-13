@@ -41,9 +41,10 @@ import {
 	modelsAreEqual,
 	streamSimple,
 } from "@metis/ai/compat";
+import { getProjectConfigDir } from "../config.ts";
 import { getThemeByName, theme } from "../modes/interactive/theme/theme.ts";
 import { stripFrontmatter } from "../utils/frontmatter.ts";
-import { isPathInside, resolvePath } from "../utils/paths.ts";
+import { canonicalizeActionPath, isPathInside, resolvePath } from "../utils/paths.ts";
 import { sleep } from "../utils/sleep.ts";
 import type { AgentMode } from "./agent-mode.ts";
 import { formatNoApiKeyFoundMessage, formatNoModelSelectedMessage } from "./auth-guidance.ts";
@@ -92,8 +93,16 @@ import {
 	wrapRegisteredTools,
 } from "./extensions/index.ts";
 import { emitSessionShutdownEvent } from "./extensions/runner.ts";
+import { createInteractiveBashBoundary, type InteractiveBashBoundary } from "./interactive-bash-boundary.ts";
 import { externalizeLargeToolOutput, type PersistedToolOutput } from "./large-tool-output.ts";
-import { createMcpToolDefinitions, type McpManager, type McpServerStatus } from "./mcp/index.ts";
+import {
+	createMcpToolDefinitions,
+	type McpCatalogItemDetail,
+	type McpCatalogItemKind,
+	type McpCatalogSummary,
+	type McpManager,
+	type McpServerStatus,
+} from "./mcp/index.ts";
 import {
 	type DreamActiveRun,
 	type DreamHistoryRecord,
@@ -104,16 +113,18 @@ import {
 } from "./memory-dream.ts";
 import type { BashExecutionMessage, CustomMessage } from "./messages.ts";
 import type { ModelRegistry } from "./model-registry.ts";
-import { narrowPermissionMode, type PermissionMode } from "./permission-mode.ts";
+import { isPermissionMode, narrowPermissionMode, type PermissionMode } from "./permission-mode.ts";
 import {
 	classifyAction,
+	executionTargetFor,
 	type PermissionAction,
+	type PermissionExecutionTarget,
 	PermissionPolicy,
 	type RequestPermissionApproval,
-	revalidateStructuredActionBinding,
 	type ToolProvenance,
 	unclassifiedAction,
 } from "./permission-policy.ts";
+import { ProjectPermissionRuleStore } from "./project-permission-rules.ts";
 import { expandPromptTemplate, type PromptTemplate } from "./prompt-templates.ts";
 import type { ResourceExtensionPaths, ResourceLoader } from "./resource-loader.ts";
 import {
@@ -134,6 +145,8 @@ import {
 	clearSessionAttachmentNonFiles,
 	clearSessionWorkDir,
 	createSessionWorkDir,
+	getOwnedSessionAttachmentDir,
+	getOwnedSessionWorkDirs,
 	getSessionAttachmentDir,
 } from "./session-attachments.ts";
 import { createSessionId } from "./session-id.ts";
@@ -276,6 +289,8 @@ export interface AgentSessionConfig {
 	includeAutoMemory?: boolean;
 	/** Host-owned monotonic upper bound for a child session. */
 	permissionModeCeiling?: () => PermissionMode;
+	/** Internal execution boundary override used by runtime tests. */
+	interactiveBashBoundary?: InteractiveBashBoundary;
 	/** Host-only fail-closed profile for unattended runs. Never derive from user or model input. */
 	unattendedExecution?: UnattendedExecutionProfile;
 }
@@ -346,6 +361,7 @@ interface AuthorizedPermissionAction {
 	readonly cwd: string;
 	readonly workspaceRoots: readonly string[];
 	readonly authorizedMode: PermissionMode | "unattended";
+	readonly executionTarget: PermissionExecutionTarget;
 }
 
 function estimateMessagesTokens(messages: AgentMessage[]): number {
@@ -397,7 +413,7 @@ interface ActiveDurableTurn {
 interface DurableOperationMetadata {
 	readonly identity: RuntimeRequestIdentity;
 	readonly input: DurablePromptInput;
-	readonly kind: "turn" | "steer";
+	readonly kind: "turn" | "steer" | "next_turn";
 	residentPayloadBytes: number;
 }
 
@@ -452,6 +468,7 @@ export class AgentSession {
 	private readonly _durableQueues = new Map<string, DurableQueueMetadata>();
 	private _durableResidentPayloadBytes = 0;
 	private _durableTerminalEvidence: "completed" | "interrupted" | undefined;
+	private readonly _durableTerminalStates = new Map<string, "completed" | "interrupted">();
 	private _durableOperationTurnListener?: (operationId: string, turnId: string) => void;
 	private _runtimeTeardownRequested = false;
 	private _stopCurrentRunAfterAbort = false;
@@ -494,6 +511,10 @@ export class AgentSession {
 	private _turnIndex = 0;
 
 	private _resourceLoader: ResourceLoader;
+	private _skillRefreshGeneration = 0;
+	private _skillRefreshPromise?: Promise<ReturnType<ResourceLoader["getSkills"]>>;
+	private _skillFullRefreshRequested = false;
+	private readonly _pendingSkillPaths = new Map<string, "project" | "user">();
 	private _customTools: ToolDefinition[];
 	private _baseToolDefinitions: Map<string, ToolDefinition> = new Map();
 	private _cwd: string;
@@ -533,6 +554,7 @@ export class AgentSession {
 	private _baseSystemPromptOptions!: BuildSystemPromptOptions;
 	private _systemPromptOverride?: string;
 	private readonly _permissionPolicy: PermissionPolicy;
+	private readonly _interactiveBashBoundary?: InteractiveBashBoundary;
 	private _requestPermissionApproval?: RequestPermissionApproval;
 	private readonly _permissionGrants = new Map<string, AuthorizedPermissionAction>();
 	private readonly _permissionDenials = new Map<string, string>();
@@ -547,6 +569,9 @@ export class AgentSession {
 
 	constructor(config: AgentSessionConfig) {
 		if (config.unattendedExecution) {
+			if (config.interactiveBashBoundary) {
+				throw new TypeError("Unattended execution cannot use an interactive Bash boundary");
+			}
 			if (config.sessionManager.getHeader()?.subagent) {
 				throw new TypeError("Unattended execution cannot run as a subagent");
 			}
@@ -609,7 +634,39 @@ export class AgentSession {
 			throw new Error("Ultra sessions require AgentSessionRuntime");
 		}
 		this._requestPermissionApproval = config.requestPermissionApproval;
-		this._permissionPolicy = new PermissionPolicy((request) => this._queuePermissionApproval(request));
+		this._interactiveBashBoundary = config.unattendedExecution
+			? undefined
+			: (config.interactiveBashBoundary ??
+				createInteractiveBashBoundary({
+					hostOperations: {
+						exec: (command, cwd, options) =>
+							createLocalBashOperations({ shellPath: this.settingsManager.getShellPath() }).exec(
+								command,
+								cwd,
+								options,
+							),
+					},
+					context: () => {
+						const sessionId = this.sessionManager.getSessionId();
+						const attachmentDir = this._agentDir
+							? getOwnedSessionAttachmentDir(this._agentDir, sessionId)
+							: undefined;
+						const workDirs = this._agentDir ? getOwnedSessionWorkDirs(this._agentDir, sessionId) : [];
+						const activeWorkDir =
+							this._activeWorkDir && workDirs.includes(this._activeWorkDir) ? this._activeWorkDir : undefined;
+						return {
+							cwd: this.sessionManager.getCwd(),
+							workspaceRoots: this.sessionManager.getWorkspaceRoots(),
+							readOnlyRoots: attachmentDir ? [attachmentDir] : [],
+							writeRoots: activeWorkDir ? [activeWorkDir] : [],
+							shellPath: this.settingsManager.getShellPath(),
+						};
+					},
+				}));
+		this._permissionPolicy = new PermissionPolicy(
+			(request) => this._queuePermissionApproval(request),
+			this._agentDir && !this._unattendedExecution ? new ProjectPermissionRuleStore(this._agentDir) : undefined,
+		);
 
 		// Always subscribe to agent events for internal handling
 		// (session persistence, extensions, auto-compaction, retry logic)
@@ -632,6 +689,21 @@ export class AgentSession {
 	/** Model registry for API key resolution and model discovery */
 	get modelRegistry(): ModelRegistry {
 		return this._modelRegistry;
+	}
+
+	async setPermissionMode(mode: PermissionMode): Promise<void> {
+		if (!isPermissionMode(mode)) throw new TypeError("Invalid permission mode");
+		if (this._permissionModeCeiling && narrowPermissionMode(mode, this._permissionModeCeiling()) !== mode) {
+			throw new Error("Permission mode cannot exceed the parent session");
+		}
+		const current = this.sessionManager.getPermissionSettings().mode;
+		if (current === mode) return;
+		if (mode === "full" && current !== "full") await this._interactiveBashBoundary?.reset();
+		this.sessionManager.setPermissionSettings({ mode });
+	}
+
+	async disposeInteractiveExecution(): Promise<void> {
+		await this._interactiveBashBoundary?.dispose();
 	}
 
 	setPermissionApprovalHandler(handler?: RequestPermissionApproval): void {
@@ -933,18 +1005,12 @@ export class AgentSession {
 				const denial = this._permissionDenials.get(toolCallId);
 				if (denial) throw new Error(denial);
 				const authorization = this._takePermissionAction(toolCallId, tool.name, args);
-				if (tool.name === "web_search" && this._toolProvenance(tool.name) === "builtin") {
-					const target =
-						WEB_SEARCH_PROVIDER_INFO[this.settingsManager.getWebSearchSettings().provider].networkTarget;
-					if (
-						!authorization.action.networkTargets.some(
-							(value) => value.host === target.host && value.port === target.port,
-						)
-					) {
-						throw new Error("web_search provider changed after permission approval; retry the search");
-					}
+				if (tool.name === "bash") this._interactiveBashBoundary?.bind(toolCallId, authorization.executionTarget);
+				try {
+					return await tool.execute(toolCallId, args, signal, onUpdate);
+				} finally {
+					if (tool.name === "bash") this._interactiveBashBoundary?.unbind(toolCallId);
 				}
-				return tool.execute(toolCallId, args, signal, onUpdate);
 			},
 		};
 	}
@@ -996,6 +1062,7 @@ export class AgentSession {
 		const approvedCwd = input.cwd ?? this._cwd;
 		const approvedWorkspaceRoots =
 			this._unattendedExecution?.workspaceRoots ?? this.sessionManager.getWorkspaceRoots();
+		const approvedReadOnlyRoots = this.resourceLoader.getSkills().skills.map((skill) => skill.baseDir);
 		const approvedSettings = this._getEffectivePermissionSettings();
 		const classificationArgs =
 			input.effectiveCommand === undefined
@@ -1008,6 +1075,7 @@ export class AgentSession {
 			args: classificationArgs,
 			cwd: approvedCwd,
 			workspaceRoots: approvedWorkspaceRoots,
+			readOnlyRoots: approvedReadOnlyRoots,
 			mcpAnnotations: input.provenance === "mcp" ? this._mcpManager?.getToolAnnotations(input.toolName) : undefined,
 			builtinNetworkTargets:
 				input.provenance === "builtin" && input.toolName === "web_search"
@@ -1019,6 +1087,12 @@ export class AgentSession {
 			: approvedSettings.mode === "full"
 				? unclassifiedAction(classifyInput)
 				: classifyAction(classifyInput);
+		const executionTarget = this._unattendedExecution
+			? action.toolName === "bash"
+				? "sandbox"
+				: "host"
+			: executionTargetFor(approvedSettings, action);
+		const header = this.sessionManager.getHeader();
 		const authorization = this._unattendedExecution
 			? authorizeUnattendedAction({
 					profile: this._unattendedExecution,
@@ -1030,6 +1104,11 @@ export class AgentSession {
 					settings: approvedSettings,
 					action,
 					args: structuredClone(approvedArgs),
+					projectPath: canonicalizeActionPath(this.sessionManager.getCwd(), this.sessionManager.getCwd()),
+					cwd: approvedCwd,
+					workspaceRoots: approvedWorkspaceRoots,
+					allowProjectRules: !header?.subagent && !header?.scheduled,
+					executionTarget,
 					signal: input.signal,
 				});
 		if (authorization.decision === "deny") {
@@ -1044,6 +1123,7 @@ export class AgentSession {
 			cwd: approvedCwd,
 			workspaceRoots: approvedWorkspaceRoots,
 			authorizedMode: this._unattendedExecution ? "unattended" : approvedSettings.mode,
+			executionTarget: authorization.executionTarget,
 		} satisfies AuthorizedPermissionAction;
 		this._permissionGrants.set(input.actionId, authorized);
 		return authorized;
@@ -1075,18 +1155,49 @@ export class AgentSession {
 			});
 			return authorized;
 		}
-		if (authorized.authorizedMode === "full" && this._getEffectivePermissionSettings().mode !== "full") {
+		const currentSettings = this._getEffectivePermissionSettings();
+		if (narrowPermissionMode(authorized.authorizedMode, currentSettings.mode) !== authorized.authorizedMode) {
 			throw new Error(`${toolName} permission mode narrowed before execution; retry requires approval`);
 		}
 		const currentWorkspaceRoots = this.sessionManager.getWorkspaceRoots();
-		if (authorized.authorizedMode === "ask" && !isDeepStrictEqual(currentWorkspaceRoots, authorized.workspaceRoots)) {
+		if (
+			authorized.authorizedMode !== "full" &&
+			!isDeepStrictEqual(currentWorkspaceRoots, authorized.workspaceRoots)
+		) {
 			throw new Error(`${toolName} workspace roots changed after authorization; retry requires approval`);
 		}
-		if (
-			authorized.action.paths.length > 0 &&
-			!revalidateStructuredActionBinding(authorized.action, args, authorized.cwd, currentWorkspaceRoots)
-		) {
-			throw new Error(`${toolName} filesystem target changed after authorization; retry requires approval`);
+		if (authorized.authorizedMode !== "full") {
+			const provenance = this._toolProvenance(toolName);
+			if (provenance !== authorized.action.provenance) {
+				throw new Error(`${toolName} provenance changed after authorization; retry requires approval`);
+			}
+			const currentArgs =
+				toolName === "bash"
+					? { ...(structuredClone(args) as Record<string, unknown>), command: this._effectiveBashCommand(args) }
+					: structuredClone(args);
+			const currentAction = classifyAction({
+				actionId,
+				toolName,
+				provenance,
+				args: currentArgs,
+				cwd: authorized.cwd,
+				workspaceRoots: currentWorkspaceRoots,
+				readOnlyRoots: this.resourceLoader.getSkills().skills.map((skill) => skill.baseDir),
+				mcpAnnotations: provenance === "mcp" ? this._mcpManager?.getToolAnnotations(toolName) : undefined,
+				builtinNetworkTargets:
+					provenance === "builtin" && toolName === "web_search"
+						? [WEB_SEARCH_PROVIDER_INFO[this.settingsManager.getWebSearchSettings().provider].networkTarget]
+						: undefined,
+			});
+			if (
+				toolName === "web_search" &&
+				!isDeepStrictEqual(currentAction.networkTargets, authorized.action.networkTargets)
+			) {
+				throw new Error("web_search provider changed after permission approval; retry the search");
+			}
+			if (!isDeepStrictEqual(currentAction, authorized.action)) {
+				throw new Error(`${toolName} classification changed after authorization; retry requires approval`);
+			}
 		}
 		return authorized;
 	}
@@ -1126,30 +1237,94 @@ export class AgentSession {
 				await this._recordSkillRead(args, isError);
 			}
 			const runner = this._extensionRunner;
-			if (!runner.hasHandlers("tool_result")) {
-				return undefined;
-			}
+			const hookResult = runner.hasHandlers("tool_result")
+				? await runner.emitToolResult({
+						type: "tool_result",
+						toolName: toolCall.name,
+						toolCallId: toolCall.id,
+						input: args as Record<string, unknown>,
+						content: result.content,
+						details: result.details,
+						isError,
+					})
+				: undefined;
+			const skillRefreshMessage =
+				!isError &&
+				this._toolProvenance(toolCall.name) === "builtin" &&
+				(toolCall.name === "write" || toolCall.name === "edit")
+					? await this._refreshSkillAfterFileMutation(args)
+					: undefined;
 
-			const hookResult = await runner.emitToolResult({
-				type: "tool_result",
-				toolName: toolCall.name,
-				toolCallId: toolCall.id,
-				input: args as Record<string, unknown>,
-				content: result.content,
-				details: result.details,
-				isError,
-			});
-
-			if (!hookResult) {
+			if (!hookResult && !skillRefreshMessage) {
 				return undefined;
 			}
 
 			return {
-				content: hookResult.content,
-				details: hookResult.details,
-				isError: hookResult.isError ?? isError,
+				content: skillRefreshMessage
+					? [...(hookResult?.content ?? result.content), { type: "text", text: skillRefreshMessage }]
+					: hookResult?.content,
+				details: hookResult?.details,
+				isError: hookResult?.isError ?? isError,
 			};
 		};
+	}
+
+	private async _refreshSkillAfterFileMutation(args: unknown): Promise<string | undefined> {
+		if (typeof args !== "object" || args === null || Array.isArray(args)) return undefined;
+		const path = (args as Record<string, unknown>).path;
+		if (typeof path !== "string") return undefined;
+
+		const target = canonicalizeActionPath(path, this._cwd);
+		if (basename(target) !== "SKILL.md") return undefined;
+		const projectRoot = canonicalizeActionPath(join(getProjectConfigDir(this._cwd), "skills"), this._cwd);
+		const userRoot = this._agentDir ? canonicalizeActionPath(join(this._agentDir, "skills"), this._cwd) : undefined;
+		const scope = isPathInside(projectRoot, target)
+			? "project"
+			: userRoot && isPathInside(userRoot, target)
+				? "user"
+				: undefined;
+		if (!scope) return undefined;
+		if (scope === "project" && !this.settingsManager.isProjectTrusted()) {
+			return `The file was written, but the project Skill at ${target} was not loaded because the project is not trusted.`;
+		}
+
+		try {
+			let refreshed = await this.refreshSkills({ path: target, scope });
+			const findSkill = () =>
+				refreshed.skills.find((candidate) => canonicalizeActionPath(candidate.filePath, this._cwd) === target);
+			let skill = findSkill();
+			if (
+				!skill &&
+				refreshed.diagnostics.some(
+					(diagnostic) =>
+						diagnostic.type === "collision" &&
+						[diagnostic.collision?.winnerPath, diagnostic.collision?.loserPath].some(
+							(path) => path && canonicalizeActionPath(path, this._cwd) === target,
+						),
+				)
+			) {
+				refreshed = await this.refreshSkills();
+				skill = findSkill();
+			}
+			const skillDir = dirname(target);
+			const diagnostics = refreshed.diagnostics.filter((diagnostic) => {
+				const paths = [diagnostic.path, diagnostic.collision?.winnerPath, diagnostic.collision?.loserPath].filter(
+					(candidate): candidate is string => typeof candidate === "string",
+				);
+				return paths.some((candidate) => isPathInside(skillDir, canonicalizeActionPath(candidate, this._cwd)));
+			});
+			const lines = skill
+				? [
+						`Loaded ${scope} Skill "${skill.name}" (${skill.disableModelInvocation ? "manual only" : "automatic invocation"}).`,
+					]
+				: [`The file was written, but the ${scope} Skill at ${target} was not loaded.`];
+			for (const diagnostic of diagnostics) {
+				lines.push(`${diagnostic.type}: ${diagnostic.message}${diagnostic.path ? ` (${diagnostic.path})` : ""}`);
+			}
+			return lines.join("\n");
+		} catch (error) {
+			return `The file was written, but Skill reload failed: ${error instanceof Error ? error.message : String(error)}`;
+		}
 	}
 
 	private _recordSkillUsage(name: string, trigger: SkillUsageRecord["trigger"]): void {
@@ -1905,6 +2080,7 @@ export class AgentSession {
 				"Cannot dispose an active agent session; await abortAndDrainAgentEventPersistence() before disposing",
 			);
 		}
+		this._interactiveBashBoundary?.forceDispose();
 		const errors: unknown[] = [];
 		if (!this._disposeCoreComplete) {
 			try {
@@ -2060,6 +2236,20 @@ export class AgentSession {
 		return this._mcpManager?.getStatus() ?? [];
 	}
 
+	getMcpCatalog(name: string): McpCatalogSummary {
+		if (!this._mcpManager) throw new Error("MCP is not available in this session");
+		return this._mcpManager.getCatalog(name);
+	}
+
+	getMcpCatalogItem(name: string, kind: McpCatalogItemKind, id: string): McpCatalogItemDetail {
+		if (!this._mcpManager) throw new Error("MCP is not available in this session");
+		return this._mcpManager.getCatalogItem(name, kind, id);
+	}
+
+	hasMcpCredential(name: string): boolean {
+		return this._mcpManager?.hasCredential(name) ?? false;
+	}
+
 	getMcpSecretEnvironment(name: string): Record<string, string> {
 		return this._mcpManager?.getSecretEnvironment(name) ?? {};
 	}
@@ -2081,6 +2271,11 @@ export class AgentSession {
 	restartMcpServers(name?: string): Promise<void> {
 		if (!this._mcpManager) return Promise.reject(new Error("MCP is not available in this session"));
 		return this._mcpManager.restart(name);
+	}
+
+	reloadMcpServers(): Promise<void> {
+		if (!this._mcpManager) return Promise.reject(new Error("MCP is not available in this session"));
+		return this._mcpManager.reload();
 	}
 
 	/**
@@ -2127,6 +2322,54 @@ export class AgentSession {
 	refreshSystemPrompt(): void {
 		this._baseSystemPrompt = this._rebuildSystemPrompt(this.getActiveToolNames());
 		this.agent.state.systemPrompt = this._systemPromptOverride ?? this._baseSystemPrompt;
+	}
+
+	/** Reload Skills and expose their latest metadata to the current session. */
+	async refreshSkills(changedSkill?: {
+		path: string;
+		scope: "project" | "user";
+	}): Promise<ReturnType<ResourceLoader["getSkills"]>> {
+		if (changedSkill) this._pendingSkillPaths.set(changedSkill.path, changedSkill.scope);
+		else this._skillFullRefreshRequested = true;
+		this._skillRefreshGeneration += 1;
+		if (this._skillRefreshPromise) return this._skillRefreshPromise;
+
+		const refresh = async (): Promise<ReturnType<ResourceLoader["getSkills"]>> => {
+			await new Promise<void>((resolve) => setImmediate(resolve));
+			let observedGeneration: number;
+			do {
+				observedGeneration = this._skillRefreshGeneration;
+				const fullRefresh = this._skillFullRefreshRequested;
+				this._skillFullRefreshRequested = false;
+				const changedSkills = [...this._pendingSkillPaths];
+				this._pendingSkillPaths.clear();
+				if (fullRefresh) {
+					if (this._resourceLoader.reloadSkills) await this._resourceLoader.reloadSkills();
+					else await this._resourceLoader.reload();
+				} else if (changedSkills.length > 0) {
+					this._resourceLoader.extendResources({
+						skillPaths: changedSkills.map(([path, scope]) => ({
+							path,
+							metadata: {
+								source: "auto",
+								scope,
+								origin: "top-level",
+								baseDir: scope === "project" ? getProjectConfigDir(this._cwd) : this._agentDir,
+							},
+						})),
+					});
+				}
+				this.refreshSystemPrompt();
+			} while (observedGeneration !== this._skillRefreshGeneration);
+			return this._resourceLoader.getSkills();
+		};
+
+		let wrapped!: Promise<ReturnType<ResourceLoader["getSkills"]>>;
+		wrapped = refresh().finally(() => {
+			if (this._skillRefreshPromise === wrapped) this._skillRefreshPromise = undefined;
+		});
+		this._skillRefreshPromise = wrapped;
+		return wrapped;
 	}
 
 	/** Whether compaction or branch summarization is currently running */
@@ -2322,11 +2565,35 @@ export class AgentSession {
 		this._durableTerminalEvidence = undefined;
 	}
 
+	/** Persist an independent queued turn before its provider work is scheduled. */
+	beginDurableQueuedTurn(identity: RuntimeRequestIdentity, input: DurablePromptInput, queueItemId: string): string {
+		if (this._durableTurn) throw new Error("A durable runtime turn is already active");
+		const turnId = deriveBatchedTurnId([queueItemId]);
+		const residentPayloadBytes = durablePromptResidentPayloadBytes(input);
+		this.sessionManager.appendRuntimeControl({
+			type: "runtime_turn",
+			turnId,
+			operationIds: [identity.operationId],
+			state: "started",
+			consumedQueueItemIds: [queueItemId],
+		});
+		this._durableTurn = {
+			turnId,
+			operations: [{ identity, input, kind: "next_turn", residentPayloadBytes }],
+			consumedQueueItemIds: [queueItemId],
+		};
+		this._durableResidentPayloadBytes += residentPayloadBytes;
+		this._durableOperationTurnListener?.(identity.operationId, turnId);
+		this._durableTerminalEvidence = undefined;
+		return turnId;
+	}
+
 	/** Queue one already-accepted prompt with its durable identity. */
 	enqueueAcceptedDurablePrompt(
 		input: DurablePromptInput,
 		identity: RuntimeRequestIdentity,
 		behavior: "steer" | "followUp",
+		queueItemId = identity.queueItemId,
 	): void {
 		let text = this._expandSkillCommand(input.text, true);
 		text = expandPromptTemplate(text, [...this.promptTemplates], MAX_DURABLE_PROMPT_TEXT_BYTES);
@@ -2335,8 +2602,8 @@ export class AgentSession {
 			throw new Error(`Expanded durable prompt cannot exceed ${MAX_DURABLE_PROMPT_TEXT_BYTES} UTF-8 bytes`);
 		}
 		const queue = behavior === "followUp" ? "follow_up" : "steer";
-		if (this._durableQueues.has(identity.queueItemId)) {
-			throw new Error(`Durable queue item is already enqueued: ${identity.queueItemId}`);
+		if (this._durableQueues.has(queueItemId)) {
+			throw new Error(`Durable queue item is already enqueued: ${queueItemId}`);
 		}
 		const residentPayloadBytes = durablePromptResidentPayloadBytes(input, text);
 		if (this._durableResidentPayloadBytes + residentPayloadBytes > MAX_DURABLE_TURN_RESIDENT_PAYLOAD_BYTES) {
@@ -2344,33 +2611,41 @@ export class AgentSession {
 				`Durable runtime turn payloads cannot exceed ${MAX_DURABLE_TURN_RESIDENT_PAYLOAD_BYTES} resident bytes`,
 			);
 		}
-		this._durableQueues.set(identity.queueItemId, {
+		this._durableQueues.set(queueItemId, {
 			operation: { identity, input, kind: "steer", residentPayloadBytes },
 			queue,
 		});
 		this._durableResidentPayloadBytes += residentPayloadBytes;
 		try {
-			const queueIdentity = { operationId: identity.operationId, queueItemId: identity.queueItemId };
+			const queueIdentity = { operationId: identity.operationId, queueItemId };
 			if (behavior === "followUp") this._enqueueFollowUp(text, undefined, queueIdentity);
 			else this._enqueueSteer(text, undefined, queueIdentity);
 		} catch (error) {
-			this._durableQueues.delete(identity.queueItemId);
+			this._durableQueues.delete(queueItemId);
 			this._durableResidentPayloadBytes -= residentPayloadBytes;
 			throw error;
 		}
 	}
 
 	/** Execute accepted work; final durable markers settle before this promise. */
-	async runAcceptedDurablePrompt(turnId: string, input: DurablePromptInput): Promise<void> {
+	async runAcceptedDurablePrompt(turnId: string, input: DurablePromptInput): Promise<"completed" | "interrupted"> {
 		const context: DurablePromptExecutionScope = { owner: this, turnId, input, active: true };
+		let runError: unknown;
 		try {
 			if (this._runtimeTeardownRequested) throw new Error("The agent session is tearing down");
 			const images = input.images?.length ? this.sessionManager.resolveDurableImageRefs(input.images) : undefined;
 			await durablePromptExecutionContext.run(context, () => this.prompt(input.text, { images }));
+		} catch (error) {
+			runError = error;
 		} finally {
 			context.active = false;
 			if (!this._isAgentRunActive && this._durableTurn?.turnId === turnId) this._finishDurableTurn();
 		}
+		const state = this._durableTerminalStates.get(turnId);
+		this._durableTerminalStates.delete(turnId);
+		if (runError !== undefined) throw runError;
+		if (!state) throw new Error(`Durable runtime turn did not reach a terminal state: ${turnId}`);
+		return state;
 	}
 
 	private _finishDurableTurn(): void {
@@ -2432,6 +2707,7 @@ export class AgentSession {
 					: {}),
 			});
 		}
+		this._durableTerminalStates.set(turn.turnId, state);
 		this._durableResidentPayloadBytes -= turn.operations.reduce(
 			(total, operation) => total + operation.residentPayloadBytes,
 			0,
@@ -4258,7 +4534,7 @@ export class AgentSession {
 				)
 			: createAllToolDefinitions(this._cwd, {
 					bash: {
-						operations: this._unattendedExecution?.bashOperations,
+						operations: this._unattendedExecution?.bashOperations ?? this._interactiveBashBoundary?.operations,
 						commandPrefix: shellCommandPrefix,
 						shellPath,
 						outputDir: this._toolOutputDir,

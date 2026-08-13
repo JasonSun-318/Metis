@@ -20,8 +20,10 @@ import {
 	createAgentSessionFromServices,
 	createAgentSessionRuntime,
 	createAgentSessionServices,
+	QueuedTurnBusyError,
 } from "../../src/core/agent-session-runtime.ts";
 import { AuthStorage } from "../../src/core/auth-storage.ts";
+import { QueuedTurnConflictError } from "../../src/core/queued-turn-queue.ts";
 import {
 	identifySubmitPromptRequest,
 	MAX_DURABLE_IMAGE_BYTES,
@@ -954,6 +956,286 @@ describe("AgentSessionRuntime characterization", () => {
 			});
 			expect(replay.turnId).toBe(direct.turnId);
 		});
+	});
+
+	it("automatically starts a queued desktop message as an independent FIFO turn", async () => {
+		let releaseFirst!: () => void;
+		let markFirstStarted!: () => void;
+		const firstStarted = new Promise<void>((resolve) => {
+			markFirstStarted = resolve;
+		});
+		const firstGate = new Promise<void>((resolve) => {
+			releaseFirst = resolve;
+		});
+		const { runtime, faux } = await createRuntimeForTest(() => {});
+		faux.setResponses([
+			async () => {
+				markFirstStarted();
+				await firstGate;
+				return fauxAssistantMessage("first done");
+			},
+			fauxAssistantMessage("queued done"),
+		]);
+
+		await runtime.submitPrompt({ requestId: "direct-before-queue", text: "start" });
+		await firstStarted;
+		const queued = runtime.enqueueQueuedTurn({
+			requestId: "00000000-0000-4000-8000-000000000101",
+			text: "afterward",
+		});
+		expect(runtime.queuedTurns).toMatchObject([{ queueItemId: queued.queueItemId, state: "queued" }]);
+		expect(faux.state.callCount).toBe(1);
+
+		releaseFirst();
+		await runtime.waitForIdle();
+		expect(faux.state.callCount).toBe(2);
+		expect(runtime.queuedTurns).toEqual([]);
+		expect(reduceRuntimeJournal(runtime.session.sessionManager.getDurableJournalSnapshot()).turns).toHaveLength(2);
+	});
+
+	it("drains consecutive queued desktop messages even when each turn settles immediately", async () => {
+		let releaseFirst!: () => void;
+		let markFirstStarted!: () => void;
+		const firstStarted = new Promise<void>((resolve) => {
+			markFirstStarted = resolve;
+		});
+		const firstGate = new Promise<void>((resolve) => {
+			releaseFirst = resolve;
+		});
+		const { runtime, faux } = await createRuntimeForTest(() => {});
+		faux.setResponses([
+			async () => {
+				markFirstStarted();
+				await firstGate;
+				return fauxAssistantMessage("first done");
+			},
+			fauxAssistantMessage("second done"),
+			fauxAssistantMessage("third done"),
+		]);
+
+		await runtime.submitPrompt({ requestId: "direct-before-two-queued", text: "start" });
+		await firstStarted;
+		runtime.enqueueQueuedTurn({ requestId: "00000000-0000-4000-8000-000000000111", text: "second" });
+		runtime.enqueueQueuedTurn({ requestId: "00000000-0000-4000-8000-000000000112", text: "third" });
+
+		releaseFirst();
+		await runtime.waitForIdle();
+		expect(faux.state.callCount).toBe(3);
+		expect(runtime.queuedTurns).toEqual([]);
+		expect(reduceRuntimeJournal(runtime.session.sessionManager.getDurableJournalSnapshot()).turns).toHaveLength(3);
+	});
+
+	it("recovers a queued desktop message as paused after runtime restart", async () => {
+		let releaseProvider!: () => void;
+		let markProviderStarted!: () => void;
+		const providerStarted = new Promise<void>((resolve) => {
+			markProviderStarted = resolve;
+		});
+		const providerGate = new Promise<void>((resolve) => {
+			releaseProvider = resolve;
+		});
+		const tempDir = join(tmpdir(), `metis-next-turn-restart-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+		const { runtime: original, faux: originalFaux } = await createRuntimeForTest(() => {}, {
+			cwd: tempDir,
+			disposeOnCleanup: false,
+		});
+		originalFaux.setResponses([
+			async (_context, options) => {
+				markProviderStarted();
+				await providerGate;
+				return fauxAssistantMessage("", { stopReason: options?.signal?.aborted ? "aborted" : "stop" });
+			},
+		]);
+
+		await original.submitPrompt({ requestId: "direct-before-next-turn-restart", text: "start" });
+		await providerStarted;
+		const queued = original.enqueueQueuedTurn({
+			requestId: "00000000-0000-4000-8000-000000000113",
+			text: "survive restart",
+		});
+		const sessionFile = original.session.sessionFile!;
+		const stopping = original.dispose();
+		releaseProvider();
+		await stopping;
+
+		const { runtime, faux } = await createRuntimeForTest(() => {}, {
+			cwd: tempDir,
+			sessionManager: SessionManager.open(sessionFile),
+		});
+		expect(faux.state.callCount).toBe(0);
+		expect(runtime.queuedTurns).toMatchObject([
+			{
+				queueItemId: queued.queueItemId,
+				state: "paused",
+				input: { text: "survive restart" },
+			},
+		]);
+		const recovered = runtime.queuedTurns[0]!;
+		await runtime.sendQueuedTurn({
+			queueItemId: recovered.queueItemId,
+			expectedRevision: recovered.revision,
+			delivery: "start",
+		});
+		await runtime.waitForIdle();
+		expect(faux.state.callCount).toBe(1);
+		expect(runtime.queuedTurns).toEqual([]);
+	});
+
+	it("pauses every queued desktop message when the active turn fails", async () => {
+		let releaseFirst!: () => void;
+		let markFirstStarted!: () => void;
+		const firstStarted = new Promise<void>((resolve) => {
+			markFirstStarted = resolve;
+		});
+		const firstGate = new Promise<void>((resolve) => {
+			releaseFirst = resolve;
+		});
+		const { runtime, faux } = await createRuntimeForTest(() => {});
+		faux.setResponses([
+			async () => {
+				markFirstStarted();
+				await firstGate;
+				throw new Error("provider failed");
+			},
+		]);
+
+		await runtime.submitPrompt({ requestId: "direct-before-queue-failure", text: "start" });
+		await firstStarted;
+		runtime.enqueueQueuedTurn({ requestId: "00000000-0000-4000-8000-000000000114", text: "second" });
+		runtime.enqueueQueuedTurn({ requestId: "00000000-0000-4000-8000-000000000115", text: "third" });
+		releaseFirst();
+		await runtime.waitForIdle();
+
+		expect(faux.state.callCount).toBe(1);
+		expect(runtime.queuedTurns.map(({ state }) => state)).toEqual(["paused", "paused"]);
+	});
+
+	it("pauses a failed automatic claim without advancing past the FIFO head", async () => {
+		let releaseFirst!: () => void;
+		let markFirstStarted!: () => void;
+		const firstStarted = new Promise<void>((resolve) => {
+			markFirstStarted = resolve;
+		});
+		const firstGate = new Promise<void>((resolve) => {
+			releaseFirst = resolve;
+		});
+		const { runtime, faux } = await createRuntimeForTest(() => {});
+		faux.setResponses([
+			async () => {
+				markFirstStarted();
+				await firstGate;
+				return fauxAssistantMessage("first done");
+			},
+		]);
+
+		await runtime.submitPrompt({ requestId: "direct-before-claim-failure", text: "start" });
+		await firstStarted;
+		runtime.enqueueQueuedTurn({ requestId: "00000000-0000-4000-8000-000000000116", text: "second" });
+		runtime.enqueueQueuedTurn({ requestId: "00000000-0000-4000-8000-000000000117", text: "third" });
+		const manager = runtime.session.sessionManager;
+		const appendControl = manager.appendRuntimeControl.bind(manager);
+		let rejected = false;
+		const appendSpy = vi.spyOn(manager, "appendRuntimeControl").mockImplementation((entry) => {
+			if (
+				!rejected &&
+				entry.type === "runtime_operation" &&
+				entry.kind === "next_turn" &&
+				entry.state === "accepted"
+			) {
+				rejected = true;
+				throw new Error("simulated admission failure");
+			}
+			return appendControl(entry);
+		});
+		try {
+			releaseFirst();
+			await runtime.waitForIdle();
+		} finally {
+			appendSpy.mockRestore();
+		}
+
+		expect(rejected).toBe(true);
+		expect(faux.state.callCount).toBe(1);
+		expect(runtime.queuedTurns.map(({ state, reason }) => [state, reason])).toEqual([
+			["paused", "delivery_failed"],
+			["queued", undefined],
+		]);
+	});
+
+	it("enforces idle delivery mode and FIFO before claiming a queued desktop message", async () => {
+		const { runtime, faux } = await createRuntimeForTest(() => {});
+		const first = runtime.enqueueQueuedTurn({
+			requestId: "00000000-0000-4000-8000-000000000118",
+			text: "first",
+		});
+		const second = runtime.enqueueQueuedTurn({
+			requestId: "00000000-0000-4000-8000-000000000119",
+			text: "second",
+		});
+
+		await expect(
+			runtime.sendQueuedTurn({
+				queueItemId: first.queueItemId,
+				expectedRevision: first.revision,
+				delivery: "steer",
+			}),
+		).rejects.toBeInstanceOf(QueuedTurnBusyError);
+		await expect(
+			runtime.sendQueuedTurn({
+				queueItemId: second.queueItemId,
+				expectedRevision: second.revision,
+				delivery: "start",
+			}),
+		).rejects.toBeInstanceOf(QueuedTurnConflictError);
+		await runtime.sendQueuedTurn({
+			queueItemId: first.queueItemId,
+			expectedRevision: first.revision,
+			delivery: "start",
+		});
+		await runtime.waitForIdle();
+		expect(faux.state.callCount).toBe(1);
+		expect(runtime.queuedTurns).toMatchObject([{ queueItemId: second.queueItemId, state: "paused" }]);
+	});
+
+	it("promotes one queued desktop message into the active turn as steering", async () => {
+		let releaseFirst!: () => void;
+		let markFirstStarted!: () => void;
+		const firstStarted = new Promise<void>((resolve) => {
+			markFirstStarted = resolve;
+		});
+		const firstGate = new Promise<void>((resolve) => {
+			releaseFirst = resolve;
+		});
+		const { runtime, faux } = await createRuntimeForTest(() => {});
+		runtime.session.agent.steeringMode = "all";
+		faux.setResponses([
+			async () => {
+				markFirstStarted();
+				await firstGate;
+				return fauxAssistantMessage("first boundary");
+			},
+			fauxAssistantMessage("guided done"),
+		]);
+
+		await runtime.submitPrompt({ requestId: "direct-before-guide", text: "start" });
+		await firstStarted;
+		const queued = runtime.enqueueQueuedTurn({
+			requestId: "00000000-0000-4000-8000-000000000102",
+			text: "adjust direction",
+		});
+		const accepted = await runtime.sendQueuedTurn({
+			queueItemId: queued.queueItemId,
+			expectedRevision: queued.revision,
+			delivery: "steer",
+		});
+		expect(accepted.queueItemId).toBe(queued.queueItemId);
+		expect(runtime.queuedTurns).toMatchObject([{ state: "sending" }]);
+
+		releaseFirst();
+		await runtime.waitForIdle();
+		expect(faux.state.callCount).toBe(2);
+		expect(runtime.queuedTurns).toEqual([]);
+		expect(reduceRuntimeJournal(runtime.session.sessionManager.getDurableJournalSnapshot()).turns).toHaveLength(1);
 	});
 
 	it("refuses every queue clear path while a durable queued prompt is pending", async () => {
