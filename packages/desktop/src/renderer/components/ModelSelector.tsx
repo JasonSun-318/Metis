@@ -134,41 +134,41 @@ export function ModelSelector({ available, commandRequest, disabled, onChange, v
 							</button>
 						);
 					})}
-					{activeProvider !== null && (
-						<div aria-label={t("Models")} className="model-selector-submenu" role="menu">
+				</div>
+			)}
+			{open && activeProvider !== null && (
+				<div aria-label={t("Models")} className="model-selector-submenu" role="menu">
+					<button
+						aria-label={t("Back to providers")}
+						className="model-selector-back"
+						onClick={() => setActiveProvider(null)}
+						role="menuitem"
+						type="button"
+					>
+						<CaretLeft aria-hidden="true" size={14} />
+						<span>{providerDisplayName(activeProvider)}</span>
+					</button>
+					{activeModels.map((model, index) => {
+						const isSelected = model.provider === value?.provider && model.modelId === value.modelId;
+						return (
 							<button
-								aria-label={t("Back to providers")}
-								className="model-selector-back"
-								onClick={() => setActiveProvider(null)}
-								role="menuitem"
+								aria-checked={isSelected}
+								key={`${model.provider}/${model.modelId}`}
+								onClick={() => {
+									if (!isSelected) void selectModel(model).catch(() => undefined);
+								}}
+								role="menuitemradio"
 								type="button"
 							>
-								<CaretLeft aria-hidden="true" size={14} />
-								<span>{providerDisplayName(activeProvider)}</span>
+								<span>{model.name}</span>
+								{isSelected ? (
+									<Check aria-hidden="true" size={16} weight="bold" />
+								) : index < 9 ? (
+									<kbd>{index + 1}</kbd>
+								) : null}
 							</button>
-							{activeModels.map((model, index) => {
-								const isSelected = model.provider === value?.provider && model.modelId === value.modelId;
-								return (
-									<button
-										aria-checked={isSelected}
-										key={`${model.provider}/${model.modelId}`}
-										onClick={() => {
-											if (!isSelected) void selectModel(model).catch(() => undefined);
-										}}
-										role="menuitemradio"
-										type="button"
-									>
-										<span>{model.name}</span>
-										{isSelected ? (
-											<Check aria-hidden="true" size={16} weight="bold" />
-										) : index < 9 ? (
-											<kbd>{index + 1}</kbd>
-										) : null}
-									</button>
-								);
-							})}
-						</div>
-					)}
+						);
+					})}
 				</div>
 			)}
 		</div>
