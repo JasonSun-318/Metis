@@ -378,6 +378,19 @@ export function replaceSessionAttachmentReferences(
 	);
 }
 
+/** Separate user-visible text from private model-facing attachment metadata. */
+export function splitSessionAttachmentPrompt(text: string): {
+	readonly text: string;
+	readonly attachments: readonly SessionAttachment[];
+} {
+	const attachments: SessionAttachment[] = [];
+	const publicText = replaceSessionAttachmentReferences(text, (found) => {
+		attachments.push(...found);
+		return "";
+	}).trim();
+	return { text: publicText, attachments };
+}
+
 /** Replace private model-facing attachment metadata with compact CLI labels. */
 export function formatSessionAttachmentDisplayText(text: string): string {
 	return replaceSessionAttachmentReferences(text, (attachments) =>

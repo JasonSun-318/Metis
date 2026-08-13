@@ -50,8 +50,8 @@ export interface CreateAgentSessionOptions {
 	/** Classification mode for a newly-created default session manager. Default: code. */
 	agentMode?: AgentMode;
 	/** Initial permission mode for a newly-created session. */
-	permissionMode?: PermissionMode | "auto";
-	/** @deprecated Ignored. Ask/Full has no reviewer. */
+	permissionMode?: PermissionMode;
+	/** @deprecated Ignored. Ask/Auto/Full have no reviewer. */
 	reviewerEnabled?: boolean;
 	/** Host callback for one-action approvals. */
 	onPermissionRequest?: PermissionRequester;
@@ -62,6 +62,8 @@ export interface CreateAgentSessionOptions {
 	modelRegistry?: ModelRegistry;
 	/** Injectable MCP manager. Ownership transfers to AgentSession after successful construction. */
 	mcpManager?: McpManager;
+	/** @internal Allow host UIs to render before optional MCP servers finish connecting. */
+	backgroundOptionalMcpStartup?: boolean;
 
 	/** Model to use. Default: from settings, else first available */
 	model?: Model<any>;
@@ -123,7 +125,10 @@ export interface PermissionRequest {
 	details: string;
 }
 
-export type PermissionRequester = (request: PermissionRequest, signal?: AbortSignal) => Promise<"allow-once" | "deny">;
+export type PermissionRequester = (
+	request: PermissionRequest,
+	signal?: AbortSignal,
+) => Promise<"allow-once" | "always-allow-project" | "deny">;
 
 /** Result from createAgentSession */
 export interface CreateAgentSessionResult {
@@ -187,6 +192,9 @@ function createActionPermissionRequester(requester: PermissionRequester | undefi
 			},
 			request.signal,
 		);
+		if (decision === "always-allow-project") {
+			return { decision: "allow" as const, remember: "project" as const };
+		}
 		return decision === "allow-once" ? { decision: "allow" as const } : { decision: "deny" as const };
 	};
 }
@@ -323,7 +331,12 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 
 	try {
 		if (!options.unattendedExecution) {
-			mcpManager ??= await McpManager.create({ settingsManager, authStorage, cwd });
+			mcpManager ??= await McpManager.create({
+				settingsManager,
+				authStorage,
+				cwd,
+				backgroundOptionalStartup: options.backgroundOptionalMcpStartup,
+			});
 		}
 		if (!resourceLoader) {
 			resourceLoader = new DefaultResourceLoader({

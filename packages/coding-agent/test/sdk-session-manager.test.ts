@@ -62,7 +62,7 @@ describe("createAgentSession session manager defaults", () => {
 		session.dispose();
 	});
 
-	it("creates Chat without cwd in an owned managed workspace with Ask permissions", async () => {
+	it("creates Chat without cwd in an owned managed workspace with Auto permissions", async () => {
 		const model = getModel("anthropic", "claude-sonnet-4-5")!;
 		const { session } = await createAgentSession({ agentDir, model, agentMode: "chat" });
 
@@ -71,22 +71,22 @@ describe("createAgentSession session manager defaults", () => {
 		expect(session.sessionManager.getCwd()).toBe(
 			realpathSync(join(agentDir, "workspaces", session.sessionManager.getSessionId())),
 		);
-		expect(session.sessionManager.getPermissionSettings()).toEqual({ mode: "ask" });
+		expect(session.sessionManager.getPermissionSettings()).toEqual({ mode: "auto" });
 		session.dispose();
 	});
 
-	it("creates Code without cwd in the host cwd with Ask permissions", async () => {
+	it("creates Code without cwd in the host cwd with Auto permissions", async () => {
 		const model = getModel("anthropic", "claude-sonnet-4-5")!;
 		const { session } = await createAgentSession({ agentDir, model, agentMode: "code" });
 
 		expect(session.mode).toBe("code");
 		expect(session.sessionManager.getCwd()).toBe(realpathSync(process.cwd()));
 		expect(session.sessionManager.getCwdOrigin()).toBe("user-selected");
-		expect(session.sessionManager.getPermissionSettings()).toEqual({ mode: "ask" });
+		expect(session.sessionManager.getPermissionSettings()).toEqual({ mode: "auto" });
 		session.dispose();
 	});
 
-	it("normalizes deprecated SDK auto and ignores reviewerEnabled", async () => {
+	it("preserves SDK Auto and ignores reviewerEnabled", async () => {
 		const model = getModel("anthropic", "claude-sonnet-4-5")!;
 		const { session } = await createAgentSession({
 			cwd,
@@ -97,7 +97,7 @@ describe("createAgentSession session manager defaults", () => {
 			reviewerEnabled: false,
 		});
 
-		expect(session.sessionManager.getPermissionSettings()).toEqual({ mode: "ask" });
+		expect(session.sessionManager.getPermissionSettings()).toEqual({ mode: "auto" });
 		expect(session.sessionManager.getHeader()).not.toHaveProperty("reviewerEnabled");
 		session.dispose();
 	});

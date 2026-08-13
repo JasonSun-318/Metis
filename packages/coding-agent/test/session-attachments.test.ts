@@ -24,6 +24,7 @@ import {
 	importSessionAttachments,
 	pruneStaleSessionWorkDirs,
 	removeSessionAttachment,
+	splitSessionAttachmentPrompt,
 } from "../src/core/session-attachments.ts";
 import { SessionManager } from "../src/core/session-manager.ts";
 
@@ -68,6 +69,16 @@ describe("session attachments", () => {
 		const prompt = formatSessionAttachments("/skill:pdf Summarize this", [attachment]);
 
 		expect(prompt.startsWith("/skill:pdf Summarize this\n\n<attachments>")).toBe(true);
+	});
+
+	it("separates public text from private attachment metadata", () => {
+		const attachment = { name: "design.png", path: "/private/metis/attachments/design.png", size: 42 };
+		const formatted = formatSessionAttachments("review this", [attachment]);
+
+		expect(splitSessionAttachmentPrompt(formatted)).toEqual({
+			text: "review this",
+			attachments: [attachment],
+		});
 	});
 
 	it("imports long display names without creating an overlong internal filename", () => {

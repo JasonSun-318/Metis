@@ -795,7 +795,7 @@ export interface NewSessionOptions {
 	mode?: AgentMode;
 	cwdOrigin?: CwdOrigin;
 	permissionMode?: PersistedPermissionMode;
-	/** @deprecated Ignored. Ask/Full has no reviewer. */
+	/** @deprecated Ignored. Ask/Auto/Full have no reviewer. */
 	reviewerEnabled?: boolean;
 	subagent?: SessionHeader["subagent"];
 	scheduled?: SessionHeader["scheduled"];
@@ -1864,7 +1864,7 @@ export function loadEntriesFromFile(filePath: string): FileEntry[] {
 }
 
 const SESSION_READ_BUFFER_BYTES = 64 * 1024;
-const MAX_SESSION_RECORD_BYTES = 64 * 1024 * 1024;
+export const MAX_SESSION_RECORD_BYTES = 64 * 1024 * 1024;
 
 function readSessionHeaderInfo(filePath: string): { header: SessionHeader; mtimeMs: number } | null {
 	try {
