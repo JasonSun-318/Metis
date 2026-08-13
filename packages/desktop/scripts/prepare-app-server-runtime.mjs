@@ -20,7 +20,14 @@ const packagedNativeTarget = process.env.METIS_NATIVE_TOOLS_TARGET;
 
 async function run(command, args, failure, env = process.env) {
 	await new Promise((resolveRun, rejectRun) => {
-		const child = spawn(command, args, { cwd: repoRoot, env, stdio: "inherit" });
+		// Node 24 on Windows throws EINVAL when spawning .cmd/.bat files directly
+		// (https://github.com/nodejs/node/issues/59210); route them through cmd.exe.
+		const child = spawn(command, args, {
+			cwd: repoRoot,
+			env,
+			stdio: "inherit",
+			shell: process.platform === "win32",
+		});
 		child.once("error", rejectRun);
 		child.once("exit", (code) => {
 			if (code === 0) resolveRun();

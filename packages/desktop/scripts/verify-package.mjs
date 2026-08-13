@@ -84,7 +84,9 @@ for (const [fuse, expected] of [
 	if (fuses[fuse] !== expected) throw new Error(`Packaged Electron fuse ${FuseV1Options[fuse]} is misconfigured`);
 }
 
-const packagedPaths = new Set(listPackage(appAsar));
+// listPackage returns OS-native separators on Windows; the expected paths below
+// always use forward slashes, so normalize the listing before matching.
+const packagedPaths = new Set(listPackage(appAsar).map((path) => path.replaceAll("\\", "/")));
 const tuiNativeRoot = "/.webpack/app-server/node_modules/@metis/tui/native/";
 const expectedTuiNativePrefix =
 	process.platform === "darwin" || process.platform === "win32"
@@ -109,7 +111,7 @@ for (const [lockPath, expected] of Object.entries(installLock.packages)) {
 	if (!packagedPaths.has(packagedPackagePath)) {
 		throw new Error(`Locked App Server dependency is missing: ${lockPath}`);
 	}
-	const packagedPackage = JSON.parse(extractFile(appAsar, packagedPackagePath.slice(1)).toString("utf8"));
+	const packagedPackage = JSON.parse(extractFile(appAsar, packagedPackagePath.slice(1).replaceAll("/", path.sep)).toString("utf8"));
 	if (packagedPackage.version !== expected.version) {
 		throw new Error(`${packagedPackage.name} is ${packagedPackage.version}, expected ${expected.version}`);
 	}

@@ -189,7 +189,11 @@ const config: ForgeConfig = {
 		},
 	},
 	makers: [
-		new MakerSquirrel({ windowsSign }),
+		// An explicit unscoped name is required: electron-winstaller builds the
+		// nuspec path from `name`, and a scoped name (@metis/desktop) turns the
+		// slash into a directory separator on Windows, failing with ENOENT.
+		// `authors` is required because nuget refuses to pack a nuspec without it.
+		new MakerSquirrel({ windowsSign, name: "Metis", authors: "Metis" }),
 		new MakerZIP({}),
 		// APFS avoids appdmg's legacy `bless --openfolder` path, which fails when
 		// an x64 Node process runs under Rosetta on Apple Silicon.
