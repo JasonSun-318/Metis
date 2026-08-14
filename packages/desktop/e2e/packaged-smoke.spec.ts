@@ -3476,17 +3476,18 @@ test("packaged browser sidebar loads real pages and persists its isolated profil
 	}
 });
 
-test("packaged Language menu switches immediately and persists across restart", async () => {
-	test.setTimeout(60_000);
+test("packaged General settings and Personalization persist across restart", async () => {
+	test.setTimeout(90_000);
+	const fixtures = await loadCodingFixtures();
 	const executable = packagedExecutable();
 	expect(existsSync(executable), `Package the desktop app first: ${executable}`).toBe(true);
 
-	const tempRoot = await mkdtemp(path.join(tmpdir(), "metis-language-"));
+	const tempRoot = await mkdtemp(path.join(tmpdir(), "metis-settings-"));
 	const agentDir = path.join(tempRoot, "agent");
 	const homeDir = path.join(tempRoot, "home");
-	const projectDir = path.join(tempRoot, "language-project");
+	const projectDir = path.join(tempRoot, "settings-project");
 	const userDataDir = path.join(tempRoot, "electron");
-	const qaDir = path.join(desktopRoot, "test-results", "design-qa", "language");
+	const qaDir = path.join(desktopRoot, "test-results", "design-qa", "settings");
 	await Promise.all([
 		mkdir(agentDir),
 		mkdir(homeDir),
@@ -3494,6 +3495,7 @@ test("packaged Language menu switches immediately and persists across restart", 
 		mkdir(userDataDir),
 		mkdir(qaDir, { recursive: true }),
 	]);
+	createStoredSession(fixtures, agentDir, projectDir, CHAT_ACTIVE_ID, "chat", false, "Settings session");
 
 	const diagnostics: string[] = [];
 	const firstPort = await reservePort();
@@ -3519,46 +3521,81 @@ test("packaged Language menu switches immediately and persists across restart", 
 		page.setDefaultTimeout(10_000);
 		await page.setViewportSize({ width: 1440, height: 900 });
 		await waitForServerReady(page);
+		const settingsSession = page.locator('.session-button[aria-label="Settings session"]');
+		await settingsSession.click();
+		await expect(settingsSession).toHaveAttribute("aria-current", "page");
 
-		phase = "opening Language menu";
+		phase = "opening General settings";
 		await page.getByRole("button", { name: "Metis User", exact: true }).click();
-		await page.getByRole("menuitem", { name: "Language", exact: true }).click();
-		await expect(page.getByRole("menuitemradio", { name: "English", exact: true })).toHaveAttribute("aria-checked", "true");
-		await expect(page.getByRole("menuitemradio")).toHaveCount(2);
-		expect(await page.locator(".account-menu-popover").evaluate((element) => {
-			const style = getComputedStyle(element);
-			return { background: style.backgroundColor, border: style.borderTopColor, radius: style.borderRadius };
-		})).toEqual({ background: "rgb(45, 45, 45)", border: "rgba(255, 255, 255, 0.14)", radius: "12px" });
-		const accountMenuBox = await page.locator(".account-menu-popover").boundingBox();
-		const languageMenuBox = await page.locator(".account-language-popover").boundingBox();
-		expect(accountMenuBox).not.toBeNull();
-		expect(languageMenuBox).not.toBeNull();
-		expect(languageMenuBox!.x).toBeGreaterThanOrEqual(accountMenuBox!.x + accountMenuBox!.width + 6);
-		await page.screenshot({ path: path.join(qaDir, "language-menu-english-1440x900.png") });
-		await page.screenshot({
-			clip: {
-				x: accountMenuBox!.x,
-				y: Math.min(accountMenuBox!.y, languageMenuBox!.y),
-				width: languageMenuBox!.x + languageMenuBox!.width - accountMenuBox!.x,
-				height: Math.max(
-					accountMenuBox!.y + accountMenuBox!.height,
-					languageMenuBox!.y + languageMenuBox!.height,
-				) - Math.min(accountMenuBox!.y, languageMenuBox!.y),
-			},
-			path: path.join(qaDir, "language-menu-focused.png"),
-		});
+		await page.getByRole("menuitem", { name: "Settings", exact: true }).click();
+		await expect(page.getByRole("heading", { name: "General", exact: true })).toBeVisible();
+		await expect(page.getByRole("button", { name: "English", exact: true })).toHaveAttribute("aria-pressed", "true");
 
-		phase = "switching to Chinese";
-		await page.getByRole("menuitemradio", { name: "中文", exact: true }).click();
-		await expect(page.getByRole("button", { name: "新建任务", exact: true })).toBeVisible();
-		await expect(page.getByText("插件", { exact: true }).first()).toBeVisible();
+		phase = "setting language typography and motion";
+		await page.getByRole("button", { name: "中文", exact: true }).click();
+		await expect(page.getByRole("heading", { name: "通用", exact: true })).toBeVisible();
 		expect(await page.evaluate(() => document.documentElement.lang)).toBe("zh-CN");
-		await page.getByRole("button", { name: "Metis User", exact: true }).click();
-		await page.getByRole("menuitem", { name: "语言", exact: true }).click();
-		await expect(page.getByRole("menuitemradio", { name: "中文", exact: true })).toHaveAttribute("aria-checked", "true");
-		await page.screenshot({ path: path.join(qaDir, "language-menu-chinese-1440x900.png") });
+		await page.getByRole("button", { name: "Chat 字体", exact: true }).click();
+		const fontMenuBox = await page.getByRole("listbox", { name: "Chat 字体", exact: true }).boundingBox();
+		expect(fontMenuBox).not.toBeNull();
+		expect(fontMenuBox!.x).toBeGreaterThanOrEqual(0);
+		expect(fontMenuBox!.x + fontMenuBox!.width).toBeLessThanOrEqual(1_440);
+		expect(fontMenuBox!.y + fontMenuBox!.height).toBeLessThanOrEqual(900);
+		await page.getByRole("option", { name: "系统无衬线", exact: true }).click();
+		await page.getByRole("button", { name: "Code 字体", exact: true }).click();
+		await page.getByRole("option", { name: "系统衬线", exact: true }).click();
+		await page.getByRole("button", { name: "减少动效", exact: true }).click();
+		expect(await page.locator("html").getAttribute("data-motion")).toBe("reduced");
+		const fonts = await page.evaluate(() => ({
+			chat: getComputedStyle(document.documentElement).getPropertyValue("--chat-prose-font"),
+			code: getComputedStyle(document.documentElement).getPropertyValue("--code-prose-font"),
+		}));
+		expect(fonts.chat).toContain("-apple-system");
+		expect(fonts.code).toContain("Songti SC");
+		expect(
+			await page.locator(".settings-page-scroll").evaluate((element) => element.scrollWidth <= element.clientWidth),
+		).toBe(true);
+		expect(
+			await page.locator(".general-setting-row").evaluateAll((rows) =>
+				rows.every((row) => {
+					const copy = row.querySelector(".general-setting-copy")?.getBoundingClientRect();
+					const control = row.querySelector(".general-setting-control")?.getBoundingClientRect();
+					return copy !== undefined && control !== undefined && copy.right <= control.left;
+				}),
+			),
+		).toBe(true);
+		await expect(page.getByRole("button", { name: "深色", exact: true })).toHaveAttribute("aria-pressed", "true");
+		await page.screenshot({ animations: "disabled", path: path.join(qaDir, "general-dark-1440x900.png") });
 
-		phase = "restarting with persisted Chinese";
+		phase = "saving global instructions without reloading the open session";
+		const statusBefore = await page.evaluate(async (sessionId) =>
+			(globalThis as unknown as { metis: MetisDesktopApi }).metis.getSessionStatus({ sessionId }), CHAT_ACTIVE_ID);
+		await page.getByRole("button", { name: "个性化", exact: true }).click();
+		const instructions = page.getByRole("textbox", { name: "全局指令", exact: true });
+		await expect(instructions).toBeVisible();
+		await instructions.fill("Prefer concise answers.");
+		await page.getByRole("button", { name: "保存指令", exact: true }).click();
+		await expect(page.getByRole("status")).toContainText("已保存");
+		expect(await readFile(path.join(agentDir, "AGENTS.md"), "utf8")).toBe("Prefer concise answers.");
+		const statusAfter = await page.evaluate(async (sessionId) =>
+			(globalThis as unknown as { metis: MetisDesktopApi }).metis.getSessionStatus({ sessionId }), CHAT_ACTIVE_ID);
+		expect(statusAfter).toEqual(statusBefore);
+		await instructions.focus();
+		await page.screenshot({ animations: "disabled", path: path.join(qaDir, "personalization-dark-1440x900.png") });
+
+		phase = "capturing matched light settings";
+		await page.getByRole("button", { name: "通用", exact: true }).click();
+		await page.getByRole("button", { name: "浅色", exact: true }).click();
+		await expect(page.getByRole("button", { name: "浅色", exact: true })).toHaveAttribute("aria-pressed", "true");
+		await page.screenshot({ animations: "disabled", path: path.join(qaDir, "general-light-1440x900.png") });
+		await page.getByRole("button", { name: "个性化", exact: true }).click();
+		await expect(page.getByRole("textbox", { name: "全局指令", exact: true })).toHaveValue("Prefer concise answers.");
+		await page.getByRole("textbox", { name: "全局指令", exact: true }).focus();
+		await page.screenshot({ animations: "disabled", path: path.join(qaDir, "personalization-light-1440x900.png") });
+		await page.getByRole("button", { name: "返回应用", exact: true }).click();
+		await expect(settingsSession).toHaveAttribute("aria-current", "page");
+
+		phase = "restarting with persisted settings";
 		await browser.close();
 		browser = undefined;
 		await stopProcess(app);
@@ -3566,13 +3603,29 @@ test("packaged Language menu switches immediately and persists across restart", 
 		app = launchPackagedApp(executable, restartPort, userDataDir, projectDir, agentDir, homeDir, diagnostics);
 		({ browser, page } = await connectToApp(restartPort));
 		captureConsoleErrors(page);
-		await page.setViewportSize({ width: 960, height: 720 });
+		page.setDefaultTimeout(10_000);
+		await page.setViewportSize({ width: 1440, height: 900 });
 		await waitForServerReady(page);
 		await expect(page.getByRole("button", { name: "新建任务", exact: true })).toBeVisible();
 		expect(await page.evaluate(() => document.documentElement.lang)).toBe("zh-CN");
+		expect(await page.locator("html").getAttribute("data-motion")).toBe("reduced");
 		await page.getByRole("button", { name: "Metis User", exact: true }).click();
 		await expect(page.getByRole("menuitem", { name: "设置", exact: true })).toBeFocused();
-		await page.screenshot({ path: path.join(qaDir, "chinese-shell-960x720.png") });
+		await expect(page.getByRole("menuitem", { name: "语言", exact: true })).toHaveCount(0);
+		await page.getByRole("menuitem", { name: "设置", exact: true }).click();
+		await expect(page.getByRole("button", { name: "中文", exact: true })).toHaveAttribute("aria-pressed", "true");
+		await expect(page.getByRole("button", { name: "浅色", exact: true })).toHaveAttribute("aria-pressed", "true");
+		await expect(page.getByRole("button", { name: "Chat 字体", exact: true })).toContainText("系统无衬线");
+		await expect(page.getByRole("button", { name: "Code 字体", exact: true })).toContainText("系统衬线");
+		await expect(page.getByRole("button", { name: "减少动效", exact: true })).toHaveAttribute("aria-pressed", "true");
+		const restartedFonts = await page.evaluate(() => ({
+			chat: getComputedStyle(document.documentElement).getPropertyValue("--chat-prose-font"),
+			code: getComputedStyle(document.documentElement).getPropertyValue("--code-prose-font"),
+		}));
+		expect(restartedFonts.chat).toContain("-apple-system");
+		expect(restartedFonts.code).toContain("Songti SC");
+		await page.getByRole("button", { name: "个性化", exact: true }).click();
+		await expect(page.getByRole("textbox", { name: "全局指令", exact: true })).toHaveValue("Prefer concise answers.");
 		expect(consoleErrors).toEqual([]);
 	} catch (error) {
 		const bodyText = await page?.locator("body").innerText().catch(() => "renderer unavailable");
