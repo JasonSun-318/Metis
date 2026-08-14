@@ -496,6 +496,9 @@ export class ClientBroker {
 		this.register(DESKTOP_IPC_CHANNELS.renameSession, 1, async (_event, [input]) =>
 			this.clientCall("session/rename", input),
 		);
+		this.register(DESKTOP_IPC_CHANNELS.forkSession, 1, async (_event, [input]) =>
+			this.clientCall("session/fork", input),
+		);
 		this.register(DESKTOP_IPC_CHANNELS.deleteSession, 1, async (_event, [input]) => {
 			const params = this.validatedParams("session/delete", input);
 			return this.enqueueSubscriptionMutation(async () => {

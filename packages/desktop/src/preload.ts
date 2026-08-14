@@ -47,6 +47,7 @@ function invoke<Method extends Exclude<ClientRequestMethod, "initialize">>(
 }
 
 const api = {
+	platform: process.platform,
 	listSessions: (input: ClientParams<"session/list"> = {}) =>
 		invoke(DESKTOP_IPC_CHANNELS.listSessions, "session/list", input) as ReturnType<MetisDesktopApi["listSessions"]>,
 	listSkills: (input: ClientParams<"skill/list">) =>
@@ -198,6 +199,8 @@ const api = {
 		invoke(DESKTOP_IPC_CHANNELS.renameSession, "session/rename", input) as ReturnType<
 			MetisDesktopApi["renameSession"]
 		>,
+	forkSession: (input: ClientParams<"session/fork">) =>
+		invoke(DESKTOP_IPC_CHANNELS.forkSession, "session/fork", input) as ReturnType<MetisDesktopApi["forkSession"]>,
 	deleteSession: (input: ClientParams<"session/delete">) =>
 		invoke(DESKTOP_IPC_CHANNELS.deleteSession, "session/delete", input) as ReturnType<
 			MetisDesktopApi["deleteSession"]

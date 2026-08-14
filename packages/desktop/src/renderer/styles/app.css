@@ -24,7 +24,9 @@ textarea { resize: none; }
 .session-sidebar button:disabled { opacity: 1; }
 .window-drag-region { position: relative; height: 47px; flex: 0 0 47px; -webkit-app-region: drag; }
 .session-sidebar button, .session-sidebar summary { -webkit-app-region: no-drag; }
-.sidebar-titlebar-controls { position: absolute; top: 3px; left: 76px; display: flex; -webkit-app-region: no-drag; }
+.sidebar-titlebar-controls { position: absolute; top: 3px; left: 6px; display: flex; -webkit-app-region: no-drag; }
+/* macOS reserves room for the traffic lights at the sidebar's top-left. */
+.session-sidebar[data-platform="darwin"] .sidebar-titlebar-controls { left: 76px; }
 .session-sidebar[data-fullscreen="true"] .sidebar-titlebar-controls { left: 0; }
 .sidebar-titlebar-controls button { display: grid; width: 24px; height: 24px; place-items: center; border-radius: 5px; color: var(--text-14); transition: background-color 140ms ease, box-shadow 140ms ease, color 140ms ease; }
 .sidebar-titlebar-controls button:hover { box-shadow: var(--shadow); color: var(--text); }
@@ -152,6 +154,8 @@ textarea { resize: none; }
 .workspace.tools-sidebar-open { padding-right: calc(var(--tool-sidebar-width, 393px) + 7px); }
 .workspace.tools-sidebar-open .workspace-titlebar-actions { right: calc(var(--tool-sidebar-width, 393px) + 7px); }
 .workspace-titlebar-actions { position: absolute; z-index: 7; top: 10px; right: 20px; left: 18px; display: flex; pointer-events: none; -webkit-app-region: drag; }
+/* macOS: when the sessions sidebar is collapsed the reveal button lands under the traffic lights; keep it clear. */
+:root[data-platform="darwin"] .sessions-sidebar-collapsed .workspace-titlebar-actions { left: 76px; }
 .workspace-titlebar-actions button { display: grid; width: 30px; height: 30px; place-items: center; color: var(--text-14); pointer-events: auto; transition: background-color 140ms ease, box-shadow 140ms ease, color 140ms ease, transform 140ms ease; -webkit-app-region: no-drag; }
 .workspace-titlebar-actions button:hover { box-shadow: var(--shadow); color: var(--text); transform: translateY(-1px); }
 .workspace-titlebar-actions .details-sidebar-toggle { margin-left: auto; }
@@ -883,6 +887,8 @@ textarea { resize: none; }
 .turn-intermediate p { margin: 7px 0 0; white-space: pre-wrap; }
 .turn-answer { color: var(--text-27); font-family: var(--chat-prose-font); font-size: var(--chat-answer-size); font-weight: 400; letter-spacing: 0; line-height: 1.55; }
 .turn-answer p { margin: 7px 0; white-space: pre-wrap; }
+.turn-fork-button { display: inline-flex; align-items: center; gap: 5px; margin-top: 8px; border-radius: 6px; color: var(--text-14); padding: 4px 8px; font-size: 12px; transition: background-color 140ms ease, color 140ms ease; }
+.turn-fork-button:hover { background: var(--surface-06); color: var(--text); }
 .turn-answer > :first-child { margin-top: 0; }
 .turn-answer > :last-child { margin-bottom: 0; }
 .turn-answer h1, .turn-answer h2, .turn-answer h3, .turn-answer h4, .turn-answer h5, .turn-answer h6 { margin: 1.15em 0 .45em; color: var(--text-29); font-family: inherit; line-height: 1.25; }

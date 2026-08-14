@@ -912,6 +912,21 @@ export function App({ api, store }: AppProps) {
 			// openSession already reports the error while preserving the current projection.
 		}
 	};
+	const forkFromReply = async (entryId: string) => {
+		const sessionId = state.activeSessionId;
+		if (!sessionId) return;
+		try {
+			const result = await api.forkSession({
+				sessionId,
+				requestId: crypto.randomUUID(),
+				entryId,
+			});
+			setMessage(t("Forked conversation"));
+			await openVisibleSession(result.session.sessionId);
+		} catch (cause) {
+			reportError(cause);
+		}
+	};
 	const openScheduledSession = (sessionId: string) => {
 		setMode("chat");
 		setDestination("tasks");
@@ -1542,6 +1557,7 @@ export function App({ api, store }: AppProps) {
 				newTaskOpen={newTaskOpen}
 				onCreateProjectSession={createEmptyProjectSession}
 				onDeleteProject={deleteProject}
+				platform={api.platform}
 				onDeleteSchedule={deleteScheduledTask}
 				onDeleteSession={deleteSession}
 				onModeChange={changeMode}
@@ -1649,7 +1665,7 @@ export function App({ api, store }: AppProps) {
 					<div className="workspace-body">
 						<div className="conversation-column">
 							<RecoveryBanner session={visibleActiveSession} />
-							<Transcript activeTurnId={state.activeTurnId} activeTurnStartedAt={state.activeTurnId ? state.turnsById.get(state.activeTurnId)?.startedAt : undefined} appearance={visibleActiveSession.mode} autoLoadOlder hasOlder={state.nextBeforeItemId !== null} itemIds={state.itemOrder} itemsById={state.itemsById} loadingOlder={loadingOlder} onLoadOlder={loadOlder} />
+							<Transcript activeTurnId={state.activeTurnId} activeTurnStartedAt={state.activeTurnId ? state.turnsById.get(state.activeTurnId)?.startedAt : undefined} appearance={visibleActiveSession.mode} autoLoadOlder hasOlder={state.nextBeforeItemId !== null} itemIds={state.itemOrder} itemsById={state.itemsById} loadingOlder={loadingOlder} onFork={forkFromReply} onLoadOlder={loadOlder} />
 							{compactingSession?.sessionId === visibleActiveSession.sessionId && (
 								<TurnRuntimeStatus items={[]} running startedAt={compactingSession.startedAt} variant="compaction" />
 							)}

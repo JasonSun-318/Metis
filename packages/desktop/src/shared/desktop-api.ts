@@ -87,6 +87,7 @@ export const DESKTOP_IPC_CHANNELS = {
 	deleteProject: "metis:delete-project",
 	createSession: "metis:create-session",
 	renameSession: "metis:rename-session",
+	forkSession: "metis:fork-session",
 	deleteSession: "metis:delete-session",
 	openSession: "metis:open-session",
 	markSessionRead: "metis:mark-session-read",
@@ -430,6 +431,7 @@ export type DesktopRpcOutcome<Result> =
 	| { readonly ok: false; readonly error: { readonly code: number; readonly message: string } };
 
 export interface MetisDesktopApi {
+	readonly platform: string;
 	listSessions(input?: ClientParams<"session/list">): Promise<ClientResult<"session/list">>;
 	listSkills(input: ClientParams<"skill/list">): Promise<ClientResult<"skill/list">>;
 	getSkill(input: ClientParams<"skill/get">): Promise<ClientResult<"skill/get">>;
@@ -478,6 +480,7 @@ export interface MetisDesktopApi {
 	deleteProject(input: ClientParams<"project/delete">): Promise<DesktopRpcOutcome<ClientResult<"project/delete">>>;
 	createSession(input: ClientParams<"session/create">): Promise<ClientResult<"session/create">>;
 	renameSession(input: ClientParams<"session/rename">): Promise<ClientResult<"session/rename">>;
+	forkSession(input: ClientParams<"session/fork">): Promise<ClientResult<"session/fork">>;
 	deleteSession(input: ClientParams<"session/delete">): Promise<ClientResult<"session/delete">>;
 	openSession(input: ClientParams<"session/open">): Promise<ClientResult<"session/subscribe">["snapshot"]>;
 	markSessionRead(input: ClientParams<"session/markRead">): Promise<ClientResult<"session/markRead">>;

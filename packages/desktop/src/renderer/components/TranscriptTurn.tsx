@@ -4,6 +4,7 @@ import {
 	CheckCircle,
 	CircleNotch,
 	ClockCounterClockwise,
+	GitFork,
 	ImageSquare,
 	TerminalWindow,
 	Wrench,
@@ -182,11 +183,13 @@ function ExecutionChain({
 	);
 }
 
-export function TranscriptTurn({ items, running: runtimeRunning = false, startedAt }: {
+export function TranscriptTurn({ items, running: runtimeRunning = false, startedAt, onFork }: {
 	readonly items: readonly ItemView[];
 	readonly running?: boolean;
 	readonly startedAt?: string;
+	readonly onFork?: (entryId: string) => void;
 }) {
+	const { t } = useTranslation();
 	const { users, segments, results, final } = buildTurnPresentation(items);
 	const enteringUserId = runtimeRunning ? users.at(-1)?.itemId : undefined;
 
@@ -222,6 +225,18 @@ export function TranscriptTurn({ items, running: runtimeRunning = false, started
 							: <StaticBlock block={block} key={`${block.type}-${index}`} />,
 					)}
 				</div>
+			)}
+			{final && onFork && (
+				<button
+					aria-label={t("Fork conversation")}
+					className="turn-fork-button"
+					onClick={() => onFork(final.itemId)}
+					title={t("Fork this conversation from this reply")}
+					type="button"
+				>
+					<GitFork aria-hidden="true" size={13} />
+					{t("Fork")}
+				</button>
 			)}
 			{runtimeRunning && <TurnRuntimeStatus items={items} running startedAt={startedAt} />}
 		</>

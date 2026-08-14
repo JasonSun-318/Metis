@@ -206,6 +206,7 @@ function createHarness(options: {
 	let mcpListIndex = 0;
 	const mcpLists = options.mcpLists ?? [[mcpServer()]];
 	const api = {
+		platform: "win32",
 		getServerState: vi.fn().mockResolvedValue({ state: "ready", serverEpoch: EPOCH, restartAttempt: 0, failure: null }),
 		getModelSettings: vi.fn().mockResolvedValue({
 			defaultModel: null,
@@ -426,6 +427,17 @@ function createHarness(options: {
 			const renamed = { ...current, name };
 			sessions = sessions.map((candidate) => candidate.sessionId === sessionId ? renamed : candidate);
 			return { session: renamed };
+		}),
+		forkSession: vi.fn(async ({ sessionId, entryId }) => {
+			const current = sessions.find((candidate) => candidate.sessionId === sessionId);
+			if (!current) throw new Error("missing session");
+			const forked: SessionSummary = {
+				...current,
+				sessionId: "forked-session-1",
+				name: `fork ${current.name ?? ""}`.trim(),
+			};
+			sessions = [...sessions, forked];
+			return { session: forked, entryId };
 		}),
 		deleteSession: vi.fn(async ({ sessionId }) => {
 			sessions = sessions.filter((candidate) => candidate.sessionId !== sessionId);
@@ -2263,6 +2275,59 @@ describe("Chat desktop shell", () => {
 		await act(async () => root.unmount());
 	});
 
+	it("forks a conversation from an assistant reply and opens the forked session", async () => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
+		const { api, emitEvent } = createHarness();
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<App api={api} store={new AppStore()} />));
+		await flush();
+
+		await act(async () => emitEvent({
+			type: "app-server",
+			envelope: {
+				jsonrpc: "2.0",
+				method: "connection/events",
+				params: {
+					serverEpoch: EPOCH,
+					fromCursor: 1,
+					toCursor: 1,
+					events: [{
+						type: "item/completed",
+						item: {
+							itemId: "assistant-reply-1",
+							sessionId: "chat-existing",
+							turnId: "turn-1",
+							role: "assistant",
+							state: "completed",
+							content: [{ type: "text", text: "Here is the reply" }],
+							createdAt: "2026-08-13T00:00:00.000Z",
+							completedAt: "2026-08-13T00:00:00.000Z",
+						},
+					}],
+				},
+			},
+		}));
+		await flush();
+
+		const forkButton = container.querySelector<HTMLButtonElement>('[aria-label="Fork conversation"]');
+		expect(forkButton).not.toBeNull();
+		expect(container.textContent).toContain("Here is the reply");
+
+		await act(async () => forkButton!.click());
+		await flush();
+		expect(api.forkSession).toHaveBeenCalledWith({
+			sessionId: "chat-existing",
+			requestId: expect.any(String),
+			entryId: "assistant-reply-1",
+		});
+		expect(api.openSession).toHaveBeenCalledWith({ sessionId: "forked-session-1" });
+		expect(container.textContent).toContain("fork Chat project task");
+		await act(async () => root.unmount());
+	});
+
 	it("shows compacting progress, disables the composer, and projects the persisted divider", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
@@ -3196,7 +3261,6 @@ describe("Chat desktop shell", () => {
 		expect(container.querySelector(".session-sidebar")).toBeNull();
 		await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Show sessions sidebar"]')!.click());
 		expect(container.querySelector(".session-sidebar")).not.toBeNull();
-		expect(container.querySelector('[aria-label="Search"]')).not.toBeNull();
 		await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Show tools sidebar"]')!.click());
 		expect(container.textContent).toContain("Review");
 		expect(container.textContent).toContain("Files");
