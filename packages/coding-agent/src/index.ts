@@ -82,6 +82,7 @@ export {
 	serializeConversation,
 	shouldCompact,
 } from "./core/compaction/index.ts";
+export { readSingleLinkTextFileSync, replaceFileAtomicallySync } from "./core/durable-file.ts";
 export { createEventBus, type EventBus, type EventBusController } from "./core/event-bus.ts";
 // Extension system
 export type {

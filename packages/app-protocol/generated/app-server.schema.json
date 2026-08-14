@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:metis:schemas:app-server:v17",
-  "title": "Metis App-Server Protocol v17",
+  "$id": "urn:metis:schemas:app-server:v18",
+  "title": "Metis App-Server Protocol v18",
   "$ref": "#/$defs/AppProtocolEnvelope",
   "$defs": {
     "AppProtocolEnvelope": {
@@ -2108,6 +2108,76 @@
                 "params": {
                   "type": "object",
                   "properties": {},
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "jsonrpc",
+                "id",
+                "method",
+                "params"
+              ],
+              "properties": {
+                "jsonrpc": {
+                  "type": "string",
+                  "const": "2.0"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "x-metis-maxUtf16Units": 128
+                },
+                "method": {
+                  "type": "string",
+                  "const": "personalization/get"
+                },
+                "params": {
+                  "type": "object",
+                  "properties": {},
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "jsonrpc",
+                "id",
+                "method",
+                "params"
+              ],
+              "properties": {
+                "jsonrpc": {
+                  "type": "string",
+                  "const": "2.0"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "x-metis-maxUtf16Units": 128
+                },
+                "method": {
+                  "type": "string",
+                  "const": "personalization/update"
+                },
+                "params": {
+                  "type": "object",
+                  "required": [
+                    "instructions"
+                  ],
+                  "properties": {
+                    "instructions": {
+                      "type": "string",
+                      "x-metis-maxUtf8Bytes": 65536
+                    }
+                  },
                   "additionalProperties": false
                 }
               },
@@ -10218,7 +10288,7 @@
                   "properties": {
                     "protocolVersion": {
                       "type": "number",
-                      "const": 17
+                      "const": 18
                     },
                     "server": {
                       "type": "object",
@@ -14266,6 +14336,74 @@
                         "additionalProperties": false
                       },
                       "maxItems": 5
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "jsonrpc",
+                "id",
+                "result"
+              ],
+              "properties": {
+                "jsonrpc": {
+                  "type": "string",
+                  "const": "2.0"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "x-metis-maxUtf16Units": 128
+                },
+                "result": {
+                  "type": "object",
+                  "required": [
+                    "instructions"
+                  ],
+                  "properties": {
+                    "instructions": {
+                      "type": "string",
+                      "x-metis-maxUtf8Bytes": 65536
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "jsonrpc",
+                "id",
+                "result"
+              ],
+              "properties": {
+                "jsonrpc": {
+                  "type": "string",
+                  "const": "2.0"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "x-metis-maxUtf16Units": 128
+                },
+                "result": {
+                  "type": "object",
+                  "required": [
+                    "instructions"
+                  ],
+                  "properties": {
+                    "instructions": {
+                      "type": "string",
+                      "x-metis-maxUtf8Bytes": 65536
                     }
                   },
                   "additionalProperties": false
@@ -29210,6 +29348,76 @@
             },
             "method": {
               "type": "string",
+              "const": "personalization/get"
+            },
+            "params": {
+              "type": "object",
+              "properties": {},
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "type": "string",
+              "const": "2.0"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "x-metis-maxUtf16Units": 128
+            },
+            "method": {
+              "type": "string",
+              "const": "personalization/update"
+            },
+            "params": {
+              "type": "object",
+              "required": [
+                "instructions"
+              ],
+              "properties": {
+                "instructions": {
+                  "type": "string",
+                  "x-metis-maxUtf8Bytes": 65536
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "type": "string",
+              "const": "2.0"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "x-metis-maxUtf16Units": 128
+            },
+            "method": {
+              "type": "string",
               "const": "project/deletePreview"
             },
             "params": {
@@ -32523,7 +32731,7 @@
               "properties": {
                 "protocolVersion": {
                   "type": "number",
-                  "const": 17
+                  "const": 18
                 },
                 "server": {
                   "type": "object",
@@ -36571,6 +36779,74 @@
                     "additionalProperties": false
                   },
                   "maxItems": 5
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "jsonrpc",
+            "id",
+            "result"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "type": "string",
+              "const": "2.0"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "x-metis-maxUtf16Units": 128
+            },
+            "result": {
+              "type": "object",
+              "required": [
+                "instructions"
+              ],
+              "properties": {
+                "instructions": {
+                  "type": "string",
+                  "x-metis-maxUtf8Bytes": 65536
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "jsonrpc",
+            "id",
+            "result"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "type": "string",
+              "const": "2.0"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "x-metis-maxUtf16Units": 128
+            },
+            "result": {
+              "type": "object",
+              "required": [
+                "instructions"
+              ],
+              "properties": {
+                "instructions": {
+                  "type": "string",
+                  "x-metis-maxUtf8Bytes": 65536
                 }
               },
               "additionalProperties": false

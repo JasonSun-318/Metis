@@ -325,7 +325,7 @@ function initialize(id = "initialize") {
 		jsonrpc: "2.0" as const,
 		id,
 		method: "initialize" as const,
-		params: { protocolVersion: 17, client: { name: "test", version: "1" }, capabilities: [] },
+		params: { protocolVersion: 18, client: { name: "test", version: "1" }, capabilities: [] },
 	};
 }
 
@@ -659,7 +659,7 @@ describe("AppServer", () => {
 		);
 		const initialized = await connection.handle(initialize());
 		expect(initialized).toMatchObject({
-			result: { protocolVersion: 17, server: { name: "metis-app-server" }, serverEpoch: server.serverEpoch },
+			result: { protocolVersion: 18, server: { name: "metis-app-server" }, serverEpoch: server.serverEpoch },
 		});
 		expectError(await connection.handle(initialize("again")), RPC_ERROR_CODES.INVALID_REQUEST);
 	});

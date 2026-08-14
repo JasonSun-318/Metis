@@ -28,6 +28,7 @@ import { InteractionBroker } from "./interactions.ts";
 import { ModelSettingsService } from "./model-settings.ts";
 import type { OutboundQueueLimits } from "./outbound-queue.ts";
 import { PermissionRulesService } from "./permission-rules.ts";
+import { PersonalizationService } from "./personalization.ts";
 import { scheduleEventView } from "./schedule-projection.ts";
 import { SessionCatalog } from "./session-catalog.ts";
 import { SessionRegistry, type SessionRegistryOptions } from "./session-registry.ts";
@@ -97,6 +98,7 @@ export class AppServer {
 			modelRegistry,
 			settingsManager,
 		});
+		const personalization = new PersonalizationService(options.agentDir);
 		const permissionRules = new PermissionRulesService(options.agentDir, this.catalog);
 		this.registry = new SessionRegistry(
 			options.runtimeHost ??
@@ -118,6 +120,7 @@ export class AppServer {
 			this.scheduleManager,
 			modelRegistry,
 			modelSettings,
+			personalization,
 			permissionRules,
 			options.titleGenerator ?? new DefaultSessionTitleGenerator({ modelRegistry, settingsManager }),
 		);

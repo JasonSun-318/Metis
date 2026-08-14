@@ -12,6 +12,7 @@ import type { DurableSessionMutation, PreparedSessionMutation } from "./durable-
 import type { InteractionBroker, InteractionPeer } from "./interactions.ts";
 import type { ModelSettingsService } from "./model-settings.ts";
 import type { PermissionRulesService } from "./permission-rules.ts";
+import type { PersonalizationService } from "./personalization.ts";
 import { ProfileSummaryCache } from "./profile-summary.ts";
 import { scheduleRunView, scheduleTaskView } from "./schedule-projection.ts";
 import type { SessionCatalog } from "./session-catalog.ts";
@@ -67,6 +68,7 @@ export class Dispatcher {
 	private readonly scheduleManager: ScheduleManager;
 	private readonly modelRegistry: ModelRegistry;
 	private readonly modelSettings: ModelSettingsService;
+	private readonly personalization: PersonalizationService;
 	private readonly permissionRules: PermissionRulesService;
 	private readonly titleGenerator: SessionTitleGenerator;
 	private readonly titleJobs = new Set<string>();
@@ -80,6 +82,7 @@ export class Dispatcher {
 		scheduleManager: ScheduleManager,
 		modelRegistry: ModelRegistry,
 		modelSettings: ModelSettingsService,
+		personalization: PersonalizationService,
 		permissionRules: PermissionRulesService,
 		titleGenerator: SessionTitleGenerator,
 	) {
@@ -90,6 +93,7 @@ export class Dispatcher {
 		this.scheduleManager = scheduleManager;
 		this.modelRegistry = modelRegistry;
 		this.modelSettings = modelSettings;
+		this.personalization = personalization;
 		this.permissionRules = permissionRules;
 		this.titleGenerator = titleGenerator;
 	}
@@ -457,6 +461,10 @@ export class Dispatcher {
 				});
 			case "profile/get":
 				return this.profileSummary.summarize(this.allSessionRefs());
+			case "personalization/get":
+				return this.personalization.view();
+			case "personalization/update":
+				return await this.replayMutation(request, async () => this.personalization.update(request.params));
 			case "usage/get":
 				return this.profileSummary.usage(this.allSessionRefs(), request.params.rangeDays);
 			case "model/list":

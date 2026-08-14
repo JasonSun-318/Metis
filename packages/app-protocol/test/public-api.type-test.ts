@@ -244,6 +244,12 @@ const profile = {
 		{ name: "documents", count: 1 },
 	],
 } satisfies ClientResult<"profile/get">;
+const personalization = {
+	instructions: "Keep explanations concise.",
+} satisfies ClientResult<"personalization/get">;
+const updatePersonalization = {
+	instructions: personalization.instructions,
+} satisfies ClientParams<"personalization/update">;
 const snapshot: SessionSnapshot = {
 	session,
 	permissionMode: "ask",
@@ -310,6 +316,8 @@ void mcpDetail;
 void mcpUpsert;
 void mcpGet;
 void profile;
+void personalization;
+void updatePersonalization;
 void projectDelete;
 void projectDeletePreview;
 void projectDeleteResult;

@@ -6,7 +6,7 @@
 			"jsonrpc": "2.0",
 			"id": "client-1",
 			"result": {
-				"protocolVersion": 17,
+				"protocolVersion": 18,
 				"server": {
 					"name": "metis-app-server",
 					"version": "0.80.6"
@@ -48,6 +48,24 @@
 					{ "name": "documents", "count": 1 }
 				]
 			}
+		}
+	},
+	{
+		"direction": "client",
+		"method": "personalization/get",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "client-personalization-get",
+			"result": { "instructions": "" }
+		}
+	},
+	{
+		"direction": "client",
+		"method": "personalization/update",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "client-personalization-update",
+			"result": { "instructions": "Keep explanations concise." }
 		}
 	},
 	{

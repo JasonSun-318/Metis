@@ -33,11 +33,11 @@ export function runTransportConformance(name: string, createHarness: () => Trans
 				jsonrpc: "2.0",
 				id: "initialize",
 				method: "initialize",
-				params: { protocolVersion: 17, client: { name: "conformance", version: "1" }, capabilities: [] },
+				params: { protocolVersion: 18, client: { name: "conformance", version: "1" }, capabilities: [] },
 			});
 			await vi.waitFor(() => expect(harness.sent()).toHaveLength(2));
 			expect(harness.sent()[0]).toMatchObject({ error: { code: RPC_ERROR_CODES.NOT_INITIALIZED } });
-			expect(harness.sent()[1]).toMatchObject({ result: { protocolVersion: 17 } });
+			expect(harness.sent()[1]).toMatchObject({ result: { protocolVersion: 18 } });
 			await binding.close();
 		});
 

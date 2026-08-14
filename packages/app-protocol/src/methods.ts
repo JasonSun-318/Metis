@@ -111,6 +111,14 @@ export const SessionListResultSchema = StrictObject({
 	nextAfterSessionId: Type.Union([SessionIdSchema, Type.Null()]),
 });
 
+export const PersonalizationGetParamsSchema = StrictObject({});
+export const PersonalizationViewSchema = StrictObject({
+	instructions: PublicTextSchema,
+});
+export const PersonalizationUpdateParamsSchema = StrictObject({
+	instructions: PublicTextSchema,
+});
+
 export const SkillListParamsSchema = Type.Union([
 	StrictObject({ sessionId: SessionIdSchema }),
 	StrictObject({ cwd: Type.Union([PathSchema, Type.Null()]) }),
@@ -746,6 +754,8 @@ export const ClientRequestMethods = {
 	"mcp/import/inspect": method(McpImportInspectParamsSchema, McpImportInspectionViewSchema),
 	"mcp/import": method(McpImportParamsSchema, McpMutationResultSchema),
 	"profile/get": method(ProfileGetParamsSchema, ProfileGetResultSchema),
+	"personalization/get": method(PersonalizationGetParamsSchema, PersonalizationViewSchema),
+	"personalization/update": method(PersonalizationUpdateParamsSchema, PersonalizationViewSchema),
 	"project/deletePreview": method(ProjectDeletePreviewParamsSchema, ProjectDeletePreviewResultSchema),
 	"project/delete": method(ProjectDeleteParamsSchema, ProjectDeleteResultSchema),
 	"session/create": method(SessionCreateParamsSchema, SessionCreateResultSchema),

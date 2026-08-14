@@ -280,7 +280,7 @@ function initialize(id: string) {
 		jsonrpc: "2.0" as const,
 		id,
 		method: "initialize" as const,
-		params: { protocolVersion: 17, client: { name: "test", version: "1" }, capabilities: [] },
+		params: { protocolVersion: 18, client: { name: "test", version: "1" }, capabilities: [] },
 	};
 }
 

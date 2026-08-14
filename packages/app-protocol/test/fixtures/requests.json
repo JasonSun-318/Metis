@@ -7,7 +7,7 @@
 			"id": "client-1",
 			"method": "initialize",
 			"params": {
-				"protocolVersion": 17,
+				"protocolVersion": 18,
 				"client": { "name": "Metis Desktop", "version": "0.80.6" },
 				"capabilities": ["interaction.v1", "session.cursor.v1"]
 			}
@@ -229,6 +229,26 @@
 			"id": "client-profile",
 			"method": "profile/get",
 			"params": {}
+		}
+	},
+	{
+		"direction": "client",
+		"method": "personalization/get",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "client-personalization-get",
+			"method": "personalization/get",
+			"params": {}
+		}
+	},
+	{
+		"direction": "client",
+		"method": "personalization/update",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "client-personalization-update",
+			"method": "personalization/update",
+			"params": { "instructions": "Keep explanations concise." }
 		}
 	},
 	{

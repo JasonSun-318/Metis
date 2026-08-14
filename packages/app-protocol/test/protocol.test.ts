@@ -15,6 +15,7 @@ import {
 	MAX_NAME_UTF16_UNITS,
 	MAX_PATH_UTF8_BYTES,
 	MAX_PROMPT_UTF8_BYTES,
+	MAX_PUBLIC_TEXT_UTF8_BYTES,
 	MAX_SCHEDULE_INSTRUCTION_UTF8_BYTES,
 	ProtocolValidationError,
 	parseRawEnvelope,
@@ -583,6 +584,18 @@ describe("session read state", () => {
 });
 
 describe("exact limits", () => {
+	it("keeps personalization updates strict and within the public text limit", () => {
+		const valid = makeClientRequest("personalization/update", {
+			instructions: "a".repeat(MAX_PUBLIC_TEXT_UTF8_BYTES),
+		});
+		expect(() => validateClientRequest(valid)).not.toThrow();
+		(valid.params as Record<string, unknown>).extra = true;
+		expect(() => validateClientRequest(valid)).toThrow(ProtocolValidationError);
+		delete (valid.params as Record<string, unknown>).extra;
+		(valid.params as { instructions: string }).instructions += "a";
+		expect(() => validateClientRequest(valid)).toThrow(ProtocolValidationError);
+	});
+
 	it("keeps scheduled-task execution fields host-owned and bounds instructions", () => {
 		const valid = makeClientRequest("schedule/create", {
 			requestId: TASK_ID,
