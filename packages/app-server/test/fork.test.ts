@@ -1,12 +1,17 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SessionManager } from "@metis/coding-agent";
 import { afterEach, describe, expect, it } from "vitest";
+import { AppServer } from "../src/app-server.ts";
 
 const directories: string[] = [];
+const servers = new Set<AppServer>();
 
-afterEach(() => {
+afterEach(async () => {
+	for (const server of servers) server.beginShutdown();
+	await Promise.all([...servers].map((server) => server.waitForShutdown().catch(() => undefined)));
+	servers.clear();
 	for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true });
 });
 
@@ -104,5 +109,115 @@ describe("session fork branch creation", () => {
 			reopened.close();
 		}
 		session.close();
+	});
+});
+
+describe("session/fork RPC end-to-end", () => {
+	it("forks a real session through the dispatcher and exposes the forked session in the catalog", async () => {
+		const root = mkdtempSync(join(tmpdir(), "metis-fork-e2e-"));
+		directories.push(root);
+		const agentDir = join(root, "agent");
+		const sessionsRoot = join(agentDir, "sessions");
+		const projectDir = join(root, "project");
+		mkdirSync(projectDir, { recursive: true });
+
+		// Create a real session file with a user message and an assistant reply.
+		const manager = SessionManager.create(projectDir, join(sessionsRoot, "dir"), {
+			id: "source-session",
+			mode: "chat",
+			cwdOrigin: "user-selected",
+		});
+		manager.appendSessionInfo("Original title");
+		manager.appendMessage({ role: "user", content: "hello", timestamp: Date.now() });
+		const assistantId = manager.appendMessage({
+			role: "assistant",
+			content: [{ type: "text", text: "reply" }],
+			api: "anthropic-messages",
+			provider: "anthropic",
+			model: "test",
+			usage: {
+				input: 1,
+				output: 1,
+				cacheRead: 0,
+				cacheWrite: 0,
+				totalTokens: 2,
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+			},
+			stopReason: "stop",
+			timestamp: Date.now(),
+		});
+		manager.close();
+
+		const server = await AppServer.create({ agentDir, sessionsRoot });
+		servers.add(server);
+		const connection = server.connect();
+		try {
+			const init = await connection.handle({
+				jsonrpc: "2.0",
+				id: "init-1",
+				method: "initialize",
+				params: { protocolVersion: 18, client: { name: "test", version: "1" }, capabilities: [] },
+			});
+			expect(init).toMatchObject({ jsonrpc: "2.0", result: { protocolVersion: 18 } });
+
+			const open = await connection.handle({
+				jsonrpc: "2.0",
+				id: "open-1",
+				method: "session/open",
+				params: { sessionId: "source-session" },
+			});
+			expect(open).toMatchObject({
+				jsonrpc: "2.0",
+				result: { session: { sessionId: "source-session" } },
+			});
+
+			const forked = await connection.handle({
+				jsonrpc: "2.0",
+				id: "fork-1",
+				method: "session/fork",
+				params: {
+					requestId: "00000000-0000-4000-8000-0000000000f1",
+					sessionId: "source-session",
+					entryId: assistantId,
+				},
+			});
+			expect(forked).toMatchObject({
+				jsonrpc: "2.0",
+				result: {
+					session: { name: "fork Original title", mode: "chat" },
+					entryId: assistantId,
+				},
+			});
+			const forkedResult = forked as { result?: { session?: { sessionId?: string } } };
+			const forkedId = forkedResult.result?.session?.sessionId;
+			expect(forkedId).toBeDefined();
+			expect(forkedId).not.toBe("source-session");
+
+			// The forked session is visible in the catalog (sidebar list).
+			const listed = await connection.handle({
+				jsonrpc: "2.0",
+				id: "list-1",
+				method: "session/list",
+				params: {},
+			});
+			const sessions =
+				(listed as { result?: { sessions?: { sessionId?: string; name?: string }[] } }).result?.sessions ?? [];
+			expect(sessions.some((s) => s.sessionId === forkedId && s.name === "fork Original title")).toBe(true);
+
+			// The original session remains listed and switchable.
+			expect(sessions.some((s) => s.sessionId === "source-session")).toBe(true);
+			const reopened = await connection.handle({
+				jsonrpc: "2.0",
+				id: "open-2",
+				method: "session/open",
+				params: { sessionId: "source-session" },
+			});
+			expect(reopened).toMatchObject({
+				jsonrpc: "2.0",
+				result: { session: { sessionId: "source-session" } },
+			});
+		} finally {
+			connection.close();
+		}
 	});
 });
