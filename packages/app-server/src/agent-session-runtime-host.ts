@@ -728,13 +728,25 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 		// the forked session as its own runtime. We deliberately do not call
 		// runtime.fork() — it swaps the active session in place, which would
 		// desync this host's ref/sessionId from its bound session.
-		const manager = this.session.sessionManager.createBranchedSessionManager(input.entryId);
+		const manager = this.session.sessionManager;
+		// Live-streamed replies carry a hashed itemId (live:<sha256>) that is
+		// not a journal entry id. The fork button sits on the latest completed
+		// reply, so resolve unknown ids to the last assistant message entry.
+		let entryId = input.entryId;
+		if (manager.getEntry(entryId) === undefined) {
+			const latestAssistant = [...manager.getEntries()]
+				.reverse()
+				.find((entry) => entry.type === "message" && (entry.message as { role?: string }).role === "assistant");
+			if (!latestAssistant) throw new AppServerError("NOT_FOUND", { sessionId: this.sessionId });
+			entryId = latestAssistant.id;
+		}
+		const branched = manager.createBranchedSessionManager(entryId);
 		try {
 			const next = optionalName(input.name);
-			if (next) manager.appendSessionInfo(next);
-			return manager.getSessionId();
+			if (next) branched.appendSessionInfo(next);
+			return branched.getSessionId();
 		} finally {
-			manager.close();
+			branched.close();
 		}
 	}
 

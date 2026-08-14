@@ -3719,11 +3719,18 @@ export class SessionManager {
 		// Filter out LabelEntry from path - we'll recreate them from the resolved map.
 		// Because labels are real tree entries, later entries can be children of labels;
 		// removing labels requires re-chaining the retained path to avoid orphaned subtrees.
+		// Turn ids are also dropped: the branch carries the conversation path without the
+		// turn's runtime-control entries, so a dangling turnId would make durable recovery
+		// reject the branch.
 		const pathWithoutLabels: SessionEntry[] = [];
 		let pathParentId: string | null = null;
 		for (const entry of path) {
 			if (entry.type === "label") continue;
-			pathWithoutLabels.push({ ...entry, parentId: pathParentId });
+			pathWithoutLabels.push({
+				...entry,
+				parentId: pathParentId,
+				...(entry.type === "message" ? { turnId: undefined } : {}),
+			});
 			pathParentId = entry.id;
 		}
 

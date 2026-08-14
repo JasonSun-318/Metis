@@ -166,6 +166,7 @@ describe("session/fork RPC end-to-end", () => {
 				method: "session/open",
 				params: { sessionId: "source-session" },
 			});
+			console.log("OPEN RESP:", JSON.stringify(open));
 			expect(open).toMatchObject({
 				jsonrpc: "2.0",
 				result: { session: { sessionId: "source-session" } },
@@ -215,6 +216,96 @@ describe("session/fork RPC end-to-end", () => {
 			expect(reopened).toMatchObject({
 				jsonrpc: "2.0",
 				result: { session: { sessionId: "source-session" } },
+			});
+
+			// Opening the forked session must also succeed (the desktop
+			// navigates to it right after forking).
+			const openForked = await connection.handle({
+				jsonrpc: "2.0",
+				id: "open-3",
+				method: "session/open",
+				params: { sessionId: forkedId },
+			});
+			expect(openForked).toMatchObject({
+				jsonrpc: "2.0",
+				result: { session: { sessionId: forkedId } },
+			});
+		} finally {
+			connection.close();
+		}
+	});
+
+	it("forks from a live hashed itemId by resolving it to the latest assistant entry", async () => {
+		const root = mkdtempSync(join(tmpdir(), "metis-fork-e2e-live-"));
+		directories.push(root);
+		const agentDir = join(root, "agent");
+		const sessionsRoot = join(agentDir, "sessions");
+		const projectDir = join(root, "project");
+		mkdirSync(projectDir, { recursive: true });
+
+		const manager = SessionManager.create(projectDir, join(sessionsRoot, "dir"), {
+			id: "live-session",
+			mode: "chat",
+			cwdOrigin: "user-selected",
+		});
+		manager.appendSessionInfo("Live title");
+		manager.appendMessage({ role: "user", content: "hello", timestamp: Date.now() });
+		manager.appendMessage({
+			role: "assistant",
+			content: [{ type: "text", text: "live reply" }],
+			api: "anthropic-messages",
+			provider: "anthropic",
+			model: "test",
+			usage: {
+				input: 1,
+				output: 1,
+				cacheRead: 0,
+				cacheWrite: 0,
+				totalTokens: 2,
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+			},
+			stopReason: "stop",
+			timestamp: Date.now(),
+		});
+		manager.close();
+
+		const server = await AppServer.create({ agentDir, sessionsRoot });
+		servers.add(server);
+		const connection = server.connect();
+		try {
+			await connection.handle({
+				jsonrpc: "2.0",
+				id: "init-1",
+				method: "initialize",
+				params: { protocolVersion: 18, client: { name: "test", version: "1" }, capabilities: [] },
+			});
+			const forked = await connection.handle({
+				jsonrpc: "2.0",
+				id: "fork-1",
+				method: "session/fork",
+				params: {
+					requestId: "00000000-0000-4000-8000-0000000000f2",
+					sessionId: "live-session",
+					entryId: "live:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+				},
+			});
+			console.log("FORKED RESP:", JSON.stringify(forked));
+			expect(forked).toMatchObject({
+				jsonrpc: "2.0",
+				result: { session: { name: "fork Live title" } },
+			});
+			const forkedId = (forked as { result?: { session?: { sessionId?: string } } }).result?.session?.sessionId;
+			expect(forkedId).toBeDefined();
+
+			const openForked = await connection.handle({
+				jsonrpc: "2.0",
+				id: "open-2",
+				method: "session/open",
+				params: { sessionId: forkedId },
+			});
+			expect(openForked).toMatchObject({
+				jsonrpc: "2.0",
+				result: { session: { sessionId: forkedId } },
 			});
 		} finally {
 			connection.close();
