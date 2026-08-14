@@ -5,6 +5,7 @@ import {
 	clipboard,
 	dialog,
 	ipcMain,
+	Notification,
 	type OpenDialogOptions,
 	powerSaveBlocker,
 	shell,
@@ -14,6 +15,7 @@ import squirrelStartup from "electron-squirrel-startup";
 import { DESKTOP_UPDATE_EVENT_CHANNEL, type DesktopWorkspaceEditState } from "../shared/desktop-api.ts";
 import { installAppProtocol, registerAppScheme } from "./app-protocol-scheme.ts";
 import { AppServerSupervisor, type UtilityChild } from "./app-server-supervisor.ts";
+import { createBackgroundCompletionTracker } from "./background-completion.ts";
 import { BrowserManager } from "./browser-manager.ts";
 import { ClientBroker } from "./client-broker.ts";
 import { DiagnosticLog } from "./diagnostic-log.ts";
@@ -34,7 +36,7 @@ if (!explicitUserData) app.setPath("userData", join(app.getPath("appData"), "Met
 
 let mainWindow: BrowserWindow | null = null;
 let allowQuit = false;
-let workspaceEditState: DesktopWorkspaceEditState = { dirty: false, language: "en" };
+let workspaceEditState: DesktopWorkspaceEditState = { dirty: false, language: "en", visibleSessionId: null };
 const scheduleKeepAwake = createScheduleKeepAwake(powerSaveBlocker);
 
 function confirmDiscardWorkspaceEdits(window: BrowserWindow | null, action: "close" | "quit"): boolean {
@@ -107,6 +109,47 @@ async function launch(): Promise<void> {
 		openPath: (path) => shell.openPath(path),
 		platform: process.platform,
 	});
+	const deliveredNotifications = new Set<Notification>();
+	let suppressNextFocusAcknowledgement = false;
+	const completionTracker = createBackgroundCompletionTracker({
+		isActive: () => app.isActive(),
+		setBadgeCount: (count) => {
+			if (process.platform === "darwin") app.setBadgeCount(count);
+		},
+		notify: ({ sessionId, mode, name, outcome }) => {
+			if (process.platform !== "darwin" || !Notification.isSupported()) return;
+			const zh = workspaceEditState.language === "zh";
+			const taskName = name || (zh ? "当前任务" : "Current task");
+			const success = outcome === "completed";
+			const notification = new Notification({
+				title: zh
+					? `Metis · ${success ? "任务已完成" : "任务执行失败"}`
+					: `Metis · ${success ? "Task completed" : "Task failed"}`,
+				body: zh
+					? `“${taskName}”${success ? "已完成，点击查看结果。" : "未完成，点击查看详情。"}`
+					: `“${taskName}” ${success ? "completed. Click to view the result." : "failed. Click to view details."}`,
+			});
+			const release = () => deliveredNotifications.delete(notification);
+			notification.on("click", () => {
+				release();
+				suppressNextFocusAcknowledgement = true;
+				broker.requestRendererOpenSession(sessionId, mode);
+				void (async () => {
+					if (!mainWindow || mainWindow.isDestroyed()) await openMainWindow();
+					if (!mainWindow || mainWindow.isDestroyed()) return;
+					if (mainWindow.isMinimized()) mainWindow.restore();
+					mainWindow.show();
+					mainWindow.focus();
+				})().catch(() => {
+					suppressNextFocusAcknowledgement = false;
+				});
+			});
+			notification.on("close", release);
+			notification.on("failed", release);
+			deliveredNotifications.add(notification);
+			notification.show();
+		},
+	});
 	const broker = new ClientBroker({
 		ipcMain,
 		supervisor,
@@ -142,12 +185,27 @@ async function launch(): Promise<void> {
 		createProjectFolder,
 		setScheduleKeepAwake: (enabled) => scheduleKeepAwake.set(enabled),
 		updater,
+		onSessionUpdated: (session) => completionTracker.update(session),
+		onSessionDeleted: (sessionId) => completionTracker.forgetSession(sessionId),
+		onProjectDeleted: (mode, cwd) => completionTracker.forgetProject(mode, cwd),
+		onUserInterruptPending: (sessionId, pending) => completionTracker.setUserInterruptPending(sessionId, pending),
+		onSessionOpened: (sessionId) => {
+			suppressNextFocusAcknowledgement = false;
+			if (app.isActive()) completionTracker.view(sessionId);
+		},
 	});
 	registerThemeHandlers(ipcMain, () => mainWindow);
-	const openMainWindow = async (): Promise<void> => {
+	async function openMainWindow(): Promise<void> {
 		const window = createMainWindow();
 		broker.attach(window);
 		mainWindow = window;
+		window.on("focus", () => {
+			if (suppressNextFocusAcknowledgement) {
+				suppressNextFocusAcknowledgement = false;
+				return;
+			}
+			if (workspaceEditState.visibleSessionId) completionTracker.view(workspaceEditState.visibleSessionId);
+		});
 		window.on("close", (event) => {
 			if (!allowQuit && !confirmDiscardWorkspaceEdits(window, "close")) event.preventDefault();
 		});
@@ -155,7 +213,7 @@ async function launch(): Promise<void> {
 			if (mainWindow === window) mainWindow = null;
 		});
 		await loadMainWindow(window);
-	};
+	}
 
 	await supervisor.start().catch(() => supervisor.view());
 	await openMainWindow();

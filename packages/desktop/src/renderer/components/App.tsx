@@ -328,7 +328,7 @@ export function App({ api, store }: AppProps) {
 	const sessionDeleteRequests = useRef(new Map<string, string>());
 	const sessionMarkReadRequests = useRef(new Set<string>());
 	const statusGeneration = useRef(0);
-	const visibleSessionId = destination === "tasks" && newTaskDraft === null ? state.activeSessionId : null;
+	const visibleSessionId = !settingsOpen && destination === "tasks" && newTaskDraft === null ? state.activeSessionId : null;
 	const visibleSessionIdRef = useRef<string | null>(visibleSessionId);
 	visibleSessionIdRef.current = visibleSessionId;
 
@@ -383,8 +383,9 @@ export function App({ api, store }: AppProps) {
 		void api.setWorkspaceEditState({
 			dirty: dirtyToolSessionIds.length > 0,
 			language: i18n.resolvedLanguage?.startsWith("zh") ? "zh" : "en",
+			visibleSessionId,
 		}).catch(reportError);
-	}, [api, dirtyToolSessionIds.length, i18n.resolvedLanguage, reportError]);
+	}, [api, dirtyToolSessionIds.length, i18n.resolvedLanguage, reportError, visibleSessionId]);
 
 	const markSessionRead = useCallback(
 		async (sessionId: string): Promise<void> => {
@@ -458,6 +459,21 @@ export function App({ api, store }: AppProps) {
 		},
 		[openSession],
 	);
+	const openNotifiedSession = useCallback(
+		async (sessionId: string, targetMode: AgentMode) => {
+			setMode(targetMode);
+			setDestination("tasks");
+			try {
+				await openSession(sessionId);
+				setNewTaskDraft(null);
+				newTaskCreateRequest.current = null;
+				newTaskTurnRequest.current = null;
+			} catch {
+				// openSession already reports the error while preserving the current projection.
+			}
+		},
+		[openSession],
+	);
 	const requestScheduleSnapshot = useCallback(
 		(replace = false): Promise<void> => {
 			const supervisorEpoch = store.getSnapshot().supervisor.serverEpoch;
@@ -492,6 +508,10 @@ export function App({ api, store }: AppProps) {
 			.catch(reportError);
 		const unsubscribe = api.subscribe((event) => {
 			if (!active) return;
+			if (event.type === "open-session") {
+				void openNotifiedSession(event.sessionId, event.mode);
+				return;
+			}
 			if (event.type === "interaction-cancelled") {
 				store.removeInteraction(event.interactionId);
 				return;
@@ -633,7 +653,7 @@ export function App({ api, store }: AppProps) {
 			void api.unsubscribeSchedule().catch(() => undefined);
 			unsubscribe();
 		};
-	}, [api, markSessionRead, openSession, queueToolCleanup, reportError, requestResnapshot, requestScheduleSnapshot, scheduleStore, store]);
+	}, [api, markSessionRead, openNotifiedSession, openSession, queueToolCleanup, reportError, requestResnapshot, requestScheduleSnapshot, scheduleStore, store]);
 
 	const refreshSessions = async () => {
 		store.setSessions(await api.listSessions({ limit: 200 }));

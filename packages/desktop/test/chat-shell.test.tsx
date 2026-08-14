@@ -689,17 +689,28 @@ describe("Chat desktop shell", () => {
 
 	it("opens the personal profile from the Metis Settings menu", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
 		const { api } = createHarness();
 		const container = document.createElement("div");
 		document.body.append(container);
 		const root = createRoot(container);
 		await act(async () => root.render(<App api={api} store={new AppStore()} />));
 		await flush();
+		expect(api.setWorkspaceEditState).toHaveBeenLastCalledWith({
+			dirty: false,
+			language: "en",
+			visibleSessionId: "chat-existing",
+		});
 
 		await act(async () => button(container, "Metis User").click());
 		expect(document.activeElement?.textContent).toBe("Settings");
 		await act(async () => button(container, "Settings").click());
 		await flush();
+		expect(api.setWorkspaceEditState).toHaveBeenLastCalledWith({
+			dirty: false,
+			language: "en",
+			visibleSessionId: null,
+		});
 		await act(async () => button(container, "Profile").click());
 		await flush();
 		expect(api.getProfile).toHaveBeenCalledTimes(1);
@@ -3540,7 +3551,11 @@ describe("Chat desktop shell", () => {
 		await act(async () => changeCodeEditor(editor, "# Edited README"));
 		await flush();
 		expect(container.querySelector(".tool-tab.is-dirty")).not.toBeNull();
-		expect(api.setWorkspaceEditState).toHaveBeenLastCalledWith({ dirty: true, language: "en" });
+		expect(api.setWorkspaceEditState).toHaveBeenLastCalledWith({
+			dirty: true,
+			language: "en",
+			visibleSessionId: "code-existing",
+		});
 		expect(container.querySelector(".tool-tab.is-preview")).toBeNull();
 		const activeRow = button(container, "Code project task").closest<HTMLElement>(".session-row")!;
 		await act(async () => button(activeRow, "Actions for Code project task").click());
@@ -3579,7 +3594,11 @@ describe("Chat desktop shell", () => {
 			expectedRevision: "a".repeat(64),
 		});
 		expect(container.querySelector(".tool-tab.is-dirty")).toBeNull();
-		expect(api.setWorkspaceEditState).toHaveBeenLastCalledWith({ dirty: false, language: "en" });
+		expect(api.setWorkspaceEditState).toHaveBeenLastCalledWith({
+			dirty: false,
+			language: "en",
+			visibleSessionId: "code-existing",
+		});
 		expect(container.querySelector(".file-preview-notice")?.textContent).toBe("File saved");
 
 		let finishWrite!: (result: { readonly revision: string; readonly byteLength: number }) => void;
@@ -3640,7 +3659,11 @@ describe("Chat desktop shell", () => {
 		expect(container.querySelector('[role="alert"]')?.textContent).toBe("Workspace file changed on disk");
 		await act(async () => button(container, "Don’t Save").click());
 		await flush();
-		expect(api.setWorkspaceEditState).toHaveBeenLastCalledWith({ dirty: false, language: "en" });
+		expect(api.setWorkspaceEditState).toHaveBeenLastCalledWith({
+			dirty: false,
+			language: "en",
+			visibleSessionId: "code-existing",
+		});
 		await act(async () => root.unmount());
 	});
 
@@ -4057,6 +4080,35 @@ describe("Chat desktop shell", () => {
 		expect(container.textContent).toContain("定时任务");
 		expect(container.textContent).toContain("有什么我可以替你分担的？");
 		expect(container.querySelector('[aria-label="隐藏会话侧边栏"]')).not.toBeNull();
+		await act(async () => root.unmount());
+	});
+
+	it("opens the originating session from a desktop notification", async () => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		const active = session("session-active", "chat", "/tmp/chat", "Active");
+		const target = session("session-target", "code", "/tmp/code", "检查登录流程");
+		const { api, emitEvent } = createHarness({ sessions: [active, target] });
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<App api={api} store={new AppStore()} />));
+		await flush();
+		expect(api.setWorkspaceEditState).toHaveBeenLastCalledWith({
+			dirty: false,
+			language: "en",
+			visibleSessionId: null,
+		});
+
+		await act(async () => emitEvent({ type: "open-session", sessionId: target.sessionId, mode: "code" }));
+		await flush();
+
+		expect(api.openSession).toHaveBeenLastCalledWith({ sessionId: target.sessionId });
+		expect(container.querySelector(".mode-switch")?.getAttribute("data-mode")).toBe("code");
+		expect(api.setWorkspaceEditState).toHaveBeenLastCalledWith({
+			dirty: false,
+			language: "en",
+			visibleSessionId: target.sessionId,
+		});
 		await act(async () => root.unmount());
 	});
 });

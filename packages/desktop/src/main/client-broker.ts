@@ -9,6 +9,7 @@ import {
 	type RpcErrorResponse,
 	type ServerRpcRequest,
 	type ServerRpcSuccessResponse,
+	type SessionSummary,
 	validateClientRequest,
 	validateServerNotification,
 	validateServerRequest,
@@ -97,6 +98,11 @@ interface ClientBrokerOptions {
 	>;
 	readonly writeClipboardText?: (text: string) => void;
 	readonly setWorkspaceEditState?: (state: DesktopWorkspaceEditState) => void;
+	readonly onSessionUpdated?: (session: SessionSummary) => void;
+	readonly onSessionDeleted?: (sessionId: string) => void;
+	readonly onProjectDeleted?: (mode: SessionSummary["mode"], cwd: string) => void;
+	readonly onUserInterruptPending?: (sessionId: string, pending: boolean) => void;
+	readonly onSessionOpened?: (sessionId: string) => void;
 }
 
 type InvokeHandler = (event: IpcMainInvokeEvent, ...args: unknown[]) => Promise<unknown>;
@@ -167,6 +173,12 @@ export class ClientBroker {
 	>;
 	private readonly writeClipboardText: (text: string) => void;
 	private readonly setWorkspaceEditState: (state: DesktopWorkspaceEditState) => void;
+	private readonly onSessionUpdated?: (session: SessionSummary) => void;
+	private readonly onSessionDeleted?: (sessionId: string) => void;
+	private readonly onProjectDeleted?: (mode: SessionSummary["mode"], cwd: string) => void;
+	private readonly onUserInterruptPending?: (sessionId: string, pending: boolean) => void;
+	private readonly onSessionOpened?: (sessionId: string) => void;
+	private pendingRendererOpenSession?: Extract<DesktopApiEvent, { type: "open-session" }>;
 	private readonly pendingInteractions = new Map<string, PendingInteraction>();
 	private readonly subscribedSessions = new Set<string>();
 	private readonly subscribedSessionScopes = new Map<string, { readonly mode: string; readonly cwd?: string }>();
@@ -262,6 +274,11 @@ export class ClientBroker {
 		};
 		this.writeClipboardText = options.writeClipboardText ?? (() => undefined);
 		this.setWorkspaceEditState = options.setWorkspaceEditState ?? (() => undefined);
+		this.onSessionUpdated = options.onSessionUpdated;
+		this.onSessionDeleted = options.onSessionDeleted;
+		this.onProjectDeleted = options.onProjectDeleted;
+		this.onUserInterruptPending = options.onUserInterruptPending;
+		this.onSessionOpened = options.onSessionOpened;
 		this.registerHandlers();
 		this.removeTerminalListener = this.terminalManager.onEvent((event) => this.sendTerminalEvent(event));
 		this.removeBrowserListener = this.browserManager.onEvent((event) => this.sendBrowserEvent(event));
@@ -322,6 +339,14 @@ export class ClientBroker {
 		this.removeBrowserListener();
 		for (const remove of this.removeSupervisorListeners) remove();
 		for (const channel of Object.values(DESKTOP_IPC_CHANNELS)) this.ipcMain.removeHandler(channel);
+	}
+
+	requestRendererOpenSession(sessionId: string, mode: "chat" | "code"): boolean {
+		const event = { type: "open-session", sessionId, mode } as const;
+		this.pendingRendererOpenSession = undefined;
+		if (this.sendEvent(event)) return true;
+		this.pendingRendererOpenSession = event;
+		return false;
 	}
 
 	private registerHandlers(): void {
@@ -495,6 +520,7 @@ export class ClientBroker {
 				await this.unsubscribeSessions(previousSessionIds, true);
 				// A request can cross the process boundary while unsubscribe is in flight.
 				this.cancelPendingInteractionsForSessions(previousSessions);
+				this.onSessionOpened?.(params.sessionId);
 				return subscribed.snapshot;
 			});
 		});
@@ -546,9 +572,16 @@ export class ClientBroker {
 		this.register(DESKTOP_IPC_CHANNELS.sendQueuedTurn, 1, async (_event, [input]) =>
 			this.clientCall("turn/queue/send", input),
 		);
-		this.register(DESKTOP_IPC_CHANNELS.interruptTurn, 1, async (_event, [input]) =>
-			this.clientCall("turn/interrupt", input),
-		);
+		this.register(DESKTOP_IPC_CHANNELS.interruptTurn, 1, async (_event, [input]) => {
+			const params = this.validatedParams("turn/interrupt", input);
+			this.onUserInterruptPending?.(params.sessionId, true);
+			try {
+				return await this.clientCall("turn/interrupt", params);
+			} catch (cause) {
+				this.onUserInterruptPending?.(params.sessionId, false);
+				throw cause;
+			}
+		});
 		this.register(DESKTOP_IPC_CHANNELS.respondToInteraction, 1, async (_event, [input]) => {
 			this.respondToInteraction(input);
 		});
@@ -569,6 +602,8 @@ export class ClientBroker {
 		this.register(DESKTOP_IPC_CHANNELS.subscribe, 0, async () => {
 			this.ownerSubscribed = true;
 			this.sendEvent({ type: "supervisor", view: this.supervisor.view() });
+			const pending = this.pendingRendererOpenSession;
+			if (pending && this.sendEvent(pending)) this.pendingRendererOpenSession = undefined;
 		});
 		this.register(DESKTOP_IPC_CHANNELS.createTerminal, 1, async (_event, [input]) =>
 			this.terminalManager.create(validateCreateTerminalInput(input)),
@@ -718,6 +753,14 @@ export class ClientBroker {
 		const notification = validateServerNotification(value);
 		const view = this.supervisor.view();
 		if (view.state !== "ready" || notification.params.serverEpoch !== view.serverEpoch) return;
+		for (const event of notification.params.events) {
+			if (event.type === "session/updated") this.onSessionUpdated?.(event.session);
+			else if (event.type === "session/invalidated" && event.reason === "deleted") {
+				this.onSessionDeleted?.(event.sessionId);
+			} else if (event.type === "project/invalidated" && event.reason === "deleted") {
+				this.onProjectDeleted?.(event.mode, event.cwd);
+			}
+		}
 		this.sendEvent({ type: "app-server", envelope: notification });
 		void this.clientCall("connection/ack", {
 			serverEpoch: notification.params.serverEpoch,
@@ -827,7 +870,7 @@ export class ClientBroker {
 		this.workspaceFiles.clear();
 		this.cancelPendingInteractions();
 		this.releaseSessionSubscriptions();
-		this.setWorkspaceEditState({ dirty: false, language: "en" });
+		this.setWorkspaceEditState({ dirty: false, language: "en", visibleSessionId: null });
 	}
 
 	private forgetSessions(sessionIds: readonly string[]): void {

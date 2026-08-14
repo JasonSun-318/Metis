@@ -1,6 +1,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
+import type { SessionSummary } from "@metis/app-protocol";
 import { describe, expect, it, vi } from "vitest";
 import { resolveRendererAsset } from "../src/main/app-protocol-scheme.ts";
 import { ClientBroker, isTrustedRendererUrl } from "../src/main/client-broker.ts";
@@ -14,6 +15,7 @@ import {
 	type SupervisorView,
 	validateBrowserControlInput,
 	validateCreateBrowserInput,
+	validateDesktopApiEvent,
 	validateDesktopBrowserEvent,
 	validateListWorkspaceDirectoryInput,
 	validateOpenWorkspaceFileInput,
@@ -293,10 +295,21 @@ describe("desktop trust boundaries", () => {
 	});
 
 	it("accepts only exact workspace edit state reports", () => {
-		expect(validateWorkspaceEditState({ dirty: true, language: "zh" })).toEqual({ dirty: true, language: "zh" });
-		expect(validateWorkspaceEditState({ dirty: false, language: "en" })).toEqual({ dirty: false, language: "en" });
-		expect(() => validateWorkspaceEditState({ dirty: true, language: "zh-CN" })).toThrow();
-		expect(() => validateWorkspaceEditState({ dirty: true, language: "en", extra: true })).toThrow();
+		expect(validateWorkspaceEditState({ dirty: true, language: "zh", visibleSessionId: "session-1" })).toEqual({
+			dirty: true,
+			language: "zh",
+			visibleSessionId: "session-1",
+		});
+		expect(validateWorkspaceEditState({ dirty: false, language: "en", visibleSessionId: null })).toEqual({
+			dirty: false,
+			language: "en",
+			visibleSessionId: null,
+		});
+		expect(() => validateWorkspaceEditState({ dirty: true, language: "zh-CN", visibleSessionId: null })).toThrow();
+		expect(() => validateWorkspaceEditState({ dirty: true, language: "en" })).toThrow();
+		expect(() =>
+			validateWorkspaceEditState({ dirty: true, language: "en", visibleSessionId: "", extra: true }),
+		).toThrow();
 	});
 
 	it("accepts exact browser commands and rejects unsafe renderer payloads", () => {
@@ -1041,9 +1054,15 @@ describe("desktop trust boundaries", () => {
 		await expect(copyText(event, { text: "copied" })).resolves.toBeUndefined();
 		expect(writeClipboardText).toHaveBeenCalledWith("copied");
 		await expect(copyText(event, { text: "copied", extra: true })).rejects.toThrow("Invalid clipboard write input");
-		await expect(reportEditState(event, { dirty: true, language: "zh" })).resolves.toBeUndefined();
-		expect(setWorkspaceEditState).toHaveBeenCalledWith({ dirty: true, language: "zh" });
-		await expect(reportEditState(event, { dirty: true, language: "zh-CN" })).rejects.toThrow(
+		await expect(
+			reportEditState(event, { dirty: true, language: "zh", visibleSessionId: "session-1" }),
+		).resolves.toBeUndefined();
+		expect(setWorkspaceEditState).toHaveBeenCalledWith({
+			dirty: true,
+			language: "zh",
+			visibleSessionId: "session-1",
+		});
+		await expect(reportEditState(event, { dirty: true, language: "zh-CN", visibleSessionId: null })).rejects.toThrow(
 			"Invalid workspace edit state",
 		);
 
@@ -1332,7 +1351,7 @@ describe("desktop trust boundaries", () => {
 			expect.objectContaining({ method: "project/delete", params: deleteInput }),
 		);
 		broker.dispose();
-		expect(setWorkspaceEditState).toHaveBeenLastCalledWith({ dirty: false, language: "en" });
+		expect(setWorkspaceEditState).toHaveBeenLastCalledWith({ dirty: false, language: "en", visibleSessionId: null });
 	});
 
 	it("keeps the current subscription when opening the replacement session fails", async () => {
@@ -1779,5 +1798,185 @@ describe("desktop trust boundaries", () => {
 		} finally {
 			vi.useRealTimers();
 		}
+	});
+
+	it("reports only validated current-epoch session summaries to the main process", async () => {
+		const ipcMain = new FakeIpcMain();
+		const { emitMessage, supervisor } = supervisorHarness();
+		const onSessionUpdated = vi.fn();
+		const updatedSession: SessionSummary = {
+			sessionId: "session-1",
+			name: "检查登录流程",
+			mode: "code",
+			cwdOrigin: "user-selected",
+			cwd: "/tmp/project",
+			createdAt: "2026-08-14T00:00:00.000Z",
+			updatedAt: "2026-08-14T00:00:01.000Z",
+			state: "idle",
+			lastTurnOutcome: "completed",
+			archived: false,
+			unread: true,
+		};
+		const broker = new ClientBroker({ ipcMain: ipcMain as never, supervisor, onSessionUpdated });
+		const webContents = new FakeWebContents();
+		broker.attach({ webContents: webContents as never });
+
+		emitMessage({
+			jsonrpc: "2.0",
+			method: "connection/events",
+			params: {
+				serverEpoch: "11111111-1111-4111-8111-111111111111",
+				fromCursor: 1,
+				toCursor: 1,
+				events: [{ type: "session/updated", session: updatedSession }],
+			},
+		});
+
+		expect(onSessionUpdated).toHaveBeenCalledOnce();
+		broker.dispose();
+	});
+
+	it("reports validated deleted session and project invalidations", () => {
+		const ipcMain = new FakeIpcMain();
+		const { emitMessage, supervisor } = supervisorHarness();
+		const onSessionDeleted = vi.fn();
+		const onProjectDeleted = vi.fn();
+		const broker = new ClientBroker({
+			ipcMain: ipcMain as never,
+			supervisor,
+			onSessionDeleted,
+			onProjectDeleted,
+		});
+
+		emitMessage({
+			jsonrpc: "2.0",
+			method: "connection/events",
+			params: {
+				serverEpoch: "11111111-1111-4111-8111-111111111111",
+				fromCursor: 1,
+				toCursor: 3,
+				events: [
+					{ type: "session/invalidated", sessionId: "session-1", reason: "deleted" },
+					{ type: "session/invalidated", sessionId: "session-2", reason: "reload_required" },
+					{ type: "project/invalidated", mode: "code", cwd: "/tmp/project", reason: "deleted" },
+				],
+			},
+		});
+
+		expect(onSessionDeleted).toHaveBeenCalledExactlyOnceWith("session-1");
+		expect(onProjectDeleted).toHaveBeenCalledExactlyOnceWith("code", "/tmp/project");
+		broker.dispose();
+	});
+
+	it("tracks a trusted user interruption around the server request", async () => {
+		const ipcMain = new FakeIpcMain();
+		const { supervisor } = supervisorHarness();
+		const onUserInterruptPending = vi.fn();
+		const broker = new ClientBroker({ ipcMain: ipcMain as never, supervisor, onUserInterruptPending });
+		const webContents = new FakeWebContents();
+		broker.attach({ webContents: webContents as never });
+		supervisor.request.mockRejectedValueOnce(new Error("interrupt failed"));
+
+		await expect(
+			ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.interruptTurn)!(
+				{
+					sender: webContents,
+					senderFrame: webContents.mainFrame,
+				},
+				{ sessionId: "session-1", requestId: "00000000-0000-4000-8000-000000000001" },
+			),
+		).rejects.toThrow("interrupt failed");
+
+		expect(onUserInterruptPending.mock.calls).toEqual([
+			["session-1", true],
+			["session-1", false],
+		]);
+		broker.dispose();
+	});
+
+	it("acknowledges the viewed session after a successful open", async () => {
+		const ipcMain = new FakeIpcMain();
+		const { supervisor } = supervisorHarness();
+		const onSessionOpened = vi.fn();
+		supervisor.request.mockImplementation(async (request) => ({
+			jsonrpc: "2.0",
+			id: request.id,
+			result:
+				request.method === "session/subscribe"
+					? {
+							snapshot: {
+								session: {
+									sessionId: "session-1",
+									name: "检查登录流程",
+									mode: "code",
+									cwdOrigin: "user-selected",
+									cwd: "/tmp/project",
+									createdAt: "2026-08-14T00:00:00.000Z",
+									updatedAt: "2026-08-14T00:00:01.000Z",
+									state: "idle",
+									lastTurnOutcome: "completed",
+									archived: false,
+									unread: false,
+								},
+							},
+						}
+					: {},
+		}));
+		const broker = new ClientBroker({ ipcMain: ipcMain as never, supervisor, onSessionOpened });
+		const webContents = new FakeWebContents();
+		broker.attach({ webContents: webContents as never });
+		const event = { sender: webContents, senderFrame: webContents.mainFrame };
+
+		await expect(
+			ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.openSession)!(event, { sessionId: "session-1" }),
+		).resolves.toMatchObject({ session: { sessionId: "session-1" } });
+
+		expect(onSessionOpened).toHaveBeenCalledExactlyOnceWith("session-1");
+		broker.dispose();
+	});
+
+	it("validates only exact open-session desktop events", () => {
+		expect(validateDesktopApiEvent({ type: "open-session", sessionId: "session-1", mode: "code" })).toEqual({
+			type: "open-session",
+			sessionId: "session-1",
+			mode: "code",
+		});
+		expect(validateDesktopApiEvent({ type: "open-session", sessionId: "session-1", mode: "chat" })).toEqual({
+			type: "open-session",
+			sessionId: "session-1",
+			mode: "chat",
+		});
+		expect(() =>
+			validateDesktopApiEvent({ type: "open-session", sessionId: "session-1", mode: "code", extra: true }),
+		).toThrow("Invalid desktop event");
+		expect(() => validateDesktopApiEvent({ type: "open-session", sessionId: "session-1", mode: "terminal" })).toThrow(
+			"Invalid desktop event",
+		);
+		expect(() => validateDesktopApiEvent({ type: "open-session", sessionId: "", mode: "code" })).toThrow(
+			"Invalid session id",
+		);
+	});
+
+	it("queues notification navigation until the renderer subscribes", async () => {
+		const ipcMain = new FakeIpcMain();
+		const { supervisor } = supervisorHarness();
+		const broker = new ClientBroker({ ipcMain: ipcMain as never, supervisor });
+		const webContents = new FakeWebContents();
+		broker.attach({ webContents: webContents as never });
+
+		expect(broker.requestRendererOpenSession("session-1", "code")).toBe(false);
+		expect(webContents.sent).not.toContainEqual([
+			"metis:event",
+			{ type: "open-session", sessionId: "session-1", mode: "code" },
+		]);
+		await ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.subscribe)!({
+			sender: webContents,
+			senderFrame: webContents.mainFrame,
+		});
+		expect(webContents.sent).toContainEqual([
+			"metis:event",
+			{ type: "open-session", sessionId: "session-1", mode: "code" },
+		]);
+		broker.dispose();
 	});
 });

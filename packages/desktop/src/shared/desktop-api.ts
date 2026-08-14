@@ -9,6 +9,7 @@ import {
 	InteractionResultSchema,
 	type ServerRpcNotification,
 	type ServerRpcRequest,
+	SessionIdSchema,
 	UuidSchema,
 	validateClientRequest,
 	validateServerNotification,
@@ -38,6 +39,7 @@ export type DesktopUpdateState =
 export type DesktopApiEvent =
 	| { readonly type: "app-server"; readonly envelope: ServerRpcRequest | ServerRpcNotification }
 	| { readonly type: "interaction-cancelled"; readonly interactionId: string }
+	| { readonly type: "open-session"; readonly sessionId: string; readonly mode: "chat" | "code" }
 	| { readonly type: "supervisor"; readonly view: SupervisorView };
 
 export const DESKTOP_IPC_CHANNELS = {
@@ -412,6 +414,7 @@ export interface DesktopAttachmentSelection {
 export interface DesktopWorkspaceEditState {
 	readonly dirty: boolean;
 	readonly language: "en" | "zh";
+	readonly visibleSessionId: string | null;
 }
 
 export interface DesktopCreateProjectFolderInput {
@@ -535,6 +538,7 @@ export interface MetisDesktopApi {
 
 const interactionResponseValidator = compileSchema(InteractionResultSchema);
 const interactionIdValidator = compileSchema(UuidSchema);
+const sessionIdValidator = compileSchema(SessionIdSchema);
 
 function exactRecord(value: unknown, keys: readonly string[], label: string): Record<string, unknown> {
 	assertEnvelopeByteLimit(value);
@@ -728,11 +732,18 @@ export function validateWriteClipboardTextInput(value: unknown): DesktopWriteCli
 }
 
 export function validateWorkspaceEditState(value: unknown): DesktopWorkspaceEditState {
-	const input = exactRecord(value, ["dirty", "language"], "workspace edit state");
+	const input = exactRecord(value, ["dirty", "language", "visibleSessionId"], "workspace edit state");
 	if (typeof input.dirty !== "boolean" || (input.language !== "en" && input.language !== "zh")) {
 		throw new TypeError("Invalid workspace edit state");
 	}
-	return { dirty: input.dirty, language: input.language };
+	if (input.visibleSessionId !== null) {
+		assertSchema(sessionIdValidator, input.visibleSessionId, "invalid_params", "visible session id");
+	}
+	return {
+		dirty: input.dirty,
+		language: input.language,
+		visibleSessionId: input.visibleSessionId as string | null,
+	};
 }
 
 export function validateDesktopUpdateState(value: unknown): DesktopUpdateState {
@@ -1066,6 +1077,14 @@ export function validateDesktopApiEvent(value: unknown): DesktopApiEvent {
 	if (event.type === "interaction-cancelled" && Object.keys(event).length === 2) {
 		assertSchema(interactionIdValidator, event.interactionId, "invalid_params", "interaction id");
 		return { type: "interaction-cancelled", interactionId: event.interactionId as string };
+	}
+	if (
+		event.type === "open-session" &&
+		Object.keys(event).length === 3 &&
+		(event.mode === "chat" || event.mode === "code")
+	) {
+		assertSchema(sessionIdValidator, event.sessionId, "invalid_params", "session id");
+		return { type: "open-session", sessionId: event.sessionId as string, mode: event.mode };
 	}
 	throw new TypeError("Invalid desktop event");
 }
