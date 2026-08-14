@@ -922,6 +922,7 @@ export function App({ api, store }: AppProps) {
 				entryId,
 			});
 			setMessage(t("Forked conversation"));
+			await refreshSessions();
 			await openVisibleSession(result.session.sessionId);
 		} catch (cause) {
 			reportError(cause);
