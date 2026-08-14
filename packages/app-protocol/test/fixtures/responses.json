@@ -713,6 +713,29 @@
 	},
 	{
 		"direction": "client",
+		"method": "session/fork",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "client-fork",
+			"result": {
+				"session": {
+					"sessionId": "33333333-3333-4333-8333-333333333333",
+					"name": "fork Renamed session",
+					"cwd": "/tmp/metis-project",
+					"createdAt": "2026-07-16T00:00:04.000Z",
+					"updatedAt": "2026-07-16T00:00:04.000Z",
+					"state": "idle",
+					"archived": false,
+					"unread": false,
+					"mode": "code",
+					"cwdOrigin": "user-selected"
+				},
+				"entryId": "aaaaaaaa"
+			}
+		}
+	},
+	{
+		"direction": "client",
 		"method": "session/delete",
 		"envelope": {
 			"jsonrpc": "2.0",

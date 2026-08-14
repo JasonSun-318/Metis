@@ -394,6 +394,16 @@ export const SessionRenameParamsSchema = StrictObject({
 	requestId: UuidSchema,
 	name: NameSchema,
 });
+export const SessionForkParamsSchema = StrictObject({
+	requestId: UuidSchema,
+	sessionId: SessionIdSchema,
+	// Branch point: the assistant item to fork at (itemId === journal entryId).
+	entryId: OpaqueIdSchema,
+});
+export const SessionForkResultSchema = StrictObject({
+	session: SessionSummarySchema,
+	entryId: OpaqueIdSchema,
+});
 export const SessionDeleteResultSchema = StrictObject({
 	sessionId: SessionIdSchema,
 	deleted: Type.Literal(true),
@@ -766,6 +776,7 @@ export const ClientRequestMethods = {
 	"session/compact": method(SessionMutationParamsSchema, SessionCompactResultSchema),
 	"session/close": method(SessionMutationParamsSchema, SessionCloseResultSchema),
 	"session/rename": method(SessionRenameParamsSchema, SessionMutationResultSchema),
+	"session/fork": method(SessionForkParamsSchema, SessionForkResultSchema),
 	"session/delete": method(SessionMutationParamsSchema, SessionDeleteResultSchema),
 	"session/archive": method(SessionMutationParamsSchema, SessionMutationResultSchema),
 	"session/unarchive": method(SessionMutationParamsSchema, SessionMutationResultSchema),
