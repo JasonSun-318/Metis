@@ -29,7 +29,7 @@ textarea { resize: none; }
 .sidebar-titlebar-controls button { display: grid; width: 24px; height: 24px; place-items: center; border-radius: 5px; color: var(--text-14); transition: background-color 140ms ease, box-shadow 140ms ease, color 140ms ease; }
 .sidebar-titlebar-controls button:hover { box-shadow: var(--shadow); color: var(--text); }
 .mode-switch { position: relative; display: grid; height: 28px; flex: 0 0 28px; isolation: isolate; grid-template-columns: 1fr 1fr; border-radius: 7px; background: var(--surface-06); padding: 2px; }
-.mode-switch-indicator { position: absolute; z-index: 0; top: 2px; bottom: 2px; left: 2px; width: calc((100% - 4px) / 2); border-radius: 6px; background: var(--surface-16); box-shadow: var(--shadow); pointer-events: none; transition: transform 190ms cubic-bezier(.22, .8, .24, 1); }
+.mode-switch-indicator { position: absolute; z-index: 0; top: 2px; bottom: 2px; left: 2px; width: calc((100% - 4px) / 2); border-radius: 6px; background: var(--mode-switch-active); box-shadow: var(--shadow); pointer-events: none; transition: transform 190ms cubic-bezier(.22, .8, .24, 1); }
 .mode-switch[data-mode="code"] .mode-switch-indicator { transform: translateX(100%); }
 .mode-switch button { position: relative; z-index: 1; display: flex; min-width: 0; align-items: center; justify-content: center; gap: 7px; border-radius: 6px; color: var(--text-07); font-size: 13px; font-weight: 400; transition: color 120ms ease; }
 .mode-switch button.active { color: var(--text-strong); }

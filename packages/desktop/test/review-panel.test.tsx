@@ -10,7 +10,7 @@ vi.mock("@pierre/diffs/react", () => ({
 		readonly options: { readonly hunkSeparators?: string; readonly loadDiffFiles?: () => Promise<unknown> };
 		readonly patch: string;
 	}) => <pre data-hunk-separators={options.hunkSeparators} data-testid="patch">{patch}<button onClick={() => void options.loadDiffFiles?.()} type="button">Expand unchanged</button></pre>,
-	WorkerPoolContextProvider: ({ children }: { readonly children: ReactNode }) => <div data-testid="worker-provider">{children}</div>,
+	WorkerPoolContextProvider: ({ children, highlighterOptions }: { readonly children: ReactNode; readonly highlighterOptions: { readonly theme: string } }) => <div data-testid="worker-provider" data-theme={highlighterOptions.theme}>{children}</div>,
 }));
 
 import { ReviewPanel } from "../src/renderer/components/ReviewPanel.tsx";
@@ -74,8 +74,9 @@ describe("ReviewPanel", () => {
 		const container = document.createElement("div");
 		document.body.append(container);
 		const root = createRoot(container);
-		await act(async () => root.render(<ReviewPanel api={api} sessionId={sessionId} visible />));
+		await act(async () => root.render(<ReviewPanel api={api} sessionId={sessionId} theme="light" visible />));
 		await flush();
+		expect(container.querySelector('[data-testid="worker-provider"]')?.getAttribute("data-theme")).toBe("pierre-light");
 
 		const headers = [...container.querySelectorAll<HTMLButtonElement>(".review-file-header")];
 		expect(headers).toHaveLength(2);

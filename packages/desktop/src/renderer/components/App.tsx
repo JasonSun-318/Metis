@@ -33,7 +33,7 @@ import {
 	setProjectPinned,
 } from "../store/project-preferences.ts";
 import { loadSessionPins, saveSessionPins, setSessionPinned } from "../store/session-pins.ts";
-import { applyThemeToDocument, loadTheme, saveTheme, type AppTheme, watchSystemTheme } from "../theme.ts";
+import { applyThemeToDocument, loadTheme, resolveTheme, saveTheme, type AppTheme, watchSystemTheme } from "../theme.ts";
 import { Composer, type ComposerSubmission } from "./Composer.tsx";
 import { CodeProjectSetup } from "./CodeProjectSetup.tsx";
 import { InteractionHost } from "./InteractionHost.tsx";
@@ -213,6 +213,9 @@ export function App({ api, store }: AppProps) {
 	const [toolsSidebarWidth, setToolsSidebarWidth] = useState(393);
 	const [bootstrapped, setBootstrapped] = useState(false);
 	const [theme, setTheme] = useState<AppTheme>(() => loadTheme(localStorage));
+	const [resolvedTheme, setResolvedTheme] = useState<"dark" | "light">(() =>
+		resolveTheme(loadTheme(localStorage), globalThis.matchMedia?.("(prefers-color-scheme: light)") ?? { matches: false }),
+	);
 	const [modelSettings, setModelSettings] = useState<ModelSettingsView | null>(null);
 	const [draftBusy, setDraftBusy] = useState(false);
 	const [loadingOlder, setLoadingOlder] = useState(false);
@@ -269,11 +272,15 @@ export function App({ api, store }: AppProps) {
 		}
 	}, []);
 	useEffect(() => {
-		applyThemeToDocument(theme);
+		const apply = () => {
+			applyThemeToDocument(theme);
+			setResolvedTheme(resolveTheme(theme, globalThis.matchMedia?.("(prefers-color-scheme: light)") ?? { matches: false }));
+		};
+		apply();
 		saveTheme(localStorage, theme);
 		void api.setThemePreference(theme).catch(() => undefined);
 		if (theme === "system") {
-			return watchSystemTheme(() => applyThemeToDocument(loadTheme(localStorage)));
+			return watchSystemTheme(apply);
 		}
 		return undefined;
 	}, [api, theme]);
@@ -1641,6 +1648,7 @@ export function App({ api, store }: AppProps) {
 					open={toolsSidebarAvailable && toolsSidebarOpen && !settingsOpen}
 					preferredWidth={toolsSidebarPreferredWidth}
 					store={store}
+					theme={resolvedTheme}
 					width={toolsSidebarWidth}
 				/>
 					<div className="sr-only" aria-live="polite">{t(error || notice || latestNotification?.message || message)}</div>

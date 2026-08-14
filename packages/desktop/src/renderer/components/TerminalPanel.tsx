@@ -9,17 +9,33 @@ interface TerminalPanelProps {
 	readonly api: MetisDesktopApi;
 	readonly cwd: string;
 	readonly terminalId: string;
+	readonly theme: "dark" | "light";
 	readonly visible: boolean;
 }
 
-export function TerminalPanel({ api, cwd, terminalId, visible }: TerminalPanelProps) {
+export const TERMINAL_THEMES = {
+	dark: {
+		background: "#252525", foreground: "#e8e7e2", cursor: "#9a9a9a", selectionBackground: "#585858",
+		black: "#202020", red: "#ff8585", green: "#8fc17b", yellow: "#e4b56a", blue: "#75a9d6",
+		magenta: "#c69bd6", cyan: "#78c2bd", white: "#e8e7e2", brightBlack: "#7d7c77", brightWhite: "#ffffff",
+	},
+	light: {
+		background: "#fcfcfb", foreground: "#2e2b27", cursor: "#69655f", selectionBackground: "#dbe8f4",
+		black: "#252320", red: "#b64235", green: "#397a49", yellow: "#956b24", blue: "#356a9b",
+		magenta: "#80569b", cyan: "#2d7a78", white: "#d9d5ce", brightBlack: "#817d76", brightWhite: "#ffffff",
+	},
+} as const;
+
+export function TerminalPanel({ api, cwd, terminalId, theme, visible }: TerminalPanelProps) {
 	const { t } = useTranslation();
 	const hostRef = useRef<HTMLDivElement>(null);
 	const terminalRef = useRef<Terminal | null>(null);
 	const fitRef = useRef<(() => void) | null>(null);
 	const creationRef = useRef<Promise<unknown> | null>(null);
 	const translateRef = useRef(t);
+	const themeRef = useRef(theme);
 	translateRef.current = t;
+	themeRef.current = theme;
 	const [status, setStatus] = useState<string | null>(null);
 
 	useEffect(() => {
@@ -38,22 +54,7 @@ export function TerminalPanel({ api, cwd, terminalId, visible }: TerminalPanelPr
 			fontSize: 12,
 			lineHeight: 1.24,
 			scrollback: 1_000,
-			theme: {
-				background: "#252525",
-				foreground: "#e8e7e2",
-				cursor: "#9a9a9a",
-				selectionBackground: "#585858",
-				black: "#202020",
-				red: "#ff8585",
-				green: "#8fc17b",
-				yellow: "#e4b56a",
-				blue: "#75a9d6",
-				magenta: "#c69bd6",
-				cyan: "#78c2bd",
-				white: "#e8e7e2",
-				brightBlack: "#7d7c77",
-				brightWhite: "#ffffff",
-			},
+			theme: TERMINAL_THEMES[themeRef.current],
 		});
 		const fitAddon = new FitAddon();
 		terminal.loadAddon(fitAddon);
@@ -119,6 +120,10 @@ export function TerminalPanel({ api, cwd, terminalId, visible }: TerminalPanelPr
 			if (fitRef.current === fit) fitRef.current = null;
 		};
 	}, [api, cwd, terminalId]);
+
+	useEffect(() => {
+		if (terminalRef.current) terminalRef.current.options.theme = TERMINAL_THEMES[theme];
+	}, [theme]);
 
 	useEffect(() => {
 		if (!visible) return;

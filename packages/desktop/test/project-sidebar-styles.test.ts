@@ -38,6 +38,7 @@ describe("Project sidebar motion", () => {
 		);
 		expect(action.background).toBe("var(--surface-18)");
 		expect(action.boxShadow).toBe("var(--shadow)");
+		expect(rule(".mode-switch-indicator").background).toBe("var(--mode-switch-active)");
 		expect(rule(".mode-switch-indicator").boxShadow).toBe("var(--shadow)");
 		expect(tokens).toContain("--shadow: 0 1px 4px rgb(150 150 150 / 9%);");
 	});

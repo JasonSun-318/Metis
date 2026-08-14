@@ -4,8 +4,10 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { TERMINAL_THEMES } from "../src/renderer/components/TerminalPanel.tsx";
 
 const css = readFileSync(path.join(process.cwd(), "src/renderer/styles/app.css"), "utf8");
+const tokens = readFileSync(path.join(process.cwd(), "src/renderer/styles/tokens.css"), "utf8");
 
 function rule(selector: string): CSSStyleDeclaration {
 	const style = document.createElement("style");
@@ -18,6 +20,14 @@ function rule(selector: string): CSSStyleDeclaration {
 }
 
 describe("Terminal sidebar shell", () => {
+	it("uses distinct terminal and editor palettes for light and dark themes", () => {
+		expect(TERMINAL_THEMES.dark.background).toBe("#252525");
+		expect(TERMINAL_THEMES.light.background).toBe("#fcfcfb");
+		expect(TERMINAL_THEMES.light.foreground).toBe("#2e2b27");
+		expect(tokens).toContain("--editor-color-scheme: light;");
+		expect(tokens).toContain("--editor-bg: #fcfcfb;");
+	});
+
 	it("keeps its interactive header outside the window drag region", () => {
 		expect(rule(".workspace.tools-sidebar-open .workspace-titlebar-actions").right).toBe(
 			"calc(var(--tool-sidebar-width, 393px) + 7px)",

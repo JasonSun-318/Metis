@@ -37,7 +37,7 @@ function languageForPath(path: string): Extension {
 }
 
 const theme = EditorView.theme({
-	"&": { height: "100%", backgroundColor: "var(--editor-bg)", color: "var(--editor-text)" },
+	"&": { height: "100%", backgroundColor: "var(--editor-bg)", color: "var(--editor-text)", colorScheme: "var(--editor-color-scheme)" },
 	"&.cm-focused": { outline: "none" },
 	".cm-scroller": {
 		overflow: "auto",
@@ -66,18 +66,18 @@ const theme = EditorView.theme({
 }, { dark: true });
 
 const highContrastHighlightStyle = HighlightStyle.define([
-	{ tag: [tags.keyword, tags.modifier, tags.operatorKeyword, tags.controlKeyword, tags.definitionKeyword, tags.moduleKeyword], color: "#ff7b72" },
-	{ tag: [tags.string, tags.docString, tags.character, tags.attributeValue], color: "#a5d6ff" },
-	{ tag: [tags.number, tags.bool, tags.null, tags.atom, tags.unit], color: "#79c0ff" },
-	{ tag: [tags.function(tags.variableName), tags.propertyName, tags.attributeName, tags.labelName], color: "#d2a8ff" },
-	{ tag: [tags.typeName, tags.className, tags.namespace, tags.tagName], color: "#ffa657" },
-	{ tag: [tags.comment, tags.lineComment, tags.blockComment, tags.docComment], color: "#8b949e", fontStyle: "italic" },
-	{ tag: [tags.heading, tags.heading1, tags.heading2, tags.heading3, tags.heading4, tags.heading5, tags.heading6], color: "#ff7b72", fontWeight: "600" },
-	{ tag: [tags.link, tags.url], color: "#d2a8ff", textDecoration: "underline" },
-	{ tag: [tags.monospace, tags.inserted], color: "#7ee787" },
-	{ tag: [tags.operator, tags.punctuation, tags.bracket], color: "#c9d1d9" },
-	{ tag: tags.meta, color: "#79c0ff" },
-	{ tag: tags.invalid, color: "#ff7b72", textDecoration: "underline wavy #f85149" },
+	{ tag: [tags.keyword, tags.modifier, tags.operatorKeyword, tags.controlKeyword, tags.definitionKeyword, tags.moduleKeyword], color: "var(--syntax-keyword)" },
+	{ tag: [tags.string, tags.docString, tags.character, tags.attributeValue], color: "var(--syntax-string)" },
+	{ tag: [tags.number, tags.bool, tags.null, tags.atom, tags.unit], color: "var(--syntax-constant)" },
+	{ tag: [tags.function(tags.variableName), tags.propertyName, tags.attributeName, tags.labelName], color: "var(--syntax-symbol)" },
+	{ tag: [tags.typeName, tags.className, tags.namespace, tags.tagName], color: "var(--syntax-type)" },
+	{ tag: [tags.comment, tags.lineComment, tags.blockComment, tags.docComment], color: "var(--syntax-comment)", fontStyle: "italic" },
+	{ tag: [tags.heading, tags.heading1, tags.heading2, tags.heading3, tags.heading4, tags.heading5, tags.heading6], color: "var(--syntax-keyword)", fontWeight: "600" },
+	{ tag: [tags.link, tags.url], color: "var(--syntax-symbol)", textDecoration: "underline" },
+	{ tag: [tags.monospace, tags.inserted], color: "var(--syntax-inserted)" },
+	{ tag: [tags.operator, tags.punctuation, tags.bracket], color: "var(--syntax-punctuation)" },
+	{ tag: tags.meta, color: "var(--syntax-constant)" },
+	{ tag: tags.invalid, color: "var(--syntax-keyword)", textDecoration: "underline wavy var(--syntax-invalid)" },
 ]);
 
 const chinesePhrases = EditorState.phrases.of({

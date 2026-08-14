@@ -27,10 +27,17 @@ const WORKER_POOL_OPTIONS = {
 	workerFactory: () => new Worker(new URL("../workers/diff-worker.ts", import.meta.url), { type: "module" }),
 };
 
-const HIGHLIGHTER_OPTIONS: WorkerInitializationRenderOptions = {
-	theme: "pierre-dark" as const,
-	lineDiffType: "word-alt" as const,
-	langs: ["bash", "css", "html", "javascript", "json", "markdown", "python", "tsx", "typescript", "yaml"],
+const HIGHLIGHTER_OPTIONS: Record<"dark" | "light", WorkerInitializationRenderOptions> = {
+	dark: {
+		theme: "pierre-dark",
+		lineDiffType: "word-alt",
+		langs: ["bash", "css", "html", "javascript", "json", "markdown", "python", "tsx", "typescript", "yaml"],
+	},
+	light: {
+		theme: "pierre-light",
+		lineDiffType: "word-alt",
+		langs: ["bash", "css", "html", "javascript", "json", "markdown", "python", "tsx", "typescript", "yaml"],
+	},
 };
 
 type PatchState =
@@ -41,6 +48,7 @@ type PatchState =
 interface ReviewPanelProps {
 	readonly api: MetisDesktopApi;
 	readonly sessionId: string;
+	readonly theme?: "dark" | "light";
 	readonly visible: boolean;
 }
 
@@ -133,7 +141,7 @@ function PatchBody({ api, file, onRetry, revision, sessionId, state }: {
 	return <><PatchDiff options={options} patch={state.value.patch} />{contextError && <p className="review-context-error">{t(contextError === "too-large" ? "Unchanged context is too large to display" : contextError === "binary" ? "Binary context cannot be displayed" : "Unable to load unchanged context")}</p>}</>;
 }
 
-export function ReviewPanel({ api, sessionId, visible }: ReviewPanelProps) {
+export function ReviewPanel({ api, sessionId, theme = "dark", visible }: ReviewPanelProps) {
 	const { t } = useTranslation();
 	const [detailsOpen, setDetailsOpen] = useState(false);
 	const [detailsMounted, setDetailsMounted] = useState(false);
@@ -268,7 +276,7 @@ export function ReviewPanel({ api, sessionId, visible }: ReviewPanelProps) {
 					: !snapshot && loadError ? <p className="review-empty is-error">{t("Unable to load review")} <button onClick={refresh} type="button">{t("Retry")}</button></p>
 						: snapshot?.kind === "not-repository" ? <p className="review-empty">{t("This workspace is not a Git repository.")}</p>
 							: snapshot?.kind === "review" && snapshot.files.length === 0 ? <p className="review-empty">{t("No changes")}</p>
-								: snapshot?.kind === "review" ? <WorkerPoolContextProvider highlighterOptions={HIGHLIGHTER_OPTIONS} poolOptions={WORKER_POOL_OPTIONS}><div className="review-files">
+								: snapshot?.kind === "review" ? <WorkerPoolContextProvider highlighterOptions={HIGHLIGHTER_OPTIONS[theme]} key={theme} poolOptions={WORKER_POOL_OPTIONS}><div className="review-files">
 									<p className="review-collapse-note">{t("Files are collapsed for large diffs. Select a file to expand it.")}</p>
 									{snapshot.files.map((file) => {
 										const isExpanded = expanded.has(file.relativePath);

@@ -75,6 +75,7 @@ interface ToolsSidebarProps {
 	readonly open: boolean;
 	readonly preferredWidth: number;
 	readonly store: AppStore;
+	readonly theme: "dark" | "light";
 	readonly width: number;
 }
 
@@ -140,7 +141,7 @@ function remapPath(path: string, previous: string, next: string): string {
 	return path === previous ? next : `${next}${path.slice(previous.length)}`;
 }
 
-export function ToolsSidebar({ activeSession, api, cleanupSessionIds, mode, onClose, onCleanupSessionIdsHandled, onDirtySessionIdsChange, onError, onWidthChange, open, preferredWidth, store, width }: ToolsSidebarProps) {
+export function ToolsSidebar({ activeSession, api, cleanupSessionIds, mode, onClose, onCleanupSessionIdsHandled, onDirtySessionIdsChange, onError, onWidthChange, open, preferredWidth, store, theme, width }: ToolsSidebarProps) {
 	const { t } = useTranslation();
 	const [workspaces, setWorkspaces] = useState<ReadonlyMap<string, ToolWorkspace>>(new Map());
 	const [expandedBySession, setExpandedBySession] = useState<ReadonlyMap<string, readonly string[]>>(new Map());
@@ -729,6 +730,7 @@ export function ToolsSidebar({ activeSession, api, cleanupSessionIds, mode, onCl
 								cwd={tab.cwd}
 								key={tab.id}
 								terminalId={tab.id}
+								theme={theme}
 								visible={open && !menuOpen && ownerSessionId === sessionId && ownerWorkspace.activeId === tab.id}
 							/>
 						) : tab.kind === "browser" ? (
@@ -745,6 +747,7 @@ export function ToolsSidebar({ activeSession, api, cleanupSessionIds, mode, onCl
 								api={api}
 								key={tab.id}
 								sessionId={ownerSessionId}
+								theme={theme}
 								visible={open && ownerSessionId === sessionId && ownerWorkspace.activeId === tab.id}
 							/>
 						) : tab.kind === "subagent" && ownerSessionId === sessionId ? (

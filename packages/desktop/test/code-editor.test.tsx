@@ -68,7 +68,7 @@ describe("CodeEditor", () => {
 		}
 	});
 
-	it("uses a high-contrast dark syntax palette", async () => {
+	it("routes syntax colors through theme-responsive tokens", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 		const container = document.createElement("div");
 		document.body.append(container);
@@ -84,8 +84,8 @@ describe("CodeEditor", () => {
 		));
 		const spans = [...container.querySelectorAll<HTMLElement>(".cm-line span")];
 		const token = (text: string) => spans.find((span) => span.textContent === text)!;
-		expect(getComputedStyle(token("export")).color).toBe("rgb(255, 123, 114)");
-		expect(getComputedStyle(token('"visible"')).color).toBe("rgb(165, 214, 255)");
+		expect(getComputedStyle(token("export")).color).toBe("var(--syntax-keyword)");
+		expect(getComputedStyle(token('"visible"')).color).toBe("var(--syntax-string)");
 		await act(async () => root.unmount());
 	});
 });
