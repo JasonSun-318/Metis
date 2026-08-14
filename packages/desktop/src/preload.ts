@@ -5,10 +5,12 @@ import {
 	DESKTOP_EVENT_CHANNEL,
 	DESKTOP_IPC_CHANNELS,
 	DESKTOP_TERMINAL_EVENT_CHANNEL,
+	DESKTOP_THEME_CHANNEL,
 	DESKTOP_UPDATE_EVENT_CHANNEL,
 	type DesktopApiEvent,
 	type DesktopBrowserEvent,
 	type DesktopTerminalEvent,
+	type DesktopThemePreference,
 	type DesktopUpdateState,
 	type MetisDesktopApi,
 	validateBrowserControlInput,
@@ -363,6 +365,15 @@ const api = {
 	getServerState: () => ipcRenderer.invoke(DESKTOP_IPC_CHANNELS.getServerState),
 	retryServer: async () => {
 		await ipcRenderer.invoke(DESKTOP_IPC_CHANNELS.retryServer);
+	},
+	getThemePreference: async (): Promise<DesktopThemePreference> => {
+		const value = await ipcRenderer.invoke(DESKTOP_THEME_CHANNEL, "get");
+		if (value === "dark" || value === "light" || value === "system") return value;
+		return "dark";
+	},
+	setThemePreference: async (theme: DesktopThemePreference): Promise<void> => {
+		if (theme !== "dark" && theme !== "light" && theme !== "system") throw new TypeError("Invalid theme preference");
+		await ipcRenderer.invoke(DESKTOP_THEME_CHANNEL, theme);
 	},
 } satisfies MetisDesktopApi;
 

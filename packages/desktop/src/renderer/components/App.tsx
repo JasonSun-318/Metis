@@ -33,6 +33,7 @@ import {
 	setProjectPinned,
 } from "../store/project-preferences.ts";
 import { loadSessionPins, saveSessionPins, setSessionPinned } from "../store/session-pins.ts";
+import { applyThemeToDocument, loadTheme, saveTheme, type AppTheme, watchSystemTheme } from "../theme.ts";
 import { Composer, type ComposerSubmission } from "./Composer.tsx";
 import { CodeProjectSetup } from "./CodeProjectSetup.tsx";
 import { InteractionHost } from "./InteractionHost.tsx";
@@ -211,6 +212,7 @@ export function App({ api, store }: AppProps) {
 	const [toolsSidebarPreferredWidth, setToolsSidebarPreferredWidth] = useState(393);
 	const [toolsSidebarWidth, setToolsSidebarWidth] = useState(393);
 	const [bootstrapped, setBootstrapped] = useState(false);
+	const [theme, setTheme] = useState<AppTheme>(() => loadTheme(localStorage));
 	const [modelSettings, setModelSettings] = useState<ModelSettingsView | null>(null);
 	const [draftBusy, setDraftBusy] = useState(false);
 	const [loadingOlder, setLoadingOlder] = useState(false);
@@ -266,6 +268,15 @@ export function App({ api, store }: AppProps) {
 			// The preference remains renderer-local when storage is unavailable.
 		}
 	}, []);
+	useEffect(() => {
+		applyThemeToDocument(theme);
+		saveTheme(localStorage, theme);
+		void api.setThemePreference(theme).catch(() => undefined);
+		if (theme === "system") {
+			return watchSystemTheme(() => applyThemeToDocument(loadTheme(localStorage)));
+		}
+		return undefined;
+	}, [api, theme]);
 	useEffect(() => {
 		const resize = () => updateSessionSidebarWidth(sessionSidebarPreferredWidth, false);
 		window.addEventListener("resize", resize);
@@ -1639,7 +1650,15 @@ export function App({ api, store }: AppProps) {
 			</main>
 			<InteractionHost interaction={inlineInteraction ? undefined : visibleInteraction} key={inlineInteraction ? "none" : visibleInteraction?.interactionId ?? "none"} onRespond={respond} />
 		</div>
-		{settingsOpen ? <SettingsDialog api={api} onClose={closeSettings} serverReady={serverReady} /> : null}
+		{settingsOpen ? (
+			<SettingsDialog
+				api={api}
+				onClose={closeSettings}
+				onThemeChange={setTheme}
+				serverReady={serverReady}
+				theme={theme}
+			/>
+		) : null}
 		</>
 	);
 }

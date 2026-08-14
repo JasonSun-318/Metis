@@ -20,6 +20,7 @@ import { DiagnosticLog } from "./diagnostic-log.ts";
 import { createProjectFolder } from "./project-folder.ts";
 import { createScheduleKeepAwake } from "./schedule-keep-awake.ts";
 import { TerminalManager } from "./terminal-manager.ts";
+import { registerThemeHandlers } from "./theme-manager.ts";
 import { DesktopUpdater } from "./updater.ts";
 import { createMainWindow, loadMainWindow } from "./window.ts";
 import { resolveDesktopRipgrepPath, WorkspaceFileManager } from "./workspace-file-manager.ts";
@@ -142,6 +143,7 @@ async function launch(): Promise<void> {
 		setScheduleKeepAwake: (enabled) => scheduleKeepAwake.set(enabled),
 		updater,
 	});
+	registerThemeHandlers(ipcMain, () => mainWindow);
 	const openMainWindow = async (): Promise<void> => {
 		const window = createMainWindow();
 		broker.attach(window);

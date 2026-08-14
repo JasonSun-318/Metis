@@ -1,20 +1,24 @@
-import { ArrowLeft, ChartBar, Cpu, UserCircle } from "@phosphor-icons/react";
+import { ArrowLeft, ChartBar, Cpu, GearSix, UserCircle } from "@phosphor-icons/react";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
+import type { AppTheme } from "../theme.ts";
+import { GeneralPanel } from "./GeneralPanel.tsx";
 import { ModelSettingsPanel } from "./ModelSettingsPanel.tsx";
 import { ProfilePanel } from "./ProfilePanel.tsx";
 import { UsagePanel } from "./UsagePanel.tsx";
 
-type SettingsPage = "profile" | "model" | "usage";
+type SettingsPage = "general" | "profile" | "model" | "usage";
 
-export function SettingsDialog({ api, onClose, serverReady }: {
+export function SettingsDialog({ api, onClose, onThemeChange, serverReady, theme }: {
 	readonly api: MetisDesktopApi;
 	readonly onClose: () => void;
+	readonly onThemeChange: (theme: AppTheme) => void;
 	readonly serverReady: boolean;
+	readonly theme: AppTheme;
 }) {
 	const { t } = useTranslation();
-	const [page, setPage] = useState<SettingsPage>("profile");
+	const [page, setPage] = useState<SettingsPage>("general");
 	const dialogRef = useRef<HTMLDivElement>(null);
 	const firstNavRef = useRef<HTMLButtonElement>(null);
 	const pageScrollRef = useRef<HTMLDivElement>(null);
@@ -52,6 +56,7 @@ export function SettingsDialog({ api, onClose, serverReady }: {
 	}, [onClose]);
 
 	const pages = [
+		{ id: "general" as const, label: "General", icon: GearSix },
 		{ id: "profile" as const, label: "Profile", icon: UserCircle },
 		{ id: "model" as const, label: "Model", icon: Cpu },
 		{ id: "usage" as const, label: "Usage", icon: ChartBar },
@@ -84,6 +89,7 @@ export function SettingsDialog({ api, onClose, serverReady }: {
 						<h1>{t(pages.find((item) => item.id === page)!.label)}</h1>
 					</header>
 					<div className={`settings-page-scroll settings-page-scroll-${page}`} ref={pageScrollRef}>
+						{page === "general" ? <GeneralPanel onThemeChange={onThemeChange} theme={theme} /> : null}
 						{page === "profile" ? <ProfilePanel api={api} serverReady={serverReady} /> : null}
 						{page === "model" ? <ModelSettingsPanel api={api} serverReady={serverReady} /> : null}
 						{page === "usage" ? <UsagePanel api={api} serverReady={serverReady} /> : null}

@@ -4,8 +4,12 @@ import { App } from "./components/App.tsx";
 import { AppErrorBoundary } from "./components/AppErrorBoundary.tsx";
 import "./i18n.ts";
 import { AppStore } from "./store/app-store.ts";
+import { applyThemeToDocument, loadTheme } from "./theme.ts";
 import "./styles/tokens.css";
 import "./styles/app.css";
+
+// Apply the persisted theme before the first paint to avoid a flash.
+applyThemeToDocument(loadTheme(localStorage));
 
 const root = document.getElementById("root");
 if (!root) throw new Error("Metis renderer root is missing");

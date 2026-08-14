@@ -1,17 +1,20 @@
-import { BrowserWindow, shell } from "electron";
+import { BrowserWindow, nativeTheme, shell } from "electron";
 import { APP_ORIGIN } from "./app-protocol-scheme.ts";
 import { isSafeExternalUrl } from "./external-url.ts";
+import { readStoredTheme, windowBackgroundFor } from "./theme-manager.ts";
 
 declare const MAIN_WINDOW_PRELOAD_WEBPACK_ENTRY: string;
 
 export function createMainWindow(): BrowserWindow {
+	const theme = readStoredTheme();
+	nativeTheme.themeSource = theme;
 	const window = new BrowserWindow({
 		width: 1280,
 		height: 840,
 		minWidth: 900,
 		minHeight: 640,
 		show: false,
-		backgroundColor: "#1f201e",
+		backgroundColor: windowBackgroundFor(theme),
 		...(process.platform === "darwin"
 			? {
 					titleBarStyle: "hiddenInset" as const,

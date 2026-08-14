@@ -41,7 +41,7 @@ export function TerminalPanel({ api, cwd, terminalId, visible }: TerminalPanelPr
 			theme: {
 				background: "#252525",
 				foreground: "#e8e7e2",
-				cursor: "#d88a72",
+				cursor: "#9a9a9a",
 				selectionBackground: "#585858",
 				black: "#202020",
 				red: "#ff8585",

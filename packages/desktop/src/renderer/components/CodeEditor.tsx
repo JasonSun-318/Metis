@@ -37,7 +37,7 @@ function languageForPath(path: string): Extension {
 }
 
 const theme = EditorView.theme({
-	"&": { height: "100%", backgroundColor: "var(--app-bg)", color: "#dedcd6" },
+	"&": { height: "100%", backgroundColor: "var(--editor-bg)", color: "var(--editor-text)" },
 	"&.cm-focused": { outline: "none" },
 	".cm-scroller": {
 		overflow: "auto",
@@ -45,23 +45,23 @@ const theme = EditorView.theme({
 		fontSize: "var(--code-mono-size)",
 		lineHeight: "1.55",
 	},
-	".cm-content": { minHeight: "100%", padding: "12px 0 28px", caretColor: "#e7e5df" },
+	".cm-content": { minHeight: "100%", padding: "12px 0 28px", caretColor: "var(--editor-caret)" },
 	".cm-line": { padding: "0 14px 0 7px" },
 	".cm-gutters": {
-		backgroundColor: "var(--app-bg)",
-		borderRight: "1px solid var(--border)",
-		color: "#676661",
+		backgroundColor: "var(--editor-bg)",
+		borderRight: "1px solid var(--editor-border)",
+		color: "var(--editor-muted)",
 	},
-	".cm-activeLine, .cm-activeLineGutter": { backgroundColor: "rgb(255 255 255 / 3.5%)" },
-	".cm-selectionBackground, &.cm-focused .cm-selectionBackground": { backgroundColor: "#38536b !important" },
-	".cm-panels": { backgroundColor: "#292929", color: "var(--text)" },
-	".cm-panels.cm-panels-top": { borderBottom: "1px solid var(--border)" },
-	".cm-textfield": { border: "1px solid var(--border)", backgroundColor: "#202020", color: "var(--text)" },
+	".cm-activeLine, .cm-activeLineGutter": { backgroundColor: "var(--editor-active)" },
+	".cm-selectionBackground, &.cm-focused .cm-selectionBackground": { backgroundColor: "var(--editor-selection) !important" },
+	".cm-panels": { backgroundColor: "var(--editor-panel)", color: "var(--editor-text)" },
+	".cm-panels.cm-panels-top": { borderBottom: "1px solid var(--editor-border)" },
+	".cm-textfield": { border: "1px solid var(--editor-border)", backgroundColor: "var(--editor-field)", color: "var(--editor-text)" },
 	".cm-button": {
-		border: "1px solid var(--border)",
-		backgroundColor: "#343434",
+		border: "1px solid var(--editor-border)",
+		backgroundColor: "var(--editor-button)",
 		backgroundImage: "none",
-		color: "var(--text)",
+		color: "var(--editor-text)",
 	},
 }, { dark: true });
 

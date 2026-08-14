@@ -24,6 +24,12 @@ export interface SupervisorView {
 	readonly failure: string | null;
 }
 
+/** Theme preference shared between the renderer and the main process. */
+export type DesktopThemePreference = "dark" | "light" | "system";
+
+/** Standalone IPC channel for theme preference (kept out of DESKTOP_IPC_CHANNELS). */
+export const DESKTOP_THEME_CHANNEL = "metis:theme";
+
 export type DesktopUpdateState =
 	| { readonly status: "unavailable" | "checking" }
 	| { readonly status: "available" | "ready"; readonly version: string }
@@ -523,6 +529,8 @@ export interface MetisDesktopApi {
 	subscribe(listener: (event: DesktopApiEvent) => void): () => void;
 	getServerState(): Promise<SupervisorView>;
 	retryServer(): Promise<void>;
+	getThemePreference(): Promise<DesktopThemePreference>;
+	setThemePreference(theme: DesktopThemePreference): Promise<void>;
 }
 
 const interactionResponseValidator = compileSchema(InteractionResultSchema);
