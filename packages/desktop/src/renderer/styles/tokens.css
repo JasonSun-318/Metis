@@ -1,5 +1,21 @@
+@font-face {
+	font-family: "Metis Anthropic Serif";
+	src: local("Anthropic Serif"), local("Anthropic Serif Text Light"), local("AnthropicSerifVariable-TextLight");
+	font-style: normal;
+	font-weight: 300 800;
+}
+
+@font-face {
+	font-family: "Metis Anthropic Serif";
+	src: local("Anthropic Serif Text Light Italic"), local("AnthropicSerifVariable-TextLightItalic");
+	font-style: italic;
+	font-weight: 300 800;
+}
+
 :root {
 	color-scheme: dark;
+	--chat-prose-font: "Metis Anthropic Serif", ui-serif, "Songti SC", STSong, Georgia, serif;
+	--code-prose-font: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", sans-serif;
 	--sidebar-width: 302px;
 	--header-height: 46px;
 	--conversation-width: 770px;

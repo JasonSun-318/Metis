@@ -17,6 +17,7 @@ interface NewTaskHomeProps {
 	readonly mode: AgentMode;
 	readonly modelControl?: ReactNode;
 	readonly permissionControl?: ReactNode;
+	readonly reducedMotion: boolean;
 	readonly onChooseFolder: () => Promise<void>;
 	readonly onManageMcp: () => void;
 	readonly onManageSkills: () => void;
@@ -41,6 +42,7 @@ export function NewTaskHome({
 	mode,
 	modelControl,
 	permissionControl,
+	reducedMotion,
 	onChooseFolder,
 	onManageMcp,
 	onManageSkills,
@@ -53,7 +55,7 @@ export function NewTaskHome({
 	const { t } = useTranslation();
 	return (
 		<section className="new-task-home">
-			<SideRays />
+			<SideRays reducedMotion={reducedMotion} />
 			<div className="new-task-home-content">
 				<div className="new-task-home-heading">
 					<h1>{t("What can I take off your plate?")}</h1>

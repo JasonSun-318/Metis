@@ -8,15 +8,6 @@ import { ThinkingSelector } from "../src/renderer/components/ThinkingSelector.ts
 let animationFrames: Map<number, FrameRequestCallback>;
 let animationFrameId: number;
 
-const setReducedMotion = (matches: boolean) => {
-	vi.stubGlobal("matchMedia", vi.fn(() => ({
-		addEventListener: vi.fn(),
-		matches,
-		media: "(prefers-reduced-motion: reduce)",
-		removeEventListener: vi.fn(),
-	})));
-};
-
 const flushAnimationFrames = async () => {
 	let time = performance.now();
 	for (let step = 0; step < 240 && animationFrames.size > 0; step += 1) {
@@ -36,7 +27,6 @@ beforeEach(() => {
 		return animationFrameId;
 	}));
 	vi.stubGlobal("cancelAnimationFrame", vi.fn((id: number) => animationFrames.delete(id)));
-	setReducedMotion(false);
 	vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(null);
 });
 afterEach(() => {
@@ -56,6 +46,7 @@ describe("ThinkingSelector", () => {
 			available: ["off", "high"] as const,
 			disabled: false,
 			onChange: vi.fn(),
+			reducedMotion: false,
 			value: "high" as const,
 		};
 		await act(async () => root.render(<ThinkingSelector {...props} commandRequest={{ id: 0, open: false }} />));
@@ -79,6 +70,7 @@ describe("ThinkingSelector", () => {
 					available={["off", "high", "max", "ultra"]}
 					disabled={false}
 					onChange={onChange}
+					reducedMotion={false}
 					value="ultra"
 				/>,
 			);
@@ -110,6 +102,7 @@ describe("ThinkingSelector", () => {
 					available={["off", "high", "max", "ultra"]}
 					disabled={false}
 					onChange={onChange}
+					reducedMotion={false}
 					value="high"
 				/>,
 			);
@@ -132,6 +125,7 @@ describe("ThinkingSelector", () => {
 					available={["off", "high", "max", "ultra"]}
 					disabled={false}
 					onChange={() => undefined}
+					reducedMotion={false}
 					value="ultra"
 				/>,
 			);
@@ -141,9 +135,38 @@ describe("ThinkingSelector", () => {
 		await act(async () => root.unmount());
 	});
 
+	it("renders one static ultra frame without scheduling animation when motion is reduced", async () => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
+			beginPath: vi.fn(),
+			clearRect: vi.fn(),
+			clip: vi.fn(),
+			fillRect: vi.fn(),
+			restore: vi.fn(),
+			roundRect: vi.fn(),
+			save: vi.fn(),
+			setTransform: vi.fn(),
+		} as unknown as CanvasRenderingContext2D);
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(
+			<ThinkingSelector
+				actualThinkingLevel="max"
+				available={["off", "high", "max", "ultra"]}
+				disabled={false}
+				onChange={() => undefined}
+				reducedMotion
+				value="ultra"
+			/>,
+		));
+		await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Select effort, current Ultra"]')!.click());
+		expect(requestAnimationFrame).not.toHaveBeenCalled();
+		await act(async () => root.unmount());
+	});
+
 	it("commits a real supported stop immediately when reduced motion is enabled", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-		setReducedMotion(true);
 		const container = document.createElement("div");
 		document.body.append(container);
 		const root = createRoot(container);
@@ -155,6 +178,7 @@ describe("ThinkingSelector", () => {
 					available={["off", "low", "ultra"]}
 					disabled={false}
 					onChange={onChange}
+					reducedMotion
 					value="off"
 				/>,
 			);
@@ -191,6 +215,7 @@ describe("ThinkingSelector", () => {
 					available={testCase.available}
 					disabled={false}
 					onChange={onChange}
+					reducedMotion={false}
 					value={testCase.current}
 				/>,
 			));

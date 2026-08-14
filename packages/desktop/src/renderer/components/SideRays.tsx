@@ -66,7 +66,7 @@ void main() {
 	gl_FragColor = color;
 }`;
 
-export function SideRays() {
+export function SideRays({ reducedMotion }: { readonly reducedMotion: boolean }) {
 	const containerRef = useRef<HTMLDivElement>(null);
 
 	useEffect(() => {
@@ -105,7 +105,7 @@ export function SideRays() {
 			renderer.render({ scene });
 			animationFrame = requestAnimationFrame(render);
 		};
-		if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+		if (reducedMotion) {
 			renderer.render({ scene });
 		} else {
 			animationFrame = requestAnimationFrame(render);
@@ -117,7 +117,7 @@ export function SideRays() {
 			gl.getExtension("WEBGL_lose_context")?.loseContext();
 			gl.canvas.remove();
 		};
-	}, []);
+	}, [reducedMotion]);
 
 	return <div aria-hidden="true" className="new-task-side-rays" ref={containerRef} />;
 }

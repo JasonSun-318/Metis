@@ -9,6 +9,7 @@ interface ThinkingSelectorProps {
 	readonly commandRequest?: { readonly id: number; readonly open: boolean };
 	readonly disabled: boolean;
 	readonly onChange: (selection: SessionSnapshot["thinkingSelection"]) => void;
+	readonly reducedMotion: boolean;
 	readonly value: SessionSnapshot["thinkingSelection"];
 }
 
@@ -20,16 +21,13 @@ const smoothstep = (minimum: number, maximum: number, value: number) => {
 };
 const hash = (x: number, y: number, seed = 0) => Math.abs(Math.sin(x * 12.9898 + y * 78.233 + seed) * 43758.5453) % 1;
 
-const prefersReducedMotion = () => window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
-
-function UltraEffortField() {
+function UltraEffortField({ reducedMotion }: { readonly reducedMotion: boolean }) {
 	const canvasRef = useRef<HTMLCanvasElement>(null);
 
 	useEffect(() => {
 		const canvas = canvasRef.current;
 		const context = canvas?.getContext("2d");
 		if (!canvas || !context) return;
-		const reducedMotion = prefersReducedMotion();
 		let frame = 0;
 		let lastDrawnAt = 0;
 		const startedAt = performance.now();
@@ -107,12 +105,12 @@ function UltraEffortField() {
 		if (reducedMotion) draw(startedAt + 4000);
 		else frame = requestAnimationFrame(animate);
 		return () => cancelAnimationFrame(frame);
-	}, []);
+	}, [reducedMotion]);
 
 	return <canvas aria-hidden="true" className="effort-ultra-field" ref={canvasRef} />;
 }
 
-export function ThinkingSelector({ actualThinkingLevel, available, commandRequest, disabled, onChange, value }: ThinkingSelectorProps) {
+export function ThinkingSelector({ actualThinkingLevel, available, commandRequest, disabled, onChange, reducedMotion, value }: ThinkingSelectorProps) {
 	const { t } = useTranslation();
 	const currentIndex = Math.max(0, available.indexOf(value));
 	const [open, setOpen] = useState(false);
@@ -208,7 +206,7 @@ export function ThinkingSelector({ actualThinkingLevel, available, commandReques
 			const last = samples.at(-1)!;
 			velocity = clamp((last.value - first.value) / Math.max((last.time - first.time) / 1000, .016), -8, 8);
 		}
-		if (Math.abs(target - previewRef.current) < .001 || prefersReducedMotion()) {
+		if (Math.abs(target - previewRef.current) < .001 || reducedMotion) {
 			updatePreview(target);
 			commit(target);
 			return;
@@ -269,8 +267,8 @@ export function ThinkingSelector({ actualThinkingLevel, available, commandReques
 					<div className="effort-axis"><span>{t("Faster")}</span><span>{t("Smarter")}</span></div>
 					<div className={`effort-slider-shell${ultraActive ? " is-ultra" : ""}`}>
 						<span aria-hidden="true" className="effort-slider-fill" style={{ width: `calc(8px + (100% - 16px) * ${fill / 100})` }} />
-						{ultraActive && <UltraEffortField />}
-					<div aria-hidden="true" className="effort-ticks">
+						{ultraActive && <UltraEffortField reducedMotion={reducedMotion} />}
+						<div aria-hidden="true" className="effort-ticks">
 							{available.map((selection) => <span className={selection === "ultra" ? "is-ultra" : undefined} key={selection} />)}
 						</div>
 						<input

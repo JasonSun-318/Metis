@@ -51,4 +51,23 @@ describe("general preferences", () => {
 		expect(document.documentElement.style.getPropertyValue("--chat-prose-font")).toContain("Metis Anthropic Serif");
 		expect(document.documentElement.style.getPropertyValue("--code-prose-font")).toContain("-apple-system");
 	});
+
+	it("maps every stored font choice through a closed stack", () => {
+		for (const [font, expected] of [
+			["anthropic-serif", "Metis Anthropic Serif"],
+			["system-serif", "Songti SC"],
+			["system-sans", "-apple-system"],
+		] as const) {
+			applyGeneralPreferencesToDocument({ motion: "system", chatFont: font, codeFont: font }, { matches: false });
+			expect(document.documentElement.style.getPropertyValue("--chat-prose-font")).toContain(expected);
+			expect(document.documentElement.style.getPropertyValue("--code-prose-font")).toContain(expected);
+		}
+		localStorage.setItem(
+			GENERAL_PREFERENCES_STORAGE_KEY,
+			JSON.stringify({ chatFont: "url(https://invalid.example/font.woff2)", codeFont: "raw-font" }),
+		);
+		applyGeneralPreferencesToDocument(loadGeneralPreferences(localStorage), { matches: false });
+		expect(document.documentElement.getAttribute("style")).not.toContain("invalid.example");
+		expect(document.documentElement.getAttribute("style")).not.toContain("raw-font");
+	});
 });

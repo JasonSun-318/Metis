@@ -23,6 +23,7 @@ import type { DesktopUpdateState, MetisDesktopApi } from "../../shared/desktop-a
 import {
 	applyGeneralPreferencesToDocument,
 	loadGeneralPreferences,
+	resolveReducedMotion,
 	saveGeneralPreferences,
 } from "../general-preferences.ts";
 import { useAppStore } from "../hooks/use-app-store.ts";
@@ -219,6 +220,12 @@ export function App({ api, store }: AppProps) {
 	const [bootstrapped, setBootstrapped] = useState(false);
 	const [theme, setTheme] = useState<AppTheme>(() => loadTheme(localStorage));
 	const [generalPreferences, setGeneralPreferences] = useState(() => loadGeneralPreferences(localStorage));
+	const [reducedMotion, setReducedMotion] = useState(() =>
+		resolveReducedMotion(
+			generalPreferences.motion,
+			globalThis.matchMedia?.("(prefers-reduced-motion: reduce)") ?? { matches: false },
+		),
+	);
 	const [resolvedTheme, setResolvedTheme] = useState<"dark" | "light">(() =>
 		resolveTheme(loadTheme(localStorage), globalThis.matchMedia?.("(prefers-color-scheme: light)") ?? { matches: false }),
 	);
@@ -279,7 +286,11 @@ export function App({ api, store }: AppProps) {
 	}, []);
 	useEffect(() => {
 		const media = globalThis.matchMedia?.("(prefers-reduced-motion: reduce)");
-		const apply = () => applyGeneralPreferencesToDocument(generalPreferences, media ?? { matches: false });
+		const apply = () => {
+			const resolvedMedia = media ?? { matches: false };
+			applyGeneralPreferencesToDocument(generalPreferences, resolvedMedia);
+			setReducedMotion(resolveReducedMotion(generalPreferences.motion, resolvedMedia));
+		};
 		apply();
 		saveGeneralPreferences(localStorage, generalPreferences);
 		if (generalPreferences.motion !== "system" || !media) return undefined;
@@ -1435,6 +1446,7 @@ export function App({ api, store }: AppProps) {
 			commandRequest={{ id: composerControl.id, open: composerControl.target === "thinking" }}
 			disabled={!serverReady}
 			onChange={(selection) => void changeThinking(configurationSession.sessionId, selection)}
+			reducedMotion={reducedMotion}
 			value={state.thinkingSelection}
 		/>
 	) : newTaskOpen ? (
@@ -1444,6 +1456,7 @@ export function App({ api, store }: AppProps) {
 			commandRequest={{ id: composerControl.id, open: composerControl.target === "thinking" }}
 			disabled={!serverReady}
 			onChange={changeGlobalThinking}
+			reducedMotion={reducedMotion}
 			value={globalThinkingSelection}
 		/>
 	) : undefined;
@@ -1626,6 +1639,7 @@ export function App({ api, store }: AppProps) {
 						onManageMcp={openMcpManagement}
 						onManageSkills={() => { setPluginSection("skills"); setDestination("skills"); }}
 						onPickFiles={pickAttachmentFiles}
+						reducedMotion={reducedMotion}
 						onSlashCommand={handleSlashCommand}
 						onSubmit={submitNewTaskDraft}
 						skills={skills}

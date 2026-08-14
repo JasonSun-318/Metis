@@ -19,6 +19,13 @@ function rule(selector: string): CSSStyleDeclaration {
 }
 
 describe("Project sidebar motion", () => {
+	it("routes Chat and Code prose fonts and reduced motion through root preferences", () => {
+		expect(css).toContain("font-family: var(--chat-prose-font)");
+		expect(css).toContain("font-family: var(--code-prose-font)");
+		expect(css).toContain(':root[data-motion="reduced"]');
+		expect(css).not.toContain(".turn-answer { color: var(--text-27); font-family: ui-serif");
+	});
+
 	it("uses a flat neutral-gray active state and a subtle gray hover shadow", () => {
 		const hover = rule(
 			".session-row:hover > .session-button:not(:disabled), .session-row:focus-within > .session-button:not(:disabled)",
@@ -87,7 +94,7 @@ describe("Project sidebar motion", () => {
 			expect(dot.animation).toBe("session-running-pulse 1.4s ease-in-out infinite");
 		}
 		expect(css).toContain(
-			".session-button-title i.running, .session-button-title i.completed, .session-button-title i.failed, .session-button-title i.attention { animation: none; opacity: 1; transform: none; }",
+			':root[data-motion="reduced"] .session-button-title i.running, :root[data-motion="reduced"] .session-button-title i.completed, :root[data-motion="reduced"] .session-button-title i.failed, :root[data-motion="reduced"] .session-button-title i.attention { animation: none; opacity: 1; transform: none; }',
 		);
 		expect(scheduledHeading.margin).toBe(taskHeading.margin);
 		expect(scheduledHeading.color).toBe(taskHeading.color);
