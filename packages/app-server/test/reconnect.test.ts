@@ -107,6 +107,10 @@ class PausableRuntime implements OpenedSessionRuntime {
 		return session;
 	}
 
+	async fork(): Promise<string> {
+		return `fork-${this.sessionId}`;
+	}
+
 	async listSkills(): Promise<ClientResult<"skill/list">> {
 		return { skills: [] };
 	}

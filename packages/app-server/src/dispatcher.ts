@@ -601,6 +601,26 @@ export class Dispatcher {
 						};
 					});
 				});
+			case "session/fork":
+				return await this.replayMutation(request, async () => {
+					this.assertMutableSession(request.params.sessionId);
+					const ref = this.catalog.get(request.params.sessionId);
+					if (ref.summary.state === "corrupt") {
+						throw new AppServerError("SESSION_CORRUPT", {
+							sessionId: request.params.sessionId,
+						});
+					}
+					const originalName = ref.summary.name ?? `Metis session ${ref.summary.sessionId.slice(0, 8)}`;
+					const forkedSessionId = await this.registry.run(ref, (runtime) =>
+						runtime.fork({
+							entryId: request.params.entryId,
+							name: `fork ${originalName}`,
+						}),
+					);
+					await this.catalog.refresh();
+					const session = this.catalog.get(forkedSessionId).summary;
+					return { session, entryId: request.params.entryId };
+				});
 			case "session/delete": {
 				let quiesced = false;
 				let result: unknown;

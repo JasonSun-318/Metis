@@ -98,6 +98,10 @@ class FakeRuntime implements OpenedSessionRuntime {
 		return this.getSummary();
 	}
 
+	async fork(): Promise<string> {
+		return `fork-${this.sessionId}`;
+	}
+
 	async listSkills(): Promise<ClientResult<"skill/list">> {
 		return { skills: [{ name: "pdf", description: "Read and create PDF documents" }] };
 	}

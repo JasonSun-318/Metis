@@ -722,6 +722,22 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 		return this.getSummary();
 	}
 
+	async fork(input: { entryId: string; name: string }): Promise<string> {
+		// Create an independent branch file rooted at the reply (inclusive).
+		// The current runtime stays on the original session; the caller opens
+		// the forked session as its own runtime. We deliberately do not call
+		// runtime.fork() — it swaps the active session in place, which would
+		// desync this host's ref/sessionId from its bound session.
+		const manager = this.session.sessionManager.createBranchedSessionManager(input.entryId);
+		try {
+			const next = optionalName(input.name);
+			if (next) manager.appendSessionInfo(next);
+			return manager.getSessionId();
+		} finally {
+			manager.close();
+		}
+	}
+
 	async listSkills(): Promise<ClientResult<"skill/list">> {
 		try {
 			return publicSkills((await this.session.refreshSkills()).skills);
@@ -1405,6 +1421,10 @@ class ReadonlyScheduledSessionRuntime implements OpenedSessionRuntime {
 	}
 
 	async renameSession(): Promise<SessionSummary> {
+		throw new AppServerError("READ_ONLY_SESSION", { sessionId: this.sessionId });
+	}
+
+	async fork(): Promise<string> {
 		throw new AppServerError("READ_ONLY_SESSION", { sessionId: this.sessionId });
 	}
 
