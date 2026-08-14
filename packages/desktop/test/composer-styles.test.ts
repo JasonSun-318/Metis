@@ -33,7 +33,7 @@ describe("Composer visual states", () => {
 	it("uses one compact square stop control for the running state", () => {
 		const stop = rule(".composer-stop.button-secondary");
 		expect(stop.borderRadius).toBe("9px");
-		expect(stop.background).toBe("rgb(85, 85, 85)");
+		expect(stop.background).toBe("var(--surface-13)");
 	});
 
 	it("uses the reference add button and compact menu scale", () => {
@@ -73,7 +73,7 @@ describe("Composer visual states", () => {
 	});
 
 	it("keeps the New Task folder row translucent and separate from the composer", () => {
-		expect(css).toContain("background: rgb(32 32 32 / 58%)");
+		expect(css).toContain("background: var(--app-bg-58)");
 		expect(rule(".new-task-home .composer").background).toBe("var(--panel)");
 	});
 
@@ -131,7 +131,7 @@ describe("Composer visual states", () => {
 
 	it("uses the shared neutral hover surface for ask-user choices", () => {
 		const hover = rule(".ask-user-option:hover:not(:disabled), .ask-user-option:focus");
-		expect(hover.background).toBe("rgb(72, 72, 72)");
+		expect(hover.background).toBe("var(--surface-11)");
 		expect(hover.boxShadow).toBe("var(--shadow)");
 	});
 });

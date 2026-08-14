@@ -483,6 +483,8 @@ function createHarness(options: {
 		setModel: vi.fn().mockResolvedValue({}),
 		respondToInteraction: vi.fn().mockResolvedValue(undefined),
 		retryServer: vi.fn().mockResolvedValue(undefined),
+		getThemePreference: vi.fn().mockResolvedValue("dark"),
+		setThemePreference: vi.fn().mockResolvedValue(undefined),
 		subscribe: vi.fn((listener) => {
 			subscriber = listener;
 			return () => {
@@ -697,6 +699,8 @@ describe("Chat desktop shell", () => {
 		await act(async () => button(container, "Metis User").click());
 		expect(document.activeElement?.textContent).toBe("Settings");
 		await act(async () => button(container, "Settings").click());
+		await flush();
+		await act(async () => button(container, "Profile").click());
 		await flush();
 		expect(api.getProfile).toHaveBeenCalledTimes(1);
 		expect(container.textContent).toContain("Personal profile");

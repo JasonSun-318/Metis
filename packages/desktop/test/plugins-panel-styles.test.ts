@@ -43,7 +43,7 @@ describe("Plugin Center visual contract", () => {
 		expect(rule(".plugins-detail-document pre").overflowX).toBe("auto");
 		expect(css).toContain(".mcp-dialog { position: relative; width: min(760px, calc(100vw - 48px));");
 		expect(rule(".mcp-dialog").borderRadius).toBe("16px");
-		expect(rule(".mcp-dialog").background).toBe("rgb(41, 41, 41)");
+		expect(rule(".mcp-dialog").background).toBe("var(--surface-04)");
 		expect(rule(".mcp-dialog h2").fontSize).toBe("19px");
 		expect(rule(".mcp-dialog label").fontSize).toBe("12px");
 		expect(rule('.mcp-dialog input:not([type="checkbox"]), .mcp-dialog select, .mcp-dialog textarea').fontSize).toBe(

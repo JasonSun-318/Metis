@@ -23,7 +23,7 @@ describe("Project sidebar motion", () => {
 		const hover = rule(
 			".session-row:hover > .session-button:not(:disabled), .session-row:focus-within > .session-button:not(:disabled)",
 		);
-		expect(hover.background).toBe("rgb(64, 64, 64)");
+		expect(hover.background).toBe("var(--surface-09)");
 		expect(hover.boxShadow).toBe("var(--shadow)");
 		const active = rule('.session-button[aria-current="page"]');
 		expect(active.background).toBe("var(--panel-selected)");
@@ -36,7 +36,7 @@ describe("Project sidebar motion", () => {
 		const action = rule(
 			'.session-actions > button:hover:not(:disabled), .session-actions > button[aria-expanded="true"]',
 		);
-		expect(action.background).toBe("rgb(104, 104, 104)");
+		expect(action.background).toBe("var(--surface-18)");
 		expect(action.boxShadow).toBe("var(--shadow)");
 		expect(rule(".mode-switch-indicator").boxShadow).toBe("var(--shadow)");
 		expect(tokens).toContain("--shadow: 0 1px 4px rgb(150 150 150 / 9%);");
@@ -59,14 +59,14 @@ describe("Project sidebar motion", () => {
 		expect(rule(".session-grouping-trigger").width).toBe("24px");
 		expect(rule(".session-grouping-trigger").height).toBe("24px");
 		expect(rule(".session-grouping-menu-primary, .session-grouping-menu-secondary").background).toBe(
-			"rgb(56, 56, 53)",
+			"var(--surface-07)",
 		);
 		expect(rule(".session-grouping-menu-primary, .session-grouping-menu-secondary").boxShadow).toBe(
 			"var(--overlay-shadow)",
 		);
 		expect(rule(".session-grouping-menu-primary > button").height).toBe("25px");
 		expect(rule(".session-grouping-menu-secondary > div > button").minHeight).toBe("24px");
-		expect(rule(".session-grouping-menu-last").borderTopColor).toBe("rgb(77, 77, 73)");
+		expect(rule(".session-grouping-menu-last").borderTop).toContain("var(--surface-12)");
 		const taskHeading = rule(".loose-tasks h2");
 		const scheduledHeading = rule(".scheduled-task-quick-list h2");
 		expect(rule(".scheduled-task-quick-list").marginTop).toBe("20px");
@@ -74,12 +74,12 @@ describe("Project sidebar motion", () => {
 		expect(rule(".session-button-title i").width).toBe("6px");
 		expect(rule(".session-button-title i").height).toBe("6px");
 		const runningDot = rule(".session-button-title i.running");
-		expect(runningDot.background).toBe("rgb(154, 153, 148)");
+		expect(runningDot.background).toBe("var(--run-running)");
 		expect(runningDot.animation).toBe("session-running-pulse 1.4s ease-in-out infinite");
 		for (const [state, background] of [
-			["completed", "rgb(91, 166, 112)"],
-			["failed", "rgb(207, 101, 94)"],
-			["attention", "rgb(209, 164, 88)"],
+			["completed", "var(--success-dot)"],
+			["failed", "var(--run-failed)"],
+			["attention", "var(--attention)"],
 		] as const) {
 			const dot = rule(`.session-button-title i.${state}`);
 			expect(dot.background).toBe(background);
@@ -114,7 +114,7 @@ describe("Project sidebar motion", () => {
 		expect(button.width).toBe("100%");
 		expect(button.height).toBe("34px");
 		expect(button.borderRadius).toBe("7px");
-		expect(button.background).toBe("rgb(51, 51, 51)");
+		expect(button.background).toBe("var(--surface-06)");
 		expect(button.border).toContain("var(--border-strong)");
 	});
 
@@ -124,15 +124,15 @@ describe("Project sidebar motion", () => {
 		expect(rule(".account-menu-name").textOverflow).toBe("ellipsis");
 		for (const selector of [".account-menu-popover", ".account-language-popover"]) {
 			const accountMenu = rule(selector);
-			expect(accountMenu.background).toBe("rgb(45, 45, 45)");
-			expect(accountMenu.borderColor).toBe("rgba(255, 255, 255, 0.14)");
+			expect(accountMenu.background).toBe("var(--surface-05)");
+			expect(accountMenu.border).toContain("var(--border-strong)");
 			expect(accountMenu.borderRadius).toBe("12px");
 			expect(accountMenu.boxShadow).toBe("var(--overlay-shadow)");
 		}
 		const hover = rule(
 			".account-menu-item:hover, .account-menu-item:focus-visible, .account-language-option:hover, .account-language-option:focus-visible",
 		);
-		expect(hover.background).toBe("rgb(56, 56, 56)");
+		expect(hover.background).toBe("var(--surface-07)");
 		expect(hover.boxShadow).toBe("");
 		expect(hover.outline).toBe("0px");
 	});
@@ -157,13 +157,13 @@ describe("Project sidebar motion", () => {
 		const projectAction = rule(
 			'.project-action-buttons > button:hover:not(:disabled), .project-action-buttons > button[aria-expanded="true"]',
 		);
-		expect(projectAction.background).toBe("rgb(104, 104, 104)");
+		expect(projectAction.background).toBe("var(--surface-18)");
 		expect(projectAction.boxShadow).toBe("var(--shadow)");
 		expect(
 			rule(
 				".project-heading:hover:not(:disabled), .project-heading:has(+ .project-actions:hover):not(:disabled), .project-heading:has(+ .project-actions:focus-within):not(:disabled)",
 			).background,
-		).toBe("rgb(64, 64, 64)");
+		).toBe("var(--surface-09)");
 		expect(rule(".project-group:hover > .project-actions, .project-actions:focus-within").pointerEvents).toBe("auto");
 		expect(
 			rule(

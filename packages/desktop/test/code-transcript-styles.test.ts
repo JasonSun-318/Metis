@@ -33,8 +33,8 @@ describe("Code transcript visual contract", () => {
 	it("uses neutral shared surfaces and separated Code Markdown table cells", () => {
 		expect(tokens).toContain("--app-bg: #202020");
 		expect(tokens).toContain("--panel: #2e2e2e");
-		expect(rule(".message-user").background).toBe("rgb(23, 23, 23)");
-		expect(rule(".transcript-code .code-turn-user > div").background).toBe("rgb(54, 54, 54)");
+		expect(rule(".message-user").background).toBe("var(--surface-00)");
+		expect(rule(".transcript-code .code-turn-user > div").background).toBe("var(--surface-06)");
 		expect(rule(".transcript-code :is(.code-turn-answer, .code-turn-status) table").borderCollapse).toBe("separate");
 		expect(rule(".transcript-code :is(.code-turn-answer, .code-turn-status) table").borderSpacing).toBe("2px");
 		expect(rule(".transcript-code :is(.code-turn-answer, .code-turn-status) :is(th, td)").borderWidth).toBe("0px");

@@ -73,13 +73,17 @@ describe("SettingsDialog", () => {
 			testModelConnection: vi.fn(),
 		} as unknown as MetisDesktopApi;
 		const onClose = vi.fn();
+		const onThemeChange = vi.fn();
 		const container = document.createElement("div");
 		document.body.append(container);
 		const root = createRoot(container);
-		await act(async () => root.render(<SettingsDialog api={api} onClose={onClose} serverReady />));
+		await act(async () => root.render(<SettingsDialog api={api} onClose={onClose} onThemeChange={onThemeChange} serverReady theme="dark" />));
+		await flush();
+		expect(api.getProfile).not.toHaveBeenCalled();
+		expect(api.getUsage).not.toHaveBeenCalled();
+		await act(async () => button(container, "Profile").click());
 		await flush();
 		expect(api.getProfile).toHaveBeenCalledTimes(1);
-		expect(api.getUsage).not.toHaveBeenCalled();
 		const pageScroll = container.querySelector<HTMLElement>(".settings-page-scroll")!;
 		pageScroll.scrollTop = 120;
 		await act(async () => button(container, "Usage").click());
@@ -99,6 +103,26 @@ describe("SettingsDialog", () => {
 		expect(container.querySelector(".model-provider-dialog")).toBeNull();
 		await act(async () => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" })));
 		expect(onClose).toHaveBeenCalledTimes(1);
+		await act(async () => root.unmount());
+	});
+
+	it("switches the theme from the General page", async () => {
+		const api = {} as unknown as MetisDesktopApi;
+		const onClose = vi.fn();
+		const onThemeChange = vi.fn();
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<SettingsDialog api={api} onClose={onClose} onThemeChange={onThemeChange} serverReady theme="dark" />));
+		await flush();
+		expect(container.querySelector(".general-page")).not.toBeNull();
+		expect(container.querySelectorAll(".theme-segmented button")).toHaveLength(3);
+		const dark = button(container, "Dark");
+		expect(dark.getAttribute("aria-pressed")).toBe("true");
+		await act(async () => button(container, "Light").click());
+		expect(onThemeChange).toHaveBeenCalledWith("light");
+		await act(async () => button(container, "Follow system").click());
+		expect(onThemeChange).toHaveBeenCalledWith("system");
 		await act(async () => root.unmount());
 	});
 });
