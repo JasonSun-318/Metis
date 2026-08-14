@@ -20,6 +20,11 @@ import { SidebarSimple } from "@phosphor-icons/react";
 import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { DesktopUpdateState, MetisDesktopApi } from "../../shared/desktop-api.ts";
+import {
+	applyGeneralPreferencesToDocument,
+	loadGeneralPreferences,
+	saveGeneralPreferences,
+} from "../general-preferences.ts";
 import { useAppStore } from "../hooks/use-app-store.ts";
 import { useScheduleStore } from "../hooks/use-schedule-store.ts";
 import type { AppStore, AppStoreSnapshot } from "../store/app-store.ts";
@@ -213,6 +218,7 @@ export function App({ api, store }: AppProps) {
 	const [toolsSidebarWidth, setToolsSidebarWidth] = useState(393);
 	const [bootstrapped, setBootstrapped] = useState(false);
 	const [theme, setTheme] = useState<AppTheme>(() => loadTheme(localStorage));
+	const [generalPreferences, setGeneralPreferences] = useState(() => loadGeneralPreferences(localStorage));
 	const [resolvedTheme, setResolvedTheme] = useState<"dark" | "light">(() =>
 		resolveTheme(loadTheme(localStorage), globalThis.matchMedia?.("(prefers-color-scheme: light)") ?? { matches: false }),
 	);
@@ -271,6 +277,15 @@ export function App({ api, store }: AppProps) {
 			// The preference remains renderer-local when storage is unavailable.
 		}
 	}, []);
+	useEffect(() => {
+		const media = globalThis.matchMedia?.("(prefers-reduced-motion: reduce)");
+		const apply = () => applyGeneralPreferencesToDocument(generalPreferences, media ?? { matches: false });
+		apply();
+		saveGeneralPreferences(localStorage, generalPreferences);
+		if (generalPreferences.motion !== "system" || !media) return undefined;
+		media.addEventListener("change", apply);
+		return () => media.removeEventListener("change", apply);
+	}, [generalPreferences]);
 	useEffect(() => {
 		const apply = () => {
 			applyThemeToDocument(theme);
@@ -1661,7 +1676,9 @@ export function App({ api, store }: AppProps) {
 		{settingsOpen ? (
 			<SettingsDialog
 				api={api}
+				generalPreferences={generalPreferences}
 				onClose={closeSettings}
+				onGeneralPreferencesChange={setGeneralPreferences}
 				onThemeChange={setTheme}
 				serverReady={serverReady}
 				theme={theme}

@@ -4047,8 +4047,9 @@ describe("Chat desktop shell", () => {
 		await flush();
 
 		await act(async () => button(container, "Metis User").click());
-		await act(async () => button(container, "Language").click());
+		await act(async () => button(container, "Settings").click());
 		await act(async () => button(container, "中文").click());
+		await act(async () => button(container, "返回应用").click());
 
 		expect(document.documentElement.lang).toBe("zh-CN");
 		expect(container.textContent).toContain("新建任务");

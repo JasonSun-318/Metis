@@ -7,8 +7,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ModelSettingsPanel } from "../src/renderer/components/ModelSettingsPanel.tsx";
 import { SettingsDialog } from "../src/renderer/components/SettingsDialog.tsx";
 import { UsagePanel } from "../src/renderer/components/UsagePanel.tsx";
-import { setLocale } from "../src/renderer/i18n.ts";
+import type { GeneralPreferences } from "../src/renderer/general-preferences.ts";
+import { APP_LOCALE_STORAGE_KEY, setLocale } from "../src/renderer/i18n.ts";
 import type { MetisDesktopApi } from "../src/shared/desktop-api.ts";
+
+const generalPreferences: GeneralPreferences = {
+	motion: "system",
+	chatFont: "anthropic-serif",
+	codeFont: "system-sans",
+};
 
 const modelSettings: ModelSettingsView = {
 	defaultModel: { provider: "openai", modelId: "gpt-5" },
@@ -73,11 +80,22 @@ describe("SettingsDialog", () => {
 			testModelConnection: vi.fn(),
 		} as unknown as MetisDesktopApi;
 		const onClose = vi.fn();
+		const onGeneralPreferencesChange = vi.fn();
 		const onThemeChange = vi.fn();
 		const container = document.createElement("div");
 		document.body.append(container);
 		const root = createRoot(container);
-		await act(async () => root.render(<SettingsDialog api={api} onClose={onClose} onThemeChange={onThemeChange} serverReady theme="dark" />));
+		await act(async () => root.render(
+			<SettingsDialog
+				api={api}
+				generalPreferences={generalPreferences}
+				onClose={onClose}
+				onGeneralPreferencesChange={onGeneralPreferencesChange}
+				onThemeChange={onThemeChange}
+				serverReady
+				theme="dark"
+			/>,
+		));
 		await flush();
 		expect(api.getProfile).not.toHaveBeenCalled();
 		expect(api.getUsage).not.toHaveBeenCalled();
@@ -106,23 +124,42 @@ describe("SettingsDialog", () => {
 		await act(async () => root.unmount());
 	});
 
-	it("switches the theme from the General page", async () => {
+	it("changes language, appearance, motion, and independent prose fonts from General", async () => {
 		const api = {} as unknown as MetisDesktopApi;
 		const onClose = vi.fn();
+		const onGeneralPreferencesChange = vi.fn();
 		const onThemeChange = vi.fn();
 		const container = document.createElement("div");
 		document.body.append(container);
 		const root = createRoot(container);
-		await act(async () => root.render(<SettingsDialog api={api} onClose={onClose} onThemeChange={onThemeChange} serverReady theme="dark" />));
+		await act(async () => root.render(
+			<SettingsDialog
+				api={api}
+				generalPreferences={generalPreferences}
+				onClose={onClose}
+				onGeneralPreferencesChange={onGeneralPreferencesChange}
+				onThemeChange={onThemeChange}
+				serverReady
+				theme="dark"
+			/>,
+		));
 		await flush();
 		expect(container.querySelector(".general-page")).not.toBeNull();
-		expect(container.querySelectorAll(".theme-segmented button")).toHaveLength(3);
-		const dark = button(container, "Dark");
+		expect(button(container, "English").getAttribute("aria-pressed")).toBe("true");
+		await act(async () => button(container, "中文").click());
+		expect(localStorage.getItem(APP_LOCALE_STORAGE_KEY)).toBe("zh-CN");
+		const dark = button(container, "深色");
 		expect(dark.getAttribute("aria-pressed")).toBe("true");
-		await act(async () => button(container, "Light").click());
+		await act(async () => button(container, "浅色").click());
 		expect(onThemeChange).toHaveBeenCalledWith("light");
-		await act(async () => button(container, "Follow system").click());
-		expect(onThemeChange).toHaveBeenCalledWith("system");
+		await act(async () => button(container, "减少动效").click());
+		expect(onGeneralPreferencesChange).toHaveBeenCalledWith({ ...generalPreferences, motion: "reduced" });
+		await act(async () => button(container, "Chat 字体").click());
+		await act(async () => container.querySelector<HTMLButtonElement>('[role="option"]:last-of-type')!.click());
+		expect(onGeneralPreferencesChange).toHaveBeenCalledWith({ ...generalPreferences, chatFont: "system-sans" });
+		await act(async () => button(container, "Code 字体").click());
+		await act(async () => container.querySelectorAll<HTMLButtonElement>('[role="option"]')[1]!.click());
+		expect(onGeneralPreferencesChange).toHaveBeenCalledWith({ ...generalPreferences, codeFont: "system-serif" });
 		await act(async () => root.unmount());
 	});
 });

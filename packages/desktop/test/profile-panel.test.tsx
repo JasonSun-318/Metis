@@ -10,7 +10,7 @@ import {
 	formatDuration,
 	ProfilePanel,
 } from "../src/renderer/components/ProfilePanel.tsx";
-import { APP_LOCALE_STORAGE_KEY, setLocale } from "../src/renderer/i18n.ts";
+import { setLocale } from "../src/renderer/i18n.ts";
 import {
 	DEFAULT_PROFILE_IDENTITY,
 	PROFILE_IDENTITY_STORAGE_KEY,
@@ -194,6 +194,8 @@ describe("AccountMenu", () => {
 		await act(async () => button(container, "Metis User").click());
 		expect(button(container, "Metis User").getAttribute("aria-expanded")).toBe("true");
 		expect(document.activeElement?.textContent).toBe("Settings");
+		expect(container.textContent).not.toContain("Language");
+		expect(container.querySelector('[role="menuitemradio"]')).toBeNull();
 		await act(async () => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" })));
 		expect(button(container, "Metis User").getAttribute("aria-expanded")).toBe("false");
 		await act(async () => button(container, "Metis User").click());
@@ -202,25 +204,4 @@ describe("AccountMenu", () => {
 		await act(async () => root.unmount());
 	});
 
-	it("opens a two-language submenu and persists an immediate Chinese switch", async () => {
-		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-		const container = document.createElement("div");
-		document.body.append(container);
-		const root = createRoot(container);
-		await act(async () => root.render(<AccountMenu onSettings={vi.fn()} />));
-
-		await act(async () => button(container, "Metis User").click());
-		await act(async () => button(container, "Language").click());
-		expect(container.querySelectorAll('[role="menuitemradio"]')).toHaveLength(2);
-		expect(button(container, "English").getAttribute("aria-checked")).toBe("true");
-		await act(async () => button(container, "中文").click());
-		expect(localStorage.getItem(APP_LOCALE_STORAGE_KEY)).toBe("zh-CN");
-		expect(document.documentElement.lang).toBe("zh-CN");
-		expect(button(container, "Metis User").getAttribute("aria-expanded")).toBe("false");
-
-		await act(async () => button(container, "Metis User").click());
-		expect(container.textContent).toContain("设置");
-		expect(container.textContent).toContain("语言");
-		await act(async () => root.unmount());
-	});
 });

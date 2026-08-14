@@ -2,6 +2,7 @@ import { ArrowLeft, ChartBar, Cpu, GearSix, UserCircle } from "@phosphor-icons/r
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
+import type { GeneralPreferences } from "../general-preferences.ts";
 import type { AppTheme } from "../theme.ts";
 import { GeneralPanel } from "./GeneralPanel.tsx";
 import { ModelSettingsPanel } from "./ModelSettingsPanel.tsx";
@@ -10,9 +11,11 @@ import { UsagePanel } from "./UsagePanel.tsx";
 
 type SettingsPage = "general" | "profile" | "model" | "usage";
 
-export function SettingsDialog({ api, onClose, onThemeChange, serverReady, theme }: {
+export function SettingsDialog({ api, generalPreferences, onClose, onGeneralPreferencesChange, onThemeChange, serverReady, theme }: {
 	readonly api: MetisDesktopApi;
+	readonly generalPreferences: GeneralPreferences;
 	readonly onClose: () => void;
+	readonly onGeneralPreferencesChange: (preferences: GeneralPreferences) => void;
 	readonly onThemeChange: (theme: AppTheme) => void;
 	readonly serverReady: boolean;
 	readonly theme: AppTheme;
@@ -89,7 +92,14 @@ export function SettingsDialog({ api, onClose, onThemeChange, serverReady, theme
 						<h1>{t(pages.find((item) => item.id === page)!.label)}</h1>
 					</header>
 					<div className={`settings-page-scroll settings-page-scroll-${page}`} ref={pageScrollRef}>
-						{page === "general" ? <GeneralPanel onThemeChange={onThemeChange} theme={theme} /> : null}
+						{page === "general" ? (
+							<GeneralPanel
+								generalPreferences={generalPreferences}
+								onGeneralPreferencesChange={onGeneralPreferencesChange}
+								onThemeChange={onThemeChange}
+								theme={theme}
+							/>
+						) : null}
 						{page === "profile" ? <ProfilePanel api={api} serverReady={serverReady} /> : null}
 						{page === "model" ? <ModelSettingsPanel api={api} serverReady={serverReady} /> : null}
 						{page === "usage" ? <UsagePanel api={api} serverReady={serverReady} /> : null}
