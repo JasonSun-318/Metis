@@ -1,4 +1,5 @@
 import { PassThrough } from "node:stream";
+import { PROTOCOL_VERSION } from "@metis/app-protocol";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AppServerSupervisor, ServerRestartedError, type UtilityChild } from "../src/main/app-server-supervisor.ts";
 
@@ -52,7 +53,7 @@ class FakeChild implements UtilityChild {
 			jsonrpc: "2.0",
 			id: request.id,
 			result: {
-				protocolVersion: 17,
+				protocolVersion: PROTOCOL_VERSION,
 				server: { name: "metis-app-server", version: "0.80.6" },
 				serverEpoch: epoch,
 				capabilities: [],

@@ -101,8 +101,8 @@ describe("Composer visual states", () => {
 		expect(rule(".task-list-drawer").overflow).toBe("hidden");
 		expect(rule(".task-list-panel.is-collapsed .task-list-drawer").transform).toBe("translateY(5px)");
 		expect(css).toContain(".task-list-spinner { animation: browser-spin 900ms linear infinite; }");
-		expect(css).toContain(".task-list-spinner { animation: none; }");
-		expect(css).toContain(".task-list-slot { animation: none; }");
+		expect(css).toContain(':root[data-motion="reduced"] .task-list-spinner');
+		expect(css).toContain(':root[data-motion="reduced"] .task-list-slot');
 	});
 
 	it("docks a non-collapsible permission approval above the composer", () => {
@@ -117,7 +117,7 @@ describe("Composer visual states", () => {
 		expect(rule(".permission-approval-details > div").gridTemplateColumns).toBe("108px minmax(0, 1fr)");
 		expect(rule(".permission-approval-details dd code").whiteSpace).toBe("pre-wrap");
 		expect(css).not.toContain("permission-approval-toggle");
-		expect(css).toContain(".permission-approval-slot { animation: none; }");
+		expect(css).toContain(':root[data-motion="reduced"] .permission-approval-slot');
 	});
 
 	it("wraps ask-user questions and answer text instead of hiding it", () => {

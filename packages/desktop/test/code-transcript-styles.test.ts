@@ -25,7 +25,9 @@ describe("Code transcript visual contract", () => {
 			".transcript-code .transcript-scroll { padding: 15px max(24px, calc((100% - var(--conversation-width)) / 2)) 16px; }",
 		);
 		expect(rule(".transcript-code .code-transcript-turn").width).toBe("100%");
-		expect(rule(".transcript-code :is(.code-turn-answer, .code-turn-status)").fontFamily).toContain("ui-sans-serif");
+		expect(rule(".transcript-code :is(.code-turn-answer, .code-turn-status)").fontFamily).toBe(
+			"var(--code-prose-font)",
+		);
 		expect(rule(".transcript-code .code-command-output").maxHeight).toBe("310px");
 		expect(rule(".transcript-code .code-execution-card").borderRadius).toBe("8px");
 	});
@@ -52,7 +54,7 @@ describe("Code transcript visual contract", () => {
 			"@keyframes user-message-enter { from { opacity: 0; transform: translateX(12px); } to { opacity: 1; transform: none; } }",
 		);
 		expect(css).toContain(
-			".turn-user.is-entering .message-user, .transcript-code .code-turn-user.is-entering > div { animation: none; }",
+			':root[data-motion="reduced"] .turn-user.is-entering .message-user, :root[data-motion="reduced"] .transcript-code .code-turn-user.is-entering > div',
 		);
 	});
 
