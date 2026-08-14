@@ -31,7 +31,7 @@ async function main(): Promise<void> {
 	}
 }
 
-void main().catch(() => {
-	console.error("Metis utility app server requires a live Electron parent process.");
+void main().catch((error: unknown) => {
+	console.error("Metis utility app server failed to start.", error);
 	process.exitCode = 1;
 });

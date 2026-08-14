@@ -104,6 +104,12 @@ for (const packagedPath of packagedPaths) {
 const installLock = JSON.parse(
 	await readFile(path.join(repoRoot, "packages", "coding-agent", "install-lock", "package-lock.json"), "utf8"),
 );
+const appServerPackage = JSON.parse(
+	await readFile(path.join(repoRoot, "packages", "app-server", "package.json"), "utf8"),
+);
+if (installLock.packages[""]?.dependencies?.[appServerPackage.name] !== appServerPackage.version) {
+	throw new Error("Packaged runtime lock does not include the App Server root");
+}
 let lockedPackageCount = 0;
 for (const [lockPath, expected] of Object.entries(installLock.packages)) {
 	if (!lockPath || lockPath.startsWith("node_modules/@metis/")) continue;

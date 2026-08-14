@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(scriptDir, "..");
 const codingAgentDir = join(repoRoot, "packages/coding-agent");
+const appServerDir = join(repoRoot, "packages/app-server");
 const outputDir = join(codingAgentDir, "install-lock");
 const rootLockfilePath = join(repoRoot, "package-lock.json");
 const outputPackageJsonPath = join(outputDir, "package.json");
@@ -228,15 +229,16 @@ function addExternalPackage(lockPackages, installLockPackages, addedPaths, queue
 	}
 }
 
-function createInstallerPackageJson(codingAgentPackage) {
+function createInstallerPackageJson(codingAgentPackage, appServerPackage) {
 	const packageJson = {
 		name: installPackageName,
 		version: codingAgentPackage.version,
 		private: true,
 		description: "Lockfile root used by the Metis installer and updater.",
-		dependencies: {
+		dependencies: sortedObject({
 			[codingAgentPackage.name]: codingAgentPackage.version,
-		},
+			[appServerPackage.name]: appServerPackage.version,
+		}),
 	};
 	if (codingAgentPackage.overrides) {
 		packageJson.overrides = codingAgentPackage.overrides;
@@ -357,7 +359,8 @@ function generateInstallLock() {
 
 	const lockPackages = rootLock.packages;
 	const codingAgentPackage = readJson(join(codingAgentDir, "package.json"));
-	const installerPackageJson = createInstallerPackageJson(codingAgentPackage);
+	const appServerPackage = readJson(join(appServerDir, "package.json"));
+	const installerPackageJson = createInstallerPackageJson(codingAgentPackage, appServerPackage);
 	const internalWorkspaces = getInternalWorkspaces(lockPackages);
 	const installLockPackages = {
 		"": createRootLockEntry(installerPackageJson),

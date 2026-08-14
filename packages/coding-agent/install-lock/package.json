@@ -4,6 +4,7 @@
 	"private": true,
 	"description": "Lockfile root used by the Metis installer and updater.",
 	"dependencies": {
+		"@metis/app-server": "0.0.3",
 		"@metis/coding-agent": "0.0.3"
 	},
 	"overrides": {
