@@ -114,6 +114,14 @@ const api = {
 		invoke(DESKTOP_IPC_CHANNELS.updateModelSettings, "model/settings/update", input) as ReturnType<
 			MetisDesktopApi["updateModelSettings"]
 		>,
+	getPersonalization: () =>
+		invoke(DESKTOP_IPC_CHANNELS.getPersonalization, "personalization/get", {}) as ReturnType<
+			MetisDesktopApi["getPersonalization"]
+		>,
+	updatePersonalization: (input: ClientParams<"personalization/update">) =>
+		invoke(DESKTOP_IPC_CHANNELS.updatePersonalization, "personalization/update", input) as ReturnType<
+			MetisDesktopApi["updatePersonalization"]
+		>,
 	testModelConnection: (input: ClientParams<"model/testConnection">) =>
 		invoke(DESKTOP_IPC_CHANNELS.testModelConnection, "model/testConnection", input) as ReturnType<
 			MetisDesktopApi["testModelConnection"]

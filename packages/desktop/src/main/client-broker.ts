@@ -414,6 +414,12 @@ export class ClientBroker {
 		this.register(DESKTOP_IPC_CHANNELS.updateModelSettings, 1, async (_event, [input]) =>
 			this.clientCall("model/settings/update", input),
 		);
+		this.register(DESKTOP_IPC_CHANNELS.getPersonalization, 1, async (_event, [input]) =>
+			this.clientCall("personalization/get", input),
+		);
+		this.register(DESKTOP_IPC_CHANNELS.updatePersonalization, 1, async (_event, [input]) =>
+			this.clientCall("personalization/update", input),
+		);
 		this.register(DESKTOP_IPC_CHANNELS.testModelConnection, 1, async (_event, [input]) =>
 			this.clientCall("model/testConnection", input),
 		);

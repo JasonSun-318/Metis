@@ -12,7 +12,20 @@ export const APP_LOCALES: readonly { readonly value: AppLocale; readonly label: 
 const zhCN = {
 	"Metis menu": "Metis 菜单",
 	Settings: "设置",
-	General: "常规",
+	General: "通用",
+	Personalization: "个性化",
+	"Global instructions": "全局指令",
+	"Metis keeps these instructions in mind across new Chat and Code tasks.":
+		"Metis 会在新的 Chat 和 Code 任务中遵循这些指令。",
+	"Changes apply to new or reloaded tasks. Running tasks are not interrupted.":
+		"更改会应用于新建或重新加载的任务，不会中断正在运行的任务。",
+	"For example: Keep explanations brief and focus on actionable changes.":
+		"例如：保持解释简洁，并优先给出可执行的修改。",
+	"Save instructions": "保存指令",
+	Saved: "已保存",
+	"Global instructions are too large.": "全局指令内容过大。",
+	"Couldn’t load global instructions.": "无法加载全局指令。",
+	"Couldn’t save global instructions.": "无法保存全局指令。",
 	Preferences: "偏好设置",
 	"Choose your language, typography, and motion preferences.": "选择语言、字体和动效偏好。",
 	Appearance: "外观",

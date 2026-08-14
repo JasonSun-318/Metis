@@ -1,4 +1,4 @@
-import { ArrowLeft, ChartBar, Cpu, GearSix, UserCircle } from "@phosphor-icons/react";
+import { ArrowLeft, ChartBar, Cpu, GearSix, Sparkle, UserCircle } from "@phosphor-icons/react";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
@@ -6,10 +6,11 @@ import type { GeneralPreferences } from "../general-preferences.ts";
 import type { AppTheme } from "../theme.ts";
 import { GeneralPanel } from "./GeneralPanel.tsx";
 import { ModelSettingsPanel } from "./ModelSettingsPanel.tsx";
+import { PersonalizationPanel } from "./PersonalizationPanel.tsx";
 import { ProfilePanel } from "./ProfilePanel.tsx";
 import { UsagePanel } from "./UsagePanel.tsx";
 
-type SettingsPage = "general" | "profile" | "model" | "usage";
+type SettingsPage = "general" | "personalization" | "profile" | "model" | "usage";
 
 export function SettingsDialog({ api, generalPreferences, onClose, onGeneralPreferencesChange, onThemeChange, serverReady, theme }: {
 	readonly api: MetisDesktopApi;
@@ -60,6 +61,7 @@ export function SettingsDialog({ api, generalPreferences, onClose, onGeneralPref
 
 	const pages = [
 		{ id: "general" as const, label: "General", icon: GearSix },
+		{ id: "personalization" as const, label: "Personalization", icon: Sparkle },
 		{ id: "profile" as const, label: "Profile", icon: UserCircle },
 		{ id: "model" as const, label: "Model", icon: Cpu },
 		{ id: "usage" as const, label: "Usage", icon: ChartBar },
@@ -101,6 +103,7 @@ export function SettingsDialog({ api, generalPreferences, onClose, onGeneralPref
 							/>
 						) : null}
 						{page === "profile" ? <ProfilePanel api={api} serverReady={serverReady} /> : null}
+						{page === "personalization" ? <PersonalizationPanel api={api} serverReady={serverReady} /> : null}
 						{page === "model" ? <ModelSettingsPanel api={api} serverReady={serverReady} /> : null}
 						{page === "usage" ? <UsagePanel api={api} serverReady={serverReady} /> : null}
 					</div>

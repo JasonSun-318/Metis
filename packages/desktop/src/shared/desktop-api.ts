@@ -65,6 +65,8 @@ export const DESKTOP_IPC_CHANNELS = {
 	listModels: "metis:list-models",
 	getModelSettings: "metis:get-model-settings",
 	updateModelSettings: "metis:update-model-settings",
+	getPersonalization: "metis:get-personalization",
+	updatePersonalization: "metis:update-personalization",
 	testModelConnection: "metis:test-model-connection",
 	getUsage: "metis:get-usage",
 	createSchedule: "metis:create-schedule",
@@ -450,6 +452,10 @@ export interface MetisDesktopApi {
 	listModels(): Promise<ClientResult<"model/list">>;
 	getModelSettings(): Promise<ClientResult<"model/settings/get">>;
 	updateModelSettings(input: ClientParams<"model/settings/update">): Promise<ClientResult<"model/settings/update">>;
+	getPersonalization(): Promise<ClientResult<"personalization/get">>;
+	updatePersonalization(
+		input: ClientParams<"personalization/update">,
+	): Promise<ClientResult<"personalization/update">>;
 	testModelConnection(input: ClientParams<"model/testConnection">): Promise<ClientResult<"model/testConnection">>;
 	getUsage(input: ClientParams<"usage/get">): Promise<ClientResult<"usage/get">>;
 	createSchedule(input: ClientParams<"schedule/create">): Promise<ClientResult<"schedule/create">>;

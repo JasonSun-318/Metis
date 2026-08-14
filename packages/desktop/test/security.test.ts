@@ -941,6 +941,8 @@ describe("desktop trust boundaries", () => {
 			if (request.method === "model/settings/get" || request.method === "model/settings/update") {
 				result = { defaultModel: null, defaultThinkingSelection: "medium", providers: [], loadError: null };
 			}
+			if (request.method === "personalization/get") result = { instructions: "" };
+			if (request.method === "personalization/update") result = { instructions: request.params.instructions };
 			if (request.method === "model/testConnection") {
 				result = { ok: true, message: "Connection succeeded", latencyMs: 12 };
 			}
@@ -1037,6 +1039,8 @@ describe("desktop trust boundaries", () => {
 		const getProfile = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.getProfile)!;
 		const getModelSettings = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.getModelSettings)!;
 		const updateModelSettings = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.updateModelSettings)!;
+		const getPersonalization = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.getPersonalization)!;
+		const updatePersonalization = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.updatePersonalization)!;
 		const testModelConnection = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.testModelConnection)!;
 		const getUsage = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.getUsage)!;
 		const previewProjectDelete = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.previewProjectDelete)!;
@@ -1241,6 +1245,14 @@ describe("desktop trust boundaries", () => {
 				mutation: { type: "set_defaults", model: null, thinkingSelection: "medium" },
 			}),
 		).resolves.toMatchObject({ defaultModel: null });
+		await expect(getPersonalization(event, {})).resolves.toEqual({ instructions: "" });
+		await expect(getPersonalization(event, { extra: true })).rejects.toThrow("Invalid personalization/get params");
+		await expect(updatePersonalization(event, { instructions: "Be concise." })).resolves.toEqual({
+			instructions: "Be concise.",
+		});
+		await expect(updatePersonalization(event, { instructions: "Be concise.", extra: true })).rejects.toThrow(
+			"Invalid personalization/update params",
+		);
 		await expect(
 			testModelConnection(event, {
 				requestId: "11111111-1111-4111-8111-111111111322",

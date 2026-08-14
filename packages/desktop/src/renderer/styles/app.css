@@ -1528,6 +1528,20 @@ textarea { resize: none; }
 .settings-page-scroll .profile-skill-list li { gap: 7px; grid-template-columns: 24px minmax(0, 1fr) auto; }
 .settings-page-scroll .profile-skill-list svg { width: 24px; height: 24px; padding: 5px; }
 .general-page { display: grid; align-content: start; }
+.personalization-page { display: grid; align-content: start; }
+.personalization-section { display: grid; gap: 18px; }
+.personalization-section .general-section-heading { border-bottom: 1px solid var(--border-weak); padding-bottom: 17px; }
+.personalization-section label { gap: 8px; }
+.personalization-section textarea { width: 100%; min-height: 112px; resize: vertical; border: 1px solid var(--border-strong); border-radius: 9px; background: var(--surface-02); color: var(--text-26); padding: 10px 11px; font-size: 12px; line-height: 1.55; }
+.personalization-section textarea:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.personalization-section textarea:disabled { opacity: .62; }
+.personalization-helper { margin: -7px 0 0; }
+.personalization-meta, .personalization-actions { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 16px; }
+.personalization-meta { margin-top: -10px; color: var(--text-08); font-size: 11px; }
+.personalization-actions > div { display: flex; min-width: 0; gap: 8px; color: var(--success-msg-text); font-size: 12px; }
+.personalization-error { color: var(--danger-inline-ink); }
+.personalization-load-error { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.personalization-load-error p { margin: 0; color: inherit; }
 .general-section + .general-section { margin-top: 34px; }
 .general-section-heading { margin-bottom: 18px; }
 .general-section-heading h2 { margin: 0; }

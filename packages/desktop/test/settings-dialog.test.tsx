@@ -55,8 +55,11 @@ function button(container: ParentNode, label: string): HTMLButtonElement {
 	return match;
 }
 
-function setValue(element: HTMLInputElement, value: string) {
-	Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(element, value);
+function setValue(element: HTMLInputElement | HTMLTextAreaElement, value: string) {
+	Object.getOwnPropertyDescriptor(
+		element instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype,
+		"value",
+	)?.set?.call(element, value);
 	element.dispatchEvent(new Event("input", { bubbles: true }));
 }
 
@@ -160,6 +163,45 @@ describe("SettingsDialog", () => {
 		await act(async () => button(container, "Code 字体").click());
 		await act(async () => container.querySelectorAll<HTMLButtonElement>('[role="option"]')[1]!.click());
 		expect(onGeneralPreferencesChange).toHaveBeenCalledWith({ ...generalPreferences, codeFont: "system-serif" });
+		await act(async () => root.unmount());
+	});
+
+	it("loads and explicitly saves bounded global instructions from Personalization", async () => {
+		const getPersonalization = vi.fn().mockResolvedValue({ instructions: "Initial" });
+		const updatePersonalization = vi
+			.fn()
+			.mockImplementation(async ({ instructions }: { instructions: string }) => ({ instructions }));
+		const api = { getPersonalization, updatePersonalization } as unknown as MetisDesktopApi;
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(
+			<SettingsDialog
+				api={api}
+				generalPreferences={generalPreferences}
+				onClose={vi.fn()}
+				onGeneralPreferencesChange={vi.fn()}
+				onThemeChange={vi.fn()}
+				serverReady
+				theme="dark"
+			/>,
+		));
+		expect(getPersonalization).not.toHaveBeenCalled();
+		await act(async () => button(container, "Personalization").click());
+		await flush();
+		const textarea = container.querySelector<HTMLTextAreaElement>('textarea[aria-label="Global instructions"]')!;
+		expect(textarea.value).toBe("Initial");
+		expect(getPersonalization).toHaveBeenCalledTimes(1);
+		await act(async () => setValue(textarea, "Be concise."));
+		await act(async () => button(container, "Save instructions").click());
+		await flush();
+		expect(updatePersonalization).toHaveBeenCalledWith({ instructions: "Be concise." });
+		expect(container.querySelector('[role="status"]')?.textContent).toContain("Saved");
+
+		await act(async () => setValue(textarea, "😀".repeat(16_385)));
+		expect(button(container, "Save instructions").disabled).toBe(true);
+		expect(container.textContent).toContain("Global instructions are too large.");
+		expect(updatePersonalization).toHaveBeenCalledTimes(1);
 		await act(async () => root.unmount());
 	});
 });
