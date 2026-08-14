@@ -2328,6 +2328,54 @@ describe("Chat desktop shell", () => {
 		await act(async () => root.unmount());
 	});
 
+	it("shows the fork button on a Code mode assistant reply and forks it", async () => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		localStorage.setItem("metis.activeSessionId.code", "code-existing");
+		const { api, emitEvent } = createHarness();
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<App api={api} store={new AppStore()} />));
+		await flush();
+		await act(async () => button(container, "Code").click());
+		await flush();
+
+		await act(async () => emitEvent({
+			type: "app-server",
+			envelope: {
+				jsonrpc: "2.0",
+				method: "connection/events",
+				params: {
+					serverEpoch: EPOCH,
+					fromCursor: 1,
+					toCursor: 1,
+					events: [{
+						type: "item/completed",
+						item: {
+							itemId: "code-reply-1",
+							sessionId: "code-existing",
+							turnId: "turn-1",
+							role: "assistant",
+							state: "completed",
+							content: [{ type: "text", text: "Code reply here" }],
+							createdAt: "2026-08-13T00:00:00.000Z",
+							completedAt: "2026-08-13T00:00:00.000Z",
+						},
+					}],
+				},
+			},
+		}));
+		await flush();
+
+		const forkButton = container.querySelector<HTMLButtonElement>('[aria-label="Fork conversation"]');
+		expect(forkButton).not.toBeNull();
+		expect(container.textContent).toContain("Code reply here");
+		await act(async () => forkButton!.click());
+		await flush();
+		expect(api.forkSession).toHaveBeenCalledWith(expect.objectContaining({ entryId: "code-reply-1" }));
+		await act(async () => root.unmount());
+	});
+
 	it("shows compacting progress, disables the composer, and projects the persisted divider", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");

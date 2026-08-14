@@ -58,6 +58,8 @@ export interface CodeTurnPresentation {
 	readonly users: readonly ItemView[];
 	readonly segments: readonly CodeTranscriptSegment[];
 	readonly results: ReadonlyMap<string, ToolResultBlock>;
+	/** Final assistant reply item id, when this turn has one. */
+	readonly finalItemId?: string;
 }
 
 export type ChatTranscriptSegment =
@@ -673,5 +675,6 @@ export function buildCodeTurnPresentation(items: readonly ItemView[]): CodeTurnP
 		users: items.filter((item) => item.role === "user"),
 		segments,
 		results,
+		finalItemId: finalIndex >= 0 ? items[finalIndex]!.itemId : undefined,
 	};
 }

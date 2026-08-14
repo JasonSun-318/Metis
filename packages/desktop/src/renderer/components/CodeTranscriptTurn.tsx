@@ -1,5 +1,5 @@
 import type { ItemContentBlockView, ItemView } from "@metis/app-protocol";
-import { CaretRight, CircleNotch, ImageSquare, TerminalWindow, Wrench } from "@phosphor-icons/react";
+import { CaretRight, CircleNotch, GitFork, ImageSquare, TerminalWindow, Wrench } from "@phosphor-icons/react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Markdown } from "./Markdown.tsx";
@@ -145,12 +145,14 @@ function CodeExecution({ calls, results, orphanResults }: {
 	);
 }
 
-export function CodeTranscriptTurn({ items, running = false, startedAt }: {
+export function CodeTranscriptTurn({ items, running = false, startedAt, onFork }: {
 	readonly items: readonly ItemView[];
 	readonly running?: boolean;
 	readonly startedAt?: string;
+	readonly onFork?: (entryId: string) => void;
 }) {
-	const { users, segments, results } = buildCodeTurnPresentation(items);
+	const { t } = useTranslation();
+	const { users, segments, results, finalItemId } = buildCodeTurnPresentation(items);
 	const enteringUserId = running ? users.at(-1)?.itemId : undefined;
 
 	return (
@@ -179,6 +181,18 @@ export function CodeTranscriptTurn({ items, running = false, startedAt }: {
 						))}
 					</div>
 				),
+			)}
+			{finalItemId && onFork && (
+				<button
+					aria-label={t("Fork conversation")}
+					className="turn-fork-button"
+					onClick={() => onFork(finalItemId)}
+					title={t("Fork this conversation from this reply")}
+					type="button"
+				>
+					<GitFork aria-hidden="true" size={13} />
+					{t("Fork")}
+				</button>
 			)}
 			{running && <TurnRuntimeStatus items={items} running startedAt={startedAt} />}
 		</>

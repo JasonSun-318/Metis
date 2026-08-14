@@ -178,7 +178,7 @@ export function Transcript({ activeTurnId, activeTurnStartedAt, appearance, aria
 							>
 									{compaction ? <div role="separator"><span>{t("Compacted")}</span></div> : appearance === "chat"
 										? <TranscriptTurn items={items} onFork={onFork} running={running} startedAt={activeTurnStartedAt} />
-										: <CodeTranscriptTurn items={items} running={running} startedAt={activeTurnStartedAt} />}
+										: <CodeTranscriptTurn items={items} onFork={onFork} running={running} startedAt={activeTurnStartedAt} />}
 							</article>
 						);
 					})}
