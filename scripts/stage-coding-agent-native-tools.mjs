@@ -106,6 +106,9 @@ function option(name, fallback) {
 const target = process.env.METIS_NATIVE_TOOLS_TARGET ?? option("--target", "all");
 const outputDir = resolve(packageDir, option("--output", "dist/vendor/tools"));
 const dispatcher = new EnvHttpProxyAgent();
+// Optional GitHub mirror base (e.g. https://ghproxy.net/) for networks where
+// github.com and raw.githubusercontent.com are slow or unreachable.
+const mirror = process.env.METIS_NATIVE_TOOLS_MIRROR;
 
 function currentPair() {
 	if (!["darwin", "linux", "win32"].includes(process.platform)) return undefined;
@@ -158,13 +161,18 @@ function sha256(data) {
 	return createHash("sha256").update(data).digest("hex");
 }
 
+function mirrorUrl(url) {
+	return mirror ? `${mirror.replace(/\/+$/u, "")}/${url}` : url;
+}
+
 async function download(url) {
+	const finalUrl = mirrorUrl(url);
 	let failure;
 	const chunks = [];
 	let received = 0;
 	for (let attempt = 1; attempt <= 3; attempt += 1) {
 		try {
-			const response = await fetch(url, {
+			const response = await fetch(finalUrl, {
 				dispatcher,
 				headers: {
 					"accept-encoding": "identity",
@@ -191,7 +199,7 @@ async function download(url) {
 			if (attempt < 3) await new Promise((resolve) => setTimeout(resolve, attempt * 500));
 		}
 	}
-	throw new Error(`Download failed after 3 attempts: ${url}: ${failure instanceof Error ? failure.message : String(failure)}`, {
+	throw new Error(`Download failed after 3 attempts: ${finalUrl}: ${failure instanceof Error ? failure.message : String(failure)}`, {
 		cause: failure,
 	});
 }
