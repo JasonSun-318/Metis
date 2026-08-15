@@ -1,5 +1,11 @@
 import { createHash } from "node:crypto";
-import type { DurableImageRefView, ItemContentBlockView, ItemView, SessionTaskView } from "@metis/app-protocol";
+import type {
+	DurableImageRefView,
+	ItemContentBlockView,
+	ItemUsageView,
+	ItemView,
+	SessionTaskView,
+} from "@metis/app-protocol";
 import { formatSessionAttachmentDisplayText } from "@metis/coding-agent";
 
 export const MAX_PROJECTED_THINKING_BYTES = 8 * 1024;
@@ -203,6 +209,27 @@ export function projectAssistantOutputTokens(message: object): number | undefine
 	return Number.isSafeInteger(output) && Number(output) >= 0 ? Number(output) : undefined;
 }
 
+/** Full assistant usage projection; only non-negative safe integers are carried onto the wire. */
+export function projectAssistantUsage(message: object): ItemUsageView | undefined {
+	const outputTokens = projectAssistantOutputTokens(message);
+	if (outputTokens === undefined) return undefined;
+	const record = (message as Record<string, unknown>).usage as Record<string, unknown> | undefined;
+	const positive = (value: unknown): number | undefined =>
+		Number.isSafeInteger(value) && Number(value) >= 0 ? Number(value) : undefined;
+	const inputTokens = positive(record?.input);
+	const cacheReadTokens = positive(record?.cacheRead);
+	const cacheWriteTokens = positive(record?.cacheWrite);
+	if (inputTokens === undefined && cacheReadTokens === undefined && cacheWriteTokens === undefined) {
+		return { outputTokens };
+	}
+	return {
+		outputTokens,
+		...(inputTokens === undefined ? {} : { inputTokens }),
+		...(cacheReadTokens === undefined ? {} : { cacheReadTokens }),
+		...(cacheWriteTokens === undefined ? {} : { cacheWriteTokens }),
+	};
+}
+
 export function projectTasksFromToolResult(message: unknown): SessionTaskView[] | undefined {
 	if (typeof message !== "object" || message === null) return undefined;
 	const record = message as Record<string, unknown>;
@@ -264,7 +291,7 @@ export function projectMessageEntry(input: MessageProjectionInput): ItemView | u
 	}
 
 	if (message.role === "assistant") {
-		const outputTokens = projectAssistantOutputTokens(message);
+		const usage = projectAssistantUsage(message);
 		const content = assistantBlocks(
 			message.content,
 			{
@@ -281,7 +308,7 @@ export function projectMessageEntry(input: MessageProjectionInput): ItemView | u
 			role: "assistant",
 			state,
 			content,
-			...(outputTokens !== undefined && outputTokens > 0 ? { usage: { outputTokens } } : {}),
+			...(usage === undefined ? {} : { usage }),
 			createdAt,
 			...(state === "streaming" ? {} : { completedAt: createdAt }),
 		};
@@ -402,7 +429,7 @@ export function appendProjectedDelta(
 	const last = content.at(-1);
 	if (last?.type === delta.type) content[content.length - 1] = { ...last, text: last.text + accepted };
 	else content.push({ type: delta.type, text: accepted });
-	const usage = delta.outputTokens === undefined ? item.usage : { outputTokens: delta.outputTokens };
+	const usage = delta.outputTokens === undefined ? item.usage : { ...item.usage, outputTokens: delta.outputTokens };
 	return {
 		item: { ...item, content, ...(usage === undefined ? {} : { usage }) },
 		delta: { ...delta, text: accepted },

@@ -4,6 +4,7 @@ import {
 	collectCacheMisses,
 	computeCacheWaste,
 	detectCacheMiss,
+	getLatestCacheHitPercent,
 	type ModelPriceSource,
 } from "../src/core/cache-stats.ts";
 import type { SessionEntry } from "../src/core/session-manager.ts";
@@ -139,5 +140,13 @@ describe("detectCacheMiss", () => {
 
 	it("returns undefined for the first turn of a session", () => {
 		expect(detectCacheMiss([], turn1, models)).toBeUndefined();
+	});
+});
+
+describe("getLatestCacheHitPercent", () => {
+	it("uses the latest request after cache activity has been reported", () => {
+		expect(getLatestCacheHitPercent([entry(turn1), entry(turn2)])).toBeCloseTo(100_000 / 1050, 5);
+		expect(getLatestCacheHitPercent([entry(turn1), entry(assistant({ input: 110_000 }))])).toBe(0);
+		expect(getLatestCacheHitPercent([entry(assistant({ input: 100_000 }))])).toBeUndefined();
 	});
 });

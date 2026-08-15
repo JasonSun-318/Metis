@@ -34,6 +34,21 @@ export interface ModelPriceSource {
 	find(provider: string, modelId: string): { cost: { cacheRead: number } } | undefined;
 }
 
+/** Cache hit percentage for the latest completed model request, once the provider has reported caching. */
+export function getLatestCacheHitPercent(entries: readonly SessionEntry[]): number | undefined {
+	let reportedCache = false;
+	let latest: AssistantMessage["usage"] | undefined;
+	for (const entry of entries) {
+		if (entry.type !== "message" || entry.message.role !== "assistant") continue;
+		latest = entry.message.usage;
+		reportedCache ||= latest.cacheRead + latest.cacheWrite > 0;
+	}
+	const promptTokens = latest ? latest.input + latest.cacheRead + latest.cacheWrite : 0;
+	return reportedCache && latest && promptTokens > 0
+		? Math.max(0, Math.min(100, (latest.cacheRead / promptTokens) * 100))
+		: undefined;
+}
+
 /** The last request seen by the scan; everything in its prompt should be cached. */
 interface PreviousRequest {
 	promptTokens: number;

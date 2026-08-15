@@ -59,6 +59,7 @@ export {
 	type OAuthCredential,
 } from "./core/auth-storage.ts";
 export { ensureModeScopedMemoryLayout } from "./core/auto-memory.ts";
+export { getLatestCacheHitPercent } from "./core/cache-stats.ts";
 // Compaction
 export {
 	type BranchPreparation,

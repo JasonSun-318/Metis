@@ -26,6 +26,7 @@ import {
 	createAskUserToolDefinition,
 	DefaultResourceLoader,
 	formatSessionAttachments,
+	getLatestCacheHitPercent,
 	getProjectTrustOptions,
 	hasTrustRequiringProjectResources,
 	importSessionAttachments,
@@ -1062,15 +1063,13 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 	async getStatus(input: ClientParams<"session/status">): Promise<ClientResult<"session/status">> {
 		const stats = this.session.getSessionStats();
 		const context = stats.contextUsage;
-		const promptTokens = stats.tokens.input + stats.tokens.cacheRead + stats.tokens.cacheWrite;
 		return {
 			sessionId: input.sessionId,
 			mode: stats.mode,
 			contextTokens: context?.tokens ?? null,
 			contextWindow: context?.contextWindow ?? null,
 			remainingPercent: context?.percent == null ? null : Math.max(0, Math.min(100, 100 - context.percent)),
-			cacheHitPercent:
-				promptTokens === 0 ? null : Math.max(0, Math.min(100, (stats.tokens.cacheRead / promptTokens) * 100)),
+			cacheHitPercent: getLatestCacheHitPercent(this.session.sessionManager.getEntries()) ?? null,
 		};
 	}
 

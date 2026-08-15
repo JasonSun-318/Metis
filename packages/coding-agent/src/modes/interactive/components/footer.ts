@@ -1,6 +1,7 @@
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import { type Component, truncateToWidth, visibleWidth } from "@metis/tui";
 import type { AgentSession } from "../../../core/agent-session.ts";
+import { getLatestCacheHitPercent } from "../../../core/cache-stats.ts";
 import { areExperimentalFeaturesEnabled } from "../../../core/experimental.ts";
 import type { ReadonlyFooterDataProvider } from "../../../core/footer-data-provider.ts";
 import { theme } from "../theme/theme.ts";
@@ -89,20 +90,16 @@ export class FooterComponent implements Component {
 		let totalCacheRead = 0;
 		let totalCacheWrite = 0;
 		let totalCost = 0;
-		let latestCacheHitRate: number | undefined;
+		const entries = this.session.sessionManager.getEntries();
+		const latestCacheHitRate = getLatestCacheHitPercent(entries);
 
-		for (const entry of this.session.sessionManager.getEntries()) {
+		for (const entry of entries) {
 			if (entry.type === "message" && entry.message.role === "assistant") {
 				totalInput += entry.message.usage.input;
 				totalOutput += entry.message.usage.output;
 				totalCacheRead += entry.message.usage.cacheRead;
 				totalCacheWrite += entry.message.usage.cacheWrite;
 				totalCost += entry.message.usage.cost.total;
-
-				const latestPromptTokens =
-					entry.message.usage.input + entry.message.usage.cacheRead + entry.message.usage.cacheWrite;
-				latestCacheHitRate =
-					latestPromptTokens > 0 ? (entry.message.usage.cacheRead / latestPromptTokens) * 100 : undefined;
 			}
 		}
 
@@ -139,7 +136,7 @@ export class FooterComponent implements Component {
 		if (totalOutput) statsParts.push(`↓${formatTokens(totalOutput)}`);
 		if (totalCacheRead) statsParts.push(`R${formatTokens(totalCacheRead)}`);
 		if (totalCacheWrite) statsParts.push(`W${formatTokens(totalCacheWrite)}`);
-		if ((totalCacheRead > 0 || totalCacheWrite > 0) && latestCacheHitRate !== undefined) {
+		if (latestCacheHitRate !== undefined) {
 			statsParts.push(`CH${latestCacheHitRate.toFixed(1)}%`);
 		}
 		// Show cost with "(sub)" indicator if using OAuth subscription

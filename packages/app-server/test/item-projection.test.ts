@@ -23,6 +23,51 @@ describe("assistant usage projection", () => {
 		expect(item?.usage).toEqual({ outputTokens: 44 });
 	});
 
+	it("projects full cache usage onto completed assistant items", () => {
+		const item = projectLiveMessage({
+			itemId: "assistant-2",
+			sessionId: "session-1",
+			turnId: "turn-1",
+			state: "completed",
+			fallbackTimestamp: CREATED_AT,
+			message: {
+				role: "assistant",
+				content: [{ type: "text", text: "reply" }],
+				usage: { input: 120, output: 30, cacheRead: 80, cacheWrite: 40 },
+				timestamp: Date.parse(CREATED_AT),
+			},
+		});
+
+		expect(item?.usage).toEqual({
+			outputTokens: 30,
+			inputTokens: 120,
+			cacheReadTokens: 80,
+			cacheWriteTokens: 40,
+		});
+	});
+
+	it("keeps projected cache usage when a streamed delta updates output tokens", () => {
+		const streamingItem: ItemView = {
+			itemId: "assistant-2",
+			sessionId: "session-1",
+			turnId: "turn-1",
+			role: "assistant",
+			state: "streaming",
+			content: [],
+			usage: { outputTokens: 10, inputTokens: 120, cacheReadTokens: 80, cacheWriteTokens: 40 },
+			createdAt: CREATED_AT,
+		};
+
+		const projected = appendProjectedDelta(streamingItem, { type: "text", text: "more", outputTokens: 12 });
+
+		expect(projected?.item.usage).toEqual({
+			outputTokens: 12,
+			inputTokens: 120,
+			cacheReadTokens: 80,
+			cacheWriteTokens: 40,
+		});
+	});
+
 	it("applies the latest output usage with a streamed delta", () => {
 		const streamingItem: ItemView = {
 			itemId: "assistant-1",
