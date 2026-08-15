@@ -10,6 +10,7 @@ import "./styles/app.css";
 
 // Apply the persisted theme before the first paint to avoid a flash.
 applyThemeToDocument(loadTheme(localStorage));
+document.documentElement.dataset.platform = window.metis.platform;
 
 const root = document.getElementById("root");
 if (!root) throw new Error("Metis renderer root is missing");

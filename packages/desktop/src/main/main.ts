@@ -1,10 +1,11 @@
 import { basename, join } from "node:path";
 import {
 	app,
-	type BrowserWindow,
+	BrowserWindow,
 	clipboard,
 	dialog,
 	ipcMain,
+	Menu,
 	Notification,
 	type OpenDialogOptions,
 	powerSaveBlocker,
@@ -38,6 +39,12 @@ let mainWindow: BrowserWindow | null = null;
 let allowQuit = false;
 let workspaceEditState: DesktopWorkspaceEditState = { dirty: false, language: "en", visibleSessionId: null };
 const scheduleKeepAwake = createScheduleKeepAwake(powerSaveBlocker);
+
+// app.isActive() is macOS-only; on other platforms treat a focused window as active.
+function isAppActive(): boolean {
+	if (process.platform === "darwin") return app.isActive();
+	return BrowserWindow.getAllWindows().some((window) => !window.isDestroyed() && window.isFocused());
+}
 
 function confirmDiscardWorkspaceEdits(window: BrowserWindow | null, action: "close" | "quit"): boolean {
 	if (!workspaceEditState.dirty) return true;
@@ -80,6 +87,9 @@ function spawnAppServer(): UtilityChild {
 
 async function launch(): Promise<void> {
 	await app.whenReady();
+	// Windows and Linux show the stock File/Edit/View menu; remove it. macOS
+	// keeps its system menu bar at the top of the screen.
+	if (process.platform !== "darwin") Menu.setApplicationMenu(null);
 	installAppProtocol(MAIN_WINDOW_WEBPACK_ENTRY);
 	const diagnostics = new DiagnosticLog({
 		path: join(app.getPath("logs"), "app-server.log"),
@@ -112,7 +122,7 @@ async function launch(): Promise<void> {
 	const deliveredNotifications = new Set<Notification>();
 	let suppressNextFocusAcknowledgement = false;
 	const completionTracker = createBackgroundCompletionTracker({
-		isActive: () => app.isActive(),
+		isActive: () => isAppActive(),
 		setBadgeCount: (count) => {
 			if (process.platform === "darwin") app.setBadgeCount(count);
 		},
@@ -191,7 +201,7 @@ async function launch(): Promise<void> {
 		onUserInterruptPending: (sessionId, pending) => completionTracker.setUserInterruptPending(sessionId, pending),
 		onSessionOpened: (sessionId) => {
 			suppressNextFocusAcknowledgement = false;
-			if (app.isActive()) completionTracker.view(sessionId);
+			if (isAppActive()) completionTracker.view(sessionId);
 		},
 	});
 	registerThemeHandlers(ipcMain, () => mainWindow);

@@ -1,5 +1,5 @@
 import type { AgentMode, ClientResult, ScheduleTaskView, SessionSummary } from "@metis/app-protocol";
-import { ArrowRight, CaretDown, CaretRight, ChatCircleDots, ClockCountdown, Code, FolderSimple, MagnifyingGlass, NotePencil, SidebarSimple, Sparkle } from "@phosphor-icons/react";
+import { ArrowRight, CaretDown, CaretRight, ChatCircleDots, ClockCountdown, Code, FolderSimple, NotePencil, SidebarSimple, Sparkle } from "@phosphor-icons/react";
 import type { ReactNode } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -44,6 +44,7 @@ export function clampSessionSidebarWidth(value: number, viewportWidth = window.i
 
 interface SessionSidebarProps {
 	readonly state: AppStoreSnapshot;
+	readonly platform: string;
 	readonly busy: boolean;
 	readonly mode: AgentMode;
 	readonly destination: SidebarDestination;
@@ -308,6 +309,7 @@ function ProjectGroup({
 
 export function SessionSidebar({
 	state,
+	platform,
 	busy,
 	mode,
 	destination,
@@ -401,14 +403,11 @@ export function SessionSidebar({
 	);
 
 	return (
-		<aside className="session-sidebar" aria-label={t("Tasks")} data-fullscreen={fullscreen || undefined}>
+		<aside className="session-sidebar" aria-label={t("Tasks")} data-fullscreen={fullscreen || undefined} data-platform={platform}>
 			<div className="window-drag-region">
 				<div className="sidebar-titlebar-controls">
 					<button aria-label={t("Hide sessions sidebar")} onClick={onToggle} type="button">
 						<SidebarSimple aria-hidden="true" size={15} />
-					</button>
-					<button aria-label={t("Search")} title={t("Search (coming soon)")} type="button">
-						<MagnifyingGlass aria-hidden="true" size={15} />
 					</button>
 				</div>
 			</div>
