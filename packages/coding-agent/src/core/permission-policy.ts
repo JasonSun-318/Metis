@@ -456,6 +456,9 @@ export function classifyAction(input: ClassifyActionInput): PermissionAction {
 export function routeAction(settings: PermissionSettings, value: PermissionAction): PermissionRoute {
 	if (settings.mode === "full") return "allow";
 	if (value.risks.length === 1 && value.risks[0] === "ordinary-read") return "allow";
+	// Auto mode lets structured reads of workspace-external paths run without
+	// approval; sensitive paths are classified separately and still ask.
+	if (settings.mode === "auto" && value.risks.length === 1 && value.risks[0] === "outside-read") return "allow";
 	if (settings.mode === "ask") return "user";
 	if (value.provenance !== "builtin") return "allow";
 	if (value.risks.length === 1 && value.risks[0] === "workspace-write") return "allow";

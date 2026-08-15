@@ -265,6 +265,7 @@ describe("Ask/Auto/Full permission policy", () => {
 
 		expect(outsideAction.risks).toEqual(["outside-read"]);
 		expect(routeAction(settings("ask"), outsideAction)).toBe("user");
+		expect(routeAction(settings("auto"), outsideAction)).toBe("allow");
 		expect(routeAction(settings("full"), outsideAction)).toBe("allow");
 		expect(addedAction.risks).toEqual(["ordinary-read"]);
 		expect(routeAction(settings("ask"), addedAction)).toBe("allow");
