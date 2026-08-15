@@ -1,15 +1,17 @@
 import type { ItemContentBlockView, ItemView } from "@metis/app-protocol";
 import {
 	CaretRight,
+	Check,
 	CheckCircle,
 	CircleNotch,
 	ClockCounterClockwise,
+	Copy,
 	GitFork,
 	ImageSquare,
 	TerminalWindow,
 	Wrench,
 } from "@phosphor-icons/react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Markdown } from "./Markdown.tsx";
 import { TurnRuntimeStatus } from "./TurnRuntimeStatus.tsx";
@@ -18,6 +20,7 @@ import {
 	buildTurnPresentation,
 	commandText,
 	isCommandTool,
+	messageText,
 	toolTranscriptPresentation,
 	type ToolCallBlock,
 	type ToolDetailLine,
@@ -183,25 +186,61 @@ function ExecutionChain({
 	);
 }
 
-export function TranscriptTurn({ items, running: runtimeRunning = false, startedAt, onFork }: {
+export function TurnCopyButton({ onCopy, text }: { readonly onCopy: (text: string) => void; readonly text: string }) {
+	const { t } = useTranslation();
+	const [copied, setCopied] = useState(false);
+	const resetTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+	useEffect(() => () => {
+		if (resetTimer.current) clearTimeout(resetTimer.current);
+	}, []);
+	const copy = () => {
+		onCopy(text);
+		setCopied(true);
+		if (resetTimer.current) clearTimeout(resetTimer.current);
+		resetTimer.current = setTimeout(() => setCopied(false), 1500);
+	};
+	return (
+		<button
+			aria-label={t("Copy message")}
+			className="turn-copy-button"
+			onClick={copy}
+			title={t("Copy this message")}
+			type="button"
+		>
+			{copied ? <Check aria-hidden="true" size={13} /> : <Copy aria-hidden="true" size={13} />}
+		</button>
+	);
+}
+
+export function TranscriptTurn({ items, running: runtimeRunning = false, startedAt, onFork, onCopy }: {
 	readonly items: readonly ItemView[];
 	readonly running?: boolean;
 	readonly startedAt?: string;
 	readonly onFork?: (entryId: string) => void;
+	readonly onCopy?: (text: string) => void;
 }) {
 	const { t } = useTranslation();
 	const { users, segments, results, final } = buildTurnPresentation(items);
 	const enteringUserId = runtimeRunning ? users.at(-1)?.itemId : undefined;
+	const finalCopyText = final ? messageText(final) : "";
 
 	return (
 		<>
-			{users.map((item) => (
-				<div className={`turn-user${item.itemId === enteringUserId ? " is-entering" : ""}`} key={item.itemId}>
-					<div className="message message-user">
-						{item.content.map((block, index) => <StaticBlock block={block} key={`${block.type}-${index}`} />)}
+			{users.map((item) => {
+				const copyText = messageText(item);
+				return (
+					<div className={`turn-user${item.itemId === enteringUserId ? " is-entering" : ""}`} key={item.itemId}>
+						<div className="message message-user">
+							{item.content.map((block, index) => <StaticBlock block={block} key={`${block.type}-${index}`} />)}
+						</div>
+						{onCopy && copyText.trim() !== "" && (
+							<div className="turn-actions">
+								<TurnCopyButton onCopy={onCopy} text={copyText} />
+							</div>
+						)}
 					</div>
-				</div>
-			))}
+				);
+			})}
 			{segments.map((segment, index) =>
 				segment.type === "intermediate" ? (
 					<div className="turn-intermediate" key={`intermediate-${index}`}>
@@ -226,17 +265,23 @@ export function TranscriptTurn({ items, running: runtimeRunning = false, started
 					)}
 				</div>
 			)}
-			{final && onFork && (
-				<button
-					aria-label={t("Fork conversation")}
-					className="turn-fork-button"
-					onClick={() => onFork(final.itemId)}
-					title={t("Fork this conversation from this reply")}
-					type="button"
-				>
-					<GitFork aria-hidden="true" size={13} />
-					{t("Fork")}
-				</button>
+			{final && final.state === "completed" && (onFork || (onCopy && finalCopyText.trim() !== "")) && (
+				<div className="turn-actions">
+					{onFork && (
+						<button
+							aria-label={t("Fork conversation")}
+							className="turn-fork-button"
+							onClick={() => onFork(final.itemId)}
+							title={t("Fork this conversation from this reply")}
+							type="button"
+						>
+							<GitFork aria-hidden="true" size={13} />
+						</button>
+					)}
+					{onCopy && finalCopyText.trim() !== "" && (
+						<TurnCopyButton onCopy={onCopy} text={finalCopyText} />
+					)}
+				</div>
 			)}
 			{runtimeRunning && <TurnRuntimeStatus items={items} running startedAt={startedAt} />}
 		</>

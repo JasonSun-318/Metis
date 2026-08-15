@@ -105,6 +105,20 @@ describe("Composer visual states", () => {
 		expect(css).toContain(':root[data-motion="reduced"] .task-list-slot');
 	});
 
+	it("uses reference-sized Skill and attachment cards", () => {
+		expect(rule(".composer-input-line").display).toBe("flex");
+		expect(rule(".composer-skill-token").background).toBe("transparent");
+		expect(rule(".composer-skill-token:hover").background).toBe("transparent");
+		expect(rule(".composer-image-preview").width).toBe("64px");
+		expect(rule(".composer-image-preview").height).toBe("64px");
+		expect(rule(".composer-file-card").width).toBe("200px");
+		expect(rule(".composer-file-card").height).toBe("64px");
+		expect(rule(".composer-file-card-icon").width).toBe("40px");
+		expect(rule(".composer-image-preview > button, .composer-file-card > button").background).toBe(
+			"var(--button-primary-bg)",
+		);
+	});
+
 	it("docks a non-collapsible permission approval above the composer", () => {
 		const slot = rule(".permission-approval-slot");
 		expect(slot.margin).toBe("0px 16px");

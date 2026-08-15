@@ -36,7 +36,7 @@ describe("Code transcript visual contract", () => {
 		expect(tokens).toContain("--app-bg: #202020");
 		expect(tokens).toContain("--panel: #2e2e2e");
 		expect(rule(".message-user").background).toBe("var(--surface-00)");
-		expect(rule(".transcript-code .code-turn-user > div").background).toBe("var(--surface-06)");
+		expect(rule(".transcript-code .code-turn-user > .code-turn-user-bubble").background).toBe("var(--surface-06)");
 		expect(rule(".transcript-code :is(.code-turn-answer, .code-turn-status) table").borderCollapse).toBe("separate");
 		expect(rule(".transcript-code :is(.code-turn-answer, .code-turn-status) table").borderSpacing).toBe("2px");
 		expect(rule(".transcript-code :is(.code-turn-answer, .code-turn-status) :is(th, td)").borderWidth).toBe("0px");
@@ -61,5 +61,21 @@ describe("Code transcript visual contract", () => {
 	it("keeps the runtime spinner the same height as its status text", () => {
 		expect(rule(".turn-runtime-status").fontSize).toBe("12px");
 		expect(rule(".turn-runtime-spinner").getPropertyValue("--uib-size")).toBe("1em");
+	});
+
+	it("hides fork and copy actions until the message is hovered", () => {
+		expect(rule(".turn-actions").opacity).toBe("0");
+		expect(css).toContain(".turn-user:hover .turn-actions, .code-turn-user:hover .turn-actions");
+		expect(css).toContain("[data-transcript-answer]:hover ~ .turn-actions");
+		expect(css).toContain(".turn-actions:focus-within");
+	});
+
+	it("rolls the Code execution title vertically and disables the leave layer under reduced motion", () => {
+		expect(rule(".code-execution-title-enter").animation).toBe("code-title-enter 180ms ease");
+		expect(rule(".code-execution-title-leave").position).toBe("absolute");
+		expect(css).toContain(
+			"@keyframes code-title-leave { from { translate: 0 0; opacity: 1; } to { translate: 0 100%; opacity: 0; } }",
+		);
+		expect(css).toContain(':root[data-motion="reduced"] .code-execution-title-leave { display: none; }');
 	});
 });

@@ -1,5 +1,5 @@
 import type { McpServerSummaryView, SessionTaskView, SkillSummaryView } from "@metis/app-protocol";
-import { ArrowUp, Paperclip, Scroll, Stop, X } from "@phosphor-icons/react";
+import { ArrowUp, Scroll, Stop, X } from "@phosphor-icons/react";
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import type { DesktopAttachmentSelection } from "../../shared/desktop-api.ts";
@@ -10,8 +10,14 @@ import {
 	SlashCommandMenu,
 } from "./SlashCommandMenu.tsx";
 import { TaskList } from "./TaskList.tsx";
+import { WorkspaceFileIcon } from "./WorkspaceFileIcon.tsx";
 
 const noSlashCommands = new Set<ComposerSlashCommand>();
+
+function attachmentTypeLabel(name: string): string {
+	const extension = name.match(/\.([^.]+)$/u)?.[1];
+	return extension ? extension.slice(0, 8).toLocaleUpperCase("en-US") : "FILE";
+}
 
 export interface ComposerSubmission {
 	readonly text: string;
@@ -46,6 +52,8 @@ interface ComposerProps {
 	readonly tasks?: readonly SessionTaskView[];
 	readonly taskListEpoch?: string | null;
 	readonly thinkingControl?: ReactNode;
+	/** Live cache hit percentage for the active session; null when there is no usage yet. */
+	readonly cacheHitPercent?: number | null;
 }
 
 export function Composer({
@@ -63,6 +71,7 @@ export function Composer({
 	onPickFiles,
 	onSlashCommand,
 	appearance = "code",
+	cacheHitPercent,
 	interactionControl,
 	queuedTurnControl,
 	modelControl,
@@ -111,6 +120,9 @@ export function Composer({
 			return [...byPath.values()].slice(0, 16);
 		});
 	};
+	const removeAttachment = (path: string) => {
+		setAttachments((current) => current.filter((attachment) => attachment.path !== path));
+	};
 	const submit = async (event: FormEvent) => {
 		event.preventDefault();
 		const prompt = text.trim();
@@ -155,9 +167,39 @@ export function Composer({
 			{queuedTurnControl}
 			<form className={`composer composer-${appearance}`} onSubmit={(event) => void submit(event).catch(() => undefined)}>
 				<label className="sr-only" htmlFor="composer-input">{t("Message Metis")}</label>
-				<textarea
-					disabled={disabled || submitting}
-					id="composer-input"
+				{attachments.length > 0 && (
+					<div aria-label={t("Message additions")} className="composer-attachments">
+						{attachments.map((attachment) => attachment.previewDataUrl ? (
+							<div className="composer-image-preview" key={attachment.path}>
+								<img alt={attachment.name} src={attachment.previewDataUrl} />
+								<button aria-label={t("Remove file {{name}}", { name: attachment.name })} onClick={() => removeAttachment(attachment.path)} type="button">
+									<X aria-hidden="true" size={12} />
+								</button>
+							</div>
+						) : (
+							<div className="composer-file-card" key={attachment.path}>
+								<span className="composer-file-card-icon"><WorkspaceFileIcon path={attachment.name} size={22} /></span>
+								<span className="composer-file-card-copy">
+									<strong title={attachment.name}>{attachment.name}</strong>
+									<small>{attachmentTypeLabel(attachment.name)}</small>
+								</span>
+								<button aria-label={t("Remove file {{name}}", { name: attachment.name })} onClick={() => removeAttachment(attachment.path)} type="button">
+									<X aria-hidden="true" size={12} />
+								</button>
+							</div>
+						))}
+					</div>
+				)}
+				<div className="composer-input-line">
+					{selectedSkill && (
+						<button aria-label={t("Remove skill {{name}}", { name: selectedSkill.name })} className="composer-skill-token" onClick={() => setSelectedSkill(undefined)} type="button">
+							<Scroll aria-hidden="true" size={16} />
+							<span>{selectedSkill.name}</span>
+						</button>
+					)}
+					<textarea
+						disabled={disabled || submitting}
+						id="composer-input"
 						onChange={(event) => {
 							const next = event.target.value;
 							setText(next);
@@ -168,35 +210,23 @@ export function Composer({
 								setDismissedSlashText(undefined);
 							}
 						}}
-					onKeyDown={(event) => {
-						if (event.defaultPrevented) return;
-						if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
-							event.preventDefault();
-							event.currentTarget.form?.requestSubmit();
-						}
-					}}
-					placeholder={placeholder ?? t(running || queueing ? "Add a queued message…" : "Ask Metis anything, or describe a task…")}
-					rows={1}
-					value={text}
-				/>
-				{(selectedSkill || attachments.length > 0) && (
-					<div aria-label={t("Message additions")} className="composer-chips">
-						{selectedSkill && (
-							<button aria-label={t("Remove skill {{name}}", { name: selectedSkill.name })} className="is-skill" onClick={() => setSelectedSkill(undefined)} type="button">
-								<Scroll aria-hidden="true" size={14} />
-								<span>{selectedSkill.name}</span>
-								<X aria-hidden="true" size={12} />
-							</button>
-						)}
-						{attachments.map((attachment) => (
-							<button aria-label={t("Remove file {{name}}", { name: attachment.name })} key={attachment.path} onClick={() => setAttachments((current) => current.filter(({ path }) => path !== attachment.path))} type="button">
-								<Paperclip aria-hidden="true" size={14} />
-								<span>{attachment.name}</span>
-								<X aria-hidden="true" size={12} />
-							</button>
-						))}
-					</div>
-				)}
+						onKeyDown={(event) => {
+							if (event.defaultPrevented) return;
+							if (event.key === "Backspace" && text.length === 0 && selectedSkill && !event.nativeEvent.isComposing) {
+								event.preventDefault();
+								setSelectedSkill(undefined);
+								return;
+							}
+							if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
+								event.preventDefault();
+								event.currentTarget.form?.requestSubmit();
+							}
+						}}
+						placeholder={placeholder ?? t(running || queueing ? "Add a queued message…" : "Ask Metis anything, or describe a task…")}
+						rows={1}
+						value={text}
+					/>
+				</div>
 				<div className="composer-actions">
 					<div className="composer-leading">
 						<ComposerAddMenu
@@ -214,6 +244,15 @@ export function Composer({
 						{mcpConnectionState === "failed" && <button className="composer-mcp-status is-error" onClick={() => onManageMcp?.()} type="button">{t("MCP connection failed")}</button>}
 					</div>
 					<div className="composer-trailing">
+						{cacheHitPercent !== null && cacheHitPercent !== undefined && (
+							<span
+								aria-label={`${t("Cache hit rate")} ${Math.round(cacheHitPercent)}%`}
+								className="composer-cache-hit"
+							>
+								<span className="composer-cache-hit-label">{t("Cache")}</span>
+								<strong>{Math.round(cacheHitPercent)}%</strong>
+							</span>
+						)}
 						{modelControl}
 						{thinkingControl}
 						{running && !hasInput ? (
@@ -226,9 +265,6 @@ export function Composer({
 					</div>
 				</div>
 			</form>
-			{appearance === "chat" && (
-				<p className="composer-disclaimer">{t("Metis is AI and can make mistakes. Please double-check responses.")}</p>
-			)}
 		</div>
 	);
 }

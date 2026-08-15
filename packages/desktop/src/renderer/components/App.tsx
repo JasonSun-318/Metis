@@ -4,6 +4,7 @@ import {
 	type DomainEvent,
 	type InteractionResponseInput,
 	type InteractionView,
+	type ItemView,
 	type McpServerSummaryView,
 	type ModelOptionView,
 	type ModelSettingsView,
@@ -175,6 +176,26 @@ export function firstInteractionForSession(
 		if (interaction?.sessionId === sessionId) return interaction;
 	}
 	return undefined;
+}
+
+export function latestCacheHitPercent(
+	itemOrder: readonly string[],
+	itemsById: ReadonlyMap<string, ItemView>,
+): number | null {
+	let reportedCache = false;
+	let latest: ItemView["usage"];
+	for (const itemId of itemOrder) {
+		const item = itemsById.get(itemId);
+		if (item?.role !== "assistant" || item.state !== "completed" || !item.usage) continue;
+		latest = item.usage;
+		reportedCache ||= (latest.cacheReadTokens ?? 0) + (latest.cacheWriteTokens ?? 0) > 0;
+	}
+	const promptTokens = latest
+		? (latest.inputTokens ?? 0) + (latest.cacheReadTokens ?? 0) + (latest.cacheWriteTokens ?? 0)
+		: 0;
+	return reportedCache && latest && promptTokens > 0
+		? Math.max(0, Math.min(100, ((latest.cacheReadTokens ?? 0) / promptTokens) * 100))
+		: null;
 }
 
 const TOOLS_SIDEBAR_WIDTH_PREFIX = "metis.tools-sidebar-width.v2:";
@@ -1082,6 +1103,9 @@ export function App({ api, store }: AppProps) {
 	const toolsSidebarAvailable = visibleActiveSession !== undefined;
 	const running = visibleActiveSession?.state === "running" || (visibleActiveSession !== undefined && state.activeTurnId !== null);
 	const serverReady = state.supervisor.state === "ready";
+	const activeSessionCacheHitPercent = visibleActiveSession
+		? latestCacheHitPercent(state.itemOrder, state.itemsById)
+		: null;
 	useEffect(() => {
 		statusGeneration.current += 1;
 		setSessionStatusPanel(null);
@@ -1666,12 +1690,13 @@ export function App({ api, store }: AppProps) {
 					<div className="workspace-body">
 						<div className="conversation-column">
 							<RecoveryBanner session={visibleActiveSession} />
-							<Transcript activeTurnId={state.activeTurnId} activeTurnStartedAt={state.activeTurnId ? state.turnsById.get(state.activeTurnId)?.startedAt : undefined} appearance={visibleActiveSession.mode} autoLoadOlder hasOlder={state.nextBeforeItemId !== null} itemIds={state.itemOrder} itemsById={state.itemsById} loadingOlder={loadingOlder} onFork={forkFromReply} onLoadOlder={loadOlder} />
+							<Transcript activeTurnId={state.activeTurnId} activeTurnStartedAt={state.activeTurnId ? state.turnsById.get(state.activeTurnId)?.startedAt : undefined} appearance={visibleActiveSession.mode} autoLoadOlder hasOlder={state.nextBeforeItemId !== null} itemIds={state.itemOrder} itemsById={state.itemsById} loadingOlder={loadingOlder} onCopy={(text) => void api.writeClipboardText({ text }).catch(reportError)} onFork={forkFromReply} onLoadOlder={loadOlder} />
 							{compactingSession?.sessionId === visibleActiveSession.sessionId && (
 								<TurnRuntimeStatus items={[]} running startedAt={compactingSession.startedAt} variant="compaction" />
 							)}
-							<Composer
-								appearance={visibleActiveSession.mode}
+								<Composer
+									appearance={visibleActiveSession.mode}
+									cacheHitPercent={activeSessionCacheHitPercent}
 								commandPanel={sessionStatusPanel?.sessionId === visibleActiveSession.sessionId ? <SessionStatusPanel error={sessionStatusPanel.error} loading={sessionStatusPanel.loading} onClose={closeSessionStatus} status={sessionStatusPanel.status} /> : undefined}
 								commandRequest={{ id: composerControl.id, open: composerControl.target === "mcp" }}
 								disabled={!serverReady || state.syncStatus !== "ready" || compactingSession !== null}

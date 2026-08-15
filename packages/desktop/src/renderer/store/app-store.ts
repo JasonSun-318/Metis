@@ -5,6 +5,7 @@ import type {
 	DomainEvent,
 	InteractionView,
 	ItemView,
+	QueuedTurnView,
 	SessionSnapshot,
 	SessionSummary,
 	TurnView,
@@ -61,7 +62,7 @@ export interface AppStoreSnapshot {
 	readonly availableModels: NonNullable<SessionSnapshot["availableModels"]>;
 	readonly subagents: SessionSnapshot["subagents"];
 	readonly tasks: SessionSnapshot["tasks"];
-	readonly queuedTurns: SessionSnapshot["queuedTurns"];
+	readonly queuedTurns: readonly QueuedTurnView[];
 	readonly subagentTranscript: SubagentTranscriptState;
 	readonly supervisor: SupervisorView;
 }

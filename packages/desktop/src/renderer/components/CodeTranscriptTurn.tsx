@@ -1,14 +1,16 @@
 import type { ItemContentBlockView, ItemView } from "@metis/app-protocol";
 import { CaretRight, CircleNotch, GitFork, ImageSquare, TerminalWindow, Wrench } from "@phosphor-icons/react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Markdown } from "./Markdown.tsx";
+import { TurnCopyButton } from "./TranscriptTurn.tsx";
 import { TurnRuntimeStatus } from "./TurnRuntimeStatus.tsx";
 import {
 	actionSummary,
 	buildCodeTurnPresentation,
 	commandText,
 	isCommandTool,
+	messageText,
 	toolTranscriptPresentation,
 	type ToolCallBlock,
 	type ToolDetailLine,
@@ -111,6 +113,30 @@ function CodeOrphanToolStep({ result }: { readonly result: ToolResultBlock }) {
 	);
 }
 
+function CodeExecutionTitle({ text }: { readonly text: string }) {
+	const previous = useRef(text);
+	const [leaving, setLeaving] = useState<string | null>(null);
+	const leavingTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+	useEffect(() => {
+		if (text === previous.current) return;
+		setLeaving(previous.current);
+		previous.current = text;
+		if (leavingTimer.current) clearTimeout(leavingTimer.current);
+		leavingTimer.current = setTimeout(() => setLeaving(null), 180);
+		return () => {
+			if (leavingTimer.current) clearTimeout(leavingTimer.current);
+		};
+	}, [text]);
+	return (
+		<span className="code-execution-title-roller">
+			{leaving !== null && (
+				<span aria-hidden="true" className="code-execution-title-leave">{leaving}</span>
+			)}
+			<span className={`code-execution-title-enter${leaving !== null ? " from-top" : ""}`} key={text}>{text}</span>
+		</span>
+	);
+}
+
 function CodeExecution({ calls, results, orphanResults }: {
 	readonly calls: readonly ToolCallBlock[];
 	readonly results: ReadonlyMap<string, ToolResultBlock>;
@@ -124,7 +150,7 @@ function CodeExecution({ calls, results, orphanResults }: {
 				event.preventDefault();
 				setOpen((current) => !current);
 			}}>
-				<span>{calls.length > 0 ? actionSummary(calls, t) : t("Used a tool")}</span>
+				<CodeExecutionTitle text={calls.length > 0 ? actionSummary(calls, t) : t("Used a tool")} />
 				<CaretRight aria-hidden="true" className="code-execution-caret" size={12} />
 			</summary>
 			{open && (
@@ -145,23 +171,33 @@ function CodeExecution({ calls, results, orphanResults }: {
 	);
 }
 
-export function CodeTranscriptTurn({ items, running = false, startedAt, onFork }: {
+export function CodeTranscriptTurn({ items, running = false, startedAt, onFork, onCopy }: {
 	readonly items: readonly ItemView[];
 	readonly running?: boolean;
 	readonly startedAt?: string;
 	readonly onFork?: (entryId: string) => void;
+	readonly onCopy?: (text: string) => void;
 }) {
 	const { t } = useTranslation();
-	const { users, segments, results, finalItemId } = buildCodeTurnPresentation(items);
+	const { users, segments, results, final } = buildCodeTurnPresentation(items);
 	const enteringUserId = running ? users.at(-1)?.itemId : undefined;
+	const finalCopyText = final ? messageText(final) : "";
 
 	return (
 		<>
-			{users.map((item) => (
-				<div className={`code-turn-user${item.itemId === enteringUserId ? " is-entering" : ""}`} key={item.itemId}>
-					<div>{item.content.map((block, index) => <VisibleBlock block={block} key={`${block.type}-${index}`} />)}</div>
-				</div>
-			))}
+			{users.map((item) => {
+				const copyText = messageText(item);
+				return (
+					<div className={`code-turn-user${item.itemId === enteringUserId ? " is-entering" : ""}`} key={item.itemId}>
+						<div className="code-turn-user-bubble">{item.content.map((block, index) => <VisibleBlock block={block} key={`${block.type}-${index}`} />)}</div>
+						{onCopy && copyText.trim() !== "" && (
+							<div className="turn-actions">
+								<TurnCopyButton onCopy={onCopy} text={copyText} />
+							</div>
+						)}
+					</div>
+				);
+			})}
 			{segments.map((segment, segmentIndex) =>
 				segment.type === "tools" ? (
 					<CodeExecution
@@ -182,17 +218,23 @@ export function CodeTranscriptTurn({ items, running = false, startedAt, onFork }
 					</div>
 				),
 			)}
-			{finalItemId && onFork && (
-				<button
-					aria-label={t("Fork conversation")}
-					className="turn-fork-button"
-					onClick={() => onFork(finalItemId)}
-					title={t("Fork this conversation from this reply")}
-					type="button"
-				>
-					<GitFork aria-hidden="true" size={13} />
-					{t("Fork")}
-				</button>
+			{final && final.state === "completed" && (onFork || (onCopy && finalCopyText.trim() !== "")) && (
+				<div className="turn-actions">
+					{onFork && (
+						<button
+							aria-label={t("Fork conversation")}
+							className="turn-fork-button"
+							onClick={() => onFork(final.itemId)}
+							title={t("Fork this conversation from this reply")}
+							type="button"
+						>
+							<GitFork aria-hidden="true" size={13} />
+						</button>
+					)}
+					{onCopy && finalCopyText.trim() !== "" && (
+						<TurnCopyButton onCopy={onCopy} text={finalCopyText} />
+					)}
+				</div>
 			)}
 			{running && <TurnRuntimeStatus items={items} running startedAt={startedAt} />}
 		</>

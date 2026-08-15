@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import type { ClientResult, McpServerSummaryView, ScheduleTaskView, SessionSnapshot, SessionSummary } from "@metis/app-protocol";
+import type { ClientResult, ItemView, McpServerSummaryView, ScheduleTaskView, SessionSnapshot, SessionSummary } from "@metis/app-protocol";
 import { EditorView } from "@codemirror/view";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	App,
 	firstInteractionForSession,
+	latestCacheHitPercent,
 	sessionDisplayTitle,
 } from "../src/renderer/components/App.tsx";
 import { buildSessionTree, clampSessionSidebarWidth } from "../src/renderer/components/SessionSidebar.tsx";
@@ -392,6 +393,8 @@ function createHarness(options: {
 		}),
 		writeClipboardText: vi.fn().mockResolvedValue(undefined),
 		setWorkspaceEditState: vi.fn().mockResolvedValue(undefined),
+		getWebSearchSettings: vi.fn().mockResolvedValue({ enabled: false, provider: "brave", authConfigured: false }),
+		updateWebSearchSettings: vi.fn().mockResolvedValue({ enabled: false, provider: "brave", authConfigured: false }),
 		getUpdateState: vi.fn(async () => updateState),
 		startUpdate: vi.fn().mockResolvedValue(undefined),
 		subscribeUpdate: vi.fn((listener) => {
@@ -526,6 +529,28 @@ afterEach(() => {
 	vi.restoreAllMocks();
 	localStorage.clear();
 	document.body.replaceChildren();
+});
+
+describe("latestCacheHitPercent", () => {
+	it("uses the latest completed assistant request after caching is reported", () => {
+		const assistant = (itemId: string, state: ItemView["state"], input: number, read: number, write: number): ItemView => ({
+			itemId,
+			sessionId: "session-1",
+			role: "assistant",
+			state,
+			content: [],
+			usage: { outputTokens: 1, inputTokens: input, cacheReadTokens: read, cacheWriteTokens: write },
+			createdAt: "2026-08-15T00:00:00.000Z",
+			...(state === "streaming" ? {} : { completedAt: "2026-08-15T00:00:01.000Z" }),
+		});
+		const items = new Map<string, ItemView>([
+			["cached", assistant("cached", "completed", 0, 80, 20)],
+			["latest", assistant("latest", "completed", 100, 0, 0)],
+			["streaming", assistant("streaming", "streaming", 0, 100, 0)],
+		]);
+		expect(latestCacheHitPercent(["cached", "latest", "streaming"], items)).toBe(0);
+		expect(latestCacheHitPercent(["latest"], items)).toBeNull();
+	});
 });
 
 describe("Chat desktop shell", () => {
@@ -2210,7 +2235,7 @@ describe("Chat desktop shell", () => {
 		await act(async () => button(container, "Add to message").click());
 		await act(async () => button(container.querySelector<HTMLElement>(".composer-add-menu")!, "Add files or photos").click());
 		await flush();
-		expect(container.querySelector(".composer-chips")?.textContent).toContain("report.pdf");
+		expect(container.querySelector(".composer-file-card")?.textContent).toContain("report.pdf");
 		await act(async () => root.unmount());
 	});
 
@@ -2325,6 +2350,130 @@ describe("Chat desktop shell", () => {
 		});
 		expect(api.openSession).toHaveBeenCalledWith({ sessionId: "forked-session-1" });
 		expect(container.textContent).toContain("fork Chat project task");
+		await act(async () => root.unmount());
+	});
+
+	it("copies the user message and assistant reply text in Chat mode", async () => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
+		const { api, emitEvent } = createHarness();
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<App api={api} store={new AppStore()} />));
+		await flush();
+
+		await act(async () => emitEvent({
+			type: "app-server",
+			envelope: {
+				jsonrpc: "2.0",
+				method: "connection/events",
+				params: {
+					serverEpoch: EPOCH,
+					fromCursor: 1,
+					toCursor: 2,
+					events: [{
+						type: "item/completed",
+						item: {
+							itemId: "user-message-1",
+							sessionId: "chat-existing",
+							turnId: "turn-1",
+							role: "user",
+							state: "completed",
+							content: [{ type: "text", text: "hello metis" }],
+							createdAt: "2026-08-13T00:00:00.000Z",
+							completedAt: "2026-08-13T00:00:00.000Z",
+						},
+					}, {
+						type: "item/completed",
+						item: {
+							itemId: "assistant-reply-2",
+							sessionId: "chat-existing",
+							turnId: "turn-1",
+							role: "assistant",
+							state: "completed",
+							content: [{ type: "text", text: "Here is the reply" }],
+							createdAt: "2026-08-13T00:00:01.000Z",
+							completedAt: "2026-08-13T00:00:01.000Z",
+						},
+					}],
+				},
+			},
+		}));
+		await flush();
+
+		const copyButtons = container.querySelectorAll<HTMLButtonElement>('[aria-label="Copy message"]');
+		expect(copyButtons).toHaveLength(2);
+		expect(container.querySelector(".turn-actions")).not.toBeNull();
+
+		await act(async () => copyButtons[0]!.click());
+		await flush();
+		expect(api.writeClipboardText).toHaveBeenCalledWith({ text: "hello metis" });
+		await act(async () => copyButtons[1]!.click());
+		await flush();
+		expect(api.writeClipboardText).toHaveBeenCalledWith({ text: "Here is the reply" });
+		await act(async () => root.unmount());
+	});
+
+	it("copies the user message and assistant reply text in Code mode", async () => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		localStorage.setItem("metis.activeSessionId.code", "code-existing");
+		const { api, emitEvent } = createHarness();
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<App api={api} store={new AppStore()} />));
+		await flush();
+		await act(async () => button(container, "Code").click());
+		await flush();
+
+		await act(async () => emitEvent({
+			type: "app-server",
+			envelope: {
+				jsonrpc: "2.0",
+				method: "connection/events",
+				params: {
+					serverEpoch: EPOCH,
+					fromCursor: 1,
+					toCursor: 2,
+					events: [{
+						type: "item/completed",
+						item: {
+							itemId: "code-user-message-1",
+							sessionId: "code-existing",
+							turnId: "code-turn-1",
+							role: "user",
+							state: "completed",
+							content: [{ type: "text", text: "build the app" }],
+							createdAt: "2026-08-13T00:00:00.000Z",
+							completedAt: "2026-08-13T00:00:00.000Z",
+						},
+					}, {
+						type: "item/completed",
+						item: {
+							itemId: "code-reply-2",
+							sessionId: "code-existing",
+							turnId: "code-turn-1",
+							role: "assistant",
+							state: "completed",
+							content: [{ type: "text", text: "Code reply here" }],
+							createdAt: "2026-08-13T00:00:01.000Z",
+							completedAt: "2026-08-13T00:00:01.000Z",
+						},
+					}],
+				},
+			},
+		}));
+		await flush();
+
+		const copyButtons = container.querySelectorAll<HTMLButtonElement>('[aria-label="Copy message"]');
+		expect(copyButtons).toHaveLength(2);
+		await act(async () => copyButtons[0]!.click());
+		await flush();
+		expect(api.writeClipboardText).toHaveBeenCalledWith({ text: "build the app" });
+		await act(async () => copyButtons[1]!.click());
+		await flush();
+		expect(api.writeClipboardText).toHaveBeenCalledWith({ text: "Code reply here" });
 		await act(async () => root.unmount());
 	});
 
@@ -2561,6 +2710,11 @@ describe("Chat desktop shell", () => {
 	it("submits selected files and one hidden skill on first Chat send", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 		const { api } = createHarness();
+		vi.mocked(api.selectAttachmentFiles).mockResolvedValue([{
+			path: "/tmp/photo.png",
+			name: "photo.png",
+			previewDataUrl: "data:image/png;base64,cHJldmlldw==",
+		}]);
 		const container = document.createElement("div");
 		document.body.append(container);
 		const root = createRoot(container);
@@ -2583,7 +2737,7 @@ describe("Chat desktop shell", () => {
 		expect(skillsButton.classList.contains("is-active")).toBe(true);
 		await act(async () => button(container.querySelector<HTMLElement>(".composer-skill-menu")!, "pdf").click());
 
-		expect(container.textContent).toContain("report.pdf");
+		expect(container.querySelector('.composer-image-preview img[alt="photo.png"]')).not.toBeNull();
 		expect(container.querySelector('[aria-label="Remove skill pdf"]')).not.toBeNull();
 		expect([...container.querySelectorAll("button")].some((candidate) => candidate.textContent?.trim() === "Browse skills")).toBe(false);
 		const textarea = container.querySelector("textarea")!;
@@ -2596,7 +2750,7 @@ describe("Chat desktop shell", () => {
 		expect(api.startTurn).toHaveBeenCalledWith(expect.objectContaining({
 			sessionId: "chat-created",
 			text: "/skill:pdf Summarize this",
-			attachments: [{ path: "/tmp/report.pdf", name: "report.pdf" }],
+			attachments: [{ path: "/tmp/photo.png", name: "photo.png" }],
 		}));
 		await act(async () => root.unmount());
 	});
@@ -2763,7 +2917,8 @@ describe("Chat desktop shell", () => {
 			attachments: [{ path: "/tmp/other.pdf", name: "other.pdf" }],
 		}));
 		expect(textarea.value).toBe("");
-		expect(container.querySelector(".composer-chips")).toBeNull();
+		expect(container.querySelector(".composer-file-card")).toBeNull();
+		expect(container.querySelector(".composer-skill-token")).toBeNull();
 		await act(async () => root.unmount());
 	});
 

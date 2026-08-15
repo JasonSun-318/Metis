@@ -147,7 +147,9 @@ export function removeModeProjectSessions(state: MutableProjectionState, mode: A
 		}),
 	);
 	if (removed.size === 0) return false;
-	for (const sessionId of removed) state.sessionsById.delete(sessionId);
+	for (const sessionId of removed) {
+		state.sessionsById.delete(sessionId);
+	}
 	state.sessionOrder = state.sessionOrder.filter((sessionId) => !removed.has(sessionId));
 	state.notifications = state.notifications.filter(
 		(notification) => notification.sessionId === undefined || !removed.has(notification.sessionId),

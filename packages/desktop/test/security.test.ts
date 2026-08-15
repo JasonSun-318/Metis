@@ -1585,14 +1585,24 @@ describe("desktop trust boundaries", () => {
 	it("returns only selected files through the guarded native file capability", async () => {
 		const ipcMain = new FakeIpcMain();
 		const { supervisor } = supervisorHarness();
-		const selectAttachmentFiles = vi.fn().mockResolvedValue([{ path: "/tmp/report.pdf", name: "report.pdf" }]);
+		const selectAttachmentFiles = vi.fn().mockResolvedValue([
+			{
+				path: "/tmp/photo.png",
+				name: "photo.png",
+				previewDataUrl: "data:image/png;base64,cHJldmlldw==",
+			},
+		]);
 		const broker = new ClientBroker({ ipcMain: ipcMain as never, supervisor, selectAttachmentFiles });
 		const webContents = new FakeWebContents();
 		broker.attach({ webContents: webContents as never });
 		const event = { sender: webContents, senderFrame: webContents.mainFrame };
 
 		await expect(ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.selectAttachmentFiles)!(event)).resolves.toEqual([
-			{ path: "/tmp/report.pdf", name: "report.pdf" },
+			{
+				path: "/tmp/photo.png",
+				name: "photo.png",
+				previewDataUrl: "data:image/png;base64,cHJldmlldw==",
+			},
 		]);
 		expect(selectAttachmentFiles).toHaveBeenCalledOnce();
 		broker.dispose();

@@ -1,4 +1,4 @@
-import { basename, join } from "node:path";
+import { basename, extname, join } from "node:path";
 import {
 	app,
 	BrowserWindow,
@@ -7,13 +7,18 @@ import {
 	ipcMain,
 	Menu,
 	Notification,
+	nativeImage,
 	type OpenDialogOptions,
 	powerSaveBlocker,
 	shell,
 	utilityProcess,
 } from "electron";
 import squirrelStartup from "electron-squirrel-startup";
-import { DESKTOP_UPDATE_EVENT_CHANNEL, type DesktopWorkspaceEditState } from "../shared/desktop-api.ts";
+import {
+	DESKTOP_UPDATE_EVENT_CHANNEL,
+	type DesktopAttachmentSelection,
+	type DesktopWorkspaceEditState,
+} from "../shared/desktop-api.ts";
 import { installAppProtocol, registerAppScheme } from "./app-protocol-scheme.ts";
 import { AppServerSupervisor, type UtilityChild } from "./app-server-supervisor.ts";
 import { createBackgroundCompletionTracker } from "./background-completion.ts";
@@ -44,6 +49,19 @@ const scheduleKeepAwake = createScheduleKeepAwake(powerSaveBlocker);
 function isAppActive(): boolean {
 	if (process.platform === "darwin") return app.isActive();
 	return BrowserWindow.getAllWindows().some((window) => !window.isDestroyed() && window.isFocused());
+}
+
+const attachmentImageExtensions = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp"]);
+
+async function attachmentSelection(path: string): Promise<DesktopAttachmentSelection> {
+	const selection = { path, name: basename(path) };
+	if (!attachmentImageExtensions.has(extname(path).toLowerCase())) return selection;
+	try {
+		const thumbnail = await nativeImage.createThumbnailFromPath(path, { width: 96, height: 96 });
+		return thumbnail.isEmpty() ? selection : { ...selection, previewDataUrl: thumbnail.toDataURL() };
+	} catch {
+		return selection;
+	}
 }
 
 function confirmDiscardWorkspaceEdits(window: BrowserWindow | null, action: "close" | "quit"): boolean {
@@ -189,7 +207,7 @@ async function launch(): Promise<void> {
 			const result = mainWindow
 				? await dialog.showOpenDialog(mainWindow, options)
 				: await dialog.showOpenDialog(options);
-			return result.canceled ? [] : result.filePaths.map((path) => ({ path, name: basename(path) }));
+			return result.canceled ? [] : await Promise.all(result.filePaths.map(attachmentSelection));
 		},
 		getDefaultProjectLocation: async () => join(app.getPath("home"), "Metis Projects"),
 		createProjectFolder,

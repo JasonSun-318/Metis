@@ -58,6 +58,8 @@ export interface CodeTurnPresentation {
 	readonly users: readonly ItemView[];
 	readonly segments: readonly CodeTranscriptSegment[];
 	readonly results: ReadonlyMap<string, ToolResultBlock>;
+	/** Final assistant reply item, when this turn has one. */
+	readonly final?: ItemView;
 	/** Final assistant reply item id, when this turn has one. */
 	readonly finalItemId?: string;
 }
@@ -83,6 +85,13 @@ export interface TurnPresentation {
 
 function textBlocks(item: ItemView): TextBlock[] {
 	return item.content.filter((block): block is TextBlock => block.type === "text");
+}
+
+/** Visible markdown/plain text of a message, concatenated in block order. */
+export function messageText(item: ItemView): string {
+	return textBlocks(item)
+		.map((block) => block.text)
+		.join("\n");
 }
 
 function isThinkingEcho(text: string, thinking: string): boolean {
@@ -675,6 +684,7 @@ export function buildCodeTurnPresentation(items: readonly ItemView[]): CodeTurnP
 		users: items.filter((item) => item.role === "user"),
 		segments,
 		results,
+		final: finalIndex >= 0 ? items[finalIndex] : undefined,
 		finalItemId: finalIndex >= 0 ? items[finalIndex]!.itemId : undefined,
 	};
 }

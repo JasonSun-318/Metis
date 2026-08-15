@@ -134,7 +134,7 @@ export function CodeProjectSetup({
 			const cwd = createdProject ?? await onCreateProject({
 				parentDirectory: location,
 				name: name.trim(),
-				files,
+				files: files.map(({ path, name }) => ({ path, name })),
 			});
 			setCreatedProject(cwd);
 			await onOpenProject(cwd);

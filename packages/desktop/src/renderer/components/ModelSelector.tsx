@@ -16,9 +16,13 @@ export function ModelSelector({ available, commandRequest, disabled, onChange, v
 	const { t } = useTranslation();
 	const [open, setOpen] = useState(false);
 	const [activeProvider, setActiveProvider] = useState<string | null>(null);
+	const [providerQuery, setProviderQuery] = useState("");
+	const [modelQuery, setModelQuery] = useState("");
 	const [pending, setPending] = useState(false);
 	const rootRef = useRef<HTMLDivElement>(null);
 	const triggerRef = useRef<HTMLButtonElement>(null);
+	const providerSearchRef = useRef<HTMLInputElement>(null);
+	const modelSearchRef = useRef<HTMLInputElement>(null);
 	const lastCommandRequest = useRef(commandRequest?.id);
 	const selected = available.find((model) => model.provider === value?.provider && model.modelId === value.modelId);
 
@@ -32,19 +36,39 @@ export function ModelSelector({ available, commandRequest, disabled, onChange, v
 		});
 	}, [available, value?.provider]);
 
+	const visibleProviders = useMemo(() => {
+		const query = providerQuery.trim().toLowerCase();
+		if (query === "") return providers;
+		return providers.filter(
+			([provider, name]) => name.toLowerCase().includes(query) || provider.toLowerCase().includes(query),
+		);
+	}, [providers, providerQuery]);
+
 	const activeModels = useMemo(
 		() => (activeProvider === null ? [] : available.filter((model) => model.provider === activeProvider)),
 		[activeProvider, available],
 	);
 
+	const visibleModels = useMemo(() => {
+		const query = modelQuery.trim().toLowerCase();
+		if (query === "") return activeModels;
+		return activeModels.filter(
+			(model) => model.name.toLowerCase().includes(query) || model.modelId.toLowerCase().includes(query),
+		);
+	}, [activeModels, modelQuery]);
+
 	const close = (restoreFocus = false) => {
 		setOpen(false);
 		setActiveProvider(null);
+		setProviderQuery("");
+		setModelQuery("");
 		if (restoreFocus) triggerRef.current?.focus();
 	};
 	const selectModel = useCallback(async (model: ModelOptionView) => {
 		setOpen(false);
 		setActiveProvider(null);
+		setProviderQuery("");
+		setModelQuery("");
 		setPending(true);
 		try {
 			await onChange(model);
@@ -62,7 +86,14 @@ export function ModelSelector({ available, commandRequest, disabled, onChange, v
 		lastCommandRequest.current = commandRequest.id;
 		setOpen(commandRequest.open && !disabled);
 		setActiveProvider(null);
+		setProviderQuery("");
+		setModelQuery("");
 	}, [commandRequest, disabled]);
+
+	useEffect(() => {
+		if (open && activeProvider === null) providerSearchRef.current?.focus();
+		else if (open && activeProvider !== null) modelSearchRef.current?.focus();
+	}, [open, activeProvider]);
 
 	useEffect(() => {
 		if (!open) return;
@@ -74,13 +105,14 @@ export function ModelSelector({ available, commandRequest, disabled, onChange, v
 				event.preventDefault();
 				if (activeProvider !== null) {
 					setActiveProvider(null);
+					setModelQuery("");
 					return;
 				}
 				close(true);
 				return;
 			}
-			if (activeProvider === null) return;
-			const model = /^[1-9]$/.test(event.key) ? activeModels[Number(event.key) - 1] : undefined;
+			if (activeProvider === null || event.target instanceof HTMLInputElement) return;
+			const model = /^[1-9]$/.test(event.key) ? visibleModels[Number(event.key) - 1] : undefined;
 			if (!model) return;
 			event.preventDefault();
 			close(true);
@@ -92,7 +124,7 @@ export function ModelSelector({ available, commandRequest, disabled, onChange, v
 			document.removeEventListener("pointerdown", onPointerDown);
 			document.removeEventListener("keydown", onKeyDown);
 		};
-	}, [activeModels, activeProvider, open, selectModel]);
+	}, [activeModels, activeProvider, open, selectModel, visibleModels]);
 
 	return (
 		<div className="composer-selector model-selector model-control" ref={rootRef}>
@@ -112,7 +144,20 @@ export function ModelSelector({ available, commandRequest, disabled, onChange, v
 			{open && (
 				<div aria-label={t("Providers")} className="model-selector-popover is-provider" role="menu">
 					<p>{t("Providers")}</p>
-					{providers.map(([provider, name]) => {
+					<input
+						aria-label={t("Search providers")}
+						autoComplete="off"
+						className="model-selector-search"
+						onChange={(event) => setProviderQuery(event.target.value)}
+						placeholder={t("Search providers")}
+						ref={providerSearchRef}
+						spellCheck={false}
+						type="text"
+						value={providerQuery}
+					/>
+					{visibleProviders.length === 0 ? (
+						<p className="model-selector-empty">{t("No matches")}</p>
+					) : visibleProviders.map(([provider, name]) => {
 						const isSelected = provider === value?.provider;
 						const expanded = provider === activeProvider;
 						return (
@@ -138,7 +183,20 @@ export function ModelSelector({ available, commandRequest, disabled, onChange, v
 			)}
 			{open && activeProvider !== null && (
 				<div aria-label={t("Models")} className="model-selector-submenu" role="menu">
-					{activeModels.map((model, index) => {
+					<input
+						aria-label={t("Search models")}
+						autoComplete="off"
+						className="model-selector-search"
+						onChange={(event) => setModelQuery(event.target.value)}
+						placeholder={t("Search models")}
+						ref={modelSearchRef}
+						spellCheck={false}
+						type="text"
+						value={modelQuery}
+					/>
+					{visibleModels.length === 0 ? (
+						<p className="model-selector-empty">{t("No matches")}</p>
+					) : visibleModels.map((model, index) => {
 						const isSelected = model.provider === value?.provider && model.modelId === value.modelId;
 						return (
 							<button

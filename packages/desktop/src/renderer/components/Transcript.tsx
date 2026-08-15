@@ -16,6 +16,7 @@ interface TranscriptProps {
 	readonly loadingOlder: boolean;
 	readonly onLoadOlder: () => Promise<void>;
 	readonly onFork?: (entryId: string) => void;
+	readonly onCopy?: (text: string) => void;
 	readonly ariaLabel?: string;
 	readonly latestLabel?: string;
 	readonly olderLabel?: string;
@@ -54,7 +55,7 @@ function transcriptRows(appearance: AgentMode, itemIds: readonly string[], items
 	return rows;
 }
 
-export function Transcript({ activeTurnId, activeTurnStartedAt, appearance, ariaLabel = "Conversation transcript", autoLoadOlder = false, hasOlder, itemIds, itemsById, latestLabel, loadingOlder, onFork, onLoadOlder, olderLabel = "Load older messages" }: TranscriptProps) {
+export function Transcript({ activeTurnId, activeTurnStartedAt, appearance, ariaLabel = "Conversation transcript", autoLoadOlder = false, hasOlder, itemIds, itemsById, latestLabel, loadingOlder, onCopy, onFork, onLoadOlder, olderLabel = "Load older messages" }: TranscriptProps) {
 	const { t } = useTranslation();
 	const scrollRef = useRef<HTMLDivElement>(null);
 	const loadingOlderRef = useRef(false);
@@ -176,9 +177,9 @@ export function Transcript({ activeTurnId, activeTurnStartedAt, appearance, aria
 								ref={virtualizer.measureElement}
 								style={{ transform: `translateY(${row.start}px)` }}
 							>
-									{compaction ? <div role="separator"><span>{t("Compacted")}</span></div> : appearance === "chat"
-										? <TranscriptTurn items={items} onFork={onFork} running={running} startedAt={activeTurnStartedAt} />
-										: <CodeTranscriptTurn items={items} onFork={onFork} running={running} startedAt={activeTurnStartedAt} />}
+								{compaction ? <div role="separator"><span>{t("Compacted")}</span></div> : appearance === "chat"
+									? <TranscriptTurn items={items} onCopy={onCopy} onFork={onFork} running={running} startedAt={activeTurnStartedAt} />
+									: <CodeTranscriptTurn items={items} onCopy={onCopy} onFork={onFork} running={running} startedAt={activeTurnStartedAt} />}
 							</article>
 						);
 					})}

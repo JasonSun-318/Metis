@@ -400,6 +400,27 @@ describe("TranscriptTurn", () => {
 		expect(container.querySelector(".turn-intermediate table")?.textContent).toContain("Child");
 		await act(async () => root.unmount());
 	});
+
+	it("shows fork and copy actions only after the reply completes", async () => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		const props = { onCopy: () => undefined, onFork: () => undefined } as const;
+
+		// 流式中间回复不显示操作按钮。
+		const streaming = item("streaming-reply", "assistant", [{ type: "text", text: "working…" }], "streaming");
+		await act(async () => root.render(<TranscriptTurn items={[streaming]} {...props} />));
+		expect(container.querySelector(".turn-actions")).toBeNull();
+
+		// 回复完成后按钮出现。
+		const completed = item("streaming-reply", "assistant", [{ type: "text", text: "done" }], "completed");
+		await act(async () => root.render(<TranscriptTurn items={[completed]} {...props} />));
+		expect(container.querySelector(".turn-actions")).not.toBeNull();
+		expect(container.querySelector('[aria-label="Fork conversation"]')).not.toBeNull();
+		expect(container.querySelector('[aria-label="Copy message"]')).not.toBeNull();
+		await act(async () => root.unmount());
+	});
 });
 
 describe("Transcript", () => {
@@ -809,5 +830,44 @@ describe("Transcript", () => {
 		expect(container.querySelector(".code-turn-answer table")?.textContent).toContain("video");
 		expect(container.textContent).not.toContain(LONG_THINKING);
 		await act(async () => root.unmount());
+	});
+
+	it("scrolls the Code execution title out and in when the summary text changes", async () => {
+		vi.useFakeTimers();
+		try {
+			const container = document.createElement("div");
+			document.body.append(container);
+			const root = createRoot(container);
+			const running = item("code-running-2", "assistant", [
+				{ type: "tool_call", toolCallId: "code-running-2", name: "bash", state: "running", inputPreview: "pwd" },
+			], "streaming");
+			const itemIds = [running.itemId];
+			const itemsById = new Map([[running.itemId, running]]);
+
+			await act(async () => root.render(
+				<Transcript appearance="code" hasOlder={false} itemIds={itemIds} itemsById={itemsById} loadingOlder={false} onLoadOlder={async () => undefined} />,
+			));
+			const enter = () => container.querySelector<HTMLElement>(".code-execution-title-enter");
+			const leave = () => container.querySelector<HTMLElement>(".code-execution-title-leave");
+			expect(enter()?.textContent).toBe("Running a command");
+			expect(leave()).toBeNull();
+
+			const completed = item("code-running-2", "assistant", [
+				{ type: "tool_call", toolCallId: "code-running-2", name: "bash", state: "completed", inputPreview: "pwd" },
+			], "completed");
+			itemsById.set(running.itemId, completed);
+			await act(async () => root.render(
+				<Transcript appearance="code" hasOlder={false} itemIds={itemIds} itemsById={itemsById} loadingOlder={false} onLoadOlder={async () => undefined} />,
+			));
+			expect(leave()?.textContent).toBe("Running a command");
+			expect(enter()?.textContent).toBe("Ran a command");
+
+			await act(async () => vi.advanceTimersByTime(200));
+			expect(leave()).toBeNull();
+			expect(enter()?.textContent).toBe("Ran a command");
+			await act(async () => root.unmount());
+		} finally {
+			vi.useRealTimers();
+		}
 	});
 });
