@@ -228,6 +228,13 @@ const scheduleCases = [
 			topModels: [{ provider: "openai", modelId: "gpt-test", totalTokens: 12 }],
 		},
 	],
+	["webSearch/get", {}, { enabled: false, provider: "brave", authConfigured: false }],
+	["webSearch/credential/reveal", { provider: "brave" }, { credential: "brave-key" }],
+	[
+		"webSearch/update",
+		{ enabled: true, provider: "serpapi", credential: { action: "set", value: "serp-key" } },
+		{ enabled: true, provider: "serpapi", authConfigured: true, authSource: "stored" },
+	],
 	[
 		"schedule/create",
 		{

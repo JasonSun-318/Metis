@@ -447,6 +447,9 @@ export const ItemContentBlockViewSchema = Type.Union([
 
 export const ItemUsageViewSchema = StrictObject({
 	outputTokens: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
+	inputTokens: Type.Optional(Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER })),
+	cacheReadTokens: Type.Optional(Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER })),
+	cacheWriteTokens: Type.Optional(Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER })),
 });
 
 export const ItemViewSchema = StrictObject({
@@ -609,7 +612,12 @@ export const ModelSettingsProviderViewSchema = StrictObject({
 	name: NameSchema,
 	builtin: Type.Boolean(),
 	baseUrl: Type.Union([Type.String({ minLength: 1, maxLength: 2_048 }), Type.Null()]),
-	api: Type.Union([Type.Literal("openai-responses"), Type.Literal("openai-completions"), Type.Null()]),
+	api: Type.Union([
+		Type.Literal("openai-responses"),
+		Type.Literal("openai-completions"),
+		Type.Literal("anthropic-messages"),
+		Type.Null(),
+	]),
 	auth: ModelAuthStatusViewSchema,
 	models: Type.Array(ModelSettingsModelViewSchema, { maxItems: 512 }),
 });
@@ -618,6 +626,19 @@ export const ModelSettingsViewSchema = StrictObject({
 	defaultThinkingSelection: ThinkingSelectionSchema,
 	providers: Type.Array(ModelSettingsProviderViewSchema, { maxItems: 128 }),
 	loadError: Type.Union([PublicTextSchema, Type.Null()]),
+});
+
+export const WebSearchProviderSchema = Type.Union([
+	Type.Literal("brave"),
+	Type.Literal("tavily"),
+	Type.Literal("serpapi"),
+]);
+export const WebSearchSettingsViewSchema = StrictObject({
+	enabled: Type.Boolean(),
+	provider: WebSearchProviderSchema,
+	authConfigured: Type.Boolean(),
+	configuredProviders: Type.Optional(Type.Array(WebSearchProviderSchema, { maxItems: 3, uniqueItems: true })),
+	authSource: Type.Optional(Type.Union([Type.Literal("stored"), Type.Literal("environment")])),
 });
 
 export const UsageRangeDaysSchema = Type.Union([Type.Literal(7), Type.Literal(30), Type.Literal(90)]);
@@ -1164,6 +1185,8 @@ export type ModelOptionView = Static<typeof ModelOptionViewSchema>;
 export type ModelSettingsModelView = Static<typeof ModelSettingsModelViewSchema>;
 export type ModelSettingsProviderView = Static<typeof ModelSettingsProviderViewSchema>;
 export type ModelSettingsView = Static<typeof ModelSettingsViewSchema>;
+export type WebSearchProvider = Static<typeof WebSearchProviderSchema>;
+export type WebSearchSettingsView = Static<typeof WebSearchSettingsViewSchema>;
 export type UsageRangeDays = Static<typeof UsageRangeDaysSchema>;
 export type UsageDailyView = Static<typeof UsageDailyViewSchema>;
 export type UsageModelView = Static<typeof UsageModelViewSchema>;

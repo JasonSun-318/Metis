@@ -2718,6 +2718,58 @@
                 },
                 "method": {
                   "type": "string",
+                  "const": "session/fork"
+                },
+                "params": {
+                  "type": "object",
+                  "required": [
+                    "requestId",
+                    "sessionId",
+                    "entryId"
+                  ],
+                  "properties": {
+                    "requestId": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "sessionId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                    },
+                    "entryId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "jsonrpc",
+                "id",
+                "method",
+                "params"
+              ],
+              "properties": {
+                "jsonrpc": {
+                  "type": "string",
+                  "const": "2.0"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "x-metis-maxUtf16Units": 128
+                },
+                "method": {
+                  "type": "string",
                   "const": "session/delete"
                 },
                 "params": {
@@ -3405,6 +3457,10 @@
                                   "const": "openai-completions"
                                 },
                                 {
+                                  "type": "string",
+                                  "const": "anthropic-messages"
+                                },
+                                {
                                   "type": "null"
                                 }
                               ]
@@ -3714,6 +3770,193 @@
                         {
                           "type": "number",
                           "const": 90
+                        }
+                      ]
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "jsonrpc",
+                "id",
+                "method",
+                "params"
+              ],
+              "properties": {
+                "jsonrpc": {
+                  "type": "string",
+                  "const": "2.0"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "x-metis-maxUtf16Units": 128
+                },
+                "method": {
+                  "type": "string",
+                  "const": "webSearch/get"
+                },
+                "params": {
+                  "type": "object",
+                  "properties": {},
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "jsonrpc",
+                "id",
+                "method",
+                "params"
+              ],
+              "properties": {
+                "jsonrpc": {
+                  "type": "string",
+                  "const": "2.0"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "x-metis-maxUtf16Units": 128
+                },
+                "method": {
+                  "type": "string",
+                  "const": "webSearch/credential/reveal"
+                },
+                "params": {
+                  "type": "object",
+                  "required": [
+                    "provider"
+                  ],
+                  "properties": {
+                    "provider": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "const": "brave"
+                        },
+                        {
+                          "type": "string",
+                          "const": "tavily"
+                        },
+                        {
+                          "type": "string",
+                          "const": "serpapi"
+                        }
+                      ]
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "jsonrpc",
+                "id",
+                "method",
+                "params"
+              ],
+              "properties": {
+                "jsonrpc": {
+                  "type": "string",
+                  "const": "2.0"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "x-metis-maxUtf16Units": 128
+                },
+                "method": {
+                  "type": "string",
+                  "const": "webSearch/update"
+                },
+                "params": {
+                  "type": "object",
+                  "required": [
+                    "enabled",
+                    "provider",
+                    "credential"
+                  ],
+                  "properties": {
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "provider": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "const": "brave"
+                        },
+                        {
+                          "type": "string",
+                          "const": "tavily"
+                        },
+                        {
+                          "type": "string",
+                          "const": "serpapi"
+                        }
+                      ]
+                    },
+                    "credential": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "required": [
+                            "action"
+                          ],
+                          "properties": {
+                            "action": {
+                              "type": "string",
+                              "const": "keep"
+                            }
+                          },
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "required": [
+                            "action"
+                          ],
+                          "properties": {
+                            "action": {
+                              "type": "string",
+                              "const": "remove"
+                            }
+                          },
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "required": [
+                            "action",
+                            "value"
+                          ],
+                          "properties": {
+                            "action": {
+                              "type": "string",
+                              "const": "set"
+                            },
+                            "value": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 32768
+                            }
+                          },
+                          "additionalProperties": false
                         }
                       ]
                     }
@@ -6972,6 +7215,21 @@
                                     "type": "integer",
                                     "minimum": 0,
                                     "maximum": 9007199254740991
+                                  },
+                                  "inputTokens": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "maximum": 9007199254740991
+                                  },
+                                  "cacheReadTokens": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "maximum": 9007199254740991
+                                  },
+                                  "cacheWriteTokens": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "maximum": 9007199254740991
                                   }
                                 },
                                 "additionalProperties": false
@@ -7385,6 +7643,21 @@
                                 ],
                                 "properties": {
                                   "outputTokens": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "maximum": 9007199254740991
+                                  },
+                                  "inputTokens": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "maximum": 9007199254740991
+                                  },
+                                  "cacheReadTokens": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "maximum": 9007199254740991
+                                  },
+                                  "cacheWriteTokens": {
                                     "type": "integer",
                                     "minimum": 0,
                                     "maximum": 9007199254740991
@@ -8673,6 +8946,21 @@
                                     "type": "integer",
                                     "minimum": 0,
                                     "maximum": 9007199254740991
+                                  },
+                                  "inputTokens": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "maximum": 9007199254740991
+                                  },
+                                  "cacheReadTokens": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "maximum": 9007199254740991
+                                  },
+                                  "cacheWriteTokens": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "maximum": 9007199254740991
                                   }
                                 },
                                 "additionalProperties": false
@@ -9094,6 +9382,21 @@
                                 ],
                                 "properties": {
                                   "outputTokens": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "maximum": 9007199254740991
+                                  },
+                                  "inputTokens": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "maximum": 9007199254740991
+                                  },
+                                  "cacheReadTokens": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "maximum": 9007199254740991
+                                  },
+                                  "cacheWriteTokens": {
                                     "type": "integer",
                                     "minimum": 0,
                                     "maximum": 9007199254740991
@@ -15381,6 +15684,21 @@
                                 "type": "integer",
                                 "minimum": 0,
                                 "maximum": 9007199254740991
+                              },
+                              "inputTokens": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 9007199254740991
+                              },
+                              "cacheReadTokens": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 9007199254740991
+                              },
+                              "cacheWriteTokens": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 9007199254740991
                               }
                             },
                             "additionalProperties": false
@@ -15782,6 +16100,185 @@
                         }
                       },
                       "additionalProperties": false
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "jsonrpc",
+                "id",
+                "result"
+              ],
+              "properties": {
+                "jsonrpc": {
+                  "type": "string",
+                  "const": "2.0"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "x-metis-maxUtf16Units": 128
+                },
+                "result": {
+                  "type": "object",
+                  "required": [
+                    "session",
+                    "entryId"
+                  ],
+                  "properties": {
+                    "session": {
+                      "type": "object",
+                      "required": [
+                        "sessionId",
+                        "mode",
+                        "cwdOrigin",
+                        "cwd",
+                        "createdAt",
+                        "updatedAt",
+                        "state",
+                        "archived",
+                        "unread"
+                      ],
+                      "properties": {
+                        "sessionId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                        },
+                        "name": {
+                          "type": "string",
+                          "maxLength": 256,
+                          "x-metis-maxUtf16Units": 256
+                        },
+                        "mode": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "const": "chat"
+                            },
+                            {
+                              "type": "string",
+                              "const": "code"
+                            }
+                          ]
+                        },
+                        "cwdOrigin": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "const": "managed"
+                            },
+                            {
+                              "type": "string",
+                              "const": "user-selected"
+                            }
+                          ]
+                        },
+                        "cwd": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "minLength": 1,
+                              "x-metis-maxUtf8Bytes": 32768
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time",
+                          "maxLength": 40
+                        },
+                        "updatedAt": {
+                          "type": "string",
+                          "format": "date-time",
+                          "maxLength": 40
+                        },
+                        "state": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "const": "idle"
+                            },
+                            {
+                              "type": "string",
+                              "const": "running"
+                            },
+                            {
+                              "type": "string",
+                              "const": "interrupted"
+                            },
+                            {
+                              "type": "string",
+                              "const": "corrupt"
+                            },
+                            {
+                              "type": "string",
+                              "const": "in_use"
+                            }
+                          ]
+                        },
+                        "lastTurnOutcome": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "const": "completed"
+                            },
+                            {
+                              "type": "string",
+                              "const": "failed"
+                            }
+                          ]
+                        },
+                        "attentionRequired": {
+                          "type": "boolean"
+                        },
+                        "archived": {
+                          "type": "boolean"
+                        },
+                        "unread": {
+                          "type": "boolean"
+                        },
+                        "recoveryNotice": {
+                          "type": "string",
+                          "x-metis-maxUtf8Bytes": 65536
+                        },
+                        "scheduled": {
+                          "type": "object",
+                          "required": [
+                            "taskId",
+                            "runId"
+                          ],
+                          "properties": {
+                            "taskId": {
+                              "type": "string",
+                              "minLength": 1,
+                              "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                            },
+                            "runId": {
+                              "type": "string",
+                              "minLength": 1,
+                              "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                            }
+                          },
+                          "additionalProperties": false
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    "entryId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
                     }
                   },
                   "additionalProperties": false
@@ -16858,6 +17355,21 @@
                                 ],
                                 "properties": {
                                   "outputTokens": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "maximum": 9007199254740991
+                                  },
+                                  "inputTokens": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "maximum": 9007199254740991
+                                  },
+                                  "cacheReadTokens": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "maximum": 9007199254740991
+                                  },
+                                  "cacheWriteTokens": {
                                     "type": "integer",
                                     "minimum": 0,
                                     "maximum": 9007199254740991
@@ -18978,6 +19490,10 @@
                                 "const": "openai-completions"
                               },
                               {
+                                "type": "string",
+                                "const": "anthropic-messages"
+                              },
+                              {
                                 "type": "null"
                               }
                             ]
@@ -19240,6 +19756,10 @@
                               {
                                 "type": "string",
                                 "const": "openai-completions"
+                              },
+                              {
+                                "type": "string",
+                                "const": "anthropic-messages"
                               },
                               {
                                 "type": "null"
@@ -19623,6 +20143,222 @@
                 "result": {
                   "type": "object",
                   "required": [
+                    "enabled",
+                    "provider",
+                    "authConfigured"
+                  ],
+                  "properties": {
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "provider": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "const": "brave"
+                        },
+                        {
+                          "type": "string",
+                          "const": "tavily"
+                        },
+                        {
+                          "type": "string",
+                          "const": "serpapi"
+                        }
+                      ]
+                    },
+                    "authConfigured": {
+                      "type": "boolean"
+                    },
+                    "configuredProviders": {
+                      "type": "array",
+                      "items": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "const": "brave"
+                          },
+                          {
+                            "type": "string",
+                            "const": "tavily"
+                          },
+                          {
+                            "type": "string",
+                            "const": "serpapi"
+                          }
+                        ]
+                      },
+                      "maxItems": 3,
+                      "uniqueItems": true
+                    },
+                    "authSource": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "const": "stored"
+                        },
+                        {
+                          "type": "string",
+                          "const": "environment"
+                        }
+                      ]
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "jsonrpc",
+                "id",
+                "result"
+              ],
+              "properties": {
+                "jsonrpc": {
+                  "type": "string",
+                  "const": "2.0"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "x-metis-maxUtf16Units": 128
+                },
+                "result": {
+                  "type": "object",
+                  "required": [
+                    "credential"
+                  ],
+                  "properties": {
+                    "credential": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 32768
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "jsonrpc",
+                "id",
+                "result"
+              ],
+              "properties": {
+                "jsonrpc": {
+                  "type": "string",
+                  "const": "2.0"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "x-metis-maxUtf16Units": 128
+                },
+                "result": {
+                  "type": "object",
+                  "required": [
+                    "enabled",
+                    "provider",
+                    "authConfigured"
+                  ],
+                  "properties": {
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "provider": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "const": "brave"
+                        },
+                        {
+                          "type": "string",
+                          "const": "tavily"
+                        },
+                        {
+                          "type": "string",
+                          "const": "serpapi"
+                        }
+                      ]
+                    },
+                    "authConfigured": {
+                      "type": "boolean"
+                    },
+                    "configuredProviders": {
+                      "type": "array",
+                      "items": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "const": "brave"
+                          },
+                          {
+                            "type": "string",
+                            "const": "tavily"
+                          },
+                          {
+                            "type": "string",
+                            "const": "serpapi"
+                          }
+                        ]
+                      },
+                      "maxItems": 3,
+                      "uniqueItems": true
+                    },
+                    "authSource": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "const": "stored"
+                        },
+                        {
+                          "type": "string",
+                          "const": "environment"
+                        }
+                      ]
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "jsonrpc",
+                "id",
+                "result"
+              ],
+              "properties": {
+                "jsonrpc": {
+                  "type": "string",
+                  "const": "2.0"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "x-metis-maxUtf16Units": 128
+                },
+                "result": {
+                  "type": "object",
+                  "required": [
                     "items",
                     "nextBeforeItemId"
                   ],
@@ -19934,6 +20670,21 @@
                             ],
                             "properties": {
                               "outputTokens": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 9007199254740991
+                              },
+                              "inputTokens": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 9007199254740991
+                              },
+                              "cacheReadTokens": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 9007199254740991
+                              },
+                              "cacheWriteTokens": {
                                 "type": "integer",
                                 "minimum": 0,
                                 "maximum": 9007199254740991
@@ -29932,6 +30683,58 @@
             },
             "method": {
               "type": "string",
+              "const": "session/fork"
+            },
+            "params": {
+              "type": "object",
+              "required": [
+                "requestId",
+                "sessionId",
+                "entryId"
+              ],
+              "properties": {
+                "requestId": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "sessionId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                },
+                "entryId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "type": "string",
+              "const": "2.0"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "x-metis-maxUtf16Units": 128
+            },
+            "method": {
+              "type": "string",
               "const": "session/delete"
             },
             "params": {
@@ -30619,6 +31422,10 @@
                               "const": "openai-completions"
                             },
                             {
+                              "type": "string",
+                              "const": "anthropic-messages"
+                            },
+                            {
                               "type": "null"
                             }
                           ]
@@ -30928,6 +31735,193 @@
                     {
                       "type": "number",
                       "const": 90
+                    }
+                  ]
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "type": "string",
+              "const": "2.0"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "x-metis-maxUtf16Units": 128
+            },
+            "method": {
+              "type": "string",
+              "const": "webSearch/get"
+            },
+            "params": {
+              "type": "object",
+              "properties": {},
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "type": "string",
+              "const": "2.0"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "x-metis-maxUtf16Units": 128
+            },
+            "method": {
+              "type": "string",
+              "const": "webSearch/credential/reveal"
+            },
+            "params": {
+              "type": "object",
+              "required": [
+                "provider"
+              ],
+              "properties": {
+                "provider": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "const": "brave"
+                    },
+                    {
+                      "type": "string",
+                      "const": "tavily"
+                    },
+                    {
+                      "type": "string",
+                      "const": "serpapi"
+                    }
+                  ]
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "type": "string",
+              "const": "2.0"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "x-metis-maxUtf16Units": 128
+            },
+            "method": {
+              "type": "string",
+              "const": "webSearch/update"
+            },
+            "params": {
+              "type": "object",
+              "required": [
+                "enabled",
+                "provider",
+                "credential"
+              ],
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                },
+                "provider": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "const": "brave"
+                    },
+                    {
+                      "type": "string",
+                      "const": "tavily"
+                    },
+                    {
+                      "type": "string",
+                      "const": "serpapi"
+                    }
+                  ]
+                },
+                "credential": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "required": [
+                        "action"
+                      ],
+                      "properties": {
+                        "action": {
+                          "type": "string",
+                          "const": "keep"
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "action"
+                      ],
+                      "properties": {
+                        "action": {
+                          "type": "string",
+                          "const": "remove"
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "action",
+                        "value"
+                      ],
+                      "properties": {
+                        "action": {
+                          "type": "string",
+                          "const": "set"
+                        },
+                        "value": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 32768
+                        }
+                      },
+                      "additionalProperties": false
                     }
                   ]
                 }
@@ -37824,6 +38818,21 @@
                             "type": "integer",
                             "minimum": 0,
                             "maximum": 9007199254740991
+                          },
+                          "inputTokens": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9007199254740991
+                          },
+                          "cacheReadTokens": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9007199254740991
+                          },
+                          "cacheWriteTokens": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9007199254740991
                           }
                         },
                         "additionalProperties": false
@@ -38225,6 +39234,185 @@
                     }
                   },
                   "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "jsonrpc",
+            "id",
+            "result"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "type": "string",
+              "const": "2.0"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "x-metis-maxUtf16Units": 128
+            },
+            "result": {
+              "type": "object",
+              "required": [
+                "session",
+                "entryId"
+              ],
+              "properties": {
+                "session": {
+                  "type": "object",
+                  "required": [
+                    "sessionId",
+                    "mode",
+                    "cwdOrigin",
+                    "cwd",
+                    "createdAt",
+                    "updatedAt",
+                    "state",
+                    "archived",
+                    "unread"
+                  ],
+                  "properties": {
+                    "sessionId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                    },
+                    "name": {
+                      "type": "string",
+                      "maxLength": 256,
+                      "x-metis-maxUtf16Units": 256
+                    },
+                    "mode": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "const": "chat"
+                        },
+                        {
+                          "type": "string",
+                          "const": "code"
+                        }
+                      ]
+                    },
+                    "cwdOrigin": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "const": "managed"
+                        },
+                        {
+                          "type": "string",
+                          "const": "user-selected"
+                        }
+                      ]
+                    },
+                    "cwd": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "minLength": 1,
+                          "x-metis-maxUtf8Bytes": 32768
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time",
+                      "maxLength": 40
+                    },
+                    "updatedAt": {
+                      "type": "string",
+                      "format": "date-time",
+                      "maxLength": 40
+                    },
+                    "state": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "const": "idle"
+                        },
+                        {
+                          "type": "string",
+                          "const": "running"
+                        },
+                        {
+                          "type": "string",
+                          "const": "interrupted"
+                        },
+                        {
+                          "type": "string",
+                          "const": "corrupt"
+                        },
+                        {
+                          "type": "string",
+                          "const": "in_use"
+                        }
+                      ]
+                    },
+                    "lastTurnOutcome": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "const": "completed"
+                        },
+                        {
+                          "type": "string",
+                          "const": "failed"
+                        }
+                      ]
+                    },
+                    "attentionRequired": {
+                      "type": "boolean"
+                    },
+                    "archived": {
+                      "type": "boolean"
+                    },
+                    "unread": {
+                      "type": "boolean"
+                    },
+                    "recoveryNotice": {
+                      "type": "string",
+                      "x-metis-maxUtf8Bytes": 65536
+                    },
+                    "scheduled": {
+                      "type": "object",
+                      "required": [
+                        "taskId",
+                        "runId"
+                      ],
+                      "properties": {
+                        "taskId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                        },
+                        "runId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                        }
+                      },
+                      "additionalProperties": false
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                "entryId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
                 }
               },
               "additionalProperties": false
@@ -39301,6 +40489,21 @@
                             ],
                             "properties": {
                               "outputTokens": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 9007199254740991
+                              },
+                              "inputTokens": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 9007199254740991
+                              },
+                              "cacheReadTokens": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 9007199254740991
+                              },
+                              "cacheWriteTokens": {
                                 "type": "integer",
                                 "minimum": 0,
                                 "maximum": 9007199254740991
@@ -41421,6 +42624,10 @@
                             "const": "openai-completions"
                           },
                           {
+                            "type": "string",
+                            "const": "anthropic-messages"
+                          },
+                          {
                             "type": "null"
                           }
                         ]
@@ -41683,6 +42890,10 @@
                           {
                             "type": "string",
                             "const": "openai-completions"
+                          },
+                          {
+                            "type": "string",
+                            "const": "anthropic-messages"
                           },
                           {
                             "type": "null"
@@ -42066,6 +43277,222 @@
             "result": {
               "type": "object",
               "required": [
+                "enabled",
+                "provider",
+                "authConfigured"
+              ],
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                },
+                "provider": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "const": "brave"
+                    },
+                    {
+                      "type": "string",
+                      "const": "tavily"
+                    },
+                    {
+                      "type": "string",
+                      "const": "serpapi"
+                    }
+                  ]
+                },
+                "authConfigured": {
+                  "type": "boolean"
+                },
+                "configuredProviders": {
+                  "type": "array",
+                  "items": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "const": "brave"
+                      },
+                      {
+                        "type": "string",
+                        "const": "tavily"
+                      },
+                      {
+                        "type": "string",
+                        "const": "serpapi"
+                      }
+                    ]
+                  },
+                  "maxItems": 3,
+                  "uniqueItems": true
+                },
+                "authSource": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "const": "stored"
+                    },
+                    {
+                      "type": "string",
+                      "const": "environment"
+                    }
+                  ]
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "jsonrpc",
+            "id",
+            "result"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "type": "string",
+              "const": "2.0"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "x-metis-maxUtf16Units": 128
+            },
+            "result": {
+              "type": "object",
+              "required": [
+                "credential"
+              ],
+              "properties": {
+                "credential": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 32768
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "jsonrpc",
+            "id",
+            "result"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "type": "string",
+              "const": "2.0"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "x-metis-maxUtf16Units": 128
+            },
+            "result": {
+              "type": "object",
+              "required": [
+                "enabled",
+                "provider",
+                "authConfigured"
+              ],
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                },
+                "provider": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "const": "brave"
+                    },
+                    {
+                      "type": "string",
+                      "const": "tavily"
+                    },
+                    {
+                      "type": "string",
+                      "const": "serpapi"
+                    }
+                  ]
+                },
+                "authConfigured": {
+                  "type": "boolean"
+                },
+                "configuredProviders": {
+                  "type": "array",
+                  "items": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "const": "brave"
+                      },
+                      {
+                        "type": "string",
+                        "const": "tavily"
+                      },
+                      {
+                        "type": "string",
+                        "const": "serpapi"
+                      }
+                    ]
+                  },
+                  "maxItems": 3,
+                  "uniqueItems": true
+                },
+                "authSource": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "const": "stored"
+                    },
+                    {
+                      "type": "string",
+                      "const": "environment"
+                    }
+                  ]
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "jsonrpc",
+            "id",
+            "result"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "type": "string",
+              "const": "2.0"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "x-metis-maxUtf16Units": 128
+            },
+            "result": {
+              "type": "object",
+              "required": [
                 "items",
                 "nextBeforeItemId"
               ],
@@ -42377,6 +43804,21 @@
                         ],
                         "properties": {
                           "outputTokens": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9007199254740991
+                          },
+                          "inputTokens": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9007199254740991
+                          },
+                          "cacheReadTokens": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9007199254740991
+                          },
+                          "cacheWriteTokens": {
                             "type": "integer",
                             "minimum": 0,
                             "maximum": 9007199254740991
@@ -49462,6 +50904,21 @@
                             "type": "integer",
                             "minimum": 0,
                             "maximum": 9007199254740991
+                          },
+                          "inputTokens": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9007199254740991
+                          },
+                          "cacheReadTokens": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9007199254740991
+                          },
+                          "cacheWriteTokens": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9007199254740991
                           }
                         },
                         "additionalProperties": false
@@ -49875,6 +51332,21 @@
                         ],
                         "properties": {
                           "outputTokens": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9007199254740991
+                          },
+                          "inputTokens": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9007199254740991
+                          },
+                          "cacheReadTokens": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9007199254740991
+                          },
+                          "cacheWriteTokens": {
                             "type": "integer",
                             "minimum": 0,
                             "maximum": 9007199254740991
@@ -51163,6 +52635,21 @@
                             "type": "integer",
                             "minimum": 0,
                             "maximum": 9007199254740991
+                          },
+                          "inputTokens": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9007199254740991
+                          },
+                          "cacheReadTokens": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9007199254740991
+                          },
+                          "cacheWriteTokens": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9007199254740991
                           }
                         },
                         "additionalProperties": false
@@ -51584,6 +53071,21 @@
                         ],
                         "properties": {
                           "outputTokens": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9007199254740991
+                          },
+                          "inputTokens": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9007199254740991
+                          },
+                          "cacheReadTokens": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9007199254740991
+                          },
+                          "cacheWriteTokens": {
                             "type": "integer",
                             "minimum": 0,
                             "maximum": 9007199254740991
@@ -53640,6 +55142,21 @@
                       "type": "integer",
                       "minimum": 0,
                       "maximum": 9007199254740991
+                    },
+                    "inputTokens": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "cacheReadTokens": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "cacheWriteTokens": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
                     }
                   },
                   "additionalProperties": false
@@ -54053,6 +55570,21 @@
                   ],
                   "properties": {
                     "outputTokens": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "inputTokens": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "cacheReadTokens": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "cacheWriteTokens": {
                       "type": "integer",
                       "minimum": 0,
                       "maximum": 9007199254740991
@@ -55341,6 +56873,21 @@
                       "type": "integer",
                       "minimum": 0,
                       "maximum": 9007199254740991
+                    },
+                    "inputTokens": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "cacheReadTokens": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "cacheWriteTokens": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
                     }
                   },
                   "additionalProperties": false
@@ -55762,6 +57309,21 @@
                   ],
                   "properties": {
                     "outputTokens": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "inputTokens": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "cacheReadTokens": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "cacheWriteTokens": {
                       "type": "integer",
                       "minimum": 0,
                       "maximum": 9007199254740991
@@ -57923,6 +59485,21 @@
           ],
           "properties": {
             "outputTokens": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "inputTokens": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "cacheReadTokens": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "cacheWriteTokens": {
               "type": "integer",
               "minimum": 0,
               "maximum": 9007199254740991
@@ -60664,6 +62241,21 @@
                                 "type": "integer",
                                 "minimum": 0,
                                 "maximum": 9007199254740991
+                              },
+                              "inputTokens": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 9007199254740991
+                              },
+                              "cacheReadTokens": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 9007199254740991
+                              },
+                              "cacheWriteTokens": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 9007199254740991
                               }
                             },
                             "additionalProperties": false
@@ -61077,6 +62669,21 @@
                             ],
                             "properties": {
                               "outputTokens": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 9007199254740991
+                              },
+                              "inputTokens": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 9007199254740991
+                              },
+                              "cacheReadTokens": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 9007199254740991
+                              },
+                              "cacheWriteTokens": {
                                 "type": "integer",
                                 "minimum": 0,
                                 "maximum": 9007199254740991
@@ -62365,6 +63972,21 @@
                                 "type": "integer",
                                 "minimum": 0,
                                 "maximum": 9007199254740991
+                              },
+                              "inputTokens": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 9007199254740991
+                              },
+                              "cacheReadTokens": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 9007199254740991
+                              },
+                              "cacheWriteTokens": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 9007199254740991
                               }
                             },
                             "additionalProperties": false
@@ -62786,6 +64408,21 @@
                             ],
                             "properties": {
                               "outputTokens": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 9007199254740991
+                              },
+                              "inputTokens": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 9007199254740991
+                              },
+                              "cacheReadTokens": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 9007199254740991
+                              },
+                              "cacheWriteTokens": {
                                 "type": "integer",
                                 "minimum": 0,
                                 "maximum": 9007199254740991
@@ -65279,6 +66916,21 @@
                 ],
                 "properties": {
                   "outputTokens": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "inputTokens": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "cacheReadTokens": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "cacheWriteTokens": {
                     "type": "integer",
                     "minimum": 0,
                     "maximum": 9007199254740991

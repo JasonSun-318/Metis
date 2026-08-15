@@ -64,6 +64,8 @@ import {
 	ThinkingSelectionSchema,
 	UsageRangeDaysSchema,
 	UsageSummaryViewSchema,
+	WebSearchProviderSchema,
+	WebSearchSettingsViewSchema,
 	WritableSkillSourceViewSchema,
 } from "./views.ts";
 
@@ -558,7 +560,7 @@ const EditableModelInputSchema = StrictObject({
 	reasoning: Type.Boolean(),
 	imageInput: Type.Boolean(),
 });
-const CredentialMutationSchema = Type.Union([
+export const CredentialMutationSchema = Type.Union([
 	StrictObject({ action: Type.Literal("keep") }),
 	StrictObject({ action: Type.Literal("remove") }),
 	StrictObject({ action: Type.Literal("set"), value: Type.String({ minLength: 1, maxLength: 32_768 }) }),
@@ -569,7 +571,12 @@ export const ModelSettingsMutationSchema = Type.Union([
 		provider: NameSchema,
 		name: NameSchema,
 		baseUrl: Type.Union([Type.String({ minLength: 1, maxLength: 2_048 }), Type.Null()]),
-		api: Type.Union([Type.Literal("openai-responses"), Type.Literal("openai-completions"), Type.Null()]),
+		api: Type.Union([
+			Type.Literal("openai-responses"),
+			Type.Literal("openai-completions"),
+			Type.Literal("anthropic-messages"),
+			Type.Null(),
+		]),
 		models: Type.Array(EditableModelInputSchema, { maxItems: 512 }),
 		credential: CredentialMutationSchema,
 	}),
@@ -596,6 +603,17 @@ export const ModelTestConnectionResultSchema = StrictObject({
 	latencyMs: Type.Integer({ minimum: 0, maximum: 300_000 }),
 });
 export const UsageGetParamsSchema = StrictObject({ rangeDays: UsageRangeDaysSchema });
+
+export const WebSearchGetParamsSchema = StrictObject({});
+export const WebSearchCredentialRevealParamsSchema = StrictObject({ provider: WebSearchProviderSchema });
+export const WebSearchCredentialRevealResultSchema = StrictObject({
+	credential: Type.Union([Type.String({ minLength: 1, maxLength: 32_768 }), Type.Null()]),
+});
+export const WebSearchUpdateParamsSchema = StrictObject({
+	enabled: Type.Boolean(),
+	provider: WebSearchProviderSchema,
+	credential: CredentialMutationSchema,
+});
 
 export const ScheduleCreateParamsSchema = Type.Refine(
 	StrictObject({
@@ -796,6 +814,9 @@ export const ClientRequestMethods = {
 	"model/settings/update": method(ModelSettingsUpdateParamsSchema, ModelSettingsViewSchema),
 	"model/testConnection": method(ModelTestConnectionParamsSchema, ModelTestConnectionResultSchema),
 	"usage/get": method(UsageGetParamsSchema, UsageSummaryViewSchema),
+	"webSearch/get": method(WebSearchGetParamsSchema, WebSearchSettingsViewSchema),
+	"webSearch/credential/reveal": method(WebSearchCredentialRevealParamsSchema, WebSearchCredentialRevealResultSchema),
+	"webSearch/update": method(WebSearchUpdateParamsSchema, WebSearchSettingsViewSchema),
 	"subagent/readItems": method(SubagentReadItemsParamsSchema, SessionReadItemsResultSchema),
 	"subagent/interrupt": method(SubagentInterruptParamsSchema, SubagentResultSchema),
 	"turn/start": method(TurnInputSchema, AcceptedOperationSchema),
