@@ -1,6 +1,7 @@
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { RPC_ERROR_CODES } from "@metis/app-protocol";
 import { SessionManager } from "@metis/coding-agent";
 import { afterEach, describe, expect, it } from "vitest";
 import { AppServer } from "../src/app-server.ts";
@@ -46,6 +47,15 @@ function assistantMsg(text: string) {
 }
 
 describe("session fork branch creation", () => {
+	it("resolves the durable entry id for the exact appended message object", () => {
+		const session = createSession("original");
+		const message = assistantMsg("reply");
+		const entryId = session.appendMessage(message);
+
+		expect(session.getMessageEntryId(message)).toBe(entryId);
+		session.close();
+	});
+
 	it("creates an independent branch at an assistant reply with a fresh id and forked name", () => {
 		const session = createSession("original");
 		const user = session.appendMessage(userMsg("hello"));
@@ -235,7 +245,7 @@ describe("session/fork RPC end-to-end", () => {
 		}
 	});
 
-	it("forks from a live hashed itemId by resolving it to the latest assistant entry", async () => {
+	it("rejects an unknown live item id instead of forking from the latest assistant entry", async () => {
 		const root = mkdtempSync(join(tmpdir(), "metis-fork-e2e-live-"));
 		directories.push(root);
 		const agentDir = join(root, "agent");
@@ -289,23 +299,12 @@ describe("session/fork RPC end-to-end", () => {
 					entryId: "live:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 				},
 			});
-			console.log("FORKED RESP:", JSON.stringify(forked));
 			expect(forked).toMatchObject({
 				jsonrpc: "2.0",
-				result: { session: { name: "fork Live title" } },
-			});
-			const forkedId = (forked as { result?: { session?: { sessionId?: string } } }).result?.session?.sessionId;
-			expect(forkedId).toBeDefined();
-
-			const openForked = await connection.handle({
-				jsonrpc: "2.0",
-				id: "open-2",
-				method: "session/open",
-				params: { sessionId: forkedId },
-			});
-			expect(openForked).toMatchObject({
-				jsonrpc: "2.0",
-				result: { session: { sessionId: forkedId } },
+				error: {
+					code: RPC_ERROR_CODES.NOT_FOUND,
+					data: { sessionId: "live-session" },
+				},
 			});
 		} finally {
 			connection.close();

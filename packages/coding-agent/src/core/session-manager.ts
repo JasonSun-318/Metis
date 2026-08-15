@@ -2743,6 +2743,7 @@ export class SessionManager {
 	private imageReadBudget: ImageReadBudget = { used: 0, limit: MAX_SESSION_IMAGE_BLOB_BYTES };
 	private recordIds: Set<string> = new Set();
 	private byId: Map<string, SessionEntry> = new Map();
+	private messageEntryIds = new WeakMap<object, string>();
 	private labelsById: Map<string, string> = new Map();
 	private labelTimestampsById: Map<string, string> = new Map();
 	private leafId: string | null = null;
@@ -2882,6 +2883,10 @@ export class SessionManager {
 		this.imageReadBudget = state.imageReadBudget;
 		this.recordIds = state.recordIds;
 		this.byId = state.byId;
+		this.messageEntryIds = new WeakMap();
+		for (const entry of state.fileEntries) {
+			if (entry.type === "message") this.messageEntryIds.set(entry.message, entry.id);
+		}
 		this.labelsById = state.labelsById;
 		this.labelTimestampsById = state.labelTimestampsById;
 		this.leafId = state.leafId;
@@ -3090,6 +3095,10 @@ export class SessionManager {
 		this.fileEntries.push(hydratedEntry);
 		this.recordIds.add(entry.id);
 		this.byId.set(entry.id, hydratedEntry);
+		if (entry.type === "message") {
+			this.messageEntryIds.set(entry.message, entry.id);
+			if (hydratedEntry.type === "message") this.messageEntryIds.set(hydratedEntry.message, entry.id);
+		}
 		this.leafId = entry.id;
 	}
 
@@ -3389,6 +3398,10 @@ export class SessionManager {
 
 	getEntry(id: string): SessionEntry | undefined {
 		return this.byId.get(id);
+	}
+
+	getMessageEntryId(message: object): string | undefined {
+		return this.messageEntryIds.get(message);
 	}
 
 	/**

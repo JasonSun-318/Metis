@@ -315,6 +315,7 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 	private readonly projection: SessionProjection;
 	private readonly subagentLive: SubagentLiveProjector;
 	private readonly liveItemIds = new WeakMap<object, string>();
+	private readonly liveMessagesByItemId = new Map<string, object>();
 	private liveAssistantItemId?: string;
 	private readonly projectedTurnStates = new Map<string, TurnView["state"]>();
 	private liveItemSequence = 0;
@@ -570,13 +571,18 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 
 	private itemIdFor(message: object): string {
 		const record = message as Record<string, unknown>;
-		if (record.role === "assistant" && this.liveAssistantItemId) return this.liveAssistantItemId;
+		if (record.role === "assistant" && this.liveAssistantItemId) {
+			this.liveItemIds.set(message, this.liveAssistantItemId);
+			this.liveMessagesByItemId.set(this.liveAssistantItemId, message);
+			return this.liveAssistantItemId;
+		}
 		const existing = this.liveItemIds.get(message);
 		if (existing) return existing;
 		this.liveItemSequence += 1;
 		const value = `${this.sessionId}:${record.role}:${String(record.timestamp)}:${this.liveItemSequence}`;
 		const itemId = opaqueId(`live:${createHash("sha256").update(value).digest("hex")}`, "item");
 		this.liveItemIds.set(message, itemId);
+		this.liveMessagesByItemId.set(itemId, message);
 		return itemId;
 	}
 
@@ -729,16 +735,16 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 		// runtime.fork() — it swaps the active session in place, which would
 		// desync this host's ref/sessionId from its bound session.
 		const manager = this.session.sessionManager;
-		// Live-streamed replies carry a hashed itemId (live:<sha256>) that is
-		// not a journal entry id. The fork button sits on the latest completed
-		// reply, so resolve unknown ids to the last assistant message entry.
+		// Live-streamed replies carry a hashed itemId (live:<sha256>) rather than
+		// their durable journal entry id. Resolve only the exact message object
+		// that produced that live item; stale or unknown ids must not fork from
+		// a different reply.
 		let entryId = input.entryId;
 		if (manager.getEntry(entryId) === undefined) {
-			const latestAssistant = [...manager.getEntries()]
-				.reverse()
-				.find((entry) => entry.type === "message" && (entry.message as { role?: string }).role === "assistant");
-			if (!latestAssistant) throw new AppServerError("NOT_FOUND", { sessionId: this.sessionId });
-			entryId = latestAssistant.id;
+			const message = this.liveMessagesByItemId.get(entryId);
+			const persistedEntryId = message ? manager.getMessageEntryId(message) : undefined;
+			if (!persistedEntryId) throw new AppServerError("NOT_FOUND", { sessionId: this.sessionId });
+			entryId = persistedEntryId;
 		}
 		const branched = manager.createBranchedSessionManager(entryId);
 		try {

@@ -52,6 +52,7 @@ test("forks a conversation from an assistant reply and switches to the forked se
 	sessionManager.close();
 	new trust.ProjectTrustStore(agentDir).set(projectDir, true);
 
+	let replyIndex = 0;
 	const fakeProvider = createServer(async (request, response) => {
 		if (request.method !== "POST" || request.url !== "/v1/chat/completions") {
 			response.writeHead(404).end();
@@ -72,12 +73,13 @@ test("forks a conversation from an assistant reply and switches to the forked se
 			})}\n\ndata: [DONE]\n\n`);
 			return;
 		}
+		replyIndex += 1;
 		response.end(`data: ${JSON.stringify({
-			id: "fork-reply",
+			id: `fork-reply-${replyIndex}`,
 			object: "chat.completion.chunk",
 			created: 1,
 			model: "fork-model",
-			choices: [{ index: 0, delta: { role: "assistant", content: "fork-reply-done" }, finish_reason: "stop" }],
+			choices: [{ index: 0, delta: { role: "assistant", content: `fork-reply-${replyIndex}` }, finish_reason: "stop" }],
 		})}\n\ndata: [DONE]\n\n`);
 	});
 	const providerPort = await listen(fakeProvider);
@@ -119,20 +121,23 @@ test("forks a conversation from an assistant reply and switches to the forked se
 		await page.setViewportSize({ width: 1200, height: 800 });
 		await waitForServerReady(page);
 
-		// Open the source chat session and wait for an assistant reply.
+		// Keep two live replies in the same open session so the first reply's
+		// live item id must resolve to its own durable journal entry.
 		await page.locator('.session-button[aria-label="Fork source title"]').click();
 		await page.locator(`[data-active-session-id="${sourceId}"]`).waitFor({ state: "visible" });
 		const input = page.locator("#composer-input");
-		await input.fill("fork me");
+		await input.fill("first turn");
 		await page.getByRole("button", { name: "Send message", exact: true }).click();
-		await expect(page.getByText("fork-reply-done", { exact: true })).toBeVisible({ timeout: 30_000 });
+		await expect(page.getByText("fork-reply-1", { exact: true })).toBeVisible({ timeout: 30_000 });
+		await input.fill("second turn");
+		await page.getByRole("button", { name: "Send message", exact: true }).click();
+		await expect(page.getByText("fork-reply-2", { exact: true })).toBeVisible({ timeout: 30_000 });
 
-		// The fork button appears below the reply.
-		const forkButton = page.getByRole("button", { name: "Fork conversation", exact: true });
-		await expect(forkButton).toBeVisible();
+		const forkButtons = page.getByRole("button", { name: "Fork conversation", exact: true });
+		await expect(forkButtons).toHaveCount(2);
 
-		// Clicking it creates a new "fork <title>" session in the sidebar.
-		await forkButton.click();
+		// Fork the earlier reply, not the latest one.
+		await forkButtons.first().click();
 		const forkedSession = page.locator('.session-button[aria-label="fork Fork source title"]');
 		await expect(forkedSession).toHaveCount(1, { timeout: 20_000 });
 
@@ -142,6 +147,8 @@ test("forks a conversation from an assistant reply and switches to the forked se
 			sourceId,
 			{ timeout: 20_000 },
 		);
+		await expect(page.getByText("fork-reply-1", { exact: true })).toBeVisible();
+		await expect(page.getByText("fork-reply-2", { exact: true })).toHaveCount(0);
 
 		// Switch back to the original session.
 		await page.locator('.session-button[aria-label="Fork source title"]').click();
