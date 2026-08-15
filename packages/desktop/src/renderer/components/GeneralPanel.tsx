@@ -1,5 +1,6 @@
 import { Desktop, Moon, Sun } from "@phosphor-icons/react";
 import { useTranslation } from "react-i18next";
+import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
 import {
 	type GeneralPreferences,
 	PROSE_FONT_OPTIONS,
@@ -8,16 +9,24 @@ import {
 import { APP_LOCALES, type AppLocale, setLocale } from "../i18n.ts";
 import { APP_THEMES, type AppTheme } from "../theme.ts";
 import { MenuSelect } from "./MenuSelect.tsx";
+import { WebSearchSettingsPanel } from "./WebSearchSettingsPanel.tsx";
 
 export function GeneralPanel({
+	api,
 	generalPreferences,
 	onGeneralPreferencesChange,
 	onThemeChange,
+	serverReady,
 	theme,
 }: {
+	readonly api: Pick<
+		MetisDesktopApi,
+		"getWebSearchSettings" | "revealWebSearchCredential" | "updateWebSearchSettings"
+	>;
 	readonly generalPreferences: GeneralPreferences;
 	readonly onGeneralPreferencesChange: (preferences: GeneralPreferences) => void;
 	readonly onThemeChange: (theme: AppTheme) => void;
+	readonly serverReady: boolean;
 	readonly theme: AppTheme;
 }) {
 	const { i18n, t } = useTranslation();
@@ -32,6 +41,7 @@ export function GeneralPanel({
 					<h2>{t("Preferences")}</h2>
 					<p>{t("Choose your language, typography, and motion preferences.")}</p>
 				</header>
+				<div className="settings-card">
 				<div className="general-setting-row">
 					<div className="general-setting-copy"><span>{t("Language")}</span></div>
 					<div className="general-setting-control">
@@ -126,7 +136,9 @@ export function GeneralPanel({
 						</div>
 					</div>
 				</div>
+				</div>
 			</section>
+			<WebSearchSettingsPanel api={api} serverReady={serverReady} />
 		</div>
 	);
 }

@@ -1,12 +1,13 @@
 // @vitest-environment jsdom
 
-import type { ModelSettingsView, UsageRangeDays, UsageSummaryView } from "@metis/app-protocol";
+import type { ModelSettingsView, UsageRangeDays, UsageSummaryView, WebSearchSettingsView } from "@metis/app-protocol";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ModelSettingsPanel } from "../src/renderer/components/ModelSettingsPanel.tsx";
 import { SettingsDialog } from "../src/renderer/components/SettingsDialog.tsx";
 import { UsagePanel } from "../src/renderer/components/UsagePanel.tsx";
+import { WebSearchSettingsPanel } from "../src/renderer/components/WebSearchSettingsPanel.tsx";
 import type { GeneralPreferences } from "../src/renderer/general-preferences.ts";
 import { APP_LOCALE_STORAGE_KEY, setLocale } from "../src/renderer/i18n.ts";
 import type { MetisDesktopApi } from "../src/shared/desktop-api.ts";
@@ -81,6 +82,7 @@ describe("SettingsDialog", () => {
 			getModelSettings: vi.fn().mockResolvedValue(modelSettings),
 			updateModelSettings: vi.fn().mockResolvedValue(modelSettings),
 			testModelConnection: vi.fn(),
+			getWebSearchSettings: vi.fn().mockResolvedValue({ enabled: false, provider: "brave", authConfigured: false }),
 		} as unknown as MetisDesktopApi;
 		const onClose = vi.fn();
 		const onGeneralPreferencesChange = vi.fn();
@@ -128,7 +130,9 @@ describe("SettingsDialog", () => {
 	});
 
 	it("changes language, appearance, motion, and independent prose fonts from General", async () => {
-		const api = {} as unknown as MetisDesktopApi;
+		const api = {
+			getWebSearchSettings: vi.fn().mockResolvedValue({ enabled: false, provider: "brave", authConfigured: false }),
+		} as unknown as MetisDesktopApi;
 		const onClose = vi.fn();
 		const onGeneralPreferencesChange = vi.fn();
 		const onThemeChange = vi.fn();
@@ -148,6 +152,7 @@ describe("SettingsDialog", () => {
 		));
 		await flush();
 		expect(container.querySelector(".general-page")).not.toBeNull();
+		expect(container.querySelector(".web-search-toggle")).not.toBeNull();
 		expect(button(container, "English").getAttribute("aria-pressed")).toBe("true");
 		await act(async () => button(container, "中文").click());
 		expect(localStorage.getItem(APP_LOCALE_STORAGE_KEY)).toBe("zh-CN");
@@ -171,7 +176,11 @@ describe("SettingsDialog", () => {
 		const updatePersonalization = vi
 			.fn()
 			.mockImplementation(async ({ instructions }: { instructions: string }) => ({ instructions }));
-		const api = { getPersonalization, updatePersonalization } as unknown as MetisDesktopApi;
+		const api = {
+			getPersonalization,
+			updatePersonalization,
+			getWebSearchSettings: vi.fn().mockResolvedValue({ enabled: false, provider: "brave", authConfigured: false }),
+		} as unknown as MetisDesktopApi;
 		const container = document.createElement("div");
 		document.body.append(container);
 		const root = createRoot(container);
@@ -224,7 +233,7 @@ describe("ModelSettingsPanel", () => {
 		expect(container.querySelector(".model-provider-dialog")?.hasAttribute("open")).toBe(true);
 		const editor = container.querySelector<HTMLElement>(".model-provider-editor")!;
 		expect(editor.textContent).toContain("••••••••••••");
-		expect(container.textContent).not.toContain("Add provider");
+		expect(editor.textContent).not.toContain("Add provider");
 		expect(editor.textContent).not.toContain("Base URL");
 		expect(editor.textContent).not.toContain("Protocol");
 		expect(editor.textContent).not.toContain("Custom models");
@@ -256,6 +265,349 @@ describe("ModelSettingsPanel", () => {
 		expect(updateModelSettings).toHaveBeenCalledWith(expect.objectContaining({
 			mutation: expect.objectContaining({ provider: "openai", credential: { action: "remove" } }),
 		}));
+		await act(async () => root.unmount());
+	});
+
+	it("adds a custom provider with base URL, API format, key, and multiple models", async () => {
+		const updateModelSettings = vi.fn().mockResolvedValue(modelSettings);
+		const api = { getModelSettings: vi.fn().mockResolvedValue(modelSettings), updateModelSettings, testModelConnection: vi.fn() } as unknown as MetisDesktopApi;
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<ModelSettingsPanel api={api} serverReady />));
+		await flush();
+
+		await act(async () => button(container, "Add provider").click());
+		await flush();
+		expect(container.querySelector(".model-custom-provider-dialog")?.hasAttribute("open")).toBe(true);
+
+		await act(async () => {
+			setValue(container.querySelector<HTMLInputElement>('input[placeholder="my-provider"]')!, "my-custom");
+		});
+		await act(async () => {
+			setValue(container.querySelector<HTMLInputElement>('input[placeholder="https://api.example.com/v1"]')!, "https://api.mycorp.dev/v1");
+		});
+		await act(async () => {
+			setValue(container.querySelector<HTMLInputElement>('input[placeholder="sk-…"]')!, "sk-custom-key");
+		});
+		// 第一行模型（默认已有）
+		const firstRow = container.querySelectorAll<HTMLElement>(".model-custom-model-row")[0]!;
+		await act(async () => {
+			setValue(firstRow.querySelector<HTMLInputElement>('input[placeholder="gpt-5"]')!, "my-model-a");
+			setValue(firstRow.querySelectorAll<HTMLInputElement>("input")[1]!, "My Model A");
+			setValue(firstRow.querySelectorAll<HTMLInputElement>("input")[2]!, "200000");
+			setValue(firstRow.querySelectorAll<HTMLInputElement>("input")[3]!, "32000");
+		});
+		// 添加第二行
+		await act(async () => button(container, "Add model").click());
+		await flush();
+		const secondRow = container.querySelectorAll<HTMLElement>(".model-custom-model-row")[1]!;
+		await act(async () => {
+			setValue(secondRow.querySelector<HTMLInputElement>('input[placeholder="gpt-5"]')!, "my-model-b");
+			setValue(secondRow.querySelectorAll<HTMLInputElement>("input")[1]!, "My Model B");
+		});
+
+		// 切换 API 格式为 Anthropic Messages（MenuSelect 选项是 role=option，portal 到 dialog 内）
+		await act(async () => button(container, "OpenAI Responses").click());
+		await flush();
+		await act(async () => {
+			[...container.querySelectorAll<HTMLButtonElement>('[role="option"]')]
+				.find((item) => item.textContent?.includes("Anthropic Messages"))?.click();
+		});
+		await flush();
+
+		await act(async () => button(container, "Save provider").click());
+		await flush();
+		expect(updateModelSettings).toHaveBeenCalledWith(expect.objectContaining({
+			mutation: {
+				type: "save_provider",
+				provider: "my-custom",
+				name: "my-custom",
+				baseUrl: "https://api.mycorp.dev/v1",
+				api: "anthropic-messages",
+				models: [
+					{ modelId: "my-model-a", name: "My Model A", contextWindow: 200000, maxOutputTokens: 32000, reasoning: false, imageInput: false },
+					{ modelId: "my-model-b", name: "My Model B", contextWindow: 128000, maxOutputTokens: 16384, reasoning: false, imageInput: false },
+				],
+				credential: { action: "set", value: "sk-custom-key" },
+			},
+		}));
+		await act(async () => root.unmount());
+	});
+
+	it("edits and removes an existing custom provider with its saved values", async () => {
+		const customSettings: ModelSettingsView = {
+			...modelSettings,
+			defaultModel: { provider: "my-custom", modelId: "my-model-a" },
+			providers: [{
+				provider: "my-custom",
+				name: "My Custom",
+				builtin: false,
+				baseUrl: "https://api.mycorp.dev/v1",
+				api: "anthropic-messages",
+				auth: { configured: true, source: "stored", label: "••••1234" },
+				models: [
+					{ provider: "my-custom", modelId: "my-model-a", name: "My Model A", contextWindow: 200000, maxOutputTokens: 32000, reasoning: false, imageInput: false, custom: true },
+					{ provider: "my-custom", modelId: "my-model-b", name: "My Model B", contextWindow: 128000, maxOutputTokens: 16384, reasoning: false, imageInput: false, custom: true },
+				],
+			}],
+		};
+		const updateModelSettings = vi.fn().mockResolvedValue(customSettings);
+		const api = { getModelSettings: vi.fn().mockResolvedValue(customSettings), updateModelSettings, testModelConnection: vi.fn() } as unknown as MetisDesktopApi;
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<ModelSettingsPanel api={api} serverReady />));
+		await flush();
+
+		await act(async () => container.querySelector<HTMLButtonElement>(".model-provider-card")!.click());
+		await flush();
+		const editor = container.querySelector<HTMLElement>(".model-custom-provider-dialog")!;
+		expect(editor.querySelector<HTMLInputElement>('input[placeholder="https://api.example.com/v1"]')!.value)
+			.toBe("https://api.mycorp.dev/v1");
+		expect(editor.textContent).toContain("My Model A");
+		expect(editor.querySelector<HTMLInputElement>('input[placeholder="my-provider"]')!.value).toBe("My Custom");
+		// 默认模型应预选为 my-model-a（而不是无脑选第一个）
+		expect(editor.querySelector(".model-use-row .menu-select-value")?.textContent).toBe("My Model A");
+
+		// 改名后保存：显示名更新，provider id 与已有凭据保持不变；保存成功后 dialog 关闭
+		const nameInput = editor.querySelector<HTMLInputElement>('input[placeholder="my-provider"]')!;
+		await act(async () => { setValue(nameInput, "My Custom Renamed"); });
+		await act(async () => button(editor, "Save provider").click());
+		await flush();
+		expect(updateModelSettings).toHaveBeenCalledWith(expect.objectContaining({
+			mutation: expect.objectContaining({ provider: "my-custom", name: "My Custom Renamed", credential: { action: "keep" } }),
+		}));
+		expect(container.querySelector(".model-custom-provider-dialog")).toBeNull();
+
+		// 重新打开并移除
+		await act(async () => container.querySelector<HTMLButtonElement>(".model-provider-card")!.click());
+		await flush();
+		await act(async () => button(container, "Remove provider").click());
+		await flush();
+		expect(updateModelSettings).toHaveBeenCalledWith(expect.objectContaining({
+			mutation: { type: "remove_provider", provider: "my-custom" },
+		}));
+		await act(async () => root.unmount());
+	});
+
+	it("rejects a custom provider name that collides with an existing provider", async () => {
+		const updateModelSettings = vi.fn().mockResolvedValue(modelSettings);
+		const api = { getModelSettings: vi.fn().mockResolvedValue(modelSettings), updateModelSettings, testModelConnection: vi.fn() } as unknown as MetisDesktopApi;
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<ModelSettingsPanel api={api} serverReady />));
+		await flush();
+
+		await act(async () => button(container, "Add provider").click());
+		await flush();
+		await act(async () => {
+			setValue(container.querySelector<HTMLInputElement>('input[placeholder="my-provider"]')!, "openai");
+		});
+		await act(async () => {
+			setValue(container.querySelector<HTMLInputElement>('input[placeholder="https://api.example.com/v1"]')!, "https://api.example.com/v1");
+		});
+		await act(async () => {
+			setValue(container.querySelector<HTMLInputElement>('input[placeholder="sk-…"]')!, "sk-key");
+		});
+		await act(async () => button(container, "Save provider").click());
+		await flush();
+		expect(container.textContent).toContain("A provider with this name already exists");
+		expect(updateModelSettings).not.toHaveBeenCalled();
+		await act(async () => root.unmount());
+	});
+
+	it("rejects duplicate model IDs within a custom provider", async () => {
+		const updateModelSettings = vi.fn().mockResolvedValue(modelSettings);
+		const api = { getModelSettings: vi.fn().mockResolvedValue(modelSettings), updateModelSettings, testModelConnection: vi.fn() } as unknown as MetisDesktopApi;
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<ModelSettingsPanel api={api} serverReady />));
+		await flush();
+
+		await act(async () => button(container, "Add provider").click());
+		await flush();
+		await act(async () => {
+			setValue(container.querySelector<HTMLInputElement>('input[placeholder="my-provider"]')!, "my-dup");
+			setValue(container.querySelector<HTMLInputElement>('input[placeholder="https://api.example.com/v1"]')!, "https://api.example.com/v1");
+			setValue(container.querySelector<HTMLInputElement>('input[placeholder="sk-…"]')!, "sk-key");
+		});
+		await act(async () => button(container, "Add model").click());
+		await flush();
+		const rows = container.querySelectorAll<HTMLElement>(".model-custom-model-row");
+		await act(async () => {
+			setValue(rows[0]!.querySelector('input[placeholder="gpt-5"]')!, "same-id");
+			setValue(rows[1]!.querySelector('input[placeholder="gpt-5"]')!, "same-id");
+		});
+		await act(async () => button(container, "Save provider").click());
+		await flush();
+		expect(container.textContent).toContain("Model IDs must be unique");
+		expect(updateModelSettings).not.toHaveBeenCalled();
+		await act(async () => root.unmount());
+	});
+
+	it("opens only one provider dialog at a time", async () => {
+		const updateModelSettings = vi.fn().mockResolvedValue(modelSettings);
+		const api = { getModelSettings: vi.fn().mockResolvedValue(modelSettings), updateModelSettings, testModelConnection: vi.fn() } as unknown as MetisDesktopApi;
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<ModelSettingsPanel api={api} serverReady />));
+		await flush();
+
+		await act(async () => button(container, "Add provider").click());
+		await flush();
+		expect(container.querySelectorAll(".model-provider-dialog")).toHaveLength(1);
+		// 打开内置卡片时，自定义编辑器必须被关闭
+		await act(async () => container.querySelector<HTMLButtonElement>(".model-provider-card")!.click());
+		await flush();
+		expect(container.querySelectorAll(".model-provider-dialog")).toHaveLength(1);
+		expect(container.querySelector(".model-custom-provider-dialog")).toBeNull();
+		// 关闭内置 dialog 后再开添加，同样只有一个
+		await act(async () => button(container, "Close provider settings").click());
+		await flush();
+		await act(async () => button(container, "Add provider").click());
+		await flush();
+		expect(container.querySelectorAll(".model-provider-dialog")).toHaveLength(1);
+		expect(container.querySelector(".model-custom-provider-dialog")).not.toBeNull();
+		await act(async () => root.unmount());
+	});
+});
+
+describe("WebSearchSettingsPanel", () => {
+	const webSearchSettings: WebSearchSettingsView = { enabled: false, provider: "brave", authConfigured: false };
+
+	it("reveals a stored API key on demand and hides it again", async () => {
+		const getWebSearchSettings = vi.fn().mockResolvedValue({
+			enabled: true,
+			provider: "brave",
+			authConfigured: true,
+			configuredProviders: ["brave", "tavily"],
+			authSource: "stored",
+		});
+		const revealWebSearchCredential = vi.fn().mockResolvedValue({ credential: "brave-secret" });
+		const api = { getWebSearchSettings, revealWebSearchCredential } as unknown as MetisDesktopApi;
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<WebSearchSettingsPanel api={api} serverReady />));
+		await flush();
+
+		const input = container.querySelector<HTMLInputElement>('input[type="password"]')!;
+		expect(input.placeholder.length).toBeGreaterThanOrEqual(24);
+		await act(async () => button(container, "Show API key").click());
+		await flush();
+		expect(revealWebSearchCredential).toHaveBeenCalledWith({ provider: "brave" });
+		expect(input.type).toBe("text");
+		expect(input.value).toBe("brave-secret");
+
+		await act(async () => button(container, "Hide API key").click());
+		expect(input.type).toBe("password");
+		expect(input.value).toBe("");
+
+		await act(async () => button(container, "Brave Search").click());
+		await flush();
+		await act(async () => {
+			[...document.querySelectorAll<HTMLButtonElement>('[role="option"]')]
+				.find((item) => item.textContent?.includes("Tavily"))?.click();
+		});
+		await flush();
+		expect(input.placeholder.length).toBeGreaterThanOrEqual(24);
+		expect(button(container, "Show API key")).not.toBeNull();
+		await act(async () => root.unmount());
+	});
+
+	it("loads and saves web search settings with an API key", async () => {
+		const getWebSearchSettings = vi.fn().mockResolvedValue(webSearchSettings);
+		const updateWebSearchSettings = vi.fn().mockResolvedValue({ ...webSearchSettings, enabled: true, provider: "serpapi", authConfigured: true, authSource: "stored" });
+		const api = { getWebSearchSettings, updateWebSearchSettings } as unknown as MetisDesktopApi;
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<WebSearchSettingsPanel api={api} serverReady />));
+		await flush();
+
+		expect(container.querySelector(".personalization-section")).not.toBeNull();
+		expect(container.querySelector(".web-search-toggle")).not.toBeNull();
+		// 切换启用（checkbox 用 click）+ 供应商（serpapi），输入 key，保存
+		await act(async () => container.querySelector<HTMLInputElement>('input[type="checkbox"]')!.click());
+		await act(async () => button(container, "Brave Search").click());
+		await flush();
+		await act(async () => {
+			[...document.querySelectorAll<HTMLButtonElement>('[role="option"]')]
+				.find((item) => item.textContent?.includes("SerpApi"))?.click();
+		});
+		await flush();
+		await act(async () => {
+			setValue(container.querySelector<HTMLInputElement>('input[type="password"]')!, "serp-key");
+		});
+		await act(async () => button(container, "Save").click());
+		await flush();
+
+		expect(updateWebSearchSettings).toHaveBeenCalledWith({
+			enabled: true,
+			provider: "serpapi",
+			credential: { action: "set", value: "serp-key" },
+		});
+		expect(container.querySelector(".settings-toast")?.textContent).toContain("Saved");
+		await act(async () => root.unmount());
+	});
+
+	it("dismisses the saved toast after 2.5 seconds", async () => {
+		const getWebSearchSettings = vi.fn().mockResolvedValue(webSearchSettings);
+		const updateWebSearchSettings = vi.fn().mockResolvedValue(webSearchSettings);
+		const api = { getWebSearchSettings, updateWebSearchSettings } as unknown as MetisDesktopApi;
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<WebSearchSettingsPanel api={api} serverReady />));
+		await flush();
+
+		vi.useFakeTimers();
+		try {
+			await act(async () => button(container, "Save").click());
+			expect(container.querySelector(".settings-toast")?.textContent).toContain("Saved");
+			await act(async () => vi.advanceTimersByTimeAsync(2_500));
+			expect(container.querySelector(".settings-toast")).toBeNull();
+		} finally {
+			vi.useRealTimers();
+			await act(async () => root.unmount());
+		}
+	});
+
+	it("clears the unsaved API key draft when switching providers", async () => {
+		const getWebSearchSettings = vi.fn().mockResolvedValue({ enabled: false, provider: "brave", authConfigured: false });
+		const updateWebSearchSettings = vi.fn().mockResolvedValue({ enabled: false, provider: "brave", authConfigured: false });
+		const api = { getWebSearchSettings, updateWebSearchSettings } as unknown as MetisDesktopApi;
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<WebSearchSettingsPanel api={api} serverReady />));
+		await flush();
+
+		// 给 Brave 输入未保存的 key
+		await act(async () => {
+			setValue(container.querySelector<HTMLInputElement>('input[type="password"]')!, "brave-draft");
+		});
+		// 切到 Tavily：草稿必须被清空，保存时不能把 Brave 的 key 存到 Tavily
+		await act(async () => button(container, "Brave Search").click());
+		await flush();
+		await act(async () => {
+			[...document.querySelectorAll<HTMLButtonElement>('[role="option"]')]
+				.find((item) => item.textContent?.includes("Tavily"))?.click();
+		});
+		await flush();
+		expect(container.querySelector<HTMLInputElement>('input[type="password"]')!.value).toBe("");
+
+		await act(async () => button(container, "Save").click());
+		await flush();
+		expect(updateWebSearchSettings).toHaveBeenCalledWith({
+			enabled: false,
+			provider: "tavily",
+			credential: { action: "keep" },
+		});
 		await act(async () => root.unmount());
 	});
 });

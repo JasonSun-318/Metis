@@ -420,6 +420,15 @@ export class ClientBroker {
 		this.register(DESKTOP_IPC_CHANNELS.updatePersonalization, 1, async (_event, [input]) =>
 			this.clientCall("personalization/update", input),
 		);
+		this.register(DESKTOP_IPC_CHANNELS.getWebSearchSettings, 1, async (_event, [input]) =>
+			this.clientCall("webSearch/get", input),
+		);
+		this.register(DESKTOP_IPC_CHANNELS.revealWebSearchCredential, 1, async (_event, [input]) =>
+			this.clientCall("webSearch/credential/reveal", input),
+		);
+		this.register(DESKTOP_IPC_CHANNELS.updateWebSearchSettings, 1, async (_event, [input]) =>
+			this.clientCall("webSearch/update", input),
+		);
 		this.register(DESKTOP_IPC_CHANNELS.testModelConnection, 1, async (_event, [input]) =>
 			this.clientCall("model/testConnection", input),
 		);

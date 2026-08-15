@@ -83,6 +83,7 @@ export function PersonalizationPanel({ api, serverReady }: {
 					<h2>{t("Global instructions")}</h2>
 					<p>{t("Metis keeps these instructions in mind across new Chat and Code tasks.")}</p>
 				</header>
+				<div className="settings-card personalization-card">
 				<label>
 					<span>{t("Global instructions")}</span>
 					<textarea
@@ -116,6 +117,7 @@ export function PersonalizationPanel({ api, serverReady }: {
 					>
 						{t("Save instructions")}
 					</button>
+				</div>
 				</div>
 			</section>
 		</div>

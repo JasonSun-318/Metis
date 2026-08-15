@@ -60,12 +60,13 @@ export function SettingsDialog({ api, generalPreferences, onClose, onGeneralPref
 	}, [onClose]);
 
 	const pages = [
-		{ id: "general" as const, label: "General", icon: GearSix },
-		{ id: "personalization" as const, label: "Personalization", icon: Sparkle },
-		{ id: "profile" as const, label: "Profile", icon: UserCircle },
-		{ id: "model" as const, label: "Model", icon: Cpu },
-		{ id: "usage" as const, label: "Usage", icon: ChartBar },
+		{ id: "general" as const, label: "General", description: "Manage language, appearance, fonts, motion, and web search.", icon: GearSix },
+		{ id: "personalization" as const, label: "Personalization", description: "Set instructions Metis keeps in mind across new tasks.", icon: Sparkle },
+		{ id: "profile" as const, label: "Profile", description: "Review your profile and activity at a glance.", icon: UserCircle },
+		{ id: "model" as const, label: "Model", description: "Configure model providers and defaults for new tasks.", icon: Cpu },
+		{ id: "usage" as const, label: "Usage", description: "Review token usage across Chat and Code tasks.", icon: ChartBar },
 	];
+	const activePage = pages.find((item) => item.id === page)!;
 	return (
 		<div className="settings-backdrop">
 			<div aria-label={t("Settings")} aria-modal="true" className="settings-dialog" ref={dialogRef} role="dialog">
@@ -74,6 +75,7 @@ export function SettingsDialog({ api, generalPreferences, onClose, onGeneralPref
 						<ArrowLeft aria-hidden="true" size={18} />
 						<span>{t("Back to app")}</span>
 					</button>
+					<p className="settings-navigation-label">{t("Preferences")}</p>
 					<nav aria-label={t("Settings pages")}>
 						{pages.map(({ id, label, icon: Icon }, index) => (
 							<button
@@ -91,14 +93,19 @@ export function SettingsDialog({ api, generalPreferences, onClose, onGeneralPref
 				</aside>
 				<div className="settings-main">
 					<header className="settings-main-header">
-						<h1>{t(pages.find((item) => item.id === page)!.label)}</h1>
+						<div className="settings-main-heading">
+							<h1>{t(activePage.label)}</h1>
+							<p>{t(activePage.description)}</p>
+						</div>
 					</header>
 					<div className={`settings-page-scroll settings-page-scroll-${page}`} ref={pageScrollRef}>
 						{page === "general" ? (
 							<GeneralPanel
+								api={api}
 								generalPreferences={generalPreferences}
 								onGeneralPreferencesChange={onGeneralPreferencesChange}
 								onThemeChange={onThemeChange}
+								serverReady={serverReady}
 								theme={theme}
 							/>
 						) : null}

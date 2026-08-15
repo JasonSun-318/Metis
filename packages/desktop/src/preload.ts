@@ -123,6 +123,18 @@ const api = {
 		invoke(DESKTOP_IPC_CHANNELS.updatePersonalization, "personalization/update", input) as ReturnType<
 			MetisDesktopApi["updatePersonalization"]
 		>,
+	getWebSearchSettings: () =>
+		invoke(DESKTOP_IPC_CHANNELS.getWebSearchSettings, "webSearch/get", {}) as ReturnType<
+			MetisDesktopApi["getWebSearchSettings"]
+		>,
+	revealWebSearchCredential: (input: ClientParams<"webSearch/credential/reveal">) =>
+		invoke(DESKTOP_IPC_CHANNELS.revealWebSearchCredential, "webSearch/credential/reveal", input) as ReturnType<
+			MetisDesktopApi["revealWebSearchCredential"]
+		>,
+	updateWebSearchSettings: (input: ClientParams<"webSearch/update">) =>
+		invoke(DESKTOP_IPC_CHANNELS.updateWebSearchSettings, "webSearch/update", input) as ReturnType<
+			MetisDesktopApi["updateWebSearchSettings"]
+		>,
 	testModelConnection: (input: ClientParams<"model/testConnection">) =>
 		invoke(DESKTOP_IPC_CHANNELS.testModelConnection, "model/testConnection", input) as ReturnType<
 			MetisDesktopApi["testModelConnection"]

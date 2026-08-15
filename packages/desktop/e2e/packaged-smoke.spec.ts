@@ -433,13 +433,14 @@ test("packaged task list uses the Metis composer UI in Chat and Code", async ({}
 		await slashMenu.getByRole("option").click();
 		await expect(page.getByRole("button", { name: "Remove skill e2e-skill", exact: true })).toBeVisible();
 		await composerInput.fill("Use the packaged fixture");
-		await expect(page.locator(".composer-chips .is-skill")).toHaveCSS("color", "rgb(169, 201, 238)");
+		await expect(page.locator(".composer-skill-token")).toHaveCSS("color", "rgb(169, 201, 238)");
 		await page.locator(".composer-dock").screenshot({
 			animations: "disabled",
-			path: testInfo.outputPath("slash-skill-chip.png"),
+			path: testInfo.outputPath("slash-skill-token.png"),
 		});
-		await page.getByRole("button", { name: "Remove skill e2e-skill", exact: true }).click();
 		await composerInput.fill("");
+		await composerInput.press("Backspace");
+		await expect(page.getByRole("button", { name: "Remove skill e2e-skill", exact: true })).toHaveCount(0);
 
 		phase = "checking expanded Chat task list";
 		let panel = page.getByRole("region", { name: "Tasks", exact: true });
@@ -3567,6 +3568,25 @@ test("packaged General settings and Personalization persist across restart", asy
 		await expect(page.getByRole("button", { name: "深色", exact: true })).toHaveAttribute("aria-pressed", "true");
 		await page.screenshot({ animations: "disabled", path: path.join(qaDir, "general-dark-1440x900.png") });
 
+		phase = "configuring and revealing web search credentials";
+		const searchSection = page.locator(".web-search-section");
+		const searchToggle = searchSection.getByRole("switch", { name: "启用网络搜索", exact: true });
+		const searchApiKey = searchSection.getByLabel("API Key", { exact: true });
+		await searchSection.locator(".web-search-toggle").click();
+		await expect(searchToggle).toBeChecked();
+		await searchApiKey.fill("packaged-search-secret");
+		await searchSection.getByRole("button", { name: "保存", exact: true }).click();
+		await expect(searchSection.getByRole("status")).toContainText("已保存");
+		await expect(searchApiKey).toHaveAttribute("type", "password");
+		await expect(searchApiKey).toHaveAttribute("placeholder", "••••••••••••");
+		await searchSection.getByRole("button", { name: "显示 API Key", exact: true }).click();
+		await expect(searchApiKey).toHaveAttribute("type", "text");
+		await expect(searchApiKey).toHaveValue("packaged-search-secret");
+		await searchSection.getByRole("button", { name: "隐藏 API Key", exact: true }).click();
+		await expect(searchApiKey).toHaveValue("");
+		await searchSection.scrollIntoViewIfNeeded();
+		await page.screenshot({ animations: "disabled", path: path.join(qaDir, "web-search-dark-1440x900.png") });
+
 		phase = "saving global instructions without reloading the open session";
 		const statusBefore = await page.evaluate(async (sessionId) =>
 			(globalThis as unknown as { metis: MetisDesktopApi }).metis.getSessionStatus({ sessionId }), CHAT_ACTIVE_ID);
@@ -3588,6 +3608,8 @@ test("packaged General settings and Personalization persist across restart", asy
 		await page.getByRole("button", { name: "浅色", exact: true }).click();
 		await expect(page.getByRole("button", { name: "浅色", exact: true })).toHaveAttribute("aria-pressed", "true");
 		await page.screenshot({ animations: "disabled", path: path.join(qaDir, "general-light-1440x900.png") });
+		await page.locator(".web-search-section").scrollIntoViewIfNeeded();
+		await page.screenshot({ animations: "disabled", path: path.join(qaDir, "web-search-light-1440x900.png") });
 		await page.getByRole("button", { name: "个性化", exact: true }).click();
 		await expect(page.getByRole("textbox", { name: "全局指令", exact: true })).toHaveValue("Prefer concise answers.");
 		await page.getByRole("textbox", { name: "全局指令", exact: true }).focus();
@@ -3618,6 +3640,12 @@ test("packaged General settings and Personalization persist across restart", asy
 		await expect(page.getByRole("button", { name: "Chat 字体", exact: true })).toContainText("系统无衬线");
 		await expect(page.getByRole("button", { name: "Code 字体", exact: true })).toContainText("系统衬线");
 		await expect(page.getByRole("button", { name: "减少动效", exact: true })).toHaveAttribute("aria-pressed", "true");
+		const restartedSearchSection = page.locator(".web-search-section");
+		await expect(restartedSearchSection.getByRole("switch", { name: "启用网络搜索", exact: true })).toBeChecked();
+		await expect(restartedSearchSection.getByLabel("API Key", { exact: true })).toHaveAttribute(
+			"placeholder",
+			"••••••••••••",
+		);
 		const restartedFonts = await page.evaluate(() => ({
 			chat: getComputedStyle(document.documentElement).getPropertyValue("--chat-prose-font"),
 			code: getComputedStyle(document.documentElement).getPropertyValue("--code-prose-font"),
