@@ -93,6 +93,53 @@ describe("ModelSettingsService", () => {
 		expect(authStorage.has("local-test")).toBe(false);
 	});
 
+	it("accepts an anthropic-messages custom provider with its own base URL", async () => {
+		const authStorage = AuthStorage.create(join(agentDir, "auth.json"));
+		const service = new ModelSettingsService({
+			agentDir,
+			authStorage,
+			modelRegistry: ModelRegistry.create(authStorage, join(agentDir, "models.json")),
+			settingsManager: SettingsManager.create(agentDir, agentDir),
+		});
+
+		const saved = await service.update({
+			type: "save_provider",
+			provider: "claude-local",
+			name: "Claude Local",
+			baseUrl: "https://claude.example.test",
+			api: "anthropic-messages",
+			models: [
+				{
+					modelId: "claude-model",
+					name: "Claude Model",
+					contextWindow: 200_000,
+					maxOutputTokens: 64_000,
+					reasoning: true,
+					imageInput: true,
+				},
+			],
+			credential: { action: "set", value: "anthropic-test-key" },
+		});
+
+		expect(saved.providers.find((provider) => provider.provider === "claude-local")).toMatchObject({
+			name: "Claude Local",
+			builtin: false,
+			baseUrl: "https://claude.example.test",
+			api: "anthropic-messages",
+			auth: { configured: true, source: "stored" },
+			models: [{ modelId: "claude-model", contextWindow: 200_000, maxOutputTokens: 64_000, custom: true }],
+		});
+		expect(JSON.parse(readFileSync(join(agentDir, "models.json"), "utf8"))).toMatchObject({
+			providers: {
+				"claude-local": {
+					api: "anthropic-messages",
+					baseUrl: "https://claude.example.test",
+				},
+			},
+		});
+		expect(readFileSync(join(agentDir, "auth.json"), "utf8")).toContain("anthropic-test-key");
+	});
+
 	it("stores and clears built-in provider credentials without creating an invalid override", async () => {
 		const authStorage = AuthStorage.create(join(agentDir, "auth.json"));
 		const service = new ModelSettingsService({

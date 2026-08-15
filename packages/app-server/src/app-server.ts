@@ -35,6 +35,7 @@ import { SessionRegistry, type SessionRegistryOptions } from "./session-registry
 import { AppServerError, type SessionRuntimeHost } from "./session-runtime-host.ts";
 import { DefaultSessionTitleGenerator, type SessionTitleGenerator } from "./session-title-generator.ts";
 import { SessionSubscriptions } from "./subscriptions.ts";
+import { WebSearchService } from "./web-search.ts";
 
 export interface AppServerOptions extends SessionRegistryOptions, OutboundQueueLimits {
 	readonly agentDir: string;
@@ -100,6 +101,7 @@ export class AppServer {
 		});
 		const personalization = new PersonalizationService(options.agentDir);
 		const permissionRules = new PermissionRulesService(options.agentDir, this.catalog);
+		const webSearch = new WebSearchService({ settingsManager, authStorage });
 		this.registry = new SessionRegistry(
 			options.runtimeHost ??
 				new AgentSessionRuntimeHost({
@@ -122,6 +124,7 @@ export class AppServer {
 			modelSettings,
 			personalization,
 			permissionRules,
+			webSearch,
 			options.titleGenerator ?? new DefaultSessionTitleGenerator({ modelRegistry, settingsManager }),
 		);
 		this.outboundQueueLimits = {

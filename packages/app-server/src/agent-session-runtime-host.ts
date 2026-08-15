@@ -1167,6 +1167,10 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 		return { permissionMode };
 	}
 
+	async refreshWebSearchSettings(): Promise<void> {
+		await this.session.refreshWebSearchSettings();
+	}
+
 	async setModel(input: ClientParams<"session/setModel">): Promise<ClientResult<"session/setModel">> {
 		this.session.modelRegistry.refresh();
 		const model = this.session.modelRegistry.find(input.provider, input.modelId);

@@ -158,6 +158,13 @@ export class SessionRegistry {
 		return await this.enqueue(this.slotFor(ref), operation);
 	}
 
+	async refreshOpenWebSearchSettings(): Promise<void> {
+		const slots = [...this.slots.values()].filter((slot) => slot.accepting);
+		await Promise.all(
+			slots.map((slot) => this.enqueue(slot, async (runtime) => runtime.refreshWebSearchSettings?.())),
+		);
+	}
+
 	async close(
 		sessionId: string,
 		prepareClose?: (runtime: OpenedSessionRuntime) => Promise<boolean> | boolean,

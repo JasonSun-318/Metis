@@ -2220,12 +2220,21 @@ export class AgentSession {
 		return this._allowedToolNames ? this._allowedToolNames.has("web_search") : this._defaultBuiltinToolsEnabled;
 	}
 
-	setWebSearchEnabled(enabled: boolean): void {
-		this.settingsManager.setWebSearchEnabled(enabled);
+	private _applyWebSearchEnabled(enabled: boolean): void {
 		const names = new Set(this.getActiveToolNames());
 		if (enabled && this._canActivateWebSearch() && this._toolRegistry.has("web_search")) names.add("web_search");
 		else names.delete("web_search");
 		this.setActiveToolsByName([...names]);
+	}
+
+	setWebSearchEnabled(enabled: boolean): void {
+		this.settingsManager.setWebSearchEnabled(enabled);
+		this._applyWebSearchEnabled(enabled);
+	}
+
+	async refreshWebSearchSettings(): Promise<void> {
+		await this.settingsManager.reload();
+		this._applyWebSearchEnabled(this.settingsManager.getWebSearchSettings().enabled);
 	}
 
 	setWebSearchProvider(provider: WebSearchProvider): void {

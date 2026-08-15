@@ -20,6 +20,7 @@ import type { SessionRegistry } from "./session-registry.ts";
 import { AppServerError, type SessionRef } from "./session-runtime-host.ts";
 import type { SessionTitleGenerator } from "./session-title-generator.ts";
 import type { ConnectionSubscriptions, SessionSubscriptions } from "./subscriptions.ts";
+import type { WebSearchService } from "./web-search.ts";
 
 const MAX_REPLAY_ENTRIES = 10_000;
 
@@ -70,6 +71,7 @@ export class Dispatcher {
 	private readonly modelSettings: ModelSettingsService;
 	private readonly personalization: PersonalizationService;
 	private readonly permissionRules: PermissionRulesService;
+	private readonly webSearch: WebSearchService;
 	private readonly titleGenerator: SessionTitleGenerator;
 	private readonly titleJobs = new Set<string>();
 	private readonly profileSummary = new ProfileSummaryCache();
@@ -84,6 +86,7 @@ export class Dispatcher {
 		modelSettings: ModelSettingsService,
 		personalization: PersonalizationService,
 		permissionRules: PermissionRulesService,
+		webSearch: WebSearchService,
 		titleGenerator: SessionTitleGenerator,
 	) {
 		this.catalog = catalog;
@@ -95,6 +98,7 @@ export class Dispatcher {
 		this.modelSettings = modelSettings;
 		this.personalization = personalization;
 		this.permissionRules = permissionRules;
+		this.webSearch = webSearch;
 		this.titleGenerator = titleGenerator;
 	}
 
@@ -465,6 +469,16 @@ export class Dispatcher {
 				return this.personalization.view();
 			case "personalization/update":
 				return await this.replayMutation(request, async () => this.personalization.update(request.params));
+			case "webSearch/get":
+				return this.webSearch.view();
+			case "webSearch/credential/reveal":
+				return this.webSearch.reveal(request.params);
+			case "webSearch/update":
+				return await this.replayMutation(request, async () => {
+					const result = await this.webSearch.update(request.params);
+					await this.registry.refreshOpenWebSearchSettings();
+					return result;
+				});
 			case "usage/get":
 				return this.profileSummary.usage(this.allSessionRefs(), request.params.rangeDays);
 			case "model/list":

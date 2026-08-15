@@ -52,6 +52,7 @@ export interface OpenedSessionRuntime {
 		input: ClientParams<"session/setPermissionMode">,
 	): Promise<ClientResult<"session/setPermissionMode">>;
 	setModel(input: ClientParams<"session/setModel">): Promise<ClientResult<"session/setModel">>;
+	refreshWebSearchSettings?(): Promise<void>;
 	snapshot(serverEpoch: string, currentCursor: () => number): Promise<SessionSnapshot>;
 	startTurn(input: ClientParams<"turn/start">): Promise<ClientResult<"turn/start">>;
 	steer(input: ClientParams<"turn/steer">): Promise<ClientResult<"turn/steer">>;

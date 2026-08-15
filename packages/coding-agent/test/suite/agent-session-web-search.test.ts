@@ -17,6 +17,10 @@ describe("AgentSession web search", () => {
 			expect(disabled.session.getActiveToolNames()).toContain("web_search");
 			disabled.session.setWebSearchEnabled(false);
 			expect(disabled.session.getActiveToolNames()).not.toContain("web_search");
+
+			disabled.settingsManager.setWebSearchEnabled(true);
+			await disabled.session.refreshWebSearchSettings();
+			expect(disabled.session.getActiveToolNames()).toContain("web_search");
 		} finally {
 			await disabled.cleanup();
 			await enabled.cleanup();

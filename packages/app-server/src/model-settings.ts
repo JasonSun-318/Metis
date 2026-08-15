@@ -118,8 +118,10 @@ export class ModelSettingsService {
 						: status.source === "environment"
 							? "environment"
 							: undefined;
-			const api: "openai-responses" | "openai-completions" | null =
-				raw.api === "openai-responses" || raw.api === "openai-completions" ? raw.api : null;
+			const api: "openai-responses" | "openai-completions" | "anthropic-messages" | null =
+				raw.api === "openai-responses" || raw.api === "openai-completions" || raw.api === "anthropic-messages"
+					? raw.api
+					: null;
 			return {
 				provider,
 				name: typeof raw.name === "string" ? raw.name : this.modelRegistry.getProviderDisplayName(provider),

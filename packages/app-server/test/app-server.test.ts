@@ -66,6 +66,7 @@ class FakeRuntime implements OpenedSessionRuntime {
 	startCalls = 0;
 	compactCalls = 0;
 	subagentInterruptCalls = 0;
+	webSearchRefreshCalls = 0;
 	sessionName: string | undefined;
 
 	constructor(ref: SessionRef) {
@@ -279,6 +280,10 @@ class FakeRuntime implements OpenedSessionRuntime {
 	async interrupt(input: ClientParams<"turn/interrupt">): Promise<ClientResult<"turn/interrupt">> {
 		this.active = false;
 		return { operationId: input.requestId, status: "accepted" };
+	}
+
+	async refreshWebSearchSettings(): Promise<void> {
+		this.webSearchRefreshCalls += 1;
 	}
 
 	async prepareMutation(_input: DurableSessionMutation): Promise<PreparedSessionMutation> {
@@ -1209,6 +1214,31 @@ describe("AppServer", () => {
 			},
 		});
 		expect(host.open).not.toHaveBeenCalled();
+	});
+
+	it("refreshes already-open runtimes after web search settings change", async () => {
+		writeSession(sessionsRoot, "web-search-session", projectDir);
+		const host = new FakeHost();
+		const server = await createTestServer({ agentDir, sessionsRoot, runtimeHost: host });
+		const connection = server.connect();
+		await connection.handle(initialize());
+		await connection.handle({
+			jsonrpc: "2.0",
+			id: "web-search-subscribe",
+			method: "session/subscribe",
+			params: { sessionId: "web-search-session" },
+		});
+
+		expect(host.runtimes.get("web-search-session")?.webSearchRefreshCalls).toBe(0);
+		expect(
+			await connection.handle({
+				jsonrpc: "2.0",
+				id: "web-search-update",
+				method: "webSearch/update",
+				params: { enabled: true, provider: "tavily", credential: { action: "keep" } },
+			}),
+		).toMatchObject({ result: { enabled: true, provider: "tavily" } });
+		expect(host.runtimes.get("web-search-session")?.webSearchRefreshCalls).toBe(1);
 	});
 
 	it("lists draft skills without creating a session or trusting project resources", async () => {
