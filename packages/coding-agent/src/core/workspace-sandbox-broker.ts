@@ -16,12 +16,15 @@ function send(response: SandboxResponse): boolean {
 
 function bundledHelperPath(kind: "seccomp" | "srt-win"): string {
 	const executable = kind === "seccomp" ? "apply-seccomp" : "srt-win.exe";
-	const path = join(getPackageDir(), "vendor", "sandbox-runtime", kind, process.arch, executable);
-	try {
-		if (!statSync(path).isFile()) throw new Error();
-	} catch {
-		throw new Error(`Bundled sandbox helper is missing: ${kind}/${process.arch}/${executable}`);
-	}
+	const packageDir = getPackageDir();
+	// Bun binaries place the helper next to the executable (vendor/); Node
+	// builds package it under dist/vendor/ — mirror getBundledToolsDir.
+	const candidates = [
+		join(packageDir, "vendor", "sandbox-runtime", kind, process.arch, executable),
+		join(packageDir, "dist", "vendor", "sandbox-runtime", kind, process.arch, executable),
+	];
+	const path = candidates.find((candidate) => existsSync(candidate));
+	if (!path) throw new Error(`Bundled sandbox helper is missing: ${kind}/${process.arch}/${executable}`);
 	return path;
 }
 
@@ -146,9 +149,9 @@ function runtimeConfig(
 			allowLocalBinding: false,
 		},
 		...(isBunBinary && process.platform === "linux" ? { seccomp: { applyPath: bundledHelperPath("seccomp") } } : {}),
-		...(isBunBinary && process.platform === "win32"
-			? { windows: { srtWin: { path: bundledHelperPath("srt-win") } } }
-			: {}),
+		// srt-win is staged for every Windows runtime (bundled in the desktop
+		// package via dist/vendor/sandbox-runtime), so enable it on all of them.
+		...(process.platform === "win32" ? { windows: { srtWin: { path: bundledHelperPath("srt-win") } } } : {}),
 	};
 }
 
