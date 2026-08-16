@@ -10,6 +10,13 @@ export {
 	createLocalBashOperations,
 } from "./bash.ts";
 export {
+	createDescribeImageTool,
+	createDescribeImageToolDefinition,
+	type DescribeImageToolDetails,
+	type DescribeImageToolInput,
+	type DescribeImageToolOptions,
+} from "./describe-image.ts";
+export {
 	createEditTool,
 	createEditToolDefinition,
 	type EditOperations,
@@ -26,6 +33,13 @@ export {
 	type FindToolInput,
 	type FindToolOptions,
 } from "./find.ts";
+export {
+	createGenerateImageTool,
+	createGenerateImageToolDefinition,
+	type GenerateImageToolDetails,
+	type GenerateImageToolInput,
+	type GenerateImageToolOptions,
+} from "./generate-image.ts";
 export {
 	createGrepTool,
 	createGrepToolDefinition,
@@ -93,8 +107,18 @@ import type { AgentTool } from "@metis/agent-core";
 import type { ToolDefinition } from "../extensions/types.ts";
 import { createSetTasksToolDefinition } from "../set-tasks.ts";
 import { type BashToolOptions, createBashTool, createBashToolDefinition } from "./bash.ts";
+import {
+	createDescribeImageTool,
+	createDescribeImageToolDefinition,
+	type DescribeImageToolOptions,
+} from "./describe-image.ts";
 import { createEditTool, createEditToolDefinition, type EditToolOptions } from "./edit.ts";
 import { createFindTool, createFindToolDefinition, type FindToolOptions } from "./find.ts";
+import {
+	createGenerateImageTool,
+	createGenerateImageToolDefinition,
+	type GenerateImageToolOptions,
+} from "./generate-image.ts";
 import { createGrepTool, createGrepToolDefinition, type GrepToolOptions } from "./grep.ts";
 import { createLsTool, createLsToolDefinition, type LsToolOptions } from "./ls.ts";
 import { createReadTool, createReadToolDefinition, type ReadToolOptions } from "./read.ts";
@@ -115,7 +139,9 @@ export type ToolName =
 	| "ls"
 	| "web_fetch"
 	| "web_search"
-	| "set_tasks";
+	| "set_tasks"
+	| "describe_image"
+	| "generate_image";
 export const allToolNames: Set<ToolName> = new Set([
 	"read",
 	"bash",
@@ -127,6 +153,8 @@ export const allToolNames: Set<ToolName> = new Set([
 	"web_fetch",
 	"web_search",
 	"set_tasks",
+	"describe_image",
+	"generate_image",
 ]);
 
 export interface ToolsOptions {
@@ -138,6 +166,8 @@ export interface ToolsOptions {
 	find?: FindToolOptions;
 	ls?: LsToolOptions;
 	webSearch?: WebSearchToolOptions;
+	describeImage?: DescribeImageToolOptions;
+	generateImage?: GenerateImageToolOptions;
 }
 
 export function createToolDefinition(toolName: ToolName, cwd: string, options?: ToolsOptions): ToolDef {
@@ -162,6 +192,10 @@ export function createToolDefinition(toolName: ToolName, cwd: string, options?: 
 			return createWebSearchToolDefinition(options?.webSearch);
 		case "set_tasks":
 			return createSetTasksToolDefinition();
+		case "describe_image":
+			return createDescribeImageToolDefinition(cwd, options?.describeImage);
+		case "generate_image":
+			return createGenerateImageToolDefinition(options?.generateImage);
 		default:
 			throw new Error(`Unknown tool name: ${toolName}`);
 	}
@@ -189,6 +223,10 @@ export function createTool(toolName: ToolName, cwd: string, options?: ToolsOptio
 			return createWebSearchTool(options?.webSearch);
 		case "set_tasks":
 			return wrapToolDefinition(createSetTasksToolDefinition());
+		case "describe_image":
+			return createDescribeImageTool(cwd, options?.describeImage);
+		case "generate_image":
+			return createGenerateImageTool(options?.generateImage);
 		default:
 			throw new Error(`Unknown tool name: ${toolName}`);
 	}
@@ -224,6 +262,8 @@ export function createAllToolDefinitions(cwd: string, options?: ToolsOptions): R
 		web_fetch: createWebFetchToolDefinition(),
 		web_search: createWebSearchToolDefinition(options?.webSearch),
 		set_tasks: createSetTasksToolDefinition(),
+		describe_image: createDescribeImageToolDefinition(cwd, options?.describeImage),
+		generate_image: createGenerateImageToolDefinition(options?.generateImage),
 	};
 }
 
@@ -257,5 +297,7 @@ export function createAllTools(cwd: string, options?: ToolsOptions): Record<Tool
 		web_fetch: createWebFetchTool(),
 		web_search: createWebSearchTool(options?.webSearch),
 		set_tasks: wrapToolDefinition(createSetTasksToolDefinition()),
+		describe_image: createDescribeImageTool(cwd, options?.describeImage),
+		generate_image: createGenerateImageTool(options?.generateImage),
 	};
 }

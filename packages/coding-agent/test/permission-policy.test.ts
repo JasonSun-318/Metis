@@ -239,6 +239,20 @@ describe("Ask/Auto/Full permission policy", () => {
 		}
 	});
 
+	it("classifies describe_image as a single-file read, not a traversal", () => {
+		const inside = join(cwd, "shot.png");
+		writeFileSync(inside, "png");
+		// 工作区内普通图片：普通读取，自动放行
+		expect(action("describe_image", { path: inside }).risks).toEqual(["ordinary-read"]);
+		// 敏感目录下的图片：敏感读取（与 read 一致，而不是 grep/find 的 traversal 语义）
+		const sensitive = join(cwd, ".ssh", "key.png");
+		mkdirSync(join(cwd, ".ssh"), { recursive: true });
+		writeFileSync(sensitive, "png");
+		expect(action("describe_image", { path: sensitive }).risks).toEqual(["sensitive-read"]);
+		// 缺失路径按 unknown 处理
+		expect(action("describe_image", { path: join(cwd, "missing.png") }).risks).toEqual(["unknown"]);
+	});
+
 	it("classifies symlinks by canonical target and revalidates before execution", () => {
 		if (process.platform === "win32") return;
 		const env = join(cwd, ".env");

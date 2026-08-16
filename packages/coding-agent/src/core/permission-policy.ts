@@ -166,7 +166,7 @@ const COMMON_SENSITIVE_ENV_FILES = [
 	".env.test",
 	".env.test.local",
 ] as const;
-const STRUCTURED_READ_TOOLS = new Set(["read", "grep", "find", "ls"]);
+const STRUCTURED_READ_TOOLS = new Set(["read", "grep", "find", "ls", "describe_image"]);
 const STRUCTURED_WRITE_TOOLS = new Set(["write", "edit"]);
 
 function record(value: unknown): Record<string, unknown> | undefined {
@@ -435,17 +435,24 @@ export function classifyAction(input: ClassifyActionInput): PermissionAction {
 			? action(input, ["network"], [], undefined, input.builtinNetworkTargets)
 			: action(input, ["unknown"]);
 	}
+	// generate_image calls the user-configured paid image API; classify like
+	// web_search as a network action, but the target host is only known at
+	// runtime from settings, so no static network targets are attached.
+	if (input.toolName === "generate_image") {
+		return typeof args.prompt === "string" && args.prompt !== ""
+			? action(input, ["network"])
+			: action(input, ["unknown"]);
+	}
 	if (input.toolName === "bash") {
 		return typeof args.command === "string" ? classifyBash(input, args.command) : action(input, ["unknown"]);
 	}
 	if (STRUCTURED_READ_TOOLS.has(input.toolName)) {
 		if (args.path !== undefined && typeof args.path !== "string") return action(input, ["unknown"]);
 		if (args.path === undefined && input.toolName === "read") return action(input, ["unknown"]);
-		return classifyStructuredRead(
-			input,
-			typeof args.path === "string" ? args.path : input.cwd,
-			input.toolName !== "read",
-		);
+		// describe_image reads a single file like `read`, so it must not be
+		// classified with the directory-traversal semantics of grep/find/ls.
+		const traversal = input.toolName !== "read" && input.toolName !== "describe_image";
+		return classifyStructuredRead(input, typeof args.path === "string" ? args.path : input.cwd, traversal);
 	}
 	if (STRUCTURED_WRITE_TOOLS.has(input.toolName)) {
 		return typeof args.path === "string" ? classifyStructuredWrite(input, args.path) : action(input, ["unknown"]);
@@ -463,7 +470,7 @@ export function routeAction(settings: PermissionSettings, value: PermissionActio
 	if (value.provenance !== "builtin") return "allow";
 	if (value.risks.length === 1 && value.risks[0] === "workspace-write") return "allow";
 	if (value.toolName === "bash") return value.risks.length === 1 && value.risks[0] === "shell" ? "allow" : "user";
-	if (value.toolName === "web_fetch" || value.toolName === "web_search") {
+	if (value.toolName === "web_fetch" || value.toolName === "web_search" || value.toolName === "generate_image") {
 		return value.risks.length === 1 && value.risks[0] === "network" ? "allow" : "user";
 	}
 	return "user";

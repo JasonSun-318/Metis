@@ -471,6 +471,8 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			"edit",
 			"write",
 			"web_fetch",
+			"describe_image",
+			"generate_image",
 			...(settingsManager.getWebSearchSettings().enabled ? (["web_search"] as const) : []),
 			...(isSubagent ? [] : (["set_tasks"] as const)),
 		];

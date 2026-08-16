@@ -511,29 +511,47 @@ function ensureSessionAssetDirectory(assetDir: string): void {
 	assertSafeSessionAssetDirectory(assetDir);
 }
 
-function externalizeImage(image: ImageContent, imageDir: string): ImageContent | ImageReference {
-	const extension = imageExtension(image.mimeType);
-	if (!extension) return image;
+export interface PersistedSessionImage {
+	path: string;
+	hash: string;
+	mimeType: string;
+	size: number;
+}
 
+function writeHashedSessionImage(imageDir: string, image: ImageContent): PersistedSessionImage {
+	const extension = imageExtension(image.mimeType);
+	if (!extension) throw new Error(`Unsupported image mime type: ${image.mimeType}`);
+	const bytes = Buffer.from(image.data, "base64");
+	if (bytes.length === 0 || bytes.length > MAX_SESSION_IMAGE_BLOB_BYTES) {
+		throw new Error("Image blob is empty or exceeds the session image size limit");
+	}
+	const hash = createHash("sha256").update(bytes).digest("hex");
+	ensureSessionAssetDirectory(imageDir);
+	const imagePath = join(imageDir, `${hash}.${extension}`);
 	try {
-		const bytes = Buffer.from(image.data, "base64");
-		if (bytes.length === 0 || bytes.length > MAX_SESSION_IMAGE_BLOB_BYTES) return image;
-		const hash = createHash("sha256").update(bytes).digest("hex");
-		ensureSessionAssetDirectory(imageDir);
-		const imagePath = join(imageDir, `${hash}.${extension}`);
-		try {
-			createFileAtomicallySync(imagePath, bytes, { mode: 0o600 });
-		} catch (error) {
-			if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-			const storedBytes = readOwnedRegularFile(imagePath, {
-				expectedSize: bytes.length,
-				maxBytes: MAX_SESSION_IMAGE_BLOB_BYTES,
-			});
-			if (createHash("sha256").update(storedBytes).digest("hex") !== hash) {
-				throw new Error("stored image hash mismatch");
-			}
+		createFileAtomicallySync(imagePath, bytes, { mode: 0o600 });
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+		const storedBytes = readOwnedRegularFile(imagePath, {
+			expectedSize: bytes.length,
+			maxBytes: MAX_SESSION_IMAGE_BLOB_BYTES,
+		});
+		if (createHash("sha256").update(storedBytes).digest("hex") !== hash) {
+			throw new Error("stored image hash mismatch");
 		}
-		return { type: "image_ref", hash, mimeType: image.mimeType, size: bytes.length };
+	}
+	return { path: imagePath, hash, mimeType: image.mimeType, size: bytes.length };
+}
+
+export function persistSessionImage(sessionFile: string, image: ImageContent): PersistedSessionImage {
+	if (!sessionFile) throw new Error("generate_image requires a persisted session to store images");
+	return writeHashedSessionImage(getSessionImageDir(sessionFile), image);
+}
+
+function externalizeImage(image: ImageContent, imageDir: string): ImageContent | ImageReference {
+	try {
+		const saved = writeHashedSessionImage(imageDir, image);
+		return { type: "image_ref", hash: saved.hash, mimeType: saved.mimeType, size: saved.size };
 	} catch {
 		return image;
 	}

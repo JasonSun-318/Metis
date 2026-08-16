@@ -165,7 +165,16 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
 
 	const contextFiles = providedContextFiles ?? [];
 	const skills = providedSkills ?? [];
-	const tools = selectedTools || ["read", "grep", "bash", "edit", "write", "web_fetch"];
+	const tools = selectedTools || [
+		"read",
+		"grep",
+		"bash",
+		"edit",
+		"write",
+		"web_fetch",
+		"describe_image",
+		"generate_image",
+	];
 
 	if (customPrompt) {
 		let prompt = customPrompt;

@@ -54,6 +54,21 @@ export interface WebSearchSettings {
 	provider?: WebSearchProvider;
 }
 
+/** Image-generation API protocol the configured service speaks. */
+export type ImageGenApi = "openai-images" | "openrouter-images";
+
+/** AuthStorage provider id under which the image-generation API key is stored. */
+export const IMAGE_GEN_PROVIDER_ID = "image-gen";
+
+/** User-configured image-generation service (single). API key lives in AuthStorage under IMAGE_GEN_PROVIDER_ID. */
+export interface ImageGenSettings {
+	/** Display name shown in settings. */
+	name: string;
+	baseUrl: string;
+	api: ImageGenApi;
+	modelId: string;
+}
+
 export type DefaultProjectTrust = "ask" | "always" | "never";
 
 export type TransportSetting = Transport;
@@ -106,6 +121,11 @@ export type PackageSource =
 export interface Settings {
 	defaultProvider?: string;
 	defaultModel?: string;
+	/** Vision-describer model reference for models without image input. */
+	visionProvider?: string;
+	visionModel?: string;
+	/** User-configured image-generation service for the generate_image tool. */
+	imageGen?: ImageGenSettings;
 	defaultThinkingLevel?: ThinkingSelection;
 	transport?: TransportSetting; // default: "auto"
 	steeringMode?: "all" | "one-at-a-time";
@@ -782,6 +802,55 @@ export class SettingsManager {
 		delete this.globalSettings.defaultModel;
 		this.markModified("defaultProvider");
 		this.markModified("defaultModel");
+		this.save();
+	}
+
+	getVisionProvider(): string | undefined {
+		return this.settings.visionProvider;
+	}
+
+	getVisionModelId(): string | undefined {
+		return this.settings.visionModel;
+	}
+
+	setVisionModelAndProvider(provider: string, modelId: string): void {
+		this.globalSettings.visionProvider = provider;
+		this.globalSettings.visionModel = modelId;
+		this.markModified("visionProvider");
+		this.markModified("visionModel");
+		this.save();
+	}
+
+	clearVisionModel(): void {
+		delete this.globalSettings.visionProvider;
+		delete this.globalSettings.visionModel;
+		this.markModified("visionProvider");
+		this.markModified("visionModel");
+		this.save();
+	}
+
+	getImageGenSettings(): ImageGenSettings | undefined {
+		const settings = this.settings.imageGen;
+		if (!settings || typeof settings !== "object") return undefined;
+		const api = settings.api === "openrouter-images" ? "openrouter-images" : "openai-images";
+		if (typeof settings.baseUrl !== "string" || typeof settings.modelId !== "string") return undefined;
+		return {
+			name: typeof settings.name === "string" && settings.name.trim() !== "" ? settings.name : settings.modelId,
+			baseUrl: settings.baseUrl,
+			api,
+			modelId: settings.modelId,
+		};
+	}
+
+	setImageGenSettings(settings: ImageGenSettings): void {
+		this.globalSettings.imageGen = { ...settings };
+		this.markModified("imageGen");
+		this.save();
+	}
+
+	clearImageGenSettings(): void {
+		delete this.globalSettings.imageGen;
+		this.markModified("imageGen");
 		this.save();
 	}
 

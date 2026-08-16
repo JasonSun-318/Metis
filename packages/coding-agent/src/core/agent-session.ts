@@ -153,7 +153,7 @@ import { createSessionId } from "./session-id.ts";
 import type { BranchSummaryEntry, CompactionEntry, SessionEntry, SessionManager } from "./session-manager.ts";
 import { CURRENT_SESSION_VERSION, getLatestCompactionEntry, type SessionHeader } from "./session-manager.ts";
 import type { CwdOrigin } from "./session-workspace.ts";
-import type { SettingsManager } from "./settings-manager.ts";
+import { IMAGE_GEN_PROVIDER_ID, type SettingsManager } from "./settings-manager.ts";
 import { SKILL_USAGE_CUSTOM_TYPE, type SkillUsageRecord } from "./skills.ts";
 import type { SlashCommandInfo } from "./slash-commands.ts";
 import { createSyntheticSourceInfo, type SourceInfo } from "./source-info.ts";
@@ -4585,6 +4585,19 @@ export class AgentSession {
 						getSettings: () => this.settingsManager.getWebSearchSettings(),
 						getApiKey: (provider) => resolveWebSearchApiKey(this._modelRegistry.authStorage, provider),
 					},
+					describeImage: {
+						getVisionRef: () => {
+							const provider = this.settingsManager.getVisionProvider();
+							const modelId = this.settingsManager.getVisionModelId();
+							return provider && modelId ? { provider, modelId } : undefined;
+						},
+						modelRegistry: this._modelRegistry,
+					},
+					generateImage: {
+						getSettings: () => this.settingsManager.getImageGenSettings(),
+						getApiKey: () =>
+							this._modelRegistry.authStorage.getApiKey(IMAGE_GEN_PROVIDER_ID, { includeFallback: false }),
+					},
 				});
 
 		this._baseToolDefinitions = new Map(
@@ -4623,6 +4636,8 @@ export class AgentSession {
 					"edit",
 					"write",
 					"web_fetch",
+					"describe_image",
+					"generate_image",
 					...(this.settingsManager.getWebSearchSettings().enabled && this._canActivateWebSearch()
 						? ["web_search"]
 						: []),
