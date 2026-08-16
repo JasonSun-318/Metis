@@ -621,8 +621,21 @@ export const ModelSettingsProviderViewSchema = StrictObject({
 	auth: ModelAuthStatusViewSchema,
 	models: Type.Array(ModelSettingsModelViewSchema, { maxItems: 512 }),
 });
+export const ImageGenApiViewSchema = Type.Union([Type.Literal("openai-images"), Type.Literal("openrouter-images")]);
+/** User-configured image-generation service; the API key is never returned. */
+export const ImageGenSettingsViewSchema = StrictObject({
+	name: Type.String({ minLength: 1, maxLength: 120 }),
+	baseUrl: Type.String({ minLength: 1, maxLength: 2_048 }),
+	api: ImageGenApiViewSchema,
+	modelId: Type.String({ minLength: 1, maxLength: 300 }),
+	authConfigured: Type.Boolean(),
+});
 export const ModelSettingsViewSchema = StrictObject({
 	defaultModel: Type.Union([SubagentModelRefSchema, Type.Null()]),
+	/** Vision-describer model for image-less models; null when unset. */
+	visionModel: Type.Union([SubagentModelRefSchema, Type.Null()]),
+	/** Image-generation service for the generate_image tool; null when unset. */
+	imageGen: Type.Union([ImageGenSettingsViewSchema, Type.Null()]),
 	defaultThinkingSelection: ThinkingSelectionSchema,
 	providers: Type.Array(ModelSettingsProviderViewSchema, { maxItems: 128 }),
 	loadError: Type.Union([PublicTextSchema, Type.Null()]),
@@ -1185,6 +1198,8 @@ export type ModelOptionView = Static<typeof ModelOptionViewSchema>;
 export type ModelSettingsModelView = Static<typeof ModelSettingsModelViewSchema>;
 export type ModelSettingsProviderView = Static<typeof ModelSettingsProviderViewSchema>;
 export type ModelSettingsView = Static<typeof ModelSettingsViewSchema>;
+export type ImageGenApiView = Static<typeof ImageGenApiViewSchema>;
+export type ImageGenSettingsView = Static<typeof ImageGenSettingsViewSchema>;
 export type WebSearchProvider = Static<typeof WebSearchProviderSchema>;
 export type WebSearchSettingsView = Static<typeof WebSearchSettingsViewSchema>;
 export type UsageRangeDays = Static<typeof UsageRangeDaysSchema>;

@@ -134,6 +134,20 @@ const zhCN = {
 	"Max output": "最大输出",
 	Reasoning: "支持推理",
 	"Image input": "支持图片输入",
+	"Vision model": "视觉理解模型",
+	"Pick an image-capable model that describes images for models without vision.":
+		"选择一个支持图片输入的模型，为不支持视觉的模型描述图片内容。",
+	"Vision model saved": "视觉理解模型已保存",
+	"No image-capable models are configured yet.": "还没有已配置且支持图片输入的模型。",
+	"Image generation": "图片生成",
+	"Configure a service the generate_image tool uses to create images.": "配置 generate_image 工具用于生成图片的服务。",
+	"Pick the API format and endpoint the generate_image tool talks to.":
+		"选择 generate_image 工具所调用的 API 格式与端点。",
+	"Fill in the name, base URL, and model ID.": "请填写名称、Base URL 和模型 ID。",
+	"Image generation saved": "图片生成服务已保存",
+	"Image generation removed": "图片生成服务已移除",
+	"OpenAI Images": "OpenAI Images",
+	"OpenRouter Images": "OpenRouter Images",
 	"Connection tests send a short prompt and may consume provider tokens.":
 		"连接测试会发送一条简短提示词，可能产生少量提供商 Token 消耗。",
 	"Remove provider": "移除提供商",

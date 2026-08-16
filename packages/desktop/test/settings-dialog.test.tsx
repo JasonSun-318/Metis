@@ -1,6 +1,11 @@
 // @vitest-environment jsdom
 
-import type { ModelSettingsView, UsageRangeDays, UsageSummaryView, WebSearchSettingsView } from "@metis/app-protocol";
+import type {
+	ModelSettingsView,
+	UsageRangeDays,
+	UsageSummaryView,
+	WebSearchSettingsView,
+} from "@metis/app-protocol";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -18,8 +23,10 @@ const generalPreferences: GeneralPreferences = {
 	codeFont: "system-sans",
 };
 
-const modelSettings: ModelSettingsView = {
+	const modelSettings: ModelSettingsView = {
 	defaultModel: { provider: "openai", modelId: "gpt-5" },
+	visionModel: null,
+	imageGen: null,
 	defaultThinkingSelection: "high",
 	providers: [{
 		provider: "openai",
@@ -268,6 +275,137 @@ describe("ModelSettingsPanel", () => {
 		await act(async () => root.unmount());
 	});
 
+	it("selects and saves a vision model from image-capable authenticated models", async () => {
+		const visionSettings: ModelSettingsView = {
+			...modelSettings,
+			visionModel: { provider: "openai", modelId: "gpt-5" },
+			providers: [
+				{
+					provider: "openai",
+					name: "OpenAI",
+					builtin: true,
+					baseUrl: null,
+					api: null,
+					auth: { configured: true, source: "stored", label: "••••1234" },
+					models: [
+						{ provider: "openai", modelId: "gpt-5", name: "GPT-5", contextWindow: 400_000, maxOutputTokens: 128_000, reasoning: true, imageInput: true, custom: false },
+						{ provider: "openai", modelId: "gpt-4o-text", name: "GPT Text", contextWindow: 128_000, maxOutputTokens: 16_384, reasoning: false, imageInput: false, custom: false },
+					],
+				},
+				{
+					provider: "noauth",
+					name: "No Auth",
+					builtin: true,
+					baseUrl: null,
+					api: null,
+					auth: { configured: false },
+					models: [
+						{ provider: "noauth", modelId: "eye", name: "Eye", contextWindow: 128_000, maxOutputTokens: 16_384, reasoning: false, imageInput: true, custom: false },
+					],
+				},
+			],
+		};
+		const updateModelSettings = vi.fn().mockResolvedValue(visionSettings);
+		const api = { getModelSettings: vi.fn().mockResolvedValue(visionSettings), updateModelSettings, testModelConnection: vi.fn() } as unknown as MetisDesktopApi;
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<ModelSettingsPanel api={api} serverReady />));
+		await flush();
+
+		// 之前保存的视觉模型应显示；纯文本模型和未认证 provider 的模型不在选项里
+		await act(async () => button(container, "OpenAI / GPT-5").click());
+		await flush();
+		const optionNames = [...document.querySelectorAll<HTMLButtonElement>('[role="option"]')].map((item) => item.textContent);
+		expect(optionNames.some((name) => name?.includes("OpenAI / GPT-5"))).toBe(true);
+		expect(optionNames.some((name) => name?.includes("GPT Text"))).toBe(false);
+		expect(optionNames.some((name) => name?.includes("Eye"))).toBe(false);
+		expect(optionNames.some((name) => name?.includes("Not configured"))).toBe(true);
+
+		// 选“不配置”保存 null
+		await act(async () => {
+			[...document.querySelectorAll<HTMLButtonElement>('[role="option"]')]
+				.find((item) => item.textContent?.includes("Not configured"))?.click();
+		});
+		await flush();
+		expect(updateModelSettings).toHaveBeenCalledWith(expect.objectContaining({
+			mutation: { type: "set_vision_model", model: null },
+		}));
+		await act(async () => root.unmount());
+	});
+
+	it("falls back to Not configured when the saved vision model disappears", async () => {
+		const noVisionSettings: ModelSettingsView = {
+			...modelSettings,
+			providers: [{
+				provider: "openai",
+				name: "OpenAI",
+				builtin: true,
+				baseUrl: null,
+				api: null,
+				auth: { configured: true, source: "stored", label: "••••1234" },
+				models: [
+					{ provider: "openai", modelId: "gpt-5", name: "GPT-5", contextWindow: 400_000, maxOutputTokens: 128_000, reasoning: true, imageInput: false, custom: false },
+				],
+			}],
+		};
+		const updateModelSettings = vi.fn().mockResolvedValue(noVisionSettings);
+		const api = { getModelSettings: vi.fn().mockResolvedValue(noVisionSettings), updateModelSettings, testModelConnection: vi.fn() } as unknown as MetisDesktopApi;
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<ModelSettingsPanel api={api} serverReady />));
+		await flush();
+
+		// 默认 visionModel 为 null；空 imageInput 模型时显示空态提示
+		expect(container.querySelector(".model-vision-select .menu-select-value")?.textContent).toContain("Not configured");
+		expect(container.textContent).toContain("No image-capable models are configured yet.");
+		await act(async () => root.unmount());
+	});
+
+	it("configures, edits, and removes the image-generation service", async () => {
+		const updateModelSettings = vi.fn();
+		updateModelSettings.mockImplementation(async ({ mutation }: { mutation: any }) => {
+			if (mutation.type === "set_image_gen") {
+				return {
+					...modelSettings,
+					imageGen: mutation.settings
+						? { ...mutation.settings, authConfigured: mutation.credential.action !== "remove" }
+						: null,
+				};
+			}
+			return modelSettings;
+		});
+		const api = { getModelSettings: vi.fn().mockResolvedValue(modelSettings), updateModelSettings, testModelConnection: vi.fn() } as unknown as MetisDesktopApi;
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<ModelSettingsPanel api={api} serverReady />));
+		await flush();
+
+		// 未配置态
+		expect(container.textContent).toContain("Not configured");
+		await act(async () => button(container, "Configure").click());
+		await flush();
+
+		// 填写表单并保存
+		await act(async () => setValue(container.querySelector<HTMLInputElement>('input[placeholder="My image gen"]')!, "My image gen"));
+		await act(async () => setValue(container.querySelector<HTMLInputElement>('input[placeholder="https://api.openai.com/v1"]')!, "https://api.openai.com/v1"));
+		await act(async () => setValue(container.querySelector<HTMLInputElement>('input[placeholder="gpt-image-1"]')!, "gpt-image-1"));
+		await act(async () => setValue(container.querySelector<HTMLInputElement>('input[placeholder="sk-…"]')!, "sk-image-key"));
+		await act(async () => button(container, "Save").click());
+		await flush();
+
+		expect(updateModelSettings).toHaveBeenCalledWith(expect.objectContaining({
+			mutation: expect.objectContaining({
+				type: "set_image_gen",
+				settings: { name: "My image gen", baseUrl: "https://api.openai.com/v1", api: "openai-images", modelId: "gpt-image-1" },
+				credential: { action: "set", value: "sk-image-key" },
+			}),
+		}));
+		await act(async () => root.unmount());
+	});
+
 	it("adds a custom provider with base URL, API format, key, and multiple models", async () => {
 		const updateModelSettings = vi.fn().mockResolvedValue(modelSettings);
 		const api = { getModelSettings: vi.fn().mockResolvedValue(modelSettings), updateModelSettings, testModelConnection: vi.fn() } as unknown as MetisDesktopApi;
@@ -388,6 +526,70 @@ describe("ModelSettingsPanel", () => {
 		expect(updateModelSettings).toHaveBeenCalledWith(expect.objectContaining({
 			mutation: { type: "remove_provider", provider: "my-custom" },
 		}));
+		await act(async () => root.unmount());
+	});
+
+	it("marks a custom model as image-capable when the Image input toggle is checked", async () => {
+		const updateModelSettings = vi.fn().mockResolvedValue(modelSettings);
+		const api = { getModelSettings: vi.fn().mockResolvedValue(modelSettings), updateModelSettings, testModelConnection: vi.fn() } as unknown as MetisDesktopApi;
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<ModelSettingsPanel api={api} serverReady />));
+		await flush();
+
+		await act(async () => button(container, "Add provider").click());
+		await flush();
+		await act(async () => setValue(container.querySelector<HTMLInputElement>('input[placeholder="my-provider"]')!, "vision-provider"));
+		await act(async () => setValue(container.querySelector<HTMLInputElement>('input[placeholder="https://api.example.com/v1"]')!, "https://api.vision.dev/v1"));
+		await act(async () => setValue(container.querySelector<HTMLInputElement>('input[placeholder="sk-…"]')!, "sk-vision-key"));
+		const firstRow = container.querySelectorAll<HTMLElement>(".model-custom-model-row")[0]!;
+		await act(async () => setValue(firstRow.querySelector<HTMLInputElement>('input[placeholder="gpt-5"]')!, "vision-model"));
+		// 默认未勾选
+		expect((firstRow.querySelector<HTMLInputElement>('input[type="checkbox"]') as HTMLInputElement).checked).toBe(false);
+		await act(async () => firstRow.querySelector<HTMLInputElement>('input[type="checkbox"]')!.click());
+		await act(async () => button(container, "Save provider").click());
+		await flush();
+
+		expect(updateModelSettings).toHaveBeenCalledWith(expect.objectContaining({
+			mutation: expect.objectContaining({
+				provider: "vision-provider",
+				models: [
+					expect.objectContaining({ modelId: "vision-model", imageInput: true }),
+				],
+			}),
+		}));
+		await act(async () => root.unmount());
+	});
+
+	it("restores the saved image input toggle when editing a custom provider", async () => {
+		const customSettings: ModelSettingsView = {
+			...modelSettings,
+			defaultModel: null,
+			providers: [{
+				provider: "vision-provider",
+				name: "Vision Provider",
+				builtin: false,
+				baseUrl: "https://api.vision.dev/v1",
+				api: "openai-responses",
+				auth: { configured: true, source: "stored", label: "••••1234" },
+				models: [
+					{ provider: "vision-provider", modelId: "vision-model", name: "Vision Model", contextWindow: 128000, maxOutputTokens: 16384, reasoning: false, imageInput: true, custom: true },
+				],
+			}],
+		};
+		const updateModelSettings = vi.fn().mockResolvedValue(customSettings);
+		const api = { getModelSettings: vi.fn().mockResolvedValue(customSettings), updateModelSettings, testModelConnection: vi.fn() } as unknown as MetisDesktopApi;
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<ModelSettingsPanel api={api} serverReady />));
+		await flush();
+
+		await act(async () => container.querySelector<HTMLButtonElement>(".model-provider-card")!.click());
+		await flush();
+		const firstRow = container.querySelectorAll<HTMLElement>(".model-custom-model-row")[0]!;
+		expect((firstRow.querySelector<HTMLInputElement>('input[type="checkbox"]') as HTMLInputElement).checked).toBe(true);
 		await act(async () => root.unmount());
 	});
 

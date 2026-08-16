@@ -1,4 +1,6 @@
 import type {
+	ImageGenApiView,
+	ImageGenSettingsView,
 	ModelSettingsProviderView,
 	ModelSettingsView,
 	ThinkingSelectionView,
@@ -17,12 +19,28 @@ interface ProviderDraft {
 }
 
 type CustomProviderApi = "openai-responses" | "openai-completions" | "anthropic-messages";
+type ImageGenApiFormat = ImageGenApiView;
+
+interface ImageGenDraft {
+	name: string;
+	baseUrl: string;
+	api: ImageGenApiFormat;
+	modelId: string;
+	apiKey: string;
+}
+
+const IMAGE_GEN_FORMATS: readonly { readonly value: ImageGenApiFormat; readonly label: string }[] = [
+	{ value: "openai-images", label: "OpenAI Images" },
+	{ value: "openrouter-images", label: "OpenRouter Images" },
+];
 
 interface CustomModelDraft {
 	readonly modelId: string;
 	readonly name: string;
 	readonly contextWindow: number;
 	readonly maxOutputTokens: number;
+	/** 模型是否支持图片输入；保存时映射为 input: ["text", "image"]。 */
+	readonly imageInput: boolean;
 }
 
 interface CustomProviderDraft {
@@ -64,6 +82,7 @@ function customProviderDraft(
 				name: model.name,
 				contextWindow: model.contextWindow,
 				maxOutputTokens: model.maxOutputTokens,
+				imageInput: model.imageInput,
 			})),
 		};
 	}
@@ -74,7 +93,7 @@ function customProviderDraft(
 		api: "openai-responses",
 		apiKey: "",
 		testModelId: "",
-		models: [{ modelId: "", name: "", contextWindow: DEFAULT_CONTEXT_WINDOW, maxOutputTokens: DEFAULT_MAX_OUTPUT_TOKENS }],
+		models: [{ modelId: "", name: "", contextWindow: DEFAULT_CONTEXT_WINDOW, maxOutputTokens: DEFAULT_MAX_OUTPUT_TOKENS, imageInput: false }],
 	};
 }
 
@@ -104,6 +123,7 @@ export function ModelSettingsPanel({ api, serverReady }: {
 	const [settings, setSettings] = useState<ModelSettingsView | null>(null);
 	const [draft, setDraft] = useState<ProviderDraft | null>(null);
 	const [customDraft, setCustomDraft] = useState<CustomProviderDraft | null>(null);
+	const [imageGenDraft, setImageGenDraft] = useState<ImageGenDraft | null>(null);
 	const [defaultThinking, setDefaultThinking] = useState<ThinkingSelectionView>("medium");
 	const [busy, setBusy] = useState(false);
 	const [error, setError] = useState<string | null>(null);
@@ -229,6 +249,85 @@ export function ModelSettingsPanel({ api, serverReady }: {
 		}, t("Defaults saved"));
 	};
 
+	const VISION_NONE = "__none__";
+	const visionOptions = providers
+		.filter((provider) => provider.auth.configured)
+		.flatMap((provider) =>
+			provider.models
+				.filter((model) => model.imageInput)
+				.map((model) => ({ value: `${provider.provider}/${model.modelId}`, label: `${provider.name} / ${model.name}` })),
+		);
+	const visionValue = settings?.visionModel
+		? `${settings.visionModel.provider}/${settings.visionModel.modelId}`
+		: VISION_NONE;
+
+	const saveVisionModel = (value: string) => {
+		if (value === VISION_NONE) {
+			void runUpdate({ type: "set_vision_model", model: null }, t("Vision model saved"));
+			return;
+		}
+		const separator = value.indexOf("/");
+		const provider = value.slice(0, separator);
+		const modelId = value.slice(separator + 1);
+		void runUpdate({ type: "set_vision_model", model: { provider, modelId } }, t("Vision model saved"));
+	};
+
+	const openImageGenEditor = () => {
+		const current = settings?.imageGen;
+		setImageGenDraft({
+			name: current?.name ?? "",
+			baseUrl: current?.baseUrl ?? "",
+			api: current?.api ?? "openai-images",
+			modelId: current?.modelId ?? "",
+			apiKey: "",
+		});
+	};
+
+	const closeImageGenEditor = () => {
+		setImageGenDraft(null);
+		setError(null);
+		setNotice(null);
+	};
+
+	const saveImageGen = async (credentialAction: "set" | "keep" | "remove" = "set") => {
+		if (!imageGenDraft) return;
+		const name = imageGenDraft.name.trim();
+		const baseUrl = imageGenDraft.baseUrl.trim();
+		const modelId = imageGenDraft.modelId.trim();
+		if (!name || !baseUrl || !modelId) {
+			setError(t("Fill in the name, base URL, and model ID."));
+			return;
+		}
+		if (!/^https?:\/\//iu.test(baseUrl)) {
+			setError(t("Enter a valid https:// or http:// URL"));
+			return;
+		}
+		const apiKey = imageGenDraft.apiKey.trim();
+		const credential = apiKey
+			? { action: "set" as const, value: apiKey }
+			: settings?.imageGen?.authConfigured
+				? { action: "keep" as const }
+				: undefined;
+		if (!credential) {
+			setError(t("Enter an API key to save."));
+			return;
+		}
+		const next = await runUpdate({
+			type: "set_image_gen",
+			settings: { name, baseUrl, api: imageGenDraft.api, modelId },
+			credential,
+		}, t("Image generation saved"));
+		if (!next) return;
+		setImageGenDraft(null);
+	};
+
+	const clearImageGen = async () => {
+		if (!settings?.imageGen) return;
+		const next = await runUpdate({ type: "set_image_gen", settings: null, credential: { action: "remove" } }, t("Image generation removed"));
+		if (!next) return;
+		setImageGenDraft(null);
+	};
+
 	const saveProvider = async (credentialAction: "set" | "remove" = "set") => {
 		if (!draft) return;
 		if (credentialAction === "set" && !draft.apiKey.trim()) {
@@ -345,7 +444,7 @@ export function ModelSettingsPanel({ api, serverReady }: {
 				contextWindow: clampTokenCount(model.contextWindow, DEFAULT_CONTEXT_WINDOW),
 				maxOutputTokens: clampTokenCount(model.maxOutputTokens, DEFAULT_MAX_OUTPUT_TOKENS),
 				reasoning: false,
-				imageInput: false,
+				imageInput: model.imageInput,
 			})),
 			credential,
 		}, t("Provider saved"));
@@ -420,6 +519,50 @@ export function ModelSettingsPanel({ api, serverReady }: {
 				<Plus aria-hidden="true" size={15} />
 				{t("Add provider")}
 			</button>
+			<div className="settings-card model-vision-card">
+				<div className="general-setting-row">
+					<div className="general-setting-copy">
+						<span>{t("Vision model")}</span>
+						<p>{t("Pick an image-capable model that describes images for models without vision.")}</p>
+					</div>
+					<div className="general-setting-control">
+						<MenuSelect
+							ariaLabel={t("Vision model")}
+							className="model-vision-select"
+							disabled={!serverReady || busy}
+							menuMinWidth={260}
+							onChange={saveVisionModel}
+							options={[{ value: VISION_NONE, label: t("Not configured") }, ...visionOptions]}
+							value={visionOptions.some((option) => option.value === visionValue) || visionValue === VISION_NONE ? visionValue : VISION_NONE}
+						/>
+					</div>
+				</div>
+				{visionOptions.length === 0 ? (
+					<p className="model-vision-empty">{t("No image-capable models are configured yet.")}</p>
+				) : null}
+			</div>
+
+			<div className="settings-card model-vision-card model-image-gen-card">
+				<div className="general-setting-row">
+					<div className="general-setting-copy">
+						<span>{t("Image generation")}</span>
+						<p>{t("Configure a service the generate_image tool uses to create images.")}</p>
+					</div>
+					<div className="general-setting-control">
+						{settings?.imageGen ? (
+							<div className="model-image-gen-summary">
+								<span>{settings.imageGen.name}</span>
+								<code>{settings.imageGen.modelId}</code>
+							</div>
+						) : (
+							<span className="model-image-gen-unset">{t("Not configured")}</span>
+						)}
+						<button className="settings-secondary-button" disabled={!serverReady || busy} onClick={openImageGenEditor} type="button">
+							{settings?.imageGen ? t("Edit") : t("Configure")}
+						</button>
+					</div>
+				</div>
+			</div>
 			{draft ? <dialog
 				aria-label={t("Configure {{provider}}", { provider: draft.name })}
 				className="model-provider-dialog"
@@ -485,13 +628,14 @@ export function ModelSettingsPanel({ api, serverReady }: {
 						</div>
 
 						<div className="model-custom-models">
-							<div className="model-custom-models-heading"><span>{t("Models")}</span><button className="settings-secondary-button" disabled={busy} onClick={() => setCustomDraft({ ...customDraft, models: [...customDraft.models, { modelId: "", name: "", contextWindow: DEFAULT_CONTEXT_WINDOW, maxOutputTokens: DEFAULT_MAX_OUTPUT_TOKENS }] })} type="button"><Plus aria-hidden="true" size={14} />{t("Add model")}</button></div>
+							<div className="model-custom-models-heading"><span>{t("Models")}</span><button className="settings-secondary-button" disabled={busy} onClick={() => setCustomDraft({ ...customDraft, models: [...customDraft.models, { modelId: "", name: "", contextWindow: DEFAULT_CONTEXT_WINDOW, maxOutputTokens: DEFAULT_MAX_OUTPUT_TOKENS, imageInput: false }] })} type="button"><Plus aria-hidden="true" size={14} />{t("Add model")}</button></div>
 							{customDraft.models.map((model, index) => (
 								<div className="model-custom-model-row" key={index}>
 									<label><span>{t("Model ID")}</span><input autoComplete="off" disabled={busy} onChange={(event) => updateCustomModel(index, { ...model, modelId: event.target.value })} placeholder="gpt-5" type="text" value={model.modelId} /></label>
 									<label><span>{t("Name")}</span><input autoComplete="off" disabled={busy} onChange={(event) => updateCustomModel(index, { ...model, name: event.target.value })} placeholder={model.modelId || t("Model name")} type="text" value={model.name} /></label>
 									<label><span>{t("Context window")}</span><input disabled={busy} min={1} onChange={(event) => updateCustomModel(index, { ...model, contextWindow: Number(event.target.value) })} type="number" value={Number.isFinite(model.contextWindow) ? model.contextWindow : ""} /></label>
 									<label><span>{t("Max output tokens")}</span><input disabled={busy} min={1} onChange={(event) => updateCustomModel(index, { ...model, maxOutputTokens: Number(event.target.value) })} type="number" value={Number.isFinite(model.maxOutputTokens) ? model.maxOutputTokens : ""} /></label>
+									<label className="model-custom-model-image"><input aria-label={t("Image input")} checked={model.imageInput} disabled={busy} onChange={(event) => updateCustomModel(index, { ...model, imageInput: event.target.checked })} type="checkbox" /><span>{t("Image input")}</span></label>
 									<button aria-label={t("Remove model")} className="model-custom-model-remove" disabled={busy || customDraft.models.length === 1} onClick={() => removeCustomModel(index)} type="button"><Trash aria-hidden="true" size={15} /></button>
 								</div>
 							))}
@@ -516,6 +660,34 @@ export function ModelSettingsPanel({ api, serverReady }: {
 				</div>
 			</dialog> : null}
 			{error && !draft ? <p className="settings-action-message error" role="alert"><XCircle aria-hidden="true" size={15} />{error}</p> : null}
-		</section>
+		
+			{imageGenDraft ? <dialog
+				aria-label={t("Image generation")}
+				className="model-provider-dialog model-image-gen-dialog"
+				onCancel={(event) => { event.preventDefault(); closeImageGenEditor(); }}
+				onClick={(event) => { if (event.target === event.currentTarget) closeImageGenEditor(); }}
+			>
+				<div className="model-provider-dialog-content">
+					<form className="model-provider-editor" onSubmit={(event) => { event.preventDefault(); void saveImageGen(); }}>
+						<header className="model-provider-editor-header">
+							<div><h2>{t("Image generation")}</h2><p>{t("Pick the API format and endpoint the generate_image tool talks to.")}</p></div>
+							<button aria-label={t("Close")} className="model-provider-dialog-close" onClick={closeImageGenEditor} type="button"><X aria-hidden="true" size={18} /></button>
+						</header>
+						<div className="model-custom-provider-fields">
+							<label className="model-api-key-field"><span>{t("Name")}</span><input autoComplete="off" disabled={busy} onChange={(event) => setImageGenDraft({ ...imageGenDraft, name: event.target.value })} placeholder={t("My image gen")} type="text" value={imageGenDraft.name} /></label>
+							<label className="model-api-key-field"><span>{t("API format")}</span><MenuSelect ariaLabel={t("API format")} disabled={busy} onChange={(api) => setImageGenDraft({ ...imageGenDraft, api })} options={IMAGE_GEN_FORMATS.map((format) => ({ value: format.value, label: t(format.label) }))} value={imageGenDraft.api} /></label>
+							<label className="model-api-key-field"><span>{t("Base URL")}</span><input autoComplete="off" disabled={busy} onChange={(event) => setImageGenDraft({ ...imageGenDraft, baseUrl: event.target.value })} placeholder="https://api.openai.com/v1" type="text" value={imageGenDraft.baseUrl} /></label>
+							<label className="model-api-key-field"><span>{t("Model ID")}</span><input autoComplete="off" disabled={busy} onChange={(event) => setImageGenDraft({ ...imageGenDraft, modelId: event.target.value })} placeholder="gpt-image-1" type="text" value={imageGenDraft.modelId} /></label>
+							<label className="model-api-key-field"><span>{t("API key")}</span><input autoComplete="off" disabled={busy} onChange={(event) => setImageGenDraft({ ...imageGenDraft, apiKey: event.target.value })} placeholder={settings?.imageGen?.authConfigured ? t("Enter a new key to replace the saved credential") : "sk-…"} type="password" value={imageGenDraft.apiKey} /></label>
+						</div>
+						<div className="settings-form-actions">
+							{settings?.imageGen ? <button className="settings-danger-button" disabled={busy} onClick={() => void clearImageGen()} type="button">{t("Remove")}</button> : null}
+							<button className="settings-secondary-button" disabled={busy} onClick={closeImageGenEditor} type="button">{t("Cancel")}</button>
+							<button className="settings-primary-button" disabled={busy || !serverReady} type="submit">{busy ? t("Saving…") : t("Save")}</button>
+						</div>
+					</form>
+				</div>
+			</dialog> : null}
+</section>
 	);
 }

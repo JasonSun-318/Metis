@@ -586,6 +586,23 @@ export const ModelSettingsMutationSchema = Type.Union([
 		model: Type.Union([SubagentModelRefSchema, Type.Null()]),
 		thinkingSelection: ThinkingSelectionSchema,
 	}),
+	StrictObject({
+		type: Type.Literal("set_vision_model"),
+		model: Type.Union([SubagentModelRefSchema, Type.Null()]),
+	}),
+	StrictObject({
+		type: Type.Literal("set_image_gen"),
+		settings: Type.Union([
+			StrictObject({
+				name: Type.String({ minLength: 1, maxLength: 120 }),
+				baseUrl: Type.String({ minLength: 1, maxLength: 2_048 }),
+				api: Type.Union([Type.Literal("openai-images"), Type.Literal("openrouter-images")]),
+				modelId: Type.String({ minLength: 1, maxLength: 300 }),
+			}),
+			Type.Null(),
+		]),
+		credential: CredentialMutationSchema,
+	}),
 ]);
 export const ModelSettingsGetParamsSchema = StrictObject({});
 export const ModelSettingsUpdateParamsSchema = StrictObject({
