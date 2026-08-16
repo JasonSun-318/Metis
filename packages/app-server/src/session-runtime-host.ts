@@ -41,6 +41,7 @@ export interface OpenedSessionRuntime {
 	setMcpCredential(input: ClientParams<"mcp/credential/set">): Promise<ClientResult<"mcp/credential/set">>;
 	clearMcpCredential(input: ClientParams<"mcp/credential/clear">): Promise<ClientResult<"mcp/credential/clear">>;
 	readItems(input: ClientParams<"session/readItems">): Promise<ClientResult<"session/readItems">>;
+	readImage(input: ClientParams<"session/readImage">): Promise<ClientResult<"session/readImage">>;
 	getStatus(input: ClientParams<"session/status">): Promise<ClientResult<"session/status">>;
 	compact(input: ClientParams<"session/compact">): Promise<ClientResult<"session/compact">>;
 	readSubagentItems(input: ClientParams<"subagent/readItems">): Promise<ClientResult<"subagent/readItems">>;

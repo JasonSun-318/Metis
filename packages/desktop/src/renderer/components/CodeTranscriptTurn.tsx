@@ -3,6 +3,7 @@ import { CaretRight, CircleNotch, GitFork, ImageSquare, TerminalWindow, Wrench }
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Markdown } from "./Markdown.tsx";
+import { ToolResultImages } from "./ToolResultImages.tsx";
 import { TurnCopyButton } from "./TranscriptTurn.tsx";
 import { TurnRuntimeStatus } from "./TurnRuntimeStatus.tsx";
 import {
@@ -11,6 +12,7 @@ import {
 	commandText,
 	isCommandTool,
 	messageText,
+	toolResultImagesFromCalls,
 	toolTranscriptPresentation,
 	type ToolCallBlock,
 	type ToolDetailLine,
@@ -182,6 +184,7 @@ export function CodeTranscriptTurn({ items, running = false, startedAt, onFork, 
 	const { users, segments, results, final } = buildCodeTurnPresentation(items);
 	const enteringUserId = running ? users.at(-1)?.itemId : undefined;
 	const finalCopyText = final ? messageText(final) : "";
+	const sessionId = items[0]?.sessionId;
 
 	return (
 		<>
@@ -200,12 +203,19 @@ export function CodeTranscriptTurn({ items, running = false, startedAt, onFork, 
 			})}
 			{segments.map((segment, segmentIndex) =>
 				segment.type === "tools" ? (
-					<CodeExecution
-						calls={segment.calls}
-						key={`tools-${segmentIndex}`}
-						orphanResults={segment.orphanResults}
-						results={results}
-					/>
+					<div key={`tools-${segmentIndex}`}>
+						<CodeExecution
+							calls={segment.calls}
+							orphanResults={segment.orphanResults}
+							results={results}
+						/>
+						{sessionId ? (
+							<ToolResultImages
+								images={toolResultImagesFromCalls(segment.calls, results, segment.orphanResults)}
+								sessionId={sessionId}
+							/>
+						) : null}
+					</div>
 				) : (
 					<div
 						className={segment.answer ? "code-turn-answer" : "code-turn-status"}

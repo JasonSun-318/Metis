@@ -159,6 +159,10 @@ class PausableRuntime implements OpenedSessionRuntime {
 		return this.projection.readItems(input);
 	}
 
+	async readImage(): Promise<ClientResult<"session/readImage">> {
+		throw new Error("No image in fixture");
+	}
+
 	async getStatus(input: ClientParams<"session/status">): Promise<ClientResult<"session/status">> {
 		return {
 			sessionId: input.sessionId,

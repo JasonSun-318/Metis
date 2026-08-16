@@ -225,6 +225,10 @@ const api = {
 		>,
 	readItems: (input: ClientParams<"session/readItems">) =>
 		invoke(DESKTOP_IPC_CHANNELS.readItems, "session/readItems", input) as ReturnType<MetisDesktopApi["readItems"]>,
+	readSessionImage: (input: ClientParams<"session/readImage">) =>
+		invoke(DESKTOP_IPC_CHANNELS.readSessionImage, "session/readImage", input) as ReturnType<
+			MetisDesktopApi["readSessionImage"]
+		>,
 	getSessionStatus: (input: ClientParams<"session/status">) =>
 		invoke(DESKTOP_IPC_CHANNELS.getSessionStatus, "session/status", input) as ReturnType<
 			MetisDesktopApi["getSessionStatus"]

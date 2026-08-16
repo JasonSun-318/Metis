@@ -1,4 +1,4 @@
-import type { ItemContentBlockView, ItemView } from "@metis/app-protocol";
+import type { DurableImageRefView, ItemContentBlockView, ItemView } from "@metis/app-protocol";
 
 export type TextBlock = Extract<ItemContentBlockView, { type: "text" }>;
 export type ThinkingBlock = Extract<ItemContentBlockView, { type: "thinking" }>;
@@ -130,6 +130,38 @@ function finalResponseIndex(items: readonly ItemView[]): number {
 
 export function isCommandTool(name: string): boolean {
 	return /(?:^|[_-])(bash|shell|run_command|command)(?:$|[_-])/iu.test(`_${name}_`);
+}
+
+export function toolResultImagesFromBlocks(
+	blocks: readonly ItemContentBlockView[],
+	results: ReadonlyMap<string, ToolResultBlock>,
+): DurableImageRefView[] {
+	const images: DurableImageRefView[] = [];
+	for (const block of blocks) {
+		if (block.type === "tool_call") {
+			const result = results.get(block.toolCallId);
+			if (result?.images) images.push(...result.images);
+		} else if (block.type === "tool_result" && block.images) {
+			images.push(...block.images);
+		}
+	}
+	return images;
+}
+
+export function toolResultImagesFromCalls(
+	calls: readonly ToolCallBlock[],
+	results: ReadonlyMap<string, ToolResultBlock>,
+	orphanResults: readonly ToolResultBlock[],
+): DurableImageRefView[] {
+	const images: DurableImageRefView[] = [];
+	for (const call of calls) {
+		const result = results.get(call.toolCallId);
+		if (result?.images) images.push(...result.images);
+	}
+	for (const result of orphanResults) {
+		if (result.images) images.push(...result.images);
+	}
+	return images;
 }
 
 export function commandText(inputPreview: string | undefined): string | undefined {

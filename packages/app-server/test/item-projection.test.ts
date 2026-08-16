@@ -1,6 +1,11 @@
 import type { ItemView } from "@metis/app-protocol";
 import { describe, expect, it } from "vitest";
-import { appendProjectedDelta, projectLiveMessage, projectSessionEntry } from "../src/item-projection.ts";
+import {
+	appendProjectedDelta,
+	projectLiveMessage,
+	projectMessageEntry,
+	projectSessionEntry,
+} from "../src/item-projection.ts";
 
 const CREATED_AT = "2026-08-08T00:00:00.000Z";
 
@@ -118,5 +123,76 @@ describe("session entry projection", () => {
 			completedAt: CREATED_AT,
 		});
 		expect(JSON.stringify(item)).not.toContain("private compacted context");
+	});
+});
+
+describe("tool result image projection", () => {
+	const imageRef = {
+		type: "image_ref",
+		hash: "a".repeat(64),
+		mimeType: "image/png",
+		size: 4,
+	} as const;
+
+	function projectToolResult(content: unknown) {
+		return projectMessageEntry({
+			entry: {
+				type: "message",
+				id: "tool-1",
+				timestamp: CREATED_AT,
+				message: {
+					role: "toolResult",
+					toolCallId: "call-1",
+					toolName: "generate_image",
+					isError: false,
+					content,
+				},
+			},
+			sessionId: "session-1",
+			turnStates: new Map(),
+			toolStates: new Map(),
+			fallbackTimestamp: CREATED_AT,
+		});
+	}
+
+	it("attaches durable image refs onto tool_result", () => {
+		const item = projectToolResult([{ type: "text", text: "ok" }, imageRef]);
+		expect(item?.content).toEqual([
+			{
+				type: "tool_result",
+				toolCallId: "call-1",
+				name: "generate_image",
+				isError: false,
+				output: "ok",
+				images: [{ hash: "a".repeat(64), mediaType: "image/png", byteLength: 4 }],
+			},
+		]);
+	});
+
+	it("omits images for text-only tool results", () => {
+		const item = projectToolResult([{ type: "text", text: "ok" }]);
+		expect(item?.content[0]).toEqual({
+			type: "tool_result",
+			toolCallId: "call-1",
+			name: "generate_image",
+			isError: false,
+			output: "ok",
+		});
+	});
+
+	it("caps projected tool result images at 4", () => {
+		const item = projectToolResult([
+			{ type: "text", text: "ok" },
+			...Array.from({ length: 5 }, (_, index) => ({
+				type: "image_ref",
+				hash: `${"a".repeat(63)}${index}`,
+				mimeType: "image/png",
+				size: 4,
+			})),
+		]);
+		const block = item?.content[0];
+		expect(block?.type).toBe("tool_result");
+		if (block?.type !== "tool_result") throw new Error("expected tool_result");
+		expect(block.images).toHaveLength(4);
 	});
 });

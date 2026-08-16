@@ -423,6 +423,7 @@ export const ToolResultBlockViewSchema = StrictObject({
 	name: NameSchema,
 	isError: Type.Boolean(),
 	output: PublicTextSchema,
+	images: Type.Optional(Type.Array(DurableImageRefViewSchema, { maxItems: 4 })),
 });
 
 export const NoticeBlockViewSchema = StrictObject({

@@ -157,6 +157,10 @@ class FakeRuntime implements OpenedSessionRuntime {
 		return { items: [], nextBeforeItemId: null };
 	}
 
+	async readImage(): Promise<ClientResult<"session/readImage">> {
+		throw new Error("No image in fixture");
+	}
+
 	async getStatus(input: ClientParams<"session/status">): Promise<ClientResult<"session/status">> {
 		return {
 			sessionId: input.sessionId,

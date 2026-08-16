@@ -2536,6 +2536,87 @@
                 },
                 "method": {
                   "type": "string",
+                  "const": "session/readImage"
+                },
+                "params": {
+                  "type": "object",
+                  "required": [
+                    "sessionId",
+                    "image"
+                  ],
+                  "properties": {
+                    "sessionId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                    },
+                    "image": {
+                      "type": "object",
+                      "required": [
+                        "hash",
+                        "mediaType",
+                        "byteLength"
+                      ],
+                      "properties": {
+                        "hash": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        "mediaType": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "const": "image/jpeg"
+                            },
+                            {
+                              "type": "string",
+                              "const": "image/png"
+                            },
+                            {
+                              "type": "string",
+                              "const": "image/gif"
+                            },
+                            {
+                              "type": "string",
+                              "const": "image/webp"
+                            }
+                          ]
+                        },
+                        "byteLength": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 33554432
+                        }
+                      },
+                      "additionalProperties": false
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "jsonrpc",
+                "id",
+                "method",
+                "params"
+              ],
+              "properties": {
+                "jsonrpc": {
+                  "type": "string",
+                  "const": "2.0"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "x-metis-maxUtf16Units": 128
+                },
+                "method": {
+                  "type": "string",
                   "const": "session/status"
                 },
                 "params": {
@@ -7302,6 +7383,50 @@
                                         "output": {
                                           "type": "string",
                                           "x-metis-maxUtf8Bytes": 65536
+                                        },
+                                        "images": {
+                                          "type": "array",
+                                          "items": {
+                                            "type": "object",
+                                            "required": [
+                                              "hash",
+                                              "mediaType",
+                                              "byteLength"
+                                            ],
+                                            "properties": {
+                                              "hash": {
+                                                "type": "string",
+                                                "pattern": "^[a-f0-9]{64}$"
+                                              },
+                                              "mediaType": {
+                                                "anyOf": [
+                                                  {
+                                                    "type": "string",
+                                                    "const": "image/jpeg"
+                                                  },
+                                                  {
+                                                    "type": "string",
+                                                    "const": "image/png"
+                                                  },
+                                                  {
+                                                    "type": "string",
+                                                    "const": "image/gif"
+                                                  },
+                                                  {
+                                                    "type": "string",
+                                                    "const": "image/webp"
+                                                  }
+                                                ]
+                                              },
+                                              "byteLength": {
+                                                "type": "integer",
+                                                "minimum": 1,
+                                                "maximum": 33554432
+                                              }
+                                            },
+                                            "additionalProperties": false
+                                          },
+                                          "maxItems": 4
                                         }
                                       },
                                       "additionalProperties": false
@@ -7733,6 +7858,50 @@
                                         "output": {
                                           "type": "string",
                                           "x-metis-maxUtf8Bytes": 65536
+                                        },
+                                        "images": {
+                                          "type": "array",
+                                          "items": {
+                                            "type": "object",
+                                            "required": [
+                                              "hash",
+                                              "mediaType",
+                                              "byteLength"
+                                            ],
+                                            "properties": {
+                                              "hash": {
+                                                "type": "string",
+                                                "pattern": "^[a-f0-9]{64}$"
+                                              },
+                                              "mediaType": {
+                                                "anyOf": [
+                                                  {
+                                                    "type": "string",
+                                                    "const": "image/jpeg"
+                                                  },
+                                                  {
+                                                    "type": "string",
+                                                    "const": "image/png"
+                                                  },
+                                                  {
+                                                    "type": "string",
+                                                    "const": "image/gif"
+                                                  },
+                                                  {
+                                                    "type": "string",
+                                                    "const": "image/webp"
+                                                  }
+                                                ]
+                                              },
+                                              "byteLength": {
+                                                "type": "integer",
+                                                "minimum": 1,
+                                                "maximum": 33554432
+                                              }
+                                            },
+                                            "additionalProperties": false
+                                          },
+                                          "maxItems": 4
                                         }
                                       },
                                       "additionalProperties": false
@@ -9033,6 +9202,50 @@
                                         "output": {
                                           "type": "string",
                                           "x-metis-maxUtf8Bytes": 65536
+                                        },
+                                        "images": {
+                                          "type": "array",
+                                          "items": {
+                                            "type": "object",
+                                            "required": [
+                                              "hash",
+                                              "mediaType",
+                                              "byteLength"
+                                            ],
+                                            "properties": {
+                                              "hash": {
+                                                "type": "string",
+                                                "pattern": "^[a-f0-9]{64}$"
+                                              },
+                                              "mediaType": {
+                                                "anyOf": [
+                                                  {
+                                                    "type": "string",
+                                                    "const": "image/jpeg"
+                                                  },
+                                                  {
+                                                    "type": "string",
+                                                    "const": "image/png"
+                                                  },
+                                                  {
+                                                    "type": "string",
+                                                    "const": "image/gif"
+                                                  },
+                                                  {
+                                                    "type": "string",
+                                                    "const": "image/webp"
+                                                  }
+                                                ]
+                                              },
+                                              "byteLength": {
+                                                "type": "integer",
+                                                "minimum": 1,
+                                                "maximum": 33554432
+                                              }
+                                            },
+                                            "additionalProperties": false
+                                          },
+                                          "maxItems": 4
                                         }
                                       },
                                       "additionalProperties": false
@@ -9472,6 +9685,50 @@
                                         "output": {
                                           "type": "string",
                                           "x-metis-maxUtf8Bytes": 65536
+                                        },
+                                        "images": {
+                                          "type": "array",
+                                          "items": {
+                                            "type": "object",
+                                            "required": [
+                                              "hash",
+                                              "mediaType",
+                                              "byteLength"
+                                            ],
+                                            "properties": {
+                                              "hash": {
+                                                "type": "string",
+                                                "pattern": "^[a-f0-9]{64}$"
+                                              },
+                                              "mediaType": {
+                                                "anyOf": [
+                                                  {
+                                                    "type": "string",
+                                                    "const": "image/jpeg"
+                                                  },
+                                                  {
+                                                    "type": "string",
+                                                    "const": "image/png"
+                                                  },
+                                                  {
+                                                    "type": "string",
+                                                    "const": "image/gif"
+                                                  },
+                                                  {
+                                                    "type": "string",
+                                                    "const": "image/webp"
+                                                  }
+                                                ]
+                                              },
+                                              "byteLength": {
+                                                "type": "integer",
+                                                "minimum": 1,
+                                                "maximum": 33554432
+                                              }
+                                            },
+                                            "additionalProperties": false
+                                          },
+                                          "maxItems": 4
                                         }
                                       },
                                       "additionalProperties": false
@@ -15771,6 +16028,50 @@
                                     "output": {
                                       "type": "string",
                                       "x-metis-maxUtf8Bytes": 65536
+                                    },
+                                    "images": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "object",
+                                        "required": [
+                                          "hash",
+                                          "mediaType",
+                                          "byteLength"
+                                        ],
+                                        "properties": {
+                                          "hash": {
+                                            "type": "string",
+                                            "pattern": "^[a-f0-9]{64}$"
+                                          },
+                                          "mediaType": {
+                                            "anyOf": [
+                                              {
+                                                "type": "string",
+                                                "const": "image/jpeg"
+                                              },
+                                              {
+                                                "type": "string",
+                                                "const": "image/png"
+                                              },
+                                              {
+                                                "type": "string",
+                                                "const": "image/gif"
+                                              },
+                                              {
+                                                "type": "string",
+                                                "const": "image/webp"
+                                              }
+                                            ]
+                                          },
+                                          "byteLength": {
+                                            "type": "integer",
+                                            "minimum": 1,
+                                            "maximum": 33554432
+                                          }
+                                        },
+                                        "additionalProperties": false
+                                      },
+                                      "maxItems": 4
                                     }
                                   },
                                   "additionalProperties": false
@@ -15881,6 +16182,62 @@
                         },
                         {
                           "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "jsonrpc",
+                "id",
+                "result"
+              ],
+              "properties": {
+                "jsonrpc": {
+                  "type": "string",
+                  "const": "2.0"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "x-metis-maxUtf16Units": 128
+                },
+                "result": {
+                  "type": "object",
+                  "required": [
+                    "data",
+                    "mediaType"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 7340032
+                    },
+                    "mediaType": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "const": "image/jpeg"
+                        },
+                        {
+                          "type": "string",
+                          "const": "image/png"
+                        },
+                        {
+                          "type": "string",
+                          "const": "image/gif"
+                        },
+                        {
+                          "type": "string",
+                          "const": "image/webp"
                         }
                       ]
                     }
@@ -17445,6 +17802,50 @@
                                         "output": {
                                           "type": "string",
                                           "x-metis-maxUtf8Bytes": 65536
+                                        },
+                                        "images": {
+                                          "type": "array",
+                                          "items": {
+                                            "type": "object",
+                                            "required": [
+                                              "hash",
+                                              "mediaType",
+                                              "byteLength"
+                                            ],
+                                            "properties": {
+                                              "hash": {
+                                                "type": "string",
+                                                "pattern": "^[a-f0-9]{64}$"
+                                              },
+                                              "mediaType": {
+                                                "anyOf": [
+                                                  {
+                                                    "type": "string",
+                                                    "const": "image/jpeg"
+                                                  },
+                                                  {
+                                                    "type": "string",
+                                                    "const": "image/png"
+                                                  },
+                                                  {
+                                                    "type": "string",
+                                                    "const": "image/gif"
+                                                  },
+                                                  {
+                                                    "type": "string",
+                                                    "const": "image/webp"
+                                                  }
+                                                ]
+                                              },
+                                              "byteLength": {
+                                                "type": "integer",
+                                                "minimum": 1,
+                                                "maximum": 33554432
+                                              }
+                                            },
+                                            "additionalProperties": false
+                                          },
+                                          "maxItems": 4
                                         }
                                       },
                                       "additionalProperties": false
@@ -20922,6 +21323,50 @@
                                     "output": {
                                       "type": "string",
                                       "x-metis-maxUtf8Bytes": 65536
+                                    },
+                                    "images": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "object",
+                                        "required": [
+                                          "hash",
+                                          "mediaType",
+                                          "byteLength"
+                                        ],
+                                        "properties": {
+                                          "hash": {
+                                            "type": "string",
+                                            "pattern": "^[a-f0-9]{64}$"
+                                          },
+                                          "mediaType": {
+                                            "anyOf": [
+                                              {
+                                                "type": "string",
+                                                "const": "image/jpeg"
+                                              },
+                                              {
+                                                "type": "string",
+                                                "const": "image/png"
+                                              },
+                                              {
+                                                "type": "string",
+                                                "const": "image/gif"
+                                              },
+                                              {
+                                                "type": "string",
+                                                "const": "image/webp"
+                                              }
+                                            ]
+                                          },
+                                          "byteLength": {
+                                            "type": "integer",
+                                            "minimum": 1,
+                                            "maximum": 33554432
+                                          }
+                                        },
+                                        "additionalProperties": false
+                                      },
+                                      "maxItems": 4
                                     }
                                   },
                                   "additionalProperties": false
@@ -30816,6 +31261,87 @@
             },
             "method": {
               "type": "string",
+              "const": "session/readImage"
+            },
+            "params": {
+              "type": "object",
+              "required": [
+                "sessionId",
+                "image"
+              ],
+              "properties": {
+                "sessionId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                },
+                "image": {
+                  "type": "object",
+                  "required": [
+                    "hash",
+                    "mediaType",
+                    "byteLength"
+                  ],
+                  "properties": {
+                    "hash": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "mediaType": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "const": "image/jpeg"
+                        },
+                        {
+                          "type": "string",
+                          "const": "image/png"
+                        },
+                        {
+                          "type": "string",
+                          "const": "image/gif"
+                        },
+                        {
+                          "type": "string",
+                          "const": "image/webp"
+                        }
+                      ]
+                    },
+                    "byteLength": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 33554432
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "type": "string",
+              "const": "2.0"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "x-metis-maxUtf16Units": 128
+            },
+            "method": {
+              "type": "string",
               "const": "session/status"
             },
             "params": {
@@ -39220,6 +39746,50 @@
                                 "output": {
                                   "type": "string",
                                   "x-metis-maxUtf8Bytes": 65536
+                                },
+                                "images": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "required": [
+                                      "hash",
+                                      "mediaType",
+                                      "byteLength"
+                                    ],
+                                    "properties": {
+                                      "hash": {
+                                        "type": "string",
+                                        "pattern": "^[a-f0-9]{64}$"
+                                      },
+                                      "mediaType": {
+                                        "anyOf": [
+                                          {
+                                            "type": "string",
+                                            "const": "image/jpeg"
+                                          },
+                                          {
+                                            "type": "string",
+                                            "const": "image/png"
+                                          },
+                                          {
+                                            "type": "string",
+                                            "const": "image/gif"
+                                          },
+                                          {
+                                            "type": "string",
+                                            "const": "image/webp"
+                                          }
+                                        ]
+                                      },
+                                      "byteLength": {
+                                        "type": "integer",
+                                        "minimum": 1,
+                                        "maximum": 33554432
+                                      }
+                                    },
+                                    "additionalProperties": false
+                                  },
+                                  "maxItems": 4
                                 }
                               },
                               "additionalProperties": false
@@ -39330,6 +39900,62 @@
                     },
                     {
                       "type": "null"
+                    }
+                  ]
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "jsonrpc",
+            "id",
+            "result"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "type": "string",
+              "const": "2.0"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "x-metis-maxUtf16Units": 128
+            },
+            "result": {
+              "type": "object",
+              "required": [
+                "data",
+                "mediaType"
+              ],
+              "properties": {
+                "data": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 7340032
+                },
+                "mediaType": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "const": "image/jpeg"
+                    },
+                    {
+                      "type": "string",
+                      "const": "image/png"
+                    },
+                    {
+                      "type": "string",
+                      "const": "image/gif"
+                    },
+                    {
+                      "type": "string",
+                      "const": "image/webp"
                     }
                   ]
                 }
@@ -40894,6 +41520,50 @@
                                     "output": {
                                       "type": "string",
                                       "x-metis-maxUtf8Bytes": 65536
+                                    },
+                                    "images": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "object",
+                                        "required": [
+                                          "hash",
+                                          "mediaType",
+                                          "byteLength"
+                                        ],
+                                        "properties": {
+                                          "hash": {
+                                            "type": "string",
+                                            "pattern": "^[a-f0-9]{64}$"
+                                          },
+                                          "mediaType": {
+                                            "anyOf": [
+                                              {
+                                                "type": "string",
+                                                "const": "image/jpeg"
+                                              },
+                                              {
+                                                "type": "string",
+                                                "const": "image/png"
+                                              },
+                                              {
+                                                "type": "string",
+                                                "const": "image/gif"
+                                              },
+                                              {
+                                                "type": "string",
+                                                "const": "image/webp"
+                                              }
+                                            ]
+                                          },
+                                          "byteLength": {
+                                            "type": "integer",
+                                            "minimum": 1,
+                                            "maximum": 33554432
+                                          }
+                                        },
+                                        "additionalProperties": false
+                                      },
+                                      "maxItems": 4
                                     }
                                   },
                                   "additionalProperties": false
@@ -44371,6 +45041,50 @@
                                 "output": {
                                   "type": "string",
                                   "x-metis-maxUtf8Bytes": 65536
+                                },
+                                "images": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "required": [
+                                      "hash",
+                                      "mediaType",
+                                      "byteLength"
+                                    ],
+                                    "properties": {
+                                      "hash": {
+                                        "type": "string",
+                                        "pattern": "^[a-f0-9]{64}$"
+                                      },
+                                      "mediaType": {
+                                        "anyOf": [
+                                          {
+                                            "type": "string",
+                                            "const": "image/jpeg"
+                                          },
+                                          {
+                                            "type": "string",
+                                            "const": "image/png"
+                                          },
+                                          {
+                                            "type": "string",
+                                            "const": "image/gif"
+                                          },
+                                          {
+                                            "type": "string",
+                                            "const": "image/webp"
+                                          }
+                                        ]
+                                      },
+                                      "byteLength": {
+                                        "type": "integer",
+                                        "minimum": 1,
+                                        "maximum": 33554432
+                                      }
+                                    },
+                                    "additionalProperties": false
+                                  },
+                                  "maxItems": 4
                                 }
                               },
                               "additionalProperties": false
@@ -51468,6 +52182,50 @@
                                 "output": {
                                   "type": "string",
                                   "x-metis-maxUtf8Bytes": 65536
+                                },
+                                "images": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "required": [
+                                      "hash",
+                                      "mediaType",
+                                      "byteLength"
+                                    ],
+                                    "properties": {
+                                      "hash": {
+                                        "type": "string",
+                                        "pattern": "^[a-f0-9]{64}$"
+                                      },
+                                      "mediaType": {
+                                        "anyOf": [
+                                          {
+                                            "type": "string",
+                                            "const": "image/jpeg"
+                                          },
+                                          {
+                                            "type": "string",
+                                            "const": "image/png"
+                                          },
+                                          {
+                                            "type": "string",
+                                            "const": "image/gif"
+                                          },
+                                          {
+                                            "type": "string",
+                                            "const": "image/webp"
+                                          }
+                                        ]
+                                      },
+                                      "byteLength": {
+                                        "type": "integer",
+                                        "minimum": 1,
+                                        "maximum": 33554432
+                                      }
+                                    },
+                                    "additionalProperties": false
+                                  },
+                                  "maxItems": 4
                                 }
                               },
                               "additionalProperties": false
@@ -51899,6 +52657,50 @@
                                 "output": {
                                   "type": "string",
                                   "x-metis-maxUtf8Bytes": 65536
+                                },
+                                "images": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "required": [
+                                      "hash",
+                                      "mediaType",
+                                      "byteLength"
+                                    ],
+                                    "properties": {
+                                      "hash": {
+                                        "type": "string",
+                                        "pattern": "^[a-f0-9]{64}$"
+                                      },
+                                      "mediaType": {
+                                        "anyOf": [
+                                          {
+                                            "type": "string",
+                                            "const": "image/jpeg"
+                                          },
+                                          {
+                                            "type": "string",
+                                            "const": "image/png"
+                                          },
+                                          {
+                                            "type": "string",
+                                            "const": "image/gif"
+                                          },
+                                          {
+                                            "type": "string",
+                                            "const": "image/webp"
+                                          }
+                                        ]
+                                      },
+                                      "byteLength": {
+                                        "type": "integer",
+                                        "minimum": 1,
+                                        "maximum": 33554432
+                                      }
+                                    },
+                                    "additionalProperties": false
+                                  },
+                                  "maxItems": 4
                                 }
                               },
                               "additionalProperties": false
@@ -53199,6 +54001,50 @@
                                 "output": {
                                   "type": "string",
                                   "x-metis-maxUtf8Bytes": 65536
+                                },
+                                "images": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "required": [
+                                      "hash",
+                                      "mediaType",
+                                      "byteLength"
+                                    ],
+                                    "properties": {
+                                      "hash": {
+                                        "type": "string",
+                                        "pattern": "^[a-f0-9]{64}$"
+                                      },
+                                      "mediaType": {
+                                        "anyOf": [
+                                          {
+                                            "type": "string",
+                                            "const": "image/jpeg"
+                                          },
+                                          {
+                                            "type": "string",
+                                            "const": "image/png"
+                                          },
+                                          {
+                                            "type": "string",
+                                            "const": "image/gif"
+                                          },
+                                          {
+                                            "type": "string",
+                                            "const": "image/webp"
+                                          }
+                                        ]
+                                      },
+                                      "byteLength": {
+                                        "type": "integer",
+                                        "minimum": 1,
+                                        "maximum": 33554432
+                                      }
+                                    },
+                                    "additionalProperties": false
+                                  },
+                                  "maxItems": 4
                                 }
                               },
                               "additionalProperties": false
@@ -53638,6 +54484,50 @@
                                 "output": {
                                   "type": "string",
                                   "x-metis-maxUtf8Bytes": 65536
+                                },
+                                "images": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "required": [
+                                      "hash",
+                                      "mediaType",
+                                      "byteLength"
+                                    ],
+                                    "properties": {
+                                      "hash": {
+                                        "type": "string",
+                                        "pattern": "^[a-f0-9]{64}$"
+                                      },
+                                      "mediaType": {
+                                        "anyOf": [
+                                          {
+                                            "type": "string",
+                                            "const": "image/jpeg"
+                                          },
+                                          {
+                                            "type": "string",
+                                            "const": "image/png"
+                                          },
+                                          {
+                                            "type": "string",
+                                            "const": "image/gif"
+                                          },
+                                          {
+                                            "type": "string",
+                                            "const": "image/webp"
+                                          }
+                                        ]
+                                      },
+                                      "byteLength": {
+                                        "type": "integer",
+                                        "minimum": 1,
+                                        "maximum": 33554432
+                                      }
+                                    },
+                                    "additionalProperties": false
+                                  },
+                                  "maxItems": 4
                                 }
                               },
                               "additionalProperties": false
@@ -55706,6 +56596,50 @@
                           "output": {
                             "type": "string",
                             "x-metis-maxUtf8Bytes": 65536
+                          },
+                          "images": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "required": [
+                                "hash",
+                                "mediaType",
+                                "byteLength"
+                              ],
+                              "properties": {
+                                "hash": {
+                                  "type": "string",
+                                  "pattern": "^[a-f0-9]{64}$"
+                                },
+                                "mediaType": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "const": "image/jpeg"
+                                    },
+                                    {
+                                      "type": "string",
+                                      "const": "image/png"
+                                    },
+                                    {
+                                      "type": "string",
+                                      "const": "image/gif"
+                                    },
+                                    {
+                                      "type": "string",
+                                      "const": "image/webp"
+                                    }
+                                  ]
+                                },
+                                "byteLength": {
+                                  "type": "integer",
+                                  "minimum": 1,
+                                  "maximum": 33554432
+                                }
+                              },
+                              "additionalProperties": false
+                            },
+                            "maxItems": 4
                           }
                         },
                         "additionalProperties": false
@@ -56137,6 +57071,50 @@
                           "output": {
                             "type": "string",
                             "x-metis-maxUtf8Bytes": 65536
+                          },
+                          "images": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "required": [
+                                "hash",
+                                "mediaType",
+                                "byteLength"
+                              ],
+                              "properties": {
+                                "hash": {
+                                  "type": "string",
+                                  "pattern": "^[a-f0-9]{64}$"
+                                },
+                                "mediaType": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "const": "image/jpeg"
+                                    },
+                                    {
+                                      "type": "string",
+                                      "const": "image/png"
+                                    },
+                                    {
+                                      "type": "string",
+                                      "const": "image/gif"
+                                    },
+                                    {
+                                      "type": "string",
+                                      "const": "image/webp"
+                                    }
+                                  ]
+                                },
+                                "byteLength": {
+                                  "type": "integer",
+                                  "minimum": 1,
+                                  "maximum": 33554432
+                                }
+                              },
+                              "additionalProperties": false
+                            },
+                            "maxItems": 4
                           }
                         },
                         "additionalProperties": false
@@ -57437,6 +58415,50 @@
                           "output": {
                             "type": "string",
                             "x-metis-maxUtf8Bytes": 65536
+                          },
+                          "images": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "required": [
+                                "hash",
+                                "mediaType",
+                                "byteLength"
+                              ],
+                              "properties": {
+                                "hash": {
+                                  "type": "string",
+                                  "pattern": "^[a-f0-9]{64}$"
+                                },
+                                "mediaType": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "const": "image/jpeg"
+                                    },
+                                    {
+                                      "type": "string",
+                                      "const": "image/png"
+                                    },
+                                    {
+                                      "type": "string",
+                                      "const": "image/gif"
+                                    },
+                                    {
+                                      "type": "string",
+                                      "const": "image/webp"
+                                    }
+                                  ]
+                                },
+                                "byteLength": {
+                                  "type": "integer",
+                                  "minimum": 1,
+                                  "maximum": 33554432
+                                }
+                              },
+                              "additionalProperties": false
+                            },
+                            "maxItems": 4
                           }
                         },
                         "additionalProperties": false
@@ -57876,6 +58898,50 @@
                           "output": {
                             "type": "string",
                             "x-metis-maxUtf8Bytes": 65536
+                          },
+                          "images": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "required": [
+                                "hash",
+                                "mediaType",
+                                "byteLength"
+                              ],
+                              "properties": {
+                                "hash": {
+                                  "type": "string",
+                                  "pattern": "^[a-f0-9]{64}$"
+                                },
+                                "mediaType": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "const": "image/jpeg"
+                                    },
+                                    {
+                                      "type": "string",
+                                      "const": "image/png"
+                                    },
+                                    {
+                                      "type": "string",
+                                      "const": "image/gif"
+                                    },
+                                    {
+                                      "type": "string",
+                                      "const": "image/webp"
+                                    }
+                                  ]
+                                },
+                                "byteLength": {
+                                  "type": "integer",
+                                  "minimum": 1,
+                                  "maximum": 33554432
+                                }
+                              },
+                              "additionalProperties": false
+                            },
+                            "maxItems": 4
                           }
                         },
                         "additionalProperties": false
@@ -60052,6 +61118,50 @@
                   "output": {
                     "type": "string",
                     "x-metis-maxUtf8Bytes": 65536
+                  },
+                  "images": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "hash",
+                        "mediaType",
+                        "byteLength"
+                      ],
+                      "properties": {
+                        "hash": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        "mediaType": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "const": "image/jpeg"
+                            },
+                            {
+                              "type": "string",
+                              "const": "image/png"
+                            },
+                            {
+                              "type": "string",
+                              "const": "image/gif"
+                            },
+                            {
+                              "type": "string",
+                              "const": "image/webp"
+                            }
+                          ]
+                        },
+                        "byteLength": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 33554432
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    "maxItems": 4
                   }
                 },
                 "additionalProperties": false
@@ -62805,6 +63915,50 @@
                                     "output": {
                                       "type": "string",
                                       "x-metis-maxUtf8Bytes": 65536
+                                    },
+                                    "images": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "object",
+                                        "required": [
+                                          "hash",
+                                          "mediaType",
+                                          "byteLength"
+                                        ],
+                                        "properties": {
+                                          "hash": {
+                                            "type": "string",
+                                            "pattern": "^[a-f0-9]{64}$"
+                                          },
+                                          "mediaType": {
+                                            "anyOf": [
+                                              {
+                                                "type": "string",
+                                                "const": "image/jpeg"
+                                              },
+                                              {
+                                                "type": "string",
+                                                "const": "image/png"
+                                              },
+                                              {
+                                                "type": "string",
+                                                "const": "image/gif"
+                                              },
+                                              {
+                                                "type": "string",
+                                                "const": "image/webp"
+                                              }
+                                            ]
+                                          },
+                                          "byteLength": {
+                                            "type": "integer",
+                                            "minimum": 1,
+                                            "maximum": 33554432
+                                          }
+                                        },
+                                        "additionalProperties": false
+                                      },
+                                      "maxItems": 4
                                     }
                                   },
                                   "additionalProperties": false
@@ -63236,6 +64390,50 @@
                                     "output": {
                                       "type": "string",
                                       "x-metis-maxUtf8Bytes": 65536
+                                    },
+                                    "images": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "object",
+                                        "required": [
+                                          "hash",
+                                          "mediaType",
+                                          "byteLength"
+                                        ],
+                                        "properties": {
+                                          "hash": {
+                                            "type": "string",
+                                            "pattern": "^[a-f0-9]{64}$"
+                                          },
+                                          "mediaType": {
+                                            "anyOf": [
+                                              {
+                                                "type": "string",
+                                                "const": "image/jpeg"
+                                              },
+                                              {
+                                                "type": "string",
+                                                "const": "image/png"
+                                              },
+                                              {
+                                                "type": "string",
+                                                "const": "image/gif"
+                                              },
+                                              {
+                                                "type": "string",
+                                                "const": "image/webp"
+                                              }
+                                            ]
+                                          },
+                                          "byteLength": {
+                                            "type": "integer",
+                                            "minimum": 1,
+                                            "maximum": 33554432
+                                          }
+                                        },
+                                        "additionalProperties": false
+                                      },
+                                      "maxItems": 4
                                     }
                                   },
                                   "additionalProperties": false
@@ -64536,6 +65734,50 @@
                                     "output": {
                                       "type": "string",
                                       "x-metis-maxUtf8Bytes": 65536
+                                    },
+                                    "images": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "object",
+                                        "required": [
+                                          "hash",
+                                          "mediaType",
+                                          "byteLength"
+                                        ],
+                                        "properties": {
+                                          "hash": {
+                                            "type": "string",
+                                            "pattern": "^[a-f0-9]{64}$"
+                                          },
+                                          "mediaType": {
+                                            "anyOf": [
+                                              {
+                                                "type": "string",
+                                                "const": "image/jpeg"
+                                              },
+                                              {
+                                                "type": "string",
+                                                "const": "image/png"
+                                              },
+                                              {
+                                                "type": "string",
+                                                "const": "image/gif"
+                                              },
+                                              {
+                                                "type": "string",
+                                                "const": "image/webp"
+                                              }
+                                            ]
+                                          },
+                                          "byteLength": {
+                                            "type": "integer",
+                                            "minimum": 1,
+                                            "maximum": 33554432
+                                          }
+                                        },
+                                        "additionalProperties": false
+                                      },
+                                      "maxItems": 4
                                     }
                                   },
                                   "additionalProperties": false
@@ -64975,6 +66217,50 @@
                                     "output": {
                                       "type": "string",
                                       "x-metis-maxUtf8Bytes": 65536
+                                    },
+                                    "images": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "object",
+                                        "required": [
+                                          "hash",
+                                          "mediaType",
+                                          "byteLength"
+                                        ],
+                                        "properties": {
+                                          "hash": {
+                                            "type": "string",
+                                            "pattern": "^[a-f0-9]{64}$"
+                                          },
+                                          "mediaType": {
+                                            "anyOf": [
+                                              {
+                                                "type": "string",
+                                                "const": "image/jpeg"
+                                              },
+                                              {
+                                                "type": "string",
+                                                "const": "image/png"
+                                              },
+                                              {
+                                                "type": "string",
+                                                "const": "image/gif"
+                                              },
+                                              {
+                                                "type": "string",
+                                                "const": "image/webp"
+                                              }
+                                            ]
+                                          },
+                                          "byteLength": {
+                                            "type": "integer",
+                                            "minimum": 1,
+                                            "maximum": 33554432
+                                          }
+                                        },
+                                        "additionalProperties": false
+                                      },
+                                      "maxItems": 4
                                     }
                                   },
                                   "additionalProperties": false
@@ -67483,6 +68769,50 @@
                         "output": {
                           "type": "string",
                           "x-metis-maxUtf8Bytes": 65536
+                        },
+                        "images": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "required": [
+                              "hash",
+                              "mediaType",
+                              "byteLength"
+                            ],
+                            "properties": {
+                              "hash": {
+                                "type": "string",
+                                "pattern": "^[a-f0-9]{64}$"
+                              },
+                              "mediaType": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "const": "image/jpeg"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "image/png"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "image/gif"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "image/webp"
+                                  }
+                                ]
+                              },
+                              "byteLength": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 33554432
+                              }
+                            },
+                            "additionalProperties": false
+                          },
+                          "maxItems": 4
                         }
                       },
                       "additionalProperties": false

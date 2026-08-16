@@ -784,6 +784,8 @@ const zhCN = {
 	"Load older messages": "加载更早的消息",
 	"Loading…": "正在加载…",
 	Image: "图片",
+	"Loading image…": "正在加载图片…",
+	"Image unavailable": "图片不可用",
 	Running: "运行中",
 	"Running command": "正在运行命令",
 	"Ran command": "已运行命令",

@@ -1,15 +1,16 @@
 import { createHash, randomUUID } from "node:crypto";
-import type {
-	ClientParams,
-	ClientResult,
-	DomainEvent,
-	DurableImageRefView,
-	ItemView,
-	McpCredentialInput,
-	QueuedTurnView,
-	SessionSnapshot,
-	SessionSummary,
-	TurnView,
+import {
+	type ClientParams,
+	type ClientResult,
+	type DomainEvent,
+	type DurableImageRefView,
+	type ItemView,
+	MAX_READ_IMAGE_DATA_UTF8_BYTES,
+	type McpCredentialInput,
+	type QueuedTurnView,
+	type SessionSnapshot,
+	type SessionSummary,
+	type TurnView,
 } from "@metis/app-protocol";
 import {
 	type AgentSession,
@@ -1060,6 +1061,26 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 		return this.projection.readItems(input);
 	}
 
+	async readImage(input: ClientParams<"session/readImage">): Promise<ClientResult<"session/readImage">> {
+		try {
+			const [image] = this.session.sessionManager.resolveDurableImageRefs([
+				{
+					type: "image_ref",
+					hash: input.image.hash,
+					mimeType: input.image.mediaType,
+					size: input.image.byteLength,
+				},
+			]);
+			if (!image) throw new Error("unavailable");
+			if (Buffer.byteLength(image.data, "utf8") > MAX_READ_IMAGE_DATA_UTF8_BYTES) {
+				throw new Error("too large for envelope");
+			}
+			return { data: image.data, mediaType: input.image.mediaType };
+		} catch {
+			throw new AppServerError("NOT_FOUND", { sessionId: this.sessionId });
+		}
+	}
+
 	async getStatus(input: ClientParams<"session/status">): Promise<ClientResult<"session/status">> {
 		const stats = this.session.getSessionStats();
 		const context = stats.contextUsage;
@@ -1500,6 +1521,10 @@ class ReadonlyScheduledSessionRuntime implements OpenedSessionRuntime {
 
 	async readItems(input: ClientParams<"session/readItems">): Promise<ClientResult<"session/readItems">> {
 		return this.projection.readItems(input);
+	}
+
+	async readImage(): Promise<ClientResult<"session/readImage">> {
+		throw new AppServerError("NOT_FOUND", { sessionId: this.sessionId });
 	}
 
 	async getStatus(input: ClientParams<"session/status">): Promise<ClientResult<"session/status">> {

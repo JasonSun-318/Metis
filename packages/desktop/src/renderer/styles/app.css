@@ -964,6 +964,9 @@ textarea { resize: none; }
 .tool-step-output-error { color: var(--danger); }
 .tool-step-orphan { display: grid; gap: 9px; }
 .tool-step-orphan .tool-step-output { margin-left: -30px; }
+.tool-result-images { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
+.tool-result-image { display: block; max-width: min(100%, 480px); height: auto; border-radius: 8px; }
+.tool-result-image-missing, .tool-result-image-loading { color: var(--muted); font-size: 13px; }
 
 .transcript-code .transcript-scroll { padding: 15px max(24px, calc((100% - var(--conversation-width)) / 2)) 16px; }
 .transcript-code .code-transcript-turn { position: absolute; top: 0; right: 0; left: 0; width: 100%; color: var(--text-25); padding: 0 0 30px; font-size: var(--code-body-size); font-weight: 400; letter-spacing: -.003em; line-height: 1.55; }

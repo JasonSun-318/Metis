@@ -329,6 +329,14 @@ const scheduleCases = [
 	],
 	["schedule/subscribe", {}, { snapshot: { serverEpoch: EPOCH, tasks: [scheduleTask], unreadCount: 0, cursor: 53 } }],
 	["schedule/unsubscribe", {}, { unsubscribed: true }],
+	[
+		"session/readImage",
+		{
+			sessionId: SESSION_ID,
+			image: { hash: "a".repeat(64), mediaType: "image/png", byteLength: 4 },
+		},
+		{ data: "aGVsbG8=", mediaType: "image/png" },
+	],
 ] as const;
 
 const scheduleEvents = [

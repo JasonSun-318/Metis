@@ -14,6 +14,7 @@ import {
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Markdown } from "./Markdown.tsx";
+import { ToolResultImages } from "./ToolResultImages.tsx";
 import { TurnRuntimeStatus } from "./TurnRuntimeStatus.tsx";
 import {
 	actionSummary,
@@ -21,6 +22,7 @@ import {
 	commandText,
 	isCommandTool,
 	messageText,
+	toolResultImagesFromBlocks,
 	toolTranscriptPresentation,
 	type ToolCallBlock,
 	type ToolDetailLine,
@@ -223,6 +225,7 @@ export function TranscriptTurn({ items, running: runtimeRunning = false, started
 	const { users, segments, results, final } = buildTurnPresentation(items);
 	const enteringUserId = runtimeRunning ? users.at(-1)?.itemId : undefined;
 	const finalCopyText = final ? messageText(final) : "";
+	const sessionId = items[0]?.sessionId;
 
 	return (
 		<>
@@ -247,13 +250,20 @@ export function TranscriptTurn({ items, running: runtimeRunning = false, started
 						{segment.blocks.map((block, blockIndex) => <Markdown key={`text-${blockIndex}`} text={block.text} />)}
 					</div>
 				) : (
-					<ExecutionChain
-						activity={segment.blocks}
-						calls={segment.calls}
-						key={`activity-${index}`}
-						results={results}
-						running={segment.running}
-					/>
+					<div key={`activity-${index}`}>
+						<ExecutionChain
+							activity={segment.blocks}
+							calls={segment.calls}
+							results={results}
+							running={segment.running}
+						/>
+						{sessionId ? (
+							<ToolResultImages
+								images={toolResultImagesFromBlocks(segment.blocks, results)}
+								sessionId={sessionId}
+							/>
+						) : null}
+					</div>
 				),
 			)}
 			{final && (

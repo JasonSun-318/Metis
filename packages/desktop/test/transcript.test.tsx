@@ -5,6 +5,7 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { shouldAdjustTranscriptScroll, shouldFollowTranscript, Transcript } from "../src/renderer/components/Transcript.tsx";
+import { CodeTranscriptTurn } from "../src/renderer/components/CodeTranscriptTurn.tsx";
 import { TranscriptTurn } from "../src/renderer/components/TranscriptTurn.tsx";
 
 const SESSION_ID = "11111111-1111-4111-8111-111111111111";
@@ -419,6 +420,69 @@ describe("TranscriptTurn", () => {
 		expect(container.querySelector(".turn-actions")).not.toBeNull();
 		expect(container.querySelector('[aria-label="Fork conversation"]')).not.toBeNull();
 		expect(container.querySelector('[aria-label="Copy message"]')).not.toBeNull();
+		await act(async () => root.unmount());
+	});
+
+	it("renders generated tool-result images outside the collapsed execution chain", async () => {
+		const image = { hash: "a".repeat(64), mediaType: "image/png" as const, byteLength: 4 };
+		const readSessionImage = vi.fn().mockResolvedValue({ data: "aGVsbG8=", mediaType: "image/png" });
+		Object.defineProperty(window, "metis", { configurable: true, value: { readSessionImage } });
+		const items: ItemView[] = [
+			item("gen-user", "user", [{ type: "text", text: "draw a circle" }]),
+			item("gen-assistant", "assistant", [
+				{ type: "tool_call", toolCallId: "gen-tool", name: "generate_image", state: "completed" },
+			]),
+			item("gen-result", "tool", [
+				{
+					type: "tool_result",
+					toolCallId: "gen-tool",
+					name: "generate_image",
+					isError: false,
+					output: "Generated 1 of 1",
+					images: [image],
+				},
+			]),
+		];
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<TranscriptTurn items={items} />));
+		expect(readSessionImage).toHaveBeenCalledWith({ sessionId: SESSION_ID, image });
+		const img = container.querySelector<HTMLImageElement>("img.tool-result-image");
+		expect(img?.src).toContain("data:image/png;base64,");
+		expect(container.querySelector(".execution-chain .tool-result-image")).toBeNull();
+		await act(async () => root.unmount());
+	});
+});
+
+describe("CodeTranscriptTurn", () => {
+	it("renders generated tool-result images outside collapsed code tools", async () => {
+		const image = { hash: "a".repeat(64), mediaType: "image/png" as const, byteLength: 4 };
+		const readSessionImage = vi.fn().mockResolvedValue({ data: "aGVsbG8=", mediaType: "image/png" });
+		Object.defineProperty(window, "metis", { configurable: true, value: { readSessionImage } });
+		const items: ItemView[] = [
+			item("gen-user", "user", [{ type: "text", text: "draw a circle" }]),
+			item("gen-assistant", "assistant", [
+				{ type: "tool_call", toolCallId: "gen-tool", name: "generate_image", state: "completed" },
+			]),
+			item("gen-result", "tool", [
+				{
+					type: "tool_result",
+					toolCallId: "gen-tool",
+					name: "generate_image",
+					isError: false,
+					output: "Generated 1 of 1",
+					images: [image],
+				},
+			]),
+		];
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<CodeTranscriptTurn items={items} />));
+		const img = container.querySelector<HTMLImageElement>("img.tool-result-image");
+		expect(img?.src).toContain("data:image/png;base64,");
+		expect(container.querySelector(".code-execution .tool-result-image")).toBeNull();
 		await act(async () => root.unmount());
 	});
 });

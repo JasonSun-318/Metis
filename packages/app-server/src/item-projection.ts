@@ -316,10 +316,15 @@ export function projectMessageEntry(input: MessageProjectionInput): ItemView | u
 
 	if (message.role === "toolResult") {
 		const budget = { remaining: MAX_ITEM_TEXT_BYTES };
-		const output = textBlocks(message.content, budget)
+		const blocks = textBlocks(message.content, budget);
+		const output = blocks
 			.filter((block): block is Extract<ItemContentBlockView, { type: "text" }> => block.type === "text")
 			.map((block) => block.text)
 			.join("\n");
+		const images = blocks
+			.filter((block): block is Extract<ItemContentBlockView, { type: "image" }> => block.type === "image")
+			.map((block) => block.image)
+			.slice(0, 4);
 		return {
 			itemId,
 			sessionId,
@@ -333,6 +338,7 @@ export function projectMessageEntry(input: MessageProjectionInput): ItemView | u
 					name: projectedName(message.toolName, "tool"),
 					isError: message.isError === true,
 					output: boundedText(output, MAX_ITEM_TEXT_BYTES),
+					...(images.length > 0 ? { images } : {}),
 				},
 			],
 			createdAt,

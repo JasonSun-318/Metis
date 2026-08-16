@@ -7,6 +7,7 @@ import {
 	MAX_ASK_USER_QUESTIONS,
 	MAX_CAPABILITIES,
 	MAX_HISTORY_ITEMS,
+	MAX_READ_IMAGE_DATA_UTF8_BYTES,
 	MAX_SCHEDULE_INSTRUCTION_UTF8_BYTES,
 	NameSchema,
 	OpaqueIdSchema,
@@ -379,6 +380,20 @@ export const SessionReadItemsParamsSchema = StrictObject({
 export const SessionReadItemsResultSchema = StrictObject({
 	items: Type.Array(ItemViewSchema, { maxItems: MAX_HISTORY_ITEMS }),
 	nextBeforeItemId: Type.Union([OpaqueIdSchema, Type.Null()]),
+});
+
+export const SessionReadImageParamsSchema = StrictObject({
+	sessionId: SessionIdSchema,
+	image: DurableImageRefViewSchema,
+});
+export const SessionReadImageResultSchema = StrictObject({
+	data: Type.String({ minLength: 1, maxLength: MAX_READ_IMAGE_DATA_UTF8_BYTES }),
+	mediaType: Type.Union([
+		Type.Literal("image/jpeg"),
+		Type.Literal("image/png"),
+		Type.Literal("image/gif"),
+		Type.Literal("image/webp"),
+	]),
 });
 
 export const SessionMutationParamsSchema = StrictObject({
@@ -807,6 +822,7 @@ export const ClientRequestMethods = {
 	"session/open": method(SessionRefParamsSchema, SessionOpenResultSchema),
 	"session/markRead": method(SessionMarkReadParamsSchema, SessionMutationResultSchema),
 	"session/readItems": method(SessionReadItemsParamsSchema, SessionReadItemsResultSchema),
+	"session/readImage": method(SessionReadImageParamsSchema, SessionReadImageResultSchema),
 	"session/status": method(SessionRefParamsSchema, SessionStatusViewSchema),
 	"session/compact": method(SessionMutationParamsSchema, SessionCompactResultSchema),
 	"session/close": method(SessionMutationParamsSchema, SessionCloseResultSchema),
