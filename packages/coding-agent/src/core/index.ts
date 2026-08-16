@@ -83,6 +83,25 @@ export {
 	type WorkingIndicatorOptions,
 } from "./extensions/index.ts";
 export {
+	type DeclarativeHook,
+	type DeclarativeHooksConfig,
+	HOOK_DEFAULT_TIMEOUT_SECONDS,
+	HOOK_EVENT_NAMES,
+	HOOK_MAX_TIMEOUT_SECONDS,
+	HOOK_RUN_MODES,
+	HOOKS_CONFIG_FILENAME,
+	type HookEventName,
+	type HookRunMode,
+	hooksConfigPath,
+	isHookEventName,
+	isHookRunMode,
+	loadDeclarativeHooks,
+	parseHookMatcher,
+	saveDeclarativeHooks,
+	validateDeclarativeHook,
+} from "./hooks/declarative-hooks.ts";
+export { createDeclarativeHooksBridge } from "./hooks/hook-bridge.ts";
+export {
 	createInteractiveBashBoundary,
 	type InteractiveBashBoundary,
 	type InteractiveBashContext,

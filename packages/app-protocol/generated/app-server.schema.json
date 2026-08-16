@@ -4221,6 +4221,212 @@
                 },
                 "method": {
                   "type": "string",
+                  "const": "hooks/list"
+                },
+                "params": {
+                  "type": "object",
+                  "properties": {},
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "jsonrpc",
+                "id",
+                "method",
+                "params"
+              ],
+              "properties": {
+                "jsonrpc": {
+                  "type": "string",
+                  "const": "2.0"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "x-metis-maxUtf16Units": 128
+                },
+                "method": {
+                  "type": "string",
+                  "const": "hooks/upsert"
+                },
+                "params": {
+                  "type": "object",
+                  "required": [
+                    "hook"
+                  ],
+                  "properties": {
+                    "hook": {
+                      "type": "object",
+                      "required": [
+                        "id",
+                        "name",
+                        "enabled",
+                        "event",
+                        "runMode",
+                        "command"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128
+                        },
+                        "name": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 200
+                        },
+                        "enabled": {
+                          "type": "boolean"
+                        },
+                        "event": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "const": "SessionStart"
+                            },
+                            {
+                              "type": "string",
+                              "const": "UserPromptSubmit"
+                            },
+                            {
+                              "type": "string",
+                              "const": "PreToolUse"
+                            },
+                            {
+                              "type": "string",
+                              "const": "PostToolUse"
+                            },
+                            {
+                              "type": "string",
+                              "const": "PostToolUseFailure"
+                            },
+                            {
+                              "type": "string",
+                              "const": "Stop"
+                            }
+                          ]
+                        },
+                        "matcher": {
+                          "type": "string",
+                          "minLength": 0,
+                          "maxLength": 200
+                        },
+                        "runMode": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "const": "process"
+                            },
+                            {
+                              "type": "string",
+                              "const": "shell"
+                            }
+                          ]
+                        },
+                        "command": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 4096
+                        },
+                        "args": {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "maxLength": 2000
+                          },
+                          "maxItems": 64
+                        },
+                        "timeoutSeconds": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 600
+                        },
+                        "statusMessage": {
+                          "type": "string",
+                          "maxLength": 500
+                        },
+                        "metadata": {
+                          "type": "object",
+                          "patternProperties": {
+                            "^.*$": {}
+                          }
+                        }
+                      },
+                      "additionalProperties": false
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "jsonrpc",
+                "id",
+                "method",
+                "params"
+              ],
+              "properties": {
+                "jsonrpc": {
+                  "type": "string",
+                  "const": "2.0"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "x-metis-maxUtf16Units": 128
+                },
+                "method": {
+                  "type": "string",
+                  "const": "hooks/delete"
+                },
+                "params": {
+                  "type": "object",
+                  "required": [
+                    "id"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "jsonrpc",
+                "id",
+                "method",
+                "params"
+              ],
+              "properties": {
+                "jsonrpc": {
+                  "type": "string",
+                  "const": "2.0"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "x-metis-maxUtf16Units": 128
+                },
+                "method": {
+                  "type": "string",
                   "const": "subagent/readItems"
                 },
                 "params": {
@@ -21075,6 +21281,435 @@
                 "result": {
                   "type": "object",
                   "required": [
+                    "hooks",
+                    "loadErrors"
+                  ],
+                  "properties": {
+                    "hooks": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "id",
+                          "name",
+                          "enabled",
+                          "event",
+                          "runMode",
+                          "command"
+                        ],
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 128
+                          },
+                          "name": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 200
+                          },
+                          "enabled": {
+                            "type": "boolean"
+                          },
+                          "event": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "const": "SessionStart"
+                              },
+                              {
+                                "type": "string",
+                                "const": "UserPromptSubmit"
+                              },
+                              {
+                                "type": "string",
+                                "const": "PreToolUse"
+                              },
+                              {
+                                "type": "string",
+                                "const": "PostToolUse"
+                              },
+                              {
+                                "type": "string",
+                                "const": "PostToolUseFailure"
+                              },
+                              {
+                                "type": "string",
+                                "const": "Stop"
+                              }
+                            ]
+                          },
+                          "matcher": {
+                            "type": "string",
+                            "minLength": 0,
+                            "maxLength": 200
+                          },
+                          "runMode": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "const": "process"
+                              },
+                              {
+                                "type": "string",
+                                "const": "shell"
+                              }
+                            ]
+                          },
+                          "command": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 4096
+                          },
+                          "args": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "maxLength": 2000
+                            },
+                            "maxItems": 64
+                          },
+                          "timeoutSeconds": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 600
+                          },
+                          "statusMessage": {
+                            "type": "string",
+                            "maxLength": 500
+                          },
+                          "metadata": {
+                            "type": "object",
+                            "patternProperties": {
+                              "^.*$": {}
+                            }
+                          }
+                        },
+                        "additionalProperties": false
+                      },
+                      "maxItems": 100
+                    },
+                    "loadErrors": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "x-metis-maxUtf8Bytes": 65536
+                      },
+                      "maxItems": 100
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "jsonrpc",
+                "id",
+                "result"
+              ],
+              "properties": {
+                "jsonrpc": {
+                  "type": "string",
+                  "const": "2.0"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "x-metis-maxUtf16Units": 128
+                },
+                "result": {
+                  "type": "object",
+                  "required": [
+                    "hooks",
+                    "loadErrors"
+                  ],
+                  "properties": {
+                    "hooks": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "id",
+                          "name",
+                          "enabled",
+                          "event",
+                          "runMode",
+                          "command"
+                        ],
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 128
+                          },
+                          "name": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 200
+                          },
+                          "enabled": {
+                            "type": "boolean"
+                          },
+                          "event": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "const": "SessionStart"
+                              },
+                              {
+                                "type": "string",
+                                "const": "UserPromptSubmit"
+                              },
+                              {
+                                "type": "string",
+                                "const": "PreToolUse"
+                              },
+                              {
+                                "type": "string",
+                                "const": "PostToolUse"
+                              },
+                              {
+                                "type": "string",
+                                "const": "PostToolUseFailure"
+                              },
+                              {
+                                "type": "string",
+                                "const": "Stop"
+                              }
+                            ]
+                          },
+                          "matcher": {
+                            "type": "string",
+                            "minLength": 0,
+                            "maxLength": 200
+                          },
+                          "runMode": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "const": "process"
+                              },
+                              {
+                                "type": "string",
+                                "const": "shell"
+                              }
+                            ]
+                          },
+                          "command": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 4096
+                          },
+                          "args": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "maxLength": 2000
+                            },
+                            "maxItems": 64
+                          },
+                          "timeoutSeconds": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 600
+                          },
+                          "statusMessage": {
+                            "type": "string",
+                            "maxLength": 500
+                          },
+                          "metadata": {
+                            "type": "object",
+                            "patternProperties": {
+                              "^.*$": {}
+                            }
+                          }
+                        },
+                        "additionalProperties": false
+                      },
+                      "maxItems": 100
+                    },
+                    "loadErrors": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "x-metis-maxUtf8Bytes": 65536
+                      },
+                      "maxItems": 100
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "jsonrpc",
+                "id",
+                "result"
+              ],
+              "properties": {
+                "jsonrpc": {
+                  "type": "string",
+                  "const": "2.0"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "x-metis-maxUtf16Units": 128
+                },
+                "result": {
+                  "type": "object",
+                  "required": [
+                    "hooks",
+                    "loadErrors"
+                  ],
+                  "properties": {
+                    "hooks": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "id",
+                          "name",
+                          "enabled",
+                          "event",
+                          "runMode",
+                          "command"
+                        ],
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 128
+                          },
+                          "name": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 200
+                          },
+                          "enabled": {
+                            "type": "boolean"
+                          },
+                          "event": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "const": "SessionStart"
+                              },
+                              {
+                                "type": "string",
+                                "const": "UserPromptSubmit"
+                              },
+                              {
+                                "type": "string",
+                                "const": "PreToolUse"
+                              },
+                              {
+                                "type": "string",
+                                "const": "PostToolUse"
+                              },
+                              {
+                                "type": "string",
+                                "const": "PostToolUseFailure"
+                              },
+                              {
+                                "type": "string",
+                                "const": "Stop"
+                              }
+                            ]
+                          },
+                          "matcher": {
+                            "type": "string",
+                            "minLength": 0,
+                            "maxLength": 200
+                          },
+                          "runMode": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "const": "process"
+                              },
+                              {
+                                "type": "string",
+                                "const": "shell"
+                              }
+                            ]
+                          },
+                          "command": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 4096
+                          },
+                          "args": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "maxLength": 2000
+                            },
+                            "maxItems": 64
+                          },
+                          "timeoutSeconds": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 600
+                          },
+                          "statusMessage": {
+                            "type": "string",
+                            "maxLength": 500
+                          },
+                          "metadata": {
+                            "type": "object",
+                            "patternProperties": {
+                              "^.*$": {}
+                            }
+                          }
+                        },
+                        "additionalProperties": false
+                      },
+                      "maxItems": 100
+                    },
+                    "loadErrors": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "x-metis-maxUtf8Bytes": 65536
+                      },
+                      "maxItems": 100
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "jsonrpc",
+                "id",
+                "result"
+              ],
+              "properties": {
+                "jsonrpc": {
+                  "type": "string",
+                  "const": "2.0"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "x-metis-maxUtf16Units": 128
+                },
+                "result": {
+                  "type": "object",
+                  "required": [
                     "items",
                     "nextBeforeItemId"
                   ],
@@ -32946,6 +33581,212 @@
             },
             "method": {
               "type": "string",
+              "const": "hooks/list"
+            },
+            "params": {
+              "type": "object",
+              "properties": {},
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "type": "string",
+              "const": "2.0"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "x-metis-maxUtf16Units": 128
+            },
+            "method": {
+              "type": "string",
+              "const": "hooks/upsert"
+            },
+            "params": {
+              "type": "object",
+              "required": [
+                "hook"
+              ],
+              "properties": {
+                "hook": {
+                  "type": "object",
+                  "required": [
+                    "id",
+                    "name",
+                    "enabled",
+                    "event",
+                    "runMode",
+                    "command"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128
+                    },
+                    "name": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 200
+                    },
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "event": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "const": "SessionStart"
+                        },
+                        {
+                          "type": "string",
+                          "const": "UserPromptSubmit"
+                        },
+                        {
+                          "type": "string",
+                          "const": "PreToolUse"
+                        },
+                        {
+                          "type": "string",
+                          "const": "PostToolUse"
+                        },
+                        {
+                          "type": "string",
+                          "const": "PostToolUseFailure"
+                        },
+                        {
+                          "type": "string",
+                          "const": "Stop"
+                        }
+                      ]
+                    },
+                    "matcher": {
+                      "type": "string",
+                      "minLength": 0,
+                      "maxLength": 200
+                    },
+                    "runMode": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "const": "process"
+                        },
+                        {
+                          "type": "string",
+                          "const": "shell"
+                        }
+                      ]
+                    },
+                    "command": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 4096
+                    },
+                    "args": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "maxLength": 2000
+                      },
+                      "maxItems": 64
+                    },
+                    "timeoutSeconds": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 600
+                    },
+                    "statusMessage": {
+                      "type": "string",
+                      "maxLength": 500
+                    },
+                    "metadata": {
+                      "type": "object",
+                      "patternProperties": {
+                        "^.*$": {}
+                      }
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "type": "string",
+              "const": "2.0"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "x-metis-maxUtf16Units": 128
+            },
+            "method": {
+              "type": "string",
+              "const": "hooks/delete"
+            },
+            "params": {
+              "type": "object",
+              "required": [
+                "id"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "type": "string",
+              "const": "2.0"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "x-metis-maxUtf16Units": 128
+            },
+            "method": {
+              "type": "string",
               "const": "subagent/readItems"
             },
             "params": {
@@ -44765,6 +45606,435 @@
                       "const": "environment"
                     }
                   ]
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "jsonrpc",
+            "id",
+            "result"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "type": "string",
+              "const": "2.0"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "x-metis-maxUtf16Units": 128
+            },
+            "result": {
+              "type": "object",
+              "required": [
+                "hooks",
+                "loadErrors"
+              ],
+              "properties": {
+                "hooks": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": [
+                      "id",
+                      "name",
+                      "enabled",
+                      "event",
+                      "runMode",
+                      "command"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128
+                      },
+                      "name": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 200
+                      },
+                      "enabled": {
+                        "type": "boolean"
+                      },
+                      "event": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "const": "SessionStart"
+                          },
+                          {
+                            "type": "string",
+                            "const": "UserPromptSubmit"
+                          },
+                          {
+                            "type": "string",
+                            "const": "PreToolUse"
+                          },
+                          {
+                            "type": "string",
+                            "const": "PostToolUse"
+                          },
+                          {
+                            "type": "string",
+                            "const": "PostToolUseFailure"
+                          },
+                          {
+                            "type": "string",
+                            "const": "Stop"
+                          }
+                        ]
+                      },
+                      "matcher": {
+                        "type": "string",
+                        "minLength": 0,
+                        "maxLength": 200
+                      },
+                      "runMode": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "const": "process"
+                          },
+                          {
+                            "type": "string",
+                            "const": "shell"
+                          }
+                        ]
+                      },
+                      "command": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 4096
+                      },
+                      "args": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "maxLength": 2000
+                        },
+                        "maxItems": 64
+                      },
+                      "timeoutSeconds": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 600
+                      },
+                      "statusMessage": {
+                        "type": "string",
+                        "maxLength": 500
+                      },
+                      "metadata": {
+                        "type": "object",
+                        "patternProperties": {
+                          "^.*$": {}
+                        }
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "maxItems": 100
+                },
+                "loadErrors": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "x-metis-maxUtf8Bytes": 65536
+                  },
+                  "maxItems": 100
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "jsonrpc",
+            "id",
+            "result"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "type": "string",
+              "const": "2.0"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "x-metis-maxUtf16Units": 128
+            },
+            "result": {
+              "type": "object",
+              "required": [
+                "hooks",
+                "loadErrors"
+              ],
+              "properties": {
+                "hooks": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": [
+                      "id",
+                      "name",
+                      "enabled",
+                      "event",
+                      "runMode",
+                      "command"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128
+                      },
+                      "name": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 200
+                      },
+                      "enabled": {
+                        "type": "boolean"
+                      },
+                      "event": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "const": "SessionStart"
+                          },
+                          {
+                            "type": "string",
+                            "const": "UserPromptSubmit"
+                          },
+                          {
+                            "type": "string",
+                            "const": "PreToolUse"
+                          },
+                          {
+                            "type": "string",
+                            "const": "PostToolUse"
+                          },
+                          {
+                            "type": "string",
+                            "const": "PostToolUseFailure"
+                          },
+                          {
+                            "type": "string",
+                            "const": "Stop"
+                          }
+                        ]
+                      },
+                      "matcher": {
+                        "type": "string",
+                        "minLength": 0,
+                        "maxLength": 200
+                      },
+                      "runMode": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "const": "process"
+                          },
+                          {
+                            "type": "string",
+                            "const": "shell"
+                          }
+                        ]
+                      },
+                      "command": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 4096
+                      },
+                      "args": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "maxLength": 2000
+                        },
+                        "maxItems": 64
+                      },
+                      "timeoutSeconds": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 600
+                      },
+                      "statusMessage": {
+                        "type": "string",
+                        "maxLength": 500
+                      },
+                      "metadata": {
+                        "type": "object",
+                        "patternProperties": {
+                          "^.*$": {}
+                        }
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "maxItems": 100
+                },
+                "loadErrors": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "x-metis-maxUtf8Bytes": 65536
+                  },
+                  "maxItems": 100
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "jsonrpc",
+            "id",
+            "result"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "type": "string",
+              "const": "2.0"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "x-metis-maxUtf16Units": 128
+            },
+            "result": {
+              "type": "object",
+              "required": [
+                "hooks",
+                "loadErrors"
+              ],
+              "properties": {
+                "hooks": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": [
+                      "id",
+                      "name",
+                      "enabled",
+                      "event",
+                      "runMode",
+                      "command"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128
+                      },
+                      "name": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 200
+                      },
+                      "enabled": {
+                        "type": "boolean"
+                      },
+                      "event": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "const": "SessionStart"
+                          },
+                          {
+                            "type": "string",
+                            "const": "UserPromptSubmit"
+                          },
+                          {
+                            "type": "string",
+                            "const": "PreToolUse"
+                          },
+                          {
+                            "type": "string",
+                            "const": "PostToolUse"
+                          },
+                          {
+                            "type": "string",
+                            "const": "PostToolUseFailure"
+                          },
+                          {
+                            "type": "string",
+                            "const": "Stop"
+                          }
+                        ]
+                      },
+                      "matcher": {
+                        "type": "string",
+                        "minLength": 0,
+                        "maxLength": 200
+                      },
+                      "runMode": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "const": "process"
+                          },
+                          {
+                            "type": "string",
+                            "const": "shell"
+                          }
+                        ]
+                      },
+                      "command": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 4096
+                      },
+                      "args": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "maxLength": 2000
+                        },
+                        "maxItems": 64
+                      },
+                      "timeoutSeconds": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 600
+                      },
+                      "statusMessage": {
+                        "type": "string",
+                        "maxLength": 500
+                      },
+                      "metadata": {
+                        "type": "object",
+                        "patternProperties": {
+                          "^.*$": {}
+                        }
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "maxItems": 100
+                },
+                "loadErrors": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "x-metis-maxUtf8Bytes": 65536
+                  },
+                  "maxItems": 100
                 }
               },
               "additionalProperties": false

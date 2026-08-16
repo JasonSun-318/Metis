@@ -9,6 +9,7 @@ import {
 	SessionManager,
 } from "@metis/coding-agent";
 import type { DurableSessionMutation, PreparedSessionMutation } from "./durable-mutation.ts";
+import type { HooksService } from "./hooks.ts";
 import type { InteractionBroker, InteractionPeer } from "./interactions.ts";
 import type { ModelSettingsService } from "./model-settings.ts";
 import type { PermissionRulesService } from "./permission-rules.ts";
@@ -72,6 +73,7 @@ export class Dispatcher {
 	private readonly personalization: PersonalizationService;
 	private readonly permissionRules: PermissionRulesService;
 	private readonly webSearch: WebSearchService;
+	private readonly hooks: HooksService;
 	private readonly titleGenerator: SessionTitleGenerator;
 	private readonly titleJobs = new Set<string>();
 	private readonly profileSummary = new ProfileSummaryCache();
@@ -87,6 +89,7 @@ export class Dispatcher {
 		personalization: PersonalizationService,
 		permissionRules: PermissionRulesService,
 		webSearch: WebSearchService,
+		hooks: HooksService,
 		titleGenerator: SessionTitleGenerator,
 	) {
 		this.catalog = catalog;
@@ -99,6 +102,7 @@ export class Dispatcher {
 		this.personalization = personalization;
 		this.permissionRules = permissionRules;
 		this.webSearch = webSearch;
+		this.hooks = hooks;
 		this.titleGenerator = titleGenerator;
 	}
 
@@ -479,6 +483,12 @@ export class Dispatcher {
 					await this.registry.refreshOpenWebSearchSettings();
 					return result;
 				});
+			case "hooks/list":
+				return this.hooks.view();
+			case "hooks/upsert":
+				return await this.replayMutation(request, async () => this.hooks.upsert(request.params));
+			case "hooks/delete":
+				return await this.replayMutation(request, async () => this.hooks.delete(request.params));
 			case "usage/get":
 				return this.profileSummary.usage(this.allSessionRefs(), request.params.rangeDays);
 			case "model/list":

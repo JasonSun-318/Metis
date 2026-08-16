@@ -135,6 +135,12 @@ const api = {
 		invoke(DESKTOP_IPC_CHANNELS.updateWebSearchSettings, "webSearch/update", input) as ReturnType<
 			MetisDesktopApi["updateWebSearchSettings"]
 		>,
+	listHooks: () =>
+		invoke(DESKTOP_IPC_CHANNELS.listHooks, "hooks/list", {}) as ReturnType<MetisDesktopApi["listHooks"]>,
+	upsertHook: (input: ClientParams<"hooks/upsert">) =>
+		invoke(DESKTOP_IPC_CHANNELS.upsertHook, "hooks/upsert", input) as ReturnType<MetisDesktopApi["upsertHook"]>,
+	deleteHook: (input: ClientParams<"hooks/delete">) =>
+		invoke(DESKTOP_IPC_CHANNELS.deleteHook, "hooks/delete", input) as ReturnType<MetisDesktopApi["deleteHook"]>,
 	testModelConnection: (input: ClientParams<"model/testConnection">) =>
 		invoke(DESKTOP_IPC_CHANNELS.testModelConnection, "model/testConnection", input) as ReturnType<
 			MetisDesktopApi["testModelConnection"]

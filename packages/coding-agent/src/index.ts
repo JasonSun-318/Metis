@@ -196,6 +196,26 @@ export {
 } from "./core/extensions/index.ts";
 // Footer data provider (git branch + extension statuses - data not otherwise available to extensions)
 export type { ReadonlyFooterDataProvider } from "./core/footer-data-provider.ts";
+// Declarative user-level hooks
+export {
+	type DeclarativeHook,
+	type DeclarativeHooksConfig,
+	HOOK_DEFAULT_TIMEOUT_SECONDS,
+	HOOK_EVENT_NAMES,
+	HOOK_MAX_TIMEOUT_SECONDS,
+	HOOK_RUN_MODES,
+	HOOKS_CONFIG_FILENAME,
+	type HookEventName,
+	type HookRunMode,
+	hooksConfigPath,
+	isHookEventName,
+	isHookRunMode,
+	loadDeclarativeHooks,
+	parseHookMatcher,
+	saveDeclarativeHooks,
+	validateDeclarativeHook,
+} from "./core/hooks/declarative-hooks.ts";
+export { createDeclarativeHooksBridge } from "./core/hooks/hook-bridge.ts";
 export {
 	createInteractiveBashBoundary,
 	type InteractiveBashBoundary,

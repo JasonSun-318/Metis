@@ -24,6 +24,7 @@ import { AgentSessionRuntimeHost } from "./agent-session-runtime-host.ts";
 import { AppServerConnection } from "./connection.ts";
 import { CredentialCoordinator } from "./credential-coordinator.ts";
 import { Dispatcher } from "./dispatcher.ts";
+import { HooksService } from "./hooks.ts";
 import { InteractionBroker } from "./interactions.ts";
 import { ModelSettingsService } from "./model-settings.ts";
 import type { OutboundQueueLimits } from "./outbound-queue.ts";
@@ -102,6 +103,7 @@ export class AppServer {
 		const personalization = new PersonalizationService(options.agentDir);
 		const permissionRules = new PermissionRulesService(options.agentDir, this.catalog);
 		const webSearch = new WebSearchService({ settingsManager, authStorage });
+		const hooks = new HooksService(options.agentDir);
 		this.registry = new SessionRegistry(
 			options.runtimeHost ??
 				new AgentSessionRuntimeHost({
@@ -125,6 +127,7 @@ export class AppServer {
 			personalization,
 			permissionRules,
 			webSearch,
+			hooks,
 			options.titleGenerator ?? new DefaultSessionTitleGenerator({ modelRegistry, settingsManager }),
 		);
 		this.outboundQueueLimits = {

@@ -655,6 +655,33 @@ export const WebSearchSettingsViewSchema = StrictObject({
 	authSource: Type.Optional(Type.Union([Type.Literal("stored"), Type.Literal("environment")])),
 });
 
+export const HookEventNameSchema = Type.Union([
+	Type.Literal("SessionStart"),
+	Type.Literal("UserPromptSubmit"),
+	Type.Literal("PreToolUse"),
+	Type.Literal("PostToolUse"),
+	Type.Literal("PostToolUseFailure"),
+	Type.Literal("Stop"),
+]);
+export const HookRunModeSchema = Type.Union([Type.Literal("process"), Type.Literal("shell")]);
+export const DeclarativeHookViewSchema = StrictObject({
+	id: Type.String({ minLength: 1, maxLength: 128 }),
+	name: Type.String({ minLength: 1, maxLength: 200 }),
+	enabled: Type.Boolean(),
+	event: HookEventNameSchema,
+	matcher: Type.Optional(Type.String({ minLength: 0, maxLength: 200 })),
+	runMode: HookRunModeSchema,
+	command: Type.String({ minLength: 1, maxLength: 4096 }),
+	args: Type.Optional(Type.Array(Type.String({ maxLength: 2000 }), { maxItems: 64 })),
+	timeoutSeconds: Type.Optional(Type.Integer({ minimum: 1, maximum: 600 })),
+	statusMessage: Type.Optional(Type.String({ maxLength: 500 })),
+	metadata: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
+});
+export const HooksListViewSchema = StrictObject({
+	hooks: Type.Array(DeclarativeHookViewSchema, { maxItems: 100 }),
+	loadErrors: Type.Array(PublicTextSchema, { maxItems: 100 }),
+});
+
 export const UsageRangeDaysSchema = Type.Union([Type.Literal(7), Type.Literal(30), Type.Literal(90)]);
 export const UsageDailyViewSchema = StrictObject({
 	date: Type.Refine(Type.String({ pattern: "^\\d{4}-\\d{2}-\\d{2}$" }), isCalendarDate, "invalid calendar date"),
@@ -1199,10 +1226,14 @@ export type ModelOptionView = Static<typeof ModelOptionViewSchema>;
 export type ModelSettingsModelView = Static<typeof ModelSettingsModelViewSchema>;
 export type ModelSettingsProviderView = Static<typeof ModelSettingsProviderViewSchema>;
 export type ModelSettingsView = Static<typeof ModelSettingsViewSchema>;
-export type ImageGenApiView = Static<typeof ImageGenApiViewSchema>;
-export type ImageGenSettingsView = Static<typeof ImageGenSettingsViewSchema>;
 export type WebSearchProvider = Static<typeof WebSearchProviderSchema>;
 export type WebSearchSettingsView = Static<typeof WebSearchSettingsViewSchema>;
+export type ImageGenApiView = Static<typeof ImageGenApiViewSchema>;
+export type ImageGenSettingsView = Static<typeof ImageGenSettingsViewSchema>;
+export type HookEventNameView = Static<typeof HookEventNameSchema>;
+export type HookRunModeView = Static<typeof HookRunModeSchema>;
+export type DeclarativeHookView = Static<typeof DeclarativeHookViewSchema>;
+export type HooksListView = Static<typeof HooksListViewSchema>;
 export type UsageRangeDays = Static<typeof UsageRangeDaysSchema>;
 export type UsageDailyView = Static<typeof UsageDailyViewSchema>;
 export type UsageModelView = Static<typeof UsageModelViewSchema>;

@@ -192,8 +192,14 @@ const scheduleCases = [
 		},
 		{
 			defaultModel: { provider: "openai", modelId: "gpt-test" },
-			visionModel: null,
-			imageGen: null,
+			visionModel: { provider: "openai", modelId: "gpt-test" },
+			imageGen: {
+				name: "My image gen",
+				baseUrl: "https://api.openai.com/v1",
+				api: "openai-images",
+				modelId: "gpt-image-1",
+				authConfigured: true,
+			},
 			defaultThinkingSelection: "high",
 			providers: [],
 			loadError: null,
@@ -284,6 +290,42 @@ const scheduleCases = [
 		{ enabled: true, provider: "serpapi", credential: { action: "set", value: "serp-key" } },
 		{ enabled: true, provider: "serpapi", authConfigured: true, authSource: "stored" },
 	],
+	[
+		"hooks/list",
+		{},
+		{
+			hooks: [
+				{
+					id: "11111111-2222-4333-8444-555555555555",
+					name: "Block dangerous bash",
+					enabled: true,
+					event: "PreToolUse",
+					matcher: "bash",
+					runMode: "shell",
+					command: "echo blocked >&2; exit 2",
+					timeoutSeconds: 30,
+				},
+			],
+			loadErrors: [],
+		},
+	],
+	[
+		"hooks/upsert",
+		{
+			hook: {
+				id: "11111111-2222-4333-8444-555555555555",
+				name: "Block dangerous bash",
+				enabled: true,
+				event: "PreToolUse",
+				matcher: "bash",
+				runMode: "shell",
+				command: "echo blocked >&2; exit 2",
+				timeoutSeconds: 30,
+			},
+		},
+		{ hooks: [], loadErrors: [] },
+	],
+	["hooks/delete", { id: "11111111-2222-4333-8444-555555555555" }, { hooks: [], loadErrors: [] }],
 	[
 		"schedule/create",
 		{

@@ -6,6 +6,7 @@ import { resolvePath } from "../utils/paths.ts";
 import { AuthStorage } from "./auth-storage.ts";
 import { ensureModeScopedMemoryLayout } from "./auto-memory.ts";
 import type { SessionStartEvent, ToolDefinition } from "./extensions/index.ts";
+import { createDeclarativeHooksBridge } from "./hooks/hook-bridge.ts";
 import { ModelRegistry } from "./model-registry.ts";
 import {
 	DefaultResourceLoader,
@@ -161,8 +162,15 @@ export async function createAgentSessionServices(
 		options.modelRegistry?.authStorage ?? options.authStorage ?? AuthStorage.create(join(agentDir, "auth.json"));
 	const settingsManager = options.settingsManager ?? SettingsManager.create(cwd, agentDir);
 	const modelRegistry = options.modelRegistry ?? ModelRegistry.create(authStorage, join(agentDir, "models.json"));
+	const resourceLoaderOptions = options.resourceLoaderOptions ?? {};
+	// Declarative hooks from hooks.json ride along as an inline extension, but
+	// only when extensions load: unattended execution requires zero extensions.
+	const hooksBridge = resourceLoaderOptions.noExtensions ? undefined : createDeclarativeHooksBridge(agentDir);
 	const resourceLoader = new DefaultResourceLoader({
-		...(options.resourceLoaderOptions ?? {}),
+		...resourceLoaderOptions,
+		...(hooksBridge
+			? { extensionFactories: [...(resourceLoaderOptions.extensionFactories ?? []), hooksBridge] }
+			: {}),
 		cwd,
 		agentDir,
 		settingsManager,

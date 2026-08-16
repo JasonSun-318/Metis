@@ -26,7 +26,9 @@ import {
 	ActualThinkingLevelSchema,
 	AgentModeSchema,
 	ConnectionEventsParamsSchema,
+	DeclarativeHookViewSchema,
 	DurableImageRefViewSchema,
+	HooksListViewSchema,
 	InteractionViewSchema,
 	ItemViewSchema,
 	McpCatalogItemDetailViewSchema,
@@ -647,6 +649,12 @@ export const WebSearchUpdateParamsSchema = StrictObject({
 	credential: CredentialMutationSchema,
 });
 
+export const HooksListParamsSchema = StrictObject({});
+export const HooksUpsertParamsSchema = StrictObject({ hook: DeclarativeHookViewSchema });
+export const HooksDeleteParamsSchema = StrictObject({
+	id: Type.String({ minLength: 1, maxLength: 128 }),
+});
+
 export const ScheduleCreateParamsSchema = Type.Refine(
 	StrictObject({
 		requestId: UuidSchema,
@@ -850,6 +858,9 @@ export const ClientRequestMethods = {
 	"webSearch/get": method(WebSearchGetParamsSchema, WebSearchSettingsViewSchema),
 	"webSearch/credential/reveal": method(WebSearchCredentialRevealParamsSchema, WebSearchCredentialRevealResultSchema),
 	"webSearch/update": method(WebSearchUpdateParamsSchema, WebSearchSettingsViewSchema),
+	"hooks/list": method(HooksListParamsSchema, HooksListViewSchema),
+	"hooks/upsert": method(HooksUpsertParamsSchema, HooksListViewSchema),
+	"hooks/delete": method(HooksDeleteParamsSchema, HooksListViewSchema),
 	"subagent/readItems": method(SubagentReadItemsParamsSchema, SessionReadItemsResultSchema),
 	"subagent/interrupt": method(SubagentInterruptParamsSchema, SubagentResultSchema),
 	"turn/start": method(TurnInputSchema, AcceptedOperationSchema),
