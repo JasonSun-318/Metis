@@ -89,6 +89,44 @@ describe("Composer slash commands", () => {
 		await act(async () => root.unmount());
 	});
 
+	it("inserts a Skill selected from the add menu at the current text position", async () => {
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		const onSubmit = vi.fn(async () => undefined);
+		await act(async () => root.render(
+			<Composer
+				disabled={false}
+				onInterrupt={async () => undefined}
+				onSubmit={onSubmit}
+				running={false}
+				skills={[{ name: "codebase-design", description: "Design deep modules" }]}
+			/>,
+		));
+		const textarea = container.querySelector<HTMLTextAreaElement>("#composer-input")!;
+		await act(async () => type(textarea, "Plan carefully"));
+		textarea.setSelectionRange(5, 5);
+		textarea.dispatchEvent(new Event("select", { bubbles: true }));
+
+		await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Add to message"]')!.click());
+		await act(async () => [...container.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')]
+			.find((item) => item.textContent?.trim() === "Skills")!.click());
+		await act(async () => [...container.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')]
+			.find((item) => item.textContent?.trim() === "codebase-design")!.click());
+
+		const before = container.querySelector<HTMLTextAreaElement>(".composer-input-before")!;
+		expect(before.value).toBe("Plan ");
+		expect(container.querySelector(".composer-skill-token")?.previousElementSibling).toBe(before);
+		expect(textarea.value).toBe("carefully");
+
+		await act(async () => textarea.form!.requestSubmit());
+		expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
+			text: "Plan carefully",
+			skill: expect.objectContaining({ name: "codebase-design" }),
+		}));
+		await act(async () => root.unmount());
+	});
+
 	it("shows image thumbnails and typed file cards above the input", async () => {
 		const container = document.createElement("div");
 		document.body.append(container);

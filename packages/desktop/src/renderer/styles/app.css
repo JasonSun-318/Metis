@@ -1173,9 +1173,10 @@ textarea { resize: none; }
 .composer-cache-hit strong { color: var(--text-22); font-weight: 560; }
 .composer-mcp-status.is-error { color: var(--danger-mcp); }
 .composer-mcp-status.is-error:hover { color: var(--danger-mcp-hover); }
-.composer-input-line { display: flex; min-width: 0; align-items: flex-start; gap: 6px; }
-.composer-input-line textarea { width: auto; min-width: 0; flex: 1; }
-.composer-skill-token { display: inline-flex; height: 30px; max-width: min(230px, 42%); flex: none; align-items: center; gap: 6px; border-radius: 8px; background: transparent; color: var(--chip-skill-text); padding: 0 8px; }
+.composer-input-line { display: flex; min-width: 0; align-items: baseline; gap: 4px; flex-wrap: wrap; }
+.composer-input-line textarea { width: auto; min-width: 8ch; flex: 1 1 8ch; field-sizing: content; }
+.composer-input-line .composer-input-before { max-width: 100%; flex: 0 1 auto; }
+.composer-skill-token { display: inline-flex; height: 1.5em; max-width: min(230px, 42%); flex: none; align-items: center; align-self: baseline; gap: 6px; border-radius: 8px; background: transparent; color: var(--chip-skill-text); padding: 0 7px; font-size: var(--chat-control-size); line-height: 1.5; }
 .composer-skill-token:hover { background: transparent; }
 .composer-skill-token span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .composer-attachments { display: flex; flex-wrap: wrap; gap: 8px; padding: 1px 4px 5px; }

@@ -196,6 +196,7 @@ const zhCN = {
 	"Steer the active task…": "引导正在运行的任务…",
 	"Ask Metis anything, or describe a task…": "向 Metis 提问，或描述一个任务…",
 	"Message additions": "消息附件",
+	"Message before selected Skill": "所选 Skill 前的消息",
 	"Slash commands": "斜杠命令",
 	"Compact conversation": "压缩会话",
 	"Choose model": "选择模型",

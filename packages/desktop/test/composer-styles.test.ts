@@ -107,7 +107,10 @@ describe("Composer visual states", () => {
 
 	it("uses reference-sized Skill and attachment cards", () => {
 		expect(rule(".composer-input-line").display).toBe("flex");
+		expect(rule(".composer-input-line").alignItems).toBe("baseline");
+		expect(rule(".composer-input-line textarea").getPropertyValue("field-sizing")).toBe("content");
 		expect(rule(".composer-skill-token").background).toBe("transparent");
+		expect(rule(".composer-skill-token").height).toBe("1.5em");
 		expect(rule(".composer-skill-token:hover").background).toBe("transparent");
 		expect(rule(".composer-image-preview").width).toBe("64px");
 		expect(rule(".composer-image-preview").height).toBe("64px");

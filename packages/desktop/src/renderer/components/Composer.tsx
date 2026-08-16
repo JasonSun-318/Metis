@@ -89,18 +89,25 @@ export function Composer({
 	const [text, setText] = useState("");
 	const [attachments, setAttachments] = useState<readonly DesktopAttachmentSelection[]>([]);
 	const [selectedSkill, setSelectedSkill] = useState<SkillSummaryView>();
+	const [skillPrefix, setSkillPrefix] = useState("");
 	const [submitting, setSubmitting] = useState(false);
 	const [dismissedSlashText, setDismissedSlashText] = useState<string>();
-	const textRef = useRef(text);
-	textRef.current = text;
-	const hasInput = text.trim().length > 0 || attachments.length > 0 || selectedSkill !== undefined;
-	const slashQuery = text.startsWith("/") && !/\s/u.test(text.slice(1)) && dismissedSlashText !== text
+	const inputRef = useRef<HTMLTextAreaElement>(null);
+	const selectionOffset = useRef(0);
+	const fullText = `${skillPrefix}${text}`;
+	const textRef = useRef(fullText);
+	textRef.current = fullText;
+	const hasInput = fullText.trim().length > 0 || attachments.length > 0 || selectedSkill !== undefined;
+	const slashQuery = !selectedSkill && text.startsWith("/") && !/\s/u.test(text.slice(1)) && dismissedSlashText !== text
 		? text.slice(1)
 		: undefined;
-	const exactCommand = composerSlashCommands.find((command) => text.trim() === `/${command}`);
+	const exactCommand = selectedSkill ? undefined : composerSlashCommands.find((command) => text.trim() === `/${command}`);
 	useEffect(() => {
-		setSelectedSkill((current) => current && skills.some(({ name }) => name === current.name) ? current : undefined);
-	}, [skills]);
+		if (!selectedSkill || skills.some(({ name }) => name === selectedSkill.name)) return;
+		setText(fullText);
+		setSkillPrefix("");
+		setSelectedSkill(undefined);
+	}, [fullText, selectedSkill, skills]);
 	const handleSlashDismiss = useCallback(() => setDismissedSlashText(textRef.current), []);
 	const handleSelectCommand = useCallback((command: ComposerSlashCommand) => {
 		if (disabledSlashCommands.has(command)) return;
@@ -109,8 +116,33 @@ export function Composer({
 	}, [disabledSlashCommands, onSlashCommand]);
 	const handleSelectSkill = useCallback((skill: SkillSummaryView) => {
 		setSelectedSkill(skill);
+		setSkillPrefix("");
 		setText("");
 	}, []);
+	const handleAddSkill = useCallback((skill: SkillSummaryView) => {
+		if (selectedSkill) {
+			setSelectedSkill(skill);
+			return;
+		}
+		const offset = Math.max(0, Math.min(inputRef.current?.selectionStart ?? selectionOffset.current, text.length));
+		setSkillPrefix(text.slice(0, offset));
+		setText(text.slice(offset));
+		setSelectedSkill(skill);
+		queueMicrotask(() => {
+			inputRef.current?.focus();
+			inputRef.current?.setSelectionRange(0, 0);
+		});
+	}, [selectedSkill, text]);
+	const removeSkill = useCallback(() => {
+		const offset = skillPrefix.length;
+		setText(fullText);
+		setSkillPrefix("");
+		setSelectedSkill(undefined);
+		queueMicrotask(() => {
+			inputRef.current?.focus();
+			inputRef.current?.setSelectionRange(offset, offset);
+		});
+	}, [fullText, skillPrefix.length]);
 	const addFiles = async () => {
 		if (!onPickFiles) return;
 		const selected = await onPickFiles();
@@ -125,7 +157,7 @@ export function Composer({
 	};
 	const submit = async (event: FormEvent) => {
 		event.preventDefault();
-		const prompt = text.trim();
+		const prompt = fullText.trim();
 		if (!hasInput || disabled || submitDisabled || submitting) return;
 		if (exactCommand && onSlashCommand) {
 			if (disabledSlashCommands.has(exactCommand)) return;
@@ -141,6 +173,7 @@ export function Composer({
 				...(selectedSkill ? { skill: selectedSkill } : {}),
 			});
 			setText("");
+			setSkillPrefix("");
 			setAttachments([]);
 			setSelectedSkill(undefined);
 		} finally {
@@ -191,8 +224,30 @@ export function Composer({
 					</div>
 				)}
 				<div className="composer-input-line">
+					{selectedSkill && skillPrefix !== "" && (
+						<textarea
+							aria-label={t("Message before selected Skill")}
+							className="composer-input-before"
+							disabled={disabled || submitting}
+							onChange={(event) => setSkillPrefix(event.target.value)}
+							onKeyDown={(event) => {
+								if (event.defaultPrevented || event.nativeEvent.isComposing) return;
+								if (event.key === "Delete" && event.currentTarget.selectionStart === skillPrefix.length && event.currentTarget.selectionEnd === skillPrefix.length) {
+									event.preventDefault();
+									removeSkill();
+									return;
+								}
+								if (event.key === "Enter" && !event.shiftKey) {
+									event.preventDefault();
+									event.currentTarget.form?.requestSubmit();
+								}
+							}}
+							rows={1}
+							value={skillPrefix}
+						/>
+					)}
 					{selectedSkill && (
-						<button aria-label={t("Remove skill {{name}}", { name: selectedSkill.name })} className="composer-skill-token" onClick={() => setSelectedSkill(undefined)} type="button">
+						<button aria-label={t("Remove skill {{name}}", { name: selectedSkill.name })} className="composer-skill-token" onClick={removeSkill} type="button">
 							<Scroll aria-hidden="true" size={16} />
 							<span>{selectedSkill.name}</span>
 						</button>
@@ -203,6 +258,7 @@ export function Composer({
 						onChange={(event) => {
 							const next = event.target.value;
 							setText(next);
+							selectionOffset.current = event.target.selectionStart ?? next.length;
 							// Re-arm the slash menu when the query diverges from the one
 							// the user dismissed, so clearing and retyping the same
 							// command opens it again.
@@ -212,9 +268,9 @@ export function Composer({
 						}}
 						onKeyDown={(event) => {
 							if (event.defaultPrevented) return;
-							if (event.key === "Backspace" && text.length === 0 && selectedSkill && !event.nativeEvent.isComposing) {
+							if (event.key === "Backspace" && selectedSkill && event.currentTarget.selectionStart === 0 && event.currentTarget.selectionEnd === 0 && !event.nativeEvent.isComposing) {
 								event.preventDefault();
-								setSelectedSkill(undefined);
+								removeSkill();
 								return;
 							}
 							if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
@@ -223,6 +279,10 @@ export function Composer({
 							}
 						}}
 						placeholder={placeholder ?? t(running || queueing ? "Add a queued message…" : "Ask Metis anything, or describe a task…")}
+						onSelect={(event) => {
+							selectionOffset.current = event.currentTarget.selectionStart ?? text.length;
+						}}
+						ref={inputRef}
 						rows={1}
 						value={text}
 					/>
@@ -236,7 +296,7 @@ export function Composer({
 							onAddFiles={() => void addFiles().catch(() => undefined)}
 							onManageMcp={() => onManageMcp?.()}
 							onManageSkills={() => onManageSkills?.()}
-							onSelectSkill={setSelectedSkill}
+							onSelectSkill={handleAddSkill}
 							skills={skills}
 						/>
 						{permissionControl}
