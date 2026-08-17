@@ -62,6 +62,7 @@ export interface AppStoreSnapshot {
 	readonly availableModels: NonNullable<SessionSnapshot["availableModels"]>;
 	readonly subagents: SessionSnapshot["subagents"];
 	readonly tasks: SessionSnapshot["tasks"];
+	readonly goal: SessionSnapshot["goal"];
 	readonly queuedTurns: readonly QueuedTurnView[];
 	readonly subagentTranscript: SubagentTranscriptState;
 	readonly supervisor: SupervisorView;
@@ -209,6 +210,7 @@ export class AppStore {
 			availableModels: this.state.availableModels,
 			subagents: this.state.subagents,
 			tasks: this.state.tasks,
+			goal: this.state.goal,
 			queuedTurns: this.state.queuedTurns,
 			subagentTranscript: this.state.subagentTranscript,
 			supervisor: this.supervisor,

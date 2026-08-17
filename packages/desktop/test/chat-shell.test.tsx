@@ -101,6 +101,7 @@ function snapshot(summary: SessionSummary): SessionSnapshot {
 		pendingInteractions: [],
 		queuedTurns: [],
 		tasks: [],
+		goal: null,
 		thinkingSelection: "off",
 		actualThinkingLevel: "off",
 		availableThinkingSelections: ["off"],

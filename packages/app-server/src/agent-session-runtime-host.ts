@@ -44,6 +44,7 @@ import {
 	QueuedTurnLimitError,
 	QueuedTurnNotFoundError,
 	RequestIdReusedError,
+	readThreadGoal,
 	reduceRuntimeJournal,
 	removeSessionAttachment,
 	resolveMcpServerSettings,
@@ -65,6 +66,7 @@ import type { InteractionBroker } from "./interactions.ts";
 import {
 	opaqueId,
 	projectAssistantOutputTokens,
+	projectGoal,
 	projectLatestTasks,
 	projectLiveMessage as projectLiveItemMessage,
 	projectMessageEntry,
@@ -365,6 +367,7 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 			turns,
 			items,
 			tasks: projectLatestTasks(this.session.sessionManager.getBranch()),
+			goal: projectGoal(this.session.getGoal()),
 			queuedTurns: queuedTurns.map(queuedTurnView),
 		});
 		this.subagentLive = new SubagentLiveProjector(
@@ -506,6 +509,14 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 				this.publish({ type: "session/tasksChanged", sessionId: this.sessionId, tasks });
 			}
 			if (event.message.role === "assistant") this.liveAssistantItemId = undefined;
+			return;
+		}
+		if (event.type === "goal_changed") {
+			this.publish({
+				type: "session/goalChanged",
+				sessionId: this.sessionId,
+				goal: projectGoal(event.goal),
+			});
 			return;
 		}
 		if (event.type === "entry_appended") {
@@ -1124,6 +1135,30 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 		}
 	}
 
+	async getGoal(input: ClientParams<"session/goal/get">): Promise<ClientResult<"session/goal/get">> {
+		return { sessionId: input.sessionId, goal: projectGoal(this.session.getGoal()) };
+	}
+
+	async setGoal(input: ClientParams<"session/goal/set">): Promise<ClientResult<"session/goal/set">> {
+		try {
+			const goal = this.session.setGoalFromUser({
+				...(input.objective === undefined ? {} : { objective: input.objective }),
+				...(input.status === undefined ? {} : { status: input.status }),
+			});
+			return { sessionId: input.sessionId, goal: projectGoal(goal)! };
+		} catch {
+			throw new AppServerError("INVALID_REQUEST", {
+				sessionId: input.sessionId,
+				requestId: input.requestId,
+			});
+		}
+	}
+
+	async clearGoal(input: ClientParams<"session/goal/clear">): Promise<ClientResult<"session/goal/clear">> {
+		const cleared = this.session.clearGoal();
+		return { sessionId: input.sessionId, cleared };
+	}
+
 	async readSubagentItems(input: ClientParams<"subagent/readItems">): Promise<ClientResult<"subagent/readItems">> {
 		const manager = this.runtime.subagentManager;
 		if (!manager) throw new AppServerError("NOT_FOUND", { sessionId: input.sessionId });
@@ -1443,6 +1478,7 @@ class ReadonlyScheduledSessionRuntime implements OpenedSessionRuntime {
 			turns,
 			items,
 			tasks: projectLatestTasks(manager.getBranch()),
+			goal: projectGoal(readThreadGoal(manager)),
 		});
 	}
 
@@ -1532,6 +1568,24 @@ class ReadonlyScheduledSessionRuntime implements OpenedSessionRuntime {
 	}
 
 	async compact(input: ClientParams<"session/compact">): Promise<ClientResult<"session/compact">> {
+		throw new AppServerError("READ_ONLY_SESSION", {
+			sessionId: input.sessionId,
+			requestId: input.requestId,
+		});
+	}
+
+	async getGoal(input: ClientParams<"session/goal/get">): Promise<ClientResult<"session/goal/get">> {
+		return { sessionId: input.sessionId, goal: this.projection.snapshot("", 0).goal };
+	}
+
+	async setGoal(input: ClientParams<"session/goal/set">): Promise<ClientResult<"session/goal/set">> {
+		throw new AppServerError("READ_ONLY_SESSION", {
+			sessionId: input.sessionId,
+			requestId: input.requestId,
+		});
+	}
+
+	async clearGoal(input: ClientParams<"session/goal/clear">): Promise<ClientResult<"session/goal/clear">> {
 		throw new AppServerError("READ_ONLY_SESSION", {
 			sessionId: input.sessionId,
 			requestId: input.requestId,

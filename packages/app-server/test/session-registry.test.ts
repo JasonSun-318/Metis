@@ -129,6 +129,18 @@ class FakeRuntime implements OpenedSessionRuntime {
 		return { sessionId: input.sessionId, tokensBefore: 64_000, estimatedTokensAfter: 8_000 };
 	}
 
+	async getGoal(input: ClientParams<"session/goal/get">): Promise<ClientResult<"session/goal/get">> {
+		return { sessionId: input.sessionId, goal: null };
+	}
+
+	async setGoal(): Promise<ClientResult<"session/goal/set">> {
+		throw new Error("No goal support in registry fixture");
+	}
+
+	async clearGoal(input: ClientParams<"session/goal/clear">): Promise<ClientResult<"session/goal/clear">> {
+		return { sessionId: input.sessionId, cleared: false };
+	}
+
 	async readSubagentItems(_input: ClientParams<"subagent/readItems">): Promise<ClientResult<"subagent/readItems">> {
 		return { items: [], nextBeforeItemId: null };
 	}
@@ -172,6 +184,7 @@ class FakeRuntime implements OpenedSessionRuntime {
 			pendingInteractions: [],
 			queuedTurns: [],
 			tasks: [],
+			goal: null,
 			thinkingSelection: "high",
 			actualThinkingLevel: "high",
 			availableThinkingSelections: ["off", "high", "ultra"],

@@ -44,6 +44,9 @@ export interface OpenedSessionRuntime {
 	readImage(input: ClientParams<"session/readImage">): Promise<ClientResult<"session/readImage">>;
 	getStatus(input: ClientParams<"session/status">): Promise<ClientResult<"session/status">>;
 	compact(input: ClientParams<"session/compact">): Promise<ClientResult<"session/compact">>;
+	getGoal(input: ClientParams<"session/goal/get">): Promise<ClientResult<"session/goal/get">>;
+	setGoal(input: ClientParams<"session/goal/set">): Promise<ClientResult<"session/goal/set">>;
+	clearGoal(input: ClientParams<"session/goal/clear">): Promise<ClientResult<"session/goal/clear">>;
 	readSubagentItems(input: ClientParams<"subagent/readItems">): Promise<ClientResult<"subagent/readItems">>;
 	interruptSubagent(input: ClientParams<"subagent/interrupt">): Promise<ClientResult<"subagent/interrupt">>;
 	setThinkingSelection(

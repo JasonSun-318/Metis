@@ -5,6 +5,7 @@ import type {
 	InteractionView,
 	ItemView,
 	QueuedTurnView,
+	SessionGoalView,
 	SessionSnapshot,
 	SessionSummary,
 	SessionTaskView,
@@ -27,6 +28,7 @@ export interface SessionProjectionSeed {
 	readonly items?: readonly ItemView[];
 	readonly pendingInteractions?: readonly InteractionView[];
 	readonly tasks?: readonly SessionTaskView[];
+	readonly goal?: SessionGoalView | null;
 	readonly queuedTurns?: readonly QueuedTurnView[];
 }
 
@@ -44,6 +46,7 @@ export class SessionProjection {
 	private readonly itemIndexById = new Map<string, number>();
 	private pendingInteractions: InteractionView[];
 	private tasks: SessionTaskView[];
+	private goal: SessionGoalView | null;
 	private queuedTurns: QueuedTurnView[];
 
 	constructor(seed: SessionProjectionSeed) {
@@ -52,6 +55,7 @@ export class SessionProjection {
 		for (const item of seed.items ?? []) this.upsertItem(item);
 		this.pendingInteractions = clone([...(seed.pendingInteractions ?? [])]);
 		this.tasks = clone([...(seed.tasks ?? [])]);
+		this.goal = seed.goal === undefined ? null : clone(seed.goal);
 		this.queuedTurns = clone([...(seed.queuedTurns ?? [])]);
 	}
 
@@ -95,6 +99,10 @@ export class SessionProjection {
 			case "session/tasksChanged":
 				this.assertSession(event.sessionId);
 				this.tasks = clone(event.tasks);
+				return clone(event);
+			case "session/goalChanged":
+				this.assertSession(event.sessionId);
+				this.goal = clone(event.goal);
 				return clone(event);
 			case "turn/queueChanged":
 				this.assertSession(event.sessionId);
@@ -176,6 +184,7 @@ export class SessionProjection {
 			pendingInteractions: clone(this.pendingInteractions),
 			queuedTurns: clone(this.queuedTurns),
 			tasks: clone(this.tasks),
+			goal: clone(this.goal),
 			...clone(runtime),
 			serverEpoch,
 			cursor,

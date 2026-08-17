@@ -50,7 +50,7 @@ function parseGoal(data: unknown): ThreadGoal | null {
 	};
 }
 
-export function readThreadGoal(session: SessionManager): ThreadGoal | null {
+export function readThreadGoal(session: Pick<SessionManager, "getEntries">): ThreadGoal | null {
 	const entries = session.getEntries();
 	for (let index = entries.length - 1; index >= 0; index -= 1) {
 		const entry = entries[index];

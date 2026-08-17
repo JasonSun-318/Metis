@@ -196,6 +196,18 @@ export {
 } from "./core/extensions/index.ts";
 // Footer data provider (git branch + extension statuses - data not otherwise available to extensions)
 export type { ReadonlyFooterDataProvider } from "./core/footer-data-provider.ts";
+export {
+	clearThreadGoal,
+	GOAL_CUSTOM_TYPE,
+	isActiveGoalStatus,
+	isTerminalGoalStatus,
+	MAX_GOAL_OBJECTIVE_CHARS,
+	readThreadGoal,
+	type ThreadGoal,
+	type ThreadGoalStatus,
+	validateGoalObjective,
+	writeThreadGoal,
+} from "./core/goal/index.ts";
 // Declarative user-level hooks
 export {
 	type DeclarativeHook,

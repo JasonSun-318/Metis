@@ -46,6 +46,7 @@ function snapshot(serverEpoch = EPOCH_A, cursor = 0, recentItems: ItemView[] = [
 		pendingInteractions: [],
 		queuedTurns: [],
 		tasks: [],
+		goal: null,
 		thinkingSelection: "off",
 		actualThinkingLevel: "off",
 		availableThinkingSelections: ["off"],

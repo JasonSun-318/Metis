@@ -4,9 +4,10 @@ import type {
 	ItemContentBlockView,
 	ItemUsageView,
 	ItemView,
+	SessionGoalView,
 	SessionTaskView,
 } from "@metis/app-protocol";
-import { formatSessionAttachmentDisplayText } from "@metis/coding-agent";
+import { formatSessionAttachmentDisplayText, type ThreadGoal } from "@metis/coding-agent";
 
 export const MAX_PROJECTED_THINKING_BYTES = 8 * 1024;
 export const MAX_PROJECTED_VISIBLE_TEXT_BYTES = 20 * 1024;
@@ -252,6 +253,17 @@ export function projectTasksFromToolResult(message: unknown): SessionTaskView[] 
 		projected.push({ task: item.task.trim(), completed: item.completed });
 	}
 	return projected;
+}
+
+export function projectGoal(goal: ThreadGoal | null): SessionGoalView | null {
+	if (!goal) return null;
+	return {
+		goalId: goal.goalId,
+		objective: goal.objective,
+		status: goal.status,
+		timeUsedSeconds: goal.timeUsedSeconds,
+		activeStartedAt: goal.activeStartedAt === null ? null : new Date(goal.activeStartedAt).toISOString(),
+	};
 }
 
 export function projectLatestTasks(entries: readonly unknown[]): SessionTaskView[] {

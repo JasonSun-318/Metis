@@ -19,9 +19,11 @@ import type {
 	AgentMode,
 	ClientParams,
 	ClientResult,
+	DomainEvent,
 	InteractionResponseInput,
 	RpcErrorResponse,
 	ServerRpcRequest,
+	SessionGoalView,
 	SessionSnapshot,
 	SessionSummary,
 } from "@metis/app-protocol";
@@ -60,6 +62,8 @@ const REQUEST_H = "00000000-0000-4000-8000-000000000008";
 class FakeRuntime implements OpenedSessionRuntime {
 	readonly sessionId: string;
 	private readonly ref: SessionRef;
+	private readonly listeners = new Set<SessionEventListener>();
+	private goal: SessionGoalView | null = null;
 	active = false;
 	pendingInteractions = false;
 	closed = false;
@@ -72,6 +76,10 @@ class FakeRuntime implements OpenedSessionRuntime {
 	constructor(ref: SessionRef) {
 		this.ref = ref;
 		this.sessionId = ref.summary.sessionId;
+	}
+
+	private publish(event: DomainEvent): void {
+		for (const listener of this.listeners) listener(event);
 	}
 
 	isActive(): boolean {
@@ -177,6 +185,36 @@ class FakeRuntime implements OpenedSessionRuntime {
 		return { sessionId: input.sessionId, tokensBefore: 64_000, estimatedTokensAfter: 8_000 };
 	}
 
+	async getGoal(input: ClientParams<"session/goal/get">): Promise<ClientResult<"session/goal/get">> {
+		return { sessionId: input.sessionId, goal: this.goal };
+	}
+
+	async setGoal(input: ClientParams<"session/goal/set">): Promise<ClientResult<"session/goal/set">> {
+		if (input.objective === undefined && input.status === undefined) {
+			throw new Error("Goal set requires an objective and/or status");
+		}
+		if (input.objective === undefined && this.goal === null) {
+			throw new Error("Cannot update goal status because this thread has no goal");
+		}
+		const now = new Date().toISOString();
+		this.goal = {
+			goalId: this.goal?.goalId ?? "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+			objective: input.objective ?? this.goal!.objective,
+			status: input.status ?? "active",
+			timeUsedSeconds: this.goal?.timeUsedSeconds ?? 0,
+			activeStartedAt: (input.status ?? "active") === "active" ? now : null,
+		};
+		this.publish({ type: "session/goalChanged", sessionId: this.sessionId, goal: this.goal });
+		return { sessionId: input.sessionId, goal: this.goal };
+	}
+
+	async clearGoal(input: ClientParams<"session/goal/clear">): Promise<ClientResult<"session/goal/clear">> {
+		const cleared = this.goal !== null;
+		this.goal = null;
+		if (cleared) this.publish({ type: "session/goalChanged", sessionId: this.sessionId, goal: null });
+		return { sessionId: input.sessionId, cleared };
+	}
+
 	async readSubagentItems(_input: ClientParams<"subagent/readItems">): Promise<ClientResult<"subagent/readItems">> {
 		return { items: [], nextBeforeItemId: null };
 	}
@@ -231,6 +269,7 @@ class FakeRuntime implements OpenedSessionRuntime {
 			pendingInteractions: [],
 			queuedTurns: [],
 			tasks: [],
+			goal: this.goal,
 			thinkingSelection: "high",
 			actualThinkingLevel: "high",
 			availableThinkingSelections: ["off", "high", "ultra"],
@@ -299,8 +338,11 @@ class FakeRuntime implements OpenedSessionRuntime {
 		}
 	}
 
-	subscribe(_listener: SessionEventListener): () => void {
-		return () => undefined;
+	subscribe(listener: SessionEventListener): () => void {
+		this.listeners.add(listener);
+		return () => {
+			this.listeners.delete(listener);
+		};
 	}
 
 	async close(): Promise<void> {
@@ -338,7 +380,7 @@ function initialize(id = "initialize") {
 		jsonrpc: "2.0" as const,
 		id,
 		method: "initialize" as const,
-		params: { protocolVersion: 18, client: { name: "test", version: "1" }, capabilities: [] },
+		params: { protocolVersion: 19, client: { name: "test", version: "1" }, capabilities: [] },
 	};
 }
 
@@ -672,7 +714,7 @@ describe("AppServer", () => {
 		);
 		const initialized = await connection.handle(initialize());
 		expect(initialized).toMatchObject({
-			result: { protocolVersion: 18, server: { name: "metis-app-server" }, serverEpoch: server.serverEpoch },
+			result: { protocolVersion: 19, server: { name: "metis-app-server" }, serverEpoch: server.serverEpoch },
 		});
 		expectError(await connection.handle(initialize("again")), RPC_ERROR_CODES.INVALID_REQUEST);
 	});
@@ -872,6 +914,112 @@ describe("AppServer", () => {
 			id: "session-compact-replay",
 		});
 		expect(host.runtimes.get("session-a")?.compactCalls).toBe(1);
+	});
+
+	it("routes session goal get/set/clear and publishes goalChanged", async () => {
+		writeSession(sessionsRoot, "session-a", projectDir);
+		const host = new FakeHost();
+		const server = await createTestServer({ agentDir, sessionsRoot, runtimeHost: host });
+		const connection = server.connect();
+		const messages: unknown[] = [];
+		connection.onMessage((message) => {
+			messages.push(message);
+		});
+		await connection.handle(initialize());
+		await connection.handle({
+			jsonrpc: "2.0",
+			id: "open",
+			method: "session/open",
+			params: { sessionId: "session-a" },
+		});
+		const subscribed = await connection.handle({
+			jsonrpc: "2.0",
+			id: "subscribe",
+			method: "session/subscribe",
+			params: { sessionId: "session-a" },
+		});
+		expect((subscribed as { result: { snapshot: SessionSnapshot } }).result.snapshot.goal).toBeNull();
+
+		const set = {
+			jsonrpc: "2.0" as const,
+			id: "goal-set",
+			method: "session/goal/set" as const,
+			params: { sessionId: "session-a", requestId: REQUEST_A, objective: "keep tests green" },
+		};
+		const setResult = await connection.handle(set);
+		expect(setResult).toMatchObject({
+			result: {
+				sessionId: "session-a",
+				goal: {
+					objective: "keep tests green",
+					status: "active",
+				},
+			},
+		});
+		expect(await connection.handle({ ...set, id: "goal-set-replay" })).toEqual({
+			...(setResult as object),
+			id: "goal-set-replay",
+		});
+
+		expect(
+			await connection.handle({
+				jsonrpc: "2.0",
+				id: "goal-get",
+				method: "session/goal/get",
+				params: { sessionId: "session-a" },
+			}),
+		).toMatchObject({
+			result: {
+				sessionId: "session-a",
+				goal: { objective: "keep tests green", status: "active" },
+			},
+		});
+
+		expect(
+			await connection.handle({
+				jsonrpc: "2.0",
+				id: "goal-pause",
+				method: "session/goal/set",
+				params: { sessionId: "session-a", requestId: REQUEST_B, status: "paused" },
+			}),
+		).toMatchObject({
+			result: { goal: { status: "paused", objective: "keep tests green" } },
+		});
+		expect(
+			await connection.handle({
+				jsonrpc: "2.0",
+				id: "goal-resume",
+				method: "session/goal/set",
+				params: { sessionId: "session-a", requestId: REQUEST_C, status: "active" },
+			}),
+		).toMatchObject({
+			result: { goal: { status: "active", objective: "keep tests green" } },
+		});
+
+		expect(
+			await connection.handle({
+				jsonrpc: "2.0",
+				id: "goal-clear",
+				method: "session/goal/clear",
+				params: { sessionId: "session-a", requestId: REQUEST_D },
+			}),
+		).toMatchObject({ result: { sessionId: "session-a", cleared: true } });
+		expect(
+			await connection.handle({
+				jsonrpc: "2.0",
+				id: "goal-get-cleared",
+				method: "session/goal/get",
+				params: { sessionId: "session-a" },
+			}),
+		).toMatchObject({ result: { goal: null } });
+
+		const events = messages.flatMap((message) => {
+			if (typeof message !== "object" || message === null || !("method" in message)) return [];
+			if ((message as { method?: unknown }).method !== "connection/events") return [];
+			const params = (message as { params?: { events?: DomainEvent[] } }).params;
+			return params?.events ?? [];
+		});
+		expect(events.some((event) => event.type === "session/goalChanged")).toBe(true);
 	});
 
 	it("routes replay-protected permission selection through the opened runtime", async () => {
