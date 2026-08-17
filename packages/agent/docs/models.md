@@ -19,7 +19,6 @@ Non-goals for the immediate `metis-ai` pass:
 - Do not migrate coding-agent `ModelRegistry` yet.
 - Do not keep the stream/API registry inside `Models`.
 - Do not implement web OAuth flows yet.
-- Image generation mirrors the chat-side design (`ImagesModels`/`ImagesProvider` in `images-models.ts`); the old global image API (`images.ts`, `images-api-registry.ts`) lives on compat.
 
 ## Package layout
 
@@ -29,7 +28,6 @@ Target source layout:
 packages/ai/src/
   index.ts                    # core exports only; no built-in provider imports
   models.ts                   # Models runtime, Provider
-  images-models.ts            # ImagesModels runtime, ImagesProvider (mirrors models.ts)
   compat.ts                   # temporary old-API compatibility entrypoint
   auth/                       # auth method types, helpers, shared resolveProviderAuth(), login callbacks
   api/                        # API implementations and lazy wrappers
@@ -51,8 +49,6 @@ packages/ai/src/
     mistral-conversations.lazy.ts
     bedrock-converse-stream.ts
     bedrock-converse-stream.lazy.ts
-    openrouter-images.ts      # image-generation API implementation
-    openrouter-images.lazy.ts
     lazy.ts                   # lazyStream()/lazyApi() helpers
     (shared helpers: openai-responses-shared, google-shared, transform-messages, ...)
   providers/                  # concrete provider factories and per-provider catalogs
@@ -65,9 +61,8 @@ packages/ai/src/
     google.ts
     google.models.ts
     ...one pair per built-in provider...
-    openrouter-images.ts      # image-generation provider factory
     faux.ts                   # test provider factory
-    all.ts                    # explicit aggregate: builtinModels(), builtinImagesModels(), getBuiltin*()
+    all.ts                    # explicit aggregate: builtinModels(), getBuiltin*()
   utils/oauth/                # OAuth flow implementations (node), lazy-loaded
 ```
 
@@ -707,7 +702,7 @@ Old semantics being preserved: global `stream()` can still dispatch by `model.ap
 - `stream/complete/streamSimple/completeSimple(model, ctx, opts)`: real built-in provider/model/api matches route through a singleton `builtinModels()` collection, so provider auth/env/baseUrl behavior is shared with the new runtime. Unknown providers, mutated models, or overridden API registrations fall back to api-registry dispatch plus `getEnvApiKey` injection.
 - The builtin api registration side effect moves from the root barrel into compat. It skips api ids that already have a registration, since compat may load after a test or extension has already registered an override. `registerApiProvider()/unregisterApiProviders()` keep feeding the compat-local registry; `resetApiProviders()` clears and re-registers builtins.
 - Sync `getModel/getModels/getProviders` are deprecated aliases of `getBuiltinModel/getBuiltinModels/getBuiltinProviders` from `providers/all` (they were always pure generated-catalog reads — verified: nothing ever mutated the old `modelRegistry`).
-- Re-exports the per-API lazy stream wrappers (incl. `setBedrockProviderModule`), `env-api-keys.ts`, and the image-generation registry/catalogs; none of these stay on the root barrel.
+- Re-exports the per-API lazy stream wrappers (incl. `setBedrockProviderModule`) and `env-api-keys.ts`; neither stays on the root barrel.
 - `export * from "./index.ts"`: compat is a strict superset of the core entrypoint, so consumers switch a file's import path wholesale without symbol surgery.
 
 coding-agent (and the interim agent package) switch imports of these symbols from `@metis/ai` to `@metis/ai/compat` (import-path-only change) and are otherwise untouched until the ModelManager migration.
@@ -739,7 +734,7 @@ Rules:
 5. OAuth implementations are always attached via `lazyOAuth()` and lazy-loaded behind a bundler-opaque dynamic import; provider metadata never eagerly imports Node-only OAuth code.
 6. `providers/all` imports every built-in provider factory and all catalogs. It is the explicit heavy entrypoint.
 7. Provider modules are side-effect-free; importing a provider does not register anything globally.
-8. `package.json` lists only effectful compat/image registration files in `sideEffects`; root and provider modules stay tree-shakeable.
+8. `package.json` lists only the effectful compat registration file in `sideEffects`; root and provider modules stay tree-shakeable.
 9. With code splitting, provider SDKs stay in lazy chunks. Without code splitting, bundlers fold statically reachable lazy API implementations into the single bundle; `providers/all` then pulls all statically visible SDKs. Bedrock is the exception because its AWS SDK implementation is behind a bundler-opaque Node-only import and needs `setBedrockProviderModule()` for standalone single-file bundles.
 
 Exports map sketch:
@@ -831,9 +826,9 @@ Check items off as they land. Keep this list current; it is the working state fo
 
 ### Phase 5 — packaging
 
-- [x] `index.ts` core-only and side-effect free (no catalogs, no provider factories, no api-registry, no env-api-keys, no images, no OAuth, no compat). Typed catalog reads (`getBuiltin*`) implemented in `providers/all.ts`; `models.ts` no longer imports `models.generated.ts`.
-- [x] `compat.ts`: superset of index + old api-dispatch globals, deprecated `getModel/getModels/getProviders` aliases, lazy api wrappers + `setBedrockProviderModule`, `getEnvApiKey`, images. Registration side effect lives here (skip-if-present).
-- [x] Subpath exports map (`./compat`, `./providers/*`, `./api/*`); `sideEffects` array listing the effectful modules (`compat`, images registration) instead of `false`.
+- [x] `index.ts` core-only and side-effect free (no catalogs, no provider factories, no api-registry, no env-api-keys, no OAuth, no compat). Typed catalog reads (`getBuiltin*`) implemented in `providers/all.ts`; `models.ts` no longer imports `models.generated.ts`.
+- [x] `compat.ts`: superset of index + old api-dispatch globals, deprecated `getModel/getModels/getProviders` aliases, lazy api wrappers + `setBedrockProviderModule`, and `getEnvApiKey`. Registration side effect lives here (skip-if-present).
+- [x] Subpath exports map (`./compat`, `./providers/*`, `./api/*`); `sideEffects` lists only the effectful compat module instead of `false`.
 - [x] Browser smoke (entry now imports old globals from `/compat`) + shrinkwrap checks green. Internal old-global imports switched to `/compat` already (42 files in agent/coding-agent/examples; vitest configs alias `/compat` to src; spawn-CLI tests resolve workspace dist, so `packages/ai` + `packages/agent` dists were rebuilt).
 
 ### Phase 6 — AgentHarness
@@ -944,7 +939,6 @@ Ordering for new sessions:
 ### Deferred / follow-ups
 
 - [ ] Web OAuth implementations (sitegeist-style) as an alternative `OAuthAuth`.
-- [x] Images API redesign: `ImagesModels`/`ImagesProvider`/`createImagesProvider` mirror the chat-side design (sync reads, explicit refresh, never-reject generation); auth resolution shared with the chat side via the free-standing `resolveProviderAuth()` in `auth/resolve.ts` (which also owns `ModelsError`; both collections pass their store/context as arguments — no resolver object). `openrouterImagesProvider()` factory + `builtinImagesProviders()`/`builtinImagesModels()` in `providers/all`; impl moved to `api/openrouter-images.ts` with a lazy wrapper. The old global image API (registry + `getImageModel*` + `generateImages`) stays on compat; `ImagesProvider` id alias in types.ts renamed to `ImagesProviderId` (mirror of `Provider` -> `ProviderId`).
 
 ## Error behavior
 

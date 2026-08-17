@@ -1369,7 +1369,7 @@ Create a new API implementation file (for example `bedrock-converse-stream.ts`) 
 
 Add a lazy wrapper `src/api/<api-id>.lazy.ts` (`<name>Api()` via `lazyApi()`) so providers can reference the implementation without importing its SDK. Add any root-level `export type` re-exports in `src/index.ts` that should remain available from `@metis/ai`.
 
-#### 3. Model Generation (`scripts/generate-models.ts`, `scripts/generate-image-models.ts`)
+#### 3. Model Generation (`scripts/generate-models.ts`)
 
 - Add logic to fetch and parse models from the provider's source (e.g., models.dev API)
 - Map chat/tool-capable provider model data to the standardized `Model` interface via `scripts/generate-models.ts`; regeneration emits `src/providers/<id>.models.ts` and the aggregator
