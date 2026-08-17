@@ -2344,6 +2344,17 @@ export class AgentSession {
 		if (input.objective === undefined && existing === null) {
 			throw new TypeError("Cannot update goal status because this thread has no goal");
 		}
+		if (input.objective === undefined && existing?.status === "complete") {
+			throw new TypeError("A completed goal cannot be paused or resumed; set a new objective instead");
+		}
+		if (
+			input.objective === undefined &&
+			input.status === "paused" &&
+			existing?.status !== "active" &&
+			existing?.status !== "paused"
+		) {
+			throw new TypeError("Only an active goal can be paused");
+		}
 		const previousObjective = existing?.objective;
 		const objective = input.objective !== undefined ? validateGoalObjective(input.objective) : existing!.objective;
 		const status =
@@ -2351,30 +2362,41 @@ export class AgentSession {
 		if (status !== "active" && status !== "paused") {
 			throw new TypeError("User goal updates may only set active or paused");
 		}
+		const continuingExisting =
+			existing !== null && !(existing.status === "complete" && input.objective !== undefined);
 		const goal = writeThreadGoal(this.sessionManager, {
-			...(existing ?? {}),
-			goalId: existing?.goalId,
+			...(continuingExisting ? existing : {}),
+			goalId: continuingExisting ? existing.goalId : randomUUID(),
 			objective,
 			status,
-			createdAt: existing?.createdAt,
-			timeUsedSeconds: existing?.timeUsedSeconds,
+			createdAt: continuingExisting ? existing.createdAt : undefined,
+			timeUsedSeconds: continuingExisting ? existing.timeUsedSeconds : undefined,
 		});
 		this._emit({ type: "goal_changed", goal });
 		if (isActiveGoalStatus(goal.status)) {
-			if (this.isStreaming && previousObjective !== undefined && previousObjective !== goal.objective) {
-				void this.sendCustomMessage(
-					{
-						customType: "goal_objective_updated",
-						content: buildGoalObjectiveUpdatedPrompt(goal),
-						display: false,
-					},
-					{ deliverAs: "steer" },
-				);
+			if (this.isStreaming && previousObjective !== goal.objective) {
+				this.agent.steer({
+					role: "custom",
+					customType: "goal_objective_updated",
+					content: buildGoalObjectiveUpdatedPrompt(goal),
+					display: false,
+					timestamp: Date.now(),
+				});
 			} else {
-				void this.queueGoalContinuationIfIdle();
+				this._continueActiveGoalInBackground();
 			}
 		}
 		return goal;
+	}
+
+	private _continueActiveGoalInBackground(): void {
+		void this.queueGoalContinuationIfIdle().catch((error) => {
+			this._extensionRunner.emitError({
+				extensionPath: "<runtime>",
+				event: "goal_continuation",
+				error: error instanceof Error ? error.message : String(error),
+			});
+		});
 	}
 
 	clearGoal(): boolean {
@@ -2922,7 +2944,7 @@ export class AgentSession {
 				if (goal && isActiveGoalStatus(goal.status)) {
 					const next = writeThreadGoal(this.sessionManager, {
 						...goal,
-						status: isGoalUsageLimitError(msg.errorMessage) ? "usage_limited" : "blocked",
+						status: isGoalUsageLimitError(msg.errorMessage) ? "usage_limited" : "paused",
 					});
 					this._emit({ type: "goal_changed", goal: next });
 				}
@@ -4318,6 +4340,7 @@ export class AgentSession {
 		this._applyExtensionBindings(this._extensionRunner);
 		await this._extensionRunner.emit(this._sessionStartEvent);
 		await this.extendResourcesFromExtensions(this._sessionStartEvent.reason === "reload" ? "reload" : "startup");
+		this._continueActiveGoalInBackground();
 	}
 
 	private async extendResourcesFromExtensions(reason: "startup" | "reload"): Promise<void> {

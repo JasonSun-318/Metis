@@ -65,7 +65,7 @@ describe("SlashCommandMenu", () => {
 		expect(onSelectCommand).not.toHaveBeenCalled();
 		await act(async () => document.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true })));
 		await act(async () => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })));
-		expect(onSelectCommand).toHaveBeenCalledWith("model");
+		expect(onSelectCommand).toHaveBeenCalledWith("goal");
 		await act(async () => root.unmount());
 	});
 });

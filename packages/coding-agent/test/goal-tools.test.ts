@@ -42,9 +42,11 @@ describe("goal tools", () => {
 		expect(created.details.goal?.objective).toBe("ship the review");
 		expect(changes).toHaveLength(1);
 
+		const beforeRejectedCreate = session.getEntries();
 		await expect(tool.execute("c2", { objective: "another" }, undefined, undefined, {} as never)).rejects.toThrow(
 			/unfinished/,
 		);
+		expect(session.getEntries()).toEqual(beforeRejectedCreate);
 
 		writeThreadGoal(session, { ...created.details.goal!, status: "complete" });
 		const next = await tool.execute("c3", { objective: "next goal" }, undefined, undefined, {} as never);

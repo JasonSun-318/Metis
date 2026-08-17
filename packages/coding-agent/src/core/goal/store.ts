@@ -1,3 +1,4 @@
+import { Buffer } from "node:buffer";
 import { randomUUID } from "node:crypto";
 import type { SessionManager } from "../session-manager.ts";
 import {
@@ -23,7 +24,15 @@ export function validateGoalObjective(raw: string): string {
 	if ([...objective].length > MAX_GOAL_OBJECTIVE_CHARS) {
 		throw new TypeError(`Goal objective must be at most ${MAX_GOAL_OBJECTIVE_CHARS} characters`);
 	}
+	if (Buffer.byteLength(objective, "utf8") > MAX_GOAL_OBJECTIVE_CHARS) {
+		throw new TypeError(`Goal objective must be at most ${MAX_GOAL_OBJECTIVE_CHARS} UTF-8 bytes`);
+	}
 	return objective;
+}
+
+export function goalElapsedSeconds(goal: ThreadGoal, now = Date.now()): number {
+	if (goal.status !== "active" || goal.activeStartedAt === null) return goal.timeUsedSeconds;
+	return goal.timeUsedSeconds + Math.max(0, Math.floor((now - goal.activeStartedAt) / 1_000));
 }
 
 function isGoalStatus(value: unknown): value is ThreadGoalStatus {
@@ -85,7 +94,7 @@ export function writeThreadGoal(
 	const leavingActive =
 		sameGoal && existing.status === "active" && existing.activeStartedAt !== null && input.status !== "active";
 	const flushed = leavingActive
-		? previousElapsed + Math.max(0, Math.floor((now - existing.activeStartedAt!) / 1_000))
+		? goalElapsedSeconds(existing, now)
 		: (input.timeUsedSeconds ?? (sameGoal ? previousElapsed : 0));
 	const goal: ThreadGoal = {
 		goalId: input.goalId ?? (sameGoal ? existing.goalId : randomUUID()),
@@ -109,7 +118,7 @@ export function flushGoalElapsed(session: SessionManager, goal: ThreadGoal, now 
 	if (goal.status !== "active" || goal.activeStartedAt === null) return goal;
 	return writeThreadGoal(session, {
 		...goal,
-		timeUsedSeconds: goal.timeUsedSeconds + Math.max(0, Math.floor((now - goal.activeStartedAt) / 1_000)),
+		timeUsedSeconds: goalElapsedSeconds(goal, now),
 		resetActiveClock: true,
 		now,
 	});

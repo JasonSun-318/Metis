@@ -3,6 +3,7 @@ import type { ToolDefinition } from "../extensions/types.ts";
 import type { SessionManager } from "../session-manager.ts";
 import {
 	flushGoalElapsed,
+	goalElapsedSeconds,
 	isTerminalGoalStatus,
 	readThreadGoal,
 	type ThreadGoal,
@@ -71,7 +72,7 @@ function goalWithLiveElapsed(goal: ThreadGoal, now = Date.now()): ThreadGoal {
 	if (goal.status !== "active" || goal.activeStartedAt === null) return goal;
 	return {
 		...goal,
-		timeUsedSeconds: goal.timeUsedSeconds + Math.max(0, Math.floor((now - goal.activeStartedAt) / 1_000)),
+		timeUsedSeconds: goalElapsedSeconds(goal, now),
 	};
 }
 
@@ -119,7 +120,7 @@ export function createCreateGoalToolDefinition(
 		async execute(_toolCallId, input) {
 			const session = resolved.getSession();
 			const objective = validateGoalObjective(input.objective);
-			const existing = currentGoalForAccounting(resolved.getSession, { flush: true });
+			const existing = readThreadGoal(session);
 			if (existing && !isTerminalGoalStatus(existing.status)) {
 				throw new Error(
 					"cannot create a new goal because this thread has an unfinished goal; complete the existing goal first",

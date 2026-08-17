@@ -22,6 +22,8 @@ describe("thread goal store", () => {
 		expect(() => validateGoalObjective("")).toThrow(/empty/i);
 		expect(() => validateGoalObjective("   ")).toThrow(/empty/i);
 		expect(() => validateGoalObjective("x".repeat(4001))).toThrow(/4000/);
+		expect(validateGoalObjective("你".repeat(1333))).toBe("你".repeat(1333));
+		expect(() => validateGoalObjective("你".repeat(1334))).toThrow(/4000.*UTF-8/i);
 		expect(validateGoalObjective("ship the review")).toBe("ship the review");
 	});
 

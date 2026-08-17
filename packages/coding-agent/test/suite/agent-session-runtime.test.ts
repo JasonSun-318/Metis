@@ -159,6 +159,45 @@ describe("AgentSessionRuntime characterization", () => {
 		return { runtime, faux, tempDir };
 	}
 
+	it("steers an edited goal into an active durable turn", async () => {
+		let releaseProvider!: () => void;
+		let markProviderStarted!: () => void;
+		const providerStarted = new Promise<void>((resolve) => {
+			markProviderStarted = resolve;
+		});
+		const providerGate = new Promise<void>((resolve) => {
+			releaseProvider = resolve;
+		});
+		const { runtime, faux } = await createRuntimeForTest(() => {});
+		let sawGoalUpdate = false;
+		faux.setResponses([
+			async () => {
+				markProviderStarted();
+				await providerGate;
+				return fauxAssistantMessage("working");
+			},
+			(context) => {
+				sawGoalUpdate = context.messages.some((message) =>
+					JSON.stringify(message.content).includes("active thread goal objective was edited"),
+				);
+				return fauxAssistantMessage(fauxToolCall("update_goal", { status: "complete" }), {
+					stopReason: "toolUse",
+				});
+			},
+			fauxAssistantMessage("done"),
+		]);
+		runtime.session.setGoalFromUser({ objective: "old objective", status: "paused" });
+
+		await runtime.submitPrompt({ requestId: "goal-edit-durable", text: "start" });
+		await providerStarted;
+		runtime.session.setGoalFromUser({ objective: "new objective" });
+		releaseProvider();
+		await runtime.session.waitForIdle();
+
+		expect(sawGoalUpdate).toBe(true);
+		expect(runtime.session.getGoal()).toMatchObject({ objective: "new objective", status: "complete" });
+	});
+
 	it("persists message_end assistant replacements to the session manager", async () => {
 		const { runtime } = await createRuntimeForTest((metis: ExtensionAPI) => {
 			metis.on("message_end", (event) => {

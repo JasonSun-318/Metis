@@ -1,6 +1,7 @@
 import { fauxAssistantMessage, fauxToolCall } from "@metis/ai";
 import { afterEach, describe, expect, it } from "vitest";
 import { GOAL_CUSTOM_TYPE, readThreadGoal, writeThreadGoal } from "../../src/core/goal/index.ts";
+import { SessionManager } from "../../src/core/session-manager.ts";
 import { createHarness, type Harness } from "./harness.ts";
 
 describe("AgentSession goal continuation", () => {
@@ -67,7 +68,7 @@ describe("AgentSession goal continuation", () => {
 		expect(harness.getPendingResponseCount()).toBe(1);
 	});
 
-	it("marks active goals blocked on non-retryable errors", async () => {
+	it("pauses active goals on non-retryable errors", async () => {
 		const harness = await createHarness({ settings: { retry: { enabled: false } } });
 		harnesses.push(harness);
 		writeThreadGoal(harness.sessionManager, { objective: "long task", status: "active" });
@@ -78,8 +79,48 @@ describe("AgentSession goal continuation", () => {
 
 		await harness.session.prompt("keep going");
 
-		expect(readThreadGoal(harness.sessionManager)?.status).toBe("blocked");
+		expect(readThreadGoal(harness.sessionManager)?.status).toBe("paused");
 		expect(harness.getPendingResponseCount()).toBe(1);
+	});
+
+	it("continues a persisted active goal after startup bindings are ready", async () => {
+		const sessionManager = SessionManager.inMemory();
+		writeThreadGoal(sessionManager, { objective: "resume after restart", status: "active" });
+		const harness = await createHarness({ sessionManager });
+		harnesses.push(harness);
+		harness.setResponses([
+			fauxAssistantMessage(fauxToolCall("update_goal", { status: "complete" }), { stopReason: "toolUse" }),
+			fauxAssistantMessage("resumed and completed"),
+		]);
+
+		await harness.session.bindExtensions({});
+		await harness.session.waitForIdle();
+
+		expect(readThreadGoal(sessionManager)?.status).toBe("complete");
+		expect(
+			sessionManager
+				.getEntries()
+				.some((entry) => entry.type === "custom_message" && entry.customType === "goal_continuation"),
+		).toBe(true);
+	});
+
+	it("keeps completed goals terminal and starts a fresh goal for a new objective", async () => {
+		const harness = await createHarness();
+		harnesses.push(harness);
+		const completed = writeThreadGoal(harness.sessionManager, {
+			objective: "first goal",
+			status: "complete",
+			timeUsedSeconds: 42,
+		});
+
+		expect(() => harness.session.setGoalFromUser({ status: "active" })).toThrow(/completed/i);
+		expect(() => harness.session.setGoalFromUser({ status: "paused" })).toThrow(/completed/i);
+
+		const next = harness.session.setGoalFromUser({ objective: "second goal", status: "paused" });
+		expect(next.goalId).not.toBe(completed.goalId);
+		expect(next.timeUsedSeconds).toBe(0);
+		expect(next.objective).toBe("second goal");
+		expect(next.status).toBe("paused");
 	});
 
 	it("exposes user goal mutations without creating a model-facing create_goal call", async () => {
