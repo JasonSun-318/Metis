@@ -93,6 +93,17 @@ import {
 	wrapRegisteredTools,
 } from "./extensions/index.ts";
 import { emitSessionShutdownEvent } from "./extensions/runner.ts";
+import {
+	buildGoalContinuationPrompt,
+	buildGoalObjectiveUpdatedPrompt,
+	clearThreadGoal,
+	isActiveGoalStatus,
+	isGoalUsageLimitError,
+	readThreadGoal,
+	type ThreadGoalStatus,
+	validateGoalObjective,
+	writeThreadGoal,
+} from "./goal/index.ts";
 import type { ThreadGoal } from "./goal/types.ts";
 import { createInteractiveBashBoundary, type InteractiveBashBoundary } from "./interactive-bash-boundary.ts";
 import { externalizeLargeToolOutput, type PersistedToolOutput } from "./large-tool-output.ts";
@@ -2342,6 +2353,74 @@ export class AgentSession {
 		return this._mcpManager.reload();
 	}
 
+	getGoal(): ThreadGoal | null {
+		return readThreadGoal(this.sessionManager);
+	}
+
+	setGoalFromUser(input: { objective?: string; status?: Extract<ThreadGoalStatus, "active" | "paused"> }): ThreadGoal {
+		const existing = readThreadGoal(this.sessionManager);
+		if (input.objective === undefined && input.status === undefined) {
+			throw new TypeError("Goal set requires an objective and/or status");
+		}
+		if (input.objective === undefined && existing === null) {
+			throw new TypeError("Cannot update goal status because this thread has no goal");
+		}
+		const previousObjective = existing?.objective;
+		const objective = input.objective !== undefined ? validateGoalObjective(input.objective) : existing!.objective;
+		const status =
+			input.status ?? (input.objective !== undefined ? "active" : (existing!.status as "active" | "paused"));
+		if (status !== "active" && status !== "paused") {
+			throw new TypeError("User goal updates may only set active or paused");
+		}
+		const goal = writeThreadGoal(this.sessionManager, {
+			...(existing ?? {}),
+			goalId: existing?.goalId,
+			objective,
+			status,
+			createdAt: existing?.createdAt,
+			timeUsedSeconds: existing?.timeUsedSeconds,
+		});
+		this._emit({ type: "goal_changed", goal });
+		if (isActiveGoalStatus(goal.status)) {
+			if (this.isStreaming && previousObjective !== undefined && previousObjective !== goal.objective) {
+				void this.sendCustomMessage(
+					{
+						customType: "goal_objective_updated",
+						content: buildGoalObjectiveUpdatedPrompt(goal),
+						display: false,
+					},
+					{ deliverAs: "steer" },
+				);
+			} else {
+				void this.queueGoalContinuationIfIdle();
+			}
+		}
+		return goal;
+	}
+
+	clearGoal(): boolean {
+		const cleared = clearThreadGoal(this.sessionManager);
+		if (cleared) this._emit({ type: "goal_changed", goal: null });
+		return cleared;
+	}
+
+	/** Start a hidden continuation turn when the session is idle and the goal is active. */
+	async queueGoalContinuationIfIdle(): Promise<boolean> {
+		if (this.sessionManager.getHeader()?.subagent) return false;
+		if (this.isStreaming || this.isCompacting) return false;
+		const goal = readThreadGoal(this.sessionManager);
+		if (!goal || !isActiveGoalStatus(goal.status)) return false;
+		await this.sendCustomMessage(
+			{
+				customType: "goal_continuation",
+				content: buildGoalContinuationPrompt(goal),
+				display: false,
+			},
+			{ triggerTurn: true },
+		);
+		return true;
+	}
+
 	/**
 	 * Get all configured tools with name, description, parameter schema, prompt guidelines, and source metadata.
 	 */
@@ -2856,6 +2935,27 @@ export class AgentSession {
 
 		if (await this._checkCompaction(msg)) {
 			return true;
+		}
+
+		if (!this.sessionManager.getHeader()?.subagent && msg.stopReason !== "aborted") {
+			const goal = readThreadGoal(this.sessionManager);
+			if (msg.stopReason === "error") {
+				if (goal && isActiveGoalStatus(goal.status)) {
+					const next = writeThreadGoal(this.sessionManager, {
+						...goal,
+						status: isGoalUsageLimitError(msg.errorMessage) ? "usage_limited" : "blocked",
+					});
+					this._emit({ type: "goal_changed", goal: next });
+				}
+			} else if (goal && isActiveGoalStatus(goal.status) && !this.agent.hasQueuedMessages()) {
+				this.agent.followUp({
+					role: "custom",
+					customType: "goal_continuation",
+					content: buildGoalContinuationPrompt(goal),
+					display: false,
+					timestamp: Date.now(),
+				});
+			}
 		}
 
 		// The agent loop drains both queues before emitting agent_end. Any messages

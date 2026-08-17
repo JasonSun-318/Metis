@@ -2,6 +2,7 @@ export {
 	buildGoalContinuationPrompt,
 	buildGoalObjectiveUpdatedPrompt,
 } from "./continuation.ts";
+export { isGoalUsageLimitError } from "./errors.ts";
 export {
 	clearThreadGoal,
 	flushGoalElapsed,
