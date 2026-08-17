@@ -259,6 +259,7 @@ const snapshot: SessionSnapshot = {
 	activeTurnId: null,
 	pendingInteractions: [],
 	tasks: [],
+	goal: null,
 	queuedTurns: [],
 	thinkingSelection: "off",
 	actualThinkingLevel: "off",
@@ -267,6 +268,11 @@ const snapshot: SessionSnapshot = {
 	serverEpoch: "33333333-3333-4333-8333-333333333333",
 	cursor: 0,
 };
+const goalSet = {
+	sessionId: session.sessionId,
+	requestId: "22222222-2222-4222-8222-222222222236",
+	objective: "keep tests green",
+} satisfies ClientParams<"session/goal/set">;
 const permissionMode: PermissionModeView = snapshot.permissionMode;
 const permissionRule = {
 	id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -327,3 +333,4 @@ void compactedItem;
 void permissionMode;
 void permissionRule;
 void subagentInterruptResult;
+void goalSet;

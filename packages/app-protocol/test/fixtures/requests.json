@@ -7,7 +7,7 @@
 			"id": "client-1",
 			"method": "initialize",
 			"params": {
-				"protocolVersion": 18,
+				"protocolVersion": 19,
 				"client": { "name": "Metis Desktop", "version": "0.80.6" },
 				"capabilities": ["interaction.v1", "session.cursor.v1"]
 			}
@@ -355,6 +355,45 @@
 			"params": {
 				"sessionId": "11111111-1111-4111-8111-111111111111",
 				"requestId": "22222222-2222-4222-8222-222222222219"
+			}
+		}
+	},
+	{
+		"direction": "client",
+		"method": "session/goal/get",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "client-goal-get",
+			"method": "session/goal/get",
+			"params": {
+				"sessionId": "11111111-1111-4111-8111-111111111111"
+			}
+		}
+	},
+	{
+		"direction": "client",
+		"method": "session/goal/set",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "client-goal-set",
+			"method": "session/goal/set",
+			"params": {
+				"sessionId": "11111111-1111-4111-8111-111111111111",
+				"requestId": "22222222-2222-4222-8222-222222222230",
+				"objective": "keep tests green"
+			}
+		}
+	},
+	{
+		"direction": "client",
+		"method": "session/goal/clear",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "client-goal-clear",
+			"method": "session/goal/clear",
+			"params": {
+				"sessionId": "11111111-1111-4111-8111-111111111111",
+				"requestId": "22222222-2222-4222-8222-222222222231"
 			}
 		}
 	},

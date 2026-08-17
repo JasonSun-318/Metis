@@ -52,6 +52,7 @@ import {
 	ScheduleRunViewSchema,
 	ScheduleSnapshotViewSchema,
 	ScheduleTaskViewSchema,
+	SessionGoalViewSchema,
 	SessionSnapshotSchema,
 	SessionStatusViewSchema,
 	SessionSummarySchema,
@@ -440,6 +441,31 @@ export const SessionCompactResultSchema = StrictObject({
 	message: Type.Optional(PublicTextSchema),
 });
 
+export const SessionGoalGetParamsSchema = SessionRefParamsSchema;
+export const SessionGoalGetResultSchema = StrictObject({
+	sessionId: SessionIdSchema,
+	goal: Type.Union([SessionGoalViewSchema, Type.Null()]),
+});
+export const SessionGoalSetParamsSchema = Type.Refine(
+	StrictObject({
+		requestId: UuidSchema,
+		sessionId: SessionIdSchema,
+		objective: Type.Optional(Utf8String(4000, { minLength: 1, maxLength: 4000 })),
+		status: Type.Optional(Type.Union([Type.Literal("active"), Type.Literal("paused")])),
+	}),
+	(value) => value.objective !== undefined || value.status !== undefined,
+	"session/goal/set requires objective and/or status",
+);
+export const SessionGoalSetResultSchema = StrictObject({
+	sessionId: SessionIdSchema,
+	goal: SessionGoalViewSchema,
+});
+export const SessionGoalClearParamsSchema = SessionMutationParamsSchema;
+export const SessionGoalClearResultSchema = StrictObject({
+	sessionId: SessionIdSchema,
+	cleared: Type.Boolean(),
+});
+
 export const SessionSubscribeResultSchema = StrictObject({ snapshot: SessionSnapshotSchema });
 export const SessionUnsubscribeResultSchema = StrictObject({
 	sessionId: SessionIdSchema,
@@ -604,8 +630,21 @@ export const ModelSettingsMutationSchema = Type.Union([
 		thinkingSelection: ThinkingSelectionSchema,
 	}),
 	StrictObject({
-		type: Type.Literal("set_vision_model"),
-		model: Type.Union([SubagentModelRefSchema, Type.Null()]),
+		type: Type.Literal("set_vision"),
+		settings: Type.Union([
+			StrictObject({
+				name: Type.String({ minLength: 1, maxLength: 120 }),
+				baseUrl: Type.String({ minLength: 1, maxLength: 2_048 }),
+				api: Type.Union([
+					Type.Literal("openai-responses"),
+					Type.Literal("openai-completions"),
+					Type.Literal("anthropic-messages"),
+				]),
+				modelId: Type.String({ minLength: 1, maxLength: 300 }),
+			}),
+			Type.Null(),
+		]),
+		credential: CredentialMutationSchema,
 	}),
 	StrictObject({
 		type: Type.Literal("set_image_gen"),
@@ -833,6 +872,9 @@ export const ClientRequestMethods = {
 	"session/readImage": method(SessionReadImageParamsSchema, SessionReadImageResultSchema),
 	"session/status": method(SessionRefParamsSchema, SessionStatusViewSchema),
 	"session/compact": method(SessionMutationParamsSchema, SessionCompactResultSchema),
+	"session/goal/get": method(SessionGoalGetParamsSchema, SessionGoalGetResultSchema),
+	"session/goal/set": method(SessionGoalSetParamsSchema, SessionGoalSetResultSchema),
+	"session/goal/clear": method(SessionGoalClearParamsSchema, SessionGoalClearResultSchema),
 	"session/close": method(SessionMutationParamsSchema, SessionCloseResultSchema),
 	"session/rename": method(SessionRenameParamsSchema, SessionMutationResultSchema),
 	"session/fork": method(SessionForkParamsSchema, SessionForkResultSchema),

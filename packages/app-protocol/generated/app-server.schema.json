@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:metis:schemas:app-server:v18",
-  "title": "Metis App-Server Protocol v18",
+  "$id": "urn:metis:schemas:app-server:v19",
+  "title": "Metis App-Server Protocol v19",
   "$ref": "#/$defs/AppProtocolEnvelope",
   "$defs": {
     "AppProtocolEnvelope": {
@@ -2702,6 +2702,154 @@
                 },
                 "method": {
                   "type": "string",
+                  "const": "session/goal/get"
+                },
+                "params": {
+                  "type": "object",
+                  "required": [
+                    "sessionId"
+                  ],
+                  "properties": {
+                    "sessionId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "jsonrpc",
+                "id",
+                "method",
+                "params"
+              ],
+              "properties": {
+                "jsonrpc": {
+                  "type": "string",
+                  "const": "2.0"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "x-metis-maxUtf16Units": 128
+                },
+                "method": {
+                  "type": "string",
+                  "const": "session/goal/set"
+                },
+                "params": {
+                  "type": "object",
+                  "required": [
+                    "requestId",
+                    "sessionId"
+                  ],
+                  "properties": {
+                    "requestId": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "sessionId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                    },
+                    "objective": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 4000,
+                      "x-metis-maxUtf8Bytes": 4000
+                    },
+                    "status": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "const": "active"
+                        },
+                        {
+                          "type": "string",
+                          "const": "paused"
+                        }
+                      ]
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "jsonrpc",
+                "id",
+                "method",
+                "params"
+              ],
+              "properties": {
+                "jsonrpc": {
+                  "type": "string",
+                  "const": "2.0"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "x-metis-maxUtf16Units": 128
+                },
+                "method": {
+                  "type": "string",
+                  "const": "session/goal/clear"
+                },
+                "params": {
+                  "type": "object",
+                  "required": [
+                    "requestId",
+                    "sessionId"
+                  ],
+                  "properties": {
+                    "requestId": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "sessionId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "jsonrpc",
+                "id",
+                "method",
+                "params"
+              ],
+              "properties": {
+                "jsonrpc": {
+                  "type": "string",
+                  "const": "2.0"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "x-metis-maxUtf16Units": 128
+                },
+                "method": {
+                  "type": "string",
                   "const": "session/close"
                 },
                 "params": {
@@ -3752,39 +3900,110 @@
                           "type": "object",
                           "required": [
                             "type",
-                            "model"
+                            "settings",
+                            "credential"
                           ],
                           "properties": {
                             "type": {
                               "type": "string",
-                              "const": "set_vision_model"
+                              "const": "set_vision"
                             },
-                            "model": {
+                            "settings": {
                               "anyOf": [
                                 {
                                   "type": "object",
                                   "required": [
-                                    "provider",
+                                    "name",
+                                    "baseUrl",
+                                    "api",
                                     "modelId"
                                   ],
                                   "properties": {
-                                    "provider": {
+                                    "name": {
                                       "type": "string",
                                       "minLength": 1,
-                                      "maxLength": 256,
-                                      "x-metis-maxUtf16Units": 256
+                                      "maxLength": 120
+                                    },
+                                    "baseUrl": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 2048
+                                    },
+                                    "api": {
+                                      "anyOf": [
+                                        {
+                                          "type": "string",
+                                          "const": "openai-responses"
+                                        },
+                                        {
+                                          "type": "string",
+                                          "const": "openai-completions"
+                                        },
+                                        {
+                                          "type": "string",
+                                          "const": "anthropic-messages"
+                                        }
+                                      ]
                                     },
                                     "modelId": {
                                       "type": "string",
                                       "minLength": 1,
-                                      "maxLength": 256,
-                                      "x-metis-maxUtf16Units": 256
+                                      "maxLength": 300
                                     }
                                   },
                                   "additionalProperties": false
                                 },
                                 {
                                   "type": "null"
+                                }
+                              ]
+                            },
+                            "credential": {
+                              "anyOf": [
+                                {
+                                  "type": "object",
+                                  "required": [
+                                    "action"
+                                  ],
+                                  "properties": {
+                                    "action": {
+                                      "type": "string",
+                                      "const": "keep"
+                                    }
+                                  },
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "object",
+                                  "required": [
+                                    "action"
+                                  ],
+                                  "properties": {
+                                    "action": {
+                                      "type": "string",
+                                      "const": "remove"
+                                    }
+                                  },
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "object",
+                                  "required": [
+                                    "action",
+                                    "value"
+                                  ],
+                                  "properties": {
+                                    "action": {
+                                      "type": "string",
+                                      "const": "set"
+                                    },
+                                    "value": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 32768
+                                    }
+                                  },
+                                  "additionalProperties": false
                                 }
                               ]
                             }
@@ -8699,6 +8918,97 @@
                         "required": [
                           "type",
                           "sessionId",
+                          "goal"
+                        ],
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "const": "session/goalChanged"
+                          },
+                          "sessionId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                          },
+                          "goal": {
+                            "anyOf": [
+                              {
+                                "type": "object",
+                                "required": [
+                                  "goalId",
+                                  "objective",
+                                  "status",
+                                  "timeUsedSeconds",
+                                  "activeStartedAt"
+                                ],
+                                "properties": {
+                                  "goalId": {
+                                    "type": "string",
+                                    "format": "uuid"
+                                  },
+                                  "objective": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 4000,
+                                    "x-metis-maxUtf8Bytes": 4000
+                                  },
+                                  "status": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string",
+                                        "const": "active"
+                                      },
+                                      {
+                                        "type": "string",
+                                        "const": "paused"
+                                      },
+                                      {
+                                        "type": "string",
+                                        "const": "blocked"
+                                      },
+                                      {
+                                        "type": "string",
+                                        "const": "usage_limited"
+                                      },
+                                      {
+                                        "type": "string",
+                                        "const": "complete"
+                                      }
+                                    ]
+                                  },
+                                  "timeUsedSeconds": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "maximum": 9007199254740991
+                                  },
+                                  "activeStartedAt": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string",
+                                        "format": "date-time",
+                                        "maxLength": 40
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  }
+                                },
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
+                        },
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "required": [
+                          "type",
+                          "sessionId",
                           "queuedTurns"
                         ],
                         "properties": {
@@ -11207,7 +11517,7 @@
                   "properties": {
                     "protocolVersion": {
                       "type": "number",
-                      "const": 18
+                      "const": 19
                     },
                     "server": {
                       "type": "object",
@@ -16633,6 +16943,252 @@
                   "type": "object",
                   "required": [
                     "sessionId",
+                    "goal"
+                  ],
+                  "properties": {
+                    "sessionId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                    },
+                    "goal": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "required": [
+                            "goalId",
+                            "objective",
+                            "status",
+                            "timeUsedSeconds",
+                            "activeStartedAt"
+                          ],
+                          "properties": {
+                            "goalId": {
+                              "type": "string",
+                              "format": "uuid"
+                            },
+                            "objective": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 4000,
+                              "x-metis-maxUtf8Bytes": 4000
+                            },
+                            "status": {
+                              "anyOf": [
+                                {
+                                  "type": "string",
+                                  "const": "active"
+                                },
+                                {
+                                  "type": "string",
+                                  "const": "paused"
+                                },
+                                {
+                                  "type": "string",
+                                  "const": "blocked"
+                                },
+                                {
+                                  "type": "string",
+                                  "const": "usage_limited"
+                                },
+                                {
+                                  "type": "string",
+                                  "const": "complete"
+                                }
+                              ]
+                            },
+                            "timeUsedSeconds": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 9007199254740991
+                            },
+                            "activeStartedAt": {
+                              "anyOf": [
+                                {
+                                  "type": "string",
+                                  "format": "date-time",
+                                  "maxLength": 40
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            }
+                          },
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "jsonrpc",
+                "id",
+                "result"
+              ],
+              "properties": {
+                "jsonrpc": {
+                  "type": "string",
+                  "const": "2.0"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "x-metis-maxUtf16Units": 128
+                },
+                "result": {
+                  "type": "object",
+                  "required": [
+                    "sessionId",
+                    "goal"
+                  ],
+                  "properties": {
+                    "sessionId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                    },
+                    "goal": {
+                      "type": "object",
+                      "required": [
+                        "goalId",
+                        "objective",
+                        "status",
+                        "timeUsedSeconds",
+                        "activeStartedAt"
+                      ],
+                      "properties": {
+                        "goalId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "objective": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 4000,
+                          "x-metis-maxUtf8Bytes": 4000
+                        },
+                        "status": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "const": "active"
+                            },
+                            {
+                              "type": "string",
+                              "const": "paused"
+                            },
+                            {
+                              "type": "string",
+                              "const": "blocked"
+                            },
+                            {
+                              "type": "string",
+                              "const": "usage_limited"
+                            },
+                            {
+                              "type": "string",
+                              "const": "complete"
+                            }
+                          ]
+                        },
+                        "timeUsedSeconds": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "activeStartedAt": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "format": "date-time",
+                              "maxLength": 40
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "additionalProperties": false
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "jsonrpc",
+                "id",
+                "result"
+              ],
+              "properties": {
+                "jsonrpc": {
+                  "type": "string",
+                  "const": "2.0"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "x-metis-maxUtf16Units": 128
+                },
+                "result": {
+                  "type": "object",
+                  "required": [
+                    "sessionId",
+                    "cleared"
+                  ],
+                  "properties": {
+                    "sessionId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                    },
+                    "cleared": {
+                      "type": "boolean"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "jsonrpc",
+                "id",
+                "result"
+              ],
+              "properties": {
+                "jsonrpc": {
+                  "type": "string",
+                  "const": "2.0"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "x-metis-maxUtf16Units": 128
+                },
+                "result": {
+                  "type": "object",
+                  "required": [
+                    "sessionId",
                     "closed"
                   ],
                   "properties": {
@@ -17439,6 +17995,7 @@
                         "pendingInteractions",
                         "queuedTurns",
                         "tasks",
+                        "goal",
                         "thinkingSelection",
                         "actualThinkingLevel",
                         "availableThinkingSelections",
@@ -18742,6 +19299,77 @@
                             "additionalProperties": false
                           },
                           "maxItems": 256
+                        },
+                        "goal": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "required": [
+                                "goalId",
+                                "objective",
+                                "status",
+                                "timeUsedSeconds",
+                                "activeStartedAt"
+                              ],
+                              "properties": {
+                                "goalId": {
+                                  "type": "string",
+                                  "format": "uuid"
+                                },
+                                "objective": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 4000,
+                                  "x-metis-maxUtf8Bytes": 4000
+                                },
+                                "status": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "const": "active"
+                                    },
+                                    {
+                                      "type": "string",
+                                      "const": "paused"
+                                    },
+                                    {
+                                      "type": "string",
+                                      "const": "blocked"
+                                    },
+                                    {
+                                      "type": "string",
+                                      "const": "usage_limited"
+                                    },
+                                    {
+                                      "type": "string",
+                                      "const": "complete"
+                                    }
+                                  ]
+                                },
+                                "timeUsedSeconds": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "maximum": 9007199254740991
+                                },
+                                "activeStartedAt": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "format": "date-time",
+                                      "maxLength": 40
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                }
+                              },
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
                         },
                         "thinkingSelection": {
                           "anyOf": [
@@ -20124,7 +20752,7 @@
                   "type": "object",
                   "required": [
                     "defaultModel",
-                    "visionModel",
+                    "vision",
                     "imageGen",
                     "defaultThinkingSelection",
                     "providers",
@@ -20160,26 +20788,51 @@
                         }
                       ]
                     },
-                    "visionModel": {
+                    "vision": {
                       "anyOf": [
                         {
                           "type": "object",
                           "required": [
-                            "provider",
-                            "modelId"
+                            "name",
+                            "baseUrl",
+                            "api",
+                            "modelId",
+                            "authConfigured"
                           ],
                           "properties": {
-                            "provider": {
+                            "name": {
                               "type": "string",
                               "minLength": 1,
-                              "maxLength": 256,
-                              "x-metis-maxUtf16Units": 256
+                              "maxLength": 120
+                            },
+                            "baseUrl": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 2048
+                            },
+                            "api": {
+                              "anyOf": [
+                                {
+                                  "type": "string",
+                                  "const": "openai-responses"
+                                },
+                                {
+                                  "type": "string",
+                                  "const": "openai-completions"
+                                },
+                                {
+                                  "type": "string",
+                                  "const": "anthropic-messages"
+                                }
+                              ]
                             },
                             "modelId": {
                               "type": "string",
                               "minLength": 1,
-                              "maxLength": 256,
-                              "x-metis-maxUtf16Units": 256
+                              "maxLength": 300
+                            },
+                            "authConfigured": {
+                              "type": "boolean"
                             }
                           },
                           "additionalProperties": false
@@ -20473,7 +21126,7 @@
                   "type": "object",
                   "required": [
                     "defaultModel",
-                    "visionModel",
+                    "vision",
                     "imageGen",
                     "defaultThinkingSelection",
                     "providers",
@@ -20509,26 +21162,51 @@
                         }
                       ]
                     },
-                    "visionModel": {
+                    "vision": {
                       "anyOf": [
                         {
                           "type": "object",
                           "required": [
-                            "provider",
-                            "modelId"
+                            "name",
+                            "baseUrl",
+                            "api",
+                            "modelId",
+                            "authConfigured"
                           ],
                           "properties": {
-                            "provider": {
+                            "name": {
                               "type": "string",
                               "minLength": 1,
-                              "maxLength": 256,
-                              "x-metis-maxUtf16Units": 256
+                              "maxLength": 120
+                            },
+                            "baseUrl": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 2048
+                            },
+                            "api": {
+                              "anyOf": [
+                                {
+                                  "type": "string",
+                                  "const": "openai-responses"
+                                },
+                                {
+                                  "type": "string",
+                                  "const": "openai-completions"
+                                },
+                                {
+                                  "type": "string",
+                                  "const": "anthropic-messages"
+                                }
+                              ]
                             },
                             "modelId": {
                               "type": "string",
                               "minLength": 1,
-                              "maxLength": 256,
-                              "x-metis-maxUtf16Units": 256
+                              "maxLength": 300
+                            },
+                            "authConfigured": {
+                              "type": "boolean"
                             }
                           },
                           "additionalProperties": false
@@ -32062,6 +32740,154 @@
             },
             "method": {
               "type": "string",
+              "const": "session/goal/get"
+            },
+            "params": {
+              "type": "object",
+              "required": [
+                "sessionId"
+              ],
+              "properties": {
+                "sessionId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "type": "string",
+              "const": "2.0"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "x-metis-maxUtf16Units": 128
+            },
+            "method": {
+              "type": "string",
+              "const": "session/goal/set"
+            },
+            "params": {
+              "type": "object",
+              "required": [
+                "requestId",
+                "sessionId"
+              ],
+              "properties": {
+                "requestId": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "sessionId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                },
+                "objective": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 4000,
+                  "x-metis-maxUtf8Bytes": 4000
+                },
+                "status": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "const": "active"
+                    },
+                    {
+                      "type": "string",
+                      "const": "paused"
+                    }
+                  ]
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "type": "string",
+              "const": "2.0"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "x-metis-maxUtf16Units": 128
+            },
+            "method": {
+              "type": "string",
+              "const": "session/goal/clear"
+            },
+            "params": {
+              "type": "object",
+              "required": [
+                "requestId",
+                "sessionId"
+              ],
+              "properties": {
+                "requestId": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "sessionId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "type": "string",
+              "const": "2.0"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "x-metis-maxUtf16Units": 128
+            },
+            "method": {
+              "type": "string",
               "const": "session/close"
             },
             "params": {
@@ -33112,39 +33938,110 @@
                       "type": "object",
                       "required": [
                         "type",
-                        "model"
+                        "settings",
+                        "credential"
                       ],
                       "properties": {
                         "type": {
                           "type": "string",
-                          "const": "set_vision_model"
+                          "const": "set_vision"
                         },
-                        "model": {
+                        "settings": {
                           "anyOf": [
                             {
                               "type": "object",
                               "required": [
-                                "provider",
+                                "name",
+                                "baseUrl",
+                                "api",
                                 "modelId"
                               ],
                               "properties": {
-                                "provider": {
+                                "name": {
                                   "type": "string",
                                   "minLength": 1,
-                                  "maxLength": 256,
-                                  "x-metis-maxUtf16Units": 256
+                                  "maxLength": 120
+                                },
+                                "baseUrl": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 2048
+                                },
+                                "api": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "const": "openai-responses"
+                                    },
+                                    {
+                                      "type": "string",
+                                      "const": "openai-completions"
+                                    },
+                                    {
+                                      "type": "string",
+                                      "const": "anthropic-messages"
+                                    }
+                                  ]
                                 },
                                 "modelId": {
                                   "type": "string",
                                   "minLength": 1,
-                                  "maxLength": 256,
-                                  "x-metis-maxUtf16Units": 256
+                                  "maxLength": 300
                                 }
                               },
                               "additionalProperties": false
                             },
                             {
                               "type": "null"
+                            }
+                          ]
+                        },
+                        "credential": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "required": [
+                                "action"
+                              ],
+                              "properties": {
+                                "action": {
+                                  "type": "string",
+                                  "const": "keep"
+                                }
+                              },
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "required": [
+                                "action"
+                              ],
+                              "properties": {
+                                "action": {
+                                  "type": "string",
+                                  "const": "remove"
+                                }
+                              },
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "required": [
+                                "action",
+                                "value"
+                              ],
+                              "properties": {
+                                "action": {
+                                  "type": "string",
+                                  "const": "set"
+                                },
+                                "value": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 32768
+                                }
+                              },
+                              "additionalProperties": false
                             }
                           ]
                         }
@@ -35560,7 +36457,7 @@
               "properties": {
                 "protocolVersion": {
                   "type": "number",
-                  "const": 18
+                  "const": 19
                 },
                 "server": {
                   "type": "object",
@@ -40986,6 +41883,252 @@
               "type": "object",
               "required": [
                 "sessionId",
+                "goal"
+              ],
+              "properties": {
+                "sessionId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                },
+                "goal": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "required": [
+                        "goalId",
+                        "objective",
+                        "status",
+                        "timeUsedSeconds",
+                        "activeStartedAt"
+                      ],
+                      "properties": {
+                        "goalId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "objective": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 4000,
+                          "x-metis-maxUtf8Bytes": 4000
+                        },
+                        "status": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "const": "active"
+                            },
+                            {
+                              "type": "string",
+                              "const": "paused"
+                            },
+                            {
+                              "type": "string",
+                              "const": "blocked"
+                            },
+                            {
+                              "type": "string",
+                              "const": "usage_limited"
+                            },
+                            {
+                              "type": "string",
+                              "const": "complete"
+                            }
+                          ]
+                        },
+                        "timeUsedSeconds": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "activeStartedAt": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "format": "date-time",
+                              "maxLength": 40
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "jsonrpc",
+            "id",
+            "result"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "type": "string",
+              "const": "2.0"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "x-metis-maxUtf16Units": 128
+            },
+            "result": {
+              "type": "object",
+              "required": [
+                "sessionId",
+                "goal"
+              ],
+              "properties": {
+                "sessionId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                },
+                "goal": {
+                  "type": "object",
+                  "required": [
+                    "goalId",
+                    "objective",
+                    "status",
+                    "timeUsedSeconds",
+                    "activeStartedAt"
+                  ],
+                  "properties": {
+                    "goalId": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "objective": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 4000,
+                      "x-metis-maxUtf8Bytes": 4000
+                    },
+                    "status": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "const": "active"
+                        },
+                        {
+                          "type": "string",
+                          "const": "paused"
+                        },
+                        {
+                          "type": "string",
+                          "const": "blocked"
+                        },
+                        {
+                          "type": "string",
+                          "const": "usage_limited"
+                        },
+                        {
+                          "type": "string",
+                          "const": "complete"
+                        }
+                      ]
+                    },
+                    "timeUsedSeconds": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "activeStartedAt": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "format": "date-time",
+                          "maxLength": 40
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "jsonrpc",
+            "id",
+            "result"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "type": "string",
+              "const": "2.0"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "x-metis-maxUtf16Units": 128
+            },
+            "result": {
+              "type": "object",
+              "required": [
+                "sessionId",
+                "cleared"
+              ],
+              "properties": {
+                "sessionId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                },
+                "cleared": {
+                  "type": "boolean"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "jsonrpc",
+            "id",
+            "result"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "type": "string",
+              "const": "2.0"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "x-metis-maxUtf16Units": 128
+            },
+            "result": {
+              "type": "object",
+              "required": [
+                "sessionId",
                 "closed"
               ],
               "properties": {
@@ -41792,6 +42935,7 @@
                     "pendingInteractions",
                     "queuedTurns",
                     "tasks",
+                    "goal",
                     "thinkingSelection",
                     "actualThinkingLevel",
                     "availableThinkingSelections",
@@ -43095,6 +44239,77 @@
                         "additionalProperties": false
                       },
                       "maxItems": 256
+                    },
+                    "goal": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "required": [
+                            "goalId",
+                            "objective",
+                            "status",
+                            "timeUsedSeconds",
+                            "activeStartedAt"
+                          ],
+                          "properties": {
+                            "goalId": {
+                              "type": "string",
+                              "format": "uuid"
+                            },
+                            "objective": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 4000,
+                              "x-metis-maxUtf8Bytes": 4000
+                            },
+                            "status": {
+                              "anyOf": [
+                                {
+                                  "type": "string",
+                                  "const": "active"
+                                },
+                                {
+                                  "type": "string",
+                                  "const": "paused"
+                                },
+                                {
+                                  "type": "string",
+                                  "const": "blocked"
+                                },
+                                {
+                                  "type": "string",
+                                  "const": "usage_limited"
+                                },
+                                {
+                                  "type": "string",
+                                  "const": "complete"
+                                }
+                              ]
+                            },
+                            "timeUsedSeconds": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 9007199254740991
+                            },
+                            "activeStartedAt": {
+                              "anyOf": [
+                                {
+                                  "type": "string",
+                                  "format": "date-time",
+                                  "maxLength": 40
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            }
+                          },
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
                     },
                     "thinkingSelection": {
                       "anyOf": [
@@ -44477,7 +45692,7 @@
               "type": "object",
               "required": [
                 "defaultModel",
-                "visionModel",
+                "vision",
                 "imageGen",
                 "defaultThinkingSelection",
                 "providers",
@@ -44513,26 +45728,51 @@
                     }
                   ]
                 },
-                "visionModel": {
+                "vision": {
                   "anyOf": [
                     {
                       "type": "object",
                       "required": [
-                        "provider",
-                        "modelId"
+                        "name",
+                        "baseUrl",
+                        "api",
+                        "modelId",
+                        "authConfigured"
                       ],
                       "properties": {
-                        "provider": {
+                        "name": {
                           "type": "string",
                           "minLength": 1,
-                          "maxLength": 256,
-                          "x-metis-maxUtf16Units": 256
+                          "maxLength": 120
+                        },
+                        "baseUrl": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 2048
+                        },
+                        "api": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "const": "openai-responses"
+                            },
+                            {
+                              "type": "string",
+                              "const": "openai-completions"
+                            },
+                            {
+                              "type": "string",
+                              "const": "anthropic-messages"
+                            }
+                          ]
                         },
                         "modelId": {
                           "type": "string",
                           "minLength": 1,
-                          "maxLength": 256,
-                          "x-metis-maxUtf16Units": 256
+                          "maxLength": 300
+                        },
+                        "authConfigured": {
+                          "type": "boolean"
                         }
                       },
                       "additionalProperties": false
@@ -44826,7 +46066,7 @@
               "type": "object",
               "required": [
                 "defaultModel",
-                "visionModel",
+                "vision",
                 "imageGen",
                 "defaultThinkingSelection",
                 "providers",
@@ -44862,26 +46102,51 @@
                     }
                   ]
                 },
-                "visionModel": {
+                "vision": {
                   "anyOf": [
                     {
                       "type": "object",
                       "required": [
-                        "provider",
-                        "modelId"
+                        "name",
+                        "baseUrl",
+                        "api",
+                        "modelId",
+                        "authConfigured"
                       ],
                       "properties": {
-                        "provider": {
+                        "name": {
                           "type": "string",
                           "minLength": 1,
-                          "maxLength": 256,
-                          "x-metis-maxUtf16Units": 256
+                          "maxLength": 120
+                        },
+                        "baseUrl": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 2048
+                        },
+                        "api": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "const": "openai-responses"
+                            },
+                            {
+                              "type": "string",
+                              "const": "openai-completions"
+                            },
+                            {
+                              "type": "string",
+                              "const": "anthropic-messages"
+                            }
+                          ]
                         },
                         "modelId": {
                           "type": "string",
                           "minLength": 1,
-                          "maxLength": 256,
-                          "x-metis-maxUtf16Units": 256
+                          "maxLength": 300
+                        },
+                        "authConfigured": {
+                          "type": "boolean"
                         }
                       },
                       "additionalProperties": false
@@ -54562,6 +55827,97 @@
                 "required": [
                   "type",
                   "sessionId",
+                  "goal"
+                ],
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "session/goalChanged"
+                  },
+                  "sessionId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                  },
+                  "goal": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "required": [
+                          "goalId",
+                          "objective",
+                          "status",
+                          "timeUsedSeconds",
+                          "activeStartedAt"
+                        ],
+                        "properties": {
+                          "goalId": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "objective": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 4000,
+                            "x-metis-maxUtf8Bytes": 4000
+                          },
+                          "status": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "const": "active"
+                              },
+                              {
+                                "type": "string",
+                                "const": "paused"
+                              },
+                              {
+                                "type": "string",
+                                "const": "blocked"
+                              },
+                              {
+                                "type": "string",
+                                "const": "usage_limited"
+                              },
+                              {
+                                "type": "string",
+                                "const": "complete"
+                              }
+                            ]
+                          },
+                          "timeUsedSeconds": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9007199254740991
+                          },
+                          "activeStartedAt": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "format": "date-time",
+                                "maxLength": 40
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
+                        },
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "required": [
+                  "type",
+                  "sessionId",
                   "queuedTurns"
                 ],
                 "properties": {
@@ -58967,6 +60323,97 @@
                 "additionalProperties": false
               },
               "maxItems": 256
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "sessionId",
+            "goal"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "session/goalChanged"
+            },
+            "sessionId": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+            },
+            "goal": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "required": [
+                    "goalId",
+                    "objective",
+                    "status",
+                    "timeUsedSeconds",
+                    "activeStartedAt"
+                  ],
+                  "properties": {
+                    "goalId": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "objective": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 4000,
+                      "x-metis-maxUtf8Bytes": 4000
+                    },
+                    "status": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "const": "active"
+                        },
+                        {
+                          "type": "string",
+                          "const": "paused"
+                        },
+                        {
+                          "type": "string",
+                          "const": "blocked"
+                        },
+                        {
+                          "type": "string",
+                          "const": "usage_limited"
+                        },
+                        {
+                          "type": "string",
+                          "const": "complete"
+                        }
+                      ]
+                    },
+                    "timeUsedSeconds": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "activeStartedAt": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "format": "date-time",
+                          "maxLength": 40
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           },
           "additionalProperties": false
@@ -66295,6 +67742,97 @@
                     "required": [
                       "type",
                       "sessionId",
+                      "goal"
+                    ],
+                    "properties": {
+                      "type": {
+                        "type": "string",
+                        "const": "session/goalChanged"
+                      },
+                      "sessionId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                      },
+                      "goal": {
+                        "anyOf": [
+                          {
+                            "type": "object",
+                            "required": [
+                              "goalId",
+                              "objective",
+                              "status",
+                              "timeUsedSeconds",
+                              "activeStartedAt"
+                            ],
+                            "properties": {
+                              "goalId": {
+                                "type": "string",
+                                "format": "uuid"
+                              },
+                              "objective": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 4000,
+                                "x-metis-maxUtf8Bytes": 4000
+                              },
+                              "status": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "const": "active"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "paused"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "blocked"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "usage_limited"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "complete"
+                                  }
+                                ]
+                              },
+                              "timeUsedSeconds": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 9007199254740991
+                              },
+                              "activeStartedAt": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "format": "date-time",
+                                    "maxLength": 40
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              }
+                            },
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "required": [
+                      "type",
+                      "sessionId",
                       "queuedTurns"
                     ],
                     "properties": {
@@ -69470,6 +71008,7 @@
         "pendingInteractions",
         "queuedTurns",
         "tasks",
+        "goal",
         "thinkingSelection",
         "actualThinkingLevel",
         "availableThinkingSelections",
@@ -70773,6 +72312,77 @@
             "additionalProperties": false
           },
           "maxItems": 256
+        },
+        "goal": {
+          "anyOf": [
+            {
+              "type": "object",
+              "required": [
+                "goalId",
+                "objective",
+                "status",
+                "timeUsedSeconds",
+                "activeStartedAt"
+              ],
+              "properties": {
+                "goalId": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "objective": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 4000,
+                  "x-metis-maxUtf8Bytes": 4000
+                },
+                "status": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "const": "active"
+                    },
+                    {
+                      "type": "string",
+                      "const": "paused"
+                    },
+                    {
+                      "type": "string",
+                      "const": "blocked"
+                    },
+                    {
+                      "type": "string",
+                      "const": "usage_limited"
+                    },
+                    {
+                      "type": "string",
+                      "const": "complete"
+                    }
+                  ]
+                },
+                "timeUsedSeconds": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "activeStartedAt": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "format": "date-time",
+                      "maxLength": 40
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "thinkingSelection": {
           "anyOf": [

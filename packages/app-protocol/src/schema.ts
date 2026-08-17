@@ -3,7 +3,7 @@ import { Compile, type Validator } from "typebox/compile";
 
 export type EmptySchemaContext = Record<string, never>;
 
-export const PROTOCOL_VERSION = 18 as const;
+export const PROTOCOL_VERSION = 19 as const;
 export const MAX_ENVELOPE_UTF8_BYTES = 8 * 1024 * 1024;
 export const MAX_READ_IMAGE_DATA_UTF8_BYTES = 7 * 1024 * 1024;
 export const MAX_NAME_UTF16_UNITS = 256;

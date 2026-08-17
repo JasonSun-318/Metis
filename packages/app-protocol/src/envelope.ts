@@ -407,6 +407,21 @@ function validateClientResultCorrelation(request: ClientRpcRequest, result: unkn
 				failResponseCorrelation("Compacted session does not match its request");
 			}
 			return;
+		case "session/goal/get":
+			if ((result as ClientResult<"session/goal/get">).sessionId !== request.params.sessionId) {
+				failResponseCorrelation("Goal get session does not match its request");
+			}
+			return;
+		case "session/goal/set":
+			if ((result as ClientResult<"session/goal/set">).sessionId !== request.params.sessionId) {
+				failResponseCorrelation("Goal set session does not match its request");
+			}
+			return;
+		case "session/goal/clear":
+			if ((result as ClientResult<"session/goal/clear">).sessionId !== request.params.sessionId) {
+				failResponseCorrelation("Goal clear session does not match its request");
+			}
+			return;
 		case "session/close":
 			if ((result as ClientResult<"session/close">).sessionId !== request.params.sessionId) {
 				failResponseCorrelation("Closed session does not match its request");

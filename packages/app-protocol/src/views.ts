@@ -631,10 +631,23 @@ export const ImageGenSettingsViewSchema = StrictObject({
 	modelId: Type.String({ minLength: 1, maxLength: 300 }),
 	authConfigured: Type.Boolean(),
 });
+export const VisionApiViewSchema = Type.Union([
+	Type.Literal("openai-responses"),
+	Type.Literal("openai-completions"),
+	Type.Literal("anthropic-messages"),
+]);
+/** User-configured vision-describer service; the API key is never returned. */
+export const VisionSettingsViewSchema = StrictObject({
+	name: Type.String({ minLength: 1, maxLength: 120 }),
+	baseUrl: Type.String({ minLength: 1, maxLength: 2_048 }),
+	api: VisionApiViewSchema,
+	modelId: Type.String({ minLength: 1, maxLength: 300 }),
+	authConfigured: Type.Boolean(),
+});
 export const ModelSettingsViewSchema = StrictObject({
 	defaultModel: Type.Union([SubagentModelRefSchema, Type.Null()]),
-	/** Vision-describer model for image-less models; null when unset. */
-	visionModel: Type.Union([SubagentModelRefSchema, Type.Null()]),
+	/** Vision-describer service for image-less models; null when unset. */
+	vision: Type.Union([VisionSettingsViewSchema, Type.Null()]),
 	/** Image-generation service for the generate_image tool; null when unset. */
 	imageGen: Type.Union([ImageGenSettingsViewSchema, Type.Null()]),
 	defaultThinkingSelection: ThinkingSelectionSchema,
@@ -780,6 +793,22 @@ export const SessionTaskViewSchema = StrictObject({
 
 export const SessionTasksSchema = Type.Array(SessionTaskViewSchema, { maxItems: 256 });
 
+export const SessionGoalStatusSchema = Type.Union([
+	Type.Literal("active"),
+	Type.Literal("paused"),
+	Type.Literal("blocked"),
+	Type.Literal("usage_limited"),
+	Type.Literal("complete"),
+]);
+
+export const SessionGoalViewSchema = StrictObject({
+	goalId: UuidSchema,
+	objective: Utf8String(4000, { minLength: 1, maxLength: 4000 }),
+	status: SessionGoalStatusSchema,
+	timeUsedSeconds: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
+	activeStartedAt: Type.Union([TimestampSchema, Type.Null()]),
+});
+
 export const QueuedTurnAttachmentViewSchema = StrictObject({
 	name: Type.String({ minLength: 1, maxLength: 255 }),
 	byteLength: Type.Integer({ minimum: 1, maximum: 128 * 1024 * 1024 }),
@@ -816,6 +845,7 @@ export const SessionSnapshotSchema = StrictObject({
 	pendingInteractions: Type.Array(InteractionViewSchema, { maxItems: MAX_INTERACTION_CHOICES }),
 	queuedTurns: QueuedTurnsSchema,
 	tasks: SessionTasksSchema,
+	goal: Type.Union([SessionGoalViewSchema, Type.Null()]),
 	thinkingSelection: ThinkingSelectionSchema,
 	actualThinkingLevel: ActualThinkingLevelSchema,
 	availableThinkingSelections: Type.Array(ThinkingSelectionSchema, { minItems: 1, maxItems: 8, uniqueItems: true }),
@@ -851,6 +881,12 @@ export const TasksChangedEventSchema = StrictObject({
 	type: Type.Literal("session/tasksChanged"),
 	sessionId: SessionIdSchema,
 	tasks: SessionTasksSchema,
+});
+
+export const GoalChangedEventSchema = StrictObject({
+	type: Type.Literal("session/goalChanged"),
+	sessionId: SessionIdSchema,
+	goal: Type.Union([SessionGoalViewSchema, Type.Null()]),
 });
 
 export const TurnQueueChangedEventSchema = StrictObject({
@@ -1160,6 +1196,7 @@ export const DomainEventSchema = Type.Union([
 	ThinkingSelectionChangedEventSchema,
 	ModelChangedEventSchema,
 	TasksChangedEventSchema,
+	GoalChangedEventSchema,
 	TurnQueueChangedEventSchema,
 	SubagentUpdatedEventSchema,
 	SubagentItemStartedEventSchema,
@@ -1214,6 +1251,8 @@ export type TurnView = Static<typeof TurnViewSchema>;
 export type InteractionChoice = Static<typeof InteractionChoiceSchema>;
 export type InteractionView = Static<typeof InteractionViewSchema>;
 export type SessionTaskView = Static<typeof SessionTaskViewSchema>;
+export type SessionGoalStatusView = Static<typeof SessionGoalStatusSchema>;
+export type SessionGoalView = Static<typeof SessionGoalViewSchema>;
 export type QueuedTurnAttachmentView = Static<typeof QueuedTurnAttachmentViewSchema>;
 export type QueuedTurnView = Static<typeof QueuedTurnViewSchema>;
 export type SessionStatusView = Static<typeof SessionStatusViewSchema>;
@@ -1230,6 +1269,8 @@ export type WebSearchProvider = Static<typeof WebSearchProviderSchema>;
 export type WebSearchSettingsView = Static<typeof WebSearchSettingsViewSchema>;
 export type ImageGenApiView = Static<typeof ImageGenApiViewSchema>;
 export type ImageGenSettingsView = Static<typeof ImageGenSettingsViewSchema>;
+export type VisionApiView = Static<typeof VisionApiViewSchema>;
+export type VisionSettingsView = Static<typeof VisionSettingsViewSchema>;
 export type HookEventNameView = Static<typeof HookEventNameSchema>;
 export type HookRunModeView = Static<typeof HookRunModeSchema>;
 export type DeclarativeHookView = Static<typeof DeclarativeHookViewSchema>;

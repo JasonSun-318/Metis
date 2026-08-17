@@ -152,7 +152,7 @@ const scheduleCases = [
 		{},
 		{
 			defaultModel: { provider: "openai", modelId: "gpt-test" },
-			visionModel: null,
+			vision: null,
 			imageGen: null,
 			defaultThinkingSelection: "high",
 			providers: [
@@ -192,7 +192,13 @@ const scheduleCases = [
 		},
 		{
 			defaultModel: { provider: "openai", modelId: "gpt-test" },
-			visionModel: { provider: "openai", modelId: "gpt-test" },
+			vision: {
+				name: "My vision",
+				baseUrl: "https://api.openai.com/v1",
+				api: "openai-responses",
+				modelId: "gpt-4o",
+				authConfigured: true,
+			},
 			imageGen: {
 				name: "My image gen",
 				baseUrl: "https://api.openai.com/v1",
@@ -209,11 +215,15 @@ const scheduleCases = [
 		"model/settings/update",
 		{
 			requestId: "ffffffff-ffff-4fff-8fff-ffffffffffff",
-			mutation: { type: "set_vision_model", model: null },
+			mutation: {
+				type: "set_vision",
+				settings: null,
+				credential: { action: "remove" },
+			},
 		},
 		{
 			defaultModel: { provider: "openai", modelId: "gpt-test" },
-			visionModel: null,
+			vision: null,
 			imageGen: null,
 			defaultThinkingSelection: "high",
 			providers: [],
@@ -237,7 +247,7 @@ const scheduleCases = [
 		},
 		{
 			defaultModel: { provider: "openai", modelId: "gpt-test" },
-			visionModel: null,
+			vision: null,
 			imageGen: {
 				name: "My image gen",
 				baseUrl: "https://api.openai.com/v1",
@@ -486,6 +496,7 @@ describe("golden protocol fixtures", () => {
 				"session/thinkingSelectionChanged",
 				"session/modelChanged",
 				"session/tasksChanged",
+				"session/goalChanged",
 				"turn/queueChanged",
 				"subagent/updated",
 				"subagent/item/started",
@@ -527,6 +538,82 @@ describe("golden protocol fixtures", () => {
 		const nonBoolean = structuredClone(withTasks);
 		nonBoolean.result.snapshot.tasks[0]!.completed = "yes";
 		expect(() => validateResponseFor("client", request, nonBoolean)).toThrow(ProtocolValidationError);
+	});
+
+	it("validates session/goal/set params and goal snapshots", () => {
+		const valid = {
+			jsonrpc: "2.0",
+			id: "goal-set-valid",
+			method: "session/goal/set",
+			params: {
+				sessionId: SESSION_ID,
+				requestId: "22222222-2222-4222-8222-222222222232",
+				objective: "keep tests green",
+			},
+		};
+		expect(validateClientRequest(valid)).toEqual(valid);
+
+		const statusOnly = {
+			...valid,
+			id: "goal-set-status",
+			params: {
+				sessionId: SESSION_ID,
+				requestId: "22222222-2222-4222-8222-222222222233",
+				status: "paused",
+			},
+		};
+		expect(validateClientRequest(statusOnly)).toEqual(statusOnly);
+
+		expect(() =>
+			validateClientRequest({
+				...valid,
+				id: "goal-set-empty",
+				params: {
+					sessionId: SESSION_ID,
+					requestId: "22222222-2222-4222-8222-222222222234",
+				},
+			}),
+		).toThrow(ProtocolValidationError);
+
+		expect(() =>
+			validateClientRequest({
+				...valid,
+				id: "goal-set-blank-objective",
+				params: {
+					sessionId: SESSION_ID,
+					requestId: "22222222-2222-4222-8222-222222222235",
+					objective: "",
+				},
+			}),
+		).toThrow(ProtocolValidationError);
+
+		const subscribeRequest = requestFor("client", "session/subscribe").envelope;
+		const subscribeFixture = responses.find((entry) => entry.method === "session/subscribe")!.envelope;
+		const withGoal = structuredClone(subscribeFixture) as {
+			result: {
+				snapshot: {
+					goal: {
+						goalId: string;
+						objective: string;
+						status: string;
+						timeUsedSeconds: number;
+						activeStartedAt: string | null;
+					} | null;
+				};
+			};
+		};
+		withGoal.result.snapshot.goal = {
+			goalId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+			objective: "keep tests green",
+			status: "active",
+			timeUsedSeconds: 12,
+			activeStartedAt: "2026-08-17T00:00:00.000Z",
+		};
+		expect(() => validateResponseFor("client", subscribeRequest, withGoal)).not.toThrow();
+
+		const blankObjective = structuredClone(withGoal);
+		blankObjective.result.snapshot.goal!.objective = "";
+		expect(() => validateResponseFor("client", subscribeRequest, blankObjective)).toThrow(ProtocolValidationError);
 	});
 
 	it("accepts terminal session invalidation notifications", () => {

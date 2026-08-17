@@ -67,11 +67,20 @@ function goalPayload(goal: ThreadGoal | null): string {
 	);
 }
 
-function currentGoalForAccounting(getSession: () => SessionManager): ThreadGoal | null {
+function goalWithLiveElapsed(goal: ThreadGoal, now = Date.now()): ThreadGoal {
+	if (goal.status !== "active" || goal.activeStartedAt === null) return goal;
+	return {
+		...goal,
+		timeUsedSeconds: goal.timeUsedSeconds + Math.max(0, Math.floor((now - goal.activeStartedAt) / 1_000)),
+	};
+}
+
+function currentGoalForAccounting(getSession: () => SessionManager, options?: { flush?: boolean }): ThreadGoal | null {
 	const session = getSession();
 	const goal = readThreadGoal(session);
 	if (!goal || goal.status !== "active") return goal;
-	return flushGoalElapsed(session, goal);
+	if (options?.flush) return flushGoalElapsed(session, goal);
+	return goalWithLiveElapsed(goal);
 }
 
 export function createGetGoalToolDefinition(
@@ -110,7 +119,7 @@ export function createCreateGoalToolDefinition(
 		async execute(_toolCallId, input) {
 			const session = resolved.getSession();
 			const objective = validateGoalObjective(input.objective);
-			const existing = currentGoalForAccounting(resolved.getSession);
+			const existing = currentGoalForAccounting(resolved.getSession, { flush: true });
 			if (existing && !isTerminalGoalStatus(existing.status)) {
 				throw new Error(
 					"cannot create a new goal because this thread has an unfinished goal; complete the existing goal first",
@@ -156,7 +165,7 @@ You cannot use this tool to pause, resume, or usage-limit a goal; those status c
 				);
 			}
 			const session = resolved.getSession();
-			const existing = currentGoalForAccounting(resolved.getSession);
+			const existing = currentGoalForAccounting(resolved.getSession, { flush: true });
 			if (!existing) {
 				throw new Error("cannot update goal because this thread has no goal");
 			}
