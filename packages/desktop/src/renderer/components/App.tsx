@@ -43,6 +43,7 @@ import { loadSessionPins, saveSessionPins, setSessionPinned } from "../store/ses
 import { applyThemeToDocument, loadTheme, resolveTheme, saveTheme, type AppTheme, watchSystemTheme } from "../theme.ts";
 import { Composer, type ComposerSubmission } from "./Composer.tsx";
 import { CodeProjectSetup } from "./CodeProjectSetup.tsx";
+import { GoalBar } from "./GoalBar.tsx";
 import { InteractionHost } from "./InteractionHost.tsx";
 import { ModelSelector } from "./ModelSelector.tsx";
 import { NewTaskHome } from "./NewTaskHome.tsx";
@@ -67,6 +68,7 @@ import { TurnRuntimeStatus } from "./TurnRuntimeStatus.tsx";
 import { clampToolsSidebarWidth, ToolsSidebar } from "./ToolsSidebar.tsx";
 import { Transcript } from "./Transcript.tsx";
 import { WorkspaceSessionHeader } from "./WorkspaceSessionHeader.tsx";
+import { GOAL_SLASH_USAGE, type GoalSlashCommand } from "../goal-slash.ts";
 import type { ComposerSlashCommand } from "./SlashCommandMenu.tsx";
 
 interface AppProps {
@@ -1397,8 +1399,10 @@ export function App({ api, store }: AppProps) {
 		const reasons: Partial<Record<ComposerSlashCommand, string>> = {};
 		if (!writableSessionId) {
 			commands.add("compact");
+			commands.add("goal");
 			commands.add("status");
 			reasons.compact = "Open a task to use this command";
+			reasons.goal = "Open a task to use this command";
 			reasons.status = "Open a task to use this command";
 		} else if (compactBlocked) {
 			commands.add("compact");
@@ -1449,6 +1453,51 @@ export function App({ api, store }: AppProps) {
 		}
 	}, [api, closeSessionStatus, compactBlocked, reportError, requestComposerControl, writableSessionId]);
 
+	const mutateSessionGoal = useCallback(
+		async (input: { objective?: string; status?: "active" | "paused" } | { clear: true }) => {
+			if (!writableSessionId) return;
+			try {
+				if ("clear" in input) {
+					await api.clearSessionGoal({ sessionId: writableSessionId, requestId: crypto.randomUUID() });
+					return;
+				}
+				await api.setSessionGoal({
+					sessionId: writableSessionId,
+					requestId: crypto.randomUUID(),
+					...(input.objective === undefined ? {} : { objective: input.objective }),
+					...(input.status === undefined ? {} : { status: input.status }),
+				});
+			} catch (cause) {
+				reportError(cause);
+			}
+		},
+		[api, reportError, writableSessionId],
+	);
+
+	const handleGoalCommand = useCallback(
+		async (command: GoalSlashCommand) => {
+			if (!writableSessionId) return;
+			if (command.kind === "usage") {
+				setNotice(GOAL_SLASH_USAGE);
+				return;
+			}
+			if (command.kind === "clear") {
+				await mutateSessionGoal({ clear: true });
+				return;
+			}
+			if (command.kind === "pause") {
+				await mutateSessionGoal({ status: "paused" });
+				return;
+			}
+			if (command.kind === "resume") {
+				await mutateSessionGoal({ status: "active" });
+				return;
+			}
+			await mutateSessionGoal({ objective: command.objective });
+		},
+		[mutateSessionGoal, writableSessionId],
+	);
+
 	const handleSlashCommand = useCallback(async (command: ComposerSlashCommand) => {
 		if (command === "status") {
 			await openSessionStatus();
@@ -1457,6 +1506,10 @@ export function App({ api, store }: AppProps) {
 		closeSessionStatus();
 		if (command === "compact") {
 			await compactConversation();
+			return;
+		}
+		if (command === "goal") {
+			setNotice(GOAL_SLASH_USAGE);
 			return;
 		}
 		requestComposerControl(command);
@@ -1703,10 +1756,19 @@ export function App({ api, store }: AppProps) {
 								disabledSlashCommands={disabledSlashCommands}
 								disabledSlashReasons={disabledSlashReasons}
 								interactionControl={inlineInteraction ? <InteractionHost interaction={inlineInteraction} key={inlineInteraction.interactionId} onRespond={respond} /> : undefined}
+								goalControl={
+									<GoalBar
+										goal={state.goal}
+										onClear={() => void mutateSessionGoal({ clear: true })}
+										onPause={() => void mutateSessionGoal({ status: "paused" })}
+										onResume={() => void mutateSessionGoal({ status: "active" })}
+									/>
+								}
 								key={visibleActiveSession.sessionId}
 								mcpConnectionState={mcpConnectionState}
 								mcpServers={connectedMcpServers}
 								modelControl={modelControl}
+								onGoalCommand={handleGoalCommand}
 								onInterrupt={interrupt}
 								onManageMcp={openMcpManagement}
 								onManageSkills={() => { setPluginSection("skills"); setDestination("skills"); }}

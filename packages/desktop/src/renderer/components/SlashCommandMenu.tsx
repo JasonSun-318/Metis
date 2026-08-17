@@ -1,12 +1,13 @@
 import type { SkillSummaryView } from "@metis/app-protocol";
-import { ArrowsIn, Brain, Cube, Gauge, Plugs, Scroll } from "@phosphor-icons/react";
+import { ArrowsIn, Brain, Cube, Gauge, Plugs, Scroll, Target } from "@phosphor-icons/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-export type ComposerSlashCommand = "compact" | "model" | "thinking" | "status" | "mcp";
+export type ComposerSlashCommand = "compact" | "goal" | "model" | "thinking" | "status" | "mcp";
 
 export const composerSlashCommands: readonly ComposerSlashCommand[] = [
 	"compact",
+	"goal",
 	"model",
 	"thinking",
 	"status",
@@ -15,6 +16,7 @@ export const composerSlashCommands: readonly ComposerSlashCommand[] = [
 
 const commandCopy: Record<ComposerSlashCommand, { readonly label: string; readonly description: string }> = {
 	compact: { label: "/compact", description: "Compact conversation" },
+	goal: { label: "/goal", description: "Set or control the session goal" },
 	model: { label: "/model", description: "Choose model" },
 	thinking: { label: "/thinking", description: "Choose reasoning effort" },
 	status: { label: "/status", description: "Show session status" },
@@ -23,6 +25,7 @@ const commandCopy: Record<ComposerSlashCommand, { readonly label: string; readon
 
 const commandIcons = {
 	compact: ArrowsIn,
+	goal: Target,
 	model: Cube,
 	thinking: Brain,
 	status: Gauge,

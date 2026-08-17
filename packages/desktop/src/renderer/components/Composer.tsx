@@ -3,6 +3,7 @@ import { ArrowUp, Scroll, Stop, X } from "@phosphor-icons/react";
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import type { DesktopAttachmentSelection } from "../../shared/desktop-api.ts";
+import { type GoalSlashCommand, parseGoalSlash } from "../goal-slash.ts";
 import { ComposerAddMenu } from "./ComposerAddMenu.tsx";
 import {
 	composerSlashCommands,
@@ -39,6 +40,7 @@ interface ComposerProps {
 	readonly onManageSkills?: () => void;
 	readonly onPickFiles?: () => Promise<readonly DesktopAttachmentSelection[]>;
 	readonly onSlashCommand?: (command: ComposerSlashCommand) => void | Promise<void>;
+	readonly onGoalCommand?: (command: GoalSlashCommand) => void | Promise<void>;
 	readonly appearance?: "chat" | "code";
 	readonly interactionControl?: ReactNode;
 	readonly goalControl?: ReactNode;
@@ -71,6 +73,7 @@ export function Composer({
 	onManageSkills,
 	onPickFiles,
 	onSlashCommand,
+	onGoalCommand,
 	appearance = "code",
 	cacheHitPercent,
 	interactionControl,
@@ -161,6 +164,13 @@ export function Composer({
 		event.preventDefault();
 		const prompt = fullText.trim();
 		if (!hasInput || disabled || submitDisabled || submitting) return;
+		const goalCommand = parseGoalSlash(fullText);
+		if (goalCommand && onGoalCommand) {
+			if (disabledSlashCommands.has("goal")) return;
+			setText("");
+			await onGoalCommand(goalCommand);
+			return;
+		}
 		if (exactCommand && onSlashCommand) {
 			if (disabledSlashCommands.has(exactCommand)) return;
 			setText("");

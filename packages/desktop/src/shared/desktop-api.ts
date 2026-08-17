@@ -101,6 +101,8 @@ export const DESKTOP_IPC_CHANNELS = {
 	readSessionImage: "metis:read-session-image",
 	getSessionStatus: "metis:get-session-status",
 	compactSession: "metis:compact-session",
+	setSessionGoal: "metis:set-session-goal",
+	clearSessionGoal: "metis:clear-session-goal",
 	readSubagentItems: "metis:read-subagent-items",
 	interruptSubagent: "metis:interrupt-subagent",
 	setThinkingSelection: "metis:set-thinking-selection",
@@ -505,6 +507,8 @@ export interface MetisDesktopApi {
 	readSessionImage(input: ClientParams<"session/readImage">): Promise<ClientResult<"session/readImage">>;
 	getSessionStatus(input: ClientParams<"session/status">): Promise<ClientResult<"session/status">>;
 	compactSession(input: ClientParams<"session/compact">): Promise<ClientResult<"session/compact">>;
+	setSessionGoal(input: ClientParams<"session/goal/set">): Promise<ClientResult<"session/goal/set">>;
+	clearSessionGoal(input: ClientParams<"session/goal/clear">): Promise<ClientResult<"session/goal/clear">>;
 	readSubagentItems(input: ClientParams<"subagent/readItems">): Promise<ClientResult<"subagent/readItems">>;
 	interruptSubagent(input: ClientParams<"subagent/interrupt">): Promise<ClientResult<"subagent/interrupt">>;
 	setThinkingSelection(

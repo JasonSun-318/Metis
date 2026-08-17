@@ -23,6 +23,7 @@ describe("SlashCommandMenu", () => {
 		await act(async () => root.render(<SlashCommandMenu {...props} query="" />));
 		expect([...container.querySelectorAll('[role="option"] strong')].map((node) => node.textContent)).toEqual([
 			"/compact",
+			"/goal",
 			"/model",
 			"/thinking",
 			"/status",
@@ -33,6 +34,10 @@ describe("SlashCommandMenu", () => {
 		await act(async () => root.render(<SlashCommandMenu {...props} query="com" />));
 		expect([...container.querySelectorAll('[role="option"] strong')].map((node) => node.textContent)).toEqual([
 			"/compact",
+		]);
+		await act(async () => root.render(<SlashCommandMenu {...props} query="goa" />));
+		expect([...container.querySelectorAll('[role="option"] strong')].map((node) => node.textContent)).toEqual([
+			"/goal",
 		]);
 		await act(async () => root.unmount());
 	});

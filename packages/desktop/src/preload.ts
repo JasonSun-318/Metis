@@ -243,6 +243,14 @@ const api = {
 		invoke(DESKTOP_IPC_CHANNELS.compactSession, "session/compact", input) as ReturnType<
 			MetisDesktopApi["compactSession"]
 		>,
+	setSessionGoal: (input: ClientParams<"session/goal/set">) =>
+		invoke(DESKTOP_IPC_CHANNELS.setSessionGoal, "session/goal/set", input) as ReturnType<
+			MetisDesktopApi["setSessionGoal"]
+		>,
+	clearSessionGoal: (input: ClientParams<"session/goal/clear">) =>
+		invoke(DESKTOP_IPC_CHANNELS.clearSessionGoal, "session/goal/clear", input) as ReturnType<
+			MetisDesktopApi["clearSessionGoal"]
+		>,
 	readSubagentItems: (input: ClientParams<"subagent/readItems">) =>
 		invoke(DESKTOP_IPC_CHANNELS.readSubagentItems, "subagent/readItems", input) as ReturnType<
 			MetisDesktopApi["readSubagentItems"]

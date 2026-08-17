@@ -393,8 +393,9 @@ test("packaged task list uses the Metis composer UI in Chat and Code", async ({}
 		await expect(slashMenu).toBeVisible();
 		await expect(slashMenu.getByText("skill:e2e-skill", { exact: true })).toBeVisible();
 		const slashLabels = await slashMenu.locator("[role=option] strong").allTextContents();
-		expect(slashLabels.slice(0, 5)).toEqual([
+		expect(slashLabels.slice(0, 6)).toEqual([
 			"/compact",
+			"/goal",
 			"/model",
 			"/thinking",
 			"/status",

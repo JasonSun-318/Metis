@@ -564,6 +564,12 @@ export class ClientBroker {
 		this.register(DESKTOP_IPC_CHANNELS.compactSession, 1, async (_event, [input]) =>
 			this.clientCall("session/compact", input),
 		);
+		this.register(DESKTOP_IPC_CHANNELS.setSessionGoal, 1, async (_event, [input]) =>
+			this.clientCall("session/goal/set", input),
+		);
+		this.register(DESKTOP_IPC_CHANNELS.clearSessionGoal, 1, async (_event, [input]) =>
+			this.clientCall("session/goal/clear", input),
+		);
 		this.register(DESKTOP_IPC_CHANNELS.readSubagentItems, 1, async (_event, [input]) =>
 			this.clientCall("subagent/readItems", input),
 		);

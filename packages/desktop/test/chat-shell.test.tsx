@@ -492,6 +492,17 @@ function createHarness(options: {
 			tokensBefore: 64_000,
 			estimatedTokensAfter: 8_000,
 		})),
+		setSessionGoal: vi.fn(async ({ sessionId, objective, status }) => ({
+			sessionId,
+			goal: {
+				goalId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+				objective: objective ?? "keep tests green",
+				status: status ?? "active",
+				timeUsedSeconds: 0,
+				activeStartedAt: status === "paused" ? null : "2026-08-17T00:00:00.000Z",
+			},
+		})),
+		clearSessionGoal: vi.fn(async ({ sessionId }) => ({ sessionId, cleared: true })),
 		readSubagentItems: vi.fn().mockResolvedValue({ items: [], nextBeforeItemId: null }),
 		interruptSubagent: vi.fn().mockResolvedValue({}),
 		setThinkingSelection: vi.fn().mockResolvedValue({}),
@@ -2298,6 +2309,29 @@ describe("Chat desktop shell", () => {
 		await run("mcp");
 		expect(container.querySelector(".effort-popover")).toBeNull();
 		expect(container.querySelector(".composer-mcp-menu")?.textContent).toContain("deepwiki");
+		await act(async () => root.unmount());
+	});
+
+	it("routes /goal text to setSessionGoal without starting a turn", async () => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
+		const { api } = createHarness();
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<App api={api} store={new AppStore()} />));
+		await flush();
+		const textarea = container.querySelector("textarea")!;
+		await act(async () => changeTextarea(textarea, "/goal keep tests green"));
+		await act(async () => textarea.form!.requestSubmit());
+		await flush();
+		expect(api.setSessionGoal).toHaveBeenCalledWith(
+			expect.objectContaining({
+				sessionId: "chat-existing",
+				objective: "keep tests green",
+			}),
+		);
+		expect(api.startTurn).not.toHaveBeenCalled();
 		await act(async () => root.unmount());
 	});
 

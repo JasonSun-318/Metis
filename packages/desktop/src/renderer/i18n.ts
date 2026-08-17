@@ -602,6 +602,8 @@ const zhCN = {
 	"Pause goal": "暂停目标",
 	"Resume goal": "继续目标",
 	"Delete goal": "删除目标",
+	"Set or control the session goal": "设置或控制会话目标",
+	"Usage: /goal [<objective>|clear|pause|resume]": "用法：/goal [<目标>|clear|pause|resume]",
 	"Collapse task list": "收起任务列表",
 	"Expand task list": "展开任务列表",
 	"Update to new version": "更新新版本",
