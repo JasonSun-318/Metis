@@ -76,16 +76,17 @@ export function writeThreadGoal(
 	const now = input.now ?? Date.now();
 	const existing = readThreadGoal(session);
 	const objective = validateGoalObjective(input.objective);
-	const sameGoal = existing !== null && (input.goalId === undefined || existing.goalId === input.goalId);
+	const replacing = input.goalId !== undefined && (existing === null || existing.goalId !== input.goalId);
+	const sameGoal = existing !== null && !replacing && (input.goalId === undefined || existing.goalId === input.goalId);
 	const createdAt = sameGoal ? (input.createdAt ?? existing.createdAt) : now;
 	const previousElapsed = sameGoal ? existing.timeUsedSeconds : 0;
 	const leavingActive =
 		sameGoal && existing.status === "active" && existing.activeStartedAt !== null && input.status !== "active";
 	const flushed = leavingActive
 		? previousElapsed + Math.max(0, Math.floor((now - existing.activeStartedAt!) / 1_000))
-		: (input.timeUsedSeconds ?? previousElapsed);
+		: (input.timeUsedSeconds ?? (sameGoal ? previousElapsed : 0));
 	const goal: ThreadGoal = {
-		goalId: input.goalId ?? existing?.goalId ?? randomUUID(),
+		goalId: input.goalId ?? (sameGoal ? existing.goalId : randomUUID()),
 		objective,
 		status: input.status,
 		timeUsedSeconds: flushed,

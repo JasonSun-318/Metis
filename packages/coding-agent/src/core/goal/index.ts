@@ -1,4 +1,8 @@
 export {
+	buildGoalContinuationPrompt,
+	buildGoalObjectiveUpdatedPrompt,
+} from "./continuation.ts";
+export {
 	clearThreadGoal,
 	flushGoalElapsed,
 	GOAL_CUSTOM_TYPE,
@@ -11,3 +15,9 @@ export {
 	validateGoalObjective,
 	writeThreadGoal,
 } from "./store.ts";
+export {
+	createCreateGoalToolDefinition,
+	createGetGoalToolDefinition,
+	createUpdateGoalToolDefinition,
+	type GoalToolOptions,
+} from "./tools.ts";
