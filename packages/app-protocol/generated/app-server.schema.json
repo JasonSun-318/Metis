@@ -4009,116 +4009,6 @@
                             }
                           },
                           "additionalProperties": false
-                        },
-                        {
-                          "type": "object",
-                          "required": [
-                            "type",
-                            "settings",
-                            "credential"
-                          ],
-                          "properties": {
-                            "type": {
-                              "type": "string",
-                              "const": "set_image_gen"
-                            },
-                            "settings": {
-                              "anyOf": [
-                                {
-                                  "type": "object",
-                                  "required": [
-                                    "name",
-                                    "baseUrl",
-                                    "api",
-                                    "modelId"
-                                  ],
-                                  "properties": {
-                                    "name": {
-                                      "type": "string",
-                                      "minLength": 1,
-                                      "maxLength": 120
-                                    },
-                                    "baseUrl": {
-                                      "type": "string",
-                                      "minLength": 1,
-                                      "maxLength": 2048
-                                    },
-                                    "api": {
-                                      "anyOf": [
-                                        {
-                                          "type": "string",
-                                          "const": "openai-images"
-                                        },
-                                        {
-                                          "type": "string",
-                                          "const": "openrouter-images"
-                                        }
-                                      ]
-                                    },
-                                    "modelId": {
-                                      "type": "string",
-                                      "minLength": 1,
-                                      "maxLength": 300
-                                    }
-                                  },
-                                  "additionalProperties": false
-                                },
-                                {
-                                  "type": "null"
-                                }
-                              ]
-                            },
-                            "credential": {
-                              "anyOf": [
-                                {
-                                  "type": "object",
-                                  "required": [
-                                    "action"
-                                  ],
-                                  "properties": {
-                                    "action": {
-                                      "type": "string",
-                                      "const": "keep"
-                                    }
-                                  },
-                                  "additionalProperties": false
-                                },
-                                {
-                                  "type": "object",
-                                  "required": [
-                                    "action"
-                                  ],
-                                  "properties": {
-                                    "action": {
-                                      "type": "string",
-                                      "const": "remove"
-                                    }
-                                  },
-                                  "additionalProperties": false
-                                },
-                                {
-                                  "type": "object",
-                                  "required": [
-                                    "action",
-                                    "value"
-                                  ],
-                                  "properties": {
-                                    "action": {
-                                      "type": "string",
-                                      "const": "set"
-                                    },
-                                    "value": {
-                                      "type": "string",
-                                      "minLength": 1,
-                                      "maxLength": 32768
-                                    }
-                                  },
-                                  "additionalProperties": false
-                                }
-                              ]
-                            }
-                          },
-                          "additionalProperties": false
                         }
                       ]
                     }
@@ -20753,7 +20643,6 @@
                   "required": [
                     "defaultModel",
                     "vision",
-                    "imageGen",
                     "defaultThinkingSelection",
                     "providers",
                     "loadError"
@@ -20823,56 +20712,6 @@
                                 {
                                   "type": "string",
                                   "const": "anthropic-messages"
-                                }
-                              ]
-                            },
-                            "modelId": {
-                              "type": "string",
-                              "minLength": 1,
-                              "maxLength": 300
-                            },
-                            "authConfigured": {
-                              "type": "boolean"
-                            }
-                          },
-                          "additionalProperties": false
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
-                    "imageGen": {
-                      "anyOf": [
-                        {
-                          "type": "object",
-                          "required": [
-                            "name",
-                            "baseUrl",
-                            "api",
-                            "modelId",
-                            "authConfigured"
-                          ],
-                          "properties": {
-                            "name": {
-                              "type": "string",
-                              "minLength": 1,
-                              "maxLength": 120
-                            },
-                            "baseUrl": {
-                              "type": "string",
-                              "minLength": 1,
-                              "maxLength": 2048
-                            },
-                            "api": {
-                              "anyOf": [
-                                {
-                                  "type": "string",
-                                  "const": "openai-images"
-                                },
-                                {
-                                  "type": "string",
-                                  "const": "openrouter-images"
                                 }
                               ]
                             },
@@ -21127,7 +20966,6 @@
                   "required": [
                     "defaultModel",
                     "vision",
-                    "imageGen",
                     "defaultThinkingSelection",
                     "providers",
                     "loadError"
@@ -21197,56 +21035,6 @@
                                 {
                                   "type": "string",
                                   "const": "anthropic-messages"
-                                }
-                              ]
-                            },
-                            "modelId": {
-                              "type": "string",
-                              "minLength": 1,
-                              "maxLength": 300
-                            },
-                            "authConfigured": {
-                              "type": "boolean"
-                            }
-                          },
-                          "additionalProperties": false
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
-                    "imageGen": {
-                      "anyOf": [
-                        {
-                          "type": "object",
-                          "required": [
-                            "name",
-                            "baseUrl",
-                            "api",
-                            "modelId",
-                            "authConfigured"
-                          ],
-                          "properties": {
-                            "name": {
-                              "type": "string",
-                              "minLength": 1,
-                              "maxLength": 120
-                            },
-                            "baseUrl": {
-                              "type": "string",
-                              "minLength": 1,
-                              "maxLength": 2048
-                            },
-                            "api": {
-                              "anyOf": [
-                                {
-                                  "type": "string",
-                                  "const": "openai-images"
-                                },
-                                {
-                                  "type": "string",
-                                  "const": "openrouter-images"
                                 }
                               ]
                             },
@@ -34047,116 +33835,6 @@
                         }
                       },
                       "additionalProperties": false
-                    },
-                    {
-                      "type": "object",
-                      "required": [
-                        "type",
-                        "settings",
-                        "credential"
-                      ],
-                      "properties": {
-                        "type": {
-                          "type": "string",
-                          "const": "set_image_gen"
-                        },
-                        "settings": {
-                          "anyOf": [
-                            {
-                              "type": "object",
-                              "required": [
-                                "name",
-                                "baseUrl",
-                                "api",
-                                "modelId"
-                              ],
-                              "properties": {
-                                "name": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "maxLength": 120
-                                },
-                                "baseUrl": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "maxLength": 2048
-                                },
-                                "api": {
-                                  "anyOf": [
-                                    {
-                                      "type": "string",
-                                      "const": "openai-images"
-                                    },
-                                    {
-                                      "type": "string",
-                                      "const": "openrouter-images"
-                                    }
-                                  ]
-                                },
-                                "modelId": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "maxLength": 300
-                                }
-                              },
-                              "additionalProperties": false
-                            },
-                            {
-                              "type": "null"
-                            }
-                          ]
-                        },
-                        "credential": {
-                          "anyOf": [
-                            {
-                              "type": "object",
-                              "required": [
-                                "action"
-                              ],
-                              "properties": {
-                                "action": {
-                                  "type": "string",
-                                  "const": "keep"
-                                }
-                              },
-                              "additionalProperties": false
-                            },
-                            {
-                              "type": "object",
-                              "required": [
-                                "action"
-                              ],
-                              "properties": {
-                                "action": {
-                                  "type": "string",
-                                  "const": "remove"
-                                }
-                              },
-                              "additionalProperties": false
-                            },
-                            {
-                              "type": "object",
-                              "required": [
-                                "action",
-                                "value"
-                              ],
-                              "properties": {
-                                "action": {
-                                  "type": "string",
-                                  "const": "set"
-                                },
-                                "value": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "maxLength": 32768
-                                }
-                              },
-                              "additionalProperties": false
-                            }
-                          ]
-                        }
-                      },
-                      "additionalProperties": false
                     }
                   ]
                 }
@@ -45693,7 +45371,6 @@
               "required": [
                 "defaultModel",
                 "vision",
-                "imageGen",
                 "defaultThinkingSelection",
                 "providers",
                 "loadError"
@@ -45763,56 +45440,6 @@
                             {
                               "type": "string",
                               "const": "anthropic-messages"
-                            }
-                          ]
-                        },
-                        "modelId": {
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 300
-                        },
-                        "authConfigured": {
-                          "type": "boolean"
-                        }
-                      },
-                      "additionalProperties": false
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                },
-                "imageGen": {
-                  "anyOf": [
-                    {
-                      "type": "object",
-                      "required": [
-                        "name",
-                        "baseUrl",
-                        "api",
-                        "modelId",
-                        "authConfigured"
-                      ],
-                      "properties": {
-                        "name": {
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 120
-                        },
-                        "baseUrl": {
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 2048
-                        },
-                        "api": {
-                          "anyOf": [
-                            {
-                              "type": "string",
-                              "const": "openai-images"
-                            },
-                            {
-                              "type": "string",
-                              "const": "openrouter-images"
                             }
                           ]
                         },
@@ -46067,7 +45694,6 @@
               "required": [
                 "defaultModel",
                 "vision",
-                "imageGen",
                 "defaultThinkingSelection",
                 "providers",
                 "loadError"
@@ -46137,56 +45763,6 @@
                             {
                               "type": "string",
                               "const": "anthropic-messages"
-                            }
-                          ]
-                        },
-                        "modelId": {
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 300
-                        },
-                        "authConfigured": {
-                          "type": "boolean"
-                        }
-                      },
-                      "additionalProperties": false
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                },
-                "imageGen": {
-                  "anyOf": [
-                    {
-                      "type": "object",
-                      "required": [
-                        "name",
-                        "baseUrl",
-                        "api",
-                        "modelId",
-                        "authConfigured"
-                      ],
-                      "properties": {
-                        "name": {
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 120
-                        },
-                        "baseUrl": {
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 2048
-                        },
-                        "api": {
-                          "anyOf": [
-                            {
-                              "type": "string",
-                              "const": "openai-images"
-                            },
-                            {
-                              "type": "string",
-                              "const": "openrouter-images"
                             }
                           ]
                         },

@@ -17,7 +17,6 @@ const CLEARABLE_BUILTIN_TOOLS = new Set([
 	"web_fetch",
 	"web_search",
 	"describe_image",
-	"generate_image",
 ]);
 
 type ToolResultMessage = Extract<AgentMessage, { role: "toolResult" }>;

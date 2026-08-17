@@ -1,20 +1,22 @@
 /**
  * Vision describer tool: lets models without image input "see" images.
  *
- * The tool is always registered. At execution time it routes:
+ * Activated only when vision settings and an API key are configured.
+ * At execution time it routes:
  * 1. models that already accept images -> tell them to use `read` directly
- * 2. no vision model configured -> tell the model to ask the user to configure one
- * 3. otherwise -> read the image and ask the configured vision model for a
+ * 2. no vision service configured -> tell the model to ask the user to configure one
+ * 3. otherwise -> read the image and ask the configured vision service for a
  *    markdown description via a standalone streaming request
  */
 
 import { readFile } from "node:fs/promises";
 import type { AgentTool, AgentToolResult } from "@metis/agent-core";
+import type { Api, AssistantMessageEventStream, Context, Model, SimpleStreamOptions } from "@metis/ai";
 import { type Static, Type } from "typebox";
 import { processImage } from "../../utils/image-process.ts";
 import { detectSupportedImageMimeTypeFromFile } from "../../utils/mime.ts";
 import type { ExtensionContext, ToolDefinition } from "../extensions/types.ts";
-import type { ModelRegistry } from "../model-registry.ts";
+import type { VisionSettings } from "../settings-manager.ts";
 import { resolveReadPathAsync } from "./path-utils.ts";
 import { wrapToolDefinition } from "./tool-definition-wrapper.ts";
 
@@ -25,14 +27,17 @@ const describeImageSchema = Type.Object({
 export type DescribeImageToolInput = Static<typeof describeImageSchema>;
 
 export interface DescribeImageToolDetails {
-	visionModel: { provider: string; modelId: string };
+	visionModel: { modelId: string; baseUrl: string };
 	path: string;
 }
 
 export interface DescribeImageToolOptions {
-	/** Current vision-model reference from settings; undefined when not configured. */
-	getVisionRef(): { provider: string; modelId: string } | undefined;
-	modelRegistry: Pick<ModelRegistry, "find" | "hasConfiguredAuth" | "getApiKeyAndHeaders" | "streamSimple">;
+	/** Current vision-describer service settings; undefined when not configured. */
+	getSettings(): VisionSettings | undefined;
+	/** Resolves the stored API key for the vision-describer service. */
+	getApiKey(): Promise<string | undefined>;
+	/** Streams a one-shot vision request against the configured endpoint. */
+	streamSimple(model: Model<Api>, context: Context, options?: SimpleStreamOptions): AssistantMessageEventStream;
 }
 
 /** System prompt for the vision model producing the markdown description. */
@@ -53,6 +58,21 @@ Rules:
 const REQUEST_TIMEOUT_MS = 120_000;
 const MAX_DESCRIPTION_TOKENS = 2_048;
 
+function visionModelFromSettings(settings: VisionSettings): Model<Api> {
+	return {
+		id: settings.modelId,
+		name: settings.name,
+		api: settings.api,
+		provider: "vision",
+		baseUrl: settings.baseUrl,
+		reasoning: false,
+		input: ["text", "image"],
+		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+		contextWindow: 128_000,
+		maxTokens: MAX_DESCRIPTION_TOKENS,
+	};
+}
+
 async function describeImage(
 	options: DescribeImageToolOptions,
 	cwd: string,
@@ -72,22 +92,16 @@ async function describeImage(
 		};
 	}
 
-	const visionRef = options.getVisionRef();
-	if (!visionRef) {
+	const settings = options.getSettings();
+	if (!settings) {
 		throw new Error(
-			"No vision model is configured, so this image cannot be described. Ask the user to configure one under Settings → Model → Vision model.",
+			"No vision service is configured, so this image cannot be described. Ask the user to configure one under Settings → Model → Vision model.",
 		);
 	}
-
-	const visionModel = options.modelRegistry.find(visionRef.provider, visionRef.modelId);
-	if (!visionModel || !options.modelRegistry.hasConfiguredAuth(visionModel)) {
+	const apiKey = await options.getApiKey();
+	if (!apiKey) {
 		throw new Error(
-			`The configured vision model (${visionRef.provider}/${visionRef.modelId}) is unavailable. Ask the user to reconfigure it under Settings → Model → Vision model.`,
-		);
-	}
-	if (!visionModel.input.includes("image")) {
-		throw new Error(
-			`The configured vision model (${visionRef.provider}/${visionRef.modelId}) does not accept image input. Ask the user to pick an image-capable model under Settings → Model → Vision model.`,
+			"The vision service has no API key. Ask the user to set it under Settings → Model → Vision model.",
 		);
 	}
 
@@ -102,17 +116,11 @@ async function describeImage(
 		throw new Error(`Could not read image ${path}: ${processed.message}`);
 	}
 
-	const auth = await options.modelRegistry.getApiKeyAndHeaders(visionModel);
-	if (!auth.ok) {
-		throw new Error(
-			`Could not authenticate the vision model (${visionRef.provider}/${visionRef.modelId}): ${auth.error}`,
-		);
-	}
-
+	const visionModel = visionModelFromSettings(settings);
 	const timeout = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
 	const requestSignal = signal ? AbortSignal.any([signal, timeout]) : timeout;
 	try {
-		const message = await options.modelRegistry
+		const message = await options
 			.streamSimple(
 				visionModel,
 				{
@@ -129,9 +137,7 @@ async function describeImage(
 					],
 				},
 				{
-					apiKey: auth.apiKey,
-					env: auth.env,
-					headers: auth.headers,
+					apiKey,
 					maxTokens: MAX_DESCRIPTION_TOKENS,
 					maxRetries: 0,
 					timeoutMs: REQUEST_TIMEOUT_MS,
@@ -145,17 +151,15 @@ async function describeImage(
 			.join("\n")
 			.trim();
 		if (!description) {
-			throw new Error(
-				`The vision model (${visionRef.provider}/${visionRef.modelId}) returned an empty description for ${path}.`,
-			);
+			throw new Error(`The vision service (${settings.modelId}) returned an empty description for ${path}.`);
 		}
 		return {
 			content: [{ type: "text", text: description }],
-			details: { visionModel: visionRef, path: absolutePath },
+			details: { visionModel: { modelId: settings.modelId, baseUrl: settings.baseUrl }, path: absolutePath },
 		};
 	} catch (error) {
 		const reason = error instanceof Error ? error.message : String(error);
-		throw new Error(`Vision model request failed for ${path}: ${reason}`);
+		throw new Error(`Vision service request failed for ${path}: ${reason}`);
 	}
 }
 
@@ -167,8 +171,8 @@ export function createDescribeImageToolDefinition(
 		name: "describe_image",
 		label: "Describe image",
 		description:
-			"Describe ONE image file with the user's dedicated vision model and return a markdown description. Pass exactly one image path per call; to describe multiple images, call this tool once per image. Use this tool ONLY when you cannot see images (this model lacks image input); when reading an image returns '[Current model does not support images...]', call this tool with the same path. If you can see images, use the `read` tool to view image files directly instead.",
-		promptSnippet: "Describe images via the configured vision model when this model cannot see images",
+			"Describe ONE image file with the user's dedicated vision service and return a markdown description. Pass exactly one image path per call; to describe multiple images, call this tool once per image. Use this tool ONLY when you cannot see images (this model lacks image input); when reading an image returns '[Current model does not support images...]', call this tool with the same path. If you can see images, use the `read` tool to view image files directly instead.",
+		promptSnippet: "Describe images via the configured vision service when this model cannot see images",
 		parameters: describeImageSchema,
 		async execute(_toolCallId, params, signal?, _onUpdate?, ctx?) {
 			if (!options) throw new Error("describe_image runtime is not configured");

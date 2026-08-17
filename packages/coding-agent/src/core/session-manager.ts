@@ -543,11 +543,6 @@ function writeHashedSessionImage(imageDir: string, image: ImageContent): Persist
 	return { path: imagePath, hash, mimeType: image.mimeType, size: bytes.length };
 }
 
-export function persistSessionImage(sessionFile: string, image: ImageContent): PersistedSessionImage {
-	if (!sessionFile) throw new Error("generate_image requires a persisted session to store images");
-	return writeHashedSessionImage(getSessionImageDir(sessionFile), image);
-}
-
 function externalizeImage(image: ImageContent, imageDir: string): ImageContent | ImageReference {
 	try {
 		const saved = writeHashedSessionImage(imageDir, image);

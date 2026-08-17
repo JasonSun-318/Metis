@@ -153,7 +153,6 @@ const scheduleCases = [
 		{
 			defaultModel: { provider: "openai", modelId: "gpt-test" },
 			vision: null,
-			imageGen: null,
 			defaultThinkingSelection: "high",
 			providers: [
 				{
@@ -199,13 +198,6 @@ const scheduleCases = [
 				modelId: "gpt-4o",
 				authConfigured: true,
 			},
-			imageGen: {
-				name: "My image gen",
-				baseUrl: "https://api.openai.com/v1",
-				api: "openai-images",
-				modelId: "gpt-image-1",
-				authConfigured: true,
-			},
 			defaultThinkingSelection: "high",
 			providers: [],
 			loadError: null,
@@ -224,37 +216,6 @@ const scheduleCases = [
 		{
 			defaultModel: { provider: "openai", modelId: "gpt-test" },
 			vision: null,
-			imageGen: null,
-			defaultThinkingSelection: "high",
-			providers: [],
-			loadError: null,
-		},
-	],
-	[
-		"model/settings/update",
-		{
-			requestId: "abababab-abab-4aba-8aba-abababababab",
-			mutation: {
-				type: "set_image_gen",
-				settings: {
-					name: "My image gen",
-					baseUrl: "https://api.openai.com/v1",
-					api: "openai-images",
-					modelId: "gpt-image-1",
-				},
-				credential: { action: "set", value: "sk-image-key" },
-			},
-		},
-		{
-			defaultModel: { provider: "openai", modelId: "gpt-test" },
-			vision: null,
-			imageGen: {
-				name: "My image gen",
-				baseUrl: "https://api.openai.com/v1",
-				api: "openai-images",
-				modelId: "gpt-image-1",
-				authConfigured: true,
-			},
 			defaultThinkingSelection: "high",
 			providers: [],
 			loadError: null,

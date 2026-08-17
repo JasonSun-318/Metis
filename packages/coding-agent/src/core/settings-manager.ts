@@ -54,18 +54,18 @@ export interface WebSearchSettings {
 	provider?: WebSearchProvider;
 }
 
-/** Image-generation API protocol the configured service speaks. */
-export type ImageGenApi = "openai-images" | "openrouter-images";
+/** Chat API protocol the configured vision-describer service speaks. */
+export type VisionApi = "openai-responses" | "openai-completions" | "anthropic-messages";
 
-/** AuthStorage provider id under which the image-generation API key is stored. */
-export const IMAGE_GEN_PROVIDER_ID = "image-gen";
+/** AuthStorage provider id under which the vision-describer API key is stored. */
+export const VISION_PROVIDER_ID = "vision";
 
-/** User-configured image-generation service (single). API key lives in AuthStorage under IMAGE_GEN_PROVIDER_ID. */
-export interface ImageGenSettings {
+/** User-configured vision-describer service (single). API key lives in AuthStorage under VISION_PROVIDER_ID. */
+export interface VisionSettings {
 	/** Display name shown in settings. */
 	name: string;
 	baseUrl: string;
-	api: ImageGenApi;
+	api: VisionApi;
 	modelId: string;
 }
 
@@ -121,11 +121,12 @@ export type PackageSource =
 export interface Settings {
 	defaultProvider?: string;
 	defaultModel?: string;
-	/** Vision-describer model reference for models without image input. */
+	/** @deprecated Replaced by `vision`; kept so old settings.json can be cleared on save. */
 	visionProvider?: string;
+	/** @deprecated Replaced by `vision`; kept so old settings.json can be cleared on save. */
 	visionModel?: string;
-	/** User-configured image-generation service for the generate_image tool. */
-	imageGen?: ImageGenSettings;
+	/** User-configured vision-describer service for the describe_image tool. */
+	vision?: VisionSettings;
 	defaultThinkingLevel?: ThinkingSelection;
 	transport?: TransportSetting; // default: "auto"
 	steeringMode?: "all" | "one-at-a-time";
@@ -805,34 +806,13 @@ export class SettingsManager {
 		this.save();
 	}
 
-	getVisionProvider(): string | undefined {
-		return this.settings.visionProvider;
-	}
-
-	getVisionModelId(): string | undefined {
-		return this.settings.visionModel;
-	}
-
-	setVisionModelAndProvider(provider: string, modelId: string): void {
-		this.globalSettings.visionProvider = provider;
-		this.globalSettings.visionModel = modelId;
-		this.markModified("visionProvider");
-		this.markModified("visionModel");
-		this.save();
-	}
-
-	clearVisionModel(): void {
-		delete this.globalSettings.visionProvider;
-		delete this.globalSettings.visionModel;
-		this.markModified("visionProvider");
-		this.markModified("visionModel");
-		this.save();
-	}
-
-	getImageGenSettings(): ImageGenSettings | undefined {
-		const settings = this.settings.imageGen;
+	getVisionSettings(): VisionSettings | undefined {
+		const settings = this.settings.vision;
 		if (!settings || typeof settings !== "object") return undefined;
-		const api = settings.api === "openrouter-images" ? "openrouter-images" : "openai-images";
+		const api =
+			settings.api === "openai-completions" || settings.api === "anthropic-messages"
+				? settings.api
+				: "openai-responses";
 		if (typeof settings.baseUrl !== "string" || typeof settings.modelId !== "string") return undefined;
 		return {
 			name: typeof settings.name === "string" && settings.name.trim() !== "" ? settings.name : settings.modelId,
@@ -842,15 +822,23 @@ export class SettingsManager {
 		};
 	}
 
-	setImageGenSettings(settings: ImageGenSettings): void {
-		this.globalSettings.imageGen = { ...settings };
-		this.markModified("imageGen");
+	setVisionSettings(settings: VisionSettings): void {
+		this.globalSettings.vision = { ...settings };
+		delete this.globalSettings.visionProvider;
+		delete this.globalSettings.visionModel;
+		this.markModified("vision");
+		this.markModified("visionProvider");
+		this.markModified("visionModel");
 		this.save();
 	}
 
-	clearImageGenSettings(): void {
-		delete this.globalSettings.imageGen;
-		this.markModified("imageGen");
+	clearVisionSettings(): void {
+		delete this.globalSettings.vision;
+		delete this.globalSettings.visionProvider;
+		delete this.globalSettings.visionModel;
+		this.markModified("vision");
+		this.markModified("visionProvider");
+		this.markModified("visionModel");
 		this.save();
 	}
 

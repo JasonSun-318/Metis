@@ -34,13 +34,6 @@ export {
 	type FindToolOptions,
 } from "./find.ts";
 export {
-	createGenerateImageTool,
-	createGenerateImageToolDefinition,
-	type GenerateImageToolDetails,
-	type GenerateImageToolInput,
-	type GenerateImageToolOptions,
-} from "./generate-image.ts";
-export {
 	createGrepTool,
 	createGrepToolDefinition,
 	type GrepOperations,
@@ -120,11 +113,6 @@ import {
 } from "./describe-image.ts";
 import { createEditTool, createEditToolDefinition, type EditToolOptions } from "./edit.ts";
 import { createFindTool, createFindToolDefinition, type FindToolOptions } from "./find.ts";
-import {
-	createGenerateImageTool,
-	createGenerateImageToolDefinition,
-	type GenerateImageToolOptions,
-} from "./generate-image.ts";
 import { createGrepTool, createGrepToolDefinition, type GrepToolOptions } from "./grep.ts";
 import { createLsTool, createLsToolDefinition, type LsToolOptions } from "./ls.ts";
 import { createReadTool, createReadToolDefinition, type ReadToolOptions } from "./read.ts";
@@ -149,8 +137,7 @@ export type ToolName =
 	| "get_goal"
 	| "create_goal"
 	| "update_goal"
-	| "describe_image"
-	| "generate_image";
+	| "describe_image";
 export const GOAL_TOOL_NAMES = ["get_goal", "create_goal", "update_goal"] as const;
 export const allToolNames: Set<ToolName> = new Set([
 	"read",
@@ -167,7 +154,6 @@ export const allToolNames: Set<ToolName> = new Set([
 	"create_goal",
 	"update_goal",
 	"describe_image",
-	"generate_image",
 ]);
 
 export interface ToolsOptions {
@@ -180,7 +166,6 @@ export interface ToolsOptions {
 	ls?: LsToolOptions;
 	webSearch?: WebSearchToolOptions;
 	describeImage?: DescribeImageToolOptions;
-	generateImage?: GenerateImageToolOptions;
 	goal?: GoalToolOptions;
 }
 
@@ -214,8 +199,6 @@ export function createToolDefinition(toolName: ToolName, cwd: string, options?: 
 			return createUpdateGoalToolDefinition(options?.goal);
 		case "describe_image":
 			return createDescribeImageToolDefinition(cwd, options?.describeImage);
-		case "generate_image":
-			return createGenerateImageToolDefinition(options?.generateImage);
 		default:
 			throw new Error(`Unknown tool name: ${toolName}`);
 	}
@@ -251,8 +234,6 @@ export function createTool(toolName: ToolName, cwd: string, options?: ToolsOptio
 			return wrapToolDefinition(createUpdateGoalToolDefinition(options?.goal));
 		case "describe_image":
 			return createDescribeImageTool(cwd, options?.describeImage);
-		case "generate_image":
-			return createGenerateImageTool(options?.generateImage);
 		default:
 			throw new Error(`Unknown tool name: ${toolName}`);
 	}
@@ -292,7 +273,6 @@ export function createAllToolDefinitions(cwd: string, options?: ToolsOptions): R
 		create_goal: createCreateGoalToolDefinition(options?.goal),
 		update_goal: createUpdateGoalToolDefinition(options?.goal),
 		describe_image: createDescribeImageToolDefinition(cwd, options?.describeImage),
-		generate_image: createGenerateImageToolDefinition(options?.generateImage),
 	};
 }
 
@@ -330,6 +310,5 @@ export function createAllTools(cwd: string, options?: ToolsOptions): Record<Tool
 		create_goal: wrapToolDefinition(createCreateGoalToolDefinition(options?.goal)),
 		update_goal: wrapToolDefinition(createUpdateGoalToolDefinition(options?.goal)),
 		describe_image: createDescribeImageTool(cwd, options?.describeImage),
-		generate_image: createGenerateImageTool(options?.generateImage),
 	};
 }

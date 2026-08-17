@@ -2,7 +2,11 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createDescribeImageToolDefinition, type DescribeImageToolOptions } from "../src/core/tools/describe-image.ts";
+import {
+	createDescribeImageToolDefinition,
+	type DescribeImageToolOptions,
+	VISION_DESCRIPTION_PROMPT,
+} from "../src/core/tools/describe-image.ts";
 
 /** 1x1 red BMP, the smallest image processImage accepts (see image-process.test.ts). */
 function tinyBmp(): Buffer {
@@ -25,30 +29,23 @@ function modelWithInput(input: ("text" | "image")[]) {
 	return { id: "v-model", name: "Vision", provider: "test", input } as never;
 }
 
-function registryMock(overrides: Record<string, ReturnType<typeof vi.fn>> = {}) {
+const defaultSettings = {
+	name: "My vision",
+	baseUrl: "https://api.example.com/v1",
+	api: "openai-responses" as const,
+	modelId: "v-model",
+};
+
+function options(overrides: Partial<DescribeImageToolOptions> = {}): DescribeImageToolOptions {
 	return {
-		find: vi.fn(() => modelWithInput(["text", "image"])),
-		hasConfiguredAuth: vi.fn(() => true),
-		getApiKeyAndHeaders: vi.fn(async () => ({ ok: true, apiKey: "k", env: undefined, headers: undefined })),
+		getSettings: () => defaultSettings,
+		getApiKey: async () => "sk-vision",
 		streamSimple: vi.fn(() => ({
 			result: async () => ({
 				content: [{ type: "text", text: "# Image\n\nA 1x1 red square." }],
 			}),
-		})),
+		})) as unknown as DescribeImageToolOptions["streamSimple"],
 		...overrides,
-	};
-}
-
-function options(
-	overrides: Omit<Partial<DescribeImageToolOptions>, "modelRegistry"> & {
-		modelRegistry?: ReturnType<typeof registryMock>;
-	} = {},
-): DescribeImageToolOptions {
-	return {
-		getVisionRef: () => ({ provider: "test", modelId: "v-model" }),
-		...overrides,
-		modelRegistry: (overrides.modelRegistry ??
-			registryMock()) as unknown as DescribeImageToolOptions["modelRegistry"],
 	};
 }
 
@@ -74,22 +71,14 @@ describe("describe_image tool", () => {
 		expect((result.content[0] as { text: string }).text).toContain("`read` tool");
 	});
 
-	it("throws with setup guidance when no vision model is configured", async () => {
-		await expect(run(options({ getVisionRef: () => undefined }), imagePath)).rejects.toThrow(
-			/No vision model is configured/,
+	it("throws with setup guidance when no vision service is configured", async () => {
+		await expect(run(options({ getSettings: () => undefined }), imagePath)).rejects.toThrow(
+			/No vision service is configured/,
 		);
 	});
 
-	it("throws when the configured vision model is unavailable", async () => {
-		const registry = registryMock({ find: vi.fn(() => undefined) });
-		await expect(run(options({ modelRegistry: registry }), imagePath)).rejects.toThrow(/unavailable/);
-		const registryNoAuth = registryMock({ hasConfiguredAuth: vi.fn(() => false) });
-		await expect(run(options({ modelRegistry: registryNoAuth }), imagePath)).rejects.toThrow(/unavailable/);
-	});
-
-	it("throws when the configured vision model cannot accept images", async () => {
-		const registry = registryMock({ find: vi.fn(() => modelWithInput(["text"])) });
-		await expect(run(options({ modelRegistry: registry }), imagePath)).rejects.toThrow(/does not accept image input/);
+	it("throws when the vision service has no API key", async () => {
+		await expect(run(options({ getApiKey: async () => undefined }), imagePath)).rejects.toThrow(/no API key/);
 	});
 
 	it("throws for non-image files", async () => {
@@ -98,30 +87,42 @@ describe("describe_image tool", () => {
 		await expect(run(options(), textPath)).rejects.toThrow(/not a supported image/);
 	});
 
-	it("returns the vision model's markdown description", async () => {
-		const registry = registryMock();
-		const result = await run(options({ modelRegistry: registry }), imagePath);
+	it("returns the vision service's markdown description", async () => {
+		const streamSimple = vi.fn(() => ({
+			result: async () => ({
+				content: [{ type: "text", text: "# Image\n\nA 1x1 red square." }],
+			}),
+		}));
+		const result = await run(
+			options({ streamSimple: streamSimple as unknown as DescribeImageToolOptions["streamSimple"] }),
+			imagePath,
+		);
 		expect((result.content[0] as { text: string }).text).toContain("A 1x1 red square.");
-		expect(result.details).toMatchObject({ visionModel: { provider: "test", modelId: "v-model" } });
-		// 请求里带 system prompt 和图片内容
-		const call = registry.streamSimple.mock.calls[0] as unknown as {
-			1: { systemPrompt: string; messages: Array<{ content: Array<{ type: string }> }> };
-		};
-		expect(call[1].systemPrompt).toContain("markdown");
-		const blocks = call[1].messages[0].content;
-		expect(blocks.some((block: { type: string }) => block.type === "image")).toBe(true);
+		expect(result.details).toMatchObject({
+			visionModel: { modelId: "v-model", baseUrl: "https://api.example.com/v1" },
+		});
+		const [model, context] = streamSimple.mock.calls[0] as unknown as [
+			{ id: string; api: string; baseUrl: string; input: string[] },
+			{ systemPrompt: string; messages: Array<{ content: Array<{ type: string }> }> },
+		];
+		expect(model).toMatchObject({
+			id: "v-model",
+			api: "openai-responses",
+			baseUrl: "https://api.example.com/v1",
+			input: ["text", "image"],
+		});
+		expect(context.systemPrompt).toBe(VISION_DESCRIPTION_PROMPT);
+		expect(context.messages[0].content.some((block) => block.type === "image")).toBe(true);
 	});
 
 	it("surfaces vision request failures as tool errors", async () => {
-		const registry = registryMock({
-			streamSimple: vi.fn(() => ({
-				result: async () => {
-					throw new Error("429 rate limited");
-				},
-			})),
-		});
-		await expect(run(options({ modelRegistry: registry }), imagePath)).rejects.toThrow(
-			/Vision model request failed.*429/,
-		);
+		const streamSimple = vi.fn(() => ({
+			result: async () => {
+				throw new Error("429 rate limited");
+			},
+		}));
+		await expect(
+			run(options({ streamSimple: streamSimple as unknown as DescribeImageToolOptions["streamSimple"] }), imagePath),
+		).rejects.toThrow(/Vision service request failed.*429/);
 	});
 });

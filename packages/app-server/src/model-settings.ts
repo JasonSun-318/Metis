@@ -152,14 +152,11 @@ export class ModelSettingsService {
 		);
 		const defaultProvider = this.settingsManager.getDefaultProvider();
 		const defaultModelId = this.settingsManager.getDefaultModel();
-		const visionProvider = this.settingsManager.getVisionProvider();
-		const visionModelId = this.settingsManager.getVisionModelId();
-		const imageGen = this.settingsManager.getImageGenSettings();
+		const vision = this.settingsManager.getVisionSettings();
 		return {
 			defaultModel:
 				defaultProvider && defaultModelId ? { provider: defaultProvider, modelId: defaultModelId } : null,
-			visionModel: visionProvider && visionModelId ? { provider: visionProvider, modelId: visionModelId } : null,
-			imageGen: imageGen ? { ...imageGen, authConfigured: this.authStorage.has("image-gen") } : null,
+			vision: vision ? { ...vision, authConfigured: this.authStorage.has("vision") } : null,
 			defaultThinkingSelection: this.settingsManager.getDefaultThinkingLevel() ?? "medium",
 			providers,
 			loadError: readError ?? this.modelRegistry.getError() ?? null,
@@ -183,27 +180,10 @@ export class ModelSettingsService {
 			await this.settingsManager.flush();
 			return this.view();
 		}
-		if (mutation.type === "set_vision_model") {
-			if (mutation.model) {
-				this.modelRegistry.refresh();
-				const model = this.modelRegistry.find(mutation.model.provider, mutation.model.modelId);
-				if (!model || !this.modelRegistry.hasConfiguredAuth(model)) {
-					throw new Error("The vision model is unavailable");
-				}
-				if (!model.input.includes("image")) {
-					throw new Error("The vision model must support image input");
-				}
-				this.settingsManager.setVisionModelAndProvider(model.provider, model.id);
-			} else {
-				this.settingsManager.clearVisionModel();
-			}
-			await this.settingsManager.flush();
-			return this.view();
-		}
-		if (mutation.type === "set_image_gen") {
+		if (mutation.type === "set_vision") {
 			if (mutation.settings === null) {
-				this.settingsManager.clearImageGenSettings();
-				this.authStorage.remove("image-gen");
+				this.settingsManager.clearVisionSettings();
+				this.authStorage.remove("vision");
 				await this.settingsManager.flush();
 				return this.view();
 			}
@@ -211,20 +191,19 @@ export class ModelSettingsService {
 			if (parsedUrl.protocol !== "http:" && parsedUrl.protocol !== "https:") {
 				throw new Error("Base URL must use HTTP or HTTPS");
 			}
-			const hasStoredKey = this.authStorage.has("image-gen");
+			const hasStoredKey = this.authStorage.has("vision");
 			if (!hasStoredKey && mutation.credential.action !== "set") {
-				throw new Error("Enter an API key to save the image-generation service");
+				throw new Error("Enter an API key to save the vision service");
 			}
 			if (mutation.credential.action === "set") {
-				this.authStorage.set("image-gen", { type: "api_key", key: mutation.credential.value });
+				this.authStorage.set("vision", { type: "api_key", key: mutation.credential.value });
 			} else if (mutation.credential.action === "remove") {
-				this.authStorage.remove("image-gen");
+				this.authStorage.remove("vision");
 			}
-			this.settingsManager.setImageGenSettings(mutation.settings);
+			this.settingsManager.setVisionSettings(mutation.settings);
 			await this.settingsManager.flush();
 			return this.view();
 		}
-
 		let previous = '{\n  "providers": {}\n}\n';
 		try {
 			this.modelsStorage.withLock((source) => {
@@ -278,10 +257,6 @@ export class ModelSettingsService {
 					this.settingsManager.clearDefaultModelAndProvider();
 					await this.settingsManager.flush();
 				}
-				if (this.settingsManager.getVisionProvider() === mutation.provider) {
-					this.settingsManager.clearVisionModel();
-					await this.settingsManager.flush();
-				}
 			} else if (mutation.credential.action === "set") {
 				this.authStorage.set(mutation.provider, { type: "api_key", key: mutation.credential.value });
 			} else if (mutation.credential.action === "remove") {
@@ -294,15 +269,6 @@ export class ModelSettingsService {
 				const defaultModel = this.modelRegistry.find(defaultProvider, defaultModelId);
 				if (!defaultModel || !this.modelRegistry.hasConfiguredAuth(defaultModel)) {
 					this.settingsManager.clearDefaultModelAndProvider();
-					await this.settingsManager.flush();
-				}
-			}
-			const visionProvider = this.settingsManager.getVisionProvider();
-			const visionModelId = this.settingsManager.getVisionModelId();
-			if (visionProvider && visionModelId) {
-				const visionModel = this.modelRegistry.find(visionProvider, visionModelId);
-				if (!visionModel || !this.modelRegistry.hasConfiguredAuth(visionModel)) {
-					this.settingsManager.clearVisionModel();
 					await this.settingsManager.flush();
 				}
 			}

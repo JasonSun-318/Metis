@@ -182,19 +182,8 @@ const zhCN = {
 	"Vision model saved": "视觉理解服务已保存",
 	"Vision model removed": "视觉理解服务已移除",
 	"Image tools": "图片工具",
-	"Configure the vision describer and image-generation service used by built-in tools.":
-		"配置内置工具使用的视觉理解服务与图片生成服务。",
-	"Image generation": "图片生成",
-	"Configure a service the generate_image tool uses to create images.": "配置 generate_image 工具用于生成图片的服务。",
-	"Configure a dedicated image API with your own base URL, API format, model ID, and key.":
-		"单独配置图片生成 API：填写 Base URL、API 格式、模型 ID 和密钥。",
-	"Pick the API format and endpoint the generate_image tool talks to.":
-		"选择 generate_image 工具所调用的 API 格式与端点。",
+	"Configure the vision describer used by built-in tools.": "配置内置工具使用的视觉理解服务。",
 	"Fill in the name, base URL, and model ID.": "请填写名称、Base URL 和模型 ID。",
-	"Image generation saved": "图片生成服务已保存",
-	"Image generation removed": "图片生成服务已移除",
-	"OpenAI Images": "OpenAI Images",
-	"OpenRouter Images": "OpenRouter Images",
 	"Connection tests send a short prompt and may consume provider tokens.":
 		"连接测试会发送一条简短提示词，可能产生少量提供商 Token 消耗。",
 	"Remove provider": "移除提供商",

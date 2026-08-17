@@ -439,14 +439,6 @@ export function classifyAction(input: ClassifyActionInput): PermissionAction {
 			? action(input, ["network"], [], undefined, input.builtinNetworkTargets)
 			: action(input, ["unknown"]);
 	}
-	// generate_image calls the user-configured paid image API; classify like
-	// web_search as a network action, but the target host is only known at
-	// runtime from settings, so no static network targets are attached.
-	if (input.toolName === "generate_image") {
-		return typeof args.prompt === "string" && args.prompt !== ""
-			? action(input, ["network"])
-			: action(input, ["unknown"]);
-	}
 	if (input.toolName === "bash") {
 		return typeof args.command === "string" ? classifyBash(input, args.command) : action(input, ["unknown"]);
 	}
@@ -474,7 +466,7 @@ export function routeAction(settings: PermissionSettings, value: PermissionActio
 	if (value.provenance !== "builtin") return "allow";
 	if (value.risks.length === 1 && value.risks[0] === "workspace-write") return "allow";
 	if (value.toolName === "bash") return value.risks.length === 1 && value.risks[0] === "shell" ? "allow" : "user";
-	if (value.toolName === "web_fetch" || value.toolName === "web_search" || value.toolName === "generate_image") {
+	if (value.toolName === "web_fetch" || value.toolName === "web_search") {
 		return value.risks.length === 1 && value.risks[0] === "network" ? "allow" : "user";
 	}
 	return "user";

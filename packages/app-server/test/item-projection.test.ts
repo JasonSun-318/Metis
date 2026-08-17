@@ -143,7 +143,7 @@ describe("tool result image projection", () => {
 				message: {
 					role: "toolResult",
 					toolCallId: "call-1",
-					toolName: "generate_image",
+					toolName: "image_tool",
 					isError: false,
 					content,
 				},
@@ -161,7 +161,7 @@ describe("tool result image projection", () => {
 			{
 				type: "tool_result",
 				toolCallId: "call-1",
-				name: "generate_image",
+				name: "image_tool",
 				isError: false,
 				output: "ok",
 				images: [{ hash: "a".repeat(64), mediaType: "image/png", byteLength: 4 }],
@@ -174,7 +174,7 @@ describe("tool result image projection", () => {
 		expect(item?.content[0]).toEqual({
 			type: "tool_result",
 			toolCallId: "call-1",
-			name: "generate_image",
+			name: "image_tool",
 			isError: false,
 			output: "ok",
 		});

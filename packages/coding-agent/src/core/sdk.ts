@@ -22,7 +22,7 @@ import { DefaultResourceLoader } from "./resource-loader.ts";
 import { createSessionId } from "./session-id.ts";
 import { getDefaultSessionDir, SessionManager } from "./session-manager.ts";
 import { removeOwnedManagedWorkspace, resolveNewSessionWorkspace } from "./session-workspace.ts";
-import { IMAGE_GEN_PROVIDER_ID, SettingsManager, VISION_PROVIDER_ID } from "./settings-manager.ts";
+import { SettingsManager, VISION_PROVIDER_ID } from "./settings-manager.ts";
 import { canUseUltra, getHighestSupportedThinkingLevel, type ThinkingSelection } from "./thinking-selection.ts";
 import { time } from "./timings.ts";
 import {
@@ -474,9 +474,6 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			...(settingsManager.getVisionSettings() !== undefined && authStorage.has(VISION_PROVIDER_ID)
 				? (["describe_image"] as const)
 				: []),
-			...(settingsManager.getImageGenSettings() !== undefined && authStorage.has(IMAGE_GEN_PROVIDER_ID)
-				? (["generate_image"] as const)
-				: []),
 			...(settingsManager.getWebSearchSettings().enabled ? (["web_search"] as const) : []),
 			...(isSubagent ? [] : (["set_tasks", "get_goal", "create_goal", "update_goal"] as const)),
 		];
@@ -506,11 +503,6 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 				(name) =>
 					name !== "describe_image" ||
 					(settingsManager.getVisionSettings() !== undefined && authStorage.has(VISION_PROVIDER_ID)),
-			)
-			.filter(
-				(name) =>
-					name !== "generate_image" ||
-					(settingsManager.getImageGenSettings() !== undefined && authStorage.has(IMAGE_GEN_PROVIDER_ID)),
 			);
 
 		let agent: Agent;

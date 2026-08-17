@@ -423,20 +423,20 @@ describe("TranscriptTurn", () => {
 		await act(async () => root.unmount());
 	});
 
-	it("renders generated tool-result images outside the collapsed execution chain", async () => {
+	it("renders tool-result images outside the collapsed execution chain", async () => {
 		const image = { hash: "a".repeat(64), mediaType: "image/png" as const, byteLength: 4 };
 		const readSessionImage = vi.fn().mockResolvedValue({ data: "aGVsbG8=", mediaType: "image/png" });
 		Object.defineProperty(window, "metis", { configurable: true, value: { readSessionImage } });
 		const items: ItemView[] = [
 			item("gen-user", "user", [{ type: "text", text: "draw a circle" }]),
 			item("gen-assistant", "assistant", [
-				{ type: "tool_call", toolCallId: "gen-tool", name: "generate_image", state: "completed" },
+				{ type: "tool_call", toolCallId: "image-tool", name: "image_tool", state: "completed" },
 			]),
 			item("gen-result", "tool", [
 				{
 					type: "tool_result",
-					toolCallId: "gen-tool",
-					name: "generate_image",
+					toolCallId: "image-tool",
+					name: "image_tool",
 					isError: false,
 					output: "Generated 1 of 1",
 					images: [image],
@@ -456,20 +456,20 @@ describe("TranscriptTurn", () => {
 });
 
 describe("CodeTranscriptTurn", () => {
-	it("renders generated tool-result images outside collapsed code tools", async () => {
+	it("renders tool-result images outside collapsed code tools", async () => {
 		const image = { hash: "a".repeat(64), mediaType: "image/png" as const, byteLength: 4 };
 		const readSessionImage = vi.fn().mockResolvedValue({ data: "aGVsbG8=", mediaType: "image/png" });
 		Object.defineProperty(window, "metis", { configurable: true, value: { readSessionImage } });
 		const items: ItemView[] = [
 			item("gen-user", "user", [{ type: "text", text: "draw a circle" }]),
 			item("gen-assistant", "assistant", [
-				{ type: "tool_call", toolCallId: "gen-tool", name: "generate_image", state: "completed" },
+				{ type: "tool_call", toolCallId: "image-tool", name: "image_tool", state: "completed" },
 			]),
 			item("gen-result", "tool", [
 				{
 					type: "tool_result",
-					toolCallId: "gen-tool",
-					name: "generate_image",
+					toolCallId: "image-tool",
+					name: "image_tool",
 					isError: false,
 					output: "Generated 1 of 1",
 					images: [image],
