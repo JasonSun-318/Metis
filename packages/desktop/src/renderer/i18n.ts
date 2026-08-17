@@ -174,12 +174,20 @@ const zhCN = {
 	Reasoning: "支持推理",
 	"Image input": "支持图片输入",
 	"Vision model": "视觉理解模型",
-	"Pick an image-capable model that describes images for models without vision.":
-		"选择一个支持图片输入的模型，为不支持视觉的模型描述图片内容。",
-	"Vision model saved": "视觉理解模型已保存",
-	"No image-capable models are configured yet.": "还没有已配置且支持图片输入的模型。",
+	"Configure a dedicated vision API with your own base URL, API format, model ID, and key.":
+		"单独配置视觉理解 API：填写 Base URL、API 格式、模型 ID 和密钥。",
+	"Pick the chat API format and endpoint describe_image talks to.":
+		"选择 describe_image 所调用的对话 API 格式与端点。",
+	"My vision": "我的视觉服务",
+	"Vision model saved": "视觉理解服务已保存",
+	"Vision model removed": "视觉理解服务已移除",
+	"Image tools": "图片工具",
+	"Configure the vision describer and image-generation service used by built-in tools.":
+		"配置内置工具使用的视觉理解服务与图片生成服务。",
 	"Image generation": "图片生成",
 	"Configure a service the generate_image tool uses to create images.": "配置 generate_image 工具用于生成图片的服务。",
+	"Configure a dedicated image API with your own base URL, API format, model ID, and key.":
+		"单独配置图片生成 API：填写 Base URL、API 格式、模型 ID 和密钥。",
 	"Pick the API format and endpoint the generate_image tool talks to.":
 		"选择 generate_image 工具所调用的 API 格式与端点。",
 	"Fill in the name, base URL, and model ID.": "请填写名称、Base URL 和模型 ID。",
@@ -586,6 +594,14 @@ const zhCN = {
 	"{{count}} uses": "使用 {{count}} 次",
 	Task: "任务",
 	Tasks: "任务",
+	"Active goal": "进行中的目标",
+	"Goal paused": "目标已暂停",
+	"Goal blocked": "目标已卡住",
+	"Goal usage limited": "目标因用量限制已停止",
+	"Goal complete": "目标已完成",
+	"Pause goal": "暂停目标",
+	"Resume goal": "继续目标",
+	"Delete goal": "删除目标",
 	"Collapse task list": "收起任务列表",
 	"Expand task list": "展开任务列表",
 	"Update to new version": "更新新版本",

@@ -433,6 +433,53 @@ describe("renderer projection reducer", () => {
 		expect(store.getSnapshot().tasks).toEqual([]);
 	});
 
+	it("replaces, live-updates, and clears the active session goal snapshot", () => {
+		const store = new AppStore();
+		const goal = {
+			goalId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+			objective: "keep tests green",
+			status: "active" as const,
+			timeUsedSeconds: 0,
+			activeStartedAt: "2026-08-17T00:00:00.000Z",
+		};
+		store.applySnapshot({
+			...snapshot(EPOCH_A, 0),
+			goal,
+		});
+		expect(store.getSnapshot().goal).toEqual(goal);
+
+		expect(
+			store.applyBatch({
+				serverEpoch: EPOCH_A,
+				fromCursor: 1,
+				toCursor: 1,
+				events: [
+					{
+						type: "session/goalChanged",
+						sessionId: "session-1",
+						goal: { ...goal, status: "paused", activeStartedAt: null, timeUsedSeconds: 9 },
+					},
+				],
+			}),
+		).toBe("applied");
+		expect(store.getSnapshot().goal).toEqual({
+			...goal,
+			status: "paused",
+			activeStartedAt: null,
+			timeUsedSeconds: 9,
+		});
+
+		expect(
+			store.applyBatch({
+				serverEpoch: EPOCH_A,
+				fromCursor: 2,
+				toCursor: 2,
+				events: [{ type: "session/goalChanged", sessionId: "session-1", goal: null }],
+			}),
+		).toBe("applied");
+		expect(store.getSnapshot().goal).toBeNull();
+	});
+
 	it("replaces the complete active projection on every snapshot", () => {
 		const store = new AppStore();
 		store.applySnapshot(snapshot(EPOCH_A, 3, [item("old-item", "old", "completed")]));

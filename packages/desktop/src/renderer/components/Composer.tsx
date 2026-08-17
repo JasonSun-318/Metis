@@ -41,6 +41,7 @@ interface ComposerProps {
 	readonly onSlashCommand?: (command: ComposerSlashCommand) => void | Promise<void>;
 	readonly appearance?: "chat" | "code";
 	readonly interactionControl?: ReactNode;
+	readonly goalControl?: ReactNode;
 	readonly queuedTurnControl?: ReactNode;
 	readonly modelControl?: ReactNode;
 	readonly mcpConnectionState?: "connecting" | "failed";
@@ -73,6 +74,7 @@ export function Composer({
 	appearance = "code",
 	cacheHitPercent,
 	interactionControl,
+	goalControl,
 	queuedTurnControl,
 	modelControl,
 	mcpConnectionState,
@@ -184,6 +186,7 @@ export function Composer({
 	return (
 		<div className="composer-dock">
 			<TaskList key={taskListEpoch ?? undefined} tasks={tasks} />
+			{goalControl}
 			{interactionControl}
 			{commandPanel}
 			{slashQuery !== undefined && (
