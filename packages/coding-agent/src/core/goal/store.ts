@@ -71,6 +71,8 @@ export function writeThreadGoal(
 		timeUsedSeconds?: number;
 		createdAt?: number;
 		now?: number;
+		/** When staying active, force a new activeStartedAt (used after flushing elapsed). */
+		resetActiveClock?: boolean;
 	},
 ): ThreadGoal {
 	const now = input.now ?? Date.now();
@@ -92,9 +94,9 @@ export function writeThreadGoal(
 		timeUsedSeconds: flushed,
 		activeStartedAt:
 			input.status === "active"
-				? sameGoal && existing.status === "active"
-					? (existing.activeStartedAt ?? now)
-					: now
+				? input.resetActiveClock || !(sameGoal && existing.status === "active")
+					? now
+					: (existing.activeStartedAt ?? now)
 				: null,
 		createdAt,
 		updatedAt: now,
@@ -108,6 +110,7 @@ export function flushGoalElapsed(session: SessionManager, goal: ThreadGoal, now 
 	return writeThreadGoal(session, {
 		...goal,
 		timeUsedSeconds: goal.timeUsedSeconds + Math.max(0, Math.floor((now - goal.activeStartedAt) / 1_000)),
+		resetActiveClock: true,
 		now,
 	});
 }

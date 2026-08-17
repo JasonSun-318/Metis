@@ -89,4 +89,22 @@ describe("GoalBar", () => {
 		act(() => container.querySelector<HTMLButtonElement>('button[aria-label="Resume goal"]')?.click());
 		expect(onResume).toHaveBeenCalledOnce();
 	});
+
+	it("allows resume from blocked and usage-limited goals", () => {
+		for (const status of ["blocked", "usage_limited"] as const) {
+			const { container, onResume, root } = mount({
+				...activeGoal,
+				status,
+				activeStartedAt: null,
+				timeUsedSeconds: 20,
+			});
+			expect(container.textContent).toContain(status === "blocked" ? "Goal blocked" : "Goal usage limited");
+			act(() => container.querySelector<HTMLButtonElement>('button[aria-label="Resume goal"]')?.click());
+			expect(onResume).toHaveBeenCalledOnce();
+			act(() => root.unmount());
+			roots = roots.filter((candidate) => candidate !== root);
+			container.remove();
+			onResume.mockClear();
+		}
+	});
 });

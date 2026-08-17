@@ -55,7 +55,7 @@ export function GoalBar({ goal, onPause, onResume, onClear }: GoalBarProps) {
 	if (!goal) return null;
 
 	const canPause = goal.status === "active";
-	const canResume = goal.status === "paused";
+	const canResume = goal.status === "paused" || goal.status === "blocked" || goal.status === "usage_limited";
 
 	return (
 		<div className="goal-bar-slot">

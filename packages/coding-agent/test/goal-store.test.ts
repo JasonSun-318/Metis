@@ -57,9 +57,18 @@ describe("thread goal store", () => {
 	it("flushes elapsed time when leaving active and clears the goal", () => {
 		const session = manager();
 		const created = writeThreadGoal(session, { objective: "long task", status: "active" });
-		const flushed = flushGoalElapsed(session, created, created.activeStartedAt! + 5_000);
-		expect(flushed.timeUsedSeconds).toBeGreaterThanOrEqual(5);
+		const started = created.activeStartedAt!;
+		const flushed = flushGoalElapsed(session, created, started + 5_000);
+		expect(flushed.timeUsedSeconds).toBe(5);
 		expect(flushed.status).toBe("active");
+		expect(flushed.activeStartedAt).toBe(started + 5_000);
+
+		const completed = writeThreadGoal(session, {
+			...flushed,
+			status: "complete",
+			now: started + 5_000,
+		});
+		expect(completed.timeUsedSeconds).toBe(5);
 		expect(clearThreadGoal(session)).toBe(true);
 		expect(readThreadGoal(session)).toBeNull();
 		expect(clearThreadGoal(session)).toBe(false);
