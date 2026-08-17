@@ -1,5 +1,5 @@
 import type { ApiKeyAuth, ApiKeyCredential, AuthContext } from "../auth/types.ts";
-import type { Api, ImagesApi, ImagesModel, Model, ProviderEnv } from "../types.ts";
+import type { Api, Model, ProviderEnv } from "../types.ts";
 
 const CLOUDFLARE_API_KEY = "CLOUDFLARE_API_KEY";
 const CLOUDFLARE_ACCOUNT_ID = "CLOUDFLARE_ACCOUNT_ID";
@@ -23,11 +23,7 @@ async function resolveValue(
 	return fromCredential ?? (await ctx.env(name));
 }
 
-function resolveCloudflareBaseUrl(
-	model: Model<Api> | ImagesModel<ImagesApi>,
-	accountId: string,
-	gatewayId: string | undefined,
-): string {
+function resolveCloudflareBaseUrl(model: Model<Api>, accountId: string, gatewayId: string | undefined): string {
 	return model.baseUrl
 		.replaceAll(`{${CLOUDFLARE_ACCOUNT_ID}}`, accountId)
 		.replaceAll(`{${CLOUDFLARE_GATEWAY_ID}}`, gatewayId ?? "");
@@ -35,7 +31,7 @@ function resolveCloudflareBaseUrl(
 
 async function resolveCloudflareEnv(
 	kind: CloudflareAuthKind,
-	model: Model<Api> | ImagesModel<ImagesApi>,
+	model: Model<Api>,
 	ctx: AuthContext,
 	credential: ApiKeyCredential | undefined,
 ): Promise<{ apiKey: string; env: ProviderEnv; baseUrl: string; source: string } | undefined> {

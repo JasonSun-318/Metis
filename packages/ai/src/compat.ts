@@ -2,7 +2,7 @@
  * Compatibility entrypoint preserving the classic global API
  * surface: api-dispatch `stream()`/`complete()` with env API key injection,
  * the api-registry, generated catalog reads (`getModel`/`getModels`/
- * `getProviders`), per-API lazy stream wrappers, and image generation.
+ * `getProviders`) and per-API lazy stream wrappers.
  *
  * Existing apps switch imports from "@metis/ai" to
  * "@metis/ai/compat" unchanged; new code uses `createModels()`
@@ -20,12 +20,8 @@ export * from "./api/openai-codex-responses.lazy.ts";
 export * from "./api/openai-completions.lazy.ts";
 export * from "./api/openai-responses.lazy.ts";
 export * from "./env-api-keys.ts";
-export * from "./image-models.ts";
-export * from "./images.ts";
-export * from "./images-api-registry.ts";
 export * from "./index.ts";
 export * from "./legacy-api-aliases.ts";
-export * from "./providers/images/register-builtins.ts";
 
 import { builtInApiIds, getBuiltInApiStreams } from "./api/builtin-streams.ts";
 import { getEnvApiKey } from "./env-api-keys.ts";

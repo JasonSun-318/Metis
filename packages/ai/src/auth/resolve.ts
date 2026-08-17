@@ -1,4 +1,4 @@
-import type { Api, ImagesApi, ImagesModel, Model, ProviderEnv } from "../types.ts";
+import type { Api, Model, ProviderEnv } from "../types.ts";
 import type {
 	ApiKeyAuth,
 	ApiKeyCredential,
@@ -28,11 +28,11 @@ export class ModelsError extends Error {
 	}
 }
 
-/** Model shape auth resolution receives: chat or image-generation models. */
-export type AuthModel = Model<Api> | ImagesModel<ImagesApi>;
+/** Model shape auth resolution receives. */
+export type AuthModel = Model<Api>;
 
 /**
- * Auth resolution shared by the `Models` and `ImagesModels` collections.
+ * Auth resolution shared by model collections.
  * A stored credential owns the provider: ambient/env is consulted only when
  * nothing is stored. No silent env fallback after a failed refresh or for a
  * credential type without a matching handler.

@@ -25,10 +25,6 @@ export type KnownApi =
 
 export type Api = KnownApi | (string & {});
 
-export type KnownImagesApi = "openrouter-images";
-
-export type ImagesApi = KnownImagesApi | (string & {});
-
 export type KnownProvider =
 	| "amazon-bedrock"
 	| "ant-ling"
@@ -65,10 +61,6 @@ export type KnownProvider =
 	| "xiaomi-token-plan-ams"
 	| "xiaomi-token-plan-sgp";
 export type ProviderId = KnownProvider | string;
-
-export type KnownImagesProvider = "openrouter";
-
-export type ImagesProviderId = KnownImagesProvider | string;
 
 export type ThinkingLevel = "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 export type ModelThinkingLevel = "off" | ThinkingLevel;
@@ -224,68 +216,6 @@ export interface ProviderStreams {
 	streamSimple(model: Model<Api>, context: Context, options?: SimpleStreamOptions): AssistantMessageEventStream;
 }
 
-/**
- * The uniform contract of an image-generation API implementation module:
- * every image API module under `src/api/` exports exactly `generateImages`,
- * so the module itself satisfies this interface. Lazy wrappers and image
- * provider factories pass these around as values.
- */
-export interface ProviderImages {
-	generateImages(
-		model: ImagesModel<ImagesApi>,
-		context: ImagesContext,
-		options?: ImagesOptions,
-	): Promise<AssistantImages>;
-}
-
-export interface ImagesOptions {
-	signal?: AbortSignal;
-	apiKey?: string;
-	/**
-	 * Provider-scoped environment values. These take precedence over process.env for
-	 * provider configuration such as endpoint placeholders and proxy variables.
-	 */
-	env?: ProviderEnv;
-	/**
-	 * Optional callback for inspecting or replacing provider payloads before sending.
-	 * Return undefined to keep the payload unchanged.
-	 */
-	onPayload?: (payload: unknown, model: ImagesModel<ImagesApi>) => unknown | undefined | Promise<unknown | undefined>;
-	/**
-	 * Optional callback invoked after an HTTP response is received.
-	 */
-	onResponse?: (response: ProviderResponse, model: ImagesModel<ImagesApi>) => void | Promise<void>;
-	/**
-	 * Optional custom HTTP headers to include in API requests.
-	 * Merged with provider defaults; can override default headers.
-	 * A null value suppresses a provider/API default header with the same name.
-	 */
-	headers?: ProviderHeaders;
-	/**
-	 * HTTP request timeout in milliseconds for providers/SDKs that support it.
-	 */
-	timeoutMs?: number;
-	/**
-	 * Maximum retry attempts for providers/SDKs that support client-side retries.
-	 */
-	maxRetries?: number;
-	/**
-	 * Maximum delay in milliseconds to wait for a retry when the server requests a long wait.
-	 * If the server's requested delay exceeds this value, the request fails immediately
-	 * with an error containing the requested delay, allowing higher-level retry logic
-	 * to handle it with user visibility.
-	 * Default: 60000 (60 seconds). Set to 0 to disable the cap.
-	 */
-	maxRetryDelayMs?: number;
-	/**
-	 * Optional metadata to include in API requests.
-	 * Providers extract the fields they understand and ignore the rest.
-	 */
-	metadata?: Record<string, unknown>;
-}
-
-export type ProviderImagesOptions = ImagesOptions & Record<string, unknown>;
-
 // Unified options with reasoning passed to streamSimple() and completeSimple()
 export interface SimpleStreamOptions extends StreamOptions {
 	reasoning?: ThinkingLevel;
@@ -306,12 +236,6 @@ export type StreamFunction<TApi extends Api = Api, TOptions extends StreamOption
 	context: Context,
 	options?: TOptions,
 ) => AssistantMessageEventStream;
-
-export type ImagesFunction<TApi extends ImagesApi = ImagesApi, TOptions extends ImagesOptions = ImagesOptions> = (
-	model: ImagesModel<TApi>,
-	context: ImagesContext,
-	options?: TOptions,
-) => Promise<AssistantImages>;
 
 export interface TextSignatureV1 {
 	v: 1;
@@ -412,27 +336,6 @@ export interface ToolResultMessage<TDetails = any> {
 }
 
 export type Message = UserMessage | AssistantMessage | ToolResultMessage;
-
-export type ImagesInputContent = TextContent | ImageContent;
-export type ImagesOutputContent = TextContent | ImageContent;
-
-export interface ImagesContext {
-	input: ImagesInputContent[];
-}
-
-export type ImagesStopReason = "stop" | "error" | "aborted";
-
-export interface AssistantImages {
-	api: ImagesApi;
-	provider: ImagesProviderId;
-	model: string;
-	output: ImagesOutputContent[];
-	responseId?: string;
-	usage?: Usage;
-	stopReason: ImagesStopReason;
-	errorMessage?: string;
-	timestamp: number; // Unix timestamp in milliseconds
-}
 
 import type { TSchema } from "typebox";
 
@@ -721,11 +624,4 @@ export interface Model<TApi extends Api> {
 			: TApi extends "anthropic-messages"
 				? AnthropicMessagesCompat
 				: never;
-}
-
-export interface ImagesModel<TApi extends ImagesApi>
-	extends Omit<Model<Api>, "api" | "provider" | "reasoning" | "contextWindow" | "maxTokens" | "compat"> {
-	api: TApi;
-	provider: ImagesProviderId;
-	output: ("text" | "image")[];
 }

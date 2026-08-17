@@ -6,9 +6,7 @@
 	"main": "./dist/index.js",
 	"types": "./dist/index.d.ts",
 	"sideEffects": [
-		"./dist/compat.js",
-		"./dist/images.js",
-		"./dist/providers/images/register-builtins.js"
+		"./dist/compat.js"
 	],
 	"exports": {
 		".": {
@@ -46,7 +44,6 @@
 	"scripts": {
 		"clean": "shx rm -rf dist",
 		"generate-models": "node scripts/generate-models.ts",
-		"generate-image-models": "node scripts/generate-image-models.ts",
 		"build": "tsgo -p tsconfig.build.json",
 		"test": "vitest --run",
 		"prepublishOnly": "npm run clean && npm run build"
