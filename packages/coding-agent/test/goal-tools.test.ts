@@ -20,7 +20,7 @@ function manager(): SessionManager {
 describe("goal tools", () => {
 	it("get_goal returns null when no goal exists", async () => {
 		const session = manager();
-		const tool = createGetGoalToolDefinition({ session });
+		const tool = createGetGoalToolDefinition({ getSession: () => session });
 		expect(Object.keys(tool.parameters.properties)).toEqual([]);
 		const result = await tool.execute("g1", {}, undefined, undefined, {} as never);
 		expect(result.details).toEqual({ goal: null, ok: true });
@@ -32,7 +32,7 @@ describe("goal tools", () => {
 		const session = manager();
 		const changes: unknown[] = [];
 		const tool = createCreateGoalToolDefinition({
-			session,
+			getSession: () => session,
 			onChange: (goal) => changes.push(goal),
 		});
 		expect(Value.Check(tool.parameters, { objective: "ship it", token_budget: 1 })).toBe(false);
@@ -54,7 +54,7 @@ describe("goal tools", () => {
 
 	it("update_goal only accepts complete or blocked and requires an existing goal", async () => {
 		const session = manager();
-		const tool = createUpdateGoalToolDefinition({ session });
+		const tool = createUpdateGoalToolDefinition({ getSession: () => session });
 		expect(Value.Check(tool.parameters, { status: "paused" })).toBe(false);
 		expect(Value.Check(tool.parameters, { status: "complete" })).toBe(true);
 

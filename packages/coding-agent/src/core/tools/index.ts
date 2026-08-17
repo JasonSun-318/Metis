@@ -105,6 +105,12 @@ export {
 
 import type { AgentTool } from "@metis/agent-core";
 import type { ToolDefinition } from "../extensions/types.ts";
+import {
+	createCreateGoalToolDefinition,
+	createGetGoalToolDefinition,
+	createUpdateGoalToolDefinition,
+	type GoalToolOptions,
+} from "../goal/tools.ts";
 import { createSetTasksToolDefinition } from "../set-tasks.ts";
 import { type BashToolOptions, createBashTool, createBashToolDefinition } from "./bash.ts";
 import {
@@ -140,8 +146,12 @@ export type ToolName =
 	| "web_fetch"
 	| "web_search"
 	| "set_tasks"
+	| "get_goal"
+	| "create_goal"
+	| "update_goal"
 	| "describe_image"
 	| "generate_image";
+export const GOAL_TOOL_NAMES = ["get_goal", "create_goal", "update_goal"] as const;
 export const allToolNames: Set<ToolName> = new Set([
 	"read",
 	"bash",
@@ -153,6 +163,9 @@ export const allToolNames: Set<ToolName> = new Set([
 	"web_fetch",
 	"web_search",
 	"set_tasks",
+	"get_goal",
+	"create_goal",
+	"update_goal",
 	"describe_image",
 	"generate_image",
 ]);
@@ -168,6 +181,7 @@ export interface ToolsOptions {
 	webSearch?: WebSearchToolOptions;
 	describeImage?: DescribeImageToolOptions;
 	generateImage?: GenerateImageToolOptions;
+	goal?: GoalToolOptions;
 }
 
 export function createToolDefinition(toolName: ToolName, cwd: string, options?: ToolsOptions): ToolDef {
@@ -192,6 +206,12 @@ export function createToolDefinition(toolName: ToolName, cwd: string, options?: 
 			return createWebSearchToolDefinition(options?.webSearch);
 		case "set_tasks":
 			return createSetTasksToolDefinition();
+		case "get_goal":
+			return createGetGoalToolDefinition(options?.goal);
+		case "create_goal":
+			return createCreateGoalToolDefinition(options?.goal);
+		case "update_goal":
+			return createUpdateGoalToolDefinition(options?.goal);
 		case "describe_image":
 			return createDescribeImageToolDefinition(cwd, options?.describeImage);
 		case "generate_image":
@@ -223,6 +243,12 @@ export function createTool(toolName: ToolName, cwd: string, options?: ToolsOptio
 			return createWebSearchTool(options?.webSearch);
 		case "set_tasks":
 			return wrapToolDefinition(createSetTasksToolDefinition());
+		case "get_goal":
+			return wrapToolDefinition(createGetGoalToolDefinition(options?.goal));
+		case "create_goal":
+			return wrapToolDefinition(createCreateGoalToolDefinition(options?.goal));
+		case "update_goal":
+			return wrapToolDefinition(createUpdateGoalToolDefinition(options?.goal));
 		case "describe_image":
 			return createDescribeImageTool(cwd, options?.describeImage);
 		case "generate_image":
@@ -262,6 +288,9 @@ export function createAllToolDefinitions(cwd: string, options?: ToolsOptions): R
 		web_fetch: createWebFetchToolDefinition(),
 		web_search: createWebSearchToolDefinition(options?.webSearch),
 		set_tasks: createSetTasksToolDefinition(),
+		get_goal: createGetGoalToolDefinition(options?.goal),
+		create_goal: createCreateGoalToolDefinition(options?.goal),
+		update_goal: createUpdateGoalToolDefinition(options?.goal),
 		describe_image: createDescribeImageToolDefinition(cwd, options?.describeImage),
 		generate_image: createGenerateImageToolDefinition(options?.generateImage),
 	};
@@ -297,6 +326,9 @@ export function createAllTools(cwd: string, options?: ToolsOptions): Record<Tool
 		web_fetch: createWebFetchTool(),
 		web_search: createWebSearchTool(options?.webSearch),
 		set_tasks: wrapToolDefinition(createSetTasksToolDefinition()),
+		get_goal: wrapToolDefinition(createGetGoalToolDefinition(options?.goal)),
+		create_goal: wrapToolDefinition(createCreateGoalToolDefinition(options?.goal)),
+		update_goal: wrapToolDefinition(createUpdateGoalToolDefinition(options?.goal)),
 		describe_image: createDescribeImageTool(cwd, options?.describeImage),
 		generate_image: createGenerateImageTool(options?.generateImage),
 	};

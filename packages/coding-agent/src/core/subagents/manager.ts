@@ -377,7 +377,14 @@ export class SubagentManager implements SubagentManagerApi {
 		const names = new Set(this.listSummaries().map((summary) => summary.name));
 		if (names.has(input.name)) throw new Error(`Subagent name has already been used: ${input.name}`);
 		if (new Set(input.tools).size !== input.tools.length) throw new Error("Subagent tools must be unique");
-		const reserved = new Set<string>([SUBAGENT_ACTIVATION_TOOL_NAME, ...SUBAGENT_TOOL_NAMES, "set_tasks"]);
+		const reserved = new Set<string>([
+			SUBAGENT_ACTIVATION_TOOL_NAME,
+			...SUBAGENT_TOOL_NAMES,
+			"set_tasks",
+			"get_goal",
+			"create_goal",
+			"update_goal",
+		]);
 		const active = new Set(parent.getActiveToolNames());
 		for (const tool of input.tools) {
 			if (!tool || tool.length > 256 || /[\u0000-\u001f\u007f-\u009f]/u.test(tool)) {

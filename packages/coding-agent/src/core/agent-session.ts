@@ -93,6 +93,7 @@ import {
 	wrapRegisteredTools,
 } from "./extensions/index.ts";
 import { emitSessionShutdownEvent } from "./extensions/runner.ts";
+import type { ThreadGoal } from "./goal/types.ts";
 import { createInteractiveBashBoundary, type InteractiveBashBoundary } from "./interactive-bash-boundary.ts";
 import { externalizeLargeToolOutput, type PersistedToolOutput } from "./large-tool-output.ts";
 import {
@@ -153,7 +154,7 @@ import { createSessionId } from "./session-id.ts";
 import type { BranchSummaryEntry, CompactionEntry, SessionEntry, SessionManager } from "./session-manager.ts";
 import { CURRENT_SESSION_VERSION, getLatestCompactionEntry, type SessionHeader } from "./session-manager.ts";
 import type { CwdOrigin } from "./session-workspace.ts";
-import { IMAGE_GEN_PROVIDER_ID, type SettingsManager } from "./settings-manager.ts";
+import { IMAGE_GEN_PROVIDER_ID, type SettingsManager, VISION_PROVIDER_ID } from "./settings-manager.ts";
 import { SKILL_USAGE_CUSTOM_TYPE, type SkillUsageRecord } from "./skills.ts";
 import type { SlashCommandInfo } from "./slash-commands.ts";
 import { createSyntheticSourceInfo, type SourceInfo } from "./source-info.ts";
@@ -163,6 +164,8 @@ import { type BuildSystemPromptOptions, buildSystemPrompt } from "./system-promp
 import { canUseUltra, getHighestSupportedThinkingLevel, type ThinkingSelection } from "./thinking-selection.ts";
 import { createToolResultMicrocompactor } from "./tool-result-microcompaction.ts";
 import { type BashOperations, createLocalBashOperations } from "./tools/bash.ts";
+import { createDescribeImageToolDefinition } from "./tools/describe-image.ts";
+import { createGenerateImageToolDefinition } from "./tools/generate-image.ts";
 import { createAllToolDefinitions } from "./tools/index.ts";
 import { resolveReadPathAsync } from "./tools/path-utils.ts";
 import { createToolDefinitionFromAgentTool } from "./tools/tool-definition-wrapper.ts";
@@ -234,7 +237,8 @@ export type AgentSessionEvent =
 			errorMessage?: string;
 	  }
 	| { type: "auto_retry_start"; attempt: number; maxAttempts: number; delayMs: number; errorMessage: string }
-	| { type: "auto_retry_end"; success: boolean; attempt: number; finalError?: string };
+	| { type: "auto_retry_end"; success: boolean; attempt: number; finalError?: string }
+	| { type: "goal_changed"; goal: ThreadGoal | null };
 
 /** Listener function for agent session events */
 export type AgentSessionEventListener = (event: AgentSessionEvent) => void;
@@ -2220,11 +2224,51 @@ export class AgentSession {
 		return this._allowedToolNames ? this._allowedToolNames.has("web_search") : this._defaultBuiltinToolsEnabled;
 	}
 
+	private _canActivateDescribeImage(): boolean {
+		if (this._excludedToolNames?.has("describe_image")) return false;
+		return this._allowedToolNames ? this._allowedToolNames.has("describe_image") : this._defaultBuiltinToolsEnabled;
+	}
+
+	private _canActivateGenerateImage(): boolean {
+		if (this._excludedToolNames?.has("generate_image")) return false;
+		return this._allowedToolNames ? this._allowedToolNames.has("generate_image") : this._defaultBuiltinToolsEnabled;
+	}
+
+	private _visionServiceReady(): boolean {
+		return (
+			this.settingsManager.getVisionSettings() !== undefined &&
+			this._modelRegistry.authStorage.has(VISION_PROVIDER_ID)
+		);
+	}
+
+	private _imageGenServiceReady(): boolean {
+		return (
+			this.settingsManager.getImageGenSettings() !== undefined &&
+			this._modelRegistry.authStorage.has(IMAGE_GEN_PROVIDER_ID)
+		);
+	}
+
 	private _applyWebSearchEnabled(enabled: boolean): void {
 		const names = new Set(this.getActiveToolNames());
 		if (enabled && this._canActivateWebSearch() && this._toolRegistry.has("web_search")) names.add("web_search");
 		else names.delete("web_search");
 		this.setActiveToolsByName([...names]);
+	}
+
+	private _rebuildImageToolDefinitions(): void {
+		if (this._baseToolsOverride) return;
+		const describeImage = createDescribeImageToolDefinition(this._cwd, {
+			getSettings: () => this.settingsManager.getVisionSettings(),
+			getApiKey: () => this._modelRegistry.authStorage.getApiKey(VISION_PROVIDER_ID, { includeFallback: false }),
+			streamSimple: (model, context, options) => this._modelRegistry.streamSimple(model, context, options),
+		});
+		const generateImage = createGenerateImageToolDefinition({
+			getSettings: () => this.settingsManager.getImageGenSettings(),
+			getApiKey: () => this._modelRegistry.authStorage.getApiKey(IMAGE_GEN_PROVIDER_ID, { includeFallback: false }),
+			includeDescribeImageHint: this._visionServiceReady() && this._canActivateDescribeImage(),
+		});
+		this._baseToolDefinitions.set("describe_image", describeImage as ToolDefinition);
+		this._baseToolDefinitions.set("generate_image", generateImage as ToolDefinition);
 	}
 
 	setWebSearchEnabled(enabled: boolean): void {
@@ -2235,6 +2279,17 @@ export class AgentSession {
 	async refreshWebSearchSettings(): Promise<void> {
 		await this.settingsManager.reload();
 		this._applyWebSearchEnabled(this.settingsManager.getWebSearchSettings().enabled);
+	}
+
+	async refreshImageToolSettings(): Promise<void> {
+		await this.settingsManager.reload();
+		this._rebuildImageToolDefinitions();
+		const names = new Set(this.getActiveToolNames());
+		if (this._visionServiceReady() && this._canActivateDescribeImage()) names.add("describe_image");
+		else names.delete("describe_image");
+		if (this._imageGenServiceReady() && this._canActivateGenerateImage()) names.add("generate_image");
+		else names.delete("generate_image");
+		this._refreshToolRegistry({ activeToolNames: [...names] });
 	}
 
 	setWebSearchProvider(provider: WebSearchProvider): void {
@@ -4586,17 +4641,20 @@ export class AgentSession {
 						getApiKey: (provider) => resolveWebSearchApiKey(this._modelRegistry.authStorage, provider),
 					},
 					describeImage: {
-						getVisionRef: () => {
-							const provider = this.settingsManager.getVisionProvider();
-							const modelId = this.settingsManager.getVisionModelId();
-							return provider && modelId ? { provider, modelId } : undefined;
-						},
-						modelRegistry: this._modelRegistry,
+						getSettings: () => this.settingsManager.getVisionSettings(),
+						getApiKey: () =>
+							this._modelRegistry.authStorage.getApiKey(VISION_PROVIDER_ID, { includeFallback: false }),
+						streamSimple: (model, context, options) => this._modelRegistry.streamSimple(model, context, options),
 					},
 					generateImage: {
 						getSettings: () => this.settingsManager.getImageGenSettings(),
 						getApiKey: () =>
 							this._modelRegistry.authStorage.getApiKey(IMAGE_GEN_PROVIDER_ID, { includeFallback: false }),
+						includeDescribeImageHint: this._visionServiceReady() && this._canActivateDescribeImage(),
+					},
+					goal: {
+						getSession: () => this.sessionManager,
+						onChange: (goal) => this._emit({ type: "goal_changed", goal }),
 					},
 				});
 
@@ -4636,17 +4694,28 @@ export class AgentSession {
 					"edit",
 					"write",
 					"web_fetch",
-					"describe_image",
-					"generate_image",
+					...(this._visionServiceReady() && this._canActivateDescribeImage() ? ["describe_image"] : []),
+					...(this._imageGenServiceReady() && this._canActivateGenerateImage() ? ["generate_image"] : []),
 					...(this.settingsManager.getWebSearchSettings().enabled && this._canActivateWebSearch()
 						? ["web_search"]
 						: []),
-					...(this.sessionManager.getHeader()?.subagent ? [] : ["set_tasks"]),
+					...(this.sessionManager.getHeader()?.subagent
+						? []
+						: ["set_tasks", "get_goal", "create_goal", "update_goal"]),
 				];
 		const baseActiveToolNames = options.activeToolNames ?? defaultActiveToolNames;
-		const globallyEnabledToolNames = this.settingsManager.getWebSearchSettings().enabled
-			? baseActiveToolNames
-			: baseActiveToolNames.filter((name) => name !== "web_search");
+		const globallyEnabledToolNames = baseActiveToolNames.filter((name) => {
+			if (name === "web_search") {
+				return this.settingsManager.getWebSearchSettings().enabled && this._canActivateWebSearch();
+			}
+			if (name === "describe_image") {
+				return this._visionServiceReady() && this._canActivateDescribeImage();
+			}
+			if (name === "generate_image") {
+				return this._imageGenServiceReady() && this._canActivateGenerateImage();
+			}
+			return true;
+		});
 		this._refreshToolRegistry({
 			activeToolNames: globallyEnabledToolNames,
 			includeAllExtensionTools: options.includeAllExtensionTools,

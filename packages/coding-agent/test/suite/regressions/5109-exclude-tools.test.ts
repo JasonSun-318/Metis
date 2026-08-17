@@ -52,12 +52,13 @@ describe("regression #5109: exclude tools", () => {
 			expect(allToolNames).toContain("dynamic_tool");
 			expect(harness.session.getActiveToolNames().sort()).toEqual([
 				"bash",
-				"describe_image",
+				"create_goal",
 				"dynamic_tool",
 				"edit",
-				"generate_image",
+				"get_goal",
 				"grep",
 				"set_tasks",
+				"update_goal",
 				"web_fetch",
 				"write",
 			]);
