@@ -29,6 +29,7 @@ import { actionMenuPosition } from "./action-menu-position.ts";
 interface DeliveredFileCardProps {
 	readonly file: SessionDeliveredFileView;
 	readonly onOpen: (action: "default" | "reveal") => void;
+	readonly onPreview?: (file: SessionDeliveredFileView) => void;
 }
 
 const FILE_ICON_BY_EXTENSION: Record<string, Icon> = {
@@ -71,7 +72,7 @@ function DeliveredFileIcon({ name }: { readonly name: string }) {
 	return <IconComponent aria-hidden="true" size={26} weight="duotone" />;
 }
 
-export function DeliveredFileCard({ file, onOpen }: DeliveredFileCardProps) {
+export function DeliveredFileCard({ file, onOpen, onPreview }: DeliveredFileCardProps) {
 	const { t } = useTranslation();
 	const [menuOpen, setMenuOpen] = useState(false);
 	const [menuPosition, setMenuPosition] = useState<CSSProperties>({});
@@ -79,7 +80,7 @@ export function DeliveredFileCard({ file, onOpen }: DeliveredFileCardProps) {
 	const menuRef = useRef<HTMLDivElement>(null);
 
 	const updateMenuPosition = useCallback(() => {
-		if (triggerRef.current) setMenuPosition(actionMenuPosition(triggerRef.current.getBoundingClientRect(), 176, 1));
+		if (triggerRef.current) setMenuPosition(actionMenuPosition(triggerRef.current.getBoundingClientRect(), 180, 1));
 	}, []);
 
 	useLayoutEffect(() => {
@@ -110,8 +111,24 @@ export function DeliveredFileCard({ file, onOpen }: DeliveredFileCardProps) {
 		};
 	}, [menuOpen, updateMenuPosition]);
 
+	const handleMainAction = () => {
+		if (onPreview) {
+			onPreview(file);
+		} else {
+			onOpen("default");
+		}
+	};
+
 	return (
-		<article className="transcript-delivered-file-card">
+		<article
+			className="transcript-delivered-file-card"
+			onClick={(e) => {
+				const target = e.target as HTMLElement;
+				if (!target.closest(".transcript-delivered-file-actions") && !target.closest(".transcript-delivered-file-menu")) {
+					handleMainAction();
+				}
+			}}
+		>
 			<div className="transcript-delivered-file-icon">
 				<DeliveredFileIcon name={file.name} />
 			</div>
@@ -121,8 +138,8 @@ export function DeliveredFileCard({ file, onOpen }: DeliveredFileCardProps) {
 				{file.message ? <p title={file.message}>{file.message}</p> : null}
 			</div>
 			<div className="transcript-delivered-file-actions">
-				<button className="transcript-delivered-file-open" onClick={() => onOpen("default")} type="button">
-					{t("Open")}
+				<button className="transcript-delivered-file-open" onClick={handleMainAction} type="button">
+					{t("Preview")}
 				</button>
 				<button
 					aria-expanded={menuOpen}
@@ -139,6 +156,16 @@ export function DeliveredFileCard({ file, onOpen }: DeliveredFileCardProps) {
 			{menuOpen
 				? createPortal(
 						<div className="transcript-delivered-file-menu" ref={menuRef} role="menu" style={menuPosition}>
+							<button
+								onClick={() => {
+									setMenuOpen(false);
+									onOpen("default");
+								}}
+								role="menuitem"
+								type="button"
+							>
+								{t("Open in default app")}
+							</button>
 							<button
 								onClick={() => {
 									setMenuOpen(false);

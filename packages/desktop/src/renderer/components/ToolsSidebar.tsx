@@ -6,6 +6,8 @@ import type { MetisDesktopApi, DesktopBrowserState, DesktopWorkspaceMutationResu
 import type { AppStore } from "../store/app-store.ts";
 import { BrowserPanel } from "./BrowserPanel.tsx";
 import { FilePanel, type WorkspaceFileDraft } from "./FilePanel.tsx";
+import { UniversalFilePreviewer, type UniversalPreviewTarget } from "./preview/UniversalFilePreviewer.tsx";
+import { previewBytesCache } from "./preview/preview-bytes-cache.ts";
 import { ReviewPanel } from "./ReviewPanel.tsx";
 import { SubagentPanel } from "./SubagentPanel.tsx";
 import { TerminalPanel } from "./TerminalPanel.tsx";
@@ -48,7 +50,14 @@ interface SubagentTab {
 	readonly title: string;
 }
 
-type ToolTab = TerminalTab | BrowserTab | FileTab | ReviewTab | SubagentTab;
+interface PreviewTab {
+	readonly kind: "preview";
+	readonly id: string;
+	readonly title: string;
+	readonly file: UniversalPreviewTarget;
+}
+
+type ToolTab = TerminalTab | BrowserTab | FileTab | ReviewTab | SubagentTab | PreviewTab;
 
 interface ToolWorkspace {
 	readonly tabs: readonly ToolTab[];
@@ -74,6 +83,7 @@ interface ToolsSidebarProps {
 	readonly onWidthChange: (width: number, persist?: boolean) => void;
 	readonly open: boolean;
 	readonly preferredWidth: number;
+	readonly previewRequest?: UniversalPreviewTarget | null;
 	readonly store: AppStore;
 	readonly theme: "dark" | "light";
 	readonly width: number;
@@ -141,7 +151,7 @@ function remapPath(path: string, previous: string, next: string): string {
 	return path === previous ? next : `${next}${path.slice(previous.length)}`;
 }
 
-export function ToolsSidebar({ activeSession, api, cleanupSessionIds, mode, onClose, onCleanupSessionIdsHandled, onDirtySessionIdsChange, onError, onWidthChange, open, preferredWidth, store, theme, width }: ToolsSidebarProps) {
+export function ToolsSidebar({ activeSession, api, cleanupSessionIds, mode, onClose, onCleanupSessionIdsHandled, onDirtySessionIdsChange, onError, onWidthChange, open, preferredWidth, previewRequest, store, theme, width }: ToolsSidebarProps) {
 	const { t } = useTranslation();
 	const [workspaces, setWorkspaces] = useState<ReadonlyMap<string, ToolWorkspace>>(new Map());
 	const [expandedBySession, setExpandedBySession] = useState<ReadonlyMap<string, readonly string[]>>(new Map());
@@ -169,6 +179,7 @@ export function ToolsSidebar({ activeSession, api, cleanupSessionIds, mode, onCl
 		if (cleanupSessionIds.length === 0) return;
 		const removedTabIds = new Set<string>();
 		for (const ownerSessionId of cleanupSessionIds) {
+			previewBytesCache.deleteSession(ownerSessionId);
 			for (const tab of workspaces.get(ownerSessionId)?.tabs ?? []) {
 				removedTabIds.add(tab.id);
 				if (tab.kind === "terminal") void api.closeTerminal({ terminalId: tab.id }).catch(onError);
@@ -217,6 +228,38 @@ export function ToolsSidebar({ activeSession, api, cleanupSessionIds, mode, onCl
 		document.addEventListener("keydown", cancel);
 		return () => document.removeEventListener("keydown", cancel);
 	}, [pendingFileClose]);
+
+	useEffect(() => {
+		if (!previewRequest || !sessionId) return;
+		setWorkspaces((current) => {
+			const previous = current.get(sessionId) ?? { tabs: [], activeId: "", nextNumber: 1 };
+			const existing = previous.tabs.find(
+				(tab): tab is PreviewTab =>
+					tab.kind === "preview" &&
+					tab.file.source === previewRequest.source &&
+					(previewRequest.fileId ? tab.file.fileId === previewRequest.fileId : tab.file.relativePath === previewRequest.relativePath),
+			);
+			if (existing) {
+				const next = new Map(current);
+				next.set(sessionId, { ...previous, activeId: existing.id });
+				return next;
+			}
+			const nextTabId = crypto.randomUUID();
+			const previewTab: PreviewTab = {
+				kind: "preview",
+				id: nextTabId,
+				title: previewRequest.name,
+				file: previewRequest,
+			};
+			const next = new Map(current);
+			next.set(sessionId, {
+				...previous,
+				tabs: [...previous.tabs, previewTab],
+				activeId: nextTabId,
+			});
+			return next;
+		});
+	}, [previewRequest, sessionId]);
 
 	const addTerminal = () => {
 		if (!activeSession?.cwd) return;
@@ -697,7 +740,7 @@ export function ToolsSidebar({ activeSession, api, cleanupSessionIds, mode, onCl
 										onClick={() => selectTab(tab.id)}
 										role="tab"
 										type="button"
-								>{tab.kind === "browser" ? <Globe aria-hidden="true" size={12} /> : tab.kind === "file" ? (tab.relativePath ? <WorkspaceFileIcon path={tab.relativePath} size={12} /> : <FileText aria-hidden="true" size={12} />) : tab.kind === "review" ? <ClipboardText aria-hidden="true" size={12} /> : tab.kind === "subagent" ? <Robot aria-hidden="true" size={12} /> : null}<span>{displayTitle}</span>{dirty && <span aria-hidden="true" className="tool-tab-dirty" />}</button>
+								>{tab.kind === "browser" ? <Globe aria-hidden="true" size={12} /> : tab.kind === "file" ? (tab.relativePath ? <WorkspaceFileIcon path={tab.relativePath} size={12} /> : <FileText aria-hidden="true" size={12} />) : tab.kind === "review" ? <ClipboardText aria-hidden="true" size={12} /> : tab.kind === "subagent" ? <Robot aria-hidden="true" size={12} /> : tab.kind === "preview" ? <WorkspaceFileIcon path={tab.title} size={12} /> : null}<span>{displayTitle}</span>{dirty && <span aria-hidden="true" className="tool-tab-dirty" />}</button>
 									<button aria-label={t("Close {{name}}", { name: displayTitle })} className="tool-tab-close" disabled={saving} onClick={() => closeTab(tab.id)} type="button"><X aria-hidden="true" size={11} /></button>
 								</div>
 								);
@@ -759,6 +802,23 @@ export function ToolsSidebar({ activeSession, api, cleanupSessionIds, mode, onCl
 								store={store}
 								visible={open && ownerWorkspace.activeId === tab.id}
 							/>
+						) : tab.kind === "preview" ? (
+							<div
+								aria-labelledby={`tab-${tab.id}`}
+								className="tool-panel preview-panel"
+								hidden={!open || ownerSessionId !== sessionId || ownerWorkspace.activeId !== tab.id}
+								id={`preview-panel-${tab.id}`}
+								key={tab.id}
+								role="tabpanel"
+							>
+								<UniversalFilePreviewer
+									active={open && ownerSessionId === sessionId && ownerWorkspace.activeId === tab.id}
+									api={api}
+									file={tab.file}
+									onClose={() => closeTab(tab.id)}
+									onError={onError}
+								/>
+							</div>
 						) : [],
 					);
 					if (ownerFileTabs.length > 0) panels.push(

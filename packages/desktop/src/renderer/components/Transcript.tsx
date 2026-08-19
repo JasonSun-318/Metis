@@ -1,4 +1,4 @@
-import type { AgentMode, ItemView } from "@metis/app-protocol";
+import type { AgentMode, ItemView, SessionDeliveredFileView } from "@metis/app-protocol";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -18,6 +18,7 @@ interface TranscriptProps {
 	readonly onFork?: (entryId: string) => void;
 	readonly onCopy?: (text: string) => void;
 	readonly onOpenDeliveredFile?: (fileId: string, action: "default" | "reveal") => void;
+	readonly onPreviewDeliveredFile?: (file: SessionDeliveredFileView) => void;
 	readonly ariaLabel?: string;
 	readonly latestLabel?: string;
 	readonly olderLabel?: string;
@@ -56,7 +57,7 @@ function transcriptRows(appearance: AgentMode, itemIds: readonly string[], items
 	return rows;
 }
 
-export function Transcript({ activeTurnId, activeTurnStartedAt, appearance, ariaLabel = "Conversation transcript", autoLoadOlder = false, hasOlder, itemIds, itemsById, latestLabel, loadingOlder, onCopy, onFork, onOpenDeliveredFile, onLoadOlder, olderLabel = "Load older messages" }: TranscriptProps) {
+export function Transcript({ activeTurnId, activeTurnStartedAt, appearance, ariaLabel = "Conversation transcript", autoLoadOlder = false, hasOlder, itemIds, itemsById, latestLabel, loadingOlder, onCopy, onFork, onOpenDeliveredFile, onPreviewDeliveredFile, onLoadOlder, olderLabel = "Load older messages" }: TranscriptProps) {
 	const { t } = useTranslation();
 	const scrollRef = useRef<HTMLDivElement>(null);
 	const loadingOlderRef = useRef(false);
@@ -179,8 +180,8 @@ export function Transcript({ activeTurnId, activeTurnStartedAt, appearance, aria
 								style={{ transform: `translateY(${row.start}px)` }}
 							>
 								{compaction ? <div role="separator"><span>{t("Compacted")}</span></div> : appearance === "chat"
-									? <TranscriptTurn items={items} onCopy={onCopy} onFork={onFork} onOpenDeliveredFile={onOpenDeliveredFile} running={running} startedAt={activeTurnStartedAt} />
-									: <CodeTranscriptTurn items={items} onCopy={onCopy} onFork={onFork} onOpenDeliveredFile={onOpenDeliveredFile} running={running} startedAt={activeTurnStartedAt} />}
+									? <TranscriptTurn items={items} onCopy={onCopy} onFork={onFork} onOpenDeliveredFile={onOpenDeliveredFile} onPreviewDeliveredFile={onPreviewDeliveredFile} running={running} startedAt={activeTurnStartedAt} />
+									: <CodeTranscriptTurn items={items} onCopy={onCopy} onFork={onFork} onOpenDeliveredFile={onOpenDeliveredFile} onPreviewDeliveredFile={onPreviewDeliveredFile} running={running} startedAt={activeTurnStartedAt} />}
 							</article>
 						);
 					})}

@@ -28,6 +28,8 @@ import type {
 } from "../../shared/desktop-api.ts";
 import { CodeEditor } from "./CodeEditor.tsx";
 import { Markdown } from "./Markdown.tsx";
+import { classifyPreviewKind, isEnginePreviewKind } from "./preview/preview-kinds.ts";
+import { UniversalFilePreviewer } from "./preview/UniversalFilePreviewer.tsx";
 import { WorkspaceFileIcon } from "./WorkspaceFileIcon.tsx";
 
 const DIRECTORY_CACHE_MS = 5_000;
@@ -229,6 +231,11 @@ export function FilePanel({
 			return;
 		}
 		if (draftMatchesActivePath) {
+			setFile(null);
+			setPreviewLoading(false);
+			return;
+		}
+		if (activePath && isEnginePreviewKind(classifyPreviewKind(fileName(activePath)))) {
 			setFile(null);
 			setPreviewLoading(false);
 			return;
@@ -504,6 +511,30 @@ export function FilePanel({
 						<div className="file-empty-state"><SpinnerGap aria-hidden="true" className="is-spinning" size={24} /><span>{t("Opening file…")}</span></div>
 					) : previewError ? (
 						<div className="file-empty-state is-error"><File aria-hidden="true" size={27} /><strong>{t("File could not be opened")}</strong><span>{previewError}</span></div>
+					) : activePath && isEnginePreviewKind(classifyPreviewKind(fileName(activePath))) ? (
+						<UniversalFilePreviewer
+							active={visible}
+							api={api}
+							file={{
+								source: "workspace",
+								sessionId,
+								relativePath: activePath,
+								name: fileName(activePath),
+							}}
+							onError={onError}
+						/>
+					) : displayedFile?.kind === "binary" ? (
+						<UniversalFilePreviewer
+							api={api}
+							file={{
+								source: "workspace",
+								sessionId,
+								relativePath: displayedFile.relativePath,
+								name: fileName(displayedFile.relativePath),
+								byteLength: displayedFile.byteLength,
+							}}
+							onError={onError}
+						/>
 					) : displayedFile?.kind === "image" ? (
 						<img alt={fileName(displayedFile.relativePath)} className="file-image" src={displayedFile.dataUrl} />
 					) : displayedFile?.kind === "unsupported" ? (

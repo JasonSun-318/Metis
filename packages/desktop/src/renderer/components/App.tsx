@@ -12,6 +12,7 @@ import {
 	type QueuedTurnView,
 	RPC_ERROR_CODES,
 	type ScheduleTaskView,
+	type SessionDeliveredFileView,
 	type SessionSummary,
 	type SessionStatusView,
 	type SkillSummaryView,
@@ -66,6 +67,7 @@ import { SCHEDULE_KEEP_AWAKE_KEY, ScheduledTasksPanel } from "./ScheduledTasksPa
 import { ThinkingSelector } from "./ThinkingSelector.tsx";
 import { TurnRuntimeStatus } from "./TurnRuntimeStatus.tsx";
 import { clampToolsSidebarWidth, ToolsSidebar } from "./ToolsSidebar.tsx";
+import type { UniversalPreviewTarget } from "./preview/UniversalFilePreviewer.tsx";
 import { Transcript } from "./Transcript.tsx";
 import { WorkspaceSessionHeader } from "./WorkspaceSessionHeader.tsx";
 import { GOAL_SLASH_USAGE, type GoalSlashCommand } from "../goal-slash.ts";
@@ -240,6 +242,7 @@ export function App({ api, store }: AppProps) {
 	const [toolsSidebarOpen, setToolsSidebarOpen] = useState(false);
 	const [toolsSidebarPreferredWidth, setToolsSidebarPreferredWidth] = useState(393);
 	const [toolsSidebarWidth, setToolsSidebarWidth] = useState(393);
+	const [previewRequest, setPreviewRequest] = useState<UniversalPreviewTarget | null>(null);
 	const [bootstrapped, setBootstrapped] = useState(false);
 	const [theme, setTheme] = useState<AppTheme>(() => loadTheme(localStorage));
 	const [generalPreferences, setGeneralPreferences] = useState(() => loadGeneralPreferences(localStorage));
@@ -296,6 +299,19 @@ export function App({ api, store }: AppProps) {
 		}
 		setToolsSidebarOpen(true);
 	}, [state.activeSessionId]);
+	const handlePreviewDeliveredFile = useCallback(
+		(file: SessionDeliveredFileView) => {
+			if (!state.activeSessionId) return;
+			setPreviewRequest({
+				source: "delivered",
+				sessionId: state.activeSessionId,
+				fileId: file.fileId,
+				name: file.name,
+			});
+			showToolsSidebar();
+		},
+		[showToolsSidebar, state.activeSessionId],
+	);
 	const updateSessionSidebarWidth = useCallback((width: number, persist = true) => {
 		const clamped = clampSessionSidebarWidth(width);
 		setSessionSidebarWidth(clamped);
@@ -1744,7 +1760,21 @@ export function App({ api, store }: AppProps) {
 					<div className="workspace-body">
 						<div className="conversation-column">
 							<RecoveryBanner session={visibleActiveSession} />
-							<Transcript activeTurnId={state.activeTurnId} activeTurnStartedAt={state.activeTurnId ? state.turnsById.get(state.activeTurnId)?.startedAt : undefined} appearance={visibleActiveSession.mode} autoLoadOlder hasOlder={state.nextBeforeItemId !== null} itemIds={state.itemOrder} itemsById={state.itemsById} loadingOlder={loadingOlder} onCopy={(text) => void api.writeClipboardText({ text }).catch(reportError)} onFork={forkFromReply} onLoadOlder={loadOlder} onOpenDeliveredFile={(fileId, action) => void api.openDeliveredFile({ sessionId: visibleActiveSession.sessionId, fileId, action }).catch(reportError)} />
+							<Transcript
+								activeTurnId={state.activeTurnId}
+								activeTurnStartedAt={state.activeTurnId ? state.turnsById.get(state.activeTurnId)?.startedAt : undefined}
+								appearance={visibleActiveSession.mode}
+								autoLoadOlder
+								hasOlder={state.nextBeforeItemId !== null}
+								itemIds={state.itemOrder}
+								itemsById={state.itemsById}
+								loadingOlder={loadingOlder}
+								onCopy={(text) => void api.writeClipboardText({ text }).catch(reportError)}
+								onFork={forkFromReply}
+								onLoadOlder={loadOlder}
+								onOpenDeliveredFile={(fileId, action) => void api.openDeliveredFile({ sessionId: visibleActiveSession.sessionId, fileId, action }).catch(reportError)}
+								onPreviewDeliveredFile={handlePreviewDeliveredFile}
+							/>
 							{compactingSession?.sessionId === visibleActiveSession.sessionId && (
 								<TurnRuntimeStatus items={[]} running startedAt={compactingSession.startedAt} variant="compaction" />
 							)}
@@ -1802,6 +1832,7 @@ export function App({ api, store }: AppProps) {
 					onWidthChange={updateToolsSidebarWidth}
 					open={toolsSidebarAvailable && toolsSidebarOpen && !settingsOpen}
 					preferredWidth={toolsSidebarPreferredWidth}
+					previewRequest={previewRequest}
 					store={store}
 					theme={resolvedTheme}
 					width={toolsSidebarWidth}

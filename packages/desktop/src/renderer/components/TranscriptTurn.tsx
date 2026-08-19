@@ -1,4 +1,4 @@
-import type { ItemContentBlockView, ItemView } from "@metis/app-protocol";
+import type { ItemContentBlockView, ItemView, SessionDeliveredFileView } from "@metis/app-protocol";
 import {
 	CaretRight,
 	Check,
@@ -215,13 +215,14 @@ export function TurnCopyButton({ onCopy, text }: { readonly onCopy: (text: strin
 	);
 }
 
-export function TranscriptTurn({ items, running: runtimeRunning = false, startedAt, onFork, onCopy, onOpenDeliveredFile }: {
+export function TranscriptTurn({ items, running: runtimeRunning = false, startedAt, onFork, onCopy, onOpenDeliveredFile, onPreviewDeliveredFile }: {
 	readonly items: readonly ItemView[];
 	readonly running?: boolean;
 	readonly startedAt?: string;
 	readonly onFork?: (entryId: string) => void;
 	readonly onCopy?: (text: string) => void;
 	readonly onOpenDeliveredFile?: (fileId: string, action: "default" | "reveal") => void;
+	readonly onPreviewDeliveredFile?: (file: SessionDeliveredFileView) => void;
 }) {
 	const { t } = useTranslation();
 	const { users, segments, results, final, deliveredFiles } = buildTurnPresentation(items);
@@ -278,7 +279,7 @@ export function TranscriptTurn({ items, running: runtimeRunning = false, started
 				</div>
 			)}
 			{deliveredFiles.length > 0 && !runtimeRunning && onOpenDeliveredFile ? (
-				<DeliveredFileCards files={deliveredFiles} onOpen={onOpenDeliveredFile} />
+				<DeliveredFileCards files={deliveredFiles} onOpen={onOpenDeliveredFile} onPreview={onPreviewDeliveredFile} />
 			) : null}
 			{final && final.state === "completed" && (onFork || (onCopy && finalCopyText.trim() !== "")) && (
 				<div className="turn-actions">

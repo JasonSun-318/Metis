@@ -541,6 +541,15 @@ describe("desktop trust boundaries", () => {
 		broker.dispose();
 	});
 
+	it("does not load preview office files over base64 JSON or a CMap CDN", () => {
+		const previewDir = join(desktopRoot, "src", "renderer", "components", "preview");
+		const sources = rendererSources(previewDir).join("\n");
+		expect(sources).not.toContain("cdn.jsdelivr.net");
+		expect(sources).not.toContain("readDeliveredFile");
+		expect(sources).not.toContain("readWorkspaceFile");
+		expect(sources).toContain("readPreviewFile");
+	});
+
 	it("keeps PTY creation behind validated IPC and closes terminals with their renderer owner", async () => {
 		const ipcMain = new FakeIpcMain();
 		const { supervisor } = supervisorHarness();
@@ -690,6 +699,7 @@ describe("desktop trust boundaries", () => {
 				text: "read",
 				revision: "a".repeat(64),
 			})),
+			readPreviewBytes: vi.fn(async () => ({ ok: false as const, reason: "not-found" as const })),
 			writeFile: vi.fn(async () => ({ revision: "b".repeat(64), byteLength: 7 })),
 			openFile: vi.fn(async () => undefined),
 			mutateEntry: vi.fn(async () => ({
