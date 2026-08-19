@@ -7,9 +7,9 @@ import { Composer } from "../src/renderer/components/Composer.tsx";
 
 afterEach(() => document.body.replaceChildren());
 
-function type(textarea: HTMLTextAreaElement, value: string) {
-	Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set?.call(textarea, value);
-	textarea.dispatchEvent(new Event("input", { bubbles: true }));
+function type(editor: HTMLElement, value: string) {
+	Object.getOwnPropertyDescriptor(editor, "value")?.set?.call(editor, value);
+	editor.dispatchEvent(new Event("input", { bubbles: true }));
 }
 
 describe("Composer slash commands", () => {
@@ -23,13 +23,13 @@ describe("Composer slash commands", () => {
 		await act(async () => root.render(
 			<Composer disabled={false} onInterrupt={async () => undefined} onSlashCommand={onSlashCommand} onSubmit={onSubmit} running={false} />,
 		));
-		const textarea = container.querySelector("textarea")!;
-		await act(async () => type(textarea, "/com"));
+		const editor = container.querySelector<HTMLElement>("#composer-input")!;
+		await act(async () => type(editor, "/com"));
 		expect(container.querySelectorAll('[role="option"]')).toHaveLength(1);
 		await act(async () => container.querySelector<HTMLButtonElement>('[role="option"]')!.click());
 		expect(onSlashCommand).toHaveBeenCalledWith("compact");
 		expect(onSubmit).not.toHaveBeenCalled();
-		expect(textarea.value).toBe("");
+		expect(editor.textContent).toBe("");
 		await act(async () => root.unmount());
 	});
 
@@ -46,18 +46,17 @@ describe("Composer slash commands", () => {
 			skills: [{ name: "codebase-design", description: "Design deep modules" }],
 		};
 		await act(async () => root.render(<Composer {...props} />));
-		const textarea = container.querySelector("textarea")!;
-		await act(async () => type(textarea, "/skill:code"));
-		await act(async () => container.querySelector<HTMLButtonElement>('[role="option"]')!.click());
+		const editor = container.querySelector<HTMLElement>("#composer-input")!;
+		await act(async () => type(editor, "/skill:codebase-design"));
 		expect(container.querySelector(".composer-input-line .composer-skill-token")?.textContent).toContain("codebase-design");
-		await act(async () => type(textarea, "review this"));
+		await act(async () => type(editor, "review this"));
 		await act(async () => container.querySelector<HTMLFormElement>("form")!.requestSubmit());
 		expect(onSubmit).toHaveBeenLastCalledWith(expect.objectContaining({
 			text: "review this",
 			skill: expect.objectContaining({ name: "codebase-design" }),
 		}));
 
-		await act(async () => type(textarea, "/unknown"));
+		await act(async () => type(editor, "/unknown"));
 		await act(async () => container.querySelector<HTMLFormElement>("form")!.requestSubmit());
 		expect(onSubmit).toHaveBeenLastCalledWith(expect.objectContaining({ text: "/unknown" }));
 		await act(async () => root.unmount());
@@ -75,16 +74,16 @@ describe("Composer slash commands", () => {
 			skills: [{ name: "codebase-design", description: "Design deep modules" }],
 		};
 		await act(async () => root.render(<Composer {...props} />));
-		const textarea = container.querySelector("textarea")!;
-		await act(async () => type(textarea, "/skill:code"));
-		await act(async () => container.querySelector<HTMLButtonElement>('[role="option"]')!.click());
-
-		await act(async () => type(textarea, "review this"));
-		await act(async () => textarea.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "Backspace" })));
+		const editor = container.querySelector<HTMLElement>("#composer-input")!;
+		await act(async () => type(editor, "/skill:codebase-design"));
 		expect(container.querySelector(".composer-skill-token")).not.toBeNull();
 
-		await act(async () => type(textarea, ""));
-		await act(async () => textarea.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "Backspace" })));
+		await act(async () => type(editor, "review this"));
+		await act(async () => editor.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "Backspace" })));
+		expect(container.querySelector(".composer-skill-token")).not.toBeNull();
+
+		await act(async () => type(editor, ""));
+		await act(async () => editor.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "Backspace" })));
 		expect(container.querySelector(".composer-skill-token")).toBeNull();
 		await act(async () => root.unmount());
 	});
@@ -103,10 +102,8 @@ describe("Composer slash commands", () => {
 				skills={[{ name: "codebase-design", description: "Design deep modules" }]}
 			/>,
 		));
-		const textarea = container.querySelector<HTMLTextAreaElement>("#composer-input")!;
-		await act(async () => type(textarea, "Plan carefully"));
-		textarea.setSelectionRange(5, 5);
-		textarea.dispatchEvent(new Event("select", { bubbles: true }));
+		const editor = container.querySelector<HTMLElement>("#composer-input")!;
+		await act(async () => type(editor, "Plan carefully"));
 
 		await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Add to message"]')!.click());
 		await act(async () => [...container.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')]
@@ -114,16 +111,40 @@ describe("Composer slash commands", () => {
 		await act(async () => [...container.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')]
 			.find((item) => item.textContent?.trim() === "codebase-design")!.click());
 
-		const before = container.querySelector<HTMLTextAreaElement>(".composer-input-before")!;
-		expect(before.value).toBe("Plan ");
-		expect(container.querySelector(".composer-skill-token")?.previousElementSibling).toBe(before);
-		expect(textarea.value).toBe("carefully");
+		expect(container.querySelector(".composer-skill-token")).not.toBeNull();
+		expect(container.querySelector(".composer-skill-token")?.textContent).toContain("codebase-design");
 
-		await act(async () => textarea.form!.requestSubmit());
+		await act(async () => container.querySelector<HTMLFormElement>("form")!.requestSubmit());
 		expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
 			text: "Plan carefully",
 			skill: expect.objectContaining({ name: "codebase-design" }),
 		}));
+		await act(async () => root.unmount());
+	});
+
+	it("inserts a Goal token when /goal is selected and submits goal command", async () => {
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		const onGoalCommand = vi.fn(async () => undefined);
+		await act(async () => root.render(
+			<Composer
+				disabled={false}
+				onGoalCommand={onGoalCommand}
+				onInterrupt={async () => undefined}
+				onSubmit={async () => undefined}
+				running={false}
+			/>,
+		));
+		const editor = container.querySelector<HTMLElement>("#composer-input")!;
+		await act(async () => type(editor, "/goal Build desktop features"));
+		expect(container.querySelector(".composer-goal-token")).not.toBeNull();
+
+		await act(async () => container.querySelector<HTMLFormElement>("form")!.requestSubmit());
+		expect(onGoalCommand).toHaveBeenCalledWith({
+			kind: "set",
+			objective: "Build desktop features",
+		});
 		await act(async () => root.unmount());
 	});
 

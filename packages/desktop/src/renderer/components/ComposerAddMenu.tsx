@@ -6,6 +6,7 @@ import { useTranslation } from "react-i18next";
 interface ComposerAddMenuProps {
 	readonly commandRequest?: { readonly id: number; readonly open: boolean };
 	readonly disabled: boolean;
+	readonly iconSize?: number;
 	readonly mcpServers: readonly McpServerSummaryView[];
 	readonly skills: readonly SkillSummaryView[];
 	readonly onAddFiles: () => void;
@@ -14,7 +15,7 @@ interface ComposerAddMenuProps {
 	readonly onSelectSkill: (skill: SkillSummaryView) => void;
 }
 
-export function ComposerAddMenu({ commandRequest, disabled, mcpServers, skills, onAddFiles, onManageMcp, onManageSkills, onSelectSkill }: ComposerAddMenuProps) {
+export function ComposerAddMenu({ commandRequest, disabled, iconSize = 18, mcpServers, skills, onAddFiles, onManageMcp, onManageSkills, onSelectSkill }: ComposerAddMenuProps) {
 	const { t } = useTranslation();
 	const [open, setOpen] = useState(false);
 	const [mcpOpen, setMcpOpen] = useState(false);
@@ -91,7 +92,7 @@ export function ComposerAddMenu({ commandRequest, disabled, mcpServers, skills, 
 				ref={triggerRef}
 				type="button"
 			>
-				<Plus aria-hidden="true" size={20} />
+				<Plus aria-hidden="true" size={iconSize} />
 			</button>
 			{open && (
 				<div className="composer-add-popover">

@@ -22,6 +22,7 @@ interface NewTaskHomeProps {
 	readonly onManageMcp: () => void;
 	readonly onManageSkills: () => void;
 	readonly onPickFiles: () => Promise<readonly DesktopAttachmentSelection[]>;
+	readonly onResolveDroppedFiles?: (files: readonly File[]) => readonly DesktopAttachmentSelection[];
 	readonly onSlashCommand?: (command: ComposerSlashCommand) => void | Promise<void>;
 	readonly onSubmit: (input: ComposerSubmission) => Promise<void>;
 	readonly skills: readonly SkillSummaryView[];
@@ -47,6 +48,7 @@ export function NewTaskHome({
 	onManageMcp,
 	onManageSkills,
 	onPickFiles,
+	onResolveDroppedFiles,
 	onSlashCommand,
 	onSubmit,
 	skills,
@@ -74,6 +76,7 @@ export function NewTaskHome({
 						onManageMcp={onManageMcp}
 						onManageSkills={onManageSkills}
 						onPickFiles={onPickFiles}
+						onResolveDroppedFiles={onResolveDroppedFiles}
 						onSlashCommand={onSlashCommand}
 						onSubmit={onSubmit}
 						placeholder={t("How can I help you today?")}
