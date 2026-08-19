@@ -583,6 +583,10 @@ export class Dispatcher {
 				const ref = this.runtimeRef(request.params.sessionId);
 				return await this.registry.run(ref, (runtime) => runtime.openDeliveredFile(request.params));
 			}
+			case "session/readDeliveredFile": {
+				const ref = this.runtimeRef(request.params.sessionId);
+				return await this.registry.run(ref, (runtime) => runtime.readDeliveredFile(request.params));
+			}
 			case "session/status": {
 				const ref = this.runtimeRef(request.params.sessionId);
 				return await this.registry.run(ref, (runtime) => runtime.getStatus(request.params));

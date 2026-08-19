@@ -91,6 +91,7 @@ import {
 } from "./mcp-projection.ts";
 import { openDeliveredFile as openDeliveredFileOnDisk } from "./open-delivered-file.ts";
 import { SessionProjection } from "./projection/session-projection.ts";
+import { readDeliveredFile as readDeliveredFileOnDisk } from "./read-delivered-file.ts";
 import {
 	AppServerError,
 	type OpenedSessionRuntime,
@@ -1144,6 +1145,23 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 		}
 	}
 
+	async readDeliveredFile(
+		input: ClientParams<"session/readDeliveredFile">,
+	): Promise<ClientResult<"session/readDeliveredFile">> {
+		try {
+			return await readDeliveredFileOnDisk({
+				agentDir: this.agentDir,
+				sessionId: input.sessionId,
+				fileId: input.fileId,
+			});
+		} catch (error) {
+			if (error instanceof Error && error.message === "Delivered file was not found") {
+				throw new AppServerError("NOT_FOUND", { sessionId: this.sessionId });
+			}
+			throw new AppServerError("OPERATION_FAILED", { sessionId: this.sessionId });
+		}
+	}
+
 	async getStatus(input: ClientParams<"session/status">): Promise<ClientResult<"session/status">> {
 		const stats = this.session.getSessionStats();
 		const context = stats.contextUsage;
@@ -1629,6 +1647,23 @@ class ReadonlyScheduledSessionRuntime implements OpenedSessionRuntime {
 				action: input.action,
 			});
 			return {};
+		} catch (error) {
+			if (error instanceof Error && error.message === "Delivered file was not found") {
+				throw new AppServerError("NOT_FOUND", { sessionId: this.sessionId });
+			}
+			throw new AppServerError("OPERATION_FAILED", { sessionId: this.sessionId });
+		}
+	}
+
+	async readDeliveredFile(
+		input: ClientParams<"session/readDeliveredFile">,
+	): Promise<ClientResult<"session/readDeliveredFile">> {
+		try {
+			return await readDeliveredFileOnDisk({
+				agentDir: this.agentDir,
+				sessionId: input.sessionId,
+				fileId: input.fileId,
+			});
 		} catch (error) {
 			if (error instanceof Error && error.message === "Delivered file was not found") {
 				throw new AppServerError("NOT_FOUND", { sessionId: this.sessionId });

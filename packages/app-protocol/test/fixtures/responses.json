@@ -659,6 +659,21 @@
 	},
 	{
 		"direction": "client",
+		"method": "session/readDeliveredFile",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "client-read-delivered-file",
+			"result": {
+				"fileId": "aaaaaaaaaaaaaaaa",
+				"name": "sample.pdf",
+				"byteLength": 1024,
+				"data": "JVBERi0xLjQK...",
+				"mediaType": "application/pdf"
+			}
+		}
+	},
+	{
+		"direction": "client",
 		"method": "session/status",
 		"envelope": {
 			"jsonrpc": "2.0",

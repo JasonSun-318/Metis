@@ -167,6 +167,18 @@ class PausableRuntime implements OpenedSessionRuntime {
 		throw new Error("No delivered file in fixture");
 	}
 
+	async readDeliveredFile(
+		input: ClientParams<"session/readDeliveredFile">,
+	): Promise<ClientResult<"session/readDeliveredFile">> {
+		return {
+			fileId: input.fileId,
+			name: "sample.pdf",
+			byteLength: 1024,
+			data: "JVBERi0xLjQK...",
+			mediaType: "application/pdf",
+		};
+	}
+
 	async getStatus(input: ClientParams<"session/status">): Promise<ClientResult<"session/status">> {
 		return {
 			sessionId: input.sessionId,

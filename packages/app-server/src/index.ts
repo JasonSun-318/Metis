@@ -8,6 +8,7 @@ export * from "./interactions.ts";
 export * from "./model-settings.ts";
 export * from "./outbound-queue.ts";
 export * from "./projection/session-projection.ts";
+export * from "./read-delivered-file.ts";
 export * from "./session-catalog.ts";
 export * from "./session-registry.ts";
 export * from "./session-runtime-host.ts";

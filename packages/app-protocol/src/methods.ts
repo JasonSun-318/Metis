@@ -406,6 +406,19 @@ export const SessionOpenDeliveredFileParamsSchema = StrictObject({
 });
 export const SessionOpenDeliveredFileResultSchema = StrictObject({});
 
+export const SessionReadDeliveredFileParamsSchema = StrictObject({
+	sessionId: SessionIdSchema,
+	fileId: Type.String({ minLength: 16, maxLength: 16, pattern: "^[a-f0-9]{16}$" }),
+});
+export const SessionReadDeliveredFileResultSchema = StrictObject({
+	fileId: Type.String({ minLength: 16, maxLength: 16, pattern: "^[a-f0-9]{16}$" }),
+	name: Type.String({ minLength: 1, maxLength: 255 }),
+	byteLength: Type.Integer({ minimum: 0, maximum: 128 * 1024 * 1024 }),
+	data: Type.String({ minLength: 0 }),
+	mediaType: Type.Optional(Type.String({ minLength: 1, maxLength: 255 })),
+	absolutePath: Type.Optional(Type.String({ minLength: 1, maxLength: 4096 })),
+});
+
 export const SessionMutationParamsSchema = StrictObject({
 	// Every other request ID is scoped to this session's durable journal.
 	requestId: UuidSchema,
@@ -865,6 +878,7 @@ export const ClientRequestMethods = {
 	"session/readItems": method(SessionReadItemsParamsSchema, SessionReadItemsResultSchema),
 	"session/readImage": method(SessionReadImageParamsSchema, SessionReadImageResultSchema),
 	"session/openDeliveredFile": method(SessionOpenDeliveredFileParamsSchema, SessionOpenDeliveredFileResultSchema),
+	"session/readDeliveredFile": method(SessionReadDeliveredFileParamsSchema, SessionReadDeliveredFileResultSchema),
 	"session/status": method(SessionRefParamsSchema, SessionStatusViewSchema),
 	"session/compact": method(SessionMutationParamsSchema, SessionCompactResultSchema),
 	"session/goal/get": method(SessionGoalGetParamsSchema, SessionGoalGetResultSchema),

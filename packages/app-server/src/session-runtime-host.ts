@@ -45,6 +45,9 @@ export interface OpenedSessionRuntime {
 	openDeliveredFile(
 		input: ClientParams<"session/openDeliveredFile">,
 	): Promise<ClientResult<"session/openDeliveredFile">>;
+	readDeliveredFile(
+		input: ClientParams<"session/readDeliveredFile">,
+	): Promise<ClientResult<"session/readDeliveredFile">>;
 	getStatus(input: ClientParams<"session/status">): Promise<ClientResult<"session/status">>;
 	compact(input: ClientParams<"session/compact">): Promise<ClientResult<"session/compact">>;
 	getGoal(input: ClientParams<"session/goal/get">): Promise<ClientResult<"session/goal/get">>;
