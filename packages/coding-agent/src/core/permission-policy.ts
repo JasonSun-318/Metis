@@ -412,9 +412,16 @@ export function classifyAction(input: ClassifyActionInput): PermissionAction {
 		return action(input, risks);
 	}
 	if (
-		["set_tasks", "ask_user", "tool_search", "inspect_agents", "get_goal", "create_goal", "update_goal"].includes(
-			input.toolName,
-		)
+		[
+			"set_tasks",
+			"ask_user",
+			"deliver_file",
+			"tool_search",
+			"inspect_agents",
+			"get_goal",
+			"create_goal",
+			"update_goal",
+		].includes(input.toolName)
 	) {
 		return action(input, ["ordinary-read"]);
 	}

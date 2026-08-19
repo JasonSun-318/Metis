@@ -83,6 +83,15 @@ export {
 	serializeConversation,
 	shouldCompact,
 } from "./core/compaction/index.ts";
+export {
+	createDeliverFileToolDefinition,
+	type DeliverFileContext,
+	type DeliverFileDetails,
+	type DeliverFileInput,
+	type GetDeliverFileContext,
+	MAX_DELIVER_FILE_MESSAGE_LENGTH,
+	parseDeliverFileDetails,
+} from "./core/deliver-file.ts";
 export { readSingleLinkTextFileSync, replaceFileAtomicallySync } from "./core/durable-file.ts";
 export { createEventBus, type EventBus, type EventBusController } from "./core/event-bus.ts";
 // Extension system
@@ -386,19 +395,25 @@ export {
 	type SubmitPromptResult,
 } from "./core/sdk.ts";
 export {
+	copySessionDeliveredFiles,
 	formatSessionAttachmentDisplayText,
 	formatSessionAttachments,
 	getOwnedSessionAttachmentDir,
+	getOwnedSessionDeliveredDir,
 	getSessionAttachmentDir,
 	importSessionAttachments,
 	MAX_SESSION_ATTACHMENT_BYTES,
 	MAX_SESSION_ATTACHMENTS,
 	MAX_SESSION_ATTACHMENTS_BYTES,
+	MAX_SESSION_DELIVERED_FILES,
 	pruneStaleSessionWorkDirs,
 	removeSessionAttachment,
+	resolveDeliveredFilePath,
 	type SessionAttachment,
 	type SessionAttachmentInput,
+	type StagedDeliveredFile,
 	splitSessionAttachmentPrompt,
+	stageDeliveredFile,
 } from "./core/session-attachments.ts";
 export {
 	isSessionControlEntryType,
