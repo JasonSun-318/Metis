@@ -26,6 +26,7 @@ import {
 	validateInteractionResponseInput,
 	validateListWorkspaceDirectoryInput,
 	validateOpenWorkspaceFileInput,
+	validateReadPreviewFileInput,
 	validateReadWorkspaceFileInput,
 	validateResizeTerminalInput,
 	validateSearchWorkspaceFilesInput,
@@ -239,6 +240,12 @@ const api = {
 		invoke(DESKTOP_IPC_CHANNELS.openDeliveredFile, "session/openDeliveredFile", input) as ReturnType<
 			MetisDesktopApi["openDeliveredFile"]
 		>,
+	readDeliveredFile: (input: ClientParams<"session/readDeliveredFile">) =>
+		invoke(DESKTOP_IPC_CHANNELS.readDeliveredFile, "session/readDeliveredFile", input) as ReturnType<
+			MetisDesktopApi["readDeliveredFile"]
+		>,
+	readPreviewFile: (input) =>
+		ipcRenderer.invoke(DESKTOP_IPC_CHANNELS.readPreviewFile, validateReadPreviewFileInput(input)),
 	getSessionStatus: (input: ClientParams<"session/status">) =>
 		invoke(DESKTOP_IPC_CHANNELS.getSessionStatus, "session/status", input) as ReturnType<
 			MetisDesktopApi["getSessionStatus"]

@@ -1,4 +1,7 @@
 import { randomUUID } from "node:crypto";
+import { readdir, readFile, stat } from "node:fs/promises";
+import { homedir } from "node:os";
+import { basename, extname, join } from "node:path";
 import {
 	type ClientParams,
 	type ClientResult,
@@ -37,6 +40,7 @@ import {
 	validateInteractionResponseInput,
 	validateListWorkspaceDirectoryInput,
 	validateOpenWorkspaceFileInput,
+	validateReadPreviewFileInput,
 	validateReadWorkspaceFileInput,
 	validateResizeTerminalInput,
 	validateSearchWorkspaceFilesInput,
@@ -49,6 +53,7 @@ import {
 	validateWriteWorkspaceFileInput,
 } from "../shared/desktop-api.ts";
 import type { BrowserManager } from "./browser-manager.ts";
+import { deliveredPreviewDirectories, readDeliveredPreviewBytes } from "./preview-file-reader.ts";
 import type { TerminalManager } from "./terminal-manager.ts";
 import type { WorkspaceFileManager } from "./workspace-file-manager.ts";
 
@@ -89,6 +94,7 @@ interface ClientBrokerOptions {
 		| "listDirectory"
 		| "search"
 		| "readFile"
+		| "readPreviewBytes"
 		| "writeFile"
 		| "openFile"
 		| "mutateEntry"
@@ -137,6 +143,64 @@ function rpcFailure(response: RpcErrorResponse): Error {
 	return error;
 }
 
+const DELIVERED_FILE_ID_PATTERN = /^[a-f0-9]{16}$/iu;
+
+const DELIVERED_MIME_MAP: Record<string, string> = {
+	pdf: "application/pdf",
+	xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+	xls: "application/vnd.ms-excel",
+	csv: "text/csv",
+	docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+	doc: "application/msword",
+	pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+	ppt: "application/vnd.ms-powerpoint",
+	png: "image/png",
+	jpg: "image/jpeg",
+	jpeg: "image/jpeg",
+	gif: "image/gif",
+	webp: "image/webp",
+	svg: "image/svg+xml",
+	txt: "text/plain",
+	md: "text/markdown",
+	json: "application/json",
+};
+
+async function readDeliveredFileDirect(sessionId: string, fileId: string) {
+	if (!DELIVERED_FILE_ID_PATTERN.test(fileId)) return null;
+	const candidateDirs = [
+		process.env.METIS_AGENT_DIR ? join(process.env.METIS_AGENT_DIR, "attachments", sessionId, "delivered") : null,
+		join(homedir(), ".metis", "agent", "attachments", sessionId, "delivered"),
+		join(homedir(), ".metis", "attachments", sessionId, "delivered"),
+		join(homedir(), ".metis", "agent", "attachments", sessionId),
+		join(homedir(), ".metis", "attachments", sessionId),
+	].filter((d): d is string => d !== null);
+
+	for (const dir of candidateDirs) {
+		try {
+			const names = await readdir(dir);
+			const match = names.find((name) => name.startsWith(fileId));
+			if (!match) continue;
+			const fullPath = join(dir, match);
+			const metadata = await stat(fullPath);
+			if (!metadata.isFile()) continue;
+			const contents = await readFile(fullPath);
+			const ext = extname(fullPath).replace(/^\./u, "").toLowerCase();
+			const mediaType = DELIVERED_MIME_MAP[ext] || "application/octet-stream";
+			return {
+				fileId,
+				name: basename(fullPath),
+				byteLength: metadata.size,
+				data: contents.toString("base64"),
+				mediaType,
+				absolutePath: fullPath,
+			};
+		} catch {
+			// Continue to next candidate directory
+		}
+	}
+	return null;
+}
+
 /** Owns the single narrow, validated renderer-to-app-server capability surface. */
 export class ClientBroker {
 	private readonly ipcMain: Pick<IpcMain, "handle" | "removeHandler">;
@@ -164,6 +228,7 @@ export class ClientBroker {
 		| "listDirectory"
 		| "search"
 		| "readFile"
+		| "readPreviewBytes"
 		| "writeFile"
 		| "openFile"
 		| "mutateEntry"
@@ -251,6 +316,9 @@ export class ClientBroker {
 				throw new Error("Workspace files are unavailable");
 			},
 			readFile: async () => {
+				throw new Error("Workspace files are unavailable");
+			},
+			readPreviewBytes: async () => {
 				throw new Error("Workspace files are unavailable");
 			},
 			writeFile: async () => {
@@ -561,6 +629,21 @@ export class ClientBroker {
 		this.register(DESKTOP_IPC_CHANNELS.openDeliveredFile, 1, async (_event, [input]) =>
 			this.clientCall("session/openDeliveredFile", input),
 		);
+		this.register(DESKTOP_IPC_CHANNELS.readDeliveredFile, 1, async (_event, [input]) => {
+			const params = input as ClientParams<"session/readDeliveredFile">;
+			const direct = await readDeliveredFileDirect(params.sessionId, params.fileId);
+			if (direct) return direct;
+			return this.clientCall("session/readDeliveredFile", params);
+		});
+		this.register(DESKTOP_IPC_CHANNELS.readPreviewFile, 1, async (_event, [input]) => {
+			const params = validateReadPreviewFileInput(input);
+			if (params.source === "workspace") return this.workspaceFiles.readPreviewBytes(params);
+			for (const directory of deliveredPreviewDirectories(params.sessionId)) {
+				const result = await readDeliveredPreviewBytes(directory, params.fileId);
+				if (result.ok || result.reason === "too-large") return result;
+			}
+			return { ok: false, reason: "not-found" };
+		});
 		this.register(DESKTOP_IPC_CHANNELS.getSessionStatus, 1, async (_event, [input]) =>
 			this.clientCall("session/status", input),
 		);

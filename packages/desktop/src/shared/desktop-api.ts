@@ -100,6 +100,8 @@ export const DESKTOP_IPC_CHANNELS = {
 	readItems: "metis:read-items",
 	readSessionImage: "metis:read-session-image",
 	openDeliveredFile: "metis:open-delivered-file",
+	readDeliveredFile: "metis:read-delivered-file",
+	readPreviewFile: "metis:read-preview-file",
 	getSessionStatus: "metis:get-session-status",
 	compactSession: "metis:compact-session",
 	setSessionGoal: "metis:set-session-goal",
@@ -410,12 +412,34 @@ interface DesktopWorkspaceFileBase {
 	readonly byteLength: number;
 }
 
+export const PREVIEW_MAX_BYTES = 50 * 1024 * 1024;
+
+export type DesktopPreviewFileInput =
+	| { readonly source: "delivered"; readonly sessionId: string; readonly fileId: string }
+	| { readonly source: "workspace"; readonly sessionId: string; readonly relativePath: string };
+
+export type DesktopPreviewFile =
+	| {
+			readonly ok: true;
+			readonly name: string;
+			readonly byteLength: number;
+			readonly mediaType: string;
+			readonly bytes: Uint8Array;
+	  }
+	| { readonly ok: false; readonly reason: "too-large" | "not-found" };
+
 export type DesktopWorkspaceFile =
 	| (DesktopWorkspaceFileBase & { readonly kind: "text"; readonly text: string; readonly revision: string })
 	| (DesktopWorkspaceFileBase & {
 			readonly kind: "image";
 			readonly mediaType: "image/png" | "image/jpeg" | "image/gif" | "image/webp";
 			readonly dataUrl: string;
+	  })
+	| (DesktopWorkspaceFileBase & {
+			readonly kind: "binary";
+			readonly mediaType: string;
+			readonly dataUrl: string;
+			readonly revision?: string;
 	  })
 	| (DesktopWorkspaceFileBase & { readonly kind: "unsupported"; readonly reason: "binary" | "too-large" });
 
@@ -509,6 +533,10 @@ export interface MetisDesktopApi {
 	openDeliveredFile(
 		input: ClientParams<"session/openDeliveredFile">,
 	): Promise<ClientResult<"session/openDeliveredFile">>;
+	readDeliveredFile(
+		input: ClientParams<"session/readDeliveredFile">,
+	): Promise<ClientResult<"session/readDeliveredFile">>;
+	readPreviewFile(input: DesktopPreviewFileInput): Promise<DesktopPreviewFile>;
 	getSessionStatus(input: ClientParams<"session/status">): Promise<ClientResult<"session/status">>;
 	compactSession(input: ClientParams<"session/compact">): Promise<ClientResult<"session/compact">>;
 	setSessionGoal(input: ClientParams<"session/goal/set">): Promise<ClientResult<"session/goal/set">>;
@@ -636,6 +664,36 @@ export function validateReadWorkspaceFileInput(value: unknown): DesktopWorkspace
 		sessionId: workspaceSessionId(input.sessionId),
 		relativePath: workspaceRelativePath(input.relativePath, false),
 	};
+}
+
+const DELIVERED_FILE_ID = /^[a-f0-9]{16}$/iu;
+
+export function validateReadPreviewFileInput(value: unknown): DesktopPreviewFileInput {
+	if (typeof value !== "object" || value === null || Array.isArray(value)) {
+		throw new TypeError("Invalid preview file input");
+	}
+	const record = value as Record<string, unknown>;
+	if (record.source === "delivered") {
+		const input = exactRecord(value, ["source", "sessionId", "fileId"], "preview file input");
+		if (typeof input.fileId !== "string" || !DELIVERED_FILE_ID.test(input.fileId)) {
+			throw new TypeError("Invalid preview file id");
+		}
+		assertSchema(sessionIdValidator, input.sessionId, "invalid_params", "preview session id");
+		return {
+			source: "delivered",
+			sessionId: input.sessionId as string,
+			fileId: input.fileId.toLowerCase(),
+		};
+	}
+	if (record.source === "workspace") {
+		const input = exactRecord(value, ["source", "sessionId", "relativePath"], "preview file input");
+		return {
+			source: "workspace",
+			sessionId: workspaceSessionId(input.sessionId),
+			relativePath: workspaceRelativePath(input.relativePath, false),
+		};
+	}
+	throw new TypeError("Invalid preview file input");
 }
 
 const FULL_GIT_OBJECT_ID = /^(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})$/u;

@@ -15,6 +15,7 @@ import {
 import { basename, dirname, extname, isAbsolute, join, relative, sep } from "node:path";
 import type {
 	DesktopOpenWorkspaceFileInput,
+	DesktopPreviewFile,
 	DesktopWorkspaceEntry,
 	DesktopWorkspaceFile,
 	DesktopWorkspaceMutationInput,
@@ -33,6 +34,7 @@ import type {
 	DesktopWriteWorkspaceFileInput,
 	DesktopWriteWorkspaceFileResult,
 } from "../shared/desktop-api.ts";
+import { PREVIEW_MAX_BYTES } from "../shared/desktop-api.ts";
 
 const TEXT_LIMIT = 2 * 1024 * 1024;
 const IMAGE_LIMIT = 10 * 1024 * 1024;
@@ -53,6 +55,17 @@ const IMAGE_TYPES = new Map<string, "image/png" | "image/jpeg" | "image/gif" | "
 	[".gif", "image/gif"],
 	[".webp", "image/webp"],
 ]);
+
+const DOC_BINARY_TYPES = new Map<string, string>([
+	[".pdf", "application/pdf"],
+	[".docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"],
+	[".doc", "application/msword"],
+	[".xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"],
+	[".xls", "application/vnd.ms-excel"],
+	[".pptx", "application/vnd.openxmlformats-officedocument.presentationml.presentation"],
+	[".ppt", "application/vnd.ms-powerpoint"],
+]);
+const DOC_LIMIT = 50 * 1024 * 1024;
 
 function contentRevision(contents: Uint8Array): string {
 	return createHash("sha256").update(contents).digest("hex");
@@ -820,6 +833,18 @@ export class WorkspaceFileManager {
 				dataUrl: `data:${mediaType};base64,${contents.toString("base64")}`,
 			};
 		}
+		const docMediaType = DOC_BINARY_TYPES.get(extname(path).toLocaleLowerCase());
+		if (docMediaType) {
+			if (metadata.size > DOC_LIMIT) return { ...base, kind: "unsupported", reason: "too-large" };
+			const contents = await readFileBuffer(path);
+			return {
+				...base,
+				kind: "binary",
+				mediaType: docMediaType,
+				dataUrl: `data:${docMediaType};base64,${contents.toString("base64")}`,
+				revision: contentRevision(contents),
+			};
+		}
 		if (metadata.size > TEXT_LIMIT) return { ...base, kind: "unsupported", reason: "too-large" };
 		const contents = await readFileBuffer(path);
 		if (contents.includes(0)) return { ...base, kind: "unsupported", reason: "binary" };
@@ -833,6 +858,36 @@ export class WorkspaceFileManager {
 		} catch {
 			return { ...base, kind: "unsupported", reason: "binary" };
 		}
+	}
+
+	async readPreviewBytes(input: DesktopWorkspaceTarget): Promise<DesktopPreviewFile> {
+		const { path } = await this.target(input);
+		const metadata = await stat(path);
+		if (!metadata.isFile()) return { ok: false, reason: "not-found" };
+		if (metadata.size > PREVIEW_MAX_BYTES) return { ok: false, reason: "too-large" };
+		const contents = await readFileBuffer(path);
+		const ext = extname(path).toLocaleLowerCase();
+		const mediaType =
+			IMAGE_TYPES.get(ext) ||
+			DOC_BINARY_TYPES.get(ext) ||
+			(ext === ".csv"
+				? "text/csv"
+				: ext === ".svg"
+					? "image/svg+xml"
+					: ext === ".md" || ext === ".markdown"
+						? "text/markdown"
+						: ext === ".txt"
+							? "text/plain"
+							: ext === ".json"
+								? "application/json"
+								: "application/octet-stream");
+		return {
+			ok: true,
+			name: basename(path),
+			byteLength: metadata.size,
+			mediaType,
+			bytes: new Uint8Array(contents.buffer, contents.byteOffset, contents.byteLength),
+		};
 	}
 
 	async writeFile(input: DesktopWriteWorkspaceFileInput): Promise<DesktopWriteWorkspaceFileResult> {
