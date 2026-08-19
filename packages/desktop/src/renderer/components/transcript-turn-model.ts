@@ -1,4 +1,9 @@
-import type { DurableImageRefView, ItemContentBlockView, ItemView } from "@metis/app-protocol";
+import type {
+	DurableImageRefView,
+	ItemContentBlockView,
+	ItemView,
+	SessionDeliveredFileView,
+} from "@metis/app-protocol";
 
 export type TextBlock = Extract<ItemContentBlockView, { type: "text" }>;
 export type ThinkingBlock = Extract<ItemContentBlockView, { type: "thinking" }>;
@@ -27,6 +32,7 @@ export interface ToolTranscriptPresentation {
 
 const INTERNAL_TOOL_NAMES = new Set([
 	"set_tasks",
+	"deliver_file",
 	"ask_user",
 	"tool_search",
 	"activate_subagents",
@@ -58,6 +64,7 @@ export interface CodeTurnPresentation {
 	readonly users: readonly ItemView[];
 	readonly segments: readonly CodeTranscriptSegment[];
 	readonly results: ReadonlyMap<string, ToolResultBlock>;
+	readonly deliveredFiles: readonly SessionDeliveredFileView[];
 	/** Final assistant reply item, when this turn has one. */
 	readonly final?: ItemView;
 	/** Final assistant reply item id, when this turn has one. */
@@ -81,6 +88,7 @@ export interface TurnPresentation {
 	readonly segments: readonly ChatTranscriptSegment[];
 	readonly final?: ItemView;
 	readonly results: ReadonlyMap<string, ToolResultBlock>;
+	readonly deliveredFiles: readonly SessionDeliveredFileView[];
 }
 
 function textBlocks(item: ItemView): TextBlock[] {
@@ -245,6 +253,8 @@ function internalFailureLabel(name: string, t: Translator): string {
 	switch (name) {
 		case "set_tasks":
 			return t("Failed to update task list");
+		case "deliver_file":
+			return t("Failed to deliver file");
 		case "ask_user":
 			return t("Failed to ask user");
 		case "activate_subagents":
@@ -298,6 +308,25 @@ function setTasksPresentation(
 		detailLines: tasks.map((task) => ({ value: `${task.completed ? "✓" : "○"} ${task.task}` })),
 		rawOutputIsError: false,
 	};
+}
+
+function deliverFilePresentation(
+	call: ToolCallBlock | undefined,
+	result: ToolResultBlock | undefined,
+	t: Translator,
+): ToolTranscriptPresentation {
+	const input = inputRecord(call);
+	const name = stringField(input, "name") ?? stringField(input, "path");
+	const message = stringField(input, "message");
+	const running = call?.state === "running" || call?.state === "pending";
+	const label = running ? t("Delivering file") : t("Delivered file to user");
+	const errorLine = result?.isError ? safeShortError(result.output) : undefined;
+	const detailLines = [
+		...(name ? [{ value: name }] : []),
+		...(message ? [{ value: message }] : []),
+		...(errorLine ? [{ value: errorLine }] : []),
+	];
+	return { label, detailLines, rawOutputIsError: Boolean(result?.isError) };
 }
 
 interface AskAnswer {
@@ -515,6 +544,8 @@ function internalToolPresentation(
 	switch (name) {
 		case "set_tasks":
 			return setTasksPresentation(call, result, t);
+		case "deliver_file":
+			return deliverFilePresentation(call, result, t);
 		case "ask_user":
 			return askUserPresentation(call, result, t);
 		case "activate_subagents":
@@ -594,6 +625,7 @@ export function buildTurnPresentation(items: readonly ItemView[]): TurnPresentat
 	let activity: (ThinkingBlock | ToolCallBlock | ToolResultBlock)[] = [];
 	let activityCalls: ToolCallBlock[] = [];
 	let intermediateText: TextBlock[] = [];
+	const deliveredFiles: SessionDeliveredFileView[] = [];
 	const flushActivity = () => {
 		if (activity.length === 0) return;
 		segments.push({
@@ -623,6 +655,14 @@ export function buildTurnPresentation(items: readonly ItemView[]): TurnPresentat
 				intermediateText.push(block);
 				continue;
 			}
+			if (block.type === "tool_call" && block.name === "deliver_file") continue;
+			if (block.type === "tool_result") {
+				if (block.deliveredFile) {
+					deliveredFiles.push(block.deliveredFile);
+					continue;
+				}
+				if (block.name === "deliver_file") continue;
+			}
 			if (
 				block.type !== "thinking" &&
 				block.type !== "tool_call" &&
@@ -641,6 +681,7 @@ export function buildTurnPresentation(items: readonly ItemView[]): TurnPresentat
 		segments,
 		final: finalIndex >= 0 ? items[finalIndex] : undefined,
 		results,
+		deliveredFiles,
 	};
 }
 
@@ -659,6 +700,7 @@ export function buildCodeTurnPresentation(items: readonly ItemView[]): CodeTurnP
 	let contentMarkdown = false;
 	let calls: ToolCallBlock[] = [];
 	let orphanResults: ToolResultBlock[] = [];
+	const deliveredFiles: SessionDeliveredFileView[] = [];
 
 	const flushContent = () => {
 		if (contentBlocks.length === 0) return;
@@ -671,12 +713,14 @@ export function buildCodeTurnPresentation(items: readonly ItemView[]): CodeTurnP
 		contentBlocks = [];
 	};
 	const flushTools = () => {
-		if (calls.length === 0 && orphanResults.length === 0) return;
+		const visibleCalls = calls.filter((call) => call.name !== "deliver_file");
+		const visibleOrphans = orphanResults.filter((result) => result.name !== "deliver_file" && !result.deliveredFile);
+		if (visibleCalls.length === 0 && visibleOrphans.length === 0) return;
 		segments.push({
 			type: "tools",
-			calls,
-			orphanResults,
-			running: calls.some((call) => call.state === "running" || call.state === "pending"),
+			calls: visibleCalls,
+			orphanResults: visibleOrphans,
+			running: visibleCalls.some((call) => call.state === "running" || call.state === "pending"),
 		});
 		calls = [];
 		orphanResults = [];
@@ -691,11 +735,20 @@ export function buildCodeTurnPresentation(items: readonly ItemView[]): CodeTurnP
 		for (const block of item.content) {
 			if (block.type === "thinking" || block.type === "compaction") continue;
 			if (block.type === "tool_call") {
+				if (block.name === "deliver_file") continue;
 				flushContent();
 				calls.push(block);
 				continue;
 			}
 			if (block.type === "tool_result") {
+				const delivered = block.deliveredFile;
+				if (delivered) {
+					flushContent();
+					flushTools();
+					deliveredFiles.push(delivered);
+					continue;
+				}
+				if (block.name === "deliver_file") continue;
 				flushContent();
 				if (!calls.some((call) => call.toolCallId === block.toolCallId)) orphanResults.push(block);
 				continue;
@@ -716,6 +769,7 @@ export function buildCodeTurnPresentation(items: readonly ItemView[]): CodeTurnP
 		users: items.filter((item) => item.role === "user"),
 		segments,
 		results,
+		deliveredFiles,
 		final: finalIndex >= 0 ? items[finalIndex] : undefined,
 		finalItemId: finalIndex >= 0 ? items[finalIndex]!.itemId : undefined,
 	};

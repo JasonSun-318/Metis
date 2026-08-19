@@ -2,6 +2,7 @@ import type { ItemContentBlockView, ItemView } from "@metis/app-protocol";
 import { CaretRight, CircleNotch, GitFork, ImageSquare, TerminalWindow, Wrench } from "@phosphor-icons/react";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { DeliveredFileCards } from "./DeliveredFileCards.tsx";
 import { Markdown } from "./Markdown.tsx";
 import { ToolResultImages } from "./ToolResultImages.tsx";
 import { TurnCopyButton } from "./TranscriptTurn.tsx";
@@ -173,15 +174,16 @@ function CodeExecution({ calls, results, orphanResults }: {
 	);
 }
 
-export function CodeTranscriptTurn({ items, running = false, startedAt, onFork, onCopy }: {
+export function CodeTranscriptTurn({ items, running = false, startedAt, onFork, onCopy, onOpenDeliveredFile }: {
 	readonly items: readonly ItemView[];
 	readonly running?: boolean;
 	readonly startedAt?: string;
 	readonly onFork?: (entryId: string) => void;
 	readonly onCopy?: (text: string) => void;
+	readonly onOpenDeliveredFile?: (fileId: string, action: "default" | "reveal") => void;
 }) {
 	const { t } = useTranslation();
-	const { users, segments, results, final } = buildCodeTurnPresentation(items);
+	const { users, segments, results, final, deliveredFiles } = buildCodeTurnPresentation(items);
 	const enteringUserId = running ? users.at(-1)?.itemId : undefined;
 	const finalCopyText = final ? messageText(final) : "";
 	const sessionId = items[0]?.sessionId;
@@ -228,6 +230,9 @@ export function CodeTranscriptTurn({ items, running = false, startedAt, onFork, 
 					</div>
 				),
 			)}
+			{deliveredFiles.length > 0 && !running && onOpenDeliveredFile ? (
+				<DeliveredFileCards files={deliveredFiles} onOpen={onOpenDeliveredFile} />
+			) : null}
 			{final && final.state === "completed" && (onFork || (onCopy && finalCopyText.trim() !== "")) && (
 				<div className="turn-actions">
 					{onFork && (

@@ -46,6 +46,7 @@ function snapshot(serverEpoch = EPOCH_A, cursor = 0, recentItems: ItemView[] = [
 		pendingInteractions: [],
 		queuedTurns: [],
 		tasks: [],
+		deliveredFiles: [],
 		goal: null,
 		thinkingSelection: "off",
 		actualThinkingLevel: "off",
@@ -431,6 +432,45 @@ describe("renderer projection reducer", () => {
 		expect(store.getSnapshot().tasks).toEqual([{ task: "Second session", completed: false }]);
 		store.removeSession("session-2");
 		expect(store.getSnapshot().tasks).toEqual([]);
+	});
+
+	it("replaces and live-updates delivered files from snapshot and events", () => {
+		const store = new AppStore();
+		const deliveredFile = {
+			fileId: "aaaaaaaaaaaaaaaa",
+			name: "report.xlsx",
+			byteLength: 4096,
+			deliveredAt: "2026-08-18T00:00:00.000Z",
+		};
+		store.applySnapshot({
+			...snapshot(EPOCH_A, 0),
+			deliveredFiles: [deliveredFile],
+		});
+		expect(store.getSnapshot().deliveredFiles).toEqual([deliveredFile]);
+
+		expect(
+			store.applyBatch({
+				serverEpoch: EPOCH_A,
+				fromCursor: 1,
+				toCursor: 1,
+				events: [
+					{
+						type: "session/deliveredFilesChanged",
+						sessionId: "session-1",
+						deliveredFiles: [
+							deliveredFile,
+							{
+								fileId: "bbbbbbbbbbbbbbbb",
+								name: "notes.txt",
+								byteLength: 12,
+								deliveredAt: "2026-08-18T00:00:01.000Z",
+							},
+						],
+					},
+				],
+			}),
+		).toBe("applied");
+		expect(store.getSnapshot().deliveredFiles).toHaveLength(2);
 	});
 
 	it("replaces, live-updates, and clears the active session goal snapshot", () => {

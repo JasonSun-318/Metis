@@ -44,6 +44,7 @@ function snapshot(serverEpoch: string, cursor: number, text: string): SessionSna
 		pendingInteractions: [],
 		queuedTurns: [],
 		tasks: [],
+		deliveredFiles: [],
 		goal: null,
 		thinkingSelection: "off",
 		actualThinkingLevel: "off",

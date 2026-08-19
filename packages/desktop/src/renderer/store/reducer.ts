@@ -47,6 +47,7 @@ export interface MutableProjectionState {
 	availableModels: NonNullable<SessionSnapshot["availableModels"]>;
 	subagents: SubagentSummaryView[];
 	tasks: SessionSnapshot["tasks"];
+	deliveredFiles: SessionSnapshot["deliveredFiles"];
 	goal: SessionSnapshot["goal"];
 	queuedTurns: QueuedTurnView[];
 	readonly subagentTranscript: MutableSubagentTranscriptState;
@@ -85,6 +86,7 @@ export function createProjectionState(): MutableProjectionState {
 		availableModels: [],
 		subagents: [],
 		tasks: [],
+		deliveredFiles: [],
 		goal: null,
 		queuedTurns: [],
 		subagentTranscript: {
@@ -223,6 +225,7 @@ export function replaceProjectionSnapshot(state: MutableProjectionState, snapsho
 	state.availableModels = snapshot.availableModels ?? [];
 	state.subagents = snapshot.subagents;
 	state.tasks = snapshot.tasks;
+	state.deliveredFiles = snapshot.deliveredFiles;
 	state.goal = snapshot.goal;
 	state.queuedTurns = snapshot.queuedTurns;
 	if (sessionChanged) clearSubagentTranscript(state.subagentTranscript);
@@ -272,6 +275,7 @@ function eventSessionId(event: DomainEvent): string | undefined {
 		case "subagent/itemsChanged":
 		case "session/modelChanged":
 		case "session/tasksChanged":
+		case "session/deliveredFilesChanged":
 		case "session/goalChanged":
 		case "turn/queueChanged":
 			return event.sessionId;
@@ -373,6 +377,9 @@ function applyEvent(state: MutableProjectionState, event: DomainEvent): void {
 			return;
 		case "session/tasksChanged":
 			state.tasks = structuredClone(event.tasks);
+			return;
+		case "session/deliveredFilesChanged":
+			state.deliveredFiles = structuredClone(event.deliveredFiles);
 			return;
 		case "session/goalChanged":
 			state.goal = structuredClone(event.goal);

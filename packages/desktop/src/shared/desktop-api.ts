@@ -99,6 +99,7 @@ export const DESKTOP_IPC_CHANNELS = {
 	markSessionRead: "metis:mark-session-read",
 	readItems: "metis:read-items",
 	readSessionImage: "metis:read-session-image",
+	openDeliveredFile: "metis:open-delivered-file",
 	getSessionStatus: "metis:get-session-status",
 	compactSession: "metis:compact-session",
 	setSessionGoal: "metis:set-session-goal",
@@ -505,6 +506,9 @@ export interface MetisDesktopApi {
 	markSessionRead(input: ClientParams<"session/markRead">): Promise<ClientResult<"session/markRead">>;
 	readItems(input: ClientParams<"session/readItems">): Promise<ClientResult<"session/readItems">>;
 	readSessionImage(input: ClientParams<"session/readImage">): Promise<ClientResult<"session/readImage">>;
+	openDeliveredFile(
+		input: ClientParams<"session/openDeliveredFile">,
+	): Promise<ClientResult<"session/openDeliveredFile">>;
 	getSessionStatus(input: ClientParams<"session/status">): Promise<ClientResult<"session/status">>;
 	compactSession(input: ClientParams<"session/compact">): Promise<ClientResult<"session/compact">>;
 	setSessionGoal(input: ClientParams<"session/goal/set">): Promise<ClientResult<"session/goal/set">>;

@@ -235,6 +235,10 @@ const api = {
 		invoke(DESKTOP_IPC_CHANNELS.readSessionImage, "session/readImage", input) as ReturnType<
 			MetisDesktopApi["readSessionImage"]
 		>,
+	openDeliveredFile: (input: ClientParams<"session/openDeliveredFile">) =>
+		invoke(DESKTOP_IPC_CHANNELS.openDeliveredFile, "session/openDeliveredFile", input) as ReturnType<
+			MetisDesktopApi["openDeliveredFile"]
+		>,
 	getSessionStatus: (input: ClientParams<"session/status">) =>
 		invoke(DESKTOP_IPC_CHANNELS.getSessionStatus, "session/status", input) as ReturnType<
 			MetisDesktopApi["getSessionStatus"]

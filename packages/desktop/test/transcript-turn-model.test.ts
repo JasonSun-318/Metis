@@ -333,4 +333,43 @@ describe("transcript turn presentation", () => {
 		expect(malformed.detailLines).toEqual([{ value: "Details unavailable" }]);
 		expect(JSON.stringify(malformed)).not.toContain("hidden");
 	});
+
+	it("collects deliver_file results and hides them from activity", () => {
+		const deliveredFile = {
+			fileId: "aaaaaaaaaaaaaaaa",
+			name: "report.xlsx",
+			byteLength: 4096,
+			deliveredAt: "2026-08-18T00:00:00.000Z",
+		};
+		const items: ItemView[] = [
+			item("user-deliver", "user", [{ type: "text", text: "send the file" }]),
+			item("assistant-deliver", "assistant", [
+				{
+					type: "tool_call",
+					toolCallId: "call-deliver",
+					name: "deliver_file",
+					state: "completed",
+					inputPreview: JSON.stringify({ path: "report.xlsx" }),
+				},
+			]),
+			item("tool-deliver", "tool", [
+				{
+					type: "tool_result",
+					toolCallId: "call-deliver",
+					name: "deliver_file",
+					isError: false,
+					output: "Delivered",
+					deliveredFile,
+				},
+			]),
+			item("assistant-final-deliver", "assistant", [{ type: "text", text: "文件已发送。" }]),
+		];
+		const view = buildTurnPresentation(items);
+		expect(view.deliveredFiles).toEqual([deliveredFile]);
+		expect(
+			view.segments.every(
+				(segment) => segment.type !== "activity" || segment.calls.every((call) => call.name !== "deliver_file"),
+			),
+		).toBe(true);
+	});
 });

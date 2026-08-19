@@ -558,6 +558,9 @@ export class ClientBroker {
 		this.register(DESKTOP_IPC_CHANNELS.readSessionImage, 1, async (_event, [input]) =>
 			this.clientCall("session/readImage", input),
 		);
+		this.register(DESKTOP_IPC_CHANNELS.openDeliveredFile, 1, async (_event, [input]) =>
+			this.clientCall("session/openDeliveredFile", input),
+		);
 		this.register(DESKTOP_IPC_CHANNELS.getSessionStatus, 1, async (_event, [input]) =>
 			this.clientCall("session/status", input),
 		);

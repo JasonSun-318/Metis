@@ -13,6 +13,7 @@ import {
 } from "@phosphor-icons/react";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { DeliveredFileCards } from "./DeliveredFileCards.tsx";
 import { Markdown } from "./Markdown.tsx";
 import { ToolResultImages } from "./ToolResultImages.tsx";
 import { TurnRuntimeStatus } from "./TurnRuntimeStatus.tsx";
@@ -214,15 +215,16 @@ export function TurnCopyButton({ onCopy, text }: { readonly onCopy: (text: strin
 	);
 }
 
-export function TranscriptTurn({ items, running: runtimeRunning = false, startedAt, onFork, onCopy }: {
+export function TranscriptTurn({ items, running: runtimeRunning = false, startedAt, onFork, onCopy, onOpenDeliveredFile }: {
 	readonly items: readonly ItemView[];
 	readonly running?: boolean;
 	readonly startedAt?: string;
 	readonly onFork?: (entryId: string) => void;
 	readonly onCopy?: (text: string) => void;
+	readonly onOpenDeliveredFile?: (fileId: string, action: "default" | "reveal") => void;
 }) {
 	const { t } = useTranslation();
-	const { users, segments, results, final } = buildTurnPresentation(items);
+	const { users, segments, results, final, deliveredFiles } = buildTurnPresentation(items);
 	const enteringUserId = runtimeRunning ? users.at(-1)?.itemId : undefined;
 	const finalCopyText = final ? messageText(final) : "";
 	const sessionId = items[0]?.sessionId;
@@ -275,6 +277,9 @@ export function TranscriptTurn({ items, running: runtimeRunning = false, started
 					)}
 				</div>
 			)}
+			{deliveredFiles.length > 0 && !runtimeRunning && onOpenDeliveredFile ? (
+				<DeliveredFileCards files={deliveredFiles} onOpen={onOpenDeliveredFile} />
+			) : null}
 			{final && final.state === "completed" && (onFork || (onCopy && finalCopyText.trim() !== "")) && (
 				<div className="turn-actions">
 					{onFork && (
