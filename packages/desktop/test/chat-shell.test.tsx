@@ -101,6 +101,7 @@ function snapshot(summary: SessionSummary): SessionSnapshot {
 		pendingInteractions: [],
 		queuedTurns: [],
 		tasks: [],
+		deliveredFiles: [],
 		goal: null,
 		thinkingSelection: "off",
 		actualThinkingLevel: "off",
@@ -140,8 +141,12 @@ async function flush() {
 	});
 }
 
-function changeTextarea(textarea: HTMLTextAreaElement, value: string) {
-	Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set?.call(textarea, value);
+function changeTextarea(textarea: HTMLElement, value: string) {
+	if (textarea instanceof HTMLTextAreaElement) {
+		Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set?.call(textarea, value);
+	} else {
+		(textarea as unknown as { value: string }).value = value;
+	}
 	textarea.dispatchEvent(new Event("input", { bubbles: true }));
 }
 
@@ -1769,7 +1774,7 @@ describe("Chat desktop shell", () => {
 		expect(api.createSession).not.toHaveBeenCalled();
 		expect(container.textContent).toContain("selected-project");
 
-		const textarea = container.querySelector("textarea")!;
+		const textarea = (container.querySelector("textarea") ?? container.querySelector("#composer-input"))!;
 		await act(async () => changeTextarea(textarea, "  Analyze this repository\ncarefully  "));
 		order.length = 0;
 		await act(async () => textarea.form!.requestSubmit());
@@ -1803,7 +1808,7 @@ describe("Chat desktop shell", () => {
 		expect(container.querySelectorAll("#composer-input")).toHaveLength(1);
 		expect(container.querySelectorAll('[aria-label="Add to message"]')).toHaveLength(1);
 		expect(api.createSession).not.toHaveBeenCalled();
-		const textarea = container.querySelector<HTMLTextAreaElement>("textarea")!;
+		const textarea = (container.querySelector<HTMLElement>("textarea") ?? container.querySelector<HTMLElement>("#composer-input"))!;
 		await act(async () => changeTextarea(textarea, "Start without a folder"));
 		await act(async () => textarea.form!.requestSubmit());
 		await flush();
@@ -1842,7 +1847,7 @@ describe("Chat desktop shell", () => {
 		await act(async () => menuOption(container, "Full access").click());
 		expect(container.querySelector('[role="dialog"]')).toBeNull();
 		expect(button(container, "Select permissions, current Full")).not.toBeNull();
-		const textarea = container.querySelector<HTMLTextAreaElement>("textarea")!;
+		const textarea = (container.querySelector<HTMLElement>("textarea") ?? container.querySelector<HTMLElement>("#composer-input"))!;
 		await act(async () => changeTextarea(textarea, "Run with full access"));
 		await act(async () => textarea.form!.requestSubmit());
 		await flush();
@@ -1874,7 +1879,7 @@ describe("Chat desktop shell", () => {
 		await act(async () => menuOption(container, "Full access").click());
 		const pendingTrigger = button(container, "Select permissions, current Ask");
 		expect(pendingTrigger.disabled).toBe(true);
-		for (const label of ["Chat", "Code", "New task", "Plugins", "Chat project task"]) {
+		for (const label of ["Chat", "Code", "New task", "Customize", "Chat project task"]) {
 			expect(button(container, label).disabled, label).toBe(false);
 		}
 
@@ -2286,7 +2291,7 @@ describe("Chat desktop shell", () => {
 		const root = createRoot(container);
 		await act(async () => root.render(<App api={api} store={new AppStore()} />));
 		await flush();
-		const textarea = container.querySelector("textarea")!;
+		const textarea = (container.querySelector("textarea") ?? container.querySelector("#composer-input"))!;
 		const run = async (command: string) => {
 			await act(async () => changeTextarea(textarea, `/${command}`));
 			const option = [...container.querySelectorAll<HTMLButtonElement>('[role="option"]')]
@@ -2321,7 +2326,7 @@ describe("Chat desktop shell", () => {
 		const root = createRoot(container);
 		await act(async () => root.render(<App api={api} store={new AppStore()} />));
 		await flush();
-		const textarea = container.querySelector("textarea")!;
+		const textarea = (container.querySelector("textarea") ?? container.querySelector("#composer-input"))!;
 		await act(async () => changeTextarea(textarea, "/goal keep tests green"));
 		await act(async () => textarea.form!.requestSubmit());
 		await flush();
@@ -2573,7 +2578,7 @@ describe("Chat desktop shell", () => {
 		const root = createRoot(container);
 		await act(async () => root.render(<App api={api} store={new AppStore()} />));
 		await flush();
-		const textarea = container.querySelector("textarea")!;
+		const textarea = (container.querySelector("textarea") ?? container.querySelector("#composer-input"))!;
 		await act(async () => changeTextarea(textarea, "/compact"));
 		const option = [...container.querySelectorAll<HTMLButtonElement>('[role="option"]')]
 			.find((candidate) => candidate.querySelector("strong")?.textContent === "/compact")!;
@@ -2623,7 +2628,7 @@ describe("Chat desktop shell", () => {
 		const root = createRoot(container);
 		await act(async () => root.render(<App api={api} store={new AppStore()} />));
 		await flush();
-		const textarea = container.querySelector("textarea")!;
+		const textarea = (container.querySelector("textarea") ?? container.querySelector("#composer-input"))!;
 		await act(async () => changeTextarea(textarea, "/compact"));
 		const option = [...container.querySelectorAll<HTMLButtonElement>('[role="option"]')]
 			.find((candidate) => candidate.querySelector("strong")?.textContent === "/compact")!;
@@ -2653,7 +2658,7 @@ describe("Chat desktop shell", () => {
 		await act(async () => root.render(<App api={api} store={new AppStore()} />));
 		await flush();
 
-		const textarea = container.querySelector("textarea")!;
+		const textarea = (container.querySelector("textarea") ?? container.querySelector("#composer-input"))!;
 		expect(button(container, "Stop task")).toBeTruthy();
 		expect(container.querySelector('[aria-label="Queue message"]')).toBeNull();
 		await act(async () => changeTextarea(textarea, "Follow up"));
@@ -2775,7 +2780,7 @@ describe("Chat desktop shell", () => {
 		expect(container.querySelector('.composer-image-preview img[alt="photo.png"]')).not.toBeNull();
 		expect(container.querySelector('[aria-label="Remove skill pdf"]')).not.toBeNull();
 		expect([...container.querySelectorAll("button")].some((candidate) => candidate.textContent?.trim() === "Browse skills")).toBe(false);
-		const textarea = container.querySelector("textarea")!;
+		const textarea = (container.querySelector("textarea") ?? container.querySelector("#composer-input"))!;
 		await act(async () => changeTextarea(textarea, "Summarize this"));
 		await act(async () => textarea.form!.requestSubmit());
 		await flush();
@@ -2822,7 +2827,7 @@ describe("Chat desktop shell", () => {
 		await act(async () => add().click());
 		await act(async () => button(container.querySelector<HTMLElement>(".composer-add-menu")!, "Skills").click());
 		await act(async () => button(container.querySelector<HTMLElement>(".composer-skill-menu")!, "Manage skills").click());
-		expect(container.textContent).toContain("Plugins");
+		expect(container.textContent).toContain("Customize");
 		expect(container.textContent).toContain("pdf");
 		await act(async () => root.unmount());
 	});
@@ -2898,7 +2903,7 @@ describe("Chat desktop shell", () => {
 		await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Add to message"]')!.click());
 		await act(async () => button(container.querySelector<HTMLElement>(".composer-add-menu")!, "Add files or photos").click());
 		await flush();
-		await act(async () => container.querySelector<HTMLTextAreaElement>("textarea")!.form!.requestSubmit());
+		await act(async () => (container.querySelector<HTMLTextAreaElement>("textarea") ?? container.querySelector<HTMLElement>("#composer-input"))!.closest("form")!.requestSubmit());
 		await flush();
 		await flush();
 
@@ -2928,7 +2933,7 @@ describe("Chat desktop shell", () => {
 		await act(async () => add().click());
 		await act(async () => button(container.querySelector<HTMLElement>(".composer-add-menu")!, "Skills").click());
 		await act(async () => button(container.querySelector<HTMLElement>(".composer-skill-menu")!, "pdf").click());
-		const textarea = container.querySelector("textarea")!;
+		const textarea = (container.querySelector("textarea") ?? container.querySelector("#composer-input"))!;
 		await act(async () => changeTextarea(textarea, "Same prompt"));
 		await act(async () => textarea.form!.requestSubmit());
 		await flush();
@@ -3039,7 +3044,7 @@ describe("Chat desktop shell", () => {
 		const root = createRoot(container);
 		await act(async () => root.render(<App api={api} store={new AppStore()} />));
 		await flush();
-		const textarea = container.querySelector("textarea")!;
+		const textarea = (container.querySelector("textarea") ?? container.querySelector("#composer-input"))!;
 		await act(async () => changeTextarea(textarea, "还在组词"));
 
 		await act(async () => {
@@ -3059,7 +3064,7 @@ describe("Chat desktop shell", () => {
 		const root = createRoot(container);
 		await act(async () => root.render(<App api={api} store={new AppStore()} />));
 		await flush();
-		const textarea = container.querySelector("textarea")!;
+		const textarea = (container.querySelector("textarea") ?? container.querySelector("#composer-input"))!;
 		await act(async () => changeTextarea(textarea, "Keep this draft"));
 		await act(async () => textarea.form!.requestSubmit());
 		await flush();
@@ -3118,7 +3123,7 @@ describe("Chat desktop shell", () => {
 
 		await act(async () => button(container, "Work in a project or folder").click());
 		await flush();
-		const textarea = container.querySelector("textarea")!;
+		const textarea = (container.querySelector("textarea") ?? container.querySelector("#composer-input"))!;
 		await act(async () => changeTextarea(textarea, "Keep the real folder"));
 		await act(async () => textarea.form!.requestSubmit());
 		await flush();
@@ -3138,7 +3143,7 @@ describe("Chat desktop shell", () => {
 		const root = createRoot(container);
 		await act(async () => root.render(<App api={api} store={new AppStore()} />));
 		await flush();
-		const textarea = container.querySelector("textarea")!;
+		const textarea = (container.querySelector("textarea") ?? container.querySelector("#composer-input"))!;
 
 		await act(async () => changeTextarea(textarea, "First payload"));
 		await act(async () => textarea.form!.requestSubmit());
@@ -3166,7 +3171,7 @@ describe("Chat desktop shell", () => {
 		const root = createRoot(container);
 		await act(async () => root.render(<App api={api} store={new AppStore()} />));
 		await flush();
-		const textarea = container.querySelector("textarea")!;
+		const textarea = (container.querySelector("textarea") ?? container.querySelector("#composer-input"))!;
 		await act(async () => changeTextarea(textarea, "Retry the same create"));
 
 		await act(async () => textarea.form!.requestSubmit());
@@ -3196,7 +3201,7 @@ describe("Chat desktop shell", () => {
 		const root = createRoot(container);
 		await act(async () => root.render(<App api={api} store={new AppStore()} />));
 		await flush();
-		const textarea = container.querySelector("textarea")!;
+		const textarea = (container.querySelector("textarea") ?? container.querySelector("#composer-input"))!;
 		await act(async () => changeTextarea(textarea, "Retry active turn"));
 
 		await act(async () => textarea.form!.requestSubmit());
@@ -3280,7 +3285,7 @@ describe("Chat desktop shell", () => {
 
 		expect(button(container, "Select model").disabled).toBe(true);
 		expect(container.querySelectorAll(".session-sidebar button:disabled")).toHaveLength(0);
-		for (const label of ["Chat", "Code", "New task", "Plugins", "Chat project task"]) {
+		for (const label of ["Chat", "Code", "New task", "Customize", "Chat project task"]) {
 			expect(button(container, label).disabled, label).toBe(false);
 		}
 
@@ -3310,7 +3315,7 @@ describe("Chat desktop shell", () => {
 
 		expect(container.textContent).toContain("Chat project task");
 		expect(container.querySelectorAll(".session-sidebar button:disabled")).toHaveLength(0);
-		for (const label of ["Chat", "Code", "New task", "Plugins", "Chat project task"]) {
+		for (const label of ["Chat", "Code", "New task", "Customize", "Chat project task"]) {
 			expect(button(container, label).disabled, label).toBe(false);
 		}
 
@@ -3512,8 +3517,8 @@ describe("Chat desktop shell", () => {
 		expect(container.querySelectorAll('[role="tab"]')).toHaveLength(1);
 
 		const backendCalls = vi.mocked(api.createSession).mock.calls.length + vi.mocked(api.openSession).mock.calls.length;
-		await act(async () => button(container, "Plugins").click());
-		expect(container.textContent).toContain("Plugins");
+		await act(async () => button(container, "Customize").click());
+		expect(container.textContent).toContain("Customize");
 		expect(container.textContent).toContain("pdf");
 		expect(vi.mocked(api.createSession).mock.calls.length + vi.mocked(api.openSession).mock.calls.length).toBe(backendCalls);
 
@@ -3541,7 +3546,7 @@ describe("Chat desktop shell", () => {
 		await act(async () => root.render(<App api={api} store={new AppStore()} />));
 		await flush();
 
-		await act(async () => button(container, "Plugins").click());
+		await act(async () => button(container, "Customize").click());
 		await act(async () => button(container, "New Skill").click());
 		await act(async () => button(document.body.querySelector<HTMLElement>(".plugins-new-menu")!, "Project").click());
 		const dialog = container.querySelector<HTMLElement>('[role="dialog"]')!;
@@ -3572,7 +3577,7 @@ describe("Chat desktop shell", () => {
 		await act(async () => root.render(<App api={api} store={new AppStore()} />));
 		await flush();
 
-		await act(async () => button(container, "Plugins").click());
+		await act(async () => button(container, "Customize").click());
 		await act(async () => button(container, "New Skill").click());
 		await act(async () => button(document.body.querySelector<HTMLElement>(".plugins-new-menu")!, "User").click());
 		await act(async () => {
@@ -4378,7 +4383,7 @@ describe("Chat desktop shell", () => {
 
 		expect(document.documentElement.lang).toBe("zh-CN");
 		expect(container.textContent).toContain("新建任务");
-		expect(container.textContent).toContain("插件");
+		expect(container.textContent).toContain("自定义");
 		expect(container.textContent).toContain("定时任务");
 		expect(container.textContent).toContain("有什么我可以替你分担的？");
 		expect(container.querySelector('[aria-label="隐藏会话侧边栏"]')).not.toBeNull();

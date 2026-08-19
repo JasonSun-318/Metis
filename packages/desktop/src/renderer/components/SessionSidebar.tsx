@@ -428,7 +428,7 @@ export function SessionSidebar({
 			</button>
 			<button aria-current={destination === "skills" ? "page" : undefined} className="sidebar-nav-button" disabled={busy} onClick={onSkills} type="button">
 				<Sparkle aria-hidden="true" size={17} />
-				{t("Plugins")}
+				{t("Customize")}
 			</button>
 			{mode === "chat" && <button aria-current={destination === "schedules" ? "page" : undefined} className="sidebar-nav-button" disabled={busy} onClick={onSchedules} type="button"><ClockCountdown aria-hidden="true" size={17} />{t("Scheduled tasks")}</button>}
 			<nav aria-label={t("{{mode}} sessions", { mode: t(mode === "chat" ? "Chat" : "Code") })} className="project-list" data-empty={!hasSessions || undefined} data-grouping={grouping}>

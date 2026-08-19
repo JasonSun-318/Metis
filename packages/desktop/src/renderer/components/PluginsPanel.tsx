@@ -1,6 +1,10 @@
 import type {
 	ClientParams,
 	ClientResult,
+	DeclarativeHookView,
+	HookEventNameView,
+	HookRunModeView,
+	HooksListView,
 	McpCatalogEntryView,
 	McpCatalogItemDetailView,
 	McpCatalogItemKindView,
@@ -18,15 +22,20 @@ import {
 	ArrowsClockwise,
 	CaretDown,
 	CaretRight,
+	CheckCircle,
 	FolderOpen,
 	Key,
+	Lightning,
 	MagnifyingGlass,
 	PencilSimple,
 	Plug,
+	Plus,
 	PuzzlePiece,
 	Trash,
 	X,
+	XCircle,
 } from "@phosphor-icons/react";
+import { HookEditorDialog, type HookDraft } from "./HookEditorDialog.tsx";
 import { type CSSProperties, type KeyboardEvent, type RefObject, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
@@ -52,14 +61,15 @@ import {
 	type SkillCreationTarget,
 } from "./SkillCreationDialog.tsx";
 
-type PluginSection = "skills" | "mcp";
+type PluginSection = "skills" | "mcp" | "hooks";
 type SkillFilter = "all" | SkillSourceView;
 type McpFilter = "all" | McpScopeView;
 type McpTarget = ClientParams<"mcp/list">;
 type PluginPage =
 	| { readonly kind: "catalog" }
 	| { readonly kind: "skill"; readonly source: SkillSourceView; readonly name: string; readonly cwd: string | null }
-	| { readonly kind: "mcp"; readonly scope: McpScopeView; readonly name: string; readonly target: McpTarget };
+	| { readonly kind: "mcp"; readonly scope: McpScopeView; readonly name: string; readonly target: McpTarget }
+	| { readonly kind: "hook"; readonly hookId: string };
 type PluginApi = Pick<
 	MetisDesktopApi,
 	| "listSkills"
@@ -82,6 +92,9 @@ type PluginApi = Pick<
 	| "restartMcpServer"
 	| "setMcpCredential"
 	| "clearMcpCredential"
+	| "listHooks"
+	| "upsertHook"
+	| "deleteHook"
 >;
 
 interface PluginsPanelProps {
@@ -111,7 +124,55 @@ type DialogState =
 	}
 	| { readonly kind: "server"; readonly mode: "edit"; readonly scope: McpScopeView; readonly server: McpServerSummaryView; readonly target: McpTarget }
 	| { readonly kind: "remove"; readonly server: McpServerSummaryView; readonly target: McpTarget }
-	| { readonly kind: "credential"; readonly server: McpServerSummaryView; readonly sessionId: string };
+	| { readonly kind: "credential"; readonly server: McpServerSummaryView; readonly sessionId: string }
+	| { readonly kind: "hook-editor"; readonly mode: "create" | "edit"; readonly initial?: DeclarativeHookView }
+	| { readonly kind: "hook-remove"; readonly hook: DeclarativeHookView };
+
+const HOOK_EVENTS: readonly HookEventNameView[] = [
+	"SessionStart",
+	"UserPromptSubmit",
+	"PreToolUse",
+	"PostToolUse",
+	"PostToolUseFailure",
+	"Stop",
+];
+
+function eventLabelKey(event: HookEventNameView): string {
+	switch (event) {
+		case "SessionStart":
+			return "Session start";
+		case "UserPromptSubmit":
+			return "User prompt submit";
+		case "PreToolUse":
+			return "Pre tool use";
+		case "PostToolUse":
+			return "Post tool use";
+		case "PostToolUseFailure":
+			return "Post tool use failure";
+		case "Stop":
+			return "Stop";
+	}
+}
+
+function RemoveHookDialog({ error, hook, onCancel, onRemove, pending }: {
+	readonly error: string | null;
+	readonly hook: DeclarativeHookView;
+	readonly onCancel: () => void;
+	readonly onRemove: () => void;
+	readonly pending: boolean;
+}) {
+	const { t } = useTranslation();
+	const cancel = useRef<HTMLButtonElement>(null);
+	return (
+		<DialogFrame cancellable={!pending} className="mcp-dialog hook-remove-dialog" descriptionId="hook-remove-description" initialFocus={cancel} onCancel={onCancel} titleId="hook-remove-title">
+			<button aria-label={t("Close")} className="mcp-dialog-close" disabled={pending} onClick={onCancel} type="button"><X aria-hidden="true" size={17} /></button>
+			<h2 id="hook-remove-title">{t("Remove Hook?")}</h2>
+			<p id="hook-remove-description">{t("Remove {{name}}? This will stop it from running automatically.", { name: hook.name })}</p>
+			{error && <p className="mcp-dialog-error" role="alert">{error}</p>}
+			<div className="mcp-dialog-actions"><button className="button-secondary" disabled={pending} onClick={onCancel} ref={cancel} type="button">{t("Cancel")}</button><button className="mcp-danger" disabled={pending} onClick={onRemove} type="button">{t(pending ? "Removing…" : "Remove")}</button></div>
+		</DialogFrame>
+	);
+}
 
 const noop = () => undefined;
 
@@ -344,6 +405,11 @@ export function PluginsPanel({ api, initialSection = "skills", onCreateSkillWith
 	const [mcpDetailError, setMcpDetailError] = useState<string | null>(null);
 	const [mcpRefreshedAt, setMcpRefreshedAt] = useState<string | null>(null);
 	const [mcpRefresh, setMcpRefresh] = useState(0);
+	const [hooksState, setHooksState] = useState<LoadState<readonly DeclarativeHookView[]>>({ status: "idle" });
+	const [hooksRefresh, setHooksRefresh] = useState(0);
+	const [hookFilter, setHookFilter] = useState<"all" | HookEventNameView>("all");
+	const [hookQuery, setHookQuery] = useState("");
+	const [hookCursor, setHookCursor] = useState<string | null>(null);
 	const [dialog, setDialog] = useState<DialogState | null>(null);
 	const [dialogError, setDialogError] = useState<string | null>(null);
 	const [pendingAction, setPendingAction] = useState<string | null>(null);
@@ -351,6 +417,7 @@ export function PluginsPanel({ api, initialSection = "skills", onCreateSkillWith
 	const skillDetailGeneration = useRef(0);
 	const mcpListGeneration = useRef(0);
 	const mcpDetailGeneration = useRef(0);
+	const hooksListGeneration = useRef(0);
 	const skipSkillDetailLoad = useRef<string | null>(null);
 	const detailHeading = useRef<HTMLHeadingElement>(null);
 	const restoreFocus = useRef<HTMLButtonElement | null>(null);
@@ -414,6 +481,18 @@ export function PluginsPanel({ api, initialSection = "skills", onCreateSkillWith
 		return () => { if (generation === mcpListGeneration.current) mcpListGeneration.current += 1; };
 	}, [api, displayedMcpTarget, mcpRefresh, section, serverReady]);
 
+	useEffect(() => {
+		if (section !== "hooks") { hooksListGeneration.current += 1; return; }
+		const generation = ++hooksListGeneration.current;
+		if (!serverReady) { setHooksState({ status: "loading" }); return; }
+		setHooksState({ status: "loading" });
+		void api.listHooks().then(
+			(result) => { if (generation === hooksListGeneration.current) setHooksState({ status: "success", value: result.hooks }); },
+			(cause) => { if (generation === hooksListGeneration.current) setHooksState({ status: "error", message: message(cause) }); },
+		);
+		return () => { if (generation === hooksListGeneration.current) hooksListGeneration.current += 1; };
+	}, [api, hooksRefresh, section, serverReady]);
+
 	const selectedMcp = page.kind === "mcp" && mcpState.status === "success"
 		? mcpState.value.find((server) => server.scope === page.scope && server.name === page.name)
 		: undefined;
@@ -437,9 +516,13 @@ export function PluginsPanel({ api, initialSection = "skills", onCreateSkillWith
 		return () => { if (generation === mcpDetailGeneration.current) mcpDetailGeneration.current += 1; };
 	}, [api, mcpSessionId, page, selectedMcp?.revision, t]);
 
+	const selectedHook = page.kind === "hook" && hooksState.status === "success"
+		? hooksState.value.find((hook) => hook.id === page.hookId)
+		: undefined;
+
 	useEffect(() => {
-		if ((page.kind === "skill" && skillDetail) || (page.kind === "mcp" && mcpDetail)) queueMicrotask(() => detailHeading.current?.focus());
-	}, [mcpDetail, page.kind, skillDetail]);
+		if ((page.kind === "skill" && skillDetail) || (page.kind === "mcp" && mcpDetail) || (page.kind === "hook" && selectedHook)) queueMicrotask(() => detailHeading.current?.focus());
+	}, [mcpDetail, page.kind, selectedHook, skillDetail]);
 
 	const visibleSkills = useMemo(() => {
 		if (skillsState.status !== "success") return [];
@@ -449,8 +532,16 @@ export function PluginsPanel({ api, initialSection = "skills", onCreateSkillWith
 	const visibleMcp = useMemo(() => {
 		if (mcpState.status !== "success") return [];
 		const query = mcpQuery.trim().toLocaleLowerCase();
-		return mcpState.value.filter((server) => (mcpFilter === "all" || server.scope === mcpFilter) && (!query || `${server.name} ${server.transport} ${server.state}`.toLocaleLowerCase().includes(query)));
+		return mcpState.value.filter((server) => (mcpFilter === "all" || server.scope === mcpFilter) && (!query || server.name.toLocaleLowerCase().includes(query)));
 	}, [mcpFilter, mcpQuery, mcpState]);
+	const visibleHooks = useMemo(() => {
+		if (hooksState.status !== "success") return [];
+		const query = hookQuery.trim().toLocaleLowerCase();
+		return hooksState.value.filter((hook) =>
+			(hookFilter === "all" || hook.event === hookFilter) &&
+			(!query || `${hook.name} ${hook.command} ${hook.statusMessage ?? ""}`.toLocaleLowerCase().includes(query))
+		);
+	}, [hookFilter, hookQuery, hooksState]);
 
 	const switchSection = (next: PluginSection) => {
 		setSection(next);
@@ -464,8 +555,8 @@ export function PluginsPanel({ api, initialSection = "skills", onCreateSkillWith
 		setDialogError(null);
 		queueMicrotask(() => restoreFocus.current?.focus());
 	};
-	const openDialog = (next: DialogState, trigger: HTMLButtonElement) => {
-		restoreFocus.current = trigger;
+	const openDialog = (next: DialogState, trigger?: HTMLButtonElement | null) => {
+		restoreFocus.current = trigger ?? (document.activeElement as HTMLButtonElement | null);
 		setDialogError(null);
 		setDialog(next);
 	};
@@ -593,15 +684,125 @@ export function PluginsPanel({ api, initialSection = "skills", onCreateSkillWith
 		} finally { setPendingAction(null); }
 	};
 
-	const catalog = <section aria-busy={(section === "skills" ? skillsState : mcpState).status === "loading"} className="plugins-catalog-page">
-		<header className="plugins-page-header"><div><h1 id="plugins-title">{t("Plugins")}</h1><p>{t("Extend Metis with built-in capabilities.")}</p></div><div className="plugins-page-actions">{section === "skills" && <button aria-label={t(skillsState.status === "loading" ? "Reloading skills…" : "Reload Skills")} className="plugins-reload" disabled={!serverReady || skillsState.status === "loading" || activeSession?.state === "running"} onClick={() => { onSkillsChanged(); setSkillRetry((value) => value + 1); }} title={t("Reload Skills")} type="button"><ArrowsClockwise aria-hidden="true" className={skillsState.status === "loading" ? "plugins-spin" : undefined} size={16} />{t("Reload")}</button>}<NewPluginMenu disabled={!serverReady} onSelect={(scope, trigger) => openDialog(section === "skills" ? { kind: "skill-create", source: scope, initialCwd: scope === "project" ? activeProjectCwd : null } : { kind: "mcp-create", scope, initialCwd: scope === "project" ? activeProjectCwd : null, initialSession: activeSession }, trigger)} section={section} /></div></header>
-		<div className="plugins-section-switch-row"><div aria-label={t("Plugin sections")} className="plugins-section-switch" role="tablist"><button aria-selected={section === "skills"} onClick={() => switchSection("skills")} role="tab" type="button">{t("Skills")}</button><button aria-selected={section === "mcp"} onClick={() => switchSection("mcp")} role="tab" type="button">{t("MCP")}</button></div></div>
+	const submitHook = async (draft: HookDraft) => {
+		setPendingAction("hook");
+		setDialogError(null);
+		try {
+			const timeoutSeconds = draft.timeout.trim() === "" ? undefined : Number(draft.timeout);
+			let metadata: Record<string, unknown> | undefined;
+			if (draft.metadataJson.trim() !== "") {
+				metadata = JSON.parse(draft.metadataJson) as Record<string, unknown>;
+			}
+			const args = draft.runMode === "process"
+				? draft.args.split("\n").map((l) => l.trim()).filter((l) => l.length > 0)
+				: undefined;
+			const hookInput: DeclarativeHookView = {
+				id: draft.id ?? crypto.randomUUID(),
+				name: draft.name.trim(),
+				enabled: draft.enabled,
+				event: draft.event,
+				matcher: draft.matcher.trim() || undefined,
+				runMode: draft.runMode,
+				command: draft.command.trim(),
+				args,
+				timeoutSeconds,
+				statusMessage: draft.statusMessage.trim() || undefined,
+				metadata,
+			};
+			const result = await api.upsertHook({ hook: hookInput });
+			setHooksState({ status: "success", value: result.hooks });
+			setDialog(null);
+		} catch (cause) {
+			setDialogError(message(cause));
+		} finally {
+			setPendingAction(null);
+		}
+	};
+
+	const removeHook = async (hook: DeclarativeHookView) => {
+		setPendingAction("hook-remove");
+		setDialogError(null);
+		try {
+			const result = await api.deleteHook({ id: hook.id });
+			setHooksState({ status: "success", value: result.hooks });
+			if (page.kind === "hook" && page.hookId === hook.id) {
+				setPage({ kind: "catalog" });
+			}
+			setDialog(null);
+		} catch (cause) {
+			setDialogError(message(cause));
+		} finally {
+			setPendingAction(null);
+		}
+	};
+
+	const toggleHookEnabled = async (hook: DeclarativeHookView) => {
+		try {
+			const result = await api.upsertHook({ hook: { ...hook, enabled: !hook.enabled } });
+			setHooksState({ status: "success", value: result.hooks });
+		} catch (cause) {
+			setDialogError(message(cause));
+		}
+	};
+
+	const catalog = <section aria-busy={(section === "skills" ? skillsState : section === "mcp" ? mcpState : hooksState).status === "loading"} className="plugins-catalog-page">
+		<header className="plugins-page-header">
+			<div>
+				<h1 id="plugins-title">{t("Customize")}</h1>
+				<p>{t("Extend Metis with built-in capabilities, MCP servers, and hooks.")}</p>
+			</div>
+			<div className="plugins-page-actions">
+				{section === "skills" && (
+					<button aria-label={t(skillsState.status === "loading" ? "Reloading skills…" : "Reload Skills")} className="plugins-reload" disabled={!serverReady || skillsState.status === "loading" || activeSession?.state === "running"} onClick={() => { onSkillsChanged(); setSkillRetry((value) => value + 1); }} title={t("Reload Skills")} type="button">
+						<ArrowsClockwise aria-hidden="true" className={skillsState.status === "loading" ? "plugins-spin" : undefined} size={16} />{t("Reload")}
+					</button>
+				)}
+				{section === "hooks" && (
+					<button aria-label={t(hooksState.status === "loading" ? "Reloading hooks…" : "Reload Hooks")} className="plugins-reload" disabled={!serverReady || hooksState.status === "loading"} onClick={() => setHooksRefresh((v) => v + 1)} title={t("Reload Hooks")} type="button">
+						<ArrowsClockwise aria-hidden="true" className={hooksState.status === "loading" ? "plugins-spin" : undefined} size={16} />{t("Reload")}
+					</button>
+				)}
+				{section === "hooks" ? (
+					<button className="plugins-new-btn" disabled={!serverReady} onClick={() => openDialog({ kind: "hook-editor", mode: "create" })} type="button">
+						<Plus aria-hidden="true" size={16} /><span>{t("New Hook")}</span>
+					</button>
+				) : (
+					<NewPluginMenu disabled={!serverReady} onSelect={(scope, trigger) => openDialog(section === "skills" ? { kind: "skill-create", source: scope, initialCwd: scope === "project" ? activeProjectCwd : null } : { kind: "mcp-create", scope, initialCwd: scope === "project" ? activeProjectCwd : null, initialSession: activeSession }, trigger)} section={section} />
+				)}
+			</div>
+		</header>
+		<div className="plugins-section-switch-row">
+			<div aria-label={t("Plugin sections")} className="plugins-section-switch" role="tablist">
+				<button aria-selected={section === "skills"} onClick={() => switchSection("skills")} role="tab" type="button">{t("Skills")}</button>
+				<button aria-selected={section === "mcp"} onClick={() => switchSection("mcp")} role="tab" type="button">{t("MCP")}</button>
+				<button aria-selected={section === "hooks"} onClick={() => switchSection("hooks")} role="tab" type="button">{t("Hooks")}</button>
+			</div>
+		</div>
 		<div className="plugins-list-controls">
-			<SearchBox label={t(section === "skills" ? "Search Skills" : "Search MCP servers")} query={section === "skills" ? skillQuery : mcpQuery} setQuery={section === "skills" ? setSkillQuery : setMcpQuery} />
-			{section === "skills" ? <MenuSelect ariaLabel={t("Skill sources")} className="plugins-filter" onChange={setSkillFilter} options={(["all", "system", "user", "project"] as const).map((value) => ({ value, label: t(value === "all" ? "All sources" : sourceLabel(value)), disabled: value === "project" && activeProjectCwd === null }))} value={skillFilter} /> : <MenuSelect ariaLabel={t("MCP scopes")} className="plugins-filter" onChange={setMcpFilter} options={(["all", "user", "project"] as const).map((value) => ({ value, label: t(value === "all" ? "All scopes" : value === "user" ? "User" : "Project"), disabled: value === "project" && activeProjectCwd === null }))} value={mcpFilter} />}
+			<SearchBox label={t(section === "skills" ? "Search Skills" : section === "mcp" ? "Search MCP servers" : "Search Hooks")} query={section === "skills" ? skillQuery : section === "mcp" ? mcpQuery : hookQuery} setQuery={section === "skills" ? setSkillQuery : section === "mcp" ? setMcpQuery : setHookQuery} />
+			{section === "skills" ? (
+				<MenuSelect ariaLabel={t("Skill sources")} className="plugins-filter" onChange={setSkillFilter} options={(["all", "system", "user", "project"] as const).map((value) => ({ value, label: t(value === "all" ? "All sources" : sourceLabel(value)), disabled: value === "project" && activeProjectCwd === null }))} value={skillFilter} />
+			) : section === "mcp" ? (
+				<MenuSelect ariaLabel={t("MCP scopes")} className="plugins-filter" onChange={setMcpFilter} options={(["all", "user", "project"] as const).map((value) => ({ value, label: t(value === "all" ? "All scopes" : value === "user" ? "User" : "Project"), disabled: value === "project" && activeProjectCwd === null }))} value={mcpFilter} />
+			) : (
+				<MenuSelect ariaLabel={t("Hook events")} className="plugins-filter" onChange={setHookFilter} options={[{ value: "all", label: t("All events") }, ...HOOK_EVENTS.map((ev) => ({ value: ev, label: t(eventLabelKey(ev)) }))]} value={hookFilter} />
+			)}
 		</div>
 		<div className="plugins-full-list" onKeyDown={keyNavigation} role="listbox">
-			{section === "skills" ? skillsState.status === "loading" ? <p className="plugins-catalog-message" role="status">{t("Loading skills")}</p> : skillsState.status === "error" ? <div className="plugins-catalog-message" role="alert"><p>{skillsState.message}</p><button onClick={() => setSkillRetry((value) => value + 1)} type="button">{t("Retry")}</button></div> : visibleSkills.length === 0 ? <p className="plugins-catalog-message">{t("No Skills are available in this category.")}</p> : visibleSkills.map((skill) => <button aria-label={skill.name} aria-selected={skillCursor === `${skill.source}:${skill.name}`} className="plugins-list-row" key={`${skill.source}:${skill.name}`} onClick={() => { setSkillDetail(null); setPage({ kind: "skill", source: skill.source ?? "system", name: skill.name, cwd: activeCwd }); }} onFocus={() => setSkillCursor(`${skill.source}:${skill.name}`)} role="option" type="button"><span className="plugins-row-icon"><PuzzlePiece aria-hidden="true" size={22} /></span><span className="plugins-row-copy"><strong>{skill.name}</strong><small>{skill.description}</small></span><span className="plugins-row-meta">{t(sourceLabel(skill.source ?? "system"))}</span><CaretRight aria-hidden="true" size={17} /></button>) : mcpState.status === "loading" ? <p className="plugins-catalog-message" role="status">{t("Loading MCP servers…")}</p> : mcpState.status === "error" ? <div className="plugins-catalog-message" role="alert"><p>{mcpState.message}</p><button onClick={() => setMcpRefresh((value) => value + 1)} type="button">{t("Retry")}</button></div> : visibleMcp.length === 0 ? <p className="plugins-catalog-message">{t("No MCP servers in this scope.")}</p> : visibleMcp.map((server) => <button aria-label={server.name} aria-selected={mcpCursor === `${server.scope}:${server.name}`} className="plugins-list-row plugins-mcp-row" key={`${server.scope}:${server.name}`} onClick={() => { setMcpDetail(null); setPage({ kind: "mcp", scope: server.scope, name: server.name, target: mcpTarget }); }} onFocus={() => setMcpCursor(`${server.scope}:${server.name}`)} role="option" type="button"><span className="plugins-row-icon"><Plug aria-hidden="true" size={22} /></span><span className="plugins-row-copy"><strong>{server.name}</strong><small>{t(server.transport === "stdio" ? "Local command" : "Remote HTTP")}</small></span><span className="plugins-row-meta">{t(server.scope === "user" ? "User" : "Project")} · {t(stateLabel(server.state))}</span><CaretRight aria-hidden="true" size={17} /></button>)}
+			{section === "skills" ? (
+				skillsState.status === "loading" ? <p className="plugins-catalog-message" role="status">{t("Loading skills")}</p> : skillsState.status === "error" ? <div className="plugins-catalog-message" role="alert"><p>{skillsState.message}</p><button onClick={() => setSkillRetry((value) => value + 1)} type="button">{t("Retry")}</button></div> : visibleSkills.length === 0 ? <p className="plugins-catalog-message">{t("No Skills are available in this category.")}</p> : visibleSkills.map((skill) => <button aria-label={skill.name} aria-selected={skillCursor === `${skill.source}:${skill.name}`} className="plugins-list-row" key={`${skill.source}:${skill.name}`} onClick={() => { setSkillDetail(null); setPage({ kind: "skill", source: skill.source ?? "system", name: skill.name, cwd: activeCwd }); }} onFocus={() => setSkillCursor(`${skill.source}:${skill.name}`)} role="option" type="button"><span className="plugins-row-icon"><PuzzlePiece aria-hidden="true" size={22} /></span><span className="plugins-row-copy"><strong>{skill.name}</strong><small>{skill.description}</small></span><span className="plugins-row-meta">{t(sourceLabel(skill.source ?? "system"))}</span><CaretRight aria-hidden="true" size={17} /></button>)
+			) : section === "mcp" ? (
+				mcpState.status === "loading" ? <p className="plugins-catalog-message" role="status">{t("Loading MCP servers…")}</p> : mcpState.status === "error" ? <div className="plugins-catalog-message" role="alert"><p>{mcpState.message}</p><button onClick={() => setMcpRefresh((value) => value + 1)} type="button">{t("Retry")}</button></div> : visibleMcp.length === 0 ? <p className="plugins-catalog-message">{t("No MCP servers in this scope.")}</p> : visibleMcp.map((server) => <button aria-label={server.name} aria-selected={mcpCursor === `${server.scope}:${server.name}`} className="plugins-list-row plugins-mcp-row" key={`${server.scope}:${server.name}`} onClick={() => { setMcpDetail(null); setPage({ kind: "mcp", scope: server.scope, name: server.name, target: mcpTarget }); }} onFocus={() => setMcpCursor(`${server.scope}:${server.name}`)} role="option" type="button"><span className="plugins-row-icon"><Plug aria-hidden="true" size={22} /></span><span className="plugins-row-copy"><strong>{server.name}</strong><small>{t(server.transport === "stdio" ? "Local command" : "Remote HTTP")}</small></span><span className="plugins-row-meta">{t(server.scope === "user" ? "User" : "Project")} · {t(stateLabel(server.state))}</span><CaretRight aria-hidden="true" size={17} /></button>)
+			) : (
+				hooksState.status === "loading" ? <p className="plugins-catalog-message" role="status">{t("Loading hooks…")}</p> : hooksState.status === "error" ? <div className="plugins-catalog-message" role="alert"><p>{hooksState.message}</p><button onClick={() => setHooksRefresh((value) => value + 1)} type="button">{t("Retry")}</button></div> : visibleHooks.length === 0 ? <p className="plugins-catalog-message">{t("No Hooks configured yet.")}</p> : visibleHooks.map((hook) => (
+					<button aria-label={hook.name} aria-selected={hookCursor === hook.id} className="plugins-list-row plugins-hook-row" key={hook.id} onClick={() => { setPage({ kind: "hook", hookId: hook.id }); }} onFocus={() => setHookCursor(hook.id)} role="option" type="button">
+						<span className="plugins-row-icon"><Lightning aria-hidden="true" size={22} /></span>
+						<span className="plugins-row-copy"><strong>{hook.name}</strong><small>{hook.command} {hook.runMode === "process" && hook.args ? hook.args.join(" ") : ""}</small></span>
+						<span className="plugins-row-meta">{t(eventLabelKey(hook.event))} · {hook.enabled ? t("Enabled") : t("Disabled")}</span>
+						<CaretRight aria-hidden="true" size={17} />
+					</button>
+				))
+			)}
 		</div>
 	</section>;
 
@@ -621,6 +822,56 @@ export function PluginsPanel({ api, initialSection = "skills", onCreateSkillWith
 			return api.getMcpCatalogItem({ sessionId: mcpSessionId, server: mcpDetail.server.name, kind, id });
 		}} onClear={(server) => void liveAction("clear", server)} onCredential={(server, trigger) => { if (mcpSessionId) openDialog({ kind: "credential", server, sessionId: mcpSessionId }, trigger); }} onEdit={(server, trigger) => openDialog({ kind: "server", mode: "edit", scope: server.scope, server, target: page.target }, trigger)} onRemove={(server, trigger) => openDialog({ kind: "remove", server, target: page.target }, trigger)} onRestart={(server) => void liveAction("restart", server)} pendingAction={pendingAction} refreshedAt={mcpRefreshedAt} /> : mcpDetailError ? <div className="plugins-detail-load-error" role="alert"><p>{mcpDetailError}</p><button onClick={() => setPage({ ...page })} type="button">{t("Retry")}</button></div> : <p className="plugins-detail-loading" role="status">{t("Loading MCP server…")}</p>}
 	</section>;
+	if (page.kind === "hook") content = <section aria-busy={!selectedHook} className="plugins-detail-page" data-plugin-detail="hook">
+		<PluginBackButton label={t("Back to Hooks")} onBack={() => setPage({ kind: "catalog" })} />
+		{selectedHook ? <>
+			<header className="plugins-detail-header">
+				<div>
+					<h1 id="plugins-title" ref={detailHeading} tabIndex={-1}>{selectedHook.name}</h1>
+					<p>{selectedHook.statusMessage || selectedHook.command}</p>
+					<span>{t(eventLabelKey(selectedHook.event))} · {selectedHook.runMode === "shell" ? t("Shell command") : t("Direct process")} · {selectedHook.enabled ? t("Enabled") : t("Disabled")}</span>
+				</div>
+				<div className="plugins-detail-actions">
+					<button onClick={() => void toggleHookEnabled(selectedHook)} type="button">
+						{selectedHook.enabled ? <XCircle aria-hidden="true" size={17} /> : <CheckCircle aria-hidden="true" size={17} />}
+						{selectedHook.enabled ? t("Disable") : t("Enable")}
+					</button>
+					<button onClick={(event) => openDialog({ kind: "hook-editor", mode: "edit", initial: selectedHook }, event.currentTarget)} type="button">
+						<PencilSimple aria-hidden="true" size={17} />{t("Edit")}
+					</button>
+					<button className="plugins-danger-action" onClick={(event) => openDialog({ kind: "hook-remove", hook: selectedHook }, event.currentTarget)} type="button">
+						<Trash aria-hidden="true" size={17} />{t("Delete")}
+					</button>
+				</div>
+			</header>
+			<div className="plugins-detail-grid">
+				<article className="plugins-detail-document">
+					<h3>{t("Command")}</h3>
+					<pre className="plugins-hook-command-preview"><code>{selectedHook.command} {selectedHook.args?.join(" ")}</code></pre>
+					{selectedHook.statusMessage && <>
+						<h3>{t("Status message")}</h3>
+						<p>{selectedHook.statusMessage}</p>
+					</>}
+					{selectedHook.matcher && <>
+						<h3>{t("Tool matcher")}</h3>
+						<p><code>{selectedHook.matcher}</code></p>
+					</>}
+					{selectedHook.metadata && Object.keys(selectedHook.metadata).length > 0 && <>
+						<h3>{t("Custom fields")}</h3>
+						<pre className="plugins-hook-command-preview"><code>{JSON.stringify(selectedHook.metadata, null, 2)}</code></pre>
+					</>}
+				</article>
+				<aside className="plugins-detail-meta">
+					<dl>
+						<dt>{t("Event")}</dt><dd>{t(eventLabelKey(selectedHook.event))}</dd>
+						<dt>{t("Run mode")}</dt><dd>{selectedHook.runMode === "shell" ? t("Shell command") : t("Direct process")}</dd>
+						<dt>{t("Timeout")}</dt><dd>{selectedHook.timeoutSeconds ? `${selectedHook.timeoutSeconds}s` : t("Default (30s)")}</dd>
+						<dt>{t("Status")}</dt><dd>{selectedHook.enabled ? t("Active") : t("Disabled")}</dd>
+					</dl>
+				</aside>
+			</div>
+		</> : <p className="plugins-detail-loading" role="status">{t("Loading hook…")}</p>}
+	</section>;
 
 	return <section aria-labelledby="plugins-title" className="plugins-panel">
 		{content}
@@ -636,6 +887,8 @@ export function PluginsPanel({ api, initialSection = "skills", onCreateSkillWith
 		{dialog?.kind === "server" && <EditMcpServerDialog error={dialogError} key={`${dialog.mode}:${dialog.server.revision}`} onCancel={closeDialog} onSubmit={(draft) => void submitServer(draft)} pending={pendingAction === "server"} server={dialog.server} />}
 		{dialog?.kind === "credential" && <McpCredentialDialog error={dialogError} onCancel={closeDialog} onSubmit={(credential) => void setCredential(dialog.server, dialog.sessionId, credential)} pending={pendingAction === "credential"} server={dialog.server} />}
 		{dialog?.kind === "remove" && <RemoveMcpDialog error={dialogError} onCancel={closeDialog} onRemove={() => void removeServer(dialog.server, dialog.target)} pending={pendingAction === "remove"} server={dialog.server} />}
+		{dialog?.kind === "hook-editor" && <HookEditorDialog error={dialogError} initial={dialog.initial} key={`${dialog.mode}:${dialog.initial?.id ?? "new"}`} mode={dialog.mode} onCancel={closeDialog} onSubmit={(draft) => void submitHook(draft)} pending={pendingAction === "hook"} />}
+		{dialog?.kind === "hook-remove" && <RemoveHookDialog error={dialogError} hook={dialog.hook} onCancel={closeDialog} onRemove={() => void removeHook(dialog.hook)} pending={pendingAction === "hook-remove"} />}
 	</section>;
 }
 

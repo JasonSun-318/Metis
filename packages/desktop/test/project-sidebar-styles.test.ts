@@ -8,12 +8,18 @@ import { describe, expect, it } from "vitest";
 const css = readFileSync(path.join(process.cwd(), "src/renderer/styles/app.css"), "utf8");
 const tokens = readFileSync(path.join(process.cwd(), "src/renderer/styles/tokens.css"), "utf8");
 
-function rule(selector: string): CSSStyleDeclaration {
+let cachedRules: CSSStyleRule[] | null = null;
+function getRules(): CSSStyleRule[] {
+	if (cachedRules) return cachedRules;
 	const style = document.createElement("style");
 	style.textContent = css;
 	document.head.replaceChildren(style);
-	const rules = Array.from(style.sheet?.cssRules ?? []) as CSSStyleRule[];
-	const match = rules.find((candidate) => candidate.selectorText === selector);
+	cachedRules = Array.from(style.sheet?.cssRules ?? []) as CSSStyleRule[];
+	return cachedRules;
+}
+
+function rule(selector: string): CSSStyleDeclaration {
+	const match = getRules().find((candidate) => candidate.selectorText === selector);
 	if (!match) throw new Error(`Missing CSS rule: ${selector}`);
 	return match.style;
 }

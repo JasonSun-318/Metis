@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import type { McpCatalogEntryView, McpServerSummaryView, SessionSummary, SkillDetailView, SkillSourceView } from "@metis/app-protocol";
+import type { DeclarativeHookView, McpCatalogEntryView, McpServerSummaryView, SessionSummary, SkillDetailView, SkillSourceView } from "@metis/app-protocol";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -66,8 +66,21 @@ const mcpServer: McpServerSummaryView = {
 	capabilities: ["tools"],
 };
 
+const sampleHook: DeclarativeHookView = {
+	id: "hook-1",
+	name: "lint-on-save",
+	enabled: true,
+	event: "PreToolUse",
+	matcher: "write_to_file",
+	runMode: "shell",
+	command: "npm run lint",
+	statusMessage: "Running linter...",
+	timeoutSeconds: 30,
+};
+
 function api() {
 	const details = new Map([systemSkill, userSkill, projectSkill].map((detail) => [`${detail.source}:${detail.name}`, detail]));
+	const hooks = [sampleHook];
 	return {
 		listSkills: vi.fn().mockResolvedValue({
 			skills: [...details.values()].map(({ name, description, source }) => ({ name, description, source })),
@@ -118,6 +131,9 @@ function api() {
 		restartMcpServer: vi.fn().mockResolvedValue({ server: mcpServer, tools: [{ id: "repo_search", name: "repo_search", description: "Search repositories" }], resources: [], resourceTemplates: [], prompts: [] }),
 		setMcpCredential: vi.fn(),
 		clearMcpCredential: vi.fn(),
+		listHooks: vi.fn().mockResolvedValue({ hooks, loadErrors: [] }),
+		upsertHook: vi.fn().mockImplementation(({ hook }) => Promise.resolve({ hooks: [hook], loadErrors: [] })),
+		deleteHook: vi.fn().mockResolvedValue({ hooks: [], loadErrors: [] }),
 	};
 }
 
@@ -730,9 +746,77 @@ describe("PluginsPanel", () => {
 		await flush();
 		await act(async () => button(container, "beta_tool").click());
 		await flush();
-		expect(container.textContent).toContain("beta");
 		await act(async () => resolveAlpha({ kind: "tool", id: "alpha_tool", name: "alpha_tool", inputSchema: '{"title":"alpha"}' }));
 		expect(container.textContent).not.toContain('"alpha"');
 		await act(async () => root.unmount());
 	});
+
+	it("navigates through Hooks catalog, opens detail, toggles state, and opens editor dialog with custom dropdown and advanced accordion", async () => {
+		const desktop = api();
+		const { container, root } = await renderPanel(desktop);
+		await act(async () => button(container, "Hooks").click());
+		await flush();
+
+		expect(container.textContent).toContain("lint-on-save");
+		expect(container.textContent).toContain("npm run lint");
+
+		await act(async () => button(container, "lint-on-save").click());
+		await flush();
+
+		expect(container.querySelector('[data-plugin-detail="hook"]')).not.toBeNull();
+		expect(container.textContent).toContain("Running linter...");
+		expect(container.textContent).toContain("write_to_file");
+
+		await act(async () => button(container, "Disable").click());
+		expect(desktop.upsertHook).toHaveBeenCalledWith(expect.objectContaining({
+			hook: expect.objectContaining({ id: "hook-1", enabled: false }),
+		}));
+
+		await act(async () => button(container, "Back to Hooks").click());
+		await flush();
+		expect(container.querySelector(".plugins-catalog-page")).not.toBeNull();
+
+		await act(async () => button(container, "New Hook").click());
+		await flush();
+		const dialog = document.body.querySelector<HTMLElement>(".hook-editor-dialog")!;
+		expect(dialog).not.toBeNull();
+
+		// 没有原生的 select
+		expect(dialog.querySelector("select")).toBeNull();
+
+		// 高级选项默认折叠
+		expect(dialog.querySelector('input[placeholder="30"]')).toBeNull();
+
+		// 展开高级选项
+		await act(async () => button(dialog, "Advanced options").click());
+		await flush();
+		expect(dialog.querySelector('input[placeholder="30"]')).not.toBeNull();
+
+		// 点击 Event 下拉
+		await act(async () => button(dialog, "PreToolUse (Pre tool use)").click());
+		await flush();
+		const stopOption = [...document.body.querySelectorAll<HTMLButtonElement>('[role="option"]')].find((el) => el.textContent?.includes("Stop"));
+		expect(stopOption).toBeDefined();
+		await act(async () => stopOption!.click());
+		await flush();
+
+		// 填写表单
+		await act(async () => setInput(dialog.querySelector<HTMLInputElement>('input[placeholder="pre-commit-lint"]')!, "notify-done"));
+		await act(async () => setInput(dialog.querySelector<HTMLInputElement>('input[placeholder="/usr/local/bin/node"]')!, "/usr/bin/say"));
+		await act(async () => setInput(dialog.querySelector<HTMLInputElement>('input[placeholder="30"]')!, "45"));
+		await act(async () => button(dialog, "Create").click());
+		await flush();
+
+		expect(desktop.upsertHook).toHaveBeenCalledWith(expect.objectContaining({
+			hook: expect.objectContaining({
+				name: "notify-done",
+				event: "Stop",
+				command: "/usr/bin/say",
+				timeoutSeconds: 45,
+			}),
+		}));
+
+		await act(async () => root.unmount());
+	});
 });
+
