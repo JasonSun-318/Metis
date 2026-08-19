@@ -2491,28 +2491,46 @@ textarea { resize: none; }
 	user-select: none;
 }
 
-.excel-table-container {
+.excel-grid {
+	position: relative;
 	min-width: max-content;
-	width: max-content;
 }
 
-.excel-grid-table {
-	border-collapse: separate;
-	border-spacing: 0;
-	font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
-	font-size: 11px;
-	line-height: 1.4;
-	color: var(--text, #e3e3e8);
+.excel-grid-header,
+.excel-grid-row {
+	display: flex;
+	box-sizing: border-box;
+}
+
+.excel-grid-header {
+	position: sticky;
+	top: 0;
+	z-index: 3;
 	background: var(--surface-card, #141418);
-	border: 1px solid var(--border-weak, rgba(255, 255, 255, 0.1));
-	user-select: text;
 }
 
-.excel-grid-table th,
-.excel-grid-table td {
+.excel-grid-body {
+	position: relative;
+}
+
+.excel-grid-row {
+	position: absolute;
+	left: 0;
+}
+
+.excel-corner-cell,
+.excel-col-header,
+.excel-row-header,
+.excel-cell {
+	box-sizing: border-box;
 	border: 1px solid var(--border-weak, rgba(255, 255, 255, 0.08));
 	padding: 4px 8px;
 	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+	font-size: 11px;
+	line-height: 1.4;
 }
 
 .excel-corner-cell,
@@ -2523,29 +2541,50 @@ textarea { resize: none; }
 	font-weight: 600;
 	text-align: center;
 	user-select: none;
+	flex: 0 0 auto;
+}
+
+.excel-row-header,
+.excel-corner-cell {
 	position: sticky;
-	top: 0;
+	left: 0;
 	z-index: 2;
 }
 
-.excel-row-header {
-	left: 0;
-	z-index: 1;
-}
-
 .excel-corner-cell {
-	left: 0;
-	z-index: 3;
+	z-index: 4;
 }
 
 .excel-cell {
 	background: var(--surface-card, #141418);
-	max-width: 320px;
-	overflow: hidden;
-	text-overflow: ellipsis;
+	color: var(--text, #e3e3e8);
+	flex: 0 0 auto;
 }
 
-.excel-cell.is-search-match {
+.excel-cell.is-covered {
+	visibility: hidden;
+}
+
+.excel-merge {
+	position: absolute;
+	z-index: 1;
+	box-sizing: border-box;
+	display: flex;
+	align-items: center;
+	border: 1px solid var(--border-weak, rgba(255, 255, 255, 0.08));
+	padding: 4px 8px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+	font-size: 11px;
+	line-height: 1.4;
+	background: var(--surface-card, #141418);
+	color: var(--text, #e3e3e8);
+}
+
+.excel-cell.is-search-match,
+.excel-merge.is-search-match {
 	background: rgba(255, 215, 0, 0.2);
 	color: #ffeaa7;
 }

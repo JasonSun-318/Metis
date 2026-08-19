@@ -2,7 +2,7 @@ import { MagnifyingGlass, SpinnerGap, Table } from "@phosphor-icons/react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { cellKey, parseExcelBytes, type ExcelWorkbookView } from "./excel-grid.ts";
+import { mergesInRowRange, paintedCellsForRow, parseExcelBytes, type ExcelWorkbookView } from "./excel-grid.ts";
 import { PreviewToolbar } from "./PreviewToolbar.tsx";
 
 export interface ExcelViewerProps {
@@ -13,6 +13,10 @@ export interface ExcelViewerProps {
 	readonly onOpenDefault?: () => void;
 	readonly onReveal?: () => void;
 }
+
+const ROW_HEIGHT = 28;
+const COL_WIDTH = 88;
+const INDEX_WIDTH = 44;
 
 function getColumnLetter(colIndex: number): string {
 	let letter = "";
@@ -52,12 +56,16 @@ export function ExcelViewer({ fileName, byteLength, bytes, onClose, onOpenDefaul
 	}, [bytes, fileName, t]);
 
 	const sheet = workbook?.sheets[activeSheetName];
+	const scale = zoom / 100;
+	const rowHeight = Math.max(18, Math.round(ROW_HEIGHT * scale));
+	const colWidth = Math.max(56, Math.round(COL_WIDTH * scale));
+	const indexWidth = Math.max(36, Math.round(INDEX_WIDTH * scale));
 	const query = searchQuery.trim().toLowerCase();
 	const virtualizer = useVirtualizer({
 		count: sheet?.rowCount ?? 0,
 		getScrollElement: () => viewportRef.current,
-		estimateSize: () => 28,
-		overscan: 12,
+		estimateSize: () => rowHeight,
+		overscan: 16,
 	});
 
 	const handleMouseDown = (event: React.MouseEvent<HTMLDivElement>) => {
@@ -90,8 +98,10 @@ export function ExcelViewer({ fileName, byteLength, bytes, onClose, onOpenDefaul
 
 	const visibleRows = virtualizer.getVirtualItems();
 	const sheetNames = workbook?.sheetNames ?? [];
-	const leading = visibleRows[0]?.start ?? 0;
-	const trailing = Math.max(0, virtualizer.getTotalSize() - (visibleRows[visibleRows.length - 1]?.end ?? 0));
+	const gridWidth = sheet ? indexWidth + sheet.colCount * colWidth : 0;
+	const firstVisibleRow = visibleRows[0]?.index ?? 0;
+	const lastVisibleRow = visibleRows[visibleRows.length - 1]?.index ?? 0;
+	const visibleMerges = sheet ? mergesInRowRange(sheet.merges, firstVisibleRow, lastVisibleRow) : [];
 
 	return (
 		<div className="universal-previewer excel-previewer">
@@ -142,53 +152,62 @@ export function ExcelViewer({ fileName, byteLength, bytes, onClose, onOpenDefaul
 						<span>{t("Empty sheet")}</span>
 					</div>
 				) : (
-					<div className="excel-table-container" style={{ zoom: `${zoom}%` }}>
-						<table className="excel-grid-table">
-							<thead>
-								<tr>
-									<th className="excel-corner-cell">#</th>
-									{Array.from({ length: sheet.colCount }, (_, col) => (
-										<th className="excel-col-header" key={col}>
-											{getColumnLetter(col)}
-										</th>
-									))}
-								</tr>
-							</thead>
-							<tbody>
-								{leading > 0 ? (
-									<tr aria-hidden="true">
-										<td colSpan={sheet.colCount + 1} style={{ height: leading, padding: 0, border: 0 }} />
-									</tr>
-								) : null}
-								{visibleRows.map((virtualRow) => (
-									<tr key={virtualRow.index}>
-										<td className="excel-row-header">{virtualRow.index + 1}</td>
-										{Array.from({ length: sheet.colCount }, (_, col) => {
-											const key = cellKey(virtualRow.index, col);
-											if (sheet.hidden.has(key)) return null;
-											const cell = sheet.cells.get(key);
-											const match = Boolean(query && cell?.formatted.toLowerCase().includes(query));
-											return (
-												<td
-													className={`excel-cell${match ? " is-search-match" : ""}`}
-													colSpan={cell?.colSpan}
-													key={col}
-													rowSpan={cell?.rowSpan}
-													title={cell?.formatted}
-												>
-													{cell?.formatted ?? ""}
-												</td>
-											);
-										})}
-									</tr>
-								))}
-								{trailing > 0 ? (
-									<tr aria-hidden="true">
-										<td colSpan={sheet.colCount + 1} style={{ height: trailing, padding: 0, border: 0 }} />
-									</tr>
-								) : null}
-							</tbody>
-						</table>
+					<div className="excel-grid" style={{ width: gridWidth, height: rowHeight + virtualizer.getTotalSize() }}>
+						<div className="excel-grid-header" style={{ height: rowHeight, width: gridWidth }}>
+							<div className="excel-corner-cell" style={{ width: indexWidth, minWidth: indexWidth }}>
+								#
+							</div>
+							{Array.from({ length: sheet.colCount }, (_, col) => (
+								<div className="excel-col-header" key={col} style={{ width: colWidth, minWidth: colWidth }}>
+									{getColumnLetter(col)}
+								</div>
+							))}
+						</div>
+						<div className="excel-grid-body" style={{ height: virtualizer.getTotalSize(), width: gridWidth }}>
+							{visibleRows.map((virtualRow) => (
+								<div
+									className="excel-grid-row"
+									key={virtualRow.index}
+									style={{ height: virtualRow.size, top: virtualRow.start, width: gridWidth }}
+								>
+									<div className="excel-row-header" style={{ width: indexWidth, minWidth: indexWidth }}>
+										{virtualRow.index + 1}
+									</div>
+									{paintedCellsForRow(sheet, virtualRow.index).map((cell) => {
+										const merged = cell.covered || cell.rowSpan > 1 || cell.colSpan > 1;
+										const match = Boolean(!merged && query && cell.formatted.toLowerCase().includes(query));
+										return (
+											<div
+												className={`excel-cell${merged ? " is-covered" : ""}${match ? " is-search-match" : ""}`}
+												key={cell.col}
+												style={{ width: colWidth, minWidth: colWidth }}
+												title={merged ? undefined : cell.formatted}
+											>
+												{merged ? "" : cell.formatted}
+											</div>
+										);
+									})}
+								</div>
+							))}
+							{visibleMerges.map((merge) => {
+								const match = Boolean(query && merge.formatted.toLowerCase().includes(query));
+								return (
+									<div
+										className={`excel-merge${match ? " is-search-match" : ""}`}
+										key={`${merge.row}:${merge.col}`}
+										style={{
+											height: merge.rowSpan * rowHeight,
+											left: indexWidth + merge.col * colWidth,
+											top: merge.row * rowHeight,
+											width: merge.colSpan * colWidth,
+										}}
+										title={merge.formatted}
+									>
+										{merge.formatted}
+									</div>
+								);
+							})}
+						</div>
 					</div>
 				)}
 			</div>
