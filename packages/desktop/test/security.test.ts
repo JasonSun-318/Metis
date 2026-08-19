@@ -463,6 +463,8 @@ describe("desktop trust boundaries", () => {
 		expect(html).toContain("default-src 'self'");
 		expect(html).toContain("script-src 'self'");
 		expect(html).toContain("style-src 'self' 'unsafe-inline'");
+		expect(html).toContain("img-src 'self' data: blob:");
+		expect(html).toContain("worker-src 'self' blob:");
 		expect(html).not.toContain("'unsafe-eval'");
 		expect(html).not.toContain("script-src 'self' 'unsafe-inline'");
 

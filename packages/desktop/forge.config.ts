@@ -218,7 +218,7 @@ const config: ForgeConfig = {
 				],
 			},
 			devContentSecurityPolicy:
-				"default-src 'self'; script-src 'self' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' ws://127.0.0.1:* ws://localhost:*",
+				"default-src 'self'; script-src 'self' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' data: blob:; worker-src 'self' blob:; connect-src 'self' blob: ws://127.0.0.1:* ws://localhost:*",
 		}),
 		new CompleteFusesPlugin({
 			version: FuseVersion.V1,

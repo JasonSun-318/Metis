@@ -1,6 +1,7 @@
 import { SpinnerGap } from "@phosphor-icons/react";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { materializePreviewBlobUrls } from "./preview-blob-urls.ts";
 import { PreviewToolbar } from "./PreviewToolbar.tsx";
 
 export interface PptxViewerProps {
@@ -23,6 +24,7 @@ export function PptxViewer({ fileName, byteLength, bytes, onClose, onOpenDefault
 		if (!host) return;
 		let cancelled = false;
 		let handle: { destroy?: () => void; cleanup?: () => void } | undefined;
+		let observer: MutationObserver | undefined;
 		setLoading(true);
 		setError(null);
 		void (async () => {
@@ -39,6 +41,11 @@ export function PptxViewer({ fileName, byteLength, bytes, onClose, onOpenDefault
 					handle?.cleanup?.();
 					return;
 				}
+				await materializePreviewBlobUrls(host);
+				observer = new MutationObserver(() => {
+					void materializePreviewBlobUrls(host);
+				});
+				observer.observe(host, { childList: true, subtree: true });
 				setLoading(false);
 			} catch (cause) {
 				if (cancelled) return;
@@ -48,6 +55,7 @@ export function PptxViewer({ fileName, byteLength, bytes, onClose, onOpenDefault
 		})();
 		return () => {
 			cancelled = true;
+			observer?.disconnect();
 			handle?.destroy?.();
 			handle?.cleanup?.();
 			host.replaceChildren();
