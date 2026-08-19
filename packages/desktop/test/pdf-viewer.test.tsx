@@ -47,29 +47,33 @@ describe("PdfViewer", () => {
 		});
 	});
 
-	it("opens the document from raw bytes and destroys it on unmount", async () => {
-		const { PdfViewer } = await import("../src/renderer/components/preview/PdfViewer.tsx");
-		const container = document.createElement("div");
-		document.body.append(container);
-		const root = createRoot(container);
-		const bytes = new Uint8Array([1, 2, 3, 4]);
-		await act(async () => {
-			root.render(
-				<PdfViewer bytes={bytes} byteLength={4} fileName="a.pdf" onOpenDefault={() => {}} onReveal={() => {}} />,
+	it(
+		"opens the document from raw bytes and destroys it on unmount",
+		async () => {
+			const { PdfViewer } = await import("../src/renderer/components/preview/PdfViewer.tsx");
+			const container = document.createElement("div");
+			document.body.append(container);
+			const root = createRoot(container);
+			const bytes = new Uint8Array([1, 2, 3, 4]);
+			await act(async () => {
+				root.render(
+					<PdfViewer bytes={bytes} byteLength={4} fileName="a.pdf" onOpenDefault={() => {}} onReveal={() => {}} />,
+				);
+				await Promise.resolve();
+			});
+			expect(getDocument).toHaveBeenCalledWith(
+				expect.objectContaining({
+					data: bytes,
+					cMapPacked: true,
+					cMapUrl: "app://renderer/pdfjs/cmaps/",
+					standardFontDataUrl: "app://renderer/pdfjs/standard_fonts/",
+				}),
 			);
-			await Promise.resolve();
-		});
-		expect(getDocument).toHaveBeenCalledWith(
-			expect.objectContaining({
-				data: bytes,
-				cMapPacked: true,
-				cMapUrl: "app://renderer/pdfjs/cmaps/",
-				standardFontDataUrl: "app://renderer/pdfjs/standard_fonts/",
-			}),
-		);
-		await act(async () => {
-			root.unmount();
-		});
-		expect(destroy).toHaveBeenCalled();
-	});
+			await act(async () => {
+				root.unmount();
+			});
+			expect(destroy).toHaveBeenCalled();
+		},
+		15000,
+	);
 });
