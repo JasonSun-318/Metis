@@ -1,9 +1,17 @@
-import { ArrowClockwise } from "@phosphor-icons/react";
+import { ArrowClockwise, Sparkle, Trash } from "@phosphor-icons/react";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
 
 const MAX_INSTRUCTION_BYTES = 64 * 1024;
+
+const PRESET_INSTRUCTIONS = [
+	{ label: "⚡ 简洁直击", text: "回答保持简洁高效，聚焦核心结论与代码改动，避免冗余寒暄。" },
+	{ label: "🔍 详细推导", text: "在修改代码前，先详细推导逻辑思路并评估边界情况与架构影响。" },
+	{ label: "💻 测试优先", text: "每次完成任务或逻辑修改后，务必补充并运行单元测试以确保验证完整。" },
+	{ label: "🌐 始终中文", text: "请始终使用中文进行所有思考、回复与代码注释说明。" },
+	{ label: "🛡️ 严格类型", text: "严格遵循 TypeScript 类型系统，严禁使用 any 或隐式类型绕过。" },
+] as const;
 
 export function PersonalizationPanel({ api, serverReady }: {
 	readonly api: Pick<MetisDesktopApi, "getPersonalization" | "updatePersonalization">;
@@ -60,6 +68,17 @@ export function PersonalizationPanel({ api, serverReady }: {
 		}
 	};
 
+	const applyPreset = (presetText: string) => {
+		setInstructions((prev) => {
+			const trimmed = prev.trim();
+			if (!trimmed) return presetText;
+			if (trimmed.includes(presetText)) return prev;
+			return `${trimmed}\n\n${presetText}`;
+		});
+		setError(null);
+		setSaved(false);
+	};
+
 	if (loading) {
 		return <div aria-label={t("Global instructions")} className="settings-loading" role="status" />;
 	}
@@ -78,47 +97,79 @@ export function PersonalizationPanel({ api, serverReady }: {
 
 	return (
 		<div className="settings-page personalization-page">
-			<section className="personalization-section">
-				<header className="general-section-heading">
-					<h2>{t("Global instructions")}</h2>
-					<p>{t("Metis keeps these instructions in mind across new Chat and Code tasks.")}</p>
-				</header>
-				<div className="settings-card personalization-card">
-				<label>
-					<span>{t("Global instructions")}</span>
-					<textarea
-						aria-label={t("Global instructions")}
-						disabled={!serverReady || saving}
-						onChange={(event) => {
-							setInstructions(event.target.value);
-							setError(null);
-							setSaved(false);
-						}}
-						placeholder={t("For example: Keep explanations brief and focus on actionable changes.")}
-						value={instructions}
-					/>
-				</label>
-				<p className="personalization-helper">{t("Changes apply to new or reloaded tasks. Running tasks are not interrupted.")}</p>
-				<div className="personalization-meta">
-					<span>{instructionBytes.toLocaleString()} / {MAX_INSTRUCTION_BYTES.toLocaleString()} UTF-8 bytes</span>
-					{oversized ? <span className="personalization-error" role="alert">{t("Global instructions are too large.")}</span> : null}
-				</div>
-				<div className="personalization-actions">
-					<div>
-						{saved ? <span role="status">{t("Saved")}</span> : null}
-						{error === "save" ? <span className="personalization-error" role="alert">{t("Couldn’t save global instructions.")}</span> : null}
+			<section className="settings-section personalization-section">
+				<div className="personalization-presets-block">
+					<span className="personalization-presets-label">
+						<Sparkle aria-hidden="true" size={14} />
+						{t("Quick presets")}
+					</span>
+					<div className="personalization-presets-grid">
+						{PRESET_INSTRUCTIONS.map((preset) => (
+							<button
+								className="personalization-preset-chip"
+								key={preset.label}
+								onClick={() => applyPreset(preset.text)}
+								type="button"
+							>
+								{preset.label}
+							</button>
+						))}
 					</div>
-					<button
-						aria-label={t("Save instructions")}
-						className="settings-primary-button"
-						disabled={!serverReady || loading || saving || oversized || instructions === savedInstructions}
-						onClick={() => void save()}
-						type="button"
-					>
-						{t("Save instructions")}
-					</button>
 				</div>
+
+				<div className="settings-card personalization-card">
+					<label className="personalization-input-label">
+						<span className="sr-only">{t("Global instructions")}</span>
+						<textarea
+							aria-label={t("Global instructions")}
+							disabled={!serverReady || saving}
+							onChange={(event) => {
+								setInstructions(event.target.value);
+								setError(null);
+								setSaved(false);
+							}}
+							placeholder={t("For example: Keep explanations brief and focus on actionable changes.")}
+							rows={7}
+							value={instructions}
+						/>
+					</label>
+					<div className="personalization-footer">
+						<div className="personalization-meta">
+							<span className="personalization-bytes">{instructionBytes.toLocaleString()} / {MAX_INSTRUCTION_BYTES.toLocaleString()} UTF-8 bytes</span>
+							{oversized ? <span className="personalization-error" role="alert">{t("Global instructions are too large.")}</span> : null}
+							{saved ? <span className="personalization-saved-badge" role="status">{t("Saved")}</span> : null}
+							{error === "save" ? <span className="personalization-error" role="alert">{t("Couldn’t save global instructions.")}</span> : null}
+						</div>
+						<div className="personalization-actions">
+							{instructions ? (
+								<button
+									aria-label={t("Clear instructions")}
+									className="settings-secondary-button personalization-clear-button"
+									disabled={!serverReady || saving}
+									onClick={() => {
+										setInstructions("");
+										setError(null);
+										setSaved(false);
+									}}
+									type="button"
+								>
+									<Trash aria-hidden="true" size={14} />
+									{t("Clear")}
+								</button>
+							) : null}
+							<button
+								aria-label={t("Save instructions")}
+								className="settings-primary-button"
+								disabled={!serverReady || loading || saving || oversized || instructions === savedInstructions}
+								onClick={() => void save()}
+								type="button"
+							>
+								{saving ? t("Saving…") : t("Save instructions")}
+							</button>
+						</div>
+					</div>
 				</div>
+				<p className="personalization-helper-note">{t("Changes apply to new or reloaded tasks. Running tasks are not interrupted.")}</p>
 			</section>
 		</div>
 	);

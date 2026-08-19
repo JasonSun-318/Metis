@@ -50,6 +50,7 @@ export function WebSearchSettingsPanel({ api, serverReady }: {
 			current = false;
 		};
 	}, [api, serverReady, t]);
+
 	useEffect(() => {
 		if (notice === null) return;
 		const timer = setTimeout(() => setNotice(null), 2_500);
@@ -146,10 +147,9 @@ export function WebSearchSettingsPanel({ api, serverReady }: {
 	};
 
 	return (
-		<section className="personalization-section web-search-section">
-			<header className="general-section-heading">
-				<h2>{t("Search engine")}</h2>
-				<p>{t("Enable web search and choose the provider Metis uses when it needs to look something up.")}</p>
+		<section className="settings-section personalization-section web-search-section">
+			<header className="settings-section-heading">
+				<h3>{t("Search engine")}</h3>
 			</header>
 			<div className="settings-card web-search-card">
 				<div className="general-setting-row">
@@ -191,7 +191,7 @@ export function WebSearchSettingsPanel({ api, serverReady }: {
 					</div>
 				</div>
 
-				<div className="general-setting-row">
+				<div className="general-setting-row web-search-api-row">
 					<div className="general-setting-copy">
 						<span>{t("API key")}</span>
 						<p>{settings?.authConfigured ? t("Credential is stored locally by Metis.") : t("API keys are stored locally on this device.")}</p>
@@ -222,9 +222,9 @@ export function WebSearchSettingsPanel({ api, serverReady }: {
 									type="button"
 								>
 									{revealedCredential === null ? (
-										<Eye aria-hidden="true" size={18} />
+										<Eye aria-hidden="true" size={16} />
 									) : (
-										<EyeSlash aria-hidden="true" size={18} />
+										<EyeSlash aria-hidden="true" size={16} />
 									)}
 								</button>
 							) : null}

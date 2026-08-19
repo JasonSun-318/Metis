@@ -502,28 +502,38 @@ export function ModelSettingsPanel({ api, serverReady }: {
 	}));
 	return (
 		<section className="settings-page model-settings-page">
-			<p className="model-provider-intro">{t("Select a provider to configure its credentials. Built-in model details stay managed by Metis.")}</p>
-			{settings?.loadError ? <p className="settings-inline-error" role="alert">{settings.loadError}</p> : null}
-			<div className="model-provider-grid">
-				{providers.map((provider) => (
-					<button aria-haspopup="dialog" className="model-provider-card" key={provider.provider} onClick={() => openProvider(provider)} type="button">
-						<span className="model-provider-card-heading"><strong>{provider.name}</strong><span className={provider.auth.configured ? "configured" : ""}>{provider.auth.configured ? t("Configured") : t("Set up")}</span></span>
-						<small>{t("{{count}} models", { count: provider.models.length })}</small>
-					</button>
-				))}
+			<div className="settings-section">
+				<header className="settings-section-heading">
+					<h3>{t("Providers")}</h3>
+				</header>
+				<p className="model-provider-intro">{t("Select a provider to configure its credentials. Built-in model details stay managed by Metis.")}</p>
+				{settings?.loadError ? <p className="settings-inline-error" role="alert">{settings.loadError}</p> : null}
+				<div className="model-provider-grid">
+					{providers.map((provider) => (
+						<button aria-haspopup="dialog" className="model-provider-card" key={provider.provider} onClick={() => openProvider(provider)} type="button">
+							<span className="model-provider-card-heading">
+								<span className="model-provider-card-title">
+									<span className={`model-provider-dot ${provider.auth.configured ? "configured" : ""}`} />
+									<strong title={provider.name}>{provider.name}</strong>
+								</span>
+								<span className={`model-provider-badge ${provider.auth.configured ? "configured" : ""}`}>{provider.auth.configured ? t("Configured") : t("Set up")}</span>
+							</span>
+							<small>{t("{{count}} models", { count: provider.models.length })}</small>
+						</button>
+					))}
+				</div>
+				<button className="settings-secondary-button model-add-provider" disabled={!serverReady || busy} onClick={() => openCustomEditor()} type="button">
+					<Plus aria-hidden="true" size={15} />
+					{t("Add provider")}
+				</button>
 			</div>
-			<button className="settings-secondary-button model-add-provider" disabled={!serverReady || busy} onClick={() => openCustomEditor()} type="button">
-				<Plus aria-hidden="true" size={15} />
-				{t("Add provider")}
-			</button>
 
-			<section className="model-service-stack">
-				<header>
+			<div className="settings-section model-service-section">
+				<header className="settings-section-heading">
 					<h3>{t("Image tools")}</h3>
-					<p>{t("Configure the vision describer used by built-in tools.")}</p>
 				</header>
 
-				<article className="model-service-panel">
+				<article className="settings-card model-service-panel">
 					<div className="model-service-panel-top">
 						<div className="model-service-copy">
 							<span>{t("Vision model")}</span>
@@ -545,7 +555,7 @@ export function ModelSettingsPanel({ api, serverReady }: {
 						</div>
 					)}
 				</article>
-			</section>
+			</div>
 			{draft ? <dialog
 				aria-label={t("Configure {{provider}}", { provider: draft.name })}
 				className="model-provider-dialog"

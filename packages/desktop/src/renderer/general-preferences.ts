@@ -11,7 +11,7 @@ export interface GeneralPreferences {
 
 export const DEFAULT_GENERAL_PREFERENCES: GeneralPreferences = {
 	motion: "system",
-	chatFont: "anthropic-serif",
+	chatFont: "system-sans",
 	codeFont: "system-sans",
 };
 

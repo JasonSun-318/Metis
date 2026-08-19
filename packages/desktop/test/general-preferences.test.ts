@@ -26,7 +26,7 @@ describe("general preferences", () => {
 		);
 		expect(loadGeneralPreferences(localStorage)).toEqual({
 			motion: "reduced",
-			chatFont: "anthropic-serif",
+			chatFont: "system-sans",
 			codeFont: "system-serif",
 		});
 		localStorage.setItem(GENERAL_PREFERENCES_STORAGE_KEY, "{");
