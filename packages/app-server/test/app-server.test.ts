@@ -169,6 +169,10 @@ class FakeRuntime implements OpenedSessionRuntime {
 		throw new Error("No image in fixture");
 	}
 
+	async openDeliveredFile(): Promise<ClientResult<"session/openDeliveredFile">> {
+		throw new Error("No delivered file in fixture");
+	}
+
 	async getStatus(input: ClientParams<"session/status">): Promise<ClientResult<"session/status">> {
 		return {
 			sessionId: input.sessionId,
@@ -269,6 +273,7 @@ class FakeRuntime implements OpenedSessionRuntime {
 			pendingInteractions: [],
 			queuedTurns: [],
 			tasks: [],
+			deliveredFiles: [],
 			goal: this.goal,
 			thinkingSelection: "high",
 			actualThinkingLevel: "high",
@@ -380,7 +385,7 @@ function initialize(id = "initialize") {
 		jsonrpc: "2.0" as const,
 		id,
 		method: "initialize" as const,
-		params: { protocolVersion: 19, client: { name: "test", version: "1" }, capabilities: [] },
+		params: { protocolVersion: 20, client: { name: "test", version: "1" }, capabilities: [] },
 	};
 }
 
@@ -714,7 +719,7 @@ describe("AppServer", () => {
 		);
 		const initialized = await connection.handle(initialize());
 		expect(initialized).toMatchObject({
-			result: { protocolVersion: 19, server: { name: "metis-app-server" }, serverEpoch: server.serverEpoch },
+			result: { protocolVersion: 20, server: { name: "metis-app-server" }, serverEpoch: server.serverEpoch },
 		});
 		expectError(await connection.handle(initialize("again")), RPC_ERROR_CODES.INVALID_REQUEST);
 	});

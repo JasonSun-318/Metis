@@ -120,11 +120,11 @@ describe("utility-process app-server binding", () => {
 				jsonrpc: "2.0",
 				id: "initialize",
 				method: "initialize",
-				params: { protocolVersion: 19, client: { name: "utility-test", version: "1" }, capabilities: [] },
+				params: { protocolVersion: 20, client: { name: "utility-test", version: "1" }, capabilities: [] },
 			},
 		});
 		await vi.waitFor(() => expect(port.sent).toHaveLength(1));
-		expect(port.sent[0]).toMatchObject({ result: { protocolVersion: 19 } });
+		expect(port.sent[0]).toMatchObject({ result: { protocolVersion: 20 } });
 
 		port.emit("close");
 		await binding.closed;
@@ -166,12 +166,12 @@ describe("utility-process app-server binding", () => {
 				jsonrpc: "2.0",
 				id: "initialize",
 				method: "initialize",
-				params: { protocolVersion: 19, client: { name: "utility-test", version: "1" }, capabilities: [] },
+				params: { protocolVersion: 20, client: { name: "utility-test", version: "1" }, capabilities: [] },
 			},
 		});
 		await vi.waitFor(() => expect(port.sent).toHaveLength(2));
 		expect(port.sent[0]).toMatchObject({ error: { code: RPC_ERROR_CODES.INVALID_REQUEST } });
-		expect(port.sent[1]).toMatchObject({ result: { protocolVersion: 19 } });
+		expect(port.sent[1]).toMatchObject({ result: { protocolVersion: 20 } });
 		port.emit("close");
 		await binding.closed;
 	});
@@ -198,7 +198,7 @@ describe("utility-process app-server binding", () => {
 				jsonrpc: "2.0",
 				id: "initialize",
 				method: "initialize",
-				params: { protocolVersion: 19, client: { name: "utility-test", version: "1" }, capabilities: [] },
+				params: { protocolVersion: 20, client: { name: "utility-test", version: "1" }, capabilities: [] },
 			},
 		});
 		await vi.waitFor(() => expect(port.sent).toHaveLength(1));

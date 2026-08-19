@@ -8,6 +8,7 @@ import {
 	MAX_READ_IMAGE_DATA_UTF8_BYTES,
 	type McpCredentialInput,
 	type QueuedTurnView,
+	type SessionDeliveredFileView,
 	type SessionSnapshot,
 	type SessionSummary,
 	type TurnView,
@@ -21,10 +22,12 @@ import {
 	type AuthStorageChange,
 	buildChildSystemPrompt,
 	type CreateAgentSessionRuntimeFactory,
+	copySessionDeliveredFiles,
 	createAgentSessionFromServices,
 	createAgentSessionRuntime,
 	createAgentSessionServices,
 	createAskUserToolDefinition,
+	createDeliverFileToolDefinition,
 	DefaultResourceLoader,
 	formatSessionAttachments,
 	getLatestCacheHitPercent,
@@ -33,6 +36,7 @@ import {
 	importSessionAttachments,
 	installScheduleHost,
 	isScheduleSessionEligible,
+	MAX_SESSION_DELIVERED_FILES,
 	type McpCredentialIdentity,
 	type McpServerSettings,
 	mcpCredentialKey,
@@ -65,7 +69,9 @@ import {
 import type { InteractionBroker } from "./interactions.ts";
 import {
 	opaqueId,
+	projectAllDeliveredFiles,
 	projectAssistantOutputTokens,
+	projectDeliveredFileFromToolResult,
 	projectGoal,
 	projectLatestTasks,
 	projectLiveMessage as projectLiveItemMessage,
@@ -83,6 +89,7 @@ import {
 	publicMcpDetail,
 	publicMcpServers,
 } from "./mcp-projection.ts";
+import { openDeliveredFile as openDeliveredFileOnDisk } from "./open-delivered-file.ts";
 import { SessionProjection } from "./projection/session-projection.ts";
 import {
 	AppServerError,
@@ -334,6 +341,7 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 	private readonly mutateMcp: McpMutationRunner;
 	private unread: boolean;
 	private readonly notifiedQueueFailureRevisions = new Set<string>();
+	private deliveredFiles: SessionDeliveredFileView[];
 
 	constructor(
 		runtime: AgentSessionRuntime,
@@ -362,11 +370,13 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 				this.notifiedQueueFailureRevisions.add(turn.revision);
 			}
 		}
+		this.deliveredFiles = projectAllDeliveredFiles(this.session.sessionManager.getBranch());
 		this.projection = new SessionProjection({
 			session: this.summaryFromRuntime(journal, reduced),
 			turns,
 			items,
 			tasks: projectLatestTasks(this.session.sessionManager.getBranch()),
+			deliveredFiles: this.deliveredFiles,
 			goal: projectGoal(this.session.getGoal()),
 			queuedTurns: queuedTurns.map(queuedTurnView),
 		});
@@ -416,8 +426,15 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 			session.installHostTools(
 				[
 					createAskUserToolDefinition((request) => this.interactions!.requestUserInput(this.sessionId, request)),
+					createDeliverFileToolDefinition(() => ({
+						cwd: session.sessionManager.getCwd(),
+						agentDir: this.agentDir,
+						sessionId: this.sessionId,
+						additionalDirectories: session.sessionManager.getAdditionalDirectories(),
+						activeDeliveredFileCount: this.deliveredFiles.length,
+					})),
 				] as never,
-				{ automaticPermissionToolNames: ["ask_user"] },
+				{ automaticPermissionToolNames: ["ask_user", "deliver_file"] },
 			);
 		}
 		session.setPermissionApprovalHandler((request) =>
@@ -507,6 +524,15 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 			const tasks = projectTasksFromToolResult(event.message);
 			if (tasks !== undefined) {
 				this.publish({ type: "session/tasksChanged", sessionId: this.sessionId, tasks });
+			}
+			const delivered = projectDeliveredFileFromToolResult(event.message);
+			if (delivered) {
+				this.deliveredFiles = [...this.deliveredFiles, delivered].slice(-MAX_SESSION_DELIVERED_FILES);
+				this.publish({
+					type: "session/deliveredFilesChanged",
+					sessionId: this.sessionId,
+					deliveredFiles: this.deliveredFiles,
+				});
 			}
 			if (event.message.role === "assistant") this.liveAssistantItemId = undefined;
 			return;
@@ -763,7 +789,14 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 		try {
 			const next = optionalName(input.name);
 			if (next) branched.appendSessionInfo(next);
-			return branched.getSessionId();
+			const forkedSessionId = branched.getSessionId();
+			copySessionDeliveredFiles({
+				agentDir: this.agentDir,
+				sourceSessionId: this.sessionId,
+				targetSessionId: forkedSessionId,
+				fileIds: projectAllDeliveredFiles(branched.getBranch()).map((file) => file.fileId),
+			});
+			return forkedSessionId;
 		} finally {
 			branched.close();
 		}
@@ -1092,6 +1125,25 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 		}
 	}
 
+	async openDeliveredFile(
+		input: ClientParams<"session/openDeliveredFile">,
+	): Promise<ClientResult<"session/openDeliveredFile">> {
+		try {
+			await openDeliveredFileOnDisk({
+				agentDir: this.agentDir,
+				sessionId: input.sessionId,
+				fileId: input.fileId,
+				action: input.action,
+			});
+			return {};
+		} catch (error) {
+			if (error instanceof Error && error.message === "Delivered file was not found") {
+				throw new AppServerError("NOT_FOUND", { sessionId: this.sessionId });
+			}
+			throw new AppServerError("OPERATION_FAILED", { sessionId: this.sessionId });
+		}
+	}
+
 	async getStatus(input: ClientParams<"session/status">): Promise<ClientResult<"session/status">> {
 		const stats = this.session.getSessionStats();
 		const context = stats.contextUsage;
@@ -1414,11 +1466,13 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 
 class ReadonlyScheduledSessionRuntime implements OpenedSessionRuntime {
 	readonly sessionId: string;
+	private readonly agentDir: string;
 	private readonly projection: SessionProjection;
 	private readonly mcpServers: ClientResult<"mcp/list">;
 
-	constructor(ref: SessionRef, mcpServers: ClientResult<"mcp/list"> = { servers: [] }) {
+	constructor(ref: SessionRef, agentDir: string, mcpServers: ClientResult<"mcp/list"> = { servers: [] }) {
 		this.sessionId = ref.summary.sessionId;
+		this.agentDir = agentDir;
 		this.mcpServers = mcpServers;
 		let manager: ReturnType<typeof SessionManager.openReadOnly>;
 		try {
@@ -1478,6 +1532,7 @@ class ReadonlyScheduledSessionRuntime implements OpenedSessionRuntime {
 			turns,
 			items,
 			tasks: projectLatestTasks(manager.getBranch()),
+			deliveredFiles: projectAllDeliveredFiles(manager.getBranch()),
 			goal: projectGoal(readThreadGoal(manager)),
 		});
 	}
@@ -1561,6 +1616,25 @@ class ReadonlyScheduledSessionRuntime implements OpenedSessionRuntime {
 
 	async readImage(): Promise<ClientResult<"session/readImage">> {
 		throw new AppServerError("NOT_FOUND", { sessionId: this.sessionId });
+	}
+
+	async openDeliveredFile(
+		input: ClientParams<"session/openDeliveredFile">,
+	): Promise<ClientResult<"session/openDeliveredFile">> {
+		try {
+			await openDeliveredFileOnDisk({
+				agentDir: this.agentDir,
+				sessionId: input.sessionId,
+				fileId: input.fileId,
+				action: input.action,
+			});
+			return {};
+		} catch (error) {
+			if (error instanceof Error && error.message === "Delivered file was not found") {
+				throw new AppServerError("NOT_FOUND", { sessionId: this.sessionId });
+			}
+			throw new AppServerError("OPERATION_FAILED", { sessionId: this.sessionId });
+		}
 	}
 
 	async getStatus(input: ClientParams<"session/status">): Promise<ClientResult<"session/status">> {
@@ -2044,7 +2118,8 @@ export class AgentSessionRuntimeHost implements SessionRuntimeHost {
 
 	async open(ref: SessionRef): Promise<OpenedSessionRuntime> {
 		if (ref.summary.archived) throw new AppServerError("NOT_FOUND", { sessionId: ref.summary.sessionId });
-		if (ref.scheduled) return new ReadonlyScheduledSessionRuntime(ref, await this.listMcpServers(ref.summary.cwd));
+		if (ref.scheduled)
+			return new ReadonlyScheduledSessionRuntime(ref, this.agentDir, await this.listMcpServers(ref.summary.cwd));
 		let manager: SessionManager;
 		try {
 			manager = SessionManager.open(ref.path);

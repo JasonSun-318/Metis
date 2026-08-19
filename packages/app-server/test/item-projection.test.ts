@@ -2,6 +2,8 @@ import type { ItemView } from "@metis/app-protocol";
 import { describe, expect, it } from "vitest";
 import {
 	appendProjectedDelta,
+	projectAllDeliveredFiles,
+	projectDeliveredFileFromToolResult,
 	projectLiveMessage,
 	projectMessageEntry,
 	projectSessionEntry,
@@ -194,5 +196,65 @@ describe("tool result image projection", () => {
 		expect(block?.type).toBe("tool_result");
 		if (block?.type !== "tool_result") throw new Error("expected tool_result");
 		expect(block.images).toHaveLength(4);
+	});
+});
+
+describe("delivered file projection", () => {
+	const deliveredDetails = {
+		fileId: "aaaaaaaaaaaaaaaa",
+		name: "report.xlsx",
+		byteLength: 4096,
+		message: "Please review",
+		deliveredAt: "2026-08-18T00:00:00.000Z",
+	} as const;
+
+	it("projects deliver_file tool results onto tool_result blocks and session lists", () => {
+		const message = {
+			role: "toolResult",
+			toolCallId: "call-deliver",
+			toolName: "deliver_file",
+			isError: false,
+			details: deliveredDetails,
+		};
+		expect(projectDeliveredFileFromToolResult(message)).toEqual(deliveredDetails);
+
+		const item = projectMessageEntry({
+			entry: { type: "message", id: "tool-deliver", timestamp: CREATED_AT, message },
+			sessionId: "session-1",
+			turnStates: new Map(),
+			toolStates: new Map(),
+			fallbackTimestamp: CREATED_AT,
+		});
+		expect(item?.content[0]).toMatchObject({
+			type: "tool_result",
+			name: "deliver_file",
+			deliveredFile: deliveredDetails,
+		});
+
+		expect(
+			projectAllDeliveredFiles([
+				{ type: "message", message },
+				{ type: "message", message: { ...message, details: { ...deliveredDetails, fileId: "bbbbbbbbbbbbbbbb" } } },
+			]),
+		).toHaveLength(2);
+	});
+
+	it("ignores invalid deliver_file payloads", () => {
+		expect(
+			projectDeliveredFileFromToolResult({
+				role: "toolResult",
+				toolName: "deliver_file",
+				isError: true,
+				details: deliveredDetails,
+			}),
+		).toBeUndefined();
+		expect(
+			projectDeliveredFileFromToolResult({
+				role: "toolResult",
+				toolName: "deliver_file",
+				isError: false,
+				details: { ...deliveredDetails, fileId: "not-valid" },
+			}),
+		).toBeUndefined();
 	});
 });

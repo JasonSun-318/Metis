@@ -457,6 +457,7 @@ describe("golden protocol fixtures", () => {
 				"session/thinkingSelectionChanged",
 				"session/modelChanged",
 				"session/tasksChanged",
+				"session/deliveredFilesChanged",
 				"session/goalChanged",
 				"turn/queueChanged",
 				"subagent/updated",

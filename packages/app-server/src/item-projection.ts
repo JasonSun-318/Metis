@@ -4,10 +4,16 @@ import type {
 	ItemContentBlockView,
 	ItemUsageView,
 	ItemView,
+	SessionDeliveredFileView,
 	SessionGoalView,
 	SessionTaskView,
 } from "@metis/app-protocol";
-import { formatSessionAttachmentDisplayText, type ThreadGoal } from "@metis/coding-agent";
+import {
+	formatSessionAttachmentDisplayText,
+	MAX_SESSION_DELIVERED_FILES,
+	parseDeliverFileDetails,
+	type ThreadGoal,
+} from "@metis/coding-agent";
 
 export const MAX_PROJECTED_THINKING_BYTES = 8 * 1024;
 export const MAX_PROJECTED_VISIBLE_TEXT_BYTES = 20 * 1024;
@@ -278,6 +284,27 @@ export function projectLatestTasks(entries: readonly unknown[]): SessionTaskView
 	return [];
 }
 
+export function projectDeliveredFileFromToolResult(message: unknown): SessionDeliveredFileView | undefined {
+	if (typeof message !== "object" || message === null) return undefined;
+	const record = message as Record<string, unknown>;
+	if (record.role !== "toolResult" || record.toolName !== "deliver_file" || record.isError !== false) {
+		return undefined;
+	}
+	return parseDeliverFileDetails(record.details);
+}
+
+export function projectAllDeliveredFiles(entries: readonly unknown[]): SessionDeliveredFileView[] {
+	const delivered: SessionDeliveredFileView[] = [];
+	for (const entry of entries) {
+		if (typeof entry !== "object" || entry === null) continue;
+		const record = entry as Record<string, unknown>;
+		if (record.type !== "message") continue;
+		const file = projectDeliveredFileFromToolResult(record.message);
+		if (file) delivered.push(file);
+	}
+	return delivered.slice(-MAX_SESSION_DELIVERED_FILES);
+}
+
 export function projectMessageEntry(input: MessageProjectionInput): ItemView | undefined {
 	const { entry, sessionId, turnStates, toolStates, fallbackTimestamp } = input;
 	if (entry.type !== "message" || typeof entry.message !== "object" || entry.message === null) return undefined;
@@ -337,6 +364,10 @@ export function projectMessageEntry(input: MessageProjectionInput): ItemView | u
 			.filter((block): block is Extract<ItemContentBlockView, { type: "image" }> => block.type === "image")
 			.map((block) => block.image)
 			.slice(0, 4);
+		const deliveredFile =
+			message.toolName === "deliver_file" && message.isError !== true
+				? projectDeliveredFileFromToolResult(message)
+				: undefined;
 		return {
 			itemId,
 			sessionId,
@@ -351,6 +382,7 @@ export function projectMessageEntry(input: MessageProjectionInput): ItemView | u
 					isError: message.isError === true,
 					output: boundedText(output, MAX_ITEM_TEXT_BYTES),
 					...(images.length > 0 ? { images } : {}),
+					...(deliveredFile ? { deliveredFile } : {}),
 				},
 			],
 			createdAt,

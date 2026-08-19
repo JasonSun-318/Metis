@@ -163,6 +163,10 @@ class PausableRuntime implements OpenedSessionRuntime {
 		throw new Error("No image in fixture");
 	}
 
+	async openDeliveredFile(): Promise<ClientResult<"session/openDeliveredFile">> {
+		throw new Error("No delivered file in fixture");
+	}
+
 	async getStatus(input: ClientParams<"session/status">): Promise<ClientResult<"session/status">> {
 		return {
 			sessionId: input.sessionId,
@@ -300,7 +304,7 @@ function initialize(id: string) {
 		jsonrpc: "2.0" as const,
 		id,
 		method: "initialize" as const,
-		params: { protocolVersion: 19, client: { name: "test", version: "1" }, capabilities: [] },
+		params: { protocolVersion: 20, client: { name: "test", version: "1" }, capabilities: [] },
 	};
 }
 

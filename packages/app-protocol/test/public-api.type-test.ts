@@ -259,6 +259,7 @@ const snapshot: SessionSnapshot = {
 	activeTurnId: null,
 	pendingInteractions: [],
 	tasks: [],
+	deliveredFiles: [],
 	goal: null,
 	queuedTurns: [],
 	thinkingSelection: "off",

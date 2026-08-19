@@ -6,7 +6,7 @@
 			"jsonrpc": "2.0",
 			"id": "client-1",
 			"result": {
-				"protocolVersion": 19,
+				"protocolVersion": 20,
 				"server": {
 					"name": "metis-app-server",
 					"version": "0.80.6"
@@ -650,6 +650,15 @@
 	},
 	{
 		"direction": "client",
+		"method": "session/openDeliveredFile",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "client-open-delivered-file",
+			"result": {}
+		}
+	},
+	{
+		"direction": "client",
 		"method": "session/status",
 		"envelope": {
 			"jsonrpc": "2.0",
@@ -858,6 +867,7 @@
 					"pendingInteractions": [],
 					"queuedTurns": [],
 					"tasks": [],
+					"deliveredFiles": [],
 					"goal": null,
 					"thinkingSelection": "off",
 					"actualThinkingLevel": "off",

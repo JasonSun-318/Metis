@@ -114,6 +114,10 @@ class FakeRuntime implements OpenedSessionRuntime {
 		throw new Error("No image in fixture");
 	}
 
+	async openDeliveredFile(): Promise<ClientResult<"session/openDeliveredFile">> {
+		throw new Error("No delivered file in fixture");
+	}
+
 	async getStatus(input: ClientParams<"session/status">): Promise<ClientResult<"session/status">> {
 		return {
 			sessionId: input.sessionId,
@@ -184,6 +188,7 @@ class FakeRuntime implements OpenedSessionRuntime {
 			pendingInteractions: [],
 			queuedTurns: [],
 			tasks: [],
+			deliveredFiles: [],
 			goal: null,
 			thinkingSelection: "high",
 			actualThinkingLevel: "high",

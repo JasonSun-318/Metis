@@ -166,9 +166,9 @@ describe("session/fork RPC end-to-end", () => {
 				jsonrpc: "2.0",
 				id: "init-1",
 				method: "initialize",
-				params: { protocolVersion: 19, client: { name: "test", version: "1" }, capabilities: [] },
+				params: { protocolVersion: 20, client: { name: "test", version: "1" }, capabilities: [] },
 			});
-			expect(init).toMatchObject({ jsonrpc: "2.0", result: { protocolVersion: 19 } });
+			expect(init).toMatchObject({ jsonrpc: "2.0", result: { protocolVersion: 20 } });
 
 			const open = await connection.handle({
 				jsonrpc: "2.0",
@@ -287,7 +287,7 @@ describe("session/fork RPC end-to-end", () => {
 				jsonrpc: "2.0",
 				id: "init-1",
 				method: "initialize",
-				params: { protocolVersion: 19, client: { name: "test", version: "1" }, capabilities: [] },
+				params: { protocolVersion: 20, client: { name: "test", version: "1" }, capabilities: [] },
 			});
 			const forked = await connection.handle({
 				jsonrpc: "2.0",

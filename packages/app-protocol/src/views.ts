@@ -417,6 +417,14 @@ export const ToolCallBlockViewSchema = StrictObject({
 	inputPreview: Type.Optional(PublicTextSchema),
 });
 
+export const SessionDeliveredFileViewSchema = StrictObject({
+	fileId: Type.String({ minLength: 16, maxLength: 16, pattern: "^[a-f0-9]{16}$" }),
+	name: Type.String({ minLength: 1, maxLength: 255 }),
+	byteLength: Type.Integer({ minimum: 1, maximum: 128 * 1024 * 1024 }),
+	message: Type.Optional(Utf8String(512, { minLength: 1, maxLength: 512 })),
+	deliveredAt: TimestampSchema,
+});
+
 export const ToolResultBlockViewSchema = StrictObject({
 	type: Type.Literal("tool_result"),
 	toolCallId: OpaqueIdSchema,
@@ -424,6 +432,7 @@ export const ToolResultBlockViewSchema = StrictObject({
 	isError: Type.Boolean(),
 	output: PublicTextSchema,
 	images: Type.Optional(Type.Array(DurableImageRefViewSchema, { maxItems: 4 })),
+	deliveredFile: Type.Optional(SessionDeliveredFileViewSchema),
 });
 
 export const NoticeBlockViewSchema = StrictObject({
@@ -782,6 +791,8 @@ export const SessionTaskViewSchema = StrictObject({
 
 export const SessionTasksSchema = Type.Array(SessionTaskViewSchema, { maxItems: 256 });
 
+export const SessionDeliveredFilesSchema = Type.Array(SessionDeliveredFileViewSchema, { maxItems: 32 });
+
 export const SessionGoalStatusSchema = Type.Union([
 	Type.Literal("active"),
 	Type.Literal("paused"),
@@ -834,6 +845,7 @@ export const SessionSnapshotSchema = StrictObject({
 	pendingInteractions: Type.Array(InteractionViewSchema, { maxItems: MAX_INTERACTION_CHOICES }),
 	queuedTurns: QueuedTurnsSchema,
 	tasks: SessionTasksSchema,
+	deliveredFiles: SessionDeliveredFilesSchema,
 	goal: Type.Union([SessionGoalViewSchema, Type.Null()]),
 	thinkingSelection: ThinkingSelectionSchema,
 	actualThinkingLevel: ActualThinkingLevelSchema,
@@ -870,6 +882,12 @@ export const TasksChangedEventSchema = StrictObject({
 	type: Type.Literal("session/tasksChanged"),
 	sessionId: SessionIdSchema,
 	tasks: SessionTasksSchema,
+});
+
+export const DeliveredFilesChangedEventSchema = StrictObject({
+	type: Type.Literal("session/deliveredFilesChanged"),
+	sessionId: SessionIdSchema,
+	deliveredFiles: SessionDeliveredFilesSchema,
 });
 
 export const GoalChangedEventSchema = StrictObject({
@@ -1185,6 +1203,7 @@ export const DomainEventSchema = Type.Union([
 	ThinkingSelectionChangedEventSchema,
 	ModelChangedEventSchema,
 	TasksChangedEventSchema,
+	DeliveredFilesChangedEventSchema,
 	GoalChangedEventSchema,
 	TurnQueueChangedEventSchema,
 	SubagentUpdatedEventSchema,
@@ -1240,6 +1259,7 @@ export type TurnView = Static<typeof TurnViewSchema>;
 export type InteractionChoice = Static<typeof InteractionChoiceSchema>;
 export type InteractionView = Static<typeof InteractionViewSchema>;
 export type SessionTaskView = Static<typeof SessionTaskViewSchema>;
+export type SessionDeliveredFileView = Static<typeof SessionDeliveredFileViewSchema>;
 export type SessionGoalStatusView = Static<typeof SessionGoalStatusSchema>;
 export type SessionGoalView = Static<typeof SessionGoalViewSchema>;
 export type QueuedTurnAttachmentView = Static<typeof QueuedTurnAttachmentViewSchema>;
