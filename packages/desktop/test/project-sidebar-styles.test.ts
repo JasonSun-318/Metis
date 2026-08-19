@@ -51,15 +51,23 @@ describe("Project sidebar motion", () => {
 		);
 		expect(action.background).toBe("var(--surface-18)");
 		expect(action.boxShadow).toBe("var(--shadow)");
+		expect(rule(".mode-switch").boxShadow).toBe("var(--mode-switch-track-shadow)");
 		expect(rule(".mode-switch-indicator").background).toBe("var(--mode-switch-active)");
-		expect(rule(".mode-switch-indicator").boxShadow).toBe("var(--shadow)");
+		expect(rule(".mode-switch-indicator").boxShadow).toBe("var(--mode-switch-shadow)");
 		expect(tokens).toContain("--shadow: 0 1px 4px rgb(150 150 150 / 9%);");
 	});
 
 	it("routes visible shadows through the shared surface or overlay theme tokens", () => {
 		const values = [...css.matchAll(/box-shadow:\s*([^;}]+)/g)].map((match) => match[1].trim());
 		expect(
-			values.every((value) => value === "none" || value === "var(--shadow)" || value === "var(--overlay-shadow)"),
+			values.every(
+				(value) =>
+					value === "none" ||
+					value === "var(--shadow)" ||
+					value === "var(--overlay-shadow)" ||
+					value === "var(--mode-switch-shadow)" ||
+					value === "var(--mode-switch-track-shadow)",
+			),
 		).toBe(true);
 		expect(tokens).toContain("--overlay-shadow: 0 12px 28px rgb(0 0 0 / 35%), 0 2px 6px rgb(0 0 0 / 24%);");
 	});
