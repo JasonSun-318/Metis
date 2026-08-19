@@ -1733,6 +1733,7 @@ export function App({ api, store }: AppProps) {
 						onManageMcp={openMcpManagement}
 						onManageSkills={() => { setPluginSection("skills"); setDestination("skills"); }}
 						onPickFiles={pickAttachmentFiles}
+						onResolveDroppedFiles={api.resolveDroppedFiles}
 						reducedMotion={reducedMotion}
 						onSlashCommand={handleSlashCommand}
 						onSubmit={submitNewTaskDraft}
@@ -1743,7 +1744,7 @@ export function App({ api, store }: AppProps) {
 					<div className="workspace-body">
 						<div className="conversation-column">
 							<RecoveryBanner session={visibleActiveSession} />
-							<Transcript activeTurnId={state.activeTurnId} activeTurnStartedAt={state.activeTurnId ? state.turnsById.get(state.activeTurnId)?.startedAt : undefined} appearance={visibleActiveSession.mode} autoLoadOlder hasOlder={state.nextBeforeItemId !== null} itemIds={state.itemOrder} itemsById={state.itemsById} loadingOlder={loadingOlder} onCopy={(text) => void api.writeClipboardText({ text }).catch(reportError)} onFork={forkFromReply} onLoadOlder={loadOlder} />
+							<Transcript activeTurnId={state.activeTurnId} activeTurnStartedAt={state.activeTurnId ? state.turnsById.get(state.activeTurnId)?.startedAt : undefined} appearance={visibleActiveSession.mode} autoLoadOlder hasOlder={state.nextBeforeItemId !== null} itemIds={state.itemOrder} itemsById={state.itemsById} loadingOlder={loadingOlder} onCopy={(text) => void api.writeClipboardText({ text }).catch(reportError)} onFork={forkFromReply} onLoadOlder={loadOlder} onOpenDeliveredFile={(fileId, action) => void api.openDeliveredFile({ sessionId: visibleActiveSession.sessionId, fileId, action }).catch(reportError)} />
 							{compactingSession?.sessionId === visibleActiveSession.sessionId && (
 								<TurnRuntimeStatus items={[]} running startedAt={compactingSession.startedAt} variant="compaction" />
 							)}
@@ -1773,6 +1774,7 @@ export function App({ api, store }: AppProps) {
 								onManageMcp={openMcpManagement}
 								onManageSkills={() => { setPluginSection("skills"); setDestination("skills"); }}
 								onPickFiles={pickAttachmentFiles}
+								onResolveDroppedFiles={api.resolveDroppedFiles}
 								onSlashCommand={handleSlashCommand}
 								onSubmit={submit}
 								permissionControl={permissionControl}
