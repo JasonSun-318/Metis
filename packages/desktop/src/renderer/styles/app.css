@@ -251,6 +251,7 @@ textarea { resize: none; }
 .file-preview-notice { position: absolute; z-index: 5; top: 49px; left: 50%; max-width: calc(62% - 24px); overflow: hidden; border: 1px solid var(--border); border-radius: 7px; background: var(--surface-05); color: var(--text); padding: 5px 9px; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; transform: translateX(-50%); pointer-events: none; }
 .file-preview-body { position: relative; min-height: 0; flex: 1; overflow: auto; color: var(--text); }
 .file-preview-body.has-editor { overflow: hidden; }
+.file-preview-body.has-hosted-preview { overflow: hidden; display: flex; flex-direction: column; }
 .file-empty-state { position: absolute; display: grid; place-items: center; align-content: center; gap: 7px; color: var(--muted); text-align: center; inset: 0; }
 .file-empty-state > svg { color: var(--text-14); }
 .file-empty-state strong { color: var(--text); font-size: 13px; font-weight: 500; }
@@ -2717,10 +2718,14 @@ textarea { resize: none; }
 	padding: 16px;
 }
 
-.preview-image-element {
+.preview-image-element,
+.image-viewport .file-image {
 	max-width: 100%;
 	max-height: 100%;
+	width: auto;
+	height: auto;
 	object-fit: contain;
+	padding: 0;
 	border-radius: 4px;
 	box-shadow: var(--overlay-shadow);
 }

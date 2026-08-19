@@ -14,6 +14,7 @@ const FILE_KIND_KEY_BY_EXTENSION: Record<string, string> = {
 	jpeg: "Image",
 	gif: "Image",
 	webp: "Image",
+	svg: "Image",
 	txt: "Text",
 	json: "JSON",
 	ts: "TypeScript",

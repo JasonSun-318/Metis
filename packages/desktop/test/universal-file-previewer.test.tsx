@@ -230,7 +230,7 @@ describe("UniversalFilePreviewer", () => {
 		expect(container.textContent).toContain("hello");
 	});
 
-	it("renders images from a blob URL", async () => {
+	it("renders images from a data URL", async () => {
 		const readPreviewFile = vi.fn().mockResolvedValue({
 			ok: true,
 			name: "photo.png",
@@ -255,7 +255,56 @@ describe("UniversalFilePreviewer", () => {
 		await act(async () => {
 			await new Promise((resolve) => setTimeout(resolve, 50));
 		});
-		expect(container.querySelector('img[src^="blob:"]')).not.toBeNull();
+		const image = container.querySelector("img.file-image");
+		expect(image?.getAttribute("src")?.startsWith("data:image/png;base64,")).toBe(true);
+	});
+
+	it("renders svg and pretty-prints json", async () => {
+		const svg = new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg"></svg>');
+		const json = new TextEncoder().encode('{"ok":true}');
+		const readPreviewFile = vi.fn().mockImplementation(async (input: { readonly relativePath?: string }) => {
+			if (input.relativePath === "icon.svg") {
+				return { ok: true, name: "icon.svg", byteLength: svg.byteLength, mediaType: "image/svg+xml", bytes: svg };
+			}
+			return { ok: true, name: "data.json", byteLength: json.byteLength, mediaType: "application/json", bytes: json };
+		});
+		const api = { readPreviewFile, openWorkspaceFile: vi.fn() } as unknown as MetisDesktopApi;
+		const { container, root } = mount(
+			<UniversalFilePreviewer
+				active
+				api={api}
+				file={{
+					source: "workspace",
+					sessionId: "session-1",
+					relativePath: "icon.svg",
+					name: "icon.svg",
+				}}
+				onError={vi.fn()}
+			/>,
+		);
+		await act(async () => {
+			await new Promise((resolve) => setTimeout(resolve, 50));
+		});
+		expect(container.querySelector("img.file-image")?.getAttribute("src")?.startsWith("data:image/svg+xml;base64,")).toBe(
+			true,
+		);
+		await act(async () => {
+			root.render(
+				<UniversalFilePreviewer
+					active
+					api={api}
+					file={{
+						source: "workspace",
+						sessionId: "session-1",
+						relativePath: "data.json",
+						name: "data.json",
+					}}
+					onError={vi.fn()}
+				/>,
+			);
+			await new Promise((resolve) => setTimeout(resolve, 50));
+		});
+		expect(container.querySelector("pre.preview-plain-text")?.textContent).toContain('"ok": true');
 	});
 
 	it("tells the user legacy Office files cannot be previewed", async () => {

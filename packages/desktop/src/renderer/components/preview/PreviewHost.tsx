@@ -2,14 +2,15 @@ import { File, SpinnerGap } from "@phosphor-icons/react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import type { DesktopPreviewFileInput, MetisDesktopApi } from "../../../shared/desktop-api.ts";
-import { Markdown } from "../Markdown.tsx";
 import { DocxViewer } from "./DocxViewer.tsx";
 import { ExcelViewer } from "./ExcelViewer.tsx";
+import { ImageViewer } from "./ImageViewer.tsx";
 import { PdfViewer } from "./PdfViewer.tsx";
 import { PptxViewer } from "./PptxViewer.tsx";
 import { PreviewToolbar } from "./PreviewToolbar.tsx";
+import { TextViewer } from "./TextViewer.tsx";
 import { previewBytesCache, previewCacheKey } from "./preview-bytes-cache.ts";
-import { classifyPreviewKind, fileExtension } from "./preview-kinds.ts";
+import { classifyPreviewKind } from "./preview-kinds.ts";
 
 export interface UniversalPreviewTarget {
 	readonly source: "delivered" | "workspace";
@@ -215,32 +216,8 @@ export function PreviewHost({ file, api, active, onClose, onError }: PreviewHost
 	if (kind === "docx") return <DocxViewer {...viewerProps} />;
 	if (kind === "pptx") return <PptxViewer {...viewerProps} />;
 	if (kind === "xlsx" || kind === "csv") return <ExcelViewer {...viewerProps} />;
-	if (kind === "image") {
-		return <ImagePreview mediaType={imageMediaType(data.name, data.mediaType)} {...viewerProps} />;
-	}
-	if (kind === "markdown" || kind === "text") {
-		const text = new TextDecoder("utf-8", { fatal: false }).decode(data.bytes);
-		return (
-			<div className="universal-previewer text-previewer">
-				<PreviewToolbar
-					byteLength={data.byteLength}
-					fileName={data.name}
-					onClose={onClose}
-					onOpenDefault={handleOpenDefault}
-					onReveal={handleReveal}
-				/>
-				<div className="preview-viewport text-viewport code-turn-answer">
-					{kind === "markdown" ? (
-						<article className="file-markdown">
-							<Markdown text={text} />
-						</article>
-					) : (
-						<pre className="preview-plain-text">{text}</pre>
-					)}
-				</div>
-			</div>
-		);
-	}
+	if (kind === "image") return <ImageViewer mediaType={data.mediaType} {...viewerProps} />;
+	if (kind === "markdown" || kind === "text") return <TextViewer kind={kind} {...viewerProps} />;
 
 	return (
 		<PreviewShell
@@ -257,60 +234,6 @@ export function PreviewHost({ file, api, active, onClose, onError }: PreviewHost
 			</div>
 		</PreviewShell>
 	);
-}
-
-function ImagePreview({
-	byteLength,
-	bytes,
-	fileName,
-	mediaType,
-	onClose,
-	onOpenDefault,
-	onReveal,
-}: {
-	readonly byteLength: number;
-	readonly bytes: Uint8Array;
-	readonly fileName: string;
-	readonly mediaType: string;
-	readonly onClose?: () => void;
-	readonly onOpenDefault: () => void;
-	readonly onReveal: () => void;
-}) {
-	const [src, setSrc] = useState<string | null>(null);
-	useEffect(() => {
-		const url = URL.createObjectURL(
-			new Blob([Uint8Array.from(bytes).buffer], {
-				type: mediaType || "application/octet-stream",
-			}),
-		);
-		setSrc(url);
-		return () => {
-			URL.revokeObjectURL(url);
-		};
-	}, [bytes, mediaType]);
-	return (
-		<div className="universal-previewer image-previewer">
-			<PreviewToolbar
-				byteLength={byteLength}
-				fileName={fileName}
-				onClose={onClose}
-				onOpenDefault={onOpenDefault}
-				onReveal={onReveal}
-			/>
-			<div className="preview-viewport image-viewport">
-				{src ? <img alt={fileName} className="preview-image-element" src={src} /> : null}
-			</div>
-		</div>
-	);
-}
-
-function imageMediaType(fileName: string, mediaType: string): string {
-	if (mediaType && mediaType !== "application/octet-stream") return mediaType;
-	const ext = fileExtension(fileName);
-	if (ext === "svg") return "image/svg+xml";
-	if (ext === "jpg" || ext === "jpeg") return "image/jpeg";
-	if (ext === "png" || ext === "gif" || ext === "webp") return `image/${ext}`;
-	return mediaType || "application/octet-stream";
 }
 
 export type { PreviewKind } from "./preview-kinds.ts";

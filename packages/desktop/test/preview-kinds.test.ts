@@ -3,6 +3,7 @@ import {
 	classifyPreviewKind,
 	fileExtension,
 	isEnginePreviewKind,
+	isHostedPreviewKind,
 } from "../src/renderer/components/preview/preview-kinds.ts";
 
 describe("classifyPreviewKind", () => {
@@ -16,8 +17,15 @@ describe("classifyPreviewKind", () => {
 
 	it("keeps images and text as light kinds", () => {
 		expect(classifyPreviewKind("photo.png")).toBe("image");
+		expect(classifyPreviewKind("photo.JPG")).toBe("image");
+		expect(classifyPreviewKind("anim.gif")).toBe("image");
+		expect(classifyPreviewKind("art.webp")).toBe("image");
+		expect(classifyPreviewKind("vector.svg")).toBe("image");
 		expect(classifyPreviewKind("notes.md")).toBe("markdown");
+		expect(classifyPreviewKind("notes.mdx")).toBe("markdown");
+		expect(classifyPreviewKind("data.json")).toBe("text");
 		expect(classifyPreviewKind("app.ts")).toBe("text");
+		expect(classifyPreviewKind("notes.txt")).toBe("text");
 	});
 
 	it("rejects legacy office and unknown binaries", () => {
@@ -29,5 +37,7 @@ describe("classifyPreviewKind", () => {
 		expect(isEnginePreviewKind("pdf")).toBe(true);
 		expect(isEnginePreviewKind("image")).toBe(false);
 		expect(isEnginePreviewKind("unsupported")).toBe(false);
+		expect(isHostedPreviewKind("image")).toBe(true);
+		expect(isHostedPreviewKind("text")).toBe(false);
 	});
 });

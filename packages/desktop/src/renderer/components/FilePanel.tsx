@@ -28,7 +28,7 @@ import type {
 } from "../../shared/desktop-api.ts";
 import { CodeEditor } from "./CodeEditor.tsx";
 import { Markdown } from "./Markdown.tsx";
-import { classifyPreviewKind, isEnginePreviewKind } from "./preview/preview-kinds.ts";
+import { classifyPreviewKind, isHostedPreviewKind } from "./preview/preview-kinds.ts";
 import { UniversalFilePreviewer } from "./preview/UniversalFilePreviewer.tsx";
 import { WorkspaceFileIcon } from "./WorkspaceFileIcon.tsx";
 
@@ -235,7 +235,7 @@ export function FilePanel({
 			setPreviewLoading(false);
 			return;
 		}
-		if (activePath && isEnginePreviewKind(classifyPreviewKind(fileName(activePath)))) {
+		if (activePath && isHostedPreviewKind(classifyPreviewKind(fileName(activePath)))) {
 			setFile(null);
 			setPreviewLoading(false);
 			return;
@@ -465,6 +465,7 @@ export function FilePanel({
 		: mutationDialog?.type === "rename" ? t("Rename {{name}}", { name: mutationDialog.entry.name })
 			: mutationDialog?.type === "move" ? t("Move {{name}}", { name: mutationDialog.entry.name })
 				: mutationDialog?.type === "trash" ? t("Move {{name}} to Trash?", { name: mutationDialog.entry.name }) : "";
+	const hostedPreview = Boolean(activePath && isHostedPreviewKind(classifyPreviewKind(fileName(activePath))));
 
 	return (
 		<section
@@ -504,14 +505,14 @@ export function FilePanel({
 					)}
 				</header>
 				{notice && <div className="file-preview-notice" role="status">{notice}</div>}
-				<div className={`file-preview-body transcript-code${draftMatchesActivePath && !previewMode ? " has-editor" : ""}`}>
+				<div className={`file-preview-body transcript-code${draftMatchesActivePath && !previewMode ? " has-editor" : ""}${hostedPreview ? " has-hosted-preview" : ""}`}>
 					{!activePath ? (
 						<div className="file-empty-state"><FolderOpen aria-hidden="true" size={29} /><strong>{t("Open file")}</strong><span>{t("Choose a file from the workspace tree")}</span></div>
 					) : previewLoading ? (
 						<div className="file-empty-state"><SpinnerGap aria-hidden="true" className="is-spinning" size={24} /><span>{t("Opening file…")}</span></div>
 					) : previewError ? (
 						<div className="file-empty-state is-error"><File aria-hidden="true" size={27} /><strong>{t("File could not be opened")}</strong><span>{previewError}</span></div>
-					) : activePath && isEnginePreviewKind(classifyPreviewKind(fileName(activePath))) ? (
+					) : hostedPreview && activePath ? (
 						<UniversalFilePreviewer
 							active={visible}
 							api={api}
@@ -535,8 +536,6 @@ export function FilePanel({
 							}}
 							onError={onError}
 						/>
-					) : displayedFile?.kind === "image" ? (
-						<img alt={fileName(displayedFile.relativePath)} className="file-image" src={displayedFile.dataUrl} />
 					) : displayedFile?.kind === "unsupported" ? (
 						<div className="file-empty-state"><File aria-hidden="true" size={27} /><strong>{t(displayedFile.reason === "too-large" ? "File is too large to preview" : "Binary file cannot be previewed")}</strong><span>{t("Open it in the default app to inspect it")}</span></div>
 					) : visible && draftMatchesActivePath && isMarkdown(draft.file.relativePath) && previewMode ? (
