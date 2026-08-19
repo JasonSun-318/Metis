@@ -13,6 +13,7 @@ import { useTranslation } from "react-i18next";
 import type { DesktopAttachmentSelection } from "../../shared/desktop-api.ts";
 import { type GoalSlashCommand, parseGoalSlash } from "../goal-slash.ts";
 import { ComposerAddMenu } from "./ComposerAddMenu.tsx";
+import { ContextUsageRing } from "./ContextUsageRing.tsx";
 import {
 	composerSlashCommands,
 	type ComposerSlashCommand,
@@ -279,6 +280,8 @@ interface ComposerProps {
 	readonly thinkingControl?: ReactNode;
 	/** Live cache hit percentage for the active session; null when there is no usage yet. */
 	readonly cacheHitPercent?: number | null;
+	readonly contextFillPercent?: number | null;
+	readonly onOpenContextUsage?: () => void;
 }
 
 export function Composer({
@@ -299,6 +302,8 @@ export function Composer({
 	onGoalCommand,
 	appearance = "code",
 	cacheHitPercent,
+	contextFillPercent,
+	onOpenContextUsage,
 	interactionControl,
 	goalControl,
 	queuedTurnControl,
@@ -768,6 +773,9 @@ export function Composer({
 						{mcpConnectionState === "failed" && <button className="composer-mcp-status is-error" onClick={() => onManageMcp?.()} type="button">{t("MCP connection failed")}</button>}
 					</div>
 					<div className="composer-trailing">
+						{onOpenContextUsage && (
+							<ContextUsageRing onClick={onOpenContextUsage} percent={contextFillPercent ?? null} />
+						)}
 						{cacheHitPercent !== null && cacheHitPercent !== undefined && (
 							<span
 								aria-label={`${t("Cache hit rate")} ${Math.round(cacheHitPercent)}%`}

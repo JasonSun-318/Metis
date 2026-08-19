@@ -196,3 +196,29 @@ describe("Composer cache hit rate", () => {
 		await act(async () => root.unmount());
 	});
 });
+
+describe("Composer context usage ring", () => {
+	it("renders the ring only when a handler is provided", async () => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		const onOpenContextUsage = vi.fn();
+		const props = {
+			disabled: false,
+			onInterrupt: async () => undefined,
+			onSubmit: async () => undefined,
+			running: false,
+		};
+		await act(async () => root.render(<Composer {...props} />));
+		expect(container.querySelector(".context-usage-ring")).toBeNull();
+		await act(async () => root.render(
+			<Composer {...props} contextFillPercent={40} onOpenContextUsage={onOpenContextUsage} />,
+		));
+		const ring = container.querySelector<HTMLButtonElement>(".context-usage-ring");
+		expect(ring).not.toBeNull();
+		await act(async () => ring?.click());
+		expect(onOpenContextUsage).toHaveBeenCalledOnce();
+		await act(async () => root.unmount());
+	});
+});

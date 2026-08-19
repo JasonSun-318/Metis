@@ -28,11 +28,13 @@ describe("SessionStatusPanel", () => {
 				}}
 			/>,
 		));
-		expect(container.textContent).toContain("session-1");
-		expect(container.textContent).toContain("64,000 / 128,000");
-		expect(container.textContent).toContain("50%");
+		expect(container.textContent).toContain("Context Usage");
+		expect(container.textContent).toContain("50% Full");
+		expect(container.textContent).toContain("~64.0K / 128K");
+		expect(container.querySelector(".context-usage-bar-fill")?.getAttribute("style")).toMatch(/width:\s*50%/);
+		expect(container.textContent).toContain("Cache hit rate");
 		expect(container.textContent).toContain("25%");
-		expect(container.textContent).not.toContain("Usage");
+		expect(container.textContent).not.toContain("session-1");
 		await act(async () => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
 		expect(onClose).toHaveBeenCalledOnce();
 		await act(async () => root.unmount());

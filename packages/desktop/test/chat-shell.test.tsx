@@ -2302,8 +2302,11 @@ describe("Chat desktop shell", () => {
 
 		await run("status");
 		expect(api.getSessionStatus).toHaveBeenCalledWith({ sessionId: "chat-existing" });
-		expect(container.querySelector(".session-status-panel")?.textContent).toContain("64,000 / 128,000");
-		expect(container.querySelector(".session-status-panel")?.textContent).toContain("Cache hit rate25%");
+		expect(container.querySelector(".session-status-panel")?.textContent).toContain("50% Full");
+		expect(container.querySelector(".session-status-panel")?.textContent).toContain("~64.0K / 128K");
+		expect(container.querySelector(".session-status-panel")?.textContent).toContain("Cache hit rate");
+		expect(container.querySelector(".session-status-panel")?.textContent).toContain("25%");
+		expect(container.querySelector(".context-usage-ring")).not.toBeNull();
 
 		await run("model");
 		expect(container.querySelector(".session-status-panel")).toBeNull();

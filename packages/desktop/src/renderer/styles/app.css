@@ -1518,6 +1518,24 @@ textarea { resize: none; }
 .composer-mcp-status { color: var(--text-14); font-size: 12px; white-space: nowrap; }
 .composer-cache-hit { display: inline-flex; height: 24px; min-height: 24px; max-height: 24px; align-items: center; gap: 4px; border-radius: 5px; background: transparent; border: 0; box-shadow: none; color: var(--text-14); padding: 0 4px; font-size: 11px; line-height: 24px; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .composer-cache-hit strong { color: var(--text-20); font-weight: 500; }
+.context-usage-ring {
+	display: grid;
+	width: 24px;
+	height: 24px;
+	place-items: center;
+	border-radius: 6px;
+	color: var(--text-14);
+	padding: 0;
+	background: transparent;
+	border: 0;
+}
+.context-usage-ring:hover,
+.context-usage-ring:focus-visible {
+	background: var(--surface-05);
+	outline: 0;
+}
+.context-usage-ring-track { stroke: var(--text-01, rgba(255, 255, 255, 0.12)); fill: none; }
+.context-usage-ring-meter { stroke: var(--text, #fff); fill: none; stroke-linecap: round; }
 .composer-mcp-status.is-error { color: var(--danger-mcp); }
 .composer-mcp-status.is-error:hover { color: var(--danger-mcp-hover); }
 .composer-input-line { display: flex; width: 100%; min-width: 0; align-items: baseline; }
@@ -1556,10 +1574,11 @@ textarea { resize: none; }
 .session-status-panel > header strong { font-size: 13px; font-weight: 580; }
 .session-status-panel > header button { display: grid; width: 25px; height: 25px; place-items: center; border-radius: 6px; color: var(--text-09); }
 .session-status-panel > header button:hover { background: var(--surface-09); color: var(--text-27); }
-.session-status-panel dl { display: grid; gap: 7px; margin: 10px 0 0; }
-.session-status-panel dl > div { display: grid; min-width: 0; align-items: baseline; gap: 12px; grid-template-columns: 110px minmax(0, 1fr); }
-.session-status-panel dt { color: var(--text-06); font-size: 11px; }
-.session-status-panel dd { min-width: 0; overflow: hidden; margin: 0; color: var(--text-22); font: 11px/1.45 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; text-overflow: ellipsis; white-space: nowrap; }
+.context-usage-summary { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin: 10px 0 0; color: var(--text-22); font-size: 12px; font-variant-numeric: tabular-nums; }
+.context-usage-summary span:last-child { color: var(--text-10); font-size: 11px; }
+.context-usage-bar { height: 6px; margin: 10px 0 0; overflow: hidden; border-radius: 999px; background: var(--text-01, rgba(255, 255, 255, 0.12)); }
+.context-usage-bar-fill { height: 100%; border-radius: inherit; background: var(--text, #fff); }
+.context-usage-cache { margin: 8px 0 0; color: var(--text-10); font-size: 11px; }
 .session-status-message { margin: 10px 0 0; color: var(--text-10); font-size: 11px; }
 .session-status-message.is-error { color: var(--danger); }
 .composer-icon-button { display: grid; width: 32px; height: 32px; place-items: center; border-radius: 50%; padding: 0; transition: background-color 140ms ease, box-shadow 140ms ease, transform 140ms ease; }
