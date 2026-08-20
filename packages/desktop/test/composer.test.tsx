@@ -175,28 +175,6 @@ describe("Composer slash commands", () => {
 	});
 });
 
-describe("Composer cache hit rate", () => {
-	it("renders a compact cache hit indicator only when usage is available", async () => {
-		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-		const container = document.createElement("div");
-		document.body.append(container);
-		const root = createRoot(container);
-		const props = {
-			disabled: false,
-			onInterrupt: async () => undefined,
-			onSubmit: async () => undefined,
-			running: false,
-		};
-
-		await act(async () => root.render(<Composer {...props} cacheHitPercent={null} />));
-		expect(container.querySelector(".composer-cache-hit")).toBeNull();
-		await act(async () => root.render(<Composer {...props} cacheHitPercent={87.4} />));
-		expect(container.querySelector(".composer-cache-hit")?.textContent).toBe("Cache87%");
-		expect(container.querySelector(".composer-cache-hit")?.getAttribute("aria-label")).toBe("Cache hit rate 87%");
-		await act(async () => root.unmount());
-	});
-});
-
 describe("Composer context usage ring", () => {
 	it("renders the ring only when a handler is provided", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -213,10 +191,11 @@ describe("Composer context usage ring", () => {
 		await act(async () => root.render(<Composer {...props} />));
 		expect(container.querySelector(".context-usage-ring")).toBeNull();
 		await act(async () => root.render(
-			<Composer {...props} contextFillPercent={40} onOpenContextUsage={onOpenContextUsage} />,
+			<Composer {...props} contextUsageExpanded contextUsagePercent={40} onOpenContextUsage={onOpenContextUsage} />,
 		));
 		const ring = container.querySelector<HTMLButtonElement>(".context-usage-ring");
 		expect(ring).not.toBeNull();
+		expect(ring?.getAttribute("aria-expanded")).toBe("true");
 		await act(async () => ring?.click());
 		expect(onOpenContextUsage).toHaveBeenCalledOnce();
 		await act(async () => root.unmount());

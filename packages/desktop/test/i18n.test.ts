@@ -48,6 +48,10 @@ describe("Desktop locale preference", () => {
 		expect(i18n.t("This Skill changed elsewhere. Review the latest version and try again.")).toBe(
 			"此技能已在其他位置更改，请查看最新版本后重试。",
 		);
+		expect(i18n.t("System prompt")).toBe("系统提示词");
+		expect(i18n.t("MCP & dynamic tools")).toBe("MCP 与动态工具");
+		expect(i18n.t("Context breakdown unavailable")).toBe("上下文明细不可用");
+		expect(i18n.t("Context exceeded")).toBe("上下文已超限");
 
 		await setLocale("en", localStorage);
 		expect(localStorage.getItem(APP_LOCALE_STORAGE_KEY)).toBe("en");

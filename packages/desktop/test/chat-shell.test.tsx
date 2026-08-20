@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import type { ClientResult, ItemView, McpServerSummaryView, ScheduleTaskView, SessionSnapshot, SessionSummary } from "@metis/app-protocol";
+import type { ClientResult, McpServerSummaryView, ScheduleTaskView, SessionSnapshot, SessionSummary } from "@metis/app-protocol";
 import { EditorView } from "@codemirror/view";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
@@ -8,7 +8,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	App,
 	firstInteractionForSession,
-	latestCacheHitPercent,
 	sessionDisplayTitle,
 } from "../src/renderer/components/App.tsx";
 import { buildSessionTree, clampSessionSidebarWidth } from "../src/renderer/components/SessionSidebar.tsx";
@@ -489,6 +488,8 @@ function createHarness(options: {
 			mode: "code" as const,
 			contextTokens: 64_000,
 			contextWindow: 128_000,
+			contextBasis: "reported_total" as const,
+			contextBreakdown: [{ category: "conversation" as const, tokens: 64_000 }],
 			remainingPercent: 50,
 			cacheHitPercent: 25,
 		})),
@@ -546,28 +547,6 @@ afterEach(() => {
 	vi.restoreAllMocks();
 	localStorage.clear();
 	document.body.replaceChildren();
-});
-
-describe("latestCacheHitPercent", () => {
-	it("uses the latest completed assistant request after caching is reported", () => {
-		const assistant = (itemId: string, state: ItemView["state"], input: number, read: number, write: number): ItemView => ({
-			itemId,
-			sessionId: "session-1",
-			role: "assistant",
-			state,
-			content: [],
-			usage: { outputTokens: 1, inputTokens: input, cacheReadTokens: read, cacheWriteTokens: write },
-			createdAt: "2026-08-15T00:00:00.000Z",
-			...(state === "streaming" ? {} : { completedAt: "2026-08-15T00:00:01.000Z" }),
-		});
-		const items = new Map<string, ItemView>([
-			["cached", assistant("cached", "completed", 0, 80, 20)],
-			["latest", assistant("latest", "completed", 100, 0, 0)],
-			["streaming", assistant("streaming", "streaming", 0, 100, 0)],
-		]);
-		expect(latestCacheHitPercent(["cached", "latest", "streaming"], items)).toBe(0);
-		expect(latestCacheHitPercent(["latest"], items)).toBeNull();
-	});
 });
 
 describe("Chat desktop shell", () => {
@@ -2291,6 +2270,7 @@ describe("Chat desktop shell", () => {
 		const root = createRoot(container);
 		await act(async () => root.render(<App api={api} store={new AppStore()} />));
 		await flush();
+		expect(container.querySelector(".composer-cache-hit")).toBeNull();
 		const textarea = (container.querySelector("textarea") ?? container.querySelector("#composer-input"))!;
 		const run = async (command: string) => {
 			await act(async () => changeTextarea(textarea, `/${command}`));
@@ -2309,14 +2289,107 @@ describe("Chat desktop shell", () => {
 		expect(container.querySelector(".context-usage-ring")).not.toBeNull();
 
 		await run("model");
-		expect(container.querySelector(".session-status-panel")).toBeNull();
+		expect(container.querySelector(".session-status-panel.is-closing")).not.toBeNull();
 		expect(container.querySelector('.model-selector-popover[role="menu"]')).not.toBeNull();
+		await act(async () => new Promise((resolve) => setTimeout(resolve, 180)));
+		expect(container.querySelector(".session-status-panel")).toBeNull();
 		await run("thinking");
 		expect(container.querySelector(".model-selector-popover")).toBeNull();
 		expect(container.querySelector(".effort-popover")).not.toBeNull();
 		await run("mcp");
 		expect(container.querySelector(".effort-popover")).toBeNull();
 		expect(container.querySelector(".composer-mcp-menu")?.textContent).toContain("deepwiki");
+		await act(async () => root.unmount());
+	});
+
+	it("keeps the newest context status when an older request resolves last", async () => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
+		const { api } = createHarness();
+		vi.mocked(api.listMcpServers).mockResolvedValue({ servers: [] });
+		const pending: Array<{
+			resolve: (status: ClientResult<"session/status">) => void;
+		}> = [];
+		vi.mocked(api.getSessionStatus).mockImplementation(() =>
+			new Promise<ClientResult<"session/status">>((resolve) => pending.push({ resolve })),
+		);
+		const status = (tokens: number, contextWindow: number): ClientResult<"session/status"> => ({
+			sessionId: "chat-existing",
+			mode: "code",
+			contextTokens: tokens,
+			contextWindow,
+			contextBasis: "estimated_total",
+			contextBreakdown: [{ category: "conversation", tokens }],
+			remainingPercent: Math.max(0, 100 - (tokens / contextWindow) * 100),
+			cacheHitPercent: null,
+		});
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<App api={api} store={new AppStore()} />));
+		await flush();
+		const older = [...pending];
+		await act(async () => container.querySelector<HTMLButtonElement>(".context-usage-ring")!.click());
+		await flush();
+		const newest = pending.at(-1)!;
+		await act(async () => newest.resolve(status(200_000, 1_000_000)));
+		await flush();
+		expect(container.querySelector(".context-usage-ring")?.getAttribute("aria-label")).toContain("20%");
+
+		await act(async () => {
+			for (const request of older) request.resolve(status(64_000, 128_000));
+		});
+		await flush();
+		expect(container.querySelector(".context-usage-ring")?.getAttribute("aria-label")).toContain("20%");
+		expect(container.querySelector(".context-usage-ring")?.getAttribute("aria-label")).not.toContain("50%");
+		await act(async () => root.unmount());
+	});
+
+	it("toggles the context status panel from the usage ring", async () => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
+		const { api } = createHarness();
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<App api={api} store={new AppStore()} />));
+		await flush();
+		const ring = container.querySelector<HTMLButtonElement>(".context-usage-ring")!;
+
+		await act(async () => ring.click());
+		await flush();
+		expect(container.querySelector(".session-status-panel")).not.toBeNull();
+		expect(ring.getAttribute("aria-expanded")).toBe("true");
+
+		await act(async () => ring.dispatchEvent(new Event("pointerdown", { bubbles: true })));
+		expect(container.querySelector(".session-status-panel.is-closing")).toBeNull();
+		expect(ring.getAttribute("aria-expanded")).toBe("true");
+		await act(async () => ring.click());
+		expect(container.querySelector(".session-status-panel.is-closing")).not.toBeNull();
+		expect(ring.getAttribute("aria-expanded")).toBe("false");
+		await act(async () => new Promise((resolve) => setTimeout(resolve, 180)));
+		expect(container.querySelector(".session-status-panel")).toBeNull();
+		await act(async () => root.unmount());
+	});
+
+	it("refreshes context status when the active model snapshot changes", async () => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
+		const { api } = createHarness();
+		const store = new AppStore();
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<App api={api} store={store} />));
+		await flush();
+		vi.mocked(api.getSessionStatus).mockClear();
+		const summary = session("chat-existing", "chat", "/work/chat-project", "Chat project task");
+		await act(async () => store.applySnapshot({
+			...snapshot(summary),
+			model: { provider: "test-provider", modelId: "other-model" },
+		}));
+		await flush();
+		expect(api.getSessionStatus).toHaveBeenCalledWith({ sessionId: "chat-existing" });
 		await act(async () => root.unmount());
 	});
 

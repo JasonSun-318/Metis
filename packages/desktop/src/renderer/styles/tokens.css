@@ -37,9 +37,9 @@
 	--panel-raised: #1e1e1e;
 	--panel-hover: #222222;
 	--panel-selected: #282828;
-	--mode-switch-active: #303030;
-	--mode-switch-track-shadow: inset 0 0 0 1px var(--surface-04), inset 0 1px 2px rgb(0 0 0 / 18%);
-	--mode-switch-shadow: 0 1px 3px rgb(0 0 0 / 50%), 0 2px 6px rgb(0 0 0 / 25%), 0 0 0 0.5px rgb(255 255 255 / 10%), inset 0 1px 0 rgb(255 255 255 / 14%);
+	--mode-switch-active: #383838;
+	--mode-switch-track-shadow: none;
+	--mode-switch-shadow: none;
 	--text: #ededed;
 	--text-muted: #787878;
 	--muted: #8c8c8c;
@@ -236,8 +236,8 @@
 	--panel-hover: #f2f1ee;
 	--panel-selected: #edece8;
 	--mode-switch-active: #ffffff;
-	--mode-switch-track-shadow: inset 0 0 0 1px var(--surface-04), inset 0 1px 2px rgb(0 0 0 / 6%);
-	--mode-switch-shadow: 0 1px 3px rgb(0 0 0 / 12%), 0 2px 5px rgb(0 0 0 / 8%), 0 0 0 0.5px rgb(0 0 0 / 5%), inset 0 1px 0 rgb(255 255 255 / 90%);
+	--mode-switch-track-shadow: none;
+	--mode-switch-shadow: 0 1px 2px rgb(0 0 0 / 8%);
 	--text: #252320;
 	--text-muted: #817d76;
 	--muted: #69655f;

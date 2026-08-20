@@ -278,9 +278,8 @@ interface ComposerProps {
 	readonly tasks?: readonly SessionTaskView[];
 	readonly taskListEpoch?: string | null;
 	readonly thinkingControl?: ReactNode;
-	/** Live cache hit percentage for the active session; null when there is no usage yet. */
-	readonly cacheHitPercent?: number | null;
-	readonly contextFillPercent?: number | null;
+	readonly contextUsageExpanded?: boolean;
+	readonly contextUsagePercent?: number | null;
 	readonly onOpenContextUsage?: () => void;
 }
 
@@ -301,8 +300,8 @@ export function Composer({
 	onSlashCommand,
 	onGoalCommand,
 	appearance = "code",
-	cacheHitPercent,
-	contextFillPercent,
+	contextUsageExpanded = false,
+	contextUsagePercent,
 	onOpenContextUsage,
 	interactionControl,
 	goalControl,
@@ -774,16 +773,12 @@ export function Composer({
 					</div>
 					<div className="composer-trailing">
 						{onOpenContextUsage && (
-							<ContextUsageRing onClick={onOpenContextUsage} percent={contextFillPercent ?? null} />
-						)}
-						{cacheHitPercent !== null && cacheHitPercent !== undefined && (
-							<span
-								aria-label={`${t("Cache hit rate")} ${Math.round(cacheHitPercent)}%`}
-								className="composer-cache-hit"
-							>
-								<span className="composer-cache-hit-label">{t("Cache")}</span>
-								<strong>{Math.round(cacheHitPercent)}%</strong>
-							</span>
+							<ContextUsageRing
+								controls="session-status-panel"
+								expanded={contextUsageExpanded}
+								onClick={onOpenContextUsage}
+								percent={contextUsagePercent ?? null}
+							/>
 						)}
 						{modelControl}
 						{thinkingControl}

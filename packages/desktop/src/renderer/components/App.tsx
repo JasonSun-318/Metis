@@ -42,7 +42,7 @@ import {
 } from "../store/project-preferences.ts";
 import { loadSessionPins, saveSessionPins, setSessionPinned } from "../store/session-pins.ts";
 import { applyThemeToDocument, loadTheme, resolveTheme, saveTheme, type AppTheme, watchSystemTheme } from "../theme.ts";
-import { contextFillPercent } from "../context-usage.ts";
+import { contextUsagePercent } from "../context-usage.ts";
 import { Composer, type ComposerSubmission } from "./Composer.tsx";
 import { CodeProjectSetup } from "./CodeProjectSetup.tsx";
 import { GoalBar } from "./GoalBar.tsx";
@@ -183,26 +183,6 @@ export function firstInteractionForSession(
 	return undefined;
 }
 
-export function latestCacheHitPercent(
-	itemOrder: readonly string[],
-	itemsById: ReadonlyMap<string, ItemView>,
-): number | null {
-	let reportedCache = false;
-	let latest: ItemView["usage"];
-	for (const itemId of itemOrder) {
-		const item = itemsById.get(itemId);
-		if (item?.role !== "assistant" || item.state !== "completed" || !item.usage) continue;
-		latest = item.usage;
-		reportedCache ||= (latest.cacheReadTokens ?? 0) + (latest.cacheWriteTokens ?? 0) > 0;
-	}
-	const promptTokens = latest
-		? (latest.inputTokens ?? 0) + (latest.cacheReadTokens ?? 0) + (latest.cacheWriteTokens ?? 0)
-		: 0;
-	return reportedCache && latest && promptTokens > 0
-		? Math.max(0, Math.min(100, ((latest.cacheReadTokens ?? 0) / promptTokens) * 100))
-		: null;
-}
-
 export function latestAssistantUsageKey(
 	itemOrder: readonly string[],
 	itemsById: ReadonlyMap<string, ItemView>,
@@ -283,6 +263,7 @@ export function App({ api, store }: AppProps) {
 	const [sessionStatusPanel, setSessionStatusPanel] = useState<{
 		readonly sessionId: string;
 		readonly loading: boolean;
+		readonly closing?: boolean;
 		readonly status?: SessionStatusView;
 		readonly error?: string;
 	} | null>(null);
@@ -393,7 +374,7 @@ export function App({ api, store }: AppProps) {
 	const sessionDeleteRequests = useRef(new Map<string, string>());
 	const sessionMarkReadRequests = useRef(new Set<string>());
 	const statusGeneration = useRef(0);
-	const contextStatusGeneration = useRef(0);
+	const contextStatusRef = useRef<SessionStatusView | null>(null);
 	const visibleSessionId = !settingsOpen && destination === "tasks" && newTaskDraft === null ? state.activeSessionId : null;
 	const visibleSessionIdRef = useRef<string | null>(visibleSessionId);
 	visibleSessionIdRef.current = visibleSessionId;
@@ -411,8 +392,16 @@ export function App({ api, store }: AppProps) {
 	}, []);
 	const closeSessionStatus = useCallback(() => {
 		statusGeneration.current += 1;
-		setSessionStatusPanel(null);
+		setSessionStatusPanel((current) => current ? { ...current, closing: true } : null);
 	}, []);
+	useEffect(() => {
+		if (!sessionStatusPanel?.closing) return undefined;
+		const timer = setTimeout(
+			() => setSessionStatusPanel((current) => current?.closing ? null : current),
+			reducedMotion ? 0 : 160,
+		);
+		return () => clearTimeout(timer);
+	}, [reducedMotion, sessionStatusPanel?.closing]);
 	useEffect(() => {
 		let disposed = false;
 		let receivedEvent = false;
@@ -1137,12 +1126,9 @@ export function App({ api, store }: AppProps) {
 	const toolsSidebarAvailable = visibleActiveSession !== undefined;
 	const running = visibleActiveSession?.state === "running" || (visibleActiveSession !== undefined && state.activeTurnId !== null);
 	const serverReady = state.supervisor.state === "ready";
-	const activeSessionCacheHitPercent = visibleActiveSession
-		? latestCacheHitPercent(state.itemOrder, state.itemsById)
-		: null;
 	useEffect(() => {
 		statusGeneration.current += 1;
-		contextStatusGeneration.current += 1;
+		contextStatusRef.current = null;
 		setSessionStatusPanel(null);
 		setContextStatus(null);
 		requestComposerControl(null);
@@ -1430,28 +1416,67 @@ export function App({ api, store }: AppProps) {
 	const compactBlocked = running || inlineInteraction !== undefined || compactingSession !== null;
 	const isCompacting = compactingSession !== null;
 	const assistantUsageKey = latestAssistantUsageKey(state.itemOrder, state.itemsById);
+	const activeModelKey = state.model ? `${state.model.provider}/${state.model.modelId}` : "";
+	const mcpContextKey = mcpServers
+		.map((server) =>
+			`${server.name}:${server.revision}:${server.effective}:${server.enabled}:${server.state}:${server.toolCount}`,
+		)
+		.sort()
+		.join("|");
 
-	const refreshContextStatus = useCallback(async (sessionId: string) => {
-		const generation = ++contextStatusGeneration.current;
+	const loadContextStatus = useCallback(async (
+		sessionId: string,
+		options: { readonly showPanel?: boolean } = {},
+	) => {
+		const generation = ++statusGeneration.current;
+		if (options.showPanel) {
+			const cached = contextStatusRef.current;
+			setSessionStatusPanel(
+				cached?.sessionId === sessionId
+					? { sessionId, loading: false, status: cached }
+					: { sessionId, loading: true },
+			);
+		}
 		try {
 			const status = await api.getSessionStatus({ sessionId });
-			if (generation !== contextStatusGeneration.current) return;
+			if (generation !== statusGeneration.current) return;
+			if (store.getSnapshot().activeSessionId !== sessionId) return;
+			contextStatusRef.current = status;
 			setContextStatus(status);
 			setSessionStatusPanel((current) =>
-				current && current.sessionId === sessionId && !current.error
+				current?.sessionId === sessionId
 					? { sessionId, loading: false, status }
 					: current,
 			);
-		} catch {
-			if (generation !== contextStatusGeneration.current) return;
-			setContextStatus(null);
+		} catch (cause) {
+			if (generation !== statusGeneration.current) return;
+			if (store.getSnapshot().activeSessionId !== sessionId) return;
+			if (options.showPanel) {
+				setSessionStatusPanel({
+					sessionId,
+					loading: false,
+					error: cause instanceof Error ? cause.message : "Session status could not be loaded.",
+				});
+			} else {
+				contextStatusRef.current = null;
+				setContextStatus(null);
+			}
 		}
-	}, [api]);
+	}, [api, store]);
 
 	useEffect(() => {
 		if (!writableSessionId || !serverReady || isCompacting) return;
-		void refreshContextStatus(writableSessionId);
-	}, [assistantUsageKey, isCompacting, refreshContextStatus, serverReady, writableSessionId]);
+		void loadContextStatus(writableSessionId);
+	}, [
+		activeModelKey,
+		assistantUsageKey,
+		isCompacting,
+		loadContextStatus,
+		mcpContextKey,
+		serverReady,
+		skillCatalogEpoch,
+		writableSessionId,
+	]);
 	const { disabledSlashCommands, disabledSlashReasons } = useMemo(() => {
 		const commands = new Set<ComposerSlashCommand>();
 		const reasons: Partial<Record<ComposerSlashCommand, string>> = {};
@@ -1480,26 +1505,16 @@ export function App({ api, store }: AppProps) {
 	const openSessionStatus = useCallback(async () => {
 		if (!writableSessionId) return;
 		requestComposerControl(null);
-		const generation = ++statusGeneration.current;
-		if (contextStatus?.sessionId === writableSessionId) {
-			setSessionStatusPanel({ sessionId: writableSessionId, loading: false, status: contextStatus });
-		} else {
-			setSessionStatusPanel({ sessionId: writableSessionId, loading: true });
+		await loadContextStatus(writableSessionId, { showPanel: true });
+	}, [loadContextStatus, requestComposerControl, writableSessionId]);
+	const toggleSessionStatus = useCallback(() => {
+		if (!writableSessionId) return;
+		if (sessionStatusPanel?.sessionId === writableSessionId && !sessionStatusPanel.closing) {
+			closeSessionStatus();
+			return;
 		}
-		try {
-			const status = await api.getSessionStatus({ sessionId: writableSessionId });
-			if (generation !== statusGeneration.current) return;
-			setContextStatus(status);
-			setSessionStatusPanel({ sessionId: writableSessionId, loading: false, status });
-		} catch (cause) {
-			if (generation !== statusGeneration.current) return;
-			setSessionStatusPanel({
-				sessionId: writableSessionId,
-				loading: false,
-				error: cause instanceof Error ? cause.message : "Session status could not be loaded.",
-			});
-		}
-	}, [api, contextStatus, requestComposerControl, writableSessionId]);
+		void openSessionStatus();
+	}, [closeSessionStatus, openSessionStatus, sessionStatusPanel, writableSessionId]);
 
 	const compactConversation = useCallback(async () => {
 		if (!writableSessionId || compactBlocked) return;
@@ -1829,12 +1844,12 @@ export function App({ api, store }: AppProps) {
 							)}
 								<Composer
 									appearance={visibleActiveSession.mode}
-									cacheHitPercent={activeSessionCacheHitPercent}
-									contextFillPercent={contextStatus && contextStatus.sessionId === visibleActiveSession.sessionId
-										? contextFillPercent(contextStatus)
+									contextUsageExpanded={sessionStatusPanel?.sessionId === visibleActiveSession.sessionId && !sessionStatusPanel.closing}
+									contextUsagePercent={contextStatus && contextStatus.sessionId === visibleActiveSession.sessionId
+										? contextUsagePercent(contextStatus)
 										: null}
-									onOpenContextUsage={writableSessionId ? () => void openSessionStatus() : undefined}
-								commandPanel={sessionStatusPanel?.sessionId === visibleActiveSession.sessionId ? <SessionStatusPanel error={sessionStatusPanel.error} loading={sessionStatusPanel.loading} onClose={closeSessionStatus} status={sessionStatusPanel.status} /> : undefined}
+									onOpenContextUsage={writableSessionId ? toggleSessionStatus : undefined}
+								commandPanel={sessionStatusPanel?.sessionId === visibleActiveSession.sessionId ? <SessionStatusPanel closing={sessionStatusPanel.closing} error={sessionStatusPanel.error} loading={sessionStatusPanel.loading} onClose={closeSessionStatus} status={sessionStatusPanel.status} /> : undefined}
 								commandRequest={{ id: composerControl.id, open: composerControl.target === "mcp" }}
 								disabled={!serverReady || state.syncStatus !== "ready" || compactingSession !== null}
 								disabledSlashCommands={disabledSlashCommands}

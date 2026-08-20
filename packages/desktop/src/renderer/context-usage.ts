@@ -1,9 +1,17 @@
-export function contextFillPercent(status: {
+export function contextUsagePercent(status: {
 	readonly contextTokens: number | null;
 	readonly contextWindow: number | null;
 }): number | null {
 	if (status.contextTokens === null || status.contextWindow === null || status.contextWindow <= 0) return null;
-	return Math.max(0, Math.min(100, (status.contextTokens / status.contextWindow) * 100));
+	return Math.max(0, (status.contextTokens / status.contextWindow) * 100);
+}
+
+export function contextFillPercent(status: {
+	readonly contextTokens: number | null;
+	readonly contextWindow: number | null;
+}): number | null {
+	const percent = contextUsagePercent(status);
+	return percent === null ? null : Math.min(100, percent);
 }
 
 export function formatContextTokens(count: number): string {
