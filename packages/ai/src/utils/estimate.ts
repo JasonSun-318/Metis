@@ -11,8 +11,9 @@ export interface ContextUsageEstimate {
 	lastUsageIndex: number | null;
 }
 
-const CHARS_PER_TOKEN = 4;
-const ESTIMATED_IMAGE_CHARS = 4800;
+const BYTES_PER_TOKEN = 4;
+const ESTIMATED_IMAGE_BYTES = 4800;
+const textEncoder = new TextEncoder();
 
 export function calculateContextTokens(usage: Usage): number {
 	return usage.totalTokens || usage.input + usage.output + usage.cacheRead + usage.cacheWrite;
@@ -26,38 +27,42 @@ function safeJsonStringify(value: unknown): string {
 	}
 }
 
-function estimateTextAndImageContentChars(content: string | Array<TextContent | ImageContent>): number {
-	if (typeof content === "string") return content.length;
+function utf8Bytes(text: string): number {
+	return textEncoder.encode(text).byteLength;
+}
 
-	let chars = 0;
-	for (const block of content) chars += block.type === "text" ? block.text.length : ESTIMATED_IMAGE_CHARS;
-	return chars;
+function estimateTextAndImageContentBytes(content: string | Array<TextContent | ImageContent>): number {
+	if (typeof content === "string") return utf8Bytes(content);
+
+	let bytes = 0;
+	for (const block of content) bytes += block.type === "text" ? utf8Bytes(block.text) : ESTIMATED_IMAGE_BYTES;
+	return bytes;
 }
 
 export function estimateTextTokens(text: string): number {
-	return Math.ceil(text.length / CHARS_PER_TOKEN);
+	return Math.ceil(utf8Bytes(text) / BYTES_PER_TOKEN);
 }
 
 export function estimateTextAndImageContentTokens(content: string | Array<TextContent | ImageContent>): number {
-	return Math.ceil(estimateTextAndImageContentChars(content) / CHARS_PER_TOKEN);
+	return Math.ceil(estimateTextAndImageContentBytes(content) / BYTES_PER_TOKEN);
 }
 
 export function estimateMessageTokens(message: Message): number {
-	let chars = 0;
+	let bytes = 0;
 
 	if (message.role === "user") return estimateTextAndImageContentTokens(message.content);
 	if (message.role === "toolResult") return estimateTextAndImageContentTokens(message.content);
 
 	for (const block of message.content) {
 		if (block.type === "text") {
-			chars += block.text.length;
+			bytes += utf8Bytes(block.text);
 		} else if (block.type === "thinking") {
-			chars += block.thinking.length;
+			bytes += utf8Bytes(block.thinking);
 		} else {
-			chars += block.name.length + safeJsonStringify(block.arguments).length;
+			bytes += utf8Bytes(block.name) + utf8Bytes(safeJsonStringify(block.arguments));
 		}
 	}
-	return Math.ceil(chars / CHARS_PER_TOKEN);
+	return Math.ceil(bytes / BYTES_PER_TOKEN);
 }
 
 function getLastAssistantUsageInfo(messages: readonly Message[]): { usage: Usage; index: number } | undefined {

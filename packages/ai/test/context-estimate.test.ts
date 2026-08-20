@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { buildBaseOptions } from "../src/api/simple-options.ts";
 import type { AssistantMessage, Context, Model, Usage } from "../src/types.ts";
-import { estimateContextTokens } from "../src/utils/estimate.ts";
+import { estimateContextTokens, estimateTextTokens } from "../src/utils/estimate.ts";
 
 function createUsage(totalTokens: number): Usage {
 	return {
@@ -41,6 +41,11 @@ const model: Model<"openai-responses"> = {
 };
 
 describe("context token estimation", () => {
+	it("uses UTF-8 bytes for the universal text estimate", () => {
+		expect(estimateTextTokens("abcd")).toBe(1);
+		expect(estimateTextTokens("中文")).toBe(2);
+	});
+
 	it("ignores stale assistant usage after a newer message is inserted before it", () => {
 		const context: Context = {
 			systemPrompt: "system",
