@@ -36,6 +36,8 @@ type FactRow = {
 
 export interface MemoryStore {
 	insertFact(fact: MemoryFact): void;
+	countFacts(): number;
+	runInTransaction(fn: () => void): void;
 	searchByEmbedding(query: Float32Array, options: MemorySearchOptions): MemorySearchHit[];
 	listActiveFacts(scope: MemoryScope, cwdKey: string | null, mode: string | null): MemoryFact[];
 	close(): void;
@@ -72,6 +74,8 @@ export function openMemoryStore(path: string): MemoryStore {
 		  AND mode IS ?
 	`);
 
+	const countAll = db.prepare(`SELECT COUNT(*) AS n FROM facts`);
+
 	function loadActiveRows(scope: MemoryScope, cwdKey: string | null, mode: string | null): FactRow[] {
 		if (scope === "global" || (cwdKey === null && mode === null)) {
 			return selectActiveGlobal.all(scope) as FactRow[];
@@ -94,6 +98,25 @@ export function openMemoryStore(path: string): MemoryStore {
 				fact.embedding ? embeddingToBlob(fact.embedding) : null,
 				fact.embeddingModel,
 			);
+		},
+
+		countFacts() {
+			return Number((countAll.get() as { n: number | bigint }).n);
+		},
+
+		runInTransaction(fn) {
+			db.exec("BEGIN IMMEDIATE");
+			try {
+				fn();
+				db.exec("COMMIT");
+			} catch (error) {
+				try {
+					db.exec("ROLLBACK");
+				} catch {
+					// Ignore rollback errors when the transaction never started.
+				}
+				throw error;
+			}
 		},
 
 		searchByEmbedding(query, options) {

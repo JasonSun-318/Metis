@@ -9,6 +9,7 @@ import {
 	replaceFileAtomicallySync,
 	syncDirectorySync,
 } from "./durable-file.ts";
+import { ingestMarkdownIfEmpty } from "./memory/memory-ingest.ts";
 
 export const AUTO_MEMORY_MAX_LINES = 200;
 export const AUTO_MEMORY_MAX_BYTES = 25 * 1024;
@@ -55,16 +56,18 @@ export function loadAutoMemory(agentDir: string, cwd: string, mode: AgentMode): 
 	};
 }
 
-/** Remove the obsolete cwd-shared project memory layout exactly once. */
+/** Remove the obsolete cwd-shared project memory layout exactly once, then ingest Markdown if needed. */
 export function ensureModeScopedMemoryLayout(agentDir: string): Promise<void> {
 	const memoryDir = getAutoMemoryRoot(agentDir);
 	const existing = migrations.get(memoryDir);
 	if (existing) return existing;
 
-	const migration = migrateModeScopedMemory(memoryDir).catch((error) => {
-		migrations.delete(memoryDir);
-		throw error;
-	});
+	const migration = migrateModeScopedMemory(memoryDir)
+		.then(() => ingestMarkdownIfEmpty(agentDir))
+		.catch((error) => {
+			migrations.delete(memoryDir);
+			throw error;
+		});
 	migrations.set(memoryDir, migration);
 	return migration;
 }
