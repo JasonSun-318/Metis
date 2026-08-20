@@ -666,6 +666,14 @@ export const WebSearchSettingsViewSchema = StrictObject({
 	authSource: Type.Optional(Type.Union([Type.Literal("stored"), Type.Literal("environment")])),
 });
 
+export const MemoryEngineSchema = Type.Union([Type.Literal("index"), Type.Literal("extract")]);
+export const MemorySettingsViewSchema = StrictObject({
+	autoMemoryEnabled: Type.Boolean(),
+	memoryEngine: MemoryEngineSchema,
+	memoryEmbeddingModel: Type.String({ maxLength: 512 }),
+	memoryRerankModel: Type.String({ maxLength: 512 }),
+});
+
 export const HookEventNameSchema = Type.Union([
 	Type.Literal("SessionStart"),
 	Type.Literal("UserPromptSubmit"),
@@ -1318,6 +1326,8 @@ export type ModelSettingsProviderView = Static<typeof ModelSettingsProviderViewS
 export type ModelSettingsView = Static<typeof ModelSettingsViewSchema>;
 export type WebSearchProvider = Static<typeof WebSearchProviderSchema>;
 export type WebSearchSettingsView = Static<typeof WebSearchSettingsViewSchema>;
+export type MemoryEngine = Static<typeof MemoryEngineSchema>;
+export type MemorySettingsView = Static<typeof MemorySettingsViewSchema>;
 export type VisionApiView = Static<typeof VisionApiViewSchema>;
 export type VisionSettingsView = Static<typeof VisionSettingsViewSchema>;
 export type HookEventNameView = Static<typeof HookEventNameSchema>;

@@ -497,6 +497,12 @@ export class ClientBroker {
 		this.register(DESKTOP_IPC_CHANNELS.updateWebSearchSettings, 1, async (_event, [input]) =>
 			this.clientCall("webSearch/update", input),
 		);
+		this.register(DESKTOP_IPC_CHANNELS.getMemorySettings, 1, async (_event, [input]) =>
+			this.clientCall("memory/get", input),
+		);
+		this.register(DESKTOP_IPC_CHANNELS.updateMemorySettings, 1, async (_event, [input]) =>
+			this.clientCall("memory/update", input),
+		);
 		this.register(DESKTOP_IPC_CHANNELS.listHooks, 1, async (_event, [input]) => this.clientCall("hooks/list", input));
 		this.register(DESKTOP_IPC_CHANNELS.upsertHook, 1, async (_event, [input]) =>
 			this.clientCall("hooks/upsert", input),

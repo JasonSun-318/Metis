@@ -40,6 +40,8 @@ import {
 	McpScopeViewSchema,
 	McpServerDetailViewSchema,
 	McpServerSummaryViewSchema,
+	MemoryEngineSchema,
+	MemorySettingsViewSchema,
 	ModelOptionViewSchema,
 	ModelSettingsViewSchema,
 	PermissionModeSchema,
@@ -695,6 +697,14 @@ export const WebSearchUpdateParamsSchema = StrictObject({
 	credential: CredentialMutationSchema,
 });
 
+export const MemoryGetParamsSchema = StrictObject({});
+export const MemoryUpdateParamsSchema = StrictObject({
+	autoMemoryEnabled: Type.Boolean(),
+	memoryEngine: MemoryEngineSchema,
+	memoryEmbeddingModel: Type.String({ maxLength: 512 }),
+	memoryRerankModel: Type.String({ maxLength: 512 }),
+});
+
 export const HooksListParamsSchema = StrictObject({});
 export const HooksUpsertParamsSchema = StrictObject({ hook: DeclarativeHookViewSchema });
 export const HooksDeleteParamsSchema = StrictObject({
@@ -909,6 +919,8 @@ export const ClientRequestMethods = {
 	"webSearch/get": method(WebSearchGetParamsSchema, WebSearchSettingsViewSchema),
 	"webSearch/credential/reveal": method(WebSearchCredentialRevealParamsSchema, WebSearchCredentialRevealResultSchema),
 	"webSearch/update": method(WebSearchUpdateParamsSchema, WebSearchSettingsViewSchema),
+	"memory/get": method(MemoryGetParamsSchema, MemorySettingsViewSchema),
+	"memory/update": method(MemoryUpdateParamsSchema, MemorySettingsViewSchema),
 	"hooks/list": method(HooksListParamsSchema, HooksListViewSchema),
 	"hooks/upsert": method(HooksUpsertParamsSchema, HooksListViewSchema),
 	"hooks/delete": method(HooksDeleteParamsSchema, HooksListViewSchema),

@@ -1,16 +1,17 @@
-import { ArrowLeft, ChartBar, Cpu, GearSix, Sparkle, UserCircle } from "@phosphor-icons/react";
+import { ArrowLeft, Brain, ChartBar, Cpu, GearSix, Sparkle, UserCircle } from "@phosphor-icons/react";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
 import type { GeneralPreferences } from "../general-preferences.ts";
 import type { AppTheme } from "../theme.ts";
 import { GeneralPanel } from "./GeneralPanel.tsx";
+import { MemorySettingsPanel } from "./MemorySettingsPanel.tsx";
 import { ModelSettingsPanel } from "./ModelSettingsPanel.tsx";
 import { PersonalizationPanel } from "./PersonalizationPanel.tsx";
 import { ProfilePanel } from "./ProfilePanel.tsx";
 import { UsagePanel } from "./UsagePanel.tsx";
 
-type SettingsPage = "general" | "personalization" | "profile" | "model" | "usage";
+type SettingsPage = "general" | "personalization" | "profile" | "model" | "memory" | "usage";
 
 export function SettingsDialog({ api, generalPreferences, onClose, onGeneralPreferencesChange, onThemeChange, serverReady, theme }: {
 	readonly api: MetisDesktopApi;
@@ -64,6 +65,7 @@ export function SettingsDialog({ api, generalPreferences, onClose, onGeneralPref
 		{ id: "personalization" as const, label: "Personalization", description: "Set instructions Metis keeps in mind across new tasks.", icon: Sparkle },
 		{ id: "profile" as const, label: "Profile", description: "Review your profile and activity at a glance.", icon: UserCircle },
 		{ id: "model" as const, label: "Model", description: "Configure model providers and defaults for new tasks.", icon: Cpu },
+		{ id: "memory" as const, label: "Memory", description: "Configure long-term memory and the index or extract engine.", icon: Brain },
 		{ id: "usage" as const, label: "Usage", description: "Review token usage across Chat and Code tasks.", icon: ChartBar },
 	];
 	const activePage = pages.find((item) => item.id === page)!;
@@ -113,6 +115,7 @@ export function SettingsDialog({ api, generalPreferences, onClose, onGeneralPref
 						{page === "profile" ? <ProfilePanel api={api} serverReady={serverReady} /> : null}
 						{page === "personalization" ? <PersonalizationPanel api={api} serverReady={serverReady} /> : null}
 						{page === "model" ? <ModelSettingsPanel api={api} serverReady={serverReady} /> : null}
+						{page === "memory" ? <MemorySettingsPanel api={api} serverReady={serverReady} /> : null}
 						{page === "usage" ? <UsagePanel api={api} serverReady={serverReady} /> : null}
 					</div>
 				</div>

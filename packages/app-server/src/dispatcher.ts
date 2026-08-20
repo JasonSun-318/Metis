@@ -11,6 +11,7 @@ import {
 import type { DurableSessionMutation, PreparedSessionMutation } from "./durable-mutation.ts";
 import type { HooksService } from "./hooks.ts";
 import type { InteractionBroker, InteractionPeer } from "./interactions.ts";
+import type { MemorySettingsService } from "./memory-settings.ts";
 import type { ModelSettingsService } from "./model-settings.ts";
 import type { PermissionRulesService } from "./permission-rules.ts";
 import type { PersonalizationService } from "./personalization.ts";
@@ -73,6 +74,7 @@ export class Dispatcher {
 	private readonly personalization: PersonalizationService;
 	private readonly permissionRules: PermissionRulesService;
 	private readonly webSearch: WebSearchService;
+	private readonly memorySettings: MemorySettingsService;
 	private readonly hooks: HooksService;
 	private readonly titleGenerator: SessionTitleGenerator;
 	private readonly titleJobs = new Set<string>();
@@ -89,6 +91,7 @@ export class Dispatcher {
 		personalization: PersonalizationService,
 		permissionRules: PermissionRulesService,
 		webSearch: WebSearchService,
+		memorySettings: MemorySettingsService,
 		hooks: HooksService,
 		titleGenerator: SessionTitleGenerator,
 	) {
@@ -102,6 +105,7 @@ export class Dispatcher {
 		this.personalization = personalization;
 		this.permissionRules = permissionRules;
 		this.webSearch = webSearch;
+		this.memorySettings = memorySettings;
 		this.hooks = hooks;
 		this.titleGenerator = titleGenerator;
 	}
@@ -483,6 +487,10 @@ export class Dispatcher {
 					await this.registry.refreshOpenWebSearchSettings();
 					return result;
 				});
+			case "memory/get":
+				return this.memorySettings.view();
+			case "memory/update":
+				return await this.replayMutation(request, async () => this.memorySettings.update(request.params));
 			case "hooks/list":
 				return this.hooks.view();
 			case "hooks/upsert":

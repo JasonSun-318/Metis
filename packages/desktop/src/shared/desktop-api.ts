@@ -70,6 +70,8 @@ export const DESKTOP_IPC_CHANNELS = {
 	getWebSearchSettings: "metis:get-web-search-settings",
 	revealWebSearchCredential: "metis:reveal-web-search-credential",
 	updateWebSearchSettings: "metis:update-web-search-settings",
+	getMemorySettings: "metis:get-memory-settings",
+	updateMemorySettings: "metis:update-memory-settings",
 	listHooks: "metis:list-hooks",
 	upsertHook: "metis:upsert-hook",
 	deleteHook: "metis:delete-hook",
@@ -499,6 +501,8 @@ export interface MetisDesktopApi {
 		input: ClientParams<"webSearch/credential/reveal">,
 	): Promise<ClientResult<"webSearch/credential/reveal">>;
 	updateWebSearchSettings(input: ClientParams<"webSearch/update">): Promise<ClientResult<"webSearch/update">>;
+	getMemorySettings(): Promise<ClientResult<"memory/get">>;
+	updateMemorySettings(input: ClientParams<"memory/update">): Promise<ClientResult<"memory/update">>;
 	listHooks(): Promise<ClientResult<"hooks/list">>;
 	upsertHook(input: ClientParams<"hooks/upsert">): Promise<ClientResult<"hooks/upsert">>;
 	deleteHook(input: ClientParams<"hooks/delete">): Promise<ClientResult<"hooks/delete">>;

@@ -26,6 +26,7 @@ import { CredentialCoordinator } from "./credential-coordinator.ts";
 import { Dispatcher } from "./dispatcher.ts";
 import { HooksService } from "./hooks.ts";
 import { InteractionBroker } from "./interactions.ts";
+import { MemorySettingsService } from "./memory-settings.ts";
 import { ModelSettingsService } from "./model-settings.ts";
 import type { OutboundQueueLimits } from "./outbound-queue.ts";
 import { PermissionRulesService } from "./permission-rules.ts";
@@ -103,6 +104,7 @@ export class AppServer {
 		const personalization = new PersonalizationService(options.agentDir);
 		const permissionRules = new PermissionRulesService(options.agentDir, this.catalog);
 		const webSearch = new WebSearchService({ settingsManager, authStorage });
+		const memorySettings = new MemorySettingsService({ settingsManager });
 		const hooks = new HooksService(options.agentDir);
 		this.registry = new SessionRegistry(
 			options.runtimeHost ??
@@ -127,6 +129,7 @@ export class AppServer {
 			personalization,
 			permissionRules,
 			webSearch,
+			memorySettings,
 			hooks,
 			options.titleGenerator ?? new DefaultSessionTitleGenerator({ modelRegistry, settingsManager }),
 		);

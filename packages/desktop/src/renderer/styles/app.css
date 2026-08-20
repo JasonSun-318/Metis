@@ -2026,6 +2026,9 @@ textarea { resize: none; }
 .web-search-api-key-reveal:disabled { cursor: default; opacity: .5; }
 .web-search-actions { min-height: 56px; margin: 0; padding: 10px 16px; }
 .web-search-message { margin: 0 16px 12px; }
+.memory-settings-warning { margin: 0 16px 12px; color: var(--text-09); }
+.memory-model-input { width: min(380px, 42vw); }
+.settings-page .memory-model-input input { width: 100%; }
 .web-search-toggle { position: relative; display: inline-flex !important; cursor: pointer; }
 .web-search-toggle input[type="checkbox"] { position: absolute; width: 1px; height: 1px; opacity: 0; }
 .web-search-toggle-track { position: relative; display: block; width: 36px; height: 22px; border: 1px solid var(--border-strong); border-radius: 999px; background: var(--surface-09); transition: background-color 140ms ease, border-color 140ms ease; }
@@ -2167,7 +2170,7 @@ textarea { resize: none; }
 	.general-setting-row { align-items: start; gap: 10px; padding: 14px 16px; grid-template-columns: minmax(0, 1fr); }
 	.general-setting-copy { padding: 0; }
 	.general-setting-control { justify-content: flex-start; }
-	.general-font-select, .web-search-provider-select, .web-search-api-key { width: 100%; }
+	.general-font-select, .web-search-provider-select, .web-search-api-key, .memory-model-input, .memory-engine-select { width: 100%; }
 }
 
 :root[data-motion="reduced"] *,

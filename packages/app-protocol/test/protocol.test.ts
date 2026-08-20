@@ -262,6 +262,31 @@ const scheduleCases = [
 		{ enabled: true, provider: "serpapi", authConfigured: true, authSource: "stored" },
 	],
 	[
+		"memory/get",
+		{},
+		{
+			autoMemoryEnabled: true,
+			memoryEngine: "index",
+			memoryEmbeddingModel: "",
+			memoryRerankModel: "",
+		},
+	],
+	[
+		"memory/update",
+		{
+			autoMemoryEnabled: true,
+			memoryEngine: "extract",
+			memoryEmbeddingModel: "openai/text-embedding-3-small",
+			memoryRerankModel: "",
+		},
+		{
+			autoMemoryEnabled: true,
+			memoryEngine: "extract",
+			memoryEmbeddingModel: "openai/text-embedding-3-small",
+			memoryRerankModel: "",
+		},
+	],
+	[
 		"hooks/list",
 		{},
 		{

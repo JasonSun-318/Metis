@@ -89,6 +89,12 @@ describe("SettingsDialog", () => {
 			updateModelSettings: vi.fn().mockResolvedValue(modelSettings),
 			testModelConnection: vi.fn(),
 			getWebSearchSettings: vi.fn().mockResolvedValue({ enabled: false, provider: "brave", authConfigured: false }),
+			getMemorySettings: vi.fn().mockResolvedValue({
+				autoMemoryEnabled: true,
+				memoryEngine: "index",
+				memoryEmbeddingModel: "",
+				memoryRerankModel: "",
+			}),
 		} as unknown as MetisDesktopApi;
 		const onClose = vi.fn();
 		const onGeneralPreferencesChange = vi.fn();
@@ -110,6 +116,7 @@ describe("SettingsDialog", () => {
 		await flush();
 		expect(api.getProfile).not.toHaveBeenCalled();
 		expect(api.getUsage).not.toHaveBeenCalled();
+		expect(api.getMemorySettings).not.toHaveBeenCalled();
 		await act(async () => button(container, "Profile").click());
 		await flush();
 		expect(api.getProfile).toHaveBeenCalledTimes(1);
@@ -120,6 +127,10 @@ describe("SettingsDialog", () => {
 		expect(pageScroll.scrollTop).toBe(0);
 		expect(api.getUsage).toHaveBeenCalledWith({ rangeDays: 30 });
 		expect(container.querySelector(".profile-panel")).toBeNull();
+		await act(async () => button(container, "Memory").click());
+		await flush();
+		expect(api.getMemorySettings).toHaveBeenCalledTimes(1);
+		expect(container.querySelector(".memory-settings-section")).not.toBeNull();
 		await act(async () => button(container, "Model").click());
 		await flush();
 		await act(async () => container.querySelector<HTMLButtonElement>(".model-provider-card")!.click());

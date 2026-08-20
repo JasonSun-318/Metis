@@ -136,6 +136,14 @@ const api = {
 		invoke(DESKTOP_IPC_CHANNELS.updateWebSearchSettings, "webSearch/update", input) as ReturnType<
 			MetisDesktopApi["updateWebSearchSettings"]
 		>,
+	getMemorySettings: () =>
+		invoke(DESKTOP_IPC_CHANNELS.getMemorySettings, "memory/get", {}) as ReturnType<
+			MetisDesktopApi["getMemorySettings"]
+		>,
+	updateMemorySettings: (input: ClientParams<"memory/update">) =>
+		invoke(DESKTOP_IPC_CHANNELS.updateMemorySettings, "memory/update", input) as ReturnType<
+			MetisDesktopApi["updateMemorySettings"]
+		>,
 	listHooks: () =>
 		invoke(DESKTOP_IPC_CHANNELS.listHooks, "hooks/list", {}) as ReturnType<MetisDesktopApi["listHooks"]>,
 	upsertHook: (input: ClientParams<"hooks/upsert">) =>

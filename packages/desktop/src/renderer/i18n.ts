@@ -105,6 +105,28 @@ const zhCN = {
 	Stop: "运行结束",
 	"Settings pages": "设置页面",
 	"Close settings": "关闭设置",
+	Memory: "记忆",
+	"Configure long-term memory and the index or extract engine.": "配置长期记忆以及 Index 或 Extract 引擎。",
+	"Memory settings": "记忆设置",
+	"Long-term memory": "长期记忆",
+	"Enable long-term memory": "启用长期记忆",
+	"Keep facts outside session history and inject them into new turns.": "将事实保存在会话历史之外，并在新回合中注入。",
+	"Memory engine": "记忆引擎",
+	"Index injects the memory catalog. Extract retrieves relevant facts for the current message.":
+		"Index 会注入记忆目录；Extract 会为当前消息检索相关事实。",
+	"Index (catalog)": "Index（目录注入）",
+	"Extract (retrieve)": "Extract（检索）",
+	"Embedding model": "嵌入模型",
+	"Required for Extract. Use provider/model, for example openai/text-embedding-3-small.":
+		"Extract 必需。使用 provider/model，例如 openai/text-embedding-3-small。",
+	"Rerank model": "重排模型",
+	"Optional. Improves Extract ranking when configured.": "可选。配置后可改善 Extract 的排序结果。",
+	"Set an embedding model before choosing Extract. Extract retrieves relevant facts; Index injects the memory catalog.":
+		"选择 Extract 前请先填写嵌入模型。Extract 检索相关事实；Index 注入记忆目录。",
+	"Extract requires an embedding model (provider/model) before it can be enabled.":
+		"启用 Extract 前必须配置嵌入模型（provider/model）。",
+	"Couldn’t load memory settings.": "无法加载记忆设置。",
+	"Couldn’t save memory settings.": "无法保存记忆设置。",
 	"Model defaults": "模型默认值",
 	"Configure model providers and defaults for new tasks.": "配置模型提供商和新任务的默认模型。",
 	"Choose the model and reasoning effort used for new tasks.": "选择新任务默认使用的模型与推理强度。",
