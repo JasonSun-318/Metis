@@ -153,6 +153,10 @@ export interface Settings {
 	themes?: string[]; // Array of local theme file paths or directories
 	enableSkillCommands?: boolean; // default: true - register skills as /skill:name commands
 	autoMemoryEnabled?: boolean; // default: true; global setting only
+	memoryEngine?: "index" | "extract"; // default: "index"; global setting only
+	// Task 9 will refuse setMemoryEngine("extract") without an embedding model; Task 4 only persists.
+	memoryEmbeddingModel?: string; // global setting only
+	memoryRerankModel?: string; // global setting only
 	terminal?: TerminalSettings;
 	enabledModels?: string[]; // Model patterns for cycling (same format as --models CLI flag)
 	doubleEscapeAction?: "fork" | "tree" | "none"; // Action for double-escape with empty editor (default: "tree")
@@ -1195,6 +1199,40 @@ export class SettingsManager {
 	setAutoMemoryEnabled(enabled: boolean): void {
 		this.globalSettings.autoMemoryEnabled = enabled;
 		this.markModified("autoMemoryEnabled");
+		this.save();
+	}
+
+	getMemoryEngine(): "index" | "extract" {
+		const engine = this.globalSettings.memoryEngine;
+		return engine === "extract" || engine === "index" ? engine : "index";
+	}
+
+	setMemoryEngine(engine: "index" | "extract" | string): void {
+		if (engine !== "index" && engine !== "extract") {
+			return;
+		}
+		this.globalSettings.memoryEngine = engine;
+		this.markModified("memoryEngine");
+		this.save();
+	}
+
+	getMemoryEmbeddingModel(): string | undefined {
+		return this.globalSettings.memoryEmbeddingModel;
+	}
+
+	setMemoryEmbeddingModel(model: string): void {
+		this.globalSettings.memoryEmbeddingModel = model;
+		this.markModified("memoryEmbeddingModel");
+		this.save();
+	}
+
+	getMemoryRerankModel(): string | undefined {
+		return this.globalSettings.memoryRerankModel;
+	}
+
+	setMemoryRerankModel(model: string): void {
+		this.globalSettings.memoryRerankModel = model;
+		this.markModified("memoryRerankModel");
 		this.save();
 	}
 

@@ -272,6 +272,25 @@ describe("SettingsManager", () => {
 			expect(manager.getAutoMemoryEnabled()).toBe(false);
 			expect(JSON.parse(readFileSync(join(agentDir, "settings.json"), "utf8")).autoMemoryEnabled).toBe(false);
 		});
+
+		it("defaults memoryEngine to index and persists extract", async () => {
+			const manager = SettingsManager.create(projectDir, agentDir);
+			expect(manager.getMemoryEngine()).toBe("index");
+			manager.setMemoryEngine("extract");
+			await manager.flush();
+			expect(JSON.parse(readFileSync(join(agentDir, "settings.json"), "utf8")).memoryEngine).toBe("extract");
+		});
+
+		it("stores embedding and rerank model ids", async () => {
+			const manager = SettingsManager.create(projectDir, agentDir);
+			expect(manager.getMemoryEmbeddingModel()).toBeUndefined();
+			manager.setMemoryEmbeddingModel("openai/text-embedding-3-small");
+			manager.setMemoryRerankModel("cohere/rerank-v3.5");
+			await manager.flush();
+			const json = JSON.parse(readFileSync(join(agentDir, "settings.json"), "utf8"));
+			expect(json.memoryEmbeddingModel).toBe("openai/text-embedding-3-small");
+			expect(json.memoryRerankModel).toBe("cohere/rerank-v3.5");
+		});
 	});
 
 	describe("theme setting", () => {
