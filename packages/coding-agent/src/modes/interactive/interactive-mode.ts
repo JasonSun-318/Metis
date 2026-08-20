@@ -82,7 +82,7 @@ import { configureHttpDispatcher, formatHttpIdleTimeoutMs } from "../../core/htt
 import { type AppKeybinding, KeybindingsManager } from "../../core/keybindings.ts";
 import { resolveMcpServerSettings } from "../../core/mcp/config.ts";
 import type { McpServerStatus } from "../../core/mcp/manager.ts";
-import type { DreamHistoryRecord } from "../../core/memory-dream.ts";
+import type { MemoryExtractRun } from "../../core/memory/memory-types.ts";
 import { createCompactionSummaryMessage } from "../../core/messages.ts";
 import { defaultModelPerProvider, findExactModelReferenceMatch, resolveModelScope } from "../../core/model-resolver.ts";
 import { DefaultPackageManager } from "../../core/package-manager.ts";
@@ -211,14 +211,10 @@ function formatDreamDuration(durationMs: number): string {
 	return durationMs < 1000 ? `${durationMs}ms` : `${(durationMs / 1000).toFixed(1)}s`;
 }
 
-function formatDreamHistoryLine(record: DreamHistoryRecord): string {
-	const scope = (label: string, result: DreamHistoryRecord["global"]): string => {
-		const symbol = result.status === "success" ? "✓" : result.status === "failed" ? "✗" : "–";
-		const changed = [...result.changes.created, ...result.changes.updated, ...result.changes.deleted].length;
-		const reason = result.reason ? ` · ${result.reason.slice(0, 160)}` : "";
-		return `  ${symbol} ${label} ${result.status} · ${changed} files · ${formatDreamDuration(result.durationMs)}${reason}`;
-	};
-	return `${record.completedAt} · ${record.mode} · ${record.trigger} · ${formatDreamDuration(record.durationMs)} · ${record.cwd}\n${scope("Global", record.global)}\n${scope("Project", record.project)}`;
+function formatMemoryExtractHistoryLine(record: MemoryExtractRun): string {
+	const symbol = record.status === "success" ? "✓" : record.status === "failed" ? "✗" : "–";
+	const reason = record.reason ? ` · ${record.reason.slice(0, 160)}` : "";
+	return `${record.startedAt} · ${record.trigger} · ${symbol} ${record.status}${reason}`;
 }
 
 const SCHEDULE_WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] as const;
@@ -5649,21 +5645,21 @@ export class InteractiveMode {
 	}
 
 	private handleDreamCommand(): void {
-		const snapshot = this.session.getDreamStatus(10);
+		const snapshot = this.session.getMemoryExtractStatus(10);
 		const lines = [
-			`${theme.bold("Dream")} ${snapshot.enabled ? theme.fg("success", "on") : theme.fg("muted", "off")}`,
+			`${theme.bold("Memory extract")} ${snapshot.enabled ? theme.fg("success", "on") : theme.fg("muted", "off")}`,
 		];
 		if (snapshot.active) {
 			const elapsed = Math.max(0, Date.now() - new Date(snapshot.active.startedAt).getTime());
 			lines.push(
-				`${theme.fg("warning", "running")} · ${snapshot.active.mode} · ${snapshot.active.trigger} · ${formatDreamDuration(elapsed)} · ${snapshot.active.cwd}`,
+				`${theme.fg("warning", "running")} · ${snapshot.active.extractMode} · ${snapshot.active.trigger} · ${formatDreamDuration(elapsed)} · ${snapshot.active.cwd}`,
 			);
 		} else {
 			lines.push(theme.fg("dim", "idle"));
 		}
 		lines.push("", theme.bold("Recent runs"));
-		if (snapshot.recent.length === 0) lines.push(theme.fg("dim", "No Dream history yet"));
-		else for (const record of snapshot.recent) lines.push(formatDreamHistoryLine(record));
+		if (snapshot.recent.length === 0) lines.push(theme.fg("dim", "No extract history yet"));
+		else for (const record of snapshot.recent) lines.push(formatMemoryExtractHistoryLine(record));
 		this.chatContainer.addChild(new Spacer(1));
 		this.chatContainer.addChild(new Text(lines.join("\n"), 1, 0));
 		this.ui.requestRender();

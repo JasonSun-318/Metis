@@ -9,7 +9,7 @@ import { serializeExtractEvidence } from "./memory-evidence.ts";
 import { writeProjection as writeProjectionDefault } from "./memory-projection.ts";
 import { type MemoryStore, openMemoryStore } from "./memory-store.ts";
 import { createCommitFactsTool, createReconcileFactsTool, type MemoryToolContext } from "./memory-tools.ts";
-import type { MemoryExtractRunStatus, MemoryFact } from "./memory-types.ts";
+import type { MemoryExtractRun, MemoryExtractRunStatus, MemoryFact } from "./memory-types.ts";
 
 export const DURABLE_MEMORY_INTENT_RE = /记住|以后|不要再|偏好|remember|always|never|prefer/i;
 
@@ -84,6 +84,22 @@ export interface MemoryExtractResult {
 	status: MemoryExtractRunStatus;
 	reason?: string;
 	runId: string;
+}
+
+export interface MemoryExtractActiveRun {
+	id: string;
+	sessionId: string;
+	mode: AgentMode;
+	extractMode: MemoryExtractMode;
+	cwd: string;
+	trigger: string;
+	startedAt: string;
+}
+
+export interface MemoryExtractStatusSnapshot {
+	enabled: boolean;
+	active?: MemoryExtractActiveRun;
+	recent: MemoryExtractRun[];
 }
 
 function toolNameForMode(mode: MemoryExtractMode): string {

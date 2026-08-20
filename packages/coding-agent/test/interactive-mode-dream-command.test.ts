@@ -6,42 +6,30 @@ import { initTheme } from "../src/modes/interactive/theme/theme.ts";
 describe("InteractiveMode /dream", () => {
 	beforeAll(() => initTheme("dark"));
 
-	it("shows active state and the latest ten metadata records", () => {
+	it("shows active extract state and recent runs", () => {
 		const addChild = vi.fn();
 		const requestRender = vi.fn();
-		const getDreamStatus = vi.fn(() => ({
+		const getMemoryExtractStatus = vi.fn(() => ({
 			enabled: true,
 			active: {
 				id: "active",
 				sessionId: "session",
 				mode: "chat" as const,
+				extractMode: "reconcile" as const,
 				cwd: "/Users/ent/Metis",
-				trigger: "manual" as const,
+				trigger: "manual",
 				startedAt: "2026-07-15T06:00:00.000Z",
 			},
 			recent: Array.from({ length: 10 }, (_, index) => ({
 				id: `run-${index}`,
-				sessionId: "session",
-				mode: "chat" as const,
-				cwd: "/Users/ent/Metis",
-				trigger: "threshold" as const,
 				startedAt: "2026-07-15T05:00:00.000Z",
-				completedAt: "2026-07-15T05:00:01.000Z",
-				durationMs: 1000,
-				global: {
-					status: "success" as const,
-					changes: { created: [], updated: ["MEMORY.md"], deleted: [] },
-					durationMs: 500,
-				},
-				project: {
-					status: "success" as const,
-					changes: { created: [], updated: ["project.md"], deleted: [] },
-					durationMs: 500,
-				},
+				trigger: "threshold",
+				status: "success" as const,
+				reason: null,
 			})),
 		}));
 		const context = {
-			session: { getDreamStatus },
+			session: { getMemoryExtractStatus },
 			chatContainer: { addChild },
 			ui: { requestRender },
 		};
@@ -49,7 +37,7 @@ describe("InteractiveMode /dream", () => {
 
 		handler.call(context);
 
-		expect(getDreamStatus).toHaveBeenCalledWith(10);
+		expect(getMemoryExtractStatus).toHaveBeenCalledWith(10);
 		expect(addChild).toHaveBeenCalledTimes(2);
 		const rendered = addChild.mock.calls
 			.map(([component]) => component as Component)

@@ -7,12 +7,7 @@ import { getModel } from "@metis/ai/compat";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AgentSession, type AgentSessionEvent } from "../src/core/agent-session.ts";
 import { AuthStorage } from "../src/core/auth-storage.ts";
-import type {
-	DreamHistoryRecord,
-	DreamRunStatus,
-	DreamScopeChanges,
-	MemoryDreamRunOptions,
-} from "../src/core/memory-dream.ts";
+import type { MemoryExtractResult, RunMemoryExtractOptions } from "../src/core/memory/memory-extract.ts";
 import { ModelRegistry } from "../src/core/model-registry.ts";
 import { SessionManager } from "../src/core/session-manager.ts";
 import { SettingsManager } from "../src/core/settings-manager.ts";
@@ -25,40 +20,19 @@ afterEach(() => {
 	for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
-function emptyChanges(): DreamScopeChanges {
-	return { created: [], updated: [], deleted: [] };
-}
-
-function dreamRecord(
-	status: DreamRunStatus,
-	cwd: string,
-	options: { reason?: string; changed?: boolean } = {},
-): DreamHistoryRecord {
-	const result = (file: "MEMORY.md" | "project.md") => ({
-		status,
-		changes: options.changed ? { created: [], updated: [file], deleted: [] } : emptyChanges(),
-		durationMs: 500,
-		...(options.reason ? { reason: options.reason } : {}),
-	});
+function extractResult(status: MemoryExtractResult["status"], options: { reason?: string } = {}): MemoryExtractResult {
 	return {
-		id: "dream-test",
-		sessionId: "session-test",
-		mode: "code",
-		cwd,
-		trigger: "manual",
-		startedAt: "2026-07-15T00:00:00.000Z",
-		completedAt: "2026-07-15T00:00:01.000Z",
-		durationMs: 1000,
-		global: result("MEMORY.md"),
-		project: result("project.md"),
+		status,
+		runId: "extract-test",
+		...(options.reason ? { reason: options.reason } : {}),
 	};
 }
 
-function setDreamRunner(
+function setExtractRunner(
 	session: AgentSession,
-	runner: (options: MemoryDreamRunOptions) => Promise<DreamHistoryRecord>,
+	runner: (options: RunMemoryExtractOptions) => Promise<MemoryExtractResult>,
 ): void {
-	(session as unknown as { _memoryDreamRunner: typeof runner })._memoryDreamRunner = runner;
+	(session as unknown as { _memoryExtractRunner: typeof runner })._memoryExtractRunner = runner;
 }
 
 function createCompactionSession(): {
@@ -67,7 +41,7 @@ function createCompactionSession(): {
 	cwd: string;
 	settingsManager: SettingsManager;
 } {
-	const root = mkdtempSync(join(tmpdir(), "metis-session-dream-"));
+	const root = mkdtempSync(join(tmpdir(), "metis-session-extract-"));
 	tempDirs.push(root);
 	const agentDir = join(root, "agent");
 	const cwd = join(root, "project");
@@ -143,38 +117,51 @@ function createCompactionSession(): {
 	return { session, events, cwd, settingsManager };
 }
 
-describe("AgentSession memory Dream", () => {
-	it("waits for Dream, exposes live status, and rejects overlapping compaction", async () => {
-		let finishDream!: (record: DreamHistoryRecord) => void;
-		const dreamPromise = new Promise<DreamHistoryRecord>((resolve) => {
-			finishDream = resolve;
+function scheduleThrottled(session: AgentSession): void {
+	(
+		session as unknown as {
+			_scheduleThrottledMemoryExtract: () => void;
+		}
+	)._scheduleThrottledMemoryExtract();
+}
+
+describe("AgentSession memory extract", () => {
+	it("waits for extract, exposes live status, and rejects overlapping compaction", async () => {
+		let finishExtract!: (result: MemoryExtractResult) => void;
+		const extractPromise = new Promise<MemoryExtractResult>((resolve) => {
+			finishExtract = resolve;
 		});
-		const runner = vi.fn(() => dreamPromise);
+		const runner = vi.fn((_options: RunMemoryExtractOptions) => extractPromise);
 		const { session, events, cwd } = createCompactionSession();
-		setDreamRunner(session, runner);
+		setExtractRunner(session, runner);
 
 		const compactPromise = session.compact();
 		await expect(session.compact()).rejects.toThrow("Compaction already in progress");
 		await vi.waitFor(() => expect(runner).toHaveBeenCalledOnce());
-		expect(session.getDreamStatus().active).toMatchObject({ cwd, mode: "code" });
+		expect(session.getMemoryExtractStatus().active).toMatchObject({
+			cwd,
+			mode: "code",
+			extractMode: "reconcile",
+		});
 		expect(events.some((event) => event.type === "compaction_end")).toBe(false);
 
-		finishDream(dreamRecord("success", cwd, { changed: true }));
+		finishExtract(extractResult("success"));
 		await compactPromise;
-		expect(session.getDreamStatus().active).toBeUndefined();
+		expect(session.getMemoryExtractStatus().active).toBeUndefined();
 		expect(events.filter((event) => event.type === "compaction_end")).toHaveLength(1);
 		session.dispose();
 	});
 
-	it("isolates Dream failures and excludes prior synthetic summaries", async () => {
-		const { session, cwd } = createCompactionSession();
-		const runner = vi.fn(async (_options: MemoryDreamRunOptions) =>
-			dreamRecord("failed", cwd, { reason: "invalid Dream JSON" }),
+	it("isolates extract failures and excludes prior synthetic summaries", async () => {
+		const { session } = createCompactionSession();
+		const runner = vi.fn(async (_options: RunMemoryExtractOptions) =>
+			extractResult("failed", { reason: "invalid extract payload" }),
 		);
-		setDreamRunner(session, runner);
+		setExtractRunner(session, runner);
 
 		await expect(session.compact()).resolves.toMatchObject({ summary: expect.stringContaining("compacted") });
 		const input = runner.mock.calls[0]![0];
+		expect(input.mode).toBe("reconcile");
 		expect(input.messages.length).toBeGreaterThan(0);
 		expect(input.transport).toBe("sse");
 		expect(JSON.stringify(input.messages)).not.toContain("previous-summary-marker");
@@ -184,10 +171,10 @@ describe("AgentSession memory Dream", () => {
 		session.dispose();
 	});
 
-	it("does not start Dream while long-term memory is off", async () => {
+	it("does not start extract while long-term memory is off", async () => {
 		const { session, settingsManager } = createCompactionSession();
-		const runner = vi.fn(async () => dreamRecord("success", "/project", { changed: true }));
-		setDreamRunner(session, runner);
+		const runner = vi.fn(async (_options: RunMemoryExtractOptions) => extractResult("success"));
+		setExtractRunner(session, runner);
 		settingsManager.setAutoMemoryEnabled(false);
 		settingsManager.applyOverrides({ compaction: { keepRecentTokens: 1 } });
 
@@ -196,14 +183,14 @@ describe("AgentSession memory Dream", () => {
 		session.dispose();
 	});
 
-	it("does not start Dream after compaction has already been cancelled", async () => {
+	it("does not start extract after compaction has already been cancelled", async () => {
 		const { session } = createCompactionSession();
-		const runner = vi.fn(async () => dreamRecord("success", "/project", { changed: true }));
+		const runner = vi.fn(async (_options: RunMemoryExtractOptions) => extractResult("success"));
 		const compactWork = vi.fn(async () => ({ summary: "should not run" }));
-		setDreamRunner(session, runner);
+		setExtractRunner(session, runner);
 		const controller = new AbortController();
 		controller.abort();
-		const compactWithDream = Reflect.get(session, "_compactWithDream") as (
+		const compactWithMemoryExtract = Reflect.get(session, "_compactWithMemoryExtract") as (
 			preparation: { messagesToSummarize: AgentMessage[]; turnPrefixMessages: AgentMessage[] },
 			reason: "manual",
 			signal: AbortSignal,
@@ -211,7 +198,7 @@ describe("AgentSession memory Dream", () => {
 		) => Promise<unknown>;
 
 		await expect(
-			compactWithDream.call(
+			compactWithMemoryExtract.call(
 				session,
 				{ messagesToSummarize: [], turnPrefixMessages: [] },
 				"manual",
@@ -224,10 +211,10 @@ describe("AgentSession memory Dream", () => {
 		session.dispose();
 	});
 
-	it.each(["threshold", "overflow"] as const)("runs Dream for %s auto-compaction", async (reason) => {
-		const { session, cwd } = createCompactionSession();
-		const runner = vi.fn(async (_options: MemoryDreamRunOptions) => dreamRecord("skipped", cwd));
-		setDreamRunner(session, runner);
+	it.each(["threshold", "overflow"] as const)("runs reconcile extract for %s auto-compaction", async (reason) => {
+		const { session } = createCompactionSession();
+		const runner = vi.fn(async (_options: RunMemoryExtractOptions) => extractResult("skipped"));
+		setExtractRunner(session, runner);
 		const runAutoCompaction = (
 			session as unknown as {
 				_runAutoCompaction: (trigger: "threshold" | "overflow", willRetry: boolean) => Promise<boolean>;
@@ -237,6 +224,7 @@ describe("AgentSession memory Dream", () => {
 		await runAutoCompaction(reason, reason === "overflow");
 
 		expect(runner).toHaveBeenCalledOnce();
+		expect(runner.mock.calls[0]![0].mode).toBe("reconcile");
 		expect(runner.mock.calls[0]![0].trigger).toBe(reason);
 		session.dispose();
 	});
@@ -256,6 +244,98 @@ describe("AgentSession memory Dream", () => {
 
 		controller.abort();
 		(session as unknown as { _compactionAbortController?: AbortController })._compactionAbortController = undefined;
+		session.dispose();
+	});
+
+	it("does not run throttled commit extract on the first three generic user turns", async () => {
+		const { session } = createCompactionSession();
+		const runner = vi.fn(async (_options: RunMemoryExtractOptions) => extractResult("success"));
+		setExtractRunner(session, runner);
+		session.agent.state.messages = [
+			{
+				role: "user",
+				content: [{ type: "text", text: "fix this" }],
+				timestamp: Date.now(),
+			},
+		];
+
+		scheduleThrottled(session);
+		scheduleThrottled(session);
+		scheduleThrottled(session);
+		await session.waitForMemoryExtract();
+		expect(runner).not.toHaveBeenCalled();
+		session.dispose();
+	});
+
+	it("runs throttled commit extract on the fourth user turn", async () => {
+		const { session } = createCompactionSession();
+		const runner = vi.fn(async (_options: RunMemoryExtractOptions) => extractResult("success"));
+		setExtractRunner(session, runner);
+		session.agent.state.messages = [
+			{
+				role: "user",
+				content: [{ type: "text", text: "fix this" }],
+				timestamp: Date.now(),
+			},
+		];
+
+		scheduleThrottled(session);
+		scheduleThrottled(session);
+		scheduleThrottled(session);
+		scheduleThrottled(session);
+		await vi.waitFor(() => expect(runner).toHaveBeenCalledOnce());
+		const input = runner.mock.calls[0]![0];
+		expect(input.mode).toBe("commit");
+		expect(input.trigger).toBe("turn");
+		await session.waitForMemoryExtract();
+		session.dispose();
+	});
+
+	it("runs throttled commit extract immediately on durable-intent user text", async () => {
+		const { session } = createCompactionSession();
+		const runner = vi.fn(async (_options: RunMemoryExtractOptions) => extractResult("success"));
+		setExtractRunner(session, runner);
+		session.agent.state.messages = [
+			{
+				role: "user",
+				content: [{ type: "text", text: "请记住以后用中文回复" }],
+				timestamp: Date.now(),
+			},
+		];
+
+		scheduleThrottled(session);
+		await vi.waitFor(() => expect(runner).toHaveBeenCalledOnce());
+		expect(runner.mock.calls[0]![0].mode).toBe("commit");
+		await session.waitForMemoryExtract();
+		session.dispose();
+	});
+
+	it("skips throttled commit extract while compact reconcile is running", async () => {
+		let finishExtract!: (result: MemoryExtractResult) => void;
+		const extractPromise = new Promise<MemoryExtractResult>((resolve) => {
+			finishExtract = resolve;
+		});
+		const runner = vi.fn((_options: RunMemoryExtractOptions) => extractPromise);
+		const { session } = createCompactionSession();
+		setExtractRunner(session, runner);
+
+		const compactPromise = session.compact();
+		await vi.waitFor(() => expect(runner).toHaveBeenCalledOnce());
+		expect(session.getMemoryExtractStatus().active?.extractMode).toBe("reconcile");
+
+		session.agent.state.messages = [
+			{
+				role: "user",
+				content: [{ type: "text", text: "请记住这个偏好" }],
+				timestamp: Date.now(),
+			},
+		];
+		scheduleThrottled(session);
+		expect(runner).toHaveBeenCalledOnce();
+
+		finishExtract(extractResult("success"));
+		await compactPromise;
+		await session.waitForMemoryExtract();
 		session.dispose();
 	});
 });

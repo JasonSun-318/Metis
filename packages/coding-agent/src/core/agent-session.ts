@@ -51,7 +51,7 @@ import { sleep } from "../utils/sleep.ts";
 import type { AgentMode } from "./agent-mode.ts";
 import { formatNoApiKeyFoundMessage, formatNoModelSelectedMessage } from "./auth-guidance.ts";
 import type { McpSecretCredential } from "./auth-storage.ts";
-import { type AutoMemorySnapshot, loadAutoMemory } from "./auto-memory.ts";
+import { type AutoMemorySnapshot, getMemorySqlitePath, loadAutoMemory } from "./auto-memory.ts";
 import { type BashResult, executeBashWithOperations } from "./bash-executor.ts";
 import { readBoundedUtf8FileSync } from "./bounded-text-file.ts";
 import {
@@ -126,13 +126,16 @@ import {
 	type McpServerStatus,
 } from "./mcp/index.ts";
 import {
-	type DreamActiveRun,
-	type DreamHistoryRecord,
-	type DreamStatusSnapshot,
-	type DreamTrigger,
-	readDreamHistory,
-	runMemoryDream,
-} from "./memory-dream.ts";
+	hasDurableMemoryIntent,
+	type MemoryExtractActiveRun,
+	type MemoryExtractMode,
+	type MemoryExtractResult,
+	type MemoryExtractStatusSnapshot,
+	type RunMemoryExtractOptions,
+	runMemoryExtract,
+} from "./memory/memory-extract.ts";
+import { openMemoryStore } from "./memory/memory-store.ts";
+import type { MemoryExtractRun } from "./memory/memory-types.ts";
 import type { BashExecutionMessage, CustomMessage } from "./messages.ts";
 import type { ModelRegistry } from "./model-registry.ts";
 import { isPermissionMode, narrowPermissionMode, type PermissionMode } from "./permission-mode.ts";
@@ -506,9 +509,11 @@ export class AgentSession {
 	private _compactionAbortController: AbortController | undefined = undefined;
 	private _autoCompactionAbortController: AbortController | undefined = undefined;
 	private _overflowRecoveryAttempted = false;
-	private _activeDream: DreamActiveRun | undefined;
-	private _dreamPromise: Promise<DreamHistoryRecord> | undefined;
-	private _memoryDreamRunner = runMemoryDream;
+	private _activeMemoryExtract: MemoryExtractActiveRun | undefined;
+	private _memoryExtractPromise: Promise<MemoryExtractResult> | undefined;
+	private _memoryExtractRunner = runMemoryExtract;
+	private _memoryExtractAbortController: AbortController | undefined;
+	private _userTurnsSinceExtract = 0;
 
 	// Branch summarization state
 	private _branchSummaryAbortController: AbortController | undefined = undefined;
@@ -2112,6 +2117,7 @@ export class AgentSession {
 					this.abortCompaction();
 					this.abortBranchSummary();
 					this.abortBash();
+					this._memoryExtractAbortController?.abort();
 					this.agent.abort();
 				} catch {
 					// Continue invalidating the session even if an abort hook throws.
@@ -2214,16 +2220,29 @@ export class AgentSession {
 		return this._agentDir ? loadAutoMemory(this._agentDir, this._cwd, this.mode) : undefined;
 	}
 
-	getDreamStatus(limit = 10): DreamStatusSnapshot {
+	getMemoryExtractStatus(limit = 10): MemoryExtractStatusSnapshot {
+		let recent: MemoryExtractRun[] = [];
+		if (this._agentDir) {
+			try {
+				const store = openMemoryStore(getMemorySqlitePath(this._agentDir));
+				try {
+					recent = store.listExtractRuns(limit);
+				} finally {
+					store.close();
+				}
+			} catch {
+				recent = [];
+			}
+		}
 		return {
 			enabled: this._includeAutoMemory && this.settingsManager.getAutoMemoryEnabled(),
-			active: this._activeDream ? { ...this._activeDream } : undefined,
-			recent: this._agentDir ? readDreamHistory(this._agentDir, limit) : [],
+			active: this._activeMemoryExtract ? { ...this._activeMemoryExtract } : undefined,
+			recent,
 		};
 	}
 
-	async waitForDream(): Promise<void> {
-		await this._dreamPromise?.catch(() => undefined);
+	async waitForMemoryExtract(): Promise<void> {
+		await this._memoryExtractPromise?.catch(() => undefined);
 	}
 
 	/** Current retry attempt (0 if not retrying) */
@@ -2983,7 +3002,11 @@ export class AgentSession {
 
 		// The agent loop drains both queues before emitting agent_end. Any messages
 		// here were queued by agent_end extension handlers and need a continuation.
-		return this.agent.hasQueuedMessages();
+		const hasQueuedMessages = this.agent.hasQueuedMessages();
+		if (!hasQueuedMessages && msg.stopReason !== "aborted") {
+			this._scheduleThrottledMemoryExtract();
+		}
+		return hasQueuedMessages;
 	}
 
 	/**
@@ -3832,9 +3855,127 @@ export class AgentSession {
 	// Compaction
 	// =========================================================================
 
-	private async _compactWithDream<T>(
+	private _lastUserMessageText(): string {
+		for (let i = this.agent.state.messages.length - 1; i >= 0; i--) {
+			const message = this.agent.state.messages[i];
+			if (message?.role === "user") {
+				return this._extractUserMessageText(message.content);
+			}
+		}
+		return "";
+	}
+
+	private _scheduleThrottledMemoryExtract(): void {
+		if (!this._includeAutoMemory || !this._agentDir || !this.settingsManager.getAutoMemoryEnabled() || !this.model) {
+			return;
+		}
+
+		this._userTurnsSinceExtract++;
+		const userText = this._lastUserMessageText();
+		if (this._userTurnsSinceExtract < 4 && !hasDurableMemoryIntent(userText)) {
+			return;
+		}
+
+		// Compact reconcile already covers uncompressed messages for this turn.
+		if (this._activeMemoryExtract?.extractMode === "reconcile") {
+			return;
+		}
+
+		// Coalesce an in-flight commit extract.
+		if (this._memoryExtractPromise && this._activeMemoryExtract?.extractMode === "commit") {
+			return;
+		}
+
+		const controller = new AbortController();
+		this._memoryExtractAbortController = controller;
+		void this._launchMemoryExtract({
+			mode: "commit",
+			trigger: "turn",
+			messages: this.agent.state.messages,
+			signal: controller.signal,
+		}).catch(() => undefined);
+	}
+
+	private _launchMemoryExtract(options: {
+		mode: MemoryExtractMode;
+		trigger: string;
+		messages: AgentMessage[];
+		signal: AbortSignal;
+	}): Promise<MemoryExtractResult> {
+		if (this._memoryExtractPromise && this._activeMemoryExtract?.extractMode === options.mode) {
+			return this._memoryExtractPromise;
+		}
+
+		const agentDir = this._agentDir;
+		const model = this.model;
+		if (!agentDir || !model) {
+			return Promise.resolve({
+				status: "skipped",
+				reason: "Memory extract unavailable",
+				runId: randomUUID(),
+			});
+		}
+
+		const active: MemoryExtractActiveRun = {
+			id: randomUUID(),
+			sessionId: this.sessionId,
+			mode: this.mode,
+			extractMode: options.mode,
+			cwd: this._cwd,
+			trigger: options.trigger,
+			startedAt: new Date().toISOString(),
+		};
+		this._activeMemoryExtract = active;
+
+		const thinkingLevel = this.thinkingLevel;
+		const streamFn = this.agent.streamFn;
+		const getApiKey = this.agent.getApiKey;
+		const transport = this.agent.transport;
+		const thinkingBudgets = this.agent.thinkingBudgets;
+		const maxRetryDelayMs = this.agent.maxRetryDelayMs;
+		const extractArgs: RunMemoryExtractOptions = {
+			mode: options.mode,
+			agentDir,
+			cwd: this._cwd,
+			agentMode: this.mode,
+			sessionId: this.sessionId,
+			messages: options.messages,
+			trigger: options.trigger,
+			signal: options.signal,
+			model,
+			thinkingLevel,
+			streamFn,
+			...(getApiKey ? { getApiKey } : {}),
+			transport,
+			...(thinkingBudgets ? { thinkingBudgets } : {}),
+			...(maxRetryDelayMs !== undefined ? { maxRetryDelayMs } : {}),
+		};
+
+		const extractPromise = Promise.resolve().then(() => this._memoryExtractRunner(extractArgs));
+		const tracked = extractPromise
+			.then((result) => {
+				if (result.status === "success") {
+					this._userTurnsSinceExtract = 0;
+					this.refreshSystemPrompt();
+				}
+				return result;
+			})
+			.finally(() => {
+				if (this._activeMemoryExtract?.id === active.id) this._activeMemoryExtract = undefined;
+				if (this._memoryExtractAbortController?.signal === options.signal) {
+					this._memoryExtractAbortController = undefined;
+				}
+			});
+		void tracked.catch(() => undefined);
+		this._memoryExtractPromise = tracked;
+		return tracked.finally(() => {
+			if (this._memoryExtractPromise === tracked) this._memoryExtractPromise = undefined;
+		});
+	}
+
+	private async _compactWithMemoryExtract<T>(
 		preparation: CompactionPreparation,
-		reason: DreamTrigger,
+		reason: "manual" | "threshold" | "overflow",
 		signal: AbortSignal,
 		compactWork: () => Promise<T>,
 	): Promise<T> {
@@ -3843,66 +3984,30 @@ export class AgentSession {
 			return compactWork();
 		}
 
-		const active: DreamActiveRun = {
-			id: randomUUID(),
-			sessionId: this.sessionId,
-			mode: this.mode,
-			cwd: this._cwd,
-			trigger: reason,
-			startedAt: new Date().toISOString(),
-		};
-		this._activeDream = active;
-		const agentDir = this._agentDir;
-		const model = this.model;
-		const thinkingLevel = this.thinkingLevel;
-		const streamFn = this.agent.streamFn;
-		const getApiKey = this.agent.getApiKey;
-		const transport = this.agent.transport;
-		const thinkingBudgets = this.agent.thinkingBudgets;
-		const maxRetryDelayMs = this.agent.maxRetryDelayMs;
 		const messages = [...preparation.messagesToSummarize, ...preparation.turnPrefixMessages];
-		const dreamPromise = Promise.resolve().then(() =>
-			this._memoryDreamRunner({
-				...active,
-				agentDir,
-				model,
-				thinkingLevel,
-				streamFn,
-				...(getApiKey ? { getApiKey } : {}),
-				transport,
-				...(thinkingBudgets ? { thinkingBudgets } : {}),
-				...(maxRetryDelayMs !== undefined ? { maxRetryDelayMs } : {}),
-				messages,
-				signal,
-			}),
-		);
-		const trackedDream = dreamPromise
-			.then((dream) => {
-				if (
-					dream.global.status === "success" ||
-					dream.project.status === "success" ||
-					dream.global.reason === "Memory changed while Dream was running" ||
-					dream.project.reason === "Memory changed while Dream was running"
-				) {
-					this.refreshSystemPrompt();
-				}
-				return dream;
-			})
-			.finally(() => {
-				if (this._activeDream?.id === active.id) this._activeDream = undefined;
-			});
-		void trackedDream.catch(() => undefined);
-		this._dreamPromise = trackedDream;
+
+		// Wait for an in-flight commit so we do not overlap modes on the same store.
+		if (this._memoryExtractPromise && this._activeMemoryExtract?.extractMode === "commit") {
+			await this._memoryExtractPromise.catch(() => undefined);
+		}
+
+		const trackedExtract =
+			this._memoryExtractPromise && this._activeMemoryExtract?.extractMode === "reconcile"
+				? this._memoryExtractPromise
+				: this._launchMemoryExtract({
+						mode: "reconcile",
+						trigger: reason,
+						messages,
+						signal,
+					});
 
 		try {
 			return await compactWork();
 		} finally {
 			try {
-				await trackedDream;
+				await trackedExtract;
 			} catch {
-				// Dream must never replace the Compact result.
-			} finally {
-				if (this._dreamPromise === trackedDream) this._dreamPromise = undefined;
+				// Extract must never replace the Compact result.
 			}
 		}
 	}
@@ -3963,7 +4068,7 @@ export class AgentSession {
 				}
 			}
 
-			const generated = await this._compactWithDream(
+			const generated = await this._compactWithMemoryExtract(
 				preparation,
 				"manual",
 				this._compactionAbortController.signal,
@@ -4228,7 +4333,7 @@ export class AgentSession {
 				}
 			}
 
-			const generated = await this._compactWithDream(
+			const generated = await this._compactWithMemoryExtract(
 				preparation,
 				reason,
 				this._autoCompactionAbortController.signal,

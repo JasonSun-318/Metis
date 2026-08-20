@@ -1106,7 +1106,7 @@ export class AgentSessionRuntime {
 			errors.push(error);
 		}
 		try {
-			await session.waitForDream();
+			await session.waitForMemoryExtract();
 		} catch (error) {
 			errors.push(error);
 		}
@@ -1584,7 +1584,7 @@ export class AgentSessionRuntime {
 		if (!this.shutdownAttempted) {
 			this.shutdownAttempted = true;
 			try {
-				await session.waitForDream();
+				await session.waitForMemoryExtract();
 			} catch (error) {
 				errors.push(error);
 			}
