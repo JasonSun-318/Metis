@@ -86,6 +86,13 @@ export interface BeforeQueueClearContext {
 	readonly items: readonly ReservedAgentQueueItem[];
 }
 
+/** Provider-ready context exposed after transforms and conversion complete. */
+export interface BeforeProviderRequestContext {
+	readonly model: Model<any>;
+	readonly agentMessages: readonly AgentMessage[];
+	readonly llmContext: Context;
+}
+
 /** A single tool call content block emitted by an assistant message. */
 export type AgentToolCall = Extract<AssistantMessage["content"][number], { type: "toolCall" }>;
 
@@ -289,7 +296,7 @@ export interface AgentLoopConfig extends SimpleStreamOptions {
 	 */
 	beforeQueueCommit?: (context: BeforeQueueCommitContext, signal?: AbortSignal) => Promise<void>;
 	/** Called after request preparation and immediately before the provider stream starts. */
-	beforeProviderRequest?: (signal?: AbortSignal) => Promise<void>;
+	beforeProviderRequest?: (context: BeforeProviderRequestContext, signal?: AbortSignal) => Promise<void>;
 
 	/**
 	 * Returns steering messages to inject into the conversation mid-run.

@@ -1,6 +1,7 @@
 import {
 	type AssistantMessage,
 	type AssistantMessageEvent,
+	type Context,
 	EventStream,
 	type Message,
 	type Model,
@@ -9,7 +10,14 @@ import {
 import { Type } from "typebox";
 import { describe, expect, it } from "vitest";
 import { agentLoop, agentLoopContinue, runAgentLoop } from "../src/agent-loop.ts";
-import type { AgentContext, AgentEvent, AgentLoopConfig, AgentMessage, AgentTool } from "../src/types.ts";
+import type {
+	AgentContext,
+	AgentEvent,
+	AgentLoopConfig,
+	AgentMessage,
+	AgentTool,
+	BeforeProviderRequestContext,
+} from "../src/types.ts";
 
 // Mock stream for testing - mimics MockAssistantStream
 class MockAssistantStream extends EventStream<AssistantMessageEvent, AssistantMessage> {
@@ -81,6 +89,52 @@ function identityConverter(messages: AgentMessage[]): Message[] {
 }
 
 describe("agentLoop with AgentMessage", () => {
+	it("passes the transformed and converted context before the provider request", async () => {
+		const base = createUserMessage("base");
+		const prompt = createUserMessage("prompt");
+		const injected = createUserMessage("injected");
+		const context: AgentContext = {
+			systemPrompt: "system prompt",
+			messages: [base],
+			tools: [],
+		};
+		let prepared: BeforeProviderRequestContext | undefined;
+
+		const config: AgentLoopConfig = {
+			model: createModel(),
+			transformContext: async (messages) => [...messages, injected],
+			convertToLlm: identityConverter,
+			beforeProviderRequest: async (value) => {
+				prepared = value;
+			},
+		};
+		const streamFn = (_model: Model<any>, llmContext: Context) => {
+			expect(prepared?.llmContext).toBe(llmContext);
+			const stream = new MockAssistantStream();
+			queueMicrotask(() => {
+				stream.push({
+					type: "done",
+					reason: "stop",
+					message: createAssistantMessage([{ type: "text", text: "ok" }]),
+				});
+			});
+			return stream;
+		};
+
+		const stream = agentLoop([prompt], context, config, undefined, streamFn);
+		for await (const _event of stream) {
+			// Drain the stream.
+		}
+
+		expect(prepared?.model.id).toBe("mock");
+		expect(prepared?.agentMessages).toEqual([base, prompt, injected]);
+		expect(prepared?.llmContext).toEqual({
+			systemPrompt: "system prompt",
+			messages: [base, prompt, injected],
+			tools: [],
+		});
+	});
+
 	it("should emit events with AgentMessage types", async () => {
 		const context: AgentContext = {
 			systemPrompt: "You are helpful.",

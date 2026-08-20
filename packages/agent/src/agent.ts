@@ -21,6 +21,7 @@ import type {
 	AgentQueueIdentity,
 	AgentState,
 	AgentTool,
+	BeforeProviderRequestContext,
 	BeforeQueueClearContext,
 	BeforeQueueCommitContext,
 	BeforeToolCallContext,
@@ -130,7 +131,7 @@ export interface AgentMandatoryRuntimeHooks {
 	beforeToolExecute?: (context: BeforeToolExecuteContext, signal?: AbortSignal) => Promise<void>;
 	beforeQueueCommit?: (context: BeforeQueueCommitContext, signal?: AbortSignal) => Promise<void>;
 	beforeQueueClear?: (context: BeforeQueueClearContext) => void;
-	beforeProviderRequest?: (signal?: AbortSignal) => Promise<void>;
+	beforeProviderRequest?: (context: BeforeProviderRequestContext, signal?: AbortSignal) => Promise<void>;
 }
 
 type ActiveRun = {
@@ -444,8 +445,8 @@ export class Agent {
 		await this.mandatoryRuntimeHooks?.beforeToolExecute?.(context, signal);
 	}
 
-	private async runBeforeProviderRequest(signal?: AbortSignal): Promise<void> {
-		await this.mandatoryRuntimeHooks?.beforeProviderRequest?.(signal);
+	private async runBeforeProviderRequest(context: BeforeProviderRequestContext, signal?: AbortSignal): Promise<void> {
+		await this.mandatoryRuntimeHooks?.beforeProviderRequest?.(context, signal);
 	}
 
 	private async consumeQueue(queue: PendingMessageQueue, signal: AbortSignal): Promise<AgentMessage[]> {
@@ -473,7 +474,7 @@ export class Agent {
 			beforeToolExecute: (context, signal) => this.runBeforeToolExecute(context, signal),
 			afterToolCall: this.afterToolCall,
 			beforeQueueCommit: (context, signal) => this.runBeforeQueueCommit(context, signal),
-			beforeProviderRequest: (signal) => this.runBeforeProviderRequest(signal),
+			beforeProviderRequest: (context, signal) => this.runBeforeProviderRequest(context, signal),
 			prepareNextTurn:
 				this.prepareNextTurnWithContext || this.prepareNextTurn
 					? async (context) => {

@@ -20,6 +20,7 @@ import type {
 	AgentTool,
 	AgentToolCall,
 	AgentToolResult,
+	BeforeProviderRequestContext,
 	StreamFn,
 } from "./types.ts";
 
@@ -351,8 +352,13 @@ async function streamAssistantResponse(
 	const resolvedApiKey =
 		(config.getApiKey ? await config.getApiKey(config.model.provider) : undefined) || config.apiKey;
 
+	const preparedContext: BeforeProviderRequestContext = {
+		model: config.model,
+		agentMessages: messages,
+		llmContext,
+	};
 	if (signal?.aborted) throw signal.reason ?? new Error("Operation aborted");
-	await config.beforeProviderRequest?.(signal);
+	await config.beforeProviderRequest?.(preparedContext, signal);
 	if (signal?.aborted) throw signal.reason ?? new Error("Operation aborted");
 	const response = await streamFunction(config.model, llmContext, {
 		...config,
