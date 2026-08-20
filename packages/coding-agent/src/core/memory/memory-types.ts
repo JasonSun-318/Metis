@@ -33,3 +33,14 @@ export interface MemorySearchHit {
 	topicFile: string;
 	createdAt: string;
 }
+
+export const MEMORY_EXTRACT_RUN_STATUSES = ["success", "failed", "skipped"] as const;
+export type MemoryExtractRunStatus = (typeof MEMORY_EXTRACT_RUN_STATUSES)[number];
+
+export interface MemoryExtractRun {
+	id: string;
+	startedAt: string;
+	trigger: string;
+	status: MemoryExtractRunStatus;
+	reason: string | null;
+}

@@ -1,7 +1,15 @@
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import type { MemoryFact, MemoryScope, MemorySearchHit, MemorySearchOptions } from "./memory-types.ts";
+import type {
+	MemoryExtractRun,
+	MemoryExtractRunStatus,
+	MemoryFact,
+	MemoryFactStatus,
+	MemoryScope,
+	MemorySearchHit,
+	MemorySearchOptions,
+} from "./memory-types.ts";
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS facts (
@@ -18,6 +26,15 @@ CREATE TABLE IF NOT EXISTS facts (
   embedding_model TEXT
 );
 CREATE INDEX IF NOT EXISTS facts_scope_status ON facts(scope, status, cwd_key, mode);
+
+CREATE TABLE IF NOT EXISTS extract_runs (
+  id TEXT PRIMARY KEY,
+  started_at TEXT NOT NULL,
+  trigger TEXT NOT NULL,
+  status TEXT NOT NULL,
+  reason TEXT
+);
+CREATE INDEX IF NOT EXISTS extract_runs_started ON extract_runs(started_at DESC);
 `;
 
 type FactRow = {
@@ -34,12 +51,27 @@ type FactRow = {
 	embedding_model: string | null;
 };
 
+type ExtractRunRow = {
+	id: string;
+	started_at: string;
+	trigger: string;
+	status: string;
+	reason: string | null;
+};
+
 export interface MemoryStore {
 	insertFact(fact: MemoryFact): void;
+	getFactById(id: string): MemoryFact | null;
+	updateFactStatus(id: string, status: MemoryFactStatus): void;
+	updateFactScope(id: string, scope: MemoryScope, cwdKey: string | null, mode: string | null): void;
+	deleteFact(id: string): void;
 	countFacts(): number;
 	runInTransaction(fn: () => void): void;
 	searchByEmbedding(query: Float32Array, options: MemorySearchOptions): MemorySearchHit[];
 	listActiveFacts(scope: MemoryScope, cwdKey: string | null, mode: string | null): MemoryFact[];
+	listFactsByStatus(status: MemoryFactStatus, limit: number): MemoryFact[];
+	recordExtractRun(run: MemoryExtractRun): void;
+	listExtractRuns(limit?: number): MemoryExtractRun[];
 	close(): void;
 }
 
@@ -55,6 +87,15 @@ export function openMemoryStore(path: string): MemoryStore {
 			id, scope, cwd_key, mode, topic_file, text, status, created_at, source_turn, embedding, embedding_model
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`);
+
+	const selectById = db.prepare(`
+		SELECT id, scope, cwd_key, mode, topic_file, text, status, created_at, source_turn, embedding, embedding_model
+		FROM facts
+		WHERE id = ?
+	`);
+
+	const updateStatus = db.prepare(`UPDATE facts SET status = ? WHERE id = ?`);
+	const updateScope = db.prepare(`UPDATE facts SET scope = ?, cwd_key = ?, mode = ? WHERE id = ?`);
 
 	const selectActiveGlobal = db.prepare(`
 		SELECT id, scope, cwd_key, mode, topic_file, text, status, created_at, source_turn, embedding, embedding_model
@@ -74,7 +115,27 @@ export function openMemoryStore(path: string): MemoryStore {
 		  AND mode IS ?
 	`);
 
+	const selectByStatus = db.prepare(`
+		SELECT id, scope, cwd_key, mode, topic_file, text, status, created_at, source_turn, embedding, embedding_model
+		FROM facts
+		WHERE status = ?
+		ORDER BY created_at DESC, id ASC
+		LIMIT ?
+	`);
+
 	const countAll = db.prepare(`SELECT COUNT(*) AS n FROM facts`);
+
+	const insertExtractRun = db.prepare(`
+		INSERT INTO extract_runs (id, started_at, trigger, status, reason)
+		VALUES (?, ?, ?, ?, ?)
+	`);
+
+	const listExtractRunsStmt = db.prepare(`
+		SELECT id, started_at, trigger, status, reason
+		FROM extract_runs
+		ORDER BY started_at DESC
+		LIMIT ?
+	`);
 
 	function loadActiveRows(scope: MemoryScope, cwdKey: string | null, mode: string | null): FactRow[] {
 		if (scope === "global" || (cwdKey === null && mode === null)) {
@@ -98,6 +159,23 @@ export function openMemoryStore(path: string): MemoryStore {
 				fact.embedding ? embeddingToBlob(fact.embedding) : null,
 				fact.embeddingModel,
 			);
+		},
+
+		getFactById(id) {
+			const row = selectById.get(id) as FactRow | undefined;
+			return row ? rowToFact(row) : null;
+		},
+
+		updateFactStatus(id, status) {
+			updateStatus.run(status, id);
+		},
+
+		updateFactScope(id, scope, cwdKey, mode) {
+			updateScope.run(scope, cwdKey, mode, id);
+		},
+
+		deleteFact(id) {
+			updateStatus.run("deleted" satisfies MemoryFactStatus, id);
 		},
 
 		countFacts() {
@@ -142,6 +220,24 @@ export function openMemoryStore(path: string): MemoryStore {
 
 		listActiveFacts(scope, cwdKey, mode) {
 			return loadActiveRows(scope, cwdKey, mode).map(rowToFact);
+		},
+
+		listFactsByStatus(status, limit) {
+			return (selectByStatus.all(status, Math.max(0, limit)) as FactRow[]).map(rowToFact);
+		},
+
+		recordExtractRun(run) {
+			insertExtractRun.run(run.id, run.startedAt, run.trigger, run.status, run.reason);
+		},
+
+		listExtractRuns(limit = 20) {
+			return (listExtractRunsStmt.all(Math.max(0, limit)) as ExtractRunRow[]).map((row) => ({
+				id: row.id,
+				startedAt: row.started_at,
+				trigger: row.trigger,
+				status: row.status as MemoryExtractRunStatus,
+				reason: row.reason,
+			}));
 		},
 
 		close() {
