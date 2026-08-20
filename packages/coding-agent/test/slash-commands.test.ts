@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getBuiltinSlashCommands } from "../src/core/slash-commands.ts";
+import { BUILTIN_SLASH_COMMANDS, getBuiltinSlashCommands } from "../src/core/slash-commands.ts";
 
 describe("mode-scoped built-in slash commands", () => {
 	it("shows directory commands only in Code mode", () => {
@@ -9,5 +9,11 @@ describe("mode-scoped built-in slash commands", () => {
 			expect(code).toContain(name);
 			expect(chat).not.toContain(name);
 		}
+	});
+
+	it("exposes /memory engine hint and drops /dream", () => {
+		const memory = BUILTIN_SLASH_COMMANDS.find((command) => command.name === "memory");
+		expect(memory?.argumentHint).toBe("[on|off|engine …]");
+		expect(BUILTIN_SLASH_COMMANDS.some((command) => command.name === "dream")).toBe(false);
 	});
 });

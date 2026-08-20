@@ -203,9 +203,11 @@ function isExpandable(obj: unknown): obj is Expandable {
 	return typeof obj === "object" && obj !== null && "setExpanded" in obj && typeof obj.setExpanded === "function";
 }
 
-const COMPACTION_SAFE_COMMANDS = new Set(["copy", "session", "hotkeys", "dream", "dirs", "quit", "debug"]);
+const COMPACTION_SAFE_COMMANDS = new Set(["copy", "session", "hotkeys", "dirs", "quit", "debug"]);
 const COMPACTION_WARNING =
 	"Compact/Memory extract is running. Wait for it to finish, then run the command again. Press Esc to cancel.";
+const MEMORY_COMMAND_USAGE = "Usage: /memory [on|off|engine …]";
+const DREAM_REMOVED_MESSAGE = "Dream was removed. Use /memory.";
 
 function formatMemoryExtractDuration(durationMs: number): string {
 	return durationMs < 1000 ? `${durationMs}ms` : `${(durationMs / 1000).toFixed(1)}s`;
@@ -2880,6 +2882,10 @@ export class InteractiveMode {
 
 	private routeCompactionInput(text: string, mode: "steer" | "followUp"): "not-compacting" | "handled" | "dispatch" {
 		if (!this.session.isCompacting) return "not-compacting";
+		if (text === "/dream" || text.startsWith("/dream ")) {
+			this.showWarning(DREAM_REMOVED_MESSAGE);
+			return "handled";
+		}
 		if (text === "/memory" || (text.startsWith("/") && COMPACTION_SAFE_COMMANDS.has(text.slice(1)))) {
 			return "dispatch";
 		}
@@ -3103,13 +3109,9 @@ export class InteractiveMode {
 				this.handleMemoryCommand(action);
 				return;
 			}
-			if (text === "/dream") {
+			if (text === "/dream" || text.startsWith("/dream ")) {
 				this.editor.setText("");
-				this.handleDreamCommand();
-				return;
-			}
-			if (text.startsWith("/dream ")) {
-				this.showWarning("Usage: /dream");
+				this.showWarning(DREAM_REMOVED_MESSAGE);
 				return;
 			}
 			if (text === "/schedule") {
@@ -5609,16 +5611,34 @@ export class InteractiveMode {
 	// =========================================================================
 
 	private handleMemoryCommand(action: string): void {
-		if (action && action !== "on" && action !== "off") {
-			this.showWarning("Usage: /memory [on|off]");
-			return;
-		}
-
-		if (action) {
+		if (action === "on" || action === "off") {
 			const enabled = action === "on";
 			this.settingsManager.setAutoMemoryEnabled(enabled);
 			this.session.refreshSystemPrompt();
 			this.showStatus(`Long-term memory ${enabled ? "enabled" : "disabled"}`);
+			return;
+		}
+
+		const engineMatch = /^engine(?:\s+(\S+))?$/.exec(action);
+		if (engineMatch) {
+			const engine = engineMatch[1];
+			if (engine !== "index" && engine !== "extract") {
+				this.showWarning(MEMORY_COMMAND_USAGE);
+				return;
+			}
+			try {
+				this.settingsManager.setMemoryEngine(engine);
+			} catch (error) {
+				this.showWarning(error instanceof Error ? error.message : String(error));
+				return;
+			}
+			this.session.refreshSystemPrompt();
+			this.showStatus(`Memory engine set to ${engine}`);
+			return;
+		}
+
+		if (action) {
+			this.showWarning(MEMORY_COMMAND_USAGE);
 			return;
 		}
 
@@ -5628,38 +5648,34 @@ export class InteractiveMode {
 			return;
 		}
 
+		const extract = this.session.getMemoryExtractStatus(10);
 		const state = (index: (typeof snapshot)["global"]): string => {
 			if (index.error) return theme.fg("warning", `unavailable: ${index.error}`);
 			if (!index.exists) return theme.fg("muted", "not created");
 			return index.truncated ? theme.fg("warning", "loaded (truncated)") : theme.fg("success", "loaded");
 		};
-		let info = `${theme.bold("Long-term memory")} ${
-			this.settingsManager.getAutoMemoryEnabled() ? theme.fg("success", "on") : theme.fg("muted", "off")
-		}\n`;
-		info += `${theme.fg("dim", "Global:")} ${snapshot.global.indexPath} ${state(snapshot.global)}\n`;
-		info += `${theme.fg("dim", "Project:")} ${snapshot.project.indexPath} ${state(snapshot.project)}\n`;
-		info += theme.fg("dim", "Use /reload after editing an index outside Metis.");
-		this.chatContainer.addChild(new Spacer(1));
-		this.chatContainer.addChild(new Text(info, 1, 0));
-		this.ui.requestRender();
-	}
-
-	private handleDreamCommand(): void {
-		const snapshot = this.session.getMemoryExtractStatus(10);
 		const lines = [
-			`${theme.bold("Memory extract")} ${snapshot.enabled ? theme.fg("success", "on") : theme.fg("muted", "off")}`,
+			`${theme.bold("Long-term memory")} ${
+				this.settingsManager.getAutoMemoryEnabled() ? theme.fg("success", "on") : theme.fg("muted", "off")
+			}`,
+			`${theme.fg("dim", "Engine:")} ${this.settingsManager.getMemoryEngine()}`,
+			`${theme.fg("dim", "Global:")} ${snapshot.global.indexPath} ${state(snapshot.global)}`,
+			`${theme.fg("dim", "Project:")} ${snapshot.project.indexPath} ${state(snapshot.project)}`,
+			"",
+			`${theme.bold("Memory extract")} ${extract.enabled ? theme.fg("success", "on") : theme.fg("muted", "off")}`,
 		];
-		if (snapshot.active) {
-			const elapsed = Math.max(0, Date.now() - new Date(snapshot.active.startedAt).getTime());
+		if (extract.active) {
+			const elapsed = Math.max(0, Date.now() - new Date(extract.active.startedAt).getTime());
 			lines.push(
-				`${theme.fg("warning", "running")} · ${snapshot.active.extractMode} · ${snapshot.active.trigger} · ${formatMemoryExtractDuration(elapsed)} · ${snapshot.active.cwd}`,
+				`${theme.fg("warning", "running")} · ${extract.active.extractMode} · ${extract.active.trigger} · ${formatMemoryExtractDuration(elapsed)} · ${extract.active.cwd}`,
 			);
 		} else {
 			lines.push(theme.fg("dim", "idle"));
 		}
 		lines.push("", theme.bold("Recent runs"));
-		if (snapshot.recent.length === 0) lines.push(theme.fg("dim", "No extract history yet"));
-		else for (const record of snapshot.recent) lines.push(formatMemoryExtractHistoryLine(record));
+		if (extract.recent.length === 0) lines.push(theme.fg("dim", "No extract history yet"));
+		else for (const record of extract.recent) lines.push(formatMemoryExtractHistoryLine(record));
+		lines.push("", theme.fg("dim", "Use /reload after editing an index outside Metis."));
 		this.chatContainer.addChild(new Spacer(1));
 		this.chatContainer.addChild(new Text(lines.join("\n"), 1, 0));
 		this.ui.requestRender();

@@ -1,51 +1,63 @@
-import type { Component } from "@metis/tui";
-import { beforeAll, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { InteractiveMode } from "../src/modes/interactive/interactive-mode.ts";
-import { initTheme } from "../src/modes/interactive/theme/theme.ts";
+
+type RouteResult = "not-compacting" | "handled" | "dispatch";
+type RouteContext = {
+	session: { isCompacting: boolean };
+	editor: { getText: () => string; setText: (text: string) => void };
+	takeClipboardInput: (text: string) => { text: string; images?: unknown[] };
+	queueCompactionMessage: (text: string, mode: "steer" | "followUp", images?: unknown[]) => void;
+	isExtensionCommand: (text: string) => boolean;
+	showWarning: (message: string) => void;
+};
 
 describe("InteractiveMode /dream", () => {
-	beforeAll(() => initTheme("dark"));
-
-	it("shows active extract state and recent runs", () => {
-		const addChild = vi.fn();
-		const requestRender = vi.fn();
-		const getMemoryExtractStatus = vi.fn(() => ({
-			enabled: true,
-			active: {
-				id: "active",
-				sessionId: "session",
-				mode: "chat" as const,
-				extractMode: "reconcile" as const,
-				cwd: "/Users/ent/Metis",
-				trigger: "manual",
-				startedAt: "2026-07-15T06:00:00.000Z",
-			},
-			recent: Array.from({ length: 10 }, (_, index) => ({
-				id: `run-${index}`,
-				startedAt: "2026-07-15T05:00:00.000Z",
-				trigger: "threshold",
-				status: "success" as const,
-				reason: null,
-			})),
-		}));
-		const context = {
-			session: { getMemoryExtractStatus },
-			chatContainer: { addChild },
-			ui: { requestRender },
+	it("tells the user Dream was removed", async () => {
+		const showWarning = vi.fn();
+		const editor = {
+			setText: vi.fn(),
+			getText: () => "/dream",
+			onSubmit: undefined as ((text: string) => Promise<void>) | undefined,
 		};
-		const handler = Reflect.get(InteractiveMode.prototype, "handleDreamCommand") as (this: typeof context) => void;
+		const mode = Object.assign(Object.create(InteractiveMode.prototype), {
+			defaultEditor: editor,
+			editor,
+			runtimeHost: { session: { isCompacting: false } },
+			showWarning,
+			showStatus: vi.fn(),
+			showError: vi.fn(),
+			isExtensionCommand: () => false,
+			takeClipboardInput: (text: string) => ({ text }),
+			queueCompactionMessage: vi.fn(),
+			updatePendingMessagesDisplay: vi.fn(),
+		});
 
-		handler.call(context);
+		(InteractiveMode.prototype as unknown as { setupEditorSubmitHandler(): void }).setupEditorSubmitHandler.call(
+			mode,
+		);
+		await editor.onSubmit?.("/dream");
 
-		expect(getMemoryExtractStatus).toHaveBeenCalledWith(10);
-		expect(addChild).toHaveBeenCalledTimes(2);
-		const rendered = addChild.mock.calls
-			.map(([component]) => component as Component)
-			.flatMap((component) => component.render(1000))
-			.join("\n");
-		expect(rendered).toContain("running");
-		expect(rendered).toContain("success");
-		expect(rendered).toContain("/Users/ent/Metis");
-		expect(requestRender).toHaveBeenCalled();
+		expect(showWarning).toHaveBeenCalledWith("Dream was removed. Use /memory.");
+		expect(editor.setText).toHaveBeenCalledWith("");
+	});
+
+	it("shows the removal message during compaction instead of queuing", () => {
+		const context: RouteContext = {
+			session: { isCompacting: true },
+			editor: { getText: () => "", setText: vi.fn() },
+			takeClipboardInput: (text) => ({ text }),
+			queueCompactionMessage: vi.fn(),
+			isExtensionCommand: () => false,
+			showWarning: vi.fn(),
+		};
+		const route = Reflect.get(InteractiveMode.prototype, "routeCompactionInput") as (
+			this: RouteContext,
+			text: string,
+			mode: "steer" | "followUp",
+		) => RouteResult;
+
+		expect(route.call(context, "/dream", "steer")).toBe("handled");
+		expect(context.showWarning).toHaveBeenCalledWith("Dream was removed. Use /memory.");
+		expect(context.queueCompactionMessage).not.toHaveBeenCalled();
 	});
 });
