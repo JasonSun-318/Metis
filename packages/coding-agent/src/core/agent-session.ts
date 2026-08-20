@@ -589,6 +589,7 @@ export class AgentSession {
 	private _runtimeShellCommandPrefix?: string;
 	private readonly _ultraAvailable: boolean;
 	private readonly _includeAutoMemory: boolean;
+	private _autoMemoryRetrieved: Array<{ scope: "global" | "project"; text: string }> = [];
 	private readonly _permissionModeCeiling?: () => PermissionMode;
 	private readonly _unattendedExecution?: UnattendedExecutionProfile;
 	private _additionalSystemPrompt?: string | (() => string | undefined);
@@ -2660,6 +2661,8 @@ export class AgentSession {
 			this._includeAutoMemory && this.settingsManager.getAutoMemoryEnabled()
 				? this.getAutoMemorySnapshot()
 				: undefined;
+		const autoMemoryEngine = autoMemory ? this.settingsManager.getMemoryEngine() : undefined;
+		const autoMemoryRetrieved = autoMemory && autoMemoryEngine === "extract" ? this._autoMemoryRetrieved : undefined;
 
 		this._baseSystemPromptOptions = {
 			cwd: this._cwd,
@@ -2672,6 +2675,8 @@ export class AgentSession {
 			toolSnippets,
 			promptGuidelines,
 			autoMemory,
+			autoMemoryEngine,
+			autoMemoryRetrieved,
 		};
 		const built = buildSystemPromptWithParts(this._baseSystemPromptOptions);
 		const parts = [...built.parts];

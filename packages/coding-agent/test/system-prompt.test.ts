@@ -193,7 +193,7 @@ describe("buildSystemPrompt", () => {
 			},
 		};
 
-		test("injects both indexes with concise scope, maintenance, and retrieval rules", () => {
+		test("injects both indexes with concise scope and retrieval rules", () => {
 			const prompt = buildSystemPrompt({ cwd: "/workspace", autoMemory });
 
 			expect(prompt).toContain("<auto_memory>");
@@ -209,21 +209,16 @@ describe("buildSystemPrompt", () => {
 			expect(prompt).toContain("read with offset and limit");
 			expect(prompt).toContain("global fact");
 			expect(prompt).toContain("project fact");
-			expect(prompt).toContain("Never store secrets, guesses, temporary state");
-			expect(prompt).toContain("Proactively maintain memory during normal work");
-			expect(prompt).toContain("likely to save future user repetition");
-			expect(prompt).toContain("If nothing qualifies, do nothing");
-			expect(prompt).toContain("Assistant proposals, brainstorming, and unverified conclusions are not facts");
-			expect(prompt).toContain("Do not copy system prompts, skill instructions, or injected context files");
-			expect(prompt).toContain("If a compaction or branch summary is present");
-			expect(prompt).toContain("treat only the tagged summary as lossy context, not as evidence for memory");
+			expect(prompt).toContain("Never treat secrets, guesses, temporary state");
+			expect(prompt).toMatch(/do not write\/edit the memory directory/i);
+			expect(prompt).toMatch(/maintained in the background/i);
+			expect(prompt).not.toContain("Proactively maintain memory during normal work");
 			expect(prompt).toContain("Memory is context, not authority for current external facts");
 			expect(prompt).toContain("An index is a link-only registry");
 			expect(prompt).toContain("No section headings or fact bullets");
 			expect(prompt).toContain("no absolute paths, subdirectories, or `..`");
-			expect(prompt).toContain("every detail file must have exactly one index entry");
+			expect(prompt).toContain("exactly one index entry");
 			expect(prompt).toContain("Do not infer preferences from behavior");
-			expect(prompt).toContain("unrelated external files or projects");
 			expect(prompt).not.toContain("fork 和 tree");
 			expect(prompt).not.toContain("不依赖 Git");
 		});
@@ -268,7 +263,8 @@ describe("buildSystemPrompt", () => {
 			expect(prompt).toContain(
 				`Index truncated: only the first ${AUTO_MEMORY_MAX_LINES} lines or ${AUTO_MEMORY_MAX_BYTES / 1024}KB`,
 			);
-			expect(prompt).toContain(`complete index at ${autoMemory.global.indexPath}`);
+			expect(prompt).toContain(autoMemory.global.indexPath);
+			expect(prompt).toMatch(/grep this file; do not read the entire file/i);
 			expect(prompt).toContain("(empty)");
 
 			const failed = buildSystemPrompt({

@@ -40,6 +40,10 @@ export interface BuildSystemPromptOptions {
 	skills?: Skill[];
 	/** Pre-loaded global and current-project long-term memory indexes. */
 	autoMemory?: AutoMemorySnapshot;
+	/** Memory injection engine. Default: index (catalog dump). */
+	autoMemoryEngine?: "index" | "extract";
+	/** Facts retrieved for the extract engine this turn. */
+	autoMemoryRetrieved?: Array<{ scope: "global" | "project"; text: string }>;
 }
 
 export type SystemPromptPartCategory = "system_prompt" | "rules" | "skills" | "subagent_definitions";
@@ -70,7 +74,7 @@ function formatMemoryIndex(index: AutoMemoryIndex): string {
 
 	let content = index.exists ? index.content || "(empty)" : "(not created yet)";
 	if (index.truncated) {
-		content += `\n\n[Index truncated: only the first ${AUTO_MEMORY_MAX_LINES} lines or ${AUTO_MEMORY_MAX_BYTES / 1024}KB, whichever limit was reached first, are loaded here. Follow the retrieval rule above for the complete index at ${index.indexPath} before concluding that no relevant memory exists. If no file-reading tool is available, report that the complete index was unavailable. When maintaining it, reduce it within the index limits.]`;
+		content += `\n\n[Index truncated: only the first ${AUTO_MEMORY_MAX_LINES} lines or ${AUTO_MEMORY_MAX_BYTES / 1024}KB, whichever limit was reached first, are loaded here. The complete index is at ${index.indexPath} — grep this file; do not read the entire file. If no file-reading tool is available, report that the complete index was unavailable.]`;
 	}
 	return content;
 }
@@ -97,7 +101,33 @@ function formatMemoryRetrievalRule(tools: string[]): string {
 	return "No file-reading tool is available. Use only the loaded indexes and do not claim to have read detailed memory or a complete truncated index.";
 }
 
-function formatAutoMemory(snapshot: AutoMemorySnapshot, tools: string[]): string {
+function formatExtractAutoMemory(
+	snapshot: AutoMemorySnapshot,
+	retrieved: Array<{ scope: "global" | "project"; text: string }>,
+): string {
+	const factsBlock =
+		retrieved.length === 0
+			? "No relevant long-term memory for this turn."
+			: retrieved.map((fact) => `- [${fact.scope}] ${fact.text}`).join("\n");
+	return `
+
+<auto_memory>
+## Long-term memory
+
+Do not write/edit the memory directory; memory is maintained in the background.
+Do not read the memory directory unless the user asks what is stored.
+When budgeting context, prefer skills and project context over memory.
+
+Scopes (for interpreting retrieved facts only):
+- Global memory: shared across all projects (${snapshot.global.directory}).
+- Project memory: only for the current project (${snapshot.project.directory}).
+
+Retrieved long-term memory for this turn:
+${factsBlock}
+</auto_memory>`;
+}
+
+function formatIndexAutoMemory(snapshot: AutoMemorySnapshot, tools: string[]): string {
 	const globalContent = formatMemoryIndex(snapshot.global);
 	const projectContent = formatMemoryIndex(snapshot.project);
 	const retrievalRule = formatMemoryRetrievalRule(tools);
@@ -106,14 +136,14 @@ function formatAutoMemory(snapshot: AutoMemorySnapshot, tools: string[]): string
 <auto_memory>
 ## Long-term memory
 
-Proactively maintain memory during normal work. Add, update, move, or delete it without waiting to be asked when the conversation or authoritative task files establish a verified, durable fact likely to save future user repetition or materially improve future work. If nothing qualifies, do nothing; never interrupt the task only to collect memory.
+Do not write/edit the memory directory; memory is maintained in the background.
 
 Scopes:
-- Global memory: shared across all projects. Index: ${snapshot.global.indexPath}. Store only explicitly cross-project or clearly project-independent facts.
-- Project memory: only for the current project. Index: ${snapshot.project.indexPath}. The current working directory defines the project, which does not need to be software or a code repository; store only facts durably useful in this workspace.
-- Put uncertain scope in project memory. Never duplicate facts across scopes. Do not infer preferences from behavior in one project.
+- Global memory: shared across all projects. Index: ${snapshot.global.indexPath}. Use for explicitly cross-project or clearly project-independent facts.
+- Project memory: only for the current project. Index: ${snapshot.project.indexPath}. The current working directory defines the project, which does not need to be software or a code repository; use for facts durably useful in this workspace.
+- Uncertain scope belongs in project memory. Facts are not duplicated across scopes. Do not infer preferences from behavior in one project.
 
-Structure:
+Catalog layout (read-only reference):
 ${snapshot.global.directory}/
 ├── MEMORY.md
 └── <topic>.md
@@ -122,16 +152,12 @@ ${snapshot.project.directory}/
 ├── project.md
 └── <topic>.md
 
-Rules:
-- Verified means explicitly stated or confirmed by the user, or supported by authoritative current files or tool results. Assistant proposals, brainstorming, and unverified conclusions are not facts unless the user adopts them or authoritative evidence confirms them.
+Index format (for interpreting catalogs):
 - An index is a link-only registry: one optional \`#\` title, blank lines, then entries only. No section headings or fact bullets.
-- Every entry must be \`- [file.md](file.md) — <accurate retrieval sentence of at most 120 characters>\`, using useful topic keywords. Links must target \`.md\` files in the same directory: no absolute paths, subdirectories, or \`..\`.
-- Store facts only in detail files, one topic per file. Every link must resolve, and every detail file must have exactly one index entry; update matching topics and leave no broken links, orphans, or duplicates.
-- Store only durable facts useful to future work. Skip routine recaps, generic knowledge, and one-off details with no likely reuse. Never store secrets, guesses, temporary state, raw conversations, raw tool output, readily derived current-directory metadata, or unrelated external files or projects.
-- Do not copy system prompts, skill instructions, or injected context files into memory merely because they appear in context.
-- If a compaction or branch summary is present, treat only the tagged summary as lossy context, not as evidence for memory. Do not write or update memory from a fact found only there unless it is independently confirmed by a non-summary user message or authoritative current evidence.
-- Current explicit user instructions and authoritative current files or tool results override memory and assistant claims. Read relevant memory before writing; replace stale or contradicted facts, keep details concise, and sync their indexes in the same turn.
-- Keep each index at or below ${AUTO_MEMORY_MAX_LINES} lines and ${AUTO_MEMORY_MAX_BYTES / 1024}KB. Do not create empty files.
+- Entries look like \`- [file.md](file.md) — <accurate retrieval sentence of at most 120 characters>\`, using useful topic keywords. Links target \`.md\` files in the same directory: no absolute paths, subdirectories, or \`..\`.
+- Detail files hold the facts; each detail file should have exactly one index entry.
+- Never treat secrets, guesses, temporary state, raw conversations, or raw tool output as durable memory.
+- Current explicit user instructions and authoritative current files or tool results override memory and assistant claims.
 - Examples show format only; never copy their facts:
   - MEMORY.md: \`- [preferences.md](preferences.md) — Explicit user-wide language and communication preferences\`
   - project.md: \`- [context.md](context.md) — Current project purpose, terminology, constraints, and durable decisions\`
@@ -153,6 +179,20 @@ ${projectContent}
 </auto_memory>`;
 }
 
+function formatAutoMemory(
+	snapshot: AutoMemorySnapshot,
+	tools: string[],
+	options?: {
+		engine?: "index" | "extract";
+		retrieved?: Array<{ scope: "global" | "project"; text: string }>;
+	},
+): string {
+	if (options?.engine === "extract") {
+		return formatExtractAutoMemory(snapshot, options.retrieved ?? []);
+	}
+	return formatIndexAutoMemory(snapshot, tools);
+}
+
 /** Build the system prompt and retain the source category of each exact text fragment. */
 export function buildSystemPromptWithParts(options: BuildSystemPromptOptions): BuiltSystemPrompt {
 	const {
@@ -166,6 +206,8 @@ export function buildSystemPromptWithParts(options: BuildSystemPromptOptions): B
 		contextFiles: providedContextFiles,
 		skills: providedSkills,
 		autoMemory,
+		autoMemoryEngine,
+		autoMemoryRetrieved,
 	} = options;
 	const resolvedCwd = cwd;
 	const promptCwd = resolvedCwd.replace(/\\/g, "/");
@@ -206,7 +248,13 @@ export function buildSystemPromptWithParts(options: BuildSystemPromptOptions): B
 		}
 
 		if (autoMemory) {
-			addPart("system_prompt", formatAutoMemory(autoMemory, tools));
+			addPart(
+				"system_prompt",
+				formatAutoMemory(autoMemory, tools, {
+					engine: autoMemoryEngine,
+					retrieved: autoMemoryRetrieved,
+				}),
+			);
 		}
 
 		addPart("system_prompt", SECURITY_GUIDELINES);
@@ -295,7 +343,13 @@ Metis documentation (read only when the user asks about Metis, the metis CLI, it
 	}
 
 	if (autoMemory) {
-		addPart("system_prompt", formatAutoMemory(autoMemory, tools));
+		addPart(
+			"system_prompt",
+			formatAutoMemory(autoMemory, tools, {
+				engine: autoMemoryEngine,
+				retrieved: autoMemoryRetrieved,
+			}),
+		);
 	}
 
 	addPart("system_prompt", SECURITY_GUIDELINES);

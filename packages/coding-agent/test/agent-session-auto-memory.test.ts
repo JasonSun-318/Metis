@@ -117,4 +117,45 @@ describe("AgentSession auto memory", () => {
 			session.dispose();
 		}
 	});
+
+	it("uses index catalog by default and extract retrieved stubs when engine is extract", async () => {
+		const root = makeTemp();
+		const agentDir = join(root, "agent");
+		const cwd = join(root, "project");
+		mkdirSync(cwd, { recursive: true });
+		await ensureModeScopedMemoryLayout(agentDir);
+		const paths = getAutoMemoryPaths(agentDir, cwd, "code");
+		mkdirSync(dirname(paths.global.indexPath), { recursive: true });
+		mkdirSync(dirname(paths.project.indexPath), { recursive: true });
+		writeFileSync(paths.global.indexPath, "index-engine-catalog-marker");
+		writeFileSync(paths.project.indexPath, "project-catalog-marker");
+
+		const settingsManager = SettingsManager.inMemory({
+			autoMemoryEnabled: true,
+			memoryEngine: "index",
+			memoryEmbeddingModel: "openai/text-embedding-3-small",
+		});
+		const { session } = await createAgentSession({
+			agentDir,
+			cwd,
+			settingsManager,
+			model: getModel("anthropic", "claude-sonnet-4-5")!,
+		});
+		try {
+			expect(session.systemPrompt).toContain("<global_memory_index>");
+			expect(session.systemPrompt).toContain("index-engine-catalog-marker");
+			expect(session.systemPrompt).toMatch(/maintained in the background/i);
+			expect(session.systemPrompt).not.toContain("Proactively maintain memory during normal work");
+
+			settingsManager.setMemoryEngine("extract");
+			session.refreshSystemPrompt();
+			expect(session.systemPrompt).toContain("<auto_memory>");
+			expect(session.systemPrompt).toContain("No relevant long-term memory for this turn.");
+			expect(session.systemPrompt).not.toContain("<global_memory_index>");
+			expect(session.systemPrompt).not.toContain("index-engine-catalog-marker");
+			expect(session.systemPrompt).toMatch(/do not read the memory directory unless the user asks what is stored/i);
+		} finally {
+			session.dispose();
+		}
+	});
 });
