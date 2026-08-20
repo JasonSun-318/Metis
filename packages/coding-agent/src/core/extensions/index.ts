@@ -47,6 +47,9 @@ export type {
 	// Event Results
 	ContextEventResult,
 	ContextUsage,
+	ContextUsageBasis,
+	ContextUsageBreakdownItem,
+	ContextUsageCategory,
 	CustomToolCallEvent,
 	CustomToolResultEvent,
 	EditorFactory,

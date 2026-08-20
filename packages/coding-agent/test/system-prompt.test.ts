@@ -1,8 +1,20 @@
 import { describe, expect, test } from "vitest";
 import { AUTO_MEMORY_MAX_BYTES, AUTO_MEMORY_MAX_LINES, type AutoMemorySnapshot } from "../src/core/auto-memory.ts";
-import { buildSystemPrompt } from "../src/core/system-prompt.ts";
+import { buildSystemPrompt, buildSystemPromptWithParts, formatProjectContext } from "../src/core/system-prompt.ts";
 
 describe("buildSystemPrompt", () => {
+	test("uses the project context formatter without changing its bytes", () => {
+		const files = [{ path: "AGENTS.md", content: "RULES" }];
+		const section = formatProjectContext(files);
+		const options = { cwd: process.cwd(), contextFiles: files, skills: [] };
+		const built = buildSystemPromptWithParts(options);
+		const prompt = buildSystemPrompt(options);
+		expect(built.parts.map((part) => part.content).join("")).toBe(built.text);
+		expect(prompt).toBe(built.text);
+		expect(built.parts.some((part) => part.category === "rules" && part.content === section)).toBe(true);
+		expect(prompt.split(section)).toHaveLength(2);
+	});
+
 	describe("empty tools", () => {
 		test("shows (none) for empty tools list", () => {
 			const prompt = buildSystemPrompt({

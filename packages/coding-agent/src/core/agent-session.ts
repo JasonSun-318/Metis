@@ -14,7 +14,7 @@
  */
 
 import { AsyncLocalStorage } from "node:async_hooks";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
@@ -26,15 +26,17 @@ import type {
 	AgentQueueIdentity,
 	AgentState,
 	AgentTool,
+	BeforeProviderRequestContext,
 	BeforeQueueCommitContext,
 	BeforeToolExecuteContext,
 	PrepareNextTurnContext,
 	ThinkingLevel,
 } from "@metis/agent-core";
-import type { AssistantMessage, ImageContent, Message, Model, TextContent } from "@metis/ai/compat";
+import type { AssistantMessage, ImageContent, Message, Model, TextContent, Tool } from "@metis/ai/compat";
 import {
 	clampThinkingLevel,
 	cleanupSessionResources,
+	estimateMessageTokens,
 	getSupportedThinkingLevels,
 	isContextOverflow,
 	isRetryableAssistantError,
@@ -64,10 +66,18 @@ import {
 	prepareCompaction,
 	shouldCompact,
 } from "./compaction/index.ts";
+import {
+	estimateContextUsageBreakdown,
+	FIXED_CONTEXT_USAGE_CATEGORIES,
+	mergeContextUsageBreakdown,
+	reconcileContextUsageBreakdown,
+	reconcileContextUsageBreakdownWithFixed,
+} from "./context-usage-breakdown.ts";
 import { exportSessionToHtml, type ToolHtmlRenderer } from "./export-html/index.ts";
 import { createToolHtmlRenderer } from "./export-html/tool-renderer.ts";
 import {
 	type ContextUsage,
+	type ContextUsageBreakdownItem,
 	type ExtensionCommandContextActions,
 	type ExtensionErrorListener,
 	type ExtensionMode,
@@ -170,8 +180,8 @@ import { SKILL_USAGE_CUSTOM_TYPE, type SkillUsageRecord } from "./skills.ts";
 import type { SlashCommandInfo } from "./slash-commands.ts";
 import { createSyntheticSourceInfo, type SourceInfo } from "./source-info.ts";
 import { buildSubagentMailboxContent } from "./subagents/prompts.ts";
-import type { SubagentMailboxEvent } from "./subagents/types.ts";
-import { type BuildSystemPromptOptions, buildSystemPrompt } from "./system-prompt.ts";
+import { SUBAGENT_ACTIVATION_TOOL_NAME, SUBAGENT_TOOL_NAMES, type SubagentMailboxEvent } from "./subagents/types.ts";
+import { type BuildSystemPromptOptions, buildSystemPromptWithParts, type SystemPromptPart } from "./system-prompt.ts";
 import { canUseUltra, getHighestSupportedThinkingLevel, type ThinkingSelection } from "./thinking-selection.ts";
 import { createToolResultMicrocompactor } from "./tool-result-microcompaction.ts";
 import { type BashOperations, createLocalBashOperations } from "./tools/bash.ts";
@@ -187,32 +197,7 @@ import {
 } from "./unattended-execution.ts";
 import { resolveWebSearchApiKey, WEB_SEARCH_PROVIDER_INFO, type WebSearchProvider } from "./web-search-config.ts";
 
-// ============================================================================
-// Skill Block Parsing
-// ============================================================================
-
-/** Parsed skill block from a user message */
-export interface ParsedSkillBlock {
-	name: string;
-	location: string;
-	content: string;
-	userMessage: string | undefined;
-}
-
-/**
- * Parse a skill block from message text.
- * Returns null if the text doesn't contain a skill block.
- */
-export function parseSkillBlock(text: string): ParsedSkillBlock | null {
-	const match = text.match(/^<skill name="([^"]+)" location="([^"]+)">\n([\s\S]*?)\n<\/skill>(?:\n\n([\s\S]+))?$/);
-	if (!match) return null;
-	return {
-		name: match[1],
-		location: match[2],
-		content: match[3],
-		userMessage: match[4]?.trim() || undefined,
-	};
-}
+export { type ParsedSkillBlock, parseSkillBlock } from "./skills.ts";
 
 /** Session-specific events that extend the core AgentEvent */
 export type AgentSessionEvent =
@@ -256,6 +241,23 @@ export type AgentSessionEventListener = (event: AgentSessionEvent) => void;
 // ============================================================================
 // Types
 // ============================================================================
+
+interface PreparedContextUsageSnapshot {
+	readonly configurationFingerprint: string;
+	readonly breakdown: readonly ContextUsageBreakdownItem[];
+}
+
+interface ReportedContextUsageSnapshot extends PreparedContextUsageSnapshot {
+	readonly assistant: AssistantMessage;
+	readonly tokens: number;
+}
+
+interface ContextUsageCalibration {
+	readonly configurationFingerprint: string;
+	readonly fixedBreakdown: readonly ContextUsageBreakdownItem[];
+}
+
+const SUBAGENT_CONTEXT_TOOL_NAMES = new Set<string>([SUBAGENT_ACTIVATION_TOOL_NAME, ...SUBAGENT_TOOL_NAMES]);
 
 export interface AgentSessionConfig {
 	agent: Agent;
@@ -562,9 +564,11 @@ export class AgentSession {
 	private _toolDefinitions: Map<string, ToolDefinitionEntry> = new Map();
 	private _toolPromptSnippets: Map<string, string> = new Map();
 	private _toolPromptGuidelines: Map<string, string[]> = new Map();
+	private _mcpToolNames = new Set<string>();
 
 	// Base system prompt (without extension appends) - used to apply fresh appends each turn
 	private _baseSystemPrompt = "";
+	private _baseSystemPromptParts: readonly SystemPromptPart[] = [];
 	private _baseSystemPromptOptions!: BuildSystemPromptOptions;
 	private _systemPromptOverride?: string;
 	private readonly _permissionPolicy: PermissionPolicy;
@@ -579,6 +583,9 @@ export class AgentSession {
 	private readonly _permissionModeCeiling?: () => PermissionMode;
 	private readonly _unattendedExecution?: UnattendedExecutionProfile;
 	private _additionalSystemPrompt?: string | (() => string | undefined);
+	private _preparedContextUsage: PreparedContextUsageSnapshot | undefined;
+	private _reportedContextUsage: ReportedContextUsageSnapshot | undefined;
+	private _contextUsageCalibration: ContextUsageCalibration | undefined;
 	private readonly _trustedControlTools = new Map<string, ToolDefinition>();
 
 	constructor(config: AgentSessionConfig) {
@@ -1377,9 +1384,10 @@ export class AgentSession {
 					throw new Error("Durable queued prompts cannot be cleared before they are consumed or recovered");
 				}
 			},
-			beforeProviderRequest: async () => {
+			beforeProviderRequest: async (prepared) => {
 				this._commitStagedSubagentMailboxDelivery();
 				this._markDurableProviderEpoch();
+				this._capturePreparedContextUsage(prepared);
 			},
 			beforeToolExecute: async (context, signal) => {
 				const provenance = this._toolProvenance(context.toolCall.name);
@@ -1799,6 +1807,7 @@ export class AgentSession {
 			// Track assistant message for auto-compaction (checked on agent_end)
 			if (event.message.role === "assistant") {
 				this._lastAssistantMessage = event.message;
+				this._captureReportedContextUsage(event.message);
 
 				const assistantMsg = event.message as AssistantMessage;
 				if (assistantMsg.stopReason !== "error") {
@@ -2638,12 +2647,25 @@ export class AgentSession {
 			promptGuidelines,
 			autoMemory,
 		};
-		const base = buildSystemPrompt(this._baseSystemPromptOptions);
+		const built = buildSystemPromptWithParts(this._baseSystemPromptOptions);
+		const parts = [...built.parts];
 		const additional =
 			typeof this._additionalSystemPrompt === "function"
 				? this._additionalSystemPrompt()
 				: this._additionalSystemPrompt;
-		return additional?.trim() ? `${base}\n\n${additional.trim()}` : base;
+		const resolvedAdditional = additional?.trim();
+		if (resolvedAdditional) {
+			parts.push({
+				category:
+					resolvedAdditional.includes("<subagent_coordination>") ||
+					resolvedAdditional.includes("<subagent_contract>")
+						? "subagent_definitions"
+						: "system_prompt",
+				content: `\n\n${resolvedAdditional}`,
+			});
+		}
+		this._baseSystemPromptParts = parts;
+		return parts.map((part) => part.content).join("");
 	}
 
 	// =========================================================================
@@ -4562,6 +4584,10 @@ export class AgentSession {
 			: { direct: [], deferred: [] };
 		const directMcpTools = mcpTools.direct.filter((definition) => isAllowedTool(definition.name));
 		const deferredMcpTools = mcpTools.deferred.filter(({ definition }) => isAllowedTool(definition.name));
+		this._mcpToolNames = new Set([
+			...directMcpTools.map((definition) => definition.name),
+			...deferredMcpTools.map(({ definition }) => definition.name),
+		]);
 		const deferredMcpNames = new Set(deferredMcpTools.map(({ definition }) => definition.name));
 		const definitionRegistry = new Map<string, ToolDefinitionEntry>(
 			Array.from(this._baseToolDefinitions.entries())
@@ -5359,49 +5385,148 @@ export class AgentSession {
 		};
 	}
 
+	private _contextUsageFingerprint(model: Model<any>, systemPrompt: string, tools: readonly Tool[]): string {
+		let serializedTools = "[unserializable]";
+		try {
+			serializedTools = JSON.stringify(tools) ?? "[]";
+		} catch {}
+		return createHash("sha256")
+			.update(model.provider)
+			.update("\0")
+			.update(model.id)
+			.update("\0")
+			.update(String(model.contextWindow ?? 0))
+			.update("\0")
+			.update(systemPrompt)
+			.update("\0")
+			.update(serializedTools)
+			.digest("hex");
+	}
+
+	private _contextUsageToolCategories(
+		tools: readonly Tool[],
+	): ReadonlyMap<string, "tool_definitions" | "mcp_dynamic_tools" | "subagent_definitions"> {
+		return new Map(
+			tools.map(
+				(tool) =>
+					[
+						tool.name,
+						SUBAGENT_CONTEXT_TOOL_NAMES.has(tool.name)
+							? "subagent_definitions"
+							: this._mcpToolNames.has(tool.name)
+								? "mcp_dynamic_tools"
+								: "tool_definitions",
+					] as const,
+			),
+		);
+	}
+
+	private _contextUsageSystemPromptParts(systemPrompt: string): readonly SystemPromptPart[] {
+		if (this._baseSystemPromptParts.map((part) => part.content).join("") === systemPrompt) {
+			return this._baseSystemPromptParts;
+		}
+		return systemPrompt ? [{ category: "system_prompt", content: systemPrompt }] : [];
+	}
+
+	private _estimateContextUsageBreakdown(
+		systemPrompt: string,
+		messages: readonly AgentMessage[],
+		tools: readonly Tool[],
+	): ContextUsageBreakdownItem[] {
+		return estimateContextUsageBreakdown({
+			systemPromptParts: this._contextUsageSystemPromptParts(systemPrompt),
+			messages,
+			tools,
+			toolCategories: this._contextUsageToolCategories(tools),
+		});
+	}
+
+	private _capturePreparedContextUsage(prepared: BeforeProviderRequestContext): void {
+		const systemPrompt = prepared.llmContext.systemPrompt ?? "";
+		const tools = prepared.llmContext.tools ?? [];
+		this._preparedContextUsage = {
+			configurationFingerprint: this._contextUsageFingerprint(prepared.model, systemPrompt, tools),
+			breakdown: this._estimateContextUsageBreakdown(systemPrompt, prepared.agentMessages, tools),
+		};
+	}
+
+	private _captureReportedContextUsage(message: AssistantMessage): void {
+		const prepared = this._preparedContextUsage;
+		this._preparedContextUsage = undefined;
+		const reportedTokens = calculateContextTokens(message.usage);
+		if (!prepared || message.stopReason === "error" || message.stopReason === "aborted" || reportedTokens <= 0) {
+			return;
+		}
+		const rawBreakdown = mergeContextUsageBreakdown(prepared.breakdown, [
+			{ category: "conversation", tokens: estimateMessageTokens(message) },
+		]);
+		const calibration = this._contextUsageCalibration;
+		const breakdown =
+			calibration?.configurationFingerprint === prepared.configurationFingerprint
+				? reconcileContextUsageBreakdownWithFixed(rawBreakdown, reportedTokens, calibration.fixedBreakdown)
+				: reconcileContextUsageBreakdown(rawBreakdown, reportedTokens);
+		if (calibration?.configurationFingerprint !== prepared.configurationFingerprint) {
+			this._contextUsageCalibration = {
+				configurationFingerprint: prepared.configurationFingerprint,
+				fixedBreakdown: breakdown.filter((item) => FIXED_CONTEXT_USAGE_CATEGORIES.has(item.category)),
+			};
+		}
+		let stateAssistant = message;
+		for (let index = this.messages.length - 1; index >= 0; index--) {
+			const candidate = this.messages[index];
+			if (candidate.role === "assistant" && (candidate === message || isDeepStrictEqual(candidate, message))) {
+				stateAssistant = candidate;
+				break;
+			}
+		}
+		this._reportedContextUsage = {
+			assistant: stateAssistant,
+			configurationFingerprint: prepared.configurationFingerprint,
+			breakdown,
+			tokens: reportedTokens,
+		};
+	}
+
 	getContextUsage(): ContextUsage | undefined {
 		const model = this.model;
 		if (!model) return undefined;
-
 		const contextWindow = model.contextWindow ?? 0;
 		if (contextWindow <= 0) return undefined;
 
-		// After compaction, the last assistant usage reflects pre-compaction context size.
-		// We can only trust usage from an assistant that responded after the latest compaction.
-		// If no such assistant exists, context token count is unknown until the next LLM response.
-		const branchEntries = this.sessionManager.getBranch();
-		const latestCompaction = getLatestCompactionEntry(branchEntries);
-
-		if (latestCompaction) {
-			// Check if there's a valid assistant usage after the compaction boundary
-			const compactionIndex = branchEntries.lastIndexOf(latestCompaction);
-			let hasPostCompactionUsage = false;
-			for (let i = branchEntries.length - 1; i > compactionIndex; i--) {
-				const entry = branchEntries[i];
-				if (entry.type === "message" && entry.message.role === "assistant") {
-					const assistant = entry.message;
-					if (assistant.stopReason !== "aborted" && assistant.stopReason !== "error") {
-						const contextTokens = calculateContextTokens(assistant.usage);
-						if (contextTokens > 0) {
-							hasPostCompactionUsage = true;
-							break;
-						}
-					}
-				}
-			}
-
-			if (!hasPostCompactionUsage) {
-				return { tokens: null, contextWindow, percent: null };
-			}
+		const systemPrompt = this.systemPrompt;
+		const tools = this.agent.state.tools as readonly Tool[];
+		const fingerprint = this._contextUsageFingerprint(model, systemPrompt, tools);
+		const reported = this._reportedContextUsage;
+		const assistantIndex = reported ? this.messages.indexOf(reported.assistant) : -1;
+		if (reported && reported.configurationFingerprint === fingerprint && assistantIndex >= 0) {
+			const tail = this._estimateContextUsageBreakdown("", this.messages.slice(assistantIndex + 1), []);
+			const breakdown = mergeContextUsageBreakdown(reported.breakdown, tail);
+			const tokens = reported.tokens + tail.reduce((sum, item) => sum + item.tokens, 0);
+			return {
+				tokens,
+				contextWindow,
+				percent: (tokens / contextWindow) * 100,
+				basis: "reported_total",
+				breakdown: breakdown.reduce((sum, item) => sum + item.tokens, 0) === tokens ? breakdown : null,
+			};
 		}
 
-		const estimate = estimateContextTokens(this.messages);
-		const percent = (estimate.tokens / contextWindow) * 100;
-
+		const estimatedBreakdown = this._estimateContextUsageBreakdown(systemPrompt, this.messages, tools);
+		const calibration = this._contextUsageCalibration;
+		const breakdown =
+			calibration?.configurationFingerprint === fingerprint
+				? mergeContextUsageBreakdown(
+						calibration.fixedBreakdown,
+						estimatedBreakdown.filter((item) => !FIXED_CONTEXT_USAGE_CATEGORIES.has(item.category)),
+					)
+				: estimatedBreakdown;
+		const tokens = breakdown.reduce((sum, item) => sum + item.tokens, 0);
 		return {
-			tokens: estimate.tokens,
+			tokens,
 			contextWindow,
-			percent,
+			percent: (tokens / contextWindow) * 100,
+			basis: "estimated_total",
+			breakdown,
 		};
 	}
 

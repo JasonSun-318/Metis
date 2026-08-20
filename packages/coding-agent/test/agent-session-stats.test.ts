@@ -6,6 +6,7 @@ import { AuthStorage } from "../src/core/auth-storage.ts";
 import { ModelRegistry } from "../src/core/model-registry.ts";
 import { SessionManager } from "../src/core/session-manager.ts";
 import { SettingsManager } from "../src/core/settings-manager.ts";
+import { createHarness as createRuntimeHarness } from "./test-harness.ts";
 import { createTestResourceLoader } from "./utilities.ts";
 
 const model = getModel("anthropic", "claude-sonnet-4-5")!;
@@ -78,7 +79,7 @@ function syncAgentMessages(session: AgentSession, sessionManager: SessionManager
 }
 
 describe("AgentSession.getSessionStats", () => {
-	it("exposes the current context usage alongside token totals", () => {
+	it("uses an estimated snapshot when restoring existing messages", () => {
 		const { session, sessionManager } = createSession();
 
 		try {
@@ -88,15 +89,18 @@ describe("AgentSession.getSessionStats", () => {
 
 			const stats = session.getSessionStats();
 			expect(stats.contextUsage).toEqual(session.getContextUsage());
-			expect(stats.contextUsage?.tokens).toBe(200);
+			expect(stats.contextUsage?.basis).toBe("estimated_total");
+			expect(stats.contextUsage?.tokens ?? 0).toBeGreaterThan(0);
 			expect(stats.contextUsage?.contextWindow).toBe(model.contextWindow);
-			expect(stats.contextUsage?.percent).toBe((200 / model.contextWindow) * 100);
+			expect(stats.contextUsage?.breakdown?.reduce((sum, item) => sum + item.tokens, 0)).toBe(
+				stats.contextUsage?.tokens,
+			);
 		} finally {
 			session.dispose();
 		}
 	});
 
-	it("reports unknown current context usage immediately after compaction", () => {
+	it("estimates current context usage immediately after compaction", () => {
 		const { session, sessionManager } = createSession();
 
 		try {
@@ -112,14 +116,17 @@ describe("AgentSession.getSessionStats", () => {
 			// Totals cover ALL entries, including history compacted away (180k + 195k).
 			expect(stats.tokens.input).toBe(375_000);
 			expect(stats.contextUsage).toBeDefined();
-			expect(stats.contextUsage?.tokens).toBeNull();
-			expect(stats.contextUsage?.percent).toBeNull();
+			expect(stats.contextUsage?.basis).toBe("estimated_total");
+			expect(stats.contextUsage?.tokens ?? 0).toBeGreaterThan(0);
+			expect(stats.contextUsage?.breakdown?.reduce((sum, item) => sum + item.tokens, 0)).toBe(
+				stats.contextUsage?.tokens,
+			);
 		} finally {
 			session.dispose();
 		}
 	});
 
-	it("uses post-compaction usage for current context instead of stale kept usage", () => {
+	it("does not reuse persisted post-compaction usage without a live request snapshot", () => {
 		const { session, sessionManager } = createSession();
 
 		try {
@@ -136,8 +143,8 @@ describe("AgentSession.getSessionStats", () => {
 			// Totals cover ALL entries, including history compacted away (180k + 195k + 25k).
 			expect(stats.tokens.input).toBe(400_000);
 			expect(stats.contextUsage).toBeDefined();
-			expect(stats.contextUsage?.tokens).toBe(25_000);
-			expect(stats.contextUsage?.percent).toBe((25_000 / model.contextWindow) * 100);
+			expect(stats.contextUsage?.basis).toBe("estimated_total");
+			expect(stats.contextUsage?.tokens).not.toBe(25_000);
 		} finally {
 			session.dispose();
 		}
@@ -160,10 +167,98 @@ describe("AgentSession.getSessionStats", () => {
 
 			const stats = session.getSessionStats();
 			expect(stats.contextUsage).toBeDefined();
-			expect(stats.contextUsage?.tokens).not.toBeNull();
-			expect(stats.contextUsage?.tokens ?? 0).toBeGreaterThan(25_000);
+			expect(stats.contextUsage?.basis).toBe("estimated_total");
+			expect(stats.contextUsage?.tokens ?? 0).toBeGreaterThan(0);
 		} finally {
 			session.dispose();
+		}
+	});
+
+	it("promotes a prepared estimate to a reported total after a valid response", async () => {
+		const harness = createRuntimeHarness({
+			systemPrompt: "SYSTEM",
+			responses: [{ text: "answer", usage: { input: 80, output: 20, totalTokens: 100 } }],
+		});
+		try {
+			await harness.session.prompt("hello");
+			const usage = harness.session.getContextUsage();
+			expect(usage?.basis).toBe("reported_total");
+			expect(usage?.tokens).toBe(100);
+			expect(usage?.breakdown?.reduce((sum, item) => sum + item.tokens, 0)).toBe(100);
+		} finally {
+			harness.cleanup();
+		}
+	});
+
+	it("calibrates fixed modules once per model and keeps them stable without usage", async () => {
+		const harness = createRuntimeHarness({
+			systemPrompt: "SYSTEM",
+			responses: [
+				{ text: "first", usage: { totalTokens: 100 } },
+				{ text: "second", usage: { totalTokens: 140 } },
+				{ text: "third", usage: { totalTokens: 1_000 } },
+				{ text: "fourth", usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0 } },
+			],
+		});
+		const fixedCategories = new Set([
+			"system_prompt",
+			"tool_definitions",
+			"rules",
+			"skills",
+			"mcp_dynamic_tools",
+			"subagent_definitions",
+		]);
+		const fixed = (breakdown: NonNullable<ReturnType<typeof harness.session.getContextUsage>>["breakdown"]) =>
+			new Map(
+				breakdown?.filter((item) => fixedCategories.has(item.category)).map((item) => [item.category, item.tokens]),
+			);
+		try {
+			await harness.session.prompt("one");
+			const first = harness.session.getContextUsage();
+			expect(first?.tokens).toBe(100);
+			expect(fixed(first?.breakdown)).not.toEqual(new Map());
+
+			await harness.session.prompt("two");
+			const second = harness.session.getContextUsage();
+			expect(second?.tokens).toBe(140);
+			expect(fixed(second?.breakdown)).toEqual(fixed(first?.breakdown));
+
+			harness.session.agent.state.model = {
+				...harness.session.agent.state.model,
+				id: "faux-2",
+			};
+			await harness.session.prompt("three");
+			const third = harness.session.getContextUsage();
+			expect(third?.tokens).toBe(1_000);
+			expect(fixed(third?.breakdown)).not.toEqual(fixed(second?.breakdown));
+
+			await harness.session.prompt("four");
+			const fourth = harness.session.getContextUsage();
+			expect(fourth?.tokens ?? 0).toBeGreaterThan(1_000);
+			expect(fixed(fourth?.breakdown)).toEqual(fixed(third?.breakdown));
+		} finally {
+			harness.cleanup();
+		}
+	});
+
+	it("invalidates a reported snapshot when the model changes", async () => {
+		const harness = createRuntimeHarness({
+			responses: [{ text: "answer", usage: { totalTokens: 100 } }],
+		});
+		try {
+			await harness.session.prompt("hello");
+			expect(harness.session.getContextUsage()?.basis).toBe("reported_total");
+			harness.session.agent.state.model = {
+				...harness.session.agent.state.model,
+				id: "faux-2",
+				contextWindow: 1_000_000,
+			};
+			const usage = harness.session.getContextUsage();
+			expect(usage?.basis).toBe("estimated_total");
+			expect(usage?.contextWindow).toBe(1_000_000);
+			expect(usage?.percent).toBe(((usage?.tokens ?? 0) / 1_000_000) * 100);
+		} finally {
+			harness.cleanup();
 		}
 	});
 });

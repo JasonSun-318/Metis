@@ -280,12 +280,33 @@ export interface ExtensionUIContext {
 // Extension Context
 // ============================================================================
 
+export type ContextUsageBasis = "reported_total" | "estimated_total" | "unavailable";
+
+export type ContextUsageCategory =
+	| "system_prompt"
+	| "tool_definitions"
+	| "rules"
+	| "skills"
+	| "mcp_dynamic_tools"
+	| "subagent_definitions"
+	| "summarized_conversation"
+	| "conversation";
+
+export interface ContextUsageBreakdownItem {
+	category: ContextUsageCategory;
+	tokens: number;
+}
+
 export interface ContextUsage {
 	/** Estimated context tokens, or null if unknown (e.g. right after compaction, before next LLM response). */
 	tokens: number | null;
 	contextWindow: number;
 	/** Context usage as percentage of context window, or null if tokens is unknown. */
 	percent: number | null;
+	/** Whether the total came from provider usage or local estimation. */
+	basis?: ContextUsageBasis;
+	/** Estimated category allocation. Its sum equals tokens when present. */
+	breakdown?: readonly ContextUsageBreakdownItem[] | null;
 }
 
 export interface CompactOptions {

@@ -80,6 +80,26 @@ export interface Skill {
 	disableModelInvocation: boolean;
 }
 
+export interface ParsedSkillBlock {
+	name: string;
+	location: string;
+	content: string;
+	skillText: string;
+	userMessage: string | undefined;
+}
+
+export function parseSkillBlock(text: string): ParsedSkillBlock | null {
+	const match = text.match(/^<skill name="([^"]+)" location="([^"]+)">\n([\s\S]*?)\n<\/skill>(?:\n\n([\s\S]+))?$/);
+	if (!match) return null;
+	return {
+		name: match[1],
+		location: match[2],
+		content: match[3],
+		skillText: `<skill name="${match[1]}" location="${match[2]}">\n${match[3]}\n</skill>`,
+		userMessage: match[4]?.trim() || undefined,
+	};
+}
+
 export const SKILL_USAGE_CUSTOM_TYPE = "metis.skill_usage.v1" as const;
 
 export function isSkillUsageCustomType(value: unknown): boolean {

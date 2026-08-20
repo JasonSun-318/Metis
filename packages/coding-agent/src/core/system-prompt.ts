@@ -42,6 +42,27 @@ export interface BuildSystemPromptOptions {
 	autoMemory?: AutoMemorySnapshot;
 }
 
+export type SystemPromptPartCategory = "system_prompt" | "rules" | "skills" | "subagent_definitions";
+
+export interface SystemPromptPart {
+	readonly category: SystemPromptPartCategory;
+	readonly content: string;
+}
+
+export interface BuiltSystemPrompt {
+	readonly text: string;
+	readonly parts: readonly SystemPromptPart[];
+}
+
+export function formatProjectContext(contextFiles: readonly { path: string; content: string }[]): string {
+	if (contextFiles.length === 0) return "";
+	let section = "\n\n<project_context>\n\nProject-specific instructions and guidelines:\n\n";
+	for (const { path, content } of contextFiles) {
+		section += `<project_instructions path="${path}">\n${content}\n</project_instructions>\n\n`;
+	}
+	return `${section}</project_context>\n`;
+}
+
 function formatMemoryIndex(index: AutoMemoryIndex): string {
 	if (index.error) {
 		return `[Index load failed at ${index.indexPath}: ${index.error}. Do not overwrite this index until the error is resolved.]`;
@@ -132,8 +153,8 @@ ${projectContent}
 </auto_memory>`;
 }
 
-/** Build the system prompt with tools, guidelines, and context */
-export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
+/** Build the system prompt and retain the source category of each exact text fragment. */
+export function buildSystemPromptWithParts(options: BuildSystemPromptOptions): BuiltSystemPrompt {
 	const {
 		customPrompt,
 		selectedTools,
@@ -166,42 +187,31 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
 	const contextFiles = providedContextFiles ?? [];
 	const skills = providedSkills ?? [];
 	const tools = selectedTools || ["read", "grep", "bash", "edit", "write", "web_fetch"];
+	const parts: SystemPromptPart[] = [];
+	const addPart = (category: SystemPromptPartCategory, content: string): void => {
+		if (content) parts.push({ category, content });
+	};
+	const finish = (): BuiltSystemPrompt => ({ text: parts.map((part) => part.content).join(""), parts });
+	const environmentSection = `\nCurrent date: ${date}\nCurrent working directory: ${promptCwd}${additionalDirectorySection}`;
 
 	if (customPrompt) {
-		let prompt = customPrompt;
-
-		if (appendSection) {
-			prompt += appendSection;
-		}
-
-		// Append project context files
-		if (contextFiles.length > 0) {
-			prompt += "\n\n<project_context>\n\n";
-			prompt += "Project-specific instructions and guidelines:\n\n";
-			for (const { path: filePath, content } of contextFiles) {
-				prompt += `<project_instructions path="${filePath}">\n${content}\n</project_instructions>\n\n`;
-			}
-			prompt += "</project_context>\n";
-		}
+		addPart("system_prompt", customPrompt);
+		addPart("system_prompt", appendSection);
+		addPart("rules", formatProjectContext(contextFiles));
 
 		// Append skills section (only if read tool is available)
 		const customPromptHasRead = !selectedTools || selectedTools.includes("read");
 		if (customPromptHasRead && skills.length > 0) {
-			prompt += formatSkillsForPrompt(skills);
+			addPart("skills", formatSkillsForPrompt(skills));
 		}
 
 		if (autoMemory) {
-			prompt += formatAutoMemory(autoMemory, tools);
+			addPart("system_prompt", formatAutoMemory(autoMemory, tools));
 		}
 
-		prompt += SECURITY_GUIDELINES;
-
-		// Add date and working directory last
-		prompt += `\nCurrent date: ${date}`;
-		prompt += `\nCurrent working directory: ${promptCwd}`;
-		prompt += additionalDirectorySection;
-
-		return prompt;
+		addPart("system_prompt", SECURITY_GUIDELINES);
+		addPart("system_prompt", environmentSection);
+		return finish();
 	}
 
 	// Get absolute paths to documentation and examples
@@ -256,7 +266,7 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
 
 	const guidelines = guidelinesList.map((g) => `- ${g}`).join("\n");
 
-	let prompt = `You are Metis, a general-purpose AI agent operating in the user's current workspace. You help with research, writing, planning, analysis, file work, coding, and other tasks. Use the available tools when useful. Treat the current working directory as the current project or workspace, and do not assume it is a software project unless the user or its contents indicate that.
+	const basePrompt = `You are Metis, a general-purpose AI agent operating in the user's current workspace. You help with research, writing, planning, analysis, file work, coding, and other tasks. Use the available tools when useful. Treat the current working directory as the current project or workspace, and do not assume it is a software project unless the user or its contents indicate that.
 
 Available tools:
 ${toolsList}
@@ -275,35 +285,25 @@ Metis documentation (read only when the user asks about Metis, the metis CLI, it
 - When working on Metis or metis CLI topics, read the docs and examples, and follow .md cross-references before implementing
 - Always read Metis .md files completely and follow links to related docs (e.g., tui.md for TUI API details)`;
 
-	if (appendSection) {
-		prompt += appendSection;
-	}
-
-	// Append project context files
-	if (contextFiles.length > 0) {
-		prompt += "\n\n<project_context>\n\n";
-		prompt += "Project-specific instructions and guidelines:\n\n";
-		for (const { path: filePath, content } of contextFiles) {
-			prompt += `<project_instructions path="${filePath}">\n${content}\n</project_instructions>\n\n`;
-		}
-		prompt += "</project_context>\n";
-	}
+	addPart("system_prompt", basePrompt);
+	addPart("system_prompt", appendSection);
+	addPart("rules", formatProjectContext(contextFiles));
 
 	// Append skills section (only if read tool is available)
 	if (hasRead && skills.length > 0) {
-		prompt += formatSkillsForPrompt(skills);
+		addPart("skills", formatSkillsForPrompt(skills));
 	}
 
 	if (autoMemory) {
-		prompt += formatAutoMemory(autoMemory, tools);
+		addPart("system_prompt", formatAutoMemory(autoMemory, tools));
 	}
 
-	prompt += SECURITY_GUIDELINES;
+	addPart("system_prompt", SECURITY_GUIDELINES);
+	addPart("system_prompt", environmentSection);
+	return finish();
+}
 
-	// Add date and working directory last
-	prompt += `\nCurrent date: ${date}`;
-	prompt += `\nCurrent working directory: ${promptCwd}`;
-	prompt += additionalDirectorySection;
-
-	return prompt;
+/** Build the exact system prompt string used by existing callers. */
+export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
+	return buildSystemPromptWithParts(options).text;
 }
