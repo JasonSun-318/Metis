@@ -78,6 +78,8 @@ export interface RunMemoryExtractOptions {
 	openStore?: (path: string) => MemoryStore;
 	writeProjection?: typeof writeProjectionDefault;
 	projectAfterWrite?: boolean;
+	embeddingModel?: string | null;
+	embedText?: (text: string) => Promise<Float32Array | null>;
 }
 
 export interface MemoryExtractResult {
@@ -219,6 +221,8 @@ export async function runMemoryExtract(options: RunMemoryExtractOptions): Promis
 		createdAt: options.createdAt,
 		// Runner owns the final projection write so injectable writeProjection is honored.
 		projectAfterWrite: false,
+		embeddingModel: options.embeddingModel ?? null,
+		...(options.embedText ? { embedText: options.embedText } : {}),
 	};
 
 	const definition =

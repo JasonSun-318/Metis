@@ -80,6 +80,10 @@ export interface MemoryToolContext {
 	createdAt?: string;
 	/** When false, skip markdown projection after a successful write. Default true. */
 	projectAfterWrite?: boolean;
+	/** Current embedding model id (`provider/model`); used when embedText succeeds. */
+	embeddingModel?: string | null;
+	/** Best-effort embedder; failures leave embedding NULL. */
+	embedText?: (text: string) => Promise<Float32Array | null>;
 }
 
 export interface CommitFactsDetails {
@@ -96,6 +100,8 @@ export interface ReconcileFactsDetails {
 	moved: number;
 	error?: string;
 }
+
+export type ApplyReconcileFactsResult = ReconcileFactsDetails & { facts: MemoryFact[] };
 
 function toolText(text: string, details: CommitFactsDetails | ReconcileFactsDetails): AgentToolResult<typeof details> {
 	return {
@@ -131,13 +137,13 @@ function maybeProject(ctx: MemoryToolContext): void {
 	writeProjection(ctx.agentDir, ctx.cwd, ctx.agentMode, ctx.store);
 }
 
-function insertFactInputs(ctx: MemoryToolContext, inputs: Static<typeof FactInputSchema>[]): number {
-	let inserted = 0;
+function insertFactInputs(ctx: MemoryToolContext, inputs: Static<typeof FactInputSchema>[]): MemoryFact[] {
+	const inserted: MemoryFact[] = [];
 	for (const input of inputs) {
 		if (typeof input.topicFile !== "string" || !isSafeTopicFile(input.topicFile)) continue;
 		if (looksLikeSecret(input.text)) continue;
 		const columns = scopeColumns(input.scope, ctx);
-		ctx.store.insertFact({
+		const fact: MemoryFact = {
 			id: randomUUID(),
 			scope: input.scope,
 			cwdKey: columns.cwdKey,
@@ -149,21 +155,39 @@ function insertFactInputs(ctx: MemoryToolContext, inputs: Static<typeof FactInpu
 			sourceTurn: ctx.sourceTurn,
 			embedding: null,
 			embeddingModel: null,
-		});
-		inserted++;
+		};
+		ctx.store.insertFact(fact);
+		inserted.push(fact);
 	}
 	return inserted;
 }
 
-export function applyCommitFacts(ctx: MemoryToolContext, params: unknown): CommitFactsDetails {
-	if (!Value.Check(CommitFactsParamsSchema, params)) {
-		return { ok: false, inserted: 0, error: "Invalid commit_facts arguments" };
+async function embedInsertedFacts(ctx: MemoryToolContext, facts: MemoryFact[]): Promise<void> {
+	if (!ctx.embedText || !ctx.embeddingModel || facts.length === 0) return;
+	for (const fact of facts) {
+		try {
+			const embedding = await ctx.embedText(fact.text);
+			if (embedding) {
+				ctx.store.updateFactEmbedding(fact.id, embedding, ctx.embeddingModel);
+			}
+		} catch {
+			// Keep the row with embedding NULL; keyword search / backfill can recover later.
+		}
 	}
-	const inserted = insertFactInputs(ctx, params.facts);
-	return { ok: true, inserted };
 }
 
-export function applyReconcileFacts(ctx: MemoryToolContext, params: unknown): ReconcileFactsDetails {
+export function applyCommitFacts(
+	ctx: MemoryToolContext,
+	params: unknown,
+): CommitFactsDetails & { facts: MemoryFact[] } {
+	if (!Value.Check(CommitFactsParamsSchema, params)) {
+		return { ok: false, inserted: 0, facts: [], error: "Invalid commit_facts arguments" };
+	}
+	const facts = insertFactInputs(ctx, params.facts);
+	return { ok: true, inserted: facts.length, facts };
+}
+
+export function applyReconcileFacts(ctx: MemoryToolContext, params: unknown): ApplyReconcileFactsResult {
 	if (!Value.Check(ReconcileFactsParamsSchema, params)) {
 		return {
 			ok: false,
@@ -171,6 +195,7 @@ export function applyReconcileFacts(ctx: MemoryToolContext, params: unknown): Re
 			superseded: 0,
 			deleted: 0,
 			moved: 0,
+			facts: [],
 			error: "Invalid reconcile_facts arguments",
 		};
 	}
@@ -180,6 +205,7 @@ export function applyReconcileFacts(ctx: MemoryToolContext, params: unknown): Re
 	let deleted = 0;
 	let moved = 0;
 	const rejectReasons: string[] = [];
+	let addedFacts: MemoryFact[] = [];
 
 	try {
 		ctx.store.runInTransaction(() => {
@@ -255,7 +281,8 @@ export function applyReconcileFacts(ctx: MemoryToolContext, params: unknown): Re
 			}
 
 			if (params.add?.length) {
-				inserted = insertFactInputs(ctx, params.add);
+				addedFacts = insertFactInputs(ctx, params.add);
+				inserted = addedFacts.length;
 			}
 
 			if (rejectReasons.length > 0 && superseded === 0 && deleted === 0 && moved === 0 && inserted === 0) {
@@ -269,11 +296,12 @@ export function applyReconcileFacts(ctx: MemoryToolContext, params: unknown): Re
 			superseded: 0,
 			deleted: 0,
 			moved: 0,
+			facts: [],
 			error: error instanceof Error ? error.message : String(error),
 		};
 	}
 
-	return { ok: true, inserted, superseded, deleted, moved };
+	return { ok: true, inserted, superseded, deleted, moved, facts: addedFacts };
 }
 
 export function createCommitFactsTool(ctx: MemoryToolContext): ToolDefinition {
@@ -286,11 +314,17 @@ export function createCommitFactsTool(ctx: MemoryToolContext): ToolDefinition {
 		executionMode: "sequential",
 		async execute(_toolCallId, params) {
 			const applied = applyCommitFacts(ctx, params);
+			const details: CommitFactsDetails = {
+				ok: applied.ok,
+				inserted: applied.inserted,
+				...(applied.error ? { error: applied.error } : {}),
+			};
 			if (!applied.ok) {
-				return toolText(applied.error ?? "Invalid commit_facts arguments", applied);
+				return toolText(applied.error ?? "Invalid commit_facts arguments", details);
 			}
+			await embedInsertedFacts(ctx, applied.facts);
 			if (applied.inserted > 0) maybeProject(ctx);
-			return toolText(`Committed ${applied.inserted} fact(s)`, applied);
+			return toolText(`Committed ${applied.inserted} fact(s)`, details);
 		},
 	});
 }
@@ -305,14 +339,23 @@ export function createReconcileFactsTool(ctx: MemoryToolContext): ToolDefinition
 		executionMode: "sequential",
 		async execute(_toolCallId, params) {
 			const applied = applyReconcileFacts(ctx, params);
+			const details: ReconcileFactsDetails = {
+				ok: applied.ok,
+				inserted: applied.inserted,
+				superseded: applied.superseded,
+				deleted: applied.deleted,
+				moved: applied.moved,
+				...(applied.error ? { error: applied.error } : {}),
+			};
 			if (!applied.ok) {
-				return toolText(applied.error ?? "Invalid reconcile_facts arguments", applied);
+				return toolText(applied.error ?? "Invalid reconcile_facts arguments", details);
 			}
+			await embedInsertedFacts(ctx, applied.facts);
 			const changed = applied.inserted + applied.superseded + applied.deleted + applied.moved;
 			if (changed > 0) maybeProject(ctx);
 			return toolText(
 				`Reconciled: inserted=${applied.inserted} superseded=${applied.superseded} deleted=${applied.deleted} moved=${applied.moved}`,
-				applied,
+				details,
 			);
 		},
 	});

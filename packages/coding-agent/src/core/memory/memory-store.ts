@@ -64,12 +64,15 @@ export interface MemoryStore {
 	getFactById(id: string): MemoryFact | null;
 	updateFactStatus(id: string, status: MemoryFactStatus): void;
 	updateFactScope(id: string, scope: MemoryScope, cwdKey: string | null, mode: string | null): void;
+	updateFactEmbedding(id: string, embedding: Float32Array | null, embeddingModel: string | null): void;
 	deleteFact(id: string): void;
 	countFacts(): number;
 	runInTransaction(fn: () => void): void;
 	searchByEmbedding(query: Float32Array, options: MemorySearchOptions): MemorySearchHit[];
 	listActiveFacts(scope: MemoryScope, cwdKey: string | null, mode: string | null): MemoryFact[];
 	listFactsByStatus(status: MemoryFactStatus, limit: number): MemoryFact[];
+	/** Active facts with null embedding or embedding_model !== expectedModel. */
+	listFactsNeedingEmbedding(expectedModel: string, limit: number): MemoryFact[];
 	recordExtractRun(run: MemoryExtractRun): void;
 	listExtractRuns(limit?: number): MemoryExtractRun[];
 	close(): void;
@@ -96,6 +99,16 @@ export function openMemoryStore(path: string): MemoryStore {
 
 	const updateStatus = db.prepare(`UPDATE facts SET status = ? WHERE id = ?`);
 	const updateScope = db.prepare(`UPDATE facts SET scope = ?, cwd_key = ?, mode = ? WHERE id = ?`);
+	const updateEmbedding = db.prepare(`UPDATE facts SET embedding = ?, embedding_model = ? WHERE id = ?`);
+
+	const selectNeedingEmbedding = db.prepare(`
+		SELECT id, scope, cwd_key, mode, topic_file, text, status, created_at, source_turn, embedding, embedding_model
+		FROM facts
+		WHERE status = 'active'
+		  AND (embedding IS NULL OR embedding_model IS NULL OR embedding_model != ?)
+		ORDER BY created_at ASC, id ASC
+		LIMIT ?
+	`);
 
 	const selectActiveGlobal = db.prepare(`
 		SELECT id, scope, cwd_key, mode, topic_file, text, status, created_at, source_turn, embedding, embedding_model
@@ -174,6 +187,10 @@ export function openMemoryStore(path: string): MemoryStore {
 			updateScope.run(scope, cwdKey, mode, id);
 		},
 
+		updateFactEmbedding(id, embedding, embeddingModel) {
+			updateEmbedding.run(embedding ? embeddingToBlob(embedding) : null, embeddingModel, id);
+		},
+
 		deleteFact(id) {
 			updateStatus.run("deleted" satisfies MemoryFactStatus, id);
 		},
@@ -224,6 +241,10 @@ export function openMemoryStore(path: string): MemoryStore {
 
 		listFactsByStatus(status, limit) {
 			return (selectByStatus.all(status, Math.max(0, limit)) as FactRow[]).map(rowToFact);
+		},
+
+		listFactsNeedingEmbedding(expectedModel, limit) {
+			return (selectNeedingEmbedding.all(expectedModel, Math.max(0, limit)) as FactRow[]).map(rowToFact);
 		},
 
 		recordExtractRun(run) {

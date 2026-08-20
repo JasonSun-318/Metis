@@ -1,11 +1,18 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { Agent } from "@metis/agent-core";
+import { createAssistantMessageEventStream, fauxAssistantMessage } from "@metis/ai";
 import { getModel } from "@metis/ai/compat";
 import { afterEach, describe, expect, it } from "vitest";
+import { AgentSession } from "../src/core/agent-session.ts";
+import { AuthStorage } from "../src/core/auth-storage.ts";
 import { ensureModeScopedMemoryLayout, getAutoMemoryPaths } from "../src/core/auto-memory.ts";
+import { ModelRegistry } from "../src/core/model-registry.ts";
 import { createAgentSession } from "../src/core/sdk.ts";
+import { SessionManager } from "../src/core/session-manager.ts";
 import { SettingsManager } from "../src/core/settings-manager.ts";
+import { createTestResourceLoader } from "./utilities.ts";
 
 describe("AgentSession auto memory", () => {
 	const tempDirs: string[] = [];
@@ -16,7 +23,13 @@ describe("AgentSession auto memory", () => {
 	};
 
 	afterEach(() => {
-		for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+		for (const dir of tempDirs.splice(0)) {
+			try {
+				rmSync(dir, { recursive: true, force: true });
+			} catch {
+				// Windows may briefly hold SQLite WAL handles after dispose.
+			}
+		}
 	});
 
 	it("injects both indexes and refreshes external changes on reload", async () => {
@@ -156,6 +169,75 @@ describe("AgentSession auto memory", () => {
 			expect(session.systemPrompt).toMatch(/do not read the memory directory unless the user asks what is stored/i);
 		} finally {
 			session.dispose();
+		}
+	});
+
+	it("keeps extract no-memory message when retrieve fails and never dumps the catalog", async () => {
+		const root = makeTemp();
+		const agentDir = join(root, "agent");
+		const cwd = join(root, "project");
+		mkdirSync(cwd, { recursive: true });
+		await ensureModeScopedMemoryLayout(agentDir);
+		const paths = getAutoMemoryPaths(agentDir, cwd, "code");
+		mkdirSync(dirname(paths.global.indexPath), { recursive: true });
+		mkdirSync(dirname(paths.project.indexPath), { recursive: true });
+		writeFileSync(paths.global.indexPath, "index-engine-catalog-marker");
+		writeFileSync(paths.project.indexPath, "project-catalog-marker");
+
+		const settingsManager = SettingsManager.inMemory({
+			autoMemoryEnabled: true,
+			memoryEngine: "extract",
+			memoryEmbeddingModel: "openai/text-embedding-3-small",
+		});
+		const model = getModel("anthropic", "claude-sonnet-4-5")!;
+		const streamFn: Agent["streamFn"] = (requestModel) => {
+			const stream = createAssistantMessageEventStream();
+			queueMicrotask(() => {
+				stream.push({
+					type: "done",
+					reason: "stop",
+					message: {
+						...fauxAssistantMessage("ok"),
+						api: requestModel.api,
+						provider: requestModel.provider,
+						model: requestModel.id,
+					},
+				});
+			});
+			return stream;
+		};
+		const agent = new Agent({
+			initialState: { model, thinkingLevel: "off", systemPrompt: "Test", tools: [] },
+			streamFn,
+			transport: "sse",
+		});
+		const authStorage = AuthStorage.inMemory();
+		authStorage.setRuntimeApiKey("anthropic", "test-key");
+		const session = new AgentSession({
+			agent,
+			sessionManager: SessionManager.inMemory(cwd),
+			settingsManager,
+			cwd,
+			agentDir,
+			modelRegistry: ModelRegistry.inMemory(authStorage),
+			resourceLoader: createTestResourceLoader(),
+		});
+		(
+			session as unknown as {
+				_searchMemories: () => Promise<never>;
+			}
+		)._searchMemories = async () => {
+			throw new Error("embed failed");
+		};
+
+		try {
+			await session.prompt("What do you remember about me?");
+			expect(session.systemPrompt).toContain("No relevant long-term memory for this turn.");
+			expect(session.systemPrompt).not.toContain("<global_memory_index>");
+			expect(session.systemPrompt).not.toContain("index-engine-catalog-marker");
+		} finally {
+			session.dispose();
+			await Promise.resolve();
 		}
 	});
 });

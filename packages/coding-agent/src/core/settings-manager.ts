@@ -154,8 +154,7 @@ export interface Settings {
 	enableSkillCommands?: boolean; // default: true - register skills as /skill:name commands
 	autoMemoryEnabled?: boolean; // default: true; global setting only
 	memoryEngine?: "index" | "extract"; // default: "index"; global setting only
-	// Task 9 will refuse setMemoryEngine("extract") without an embedding model; Task 4 only persists.
-	memoryEmbeddingModel?: string; // global setting only
+	memoryEmbeddingModel?: string; // global setting only; required before enabling extract engine
 	memoryRerankModel?: string; // global setting only
 	terminal?: TerminalSettings;
 	enabledModels?: string[]; // Model patterns for cycling (same format as --models CLI flag)
@@ -1210,6 +1209,14 @@ export class SettingsManager {
 	setMemoryEngine(engine: "index" | "extract" | string): void {
 		if (engine !== "index" && engine !== "extract") {
 			return;
+		}
+		if (engine === "extract") {
+			const embeddingModel = this.globalSettings.memoryEmbeddingModel?.trim();
+			if (!embeddingModel) {
+				throw new Error(
+					'Cannot enable memory engine "extract" without memoryEmbeddingModel. Configure an embedding model first (provider/model).',
+				);
+			}
 		}
 		this.globalSettings.memoryEngine = engine;
 		this.markModified("memoryEngine");

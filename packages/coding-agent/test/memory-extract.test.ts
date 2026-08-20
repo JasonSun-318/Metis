@@ -132,6 +132,47 @@ describe("memory extract tools + runner", () => {
 			expect(ctx.store.countFacts()).toBe(0);
 			ctx.store.close();
 		});
+
+		it("still inserts when embedding fails, leaving embedding NULL", async () => {
+			const root = tempRoot();
+			const ctx = toolContext(root);
+			ctx.embeddingModel = "openai/text-embedding-3-small";
+			ctx.embedText = async () => {
+				throw new Error("embed down");
+			};
+			const tool = createCommitFactsTool(ctx);
+			await tool.execute(
+				"c-embed-fail",
+				{ facts: [{ text: "User prefers concise replies", scope: "global", topicFile: "prefs.md" }] },
+				undefined,
+				undefined,
+				{} as never,
+			);
+			const facts = ctx.store.listActiveFacts("global", null, null);
+			expect(facts).toHaveLength(1);
+			expect(facts[0]?.embedding).toBeNull();
+			expect(facts[0]?.embeddingModel).toBeNull();
+			ctx.store.close();
+		});
+
+		it("stores embedding after a successful embedText", async () => {
+			const root = tempRoot();
+			const ctx = toolContext(root);
+			ctx.embeddingModel = "openai/text-embedding-3-small";
+			ctx.embedText = async () => new Float32Array([0.25, 0.5, 0.75]);
+			const tool = createCommitFactsTool(ctx);
+			await tool.execute(
+				"c-embed-ok",
+				{ facts: [{ text: "User prefers concise replies", scope: "global", topicFile: "prefs.md" }] },
+				undefined,
+				undefined,
+				{} as never,
+			);
+			const facts = ctx.store.listActiveFacts("global", null, null);
+			expect(facts[0]?.embeddingModel).toBe("openai/text-embedding-3-small");
+			expect(Array.from(facts[0]!.embedding!).map((n) => Number(n.toFixed(2)))).toEqual([0.25, 0.5, 0.75]);
+			ctx.store.close();
+		});
 	});
 
 	describe("reconcile_facts", () => {

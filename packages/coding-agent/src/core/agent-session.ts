@@ -46,7 +46,13 @@ import {
 import { getProjectConfigDir } from "../config.ts";
 import { getThemeByName, theme } from "../modes/interactive/theme/theme.ts";
 import { stripFrontmatter } from "../utils/frontmatter.ts";
-import { canonicalizeActionPath, isPathInside, resolvePath } from "../utils/paths.ts";
+import {
+	canonicalizeActionPath,
+	canonicalizePathForCreation,
+	encodePathForStorage,
+	isPathInside,
+	resolvePath,
+} from "../utils/paths.ts";
 import { sleep } from "../utils/sleep.ts";
 import type { AgentMode } from "./agent-mode.ts";
 import { formatNoApiKeyFoundMessage, formatNoModelSelectedMessage } from "./auth-guidance.ts";
@@ -129,6 +135,7 @@ import {
 	type McpManager,
 	type McpServerStatus,
 } from "./mcp/index.ts";
+import { embedText as embedMemoryText, resolveEmbeddingEndpoint } from "./memory/memory-embedder.ts";
 import {
 	hasDurableMemoryIntent,
 	type MemoryExtractActiveRun,
@@ -138,6 +145,12 @@ import {
 	type RunMemoryExtractOptions,
 	runMemoryExtract,
 } from "./memory/memory-extract.ts";
+import {
+	backfillMemoryEmbeddings,
+	MEMORY_RETRIEVE_TIMEOUT_MS,
+	type RetrievedMemoryFact,
+	searchMemories,
+} from "./memory/memory-search.ts";
 import { openMemoryStore } from "./memory/memory-store.ts";
 import type { MemoryExtractRun } from "./memory/memory-types.ts";
 import type { BashExecutionMessage, CustomMessage } from "./messages.ts";
@@ -590,6 +603,9 @@ export class AgentSession {
 	private readonly _ultraAvailable: boolean;
 	private readonly _includeAutoMemory: boolean;
 	private _autoMemoryRetrieved: Array<{ scope: "global" | "project"; text: string }> = [];
+	private _searchMemories = searchMemories;
+	private _memoryBackfillPromise: Promise<void> | undefined;
+	private _memoryBackfillAbort: AbortController | undefined;
 	private readonly _permissionModeCeiling?: () => PermissionMode;
 	private readonly _unattendedExecution?: UnattendedExecutionProfile;
 	private _additionalSystemPrompt?: string | (() => string | undefined);
@@ -2126,6 +2142,7 @@ export class AgentSession {
 					this.abortBranchSummary();
 					this.abortBash();
 					this._memoryExtractAbortController?.abort();
+					this._memoryBackfillAbort?.abort();
 					this.agent.abort();
 				} catch {
 					// Continue invalidating the session even if an abort hook throws.
@@ -2502,6 +2519,88 @@ export class AgentSession {
 	refreshSystemPrompt(): void {
 		this._baseSystemPrompt = this._rebuildSystemPrompt(this.getActiveToolNames());
 		this.agent.state.systemPrompt = this._systemPromptOverride ?? this._baseSystemPrompt;
+	}
+
+	private _maybeStartMemoryEmbeddingBackfill(): void {
+		if (
+			!this._includeAutoMemory ||
+			!this._agentDir ||
+			!this.settingsManager.getAutoMemoryEnabled() ||
+			this.settingsManager.getMemoryEngine() !== "extract"
+		) {
+			return;
+		}
+		const embeddingModel = this.settingsManager.getMemoryEmbeddingModel()?.trim();
+		if (!embeddingModel || this._memoryBackfillPromise) return;
+
+		const agentDir = this._agentDir;
+		const modelRegistry = this._modelRegistry;
+		this._memoryBackfillAbort?.abort();
+		const controller = new AbortController();
+		this._memoryBackfillAbort = controller;
+		this._memoryBackfillPromise = Promise.resolve()
+			.then(async () => {
+				const store = openMemoryStore(getMemorySqlitePath(agentDir));
+				try {
+					if (controller.signal.aborted) return;
+					await backfillMemoryEmbeddings({
+						store,
+						embeddingModel,
+						modelRegistry,
+						signal: controller.signal,
+					});
+				} finally {
+					store.close();
+				}
+			})
+			.catch(() => undefined)
+			.finally(() => {
+				if (this._memoryBackfillAbort === controller) {
+					this._memoryBackfillAbort = undefined;
+				}
+				this._memoryBackfillPromise = undefined;
+			});
+	}
+
+	private async _retrieveAutoMemories(query: string): Promise<Array<{ scope: "global" | "project"; text: string }>> {
+		const agentDir = this._agentDir;
+		const embeddingModel = this.settingsManager.getMemoryEmbeddingModel()?.trim();
+		if (!agentDir || !embeddingModel) return [];
+
+		const cwdKey = encodePathForStorage(canonicalizePathForCreation(this._cwd));
+		const store = openMemoryStore(getMemorySqlitePath(agentDir));
+		try {
+			const hits: RetrievedMemoryFact[] = await this._searchMemories({
+				store,
+				query,
+				cwdKey,
+				mode: this.mode,
+				embeddingModel,
+				modelRegistry: this._modelRegistry,
+				rerankModel: this.settingsManager.getMemoryRerankModel()?.trim(),
+				retrieveTimeoutMs: MEMORY_RETRIEVE_TIMEOUT_MS,
+			});
+			return hits.map((hit) => ({ scope: hit.scope, text: hit.text }));
+		} finally {
+			store.close();
+		}
+	}
+
+	private async _createMemoryEmbedText(): Promise<((text: string) => Promise<Float32Array | null>) | undefined> {
+		const embeddingModel = this.settingsManager.getMemoryEmbeddingModel()?.trim();
+		if (!embeddingModel) return undefined;
+		try {
+			const endpoint = await resolveEmbeddingEndpoint(this._modelRegistry, embeddingModel);
+			return async (text: string) => {
+				try {
+					return await embedMemoryText(text, { endpoint });
+				} catch {
+					return null;
+				}
+			};
+		} catch {
+			return undefined;
+		}
 	}
 
 	/** Reload Skills and expose their latest metadata to the current session. */
@@ -3131,6 +3230,24 @@ export class AgentSession {
 			const lastAssistant = this._findLastAssistantMessage();
 			if (lastAssistant) {
 				await this._checkCompaction(lastAssistant, false);
+			}
+
+			// Extract-engine retrieval: embed the user message and inject top hits (never fall back to catalog).
+			if (
+				this._includeAutoMemory &&
+				this.settingsManager.getAutoMemoryEnabled() &&
+				this.settingsManager.getMemoryEngine() === "extract"
+			) {
+				try {
+					this._autoMemoryRetrieved = await this._retrieveAutoMemories(expandedText);
+				} catch {
+					this._autoMemoryRetrieved = [];
+				}
+				this._baseSystemPrompt = this._rebuildSystemPrompt(this.getActiveToolNames());
+				if (this._systemPromptOverride === undefined) {
+					this.agent.state.systemPrompt = this._baseSystemPrompt;
+				}
+				this._maybeStartMemoryEmbeddingBackfill();
 			}
 
 			// Build messages array (custom message if any, then user message)
@@ -3945,6 +4062,7 @@ export class AgentSession {
 		const transport = this.agent.transport;
 		const thinkingBudgets = this.agent.thinkingBudgets;
 		const maxRetryDelayMs = this.agent.maxRetryDelayMs;
+		const embeddingModel = this.settingsManager.getMemoryEmbeddingModel()?.trim() ?? null;
 		const extractArgs: RunMemoryExtractOptions = {
 			mode: options.mode,
 			agentDir,
@@ -3961,9 +4079,14 @@ export class AgentSession {
 			transport,
 			...(thinkingBudgets ? { thinkingBudgets } : {}),
 			...(maxRetryDelayMs !== undefined ? { maxRetryDelayMs } : {}),
+			embeddingModel,
 		};
 
-		const extractPromise = Promise.resolve().then(() => this._memoryExtractRunner(extractArgs));
+		const extractPromise = Promise.resolve().then(async () => {
+			const embedText = await this._createMemoryEmbedText();
+			if (embedText) extractArgs.embedText = embedText;
+			return this._memoryExtractRunner(extractArgs);
+		});
 		const tracked = extractPromise
 			.then((result) => {
 				if (result.status === "success") {

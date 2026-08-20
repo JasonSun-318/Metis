@@ -276,9 +276,17 @@ describe("SettingsManager", () => {
 		it("defaults memoryEngine to index and persists extract", async () => {
 			const manager = SettingsManager.create(projectDir, agentDir);
 			expect(manager.getMemoryEngine()).toBe("index");
+			manager.setMemoryEmbeddingModel("openai/text-embedding-3-small");
 			manager.setMemoryEngine("extract");
 			await manager.flush();
 			expect(JSON.parse(readFileSync(join(agentDir, "settings.json"), "utf8")).memoryEngine).toBe("extract");
+		});
+
+		it("refuses setMemoryEngine(extract) without an embedding model", () => {
+			const manager = SettingsManager.create(projectDir, agentDir);
+			expect(manager.getMemoryEmbeddingModel()).toBeUndefined();
+			expect(() => manager.setMemoryEngine("extract")).toThrow(/memoryEmbeddingModel|embedding model/i);
+			expect(manager.getMemoryEngine()).toBe("index");
 		});
 
 		it("stores embedding and rerank model ids", async () => {
