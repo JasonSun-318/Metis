@@ -1347,6 +1347,25 @@ describe("direction and response correlation", () => {
 		expect(() => validateResponseFor("client", open, wrong)).toThrow(ProtocolValidationError);
 	});
 
+	it("rejects context breakdowns whose sum does not match contextTokens", () => {
+		const request = requestFor("client", "session/status").envelope;
+		const response = structuredClone(responses.find((entry) => entry.method === "session/status")!.envelope) as {
+			result: { contextBreakdown: Array<{ category: string; tokens: number }> };
+		};
+		response.result.contextBreakdown[0]!.tokens += 1;
+		expect(() => validateResponseFor("client", request, response)).toThrow(ProtocolValidationError);
+	});
+
+	it("requires unavailable context status to carry null tokens and breakdown", () => {
+		const request = requestFor("client", "session/status").envelope;
+		const response = structuredClone(responses.find((entry) => entry.method === "session/status")!.envelope) as {
+			result: { contextBasis: string; contextTokens: number | null; contextBreakdown: unknown };
+		};
+		response.result.contextBasis = "unavailable";
+		response.result.contextTokens = 64_000;
+		expect(() => validateResponseFor("client", request, response)).toThrow(ProtocolValidationError);
+	});
+
 	it("rejects duplicate skill names", () => {
 		const request = requestFor("client", "skill/list").envelope;
 		const response = structuredClone(responses.find((entry) => entry.method === "skill/list")!.envelope) as {

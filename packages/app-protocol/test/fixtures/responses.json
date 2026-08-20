@@ -683,6 +683,11 @@
 				"mode": "code",
 				"contextTokens": 64000,
 				"contextWindow": 128000,
+				"contextBasis": "reported_total",
+				"contextBreakdown": [
+					{ "category": "system_prompt", "tokens": 4000 },
+					{ "category": "conversation", "tokens": 60000 }
+				],
 				"remainingPercent": 50,
 				"cacheHitPercent": 25
 			}

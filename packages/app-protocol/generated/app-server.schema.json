@@ -17132,6 +17132,8 @@
                     "mode",
                     "contextTokens",
                     "contextWindow",
+                    "contextBasis",
+                    "contextBreakdown",
                     "remainingPercent",
                     "cacheHitPercent"
                   ],
@@ -17171,6 +17173,84 @@
                           "type": "integer",
                           "minimum": 1,
                           "maximum": 10000000
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "contextBasis": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "const": "reported_total"
+                        },
+                        {
+                          "type": "string",
+                          "const": "estimated_total"
+                        },
+                        {
+                          "type": "string",
+                          "const": "unavailable"
+                        }
+                      ]
+                    },
+                    "contextBreakdown": {
+                      "anyOf": [
+                        {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "required": [
+                              "category",
+                              "tokens"
+                            ],
+                            "properties": {
+                              "category": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "const": "system_prompt"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "tool_definitions"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "rules"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "skills"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "mcp_dynamic_tools"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "subagent_definitions"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "summarized_conversation"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "conversation"
+                                  }
+                                ]
+                              },
+                              "tokens": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 9007199254740991
+                              }
+                            },
+                            "additionalProperties": false
+                          },
+                          "maxItems": 9
                         },
                         {
                           "type": "null"
@@ -42217,6 +42297,8 @@
                 "mode",
                 "contextTokens",
                 "contextWindow",
+                "contextBasis",
+                "contextBreakdown",
                 "remainingPercent",
                 "cacheHitPercent"
               ],
@@ -42256,6 +42338,84 @@
                       "type": "integer",
                       "minimum": 1,
                       "maximum": 10000000
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "contextBasis": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "const": "reported_total"
+                    },
+                    {
+                      "type": "string",
+                      "const": "estimated_total"
+                    },
+                    {
+                      "type": "string",
+                      "const": "unavailable"
+                    }
+                  ]
+                },
+                "contextBreakdown": {
+                  "anyOf": [
+                    {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "category",
+                          "tokens"
+                        ],
+                        "properties": {
+                          "category": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "const": "system_prompt"
+                              },
+                              {
+                                "type": "string",
+                                "const": "tool_definitions"
+                              },
+                              {
+                                "type": "string",
+                                "const": "rules"
+                              },
+                              {
+                                "type": "string",
+                                "const": "skills"
+                              },
+                              {
+                                "type": "string",
+                                "const": "mcp_dynamic_tools"
+                              },
+                              {
+                                "type": "string",
+                                "const": "subagent_definitions"
+                              },
+                              {
+                                "type": "string",
+                                "const": "summarized_conversation"
+                              },
+                              {
+                                "type": "string",
+                                "const": "conversation"
+                              }
+                            ]
+                          },
+                          "tokens": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 9007199254740991
+                          }
+                        },
+                        "additionalProperties": false
+                      },
+                      "maxItems": 9
                     },
                     {
                       "type": "null"

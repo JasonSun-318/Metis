@@ -191,6 +191,8 @@ class FakeRuntime implements OpenedSessionRuntime {
 			mode: "code",
 			contextTokens: 64_000,
 			contextWindow: 128_000,
+			contextBasis: "reported_total",
+			contextBreakdown: [{ category: "conversation", tokens: 64_000 }],
 			remainingPercent: 50,
 			cacheHitPercent: 25,
 		};

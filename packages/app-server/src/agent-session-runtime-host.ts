@@ -1165,11 +1165,28 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 	async getStatus(input: ClientParams<"session/status">): Promise<ClientResult<"session/status">> {
 		const stats = this.session.getSessionStats();
 		const context = stats.contextUsage;
+		const contextBasis =
+			context?.tokens == null
+				? "unavailable"
+				: context.basis === "reported_total"
+					? "reported_total"
+					: "estimated_total";
+		let contextBreakdown: ClientResult<"session/status">["contextBreakdown"] =
+			context?.tokens == null ? null : context.tokens === 0 ? [] : null;
+		if (context?.tokens != null && context.breakdown) {
+			const categories = context.breakdown.map((item) => item.category);
+			const sum = context.breakdown.reduce((total, item) => total + item.tokens, 0);
+			if (new Set(categories).size === categories.length && sum === context.tokens) {
+				contextBreakdown = [...context.breakdown];
+			}
+		}
 		return {
 			sessionId: input.sessionId,
 			mode: stats.mode,
 			contextTokens: context?.tokens ?? null,
 			contextWindow: context?.contextWindow ?? null,
+			contextBasis,
+			contextBreakdown,
 			remainingPercent: context?.percent == null ? null : Math.max(0, Math.min(100, 100 - context.percent)),
 			cacheHitPercent: getLatestCacheHitPercent(this.session.sessionManager.getEntries()) ?? null,
 		};

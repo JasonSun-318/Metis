@@ -442,6 +442,12 @@ describe("production runtime streaming", () => {
 			});
 			if ("result" in status && "remainingPercent" in status.result) {
 				expect(status.result.contextTokens).toEqual(expect.any(Number));
+				// This streaming fixture does not emit a provider usage block, so the runtime must estimate.
+				expect(status.result.contextBasis).toBe("estimated_total");
+				expect(status.result.contextBreakdown).toEqual(expect.any(Array));
+				expect(status.result.contextBreakdown!.reduce((sum, item) => sum + item.tokens, 0)).toBe(
+					status.result.contextTokens,
+				);
 				expect(status.result.remainingPercent).toBeGreaterThanOrEqual(0);
 				expect(status.result.remainingPercent).toBeLessThanOrEqual(100);
 			}

@@ -53,6 +53,11 @@ const sessionStatusResult = {
 	mode: "code",
 	contextTokens: 64_000,
 	contextWindow: 128_000,
+	contextBasis: "reported_total",
+	contextBreakdown: [
+		{ category: "system_prompt", tokens: 4_000 },
+		{ category: "conversation", tokens: 60_000 },
+	],
 	remainingPercent: 50,
 	cacheHitPercent: 25,
 } satisfies ClientResult<"session/status">;

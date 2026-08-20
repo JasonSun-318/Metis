@@ -824,14 +824,53 @@ export const QueuedTurnViewSchema = StrictObject({
 
 export const QueuedTurnsSchema = Type.Array(QueuedTurnViewSchema, { maxItems: 32 });
 
-export const SessionStatusViewSchema = StrictObject({
-	sessionId: SessionIdSchema,
-	mode: AgentModeSchema,
-	contextTokens: Type.Union([Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }), Type.Null()]),
-	contextWindow: Type.Union([Type.Integer({ minimum: 1, maximum: 10_000_000 }), Type.Null()]),
-	remainingPercent: Type.Union([Type.Number({ minimum: 0, maximum: 100 }), Type.Null()]),
-	cacheHitPercent: Type.Union([Type.Number({ minimum: 0, maximum: 100 }), Type.Null()]),
+export const ContextUsageBasisViewSchema = Type.Union([
+	Type.Literal("reported_total"),
+	Type.Literal("estimated_total"),
+	Type.Literal("unavailable"),
+]);
+
+export const ContextUsageCategoryViewSchema = Type.Union([
+	Type.Literal("system_prompt"),
+	Type.Literal("tool_definitions"),
+	Type.Literal("rules"),
+	Type.Literal("skills"),
+	Type.Literal("mcp_dynamic_tools"),
+	Type.Literal("subagent_definitions"),
+	Type.Literal("summarized_conversation"),
+	Type.Literal("conversation"),
+]);
+
+export const ContextUsageBreakdownItemViewSchema = StrictObject({
+	category: ContextUsageCategoryViewSchema,
+	tokens: Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }),
 });
+
+export const SessionStatusViewSchema = Type.Refine(
+	StrictObject({
+		sessionId: SessionIdSchema,
+		mode: AgentModeSchema,
+		contextTokens: Type.Union([Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }), Type.Null()]),
+		contextWindow: Type.Union([Type.Integer({ minimum: 1, maximum: 10_000_000 }), Type.Null()]),
+		contextBasis: ContextUsageBasisViewSchema,
+		contextBreakdown: Type.Union([Type.Array(ContextUsageBreakdownItemViewSchema, { maxItems: 9 }), Type.Null()]),
+		remainingPercent: Type.Union([Type.Number({ minimum: 0, maximum: 100 }), Type.Null()]),
+		cacheHitPercent: Type.Union([Type.Number({ minimum: 0, maximum: 100 }), Type.Null()]),
+	}),
+	(value) => {
+		if (value.contextBasis === "unavailable") {
+			return value.contextTokens === null && value.contextBreakdown === null;
+		}
+		if (value.contextTokens === null || value.contextWindow === null) return false;
+		if (value.contextBreakdown === null) return true;
+		const categories = value.contextBreakdown.map((item) => item.category);
+		return (
+			new Set(categories).size === categories.length &&
+			value.contextBreakdown.reduce((sum, item) => sum + item.tokens, 0) === value.contextTokens
+		);
+	},
+	"Context usage status is inconsistent",
+);
 
 export const SessionSnapshotSchema = StrictObject({
 	session: SessionSummarySchema,
@@ -1264,6 +1303,9 @@ export type SessionGoalStatusView = Static<typeof SessionGoalStatusSchema>;
 export type SessionGoalView = Static<typeof SessionGoalViewSchema>;
 export type QueuedTurnAttachmentView = Static<typeof QueuedTurnAttachmentViewSchema>;
 export type QueuedTurnView = Static<typeof QueuedTurnViewSchema>;
+export type ContextUsageBasisView = Static<typeof ContextUsageBasisViewSchema>;
+export type ContextUsageCategoryView = Static<typeof ContextUsageCategoryViewSchema>;
+export type ContextUsageBreakdownItemView = Static<typeof ContextUsageBreakdownItemViewSchema>;
 export type SessionStatusView = Static<typeof SessionStatusViewSchema>;
 export type SessionSnapshot = Static<typeof SessionSnapshotSchema>;
 export type ThinkingSelectionView = Static<typeof ThinkingSelectionSchema>;
