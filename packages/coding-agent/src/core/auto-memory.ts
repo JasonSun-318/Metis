@@ -34,6 +34,10 @@ export function getAutoMemoryRoot(agentDir: string): string {
 	return join(resolvePath(agentDir), "memory");
 }
 
+export function getMemorySqlitePath(agentDir: string): string {
+	return join(getAutoMemoryRoot(agentDir), "memory.sqlite");
+}
+
 export function getAutoMemoryPaths(agentDir: string, cwd: string, mode: AgentMode): AutoMemorySnapshot {
 	const memoryDir = getAutoMemoryRoot(agentDir);
 	const projectDir = join(memoryDir, "projects", encodePathForStorage(canonicalizePathForCreation(cwd)), mode);
