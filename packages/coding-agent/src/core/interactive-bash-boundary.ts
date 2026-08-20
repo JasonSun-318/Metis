@@ -12,6 +12,17 @@ export interface InteractiveBashContext {
 	readonly shellPath?: string;
 }
 
+/** Roots mounted read-only in the interactive Bash sandbox (attachments, long-term memory, …). */
+export function buildInteractiveBashReadOnlyRoots(input: {
+	readonly attachmentDir?: string;
+	readonly memoryRoot?: string;
+}): string[] {
+	const roots: string[] = [];
+	if (input.attachmentDir) roots.push(input.attachmentDir);
+	if (input.memoryRoot) roots.push(input.memoryRoot);
+	return roots;
+}
+
 export interface InteractiveBashBoundary {
 	readonly operations: BashOperations;
 	bind(actionId: string, target: PermissionExecutionTarget): void;

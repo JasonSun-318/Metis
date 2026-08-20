@@ -1,5 +1,9 @@
+import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createInteractiveBashBoundary } from "../src/core/interactive-bash-boundary.ts";
+import {
+	buildInteractiveBashReadOnlyRoots,
+	createInteractiveBashBoundary,
+} from "../src/core/interactive-bash-boundary.ts";
 import type { BashOperations } from "../src/core/tools/bash.ts";
 import type { WorkspaceSandbox } from "../src/core/workspace-sandbox.ts";
 
@@ -89,6 +93,27 @@ describe("interactive Bash boundary", () => {
 		await value.operations.exec("pwd", cwd, options("three"));
 		expect(createSandbox).toHaveBeenCalledTimes(2);
 		expect(first.dispose).toHaveBeenCalledOnce();
+	});
+
+	it("passes memory root through as a sandbox readOnlyRoot", async () => {
+		const memoryRoot = join(cwd, "agent-memory");
+		const createSandbox = vi.fn(async () => sandbox());
+		const value = boundary({
+			createSandbox,
+			context: () => ({
+				cwd,
+				workspaceRoots: [cwd],
+				readOnlyRoots: buildInteractiveBashReadOnlyRoots({ memoryRoot }),
+				writeRoots: [],
+			}),
+		});
+		value.bind("safe", "sandbox");
+		await value.operations.exec("pwd", cwd, options("safe"));
+		expect(createSandbox).toHaveBeenCalledWith(
+			expect.objectContaining({
+				readOnlyRoots: expect.arrayContaining([expect.stringContaining("agent-memory")]),
+			}),
+		);
 	});
 
 	it("serializes sandbox commands and skips an aborted queued command", async () => {

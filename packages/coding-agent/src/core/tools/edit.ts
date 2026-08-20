@@ -6,6 +6,7 @@ import { type Static, Type } from "typebox";
 import { renderDiff } from "../../modes/interactive/components/diff.ts";
 import type { Theme } from "../../modes/interactive/theme/theme.ts";
 import type { ToolDefinition } from "../extensions/types.ts";
+import { assertNotRestrictedFsWrite } from "../memory/memory-path-guard.ts";
 import {
 	applyEditsToNormalizedContent,
 	computeEditsDiff,
@@ -90,6 +91,8 @@ const defaultEditOperations: EditOperations = {
 export interface EditToolOptions {
 	/** Custom operations for file editing. Default: local filesystem */
 	operations?: EditOperations;
+	/** Absolute roots the main session may not write (e.g. long-term memory). */
+	restrictedRoots?: readonly string[];
 }
 
 function prepareEditArguments(input: unknown): EditToolInput {
@@ -309,6 +312,7 @@ export function createEditToolDefinition(
 		async execute(_toolCallId, input: EditToolInput, signal?: AbortSignal, _onUpdate?, _ctx?) {
 			const { path, edits } = validateEditInput(input);
 			const absolutePath = resolveToCwd(path, cwd);
+			assertNotRestrictedFsWrite(absolutePath, options?.restrictedRoots);
 
 			return withFileMutationQueue(absolutePath, async () => {
 				// Do not reject from an abort event listener here: that would release the

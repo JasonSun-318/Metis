@@ -238,6 +238,7 @@ export {
 } from "./core/hooks/declarative-hooks.ts";
 export { createDeclarativeHooksBridge } from "./core/hooks/hook-bridge.ts";
 export {
+	buildInteractiveBashReadOnlyRoots,
 	createInteractiveBashBoundary,
 	type InteractiveBashBoundary,
 	type InteractiveBashContext,

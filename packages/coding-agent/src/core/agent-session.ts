@@ -51,7 +51,7 @@ import { sleep } from "../utils/sleep.ts";
 import type { AgentMode } from "./agent-mode.ts";
 import { formatNoApiKeyFoundMessage, formatNoModelSelectedMessage } from "./auth-guidance.ts";
 import type { McpSecretCredential } from "./auth-storage.ts";
-import { type AutoMemorySnapshot, getMemorySqlitePath, loadAutoMemory } from "./auto-memory.ts";
+import { type AutoMemorySnapshot, getAutoMemoryRoot, getMemorySqlitePath, loadAutoMemory } from "./auto-memory.ts";
 import { type BashResult, executeBashWithOperations } from "./bash-executor.ts";
 import { readBoundedUtf8FileSync } from "./bounded-text-file.ts";
 import {
@@ -115,7 +115,11 @@ import {
 	writeThreadGoal,
 } from "./goal/index.ts";
 import type { ThreadGoal } from "./goal/types.ts";
-import { createInteractiveBashBoundary, type InteractiveBashBoundary } from "./interactive-bash-boundary.ts";
+import {
+	buildInteractiveBashReadOnlyRoots,
+	createInteractiveBashBoundary,
+	type InteractiveBashBoundary,
+} from "./interactive-bash-boundary.ts";
 import { externalizeLargeToolOutput, type PersistedToolOutput } from "./large-tool-output.ts";
 import {
 	createMcpToolDefinitions,
@@ -683,7 +687,10 @@ export class AgentSession {
 						return {
 							cwd: this.sessionManager.getCwd(),
 							workspaceRoots: this.sessionManager.getWorkspaceRoots(),
-							readOnlyRoots: attachmentDir ? [attachmentDir] : [],
+							readOnlyRoots: buildInteractiveBashReadOnlyRoots({
+								attachmentDir,
+								memoryRoot: this._agentDir ? getAutoMemoryRoot(this._agentDir) : undefined,
+							}),
 							writeRoots: activeWorkDir ? [activeWorkDir] : [],
 							shellPath: this.settingsManager.getShellPath(),
 						};
@@ -4869,6 +4876,8 @@ export class AgentSession {
 								}
 							: {}),
 					},
+					write: this._agentDir ? { restrictedRoots: [getAutoMemoryRoot(this._agentDir)] } : undefined,
+					edit: this._agentDir ? { restrictedRoots: [getAutoMemoryRoot(this._agentDir)] } : undefined,
 					webSearch: {
 						getSettings: () => this.settingsManager.getWebSearchSettings(),
 						getApiKey: (provider) => resolveWebSearchApiKey(this._modelRegistry.authStorage, provider),
