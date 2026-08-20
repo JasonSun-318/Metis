@@ -145,6 +145,7 @@ import {
 	type RunMemoryExtractOptions,
 	runMemoryExtract,
 } from "./memory/memory-extract.ts";
+import { assertBashDoesNotTouchMemory } from "./memory/memory-path-guard.ts";
 import {
 	backfillMemoryEmbeddings,
 	MEMORY_RETRIEVE_TIMEOUT_MS,
@@ -686,12 +687,18 @@ export class AgentSession {
 			: (config.interactiveBashBoundary ??
 				createInteractiveBashBoundary({
 					hostOperations: {
-						exec: (command, cwd, options) =>
-							createLocalBashOperations({ shellPath: this.settingsManager.getShellPath() }).exec(
+						exec: (command, cwd, options) => {
+							assertBashDoesNotTouchMemory(
+								command,
+								cwd,
+								this._agentDir ? getAutoMemoryRoot(this._agentDir) : undefined,
+							);
+							return createLocalBashOperations({ shellPath: this.settingsManager.getShellPath() }).exec(
 								command,
 								cwd,
 								options,
-							),
+							);
+						},
 					},
 					context: () => {
 						const sessionId = this.sessionManager.getSessionId();
@@ -2268,6 +2275,22 @@ export class AgentSession {
 
 	async waitForMemoryExtract(): Promise<void> {
 		await this._memoryExtractPromise?.catch(() => undefined);
+	}
+
+	/** Wrap bash ops so host/full paths cannot touch the long-term memory directory. */
+	private _bashOperationsGuardingMemory(operations: BashOperations): BashOperations {
+		const memoryRoot = this._agentDir ? getAutoMemoryRoot(this._agentDir) : undefined;
+		if (!memoryRoot) return operations;
+		return {
+			exec: (command, cwd, options) => {
+				assertBashDoesNotTouchMemory(command, cwd, memoryRoot);
+				return operations.exec(command, cwd, options);
+			},
+		};
+	}
+
+	private _optionalBashOperationsGuardingMemory(operations: BashOperations | undefined): BashOperations | undefined {
+		return operations ? this._bashOperationsGuardingMemory(operations) : undefined;
 	}
 
 	/** Current retry attempt (0 if not retrying) */
@@ -4966,7 +4989,9 @@ export class AgentSession {
 				)
 			: createAllToolDefinitions(this._cwd, {
 					bash: {
-						operations: this._unattendedExecution?.bashOperations ?? this._interactiveBashBoundary?.operations,
+						operations: this._optionalBashOperationsGuardingMemory(
+							this._unattendedExecution?.bashOperations ?? this._interactiveBashBoundary?.operations,
+						),
 						commandPrefix: shellCommandPrefix,
 						shellPath,
 						outputDir: this._toolOutputDir,
@@ -5235,7 +5260,7 @@ export class AgentSession {
 			const result = await executeBashWithOperations(
 				resolvedCommand,
 				this.sessionManager.getCwd(),
-				options?.operations ?? createLocalBashOperations({ shellPath }),
+				this._bashOperationsGuardingMemory(options?.operations ?? createLocalBashOperations({ shellPath })),
 				{
 					onChunk,
 					signal: this._bashAbortController.signal,

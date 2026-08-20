@@ -5,7 +5,7 @@ import { serializeExtractEvidence } from "../src/core/memory/memory-evidence.ts"
 
 describe("serializeExtractEvidence", () => {
 	it("keeps user and capped assistant text, names tools, and omits tool bodies", () => {
-		const hugeBody = "HUGE_TOOL_BODY_MARKER_" + "x".repeat(50_000);
+		const hugeBody = `HUGE_TOOL_BODY_MARKER_${"x".repeat(50_000)}`;
 		const messages: AgentMessage[] = [
 			{
 				role: "user",

@@ -61,4 +61,19 @@ describe("memory path guard", () => {
 			content: [{ type: "text", text: expect.stringContaining("Successfully wrote") }],
 		});
 	});
+
+	it("blocks bash cwd or absolute paths under the memory root", async () => {
+		const { assertBashDoesNotTouchMemory } = await import("../src/core/memory/memory-path-guard.ts");
+		const agentDir = join(makeTemp(), "agent");
+		const memoryRoot = getAutoMemoryRoot(agentDir);
+		const workspace = join(makeTemp(), "workspace");
+		mkdirSync(memoryRoot, { recursive: true });
+		mkdirSync(workspace, { recursive: true });
+
+		expect(() => assertBashDoesNotTouchMemory("echo hi", workspace, memoryRoot)).not.toThrow();
+		expect(() => assertBashDoesNotTouchMemory("echo hi", memoryRoot, memoryRoot)).toThrow(/read-only|memory/i);
+		expect(() =>
+			assertBashDoesNotTouchMemory(`echo x > "${join(memoryRoot, "MEMORY.md")}"`, workspace, memoryRoot),
+		).toThrow(/read-only|memory/i);
+	});
 });
