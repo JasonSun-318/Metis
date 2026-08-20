@@ -205,9 +205,9 @@ function isExpandable(obj: unknown): obj is Expandable {
 
 const COMPACTION_SAFE_COMMANDS = new Set(["copy", "session", "hotkeys", "dream", "dirs", "quit", "debug"]);
 const COMPACTION_WARNING =
-	"Compact/Dream is running. Wait for it to finish, then run the command again. Press Esc to cancel.";
+	"Compact/Memory extract is running. Wait for it to finish, then run the command again. Press Esc to cancel.";
 
-function formatDreamDuration(durationMs: number): string {
+function formatMemoryExtractDuration(durationMs: number): string {
 	return durationMs < 1000 ? `${durationMs}ms` : `${(durationMs / 1000).toFixed(1)}s`;
 }
 
@@ -5652,7 +5652,7 @@ export class InteractiveMode {
 		if (snapshot.active) {
 			const elapsed = Math.max(0, Date.now() - new Date(snapshot.active.startedAt).getTime());
 			lines.push(
-				`${theme.fg("warning", "running")} · ${snapshot.active.extractMode} · ${snapshot.active.trigger} · ${formatDreamDuration(elapsed)} · ${snapshot.active.cwd}`,
+				`${theme.fg("warning", "running")} · ${snapshot.active.extractMode} · ${snapshot.active.trigger} · ${formatMemoryExtractDuration(elapsed)} · ${snapshot.active.cwd}`,
 			);
 		} else {
 			lines.push(theme.fg("dim", "idle"));

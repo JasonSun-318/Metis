@@ -160,8 +160,7 @@ Type `/` in the editor to trigger commands. [Extensions](#extensions) can regist
 | `/copy` | Copy last assistant message to clipboard |
 | `/export [file]` | Export session to HTML or JSONL file |
 | `/import <file>` | Import and resume a session from a JSONL file |
-| `/memory [on\|off]` | Show or toggle long-term memory |
-| `/dream` | Show Dream status and the latest 10 memory-maintenance runs |
+| `/memory [on\|off\|engine …]` | Show status, toggle long-term memory, or set engine (`index` / `extract`) |
 | `/reload` | Reload resources, context files, and memory |
 | `/hotkeys` | Show all keyboard shortcuts |
 | `/quit` | Quit metis |
@@ -250,15 +249,20 @@ Compaction is lossy. The full history remains in the JSONL file; use `/tree` to 
 
 ## Long-Term Memory
 
-Metis keeps long-term memory outside session JSONL files. `~/.metis/agent/memory/MEMORY.md` is the global index. Each exact working directory gets a separate `memory/projects/--<cwd>--/project.md` index, so sessions, forks, and tree branches in the same directory share project memory without relying on Git.
+Metis keeps long-term memory outside session JSONL files. Facts live in a SQLite ledger at `~/.metis/agent/memory/memory.sqlite`. Markdown files (`MEMORY.md`, per-project `project.md`, and topic files) are projections for humans and for the index engine—not the source of truth. Each exact working directory gets a separate `memory/projects/--<cwd>--/<mode>/` tree, so sessions, forks, and tree branches in the same directory share project memory without relying on Git.
 
-The first 200 lines or 25KB of each index are loaded into the system prompt. Detailed notes belong in linked topic files and are read on demand. Use `/memory` to inspect paths, `/memory off` to disable injection, and `/reload` after editing an index outside Metis. Memory is not exported with or deleted alongside session JSONL files.
+Two engines (global `memoryEngine`, default `index`):
 
-Dream runs silently alongside manual and automatic context compaction when long-term memory is enabled. It reconciles only global memory and the project memory for the current working directory. Ordinary messages and images stay queued until Compact and Dream both settle.
+- **index** — injects truncated catalog indexes into the system prompt.
+- **extract** — embeds the current user message, retrieves relevant facts from SQLite, and injects those hits. Requires `memoryEmbeddingModel` before you can enable it (`/memory engine extract` refuses without one).
 
-`/dream` is read-only and remains available while Dream is running. It shows live state and the latest 10 metadata-only records from `~/.metis/agent/memory/dream-history.jsonl`; it never starts Dream manually.
+Use `/memory` to inspect on/off state, engine, catalog paths, and recent Memory extract runs; `/memory on|off` to toggle injection; `/memory engine index|extract` to switch engines; and `/reload` after editing an index outside Metis. Memory is not exported with or deleted alongside session JSONL files.
 
-While Compact/Dream runs, Shell commands, extension commands, and built-ins that mutate model, settings, authentication, sessions, imports, exports, or memory are rejected and left in the editor. Read-only `/dirs`, `/copy`, `/session`, `/hotkeys`, `/memory`, `/dream`, `/quit`, `/debug`, Escape, and display-only shortcuts remain available; `/add-dir` and `/remove-dir` remain blocked.
+For the index engine, the first 200 lines or 25KB of each catalog are loaded into the system prompt. When a catalog is truncated, the prompt tells the model to grep the full index path rather than reading the whole file. Detailed notes belong in linked topic files and are read on demand.
+
+Memory extract runs in the background alongside manual and automatic context compaction when long-term memory is enabled. It updates only global memory and the project memory for the current working directory. Ordinary messages and images stay queued until Compact and Memory extract both settle.
+
+While Compact/Memory extract runs, Shell commands, extension commands, and built-ins that mutate model, settings, authentication, sessions, imports, exports, or memory are rejected and left in the editor. Read-only `/dirs`, `/copy`, `/session`, `/hotkeys`, bare `/memory`, `/quit`, `/debug`, Escape, and display-only shortcuts remain available; `/add-dir`, `/remove-dir`, and mutating `/memory on|off|engine …` remain blocked.
 
 ---
 

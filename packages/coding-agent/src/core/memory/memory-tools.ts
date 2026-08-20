@@ -9,7 +9,7 @@ import { looksLikeSecret } from "./memory-secrets.ts";
 import type { MemoryStore } from "./memory-store.ts";
 import type { MemoryFact, MemoryScope } from "./memory-types.ts";
 
-/** Same basename rule as Dream / ingest — flat `.md` only, no traversal. */
+/** Same basename rule as ingest / projection — flat `.md` only, no traversal. */
 export const SAFE_MEMORY_FILE = /^(?!\.)(?!.*\.\.)([A-Za-z0-9][A-Za-z0-9._-]*)\.md$/;
 
 const FactInputSchema = Type.Object(

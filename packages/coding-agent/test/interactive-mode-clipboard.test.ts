@@ -45,7 +45,7 @@ test("submits numbered clipboard images in placeholder order", async () => {
 	expect(editor.addToHistory).toHaveBeenCalledWith("compare");
 });
 
-test("preserves blocked commands and queues numbered images during Compact/Dream", async () => {
+test("preserves blocked commands and queues numbered images during Compact/Memory extract", async () => {
 	const image: ImageContent = { type: "image", data: "image", mimeType: "image/png" };
 	const editor = {
 		addToHistory: vi.fn(),
@@ -71,7 +71,7 @@ test("preserves blocked commands and queues numbered images during Compact/Dream
 	(InteractiveMode.prototype as any).setupEditorSubmitHandler.call(mode);
 	await editor.onSubmit?.("/settings");
 	expect(mode.showWarning).toHaveBeenCalledWith(
-		"Compact/Dream is running. Wait for it to finish, then run the command again. Press Esc to cancel.",
+		"Compact/Memory extract is running. Wait for it to finish, then run the command again. Press Esc to cancel.",
 	);
 	expect(editor.setText).not.toHaveBeenCalled();
 

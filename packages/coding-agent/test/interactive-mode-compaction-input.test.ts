@@ -28,8 +28,11 @@ const route = Reflect.get(InteractiveMode.prototype, "routeCompactionInput") as 
 	mode: "steer" | "followUp",
 ) => RouteResult;
 
-describe("Compact/Dream input routing", () => {
-	it.each(["/copy", "/session", "/hotkeys", "/memory", "/dream", "/quit", "/debug"])(
+const COMPACTION_WARNING =
+	"Compact/Memory extract is running. Wait for it to finish, then run the command again. Press Esc to cancel.";
+
+describe("Compact/Memory extract input routing", () => {
+	it.each(["/copy", "/session", "/hotkeys", "/memory", "/quit", "/debug"])(
 		"dispatches safe command %s immediately",
 		(text) => {
 			const context = createContext();
@@ -58,15 +61,15 @@ describe("Compact/Dream input routing", () => {
 		"/resume",
 		"/memory on",
 		"/memory off",
+		"/memory engine index",
+		"/memory engine extract",
 		"/reload",
 		"/extension-command",
 	])("blocks unsafe command %s without clearing the editor", (text) => {
 		const context = createContext(text === "/extension-command");
 		expect(route.call(context, text, "steer")).toBe("handled");
 		expect(context.editor.setText).not.toHaveBeenCalled();
-		expect(context.showWarning).toHaveBeenCalledWith(
-			"Compact/Dream is running. Wait for it to finish, then run the command again. Press Esc to cancel.",
-		);
+		expect(context.showWarning).toHaveBeenCalledWith(COMPACTION_WARNING);
 	});
 
 	it.each(["ordinary message", "xdream", "/skill:notes summarize", "/prompt-template input"])(
