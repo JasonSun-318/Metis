@@ -6,6 +6,12 @@ import lockfile from "proper-lockfile";
 import { getAgentDir, getMetisEnv, getProjectConfigDir } from "../config.ts";
 import { normalizePath, resolvePath } from "../utils/paths.ts";
 import { DEFAULT_HTTP_IDLE_TIMEOUT_MS, parseHttpIdleTimeoutMs } from "./http-dispatcher.ts";
+import {
+	type EmbeddingSettings,
+	type RerankSettings,
+	validateEmbeddingSettings,
+	validateRerankSettings,
+} from "./memory/memory-service-settings.ts";
 import type { ThinkingSelection } from "./thinking-selection.ts";
 import { isWebSearchProvider, type WebSearchProvider } from "./web-search-config.ts";
 
@@ -154,7 +160,12 @@ export interface Settings {
 	enableSkillCommands?: boolean; // default: true - register skills as /skill:name commands
 	autoMemoryEnabled?: boolean; // default: true; global setting only
 	memoryEngine?: "index" | "extract"; // default: "index"; global setting only
+	embedding?: EmbeddingSettings;
+	rerank?: RerankSettings;
+	memoryMigrationNotice?: string;
+	/** @deprecated Removed by one-time memory settings migration. */
 	memoryEmbeddingModel?: string; // global setting only; required before enabling extract engine
+	/** @deprecated Removed by one-time memory settings migration. */
 	memoryRerankModel?: string; // global setting only
 	terminal?: TerminalSettings;
 	enabledModels?: string[]; // Model patterns for cycling (same format as --models CLI flag)
@@ -398,17 +409,15 @@ export class SettingsManager {
 			return {};
 		}
 
-		let content: string | undefined;
+		let loaded: Settings = {};
 		storage.withLock(scope, (current) => {
-			content = current;
-			return undefined;
+			if (!current) return undefined;
+			const parsed = JSON.parse(current) as Record<string, unknown>;
+			loaded = SettingsManager.migrateSettings(parsed);
+			const migrated = JSON.stringify(loaded, null, 2);
+			return migrated === current ? undefined : migrated;
 		});
-
-		if (!content) {
-			return {};
-		}
-		const settings = JSON.parse(content);
-		return SettingsManager.migrateSettings(settings);
+		return loaded;
 	}
 
 	private static tryLoadFromStorage(
@@ -456,6 +465,33 @@ export class SettingsManager {
 			} else {
 				delete settings.skills;
 			}
+		}
+
+		let embedding: EmbeddingSettings | undefined;
+		if (settings.embedding !== undefined) {
+			try {
+				embedding = validateEmbeddingSettings(settings.embedding);
+				settings.embedding = embedding;
+			} catch {
+				delete settings.embedding;
+			}
+		}
+		if (settings.rerank !== undefined) {
+			try {
+				settings.rerank = validateRerankSettings(settings.rerank);
+			} catch {
+				delete settings.rerank;
+			}
+		}
+		const hadLegacyMemoryModels = "memoryEmbeddingModel" in settings || "memoryRerankModel" in settings;
+		if (hadLegacyMemoryModels) {
+			delete settings.memoryEmbeddingModel;
+			delete settings.memoryRerankModel;
+		}
+		if (!embedding && (settings.memoryEngine === "extract" || hadLegacyMemoryModels)) {
+			if (settings.memoryEngine === "extract") settings.memoryEngine = "index";
+			settings.memoryMigrationNotice =
+				"Memory model settings changed; reconfigure Embedding and optional Rerank in Settings → Model.";
 		}
 
 		// Migrate retry.maxDelayMs -> retry.provider.maxRetryDelayMs
@@ -762,6 +798,25 @@ export class SettingsManager {
 		await this.writeQueue;
 	}
 
+	async throwPendingWriteError(): Promise<void> {
+		await this.writeQueue;
+		const [failure] = this.drainErrors();
+		if (!failure) return;
+		const original = failure.error;
+		try {
+			await this.reload();
+			this.drainErrors();
+		} catch (recoveryError) {
+			(original as Error & { cause?: unknown }).cause ??= recoveryError;
+		}
+		throw original;
+	}
+
+	async flushOrThrow(): Promise<void> {
+		await this.flush();
+		await this.throwPendingWriteError();
+	}
+
 	drainErrors(): SettingsError[] {
 		const drained = [...this.errors];
 		this.errors = [];
@@ -798,6 +853,24 @@ export class SettingsManager {
 		this.globalSettings.defaultModel = modelId;
 		this.markModified("defaultProvider");
 		this.markModified("defaultModel");
+		this.save();
+	}
+
+	setDefaultModelSettings(
+		model: { provider: string; modelId: string } | null,
+		thinkingSelection: ThinkingSelection,
+	): void {
+		if (model) {
+			this.globalSettings.defaultProvider = model.provider;
+			this.globalSettings.defaultModel = model.modelId;
+		} else {
+			delete this.globalSettings.defaultProvider;
+			delete this.globalSettings.defaultModel;
+		}
+		this.globalSettings.defaultThinkingLevel = thinkingSelection;
+		this.markModified("defaultProvider");
+		this.markModified("defaultModel");
+		this.markModified("defaultThinkingLevel");
 		this.save();
 	}
 
@@ -1211,11 +1284,8 @@ export class SettingsManager {
 			return;
 		}
 		if (engine === "extract") {
-			const embeddingModel = this.globalSettings.memoryEmbeddingModel?.trim();
-			if (!embeddingModel) {
-				throw new Error(
-					'Cannot enable memory engine "extract" without memoryEmbeddingModel. Configure an embedding model first (provider/model).',
-				);
+			if (!this.globalSettings.embedding) {
+				throw new Error('Cannot enable memory engine "extract" without configured Embedding settings.');
 			}
 		}
 		this.globalSettings.memoryEngine = engine;
@@ -1223,23 +1293,60 @@ export class SettingsManager {
 		this.save();
 	}
 
-	getMemoryEmbeddingModel(): string | undefined {
-		return this.globalSettings.memoryEmbeddingModel;
-	}
-
-	setMemoryEmbeddingModel(model: string): void {
-		this.globalSettings.memoryEmbeddingModel = model;
-		this.markModified("memoryEmbeddingModel");
+	setMemorySettings(autoMemoryEnabled: boolean, memoryEngine: "index" | "extract"): void {
+		if (memoryEngine === "extract" && !this.globalSettings.embedding) {
+			throw new Error('Cannot enable memory engine "extract" without configured Embedding settings.');
+		}
+		this.globalSettings.autoMemoryEnabled = autoMemoryEnabled;
+		this.globalSettings.memoryEngine = memoryEngine;
+		this.markModified("autoMemoryEnabled");
+		this.markModified("memoryEngine");
 		this.save();
 	}
 
-	getMemoryRerankModel(): string | undefined {
-		return this.globalSettings.memoryRerankModel;
+	getEmbeddingSettings(): EmbeddingSettings | undefined {
+		return this.globalSettings.embedding ? structuredClone(this.globalSettings.embedding) : undefined;
 	}
 
-	setMemoryRerankModel(model: string): void {
-		this.globalSettings.memoryRerankModel = model;
-		this.markModified("memoryRerankModel");
+	setEmbeddingSettings(settings: EmbeddingSettings): void {
+		this.globalSettings.embedding = validateEmbeddingSettings(settings);
+		delete this.globalSettings.memoryMigrationNotice;
+		this.markModified("embedding");
+		this.markModified("memoryMigrationNotice");
+		this.save();
+	}
+
+	clearEmbeddingSettings(): void {
+		delete this.globalSettings.embedding;
+		if (this.globalSettings.memoryEngine === "extract") this.globalSettings.memoryEngine = "index";
+		this.markModified("embedding");
+		this.markModified("memoryEngine");
+		this.save();
+	}
+
+	getRerankSettings(): RerankSettings | undefined {
+		return this.globalSettings.rerank ? structuredClone(this.globalSettings.rerank) : undefined;
+	}
+
+	setRerankSettings(settings: RerankSettings): void {
+		this.globalSettings.rerank = validateRerankSettings(settings);
+		this.markModified("rerank");
+		this.save();
+	}
+
+	clearRerankSettings(): void {
+		delete this.globalSettings.rerank;
+		this.markModified("rerank");
+		this.save();
+	}
+
+	getMemoryMigrationNotice(): string | undefined {
+		return this.globalSettings.memoryMigrationNotice;
+	}
+
+	clearMemoryMigrationNotice(): void {
+		delete this.globalSettings.memoryMigrationNotice;
+		this.markModified("memoryMigrationNotice");
 		this.save();
 	}
 

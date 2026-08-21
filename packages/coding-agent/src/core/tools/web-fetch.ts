@@ -3,6 +3,7 @@ import { Text } from "@metis/tui";
 import { NodeHtmlMarkdown } from "node-html-markdown";
 import { type Static, Type } from "typebox";
 import { keyText } from "../../modes/interactive/components/keybinding-hints.ts";
+import { readBoundedResponseBytes } from "../bounded-response.ts";
 import type { ToolDefinition } from "../extensions/types.ts";
 import { getTextOutput, invalidArgText, str } from "./render-utils.ts";
 import { wrapToolDefinition } from "./tool-definition-wrapper.ts";
@@ -24,40 +25,6 @@ export interface WebFetchToolDetails {
 	status: number;
 	contentType: string;
 	bytes: number;
-}
-
-export async function readBoundedResponseBytes(response: Response): Promise<{ data: Uint8Array; bytes: number }> {
-	const declaredBytes = Number(response.headers.get("content-length"));
-	if (Number.isFinite(declaredBytes) && declaredBytes > MAX_WEB_RESPONSE_BYTES) {
-		await response.body?.cancel();
-		throw new Error("Response exceeds the 2,000,000 bytes limit");
-	}
-	if (!response.body) return { data: new Uint8Array(), bytes: 0 };
-
-	const reader = response.body.getReader();
-	const chunks: Uint8Array[] = [];
-	let bytes = 0;
-	try {
-		while (true) {
-			const { done, value } = await reader.read();
-			if (done) break;
-			bytes += value.byteLength;
-			if (bytes > MAX_WEB_RESPONSE_BYTES) {
-				await reader.cancel();
-				throw new Error("Response exceeds the 2,000,000 bytes limit");
-			}
-			chunks.push(value);
-		}
-		const data = new Uint8Array(bytes);
-		let offset = 0;
-		for (const chunk of chunks) {
-			data.set(chunk, offset);
-			offset += chunk.byteLength;
-		}
-		return { data, bytes };
-	} finally {
-		reader.releaseLock();
-	}
 }
 
 function parseUrl(value: string, base?: URL): URL {
@@ -187,7 +154,7 @@ export function createWebFetchToolDefinition(): ToolDefinition<typeof webFetchSc
 			if (!response.ok) throw new Error(`Request failed with HTTP ${response.status}`);
 
 			const { mediaType, charset } = parseContentType(response.headers.get("content-type"));
-			const { data, bytes } = await readBoundedResponseBytes(response);
+			const { data, bytes } = await readBoundedResponseBytes(response, MAX_WEB_RESPONSE_BYTES);
 			const text = decodeResponse(data, mediaType, charset);
 			return {
 				content: [{ type: "text", text: convertToMarkdown(text, mediaType, finalUrl) }],

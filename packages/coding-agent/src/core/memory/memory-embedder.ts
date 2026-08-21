@@ -1,125 +1,101 @@
-import type { ModelRegistry } from "../model-registry.ts";
+import { createHash } from "node:crypto";
+import { readBoundedResponseBytes } from "../bounded-response.ts";
+import {
+	type EmbeddingSettings,
+	normalizeEmbeddingBaseUrl,
+	validateEmbeddingSettings,
+	validateServiceCredential,
+} from "./memory-service-settings.ts";
 
-export const MEMORY_EMBED_DEFAULT_TIMEOUT_MS = 2500;
-
-export class MemoryEmbedTimeout extends Error {
-	constructor(message = "Memory embedding request timed out") {
-		super(message);
-		this.name = "MemoryEmbedTimeout";
-	}
-}
-
-export interface EmbeddingEndpoint {
-	baseUrl: string;
-	apiKey?: string;
-	headers?: Record<string, string>;
-	modelId: string;
-}
-
-export function parseProviderModelRef(modelRef: string): { provider: string; modelId: string } {
-	const slash = modelRef.indexOf("/");
-	if (slash <= 0 || slash === modelRef.length - 1) {
-		throw new Error(`memoryEmbeddingModel must be "provider/model", got: ${modelRef}`);
-	}
-	return { provider: modelRef.slice(0, slash), modelId: modelRef.slice(slash + 1) };
-}
-
-export async function resolveEmbeddingEndpoint(
-	modelRegistry: ModelRegistry,
-	modelRef: string,
-): Promise<EmbeddingEndpoint> {
-	const { provider, modelId } = parseProviderModelRef(modelRef);
-	const exact = modelRegistry.find(provider, modelId);
-	const fallback = modelRegistry.getAll().find((model) => model.provider === provider);
-	const model = exact ?? fallback;
-	if (!model?.baseUrl) {
-		throw new Error(`No baseUrl found for embedding provider "${provider}"`);
-	}
-
-	const auth = await modelRegistry.getApiKeyAndHeaders(model);
-	if (!auth.ok) {
-		throw new Error(auth.error);
-	}
-
-	return {
-		baseUrl: model.baseUrl.replace(/\/+$/, ""),
-		apiKey: auth.apiKey,
-		headers: auth.headers,
-		modelId,
-	};
-}
+export const MEMORY_EMBED_DEFAULT_TIMEOUT_MS = 30_000;
+const MAX_RESPONSE_BYTES = 16 * 1024 * 1024;
 
 export interface EmbedTextsOptions {
-	endpoint: EmbeddingEndpoint;
+	settings: EmbeddingSettings;
+	apiKey: string;
 	timeoutMs?: number;
 	fetchFn?: typeof fetch;
 	signal?: AbortSignal;
 }
 
-function isAbortError(error: unknown): boolean {
-	return (
-		(error instanceof Error && error.name === "AbortError") ||
-		(typeof error === "object" &&
-			error !== null &&
-			"name" in error &&
-			(error as { name: string }).name === "AbortError")
-	);
+export function embeddingConfigKey(settings: EmbeddingSettings): string {
+	const valid = validateEmbeddingSettings(settings);
+	return createHash("sha256")
+		.update(valid.api)
+		.update("\0")
+		.update(valid.baseUrl)
+		.update("\0")
+		.update(valid.modelId)
+		.update("\0")
+		.update(String(valid.dimensions ?? ""))
+		.digest("hex");
 }
 
 export async function embedTexts(texts: string[], options: EmbedTextsOptions): Promise<Float32Array[]> {
-	if (texts.length === 0) return [];
-
-	const timeoutMs = options.timeoutMs ?? MEMORY_EMBED_DEFAULT_TIMEOUT_MS;
-	const timeout = AbortSignal.timeout(timeoutMs);
+	if (texts.length < 1 || texts.length > 32) throw new Error("Embedding requires 1 through 32 inputs");
+	if (texts.some((text) => typeof text !== "string" || text.length > 8_000)) {
+		throw new Error("Each embedding input must contain at most 8000 characters");
+	}
+	const settings = validateEmbeddingSettings(options.settings);
+	const apiKey = validateServiceCredential(options.apiKey);
+	const timeout = AbortSignal.timeout(options.timeoutMs ?? MEMORY_EMBED_DEFAULT_TIMEOUT_MS);
 	const signal = options.signal ? AbortSignal.any([options.signal, timeout]) : timeout;
-	const fetchFn = options.fetchFn ?? globalThis.fetch;
-	const url = `${options.endpoint.baseUrl}/v1/embeddings`;
-	const headers: Record<string, string> = {
-		"content-type": "application/json",
-		...(options.endpoint.headers ?? {}),
-	};
-	if (options.endpoint.apiKey && !headers.Authorization && !headers.authorization) {
-		headers.Authorization = `Bearer ${options.endpoint.apiKey}`;
-	}
-
-	let response: Response;
-	try {
-		response = await fetchFn(url, {
-			method: "POST",
-			headers,
-			body: JSON.stringify({ model: options.endpoint.modelId, input: texts }),
-			signal,
-		});
-	} catch (error) {
-		if (isAbortError(error) || signal.aborted) {
-			throw new MemoryEmbedTimeout();
-		}
-		throw error;
-	}
-
-	if (!response.ok) {
-		throw new Error(`Embedding request failed with status ${response.status}`);
-	}
-
-	const payload = (await response.json()) as {
-		data?: Array<{ embedding?: number[]; index?: number }>;
-	};
-	const rows = Array.isArray(payload.data) ? [...payload.data] : [];
-	rows.sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
-	if (rows.length !== texts.length) {
-		throw new Error(`Embedding response size mismatch: expected ${texts.length}, got ${rows.length}`);
-	}
-
-	return rows.map((row) => {
-		if (!Array.isArray(row.embedding) || row.embedding.length === 0) {
-			throw new Error("Embedding response missing vector");
-		}
-		return Float32Array.from(row.embedding);
+	const response = await (options.fetchFn ?? fetch)(`${normalizeEmbeddingBaseUrl(settings.baseUrl)}/embeddings`, {
+		method: "POST",
+		headers: { authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
+		body: JSON.stringify({
+			model: settings.modelId,
+			input: texts,
+			...(settings.dimensions === undefined ? {} : { dimensions: settings.dimensions }),
+		}),
+		redirect: "error",
+		signal,
 	});
+	if (!response.ok) throw new Error(`Embedding request failed with HTTP ${response.status}`);
+	const { data } = await readBoundedResponseBytes(response, MAX_RESPONSE_BYTES);
+	let payload: unknown;
+	try {
+		payload = JSON.parse(new TextDecoder().decode(data));
+	} catch {
+		throw new Error("Embedding response is not valid JSON");
+	}
+	if (!isRecord(payload) || !Array.isArray(payload.data) || payload.data.length !== texts.length) {
+		throw new Error("Embedding response size mismatch");
+	}
+	const vectors: Array<Float32Array | undefined> = new Array(texts.length);
+	let expectedLength = settings.dimensions;
+	for (const raw of payload.data) {
+		const index = isRecord(raw) && typeof raw.index === "number" ? raw.index : Number.NaN;
+		if (!isRecord(raw) || !Number.isInteger(index) || index < 0 || index >= texts.length) {
+			throw new Error("Embedding response contains an out-of-range index");
+		}
+		if (vectors[index]) throw new Error("Embedding response contains a duplicate index");
+		if (!Array.isArray(raw.embedding) || raw.embedding.length < 1 || raw.embedding.length > 8_192) {
+			throw new Error("Embedding vector length is invalid");
+		}
+		if (expectedLength === undefined) expectedLength = raw.embedding.length;
+		if (raw.embedding.length !== expectedLength) throw new Error("Embedding vector length mismatch");
+		let norm = 0;
+		const vector = new Float32Array(raw.embedding.length);
+		for (let offset = 0; offset < raw.embedding.length; offset++) {
+			const source = raw.embedding[offset];
+			if (typeof source !== "number" || !Number.isFinite(source)) throw new Error("Embedding values must be finite");
+			const converted = Math.fround(source);
+			if (!Number.isFinite(converted)) throw new Error("Embedding value is outside finite float32 range");
+			vector[offset] = converted;
+			norm += converted * converted;
+		}
+		if (!Number.isFinite(norm) || norm === 0) throw new Error("Embedding vector norm must be non-zero");
+		vectors[index] = vector;
+	}
+	if (vectors.some((vector) => vector === undefined)) throw new Error("Embedding response index set is incomplete");
+	return vectors as Float32Array[];
 }
 
 export async function embedText(text: string, options: EmbedTextsOptions): Promise<Float32Array> {
-	const [vector] = await embedTexts([text], options);
-	if (!vector) throw new Error("Embedding response missing vector");
-	return vector;
+	return (await embedTexts([text], options))[0]!;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
 }

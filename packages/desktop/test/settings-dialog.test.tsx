@@ -23,9 +23,11 @@ const generalPreferences: GeneralPreferences = {
 	codeFont: "system-sans",
 };
 
-	const modelSettings: ModelSettingsView = {
+const modelSettings: ModelSettingsView = {
 	defaultModel: { provider: "openai", modelId: "gpt-5" },
 	vision: null,
+	embedding: null,
+	rerank: null,
 	defaultThinkingSelection: "high",
 	providers: [{
 		provider: "openai",
@@ -92,8 +94,10 @@ describe("SettingsDialog", () => {
 			getMemorySettings: vi.fn().mockResolvedValue({
 				autoMemoryEnabled: true,
 				memoryEngine: "index",
-				memoryEmbeddingModel: "",
-				memoryRerankModel: "",
+				embeddingConfigured: false,
+				rerankConfigured: false,
+				lastError: null,
+				memoryMigrationNotice: null,
 			}),
 		} as unknown as MetisDesktopApi;
 		const onClose = vi.fn();
@@ -326,6 +330,67 @@ describe("ModelSettingsPanel", () => {
 				credential: { action: "set", value: "sk-vision-key" },
 			}),
 		}));
+		await act(async () => root.unmount());
+	});
+
+	it("tests and saves an unsaved Embedding draft with arbitrary supplier metadata", async () => {
+		const configured: ModelSettingsView = {
+			...modelSettings,
+			embedding: {
+				name: "Qwen Embedding",
+				provider: "Qwen Cloud",
+				baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+				api: "openai-compatible",
+				modelId: "text-embedding-v4",
+				authConfigured: true,
+			},
+		};
+		const updateModelSettings = vi.fn().mockResolvedValue(configured);
+		const testModelConnection = vi.fn().mockResolvedValue({ ok: true, message: "Connection succeeded", latencyMs: 17 });
+		const api = {
+			getModelSettings: vi.fn().mockResolvedValue(modelSettings),
+			updateModelSettings,
+			testModelConnection,
+		} as unknown as MetisDesktopApi;
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<ModelSettingsPanel api={api} serverReady />));
+		await flush();
+		const panel = [...container.querySelectorAll(".model-service-panel")].find((item) =>
+			item.textContent?.includes("Embedding model"),
+		)!;
+		await act(async () => button(panel, "Configure").click());
+		await flush();
+		const dialog = container.querySelector<HTMLDialogElement>('.model-service-dialog[aria-label="Embedding model"]')!;
+		const inputFor = (label: string) =>
+			[...dialog.querySelectorAll("label")].find((item) => item.querySelector("span")?.textContent === label)?.querySelector(
+				"input",
+			) as HTMLInputElement;
+		await act(async () => {
+			setValue(inputFor("Name"), "Qwen Embedding");
+			setValue(inputFor("Supplier"), "Qwen Cloud");
+			setValue(inputFor("Base URL"), "https://dashscope.aliyuncs.com/compatible-mode/v1");
+			setValue(inputFor("Model ID"), "text-embedding-v4");
+			setValue(inputFor("API key"), "one-shot");
+		});
+		await act(async () => button(dialog, "Test connection").click());
+		await flush();
+		expect(testModelConnection).toHaveBeenCalledWith(
+			expect.objectContaining({
+				kind: "embedding",
+				settings: expect.objectContaining({ provider: "Qwen Cloud", modelId: "text-embedding-v4" }),
+				credential: { action: "set", value: "one-shot" },
+			}),
+		);
+		expect(updateModelSettings).not.toHaveBeenCalled();
+		await act(async () => button(dialog, "Save").click());
+		await flush();
+		expect(updateModelSettings).toHaveBeenCalledWith(
+			expect.objectContaining({
+				mutation: expect.objectContaining({ type: "set_embedding", credential: { action: "set", value: "one-shot" } }),
+			}),
+		);
 		await act(async () => root.unmount());
 	});
 

@@ -1268,6 +1268,7 @@ describe("desktop trust boundaries", () => {
 		await expect(
 			testModelConnection(event, {
 				requestId: "11111111-1111-4111-8111-111111111322",
+				kind: "chat",
 				provider: "openai",
 				modelId: "gpt-5",
 			}),

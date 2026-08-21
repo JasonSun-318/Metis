@@ -262,6 +262,13 @@ describe("SettingsManager", () => {
 	});
 
 	describe("auto memory setting", () => {
+		const embedding = {
+			name: "Qwen Embedding",
+			provider: "Qwen",
+			baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+			api: "openai-compatible" as const,
+			modelId: "text-embedding-v4",
+		};
 		it("defaults to enabled and persists a global toggle", async () => {
 			const manager = SettingsManager.create(projectDir, agentDir);
 			expect(manager.getAutoMemoryEnabled()).toBe(true);
@@ -276,7 +283,7 @@ describe("SettingsManager", () => {
 		it("defaults memoryEngine to index and persists extract", async () => {
 			const manager = SettingsManager.create(projectDir, agentDir);
 			expect(manager.getMemoryEngine()).toBe("index");
-			manager.setMemoryEmbeddingModel("openai/text-embedding-3-small");
+			manager.setEmbeddingSettings(embedding);
 			manager.setMemoryEngine("extract");
 			await manager.flush();
 			expect(JSON.parse(readFileSync(join(agentDir, "settings.json"), "utf8")).memoryEngine).toBe("extract");
@@ -284,20 +291,55 @@ describe("SettingsManager", () => {
 
 		it("refuses setMemoryEngine(extract) without an embedding model", () => {
 			const manager = SettingsManager.create(projectDir, agentDir);
-			expect(manager.getMemoryEmbeddingModel()).toBeUndefined();
-			expect(() => manager.setMemoryEngine("extract")).toThrow(/memoryEmbeddingModel|embedding model/i);
+			expect(manager.getEmbeddingSettings()).toBeUndefined();
+			expect(() => manager.setMemoryEngine("extract")).toThrow(/Embedding settings/i);
 			expect(manager.getMemoryEngine()).toBe("index");
 		});
 
-		it("stores embedding and rerank model ids", async () => {
+		it("stores structured embedding and rerank settings", async () => {
 			const manager = SettingsManager.create(projectDir, agentDir);
-			expect(manager.getMemoryEmbeddingModel()).toBeUndefined();
-			manager.setMemoryEmbeddingModel("openai/text-embedding-3-small");
-			manager.setMemoryRerankModel("cohere/rerank-v3.5");
+			expect(manager.getEmbeddingSettings()).toBeUndefined();
+			manager.setEmbeddingSettings(embedding);
+			manager.setRerankSettings({
+				name: "Cohere Rerank",
+				provider: "Cohere",
+				endpointUrl: "https://api.cohere.com/v2/rerank",
+				modelId: "rerank-v3.5",
+			});
 			await manager.flush();
 			const json = JSON.parse(readFileSync(join(agentDir, "settings.json"), "utf8"));
-			expect(json.memoryEmbeddingModel).toBe("openai/text-embedding-3-small");
-			expect(json.memoryRerankModel).toBe("cohere/rerank-v3.5");
+			expect(json.embedding).toEqual(embedding);
+			expect(json.rerank.endpointUrl).toBe("https://api.cohere.com/v2/rerank");
+		});
+
+		it("retires legacy model refs and falls Extract back to Index", async () => {
+			writeFileSync(
+				join(agentDir, "settings.json"),
+				JSON.stringify({
+					autoMemoryEnabled: true,
+					memoryEngine: "extract",
+					memoryEmbeddingModel: "openai/text-embedding-3-small",
+					memoryRerankModel: "cohere/rerank-v3.5",
+				}),
+			);
+			const manager = SettingsManager.create(projectDir, agentDir);
+			expect(manager.getMemoryEngine()).toBe("index");
+			expect(manager.getEmbeddingSettings()).toBeUndefined();
+			expect(manager.getMemoryMigrationNotice()).toMatch(/reconfigure/i);
+			await manager.flush();
+			const json = JSON.parse(readFileSync(join(agentDir, "settings.json"), "utf8"));
+			expect(json).not.toHaveProperty("memoryEmbeddingModel");
+			expect(json).not.toHaveProperty("memoryRerankModel");
+		});
+
+		it("keeps valid structured settings while removing mixed-version fields", () => {
+			writeFileSync(
+				join(agentDir, "settings.json"),
+				JSON.stringify({ memoryEngine: "extract", embedding, memoryEmbeddingModel: "old/ref" }),
+			);
+			const manager = SettingsManager.create(projectDir, agentDir);
+			expect(manager.getMemoryEngine()).toBe("extract");
+			expect(manager.getEmbeddingSettings()).toEqual(embedding);
 		});
 	});
 

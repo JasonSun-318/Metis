@@ -3106,7 +3106,7 @@ export class InteractiveMode {
 			if (text === "/memory" || text.startsWith("/memory ")) {
 				const action = text.slice(7).trim();
 				this.editor.setText("");
-				this.handleMemoryCommand(action);
+				await this.handleMemoryCommand(action);
 				return;
 			}
 			if (text === "/dream" || text.startsWith("/dream ")) {
@@ -5610,11 +5610,15 @@ export class InteractiveMode {
 	// Command handlers
 	// =========================================================================
 
-	private handleMemoryCommand(action: string): void {
+	private async handleMemoryCommand(action: string): Promise<void> {
 		if (action === "on" || action === "off") {
 			const enabled = action === "on";
-			this.settingsManager.setAutoMemoryEnabled(enabled);
-			this.session.refreshSystemPrompt();
+			try {
+				await this.session.updateMemorySettings({ autoMemoryEnabled: enabled });
+			} catch (error) {
+				this.showWarning(error instanceof Error ? error.message : String(error));
+				return;
+			}
 			this.showStatus(`Long-term memory ${enabled ? "enabled" : "disabled"}`);
 			return;
 		}
@@ -5627,12 +5631,11 @@ export class InteractiveMode {
 				return;
 			}
 			try {
-				this.settingsManager.setMemoryEngine(engine);
+				await this.session.updateMemorySettings({ memoryEngine: engine });
 			} catch (error) {
 				this.showWarning(error instanceof Error ? error.message : String(error));
 				return;
 			}
-			this.session.refreshSystemPrompt();
 			this.showStatus(`Memory engine set to ${engine}`);
 			return;
 		}

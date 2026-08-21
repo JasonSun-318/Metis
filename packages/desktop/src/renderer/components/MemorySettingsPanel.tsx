@@ -10,8 +10,9 @@ const ENGINES: readonly { readonly value: MemoryEngine; readonly labelKey: strin
 	{ value: "extract", labelKey: "Extract (retrieve)" },
 ];
 
-export function MemorySettingsPanel({ api, serverReady }: {
+export function MemorySettingsPanel({ api, onConfigureModels, serverReady }: {
 	readonly api: Pick<MetisDesktopApi, "getMemorySettings" | "updateMemorySettings">;
+	readonly onConfigureModels: () => void;
 	readonly serverReady: boolean;
 }) {
 	const { t } = useTranslation();
@@ -47,13 +48,13 @@ export function MemorySettingsPanel({ api, serverReady }: {
 		return <div aria-label={t("Memory settings")} className="settings-loading" role="status" />;
 	}
 
-	const embeddingConfigured = Boolean(settings?.memoryEmbeddingModel.trim());
+	const embeddingConfigured = settings?.embeddingConfigured ?? false;
 	const extractBlocked = !embeddingConfigured;
 	const engineWarning =
 		settings?.memoryEngine === "extract" && extractBlocked
-			? t("Extract requires an embedding model (provider/model) before it can be enabled.")
+			? t("Extract requires a configured Embedding model and credential before it can be enabled.")
 			: extractBlocked
-				? t("Set an embedding model before choosing Extract. Extract retrieves relevant facts; Index injects the memory catalog.")
+				? t("Configure an Embedding model before choosing Extract. Index injects the memory catalog.")
 				: null;
 
 	const update = (patch: Partial<MemorySettingsView>) => {
@@ -64,8 +65,8 @@ export function MemorySettingsPanel({ api, serverReady }: {
 
 	const save = async () => {
 		if (!settings) return;
-		if (settings.memoryEngine === "extract" && !settings.memoryEmbeddingModel.trim()) {
-			setError(t("Extract requires an embedding model (provider/model) before it can be enabled."));
+		if (settings.memoryEngine === "extract" && !settings.embeddingConfigured) {
+			setError(t("Extract requires a configured Embedding model and credential before it can be enabled."));
 			return;
 		}
 		setBusy(true);
@@ -75,8 +76,6 @@ export function MemorySettingsPanel({ api, serverReady }: {
 			const next = await api.updateMemorySettings({
 				autoMemoryEnabled: settings.autoMemoryEnabled,
 				memoryEngine: settings.memoryEngine,
-				memoryEmbeddingModel: settings.memoryEmbeddingModel.trim(),
-				memoryRerankModel: settings.memoryRerankModel.trim(),
 			});
 			setSettings(next);
 			setNotice(t("Saved"));
@@ -139,48 +138,37 @@ export function MemorySettingsPanel({ api, serverReady }: {
 				<div className="general-setting-row">
 					<div className="general-setting-copy">
 						<span>{t("Embedding model")}</span>
-						<p>{t("Required for Extract. Use provider/model, for example openai/text-embedding-3-small.")}</p>
+						<p>{embeddingConfigured ? t("Configured in Model settings.") : t("Required for Extract and not configured.")}</p>
 					</div>
-					<div className="general-setting-control memory-model-input">
-						<label className="sr-only" htmlFor="memory-embedding-model">{t("Embedding model")}</label>
-						<input
-							autoComplete="off"
-							disabled={!serverReady || busy}
-							id="memory-embedding-model"
-							onChange={(event) => update({ memoryEmbeddingModel: event.target.value })}
-							placeholder="openai/text-embedding-3-small"
-							spellCheck={false}
-							type="text"
-							value={settings?.memoryEmbeddingModel ?? ""}
-						/>
+					<div className="general-setting-control">
+						<span className="model-service-badge">{embeddingConfigured ? t("Configured") : t("Not configured")}</span>
 					</div>
 				</div>
 
 				<div className="general-setting-row">
 					<div className="general-setting-copy">
 						<span>{t("Rerank model")}</span>
-						<p>{t("Optional. Improves Extract ranking when configured.")}</p>
+						<p>{t("Optional. Reranks up to 50 candidate facts when configured.")}</p>
 					</div>
-					<div className="general-setting-control memory-model-input">
-						<label className="sr-only" htmlFor="memory-rerank-model">{t("Rerank model")}</label>
-						<input
-							autoComplete="off"
-							disabled={!serverReady || busy}
-							id="memory-rerank-model"
-							onChange={(event) => update({ memoryRerankModel: event.target.value })}
-							placeholder={t("Optional")}
-							spellCheck={false}
-							type="text"
-							value={settings?.memoryRerankModel ?? ""}
-						/>
+					<div className="general-setting-control">
+						<span className="model-service-badge">{settings?.rerankConfigured ? t("Configured") : t("Not configured")}</span>
 					</div>
 				</div>
+
+				<p className="model-provider-intro">
+					{t("Extract sends the bounded query and stored facts to your Embedding service, and candidates to optional Rerank.")}
+				</p>
+				<button className="settings-secondary-button" disabled={!serverReady || busy} onClick={onConfigureModels} type="button">
+					{t("Configure in Models")}
+				</button>
 
 				{engineWarning ? (
 					<p className="settings-action-message memory-settings-warning" role="status">
 						{engineWarning}
 					</p>
 				) : null}
+				{settings?.memoryMigrationNotice ? <p className="settings-action-message memory-settings-warning" role="status">{settings.memoryMigrationNotice}</p> : null}
+				{settings?.lastError ? <p className="settings-action-message error" role="alert">{settings.lastError}</p> : null}
 
 				<div className="settings-form-actions web-search-actions">
 					<button

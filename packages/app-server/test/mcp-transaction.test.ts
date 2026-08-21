@@ -13,16 +13,16 @@ function harness(failure?: "settings" | "auth" | "reload") {
 	let reloadCalls = 0;
 	let settingsFailureReported = false;
 	const settingsManager = {
+		throwPendingWriteError: vi.fn().mockResolvedValue(undefined),
 		applyMcpServerChanges: vi.fn((_scope: string, changes: ReadonlyMap<string, McpServerSettings | undefined>) => {
 			settingsCalls += 1;
 			definitions = new Map(definitions);
 			for (const [name, value] of changes) definitions.set(name, value);
 		}),
-		flush: vi.fn().mockResolvedValue(undefined),
-		drainErrors: vi.fn(() => {
-			if (failure !== "settings" || settingsCalls !== 1 || settingsFailureReported) return [];
+		flushOrThrow: vi.fn(async () => {
+			if (failure !== "settings" || settingsCalls !== 1 || settingsFailureReported) return;
 			settingsFailureReported = true;
-			return [{ scope: "global", error: new Error("settings failed") }];
+			throw new Error("settings failed");
 		}),
 	} as unknown as SettingsManager;
 	const authStorage = {

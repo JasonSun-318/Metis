@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { validateResponseFor } from "@metis/app-protocol";
-import { SettingsManager } from "@metis/coding-agent";
+import { AuthStorage, MEMORY_EMBEDDING_CREDENTIAL_ID, SettingsManager } from "@metis/coding-agent";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { MemorySettingsService } from "../src/memory-settings.ts";
 
@@ -20,6 +20,8 @@ describe("MemorySettingsService", () => {
 
 	function service() {
 		return new MemorySettingsService({
+			agentDir,
+			authStorage: AuthStorage.create(join(agentDir, "auth.json")),
 			settingsManager: SettingsManager.create(agentDir, agentDir),
 		});
 	}
@@ -28,33 +30,44 @@ describe("MemorySettingsService", () => {
 		expect(service().view()).toEqual({
 			autoMemoryEnabled: true,
 			memoryEngine: "index",
-			memoryEmbeddingModel: "",
-			memoryRerankModel: "",
+			embeddingConfigured: false,
+			rerankConfigured: false,
+			lastError: null,
+			memoryMigrationNotice: null,
 		});
 	});
 
-	it("persists memory settings and rejects extract without an embedding model", async () => {
+	it("persists memory settings and rejects enabled Extract without dedicated configuration", async () => {
 		const svc = service();
 		await expect(
 			svc.update({
 				autoMemoryEnabled: true,
 				memoryEngine: "extract",
-				memoryEmbeddingModel: "  ",
-				memoryRerankModel: "",
 			}),
-		).rejects.toThrow(/extract.*memoryEmbeddingModel/i);
+		).rejects.toThrow(/extract.*Embedding settings and credential/i);
 
-		const updated = await svc.update({
-			autoMemoryEnabled: false,
-			memoryEngine: "extract",
-			memoryEmbeddingModel: "openai/text-embedding-3-small",
-			memoryRerankModel: "openai/rerank",
+		const manager = SettingsManager.create(agentDir, agentDir);
+		manager.setEmbeddingSettings({
+			name: "Embedding",
+			provider: "Qwen",
+			baseUrl: "https://example.test/v1",
+			api: "openai-compatible",
+			modelId: "embedding-model",
 		});
-		expect(updated).toEqual({
-			autoMemoryEnabled: false,
+		await manager.flushOrThrow();
+		AuthStorage.create(join(agentDir, "auth.json")).set(MEMORY_EMBEDDING_CREDENTIAL_ID, {
+			type: "api_key",
+			key: "secret",
+		});
+
+		const updated = await service().update({
+			autoMemoryEnabled: true,
 			memoryEngine: "extract",
-			memoryEmbeddingModel: "openai/text-embedding-3-small",
-			memoryRerankModel: "openai/rerank",
+		});
+		expect(updated).toMatchObject({
+			autoMemoryEnabled: true,
+			memoryEngine: "extract",
+			embeddingConfigured: true,
 		});
 		expect(service().view()).toEqual(updated);
 	});
@@ -82,8 +95,6 @@ describe("MemorySettingsService", () => {
 			params: {
 				autoMemoryEnabled: true,
 				memoryEngine: "index" as const,
-				memoryEmbeddingModel: "openai/text-embedding-3-small",
-				memoryRerankModel: "",
 			},
 		};
 		const updateResult = await svc.update(updateRequest.params);

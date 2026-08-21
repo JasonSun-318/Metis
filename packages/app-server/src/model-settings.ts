@@ -3,9 +3,18 @@ import { join } from "node:path";
 import type { ClientParams, ClientResult } from "@metis/app-protocol";
 import {
 	type AuthStorage,
+	embedTexts,
 	FileAuthStorageBackend,
+	getMemorySqlitePath,
+	MEMORY_EMBEDDING_CREDENTIAL_ID,
+	MEMORY_RERANK_CREDENTIAL_ID,
 	type ModelRegistry,
+	openMemoryStore,
+	rerankDocuments,
 	type SettingsManager,
+	validateEmbeddingSettings,
+	validateRerankSettings,
+	validateServiceCredential,
 } from "@metis/coding-agent";
 
 interface ModelsConfigDocument {
@@ -69,6 +78,7 @@ function publicError(error: unknown, secrets: readonly (string | undefined)[]): 
 
 /** Owns the small settings-specific mutation surface for models.json, auth.json, and global defaults. */
 export class ModelSettingsService {
+	private readonly agentDir: string;
 	private readonly authStorage: AuthStorage;
 	private readonly modelRegistry: ModelRegistry;
 	private readonly settingsManager: SettingsManager;
@@ -76,6 +86,7 @@ export class ModelSettingsService {
 	private readonly modelsStorage: FileAuthStorageBackend;
 
 	constructor(options: ModelSettingsServiceOptions) {
+		this.agentDir = options.agentDir;
 		this.authStorage = options.authStorage;
 		this.modelRegistry = options.modelRegistry;
 		this.settingsManager = options.settingsManager;
@@ -153,10 +164,21 @@ export class ModelSettingsService {
 		const defaultProvider = this.settingsManager.getDefaultProvider();
 		const defaultModelId = this.settingsManager.getDefaultModel();
 		const vision = this.settingsManager.getVisionSettings();
+		const embedding = this.settingsManager.getEmbeddingSettings();
+		const rerank = this.settingsManager.getRerankSettings();
 		return {
 			defaultModel:
 				defaultProvider && defaultModelId ? { provider: defaultProvider, modelId: defaultModelId } : null,
 			vision: vision ? { ...vision, authConfigured: this.authStorage.has("vision") } : null,
+			embedding: embedding
+				? {
+						...embedding,
+						authConfigured: this.authStorage.get(MEMORY_EMBEDDING_CREDENTIAL_ID)?.type === "api_key",
+					}
+				: null,
+			rerank: rerank
+				? { ...rerank, authConfigured: this.authStorage.get(MEMORY_RERANK_CREDENTIAL_ID)?.type === "api_key" }
+				: null,
 			defaultThinkingSelection: this.settingsManager.getDefaultThinkingLevel() ?? "medium",
 			providers,
 			loadError: readError ?? this.modelRegistry.getError() ?? null,
@@ -166,25 +188,70 @@ export class ModelSettingsService {
 	async update(
 		mutation: ClientParams<"model/settings/update">["mutation"],
 	): Promise<ClientResult<"model/settings/get">> {
+		await this.settingsManager.throwPendingWriteError();
+		if (mutation.type === "set_embedding" || mutation.type === "set_rerank") {
+			const embedding = mutation.type === "set_embedding";
+			const credentialId = embedding ? MEMORY_EMBEDDING_CREDENTIAL_ID : MEMORY_RERANK_CREDENTIAL_ID;
+			if (mutation.settings === null) {
+				if (mutation.credential.action !== "remove") {
+					throw new Error("Removing specialized model settings requires removing its credential");
+				}
+				if (embedding) this.settingsManager.clearEmbeddingSettings();
+				else this.settingsManager.clearRerankSettings();
+				await this.settingsManager.flushOrThrow();
+				this.authStorage.remove(credentialId);
+				this.clearMemoryHealth(embedding ? ["embedding", "backfill"] : ["rerank"]);
+				return this.view();
+			}
+			if (mutation.credential.action === "remove") {
+				throw new Error("Credential mutation must be set or keep while retaining specialized model settings");
+			}
+			const settings = embedding
+				? validateEmbeddingSettings(mutation.settings)
+				: validateRerankSettings(mutation.settings);
+			if (mutation.credential.action === "keep" && this.authStorage.get(credentialId)?.type !== "api_key") {
+				throw new Error("A stored dedicated credential is required for keep");
+			}
+			const previous = this.authStorage.get(credentialId);
+			try {
+				if (mutation.credential.action === "set") {
+					this.authStorage.set(credentialId, {
+						type: "api_key",
+						key: validateServiceCredential(mutation.credential.value),
+					});
+				}
+				if (embedding) {
+					this.settingsManager.setEmbeddingSettings(validateEmbeddingSettings(settings));
+				} else this.settingsManager.setRerankSettings(validateRerankSettings(settings));
+				await this.settingsManager.flushOrThrow();
+			} catch (error) {
+				if (mutation.credential.action === "set") this.restoreCredential(credentialId, previous, error);
+				throw error;
+			}
+			this.clearMemoryHealth(embedding ? ["embedding", "backfill"] : ["rerank"]);
+			return this.view();
+		}
 		if (mutation.type === "set_defaults") {
 			if (mutation.model) {
 				this.modelRegistry.refresh();
 				const model = this.modelRegistry.find(mutation.model.provider, mutation.model.modelId);
 				if (!model || !this.modelRegistry.hasConfiguredAuth(model))
 					throw new Error("The default model is unavailable");
-				this.settingsManager.setDefaultModelAndProvider(model.provider, model.id);
+				this.settingsManager.setDefaultModelSettings(
+					{ provider: model.provider, modelId: model.id },
+					mutation.thinkingSelection,
+				);
 			} else {
-				this.settingsManager.clearDefaultModelAndProvider();
+				this.settingsManager.setDefaultModelSettings(null, mutation.thinkingSelection);
 			}
-			this.settingsManager.setDefaultThinkingLevel(mutation.thinkingSelection);
-			await this.settingsManager.flush();
+			await this.settingsManager.flushOrThrow();
 			return this.view();
 		}
 		if (mutation.type === "set_vision") {
 			if (mutation.settings === null) {
 				this.settingsManager.clearVisionSettings();
+				await this.settingsManager.flushOrThrow();
 				this.authStorage.remove("vision");
-				await this.settingsManager.flush();
 				return this.view();
 			}
 			const parsedUrl = new URL(mutation.settings.baseUrl);
@@ -195,16 +262,24 @@ export class ModelSettingsService {
 			if (!hasStoredKey && mutation.credential.action !== "set") {
 				throw new Error("Enter an API key to save the vision service");
 			}
-			if (mutation.credential.action === "set") {
-				this.authStorage.set("vision", { type: "api_key", key: mutation.credential.value });
-			} else if (mutation.credential.action === "remove") {
-				this.authStorage.remove("vision");
+			const previous = this.authStorage.get("vision");
+			try {
+				if (mutation.credential.action === "set") {
+					this.authStorage.set("vision", { type: "api_key", key: mutation.credential.value });
+				} else if (mutation.credential.action === "remove") {
+					this.authStorage.remove("vision");
+				}
+				this.settingsManager.setVisionSettings(mutation.settings);
+				await this.settingsManager.flushOrThrow();
+			} catch (error) {
+				this.restoreCredential("vision", previous, error);
+				throw error;
 			}
-			this.settingsManager.setVisionSettings(mutation.settings);
-			await this.settingsManager.flush();
 			return this.view();
 		}
 		let previous = '{\n  "providers": {}\n}\n';
+		const previousCredential = this.authStorage.get(mutation.provider);
+		let credentialTouched = false;
 		try {
 			this.modelsStorage.withLock((source) => {
 				const config = parseModelsConfig(source);
@@ -252,14 +327,17 @@ export class ModelSettingsService {
 			const configError = this.modelRegistry.getError();
 			if (configError) throw new Error(configError);
 			if (mutation.type === "remove_provider") {
+				credentialTouched = true;
 				this.authStorage.remove(mutation.provider);
 				if (this.settingsManager.getDefaultProvider() === mutation.provider) {
 					this.settingsManager.clearDefaultModelAndProvider();
-					await this.settingsManager.flush();
+					await this.settingsManager.flushOrThrow();
 				}
 			} else if (mutation.credential.action === "set") {
+				credentialTouched = true;
 				this.authStorage.set(mutation.provider, { type: "api_key", key: mutation.credential.value });
 			} else if (mutation.credential.action === "remove") {
+				credentialTouched = true;
 				this.authStorage.remove(mutation.provider);
 			}
 			this.modelRegistry.refresh();
@@ -269,20 +347,53 @@ export class ModelSettingsService {
 				const defaultModel = this.modelRegistry.find(defaultProvider, defaultModelId);
 				if (!defaultModel || !this.modelRegistry.hasConfiguredAuth(defaultModel)) {
 					this.settingsManager.clearDefaultModelAndProvider();
-					await this.settingsManager.flush();
+					await this.settingsManager.flushOrThrow();
 				}
 			}
 			return this.view();
 		} catch (error) {
 			this.modelsStorage.withLock(() => ({ result: undefined, next: previous }));
+			if (credentialTouched) this.restoreCredential(mutation.provider, previousCredential, error);
 			this.modelRegistry.refresh();
 			throw error;
 		}
 	}
 
-	async testConnection(provider: string, modelId: string): Promise<ClientResult<"model/testConnection">> {
+	async testConnection(params: ClientParams<"model/testConnection">): Promise<ClientResult<"model/testConnection">> {
+		if (params.kind === "embedding" || params.kind === "rerank") {
+			const embedding = params.kind === "embedding";
+			const credentialId = embedding ? MEMORY_EMBEDDING_CREDENTIAL_ID : MEMORY_RERANK_CREDENTIAL_ID;
+			const startedAt = Date.now();
+			let apiKey: string | undefined;
+			try {
+				apiKey =
+					params.credential.action === "set"
+						? validateServiceCredential(params.credential.value)
+						: await this.authStorage.getApiKey(credentialId, { includeFallback: false });
+				if (!apiKey) throw new Error("A stored dedicated credential is required for keep");
+				if (embedding) {
+					await embedTexts(["Metis connection test A", "Metis connection test B"], {
+						settings: validateEmbeddingSettings(params.settings),
+						apiKey,
+					});
+				} else {
+					await rerankDocuments({
+						settings: validateRerankSettings(params.settings),
+						apiKey,
+						query: "Metis connection test",
+						documents: [
+							{ id: "a", text: "Metis connection test A" },
+							{ id: "b", text: "Metis connection test B" },
+						],
+					});
+				}
+				return { ok: true, message: "Connection succeeded", latencyMs: Date.now() - startedAt };
+			} catch (error) {
+				return { ok: false, message: publicError(error, [apiKey]), latencyMs: Date.now() - startedAt };
+			}
+		}
 		this.modelRegistry.refresh();
-		const model = this.modelRegistry.find(provider, modelId);
+		const model = this.modelRegistry.find(params.provider, params.modelId);
 		if (!model) return { ok: false, message: "Model not found", latencyMs: 0 };
 		const startedAt = Date.now();
 		let apiKey: string | undefined;
@@ -312,6 +423,28 @@ export class ModelSettingsService {
 				message: publicError(error, [apiKey]),
 				latencyMs: Date.now() - startedAt,
 			};
+		}
+	}
+
+	private restoreCredential(id: string, previous: ReturnType<AuthStorage["get"]>, original: unknown): void {
+		try {
+			if (previous) this.authStorage.set(id, previous);
+			else this.authStorage.remove(id);
+		} catch (recoveryError) {
+			if (original instanceof Error) (original as Error & { cause?: unknown }).cause ??= recoveryError;
+		}
+	}
+
+	private clearMemoryHealth(operations: Array<"embedding" | "rerank" | "backfill">): void {
+		try {
+			const store = openMemoryStore(getMemorySqlitePath(this.agentDir));
+			try {
+				store.clearHealth(...operations);
+			} finally {
+				store.close();
+			}
+		} catch {
+			// Health is derived state; settings and credentials are already durable.
 		}
 	}
 }

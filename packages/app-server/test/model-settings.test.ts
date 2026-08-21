@@ -2,8 +2,14 @@ import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { validateResponseFor } from "@metis/app-protocol";
-import { AuthStorage, ModelRegistry, SettingsManager } from "@metis/coding-agent";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import {
+	AuthStorage,
+	MEMORY_EMBEDDING_CREDENTIAL_ID,
+	MEMORY_RERANK_CREDENTIAL_ID,
+	ModelRegistry,
+	SettingsManager,
+} from "@metis/coding-agent";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ModelSettingsService } from "../src/model-settings.ts";
 
 describe("ModelSettingsService", () => {
@@ -15,6 +21,7 @@ describe("ModelSettingsService", () => {
 	});
 
 	afterEach(() => {
+		vi.unstubAllGlobals();
 		if (existsSync(agentDir)) rmSync(agentDir, { recursive: true, force: true });
 	});
 
@@ -161,6 +168,100 @@ describe("ModelSettingsService", () => {
 		const cleared = await service.update({ type: "set_vision", settings: null, credential: { action: "remove" } });
 		expect(cleared.vision).toBeNull();
 		expect(authStorage.has("vision")).toBe(false);
+	});
+
+	it("keeps specialized settings and dedicated credentials consistent", async () => {
+		const authStorage = AuthStorage.create(join(agentDir, "auth.json"));
+		const settingsManager = SettingsManager.create(agentDir, agentDir);
+		const service = new ModelSettingsService({
+			agentDir,
+			authStorage,
+			modelRegistry: ModelRegistry.create(authStorage, join(agentDir, "models.json")),
+			settingsManager,
+		});
+		const embedding = {
+			name: "Qwen Embedding",
+			provider: "Qwen",
+			baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1/",
+			api: "openai-compatible" as const,
+			modelId: "text-embedding-v4",
+		};
+
+		await expect(
+			service.update({ type: "set_embedding", settings: embedding, credential: { action: "keep" } }),
+		).rejects.toThrow(/stored dedicated credential/i);
+		const saved = await service.update({
+			type: "set_embedding",
+			settings: embedding,
+			credential: { action: "set", value: "embedding-secret" },
+		});
+		expect(saved.embedding).toMatchObject({
+			...embedding,
+			baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+			authConfigured: true,
+		});
+		expect(authStorage.get(MEMORY_EMBEDDING_CREDENTIAL_ID)).toMatchObject({ type: "api_key" });
+		await expect(
+			service.update({ type: "set_embedding", settings: embedding, credential: { action: "remove" } }),
+		).rejects.toThrow(/credential mutation/i);
+		await expect(
+			service.update({ type: "set_rerank", settings: null, credential: { action: "keep" } }),
+		).rejects.toThrow(/requires removing/i);
+
+		settingsManager.setMemoryEngine("extract");
+		await settingsManager.flushOrThrow();
+		const removed = await service.update({
+			type: "set_embedding",
+			settings: null,
+			credential: { action: "remove" },
+		});
+		expect(removed.embedding).toBeNull();
+		expect(authStorage.has(MEMORY_EMBEDDING_CREDENTIAL_ID)).toBe(false);
+		expect(settingsManager.getMemoryEngine()).toBe("index");
+		expect(authStorage.has(MEMORY_RERANK_CREDENTIAL_ID)).toBe(false);
+	});
+
+	it("tests an unsaved specialized draft without persisting settings or credentials", async () => {
+		const authStorage = AuthStorage.create(join(agentDir, "auth.json"));
+		const service = new ModelSettingsService({
+			agentDir,
+			authStorage,
+			modelRegistry: ModelRegistry.create(authStorage, join(agentDir, "models.json")),
+			settingsManager: SettingsManager.create(agentDir, agentDir),
+		});
+		const fetchMock = vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
+			const body = JSON.parse(String(init?.body));
+			expect(body.input).toHaveLength(2);
+			return new Response(
+				JSON.stringify({
+					data: [
+						{ index: 0, embedding: [1, 0] },
+						{ index: 1, embedding: [0, 1] },
+					],
+				}),
+				{ status: 200 },
+			);
+		});
+		vi.stubGlobal("fetch", fetchMock);
+		await expect(
+			service.testConnection({
+				requestId: "11111111-1111-4111-8111-111111111111",
+				kind: "embedding",
+				settings: {
+					name: "Draft",
+					provider: "Qwen",
+					baseUrl: "https://example.test/v1",
+					api: "openai-compatible",
+					modelId: "draft-model",
+				},
+				credential: { action: "set", value: "one-shot" },
+			}),
+		).resolves.toMatchObject({ ok: true });
+		expect(service.view().embedding).toBeNull();
+		expect(authStorage.has(MEMORY_EMBEDDING_CREDENTIAL_ID)).toBe(false);
+		expect(
+			existsSync(join(agentDir, "auth.json")) ? readFileSync(join(agentDir, "auth.json"), "utf8") : "",
+		).not.toContain("one-shot");
 	});
 
 	it("accepts an anthropic-messages custom provider with its own base URL", async () => {

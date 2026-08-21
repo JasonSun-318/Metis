@@ -630,6 +630,35 @@ export const CredentialMutationSchema = Type.Union([
 	StrictObject({ action: Type.Literal("remove") }),
 	StrictObject({ action: Type.Literal("set"), value: Type.String({ minLength: 1, maxLength: 32_768 }) }),
 ]);
+const SpecializedCredentialSchema = Type.Union([
+	StrictObject({ action: Type.Literal("keep") }),
+	StrictObject({ action: Type.Literal("remove") }),
+	StrictObject({
+		action: Type.Literal("set"),
+		value: Type.String({ minLength: 1, maxLength: 16_384, pattern: "^[^\\x00-\\x1f\\x7f]+$" }),
+	}),
+]);
+const SpecializedTestCredentialSchema = Type.Union([
+	StrictObject({ action: Type.Literal("keep") }),
+	StrictObject({
+		action: Type.Literal("set"),
+		value: Type.String({ minLength: 1, maxLength: 16_384, pattern: "^[^\\x00-\\x1f\\x7f]+$" }),
+	}),
+]);
+const EmbeddingSettingsInputSchema = StrictObject({
+	name: Type.String({ minLength: 1, maxLength: 120 }),
+	provider: Type.String({ minLength: 1, maxLength: 120 }),
+	baseUrl: Type.String({ minLength: 1, maxLength: 2_048 }),
+	api: Type.Literal("openai-compatible"),
+	modelId: Type.String({ minLength: 1, maxLength: 200 }),
+	dimensions: Type.Optional(Type.Integer({ minimum: 1, maximum: 8_192 })),
+});
+const RerankSettingsInputSchema = StrictObject({
+	name: Type.String({ minLength: 1, maxLength: 120 }),
+	provider: Type.String({ minLength: 1, maxLength: 120 }),
+	endpointUrl: Type.String({ minLength: 1, maxLength: 2_048 }),
+	modelId: Type.String({ minLength: 1, maxLength: 200 }),
+});
 export const ModelSettingsMutationSchema = Type.Union([
 	StrictObject({
 		type: Type.Literal("save_provider"),
@@ -668,6 +697,16 @@ export const ModelSettingsMutationSchema = Type.Union([
 		]),
 		credential: CredentialMutationSchema,
 	}),
+	StrictObject({
+		type: Type.Literal("set_embedding"),
+		settings: Type.Union([EmbeddingSettingsInputSchema, Type.Null()]),
+		credential: SpecializedCredentialSchema,
+	}),
+	StrictObject({
+		type: Type.Literal("set_rerank"),
+		settings: Type.Union([RerankSettingsInputSchema, Type.Null()]),
+		credential: SpecializedCredentialSchema,
+	}),
 ]);
 export const ModelSettingsGetParamsSchema = StrictObject({});
 export const ModelSettingsUpdateParamsSchema = StrictObject({
@@ -676,9 +715,28 @@ export const ModelSettingsUpdateParamsSchema = StrictObject({
 });
 export const ModelTestConnectionParamsSchema = StrictObject({
 	requestId: UuidSchema,
+	kind: Type.Literal("chat"),
 	provider: NameSchema,
 	modelId: NameSchema,
 });
+export const SpecializedModelTestConnectionParamsSchema = Type.Union([
+	StrictObject({
+		requestId: UuidSchema,
+		kind: Type.Literal("embedding"),
+		settings: EmbeddingSettingsInputSchema,
+		credential: SpecializedTestCredentialSchema,
+	}),
+	StrictObject({
+		requestId: UuidSchema,
+		kind: Type.Literal("rerank"),
+		settings: RerankSettingsInputSchema,
+		credential: SpecializedTestCredentialSchema,
+	}),
+]);
+export const AnyModelTestConnectionParamsSchema = Type.Union([
+	ModelTestConnectionParamsSchema,
+	SpecializedModelTestConnectionParamsSchema,
+]);
 export const ModelTestConnectionResultSchema = StrictObject({
 	ok: Type.Boolean(),
 	message: PublicTextSchema,
@@ -701,8 +759,6 @@ export const MemoryGetParamsSchema = StrictObject({});
 export const MemoryUpdateParamsSchema = StrictObject({
 	autoMemoryEnabled: Type.Boolean(),
 	memoryEngine: MemoryEngineSchema,
-	memoryEmbeddingModel: Type.String({ maxLength: 512 }),
-	memoryRerankModel: Type.String({ maxLength: 512 }),
 });
 
 export const HooksListParamsSchema = StrictObject({});
@@ -914,7 +970,7 @@ export const ClientRequestMethods = {
 	"model/list": method(ModelListParamsSchema, ModelListResultSchema),
 	"model/settings/get": method(ModelSettingsGetParamsSchema, ModelSettingsViewSchema),
 	"model/settings/update": method(ModelSettingsUpdateParamsSchema, ModelSettingsViewSchema),
-	"model/testConnection": method(ModelTestConnectionParamsSchema, ModelTestConnectionResultSchema),
+	"model/testConnection": method(AnyModelTestConnectionParamsSchema, ModelTestConnectionResultSchema),
 	"usage/get": method(UsageGetParamsSchema, UsageSummaryViewSchema),
 	"webSearch/get": method(WebSearchGetParamsSchema, WebSearchSettingsViewSchema),
 	"webSearch/credential/reveal": method(WebSearchCredentialRevealParamsSchema, WebSearchCredentialRevealResultSchema),

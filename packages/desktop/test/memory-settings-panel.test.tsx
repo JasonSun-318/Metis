@@ -18,14 +18,6 @@ function button(container: HTMLElement, name: string): HTMLButtonElement {
 	return match as HTMLButtonElement;
 }
 
-function setValue(element: HTMLInputElement | HTMLTextAreaElement, value: string) {
-	Object.getOwnPropertyDescriptor(
-		element instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype,
-		"value",
-	)?.set?.call(element, value);
-	element.dispatchEvent(new Event("input", { bubbles: true }));
-}
-
 beforeEach(async () => {
 	(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 	await setLocale("en");
@@ -40,8 +32,10 @@ describe("MemorySettingsPanel", () => {
 	const memorySettings: MemorySettingsView = {
 		autoMemoryEnabled: true,
 		memoryEngine: "index",
-		memoryEmbeddingModel: "",
-		memoryRerankModel: "",
+		embeddingConfigured: false,
+		rerankConfigured: false,
+		lastError: null,
+		memoryMigrationNotice: null,
 	};
 
 	it("loads and saves memory settings", async () => {
@@ -49,14 +43,12 @@ describe("MemorySettingsPanel", () => {
 		const updateMemorySettings = vi.fn().mockResolvedValue({
 			...memorySettings,
 			autoMemoryEnabled: false,
-			memoryEmbeddingModel: "openai/text-embedding-3-small",
-			memoryRerankModel: "openai/rerank",
 		});
 		const api = { getMemorySettings, updateMemorySettings } as unknown as MetisDesktopApi;
 		const container = document.createElement("div");
 		document.body.append(container);
 		const root = createRoot(container);
-		await act(async () => root.render(<MemorySettingsPanel api={api} serverReady />));
+		await act(async () => root.render(<MemorySettingsPanel api={api} onConfigureModels={vi.fn()} serverReady />));
 		await flush();
 
 		expect(getMemorySettings).toHaveBeenCalledTimes(1);
@@ -64,35 +56,26 @@ describe("MemorySettingsPanel", () => {
 		expect(container.querySelector(".web-search-toggle")).not.toBeNull();
 
 		await act(async () => container.querySelector<HTMLInputElement>('input[type="checkbox"]')!.click());
-		await act(async () => {
-			setValue(container.querySelector<HTMLInputElement>("#memory-embedding-model")!, "openai/text-embedding-3-small");
-			setValue(container.querySelector<HTMLInputElement>("#memory-rerank-model")!, "openai/rerank");
-		});
 		await act(async () => button(container, "Save").click());
 		await flush();
 
 		expect(updateMemorySettings).toHaveBeenCalledWith({
 			autoMemoryEnabled: false,
 			memoryEngine: "index",
-			memoryEmbeddingModel: "openai/text-embedding-3-small",
-			memoryRerankModel: "openai/rerank",
 		});
 		expect(container.querySelector(".settings-toast")?.textContent).toContain("Saved");
 		await act(async () => root.unmount());
 	});
 
-	it("warns and keeps Extract disabled until an embedding model is set", async () => {
+	it("warns, renders health/migration state, and navigates to Model configuration", async () => {
+		const onConfigureModels = vi.fn();
 		const getMemorySettings = vi.fn().mockResolvedValue(memorySettings);
-		const updateMemorySettings = vi.fn().mockResolvedValue({
-			...memorySettings,
-			memoryEngine: "extract",
-			memoryEmbeddingModel: "openai/text-embedding-3-small",
-		});
+		const updateMemorySettings = vi.fn();
 		const api = { getMemorySettings, updateMemorySettings } as unknown as MetisDesktopApi;
 		const container = document.createElement("div");
 		document.body.append(container);
 		const root = createRoot(container);
-		await act(async () => root.render(<MemorySettingsPanel api={api} serverReady />));
+		await act(async () => root.render(<MemorySettingsPanel api={api} onConfigureModels={onConfigureModels} serverReady />));
 		await flush();
 
 		expect(container.querySelector(".memory-settings-warning")?.textContent).toMatch(/embedding model/i);
@@ -105,16 +88,25 @@ describe("MemorySettingsPanel", () => {
 		);
 		expect(extractOption?.disabled).toBe(true);
 
-		await act(async () => {
-			document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
-		});
-		await flush();
-		await act(async () => {
-			setValue(container.querySelector<HTMLInputElement>("#memory-embedding-model")!, "openai/text-embedding-3-small");
-		});
-		await flush();
-		expect(container.querySelector(".memory-settings-warning")).toBeNull();
+		await act(async () => button(container, "Configure in Models").click());
+		expect(onConfigureModels).toHaveBeenCalledOnce();
+		await act(async () => root.unmount());
+	});
 
+	it("enables Extract only when Embedding is configured and sends no model refs", async () => {
+		const configured = { ...memorySettings, embeddingConfigured: true };
+		const updateMemorySettings = vi.fn().mockResolvedValue({ ...configured, memoryEngine: "extract" });
+		const api = {
+			getMemorySettings: vi.fn().mockResolvedValue(configured),
+			updateMemorySettings,
+		} as unknown as MetisDesktopApi;
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<MemorySettingsPanel api={api} onConfigureModels={vi.fn()} serverReady />));
+		await flush();
+
+		const engineTrigger = () => container.querySelector<HTMLButtonElement>('button[aria-label="Memory engine"]')!;
 		await act(async () => engineTrigger().click());
 		await flush();
 		const enabledExtract = [...document.querySelectorAll<HTMLButtonElement>('[role="option"]')].find((item) =>
@@ -129,8 +121,6 @@ describe("MemorySettingsPanel", () => {
 		expect(updateMemorySettings).toHaveBeenCalledWith({
 			autoMemoryEnabled: true,
 			memoryEngine: "extract",
-			memoryEmbeddingModel: "openai/text-embedding-3-small",
-			memoryRerankModel: "",
 		});
 		await act(async () => root.unmount());
 	});

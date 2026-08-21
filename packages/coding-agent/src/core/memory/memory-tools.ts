@@ -78,9 +78,6 @@ export interface MemoryToolContext {
 	signal?: AbortSignal;
 	embeddingKey?: string | null;
 	embedTexts?: (texts: string[], signal?: AbortSignal) => Promise<Float32Array[]>;
-	/** @deprecated Transitional single-item adapter; removed when provider settings land. */
-	embeddingModel?: string | null;
-	embedText?: (text: string) => Promise<Float32Array | null>;
 }
 
 export interface CommitFactsDetails {
@@ -410,17 +407,15 @@ export function applyReconcileFacts(ctx: MemoryToolContext, params: unknown): Ap
 }
 
 async function embedInsertedFacts(ctx: MemoryToolContext, facts: MemoryFact[], signal?: AbortSignal): Promise<void> {
-	const embeddingKey = ctx.embeddingKey ?? ctx.embeddingModel ?? null;
-	if (!embeddingKey || facts.length === 0 || (!ctx.embedTexts && !ctx.embedText)) return;
+	const embeddingKey = ctx.embeddingKey ?? null;
+	if (!embeddingKey || facts.length === 0 || !ctx.embedTexts) return;
 	const now = new Date().toISOString();
 	try {
 		signal?.throwIfAborted();
-		const vectors = ctx.embedTexts
-			? await ctx.embedTexts(
-					facts.map((fact) => fact.text),
-					signal,
-				)
-			: await Promise.all(facts.map(async (fact) => (await ctx.embedText!(fact.text)) ?? new Float32Array()));
+		const vectors = await ctx.embedTexts(
+			facts.map((fact) => fact.text),
+			signal,
+		);
 		signal?.throwIfAborted();
 		if (vectors.length !== facts.length || vectors.some((vector) => vector.length === 0))
 			throw new Error("Embedding batch size mismatch");

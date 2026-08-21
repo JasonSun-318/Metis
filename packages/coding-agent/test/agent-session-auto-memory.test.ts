@@ -197,7 +197,13 @@ describe("AgentSession auto memory", () => {
 		const settingsManager = SettingsManager.inMemory({
 			autoMemoryEnabled: true,
 			memoryEngine: "index",
-			memoryEmbeddingModel: "openai/text-embedding-3-small",
+			embedding: {
+				name: "Embedding",
+				provider: "OpenAI",
+				baseUrl: "https://api.openai.com/v1",
+				api: "openai-compatible",
+				modelId: "text-embedding-3-small",
+			},
 		});
 		const { session } = await createAgentSession({
 			agentDir,
@@ -233,7 +239,13 @@ describe("AgentSession auto memory", () => {
 		const settingsManager = SettingsManager.inMemory({
 			autoMemoryEnabled: true,
 			memoryEngine: "extract",
-			memoryEmbeddingModel: "openai/text-embedding-3-small",
+			embedding: {
+				name: "Embedding",
+				provider: "OpenAI",
+				baseUrl: "https://api.openai.com/v1",
+				api: "openai-compatible",
+				modelId: "text-embedding-3-small",
+			},
 		});
 		const model = getModel("anthropic", "claude-sonnet-4-5")!;
 		const streamFn: Agent["streamFn"] = (requestModel) => {

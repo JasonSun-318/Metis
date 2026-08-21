@@ -117,9 +117,19 @@ const zhCN = {
 	"Index (catalog)": "Index（目录注入）",
 	"Extract (retrieve)": "Extract（检索）",
 	"Embedding model": "嵌入模型",
+	"Configured in Model settings.": "已在模型设置中配置。",
+	"Required for Extract and not configured.": "Extract 必需，当前尚未配置。",
+	"Extract requires a configured Embedding model and credential before it can be enabled.":
+		"启用 Extract 前必须配置嵌入模型和专用凭据。",
+	"Configure an Embedding model before choosing Extract. Index injects the memory catalog.":
+		"选择 Extract 前请先配置嵌入模型；Index 会注入记忆目录。",
 	"Required for Extract. Use provider/model, for example openai/text-embedding-3-small.":
 		"Extract 必需。使用 provider/model，例如 openai/text-embedding-3-small。",
 	"Rerank model": "重排模型",
+	"Optional. Reranks up to 50 candidate facts when configured.": "可选。配置后最多重排 50 条候选事实。",
+	"Extract sends the bounded query and stored facts to your Embedding service, and candidates to optional Rerank.":
+		"Extract 会把受限长度的查询和已存事实发送到嵌入服务，并可将候选事实发送到可选的重排服务。",
+	"Configure in Models": "前往模型设置",
 	"Optional. Improves Extract ranking when configured.": "可选。配置后可改善 Extract 的排序结果。",
 	"Set an embedding model before choosing Extract. Extract retrieves relevant facts; Index injects the memory catalog.":
 		"选择 Extract 前请先填写嵌入模型。Extract 检索相关事实；Index 注入记忆目录。",
@@ -196,6 +206,22 @@ const zhCN = {
 	Reasoning: "支持推理",
 	"Image input": "支持图片输入",
 	"Vision model": "视觉理解模型",
+	"Specialized models": "专用模型",
+	"Extract sends bounded text to your Embedding service and up to 50 candidate facts to optional Rerank.":
+		"Extract 会把受限长度的文本发送到嵌入服务，并可将最多 50 条候选事实发送到重排服务。",
+	"Required for Extract; supports OpenAI-compatible providers such as OpenAI and Qwen.":
+		"Extract 必需；支持 OpenAI、千问等 OpenAI-compatible 提供商。",
+	"Optional; enter the provider's complete rerank endpoint URL.": "可选；请填写提供商完整的重排端点 URL。",
+	Supplier: "供应商",
+	"OpenAI-compatible embeddings endpoint.": "OpenAI-compatible 嵌入端点。",
+	"Cohere-compatible and Qwen-compatible services use different paths, so enter the complete endpoint URL.":
+		"Cohere-compatible 与 Qwen-compatible 服务使用不同路径，请填写完整端点 URL。",
+	Dimensions: "向量维度",
+	"Endpoint URL": "端点 URL",
+	"Fill in all required fields and an API key.": "请填写所有必填项和 API Key。",
+	"Embedding model saved": "嵌入模型已保存",
+	"Rerank model saved": "重排模型已保存",
+	"Model removed": "模型已移除",
 	"Configure a dedicated vision API with your own base URL, API format, model ID, and key.":
 		"单独配置视觉理解 API：填写 Base URL、API 格式、模型 ID 和密钥。",
 	"Pick the chat API format and endpoint describe_image talks to.":

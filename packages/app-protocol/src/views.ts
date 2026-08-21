@@ -644,10 +644,28 @@ export const VisionSettingsViewSchema = StrictObject({
 	modelId: Type.String({ minLength: 1, maxLength: 300 }),
 	authConfigured: Type.Boolean(),
 });
+export const EmbeddingSettingsViewSchema = StrictObject({
+	name: Type.String({ minLength: 1, maxLength: 120 }),
+	provider: Type.String({ minLength: 1, maxLength: 120 }),
+	baseUrl: Type.String({ minLength: 1, maxLength: 2_048 }),
+	api: Type.Literal("openai-compatible"),
+	modelId: Type.String({ minLength: 1, maxLength: 200 }),
+	dimensions: Type.Optional(Type.Integer({ minimum: 1, maximum: 8_192 })),
+	authConfigured: Type.Boolean(),
+});
+export const RerankSettingsViewSchema = StrictObject({
+	name: Type.String({ minLength: 1, maxLength: 120 }),
+	provider: Type.String({ minLength: 1, maxLength: 120 }),
+	endpointUrl: Type.String({ minLength: 1, maxLength: 2_048 }),
+	modelId: Type.String({ minLength: 1, maxLength: 200 }),
+	authConfigured: Type.Boolean(),
+});
 export const ModelSettingsViewSchema = StrictObject({
 	defaultModel: Type.Union([SubagentModelRefSchema, Type.Null()]),
 	/** Vision-describer service for image-less models; null when unset. */
 	vision: Type.Union([VisionSettingsViewSchema, Type.Null()]),
+	embedding: Type.Union([EmbeddingSettingsViewSchema, Type.Null()]),
+	rerank: Type.Union([RerankSettingsViewSchema, Type.Null()]),
 	defaultThinkingSelection: ThinkingSelectionSchema,
 	providers: Type.Array(ModelSettingsProviderViewSchema, { maxItems: 128 }),
 	loadError: Type.Union([PublicTextSchema, Type.Null()]),
@@ -670,8 +688,10 @@ export const MemoryEngineSchema = Type.Union([Type.Literal("index"), Type.Litera
 export const MemorySettingsViewSchema = StrictObject({
 	autoMemoryEnabled: Type.Boolean(),
 	memoryEngine: MemoryEngineSchema,
-	memoryEmbeddingModel: Type.String({ maxLength: 512 }),
-	memoryRerankModel: Type.String({ maxLength: 512 }),
+	embeddingConfigured: Type.Boolean(),
+	rerankConfigured: Type.Boolean(),
+	lastError: Type.Union([PublicTextSchema, Type.Null()]),
+	memoryMigrationNotice: Type.Union([PublicTextSchema, Type.Null()]),
 });
 
 export const HookEventNameSchema = Type.Union([
@@ -1330,6 +1350,8 @@ export type MemoryEngine = Static<typeof MemoryEngineSchema>;
 export type MemorySettingsView = Static<typeof MemorySettingsViewSchema>;
 export type VisionApiView = Static<typeof VisionApiViewSchema>;
 export type VisionSettingsView = Static<typeof VisionSettingsViewSchema>;
+export type EmbeddingSettingsView = Static<typeof EmbeddingSettingsViewSchema>;
+export type RerankSettingsView = Static<typeof RerankSettingsViewSchema>;
 export type HookEventNameView = Static<typeof HookEventNameSchema>;
 export type HookRunModeView = Static<typeof HookRunModeSchema>;
 export type DeclarativeHookView = Static<typeof DeclarativeHookViewSchema>;

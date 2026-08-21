@@ -153,6 +153,8 @@ const scheduleCases = [
 		{
 			defaultModel: { provider: "openai", modelId: "gpt-test" },
 			vision: null,
+			embedding: null,
+			rerank: null,
 			defaultThinkingSelection: "high",
 			providers: [
 				{
@@ -198,6 +200,8 @@ const scheduleCases = [
 				modelId: "gpt-4o",
 				authConfigured: true,
 			},
+			embedding: null,
+			rerank: null,
 			defaultThinkingSelection: "high",
 			providers: [],
 			loadError: null,
@@ -216,6 +220,8 @@ const scheduleCases = [
 		{
 			defaultModel: { provider: "openai", modelId: "gpt-test" },
 			vision: null,
+			embedding: null,
+			rerank: null,
 			defaultThinkingSelection: "high",
 			providers: [],
 			loadError: null,
@@ -223,7 +229,23 @@ const scheduleCases = [
 	],
 	[
 		"model/testConnection",
-		{ requestId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee", provider: "openai", modelId: "gpt-test" },
+		{ requestId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee", kind: "chat", provider: "openai", modelId: "gpt-test" },
+		{ ok: true, message: "Connection succeeded", latencyMs: 42 },
+	],
+	[
+		"model/testConnection",
+		{
+			requestId: "abababab-abab-4bab-8bab-abababababab",
+			kind: "embedding",
+			settings: {
+				name: "Qwen Embedding",
+				provider: "Qwen",
+				baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+				api: "openai-compatible",
+				modelId: "text-embedding-v4",
+			},
+			credential: { action: "set", value: "one-shot" },
+		},
 		{ ok: true, message: "Connection succeeded", latencyMs: 42 },
 	],
 	[
@@ -267,8 +289,10 @@ const scheduleCases = [
 		{
 			autoMemoryEnabled: true,
 			memoryEngine: "index",
-			memoryEmbeddingModel: "",
-			memoryRerankModel: "",
+			embeddingConfigured: false,
+			rerankConfigured: false,
+			lastError: null,
+			memoryMigrationNotice: null,
 		},
 	],
 	[
@@ -276,14 +300,14 @@ const scheduleCases = [
 		{
 			autoMemoryEnabled: true,
 			memoryEngine: "extract",
-			memoryEmbeddingModel: "openai/text-embedding-3-small",
-			memoryRerankModel: "",
 		},
 		{
 			autoMemoryEnabled: true,
 			memoryEngine: "extract",
-			memoryEmbeddingModel: "openai/text-embedding-3-small",
-			memoryRerankModel: "",
+			embeddingConfigured: true,
+			rerankConfigured: false,
+			lastError: null,
+			memoryMigrationNotice: null,
 		},
 	],
 	[

@@ -2,11 +2,20 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { embeddingConfigKey } from "../src/core/memory/memory-embedder.ts";
 import { searchMemories } from "../src/core/memory/memory-search.ts";
 import { openMemoryStore } from "../src/core/memory/memory-store.ts";
 import type { MemoryFact } from "../src/core/memory/memory-types.ts";
 
 describe("memory search", () => {
+	const embeddingSettings = {
+		name: "Embedding",
+		provider: "Qwen",
+		baseUrl: "https://example.test/v1",
+		api: "openai-compatible" as const,
+		modelId: "embedding-model",
+	};
+	const embeddingKey = embeddingConfigKey(embeddingSettings);
 	const dirs: string[] = [];
 
 	afterEach(() => {
@@ -23,7 +32,7 @@ describe("memory search", () => {
 			status: "active",
 			createdAt: "2026-08-21T00:00:00.000Z",
 			sourceTurn: "t1",
-			embeddingModel: "openai/text-embedding-3-small",
+			embeddingModel: embeddingKey,
 			...partial,
 		};
 	}
@@ -52,7 +61,8 @@ describe("memory search", () => {
 			query: "TypeScript backend preferences",
 			cwdKey: "unused",
 			mode: "code",
-			embeddingModel: "openai/text-embedding-3-small",
+			embeddingSettings,
+			embeddingApiKey: "secret",
 			embedQuery: async () => new Float32Array([0.95, 0.05, 0]),
 		});
 		expect(hits[0]?.text).toContain("TypeScript");
@@ -85,12 +95,49 @@ describe("memory search", () => {
 			query: "TypeScript backend preferences",
 			cwdKey: "unused",
 			mode: "code",
-			embeddingModel: "openai/text-embedding-3-small",
-			rerankModel: "cohere/rerank-v3.5",
+			embeddingSettings,
+			embeddingApiKey: "secret",
+			rerankSettings: {
+				name: "Rerank",
+				provider: "Cohere",
+				endpointUrl: "https://example.test/v2/rerank",
+				modelId: "rerank",
+			},
+			rerankApiKey: "secret",
 			embedQuery: async () => new Float32Array([0.95, 0.05, 0]),
 			rerank: async (_query, docs) => [...docs].reverse().map((d) => d.id),
 		});
 		expect(hits[0]?.id).toBe("b");
+		store.close();
+	});
+
+	it("keeps fused ranking when rerank fails", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "metis-mem-search-"));
+		dirs.push(dir);
+		const store = openMemoryStore(join(dir, "memory.sqlite"));
+		store.insertFact(insertFact({ id: "a", text: "typescript backend", embedding: new Float32Array([1, 0]) }));
+		store.insertFact(insertFact({ id: "b", text: "dark theme", embedding: new Float32Array([0, 1]) }));
+
+		const hits = await searchMemories({
+			store,
+			query: "typescript",
+			cwdKey: "unused",
+			mode: "code",
+			embeddingSettings,
+			embeddingApiKey: "secret",
+			rerankSettings: {
+				name: "Rerank",
+				provider: "Cohere",
+				endpointUrl: "https://example.test/rerank",
+				modelId: "rerank",
+			},
+			rerankApiKey: "secret",
+			embedQuery: async () => new Float32Array([1, 0]),
+			rerank: async () => {
+				throw new Error("offline");
+			},
+		});
+		expect(hits.map((hit) => hit.id)).toEqual(["a", "b"]);
 		store.close();
 	});
 
@@ -131,7 +178,8 @@ describe("memory search", () => {
 			query: "typescript",
 			cwdKey: "cwd-a",
 			mode: "code",
-			embeddingModel: "openai/text-embedding-3-small",
+			embeddingSettings,
+			embeddingApiKey: "secret",
 			embedQuery: async () => new Float32Array([1, 0, 0]),
 		});
 		expect(hits.map((h) => h.id).sort()).toEqual(["global", "here"]);

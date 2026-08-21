@@ -4116,6 +4116,224 @@
                             }
                           },
                           "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "required": [
+                            "type",
+                            "settings",
+                            "credential"
+                          ],
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "const": "set_embedding"
+                            },
+                            "settings": {
+                              "anyOf": [
+                                {
+                                  "type": "object",
+                                  "required": [
+                                    "name",
+                                    "provider",
+                                    "baseUrl",
+                                    "api",
+                                    "modelId"
+                                  ],
+                                  "properties": {
+                                    "name": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 120
+                                    },
+                                    "provider": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 120
+                                    },
+                                    "baseUrl": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 2048
+                                    },
+                                    "api": {
+                                      "type": "string",
+                                      "const": "openai-compatible"
+                                    },
+                                    "modelId": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 200
+                                    },
+                                    "dimensions": {
+                                      "type": "integer",
+                                      "minimum": 1,
+                                      "maximum": 8192
+                                    }
+                                  },
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "credential": {
+                              "anyOf": [
+                                {
+                                  "type": "object",
+                                  "required": [
+                                    "action"
+                                  ],
+                                  "properties": {
+                                    "action": {
+                                      "type": "string",
+                                      "const": "keep"
+                                    }
+                                  },
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "object",
+                                  "required": [
+                                    "action"
+                                  ],
+                                  "properties": {
+                                    "action": {
+                                      "type": "string",
+                                      "const": "remove"
+                                    }
+                                  },
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "object",
+                                  "required": [
+                                    "action",
+                                    "value"
+                                  ],
+                                  "properties": {
+                                    "action": {
+                                      "type": "string",
+                                      "const": "set"
+                                    },
+                                    "value": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 16384,
+                                      "pattern": "^[^\\x00-\\x1f\\x7f]+$"
+                                    }
+                                  },
+                                  "additionalProperties": false
+                                }
+                              ]
+                            }
+                          },
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "required": [
+                            "type",
+                            "settings",
+                            "credential"
+                          ],
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "const": "set_rerank"
+                            },
+                            "settings": {
+                              "anyOf": [
+                                {
+                                  "type": "object",
+                                  "required": [
+                                    "name",
+                                    "provider",
+                                    "endpointUrl",
+                                    "modelId"
+                                  ],
+                                  "properties": {
+                                    "name": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 120
+                                    },
+                                    "provider": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 120
+                                    },
+                                    "endpointUrl": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 2048
+                                    },
+                                    "modelId": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 200
+                                    }
+                                  },
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "credential": {
+                              "anyOf": [
+                                {
+                                  "type": "object",
+                                  "required": [
+                                    "action"
+                                  ],
+                                  "properties": {
+                                    "action": {
+                                      "type": "string",
+                                      "const": "keep"
+                                    }
+                                  },
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "object",
+                                  "required": [
+                                    "action"
+                                  ],
+                                  "properties": {
+                                    "action": {
+                                      "type": "string",
+                                      "const": "remove"
+                                    }
+                                  },
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "object",
+                                  "required": [
+                                    "action",
+                                    "value"
+                                  ],
+                                  "properties": {
+                                    "action": {
+                                      "type": "string",
+                                      "const": "set"
+                                    },
+                                    "value": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 16384,
+                                      "pattern": "^[^\\x00-\\x1f\\x7f]+$"
+                                    }
+                                  },
+                                  "additionalProperties": false
+                                }
+                              ]
+                            }
+                          },
+                          "additionalProperties": false
                         }
                       ]
                     }
@@ -4149,31 +4367,232 @@
                   "const": "model/testConnection"
                 },
                 "params": {
-                  "type": "object",
-                  "required": [
-                    "requestId",
-                    "provider",
-                    "modelId"
-                  ],
-                  "properties": {
-                    "requestId": {
-                      "type": "string",
-                      "format": "uuid"
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "required": [
+                        "requestId",
+                        "kind",
+                        "provider",
+                        "modelId"
+                      ],
+                      "properties": {
+                        "requestId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "kind": {
+                          "type": "string",
+                          "const": "chat"
+                        },
+                        "provider": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 256,
+                          "x-metis-maxUtf16Units": 256
+                        },
+                        "modelId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 256,
+                          "x-metis-maxUtf16Units": 256
+                        }
+                      },
+                      "additionalProperties": false
                     },
-                    "provider": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 256,
-                      "x-metis-maxUtf16Units": 256
-                    },
-                    "modelId": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 256,
-                      "x-metis-maxUtf16Units": 256
+                    {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "required": [
+                            "requestId",
+                            "kind",
+                            "settings",
+                            "credential"
+                          ],
+                          "properties": {
+                            "requestId": {
+                              "type": "string",
+                              "format": "uuid"
+                            },
+                            "kind": {
+                              "type": "string",
+                              "const": "embedding"
+                            },
+                            "settings": {
+                              "type": "object",
+                              "required": [
+                                "name",
+                                "provider",
+                                "baseUrl",
+                                "api",
+                                "modelId"
+                              ],
+                              "properties": {
+                                "name": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 120
+                                },
+                                "provider": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 120
+                                },
+                                "baseUrl": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 2048
+                                },
+                                "api": {
+                                  "type": "string",
+                                  "const": "openai-compatible"
+                                },
+                                "modelId": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 200
+                                },
+                                "dimensions": {
+                                  "type": "integer",
+                                  "minimum": 1,
+                                  "maximum": 8192
+                                }
+                              },
+                              "additionalProperties": false
+                            },
+                            "credential": {
+                              "anyOf": [
+                                {
+                                  "type": "object",
+                                  "required": [
+                                    "action"
+                                  ],
+                                  "properties": {
+                                    "action": {
+                                      "type": "string",
+                                      "const": "keep"
+                                    }
+                                  },
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "object",
+                                  "required": [
+                                    "action",
+                                    "value"
+                                  ],
+                                  "properties": {
+                                    "action": {
+                                      "type": "string",
+                                      "const": "set"
+                                    },
+                                    "value": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 16384,
+                                      "pattern": "^[^\\x00-\\x1f\\x7f]+$"
+                                    }
+                                  },
+                                  "additionalProperties": false
+                                }
+                              ]
+                            }
+                          },
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "required": [
+                            "requestId",
+                            "kind",
+                            "settings",
+                            "credential"
+                          ],
+                          "properties": {
+                            "requestId": {
+                              "type": "string",
+                              "format": "uuid"
+                            },
+                            "kind": {
+                              "type": "string",
+                              "const": "rerank"
+                            },
+                            "settings": {
+                              "type": "object",
+                              "required": [
+                                "name",
+                                "provider",
+                                "endpointUrl",
+                                "modelId"
+                              ],
+                              "properties": {
+                                "name": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 120
+                                },
+                                "provider": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 120
+                                },
+                                "endpointUrl": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 2048
+                                },
+                                "modelId": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 200
+                                }
+                              },
+                              "additionalProperties": false
+                            },
+                            "credential": {
+                              "anyOf": [
+                                {
+                                  "type": "object",
+                                  "required": [
+                                    "action"
+                                  ],
+                                  "properties": {
+                                    "action": {
+                                      "type": "string",
+                                      "const": "keep"
+                                    }
+                                  },
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "object",
+                                  "required": [
+                                    "action",
+                                    "value"
+                                  ],
+                                  "properties": {
+                                    "action": {
+                                      "type": "string",
+                                      "const": "set"
+                                    },
+                                    "value": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 16384,
+                                      "pattern": "^[^\\x00-\\x1f\\x7f]+$"
+                                    }
+                                  },
+                                  "additionalProperties": false
+                                }
+                              ]
+                            }
+                          },
+                          "additionalProperties": false
+                        }
+                      ]
                     }
-                  },
-                  "additionalProperties": false
+                  ]
                 }
               },
               "additionalProperties": false
@@ -4407,6 +4826,88 @@
                             }
                           },
                           "additionalProperties": false
+                        }
+                      ]
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "jsonrpc",
+                "id",
+                "method",
+                "params"
+              ],
+              "properties": {
+                "jsonrpc": {
+                  "type": "string",
+                  "const": "2.0"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "x-metis-maxUtf16Units": 128
+                },
+                "method": {
+                  "type": "string",
+                  "const": "memory/get"
+                },
+                "params": {
+                  "type": "object",
+                  "properties": {},
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "jsonrpc",
+                "id",
+                "method",
+                "params"
+              ],
+              "properties": {
+                "jsonrpc": {
+                  "type": "string",
+                  "const": "2.0"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "x-metis-maxUtf16Units": 128
+                },
+                "method": {
+                  "type": "string",
+                  "const": "memory/update"
+                },
+                "params": {
+                  "type": "object",
+                  "required": [
+                    "autoMemoryEnabled",
+                    "memoryEngine"
+                  ],
+                  "properties": {
+                    "autoMemoryEnabled": {
+                      "type": "boolean"
+                    },
+                    "memoryEngine": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "const": "index"
+                        },
+                        {
+                          "type": "string",
+                          "const": "extract"
                         }
                       ]
                     }
@@ -21260,6 +21761,8 @@
                   "required": [
                     "defaultModel",
                     "vision",
+                    "embedding",
+                    "rerank",
                     "defaultThinkingSelection",
                     "providers",
                     "loadError"
@@ -21336,6 +21839,102 @@
                               "type": "string",
                               "minLength": 1,
                               "maxLength": 300
+                            },
+                            "authConfigured": {
+                              "type": "boolean"
+                            }
+                          },
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "embedding": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "required": [
+                            "name",
+                            "provider",
+                            "baseUrl",
+                            "api",
+                            "modelId",
+                            "authConfigured"
+                          ],
+                          "properties": {
+                            "name": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 120
+                            },
+                            "provider": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 120
+                            },
+                            "baseUrl": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 2048
+                            },
+                            "api": {
+                              "type": "string",
+                              "const": "openai-compatible"
+                            },
+                            "modelId": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 200
+                            },
+                            "dimensions": {
+                              "type": "integer",
+                              "minimum": 1,
+                              "maximum": 8192
+                            },
+                            "authConfigured": {
+                              "type": "boolean"
+                            }
+                          },
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "rerank": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "required": [
+                            "name",
+                            "provider",
+                            "endpointUrl",
+                            "modelId",
+                            "authConfigured"
+                          ],
+                          "properties": {
+                            "name": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 120
+                            },
+                            "provider": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 120
+                            },
+                            "endpointUrl": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 2048
+                            },
+                            "modelId": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 200
                             },
                             "authConfigured": {
                               "type": "boolean"
@@ -21583,6 +22182,8 @@
                   "required": [
                     "defaultModel",
                     "vision",
+                    "embedding",
+                    "rerank",
                     "defaultThinkingSelection",
                     "providers",
                     "loadError"
@@ -21659,6 +22260,102 @@
                               "type": "string",
                               "minLength": 1,
                               "maxLength": 300
+                            },
+                            "authConfigured": {
+                              "type": "boolean"
+                            }
+                          },
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "embedding": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "required": [
+                            "name",
+                            "provider",
+                            "baseUrl",
+                            "api",
+                            "modelId",
+                            "authConfigured"
+                          ],
+                          "properties": {
+                            "name": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 120
+                            },
+                            "provider": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 120
+                            },
+                            "baseUrl": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 2048
+                            },
+                            "api": {
+                              "type": "string",
+                              "const": "openai-compatible"
+                            },
+                            "modelId": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 200
+                            },
+                            "dimensions": {
+                              "type": "integer",
+                              "minimum": 1,
+                              "maximum": 8192
+                            },
+                            "authConfigured": {
+                              "type": "boolean"
+                            }
+                          },
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "rerank": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "required": [
+                            "name",
+                            "provider",
+                            "endpointUrl",
+                            "modelId",
+                            "authConfigured"
+                          ],
+                          "properties": {
+                            "name": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 120
+                            },
+                            "provider": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 120
+                            },
+                            "endpointUrl": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 2048
+                            },
+                            "modelId": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 200
                             },
                             "authConfigured": {
                               "type": "boolean"
@@ -22334,6 +23031,162 @@
                         {
                           "type": "string",
                           "const": "environment"
+                        }
+                      ]
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "jsonrpc",
+                "id",
+                "result"
+              ],
+              "properties": {
+                "jsonrpc": {
+                  "type": "string",
+                  "const": "2.0"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "x-metis-maxUtf16Units": 128
+                },
+                "result": {
+                  "type": "object",
+                  "required": [
+                    "autoMemoryEnabled",
+                    "memoryEngine",
+                    "embeddingConfigured",
+                    "rerankConfigured",
+                    "lastError",
+                    "memoryMigrationNotice"
+                  ],
+                  "properties": {
+                    "autoMemoryEnabled": {
+                      "type": "boolean"
+                    },
+                    "memoryEngine": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "const": "index"
+                        },
+                        {
+                          "type": "string",
+                          "const": "extract"
+                        }
+                      ]
+                    },
+                    "embeddingConfigured": {
+                      "type": "boolean"
+                    },
+                    "rerankConfigured": {
+                      "type": "boolean"
+                    },
+                    "lastError": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "x-metis-maxUtf8Bytes": 65536
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "memoryMigrationNotice": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "x-metis-maxUtf8Bytes": 65536
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "jsonrpc",
+                "id",
+                "result"
+              ],
+              "properties": {
+                "jsonrpc": {
+                  "type": "string",
+                  "const": "2.0"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "x-metis-maxUtf16Units": 128
+                },
+                "result": {
+                  "type": "object",
+                  "required": [
+                    "autoMemoryEnabled",
+                    "memoryEngine",
+                    "embeddingConfigured",
+                    "rerankConfigured",
+                    "lastError",
+                    "memoryMigrationNotice"
+                  ],
+                  "properties": {
+                    "autoMemoryEnabled": {
+                      "type": "boolean"
+                    },
+                    "memoryEngine": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "const": "index"
+                        },
+                        {
+                          "type": "string",
+                          "const": "extract"
+                        }
+                      ]
+                    },
+                    "embeddingConfigured": {
+                      "type": "boolean"
+                    },
+                    "rerankConfigured": {
+                      "type": "boolean"
+                    },
+                    "lastError": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "x-metis-maxUtf8Bytes": 65536
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "memoryMigrationNotice": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "x-metis-maxUtf8Bytes": 65536
+                        },
+                        {
+                          "type": "null"
                         }
                       ]
                     }
@@ -34598,6 +35451,224 @@
                         }
                       },
                       "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "type",
+                        "settings",
+                        "credential"
+                      ],
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "set_embedding"
+                        },
+                        "settings": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "required": [
+                                "name",
+                                "provider",
+                                "baseUrl",
+                                "api",
+                                "modelId"
+                              ],
+                              "properties": {
+                                "name": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 120
+                                },
+                                "provider": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 120
+                                },
+                                "baseUrl": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 2048
+                                },
+                                "api": {
+                                  "type": "string",
+                                  "const": "openai-compatible"
+                                },
+                                "modelId": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 200
+                                },
+                                "dimensions": {
+                                  "type": "integer",
+                                  "minimum": 1,
+                                  "maximum": 8192
+                                }
+                              },
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "credential": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "required": [
+                                "action"
+                              ],
+                              "properties": {
+                                "action": {
+                                  "type": "string",
+                                  "const": "keep"
+                                }
+                              },
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "required": [
+                                "action"
+                              ],
+                              "properties": {
+                                "action": {
+                                  "type": "string",
+                                  "const": "remove"
+                                }
+                              },
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "required": [
+                                "action",
+                                "value"
+                              ],
+                              "properties": {
+                                "action": {
+                                  "type": "string",
+                                  "const": "set"
+                                },
+                                "value": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 16384,
+                                  "pattern": "^[^\\x00-\\x1f\\x7f]+$"
+                                }
+                              },
+                              "additionalProperties": false
+                            }
+                          ]
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "type",
+                        "settings",
+                        "credential"
+                      ],
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "set_rerank"
+                        },
+                        "settings": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "required": [
+                                "name",
+                                "provider",
+                                "endpointUrl",
+                                "modelId"
+                              ],
+                              "properties": {
+                                "name": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 120
+                                },
+                                "provider": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 120
+                                },
+                                "endpointUrl": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 2048
+                                },
+                                "modelId": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 200
+                                }
+                              },
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "credential": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "required": [
+                                "action"
+                              ],
+                              "properties": {
+                                "action": {
+                                  "type": "string",
+                                  "const": "keep"
+                                }
+                              },
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "required": [
+                                "action"
+                              ],
+                              "properties": {
+                                "action": {
+                                  "type": "string",
+                                  "const": "remove"
+                                }
+                              },
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "required": [
+                                "action",
+                                "value"
+                              ],
+                              "properties": {
+                                "action": {
+                                  "type": "string",
+                                  "const": "set"
+                                },
+                                "value": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 16384,
+                                  "pattern": "^[^\\x00-\\x1f\\x7f]+$"
+                                }
+                              },
+                              "additionalProperties": false
+                            }
+                          ]
+                        }
+                      },
+                      "additionalProperties": false
                     }
                   ]
                 }
@@ -34631,31 +35702,232 @@
               "const": "model/testConnection"
             },
             "params": {
-              "type": "object",
-              "required": [
-                "requestId",
-                "provider",
-                "modelId"
-              ],
-              "properties": {
-                "requestId": {
-                  "type": "string",
-                  "format": "uuid"
+              "anyOf": [
+                {
+                  "type": "object",
+                  "required": [
+                    "requestId",
+                    "kind",
+                    "provider",
+                    "modelId"
+                  ],
+                  "properties": {
+                    "requestId": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "kind": {
+                      "type": "string",
+                      "const": "chat"
+                    },
+                    "provider": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256,
+                      "x-metis-maxUtf16Units": 256
+                    },
+                    "modelId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256,
+                      "x-metis-maxUtf16Units": 256
+                    }
+                  },
+                  "additionalProperties": false
                 },
-                "provider": {
-                  "type": "string",
-                  "minLength": 1,
-                  "maxLength": 256,
-                  "x-metis-maxUtf16Units": 256
-                },
-                "modelId": {
-                  "type": "string",
-                  "minLength": 1,
-                  "maxLength": 256,
-                  "x-metis-maxUtf16Units": 256
+                {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "required": [
+                        "requestId",
+                        "kind",
+                        "settings",
+                        "credential"
+                      ],
+                      "properties": {
+                        "requestId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "kind": {
+                          "type": "string",
+                          "const": "embedding"
+                        },
+                        "settings": {
+                          "type": "object",
+                          "required": [
+                            "name",
+                            "provider",
+                            "baseUrl",
+                            "api",
+                            "modelId"
+                          ],
+                          "properties": {
+                            "name": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 120
+                            },
+                            "provider": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 120
+                            },
+                            "baseUrl": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 2048
+                            },
+                            "api": {
+                              "type": "string",
+                              "const": "openai-compatible"
+                            },
+                            "modelId": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 200
+                            },
+                            "dimensions": {
+                              "type": "integer",
+                              "minimum": 1,
+                              "maximum": 8192
+                            }
+                          },
+                          "additionalProperties": false
+                        },
+                        "credential": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "required": [
+                                "action"
+                              ],
+                              "properties": {
+                                "action": {
+                                  "type": "string",
+                                  "const": "keep"
+                                }
+                              },
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "required": [
+                                "action",
+                                "value"
+                              ],
+                              "properties": {
+                                "action": {
+                                  "type": "string",
+                                  "const": "set"
+                                },
+                                "value": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 16384,
+                                  "pattern": "^[^\\x00-\\x1f\\x7f]+$"
+                                }
+                              },
+                              "additionalProperties": false
+                            }
+                          ]
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "requestId",
+                        "kind",
+                        "settings",
+                        "credential"
+                      ],
+                      "properties": {
+                        "requestId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "kind": {
+                          "type": "string",
+                          "const": "rerank"
+                        },
+                        "settings": {
+                          "type": "object",
+                          "required": [
+                            "name",
+                            "provider",
+                            "endpointUrl",
+                            "modelId"
+                          ],
+                          "properties": {
+                            "name": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 120
+                            },
+                            "provider": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 120
+                            },
+                            "endpointUrl": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 2048
+                            },
+                            "modelId": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 200
+                            }
+                          },
+                          "additionalProperties": false
+                        },
+                        "credential": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "required": [
+                                "action"
+                              ],
+                              "properties": {
+                                "action": {
+                                  "type": "string",
+                                  "const": "keep"
+                                }
+                              },
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "required": [
+                                "action",
+                                "value"
+                              ],
+                              "properties": {
+                                "action": {
+                                  "type": "string",
+                                  "const": "set"
+                                },
+                                "value": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 16384,
+                                  "pattern": "^[^\\x00-\\x1f\\x7f]+$"
+                                }
+                              },
+                              "additionalProperties": false
+                            }
+                          ]
+                        }
+                      },
+                      "additionalProperties": false
+                    }
+                  ]
                 }
-              },
-              "additionalProperties": false
+              ]
             }
           },
           "additionalProperties": false
@@ -34889,6 +36161,88 @@
                         }
                       },
                       "additionalProperties": false
+                    }
+                  ]
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "type": "string",
+              "const": "2.0"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "x-metis-maxUtf16Units": 128
+            },
+            "method": {
+              "type": "string",
+              "const": "memory/get"
+            },
+            "params": {
+              "type": "object",
+              "properties": {},
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "type": "string",
+              "const": "2.0"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "x-metis-maxUtf16Units": 128
+            },
+            "method": {
+              "type": "string",
+              "const": "memory/update"
+            },
+            "params": {
+              "type": "object",
+              "required": [
+                "autoMemoryEnabled",
+                "memoryEngine"
+              ],
+              "properties": {
+                "autoMemoryEnabled": {
+                  "type": "boolean"
+                },
+                "memoryEngine": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "const": "index"
+                    },
+                    {
+                      "type": "string",
+                      "const": "extract"
                     }
                   ]
                 }
@@ -46425,6 +47779,8 @@
               "required": [
                 "defaultModel",
                 "vision",
+                "embedding",
+                "rerank",
                 "defaultThinkingSelection",
                 "providers",
                 "loadError"
@@ -46501,6 +47857,102 @@
                           "type": "string",
                           "minLength": 1,
                           "maxLength": 300
+                        },
+                        "authConfigured": {
+                          "type": "boolean"
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "embedding": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "required": [
+                        "name",
+                        "provider",
+                        "baseUrl",
+                        "api",
+                        "modelId",
+                        "authConfigured"
+                      ],
+                      "properties": {
+                        "name": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 120
+                        },
+                        "provider": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 120
+                        },
+                        "baseUrl": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 2048
+                        },
+                        "api": {
+                          "type": "string",
+                          "const": "openai-compatible"
+                        },
+                        "modelId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 200
+                        },
+                        "dimensions": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 8192
+                        },
+                        "authConfigured": {
+                          "type": "boolean"
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "rerank": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "required": [
+                        "name",
+                        "provider",
+                        "endpointUrl",
+                        "modelId",
+                        "authConfigured"
+                      ],
+                      "properties": {
+                        "name": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 120
+                        },
+                        "provider": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 120
+                        },
+                        "endpointUrl": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 2048
+                        },
+                        "modelId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 200
                         },
                         "authConfigured": {
                           "type": "boolean"
@@ -46748,6 +48200,8 @@
               "required": [
                 "defaultModel",
                 "vision",
+                "embedding",
+                "rerank",
                 "defaultThinkingSelection",
                 "providers",
                 "loadError"
@@ -46824,6 +48278,102 @@
                           "type": "string",
                           "minLength": 1,
                           "maxLength": 300
+                        },
+                        "authConfigured": {
+                          "type": "boolean"
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "embedding": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "required": [
+                        "name",
+                        "provider",
+                        "baseUrl",
+                        "api",
+                        "modelId",
+                        "authConfigured"
+                      ],
+                      "properties": {
+                        "name": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 120
+                        },
+                        "provider": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 120
+                        },
+                        "baseUrl": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 2048
+                        },
+                        "api": {
+                          "type": "string",
+                          "const": "openai-compatible"
+                        },
+                        "modelId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 200
+                        },
+                        "dimensions": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 8192
+                        },
+                        "authConfigured": {
+                          "type": "boolean"
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "rerank": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "required": [
+                        "name",
+                        "provider",
+                        "endpointUrl",
+                        "modelId",
+                        "authConfigured"
+                      ],
+                      "properties": {
+                        "name": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 120
+                        },
+                        "provider": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 120
+                        },
+                        "endpointUrl": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 2048
+                        },
+                        "modelId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 200
                         },
                         "authConfigured": {
                           "type": "boolean"
@@ -47499,6 +49049,162 @@
                     {
                       "type": "string",
                       "const": "environment"
+                    }
+                  ]
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "jsonrpc",
+            "id",
+            "result"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "type": "string",
+              "const": "2.0"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "x-metis-maxUtf16Units": 128
+            },
+            "result": {
+              "type": "object",
+              "required": [
+                "autoMemoryEnabled",
+                "memoryEngine",
+                "embeddingConfigured",
+                "rerankConfigured",
+                "lastError",
+                "memoryMigrationNotice"
+              ],
+              "properties": {
+                "autoMemoryEnabled": {
+                  "type": "boolean"
+                },
+                "memoryEngine": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "const": "index"
+                    },
+                    {
+                      "type": "string",
+                      "const": "extract"
+                    }
+                  ]
+                },
+                "embeddingConfigured": {
+                  "type": "boolean"
+                },
+                "rerankConfigured": {
+                  "type": "boolean"
+                },
+                "lastError": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "x-metis-maxUtf8Bytes": 65536
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "memoryMigrationNotice": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "x-metis-maxUtf8Bytes": 65536
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "jsonrpc",
+            "id",
+            "result"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "type": "string",
+              "const": "2.0"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "x-metis-maxUtf16Units": 128
+            },
+            "result": {
+              "type": "object",
+              "required": [
+                "autoMemoryEnabled",
+                "memoryEngine",
+                "embeddingConfigured",
+                "rerankConfigured",
+                "lastError",
+                "memoryMigrationNotice"
+              ],
+              "properties": {
+                "autoMemoryEnabled": {
+                  "type": "boolean"
+                },
+                "memoryEngine": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "const": "index"
+                    },
+                    {
+                      "type": "string",
+                      "const": "extract"
+                    }
+                  ]
+                },
+                "embeddingConfigured": {
+                  "type": "boolean"
+                },
+                "rerankConfigured": {
+                  "type": "boolean"
+                },
+                "lastError": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "x-metis-maxUtf8Bytes": 65536
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "memoryMigrationNotice": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "x-metis-maxUtf8Bytes": 65536
+                    },
+                    {
+                      "type": "null"
                     }
                   ]
                 }

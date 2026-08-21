@@ -115,7 +115,7 @@ export function SettingsDialog({ api, generalPreferences, onClose, onGeneralPref
 						{page === "profile" ? <ProfilePanel api={api} serverReady={serverReady} /> : null}
 						{page === "personalization" ? <PersonalizationPanel api={api} serverReady={serverReady} /> : null}
 						{page === "model" ? <ModelSettingsPanel api={api} serverReady={serverReady} /> : null}
-						{page === "memory" ? <MemorySettingsPanel api={api} serverReady={serverReady} /> : null}
+						{page === "memory" ? <MemorySettingsPanel api={api} onConfigureModels={() => setPage("model")} serverReady={serverReady} /> : null}
 						{page === "usage" ? <UsagePanel api={api} serverReady={serverReady} /> : null}
 					</div>
 				</div>

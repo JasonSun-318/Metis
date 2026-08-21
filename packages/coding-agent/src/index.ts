@@ -58,7 +58,7 @@ export {
 	mcpCredentialKey,
 	type OAuthCredential,
 } from "./core/auth-storage.ts";
-export { ensureModeScopedMemoryLayout } from "./core/auto-memory.ts";
+export { ensureModeScopedMemoryLayout, getMemorySqlitePath } from "./core/auto-memory.ts";
 export { getLatestCacheHitPercent } from "./core/cache-stats.ts";
 // Compaction
 export {
@@ -253,11 +253,23 @@ export {
 	mcpServerFingerprint,
 	resolveMcpServerSettings,
 } from "./core/mcp/index.ts";
+export { embedTexts } from "./core/memory/memory-embedder.ts";
 export {
 	assertMemoryReadAllowed,
 	type MemoryReadBoundary,
 } from "./core/memory/memory-path-guard.ts";
 export { type MemoryProjectIdentity, memoryProjectIdentity } from "./core/memory/memory-project.ts";
+export { rerankDocuments } from "./core/memory/memory-rerank.ts";
+export {
+	type EmbeddingSettings,
+	MEMORY_EMBEDDING_CREDENTIAL_ID,
+	MEMORY_RERANK_CREDENTIAL_ID,
+	type RerankSettings,
+	validateEmbeddingSettings,
+	validateRerankSettings,
+	validateServiceCredential,
+} from "./core/memory/memory-service-settings.ts";
+export { openMemoryStore } from "./core/memory/memory-store.ts";
 export { convertToLlm } from "./core/messages.ts";
 export type {
 	ModeProjectSessionTarget,

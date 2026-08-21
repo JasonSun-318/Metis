@@ -2,11 +2,12 @@ import type { AgentTool } from "@metis/agent-core";
 import { Text } from "@metis/tui";
 import { type Static, Type } from "typebox";
 import { keyText } from "../../modes/interactive/components/keybinding-hints.ts";
+import { readBoundedResponseBytes } from "../bounded-response.ts";
 import type { ToolDefinition } from "../extensions/types.ts";
 import { WEB_SEARCH_PROVIDER_INFO, type WebSearchProvider } from "../web-search-config.ts";
 import { getTextOutput, invalidArgText, str } from "./render-utils.ts";
 import { wrapToolDefinition } from "./tool-definition-wrapper.ts";
-import { readBoundedResponseBytes } from "./web-fetch.ts";
+import { MAX_WEB_RESPONSE_BYTES } from "./web-fetch.ts";
 
 const REQUEST_TIMEOUT_MS = 15_000;
 
@@ -84,7 +85,7 @@ async function requestJson(
 		await response.body?.cancel();
 		throw new Error(`${WEB_SEARCH_PROVIDER_INFO[provider].label} request failed with HTTP ${response.status}`);
 	}
-	const { data } = await readBoundedResponseBytes(response);
+	const { data } = await readBoundedResponseBytes(response, MAX_WEB_RESPONSE_BYTES);
 	try {
 		const parsed = object(JSON.parse(new TextDecoder().decode(data)));
 		if (!parsed) throw new Error("not an object");

@@ -26,6 +26,8 @@ export class SessionRegistry {
 	private readonly blockedSessionIds = new Set<string>();
 	private readonly maxQueuedOperationsPerSession: number;
 	private accepting = true;
+	private modelServiceRefreshActive = false;
+	private modelServiceRefreshTail: Promise<void> = Promise.resolve();
 	private shutdownPromise?: Promise<void>;
 
 	constructor(host: SessionRuntimeHost, options: SessionRegistryOptions = {}) {
@@ -102,6 +104,7 @@ export class SessionRegistry {
 	}
 
 	private slotFor(ref: SessionRef): RuntimeSlot {
+		if (this.modelServiceRefreshActive) throw new AppServerError("BUSY", { sessionId: ref.summary.sessionId });
 		if (this.blockedSessionIds.has(ref.summary.sessionId)) {
 			throw new AppServerError("BUSY", { sessionId: ref.summary.sessionId });
 		}
@@ -159,16 +162,72 @@ export class SessionRegistry {
 	}
 
 	async refreshOpenWebSearchSettings(): Promise<void> {
+		if (this.modelServiceRefreshActive) throw new AppServerError("BUSY");
 		const slots = [...this.slots.values()].filter((slot) => slot.accepting);
 		await Promise.all(
 			slots.map((slot) => this.enqueue(slot, async (runtime) => runtime.refreshWebSearchSettings?.())),
 		);
 	}
 
+	async beginModelServiceSettingsRefresh(): Promise<() => void> {
+		if (!this.accepting) throw new AppServerError("BUSY");
+		let unlock!: () => void;
+		const lock = new Promise<void>((resolve) => {
+			unlock = resolve;
+		});
+		const previous = this.modelServiceRefreshTail;
+		this.modelServiceRefreshTail = previous.then(() => lock);
+		await previous;
+		if (!this.accepting) {
+			unlock();
+			throw new AppServerError("BUSY");
+		}
+		this.modelServiceRefreshActive = true;
+		let released = false;
+		return () => {
+			if (released) return;
+			released = true;
+			this.modelServiceRefreshActive = false;
+			unlock();
+		};
+	}
+
+	async prepareOpenModelServiceSettingsRefresh(): Promise<string[]> {
+		return await this.refreshOpenModelServices("prepareModelServiceSettingsRefresh");
+	}
+
+	async applyOpenModelServiceSettingsRefresh(): Promise<string[]> {
+		return await this.refreshOpenModelServices("applyModelServiceSettingsRefresh");
+	}
+
+	private async refreshOpenModelServices(
+		method: "prepareModelServiceSettingsRefresh" | "applyModelServiceSettingsRefresh",
+	): Promise<string[]> {
+		const slots = [...this.slots.values()].filter((slot) => slot.accepting);
+		const results = await Promise.allSettled(
+			slots.map((slot) => this.enqueue(slot, async (runtime) => runtime[method]?.())),
+		);
+		const failed: string[] = [];
+		for (let index = 0; index < results.length; index += 1) {
+			if (results[index]?.status === "fulfilled") continue;
+			const slot = slots[index]!;
+			failed.push(slot.ref.summary.sessionId);
+			slot.accepting = false;
+			if (this.slots.get(slot.ref.summary.sessionId) === slot) this.slots.delete(slot.ref.summary.sessionId);
+			try {
+				await (await slot.runtime).close();
+			} catch {
+				// A failed refresh slot is already detached; close is best-effort.
+			}
+		}
+		return failed;
+	}
+
 	async close(
 		sessionId: string,
 		prepareClose?: (runtime: OpenedSessionRuntime) => Promise<boolean> | boolean,
 	): Promise<void> {
+		if (this.modelServiceRefreshActive) throw new AppServerError("BUSY", { sessionId });
 		if (this.blockedSessionIds.has(sessionId)) throw new AppServerError("BUSY", { sessionId });
 		const slot = this.slots.get(sessionId);
 		if (!slot) return;
@@ -214,6 +273,7 @@ export class SessionRegistry {
 		operation: () => Promise<T>,
 		beforeClose?: () => void,
 	): Promise<T> {
+		if (this.modelServiceRefreshActive) throw new AppServerError("BUSY");
 		const ids = [...new Set(sessionIds)];
 		for (const sessionId of ids) assertValidSessionId(sessionId);
 		if (ids.some((sessionId) => this.blockedSessionIds.has(sessionId))) throw new AppServerError("BUSY");

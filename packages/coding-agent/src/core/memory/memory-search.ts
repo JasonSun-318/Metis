@@ -1,12 +1,6 @@
-import type { ModelRegistry } from "../model-registry.ts";
-import {
-	type EmbeddingEndpoint,
-	embedText,
-	embedTexts,
-	MEMORY_EMBED_DEFAULT_TIMEOUT_MS,
-	resolveEmbeddingEndpoint,
-} from "./memory-embedder.ts";
+import { embeddingConfigKey, embedText, embedTexts, MEMORY_EMBED_DEFAULT_TIMEOUT_MS } from "./memory-embedder.ts";
 import { MEMORY_RERANK_DEFAULT_TIMEOUT_MS, rerankDocuments } from "./memory-rerank.ts";
+import type { EmbeddingSettings, RerankSettings } from "./memory-service-settings.ts";
 import type { MemoryStore } from "./memory-store.ts";
 import type { MemoryFact, MemoryScope, MemorySearchHit } from "./memory-types.ts";
 
@@ -30,9 +24,10 @@ export interface SearchMemoriesOptions {
 	query: string;
 	cwdKey: string;
 	mode: string | null;
-	embeddingModel: string;
-	modelRegistry?: ModelRegistry;
-	rerankModel?: string;
+	embeddingSettings: EmbeddingSettings;
+	embeddingApiKey: string;
+	rerankSettings?: RerankSettings;
+	rerankApiKey?: string;
 	retrieveTimeoutMs?: number;
 	rerankTimeoutMs?: number;
 	fetchFn?: typeof fetch;
@@ -137,23 +132,22 @@ async function searchMemoriesInner(options: SearchMemoriesOptions): Promise<Retr
 	let queryEmbedding: Float32Array | null = null;
 	if (options.embedQuery) {
 		queryEmbedding = await options.embedQuery(options.query);
-	} else if (options.modelRegistry) {
-		const endpoint = await resolveEmbeddingEndpoint(options.modelRegistry, options.embeddingModel);
+	} else {
 		queryEmbedding = await embedText(options.query, {
-			endpoint,
+			settings: options.embeddingSettings,
+			apiKey: options.embeddingApiKey,
 			timeoutMs: options.retrieveTimeoutMs ?? MEMORY_EMBED_DEFAULT_TIMEOUT_MS,
 			fetchFn: options.fetchFn,
 			signal: options.signal,
 		});
-	} else {
-		throw new Error("searchMemories requires modelRegistry or embedQuery");
 	}
+	const embeddingKey = embeddingConfigKey(options.embeddingSettings);
 
 	const scored: RetrievedMemoryFact[] = [];
 	for (const fact of facts) {
 		const keyword = keywordScore(options.query, fact.text);
 		let cosine = 0;
-		if (fact.embedding && fact.embeddingModel === options.embeddingModel && queryEmbedding) {
+		if (fact.embedding && fact.embeddingModel === embeddingKey && queryEmbedding) {
 			cosine = cosineSimilarity(queryEmbedding, fact.embedding) ?? 0;
 		}
 		scored.push({
@@ -167,36 +161,39 @@ async function searchMemoriesInner(options: SearchMemoriesOptions): Promise<Retr
 	scored.sort((a, b) => b.score - a.score || a.id.localeCompare(b.id));
 	let candidates = scored.slice(0, MEMORY_RETRIEVE_CANDIDATE_LIMIT);
 
-	const rerankModel = options.rerankModel?.trim();
-	if (rerankModel && candidates.length > 1) {
+	if (options.rerankSettings && options.rerankApiKey && candidates.length > 1) {
 		const docs = candidates.map((hit) => ({ id: hit.id, text: hit.text }));
-		let orderedIds: string[];
-		if (options.rerank) {
-			orderedIds = await options.rerank(options.query, docs);
-		} else if (options.modelRegistry) {
-			orderedIds = await rerankDocuments({
-				modelRegistry: options.modelRegistry,
-				modelRef: rerankModel,
-				query: options.query,
-				documents: docs,
-				timeoutMs: options.rerankTimeoutMs ?? MEMORY_RERANK_TIMEOUT_MS,
-				fetchFn: options.fetchFn,
-				signal: options.signal,
-			});
-		} else {
-			orderedIds = docs.map((doc) => doc.id);
-		}
-		const byId = new Map(candidates.map((hit) => [hit.id, hit]));
-		const reranked: RetrievedMemoryFact[] = [];
-		for (const id of orderedIds) {
-			const hit = byId.get(id);
-			if (hit) {
-				reranked.push(hit);
-				byId.delete(id);
+		try {
+			let orderedIds: string[];
+			if (options.rerank) {
+				orderedIds = await options.rerank(options.query, docs);
+			} else {
+				orderedIds = (
+					await rerankDocuments({
+						settings: options.rerankSettings,
+						apiKey: options.rerankApiKey,
+						query: options.query,
+						documents: docs,
+						timeoutMs: options.rerankTimeoutMs ?? MEMORY_RERANK_TIMEOUT_MS,
+						fetchFn: options.fetchFn,
+						signal: options.signal,
+					})
+				).map((score) => score.id);
 			}
+			const byId = new Map(candidates.map((hit) => [hit.id, hit]));
+			const reranked: RetrievedMemoryFact[] = [];
+			for (const id of orderedIds) {
+				const hit = byId.get(id);
+				if (hit) {
+					reranked.push(hit);
+					byId.delete(id);
+				}
+			}
+			for (const hit of byId.values()) reranked.push(hit);
+			candidates = reranked;
+		} catch (error) {
+			if (options.signal?.aborted) throw error;
 		}
-		for (const hit of byId.values()) reranked.push(hit);
-		candidates = reranked;
 	}
 
 	const top = candidates.slice(0, MEMORY_RETRIEVE_TOP_K).map(toRetrieved);
@@ -205,8 +202,8 @@ async function searchMemoriesInner(options: SearchMemoriesOptions): Promise<Retr
 
 export interface BackfillEmbeddingsOptions {
 	store: MemoryStore;
-	embeddingModel: string;
-	modelRegistry: ModelRegistry;
+	embeddingSettings: EmbeddingSettings;
+	embeddingApiKey: string;
 	limit?: number;
 	fetchFn?: typeof fetch;
 	signal?: AbortSignal;
@@ -215,14 +212,15 @@ export interface BackfillEmbeddingsOptions {
 /** Embed active facts with null or mismatched embeddings. Best-effort; never throws to callers that void it. */
 export async function backfillMemoryEmbeddings(options: BackfillEmbeddingsOptions): Promise<number> {
 	const limit = options.limit ?? 32;
-	const endpoint: EmbeddingEndpoint = await resolveEmbeddingEndpoint(options.modelRegistry, options.embeddingModel);
-	const needing = options.store.listFactsNeedingEmbedding(options.embeddingModel, limit);
+	const embeddingKey = embeddingConfigKey(options.embeddingSettings);
+	const needing = options.store.listFactsNeedingEmbedding(embeddingKey, limit);
 	if (needing.length === 0) return 0;
 
 	const vectors = await embedTexts(
 		needing.map((fact) => fact.text),
 		{
-			endpoint,
+			settings: options.embeddingSettings,
+			apiKey: options.embeddingApiKey,
 			fetchFn: options.fetchFn,
 			signal: options.signal,
 			timeoutMs: MEMORY_EMBED_DEFAULT_TIMEOUT_MS * Math.min(4, needing.length),
@@ -234,7 +232,7 @@ export async function backfillMemoryEmbeddings(options: BackfillEmbeddingsOption
 		const fact = needing[i]!;
 		const vector = vectors[i];
 		if (!vector) continue;
-		options.store.updateFactEmbedding(fact.id, vector, options.embeddingModel);
+		options.store.updateFactEmbedding(fact.id, vector, embeddingKey);
 		updated++;
 	}
 	return updated;

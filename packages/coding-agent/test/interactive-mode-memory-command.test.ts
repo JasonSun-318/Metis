@@ -5,13 +5,14 @@ import { initTheme } from "../src/modes/interactive/theme/theme.ts";
 
 type MemoryCommandContext = {
 	settingsManager: {
-		setAutoMemoryEnabled: (enabled: boolean) => void;
 		getAutoMemoryEnabled: () => boolean;
 		getMemoryEngine: () => "index" | "extract";
-		setMemoryEngine: (engine: "index" | "extract") => void;
 	};
 	session: {
-		refreshSystemPrompt: () => void;
+		updateMemorySettings: (update: {
+			autoMemoryEnabled?: boolean;
+			memoryEngine?: "index" | "extract";
+		}) => Promise<void>;
 		getAutoMemorySnapshot: () =>
 			| {
 					global: { indexPath: string; exists: boolean; truncated: boolean; error?: string };
@@ -45,7 +46,7 @@ type MemoryCommandContext = {
 };
 
 type InteractiveModePrototype = {
-	handleMemoryCommand(this: MemoryCommandContext, action: string): void;
+	handleMemoryCommand(this: MemoryCommandContext, action: string): Promise<void>;
 };
 
 const prototype = InteractiveMode.prototype as unknown as InteractiveModePrototype;
@@ -57,20 +58,17 @@ describe("InteractiveMode /memory", () => {
 	it.each([
 		["on", true, "Long-term memory enabled"],
 		["off", false, "Long-term memory disabled"],
-	] as const)("applies /memory %s immediately", (action, enabled, message) => {
-		const setAutoMemoryEnabled = vi.fn();
-		const refreshSystemPrompt = vi.fn();
+	] as const)("applies /memory %s immediately", async (action, enabled, message) => {
+		const updateMemorySettings = vi.fn(async () => undefined);
 		const showStatus = vi.fn();
 		const showWarning = vi.fn();
 		const context = {
 			settingsManager: {
-				setAutoMemoryEnabled,
 				getAutoMemoryEnabled: () => true,
 				getMemoryEngine: () => "index" as const,
-				setMemoryEngine: vi.fn(),
 			},
 			session: {
-				refreshSystemPrompt,
+				updateMemorySettings,
 				getAutoMemorySnapshot: vi.fn(),
 				getMemoryExtractStatus: vi.fn(),
 			},
@@ -80,27 +78,23 @@ describe("InteractiveMode /memory", () => {
 			showWarning,
 		};
 
-		prototype.handleMemoryCommand.call(context, action);
+		await prototype.handleMemoryCommand.call(context, action);
 
-		expect(setAutoMemoryEnabled).toHaveBeenCalledWith(enabled);
-		expect(refreshSystemPrompt).toHaveBeenCalledOnce();
+		expect(updateMemorySettings).toHaveBeenCalledWith({ autoMemoryEnabled: enabled });
 		expect(showStatus).toHaveBeenCalledWith(message);
 		expect(showWarning).not.toHaveBeenCalled();
 	});
 
-	it.each(["index", "extract"] as const)("applies /memory engine %s", (engine) => {
-		const setMemoryEngine = vi.fn();
-		const refreshSystemPrompt = vi.fn();
+	it.each(["index", "extract"] as const)("applies /memory engine %s", async (engine) => {
+		const updateMemorySettings = vi.fn(async () => undefined);
 		const showStatus = vi.fn();
 		const context = {
 			settingsManager: {
-				setAutoMemoryEnabled: vi.fn(),
 				getAutoMemoryEnabled: () => true,
 				getMemoryEngine: () => "index" as const,
-				setMemoryEngine,
 			},
 			session: {
-				refreshSystemPrompt,
+				updateMemorySettings,
 				getAutoMemorySnapshot: vi.fn(),
 				getMemoryExtractStatus: vi.fn(),
 			},
@@ -110,30 +104,24 @@ describe("InteractiveMode /memory", () => {
 			showWarning: vi.fn(),
 		};
 
-		prototype.handleMemoryCommand.call(context, `engine ${engine}`);
+		await prototype.handleMemoryCommand.call(context, `engine ${engine}`);
 
-		expect(setMemoryEngine).toHaveBeenCalledWith(engine);
-		expect(refreshSystemPrompt).toHaveBeenCalledOnce();
+		expect(updateMemorySettings).toHaveBeenCalledWith({ memoryEngine: engine });
 		expect(showStatus).toHaveBeenCalledWith(expect.stringMatching(new RegExp(engine, "i")));
 	});
 
-	it("warns and does not switch when extract lacks an embedding model", () => {
-		const setMemoryEngine = vi.fn(() => {
-			throw new Error(
-				'Cannot enable memory engine "extract" without memoryEmbeddingModel. Configure an embedding model first (provider/model).',
-			);
+	it("warns and does not switch when extract lacks an embedding model", async () => {
+		const updateMemorySettings = vi.fn(async () => {
+			throw new Error('Cannot enable memory engine "extract" without configured Embedding settings and credential.');
 		});
-		const refreshSystemPrompt = vi.fn();
 		const showWarning = vi.fn();
 		const context = {
 			settingsManager: {
-				setAutoMemoryEnabled: vi.fn(),
 				getAutoMemoryEnabled: () => true,
 				getMemoryEngine: () => "index" as const,
-				setMemoryEngine,
 			},
 			session: {
-				refreshSystemPrompt,
+				updateMemorySettings,
 				getAutoMemorySnapshot: vi.fn(),
 				getMemoryExtractStatus: vi.fn(),
 			},
@@ -143,27 +131,22 @@ describe("InteractiveMode /memory", () => {
 			showWarning,
 		};
 
-		prototype.handleMemoryCommand.call(context, "engine extract");
+		await prototype.handleMemoryCommand.call(context, "engine extract");
 
-		expect(setMemoryEngine).toHaveBeenCalledWith("extract");
-		expect(refreshSystemPrompt).not.toHaveBeenCalled();
-		expect(showWarning).toHaveBeenCalledWith(expect.stringMatching(/memoryEmbeddingModel|embedding model/i));
+		expect(updateMemorySettings).toHaveBeenCalledWith({ memoryEngine: "extract" });
+		expect(showWarning).toHaveBeenCalledWith(expect.stringMatching(/Embedding settings|embedding model/i));
 	});
 
 	it("rejects unknown arguments without changing state", () => {
-		const setAutoMemoryEnabled = vi.fn();
-		const setMemoryEngine = vi.fn();
-		const refreshSystemPrompt = vi.fn();
+		const updateMemorySettings = vi.fn(async () => undefined);
 		const showWarning = vi.fn();
 		const context = {
 			settingsManager: {
-				setAutoMemoryEnabled,
 				getAutoMemoryEnabled: () => true,
 				getMemoryEngine: () => "index" as const,
-				setMemoryEngine,
 			},
 			session: {
-				refreshSystemPrompt,
+				updateMemorySettings,
 				getAutoMemorySnapshot: vi.fn(),
 				getMemoryExtractStatus: vi.fn(),
 			},
@@ -176,23 +159,19 @@ describe("InteractiveMode /memory", () => {
 		prototype.handleMemoryCommand.call(context, "maybe");
 
 		expect(showWarning).toHaveBeenCalledWith(USAGE);
-		expect(setAutoMemoryEnabled).not.toHaveBeenCalled();
-		expect(setMemoryEngine).not.toHaveBeenCalled();
-		expect(refreshSystemPrompt).not.toHaveBeenCalled();
+		expect(updateMemorySettings).not.toHaveBeenCalled();
 	});
 
 	it("rejects incomplete engine arguments", () => {
-		const setMemoryEngine = vi.fn();
+		const updateMemorySettings = vi.fn(async () => undefined);
 		const showWarning = vi.fn();
 		const context = {
 			settingsManager: {
-				setAutoMemoryEnabled: vi.fn(),
 				getAutoMemoryEnabled: () => true,
 				getMemoryEngine: () => "index" as const,
-				setMemoryEngine,
 			},
 			session: {
-				refreshSystemPrompt: vi.fn(),
+				updateMemorySettings,
 				getAutoMemorySnapshot: vi.fn(),
 				getMemoryExtractStatus: vi.fn(),
 			},
@@ -206,7 +185,7 @@ describe("InteractiveMode /memory", () => {
 		prototype.handleMemoryCommand.call(context, "engine foo");
 
 		expect(showWarning).toHaveBeenCalledWith(USAGE);
-		expect(setMemoryEngine).not.toHaveBeenCalled();
+		expect(updateMemorySettings).not.toHaveBeenCalled();
 	});
 
 	it("shows on/off, engine, catalog paths, extract status, and recent runs", () => {
@@ -233,13 +212,11 @@ describe("InteractiveMode /memory", () => {
 		}));
 		const context = {
 			settingsManager: {
-				setAutoMemoryEnabled: vi.fn(),
 				getAutoMemoryEnabled: () => true,
 				getMemoryEngine: () => "extract" as const,
-				setMemoryEngine: vi.fn(),
 			},
 			session: {
-				refreshSystemPrompt: vi.fn(),
+				updateMemorySettings: vi.fn(async () => undefined),
 				getAutoMemorySnapshot: () => ({
 					global: {
 						indexPath: "/agent/memory/MEMORY.md",

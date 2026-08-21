@@ -192,6 +192,14 @@ class FakeRuntime implements OpenedSessionRuntime {
 		};
 	}
 
+	async prepareModelServiceSettingsRefresh(): Promise<void> {
+		this.calls.push("refresh:prepare");
+	}
+
+	async applyModelServiceSettingsRefresh(): Promise<void> {
+		this.calls.push("refresh:apply");
+	}
+
 	async snapshot(serverEpoch: string, currentCursor: () => number): Promise<SessionSnapshot> {
 		return {
 			session: this.getSummary(),
@@ -513,6 +521,53 @@ describe("SessionRegistry", () => {
 		expect(secondRan).toBe(true);
 		release();
 		await first;
+	});
+
+	it("gates public session work across two-phase model-service refresh", async () => {
+		const host = new FakeHost();
+		const registry = new SessionRegistry(host);
+		const first = (await registry.open(ref("session-a"))) as FakeRuntime;
+		const second = (await registry.open(ref("session-b"))) as FakeRuntime;
+		const release = await registry.beginModelServiceSettingsRefresh();
+
+		expect(await registry.prepareOpenModelServiceSettingsRefresh()).toEqual([]);
+		expect(first.calls).toEqual(["refresh:prepare"]);
+		expect(second.calls).toEqual(["refresh:prepare"]);
+		await expect(registry.open(ref("session-c"))).rejects.toMatchObject({ code: "BUSY" });
+		await expect(registry.run(ref("session-a"), () => undefined)).rejects.toMatchObject({ code: "BUSY" });
+		await expect(registry.close("session-a")).rejects.toMatchObject({ code: "BUSY" });
+		await expect(registry.withSessionsQuiesced(["session-a"], async () => undefined)).rejects.toMatchObject({
+			code: "BUSY",
+		});
+
+		expect(await registry.applyOpenModelServiceSettingsRefresh()).toEqual([]);
+		expect(first.calls).toEqual(["refresh:prepare", "refresh:apply"]);
+		release();
+		await expect(registry.run(ref("session-a"), () => "ready")).resolves.toBe("ready");
+	});
+
+	it("serializes concurrent refresh gates and removes a runtime that fails refresh", async () => {
+		const host = new FakeHost();
+		const registry = new SessionRegistry(host);
+		const runtime = (await registry.open(ref("session-a"))) as FakeRuntime;
+		const firstRelease = await registry.beginModelServiceSettingsRefresh();
+		let secondEntered = false;
+		const second = registry.beginModelServiceSettingsRefresh().then((release) => {
+			secondEntered = true;
+			return release;
+		});
+		await Promise.resolve();
+		expect(secondEntered).toBe(false);
+		firstRelease();
+		const secondRelease = await second;
+
+		runtime.prepareModelServiceSettingsRefresh = vi.fn(async () => {
+			throw new Error("refresh failed");
+		});
+		expect(await registry.prepareOpenModelServiceSettingsRefresh()).toEqual(["session-a"]);
+		expect(registry.has("session-a")).toBe(false);
+		expect(runtime.closed).toBe(true);
+		secondRelease();
 	});
 
 	it("rejects queue overflow without disturbing admitted work", async () => {

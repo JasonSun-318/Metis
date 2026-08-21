@@ -217,8 +217,8 @@ describe("memory extract tools + runner", () => {
 		it("still inserts when embedding fails, leaving embedding NULL", async () => {
 			const root = tempRoot();
 			const ctx = toolContext(root);
-			ctx.embeddingModel = "openai/text-embedding-3-small";
-			ctx.embedText = async () => {
+			ctx.embeddingKey = "embedding-config-key";
+			ctx.embedTexts = async () => {
 				throw new Error("embed down");
 			};
 			const tool = createCommitFactsTool(ctx);
@@ -236,11 +236,11 @@ describe("memory extract tools + runner", () => {
 			ctx.store.close();
 		});
 
-		it("stores embedding after a successful embedText", async () => {
+		it("stores embeddings after a successful batch", async () => {
 			const root = tempRoot();
 			const ctx = toolContext(root);
-			ctx.embeddingModel = "openai/text-embedding-3-small";
-			ctx.embedText = async () => new Float32Array([0.25, 0.5, 0.75]);
+			ctx.embeddingKey = "embedding-config-key";
+			ctx.embedTexts = async () => [new Float32Array([0.25, 0.5, 0.75])];
 			const tool = createCommitFactsTool(ctx);
 			await tool.execute(
 				"c-embed-ok",
@@ -250,7 +250,7 @@ describe("memory extract tools + runner", () => {
 				{} as never,
 			);
 			const facts = ctx.store.listActiveFacts("global", null, null);
-			expect(facts[0]?.embeddingModel).toBe("openai/text-embedding-3-small");
+			expect(facts[0]?.embeddingModel).toBe("embedding-config-key");
 			expect(Array.from(facts[0]!.embedding!).map((n) => Number(n.toFixed(2)))).toEqual([0.25, 0.5, 0.75]);
 			ctx.store.close();
 		});

@@ -85,8 +85,8 @@ export interface RunMemoryExtractOptions {
 	writeProjection?: typeof writeProjectionDefault;
 	projectAfterWrite?: boolean;
 	timeoutMs?: number;
-	embeddingModel?: string | null;
-	embedText?: (text: string) => Promise<Float32Array | null>;
+	embeddingKey?: string | null;
+	embedTexts?: (texts: string[], signal?: AbortSignal) => Promise<Float32Array[]>;
 }
 
 export interface MemoryExtractResult {
@@ -285,8 +285,8 @@ export async function runMemoryExtract(options: RunMemoryExtractOptions): Promis
 		// Runner owns the final projection write so injectable writeProjection is honored.
 		projectAfterWrite: false,
 		signal,
-		embeddingModel: options.embeddingModel ?? null,
-		...(options.embedText ? { embedText: options.embedText } : {}),
+		embeddingKey: options.embeddingKey ?? null,
+		...(options.embedTexts ? { embedTexts: options.embedTexts } : {}),
 	};
 
 	const definition =

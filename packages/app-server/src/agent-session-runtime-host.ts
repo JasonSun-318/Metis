@@ -144,9 +144,7 @@ export interface McpDefinitionChange {
 }
 
 async function flushMcpSettings(settingsManager: SettingsManager): Promise<void> {
-	await settingsManager.flush();
-	const failure = settingsManager.drainErrors()[0];
-	if (failure) throw failure.error;
+	await settingsManager.flushOrThrow();
 }
 
 export async function persistMcpChanges(options: {
@@ -163,8 +161,7 @@ export async function persistMcpChanges(options: {
 	const rollbackDefinitions = new Map([...changes].map(([name, change]) => [name, change.previous]));
 	const authChanges: AuthStorageChange[] = [];
 	const rollbackCredentials: AuthStorageChange[] = [];
-	const pendingSettingsFailure = settingsManager.drainErrors()[0];
-	if (pendingSettingsFailure) throw pendingSettingsFailure.error;
+	await settingsManager.throwPendingWriteError();
 
 	for (const [name, change] of changes) {
 		const identity = mcpCredentialIdentity(scope, name, cwd);
@@ -1311,6 +1308,14 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 
 	async refreshWebSearchSettings(): Promise<void> {
 		await this.session.refreshWebSearchSettings();
+	}
+
+	async prepareModelServiceSettingsRefresh(): Promise<void> {
+		await this.session.prepareModelServiceSettingsRefresh();
+	}
+
+	async applyModelServiceSettingsRefresh(): Promise<void> {
+		await this.session.applyModelServiceSettingsRefresh();
 	}
 
 	async setModel(input: ClientParams<"session/setModel">): Promise<ClientResult<"session/setModel">> {

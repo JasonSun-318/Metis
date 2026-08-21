@@ -104,7 +104,7 @@ export class AppServer {
 		const personalization = new PersonalizationService(options.agentDir);
 		const permissionRules = new PermissionRulesService(options.agentDir, this.catalog);
 		const webSearch = new WebSearchService({ settingsManager, authStorage });
-		const memorySettings = new MemorySettingsService({ settingsManager });
+		const memorySettings = new MemorySettingsService({ agentDir: options.agentDir, authStorage, settingsManager });
 		const hooks = new HooksService(options.agentDir);
 		this.registry = new SessionRegistry(
 			options.runtimeHost ??

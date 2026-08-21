@@ -164,7 +164,7 @@ describe("AgentSession image tools", () => {
 
 		harness.settingsManager.clearVisionSettings();
 		harness.authStorage.remove(VISION_PROVIDER_ID);
-		await harness.session.refreshImageToolSettings();
+		await harness.session.applyModelServiceSettingsRefresh();
 
 		expect(harness.session.getActiveToolNames()).not.toContain("describe_image");
 		expect(harness.session.systemPrompt).not.toContain("- describe_image:");

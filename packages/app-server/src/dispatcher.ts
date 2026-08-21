@@ -110,6 +110,27 @@ export class Dispatcher {
 		this.titleGenerator = titleGenerator;
 	}
 
+	private dropRuntimeSubscriptions(sessionIds: readonly string[]): void {
+		for (const sessionId of sessionIds) this.subscriptionHub.removeSession(sessionId);
+	}
+
+	private async mutateModelServiceSettings<T>(mutate: () => Promise<T>): Promise<T> {
+		const release = await this.registry.beginModelServiceSettingsRefresh();
+		try {
+			this.dropRuntimeSubscriptions(await this.registry.prepareOpenModelServiceSettingsRefresh());
+			try {
+				const result = await mutate();
+				this.dropRuntimeSubscriptions(await this.registry.applyOpenModelServiceSettingsRefresh());
+				return result;
+			} catch (error) {
+				this.dropRuntimeSubscriptions(await this.registry.applyOpenModelServiceSettingsRefresh());
+				throw error;
+			}
+		} finally {
+			release();
+		}
+	}
+
 	private startTitleJob(sessionId: string, input: ClientParams<"turn/start">): void {
 		if (this.titleJobs.has(sessionId)) return;
 		const source = [
@@ -490,7 +511,9 @@ export class Dispatcher {
 			case "memory/get":
 				return this.memorySettings.view();
 			case "memory/update":
-				return await this.replayMutation(request, async () => this.memorySettings.update(request.params));
+				return await this.replayMutation(request, () =>
+					this.mutateModelServiceSettings(() => this.memorySettings.update(request.params)),
+				);
 			case "hooks/list":
 				return this.hooks.view();
 			case "hooks/upsert":
@@ -513,11 +536,11 @@ export class Dispatcher {
 			case "model/settings/get":
 				return this.modelSettings.view();
 			case "model/settings/update":
-				return await this.replayMutation(request, () => this.modelSettings.update(request.params.mutation));
-			case "model/testConnection":
 				return await this.replayMutation(request, () =>
-					this.modelSettings.testConnection(request.params.provider, request.params.modelId),
+					this.mutateModelServiceSettings(() => this.modelSettings.update(request.params.mutation)),
 				);
+			case "model/testConnection":
+				return await this.replayMutation(request, () => this.modelSettings.testConnection(request.params));
 			case "permission/rules/list":
 				return this.permissionRules.list(request.params);
 			case "permission/rules/delete":

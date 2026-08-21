@@ -136,7 +136,7 @@ import {
 	type McpManager,
 	type McpServerStatus,
 } from "./mcp/index.ts";
-import { embedText as embedMemoryText, resolveEmbeddingEndpoint } from "./memory/memory-embedder.ts";
+import { embeddingConfigKey, embedTexts as embedMemoryTexts } from "./memory/memory-embedder.ts";
 import { collectMemoryEvidenceBatch, serializeExtractEvidence } from "./memory/memory-evidence.ts";
 import {
 	awaitWithAbort,
@@ -156,6 +156,7 @@ import {
 	type RetrievedMemoryFact,
 	searchMemories,
 } from "./memory/memory-search.ts";
+import { MEMORY_EMBEDDING_CREDENTIAL_ID, MEMORY_RERANK_CREDENTIAL_ID } from "./memory/memory-service-settings.ts";
 import { openMemoryStore } from "./memory/memory-store.ts";
 import type { MemoryExtractRun } from "./memory/memory-types.ts";
 import type { BashExecutionMessage, CustomMessage } from "./messages.ts";
@@ -2345,11 +2346,79 @@ export class AgentSession {
 
 	async refreshImageToolSettings(): Promise<void> {
 		await this.settingsManager.reload();
+		this._applyImageToolSettings();
+	}
+
+	private _applyImageToolSettings(): void {
 		this._rebuildImageToolDefinitions();
 		const names = new Set(this.getActiveToolNames());
 		if (this._visionServiceReady() && this._canActivateDescribeImage()) names.add("describe_image");
 		else names.delete("describe_image");
 		this._refreshToolRegistry({ activeToolNames: [...names] });
+	}
+
+	async prepareModelServiceSettingsRefresh(): Promise<void> {
+		this._memoryExtractAbortController?.abort("settings-refresh");
+		this._memoryBackfillAbort?.abort("settings-refresh");
+		const drains: Promise<unknown>[] = [];
+		if (this._memoryExtractPromise) drains.push(this._memoryExtractPromise);
+		if (this._memoryBackfillPromise) drains.push(this._memoryBackfillPromise);
+		await Promise.allSettled(drains);
+	}
+
+	async applyModelServiceSettingsRefresh(): Promise<void> {
+		await this.settingsManager.reload();
+		this._modelRegistry.refresh();
+		this._refreshCurrentModelFromRegistry();
+		this._applyImageToolSettings();
+		this.refreshSystemPrompt();
+		this._maybeSchedulePendingMemoryExtract();
+		this._maybeStartMemoryEmbeddingBackfill();
+	}
+
+	async updateMemorySettings(update: {
+		autoMemoryEnabled?: boolean;
+		memoryEngine?: "index" | "extract";
+	}): Promise<void> {
+		const enabled = update.autoMemoryEnabled ?? this.settingsManager.getAutoMemoryEnabled();
+		const engine = update.memoryEngine ?? this.settingsManager.getMemoryEngine();
+		if (enabled && engine === "extract") {
+			const apiKey = await this._modelRegistry.authStorage.getApiKey(MEMORY_EMBEDDING_CREDENTIAL_ID, {
+				includeFallback: false,
+			});
+			if (!this.settingsManager.getEmbeddingSettings() || !apiKey) {
+				throw new Error(
+					'Cannot enable memory engine "extract" without configured Embedding settings and credential.',
+				);
+			}
+		}
+		await this.prepareModelServiceSettingsRefresh();
+		let original: unknown;
+		try {
+			this.settingsManager.setMemorySettings(enabled, engine);
+			await this.settingsManager.flushOrThrow();
+			if (this._agentDir) {
+				try {
+					const store = openMemoryStore(getMemorySqlitePath(this._agentDir));
+					try {
+						store.clearHealth("extract", "backfill");
+					} finally {
+						store.close();
+					}
+				} catch {
+					// Health is derived state; settings are already durable.
+				}
+			}
+		} catch (error) {
+			original = error;
+		}
+		try {
+			await this.applyModelServiceSettingsRefresh();
+		} catch (recoveryError) {
+			if (!original) throw recoveryError;
+			if (original instanceof Error) (original as Error & { cause?: unknown }).cause ??= recoveryError;
+		}
+		if (original) throw original;
 	}
 
 	setWebSearchProvider(provider: WebSearchProvider): void {
@@ -2547,23 +2616,27 @@ export class AgentSession {
 		) {
 			return;
 		}
-		const embeddingModel = this.settingsManager.getMemoryEmbeddingModel()?.trim();
-		if (!embeddingModel || this._memoryBackfillPromise) return;
+		const embeddingSettings = this.settingsManager.getEmbeddingSettings();
+		if (!embeddingSettings || this._memoryBackfillPromise) return;
 
 		const agentDir = this._agentDir;
-		const modelRegistry = this._modelRegistry;
+		const authStorage = this._modelRegistry.authStorage;
 		this._memoryBackfillAbort?.abort();
 		const controller = new AbortController();
 		this._memoryBackfillAbort = controller;
 		this._memoryBackfillPromise = Promise.resolve()
 			.then(async () => {
+				const embeddingApiKey = await authStorage.getApiKey(MEMORY_EMBEDDING_CREDENTIAL_ID, {
+					includeFallback: false,
+				});
+				if (!embeddingApiKey) return;
 				const store = openMemoryStore(getMemorySqlitePath(agentDir));
 				try {
 					if (controller.signal.aborted) return;
 					await backfillMemoryEmbeddings({
 						store,
-						embeddingModel,
-						modelRegistry,
+						embeddingSettings,
+						embeddingApiKey,
 						signal: controller.signal,
 					});
 				} finally {
@@ -2581,8 +2654,16 @@ export class AgentSession {
 
 	private async _retrieveAutoMemories(query: string): Promise<Array<{ scope: "global" | "project"; text: string }>> {
 		const agentDir = this._agentDir;
-		const embeddingModel = this.settingsManager.getMemoryEmbeddingModel()?.trim();
-		if (!agentDir || !embeddingModel) return [];
+		const embeddingSettings = this.settingsManager.getEmbeddingSettings();
+		if (!agentDir || !embeddingSettings) return [];
+		const embeddingApiKey = await this._modelRegistry.authStorage.getApiKey(MEMORY_EMBEDDING_CREDENTIAL_ID, {
+			includeFallback: false,
+		});
+		if (!embeddingApiKey) return [];
+		const rerankSettings = this.settingsManager.getRerankSettings();
+		const rerankApiKey = rerankSettings
+			? await this._modelRegistry.authStorage.getApiKey(MEMORY_RERANK_CREDENTIAL_ID, { includeFallback: false })
+			: undefined;
 
 		const projectKey = memoryProjectIdentity(this._cwd).projectKey;
 		const store = openMemoryStore(getMemorySqlitePath(agentDir));
@@ -2592,9 +2673,10 @@ export class AgentSession {
 				query,
 				cwdKey: projectKey,
 				mode: null,
-				embeddingModel,
-				modelRegistry: this._modelRegistry,
-				rerankModel: this.settingsManager.getMemoryRerankModel()?.trim(),
+				embeddingSettings,
+				embeddingApiKey,
+				...(rerankSettings ? { rerankSettings } : {}),
+				...(rerankApiKey ? { rerankApiKey } : {}),
 				retrieveTimeoutMs: MEMORY_RETRIEVE_TIMEOUT_MS,
 			});
 			return hits.map((hit) => ({ scope: hit.scope, text: hit.text }));
@@ -2603,21 +2685,23 @@ export class AgentSession {
 		}
 	}
 
-	private async _createMemoryEmbedText(): Promise<((text: string) => Promise<Float32Array | null>) | undefined> {
-		const embeddingModel = this.settingsManager.getMemoryEmbeddingModel()?.trim();
-		if (!embeddingModel) return undefined;
-		try {
-			const endpoint = await resolveEmbeddingEndpoint(this._modelRegistry, embeddingModel);
-			return async (text: string) => {
-				try {
-					return await embedMemoryText(text, { endpoint });
-				} catch {
-					return null;
-				}
-			};
-		} catch {
-			return undefined;
-		}
+	private async _createMemoryEmbedder(): Promise<
+		| {
+				key: string;
+				embed: (texts: string[], signal?: AbortSignal) => Promise<Float32Array[]>;
+		  }
+		| undefined
+	> {
+		const settings = this.settingsManager.getEmbeddingSettings();
+		if (!settings) return undefined;
+		const apiKey = await this._modelRegistry.authStorage.getApiKey(MEMORY_EMBEDDING_CREDENTIAL_ID, {
+			includeFallback: false,
+		});
+		if (!apiKey) return undefined;
+		return {
+			key: embeddingConfigKey(settings),
+			embed: (texts, signal) => embedMemoryTexts(texts, { settings, apiKey, signal }),
+		};
 	}
 
 	/** Reload Skills and expose their latest metadata to the current session. */
@@ -4049,6 +4133,28 @@ export class AgentSession {
 		}).catch(() => undefined);
 	}
 
+	private _maybeSchedulePendingMemoryExtract(): void {
+		if (
+			this._memoryExtractPromise ||
+			!this._includeAutoMemory ||
+			!this._agentDir ||
+			!this.settingsManager.getAutoMemoryEnabled() ||
+			this.settingsManager.getMemoryEngine() !== "extract" ||
+			!this.model
+		) {
+			return;
+		}
+		const controller = new AbortController();
+		this._memoryExtractAbortController = controller;
+		void this._launchMemoryExtract({
+			mode: "commit",
+			trigger: "settings-refresh",
+			evidence: "",
+			cursorEntryId: null,
+			signal: controller.signal,
+		}).catch(() => undefined);
+	}
+
 	private _launchMemoryExtract(options: {
 		mode: MemoryExtractMode;
 		trigger: string;
@@ -4189,10 +4295,12 @@ export class AgentSession {
 			transport: this.agent.transport,
 			...(this.agent.thinkingBudgets ? { thinkingBudgets: this.agent.thinkingBudgets } : {}),
 			...(this.agent.maxRetryDelayMs !== undefined ? { maxRetryDelayMs: this.agent.maxRetryDelayMs } : {}),
-			embeddingModel: this.settingsManager.getMemoryEmbeddingModel()?.trim() ?? null,
 		};
-		const embedText = await awaitWithAbort(this._createMemoryEmbedText(), options.signal);
-		if (embedText) extractArgs.embedText = embedText;
+		const embedder = await awaitWithAbort(this._createMemoryEmbedder(), options.signal);
+		if (embedder) {
+			extractArgs.embeddingKey = embedder.key;
+			extractArgs.embedTexts = embedder.embed;
+		}
 		return awaitWithAbort(this._memoryExtractRunner(extractArgs), options.signal);
 	}
 
