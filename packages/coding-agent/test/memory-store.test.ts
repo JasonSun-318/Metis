@@ -40,6 +40,21 @@ describe("memory store", () => {
 		store.close();
 	});
 
+	it("persists and advances a per-session extract cursor", () => {
+		const dir = mkdtempSync(join(tmpdir(), "metis-mem-"));
+		dirs.push(dir);
+		const path = join(dir, "memory.sqlite");
+		let store = openMemoryStore(path);
+		expect(store.getExtractCursor("session")).toBeNull();
+		store.setExtractCursor("session", "entry-a", "2026-08-21T00:00:00.000Z");
+		store.close();
+		store = openMemoryStore(path);
+		expect(store.getExtractCursor("session")).toBe("entry-a");
+		store.setExtractCursor("session", "entry-b", "2026-08-21T00:00:01.000Z");
+		expect(store.getExtractCursor("session")).toBe("entry-b");
+		store.close();
+	});
+
 	it("does not return superseded facts", () => {
 		const dir = mkdtempSync(join(tmpdir(), "metis-mem-"));
 		dirs.push(dir);

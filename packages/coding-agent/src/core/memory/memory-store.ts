@@ -60,6 +60,12 @@ CREATE TABLE IF NOT EXISTS memory_ingest_state (
   handled_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS extract_cursors (
+  session_id TEXT PRIMARY KEY,
+  entry_id TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS memory_health (
   operation TEXT PRIMARY KEY,
   status TEXT NOT NULL,
@@ -138,6 +144,8 @@ export interface MemoryStore {
 	listActiveFactsForContext(projectKey: string): MemoryFact[];
 	listSupersededFactsForContext(projectKey: string, limit: number): MemoryFact[];
 	iterateProjectionFacts(projectKey: string | null): Iterable<MemoryProjectionFact>;
+	getExtractCursor(sessionId: string): string | null;
+	setExtractCursor(sessionId: string, entryId: string, updatedAt: string): void;
 	isMarkdownRecoveryHandled(contextKey: MemoryIngestContextKey): boolean;
 	markMarkdownRecoveryHandled(contextKey: MemoryIngestContextKey, handledAt: string): void;
 	recordHealth(row: MemoryHealth): void;
@@ -156,8 +164,10 @@ export function openMemoryStore(path: string): MemoryStore {
 	if (factColumns.length > 0 && !factColumns.some((column) => column.name === "fingerprint")) {
 		db.exec("ALTER TABLE facts ADD COLUMN fingerprint TEXT");
 	}
-	db.exec("DROP INDEX IF EXISTS facts_active_fingerprint");
-	migrateMemoryFacts(db);
+	if (db.prepare("SELECT 1 AS found FROM facts WHERE fingerprint IS NULL LIMIT 1").get() !== undefined) {
+		db.exec("DROP INDEX IF EXISTS facts_active_fingerprint");
+		migrateMemoryFacts(db);
+	}
 	db.exec(`
 		CREATE UNIQUE INDEX IF NOT EXISTS facts_active_fingerprint
 		ON facts(scope, IFNULL(cwd_key, ''), fingerprint)
@@ -287,6 +297,11 @@ export function openMemoryStore(path: string): MemoryStore {
 		ORDER BY topic_file ASC, created_at ASC, id ASC
 	`);
 	const selectIngestState = db.prepare(`SELECT 1 AS found FROM memory_ingest_state WHERE context_key = ?`);
+	const selectExtractCursor = db.prepare(`SELECT entry_id FROM extract_cursors WHERE session_id = ?`);
+	const upsertExtractCursor = db.prepare(`
+		INSERT INTO extract_cursors (session_id, entry_id, updated_at) VALUES (?, ?, ?)
+		ON CONFLICT(session_id) DO UPDATE SET entry_id = excluded.entry_id, updated_at = excluded.updated_at
+	`);
 	const markIngestState = db.prepare(`
 		INSERT INTO memory_ingest_state (context_key, handled_at) VALUES (?, ?)
 		ON CONFLICT(context_key) DO UPDATE SET handled_at = excluded.handled_at
@@ -493,6 +508,14 @@ export function openMemoryStore(path: string): MemoryStore {
 			}
 		},
 
+		getExtractCursor(sessionId) {
+			return (selectExtractCursor.get(sessionId) as { entry_id: string } | undefined)?.entry_id ?? null;
+		},
+
+		setExtractCursor(sessionId, entryId, updatedAt) {
+			upsertExtractCursor.run(sessionId, entryId, updatedAt);
+		},
+
 		isMarkdownRecoveryHandled(contextKey) {
 			return selectIngestState.get(contextKey) !== undefined;
 		},
@@ -539,13 +562,12 @@ type MigrationFactRow = {
 };
 
 function migrateMemoryFacts(db: DatabaseSync): void {
+	if (db.prepare("SELECT 1 AS found FROM facts WHERE fingerprint IS NULL LIMIT 1").get() === undefined) return;
 	const rows = db
 		.prepare(
 			`SELECT id, scope, cwd_key, mode, topic_file, text, fingerprint, status, created_at, source_turn FROM facts`,
 		)
 		.all() as MigrationFactRow[];
-	if (!rows.some((row) => row.fingerprint === null)) return;
-
 	const contextKey = (row: MigrationFactRow) => `${row.scope}\0${row.cwd_key ?? ""}`;
 	const usedByContext = new Map<string, Map<string, string>>();
 	const topicByContextAndSource = new Map<string, string>();

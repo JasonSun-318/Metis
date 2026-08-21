@@ -12,6 +12,7 @@ import { createCommitFactsTool, createReconcileFactsTool, type MemoryToolContext
 import type { MemoryExtractRun, MemoryExtractRunStatus, MemoryFact } from "./memory-types.ts";
 
 export const DURABLE_MEMORY_INTENT_RE = /记住|以后|不要再|偏好|remember|always|never|prefer/i;
+export const MEMORY_EXTRACT_TIMEOUT_MS = 60_000;
 
 export function hasDurableMemoryIntent(text: string): boolean {
 	return DURABLE_MEMORY_INTENT_RE.test(text);
@@ -23,7 +24,7 @@ Rules:
 - Uncertain scope → project (never invent a third scope).
 - commit_facts is ADD-only: only append new facts; never delete or supersede on a turn extract.
 - Do not read or write the memory directory. Your only action is calling the commit_facts tool.
-- Every fact must include topicFile: a flat basename matching [A-Za-z0-9][A-Za-z0-9._-]*.md (reuse an existing topic file when the fact belongs there; mint a new basename only for a new topic).
+- Every fact must include a lowercase flat topicFile matching [a-z0-9][a-z0-9._-]*.md; never use memory.md, project.md, overflow.md, or legacy-overflow.md.
 - Omit secrets, credentials, and ephemeral chatter.
 - If nothing durable should be stored, call commit_facts with an empty facts array.
 `;
@@ -60,7 +61,12 @@ export interface RunMemoryExtractOptions {
 	cwd: string;
 	agentMode: AgentMode;
 	sessionId: string;
-	messages: AgentMessage[];
+	/** Already bounded, oldest-first evidence. */
+	evidence?: string;
+	/** Durable message-entry id represented by evidence; commit success advances through it. */
+	cursorEntryId?: string | null;
+	/** @deprecated Transitional test/API adapter; session code passes evidence. */
+	messages?: AgentMessage[];
 	trigger: string;
 	signal: AbortSignal;
 	model?: Model<any>;
@@ -78,6 +84,7 @@ export interface RunMemoryExtractOptions {
 	openStore?: (path: string) => MemoryStore;
 	writeProjection?: typeof writeProjectionDefault;
 	projectAfterWrite?: boolean;
+	timeoutMs?: number;
 	embeddingModel?: string | null;
 	embedText?: (text: string) => Promise<Float32Array | null>;
 }
@@ -167,7 +174,7 @@ function buildReconcileFactsPayload(
 }
 
 function buildUserPrompt(options: RunMemoryExtractOptions, store: MemoryStore, projectKey: string): string {
-	const evidence = (options.serializeEvidence ?? serializeExtractEvidence)(options.messages);
+	const evidence = options.evidence ?? (options.serializeEvidence ?? serializeExtractEvidence)(options.messages ?? []);
 	if (options.mode === "commit") {
 		return `<extract_mode>commit</extract_mode>
 <conversation_evidence>
@@ -209,7 +216,7 @@ async function defaultPromptFn(
 		initialState: {
 			systemPrompt: args.systemPrompt,
 			model: options.model,
-			thinkingLevel: options.thinkingLevel ?? "off",
+			thinkingLevel: "off",
 			tools: [args.tool],
 		},
 		streamFn: options.streamFn,
@@ -231,9 +238,30 @@ async function defaultPromptFn(
 	}
 }
 
+export function awaitWithAbort<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+	if (signal.aborted) return Promise.reject(signal.reason ?? new DOMException("Aborted", "AbortError"));
+	return new Promise<T>((resolve, reject) => {
+		const abort = () => reject(signal.reason ?? new DOMException("Aborted", "AbortError"));
+		signal.addEventListener("abort", abort, { once: true });
+		promise.then(
+			(value) => {
+				signal.removeEventListener("abort", abort);
+				resolve(value);
+			},
+			(error) => {
+				signal.removeEventListener("abort", abort);
+				reject(error);
+			},
+		);
+	});
+}
+
 export async function runMemoryExtract(options: RunMemoryExtractOptions): Promise<MemoryExtractResult> {
 	const runId = randomUUID();
 	const startedAt = new Date().toISOString();
+	const timeoutMs = options.timeoutMs ?? MEMORY_EXTRACT_TIMEOUT_MS;
+	const timeoutSignal = AbortSignal.timeout(timeoutMs);
+	const signal = AbortSignal.any([options.signal, timeoutSignal]);
 	const openStore = options.openStore ?? openMemoryStore;
 	const store = openStore(getMemorySqlitePath(options.agentDir));
 	const identity = memoryProjectIdentity(options.cwd);
@@ -256,6 +284,7 @@ export async function runMemoryExtract(options: RunMemoryExtractOptions): Promis
 		createdAt: options.createdAt,
 		// Runner owns the final projection write so injectable writeProjection is honored.
 		projectAfterWrite: false,
+		signal,
 		embeddingModel: options.embeddingModel ?? null,
 		...(options.embedText ? { embedText: options.embedText } : {}),
 	};
@@ -273,17 +302,12 @@ export async function runMemoryExtract(options: RunMemoryExtractOptions): Promis
 	let reason: string | undefined;
 
 	try {
-		options.signal.throwIfAborted();
+		signal.throwIfAborted();
 		for (let attempt = 0; attempt < 2; attempt++) {
-			options.signal.throwIfAborted();
+			signal.throwIfAborted();
 			const userPrompt = attempt === 0 ? baseUserPrompt : `${baseUserPrompt}\n\n${RETRY_USER_MESSAGE}`;
-			const messages = await promptFn({
-				attempt,
-				systemPrompt,
-				userPrompt,
-				tool,
-				signal: options.signal,
-			});
+			const messages = await awaitWithAbort(promptFn({ attempt, systemPrompt, userPrompt, tool, signal }), signal);
+			signal.throwIfAborted();
 			const toolResult = findLastToolResult(messages, expectedTool);
 			if (!toolResult) {
 				reason = "No tool call";
@@ -295,7 +319,12 @@ export async function runMemoryExtract(options: RunMemoryExtractOptions): Promis
 			}
 			status = "success";
 			reason = undefined;
+			signal.throwIfAborted();
 			await writeProjection(options.agentDir, projectKey, store);
+			signal.throwIfAborted();
+			if (options.mode === "commit" && options.cursorEntryId) {
+				store.setExtractCursor(options.sessionId, options.cursorEntryId, new Date().toISOString());
+			}
 			break;
 		}
 		if (status !== "success") {
@@ -303,8 +332,16 @@ export async function runMemoryExtract(options: RunMemoryExtractOptions): Promis
 			reason = reason ?? "Extract did not produce a valid tool call";
 		}
 	} catch (error) {
-		status = "failed";
-		reason = error instanceof Error ? error.message : String(error);
+		if (timeoutSignal.aborted || (options.signal.aborted && isTimeoutReason(options.signal.reason))) {
+			status = "failed";
+			reason = `Timed out after ${timeoutMs}ms`;
+		} else if (options.signal.aborted) {
+			status = "skipped";
+			reason = "Aborted";
+		} else {
+			status = "failed";
+			reason = error instanceof Error ? error.message : String(error);
+		}
 	}
 
 	try {
@@ -315,10 +352,25 @@ export async function runMemoryExtract(options: RunMemoryExtractOptions): Promis
 			status,
 			reason: reason ?? null,
 		});
+		store.recordHealth({
+			operation: "extract",
+			status: status === "success" ? "ok" : "error",
+			updatedAt: new Date().toISOString(),
+			reason:
+				status === "success"
+					? null
+					: status === "skipped"
+						? "Aborted; pending evidence will retry"
+						: (reason ?? null),
+		});
 	} catch {
 		// Audit failure must not hide the extract outcome.
 	}
 
 	store.close();
 	return { status, reason, runId };
+}
+
+function isTimeoutReason(reason: unknown): boolean {
+	return reason instanceof Error && reason.name === "TimeoutError";
 }

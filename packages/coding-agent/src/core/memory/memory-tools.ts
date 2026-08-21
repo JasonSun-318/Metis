@@ -75,6 +75,7 @@ export interface MemoryToolContext {
 	sourceTurn: string | null;
 	createdAt?: string;
 	projectAfterWrite?: boolean;
+	signal?: AbortSignal;
 	embeddingKey?: string | null;
 	embedTexts?: (texts: string[], signal?: AbortSignal) => Promise<Float32Array[]>;
 	/** @deprecated Transitional single-item adapter; removed when provider settings land. */
@@ -447,10 +448,13 @@ export function createCommitFactsTool(ctx: MemoryToolContext): ToolDefinition {
 		parameters: CommitFactsParamsSchema,
 		executionMode: "sequential",
 		async execute(_toolCallId, params, signal) {
+			const executionSignal = signal ?? ctx.signal;
+			executionSignal?.throwIfAborted();
 			const applied = applyCommitFacts(ctx, params);
 			const { facts, ...details } = applied;
 			if (!details.ok) return toolText(details.error ?? "Invalid commit_facts arguments", details);
-			await embedInsertedFacts(ctx, facts, signal);
+			await embedInsertedFacts(ctx, facts, executionSignal);
+			executionSignal?.throwIfAborted();
 			if (details.inserted > 0) await maybeProject(ctx);
 			return toolText(`Committed ${details.inserted} fact(s)`, details);
 		},
@@ -466,10 +470,13 @@ export function createReconcileFactsTool(ctx: MemoryToolContext): ToolDefinition
 		parameters: ReconcileFactsParamsSchema,
 		executionMode: "sequential",
 		async execute(_toolCallId, params, signal) {
+			const executionSignal = signal ?? ctx.signal;
+			executionSignal?.throwIfAborted();
 			const applied = applyReconcileFacts(ctx, params);
 			const { facts, ...details } = applied;
 			if (!details.ok) return toolText(details.error ?? "Invalid reconcile_facts arguments", details);
-			await embedInsertedFacts(ctx, facts, signal);
+			await embedInsertedFacts(ctx, facts, executionSignal);
+			executionSignal?.throwIfAborted();
 			if (details.inserted + details.superseded + details.deleted + details.moved > 0) await maybeProject(ctx);
 			return toolText(
 				`Reconciled: inserted=${details.inserted} superseded=${details.superseded} deleted=${details.deleted} moved=${details.moved}`,

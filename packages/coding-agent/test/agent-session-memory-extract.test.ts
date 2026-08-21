@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Agent, type AgentMessage } from "@metis/agent-core";
@@ -7,7 +7,9 @@ import { getModel } from "@metis/ai/compat";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AgentSession, type AgentSessionEvent } from "../src/core/agent-session.ts";
 import { AuthStorage } from "../src/core/auth-storage.ts";
+import { getMemorySqlitePath } from "../src/core/auto-memory.ts";
 import type { MemoryExtractResult, RunMemoryExtractOptions } from "../src/core/memory/memory-extract.ts";
+import { openMemoryStore } from "../src/core/memory/memory-store.ts";
 import { ModelRegistry } from "../src/core/model-registry.ts";
 import { SessionManager } from "../src/core/session-manager.ts";
 import { SettingsManager } from "../src/core/settings-manager.ts";
@@ -39,12 +41,15 @@ function createCompactionSession(): {
 	session: AgentSession;
 	events: AgentSessionEvent[];
 	cwd: string;
+	agentDir: string;
+	sessionManager: SessionManager;
 	settingsManager: SettingsManager;
 } {
 	const root = mkdtempSync(join(tmpdir(), "metis-session-extract-"));
 	tempDirs.push(root);
 	const agentDir = join(root, "agent");
 	const cwd = join(root, "project");
+	mkdirSync(cwd);
 	const model = getModel("anthropic", "claude-sonnet-4-5")!;
 	const streamFn: Agent["streamFn"] = (requestModel) => {
 		const stream = createAssistantMessageEventStream();
@@ -114,7 +119,7 @@ function createCompactionSession(): {
 	});
 	const events: AgentSessionEvent[] = [];
 	session.subscribe((event) => events.push(event));
-	return { session, events, cwd, settingsManager };
+	return { session, events, cwd, agentDir, sessionManager, settingsManager };
 }
 
 function scheduleThrottled(session: AgentSession): void {
@@ -162,12 +167,10 @@ describe("AgentSession memory extract", () => {
 		await expect(session.compact()).resolves.toMatchObject({ summary: expect.stringContaining("compacted") });
 		const input = runner.mock.calls[0]![0];
 		expect(input.mode).toBe("reconcile");
-		expect(input.messages.length).toBeGreaterThan(0);
+		expect(input.thinkingLevel).toBe("off");
+		expect(input.evidence?.length).toBeGreaterThan(0);
 		expect(input.transport).toBe("sse");
-		expect(JSON.stringify(input.messages)).not.toContain("previous-summary-marker");
-		expect(
-			input.messages.every((message) => message.role !== "compactionSummary" && message.role !== "branchSummary"),
-		).toBe(true);
+		expect(input.evidence).not.toContain("previous-summary-marker");
 		session.dispose();
 	});
 
@@ -307,6 +310,65 @@ describe("AgentSession memory extract", () => {
 		await vi.waitFor(() => expect(runner).toHaveBeenCalledOnce());
 		expect(runner.mock.calls[0]![0].mode).toBe("commit");
 		await session.waitForMemoryExtract();
+		session.dispose();
+	});
+
+	it("drains entries appended during an active extract", async () => {
+		let finishFirst!: (result: MemoryExtractResult) => void;
+		const first = new Promise<MemoryExtractResult>((resolve) => {
+			finishFirst = resolve;
+		});
+		const runner = vi.fn(async (_options: RunMemoryExtractOptions) => {
+			if (runner.mock.calls.length === 1) return first;
+			return extractResult("success");
+		});
+		const { session, sessionManager } = createCompactionSession();
+		setExtractRunner(session, runner);
+		const firstMessage: AgentMessage = { role: "user", content: "remember first", timestamp: Date.now() };
+		sessionManager.appendMessage(firstMessage);
+		session.agent.state.messages = [firstMessage];
+		scheduleThrottled(session);
+		await vi.waitFor(() => expect(runner).toHaveBeenCalledTimes(1));
+		sessionManager.appendMessage({ role: "user", content: "remember second", timestamp: Date.now() + 1 });
+		finishFirst(extractResult("success"));
+		await vi.waitFor(() => expect(runner).toHaveBeenCalledTimes(2));
+		await session.waitForMemoryExtract();
+		expect(runner.mock.calls[1]![0].evidence).toContain("remember second");
+		expect(runner.mock.calls[1]![0].evidence).not.toContain("remember first");
+		session.dispose();
+	});
+
+	it("does not report background extraction as Compact or block Bash", async () => {
+		let finish!: (result: MemoryExtractResult) => void;
+		const pending = new Promise<MemoryExtractResult>((resolve) => {
+			finish = resolve;
+		});
+		const { session } = createCompactionSession();
+		setExtractRunner(session, () => pending);
+		const message: AgentMessage = { role: "user", content: "remember background", timestamp: Date.now() };
+		session.agent.state.messages = [message];
+		scheduleThrottled(session);
+		await vi.waitFor(() => expect(session.getMemoryExtractStatus().active).toBeDefined());
+		expect(session.isCompacting).toBe(false);
+		await expect(session.executeBash("printf ok")).resolves.toMatchObject({ exitCode: 0 });
+		finish(extractResult("success"));
+		await session.waitForMemoryExtract();
+		session.dispose();
+	});
+
+	it("times out an injected runner, preserves the cursor, and releases active state", async () => {
+		const { session, agentDir } = createCompactionSession();
+		setExtractRunner(session, () => new Promise<MemoryExtractResult>(() => {}));
+		(session as unknown as { _memoryExtractTimeoutMs: number })._memoryExtractTimeoutMs = 10;
+		const message: AgentMessage = { role: "user", content: "remember timeout", timestamp: Date.now() };
+		session.agent.state.messages = [message];
+		scheduleThrottled(session);
+		await session.waitForMemoryExtract();
+		expect(session.getMemoryExtractStatus().active).toBeUndefined();
+		const store = openMemoryStore(getMemorySqlitePath(agentDir));
+		expect(store.getExtractCursor(session.sessionId)).toBeNull();
+		expect(store.listHealth()).toContainEqual(expect.objectContaining({ operation: "extract", status: "error" }));
+		store.close();
 		session.dispose();
 	});
 

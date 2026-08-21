@@ -1,10 +1,17 @@
 import type { AgentMessage } from "@metis/agent-core";
+import type { SessionEntry } from "../session-manager.ts";
 
 /** Max characters of assistant text kept per message. */
 export const ASSISTANT_EVIDENCE_MAX_CHARS = 2000;
 
 /** Max characters of the full evidence string. */
 export const TOTAL_EVIDENCE_MAX_CHARS = 8000;
+
+export interface MemoryEvidenceBatch {
+	evidence: string;
+	cursorEntryId: string | null;
+	hasMore: boolean;
+}
 
 function truncate(text: string, maxChars: number): string {
 	if (text.length <= maxChars) return text;
@@ -78,4 +85,42 @@ export function serializeExtractEvidence(messages: AgentMessage[]): string {
 		if (part) parts.push(part);
 	}
 	return truncate(parts.join("\n\n"), TOTAL_EVIDENCE_MAX_CHARS);
+}
+
+/** Select the oldest complete pending message-entry batch after a durable cursor. */
+export function collectMemoryEvidenceBatch(
+	branch: readonly SessionEntry[],
+	cursorEntryId: string | null,
+): MemoryEvidenceBatch {
+	const cursorIndex = cursorEntryId ? branch.findIndex((entry) => entry.id === cursorEntryId) : -1;
+	const parts: string[] = [];
+	let evidenceLength = 0;
+	let cursor: string | null = null;
+	for (let index = cursorIndex >= 0 ? cursorIndex + 1 : 0; index < branch.length; index++) {
+		const entry = branch[index]!;
+		if (entry.type !== "message") continue;
+		const part = serializeMessage(entry.message);
+		if (part) {
+			if (parts.length === 0 && part.length > TOTAL_EVIDENCE_MAX_CHARS) {
+				parts.push(part.slice(-TOTAL_EVIDENCE_MAX_CHARS));
+				cursor = entry.id;
+				return { evidence: parts[0]!, cursorEntryId: cursor, hasMore: hasMessageAfter(branch, index + 1) };
+			}
+			const candidateLength = evidenceLength + part.length + (parts.length > 0 ? 2 : 0);
+			if (candidateLength > TOTAL_EVIDENCE_MAX_CHARS) {
+				return { evidence: parts.join("\n\n"), cursorEntryId: cursor, hasMore: true };
+			}
+			parts.push(part);
+			evidenceLength = candidateLength;
+		}
+		cursor = entry.id;
+	}
+	return { evidence: parts.join("\n\n"), cursorEntryId: cursor, hasMore: false };
+}
+
+function hasMessageAfter(branch: readonly SessionEntry[], start: number): boolean {
+	for (let index = start; index < branch.length; index++) {
+		if (branch[index]?.type === "message") return true;
+	}
+	return false;
 }

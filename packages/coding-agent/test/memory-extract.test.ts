@@ -473,7 +473,8 @@ describe("memory extract tools + runner", () => {
 				cwd,
 				agentMode: "code",
 				sessionId: "s1",
-				messages: [{ role: "user", content: "Auth lives in app-server", timestamp: 1 }],
+				evidence: "[User]: Auth lives in app-server",
+				cursorEntryId: "entry-1",
 				trigger: "manual",
 				signal: AbortSignal.timeout(5_000),
 				sourceTurn: "turn-9",
@@ -527,6 +528,79 @@ describe("memory extract tools + runner", () => {
 			expect(
 				store.listActiveFacts("project", memoryProjectIdentity(cwd).projectKey, null).map((f) => f.text),
 			).toEqual(["Auth lives in app-server"]);
+			expect(store.getExtractCursor("s1")).toBe("entry-1");
+			store.close();
+		});
+
+		it("times out an ignored provider and prevents its late tool mutation", async () => {
+			const root = tempRoot();
+			const agentDir = join(root, "agent");
+			const cwd = join(root, "project");
+			let attemptedLateWrite = false;
+			const result = await runMemoryExtract({
+				mode: "commit",
+				agentDir,
+				cwd,
+				agentMode: "code",
+				sessionId: "timeout",
+				evidence: "[User]: remember late fact",
+				cursorEntryId: "late-entry",
+				trigger: "turn",
+				signal: new AbortController().signal,
+				timeoutMs: 10,
+				writeProjection: vi.fn(),
+				promptFn: ({ tool }) =>
+					new Promise((resolve) => {
+						setTimeout(async () => {
+							try {
+								await (tool as AgentTool).execute(
+									"late",
+									{ facts: [{ text: "late fact", scope: "global", topicFile: "facts.md" }] },
+									undefined,
+									undefined,
+								);
+								attemptedLateWrite = true;
+							} catch {
+								// Expected: the tool context observes the timed-out lifecycle signal.
+							}
+							resolve([]);
+						}, 25);
+					}),
+			});
+			expect(result).toMatchObject({ status: "failed", reason: "Timed out after 10ms" });
+			await new Promise((resolve) => setTimeout(resolve, 35));
+			const store = openMemoryStore(getMemorySqlitePath(agentDir));
+			expect(store.countFacts()).toBe(0);
+			expect(store.getExtractCursor("timeout")).toBeNull();
+			expect(store.listHealth()).toContainEqual(expect.objectContaining({ operation: "extract", status: "error" }));
+			expect(attemptedLateWrite).toBe(false);
+			store.close();
+		});
+
+		it("does not advance the cursor when projection fails", async () => {
+			const root = tempRoot();
+			const agentDir = join(root, "agent");
+			const result = await runMemoryExtract({
+				mode: "commit",
+				agentDir,
+				cwd: join(root, "project"),
+				agentMode: "code",
+				sessionId: "projection-fail",
+				evidence: "[User]: nothing durable",
+				cursorEntryId: "pending-entry",
+				trigger: "turn",
+				signal: new AbortController().signal,
+				writeProjection: async () => {
+					throw new Error("projection failed");
+				},
+				promptFn: async ({ tool }) => {
+					const executed = await (tool as AgentTool).execute("noop", { facts: [] }, undefined, undefined);
+					return [toolResultMessage("commit_facts", textOf(executed), false)];
+				},
+			});
+			expect(result).toMatchObject({ status: "failed", reason: "projection failed" });
+			const store = openMemoryStore(getMemorySqlitePath(agentDir));
+			expect(store.getExtractCursor("projection-fail")).toBeNull();
 			store.close();
 		});
 

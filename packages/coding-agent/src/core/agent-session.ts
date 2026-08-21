@@ -137,8 +137,11 @@ import {
 	type McpServerStatus,
 } from "./mcp/index.ts";
 import { embedText as embedMemoryText, resolveEmbeddingEndpoint } from "./memory/memory-embedder.ts";
+import { collectMemoryEvidenceBatch, serializeExtractEvidence } from "./memory/memory-evidence.ts";
 import {
+	awaitWithAbort,
 	hasDurableMemoryIntent,
+	MEMORY_EXTRACT_TIMEOUT_MS,
 	type MemoryExtractActiveRun,
 	type MemoryExtractMode,
 	type MemoryExtractResult,
@@ -532,6 +535,7 @@ export class AgentSession {
 	private _memoryExtractPromise: Promise<MemoryExtractResult> | undefined;
 	private _memoryExtractRunner = runMemoryExtract;
 	private _memoryExtractAbortController: AbortController | undefined;
+	private _memoryExtractTimeoutMs = MEMORY_EXTRACT_TIMEOUT_MS;
 	private _userTurnsSinceExtract = 0;
 
 	// Branch summarization state
@@ -4039,7 +4043,8 @@ export class AgentSession {
 		void this._launchMemoryExtract({
 			mode: "commit",
 			trigger: "turn",
-			messages: this.agent.state.messages,
+			evidence: "",
+			cursorEntryId: null,
 			signal: controller.signal,
 		}).catch(() => undefined);
 	}
@@ -4047,7 +4052,8 @@ export class AgentSession {
 	private _launchMemoryExtract(options: {
 		mode: MemoryExtractMode;
 		trigger: string;
-		messages: AgentMessage[];
+		evidence: string;
+		cursorEntryId: string | null;
 		signal: AbortSignal;
 	}): Promise<MemoryExtractResult> {
 		if (this._memoryExtractPromise && this._activeMemoryExtract?.extractMode === options.mode) {
@@ -4074,43 +4080,34 @@ export class AgentSession {
 			startedAt: new Date().toISOString(),
 		};
 		this._activeMemoryExtract = active;
-
-		const thinkingLevel = this.thinkingLevel;
-		const streamFn = this.agent.streamFn;
-		const getApiKey = this.agent.getApiKey;
-		const transport = this.agent.transport;
-		const thinkingBudgets = this.agent.thinkingBudgets;
-		const maxRetryDelayMs = this.agent.maxRetryDelayMs;
-		const embeddingModel = this.settingsManager.getMemoryEmbeddingModel()?.trim() ?? null;
-		const extractArgs: RunMemoryExtractOptions = {
-			mode: options.mode,
-			agentDir,
-			cwd: this._cwd,
-			agentMode: this.mode,
-			projectKey: memoryProjectIdentity(this._cwd).projectKey,
-			sessionId: this.sessionId,
-			messages: options.messages,
-			trigger: options.trigger,
-			signal: options.signal,
-			model,
-			thinkingLevel,
-			streamFn,
-			...(getApiKey ? { getApiKey } : {}),
-			transport,
-			...(thinkingBudgets ? { thinkingBudgets } : {}),
-			...(maxRetryDelayMs !== undefined ? { maxRetryDelayMs } : {}),
-			embeddingModel,
-		};
-
+		const timeoutSignal = AbortSignal.timeout(this._memoryExtractTimeoutMs);
+		const signal = AbortSignal.any([options.signal, timeoutSignal]);
 		const extractPromise = Promise.resolve().then(async () => {
-			const embedText = await this._createMemoryEmbedText();
-			if (embedText) extractArgs.embedText = embedText;
-			return this._memoryExtractRunner(extractArgs);
+			try {
+				return options.mode === "commit"
+					? await this._drainMemoryExtract(options.trigger, signal)
+					: await this._invokeMemoryExtract({ ...options, signal });
+			} catch (error) {
+				const result: MemoryExtractResult = options.signal.aborted
+					? { status: "skipped", reason: "Aborted", runId: active.id }
+					: timeoutSignal.aborted
+						? {
+								status: "failed",
+								reason: `Timed out after ${this._memoryExtractTimeoutMs}ms`,
+								runId: active.id,
+							}
+						: {
+								status: "failed",
+								reason: error instanceof Error ? error.message : String(error),
+								runId: active.id,
+							};
+				this._recordMemoryExtractLifecycleFailure(result);
+				return result;
+			}
 		});
 		const tracked = extractPromise
 			.then((result) => {
 				if (result.status === "success") {
-					this._userTurnsSinceExtract = 0;
 					this.refreshSystemPrompt();
 				}
 				return result;
@@ -4128,6 +4125,107 @@ export class AgentSession {
 		});
 	}
 
+	private async _drainMemoryExtract(trigger: string, signal: AbortSignal): Promise<MemoryExtractResult> {
+		let lastResult: MemoryExtractResult = { status: "skipped", reason: "No pending evidence", runId: randomUUID() };
+		while (!signal.aborted && this._includeAutoMemory && this.settingsManager.getAutoMemoryEnabled()) {
+			const store = openMemoryStore(getMemorySqlitePath(this._agentDir!));
+			let cursor: string | null;
+			try {
+				cursor = store.getExtractCursor(this.sessionId);
+			} finally {
+				store.close();
+			}
+			const batch = collectMemoryEvidenceBatch(this.sessionManager.getBranch(), cursor);
+			if (!batch.cursorEntryId) {
+				this._userTurnsSinceExtract = 0;
+				return lastResult;
+			}
+			lastResult = await this._invokeMemoryExtract({
+				mode: "commit",
+				trigger,
+				evidence: batch.evidence,
+				cursorEntryId: batch.cursorEntryId,
+				signal,
+			});
+			if (lastResult.status !== "success") return lastResult;
+			signal.throwIfAborted();
+			// A successful injected runner has the same contract as production: facts and projection are complete.
+			const cursorStore = openMemoryStore(getMemorySqlitePath(this._agentDir!));
+			try {
+				cursorStore.setExtractCursor(this.sessionId, batch.cursorEntryId, new Date().toISOString());
+			} finally {
+				cursorStore.close();
+			}
+			await awaitWithAbort(new Promise<void>((resolve) => setImmediate(resolve)), signal);
+		}
+		signal.throwIfAborted();
+		return lastResult;
+	}
+
+	private async _invokeMemoryExtract(options: {
+		mode: MemoryExtractMode;
+		trigger: string;
+		evidence: string;
+		cursorEntryId: string | null;
+		signal: AbortSignal;
+	}): Promise<MemoryExtractResult> {
+		const agentDir = this._agentDir!;
+		const model = this.model!;
+		const extractArgs: RunMemoryExtractOptions = {
+			mode: options.mode,
+			agentDir,
+			cwd: this._cwd,
+			agentMode: this.mode,
+			projectKey: memoryProjectIdentity(this._cwd).projectKey,
+			sessionId: this.sessionId,
+			evidence: options.evidence,
+			cursorEntryId: options.cursorEntryId,
+			trigger: options.trigger,
+			signal: options.signal,
+			model,
+			thinkingLevel: "off",
+			streamFn: this.agent.streamFn,
+			...(this.agent.getApiKey ? { getApiKey: this.agent.getApiKey } : {}),
+			transport: this.agent.transport,
+			...(this.agent.thinkingBudgets ? { thinkingBudgets: this.agent.thinkingBudgets } : {}),
+			...(this.agent.maxRetryDelayMs !== undefined ? { maxRetryDelayMs: this.agent.maxRetryDelayMs } : {}),
+			embeddingModel: this.settingsManager.getMemoryEmbeddingModel()?.trim() ?? null,
+		};
+		const embedText = await awaitWithAbort(this._createMemoryEmbedText(), options.signal);
+		if (embedText) extractArgs.embedText = embedText;
+		return awaitWithAbort(this._memoryExtractRunner(extractArgs), options.signal);
+	}
+
+	private _recordMemoryExtractLifecycleFailure(result: MemoryExtractResult): void {
+		if (!this._agentDir) return;
+		try {
+			const store = openMemoryStore(getMemorySqlitePath(this._agentDir));
+			try {
+				const active = this._activeMemoryExtract;
+				store.recordExtractRun({
+					id: result.runId,
+					startedAt: active?.startedAt ?? new Date().toISOString(),
+					trigger: active?.trigger ?? "lifecycle",
+					status: result.status,
+					reason: result.reason ?? null,
+				});
+				store.recordHealth({
+					operation: "extract",
+					status: "error",
+					updatedAt: new Date().toISOString(),
+					reason:
+						result.status === "skipped"
+							? "Aborted; pending evidence will retry"
+							: (result.reason ?? "Extract failed"),
+				});
+			} finally {
+				store.close();
+			}
+		} catch {
+			// Lifecycle health is best-effort; the durable cursor still proves no work was acknowledged.
+		}
+	}
+
 	private async _compactWithMemoryExtract<T>(
 		preparation: CompactionPreparation,
 		reason: "manual" | "threshold" | "overflow",
@@ -4139,7 +4237,10 @@ export class AgentSession {
 			return compactWork();
 		}
 
-		const messages = [...preparation.messagesToSummarize, ...preparation.turnPrefixMessages];
+		const evidence = serializeExtractEvidence([
+			...preparation.messagesToSummarize,
+			...preparation.turnPrefixMessages,
+		]);
 
 		// Wait for an in-flight commit so we do not overlap modes on the same store.
 		if (this._memoryExtractPromise && this._activeMemoryExtract?.extractMode === "commit") {
@@ -4152,7 +4253,8 @@ export class AgentSession {
 				: this._launchMemoryExtract({
 						mode: "reconcile",
 						trigger: reason,
-						messages,
+						evidence,
+						cursorEntryId: null,
 						signal,
 					});
 

@@ -1,7 +1,18 @@
 import type { AgentMessage } from "@metis/agent-core";
 import { fauxAssistantMessage, fauxToolCall } from "@metis/ai";
 import { describe, expect, it } from "vitest";
-import { serializeExtractEvidence } from "../src/core/memory/memory-evidence.ts";
+import { collectMemoryEvidenceBatch, serializeExtractEvidence } from "../src/core/memory/memory-evidence.ts";
+import type { SessionEntry } from "../src/core/session-manager.ts";
+
+function entry(id: string, text: string): SessionEntry {
+	return {
+		type: "message",
+		id,
+		parentId: null,
+		timestamp: "2026-08-21T00:00:00.000Z",
+		message: { role: "user", content: text, timestamp: 1 },
+	};
+}
 
 describe("serializeExtractEvidence", () => {
 	it("keeps user and capped assistant text, names tools, and omits tool bodies", () => {
@@ -65,5 +76,31 @@ describe("serializeExtractEvidence", () => {
 		expect(evidence).toContain("A".repeat(100));
 		expect(evidence).not.toContain("A".repeat(3000));
 		expect(evidence.length).toBeLessThanOrEqual(8000);
+	});
+});
+
+describe("collectMemoryEvidenceBatch", () => {
+	it("processes the oldest complete pending batch and exposes remaining work", () => {
+		const batch = collectMemoryEvidenceBatch(
+			[entry("old", `OLD_MARKER ${"a".repeat(5_000)}`), entry("new", `NEW_MARKER ${"b".repeat(5_000)}`)],
+			null,
+		);
+		expect(batch.evidence).toContain("OLD_MARKER");
+		expect(batch.evidence).not.toContain("NEW_MARKER");
+		expect(batch.cursorEntryId).toBe("old");
+		expect(batch.hasMore).toBe(true);
+	});
+
+	it("caps one oversized oldest entry and advances only through it", () => {
+		const batch = collectMemoryEvidenceBatch([entry("huge", "x".repeat(10_000)), entry("later", "later")], null);
+		expect(batch.evidence).toHaveLength(8_000);
+		expect(batch.cursorEntryId).toBe("huge");
+		expect(batch.hasMore).toBe(true);
+	});
+
+	it("resumes after a present cursor and replays when it is missing", () => {
+		const branch = [entry("a", "first"), entry("b", "second")];
+		expect(collectMemoryEvidenceBatch(branch, "a").evidence).toContain("second");
+		expect(collectMemoryEvidenceBatch(branch, "missing").evidence).toContain("first");
 	});
 });
