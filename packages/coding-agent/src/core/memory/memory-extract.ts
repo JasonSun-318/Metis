@@ -1,11 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { Agent, type AgentMessage, type AgentTool, type StreamFn, type ThinkingLevel } from "@metis/agent-core";
 import type { Model } from "@metis/ai/compat";
-import { canonicalizePathForCreation, encodePathForStorage } from "../../utils/paths.ts";
 import type { AgentMode } from "../agent-mode.ts";
 import { getMemorySqlitePath } from "../auto-memory.ts";
 import { wrapToolDefinition } from "../tools/tool-definition-wrapper.ts";
 import { serializeExtractEvidence } from "./memory-evidence.ts";
+import { memoryProjectIdentity } from "./memory-project.ts";
 import { writeProjection as writeProjectionDefault } from "./memory-projection.ts";
 import { type MemoryStore, openMemoryStore } from "./memory-store.ts";
 import { createCommitFactsTool, createReconcileFactsTool, type MemoryToolContext } from "./memory-tools.ts";
@@ -72,7 +72,7 @@ export interface RunMemoryExtractOptions {
 	maxRetryDelayMs?: number;
 	sourceTurn?: string | null;
 	createdAt?: string;
-	cwdKey?: string;
+	projectKey?: string;
 	promptFn?: MemoryExtractPromptFn;
 	serializeEvidence?: typeof serializeExtractEvidence;
 	openStore?: (path: string) => MemoryStore;
@@ -128,29 +128,45 @@ function toolResultSucceeded(result: Extract<AgentMessage, { role: "toolResult" 
 
 function buildReconcileFactsPayload(
 	store: MemoryStore,
-	cwdKey: string,
-	mode: string,
+	projectKey: string,
 ): {
-	active: MemoryFact[];
+	active: Array<Pick<MemoryFact, "id" | "text" | "createdAt" | "sourceTurn" | "scope" | "topicFile">>;
 	superseded: Array<Pick<MemoryFact, "id" | "text" | "createdAt" | "sourceTurn" | "scope" | "topicFile">>;
 } {
-	const active = [...store.listActiveFacts("global", null, null), ...store.listActiveFacts("project", cwdKey, mode)]
+	const activeCandidates = store
+		.listActiveFactsForContext(projectKey)
 		.sort((a, b) => b.createdAt.localeCompare(a.createdAt) || a.id.localeCompare(b.id))
-		.slice(0, 200);
-
-	const superseded = store.listFactsByStatus("superseded", 50).map((fact) => ({
+		.slice(0, 100)
+		.map((fact) => ({
+			id: fact.id,
+			text: unicodePrefix(fact.text, 400),
+			createdAt: fact.createdAt,
+			sourceTurn: fact.sourceTurn,
+			scope: fact.scope,
+			topicFile: fact.topicFile,
+		}));
+	const supersededCandidates = store.listSupersededFactsForContext(projectKey, 50).map((fact) => ({
 		id: fact.id,
-		text: fact.text.length > 200 ? `${fact.text.slice(0, 200)}…` : fact.text,
+		text: unicodePrefix(fact.text, 400),
 		createdAt: fact.createdAt,
 		sourceTurn: fact.sourceTurn,
 		scope: fact.scope,
 		topicFile: fact.topicFile,
 	}));
-
+	const active: typeof activeCandidates = [];
+	const superseded: typeof supersededCandidates = [];
+	for (const fact of activeCandidates) {
+		if (JSON.stringify({ active: [...active, fact], superseded }).length > 32_000) break;
+		active.push(fact);
+	}
+	for (const fact of supersededCandidates) {
+		if (JSON.stringify({ active, superseded: [...superseded, fact] }).length > 32_000) break;
+		superseded.push(fact);
+	}
 	return { active, superseded };
 }
 
-function buildUserPrompt(options: RunMemoryExtractOptions, store: MemoryStore, cwdKey: string): string {
+function buildUserPrompt(options: RunMemoryExtractOptions, store: MemoryStore, projectKey: string): string {
 	const evidence = (options.serializeEvidence ?? serializeExtractEvidence)(options.messages);
 	if (options.mode === "commit") {
 		return `<extract_mode>commit</extract_mode>
@@ -158,7 +174,7 @@ function buildUserPrompt(options: RunMemoryExtractOptions, store: MemoryStore, c
 ${evidence}
 </conversation_evidence>`;
 	}
-	const facts = buildReconcileFactsPayload(store, cwdKey, options.agentMode);
+	const facts = buildReconcileFactsPayload(store, projectKey);
 	return `<extract_mode>reconcile</extract_mode>
 <active_facts>
 ${JSON.stringify(facts.active)}
@@ -169,6 +185,17 @@ ${JSON.stringify(facts.superseded)}
 <conversation_evidence>
 ${evidence}
 </conversation_evidence>`;
+}
+
+function unicodePrefix(text: string, maxCharacters: number): string {
+	let end = 0;
+	let count = 0;
+	for (const character of text) {
+		if (count >= maxCharacters) break;
+		end += character.length;
+		count++;
+	}
+	return end < text.length ? `${text.slice(0, end)}…` : text;
 }
 
 async function defaultPromptFn(
@@ -209,14 +236,22 @@ export async function runMemoryExtract(options: RunMemoryExtractOptions): Promis
 	const startedAt = new Date().toISOString();
 	const openStore = options.openStore ?? openMemoryStore;
 	const store = openStore(getMemorySqlitePath(options.agentDir));
-	const cwdKey = options.cwdKey ?? encodePathForStorage(canonicalizePathForCreation(options.cwd));
+	const identity = memoryProjectIdentity(options.cwd);
+	if (options.projectKey && options.projectKey !== identity.projectKey) {
+		store.close();
+		throw new Error("Memory project key does not match the exact canonical cwd");
+	}
+	const projectKey = identity.projectKey;
+	try {
+		store.resolveProject(identity);
+	} catch (error) {
+		store.close();
+		throw error;
+	}
 	const toolContext: MemoryToolContext = {
 		store,
 		agentDir: options.agentDir,
-		cwd: options.cwd,
-		agentMode: options.agentMode,
-		cwdKey,
-		mode: options.agentMode,
+		projectKey,
 		sourceTurn: options.sourceTurn ?? null,
 		createdAt: options.createdAt,
 		// Runner owns the final projection write so injectable writeProjection is honored.
@@ -229,7 +264,7 @@ export async function runMemoryExtract(options: RunMemoryExtractOptions): Promis
 		options.mode === "commit" ? createCommitFactsTool(toolContext) : createReconcileFactsTool(toolContext);
 	const tool = wrapToolDefinition(definition);
 	const systemPrompt = options.mode === "commit" ? COMMIT_EXTRACT_SYSTEM_PROMPT : RECONCILE_EXTRACT_SYSTEM_PROMPT;
-	const baseUserPrompt = buildUserPrompt(options, store, cwdKey);
+	const baseUserPrompt = buildUserPrompt(options, store, projectKey);
 	const promptFn = options.promptFn ?? ((args) => defaultPromptFn(options, args));
 	const writeProjection = options.writeProjection ?? writeProjectionDefault;
 	const expectedTool = toolNameForMode(options.mode);
@@ -260,7 +295,7 @@ export async function runMemoryExtract(options: RunMemoryExtractOptions): Promis
 			}
 			status = "success";
 			reason = undefined;
-			writeProjection(options.agentDir, options.cwd, options.agentMode, store);
+			writeProjection(options.agentDir, projectKey, store);
 			break;
 		}
 		if (status !== "success") {

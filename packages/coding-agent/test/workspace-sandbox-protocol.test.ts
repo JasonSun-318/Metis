@@ -10,6 +10,7 @@ it("accepts only the bounded discriminated sandbox protocol", () => {
 				workspaceRoots: ["/work"],
 				readOnlyRoots: ["/attachments"],
 				writeRoots: ["/workdir"],
+				protectedRoots: ["/agent/memory"],
 				shellPath: "/bin/zsh",
 			}),
 		),
@@ -19,6 +20,7 @@ it("accepts only the bounded discriminated sandbox protocol", () => {
 		workspaceRoots: ["/work"],
 		readOnlyRoots: ["/attachments"],
 		writeRoots: ["/workdir"],
+		protectedRoots: ["/agent/memory"],
 		shellPath: "/bin/zsh",
 	});
 	expect(
@@ -40,15 +42,32 @@ it("accepts only the bounded discriminated sandbox protocol", () => {
 
 	for (const line of [
 		"{",
-		JSON.stringify({ type: "init", cwd: "/work", workspaceRoots: [], readOnlyRoots: [], writeRoots: [] }),
-		JSON.stringify({ type: "init", cwd: "/work", workspaceRoots: ["/work"], writeRoots: [] }),
+		JSON.stringify({
+			type: "init",
+			cwd: "/work",
+			workspaceRoots: [],
+			readOnlyRoots: [],
+			writeRoots: [],
+			protectedRoots: [],
+		}),
+		JSON.stringify({ type: "init", cwd: "/work", workspaceRoots: ["/work"], writeRoots: [], protectedRoots: [] }),
 		JSON.stringify({
 			type: "init",
 			cwd: "/work",
 			workspaceRoots: ["/work"],
 			readOnlyRoots: [],
 			writeRoots: [],
+			protectedRoots: [],
 			shellPath: "",
+		}),
+		JSON.stringify({
+			type: "init",
+			cwd: "/work",
+			workspaceRoots: ["/work"],
+			readOnlyRoots: [],
+			writeRoots: [],
+			protectedRoots: [],
+			extra: true,
 		}),
 		JSON.stringify({ type: "exec", id: "1", command: "x".repeat(262_145), cwd: "/work", env: {} }),
 		JSON.stringify({ type: "exec", id: "1", command: "pwd", cwd: "/work", env: {}, extra: true }),

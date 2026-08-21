@@ -22,7 +22,6 @@ import { TextDecoder } from "node:util";
 import { canonicalizePathForCreation, encodePathForStorage, resolvePath } from "../utils/paths.ts";
 import { trashPath } from "../utils/trash.ts";
 import { type AgentMode, DEFAULT_AGENT_MODE, isAgentMode } from "./agent-mode.ts";
-import { getAutoMemoryPaths } from "./auto-memory.ts";
 import {
 	ensureDirectoryDurablySync,
 	ensureRealDirectoryDurablySync,
@@ -369,23 +368,6 @@ function addOwnedTarget(
 	targets.set(resolved, { path: resolved, directory: metadata.isDirectory() });
 }
 
-function assertSafeMemoryTree(root: string, agentDir: string): void {
-	if (!existsSync(root)) return;
-	const pending = [root];
-	while (pending.length > 0) {
-		const path = pending.pop()!;
-		const metadata = lstatSync(path);
-		if (metadata.isSymbolicLink()) throw new Error(`Project memory cannot contain symbolic links: ${path}`);
-		if (metadata.isDirectory()) {
-			if (!inside(agentDir, realpathSync(path)))
-				throw new Error(`Project memory escapes the agent directory: ${path}`);
-			for (const name of readdirSync(path)) pending.push(join(path, name));
-		} else if (!metadata.isFile() || metadata.nlink !== 1) {
-			throw new Error(`Project memory contains an unsafe entry: ${path}`);
-		}
-	}
-}
-
 function pruneDescendants(targets: ReadonlyMap<string, OwnedTarget>): OwnedTarget[] {
 	const kept: OwnedTarget[] = [];
 	for (const target of targets.values()) {
@@ -472,9 +454,6 @@ async function collectTargets(
 		if (++inspected % 32 === 0) await yieldToEventLoop();
 	}
 
-	const projectMemory = getAutoMemoryPaths(roots.agentDir, roots.cwd, input.mode).project.directory;
-	assertSafeMemoryTree(projectMemory, roots.agentDir);
-	addOwnedTarget(targets, roots.agentDir, projectMemory, "directory");
 	return { targets: pruneDescendants(targets), storageCwd: storageCwd ?? roots.storageCwd };
 }
 

@@ -1,6 +1,7 @@
 import { lstatSync, realpathSync } from "node:fs";
 import type { AgentMessage } from "@metis/agent-core";
 import { createAgentSessionFromServices, createAgentSessionServices } from "../agent-session-services.ts";
+import { getAutoMemoryRoot } from "../auto-memory.ts";
 import { identifySubmitPromptRequest } from "../runtime-recovery.ts";
 import { getDefaultSessionDir, SessionManager, sessionEntryToContextMessages } from "../session-manager.ts";
 import { createUnattendedExecutionProfile, UNATTENDED_TOOL_NAMES } from "../unattended-execution.ts";
@@ -63,7 +64,12 @@ export function createScheduledRunExecutor(options: {
 		const cwd = workspaceRoots[0]!;
 		let sandbox: Awaited<ReturnType<typeof createWorkspaceSandbox>>;
 		try {
-			sandbox = await createWorkspaceSandbox({ cwd, workspaceRoots, signal });
+			sandbox = await createWorkspaceSandbox({
+				cwd,
+				workspaceRoots,
+				protectedRoots: [getAutoMemoryRoot(options.agentDir)],
+				signal,
+			});
 		} catch (error) {
 			if (signal.aborted) throw new Error("aborted", { cause: error });
 			throw new ScheduleError(

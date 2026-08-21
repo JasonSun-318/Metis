@@ -1,7 +1,5 @@
 import { join } from "node:path";
-import { canonicalizePathForCreation, encodePathForStorage } from "../../utils/paths.ts";
-import type { AgentMode } from "../agent-mode.ts";
-import { getAutoMemoryPaths, getAutoMemoryRoot } from "../auto-memory.ts";
+import { getGlobalMemoryDirectory, getProjectMemoryDirectory } from "../auto-memory.ts";
 import { ensureRealDirectoryDurablySync, replaceFileAtomicallySync } from "../durable-file.ts";
 import type { MemoryStore } from "./memory-store.ts";
 import type { MemoryFact } from "./memory-types.ts";
@@ -52,20 +50,25 @@ export function renderProjection(
 	};
 }
 
-export function writeProjection(agentDir: string, cwd: string, mode: AgentMode, store: MemoryStore): void {
-	const cwdKey = encodePathForStorage(canonicalizePathForCreation(cwd));
-	const paths = getAutoMemoryPaths(agentDir, cwd, mode);
+export function writeProjection(agentDir: string, projectKey: string, store: MemoryStore): void {
+	writeGlobalProjection(agentDir, store);
+	writeProjectProjection(agentDir, projectKey, store);
+}
 
-	writeScopeProjection(getAutoMemoryRoot(agentDir), "MEMORY.md", store.listActiveFacts("global", null, null));
-	writeScopeProjection(paths.project.directory, "project.md", store.listActiveFacts("project", cwdKey, mode));
+export function writeGlobalProjection(agentDir: string, store: MemoryStore): void {
+	writeScopeProjection(getGlobalMemoryDirectory(agentDir), "MEMORY.md", store.listActiveFacts("global", null, null));
+}
+
+export function writeProjectProjection(agentDir: string, projectKey: string, store: MemoryStore): void {
+	writeScopeProjection(
+		getProjectMemoryDirectory(agentDir, projectKey),
+		"project.md",
+		store.listActiveFacts("project", projectKey, null),
+	);
 }
 
 function writeScopeProjection(directory: string, indexFile: string, facts: MemoryFact[]): void {
 	const rendered = renderProjection(facts);
-	if (rendered.topicFiles.size === 0 && rendered.indexMarkdown.length === 0) {
-		return;
-	}
-
 	ensureRealDirectoryDurablySync(directory, 0o700);
 	for (const [topicFile, content] of rendered.topicFiles) {
 		replaceFileAtomicallySync(join(directory, topicFile), content.endsWith("\n") ? content : `${content}\n`, {
@@ -114,7 +117,7 @@ function formatIndexLine(group: TopicGroup): string {
 
 function buildRetrievalSentence(texts: readonly string[]): string {
 	const joined = texts
-		.map((text) => text.trim())
+		.map((text) => text.replace(/\s+/gu, " ").trim())
 		.filter(Boolean)
 		.join(" ");
 	if (joined.length <= INDEX_SENTENCE_MAX) return joined;

@@ -9,17 +9,18 @@ export interface InteractiveBashContext {
 	readonly workspaceRoots: readonly string[];
 	readonly readOnlyRoots: readonly string[];
 	readonly writeRoots: readonly string[];
+	readonly protectedRoots?: readonly string[];
 	readonly shellPath?: string;
 }
 
 /** Roots mounted read-only in the interactive Bash sandbox (attachments, long-term memory, …). */
 export function buildInteractiveBashReadOnlyRoots(input: {
 	readonly attachmentDir?: string;
-	readonly memoryRoot?: string;
+	readonly memoryReadRoots?: readonly string[];
 }): string[] {
 	const roots: string[] = [];
 	if (input.attachmentDir) roots.push(input.attachmentDir);
-	if (input.memoryRoot) roots.push(input.memoryRoot);
+	if (input.memoryReadRoots) roots.push(...input.memoryReadRoots);
 	return roots;
 }
 
@@ -39,7 +40,13 @@ type SandboxState = {
 };
 
 function normalizeContext(value: InteractiveBashContext): InteractiveBashContext {
-	const paths = [value.cwd, ...value.workspaceRoots, ...value.readOnlyRoots, ...value.writeRoots];
+	const paths = [
+		value.cwd,
+		...value.workspaceRoots,
+		...value.readOnlyRoots,
+		...value.writeRoots,
+		...(value.protectedRoots ?? []),
+	];
 	if (
 		!isAbsolute(value.cwd) ||
 		value.workspaceRoots.length === 0 ||
@@ -54,6 +61,7 @@ function normalizeContext(value: InteractiveBashContext): InteractiveBashContext
 		workspaceRoots: roots(value.workspaceRoots),
 		readOnlyRoots: roots(value.readOnlyRoots),
 		writeRoots: roots(value.writeRoots),
+		protectedRoots: roots(value.protectedRoots ?? []),
 		...(value.shellPath === undefined
 			? {}
 			: {

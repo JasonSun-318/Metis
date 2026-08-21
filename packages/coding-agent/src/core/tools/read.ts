@@ -12,6 +12,7 @@ import { processImage } from "../../utils/image-process.ts";
 import { detectSupportedImageMimeTypeFromFile } from "../../utils/mime.ts";
 import { formatPathRelativeToCwdOrAbsolute } from "../../utils/paths.ts";
 import type { ToolDefinition, ToolRenderResultOptions } from "../extensions/types.ts";
+import { assertMemoryReadAllowed, type MemoryReadBoundary } from "../memory/memory-path-guard.ts";
 import { resolveReadPathAsync, resolveToCwd } from "./path-utils.ts";
 import { getTextOutput, renderToolPath, replaceTabs, str } from "./render-utils.ts";
 import { wrapToolDefinition } from "./tool-definition-wrapper.ts";
@@ -60,6 +61,7 @@ export interface ReadToolOptions {
 	autoResizeImages?: boolean;
 	/** Custom operations for file reading. Default: local filesystem */
 	operations?: ReadOperations;
+	memoryReadBoundary?: MemoryReadBoundary;
 }
 
 type ReadRenderArgs = { path?: string; file_path?: string; offset?: number; limit?: number };
@@ -236,6 +238,7 @@ export function createReadToolDefinition(
 					(async () => {
 						try {
 							const absolutePath = await resolveReadPathAsync(path, cwd);
+							assertMemoryReadAllowed(absolutePath, options?.memoryReadBoundary);
 							if (aborted) return;
 							// Check if file exists and is readable.
 							await ops.access(absolutePath);

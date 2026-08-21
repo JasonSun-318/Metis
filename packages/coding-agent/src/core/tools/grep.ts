@@ -10,6 +10,7 @@ import type { Theme } from "../../modes/interactive/theme/theme.ts";
 import { waitForChildProcess } from "../../utils/child-process.ts";
 import { ensureTool } from "../../utils/tools-manager.ts";
 import type { ToolDefinition, ToolRenderResultOptions } from "../extensions/types.ts";
+import { assertMemoryReadAllowed, type MemoryReadBoundary } from "../memory/memory-path-guard.ts";
 import { resolveToCwd } from "./path-utils.ts";
 import { getTextOutput, invalidArgText, shortenPath, str } from "./render-utils.ts";
 import type { ToolSubprocessExecutor, WrappedToolSubprocess } from "./subprocess.ts";
@@ -78,6 +79,7 @@ export interface GrepToolOptions {
 	operations?: GrepOperations;
 	/** Session permission/sandbox boundary for the built-in rg subprocess. */
 	subprocess?: ToolSubprocessExecutor;
+	memoryReadBoundary?: MemoryReadBoundary;
 }
 
 function formatGrepCall(
@@ -195,6 +197,7 @@ export function createGrepToolDefinition(
 						}
 
 						const searchPath = resolveToCwd(searchDir || ".", cwd);
+						assertMemoryReadAllowed(searchPath, options?.memoryReadBoundary);
 						const ops = customOps ?? defaultGrepOperations;
 						let isDirectory: boolean;
 						try {

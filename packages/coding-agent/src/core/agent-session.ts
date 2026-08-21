@@ -46,18 +46,19 @@ import {
 import { getProjectConfigDir } from "../config.ts";
 import { getThemeByName, theme } from "../modes/interactive/theme/theme.ts";
 import { stripFrontmatter } from "../utils/frontmatter.ts";
-import {
-	canonicalizeActionPath,
-	canonicalizePathForCreation,
-	encodePathForStorage,
-	isPathInside,
-	resolvePath,
-} from "../utils/paths.ts";
+import { canonicalizeActionPath, isPathInside, resolvePath } from "../utils/paths.ts";
 import { sleep } from "../utils/sleep.ts";
 import type { AgentMode } from "./agent-mode.ts";
 import { formatNoApiKeyFoundMessage, formatNoModelSelectedMessage } from "./auth-guidance.ts";
 import type { McpSecretCredential } from "./auth-storage.ts";
-import { type AutoMemorySnapshot, getAutoMemoryRoot, getMemorySqlitePath, loadAutoMemory } from "./auto-memory.ts";
+import {
+	type AutoMemorySnapshot,
+	getAutoMemoryRoot,
+	getGlobalMemoryDirectory,
+	getMemorySqlitePath,
+	getProjectMemoryDirectory,
+	loadAutoMemory,
+} from "./auto-memory.ts";
 import { type BashResult, executeBashWithOperations } from "./bash-executor.ts";
 import { readBoundedUtf8FileSync } from "./bounded-text-file.ts";
 import {
@@ -145,7 +146,7 @@ import {
 	type RunMemoryExtractOptions,
 	runMemoryExtract,
 } from "./memory/memory-extract.ts";
-import { assertBashDoesNotTouchMemory } from "./memory/memory-path-guard.ts";
+import { memoryProjectIdentity } from "./memory/memory-project.ts";
 import {
 	backfillMemoryEmbeddings,
 	MEMORY_RETRIEVE_TIMEOUT_MS,
@@ -687,18 +688,12 @@ export class AgentSession {
 			: (config.interactiveBashBoundary ??
 				createInteractiveBashBoundary({
 					hostOperations: {
-						exec: (command, cwd, options) => {
-							assertBashDoesNotTouchMemory(
-								command,
-								cwd,
-								this._agentDir ? getAutoMemoryRoot(this._agentDir) : undefined,
-							);
-							return createLocalBashOperations({ shellPath: this.settingsManager.getShellPath() }).exec(
+						exec: (command, cwd, options) =>
+							createLocalBashOperations({ shellPath: this.settingsManager.getShellPath() }).exec(
 								command,
 								cwd,
 								options,
-							);
-						},
+							),
 					},
 					context: () => {
 						const sessionId = this.sessionManager.getSessionId();
@@ -708,14 +703,25 @@ export class AgentSession {
 						const workDirs = this._agentDir ? getOwnedSessionWorkDirs(this._agentDir, sessionId) : [];
 						const activeWorkDir =
 							this._activeWorkDir && workDirs.includes(this._activeWorkDir) ? this._activeWorkDir : undefined;
+						const memoryRoot = this._agentDir ? getAutoMemoryRoot(this._agentDir) : undefined;
+						const memoryReadRoots = this._agentDir
+							? [
+									getGlobalMemoryDirectory(this._agentDir),
+									getProjectMemoryDirectory(
+										this._agentDir,
+										memoryProjectIdentity(this.sessionManager.getCwd()).projectKey,
+									),
+								]
+							: [];
 						return {
 							cwd: this.sessionManager.getCwd(),
 							workspaceRoots: this.sessionManager.getWorkspaceRoots(),
 							readOnlyRoots: buildInteractiveBashReadOnlyRoots({
 								attachmentDir,
-								memoryRoot: this._agentDir ? getAutoMemoryRoot(this._agentDir) : undefined,
+								memoryReadRoots,
 							}),
 							writeRoots: activeWorkDir ? [activeWorkDir] : [],
+							protectedRoots: memoryRoot ? [memoryRoot] : [],
 							shellPath: this.settingsManager.getShellPath(),
 						};
 					},
@@ -2249,7 +2255,7 @@ export class AgentSession {
 	}
 
 	getAutoMemorySnapshot(): AutoMemorySnapshot | undefined {
-		return this._agentDir ? loadAutoMemory(this._agentDir, this._cwd, this.mode) : undefined;
+		return this._agentDir ? loadAutoMemory(this._agentDir, this._cwd) : undefined;
 	}
 
 	getMemoryExtractStatus(limit = 10): MemoryExtractStatusSnapshot {
@@ -2275,22 +2281,6 @@ export class AgentSession {
 
 	async waitForMemoryExtract(): Promise<void> {
 		await this._memoryExtractPromise?.catch(() => undefined);
-	}
-
-	/** Wrap bash ops so host/full paths cannot touch the long-term memory directory. */
-	private _bashOperationsGuardingMemory(operations: BashOperations): BashOperations {
-		const memoryRoot = this._agentDir ? getAutoMemoryRoot(this._agentDir) : undefined;
-		if (!memoryRoot) return operations;
-		return {
-			exec: (command, cwd, options) => {
-				assertBashDoesNotTouchMemory(command, cwd, memoryRoot);
-				return operations.exec(command, cwd, options);
-			},
-		};
-	}
-
-	private _optionalBashOperationsGuardingMemory(operations: BashOperations | undefined): BashOperations | undefined {
-		return operations ? this._bashOperationsGuardingMemory(operations) : undefined;
 	}
 
 	/** Current retry attempt (0 if not retrying) */
@@ -2590,14 +2580,14 @@ export class AgentSession {
 		const embeddingModel = this.settingsManager.getMemoryEmbeddingModel()?.trim();
 		if (!agentDir || !embeddingModel) return [];
 
-		const cwdKey = encodePathForStorage(canonicalizePathForCreation(this._cwd));
+		const projectKey = memoryProjectIdentity(this._cwd).projectKey;
 		const store = openMemoryStore(getMemorySqlitePath(agentDir));
 		try {
 			const hits: RetrievedMemoryFact[] = await this._searchMemories({
 				store,
 				query,
-				cwdKey,
-				mode: this.mode,
+				cwdKey: projectKey,
+				mode: null,
 				embeddingModel,
 				modelRegistry: this._modelRegistry,
 				rerankModel: this.settingsManager.getMemoryRerankModel()?.trim(),
@@ -3271,6 +3261,12 @@ export class AgentSession {
 					this.agent.state.systemPrompt = this._baseSystemPrompt;
 				}
 				this._maybeStartMemoryEmbeddingBackfill();
+			} else if (
+				this._includeAutoMemory &&
+				this.settingsManager.getAutoMemoryEnabled() &&
+				this.settingsManager.getMemoryEngine() === "index"
+			) {
+				this.refreshSystemPrompt();
 			}
 
 			// Build messages array (custom message if any, then user message)
@@ -4091,6 +4087,7 @@ export class AgentSession {
 			agentDir,
 			cwd: this._cwd,
 			agentMode: this.mode,
+			projectKey: memoryProjectIdentity(this._cwd).projectKey,
 			sessionId: this.sessionId,
 			messages: options.messages,
 			trigger: options.trigger,
@@ -4979,6 +4976,15 @@ export class AgentSession {
 	}): void {
 		const shellCommandPrefix = this._unattendedExecution ? undefined : this.settingsManager.getShellCommandPrefix();
 		const shellPath = this._unattendedExecution ? undefined : this.settingsManager.getShellPath();
+		const memoryReadBoundary = this._agentDir
+			? {
+					memoryRoot: getAutoMemoryRoot(this._agentDir),
+					allowedRoots: [
+						getGlobalMemoryDirectory(this._agentDir),
+						getProjectMemoryDirectory(this._agentDir, memoryProjectIdentity(this._cwd).projectKey),
+					],
+				}
+			: undefined;
 		this._runtimeShellCommandPrefix = shellCommandPrefix;
 		const baseToolDefinitions = this._baseToolsOverride
 			? Object.fromEntries(
@@ -4988,10 +4994,12 @@ export class AgentSession {
 					]),
 				)
 			: createAllToolDefinitions(this._cwd, {
+					read: { memoryReadBoundary },
+					grep: { memoryReadBoundary },
+					find: { memoryReadBoundary },
+					ls: { memoryReadBoundary },
 					bash: {
-						operations: this._optionalBashOperationsGuardingMemory(
-							this._unattendedExecution?.bashOperations ?? this._interactiveBashBoundary?.operations,
-						),
+						operations: this._unattendedExecution?.bashOperations ?? this._interactiveBashBoundary?.operations,
 						commandPrefix: shellCommandPrefix,
 						shellPath,
 						outputDir: this._toolOutputDir,
@@ -5260,7 +5268,7 @@ export class AgentSession {
 			const result = await executeBashWithOperations(
 				resolvedCommand,
 				this.sessionManager.getCwd(),
-				this._bashOperationsGuardingMemory(options?.operations ?? createLocalBashOperations({ shellPath })),
+				options?.operations ?? createLocalBashOperations({ shellPath }),
 				{
 					onChunk,
 					signal: this._bashAbortController.signal,

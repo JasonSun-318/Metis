@@ -2,7 +2,6 @@ import { randomUUID } from "node:crypto";
 import type { AgentToolResult } from "@metis/agent-core";
 import { type Static, Type } from "typebox";
 import { Value } from "typebox/value";
-import type { AgentMode } from "../agent-mode.ts";
 import { defineTool, type ToolDefinition } from "../extensions/types.ts";
 import { writeProjection } from "./memory-projection.ts";
 import { looksLikeSecret } from "./memory-secrets.ts";
@@ -70,12 +69,8 @@ export type ReconcileFactsParams = Static<typeof ReconcileFactsParamsSchema>;
 export interface MemoryToolContext {
 	store: MemoryStore;
 	agentDir: string;
-	cwd: string;
-	agentMode: AgentMode;
-	/** Encoded project cwd key used for project-scoped inserts. */
-	cwdKey: string;
-	/** Mode column for project-scoped inserts (usually AgentMode). */
-	mode: string;
+	/** SHA-256 key of the exact canonical primary cwd. */
+	projectKey: string;
 	sourceTurn: string | null;
 	createdAt?: string;
 	/** When false, skip markdown projection after a successful write. Default true. */
@@ -129,12 +124,19 @@ export function isFactNewer(candidate: MemoryFact, baseline: MemoryFact): boolea
 
 function scopeColumns(scope: MemoryScope, ctx: MemoryToolContext): { cwdKey: string | null; mode: string | null } {
 	if (scope === "global") return { cwdKey: null, mode: null };
-	return { cwdKey: ctx.cwdKey, mode: ctx.mode };
+	return { cwdKey: ctx.projectKey, mode: null };
+}
+
+function isFactVisible(ctx: MemoryToolContext, fact: MemoryFact): boolean {
+	return (
+		(fact.scope === "global" && fact.cwdKey === null && fact.mode === null) ||
+		(fact.scope === "project" && fact.cwdKey === ctx.projectKey && fact.mode === null)
+	);
 }
 
 function maybeProject(ctx: MemoryToolContext): void {
 	if (ctx.projectAfterWrite === false) return;
-	writeProjection(ctx.agentDir, ctx.cwd, ctx.agentMode, ctx.store);
+	writeProjection(ctx.agentDir, ctx.projectKey, ctx.store);
 }
 
 function insertFactInputs(ctx: MemoryToolContext, inputs: Static<typeof FactInputSchema>[]): MemoryFact[] {
@@ -212,7 +214,7 @@ export function applyReconcileFacts(ctx: MemoryToolContext, params: unknown): Ap
 			for (const entry of params.supersede ?? []) {
 				const oldFact = ctx.store.getFactById(entry.oldId);
 				const newFact = ctx.store.getFactById(entry.newId);
-				if (!oldFact || !newFact) {
+				if (!oldFact || !newFact || !isFactVisible(ctx, oldFact) || !isFactVisible(ctx, newFact)) {
 					rejectReasons.push(`Unknown supersede ids ${entry.oldId}/${entry.newId}`);
 					continue;
 				}
@@ -231,7 +233,7 @@ export function applyReconcileFacts(ctx: MemoryToolContext, params: unknown): Ap
 			for (const entry of params.merge ?? []) {
 				const facts = entry.ids
 					.map((id) => ctx.store.getFactById(id))
-					.filter((fact): fact is MemoryFact => fact !== null);
+					.filter((fact): fact is MemoryFact => fact !== null && isFactVisible(ctx, fact));
 				if (facts.length < 2) {
 					rejectReasons.push(`Merge requires at least two known ids`);
 					continue;
@@ -261,7 +263,7 @@ export function applyReconcileFacts(ctx: MemoryToolContext, params: unknown): Ap
 
 			for (const id of params.deleteIds ?? []) {
 				const fact = ctx.store.getFactById(id);
-				if (!fact) {
+				if (!fact || !isFactVisible(ctx, fact)) {
 					rejectReasons.push(`Unknown delete id ${id}`);
 					continue;
 				}
@@ -271,7 +273,7 @@ export function applyReconcileFacts(ctx: MemoryToolContext, params: unknown): Ap
 
 			for (const entry of params.moveScope ?? []) {
 				const fact = ctx.store.getFactById(entry.id);
-				if (!fact) {
+				if (!fact || !isFactVisible(ctx, fact)) {
 					rejectReasons.push(`Unknown moveScope id ${entry.id}`);
 					continue;
 				}

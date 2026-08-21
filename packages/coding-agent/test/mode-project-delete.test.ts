@@ -214,15 +214,13 @@ describe("mode project Trash", () => {
 			decoys.push(write(join(recoveryDirectory, `${parse(session.path).name}-not-owned.partial`)));
 		}
 
-		const chatMemory = getAutoMemoryPaths(layout.agentDir, layout.cwd, "chat").project;
-		const codeMemory = getAutoMemoryPaths(layout.agentDir, layout.cwd, "code").project;
-		owned.add(write(chatMemory.indexPath, "chat memory"));
+		const sharedMemory = getAutoMemoryPaths(layout.agentDir, layout.cwd).project;
 		const preservedPaths = [
 			code.path,
 			child.path,
 			scheduled.path,
-			write(codeMemory.indexPath, "code memory"),
-			write(join(layout.agentDir, "memory", "MEMORY.md"), "global memory"),
+			write(sharedMemory.indexPath, "shared memory"),
+			write(join(layout.agentDir, "memory", "global", "MEMORY.md"), "global memory"),
 			write(join(layout.agentDir, "skills", "sample", "SKILL.md"), "user skill"),
 			write(join(layout.cwd, ".agents", "skills", "sample", "SKILL.md"), "project skill"),
 			write(join(layout.cwd, "source.txt"), "source"),

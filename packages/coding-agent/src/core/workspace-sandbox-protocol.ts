@@ -7,6 +7,7 @@ export type SandboxRequest =
 			workspaceRoots: string[];
 			readOnlyRoots: string[];
 			writeRoots: string[];
+			protectedRoots: string[];
 			shellPath?: string;
 	  }
 	| { type: "exec"; id: string; command: string; cwd: string; timeoutMs?: number; env: Record<string, string> }
@@ -100,6 +101,7 @@ export function parseSandboxRequest(line: string): SandboxRequest {
 		"workspaceRoots",
 		"readOnlyRoots",
 		"writeRoots",
+		"protectedRoots",
 		"shellPath",
 		"id",
 		"command",
@@ -115,6 +117,7 @@ export function parseSandboxRequest(line: string): SandboxRequest {
 				"workspaceRoots",
 				"readOnlyRoots",
 				"writeRoots",
+				"protectedRoots",
 				"shellPath",
 			]);
 			return {
@@ -123,6 +126,7 @@ export function parseSandboxRequest(line: string): SandboxRequest {
 				workspaceRoots: paths(record.workspaceRoots, "workspaceRoots", false),
 				readOnlyRoots: paths(record.readOnlyRoots, "readOnlyRoots", true),
 				writeRoots: paths(record.writeRoots, "writeRoots", true),
+				protectedRoots: paths(record.protectedRoots, "protectedRoots", true),
 				...(record.shellPath === undefined ? {} : { shellPath: nonEmptyString(record.shellPath, "shellPath") }),
 			};
 		}

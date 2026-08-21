@@ -286,10 +286,12 @@ describe("scheduled run executor", () => {
 				},
 			},
 		};
-		await createScheduledRunExecutor({ agentDir: join(cwd, ".agent") })(input, new AbortController().signal);
+		const agentDir = join(cwd, ".agent");
+		await createScheduledRunExecutor({ agentDir })(input, new AbortController().signal);
 		expect(mocks.createSandbox).toHaveBeenCalledWith({
 			cwd,
 			workspaceRoots: [cwd, additionalWorkspaceCwd],
+			protectedRoots: [join(agentDir, "memory")],
 			signal: expect.any(AbortSignal),
 		});
 		expect(mocks.sessionOptions[0]).toMatchObject({

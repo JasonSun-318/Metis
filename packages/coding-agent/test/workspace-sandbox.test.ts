@@ -1,8 +1,56 @@
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import {
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readdirSync,
+	realpathSync,
+	rmSync,
+	symlinkSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { createWorkspaceSandbox, WorkspaceSandboxError } from "../src/core/workspace-sandbox.ts";
+
+describe("workspace sandbox protected roots", () => {
+	const roots: string[] = [];
+	afterEach(() => {
+		for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+	});
+	const root = () => {
+		const value = mkdtempSync(join(tmpdir(), "metis-workspace-protected-"));
+		roots.push(value);
+		return value;
+	};
+
+	it("rejects workspace, write, and broad read roots that expose protected memory", async () => {
+		const base = root();
+		const workspace = join(base, "workspace");
+		const memory = join(base, "agent", "memory");
+		mkdirSync(workspace, { recursive: true });
+		mkdirSync(memory, { recursive: true });
+		await expect(
+			createWorkspaceSandbox({ cwd: base, workspaceRoots: [base], protectedRoots: [memory] }),
+		).rejects.toThrow(/protected root/i);
+		await expect(
+			createWorkspaceSandbox({
+				cwd: workspace,
+				workspaceRoots: [workspace],
+				writeRoots: [join(base, "agent")],
+				protectedRoots: [memory],
+			}),
+		).rejects.toThrow(/protected root/i);
+		await expect(
+			createWorkspaceSandbox({
+				cwd: workspace,
+				workspaceRoots: [workspace],
+				readOnlyRoots: [join(base, "agent")],
+				protectedRoots: [memory],
+			}),
+		).rejects.toThrow(/protected root/i);
+	});
+});
 
 describe.runIf(process.env.METIS_TEST_OS_SANDBOX === "1")("workspace sandbox", () => {
 	const roots: string[] = [];
@@ -120,6 +168,66 @@ describe.runIf(process.env.METIS_TEST_OS_SANDBOX === "1")("workspace sandbox", (
 		} finally {
 			await sandbox.dispose();
 			await expect(sandbox.dispose()).resolves.toBeUndefined();
+		}
+	});
+
+	it.skipIf(process.platform === "win32")("carves out only global and exact-project memory as read-only", async () => {
+		const base = temporaryDirectory();
+		const cwd = join(base, "workspace");
+		const memory = join(base, "agent", "memory");
+		const global = join(memory, "global");
+		const current = join(memory, "projects", "current");
+		const sibling = join(memory, "projects", "sibling");
+		mkdirSync(cwd, { recursive: true });
+		mkdirSync(global, { recursive: true });
+		mkdirSync(current, { recursive: true });
+		mkdirSync(sibling, { recursive: true });
+		const memoryPath = realpathSync(memory);
+		const globalPath = realpathSync(global);
+		const currentPath = realpathSync(current);
+		const siblingPath = realpathSync(sibling);
+		writeFileSync(join(globalPath, "global.md"), "global-marker");
+		writeFileSync(join(currentPath, "current.md"), "current-marker");
+		writeFileSync(join(siblingPath, "sibling.md"), "sibling-marker");
+		writeFileSync(join(memoryPath, "memory.sqlite"), "database-marker");
+		symlinkSync(siblingPath, join(currentPath, "sibling-alias"));
+		symlinkSync(join(memoryPath, "memory.sqlite"), join(currentPath, "sqlite-alias"));
+		const sandbox = await createWorkspaceSandbox({
+			cwd,
+			workspaceRoots: [cwd],
+			readOnlyRoots: [globalPath, currentPath],
+			protectedRoots: [memoryPath],
+		});
+		try {
+			const output = async (command: string) => {
+				const chunks: Buffer[] = [];
+				const result = await sandbox.operations.exec(command, cwd, { onData: (data) => chunks.push(data) });
+				return { ...result, text: Buffer.concat(chunks).toString() };
+			};
+			await expect(output(`cat ${JSON.stringify(join(globalPath, "global.md"))}`)).resolves.toMatchObject({
+				exitCode: 0,
+				text: expect.stringContaining("global-marker"),
+			});
+			await expect(output(`cat ${JSON.stringify(join(currentPath, "current.md"))}`)).resolves.toMatchObject({
+				exitCode: 0,
+				text: expect.stringContaining("current-marker"),
+			});
+			for (const denied of [
+				join(siblingPath, "sibling.md"),
+				join(memoryPath, "memory.sqlite"),
+				join(currentPath, "sibling-alias", "sibling.md"),
+				join(currentPath, "sqlite-alias"),
+			]) {
+				await expect(output(`cat ${JSON.stringify(denied)}`)).resolves.not.toMatchObject({ exitCode: 0 });
+			}
+			for (const denied of [join(globalPath, "new.md"), join(currentPath, "new.md")]) {
+				await expect(output(`printf blocked > ${JSON.stringify(denied)}`)).resolves.not.toMatchObject({
+					exitCode: 0,
+				});
+				expect(existsSync(denied)).toBe(false);
+			}
+		} finally {
+			await sandbox.dispose();
 		}
 	});
 

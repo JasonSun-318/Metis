@@ -29,7 +29,7 @@ export interface SearchMemoriesOptions {
 	store: MemoryStore;
 	query: string;
 	cwdKey: string;
-	mode: string;
+	mode: string | null;
 	embeddingModel: string;
 	modelRegistry?: ModelRegistry;
 	rerankModel?: string;

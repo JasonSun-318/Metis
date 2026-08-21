@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { Worker } from "node:worker_threads";
 import { getPackageDir, isBunBinary } from "../config.ts";
 import { spawnProcess } from "../utils/child-process.ts";
-import { canonicalizeActionPath, isPathInside } from "../utils/paths.ts";
+import { canonicalizeActionPath, isPathInside, pathsIntersect } from "../utils/paths.ts";
 import { killProcessTree } from "../utils/shell.ts";
 import type { BashOperations } from "./tools/bash.ts";
 import {
@@ -157,11 +157,17 @@ class SandboxBroker {
 		workspaceRoots: readonly string[];
 		readOnlyRoots?: readonly string[];
 		writeRoots?: readonly string[];
+		protectedRoots?: readonly string[];
 		shellPath?: string;
 		signal?: AbortSignal;
 	}): Promise<SandboxBroker> {
 		if (input.signal?.aborted) throw new Error("aborted");
-		const allRoots = [...input.workspaceRoots, ...(input.readOnlyRoots ?? []), ...(input.writeRoots ?? [])];
+		const allRoots = [
+			...input.workspaceRoots,
+			...(input.readOnlyRoots ?? []),
+			...(input.writeRoots ?? []),
+			...(input.protectedRoots ?? []),
+		];
 		if (
 			!isAbsolute(input.cwd) ||
 			input.cwd.includes("\0") ||
@@ -177,6 +183,15 @@ class SandboxBroker {
 		const workspaceRoots = normalizeRoots(input.workspaceRoots);
 		const readOnlyRoots = normalizeRoots(input.readOnlyRoots ?? []);
 		const writeRoots = normalizeRoots(input.writeRoots ?? []);
+		const protectedRoots = normalizeRoots(input.protectedRoots ?? []);
+		for (const protectedRoot of protectedRoots) {
+			if ([...workspaceRoots, ...writeRoots].some((root) => pathsIntersect(root, protectedRoot))) {
+				throw new TypeError("Workspace sandbox write roots overlap a protected root");
+			}
+			if (readOnlyRoots.some((root) => isPathInside(root, protectedRoot))) {
+				throw new TypeError("Workspace sandbox read roots expose a protected root");
+			}
+		}
 		if (!workspaceRoots.some((root) => isPathInside(root, cwd))) {
 			throw new TypeError("Workspace sandbox cwd must be inside a workspace root");
 		}
@@ -225,6 +240,7 @@ class SandboxBroker {
 				workspaceRoots,
 				readOnlyRoots,
 				writeRoots,
+				protectedRoots,
 				...(shellPath ? { shellPath } : {}),
 			});
 			await controlTimeout(broker.readyPromise, "Sandbox initialization timed out");
@@ -471,6 +487,7 @@ export async function createWorkspaceSandbox(input: {
 	workspaceRoots: readonly string[];
 	readOnlyRoots?: readonly string[];
 	writeRoots?: readonly string[];
+	protectedRoots?: readonly string[];
 	shellPath?: string;
 	signal?: AbortSignal;
 }): Promise<WorkspaceSandbox> {

@@ -11,6 +11,7 @@ import {
 	RECONCILE_EXTRACT_SYSTEM_PROMPT,
 	runMemoryExtract,
 } from "../src/core/memory/memory-extract.ts";
+import { memoryProjectIdentity } from "../src/core/memory/memory-project.ts";
 import { openMemoryStore } from "../src/core/memory/memory-store.ts";
 import {
 	CommitFactsParamsSchema,
@@ -42,10 +43,7 @@ describe("memory extract tools + runner", () => {
 		return {
 			store,
 			agentDir,
-			cwd,
-			agentMode: "code",
-			cwdKey: "--cwd--",
-			mode: "code",
+			projectKey: memoryProjectIdentity(cwd).projectKey,
 			sourceTurn: "turn-1",
 			createdAt: "2026-08-21T12:00:00.000Z",
 		};
@@ -88,7 +86,7 @@ describe("memory extract tools + runner", () => {
 			);
 
 			expect(textOf(result)).toMatch(/2/);
-			const project = ctx.store.listActiveFacts("project", "--cwd--", "code");
+			const project = ctx.store.listActiveFacts("project", ctx.projectKey, null);
 			const global = ctx.store.listActiveFacts("global", null, null);
 			expect(project.map((f) => f.text)).toEqual(["Auth lives in app-server"]);
 			expect(project[0]?.topicFile).toBe("auth.md");
@@ -182,8 +180,8 @@ describe("memory extract tools + runner", () => {
 			ctx.store.insertFact({
 				id: "old",
 				scope: "project",
-				cwdKey: "--cwd--",
-				mode: "code",
+				cwdKey: ctx.projectKey,
+				mode: null,
 				topicFile: "auth.md",
 				text: "Old auth location",
 				status: "active",
@@ -195,8 +193,8 @@ describe("memory extract tools + runner", () => {
 			ctx.store.insertFact({
 				id: "newer",
 				scope: "project",
-				cwdKey: "--cwd--",
-				mode: "code",
+				cwdKey: ctx.projectKey,
+				mode: null,
 				topicFile: "auth.md",
 				text: "New auth location",
 				status: "active",
@@ -208,8 +206,8 @@ describe("memory extract tools + runner", () => {
 			ctx.store.insertFact({
 				id: "older-new",
 				scope: "project",
-				cwdKey: "--cwd--",
-				mode: "code",
+				cwdKey: ctx.projectKey,
+				mode: null,
 				topicFile: "auth.md",
 				text: "Stale candidate",
 				status: "active",
@@ -242,6 +240,34 @@ describe("memory extract tools + runner", () => {
 			expect(textOf(accepted).toLowerCase()).not.toMatch(/error|invalid|reject/);
 			expect(ctx.store.getFactById("old")?.status).toBe("superseded");
 			expect(ctx.store.getFactById("newer")?.status).toBe("active");
+			ctx.store.close();
+		});
+
+		it("rejects ids outside global plus the exact current project", async () => {
+			const root = tempRoot();
+			const ctx = toolContext(root);
+			ctx.store.insertFact({
+				id: "sibling",
+				scope: "project",
+				cwdKey: "b".repeat(64),
+				mode: null,
+				topicFile: "private.md",
+				text: "sibling marker",
+				status: "active",
+				createdAt: "2026-08-21T10:00:00.000Z",
+				sourceTurn: "turn-1",
+				embedding: null,
+				embeddingModel: null,
+			});
+			const result = await createReconcileFactsTool(ctx).execute(
+				"r-sibling",
+				{ deleteIds: ["sibling"] },
+				undefined,
+				undefined,
+				{} as never,
+			);
+			expect(textOf(result)).toMatch(/unknown|invalid|error/i);
+			expect(ctx.store.getFactById("sibling")?.status).toBe("active");
 			ctx.store.close();
 		});
 	});
@@ -343,7 +369,6 @@ describe("memory extract tools + runner", () => {
 				signal: AbortSignal.timeout(5_000),
 				sourceTurn: "turn-9",
 				createdAt: "2026-08-21T12:00:00.000Z",
-				cwdKey: "--cwd--",
 				writeProjection,
 				promptFn: async ({ tool }) => {
 					const agentTool = tool as AgentTool;
@@ -390,9 +415,9 @@ describe("memory extract tools + runner", () => {
 			expect(result.status).toBe("success");
 			expect(writeProjection).toHaveBeenCalledOnce();
 			const store = openMemoryStore(getMemorySqlitePath(agentDir));
-			expect(store.listActiveFacts("project", "--cwd--", "code").map((f) => f.text)).toEqual([
-				"Auth lives in app-server",
-			]);
+			expect(
+				store.listActiveFacts("project", memoryProjectIdentity(cwd).projectKey, null).map((f) => f.text),
+			).toEqual(["Auth lives in app-server"]);
 			store.close();
 		});
 
@@ -410,7 +435,6 @@ describe("memory extract tools + runner", () => {
 				messages: [{ role: "user", content: "remember", timestamp: 1 }],
 				trigger: "manual",
 				signal: AbortSignal.timeout(5_000),
-				cwdKey: "--cwd--",
 				sourceTurn: "turn-1",
 				createdAt: "2026-08-21T12:00:00.000Z",
 				writeProjection: vi.fn(),
@@ -474,7 +498,9 @@ describe("memory extract tools + runner", () => {
 			});
 			expect(ok.status).toBe("success");
 			let store = openMemoryStore(getMemorySqlitePath(agentDir));
-			expect(store.listActiveFacts("project", "--cwd--", "code").map((f) => f.text)).toEqual(["Retried fact"]);
+			expect(
+				store.listActiveFacts("project", memoryProjectIdentity(cwd).projectKey, null).map((f) => f.text),
+			).toEqual(["Retried fact"]);
 			store.close();
 
 			const root2 = tempRoot();
@@ -487,7 +513,6 @@ describe("memory extract tools + runner", () => {
 				messages: [{ role: "user", content: "remember", timestamp: 1 }],
 				trigger: "manual",
 				signal: AbortSignal.timeout(5_000),
-				cwdKey: "--cwd--",
 				writeProjection: vi.fn(),
 				promptFn: async ({ tool }) => {
 					const agentTool = tool as AgentTool;
@@ -551,6 +576,85 @@ describe("memory extract tools + runner", () => {
 			expect(runs[0]?.startedAt).toBeTruthy();
 			store.close();
 		});
+
+		it("bounds reconcile candidates and excludes sibling project facts", async () => {
+			const root = tempRoot();
+			const agentDir = join(root, "agent");
+			const cwd = join(root, "project");
+			const identity = memoryProjectIdentity(cwd);
+			const store = openMemoryStore(getMemorySqlitePath(agentDir));
+			store.resolveProject(identity);
+			for (let index = 0; index < 150; index++) {
+				store.insertFact({
+					id: `candidate-${index}`,
+					scope: "project",
+					cwdKey: identity.projectKey,
+					mode: null,
+					topicFile: "context.md",
+					text: `${String(index).padStart(3, "0")}-${"x".repeat(1_000)}`,
+					status: index < 100 ? "active" : "superseded",
+					createdAt: new Date(Date.UTC(2026, 0, 1, 0, 0, index)).toISOString(),
+					sourceTurn: `turn-${index}`,
+					embedding: new Float32Array([1, 2, 3]),
+					embeddingModel: "must-not-enter-prompt",
+				});
+			}
+			store.insertFact({
+				id: "sibling-candidate",
+				scope: "project",
+				cwdKey: "c".repeat(64),
+				mode: null,
+				topicFile: "private.md",
+				text: "SIBLING_MARKER_MUST_NOT_ENTER_PROMPT",
+				status: "active",
+				createdAt: "2026-12-31T00:00:00.000Z",
+				sourceTurn: "sibling",
+				embedding: null,
+				embeddingModel: null,
+			});
+			store.close();
+
+			let captured = "";
+			const result = await runMemoryExtract({
+				mode: "reconcile",
+				agentDir,
+				cwd,
+				agentMode: "code",
+				sessionId: "bounded",
+				messages: [],
+				trigger: "test",
+				signal: AbortSignal.timeout(5_000),
+				writeProjection: vi.fn(),
+				promptFn: async ({ tool, userPrompt }) => {
+					captured = userPrompt;
+					const executed = await (tool as AgentTool).execute("tc-bounded", {}, undefined, undefined);
+					return [
+						{
+							role: "assistant",
+							content: [{ type: "toolCall", id: "tc-bounded", name: "reconcile_facts", arguments: {} }],
+							api: "test",
+							provider: "test",
+							model: "test",
+							usage: {
+								input: 0,
+								output: 0,
+								cacheRead: 0,
+								cacheWrite: 0,
+								totalTokens: 0,
+								cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+							},
+							stopReason: "toolUse",
+							timestamp: Date.now(),
+						},
+						toolResultMessage("reconcile_facts", textOf(executed), false),
+					];
+				},
+			});
+			expect(result.status).toBe("success");
+			expect(captured.length).toBeLessThan(34_000);
+			expect(captured).not.toContain("SIBLING_MARKER_MUST_NOT_ENTER_PROMPT");
+			expect(captured).not.toContain("must-not-enter-prompt");
+		});
 	});
 
 	it("does not leave projection unwritten after a real disk commit path", async () => {
@@ -605,7 +709,7 @@ describe("memory extract tools + runner", () => {
 				];
 			},
 		});
-		const paths = getAutoMemoryPaths(agentDir, cwd, "code");
+		const paths = getAutoMemoryPaths(agentDir, cwd);
 		expect(existsSync(paths.project.indexPath)).toBe(true);
 		expect(readFileSync(paths.project.indexPath, "utf8")).toContain("auth.md");
 	});

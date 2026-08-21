@@ -1,4 +1,4 @@
-import { isPathInside, resolvePath } from "../../utils/paths.ts";
+import { canonicalizeActionPath, isPathInside, resolvePath } from "../../utils/paths.ts";
 import { getAutoMemoryRoot } from "../auto-memory.ts";
 
 /** True when `path` resolves under the agent's long-term memory directory. */
@@ -21,24 +21,15 @@ export function assertNotRestrictedFsWrite(absolutePath: string, restrictedRoots
 	}
 }
 
-/**
- * Block host/sandbox bash from using the memory directory as cwd or naming it in the command.
- * Does not parse shell grammar; catches the common absolute-path cases that bypass write/edit.
- */
-export function assertBashDoesNotTouchMemory(command: string, cwd: string, memoryRoot: string | undefined): void {
-	if (!memoryRoot) return;
-	const root = resolvePath(memoryRoot);
-	if (isPathInside(root, resolvePath(cwd))) {
-		throw new Error(
-			"Cannot run bash with cwd under the long-term memory directory; memory is read-only to the session.",
-		);
-	}
-	const normalizedRoot = root.replaceAll("\\", "/").replace(/\/+$/, "");
-	const normalizedCommand = command.replaceAll("\\", "/");
-	if (
-		normalizedCommand.includes(normalizedRoot) ||
-		(process.platform === "win32" && normalizedCommand.toLowerCase().includes(normalizedRoot.toLowerCase()))
-	) {
-		throw new Error("Cannot reference the long-term memory directory from bash; memory is read-only to the session.");
-	}
+export interface MemoryReadBoundary {
+	memoryRoot: string;
+	allowedRoots: readonly string[];
+}
+
+export function assertMemoryReadAllowed(path: string, boundary?: MemoryReadBoundary): void {
+	if (!boundary) return;
+	const target = canonicalizeActionPath(path, path);
+	if (!isPathInside(boundary.memoryRoot, target)) return;
+	if (boundary.allowedRoots.some((root) => isPathInside(root, target))) return;
+	throw new Error("Memory path is outside the current memory scope.");
 }

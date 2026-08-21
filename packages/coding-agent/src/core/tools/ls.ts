@@ -6,6 +6,7 @@ import { type Static, Type } from "typebox";
 import { keyHint } from "../../modes/interactive/components/keybinding-hints.ts";
 import type { Theme } from "../../modes/interactive/theme/theme.ts";
 import type { ToolDefinition, ToolRenderResultOptions } from "../extensions/types.ts";
+import { assertMemoryReadAllowed, type MemoryReadBoundary } from "../memory/memory-path-guard.ts";
 import { pathExists, resolveToCwd } from "./path-utils.ts";
 import { getTextOutput, renderToolPath, str } from "./render-utils.ts";
 import { wrapToolDefinition } from "./tool-definition-wrapper.ts";
@@ -47,6 +48,7 @@ const defaultLsOperations: LsOperations = {
 export interface LsToolOptions {
 	/** Custom operations for directory listing. Default: local filesystem */
 	operations?: LsOperations;
+	memoryReadBoundary?: MemoryReadBoundary;
 }
 
 function formatLsCall(args: { path?: string; limit?: number } | undefined, theme: Theme, cwd: string): string {
@@ -122,6 +124,7 @@ export function createLsToolDefinition(
 				(async () => {
 					try {
 						const dirPath = resolveToCwd(path || ".", cwd);
+						assertMemoryReadAllowed(dirPath, options?.memoryReadBoundary);
 						const effectiveLimit = limit ?? DEFAULT_LIMIT;
 
 						// Check if path exists.

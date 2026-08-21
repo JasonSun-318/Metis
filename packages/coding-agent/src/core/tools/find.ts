@@ -9,6 +9,7 @@ import type { Theme } from "../../modes/interactive/theme/theme.ts";
 import { waitForChildProcess } from "../../utils/child-process.ts";
 import { ensureTool } from "../../utils/tools-manager.ts";
 import type { ToolDefinition, ToolRenderResultOptions } from "../extensions/types.ts";
+import { assertMemoryReadAllowed, type MemoryReadBoundary } from "../memory/memory-path-guard.ts";
 import { pathExists, resolveToCwd } from "./path-utils.ts";
 import { getTextOutput, invalidArgText, shortenPath, str } from "./render-utils.ts";
 import type { ToolSubprocessExecutor, WrappedToolSubprocess } from "./subprocess.ts";
@@ -58,6 +59,7 @@ export interface FindToolOptions {
 	operations?: FindOperations;
 	/** Session permission/sandbox boundary for the built-in fd subprocess. */
 	subprocess?: ToolSubprocessExecutor;
+	memoryReadBoundary?: MemoryReadBoundary;
 }
 
 function formatFindCall(args: { pattern: string; path?: string; limit?: number } | undefined, theme: Theme): string {
@@ -153,6 +155,7 @@ export function createFindToolDefinition(
 				(async () => {
 					try {
 						const searchPath = resolveToCwd(searchDir || ".", cwd);
+						assertMemoryReadAllowed(searchPath, options?.memoryReadBoundary);
 						const effectiveLimit = limit ?? DEFAULT_LIMIT;
 						const ops = customOps ?? defaultFindOperations;
 

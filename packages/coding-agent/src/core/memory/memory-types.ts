@@ -44,3 +44,23 @@ export interface MemoryExtractRun {
 	status: MemoryExtractRunStatus;
 	reason: string | null;
 }
+
+export const MEMORY_HEALTH_OPERATIONS = [
+	"extract",
+	"embedding",
+	"rerank",
+	"backfill",
+	"projection",
+	"migration",
+] as const;
+export type MemoryHealthOperation = (typeof MEMORY_HEALTH_OPERATIONS)[number];
+
+export const MEMORY_HEALTH_STATUSES = ["running", "ok", "error"] as const;
+export type MemoryHealthStatus = (typeof MEMORY_HEALTH_STATUSES)[number];
+
+export interface MemoryHealth {
+	operation: MemoryHealthOperation;
+	status: MemoryHealthStatus;
+	updatedAt: string;
+	reason: string | null;
+}

@@ -2,11 +2,11 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { getAutoMemoryPaths, getMemorySqlitePath, loadAutoMemory } from "../src/core/auto-memory.ts";
+import { getAutoMemoryPaths, getAutoMemoryRoot, getMemorySqlitePath, loadAutoMemory } from "../src/core/auto-memory.ts";
+import { memoryProjectIdentity } from "../src/core/memory/memory-project.ts";
 import { renderProjection, writeProjection } from "../src/core/memory/memory-projection.ts";
 import { openMemoryStore } from "../src/core/memory/memory-store.ts";
 import type { MemoryFact } from "../src/core/memory/memory-types.ts";
-import { canonicalizePathForCreation, encodePathForStorage } from "../src/utils/paths.ts";
 
 const INDEX_ENTRY = /^- \[([^\]]+\.md)\]\(\1\) — (.{1,120})$/u;
 
@@ -92,10 +92,10 @@ describe("memory projection", () => {
 		const agentDir = join(root, "agent");
 		const cwd = join(root, "project");
 		const sqlitePath = getMemorySqlitePath(agentDir);
-		expect(sqlitePath).toBe(join(agentDir, "memory", "memory.sqlite"));
+		expect(sqlitePath).toBe(join(getAutoMemoryRoot(agentDir), "memory.sqlite"));
 
 		const store = openMemoryStore(sqlitePath);
-		const cwdKey = encodePathForStorage(canonicalizePathForCreation(cwd));
+		const projectKey = memoryProjectIdentity(cwd).projectKey;
 
 		store.insertFact(
 			fact({
@@ -119,8 +119,8 @@ describe("memory projection", () => {
 				fact({
 					id: `p${i}`,
 					scope: "project",
-					cwdKey,
-					mode: "chat",
+					cwdKey: projectKey,
+					mode: null,
 					topicFile: `topic-${String(i).padStart(3, "0")}.md`,
 					text: `Project fact ${i}`,
 					createdAt: new Date(Date.UTC(2026, 0, 1, 0, 0, i)).toISOString(),
@@ -128,10 +128,10 @@ describe("memory projection", () => {
 			);
 		}
 
-		writeProjection(agentDir, cwd, "chat", store);
+		writeProjection(agentDir, projectKey, store);
 		store.close();
 
-		const paths = getAutoMemoryPaths(agentDir, cwd, "chat");
+		const paths = getAutoMemoryPaths(agentDir, cwd);
 		const globalIndex = readFileSync(paths.global.indexPath, "utf8");
 		const globalLines = globalIndex.split(/\r?\n/).filter((line) => INDEX_ENTRY.test(line));
 		expect(globalLines).toHaveLength(1);
@@ -147,7 +147,7 @@ describe("memory projection", () => {
 		expect(readFileSync(join(paths.project.directory, "topic-204.md"), "utf8")).toContain("Project fact 204");
 		expect(readFileSync(join(paths.project.directory, "topic-000.md"), "utf8")).toContain("Project fact 0");
 
-		const loaded = loadAutoMemory(agentDir, cwd, "chat");
+		const loaded = loadAutoMemory(agentDir, cwd);
 		expect(loaded.project.truncated).toBe(true);
 		const loadedLines = loaded.project.content.split(/\r?\n/).filter((line) => INDEX_ENTRY.test(line));
 		expect(loadedLines.length).toBeLessThanOrEqual(200);

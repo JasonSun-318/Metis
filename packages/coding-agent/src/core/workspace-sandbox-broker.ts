@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { getDefaultWritePaths, SandboxManager, type SandboxRuntimeConfig } from "@anthropic-ai/sandbox-runtime";
 import { getBundledToolsDir, getPackageDir, isBunBinary } from "../config.ts";
 import { spawnProcess, waitForChildProcess } from "../utils/child-process.ts";
-import { canonicalizeActionPath, isPathInside } from "../utils/paths.ts";
+import { canonicalizeActionPath, isPathInside, pathsIntersect } from "../utils/paths.ts";
 import { getShellConfig, killProcessTree } from "../utils/shell.ts";
 import { parseSandboxRequest, type SandboxErrorCode, type SandboxResponse } from "./workspace-sandbox-protocol.ts";
 
@@ -124,13 +124,14 @@ function runtimeConfig(
 	readOnlyRoots: readonly string[],
 	writeRoots: readonly string[],
 	temporaryDir: string,
+	runtimeReads: readonly string[],
 	shellPath?: string,
 ): SandboxRuntimeConfig {
 	const callerHome = homedir();
 	const denyRead = deniedReadRoots(callerHome);
 	const allowedWrite = [...new Set([...workspaceRoots, ...writeRoots, temporaryDir])];
 	const allowedRead = [
-		...new Set([...allowedWrite, ...readOnlyRoots, ...runtimeReadPaths(), ...(shellPath ? [shellPath] : [])]),
+		...new Set([...allowedWrite, ...readOnlyRoots, ...runtimeReads, ...(shellPath ? [shellPath] : [])]),
 	];
 	const denyWrite = getDefaultWritePaths().filter(
 		(path) => !path.startsWith("/dev/") && !allowedWrite.some((root) => isPathInside(root, path)),
@@ -297,9 +298,12 @@ export async function runWorkspaceSandboxBroker(): Promise<void> {
 				try {
 					if (
 						!isAbsolute(request.cwd) ||
-						[...request.workspaceRoots, ...request.readOnlyRoots, ...request.writeRoots].some(
-							(root) => !isAbsolute(root),
-						)
+						[
+							...request.workspaceRoots,
+							...request.readOnlyRoots,
+							...request.writeRoots,
+							...request.protectedRoots,
+						].some((root) => !isAbsolute(root))
 					) {
 						throw new Error("Sandbox paths must be absolute");
 					}
@@ -308,6 +312,7 @@ export async function runWorkspaceSandboxBroker(): Promise<void> {
 					workspaceRoots = canonicalRoots(request.workspaceRoots);
 					const readOnlyRoots = canonicalRoots(request.readOnlyRoots);
 					const writeRoots = canonicalRoots(request.writeRoots);
+					const protectedRoots = canonicalRoots(request.protectedRoots);
 					const cwd = canonicalizeActionPath(request.cwd, request.cwd);
 					if (!workspaceRoots.some((root) => isPathInside(root, cwd))) {
 						throw new Error("Sandbox cwd is outside the workspace");
@@ -317,12 +322,30 @@ export async function runWorkspaceSandboxBroker(): Promise<void> {
 						shellPath = canonicalizeActionPath(request.shellPath, request.shellPath);
 						if (!statSync(shellPath).isFile()) throw new Error("Sandbox shell path must be a file");
 					}
+					for (const protectedRoot of protectedRoots) {
+						if ([...workspaceRoots, ...writeRoots].some((root) => pathsIntersect(root, protectedRoot))) {
+							throw new Error("Sandbox write roots overlap a protected root");
+						}
+						if (readOnlyRoots.some((root) => isPathInside(root, protectedRoot))) {
+							throw new Error("Sandbox read roots expose a protected root");
+						}
+					}
+					const runtimeReads = runtimeReadPaths();
+					for (const protectedRoot of protectedRoots) {
+						if (
+							[...runtimeReads, ...(shellPath ? [shellPath] : [])].some((root) =>
+								pathsIntersect(root, protectedRoot),
+							)
+						) {
+							throw new Error("Sandbox runtime paths overlap a protected root");
+						}
+					}
 					const temporaryDir = process.env.METIS_SANDBOX_TEMP_DIR;
 					if (!temporaryDir) throw new Error("Sandbox temporary directory is missing");
 					mkdirSync(temporaryDir, { recursive: true });
 					process.env.CLAUDE_CODE_TMPDIR = temporaryDir;
 					await SandboxManager.initialize(
-						runtimeConfig(workspaceRoots, readOnlyRoots, writeRoots, temporaryDir, shellPath),
+						runtimeConfig(workspaceRoots, readOnlyRoots, writeRoots, temporaryDir, runtimeReads, shellPath),
 					);
 					send({ type: "ready" });
 				} catch (error) {

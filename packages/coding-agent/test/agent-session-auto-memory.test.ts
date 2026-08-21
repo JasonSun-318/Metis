@@ -1,13 +1,17 @@
+import { randomUUID } from "node:crypto";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { Agent } from "@metis/agent-core";
 import { createAssistantMessageEventStream, fauxAssistantMessage } from "@metis/ai";
 import { getModel } from "@metis/ai/compat";
 import { afterEach, describe, expect, it } from "vitest";
 import { AgentSession } from "../src/core/agent-session.ts";
 import { AuthStorage } from "../src/core/auth-storage.ts";
-import { ensureModeScopedMemoryLayout, getAutoMemoryPaths } from "../src/core/auto-memory.ts";
+import { ensureModeScopedMemoryLayout, getAutoMemoryPaths, getMemorySqlitePath } from "../src/core/auto-memory.ts";
+import { memoryProjectIdentity } from "../src/core/memory/memory-project.ts";
+import { writeProjection } from "../src/core/memory/memory-projection.ts";
+import { openMemoryStore } from "../src/core/memory/memory-store.ts";
 import { ModelRegistry } from "../src/core/model-registry.ts";
 import { createAgentSession } from "../src/core/sdk.ts";
 import { SessionManager } from "../src/core/session-manager.ts";
@@ -20,6 +24,32 @@ describe("AgentSession auto memory", () => {
 		const dir = mkdtempSync(join(tmpdir(), "metis-session-memory-"));
 		tempDirs.push(dir);
 		return dir;
+	};
+	const seedMemory = async (agentDir: string, cwd: string, globalText?: string, projectText?: string) => {
+		await ensureModeScopedMemoryLayout(agentDir);
+		const identity = memoryProjectIdentity(cwd);
+		const store = openMemoryStore(getMemorySqlitePath(agentDir));
+		store.resolveProject(identity);
+		for (const [scope, text] of [
+			["global", globalText],
+			["project", projectText],
+		] as const) {
+			if (!text) continue;
+			store.insertFact({
+				id: randomUUID(),
+				scope,
+				cwdKey: scope === "global" ? null : identity.projectKey,
+				mode: null,
+				topicFile: scope === "global" ? "preferences.md" : "context.md",
+				text,
+				status: "active",
+				createdAt: new Date().toISOString(),
+				sourceTurn: "test",
+				embedding: null,
+				embeddingModel: null,
+			});
+		}
+		store.close();
 	};
 
 	afterEach(() => {
@@ -37,12 +67,8 @@ describe("AgentSession auto memory", () => {
 		const agentDir = join(root, "agent");
 		const cwd = join(root, "project");
 		mkdirSync(cwd, { recursive: true });
-		await ensureModeScopedMemoryLayout(agentDir);
-		const paths = getAutoMemoryPaths(agentDir, cwd, "code");
-		mkdirSync(dirname(paths.global.indexPath), { recursive: true });
-		mkdirSync(dirname(paths.project.indexPath), { recursive: true });
-		writeFileSync(paths.global.indexPath, "global-memory-v1");
-		writeFileSync(paths.project.indexPath, "project-memory-v1");
+		await seedMemory(agentDir, cwd, "global-memory-v1", "project-memory-v1");
+		const paths = getAutoMemoryPaths(agentDir, cwd);
 
 		const { session } = await createAgentSession({
 			agentDir,
@@ -56,7 +82,7 @@ describe("AgentSession auto memory", () => {
 
 			writeFileSync(paths.project.indexPath, "project-memory-v2");
 			expect(session.systemPrompt).not.toContain("project-memory-v2");
-			await session.reload();
+			session.refreshSystemPrompt();
 			expect(session.systemPrompt).toContain("project-memory-v2");
 			expect(session.systemPrompt).not.toContain("project-memory-v1");
 		} finally {
@@ -64,22 +90,57 @@ describe("AgentSession auto memory", () => {
 		}
 	});
 
-	it("shares global memory but isolates project memory by exact cwd and mode", async () => {
+	it("refreshes Index memory before provider context on each new user turn", async () => {
+		const root = makeTemp();
+		const agentDir = join(root, "agent");
+		const cwd = join(root, "project");
+		mkdirSync(cwd, { recursive: true });
+		await seedMemory(agentDir, cwd, "global-before-turn", "project-before-turn");
+		const identity = memoryProjectIdentity(cwd);
+		const store = openMemoryStore(getMemorySqlitePath(agentDir));
+		writeProjection(agentDir, identity.projectKey, store);
+		store.close();
+
+		const model = getModel("anthropic", "claude-sonnet-4-5")!;
+		let providerPrompt = "";
+		const agent = new Agent({
+			initialState: { model, thinkingLevel: "off", systemPrompt: "Test", tools: [] },
+			streamFn: (_requestModel, context) => {
+				providerPrompt = context.systemPrompt ?? "";
+				const stream = createAssistantMessageEventStream();
+				queueMicrotask(() => stream.push({ type: "done", reason: "stop", message: fauxAssistantMessage("ok") }));
+				return stream;
+			},
+		});
+		const authStorage = AuthStorage.inMemory();
+		authStorage.setRuntimeApiKey("anthropic", "test-key");
+		const session = new AgentSession({
+			agent,
+			sessionManager: SessionManager.inMemory(cwd),
+			settingsManager: SettingsManager.inMemory({ autoMemoryEnabled: true, memoryEngine: "index" }),
+			cwd,
+			agentDir,
+			modelRegistry: ModelRegistry.inMemory(authStorage),
+			resourceLoader: createTestResourceLoader(),
+		});
+		try {
+			const paths = getAutoMemoryPaths(agentDir, cwd);
+			writeFileSync(paths.project.indexPath, "project-visible-on-next-turn");
+			await session.prompt("hello");
+			expect(providerPrompt).toContain("project-visible-on-next-turn");
+		} finally {
+			session.dispose();
+		}
+	});
+
+	it("shares exact-cwd project memory across Chat and Code and isolates sibling cwd", async () => {
 		const root = makeTemp();
 		const agentDir = join(root, "agent");
 		const firstCwd = join(root, "first");
 		const secondCwd = join(root, "second");
 		mkdirSync(firstCwd, { recursive: true });
 		mkdirSync(secondCwd, { recursive: true });
-		await ensureModeScopedMemoryLayout(agentDir);
-		const firstPaths = getAutoMemoryPaths(agentDir, firstCwd, "code");
-		const firstChatPaths = getAutoMemoryPaths(agentDir, firstCwd, "chat");
-		mkdirSync(dirname(firstPaths.global.indexPath), { recursive: true });
-		mkdirSync(dirname(firstPaths.project.indexPath), { recursive: true });
-		mkdirSync(dirname(firstChatPaths.project.indexPath), { recursive: true });
-		writeFileSync(firstPaths.global.indexPath, "shared-global-memory");
-		writeFileSync(firstPaths.project.indexPath, "first-code-project-memory");
-		writeFileSync(firstChatPaths.project.indexPath, "first-chat-project-memory");
+		await seedMemory(agentDir, firstCwd, "shared-global-memory", "shared-project-memory");
 
 		const model = getModel("anthropic", "claude-sonnet-4-5")!;
 		const first = await createAgentSession({ agentDir, cwd: firstCwd, model });
@@ -89,11 +150,9 @@ describe("AgentSession auto memory", () => {
 			expect(first.session.systemPrompt).toContain("shared-global-memory");
 			expect(firstChat.session.systemPrompt).toContain("shared-global-memory");
 			expect(second.session.systemPrompt).toContain("shared-global-memory");
-			expect(first.session.systemPrompt).toContain("first-code-project-memory");
-			expect(first.session.systemPrompt).not.toContain("first-chat-project-memory");
-			expect(firstChat.session.systemPrompt).toContain("first-chat-project-memory");
-			expect(firstChat.session.systemPrompt).not.toContain("first-code-project-memory");
-			expect(second.session.systemPrompt).not.toContain("first-code-project-memory");
+			expect(first.session.systemPrompt).toContain("shared-project-memory");
+			expect(firstChat.session.systemPrompt).toContain("shared-project-memory");
+			expect(second.session.systemPrompt).not.toContain("shared-project-memory");
 		} finally {
 			first.session.dispose();
 			firstChat.session.dispose();
@@ -106,10 +165,7 @@ describe("AgentSession auto memory", () => {
 		const agentDir = join(root, "agent");
 		const cwd = join(root, "project");
 		mkdirSync(cwd, { recursive: true });
-		await ensureModeScopedMemoryLayout(agentDir);
-		const paths = getAutoMemoryPaths(agentDir, cwd, "code");
-		mkdirSync(dirname(paths.global.indexPath), { recursive: true });
-		writeFileSync(paths.global.indexPath, "toggle-memory-marker");
+		await seedMemory(agentDir, cwd, "toggle-memory-marker");
 		const settingsManager = SettingsManager.inMemory();
 		const { session } = await createAgentSession({
 			agentDir,
@@ -136,12 +192,7 @@ describe("AgentSession auto memory", () => {
 		const agentDir = join(root, "agent");
 		const cwd = join(root, "project");
 		mkdirSync(cwd, { recursive: true });
-		await ensureModeScopedMemoryLayout(agentDir);
-		const paths = getAutoMemoryPaths(agentDir, cwd, "code");
-		mkdirSync(dirname(paths.global.indexPath), { recursive: true });
-		mkdirSync(dirname(paths.project.indexPath), { recursive: true });
-		writeFileSync(paths.global.indexPath, "index-engine-catalog-marker");
-		writeFileSync(paths.project.indexPath, "project-catalog-marker");
+		await seedMemory(agentDir, cwd, "index-engine-catalog-marker", "project-catalog-marker");
 
 		const settingsManager = SettingsManager.inMemory({
 			autoMemoryEnabled: true,
@@ -177,12 +228,7 @@ describe("AgentSession auto memory", () => {
 		const agentDir = join(root, "agent");
 		const cwd = join(root, "project");
 		mkdirSync(cwd, { recursive: true });
-		await ensureModeScopedMemoryLayout(agentDir);
-		const paths = getAutoMemoryPaths(agentDir, cwd, "code");
-		mkdirSync(dirname(paths.global.indexPath), { recursive: true });
-		mkdirSync(dirname(paths.project.indexPath), { recursive: true });
-		writeFileSync(paths.global.indexPath, "index-engine-catalog-marker");
-		writeFileSync(paths.project.indexPath, "project-catalog-marker");
+		await seedMemory(agentDir, cwd, "index-engine-catalog-marker", "project-catalog-marker");
 
 		const settingsManager = SettingsManager.inMemory({
 			autoMemoryEnabled: true,

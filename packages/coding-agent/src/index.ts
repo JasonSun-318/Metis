@@ -253,6 +253,11 @@ export {
 	mcpServerFingerprint,
 	resolveMcpServerSettings,
 } from "./core/mcp/index.ts";
+export {
+	assertMemoryReadAllowed,
+	type MemoryReadBoundary,
+} from "./core/memory/memory-path-guard.ts";
+export { type MemoryProjectIdentity, memoryProjectIdentity } from "./core/memory/memory-project.ts";
 export { convertToLlm } from "./core/messages.ts";
 export type {
 	ModeProjectSessionTarget,
