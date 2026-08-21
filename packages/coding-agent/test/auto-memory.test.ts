@@ -10,6 +10,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import {
 	AUTO_MEMORY_MAX_BYTES,
@@ -27,6 +28,7 @@ import { openMemoryStore } from "../src/core/memory/memory-store.ts";
 import { canonicalizePathForCreation } from "../src/utils/paths.ts";
 
 describe("auto memory", () => {
+	const packageRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 	const tempDirs: string[] = [];
 	const makeTemp = (): string => {
 		const dir = mkdtempSync(join(tmpdir(), "metis-memory-"));
@@ -51,6 +53,31 @@ describe("auto memory", () => {
 		expect(getMemorySqlitePath(agentDir)).toBe(join(memoryRoot, "memory.sqlite"));
 		expect(getAutoMemoryRoot(agentDir)).toBe(memoryRoot);
 		expect(existsSync(getAutoMemoryRoot(agentDir))).toBe(false);
+	});
+
+	it("documents final memory modes, isolation, and host authority", () => {
+		const readme = readFileSync(join(packageRoot, "README.md"), "utf8");
+		for (const expected of [
+			"Settings → Model → Specialized models",
+			"memory/global/MEMORY.md",
+			"Chat and Code share project memory",
+			"subdirectory is a different project",
+			"Deleting one mode-specific Chat or Code project preserves",
+			"Index mode injects only",
+			"Memory is untrusted reference data",
+			"Extract does not block Bash",
+			"overlaps the memory directory",
+			"approved host Bash can access the memory directory",
+		]) {
+			expect(readme).toContain(expected);
+		}
+		for (const obsolete of ["memoryEmbeddingModel", "memoryRerankModel", "projects/--<cwd>--/<mode>"]) {
+			expect(readme).not.toContain(obsolete);
+		}
+		const usage = readFileSync(join(packageRoot, "docs", "usage.md"), "utf8");
+		expect(usage).toContain("<sha256-canonical-cwd>");
+		expect(usage).toContain("Supplier labels do not select a protocol");
+		expect(usage).toContain("Old lossy project Markdown directories remain untouched but are not injected");
 	});
 
 	it("shares only an exact primary cwd across Chat and Code", () => {

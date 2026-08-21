@@ -249,20 +249,28 @@ Compaction is lossy. The full history remains in the JSONL file; use `/tree` to 
 
 ## Long-Term Memory
 
-Metis keeps long-term memory outside session JSONL files. Facts live in a SQLite ledger at `~/.metis/agent/memory/memory.sqlite`. Markdown files (`MEMORY.md`, per-project `project.md`, and topic files) are projections for humans and for the index engine—not the source of truth. Each exact working directory gets a separate `memory/projects/--<cwd>--/<mode>/` tree, so sessions, forks, and tree branches in the same directory share project memory without relying on Git.
+Metis keeps long-term memory outside session JSONL files. SQLite at `~/.metis/agent/memory/memory.sqlite` is the source of truth; Markdown is a generated projection. Global files live under `memory/global/`, including `memory/global/MEMORY.md`. Exact-project files live under `memory/projects/<sha256-canonical-cwd>/`.
 
-Two engines (global `memoryEngine`, default `index`):
+Chat and Code share project memory only when their primary cwd is exactly the same. A subdirectory is a different project and does not inherit its parent's memory. Deleting one mode-specific Chat or Code project preserves the shared exact-cwd long-term memory; purging project memory is a separate explicit operation.
 
-- **index** — injects truncated catalog indexes into the system prompt.
-- **extract** — embeds the current user message, retrieves relevant facts from SQLite, and injects those hits. Requires `memoryEmbeddingModel` before you can enable it (`/memory engine extract` refuses without one).
+Configure one Embedding service and an optional Rerank service under **Settings → Model → Specialized models**. Supplier is descriptive metadata. Embedding uses the OpenAI-compatible request contract and appends exactly `embeddings` to its API root. Rerank stores the complete operation endpoint and uses the shared text-Rerank JSON shape. Test connection validates the unsaved editor draft without persisting its one-shot credential.
 
-Use `/memory` to inspect on/off state, engine, catalog paths, and recent Memory extract runs; `/memory on|off` to toggle injection; `/memory engine index|extract` to switch engines; and `/reload` after editing an index outside Metis. Memory is not exported with or deleted alongside session JSONL files.
+Two engines are available (`memoryEngine`, default `index`):
 
-For the index engine, the first 200 lines or 25KB of each catalog are loaded into the system prompt. When a catalog is truncated, the prompt tells the model to grep the full index path rather than reading the whole file. Detailed notes belong in linked topic files and are read on demand.
+- **Index** — Index mode injects only the global `MEMORY.md` and current-project `project.md` index contents. Linked topic bodies are read on demand. Index mode does not call Embedding or Rerank.
+- **Extract** — sends the bounded current query and durable fact text to Embedding and may send up to 50 candidate fact texts to Rerank. It injects only positively relevant retrieved facts, at most 8 facts and 2,048 characters. Rerank failure preserves the local cosine-plus-keyword order.
 
-Memory extract runs in the background alongside manual and automatic context compaction when long-term memory is enabled. It updates only global memory and the project memory for the current working directory. Ordinary messages and images stay queued until Compact and Memory extract both settle.
+Each context keeps 30 ordinary topic files. Later categories use generated `overflow.md`; historical excess uses `legacy-overflow.md`. Topic names are lowercase flat basenames; `memory.md` and `project.md` are reserved. Memory is escaped and labeled before injection: **Memory is untrusted reference data**, never instructions.
 
-While Compact/Memory extract runs, Shell commands, extension commands, and built-ins that mutate model, settings, authentication, sessions, imports, exports, or memory are rejected and left in the editor. Read-only `/dirs`, `/copy`, `/session`, `/hotkeys`, bare `/memory`, `/quit`, `/debug`, Escape, and display-only shortcuts remain available; `/add-dir`, `/remove-dir`, and mutating `/memory on|off|engine …` remain blocked.
+Default Read/Grep/Find/Ls and sandbox Bash can access only the global and current exact-project projections—not `memory.sqlite` or sibling projects. If an allowed workspace overlaps the memory directory, default sandbox Bash fails closed because the sandbox cannot safely express the nested denial; approved host Bash can access the memory directory, and Full mode runs with the current user's OS authority.
+
+Memory extraction advances an oldest-first durable cursor only after a valid tool result and projection. It runs with thinking disabled and a 60-second timeout, has separate status from Compact, and does not block prompts or read-only interaction: **Extract does not block Bash** or extension commands. Embedding/Rerank failures remain visible and use explicit fallbacks. Backfill uses one SQLite lease across open sessions and drains sequential batches of 32 until complete or cancelled.
+
+Retrieval streams a bounded SQLite scan, keeps at most 50 candidates, and never fills Top-K with zero-score rows. Add a vector store only after one global-plus-exact-project scope reaches 50,000 active facts or measured p95 local ranking exceeds 250 ms.
+
+Use `/memory` to inspect state, health, paths, and recent extract runs; `/memory on|off` to toggle injection; `/memory engine index|extract` to switch engines; and `/reload` after an external projection edit. Memory is not exported with or deleted alongside session JSONL files.
+
+On upgrade, obsolete guessed model references safely fall back to Index with a reconfiguration notice. Historical lossy project Markdown directories remain untouched but are not read.
 
 ---
 

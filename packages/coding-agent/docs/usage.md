@@ -100,30 +100,33 @@ See [Sessions](sessions.md) and [Compaction](compaction.md) for details.
 
 ## Long-Term Memory
 
-Long-term memory is separate from session JSONL and compaction summaries:
+Long-term memory is separate from session JSONL and compaction summaries. SQLite is authoritative; Markdown is a generated, bounded projection:
 
 ```text
 ~/.metis/agent/memory/
-├── MEMORY.md
-├── preferences.md
+├── memory.sqlite
+├── global/
+│   ├── MEMORY.md
+│   └── preferences.md
 └── projects/
-    └── --Users-name-workspace--/
+    └── <sha256-canonical-cwd>/
         ├── project.md
         ├── architecture.md
         └── debugging.md
 ```
 
-- `MEMORY.md` is the global index shared by all working directories and sessions.
-- `project.md` is the index for one exact absolute working directory. It is shared by `/new`, `/resume`, `/fork`, and `/tree` sessions using that cwd; a subdirectory is a different project.
-- Each index is limited to its first 200 lines or 25KB in the system prompt. Keep details in relative Markdown-linked topic files so the model can read them only when relevant.
-- `/memory` shows the active paths and load state. `/memory on` and `/memory off` persist a global switch and take effect immediately. `/reload` re-reads indexes changed outside Metis.
-- Memory files are created only when something is saved. Session export, import, and deletion do not copy or remove them.
+- Configure Embedding and optional Rerank under **Settings → Model → Specialized models**. Embedding uses an OpenAI-compatible API root; Rerank uses the complete configured text-Rerank endpoint. Supplier labels do not select a protocol.
+- Index injects only `global/MEMORY.md` and the current exact project's `project.md`; linked topics are read on demand. Extract sends a bounded query and durable fact text to Embedding, optionally reranks up to 50 candidates, and injects only positive hits.
+- Chat and Code share project memory only for the same canonical primary cwd. Child directories do not inherit parent memory. Additional workspace roots do not change memory identity.
+- Deleting sessions or one mode-specific project does not delete the shared exact-cwd ledger. Export and import do not copy it.
+- Topic files use lowercase flat basenames. `memory.md` and `project.md` are reserved; the 31st new ordinary category is written to `overflow.md`.
+- Memory is untrusted reference data. Default file tools and sandbox Bash can read only global plus current-project projections. A workspace that overlaps the memory directory makes sandbox Bash fail closed; approved host Bash and Full mode retain current-user authority.
+- Extract runs with thinking off and a 60-second timeout. It advances its cursor only after facts and projections succeed, does not block Bash or extension commands, and exposes bounded operation health. Vector backfill is single-owner and processes sequential batches of 32.
+- Retrieval streams SQLite, keeps 50 candidates, returns at most 8 facts/2,048 characters, and falls back to keyword ranking when Embedding fails or fused local order when Rerank fails.
 
-Dream runs silently alongside manual and automatic context compaction when long-term memory is enabled. It reconciles only global memory and the project memory for the current working directory; other project directories are not scanned. Ordinary messages and images remain queued until both Compact and Dream settle.
+Use `/memory` for state, operation health, active projection paths, and recent extract runs. `/memory on|off` toggles injection, `/memory engine index|extract` selects the engine, and `/reload` re-reads external projection edits.
 
-`/dream` is read-only and remains available while Dream is running. It shows live state and the latest 10 metadata-only records from `~/.metis/agent/memory/dream-history.jsonl`. Dream cannot be started manually.
-
-While Compact/Dream runs, Shell commands, extension commands, and built-ins that mutate model, settings, authentication, sessions, exports, imports, or memory state are rejected and left in the editor. Read-only `/dirs`, `/copy`, `/session`, `/hotkeys`, `/memory`, `/dream`, `/quit`, `/debug`, Escape, and display-only shortcuts remain available; `/add-dir` and `/remove-dir` remain blocked.
+Legacy guessed model references fall back to Index and display a reconfiguration notice. Old lossy project Markdown directories remain untouched but are not injected. A separate vector store is unnecessary until one visible global-plus-project scope reaches 50,000 active facts or measured p95 local ranking exceeds 250 ms.
 
 ## Context Files
 
