@@ -2,7 +2,14 @@ import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { validateResponseFor } from "@metis/app-protocol";
-import { AuthStorage, MEMORY_EMBEDDING_CREDENTIAL_ID, SettingsManager } from "@metis/coding-agent";
+import {
+	AuthStorage,
+	getMemorySqlitePath,
+	MEMORY_EMBEDDING_CREDENTIAL_ID,
+	MEMORY_RERANK_CREDENTIAL_ID,
+	openMemoryStore,
+	SettingsManager,
+} from "@metis/coding-agent";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { MemorySettingsService } from "../src/memory-settings.ts";
 
@@ -34,6 +41,46 @@ describe("MemorySettingsService", () => {
 			rerankConfigured: false,
 			lastError: null,
 			memoryMigrationNotice: null,
+		});
+	});
+
+	it("requires dedicated API keys and exposes the latest bounded health error", async () => {
+		const manager = SettingsManager.create(agentDir, agentDir);
+		manager.setEmbeddingSettings({
+			name: "Embedding",
+			provider: "Qwen",
+			baseUrl: "https://example.test/v1",
+			api: "openai-compatible",
+			modelId: "embedding-model",
+		});
+		manager.setRerankSettings({
+			name: "Rerank",
+			provider: "Cohere",
+			endpointUrl: "https://example.test/rerank",
+			modelId: "rerank-model",
+		});
+		await manager.flushOrThrow();
+		const auth = AuthStorage.create(join(agentDir, "auth.json"));
+		auth.set(MEMORY_EMBEDDING_CREDENTIAL_ID, {
+			type: "oauth",
+			access: "oauth-token",
+			expires: Date.now() + 60_000,
+			refresh: "refresh-token",
+		});
+		auth.set(MEMORY_RERANK_CREDENTIAL_ID, { type: "api_key", key: "rerank-secret" });
+		const store = openMemoryStore(getMemorySqlitePath(agentDir));
+		store.recordHealth({
+			operation: "embedding",
+			status: "error",
+			updatedAt: new Date().toISOString(),
+			reason: "Embedding request failed",
+		});
+		store.close();
+
+		expect(service().view()).toMatchObject({
+			embeddingConfigured: false,
+			rerankConfigured: true,
+			lastError: "Embedding request failed",
 		});
 	});
 

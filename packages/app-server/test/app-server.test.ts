@@ -29,9 +29,12 @@ import type {
 } from "@metis/app-protocol";
 import { RPC_ERROR_CODES } from "@metis/app-protocol";
 import {
+	ensureAutoMemoryLayout,
 	getDefaultSessionDir,
 	getManagedWorkspaceDir,
+	getMemorySqlitePath,
 	getSessionDisplayMetadataPath,
+	openMemoryStore,
 	ProjectTrustStore,
 	SessionManager,
 	SettingsManager,
@@ -509,6 +512,25 @@ describe("AppServer", () => {
 		await createTestServer({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
 
 		expect(existsSync(stale)).toBe(false);
+	});
+
+	it("recovers interrupted memory health before serving sessions", async () => {
+		await ensureAutoMemoryLayout(agentDir);
+		let store = openMemoryStore(getMemorySqlitePath(agentDir));
+		store.recordHealth({
+			operation: "backfill",
+			status: "running",
+			updatedAt: "2026-08-20T00:00:00.000Z",
+			reason: null,
+		});
+		store.close();
+
+		await createTestServer({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
+		store = openMemoryStore(getMemorySqlitePath(agentDir));
+		expect(store.listHealth()).toContainEqual(
+			expect.objectContaining({ operation: "backfill", status: "error", reason: "Interrupted before completion" }),
+		);
+		store.close();
 	});
 
 	it("restores persisted session names and caches unchanged journal metadata", async () => {

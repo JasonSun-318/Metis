@@ -46,13 +46,6 @@ export interface MemoryFact {
 	embeddingModel: string | null;
 }
 
-export interface MemorySearchOptions {
-	scope: MemoryScope;
-	cwdKey: string | null;
-	mode: string | null;
-	limit: number;
-}
-
 export interface MemorySearchHit {
 	id: string;
 	text: string;
@@ -91,4 +84,30 @@ export interface MemoryHealth {
 	status: MemoryHealthStatus;
 	updatedAt: string;
 	reason: string | null;
+}
+
+export function memoryHealth(
+	operation: MemoryHealthOperation,
+	status: MemoryHealthStatus,
+	now = new Date().toISOString(),
+): MemoryHealth {
+	return { operation, status, updatedAt: now, reason: null };
+}
+
+export function memoryHealthError(
+	operation: MemoryHealthOperation,
+	error: unknown,
+	secrets: readonly (string | undefined)[],
+	now = new Date().toISOString(),
+): MemoryHealth {
+	let reason = error instanceof Error ? error.message : String(error);
+	for (const secret of secrets) {
+		if (secret) reason = reason.split(secret).join("[redacted]");
+	}
+	reason = reason
+		.replace(/Bearer\s+\S+/giu, "Bearer [redacted]")
+		.replace(/\s+/gu, " ")
+		.trim()
+		.slice(0, 500);
+	return { operation, status: "error", updatedAt: now, reason: reason || "Memory operation failed" };
 }

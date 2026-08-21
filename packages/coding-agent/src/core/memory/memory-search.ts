@@ -1,8 +1,9 @@
+import { randomUUID } from "node:crypto";
 import { embeddingConfigKey, embedText, embedTexts, MEMORY_EMBED_DEFAULT_TIMEOUT_MS } from "./memory-embedder.ts";
 import { MEMORY_RERANK_DEFAULT_TIMEOUT_MS, rerankDocuments } from "./memory-rerank.ts";
 import type { EmbeddingSettings, RerankSettings } from "./memory-service-settings.ts";
 import type { MemoryStore } from "./memory-store.ts";
-import type { MemoryFact, MemoryScope, MemorySearchHit } from "./memory-types.ts";
+import { type MemoryScope, type MemorySearchHit, memoryHealth, memoryHealthError } from "./memory-types.ts";
 
 export const MEMORY_RETRIEVE_TIMEOUT_MS = 2500;
 export const MEMORY_RERANK_TIMEOUT_MS = MEMORY_RERANK_DEFAULT_TIMEOUT_MS;
@@ -11,6 +12,7 @@ export const MEMORY_RETRIEVE_TOP_K = 8;
 export const MEMORY_RETRIEVE_MAX_CHARS = 2048;
 export const MEMORY_COSINE_WEIGHT = 0.7;
 export const MEMORY_KEYWORD_WEIGHT = 0.3;
+const MEMORY_BACKFILL_LEASE_MS = 90_000;
 
 export interface RetrievedMemoryFact {
 	id: string;
@@ -33,79 +35,30 @@ export interface SearchMemoriesOptions {
 	fetchFn?: typeof fetch;
 	signal?: AbortSignal;
 	/** Test seam: supply query embedding without HTTP. */
-	embedQuery?: (query: string) => Promise<Float32Array>;
+	embedQuery?: (query: string, signal: AbortSignal) => Promise<Float32Array>;
 	/** Test seam: reorder candidate ids after fusion. */
-	rerank?: (query: string, docs: Array<{ id: string; text: string }>) => Promise<string[]>;
+	rerank?: (query: string, docs: Array<{ id: string; text: string }>, signal: AbortSignal) => Promise<string[]>;
 }
 
-function tokenize(text: string): string[] {
-	return text
-		.toLowerCase()
-		.split(/[^\p{L}\p{N}]+/u)
-		.filter(Boolean);
-}
+export { keywordScore } from "./memory-store.ts";
 
-export function keywordScore(query: string, text: string): number {
-	const queryTokens = new Set(tokenize(query));
-	if (queryTokens.size === 0) return 0;
-	const textTokens = new Set(tokenize(text));
-	let overlap = 0;
-	for (const token of queryTokens) {
-		if (textTokens.has(token)) overlap++;
-	}
-	return overlap / queryTokens.size;
-}
-
-export function cosineSimilarity(a: Float32Array, b: Float32Array): number | null {
-	if (a.length !== b.length) return null;
-	let dot = 0;
-	let normA = 0;
-	let normB = 0;
-	for (let i = 0; i < a.length; i++) {
-		const av = a[i] ?? 0;
-		const bv = b[i] ?? 0;
-		dot += av * bv;
-		normA += av * av;
-		normB += bv * bv;
-	}
-	if (normA === 0 || normB === 0) return null;
-	return dot / (Math.sqrt(normA) * Math.sqrt(normB));
-}
-
-function capByChars(hits: RetrievedMemoryFact[], maxChars: number): RetrievedMemoryFact[] {
+export function capRetrievedFacts(
+	hits: RetrievedMemoryFact[],
+	maxHits = MEMORY_RETRIEVE_TOP_K,
+	maxChars = MEMORY_RETRIEVE_MAX_CHARS,
+): RetrievedMemoryFact[] {
 	const kept: RetrievedMemoryFact[] = [];
 	let used = 0;
 	for (const hit of hits) {
-		const size = hit.text.length + hit.scope.length + 8;
-		if (kept.length > 0 && used + size > maxChars) break;
-		kept.push(hit);
-		used += size;
+		if (kept.length >= maxHits || used >= maxChars) break;
+		const remaining = maxChars - used;
+		const chars = Array.from(hit.text);
+		const text =
+			chars.length <= remaining ? hit.text : remaining === 1 ? "…" : `${chars.slice(0, remaining - 1).join("")}…`;
+		kept.push(text === hit.text ? hit : { ...hit, text });
+		used += Array.from(text).length;
 	}
 	return kept;
-}
-
-async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, signal?: AbortSignal): Promise<T> {
-	const timeout = AbortSignal.timeout(timeoutMs);
-	const combined = signal ? AbortSignal.any([signal, timeout]) : timeout;
-	if (combined.aborted) {
-		throw Object.assign(new Error("aborted"), { name: "AbortError" });
-	}
-	return await new Promise<T>((resolve, reject) => {
-		const onAbort = () => {
-			reject(Object.assign(new Error("aborted"), { name: "AbortError" }));
-		};
-		combined.addEventListener("abort", onAbort, { once: true });
-		promise.then(
-			(value) => {
-				combined.removeEventListener("abort", onAbort);
-				resolve(value);
-			},
-			(error) => {
-				combined.removeEventListener("abort", onAbort);
-				reject(error);
-			},
-		);
-	});
 }
 
 function toRetrieved(hit: MemorySearchHit | RetrievedMemoryFact): RetrievedMemoryFact {
@@ -118,65 +71,51 @@ function toRetrieved(hit: MemorySearchHit | RetrievedMemoryFact): RetrievedMemor
 }
 
 export async function searchMemories(options: SearchMemoriesOptions): Promise<RetrievedMemoryFact[]> {
-	const retrieveTimeoutMs = options.retrieveTimeoutMs ?? MEMORY_RETRIEVE_TIMEOUT_MS;
-	return await withTimeout(searchMemoriesInner(options), retrieveTimeoutMs, options.signal);
-}
-
-async function searchMemoriesInner(options: SearchMemoriesOptions): Promise<RetrievedMemoryFact[]> {
-	const facts: MemoryFact[] = [
-		...options.store.listActiveFacts("global", null, null),
-		...options.store.listActiveFacts("project", options.cwdKey, options.mode),
-	];
-	if (facts.length === 0) return [];
-
-	let queryEmbedding: Float32Array | null = null;
-	if (options.embedQuery) {
-		queryEmbedding = await options.embedQuery(options.query);
-	} else {
-		queryEmbedding = await embedText(options.query, {
-			settings: options.embeddingSettings,
-			apiKey: options.embeddingApiKey,
-			timeoutMs: options.retrieveTimeoutMs ?? MEMORY_EMBED_DEFAULT_TIMEOUT_MS,
-			fetchFn: options.fetchFn,
-			signal: options.signal,
-		});
-	}
+	const query = takeLastUnicodeCharacters(options.query, 8_000);
+	const timeout = AbortSignal.timeout(options.retrieveTimeoutMs ?? MEMORY_RETRIEVE_TIMEOUT_MS);
+	const signal = options.signal ? AbortSignal.any([options.signal, timeout]) : timeout;
 	const embeddingKey = embeddingConfigKey(options.embeddingSettings);
-
-	const scored: RetrievedMemoryFact[] = [];
-	for (const fact of facts) {
-		const keyword = keywordScore(options.query, fact.text);
-		let cosine = 0;
-		if (fact.embedding && fact.embeddingModel === embeddingKey && queryEmbedding) {
-			cosine = cosineSimilarity(queryEmbedding, fact.embedding) ?? 0;
-		}
-		scored.push({
-			id: fact.id,
-			scope: fact.scope,
-			text: fact.text,
-			score: MEMORY_COSINE_WEIGHT * cosine + MEMORY_KEYWORD_WEIGHT * keyword,
-		});
+	let queryEmbedding: Float32Array | null = null;
+	try {
+		queryEmbedding = options.embedQuery
+			? await options.embedQuery(query, signal)
+			: await embedText(query, {
+					settings: options.embeddingSettings,
+					apiKey: options.embeddingApiKey,
+					timeoutMs: MEMORY_EMBED_DEFAULT_TIMEOUT_MS,
+					fetchFn: options.fetchFn,
+					signal,
+				});
+		options.store.recordHealth(memoryHealth("embedding", "ok"));
+	} catch (error) {
+		throwIfCallerAborted(options.signal);
+		options.store.recordHealth(memoryHealthError("embedding", error, [options.embeddingApiKey]));
 	}
+	let candidates = options.store
+		.searchRelevantFacts(queryEmbedding, {
+			queryText: query,
+			embeddingKey,
+			projectKey: options.cwdKey,
+			limit: MEMORY_RETRIEVE_CANDIDATE_LIMIT,
+		})
+		.hits.map(toRetrieved);
 
-	scored.sort((a, b) => b.score - a.score || a.id.localeCompare(b.id));
-	let candidates = scored.slice(0, MEMORY_RETRIEVE_CANDIDATE_LIMIT);
-
-	if (options.rerankSettings && options.rerankApiKey && candidates.length > 1) {
+	if (options.rerankSettings && options.rerankApiKey && candidates.length > 1 && !signal.aborted) {
 		const docs = candidates.map((hit) => ({ id: hit.id, text: hit.text }));
 		try {
 			let orderedIds: string[];
 			if (options.rerank) {
-				orderedIds = await options.rerank(options.query, docs);
+				orderedIds = await options.rerank(query, docs, signal);
 			} else {
 				orderedIds = (
 					await rerankDocuments({
 						settings: options.rerankSettings,
 						apiKey: options.rerankApiKey,
-						query: options.query,
+						query,
 						documents: docs,
 						timeoutMs: options.rerankTimeoutMs ?? MEMORY_RERANK_TIMEOUT_MS,
 						fetchFn: options.fetchFn,
-						signal: options.signal,
+						signal,
 					})
 				).map((score) => score.id);
 			}
@@ -191,13 +130,14 @@ async function searchMemoriesInner(options: SearchMemoriesOptions): Promise<Retr
 			}
 			for (const hit of byId.values()) reranked.push(hit);
 			candidates = reranked;
+			options.store.recordHealth(memoryHealth("rerank", "ok"));
 		} catch (error) {
-			if (options.signal?.aborted) throw error;
+			throwIfCallerAborted(options.signal);
+			options.store.recordHealth(memoryHealthError("rerank", error, [options.rerankApiKey]));
 		}
 	}
 
-	const top = candidates.slice(0, MEMORY_RETRIEVE_TOP_K).map(toRetrieved);
-	return capByChars(top, MEMORY_RETRIEVE_MAX_CHARS);
+	return capRetrievedFacts(candidates);
 }
 
 export interface BackfillEmbeddingsOptions {
@@ -207,33 +147,78 @@ export interface BackfillEmbeddingsOptions {
 	limit?: number;
 	fetchFn?: typeof fetch;
 	signal?: AbortSignal;
+	/** Test seam: supply vectors without HTTP. */
+	embedTexts?: (texts: string[], signal: AbortSignal) => Promise<Float32Array[]>;
 }
 
-/** Embed active facts with null or mismatched embeddings. Best-effort; never throws to callers that void it. */
 export async function backfillMemoryEmbeddings(options: BackfillEmbeddingsOptions): Promise<number> {
-	const limit = options.limit ?? 32;
 	const embeddingKey = embeddingConfigKey(options.embeddingSettings);
-	const needing = options.store.listFactsNeedingEmbedding(embeddingKey, limit);
-	if (needing.length === 0) return 0;
-
-	const vectors = await embedTexts(
-		needing.map((fact) => fact.text),
-		{
-			settings: options.embeddingSettings,
-			apiKey: options.embeddingApiKey,
-			fetchFn: options.fetchFn,
-			signal: options.signal,
-			timeoutMs: MEMORY_EMBED_DEFAULT_TIMEOUT_MS * Math.min(4, needing.length),
-		},
-	);
-
-	let updated = 0;
-	for (let i = 0; i < needing.length; i++) {
-		const fact = needing[i]!;
-		const vector = vectors[i];
-		if (!vector) continue;
-		options.store.updateFactEmbedding(fact.id, vector, embeddingKey);
-		updated++;
+	const ownerId = randomUUID();
+	if (!options.store.tryAcquireBackfillLease(ownerId, embeddingKey, Date.now(), MEMORY_BACKFILL_LEASE_MS)) return 0;
+	const signal = options.signal ?? new AbortController().signal;
+	const batchSize = Math.min(32, Math.max(1, options.limit ?? 32));
+	let total = 0;
+	options.store.recordHealth(memoryHealth("backfill", "running"));
+	try {
+		while (true) {
+			signal.throwIfAborted();
+			const facts = options.store.listFactsNeedingEmbedding(embeddingKey, batchSize);
+			if (facts.length === 0) break;
+			const texts = facts.map((fact) => Array.from(fact.text).slice(0, 8_000).join(""));
+			const vectors = options.embedTexts
+				? await options.embedTexts(texts, signal)
+				: await embedTexts(texts, {
+						settings: options.embeddingSettings,
+						apiKey: options.embeddingApiKey,
+						fetchFn: options.fetchFn,
+						signal,
+						timeoutMs: MEMORY_EMBED_DEFAULT_TIMEOUT_MS,
+					});
+			if (vectors.length !== facts.length) throw new Error("Embedding batch size mismatch");
+			const committed = options.store.commitBackfillBatch({
+				ownerId,
+				embeddingKey,
+				facts: facts.map((fact, index) => ({ id: fact.id, vector: vectors[index]! })),
+				nowMs: Date.now(),
+				leaseMs: MEMORY_BACKFILL_LEASE_MS,
+			});
+			if (committed < 0) throw new Error("Memory backfill lease was lost");
+			total += committed;
+			await new Promise<void>((resolve) => setImmediate(resolve));
+		}
+		options.store.recordHealth(memoryHealth("backfill", "ok"));
+		return total;
+	} catch (error) {
+		if (signal.aborted) {
+			if (signal.reason !== "settings-refresh") {
+				options.store.recordHealth(
+					memoryHealthError("backfill", new Error("Backfill interrupted; it will retry on next memory use"), []),
+				);
+			}
+			return total;
+		}
+		options.store.recordHealth(memoryHealthError("backfill", error, [options.embeddingApiKey]));
+		throw error;
+	} finally {
+		options.store.releaseBackfillLease(ownerId);
 	}
-	return updated;
+}
+
+function throwIfCallerAborted(signal: AbortSignal | undefined): void {
+	if (signal?.aborted) throw Object.assign(new Error("aborted"), { name: "AbortError" });
+}
+
+function takeLastUnicodeCharacters(text: string, limit: number): string {
+	let start = text.length;
+	let count = 0;
+	while (start > 0 && count < limit) {
+		start--;
+		const unit = text.charCodeAt(start);
+		if (unit >= 0xdc00 && unit <= 0xdfff && start > 0) {
+			const previous = text.charCodeAt(start - 1);
+			if (previous >= 0xd800 && previous <= 0xdbff) start--;
+		}
+		count++;
+	}
+	return text.slice(start);
 }

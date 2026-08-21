@@ -298,4 +298,38 @@ describe("AgentSession auto memory", () => {
 			await Promise.resolve();
 		}
 	});
+
+	it("aborts and drains local backfill before model-service settings change", async () => {
+		const root = makeTemp();
+		const agentDir = join(root, "agent");
+		const cwd = join(root, "project");
+		mkdirSync(cwd, { recursive: true });
+		const { session } = await createAgentSession({
+			agentDir,
+			cwd,
+			model: getModel("anthropic", "claude-sonnet-4-5")!,
+		});
+		let release!: () => void;
+		const held = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		const controller = new AbortController();
+		const internals = session as unknown as {
+			_memoryBackfillAbort: AbortController;
+			_memoryBackfillPromise: Promise<void>;
+		};
+		internals._memoryBackfillAbort = controller;
+		internals._memoryBackfillPromise = held;
+		let settled = false;
+		const prepare = session.prepareModelServiceSettingsRefresh().then(() => {
+			settled = true;
+		});
+		await Promise.resolve();
+		expect(controller.signal.aborted).toBe(true);
+		expect(controller.signal.reason).toBe("settings-refresh");
+		expect(settled).toBe(false);
+		release();
+		await prepare;
+		session.dispose();
+	});
 });

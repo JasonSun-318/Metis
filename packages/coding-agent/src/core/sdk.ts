@@ -7,7 +7,7 @@ import { type AgentMode, DEFAULT_AGENT_MODE } from "./agent-mode.ts";
 import { AgentSession, type AgentSessionConfig } from "./agent-session.ts";
 import { formatNoModelsAvailableMessage } from "./auth-guidance.ts";
 import { AuthStorage } from "./auth-storage.ts";
-import { ensureModeScopedMemoryLayout, getMemorySqlitePath } from "./auto-memory.ts";
+import { getMemorySqlitePath, initializeAutoMemory } from "./auto-memory.ts";
 import { DEFAULT_THINKING_LEVEL } from "./defaults.ts";
 import type { ExtensionRunner, LoadExtensionsResult, SessionStartEvent, ToolDefinition } from "./extensions/index.ts";
 import { McpManager } from "./mcp/index.ts";
@@ -255,7 +255,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		throw new Error("thinkingLevel and thinkingSelection cannot both be supplied");
 	}
 	const agentDir = options.agentDir ? resolvePath(options.agentDir) : getDefaultAgentDir();
-	await ensureModeScopedMemoryLayout(agentDir);
+	await initializeAutoMemory(agentDir);
 	const suppliedSessionManager = options.sessionManager;
 	const requestedPermissionMode =
 		options.permissionMode === undefined ? undefined : normalizePermissionMode(options.permissionMode);

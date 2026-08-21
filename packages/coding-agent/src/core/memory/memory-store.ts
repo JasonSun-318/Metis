@@ -15,7 +15,6 @@ import {
 	type MemoryHealthOperation,
 	type MemoryScope,
 	type MemorySearchHit,
-	type MemorySearchOptions,
 	memoryFactFingerprint,
 } from "./memory-types.ts";
 
@@ -72,6 +71,13 @@ CREATE TABLE IF NOT EXISTS memory_health (
   updated_at TEXT NOT NULL,
   reason TEXT
 );
+
+CREATE TABLE IF NOT EXISTS memory_backfill_lease (
+  singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+  owner_id TEXT NOT NULL,
+  embedding_key TEXT NOT NULL,
+  expires_at_ms INTEGER NOT NULL
+);
 `;
 
 type FactRow = {
@@ -112,6 +118,12 @@ type HealthRow = {
 	reason: string | null;
 };
 
+type BackfillLeaseRow = {
+	owner_id: string;
+	embedding_key: string;
+	expires_at_ms: number | bigint;
+};
+
 export type MemoryIngestContextKey = "global" | `project:${string}`;
 
 export interface ResolveMemoryProjectResult {
@@ -121,6 +133,26 @@ export interface ResolveMemoryProjectResult {
 }
 
 export type MemoryProjectionFact = Pick<MemoryFact, "topicFile" | "text" | "createdAt" | "id">;
+
+export interface SearchRelevantFactsOptions {
+	queryText: string;
+	embeddingKey: string;
+	projectKey: string;
+	limit: number;
+}
+
+export interface SearchRelevantFactsResult {
+	hits: MemorySearchHit[];
+	invalidEmbeddingIds: string[];
+}
+
+export interface CommitBackfillBatchInput {
+	ownerId: string;
+	embeddingKey: string;
+	facts: Array<{ id: string; vector: Float32Array }>;
+	nowMs: number;
+	leaseMs: number;
+}
 
 export interface MemoryStore {
 	insertFact(fact: MemoryFact): boolean;
@@ -132,7 +164,10 @@ export interface MemoryStore {
 	deleteFact(id: string): void;
 	countFacts(): number;
 	runInTransaction<T>(fn: () => T): T;
-	searchByEmbedding(query: Float32Array, options: MemorySearchOptions): MemorySearchHit[];
+	searchRelevantFacts(
+		queryEmbedding: Float32Array | null,
+		options: SearchRelevantFactsOptions,
+	): SearchRelevantFactsResult;
 	listActiveFacts(scope: MemoryScope, cwdKey: string | null, mode: string | null): MemoryFact[];
 	listFactsByStatus(status: MemoryFactStatus, limit: number): MemoryFact[];
 	/** Active facts with null embedding or embedding_model !== expectedModel. */
@@ -151,6 +186,11 @@ export interface MemoryStore {
 	recordHealth(row: MemoryHealth): void;
 	clearHealth(...operations: MemoryHealthOperation[]): void;
 	listHealth(): MemoryHealth[];
+	recoverInterruptedHealth(updatedAt: string): number;
+	tryAcquireBackfillLease(ownerId: string, embeddingKey: string, nowMs: number, leaseMs: number): boolean;
+	commitBackfillBatch(input: CommitBackfillBatchInput): number;
+	getActiveBackfillLease(nowMs: number): { embeddingKey: string; expiresAtMs: number } | null;
+	releaseBackfillLease(ownerId: string): void;
 	close(): void;
 }
 
@@ -190,6 +230,10 @@ export function openMemoryStore(path: string): MemoryStore {
 	const updateScope = db.prepare(`UPDATE facts SET scope = ?, cwd_key = ?, mode = ? WHERE id = ?`);
 	const updateTopic = db.prepare(`UPDATE facts SET topic_file = ? WHERE id = ?`);
 	const updateEmbedding = db.prepare(`UPDATE facts SET embedding = ?, embedding_model = ? WHERE id = ?`);
+	const clearInvalidEmbedding = db.prepare(`
+		UPDATE facts SET embedding = NULL, embedding_model = NULL
+		WHERE id = ? AND embedding_model = ? AND embedding = ?
+	`);
 
 	const selectNeedingEmbedding = db.prepare(`
 		SELECT id, scope, cwd_key, mode, topic_file, text, fingerprint, status, created_at, source_turn, embedding, embedding_model
@@ -216,6 +260,13 @@ export function openMemoryStore(path: string): MemoryStore {
 		  AND status = 'active'
 		  AND cwd_key IS ?
 		  AND mode IS ?
+	`);
+	const selectRelevantFacts = db.prepare(`
+		SELECT id, scope, topic_file, text, created_at, embedding, embedding_model
+		FROM facts
+		WHERE status = 'active'
+		  AND ((scope = 'global' AND cwd_key IS NULL AND mode IS NULL)
+		    OR (scope = 'project' AND cwd_key = ? AND mode IS NULL))
 	`);
 
 	const selectByStatus = db.prepare(`
@@ -319,6 +370,35 @@ export function openMemoryStore(path: string): MemoryStore {
 		FROM memory_health
 		ORDER BY updated_at DESC, operation ASC
 	`);
+	const recoverRunningHealth = db.prepare(`
+		UPDATE memory_health
+		SET status = 'error', updated_at = ?, reason = 'Interrupted before completion'
+		WHERE status = 'running'
+	`);
+	const acquireBackfillLease = db.prepare(`
+		INSERT INTO memory_backfill_lease (singleton, owner_id, embedding_key, expires_at_ms)
+		VALUES (1, ?, ?, ?)
+		ON CONFLICT(singleton) DO UPDATE SET
+		  owner_id = excluded.owner_id,
+		  embedding_key = excluded.embedding_key,
+		  expires_at_ms = excluded.expires_at_ms
+		WHERE memory_backfill_lease.expires_at_ms <= ?
+	`);
+	const selectBackfillLease = db.prepare(`
+		SELECT owner_id, embedding_key, expires_at_ms FROM memory_backfill_lease WHERE singleton = 1
+	`);
+	const updateBackfillFact = db.prepare(`
+		UPDATE facts SET embedding = ?, embedding_model = ?
+		WHERE id = ? AND status = 'active'
+		  AND (embedding IS NULL OR embedding_model IS NULL OR embedding_model != ?)
+	`);
+	const renewBackfillLease = db.prepare(`
+		UPDATE memory_backfill_lease SET expires_at_ms = ?
+		WHERE singleton = 1 AND owner_id = ? AND embedding_key = ?
+	`);
+	const releaseBackfillLease = db.prepare(`
+		DELETE FROM memory_backfill_lease WHERE singleton = 1 AND owner_id = ?
+	`);
 
 	function loadActiveRows(scope: MemoryScope, cwdKey: string | null, mode: string | null): FactRow[] {
 		if (scope === "global" || (cwdKey === null && mode === null)) {
@@ -395,25 +475,62 @@ export function openMemoryStore(path: string): MemoryStore {
 			return runInTransaction(fn);
 		},
 
-		searchByEmbedding(query, options) {
-			const rows = loadActiveRows(options.scope, options.cwdKey, options.mode);
+		searchRelevantFacts(queryEmbedding, options) {
+			const limit = Math.max(0, options.limit);
 			const hits: MemorySearchHit[] = [];
+			const invalid: Array<{ id: string; model: string; blob: Buffer }> = [];
+			const queryTokens = memoryKeywordTokens(options.queryText);
+			const rows = selectRelevantFacts.iterate(options.projectKey) as Iterable<{
+				id: string;
+				scope: string;
+				topic_file: string;
+				text: string;
+				created_at: string;
+				embedding: Buffer | Uint8Array | null;
+				embedding_model: string | null;
+			}>;
 			for (const row of rows) {
-				const embedding = blobToEmbedding(row.embedding);
-				if (!embedding) continue;
-				const score = cosineSimilarity(query, embedding);
-				if (score === null) continue;
-				hits.push({
+				const keyword = keywordScoreFromTokens(queryTokens, row.text);
+				let cosine: number | null = null;
+				if (queryEmbedding && row.embedding && row.embedding_model === options.embeddingKey) {
+					const embedding = blobToEmbedding(row.embedding);
+					cosine = embedding ? cosineSimilarity(queryEmbedding, embedding) : null;
+					if (cosine === null && invalid.length < 100) {
+						invalid.push({ id: row.id, model: row.embedding_model, blob: Buffer.from(row.embedding) });
+					}
+				}
+				if (keyword <= 0 && (cosine === null || cosine < 0.25)) continue;
+				const hit = {
 					id: row.id,
 					text: row.text,
-					score,
+					score: 0.7 * Math.max(0, cosine ?? 0) + 0.3 * keyword,
 					scope: row.scope as MemoryScope,
 					topicFile: row.topic_file,
 					createdAt: row.created_at,
-				});
+				};
+				const insertion = hits.findIndex((existing) => compareSearchHits(hit, existing) < 0);
+				if (insertion >= 0) hits.splice(insertion, 0, hit);
+				else if (hits.length < limit) hits.push(hit);
+				if (hits.length > limit) hits.pop();
 			}
-			hits.sort((a, b) => b.score - a.score);
-			return hits.slice(0, Math.max(0, options.limit));
+
+			const invalidEmbeddingIds: string[] = [];
+			if (invalid.length > 0) {
+				runInTransaction(() => {
+					for (const row of invalid) {
+						if (Number(clearInvalidEmbedding.run(row.id, row.model, row.blob).changes) === 1) {
+							invalidEmbeddingIds.push(row.id);
+						}
+					}
+				});
+				upsertHealth.run(
+					"embedding",
+					"error",
+					new Date().toISOString(),
+					`Cleared ${invalidEmbeddingIds.length} invalid stored embedding${invalidEmbeddingIds.length === 1 ? "" : "s"}`,
+				);
+			}
+			return { hits, invalidEmbeddingIds };
 		},
 
 		listActiveFacts(scope, cwdKey, mode) {
@@ -540,6 +657,51 @@ export function openMemoryStore(path: string): MemoryStore {
 				updatedAt: row.updated_at,
 				reason: row.reason,
 			}));
+		},
+
+		recoverInterruptedHealth(updatedAt) {
+			return Number(recoverRunningHealth.run(updatedAt).changes);
+		},
+
+		tryAcquireBackfillLease(ownerId, embeddingKey, nowMs, leaseMs) {
+			return runInTransaction(
+				() => Number(acquireBackfillLease.run(ownerId, embeddingKey, nowMs + leaseMs, nowMs).changes) === 1,
+			);
+		},
+
+		commitBackfillBatch(input) {
+			return runInTransaction(() => {
+				const lease = selectBackfillLease.get() as BackfillLeaseRow | undefined;
+				if (
+					!lease ||
+					lease.owner_id !== input.ownerId ||
+					lease.embedding_key !== input.embeddingKey ||
+					Number(lease.expires_at_ms) <= input.nowMs
+				) {
+					return -1;
+				}
+				let updated = 0;
+				for (const fact of input.facts) {
+					updated += Number(
+						updateBackfillFact.run(embeddingToBlob(fact.vector), input.embeddingKey, fact.id, input.embeddingKey)
+							.changes,
+					);
+				}
+				renewBackfillLease.run(input.nowMs + input.leaseMs, input.ownerId, input.embeddingKey);
+				return updated;
+			});
+		},
+
+		getActiveBackfillLease(nowMs) {
+			const row = selectBackfillLease.get() as BackfillLeaseRow | undefined;
+			if (!row || Number(row.expires_at_ms) <= nowMs) return null;
+			return { embeddingKey: row.embedding_key, expiresAtMs: Number(row.expires_at_ms) };
+		},
+
+		releaseBackfillLease(ownerId) {
+			runInTransaction(() => {
+				releaseBackfillLease.run(ownerId);
+			});
 		},
 
 		close() {
@@ -697,11 +859,12 @@ function embeddingToBlob(embedding: Float32Array): Buffer {
 
 function blobToEmbedding(blob: Buffer | Uint8Array | null): Float32Array | null {
 	if (!blob || blob.byteLength === 0 || blob.byteLength % 4 !== 0) return null;
-	const copy = Buffer.from(blob);
-	return new Float32Array(copy.buffer, copy.byteOffset, copy.byteLength / 4);
+	if (blob.byteOffset % 4 === 0) return new Float32Array(blob.buffer, blob.byteOffset, blob.byteLength / 4);
+	const copy = Uint8Array.from(blob);
+	return new Float32Array(copy.buffer);
 }
 
-function cosineSimilarity(a: Float32Array, b: Float32Array): number | null {
+export function cosineSimilarity(a: Float32Array, b: Float32Array): number | null {
 	if (a.length !== b.length) return null;
 	let dot = 0;
 	let normA = 0;
@@ -709,12 +872,41 @@ function cosineSimilarity(a: Float32Array, b: Float32Array): number | null {
 	for (let i = 0; i < a.length; i++) {
 		const av = a[i] ?? 0;
 		const bv = b[i] ?? 0;
+		if (!Number.isFinite(av) || !Number.isFinite(bv)) return null;
 		dot += av * bv;
 		normA += av * av;
 		normB += bv * bv;
 	}
-	if (normA === 0 || normB === 0) return null;
+	if (!Number.isFinite(normA) || !Number.isFinite(normB) || normA === 0 || normB === 0) return null;
 	return dot / (Math.sqrt(normA) * Math.sqrt(normB));
+}
+
+export function keywordScore(query: string, text: string): number {
+	return keywordScoreFromTokens(memoryKeywordTokens(query), text);
+}
+
+function keywordScoreFromTokens(queryTokens: Set<string>, text: string): number {
+	if (queryTokens.size === 0) return 0;
+	const textTokens = memoryKeywordTokens(text);
+	let overlap = 0;
+	for (const token of queryTokens) {
+		if (textTokens.has(token)) overlap++;
+	}
+	return overlap / queryTokens.size;
+}
+
+function memoryKeywordTokens(text: string): Set<string> {
+	const normalized = text.normalize("NFKC").toLocaleLowerCase("en-US");
+	const tokens = new Set(normalized.match(/[\p{L}\p{N}]+/gu) ?? []);
+	for (const run of normalized.match(/\p{Script=Han}+/gu) ?? []) {
+		const chars = Array.from(run);
+		for (let index = 0; index + 1 < chars.length; index++) tokens.add(`${chars[index]}${chars[index + 1]}`);
+	}
+	return tokens;
+}
+
+function compareSearchHits(left: MemorySearchHit, right: MemorySearchHit): number {
+	return right.score - left.score || left.id.localeCompare(right.id);
 }
 
 function rowToFact(row: FactRow): MemoryFact {

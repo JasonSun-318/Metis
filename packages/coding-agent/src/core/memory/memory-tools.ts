@@ -16,6 +16,7 @@ import {
 	type MemoryFact,
 	type MemoryScope,
 	memoryFactFingerprint,
+	memoryHealthError,
 } from "./memory-types.ts";
 
 /** @deprecated Use isSafeTopicFile; retained for extension compatibility. */
@@ -424,7 +425,7 @@ async function embedInsertedFacts(ctx: MemoryToolContext, facts: MemoryFact[], s
 			ctx.store.recordHealth({ operation: "embedding", status: "ok", updatedAt: now, reason: null });
 		});
 	} catch (error) {
-		ctx.store.recordHealth({ operation: "embedding", status: "error", updatedAt: now, reason: errorMessage(error) });
+		ctx.store.recordHealth(memoryHealthError("embedding", error, [], now));
 		if (signal?.aborted) throw error;
 	}
 }

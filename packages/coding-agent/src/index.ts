@@ -58,7 +58,12 @@ export {
 	mcpCredentialKey,
 	type OAuthCredential,
 } from "./core/auth-storage.ts";
-export { ensureModeScopedMemoryLayout, getMemorySqlitePath } from "./core/auto-memory.ts";
+export {
+	ensureAutoMemoryLayout,
+	ensureModeScopedMemoryLayout,
+	getMemorySqlitePath,
+	initializeAutoMemory,
+} from "./core/auto-memory.ts";
 export { getLatestCacheHitPercent } from "./core/cache-stats.ts";
 // Compaction
 export {

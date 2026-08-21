@@ -158,7 +158,7 @@ import {
 } from "./memory/memory-search.ts";
 import { MEMORY_EMBEDDING_CREDENTIAL_ID, MEMORY_RERANK_CREDENTIAL_ID } from "./memory/memory-service-settings.ts";
 import { openMemoryStore } from "./memory/memory-store.ts";
-import type { MemoryExtractRun } from "./memory/memory-types.ts";
+import type { MemoryExtractRun, MemoryHealth } from "./memory/memory-types.ts";
 import type { BashExecutionMessage, CustomMessage } from "./messages.ts";
 import type { ModelRegistry } from "./model-registry.ts";
 import { isPermissionMode, narrowPermissionMode, type PermissionMode } from "./permission-mode.ts";
@@ -752,6 +752,7 @@ export class AgentSession {
 		this._unsubscribeMcpCatalog = this._mcpManager?.subscribeCatalog(() => {
 			this._refreshToolRegistry({ activeToolNames: this.getActiveToolNames() });
 		});
+		this._maybeStartMemoryEmbeddingBackfill();
 	}
 
 	/** Model registry for API key resolution and model discovery */
@@ -2284,6 +2285,23 @@ export class AgentSession {
 		};
 	}
 
+	getMemoryHealth(): MemoryHealth[] {
+		if (!this._agentDir) return [];
+		try {
+			const store = openMemoryStore(getMemorySqlitePath(this._agentDir));
+			try {
+				const backfillRunning = store.getActiveBackfillLease(Date.now()) !== null;
+				return store
+					.listHealth()
+					.filter((row) => row.operation !== "backfill" || row.status !== "running" || backfillRunning);
+			} finally {
+				store.close();
+			}
+		} catch {
+			return [];
+		}
+	}
+
 	async waitForMemoryExtract(): Promise<void> {
 		await this._memoryExtractPromise?.catch(() => undefined);
 	}
@@ -2624,7 +2642,7 @@ export class AgentSession {
 		this._memoryBackfillAbort?.abort();
 		const controller = new AbortController();
 		this._memoryBackfillAbort = controller;
-		this._memoryBackfillPromise = Promise.resolve()
+		const tracked = Promise.resolve()
 			.then(async () => {
 				const embeddingApiKey = await authStorage.getApiKey(MEMORY_EMBEDDING_CREDENTIAL_ID, {
 					includeFallback: false,
@@ -2648,11 +2666,13 @@ export class AgentSession {
 				if (this._memoryBackfillAbort === controller) {
 					this._memoryBackfillAbort = undefined;
 				}
-				this._memoryBackfillPromise = undefined;
+				if (this._memoryBackfillPromise === tracked) this._memoryBackfillPromise = undefined;
 			});
+		this._memoryBackfillPromise = tracked;
 	}
 
 	private async _retrieveAutoMemories(query: string): Promise<Array<{ scope: "global" | "project"; text: string }>> {
+		this._maybeStartMemoryEmbeddingBackfill();
 		const agentDir = this._agentDir;
 		const embeddingSettings = this.settingsManager.getEmbeddingSettings();
 		if (!agentDir || !embeddingSettings) return [];

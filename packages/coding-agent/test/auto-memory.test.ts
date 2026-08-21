@@ -14,13 +14,16 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
 	AUTO_MEMORY_MAX_BYTES,
 	AUTO_MEMORY_MAX_LINES,
+	ensureAutoMemoryLayout,
 	ensureModeScopedMemoryLayout,
 	getAutoMemoryPaths,
 	getAutoMemoryRoot,
 	getMemorySqlitePath,
+	initializeAutoMemory,
 	loadAutoMemory,
 } from "../src/core/auto-memory.ts";
 import { memoryProjectIdentity } from "../src/core/memory/memory-project.ts";
+import { openMemoryStore } from "../src/core/memory/memory-store.ts";
 import { canonicalizePathForCreation } from "../src/utils/paths.ts";
 
 describe("auto memory", () => {
@@ -101,6 +104,38 @@ describe("auto memory", () => {
 		expect(readFileSync(join(memoryDir, "projects", "legacy", "project.md"), "utf8")).toBe("historical");
 		expect(readFileSync(join(memoryDir, "dream-history.jsonl"), "utf8")).toBe("history\n");
 		expect(existsSync(join(memoryDir, "global"))).toBe(true);
+	});
+
+	it("recovers startup health once without overwriting later live operations", async () => {
+		const root = makeTemp();
+		const agentDir = join(root, "agent");
+		await ensureAutoMemoryLayout(agentDir);
+		let store = openMemoryStore(getMemorySqlitePath(agentDir));
+		store.recordHealth({
+			operation: "extract",
+			status: "running",
+			updatedAt: "2026-08-20T00:00:00.000Z",
+			reason: null,
+		});
+		store.close();
+
+		await Promise.all([initializeAutoMemory(agentDir), initializeAutoMemory(agentDir)]);
+		store = openMemoryStore(getMemorySqlitePath(agentDir));
+		expect(store.listHealth()).toContainEqual(
+			expect.objectContaining({ operation: "extract", status: "error", reason: "Interrupted before completion" }),
+		);
+		store.recordHealth({
+			operation: "extract",
+			status: "running",
+			updatedAt: "2026-08-21T00:00:00.000Z",
+			reason: null,
+		});
+		store.close();
+
+		await ensureModeScopedMemoryLayout(agentDir);
+		store = openMemoryStore(getMemorySqlitePath(agentDir));
+		expect(store.listHealth()).toContainEqual(expect.objectContaining({ operation: "extract", status: "running" }));
+		store.close();
 	});
 
 	it.skipIf(process.platform === "win32")("rejects a symlinked projects directory and can retry", async () => {

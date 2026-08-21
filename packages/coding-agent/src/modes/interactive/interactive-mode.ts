@@ -5652,6 +5652,7 @@ export class InteractiveMode {
 		}
 
 		const extract = this.session.getMemoryExtractStatus(10);
+		const health = this.session.getMemoryHealth();
 		const state = (index: (typeof snapshot)["global"]): string => {
 			if (index.error) return theme.fg("warning", `unavailable: ${index.error}`);
 			if (!index.exists) return theme.fg("muted", "not created");
@@ -5678,6 +5679,13 @@ export class InteractiveMode {
 		lines.push("", theme.bold("Recent runs"));
 		if (extract.recent.length === 0) lines.push(theme.fg("dim", "No extract history yet"));
 		else for (const record of extract.recent) lines.push(formatMemoryExtractHistoryLine(record));
+		lines.push("", theme.bold("Operation health"));
+		if (health.length === 0) lines.push(theme.fg("dim", "No operation health yet"));
+		else {
+			for (const row of health) {
+				lines.push(`${row.operation} · ${row.status} · ${row.updatedAt}${row.reason ? ` · ${row.reason}` : ""}`);
+			}
+		}
 		lines.push("", theme.fg("dim", "Use /reload after editing an index outside Metis."));
 		this.chatContainer.addChild(new Spacer(1));
 		this.chatContainer.addChild(new Text(lines.join("\n"), 1, 0));

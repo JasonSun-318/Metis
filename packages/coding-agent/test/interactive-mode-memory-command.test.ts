@@ -38,6 +38,12 @@ type MemoryCommandContext = {
 				reason: string | null;
 			}>;
 		};
+		getMemoryHealth?: () => Array<{
+			operation: "extract" | "embedding" | "rerank" | "backfill" | "projection" | "migration";
+			status: "running" | "ok" | "error";
+			updatedAt: string;
+			reason: string | null;
+		}>;
 	};
 	chatContainer: { addChild: (component: unknown) => void };
 	ui: { requestRender: () => void };
@@ -230,6 +236,14 @@ describe("InteractiveMode /memory", () => {
 					},
 				}),
 				getMemoryExtractStatus,
+				getMemoryHealth: () => [
+					{
+						operation: "embedding" as const,
+						status: "error" as const,
+						updatedAt: "2026-07-15T05:30:00.000Z",
+						reason: "Embedding request failed",
+					},
+				],
 			},
 			chatContainer: { addChild },
 			ui: { requestRender },
@@ -251,6 +265,7 @@ describe("InteractiveMode /memory", () => {
 		expect(rendered).toContain("/agent/memory/projects/--workspace--/chat/project.md");
 		expect(rendered).toContain("running");
 		expect(rendered).toContain("success");
+		expect(rendered).toContain("Embedding request failed");
 		expect(rendered).toContain("/Users/ent/Metis");
 		expect(requestRender).toHaveBeenCalled();
 	});

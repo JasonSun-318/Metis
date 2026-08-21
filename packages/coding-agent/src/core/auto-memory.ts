@@ -9,7 +9,7 @@ import { openMemoryStore } from "./memory/memory-store.ts";
 
 export const AUTO_MEMORY_MAX_LINES = 200;
 export const AUTO_MEMORY_MAX_BYTES = 25 * 1024;
-const migrations = new Map<string, Promise<void>>();
+const initializations = new Map<string, Promise<void>>();
 
 export interface AutoMemoryIndex {
 	directory: string;
@@ -58,18 +58,30 @@ export function loadAutoMemory(agentDir: string, cwd: string): AutoMemorySnapsho
 	};
 }
 
-/** Compatibility entrypoint: ensure the new layout and recover global Markdown once. */
-export function ensureModeScopedMemoryLayout(agentDir: string): Promise<void> {
+export async function ensureAutoMemoryLayout(agentDir: string): Promise<void> {
 	const memoryDir = getAutoMemoryRoot(agentDir);
-	const existing = migrations.get(memoryDir);
+	ensureRealDirectoryDurablySync(memoryDir, 0o700);
+	ensureRealDirectoryDurablySync(getGlobalMemoryDirectory(agentDir), 0o700);
+	ensureRealDirectoryDurablySync(join(memoryDir, "projects"), 0o700);
+	chmodSync(memoryDir, 0o700);
+	const store = openMemoryStore(getMemorySqlitePath(agentDir));
+	store.close();
+}
+
+export function initializeAutoMemory(agentDir: string): Promise<void> {
+	const memoryDir = getAutoMemoryRoot(agentDir);
+	const existing = initializations.get(memoryDir);
 	if (existing) return existing;
 
-	const migration = Promise.resolve()
+	const initialization = Promise.resolve()
 		.then(async () => {
-			ensureRealDirectoryDurablySync(memoryDir, 0o700);
-			ensureRealDirectoryDurablySync(getGlobalMemoryDirectory(agentDir), 0o700);
-			ensureRealDirectoryDurablySync(join(memoryDir, "projects"), 0o700);
-			chmodSync(memoryDir, 0o700);
+			await ensureAutoMemoryLayout(agentDir);
+			const store = openMemoryStore(getMemorySqlitePath(agentDir));
+			try {
+				store.recoverInterruptedHealth(new Date().toISOString());
+			} finally {
+				store.close();
+			}
 		})
 		.then(() => ingestGlobalMarkdownOnce(agentDir))
 		.then(async () => {
@@ -81,11 +93,23 @@ export function ensureModeScopedMemoryLayout(agentDir: string): Promise<void> {
 			}
 		})
 		.catch((error) => {
-			migrations.delete(memoryDir);
+			initializations.delete(memoryDir);
 			throw error;
 		});
-	migrations.set(memoryDir, migration);
-	return migration;
+	initializations.set(memoryDir, initialization);
+	return initialization;
+}
+
+/** @deprecated Compatibility entrypoint without startup recovery. */
+export async function ensureModeScopedMemoryLayout(agentDir: string): Promise<void> {
+	await ensureAutoMemoryLayout(agentDir);
+	await ingestGlobalMarkdownOnce(agentDir);
+	const store = openMemoryStore(getMemorySqlitePath(agentDir));
+	try {
+		await writeGlobalProjection(agentDir, store);
+	} finally {
+		store.close();
+	}
 }
 
 function emptyIndex(directory: string, indexPath: string): AutoMemoryIndex {

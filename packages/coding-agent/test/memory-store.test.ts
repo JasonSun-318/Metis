@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -11,7 +12,7 @@ describe("memory store", () => {
 		for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 	});
 
-	it("inserts an active fact and finds it by cosine search", () => {
+	it("streams exact-context facts and ranks by fused relevance", () => {
 		const dir = mkdtempSync(join(tmpdir(), "metis-mem-"));
 		dirs.push(dir);
 		const store = openMemoryStore(join(dir, "memory.sqlite"));
@@ -29,10 +30,10 @@ describe("memory store", () => {
 			embedding,
 			embeddingModel: "test-emb",
 		});
-		const hits = store.searchByEmbedding(new Float32Array([0.9, 0.1, 0]), {
-			scope: "global",
-			cwdKey: null,
-			mode: null,
+		const { hits } = store.searchRelevantFacts(new Float32Array([0.9, 0.1, 0]), {
+			queryText: "Chinese replies",
+			embeddingKey: "test-emb",
+			projectKey: "unused",
 			limit: 8,
 		});
 		expect(hits[0]?.id).toBe("f1");
@@ -73,7 +74,12 @@ describe("memory store", () => {
 			embeddingModel: "test-emb",
 		});
 		expect(
-			store.searchByEmbedding(new Float32Array([1, 0]), { scope: "global", cwdKey: null, mode: null, limit: 8 }),
+			store.searchRelevantFacts(new Float32Array([1, 0]), {
+				queryText: "Chinese",
+				embeddingKey: "test-emb",
+				projectKey: "unused",
+				limit: 8,
+			}).hits,
 		).toEqual([]);
 		store.close();
 	});
@@ -96,13 +102,144 @@ describe("memory store", () => {
 			embeddingModel: "test-emb",
 		});
 		expect(store.listActiveFacts("project", "--cwd--", null).map((f) => f.id)).toEqual(["p1"]);
-		const hits = store.searchByEmbedding(new Float32Array([0, 1, 0]), {
-			scope: "project",
-			cwdKey: "--cwd--",
-			mode: null,
+		const { hits } = store.searchRelevantFacts(new Float32Array([0, 1, 0]), {
+			queryText: "Auth",
+			embeddingKey: "test-emb",
+			projectKey: "--cwd--",
 			limit: 8,
 		});
 		expect(hits[0]?.id).toBe("p1");
+		store.close();
+	});
+
+	it("admits only positive relevance and tokenizes CJK bigrams", () => {
+		const dir = mkdtempSync(join(tmpdir(), "metis-mem-"));
+		dirs.push(dir);
+		const store = openMemoryStore(join(dir, "memory.sqlite"));
+		const base = {
+			scope: "global" as const,
+			cwdKey: null,
+			mode: null,
+			topicFile: "preferences.md",
+			status: "active" as const,
+			createdAt: "2026-08-21T00:00:00.000Z",
+			sourceTurn: null,
+			embedding: null,
+			embeddingModel: null,
+		};
+		store.insertFact({ ...base, id: "zh", text: "用户偏好中文回复" });
+		store.insertFact({ ...base, id: "unrelated", text: "coffee preference" });
+		expect(
+			store
+				.searchRelevantFacts(null, {
+					queryText: "请用中文回答",
+					embeddingKey: "key",
+					projectKey: "unused",
+					limit: 50,
+				})
+				.hits.map((hit) => hit.id),
+		).toEqual(["zh"]);
+		expect(
+			store.searchRelevantFacts(null, {
+				queryText: "typescript backend",
+				embeddingKey: "key",
+				projectKey: "unused",
+				limit: 50,
+			}).hits,
+		).toEqual([]);
+		store.close();
+	});
+
+	it("clears bounded invalid vectors while keeping keyword hits", () => {
+		const dir = mkdtempSync(join(tmpdir(), "metis-mem-"));
+		dirs.push(dir);
+		const path = join(dir, "memory.sqlite");
+		let store = openMemoryStore(path);
+		for (let index = 0; index < 101; index++) {
+			store.insertFact({
+				id: `bad-${index}`,
+				scope: "global",
+				cwdKey: null,
+				mode: null,
+				topicFile: "preferences.md",
+				text: `target fact ${index}`,
+				status: "active",
+				createdAt: new Date(Date.UTC(2026, 0, 1, 0, 0, index)).toISOString(),
+				sourceTurn: null,
+				embedding: new Float32Array([1, 0]),
+				embeddingModel: "key",
+			});
+		}
+		store.close();
+		const db = new DatabaseSync(path);
+		const update = db.prepare("UPDATE facts SET embedding = ? WHERE id = ?");
+		update.run(Buffer.from([1, 2, 3]), "bad-0");
+		update.run(Buffer.from(new Float32Array([Number.NaN, 1]).buffer), "bad-1");
+		update.run(Buffer.from(new Float32Array([0, 0]).buffer), "bad-2");
+		for (let index = 3; index < 101; index++) {
+			update.run(Buffer.from(new Float32Array([1, 0, 0]).buffer), `bad-${index}`);
+		}
+		db.close();
+
+		store = openMemoryStore(path);
+		const result = store.searchRelevantFacts(new Float32Array([1, 0]), {
+			queryText: "target",
+			embeddingKey: "key",
+			projectKey: "unused",
+			limit: 50,
+		});
+		expect(result.hits).toHaveLength(50);
+		expect(result.invalidEmbeddingIds).toHaveLength(100);
+		expect(store.getFactById(result.invalidEmbeddingIds[0]!)?.embedding).toBeNull();
+		expect(store.listHealth()).toContainEqual(expect.objectContaining({ operation: "embedding", status: "error" }));
+		expect(
+			Array.from({ length: 101 }, (_, index) => store.getFactById(`bad-${index}`)).filter(
+				(fact) => fact?.embedding !== null,
+			),
+		).toHaveLength(1);
+		store.close();
+	});
+
+	it("enforces one backfill lease and rejects a stale owner's commit", () => {
+		const dir = mkdtempSync(join(tmpdir(), "metis-mem-"));
+		dirs.push(dir);
+		const store = openMemoryStore(join(dir, "memory.sqlite"));
+		store.insertFact({
+			id: "pending",
+			scope: "global",
+			cwdKey: null,
+			mode: null,
+			topicFile: "preferences.md",
+			text: "pending",
+			status: "active",
+			createdAt: "2026-08-21T00:00:00.000Z",
+			sourceTurn: null,
+			embedding: null,
+			embeddingModel: null,
+		});
+		expect(store.tryAcquireBackfillLease("old", "old-key", 100, 100)).toBe(true);
+		expect(store.tryAcquireBackfillLease("new", "new-key", 150, 100)).toBe(false);
+		expect(store.tryAcquireBackfillLease("new", "new-key", 200, 100)).toBe(true);
+		expect(
+			store.commitBackfillBatch({
+				ownerId: "old",
+				embeddingKey: "old-key",
+				facts: [{ id: "pending", vector: new Float32Array([1, 0]) }],
+				nowMs: 201,
+				leaseMs: 100,
+			}),
+		).toBe(-1);
+		expect(store.getFactById("pending")?.embedding).toBeNull();
+		expect(
+			store.commitBackfillBatch({
+				ownerId: "new",
+				embeddingKey: "new-key",
+				facts: [{ id: "pending", vector: new Float32Array([0, 1]) }],
+				nowMs: 201,
+				leaseMs: 100,
+			}),
+		).toBe(1);
+		expect(store.getFactById("pending")?.embeddingModel).toBe("new-key");
 		store.close();
 	});
 
@@ -204,5 +341,3 @@ describe("memory store", () => {
 		store.close();
 	});
 });
-
-import { createHash } from "node:crypto";

@@ -11,7 +11,7 @@ import {
 } from "@metis/app-protocol";
 import {
 	createScheduledRunExecutor,
-	ensureModeScopedMemoryLayout,
+	initializeAutoMemory,
 	ModelRegistry,
 	pruneStaleSessionWorkDirs,
 	ScheduleManager,
@@ -142,7 +142,7 @@ export class AppServer {
 
 	static async create(options: AppServerOptions): Promise<AppServer> {
 		SessionManager.recoverInterruptedProjectTrash(options.agentDir);
-		await ensureModeScopedMemoryLayout(options.agentDir);
+		await initializeAutoMemory(options.agentDir);
 		pruneStaleSessionWorkDirs(options.agentDir);
 		const server = new AppServer(options);
 		await server.catalog.refresh();
