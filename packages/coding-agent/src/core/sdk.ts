@@ -356,7 +356,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		{
 			const store = openMemoryStore(getMemorySqlitePath(agentDir));
 			try {
-				writeProjection(agentDir, memoryIdentity.projectKey, store);
+				await writeProjection(agentDir, memoryIdentity.projectKey, store);
 				store.recordHealth({
 					operation: "migration",
 					status: memoryMigration.legacyCollision ? "error" : "ok",

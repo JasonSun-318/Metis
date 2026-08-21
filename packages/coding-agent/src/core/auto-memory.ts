@@ -65,17 +65,17 @@ export function ensureModeScopedMemoryLayout(agentDir: string): Promise<void> {
 	if (existing) return existing;
 
 	const migration = Promise.resolve()
-		.then(() => {
+		.then(async () => {
 			ensureRealDirectoryDurablySync(memoryDir, 0o700);
 			ensureRealDirectoryDurablySync(getGlobalMemoryDirectory(agentDir), 0o700);
 			ensureRealDirectoryDurablySync(join(memoryDir, "projects"), 0o700);
 			chmodSync(memoryDir, 0o700);
 		})
 		.then(() => ingestGlobalMarkdownOnce(agentDir))
-		.then(() => {
+		.then(async () => {
 			const store = openMemoryStore(getMemorySqlitePath(agentDir));
 			try {
-				writeGlobalProjection(agentDir, store);
+				await writeGlobalProjection(agentDir, store);
 			} finally {
 				store.close();
 			}

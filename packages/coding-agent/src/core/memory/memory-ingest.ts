@@ -1,7 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
-import lockfile from "proper-lockfile";
 import {
 	getAutoMemoryRoot,
 	getGlobalMemoryDirectory,
@@ -9,6 +8,7 @@ import {
 	getProjectMemoryDirectory,
 } from "../auto-memory.ts";
 import { readSingleLinkFilePrefixSync } from "../durable-file.ts";
+import { withMemoryRootLock } from "./memory-lock.ts";
 import { looksLikeSecret } from "./memory-secrets.ts";
 import { type MemoryIngestContextKey, type MemoryStore, openMemoryStore } from "./memory-store.ts";
 import type { MemoryFact, MemoryScope } from "./memory-types.ts";
@@ -20,16 +20,11 @@ const MAX_AGGREGATE_TOPIC_BYTES = 16 * 1024 * 1024;
 const MAX_FACT_CHARACTERS = 4_000;
 const INDEX_ENTRY = /^- \[([^\]]+\.md)\]\(\1\) — .{1,120}$/u;
 const SAFE_MEMORY_FILE = /^(?!\.)(?!.*\.\.)([A-Za-z0-9][A-Za-z0-9._-]*)\.md$/;
-const INGEST_LOCK_OPTIONS = {
-	realpath: false,
-	stale: 15_000,
-	retries: { retries: 8, factor: 1.5, minTimeout: 20, maxTimeout: 250, randomize: true },
-} as const;
 
 export async function ingestGlobalMarkdownOnce(agentDir: string): Promise<void> {
 	const memoryRoot = getAutoMemoryRoot(agentDir);
 	if (!existsSync(memoryRoot)) return;
-	await withMemoryLock(memoryRoot, async () => {
+	await withMemoryRootLock(memoryRoot, async () => {
 		const store = openMemoryStore(getMemorySqlitePath(agentDir));
 		try {
 			if (store.isMarkdownRecoveryHandled("global")) return;
@@ -50,7 +45,7 @@ export async function ingestExactProjectProjectionOnce(agentDir: string, project
 	if (!/^[0-9a-f]{64}$/u.test(projectKey)) throw new Error("Invalid memory project key");
 	const memoryRoot = getAutoMemoryRoot(agentDir);
 	if (!existsSync(memoryRoot)) return;
-	await withMemoryLock(memoryRoot, async () => {
+	await withMemoryRootLock(memoryRoot, async () => {
 		const store = openMemoryStore(getMemorySqlitePath(agentDir));
 		try {
 			const contextKey = `project:${projectKey}` as const;
@@ -144,6 +139,7 @@ function collectFacts(
 				mode: null,
 				topicFile,
 				text: chunk,
+				fingerprint: null,
 				status: "active",
 				createdAt,
 				sourceTurn: "ingest",
@@ -204,26 +200,6 @@ function decodeCompleteUtf8Prefix(bytes: Buffer, mayEndMidCharacter: boolean): s
 		}
 	}
 	return "";
-}
-
-async function withMemoryLock<T>(memoryRoot: string, operation: () => Promise<T>): Promise<T> {
-	const release = await lockfile.lock(memoryRoot, INGEST_LOCK_OPTIONS);
-	let primaryError: unknown;
-	let result: T | undefined;
-	try {
-		result = await operation();
-	} catch (error) {
-		primaryError = error;
-	}
-	let releaseError: unknown;
-	try {
-		await release();
-	} catch (error) {
-		releaseError = error;
-	}
-	if (primaryError !== undefined) throw primaryError;
-	if (releaseError !== undefined) throw releaseError;
-	return result as T;
 }
 
 function errorMessage(error: unknown): string {

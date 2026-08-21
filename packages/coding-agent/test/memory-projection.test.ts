@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, linkSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -86,7 +86,23 @@ describe("memory projection", () => {
 		expect(rendered.topicFiles.size).toBe(205);
 	});
 
-	it("writeProjection writes full catalogs on disk while loadAutoMemory still truncates", () => {
+	it("keeps a multiline Unicode retrieval sentence on one 120-code-point line", () => {
+		const rendered = renderProjection([
+			fact({
+				id: "multiline",
+				topicFile: "notes.md",
+				text: `line one\nline two ${"界".repeat(200)}`,
+				createdAt: "2026-08-21T00:00:00.000Z",
+			}),
+		]);
+		const lines = rendered.indexMarkdown.split("\n");
+		expect(lines).toHaveLength(1);
+		const summary = lines[0]!.split(" — ")[1]!;
+		expect(summary).toContain("line one line two");
+		expect([...summary]).toHaveLength(120);
+	});
+
+	it("writeProjection writes the bounded catalog on disk", async () => {
 		const root = mkdtempSync(join(tmpdir(), "metis-proj-"));
 		dirs.push(root);
 		const agentDir = join(root, "agent");
@@ -114,7 +130,7 @@ describe("memory projection", () => {
 			}),
 		);
 
-		for (let i = 0; i < 205; i++) {
+		for (let i = 0; i < 30; i++) {
 			store.insertFact(
 				fact({
 					id: `p${i}`,
@@ -128,7 +144,7 @@ describe("memory projection", () => {
 			);
 		}
 
-		writeProjection(agentDir, projectKey, store);
+		await writeProjection(agentDir, projectKey, store);
 		store.close();
 
 		const paths = getAutoMemoryPaths(agentDir, cwd);
@@ -142,15 +158,60 @@ describe("memory projection", () => {
 
 		const projectIndex = readFileSync(paths.project.indexPath, "utf8");
 		const projectLines = projectIndex.split(/\r?\n/).filter((line) => INDEX_ENTRY.test(line));
-		expect(projectLines).toHaveLength(205);
-		expect(projectLines[0]).toContain("topic-204.md");
-		expect(readFileSync(join(paths.project.directory, "topic-204.md"), "utf8")).toContain("Project fact 204");
+		expect(projectLines).toHaveLength(30);
+		expect(projectLines[0]).toContain("topic-029.md");
+		expect(readFileSync(join(paths.project.directory, "topic-029.md"), "utf8")).toContain("Project fact 29");
 		expect(readFileSync(join(paths.project.directory, "topic-000.md"), "utf8")).toContain("Project fact 0");
 
 		const loaded = loadAutoMemory(agentDir, cwd);
-		expect(loaded.project.truncated).toBe(true);
+		expect(loaded.project.truncated).toBe(false);
 		const loadedLines = loaded.project.content.split(/\r?\n/).filter((line) => INDEX_ENTRY.test(line));
 		expect(loadedLines.length).toBeLessThanOrEqual(200);
-		expect(loadedLines[0]).toContain("topic-204.md");
+		expect(loadedLines[0]).toContain("topic-029.md");
+	});
+
+	it("removes only stale topics owned by the prior generated index", async () => {
+		const root = mkdtempSync(join(tmpdir(), "metis-proj-"));
+		dirs.push(root);
+		const agentDir = join(root, "agent");
+		const projectKey = memoryProjectIdentity(join(root, "project")).projectKey;
+		const store = openMemoryStore(getMemorySqlitePath(agentDir));
+		for (const topicFile of ["old.md", "overflow.md", "keep.md"]) {
+			store.insertFact(fact({ id: topicFile, topicFile, text: topicFile, createdAt: "2026-08-21T00:00:00.000Z" }));
+		}
+		await writeProjection(agentDir, projectKey, store);
+		const directory = getAutoMemoryPaths(agentDir, join(root, "project")).global.directory;
+		writeFileSync(join(directory, "notes.md"), "unrelated\n");
+		store.deleteFact("old.md");
+		store.deleteFact("overflow.md");
+		await writeProjection(agentDir, projectKey, store);
+		expect(existsSync(join(directory, "old.md"))).toBe(false);
+		expect(existsSync(join(directory, "overflow.md"))).toBe(false);
+		expect(existsSync(join(directory, "keep.md"))).toBe(true);
+		expect(readFileSync(join(directory, "notes.md"), "utf8")).toBe("unrelated\n");
+		store.close();
+	});
+
+	it("keeps the old ownership index when stale cleanup fails, then succeeds on retry", async () => {
+		const root = mkdtempSync(join(tmpdir(), "metis-proj-"));
+		dirs.push(root);
+		const agentDir = join(root, "agent");
+		const cwd = join(root, "project");
+		const projectKey = memoryProjectIdentity(cwd).projectKey;
+		const store = openMemoryStore(getMemorySqlitePath(agentDir));
+		store.insertFact(fact({ id: "old", topicFile: "old.md", text: "old", createdAt: "2026-08-21T00:00:00.000Z" }));
+		await writeProjection(agentDir, projectKey, store);
+		const paths = getAutoMemoryPaths(agentDir, cwd);
+		const oldIndex = readFileSync(paths.global.indexPath, "utf8");
+		const alias = join(paths.global.directory, "alias");
+		linkSync(join(paths.global.directory, "old.md"), alias);
+		store.deleteFact("old");
+		await expect(writeProjection(agentDir, projectKey, store)).rejects.toThrow(/aliased/u);
+		expect(readFileSync(paths.global.indexPath, "utf8")).toBe(oldIndex);
+		unlinkSync(alias);
+		await writeProjection(agentDir, projectKey, store);
+		expect(readFileSync(paths.global.indexPath, "utf8")).toBe("");
+		expect(existsSync(join(paths.global.directory, "old.md"))).toBe(false);
+		store.close();
 	});
 });

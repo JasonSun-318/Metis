@@ -1,17 +1,22 @@
+import { createHash } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type { MemoryProjectIdentity } from "./memory-project.ts";
-import type {
-	MemoryExtractRun,
-	MemoryExtractRunStatus,
-	MemoryFact,
-	MemoryFactStatus,
-	MemoryHealth,
-	MemoryHealthOperation,
-	MemoryScope,
-	MemorySearchHit,
-	MemorySearchOptions,
+import {
+	isManagedProjectionTopicFile,
+	isSafeTopicFile,
+	MAX_ORDINARY_TOPICS_PER_CONTEXT,
+	type MemoryExtractRun,
+	type MemoryExtractRunStatus,
+	type MemoryFact,
+	type MemoryFactStatus,
+	type MemoryHealth,
+	type MemoryHealthOperation,
+	type MemoryScope,
+	type MemorySearchHit,
+	type MemorySearchOptions,
+	memoryFactFingerprint,
 } from "./memory-types.ts";
 
 const SCHEMA = `
@@ -22,6 +27,7 @@ CREATE TABLE IF NOT EXISTS facts (
   mode TEXT,
   topic_file TEXT NOT NULL,
   text TEXT NOT NULL,
+  fingerprint TEXT,
   status TEXT NOT NULL,
   created_at TEXT NOT NULL,
   source_turn TEXT,
@@ -69,6 +75,7 @@ type FactRow = {
 	mode: string | null;
 	topic_file: string;
 	text: string;
+	fingerprint: string | null;
 	status: string;
 	created_at: string;
 	source_turn: string | null;
@@ -107,11 +114,14 @@ export interface ResolveMemoryProjectResult {
 	legacyCollision: boolean;
 }
 
+export type MemoryProjectionFact = Pick<MemoryFact, "topicFile" | "text" | "createdAt" | "id">;
+
 export interface MemoryStore {
-	insertFact(fact: MemoryFact): void;
+	insertFact(fact: MemoryFact): boolean;
 	getFactById(id: string): MemoryFact | null;
 	updateFactStatus(id: string, status: MemoryFactStatus): void;
 	updateFactScope(id: string, scope: MemoryScope, cwdKey: string | null, mode: string | null): void;
+	updateFactTopic(id: string, topicFile: string): void;
 	updateFactEmbedding(id: string, embedding: Float32Array | null, embeddingModel: string | null): void;
 	deleteFact(id: string): void;
 	countFacts(): number;
@@ -127,6 +137,7 @@ export interface MemoryStore {
 	insertProjectRow(identity: MemoryProjectIdentity): void;
 	listActiveFactsForContext(projectKey: string): MemoryFact[];
 	listSupersededFactsForContext(projectKey: string, limit: number): MemoryFact[];
+	iterateProjectionFacts(projectKey: string | null): Iterable<MemoryProjectionFact>;
 	isMarkdownRecoveryHandled(contextKey: MemoryIngestContextKey): boolean;
 	markMarkdownRecoveryHandled(contextKey: MemoryIngestContextKey, handledAt: string): void;
 	recordHealth(row: MemoryHealth): void;
@@ -140,26 +151,38 @@ export function openMemoryStore(path: string): MemoryStore {
 	const db = new DatabaseSync(path);
 	db.exec("PRAGMA journal_mode = WAL;");
 	db.exec("PRAGMA busy_timeout = 5000;");
+	const factColumns = db.prepare("PRAGMA table_info(facts)").all() as Array<{ name: string }>;
 	db.exec(SCHEMA);
+	if (factColumns.length > 0 && !factColumns.some((column) => column.name === "fingerprint")) {
+		db.exec("ALTER TABLE facts ADD COLUMN fingerprint TEXT");
+	}
+	db.exec("DROP INDEX IF EXISTS facts_active_fingerprint");
+	migrateMemoryFacts(db);
+	db.exec(`
+		CREATE UNIQUE INDEX IF NOT EXISTS facts_active_fingerprint
+		ON facts(scope, IFNULL(cwd_key, ''), fingerprint)
+		WHERE status = 'active'
+	`);
 
 	const insert = db.prepare(`
-		INSERT INTO facts (
-			id, scope, cwd_key, mode, topic_file, text, status, created_at, source_turn, embedding, embedding_model
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT OR IGNORE INTO facts (
+			id, scope, cwd_key, mode, topic_file, text, fingerprint, status, created_at, source_turn, embedding, embedding_model
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`);
 
 	const selectById = db.prepare(`
-		SELECT id, scope, cwd_key, mode, topic_file, text, status, created_at, source_turn, embedding, embedding_model
+		SELECT id, scope, cwd_key, mode, topic_file, text, fingerprint, status, created_at, source_turn, embedding, embedding_model
 		FROM facts
 		WHERE id = ?
 	`);
 
 	const updateStatus = db.prepare(`UPDATE facts SET status = ? WHERE id = ?`);
 	const updateScope = db.prepare(`UPDATE facts SET scope = ?, cwd_key = ?, mode = ? WHERE id = ?`);
+	const updateTopic = db.prepare(`UPDATE facts SET topic_file = ? WHERE id = ?`);
 	const updateEmbedding = db.prepare(`UPDATE facts SET embedding = ?, embedding_model = ? WHERE id = ?`);
 
 	const selectNeedingEmbedding = db.prepare(`
-		SELECT id, scope, cwd_key, mode, topic_file, text, status, created_at, source_turn, embedding, embedding_model
+		SELECT id, scope, cwd_key, mode, topic_file, text, fingerprint, status, created_at, source_turn, embedding, embedding_model
 		FROM facts
 		WHERE status = 'active'
 		  AND (embedding IS NULL OR embedding_model IS NULL OR embedding_model != ?)
@@ -168,7 +191,7 @@ export function openMemoryStore(path: string): MemoryStore {
 	`);
 
 	const selectActiveGlobal = db.prepare(`
-		SELECT id, scope, cwd_key, mode, topic_file, text, status, created_at, source_turn, embedding, embedding_model
+		SELECT id, scope, cwd_key, mode, topic_file, text, fingerprint, status, created_at, source_turn, embedding, embedding_model
 		FROM facts
 		WHERE scope = ?
 		  AND status = 'active'
@@ -177,7 +200,7 @@ export function openMemoryStore(path: string): MemoryStore {
 	`);
 
 	const selectActiveProject = db.prepare(`
-		SELECT id, scope, cwd_key, mode, topic_file, text, status, created_at, source_turn, embedding, embedding_model
+		SELECT id, scope, cwd_key, mode, topic_file, text, fingerprint, status, created_at, source_turn, embedding, embedding_model
 		FROM facts
 		WHERE scope = ?
 		  AND status = 'active'
@@ -186,7 +209,7 @@ export function openMemoryStore(path: string): MemoryStore {
 	`);
 
 	const selectByStatus = db.prepare(`
-		SELECT id, scope, cwd_key, mode, topic_file, text, status, created_at, source_turn, embedding, embedding_model
+		SELECT id, scope, cwd_key, mode, topic_file, text, fingerprint, status, created_at, source_turn, embedding, embedding_model
 		FROM facts
 		WHERE status = ?
 		ORDER BY created_at DESC, id ASC
@@ -235,7 +258,7 @@ export function openMemoryStore(path: string): MemoryStore {
 		WHERE scope = 'project' AND cwd_key = ? AND mode IS NOT NULL
 	`);
 	const selectActiveContext = db.prepare(`
-		SELECT id, scope, cwd_key, mode, topic_file, text, status, created_at, source_turn, embedding, embedding_model
+		SELECT id, scope, cwd_key, mode, topic_file, text, fingerprint, status, created_at, source_turn, embedding, embedding_model
 		FROM facts
 		WHERE status = 'active'
 		  AND ((scope = 'global' AND cwd_key IS NULL AND mode IS NULL)
@@ -243,13 +266,25 @@ export function openMemoryStore(path: string): MemoryStore {
 		ORDER BY created_at DESC, id ASC
 	`);
 	const selectSupersededContext = db.prepare(`
-		SELECT id, scope, cwd_key, mode, topic_file, text, status, created_at, source_turn, embedding, embedding_model
+		SELECT id, scope, cwd_key, mode, topic_file, text, fingerprint, status, created_at, source_turn, embedding, embedding_model
 		FROM facts
 		WHERE status = 'superseded'
 		  AND ((scope = 'global' AND cwd_key IS NULL AND mode IS NULL)
 		    OR (scope = 'project' AND cwd_key = ? AND mode IS NULL))
 		ORDER BY created_at DESC, source_turn DESC, id DESC
 		LIMIT ?
+	`);
+	const selectProjectionGlobal = db.prepare(`
+		SELECT topic_file, text, created_at, id
+		FROM facts
+		WHERE status = 'active' AND scope = 'global' AND cwd_key IS NULL AND mode IS NULL
+		ORDER BY topic_file ASC, created_at ASC, id ASC
+	`);
+	const selectProjectionProject = db.prepare(`
+		SELECT topic_file, text, created_at, id
+		FROM facts
+		WHERE status = 'active' AND scope = 'project' AND cwd_key = ? AND mode IS NULL
+		ORDER BY topic_file ASC, created_at ASC, id ASC
 	`);
 	const selectIngestState = db.prepare(`SELECT 1 AS found FROM memory_ingest_state WHERE context_key = ?`);
 	const markIngestState = db.prepare(`
@@ -295,19 +330,21 @@ export function openMemoryStore(path: string): MemoryStore {
 
 	return {
 		insertFact(fact) {
-			insert.run(
+			const result = insert.run(
 				fact.id,
 				fact.scope,
 				fact.cwdKey,
 				fact.mode,
 				fact.topicFile,
 				fact.text,
+				fact.fingerprint ?? memoryFactFingerprint(fact.text),
 				fact.status,
 				fact.createdAt,
 				fact.sourceTurn,
 				fact.embedding ? embeddingToBlob(fact.embedding) : null,
 				fact.embeddingModel,
 			);
+			return Number(result.changes) === 1;
 		},
 
 		getFactById(id) {
@@ -321,6 +358,10 @@ export function openMemoryStore(path: string): MemoryStore {
 
 		updateFactScope(id, scope, cwdKey, mode) {
 			updateScope.run(scope, cwdKey, mode, id);
+		},
+
+		updateFactTopic(id, topicFile) {
+			updateTopic.run(topicFile, id);
 		},
 
 		updateFactEmbedding(id, embedding, embeddingModel) {
@@ -439,6 +480,19 @@ export function openMemoryStore(path: string): MemoryStore {
 			return (selectSupersededContext.all(projectKey, Math.max(0, limit)) as FactRow[]).map(rowToFact);
 		},
 
+		*iterateProjectionFacts(projectKey) {
+			const rows =
+				projectKey === null ? selectProjectionGlobal.iterate() : selectProjectionProject.iterate(projectKey);
+			for (const row of rows as Iterable<{
+				topic_file: string;
+				text: string;
+				created_at: string;
+				id: string;
+			}>) {
+				yield { topicFile: row.topic_file, text: row.text, createdAt: row.created_at, id: row.id };
+			}
+		},
+
 		isMarkdownRecoveryHandled(contextKey) {
 			return selectIngestState.get(contextKey) !== undefined;
 		},
@@ -469,6 +523,150 @@ export function openMemoryStore(path: string): MemoryStore {
 			db.close();
 		},
 	};
+}
+
+type MigrationFactRow = {
+	id: string;
+	scope: string;
+	cwd_key: string | null;
+	mode: string | null;
+	topic_file: string;
+	text: string;
+	fingerprint: string | null;
+	status: string;
+	created_at: string;
+	source_turn: string | null;
+};
+
+function migrateMemoryFacts(db: DatabaseSync): void {
+	const rows = db
+		.prepare(
+			`SELECT id, scope, cwd_key, mode, topic_file, text, fingerprint, status, created_at, source_turn FROM facts`,
+		)
+		.all() as MigrationFactRow[];
+	if (!rows.some((row) => row.fingerprint === null)) return;
+
+	const contextKey = (row: MigrationFactRow) => `${row.scope}\0${row.cwd_key ?? ""}`;
+	const usedByContext = new Map<string, Map<string, string>>();
+	const topicByContextAndSource = new Map<string, string>();
+	const usedFor = (context: string) => {
+		let used = usedByContext.get(context);
+		if (!used) {
+			used = new Map();
+			usedByContext.set(context, used);
+		}
+		return used;
+	};
+
+	for (const row of rows) {
+		const context = contextKey(row);
+		const lower = row.topic_file.toLocaleLowerCase("en-US");
+		const canonical =
+			row.fingerprint !== null && isManagedProjectionTopicFile(row.topic_file)
+				? row.topic_file
+				: isSafeTopicFile(lower)
+					? lower
+					: undefined;
+		if (!canonical) continue;
+		topicByContextAndSource.set(`${context}\0${row.topic_file}`, canonical);
+		usedFor(context).set(canonical, row.topic_file);
+	}
+
+	const invalidSources = [
+		...new Set(
+			rows
+				.filter((row) => !topicByContextAndSource.has(`${contextKey(row)}\0${row.topic_file}`))
+				.map((row) => `${contextKey(row)}\0${row.topic_file}`),
+		),
+	].sort();
+	for (const entry of invalidSources) {
+		const separator = entry.lastIndexOf("\0");
+		const context = entry.slice(0, separator);
+		const source = entry.slice(separator + 1);
+		const digest = createHash("sha256").update(source).digest("hex");
+		const used = usedFor(context);
+		let length = 12;
+		let candidate = `legacy-${digest.slice(0, length)}.md`;
+		while (used.has(candidate) && used.get(candidate) !== source && length < digest.length) {
+			candidate = `legacy-${digest.slice(0, ++length)}.md`;
+		}
+		if (used.has(candidate) && used.get(candidate) !== source) {
+			throw new Error("Memory topic digest collision");
+		}
+		used.set(candidate, source);
+		topicByContextAndSource.set(entry, candidate);
+	}
+
+	for (const row of rows) {
+		row.topic_file = topicByContextAndSource.get(`${contextKey(row)}\0${row.topic_file}`)!;
+		row.fingerprint = memoryFactFingerprint(row.text);
+		row.mode = null;
+		if (row.scope === "global") row.cwd_key = null;
+	}
+
+	const activeByContext = new Map<string, MigrationFactRow[]>();
+	for (const row of rows) {
+		if (row.status !== "active") continue;
+		const context = contextKey(row);
+		const facts = activeByContext.get(context);
+		if (facts) facts.push(row);
+		else activeByContext.set(context, [row]);
+	}
+	for (const facts of activeByContext.values()) {
+		const latestByTopic = new Map<string, string>();
+		for (const fact of facts) {
+			if (fact.topic_file === "overflow.md" || fact.topic_file === "legacy-overflow.md") continue;
+			const latest = latestByTopic.get(fact.topic_file);
+			if (!latest || fact.created_at > latest) latestByTopic.set(fact.topic_file, fact.created_at);
+		}
+		const overflowTopics = [...latestByTopic]
+			.sort(
+				([leftName, leftDate], [rightName, rightDate]) =>
+					rightDate.localeCompare(leftDate) || leftName.localeCompare(rightName),
+			)
+			.slice(MAX_ORDINARY_TOPICS_PER_CONTEXT)
+			.map(([name]) => name);
+		const overflow = new Set(overflowTopics);
+		for (const fact of facts) {
+			if (overflow.has(fact.topic_file)) fact.topic_file = "legacy-overflow.md";
+		}
+	}
+
+	const activeByFingerprint = new Map<string, MigrationFactRow[]>();
+	for (const row of rows) {
+		if (row.status !== "active") continue;
+		const key = `${row.scope}\0${row.cwd_key ?? ""}\0${row.fingerprint}`;
+		const facts = activeByFingerprint.get(key);
+		if (facts) facts.push(row);
+		else activeByFingerprint.set(key, [row]);
+	}
+	for (const duplicates of activeByFingerprint.values()) {
+		if (duplicates.length < 2) continue;
+		duplicates.sort(compareMigrationRecency);
+		for (const duplicate of duplicates.slice(0, -1)) duplicate.status = "superseded";
+	}
+
+	const update = db.prepare(
+		`UPDATE facts SET cwd_key = ?, mode = ?, topic_file = ?, fingerprint = ?, status = ? WHERE id = ?`,
+	);
+	db.exec("BEGIN IMMEDIATE");
+	try {
+		for (const row of rows) {
+			update.run(row.cwd_key, row.mode, row.topic_file, row.fingerprint, row.status, row.id);
+		}
+		db.exec("COMMIT");
+	} catch (error) {
+		db.exec("ROLLBACK");
+		throw error;
+	}
+}
+
+function compareMigrationRecency(left: MigrationFactRow, right: MigrationFactRow): number {
+	return (
+		left.created_at.localeCompare(right.created_at) ||
+		(left.source_turn ?? "").localeCompare(right.source_turn ?? "") ||
+		left.id.localeCompare(right.id)
+	);
 }
 
 function embeddingToBlob(embedding: Float32Array): Buffer {
@@ -505,6 +703,7 @@ function rowToFact(row: FactRow): MemoryFact {
 		mode: row.mode,
 		topicFile: row.topic_file,
 		text: row.text,
+		fingerprint: row.fingerprint,
 		status: row.status as MemoryFact["status"],
 		createdAt: row.created_at,
 		sourceTurn: row.source_turn,

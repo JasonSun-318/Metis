@@ -33,8 +33,8 @@ export const RECONCILE_EXTRACT_SYSTEM_PROMPT = `You reconcile durable memory fac
 Rules:
 - Uncertain scope → project.
 - Do not read or write the memory directory. Your only action is calling the reconcile_facts tool.
-- Code applies recency using createdAt/sourceTurn. Prefer including ids from the supplied fact list only.
-- merge: keep the newest sourceTurn/createdAt id as the survivor unless you name survivorId; if timestamps tie, the first listed survivor wins and the rest are superseded.
+- Code applies recency by createdAt, then null-as-empty sourceTurn, then id. Use only ids from the supplied fact list.
+- merge: the survivor must be the deterministically newest id under that three-field order; the rest are superseded.
 - moveScope only changes scope/cwd_key/mode columns.
 - supersede/merge/delete/moveScope must reference ids from the supplied list.
 - You may add new facts via add when needed.
@@ -295,7 +295,7 @@ export async function runMemoryExtract(options: RunMemoryExtractOptions): Promis
 			}
 			status = "success";
 			reason = undefined;
-			writeProjection(options.agentDir, projectKey, store);
+			await writeProjection(options.agentDir, projectKey, store);
 			break;
 		}
 		if (status !== "success") {

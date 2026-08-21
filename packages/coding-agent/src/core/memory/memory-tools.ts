@@ -6,25 +6,32 @@ import { defineTool, type ToolDefinition } from "../extensions/types.ts";
 import { writeProjection } from "./memory-projection.ts";
 import { looksLikeSecret } from "./memory-secrets.ts";
 import type { MemoryStore } from "./memory-store.ts";
-import type { MemoryFact, MemoryScope } from "./memory-types.ts";
+import {
+	isManagedProjectionTopicFile,
+	isSafeTopicFile,
+	MAX_FACT_TEXT_CHARS,
+	MAX_FACTS_PER_MUTATION,
+	MAX_ORDINARY_TOPICS_PER_CONTEXT,
+	MAX_RECONCILE_OPERATIONS,
+	type MemoryFact,
+	type MemoryScope,
+	memoryFactFingerprint,
+} from "./memory-types.ts";
 
-/** Same basename rule as ingest / projection — flat `.md` only, no traversal. */
-export const SAFE_MEMORY_FILE = /^(?!\.)(?!.*\.\.)([A-Za-z0-9][A-Za-z0-9._-]*)\.md$/;
+/** @deprecated Use isSafeTopicFile; retained for extension compatibility. */
+export const SAFE_MEMORY_FILE = /^(?!.*\.\.)[a-z0-9][a-z0-9._-]{0,119}\.md$/u;
 
 const FactInputSchema = Type.Object(
 	{
-		text: Type.String({ minLength: 1 }),
+		text: Type.String({ minLength: 1, maxLength: MAX_FACT_TEXT_CHARS }),
 		scope: Type.Union([Type.Literal("global"), Type.Literal("project")]),
-		/** Required for insert; omitted/invalid basenames are dropped (no auto-slug). */
-		topicFile: Type.Optional(Type.String()),
+		topicFile: Type.String({ minLength: 1, maxLength: 123 }),
 	},
 	{ additionalProperties: false },
 );
 
 export const CommitFactsParamsSchema = Type.Object(
-	{
-		facts: Type.Array(FactInputSchema),
-	},
+	{ facts: Type.Array(FactInputSchema, { maxItems: MAX_FACTS_PER_MUTATION }) },
 	{ additionalProperties: false },
 );
 
@@ -35,15 +42,10 @@ const MergeEntrySchema = Type.Object(
 	},
 	{ additionalProperties: false },
 );
-
 const SupersedeEntrySchema = Type.Object(
-	{
-		oldId: Type.String({ minLength: 1 }),
-		newId: Type.String({ minLength: 1 }),
-	},
+	{ oldId: Type.String({ minLength: 1 }), newId: Type.String({ minLength: 1 }) },
 	{ additionalProperties: false },
 );
-
 const MoveScopeEntrySchema = Type.Object(
 	{
 		id: Type.String({ minLength: 1 }),
@@ -57,7 +59,7 @@ export const ReconcileFactsParamsSchema = Type.Object(
 		merge: Type.Optional(Type.Array(MergeEntrySchema)),
 		supersede: Type.Optional(Type.Array(SupersedeEntrySchema)),
 		deleteIds: Type.Optional(Type.Array(Type.String({ minLength: 1 }))),
-		add: Type.Optional(Type.Array(FactInputSchema)),
+		add: Type.Optional(Type.Array(FactInputSchema, { maxItems: MAX_FACTS_PER_MUTATION })),
 		moveScope: Type.Optional(Type.Array(MoveScopeEntrySchema)),
 	},
 	{ additionalProperties: false },
@@ -69,62 +71,57 @@ export type ReconcileFactsParams = Static<typeof ReconcileFactsParamsSchema>;
 export interface MemoryToolContext {
 	store: MemoryStore;
 	agentDir: string;
-	/** SHA-256 key of the exact canonical primary cwd. */
 	projectKey: string;
 	sourceTurn: string | null;
 	createdAt?: string;
-	/** When false, skip markdown projection after a successful write. Default true. */
 	projectAfterWrite?: boolean;
-	/** Current embedding model id (`provider/model`); used when embedText succeeds. */
+	embeddingKey?: string | null;
+	embedTexts?: (texts: string[], signal?: AbortSignal) => Promise<Float32Array[]>;
+	/** @deprecated Transitional single-item adapter; removed when provider settings land. */
 	embeddingModel?: string | null;
-	/** Best-effort embedder; failures leave embedding NULL. */
 	embedText?: (text: string) => Promise<Float32Array | null>;
 }
 
 export interface CommitFactsDetails {
 	ok: boolean;
 	inserted: number;
+	omittedSensitive: number;
+	remappedTopicLimit: number;
 	error?: string;
 }
-
 export interface ReconcileFactsDetails {
 	ok: boolean;
 	inserted: number;
 	superseded: number;
 	deleted: number;
 	moved: number;
+	remappedTopicLimit: number;
 	error?: string;
 }
-
 export type ApplyReconcileFactsResult = ReconcileFactsDetails & { facts: MemoryFact[] };
 
 function toolText(text: string, details: CommitFactsDetails | ReconcileFactsDetails): AgentToolResult<typeof details> {
-	return {
-		content: [{ type: "text", text }],
-		details,
-	};
+	return { content: [{ type: "text", text }], details };
 }
 
-function createdAtNow(ctx: MemoryToolContext): string {
-	return ctx.createdAt ?? new Date().toISOString();
+function recency(left: MemoryFact, right: MemoryFact): number {
+	return (
+		left.createdAt.localeCompare(right.createdAt) ||
+		(left.sourceTurn ?? "").localeCompare(right.sourceTurn ?? "") ||
+		left.id.localeCompare(right.id)
+	);
 }
 
-function isSafeTopicFile(topicFile: string): boolean {
-	return SAFE_MEMORY_FILE.test(topicFile);
-}
-
-/** True when `candidate` is strictly newer than `baseline` by createdAt, then sourceTurn. */
 export function isFactNewer(candidate: MemoryFact, baseline: MemoryFact): boolean {
-	const byCreated = candidate.createdAt.localeCompare(baseline.createdAt);
-	if (byCreated !== 0) return byCreated > 0;
-	const left = candidate.sourceTurn ?? "";
-	const right = baseline.sourceTurn ?? "";
-	return left.localeCompare(right) > 0;
+	return recency(candidate, baseline) > 0;
 }
 
-function scopeColumns(scope: MemoryScope, ctx: MemoryToolContext): { cwdKey: string | null; mode: string | null } {
-	if (scope === "global") return { cwdKey: null, mode: null };
-	return { cwdKey: ctx.projectKey, mode: null };
+function scopeColumns(scope: MemoryScope, ctx: MemoryToolContext) {
+	return scope === "global" ? { cwdKey: null, mode: null } : { cwdKey: ctx.projectKey, mode: null };
+}
+
+function contextKey(scope: MemoryScope, cwdKey: string | null): string {
+	return `${scope}\0${cwdKey ?? ""}`;
 }
 
 function isFactVisible(ctx: MemoryToolContext, fact: MemoryFact): boolean {
@@ -134,48 +131,73 @@ function isFactVisible(ctx: MemoryToolContext, fact: MemoryFact): boolean {
 	);
 }
 
-function maybeProject(ctx: MemoryToolContext): void {
-	if (ctx.projectAfterWrite === false) return;
-	writeProjection(ctx.agentDir, ctx.projectKey, ctx.store);
-}
-
-function insertFactInputs(ctx: MemoryToolContext, inputs: Static<typeof FactInputSchema>[]): MemoryFact[] {
-	const inserted: MemoryFact[] = [];
-	for (const input of inputs) {
-		if (typeof input.topicFile !== "string" || !isSafeTopicFile(input.topicFile)) continue;
-		if (looksLikeSecret(input.text)) continue;
-		const columns = scopeColumns(input.scope, ctx);
-		const fact: MemoryFact = {
-			id: randomUUID(),
-			scope: input.scope,
-			cwdKey: columns.cwdKey,
-			mode: columns.mode,
-			topicFile: input.topicFile,
-			text: input.text,
-			status: "active",
-			createdAt: createdAtNow(ctx),
-			sourceTurn: ctx.sourceTurn,
-			embedding: null,
-			embeddingModel: null,
-		};
-		ctx.store.insertFact(fact);
-		inserted.push(fact);
+function normalizedInput(input: Static<typeof FactInputSchema>): Static<typeof FactInputSchema> {
+	const text = input.text.trim();
+	const topicFile = input.topicFile;
+	if (!text || [...text].length > MAX_FACT_TEXT_CHARS || !isSafeTopicFile(topicFile)) {
+		throw new Error("Invalid memory fact text or topicFile");
 	}
-	return inserted;
+	return { ...input, text, topicFile };
 }
 
-async function embedInsertedFacts(ctx: MemoryToolContext, facts: MemoryFact[]): Promise<void> {
-	if (!ctx.embedText || !ctx.embeddingModel || facts.length === 0) return;
-	for (const fact of facts) {
-		try {
-			const embedding = await ctx.embedText(fact.text);
-			if (embedding) {
-				ctx.store.updateFactEmbedding(fact.id, embedding, ctx.embeddingModel);
+function allocateTopics(
+	ctx: MemoryToolContext,
+	inputs: Static<typeof FactInputSchema>[],
+	known = currentTopicSets(ctx),
+): { inputs: Static<typeof FactInputSchema>[]; remapped: number } {
+	let remapped = 0;
+	return {
+		inputs: inputs.map((raw) => {
+			const input = normalizedInput(raw);
+			const columns = scopeColumns(input.scope, ctx);
+			const topics = known.get(contextKey(input.scope, columns.cwdKey))!;
+			if (topics.has(input.topicFile)) return input;
+			if (topics.size < MAX_ORDINARY_TOPICS_PER_CONTEXT) {
+				topics.add(input.topicFile);
+				return input;
 			}
-		} catch {
-			// Keep the row with embedding NULL; keyword search / backfill can recover later.
-		}
+			remapped++;
+			return { ...input, topicFile: "overflow.md" };
+		}),
+		remapped,
+	};
+}
+
+function currentTopicSets(ctx: MemoryToolContext, facts?: MemoryFact[]): Map<string, Set<string>> {
+	const known = new Map<string, Set<string>>();
+	for (const scope of ["global", "project"] as const) {
+		const cwdKey = scope === "global" ? null : ctx.projectKey;
+		const contextFacts =
+			facts?.filter((fact) => fact.scope === scope && fact.cwdKey === cwdKey) ??
+			ctx.store.listActiveFacts(scope, cwdKey, null);
+		known.set(
+			contextKey(scope, cwdKey),
+			new Set(
+				contextFacts
+					.map((fact) => fact.topicFile)
+					.filter((topic) => topic !== "overflow.md" && topic !== "legacy-overflow.md"),
+			),
+		);
 	}
+	return known;
+}
+
+function newFact(ctx: MemoryToolContext, input: Static<typeof FactInputSchema>): MemoryFact {
+	const columns = scopeColumns(input.scope, ctx);
+	return {
+		id: randomUUID(),
+		scope: input.scope,
+		cwdKey: columns.cwdKey,
+		mode: null,
+		topicFile: input.topicFile,
+		text: input.text,
+		fingerprint: memoryFactFingerprint(input.text),
+		status: "active",
+		createdAt: ctx.createdAt ?? new Date().toISOString(),
+		sourceTurn: ctx.sourceTurn,
+		embedding: null,
+		embeddingModel: null,
+	};
 }
 
 export function applyCommitFacts(
@@ -183,127 +205,237 @@ export function applyCommitFacts(
 	params: unknown,
 ): CommitFactsDetails & { facts: MemoryFact[] } {
 	if (!Value.Check(CommitFactsParamsSchema, params)) {
-		return { ok: false, inserted: 0, facts: [], error: "Invalid commit_facts arguments" };
-	}
-	const facts = insertFactInputs(ctx, params.facts);
-	return { ok: true, inserted: facts.length, facts };
-}
-
-export function applyReconcileFacts(ctx: MemoryToolContext, params: unknown): ApplyReconcileFactsResult {
-	if (!Value.Check(ReconcileFactsParamsSchema, params)) {
 		return {
 			ok: false,
 			inserted: 0,
-			superseded: 0,
-			deleted: 0,
-			moved: 0,
+			omittedSensitive: 0,
+			remappedTopicLimit: 0,
 			facts: [],
-			error: "Invalid reconcile_facts arguments",
+			error: "Invalid commit_facts arguments",
 		};
 	}
-
-	let inserted = 0;
-	let superseded = 0;
-	let deleted = 0;
-	let moved = 0;
-	const rejectReasons: string[] = [];
-	let addedFacts: MemoryFact[] = [];
-
 	try {
-		ctx.store.runInTransaction(() => {
-			for (const entry of params.supersede ?? []) {
-				const oldFact = ctx.store.getFactById(entry.oldId);
-				const newFact = ctx.store.getFactById(entry.newId);
-				if (!oldFact || !newFact || !isFactVisible(ctx, oldFact) || !isFactVisible(ctx, newFact)) {
-					rejectReasons.push(`Unknown supersede ids ${entry.oldId}/${entry.newId}`);
-					continue;
-				}
-				if (!isFactNewer(newFact, oldFact)) {
-					rejectReasons.push(
-						`Rejected supersede ${entry.oldId}→${entry.newId}: new fact is not newer by createdAt/sourceTurn`,
-					);
-					continue;
-				}
-				if (oldFact.status === "active") {
-					ctx.store.updateFactStatus(entry.oldId, "superseded");
-					superseded++;
-				}
-			}
-
-			for (const entry of params.merge ?? []) {
-				const facts = entry.ids
-					.map((id) => ctx.store.getFactById(id))
-					.filter((fact): fact is MemoryFact => fact !== null && isFactVisible(ctx, fact));
-				if (facts.length < 2) {
-					rejectReasons.push(`Merge requires at least two known ids`);
-					continue;
-				}
-				let survivor: MemoryFact | undefined;
-				if (entry.survivorId) {
-					survivor = facts.find((fact) => fact.id === entry.survivorId);
-					if (!survivor) {
-						rejectReasons.push(`Named survivor ${entry.survivorId} not in merge ids`);
-						continue;
-					}
-				} else {
-					survivor = facts[0]!;
-					for (let i = 1; i < facts.length; i++) {
-						const candidate = facts[i]!;
-						if (isFactNewer(candidate, survivor)) survivor = candidate;
-					}
-				}
-				for (const fact of facts) {
-					if (fact.id === survivor.id) continue;
-					if (fact.status === "active") {
-						ctx.store.updateFactStatus(fact.id, "superseded");
-						superseded++;
-					}
-				}
-			}
-
-			for (const id of params.deleteIds ?? []) {
-				const fact = ctx.store.getFactById(id);
-				if (!fact || !isFactVisible(ctx, fact)) {
-					rejectReasons.push(`Unknown delete id ${id}`);
-					continue;
-				}
-				ctx.store.deleteFact(id);
-				deleted++;
-			}
-
-			for (const entry of params.moveScope ?? []) {
-				const fact = ctx.store.getFactById(entry.id);
-				if (!fact || !isFactVisible(ctx, fact)) {
-					rejectReasons.push(`Unknown moveScope id ${entry.id}`);
-					continue;
-				}
-				const columns = scopeColumns(entry.scope, ctx);
-				ctx.store.updateFactScope(entry.id, entry.scope, columns.cwdKey, columns.mode);
-				moved++;
-			}
-
-			if (params.add?.length) {
-				addedFacts = insertFactInputs(ctx, params.add);
-				inserted = addedFacts.length;
-			}
-
-			if (rejectReasons.length > 0 && superseded === 0 && deleted === 0 && moved === 0 && inserted === 0) {
-				throw new Error(rejectReasons[0]!);
-			}
+		const safe = params.facts.filter((input) => !looksLikeSecret(input.text));
+		const result = ctx.store.runInTransaction(() => {
+			const { inputs, remapped } = allocateTopics(ctx, safe);
+			const candidates = inputs.map((input) => newFact(ctx, input));
+			const facts: MemoryFact[] = [];
+			for (const fact of candidates) if (ctx.store.insertFact(fact)) facts.push(fact);
+			return { facts, remapped };
 		});
+		return {
+			ok: true,
+			inserted: result.facts.length,
+			omittedSensitive: params.facts.length - safe.length,
+			remappedTopicLimit: result.remapped,
+			facts: result.facts,
+		};
 	} catch (error) {
 		return {
 			ok: false,
 			inserted: 0,
-			superseded: 0,
-			deleted: 0,
-			moved: 0,
+			omittedSensitive: 0,
+			remappedTopicLimit: 0,
 			facts: [],
-			error: error instanceof Error ? error.message : String(error),
+			error: errorMessage(error),
 		};
 	}
+}
 
-	return { ok: true, inserted, superseded, deleted, moved, facts: addedFacts };
+function referencedFact(ctx: MemoryToolContext, id: string): MemoryFact {
+	const fact = ctx.store.getFactById(id);
+	if (!fact || !isFactVisible(ctx, fact)) throw new Error(`Unknown memory fact id ${id}`);
+	if (!isManagedProjectionTopicFile(fact.topicFile)) throw new Error(`Memory fact ${id} has an unsafe topic`);
+	return fact;
+}
+
+function assertUnique(values: string[], label: string): void {
+	if (new Set(values).size !== values.length) throw new Error(`${label} contains duplicate ids`);
+}
+
+export function applyReconcileFacts(ctx: MemoryToolContext, params: unknown): ApplyReconcileFactsResult {
+	const empty = {
+		ok: false as const,
+		inserted: 0,
+		superseded: 0,
+		deleted: 0,
+		moved: 0,
+		remappedTopicLimit: 0,
+		facts: [],
+	};
+	if (!Value.Check(ReconcileFactsParamsSchema, params))
+		return { ...empty, error: "Invalid reconcile_facts arguments" };
+	const operationCount =
+		(params.merge?.length ?? 0) +
+		(params.supersede?.length ?? 0) +
+		(params.deleteIds?.length ?? 0) +
+		(params.add?.length ?? 0) +
+		(params.moveScope?.length ?? 0);
+	if (operationCount > MAX_RECONCILE_OPERATIONS) return { ...empty, error: "Reconcile operation limit exceeded" };
+
+	try {
+		return ctx.store.runInTransaction(() => {
+			if (params.add?.some((input) => looksLikeSecret(input.text)))
+				throw new Error("Sensitive memory additions are not allowed during reconcile");
+			const destructive = new Set<string>();
+			const markDestructive = (id: string) => {
+				if (destructive.has(id)) throw new Error(`Fact ${id} is used destructively more than once`);
+				destructive.add(id);
+			};
+			const status = new Map<string, MemoryFact["status"]>();
+			const moves = new Map<string, MemoryScope>();
+			const movedFacts = new Map<string, MemoryFact>();
+			let superseded = 0;
+			let deleted = 0;
+
+			for (const entry of params.supersede ?? []) {
+				if (entry.oldId === entry.newId) throw new Error("Supersede ids must differ");
+				const oldFact = referencedFact(ctx, entry.oldId);
+				const newFact = referencedFact(ctx, entry.newId);
+				if (oldFact.status !== "active" || newFact.status !== "active")
+					throw new Error("Supersede requires active facts");
+				if (contextKey(oldFact.scope, oldFact.cwdKey) !== contextKey(newFact.scope, newFact.cwdKey))
+					throw new Error("Supersede facts must share one context");
+				if (!isFactNewer(newFact, oldFact)) throw new Error("Rejected supersede: proposed fact is not newer");
+				markDestructive(oldFact.id);
+				status.set(oldFact.id, "superseded");
+				superseded++;
+			}
+
+			for (const entry of params.merge ?? []) {
+				assertUnique(entry.ids, "merge");
+				const facts = entry.ids.map((id) => referencedFact(ctx, id));
+				if (facts.some((fact) => fact.status !== "active")) throw new Error("Merge requires active facts");
+				if (new Set(facts.map((fact) => contextKey(fact.scope, fact.cwdKey))).size !== 1)
+					throw new Error("Merge facts must share one context");
+				const newest = [...facts].sort(recency).at(-1)!;
+				const survivor = entry.survivorId ? facts.find((fact) => fact.id === entry.survivorId) : newest;
+				if (!survivor) throw new Error("Named survivor is not in merge ids");
+				if (survivor.id !== newest.id) throw new Error("Merge survivor must be the newest fact");
+				for (const fact of facts) {
+					if (fact.id === survivor.id) continue;
+					markDestructive(fact.id);
+					status.set(fact.id, "superseded");
+					superseded++;
+				}
+			}
+
+			assertUnique(params.deleteIds ?? [], "deleteIds");
+			for (const id of params.deleteIds ?? []) {
+				const fact = referencedFact(ctx, id);
+				if (fact.status !== "active" && fact.status !== "superseded")
+					throw new Error("Delete requires active or superseded facts");
+				markDestructive(id);
+				status.set(id, "deleted");
+				deleted++;
+			}
+
+			assertUnique(
+				(params.moveScope ?? []).map((entry) => entry.id),
+				"moveScope",
+			);
+			for (const entry of params.moveScope ?? []) {
+				const fact = referencedFact(ctx, entry.id);
+				if (fact.status !== "active") throw new Error("moveScope requires an active fact");
+				markDestructive(entry.id);
+				moves.set(entry.id, entry.scope);
+				movedFacts.set(entry.id, fact);
+			}
+
+			const visible = [
+				...ctx.store.listActiveFacts("global", null, null),
+				...ctx.store.listActiveFacts("project", ctx.projectKey, null),
+			];
+			const stationary = visible.filter(
+				(fact) => (status.get(fact.id) ?? fact.status) === "active" && !moves.has(fact.id),
+			);
+			const knownTopics = currentTopicSets(ctx, stationary);
+			const moveTopics = new Map<string, string>();
+			let remappedMoves = 0;
+			for (const entry of params.moveScope ?? []) {
+				const fact = movedFacts.get(entry.id)!;
+				let topicFile = fact.topicFile;
+				if (topicFile !== "overflow.md" && topicFile !== "legacy-overflow.md") {
+					const columns = scopeColumns(entry.scope, ctx);
+					const topics = knownTopics.get(contextKey(entry.scope, columns.cwdKey))!;
+					if (!topics.has(topicFile)) {
+						if (topics.size < MAX_ORDINARY_TOPICS_PER_CONTEXT) topics.add(topicFile);
+						else {
+							topicFile = "overflow.md";
+							remappedMoves++;
+						}
+					}
+				}
+				moveTopics.set(entry.id, topicFile);
+			}
+			const allocated = allocateTopics(ctx, params.add ?? [], knownTopics);
+			const additions = allocated.inputs.map((input) => newFact(ctx, input));
+			const fingerprints = new Set<string>();
+			for (const fact of [...visible, ...additions]) {
+				if ((status.get(fact.id) ?? fact.status) !== "active") continue;
+				const scope = moves.get(fact.id) ?? fact.scope;
+				const cwdKey = scope === "global" ? null : ctx.projectKey;
+				const key = `${contextKey(scope, cwdKey)}\0${fact.fingerprint ?? memoryFactFingerprint(fact.text)}`;
+				if (fingerprints.has(key)) throw new Error("Reconcile would create an active fingerprint duplicate");
+				fingerprints.add(key);
+			}
+
+			const inserted: MemoryFact[] = [];
+			for (const [id, next] of status) ctx.store.updateFactStatus(id, next!);
+			for (const id of moves.keys()) ctx.store.updateFactStatus(id, "superseded");
+			for (const [id, scope] of moves) {
+				const columns = scopeColumns(scope, ctx);
+				ctx.store.updateFactScope(id, scope, columns.cwdKey, null);
+				ctx.store.updateFactTopic(id, moveTopics.get(id)!);
+			}
+			for (const id of moves.keys()) ctx.store.updateFactStatus(id, "active");
+			for (const fact of additions) {
+				if (!ctx.store.insertFact(fact)) throw new Error("Reconcile insert conflicted");
+				inserted.push(fact);
+			}
+			return {
+				ok: true,
+				inserted: inserted.length,
+				superseded,
+				deleted,
+				moved: moves.size,
+				remappedTopicLimit: remappedMoves + allocated.remapped,
+				facts: inserted,
+			};
+		});
+	} catch (error) {
+		return { ...empty, error: errorMessage(error) };
+	}
+}
+
+async function embedInsertedFacts(ctx: MemoryToolContext, facts: MemoryFact[], signal?: AbortSignal): Promise<void> {
+	const embeddingKey = ctx.embeddingKey ?? ctx.embeddingModel ?? null;
+	if (!embeddingKey || facts.length === 0 || (!ctx.embedTexts && !ctx.embedText)) return;
+	const now = new Date().toISOString();
+	try {
+		signal?.throwIfAborted();
+		const vectors = ctx.embedTexts
+			? await ctx.embedTexts(
+					facts.map((fact) => fact.text),
+					signal,
+				)
+			: await Promise.all(facts.map(async (fact) => (await ctx.embedText!(fact.text)) ?? new Float32Array()));
+		signal?.throwIfAborted();
+		if (vectors.length !== facts.length || vectors.some((vector) => vector.length === 0))
+			throw new Error("Embedding batch size mismatch");
+		ctx.store.runInTransaction(() => {
+			for (let i = 0; i < facts.length; i++) ctx.store.updateFactEmbedding(facts[i]!.id, vectors[i]!, embeddingKey);
+			ctx.store.recordHealth({ operation: "embedding", status: "ok", updatedAt: now, reason: null });
+		});
+	} catch (error) {
+		ctx.store.recordHealth({ operation: "embedding", status: "error", updatedAt: now, reason: errorMessage(error) });
+		if (signal?.aborted) throw error;
+	}
+}
+
+async function maybeProject(ctx: MemoryToolContext): Promise<void> {
+	if (ctx.projectAfterWrite === false) return;
+	await writeProjection(ctx.agentDir, ctx.projectKey, ctx.store);
 }
 
 export function createCommitFactsTool(ctx: MemoryToolContext): ToolDefinition {
@@ -314,19 +446,13 @@ export function createCommitFactsTool(ctx: MemoryToolContext): ToolDefinition {
 			"Submit durable memory facts to append. Call with an empty facts array when nothing should be stored.",
 		parameters: CommitFactsParamsSchema,
 		executionMode: "sequential",
-		async execute(_toolCallId, params) {
+		async execute(_toolCallId, params, signal) {
 			const applied = applyCommitFacts(ctx, params);
-			const details: CommitFactsDetails = {
-				ok: applied.ok,
-				inserted: applied.inserted,
-				...(applied.error ? { error: applied.error } : {}),
-			};
-			if (!applied.ok) {
-				return toolText(applied.error ?? "Invalid commit_facts arguments", details);
-			}
-			await embedInsertedFacts(ctx, applied.facts);
-			if (applied.inserted > 0) maybeProject(ctx);
-			return toolText(`Committed ${applied.inserted} fact(s)`, details);
+			const { facts, ...details } = applied;
+			if (!details.ok) return toolText(details.error ?? "Invalid commit_facts arguments", details);
+			await embedInsertedFacts(ctx, facts, signal);
+			if (details.inserted > 0) await maybeProject(ctx);
+			return toolText(`Committed ${details.inserted} fact(s)`, details);
 		},
 	});
 }
@@ -339,26 +465,20 @@ export function createReconcileFactsTool(ctx: MemoryToolContext): ToolDefinition
 			"Reconcile durable memory: merge, supersede, delete, add, or moveScope. Recency is enforced in code.",
 		parameters: ReconcileFactsParamsSchema,
 		executionMode: "sequential",
-		async execute(_toolCallId, params) {
+		async execute(_toolCallId, params, signal) {
 			const applied = applyReconcileFacts(ctx, params);
-			const details: ReconcileFactsDetails = {
-				ok: applied.ok,
-				inserted: applied.inserted,
-				superseded: applied.superseded,
-				deleted: applied.deleted,
-				moved: applied.moved,
-				...(applied.error ? { error: applied.error } : {}),
-			};
-			if (!applied.ok) {
-				return toolText(applied.error ?? "Invalid reconcile_facts arguments", details);
-			}
-			await embedInsertedFacts(ctx, applied.facts);
-			const changed = applied.inserted + applied.superseded + applied.deleted + applied.moved;
-			if (changed > 0) maybeProject(ctx);
+			const { facts, ...details } = applied;
+			if (!details.ok) return toolText(details.error ?? "Invalid reconcile_facts arguments", details);
+			await embedInsertedFacts(ctx, facts, signal);
+			if (details.inserted + details.superseded + details.deleted + details.moved > 0) await maybeProject(ctx);
 			return toolText(
-				`Reconciled: inserted=${applied.inserted} superseded=${applied.superseded} deleted=${applied.deleted} moved=${applied.moved}`,
+				`Reconciled: inserted=${details.inserted} superseded=${details.superseded} deleted=${details.deleted} moved=${details.moved}`,
 				details,
 			);
 		},
 	});
+}
+
+function errorMessage(error: unknown): string {
+	return error instanceof Error ? error.message : String(error);
 }

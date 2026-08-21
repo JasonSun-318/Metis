@@ -98,7 +98,7 @@ describe("AgentSession auto memory", () => {
 		await seedMemory(agentDir, cwd, "global-before-turn", "project-before-turn");
 		const identity = memoryProjectIdentity(cwd);
 		const store = openMemoryStore(getMemorySqlitePath(agentDir));
-		writeProjection(agentDir, identity.projectKey, store);
+		await writeProjection(agentDir, identity.projectKey, store);
 		store.close();
 
 		const model = getModel("anthropic", "claude-sonnet-4-5")!;

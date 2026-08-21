@@ -1,3 +1,29 @@
+import { createHash } from "node:crypto";
+
+export const MAX_FACTS_PER_MUTATION = 32;
+export const MAX_FACT_TEXT_CHARS = 4_000;
+export const MAX_RECONCILE_OPERATIONS = 200;
+export const MAX_TOPICS_PER_CONTEXT = 32;
+export const MAX_ORDINARY_TOPICS_PER_CONTEXT = 30;
+export const SAFE_TOPIC_FILE = /^(?!.*\.\.)[a-z0-9][a-z0-9._-]{0,119}\.md$/u;
+export const RESERVED_TOPIC_FILES = new Set(["memory.md", "project.md", "overflow.md", "legacy-overflow.md"]);
+
+export function isSafeTopicFile(value: string): boolean {
+	return SAFE_TOPIC_FILE.test(value) && !RESERVED_TOPIC_FILES.has(value);
+}
+
+export function isManagedProjectionTopicFile(value: string): boolean {
+	return SAFE_TOPIC_FILE.test(value) && value !== "memory.md" && value !== "project.md";
+}
+
+export function normalizeMemoryFactText(text: string): string {
+	return text.normalize("NFKC").trim().replace(/\s+/gu, " ").toLocaleLowerCase("en-US");
+}
+
+export function memoryFactFingerprint(text: string): string {
+	return createHash("sha256").update(normalizeMemoryFactText(text)).digest("hex");
+}
+
 export const MEMORY_SCOPES = ["global", "project"] as const;
 export type MemoryScope = (typeof MEMORY_SCOPES)[number];
 
@@ -11,6 +37,8 @@ export interface MemoryFact {
 	mode: string | null;
 	topicFile: string;
 	text: string;
+	/** Filled by MemoryStore on insert and always present on persisted rows. */
+	fingerprint?: string | null;
 	status: MemoryFactStatus;
 	createdAt: string;
 	sourceTurn: string | null;

@@ -59,7 +59,7 @@ describe("memory extract tools + runner", () => {
 	}
 
 	describe("commit_facts", () => {
-		it("inserts valid facts, drops secrets and invalid topicFile, allows empty array", async () => {
+		it("inserts valid facts, omits secrets, and allows an empty array", async () => {
 			const root = tempRoot();
 			const ctx = toolContext(root);
 			const tool = createCommitFactsTool(ctx);
@@ -74,9 +74,6 @@ describe("memory extract tools + runner", () => {
 					facts: [
 						{ text: "Auth lives in app-server", scope: "project", topicFile: "auth.md" },
 						{ text: "sk-abc1234567890secret", scope: "project", topicFile: "auth.md" },
-						{ text: "Missing file omitted", scope: "project" } as never,
-						{ text: "Bad path", scope: "project", topicFile: "../escape.md" },
-						{ text: "Also bad", scope: "project", topicFile: ".hidden.md" },
 						{ text: "Global pref", scope: "global", topicFile: "preferences.md" },
 					],
 				},
@@ -131,6 +128,92 @@ describe("memory extract tools + runner", () => {
 			ctx.store.close();
 		});
 
+		it.each(["project.md", "memory.md", "overflow.md", "legacy-overflow.md", "Foo.md", "../escape.md", "a..b.md"])(
+			"rejects unsafe topic %s without writing",
+			async (topicFile) => {
+				const ctx = toolContext(tempRoot());
+				const result = await createCommitFactsTool(ctx).execute(
+					"unsafe",
+					{ facts: [{ text: "durable fact", scope: "project", topicFile }] },
+					undefined,
+					undefined,
+					{} as never,
+				);
+				expect(result.details).toMatchObject({ ok: false, inserted: 0 });
+				expect(ctx.store.countFacts()).toBe(0);
+				ctx.store.close();
+			},
+		);
+
+		it("bounds facts, reports sensitive omissions, and embeds a batch once", async () => {
+			const ctx = toolContext(tempRoot());
+			const tool = createCommitFactsTool(ctx);
+			const tooMany = Array.from({ length: 33 }, (_, index) => ({
+				text: `fact ${index}`,
+				scope: "global" as const,
+				topicFile: "facts.md",
+			}));
+			const rejected = await tool.execute("bounded", { facts: tooMany }, undefined, undefined, {} as never);
+			expect(rejected.details).toMatchObject({ ok: false, inserted: 0 });
+
+			const embedTexts = vi.fn(async (texts: string[]) => texts.map((_, index) => new Float32Array([index + 1, 0])));
+			ctx.embeddingKey = "provider/model";
+			ctx.embedTexts = embedTexts;
+			const result = await tool.execute(
+				"batch",
+				{
+					facts: [
+						{ text: "Use Chinese replies", scope: "global", topicFile: "facts.md" },
+						{ text: "api_key=secret-value", scope: "global", topicFile: "facts.md" },
+						{ text: "Auth lives here", scope: "project", topicFile: "tooling.md" },
+					],
+				},
+				undefined,
+				undefined,
+				{} as never,
+			);
+			expect(result.details).toMatchObject({ ok: true, inserted: 2, omittedSensitive: 1 });
+			expect(embedTexts).toHaveBeenCalledTimes(1);
+			expect(embedTexts).toHaveBeenCalledWith(["Use Chinese replies", "Auth lives here"], undefined);
+			ctx.store.close();
+		});
+
+		it("remaps only new topics after 30 ordinary topics to overflow.md", async () => {
+			const ctx = toolContext(tempRoot());
+			for (let index = 0; index < 30; index++) {
+				ctx.store.insertFact({
+					id: `seed-${index}`,
+					scope: "global",
+					cwdKey: null,
+					mode: null,
+					topicFile: `topic-${index}.md`,
+					text: `seed ${index}`,
+					status: "active",
+					createdAt: "2026-08-21T00:00:00.000Z",
+					sourceTurn: null,
+					embedding: null,
+					embeddingModel: null,
+				});
+			}
+			const result = await createCommitFactsTool(ctx).execute(
+				"overflow",
+				{
+					facts: [
+						{ text: "new category", scope: "global", topicFile: "new-topic.md" },
+						{ text: "existing category", scope: "global", topicFile: "topic-0.md" },
+					],
+				},
+				undefined,
+				undefined,
+				{} as never,
+			);
+			expect(result.details).toMatchObject({ ok: true, inserted: 2, remappedTopicLimit: 1 });
+			const facts = ctx.store.listActiveFacts("global", null, null);
+			expect(facts.find((fact) => fact.text === "new category")?.topicFile).toBe("overflow.md");
+			expect(facts.find((fact) => fact.text === "existing category")?.topicFile).toBe("topic-0.md");
+			ctx.store.close();
+		});
+
 		it("still inserts when embedding fails, leaving embedding NULL", async () => {
 			const root = tempRoot();
 			const ctx = toolContext(root);
@@ -174,6 +257,32 @@ describe("memory extract tools + runner", () => {
 	});
 
 	describe("reconcile_facts", () => {
+		it("rolls back the whole reconcile when one id is outside the current context", async () => {
+			const ctx = toolContext(tempRoot());
+			const base = {
+				mode: null,
+				topicFile: "facts.md",
+				status: "active" as const,
+				createdAt: "2026-08-21T00:00:00.000Z",
+				sourceTurn: null,
+				embedding: null,
+				embeddingModel: null,
+			};
+			ctx.store.insertFact({ ...base, id: "current", scope: "project", cwdKey: ctx.projectKey, text: "current" });
+			ctx.store.insertFact({ ...base, id: "sibling", scope: "project", cwdKey: "other-project", text: "sibling" });
+			const result = await createReconcileFactsTool(ctx).execute(
+				"rollback",
+				{ deleteIds: ["current", "sibling"] },
+				undefined,
+				undefined,
+				{} as never,
+			);
+			expect(result.details).toMatchObject({ ok: false, deleted: 0 });
+			expect(ctx.store.getFactById("current")?.status).toBe("active");
+			expect(ctx.store.getFactById("sibling")?.status).toBe("active");
+			ctx.store.close();
+		});
+
 		it("supersedes only when the new fact is newer by createdAt/sourceTurn", async () => {
 			const root = tempRoot();
 			const ctx = toolContext(root);
@@ -227,7 +336,7 @@ describe("memory extract tools + runner", () => {
 				undefined,
 				{} as never,
 			);
-			expect(textOf(rejected).toLowerCase()).toMatch(/reject|older|recency|not newer/);
+			expect(textOf(rejected).toLowerCase()).toMatch(/reject|older|recency|not be newer/);
 			expect(ctx.store.getFactById("old")?.status).toBe("active");
 
 			const accepted = await tool.execute(
