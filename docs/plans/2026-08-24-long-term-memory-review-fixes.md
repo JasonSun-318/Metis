@@ -164,13 +164,13 @@ Expected: PASS.
 - Uses: `getAutoMemoryPaths(agentDir, projectDir).project`
 - Preserves: `memory/global/MEMORY.md` and the one exact-cwd `project.md` after deleting either mode.
 
-- [x] **Step 1: Replace stale fixture paths**
+- [x] **Step 1: Add a focused packaged deletion contract**
 
-Create one `sharedMemory` path without a mode argument, write `shared project memory` once, and use `memory/global/MEMORY.md` for the global projection.
+Create one Chat session and one Code session for the same canonical cwd. Seed global and project facts in SQLite, then generate the real Markdown projection before launching the packaged app.
 
-- [x] **Step 2: Replace contradictory assertions**
+- [x] **Step 2: Verify the exact shared projection survives**
 
-Remove `sharedMemory.directory` from deleted paths. Assert the shared project index and global index still exist with their seeded contents after deleting Chat.
+Delete Chat through the packaged preload/RPC boundary. Assert the Code session, shared project index/topic, and global index/topic still exist with their seeded contents.
 
 - [x] **Step 3: Run the disk-contract unit test**
 
@@ -180,7 +180,7 @@ Expected: PASS.
 
 - [x] **Step 4: Run packaged E2E when a current package is available**
 
-Run: `npx playwright test e2e/packaged-smoke.spec.ts -g "packaged mode project actions preserve"` from `packages/desktop` after packaging the current source. If unrelated UI assertions fail before disk verification, report them separately and retain the corrected disk contract.
+Run: `npx playwright test e2e/packaged-smoke.spec.ts -g "packaged project delete preserves exact-cwd shared memory"` from `packages/desktop` after packaging the current source. Keep unrelated visual QA outside this memory contract.
 
 ### Task 6: Final validation and independent review
 
