@@ -336,14 +336,29 @@ describe("AgentSession memory extract", () => {
 		session.dispose();
 	});
 
-	it("resumes pending Index evidence immediately after a settings refresh", async () => {
+	it("aborts, drains, and resumes pending Index evidence across a settings refresh", async () => {
 		const { session } = createCompactionSession();
-		const runner = vi.fn(async (_options: RunMemoryExtractOptions) => extractResult("success"));
+		const runner = vi.fn((options: RunMemoryExtractOptions) => {
+			if (runner.mock.calls.length > 1) return Promise.resolve(extractResult("success"));
+			return new Promise<MemoryExtractResult>((resolve) => {
+				options.signal.addEventListener(
+					"abort",
+					() => resolve(extractResult("skipped", { reason: "settings-refresh" })),
+					{ once: true },
+				);
+			});
+		});
 		setExtractRunner(session, runner);
 
-		await session.applyModelServiceSettingsRefresh();
+		for (let turn = 0; turn < 4; turn++) scheduleThrottled(session);
 		await vi.waitFor(() => expect(runner).toHaveBeenCalledOnce());
-		expect(runner.mock.calls[0]![0]).toMatchObject({ mode: "commit", trigger: "settings-refresh" });
+		const firstSignal = runner.mock.calls[0]![0].signal;
+		await session.prepareModelServiceSettingsRefresh();
+		expect(firstSignal.aborted).toBe(true);
+		expect(firstSignal.reason).toBe("settings-refresh");
+		await session.applyModelServiceSettingsRefresh();
+		await vi.waitFor(() => expect(runner).toHaveBeenCalledTimes(2));
+		expect(runner.mock.calls[1]![0]).toMatchObject({ mode: "commit", trigger: "settings-refresh" });
 		await session.waitForMemoryExtract();
 		session.dispose();
 	});

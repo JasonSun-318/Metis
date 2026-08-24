@@ -1,9 +1,12 @@
 import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { validateResponseFor } from "@metis/app-protocol";
 import {
 	AuthStorage,
+	getLatestMemoryError,
+	getMemorySqlitePath,
 	MEMORY_EMBEDDING_CREDENTIAL_ID,
 	MEMORY_RERANK_CREDENTIAL_ID,
 	ModelRegistry,
@@ -219,6 +222,50 @@ describe("ModelSettingsService", () => {
 		expect(authStorage.has(MEMORY_EMBEDDING_CREDENTIAL_ID)).toBe(false);
 		expect(settingsManager.getMemoryEngine()).toBe("index");
 		expect(authStorage.has(MEMORY_RERANK_CREDENTIAL_ID)).toBe(false);
+	});
+
+	it("clears only matching memory health after specialized settings change", async () => {
+		const authStorage = AuthStorage.create(join(agentDir, "auth.json"));
+		const service = new ModelSettingsService({
+			agentDir,
+			authStorage,
+			modelRegistry: ModelRegistry.create(authStorage, join(agentDir, "models.json")),
+			settingsManager: SettingsManager.create(agentDir, agentDir),
+		});
+		expect(getLatestMemoryError(agentDir)).toBeNull();
+		const db = new DatabaseSync(getMemorySqlitePath(agentDir));
+		const insert = db.prepare(
+			"INSERT INTO memory_health (operation, status, updated_at, reason) VALUES (?, ?, ?, ?)",
+		);
+		insert.run("embedding", "error", "2026-08-24T00:00:00.000Z", "Embedding request failed");
+		insert.run("backfill", "error", "2026-08-24T00:01:00.000Z", "Backfill request failed");
+		insert.run("rerank", "error", "2026-08-24T00:02:00.000Z", "Rerank request failed");
+		db.close();
+
+		await service.update({
+			type: "set_embedding",
+			settings: {
+				name: "Embedding",
+				provider: "Qwen",
+				baseUrl: "https://example.test/v1",
+				api: "openai-compatible",
+				modelId: "embedding-model",
+			},
+			credential: { action: "set", value: "embedding-secret" },
+		});
+		expect(getLatestMemoryError(agentDir)).toBe("Rerank request failed");
+
+		await service.update({
+			type: "set_rerank",
+			settings: {
+				name: "Rerank",
+				provider: "Cohere",
+				endpointUrl: "https://example.test/v2/rerank",
+				modelId: "rerank-model",
+			},
+			credential: { action: "set", value: "rerank-secret" },
+		});
+		expect(getLatestMemoryError(agentDir)).toBeNull();
 	});
 
 	it("tests an unsaved specialized draft without persisting settings or credentials", async () => {

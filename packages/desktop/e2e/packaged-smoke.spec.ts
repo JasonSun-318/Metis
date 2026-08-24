@@ -3793,7 +3793,6 @@ test("packaged mode project actions preserve the other mode and shared project d
 	const userDataDir = path.join(tempRoot, "electron");
 	const sourcePath = path.join(projectDir, "source-sentinel.txt");
 	const skillPath = path.join(projectDir, ".metis", "skills", "shared-project-skill", "SKILL.md");
-	const globalMemoryPath = path.join(agentDir, "memory", "global", "MEMORY.md");
 	const qaDir = path.join(desktopRoot, "test-results", "design-qa", "project-actions");
 	await Promise.all([
 		mkdir(agentDir),
@@ -3831,44 +3830,6 @@ test("packaged mode project actions preserve the other mode and shared project d
 		...(await seedOwnedSessionData(fixtures, agentDir, CHAT_ACTIVE_ID, chatActivePath)),
 		...(await seedOwnedSessionData(fixtures, agentDir, CHAT_ARCHIVED_ID, chatArchivedPath)),
 	];
-	const sharedMemory = fixtures.getAutoMemoryPaths(agentDir, projectDir).project;
-	const globalMemoryTopicPath = path.join(path.dirname(globalMemoryPath), "global-sentinel.md");
-	const projectMemoryTopicPath = path.join(sharedMemory.directory, "project-sentinel.md");
-	const memoryIdentity = fixtures.memoryProjectIdentity(projectDir);
-	const memoryStore = fixtures.openMemoryStore(fixtures.getMemorySqlitePath(agentDir));
-	try {
-		memoryStore.resolveProject(memoryIdentity);
-		const createdAt = "2026-01-01T00:00:00.000Z";
-		memoryStore.insertFact({
-			id: "global-sentinel",
-			scope: "global",
-			cwdKey: null,
-			mode: null,
-			topicFile: "global-sentinel.md",
-			text: "shared global memory",
-			status: "active",
-			createdAt,
-			sourceTurn: null,
-			embedding: null,
-			embeddingModel: null,
-		});
-		memoryStore.insertFact({
-			id: "project-sentinel",
-			scope: "project",
-			cwdKey: memoryIdentity.projectKey,
-			mode: null,
-			topicFile: "project-sentinel.md",
-			text: "shared project memory",
-			status: "active",
-			createdAt,
-			sourceTurn: null,
-			embedding: null,
-			embeddingModel: null,
-		});
-		await fixtures.writeMemoryProjection(agentDir, memoryIdentity.projectKey, memoryStore);
-	} finally {
-		memoryStore.close();
-	}
 	await Promise.all([
 		writeFixtureFile(sourcePath, "source must survive"),
 		writeFixtureFile(
@@ -3912,17 +3873,17 @@ test("packaged mode project actions preserve the other mode and shared project d
 		await expect(sessionActionButton).toHaveCSS("opacity", "0");
 		await sessionActionButton.focus();
 		await expect(sessionActionButton).toHaveCSS("opacity", "1");
-		await expect(sessionButton).toHaveCSS("background-color", "rgb(51, 51, 51)");
+		await expect(sessionButton).toHaveCSS("background-color", "rgb(64, 64, 64)");
 		await sessionActionButton.click();
-		await expect(sessionActionButton).toHaveCSS("background-color", "rgb(42, 42, 42)");
+		await expect(sessionActionButton).toHaveCSS("background-color", "rgb(104, 104, 104)");
 		await page.locator(".session-sidebar").screenshot({ path: path.join(qaDir, "session-row-hover-inactive.png") });
 		await page.keyboard.press("Escape");
 		await sessionActionRow.getByRole("button", { name: "Session action target", exact: true }).click();
 		await expect(page.locator(".workspace-header")).toHaveAttribute("data-active-session-id", SESSION_ACTION_ID);
 		await sessionActionButton.focus();
-		await expect(sessionButton).toHaveCSS("background-color", "rgb(40, 40, 40)");
+		await expect(sessionButton).toHaveCSS("background-color", "rgb(88, 88, 88)");
 		await sessionActionButton.click();
-		await expect(sessionActionButton).toHaveCSS("background-color", "rgb(42, 42, 42)");
+		await expect(sessionActionButton).toHaveCSS("background-color", "rgb(104, 104, 104)");
 		await page.locator(".session-sidebar").screenshot({ path: path.join(qaDir, "session-row-hover-current.png") });
 		const sessionActionMenu = page.getByRole("menu", { name: "Session action target session actions" });
 		await expect(sessionActionMenu.getByRole("menuitem")).toHaveText(["Pin", "Rename", "Delete"]);
@@ -4070,7 +4031,6 @@ test("packaged mode project actions preserve the other mode and shared project d
 		debuggingPort = await reservePort();
 		app = launchPackagedApp(executable, debuggingPort, userDataDir, projectDir, agentDir, homeDir, diagnostics);
 		({ browser, page } = await connectToApp(debuggingPort));
-		page.setDefaultTimeout(10_000);
 		await waitForServerReady(page);
 		await expect(projectGroup(page, "Pinned Chat Project")).toBeVisible();
 		await page.setViewportSize({ width: 900, height: 720 });
@@ -4098,30 +4058,17 @@ test("packaged mode project actions preserve the other mode and shared project d
 		for (const removedPath of [chatActivePath, chatArchivedPath, ...ownedPaths]) {
 			expect(existsSync(removedPath), removedPath).toBe(false);
 		}
-		for (const preservedPath of [
-			codePath,
-			sharedMemory.indexPath,
-			projectMemoryTopicPath,
-			globalMemoryPath,
-			globalMemoryTopicPath,
-			sourcePath,
-			skillPath,
-		]) {
+		for (const preservedPath of [codePath, sourcePath, skillPath]) {
 			expect(existsSync(preservedPath), preservedPath).toBe(true);
 		}
-		expect(await readFile(projectMemoryTopicPath, "utf8")).toBe("shared project memory\n");
-		expect(await readFile(globalMemoryTopicPath, "utf8")).toBe("shared global memory\n");
-		expect(await readFile(sharedMemory.indexPath, "utf8")).toContain("[project-sentinel.md](project-sentinel.md)");
-		expect(await readFile(globalMemoryPath, "utf8")).toContain("[global-sentinel.md](global-sentinel.md)");
 		expect(await readFile(sourcePath, "utf8")).toBe("source must survive");
 		expect(new fixtures.ProjectTrustStore(agentDir).get(projectDir)).toBe(true);
 
 		phase = "reopening Code and shared Skills";
 		await page.getByRole("button", { name: "Code", exact: true }).click();
-		await groupSessionsBy(page, "Project");
 		await projectGroup(page, projectName).locator(".session-button").click();
 		await expect(page.locator(`[data-active-session-id="${CODE_ID}"]`)).toBeVisible();
-		await page.getByRole("button", { name: "Customize", exact: true }).click();
+		await page.getByRole("button", { name: "Plugins", exact: true }).click();
 		await page.getByRole("button", { name: "Skill sources", exact: true }).click();
 		await page.getByRole("option", { name: "Project", exact: true }).click();
 		await expect(page.getByText("shared-project-skill", { exact: true })).toBeVisible();
@@ -4134,6 +4081,124 @@ test("packaged mode project actions preserve the other mode and shared project d
 		await browser?.close().catch(() => undefined);
 		await stopProcess(app);
 		if (!scheduleRemoved) await fixtures.ScheduleManager.create({ agentDir }).delete(SCHEDULE_ID, { deleteSessions: false }).catch(() => undefined);
+		await rm(tempRoot, { recursive: true, force: true });
+	}
+});
+
+test("packaged project delete preserves exact-cwd shared memory", async () => {
+	test.setTimeout(60_000);
+	const fixtures = await loadCodingFixtures();
+	const executable = packagedExecutable();
+	expect(existsSync(executable), `Package the desktop app first: ${executable}`).toBe(true);
+
+	const tempRoot = await mkdtemp(path.join(tmpdir(), "metis-project-memory-delete-"));
+	const agentDir = path.join(tempRoot, "agent");
+	const homeDir = path.join(tempRoot, "home");
+	const projectDir = path.join(tempRoot, "shared-project");
+	const userDataDir = path.join(tempRoot, "electron");
+	await Promise.all([mkdir(agentDir), mkdir(homeDir), mkdir(projectDir), mkdir(userDataDir)]);
+	const canonicalProjectDir = await realpath(projectDir);
+	await fixtures.ensureModeScopedMemoryLayout(agentDir);
+
+	const chatPath = createStoredSession(fixtures, agentDir, canonicalProjectDir, CHAT_ACTIVE_ID, "chat");
+	const codePath = createStoredSession(fixtures, agentDir, canonicalProjectDir, CODE_ID, "code");
+	const sharedMemory = fixtures.getAutoMemoryPaths(agentDir, canonicalProjectDir).project;
+	const globalMemoryPath = path.join(agentDir, "memory", "global", "MEMORY.md");
+	const globalMemoryTopicPath = path.join(path.dirname(globalMemoryPath), "global-sentinel.md");
+	const projectMemoryTopicPath = path.join(sharedMemory.directory, "project-sentinel.md");
+	const memoryIdentity = fixtures.memoryProjectIdentity(canonicalProjectDir);
+	const memoryStore = fixtures.openMemoryStore(fixtures.getMemorySqlitePath(agentDir));
+	try {
+		memoryStore.resolveProject(memoryIdentity);
+		const createdAt = "2026-01-01T00:00:00.000Z";
+		memoryStore.insertFact({
+			id: "global-sentinel",
+			scope: "global",
+			cwdKey: null,
+			mode: null,
+			topicFile: "global-sentinel.md",
+			text: "shared global memory",
+			status: "active",
+			createdAt,
+			sourceTurn: null,
+			embedding: null,
+			embeddingModel: null,
+		});
+		memoryStore.insertFact({
+			id: "project-sentinel",
+			scope: "project",
+			cwdKey: memoryIdentity.projectKey,
+			mode: null,
+			topicFile: "project-sentinel.md",
+			text: "shared project memory",
+			status: "active",
+			createdAt,
+			sourceTurn: null,
+			embedding: null,
+			embeddingModel: null,
+		});
+		await fixtures.writeMemoryProjection(agentDir, memoryIdentity.projectKey, memoryStore);
+	} finally {
+		memoryStore.close();
+	}
+
+	const debuggingPort = await reservePort();
+	const diagnostics: string[] = [];
+	const app = launchPackagedApp(
+		executable,
+		debuggingPort,
+		userDataDir,
+		canonicalProjectDir,
+		agentDir,
+		homeDir,
+		diagnostics,
+	);
+	let browser: Browser | undefined;
+	let page: Page | undefined;
+	let phase = "connecting";
+	try {
+		({ browser, page } = await connectToApp(debuggingPort));
+		page.setDefaultTimeout(10_000);
+		await waitForServerReady(page);
+		phase = "deleting Chat through packaged RPC";
+		const deletion = await page.evaluate(async (cwd) => {
+			const api = (globalThis as unknown as { metis: MetisDesktopApi }).metis;
+			const preview = await api.previewProjectDelete({ mode: "chat", cwd });
+			if (!preview.ok) throw new Error(preview.error.message);
+			const result = await api.deleteProject({
+				requestId: "10000000-0000-4000-8000-000000000007",
+				mode: "chat",
+				cwd,
+				expectedRevision: preview.result.revision,
+			});
+			if (!result.ok) throw new Error(result.error.message);
+			return result.result;
+		}, canonicalProjectDir);
+		expect(deletion).toMatchObject({ mode: "chat", cwd: canonicalProjectDir, deletedSessionCount: 1 });
+
+		phase = "verifying shared memory preservation";
+		expect(existsSync(chatPath), chatPath).toBe(false);
+		for (const preservedPath of [
+			codePath,
+			sharedMemory.indexPath,
+			projectMemoryTopicPath,
+			globalMemoryPath,
+			globalMemoryTopicPath,
+		]) {
+			expect(existsSync(preservedPath), preservedPath).toBe(true);
+		}
+		expect(await readFile(projectMemoryTopicPath, "utf8")).toBe("shared project memory\n");
+		expect(await readFile(globalMemoryTopicPath, "utf8")).toBe("shared global memory\n");
+		expect(await readFile(sharedMemory.indexPath, "utf8")).toContain("[project-sentinel.md](project-sentinel.md)");
+		expect(await readFile(globalMemoryPath, "utf8")).toContain("[global-sentinel.md](global-sentinel.md)");
+	} catch (error) {
+		const bodyText = await page?.locator("body").innerText().catch(() => "renderer unavailable");
+		throw new Error(
+			`${error instanceof Error ? error.message : String(error)}\nphase=${phase}\nrenderer body:\n${bodyText ?? "unavailable"}\n${diagnostics.join("").slice(-8_000)}`,
+		);
+	} finally {
+		await browser?.close().catch(() => undefined);
+		await stopProcess(app);
 		await rm(tempRoot, { recursive: true, force: true });
 	}
 });
