@@ -394,6 +394,81 @@ describe("ModelSettingsPanel", () => {
 		await act(async () => root.unmount());
 	});
 
+	it("tests and saves a Rerank draft with its complete operation endpoint", async () => {
+		const configured: ModelSettingsView = {
+			...modelSettings,
+			rerank: {
+				name: "Cohere Rerank",
+				provider: "Cohere",
+				endpointUrl: "https://api.cohere.com/v2/rerank",
+				modelId: "rerank-v3.5",
+				authConfigured: true,
+			},
+		};
+		const updateModelSettings = vi.fn().mockResolvedValue(configured);
+		const testModelConnection = vi.fn().mockResolvedValue({ ok: true, message: "Connection succeeded", latencyMs: 11 });
+		const api = {
+			getModelSettings: vi.fn().mockResolvedValue(modelSettings),
+			updateModelSettings,
+			testModelConnection,
+		} as unknown as MetisDesktopApi;
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<ModelSettingsPanel api={api} serverReady />));
+		await flush();
+		const panel = [...container.querySelectorAll(".model-service-panel")].find((item) =>
+			item.textContent?.includes("Rerank model"),
+		)!;
+		await act(async () => button(panel, "Configure").click());
+		await flush();
+		const dialog = container.querySelector<HTMLDialogElement>('.model-service-dialog[aria-label="Rerank model"]')!;
+		const inputFor = (label: string) =>
+			[...dialog.querySelectorAll("label")].find((item) => item.querySelector("span")?.textContent === label)?.querySelector(
+				"input",
+			) as HTMLInputElement;
+		expect(inputFor("Base URL")).toBeUndefined();
+		expect(inputFor("Dimensions")).toBeUndefined();
+		await act(async () => {
+			setValue(inputFor("Name"), "Cohere Rerank");
+			setValue(inputFor("Supplier"), "Cohere");
+			setValue(inputFor("Endpoint URL"), "https://api.cohere.com/v2/rerank");
+			setValue(inputFor("Model ID"), "rerank-v3.5");
+			setValue(inputFor("API key"), "rerank-key");
+		});
+		await act(async () => button(dialog, "Test connection").click());
+		await flush();
+		expect(testModelConnection).toHaveBeenCalledWith(
+			expect.objectContaining({
+				kind: "rerank",
+				settings: {
+					name: "Cohere Rerank",
+					provider: "Cohere",
+					endpointUrl: "https://api.cohere.com/v2/rerank",
+					modelId: "rerank-v3.5",
+				},
+				credential: { action: "set", value: "rerank-key" },
+			}),
+		);
+		await act(async () => button(dialog, "Save").click());
+		await flush();
+		expect(updateModelSettings).toHaveBeenCalledWith(
+			expect.objectContaining({
+				mutation: {
+					type: "set_rerank",
+					settings: {
+						name: "Cohere Rerank",
+						provider: "Cohere",
+						endpointUrl: "https://api.cohere.com/v2/rerank",
+						modelId: "rerank-v3.5",
+					},
+					credential: { action: "set", value: "rerank-key" },
+				},
+			}),
+		);
+		await act(async () => root.unmount());
+	});
+
 	it("adds a custom provider with base URL, API format, key, and multiple models", async () => {
 		const updateModelSettings = vi.fn().mockResolvedValue(modelSettings);
 		const api = { getModelSettings: vi.fn().mockResolvedValue(modelSettings), updateModelSettings, testModelConnection: vi.fn() } as unknown as MetisDesktopApi;

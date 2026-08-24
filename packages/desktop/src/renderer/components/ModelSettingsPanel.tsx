@@ -28,24 +28,25 @@ interface VisionDraft {
 	apiKey: string;
 }
 
-type MemoryServiceDraft =
-	| {
-			kind: "embedding";
-			name: string;
-			provider: string;
-			baseUrl: string;
-			modelId: string;
-			dimensions: string;
-			apiKey: string;
-	  }
-	| {
-			kind: "rerank";
-			name: string;
-			provider: string;
-			endpointUrl: string;
-			modelId: string;
-			apiKey: string;
-	  };
+interface MemoryServiceDraftBase {
+	name: string;
+	provider: string;
+	modelId: string;
+	apiKey: string;
+}
+
+interface EmbeddingServiceDraft extends MemoryServiceDraftBase {
+	kind: "embedding";
+	baseUrl: string;
+	dimensions: string;
+}
+
+interface RerankServiceDraft extends MemoryServiceDraftBase {
+	kind: "rerank";
+	endpointUrl: string;
+}
+
+type MemoryServiceDraft = EmbeddingServiceDraft | RerankServiceDraft;
 
 interface CustomModelDraft {
 	readonly modelId: string;
@@ -126,6 +127,77 @@ function providerDraft(provider: ModelSettingsProviderView, defaultModel: ModelS
 	};
 }
 
+function embeddingServiceDraft(current: ModelSettingsView["embedding"] | undefined): EmbeddingServiceDraft {
+	return {
+		kind: "embedding",
+		name: current?.name ?? "",
+		provider: current?.provider ?? "",
+		baseUrl: current?.baseUrl ?? "",
+		modelId: current?.modelId ?? "",
+		dimensions: current?.dimensions?.toString() ?? "",
+		apiKey: "",
+	};
+}
+
+function rerankServiceDraft(current: ModelSettingsView["rerank"] | undefined): RerankServiceDraft {
+	return {
+		kind: "rerank",
+		name: current?.name ?? "",
+		provider: current?.provider ?? "",
+		endpointUrl: current?.endpointUrl ?? "",
+		modelId: current?.modelId ?? "",
+		apiKey: "",
+	};
+}
+
+function memoryServiceInput(draft: MemoryServiceDraft) {
+	const name = draft.name.trim();
+	const provider = draft.provider.trim();
+	const modelId = draft.modelId.trim();
+	if (!name || !provider || !modelId) return null;
+	if (draft.kind === "embedding") {
+		const baseUrl = draft.baseUrl.trim();
+		const dimensions = draft.dimensions.trim();
+		if (!/^https?:\/\//iu.test(baseUrl) || (dimensions && !/^\d+$/u.test(dimensions))) return null;
+		return {
+			kind: "embedding" as const,
+			settings: {
+				name,
+				provider,
+				baseUrl,
+				api: "openai-compatible" as const,
+				modelId,
+				...(dimensions ? { dimensions: Number(dimensions) } : {}),
+			},
+		};
+	}
+	const endpointUrl = draft.endpointUrl.trim();
+	if (!/^https?:\/\//iu.test(endpointUrl)) return null;
+	return { kind: "rerank" as const, settings: { name, provider, endpointUrl, modelId } };
+}
+
+function EmbeddingServiceFields({ draft, busy, onChange }: {
+	readonly draft: EmbeddingServiceDraft;
+	readonly busy: boolean;
+	readonly onChange: (next: EmbeddingServiceDraft) => void;
+}) {
+	const { t } = useTranslation();
+	return <>
+		<label className="model-api-key-field"><span>{t("API format")}</span><input disabled readOnly type="text" value="OpenAI compatible" /></label>
+		<label className="model-api-key-field"><span>{t("Base URL")}</span><input autoComplete="off" disabled={busy} maxLength={2048} onChange={(event) => onChange({ ...draft, baseUrl: event.target.value })} placeholder="https://dashscope.aliyuncs.com/compatible-mode/v1" type="text" value={draft.baseUrl} /></label>
+		<label className="model-api-key-field"><span>{t("Dimensions")}</span><input disabled={busy} max={8192} min={1} onChange={(event) => onChange({ ...draft, dimensions: event.target.value })} placeholder={t("Optional")} type="number" value={draft.dimensions} /></label>
+	</>;
+}
+
+function RerankServiceFields({ draft, busy, onChange }: {
+	readonly draft: RerankServiceDraft;
+	readonly busy: boolean;
+	readonly onChange: (next: RerankServiceDraft) => void;
+}) {
+	const { t } = useTranslation();
+	return <label className="model-api-key-field"><span>{t("Endpoint URL")}</span><input autoComplete="off" disabled={busy} maxLength={2048} onChange={(event) => onChange({ ...draft, endpointUrl: event.target.value })} placeholder="https://api.cohere.com/v2/rerank" type="text" value={draft.endpointUrl} /></label>;
+}
+
 const THINKING_LEVELS: readonly ThinkingSelectionView[] = ["off", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"];
 
 export function ModelSettingsPanel({ api, serverReady }: {
@@ -171,6 +243,26 @@ export function ModelSettingsPanel({ api, serverReady }: {
 			Number(right.auth.configured) - Number(left.auth.configured) || left.name.localeCompare(right.name)),
 		[settings],
 	);
+	const memoryServiceEditor =
+		memoryServiceDraft?.kind === "embedding"
+			? {
+					title: t("Embedding model"),
+					description: t("OpenAI-compatible embeddings endpoint."),
+					supplierPlaceholder: "Qwen",
+					configured: settings?.embedding !== null && settings?.embedding !== undefined,
+					authConfigured: settings?.embedding?.authConfigured ?? false,
+				}
+			: memoryServiceDraft
+				? {
+						title: t("Rerank model"),
+						description: t(
+							"Cohere-compatible and Qwen-compatible services use different paths, so enter the complete endpoint URL.",
+						),
+						supplierPlaceholder: "Cohere",
+						configured: settings?.rerank !== null && settings?.rerank !== undefined,
+						authConfigured: settings?.rerank?.authConfigured ?? false,
+					}
+				: null;
 
 	const closeProvider = useCallback(() => {
 		setDraft(null);
@@ -371,70 +463,20 @@ export function ModelSettingsPanel({ api, serverReady }: {
 	const openMemoryServiceEditor = (kind: MemoryServiceDraft["kind"]) => {
 		setError(null);
 		setNotice(null);
-		if (kind === "embedding") {
-			const current = settings?.embedding;
-			setMemoryServiceDraft({
-				kind,
-				name: current?.name ?? "",
-				provider: current?.provider ?? "",
-				baseUrl: current?.baseUrl ?? "",
-				modelId: current?.modelId ?? "",
-				dimensions: current?.dimensions?.toString() ?? "",
-				apiKey: "",
-			});
-			return;
-		}
-		const current = settings?.rerank;
-		setMemoryServiceDraft({
-			kind,
-			name: current?.name ?? "",
-			provider: current?.provider ?? "",
-			endpointUrl: current?.endpointUrl ?? "",
-			modelId: current?.modelId ?? "",
-			apiKey: "",
-		});
-	};
-
-	const memoryServiceInput = () => {
-		if (!memoryServiceDraft) return null;
-		const name = memoryServiceDraft.name.trim();
-		const provider = memoryServiceDraft.provider.trim();
-		const modelId = memoryServiceDraft.modelId.trim();
-		if (!name || !provider || !modelId) return null;
-		if (memoryServiceDraft.kind === "embedding") {
-			const baseUrl = memoryServiceDraft.baseUrl.trim();
-			const dimensions = memoryServiceDraft.dimensions.trim();
-			if (!/^https?:\/\//iu.test(baseUrl) || (dimensions && !/^\d+$/u.test(dimensions))) return null;
-			return {
-				kind: "embedding" as const,
-				settings: {
-					name,
-					provider,
-					baseUrl,
-					api: "openai-compatible" as const,
-					modelId,
-					...(dimensions ? { dimensions: Number(dimensions) } : {}),
-				},
-			};
-		}
-		const endpointUrl = memoryServiceDraft.endpointUrl.trim();
-		if (!/^https?:\/\//iu.test(endpointUrl)) return null;
-		return { kind: "rerank" as const, settings: { name, provider, endpointUrl, modelId } };
+		setMemoryServiceDraft(
+			kind === "embedding" ? embeddingServiceDraft(settings?.embedding) : rerankServiceDraft(settings?.rerank),
+		);
 	};
 
 	const memoryServiceCredential = () => {
 		if (!memoryServiceDraft) return null;
 		const value = memoryServiceDraft.apiKey;
 		if (value) return { action: "set" as const, value };
-		const configured =
-			memoryServiceDraft.kind === "embedding"
-				? settings?.embedding?.authConfigured
-				: settings?.rerank?.authConfigured;
-		return configured ? { action: "keep" as const } : null;
+		return memoryServiceEditor?.authConfigured ? { action: "keep" as const } : null;
 	};
 
 	const testMemoryService = async () => {
-		const input = memoryServiceInput();
+		const input = memoryServiceDraft ? memoryServiceInput(memoryServiceDraft) : null;
 		const credential = memoryServiceCredential();
 		if (!input || !credential) {
 			setError(t("Fill in all required fields and an API key."));
@@ -458,7 +500,7 @@ export function ModelSettingsPanel({ api, serverReady }: {
 	};
 
 	const saveMemoryService = async () => {
-		const input = memoryServiceInput();
+		const input = memoryServiceDraft ? memoryServiceInput(memoryServiceDraft) : null;
 		const credential = memoryServiceCredential();
 		if (!input || !credential) {
 			setError(t("Fill in all required fields and an API key."));
@@ -888,8 +930,8 @@ export function ModelSettingsPanel({ api, serverReady }: {
 				</div>
 			</dialog> : null}
 
-			{memoryServiceDraft ? <dialog
-				aria-label={t(memoryServiceDraft.kind === "embedding" ? "Embedding model" : "Rerank model")}
+			{memoryServiceDraft && memoryServiceEditor ? <dialog
+				aria-label={memoryServiceEditor.title}
 				className="model-provider-dialog model-service-dialog"
 				onCancel={(event) => { event.preventDefault(); closeMemoryServiceEditor(); }}
 				onClick={(event) => { if (event.target === event.currentTarget) closeMemoryServiceEditor(); }}
@@ -899,24 +941,22 @@ export function ModelSettingsPanel({ api, serverReady }: {
 					<form className="model-provider-editor" onSubmit={(event) => { event.preventDefault(); void saveMemoryService(); }}>
 						<header className="model-provider-editor-header">
 							<div>
-								<h2>{t(memoryServiceDraft.kind === "embedding" ? "Embedding model" : "Rerank model")}</h2>
-								<p>{t(memoryServiceDraft.kind === "embedding" ? "OpenAI-compatible embeddings endpoint." : "Cohere-compatible and Qwen-compatible services use different paths, so enter the complete endpoint URL.")}</p>
+								<h2>{memoryServiceEditor.title}</h2>
+								<p>{memoryServiceEditor.description}</p>
 							</div>
 							<button aria-label={t("Close")} className="model-provider-dialog-close" onClick={closeMemoryServiceEditor} type="button"><X aria-hidden="true" size={18} /></button>
 						</header>
 						<div className="model-custom-provider-fields">
 							<label className="model-api-key-field"><span>{t("Name")}</span><input autoComplete="off" disabled={busy} maxLength={120} onChange={(event) => setMemoryServiceDraft({ ...memoryServiceDraft, name: event.target.value })} type="text" value={memoryServiceDraft.name} /></label>
-							<label className="model-api-key-field"><span>{t("Supplier")}</span><input autoComplete="off" disabled={busy} maxLength={120} onChange={(event) => setMemoryServiceDraft({ ...memoryServiceDraft, provider: event.target.value })} placeholder={memoryServiceDraft.kind === "embedding" ? "Qwen" : "Cohere"} type="text" value={memoryServiceDraft.provider} /></label>
-							{memoryServiceDraft.kind === "embedding" ? <>
-								<label className="model-api-key-field"><span>{t("API format")}</span><input disabled readOnly type="text" value="OpenAI compatible" /></label>
-								<label className="model-api-key-field"><span>{t("Base URL")}</span><input autoComplete="off" disabled={busy} maxLength={2048} onChange={(event) => setMemoryServiceDraft({ ...memoryServiceDraft, baseUrl: event.target.value })} placeholder="https://dashscope.aliyuncs.com/compatible-mode/v1" type="text" value={memoryServiceDraft.baseUrl} /></label>
-								<label className="model-api-key-field"><span>{t("Dimensions")}</span><input disabled={busy} max={8192} min={1} onChange={(event) => setMemoryServiceDraft({ ...memoryServiceDraft, dimensions: event.target.value })} placeholder={t("Optional")} type="number" value={memoryServiceDraft.dimensions} /></label>
-							</> : <label className="model-api-key-field"><span>{t("Endpoint URL")}</span><input autoComplete="off" disabled={busy} maxLength={2048} onChange={(event) => setMemoryServiceDraft({ ...memoryServiceDraft, endpointUrl: event.target.value })} placeholder="https://api.cohere.com/v2/rerank" type="text" value={memoryServiceDraft.endpointUrl} /></label>}
+							<label className="model-api-key-field"><span>{t("Supplier")}</span><input autoComplete="off" disabled={busy} maxLength={120} onChange={(event) => setMemoryServiceDraft({ ...memoryServiceDraft, provider: event.target.value })} placeholder={memoryServiceEditor.supplierPlaceholder} type="text" value={memoryServiceDraft.provider} /></label>
+							{memoryServiceDraft.kind === "embedding"
+								? <EmbeddingServiceFields busy={busy} draft={memoryServiceDraft} onChange={setMemoryServiceDraft} />
+								: <RerankServiceFields busy={busy} draft={memoryServiceDraft} onChange={setMemoryServiceDraft} />}
 							<label className="model-api-key-field"><span>{t("Model ID")}</span><input autoComplete="off" disabled={busy} maxLength={200} onChange={(event) => setMemoryServiceDraft({ ...memoryServiceDraft, modelId: event.target.value })} type="text" value={memoryServiceDraft.modelId} /></label>
 							<label className="model-api-key-field"><span>{t("API key")}</span><input autoComplete="off" disabled={busy} maxLength={16384} onChange={(event) => setMemoryServiceDraft({ ...memoryServiceDraft, apiKey: event.target.value })} placeholder={memoryServiceCredential()?.action === "keep" ? t("Enter a new key to replace the saved credential") : "sk-…"} type="password" value={memoryServiceDraft.apiKey} /></label>
 						</div>
 						<div className="settings-form-actions">
-							{(memoryServiceDraft.kind === "embedding" ? settings?.embedding : settings?.rerank) ? <button className="settings-danger-button" disabled={busy} onClick={() => void removeMemoryService()} type="button">{t("Remove")}</button> : null}
+							{memoryServiceEditor.configured ? <button className="settings-danger-button" disabled={busy} onClick={() => void removeMemoryService()} type="button">{t("Remove")}</button> : null}
 							<button className="settings-secondary-button" disabled={busy || !serverReady} onClick={() => void testMemoryService()} type="button">{t("Test connection")}</button>
 							<button className="settings-primary-button" disabled={busy || !serverReady} type="submit">{busy ? t("Saving…") : t("Save")}</button>
 						</div>
