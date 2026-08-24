@@ -44,6 +44,24 @@ interface FixtureSessionManager {
 	getSessionFile(): string | undefined;
 }
 
+interface FixtureMemoryStore {
+	resolveProject(identity: { canonicalCwd: string; projectKey: string; legacyKey: string }): unknown;
+	insertFact(fact: {
+		id: string;
+		scope: "global" | "project";
+		cwdKey: string | null;
+		mode: null;
+		topicFile: string;
+		text: string;
+		status: "active";
+		createdAt: string;
+		sourceTurn: null;
+		embedding: null;
+		embeddingModel: null;
+	}): boolean;
+	close(): void;
+}
+
 function assistantMessage(timestamp: number, totalTokens: number) {
 	return {
 		role: "assistant" as const,
@@ -70,8 +88,15 @@ interface CodingFixtures {
 	readonly getAutoMemoryPaths: (
 		agentDir: string,
 		cwd: string,
-		mode: "chat" | "code",
 	) => { readonly project: { readonly directory: string; readonly indexPath: string } };
+	readonly getMemorySqlitePath: (agentDir: string) => string;
+	readonly memoryProjectIdentity: (cwd: string) => { canonicalCwd: string; projectKey: string; legacyKey: string };
+	readonly openMemoryStore: (path: string) => FixtureMemoryStore;
+	readonly writeMemoryProjection: (
+		agentDir: string,
+		projectKey: string,
+		store: FixtureMemoryStore,
+	) => Promise<void>;
 	readonly getDefaultSessionDir: (cwd: string, agentDir: string) => string;
 	readonly getSessionAttachmentDir: (agentDir: string, sessionId: string) => string;
 	readonly getSessionImageDir: (sessionFile: string) => string;
@@ -106,8 +131,11 @@ interface CodingFixtures {
 async function loadCodingFixtures(): Promise<CodingFixtures> {
 	const coreRoot = path.resolve(desktopRoot, "../coding-agent/dist/core");
 	const importEsm = Function("specifier", "return import(specifier)") as (specifier: string) => Promise<Record<string, unknown>>;
-	const [memory, attachments, sessions, schedules, trust] = await Promise.all([
+	const [memory, memoryProject, memoryProjection, memoryStore, attachments, sessions, schedules, trust] = await Promise.all([
 		importEsm(pathToFileURL(path.join(coreRoot, "auto-memory.js")).href),
+		importEsm(pathToFileURL(path.join(coreRoot, "memory", "memory-project.js")).href),
+		importEsm(pathToFileURL(path.join(coreRoot, "memory", "memory-projection.js")).href),
+		importEsm(pathToFileURL(path.join(coreRoot, "memory", "memory-store.js")).href),
 		importEsm(pathToFileURL(path.join(coreRoot, "session-attachments.js")).href),
 		importEsm(pathToFileURL(path.join(coreRoot, "session-manager.js")).href),
 		importEsm(pathToFileURL(path.join(coreRoot, "schedules", "manager.js")).href),
@@ -117,6 +145,10 @@ async function loadCodingFixtures(): Promise<CodingFixtures> {
 		createSessionWorkDir: attachments.createSessionWorkDir,
 		ensureModeScopedMemoryLayout: memory.ensureModeScopedMemoryLayout,
 		getAutoMemoryPaths: memory.getAutoMemoryPaths,
+		getMemorySqlitePath: memory.getMemorySqlitePath,
+		memoryProjectIdentity: memoryProject.memoryProjectIdentity,
+		openMemoryStore: memoryStore.openMemoryStore,
+		writeMemoryProjection: memoryProjection.writeProjection,
 		getDefaultSessionDir: sessions.getDefaultSessionDir,
 		getSessionAttachmentDir: attachments.getSessionAttachmentDir,
 		getSessionImageDir: sessions.getSessionImageDir,
@@ -3761,7 +3793,7 @@ test("packaged mode project actions preserve the other mode and shared project d
 	const userDataDir = path.join(tempRoot, "electron");
 	const sourcePath = path.join(projectDir, "source-sentinel.txt");
 	const skillPath = path.join(projectDir, ".metis", "skills", "shared-project-skill", "SKILL.md");
-	const globalMemoryPath = path.join(agentDir, "memory", "MEMORY.md");
+	const globalMemoryPath = path.join(agentDir, "memory", "global", "MEMORY.md");
 	const qaDir = path.join(desktopRoot, "test-results", "design-qa", "project-actions");
 	await Promise.all([
 		mkdir(agentDir),
@@ -3799,12 +3831,45 @@ test("packaged mode project actions preserve the other mode and shared project d
 		...(await seedOwnedSessionData(fixtures, agentDir, CHAT_ACTIVE_ID, chatActivePath)),
 		...(await seedOwnedSessionData(fixtures, agentDir, CHAT_ARCHIVED_ID, chatArchivedPath)),
 	];
-	const chatMemory = fixtures.getAutoMemoryPaths(agentDir, projectDir, "chat").project;
-	const codeMemory = fixtures.getAutoMemoryPaths(agentDir, projectDir, "code").project;
+	const sharedMemory = fixtures.getAutoMemoryPaths(agentDir, projectDir).project;
+	const globalMemoryTopicPath = path.join(path.dirname(globalMemoryPath), "global-sentinel.md");
+	const projectMemoryTopicPath = path.join(sharedMemory.directory, "project-sentinel.md");
+	const memoryIdentity = fixtures.memoryProjectIdentity(projectDir);
+	const memoryStore = fixtures.openMemoryStore(fixtures.getMemorySqlitePath(agentDir));
+	try {
+		memoryStore.resolveProject(memoryIdentity);
+		const createdAt = "2026-01-01T00:00:00.000Z";
+		memoryStore.insertFact({
+			id: "global-sentinel",
+			scope: "global",
+			cwdKey: null,
+			mode: null,
+			topicFile: "global-sentinel.md",
+			text: "shared global memory",
+			status: "active",
+			createdAt,
+			sourceTurn: null,
+			embedding: null,
+			embeddingModel: null,
+		});
+		memoryStore.insertFact({
+			id: "project-sentinel",
+			scope: "project",
+			cwdKey: memoryIdentity.projectKey,
+			mode: null,
+			topicFile: "project-sentinel.md",
+			text: "shared project memory",
+			status: "active",
+			createdAt,
+			sourceTurn: null,
+			embedding: null,
+			embeddingModel: null,
+		});
+		await fixtures.writeMemoryProjection(agentDir, memoryIdentity.projectKey, memoryStore);
+	} finally {
+		memoryStore.close();
+	}
 	await Promise.all([
-		writeFixtureFile(chatMemory.indexPath, "chat-only memory"),
-		writeFixtureFile(codeMemory.indexPath, "code-only memory"),
-		writeFixtureFile(globalMemoryPath, "shared global memory"),
 		writeFixtureFile(sourcePath, "source must survive"),
 		writeFixtureFile(
 			skillPath,
@@ -3847,17 +3912,17 @@ test("packaged mode project actions preserve the other mode and shared project d
 		await expect(sessionActionButton).toHaveCSS("opacity", "0");
 		await sessionActionButton.focus();
 		await expect(sessionActionButton).toHaveCSS("opacity", "1");
-		await expect(sessionButton).toHaveCSS("background-color", "rgb(64, 64, 64)");
+		await expect(sessionButton).toHaveCSS("background-color", "rgb(51, 51, 51)");
 		await sessionActionButton.click();
-		await expect(sessionActionButton).toHaveCSS("background-color", "rgb(104, 104, 104)");
+		await expect(sessionActionButton).toHaveCSS("background-color", "rgb(42, 42, 42)");
 		await page.locator(".session-sidebar").screenshot({ path: path.join(qaDir, "session-row-hover-inactive.png") });
 		await page.keyboard.press("Escape");
 		await sessionActionRow.getByRole("button", { name: "Session action target", exact: true }).click();
 		await expect(page.locator(".workspace-header")).toHaveAttribute("data-active-session-id", SESSION_ACTION_ID);
 		await sessionActionButton.focus();
-		await expect(sessionButton).toHaveCSS("background-color", "rgb(88, 88, 88)");
+		await expect(sessionButton).toHaveCSS("background-color", "rgb(40, 40, 40)");
 		await sessionActionButton.click();
-		await expect(sessionActionButton).toHaveCSS("background-color", "rgb(104, 104, 104)");
+		await expect(sessionActionButton).toHaveCSS("background-color", "rgb(42, 42, 42)");
 		await page.locator(".session-sidebar").screenshot({ path: path.join(qaDir, "session-row-hover-current.png") });
 		const sessionActionMenu = page.getByRole("menu", { name: "Session action target session actions" });
 		await expect(sessionActionMenu.getByRole("menuitem")).toHaveText(["Pin", "Rename", "Delete"]);
@@ -4005,6 +4070,7 @@ test("packaged mode project actions preserve the other mode and shared project d
 		debuggingPort = await reservePort();
 		app = launchPackagedApp(executable, debuggingPort, userDataDir, projectDir, agentDir, homeDir, diagnostics);
 		({ browser, page } = await connectToApp(debuggingPort));
+		page.setDefaultTimeout(10_000);
 		await waitForServerReady(page);
 		await expect(projectGroup(page, "Pinned Chat Project")).toBeVisible();
 		await page.setViewportSize({ width: 900, height: 720 });
@@ -4029,22 +4095,33 @@ test("packaged mode project actions preserve the other mode and shared project d
 		await page.screenshot({ path: path.join(qaDir, "delete-success-narrow.png") });
 
 		phase = "verifying exact disk preservation";
-		for (const removedPath of [chatActivePath, chatArchivedPath, chatMemory.directory, ...ownedPaths]) {
+		for (const removedPath of [chatActivePath, chatArchivedPath, ...ownedPaths]) {
 			expect(existsSync(removedPath), removedPath).toBe(false);
 		}
-		for (const preservedPath of [codePath, codeMemory.indexPath, globalMemoryPath, sourcePath, skillPath]) {
+		for (const preservedPath of [
+			codePath,
+			sharedMemory.indexPath,
+			projectMemoryTopicPath,
+			globalMemoryPath,
+			globalMemoryTopicPath,
+			sourcePath,
+			skillPath,
+		]) {
 			expect(existsSync(preservedPath), preservedPath).toBe(true);
 		}
-		expect(await readFile(codeMemory.indexPath, "utf8")).toBe("code-only memory");
-		expect(await readFile(globalMemoryPath, "utf8")).toBe("shared global memory");
+		expect(await readFile(projectMemoryTopicPath, "utf8")).toBe("shared project memory\n");
+		expect(await readFile(globalMemoryTopicPath, "utf8")).toBe("shared global memory\n");
+		expect(await readFile(sharedMemory.indexPath, "utf8")).toContain("[project-sentinel.md](project-sentinel.md)");
+		expect(await readFile(globalMemoryPath, "utf8")).toContain("[global-sentinel.md](global-sentinel.md)");
 		expect(await readFile(sourcePath, "utf8")).toBe("source must survive");
 		expect(new fixtures.ProjectTrustStore(agentDir).get(projectDir)).toBe(true);
 
 		phase = "reopening Code and shared Skills";
 		await page.getByRole("button", { name: "Code", exact: true }).click();
+		await groupSessionsBy(page, "Project");
 		await projectGroup(page, projectName).locator(".session-button").click();
 		await expect(page.locator(`[data-active-session-id="${CODE_ID}"]`)).toBeVisible();
-		await page.getByRole("button", { name: "Plugins", exact: true }).click();
+		await page.getByRole("button", { name: "Customize", exact: true }).click();
 		await page.getByRole("button", { name: "Skill sources", exact: true }).click();
 		await page.getByRole("option", { name: "Project", exact: true }).click();
 		await expect(page.getByText("shared-project-skill", { exact: true })).toBeVisible();
