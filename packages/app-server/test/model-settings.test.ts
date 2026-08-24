@@ -1,12 +1,10 @@
 import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { DatabaseSync } from "node:sqlite";
 import { validateResponseFor } from "@metis/app-protocol";
 import {
 	AuthStorage,
 	getLatestMemoryError,
-	getMemorySqlitePath,
 	MEMORY_EMBEDDING_CREDENTIAL_ID,
 	MEMORY_RERANK_CREDENTIAL_ID,
 	ModelRegistry,
@@ -14,6 +12,7 @@ import {
 } from "@metis/coding-agent";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ModelSettingsService } from "../src/model-settings.ts";
+import { recordMemoryHealth } from "./fixtures/memory-health.ts";
 
 describe("ModelSettingsService", () => {
 	let agentDir: string;
@@ -233,14 +232,27 @@ describe("ModelSettingsService", () => {
 			settingsManager: SettingsManager.create(agentDir, agentDir),
 		});
 		expect(getLatestMemoryError(agentDir)).toBeNull();
-		const db = new DatabaseSync(getMemorySqlitePath(agentDir));
-		const insert = db.prepare(
-			"INSERT INTO memory_health (operation, status, updated_at, reason) VALUES (?, ?, ?, ?)",
+		recordMemoryHealth(
+			agentDir,
+			{
+				operation: "embedding",
+				status: "error",
+				updatedAt: "2026-08-24T00:00:00.000Z",
+				reason: "Embedding request failed",
+			},
+			{
+				operation: "backfill",
+				status: "error",
+				updatedAt: "2026-08-24T00:01:00.000Z",
+				reason: "Backfill request failed",
+			},
+			{
+				operation: "rerank",
+				status: "error",
+				updatedAt: "2026-08-24T00:02:00.000Z",
+				reason: "Rerank request failed",
+			},
 		);
-		insert.run("embedding", "error", "2026-08-24T00:00:00.000Z", "Embedding request failed");
-		insert.run("backfill", "error", "2026-08-24T00:01:00.000Z", "Backfill request failed");
-		insert.run("rerank", "error", "2026-08-24T00:02:00.000Z", "Rerank request failed");
-		db.close();
 
 		await service.update({
 			type: "set_embedding",

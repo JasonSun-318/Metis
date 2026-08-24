@@ -1,17 +1,16 @@
 import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { DatabaseSync } from "node:sqlite";
 import { validateResponseFor } from "@metis/app-protocol";
 import {
 	AuthStorage,
-	getMemorySqlitePath,
 	MEMORY_EMBEDDING_CREDENTIAL_ID,
 	MEMORY_RERANK_CREDENTIAL_ID,
 	SettingsManager,
 } from "@metis/coding-agent";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { MemorySettingsService } from "../src/memory-settings.ts";
+import { recordMemoryHealth } from "./fixtures/memory-health.ts";
 
 describe("MemorySettingsService", () => {
 	let agentDir: string;
@@ -47,14 +46,12 @@ describe("MemorySettingsService", () => {
 	it("exposes the latest memory health error through the narrow boundary", () => {
 		const svc = service();
 		expect(svc.view().lastError).toBeNull();
-		const db = new DatabaseSync(getMemorySqlitePath(agentDir));
-		db.prepare("INSERT INTO memory_health (operation, status, updated_at, reason) VALUES (?, ?, ?, ?)").run(
-			"embedding",
-			"error",
-			"2026-08-24T00:00:00.000Z",
-			"Embedding request failed",
-		);
-		db.close();
+		recordMemoryHealth(agentDir, {
+			operation: "embedding",
+			status: "error",
+			updatedAt: "2026-08-24T00:00:00.000Z",
+			reason: "Embedding request failed",
+		});
 
 		expect(svc.view().lastError).toBe("Embedding request failed");
 	});

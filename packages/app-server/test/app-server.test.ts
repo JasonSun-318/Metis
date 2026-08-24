@@ -15,7 +15,6 @@ import {
 import { open } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
-import { DatabaseSync } from "node:sqlite";
 import type {
 	AgentMode,
 	ClientParams,
@@ -30,11 +29,9 @@ import type {
 } from "@metis/app-protocol";
 import { RPC_ERROR_CODES } from "@metis/app-protocol";
 import {
-	ensureAutoMemoryLayout,
 	getDefaultSessionDir,
 	getLatestMemoryError,
 	getManagedWorkspaceDir,
-	getMemorySqlitePath,
 	getSessionDisplayMetadataPath,
 	ProjectTrustStore,
 	SessionManager,
@@ -53,6 +50,7 @@ import type {
 	SessionRef,
 	SessionRuntimeHost,
 } from "../src/session-runtime-host.ts";
+import { recordMemoryHealth } from "./fixtures/memory-health.ts";
 
 const REQUEST_A = "00000000-0000-4000-8000-000000000001";
 const REQUEST_B = "00000000-0000-4000-8000-000000000002";
@@ -516,15 +514,12 @@ describe("AppServer", () => {
 	});
 
 	it("recovers interrupted memory health before serving sessions", async () => {
-		await ensureAutoMemoryLayout(agentDir);
-		const db = new DatabaseSync(getMemorySqlitePath(agentDir));
-		db.prepare("INSERT INTO memory_health (operation, status, updated_at, reason) VALUES (?, ?, ?, ?)").run(
-			"backfill",
-			"running",
-			"2026-08-20T00:00:00.000Z",
-			null,
-		);
-		db.close();
+		recordMemoryHealth(agentDir, {
+			operation: "backfill",
+			status: "running",
+			updatedAt: "2026-08-20T00:00:00.000Z",
+			reason: null,
+		});
 
 		await createTestServer({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
 		expect(getLatestMemoryError(agentDir)).toBe("Interrupted before completion");
