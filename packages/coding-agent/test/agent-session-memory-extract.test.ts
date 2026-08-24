@@ -313,6 +313,41 @@ describe("AgentSession memory extract", () => {
 		session.dispose();
 	});
 
+	it("does not attach an Embedding adapter while the memory engine is Index", async () => {
+		const { session } = createCompactionSession();
+		const runner = vi.fn(async (_options: RunMemoryExtractOptions) => extractResult("success"));
+		const createEmbedder = vi.fn(async () => ({
+			key: "configured-embedding",
+			embed: async () => [new Float32Array([1])],
+		}));
+		setExtractRunner(session, runner);
+		(
+			session as unknown as {
+				_createMemoryEmbedder: typeof createEmbedder;
+			}
+		)._createMemoryEmbedder = createEmbedder;
+		session.agent.state.messages = [{ role: "user", content: "remember without vectors", timestamp: Date.now() }];
+
+		scheduleThrottled(session);
+		await vi.waitFor(() => expect(runner).toHaveBeenCalledOnce());
+		expect(createEmbedder).not.toHaveBeenCalled();
+		expect(runner.mock.calls[0]![0]).not.toHaveProperty("embedTexts");
+		await session.waitForMemoryExtract();
+		session.dispose();
+	});
+
+	it("resumes pending Index evidence immediately after a settings refresh", async () => {
+		const { session } = createCompactionSession();
+		const runner = vi.fn(async (_options: RunMemoryExtractOptions) => extractResult("success"));
+		setExtractRunner(session, runner);
+
+		await session.applyModelServiceSettingsRefresh();
+		await vi.waitFor(() => expect(runner).toHaveBeenCalledOnce());
+		expect(runner.mock.calls[0]![0]).toMatchObject({ mode: "commit", trigger: "settings-refresh" });
+		await session.waitForMemoryExtract();
+		session.dispose();
+	});
+
 	it("drains entries appended during an active extract", async () => {
 		let finishFirst!: (result: MemoryExtractResult) => void;
 		const first = new Promise<MemoryExtractResult>((resolve) => {

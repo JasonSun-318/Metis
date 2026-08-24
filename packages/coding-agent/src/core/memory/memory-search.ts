@@ -24,8 +24,7 @@ export interface RetrievedMemoryFact {
 export interface SearchMemoriesOptions {
 	store: MemoryStore;
 	query: string;
-	cwdKey: string;
-	mode: string | null;
+	projectKey: string;
 	embeddingSettings: EmbeddingSettings;
 	embeddingApiKey: string;
 	rerankSettings?: RerankSettings;
@@ -95,7 +94,7 @@ export async function searchMemories(options: SearchMemoriesOptions): Promise<Re
 		.searchRelevantFacts(queryEmbedding, {
 			queryText: query,
 			embeddingKey,
-			projectKey: options.cwdKey,
+			projectKey: options.projectKey,
 			limit: MEMORY_RETRIEVE_CANDIDATE_LIMIT,
 		})
 		.hits.map(toRetrieved);

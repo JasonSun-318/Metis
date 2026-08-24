@@ -3,13 +3,12 @@ import { join } from "node:path";
 import type { ClientParams, ClientResult } from "@metis/app-protocol";
 import {
 	type AuthStorage,
+	clearMemoryHealth,
 	embedTexts,
 	FileAuthStorageBackend,
-	getMemorySqlitePath,
 	MEMORY_EMBEDDING_CREDENTIAL_ID,
 	MEMORY_RERANK_CREDENTIAL_ID,
 	type ModelRegistry,
-	openMemoryStore,
 	rerankDocuments,
 	type SettingsManager,
 	validateEmbeddingSettings,
@@ -437,12 +436,7 @@ export class ModelSettingsService {
 
 	private clearMemoryHealth(operations: Array<"embedding" | "rerank" | "backfill">): void {
 		try {
-			const store = openMemoryStore(getMemorySqlitePath(this.agentDir));
-			try {
-				store.clearHealth(...operations);
-			} finally {
-				store.close();
-			}
+			clearMemoryHealth(this.agentDir, ...operations);
 		} catch {
 			// Health is derived state; settings and credentials are already durable.
 		}

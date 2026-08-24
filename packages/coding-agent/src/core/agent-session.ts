@@ -2691,8 +2691,7 @@ export class AgentSession {
 			const hits: RetrievedMemoryFact[] = await this._searchMemories({
 				store,
 				query,
-				cwdKey: projectKey,
-				mode: null,
+				projectKey,
 				embeddingSettings,
 				embeddingApiKey,
 				...(rerankSettings ? { rerankSettings } : {}),
@@ -4159,7 +4158,6 @@ export class AgentSession {
 			!this._includeAutoMemory ||
 			!this._agentDir ||
 			!this.settingsManager.getAutoMemoryEnabled() ||
-			this.settingsManager.getMemoryEngine() !== "extract" ||
 			!this.model
 		) {
 			return;
@@ -4316,10 +4314,12 @@ export class AgentSession {
 			...(this.agent.thinkingBudgets ? { thinkingBudgets: this.agent.thinkingBudgets } : {}),
 			...(this.agent.maxRetryDelayMs !== undefined ? { maxRetryDelayMs: this.agent.maxRetryDelayMs } : {}),
 		};
-		const embedder = await awaitWithAbort(this._createMemoryEmbedder(), options.signal);
-		if (embedder) {
-			extractArgs.embeddingKey = embedder.key;
-			extractArgs.embedTexts = embedder.embed;
+		if (this.settingsManager.getMemoryEngine() === "extract") {
+			const embedder = await awaitWithAbort(this._createMemoryEmbedder(), options.signal);
+			if (embedder) {
+				extractArgs.embeddingKey = embedder.key;
+				extractArgs.embedTexts = embedder.embed;
+			}
 		}
 		return awaitWithAbort(this._memoryExtractRunner(extractArgs), options.signal);
 	}

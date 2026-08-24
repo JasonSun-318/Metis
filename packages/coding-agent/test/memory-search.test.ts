@@ -59,8 +59,7 @@ describe("memory search", () => {
 		const hits = await searchMemories({
 			store,
 			query: "TypeScript backend preferences",
-			cwdKey: "unused",
-			mode: "code",
+			projectKey: "unused",
 			embeddingSettings,
 			embeddingApiKey: "secret",
 			embedQuery: async () => new Float32Array([0.95, 0.05, 0]),
@@ -94,8 +93,7 @@ describe("memory search", () => {
 		const hits = await searchMemories({
 			store,
 			query: "TypeScript backend preferences",
-			cwdKey: "unused",
-			mode: "code",
+			projectKey: "unused",
 			embeddingSettings,
 			embeddingApiKey: "secret",
 			rerankSettings: {
@@ -123,8 +121,7 @@ describe("memory search", () => {
 		const hits = await searchMemories({
 			store,
 			query: "typescript",
-			cwdKey: "unused",
-			mode: "code",
+			projectKey: "unused",
 			embeddingSettings,
 			embeddingApiKey: "secret",
 			rerankSettings: {
@@ -156,8 +153,7 @@ describe("memory search", () => {
 		const hits = await searchMemories({
 			store,
 			query: "typescript",
-			cwdKey: "unused",
-			mode: "code",
+			projectKey: "unused",
 			embeddingSettings,
 			embeddingApiKey: "secret",
 			retrieveTimeoutMs: 10,
@@ -187,8 +183,7 @@ describe("memory search", () => {
 		const pending = searchMemories({
 			store,
 			query: "typescript",
-			cwdKey: "unused",
-			mode: "code",
+			projectKey: "unused",
 			embeddingSettings,
 			embeddingApiKey: "secret",
 			signal: controller.signal,
@@ -220,8 +215,7 @@ describe("memory search", () => {
 		await searchMemories({
 			store,
 			query: `drop${"😀".repeat(8_000)}`,
-			cwdKey: "unused",
-			mode: null,
+			projectKey: "unused",
 			embeddingSettings,
 			embeddingApiKey: "secret",
 			embedQuery: async (query) => {
@@ -336,8 +330,7 @@ describe("memory search", () => {
 		const hits = await searchMemories({
 			store,
 			query: "typescript",
-			cwdKey: "cwd-a",
-			mode: "code",
+			projectKey: "cwd-a",
 			embeddingSettings,
 			embeddingApiKey: "secret",
 			embedQuery: async () => new Float32Array([1, 0, 0]),

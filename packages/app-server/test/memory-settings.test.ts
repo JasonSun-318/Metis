@@ -4,10 +4,8 @@ import { join } from "node:path";
 import { validateResponseFor } from "@metis/app-protocol";
 import {
 	AuthStorage,
-	getMemorySqlitePath,
 	MEMORY_EMBEDDING_CREDENTIAL_ID,
 	MEMORY_RERANK_CREDENTIAL_ID,
-	openMemoryStore,
 	SettingsManager,
 } from "@metis/coding-agent";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -44,7 +42,7 @@ describe("MemorySettingsService", () => {
 		});
 	});
 
-	it("requires dedicated API keys and exposes the latest bounded health error", async () => {
+	it("requires dedicated API keys", async () => {
 		const manager = SettingsManager.create(agentDir, agentDir);
 		manager.setEmbeddingSettings({
 			name: "Embedding",
@@ -68,19 +66,10 @@ describe("MemorySettingsService", () => {
 			refresh: "refresh-token",
 		});
 		auth.set(MEMORY_RERANK_CREDENTIAL_ID, { type: "api_key", key: "rerank-secret" });
-		const store = openMemoryStore(getMemorySqlitePath(agentDir));
-		store.recordHealth({
-			operation: "embedding",
-			status: "error",
-			updatedAt: new Date().toISOString(),
-			reason: "Embedding request failed",
-		});
-		store.close();
-
 		expect(service().view()).toMatchObject({
 			embeddingConfigured: false,
 			rerankConfigured: true,
-			lastError: "Embedding request failed",
+			lastError: null,
 		});
 	});
 

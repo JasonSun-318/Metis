@@ -1,10 +1,10 @@
 import type { ClientParams, ClientResult } from "@metis/app-protocol";
 import {
 	type AuthStorage,
-	getMemorySqlitePath,
+	clearMemoryHealth,
+	getLatestMemoryError,
 	MEMORY_EMBEDDING_CREDENTIAL_ID,
 	MEMORY_RERANK_CREDENTIAL_ID,
-	openMemoryStore,
 	type SettingsManager,
 } from "@metis/coding-agent";
 
@@ -27,12 +27,7 @@ export class MemorySettingsService {
 	view(): ClientResult<"memory/get"> {
 		let lastError: string | null = null;
 		try {
-			const store = openMemoryStore(getMemorySqlitePath(this.agentDir));
-			try {
-				lastError = store.listHealth().find((health) => health.status === "error")?.reason ?? null;
-			} finally {
-				store.close();
-			}
+			lastError = getLatestMemoryError(this.agentDir);
 		} catch {
 			// Health is derived state; settings remain readable if SQLite is temporarily unavailable.
 		}
@@ -64,12 +59,7 @@ export class MemorySettingsService {
 		this.settingsManager.setMemorySettings(params.autoMemoryEnabled, params.memoryEngine);
 		await this.settingsManager.flushOrThrow();
 		try {
-			const store = openMemoryStore(getMemorySqlitePath(this.agentDir));
-			try {
-				store.clearHealth("extract", "backfill");
-			} finally {
-				store.close();
-			}
+			clearMemoryHealth(this.agentDir, "extract", "backfill");
 		} catch {
 			// Health is derived state; settings are already durable.
 		}

@@ -15,6 +15,7 @@ import {
 import { open } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import type {
 	AgentMode,
 	ClientParams,
@@ -31,10 +32,10 @@ import { RPC_ERROR_CODES } from "@metis/app-protocol";
 import {
 	ensureAutoMemoryLayout,
 	getDefaultSessionDir,
+	getLatestMemoryError,
 	getManagedWorkspaceDir,
 	getMemorySqlitePath,
 	getSessionDisplayMetadataPath,
-	openMemoryStore,
 	ProjectTrustStore,
 	SessionManager,
 	SettingsManager,
@@ -516,21 +517,17 @@ describe("AppServer", () => {
 
 	it("recovers interrupted memory health before serving sessions", async () => {
 		await ensureAutoMemoryLayout(agentDir);
-		let store = openMemoryStore(getMemorySqlitePath(agentDir));
-		store.recordHealth({
-			operation: "backfill",
-			status: "running",
-			updatedAt: "2026-08-20T00:00:00.000Z",
-			reason: null,
-		});
-		store.close();
+		const db = new DatabaseSync(getMemorySqlitePath(agentDir));
+		db.prepare("INSERT INTO memory_health (operation, status, updated_at, reason) VALUES (?, ?, ?, ?)").run(
+			"backfill",
+			"running",
+			"2026-08-20T00:00:00.000Z",
+			null,
+		);
+		db.close();
 
 		await createTestServer({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
-		store = openMemoryStore(getMemorySqlitePath(agentDir));
-		expect(store.listHealth()).toContainEqual(
-			expect.objectContaining({ operation: "backfill", status: "error", reason: "Interrupted before completion" }),
-		);
-		store.close();
+		expect(getLatestMemoryError(agentDir)).toBe("Interrupted before completion");
 	});
 
 	it("restores persisted session names and caches unchanged journal metadata", async () => {

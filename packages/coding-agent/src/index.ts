@@ -259,6 +259,7 @@ export {
 	resolveMcpServerSettings,
 } from "./core/mcp/index.ts";
 export { embedTexts } from "./core/memory/memory-embedder.ts";
+export { clearMemoryHealth, getLatestMemoryError } from "./core/memory/memory-health.ts";
 export {
 	assertMemoryReadAllowed,
 	type MemoryReadBoundary,
@@ -274,7 +275,6 @@ export {
 	validateRerankSettings,
 	validateServiceCredential,
 } from "./core/memory/memory-service-settings.ts";
-export { openMemoryStore } from "./core/memory/memory-store.ts";
 export { convertToLlm } from "./core/messages.ts";
 export type {
 	ModeProjectSessionTarget,
