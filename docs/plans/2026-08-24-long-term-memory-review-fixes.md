@@ -199,10 +199,12 @@ Run the complete coding-agent, app-server, and Desktop test suites serially to a
 
 Run `npm run package --workspace @metis/desktop` followed by `npm run verify:package --workspace @metis/desktop`.
 
-- [ ] **Step 4: Run independent Standards and Spec reviews**
+- [x] **Step 4: Run independent Standards and Spec reviews**
 
 Review the final diff against this plan and `docs/specs/long-term-memory-hardening.md`. Resolve every supported P0-P2 finding and document any rejected false positive with source evidence.
 
-- [ ] **Step 5: Confirm worktree scope**
+Outcome: Spec review found no remaining issues. Standards review found no hard violation or P0-P2; the remaining P3 `kind` branches are intentional for two protocols and avoid an unrequested factory. Repeated health SQL was consolidated into one test fixture.
+
+- [x] **Step 5: Confirm worktree scope**
 
 Use `git status --short`, `git diff --stat`, and `git diff --check`; confirm the unrelated `doc/` directory is untouched.
