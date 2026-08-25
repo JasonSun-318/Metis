@@ -38,6 +38,7 @@ function childItem(itemId: string, text: string, state: ItemView["state"] = "str
 function snapshot(serverEpoch = EPOCH_A, cursor = 0, recentItems: ItemView[] = [item("item-1", "A")]): SessionSnapshot {
 	return {
 		session: session(),
+		collaborationMode: "default",
 		permissionMode: "ask",
 		turns: [],
 		recentItems,
@@ -373,6 +374,31 @@ describe("renderer projection reducer", () => {
 		).toBe("applied");
 		expect(store.getSnapshot().activeSessionId).toBeNull();
 		expect(store.getSnapshot().sessionOrder).toEqual(["code-preserved"]);
+	});
+
+	it("replaces and streams the active session collaboration mode", () => {
+		const store = new AppStore();
+		store.applySnapshot({ ...snapshot(EPOCH_A, 0), collaborationMode: "plan" });
+		expect(store.getSnapshot().collaborationMode).toBe("plan");
+
+		expect(
+			store.applyBatch({
+				serverEpoch: EPOCH_A,
+				fromCursor: 1,
+				toCursor: 1,
+				events: [
+					{
+						type: "session/collaborationModeChanged",
+						sessionId: "session-1",
+						collaborationMode: "default",
+					},
+				],
+			}),
+		).toBe("applied");
+		expect(store.getSnapshot().collaborationMode).toBe("default");
+
+		store.applySnapshot({ ...snapshot(EPOCH_B, 4), collaborationMode: "plan" });
+		expect(store.getSnapshot().collaborationMode).toBe("plan");
 	});
 
 	it("replaces and streams the active session permission mode", () => {

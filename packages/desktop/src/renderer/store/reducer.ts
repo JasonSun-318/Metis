@@ -39,6 +39,7 @@ export interface MutableProjectionState {
 	serverEpoch: string | null;
 	cursor: number;
 	syncStatus: ProjectionSyncStatus;
+	collaborationMode: SessionSnapshot["collaborationMode"];
 	permissionMode: SessionSnapshot["permissionMode"];
 	thinkingSelection: ThinkingSelectionView;
 	actualThinkingLevel: Exclude<ThinkingSelectionView, "ultra">;
@@ -78,6 +79,7 @@ export function createProjectionState(): MutableProjectionState {
 		serverEpoch: null,
 		cursor: 0,
 		syncStatus: "empty",
+		collaborationMode: "default",
 		permissionMode: "auto",
 		thinkingSelection: "off",
 		actualThinkingLevel: "off",
@@ -135,6 +137,7 @@ export function removeSession(state: MutableProjectionState, sessionId: string):
 	state.serverEpoch = null;
 	state.cursor = 0;
 	state.syncStatus = "empty";
+	state.collaborationMode = "default";
 	state.permissionMode = "auto";
 	state.subagents = [];
 	state.tasks = [];
@@ -173,6 +176,7 @@ export function removeModeProjectSessions(state: MutableProjectionState, mode: A
 	state.serverEpoch = null;
 	state.cursor = 0;
 	state.syncStatus = "empty";
+	state.collaborationMode = "default";
 	state.permissionMode = "auto";
 	state.subagents = [];
 	state.tasks = [];
@@ -217,6 +221,7 @@ export function replaceProjectionSnapshot(state: MutableProjectionState, snapsho
 	state.serverEpoch = snapshot.serverEpoch;
 	state.cursor = snapshot.cursor;
 	state.syncStatus = "ready";
+	state.collaborationMode = snapshot.collaborationMode;
 	state.permissionMode = snapshot.permissionMode;
 	state.thinkingSelection = snapshot.thinkingSelection;
 	state.actualThinkingLevel = snapshot.actualThinkingLevel;
@@ -267,6 +272,7 @@ function eventSessionId(event: DomainEvent): string | undefined {
 		case "item/delta":
 			return event.sessionId;
 		case "session/permissionModeChanged":
+		case "session/collaborationModeChanged":
 		case "session/thinkingSelectionChanged":
 		case "subagent/updated":
 		case "subagent/item/started":
@@ -363,6 +369,9 @@ function applyEvent(state: MutableProjectionState, event: DomainEvent): void {
 			return;
 		case "session/permissionModeChanged":
 			state.permissionMode = event.permissionMode;
+			return;
+		case "session/collaborationModeChanged":
+			state.collaborationMode = event.collaborationMode;
 			return;
 		case "session/thinkingSelectionChanged":
 			state.thinkingSelection = event.thinkingSelection;

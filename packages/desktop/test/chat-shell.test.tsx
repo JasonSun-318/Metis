@@ -87,6 +87,7 @@ function mcpServer(
 function snapshot(summary: SessionSummary): SessionSnapshot {
 	return {
 		session: summary,
+		collaborationMode: "default",
 		permissionMode: "ask",
 		model: { provider: "test-provider", modelId: "test-model" },
 		availableModels: [

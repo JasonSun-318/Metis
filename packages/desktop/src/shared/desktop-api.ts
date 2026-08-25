@@ -112,6 +112,9 @@ export const DESKTOP_IPC_CHANNELS = {
 	interruptSubagent: "metis:interrupt-subagent",
 	setThinkingSelection: "metis:set-thinking-selection",
 	setPermissionMode: "metis:set-permission-mode",
+	setCollaborationMode: "metis:set-collaboration-mode",
+	startPlanExecution: "metis:start-plan-execution",
+	cancelPlan: "metis:cancel-plan",
 	listPermissionRules: "metis:list-permission-rules",
 	deletePermissionRule: "metis:delete-permission-rule",
 	clearPermissionRules: "metis:clear-permission-rules",
@@ -553,6 +556,11 @@ export interface MetisDesktopApi {
 	setPermissionMode(
 		input: ClientParams<"session/setPermissionMode">,
 	): Promise<ClientResult<"session/setPermissionMode">>;
+	setCollaborationMode(
+		input: ClientParams<"session/setCollaborationMode">,
+	): Promise<ClientResult<"session/setCollaborationMode">>;
+	startPlanExecution(input: ClientParams<"plan/startExecution">): Promise<ClientResult<"plan/startExecution">>;
+	cancelPlan(input: ClientParams<"plan/cancel">): Promise<ClientResult<"plan/cancel">>;
 	listPermissionRules(input: ClientParams<"permission/rules/list">): Promise<ClientResult<"permission/rules/list">>;
 	deletePermissionRule(
 		input: ClientParams<"permission/rules/delete">,

@@ -54,6 +54,7 @@ export interface AppStoreSnapshot {
 	readonly serverEpoch: string | null;
 	readonly cursor: number;
 	readonly syncStatus: "empty" | "ready" | "resubscribing" | "resnapshot_required";
+	readonly collaborationMode: SessionSnapshot["collaborationMode"];
 	readonly permissionMode: SessionSnapshot["permissionMode"];
 	readonly thinkingSelection: SessionSnapshot["thinkingSelection"];
 	readonly actualThinkingLevel: SessionSnapshot["actualThinkingLevel"];
@@ -203,6 +204,7 @@ export class AppStore {
 			serverEpoch: this.state.serverEpoch,
 			cursor: this.state.cursor,
 			syncStatus: this.state.syncStatus,
+			collaborationMode: this.state.collaborationMode,
 			permissionMode: this.state.permissionMode,
 			thinkingSelection: this.state.thinkingSelection,
 			actualThinkingLevel: this.state.actualThinkingLevel,

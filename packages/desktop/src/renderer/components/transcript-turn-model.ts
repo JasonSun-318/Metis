@@ -733,7 +733,7 @@ export function buildCodeTurnPresentation(items: readonly ItemView[]): CodeTurnP
 		const answer = itemIndex === finalIndex;
 		const markdown = item.role === "assistant";
 		for (const block of item.content) {
-			if (block.type === "thinking" || block.type === "compaction") continue;
+			if (block.type === "thinking" || block.type === "compaction" || block.type === "plan") continue;
 			if (block.type === "tool_call") {
 				if (block.name === "deliver_file") continue;
 				flushContent();

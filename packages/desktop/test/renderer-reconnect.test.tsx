@@ -36,6 +36,7 @@ function snapshot(serverEpoch: string, cursor: number, text: string): SessionSna
 			state: "running",
 			archived: false,
 		},
+		collaborationMode: "default",
 		permissionMode: "ask",
 		turns: [],
 		recentItems: [item("item-1", text)],

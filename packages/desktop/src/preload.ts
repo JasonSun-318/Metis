@@ -286,6 +286,16 @@ const api = {
 		invoke(DESKTOP_IPC_CHANNELS.setPermissionMode, "session/setPermissionMode", input) as ReturnType<
 			MetisDesktopApi["setPermissionMode"]
 		>,
+	setCollaborationMode: (input: ClientParams<"session/setCollaborationMode">) =>
+		invoke(DESKTOP_IPC_CHANNELS.setCollaborationMode, "session/setCollaborationMode", input) as ReturnType<
+			MetisDesktopApi["setCollaborationMode"]
+		>,
+	startPlanExecution: (input: ClientParams<"plan/startExecution">) =>
+		invoke(DESKTOP_IPC_CHANNELS.startPlanExecution, "plan/startExecution", input) as ReturnType<
+			MetisDesktopApi["startPlanExecution"]
+		>,
+	cancelPlan: (input: ClientParams<"plan/cancel">) =>
+		invoke(DESKTOP_IPC_CHANNELS.cancelPlan, "plan/cancel", input) as ReturnType<MetisDesktopApi["cancelPlan"]>,
 	listPermissionRules: (input: ClientParams<"permission/rules/list">) =>
 		invoke(DESKTOP_IPC_CHANNELS.listPermissionRules, "permission/rules/list", input) as ReturnType<
 			MetisDesktopApi["listPermissionRules"]

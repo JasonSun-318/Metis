@@ -482,6 +482,9 @@ describe("desktop trust boundaries", () => {
 		expect(preload).toContain("const frozenApi = Object.freeze(api)");
 		expect(preload).toContain('exposeInMainWorld("metis", frozenApi)');
 		for (const method of [
+			'"session/setCollaborationMode"',
+			'"plan/startExecution"',
+			'"plan/cancel"',
 			'"skill/get"',
 			'"skill/upsert"',
 			'"skill/remove"',
@@ -1009,6 +1012,25 @@ describe("desktop trust boundaries", () => {
 			if (request.method === "session/setPermissionMode") {
 				result = { permissionMode: request.params.permissionMode };
 			}
+			if (request.method === "session/setCollaborationMode") {
+				result = { collaborationMode: request.params.collaborationMode };
+			}
+			if (request.method === "plan/startExecution") {
+				result = { operationId: request.params.requestId, status: "accepted" };
+			}
+			if (request.method === "plan/cancel") {
+				result = {
+					plan: {
+						planId: request.params.planId,
+						revision: request.params.revision,
+						title: "Plan",
+						markdown: "# Plan",
+						status: "cancelled",
+						createdAt: "2026-07-30T00:00:00.000Z",
+					},
+					collaborationMode: "default",
+				};
+			}
 			if (request.method.startsWith("permission/rules/")) {
 				result = { projectPath: "/work/project", rules: [] };
 			}
@@ -1060,6 +1082,9 @@ describe("desktop trust boundaries", () => {
 		const renameSession = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.renameSession)!;
 		const deleteSession = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.deleteSession)!;
 		const setPermissionMode = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.setPermissionMode)!;
+		const setCollaborationMode = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.setCollaborationMode)!;
+		const startPlanExecution = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.startPlanExecution)!;
+		const cancelPlan = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.cancelPlan)!;
 		const listPermissionRules = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.listPermissionRules)!;
 		const deletePermissionRule = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.deletePermissionRule)!;
 		const clearPermissionRules = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.clearPermissionRules)!;
@@ -1327,6 +1352,48 @@ describe("desktop trust boundaries", () => {
 		await expect(setPermissionMode(event, permissionInput)).resolves.toEqual({ permissionMode: "full" });
 		expect(supervisor.request).toHaveBeenCalledWith(
 			expect.objectContaining({ method: "session/setPermissionMode", params: permissionInput }),
+		);
+		const collaborationInput = {
+			sessionId: "session-a",
+			requestId: "11111111-1111-4111-8111-111111111402",
+			collaborationMode: "plan",
+		};
+		await expect(
+			setCollaborationMode(event, { ...collaborationInput, collaborationMode: "planning" }),
+		).rejects.toThrow("Invalid session/setCollaborationMode params");
+		await expect(setCollaborationMode(event, collaborationInput)).resolves.toEqual({ collaborationMode: "plan" });
+		expect(supervisor.request).toHaveBeenCalledWith(
+			expect.objectContaining({ method: "session/setCollaborationMode", params: collaborationInput }),
+		);
+		const planMutation = {
+			sessionId: "session-a",
+			requestId: "11111111-1111-4111-8111-111111111405",
+			planId: "plan-1",
+			revision: 2,
+		};
+		await expect(startPlanExecution(event, { ...planMutation, revision: 0 })).rejects.toThrow(
+			"Invalid plan/startExecution params",
+		);
+		await expect(startPlanExecution(event, { ...planMutation, planId: "" })).rejects.toThrow(
+			"Invalid plan/startExecution params",
+		);
+		await expect(startPlanExecution(event, { ...planMutation, forged: true })).rejects.toThrow(
+			"Invalid plan/startExecution params",
+		);
+		await expect(startPlanExecution(event, planMutation)).resolves.toEqual({
+			operationId: planMutation.requestId,
+			status: "accepted",
+		});
+		expect(supervisor.request).toHaveBeenCalledWith(
+			expect.objectContaining({ method: "plan/startExecution", params: planMutation }),
+		);
+		await expect(cancelPlan(event, { ...planMutation, revision: 0 })).rejects.toThrow("Invalid plan/cancel params");
+		await expect(cancelPlan(event, planMutation)).resolves.toMatchObject({
+			collaborationMode: "default",
+			plan: expect.objectContaining({ planId: "plan-1", revision: 2, status: "cancelled" }),
+		});
+		expect(supervisor.request).toHaveBeenCalledWith(
+			expect.objectContaining({ method: "plan/cancel", params: planMutation }),
 		);
 		await expect(listPermissionRules(event, { sessionId: "session-a", projectPath: "/forged" })).rejects.toThrow(
 			"Invalid permission/rules/list params",
