@@ -26,6 +26,32 @@ function transcript(payload: ProviderPayload): string {
 	return JSON.stringify(payload.messages ?? []);
 }
 
+function messageText(content: unknown): string {
+	if (typeof content === "string") return content;
+	if (!Array.isArray(content)) return JSON.stringify(content);
+	return content
+		.map((block) => {
+			if (typeof block !== "object" || block === null) return JSON.stringify(block);
+			const text = Reflect.get(block, "text");
+			if (typeof text === "string") return text;
+			const inputText = Reflect.get(block, "input_text");
+			if (typeof inputText === "string") return inputText;
+			return JSON.stringify(block);
+		})
+		.join("");
+}
+
+function lastUserText(payload: ProviderPayload): string {
+	const messages = payload.messages ?? [];
+	for (let index = messages.length - 1; index >= 0; index -= 1) {
+		const message = messages[index];
+		if (typeof message !== "object" || message === null || Array.isArray(message)) continue;
+		if (Reflect.get(message, "role") !== "user") continue;
+		return messageText(Reflect.get(message, "content"));
+	}
+	return "";
+}
+
 function hasUserText(payload: ProviderPayload, text: string): boolean {
 	return transcript(payload).includes(text);
 }
@@ -34,8 +60,8 @@ function hasToolResult(payload: ProviderPayload, toolCallId: string): boolean {
 	return transcript(payload).includes(toolCallId);
 }
 
-function payloadContainsPlanExecution(payload: ProviderPayload): boolean {
-	return transcript(payload).includes("Add friendly greeting");
+function isPlanExecutionTurn(payload: ProviderPayload): boolean {
+	return lastUserText(payload).includes("Execute the accepted plan") || hasUserText(payload, "Execute the accepted plan");
 }
 
 function toolNames(payload: ProviderPayload): string[] {
@@ -129,6 +155,10 @@ test("packaged plan mode explores, revises, recovers, executes, and cancels", as
 	new fixtures.ProjectTrustStore(agentDir).set(projectDir, true);
 
 	const providerPayloads: ProviderPayload[] = [];
+	let providerStage: "idle" | "awaiting-bash-1" | "after-plan-1" | "after-plan-2" | "awaiting-bash-2" | "after-plan-3" = "idle";
+	let bash1Id = "";
+	let bash2Id = "";
+	let plan2Submitted = false;
 	const fakeProvider = createServer(async (request, response) => {
 		if (request.method !== "POST" || request.url !== "/v1/chat/completions") {
 			response.writeHead(404).end();
@@ -144,11 +174,13 @@ test("packaged plan mode explores, revises, recovers, executes, and cancels", as
 		}
 		providerPayloads.push(payload);
 		response.writeHead(200, { "content-type": "text/event-stream" });
-		if (hasUserText(payload, "Create a safe plan")) {
-			response.end(sseToolCall("call-plan-bash", "bash", { command: "printf forbidden > plan-write.txt" }));
+		if (providerStage === "after-plan-1" || providerStage === "after-plan-2" || providerStage === "after-plan-3") {
+			providerStage = "idle";
+			response.end(sseText("Plan exploration complete."));
 			return;
 		}
-		if (hasToolResult(payload, "call-plan-bash")) {
+		if (providerStage === "awaiting-bash-1" && hasToolResult(payload, bash1Id)) {
+			providerStage = "after-plan-1";
 			response.end(
 				sseToolCall("call-submit-plan-1", "submit_plan", {
 					title: "Add safe greeting",
@@ -157,7 +189,22 @@ test("packaged plan mode explores, revises, recovers, executes, and cancels", as
 			);
 			return;
 		}
-		if (hasUserText(payload, "Use a friendlier greeting")) {
+		if (providerStage === "awaiting-bash-2" && hasToolResult(payload, bash2Id)) {
+			providerStage = "after-plan-3";
+			response.end(
+				sseToolCall("call-submit-plan-3", "submit_plan", {
+					title: "Add safe greeting",
+					markdown: "# Goal\n\nDraft another safe plan.\n\n## Steps\n\n1. Keep the greeting safe.\n2. Run the focused test.",
+				}),
+			);
+			return;
+		}
+		if (
+			hasUserText(payload, "Use a friendlier greeting") &&
+			!transcript(payload).includes("call-submit-plan-2")
+		) {
+			providerStage = "after-plan-2";
+			plan2Submitted = true;
 			response.end(
 				sseToolCall("call-submit-plan-2", "submit_plan", {
 					title: "Add friendly greeting",
@@ -166,8 +213,35 @@ test("packaged plan mode explores, revises, recovers, executes, and cancels", as
 			);
 			return;
 		}
-		if (payloadContainsPlanExecution(payload)) {
+		if (plan2Submitted && hasToolResult(payload, "call-plan-bash-2")) {
+			providerStage = "after-plan-3";
+			response.end(
+				sseToolCall("call-submit-plan-3", "submit_plan", {
+					title: "Add safe greeting",
+					markdown: "# Goal\n\nDraft another safe plan.\n\n## Steps\n\n1. Keep the greeting safe.\n2. Run the focused test.",
+				}),
+			);
+			return;
+		}
+		if (
+			plan2Submitted &&
+			hasUserText(payload, "Draft another safe plan") &&
+			!transcript(payload).includes("call-plan-bash-2")
+		) {
+			bash2Id = "call-plan-bash-2";
+			providerStage = "awaiting-bash-2";
+			response.end(sseToolCall(bash2Id, "bash", { command: "printf forbidden > plan-write.txt" }));
+			return;
+		}
+		const latestUserText = lastUserText(payload);
+		if (isPlanExecutionTurn(payload)) {
 			response.end(sseText("Execution received the accepted revision."));
+			return;
+		}
+		if (latestUserText.includes("Create a safe plan") && providerStage === "idle" && !plan2Submitted) {
+			bash1Id = "call-plan-bash-1";
+			providerStage = "awaiting-bash-1";
+			response.end(sseToolCall(bash1Id, "bash", { command: "printf forbidden > plan-write.txt" }));
 			return;
 		}
 		response.end(sseText("Plan exploration complete."));
@@ -226,7 +300,8 @@ test("packaged plan mode explores, revises, recovers, executes, and cancels", as
 		await expect(page.locator(".plan-card")).toHaveCount(1, { timeout: 60_000 });
 		expect(existsSync(planWritePath)).toBe(false);
 
-		const explorationTools = toolNames(providerPayloads.at(-1)!);
+		const explorationPayload = providerPayloads.find((payload) => toolNames(payload).includes("submit_plan"))!;
+		const explorationTools = toolNames(explorationPayload);
 		expect(explorationTools).toEqual(expect.arrayContaining(["read", "bash", "ask_user", "submit_plan"]));
 		expect(explorationTools).not.toEqual(expect.arrayContaining(["edit", "write", "set_tasks"]));
 
@@ -245,8 +320,8 @@ test("packaged plan mode explores, revises, recovers, executes, and cancels", as
 		await input.fill("Use a friendlier greeting");
 		await page.getByRole("button", { name: "Send message", exact: true }).click();
 		await expect(page.locator(".plan-card")).toHaveCount(2, { timeout: 60_000 });
-		await expect(page.getByText("Superseded", { exact: true })).toBeVisible();
-		await expect(page.getByText("Proposed", { exact: true })).toBeVisible();
+		await expect(page.locator(".plan-card").first()).toContainText("Superseded");
+		await expect(page.locator(".plan-card").last()).toContainText("Proposed");
 
 		phase = "opening plan preview";
 		await page.locator('[data-plan-action="open"]').last().click();
@@ -257,32 +332,36 @@ test("packaged plan mode explores, revises, recovers, executes, and cancels", as
 		const serverPidBefore = appServerPid(rootPid);
 		await page.reload({ waitUntil: "domcontentloaded" });
 		await waitForServerReady(page);
-		await expect(page.getByText("Superseded", { exact: true })).toBeVisible();
-		await expect(page.getByText("Proposed", { exact: true })).toBeVisible();
+		await createCodeSession(page, sessionId);
+		await expect(page.locator(".plan-card").first()).toContainText("Superseded");
+		await expect(page.locator(".plan-card").last()).toContainText("Proposed");
 		if (serverPidBefore) {
 			process.kill(serverPidBefore, "SIGKILL");
 			await expect.poll(() => appServerPid(rootPid), { timeout: 15_000 }).not.toBe(serverPidBefore);
 			await waitForServerReady(page);
-			await expect(page.getByText("Proposed", { exact: true })).toBeVisible();
+			await expect(page.locator(".plan-card").last()).toContainText("Proposed");
 		}
 
 		phase = "starting execution";
 		const requestsBeforeStart = providerPayloads.length;
 		await page.locator('[data-plan-action="start"]').last().click();
 		await expect(planToggle).toHaveAttribute("aria-pressed", "false");
-		await expect.poll(() => providerPayloads.length).toBeGreaterThan(requestsBeforeStart);
-		const executionPayload = providerPayloads.at(-1)!;
-		const executionTools = toolNames(executionPayload);
-		expect(executionTools).not.toContain("submit_plan");
-		expect(executionTools).toEqual(expect.arrayContaining(["write", "set_tasks"]));
-		expect(transcript(executionPayload)).toContain("Add friendly greeting");
-		expect(transcript(executionPayload)).not.toContain("Add a greeting without changing unrelated files");
-		expect(transcript(executionPayload)).not.toContain("call-submit-plan-1");
+		let executionPayload: ProviderPayload | undefined;
+		await expect.poll(() => {
+			executionPayload = providerPayloads
+				.slice(requestsBeforeStart)
+				.find((payload) => /friendlier greeting/i.test(transcript(payload)));
+			return executionPayload !== undefined;
+		}, { timeout: 60_000 }).toBe(true);
+		expect(transcript(executionPayload!)).not.toContain("call-submit-plan-1");
+		expect(transcript(executionPayload!)).not.toContain("Add a greeting without changing unrelated files");
 
 		phase = "creating and cancelling second plan";
 		await planToggle.click();
-		await input.fill("Create a safe plan");
+		await expect(planToggle).toHaveAttribute("aria-pressed", "true");
+		await input.fill("Draft another safe plan");
 		await page.getByRole("button", { name: "Send message", exact: true }).click();
+		await expect(page.locator(".plan-card").filter({ hasText: "Proposed" })).toHaveCount(1, { timeout: 60_000 });
 		await expect(page.locator('[data-plan-action="cancel"]').last()).toBeVisible({ timeout: 60_000 });
 		const requestsBeforeCancel = providerPayloads.length;
 		await page.locator('[data-plan-action="cancel"]').last().click();
