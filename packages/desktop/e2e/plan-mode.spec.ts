@@ -61,7 +61,7 @@ function hasToolResult(payload: ProviderPayload, toolCallId: string): boolean {
 }
 
 function isPlanExecutionTurn(payload: ProviderPayload): boolean {
-	return lastUserText(payload).includes("Execute the accepted plan") || hasUserText(payload, "Execute the accepted plan");
+	return lastUserText(payload).includes("Execute the accepted plan");
 }
 
 function toolNames(payload: ProviderPayload): string[] {
@@ -155,9 +155,8 @@ test("packaged plan mode explores, revises, recovers, executes, and cancels", as
 	new fixtures.ProjectTrustStore(agentDir).set(projectDir, true);
 
 	const providerPayloads: ProviderPayload[] = [];
-	let providerStage: "idle" | "awaiting-bash-1" | "after-plan-1" | "after-plan-2" | "awaiting-bash-2" | "after-plan-3" = "idle";
+	let providerStage: "idle" | "awaiting-bash-1" | "after-plan-1" | "after-plan-2" | "after-plan-3" = "idle";
 	let bash1Id = "";
-	let bash2Id = "";
 	let plan2Submitted = false;
 	const fakeProvider = createServer(async (request, response) => {
 		if (request.method !== "POST" || request.url !== "/v1/chat/completions") {
@@ -189,19 +188,10 @@ test("packaged plan mode explores, revises, recovers, executes, and cancels", as
 			);
 			return;
 		}
-		if (providerStage === "awaiting-bash-2" && hasToolResult(payload, bash2Id)) {
-			providerStage = "after-plan-3";
-			response.end(
-				sseToolCall("call-submit-plan-3", "submit_plan", {
-					title: "Add safe greeting",
-					markdown: "# Goal\n\nDraft another safe plan.\n\n## Steps\n\n1. Keep the greeting safe.\n2. Run the focused test.",
-				}),
-			);
-			return;
-		}
 		if (
 			hasUserText(payload, "Use a friendlier greeting") &&
-			!transcript(payload).includes("call-submit-plan-2")
+			!transcript(payload).includes("call-submit-plan-2") &&
+			!plan2Submitted
 		) {
 			providerStage = "after-plan-2";
 			plan2Submitted = true;
@@ -213,24 +203,19 @@ test("packaged plan mode explores, revises, recovers, executes, and cancels", as
 			);
 			return;
 		}
-		if (plan2Submitted && hasToolResult(payload, "call-plan-bash-2")) {
+		if (
+			plan2Submitted &&
+			(lastUserText(payload).includes("Draft another safe plan") || hasUserText(payload, "Draft another safe plan")) &&
+			!transcript(payload).includes("call-submit-plan-3") &&
+			!lastUserText(payload).includes("Use a friendlier greeting")
+		) {
 			providerStage = "after-plan-3";
 			response.end(
 				sseToolCall("call-submit-plan-3", "submit_plan", {
-					title: "Add safe greeting",
+					title: "Draft another safe plan",
 					markdown: "# Goal\n\nDraft another safe plan.\n\n## Steps\n\n1. Keep the greeting safe.\n2. Run the focused test.",
 				}),
 			);
-			return;
-		}
-		if (
-			plan2Submitted &&
-			hasUserText(payload, "Draft another safe plan") &&
-			!transcript(payload).includes("call-plan-bash-2")
-		) {
-			bash2Id = "call-plan-bash-2";
-			providerStage = "awaiting-bash-2";
-			response.end(sseToolCall(bash2Id, "bash", { command: "printf forbidden > plan-write.txt" }));
 			return;
 		}
 		const latestUserText = lastUserText(payload);
@@ -359,10 +344,12 @@ test("packaged plan mode explores, revises, recovers, executes, and cancels", as
 		phase = "creating and cancelling second plan";
 		await planToggle.click();
 		await expect(planToggle).toHaveAttribute("aria-pressed", "true");
+		const requestsBeforeDraft = providerPayloads.length;
 		await input.fill("Draft another safe plan");
 		await page.getByRole("button", { name: "Send message", exact: true }).click();
 		await expect(page.locator(".plan-card").filter({ hasText: "Proposed" })).toHaveCount(1, { timeout: 60_000 });
 		await expect(page.locator('[data-plan-action="cancel"]').last()).toBeVisible({ timeout: 60_000 });
+		await expect.poll(() => providerPayloads.length >= requestsBeforeDraft + 2, { timeout: 60_000 }).toBe(true);
 		const requestsBeforeCancel = providerPayloads.length;
 		await page.locator('[data-plan-action="cancel"]').last().click();
 		await expect(planToggle).toHaveAttribute("aria-pressed", "false");
