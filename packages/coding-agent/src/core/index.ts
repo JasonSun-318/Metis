@@ -3,6 +3,12 @@
  */
 
 export {
+	PLAN_MODE_SYSTEM_PROMPT,
+	type PlanContextProjectionInput,
+	planVisibleToolNames,
+	projectPlanContext,
+} from "./plan-mode.ts";
+export {
 	type CollaborationMode,
 	MAX_PLAN_MARKDOWN_UTF8_BYTES,
 	MAX_PLAN_TITLE_UTF16_UNITS,
@@ -12,6 +18,7 @@ export {
 	type StoredPlan,
 	reducePlanState,
 } from "./plan-state.ts";
+export { createSubmitPlanToolDefinition, type SubmitPlanInput, SubmitPlanParams } from "./submit-plan.ts";
 export {
 	AgentSession,
 	type AgentSessionConfig,

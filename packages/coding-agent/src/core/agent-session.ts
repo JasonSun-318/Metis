@@ -198,7 +198,9 @@ import {
 	getSessionAttachmentDir,
 } from "./session-attachments.ts";
 import { createSessionId } from "./session-id.ts";
-import type { BranchSummaryEntry, CompactionEntry, SessionEntry, SessionManager } from "./session-manager.ts";
+import { PLAN_MODE_SYSTEM_PROMPT, planVisibleToolNames, projectPlanContext } from "./plan-mode.ts";
+import type { CollaborationMode, PlanRef, StoredPlan } from "./plan-state.ts";
+import { createSubmitPlanToolDefinition } from "./submit-plan.ts";
 import { CURRENT_SESSION_VERSION, getLatestCompactionEntry, type SessionHeader } from "./session-manager.ts";
 import type { CwdOrigin } from "./session-workspace.ts";
 import { type SettingsManager, VISION_PROVIDER_ID } from "./settings-manager.ts";
@@ -259,7 +261,9 @@ export type AgentSessionEvent =
 	  }
 	| { type: "auto_retry_start"; attempt: number; maxAttempts: number; delayMs: number; errorMessage: string }
 	| { type: "auto_retry_end"; success: boolean; attempt: number; finalError?: string }
-	| { type: "goal_changed"; goal: ThreadGoal | null };
+	| { type: "goal_changed"; goal: ThreadGoal | null }
+	| { type: "plan_changed"; entryIds: readonly string[] }
+	| { type: "collaboration_mode_changed"; collaborationMode: CollaborationMode };
 
 /** Listener function for agent session events */
 export type AgentSessionEventListener = (event: AgentSessionEvent) => void;
@@ -620,6 +624,7 @@ export class AgentSession {
 	private _reportedContextUsage: ReportedContextUsageSnapshot | undefined;
 	private _contextUsageCalibration: ContextUsageCalibration | undefined;
 	private readonly _trustedControlTools = new Map<string, ToolDefinition>();
+	private _configuredActiveToolNames: string[] = [];
 
 	constructor(config: AgentSessionConfig) {
 		if (config.unattendedExecution) {
@@ -741,6 +746,7 @@ export class AgentSession {
 		this._unsubscribeAgent = this.agent.subscribe(this._handleAgentEvent);
 		this._installAgentToolHooks();
 		this._installSubagentMailboxHook();
+		this._installPlanContextHook();
 		this._installToolResultMicrocompactionHook();
 		this._installAgentDurabilityHooks();
 		this._installAgentNextTurnRefresh();
@@ -750,7 +756,7 @@ export class AgentSession {
 			includeAllExtensionTools: true,
 		});
 		this._unsubscribeMcpCatalog = this._mcpManager?.subscribeCatalog(() => {
-			this._refreshToolRegistry({ activeToolNames: this.getActiveToolNames() });
+			this._refreshToolRegistry({ activeToolNames: this.getConfiguredActiveToolNames() });
 		});
 		this._maybeStartMemoryEmbeddingBackfill();
 	}
@@ -809,7 +815,7 @@ export class AgentSession {
 		options?: { readonly automaticPermissionToolNames?: readonly string[] },
 	): void {
 		if (this._unattendedExecution) throw new Error("Unattended execution cannot install host tools");
-		const active = new Set(this.getActiveToolNames());
+		const active = new Set(this.getConfiguredActiveToolNames());
 		const automatic = new Set(options?.automaticPermissionToolNames);
 		for (const definition of definitions) {
 			const existing = this._customTools.findIndex((candidate) => candidate.name === definition.name);
@@ -831,7 +837,7 @@ export class AgentSession {
 			this._trustedControlTools.delete(name);
 			this._allowedToolNames?.delete(name);
 		}
-		this._refreshToolRegistry({ activeToolNames: this.getActiveToolNames().filter((name) => !removed.has(name)) });
+		this._refreshToolRegistry({ activeToolNames: this.getConfiguredActiveToolNames().filter((name) => !removed.has(name)) });
 	}
 
 	private _isTrustedControlTool(name: string): boolean {
@@ -841,8 +847,8 @@ export class AgentSession {
 
 	setHostSystemPrompt(additional?: string | (() => string | undefined)): void {
 		this._additionalSystemPrompt = additional;
-		this._baseSystemPrompt = this._rebuildSystemPrompt(this.getActiveToolNames());
-		this.agent.state.systemPrompt = this._baseSystemPrompt;
+		this._baseSystemPrompt = this._rebuildSystemPrompt(this.getConfiguredActiveToolNames());
+		this.agent.state.systemPrompt = this._effectiveSystemPrompt();
 	}
 
 	private _restoreSubagentMailbox(): void {
@@ -951,6 +957,18 @@ export class AgentSession {
 				.map((eventId) => this._subagentMailboxMessage(this._pendingSubagentMailboxEvents.get(eventId)!.event));
 			const withPending = pendingMessages.length === 0 ? messages : [...messages, ...pendingMessages];
 			return transformContext ? transformContext(withPending, signal) : withPending;
+		};
+	}
+
+	private _installPlanContextHook(): void {
+		const transformContext = this.agent.transformContext;
+		this.agent.transformContext = async (messages, signal) => {
+			const transformed = transformContext ? await transformContext(messages, signal) : messages;
+			return projectPlanContext(transformed, {
+				collaborationMode: this.sessionManager.getCollaborationMode(),
+				currentPlan: this.sessionManager.getPlanState().currentPlan,
+				executionPlan: this._currentDurablePlanExecution(),
+			});
 		};
 	}
 
@@ -1673,7 +1691,7 @@ export class AgentSession {
 				...previousSnapshot,
 				context: {
 					...previousContext,
-					systemPrompt: this._systemPromptOverride ?? this._baseSystemPrompt,
+					systemPrompt: this._effectiveSystemPrompt(),
 					tools: this.agent.state.tools.slice(),
 				},
 				model: this.agent.state.model,
@@ -2319,6 +2337,68 @@ export class AgentSession {
 		return this.agent.state.tools.map((t) => t.name);
 	}
 
+	getConfiguredActiveToolNames(): string[] {
+		return [...this._configuredActiveToolNames];
+	}
+
+	async setCollaborationMode(collaborationMode: CollaborationMode): Promise<void> {
+		if (this.sessionManager.getHeader()?.subagent || this.sessionManager.getHeader()?.scheduled) {
+			throw new Error("Plan mode is unavailable for this session");
+		}
+		if (this.isStreaming || this.isCompacting) throw new Error("Cannot change Plan mode during active work");
+		this.sessionManager.setCollaborationMode(collaborationMode);
+		this._applyEffectiveTools();
+		await this._interactiveBashBoundary?.reset();
+		this._emit({ type: "collaboration_mode_changed", collaborationMode });
+	}
+
+	submitPlan(input: { readonly title: string; readonly markdown: string }): StoredPlan {
+		const previous = this.sessionManager.getPlanState().currentPlan;
+		const plan = this.sessionManager.submitPlan(input);
+		this._emit({ type: "plan_changed", entryIds: [...(previous ? [previous.entryId] : []), plan.entryId] });
+		return plan;
+	}
+
+	async cancelPlan(ref: PlanRef): Promise<StoredPlan> {
+		if (this.isStreaming || this.isCompacting) throw new Error("Cannot cancel a plan during active work");
+		const plan = this.sessionManager.cancelPlan(ref);
+		this._emit({ type: "plan_changed", entryIds: [plan.entryId] });
+		await this.setCollaborationMode("default");
+		return plan;
+	}
+
+	private _currentDurablePlanExecution(): StoredPlan | undefined {
+		return undefined;
+	}
+
+	private _planToolSource(name: string): "builtin" | "trusted" | "extension" | "mcp" | "sdk" | undefined {
+		if (this._trustedControlTools.has(name) && this._isTrustedControlTool(name)) return "trusted";
+		const entry = this._toolDefinitions.get(name);
+		if (!entry) return undefined;
+		const source = entry.sourceInfo.source;
+		if (source === "builtin" || source === "sdk") return source;
+		if (source.startsWith("mcp:")) return "mcp";
+		return "extension";
+	}
+
+	private _effectiveSystemPrompt(): string {
+		const selected = this._systemPromptOverride ?? this._baseSystemPrompt;
+		return this.sessionManager.getCollaborationMode() === "plan" && this._systemPromptOverride !== undefined
+			? `${selected}\n\n${PLAN_MODE_SYSTEM_PROMPT}`
+			: selected;
+	}
+
+	private _applyEffectiveTools(): void {
+		const mode = this.sessionManager.getCollaborationMode();
+		const names =
+			mode === "plan"
+				? planVisibleToolNames(this._configuredActiveToolNames, (name) => this._planToolSource(name))
+				: this._configuredActiveToolNames;
+		this.agent.state.tools = names.flatMap((name) => this._toolRegistry.get(name) ?? []);
+		this._baseSystemPrompt = this._rebuildSystemPrompt(names);
+		this.agent.state.systemPrompt = this._effectiveSystemPrompt();
+	}
+
 	private _canActivateWebSearch(): boolean {
 		return this._allowedToolNames ? this._allowedToolNames.has("web_search") : this._defaultBuiltinToolsEnabled;
 	}
@@ -2336,7 +2416,7 @@ export class AgentSession {
 	}
 
 	private _applyWebSearchEnabled(enabled: boolean): void {
-		const names = new Set(this.getActiveToolNames());
+		const names = new Set(this.getConfiguredActiveToolNames());
 		if (enabled && this._canActivateWebSearch() && this._toolRegistry.has("web_search")) names.add("web_search");
 		else names.delete("web_search");
 		this.setActiveToolsByName([...names]);
@@ -2369,7 +2449,7 @@ export class AgentSession {
 
 	private _applyImageToolSettings(): void {
 		this._rebuildImageToolDefinitions();
-		const names = new Set(this.getActiveToolNames());
+		const names = new Set(this.getConfiguredActiveToolNames());
 		if (this._visionServiceReady() && this._canActivateDescribeImage()) names.add("describe_image");
 		else names.delete("describe_image");
 		this._refreshToolRegistry({ activeToolNames: [...names] });
@@ -2603,26 +2683,14 @@ export class AgentSession {
 	 * Changes take effect on the next agent turn.
 	 */
 	setActiveToolsByName(toolNames: string[]): void {
-		const tools: AgentTool[] = [];
-		const validToolNames: string[] = [];
-		for (const name of toolNames) {
-			const tool = this._toolRegistry.get(name);
-			if (tool) {
-				tools.push(tool);
-				validToolNames.push(name);
-			}
-		}
-		this.agent.state.tools = tools;
-
-		// Rebuild base system prompt with new tool set
-		this._baseSystemPrompt = this._rebuildSystemPrompt(validToolNames);
-		this.agent.state.systemPrompt = this._systemPromptOverride ?? this._baseSystemPrompt;
+		this._configuredActiveToolNames = [...new Set(toolNames)].filter((name) => this._toolRegistry.has(name));
+		this._applyEffectiveTools();
 	}
 
 	/** Re-read memory indexes and rebuild the current base system prompt. */
 	refreshSystemPrompt(): void {
-		this._baseSystemPrompt = this._rebuildSystemPrompt(this.getActiveToolNames());
-		this.agent.state.systemPrompt = this._systemPromptOverride ?? this._baseSystemPrompt;
+		this._baseSystemPrompt = this._rebuildSystemPrompt(this.getConfiguredActiveToolNames());
+		this.agent.state.systemPrompt = this._effectiveSystemPrompt();
 	}
 
 	private _maybeStartMemoryEmbeddingBackfill(): void {
@@ -2913,6 +2981,9 @@ export class AgentSession {
 						: "system_prompt",
 				content: `\n\n${resolvedAdditional}`,
 			});
+		}
+		if (this.sessionManager.getCollaborationMode() === "plan") {
+			parts.push({ category: "system_prompt", content: `\n\n${PLAN_MODE_SYSTEM_PROMPT}` });
 		}
 		this._baseSystemPromptParts = parts;
 		return parts.map((part) => part.content).join("");
@@ -3363,9 +3434,9 @@ export class AgentSession {
 				} catch {
 					this._autoMemoryRetrieved = [];
 				}
-				this._baseSystemPrompt = this._rebuildSystemPrompt(this.getActiveToolNames());
+				this._baseSystemPrompt = this._rebuildSystemPrompt(this.getConfiguredActiveToolNames());
 				if (this._systemPromptOverride === undefined) {
-					this.agent.state.systemPrompt = this._baseSystemPrompt;
+					this.agent.state.systemPrompt = this._effectiveSystemPrompt();
 				}
 				this._maybeStartMemoryEmbeddingBackfill();
 			} else if (
@@ -3424,7 +3495,7 @@ export class AgentSession {
 			} else {
 				// Ensure we're using the base prompt (in case previous turn had modifications)
 				this._systemPromptOverride = undefined;
-				this.agent.state.systemPrompt = this._baseSystemPrompt;
+				this.agent.state.systemPrompt = this._effectiveSystemPrompt();
 			}
 		} catch (error) {
 			preflightResult?.(false);
@@ -4876,8 +4947,8 @@ export class AgentSession {
 		};
 
 		this._resourceLoader.extendResources(extensionPaths);
-		this._baseSystemPrompt = this._rebuildSystemPrompt(this.getActiveToolNames());
-		this.agent.state.systemPrompt = this._baseSystemPrompt;
+		this._baseSystemPrompt = this._rebuildSystemPrompt(this.getConfiguredActiveToolNames());
+		this.agent.state.systemPrompt = this._effectiveSystemPrompt();
 	}
 
 	private buildExtensionResourcePaths(entries: Array<{ path: string; extensionPath: string }>): Array<{
@@ -5053,7 +5124,9 @@ export class AgentSession {
 
 	private _refreshToolRegistry(options?: { activeToolNames?: string[]; includeAllExtensionTools?: boolean }): void {
 		const previousRegistryNames = new Set(this._toolRegistry.keys());
-		const previousActiveToolNames = this.getActiveToolNames();
+		const previousActiveToolNames =
+			options?.activeToolNames ??
+			(this._configuredActiveToolNames.length > 0 ? this._configuredActiveToolNames : this.getActiveToolNames());
 		const allowedToolNames = this._allowedToolNames;
 		const excludedToolNames = this._excludedToolNames;
 		const isAllowedTool = (name: string): boolean =>
@@ -5171,6 +5244,14 @@ export class AgentSession {
 			const guarded = this._withPermissionGuard(tool);
 			toolRegistry.set(guarded.name, guarded);
 		}
+		for (const trustedName of ["ask_user", "submit_plan"] as const) {
+			const definition = this._trustedControlTools.get(trustedName);
+			if (!definition) continue;
+			const sourceInfo = createSyntheticSourceInfo(`<trusted:${trustedName}>`, { source: "trusted" });
+			definitionRegistry.set(trustedName, { definition, sourceInfo });
+			const wrapped = wrapRegisteredTools([{ definition, sourceInfo }], runner)[0] as AgentTool;
+			toolRegistry.set(trustedName, this._withPermissionGuard(wrapped));
+		}
 		this._toolRegistry = toolRegistry;
 
 		const nextActiveToolNames = (
@@ -5196,7 +5277,8 @@ export class AgentSession {
 		}
 		for (const tool of wrappedDirectMcpTools) nextActiveToolNames.push(tool.name);
 
-		this.setActiveToolsByName([...new Set(nextActiveToolNames)]);
+		this._configuredActiveToolNames = [...new Set(nextActiveToolNames)];
+		this._applyEffectiveTools();
 	}
 
 	private _buildRuntime(options: {
@@ -5288,6 +5370,9 @@ export class AgentSession {
 		this._baseToolDefinitions = new Map(
 			Object.entries(baseToolDefinitions).map(([name, tool]) => [name, tool as ToolDefinition]),
 		);
+		const submitPlanDefinition = createSubmitPlanToolDefinition((input) => this.submitPlan(input));
+		this._baseToolDefinitions.set(submitPlanDefinition.name, submitPlanDefinition);
+		this._trustedControlTools.set(submitPlanDefinition.name, submitPlanDefinition);
 
 		const extensionsResult = this._resourceLoader.getExtensions();
 		if (this._unattendedExecution && extensionsResult.extensions.length > 0) {
@@ -5339,6 +5424,7 @@ export class AgentSession {
 			}
 			return true;
 		});
+		this._configuredActiveToolNames = globallyEnabledToolNames;
 		this._refreshToolRegistry({
 			activeToolNames: globallyEnabledToolNames,
 			includeAllExtensionTools: options.includeAllExtensionTools,
@@ -5355,7 +5441,7 @@ export class AgentSession {
 		this._refreshCurrentModelFromRegistry();
 		await this._resourceLoader.reload();
 		this._buildRuntime({
-			activeToolNames: this.getActiveToolNames(),
+			activeToolNames: this.getConfiguredActiveToolNames(),
 			flagValues: previousFlagValues,
 			includeAllExtensionTools: true,
 		});

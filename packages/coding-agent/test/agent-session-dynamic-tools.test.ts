@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { getModel } from "@metis/ai/compat";
 import { Type } from "typebox";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { createAskUserToolDefinition } from "../src/core/ask-user.ts";
 import { DefaultResourceLoader } from "../src/core/resource-loader.ts";
 import { createAgentSession } from "../src/core/sdk.ts";
 import { SessionManager } from "../src/core/session-manager.ts";
@@ -179,6 +180,43 @@ describe("AgentSession dynamic tool registration", () => {
 		expect(session.getActiveToolNames()).toContain("hidden_tool");
 		expect(session.systemPrompt).not.toContain("hidden_tool");
 		expect(session.systemPrompt).not.toContain("Description should not appear in available tools");
+
+		session.dispose();
+	});
+
+	it("filters tools in Plan mode and restores configured tools in Default", async () => {
+		const settingsManager = SettingsManager.create(tempDir, agentDir);
+		const sessionManager = SessionManager.inMemory(tempDir);
+		const resourceLoader = new DefaultResourceLoader({ cwd: tempDir, agentDir, settingsManager });
+		await resourceLoader.reload();
+
+		const { session } = await createAgentSession({
+			cwd: tempDir,
+			agentDir,
+			model: getModel("anthropic", "claude-sonnet-4-5")!,
+			settingsManager,
+			sessionManager,
+			resourceLoader,
+		});
+
+		const askUser = createAskUserToolDefinition(async () => ({ cancelled: true, answers: [] }));
+		session.installHostTools([askUser], { automaticPermissionToolNames: ["ask_user"] });
+		const normal = session.getConfiguredActiveToolNames();
+		await session.setCollaborationMode("plan");
+		expect(session.getActiveToolNames()).toEqual(
+			expect.arrayContaining(["read", "bash", "ask_user", "submit_plan"]),
+		);
+		expect(session.getActiveToolNames()).not.toEqual(expect.arrayContaining(["edit", "write", "set_tasks"]));
+		await session.reload();
+		await session.setCollaborationMode("default");
+		expect(session.getActiveToolNames()).toEqual(normal);
+		expect(session.getActiveToolNames()).not.toContain("submit_plan");
+
+		const submitPlan = session.getToolDefinition("submit_plan");
+		expect(submitPlan).toBeDefined();
+		await expect(
+			submitPlan!.execute("call-plan", { title: "Plan", markdown: "# Plan" }, undefined, undefined),
+		).rejects.toThrow(/only in Plan mode/iu);
 
 		session.dispose();
 	});
