@@ -503,6 +503,7 @@ describe("golden protocol fixtures", () => {
 				"item/completed",
 				"interaction/notify",
 				"session/permissionModeChanged",
+				"session/collaborationModeChanged",
 				"session/thinkingSelectionChanged",
 				"session/modelChanged",
 				"session/tasksChanged",

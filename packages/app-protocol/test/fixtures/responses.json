@@ -6,7 +6,7 @@
 			"jsonrpc": "2.0",
 			"id": "client-1",
 			"result": {
-				"protocolVersion": 20,
+				"protocolVersion": 21,
 				"server": {
 					"name": "metis-app-server",
 					"version": "0.80.6"
@@ -454,6 +454,47 @@
 	},
 	{
 		"direction": "client",
+		"method": "session/setCollaborationMode",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "plan-mode-1",
+			"result": { "collaborationMode": "plan" }
+		}
+	},
+	{
+		"direction": "client",
+		"method": "plan/startExecution",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "plan-start-1",
+			"result": {
+				"operationId": "operation_plan_start_execution_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+				"turnId": "turn_plan_start_execution_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+				"status": "accepted"
+			}
+		}
+	},
+	{
+		"direction": "client",
+		"method": "plan/cancel",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "plan-cancel-1",
+			"result": {
+				"plan": {
+					"planId": "00000000-0000-4000-8000-000000000003",
+					"revision": 2,
+					"title": "Implementation plan",
+					"markdown": "# Plan\n\nShip Plan mode.",
+					"status": "cancelled",
+					"createdAt": "2026-08-25T00:00:00.000Z"
+				},
+				"collaborationMode": "default"
+			}
+		}
+	},
+	{
+		"direction": "client",
 		"method": "permission/rules/list",
 		"envelope": {
 			"jsonrpc": "2.0",
@@ -879,6 +920,7 @@
 						"mode": "code",
 						"cwdOrigin": "user-selected"
 					},
+					"collaborationMode": "default",
 					"permissionMode": "ask",
 					"turns": [],
 					"recentItems": [],

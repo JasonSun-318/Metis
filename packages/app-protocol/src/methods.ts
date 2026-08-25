@@ -25,6 +25,7 @@ import {
 import {
 	ActualThinkingLevelSchema,
 	AgentModeSchema,
+	CollaborationModeSchema,
 	ConnectionEventsParamsSchema,
 	DeclarativeHookViewSchema,
 	DurableImageRefViewSchema,
@@ -45,6 +46,7 @@ import {
 	ModelOptionViewSchema,
 	ModelSettingsViewSchema,
 	PermissionModeSchema,
+	PlanViewSchema,
 	ProfileUsageSummaryViewSchema,
 	ProjectPermissionRuleViewSchema,
 	QueuedTurnViewSchema,
@@ -512,6 +514,26 @@ export const SessionSetPermissionModeParamsSchema = StrictObject({
 });
 export const SessionPermissionModeResultSchema = StrictObject({ permissionMode: PermissionModeSchema });
 
+export const SessionSetCollaborationModeParamsSchema = StrictObject({
+	sessionId: SessionIdSchema,
+	requestId: UuidSchema,
+	collaborationMode: CollaborationModeSchema,
+});
+export const SessionCollaborationModeResultSchema = StrictObject({ collaborationMode: CollaborationModeSchema });
+
+const PlanMutationFields = {
+	sessionId: SessionIdSchema,
+	requestId: UuidSchema,
+	planId: OpaqueIdSchema,
+	revision: Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }),
+} as const;
+export const PlanStartExecutionParamsSchema = StrictObject(PlanMutationFields);
+export const PlanCancelParamsSchema = StrictObject(PlanMutationFields);
+export const PlanCancelResultSchema = StrictObject({
+	plan: PlanViewSchema,
+	collaborationMode: Type.Literal("default"),
+});
+
 export const PermissionRulesListParamsSchema = StrictObject({ sessionId: SessionIdSchema });
 export const PermissionRulesDeleteParamsSchema = StrictObject({
 	sessionId: SessionIdSchema,
@@ -963,6 +985,12 @@ export const ClientRequestMethods = {
 		SessionThinkingSelectionResultSchema,
 	),
 	"session/setPermissionMode": method(SessionSetPermissionModeParamsSchema, SessionPermissionModeResultSchema),
+	"session/setCollaborationMode": method(
+		SessionSetCollaborationModeParamsSchema,
+		SessionCollaborationModeResultSchema,
+	),
+	"plan/startExecution": method(PlanStartExecutionParamsSchema, AcceptedOperationSchema),
+	"plan/cancel": method(PlanCancelParamsSchema, PlanCancelResultSchema),
 	"permission/rules/list": method(PermissionRulesListParamsSchema, PermissionRulesResultSchema),
 	"permission/rules/delete": method(PermissionRulesDeleteParamsSchema, PermissionRulesResultSchema),
 	"permission/rules/clear": method(PermissionRulesClearParamsSchema, PermissionRulesResultSchema),

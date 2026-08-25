@@ -257,6 +257,7 @@ const updatePersonalization = {
 } satisfies ClientParams<"personalization/update">;
 const snapshot: SessionSnapshot = {
 	session,
+	collaborationMode: "default",
 	permissionMode: "ask",
 	turns,
 	recentItems: items,
@@ -280,6 +281,44 @@ const goalSet = {
 	objective: "keep tests green",
 } satisfies ClientParams<"session/goal/set">;
 const permissionMode: PermissionModeView = snapshot.permissionMode;
+const setCollaborationMode = {
+	sessionId: session.sessionId,
+	requestId: "00000000-0000-4000-8000-000000000001",
+	collaborationMode: "plan",
+} satisfies ClientParams<"session/setCollaborationMode">;
+const planStartExecution = {
+	sessionId: "session-12345678",
+	requestId: "00000000-0000-4000-8000-000000000002",
+	planId: "00000000-0000-4000-8000-000000000003",
+	revision: 2,
+} satisfies ClientParams<"plan/startExecution">;
+const planCancel = {
+	sessionId: "session-12345678",
+	requestId: "00000000-0000-4000-8000-000000000004",
+	planId: "00000000-0000-4000-8000-000000000003",
+	revision: 2,
+} satisfies ClientParams<"plan/cancel">;
+const planItem = {
+	itemId: "item_plan_proposed",
+	sessionId: session.sessionId,
+	role: "system",
+	state: "completed",
+	content: [
+		{
+			type: "plan",
+			plan: {
+				planId: planCancel.planId,
+				revision: planCancel.revision,
+				title: "Implementation plan",
+				markdown: "# Plan\n\nShip Plan mode.",
+				status: "proposed",
+				createdAt: "2026-08-25T00:00:00.000Z",
+			},
+		},
+	],
+	createdAt: "2026-08-25T00:00:00.000Z",
+	completedAt: "2026-08-25T00:00:00.000Z",
+} satisfies ItemView;
 const permissionRule = {
 	id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 	toolName: "bash",
@@ -294,9 +333,14 @@ const permissionRule = {
 const events: ConnectionEventsParams = {
 	serverEpoch: snapshot.serverEpoch,
 	fromCursor: 1,
-	toCursor: 2,
+	toCursor: 3,
 	events: [
 		{ type: "server/state", state: "ready" },
+		{
+			type: "session/collaborationModeChanged",
+			sessionId: session.sessionId,
+			collaborationMode: "plan",
+		},
 		{
 			type: "subagent/itemsChanged",
 			sessionId: session.sessionId,
@@ -319,6 +363,10 @@ const askUserInteractionResponse: InteractionResponseInput = {
 void events;
 void interactionResponse;
 void askUserInteractionResponse;
+void planItem;
+void setCollaborationMode;
+void planStartExecution;
+void planCancel;
 void skill;
 void skillDetail;
 void skillUpsert;

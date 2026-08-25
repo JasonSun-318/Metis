@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:metis:schemas:app-server:v20",
-  "title": "Metis App-Server Protocol v20",
+  "$id": "urn:metis:schemas:app-server:v21",
+  "title": "Metis App-Server Protocol v21",
   "$ref": "#/$defs/AppProtocolEnvelope",
   "$defs": {
     "AppProtocolEnvelope": {
@@ -3441,6 +3441,180 @@
                           "const": "full"
                         }
                       ]
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "jsonrpc",
+                "id",
+                "method",
+                "params"
+              ],
+              "properties": {
+                "jsonrpc": {
+                  "type": "string",
+                  "const": "2.0"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "x-metis-maxUtf16Units": 128
+                },
+                "method": {
+                  "type": "string",
+                  "const": "session/setCollaborationMode"
+                },
+                "params": {
+                  "type": "object",
+                  "required": [
+                    "sessionId",
+                    "requestId",
+                    "collaborationMode"
+                  ],
+                  "properties": {
+                    "sessionId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                    },
+                    "requestId": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "collaborationMode": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "const": "default"
+                        },
+                        {
+                          "type": "string",
+                          "const": "plan"
+                        }
+                      ]
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "jsonrpc",
+                "id",
+                "method",
+                "params"
+              ],
+              "properties": {
+                "jsonrpc": {
+                  "type": "string",
+                  "const": "2.0"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "x-metis-maxUtf16Units": 128
+                },
+                "method": {
+                  "type": "string",
+                  "const": "plan/startExecution"
+                },
+                "params": {
+                  "type": "object",
+                  "required": [
+                    "sessionId",
+                    "requestId",
+                    "planId",
+                    "revision"
+                  ],
+                  "properties": {
+                    "sessionId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                    },
+                    "requestId": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "planId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                    },
+                    "revision": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "jsonrpc",
+                "id",
+                "method",
+                "params"
+              ],
+              "properties": {
+                "jsonrpc": {
+                  "type": "string",
+                  "const": "2.0"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "x-metis-maxUtf16Units": 128
+                },
+                "method": {
+                  "type": "string",
+                  "const": "plan/cancel"
+                },
+                "params": {
+                  "type": "object",
+                  "required": [
+                    "sessionId",
+                    "requestId",
+                    "planId",
+                    "revision"
+                  ],
+                  "properties": {
+                    "sessionId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                    },
+                    "requestId": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "planId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                    },
+                    "revision": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 9007199254740991
                     }
                   },
                   "additionalProperties": false
@@ -8440,6 +8614,81 @@
                                         }
                                       },
                                       "additionalProperties": false
+                                    },
+                                    {
+                                      "type": "object",
+                                      "required": [
+                                        "type",
+                                        "plan"
+                                      ],
+                                      "properties": {
+                                        "type": {
+                                          "type": "string",
+                                          "const": "plan"
+                                        },
+                                        "plan": {
+                                          "type": "object",
+                                          "required": [
+                                            "planId",
+                                            "revision",
+                                            "title",
+                                            "markdown",
+                                            "status",
+                                            "createdAt"
+                                          ],
+                                          "properties": {
+                                            "planId": {
+                                              "type": "string",
+                                              "minLength": 1,
+                                              "maxLength": 128,
+                                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                                            },
+                                            "revision": {
+                                              "type": "integer",
+                                              "minimum": 1,
+                                              "maximum": 9007199254740991
+                                            },
+                                            "title": {
+                                              "type": "string",
+                                              "minLength": 1,
+                                              "maxLength": 256,
+                                              "x-metis-maxUtf16Units": 256
+                                            },
+                                            "markdown": {
+                                              "type": "string",
+                                              "minLength": 1,
+                                              "x-metis-maxUtf8Bytes": 65536
+                                            },
+                                            "status": {
+                                              "anyOf": [
+                                                {
+                                                  "type": "string",
+                                                  "const": "proposed"
+                                                },
+                                                {
+                                                  "type": "string",
+                                                  "const": "superseded"
+                                                },
+                                                {
+                                                  "type": "string",
+                                                  "const": "accepted"
+                                                },
+                                                {
+                                                  "type": "string",
+                                                  "const": "cancelled"
+                                                }
+                                              ]
+                                            },
+                                            "createdAt": {
+                                              "type": "string",
+                                              "format": "date-time",
+                                              "maxLength": 40
+                                            }
+                                          },
+                                          "additionalProperties": false
+                                        }
+                                      },
+                                      "additionalProperties": false
                                     }
                                   ]
                                 },
@@ -8954,6 +9203,81 @@
                                         }
                                       },
                                       "additionalProperties": false
+                                    },
+                                    {
+                                      "type": "object",
+                                      "required": [
+                                        "type",
+                                        "plan"
+                                      ],
+                                      "properties": {
+                                        "type": {
+                                          "type": "string",
+                                          "const": "plan"
+                                        },
+                                        "plan": {
+                                          "type": "object",
+                                          "required": [
+                                            "planId",
+                                            "revision",
+                                            "title",
+                                            "markdown",
+                                            "status",
+                                            "createdAt"
+                                          ],
+                                          "properties": {
+                                            "planId": {
+                                              "type": "string",
+                                              "minLength": 1,
+                                              "maxLength": 128,
+                                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                                            },
+                                            "revision": {
+                                              "type": "integer",
+                                              "minimum": 1,
+                                              "maximum": 9007199254740991
+                                            },
+                                            "title": {
+                                              "type": "string",
+                                              "minLength": 1,
+                                              "maxLength": 256,
+                                              "x-metis-maxUtf16Units": 256
+                                            },
+                                            "markdown": {
+                                              "type": "string",
+                                              "minLength": 1,
+                                              "x-metis-maxUtf8Bytes": 65536
+                                            },
+                                            "status": {
+                                              "anyOf": [
+                                                {
+                                                  "type": "string",
+                                                  "const": "proposed"
+                                                },
+                                                {
+                                                  "type": "string",
+                                                  "const": "superseded"
+                                                },
+                                                {
+                                                  "type": "string",
+                                                  "const": "accepted"
+                                                },
+                                                {
+                                                  "type": "string",
+                                                  "const": "cancelled"
+                                                }
+                                              ]
+                                            },
+                                            "createdAt": {
+                                              "type": "string",
+                                              "format": "date-time",
+                                              "maxLength": 40
+                                            }
+                                          },
+                                          "additionalProperties": false
+                                        }
+                                      },
+                                      "additionalProperties": false
                                     }
                                   ]
                                 },
@@ -9138,6 +9462,38 @@
                               {
                                 "type": "string",
                                 "const": "full"
+                              }
+                            ]
+                          }
+                        },
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "required": [
+                          "type",
+                          "sessionId",
+                          "collaborationMode"
+                        ],
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "const": "session/collaborationModeChanged"
+                          },
+                          "sessionId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                          },
+                          "collaborationMode": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "const": "default"
+                              },
+                              {
+                                "type": "string",
+                                "const": "plan"
                               }
                             ]
                           }
@@ -10491,6 +10847,81 @@
                                         }
                                       },
                                       "additionalProperties": false
+                                    },
+                                    {
+                                      "type": "object",
+                                      "required": [
+                                        "type",
+                                        "plan"
+                                      ],
+                                      "properties": {
+                                        "type": {
+                                          "type": "string",
+                                          "const": "plan"
+                                        },
+                                        "plan": {
+                                          "type": "object",
+                                          "required": [
+                                            "planId",
+                                            "revision",
+                                            "title",
+                                            "markdown",
+                                            "status",
+                                            "createdAt"
+                                          ],
+                                          "properties": {
+                                            "planId": {
+                                              "type": "string",
+                                              "minLength": 1,
+                                              "maxLength": 128,
+                                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                                            },
+                                            "revision": {
+                                              "type": "integer",
+                                              "minimum": 1,
+                                              "maximum": 9007199254740991
+                                            },
+                                            "title": {
+                                              "type": "string",
+                                              "minLength": 1,
+                                              "maxLength": 256,
+                                              "x-metis-maxUtf16Units": 256
+                                            },
+                                            "markdown": {
+                                              "type": "string",
+                                              "minLength": 1,
+                                              "x-metis-maxUtf8Bytes": 65536
+                                            },
+                                            "status": {
+                                              "anyOf": [
+                                                {
+                                                  "type": "string",
+                                                  "const": "proposed"
+                                                },
+                                                {
+                                                  "type": "string",
+                                                  "const": "superseded"
+                                                },
+                                                {
+                                                  "type": "string",
+                                                  "const": "accepted"
+                                                },
+                                                {
+                                                  "type": "string",
+                                                  "const": "cancelled"
+                                                }
+                                              ]
+                                            },
+                                            "createdAt": {
+                                              "type": "string",
+                                              "format": "date-time",
+                                              "maxLength": 40
+                                            }
+                                          },
+                                          "additionalProperties": false
+                                        }
+                                      },
+                                      "additionalProperties": false
                                     }
                                   ]
                                 },
@@ -11010,6 +11441,81 @@
                                         "type": {
                                           "type": "string",
                                           "const": "compaction"
+                                        }
+                                      },
+                                      "additionalProperties": false
+                                    },
+                                    {
+                                      "type": "object",
+                                      "required": [
+                                        "type",
+                                        "plan"
+                                      ],
+                                      "properties": {
+                                        "type": {
+                                          "type": "string",
+                                          "const": "plan"
+                                        },
+                                        "plan": {
+                                          "type": "object",
+                                          "required": [
+                                            "planId",
+                                            "revision",
+                                            "title",
+                                            "markdown",
+                                            "status",
+                                            "createdAt"
+                                          ],
+                                          "properties": {
+                                            "planId": {
+                                              "type": "string",
+                                              "minLength": 1,
+                                              "maxLength": 128,
+                                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                                            },
+                                            "revision": {
+                                              "type": "integer",
+                                              "minimum": 1,
+                                              "maximum": 9007199254740991
+                                            },
+                                            "title": {
+                                              "type": "string",
+                                              "minLength": 1,
+                                              "maxLength": 256,
+                                              "x-metis-maxUtf16Units": 256
+                                            },
+                                            "markdown": {
+                                              "type": "string",
+                                              "minLength": 1,
+                                              "x-metis-maxUtf8Bytes": 65536
+                                            },
+                                            "status": {
+                                              "anyOf": [
+                                                {
+                                                  "type": "string",
+                                                  "const": "proposed"
+                                                },
+                                                {
+                                                  "type": "string",
+                                                  "const": "superseded"
+                                                },
+                                                {
+                                                  "type": "string",
+                                                  "const": "accepted"
+                                                },
+                                                {
+                                                  "type": "string",
+                                                  "const": "cancelled"
+                                                }
+                                              ]
+                                            },
+                                            "createdAt": {
+                                              "type": "string",
+                                              "format": "date-time",
+                                              "maxLength": 40
+                                            }
+                                          },
+                                          "additionalProperties": false
                                         }
                                       },
                                       "additionalProperties": false
@@ -12234,7 +12740,7 @@
                   "properties": {
                     "protocolVersion": {
                       "type": "number",
-                      "const": 20
+                      "const": 21
                     },
                     "server": {
                       "type": "object",
@@ -17395,6 +17901,81 @@
                                     }
                                   },
                                   "additionalProperties": false
+                                },
+                                {
+                                  "type": "object",
+                                  "required": [
+                                    "type",
+                                    "plan"
+                                  ],
+                                  "properties": {
+                                    "type": {
+                                      "type": "string",
+                                      "const": "plan"
+                                    },
+                                    "plan": {
+                                      "type": "object",
+                                      "required": [
+                                        "planId",
+                                        "revision",
+                                        "title",
+                                        "markdown",
+                                        "status",
+                                        "createdAt"
+                                      ],
+                                      "properties": {
+                                        "planId": {
+                                          "type": "string",
+                                          "minLength": 1,
+                                          "maxLength": 128,
+                                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                                        },
+                                        "revision": {
+                                          "type": "integer",
+                                          "minimum": 1,
+                                          "maximum": 9007199254740991
+                                        },
+                                        "title": {
+                                          "type": "string",
+                                          "minLength": 1,
+                                          "maxLength": 256,
+                                          "x-metis-maxUtf16Units": 256
+                                        },
+                                        "markdown": {
+                                          "type": "string",
+                                          "minLength": 1,
+                                          "x-metis-maxUtf8Bytes": 65536
+                                        },
+                                        "status": {
+                                          "anyOf": [
+                                            {
+                                              "type": "string",
+                                              "const": "proposed"
+                                            },
+                                            {
+                                              "type": "string",
+                                              "const": "superseded"
+                                            },
+                                            {
+                                              "type": "string",
+                                              "const": "accepted"
+                                            },
+                                            {
+                                              "type": "string",
+                                              "const": "cancelled"
+                                            }
+                                          ]
+                                        },
+                                        "createdAt": {
+                                          "type": "string",
+                                          "format": "date-time",
+                                          "maxLength": 40
+                                        }
+                                      },
+                                      "additionalProperties": false
+                                    }
+                                  },
+                                  "additionalProperties": false
                                 }
                               ]
                             },
@@ -18912,6 +19493,7 @@
                       "type": "object",
                       "required": [
                         "session",
+                        "collaborationMode",
                         "permissionMode",
                         "turns",
                         "recentItems",
@@ -19071,6 +19653,18 @@
                             }
                           },
                           "additionalProperties": false
+                        },
+                        "collaborationMode": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "const": "default"
+                            },
+                            {
+                              "type": "string",
+                              "const": "plan"
+                            }
+                          ]
                         },
                         "permissionMode": {
                           "anyOf": [
@@ -19622,6 +20216,81 @@
                                         "type": {
                                           "type": "string",
                                           "const": "compaction"
+                                        }
+                                      },
+                                      "additionalProperties": false
+                                    },
+                                    {
+                                      "type": "object",
+                                      "required": [
+                                        "type",
+                                        "plan"
+                                      ],
+                                      "properties": {
+                                        "type": {
+                                          "type": "string",
+                                          "const": "plan"
+                                        },
+                                        "plan": {
+                                          "type": "object",
+                                          "required": [
+                                            "planId",
+                                            "revision",
+                                            "title",
+                                            "markdown",
+                                            "status",
+                                            "createdAt"
+                                          ],
+                                          "properties": {
+                                            "planId": {
+                                              "type": "string",
+                                              "minLength": 1,
+                                              "maxLength": 128,
+                                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                                            },
+                                            "revision": {
+                                              "type": "integer",
+                                              "minimum": 1,
+                                              "maximum": 9007199254740991
+                                            },
+                                            "title": {
+                                              "type": "string",
+                                              "minLength": 1,
+                                              "maxLength": 256,
+                                              "x-metis-maxUtf16Units": 256
+                                            },
+                                            "markdown": {
+                                              "type": "string",
+                                              "minLength": 1,
+                                              "x-metis-maxUtf8Bytes": 65536
+                                            },
+                                            "status": {
+                                              "anyOf": [
+                                                {
+                                                  "type": "string",
+                                                  "const": "proposed"
+                                                },
+                                                {
+                                                  "type": "string",
+                                                  "const": "superseded"
+                                                },
+                                                {
+                                                  "type": "string",
+                                                  "const": "accepted"
+                                                },
+                                                {
+                                                  "type": "string",
+                                                  "const": "cancelled"
+                                                }
+                                              ]
+                                            },
+                                            "createdAt": {
+                                              "type": "string",
+                                              "format": "date-time",
+                                              "maxLength": 40
+                                            }
+                                          },
+                                          "additionalProperties": false
                                         }
                                       },
                                       "additionalProperties": false
@@ -21084,6 +21753,205 @@
                           "const": "full"
                         }
                       ]
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "jsonrpc",
+                "id",
+                "result"
+              ],
+              "properties": {
+                "jsonrpc": {
+                  "type": "string",
+                  "const": "2.0"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "x-metis-maxUtf16Units": 128
+                },
+                "result": {
+                  "type": "object",
+                  "required": [
+                    "collaborationMode"
+                  ],
+                  "properties": {
+                    "collaborationMode": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "const": "default"
+                        },
+                        {
+                          "type": "string",
+                          "const": "plan"
+                        }
+                      ]
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "jsonrpc",
+                "id",
+                "result"
+              ],
+              "properties": {
+                "jsonrpc": {
+                  "type": "string",
+                  "const": "2.0"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "x-metis-maxUtf16Units": 128
+                },
+                "result": {
+                  "type": "object",
+                  "required": [
+                    "operationId",
+                    "status"
+                  ],
+                  "properties": {
+                    "operationId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                    },
+                    "queueItemId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                    },
+                    "turnId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                    },
+                    "status": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "const": "accepted"
+                        },
+                        {
+                          "type": "string",
+                          "const": "existing"
+                        }
+                      ]
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "jsonrpc",
+                "id",
+                "result"
+              ],
+              "properties": {
+                "jsonrpc": {
+                  "type": "string",
+                  "const": "2.0"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "x-metis-maxUtf16Units": 128
+                },
+                "result": {
+                  "type": "object",
+                  "required": [
+                    "plan",
+                    "collaborationMode"
+                  ],
+                  "properties": {
+                    "plan": {
+                      "type": "object",
+                      "required": [
+                        "planId",
+                        "revision",
+                        "title",
+                        "markdown",
+                        "status",
+                        "createdAt"
+                      ],
+                      "properties": {
+                        "planId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                        },
+                        "revision": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 9007199254740991
+                        },
+                        "title": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 256,
+                          "x-metis-maxUtf16Units": 256
+                        },
+                        "markdown": {
+                          "type": "string",
+                          "minLength": 1,
+                          "x-metis-maxUtf8Bytes": 65536
+                        },
+                        "status": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "const": "proposed"
+                            },
+                            {
+                              "type": "string",
+                              "const": "superseded"
+                            },
+                            {
+                              "type": "string",
+                              "const": "accepted"
+                            },
+                            {
+                              "type": "string",
+                              "const": "cancelled"
+                            }
+                          ]
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time",
+                          "maxLength": 40
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    "collaborationMode": {
+                      "type": "string",
+                      "const": "default"
                     }
                   },
                   "additionalProperties": false
@@ -24025,6 +24893,81 @@
                                     "type": {
                                       "type": "string",
                                       "const": "compaction"
+                                    }
+                                  },
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "object",
+                                  "required": [
+                                    "type",
+                                    "plan"
+                                  ],
+                                  "properties": {
+                                    "type": {
+                                      "type": "string",
+                                      "const": "plan"
+                                    },
+                                    "plan": {
+                                      "type": "object",
+                                      "required": [
+                                        "planId",
+                                        "revision",
+                                        "title",
+                                        "markdown",
+                                        "status",
+                                        "createdAt"
+                                      ],
+                                      "properties": {
+                                        "planId": {
+                                          "type": "string",
+                                          "minLength": 1,
+                                          "maxLength": 128,
+                                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                                        },
+                                        "revision": {
+                                          "type": "integer",
+                                          "minimum": 1,
+                                          "maximum": 9007199254740991
+                                        },
+                                        "title": {
+                                          "type": "string",
+                                          "minLength": 1,
+                                          "maxLength": 256,
+                                          "x-metis-maxUtf16Units": 256
+                                        },
+                                        "markdown": {
+                                          "type": "string",
+                                          "minLength": 1,
+                                          "x-metis-maxUtf8Bytes": 65536
+                                        },
+                                        "status": {
+                                          "anyOf": [
+                                            {
+                                              "type": "string",
+                                              "const": "proposed"
+                                            },
+                                            {
+                                              "type": "string",
+                                              "const": "superseded"
+                                            },
+                                            {
+                                              "type": "string",
+                                              "const": "accepted"
+                                            },
+                                            {
+                                              "type": "string",
+                                              "const": "cancelled"
+                                            }
+                                          ]
+                                        },
+                                        "createdAt": {
+                                          "type": "string",
+                                          "format": "date-time",
+                                          "maxLength": 40
+                                        }
+                                      },
+                                      "additionalProperties": false
                                     }
                                   },
                                   "additionalProperties": false
@@ -34804,6 +35747,180 @@
             },
             "method": {
               "type": "string",
+              "const": "session/setCollaborationMode"
+            },
+            "params": {
+              "type": "object",
+              "required": [
+                "sessionId",
+                "requestId",
+                "collaborationMode"
+              ],
+              "properties": {
+                "sessionId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                },
+                "requestId": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "collaborationMode": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "const": "default"
+                    },
+                    {
+                      "type": "string",
+                      "const": "plan"
+                    }
+                  ]
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "type": "string",
+              "const": "2.0"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "x-metis-maxUtf16Units": 128
+            },
+            "method": {
+              "type": "string",
+              "const": "plan/startExecution"
+            },
+            "params": {
+              "type": "object",
+              "required": [
+                "sessionId",
+                "requestId",
+                "planId",
+                "revision"
+              ],
+              "properties": {
+                "sessionId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                },
+                "requestId": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "planId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                },
+                "revision": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9007199254740991
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "type": "string",
+              "const": "2.0"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "x-metis-maxUtf16Units": 128
+            },
+            "method": {
+              "type": "string",
+              "const": "plan/cancel"
+            },
+            "params": {
+              "type": "object",
+              "required": [
+                "sessionId",
+                "requestId",
+                "planId",
+                "revision"
+              ],
+              "properties": {
+                "sessionId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                },
+                "requestId": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "planId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                },
+                "revision": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9007199254740991
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "type": "string",
+              "const": "2.0"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "x-metis-maxUtf16Units": 128
+            },
+            "method": {
+              "type": "string",
               "const": "permission/rules/list"
             },
             "params": {
@@ -38252,7 +39369,7 @@
               "properties": {
                 "protocolVersion": {
                   "type": "number",
-                  "const": 20
+                  "const": 21
                 },
                 "server": {
                   "type": "object",
@@ -43413,6 +44530,81 @@
                                 }
                               },
                               "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "required": [
+                                "type",
+                                "plan"
+                              ],
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "const": "plan"
+                                },
+                                "plan": {
+                                  "type": "object",
+                                  "required": [
+                                    "planId",
+                                    "revision",
+                                    "title",
+                                    "markdown",
+                                    "status",
+                                    "createdAt"
+                                  ],
+                                  "properties": {
+                                    "planId": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 128,
+                                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                                    },
+                                    "revision": {
+                                      "type": "integer",
+                                      "minimum": 1,
+                                      "maximum": 9007199254740991
+                                    },
+                                    "title": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 256,
+                                      "x-metis-maxUtf16Units": 256
+                                    },
+                                    "markdown": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "x-metis-maxUtf8Bytes": 65536
+                                    },
+                                    "status": {
+                                      "anyOf": [
+                                        {
+                                          "type": "string",
+                                          "const": "proposed"
+                                        },
+                                        {
+                                          "type": "string",
+                                          "const": "superseded"
+                                        },
+                                        {
+                                          "type": "string",
+                                          "const": "accepted"
+                                        },
+                                        {
+                                          "type": "string",
+                                          "const": "cancelled"
+                                        }
+                                      ]
+                                    },
+                                    "createdAt": {
+                                      "type": "string",
+                                      "format": "date-time",
+                                      "maxLength": 40
+                                    }
+                                  },
+                                  "additionalProperties": false
+                                }
+                              },
+                              "additionalProperties": false
                             }
                           ]
                         },
@@ -44930,6 +46122,7 @@
                   "type": "object",
                   "required": [
                     "session",
+                    "collaborationMode",
                     "permissionMode",
                     "turns",
                     "recentItems",
@@ -45089,6 +46282,18 @@
                         }
                       },
                       "additionalProperties": false
+                    },
+                    "collaborationMode": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "const": "default"
+                        },
+                        {
+                          "type": "string",
+                          "const": "plan"
+                        }
+                      ]
                     },
                     "permissionMode": {
                       "anyOf": [
@@ -45640,6 +46845,81 @@
                                     "type": {
                                       "type": "string",
                                       "const": "compaction"
+                                    }
+                                  },
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "object",
+                                  "required": [
+                                    "type",
+                                    "plan"
+                                  ],
+                                  "properties": {
+                                    "type": {
+                                      "type": "string",
+                                      "const": "plan"
+                                    },
+                                    "plan": {
+                                      "type": "object",
+                                      "required": [
+                                        "planId",
+                                        "revision",
+                                        "title",
+                                        "markdown",
+                                        "status",
+                                        "createdAt"
+                                      ],
+                                      "properties": {
+                                        "planId": {
+                                          "type": "string",
+                                          "minLength": 1,
+                                          "maxLength": 128,
+                                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                                        },
+                                        "revision": {
+                                          "type": "integer",
+                                          "minimum": 1,
+                                          "maximum": 9007199254740991
+                                        },
+                                        "title": {
+                                          "type": "string",
+                                          "minLength": 1,
+                                          "maxLength": 256,
+                                          "x-metis-maxUtf16Units": 256
+                                        },
+                                        "markdown": {
+                                          "type": "string",
+                                          "minLength": 1,
+                                          "x-metis-maxUtf8Bytes": 65536
+                                        },
+                                        "status": {
+                                          "anyOf": [
+                                            {
+                                              "type": "string",
+                                              "const": "proposed"
+                                            },
+                                            {
+                                              "type": "string",
+                                              "const": "superseded"
+                                            },
+                                            {
+                                              "type": "string",
+                                              "const": "accepted"
+                                            },
+                                            {
+                                              "type": "string",
+                                              "const": "cancelled"
+                                            }
+                                          ]
+                                        },
+                                        "createdAt": {
+                                          "type": "string",
+                                          "format": "date-time",
+                                          "maxLength": 40
+                                        }
+                                      },
+                                      "additionalProperties": false
                                     }
                                   },
                                   "additionalProperties": false
@@ -47102,6 +48382,205 @@
                       "const": "full"
                     }
                   ]
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "jsonrpc",
+            "id",
+            "result"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "type": "string",
+              "const": "2.0"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "x-metis-maxUtf16Units": 128
+            },
+            "result": {
+              "type": "object",
+              "required": [
+                "collaborationMode"
+              ],
+              "properties": {
+                "collaborationMode": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "const": "default"
+                    },
+                    {
+                      "type": "string",
+                      "const": "plan"
+                    }
+                  ]
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "jsonrpc",
+            "id",
+            "result"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "type": "string",
+              "const": "2.0"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "x-metis-maxUtf16Units": 128
+            },
+            "result": {
+              "type": "object",
+              "required": [
+                "operationId",
+                "status"
+              ],
+              "properties": {
+                "operationId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                },
+                "queueItemId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                },
+                "turnId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                },
+                "status": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "const": "accepted"
+                    },
+                    {
+                      "type": "string",
+                      "const": "existing"
+                    }
+                  ]
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "jsonrpc",
+            "id",
+            "result"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "type": "string",
+              "const": "2.0"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "x-metis-maxUtf16Units": 128
+            },
+            "result": {
+              "type": "object",
+              "required": [
+                "plan",
+                "collaborationMode"
+              ],
+              "properties": {
+                "plan": {
+                  "type": "object",
+                  "required": [
+                    "planId",
+                    "revision",
+                    "title",
+                    "markdown",
+                    "status",
+                    "createdAt"
+                  ],
+                  "properties": {
+                    "planId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                    },
+                    "revision": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 9007199254740991
+                    },
+                    "title": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256,
+                      "x-metis-maxUtf16Units": 256
+                    },
+                    "markdown": {
+                      "type": "string",
+                      "minLength": 1,
+                      "x-metis-maxUtf8Bytes": 65536
+                    },
+                    "status": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "const": "proposed"
+                        },
+                        {
+                          "type": "string",
+                          "const": "superseded"
+                        },
+                        {
+                          "type": "string",
+                          "const": "accepted"
+                        },
+                        {
+                          "type": "string",
+                          "const": "cancelled"
+                        }
+                      ]
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time",
+                      "maxLength": 40
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                "collaborationMode": {
+                  "type": "string",
+                  "const": "default"
                 }
               },
               "additionalProperties": false
@@ -50043,6 +51522,81 @@
                                 "type": {
                                   "type": "string",
                                   "const": "compaction"
+                                }
+                              },
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "required": [
+                                "type",
+                                "plan"
+                              ],
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "const": "plan"
+                                },
+                                "plan": {
+                                  "type": "object",
+                                  "required": [
+                                    "planId",
+                                    "revision",
+                                    "title",
+                                    "markdown",
+                                    "status",
+                                    "createdAt"
+                                  ],
+                                  "properties": {
+                                    "planId": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 128,
+                                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                                    },
+                                    "revision": {
+                                      "type": "integer",
+                                      "minimum": 1,
+                                      "maximum": 9007199254740991
+                                    },
+                                    "title": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 256,
+                                      "x-metis-maxUtf16Units": 256
+                                    },
+                                    "markdown": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "x-metis-maxUtf8Bytes": 65536
+                                    },
+                                    "status": {
+                                      "anyOf": [
+                                        {
+                                          "type": "string",
+                                          "const": "proposed"
+                                        },
+                                        {
+                                          "type": "string",
+                                          "const": "superseded"
+                                        },
+                                        {
+                                          "type": "string",
+                                          "const": "accepted"
+                                        },
+                                        {
+                                          "type": "string",
+                                          "const": "cancelled"
+                                        }
+                                      ]
+                                    },
+                                    "createdAt": {
+                                      "type": "string",
+                                      "format": "date-time",
+                                      "maxLength": 40
+                                    }
+                                  },
+                                  "additionalProperties": false
                                 }
                               },
                               "additionalProperties": false
@@ -57226,6 +58780,81 @@
                                 }
                               },
                               "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "required": [
+                                "type",
+                                "plan"
+                              ],
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "const": "plan"
+                                },
+                                "plan": {
+                                  "type": "object",
+                                  "required": [
+                                    "planId",
+                                    "revision",
+                                    "title",
+                                    "markdown",
+                                    "status",
+                                    "createdAt"
+                                  ],
+                                  "properties": {
+                                    "planId": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 128,
+                                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                                    },
+                                    "revision": {
+                                      "type": "integer",
+                                      "minimum": 1,
+                                      "maximum": 9007199254740991
+                                    },
+                                    "title": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 256,
+                                      "x-metis-maxUtf16Units": 256
+                                    },
+                                    "markdown": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "x-metis-maxUtf8Bytes": 65536
+                                    },
+                                    "status": {
+                                      "anyOf": [
+                                        {
+                                          "type": "string",
+                                          "const": "proposed"
+                                        },
+                                        {
+                                          "type": "string",
+                                          "const": "superseded"
+                                        },
+                                        {
+                                          "type": "string",
+                                          "const": "accepted"
+                                        },
+                                        {
+                                          "type": "string",
+                                          "const": "cancelled"
+                                        }
+                                      ]
+                                    },
+                                    "createdAt": {
+                                      "type": "string",
+                                      "format": "date-time",
+                                      "maxLength": 40
+                                    }
+                                  },
+                                  "additionalProperties": false
+                                }
+                              },
+                              "additionalProperties": false
                             }
                           ]
                         },
@@ -57740,6 +59369,81 @@
                                 }
                               },
                               "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "required": [
+                                "type",
+                                "plan"
+                              ],
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "const": "plan"
+                                },
+                                "plan": {
+                                  "type": "object",
+                                  "required": [
+                                    "planId",
+                                    "revision",
+                                    "title",
+                                    "markdown",
+                                    "status",
+                                    "createdAt"
+                                  ],
+                                  "properties": {
+                                    "planId": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 128,
+                                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                                    },
+                                    "revision": {
+                                      "type": "integer",
+                                      "minimum": 1,
+                                      "maximum": 9007199254740991
+                                    },
+                                    "title": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 256,
+                                      "x-metis-maxUtf16Units": 256
+                                    },
+                                    "markdown": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "x-metis-maxUtf8Bytes": 65536
+                                    },
+                                    "status": {
+                                      "anyOf": [
+                                        {
+                                          "type": "string",
+                                          "const": "proposed"
+                                        },
+                                        {
+                                          "type": "string",
+                                          "const": "superseded"
+                                        },
+                                        {
+                                          "type": "string",
+                                          "const": "accepted"
+                                        },
+                                        {
+                                          "type": "string",
+                                          "const": "cancelled"
+                                        }
+                                      ]
+                                    },
+                                    "createdAt": {
+                                      "type": "string",
+                                      "format": "date-time",
+                                      "maxLength": 40
+                                    }
+                                  },
+                                  "additionalProperties": false
+                                }
+                              },
+                              "additionalProperties": false
                             }
                           ]
                         },
@@ -57924,6 +59628,38 @@
                       {
                         "type": "string",
                         "const": "full"
+                      }
+                    ]
+                  }
+                },
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "required": [
+                  "type",
+                  "sessionId",
+                  "collaborationMode"
+                ],
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "session/collaborationModeChanged"
+                  },
+                  "sessionId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                  },
+                  "collaborationMode": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "const": "default"
+                      },
+                      {
+                        "type": "string",
+                        "const": "plan"
                       }
                     ]
                   }
@@ -59277,6 +61013,81 @@
                                 }
                               },
                               "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "required": [
+                                "type",
+                                "plan"
+                              ],
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "const": "plan"
+                                },
+                                "plan": {
+                                  "type": "object",
+                                  "required": [
+                                    "planId",
+                                    "revision",
+                                    "title",
+                                    "markdown",
+                                    "status",
+                                    "createdAt"
+                                  ],
+                                  "properties": {
+                                    "planId": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 128,
+                                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                                    },
+                                    "revision": {
+                                      "type": "integer",
+                                      "minimum": 1,
+                                      "maximum": 9007199254740991
+                                    },
+                                    "title": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 256,
+                                      "x-metis-maxUtf16Units": 256
+                                    },
+                                    "markdown": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "x-metis-maxUtf8Bytes": 65536
+                                    },
+                                    "status": {
+                                      "anyOf": [
+                                        {
+                                          "type": "string",
+                                          "const": "proposed"
+                                        },
+                                        {
+                                          "type": "string",
+                                          "const": "superseded"
+                                        },
+                                        {
+                                          "type": "string",
+                                          "const": "accepted"
+                                        },
+                                        {
+                                          "type": "string",
+                                          "const": "cancelled"
+                                        }
+                                      ]
+                                    },
+                                    "createdAt": {
+                                      "type": "string",
+                                      "format": "date-time",
+                                      "maxLength": 40
+                                    }
+                                  },
+                                  "additionalProperties": false
+                                }
+                              },
+                              "additionalProperties": false
                             }
                           ]
                         },
@@ -59796,6 +61607,81 @@
                                 "type": {
                                   "type": "string",
                                   "const": "compaction"
+                                }
+                              },
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "required": [
+                                "type",
+                                "plan"
+                              ],
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "const": "plan"
+                                },
+                                "plan": {
+                                  "type": "object",
+                                  "required": [
+                                    "planId",
+                                    "revision",
+                                    "title",
+                                    "markdown",
+                                    "status",
+                                    "createdAt"
+                                  ],
+                                  "properties": {
+                                    "planId": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 128,
+                                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                                    },
+                                    "revision": {
+                                      "type": "integer",
+                                      "minimum": 1,
+                                      "maximum": 9007199254740991
+                                    },
+                                    "title": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 256,
+                                      "x-metis-maxUtf16Units": 256
+                                    },
+                                    "markdown": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "x-metis-maxUtf8Bytes": 65536
+                                    },
+                                    "status": {
+                                      "anyOf": [
+                                        {
+                                          "type": "string",
+                                          "const": "proposed"
+                                        },
+                                        {
+                                          "type": "string",
+                                          "const": "superseded"
+                                        },
+                                        {
+                                          "type": "string",
+                                          "const": "accepted"
+                                        },
+                                        {
+                                          "type": "string",
+                                          "const": "cancelled"
+                                        }
+                                      ]
+                                    },
+                                    "createdAt": {
+                                      "type": "string",
+                                      "format": "date-time",
+                                      "maxLength": 40
+                                    }
+                                  },
+                                  "additionalProperties": false
                                 }
                               },
                               "additionalProperties": false
@@ -61950,6 +63836,81 @@
                           }
                         },
                         "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "required": [
+                          "type",
+                          "plan"
+                        ],
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "const": "plan"
+                          },
+                          "plan": {
+                            "type": "object",
+                            "required": [
+                              "planId",
+                              "revision",
+                              "title",
+                              "markdown",
+                              "status",
+                              "createdAt"
+                            ],
+                            "properties": {
+                              "planId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 128,
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                              },
+                              "revision": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 9007199254740991
+                              },
+                              "title": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 256,
+                                "x-metis-maxUtf16Units": 256
+                              },
+                              "markdown": {
+                                "type": "string",
+                                "minLength": 1,
+                                "x-metis-maxUtf8Bytes": 65536
+                              },
+                              "status": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "const": "proposed"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "superseded"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "accepted"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "cancelled"
+                                  }
+                                ]
+                              },
+                              "createdAt": {
+                                "type": "string",
+                                "format": "date-time",
+                                "maxLength": 40
+                              }
+                            },
+                            "additionalProperties": false
+                          }
+                        },
+                        "additionalProperties": false
                       }
                     ]
                   },
@@ -62464,6 +64425,81 @@
                           }
                         },
                         "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "required": [
+                          "type",
+                          "plan"
+                        ],
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "const": "plan"
+                          },
+                          "plan": {
+                            "type": "object",
+                            "required": [
+                              "planId",
+                              "revision",
+                              "title",
+                              "markdown",
+                              "status",
+                              "createdAt"
+                            ],
+                            "properties": {
+                              "planId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 128,
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                              },
+                              "revision": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 9007199254740991
+                              },
+                              "title": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 256,
+                                "x-metis-maxUtf16Units": 256
+                              },
+                              "markdown": {
+                                "type": "string",
+                                "minLength": 1,
+                                "x-metis-maxUtf8Bytes": 65536
+                              },
+                              "status": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "const": "proposed"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "superseded"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "accepted"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "cancelled"
+                                  }
+                                ]
+                              },
+                              "createdAt": {
+                                "type": "string",
+                                "format": "date-time",
+                                "maxLength": 40
+                              }
+                            },
+                            "additionalProperties": false
+                          }
+                        },
+                        "additionalProperties": false
                       }
                     ]
                   },
@@ -62648,6 +64684,38 @@
                 {
                   "type": "string",
                   "const": "full"
+                }
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "sessionId",
+            "collaborationMode"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "session/collaborationModeChanged"
+            },
+            "sessionId": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+            },
+            "collaborationMode": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "const": "default"
+                },
+                {
+                  "type": "string",
+                  "const": "plan"
                 }
               ]
             }
@@ -64001,6 +66069,81 @@
                           }
                         },
                         "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "required": [
+                          "type",
+                          "plan"
+                        ],
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "const": "plan"
+                          },
+                          "plan": {
+                            "type": "object",
+                            "required": [
+                              "planId",
+                              "revision",
+                              "title",
+                              "markdown",
+                              "status",
+                              "createdAt"
+                            ],
+                            "properties": {
+                              "planId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 128,
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                              },
+                              "revision": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 9007199254740991
+                              },
+                              "title": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 256,
+                                "x-metis-maxUtf16Units": 256
+                              },
+                              "markdown": {
+                                "type": "string",
+                                "minLength": 1,
+                                "x-metis-maxUtf8Bytes": 65536
+                              },
+                              "status": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "const": "proposed"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "superseded"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "accepted"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "cancelled"
+                                  }
+                                ]
+                              },
+                              "createdAt": {
+                                "type": "string",
+                                "format": "date-time",
+                                "maxLength": 40
+                              }
+                            },
+                            "additionalProperties": false
+                          }
+                        },
+                        "additionalProperties": false
                       }
                     ]
                   },
@@ -64520,6 +66663,81 @@
                           "type": {
                             "type": "string",
                             "const": "compaction"
+                          }
+                        },
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "required": [
+                          "type",
+                          "plan"
+                        ],
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "const": "plan"
+                          },
+                          "plan": {
+                            "type": "object",
+                            "required": [
+                              "planId",
+                              "revision",
+                              "title",
+                              "markdown",
+                              "status",
+                              "createdAt"
+                            ],
+                            "properties": {
+                              "planId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 128,
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                              },
+                              "revision": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 9007199254740991
+                              },
+                              "title": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 256,
+                                "x-metis-maxUtf16Units": 256
+                              },
+                              "markdown": {
+                                "type": "string",
+                                "minLength": 1,
+                                "x-metis-maxUtf8Bytes": 65536
+                              },
+                              "status": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "const": "proposed"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "superseded"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "accepted"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "cancelled"
+                                  }
+                                ]
+                              },
+                              "createdAt": {
+                                "type": "string",
+                                "format": "date-time",
+                                "maxLength": 40
+                              }
+                            },
+                            "additionalProperties": false
                           }
                         },
                         "additionalProperties": false
@@ -66779,6 +68997,81 @@
                   "type": {
                     "type": "string",
                     "const": "compaction"
+                  }
+                },
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "required": [
+                  "type",
+                  "plan"
+                ],
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "plan"
+                  },
+                  "plan": {
+                    "type": "object",
+                    "required": [
+                      "planId",
+                      "revision",
+                      "title",
+                      "markdown",
+                      "status",
+                      "createdAt"
+                    ],
+                    "properties": {
+                      "planId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128,
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                      },
+                      "revision": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 9007199254740991
+                      },
+                      "title": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256,
+                        "x-metis-maxUtf16Units": 256
+                      },
+                      "markdown": {
+                        "type": "string",
+                        "minLength": 1,
+                        "x-metis-maxUtf8Bytes": 65536
+                      },
+                      "status": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "const": "proposed"
+                          },
+                          {
+                            "type": "string",
+                            "const": "superseded"
+                          },
+                          {
+                            "type": "string",
+                            "const": "accepted"
+                          },
+                          {
+                            "type": "string",
+                            "const": "cancelled"
+                          }
+                        ]
+                      },
+                      "createdAt": {
+                        "type": "string",
+                        "format": "date-time",
+                        "maxLength": 40
+                      }
+                    },
+                    "additionalProperties": false
                   }
                 },
                 "additionalProperties": false
@@ -69618,6 +71911,81 @@
                                     }
                                   },
                                   "additionalProperties": false
+                                },
+                                {
+                                  "type": "object",
+                                  "required": [
+                                    "type",
+                                    "plan"
+                                  ],
+                                  "properties": {
+                                    "type": {
+                                      "type": "string",
+                                      "const": "plan"
+                                    },
+                                    "plan": {
+                                      "type": "object",
+                                      "required": [
+                                        "planId",
+                                        "revision",
+                                        "title",
+                                        "markdown",
+                                        "status",
+                                        "createdAt"
+                                      ],
+                                      "properties": {
+                                        "planId": {
+                                          "type": "string",
+                                          "minLength": 1,
+                                          "maxLength": 128,
+                                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                                        },
+                                        "revision": {
+                                          "type": "integer",
+                                          "minimum": 1,
+                                          "maximum": 9007199254740991
+                                        },
+                                        "title": {
+                                          "type": "string",
+                                          "minLength": 1,
+                                          "maxLength": 256,
+                                          "x-metis-maxUtf16Units": 256
+                                        },
+                                        "markdown": {
+                                          "type": "string",
+                                          "minLength": 1,
+                                          "x-metis-maxUtf8Bytes": 65536
+                                        },
+                                        "status": {
+                                          "anyOf": [
+                                            {
+                                              "type": "string",
+                                              "const": "proposed"
+                                            },
+                                            {
+                                              "type": "string",
+                                              "const": "superseded"
+                                            },
+                                            {
+                                              "type": "string",
+                                              "const": "accepted"
+                                            },
+                                            {
+                                              "type": "string",
+                                              "const": "cancelled"
+                                            }
+                                          ]
+                                        },
+                                        "createdAt": {
+                                          "type": "string",
+                                          "format": "date-time",
+                                          "maxLength": 40
+                                        }
+                                      },
+                                      "additionalProperties": false
+                                    }
+                                  },
+                                  "additionalProperties": false
                                 }
                               ]
                             },
@@ -70132,6 +72500,81 @@
                                     }
                                   },
                                   "additionalProperties": false
+                                },
+                                {
+                                  "type": "object",
+                                  "required": [
+                                    "type",
+                                    "plan"
+                                  ],
+                                  "properties": {
+                                    "type": {
+                                      "type": "string",
+                                      "const": "plan"
+                                    },
+                                    "plan": {
+                                      "type": "object",
+                                      "required": [
+                                        "planId",
+                                        "revision",
+                                        "title",
+                                        "markdown",
+                                        "status",
+                                        "createdAt"
+                                      ],
+                                      "properties": {
+                                        "planId": {
+                                          "type": "string",
+                                          "minLength": 1,
+                                          "maxLength": 128,
+                                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                                        },
+                                        "revision": {
+                                          "type": "integer",
+                                          "minimum": 1,
+                                          "maximum": 9007199254740991
+                                        },
+                                        "title": {
+                                          "type": "string",
+                                          "minLength": 1,
+                                          "maxLength": 256,
+                                          "x-metis-maxUtf16Units": 256
+                                        },
+                                        "markdown": {
+                                          "type": "string",
+                                          "minLength": 1,
+                                          "x-metis-maxUtf8Bytes": 65536
+                                        },
+                                        "status": {
+                                          "anyOf": [
+                                            {
+                                              "type": "string",
+                                              "const": "proposed"
+                                            },
+                                            {
+                                              "type": "string",
+                                              "const": "superseded"
+                                            },
+                                            {
+                                              "type": "string",
+                                              "const": "accepted"
+                                            },
+                                            {
+                                              "type": "string",
+                                              "const": "cancelled"
+                                            }
+                                          ]
+                                        },
+                                        "createdAt": {
+                                          "type": "string",
+                                          "format": "date-time",
+                                          "maxLength": 40
+                                        }
+                                      },
+                                      "additionalProperties": false
+                                    }
+                                  },
+                                  "additionalProperties": false
                                 }
                               ]
                             },
@@ -70316,6 +72759,38 @@
                           {
                             "type": "string",
                             "const": "full"
+                          }
+                        ]
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "required": [
+                      "type",
+                      "sessionId",
+                      "collaborationMode"
+                    ],
+                    "properties": {
+                      "type": {
+                        "type": "string",
+                        "const": "session/collaborationModeChanged"
+                      },
+                      "sessionId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                      },
+                      "collaborationMode": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "const": "default"
+                          },
+                          {
+                            "type": "string",
+                            "const": "plan"
                           }
                         ]
                       }
@@ -71669,6 +74144,81 @@
                                     }
                                   },
                                   "additionalProperties": false
+                                },
+                                {
+                                  "type": "object",
+                                  "required": [
+                                    "type",
+                                    "plan"
+                                  ],
+                                  "properties": {
+                                    "type": {
+                                      "type": "string",
+                                      "const": "plan"
+                                    },
+                                    "plan": {
+                                      "type": "object",
+                                      "required": [
+                                        "planId",
+                                        "revision",
+                                        "title",
+                                        "markdown",
+                                        "status",
+                                        "createdAt"
+                                      ],
+                                      "properties": {
+                                        "planId": {
+                                          "type": "string",
+                                          "minLength": 1,
+                                          "maxLength": 128,
+                                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                                        },
+                                        "revision": {
+                                          "type": "integer",
+                                          "minimum": 1,
+                                          "maximum": 9007199254740991
+                                        },
+                                        "title": {
+                                          "type": "string",
+                                          "minLength": 1,
+                                          "maxLength": 256,
+                                          "x-metis-maxUtf16Units": 256
+                                        },
+                                        "markdown": {
+                                          "type": "string",
+                                          "minLength": 1,
+                                          "x-metis-maxUtf8Bytes": 65536
+                                        },
+                                        "status": {
+                                          "anyOf": [
+                                            {
+                                              "type": "string",
+                                              "const": "proposed"
+                                            },
+                                            {
+                                              "type": "string",
+                                              "const": "superseded"
+                                            },
+                                            {
+                                              "type": "string",
+                                              "const": "accepted"
+                                            },
+                                            {
+                                              "type": "string",
+                                              "const": "cancelled"
+                                            }
+                                          ]
+                                        },
+                                        "createdAt": {
+                                          "type": "string",
+                                          "format": "date-time",
+                                          "maxLength": 40
+                                        }
+                                      },
+                                      "additionalProperties": false
+                                    }
+                                  },
+                                  "additionalProperties": false
                                 }
                               ]
                             },
@@ -72188,6 +74738,81 @@
                                     "type": {
                                       "type": "string",
                                       "const": "compaction"
+                                    }
+                                  },
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "object",
+                                  "required": [
+                                    "type",
+                                    "plan"
+                                  ],
+                                  "properties": {
+                                    "type": {
+                                      "type": "string",
+                                      "const": "plan"
+                                    },
+                                    "plan": {
+                                      "type": "object",
+                                      "required": [
+                                        "planId",
+                                        "revision",
+                                        "title",
+                                        "markdown",
+                                        "status",
+                                        "createdAt"
+                                      ],
+                                      "properties": {
+                                        "planId": {
+                                          "type": "string",
+                                          "minLength": 1,
+                                          "maxLength": 128,
+                                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                                        },
+                                        "revision": {
+                                          "type": "integer",
+                                          "minimum": 1,
+                                          "maximum": 9007199254740991
+                                        },
+                                        "title": {
+                                          "type": "string",
+                                          "minLength": 1,
+                                          "maxLength": 256,
+                                          "x-metis-maxUtf16Units": 256
+                                        },
+                                        "markdown": {
+                                          "type": "string",
+                                          "minLength": 1,
+                                          "x-metis-maxUtf8Bytes": 65536
+                                        },
+                                        "status": {
+                                          "anyOf": [
+                                            {
+                                              "type": "string",
+                                              "const": "proposed"
+                                            },
+                                            {
+                                              "type": "string",
+                                              "const": "superseded"
+                                            },
+                                            {
+                                              "type": "string",
+                                              "const": "accepted"
+                                            },
+                                            {
+                                              "type": "string",
+                                              "const": "cancelled"
+                                            }
+                                          ]
+                                        },
+                                        "createdAt": {
+                                          "type": "string",
+                                          "format": "date-time",
+                                          "maxLength": 40
+                                        }
+                                      },
+                                      "additionalProperties": false
                                     }
                                   },
                                   "additionalProperties": false
@@ -74071,6 +76696,7 @@
       "type": "object",
       "required": [
         "session",
+        "collaborationMode",
         "permissionMode",
         "turns",
         "recentItems",
@@ -74230,6 +76856,18 @@
             }
           },
           "additionalProperties": false
+        },
+        "collaborationMode": {
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "default"
+            },
+            {
+              "type": "string",
+              "const": "plan"
+            }
+          ]
         },
         "permissionMode": {
           "anyOf": [
@@ -74781,6 +77419,81 @@
                         "type": {
                           "type": "string",
                           "const": "compaction"
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "type",
+                        "plan"
+                      ],
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "plan"
+                        },
+                        "plan": {
+                          "type": "object",
+                          "required": [
+                            "planId",
+                            "revision",
+                            "title",
+                            "markdown",
+                            "status",
+                            "createdAt"
+                          ],
+                          "properties": {
+                            "planId": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 128,
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                            },
+                            "revision": {
+                              "type": "integer",
+                              "minimum": 1,
+                              "maximum": 9007199254740991
+                            },
+                            "title": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 256,
+                              "x-metis-maxUtf16Units": 256
+                            },
+                            "markdown": {
+                              "type": "string",
+                              "minLength": 1,
+                              "x-metis-maxUtf8Bytes": 65536
+                            },
+                            "status": {
+                              "anyOf": [
+                                {
+                                  "type": "string",
+                                  "const": "proposed"
+                                },
+                                {
+                                  "type": "string",
+                                  "const": "superseded"
+                                },
+                                {
+                                  "type": "string",
+                                  "const": "accepted"
+                                },
+                                {
+                                  "type": "string",
+                                  "const": "cancelled"
+                                }
+                              ]
+                            },
+                            "createdAt": {
+                              "type": "string",
+                              "format": "date-time",
+                              "maxLength": 40
+                            }
+                          },
+                          "additionalProperties": false
                         }
                       },
                       "additionalProperties": false

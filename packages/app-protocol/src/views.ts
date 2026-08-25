@@ -7,6 +7,7 @@ import {
 	MAX_HISTORY_ITEMS,
 	MAX_INTERACTION_CHOICES,
 	MAX_PERMISSION_OPERATION_ROWS,
+	MAX_PUBLIC_TEXT_UTF8_BYTES,
 	MAX_SCHEDULE_INSTRUCTION_UTF8_BYTES,
 	NameSchema,
 	OpaqueIdSchema,
@@ -445,6 +446,23 @@ export const CompactionBlockViewSchema = StrictObject({
 	type: Type.Literal("compaction"),
 });
 
+export const CollaborationModeSchema = Type.Union([Type.Literal("default"), Type.Literal("plan")]);
+export const PlanStatusSchema = Type.Union([
+	Type.Literal("proposed"),
+	Type.Literal("superseded"),
+	Type.Literal("accepted"),
+	Type.Literal("cancelled"),
+]);
+export const PlanViewSchema = StrictObject({
+	planId: OpaqueIdSchema,
+	revision: Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }),
+	title: NameSchema,
+	markdown: Utf8String(MAX_PUBLIC_TEXT_UTF8_BYTES, { minLength: 1 }),
+	status: PlanStatusSchema,
+	createdAt: TimestampSchema,
+});
+export const PlanBlockViewSchema = StrictObject({ type: Type.Literal("plan"), plan: PlanViewSchema });
+
 export const ItemContentBlockViewSchema = Type.Union([
 	TextBlockViewSchema,
 	ThinkingBlockViewSchema,
@@ -453,6 +471,7 @@ export const ItemContentBlockViewSchema = Type.Union([
 	ToolResultBlockViewSchema,
 	NoticeBlockViewSchema,
 	CompactionBlockViewSchema,
+	PlanBlockViewSchema,
 ]);
 
 export const ItemUsageViewSchema = StrictObject({
@@ -902,6 +921,7 @@ export const SessionStatusViewSchema = Type.Refine(
 
 export const SessionSnapshotSchema = StrictObject({
 	session: SessionSummarySchema,
+	collaborationMode: CollaborationModeSchema,
 	permissionMode: PermissionModeSchema,
 	model: Type.Optional(SubagentModelRefSchema),
 	availableModels: Type.Optional(Type.Array(ModelOptionViewSchema, { maxItems: 512 })),
@@ -934,6 +954,12 @@ export const PermissionModeChangedEventSchema = StrictObject({
 	type: Type.Literal("session/permissionModeChanged"),
 	sessionId: SessionIdSchema,
 	permissionMode: PermissionModeSchema,
+});
+
+export const CollaborationModeChangedEventSchema = StrictObject({
+	type: Type.Literal("session/collaborationModeChanged"),
+	sessionId: SessionIdSchema,
+	collaborationMode: CollaborationModeSchema,
 });
 
 export const ModelChangedEventSchema = StrictObject({
@@ -1267,6 +1293,7 @@ export const DomainEventSchema = Type.Union([
 	InteractionNotifyEventSchema,
 	ServerStateEventSchema,
 	PermissionModeChangedEventSchema,
+	CollaborationModeChangedEventSchema,
 	ThinkingSelectionChangedEventSchema,
 	ModelChangedEventSchema,
 	TasksChangedEventSchema,
@@ -1319,6 +1346,10 @@ export type ProfileActivityDayView = Static<typeof ProfileActivityDayViewSchema>
 export type ProfileSkillUsageView = Static<typeof ProfileSkillUsageViewSchema>;
 export type ProfileUsageSummaryView = Static<typeof ProfileUsageSummaryViewSchema>;
 export type DurableImageRefView = Static<typeof DurableImageRefViewSchema>;
+export type CollaborationModeView = Static<typeof CollaborationModeSchema>;
+export type PlanStatusView = Static<typeof PlanStatusSchema>;
+export type PlanView = Static<typeof PlanViewSchema>;
+export type PlanBlockView = Static<typeof PlanBlockViewSchema>;
 export type ItemContentBlockView = Static<typeof ItemContentBlockViewSchema>;
 export type ItemUsageView = Static<typeof ItemUsageViewSchema>;
 export type ItemView = Static<typeof ItemViewSchema>;
