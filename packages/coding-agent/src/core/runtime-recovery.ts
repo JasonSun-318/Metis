@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
+import type { PlanRef } from "./plan-state.ts";
 
 const SUBMIT_PROMPT_METHOD = "session/submitPrompt";
+const MAX_PLAN_ID_CODE_UNITS = 128;
 const MAX_RUNTIME_METHOD_CODE_UNITS = 256;
 const MAX_REQUEST_ID_CODE_UNITS = 256;
 export const MAX_DURABLE_PROMPT_TEXT_BYTES = 2 * 1024 * 1024;
@@ -22,10 +24,13 @@ export interface DurableImageRef {
 	readonly size: number;
 }
 
+export type PlanExecutionRef = PlanRef;
+
 export interface DurablePromptInput {
 	readonly text: string;
 	readonly images?: readonly DurableImageRef[];
 	readonly streamingBehavior?: "steer" | "followUp";
+	readonly planExecution?: PlanExecutionRef;
 }
 
 export interface DurablePromptSubmission {
@@ -320,9 +325,21 @@ function parseDurableImageRef(value: unknown, label: string): DurableImageRef {
 	return { ...reference, size: reference.size };
 }
 
+function parsePlanExecutionRef(value: unknown, label: string): PlanExecutionRef {
+	const fields = dataFields(value, label);
+	assertOnlyFields(fields, ["planId", "revision"], label);
+	const planId = boundedCodeUnits(requiredString(fields, "planId", label), MAX_PLAN_ID_CODE_UNITS, `${label}.planId`);
+	if (/[\u0000-\u001f\u007f-\u009f]/u.test(planId)) invalid(`${label}.planId contains control characters`);
+	const revision = fields.get("revision");
+	if (typeof revision !== "number" || !Number.isSafeInteger(revision) || revision < 1) {
+		invalid(`${label}.revision must be a positive safe integer`);
+	}
+	return { planId, revision };
+}
+
 function parseDurablePromptInput(value: unknown, label: string): DurablePromptInput {
 	const fields = dataFields(value, label);
-	assertOnlyFields(fields, ["text", "images", "streamingBehavior"], label);
+	assertOnlyFields(fields, ["text", "images", "streamingBehavior", "planExecution"], label);
 	const text = fields.get("text");
 	if (typeof text !== "string") invalid(`${label}.text must be a string`);
 	if (Buffer.byteLength(text, "utf8") > MAX_DURABLE_PROMPT_TEXT_BYTES) {
@@ -351,16 +368,25 @@ function parseDurablePromptInput(value: unknown, label: string): DurablePromptIn
 		streamingBehavior = value;
 	}
 
+	let planExecution: PlanExecutionRef | undefined;
+	if (fields.has("planExecution")) {
+		planExecution = parsePlanExecutionRef(fields.get("planExecution"), `${label}.planExecution`);
+	}
+	if (planExecution && (images !== undefined || streamingBehavior !== undefined)) {
+		invalid(`${label} cannot combine planExecution with images or streamingBehavior`);
+	}
+
 	return {
 		text,
 		...(images === undefined ? {} : { images }),
 		...(streamingBehavior === undefined ? {} : { streamingBehavior }),
+		...(planExecution === undefined ? {} : { planExecution }),
 	};
 }
 
 export function parseDurablePromptSubmission(value: unknown): DurablePromptSubmission {
 	const fields = dataFields(value, "durable prompt submission");
-	assertOnlyFields(fields, ["requestId", "text", "images", "streamingBehavior"], "durable prompt submission");
+	assertOnlyFields(fields, ["requestId", "text", "images", "streamingBehavior", "planExecution"], "durable prompt submission");
 	const inputFields = new Map(fields);
 	inputFields.delete("requestId");
 	return {

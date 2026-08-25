@@ -191,6 +191,7 @@ export {
 	type DurableImageRef,
 	type DurablePromptInput,
 	type DurablePromptSubmission,
+	type PlanExecutionRef,
 	deriveBatchedTurnId,
 	identifyRuntimeRequest,
 	identifySubmitPromptRequest,

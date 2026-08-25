@@ -300,6 +300,47 @@ describe("durable runtime request identity", () => {
 		);
 	});
 
+	it("round-trips an exact Plan execution reference", () => {
+		const parsed = parseDurablePromptSubmission({
+			requestId: "request-1",
+			text: "Execute the accepted plan.",
+			planExecution: { planId: "plan-a", revision: 2 },
+		});
+		expect(parsed.input.planExecution).toEqual({ planId: "plan-a", revision: 2 });
+	});
+
+	it("rejects planExecution combined with steer or image inputs", () => {
+		const hash = "a".repeat(64);
+		expect(() =>
+			parseDurablePromptSubmission({
+				requestId: "request-1",
+				text: "Execute",
+				planExecution: { planId: "plan-a", revision: 1 },
+				streamingBehavior: "steer",
+			}),
+		).toThrow(/cannot combine planExecution/iu);
+		expect(() =>
+			parseDurablePromptSubmission({
+				requestId: "request-1",
+				text: "Execute",
+				planExecution: { planId: "plan-a", revision: 1 },
+				images: [{ type: "image_ref", hash, mimeType: "image/png", size: 123 }],
+			}),
+		).toThrow(/cannot combine planExecution/iu);
+	});
+
+	it("changes request hash when plan revision changes under the same request ID text", () => {
+		const first = identifySubmitPromptRequest("request-1", {
+			text: "Execute",
+			planExecution: { planId: "plan-a", revision: 1 },
+		});
+		const revised = identifySubmitPromptRequest("request-1", {
+			text: "Execute",
+			planExecution: { planId: "plan-a", revision: 2 },
+		});
+		expect(revised.requestHash).not.toBe(first.requestHash);
+	});
+
 	it("canonicalizes JSON and derives stable namespaced IDs from only the request ID", () => {
 		const first = identifyRuntimeRequest(method, "request-1", { z: [3, 2, 1], a: { y: true, x: null } });
 		const reordered = identifyRuntimeRequest(method, "request-1", { a: { x: null, y: true }, z: [3, 2, 1] });

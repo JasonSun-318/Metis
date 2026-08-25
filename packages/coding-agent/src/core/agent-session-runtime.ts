@@ -16,6 +16,7 @@ import type { PermissionMode } from "./permission-mode.ts";
 import { QueuedTurnConflictError, type QueuedTurnDraft, QueuedTurnQueue } from "./queued-turn-queue.ts";
 import {
 	type DurableImageRef,
+	type PlanExecutionRef,
 	identifyRuntimeRequest,
 	identifySubmitPromptRequest,
 	parseDurablePromptSubmission,
@@ -53,6 +54,7 @@ export interface SubmitPromptInput {
 	text: string;
 	images?: readonly DurableImageRef[];
 	streamingBehavior?: "steer" | "followUp";
+	planExecution?: PlanExecutionRef;
 }
 
 export interface SubmitPromptResult {

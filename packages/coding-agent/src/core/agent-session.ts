@@ -2388,7 +2388,14 @@ export class AgentSession {
 	}
 
 	private _currentDurablePlanExecution(): StoredPlan | undefined {
-		return undefined;
+		const scope = durablePromptExecutionContext.getStore();
+		if (!scope?.active || !scope.input.planExecution) return undefined;
+		return this.sessionManager.getPlanState().plans.find(
+			(plan) =>
+				plan.planId === scope.input.planExecution!.planId &&
+				plan.revision === scope.input.planExecution!.revision &&
+				plan.status === "accepted",
+		);
 	}
 
 	private _planToolSource(name: string): "builtin" | "trusted" | "extension" | "mcp" | "sdk" | undefined {
@@ -3030,6 +3037,19 @@ export class AgentSession {
 		}
 		if (input.text.startsWith("/")) this._throwIfExtensionCommand(input.text);
 		if (input.images?.length) this.sessionManager.validateDurableImageRefs(input.images);
+		if (input.planExecution) {
+			if (this.sessionManager.getHeader()?.subagent || this.sessionManager.getHeader()?.scheduled) {
+				throw new Error("Plan execution is unavailable for this session");
+			}
+			const current = this.sessionManager.getPlanState().currentPlan;
+			if (
+				!current ||
+				current.planId !== input.planExecution.planId ||
+				current.revision !== input.planExecution.revision
+			) {
+				throw new Error("Plan execution must target the current proposed revision");
+			}
+		}
 	}
 
 	assertDurablePromptCapacity(input: DurablePromptInput): void {
@@ -3136,6 +3156,26 @@ export class AgentSession {
 
 	/** Execute accepted work; final durable markers settle before this promise. */
 	async runAcceptedDurablePrompt(turnId: string, input: DurablePromptInput): Promise<"completed" | "interrupted"> {
+		if (input.planExecution) {
+			const exact = this.sessionManager.getPlanState().plans.find(
+				(plan) => plan.planId === input.planExecution!.planId && plan.revision === input.planExecution!.revision,
+			);
+			if (!exact || (exact.status !== "proposed" && exact.status !== "accepted")) {
+				throw new Error("The admitted Plan execution revision is no longer executable");
+			}
+			const accepted =
+				exact.status === "accepted" ? exact : this.sessionManager.acceptPlan(input.planExecution);
+			if (exact.status !== "accepted") {
+				this._emit({ type: "plan_changed", entryIds: [accepted.entryId] });
+			}
+			const modeChanged = this.sessionManager.getCollaborationMode() !== "default";
+			if (modeChanged) this.sessionManager.setCollaborationMode("default");
+			await this._interactiveBashBoundary?.reset();
+			this._applyEffectiveTools();
+			if (modeChanged) {
+				this._emit({ type: "collaboration_mode_changed", collaborationMode: "default" });
+			}
+		}
 		const context: DurablePromptExecutionScope = { owner: this, turnId, input, active: true };
 		let runError: unknown;
 		try {
