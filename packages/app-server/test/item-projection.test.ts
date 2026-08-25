@@ -6,6 +6,7 @@ import {
 	projectDeliveredFileFromToolResult,
 	projectLiveMessage,
 	projectMessageEntry,
+	projectPlanEntry,
 	projectSessionEntry,
 } from "../src/item-projection.ts";
 
@@ -256,5 +257,75 @@ describe("delivered file projection", () => {
 				details: { ...deliveredDetails, fileId: "not-valid" },
 			}),
 		).toBeUndefined();
+	});
+});
+
+describe("plan projection", () => {
+	const proposalEntry = {
+		id: "proposal-entry-2",
+		timestamp: "2026-08-25T00:00:00.000Z",
+	};
+	const storedPlan = {
+		entryId: "proposal-entry-2",
+		parentId: "user-2",
+		planId: "plan-a",
+		revision: 2,
+		title: "Current plan",
+		markdown: "plan body",
+		status: "proposed" as const,
+		createdAt: "2026-08-25T00:00:00.000Z",
+	};
+
+	it("projects a plan proposal as one assistant Plan item", () => {
+		const item = projectPlanEntry({
+			entry: proposalEntry,
+			plan: storedPlan,
+			sessionId: "session-12345678",
+			fallbackTimestamp: CREATED_AT,
+		});
+		expect(item).toMatchObject({
+			itemId: proposalEntry.id,
+			role: "assistant",
+			state: "completed",
+			content: [{ type: "plan", plan: { revision: 2, status: "proposed" } }],
+		});
+	});
+
+	it("does not project raw submit_plan call/result plumbing", () => {
+		const submitOnlyAssistantInput = {
+			entry: {
+				type: "message",
+				id: "assistant-submit-only",
+				timestamp: CREATED_AT,
+				message: {
+					role: "assistant",
+					content: [{ type: "toolCall", id: "call-1", name: "submit_plan", arguments: { title: "T", markdown: "m" } }],
+				},
+			},
+			sessionId: "session-1",
+			turnStates: new Map(),
+			toolStates: new Map(),
+			fallbackTimestamp: CREATED_AT,
+		};
+		const submitToolResultInput = {
+			entry: {
+				type: "message",
+				id: "tool-submit",
+				timestamp: CREATED_AT,
+				message: {
+					role: "toolResult",
+					toolCallId: "call-1",
+					toolName: "submit_plan",
+					isError: false,
+					content: [{ type: "text", text: "submitted" }],
+				},
+			},
+			sessionId: "session-1",
+			turnStates: new Map(),
+			toolStates: new Map(),
+			fallbackTimestamp: CREATED_AT,
+		};
+		expect(projectMessageEntry(submitOnlyAssistantInput)).toBeUndefined();
+		expect(projectMessageEntry(submitToolResultInput)).toBeUndefined();
 	});
 });

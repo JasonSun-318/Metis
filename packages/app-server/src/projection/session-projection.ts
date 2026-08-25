@@ -22,6 +22,7 @@ import { AppServerError } from "../session-runtime-host.ts";
 export { MAX_PROJECTED_THINKING_BYTES, MAX_PROJECTED_VISIBLE_TEXT_BYTES };
 const MAX_SNAPSHOT_ITEMS = 200;
 const MAX_SNAPSHOT_TURNS = 200;
+const MAX_PROJECTED_ITEM_PAGE_UTF8_BYTES = 6 * 1024 * 1024;
 
 export interface SessionProjectionSeed {
 	readonly session: SessionSummary;
@@ -91,6 +92,7 @@ export class SessionProjection {
 			case "interaction/notify":
 				return clone(event);
 			case "session/permissionModeChanged":
+			case "session/collaborationModeChanged":
 			case "session/thinkingSelectionChanged":
 			case "session/modelChanged":
 			case "subagent/updated":
@@ -145,6 +147,22 @@ export class SessionProjection {
 		return clone(this.session);
 	}
 
+	private itemPage(end: number, limit: number): readonly string[] {
+		const itemIds: string[] = [];
+		let bytes = 2;
+		for (let index = end - 1; index >= 0 && itemIds.length < limit; index -= 1) {
+			const itemId = this.itemOrder[index]!;
+			const itemBytes = Buffer.byteLength(JSON.stringify(this.itemsById.get(itemId)!), "utf8") + 1;
+			if (itemIds.length > 0 && bytes + itemBytes > MAX_PROJECTED_ITEM_PAGE_UTF8_BYTES) break;
+			itemIds.unshift(itemId);
+			bytes += itemBytes;
+		}
+		if (itemIds.length === 0 && end > 0) {
+			itemIds.push(this.itemOrder[end - 1]!);
+		}
+		return itemIds;
+	}
+
 	readItems(input: ClientParams<"session/readItems">): ClientResult<"session/readItems"> {
 		this.assertSession(input.sessionId);
 		let end = this.itemOrder.length;
@@ -153,10 +171,11 @@ export class SessionProjection {
 			if (index === undefined) throw new AppServerError("NOT_FOUND", { sessionId: this.session.sessionId });
 			end = index;
 		}
-		const start = Math.max(0, end - input.limit);
+		const itemIds = this.itemPage(end, input.limit);
+		const startIndex = itemIds.length > 0 ? this.itemIndexById.get(itemIds[0]!)! : 0;
 		return {
-			items: this.itemOrder.slice(start, end).map((itemId) => clone(this.itemsById.get(itemId)!)),
-			nextBeforeItemId: start > 0 ? this.itemOrder[start]! : null,
+			items: itemIds.map((itemId) => clone(this.itemsById.get(itemId)!)),
+			nextBeforeItemId: startIndex > 0 ? this.itemOrder[startIndex - 1]! : null,
 		};
 	}
 
@@ -165,6 +184,7 @@ export class SessionProjection {
 		cursor: number,
 		runtime: Pick<
 			SessionSnapshot,
+			| "collaborationMode"
 			| "thinkingSelection"
 			| "permissionMode"
 			| "actualThinkingLevel"
@@ -173,6 +193,7 @@ export class SessionProjection {
 			| "model"
 			| "availableModels"
 		> = {
+			collaborationMode: "default",
 			permissionMode: "auto",
 			thinkingSelection: "off",
 			actualThinkingLevel: "off",
@@ -180,14 +201,14 @@ export class SessionProjection {
 			subagents: [],
 		},
 	): SessionSnapshot {
-		const recentItemIds = this.itemOrder.slice(-MAX_SNAPSHOT_ITEMS);
+		const recentItemIds = this.itemPage(this.itemOrder.length, MAX_SNAPSHOT_ITEMS);
 		const turns = this.turnOrder.slice(-MAX_SNAPSHOT_TURNS).map((turnId) => clone(this.turnsById.get(turnId)!));
+		const startIndex = recentItemIds.length > 0 ? this.itemIndexById.get(recentItemIds[0]!)! : 0;
 		return {
 			session: this.getSummary(),
 			turns,
 			recentItems: recentItemIds.map((itemId) => clone(this.itemsById.get(itemId)!)),
-			nextBeforeItemId:
-				this.itemOrder.length > recentItemIds.length && recentItemIds.length > 0 ? recentItemIds[0]! : null,
+			nextBeforeItemId: startIndex > 0 ? this.itemOrder[startIndex - 1]! : null,
 			activeTurnId: [...turns].reverse().find((turn) => turn.state === "running")?.turnId ?? null,
 			pendingInteractions: clone(this.pendingInteractions),
 			queuedTurns: clone(this.queuedTurns),

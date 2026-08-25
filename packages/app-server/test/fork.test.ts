@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { RPC_ERROR_CODES } from "@metis/app-protocol";
+import { PROTOCOL_VERSION, RPC_ERROR_CODES } from "@metis/app-protocol";
 import { SessionManager } from "@metis/coding-agent";
 import { afterEach, describe, expect, it } from "vitest";
 import { AppServer } from "../src/app-server.ts";
@@ -166,9 +166,9 @@ describe("session/fork RPC end-to-end", () => {
 				jsonrpc: "2.0",
 				id: "init-1",
 				method: "initialize",
-				params: { protocolVersion: 20, client: { name: "test", version: "1" }, capabilities: [] },
+				params: { protocolVersion: PROTOCOL_VERSION, client: { name: "test", version: "1" }, capabilities: [] },
 			});
-			expect(init).toMatchObject({ jsonrpc: "2.0", result: { protocolVersion: 20 } });
+			expect(init).toMatchObject({ jsonrpc: "2.0", result: { protocolVersion: PROTOCOL_VERSION } });
 
 			const open = await connection.handle({
 				jsonrpc: "2.0",
@@ -287,7 +287,7 @@ describe("session/fork RPC end-to-end", () => {
 				jsonrpc: "2.0",
 				id: "init-1",
 				method: "initialize",
-				params: { protocolVersion: 20, client: { name: "test", version: "1" }, capabilities: [] },
+				params: { protocolVersion: PROTOCOL_VERSION, client: { name: "test", version: "1" }, capabilities: [] },
 			});
 			const forked = await connection.handle({
 				jsonrpc: "2.0",

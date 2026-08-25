@@ -10,6 +10,7 @@ import type {
 	SessionSnapshot,
 	SessionSummary,
 } from "@metis/app-protocol";
+import { PROTOCOL_VERSION } from "@metis/app-protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AppServer } from "../src/app-server.ts";
 import type { ConnectionOutboundEnvelope } from "../src/connection.ts";
@@ -232,6 +233,32 @@ class PausableRuntime implements OpenedSessionRuntime {
 		return { permissionMode: input.permissionMode };
 	}
 
+	async setCollaborationMode(
+		input: ClientParams<"session/setCollaborationMode">,
+	): Promise<ClientResult<"session/setCollaborationMode">> {
+		return { collaborationMode: input.collaborationMode };
+	}
+
+	async startPlanExecution(
+		input: ClientParams<"plan/startExecution">,
+	): Promise<ClientResult<"plan/startExecution">> {
+		return { operationId: input.requestId, status: "accepted" };
+	}
+
+	async cancelPlan(input: ClientParams<"plan/cancel">): Promise<ClientResult<"plan/cancel">> {
+		return {
+			plan: {
+				planId: input.planId,
+				revision: input.revision,
+				title: "Plan",
+				markdown: "# Plan",
+				status: "cancelled",
+				createdAt: this.ref.summary.createdAt,
+			},
+			collaborationMode: "default",
+		};
+	}
+
 	async setModel(input: ClientParams<"session/setModel">): Promise<ClientResult<"session/setModel">> {
 		return {
 			model: { provider: input.provider, modelId: input.modelId },
@@ -318,7 +345,7 @@ function initialize(id: string) {
 		jsonrpc: "2.0" as const,
 		id,
 		method: "initialize" as const,
-		params: { protocolVersion: 20, client: { name: "test", version: "1" }, capabilities: [] },
+		params: { protocolVersion: PROTOCOL_VERSION, client: { name: "test", version: "1" }, capabilities: [] },
 	};
 }
 
@@ -480,7 +507,7 @@ describe("gap-free reconnect", () => {
 		const initial = projection.snapshot("00000000-0000-4000-8000-000000000001", 4);
 		expect(initial.recentItems).toHaveLength(200);
 		expect(initial.recentItems[0]?.itemId).toBe("item-50");
-		expect(initial.nextBeforeItemId).toBe("item-50");
+		expect(initial.nextBeforeItemId).toBe("item-49");
 
 		const older = projection.readItems({ sessionId: SESSION_ID, beforeItemId: "item-50", limit: 200 });
 		expect(older.items).toHaveLength(50);

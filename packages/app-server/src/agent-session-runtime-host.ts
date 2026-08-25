@@ -48,6 +48,7 @@ import {
 	QueuedTurnLimitError,
 	QueuedTurnNotFoundError,
 	RequestIdReusedError,
+	reducePlanState,
 	readThreadGoal,
 	reduceRuntimeJournal,
 	removeSessionAttachment,
@@ -76,6 +77,8 @@ import {
 	projectLatestTasks,
 	projectLiveMessage as projectLiveItemMessage,
 	projectMessageEntry,
+	projectPlanEntry,
+	projectPlanView,
 	projectSessionEntry,
 	projectTasksFromToolResult,
 	timestamp,
@@ -543,6 +546,39 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 			});
 			return;
 		}
+		if (event.type === "plan_changed") {
+			const planByEntryId = new Map(
+				this.session.sessionManager.getPlanState().plans.map((plan) => [plan.entryId, plan]),
+			);
+			for (const entryId of event.entryIds) {
+				const plan = planByEntryId.get(entryId);
+				if (!plan) continue;
+				const entry = this.journal().find(
+					(candidate) =>
+						typeof candidate === "object" &&
+						candidate !== null &&
+						(candidate as { type?: unknown }).type === "session_plan_proposal" &&
+						(candidate as { id?: unknown }).id === entryId,
+				) as Record<string, unknown> | undefined;
+				if (!entry) continue;
+				const item = projectPlanEntry({
+					entry: { id: entryId, timestamp: String(entry.timestamp ?? "") },
+					plan,
+					sessionId: this.sessionId,
+					fallbackTimestamp: this.ref.summary.createdAt,
+				});
+				this.publish({ type: "item/completed", item });
+			}
+			return;
+		}
+		if (event.type === "collaboration_mode_changed") {
+			this.publish({
+				type: "session/collaborationModeChanged",
+				sessionId: this.sessionId,
+				collaborationMode: event.collaborationMode,
+			});
+			return;
+		}
 		if (event.type === "entry_appended") {
 			const item = this.projectJournalItem(event.entry as unknown as Record<string, unknown>);
 			if (item) this.publish({ type: "item/completed", item });
@@ -665,6 +701,16 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 	}
 
 	private projectJournalItem(entry: Record<string, unknown>): ItemView | undefined {
+		if (entry.type === "session_plan_proposal") {
+			const plan = this.session.sessionManager.getPlanState().plans.find((candidate) => candidate.entryId === entry.id);
+			if (!plan) return undefined;
+			return projectPlanEntry({
+				entry: { id: String(entry.id), timestamp: String(entry.timestamp ?? "") },
+				plan,
+				sessionId: this.sessionId,
+				fallbackTimestamp: this.ref.summary.createdAt,
+			});
+		}
 		const reduced = this.reduced();
 		return projectSessionEntry({
 			entry,
@@ -679,18 +725,32 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 		journal: readonly unknown[] = this.journal(),
 		reduced: ReturnType<typeof reduceRuntimeJournal> = reduceRuntimeJournal(journal),
 	): ItemView[] {
+		const activeBranchIds = new Set(this.session.sessionManager.getBranch().map(({ id }) => id));
+		const planState = reducePlanState(journal, activeBranchIds);
+		const planByEntryId = new Map(planState.plans.map((plan) => [plan.entryId, plan]));
 		const turnStates = new Map(reduced.turns.map((turn) => [opaqueId(turn.turnId, "turn"), turn.state]));
 		const toolStates = new Map(reduced.tools.map((tool) => [opaqueId(tool.toolCallId, "tool"), tool.state]));
 		return journal
-			.map((entry) =>
-				projectSessionEntry({
-					entry: entry as unknown as Record<string, unknown>,
+			.map((entry) => {
+				const record = entry as Record<string, unknown>;
+				if (record.type === "session_plan_proposal") {
+					const plan = planByEntryId.get(String(record.id));
+					if (!plan) return undefined;
+					return projectPlanEntry({
+						entry: { id: String(record.id), timestamp: String(record.timestamp ?? "") },
+						plan,
+						sessionId: this.sessionId,
+						fallbackTimestamp: this.ref.summary.createdAt,
+					});
+				}
+				return projectSessionEntry({
+					entry: record,
 					sessionId: this.sessionId,
 					turnStates,
 					toolStates,
 					fallbackTimestamp: this.ref.summary.createdAt,
-				}),
-			)
+				});
+			})
 			.filter((item): item is ItemView => item !== undefined);
 	}
 
@@ -1306,6 +1366,76 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 		return { permissionMode };
 	}
 
+	async setCollaborationMode(
+		input: ClientParams<"session/setCollaborationMode">,
+	): Promise<ClientResult<"session/setCollaborationMode">> {
+		if (this.ref.scheduled || this.session.sessionManager.getHeader()?.subagent) {
+			throw new AppServerError("READ_ONLY_SESSION", {
+				sessionId: input.sessionId,
+				requestId: input.requestId,
+			});
+		}
+		if (this.isActive() || this.hasPendingInteractions()) {
+			throw new AppServerError("BUSY", { sessionId: input.sessionId, requestId: input.requestId });
+		}
+		if (input.collaborationMode === "default" && this.session.sessionManager.getPlanState().currentPlan) {
+			throw new AppServerError("CONFLICT", { sessionId: input.sessionId, requestId: input.requestId });
+		}
+		try {
+			await this.session.setCollaborationMode(input.collaborationMode);
+		} catch {
+			throw new AppServerError("OPERATION_FAILED", {
+				sessionId: input.sessionId,
+				requestId: input.requestId,
+			});
+		}
+		return { collaborationMode: this.session.sessionManager.getCollaborationMode() };
+	}
+
+	async startPlanExecution(
+		input: ClientParams<"plan/startExecution">,
+	): Promise<ClientResult<"plan/startExecution">> {
+		if (this.isActive() || this.hasPendingInteractions()) {
+			throw new AppServerError("BUSY", { sessionId: input.sessionId, requestId: input.requestId });
+		}
+		const current = this.session.sessionManager.getPlanState().currentPlan;
+		if (
+			!current ||
+			opaqueId(current.planId, "plan") !== input.planId ||
+			current.revision !== input.revision
+		) {
+			throw new AppServerError("CONFLICT", { sessionId: input.sessionId, requestId: input.requestId });
+		}
+		return await this.runtime.submitPrompt({
+			requestId: input.requestId,
+			text: "Execute the accepted plan.",
+			planExecution: { planId: current.planId, revision: current.revision },
+		});
+	}
+
+	async cancelPlan(input: ClientParams<"plan/cancel">): Promise<ClientResult<"plan/cancel">> {
+		if (this.isActive() || this.hasPendingInteractions()) {
+			throw new AppServerError("BUSY", { sessionId: input.sessionId, requestId: input.requestId });
+		}
+		const current = this.session.sessionManager.getPlanState().currentPlan;
+		if (
+			!current ||
+			opaqueId(current.planId, "plan") !== input.planId ||
+			current.revision !== input.revision
+		) {
+			throw new AppServerError("CONFLICT", { sessionId: input.sessionId, requestId: input.requestId });
+		}
+		try {
+			const plan = await this.session.cancelPlan({ planId: current.planId, revision: current.revision });
+			return { plan: projectPlanView(plan), collaborationMode: "default" };
+		} catch {
+			throw new AppServerError("OPERATION_FAILED", {
+				sessionId: input.sessionId,
+				requestId: input.requestId,
+			});
+		}
+	}
+
 	async refreshWebSearchSettings(): Promise<void> {
 		await this.session.refreshWebSearchSettings();
 	}
@@ -1338,6 +1468,7 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 	async snapshot(serverEpoch: string, currentCursor: () => number): Promise<SessionSnapshot> {
 		this.refreshLifecycleProjection();
 		return this.projection.snapshot(serverEpoch, currentCursor(), {
+			collaborationMode: this.session.sessionManager.getCollaborationMode(),
 			permissionMode: this.session.sessionManager.getPermissionSettings().mode,
 			...(this.session.model
 				? { model: { provider: this.session.model.provider, modelId: this.session.model.id } }
@@ -1736,6 +1867,18 @@ class ReadonlyScheduledSessionRuntime implements OpenedSessionRuntime {
 	}
 
 	async setPermissionMode(): Promise<ClientResult<"session/setPermissionMode">> {
+		throw new AppServerError("READ_ONLY_SESSION", { sessionId: this.sessionId });
+	}
+
+	async setCollaborationMode(): Promise<ClientResult<"session/setCollaborationMode">> {
+		throw new AppServerError("READ_ONLY_SESSION", { sessionId: this.sessionId });
+	}
+
+	async startPlanExecution(): Promise<ClientResult<"plan/startExecution">> {
+		throw new AppServerError("READ_ONLY_SESSION", { sessionId: this.sessionId });
+	}
+
+	async cancelPlan(): Promise<ClientResult<"plan/cancel">> {
 		throw new AppServerError("READ_ONLY_SESSION", { sessionId: this.sessionId });
 	}
 

@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { ClientRpcRequest, HostRpcRequest, SessionSnapshot } from "@metis/app-protocol";
+import { PROTOCOL_VERSION, type ClientRpcRequest, type HostRpcRequest, type SessionSnapshot } from "@metis/app-protocol";
 import { identifySubmitPromptRequest } from "@metis/coding-agent";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -118,7 +118,7 @@ function request(id: string, method: ClientRpcRequest["method"], params: unknown
 async function initialize(rpc: RpcProcess): Promise<void> {
 	await rpc.request(
 		request("initialize", "initialize", {
-			protocolVersion: 20,
+			protocolVersion: PROTOCOL_VERSION,
 			client: { name: "process-recovery-test", version: "1" },
 			capabilities: [],
 		}),

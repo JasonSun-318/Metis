@@ -61,6 +61,11 @@ export interface OpenedSessionRuntime {
 	setPermissionMode(
 		input: ClientParams<"session/setPermissionMode">,
 	): Promise<ClientResult<"session/setPermissionMode">>;
+	setCollaborationMode(
+		input: ClientParams<"session/setCollaborationMode">,
+	): Promise<ClientResult<"session/setCollaborationMode">>;
+	startPlanExecution(input: ClientParams<"plan/startExecution">): Promise<ClientResult<"plan/startExecution">>;
+	cancelPlan(input: ClientParams<"plan/cancel">): Promise<ClientResult<"plan/cancel">>;
 	setModel(input: ClientParams<"session/setModel">): Promise<ClientResult<"session/setModel">>;
 	refreshWebSearchSettings?(): Promise<void>;
 	prepareModelServiceSettingsRefresh?(): Promise<void>;

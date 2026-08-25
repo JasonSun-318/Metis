@@ -27,7 +27,7 @@ import type {
 	SessionSnapshot,
 	SessionSummary,
 } from "@metis/app-protocol";
-import { RPC_ERROR_CODES } from "@metis/app-protocol";
+import { PROTOCOL_VERSION, RPC_ERROR_CODES } from "@metis/app-protocol";
 import {
 	getDefaultSessionDir,
 	getLatestMemoryError,
@@ -269,6 +269,32 @@ class FakeRuntime implements OpenedSessionRuntime {
 		return { permissionMode: input.permissionMode };
 	}
 
+	async setCollaborationMode(
+		input: ClientParams<"session/setCollaborationMode">,
+	): Promise<ClientResult<"session/setCollaborationMode">> {
+		return { collaborationMode: input.collaborationMode };
+	}
+
+	async startPlanExecution(
+		input: ClientParams<"plan/startExecution">,
+	): Promise<ClientResult<"plan/startExecution">> {
+		return { operationId: input.requestId, status: "accepted" };
+	}
+
+	async cancelPlan(input: ClientParams<"plan/cancel">): Promise<ClientResult<"plan/cancel">> {
+		return {
+			plan: {
+				planId: input.planId,
+				revision: input.revision,
+				title: "Plan",
+				markdown: "# Plan",
+				status: "cancelled",
+				createdAt: this.ref.summary.createdAt,
+			},
+			collaborationMode: "default",
+		};
+	}
+
 	async setModel(input: ClientParams<"session/setModel">): Promise<ClientResult<"session/setModel">> {
 		return {
 			model: { provider: input.provider, modelId: input.modelId },
@@ -281,6 +307,7 @@ class FakeRuntime implements OpenedSessionRuntime {
 	async snapshot(serverEpoch: string, currentCursor: () => number): Promise<SessionSnapshot> {
 		return {
 			session: this.getSummary(),
+			collaborationMode: "default",
 			permissionMode: "ask",
 			turns: [],
 			recentItems: [],
@@ -401,7 +428,7 @@ function initialize(id = "initialize") {
 		jsonrpc: "2.0" as const,
 		id,
 		method: "initialize" as const,
-		params: { protocolVersion: 20, client: { name: "test", version: "1" }, capabilities: [] },
+		params: { protocolVersion: PROTOCOL_VERSION, client: { name: "test", version: "1" }, capabilities: [] },
 	};
 }
 
@@ -747,7 +774,7 @@ describe("AppServer", () => {
 		);
 		const initialized = await connection.handle(initialize());
 		expect(initialized).toMatchObject({
-			result: { protocolVersion: 20, server: { name: "metis-app-server" }, serverEpoch: server.serverEpoch },
+			result: { protocolVersion: PROTOCOL_VERSION, server: { name: "metis-app-server" }, serverEpoch: server.serverEpoch },
 		});
 		expectError(await connection.handle(initialize("again")), RPC_ERROR_CODES.INVALID_REQUEST);
 	});

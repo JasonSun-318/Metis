@@ -4,16 +4,12 @@ import type {
 	ItemContentBlockView,
 	ItemUsageView,
 	ItemView,
+	PlanView,
 	SessionDeliveredFileView,
 	SessionGoalView,
 	SessionTaskView,
 } from "@metis/app-protocol";
-import {
-	formatSessionAttachmentDisplayText,
-	MAX_SESSION_DELIVERED_FILES,
-	parseDeliverFileDetails,
-	type ThreadGoal,
-} from "@metis/coding-agent";
+import { formatSessionAttachmentDisplayText, MAX_SESSION_DELIVERED_FILES, parseDeliverFileDetails, type StoredPlan, type ThreadGoal } from "@metis/coding-agent";
 
 export const MAX_PROJECTED_THINKING_BYTES = 8 * 1024;
 export const MAX_PROJECTED_VISIBLE_TEXT_BYTES = 20 * 1024;
@@ -160,6 +156,7 @@ function assistantBlocks(
 			continue;
 		}
 		if (block.type !== "toolCall") continue;
+		if (block.name === "submit_plan") continue;
 		const toolCallId = opaqueId(block.id, "tool");
 		const toolState = toolStates.get(toolCallId) ?? "completed";
 		let inputPreview: string | undefined;
@@ -305,6 +302,40 @@ export function projectAllDeliveredFiles(entries: readonly unknown[]): SessionDe
 	return delivered.slice(-MAX_SESSION_DELIVERED_FILES);
 }
 
+export function projectPlanView(plan: StoredPlan): PlanView {
+	return {
+		planId: opaqueId(plan.planId, "plan"),
+		revision: plan.revision,
+		title: plan.title,
+		markdown: plan.markdown,
+		status: plan.status,
+		createdAt: plan.createdAt,
+	};
+}
+
+export interface PlanProposalProjectionEntry {
+	readonly id: string;
+	readonly timestamp: string;
+}
+
+export function projectPlanEntry(input: {
+	readonly entry: PlanProposalProjectionEntry;
+	readonly plan: StoredPlan;
+	readonly sessionId: string;
+	readonly fallbackTimestamp: string;
+}): ItemView {
+	const createdAt = timestamp(input.entry.timestamp, input.fallbackTimestamp);
+	return {
+		itemId: opaqueId(input.entry.id, "item"),
+		sessionId: input.sessionId,
+		role: "assistant",
+		state: "completed",
+		content: [{ type: "plan", plan: projectPlanView(input.plan) }],
+		createdAt,
+		completedAt: createdAt,
+	};
+}
+
 export function projectMessageEntry(input: MessageProjectionInput): ItemView | undefined {
 	const { entry, sessionId, turnStates, toolStates, fallbackTimestamp } = input;
 	if (entry.type !== "message" || typeof entry.message !== "object" || entry.message === null) return undefined;
@@ -329,6 +360,8 @@ export function projectMessageEntry(input: MessageProjectionInput): ItemView | u
 		};
 	}
 
+	if (message.role === "toolResult" && message.toolName === "submit_plan") return undefined;
+
 	if (message.role === "assistant") {
 		const usage = projectAssistantUsage(message);
 		const content = assistantBlocks(
@@ -340,6 +373,7 @@ export function projectMessageEntry(input: MessageProjectionInput): ItemView | u
 			},
 			toolStates,
 		);
+		if (content.length === 0 && state !== "streaming") return undefined;
 		return {
 			itemId,
 			sessionId,

@@ -183,6 +183,32 @@ class FakeRuntime implements OpenedSessionRuntime {
 		return { permissionMode: input.permissionMode };
 	}
 
+	async setCollaborationMode(
+		input: ClientParams<"session/setCollaborationMode">,
+	): Promise<ClientResult<"session/setCollaborationMode">> {
+		return { collaborationMode: input.collaborationMode };
+	}
+
+	async startPlanExecution(
+		input: ClientParams<"plan/startExecution">,
+	): Promise<ClientResult<"plan/startExecution">> {
+		return { operationId: input.requestId, status: "accepted" };
+	}
+
+	async cancelPlan(input: ClientParams<"plan/cancel">): Promise<ClientResult<"plan/cancel">> {
+		return {
+			plan: {
+				planId: input.planId,
+				revision: input.revision,
+				title: "Plan",
+				markdown: "# Plan",
+				status: "cancelled",
+				createdAt: this.ref.summary.createdAt,
+			},
+			collaborationMode: "default",
+		};
+	}
+
 	async setModel(input: ClientParams<"session/setModel">): Promise<ClientResult<"session/setModel">> {
 		return {
 			model: { provider: input.provider, modelId: input.modelId },
@@ -203,6 +229,7 @@ class FakeRuntime implements OpenedSessionRuntime {
 	async snapshot(serverEpoch: string, currentCursor: () => number): Promise<SessionSnapshot> {
 		return {
 			session: this.getSummary(),
+			collaborationMode: "default",
 			turns: [],
 			recentItems: [],
 			nextBeforeItemId: null,

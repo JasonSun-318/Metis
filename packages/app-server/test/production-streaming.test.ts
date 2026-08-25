@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { createServer, type Server, type ServerResponse } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type ItemView, RPC_ERROR_CODES } from "@metis/app-protocol";
+import { type ItemView, PROTOCOL_VERSION, RPC_ERROR_CODES } from "@metis/app-protocol";
 import { afterEach, describe, expect, it } from "vitest";
 import { AppServer } from "../src/app-server.ts";
 import type { ConnectionOutboundEnvelope } from "../src/connection.ts";
@@ -113,7 +113,7 @@ describe("production runtime streaming", () => {
 				jsonrpc: "2.0",
 				id: "initialize",
 				method: "initialize",
-				params: { protocolVersion: 20, client: { name: "test", version: "1" }, capabilities: [] },
+				params: { protocolVersion: PROTOCOL_VERSION, client: { name: "test", version: "1" }, capabilities: [] },
 			});
 			await connection.handle({
 				jsonrpc: "2.0",
@@ -635,7 +635,7 @@ describe("production runtime streaming", () => {
 				jsonrpc: "2.0",
 				id: "initialize",
 				method: "initialize",
-				params: { protocolVersion: 20, client: { name: "test", version: "1" }, capabilities: [] },
+				params: { protocolVersion: PROTOCOL_VERSION, client: { name: "test", version: "1" }, capabilities: [] },
 			});
 			await connection.handle({
 				jsonrpc: "2.0",

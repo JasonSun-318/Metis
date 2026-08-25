@@ -660,6 +660,21 @@ export class Dispatcher {
 					const ref = this.runtimeRef(request.params.sessionId);
 					return await this.registry.run(ref, (runtime) => runtime.setPermissionMode(request.params));
 				});
+			case "session/setCollaborationMode":
+				return await this.replayMutation(request, async () => {
+					const ref = this.runtimeRef(request.params.sessionId);
+					return await this.registry.run(ref, (runtime) => runtime.setCollaborationMode(request.params));
+				});
+			case "plan/startExecution":
+				return await this.replayMutation(request, async () => {
+					const ref = this.runtimeRef(request.params.sessionId);
+					return await this.registry.run(ref, (runtime) => runtime.startPlanExecution(request.params));
+				});
+			case "plan/cancel":
+				return await this.replayMutation(request, async () => {
+					const ref = this.runtimeRef(request.params.sessionId);
+					return await this.registry.run(ref, (runtime) => runtime.cancelPlan(request.params));
+				});
 			case "session/setModel":
 				return await this.replayMutation(request, async () => {
 					const ref = this.runtimeRef(request.params.sessionId);
