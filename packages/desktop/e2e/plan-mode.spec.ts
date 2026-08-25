@@ -41,6 +41,14 @@ function messageText(content: unknown): string {
 		.join("");
 }
 
+async function enterPlanMode(page: Page): Promise<void> {
+	const planToggle = page.getByRole("button", { name: "Plan mode", exact: true });
+	await planToggle.click();
+	await expect(planToggle).toHaveAttribute("aria-pressed", "true");
+	await expect(planToggle).toBeEnabled();
+	await expect(page.locator("#composer-input")).toHaveAttribute("contenteditable", "true");
+}
+
 function lastUserText(payload: ProviderPayload): string {
 	const messages = payload.messages ?? [];
 	for (let index = messages.length - 1; index >= 0; index -= 1) {
@@ -275,11 +283,11 @@ test("packaged plan mode explores, revises, recovers, executes, and cancels", as
 
 		phase = "entering plan mode";
 		const planToggle = page.getByRole("button", { name: "Plan mode", exact: true });
-		await planToggle.click();
-		await expect(planToggle).toHaveAttribute("aria-pressed", "true");
+		await enterPlanMode(page);
 
 		phase = "creating first plan";
 		const input = page.locator("#composer-input");
+		await expect(input).toHaveAttribute("contenteditable", "true");
 		await input.fill("Create a safe plan");
 		await page.getByRole("button", { name: "Send message", exact: true }).click();
 		await expect(page.locator(".plan-card")).toHaveCount(1, { timeout: 60_000 });
@@ -335,15 +343,19 @@ test("packaged plan mode explores, revises, recovers, executes, and cancels", as
 		await expect.poll(() => {
 			executionPayload = providerPayloads
 				.slice(requestsBeforeStart)
-				.find((payload) => /friendlier greeting/i.test(transcript(payload)));
+				.find((payload) => {
+					const tools = toolNames(payload);
+					return tools.includes("write") && tools.includes("set_tasks") && !tools.includes("submit_plan");
+				});
 			return executionPayload !== undefined;
 		}, { timeout: 60_000 }).toBe(true);
+		expect(transcript(executionPayload!)).toMatch(/friendlier greeting/i);
 		expect(transcript(executionPayload!)).not.toContain("call-submit-plan-1");
 		expect(transcript(executionPayload!)).not.toContain("Add a greeting without changing unrelated files");
 
 		phase = "creating and cancelling second plan";
-		await planToggle.click();
-		await expect(planToggle).toHaveAttribute("aria-pressed", "true");
+		await expect(page.getByText("Session ready")).toBeVisible({ timeout: 60_000 });
+		await enterPlanMode(page);
 		const requestsBeforeDraft = providerPayloads.length;
 		await input.fill("Draft another safe plan");
 		await page.getByRole("button", { name: "Send message", exact: true }).click();

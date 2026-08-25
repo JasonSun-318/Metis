@@ -1274,7 +1274,7 @@ export function App({ api, store }: AppProps) {
 		.find((notification) => notification.sessionId === undefined || notification.sessionId === visibleActiveSession?.sessionId);
 
 	const submit = async (input: ComposerSubmission) => {
-		if (!visibleActiveSession) return;
+		if (!visibleActiveSession || pendingCollaborationMode !== null) return;
 		setError(null);
 		try {
 			const key = JSON.stringify({ sessionId: visibleActiveSession.sessionId, input: composerRequestKey(input) });
@@ -1472,15 +1472,12 @@ export function App({ api, store }: AppProps) {
 		running;
 	const collaborationModeValue = pendingCollaborationMode ?? state.collaborationMode;
 	const collaborationToggleDisabled =
-		!serverReady ||
-		state.syncStatus !== "ready" ||
-		compactingSession !== null ||
-		inlineInteraction !== undefined ||
+		planActionsBusy ||
 		pendingCollaborationMode !== null ||
 		currentProposedPlan !== undefined;
 
 	const changeCollaborationMode = useCallback(async (next: CollaborationModeView) => {
-		if (!writableSessionId || pendingCollaborationMode !== null) return;
+		if (!writableSessionId || pendingCollaborationMode !== null || planActionsBusy) return;
 		if (next === "default" && currentProposedPlan) return;
 		setPendingCollaborationMode(next);
 		try {
@@ -1494,7 +1491,7 @@ export function App({ api, store }: AppProps) {
 			reportError(cause);
 			throw cause;
 		}
-	}, [api, currentProposedPlan, pendingCollaborationMode, reportError, writableSessionId]);
+	}, [api, currentProposedPlan, pendingCollaborationMode, planActionsBusy, reportError, writableSessionId]);
 
 	const revisePlan = useCallback((plan: PlanView) => {
 		setPlanRevisionTarget(plan);
@@ -2029,7 +2026,7 @@ export function App({ api, store }: AppProps) {
 									onOpenContextUsage={writableSessionId ? toggleSessionStatus : undefined}
 								commandPanel={sessionStatusPanel?.sessionId === visibleActiveSession.sessionId ? <SessionStatusPanel closing={sessionStatusPanel.closing} error={sessionStatusPanel.error} loading={sessionStatusPanel.loading} onClose={closeSessionStatus} status={sessionStatusPanel.status} /> : undefined}
 								commandRequest={{ id: composerControl.id, open: composerControl.target === "mcp" }}
-								disabled={!serverReady || state.syncStatus !== "ready" || compactingSession !== null}
+								disabled={!serverReady || state.syncStatus !== "ready" || compactingSession !== null || pendingCollaborationMode !== null}
 								disabledSlashCommands={disabledSlashCommands}
 								disabledSlashReasons={disabledSlashReasons}
 								interactionControl={inlineInteraction ? <InteractionHost interaction={inlineInteraction} key={inlineInteraction.interactionId} onRespond={respond} /> : undefined}

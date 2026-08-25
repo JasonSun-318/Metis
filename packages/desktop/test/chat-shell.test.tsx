@@ -514,6 +514,9 @@ function createHarness(options: {
 		interruptSubagent: vi.fn().mockResolvedValue({}),
 		setThinkingSelection: vi.fn().mockResolvedValue({}),
 		setPermissionMode: vi.fn(async ({ permissionMode }) => ({ permissionMode })),
+		setCollaborationMode: vi.fn(async ({ collaborationMode }) => ({ collaborationMode })),
+		startPlanExecution: vi.fn(async () => ({})),
+		cancelPlan: vi.fn(async () => ({ collaborationMode: "default" as const })),
 		setModel: vi.fn().mockResolvedValue({}),
 		respondToInteraction: vi.fn().mockResolvedValue(undefined),
 		retryServer: vi.fn().mockResolvedValue(undefined),
@@ -2111,6 +2114,75 @@ describe("Chat desktop shell", () => {
 		await flush();
 
 		expect(button(container, "Select permissions, current Ask").disabled).toBe(true);
+		await act(async () => root.unmount());
+	});
+
+	it("disables Plan mode and sending while a collaboration-mode change is in flight", async () => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
+		const { api, emitEvent } = createHarness();
+		let resolveMode!: (value: { collaborationMode: "plan" }) => void;
+		vi.mocked(api.setCollaborationMode).mockImplementationOnce(
+			() => new Promise((resolve) => {
+				resolveMode = resolve;
+			}),
+		);
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<App api={api} store={new AppStore()} />));
+		await flush();
+
+		await act(async () => button(container, "Plan mode").click());
+		expect(button(container, "Plan mode").disabled).toBe(true);
+		expect(button(container, "Plan mode").getAttribute("aria-pressed")).toBe("true");
+		const editor = container.querySelector<HTMLElement>("#composer-input")!;
+		await act(async () => changeTextarea(editor, "Create a safe plan"));
+		expect(button(container, "Send message").disabled).toBe(true);
+		await act(async () => editor.closest("form")!.requestSubmit());
+		expect(api.startTurn).not.toHaveBeenCalled();
+
+		await act(async () => resolveMode({ collaborationMode: "plan" }));
+		await act(async () => {
+			emitEvent({
+				type: "app-server",
+				envelope: {
+					jsonrpc: "2.0",
+					method: "connection/events",
+					params: {
+						serverEpoch: EPOCH,
+						fromCursor: 1,
+						toCursor: 1,
+						events: [{
+							type: "session/collaborationModeChanged",
+							sessionId: "chat-existing",
+							collaborationMode: "plan",
+						}],
+					},
+				},
+			});
+		});
+		await flush();
+		expect(button(container, "Plan mode").disabled).toBe(false);
+		await act(async () => root.unmount());
+	});
+
+	it("disables Plan mode while a turn is running", async () => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
+		const { api } = createHarness();
+		const running = { ...session("chat-existing", "chat", "/work/chat-project", "Chat project task"), state: "running" as const };
+		vi.mocked(api.openSession).mockResolvedValueOnce({
+			...snapshot(running),
+			activeTurnId: "turn-running",
+		});
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<App api={api} store={new AppStore()} />));
+		await flush();
+
+		expect(button(container, "Plan mode").disabled).toBe(true);
 		await act(async () => root.unmount());
 	});
 

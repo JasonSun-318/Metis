@@ -522,5 +522,34 @@ describe("AgentSession permission enforcement", () => {
 			await harness.session.prompt("write tracked");
 			expect(readFileSync(trackedFile, "utf8")).toBe("original");
 		});
+
+		it("emits Default mode after cancel even if sandbox reset fails", async () => {
+			const fake = fakeBashBoundary();
+			const resetSpy = vi.spyOn(fake.boundary, "reset");
+			const harness = await createHarness({
+				permissionSettings: { mode: "ask" },
+				interactiveBashBoundary: fake.boundary,
+			});
+			harnesses.push(harness);
+			const events: string[] = [];
+			harness.session.subscribe((event) => {
+				if (event.type === "plan_changed" || event.type === "collaboration_mode_changed") {
+					events.push(event.type);
+				}
+			});
+			await harness.session.setCollaborationMode("plan");
+			resetSpy.mockRejectedValueOnce(new Error("sandbox reset failed"));
+			const plan = harness.session.submitPlan({ title: "Safe greeting", markdown: "# Goal\n\nGreet." });
+			await expect(harness.session.cancelPlan({ planId: plan.planId, revision: plan.revision })).resolves.toMatchObject({
+				status: "cancelled",
+			});
+			expect(harness.session.sessionManager.getCollaborationMode()).toBe("default");
+			expect(events).toEqual([
+				"collaboration_mode_changed",
+				"plan_changed",
+				"plan_changed",
+				"collaboration_mode_changed",
+			]);
+		});
 	});
 });

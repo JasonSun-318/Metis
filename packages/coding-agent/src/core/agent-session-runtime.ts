@@ -483,7 +483,7 @@ export class AgentSessionRuntime {
 		const manager = this.subagentManagerValue;
 		if (!manager) return;
 		const management = new Set<string>([SUBAGENT_ACTIVATION_TOOL_NAME, ...SUBAGENT_TOOL_NAMES]);
-		const base = session.getActiveToolNames().filter((name) => !management.has(name));
+		const base = session.getConfiguredActiveToolNames().filter((name) => !management.has(name));
 		const residual = manager.listSummaries().some((summary) => summary.status !== "closed");
 		const cleanup = residual ? ["inspect_agents", "interrupt_agent", "close_agent"] : [];
 		const ultra = session.mode === "code" && session.getThinkingSelection() === "ultra";

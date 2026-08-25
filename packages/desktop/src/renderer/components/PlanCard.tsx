@@ -23,7 +23,7 @@ export function PlanCard({ busy, plan, onStart, onCancel, onOpen, onRevise }: Pl
 	const isProposed = plan.status === "proposed";
 	const actionLabel = `${plan.title} · r${plan.revision}`;
 	return (
-		<section className="plan-card" aria-label={t("Plan preview")}>
+		<section className="plan-card" aria-label={t("Plan")}>
 			<header className="plan-card-header">
 				<h2 className="plan-card-title">{plan.title}</h2>
 				<span className="plan-card-meta">

@@ -44,6 +44,7 @@ async function renderCard(overrides: Partial<PlanView> = {}) {
 describe("PlanCard", () => {
 	it("renders fixed-scroll Markdown and invokes exact-revision actions", async () => {
 		const { container, root, onStart, onRevise } = await renderCard();
+		expect(container.querySelector(".plan-card")?.getAttribute("aria-label")).toBe("Plan");
 		expect(container.querySelector(".plan-card-body")).not.toBeNull();
 		container.querySelector<HTMLButtonElement>('[data-plan-action="start"]')!.click();
 		container.querySelector<HTMLButtonElement>('[data-plan-action="revise"]')!.click();

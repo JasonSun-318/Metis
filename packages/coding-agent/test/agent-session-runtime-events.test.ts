@@ -421,6 +421,21 @@ describe("AgentSessionRuntime plan execution", () => {
 		expect(serialized).toContain("accepted-plan-markdown-body");
 	});
 
+	it("keeps configured Default tools when Plan is active and subagent capabilities resync", async () => {
+		const { session } = await createPlanRuntime();
+		const configured = session.getConfiguredActiveToolNames();
+		expect(configured).toEqual(expect.arrayContaining(["edit", "write", "set_tasks"]));
+
+		await session.setCollaborationMode("plan");
+		expect(session.getActiveToolNames()).not.toContain("write");
+		session.setThinkingSelection(session.getThinkingSelection());
+		expect(session.getConfiguredActiveToolNames()).toEqual(configured);
+
+		await session.setCollaborationMode("default");
+		expect(session.getActiveToolNames()).toEqual(expect.arrayContaining(["edit", "write", "set_tasks"]));
+		expect(session.getActiveToolNames()).not.toContain("submit_plan");
+	});
+
 	it("does not inject plan context on the next ordinary Default prompt", async () => {
 		const observed: unknown[][] = [];
 		const { runtime, session, faux } = await createPlanRuntime();

@@ -2376,10 +2376,7 @@ export class AgentSession {
 			throw new Error("Plan mode is unavailable for this session");
 		}
 		if (this.isStreaming || this.isCompacting) throw new Error("Cannot change Plan mode during active work");
-		this.sessionManager.setCollaborationMode(collaborationMode);
-		this._applyEffectiveTools();
-		await this._interactiveBashBoundary?.reset();
-		this._emit({ type: "collaboration_mode_changed", collaborationMode });
+		await this._persistCollaborationMode(collaborationMode);
 	}
 
 	submitPlan(input: { readonly title: string; readonly markdown: string }): StoredPlan {
@@ -2393,8 +2390,22 @@ export class AgentSession {
 		if (this.isStreaming || this.isCompacting) throw new Error("Cannot cancel a plan during active work");
 		const plan = this.sessionManager.cancelPlan(ref);
 		this._emit({ type: "plan_changed", entryIds: [plan.entryId] });
-		await this.setCollaborationMode("default");
+		try {
+			await this._persistCollaborationMode("default");
+		} catch {
+			// Restrictive cancel and Default mode are already durable; sandbox reset is best-effort.
+		}
 		return plan;
+	}
+
+	private async _persistCollaborationMode(collaborationMode: CollaborationMode): Promise<void> {
+		this.sessionManager.setCollaborationMode(collaborationMode);
+		this._applyEffectiveTools();
+		try {
+			await this._interactiveBashBoundary?.reset();
+		} finally {
+			this._emit({ type: "collaboration_mode_changed", collaborationMode });
+		}
 	}
 
 	private _currentDurablePlanExecution(): StoredPlan | undefined {

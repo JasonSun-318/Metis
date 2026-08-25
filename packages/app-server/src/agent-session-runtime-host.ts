@@ -1395,6 +1395,12 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 	async startPlanExecution(
 		input: ClientParams<"plan/startExecution">,
 	): Promise<ClientResult<"plan/startExecution">> {
+		if (this.ref.scheduled || this.session.sessionManager.getHeader()?.subagent) {
+			throw new AppServerError("READ_ONLY_SESSION", {
+				sessionId: input.sessionId,
+				requestId: input.requestId,
+			});
+		}
 		if (this.isActive() || this.hasPendingInteractions()) {
 			throw new AppServerError("BUSY", { sessionId: input.sessionId, requestId: input.requestId });
 		}
@@ -1414,6 +1420,12 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 	}
 
 	async cancelPlan(input: ClientParams<"plan/cancel">): Promise<ClientResult<"plan/cancel">> {
+		if (this.ref.scheduled || this.session.sessionManager.getHeader()?.subagent) {
+			throw new AppServerError("READ_ONLY_SESSION", {
+				sessionId: input.sessionId,
+				requestId: input.requestId,
+			});
+		}
 		if (this.isActive() || this.hasPendingInteractions()) {
 			throw new AppServerError("BUSY", { sessionId: input.sessionId, requestId: input.requestId });
 		}
