@@ -1,6 +1,6 @@
 Metis is a minimal general-purpose terminal agent. Adapt Metis to your workflows without modifying its internals. Extend it with TypeScript [Extensions](#extensions), [Skills](#skills), [Prompt Templates](#prompt-templates), and [Themes](#themes).
 
-Metis ships with powerful defaults while leaving workflow-specific modes to extensions. The core `set_tasks` tool publishes a visible checklist for multi-step work; the independent Plan Mode and Todo extensions remain available for richer workflows.
+Metis ships with powerful defaults while leaving workflow-specific modes to extensions. The core `set_tasks` tool publishes a visible checklist for multi-step work, and built-in Plan collaboration mode provides a review-first planning workflow alongside Chat and Code.
 
 Metis runs in four modes: interactive, print or JSON, RPC for process integration, and an SDK for embedding in your own apps. See [openclaw/openclaw](https://github.com/openclaw/openclaw) for a real-world SDK integration.
 
@@ -488,7 +488,7 @@ Metis is aggressively extensible so it doesn't have to dictate your workflow. Fe
 
 **Explicit permission boundary.** Auto is the default. Ask and Auto sandbox model-initiated Bash unless an approved action explicitly shows host execution; exact current-project approvals can be revoked. Full runs directly with the current user's OS authority. Installed integration code remains trusted. See [Permissions](docs/permissions.md).
 
-**No separate plan mode.** The built-in `set_tasks` tool lets the model show a visible checklist for complex multi-step work. Use a plan file or the independent Plan Mode extension when you want a review-first or read-only planning workflow.
+**Built-in Plan collaboration mode.** Plan is a collaboration mode orthogonal to Chat and Code appearance. Toggle Plan in the composer to explore safely: the model sees `read`, `bash`, `ask_user`, and `submit_plan` only. Plan Bash uses a read-only workspace sandbox; controlled web lookup remains available when configured. Complete plan revisions are stored in the session journal as Plan cards. Only the current proposed or accepted revision enters provider context; historical `submit_plan` plumbing is not replayed to the model. Starting execution on a proposed plan switches back to Default mode, restores normal tools, injects only that accepted revision into the execution turn, and `set_tasks` tracks progress.
 
 **No built-in to-do manager.** `set_tasks` replaces the current session's visible checklist; it does not add manual Todo commands or project task storage. Use a TODO.md file or the Todo extension for those workflows.
 
