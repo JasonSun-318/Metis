@@ -9,6 +9,7 @@ import { expect, test, type Browser, type Page } from "@playwright/test";
 import {
 	appServerPid,
 	connectToApp,
+	desktopRoot,
 	listen,
 	packagedExecutable,
 	reservePort,
@@ -75,20 +76,11 @@ function sseText(text: string): string {
 	})}\n\ndata: [DONE]\n\n`;
 }
 
-async function createCodeSession(page: Page, fixtures: CodingFixtures, projectDir: string, agentDir: string): Promise<string> {
-	const sessionId = "91000000-0000-4000-8000-000000000001";
-	const manager = fixtures.SessionManager.create(
-		projectDir,
-		fixtures.getDefaultSessionDir(projectDir, agentDir),
-		{ id: sessionId, mode: "code", permissionMode: "full" },
-	);
-	manager.appendSessionInfo("Plan mode fixture");
-	manager.close();
-	new fixtures.ProjectTrustStore(agentDir).set(projectDir, true);
+async function createCodeSession(page: Page, sessionId: string): Promise<void> {
 	await page.getByRole("button", { name: "Code", exact: true }).click();
-	await page.locator(`.session-button[aria-label="Plan mode fixture"]`).click();
+	await page.keyboard.press("Escape");
+	await page.locator(".project-list .session-button").first().click();
 	await expect(page.locator(`[data-active-session-id="${sessionId}"]`)).toBeVisible();
-	return sessionId;
 }
 
 interface CodingFixtures {
@@ -103,7 +95,7 @@ interface CodingFixtures {
 }
 
 async function loadCodingFixtures(): Promise<CodingFixtures> {
-	const coreRoot = path.resolve(import.meta.dirname, "../../coding-agent/dist/core");
+	const coreRoot = path.resolve(desktopRoot, "../coding-agent/dist/core");
 	const importEsm = Function("specifier", "return import(specifier)") as (specifier: string) => Promise<Record<string, unknown>>;
 	return {
 		SessionManager: (await importEsm(pathToFileURL(path.join(coreRoot, "session-manager.js")).href)).SessionManager as CodingFixtures["SessionManager"],
@@ -125,6 +117,16 @@ test("packaged plan mode explores, revises, recovers, executes, and cancels", as
 	const userDataDir = path.join(tempRoot, "electron");
 	const planWritePath = path.join(projectDir, "plan-write.txt");
 	await Promise.all([mkdir(agentDir), mkdir(homeDir), mkdir(projectDir), mkdir(userDataDir)]);
+
+	const sessionId = "91000000-0000-4000-8000-000000000001";
+	const manager = fixtures.SessionManager.create(
+		projectDir,
+		fixtures.getDefaultSessionDir(projectDir, agentDir),
+		{ id: sessionId, mode: "code", permissionMode: "full" },
+	);
+	manager.appendSessionInfo("Plan mode fixture");
+	manager.close();
+	new fixtures.ProjectTrustStore(agentDir).set(projectDir, true);
 
 	const providerPayloads: ProviderPayload[] = [];
 	const fakeProvider = createServer(async (request, response) => {
@@ -210,7 +212,7 @@ test("packaged plan mode explores, revises, recovers, executes, and cancels", as
 		await page.setViewportSize({ width: 1280, height: 900 });
 		await waitForServerReady(page);
 		phase = "opening code session";
-		await createCodeSession(page, fixtures, projectDir, agentDir);
+		await createCodeSession(page, sessionId);
 
 		phase = "entering plan mode";
 		const planToggle = page.getByRole("button", { name: "Plan mode", exact: true });

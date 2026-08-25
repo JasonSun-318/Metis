@@ -201,7 +201,17 @@ import { createSessionId } from "./session-id.ts";
 import { PLAN_MODE_SYSTEM_PROMPT, planVisibleToolNames, projectPlanContext } from "./plan-mode.ts";
 import type { CollaborationMode, PlanRef, StoredPlan } from "./plan-state.ts";
 import { createSubmitPlanToolDefinition } from "./submit-plan.ts";
-import { CURRENT_SESSION_VERSION, getLatestCompactionEntry, type SessionHeader } from "./session-manager.ts";
+import {
+	CURRENT_SESSION_VERSION,
+	getLatestCompactionEntry,
+	SessionManager,
+} from "./session-manager.ts";
+import type {
+	BranchSummaryEntry,
+	CompactionEntry,
+	SessionEntry,
+	SessionHeader,
+} from "./session-manager.ts";
 import type { CwdOrigin } from "./session-workspace.ts";
 import { type SettingsManager, VISION_PROVIDER_ID } from "./settings-manager.ts";
 import { SKILL_USAGE_CUSTOM_TYPE, type SkillUsageRecord } from "./skills.ts";
@@ -5434,8 +5444,8 @@ export class AgentSession {
 			Object.entries(baseToolDefinitions).map(([name, tool]) => [name, tool as ToolDefinition]),
 		);
 		const submitPlanDefinition = createSubmitPlanToolDefinition((input) => this.submitPlan(input));
-		this._baseToolDefinitions.set(submitPlanDefinition.name, submitPlanDefinition);
-		this._trustedControlTools.set(submitPlanDefinition.name, submitPlanDefinition);
+		this._baseToolDefinitions.set(submitPlanDefinition.name, submitPlanDefinition as ToolDefinition);
+		this._trustedControlTools.set(submitPlanDefinition.name, submitPlanDefinition as ToolDefinition);
 
 		const extensionsResult = this._resourceLoader.getExtensions();
 		if (this._unattendedExecution && extensionsResult.extensions.length > 0) {
