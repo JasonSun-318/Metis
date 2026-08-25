@@ -2,7 +2,7 @@ import { expect, it } from "vitest";
 import { parseSandboxRequest, parseSandboxResponse } from "../src/core/workspace-sandbox-protocol.ts";
 
 it("accepts only the bounded discriminated sandbox protocol", () => {
-	expect(
+		expect(
 		parseSandboxRequest(
 			JSON.stringify({
 				type: "init",
@@ -12,6 +12,7 @@ it("accepts only the bounded discriminated sandbox protocol", () => {
 				writeRoots: ["/workdir"],
 				protectedRoots: ["/agent/memory"],
 				shellPath: "/bin/zsh",
+				workspaceReadOnly: true,
 			}),
 		),
 	).toEqual({
@@ -22,6 +23,7 @@ it("accepts only the bounded discriminated sandbox protocol", () => {
 		writeRoots: ["/workdir"],
 		protectedRoots: ["/agent/memory"],
 		shellPath: "/bin/zsh",
+		workspaceReadOnly: true,
 	});
 	expect(
 		parseSandboxRequest(
@@ -67,7 +69,7 @@ it("accepts only the bounded discriminated sandbox protocol", () => {
 			readOnlyRoots: [],
 			writeRoots: [],
 			protectedRoots: [],
-			extra: true,
+			workspaceReadOnly: "yes",
 		}),
 		JSON.stringify({ type: "exec", id: "1", command: "x".repeat(262_145), cwd: "/work", env: {} }),
 		JSON.stringify({ type: "exec", id: "1", command: "pwd", cwd: "/work", env: {}, extra: true }),

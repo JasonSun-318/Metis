@@ -726,6 +726,7 @@ export class AgentSession {
 						return {
 							cwd: this.sessionManager.getCwd(),
 							workspaceRoots: this.sessionManager.getWorkspaceRoots(),
+							workspaceReadOnly: this.sessionManager.getCollaborationMode() === "plan",
 							readOnlyRoots: buildInteractiveBashReadOnlyRoots({
 								attachmentDir,
 								memoryReadRoots,
@@ -1174,30 +1175,49 @@ export class AgentSession {
 			: approvedSettings.mode === "full"
 				? unclassifiedAction(classifyInput)
 				: classifyAction(classifyInput);
-		const executionTarget = this._unattendedExecution
-			? action.toolName === "bash"
-				? "sandbox"
-				: "host"
-			: executionTargetFor(approvedSettings, action);
+		const planBash = this.sessionManager.getCollaborationMode() === "plan" && action.toolName === "bash";
+		if (planBash) {
+			const forbidden = action.risks.filter((risk) =>
+				["sensitive-read", "unknown", "network", "elevation", "destructive", "external-side-effect"].includes(risk),
+			);
+			if (forbidden.length > 0) {
+				throw new Error(`Permission denied for bash in Plan mode: ${forbidden.join(", ")}`);
+			}
+		}
+		const executionTarget = planBash
+			? "sandbox"
+			: this._unattendedExecution
+				? action.toolName === "bash"
+					? "sandbox"
+					: "host"
+				: executionTargetFor(approvedSettings, action);
 		const header = this.sessionManager.getHeader();
-		const authorization = this._unattendedExecution
-			? authorizeUnattendedAction({
-					profile: this._unattendedExecution,
+		const authorization = planBash
+			? {
+					decision: "allow" as const,
+					reason: "Plan Bash is confined to the read-only workspace sandbox",
+					source: "automatic" as const,
 					action,
-					args: structuredClone(approvedArgs),
-					cwd: approvedCwd,
-				})
-			: await this._permissionPolicy.authorize({
-					settings: approvedSettings,
-					action,
-					args: structuredClone(approvedArgs),
-					projectPath: canonicalizeActionPath(this.sessionManager.getCwd(), this.sessionManager.getCwd()),
-					cwd: approvedCwd,
-					workspaceRoots: approvedWorkspaceRoots,
-					allowProjectRules: !header?.subagent && !header?.scheduled,
-					executionTarget,
-					signal: input.signal,
-				});
+					executionTarget: "sandbox" as const,
+				}
+			: this._unattendedExecution
+				? authorizeUnattendedAction({
+						profile: this._unattendedExecution,
+						action,
+						args: structuredClone(approvedArgs),
+						cwd: approvedCwd,
+					})
+				: await this._permissionPolicy.authorize({
+						settings: approvedSettings,
+						action,
+						args: structuredClone(approvedArgs),
+						projectPath: canonicalizeActionPath(this.sessionManager.getCwd(), this.sessionManager.getCwd()),
+						cwd: approvedCwd,
+						workspaceRoots: approvedWorkspaceRoots,
+						allowProjectRules: !header?.subagent && !header?.scheduled,
+						executionTarget,
+						signal: input.signal,
+					});
 		if (authorization.decision === "deny") {
 			if (this._unattendedExecution) this._appendPermissionAudit(action, "deny", authorization.reason, "policy");
 			else if (authorization.source === "user") this._appendPermissionAudit(action, "deny", authorization.reason);
@@ -5335,6 +5355,9 @@ export class AgentSession {
 													this._agentDir!,
 													this.sessionManager.getSessionId(),
 												),
+												...(this.sessionManager.getCollaborationMode() === "plan"
+													? { GIT_OPTIONAL_LOCKS: "0" }
+													: {}),
 												...(this._activeWorkDir
 													? {
 															METIS_WORK_DIR: this._activeWorkDir,

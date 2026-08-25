@@ -159,6 +159,7 @@ class SandboxBroker {
 		writeRoots?: readonly string[];
 		protectedRoots?: readonly string[];
 		shellPath?: string;
+		workspaceReadOnly?: boolean;
 		signal?: AbortSignal;
 	}): Promise<SandboxBroker> {
 		if (input.signal?.aborted) throw new Error("aborted");
@@ -242,6 +243,7 @@ class SandboxBroker {
 				writeRoots,
 				protectedRoots,
 				...(shellPath ? { shellPath } : {}),
+				...(input.workspaceReadOnly === true ? { workspaceReadOnly: true } : {}),
 			});
 			await controlTimeout(broker.readyPromise, "Sandbox initialization timed out");
 			return broker;
@@ -489,6 +491,7 @@ export async function createWorkspaceSandbox(input: {
 	writeRoots?: readonly string[];
 	protectedRoots?: readonly string[];
 	shellPath?: string;
+	workspaceReadOnly?: boolean;
 	signal?: AbortSignal;
 }): Promise<WorkspaceSandbox> {
 	const broker = await SandboxBroker.start(input);

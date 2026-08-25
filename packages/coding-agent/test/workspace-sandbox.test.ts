@@ -2,6 +2,7 @@ import {
 	existsSync,
 	mkdirSync,
 	mkdtempSync,
+	readFileSync,
 	readdirSync,
 	realpathSync,
 	rmSync,
@@ -168,6 +169,35 @@ describe.runIf(process.env.METIS_TEST_OS_SANDBOX === "1")("workspace sandbox", (
 		} finally {
 			await sandbox.dispose();
 			await expect(sandbox.dispose()).resolves.toBeUndefined();
+		}
+	});
+
+	it("mounts Plan workspaces read-only while preserving Metis temp writes", async () => {
+		const workspace = temporaryDirectory();
+		const sessionWorkDir = temporaryDirectory();
+		writeFileSync(join(workspace, "tracked.txt"), "original");
+		let sandbox: Awaited<ReturnType<typeof createWorkspaceSandbox>>;
+		try {
+			sandbox = await createWorkspaceSandbox({
+				cwd: workspace,
+				workspaceRoots: [workspace],
+				writeRoots: [sessionWorkDir],
+				workspaceReadOnly: true,
+			});
+		} catch (error) {
+			if (error instanceof WorkspaceSandboxError && error.code === "SANDBOX_UNAVAILABLE") return;
+			throw error;
+		}
+		const exec = (command: string) =>
+			sandbox.operations.exec(command, workspace, { onData: () => {}, env: { METIS_WORK_DIR: sessionWorkDir } });
+		try {
+			const writeResult = await exec("printf changed > tracked.txt");
+			expect(writeResult.exitCode).not.toBe(0);
+			expect(readFileSync(join(workspace, "tracked.txt"), "utf8")).toBe("original");
+			await expect(exec("cat tracked.txt")).resolves.toMatchObject({ exitCode: 0 });
+			await expect(exec('printf ok > "$METIS_WORK_DIR/result.txt"')).resolves.toMatchObject({ exitCode: 0 });
+		} finally {
+			await sandbox.dispose();
 		}
 	});
 

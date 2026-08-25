@@ -9,6 +9,7 @@ export type SandboxRequest =
 			writeRoots: string[];
 			protectedRoots: string[];
 			shellPath?: string;
+			workspaceReadOnly?: boolean;
 	  }
 	| { type: "exec"; id: string; command: string; cwd: string; timeoutMs?: number; env: Record<string, string> }
 	| { type: "cancel"; id: string }
@@ -103,6 +104,7 @@ export function parseSandboxRequest(line: string): SandboxRequest {
 		"writeRoots",
 		"protectedRoots",
 		"shellPath",
+		"workspaceReadOnly",
 		"id",
 		"command",
 		"timeoutMs",
@@ -119,7 +121,12 @@ export function parseSandboxRequest(line: string): SandboxRequest {
 				"writeRoots",
 				"protectedRoots",
 				"shellPath",
+				"workspaceReadOnly",
 			]);
+			const workspaceReadOnly = record.workspaceReadOnly;
+			if (workspaceReadOnly !== undefined && typeof workspaceReadOnly !== "boolean") {
+				throw new TypeError("Sandbox workspaceReadOnly must be a boolean");
+			}
 			return {
 				type,
 				cwd: nonEmptyString(record.cwd, "cwd"),
@@ -128,6 +135,7 @@ export function parseSandboxRequest(line: string): SandboxRequest {
 				writeRoots: paths(record.writeRoots, "writeRoots", true),
 				protectedRoots: paths(record.protectedRoots, "protectedRoots", true),
 				...(record.shellPath === undefined ? {} : { shellPath: nonEmptyString(record.shellPath, "shellPath") }),
+				...(workspaceReadOnly === undefined ? {} : { workspaceReadOnly }),
 			};
 		}
 		case "exec": {

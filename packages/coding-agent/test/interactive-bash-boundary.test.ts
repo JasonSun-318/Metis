@@ -95,6 +95,23 @@ describe("interactive Bash boundary", () => {
 		expect(first.dispose).toHaveBeenCalledOnce();
 	});
 
+	it("passes workspaceReadOnly to sandbox creation", async () => {
+		const createSandbox = vi.fn(async () => sandbox());
+		const value = boundary({
+			createSandbox,
+			context: () => ({
+				cwd,
+				workspaceRoots: [cwd],
+				readOnlyRoots: [],
+				writeRoots: [join(cwd, "work")],
+				workspaceReadOnly: true,
+			}),
+		});
+		value.bind("one", "sandbox");
+		await value.operations.exec("pwd", cwd, options("one"));
+		expect(createSandbox).toHaveBeenCalledWith(expect.objectContaining({ workspaceReadOnly: true }));
+	});
+
 	it("passes only memory carve-outs as read roots and the root as protected metadata", async () => {
 		const memoryRoot = join(cwd, "agent-memory");
 		const globalRoot = join(memoryRoot, "global");

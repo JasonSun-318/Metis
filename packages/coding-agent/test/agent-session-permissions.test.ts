@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AgentTool } from "@metis/agent-core";
@@ -466,5 +466,61 @@ describe("AgentSession permission enforcement", () => {
 
 		expect(requestApproval).toHaveBeenCalledOnce();
 		expect(inspect.execute).toHaveBeenCalledOnce();
+	});
+
+	describe("Plan mode Bash boundary", () => {
+		it("routes harmless Bash to sandbox without approval and rejects risky commands", async () => {
+			const fake = fakeBashBoundary();
+			const bindSpy = vi.spyOn(fake.boundary, "bind");
+			const requestApproval = vi.fn(async () => ({ decision: "allow" as const }));
+			const harness = await createHarness({
+				permissionSettings: { mode: "ask" },
+				requestPermissionApproval: requestApproval,
+				interactiveBashBoundary: fake.boundary,
+			});
+			harnesses.push(harness);
+			const trackedFile = join(harness.tempDir, "tracked.txt");
+			writeFileSync(trackedFile, "original");
+			await harness.session.setCollaborationMode("plan");
+
+			harness.setResponses([
+				fauxAssistantMessage([fauxToolCall("bash", { command: "pwd" })], { stopReason: "toolUse" }),
+				fauxAssistantMessage("done"),
+			]);
+			await harness.session.prompt("run pwd");
+			expect(requestApproval).not.toHaveBeenCalled();
+			expect(bindSpy).toHaveBeenCalledWith(expect.any(String), "sandbox");
+			expect(fake.sandboxExec).toHaveBeenCalledOnce();
+			expect(fake.hostExec).not.toHaveBeenCalled();
+
+			for (const [command, pattern] of [
+				["curl https://example.com", /Plan mode.*network/iu],
+				["sudo true", /Plan mode.*elevation/iu],
+				["cat .env", /Plan mode.*sensitive-read/iu],
+				["bash -c 'cat package.json'", /Plan mode.*unknown/iu],
+			] as const) {
+				fake.sandboxExec.mockClear();
+				fake.hostExec.mockClear();
+				harness.setResponses([
+					fauxAssistantMessage([fauxToolCall("bash", { command })], { stopReason: "toolUse" }),
+					fauxAssistantMessage("done"),
+				]);
+				await harness.session.prompt(`run ${command}`);
+				expect(fake.sandboxExec).not.toHaveBeenCalled();
+				expect(fake.hostExec).not.toHaveBeenCalled();
+				const toolResult = harness.session.messages.findLast((message) => message.role === "toolResult");
+				expect(toolResult?.isError).toBe(true);
+				expect(getMessageText(toolResult)).toMatch(pattern);
+			}
+
+			harness.setResponses([
+				fauxAssistantMessage([fauxToolCall("bash", { command: "printf x > tracked.txt" })], {
+					stopReason: "toolUse",
+				}),
+				fauxAssistantMessage("done"),
+			]);
+			await harness.session.prompt("write tracked");
+			expect(readFileSync(trackedFile, "utf8")).toBe("original");
+		});
 	});
 });

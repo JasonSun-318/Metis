@@ -126,12 +126,13 @@ function runtimeConfig(
 	temporaryDir: string,
 	runtimeReads: readonly string[],
 	shellPath?: string,
+	workspaceReadOnly = false,
 ): SandboxRuntimeConfig {
 	const callerHome = homedir();
 	const denyRead = deniedReadRoots(callerHome);
-	const allowedWrite = [...new Set([...workspaceRoots, ...writeRoots, temporaryDir])];
+	const allowedWrite = [...new Set([...(workspaceReadOnly ? [] : workspaceRoots), ...writeRoots, temporaryDir])];
 	const allowedRead = [
-		...new Set([...allowedWrite, ...readOnlyRoots, ...runtimeReads, ...(shellPath ? [shellPath] : [])]),
+		...new Set([...workspaceRoots, ...allowedWrite, ...readOnlyRoots, ...runtimeReads, ...(shellPath ? [shellPath] : [])]),
 	];
 	const denyWrite = getDefaultWritePaths().filter(
 		(path) => !path.startsWith("/dev/") && !allowedWrite.some((root) => isPathInside(root, path)),
@@ -345,7 +346,15 @@ export async function runWorkspaceSandboxBroker(): Promise<void> {
 					mkdirSync(temporaryDir, { recursive: true });
 					process.env.CLAUDE_CODE_TMPDIR = temporaryDir;
 					await SandboxManager.initialize(
-						runtimeConfig(workspaceRoots, readOnlyRoots, writeRoots, temporaryDir, runtimeReads, shellPath),
+						runtimeConfig(
+							workspaceRoots,
+							readOnlyRoots,
+							writeRoots,
+							temporaryDir,
+							runtimeReads,
+							shellPath,
+							request.workspaceReadOnly === true,
+						),
 					);
 					send({ type: "ready" });
 				} catch (error) {

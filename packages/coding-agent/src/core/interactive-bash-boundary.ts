@@ -11,6 +11,7 @@ export interface InteractiveBashContext {
 	readonly writeRoots: readonly string[];
 	readonly protectedRoots?: readonly string[];
 	readonly shellPath?: string;
+	readonly workspaceReadOnly?: boolean;
 }
 
 /** Roots mounted read-only in the interactive Bash sandbox (attachments, long-term memory, …). */
@@ -62,6 +63,7 @@ function normalizeContext(value: InteractiveBashContext): InteractiveBashContext
 		readOnlyRoots: roots(value.readOnlyRoots),
 		writeRoots: roots(value.writeRoots),
 		protectedRoots: roots(value.protectedRoots ?? []),
+		workspaceReadOnly: value.workspaceReadOnly === true,
 		...(value.shellPath === undefined
 			? {}
 			: {
