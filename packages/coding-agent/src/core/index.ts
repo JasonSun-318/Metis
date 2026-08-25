@@ -3,6 +3,16 @@
  */
 
 export {
+	type CollaborationMode,
+	MAX_PLAN_MARKDOWN_UTF8_BYTES,
+	MAX_PLAN_TITLE_UTF16_UNITS,
+	type PlanRef,
+	type PlanState,
+	type PlanStatus,
+	type StoredPlan,
+	reducePlanState,
+} from "./plan-state.ts";
+export {
 	AgentSession,
 	type AgentSessionConfig,
 	type AgentSessionEvent,

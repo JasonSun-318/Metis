@@ -1,5 +1,10 @@
 import { isAbsolute, normalize } from "node:path";
 import { isAgentMode } from "./agent-mode.ts";
+import {
+	MAX_PLAN_MARKDOWN_UTF8_BYTES,
+	MAX_PLAN_TITLE_UTF16_UNITS,
+	type CollaborationMode,
+} from "./plan-state.ts";
 import { isPersistedPermissionMode, normalizePermissionMode, type PersistedPermissionMode } from "./permission-mode.ts";
 import type {
 	SubagentConfig,
@@ -97,6 +102,26 @@ export interface SubagentModeChangeEntry extends SessionControlEntryBase {
 	readonly enabled: boolean;
 }
 
+export interface SessionCollaborationModeEntry extends SessionControlEntryBase {
+	readonly type: "session_collaboration_mode";
+	readonly collaborationMode: CollaborationMode;
+}
+
+export interface SessionPlanProposalEntry extends SessionControlEntryBase {
+	readonly type: "session_plan_proposal";
+	readonly planId: string;
+	readonly revision: number;
+	readonly title: string;
+	readonly markdown: string;
+}
+
+export interface SessionPlanStatusEntry extends SessionControlEntryBase {
+	readonly type: "session_plan_status";
+	readonly planId: string;
+	readonly revision: number;
+	readonly status: "accepted" | "cancelled";
+}
+
 export type SubagentControlEntry =
 	| SubagentCreatedEntry
 	| SubagentStateEntry
@@ -110,6 +135,9 @@ export type SessionControlEntry =
 	| SessionPermissionsEntry
 	| SessionPermissionDecisionEntry
 	| SessionDirectoryControlEntry
+	| SessionCollaborationModeEntry
+	| SessionPlanProposalEntry
+	| SessionPlanStatusEntry
 	| SubagentControlEntry;
 
 export type SessionControlPayload = SessionControlEntry extends infer Entry
@@ -190,6 +218,12 @@ function finiteNonNegative(fields: ReadonlyMap<string, unknown>, key: string, la
 	if (typeof value !== "number" || !Number.isFinite(value) || value < 0)
 		invalid(`${label}.${key} must be finite and non-negative`);
 	return value;
+}
+
+function positiveSafeInteger(fields: ReadonlyMap<string, unknown>, key: string): number {
+	const value = fields.get(key);
+	if (!Number.isSafeInteger(value) || (value as number) < 1) invalid(`Session control entry.${key} is invalid`);
+	return value as number;
 }
 
 function parseBase(fields: ReadonlyMap<string, unknown>): SessionControlEntryBase {
@@ -406,11 +440,19 @@ export function isSessionDirectoryControlEntryType(type: unknown): type is Sessi
 	return type === "session_directory_added" || type === "session_directory_removed";
 }
 
+export function isPlanControlEntryType(type: unknown): type is
+	| SessionCollaborationModeEntry["type"]
+	| SessionPlanProposalEntry["type"]
+	| SessionPlanStatusEntry["type"] {
+	return type === "session_collaboration_mode" || type === "session_plan_proposal" || type === "session_plan_status";
+}
+
 export function isSessionControlEntryType(type: unknown): type is SessionControlEntry["type"] {
 	return (
 		type === "session_permissions" ||
 		type === "session_permission_decision" ||
 		isSessionDirectoryControlEntryType(type) ||
+		isPlanControlEntryType(type) ||
 		isSubagentControlEntryType(type)
 	);
 }
@@ -581,6 +623,37 @@ export function parseSessionControlEntry(value: unknown): SessionControlEntry {
 		const enabled = fields.get("enabled");
 		if (typeof enabled !== "boolean") invalid("Session control entry.enabled must be a boolean");
 		return { type, ...parseBase(fields), enabled };
+	}
+	if (type === "session_collaboration_mode") {
+		assertOnlyFields(fields, [...baseFields, "collaborationMode"]);
+		const collaborationMode = fields.get("collaborationMode");
+		if (collaborationMode !== "default" && collaborationMode !== "plan") {
+			invalid("Session control entry.collaborationMode is invalid");
+		}
+		return { type, ...parseBase(fields), collaborationMode };
+	}
+	if (type === "session_plan_proposal") {
+		assertOnlyFields(fields, [...baseFields, "planId", "revision", "title", "markdown"]);
+		return {
+			type,
+			...parseBase(fields),
+			planId: requiredString(fields, "planId", { maxLength: 128, noControls: true }),
+			revision: positiveSafeInteger(fields, "revision"),
+			title: requiredString(fields, "title", { maxLength: MAX_PLAN_TITLE_UTF16_UNITS, noControls: true }),
+			markdown: requiredString(fields, "markdown", { maxBytes: MAX_PLAN_MARKDOWN_UTF8_BYTES }),
+		};
+	}
+	if (type === "session_plan_status") {
+		assertOnlyFields(fields, [...baseFields, "planId", "revision", "status"]);
+		const status = fields.get("status");
+		if (status !== "accepted" && status !== "cancelled") invalid("Session control entry.status is invalid");
+		return {
+			type,
+			...parseBase(fields),
+			planId: requiredString(fields, "planId", { maxLength: 128, noControls: true }),
+			revision: positiveSafeInteger(fields, "revision"),
+			status,
+		};
 	}
 	invalid(`Unknown session control entry type: ${type}`);
 }

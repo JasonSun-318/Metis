@@ -71,6 +71,7 @@ import {
 	getOwnedSessionWorkDirs,
 } from "./session-attachments.ts";
 import {
+	isPlanControlEntryType,
 	isSessionControlEntryType,
 	isSessionDirectoryControlEntryType,
 	isSubagentControlEntryType,
@@ -79,6 +80,13 @@ import {
 	type SessionControlPayload,
 	type SubagentControlPayload,
 } from "./session-control.ts";
+import {
+	type CollaborationMode,
+	type PlanRef,
+	type PlanState,
+	type StoredPlan,
+	reducePlanState,
+} from "./plan-state.ts";
 import { assertValidSessionId, createSessionId } from "./session-id.ts";
 import {
 	CorruptSessionError,
@@ -89,7 +97,7 @@ import {
 import { acquireModeProjectMutationLease, SessionLease, SessionLeaseError } from "./session-lease.ts";
 import { type CwdOrigin, getOwnedManagedWorkspace, publishManagedWorkspaceCopy } from "./session-workspace.ts";
 
-export const CURRENT_SESSION_VERSION = 11;
+export const CURRENT_SESSION_VERSION = 12;
 
 interface ImageReference {
 	type: "image_ref";
@@ -1197,6 +1205,13 @@ function migrateV10ToV11(entries: FileEntry[]): void {
 	}
 }
 
+/** Migrate v11 → v12: reserve durable Plan collaboration controls. */
+function migrateV11ToV12(entries: FileEntry[]): void {
+	for (const entry of entries) {
+		if (entry.type === "session") entry.version = 12;
+	}
+}
+
 function isV11SubagentRecord(entry: unknown): boolean {
 	if (typeof entry !== "object" || entry === null) return false;
 	const value = entry as { type?: unknown; background?: unknown };
@@ -1246,6 +1261,9 @@ function migrateToCurrentVersion(entries: FileEntry[]): boolean {
 	if (version < 11 && entries.some(isV11SubagentRecord)) {
 		throw new TypeError("Subagent mailbox controls require a v11 session header");
 	}
+	if (version < 12 && entries.some((entry) => isPlanControlEntryType(entry.type))) {
+		throw new TypeError("Plan control entries require a v12 session header");
+	}
 
 	if (version >= CURRENT_SESSION_VERSION) return false;
 
@@ -1259,6 +1277,7 @@ function migrateToCurrentVersion(entries: FileEntry[]): boolean {
 	if (version < 9) migrateV8ToV9(entries);
 	if (version < 10) migrateV9ToV10(entries);
 	if (version < 11) migrateV10ToV11(entries);
+	if (version < 12) migrateV11ToV12(entries);
 
 	return true;
 }
@@ -3239,6 +3258,53 @@ export class SessionManager {
 		const entry = this._appendSessionControl(payload);
 		if (!isSubagentControlEntryType(entry.type)) throw new Error("Unexpected session control entry");
 		return entry.id;
+	}
+
+	getPlanState(): PlanState {
+		const branchIds = new Set(this.getBranch().map(({ id }) => id));
+		return reducePlanState(this.rawFileEntries, branchIds);
+	}
+
+	getCollaborationMode(): CollaborationMode {
+		return this.getPlanState().collaborationMode;
+	}
+
+	setCollaborationMode(collaborationMode: CollaborationMode): void {
+		if (collaborationMode === "default" && this.getPlanState().currentPlan) {
+			throw new Error("Cancel or start the current plan before leaving Plan mode");
+		}
+		this._appendSessionControl({ type: "session_collaboration_mode", collaborationMode });
+	}
+
+	submitPlan(input: { readonly title: string; readonly markdown: string }): StoredPlan {
+		if (this.getCollaborationMode() !== "plan") throw new Error("submit_plan is available only in Plan mode");
+		const current = this.getPlanState().currentPlan;
+		const entry = this._appendSessionControl({
+			type: "session_plan_proposal",
+			planId: current?.planId ?? randomUUID(),
+			revision: current ? current.revision + 1 : 1,
+			title: input.title,
+			markdown: input.markdown,
+		});
+		return this.getPlanState().plans.find((plan) => plan.entryId === entry.id)!;
+	}
+
+	acceptPlan(ref: PlanRef): StoredPlan {
+		const current = this.getPlanState().currentPlan;
+		if (!current || current.planId !== ref.planId || current.revision !== ref.revision) {
+			throw new Error("Plan action must target the current plan");
+		}
+		this._appendSessionControl({ type: "session_plan_status", ...ref, status: "accepted" });
+		return this.getPlanState().plans.find((plan) => plan.entryId === current.entryId)!;
+	}
+
+	cancelPlan(ref: PlanRef): StoredPlan {
+		const current = this.getPlanState().currentPlan;
+		if (!current || current.planId !== ref.planId || current.revision !== ref.revision) {
+			throw new Error("Plan action must target the current plan");
+		}
+		this._appendSessionControl({ type: "session_plan_status", ...ref, status: "cancelled" });
+		return this.getPlanState().plans.find((plan) => plan.entryId === current.entryId)!;
 	}
 
 	/** Persist the user-facing Ultra orchestration flag independently from provider thinking. */

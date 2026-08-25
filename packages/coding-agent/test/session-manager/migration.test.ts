@@ -89,4 +89,41 @@ describe("migrateSessionEntries", () => {
 		expect((entries[2] as any).id).toBe("def67890");
 		expect((entries[2] as any).parentId).toBe("abc12345");
 	});
+
+	it("migrates v11 headers to v12", () => {
+		const entries: FileEntry[] = [
+			{
+				type: "session",
+				id: "sess-v11",
+				version: 11,
+				timestamp: "2025-01-01T00:00:00Z",
+				cwd: "/tmp",
+			},
+		];
+		migrateSessionEntries(entries);
+		expect((entries[0] as { version: number }).version).toBe(CURRENT_SESSION_VERSION);
+	});
+
+	it("rejects plan controls under pre-v12 headers", () => {
+		const entries: FileEntry[] = [
+			{
+				type: "session",
+				id: "sess-v11",
+				version: 11,
+				timestamp: "2025-01-01T00:00:00Z",
+				cwd: "/tmp",
+			},
+			{
+				type: "session_plan_proposal",
+				id: "plan-1",
+				parentId: null,
+				timestamp: "2025-01-01T00:00:01Z",
+				planId: "plan-a",
+				revision: 1,
+				title: "Plan",
+				markdown: "# Plan",
+			},
+		] as FileEntry[];
+		expect(() => migrateSessionEntries(entries)).toThrow(/v12 session header/iu);
+	});
 });
