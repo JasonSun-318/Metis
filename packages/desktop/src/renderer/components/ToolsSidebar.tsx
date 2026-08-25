@@ -1,4 +1,4 @@
-import type { AgentMode, SessionSummary } from "@metis/app-protocol";
+import type { AgentMode, PlanView, SessionSummary } from "@metis/app-protocol";
 import { ClipboardText, FileText, FolderSimple, Globe, Plus, Robot, SidebarSimple, TerminalWindow, X } from "@phosphor-icons/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -8,6 +8,7 @@ import { BrowserPanel } from "./BrowserPanel.tsx";
 import { FilePanel, type WorkspaceFileDraft } from "./FilePanel.tsx";
 import { UniversalFilePreviewer, type UniversalPreviewTarget } from "./preview/UniversalFilePreviewer.tsx";
 import { previewBytesCache } from "./preview/preview-bytes-cache.ts";
+import { PlanPreview } from "./PlanPreview.tsx";
 import { ReviewPanel } from "./ReviewPanel.tsx";
 import { SubagentPanel } from "./SubagentPanel.tsx";
 import { TerminalPanel } from "./TerminalPanel.tsx";
@@ -50,6 +51,13 @@ interface SubagentTab {
 	readonly title: string;
 }
 
+interface PlanTab {
+	readonly kind: "plan";
+	readonly id: string;
+	readonly title: string;
+	readonly plan: PlanView;
+}
+
 interface PreviewTab {
 	readonly kind: "preview";
 	readonly id: string;
@@ -57,7 +65,7 @@ interface PreviewTab {
 	readonly file: UniversalPreviewTarget;
 }
 
-type ToolTab = TerminalTab | BrowserTab | FileTab | ReviewTab | SubagentTab | PreviewTab;
+type ToolTab = TerminalTab | BrowserTab | FileTab | ReviewTab | SubagentTab | PreviewTab | PlanTab;
 
 interface ToolWorkspace {
 	readonly tabs: readonly ToolTab[];
@@ -84,6 +92,7 @@ interface ToolsSidebarProps {
 	readonly open: boolean;
 	readonly preferredWidth: number;
 	readonly previewRequest?: UniversalPreviewTarget | null;
+	readonly planPreviewRequest?: PlanView | null;
 	readonly store: AppStore;
 	readonly theme: "dark" | "light";
 	readonly width: number;
@@ -151,7 +160,7 @@ function remapPath(path: string, previous: string, next: string): string {
 	return path === previous ? next : `${next}${path.slice(previous.length)}`;
 }
 
-export function ToolsSidebar({ activeSession, api, cleanupSessionIds, mode, onClose, onCleanupSessionIdsHandled, onDirtySessionIdsChange, onError, onWidthChange, open, preferredWidth, previewRequest, store, theme, width }: ToolsSidebarProps) {
+export function ToolsSidebar({ activeSession, api, cleanupSessionIds, mode, onClose, onCleanupSessionIdsHandled, onDirtySessionIdsChange, onError, onWidthChange, open, planPreviewRequest, preferredWidth, previewRequest, store, theme, width }: ToolsSidebarProps) {
 	const { t } = useTranslation();
 	const [workspaces, setWorkspaces] = useState<ReadonlyMap<string, ToolWorkspace>>(new Map());
 	const [expandedBySession, setExpandedBySession] = useState<ReadonlyMap<string, readonly string[]>>(new Map());
@@ -260,6 +269,39 @@ export function ToolsSidebar({ activeSession, api, cleanupSessionIds, mode, onCl
 			return next;
 		});
 	}, [previewRequest, sessionId]);
+
+	useEffect(() => {
+		if (!planPreviewRequest || !sessionId) return;
+		setWorkspaces((current) => {
+			const previous = current.get(sessionId) ?? { tabs: [], activeId: "", nextNumber: 1 };
+			const existing = previous.tabs.find(
+				(tab): tab is PlanTab => tab.kind === "plan" && tab.plan.planId === planPreviewRequest.planId,
+			);
+			if (existing) {
+				const tabs = previous.tabs.map((tab) =>
+					tab.kind === "plan" && tab.plan.planId === planPreviewRequest.planId
+						? { ...tab, title: planPreviewRequest.title, plan: planPreviewRequest }
+						: tab,
+				);
+				const next = new Map(current);
+				next.set(sessionId, { ...previous, tabs, activeId: existing.id });
+				return next;
+			}
+			const planTab: PlanTab = {
+				kind: "plan",
+				id: planPreviewRequest.planId,
+				title: planPreviewRequest.title,
+				plan: planPreviewRequest,
+			};
+			const next = new Map(current);
+			next.set(sessionId, {
+				...previous,
+				tabs: [...previous.tabs, planTab],
+				activeId: planTab.id,
+			});
+			return next;
+		});
+	}, [planPreviewRequest, sessionId]);
 
 	const addTerminal = () => {
 		if (!activeSession?.cwd) return;
@@ -740,7 +782,7 @@ export function ToolsSidebar({ activeSession, api, cleanupSessionIds, mode, onCl
 										onClick={() => selectTab(tab.id)}
 										role="tab"
 										type="button"
-								>{tab.kind === "browser" ? <Globe aria-hidden="true" size={12} /> : tab.kind === "file" ? (tab.relativePath ? <WorkspaceFileIcon path={tab.relativePath} size={12} /> : <FileText aria-hidden="true" size={12} />) : tab.kind === "review" ? <ClipboardText aria-hidden="true" size={12} /> : tab.kind === "subagent" ? <Robot aria-hidden="true" size={12} /> : tab.kind === "preview" ? <WorkspaceFileIcon path={tab.title} size={12} /> : null}<span>{displayTitle}</span>{dirty && <span aria-hidden="true" className="tool-tab-dirty" />}</button>
+								>{tab.kind === "browser" ? <Globe aria-hidden="true" size={12} /> : tab.kind === "file" ? (tab.relativePath ? <WorkspaceFileIcon path={tab.relativePath} size={12} /> : <FileText aria-hidden="true" size={12} />) : tab.kind === "review" ? <ClipboardText aria-hidden="true" size={12} /> : tab.kind === "subagent" ? <Robot aria-hidden="true" size={12} /> : tab.kind === "plan" ? <FileText aria-hidden="true" size={12} /> : tab.kind === "preview" ? <WorkspaceFileIcon path={tab.title} size={12} /> : null}<span>{displayTitle}</span>{dirty && <span aria-hidden="true" className="tool-tab-dirty" />}</button>
 									<button aria-label={t("Close {{name}}", { name: displayTitle })} className="tool-tab-close" disabled={saving} onClick={() => closeTab(tab.id)} type="button"><X aria-hidden="true" size={11} /></button>
 								</div>
 								);
@@ -802,6 +844,17 @@ export function ToolsSidebar({ activeSession, api, cleanupSessionIds, mode, onCl
 								store={store}
 								visible={open && ownerWorkspace.activeId === tab.id}
 							/>
+						) : tab.kind === "plan" ? (
+							<div
+								aria-labelledby={`tab-${tab.id}`}
+								className="tool-panel plan-panel"
+								hidden={!open || ownerSessionId !== sessionId || ownerWorkspace.activeId !== tab.id}
+								id={`plan-panel-${tab.id}`}
+								key={tab.id}
+								role="tabpanel"
+							>
+								<PlanPreview plan={tab.plan} />
+							</div>
 						) : tab.kind === "preview" ? (
 							<div
 								aria-labelledby={`tab-${tab.id}`}

@@ -63,6 +63,13 @@ describe("Code transcript visual contract", () => {
 		expect(rule(".turn-runtime-spinner").getPropertyValue("--uib-size")).toBe("1em");
 	});
 
+	it("fixes the plan card scroll viewport", () => {
+		const planBody = rule(".plan-card-body");
+		expect(planBody.height).toBe("280px");
+		expect(planBody.overflowY).toBe("auto");
+		expect(planBody.overscrollBehavior).toBe("contain");
+	});
+
 	it("hides fork and copy actions until the message is hovered", () => {
 		expect(rule(".turn-actions").opacity).toBe("0");
 		expect(css).toContain(".turn-user:hover .turn-actions, .code-turn-user:hover .turn-actions");

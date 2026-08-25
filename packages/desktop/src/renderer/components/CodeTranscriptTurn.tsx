@@ -33,6 +33,7 @@ function VisibleBlock({ block, markdown = false }: { readonly block: ItemContent
 		case "tool_call":
 		case "tool_result":
 		case "compaction":
+		case "plan":
 			return null;
 	}
 }

@@ -52,6 +52,10 @@ describe("Desktop locale preference", () => {
 		expect(i18n.t("MCP & dynamic tools")).toBe("MCP 与动态工具");
 		expect(i18n.t("Context breakdown unavailable")).toBe("上下文明细不可用");
 		expect(i18n.t("Context exceeded")).toBe("上下文已超限");
+		expect(i18n.t("Plan mode")).toBe("计划模式");
+		expect(i18n.t("Start execution")).toBe("开始执行");
+		expect(i18n.t("Describe what should change in this plan…")).toBe("说明希望如何修改这个计划…");
+		expect(i18n.t("Revision {{revision}}", { revision: 3 })).toBe("第 3 版");
 
 		await setLocale("en", localStorage);
 		expect(localStorage.getItem(APP_LOCALE_STORAGE_KEY)).toBe("en");

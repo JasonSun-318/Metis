@@ -1,14 +1,17 @@
 import {
 	type AgentMode,
 	type ClientResult,
+	type CollaborationModeView,
 	type DomainEvent,
 	type InteractionResponseInput,
 	type InteractionView,
+	type ItemContentBlockView,
 	type ItemView,
 	type McpServerSummaryView,
 	type ModelOptionView,
 	type ModelSettingsView,
 	type PermissionModeView,
+	type PlanView,
 	type QueuedTurnView,
 	RPC_ERROR_CODES,
 	type ScheduleTaskView,
@@ -44,6 +47,7 @@ import { loadSessionPins, saveSessionPins, setSessionPinned } from "../store/ses
 import { applyThemeToDocument, loadTheme, resolveTheme, saveTheme, type AppTheme, watchSystemTheme } from "../theme.ts";
 import { contextUsagePercent } from "../context-usage.ts";
 import { Composer, type ComposerSubmission } from "./Composer.tsx";
+import { CollaborationModeToggle } from "./CollaborationModeToggle.tsx";
 import { CodeProjectSetup } from "./CodeProjectSetup.tsx";
 import { GoalBar } from "./GoalBar.tsx";
 import { InteractionHost } from "./InteractionHost.tsx";
@@ -159,6 +163,38 @@ function composerRequestKey(input: ComposerSubmission): string {
 	});
 }
 
+function planFromItem(item: ItemView): PlanView | undefined {
+	const block = item.content.find(
+		(candidate): candidate is Extract<ItemContentBlockView, { type: "plan" }> => candidate.type === "plan",
+	);
+	return block?.plan;
+}
+
+function latestProposedPlan(itemOrder: readonly string[], itemsById: ReadonlyMap<string, ItemView>): PlanView | undefined {
+	for (let index = itemOrder.length - 1; index >= 0; index -= 1) {
+		const item = itemsById.get(itemOrder[index]!);
+		if (!item) continue;
+		const plan = planFromItem(item);
+		if (plan?.status === "proposed") return plan;
+	}
+	return undefined;
+}
+
+function findPlanRevision(
+	itemOrder: readonly string[],
+	itemsById: ReadonlyMap<string, ItemView>,
+	planId: string,
+	revision: number,
+): PlanView | undefined {
+	for (const itemId of itemOrder) {
+		const item = itemsById.get(itemId);
+		if (!item) continue;
+		const plan = planFromItem(item);
+		if (plan?.planId === planId && plan.revision === revision) return plan;
+	}
+	return undefined;
+}
+
 export function shouldResnapshotAfterReady(
 	before: AppStoreSnapshot,
 	next: Awaited<ReturnType<MetisDesktopApi["getServerState"]>>,
@@ -237,6 +273,14 @@ export function App({ api, store }: AppProps) {
 	const [toolsSidebarPreferredWidth, setToolsSidebarPreferredWidth] = useState(393);
 	const [toolsSidebarWidth, setToolsSidebarWidth] = useState(393);
 	const [previewRequest, setPreviewRequest] = useState<UniversalPreviewTarget | null>(null);
+	const [planPreviewRequest, setPlanPreviewRequest] = useState<PlanView | null>(null);
+	const [planRevisionTarget, setPlanRevisionTarget] = useState<PlanView | null>(null);
+	const [pendingPlanAction, setPendingPlanAction] = useState<{
+		readonly action: "start" | "cancel";
+		readonly planId: string;
+		readonly revision: number;
+	} | null>(null);
+	const [pendingCollaborationMode, setPendingCollaborationMode] = useState<CollaborationModeView | null>(null);
 	const [bootstrapped, setBootstrapped] = useState(false);
 	const [theme, setTheme] = useState<AppTheme>(() => loadTheme(localStorage));
 	const [generalPreferences, setGeneralPreferences] = useState(() => loadGeneralPreferences(localStorage));
@@ -1133,6 +1177,10 @@ export function App({ api, store }: AppProps) {
 		setContextStatus(null);
 		requestComposerControl(null);
 		setCompactingSession((current) => current?.sessionId === visibleActiveSession?.sessionId ? current : null);
+		setPlanPreviewRequest(null);
+		setPlanRevisionTarget(null);
+		setPendingPlanAction(null);
+		setPendingCollaborationMode(null);
 	}, [requestComposerControl, visibleActiveSession?.sessionId]);
 	const skillSessionId = visibleActiveSession?.sessionId ?? visibleNewTaskDraft?.sessionId;
 	const shouldListSkills = destination === "tasks" && (newTaskOpen || visibleActiveSession !== undefined);
@@ -1240,6 +1288,7 @@ export function App({ api, store }: AppProps) {
 				await api.startTurn({ sessionId: visibleActiveSession.sessionId, requestId: request.requestId, ...composerPayload(input) });
 			}
 			activeTurnRequest.current = null;
+			setPlanRevisionTarget(null);
 		} catch (cause) {
 			reportError(cause);
 			throw cause;
@@ -1413,6 +1462,111 @@ export function App({ api, store }: AppProps) {
 		newTaskOpen && activeSession?.mode === mode ? activeSession : undefined
 	);
 	const writableSessionId = visibleActiveSession?.scheduled === undefined ? visibleActiveSession?.sessionId : undefined;
+	const currentProposedPlan = latestProposedPlan(state.itemOrder, state.itemsById);
+	const planActionsBusy =
+		pendingPlanAction !== null ||
+		!serverReady ||
+		state.syncStatus !== "ready" ||
+		compactingSession !== null ||
+		inlineInteraction !== undefined ||
+		running;
+	const collaborationModeValue = pendingCollaborationMode ?? state.collaborationMode;
+	const collaborationToggleDisabled =
+		!serverReady ||
+		state.syncStatus !== "ready" ||
+		compactingSession !== null ||
+		inlineInteraction !== undefined ||
+		pendingCollaborationMode !== null ||
+		currentProposedPlan !== undefined;
+
+	const changeCollaborationMode = useCallback(async (next: CollaborationModeView) => {
+		if (!writableSessionId || pendingCollaborationMode !== null) return;
+		if (next === "default" && currentProposedPlan) return;
+		setPendingCollaborationMode(next);
+		try {
+			await api.setCollaborationMode({
+				sessionId: writableSessionId,
+				requestId: crypto.randomUUID(),
+				collaborationMode: next,
+			});
+		} catch (cause) {
+			setPendingCollaborationMode(null);
+			reportError(cause);
+			throw cause;
+		}
+	}, [api, currentProposedPlan, pendingCollaborationMode, reportError, writableSessionId]);
+
+	const revisePlan = useCallback((plan: PlanView) => {
+		setPlanRevisionTarget(plan);
+		requestAnimationFrame(() => document.getElementById("composer-input")?.focus());
+	}, []);
+
+	const openPlan = useCallback((plan: PlanView) => {
+		setPlanPreviewRequest(plan);
+		showToolsSidebar();
+	}, [showToolsSidebar]);
+
+	const startPlan = useCallback(async (plan: PlanView) => {
+		if (!writableSessionId || planActionsBusy) return;
+		setPendingPlanAction({ action: "start", planId: plan.planId, revision: plan.revision });
+		setPlanRevisionTarget(null);
+		try {
+			await api.startPlanExecution({
+				sessionId: writableSessionId,
+				requestId: crypto.randomUUID(),
+				planId: plan.planId,
+				revision: plan.revision,
+			});
+		} catch (cause) {
+			setPendingPlanAction(null);
+			reportError(cause);
+		}
+	}, [api, planActionsBusy, reportError, writableSessionId]);
+
+	const cancelPlan = useCallback(async (plan: PlanView) => {
+		if (!writableSessionId || planActionsBusy) return;
+		setPendingPlanAction({ action: "cancel", planId: plan.planId, revision: plan.revision });
+		setPlanRevisionTarget(null);
+		try {
+			await api.cancelPlan({
+				sessionId: writableSessionId,
+				requestId: crypto.randomUUID(),
+				planId: plan.planId,
+				revision: plan.revision,
+			});
+		} catch (cause) {
+			setPendingPlanAction(null);
+			reportError(cause);
+		}
+	}, [api, planActionsBusy, reportError, writableSessionId]);
+
+	useEffect(() => {
+		if (pendingCollaborationMode === null) return;
+		if (state.collaborationMode === pendingCollaborationMode) setPendingCollaborationMode(null);
+	}, [pendingCollaborationMode, state.collaborationMode]);
+
+	useEffect(() => {
+		if (!pendingPlanAction) return;
+		const plan = findPlanRevision(
+			state.itemOrder,
+			state.itemsById,
+			pendingPlanAction.planId,
+			pendingPlanAction.revision,
+		);
+		if (!plan || plan.status !== "proposed") setPendingPlanAction(null);
+	}, [pendingPlanAction, state.itemOrder, state.itemsById]);
+
+	useEffect(() => {
+		if (!planRevisionTarget) return;
+		const plan = findPlanRevision(
+			state.itemOrder,
+			state.itemsById,
+			planRevisionTarget.planId,
+			planRevisionTarget.revision,
+		);
+		if (!plan || plan.status !== "proposed") setPlanRevisionTarget(null);
+	}, [planRevisionTarget, state.itemOrder, state.itemsById]);
+
 	const compactBlocked = running || inlineInteraction !== undefined || compactingSession !== null;
 	const isCompacting = compactingSession !== null;
 	const assistantUsageKey = latestAssistantUsageKey(state.itemOrder, state.itemsById);
@@ -1661,6 +1815,23 @@ export function App({ api, store }: AppProps) {
 			value={state.permissionMode}
 		/>
 	) : undefined;
+	const collaborationControl = visibleActiveSession ? (
+		<CollaborationModeToggle
+			disabled={collaborationToggleDisabled}
+			onChange={(mode) => void changeCollaborationMode(mode).catch(() => undefined)}
+			value={collaborationModeValue}
+		/>
+	) : undefined;
+	const planRevisionChip = planRevisionTarget ? (
+		<div className="composer-plan-context">
+			<span className="composer-plan-revision-chip">
+				{t("Revise plan")}: {planRevisionTarget.title} · r{planRevisionTarget.revision}
+			</span>
+			<button aria-label={t("Remove revision context")} onClick={() => setPlanRevisionTarget(null)} type="button">
+				×
+			</button>
+		</div>
+	) : null;
 	const connectedMcpServers = mcpServers.filter((server) => server.effective && server.enabled && server.state === "connected");
 	const mcpConnectionState = mcpServers.some((server) =>
 		server.effective && server.enabled && (
@@ -1833,17 +2004,24 @@ export function App({ api, store }: AppProps) {
 								itemIds={state.itemOrder}
 								itemsById={state.itemsById}
 								loadingOlder={loadingOlder}
+								onCancelPlan={(plan) => void cancelPlan(plan)}
 								onCopy={(text) => void api.writeClipboardText({ text }).catch(reportError)}
 								onFork={forkFromReply}
 								onLoadOlder={loadOlder}
 								onOpenDeliveredFile={(fileId, action) => void api.openDeliveredFile({ sessionId: visibleActiveSession.sessionId, fileId, action }).catch(reportError)}
+								onOpenPlan={openPlan}
 								onPreviewDeliveredFile={handlePreviewDeliveredFile}
+								onRevisePlan={revisePlan}
+								onStartPlan={(plan) => void startPlan(plan)}
+								planActionsBusy={planActionsBusy}
 							/>
 							{compactingSession?.sessionId === visibleActiveSession.sessionId && (
 								<TurnRuntimeStatus items={[]} running startedAt={compactingSession.startedAt} variant="compaction" />
 							)}
 								<Composer
 									appearance={visibleActiveSession.mode}
+									collaborationControl={collaborationControl}
+									contextControl={planRevisionChip}
 									contextUsageExpanded={sessionStatusPanel?.sessionId === visibleActiveSession.sessionId && !sessionStatusPanel.closing}
 									contextUsagePercent={contextStatus && contextStatus.sessionId === visibleActiveSession.sessionId
 										? contextUsagePercent(contextStatus)
@@ -1876,7 +2054,13 @@ export function App({ api, store }: AppProps) {
 								onSlashCommand={handleSlashCommand}
 								onSubmit={submit}
 								permissionControl={permissionControl}
-								placeholder={t(running || state.queuedTurns.length > 0 ? "Add a queued message…" : "Write a message…")}
+								placeholder={t(
+									planRevisionTarget
+										? "Describe what should change in this plan…"
+										: running || state.queuedTurns.length > 0
+											? "Add a queued message…"
+											: "Write a message…",
+								)}
 								queuedTurnControl={<QueuedTurnList disabled={!serverReady || state.syncStatus !== "ready" || compactingSession !== null} onDelete={deleteQueuedTurn} onSend={sendQueuedTurn} onUpdate={updateQueuedTurn} running={running} turns={state.queuedTurns} />}
 								queueing={state.queuedTurns.length > 0}
 								running={running}
@@ -1899,6 +2083,7 @@ export function App({ api, store }: AppProps) {
 					onError={reportError}
 					onWidthChange={updateToolsSidebarWidth}
 					open={toolsSidebarAvailable && toolsSidebarOpen && !settingsOpen}
+					planPreviewRequest={planPreviewRequest}
 					preferredWidth={toolsSidebarPreferredWidth}
 					previewRequest={previewRequest}
 					store={store}

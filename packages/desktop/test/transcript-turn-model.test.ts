@@ -2,8 +2,10 @@ import type { ItemContentBlockView, ItemView } from "@metis/app-protocol";
 import { describe, expect, it } from "vitest";
 import {
 	actionSummary,
+	buildCodeTurnPresentation,
 	buildTurnPresentation,
 	commandText,
+	messageText,
 	type ToolCallBlock,
 	type ToolResultBlock,
 	toolTranscriptPresentation,
@@ -371,5 +373,28 @@ describe("transcript turn presentation", () => {
 				(segment) => segment.type !== "activity" || segment.calls.every((call) => call.name !== "deliver_file"),
 			),
 		).toBe(true);
+	});
+
+	it("keeps plan blocks out of ordinary assistant text presentation", () => {
+		const items: ItemView[] = [
+			item("plan-item", "assistant", [
+				{
+					type: "plan",
+					plan: {
+						planId: "plan-1",
+						revision: 1,
+						title: "Safe plan",
+						markdown: "# Plan",
+						status: "proposed",
+						createdAt: "2026-08-18T00:00:00.000Z",
+					},
+				},
+			]),
+		];
+		const chat = buildTurnPresentation(items);
+		expect(chat.segments).toEqual([]);
+		const code = buildCodeTurnPresentation(items);
+		expect(code.segments).toEqual([]);
+		expect(messageText(items[0]!)).toBe("");
 	});
 });

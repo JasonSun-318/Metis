@@ -43,6 +43,7 @@ function StaticBlock({ block }: { readonly block: ItemContentBlockView }) {
 		case "tool_call":
 		case "tool_result":
 		case "compaction":
+		case "plan":
 			return null;
 	}
 }

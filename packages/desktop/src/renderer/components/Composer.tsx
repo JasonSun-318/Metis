@@ -265,6 +265,8 @@ interface ComposerProps {
 	readonly onSlashCommand?: (command: ComposerSlashCommand) => void | Promise<void>;
 	readonly onGoalCommand?: (command: GoalSlashCommand) => void | Promise<void>;
 	readonly appearance?: "chat" | "code";
+	readonly collaborationControl?: ReactNode;
+	readonly contextControl?: ReactNode;
 	readonly interactionControl?: ReactNode;
 	readonly goalControl?: ReactNode;
 	readonly queuedTurnControl?: ReactNode;
@@ -300,6 +302,8 @@ export function Composer({
 	onSlashCommand,
 	onGoalCommand,
 	appearance = "code",
+	collaborationControl,
+	contextControl,
 	contextUsageExpanded = false,
 	contextUsagePercent,
 	onOpenContextUsage,
@@ -696,6 +700,7 @@ export function Composer({
 							))}
 						</div>
 					)}
+					{contextControl}
 					<div className="composer-input-line">
 						<div
 							aria-label={t("Message Metis")}
@@ -739,6 +744,7 @@ export function Composer({
 					<div className="composer-leading">
 						{isCode ? (
 							<>
+								{collaborationControl}
 								{permissionControl}
 								<ComposerAddMenu
 									commandRequest={commandRequest}
@@ -765,6 +771,7 @@ export function Composer({
 									onSelectSkill={handleAddSkill}
 									skills={skills}
 								/>
+								{collaborationControl}
 								{permissionControl}
 							</>
 						)}

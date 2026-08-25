@@ -2173,6 +2173,69 @@ textarea { resize: none; }
 	.general-font-select, .web-search-provider-select, .web-search-api-key, .memory-model-input, .memory-engine-select { width: 100%; }
 }
 
+.collaboration-mode-toggle {
+	border: 1px solid var(--border);
+	border-radius: 999px;
+	color: var(--text-18);
+	font-size: 12px;
+	font-weight: 500;
+	min-height: 28px;
+	padding: 0 10px;
+}
+.collaboration-mode-toggle.is-active { background: var(--surface-08); color: var(--text-strong); border-color: var(--border-strong); }
+.collaboration-mode-toggle:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.plan-card {
+	border: 1px solid var(--border);
+	border-radius: 12px;
+	background: var(--surface-04);
+	display: grid;
+	gap: 10px;
+	padding: 12px;
+}
+.plan-card-header { display: grid; gap: 4px; }
+.plan-card-title { font-size: 15px; font-weight: 600; }
+.plan-card-meta { color: var(--text-12); font-size: 12px; }
+.plan-card-body {
+	height: 280px;
+	overflow-y: auto;
+	overscroll-behavior: contain;
+}
+.plan-card-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.plan-card-actions button {
+	border: 1px solid var(--border);
+	border-radius: 8px;
+	font-size: 12px;
+	min-height: 30px;
+	padding: 0 10px;
+}
+.plan-card-actions button:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.plan-card-actions button:disabled { opacity: 0.55; }
+.transcript-plan-row { padding: 8px 0; }
+.plan-preview { display: grid; gap: 12px; padding: 12px; }
+.plan-preview-header { display: grid; gap: 4px; }
+.plan-preview-header h2 { font-size: 16px; font-weight: 600; }
+.plan-preview-body { max-height: calc(100vh - 180px); overflow: auto; }
+.composer-plan-context {
+	align-items: center;
+	display: flex;
+	gap: 8px;
+	margin-bottom: 8px;
+}
+.composer-plan-revision-chip {
+	background: var(--surface-06);
+	border: 1px solid var(--border);
+	border-radius: 999px;
+	font-size: 12px;
+	padding: 4px 10px;
+}
+.composer-plan-context button {
+	border-radius: 6px;
+	font-size: 14px;
+	line-height: 1;
+	min-height: 24px;
+	min-width: 24px;
+}
+
 :root[data-motion="reduced"] *,
 :root[data-motion="reduced"] *::before,
 :root[data-motion="reduced"] *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; scroll-behavior: auto !important; transition-duration: .01ms !important; }

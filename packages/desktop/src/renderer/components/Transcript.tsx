@@ -1,8 +1,9 @@
-import type { AgentMode, ItemView, SessionDeliveredFileView } from "@metis/app-protocol";
+import type { AgentMode, ItemView, PlanView, SessionDeliveredFileView } from "@metis/app-protocol";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { CodeTranscriptTurn } from "./CodeTranscriptTurn.tsx";
+import { PlanCard } from "./PlanCard.tsx";
 import { TranscriptTurn } from "./TranscriptTurn.tsx";
 
 interface TranscriptProps {
@@ -19,6 +20,11 @@ interface TranscriptProps {
 	readonly onCopy?: (text: string) => void;
 	readonly onOpenDeliveredFile?: (fileId: string, action: "default" | "reveal") => void;
 	readonly onPreviewDeliveredFile?: (file: SessionDeliveredFileView) => void;
+	readonly onStartPlan?: (plan: PlanView) => void;
+	readonly onCancelPlan?: (plan: PlanView) => void;
+	readonly onOpenPlan?: (plan: PlanView) => void;
+	readonly onRevisePlan?: (plan: PlanView) => void;
+	readonly planActionsBusy?: boolean;
 	readonly ariaLabel?: string;
 	readonly latestLabel?: string;
 	readonly olderLabel?: string;
@@ -57,7 +63,7 @@ function transcriptRows(appearance: AgentMode, itemIds: readonly string[], items
 	return rows;
 }
 
-export function Transcript({ activeTurnId, activeTurnStartedAt, appearance, ariaLabel = "Conversation transcript", autoLoadOlder = false, hasOlder, itemIds, itemsById, latestLabel, loadingOlder, onCopy, onFork, onOpenDeliveredFile, onPreviewDeliveredFile, onLoadOlder, olderLabel = "Load older messages" }: TranscriptProps) {
+export function Transcript({ activeTurnId, activeTurnStartedAt, appearance, ariaLabel = "Conversation transcript", autoLoadOlder = false, hasOlder, itemIds, itemsById, latestLabel, loadingOlder, onCancelPlan, onCopy, onFork, onOpenDeliveredFile, onOpenPlan, onPreviewDeliveredFile, onLoadOlder, onRevisePlan, onStartPlan, olderLabel = "Load older messages", planActionsBusy = false }: TranscriptProps) {
 	const { t } = useTranslation();
 	const scrollRef = useRef<HTMLDivElement>(null);
 	const loadingOlderRef = useRef(false);
@@ -166,6 +172,30 @@ export function Transcript({ activeTurnId, activeTurnStartedAt, appearance, aria
 							return item ? [item] : [];
 						});
 						if (items.length === 0) return null;
+						const planBlock = items
+							.flatMap((item) => item.content)
+							.find((block): block is Extract<ItemView["content"][number], { type: "plan" }> => block.type === "plan");
+						if (planBlock) {
+							return (
+								<article
+									className="transcript-plan-row"
+									data-index={row.index}
+									data-transcript-plan={planBlock.plan.planId}
+									key={row.key}
+									ref={virtualizer.measureElement}
+									style={{ transform: `translateY(${row.start}px)` }}
+								>
+									<PlanCard
+										busy={planActionsBusy}
+										onCancel={(plan) => onCancelPlan?.(plan)}
+										onOpen={(plan) => onOpenPlan?.(plan)}
+										onRevise={(plan) => onRevisePlan?.(plan)}
+										onStart={(plan) => onStartPlan?.(plan)}
+										plan={planBlock.plan}
+									/>
+								</article>
+							);
+						}
 						const compaction = items.some((item) => item.content.some((block) => block.type === "compaction"));
 						const running = activeTurnId !== null && activeTurnId !== undefined &&
 							items.some((item) => item.turnId === activeTurnId);
