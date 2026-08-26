@@ -1944,11 +1944,14 @@ export function App({ api, store }: AppProps) {
 							<SidebarSimple aria-hidden="true" size={17} />
 						</button>
 					)}
-					{toolsSidebarAvailable && !toolsSidebarOpen && <button
+					{toolsSidebarAvailable && <button
 						aria-label={t(toolsSidebarOpen ? "Hide tools sidebar" : "Show tools sidebar")}
 						aria-pressed={toolsSidebarOpen}
 						className="details-sidebar-toggle"
-						onClick={showToolsSidebar}
+						onClick={() => {
+							if (toolsSidebarOpen) setToolsSidebarOpen(false);
+							else showToolsSidebar();
+						}}
 						type="button"
 					>
 						<SidebarSimple aria-hidden="true" size={17} />

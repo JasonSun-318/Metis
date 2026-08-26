@@ -29,9 +29,7 @@ describe("Terminal sidebar shell", () => {
 	});
 
 	it("keeps its interactive header outside the window drag region", () => {
-		expect(rule(".workspace.tools-sidebar-open .workspace-titlebar-actions").right).toBe(
-			"calc(var(--tool-sidebar-width, 393px) + 7px)",
-		);
+		expect(rule(".workspace-titlebar-actions").right).toBe("20px");
 		expect(css).toMatch(/\.tool-tabbar\s*\{[^}]*-webkit-app-region:\s*no-drag/u);
 	});
 

@@ -719,9 +719,9 @@ export function ToolsSidebar({ activeSession, api, cleanupSessionIds, mode, onCl
 
 	const toolMenu = (compact: boolean) => (
 		<nav aria-label={t("Available tools")} className={compact ? "tool-add-menu" : "tool-sidebar-menu"} role={compact ? "menu" : undefined}>
-			{mode === "code" && <button disabled={!activeSession?.cwd} onClick={addReview} role={compact ? "menuitem" : undefined} title={activeSession?.cwd ? undefined : t("Open a task before reviewing changes")} type="button"><ClipboardText aria-hidden="true" size={14} /><span>{t("Review")}</span><kbd>⌃⇧G</kbd></button>}
+			{mode === "code" && <button disabled={!activeSession?.cwd} onClick={addReview} role={compact ? "menuitem" : undefined} title={activeSession?.cwd ? undefined : t("Open a task before reviewing changes")} type="button"><ClipboardText aria-hidden="true" size={14} /><span>{t("Review")}</span></button>}
 			<button disabled={!activeSession?.cwd} onClick={addTerminal} role={compact ? "menuitem" : undefined} title={activeSession?.cwd ? undefined : t("Open a task before starting a terminal")} type="button"><TerminalWindow aria-hidden="true" size={14} /><span>{t("Terminal")}</span></button>
-			<button disabled={!activeSession} onClick={addBrowser} role={compact ? "menuitem" : undefined} title={activeSession ? undefined : t("Open a task before starting a browser")} type="button"><Globe aria-hidden="true" size={14} /><span>{t("Browser")}</span><kbd>⌘T</kbd></button>
+			<button disabled={!activeSession} onClick={addBrowser} role={compact ? "menuitem" : undefined} title={activeSession ? undefined : t("Open a task before starting a browser")} type="button"><Globe aria-hidden="true" size={14} /><span>{t("Browser")}</span></button>
 			{mode === "code" && <button disabled={!activeSession?.cwd} onClick={addFiles} role={compact ? "menuitem" : undefined} title={activeSession?.cwd ? undefined : t("Open a task before browsing files")} type="button"><FolderSimple aria-hidden="true" size={14} /><span>{t("Files")}</span></button>}
 			{mode === "code" && <button disabled={!activeSession} onClick={addSubagent} role={compact ? "menuitem" : undefined} type="button"><Robot aria-hidden="true" size={14} /><span>{t("Subagent")}</span></button>}
 		</nav>
@@ -794,7 +794,6 @@ export function ToolsSidebar({ activeSession, api, cleanupSessionIds, mode, onCl
 						</div>
 					</div>
 				)}
-				<button aria-label={t("Hide tools sidebar")} className="tool-sidebar-collapse" onClick={onClose} type="button"><SidebarSimple aria-hidden="true" size={15} /></button>
 			</header>
 			{tabs.length === 0 && toolMenu(false)}
 			<div className="tool-stage" hidden={tabs.length === 0}>

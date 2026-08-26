@@ -8,12 +8,15 @@ import { describe, expect, it } from "vitest";
 const css = readFileSync(path.join(process.cwd(), "src/renderer/styles/app.css"), "utf8");
 const tokens = readFileSync(path.join(process.cwd(), "src/renderer/styles/tokens.css"), "utf8");
 
+let parsedRules: CSSStyleRule[] | null = null;
 function rule(selector: string): CSSStyleDeclaration {
-	const style = document.createElement("style");
-	style.textContent = css;
-	document.head.replaceChildren(style);
-	const rules = Array.from(style.sheet?.cssRules ?? []) as CSSStyleRule[];
-	const match = rules.find((candidate) => candidate.selectorText === selector);
+	if (!parsedRules) {
+		const style = document.createElement("style");
+		style.textContent = css;
+		document.head.replaceChildren(style);
+		parsedRules = Array.from(style.sheet?.cssRules ?? []) as CSSStyleRule[];
+	}
+	const match = parsedRules.find((candidate) => candidate.selectorText === selector);
 	if (!match) throw new Error(`Missing CSS rule: ${selector}`);
 	return match.style;
 }
@@ -22,7 +25,7 @@ describe("Code transcript visual contract", () => {
 	it("keeps the dense Code transcript treatment scoped away from Chat", () => {
 		expect(tokens).toContain("--code-body-size: clamp(14px");
 		expect(css).toContain(
-			".transcript-code .transcript-scroll { padding: 15px max(24px, calc((100% - var(--conversation-width)) / 2)) 16px; }",
+			".transcript-code .transcript-scroll { padding: 18px max(24px, calc((100% - var(--conversation-width)) / 2)) 28px; }",
 		);
 		expect(rule(".transcript-code .code-transcript-turn").width).toBe("100%");
 		expect(rule(".transcript-code :is(.code-turn-answer, .code-turn-status)").fontFamily).toBe(

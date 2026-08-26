@@ -3789,9 +3789,7 @@ describe("Chat desktop shell", () => {
 		expect(api.createTerminal).toHaveBeenCalledTimes(1);
 		expect(api.createTerminal).toHaveBeenCalledWith(expect.objectContaining({ cwd: "/work/chat-project" }));
 		expect(container.querySelectorAll('[role="tab"]')).toHaveLength(1);
-		const toolSidebar = container.querySelector<HTMLElement>(".tool-sidebar")!;
-		expect(button(toolSidebar, "Hide tools sidebar")).toBeTruthy();
-		expect(container.querySelector('.workspace-titlebar-actions [aria-label="Hide tools sidebar"]')).toBeNull();
+		expect(container.querySelector('.workspace-titlebar-actions [aria-label="Hide tools sidebar"]')).toBeTruthy();
 		expect([...container.querySelector<HTMLElement>(".tool-tabbar")!.children].map((child) => child.className)).toEqual([
 			"tool-tabs-scroll",
 			"tool-add",

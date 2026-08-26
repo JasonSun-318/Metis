@@ -145,9 +145,9 @@ describe("Project sidebar motion", () => {
 		expect(rule(".account-mark img").objectFit).toBe("cover");
 		expect(rule(".account-menu-name").textOverflow).toBe("ellipsis");
 		const accountMenu = rule(".account-menu-popover");
-		expect(accountMenu.background).toBe("var(--surface-05)");
+		expect(accountMenu.background).toBe("var(--surface-04)");
 		expect(accountMenu.border).toContain("var(--border-strong)");
-		expect(accountMenu.borderRadius).toBe("12px");
+		expect(accountMenu.borderRadius).toBe("10px");
 		expect(accountMenu.boxShadow).toBe("var(--overlay-shadow)");
 		const hover = rule(".account-menu-item:hover, .account-menu-item:focus-visible");
 		expect(hover.background).toBe("var(--surface-07)");

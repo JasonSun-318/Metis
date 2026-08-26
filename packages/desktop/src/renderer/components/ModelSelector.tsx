@@ -143,7 +143,6 @@ export function ModelSelector({ available, commandRequest, disabled, onChange, v
 			</button>
 			{open && (
 				<div aria-label={t("Providers")} className="model-selector-popover is-provider" role="menu">
-					<p>{t("Providers")}</p>
 					<input
 						aria-label={t("Search providers")}
 						autoComplete="off"
