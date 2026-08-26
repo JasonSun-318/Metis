@@ -57,7 +57,7 @@ import { createSessionId } from "./core/session-id.ts";
 import { assertValidSessionId, SessionManager } from "./core/session-manager.ts";
 import { removeOwnedManagedWorkspace, resolveNewSessionWorkspace } from "./core/session-workspace.ts";
 import { SettingsManager } from "./core/settings-manager.ts";
-import { buildChildSystemPrompt } from "./core/subagents/prompts.ts";
+import { buildChildSystemPromptFromAgentConfig } from "./core/subagents/prompts.ts";
 import { printTimings, resetTimings, time } from "./core/timings.ts";
 import { hasTrustRequiringProjectResources, ProjectTrustStore } from "./core/trust-manager.ts";
 import { handleMcpCliCommand } from "./mcp-cli.ts";
@@ -922,9 +922,6 @@ export async function main(args: string[], options?: MainOptions) {
 				const childModel = childConfig
 					? modelRegistry.find(childConfig.model.provider, childConfig.model.modelId)
 					: undefined;
-				if (childConfig?.mode !== undefined && childConfig.mode !== "code") {
-					throw new Error("Legacy Chat subagents are cleanup-only and cannot start a runtime");
-				}
 				if (childConfig && (!childModel || !modelRegistry.hasConfiguredAuth(childModel))) {
 					throw new Error(
 						`Child model is unavailable: ${childConfig.model.provider}/${childConfig.model.modelId}`,
@@ -946,7 +943,7 @@ export async function main(args: string[], options?: MainOptions) {
 					customTools: childConfig ? [] : sessionOptions.customTools,
 					ultraAvailable,
 					...(childConfig
-						? { additionalSystemPrompt: buildChildSystemPrompt(childConfig) }
+						? { additionalSystemPrompt: buildChildSystemPromptFromAgentConfig(childConfig) }
 						: scheduleEligible
 							? { additionalSystemPrompt: SCHEDULE_MAIN_PROMPT }
 							: {}),

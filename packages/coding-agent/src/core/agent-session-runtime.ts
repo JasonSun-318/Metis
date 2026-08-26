@@ -26,16 +26,16 @@ import { materializeRuntimeRecovery, type RecoverablePromptDraft } from "./runti
 import type { CreateAgentSessionResult } from "./sdk.ts";
 import { assertSessionCwdExists } from "./session-cwd.ts";
 import { createSessionId } from "./session-id.ts";
-import { getSessionSubagentDir, SessionManager } from "./session-manager.ts";
+import { getSessionAgentDir, SessionManager } from "./session-manager.ts";
 import { removeOwnedManagedWorkspace, resolveNewSessionWorkspace } from "./session-workspace.ts";
 import { SubagentManager } from "./subagents/manager.ts";
 import { SUBAGENT_COORDINATION_PROMPT } from "./subagents/prompts.ts";
 import { createSubagentTools } from "./subagents/tools.ts";
 import {
 	type ActivateSubagentsResult,
+	type AgentConfig,
 	SUBAGENT_ACTIVATION_TOOL_NAME,
 	SUBAGENT_TOOL_NAMES,
-	type SubagentConfig,
 } from "./subagents/types.ts";
 
 /**
@@ -95,7 +95,7 @@ export type CreateAgentSessionRuntimeFactory = (options: {
 	sessionStartEvent?: SessionStartEvent;
 	projectTrustContext?: ProjectTrustContext;
 	ultraAvailable?: boolean;
-	childConfig?: SubagentConfig;
+	childConfig?: AgentConfig;
 	permissionModeCeiling?: () => PermissionMode;
 }) => Promise<CreateAgentSessionRuntimeResult>;
 
@@ -322,7 +322,7 @@ export class AgentSessionRuntime {
 
 	async initializeSubagents(): Promise<void> {
 		this.assertPubliclyAccessible();
-		await this.subagentManagerValue?.recoverCloseMarkers();
+		await this.subagentManagerValue?.recoverDeleteMarkers();
 	}
 
 	private bindDurableSession(session: AgentSession): void {
@@ -339,14 +339,12 @@ export class AgentSessionRuntime {
 		this.attemptedSubagentContinuationIds.clear();
 		this.subagentContinuationTask = undefined;
 		const header = session.sessionManager.getHeader();
-		if (!session.sessionManager.isPersisted() || header?.subagent || header?.scheduled) {
+		if (!session.sessionManager.isPersisted() || header?.agent || header?.subagent || header?.scheduled) {
 			this.subagentManagerValue = undefined;
 			return;
 		}
-		const hasLegacyChildren =
-			existsSync(getSessionSubagentDir(this._services.agentDir, session.sessionManager.getSessionId())) ||
-			session.sessionManager.getDurableJournalSnapshot().some((entry) => entry.type === "subagent_closed");
-		if (session.mode !== "code" && !hasLegacyChildren) {
+		const hasAgents = existsSync(getSessionAgentDir(this._services.agentDir, session.sessionManager.getSessionId()));
+		if (session.mode !== "code" && !hasAgents) {
 			this.subagentManagerValue = undefined;
 			return;
 		}
@@ -402,7 +400,7 @@ export class AgentSessionRuntime {
 				];
 			}
 		});
-		manager.attachParent(session);
+		manager.attachActor(session);
 		sync();
 	}
 
@@ -484,8 +482,10 @@ export class AgentSessionRuntime {
 		if (!manager) return;
 		const management = new Set<string>([SUBAGENT_ACTIVATION_TOOL_NAME, ...SUBAGENT_TOOL_NAMES]);
 		const base = session.getConfiguredActiveToolNames().filter((name) => !management.has(name));
-		const residual = manager.listSummaries().some((summary) => summary.status !== "closed");
-		const cleanup = residual ? ["inspect_agents", "interrupt_agent", "close_agent"] : [];
+		const residual = manager
+			.listSummaries(session.sessionManager.getSessionId())
+			.some((summary) => !summary.archived);
+		const cleanup = residual ? ["inspect_agents", "interrupt_agent"] : [];
 		const ultra = session.mode === "code" && session.getThinkingSelection() === "ultra";
 		if (!ultra) this.subagentsActivated = false;
 		const desired = ultra
@@ -1157,7 +1157,7 @@ export class AgentSessionRuntime {
 		this.submissionDisabled = false;
 		this.bindDurableSession(prepared.result.session);
 		this.bindSubagents(prepared.result.session);
-		await this.subagentManagerValue?.recoverCloseMarkers();
+		await this.subagentManagerValue?.recoverDeleteMarkers();
 		this.emitQueuedTurns();
 	}
 

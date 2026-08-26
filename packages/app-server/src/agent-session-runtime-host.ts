@@ -17,10 +17,11 @@ import {
 	type AgentSession,
 	type AgentSessionEvent,
 	type AgentSessionRuntime,
+	type AgentSummary,
 	type AuthCredential,
 	type AuthStorage,
 	type AuthStorageChange,
-	buildChildSystemPrompt,
+	buildChildSystemPromptFromAgentConfig,
 	type CreateAgentSessionRuntimeFactory,
 	copySessionDeliveredFiles,
 	createAgentSessionFromServices,
@@ -58,7 +59,6 @@ import {
 	SessionManager,
 	SettingsManager,
 	type Skill,
-	type SubagentSummary,
 	splitSessionAttachmentPrompt,
 } from "@metis/coding-agent";
 import type { CredentialCoordinator } from "./credential-coordinator.ts";
@@ -267,26 +267,40 @@ function completedTurnHasVisibleAssistantText(journal: readonly unknown[], turnI
 	return false;
 }
 
-function subagentView(summary: SubagentSummary): SessionSnapshot["subagents"][number] {
-	const { configuration, ...rest } = summary;
-	if (summary.status === "closed") {
+function agentSummaryView(summary: AgentSummary): SessionSnapshot["subagents"][number] {
+	const task = summary.currentTask ?? summary.latestTask;
+	const taskSummary = task?.taskSummary ?? "";
+	const finalSummary = task?.finalMessage;
+	if (summary.archived) {
 		return {
 			agentId: summary.agentId,
 			name: summary.name,
 			status: "closed",
-			taskSummary: summary.taskSummary,
-			...(summary.finalSummary ? { finalSummary: summary.finalSummary } : {}),
+			taskSummary,
+			...(finalSummary ? { finalSummary } : {}),
 			createdAt: summary.createdAt,
 			updatedAt: summary.updatedAt,
 		};
 	}
-	if (!configuration) throw new Error(`Active subagent is missing configuration: ${summary.agentId}`);
+	// ponytail: Task 8 should project full child configuration from the v13 agent header.
 	return {
-		...rest,
+		agentId: summary.agentId,
+		name: summary.name,
+		status: summary.status,
+		taskSummary,
+		...(finalSummary ? { finalSummary } : {}),
 		configuration: {
-			...configuration,
-			tools: [...configuration.tools],
+			mode: "code",
+			tools: [],
+			permissionMode: "ask",
+			model: { provider: "unknown", modelId: "unknown" },
+			thinkingLevel: "high",
+			cwd: "/",
+			forkTurns: 0,
+			timeoutSeconds: 60,
 		},
+		createdAt: summary.createdAt,
+		updatedAt: summary.updatedAt,
 	};
 }
 
@@ -458,17 +472,19 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 		this.unsubscribeAgent = session.subscribe((event) => this.onAgentEvent(event));
 		this.unsubscribeSubagents = this.runtime.subagentManager?.subscribe((event) => {
 			if (event.type === "activity") {
-				this.subagentLive.apply(event.agentId, event.turnId, event.event);
 				return;
 			}
 			if (event.type !== "updated") return;
-			this.publish({ type: "subagent/updated", sessionId: this.sessionId, subagent: subagentView(event.summary) });
+			this.publish({
+				type: "subagent/updated",
+				sessionId: this.sessionId,
+				subagent: agentSummaryView(event.summary),
+			});
 			if (
 				event.summary.status === "done" ||
 				event.summary.status === "failed" ||
 				event.summary.status === "stopped" ||
-				event.summary.status === "close_failed" ||
-				event.summary.status === "closed"
+				event.summary.archived
 			) {
 				this.subagentLive.clear(event.summary.agentId);
 				this.publish({
@@ -1299,7 +1315,7 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 	async readSubagentItems(input: ClientParams<"subagent/readItems">): Promise<ClientResult<"subagent/readItems">> {
 		const manager = this.runtime.subagentManager;
 		if (!manager) throw new AppServerError("NOT_FOUND", { sessionId: input.sessionId });
-		const journal = await manager.readJournal(input.agentId);
+		const journal = await manager.readJournal(this.sessionId, input.agentId);
 		const reduced = reduceRuntimeJournal(journal);
 		const turns = new Map(reduced.turns.map((turn) => [opaqueId(turn.turnId, "turn"), turn.state]));
 		const tools = new Map(reduced.tools.map((tool) => [opaqueId(tool.toolCallId, "tool"), tool.state]));
@@ -1324,7 +1340,10 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 	async interruptSubagent(input: ClientParams<"subagent/interrupt">): Promise<ClientResult<"subagent/interrupt">> {
 		const manager = this.runtime.subagentManager;
 		if (!manager) throw new AppServerError("NOT_FOUND", { sessionId: input.sessionId, requestId: input.requestId });
-		return { subagent: subagentView(await manager.interrupt(input.agentId)) };
+		await manager.interrupt(this.sessionId, input.agentId);
+		const summary = manager.listSummaries(this.sessionId).find((entry) => entry.agentId === input.agentId);
+		if (!summary) throw new AppServerError("NOT_FOUND", { sessionId: input.sessionId, requestId: input.requestId });
+		return { subagent: agentSummaryView(summary) };
 	}
 
 	async setThinkingSelection(
@@ -1479,7 +1498,7 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 			thinkingSelection: this.session.getThinkingSelection(),
 			actualThinkingLevel: this.session.thinkingLevel,
 			availableThinkingSelections: this.session.getAvailableThinkingSelections(),
-			subagents: [...(this.runtime.subagentManager?.listSummaries() ?? [])].map(subagentView),
+			subagents: [...(this.runtime.subagentManager?.listSummaries(this.sessionId) ?? [])].map(agentSummaryView),
 		});
 	}
 
@@ -2024,8 +2043,6 @@ export class AgentSessionRuntimeHost implements SessionRuntimeHost {
 		});
 		try {
 			const childModel = child ? services.modelRegistry.find(child.model.provider, child.model.modelId) : undefined;
-			if (child?.mode !== undefined && child.mode !== "code")
-				throw new Error("Legacy Chat subagents are cleanup-only and cannot start a runtime");
 			if (child && (!childModel || !services.modelRegistry.hasConfiguredAuth(childModel)))
 				throw new Error(`Child model is unavailable: ${child.model.provider}/${child.model.modelId}`);
 			const scheduleEligible =
@@ -2041,7 +2058,7 @@ export class AgentSessionRuntimeHost implements SessionRuntimeHost {
 							model: childModel!,
 							thinkingLevel: child.thinkingLevel,
 							tools: [...child.tools],
-							additionalSystemPrompt: buildChildSystemPrompt(child),
+							additionalSystemPrompt: buildChildSystemPromptFromAgentConfig(child),
 							includeAutoMemory: false,
 							permissionModeCeiling: options.permissionModeCeiling,
 						}

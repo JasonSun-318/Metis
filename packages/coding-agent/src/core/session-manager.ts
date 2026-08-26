@@ -1,4 +1,4 @@
-import type { AgentMessage } from "@metis/agent-core";
+import type { AgentMessage, ThinkingLevel } from "@metis/agent-core";
 import type { ImageContent, Message, TextContent } from "@metis/ai";
 import { createHash, randomUUID } from "crypto";
 import {
@@ -19,7 +19,7 @@ import {
 	unlinkSync,
 } from "fs";
 import { lstat, open, readdir } from "fs/promises";
-import { basename, dirname, isAbsolute, join, parse, relative, resolve, sep } from "path";
+import { basename, dirname, isAbsolute, join, normalize, parse, relative, resolve, sep } from "path";
 import { setImmediate as yieldToEventLoop } from "timers/promises";
 import { TextDecoder } from "util";
 import { getAgentDir as getDefaultAgentDir, getSessionsDir } from "../config.ts";
@@ -78,6 +78,8 @@ import {
 	getOwnedSessionWorkDirs,
 } from "./session-attachments.ts";
 import {
+	type AgentControlPayload,
+	isAgentControlEntryType,
 	isPlanControlEntryType,
 	isSessionControlEntryType,
 	isSessionDirectoryControlEntryType,
@@ -96,8 +98,9 @@ import {
 } from "./session-journal.ts";
 import { acquireModeProjectMutationLease, SessionLease, SessionLeaseError } from "./session-lease.ts";
 import { type CwdOrigin, getOwnedManagedWorkspace, publishManagedWorkspaceCopy } from "./session-workspace.ts";
+import type { AgentType } from "./subagents/types.ts";
 
-export const CURRENT_SESSION_VERSION = 12;
+export const CURRENT_SESSION_VERSION = 13;
 
 interface ImageReference {
 	type: "image_ref";
@@ -300,6 +303,12 @@ export function migrateSessionDisplayMetadata(
 export function getSessionSubagentDir(agentDir: string, parentSessionId: string): string {
 	assertValidSessionId(parentSessionId);
 	return join(resolvePath(agentDir), "subagents", parentSessionId);
+}
+
+/** Root-session-owned directory for Agent System v2 child session journals. */
+export function getSessionAgentDir(agentDir: string, rootSessionId: string): string {
+	assertValidSessionId(rootSessionId);
+	return join(resolvePath(agentDir), "agents", rootSessionId);
 }
 
 /**
@@ -802,6 +811,24 @@ export interface SessionHeader {
 		name: string;
 		parentSessionId: string;
 	};
+	agent?: {
+		agentId: string;
+		name: string;
+		parentSessionId: string;
+		rootSessionId: string;
+		agentPath: readonly string[];
+		agentType: AgentType;
+		tools: readonly string[];
+		writePolicy: "inherit" | "deny";
+		permissionMode: PersistedPermissionMode;
+		model: { provider: string; modelId: string };
+		thinkingLevel: ThinkingLevel;
+		cwd: string;
+		forkTurns: number | "all";
+		timeoutSeconds: number;
+		mayDelegate: boolean;
+		initialTask: string;
+	};
 	scheduled?: {
 		taskId: string;
 		runId: string;
@@ -819,6 +846,7 @@ export interface NewSessionOptions {
 	/** @deprecated Ignored. Ask/Auto/Full have no reviewer. */
 	reviewerEnabled?: boolean;
 	subagent?: SessionHeader["subagent"];
+	agent?: SessionHeader["agent"];
 	scheduled?: SessionHeader["scheduled"];
 }
 
@@ -1602,6 +1630,75 @@ function validateSessionHeader(record: Record<string, unknown>, filePath: string
 			corruptSession(filePath, 1, "Session header has an invalid subagent name");
 		}
 	}
+	if (header.agent !== undefined) {
+		if (!isJsonObject(header.agent)) corruptSession(filePath, 1, "Session header has an invalid agent marker");
+		const agent = header.agent;
+		try {
+			assertValidSessionId(agent.agentId);
+			assertValidSessionId(agent.parentSessionId);
+			assertValidSessionId(agent.rootSessionId);
+		} catch (error) {
+			throw new CorruptSessionError(filePath, 1, "Session header has an invalid agent id", { cause: error });
+		}
+		if (agent.agentId !== header.id) corruptSession(filePath, 1, "Session header agent id must match session id");
+		if (
+			typeof agent.name !== "string" ||
+			agent.name.length < 1 ||
+			agent.name.length > 128 ||
+			/[\u0000-\u001f\u007f-\u009f]/u.test(agent.name)
+		) {
+			corruptSession(filePath, 1, "Session header has an invalid agent name");
+		}
+		if (!Array.isArray(agent.agentPath) || agent.agentPath.length < 1 || agent.agentPath.length > 2) {
+			corruptSession(filePath, 1, "Session header has an invalid agent path");
+		}
+		if (agent.agentPath.at(-1) !== agent.agentId) {
+			corruptSession(filePath, 1, "Session header agent path must end with agent id");
+		}
+		if (
+			typeof agent.agentType !== "string" ||
+			(agent.agentType !== "default" &&
+				agent.agentType !== "explorer" &&
+				agent.agentType !== "worker" &&
+				agent.agentType !== "reviewer")
+		) {
+			corruptSession(filePath, 1, "Session header has an invalid agent type");
+		}
+		if (agent.writePolicy !== "inherit" && agent.writePolicy !== "deny") {
+			corruptSession(filePath, 1, "Session header has an invalid agent write policy");
+		}
+		if (!isPersistedPermissionMode(agent.permissionMode)) {
+			corruptSession(filePath, 1, "Session header has an invalid agent permission mode");
+		}
+		if (
+			!isJsonObject(agent.model) ||
+			typeof agent.model.provider !== "string" ||
+			typeof agent.model.modelId !== "string"
+		) {
+			corruptSession(filePath, 1, "Session header has an invalid agent model");
+		}
+		if (typeof agent.cwd !== "string" || !isAbsolute(agent.cwd) || normalize(agent.cwd) !== agent.cwd) {
+			corruptSession(filePath, 1, "Session header has an invalid agent cwd");
+		}
+		if (
+			agent.forkTurns !== "all" &&
+			(!Number.isInteger(agent.forkTurns) || agent.forkTurns < 0 || agent.forkTurns > 1_000)
+		) {
+			corruptSession(filePath, 1, "Session header has an invalid agent forkTurns");
+		}
+		if (!Number.isInteger(agent.timeoutSeconds) || agent.timeoutSeconds < 1 || agent.timeoutSeconds > 1_800) {
+			corruptSession(filePath, 1, "Session header has an invalid agent timeout");
+		}
+		if (typeof agent.mayDelegate !== "boolean") {
+			corruptSession(filePath, 1, "Session header has an invalid agent delegation flag");
+		}
+		if (typeof agent.initialTask !== "string" || agent.initialTask.length < 1) {
+			corruptSession(filePath, 1, "Session header has an invalid agent initial task");
+		}
+		if (!Array.isArray(agent.tools) || agent.tools.length > 128) {
+			corruptSession(filePath, 1, "Session header has invalid agent tools");
+		}
+	}
 	if (header.scheduled !== undefined) {
 		if (!isJsonObject(header.scheduled))
 			corruptSession(filePath, 1, "Session header has an invalid scheduled marker");
@@ -1618,6 +1715,12 @@ function validateSessionHeader(record: Record<string, unknown>, filePath: string
 		if (header.subagent !== undefined) {
 			corruptSession(filePath, 1, "Session header cannot be both scheduled and a subagent");
 		}
+		if (header.agent !== undefined) {
+			corruptSession(filePath, 1, "Session header cannot be both scheduled and an agent");
+		}
+	}
+	if (header.subagent !== undefined && header.agent !== undefined) {
+		corruptSession(filePath, 1, "Session header cannot be both a subagent and an agent");
 	}
 
 	const version = header.version ?? 1;
@@ -1642,6 +1745,9 @@ function validateSessionHeader(record: Record<string, unknown>, filePath: string
 	}
 	if (version < 10 && header.scheduled !== undefined) {
 		corruptSession(filePath, 1, "Scheduled header fields require a v10 session header");
+	}
+	if (version < 13 && header.agent !== undefined) {
+		corruptSession(filePath, 1, "Agent header fields require a v13 session header");
 	}
 	return header;
 }
@@ -1677,6 +1783,9 @@ function validateRawSessionRecords(records: readonly unknown[], filePath: string
 			}
 			if (isSubagentControlEntryType(type) && version < 7) {
 				corruptSession(filePath, index + 1, "Subagent control entries require a v7 session header");
+			}
+			if (isAgentControlEntryType(type) && version < 13) {
+				corruptSession(filePath, index + 1, "Agent control entries require a v13 session header");
 			}
 			if (!isSubagentControlEntryType(type) && version < 6) {
 				corruptSession(filePath, index + 1, "Session control entries require a v6 session header");
@@ -2867,8 +2976,22 @@ export class SessionManager {
 				throw new TypeError("Invalid subagent name");
 			}
 		}
+		if (options?.agent) {
+			if (options.agent.agentId !== sessionId) throw new TypeError("Agent header id must match session id");
+			assertValidSessionId(options.agent.parentSessionId);
+			assertValidSessionId(options.agent.rootSessionId);
+			if (
+				typeof options.agent.name !== "string" ||
+				options.agent.name.length < 1 ||
+				options.agent.name.length > 128 ||
+				/[\u0000-\u001f\u007f-\u009f]/u.test(options.agent.name)
+			) {
+				throw new TypeError("Invalid agent name");
+			}
+		}
 		if (options?.scheduled) {
 			if (options.subagent) throw new TypeError("A session cannot be both scheduled and a subagent");
+			if (options.agent) throw new TypeError("A session cannot be both scheduled and an agent");
 			assertValidSessionId(options.scheduled.taskId);
 			assertValidSessionId(options.scheduled.runId);
 		}
@@ -2883,6 +3006,7 @@ export class SessionManager {
 			permissionMode,
 			parentSession: options?.parentSession,
 			subagent: options?.subagent,
+			agent: options?.agent,
 			scheduled: options?.scheduled,
 		};
 		let state: ManagedSessionState;
@@ -3251,6 +3375,13 @@ export class SessionManager {
 			...decision,
 			reason: decision.reason ?? "No reason provided",
 		}).id;
+	}
+
+	/** Append one validated agent control without advancing the transcript leaf. */
+	appendAgentControl(payload: AgentControlPayload): string {
+		const entry = this._appendSessionControl(payload);
+		if (!isAgentControlEntryType(entry.type)) throw new Error("Unexpected session control entry");
+		return entry.id;
 	}
 
 	/** Append one validated first-class subagent control without advancing the transcript leaf. */

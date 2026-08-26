@@ -256,6 +256,7 @@ export {
 	type CwdOrigin,
 	type FileEntry,
 	getDefaultSessionDir,
+	getSessionAgentDir,
 	getSessionDisplayMetadataPath,
 	getSessionSubagentDir,
 	getSessionUnreadStatePath,
@@ -289,6 +290,7 @@ export type {
 export { createSyntheticSourceInfo } from "./source-info.ts";
 export {
 	buildChildSystemPrompt,
+	buildChildSystemPromptFromAgentConfig,
 	buildParentAssignmentProfile,
 	buildSubagentContract,
 	SUBAGENT_COORDINATION_PROMPT,
@@ -296,6 +298,8 @@ export {
 } from "./subagents/prompts.ts";
 export {
 	type ActivateSubagentsResult,
+	type AgentConfig,
+	type AgentSummary,
 	SUBAGENT_ACTIVATION_TOOL_NAME,
 	SUBAGENT_TOOL_NAMES,
 	type SubagentConfig,

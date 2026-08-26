@@ -2,217 +2,88 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { SessionManager } from "../src/core/session-manager.ts";
-import { SubagentManager } from "../src/core/subagents/manager.ts";
-import { SubagentStore } from "../src/core/subagents/store.ts";
-import type { SubagentConfig } from "../src/core/subagents/types.ts";
-import { assistantMsg, userMsg } from "./utilities.ts";
+import { CURRENT_SESSION_VERSION, getSessionAgentDir, SessionManager } from "../src/core/session-manager.ts";
+import { AgentStore } from "../src/core/subagents/store.ts";
+import type { AgentConfig } from "../src/core/subagents/types.ts";
 
+const ROOT_ID = "parent-session-1";
 const roots: string[] = [];
+
 afterEach(() => {
 	for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
-function setup(): { root: string; agentDir: string; parent: SessionManager; store: SubagentStore } {
-	const root = mkdtempSync(join(tmpdir(), "metis-subagent-store-"));
+function setup(): { root: string; agentDir: string; parent: SessionManager; store: AgentStore } {
+	const root = mkdtempSync(join(tmpdir(), "metis-agent-store-"));
 	roots.push(root);
 	const project = join(root, "project");
 	const agentDir = join(root, "agent");
 	mkdirSync(project);
-	const parent = SessionManager.create(project, join(root, "sessions"), { id: "parent-session-1" });
-	return { root, agentDir, parent, store: new SubagentStore(parent, agentDir) };
+	const parent = SessionManager.create(project, join(root, "sessions"), { id: ROOT_ID });
+	return { root, agentDir, parent, store: new AgentStore(parent, agentDir) };
 }
 
-function config(root: string): SubagentConfig {
+function config(
+	root: string,
+	overrides?: Partial<AgentConfig> & { readonly taskId?: string },
+): {
+	config: AgentConfig;
+	taskId: string;
+} {
+	const agentId = overrides?.agentId ?? "agent-1";
+	const taskId = overrides?.taskId ?? "task-1";
 	return {
-		agentId: "child-session-1",
-		name: "researcher",
-		task: "Inspect the implementation",
-		taskSummary: "Inspect the implementation",
-		mode: "code",
-		tools: ["read"],
-		permissionMode: "ask",
-		model: { provider: "openai", modelId: "gpt-test" },
-		thinkingLevel: "high",
-		cwd: join(root, "project"),
-		forkTurns: "all",
-		timeoutSeconds: 60,
+		taskId,
+		config: {
+			agentId,
+			name: overrides?.name ?? "worker",
+			agentType: overrides?.agentType ?? "worker",
+			initialTask: overrides?.initialTask ?? "Implement the manager",
+			tools: overrides?.tools ?? ["read", "bash"],
+			writePolicy: overrides?.writePolicy ?? "inherit",
+			permissionMode: overrides?.permissionMode ?? "ask",
+			model: overrides?.model ?? { provider: "openai", modelId: "gpt-test" },
+			thinkingLevel: overrides?.thinkingLevel ?? "high",
+			cwd: overrides?.cwd ?? join(root, "project"),
+			forkTurns: overrides?.forkTurns ?? 0,
+			timeoutSeconds: overrides?.timeoutSeconds ?? 60,
+			mayDelegate: overrides?.mayDelegate ?? true,
+			parentSessionId: overrides?.parentSessionId ?? ROOT_ID,
+			rootSessionId: overrides?.rootSessionId ?? ROOT_ID,
+			agentPath: overrides?.agentPath ?? [agentId],
+		},
 	};
 }
 
-describe("SubagentStore", () => {
-	it("creates, discovers, and reduces a parent-owned child journal", () => {
-		const { root, parent, store } = setup();
-		const created = store.create(config(root), []);
-		expect(existsSync(created.path)).toBe(true);
-		expect(created.agentId).toBe("child-session-1");
-		expect(store.list().agents).toMatchObject([{ agentId: "child-session-1", status: "queued" }]);
-		const serialized = JSON.stringify(store.readJournal(created.agentId));
-		expect(serialized).not.toContain("reviewerEnabled");
-		expect(serialized).not.toContain("readPaths");
-		expect(serialized).not.toContain("writePaths");
-
-		const running = store.appendState(created.agentId, {
-			type: "subagent_state",
-			agentId: created.agentId,
-			runId: "run-1",
-			status: "running",
-		});
-		expect(running.status).toBe("running");
-		parent.close();
+describe("AgentStore", () => {
+	it("persists one canonical agent header and distinct task ids", () => {
+		const { root, store } = setup();
+		const { config: agentConfig, taskId } = config(root, { agentId: "agent-1", taskId: "task-1" });
+		const created = store.create(agentConfig, [], taskId);
+		store.appendTask("agent-1", { taskId: "task-2", text: "verify again", status: "queued" });
+		expect(created.header).toMatchObject({ agentId: "agent-1", rootSessionId: ROOT_ID });
+		expect(store.listTasks("agent-1").map((task) => task.taskId)).toEqual(["task-1", "task-2"]);
 	});
 
-	it("persists delivery mode for one run and defaults legacy runs to background", () => {
-		const { root, parent, store } = setup();
-		const created = store.create(config(root), []);
-		store.appendState(created.agentId, {
-			type: "subagent_state",
-			agentId: created.agentId,
-			runId: "run-foreground",
-			status: "queued",
-			background: false,
-		});
-		const terminal = store.appendState(created.agentId, {
-			type: "subagent_state",
-			agentId: created.agentId,
-			runId: "run-foreground",
-			status: "done",
-			reason: "completed",
-			finalSummary: "done",
-		});
-		expect(terminal).toMatchObject({ runId: "run-foreground", status: "done", background: false });
-
-		const legacy = store.appendState(created.agentId, {
-			type: "subagent_state",
-			agentId: created.agentId,
-			runId: "run-legacy",
-			status: "queued",
-		});
-		expect(legacy.background).toBe(true);
-		parent.close();
+	it("does not scan the removed subagents directory", () => {
+		const { agentDir, store } = setup();
+		mkdirSync(join(agentDir, "subagents", ROOT_ID), { recursive: true });
+		writeFileSync(join(agentDir, "subagents", ROOT_ID, "old-child.jsonl"), "legacy sentinel");
+		expect(store.listTree().agents).toEqual([]);
+		expect(getSessionAgentDir(agentDir, ROOT_ID)).toBe(join(agentDir, "agents", ROOT_ID));
 	});
 
-	it("forks only visible messages and strips assistant thinking and custom details", () => {
-		const { root, parent, store } = setup();
-		const assistant = assistantMsg("visible answer");
-		const created = store.create(config(root), [
-			userMsg("visible question"),
-			{ ...assistant, content: [{ type: "thinking" as const, thinking: "hidden reasoning" }, ...assistant.content] },
-			{
-				role: "custom",
-				customType: "hidden",
-				content: "secret",
-				display: false,
-				details: { secret: true },
-				timestamp: 1,
-			},
-			{
-				role: "custom",
-				customType: "visible",
-				content: "visible notice",
-				display: true,
-				details: { secret: true },
-				timestamp: 2,
-			},
-		]);
+	it("writes v13 agent headers and agent_task records", () => {
+		const { root, store } = setup();
+		const { config: agentConfig, taskId } = config(root);
+		const created = store.create(agentConfig, [], taskId);
 		const journal = store.readJournal(created.agentId);
-		expect(JSON.stringify(journal)).toContain("visible question");
-		expect(JSON.stringify(journal)).toContain("visible answer");
-		expect(JSON.stringify(journal)).toContain("visible notice");
-		expect(JSON.stringify(journal)).not.toContain("hidden reasoning");
-		expect(JSON.stringify(journal)).not.toContain("secret");
-		parent.close();
-	});
-
-	it("rejects in-memory and nested parents", () => {
-		const root = mkdtempSync(join(tmpdir(), "metis-subagent-store-invalid-"));
-		roots.push(root);
-		const memory = SessionManager.inMemory(root);
-		expect(() => new SubagentStore(memory, join(root, "agent"))).toThrow("persisted parent");
-		memory.close();
-	});
-
-	it("recovers interrupted work as stopped and cancels queued follow-ups", () => {
-		const { root, agentDir, parent, store } = setup();
-		const created = store.create(config(root), []);
-		store.appendState(created.agentId, {
-			type: "subagent_state",
-			agentId: created.agentId,
-			runId: "run-1",
-			status: "running",
-		});
-		store.appendFollowUp(created.agentId, {
-			type: "subagent_follow_up",
-			agentId: created.agentId,
-			runId: "run-1",
-			messageId: "follow-up-1",
-			text: "Continue after restart",
-			state: "queued",
-		});
-
-		new SubagentManager({
-			parentSessionManager: parent,
-			agentDir,
-			getWorkspaceRoots: () => parent.getWorkspaceRoots(),
-			store,
-			createChildRuntime: async () => {
-				throw new Error("Recovery must not start child work");
-			},
-		});
-
-		expect(store.load(created.agentId).status).toBe("stopped");
-		expect(
-			store
-				.readJournal(created.agentId)
-				.flatMap((entry) =>
-					entry.type === "subagent_follow_up" && entry.messageId === "follow-up-1" ? [entry.state] : [],
-				),
-		).toEqual(["queued", "cancelled"]);
-		parent.close();
-	});
-
-	it("closes by deleting child data and retaining one parent tombstone", async () => {
-		const { root, parent, store } = setup();
-		const created = store.create(config(root), []);
-		const tombstone = {
-			agentId: created.agentId,
-			name: created.name,
-			status: "closed" as const,
-			taskSummary: created.taskSummary,
-			closedAt: new Date().toISOString(),
-		};
-		store.beginClose(created.agentId, tombstone);
-		await store.recoverCloseMarkers();
-		expect(existsSync(created.path)).toBe(false);
-		expect(await store.finishClose(created.agentId)).toEqual({ status: "closed" });
-		expect(
-			parent
-				.getDurableJournalSnapshot()
-				.filter((entry) => entry.type === "subagent_closed" && entry.tombstone.agentId === created.agentId),
-		).toHaveLength(1);
-		parent.close();
-	});
-
-	it("never mistakes an unreadable residual child for a completed deletion", async () => {
-		const { root, parent, store } = setup();
-		const created = store.create(config(root), []);
-		const tombstone = {
-			agentId: created.agentId,
-			name: created.name,
-			status: "closed" as const,
-			taskSummary: created.taskSummary,
-			closedAt: new Date().toISOString(),
-		};
-		store.beginClose(created.agentId, tombstone);
-		writeFileSync(created.path, "not-jsonl\n", "utf8");
-
-		await expect(store.finishClose(created.agentId)).rejects.toThrow("still exists but cannot be verified");
+		const header = journal[0];
+		expect(header.type).toBe("session");
+		if (header.type !== "session") throw new Error("expected session header");
+		expect(header.version).toBe(CURRENT_SESSION_VERSION);
+		expect(header.agent?.agentType).toBe("worker");
+		expect(journal.some((entry) => entry.type === "agent_task")).toBe(true);
 		expect(existsSync(created.path)).toBe(true);
-		expect(
-			parent
-				.getDurableJournalSnapshot()
-				.some((entry) => entry.type === "subagent_closed" && entry.tombstone.agentId === created.agentId),
-		).toBe(false);
-		parent.close();
 	});
 });

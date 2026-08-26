@@ -1,11 +1,14 @@
-import type { ThinkingLevel } from "@metis/agent-core";
 import { Text } from "@metis/tui";
 import { Type } from "typebox";
 import { keyHint } from "../../modes/interactive/components/keybinding-hints.ts";
 import type { AgentSession } from "../agent-session.ts";
 import { defineTool, type ToolDefinition } from "../extensions/types.ts";
-import type { InspectSubagentsResult, SubagentManager } from "./manager.ts";
-import { type ActivateSubagentsResult, SUBAGENT_ACTIVATION_TOOL_NAME } from "./types.ts";
+import type { SubagentManager } from "./manager.ts";
+import { type ActivateSubagentsResult, type InspectAgentsResult, SUBAGENT_ACTIVATION_TOOL_NAME } from "./types.ts";
+
+function actorId(session: AgentSession): string {
+	return session.sessionManager.getSessionId();
+}
 
 const REAL_THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
 const Activate = Type.Object({}, { additionalProperties: false });
@@ -108,7 +111,7 @@ const MessageField = Type.String({
 	maxLength: 2 * 1024 * 1024,
 	description: "New bounded instructions for the child.",
 });
-const Message = Type.Union([
+const _Message = Type.Union([
 	Type.Object(
 		{ agentId: AgentIdField, mode: Type.Literal("steer"), message: MessageField },
 		{ additionalProperties: false },
@@ -168,7 +171,7 @@ function textBlocks(content: unknown): string[] {
 	});
 }
 
-function transcriptLines(entry: unknown): string[] {
+function _transcriptLines(entry: unknown): string[] {
 	const value = record(entry);
 	if (value?.type === "custom_message") return textBlocks(value.content).map((text) => `[user] ${text}`);
 	if (value?.type !== "message") return [];
@@ -187,14 +190,24 @@ function transcriptLines(entry: unknown): string[] {
 	});
 }
 
-function inspectText(inspected: InspectSubagentsResult): string {
-	if (inspected.agents.length === 0) return "No subagent sessions.";
-	const sessions = inspected.agents.flatMap((agent) => [
-		`Session ${JSON.stringify(agent.name)}: ${agent.status}`,
-		`Agent ID: ${agent.agentId}`,
-	]);
-	const transcript = inspected.journal?.flatMap(transcriptLines) ?? [];
-	return transcript.length > 0 ? [...sessions, "", ...transcript].join("\n") : sessions.join("\n");
+function inspectText(inspected: InspectAgentsResult): string {
+	if (inspected.kind === "list") {
+		if (inspected.agents.length === 0) return "No agent sessions.";
+		return inspected.agents
+			.map((agent) => {
+				const task = agent.currentTask ?? agent.latestTask;
+				return `Agent ${JSON.stringify(agent.name)} (${agent.agentId}) · ${agent.agentType} · ${agent.status}${
+					task ? `\nTask ${task.taskId} · ${task.taskSummary}` : ""
+				}`;
+			})
+			.join("\n");
+	}
+	const events = inspected.events.map((event) => {
+		if (event.kind === "tool") return `[Tool ${event.status}] ${event.toolName}`;
+		if (event.kind === "final") return `[Final] ${event.text}`;
+		return `[LLM] ${event.text}`;
+	});
+	return [`Agent ${inspected.agent.name} (${inspected.agent.agentId})`, "", ...events].join("\n");
 }
 
 function compactResult(value: unknown): string {
@@ -306,7 +319,13 @@ export function createSubagentTools(host: SubagentToolHost): ToolDefinition[] {
 				requireUltra();
 				return result(
 					await manager().spawn(
-						{ ...params, thinkingLevel: params.thinkingLevel as ThinkingLevel | undefined },
+						actorId(host.getSession()),
+						{
+							name: params.name,
+							task: params.task,
+							forkTurns: params.forkTurns,
+							model: params.model,
+						},
 						signal,
 					),
 				);
@@ -320,20 +339,12 @@ export function createSubagentTools(host: SubagentToolHost): ToolDefinition[] {
 			parameters: Inspect,
 			renderResult: renderSubagentResult,
 			async execute(_id, params) {
-				const inspected = await manager().inspect(params);
+				const inspected = await manager().inspect(actorId(host.getSession()), {
+					agentId: params.agentId,
+					beforeEventId: params.beforeEntryId,
+					limit: params.limit,
+				});
 				return result(inspected, false, inspectText(inspected));
-			},
-		}),
-		defineTool({
-			name: "message_agent",
-			label: "Message agent",
-			description:
-				"Steer a running child or send a follow-up that resumes a completed, failed, or stopped child. Reuse an existing child when its responsibility has not changed.",
-			parameters: Message,
-			renderResult: renderSubagentResult,
-			async execute(_id, params, signal) {
-				requireUltra();
-				return result(await manager().message(params, signal));
 			},
 		}),
 		defineTool({
@@ -343,18 +354,7 @@ export function createSubagentTools(host: SubagentToolHost): ToolDefinition[] {
 			parameters: AgentId,
 			renderResult: renderSubagentResult,
 			async execute(_id, params) {
-				return result(await manager().interrupt(params.agentId));
-			},
-		}),
-		defineTool({
-			name: "close_agent",
-			label: "Close agent",
-			description:
-				"Permanently delete a child session after its transcript and follow-up history are no longer needed.",
-			parameters: AgentId,
-			renderResult: renderSubagentResult,
-			async execute(_id, params) {
-				return result(await manager().close(params.agentId));
+				return result(await manager().interrupt(actorId(host.getSession()), params.agentId));
 			},
 		}),
 	];

@@ -1,14 +1,7 @@
 import { isAbsolute, normalize } from "node:path";
-import { isAgentMode } from "./agent-mode.ts";
-import { isPersistedPermissionMode, normalizePermissionMode, type PersistedPermissionMode } from "./permission-mode.ts";
+import { isPersistedPermissionMode, type PersistedPermissionMode } from "./permission-mode.ts";
 import { type CollaborationMode, MAX_PLAN_MARKDOWN_UTF8_BYTES, MAX_PLAN_TITLE_UTF16_UNITS } from "./plan-state.ts";
-import type {
-	SubagentConfig,
-	SubagentMailboxEvent,
-	SubagentStatus,
-	SubagentTombstone,
-	SubagentUsage,
-} from "./subagents/types.ts";
+import type { AgentTaskStatus, AgentUsage, SubagentMailboxEvent, SubagentUsage } from "./subagents/types.ts";
 
 interface SessionControlEntryBase {
 	readonly id: string;
@@ -47,25 +40,38 @@ export interface SessionDirectoryRemovedEntry extends SessionControlEntryBase {
 
 export type SessionDirectoryControlEntry = SessionDirectoryAddedEntry | SessionDirectoryRemovedEntry;
 
-export interface SubagentCreatedEntry extends SessionControlEntryBase {
-	readonly type: "subagent_created";
-	readonly config: SubagentConfig;
-}
+export type AgentStateReason = "completed" | "error" | "interrupted" | "timeout" | "parent_unloaded" | "recovered";
+export type SubagentStateReason = AgentStateReason;
 
-export type SubagentStateReason = "completed" | "error" | "interrupted" | "timeout" | "parent_unloaded" | "recovered";
-
-export interface SubagentStateEntry extends SessionControlEntryBase {
-	readonly type: "subagent_state";
+export interface AgentTaskEntry extends SessionControlEntryBase {
+	readonly type: "agent_task";
 	readonly agentId: string;
-	readonly runId: string;
-	readonly status: Exclude<SubagentStatus, "closed">;
-	readonly background?: boolean;
-	readonly reason?: SubagentStateReason;
-	readonly finalSummary?: string;
+	readonly taskId: string;
+	readonly text: string;
+	readonly taskSummary: string;
+	readonly status: AgentTaskStatus;
+	readonly reason?: AgentStateReason;
+	readonly finalMessage?: string;
 	readonly error?: string;
-	readonly residualPath?: string;
-	readonly usage?: SubagentUsage;
+	readonly usage?: AgentUsage;
 }
+
+export interface AgentMessageEntry extends SessionControlEntryBase {
+	readonly type: "agent_message";
+	readonly agentId: string;
+	readonly taskId: string;
+	readonly messageId: string;
+	readonly text: string;
+	readonly state: "accepted" | "cancelled";
+}
+
+export interface AgentArchivedEntry extends SessionControlEntryBase {
+	readonly type: "agent_archived";
+	readonly agentId: string;
+	readonly archived: boolean;
+}
+
+export type AgentControlEntry = AgentTaskEntry | AgentMessageEntry | AgentArchivedEntry;
 
 export interface SubagentMailboxEventEntry extends SessionControlEntryBase {
 	readonly type: "subagent_mailbox_event";
@@ -77,20 +83,6 @@ export interface SubagentMailboxDeliveryEntry extends SessionControlEntryBase {
 	readonly deliveryId: string;
 	readonly eventIds: readonly string[];
 	readonly state: "started" | "completed";
-}
-
-export interface SubagentFollowUpEntry extends SessionControlEntryBase {
-	readonly type: "subagent_follow_up";
-	readonly agentId: string;
-	readonly runId: string;
-	readonly messageId: string;
-	readonly text: string;
-	readonly state: "queued" | "accepted" | "cancelled";
-}
-
-export interface SubagentClosedEntry extends SessionControlEntryBase {
-	readonly type: "subagent_closed";
-	readonly tombstone: SubagentTombstone;
 }
 
 export interface SubagentModeChangeEntry extends SessionControlEntryBase {
@@ -118,14 +110,7 @@ export interface SessionPlanStatusEntry extends SessionControlEntryBase {
 	readonly status: "accepted" | "cancelled";
 }
 
-export type SubagentControlEntry =
-	| SubagentCreatedEntry
-	| SubagentStateEntry
-	| SubagentMailboxEventEntry
-	| SubagentMailboxDeliveryEntry
-	| SubagentFollowUpEntry
-	| SubagentClosedEntry
-	| SubagentModeChangeEntry;
+export type SubagentControlEntry = SubagentMailboxEventEntry | SubagentMailboxDeliveryEntry | SubagentModeChangeEntry;
 
 export type SessionControlEntry =
 	| SessionPermissionsEntry
@@ -134,10 +119,17 @@ export type SessionControlEntry =
 	| SessionCollaborationModeEntry
 	| SessionPlanProposalEntry
 	| SessionPlanStatusEntry
+	| AgentControlEntry
 	| SubagentControlEntry;
 
 export type SessionControlPayload = SessionControlEntry extends infer Entry
 	? Entry extends SessionControlEntry
+		? Omit<Entry, "id" | "parentId" | "timestamp">
+		: never
+	: never;
+
+export type AgentControlPayload = AgentControlEntry extends infer Entry
+	? Entry extends AgentControlEntry
 		? Omit<Entry, "id" | "parentId" | "timestamp">
 		: never
 	: never;
@@ -149,8 +141,7 @@ export type SubagentControlPayload = SubagentControlEntry extends infer Entry
 	: never;
 
 const encoder = new TextEncoder();
-const REAL_THINKING_LEVELS = new Set(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
-const SUBAGENT_STATUSES = new Set(["queued", "running", "done", "failed", "stopped", "close_failed"]);
+const AGENT_TASK_STATUSES = new Set(["queued", "running", "done", "failed", "stopped"]);
 const STATE_REASONS = new Set(["completed", "error", "interrupted", "timeout", "parent_unloaded", "recovered"]);
 
 function invalid(message: string): never {
@@ -234,120 +225,12 @@ function parseBase(fields: ReadonlyMap<string, unknown>): SessionControlEntryBas
 	};
 }
 
-function parseModel(value: unknown, label: string): SubagentConfig["model"] {
+function parseModel(value: unknown, label: string): AgentUsage["model"] {
 	const fields = dataFields(value, label);
 	assertOnlyFields(fields, ["provider", "modelId"], label);
 	return {
 		provider: requiredString(fields, "provider", { label, maxLength: 256, noControls: true }),
 		modelId: requiredString(fields, "modelId", { label, maxLength: 512, noControls: true }),
-	};
-}
-
-function parseTools(value: unknown, label: string): readonly string[] {
-	if (!Array.isArray(value) || value.length > 128) invalid(`${label} must be an array of at most 128 tool names`);
-	const tools = value.map((tool) => {
-		if (
-			typeof tool !== "string" ||
-			tool.length === 0 ||
-			tool.length > 256 ||
-			/[\u0000-\u001f\u007f-\u009f]/u.test(tool)
-		) {
-			invalid(`${label} contains an invalid tool name`);
-		}
-		return tool;
-	});
-	if (new Set(tools).size !== tools.length) invalid(`${label} must contain unique tool names`);
-	return tools;
-}
-
-function parsePaths(value: unknown, label: string): readonly string[] {
-	if (!Array.isArray(value) || value.length === 0 || value.length > 32) {
-		invalid(`${label} must be a non-empty array of at most 32 paths`);
-	}
-	const paths = value.map((path) => {
-		if (
-			typeof path !== "string" ||
-			path.length === 0 ||
-			encoder.encode(path).byteLength > 32 * 1024 ||
-			!isAbsolute(path) ||
-			normalize(path) !== path
-		) {
-			invalid(`${label} contains an invalid path`);
-		}
-		return path;
-	});
-	if (new Set(paths).size !== paths.length) invalid(`${label} must contain unique paths`);
-	return paths;
-}
-
-function parseForkTurns(value: unknown, label: string): SubagentConfig["forkTurns"] {
-	if (value === "all") return value;
-	if (!Number.isInteger(value) || (value as number) < 0 || (value as number) > 1_000) {
-		invalid(`${label} must be "all" or an integer from 0 through 1000`);
-	}
-	return value as number;
-}
-
-function parseConfig(value: unknown): SubagentConfig {
-	const label = "Session control entry.config";
-	const fields = dataFields(value, label);
-	assertOnlyFields(
-		fields,
-		[
-			"agentId",
-			"name",
-			"task",
-			"taskSummary",
-			"mode",
-			"tools",
-			"permissionMode",
-			"reviewerEnabled",
-			"model",
-			"thinkingLevel",
-			"cwd",
-			"readPaths",
-			"writePaths",
-			"forkTurns",
-			"timeoutSeconds",
-			"role",
-			"developerInstructions",
-		],
-		label,
-	);
-	const mode = fields.get("mode");
-	const permissionMode = fields.get("permissionMode");
-	const reviewerEnabled = fields.get("reviewerEnabled");
-	const thinkingLevel = fields.get("thinkingLevel");
-	const timeoutSeconds = fields.get("timeoutSeconds");
-	if (!isAgentMode(mode)) invalid(`${label}.mode is invalid`);
-	if (!isPersistedPermissionMode(permissionMode)) invalid(`${label}.permissionMode is invalid`);
-	if (reviewerEnabled !== undefined && typeof reviewerEnabled !== "boolean") {
-		invalid(`${label}.reviewerEnabled must be a boolean`);
-	}
-	if (typeof thinkingLevel !== "string" || !REAL_THINKING_LEVELS.has(thinkingLevel))
-		invalid(`${label}.thinkingLevel is invalid`);
-	if (!Number.isInteger(timeoutSeconds) || (timeoutSeconds as number) < 1 || (timeoutSeconds as number) > 1_800) {
-		invalid(`${label}.timeoutSeconds must be an integer from 1 through 1800`);
-	}
-	const cwd = requiredString(fields, "cwd", { label, maxBytes: 32 * 1024 });
-	if (!isAbsolute(cwd) || normalize(cwd) !== cwd) invalid(`${label}.cwd must be a canonical absolute path`);
-	if (fields.has("readPaths")) parsePaths(fields.get("readPaths"), `${label}.readPaths`);
-	if (fields.has("writePaths")) parsePaths(fields.get("writePaths"), `${label}.writePaths`);
-	return {
-		agentId: requiredString(fields, "agentId", { label, maxLength: 256, noControls: true }),
-		name: requiredString(fields, "name", { label, maxLength: 128, noControls: true }),
-		task: requiredString(fields, "task", { label, maxBytes: 2 * 1024 * 1024 }),
-		taskSummary: requiredString(fields, "taskSummary", { label, maxLength: 240 }),
-		mode,
-		tools: parseTools(fields.get("tools"), `${label}.tools`),
-		permissionMode: normalizePermissionMode(permissionMode)!,
-		model: parseModel(fields.get("model"), `${label}.model`),
-		thinkingLevel: thinkingLevel as SubagentConfig["thinkingLevel"],
-		cwd,
-		forkTurns: parseForkTurns(fields.get("forkTurns"), `${label}.forkTurns`),
-		timeoutSeconds: timeoutSeconds as number,
-		role: optionalString(fields, "role", { label, maxBytes: 8 * 1024 }),
-		developerInstructions: optionalString(fields, "developerInstructions", { label, maxBytes: 64 * 1024 }),
 	};
 }
 
@@ -372,21 +255,6 @@ function parseUsage(value: unknown): SubagentUsage {
 		elapsedMs: finiteNonNegative(fields, "elapsedMs", label),
 		...(toolCalls !== undefined ? { toolCalls: toolCalls as number } : {}),
 		...(fields.has("cost") ? { cost: finiteNonNegative(fields, "cost", label) } : {}),
-	};
-}
-
-function parseTombstone(value: unknown): SubagentTombstone {
-	const label = "Session control entry.tombstone";
-	const fields = dataFields(value, label);
-	assertOnlyFields(fields, ["agentId", "name", "status", "taskSummary", "finalSummary", "closedAt"], label);
-	if (fields.get("status") !== "closed") invalid(`${label}.status must be closed`);
-	return {
-		agentId: requiredString(fields, "agentId", { label, maxLength: 256, noControls: true }),
-		name: requiredString(fields, "name", { label, maxLength: 128, noControls: true }),
-		status: "closed",
-		taskSummary: requiredString(fields, "taskSummary", { label, maxLength: 240 }),
-		finalSummary: optionalString(fields, "finalSummary", { label, maxBytes: 4 * 1024 }),
-		closedAt: requiredString(fields, "closedAt", { label }),
 	};
 }
 
@@ -420,16 +288,12 @@ function parseSubagentMailboxEvent(value: unknown): SubagentMailboxEvent {
 	};
 }
 
+export function isAgentControlEntryType(type: unknown): type is AgentControlEntry["type"] {
+	return type === "agent_task" || type === "agent_message" || type === "agent_archived";
+}
+
 export function isSubagentControlEntryType(type: unknown): type is SubagentControlEntry["type"] {
-	return (
-		type === "subagent_created" ||
-		type === "subagent_state" ||
-		type === "subagent_mailbox_event" ||
-		type === "subagent_mailbox_delivery" ||
-		type === "subagent_follow_up" ||
-		type === "subagent_closed" ||
-		type === "subagent_mode_change"
-	);
+	return type === "subagent_mailbox_event" || type === "subagent_mailbox_delivery" || type === "subagent_mode_change";
 }
 
 export function isSessionDirectoryControlEntryType(type: unknown): type is SessionDirectoryControlEntry["type"] {
@@ -448,6 +312,7 @@ export function isSessionControlEntryType(type: unknown): type is SessionControl
 		type === "session_permission_decision" ||
 		isSessionDirectoryControlEntryType(type) ||
 		isPlanControlEntryType(type) ||
+		isAgentControlEntryType(type) ||
 		isSubagentControlEntryType(type)
 	);
 }
@@ -498,62 +363,81 @@ export function parseSessionControlEntry(value: unknown): SessionControlEntry {
 		}
 		return { type, ...parseBase(fields), path };
 	}
-	if (type === "subagent_created") {
-		assertOnlyFields(fields, [...baseFields, "config"]);
-		return { type, ...parseBase(fields), config: parseConfig(fields.get("config")) };
-	}
-	if (type === "subagent_state") {
+	if (type === "agent_task") {
 		assertOnlyFields(fields, [
 			...baseFields,
 			"agentId",
-			"runId",
+			"taskId",
+			"text",
+			"taskSummary",
 			"status",
-			"background",
 			"reason",
-			"finalSummary",
+			"finalMessage",
 			"error",
-			"residualPath",
 			"usage",
 		]);
 		const status = fields.get("status");
 		const reason = fields.get("reason");
-		const background = fields.get("background");
-		if (typeof status !== "string" || !SUBAGENT_STATUSES.has(status))
+		if (typeof status !== "string" || !AGENT_TASK_STATUSES.has(status)) {
 			invalid("Session control entry.status is invalid");
-		if (reason !== undefined && (typeof reason !== "string" || !STATE_REASONS.has(reason)))
-			invalid("Session control entry.reason is invalid");
-		if (reason === "completed" && status !== "done")
-			invalid("Session control entry.reason completed requires done status");
-		if (reason === "error" && status !== "failed" && status !== "close_failed")
-			invalid("Session control entry.reason error requires failed status");
-		if ((reason === "interrupted" || reason === "parent_unloaded") && status !== "stopped")
-			invalid(`Session control entry.reason ${reason} requires stopped status`);
-		if (reason === "timeout" && status !== "failed")
-			invalid("Session control entry.reason timeout requires failed status");
-		if (reason === "recovered" && status !== "queued")
-			invalid("Session control entry.reason recovered requires queued status");
-		if (background !== undefined && typeof background !== "boolean") {
-			invalid("Session control entry.background must be a boolean");
 		}
-		const base = parseBase(fields);
+		if (reason !== undefined && (typeof reason !== "string" || !STATE_REASONS.has(reason))) {
+			invalid("Session control entry.reason is invalid");
+		}
+		if (reason === "completed" && status !== "done") {
+			invalid("Session control entry.reason completed requires done status");
+		}
+		if (reason === "error" && status !== "failed") {
+			invalid("Session control entry.reason error requires failed status");
+		}
+		if ((reason === "interrupted" || reason === "parent_unloaded") && status !== "stopped") {
+			invalid(`Session control entry.reason ${reason} requires stopped status`);
+		}
+		if (reason === "timeout" && status !== "failed") {
+			invalid("Session control entry.reason timeout requires failed status");
+		}
+		if (reason === "recovered" && status !== "queued") {
+			invalid("Session control entry.reason recovered requires queued status");
+		}
 		return {
 			type,
-			...base,
+			...parseBase(fields),
 			agentId: requiredString(fields, "agentId", { maxLength: 256, noControls: true }),
-			runId: fields.has("runId")
-				? requiredString(fields, "runId", { maxLength: 256, noControls: true })
-				: `legacy-${base.id}`,
-			status: status as Exclude<SubagentStatus, "closed">,
-			...(background === undefined ? {} : { background }),
-			...(reason === undefined ? {} : { reason: reason as SubagentStateReason }),
-			...(fields.has("finalSummary")
-				? { finalSummary: optionalString(fields, "finalSummary", { maxBytes: 4 * 1024 }) }
+			taskId: requiredString(fields, "taskId", { maxLength: 256, noControls: true }),
+			text: requiredString(fields, "text", { maxBytes: 2 * 1024 * 1024 }),
+			taskSummary: requiredString(fields, "taskSummary", { maxLength: 240 }),
+			status: status as AgentTaskStatus,
+			...(reason === undefined ? {} : { reason: reason as AgentStateReason }),
+			...(fields.has("finalMessage")
+				? { finalMessage: optionalString(fields, "finalMessage", { maxBytes: 4 * 1024 }) }
 				: {}),
 			...(fields.has("error") ? { error: optionalString(fields, "error", { maxBytes: 64 * 1024 }) } : {}),
-			...(fields.has("residualPath")
-				? { residualPath: optionalString(fields, "residualPath", { maxBytes: 32 * 1024 }) }
-				: {}),
-			...(fields.has("usage") ? { usage: parseUsage(fields.get("usage")) } : {}),
+			...(fields.has("usage") ? { usage: parseUsage(fields.get("usage")) as AgentUsage } : {}),
+		};
+	}
+	if (type === "agent_message") {
+		assertOnlyFields(fields, [...baseFields, "agentId", "taskId", "messageId", "text", "state"]);
+		const state = fields.get("state");
+		if (state !== "accepted" && state !== "cancelled") invalid("Session control entry.state is invalid");
+		return {
+			type,
+			...parseBase(fields),
+			agentId: requiredString(fields, "agentId", { maxLength: 256, noControls: true }),
+			taskId: requiredString(fields, "taskId", { maxLength: 256, noControls: true }),
+			messageId: requiredString(fields, "messageId", { maxLength: 256, noControls: true }),
+			text: requiredString(fields, "text", { maxBytes: 2 * 1024 * 1024 }),
+			state,
+		};
+	}
+	if (type === "agent_archived") {
+		assertOnlyFields(fields, [...baseFields, "agentId", "archived"]);
+		const archived = fields.get("archived");
+		if (typeof archived !== "boolean") invalid("Session control entry.archived must be a boolean");
+		return {
+			type,
+			...parseBase(fields),
+			agentId: requiredString(fields, "agentId", { maxLength: 256, noControls: true }),
+			archived,
 		};
 	}
 	if (type === "subagent_mailbox_event") {
@@ -590,28 +474,6 @@ export function parseSessionControlEntry(value: unknown): SessionControlEntry {
 			eventIds,
 			state,
 		};
-	}
-	if (type === "subagent_follow_up") {
-		assertOnlyFields(fields, [...baseFields, "agentId", "runId", "messageId", "text", "state"]);
-		const state = fields.get("state");
-		if (state !== "queued" && state !== "accepted" && state !== "cancelled")
-			invalid("Session control entry.state is invalid");
-		const base = parseBase(fields);
-		return {
-			type,
-			...base,
-			agentId: requiredString(fields, "agentId", { maxLength: 256, noControls: true }),
-			runId: fields.has("runId")
-				? requiredString(fields, "runId", { maxLength: 256, noControls: true })
-				: `legacy-${base.id}`,
-			messageId: requiredString(fields, "messageId", { maxLength: 256, noControls: true }),
-			text: requiredString(fields, "text", { maxBytes: 2 * 1024 * 1024 }),
-			state,
-		};
-	}
-	if (type === "subagent_closed") {
-		assertOnlyFields(fields, [...baseFields, "tombstone"]);
-		return { type, ...parseBase(fields), tombstone: parseTombstone(fields.get("tombstone")) };
 	}
 	if (type === "subagent_mode_change") {
 		assertOnlyFields(fields, [...baseFields, "enabled"]);

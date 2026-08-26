@@ -71,6 +71,35 @@ ${safePromptJson({
 </parent_assignment_profile>`;
 }
 
+export function buildChildSystemPromptFromAgentConfig(config: {
+	readonly agentId: string;
+	readonly name: string;
+	readonly initialTask: string;
+	readonly tools: readonly string[];
+	readonly permissionMode: SubagentConfig["permissionMode"];
+	readonly model: SubagentConfig["model"];
+	readonly thinkingLevel: SubagentConfig["thinkingLevel"];
+	readonly cwd: string;
+	readonly forkTurns: SubagentConfig["forkTurns"];
+	readonly timeoutSeconds: number;
+}): string {
+	const taskSummary = config.initialTask.replace(/\s+/g, " ").trim().slice(0, 240);
+	return buildChildSystemPrompt({
+		agentId: config.agentId,
+		name: config.name,
+		task: config.initialTask,
+		taskSummary,
+		mode: "code",
+		tools: config.tools,
+		permissionMode: config.permissionMode,
+		model: config.model,
+		thinkingLevel: config.thinkingLevel,
+		cwd: config.cwd,
+		forkTurns: config.forkTurns,
+		timeoutSeconds: config.timeoutSeconds,
+	});
+}
+
 export function buildChildSystemPrompt(config: SubagentConfig): string {
 	return [buildSubagentContract(config), buildParentAssignmentProfile(config)]
 		.filter((part): part is string => part !== undefined)

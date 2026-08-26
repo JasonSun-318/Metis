@@ -291,6 +291,15 @@ export interface DeleteAgentResult {
 	readonly error?: string;
 }
 
+export interface AgentTombstone {
+	readonly agentId: string;
+	readonly name: string;
+	readonly status: "deleted";
+	readonly taskSummary: string;
+	readonly finalMessage?: string;
+	readonly deletedAt: string;
+}
+
 export interface AgentMailboxTerminalEvent {
 	readonly eventId: string;
 	readonly taskId: string;
