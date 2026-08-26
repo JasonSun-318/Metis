@@ -16,9 +16,9 @@ import type { PermissionMode } from "./permission-mode.ts";
 import { QueuedTurnConflictError, type QueuedTurnDraft, QueuedTurnQueue } from "./queued-turn-queue.ts";
 import {
 	type DurableImageRef,
-	type PlanExecutionRef,
 	identifyRuntimeRequest,
 	identifySubmitPromptRequest,
+	type PlanExecutionRef,
 	parseDurablePromptSubmission,
 	RequestIdReusedError,
 } from "./runtime-recovery.ts";

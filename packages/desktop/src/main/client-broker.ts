@@ -680,7 +680,9 @@ export class ClientBroker {
 		this.register(DESKTOP_IPC_CHANNELS.startPlanExecution, 1, async (_event, [input]) =>
 			this.clientCall("plan/startExecution", input),
 		);
-		this.register(DESKTOP_IPC_CHANNELS.cancelPlan, 1, async (_event, [input]) => this.clientCall("plan/cancel", input));
+		this.register(DESKTOP_IPC_CHANNELS.cancelPlan, 1, async (_event, [input]) =>
+			this.clientCall("plan/cancel", input),
+		);
 		this.register(DESKTOP_IPC_CHANNELS.listPermissionRules, 1, async (_event, [input]) =>
 			this.clientCall("permission/rules/list", input),
 		);

@@ -1,11 +1,7 @@
 import { isAbsolute, normalize } from "node:path";
 import { isAgentMode } from "./agent-mode.ts";
-import {
-	MAX_PLAN_MARKDOWN_UTF8_BYTES,
-	MAX_PLAN_TITLE_UTF16_UNITS,
-	type CollaborationMode,
-} from "./plan-state.ts";
 import { isPersistedPermissionMode, normalizePermissionMode, type PersistedPermissionMode } from "./permission-mode.ts";
+import { type CollaborationMode, MAX_PLAN_MARKDOWN_UTF8_BYTES, MAX_PLAN_TITLE_UTF16_UNITS } from "./plan-state.ts";
 import type {
 	SubagentConfig,
 	SubagentMailboxEvent,
@@ -440,10 +436,9 @@ export function isSessionDirectoryControlEntryType(type: unknown): type is Sessi
 	return type === "session_directory_added" || type === "session_directory_removed";
 }
 
-export function isPlanControlEntryType(type: unknown): type is
-	| SessionCollaborationModeEntry["type"]
-	| SessionPlanProposalEntry["type"]
-	| SessionPlanStatusEntry["type"] {
+export function isPlanControlEntryType(
+	type: unknown,
+): type is SessionCollaborationModeEntry["type"] | SessionPlanProposalEntry["type"] | SessionPlanStatusEntry["type"] {
 	return type === "session_collaboration_mode" || type === "session_plan_proposal" || type === "session_plan_status";
 }
 

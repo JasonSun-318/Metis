@@ -49,7 +49,10 @@ function filterSubmitPlanHistory(messages: readonly AgentMessage[]): AgentMessag
 	return filtered;
 }
 
-export function projectPlanContext(messages: readonly AgentMessage[], input: PlanContextProjectionInput): AgentMessage[] {
+export function projectPlanContext(
+	messages: readonly AgentMessage[],
+	input: PlanContextProjectionInput,
+): AgentMessage[] {
 	const filtered = filterSubmitPlanHistory(messages);
 	const plan = input.executionPlan ?? (input.collaborationMode === "plan" ? input.currentPlan : undefined);
 	if (!plan) return filtered;

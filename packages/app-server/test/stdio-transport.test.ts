@@ -116,7 +116,11 @@ describe("stdio app-server binding", () => {
 				jsonrpc: "2.0",
 				id: "initialize",
 				method: "initialize",
-				params: { protocolVersion: PROTOCOL_VERSION, client: { name: "stdio-test", version: "1" }, capabilities: [] },
+				params: {
+					protocolVersion: PROTOCOL_VERSION,
+					client: { name: "stdio-test", version: "1" },
+					capabilities: [],
+				},
 			})}\n`,
 		);
 		await vi.waitFor(() => expect(output.envelopes).toHaveLength(2));
@@ -140,7 +144,11 @@ describe("stdio app-server binding", () => {
 				jsonrpc: "2.0",
 				id: "initialize",
 				method: "initialize",
-				params: { protocolVersion: PROTOCOL_VERSION, client: { name: "stdio-test", version: "1" }, capabilities: [] },
+				params: {
+					protocolVersion: PROTOCOL_VERSION,
+					client: { name: "stdio-test", version: "1" },
+					capabilities: [],
+				},
 			})}\n`,
 		);
 		await vi.waitFor(() => expect(output.envelopes).toHaveLength(2));
@@ -162,7 +170,11 @@ describe("stdio app-server binding", () => {
 			jsonrpc: "2.0",
 			id: "initialize",
 			method: "initialize",
-			params: { protocolVersion: PROTOCOL_VERSION, client: { name: "stdio-restart", version: "1" }, capabilities: [] },
+			params: {
+				protocolVersion: PROTOCOL_VERSION,
+				client: { name: "stdio-restart", version: "1" },
+				capabilities: [],
+			},
 		};
 		const create = {
 			jsonrpc: "2.0",

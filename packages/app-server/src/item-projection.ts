@@ -9,7 +9,13 @@ import type {
 	SessionGoalView,
 	SessionTaskView,
 } from "@metis/app-protocol";
-import { formatSessionAttachmentDisplayText, MAX_SESSION_DELIVERED_FILES, parseDeliverFileDetails, type StoredPlan, type ThreadGoal } from "@metis/coding-agent";
+import {
+	formatSessionAttachmentDisplayText,
+	MAX_SESSION_DELIVERED_FILES,
+	parseDeliverFileDetails,
+	type StoredPlan,
+	type ThreadGoal,
+} from "@metis/coding-agent";
 
 export const MAX_PROJECTED_THINKING_BYTES = 8 * 1024;
 export const MAX_PROJECTED_VISIBLE_TEXT_BYTES = 20 * 1024;

@@ -14,16 +14,6 @@ export {
 	getWorkspacesDir,
 	VERSION,
 } from "./config.ts";
-export {
-	type CollaborationMode,
-	MAX_PLAN_MARKDOWN_UTF8_BYTES,
-	MAX_PLAN_TITLE_UTF16_UNITS,
-	type PlanRef,
-	type PlanState,
-	type PlanStatus,
-	reducePlanState,
-	type StoredPlan,
-} from "./core/plan-state.ts";
 export { type AgentMode, DEFAULT_AGENT_MODE, isAgentMode } from "./core/agent-mode.ts";
 export {
 	AgentSession,
@@ -344,6 +334,16 @@ export {
 	unclassifiedAction,
 } from "./core/permission-policy.ts";
 export {
+	type CollaborationMode,
+	MAX_PLAN_MARKDOWN_UTF8_BYTES,
+	MAX_PLAN_TITLE_UTF16_UNITS,
+	type PlanRef,
+	type PlanState,
+	type PlanStatus,
+	reducePlanState,
+	type StoredPlan,
+} from "./core/plan-state.ts";
+export {
 	ProjectPermissionRuleStore,
 	type ProjectPermissionRuleView,
 	type ProjectPermissionSignatureInput,
@@ -363,11 +363,11 @@ export {
 	type DurableImageRef,
 	type DurablePromptInput,
 	type DurablePromptSubmission,
-	type PlanExecutionRef,
 	deriveBatchedTurnId,
 	identifyRuntimeRequest,
 	identifySubmitPromptRequest,
 	isRuntimeControlEntryType,
+	type PlanExecutionRef,
 	parseDurablePromptSubmission,
 	parseRuntimeControlEntry,
 	type ReducedRuntimeOperation,

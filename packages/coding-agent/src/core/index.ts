@@ -3,23 +3,6 @@
  */
 
 export {
-	PLAN_MODE_SYSTEM_PROMPT,
-	type PlanContextProjectionInput,
-	planVisibleToolNames,
-	projectPlanContext,
-} from "./plan-mode.ts";
-export {
-	type CollaborationMode,
-	MAX_PLAN_MARKDOWN_UTF8_BYTES,
-	MAX_PLAN_TITLE_UTF16_UNITS,
-	type PlanRef,
-	type PlanState,
-	type PlanStatus,
-	type StoredPlan,
-	reducePlanState,
-} from "./plan-state.ts";
-export { createSubmitPlanToolDefinition, type SubmitPlanInput, SubmitPlanParams } from "./submit-plan.ts";
-export {
 	AgentSession,
 	type AgentSessionConfig,
 	type AgentSessionEvent,
@@ -174,6 +157,22 @@ export {
 	unclassifiedAction,
 } from "./permission-policy.ts";
 export {
+	PLAN_MODE_SYSTEM_PROMPT,
+	type PlanContextProjectionInput,
+	planVisibleToolNames,
+	projectPlanContext,
+} from "./plan-mode.ts";
+export {
+	type CollaborationMode,
+	MAX_PLAN_MARKDOWN_UTF8_BYTES,
+	MAX_PLAN_TITLE_UTF16_UNITS,
+	type PlanRef,
+	type PlanState,
+	type PlanStatus,
+	reducePlanState,
+	type StoredPlan,
+} from "./plan-state.ts";
+export {
 	ProjectPermissionRuleStore,
 	type ProjectPermissionRuleView,
 	type ProjectPermissionSignatureInput,
@@ -191,11 +190,11 @@ export {
 	type DurableImageRef,
 	type DurablePromptInput,
 	type DurablePromptSubmission,
-	type PlanExecutionRef,
 	deriveBatchedTurnId,
 	identifyRuntimeRequest,
 	identifySubmitPromptRequest,
 	isRuntimeControlEntryType,
+	type PlanExecutionRef,
 	parseDurablePromptSubmission,
 	parseRuntimeControlEntry,
 	type ReducedRuntimeOperation,
@@ -310,6 +309,7 @@ export {
 	type SubagentUsage,
 	type SubagentVisibleActivity,
 } from "./subagents/types.ts";
+export { createSubmitPlanToolDefinition, type SubmitPlanInput, SubmitPlanParams } from "./submit-plan.ts";
 export {
 	canUseUltra,
 	getHighestSupportedThinkingLevel,

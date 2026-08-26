@@ -386,7 +386,11 @@ function parseDurablePromptInput(value: unknown, label: string): DurablePromptIn
 
 export function parseDurablePromptSubmission(value: unknown): DurablePromptSubmission {
 	const fields = dataFields(value, "durable prompt submission");
-	assertOnlyFields(fields, ["requestId", "text", "images", "streamingBehavior", "planExecution"], "durable prompt submission");
+	assertOnlyFields(
+		fields,
+		["requestId", "text", "images", "streamingBehavior", "planExecution"],
+		"durable prompt submission",
+	);
 	const inputFields = new Map(fields);
 	inputFields.delete("requestId");
 	return {

@@ -5,9 +5,9 @@ import {
 	MAX_NAME_UTF16_UNITS,
 	MAX_PERMISSION_OPERATION_ROWS,
 	MAX_PUBLIC_TEXT_UTF8_BYTES,
+	PROTOCOL_VERSION,
 	type ServerRpcRequest,
 } from "@metis/app-protocol";
-import { PROTOCOL_VERSION } from "@metis/app-protocol";
 import {
 	type AskUserInput,
 	type AskUserRequest,

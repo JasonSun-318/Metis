@@ -299,7 +299,9 @@ describe("plan projection", () => {
 				timestamp: CREATED_AT,
 				message: {
 					role: "assistant",
-					content: [{ type: "toolCall", id: "call-1", name: "submit_plan", arguments: { title: "T", markdown: "m" } }],
+					content: [
+						{ type: "toolCall", id: "call-1", name: "submit_plan", arguments: { title: "T", markdown: "m" } },
+					],
 				},
 			},
 			sessionId: "session-1",

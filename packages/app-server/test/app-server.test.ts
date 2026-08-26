@@ -275,9 +275,7 @@ class FakeRuntime implements OpenedSessionRuntime {
 		return { collaborationMode: input.collaborationMode };
 	}
 
-	async startPlanExecution(
-		input: ClientParams<"plan/startExecution">,
-	): Promise<ClientResult<"plan/startExecution">> {
+	async startPlanExecution(input: ClientParams<"plan/startExecution">): Promise<ClientResult<"plan/startExecution">> {
 		return { operationId: input.requestId, status: "accepted" };
 	}
 
@@ -774,7 +772,11 @@ describe("AppServer", () => {
 		);
 		const initialized = await connection.handle(initialize());
 		expect(initialized).toMatchObject({
-			result: { protocolVersion: PROTOCOL_VERSION, server: { name: "metis-app-server" }, serverEpoch: server.serverEpoch },
+			result: {
+				protocolVersion: PROTOCOL_VERSION,
+				server: { name: "metis-app-server" },
+				serverEpoch: server.serverEpoch,
+			},
 		});
 		expectError(await connection.handle(initialize("again")), RPC_ERROR_CODES.INVALID_REQUEST);
 	});

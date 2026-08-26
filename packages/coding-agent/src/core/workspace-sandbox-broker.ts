@@ -132,7 +132,13 @@ function runtimeConfig(
 	const denyRead = deniedReadRoots(callerHome);
 	const allowedWrite = [...new Set([...(workspaceReadOnly ? [] : workspaceRoots), ...writeRoots, temporaryDir])];
 	const allowedRead = [
-		...new Set([...workspaceRoots, ...allowedWrite, ...readOnlyRoots, ...runtimeReads, ...(shellPath ? [shellPath] : [])]),
+		...new Set([
+			...workspaceRoots,
+			...allowedWrite,
+			...readOnlyRoots,
+			...runtimeReads,
+			...(shellPath ? [shellPath] : []),
+		]),
 	];
 	const denyWrite = getDefaultWritePaths().filter(
 		(path) => !path.startsWith("/dev/") && !allowedWrite.some((root) => isPathInside(root, path)),

@@ -69,9 +69,9 @@ export function reducePlanState(entries: readonly unknown[], activeBranchIds?: R
 	}
 	const plans: StoredPlan[] = proposals.map((plan, index) => {
 		const explicit = terminal.get(`${plan.planId}:${plan.revision}`);
-		const superseded = proposals.slice(index + 1).some(
-			(candidate) => candidate.planId === plan.planId && candidate.revision > plan.revision,
-		);
+		const superseded = proposals
+			.slice(index + 1)
+			.some((candidate) => candidate.planId === plan.planId && candidate.revision > plan.revision);
 		const status: PlanStatus = explicit ?? (superseded ? "superseded" : "proposed");
 		return { ...plan, status };
 	});

@@ -2,12 +2,7 @@ import { EventEmitter } from "node:events";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import {
-	MAX_ENVELOPE_UTF8_BYTES,
-	PROTOCOL_VERSION,
-	RPC_ERROR_CODES,
-	type ServerRpcRequest,
-} from "@metis/app-protocol";
+import { MAX_ENVELOPE_UTF8_BYTES, PROTOCOL_VERSION, RPC_ERROR_CODES, type ServerRpcRequest } from "@metis/app-protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AppServer } from "../src/app-server.ts";
 import { bindAppServerTransport } from "../src/transport/transport.ts";
@@ -125,7 +120,11 @@ describe("utility-process app-server binding", () => {
 				jsonrpc: "2.0",
 				id: "initialize",
 				method: "initialize",
-				params: { protocolVersion: PROTOCOL_VERSION, client: { name: "utility-test", version: "1" }, capabilities: [] },
+				params: {
+					protocolVersion: PROTOCOL_VERSION,
+					client: { name: "utility-test", version: "1" },
+					capabilities: [],
+				},
 			},
 		});
 		await vi.waitFor(() => expect(port.sent).toHaveLength(1));
@@ -171,7 +170,11 @@ describe("utility-process app-server binding", () => {
 				jsonrpc: "2.0",
 				id: "initialize",
 				method: "initialize",
-				params: { protocolVersion: PROTOCOL_VERSION, client: { name: "utility-test", version: "1" }, capabilities: [] },
+				params: {
+					protocolVersion: PROTOCOL_VERSION,
+					client: { name: "utility-test", version: "1" },
+					capabilities: [],
+				},
 			},
 		});
 		await vi.waitFor(() => expect(port.sent).toHaveLength(2));
@@ -203,7 +206,11 @@ describe("utility-process app-server binding", () => {
 				jsonrpc: "2.0",
 				id: "initialize",
 				method: "initialize",
-				params: { protocolVersion: PROTOCOL_VERSION, client: { name: "utility-test", version: "1" }, capabilities: [] },
+				params: {
+					protocolVersion: PROTOCOL_VERSION,
+					client: { name: "utility-test", version: "1" },
+					capabilities: [],
+				},
 			},
 		});
 		await vi.waitFor(() => expect(port.sent).toHaveLength(1));

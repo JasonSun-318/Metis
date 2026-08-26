@@ -2,7 +2,7 @@ import { expect, it } from "vitest";
 import { parseSandboxRequest, parseSandboxResponse } from "../src/core/workspace-sandbox-protocol.ts";
 
 it("accepts only the bounded discriminated sandbox protocol", () => {
-		expect(
+	expect(
 		parseSandboxRequest(
 			JSON.stringify({
 				type: "init",
