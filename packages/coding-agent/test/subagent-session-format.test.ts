@@ -178,7 +178,7 @@ describe("v7 first-class subagent records", () => {
 		);
 
 		const migrated = SessionManager.open(ordinaryPath);
-		expect(migrated.getHeader()?.version).toBe(11);
+		expect(migrated.getHeader()?.version).toBe(12);
 		migrated.close();
 		expect(() => SessionManager.open(badPath)).toThrow("Subagent mailbox controls require a v11 session header");
 		expect(() => SessionManager.open(badBackgroundPath)).toThrow(
