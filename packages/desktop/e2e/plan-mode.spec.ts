@@ -42,11 +42,11 @@ function messageText(content: unknown): string {
 }
 
 async function enterPlanMode(page: Page): Promise<void> {
-	const planToggle = page.getByRole("button", { name: "Plan mode", exact: true });
-	await planToggle.click();
-	await expect(planToggle).toHaveAttribute("aria-pressed", "true");
-	await expect(planToggle).toBeEnabled();
-	await expect(page.locator("#composer-input")).toHaveAttribute("contenteditable", "true");
+	const input = page.locator("#composer-input");
+	await expect(input).toHaveAttribute("contenteditable", "true");
+	await input.fill("/plan");
+	await page.getByRole("option").filter({ hasText: "/plan" }).click();
+	await expect(page.getByRole("button", { name: "Exit Plan mode", exact: true })).toBeEnabled();
 }
 
 function lastUserText(payload: ProviderPayload): string {
@@ -163,7 +163,7 @@ test("packaged plan mode explores, revises, recovers, executes, and cancels", as
 	new fixtures.ProjectTrustStore(agentDir).set(projectDir, true);
 
 	const providerPayloads: ProviderPayload[] = [];
-	let providerStage: "idle" | "awaiting-bash-1" | "after-plan-1" | "after-plan-2" | "after-plan-3" = "idle";
+	let providerStage: "idle" | "awaiting-bash-1" = "idle";
 	let bash1Id = "";
 	let plan2Submitted = false;
 	const fakeProvider = createServer(async (request, response) => {
@@ -181,13 +181,8 @@ test("packaged plan mode explores, revises, recovers, executes, and cancels", as
 		}
 		providerPayloads.push(payload);
 		response.writeHead(200, { "content-type": "text/event-stream" });
-		if (providerStage === "after-plan-1" || providerStage === "after-plan-2" || providerStage === "after-plan-3") {
-			providerStage = "idle";
-			response.end(sseText("Plan exploration complete."));
-			return;
-		}
 		if (providerStage === "awaiting-bash-1" && hasToolResult(payload, bash1Id)) {
-			providerStage = "after-plan-1";
+			providerStage = "idle";
 			response.end(
 				sseToolCall("call-submit-plan-1", "submit_plan", {
 					title: "Add safe greeting",
@@ -201,7 +196,6 @@ test("packaged plan mode explores, revises, recovers, executes, and cancels", as
 			!transcript(payload).includes("call-submit-plan-2") &&
 			!plan2Submitted
 		) {
-			providerStage = "after-plan-2";
 			plan2Submitted = true;
 			response.end(
 				sseToolCall("call-submit-plan-2", "submit_plan", {
@@ -217,7 +211,6 @@ test("packaged plan mode explores, revises, recovers, executes, and cancels", as
 			!transcript(payload).includes("call-submit-plan-3") &&
 			!lastUserText(payload).includes("Use a friendlier greeting")
 		) {
-			providerStage = "after-plan-3";
 			response.end(
 				sseToolCall("call-submit-plan-3", "submit_plan", {
 					title: "Draft another safe plan",
@@ -282,7 +275,21 @@ test("packaged plan mode explores, revises, recovers, executes, and cancels", as
 		await createCodeSession(page, sessionId);
 
 		phase = "entering plan mode";
-		const planToggle = page.getByRole("button", { name: "Plan mode", exact: true });
+		await enterPlanMode(page);
+		const exitPlanMode = page.getByRole("button", { name: "Exit Plan mode", exact: true });
+		const leadingClasses = await page.locator(".composer-leading > *").evaluateAll((elements) =>
+			elements.slice(0, 3).map((element) => element.className),
+		);
+		expect(leadingClasses[0]).toContain("composer-add");
+		expect(leadingClasses[1]).toContain("permission-selector");
+		expect(leadingClasses[2]).toContain("collaboration-mode-control");
+		await expect(exitPlanMode.locator(".collaboration-mode-active-icon")).toHaveCSS("opacity", "1");
+		await expect(exitPlanMode.locator(".collaboration-mode-exit-icon")).toHaveCSS("opacity", "0");
+		await exitPlanMode.hover();
+		await expect(exitPlanMode.locator(".collaboration-mode-active-icon")).toHaveCSS("opacity", "0");
+		await expect(exitPlanMode.locator(".collaboration-mode-exit-icon")).toHaveCSS("opacity", "1");
+		await exitPlanMode.click();
+		await expect(exitPlanMode).toHaveCount(0);
 		await enterPlanMode(page);
 
 		phase = "creating first plan";
@@ -338,7 +345,7 @@ test("packaged plan mode explores, revises, recovers, executes, and cancels", as
 		phase = "starting execution";
 		const requestsBeforeStart = providerPayloads.length;
 		await page.locator('[data-plan-action="start"]').last().click();
-		await expect(planToggle).toHaveAttribute("aria-pressed", "false");
+		await expect(exitPlanMode).toHaveCount(0);
 		let executionPayload: ProviderPayload | undefined;
 		await expect.poll(() => {
 			executionPayload = providerPayloads
@@ -361,10 +368,10 @@ test("packaged plan mode explores, revises, recovers, executes, and cancels", as
 		await page.getByRole("button", { name: "Send message", exact: true }).click();
 		await expect(page.locator(".plan-card").filter({ hasText: "Proposed" })).toHaveCount(1, { timeout: 60_000 });
 		await expect(page.locator('[data-plan-action="cancel"]').last()).toBeVisible({ timeout: 60_000 });
-		await expect.poll(() => providerPayloads.length >= requestsBeforeDraft + 2, { timeout: 60_000 }).toBe(true);
+		await expect.poll(() => providerPayloads.length >= requestsBeforeDraft + 1, { timeout: 60_000 }).toBe(true);
 		const requestsBeforeCancel = providerPayloads.length;
 		await page.locator('[data-plan-action="cancel"]').last().click();
-		await expect(planToggle).toHaveAttribute("aria-pressed", "false");
+		await expect(exitPlanMode).toHaveCount(0);
 		expect(providerPayloads.length).toBe(requestsBeforeCancel);
 	} catch (error) {
 		const bodyText = await page?.locator("body").innerText().catch(() => "renderer unavailable");

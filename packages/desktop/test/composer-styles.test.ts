@@ -42,6 +42,20 @@ describe("Composer visual states", () => {
 		expect(stop.background).toBe("var(--surface-13)");
 	});
 
+	it("uses a separated Plan status control that reveals its exit icon on hover", () => {
+		expect(rule(".collaboration-mode-separator").width).toBe("1px");
+		expect(rule(".collaboration-mode-separator").height).toBe("14px");
+		expect(rule(".collaboration-mode-indicator").background).toBe("transparent");
+		expect(rule(".collaboration-mode-indicator").minHeight).toBe("28px");
+		expect(rule(".collaboration-mode-exit-icon").opacity).toBe("0");
+		expect(
+			getRules().some(
+				(candidate) =>
+					candidate.selectorText?.includes(".collaboration-mode-exit-icon") && candidate.style.opacity === "1",
+			),
+		).toBe(true);
+	});
+
 	it("uses the reference add button and compact menu scale", () => {
 		const addButton = rule(".composer-add > .composer-plain-button");
 		expect(addButton.background).toBe("transparent");

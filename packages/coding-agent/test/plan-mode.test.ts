@@ -1,4 +1,5 @@
 import type { AgentMessage } from "@metis/agent-core";
+import { fauxAssistantMessage, fauxToolCall } from "@metis/ai/compat";
 import { describe, expect, it } from "vitest";
 import { PLAN_MODE_SYSTEM_PROMPT, planVisibleToolNames, projectPlanContext } from "../src/core/plan-mode.ts";
 import type { StoredPlan } from "../src/core/plan-state.ts";
@@ -15,18 +16,13 @@ const planRevision2: StoredPlan = {
 };
 
 const messagesWithTwoSubmitCalls: AgentMessage[] = [
-	{
-		role: "assistant",
-		content: [
-			{
-				type: "toolCall",
-				id: "call-1",
-				name: "submit_plan",
-				arguments: { title: "Old", markdown: "planRevision1Body" },
-			},
-		],
-		timestamp: 1,
-	},
+	fauxAssistantMessage(
+		[fauxToolCall("submit_plan", { title: "Old", markdown: "planRevision1Body" }, { id: "call-1" })],
+		{
+			stopReason: "toolUse",
+			timestamp: 1,
+		},
+	),
 	{
 		role: "toolResult",
 		toolCallId: "call-1",
@@ -35,18 +31,10 @@ const messagesWithTwoSubmitCalls: AgentMessage[] = [
 		isError: false,
 		timestamp: 2,
 	},
-	{
-		role: "assistant",
-		content: [
-			{
-				type: "toolCall",
-				id: "call-2",
-				name: "submit_plan",
-				arguments: { title: "Current", markdown: "planRevision2Body" },
-			},
-		],
-		timestamp: 3,
-	},
+	fauxAssistantMessage(
+		[fauxToolCall("submit_plan", { title: "Current", markdown: "planRevision2Body" }, { id: "call-2" })],
+		{ stopReason: "toolUse", timestamp: 3 },
+	),
 	{
 		role: "toolResult",
 		toolCallId: "call-2",
@@ -61,8 +49,7 @@ describe("plan mode projection", () => {
 	it("exposes only trusted exploration tools and submit_plan", () => {
 		const visible = planVisibleToolNames(
 			["read", "grep", "bash", "edit", "write", "web_fetch", "web_search", "ask_user", "set_tasks", "mcp_write"],
-			(name) =>
-				["ask_user", "submit_plan"].includes(name) ? "trusted" : name === "mcp_write" ? "mcp" : "builtin",
+			(name) => (["ask_user", "submit_plan"].includes(name) ? "trusted" : name === "mcp_write" ? "mcp" : "builtin"),
 		);
 		expect(visible).toEqual(["read", "grep", "bash", "web_fetch", "web_search", "ask_user", "submit_plan"]);
 	});

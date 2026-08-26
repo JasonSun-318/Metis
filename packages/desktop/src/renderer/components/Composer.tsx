@@ -742,39 +742,19 @@ export function Composer({
 				</div>
 				<div className="composer-actions">
 					<div className="composer-leading">
-						{isCode ? (
-							<>
-								{collaborationControl}
-								{permissionControl}
-								<ComposerAddMenu
-									commandRequest={commandRequest}
-									disabled={disabled || submitting}
-									iconSize={13}
-									mcpServers={mcpServers}
-									onAddFiles={() => void addFiles().catch(() => undefined)}
-									onManageMcp={() => onManageMcp?.()}
-									onManageSkills={() => onManageSkills?.()}
-									onSelectSkill={handleAddSkill}
-									skills={skills}
-								/>
-							</>
-						) : (
-							<>
-								<ComposerAddMenu
-									commandRequest={commandRequest}
-									disabled={disabled || submitting}
-									iconSize={16}
-									mcpServers={mcpServers}
-									onAddFiles={() => void addFiles().catch(() => undefined)}
-									onManageMcp={() => onManageMcp?.()}
-									onManageSkills={() => onManageSkills?.()}
-									onSelectSkill={handleAddSkill}
-									skills={skills}
-								/>
-								{collaborationControl}
-								{permissionControl}
-							</>
-						)}
+						<ComposerAddMenu
+							commandRequest={commandRequest}
+							disabled={disabled || submitting}
+							iconSize={isCode ? 13 : 16}
+							mcpServers={mcpServers}
+							onAddFiles={() => void addFiles().catch(() => undefined)}
+							onManageMcp={() => onManageMcp?.()}
+							onManageSkills={() => onManageSkills?.()}
+							onSelectSkill={handleAddSkill}
+							skills={skills}
+						/>
+						{permissionControl}
+						{collaborationControl}
 						{mcpConnectionState === "connecting" && <span className="composer-mcp-status" role="status">{t("MCP connecting")}</span>}
 						{mcpConnectionState === "failed" && <button className="composer-mcp-status is-error" onClick={() => onManageMcp?.()} type="button">{t("MCP connection failed")}</button>}
 					</div>

@@ -24,6 +24,7 @@ describe("SlashCommandMenu", () => {
 		expect([...container.querySelectorAll('[role="option"] strong')].map((node) => node.textContent)).toEqual([
 			"/compact",
 			"/goal",
+			"/plan",
 			"/model",
 			"/thinking",
 			"/status",

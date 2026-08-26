@@ -2117,7 +2117,7 @@ describe("Chat desktop shell", () => {
 		await act(async () => root.unmount());
 	});
 
-	it("disables Plan mode and sending while a collaboration-mode change is in flight", async () => {
+	it("enters Plan mode with /plan and disables sending while the change is in flight", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
 		const { api, emitEvent } = createHarness();
@@ -2133,10 +2133,14 @@ describe("Chat desktop shell", () => {
 		await act(async () => root.render(<App api={api} store={new AppStore()} />));
 		await flush();
 
-		await act(async () => button(container, "Plan mode").click());
-		expect(button(container, "Plan mode").disabled).toBe(true);
-		expect(button(container, "Plan mode").getAttribute("aria-pressed")).toBe("true");
 		const editor = container.querySelector<HTMLElement>("#composer-input")!;
+		await act(async () => changeTextarea(editor, "/plan"));
+		const option = [...container.querySelectorAll<HTMLButtonElement>('[role="option"]')]
+			.find((candidate) => candidate.querySelector("strong")?.textContent === "/plan")!;
+		await act(async () => option.click());
+		expect(api.setCollaborationMode).toHaveBeenCalledWith(expect.objectContaining({ collaborationMode: "plan" }));
+		expect(button(container, "Exit Plan mode").disabled).toBe(true);
+		expect(container.querySelector(".collaboration-mode-indicator")?.textContent).toBe("Plan");
 		await act(async () => changeTextarea(editor, "Create a safe plan"));
 		expect(button(container, "Send message").disabled).toBe(true);
 		await act(async () => editor.closest("form")!.requestSubmit());
@@ -2163,11 +2167,29 @@ describe("Chat desktop shell", () => {
 			});
 		});
 		await flush();
-		expect(button(container, "Plan mode").disabled).toBe(false);
+		const exitPlanMode = button(container, "Exit Plan mode");
+		expect(exitPlanMode.disabled).toBe(false);
+		const leading = container.querySelector(".composer-leading")!;
+		expect(leading.children[0]?.classList.contains("composer-add")).toBe(true);
+		expect(leading.children[1]?.classList.contains("permission-selector")).toBe(true);
+		expect(leading.children[2]?.classList.contains("collaboration-mode-control")).toBe(true);
+		expect(exitPlanMode.querySelector(".collaboration-mode-active-icon")).not.toBeNull();
+		expect(exitPlanMode.querySelector(".collaboration-mode-exit-icon")).not.toBeNull();
+
+		await act(async () => changeTextarea(editor, "/plan"));
+		const activePlanOption = [...container.querySelectorAll<HTMLButtonElement>('[role="option"]')]
+			.find((candidate) => candidate.querySelector("strong")?.textContent === "/plan")!;
+		expect(activePlanOption.getAttribute("aria-disabled")).toBe("true");
+		await act(async () => activePlanOption.click());
+		expect(api.setCollaborationMode).toHaveBeenCalledTimes(1);
+
+		await act(async () => exitPlanMode.click());
+		expect(api.setCollaborationMode).toHaveBeenLastCalledWith(expect.objectContaining({ collaborationMode: "default" }));
+		expect(container.querySelector(".collaboration-mode-control")).toBeNull();
 		await act(async () => root.unmount());
 	});
 
-	it("disables Plan mode while a turn is running", async () => {
+	it("disables /plan while a turn is running", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
 		const { api } = createHarness();
@@ -2182,7 +2204,13 @@ describe("Chat desktop shell", () => {
 		await act(async () => root.render(<App api={api} store={new AppStore()} />));
 		await flush();
 
-		expect(button(container, "Plan mode").disabled).toBe(true);
+		const editor = container.querySelector<HTMLElement>("#composer-input")!;
+		await act(async () => changeTextarea(editor, "/plan"));
+		const option = [...container.querySelectorAll<HTMLButtonElement>('[role="option"]')]
+			.find((candidate) => candidate.querySelector("strong")?.textContent === "/plan")!;
+		expect(option.getAttribute("aria-disabled")).toBe("true");
+		await act(async () => option.click());
+		expect(api.setCollaborationMode).not.toHaveBeenCalled();
 		await act(async () => root.unmount());
 	});
 

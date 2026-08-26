@@ -21,7 +21,7 @@ import {
 	type SkillSummaryView,
 	type ThinkingSelectionView,
 } from "@metis/app-protocol";
-import { SidebarSimple } from "@phosphor-icons/react";
+import { Lightbulb, SidebarSimple, XCircle } from "@phosphor-icons/react";
 import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { DesktopUpdateState, MetisDesktopApi } from "../../shared/desktop-api.ts";
@@ -47,7 +47,6 @@ import { loadSessionPins, saveSessionPins, setSessionPinned } from "../store/ses
 import { applyThemeToDocument, loadTheme, resolveTheme, saveTheme, type AppTheme, watchSystemTheme } from "../theme.ts";
 import { contextUsagePercent } from "../context-usage.ts";
 import { Composer, type ComposerSubmission } from "./Composer.tsx";
-import { CollaborationModeToggle } from "./CollaborationModeToggle.tsx";
 import { CodeProjectSetup } from "./CodeProjectSetup.tsx";
 import { GoalBar } from "./GoalBar.tsx";
 import { InteractionHost } from "./InteractionHost.tsx";
@@ -1471,7 +1470,7 @@ export function App({ api, store }: AppProps) {
 		inlineInteraction !== undefined ||
 		running;
 	const collaborationModeValue = pendingCollaborationMode ?? state.collaborationMode;
-	const collaborationToggleDisabled =
+	const collaborationModeBlocked =
 		planActionsBusy ||
 		pendingCollaborationMode !== null ||
 		currentProposedPlan !== undefined;
@@ -1634,15 +1633,25 @@ export function App({ api, store }: AppProps) {
 		if (!writableSessionId) {
 			commands.add("compact");
 			commands.add("goal");
+			commands.add("plan");
 			commands.add("status");
 			reasons.compact = "Open a task to use this command";
 			reasons.goal = "Open a task to use this command";
+			reasons.plan = "Open a task to use this command";
 			reasons.status = "Open a task to use this command";
 		} else if (compactBlocked) {
 			commands.add("compact");
 			reasons.compact = compactingSession
 				? "Conversation compaction is already running"
 				: "Stop the active task before compacting";
+		}
+		if (writableSessionId && (collaborationModeValue === "plan" || collaborationModeBlocked)) {
+			commands.add("plan");
+			reasons.plan = currentProposedPlan
+				? "Start or cancel the current plan first"
+				: collaborationModeValue === "plan"
+					? "Plan mode is already active"
+					: "Plan mode is unavailable while this task is busy";
 		}
 		if (!configurationSession && !newTaskOpen) {
 			commands.add("model");
@@ -1651,7 +1660,7 @@ export function App({ api, store }: AppProps) {
 			reasons.thinking = "Open a task to use this command";
 		}
 		return { disabledSlashCommands: commands, disabledSlashReasons: reasons };
-	}, [compactBlocked, compactingSession, configurationSession, writableSessionId]);
+	}, [collaborationModeBlocked, collaborationModeValue, compactBlocked, compactingSession, configurationSession, currentProposedPlan, writableSessionId]);
 
 	const openSessionStatus = useCallback(async () => {
 		if (!writableSessionId) return;
@@ -1743,8 +1752,12 @@ export function App({ api, store }: AppProps) {
 			setNotice(GOAL_SLASH_USAGE);
 			return;
 		}
+		if (command === "plan") {
+			if (collaborationModeValue !== "plan") await changeCollaborationMode("plan");
+			return;
+		}
 		requestComposerControl(command);
-	}, [closeSessionStatus, compactConversation, openSessionStatus, requestComposerControl]);
+	}, [changeCollaborationMode, closeSessionStatus, collaborationModeValue, compactConversation, openSessionStatus, requestComposerControl]);
 	const modelControl = configurationSession ? (
 		<ModelSelector
 			available={state.availableModels}
@@ -1812,12 +1825,23 @@ export function App({ api, store }: AppProps) {
 			value={state.permissionMode}
 		/>
 	) : undefined;
-	const collaborationControl = visibleActiveSession ? (
-		<CollaborationModeToggle
-			disabled={collaborationToggleDisabled}
-			onChange={(mode) => void changeCollaborationMode(mode).catch(() => undefined)}
-			value={collaborationModeValue}
-		/>
+	const collaborationControl = visibleActiveSession && collaborationModeValue === "plan" ? (
+		<div className="collaboration-mode-control">
+			<span aria-hidden="true" className="collaboration-mode-separator" />
+			<button
+				aria-label={t("Exit Plan mode")}
+				className="collaboration-mode-indicator"
+				disabled={collaborationModeBlocked}
+				onClick={() => void changeCollaborationMode("default").catch(() => undefined)}
+				type="button"
+			>
+				<span aria-hidden="true" className="collaboration-mode-icon">
+					<Lightbulb className="collaboration-mode-active-icon" size={14} />
+					<XCircle className="collaboration-mode-exit-icon" size={14} weight="fill" />
+				</span>
+				<span>{t("Plan")}</span>
+			</button>
+		</div>
 	) : undefined;
 	const planRevisionChip = planRevisionTarget ? (
 		<div className="composer-plan-context">
