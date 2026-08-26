@@ -57,6 +57,13 @@ import {
 	type PersistedPermissionMode,
 } from "./permission-mode.ts";
 import {
+	type CollaborationMode,
+	type PlanRef,
+	type PlanState,
+	reducePlanState,
+	type StoredPlan,
+} from "./plan-state.ts";
+import {
 	type DurableImageRef,
 	isRuntimeControlEntryType,
 	MAX_DURABLE_IMAGE_BYTES,
@@ -80,13 +87,6 @@ import {
 	type SessionControlPayload,
 	type SubagentControlPayload,
 } from "./session-control.ts";
-import {
-	type CollaborationMode,
-	type PlanRef,
-	type PlanState,
-	type StoredPlan,
-	reducePlanState,
-} from "./plan-state.ts";
 import { assertValidSessionId, createSessionId } from "./session-id.ts";
 import {
 	CorruptSessionError,
@@ -3290,20 +3290,19 @@ export class SessionManager {
 	}
 
 	acceptPlan(ref: PlanRef): StoredPlan {
-		const current = this.getPlanState().currentPlan;
-		if (!current || current.planId !== ref.planId || current.revision !== ref.revision) {
-			throw new Error("Plan action must target the current plan");
-		}
-		this._appendSessionControl({ type: "session_plan_status", ...ref, status: "accepted" });
-		return this.getPlanState().plans.find((plan) => plan.entryId === current.entryId)!;
+		return this._setPlanStatus(ref, "accepted");
 	}
 
 	cancelPlan(ref: PlanRef): StoredPlan {
+		return this._setPlanStatus(ref, "cancelled");
+	}
+
+	private _setPlanStatus(ref: PlanRef, status: "accepted" | "cancelled"): StoredPlan {
 		const current = this.getPlanState().currentPlan;
 		if (!current || current.planId !== ref.planId || current.revision !== ref.revision) {
 			throw new Error("Plan action must target the current plan");
 		}
-		this._appendSessionControl({ type: "session_plan_status", ...ref, status: "cancelled" });
+		this._appendSessionControl({ type: "session_plan_status", ...ref, status });
 		return this.getPlanState().plans.find((plan) => plan.entryId === current.entryId)!;
 	}
 

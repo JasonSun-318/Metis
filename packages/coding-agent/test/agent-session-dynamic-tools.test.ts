@@ -5,6 +5,7 @@ import { getModel } from "@metis/ai/compat";
 import { Type } from "typebox";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createAskUserToolDefinition } from "../src/core/ask-user.ts";
+import type { ExtensionContext } from "../src/core/extensions/types.ts";
 import { DefaultResourceLoader } from "../src/core/resource-loader.ts";
 import { createAgentSession } from "../src/core/sdk.ts";
 import { SessionManager } from "../src/core/session-manager.ts";
@@ -202,20 +203,27 @@ describe("AgentSession dynamic tool registration", () => {
 		const askUser = createAskUserToolDefinition(async () => ({ cancelled: true, answers: [] }));
 		session.installHostTools([askUser], { automaticPermissionToolNames: ["ask_user"] });
 		const normal = session.getConfiguredActiveToolNames();
+		expect(session.getAllTools().map(({ name }) => name)).not.toContain("submit_plan");
 		await session.setCollaborationMode("plan");
-		expect(session.getActiveToolNames()).toEqual(
-			expect.arrayContaining(["read", "bash", "ask_user", "submit_plan"]),
-		);
+		expect(session.getActiveToolNames()).toEqual(expect.arrayContaining(["read", "bash", "ask_user", "submit_plan"]));
+		expect(session.getAllTools().map(({ name }) => name)).toContain("submit_plan");
 		expect(session.getActiveToolNames()).not.toEqual(expect.arrayContaining(["edit", "write", "set_tasks"]));
 		await session.reload();
 		await session.setCollaborationMode("default");
 		expect(session.getActiveToolNames()).toEqual(normal);
 		expect(session.getActiveToolNames()).not.toContain("submit_plan");
+		expect(session.getAllTools().map(({ name }) => name)).not.toContain("submit_plan");
 
 		const submitPlan = session.getToolDefinition("submit_plan");
 		expect(submitPlan).toBeDefined();
 		await expect(
-			submitPlan!.execute("call-plan", { title: "Plan", markdown: "# Plan" }, undefined, undefined),
+			submitPlan!.execute(
+				"call-plan",
+				{ title: "Plan", markdown: "# Plan" },
+				undefined,
+				undefined,
+				{} as ExtensionContext,
+			),
 		).rejects.toThrow(/only in Plan mode/iu);
 
 		session.dispose();

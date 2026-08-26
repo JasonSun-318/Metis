@@ -487,4 +487,22 @@ describe("AgentSessionRuntime plan execution", () => {
 		expect(countAcceptedPlanStatusEntries(session.sessionManager)).toBe(statusCountAfterFirst);
 		expect(statusCountAfterFirst).toBe(1);
 	});
+
+	it("replays an already accepted Plan revision without a duplicate status record", async () => {
+		const { runtime, session, faux } = await createPlanRuntime();
+		await session.setCollaborationMode("plan");
+		const plan = session.sessionManager.submitPlan({ title: "Plan", markdown: "recovery-body" });
+		session.sessionManager.acceptPlan({ planId: plan.planId, revision: plan.revision });
+
+		await runtime.submitPrompt({
+			requestId: "request-plan-recovery",
+			text: "Execute the accepted plan.",
+			planExecution: { planId: plan.planId, revision: plan.revision },
+		});
+		await vi.waitFor(() => expect(faux.state.callCount).toBe(1));
+		await session.waitForIdle();
+
+		expect(countAcceptedPlanStatusEntries(session.sessionManager)).toBe(1);
+		expect(session.sessionManager.getCollaborationMode()).toBe("default");
+	});
 });

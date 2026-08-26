@@ -34,6 +34,7 @@ export function createSubmitPlanToolDefinition(
 			return {
 				content: [{ type: "text", text: `Plan submitted: ${plan.planId} revision ${plan.revision}` }],
 				details: plan,
+				terminate: true,
 			};
 		},
 	};

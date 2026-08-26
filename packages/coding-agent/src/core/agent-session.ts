@@ -172,6 +172,8 @@ import {
 	type ToolProvenance,
 	unclassifiedAction,
 } from "./permission-policy.ts";
+import { PLAN_MODE_SYSTEM_PROMPT, planVisibleToolNames, projectPlanContext } from "./plan-mode.ts";
+import type { CollaborationMode, PlanRef, StoredPlan } from "./plan-state.ts";
 import { ProjectPermissionRuleStore } from "./project-permission-rules.ts";
 import { expandPromptTemplate, type PromptTemplate } from "./prompt-templates.ts";
 import type { ResourceExtensionPaths, ResourceLoader } from "./resource-loader.ts";
@@ -198,20 +200,8 @@ import {
 	getSessionAttachmentDir,
 } from "./session-attachments.ts";
 import { createSessionId } from "./session-id.ts";
-import { PLAN_MODE_SYSTEM_PROMPT, planVisibleToolNames, projectPlanContext } from "./plan-mode.ts";
-import type { CollaborationMode, PlanRef, StoredPlan } from "./plan-state.ts";
-import { createSubmitPlanToolDefinition } from "./submit-plan.ts";
-import {
-	CURRENT_SESSION_VERSION,
-	getLatestCompactionEntry,
-	SessionManager,
-} from "./session-manager.ts";
-import type {
-	BranchSummaryEntry,
-	CompactionEntry,
-	SessionEntry,
-	SessionHeader,
-} from "./session-manager.ts";
+import type { BranchSummaryEntry, CompactionEntry, SessionEntry, SessionHeader } from "./session-manager.ts";
+import { CURRENT_SESSION_VERSION, getLatestCompactionEntry, type SessionManager } from "./session-manager.ts";
 import type { CwdOrigin } from "./session-workspace.ts";
 import { type SettingsManager, VISION_PROVIDER_ID } from "./settings-manager.ts";
 import { SKILL_USAGE_CUSTOM_TYPE, type SkillUsageRecord } from "./skills.ts";
@@ -219,6 +209,7 @@ import type { SlashCommandInfo } from "./slash-commands.ts";
 import { createSyntheticSourceInfo, type SourceInfo } from "./source-info.ts";
 import { buildSubagentMailboxContent } from "./subagents/prompts.ts";
 import { SUBAGENT_ACTIVATION_TOOL_NAME, SUBAGENT_TOOL_NAMES, type SubagentMailboxEvent } from "./subagents/types.ts";
+import { createSubmitPlanToolDefinition } from "./submit-plan.ts";
 import { type BuildSystemPromptOptions, buildSystemPromptWithParts, type SystemPromptPart } from "./system-prompt.ts";
 import { canUseUltra, getHighestSupportedThinkingLevel, type ThinkingSelection } from "./thinking-selection.ts";
 import { createToolResultMicrocompactor } from "./tool-result-microcompaction.ts";
@@ -822,7 +813,7 @@ export class AgentSession {
 
 	/** Install runtime-owned tools; only explicitly named no-host controls bypass approval. */
 	installHostTools(
-		definitions: readonly ToolDefinition[],
+		definitions: readonly ToolDefinition<any, any, any>[],
 		options?: { readonly automaticPermissionToolNames?: readonly string[] },
 	): void {
 		if (this._unattendedExecution) throw new Error("Unattended execution cannot install host tools");
@@ -848,7 +839,9 @@ export class AgentSession {
 			this._trustedControlTools.delete(name);
 			this._allowedToolNames?.delete(name);
 		}
-		this._refreshToolRegistry({ activeToolNames: this.getConfiguredActiveToolNames().filter((name) => !removed.has(name)) });
+		this._refreshToolRegistry({
+			activeToolNames: this.getConfiguredActiveToolNames().filter((name) => !removed.has(name)),
+		});
 	}
 
 	private _isTrustedControlTool(name: string): boolean {
@@ -1180,12 +1173,13 @@ export class AgentSession {
 					? [WEB_SEARCH_PROVIDER_INFO[this.settingsManager.getWebSearchSettings().provider].networkTarget]
 					: undefined,
 		};
-		const action = this._unattendedExecution
-			? classifyAction(classifyInput)
-			: approvedSettings.mode === "full"
-				? unclassifiedAction(classifyInput)
-				: classifyAction(classifyInput);
-		const planBash = this.sessionManager.getCollaborationMode() === "plan" && action.toolName === "bash";
+		const planBash = this.sessionManager.getCollaborationMode() === "plan" && input.toolName === "bash";
+		const action =
+			this._unattendedExecution || planBash
+				? classifyAction(classifyInput)
+				: approvedSettings.mode === "full"
+					? unclassifiedAction(classifyInput)
+					: classifyAction(classifyInput);
 		if (planBash) {
 			const forbidden = action.risks.filter((risk) =>
 				["sensitive-read", "unknown", "network", "elevation", "destructive", "external-side-effect"].includes(risk),
@@ -2411,16 +2405,19 @@ export class AgentSession {
 	private _currentDurablePlanExecution(): StoredPlan | undefined {
 		const scope = durablePromptExecutionContext.getStore();
 		if (!scope?.active || !scope.input.planExecution) return undefined;
-		return this.sessionManager.getPlanState().plans.find(
-			(plan) =>
-				plan.planId === scope.input.planExecution!.planId &&
-				plan.revision === scope.input.planExecution!.revision &&
-				plan.status === "accepted",
-		);
+		return this.sessionManager
+			.getPlanState()
+			.plans.find(
+				(plan) =>
+					plan.planId === scope.input.planExecution!.planId &&
+					plan.revision === scope.input.planExecution!.revision &&
+					plan.status === "accepted",
+			);
 	}
 
 	private _planToolSource(name: string): "builtin" | "trusted" | "extension" | "mcp" | "sdk" | undefined {
 		if (this._trustedControlTools.has(name) && this._isTrustedControlTool(name)) return "trusted";
+		if (this._mcpToolNames.has(name)) return "mcp";
 		const entry = this._toolDefinitions.get(name);
 		if (!entry) return undefined;
 		const source = entry.sourceInfo.source;
@@ -2711,13 +2708,18 @@ export class AgentSession {
 	 * Get all configured tools with name, description, parameter schema, prompt guidelines, and source metadata.
 	 */
 	getAllTools(): ToolInfo[] {
-		return Array.from(this._toolDefinitions.values()).map(({ definition, sourceInfo }) => ({
-			name: definition.name,
-			description: definition.description,
-			parameters: definition.parameters,
-			promptGuidelines: definition.promptGuidelines,
-			sourceInfo,
-		}));
+		return Array.from(this._toolDefinitions.values())
+			.filter(
+				({ definition }) =>
+					definition.name !== "submit_plan" || this.sessionManager.getCollaborationMode() === "plan",
+			)
+			.map(({ definition, sourceInfo }) => ({
+				name: definition.name,
+				description: definition.description,
+				parameters: definition.parameters,
+				promptGuidelines: definition.promptGuidelines,
+				sourceInfo,
+			}));
 	}
 
 	getToolDefinition(name: string): ToolDefinition | undefined {
@@ -3062,13 +3064,15 @@ export class AgentSession {
 			if (this.sessionManager.getHeader()?.subagent || this.sessionManager.getHeader()?.scheduled) {
 				throw new Error("Plan execution is unavailable for this session");
 			}
-			const current = this.sessionManager.getPlanState().currentPlan;
-			if (
-				!current ||
-				current.planId !== input.planExecution.planId ||
-				current.revision !== input.planExecution.revision
-			) {
-				throw new Error("Plan execution must target the current proposed revision");
+			const exact = this.sessionManager
+				.getPlanState()
+				.plans.find(
+					(plan) => plan.planId === input.planExecution!.planId && plan.revision === input.planExecution!.revision,
+				);
+			if (!exact || (exact.status !== "proposed" && exact.status !== "accepted")) {
+				throw new Error(
+					"Plan execution must target the current proposed revision or an already accepted exact revision",
+				);
 			}
 		}
 	}
@@ -3178,14 +3182,15 @@ export class AgentSession {
 	/** Execute accepted work; final durable markers settle before this promise. */
 	async runAcceptedDurablePrompt(turnId: string, input: DurablePromptInput): Promise<"completed" | "interrupted"> {
 		if (input.planExecution) {
-			const exact = this.sessionManager.getPlanState().plans.find(
-				(plan) => plan.planId === input.planExecution!.planId && plan.revision === input.planExecution!.revision,
-			);
+			const exact = this.sessionManager
+				.getPlanState()
+				.plans.find(
+					(plan) => plan.planId === input.planExecution!.planId && plan.revision === input.planExecution!.revision,
+				);
 			if (!exact || (exact.status !== "proposed" && exact.status !== "accepted")) {
 				throw new Error("The admitted Plan execution revision is no longer executable");
 			}
-			const accepted =
-				exact.status === "accepted" ? exact : this.sessionManager.acceptPlan(input.planExecution);
+			const accepted = exact.status === "accepted" ? exact : this.sessionManager.acceptPlan(input.planExecution);
 			if (exact.status !== "accepted") {
 				this._emit({ type: "plan_changed", entryIds: [accepted.entryId] });
 			}

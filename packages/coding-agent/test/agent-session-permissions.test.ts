@@ -469,6 +469,28 @@ describe("AgentSession permission enforcement", () => {
 	});
 
 	describe("Plan mode Bash boundary", () => {
+		it("rejects sensitive Bash reads in full permission mode", async () => {
+			const fake = fakeBashBoundary();
+			const harness = await createHarness({
+				permissionSettings: { mode: "full" },
+				interactiveBashBoundary: fake.boundary,
+			});
+			harnesses.push(harness);
+			await harness.session.setCollaborationMode("plan");
+			harness.setResponses([
+				fauxAssistantMessage([fauxToolCall("bash", { command: "cat .env" })], { stopReason: "toolUse" }),
+				fauxAssistantMessage("done"),
+			]);
+
+			await harness.session.prompt("read secrets");
+
+			expect(fake.sandboxExec).not.toHaveBeenCalled();
+			expect(fake.hostExec).not.toHaveBeenCalled();
+			const toolResult = [...harness.session.messages].reverse().find((message) => message.role === "toolResult");
+			expect(toolResult?.isError).toBe(true);
+			expect(getMessageText(toolResult)).toMatch(/Plan mode.*sensitive-read/iu);
+		});
+
 		it("routes harmless Bash to sandbox without approval and rejects risky commands", async () => {
 			const fake = fakeBashBoundary();
 			const bindSpy = vi.spyOn(fake.boundary, "bind");
@@ -508,7 +530,7 @@ describe("AgentSession permission enforcement", () => {
 				await harness.session.prompt(`run ${command}`);
 				expect(fake.sandboxExec).not.toHaveBeenCalled();
 				expect(fake.hostExec).not.toHaveBeenCalled();
-				const toolResult = harness.session.messages.findLast((message) => message.role === "toolResult");
+				const toolResult = [...harness.session.messages].reverse().find((message) => message.role === "toolResult");
 				expect(toolResult?.isError).toBe(true);
 				expect(getMessageText(toolResult)).toMatch(pattern);
 			}
@@ -540,7 +562,9 @@ describe("AgentSession permission enforcement", () => {
 			await harness.session.setCollaborationMode("plan");
 			resetSpy.mockRejectedValueOnce(new Error("sandbox reset failed"));
 			const plan = harness.session.submitPlan({ title: "Safe greeting", markdown: "# Goal\n\nGreet." });
-			await expect(harness.session.cancelPlan({ planId: plan.planId, revision: plan.revision })).resolves.toMatchObject({
+			await expect(
+				harness.session.cancelPlan({ planId: plan.planId, revision: plan.revision }),
+			).resolves.toMatchObject({
 				status: "cancelled",
 			});
 			expect(harness.session.sessionManager.getCollaborationMode()).toBe("default");
