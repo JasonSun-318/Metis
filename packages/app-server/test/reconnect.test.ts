@@ -239,9 +239,7 @@ class PausableRuntime implements OpenedSessionRuntime {
 		return { collaborationMode: input.collaborationMode };
 	}
 
-	async startPlanExecution(
-		input: ClientParams<"plan/startExecution">,
-	): Promise<ClientResult<"plan/startExecution">> {
+	async startPlanExecution(input: ClientParams<"plan/startExecution">): Promise<ClientResult<"plan/startExecution">> {
 		return { operationId: input.requestId, status: "accepted" };
 	}
 
@@ -253,7 +251,7 @@ class PausableRuntime implements OpenedSessionRuntime {
 				title: "Plan",
 				markdown: "# Plan",
 				status: "cancelled",
-				createdAt: this.ref.summary.createdAt,
+				createdAt: this.getSummary().createdAt,
 			},
 			collaborationMode: "default",
 		};
@@ -507,12 +505,19 @@ describe("gap-free reconnect", () => {
 		const initial = projection.snapshot("00000000-0000-4000-8000-000000000001", 4);
 		expect(initial.recentItems).toHaveLength(200);
 		expect(initial.recentItems[0]?.itemId).toBe("item-50");
-		expect(initial.nextBeforeItemId).toBe("item-49");
+		expect(initial.nextBeforeItemId).toBe("item-50");
 
-		const older = projection.readItems({ sessionId: SESSION_ID, beforeItemId: "item-50", limit: 200 });
+		const older = projection.readItems({
+			sessionId: SESSION_ID,
+			beforeItemId: initial.nextBeforeItemId!,
+			limit: 200,
+		});
 		expect(older.items).toHaveLength(50);
 		expect(older.items[0]?.itemId).toBe("item-0");
 		expect(older.nextBeforeItemId).toBeNull();
+		expect([...older.items, ...initial.recentItems].map((candidate) => candidate.itemId)).toEqual(
+			items.map((candidate) => candidate.itemId),
+		);
 
 		projection.apply({ type: "item/started", item: item("item-stream", "streaming", "") });
 		projection.apply({

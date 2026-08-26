@@ -175,7 +175,7 @@ export class SessionProjection {
 		const startIndex = itemIds.length > 0 ? this.itemIndexById.get(itemIds[0]!)! : 0;
 		return {
 			items: itemIds.map((itemId) => clone(this.itemsById.get(itemId)!)),
-			nextBeforeItemId: startIndex > 0 ? this.itemOrder[startIndex - 1]! : null,
+			nextBeforeItemId: startIndex > 0 ? itemIds[0]! : null,
 		};
 	}
 
@@ -208,7 +208,7 @@ export class SessionProjection {
 			session: this.getSummary(),
 			turns,
 			recentItems: recentItemIds.map((itemId) => clone(this.itemsById.get(itemId)!)),
-			nextBeforeItemId: startIndex > 0 ? this.itemOrder[startIndex - 1]! : null,
+			nextBeforeItemId: startIndex > 0 ? recentItemIds[0]! : null,
 			activeTurnId: [...turns].reverse().find((turn) => turn.state === "running")?.turnId ?? null,
 			pendingInteractions: clone(this.pendingInteractions),
 			queuedTurns: clone(this.queuedTurns),

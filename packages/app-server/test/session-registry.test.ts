@@ -189,9 +189,7 @@ class FakeRuntime implements OpenedSessionRuntime {
 		return { collaborationMode: input.collaborationMode };
 	}
 
-	async startPlanExecution(
-		input: ClientParams<"plan/startExecution">,
-	): Promise<ClientResult<"plan/startExecution">> {
+	async startPlanExecution(input: ClientParams<"plan/startExecution">): Promise<ClientResult<"plan/startExecution">> {
 		return { operationId: input.requestId, status: "accepted" };
 	}
 
@@ -203,7 +201,7 @@ class FakeRuntime implements OpenedSessionRuntime {
 				title: "Plan",
 				markdown: "# Plan",
 				status: "cancelled",
-				createdAt: this.ref.summary.createdAt,
+				createdAt: this.getSummary().createdAt,
 			},
 			collaborationMode: "default",
 		};

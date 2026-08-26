@@ -48,8 +48,8 @@ import {
 	QueuedTurnLimitError,
 	QueuedTurnNotFoundError,
 	RequestIdReusedError,
-	reducePlanState,
 	readThreadGoal,
+	reducePlanState,
 	reduceRuntimeJournal,
 	removeSessionAttachment,
 	resolveMcpServerSettings,
@@ -434,7 +434,7 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 						additionalDirectories: session.sessionManager.getAdditionalDirectories(),
 						activeDeliveredFileCount: this.deliveredFiles.length,
 					})),
-				] as never,
+				],
 				{ automaticPermissionToolNames: ["ask_user", "deliver_file"] },
 			);
 		}
@@ -547,13 +547,9 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 			return;
 		}
 		if (event.type === "plan_changed") {
-			const planByEntryId = new Map(
-				this.session.sessionManager.getPlanState().plans.map((plan) => [plan.entryId, plan]),
-			);
+			const journal = this.journal();
 			for (const entryId of event.entryIds) {
-				const plan = planByEntryId.get(entryId);
-				if (!plan) continue;
-				const entry = this.journal().find(
+				const entry = journal.find(
 					(candidate) =>
 						typeof candidate === "object" &&
 						candidate !== null &&
@@ -561,13 +557,8 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 						(candidate as { id?: unknown }).id === entryId,
 				) as Record<string, unknown> | undefined;
 				if (!entry) continue;
-				const item = projectPlanEntry({
-					entry: { id: entryId, timestamp: String(entry.timestamp ?? "") },
-					plan,
-					sessionId: this.sessionId,
-					fallbackTimestamp: this.ref.summary.createdAt,
-				});
-				this.publish({ type: "item/completed", item });
+				const item = this.projectJournalItem(entry);
+				if (item) this.publish({ type: "item/completed", item });
 			}
 			return;
 		}
@@ -702,7 +693,9 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 
 	private projectJournalItem(entry: Record<string, unknown>): ItemView | undefined {
 		if (entry.type === "session_plan_proposal") {
-			const plan = this.session.sessionManager.getPlanState().plans.find((candidate) => candidate.entryId === entry.id);
+			const plan = this.session.sessionManager
+				.getPlanState()
+				.plans.find((candidate) => candidate.entryId === entry.id);
 			if (!plan) return undefined;
 			return projectPlanEntry({
 				entry: { id: String(entry.id), timestamp: String(entry.timestamp ?? "") },
@@ -1392,9 +1385,7 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 		return { collaborationMode: this.session.sessionManager.getCollaborationMode() };
 	}
 
-	async startPlanExecution(
-		input: ClientParams<"plan/startExecution">,
-	): Promise<ClientResult<"plan/startExecution">> {
+	async startPlanExecution(input: ClientParams<"plan/startExecution">): Promise<ClientResult<"plan/startExecution">> {
 		if (this.ref.scheduled || this.session.sessionManager.getHeader()?.subagent) {
 			throw new AppServerError("READ_ONLY_SESSION", {
 				sessionId: input.sessionId,
@@ -1405,11 +1396,7 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 			throw new AppServerError("BUSY", { sessionId: input.sessionId, requestId: input.requestId });
 		}
 		const current = this.session.sessionManager.getPlanState().currentPlan;
-		if (
-			!current ||
-			opaqueId(current.planId, "plan") !== input.planId ||
-			current.revision !== input.revision
-		) {
+		if (!current || opaqueId(current.planId, "plan") !== input.planId || current.revision !== input.revision) {
 			throw new AppServerError("CONFLICT", { sessionId: input.sessionId, requestId: input.requestId });
 		}
 		return await this.runtime.submitPrompt({
@@ -1430,11 +1417,7 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 			throw new AppServerError("BUSY", { sessionId: input.sessionId, requestId: input.requestId });
 		}
 		const current = this.session.sessionManager.getPlanState().currentPlan;
-		if (
-			!current ||
-			opaqueId(current.planId, "plan") !== input.planId ||
-			current.revision !== input.revision
-		) {
+		if (!current || opaqueId(current.planId, "plan") !== input.planId || current.revision !== input.revision) {
 			throw new AppServerError("CONFLICT", { sessionId: input.sessionId, requestId: input.requestId });
 		}
 		try {
