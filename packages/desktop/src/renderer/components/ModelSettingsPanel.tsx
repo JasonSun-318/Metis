@@ -376,11 +376,25 @@ export function ModelSettingsPanel({ api, serverReady }: {
 		} catch {
 			dialog.setAttribute("open", "");
 		}
-		return () => {
-			if (dialog.open && typeof dialog.close === "function") dialog.close();
-			else dialog.removeAttribute("open");
+		const onKeyDown = (event: KeyboardEvent) => {
+			if (event.key !== "Escape") return;
+			event.preventDefault();
+			closeMemoryServiceEditor();
 		};
-	}, [memoryServiceDraft?.kind]);
+		document.addEventListener("keydown", onKeyDown);
+		return () => {
+			document.removeEventListener("keydown", onKeyDown);
+			if (dialog.open && typeof dialog.close === "function") {
+				try {
+					dialog.close();
+				} catch {
+					dialog.removeAttribute("open");
+				}
+			} else {
+				dialog.removeAttribute("open");
+			}
+		};
+	}, [closeMemoryServiceEditor, Boolean(memoryServiceDraft)]);
 
 	const runUpdate = async (mutation: Parameters<MetisDesktopApi["updateModelSettings"]>[0]["mutation"], success: string) => {
 		setBusy(true);
@@ -958,6 +972,7 @@ export function ModelSettingsPanel({ api, serverReady }: {
 						<div className="settings-form-actions">
 							{memoryServiceEditor.configured ? <button className="settings-danger-button" disabled={busy} onClick={() => void removeMemoryService()} type="button">{t("Remove")}</button> : null}
 							<button className="settings-secondary-button" disabled={busy || !serverReady} onClick={() => void testMemoryService()} type="button">{t("Test connection")}</button>
+							<button className="settings-secondary-button" disabled={busy} onClick={closeMemoryServiceEditor} type="button">{t("Cancel")}</button>
 							<button className="settings-primary-button" disabled={busy || !serverReady} type="submit">{busy ? t("Saving…") : t("Save")}</button>
 						</div>
 						{error ? <p className="settings-action-message error" role="alert"><XCircle aria-hidden="true" size={15} />{error}</p> : null}

@@ -133,8 +133,17 @@ const zhCN = {
 	"Optional. Improves Extract ranking when configured.": "可选。配置后可改善 Extract 的排序结果。",
 	"Set an embedding model before choosing Extract. Extract retrieves relevant facts; Index injects the memory catalog.":
 		"选择 Extract 前请先填写嵌入模型。Extract 检索相关事实；Index 注入记忆目录。",
-	"Extract requires an embedding model (provider/model) before it can be enabled.":
-		"启用 Extract 前必须配置嵌入模型（provider/model）。",
+	"Active engine": "当前启用的引擎",
+	"Model dependencies": "关联模型依赖",
+	"Zero-config": "零配置开箱即用",
+	Ready: "已就绪",
+	"Embedding needed": "需嵌入模型",
+	"Injects memory catalog outlines directly into prompt context. Lightweight, deterministic, and works without embedding models.":
+		"将记忆目录大纲直接注入 Prompt 上下文中。轻量直观，无需配置任何向量模型即可生效。",
+	"Performs semantic vector search over memory items. Retrieves only targeted, highly relevant facts for each user query.":
+		"对记忆条目执行向量语义检索。针对每次用户提问精准提取高度相关的事实碎片并动态注入。",
+	"Configure embedding and rerank models in Model settings to power Extract mode.":
+		"在「模型」设置中配置嵌入与重排模型，以启用高级 Extract 模式。",
 	"Couldn’t load memory settings.": "无法加载记忆设置。",
 	"Couldn’t save memory settings.": "无法保存记忆设置。",
 	"Model defaults": "模型默认值",

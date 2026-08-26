@@ -1,5 +1,5 @@
 import type { AgentMode, ClientResult, ScheduleTaskView, SessionSummary } from "@metis/app-protocol";
-import { ArrowRight, CaretDown, CaretRight, ChatCircleDots, ClockCountdown, Code, FolderSimple, NotePencil, SidebarSimple, Sparkle } from "@phosphor-icons/react";
+import { ArrowRight, CaretDown, CaretRight, ChatCircleDots, ClockCountdown, Code, FolderSimple, NotePencil, PuzzlePiece, SidebarSimple } from "@phosphor-icons/react";
 import type { ReactNode } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -427,7 +427,7 @@ export function SessionSidebar({
 				{t("New task")}
 			</button>
 			<button aria-current={destination === "skills" ? "page" : undefined} className="sidebar-nav-button" disabled={busy} onClick={onSkills} type="button">
-				<Sparkle aria-hidden="true" size={17} />
+				<PuzzlePiece aria-hidden="true" size={17} />
 				{t("Customize")}
 			</button>
 			{mode === "chat" && <button aria-current={destination === "schedules" ? "page" : undefined} className="sidebar-nav-button" disabled={busy} onClick={onSchedules} type="button"><ClockCountdown aria-hidden="true" size={17} />{t("Scheduled tasks")}</button>}

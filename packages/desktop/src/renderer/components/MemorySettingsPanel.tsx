@@ -1,5 +1,5 @@
 import type { MemoryEngine, MemorySettingsView } from "@metis/app-protocol";
-import { CheckCircle, XCircle } from "@phosphor-icons/react";
+import { BookBookmark, CheckCircle, Cpu, Info, Sparkle, WarningCircle, XCircle } from "@phosphor-icons/react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
@@ -87,113 +87,192 @@ export function MemorySettingsPanel({ api, onConfigureModels, serverReady }: {
 	};
 
 	return (
-		<section className="settings-section personalization-section memory-settings-section">
-			<header className="settings-section-heading">
-				<h3>{t("Long-term memory")}</h3>
-			</header>
-			<div className="settings-card memory-settings-card">
-				<div className="general-setting-row">
-					<div className="general-setting-copy">
-						<span>{t("Enable long-term memory")}</span>
-						<p>{t("Keep facts outside session history and inject them into new turns.")}</p>
+		<div className="settings-page memory-page">
+			<section className="settings-section memory-settings-section">
+				<header className="settings-section-heading">
+					<h3>{t("Long-term memory")}</h3>
+				</header>
+				<div className="settings-card memory-settings-card">
+					<div className="general-setting-row">
+						<div className="general-setting-copy">
+							<span>{t("Enable long-term memory")}</span>
+							<p>{t("Keep facts outside session history and inject them into new turns.")}</p>
+						</div>
+						<div className="general-setting-control">
+							<label className="web-search-toggle">
+								<span className="sr-only">{t("Enable long-term memory")}</span>
+								<input
+									aria-label={t("Enable long-term memory")}
+									checked={settings?.autoMemoryEnabled ?? false}
+									disabled={!serverReady || busy}
+									onChange={(event) => update({ autoMemoryEnabled: event.target.checked })}
+									role="switch"
+									type="checkbox"
+								/>
+								<span aria-hidden="true" className="web-search-toggle-track" />
+							</label>
+						</div>
 					</div>
-					<div className="general-setting-control">
-						<label className="web-search-toggle">
-							<span className="sr-only">{t("Enable long-term memory")}</span>
-							<input
-								aria-label={t("Enable long-term memory")}
-								checked={settings?.autoMemoryEnabled ?? false}
+				</div>
+			</section>
+
+			<section className="settings-section">
+				<header className="settings-section-heading">
+					<h3>{t("Memory engine")}</h3>
+				</header>
+				<div className="settings-card">
+					<div className="general-setting-row">
+						<div className="general-setting-copy">
+							<span>{t("Active engine")}</span>
+							<p>{t("Index injects the memory catalog. Extract retrieves relevant facts for the current message.")}</p>
+						</div>
+						<div className="general-setting-control">
+							<MenuSelect
+								ariaLabel={t("Memory engine")}
+								className="memory-engine-select"
 								disabled={!serverReady || busy}
-								onChange={(event) => update({ autoMemoryEnabled: event.target.checked })}
-								role="switch"
-								type="checkbox"
+								menuAlign="end"
+								onChange={(memoryEngine) => update({ memoryEngine })}
+								options={ENGINES.map((option) => ({
+									value: option.value,
+									label: t(option.labelKey),
+									disabled: option.value === "extract" && extractBlocked,
+								}))}
+								value={settings?.memoryEngine ?? "index"}
 							/>
-							<span aria-hidden="true" className="web-search-toggle-track" />
-						</label>
+						</div>
+					</div>
+
+					<div className="memory-engine-grid">
+						<div
+							className={`memory-engine-card ${settings?.memoryEngine === "index" ? "selected" : ""}`}
+							onClick={() => update({ memoryEngine: "index" })}
+							onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") update({ memoryEngine: "index" }); }}
+							role="button"
+							tabIndex={0}
+						>
+							<div className="memory-engine-card-header">
+								<div className="memory-engine-card-title">
+									<BookBookmark aria-hidden="true" size={16} />
+									<strong>{t("Index (catalog)")}</strong>
+								</div>
+								<span className="memory-engine-badge">{t("Zero-config")}</span>
+							</div>
+							<p className="memory-engine-card-desc">
+								{t("Injects memory catalog outlines directly into prompt context. Lightweight, deterministic, and works without embedding models.")}
+							</p>
+						</div>
+
+						<div
+							className={`memory-engine-card ${settings?.memoryEngine === "extract" ? "selected" : ""} ${extractBlocked ? "disabled" : ""}`}
+							onClick={() => { if (!extractBlocked) update({ memoryEngine: "extract" }); }}
+							onKeyDown={(e) => { if (!extractBlocked && (e.key === "Enter" || e.key === " ")) update({ memoryEngine: "extract" }); }}
+							role="button"
+							tabIndex={extractBlocked ? -1 : 0}
+						>
+							<div className="memory-engine-card-header">
+								<div className="memory-engine-card-title">
+									<Sparkle aria-hidden="true" size={16} />
+									<strong>{t("Extract (retrieve)")}</strong>
+								</div>
+								<span className={`memory-engine-badge ${embeddingConfigured ? "configured" : "warning"}`}>
+									{embeddingConfigured ? t("Ready") : t("Embedding needed")}
+								</span>
+							</div>
+							<p className="memory-engine-card-desc">
+								{t("Performs semantic vector search over memory items. Retrieves only targeted, highly relevant facts for each user query.")}
+							</p>
+						</div>
+					</div>
+
+					<div className="memory-info-banner">
+						<Info aria-hidden="true" size={15} />
+						<span>{t("Extract sends the bounded query and stored facts to your Embedding service, and candidates to optional Rerank.")}</span>
+					</div>
+
+					{engineWarning ? (
+						<div className="memory-warning-banner memory-settings-warning" role="status">
+							<WarningCircle aria-hidden="true" size={15} />
+							<span>{engineWarning}</span>
+						</div>
+					) : null}
+					{settings?.memoryMigrationNotice ? (
+						<div className="memory-warning-banner memory-settings-warning" role="status">
+							<WarningCircle aria-hidden="true" size={15} />
+							<span>{settings.memoryMigrationNotice}</span>
+						</div>
+					) : null}
+					{settings?.lastError ? (
+						<div className="settings-action-message error memory-error-banner" role="alert">
+							<XCircle aria-hidden="true" size={15} />
+							<span>{settings.lastError}</span>
+						</div>
+					) : null}
+				</div>
+			</section>
+
+			<section className="settings-section">
+				<header className="settings-section-heading">
+					<h3>{t("Model dependencies")}</h3>
+				</header>
+				<div className="settings-card">
+					<div className="general-setting-row">
+						<div className="general-setting-copy">
+							<span>{t("Embedding model")}</span>
+							<p>{embeddingConfigured ? t("Configured in Model settings.") : t("Required for Extract and not configured.")}</p>
+						</div>
+						<div className="general-setting-control">
+							<span className={`model-provider-badge ${embeddingConfigured ? "configured" : ""}`}>
+								{embeddingConfigured ? t("Configured") : t("Not configured")}
+							</span>
+						</div>
+					</div>
+
+					<div className="general-setting-row">
+						<div className="general-setting-copy">
+							<span>{t("Rerank model")}</span>
+							<p>{t("Optional. Reranks up to 50 candidate facts when configured.")}</p>
+						</div>
+						<div className="general-setting-control">
+							<span className={`model-provider-badge ${settings?.rerankConfigured ? "configured" : ""}`}>
+								{settings?.rerankConfigured ? t("Configured") : t("Not configured")}
+							</span>
+						</div>
+					</div>
+
+					<div className="memory-models-action-row">
+						<p>{t("Configure embedding and rerank models in Model settings to power Extract mode.")}</p>
+						<button className="settings-secondary-button" disabled={!serverReady || busy} onClick={onConfigureModels} type="button">
+							<Cpu aria-hidden="true" size={15} />
+							{t("Configure in Models")}
+						</button>
 					</div>
 				</div>
+			</section>
 
-				<div className="general-setting-row">
-					<div className="general-setting-copy">
-						<span>{t("Memory engine")}</span>
-						<p>{t("Index injects the memory catalog. Extract retrieves relevant facts for the current message.")}</p>
-					</div>
-					<div className="general-setting-control">
-						<MenuSelect
-							ariaLabel={t("Memory engine")}
-							className="memory-engine-select"
-							disabled={!serverReady || busy}
-							menuAlign="end"
-							onChange={(memoryEngine) => update({ memoryEngine })}
-							options={ENGINES.map((option) => ({
-								value: option.value,
-								label: t(option.labelKey),
-								disabled: option.value === "extract" && extractBlocked,
-							}))}
-							value={settings?.memoryEngine ?? "index"}
-						/>
-					</div>
-				</div>
-
-				<div className="general-setting-row">
-					<div className="general-setting-copy">
-						<span>{t("Embedding model")}</span>
-						<p>{embeddingConfigured ? t("Configured in Model settings.") : t("Required for Extract and not configured.")}</p>
-					</div>
-					<div className="general-setting-control">
-						<span className="model-service-badge">{embeddingConfigured ? t("Configured") : t("Not configured")}</span>
-					</div>
-				</div>
-
-				<div className="general-setting-row">
-					<div className="general-setting-copy">
-						<span>{t("Rerank model")}</span>
-						<p>{t("Optional. Reranks up to 50 candidate facts when configured.")}</p>
-					</div>
-					<div className="general-setting-control">
-						<span className="model-service-badge">{settings?.rerankConfigured ? t("Configured") : t("Not configured")}</span>
-					</div>
-				</div>
-
-				<p className="model-provider-intro">
-					{t("Extract sends the bounded query and stored facts to your Embedding service, and candidates to optional Rerank.")}
-				</p>
-				<button className="settings-secondary-button" disabled={!serverReady || busy} onClick={onConfigureModels} type="button">
-					{t("Configure in Models")}
-				</button>
-
-				{engineWarning ? (
-					<p className="settings-action-message memory-settings-warning" role="status">
-						{engineWarning}
-					</p>
-				) : null}
-				{settings?.memoryMigrationNotice ? <p className="settings-action-message memory-settings-warning" role="status">{settings.memoryMigrationNotice}</p> : null}
-				{settings?.lastError ? <p className="settings-action-message error" role="alert">{settings.lastError}</p> : null}
-
-				<div className="settings-form-actions web-search-actions">
-					<button
-						className="settings-primary-button"
-						disabled={!serverReady || busy || (settings?.memoryEngine === "extract" && extractBlocked)}
-						onClick={() => void save()}
-						type="button"
-					>
-						{busy ? t("Saving…") : t("Save")}
-					</button>
-				</div>
-
+			<div className="settings-form-actions memory-form-actions">
 				{error ? (
 					<p className="settings-action-message error web-search-message" role="alert">
 						<XCircle aria-hidden="true" size={15} />
 						{error}
 					</p>
 				) : null}
+				<button
+					className="settings-primary-button"
+					disabled={!serverReady || busy || (settings?.memoryEngine === "extract" && extractBlocked)}
+					onClick={() => void save()}
+					type="button"
+				>
+					{busy ? t("Saving…") : t("Save")}
+				</button>
 			</div>
+
 			{notice ? (
 				<div className="toast settings-toast" role="status">
 					<CheckCircle aria-hidden="true" size={15} />
 					{notice}
 				</div>
 			) : null}
-		</section>
+		</div>
 	);
 }

@@ -772,7 +772,8 @@ export function PluginsPanel({ api, initialSection = "skills", onCreateSkillWith
 			</div>
 		</header>
 		<div className="plugins-section-switch-row">
-			<div aria-label={t("Plugin sections")} className="plugins-section-switch" role="tablist">
+			<div aria-label={t("Plugin sections")} className="plugins-section-switch" data-section={section} role="tablist">
+				<span aria-hidden="true" className="plugins-section-indicator" />
 				<button aria-selected={section === "skills"} onClick={() => switchSection("skills")} role="tab" type="button">{t("Skills")}</button>
 				<button aria-selected={section === "mcp"} onClick={() => switchSection("mcp")} role="tab" type="button">{t("MCP")}</button>
 				<button aria-selected={section === "hooks"} onClick={() => switchSection("hooks")} role="tab" type="button">{t("Hooks")}</button>
