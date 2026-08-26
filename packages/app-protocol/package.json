@@ -1,6 +1,6 @@
 {
 	"name": "@metis/app-protocol",
-	"version": "0.0.3",
+	"version": "0.0.4",
 	"description": "Versioned runtime-independent protocol for the Metis app-server",
 	"type": "module",
 	"main": "./dist/index.js",

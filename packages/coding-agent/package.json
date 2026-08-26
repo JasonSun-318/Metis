@@ -1,6 +1,6 @@
 {
 	"name": "@metis/coding-agent",
-	"version": "0.0.3",
+	"version": "0.0.4",
 	"description": "General-purpose AI agent CLI with read, grep, bash, edit, write tools and session management",
 	"type": "module",
 	"metisConfig": {
@@ -45,9 +45,9 @@
 	"dependencies": {
 		"@anthropic-ai/sandbox-runtime": "0.0.67",
 		"@js-temporal/polyfill": "0.5.1",
-		"@metis/agent-core": "^0.0.3",
-		"@metis/ai": "^0.0.3",
-		"@metis/tui": "^0.0.3",
+		"@metis/agent-core": "^0.0.4",
+		"@metis/ai": "^0.0.4",
+		"@metis/tui": "^0.0.4",
 		"@modelcontextprotocol/sdk": "1.29.0",
 		"@silvia-odwyer/photon-node": "0.3.4",
 		"chalk": "5.6.2",
