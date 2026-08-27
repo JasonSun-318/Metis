@@ -28,7 +28,7 @@ const SERVER_CAPABILITIES = [
 	"schedules.v2",
 	"session.cursor.v1",
 	"sessions.v1",
-	"subagents.v1",
+	"agents.v1",
 	"thinkingSelection.v1",
 	"turns.v1",
 ] as const;

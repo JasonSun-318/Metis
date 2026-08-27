@@ -14,6 +14,7 @@ import {
 	type TurnView,
 } from "@metis/app-protocol";
 import {
+	AgentError,
 	type AgentSession,
 	type AgentSessionEvent,
 	type AgentSessionRuntime,
@@ -21,7 +22,7 @@ import {
 	type AuthCredential,
 	type AuthStorage,
 	type AuthStorageChange,
-	buildChildSystemPromptFromAgentConfig,
+	buildChildSystemPrompt,
 	type CreateAgentSessionRuntimeFactory,
 	copySessionDeliveredFiles,
 	createAgentSessionFromServices,
@@ -61,6 +62,7 @@ import {
 	type Skill,
 	splitSessionAttachmentPrompt,
 } from "@metis/coding-agent";
+import { AgentLiveProjector } from "./agent-live-projector.ts";
 import type { CredentialCoordinator } from "./credential-coordinator.ts";
 import {
 	type DurableSessionMutation,
@@ -110,7 +112,6 @@ import {
 	trashSkill,
 	writeSkill,
 } from "./skill-files.ts";
-import { SubagentLiveProjector } from "./subagent-live-projector.ts";
 
 const MAX_TURNS = 200;
 type McpMutationRunner = <T>(mutation: () => Promise<T>) => Promise<T>;
@@ -134,6 +135,22 @@ function throwQueuedTurnError(error: unknown, input: { sessionId: string; reques
 	if (error instanceof QueuedTurnLimitError) throw new AppServerError("OVERLOADED", context);
 	if (error instanceof RequestIdReusedError) throw new AppServerError("REQUEST_ID_REUSED", context);
 	throw new AppServerError("OPERATION_FAILED", context);
+}
+
+function throwAgentError(error: unknown, input: { sessionId: string; requestId?: string }): never {
+	if (error instanceof AppServerError) throw error;
+	if (error instanceof AgentError) {
+		if (error.code === "UNKNOWN_AGENT" || error.code === "NOT_DESCENDANT") {
+			throw new AppServerError("NOT_FOUND", input);
+		}
+		if (error.code === "UNKNOWN_CURSOR") throw new AppServerError("INVALID_CURSOR", input);
+		if (error.code === "INVALID_INPUT" || error.code === "UNKNOWN_TASK") {
+			throw new AppServerError("INVALID_PARAMS", input);
+		}
+		if (error.code === "INVALID_STATE") throw new AppServerError("BUSY", input);
+		if (error.code === "QUEUE_FULL") throw new AppServerError("OVERLOADED", input);
+	}
+	throw new AppServerError("OPERATION_FAILED", input);
 }
 
 function mcpCredentialIdentity(scope: "user" | "project", name: string, cwd: string): McpCredentialIdentity {
@@ -267,38 +284,35 @@ function completedTurnHasVisibleAssistantText(journal: readonly unknown[], turnI
 	return false;
 }
 
-function agentSummaryView(summary: AgentSummary): SessionSnapshot["subagents"][number] {
-	const task = summary.currentTask ?? summary.latestTask;
-	const taskSummary = task?.taskSummary ?? "";
-	const finalSummary = task?.finalMessage;
-	if (summary.archived) {
-		return {
-			agentId: summary.agentId,
-			name: summary.name,
-			status: "closed",
-			taskSummary,
-			...(finalSummary ? { finalSummary } : {}),
-			createdAt: summary.createdAt,
-			updatedAt: summary.updatedAt,
-		};
-	}
-	// ponytail: Task 8 should project full child configuration from the v13 agent header.
+function agentTaskView(
+	task: NonNullable<AgentSummary["currentTask"]>,
+): NonNullable<SessionSnapshot["agents"][number]["currentTask"]> {
+	return {
+		taskId: task.taskId,
+		status: task.status,
+		taskSummary: task.taskSummary,
+		...(task.finalMessage ? { finalMessage: task.finalMessage } : {}),
+		...(task.error ? { error: task.error } : {}),
+		...(task.usage ? { usage: task.usage } : {}),
+		createdAt: task.createdAt,
+		updatedAt: task.updatedAt,
+	};
+}
+
+function agentSummaryView(summary: AgentSummary): SessionSnapshot["agents"][number] {
 	return {
 		agentId: summary.agentId,
 		name: summary.name,
+		agentType: summary.agentType,
+		depth: summary.depth,
 		status: summary.status,
-		taskSummary,
-		...(finalSummary ? { finalSummary } : {}),
-		configuration: {
-			mode: "code",
-			tools: [],
-			permissionMode: "ask",
-			model: { provider: "unknown", modelId: "unknown" },
-			thinkingLevel: "high",
-			cwd: "/",
-			forkTurns: 0,
-			timeoutSeconds: 60,
-		},
+		archived: summary.archived,
+		parentSessionId: summary.parentSessionId,
+		rootSessionId: summary.rootSessionId,
+		agentPath: [...summary.agentPath],
+		tasks: summary.tasks.slice(-256).map(agentTaskView),
+		...(summary.currentTask ? { currentTask: agentTaskView(summary.currentTask) } : {}),
+		...(summary.latestTask ? { latestTask: agentTaskView(summary.latestTask) } : {}),
 		createdAt: summary.createdAt,
 		updatedAt: summary.updatedAt,
 	};
@@ -339,7 +353,7 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 	private session: AgentSession;
 	private readonly ref: SessionRef;
 	private readonly projection: SessionProjection;
-	private readonly subagentLive: SubagentLiveProjector;
+	private readonly agentLive: AgentLiveProjector;
 	private readonly liveItemIds = new WeakMap<object, string>();
 	private readonly liveMessagesByItemId = new Map<string, object>();
 	private liveAssistantItemId?: string;
@@ -395,7 +409,7 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 			goal: projectGoal(this.session.getGoal()),
 			queuedTurns: queuedTurns.map(queuedTurnView),
 		});
-		this.subagentLive = new SubagentLiveProjector(
+		this.agentLive = new AgentLiveProjector(
 			this.sessionId,
 			(event) => this.publish(event),
 			this.ref.summary.updatedAt,
@@ -467,18 +481,28 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 	private bind(session: AgentSession): void {
 		this.unsubscribeAgent?.();
 		this.unsubscribeSubagents?.();
-		this.subagentLive.clear();
+		this.agentLive.clear();
 		this.session = session;
 		this.unsubscribeAgent = session.subscribe((event) => this.onAgentEvent(event));
 		this.unsubscribeSubagents = this.runtime.subagentManager?.subscribe((event) => {
 			if (event.type === "activity") {
 				return;
 			}
+			if (event.type === "deleted") {
+				this.publish({
+					type: "agent/deleted",
+					sessionId: this.sessionId,
+					agentId: event.agentId,
+					deletedAgentIds: [...event.deletedAgentIds],
+				});
+				for (const agentId of event.deletedAgentIds) this.agentLive.clear(agentId);
+				return;
+			}
 			if (event.type !== "updated") return;
 			this.publish({
-				type: "subagent/updated",
+				type: "agent/updated",
 				sessionId: this.sessionId,
-				subagent: agentSummaryView(event.summary),
+				agent: agentSummaryView(event.summary),
 			});
 			if (
 				event.summary.status === "done" ||
@@ -486,9 +510,9 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 				event.summary.status === "stopped" ||
 				event.summary.archived
 			) {
-				this.subagentLive.clear(event.summary.agentId);
+				this.agentLive.clear(event.summary.agentId);
 				this.publish({
-					type: "subagent/itemsChanged",
+					type: "agent/itemsChanged",
 					sessionId: this.sessionId,
 					agentId: event.summary.agentId,
 				});
@@ -1312,13 +1336,49 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 		return { sessionId: input.sessionId, cleared };
 	}
 
-	async readSubagentItems(input: ClientParams<"subagent/readItems">): Promise<ClientResult<"subagent/readItems">> {
+	async listAgents(input: ClientParams<"agent/list">): Promise<ClientResult<"agent/list">> {
 		const manager = this.runtime.subagentManager;
 		if (!manager) throw new AppServerError("NOT_FOUND", { sessionId: input.sessionId });
-		const journal = await manager.readJournal(this.sessionId, input.agentId);
+		const agents = manager.listSummaries(this.sessionId, input.includeArchived ?? false);
+		const limit = input.limit ?? 20;
+		let start = 0;
+		if (input.afterAgentId) {
+			const cursor = agents.findIndex((agent) => agent.agentId === input.afterAgentId);
+			if (cursor < 0) throw new AppServerError("INVALID_CURSOR", { sessionId: input.sessionId });
+			start = cursor + 1;
+		}
+		const page = agents.slice(start, start + limit);
+		return {
+			agents: page.map(agentSummaryView),
+			nextAfterAgentId: start + page.length < agents.length ? (page.at(-1)?.agentId ?? null) : null,
+		};
+	}
+
+	async readAgentItems(input: ClientParams<"agent/readItems">): Promise<ClientResult<"agent/readItems">> {
+		const manager = this.runtime.subagentManager;
+		if (!manager) throw new AppServerError("NOT_FOUND", { sessionId: input.sessionId });
+		const completeJournal = await manager
+			.readJournal(this.sessionId, input.agentId)
+			.catch((error: unknown) => throwAgentError(error, input));
+		let journal = completeJournal;
+		if (input.taskId) {
+			let start = -1;
+			let end = -1;
+			for (let index = 0; index < completeJournal.length; index++) {
+				const entry = completeJournal[index]!;
+				if (entry.type !== "agent_task" || entry.taskId !== input.taskId) continue;
+				if (start < 0 || entry.status === "running") start = index;
+				if (entry.status === "done" || entry.status === "failed" || entry.status === "stopped") end = index;
+			}
+			if (start < 0) throw new AppServerError("NOT_FOUND", { sessionId: input.sessionId });
+			const scoped = completeJournal.slice(start, end >= start ? end + 1 : undefined);
+			journal = completeJournal[0] ? [completeJournal[0], ...scoped] : scoped;
+		}
 		const reduced = reduceRuntimeJournal(journal);
 		const turns = new Map(reduced.turns.map((turn) => [opaqueId(turn.turnId, "turn"), turn.state]));
 		const tools = new Map(reduced.tools.map((tool) => [opaqueId(tool.toolCallId, "tool"), tool.state]));
+		const selected = manager.listSummaries(this.sessionId, true).find((agent) => agent.agentId === input.agentId);
+		const includeLive = !input.taskId || selected?.currentTask?.taskId === input.taskId;
 		const items = journal
 			.map((entry) =>
 				projectMessageEntry({
@@ -1330,20 +1390,51 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 				}),
 			)
 			.filter((item): item is ItemView => item !== undefined)
-			.concat(this.subagentLive.currentItems(input.agentId));
+			.concat(includeLive ? this.agentLive.currentItems(input.agentId) : []);
 		const end = input.beforeItemId ? items.findIndex((item) => item.itemId === input.beforeItemId) : items.length;
-		if (input.beforeItemId && end < 0) throw new AppServerError("NOT_FOUND", { sessionId: input.sessionId });
+		if (input.beforeItemId && end < 0) {
+			throw new AppServerError("INVALID_CURSOR", { sessionId: input.sessionId });
+		}
 		const start = Math.max(0, end - input.limit);
 		return { items: items.slice(start, end), nextBeforeItemId: start > 0 ? items[start]!.itemId : null };
 	}
 
-	async interruptSubagent(input: ClientParams<"subagent/interrupt">): Promise<ClientResult<"subagent/interrupt">> {
+	async interruptAgent(input: ClientParams<"agent/interrupt">): Promise<ClientResult<"agent/interrupt">> {
 		const manager = this.runtime.subagentManager;
 		if (!manager) throw new AppServerError("NOT_FOUND", { sessionId: input.sessionId, requestId: input.requestId });
-		await manager.interrupt(this.sessionId, input.agentId);
-		const summary = manager.listSummaries(this.sessionId).find((entry) => entry.agentId === input.agentId);
+		try {
+			await manager.interrupt(this.sessionId, input.agentId);
+		} catch (error) {
+			throwAgentError(error, input);
+		}
+		const summary = manager.listSummaries(this.sessionId, true).find((entry) => entry.agentId === input.agentId);
 		if (!summary) throw new AppServerError("NOT_FOUND", { sessionId: input.sessionId, requestId: input.requestId });
-		return { subagent: agentSummaryView(summary) };
+		return { agent: agentSummaryView(summary) };
+	}
+
+	async archiveAgent(input: ClientParams<"agent/archive">): Promise<ClientResult<"agent/archive">> {
+		const manager = this.runtime.subagentManager;
+		if (!manager) throw new AppServerError("NOT_FOUND", { sessionId: input.sessionId, requestId: input.requestId });
+		try {
+			return { agent: agentSummaryView(await manager.setArchived(this.sessionId, input.agentId, input.archived)) };
+		} catch (error) {
+			throwAgentError(error, input);
+		}
+	}
+
+	async deleteAgent(input: ClientParams<"agent/delete">): Promise<ClientResult<"agent/delete">> {
+		const manager = this.runtime.subagentManager;
+		if (!manager) throw new AppServerError("NOT_FOUND", { sessionId: input.sessionId, requestId: input.requestId });
+		let deleted: Awaited<ReturnType<typeof manager.deleteAgent>>;
+		try {
+			deleted = await manager.deleteAgent(this.sessionId, input.agentId);
+		} catch (error) {
+			throwAgentError(error, input);
+		}
+		if (deleted.status !== "deleted") {
+			throw new AppServerError("OPERATION_FAILED", { sessionId: input.sessionId, requestId: input.requestId });
+		}
+		return { agentId: input.agentId, status: "deleted" };
 	}
 
 	async setThinkingSelection(
@@ -1381,7 +1472,7 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 	async setCollaborationMode(
 		input: ClientParams<"session/setCollaborationMode">,
 	): Promise<ClientResult<"session/setCollaborationMode">> {
-		if (this.ref.scheduled || this.session.sessionManager.getHeader()?.subagent) {
+		if (this.ref.scheduled || this.session.sessionManager.getHeader()?.agent) {
 			throw new AppServerError("READ_ONLY_SESSION", {
 				sessionId: input.sessionId,
 				requestId: input.requestId,
@@ -1405,7 +1496,7 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 	}
 
 	async startPlanExecution(input: ClientParams<"plan/startExecution">): Promise<ClientResult<"plan/startExecution">> {
-		if (this.ref.scheduled || this.session.sessionManager.getHeader()?.subagent) {
+		if (this.ref.scheduled || this.session.sessionManager.getHeader()?.agent) {
 			throw new AppServerError("READ_ONLY_SESSION", {
 				sessionId: input.sessionId,
 				requestId: input.requestId,
@@ -1426,7 +1517,7 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 	}
 
 	async cancelPlan(input: ClientParams<"plan/cancel">): Promise<ClientResult<"plan/cancel">> {
-		if (this.ref.scheduled || this.session.sessionManager.getHeader()?.subagent) {
+		if (this.ref.scheduled || this.session.sessionManager.getHeader()?.agent) {
 			throw new AppServerError("READ_ONLY_SESSION", {
 				sessionId: input.sessionId,
 				requestId: input.requestId,
@@ -1498,7 +1589,9 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 			thinkingSelection: this.session.getThinkingSelection(),
 			actualThinkingLevel: this.session.thinkingLevel,
 			availableThinkingSelections: this.session.getAvailableThinkingSelections(),
-			subagents: [...(this.runtime.subagentManager?.listSummaries(this.sessionId) ?? [])].map(agentSummaryView),
+			agents: [...(this.runtime.subagentManager?.listSummaries(this.sessionId, false) ?? [])]
+				.slice(0, 100)
+				.map(agentSummaryView),
 		});
 	}
 
@@ -1637,7 +1730,7 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 					this.unsubscribeSubagents = undefined;
 					this.unsubscribeQueuedTurns?.();
 					this.unsubscribeQueuedTurns = undefined;
-					this.subagentLive.clear();
+					this.agentLive.clear();
 					this.listeners.clear();
 					this.closed = true;
 				})
@@ -1868,11 +1961,23 @@ class ReadonlyScheduledSessionRuntime implements OpenedSessionRuntime {
 		});
 	}
 
-	async readSubagentItems(): Promise<ClientResult<"subagent/readItems">> {
+	async readAgentItems(): Promise<ClientResult<"agent/readItems">> {
 		throw new AppServerError("NOT_FOUND", { sessionId: this.sessionId });
 	}
 
-	async interruptSubagent(): Promise<ClientResult<"subagent/interrupt">> {
+	async listAgents(): Promise<ClientResult<"agent/list">> {
+		throw new AppServerError("NOT_FOUND", { sessionId: this.sessionId });
+	}
+
+	async interruptAgent(): Promise<ClientResult<"agent/interrupt">> {
+		throw new AppServerError("READ_ONLY_SESSION", { sessionId: this.sessionId });
+	}
+
+	async archiveAgent(): Promise<ClientResult<"agent/archive">> {
+		throw new AppServerError("READ_ONLY_SESSION", { sessionId: this.sessionId });
+	}
+
+	async deleteAgent(): Promise<ClientResult<"agent/delete">> {
 		throw new AppServerError("READ_ONLY_SESSION", { sessionId: this.sessionId });
 	}
 
@@ -2058,7 +2163,7 @@ export class AgentSessionRuntimeHost implements SessionRuntimeHost {
 							model: childModel!,
 							thinkingLevel: child.thinkingLevel,
 							tools: [...child.tools],
-							additionalSystemPrompt: buildChildSystemPromptFromAgentConfig(child),
+							additionalSystemPrompt: buildChildSystemPrompt(child),
 							includeAutoMemory: false,
 							permissionModeCeiling: options.permissionModeCeiling,
 						}

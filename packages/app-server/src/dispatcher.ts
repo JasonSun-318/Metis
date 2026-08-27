@@ -641,14 +641,28 @@ export class Dispatcher {
 					const ref = this.runtimeRef(request.params.sessionId);
 					return await this.registry.run(ref, (runtime) => runtime.clearGoal(request.params));
 				});
-			case "subagent/readItems": {
+			case "agent/readItems": {
 				const ref = this.runtimeRef(request.params.sessionId);
-				return await this.registry.run(ref, (runtime) => runtime.readSubagentItems(request.params));
+				return await this.registry.run(ref, (runtime) => runtime.readAgentItems(request.params));
 			}
-			case "subagent/interrupt":
+			case "agent/list": {
+				const ref = this.runtimeRef(request.params.sessionId);
+				return await this.registry.run(ref, (runtime) => runtime.listAgents(request.params));
+			}
+			case "agent/interrupt":
 				return await this.replayMutation(request, async () => {
 					const ref = this.runtimeRef(request.params.sessionId);
-					return await this.registry.run(ref, (runtime) => runtime.interruptSubagent(request.params));
+					return await this.registry.run(ref, (runtime) => runtime.interruptAgent(request.params));
+				});
+			case "agent/archive":
+				return await this.replayMutation(request, async () => {
+					const ref = this.runtimeRef(request.params.sessionId);
+					return await this.registry.run(ref, (runtime) => runtime.archiveAgent(request.params));
+				});
+			case "agent/delete":
+				return await this.replayMutation(request, async () => {
+					const ref = this.runtimeRef(request.params.sessionId);
+					return await this.registry.run(ref, (runtime) => runtime.deleteAgent(request.params));
 				});
 			case "session/setThinkingSelection":
 				return await this.replayMutation(request, async () => {

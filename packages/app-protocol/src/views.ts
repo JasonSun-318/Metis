@@ -606,16 +606,7 @@ export const InteractionViewSchema = Type.Union([
 ]);
 
 export const ThinkingSelectionSchema = Type.Union([ActualThinkingLevelSchema, Type.Literal("ultra")]);
-export const SubagentStatusSchema = Type.Union([
-	Type.Literal("queued"),
-	Type.Literal("running"),
-	Type.Literal("done"),
-	Type.Literal("failed"),
-	Type.Literal("stopped"),
-	Type.Literal("close_failed"),
-	Type.Literal("closed"),
-]);
-export const SubagentModelRefSchema = StrictObject({ provider: NameSchema, modelId: NameSchema });
+export const ModelRefSchema = StrictObject({ provider: NameSchema, modelId: NameSchema });
 export const ModelOptionViewSchema = StrictObject({
 	provider: NameSchema,
 	modelId: NameSchema,
@@ -680,7 +671,7 @@ export const RerankSettingsViewSchema = StrictObject({
 	authConfigured: Type.Boolean(),
 });
 export const ModelSettingsViewSchema = StrictObject({
-	defaultModel: Type.Union([SubagentModelRefSchema, Type.Null()]),
+	defaultModel: Type.Union([ModelRefSchema, Type.Null()]),
 	/** Vision-describer service for image-less models; null when unset. */
 	vision: Type.Union([VisionSettingsViewSchema, Type.Null()]),
 	embedding: Type.Union([EmbeddingSettingsViewSchema, Type.Null()]),
@@ -778,58 +769,55 @@ export const UsageSummaryViewSchema = Type.Refine(
 		value.totalTokens === value.chatTokens + value.codeTokens,
 	"usage summary fields are inconsistent",
 );
-export const SubagentUsageSchema = StrictObject({
-	model: SubagentModelRefSchema,
-	input: Type.Number({ minimum: 0 }),
-	output: Type.Number({ minimum: 0 }),
-	cacheRead: Type.Number({ minimum: 0 }),
-	cacheWrite: Type.Number({ minimum: 0 }),
-	elapsedMs: Type.Number({ minimum: 0 }),
-	toolCalls: Type.Optional(Type.Integer({ minimum: 0 })),
-	cost: Type.Optional(Type.Number({ minimum: 0 })),
-});
-const SubagentIdentityFields = {
-	agentId: SessionIdSchema,
-	name: NameSchema,
-	taskSummary: PublicTextSchema,
-	finalSummary: Type.Optional(PublicTextSchema),
-	createdAt: TimestampSchema,
-	updatedAt: TimestampSchema,
-};
-const ActiveSubagentStatusSchema = Type.Union([
+export const AgentTypeViewSchema = Type.Union([
+	Type.Literal("default"),
+	Type.Literal("explorer"),
+	Type.Literal("worker"),
+	Type.Literal("reviewer"),
+]);
+export const AgentStatusViewSchema = Type.Union([
 	Type.Literal("queued"),
 	Type.Literal("running"),
 	Type.Literal("done"),
 	Type.Literal("failed"),
 	Type.Literal("stopped"),
-	Type.Literal("close_failed"),
 ]);
-const SubagentConfigurationSchema = StrictObject({
-	mode: Type.Union([Type.Literal("chat"), Type.Literal("code")]),
-	tools: Type.Array(NameSchema, { maxItems: 128, uniqueItems: true }),
-	permissionMode: PermissionModeSchema,
-	model: SubagentModelRefSchema,
-	thinkingLevel: ActualThinkingLevelSchema,
-	cwd: PathSchema,
-	forkTurns: Type.Union([Type.Integer({ minimum: 0, maximum: 1_000 }), Type.Literal("all")]),
-	timeoutSeconds: Type.Integer({ minimum: 1, maximum: 1_800 }),
+export const AgentUsageViewSchema = StrictObject({
+	model: ModelRefSchema,
+	input: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
+	output: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
+	cacheRead: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
+	cacheWrite: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
+	elapsedMs: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
+	toolCalls: Type.Optional(Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER })),
+	cost: Type.Optional(Type.Number({ minimum: 0 })),
 });
-export const SubagentSummarySchema = Type.Union([
-	StrictObject({
-		...SubagentIdentityFields,
-		runId: Type.Optional(SessionIdSchema),
-		status: ActiveSubagentStatusSchema,
-		background: Type.Optional(Type.Boolean()),
-		configuration: SubagentConfigurationSchema,
-		error: Type.Optional(PublicTextSchema),
-		residualPath: Type.Optional(PathSchema),
-		usage: Type.Optional(SubagentUsageSchema),
-	}),
-	StrictObject({
-		...SubagentIdentityFields,
-		status: Type.Literal("closed"),
-	}),
-]);
+export const AgentTaskSummaryViewSchema = StrictObject({
+	taskId: SessionIdSchema,
+	status: AgentStatusViewSchema,
+	taskSummary: PublicTextSchema,
+	finalMessage: Type.Optional(PublicTextSchema),
+	error: Type.Optional(PublicTextSchema),
+	usage: Type.Optional(AgentUsageViewSchema),
+	createdAt: TimestampSchema,
+	updatedAt: TimestampSchema,
+});
+export const AgentSummaryViewSchema = StrictObject({
+	agentId: SessionIdSchema,
+	name: NameSchema,
+	agentType: AgentTypeViewSchema,
+	depth: Type.Integer({ minimum: 1, maximum: 2 }),
+	status: AgentStatusViewSchema,
+	archived: Type.Boolean(),
+	parentSessionId: SessionIdSchema,
+	rootSessionId: SessionIdSchema,
+	agentPath: Type.Array(SessionIdSchema, { minItems: 1, maxItems: 2 }),
+	tasks: Type.Array(AgentTaskSummaryViewSchema, { maxItems: 256 }),
+	currentTask: Type.Optional(AgentTaskSummaryViewSchema),
+	latestTask: Type.Optional(AgentTaskSummaryViewSchema),
+	createdAt: TimestampSchema,
+	updatedAt: TimestampSchema,
+});
 
 export const SessionTaskViewSchema = StrictObject({
 	task: Type.String({ minLength: 1, maxLength: 512 }),
@@ -883,7 +871,7 @@ export const ContextUsageCategoryViewSchema = Type.Union([
 	Type.Literal("rules"),
 	Type.Literal("skills"),
 	Type.Literal("mcp_dynamic_tools"),
-	Type.Literal("subagent_definitions"),
+	Type.Literal("agent_definitions"),
 	Type.Literal("summarized_conversation"),
 	Type.Literal("conversation"),
 ]);
@@ -923,7 +911,7 @@ export const SessionSnapshotSchema = StrictObject({
 	session: SessionSummarySchema,
 	collaborationMode: CollaborationModeSchema,
 	permissionMode: PermissionModeSchema,
-	model: Type.Optional(SubagentModelRefSchema),
+	model: Type.Optional(ModelRefSchema),
 	availableModels: Type.Optional(Type.Array(ModelOptionViewSchema, { maxItems: 512 })),
 	turns: Type.Array(TurnViewSchema, { maxItems: MAX_HISTORY_ITEMS }),
 	recentItems: Type.Array(ItemViewSchema, { maxItems: MAX_HISTORY_ITEMS }),
@@ -937,7 +925,7 @@ export const SessionSnapshotSchema = StrictObject({
 	thinkingSelection: ThinkingSelectionSchema,
 	actualThinkingLevel: ActualThinkingLevelSchema,
 	availableThinkingSelections: Type.Array(ThinkingSelectionSchema, { minItems: 1, maxItems: 8, uniqueItems: true }),
-	subagents: Type.Array(SubagentSummarySchema, { maxItems: 10 }),
+	agents: Type.Array(AgentSummaryViewSchema, { maxItems: 100 }),
 	serverEpoch: UuidSchema,
 	cursor: CursorSchema,
 });
@@ -965,7 +953,7 @@ export const CollaborationModeChangedEventSchema = StrictObject({
 export const ModelChangedEventSchema = StrictObject({
 	type: Type.Literal("session/modelChanged"),
 	sessionId: SessionIdSchema,
-	model: SubagentModelRefSchema,
+	model: ModelRefSchema,
 	thinkingSelection: ThinkingSelectionSchema,
 	actualThinkingLevel: ActualThinkingLevelSchema,
 	availableThinkingSelections: Type.Array(ThinkingSelectionSchema, { minItems: 1, maxItems: 8, uniqueItems: true }),
@@ -995,26 +983,32 @@ export const TurnQueueChangedEventSchema = StrictObject({
 	queuedTurns: QueuedTurnsSchema,
 });
 
-export const SubagentUpdatedEventSchema = StrictObject({
-	type: Type.Literal("subagent/updated"),
+export const AgentUpdatedEventSchema = StrictObject({
+	type: Type.Literal("agent/updated"),
 	sessionId: SessionIdSchema,
-	subagent: SubagentSummarySchema,
+	agent: AgentSummaryViewSchema,
+});
+export const AgentDeletedEventSchema = StrictObject({
+	type: Type.Literal("agent/deleted"),
+	sessionId: SessionIdSchema,
+	agentId: SessionIdSchema,
+	deletedAgentIds: Type.Array(SessionIdSchema, { minItems: 1, maxItems: 256, uniqueItems: true }),
 });
 
-const SubagentItemStartedEventObjectSchema = StrictObject({
-	type: Type.Literal("subagent/item/started"),
+const AgentItemStartedEventObjectSchema = StrictObject({
+	type: Type.Literal("agent/item/started"),
 	sessionId: SessionIdSchema,
 	agentId: SessionIdSchema,
 	item: ItemViewSchema,
 });
-export const SubagentItemStartedEventSchema = Type.Refine(
-	SubagentItemStartedEventObjectSchema,
+export const AgentItemStartedEventSchema = Type.Refine(
+	AgentItemStartedEventObjectSchema,
 	(value) => value.item.sessionId === value.agentId,
 	"child item sessionId must equal agentId",
 );
 
-export const SubagentItemDeltaEventSchema = StrictObject({
-	type: Type.Literal("subagent/item/delta"),
+export const AgentItemDeltaEventSchema = StrictObject({
+	type: Type.Literal("agent/item/delta"),
 	sessionId: SessionIdSchema,
 	agentId: SessionIdSchema,
 	itemId: OpaqueIdSchema,
@@ -1024,20 +1018,20 @@ export const SubagentItemDeltaEventSchema = StrictObject({
 	]),
 });
 
-const SubagentItemCompletedEventObjectSchema = StrictObject({
-	type: Type.Literal("subagent/item/completed"),
+const AgentItemCompletedEventObjectSchema = StrictObject({
+	type: Type.Literal("agent/item/completed"),
 	sessionId: SessionIdSchema,
 	agentId: SessionIdSchema,
 	item: ItemViewSchema,
 });
-export const SubagentItemCompletedEventSchema = Type.Refine(
-	SubagentItemCompletedEventObjectSchema,
+export const AgentItemCompletedEventSchema = Type.Refine(
+	AgentItemCompletedEventObjectSchema,
 	(value) => value.item.sessionId === value.agentId,
 	"child item sessionId must equal agentId",
 );
 
-export const SubagentItemsChangedEventSchema = StrictObject({
-	type: Type.Literal("subagent/itemsChanged"),
+export const AgentItemsChangedEventSchema = StrictObject({
+	type: Type.Literal("agent/itemsChanged"),
 	sessionId: SessionIdSchema,
 	agentId: SessionIdSchema,
 });
@@ -1201,7 +1195,7 @@ export const ScheduleTaskSnapshotViewSchema = StrictObject({
 	name: ScheduleNameSchema,
 	description: Type.Optional(PublicTextSchema),
 	instruction: Utf8String(MAX_SCHEDULE_INSTRUCTION_UTF8_BYTES, { minLength: 1 }),
-	model: SubagentModelRefSchema,
+	model: ModelRefSchema,
 	schedule: ScheduleSpecSchema,
 	timezone: Type.String({ minLength: 1, maxLength: 255 }),
 	target: ScheduleTargetViewSchema,
@@ -1236,7 +1230,7 @@ export const ScheduleTaskViewSchema = StrictObject({
 	name: ScheduleNameSchema,
 	description: Type.Optional(PublicTextSchema),
 	instruction: Utf8String(MAX_SCHEDULE_INSTRUCTION_UTF8_BYTES, { minLength: 1 }),
-	model: SubagentModelRefSchema,
+	model: ModelRefSchema,
 	schedule: ScheduleSpecSchema,
 	timezone: Type.String({ minLength: 1, maxLength: 255 }),
 	target: ScheduleTargetViewSchema,
@@ -1300,11 +1294,12 @@ export const DomainEventSchema = Type.Union([
 	DeliveredFilesChangedEventSchema,
 	GoalChangedEventSchema,
 	TurnQueueChangedEventSchema,
-	SubagentUpdatedEventSchema,
-	SubagentItemStartedEventSchema,
-	SubagentItemDeltaEventSchema,
-	SubagentItemCompletedEventSchema,
-	SubagentItemsChangedEventSchema,
+	AgentUpdatedEventSchema,
+	AgentDeletedEventSchema,
+	AgentItemStartedEventSchema,
+	AgentItemDeltaEventSchema,
+	AgentItemCompletedEventSchema,
+	AgentItemsChangedEventSchema,
 	ScheduleUpdatedEventSchema,
 	ScheduleDeletedEventSchema,
 	ScheduleRunUpdatedEventSchema,
@@ -1391,7 +1386,8 @@ export type UsageRangeDays = Static<typeof UsageRangeDaysSchema>;
 export type UsageDailyView = Static<typeof UsageDailyViewSchema>;
 export type UsageModelView = Static<typeof UsageModelViewSchema>;
 export type UsageSummaryView = Static<typeof UsageSummaryViewSchema>;
-export type SubagentSummaryView = Static<typeof SubagentSummarySchema>;
+export type AgentSummaryView = Static<typeof AgentSummaryViewSchema>;
+export type AgentTaskSummaryView = Static<typeof AgentTaskSummaryViewSchema>;
 export type ScheduleInputSpecView = Static<typeof ScheduleInputSpecSchema>;
 export type ScheduleTaskView = Static<typeof ScheduleTaskViewSchema>;
 export type ScheduleRunView = Static<typeof ScheduleRunViewSchema>;

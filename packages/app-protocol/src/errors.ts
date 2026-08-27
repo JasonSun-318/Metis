@@ -22,6 +22,7 @@ export const RPC_ERROR_CODES = {
 	READ_ONLY_SESSION: -32012,
 	SCHEDULE_STORE_CORRUPT: -32013,
 	CONFLICT: -32014,
+	INVALID_CURSOR: -32015,
 } as const;
 
 export type RpcErrorName = keyof typeof RPC_ERROR_CODES;
@@ -47,6 +48,7 @@ const ERROR_MESSAGES: Record<RpcErrorName, string> = {
 	READ_ONLY_SESSION: "Session is read-only",
 	SCHEDULE_STORE_CORRUPT: "Scheduled task store is corrupt",
 	CONFLICT: "Resource changed",
+	INVALID_CURSOR: "Cursor is invalid or no longer available",
 };
 
 const RETRYABLE: Record<RpcErrorName, boolean> = {
@@ -69,6 +71,7 @@ const RETRYABLE: Record<RpcErrorName, boolean> = {
 	READ_ONLY_SESSION: false,
 	SCHEDULE_STORE_CORRUPT: false,
 	CONFLICT: false,
+	INVALID_CURSOR: false,
 };
 
 const STANDARD_ERROR_NAMES = new Set<RpcErrorName>([
@@ -125,6 +128,7 @@ export const RpcErrorObjectSchema = Type.Union([
 	ApplicationErrorSchema("READ_ONLY_SESSION"),
 	ApplicationErrorSchema("SCHEDULE_STORE_CORRUPT"),
 	ApplicationErrorSchema("CONFLICT"),
+	ApplicationErrorSchema("INVALID_CURSOR"),
 ]);
 
 export interface RpcErrorContext {

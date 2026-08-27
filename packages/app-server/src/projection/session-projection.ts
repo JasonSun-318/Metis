@@ -95,11 +95,12 @@ export class SessionProjection {
 			case "session/collaborationModeChanged":
 			case "session/thinkingSelectionChanged":
 			case "session/modelChanged":
-			case "subagent/updated":
-			case "subagent/item/started":
-			case "subagent/item/delta":
-			case "subagent/item/completed":
-			case "subagent/itemsChanged":
+			case "agent/updated":
+			case "agent/deleted":
+			case "agent/item/started":
+			case "agent/item/delta":
+			case "agent/item/completed":
+			case "agent/itemsChanged":
 				this.assertSession(event.sessionId);
 				return clone(event);
 			case "session/tasksChanged":
@@ -189,7 +190,7 @@ export class SessionProjection {
 			| "permissionMode"
 			| "actualThinkingLevel"
 			| "availableThinkingSelections"
-			| "subagents"
+			| "agents"
 			| "model"
 			| "availableModels"
 		> = {
@@ -198,7 +199,7 @@ export class SessionProjection {
 			thinkingSelection: "off",
 			actualThinkingLevel: "off",
 			availableThinkingSelections: ["off"],
-			subagents: [],
+			agents: [],
 		},
 	): SessionSnapshot {
 		const recentItemIds = this.itemPage(this.itemOrder.length, MAX_SNAPSHOT_ITEMS);

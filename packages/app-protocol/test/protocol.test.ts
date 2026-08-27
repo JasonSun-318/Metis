@@ -510,11 +510,12 @@ describe("golden protocol fixtures", () => {
 				"session/deliveredFilesChanged",
 				"session/goalChanged",
 				"turn/queueChanged",
-				"subagent/updated",
-				"subagent/item/started",
-				"subagent/item/delta",
-				"subagent/item/completed",
-				"subagent/itemsChanged",
+				"agent/updated",
+				"agent/deleted",
+				"agent/item/started",
+				"agent/item/delta",
+				"agent/item/completed",
+				"agent/itemsChanged",
 				"server/state",
 				"schedule/updated",
 				"schedule/deleted",
@@ -643,13 +644,11 @@ describe("golden protocol fixtures", () => {
 		expect(validateServerNotification(notification)).toEqual(notification);
 	});
 
-	it("validates scoped subagent item events", () => {
+	it("validates scoped agent item events", () => {
 		const fixtureEnvelope = structuredClone(notifications[0]!.envelope) as {
 			params: { events: Array<Record<string, unknown>> };
 		};
-		const childEvents = fixtureEnvelope.params.events.filter((event) =>
-			String(event.type).startsWith("subagent/item"),
-		);
+		const childEvents = fixtureEnvelope.params.events.filter((event) => String(event.type).startsWith("agent/item"));
 		const envelope = {
 			jsonrpc: "2.0",
 			method: "connection/events",
@@ -662,51 +661,46 @@ describe("golden protocol fixtures", () => {
 		expect(() => validateServerNotification(mismatched)).toThrow(ProtocolValidationError);
 
 		const oversized = structuredClone(envelope);
-		const delta = oversized.params.events.find((event) => event.type === "subagent/item/delta")!;
+		const delta = oversized.params.events.find((event) => event.type === "agent/item/delta")!;
 		(delta.delta as Record<string, unknown>).text = "x".repeat(MAX_DELTA_UTF8_BYTES + 1);
 		expect(() => validateServerNotification(oversized)).toThrow(ProtocolValidationError);
 	});
 
-	it("requires configuration only for non-closed subagent summaries", () => {
+	it("accepts active agent summaries without legacy configuration fields", () => {
 		const envelope = structuredClone(notifications[0]!.envelope) as {
-			params: { events: Array<{ type: string; subagent?: Record<string, unknown> }> };
+			params: { events: Array<{ type: string; agent?: Record<string, unknown> }> };
 		};
-		const event = envelope.params.events.find((candidate) => candidate.type === "subagent/updated")!;
-		const configuration = event.subagent!.configuration;
-		delete event.subagent!.configuration;
-		expect(() => validateServerNotification(envelope)).toThrow(ProtocolValidationError);
-
-		event.subagent!.status = "closed";
-		event.subagent!.configuration = configuration;
-		expect(() => validateServerNotification(envelope)).toThrow(ProtocolValidationError);
-		delete event.subagent!.configuration;
+		const event = envelope.params.events.find((candidate) => candidate.type === "agent/updated")!;
+		expect(event.agent).toMatchObject({ agentType: "worker", archived: false });
 		expect(validateServerNotification(envelope)).toEqual(envelope);
 	});
 
-	it("accepts runtime identity fields in active subagent snapshots", () => {
+	it("accepts runtime identity fields in active agent snapshots", () => {
 		const request = requestFor("client", "session/subscribe");
 		const response = structuredClone(
 			responses.find((entry) => entry.direction === "client" && entry.method === "session/subscribe")!.envelope,
 		) as {
-			result: { snapshot: { subagents: Array<Record<string, unknown>> } };
+			result: { snapshot: { agents: Array<Record<string, unknown>> } };
 		};
-		response.result.snapshot.subagents = [
+		response.result.snapshot.agents = [
 			{
 				agentId: "22222222-2222-4222-8222-222222222222",
-				runId: RUN_ID,
 				name: "researcher",
+				agentType: "worker",
+				depth: 1,
 				status: "stopped",
-				background: false,
-				taskSummary: "Inspect the runtime",
-				configuration: {
-					mode: "code",
-					tools: ["read"],
-					permissionMode: "ask",
-					model: { provider: "openai", modelId: "gpt-test" },
-					thinkingLevel: "max",
-					cwd: "/tmp/metis-project",
-					forkTurns: 0,
-					timeoutSeconds: 1800,
+				archived: false,
+				parentSessionId: "11111111-1111-4111-8111-111111111111",
+				rootSessionId: "11111111-1111-4111-8111-111111111111",
+				agentPath: ["22222222-2222-4222-8222-222222222222"],
+				tasks: [],
+				latestTask: {
+					taskId: "33333333-3333-4333-8333-333333333333",
+					status: "stopped",
+					taskSummary: "Inspect the runtime",
+					finalMessage: "done",
+					createdAt: "2026-07-16T00:00:12.000Z",
+					updatedAt: "2026-07-16T00:00:13.000Z",
 				},
 				createdAt: "2026-07-16T00:00:12.000Z",
 				updatedAt: "2026-07-16T00:00:13.000Z",
@@ -717,19 +711,32 @@ describe("golden protocol fixtures", () => {
 	});
 
 	it.each([
-		["readPaths", "readPaths", ["/tmp/project"]],
-		["writePaths", "writePaths", ["/tmp/project"]],
-	])("rejects legacy %s in current subagent notifications", (_label, field, value) => {
+		["runId", "runId", "33333333-3333-4333-8333-333333333333"],
+		[
+			"configuration",
+			"configuration",
+			{
+				mode: "code",
+				tools: ["read"],
+				permissionMode: "ask",
+				model: { provider: "openai", modelId: "gpt-test" },
+				thinkingLevel: "max",
+				cwd: "/tmp/metis-project",
+				forkTurns: 0,
+				timeoutSeconds: 1800,
+			},
+		],
+	])("rejects legacy %s in current agent notifications", (_label, field, value) => {
 		const envelope = structuredClone(notifications[0]!.envelope) as {
 			params: {
 				events: Array<{
 					type: string;
-					subagent?: { configuration?: Record<string, unknown> };
+					agent?: Record<string, unknown>;
 				}>;
 			};
 		};
-		const event = envelope.params.events.find((candidate) => candidate.type === "subagent/updated")!;
-		event.subagent!.configuration![field] = value;
+		const event = envelope.params.events.find((candidate) => candidate.type === "agent/updated")!;
+		event.agent![field] = value;
 		expect(() => validateServerNotification(envelope)).toThrow(ProtocolValidationError);
 	});
 

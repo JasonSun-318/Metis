@@ -35,7 +35,7 @@ interface QueuedEvent {
 	deltaParts?: Array<{ readonly cursor: number; readonly text: string }>;
 }
 
-type DeltaEvent = Extract<DomainEvent, { type: "item/delta" | "subagent/item/delta" }>;
+type DeltaEvent = Extract<DomainEvent, { type: "item/delta" | "agent/item/delta" }>;
 
 export interface OutboundStage {
 	enqueue(cursor: number, event: DomainEvent): boolean;
@@ -74,18 +74,18 @@ function canCoalesce(previous: QueuedEvent, next: QueuedEvent): boolean {
 	if (previous.sent || previous.hold !== next.hold || previous.event.type !== next.event.type) {
 		return false;
 	}
-	if (previous.event.type === "subagent/itemsChanged" && next.event.type === "subagent/itemsChanged") {
+	if (previous.event.type === "agent/itemsChanged" && next.event.type === "agent/itemsChanged") {
 		return previous.event.sessionId === next.event.sessionId && previous.event.agentId === next.event.agentId;
 	}
-	if (previous.event.type !== "item/delta" && previous.event.type !== "subagent/item/delta") return false;
+	if (previous.event.type !== "item/delta" && previous.event.type !== "agent/item/delta") return false;
 	const prior = previous.event as DeltaEvent;
 	const incoming = next.event as DeltaEvent;
 	return (
 		prior.sessionId === incoming.sessionId &&
 		prior.itemId === incoming.itemId &&
 		prior.delta.type === incoming.delta.type &&
-		(prior.type !== "subagent/item/delta" ||
-			(incoming.type === "subagent/item/delta" && prior.agentId === incoming.agentId))
+		(prior.type !== "agent/item/delta" ||
+			(incoming.type === "agent/item/delta" && prior.agentId === incoming.agentId))
 	);
 }
 
@@ -168,7 +168,7 @@ export class OutboundQueue {
 			bytes: eventBytes(event),
 			sent: false,
 			...(hold === undefined ? {} : { hold }),
-			...(event.type === "item/delta" || event.type === "subagent/item/delta"
+			...(event.type === "item/delta" || event.type === "agent/item/delta"
 				? { deltaParts: [{ cursor, text: event.delta.text }] }
 				: {}),
 		};
@@ -187,7 +187,7 @@ export class OutboundQueue {
 				event: structuredClone(last.event),
 				...(last.deltaParts === undefined ? {} : { deltaParts: [...last.deltaParts] }),
 			};
-			if (last.event.type === "subagent/itemsChanged") {
+			if (last.event.type === "agent/itemsChanged") {
 				merged = { ...last, cursor, event: incoming.event, bytes: incoming.bytes };
 			} else {
 				const prior = last.event as DeltaEvent;

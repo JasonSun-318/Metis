@@ -209,12 +209,24 @@ class PausableRuntime implements OpenedSessionRuntime {
 		return { sessionId: input.sessionId, cleared: false };
 	}
 
-	async readSubagentItems(_input: ClientParams<"subagent/readItems">): Promise<ClientResult<"subagent/readItems">> {
+	async listAgents(): Promise<ClientResult<"agent/list">> {
+		return { agents: [], nextAfterAgentId: null };
+	}
+
+	async readAgentItems(_input: ClientParams<"agent/readItems">): Promise<ClientResult<"agent/readItems">> {
 		return { items: [], nextBeforeItemId: null };
 	}
 
-	async interruptSubagent(): Promise<ClientResult<"subagent/interrupt">> {
+	async interruptAgent(): Promise<ClientResult<"agent/interrupt">> {
 		throw new Error("No child runtime in reconnect fixture");
+	}
+
+	async archiveAgent(): Promise<ClientResult<"agent/archive">> {
+		throw new Error("No agent archive in reconnect fixture");
+	}
+
+	async deleteAgent(input: ClientParams<"agent/delete">): Promise<ClientResult<"agent/delete">> {
+		return { agentId: input.agentId, status: "deleted" };
 	}
 
 	async setThinkingSelection(

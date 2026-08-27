@@ -86,21 +86,42 @@ const _sessionDeleteResult = {
 	method: "trash",
 } satisfies ClientResult<"session/delete">;
 
-const subagentInterrupt = {
+const agentInterrupt = {
 	sessionId: "11111111-1111-4111-8111-111111111111",
 	agentId: "22222222-2222-4222-8222-222222222222",
 	requestId: "00000000-0000-4000-8000-000000000004",
-} satisfies ClientParams<"subagent/interrupt">;
-const subagentInterruptResult = {
-	subagent: {
-		agentId: subagentInterrupt.agentId,
+} satisfies ClientParams<"agent/interrupt">;
+const agentInterruptResult = {
+	agent: {
+		agentId: agentInterrupt.agentId,
 		name: "researcher",
-		status: "closed",
-		taskSummary: "Inspect runtime",
+		agentType: "worker",
+		depth: 1,
+		status: "stopped",
+		archived: false,
+		parentSessionId: agentInterrupt.sessionId,
+		rootSessionId: agentInterrupt.sessionId,
+		agentPath: [agentInterrupt.agentId],
+		tasks: [
+			{
+				taskId: "33333333-3333-4333-8333-333333333333",
+				status: "stopped",
+				taskSummary: "Inspect runtime",
+				createdAt: "2026-08-06T00:00:00.000Z",
+				updatedAt: "2026-08-06T00:00:01.000Z",
+			},
+		],
+		latestTask: {
+			taskId: "33333333-3333-4333-8333-333333333333",
+			status: "stopped",
+			taskSummary: "Inspect runtime",
+			createdAt: "2026-08-06T00:00:00.000Z",
+			updatedAt: "2026-08-06T00:00:01.000Z",
+		},
 		createdAt: "2026-08-06T00:00:00.000Z",
 		updatedAt: "2026-08-06T00:00:01.000Z",
 	},
-} satisfies ClientResult<"subagent/interrupt">;
+} satisfies ClientResult<"agent/interrupt">;
 
 const session = {
 	sessionId: "11111111-1111-4111-8111-111111111111",
@@ -271,7 +292,7 @@ const snapshot: SessionSnapshot = {
 	thinkingSelection: "off",
 	actualThinkingLevel: "off",
 	availableThinkingSelections: ["off"],
-	subagents: [],
+	agents: [],
 	serverEpoch: "33333333-3333-4333-8333-333333333333",
 	cursor: 0,
 };
@@ -342,9 +363,9 @@ const events: ConnectionEventsParams = {
 			collaborationMode: "plan",
 		},
 		{
-			type: "subagent/itemsChanged",
+			type: "agent/itemsChanged",
 			sessionId: session.sessionId,
-			agentId: subagentInterrupt.agentId,
+			agentId: agentInterrupt.agentId,
 		},
 	],
 };
@@ -386,5 +407,5 @@ void sessionCompactResult;
 void compactedItem;
 void permissionMode;
 void permissionRule;
-void subagentInterruptResult;
+void agentInterruptResult;
 void goalSet;

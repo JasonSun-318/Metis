@@ -25,6 +25,7 @@ import {
 import {
 	ActualThinkingLevelSchema,
 	AgentModeSchema,
+	AgentSummaryViewSchema,
 	CollaborationModeSchema,
 	ConnectionEventsParamsSchema,
 	DeclarativeHookViewSchema,
@@ -44,6 +45,7 @@ import {
 	MemoryEngineSchema,
 	MemorySettingsViewSchema,
 	ModelOptionViewSchema,
+	ModelRefSchema,
 	ModelSettingsViewSchema,
 	PermissionModeSchema,
 	PlanViewSchema,
@@ -67,8 +69,6 @@ import {
 	SkillNameSchema,
 	SkillSourceViewSchema,
 	SkillSummaryViewSchema,
-	SubagentModelRefSchema,
-	SubagentSummarySchema,
 	ThinkingSelectionSchema,
 	UsageRangeDaysSchema,
 	UsageSummaryViewSchema,
@@ -556,24 +556,45 @@ export const SessionSetModelParamsSchema = StrictObject({
 	modelId: NameSchema,
 });
 export const SessionModelResultSchema = StrictObject({
-	model: SubagentModelRefSchema,
+	model: ModelRefSchema,
 	thinkingSelection: ThinkingSelectionSchema,
 	actualThinkingLevel: ActualThinkingLevelSchema,
 	availableThinkingSelections: Type.Array(ThinkingSelectionSchema, { minItems: 1, maxItems: 8, uniqueItems: true }),
 });
 
-export const SubagentReadItemsParamsSchema = StrictObject({
+export const AgentReadItemsParamsSchema = StrictObject({
 	sessionId: SessionIdSchema,
 	agentId: SessionIdSchema,
+	taskId: Type.Optional(SessionIdSchema),
 	beforeItemId: Type.Optional(Type.Union([OpaqueIdSchema, Type.Null()])),
 	limit: Type.Integer({ minimum: 1, maximum: MAX_HISTORY_ITEMS }),
 });
-export const SubagentInterruptParamsSchema = StrictObject({
+const AgentMutationFields = {
 	sessionId: SessionIdSchema,
 	agentId: SessionIdSchema,
 	requestId: UuidSchema,
+} as const;
+export const AgentInterruptParamsSchema = StrictObject(AgentMutationFields);
+export const AgentArchiveParamsSchema = StrictObject({
+	...AgentMutationFields,
+	archived: Type.Boolean(),
 });
-export const SubagentResultSchema = StrictObject({ subagent: SubagentSummarySchema });
+export const AgentDeleteParamsSchema = StrictObject(AgentMutationFields);
+export const AgentListParamsSchema = StrictObject({
+	sessionId: SessionIdSchema,
+	includeArchived: Type.Optional(Type.Boolean()),
+	afterAgentId: Type.Optional(Type.Union([SessionIdSchema, Type.Null()])),
+	limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 100 })),
+});
+export const AgentListResultSchema = StrictObject({
+	agents: Type.Array(AgentSummaryViewSchema, { maxItems: 100 }),
+	nextAfterAgentId: Type.Union([SessionIdSchema, Type.Null()]),
+});
+export const AgentResultSchema = StrictObject({ agent: AgentSummaryViewSchema });
+export const AgentDeleteResultSchema = StrictObject({
+	agentId: SessionIdSchema,
+	status: Type.Literal("deleted"),
+});
 
 export const FileAttachmentInputSchema = StrictObject({
 	path: PathSchema,
@@ -699,7 +720,7 @@ export const ModelSettingsMutationSchema = Type.Union([
 	StrictObject({ type: Type.Literal("remove_provider"), provider: NameSchema }),
 	StrictObject({
 		type: Type.Literal("set_defaults"),
-		model: Type.Union([SubagentModelRefSchema, Type.Null()]),
+		model: Type.Union([ModelRefSchema, Type.Null()]),
 		thinkingSelection: ThinkingSelectionSchema,
 	}),
 	StrictObject({
@@ -797,7 +818,7 @@ export const ScheduleCreateParamsSchema = Type.Refine(
 		name: ScheduleNameSchema,
 		description: Type.Optional(ScheduleDescriptionInputSchema),
 		instruction: ScheduleInstructionSchema,
-		model: SubagentModelRefSchema,
+		model: ModelRefSchema,
 		schedule: ScheduleInputSpecSchema,
 	}),
 	(value) => value.sourceSessionId === undefined || value.additionalWorkspaceCwd === undefined,
@@ -824,7 +845,7 @@ export const ScheduleUpdateParamsSchema = Type.Refine(
 		name: Type.Optional(ScheduleNameSchema),
 		description: Type.Optional(Type.Union([ScheduleDescriptionInputSchema, Type.Null()])),
 		instruction: Type.Optional(ScheduleInstructionSchema),
-		model: Type.Optional(SubagentModelRefSchema),
+		model: Type.Optional(ModelRefSchema),
 		schedule: Type.Optional(ScheduleInputSpecSchema),
 		sourceSessionId: Type.Optional(Type.Union([SessionIdSchema, Type.Null()])),
 		additionalWorkspaceCwd: Type.Optional(Type.Union([PathSchema, Type.Null()])),
@@ -1008,8 +1029,11 @@ export const ClientRequestMethods = {
 	"hooks/list": method(HooksListParamsSchema, HooksListViewSchema),
 	"hooks/upsert": method(HooksUpsertParamsSchema, HooksListViewSchema),
 	"hooks/delete": method(HooksDeleteParamsSchema, HooksListViewSchema),
-	"subagent/readItems": method(SubagentReadItemsParamsSchema, SessionReadItemsResultSchema),
-	"subagent/interrupt": method(SubagentInterruptParamsSchema, SubagentResultSchema),
+	"agent/list": method(AgentListParamsSchema, AgentListResultSchema),
+	"agent/readItems": method(AgentReadItemsParamsSchema, SessionReadItemsResultSchema),
+	"agent/interrupt": method(AgentInterruptParamsSchema, AgentResultSchema),
+	"agent/archive": method(AgentArchiveParamsSchema, AgentResultSchema),
+	"agent/delete": method(AgentDeleteParamsSchema, AgentDeleteResultSchema),
 	"turn/start": method(TurnInputSchema, AcceptedOperationSchema),
 	"turn/steer": method(TurnSteerParamsSchema, AcceptedOperationSchema),
 	"turn/queue": method(TurnInputSchema, QueuedTurnResultSchema),

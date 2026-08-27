@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type { DomainEvent, ItemView } from "@metis/app-protocol";
-import type { SubagentVisibleActivity } from "@metis/coding-agent";
+import type { AgentVisibleActivity } from "@metis/coding-agent";
 import { appendProjectedDelta, opaqueId, projectLiveMessage } from "./item-projection.ts";
 
 interface ChildLiveState {
@@ -11,7 +11,7 @@ interface ChildLiveState {
 }
 
 /** Projects one child at a time without retaining durable transcript history. */
-export class SubagentLiveProjector {
+export class AgentLiveProjector {
 	private readonly children = new Map<string, ChildLiveState>();
 	private readonly parentSessionId: string;
 	private readonly publish: (event: DomainEvent) => void;
@@ -40,7 +40,7 @@ export class SubagentLiveProjector {
 		state.sequence += 1;
 		const timestamp = (message as Record<string, unknown>).timestamp;
 		const itemId = opaqueId(
-			`subagent-live:${createHash("sha256")
+			`agent-live:${createHash("sha256")
 				.update(`${agentId}:${turnId ?? "none"}:${String(role)}:${String(timestamp)}:${state.sequence}`)
 				.digest("hex")}`,
 			"item",
@@ -50,7 +50,7 @@ export class SubagentLiveProjector {
 		return itemId;
 	}
 
-	apply(agentId: string, turnId: string | undefined, event: SubagentVisibleActivity): void {
+	apply(agentId: string, turnId: string | undefined, event: AgentVisibleActivity): void {
 		const role = event.message.role;
 		if (role !== "user" && role !== "assistant" && role !== "toolResult") return;
 		const itemId = this.itemId(agentId, turnId, event.message);
@@ -67,7 +67,7 @@ export class SubagentLiveProjector {
 			});
 			if (!item) return;
 			state.items.set(itemId, item);
-			this.publish({ type: "subagent/item/started", sessionId: this.parentSessionId, agentId, item });
+			this.publish({ type: "agent/item/started", sessionId: this.parentSessionId, agentId, item });
 			return;
 		}
 
@@ -83,7 +83,7 @@ export class SubagentLiveProjector {
 			if (!projected) return;
 			state.items.set(itemId, projected.item);
 			this.publish({
-				type: "subagent/item/delta",
+				type: "agent/item/delta",
 				sessionId: this.parentSessionId,
 				agentId,
 				itemId,
@@ -103,7 +103,7 @@ export class SubagentLiveProjector {
 			fallbackTimestamp: this.fallbackTimestamp,
 		});
 		if (item) {
-			this.publish({ type: "subagent/item/completed", sessionId: this.parentSessionId, agentId, item });
+			this.publish({ type: "agent/item/completed", sessionId: this.parentSessionId, agentId, item });
 		}
 		state.items.delete(itemId);
 		if (role === "assistant") state.assistantItemId = undefined;

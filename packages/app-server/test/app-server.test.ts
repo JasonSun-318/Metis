@@ -71,7 +71,7 @@ class FakeRuntime implements OpenedSessionRuntime {
 	closed = false;
 	startCalls = 0;
 	compactCalls = 0;
-	subagentInterruptCalls = 0;
+	agentInterruptCalls = 0;
 	webSearchRefreshCalls = 0;
 	sessionName: string | undefined;
 
@@ -235,22 +235,55 @@ class FakeRuntime implements OpenedSessionRuntime {
 		return { sessionId: input.sessionId, cleared };
 	}
 
-	async readSubagentItems(_input: ClientParams<"subagent/readItems">): Promise<ClientResult<"subagent/readItems">> {
+	async listAgents(): Promise<ClientResult<"agent/list">> {
+		return { agents: [], nextAfterAgentId: null };
+	}
+
+	async readAgentItems(_input: ClientParams<"agent/readItems">): Promise<ClientResult<"agent/readItems">> {
 		return { items: [], nextBeforeItemId: null };
 	}
 
-	async interruptSubagent(input: ClientParams<"subagent/interrupt">): Promise<ClientResult<"subagent/interrupt">> {
-		this.subagentInterruptCalls += 1;
+	async interruptAgent(input: ClientParams<"agent/interrupt">): Promise<ClientResult<"agent/interrupt">> {
+		this.agentInterruptCalls += 1;
 		return {
-			subagent: {
+			agent: {
 				agentId: input.agentId,
 				name: "Child",
-				status: "closed",
-				taskSummary: "Test child",
+				agentType: "worker",
+				depth: 1,
+				status: "stopped",
+				archived: false,
+				parentSessionId: this.sessionId,
+				rootSessionId: this.sessionId,
+				agentPath: [input.agentId],
+				tasks: [
+					{
+						taskId: "33333333-3333-4333-8333-333333333333",
+						status: "stopped",
+						taskSummary: "Test child",
+						createdAt: this.ref.summary.createdAt,
+						updatedAt: this.ref.summary.updatedAt,
+					},
+				],
+				latestTask: {
+					taskId: "33333333-3333-4333-8333-333333333333",
+					status: "stopped",
+					taskSummary: "Test child",
+					createdAt: this.ref.summary.createdAt,
+					updatedAt: this.ref.summary.updatedAt,
+				},
 				createdAt: this.ref.summary.createdAt,
 				updatedAt: this.ref.summary.updatedAt,
 			},
 		};
+	}
+
+	async archiveAgent(): Promise<ClientResult<"agent/archive">> {
+		throw new Error("No agent archive in fixture");
+	}
+
+	async deleteAgent(input: ClientParams<"agent/delete">): Promise<ClientResult<"agent/delete">> {
+		return { agentId: input.agentId, status: "deleted" };
 	}
 
 	async setThinkingSelection(
@@ -319,7 +352,7 @@ class FakeRuntime implements OpenedSessionRuntime {
 			thinkingSelection: "high",
 			actualThinkingLevel: "high",
 			availableThinkingSelections: ["off", "high", "ultra"],
-			subagents: [],
+			agents: [],
 			serverEpoch,
 			cursor: currentCursor(),
 		};
@@ -1731,17 +1764,17 @@ describe("AppServer", () => {
 		const request = {
 			jsonrpc: "2.0" as const,
 			id: "interrupt-child",
-			method: "subagent/interrupt" as const,
+			method: "agent/interrupt" as const,
 			params: { sessionId: "session-a", agentId: "child-a", requestId: REQUEST_A },
 		};
 
 		expect(await connection.handle(request)).toMatchObject({
-			result: { subagent: { agentId: "child-a", status: "closed" } },
+			result: { agent: { agentId: "child-a", status: "stopped" } },
 		});
 		expect(await connection.handle({ ...request, id: "interrupt-child-replay" })).toMatchObject({
-			result: { subagent: { agentId: "child-a" } },
+			result: { agent: { agentId: "child-a" } },
 		});
-		expect(host.runtimes.get("session-a")?.subagentInterruptCalls).toBe(1);
+		expect(host.runtimes.get("session-a")?.agentInterruptCalls).toBe(1);
 	});
 
 	it("applies replayed close cleanup to the calling connection and rejects unknown sessions", async () => {

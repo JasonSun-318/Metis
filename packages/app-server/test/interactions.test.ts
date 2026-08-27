@@ -62,7 +62,7 @@ describe("InteractionBroker", () => {
 		reason: "Network destination needs approval",
 		cwd: "/tmp/work",
 		executionTarget: "host",
-		actor: { type: "subagent", id: "agent-child-1", name: "researcher" },
+		actor: { type: "agent", id: "agent-child-1", name: "researcher" },
 		...overrides,
 	});
 	const askUserRequest = (overrides: Partial<AskUserRequest> = {}): AskUserRequest => ({
@@ -283,7 +283,7 @@ describe("InteractionBroker", () => {
 				{ id: "permission:deny", label: "Reject" },
 			],
 		});
-		expect(peer.requests[0]?.message).toContain("Subagent: researcher (agent-child-1)");
+		expect(peer.requests[0]?.message).toContain("Agent: researcher (agent-child-1)");
 		expect(peer.requests[0]?.message).toContain("Risk: network");
 		expect(peer.requests[0]?.message).toContain('"command": "curl https://example.test"');
 		expect(peer.requests[0]?.message).toContain("Path: /tmp/work/result.txt");

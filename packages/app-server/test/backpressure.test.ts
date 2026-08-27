@@ -22,7 +22,7 @@ function delta(text: string, outputTokens?: number): DomainEvent {
 
 function childDelta(agentId: string, text: string, type: "text" | "thinking" = "text"): DomainEvent {
 	return {
-		type: "subagent/item/delta",
+		type: "agent/item/delta",
 		sessionId: SESSION_ID,
 		agentId,
 		itemId: "child-item-stream",
@@ -50,8 +50,8 @@ describe("OutboundQueue backpressure", () => {
 	it("does not misclassify an invalid internal event as connection overload", () => {
 		const queue = new OutboundQueue({ serverEpoch: EPOCH });
 		const invalid = {
-			type: "subagent/updated",
-			subagent: { agentId: "agent-invalid" },
+			type: "agent/updated",
+			agent: { agentId: "agent-invalid" },
 		} as unknown as DomainEvent;
 
 		expect(() => queue.enqueue(1, invalid)).toThrow(ProtocolValidationError);
@@ -137,11 +137,11 @@ describe("OutboundQueue backpressure", () => {
 				toCursor: 3,
 				events: [
 					{
-						type: "subagent/item/delta",
+						type: "agent/item/delta",
 						agentId: "child-a",
 						delta: { type: "thinking", text: "one two" },
 					},
-					{ type: "subagent/item/delta", agentId: "child-b" },
+					{ type: "agent/item/delta", agentId: "child-b" },
 				],
 			},
 		});
@@ -160,8 +160,8 @@ describe("OutboundQueue backpressure", () => {
 		});
 		await vi.waitFor(() => expect(notifications(sent)).toHaveLength(1));
 		const event = notifications(sent)[0]?.params.events[0];
-		expect(event).toMatchObject({ type: "subagent/item/delta", agentId: "child-a" });
-		if (event?.type !== "subagent/item/delta") throw new TypeError("Expected child delta");
+		expect(event).toMatchObject({ type: "agent/item/delta", agentId: "child-a" });
+		if (event?.type !== "agent/item/delta") throw new TypeError("Expected child delta");
 		expect(event.delta.text).toBe(Array.from({ length: 500 }, (_, index) => String((index + 1) % 10)).join(""));
 	});
 
@@ -169,13 +169,13 @@ describe("OutboundQueue backpressure", () => {
 		const queue = new OutboundQueue({ serverEpoch: EPOCH });
 		for (let cursor = 1; cursor <= 50; cursor += 1) {
 			queue.enqueue(cursor, {
-				type: "subagent/itemsChanged",
+				type: "agent/itemsChanged",
 				sessionId: SESSION_ID,
 				agentId: "child-a",
 			});
 		}
 		queue.enqueue(51, {
-			type: "subagent/itemsChanged",
+			type: "agent/itemsChanged",
 			sessionId: SESSION_ID,
 			agentId: "child-b",
 		});
@@ -191,8 +191,8 @@ describe("OutboundQueue backpressure", () => {
 				fromCursor: 50,
 				toCursor: 51,
 				events: [
-					{ type: "subagent/itemsChanged", agentId: "child-a" },
-					{ type: "subagent/itemsChanged", agentId: "child-b" },
+					{ type: "agent/itemsChanged", agentId: "child-a" },
+					{ type: "agent/itemsChanged", agentId: "child-b" },
 				],
 			},
 		});
