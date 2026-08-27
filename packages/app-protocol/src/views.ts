@@ -926,6 +926,7 @@ export const SessionSnapshotSchema = StrictObject({
 	actualThinkingLevel: ActualThinkingLevelSchema,
 	availableThinkingSelections: Type.Array(ThinkingSelectionSchema, { minItems: 1, maxItems: 8, uniqueItems: true }),
 	agents: Type.Array(AgentSummaryViewSchema, { maxItems: 100 }),
+	nextAgentAfterId: Type.Optional(Type.Union([SessionIdSchema, Type.Null()])),
 	serverEpoch: UuidSchema,
 	cursor: CursorSchema,
 });
@@ -1034,6 +1035,7 @@ export const AgentItemsChangedEventSchema = StrictObject({
 	type: Type.Literal("agent/itemsChanged"),
 	sessionId: SessionIdSchema,
 	agentId: SessionIdSchema,
+	taskId: SessionIdSchema,
 });
 
 export const SessionUpdatedEventSchema = StrictObject({

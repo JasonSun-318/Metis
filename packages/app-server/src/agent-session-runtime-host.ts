@@ -22,6 +22,7 @@ import {
 	type AuthCredential,
 	type AuthStorage,
 	type AuthStorageChange,
+	agentTaskWindow,
 	buildChildSystemPrompt,
 	type CreateAgentSessionRuntimeFactory,
 	copySessionDeliveredFiles,
@@ -286,14 +287,15 @@ function completedTurnHasVisibleAssistantText(journal: readonly unknown[], turnI
 
 function agentTaskView(
 	task: NonNullable<AgentSummary["currentTask"]>,
+	includeResult = true,
 ): NonNullable<SessionSnapshot["agents"][number]["currentTask"]> {
 	return {
 		taskId: task.taskId,
 		status: task.status,
 		taskSummary: task.taskSummary,
-		...(task.finalMessage ? { finalMessage: task.finalMessage } : {}),
-		...(task.error ? { error: task.error } : {}),
-		...(task.usage ? { usage: task.usage } : {}),
+		...(includeResult && task.finalMessage ? { finalMessage: task.finalMessage } : {}),
+		...(includeResult && task.error ? { error: task.error } : {}),
+		...(task.usage ? { usage: { ...task.usage, model: { ...task.usage.model } } } : {}),
 		createdAt: task.createdAt,
 		updatedAt: task.updatedAt,
 	};
@@ -310,12 +312,31 @@ function agentSummaryView(summary: AgentSummary): SessionSnapshot["agents"][numb
 		parentSessionId: summary.parentSessionId,
 		rootSessionId: summary.rootSessionId,
 		agentPath: [...summary.agentPath],
-		tasks: summary.tasks.slice(-256).map(agentTaskView),
+		tasks: summary.tasks.map((task) => agentTaskView(task, false)),
 		...(summary.currentTask ? { currentTask: agentTaskView(summary.currentTask) } : {}),
 		...(summary.latestTask ? { latestTask: agentTaskView(summary.latestTask) } : {}),
 		createdAt: summary.createdAt,
 		updatedAt: summary.updatedAt,
 	};
+}
+
+const MAX_AGENT_COLLECTION_UTF8_BYTES = 1024 * 1024;
+
+function boundedAgentSummaryViews(
+	summaries: readonly AgentSummary[],
+	limit: number,
+): SessionSnapshot["agents"][number][] {
+	const views: SessionSnapshot["agents"][number][] = [];
+	let bytes = 2;
+	for (const summary of summaries) {
+		if (views.length >= limit) break;
+		const view = agentSummaryView(summary);
+		const viewBytes = Buffer.byteLength(JSON.stringify(view), "utf8") + (views.length > 0 ? 1 : 0);
+		if (views.length > 0 && bytes + viewBytes > MAX_AGENT_COLLECTION_UTF8_BYTES) break;
+		views.push(view);
+		bytes += viewBytes;
+	}
+	return views;
 }
 
 function mapRuntimeTurns(
@@ -486,15 +507,18 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 		this.unsubscribeAgent = session.subscribe((event) => this.onAgentEvent(event));
 		this.unsubscribeSubagents = this.runtime.subagentManager?.subscribe((event) => {
 			if (event.type === "activity") {
+				this.agentLive.apply(event.agentId, event.taskId, event.event);
 				return;
 			}
 			if (event.type === "deleted") {
-				this.publish({
-					type: "agent/deleted",
-					sessionId: this.sessionId,
-					agentId: event.agentId,
-					deletedAgentIds: [...event.deletedAgentIds],
-				});
+				for (let index = 0; index < event.deletedAgentIds.length; index += 256) {
+					this.publish({
+						type: "agent/deleted",
+						sessionId: this.sessionId,
+						agentId: event.agentId,
+						deletedAgentIds: event.deletedAgentIds.slice(index, index + 256),
+					});
+				}
 				for (const agentId of event.deletedAgentIds) this.agentLive.clear(agentId);
 				return;
 			}
@@ -511,11 +535,15 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 				event.summary.archived
 			) {
 				this.agentLive.clear(event.summary.agentId);
-				this.publish({
-					type: "agent/itemsChanged",
-					sessionId: this.sessionId,
-					agentId: event.summary.agentId,
-				});
+				const taskId = event.summary.currentTask?.taskId ?? event.summary.latestTask?.taskId;
+				if (taskId) {
+					this.publish({
+						type: "agent/itemsChanged",
+						sessionId: this.sessionId,
+						agentId: event.summary.agentId,
+						taskId,
+					});
+				}
 			}
 		});
 	}
@@ -1347,9 +1375,11 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 			if (cursor < 0) throw new AppServerError("INVALID_CURSOR", { sessionId: input.sessionId });
 			start = cursor + 1;
 		}
-		const page = agents.slice(start, start + limit);
+		const candidates = agents.slice(start, start + limit);
+		const views = boundedAgentSummaryViews(candidates, limit);
+		const page = candidates.slice(0, views.length);
 		return {
-			agents: page.map(agentSummaryView),
+			agents: views,
 			nextAfterAgentId: start + page.length < agents.length ? (page.at(-1)?.agentId ?? null) : null,
 		};
 	}
@@ -1362,16 +1392,9 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 			.catch((error: unknown) => throwAgentError(error, input));
 		let journal = completeJournal;
 		if (input.taskId) {
-			let start = -1;
-			let end = -1;
-			for (let index = 0; index < completeJournal.length; index++) {
-				const entry = completeJournal[index]!;
-				if (entry.type !== "agent_task" || entry.taskId !== input.taskId) continue;
-				if (start < 0 || entry.status === "running") start = index;
-				if (entry.status === "done" || entry.status === "failed" || entry.status === "stopped") end = index;
-			}
-			if (start < 0) throw new AppServerError("NOT_FOUND", { sessionId: input.sessionId });
-			const scoped = completeJournal.slice(start, end >= start ? end + 1 : undefined);
+			const window = agentTaskWindow(completeJournal, input.taskId);
+			if (!window) throw new AppServerError("NOT_FOUND", { sessionId: input.sessionId });
+			const scoped = completeJournal.slice(window.start, window.end + 1);
 			journal = completeJournal[0] ? [completeJournal[0], ...scoped] : scoped;
 		}
 		const reduced = reduceRuntimeJournal(journal);
@@ -1572,6 +1595,8 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 
 	async snapshot(serverEpoch: string, currentCursor: () => number): Promise<SessionSnapshot> {
 		this.refreshLifecycleProjection();
+		const agentSummaries = this.runtime.subagentManager?.listSummaries(this.sessionId, false) ?? [];
+		const agents = boundedAgentSummaryViews(agentSummaries, 100);
 		return this.projection.snapshot(serverEpoch, currentCursor(), {
 			collaborationMode: this.session.sessionManager.getCollaborationMode(),
 			permissionMode: this.session.sessionManager.getPermissionSettings().mode,
@@ -1589,9 +1614,9 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 			thinkingSelection: this.session.getThinkingSelection(),
 			actualThinkingLevel: this.session.thinkingLevel,
 			availableThinkingSelections: this.session.getAvailableThinkingSelections(),
-			agents: [...(this.runtime.subagentManager?.listSummaries(this.sessionId, false) ?? [])]
-				.slice(0, 100)
-				.map(agentSummaryView),
+			agents,
+			nextAgentAfterId:
+				agents.length < agentSummaries.length ? (agentSummaries[agents.length - 1]?.agentId ?? null) : null,
 		});
 	}
 
@@ -2132,11 +2157,13 @@ export class AgentSessionRuntimeHost implements SessionRuntimeHost {
 		const services = await createAgentSessionServices({
 			cwd: options.cwd,
 			agentDir: this.agentDir,
+			isolatedChild: child?.writePolicy === "deny",
 			settingsManager,
 			...(this.options.credentials ? { authStorage: this.options.credentials.createView() } : {}),
 			...(child
 				? {
 						resourceLoaderOptions: {
+							noExtensions: child.writePolicy === "deny",
 							noSkills: true,
 							noPromptTemplates: true,
 							noThemes: true,
@@ -2166,6 +2193,7 @@ export class AgentSessionRuntimeHost implements SessionRuntimeHost {
 							additionalSystemPrompt: buildChildSystemPrompt(child),
 							includeAutoMemory: false,
 							permissionModeCeiling: options.permissionModeCeiling,
+							workspaceWritePolicy: child.writePolicy,
 						}
 					: scheduleEligible
 						? { additionalSystemPrompt: SCHEDULE_MAIN_PROMPT }

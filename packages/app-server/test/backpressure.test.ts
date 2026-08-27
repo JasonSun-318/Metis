@@ -172,12 +172,14 @@ describe("OutboundQueue backpressure", () => {
 				type: "agent/itemsChanged",
 				sessionId: SESSION_ID,
 				agentId: "child-a",
+				taskId: "task-a",
 			});
 		}
 		queue.enqueue(51, {
 			type: "agent/itemsChanged",
 			sessionId: SESSION_ID,
 			agentId: "child-b",
+			taskId: "task-b",
 		});
 		expect(queue.getStats().unacknowledgedEvents).toBe(2);
 
@@ -191,8 +193,8 @@ describe("OutboundQueue backpressure", () => {
 				fromCursor: 50,
 				toCursor: 51,
 				events: [
-					{ type: "agent/itemsChanged", agentId: "child-a" },
-					{ type: "agent/itemsChanged", agentId: "child-b" },
+					{ type: "agent/itemsChanged", agentId: "child-a", taskId: "task-a" },
+					{ type: "agent/itemsChanged", agentId: "child-b", taskId: "task-b" },
 				],
 			},
 		});

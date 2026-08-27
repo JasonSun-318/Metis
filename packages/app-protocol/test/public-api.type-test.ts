@@ -366,6 +366,7 @@ const events: ConnectionEventsParams = {
 			type: "agent/itemsChanged",
 			sessionId: session.sessionId,
 			agentId: agentInterrupt.agentId,
+			taskId: "task-1",
 		},
 	],
 };

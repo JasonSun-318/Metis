@@ -11965,7 +11965,8 @@
                         "required": [
                           "type",
                           "sessionId",
-                          "agentId"
+                          "agentId",
+                          "taskId"
                         ],
                         "properties": {
                           "type": {
@@ -11978,6 +11979,11 @@
                             "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
                           },
                           "agentId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                          },
+                          "taskId": {
                             "type": "string",
                             "minLength": 1,
                             "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
@@ -22079,6 +22085,18 @@
                             "additionalProperties": false
                           },
                           "maxItems": 100
+                        },
+                        "nextAgentAfterId": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "minLength": 1,
+                              "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
                         },
                         "serverEpoch": {
                           "type": "string",
@@ -50457,6 +50475,18 @@
                       },
                       "maxItems": 100
                     },
+                    "nextAgentAfterId": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "minLength": 1,
+                          "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
                     "serverEpoch": {
                       "type": "string",
                       "format": "uuid"
@@ -65620,7 +65650,8 @@
                 "required": [
                   "type",
                   "sessionId",
-                  "agentId"
+                  "agentId",
+                  "taskId"
                 ],
                 "properties": {
                   "type": {
@@ -65633,6 +65664,11 @@
                     "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
                   },
                   "agentId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                  },
+                  "taskId": {
                     "type": "string",
                     "minLength": 1,
                     "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
@@ -70896,7 +70932,8 @@
           "required": [
             "type",
             "sessionId",
-            "agentId"
+            "agentId",
+            "taskId"
           ],
           "properties": {
             "type": {
@@ -70909,6 +70946,11 @@
               "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
             },
             "agentId": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+            },
+            "taskId": {
               "type": "string",
               "minLength": 1,
               "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
@@ -79303,7 +79345,8 @@
                     "required": [
                       "type",
                       "sessionId",
-                      "agentId"
+                      "agentId",
+                      "taskId"
                     ],
                     "properties": {
                       "type": {
@@ -79316,6 +79359,11 @@
                         "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
                       },
                       "agentId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                      },
+                      "taskId": {
                         "type": "string",
                         "minLength": 1,
                         "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
@@ -83323,6 +83371,18 @@
             "additionalProperties": false
           },
           "maxItems": 100
+        },
+        "nextAgentAfterId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "serverEpoch": {
           "type": "string",

@@ -75,7 +75,11 @@ function canCoalesce(previous: QueuedEvent, next: QueuedEvent): boolean {
 		return false;
 	}
 	if (previous.event.type === "agent/itemsChanged" && next.event.type === "agent/itemsChanged") {
-		return previous.event.sessionId === next.event.sessionId && previous.event.agentId === next.event.agentId;
+		return (
+			previous.event.sessionId === next.event.sessionId &&
+			previous.event.agentId === next.event.agentId &&
+			previous.event.taskId === next.event.taskId
+		);
 	}
 	if (previous.event.type !== "item/delta" && previous.event.type !== "agent/item/delta") return false;
 	const prior = previous.event as DeltaEvent;

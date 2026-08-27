@@ -191,6 +191,7 @@ export class SessionProjection {
 			| "actualThinkingLevel"
 			| "availableThinkingSelections"
 			| "agents"
+			| "nextAgentAfterId"
 			| "model"
 			| "availableModels"
 		> = {
@@ -200,6 +201,7 @@ export class SessionProjection {
 			actualThinkingLevel: "off",
 			availableThinkingSelections: ["off"],
 			agents: [],
+			nextAgentAfterId: null,
 		},
 	): SessionSnapshot {
 		const recentItemIds = this.itemPage(this.itemOrder.length, MAX_SNAPSHOT_ITEMS);
