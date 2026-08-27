@@ -270,14 +270,20 @@ const api = {
 		invoke(DESKTOP_IPC_CHANNELS.clearSessionGoal, "session/goal/clear", input) as ReturnType<
 			MetisDesktopApi["clearSessionGoal"]
 		>,
-	readSubagentItems: (input: ClientParams<"subagent/readItems">) =>
-		invoke(DESKTOP_IPC_CHANNELS.readSubagentItems, "subagent/readItems", input) as ReturnType<
-			MetisDesktopApi["readSubagentItems"]
+	listAgents: (input: ClientParams<"agent/list">) =>
+		invoke(DESKTOP_IPC_CHANNELS.listAgents, "agent/list", input) as ReturnType<MetisDesktopApi["listAgents"]>,
+	readAgentItems: (input: ClientParams<"agent/readItems">) =>
+		invoke(DESKTOP_IPC_CHANNELS.readAgentItems, "agent/readItems", input) as ReturnType<
+			MetisDesktopApi["readAgentItems"]
 		>,
-	interruptSubagent: (input: ClientParams<"subagent/interrupt">) =>
-		invoke(DESKTOP_IPC_CHANNELS.interruptSubagent, "subagent/interrupt", input) as ReturnType<
-			MetisDesktopApi["interruptSubagent"]
+	interruptAgent: (input: ClientParams<"agent/interrupt">) =>
+		invoke(DESKTOP_IPC_CHANNELS.interruptAgent, "agent/interrupt", input) as ReturnType<
+			MetisDesktopApi["interruptAgent"]
 		>,
+	archiveAgent: (input: ClientParams<"agent/archive">) =>
+		invoke(DESKTOP_IPC_CHANNELS.archiveAgent, "agent/archive", input) as ReturnType<MetisDesktopApi["archiveAgent"]>,
+	deleteAgent: (input: ClientParams<"agent/delete">) =>
+		invoke(DESKTOP_IPC_CHANNELS.deleteAgent, "agent/delete", input) as ReturnType<MetisDesktopApi["deleteAgent"]>,
 	setThinkingSelection: (input: ClientParams<"session/setThinkingSelection">) =>
 		invoke(DESKTOP_IPC_CHANNELS.setThinkingSelection, "session/setThinkingSelection", input) as ReturnType<
 			MetisDesktopApi["setThinkingSelection"]

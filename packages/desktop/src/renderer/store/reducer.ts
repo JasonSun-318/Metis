@@ -1,5 +1,6 @@
 import type {
 	AgentMode,
+	AgentSummaryView,
 	ConnectionEventsParams,
 	DomainEvent,
 	InteractionView,
@@ -7,7 +8,6 @@ import type {
 	QueuedTurnView,
 	SessionSnapshot,
 	SessionSummary,
-	SubagentSummaryView,
 	ThinkingSelectionView,
 	TurnView,
 } from "@metis/app-protocol";
@@ -15,8 +15,9 @@ import type {
 export type ProjectionSyncStatus = "empty" | "ready" | "resubscribing" | "resnapshot_required";
 export type BatchApplyResult = "applied" | "resnapshot_required";
 
-export interface MutableSubagentTranscriptState {
+export interface MutableAgentTranscriptState {
 	agentId: string | null;
+	taskId: string | null;
 	readonly itemsById: Map<string, ItemView>;
 	itemOrder: string[];
 	nextBeforeItemId: string | null;
@@ -46,16 +47,21 @@ export interface MutableProjectionState {
 	availableThinkingSelections: ThinkingSelectionView[];
 	model: SessionSnapshot["model"];
 	availableModels: NonNullable<SessionSnapshot["availableModels"]>;
-	subagents: SubagentSummaryView[];
+	agents: AgentSummaryView[];
 	tasks: SessionSnapshot["tasks"];
 	deliveredFiles: SessionSnapshot["deliveredFiles"];
 	goal: SessionSnapshot["goal"];
 	queuedTurns: QueuedTurnView[];
-	readonly subagentTranscript: MutableSubagentTranscriptState;
+	readonly agentTranscript: MutableAgentTranscriptState;
 }
 
-function clearSubagentTranscript(state: MutableSubagentTranscriptState, agentId: string | null = null): void {
+function clearAgentTranscript(
+	state: MutableAgentTranscriptState,
+	agentId: string | null = null,
+	taskId: string | null = null,
+): void {
 	state.agentId = agentId;
+	state.taskId = taskId;
 	state.itemsById.clear();
 	state.itemOrder = [];
 	state.nextBeforeItemId = null;
@@ -86,13 +92,14 @@ export function createProjectionState(): MutableProjectionState {
 		availableThinkingSelections: ["off"],
 		model: undefined,
 		availableModels: [],
-		subagents: [],
+		agents: [],
 		tasks: [],
 		deliveredFiles: [],
 		goal: null,
 		queuedTurns: [],
-		subagentTranscript: {
+		agentTranscript: {
 			agentId: null,
+			taskId: null,
 			itemsById: new Map(),
 			itemOrder: [],
 			nextBeforeItemId: null,
@@ -139,11 +146,11 @@ export function removeSession(state: MutableProjectionState, sessionId: string):
 	state.syncStatus = "empty";
 	state.collaborationMode = "default";
 	state.permissionMode = "auto";
-	state.subagents = [];
+	state.agents = [];
 	state.tasks = [];
 	state.goal = null;
 	state.queuedTurns = [];
-	clearSubagentTranscript(state.subagentTranscript);
+	clearAgentTranscript(state.agentTranscript);
 	return true;
 }
 
@@ -178,11 +185,11 @@ export function removeModeProjectSessions(state: MutableProjectionState, mode: A
 	state.syncStatus = "empty";
 	state.collaborationMode = "default";
 	state.permissionMode = "auto";
-	state.subagents = [];
+	state.agents = [];
 	state.tasks = [];
 	state.goal = null;
 	state.queuedTurns = [];
-	clearSubagentTranscript(state.subagentTranscript);
+	clearAgentTranscript(state.agentTranscript);
 	return true;
 }
 
@@ -228,13 +235,13 @@ export function replaceProjectionSnapshot(state: MutableProjectionState, snapsho
 	state.availableThinkingSelections = snapshot.availableThinkingSelections;
 	state.model = snapshot.model;
 	state.availableModels = snapshot.availableModels ?? [];
-	state.subagents = snapshot.subagents;
+	state.agents = snapshot.agents;
 	state.tasks = snapshot.tasks;
 	state.deliveredFiles = snapshot.deliveredFiles;
 	state.goal = snapshot.goal;
 	state.queuedTurns = snapshot.queuedTurns;
-	if (sessionChanged) clearSubagentTranscript(state.subagentTranscript);
-	else if (state.subagentTranscript.agentId) state.subagentTranscript.journalRevision += 1;
+	if (sessionChanged) clearAgentTranscript(state.agentTranscript);
+	else if (state.agentTranscript.agentId) state.agentTranscript.journalRevision += 1;
 }
 
 export function markProjectionResubscribing(state: MutableProjectionState): void {
@@ -274,11 +281,12 @@ function eventSessionId(event: DomainEvent): string | undefined {
 		case "session/permissionModeChanged":
 		case "session/collaborationModeChanged":
 		case "session/thinkingSelectionChanged":
-		case "subagent/updated":
-		case "subagent/item/started":
-		case "subagent/item/delta":
-		case "subagent/item/completed":
-		case "subagent/itemsChanged":
+		case "agent/updated":
+		case "agent/deleted":
+		case "agent/item/started":
+		case "agent/item/delta":
+		case "agent/item/completed":
+		case "agent/itemsChanged":
 		case "session/modelChanged":
 		case "session/tasksChanged":
 		case "session/deliveredFilesChanged":
@@ -396,37 +404,47 @@ function applyEvent(state: MutableProjectionState, event: DomainEvent): void {
 		case "turn/queueChanged":
 			state.queuedTurns = structuredClone(event.queuedTurns);
 			return;
-		case "subagent/updated": {
-			const index = state.subagents.findIndex((candidate) => candidate.agentId === event.subagent.agentId);
-			state.subagents =
+		case "agent/updated": {
+			const index = state.agents.findIndex((candidate) => candidate.agentId === event.agent.agentId);
+			state.agents =
 				index < 0
-					? [...state.subagents, structuredClone(event.subagent)]
-					: state.subagents.map((candidate, current) =>
-							current === index ? structuredClone(event.subagent) : candidate,
+					? [...state.agents, structuredClone(event.agent)]
+					: state.agents.map((candidate, current) =>
+							current === index ? structuredClone(event.agent) : candidate,
 						);
 			return;
 		}
-		case "subagent/item/started":
-		case "subagent/item/completed":
-			if (state.subagentTranscript.agentId === event.agentId) {
-				state.subagentTranscript.itemOrder = upsertOrdered(
-					state.subagentTranscript.itemsById,
-					state.subagentTranscript.itemOrder,
+		case "agent/deleted": {
+			const deleted = new Set(event.deletedAgentIds);
+			state.agents = state.agents.filter((agent) => !deleted.has(agent.agentId));
+			if (state.agentTranscript.agentId && deleted.has(state.agentTranscript.agentId)) {
+				clearAgentTranscript(state.agentTranscript);
+			}
+			return;
+		}
+		case "agent/item/started":
+		case "agent/item/completed":
+			if (state.agentTranscript.agentId === event.agentId && state.agentTranscript.taskId === null) {
+				state.agentTranscript.itemOrder = upsertOrdered(
+					state.agentTranscript.itemsById,
+					state.agentTranscript.itemOrder,
 					event.item.itemId,
 					structuredClone(event.item),
 				);
 			}
 			return;
-		case "subagent/item/delta": {
-			if (state.subagentTranscript.agentId !== event.agentId) return;
-			const item = state.subagentTranscript.itemsById.get(event.itemId);
+		case "agent/item/delta": {
+			if (state.agentTranscript.agentId !== event.agentId || state.agentTranscript.taskId !== null) return;
+			const item = state.agentTranscript.itemsById.get(event.itemId);
 			if (item?.state === "streaming") {
-				state.subagentTranscript.itemsById.set(event.itemId, appendItemDelta(item, event.delta));
+				state.agentTranscript.itemsById.set(event.itemId, appendItemDelta(item, event.delta));
 			}
 			return;
 		}
-		case "subagent/itemsChanged":
-			if (state.subagentTranscript.agentId === event.agentId) state.subagentTranscript.journalRevision += 1;
+		case "agent/itemsChanged":
+			if (state.agentTranscript.agentId === event.agentId && state.agentTranscript.taskId === null) {
+				state.agentTranscript.journalRevision += 1;
+			}
 			return;
 		case "turn/started":
 		case "turn/completed":
@@ -507,45 +525,51 @@ export function prependProjectionItems(
 	state.nextBeforeItemId = page.nextBeforeItemId;
 }
 
-export function selectSubagentTranscript(state: MutableProjectionState, agentId: string | null): boolean {
-	if (state.subagentTranscript.agentId === agentId) return false;
-	clearSubagentTranscript(state.subagentTranscript, agentId);
+export function selectAgentTranscript(
+	state: MutableProjectionState,
+	agentId: string | null,
+	taskId: string | null = null,
+): boolean {
+	if (state.agentTranscript.agentId === agentId && state.agentTranscript.taskId === taskId) return false;
+	clearAgentTranscript(state.agentTranscript, agentId, taskId);
 	return true;
 }
 
-export function replaceSubagentItems(
+export function replaceAgentItems(
 	state: MutableProjectionState,
 	agentId: string,
+	taskId: string | null,
 	page: { readonly items: readonly ItemView[]; readonly nextBeforeItemId: string | null },
 ): boolean {
-	if (state.subagentTranscript.agentId !== agentId) return false;
+	if (state.agentTranscript.agentId !== agentId || state.agentTranscript.taskId !== taskId) return false;
 	if (page.items.some((item) => item.sessionId !== agentId))
 		throw new TypeError("History page does not belong to child");
-	state.subagentTranscript.itemsById.clear();
-	state.subagentTranscript.itemOrder = [];
+	state.agentTranscript.itemsById.clear();
+	state.agentTranscript.itemOrder = [];
 	for (const item of page.items) {
-		state.subagentTranscript.itemsById.set(item.itemId, structuredClone(item));
-		state.subagentTranscript.itemOrder.push(item.itemId);
+		state.agentTranscript.itemsById.set(item.itemId, structuredClone(item));
+		state.agentTranscript.itemOrder.push(item.itemId);
 	}
-	state.subagentTranscript.nextBeforeItemId = page.nextBeforeItemId;
+	state.agentTranscript.nextBeforeItemId = page.nextBeforeItemId;
 	return true;
 }
 
-export function prependSubagentItems(
+export function prependAgentItems(
 	state: MutableProjectionState,
 	agentId: string,
+	taskId: string | null,
 	page: { readonly items: readonly ItemView[]; readonly nextBeforeItemId: string | null },
 ): boolean {
-	if (state.subagentTranscript.agentId !== agentId) return false;
+	if (state.agentTranscript.agentId !== agentId || state.agentTranscript.taskId !== taskId) return false;
 	if (page.items.some((item) => item.sessionId !== agentId))
 		throw new TypeError("History page does not belong to child");
 	const added: string[] = [];
 	for (const item of page.items) {
-		if (!state.subagentTranscript.itemsById.has(item.itemId)) added.push(item.itemId);
-		state.subagentTranscript.itemsById.set(item.itemId, structuredClone(item));
+		if (!state.agentTranscript.itemsById.has(item.itemId)) added.push(item.itemId);
+		state.agentTranscript.itemsById.set(item.itemId, structuredClone(item));
 	}
-	state.subagentTranscript.itemOrder = [...added, ...state.subagentTranscript.itemOrder];
-	state.subagentTranscript.nextBeforeItemId = page.nextBeforeItemId;
+	state.agentTranscript.itemOrder = [...added, ...state.agentTranscript.itemOrder];
+	state.agentTranscript.nextBeforeItemId = page.nextBeforeItemId;
 	return true;
 }
 

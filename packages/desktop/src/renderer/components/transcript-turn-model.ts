@@ -35,14 +35,13 @@ const INTERNAL_TOOL_NAMES = new Set([
 	"deliver_file",
 	"ask_user",
 	"tool_search",
-	"activate_subagents",
 	"spawn_agent",
 	"inspect_agents",
-	"message_agent",
+	"send_message",
+	"followup_task",
+	"wait_agents",
 	"interrupt_agent",
-	"close_agent",
 ]);
-const TERMINAL_SUBAGENT_STATUSES = new Set(["done", "failed", "stopped"]);
 const PREVIEW_LINES = 10;
 const PREVIEW_CHARS = 2_000;
 
@@ -257,18 +256,18 @@ function internalFailureLabel(name: string, t: Translator): string {
 			return t("Failed to deliver file");
 		case "ask_user":
 			return t("Failed to ask user");
-		case "activate_subagents":
-			return t("Failed to activate subagents");
 		case "spawn_agent":
-			return t("Failed to spawn subagent");
+			return t("Failed to spawn agent");
 		case "inspect_agents":
-			return t("Failed to inspect subagents");
-		case "message_agent":
-			return t("Failed to message subagent");
+			return t("Failed to inspect agents");
+		case "send_message":
+			return t("Failed to message agent");
+		case "followup_task":
+			return t("Failed to send agent follow-up");
+		case "wait_agents":
+			return t("Failed to wait for agents");
 		case "interrupt_agent":
-			return t("Failed to interrupt subagent");
-		case "close_agent":
-			return t("Failed to close subagent");
+			return t("Failed to interrupt agent");
 		case "tool_search":
 			return t("Tool search failed");
 		default:
@@ -385,7 +384,7 @@ function askUserPresentation(
 	};
 }
 
-function subagentName(
+function agentName(
 	input: Record<string, unknown> | undefined,
 	output: Record<string, unknown> | undefined,
 ): string | undefined {
@@ -403,20 +402,12 @@ function spawnAgentPresentation(
 ): ToolTranscriptPresentation {
 	const input = inputRecord(call);
 	const output = resultRecord(result);
-	const name = subagentName(input, output);
-	const background = booleanField(input, "background") ?? booleanField(output, "background");
+	const name = agentName(input, output);
 	const status = stringField(output, "status");
-	const completed = background === false && status !== undefined && TERMINAL_SUBAGENT_STATUSES.has(status);
-	const task = stringField(output, "taskSummary") ?? stringField(input, "task");
-	const finalSummary = stringField(output, "finalSummary");
-	const lines = [
-		...detail(t("Task"), task && boundedPreview(task)),
-		...detail(t("Mode"), background === undefined ? undefined : t(background ? "Background" : "Foreground")),
-		...detail(t("Status"), status),
-	];
-	if (completed) lines.push(...detail(t("Result"), finalSummary && boundedPreview(finalSummary)));
+	const task = stringField(input, "task");
+	const lines = [...detail(t("Task"), task && boundedPreview(task)), ...detail(t("Status"), status)];
 	return {
-		label: withName(t(completed ? "Subagent completed" : "Spawned subagent"), name),
+		label: withName(t("Spawned agent"), name),
 		detailLines: lines,
 		rawOutputIsError: false,
 	};
@@ -426,66 +417,79 @@ function inspectAgentsPresentation(result: ToolResultBlock | undefined, t: Trans
 	const lines: ToolDetailLine[] = [];
 	let count = 0;
 	for (const line of result?.output.split("\n") ?? []) {
-		const session = /^Session "(.+)": (\S+)$/u.exec(line);
-		if (session) {
+		if (/^Agent ".+" \(.+\) ·/u.test(line)) {
 			count += 1;
-			lines.push({ value: `${session[1]} · ${session[2]}` });
+			lines.push({ value: boundedPreview(line) });
 			continue;
 		}
-		if (/^Agent ID:/u.test(line) || !line.trim()) continue;
-		if (/^\[(?:user|assistant)\] /u.test(line)) lines.push({ value: boundedPreview(line) });
-		else if (line === "No subagent sessions.") lines.push({ value: line });
+		if (!line.trim() || /^Agent .+ \(.+\)$/u.test(line)) continue;
+		if (/^(?:Task |\[(?:LLM|Final)\]|\[Tool(?: [^\]]+)?\])/u.test(line)) {
+			lines.push({ value: boundedPreview(line) });
+		} else if (line === "No agent sessions.") lines.push({ value: line });
 	}
 	return {
-		label: count > 0 ? t("Inspected {{count}} subagents", { count }) : t("Inspected subagents"),
+		label: count > 0 ? t("Inspected {{count}} agents", { count }) : t("Inspected agents"),
 		detailLines: lines.slice(0, PREVIEW_LINES),
 		rawOutputIsError: false,
 	};
 }
 
-function messageAgentPresentation(
+function sendMessagePresentation(
 	call: ToolCallBlock | undefined,
 	result: ToolResultBlock | undefined,
 	t: Translator,
 ): ToolTranscriptPresentation {
 	const input = inputRecord(call);
 	const output = resultRecord(result);
-	const mode = stringField(input, "mode");
-	const background = booleanField(input, "background") ?? booleanField(output, "background");
-	const status = [stringField(output, "status"), stringField(output, "delivery")].filter(Boolean).join(" · ");
 	const message = stringField(input, "message");
-	const finalSummary = stringField(output, "finalSummary");
+	const status = stringField(output, "delivery");
 	const lines = [
 		...detail(t("Message"), message && boundedPreview(message)),
-		...detail(t("Mode"), background === undefined ? mode : t(background ? "Background" : "Foreground")),
 		...detail(t("Status"), status || undefined),
 	];
-	if (background === false) lines.push(...detail(t("Result"), finalSummary && boundedPreview(finalSummary)));
 	return {
-		label: t(mode === "follow_up" ? "Sent subagent follow-up" : "Messaged subagent"),
+		label: t("Messaged agent"),
 		detailLines: lines,
+		rawOutputIsError: false,
+	};
+}
+
+function followupTaskPresentation(
+	call: ToolCallBlock | undefined,
+	result: ToolResultBlock | undefined,
+	t: Translator,
+): ToolTranscriptPresentation {
+	const input = inputRecord(call);
+	const output = resultRecord(result);
+	const task = stringField(input, "task");
+	const status = stringField(output, "status");
+	const lines = [...detail(t("Task"), task && boundedPreview(task)), ...detail(t("Status"), status || undefined)];
+	return {
+		label: t("Sent agent follow-up"),
+		detailLines: lines,
+		rawOutputIsError: false,
+	};
+}
+
+function waitAgentsPresentation(result: ToolResultBlock | undefined, t: Translator): ToolTranscriptPresentation {
+	const lines: ToolDetailLine[] = [];
+	for (const line of result?.output.split("\n") ?? []) {
+		if (!line.trim()) continue;
+		lines.push({ value: boundedPreview(line) });
+	}
+	return {
+		label: t("Waited for agents"),
+		detailLines: lines.slice(0, PREVIEW_LINES),
 		rawOutputIsError: false,
 	};
 }
 
 function interruptAgentPresentation(result: ToolResultBlock | undefined, t: Translator): ToolTranscriptPresentation {
 	const output = resultRecord(result);
+	const task = stringField(output, "taskSummary") ?? stringField(record(output?.latestTask), "taskSummary");
 	return {
-		label: withName(t("Interrupted subagent"), stringField(output, "name")),
-		detailLines: [
-			...detail(t("Task"), stringField(output, "taskSummary")),
-			...detail(t("Status"), stringField(output, "status")),
-		],
-		rawOutputIsError: false,
-	};
-}
-
-function closeAgentPresentation(result: ToolResultBlock | undefined, t: Translator): ToolTranscriptPresentation {
-	const output = resultRecord(result);
-	const status = booleanField(output, "alreadyClosed") ? "already closed" : stringField(output, "status");
-	return {
-		label: t("Closed subagent"),
-		detailLines: detail(t("Status"), status),
+		label: withName(t("Interrupted agent"), stringField(output, "name")),
+		detailLines: [...detail(t("Task"), task), ...detail(t("Status"), stringField(output, "status"))],
 		rawOutputIsError: false,
 	};
 }
@@ -548,18 +552,18 @@ function internalToolPresentation(
 			return deliverFilePresentation(call, result, t);
 		case "ask_user":
 			return askUserPresentation(call, result, t);
-		case "activate_subagents":
-			return { label: t("Activated subagents"), detailLines: [], rawOutputIsError: false };
 		case "spawn_agent":
 			return spawnAgentPresentation(call, result, t);
 		case "inspect_agents":
 			return inspectAgentsPresentation(result, t);
-		case "message_agent":
-			return messageAgentPresentation(call, result, t);
+		case "send_message":
+			return sendMessagePresentation(call, result, t);
+		case "followup_task":
+			return followupTaskPresentation(call, result, t);
+		case "wait_agents":
+			return waitAgentsPresentation(result, t);
 		case "interrupt_agent":
 			return interruptAgentPresentation(result, t);
-		case "close_agent":
-			return closeAgentPresentation(result, t);
 		case "tool_search":
 			return toolSearchPresentation(call, result, t);
 		default:
@@ -576,7 +580,7 @@ export function toolTranscriptPresentation(
 	const internal = INTERNAL_TOOL_NAMES.has(name) || /request.*(?:directory|folder)|cowork.*directory/iu.test(name);
 	if (internal) {
 		const presentation = internalToolPresentation(name, call, result, t);
-		return result && !result.isError && name !== "activate_subagents" && presentation.detailLines.length === 0
+		return result && !result.isError && presentation.detailLines.length === 0
 			? { ...presentation, detailLines: [{ value: t("Details unavailable") }] }
 			: presentation;
 	}

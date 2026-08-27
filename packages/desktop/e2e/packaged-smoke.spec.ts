@@ -34,10 +34,10 @@ const SESSION_ACTION_ID = "10000000-0000-4000-8000-000000000005";
 const COMPLETED_TASK_ID = "10000000-0000-4000-8000-000000000006";
 
 interface FixtureSessionManager {
+	appendAgentControl(payload: object): string;
 	appendCompaction(summary: string, firstKeptEntryId: string, tokensBefore: number, details?: unknown, fromHook?: boolean): string;
 	appendCustomEntry(customType: string, data?: unknown): string;
 	appendMessage(message: object, toolOutput?: unknown): string;
-	appendSubagentControl(payload: object): string;
 	appendSessionInfo(name: string): string;
 	appendThinkingLevelChange(thinkingLevel: string): string;
 	close(): void;
@@ -100,7 +100,7 @@ interface CodingFixtures {
 	readonly getDefaultSessionDir: (cwd: string, agentDir: string) => string;
 	readonly getSessionAttachmentDir: (agentDir: string, sessionId: string) => string;
 	readonly getSessionImageDir: (sessionFile: string) => string;
-	readonly getSessionSubagentDir: (agentDir: string, sessionId: string) => string;
+	readonly getSessionAgentDir: (agentDir: string, sessionId: string) => string;
 	readonly getSessionToolOutputDir: (sessionFile: string) => string;
 	readonly moveSessionFileWithLease: (source: string, destination: string) => void;
 	readonly ProjectTrustStore: new (agentDir: string) => {
@@ -122,7 +122,24 @@ interface CodingFixtures {
 				id: string;
 				mode: "chat" | "code";
 				permissionMode?: "ask" | "auto" | "full";
-				subagent?: { agentId: string; name: string; parentSessionId: string };
+				agent?: {
+					agentId: string;
+					name: string;
+					agentType: "default" | "explorer" | "worker" | "reviewer";
+					parentSessionId: string;
+					rootSessionId: string;
+					agentPath: readonly string[];
+					cwd: string;
+					tools: readonly string[];
+					writePolicy: "inherit" | "deny";
+					permissionMode: "ask" | "auto" | "full";
+					model: { provider: string; modelId: string };
+					thinkingLevel: string;
+					initialTask: string;
+					forkTurns: number;
+					timeoutSeconds: number;
+					mayDelegate: boolean;
+				};
 			},
 		): FixtureSessionManager;
 	};
@@ -152,7 +169,7 @@ async function loadCodingFixtures(): Promise<CodingFixtures> {
 		getDefaultSessionDir: sessions.getDefaultSessionDir,
 		getSessionAttachmentDir: attachments.getSessionAttachmentDir,
 		getSessionImageDir: sessions.getSessionImageDir,
-		getSessionSubagentDir: sessions.getSessionSubagentDir,
+		getSessionAgentDir: sessions.getSessionAgentDir,
 		getSessionToolOutputDir: sessions.getSessionToolOutputDir,
 		moveSessionFileWithLease: sessions.moveSessionFileWithLease,
 		ProjectTrustStore: trust.ProjectTrustStore,
@@ -214,7 +231,7 @@ async function seedOwnedSessionData(
 		writeFixtureFile(path.join(imageDir, "image.png"), "chat image"),
 		writeFixtureFile(path.join(toolOutputDir, "tool.txt"), "chat tool output"),
 		writeFixtureFile(path.join(fixtures.getSessionAttachmentDir(agentDir, sessionId), "attachment.txt"), "chat attachment"),
-		writeFixtureFile(path.join(fixtures.getSessionSubagentDir(agentDir, sessionId), "subagent.jsonl"), "chat subagent"),
+		writeFixtureFile(path.join(fixtures.getSessionAgentDir(agentDir, sessionId), "owned-marker.txt"), "agent data"),
 		writeFixtureFile(path.join(workDir, "document.txt"), "chat document work"),
 	]);
 }
@@ -2449,18 +2466,18 @@ test("packaged MCP creation matrix connects URL, custom, and JSON transports", a
 	}
 });
 
-test("packaged Code subagent sidebar lists durable work and opens its transcript", async () => {
+test("packaged Code agent sidebar lists durable work and opens its transcript", async () => {
 	test.setTimeout(90_000);
 	const fixtures = await loadCodingFixtures();
 	const executable = packagedExecutable();
 	expect(existsSync(executable), `Package the desktop app first: ${executable}`).toBe(true);
 
-	const tempRoot = await mkdtemp(path.join(tmpdir(), "metis-subagent-"));
+	const tempRoot = await mkdtemp(path.join(tmpdir(), "metis-agent-"));
 	const agentDir = path.join(tempRoot, "agent");
 	const homeDir = path.join(tempRoot, "home");
-	const projectDir = path.join(tempRoot, "subagent-project");
+	const projectDir = path.join(tempRoot, "agent-project");
 	const userDataDir = path.join(tempRoot, "electron");
-	const qaDir = path.join(desktopRoot, "test-results", "design-qa", "subagents");
+	const qaDir = path.join(desktopRoot, "test-results", "design-qa", "agents");
 	await Promise.all([
 		mkdir(agentDir),
 		mkdir(homeDir),
@@ -2468,60 +2485,53 @@ test("packaged Code subagent sidebar lists durable work and opens its transcript
 		mkdir(userDataDir),
 		mkdir(qaDir, { recursive: true }),
 	]);
-	const parentPath = createStoredSession(fixtures, agentDir, projectDir, CODE_ID, "code", false, "Subagent fixture");
-	const parent = fixtures.SessionManager.open(parentPath);
-	parent.appendSubagentControl({
-		type: "subagent_closed",
-		tombstone: {
-			agentId: "30000000-0000-4000-8000-000000000003",
-			name: "Archived result reviewer",
-			status: "closed",
-			taskSummary: "Review archived result",
-			finalSummary: "## Archived result\n\nFound **no remaining issues**.",
-			closedAt: "2026-08-06T00:00:00.000Z",
-		},
-	});
-	parent.close();
+	createStoredSession(fixtures, agentDir, projectDir, CODE_ID, "code", false, "Agent fixture");
 	const childId = "30000000-0000-4000-8000-000000000001";
-	const runId = "30000000-0000-4000-8000-000000000002";
+	const taskId = "30000000-0000-4000-8000-000000000002";
+	const archivedId = "30000000-0000-4000-8000-000000000003";
+	const agentHeader = {
+		agentId: childId,
+		name: "Packaged project inspector",
+		agentType: "explorer" as const,
+		parentSessionId: CODE_ID,
+		rootSessionId: CODE_ID,
+		agentPath: [childId],
+		cwd: projectDir,
+		tools: ["read"],
+		writePolicy: "inherit" as const,
+		permissionMode: "ask" as const,
+		model: { provider: "fixture", modelId: "fixture-model" },
+		thinkingLevel: "off",
+		initialTask: "Inspect packaged project",
+		forkTurns: 0,
+		timeoutSeconds: 60,
+		mayDelegate: false,
+	};
 	const child = fixtures.SessionManager.create(
 		projectDir,
-		fixtures.getSessionSubagentDir(agentDir, CODE_ID),
+		fixtures.getSessionAgentDir(agentDir, CODE_ID),
 		{
 			id: childId,
 			mode: "code",
 			permissionMode: "ask",
-			subagent: { agentId: childId, name: "Packaged project inspector", parentSessionId: CODE_ID },
+			agent: agentHeader,
 		},
 	);
-	const config = {
+	child.appendAgentControl({
+		type: "agent_task",
 		agentId: childId,
-		name: "Packaged project inspector",
-		task: "Inspect packaged project",
+		taskId,
+		text: "Inspect packaged project",
 		taskSummary: "Inspect packaged project",
-		mode: "code",
-		tools: ["read"],
-		permissionMode: "ask",
-		model: { provider: "fixture", modelId: "fixture-model" },
-		thinkingLevel: "off",
-		cwd: projectDir,
-		forkTurns: 0,
-		timeoutSeconds: 60,
-	};
-	child.appendSubagentControl({ type: "subagent_created", config });
-	child.appendSubagentControl({
-		type: "subagent_state",
-		agentId: childId,
-		runId,
 		status: "queued",
-		background: true,
 	});
-	child.appendSubagentControl({
-		type: "subagent_state",
+	child.appendAgentControl({
+		type: "agent_task",
 		agentId: childId,
-		runId,
+		taskId,
+		text: "Inspect packaged project",
+		taskSummary: "Inspect packaged project",
 		status: "running",
-		background: true,
 	});
 	const fixtureTimestamp = Date.now();
 	child.appendMessage({ role: "user", content: "Inspect packaged project", timestamp: fixtureTimestamp });
@@ -2549,25 +2559,70 @@ test("packaged Code subagent sidebar lists durable work and opens its transcript
 		...assistantMessage(fixtureTimestamp + 199, 35),
 		content: [{ type: "text", text: "Packaged child completed" }],
 	});
-	child.appendSubagentControl({
-		type: "subagent_state",
+	child.appendAgentControl({
+		type: "agent_task",
 		agentId: childId,
-		runId,
+		taskId,
+		text: "Inspect packaged project",
+		taskSummary: "Inspect packaged project",
 		status: "done",
-		background: true,
 		reason: "completed",
-		finalSummary: "Packaged child completed",
-		usage: {
-			model: config.model,
-			input: 10,
-			output: 20,
-			cacheRead: 3,
-			cacheWrite: 2,
-			elapsedMs: 65_000,
-			toolCalls: 4,
-		},
+		finalMessage: "Packaged child completed",
 	});
 	child.close();
+
+	const archived = fixtures.SessionManager.create(
+		projectDir,
+		fixtures.getSessionAgentDir(agentDir, CODE_ID),
+		{
+			id: archivedId,
+			mode: "code",
+			permissionMode: "ask",
+			agent: {
+				agentId: archivedId,
+				name: "Archived result reviewer",
+				agentType: "reviewer" as const,
+				parentSessionId: CODE_ID,
+				rootSessionId: CODE_ID,
+				agentPath: [archivedId],
+				cwd: projectDir,
+				tools: ["read"],
+				writePolicy: "deny" as const,
+				permissionMode: "ask" as const,
+				model: { provider: "fixture", modelId: "fixture-model" },
+				thinkingLevel: "off",
+				initialTask: "Review archived result",
+				forkTurns: 0,
+				timeoutSeconds: 60,
+				mayDelegate: false,
+			},
+		},
+	);
+	const archivedTaskId = "30000000-0000-4000-8000-000000000004";
+	archived.appendAgentControl({
+		type: "agent_task",
+		agentId: archivedId,
+		taskId: archivedTaskId,
+		text: "Review archived result",
+		taskSummary: "Review archived result",
+		status: "running",
+	});
+	archived.appendMessage({
+		...assistantMessage(Date.now(), 0),
+		content: [{ type: "text", text: "## Archived result\n\nFound **no remaining issues**." }],
+	});
+	archived.appendAgentControl({
+		type: "agent_task",
+		agentId: archivedId,
+		taskId: archivedTaskId,
+		text: "Review archived result",
+		taskSummary: "Review archived result",
+		status: "done",
+		reason: "completed",
+		finalMessage: "## Archived result\n\nFound **no remaining issues**.",
+	});
+	archived.appendAgentControl({ type: "agent_archived", agentId: archivedId, archived: true });
+	archived.close();
 
 	let debuggingPort = await reservePort();
 	const diagnostics: string[] = [];
@@ -2585,25 +2640,24 @@ test("packaged Code subagent sidebar lists durable work and opens its transcript
 		await waitForServerReady(page);
 		await page.getByRole("button", { name: "Code", exact: true }).click();
 		await page.keyboard.press("Escape");
-		await page.getByRole("button", { name: "Subagent fixture", exact: true }).click();
+		await page.getByRole("button", { name: "Agent fixture", exact: true }).click();
 		await expect(page.locator(".workspace-header")).toHaveAttribute("data-active-session-id", CODE_ID);
-		expect(await page.evaluate(() => typeof (window as Window & { metis?: { interruptSubagent?: unknown } }).metis?.interruptSubagent)).toBe("function");
+		expect(await page.evaluate(() => typeof (window as Window & { metis?: { interruptAgent?: unknown } }).metis?.interruptAgent)).toBe("function");
 		await expect(page.locator(".conversation-column")).not.toContainText("Packaged child completed");
 		await expect(page.locator(".conversation-column")).not.toContainText("Packaged tool output");
 
-		phase = "opening the Subagent tool";
+		phase = "opening the Agents tool";
 		await page.getByRole("button", { name: "Hide sessions sidebar", exact: true }).click();
 		await page.getByRole("button", { name: "Show tools sidebar", exact: true }).click();
-		await page.locator(".tool-sidebar-menu").getByRole("button", { name: "Subagent", exact: true }).click();
-		await expect(page.getByText("Background tasks", { exact: true })).toBeVisible();
+		await page.locator(".tool-sidebar-menu").getByRole("button", { name: "Agents", exact: true }).click();
+		await expect(page.locator(".subagent-panel-heading").getByText("Agents", { exact: true })).toBeVisible();
 		await expect(page.getByText("Inspect packaged project", { exact: true })).toBeVisible();
-		await expect(page.getByText("35 tokens", { exact: true })).toBeVisible();
-		await expect(page.getByText("4 tool uses", { exact: true })).toBeVisible();
+		await page.getByRole("button", { name: "Show archived", exact: true }).click();
 		await page.getByRole("button", { name: "View summary for Archived result reviewer", exact: true }).click();
 		await expect(page.getByRole("heading", { name: "Archived result", exact: true })).toBeVisible();
 		await expect(page.getByText("no remaining issues", { exact: true })).toBeVisible();
-		await expect(page.getByRole("region", { name: "Subagent transcript", exact: true })).toHaveCount(0);
-		await page.getByRole("button", { name: "Back to background tasks", exact: true }).click();
+		await expect(page.getByRole("region", { name: "Agent transcript", exact: true })).toBeVisible();
+		await page.getByRole("button", { name: "Back to agents", exact: true }).click();
 		await resizeToolsSidebar(page, 392);
 		expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
 		await expect(page.getByRole("button", { name: "Hide tools sidebar", exact: true })).toBeInViewport();
@@ -2616,7 +2670,7 @@ test("packaged Code subagent sidebar lists durable work and opens its transcript
 
 		phase = "opening the child transcript";
 		await page.getByRole("button", { name: "View transcript for Packaged project inspector", exact: true }).click();
-		const transcript = page.getByRole("region", { name: "Subagent transcript", exact: true });
+		const transcript = page.getByRole("region", { name: "Agent transcript", exact: true });
 		await expect(transcript).toBeVisible();
 		await expect(page.getByText("Packaged child completed", { exact: true })).toBeVisible();
 		expect(await transcript.locator("[data-transcript-item]").count()).toBeLessThanOrEqual(24);
@@ -2633,13 +2687,13 @@ test("packaged Code subagent sidebar lists durable work and opens its transcript
 		await expect(page.locator(".conversation-column")).not.toContainText("Packaged child completed");
 		await expect(page.locator(".conversation-column")).not.toContainText("Packaged tool output");
 
-		phase = "reopening the Subagent tab";
-		await page.getByRole("button", { name: "Close Subagent", exact: true }).click();
-		await page.locator(".tool-sidebar-menu").getByRole("button", { name: "Subagent", exact: true }).click();
+		phase = "reopening the Agents tab";
+		await page.getByRole("button", { name: "Close Agents", exact: true }).click();
+		await page.locator(".tool-sidebar-menu").getByRole("button", { name: "Agents", exact: true }).click();
 		await expect(page.getByRole("button", { name: "View transcript for Packaged project inspector", exact: true })).toBeVisible();
 		await page.getByRole("button", { name: "View transcript for Packaged project inspector", exact: true }).click();
 		await expect(page.getByText("Packaged child completed", { exact: true })).toBeVisible();
-		const reopenedTranscript = page.getByRole("region", { name: "Subagent transcript", exact: true });
+		const reopenedTranscript = page.getByRole("region", { name: "Agent transcript", exact: true });
 		await reopenedTranscript.locator(".code-execution > summary").last().click();
 		await reopenedTranscript.locator(".code-execution").last().locator(".code-command > summary").last().click();
 		await expect(page.getByText("Packaged tool output", { exact: true })).toBeVisible();
@@ -2665,19 +2719,19 @@ test("packaged Code subagent sidebar lists durable work and opens its transcript
 		await waitForServerReady(page);
 		await page.getByRole("button", { name: "Code", exact: true }).click();
 		await page.keyboard.press("Escape");
-		await page.getByRole("button", { name: "Subagent fixture", exact: true }).click();
+		await page.getByRole("button", { name: "Agent fixture", exact: true }).click();
 		await expect(page.locator(`[data-active-session-id="${CODE_ID}"]`)).toBeVisible();
 		await page.getByRole("button", { name: "Hide sessions sidebar", exact: true }).click();
 		await page.getByRole("button", { name: "Show tools sidebar", exact: true }).click();
-		await page.locator(".tool-sidebar-menu").getByRole("button", { name: "Subagent", exact: true }).click();
+		await page.locator(".tool-sidebar-menu").getByRole("button", { name: "Agents", exact: true }).click();
 		await expect(page.getByRole("button", { name: "View transcript for Packaged project inspector", exact: true })).toBeVisible();
 		await page.getByRole("button", { name: "View transcript for Packaged project inspector", exact: true }).click();
 		await expect(page.getByText("Packaged child completed", { exact: true })).toBeVisible();
-		const restoredTranscript = page.getByRole("region", { name: "Subagent transcript", exact: true });
+		const restoredTranscript = page.getByRole("region", { name: "Agent transcript", exact: true });
 		await restoredTranscript.locator(".code-execution > summary").last().click();
 		await restoredTranscript.locator(".code-execution").last().locator(".code-command > summary").last().click();
 		await expect(page.getByText("Packaged tool output", { exact: true })).toBeVisible();
-		await page.getByRole("button", { name: "Back to background tasks", exact: true }).click();
+		await page.getByRole("button", { name: "Back to agents", exact: true }).click();
 		await expect(page.getByRole("button", { name: "View transcript for Packaged project inspector", exact: true })).toBeFocused();
 		expect(consoleErrors).toEqual([]);
 	} catch (error) {

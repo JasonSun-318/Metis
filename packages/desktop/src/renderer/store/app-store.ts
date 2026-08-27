@@ -17,20 +17,21 @@ import {
 	type BatchApplyResult,
 	createProjectionState,
 	markProjectionResubscribing,
+	prependAgentItems,
 	prependProjectionItems,
-	prependSubagentItems,
 	removeModeProjectSessions,
 	removePendingInteraction,
 	removeSession,
+	replaceAgentItems,
 	replaceProjectionSnapshot,
 	replaceSessionList,
-	replaceSubagentItems,
 	restoreProjectionSyncStatus,
-	selectSubagentTranscript,
+	selectAgentTranscript,
 } from "./reducer.ts";
 
-export interface SubagentTranscriptState {
+export interface AgentTranscriptState {
 	readonly agentId: string | null;
+	readonly taskId: string | null;
 	readonly itemsById: ReadonlyMap<string, ItemView>;
 	readonly itemOrder: readonly string[];
 	readonly nextBeforeItemId: string | null;
@@ -61,12 +62,12 @@ export interface AppStoreSnapshot {
 	readonly availableThinkingSelections: SessionSnapshot["availableThinkingSelections"];
 	readonly model: SessionSnapshot["model"];
 	readonly availableModels: NonNullable<SessionSnapshot["availableModels"]>;
-	readonly subagents: SessionSnapshot["subagents"];
+	readonly agents: SessionSnapshot["agents"];
 	readonly tasks: SessionSnapshot["tasks"];
 	readonly deliveredFiles: SessionSnapshot["deliveredFiles"];
 	readonly goal: SessionSnapshot["goal"];
 	readonly queuedTurns: readonly QueuedTurnView[];
-	readonly subagentTranscript: SubagentTranscriptState;
+	readonly agentTranscript: AgentTranscriptState;
 	readonly supervisor: SupervisorView;
 }
 
@@ -132,16 +133,16 @@ export class AppStore {
 		this.commit();
 	}
 
-	selectSubagentTranscript(agentId: string | null): void {
-		if (selectSubagentTranscript(this.state, agentId)) this.commit();
+	selectAgentTranscript(agentId: string | null, taskId: string | null = null): void {
+		if (selectAgentTranscript(this.state, agentId, taskId)) this.commit();
 	}
 
-	replaceSubagentItems(agentId: string, page: ClientResult<"subagent/readItems">): void {
-		if (replaceSubagentItems(this.state, agentId, page)) this.commit();
+	replaceAgentItems(agentId: string, taskId: string | null, page: ClientResult<"agent/readItems">): void {
+		if (replaceAgentItems(this.state, agentId, taskId, page)) this.commit();
 	}
 
-	prependSubagentItems(agentId: string, page: ClientResult<"subagent/readItems">): void {
-		if (prependSubagentItems(this.state, agentId, page)) this.commit();
+	prependAgentItems(agentId: string, taskId: string | null, page: ClientResult<"agent/readItems">): void {
+		if (prependAgentItems(this.state, agentId, taskId, page)) this.commit();
 	}
 
 	markResubscribing(): void {
@@ -211,12 +212,12 @@ export class AppStore {
 			availableThinkingSelections: this.state.availableThinkingSelections,
 			model: this.state.model,
 			availableModels: this.state.availableModels,
-			subagents: this.state.subagents,
+			agents: this.state.agents,
 			tasks: this.state.tasks,
 			deliveredFiles: this.state.deliveredFiles,
 			goal: this.state.goal,
 			queuedTurns: this.state.queuedTurns,
-			subagentTranscript: this.state.subagentTranscript,
+			agentTranscript: this.state.agentTranscript,
 			supervisor: this.supervisor,
 		};
 	}

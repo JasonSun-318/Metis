@@ -51,7 +51,7 @@ export function SessionStatusPanel({ closing = false, error, loading, onClose, s
 		rules: "Rules",
 		skills: "Skills",
 		mcp_dynamic_tools: "MCP & dynamic tools",
-		subagent_definitions: "Subagent definitions",
+		agent_definitions: "Agent definitions",
 		summarized_conversation: "Summarized conversation",
 		conversation: "Conversation",
 	};

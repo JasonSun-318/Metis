@@ -253,9 +253,9 @@ describe("TranscriptTurn", () => {
 			item("chat-orphan-result", "tool", [{
 				type: "tool_result",
 				toolCallId: "chat-orphan-close",
-				name: "close_agent",
+				name: "interrupt_agent",
 				isError: false,
-				output: JSON.stringify({ agentId: "child-secret", status: "closed", secretField: "raw internal result" }),
+				output: JSON.stringify({ name: "Login flow audit", status: "stopped", taskSummary: "Inspect refresh" }),
 			}]),
 			item("chat-safe-final", "assistant", [{ type: "text", text: "Done" }]),
 		]} />));
@@ -266,7 +266,7 @@ describe("TranscriptTurn", () => {
 		expect(container.textContent).toContain("How should Metis answer?");
 		expect(container.textContent).toContain("Concise");
 		expect(container.textContent).toContain("Failed to update task list");
-		expect(container.textContent).toContain("Closed subagent");
+		expect(container.textContent).toContain("Interrupted agent · Login flow audit");
 		expect(container.textContent).not.toContain('"questions"');
 		expect(container.textContent).not.toContain("internal_error_code");
 		expect(container.textContent).not.toContain("secretField");
@@ -392,9 +392,9 @@ describe("TranscriptTurn", () => {
 			item("mixed-user", "user", [{ type: "text", text: "Summarize" }]),
 			item("mixed-report", "assistant", [
 				{ type: "text", text: "**Summary**\n\n| Name | State |\n| --- | --- |\n| Child | Done |" },
-				{ type: "tool_call", toolCallId: "mixed-close", name: "close_agent", state: "completed" },
+				{ type: "tool_call", toolCallId: "mixed-stop", name: "interrupt_agent", state: "completed" },
 			]),
-			item("mixed-result", "tool", [{ type: "tool_result", toolCallId: "mixed-close", name: "close_agent", isError: false, output: "closed" }]),
+			item("mixed-result", "tool", [{ type: "tool_result", toolCallId: "mixed-stop", name: "interrupt_agent", isError: false, output: "stopped" }]),
 		]} />));
 
 		expect(container.querySelector(".turn-intermediate strong")?.textContent).toBe("Summary");
@@ -753,7 +753,7 @@ describe("Transcript", () => {
 		const root = createRoot(container);
 		const user = item("markdown-code-user", "user", [{ type: "text", text: "Summarize" }]);
 		const report = item("markdown-code-report", "assistant", [
-			{ type: "tool_call", toolCallId: "close-child", name: "close_agent", state: "running" },
+			{ type: "tool_call", toolCallId: "stop-child", name: "interrupt_agent", state: "running" },
 			{ type: "text", text: "**Summary**\n\n| Name | State |\n| --- | --- |\n| Child | Done |" },
 		], "streaming");
 		const render = (entries: readonly ItemView[]) => root.render(
@@ -773,7 +773,7 @@ describe("Transcript", () => {
 		await act(async () => render([
 			user,
 			completedReport,
-			item("markdown-code-result", "tool", [{ type: "tool_result", toolCallId: "close-child", name: "close_agent", isError: false, output: "closed" }]),
+			item("markdown-code-result", "tool", [{ type: "tool_result", toolCallId: "stop-child", name: "interrupt_agent", isError: false, output: "stopped" }]),
 			item("markdown-code-final", "assistant", [{ type: "text", text: "All agents closed." }]),
 		]));
 		expect(container.querySelector(".code-turn-status strong")?.textContent).toBe("Summary");

@@ -1034,13 +1034,20 @@ describe("desktop trust boundaries", () => {
 			if (request.method.startsWith("permission/rules/")) {
 				result = { projectPath: "/work/project", rules: [] };
 			}
-			if (request.method === "subagent/interrupt") {
+			if (request.method === "agent/interrupt") {
 				result = {
-					subagent: {
+					agent: {
 						agentId: request.params.agentId,
 						name: "Child",
-						status: "closed",
-						taskSummary: "Test child",
+						agentType: "worker",
+						depth: 1,
+						status: "stopped",
+						archived: false,
+						latestTask: {
+							taskId: "33333333-3333-4333-8333-333333333333",
+							status: "stopped",
+							taskSummary: "Test child",
+						},
 						createdAt: "2026-07-30T00:00:00.000Z",
 						updatedAt: "2026-07-30T00:00:00.000Z",
 					},
@@ -1088,7 +1095,7 @@ describe("desktop trust boundaries", () => {
 		const listPermissionRules = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.listPermissionRules)!;
 		const deletePermissionRule = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.deletePermissionRule)!;
 		const clearPermissionRules = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.clearPermissionRules)!;
-		const interruptSubagent = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.interruptSubagent)!;
+		const interruptAgent = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.interruptAgent)!;
 		const copyText = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.writeClipboardText)!;
 		const reportEditState = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.setWorkspaceEditState)!;
 
@@ -1413,19 +1420,19 @@ describe("desktop trust boundaries", () => {
 			projectPath: "/work/project",
 		});
 		await expect(clearPermissionRules(event, ruleMutation)).resolves.toMatchObject({ projectPath: "/work/project" });
-		const subagentInput = {
+		const agentInput = {
 			sessionId: "session-a",
 			agentId: "child-a",
 			requestId: "11111111-1111-4111-8111-111111111403",
 		};
-		await expect(interruptSubagent(event, { ...subagentInput, agentId: "" })).rejects.toThrow(
-			"Invalid subagent/interrupt params",
+		await expect(interruptAgent(event, { ...agentInput, agentId: "" })).rejects.toThrow(
+			"Invalid agent/interrupt params",
 		);
-		await expect(interruptSubagent(event, subagentInput)).resolves.toMatchObject({
-			subagent: { agentId: "child-a", status: "closed" },
+		await expect(interruptAgent(event, agentInput)).resolves.toMatchObject({
+			agent: { agentId: "child-a", status: "stopped" },
 		});
 		expect(supervisor.request).toHaveBeenCalledWith(
-			expect.objectContaining({ method: "subagent/interrupt", params: subagentInput }),
+			expect.objectContaining({ method: "agent/interrupt", params: agentInput }),
 		);
 		supervisor.request.mockImplementationOnce(async (request) => ({
 			jsonrpc: "2.0",

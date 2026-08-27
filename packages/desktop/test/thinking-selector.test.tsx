@@ -78,7 +78,7 @@ describe("ThinkingSelector", () => {
 		await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Select effort, current Ultra"]')!.click());
 		expect(container.querySelector(".effort-title")?.textContent).toContain("Effort Ultra");
 		expect(container.querySelectorAll(".effort-ticks > span")).toHaveLength(4);
-		expect(container.textContent).toContain("multiple model calls");
+		expect(container.textContent).toContain("highest supported reasoning level");
 		const range = container.querySelector<HTMLInputElement>('input[type="range"]')!;
 		await act(async () => {
 			range.dispatchEvent(new Event("pointerdown", { bubbles: true }));

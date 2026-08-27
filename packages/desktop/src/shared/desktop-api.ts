@@ -108,8 +108,11 @@ export const DESKTOP_IPC_CHANNELS = {
 	compactSession: "metis:compact-session",
 	setSessionGoal: "metis:set-session-goal",
 	clearSessionGoal: "metis:clear-session-goal",
-	readSubagentItems: "metis:read-subagent-items",
-	interruptSubagent: "metis:interrupt-subagent",
+	listAgents: "metis:list-agents",
+	readAgentItems: "metis:read-agent-items",
+	interruptAgent: "metis:interrupt-agent",
+	archiveAgent: "metis:archive-agent",
+	deleteAgent: "metis:delete-agent",
 	setThinkingSelection: "metis:set-thinking-selection",
 	setPermissionMode: "metis:set-permission-mode",
 	setCollaborationMode: "metis:set-collaboration-mode",
@@ -548,8 +551,11 @@ export interface MetisDesktopApi {
 	compactSession(input: ClientParams<"session/compact">): Promise<ClientResult<"session/compact">>;
 	setSessionGoal(input: ClientParams<"session/goal/set">): Promise<ClientResult<"session/goal/set">>;
 	clearSessionGoal(input: ClientParams<"session/goal/clear">): Promise<ClientResult<"session/goal/clear">>;
-	readSubagentItems(input: ClientParams<"subagent/readItems">): Promise<ClientResult<"subagent/readItems">>;
-	interruptSubagent(input: ClientParams<"subagent/interrupt">): Promise<ClientResult<"subagent/interrupt">>;
+	listAgents(input: ClientParams<"agent/list">): Promise<ClientResult<"agent/list">>;
+	readAgentItems(input: ClientParams<"agent/readItems">): Promise<ClientResult<"agent/readItems">>;
+	interruptAgent(input: ClientParams<"agent/interrupt">): Promise<ClientResult<"agent/interrupt">>;
+	archiveAgent(input: ClientParams<"agent/archive">): Promise<ClientResult<"agent/archive">>;
+	deleteAgent(input: ClientParams<"agent/delete">): Promise<ClientResult<"agent/delete">>;
 	setThinkingSelection(
 		input: ClientParams<"session/setThinkingSelection">,
 	): Promise<ClientResult<"session/setThinkingSelection">>;

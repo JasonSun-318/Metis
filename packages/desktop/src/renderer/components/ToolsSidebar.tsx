@@ -10,7 +10,7 @@ import { UniversalFilePreviewer, type UniversalPreviewTarget } from "./preview/U
 import { previewBytesCache } from "./preview/preview-bytes-cache.ts";
 import { PlanPreview } from "./PlanPreview.tsx";
 import { ReviewPanel } from "./ReviewPanel.tsx";
-import { SubagentPanel } from "./SubagentPanel.tsx";
+import { AgentTreePanel } from "./AgentTreePanel.tsx";
 import { TerminalPanel } from "./TerminalPanel.tsx";
 import { WorkspaceFileIcon } from "./WorkspaceFileIcon.tsx";
 
@@ -45,8 +45,8 @@ interface ReviewTab {
 	readonly title: string;
 }
 
-interface SubagentTab {
-	readonly kind: "subagent";
+interface AgentTab {
+	readonly kind: "agent";
 	readonly id: string;
 	readonly title: string;
 }
@@ -65,7 +65,7 @@ interface PreviewTab {
 	readonly file: UniversalPreviewTarget;
 }
 
-type ToolTab = TerminalTab | BrowserTab | FileTab | ReviewTab | SubagentTab | PreviewTab | PlanTab;
+type ToolTab = TerminalTab | BrowserTab | FileTab | ReviewTab | AgentTab | PreviewTab | PlanTab;
 
 interface ToolWorkspace {
 	readonly tabs: readonly ToolTab[];
@@ -407,13 +407,13 @@ export function ToolsSidebar({ activeSession, api, cleanupSessionIds, mode, onCl
 		setMenuOpen(false);
 	};
 
-	const addSubagent = () => {
+	const addAgent = () => {
 		if (!activeSession || mode !== "code") return;
 		const ownerSessionId = activeSession.sessionId;
 		setWorkspaces((current) => {
 			const previous = current.get(ownerSessionId) ?? { tabs: [], activeId: "", nextNumber: 1 };
-			const existing = previous.tabs.find((tab) => tab.kind === "subagent");
-			const tab: SubagentTab = existing ?? { kind: "subagent", id: crypto.randomUUID(), title: t("Subagent") };
+			const existing = previous.tabs.find((tab) => tab.kind === "agent");
+			const tab: AgentTab = existing ?? { kind: "agent", id: crypto.randomUUID(), title: t("Agents") };
 			const next = new Map(current);
 			next.set(ownerSessionId, {
 				...previous,
@@ -640,7 +640,7 @@ export function ToolsSidebar({ activeSession, api, cleanupSessionIds, mode, onCl
 		if (!closing) return;
 		if (closing.kind === "terminal") void api.closeTerminal({ terminalId: id }).catch(onError);
 		else if (closing.kind === "browser") void api.closeBrowser({ browserId: id }).catch(onError);
-		else if (closing.kind === "subagent" && ownerSessionId === sessionId) store.selectSubagentTranscript(null);
+		else if (closing.kind === "agent" && ownerSessionId === sessionId) store.selectAgentTranscript(null);
 		setFileDrafts((current) => {
 			if (!current.has(id)) return current;
 			const next = new Map(current);
@@ -723,7 +723,7 @@ export function ToolsSidebar({ activeSession, api, cleanupSessionIds, mode, onCl
 			<button disabled={!activeSession?.cwd} onClick={addTerminal} role={compact ? "menuitem" : undefined} title={activeSession?.cwd ? undefined : t("Open a task before starting a terminal")} type="button"><TerminalWindow aria-hidden="true" size={14} /><span>{t("Terminal")}</span></button>
 			<button disabled={!activeSession} onClick={addBrowser} role={compact ? "menuitem" : undefined} title={activeSession ? undefined : t("Open a task before starting a browser")} type="button"><Globe aria-hidden="true" size={14} /><span>{t("Browser")}</span></button>
 			{mode === "code" && <button disabled={!activeSession?.cwd} onClick={addFiles} role={compact ? "menuitem" : undefined} title={activeSession?.cwd ? undefined : t("Open a task before browsing files")} type="button"><FolderSimple aria-hidden="true" size={14} /><span>{t("Files")}</span></button>}
-			{mode === "code" && <button disabled={!activeSession} onClick={addSubagent} role={compact ? "menuitem" : undefined} type="button"><Robot aria-hidden="true" size={14} /><span>{t("Subagent")}</span></button>}
+			{mode === "code" && <button disabled={!activeSession} onClick={addAgent} role={compact ? "menuitem" : undefined} type="button"><Robot aria-hidden="true" size={14} /><span>{t("Agents")}</span></button>}
 		</nav>
 	);
 
@@ -775,14 +775,14 @@ export function ToolsSidebar({ activeSession, api, cleanupSessionIds, mode, onCl
 								return (
 								<div className={`tool-tab${workspace?.activeId === tab.id ? " is-active" : ""}${tab.kind === "file" && !tab.fixed ? " is-preview" : ""}${dirty ? " is-dirty" : ""}`} key={tab.id}>
 									<button
-									aria-controls={tab.kind === "file" ? `file-panel-${sessionId}` : tab.kind === "review" ? `review-panel-${sessionId}` : tab.kind === "subagent" ? `subagent-panel-${sessionId}` : `${tab.kind}-panel-${tab.id}`}
+									aria-controls={tab.kind === "file" ? `file-panel-${sessionId}` : tab.kind === "review" ? `review-panel-${sessionId}` : tab.kind === "agent" ? `agent-panel-${sessionId}` : `${tab.kind}-panel-${tab.id}`}
 										aria-label={dirty ? `${displayTitle}, ${t("Unsaved")}` : displayTitle}
 										aria-selected={workspace?.activeId === tab.id}
 										className="tool-tab-select"
 										onClick={() => selectTab(tab.id)}
 										role="tab"
 										type="button"
-								>{tab.kind === "browser" ? <Globe aria-hidden="true" size={12} /> : tab.kind === "file" ? (tab.relativePath ? <WorkspaceFileIcon path={tab.relativePath} size={12} /> : <FileText aria-hidden="true" size={12} />) : tab.kind === "review" ? <ClipboardText aria-hidden="true" size={12} /> : tab.kind === "subagent" ? <Robot aria-hidden="true" size={12} /> : tab.kind === "plan" ? <FileText aria-hidden="true" size={12} /> : tab.kind === "preview" ? <WorkspaceFileIcon path={tab.title} size={12} /> : null}<span>{displayTitle}</span>{dirty && <span aria-hidden="true" className="tool-tab-dirty" />}</button>
+								>{tab.kind === "browser" ? <Globe aria-hidden="true" size={12} /> : tab.kind === "file" ? (tab.relativePath ? <WorkspaceFileIcon path={tab.relativePath} size={12} /> : <FileText aria-hidden="true" size={12} />) : tab.kind === "review" ? <ClipboardText aria-hidden="true" size={12} /> : tab.kind === "agent" ? <Robot aria-hidden="true" size={12} /> : tab.kind === "plan" ? <FileText aria-hidden="true" size={12} /> : tab.kind === "preview" ? <WorkspaceFileIcon path={tab.title} size={12} /> : null}<span>{displayTitle}</span>{dirty && <span aria-hidden="true" className="tool-tab-dirty" />}</button>
 									<button aria-label={t("Close {{name}}", { name: displayTitle })} className="tool-tab-close" disabled={saving} onClick={() => closeTab(tab.id)} type="button"><X aria-hidden="true" size={11} /></button>
 								</div>
 								);
@@ -834,8 +834,8 @@ export function ToolsSidebar({ activeSession, api, cleanupSessionIds, mode, onCl
 								theme={theme}
 								visible={open && ownerSessionId === sessionId && ownerWorkspace.activeId === tab.id}
 							/>
-						) : tab.kind === "subagent" && ownerSessionId === sessionId ? (
-							<SubagentPanel
+						) : tab.kind === "agent" && ownerSessionId === sessionId ? (
+							<AgentTreePanel
 								api={api}
 								key={tab.id}
 								onError={onError}

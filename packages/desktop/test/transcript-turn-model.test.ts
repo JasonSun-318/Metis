@@ -155,98 +155,64 @@ describe("transcript turn presentation", () => {
 		expect(JSON.stringify(presentation)).not.toMatch(/multiple|options|description|selected/iu);
 	});
 
-	it("uses only real subagent fields and never completes a background receipt", () => {
-		const background = toolTranscriptPresentation(
+	it("presents the asynchronous spawn receipt without legacy mode fields or identifiers", () => {
+		const spawned = toolTranscriptPresentation(
 			call("spawn_agent", {
 				name: "Login flow audit",
 				task: "Inspect refresh-token handling",
-				tools: ["read", "grep"],
-				background: true,
+				agentType: "explorer",
 			}),
 			result(
 				"spawn_agent",
 				JSON.stringify({
 					agentId: "child-secret",
-					runId: "run-secret",
+					taskId: "task-secret",
 					name: "Login flow audit",
-					taskSummary: "Inspect refresh-token handling",
-					background: true,
 					status: "running",
-					finalSummary: "must not be used for a background receipt",
 				}),
 			),
 		);
-		expect(background.label).toBe("Spawned subagent · Login flow audit");
-		expect(background.detailLines).toEqual([
+		expect(spawned.label).toBe("Spawned agent · Login flow audit");
+		expect(spawned.detailLines).toEqual([
 			{ label: "Task", value: "Inspect refresh-token handling" },
-			{ label: "Mode", value: "Background" },
 			{ label: "Status", value: "running" },
 		]);
-		expect(JSON.stringify(background)).not.toMatch(/child-secret|run-secret|must not be used|tools/iu);
-
-		const foreground = toolTranscriptPresentation(
-			call("spawn_agent", {
-				name: "Login flow audit",
-				task: "Inspect refresh-token handling",
-				tools: [],
-				background: false,
-			}),
-			result(
-				"spawn_agent",
-				JSON.stringify({
-					name: "Login flow audit",
-					background: false,
-					status: "done",
-					finalSummary: "Refresh is not triggered after expiry.",
-				}),
-			),
-		);
-		expect(foreground.label).toBe("Subagent completed · Login flow audit");
-		expect(foreground.detailLines).toContainEqual({
-			label: "Result",
-			value: "Refresh is not triggered after expiry.",
-		});
+		expect(JSON.stringify(spawned)).not.toMatch(/child-secret|task-secret|agentType/iu);
 	});
 
-	it("summarizes the remaining subagent controls without identifiers", () => {
+	it("summarizes the remaining agent controls", () => {
 		const inspected = toolTranscriptPresentation(
 			call("inspect_agents", { agentId: "child-secret" }),
 			result(
 				"inspect_agents",
 				[
-					'Session "Login flow audit": done',
-					"Agent ID: child-secret",
+					'Agent "Login flow audit" (child-secret) · explorer · done',
+					"Task task-secret · Inspect token refresh",
 					"",
-					"[user] Inspect token refresh",
-					"[assistant] Refresh path checked",
+					"[LLM] Refresh path checked",
+					"[Tool success] read",
 				].join("\n"),
 			),
 		);
-		expect(inspected.label).toBe("Inspected 1 subagents");
+		expect(inspected.label).toBe("Inspected 1 agents");
 		expect(inspected.detailLines.map((line) => line.value)).toEqual([
-			"Login flow audit · done",
-			"[user] Inspect token refresh",
-			"[assistant] Refresh path checked",
+			'Agent "Login flow audit" (child-secret) · explorer · done',
+			"Task task-secret · Inspect token refresh",
+			"[LLM] Refresh path checked",
+			"[Tool success] read",
 		]);
-		expect(JSON.stringify(inspected)).not.toContain("child-secret");
 
 		const messaged = toolTranscriptPresentation(
-			call("message_agent", {
+			call("followup_task", {
 				agentId: "child-secret",
-				mode: "follow_up",
-				message: "Verify the regression",
-				background: true,
+				task: "Verify the regression",
 			}),
-			result(
-				"message_agent",
-				JSON.stringify({ agentId: "child-secret", background: true, status: "queued", delivery: "queued" }),
-			),
+			result("followup_task", JSON.stringify({ agentId: "child-secret", status: "queued" })),
 		);
-		expect(messaged.label).toBe("Sent subagent follow-up");
+		expect(messaged.label).toBe("Sent agent follow-up");
 		expect(messaged.detailLines).toEqual([
-			{ label: "Message", value: "Verify the regression" },
-			{ label: "Mode", value: "Background" },
-			{ label: "Status", value: "queued · queued" },
+			{ label: "Task", value: "Verify the regression" },
+			{ label: "Status", value: "queued" },
 		]);
 
 		const interrupted = toolTranscriptPresentation(
@@ -261,25 +227,16 @@ describe("transcript turn presentation", () => {
 				}),
 			),
 		);
-		expect(interrupted.label).toBe("Interrupted subagent · Login flow audit");
+		expect(interrupted.label).toBe("Interrupted agent · Login flow audit");
 		expect(interrupted.detailLines).toContainEqual({ label: "Task", value: "Inspect refresh" });
 		expect(JSON.stringify(interrupted)).not.toContain("child-secret");
 
-		const closed = toolTranscriptPresentation(
-			call("close_agent", { agentId: "child-secret" }),
-			result(
-				"close_agent",
-				JSON.stringify({
-					agentId: "child-secret",
-					status: "close_failed",
-					residualPath: "/private/internal",
-					error: "Directory busy",
-				}),
-			),
+		const waited = toolTranscriptPresentation(
+			call("wait_agents", { agentIds: ["child-secret"] }),
+			result("wait_agents", "Login flow audit · done"),
 		);
-		expect(closed.label).toBe("Closed subagent");
-		expect(closed.detailLines).toEqual([{ label: "Status", value: "close_failed" }]);
-		expect(JSON.stringify(closed)).not.toMatch(/child-secret|private\/internal|Directory busy/iu);
+		expect(waited.label).toBe("Waited for agents");
+		expect(waited.detailLines).toEqual([{ value: "Login flow audit · done" }]);
 	});
 
 	it("summarizes tool search and folder access without structural JSON", () => {
@@ -317,15 +274,16 @@ describe("transcript turn presentation", () => {
 		const orphan = toolTranscriptPresentation(
 			undefined,
 			result(
-				"close_agent",
+				"interrupt_agent",
 				JSON.stringify({
 					agentId: "child-secret",
-					status: "closed",
-					residualPath: "/private/internal",
+					name: "Login flow audit",
+					status: "stopped",
+					taskSummary: "Inspect refresh",
 				}),
 			),
 		);
-		expect(orphan.label).toBe("Closed subagent");
+		expect(orphan.label).toBe("Interrupted agent · Login flow audit");
 		expect(JSON.stringify(orphan)).not.toMatch(/child-secret|private\/internal/iu);
 
 		const malformed = toolTranscriptPresentation(

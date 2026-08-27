@@ -53,7 +53,7 @@ function snapshot(serverEpoch = EPOCH_A, cursor = 0, recentItems: ItemView[] = [
 		actualThinkingLevel: "off",
 		availableThinkingSelections: ["off"],
 		availableModels: [{ provider: "test", modelId: "model-a", name: "Model A" }],
-		subagents: [],
+		agents: [],
 		serverEpoch,
 		cursor,
 	};
@@ -126,7 +126,7 @@ describe("renderer projection reducer", () => {
 	it("keeps the selected child transcript separate from the parent", () => {
 		const store = new AppStore();
 		store.applySnapshot(snapshot(EPOCH_A, 0));
-		store.selectSubagentTranscript("child-1");
+		store.selectAgentTranscript("child-1");
 
 		expect(
 			store.applyBatch({
@@ -135,26 +135,26 @@ describe("renderer projection reducer", () => {
 				toCursor: 4,
 				events: [
 					{
-						type: "subagent/item/started",
+						type: "agent/item/started",
 						sessionId: "session-1",
 						agentId: "child-1",
 						item: childItem("child-live", ""),
 					},
 					{
-						type: "subagent/item/delta",
+						type: "agent/item/delta",
 						sessionId: "session-1",
 						agentId: "child-1",
 						itemId: "child-live",
 						delta: { type: "text", text: "hello" },
 					},
 					{
-						type: "subagent/item/completed",
+						type: "agent/item/completed",
 						sessionId: "session-1",
 						agentId: "child-1",
 						item: childItem("child-live", "hello", "completed"),
 					},
 					{
-						type: "subagent/itemsChanged",
+						type: "agent/itemsChanged",
 						sessionId: "session-1",
 						agentId: "child-1",
 					},
@@ -163,8 +163,8 @@ describe("renderer projection reducer", () => {
 		).toBe("applied");
 
 		const state = store.getSnapshot();
-		expect(state.subagentTranscript.itemsById.get("child-live")?.content).toEqual([{ type: "text", text: "hello" }]);
-		expect(state.subagentTranscript.journalRevision).toBe(1);
+		expect(state.agentTranscript.itemsById.get("child-live")?.content).toEqual([{ type: "text", text: "hello" }]);
+		expect(state.agentTranscript.journalRevision).toBe(1);
 		expect(state.itemsById.has("child-live")).toBe(false);
 
 		expect(
@@ -174,7 +174,7 @@ describe("renderer projection reducer", () => {
 				toCursor: 5,
 				events: [
 					{
-						type: "subagent/item/started",
+						type: "agent/item/started",
 						sessionId: "session-1",
 						agentId: "child-2",
 						item: { ...childItem("ignored", "ignored"), sessionId: "child-2" },
@@ -182,25 +182,25 @@ describe("renderer projection reducer", () => {
 				],
 			}),
 		).toBe("applied");
-		expect(store.getSnapshot().subagentTranscript.itemsById.has("ignored")).toBe(false);
+		expect(store.getSnapshot().agentTranscript.itemsById.has("ignored")).toBe(false);
 	});
 
 	it("replaces and paginates child history, then clears it on session switch", () => {
 		const store = new AppStore();
 		store.applySnapshot(snapshot());
-		store.selectSubagentTranscript("child-1");
-		store.replaceSubagentItems("child-1", {
+		store.selectAgentTranscript("child-1");
+		store.replaceAgentItems("child-1", null, {
 			items: [childItem("durable", "new", "completed")],
 			nextBeforeItemId: "durable",
 		});
-		store.prependSubagentItems("child-1", {
+		store.prependAgentItems("child-1", null, {
 			items: [childItem("older", "old", "completed")],
 			nextBeforeItemId: null,
 		});
-		expect(store.getSnapshot().subagentTranscript.itemOrder).toEqual(["older", "durable"]);
+		expect(store.getSnapshot().agentTranscript.itemOrder).toEqual(["older", "durable"]);
 
 		store.applySnapshot({ ...snapshot(EPOCH_B), session: session("session-2") });
-		expect(store.getSnapshot().subagentTranscript).toMatchObject({
+		expect(store.getSnapshot().agentTranscript).toMatchObject({
 			agentId: null,
 			itemOrder: [],
 			nextBeforeItemId: null,
@@ -210,9 +210,9 @@ describe("renderer projection reducer", () => {
 	it("requests a selected-child refresh after a same-session resnapshot", () => {
 		const store = new AppStore();
 		store.applySnapshot(snapshot(EPOCH_A));
-		store.selectSubagentTranscript("child-1");
+		store.selectAgentTranscript("child-1");
 		store.applySnapshot(snapshot(EPOCH_B));
-		expect(store.getSnapshot().subagentTranscript).toMatchObject({ agentId: "child-1", journalRevision: 1 });
+		expect(store.getSnapshot().agentTranscript).toMatchObject({ agentId: "child-1", journalRevision: 1 });
 	});
 
 	it("filters sessions by mode and separates managed tasks from project folders", () => {
@@ -271,7 +271,7 @@ describe("renderer projection reducer", () => {
 		expect([...state.sessionsById.keys()]).toEqual(["code-same", "chat-child", "chat-scheduled"]);
 		expect(state.activeSessionId).toBeNull();
 		expect(state.itemOrder).toEqual([]);
-		expect(state.subagents).toEqual([]);
+		expect(state.agents).toEqual([]);
 		expect(state.permissionMode).toBe("auto");
 		expect(state.availableModels).toEqual([{ provider: "test", modelId: "model-a", name: "Model A" }]);
 		expect(state.model).toEqual({ provider: "test", modelId: "model-a" });

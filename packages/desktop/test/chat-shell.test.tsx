@@ -106,7 +106,7 @@ function snapshot(summary: SessionSummary): SessionSnapshot {
 		thinkingSelection: "off",
 		actualThinkingLevel: "off",
 		availableThinkingSelections: ["off"],
-		subagents: [],
+		agents: [],
 		serverEpoch: EPOCH,
 		cursor: 0,
 	};
@@ -510,8 +510,8 @@ function createHarness(options: {
 			},
 		})),
 		clearSessionGoal: vi.fn(async ({ sessionId }) => ({ sessionId, cleared: true })),
-		readSubagentItems: vi.fn().mockResolvedValue({ items: [], nextBeforeItemId: null }),
-		interruptSubagent: vi.fn().mockResolvedValue({}),
+		readAgentItems: vi.fn().mockResolvedValue({ items: [], nextBeforeItemId: null }),
+		interruptAgent: vi.fn().mockResolvedValue({}),
 		setThinkingSelection: vi.fn().mockResolvedValue({}),
 		setPermissionMode: vi.fn(async ({ permissionMode }) => ({ permissionMode })),
 		setCollaborationMode: vi.fn(async ({ collaborationMode }) => ({ collaborationMode })),
@@ -3684,13 +3684,13 @@ describe("Chat desktop shell", () => {
 		await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Show tools sidebar"]')!.click());
 		expect(container.textContent).toContain("Review");
 		expect(container.textContent).toContain("Files");
-		expect(container.textContent).toContain("Subagent");
-		await act(async () => button(container, "Subagent").click());
+		expect(container.textContent).toContain("Agents");
+		await act(async () => button(container, "Agents").click());
 		expect(container.querySelectorAll('[role="tab"]')).toHaveLength(1);
 		await act(async () => button(container, "Add tool").click());
-		const subagentMenuItem = [...container.querySelectorAll<HTMLButtonElement>('.tool-add-menu [role="menuitem"]')]
-			.find((candidate) => candidate.textContent?.includes("Subagent"))!;
-		await act(async () => subagentMenuItem.click());
+		const agentMenuItem = [...container.querySelectorAll<HTMLButtonElement>('.tool-add-menu [role="menuitem"]')]
+			.find((candidate) => candidate.textContent?.includes("Agents"))!;
+		await act(async () => agentMenuItem.click());
 		expect(container.querySelectorAll('[role="tab"]')).toHaveLength(1);
 
 		const backendCalls = vi.mocked(api.createSession).mock.calls.length + vi.mocked(api.openSession).mock.calls.length;
@@ -3709,7 +3709,7 @@ describe("Chat desktop shell", () => {
 		expect(container.textContent).not.toContain("Side tasks");
 		expect(container.textContent).not.toContain("Review");
 		expect(container.textContent).not.toContain("Files");
-		expect(container.textContent).not.toContain("Subagent");
+		expect(container.textContent).not.toContain("Agents");
 		expect(container.querySelector('[aria-label="Add to message"]')).not.toBeNull();
 		await act(async () => root.unmount());
 	});

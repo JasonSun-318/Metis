@@ -50,7 +50,7 @@ function snapshot(serverEpoch: string, cursor: number, text: string): SessionSna
 		thinkingSelection: "off",
 		actualThinkingLevel: "off",
 		availableThinkingSelections: ["off"],
-		subagents: [],
+		agents: [],
 		serverEpoch,
 		cursor,
 	};

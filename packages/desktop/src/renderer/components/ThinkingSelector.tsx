@@ -334,7 +334,7 @@ export function ThinkingSelector({ actualThinkingLevel, available, commandReques
 			)}
 			<span className="sr-only" id="thinking-selection-detail">
 				{value === "ultra"
-					? t("Uses {{level}}, multiple model calls, and subagent orchestration.", { level: selectionLabel(actualThinkingLevel) })
+					? t("Uses the highest supported reasoning level ({{level}}).", { level: selectionLabel(actualThinkingLevel) })
 					: t("Provider thinking level {{level}}.", { level: selectionLabel(actualThinkingLevel) })}
 			</span>
 		</div>
