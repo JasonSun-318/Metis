@@ -48,6 +48,7 @@ export interface MutableProjectionState {
 	model: SessionSnapshot["model"];
 	availableModels: NonNullable<SessionSnapshot["availableModels"]>;
 	agents: AgentSummaryView[];
+	nextAgentAfterId: string | null;
 	tasks: SessionSnapshot["tasks"];
 	deliveredFiles: SessionSnapshot["deliveredFiles"];
 	goal: SessionSnapshot["goal"];
@@ -93,6 +94,7 @@ export function createProjectionState(): MutableProjectionState {
 		model: undefined,
 		availableModels: [],
 		agents: [],
+		nextAgentAfterId: null,
 		tasks: [],
 		deliveredFiles: [],
 		goal: null,
@@ -147,6 +149,7 @@ export function removeSession(state: MutableProjectionState, sessionId: string):
 	state.collaborationMode = "default";
 	state.permissionMode = "auto";
 	state.agents = [];
+	state.nextAgentAfterId = null;
 	state.tasks = [];
 	state.goal = null;
 	state.queuedTurns = [];
@@ -186,6 +189,7 @@ export function removeModeProjectSessions(state: MutableProjectionState, mode: A
 	state.collaborationMode = "default";
 	state.permissionMode = "auto";
 	state.agents = [];
+	state.nextAgentAfterId = null;
 	state.tasks = [];
 	state.goal = null;
 	state.queuedTurns = [];
@@ -236,6 +240,8 @@ export function replaceProjectionSnapshot(state: MutableProjectionState, snapsho
 	state.model = snapshot.model;
 	state.availableModels = snapshot.availableModels ?? [];
 	state.agents = snapshot.agents;
+	state.nextAgentAfterId =
+		snapshot.nextAgentAfterId ?? (snapshot.agents.length >= 100 ? (snapshot.agents.at(-1)?.agentId ?? null) : null);
 	state.tasks = snapshot.tasks;
 	state.deliveredFiles = snapshot.deliveredFiles;
 	state.goal = snapshot.goal;
@@ -307,6 +313,13 @@ function targetsActiveProject(
 ): boolean {
 	const active = state.activeSessionId ? state.sessionsById.get(state.activeSessionId) : undefined;
 	return active?.scheduled === undefined && active?.mode === event.mode && active.cwd === event.cwd;
+}
+
+function isSelectedAgentLiveTask(state: MutableProjectionState, agentId: string, taskId?: string): boolean {
+	if (state.agentTranscript.agentId !== agentId) return false;
+	if (state.agentTranscript.taskId === null) return true;
+	if (taskId !== undefined) return taskId === state.agentTranscript.taskId;
+	return state.agents.find((agent) => agent.agentId === agentId)?.currentTask?.taskId === state.agentTranscript.taskId;
 }
 
 function canApplyEvents(state: MutableProjectionState, events: readonly DomainEvent[]): boolean {
@@ -424,7 +437,7 @@ function applyEvent(state: MutableProjectionState, event: DomainEvent): void {
 		}
 		case "agent/item/started":
 		case "agent/item/completed":
-			if (state.agentTranscript.agentId === event.agentId && state.agentTranscript.taskId === null) {
+			if (isSelectedAgentLiveTask(state, event.agentId)) {
 				state.agentTranscript.itemOrder = upsertOrdered(
 					state.agentTranscript.itemsById,
 					state.agentTranscript.itemOrder,
@@ -434,7 +447,7 @@ function applyEvent(state: MutableProjectionState, event: DomainEvent): void {
 			}
 			return;
 		case "agent/item/delta": {
-			if (state.agentTranscript.agentId !== event.agentId || state.agentTranscript.taskId !== null) return;
+			if (!isSelectedAgentLiveTask(state, event.agentId)) return;
 			const item = state.agentTranscript.itemsById.get(event.itemId);
 			if (item?.state === "streaming") {
 				state.agentTranscript.itemsById.set(event.itemId, appendItemDelta(item, event.delta));
@@ -442,7 +455,7 @@ function applyEvent(state: MutableProjectionState, event: DomainEvent): void {
 			return;
 		}
 		case "agent/itemsChanged":
-			if (state.agentTranscript.agentId === event.agentId && state.agentTranscript.taskId === null) {
+			if (isSelectedAgentLiveTask(state, event.agentId, event.taskId)) {
 				state.agentTranscript.journalRevision += 1;
 			}
 			return;

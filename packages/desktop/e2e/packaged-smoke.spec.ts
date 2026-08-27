@@ -2489,10 +2489,13 @@ test("packaged Code agent sidebar lists durable work and opens its transcript", 
 	const childId = "30000000-0000-4000-8000-000000000001";
 	const taskId = "30000000-0000-4000-8000-000000000002";
 	const archivedId = "30000000-0000-4000-8000-000000000003";
+	const oldTaskId = "30000000-0000-4000-8000-000000000005";
+	const nestedId = "30000000-0000-4000-8000-000000000006";
+	const nestedTaskId = "30000000-0000-4000-8000-000000000007";
 	const agentHeader = {
 		agentId: childId,
 		name: "Packaged project inspector",
-		agentType: "explorer" as const,
+		agentType: "worker" as const,
 		parentSessionId: CODE_ID,
 		rootSessionId: CODE_ID,
 		agentPath: [childId],
@@ -2505,7 +2508,7 @@ test("packaged Code agent sidebar lists durable work and opens its transcript", 
 		initialTask: "Inspect packaged project",
 		forkTurns: 0,
 		timeoutSeconds: 60,
-		mayDelegate: false,
+		mayDelegate: true,
 	};
 	const child = fixtures.SessionManager.create(
 		projectDir,
@@ -2517,6 +2520,37 @@ test("packaged Code agent sidebar lists durable work and opens its transcript", 
 			agent: agentHeader,
 		},
 	);
+	child.appendAgentControl({
+		type: "agent_task",
+		agentId: childId,
+		taskId: oldTaskId,
+		text: "Inspect initial packaged state",
+		taskSummary: "Inspect initial packaged state",
+		status: "queued",
+	});
+	child.appendAgentControl({
+		type: "agent_task",
+		agentId: childId,
+		taskId: oldTaskId,
+		text: "Inspect initial packaged state",
+		taskSummary: "Inspect initial packaged state",
+		status: "running",
+	});
+	child.appendMessage({ role: "user", content: "Inspect initial packaged state", timestamp: Date.now() - 1_000 });
+	child.appendMessage({
+		...assistantMessage(Date.now() - 999, 8),
+		content: [{ type: "text", text: "Initial packaged handoff" }],
+	});
+	child.appendAgentControl({
+		type: "agent_task",
+		agentId: childId,
+		taskId: oldTaskId,
+		text: "Inspect initial packaged state",
+		taskSummary: "Inspect initial packaged state",
+		status: "done",
+		reason: "completed",
+		finalMessage: "Initial packaged handoff",
+	});
 	child.appendAgentControl({
 		type: "agent_task",
 		agentId: childId,
@@ -2568,8 +2602,69 @@ test("packaged Code agent sidebar lists durable work and opens its transcript", 
 		status: "done",
 		reason: "completed",
 		finalMessage: "Packaged child completed",
+		usage: {
+			model: { provider: "fixture", modelId: "fixture-model" },
+			input: 10,
+			output: 25,
+			cacheRead: 0,
+			cacheWrite: 0,
+			elapsedMs: 2_000,
+			toolCalls: 1,
+			cost: 0,
+		},
 	});
 	child.close();
+
+	const nested = fixtures.SessionManager.create(
+		projectDir,
+		fixtures.getSessionAgentDir(agentDir, CODE_ID),
+		{
+			id: nestedId,
+			mode: "code",
+			permissionMode: "ask",
+			agent: {
+				agentId: nestedId,
+				name: "Nested verifier",
+				agentType: "reviewer" as const,
+				parentSessionId: childId,
+				rootSessionId: CODE_ID,
+				agentPath: [childId, nestedId],
+				cwd: projectDir,
+				tools: ["read"],
+				writePolicy: "deny" as const,
+				permissionMode: "ask" as const,
+				model: { provider: "fixture", modelId: "fixture-model" },
+				thinkingLevel: "off",
+				initialTask: "Verify nested packaged state",
+				forkTurns: 0,
+				timeoutSeconds: 60,
+				mayDelegate: false,
+			},
+		},
+	);
+	nested.appendAgentControl({
+		type: "agent_task",
+		agentId: nestedId,
+		taskId: nestedTaskId,
+		text: "Verify nested packaged state",
+		taskSummary: "Verify nested packaged state",
+		status: "running",
+	});
+	nested.appendMessage({
+		...assistantMessage(Date.now(), 5),
+		content: [{ type: "text", text: "Nested packaged verification complete" }],
+	});
+	nested.appendAgentControl({
+		type: "agent_task",
+		agentId: nestedId,
+		taskId: nestedTaskId,
+		text: "Verify nested packaged state",
+		taskSummary: "Verify nested packaged state",
+		status: "done",
+		reason: "completed",
+		finalMessage: "Nested packaged verification complete",
+	});
+	nested.close();
 
 	const archived = fixtures.SessionManager.create(
 		projectDir,
@@ -2652,11 +2747,26 @@ test("packaged Code agent sidebar lists durable work and opens its transcript", 
 		await page.locator(".tool-sidebar-menu").getByRole("button", { name: "Agents", exact: true }).click();
 		await expect(page.locator(".subagent-panel-heading").getByText("Agents", { exact: true })).toBeVisible();
 		await expect(page.getByText("Inspect packaged project", { exact: true })).toBeVisible();
+		const agentTree = page.getByRole("tree", { name: "Agent tree", exact: true });
+		await expect(agentTree.getByRole("treeitem")).toHaveCount(2);
+		await expect(agentTree.getByRole("treeitem").nth(0)).toHaveAttribute("aria-level", "1");
+		await expect(agentTree.getByRole("treeitem").nth(0)).toHaveAttribute("aria-expanded", "true");
+		await expect(agentTree.getByRole("treeitem").nth(1)).toHaveAttribute("aria-level", "2");
+		await expect(page.getByText("35 tokens", { exact: true })).toBeVisible();
+		await expect(page.getByText("1 tool use", { exact: true })).toBeVisible();
+		await page.getByRole("button", { name: "Collapse Packaged project inspector", exact: true }).click();
+		await expect(page.getByRole("button", { name: "View transcript for Nested verifier", exact: true })).toHaveCount(0);
+		await page.getByRole("button", { name: "Expand Packaged project inspector", exact: true }).click();
+		await expect(page.getByRole("button", { name: "View transcript for Nested verifier", exact: true })).toBeVisible();
 		await page.getByRole("button", { name: "Show archived", exact: true }).click();
 		await page.getByRole("button", { name: "View summary for Archived result reviewer", exact: true }).click();
 		await expect(page.getByRole("heading", { name: "Archived result", exact: true })).toBeVisible();
 		await expect(page.getByText("no remaining issues", { exact: true })).toBeVisible();
 		await expect(page.getByRole("region", { name: "Agent transcript", exact: true })).toBeVisible();
+		await page.getByRole("button", { name: "Unarchive agent", exact: true }).click();
+		await expect(page.getByRole("button", { name: "Archive agent", exact: true })).toBeVisible();
+		await page.getByRole("button", { name: "Archive agent", exact: true }).click();
+		await expect(page.getByRole("button", { name: "Unarchive agent", exact: true })).toBeVisible();
 		await page.getByRole("button", { name: "Back to agents", exact: true }).click();
 		await resizeToolsSidebar(page, 392);
 		expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
@@ -2672,6 +2782,11 @@ test("packaged Code agent sidebar lists durable work and opens its transcript", 
 		await page.getByRole("button", { name: "View transcript for Packaged project inspector", exact: true }).click();
 		const transcript = page.getByRole("region", { name: "Agent transcript", exact: true });
 		await expect(transcript).toBeVisible();
+		await expect(page.getByText("Packaged child completed", { exact: true })).toBeVisible();
+		const taskSelector = page.locator(".subagent-task-selector select");
+		await taskSelector.selectOption(oldTaskId);
+		await expect(page.getByText("Initial packaged handoff", { exact: true })).toBeVisible();
+		await taskSelector.selectOption(taskId);
 		await expect(page.getByText("Packaged child completed", { exact: true })).toBeVisible();
 		expect(await transcript.locator("[data-transcript-item]").count()).toBeLessThanOrEqual(24);
 		expect(await transcript.locator(".code-execution > summary").count()).toBeGreaterThanOrEqual(2);
@@ -2697,6 +2812,15 @@ test("packaged Code agent sidebar lists durable work and opens its transcript", 
 		await reopenedTranscript.locator(".code-execution > summary").last().click();
 		await reopenedTranscript.locator(".code-execution").last().locator(".code-command > summary").last().click();
 		await expect(page.getByText("Packaged tool output", { exact: true })).toBeVisible();
+
+		phase = "deleting a nested agent";
+		await page.getByRole("button", { name: "Back to agents", exact: true }).click();
+		await page.getByRole("button", { name: "View transcript for Nested verifier", exact: true }).click();
+		page.once("dialog", (dialog) => dialog.accept());
+		await page.getByRole("button", { name: "Delete", exact: true }).click();
+		await expect(page.getByRole("button", { name: "View transcript for Nested verifier", exact: true })).toHaveCount(0);
+		await page.getByRole("button", { name: "View transcript for Packaged project inspector", exact: true }).click();
+		await expect(page.getByText("Packaged child completed", { exact: true })).toBeVisible();
 
 		phase = "checking a narrow app window";
 		await page.setViewportSize({ width: 900, height: 640 });

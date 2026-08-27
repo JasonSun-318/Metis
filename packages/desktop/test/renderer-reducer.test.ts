@@ -157,6 +157,7 @@ describe("renderer projection reducer", () => {
 						type: "agent/itemsChanged",
 						sessionId: "session-1",
 						agentId: "child-1",
+						taskId: "task-1",
 					},
 				],
 			}),
@@ -183,6 +184,137 @@ describe("renderer projection reducer", () => {
 			}),
 		).toBe("applied");
 		expect(store.getSnapshot().agentTranscript.itemsById.has("ignored")).toBe(false);
+	});
+
+	it("applies live events when the explicitly selected task is the current task", () => {
+		const store = new AppStore();
+		const task = {
+			taskId: "task-current",
+			taskSummary: "Current task",
+			status: "running" as const,
+			createdAt: "2026-07-16T00:00:00.000Z",
+			updatedAt: "2026-07-16T00:00:00.000Z",
+		};
+		store.applySnapshot({
+			...snapshot(EPOCH_A, 0),
+			agents: [
+				{
+					agentId: "child-1",
+					name: "Current worker",
+					agentType: "worker",
+					depth: 1,
+					status: "running",
+					archived: false,
+					parentSessionId: "session-1",
+					rootSessionId: "session-1",
+					agentPath: ["child-1"],
+					tasks: [task],
+					currentTask: task,
+					latestTask: task,
+					createdAt: "2026-07-16T00:00:00.000Z",
+					updatedAt: "2026-07-16T00:00:00.000Z",
+				},
+			],
+		});
+		store.selectAgentTranscript("child-1", "task-current");
+
+		expect(
+			store.applyBatch({
+				serverEpoch: EPOCH_A,
+				fromCursor: 1,
+				toCursor: 4,
+				events: [
+					{
+						type: "agent/item/started",
+						sessionId: "session-1",
+						agentId: "child-1",
+						item: childItem("selected-live", ""),
+					},
+					{
+						type: "agent/item/delta",
+						sessionId: "session-1",
+						agentId: "child-1",
+						itemId: "selected-live",
+						delta: { type: "text", text: "visible" },
+					},
+					{
+						type: "agent/item/completed",
+						sessionId: "session-1",
+						agentId: "child-1",
+						item: childItem("selected-live", "visible", "completed"),
+					},
+					{
+						type: "agent/itemsChanged",
+						sessionId: "session-1",
+						agentId: "child-1",
+						taskId: "task-current",
+					},
+				],
+			}),
+		).toBe("applied");
+		expect(store.getSnapshot().agentTranscript.itemsById.get("selected-live")?.content).toEqual([
+			{ type: "text", text: "visible" },
+		]);
+		expect(store.getSnapshot().agentTranscript.journalRevision).toBe(1);
+	});
+
+	it("refreshes an explicitly selected task after its terminal summary clears currentTask", () => {
+		const store = new AppStore();
+		const task = {
+			taskId: "task-current",
+			status: "running" as const,
+			taskSummary: "current",
+			createdAt: "2026-07-16T00:00:00.000Z",
+			updatedAt: "2026-07-16T00:00:00.000Z",
+		};
+		const running = {
+			agentId: "child-1",
+			name: "worker",
+			agentType: "worker" as const,
+			depth: 1,
+			status: "running" as const,
+			archived: false,
+			parentSessionId: "session-1",
+			rootSessionId: "session-1",
+			agentPath: ["child-1"],
+			tasks: [task],
+			currentTask: task,
+			latestTask: task,
+			createdAt: task.createdAt,
+			updatedAt: task.updatedAt,
+		};
+		store.applySnapshot({ ...snapshot(EPOCH_A, 0), agents: [running] });
+		store.selectAgentTranscript("child-1", "task-current");
+		const terminal = { ...task, status: "done" as const, updatedAt: "2026-07-16T00:01:00.000Z" };
+
+		expect(
+			store.applyBatch({
+				serverEpoch: EPOCH_A,
+				fromCursor: 1,
+				toCursor: 2,
+				events: [
+					{
+						type: "agent/updated",
+						sessionId: "session-1",
+						agent: {
+							...running,
+							status: "done",
+							tasks: [terminal],
+							currentTask: undefined,
+							latestTask: terminal,
+							updatedAt: terminal.updatedAt,
+						},
+					},
+					{
+						type: "agent/itemsChanged",
+						sessionId: "session-1",
+						agentId: "child-1",
+						taskId: "task-current",
+					},
+				],
+			}),
+		).toBe("applied");
+		expect(store.getSnapshot().agentTranscript.journalRevision).toBe(1);
 	});
 
 	it("replaces and paginates child history, then clears it on session switch", () => {

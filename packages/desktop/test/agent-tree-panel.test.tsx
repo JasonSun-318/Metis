@@ -155,6 +155,11 @@ let roots: Root[] = [];
 
 beforeEach(async () => {
 	(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+	globalThis.ResizeObserver ??= class ResizeObserver {
+		disconnect() {}
+		observe() {}
+		unobserve() {}
+	};
 	await setLocale("en");
 });
 
@@ -204,6 +209,33 @@ describe("AgentTreePanel", () => {
 		expect(interval).toHaveBeenCalledTimes(1);
 	});
 
+	it("measures active elapsed time from the current follow-up task", async () => {
+		vi.useFakeTimers();
+		vi.setSystemTime(new Date("2026-08-07T00:00:00.000Z"));
+		const currentTask = {
+			...taskSummary("Follow up", "running"),
+			taskId: "follow-up",
+			createdAt: "2026-08-06T00:00:00.000Z",
+			updatedAt: "2026-08-06T23:59:55.000Z",
+		};
+		const store = new AppStore();
+		store.applySnapshot(
+			snapshot("parent", [
+				agentSummary("child", "Follow up", "running", "Worker", {
+					tasks: [currentTask],
+					currentTask,
+					latestTask: currentTask,
+					createdAt: "2026-08-06T00:00:00.000Z",
+				}),
+			]),
+		);
+		const rendered = renderPanel(store, api());
+		roots.push(rendered.root);
+		await flush();
+		expect(rendered.container.textContent).toContain("5s");
+		expect(rendered.container.textContent).not.toContain("24h");
+	});
+
 	it("coalesces a burst during one pending latest read into one trailing read", async () => {
 		const store = new AppStore();
 		store.applySnapshot(snapshot("parent", [agentSummary("child", "Analyze code", "running")]));
@@ -225,6 +257,7 @@ describe("AgentTreePanel", () => {
 					type: "agent/itemsChanged" as const,
 					sessionId: "parent",
 					agentId: "child",
+					taskId: "task-1",
 				})),
 			});
 		});
@@ -284,14 +317,54 @@ describe("AgentTreePanel", () => {
 		await flush();
 
 		expect(desktopApi.readAgentItems).toHaveBeenCalledWith(expect.objectContaining({ agentId: "child" }));
-		expect(vi.mocked(desktopApi.readAgentItems).mock.calls.at(-1)?.[0]).not.toHaveProperty("taskId");
+		expect(vi.mocked(desktopApi.readAgentItems).mock.calls.at(-1)?.[0]).toMatchObject({ taskId: TASK_ID });
 		expect(rendered.container.textContent).toContain("Found three issues.");
 		expect(rendered.onError).not.toHaveBeenCalled();
 	});
 
+	it("automatically pages past active rows until archived history is found", async () => {
+		const store = new AppStore();
+		store.applySnapshot(snapshot("parent", []));
+		const activePage = Array.from({ length: 100 }, (_, index) =>
+			agentSummary(`active-${index}`, `Task ${index}`, "done", `Active ${index}`),
+		);
+		const archived = archivedAgent("archived-child", "Archived task", "Archived result", "Archived worker");
+		const desktopApi = api();
+		desktopApi.listAgents = vi
+			.fn()
+			.mockResolvedValueOnce({ agents: activePage, nextAfterAgentId: "active-99" })
+			.mockResolvedValueOnce({ agents: [archived], nextAfterAgentId: null });
+		const rendered = renderPanel(store, desktopApi);
+		roots.push(rendered.root);
+
+		await act(async () => button(rendered.container, "Show archived").click());
+		await flush();
+		expect(desktopApi.listAgents).toHaveBeenCalledTimes(2);
+		expect(desktopApi.listAgents).toHaveBeenLastCalledWith(
+			expect.objectContaining({ includeArchived: true, afterAgentId: "active-99" }),
+		);
+		expect(button(rendered.container, "View summary for Archived worker")).toBeTruthy();
+	});
+
 	it("renders nested ownership and disables archiving a parent with active descendants", async () => {
 		const store = new AppStore();
-		const parent = agentSummary("root-agent", "Coordinate review", "done", "Coordinator");
+		const parentTask = {
+			...taskSummary("Coordinate review", "done"),
+			usage: {
+				model: { provider: "fixture", modelId: "worker" },
+				input: 12,
+				output: 8,
+				cacheRead: 4,
+				cacheWrite: 6,
+				elapsedMs: 100,
+				cost: 0.01,
+				toolCalls: 3,
+			},
+		};
+		const parent = agentSummary("root-agent", "Coordinate review", "done", "Coordinator", {
+			tasks: [parentTask],
+			latestTask: parentTask,
+		});
 		const child = agentSummary("child-agent", "Inspect code", "running", "Explorer", {
 			depth: 2,
 			parentSessionId: parent.agentId,
@@ -301,7 +374,34 @@ describe("AgentTreePanel", () => {
 		const rendered = renderPanel(store, api());
 		roots.push(rendered.root);
 
+		const tree = rendered.container.querySelector('[role="tree"]');
+		const treeItems = rendered.container.querySelectorAll('[role="treeitem"]');
+		expect(tree?.getAttribute("aria-label")).toBe("Agent tree");
+		expect(treeItems[0]?.getAttribute("aria-level")).toBe("1");
+		expect(treeItems[0]?.getAttribute("aria-expanded")).toBe("true");
+		expect(treeItems[1]?.getAttribute("aria-level")).toBe("2");
+		await act(async () => {
+			(treeItems[0] as HTMLElement).focus();
+			treeItems[0]?.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+		});
+		expect(document.activeElement).toBe(treeItems[1]);
+		await act(async () => {
+			treeItems[1]?.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true }));
+		});
+		expect(document.activeElement).toBe(treeItems[0]);
+		await act(async () => {
+			treeItems[0]?.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+		});
+		expect(document.activeElement).toBe(treeItems[1]);
+		expect(rendered.container.textContent).toContain("30 tokens");
+		expect(rendered.container.textContent).toContain("3 tool uses");
 		expect(rendered.container.querySelectorAll(".subagent-tree-children .subagent-card")).toHaveLength(1);
+		await act(async () => button(rendered.container, "Collapse Coordinator").click());
+		expect(rendered.container.querySelector('[aria-label="View transcript for Explorer"]')).toBeNull();
+		expect(treeItems[0]?.getAttribute("aria-expanded")).toBe("false");
+		expect((treeItems[0] as HTMLElement).tabIndex).toBe(0);
+		await act(async () => button(rendered.container, "Expand Coordinator").click());
+		expect(button(rendered.container, "View transcript for Explorer")).toBeTruthy();
 		await act(async () => button(rendered.container, "View transcript for Coordinator").click());
 		expect(button(rendered.container, "Archive agent").disabled).toBe(true);
 	});
@@ -320,6 +420,7 @@ describe("AgentTreePanel", () => {
 		roots.push(rendered.root);
 		await act(async () => button(rendered.container, "View transcript for Historian").click());
 		await flush();
+		expect(desktopApi.readAgentItems).toHaveBeenLastCalledWith(expect.objectContaining({ taskId: "task-new" }));
 
 		const select = rendered.container.querySelector<HTMLSelectElement>(".subagent-task-selector select")!;
 		await act(async () => {
@@ -355,6 +456,143 @@ describe("AgentTreePanel", () => {
 		expect(button(rendered.container, "View transcript for Agent 100")).toBeTruthy();
 	});
 
+	it("uses a byte-budgeted snapshot cursor even when fewer than 100 agents are present", async () => {
+		const store = new AppStore();
+		store.applySnapshot({
+			...snapshot("parent", [agentSummary("agent-0", "Task 0", "done", "Agent 0")]),
+			nextAgentAfterId: "agent-0",
+		});
+		const desktopApi = api();
+		desktopApi.listAgents = vi.fn().mockResolvedValue({ agents: [], nextAfterAgentId: null });
+		const rendered = renderPanel(store, desktopApi);
+		roots.push(rendered.root);
+		await act(async () => button(rendered.container, "Load older agents").click());
+		expect(desktopApi.listAgents).toHaveBeenCalledWith(
+			expect.objectContaining({ afterAgentId: "agent-0", includeArchived: false }),
+		);
+	});
+
+	it("recovers pagination when the server cursor agent was deleted", async () => {
+		const firstPage = Array.from({ length: 100 }, (_, index) =>
+			agentSummary(`agent-${index}`, `Task ${index}`, "done", `Agent ${index}`),
+		);
+		const store = new AppStore();
+		store.applySnapshot(snapshot("parent", firstPage));
+		const invalidCursor = Object.assign(new Error("invalid cursor"), { code: -32015 });
+		const desktopApi = api();
+		desktopApi.listAgents = vi
+			.fn()
+			.mockRejectedValueOnce(invalidCursor)
+			.mockResolvedValueOnce({
+				agents: [agentSummary("agent-100", "Task 100", "done", "Agent 100")],
+				nextAfterAgentId: null,
+			});
+		const rendered = renderPanel(store, desktopApi);
+		roots.push(rendered.root);
+		await act(async () => button(rendered.container, "Load older agents").click());
+		await flush();
+		expect(desktopApi.listAgents).toHaveBeenNthCalledWith(
+			1,
+			expect.objectContaining({ afterAgentId: "agent-99" }),
+		);
+		expect(desktopApi.listAgents).toHaveBeenNthCalledWith(
+			2,
+			expect.objectContaining({ afterAgentId: "agent-98" }),
+		);
+		expect(rendered.onError).not.toHaveBeenCalled();
+		expect(button(rendered.container, "View transcript for Agent 100")).toBeTruthy();
+	});
+
+	it("lets a live summary replace a stale copy loaded from an older page", async () => {
+		const firstPage = Array.from({ length: 100 }, (_, index) =>
+			agentSummary(`agent-${index}`, `Task ${index}`, "done", `Agent ${index}`),
+		);
+		const store = new AppStore();
+		store.applySnapshot(snapshot("parent", firstPage));
+		const desktopApi = api();
+		desktopApi.listAgents = vi.fn().mockResolvedValue({
+			agents: [agentSummary("returning", "Resume work", "done", "Returning")],
+			nextAfterAgentId: null,
+		});
+		const rendered = renderPanel(store, desktopApi);
+		roots.push(rendered.root);
+		await act(async () => button(rendered.container, "Load older agents").click());
+		await flush();
+
+		await act(async () => {
+			store.applyBatch({
+				serverEpoch: EPOCH,
+				fromCursor: 1,
+				toCursor: 1,
+				events: [
+					{
+						type: "agent/updated",
+						sessionId: "parent",
+						agent: agentSummary("returning", "Resume work", "running", "Returning"),
+					},
+				],
+			});
+		});
+
+		expect(button(rendered.container, "Stop Returning")).toBeTruthy();
+		expect(rendered.container.textContent).toContain("Running");
+	});
+
+	it("drops paged agents and their selection on a same-session resnapshot", async () => {
+		const firstPage = Array.from({ length: 100 }, (_, index) =>
+			agentSummary(`agent-${index}`, `Task ${index}`, "done", `Agent ${index}`),
+		);
+		const store = new AppStore();
+		store.applySnapshot(snapshot("parent", firstPage));
+		const desktopApi = api();
+		desktopApi.listAgents = vi.fn().mockResolvedValue({
+			agents: [agentSummary("paged", "Paged task", "done", "Paged worker")],
+			nextAfterAgentId: null,
+		});
+		const rendered = renderPanel(store, desktopApi);
+		roots.push(rendered.root);
+		await act(async () => button(rendered.container, "Load older agents").click());
+		await flush();
+		await act(async () => button(rendered.container, "View transcript for Paged worker").click());
+		expect(store.getSnapshot().agentTranscript.agentId).toBe("paged");
+
+		await act(async () => store.applySnapshot(snapshot("parent", [firstPage[0]!] , 10)));
+		await flush();
+		expect(rendered.container.textContent).not.toContain("Paged worker");
+		expect(store.getSnapshot().agentTranscript.agentId).toBeNull();
+	});
+
+	it("removes a paged agent when a live delete event arrives", async () => {
+		const firstPage = Array.from({ length: 100 }, (_, index) =>
+			agentSummary(`agent-${index}`, `Task ${index}`, "done", `Agent ${index}`),
+		);
+		const store = new AppStore();
+		store.applySnapshot(snapshot("parent", firstPage));
+		const desktopApi = api();
+		desktopApi.listAgents = vi.fn().mockResolvedValue({
+			agents: [agentSummary("paged", "Paged task", "done", "Paged worker")],
+			nextAfterAgentId: null,
+		});
+		const rendered = renderPanel(store, desktopApi);
+		roots.push(rendered.root);
+		await act(async () => button(rendered.container, "Load older agents").click());
+		await flush();
+		expect(button(rendered.container, "View transcript for Paged worker")).toBeTruthy();
+
+		await act(async () => {
+			store.applyBatch({
+				serverEpoch: EPOCH,
+				fromCursor: 1,
+				toCursor: 1,
+				events: [
+					{ type: "agent/deleted", sessionId: "parent", agentId: "paged", deletedAgentIds: ["paged"] },
+				],
+			});
+		});
+		await flush();
+		expect(rendered.container.textContent).not.toContain("Paged worker");
+	});
+
 	it("requires permanent-delete confirmation and reports mutation failures without hiding the agent", async () => {
 		const store = new AppStore();
 		store.applySnapshot(snapshot("parent", [agentSummary("child", "Analyze code", "done", "Disposable")]));
@@ -387,6 +625,44 @@ describe("AgentTreePanel", () => {
 		expect(store.getSnapshot().agentTranscript.agentId).toBeNull();
 		expect(rendered.container.textContent).not.toContain("stale");
 		expect(rendered.onError).not.toHaveBeenCalled();
+	});
+
+	it("ignores stale list and archive responses after switching sessions", async () => {
+		const firstPage = Array.from({ length: 100 }, (_, index) =>
+			agentSummary(`agent-${index}`, `Task ${index}`, "done", `Agent ${index}`),
+		);
+		const store = new AppStore();
+		store.applySnapshot(snapshot("parent", firstPage));
+		const listed = deferred<{ agents: AgentSummaryView[]; nextAfterAgentId: null }>();
+		const archived = deferred<{ agent: AgentSummaryView }>();
+		const desktopApi = api();
+		desktopApi.listAgents = vi.fn().mockReturnValue(listed.promise);
+		desktopApi.archiveAgent = vi.fn().mockReturnValue(archived.promise) as MetisDesktopApi["archiveAgent"];
+		const onError = vi.fn();
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		roots.push(root);
+		await act(async () =>
+			root.render(<AgentTreePanel api={desktopApi} onError={onError} sessionId="parent" store={store} visible />),
+		);
+		await act(async () => button(container, "Load older agents").click());
+		await act(async () => button(container, "Archive agent").click());
+		await act(async () => {
+			store.applySnapshot(snapshot("other", []));
+			root.render(<AgentTreePanel api={desktopApi} onError={onError} sessionId="other" store={store} visible />);
+		});
+		await act(async () => {
+			listed.resolve({
+				agents: [agentSummary("stale-list", "Stale", "done", "Stale list")],
+				nextAfterAgentId: null,
+			});
+			archived.resolve({ agent: archivedAgent("agent-0", "Task 0", undefined, "Agent 0") });
+		});
+		await flush();
+		expect(container.textContent).not.toContain("Stale list");
+		expect(container.textContent).not.toContain("Agent 0");
+		expect(onError).not.toHaveBeenCalled();
 	});
 
 	it("restores mounted state across React StrictMode's effect replay", async () => {
@@ -453,12 +729,32 @@ describe("AgentTreePanel", () => {
 
 	it("uses localized labels from i18n", async () => {
 		await setLocale("zh-CN");
+		const localizedTask = {
+			...taskSummary("检查代理", "done"),
+			usage: {
+				model: { provider: "fixture", modelId: "worker" },
+				input: 1,
+				output: 2,
+				cacheRead: 0,
+				cacheWrite: 0,
+				elapsedMs: 10,
+				toolCalls: 1,
+			},
+		};
 		const store = new AppStore();
-		store.applySnapshot(snapshot("parent", []));
+		store.applySnapshot(snapshot("parent", [
+			agentSummary("child", "检查代理", "done", "检查员", {
+				tasks: [localizedTask],
+				latestTask: localizedTask,
+			}),
+		]));
 		const rendered = renderPanel(store, api());
 		roots.push(rendered.root);
 		await flush();
 		expect(rendered.container.textContent).toContain("代理");
-		expect(rendered.container.textContent).toContain("暂无代理");
+		expect(rendered.container.querySelector('[role="tree"]')?.getAttribute("aria-label")).toBe("代理树");
+		expect(rendered.container.textContent).toContain("1 次工具调用");
+		await act(async () => button(rendered.container, "查看 检查员 的记录").click());
+		expect(button(rendered.container, "归档")).toBeTruthy();
 	});
 });

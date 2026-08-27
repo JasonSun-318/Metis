@@ -205,13 +205,16 @@ textarea { resize: none; }
 .subagent-section + .subagent-section { margin-top: 15px; }
 .subagent-section-title { margin: 0 0 6px; color: var(--muted); font-size: 11px; font-weight: 500; }
 .subagent-section-empty { margin: 0; color: var(--text-03); padding: 7px 2px; font-size: 11px; }
-.subagent-card { display: grid; min-width: 0; align-items: start; grid-template-columns: minmax(0, 1fr) auto; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); padding: 9px; transition: background-color 140ms ease; }
+.subagent-card { display: grid; min-width: 0; align-items: start; grid-template-columns: auto minmax(0, 1fr) auto; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); padding: 9px; transition: background-color 140ms ease; }
 .subagent-card + .subagent-card { margin-top: 5px; }
 .subagent-tree-node + .subagent-tree-node { margin-top: 5px; }
 .subagent-tree-children { margin-top: 5px; border-left: 1px solid var(--border); }
 .subagent-card:hover, .subagent-card:focus-within { background: var(--panel-hover); }
 .subagent-card-open { display: grid; min-width: 0; gap: 6px; background: transparent; padding: 0; text-align: left; }
 .subagent-card-open:hover:not(:disabled) { background: transparent; }
+.subagent-fold { display: grid; width: 20px; height: 20px; align-items: center; justify-content: center; border-radius: 4px; background: transparent; color: var(--muted); margin: -2px 4px 0 -3px; }
+.subagent-fold:hover, .subagent-fold:focus-visible { background: var(--surface-08); color: var(--text); }
+.subagent-fold-spacer { width: 20px; margin-right: 4px; }
 .subagent-card-title { overflow: hidden; color: var(--text); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .subagent-card-meta { display: flex; flex-wrap: wrap; gap: 4px 7px; color: var(--muted); font-size: 11px; }
 .subagent-card-meta > span { min-width: 0; }

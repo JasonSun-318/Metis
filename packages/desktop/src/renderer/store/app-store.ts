@@ -63,6 +63,8 @@ export interface AppStoreSnapshot {
 	readonly model: SessionSnapshot["model"];
 	readonly availableModels: NonNullable<SessionSnapshot["availableModels"]>;
 	readonly agents: SessionSnapshot["agents"];
+	readonly nextAgentAfterId: string | null;
+	readonly agentCollectionRevision: number;
 	readonly tasks: SessionSnapshot["tasks"];
 	readonly deliveredFiles: SessionSnapshot["deliveredFiles"];
 	readonly goal: SessionSnapshot["goal"];
@@ -75,6 +77,7 @@ export class AppStore {
 	private readonly state = createProjectionState();
 	private readonly listeners = new Set<() => void>();
 	private version = 0;
+	private agentCollectionRevision = 0;
 	private supervisor: SupervisorView = {
 		state: "stopped",
 		serverEpoch: null,
@@ -118,12 +121,16 @@ export class AppStore {
 
 	applySnapshot(snapshot: SessionSnapshot): void {
 		replaceProjectionSnapshot(this.state, snapshot);
+		this.agentCollectionRevision += 1;
 		this.commit();
 	}
 
 	applyBatch(batch: ConnectionEventsParams): BatchApplyResult {
 		const previousStatus = this.state.syncStatus;
 		const result = applyConnectionEvents(this.state, batch);
+		if (result === "applied" && batch.events.some((event) => event.type === "agent/deleted")) {
+			this.agentCollectionRevision += 1;
+		}
 		if (result === "applied" || previousStatus !== this.state.syncStatus) this.commit();
 		return result;
 	}
@@ -213,6 +220,8 @@ export class AppStore {
 			model: this.state.model,
 			availableModels: this.state.availableModels,
 			agents: this.state.agents,
+			nextAgentAfterId: this.state.nextAgentAfterId,
+			agentCollectionRevision: this.agentCollectionRevision,
 			tasks: this.state.tasks,
 			deliveredFiles: this.state.deliveredFiles,
 			goal: this.state.goal,

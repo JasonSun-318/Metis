@@ -782,6 +782,11 @@ const zhCN = {
 	"Permanently delete {{name}} and all descendant agent history? Project files are not deleted.":
 		"永久删除 {{name}} 及其所有下级代理历史？不会删除项目文件。",
 	"Back to agents": "返回代理列表",
+	"Agent tree": "代理树",
+	"Collapse {{name}}": "折叠 {{name}}",
+	"Expand {{name}}": "展开 {{name}}",
+	"1 tool use": "1 次工具调用",
+	"{{count}} tool uses": "{{count}} 次工具调用",
 	"Latest task": "最新任务",
 	"Load older agents": "加载更早的代理",
 	"Load more archived": "加载更多已归档代理",
