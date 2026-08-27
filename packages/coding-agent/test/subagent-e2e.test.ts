@@ -1,7 +1,7 @@
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fauxAssistantMessage, getModel, registerFauxProvider } from "@metis/ai/compat";
+import { fauxAssistantMessage, fauxToolCall, getModel, registerFauxProvider } from "@metis/ai/compat";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AgentSession, AgentSessionEvent } from "../src/core/agent-session.ts";
 import type { AgentSessionRuntime } from "../src/core/agent-session-runtime.ts";
@@ -122,6 +122,7 @@ function setupHarness() {
 			hasConfiguredAuth: () => true,
 		},
 		getActiveToolNames: () => ["read", "bash", "grep", "find", "ls", "web_fetch", "web_search"],
+		getDelegatableToolNames: () => ["read", "bash", "grep", "find", "ls", "web_fetch", "web_search"],
 		enqueueAgentMailboxEvent: vi.fn((event: AgentMailboxTerminalEvent) => {
 			if (!knownMailbox.has(event.eventId)) {
 				parentManager.appendAgentControl({ type: "agent_mailbox_event", event });
@@ -134,6 +135,7 @@ function setupHarness() {
 		getPendingAgentMailboxEventIds: () => [...pendingMailbox],
 		stageAgentMailboxDelivery: (eventIds: readonly string[]) => {
 			for (const eventId of eventIds) pendingMailbox.delete(eventId);
+			return eventIds;
 		},
 	} as unknown as AgentSession;
 	const runtimes: FakeChildRuntime[] = [];
@@ -180,9 +182,18 @@ describe("agent system e2e", () => {
 		const agentDir = join(root, "agent");
 		mkdirSync(cwd);
 		mkdirSync(agentDir);
+		const secretPath = join(cwd, "secret.txt");
+		writeFileSync(secretPath, "TOP SECRET TOOL OUTPUT");
 		const faux = registerFauxProvider();
 		faux.setResponses([
-			fauxAssistantMessage("first child handoff"),
+			fauxAssistantMessage([fauxToolCall("read", { path: secretPath })], { stopReason: "toolUse" }),
+			fauxAssistantMessage(
+				[
+					{ type: "thinking", thinking: "hidden child reasoning" },
+					{ type: "text", text: "first child handoff" },
+				],
+				{ stopReason: "stop" },
+			),
 			fauxAssistantMessage("parent integrated first handoff"),
 			fauxAssistantMessage("second child handoff"),
 			fauxAssistantMessage("parent integrated second handoff"),
@@ -282,7 +293,12 @@ describe("agent system e2e", () => {
 			agents: [{ agentId: receipt.agentId, status: "done" }],
 		});
 		const inspected = await run("inspect_agents", { agentId: receipt.agentId });
-		expect(inspected.content.find((block) => block.type === "text")?.text).toContain("[Final]");
+		const safeTrace = inspected.content.find((block) => block.type === "text")?.text ?? "";
+		expect(safeTrace).toContain("[Tool success] read");
+		expect(safeTrace).toContain("[Final]");
+		expect(safeTrace).not.toContain(secretPath);
+		expect(safeTrace).not.toContain("TOP SECRET TOOL OUTPUT");
+		expect(safeTrace).not.toContain("hidden child reasoning");
 
 		const followed = await run("followup_task", {
 			agentId: receipt.agentId,

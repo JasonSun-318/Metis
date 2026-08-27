@@ -68,7 +68,7 @@ function assistantToolCalls(message: Extract<AgentMessage, { role: "assistant" }
 	);
 }
 
-function taskWindow(
+export function agentTaskWindow(
 	journal: readonly FileEntry[],
 	taskId: string,
 ): { readonly start: number; readonly end: number } | undefined {
@@ -84,11 +84,15 @@ function taskWindow(
 		}
 	}
 	if (first < 0) return undefined;
-	return { start: running >= 0 ? running : first, end: end >= 0 ? end : journal.length - 1 };
+	if (running < 0) {
+		const control = end >= 0 ? end : first;
+		return { start: control, end: control };
+	}
+	return { start: running, end: end >= 0 ? end : journal.length - 1 };
 }
 
 function buildTraceEvents(journal: readonly FileEntry[], taskId: string): AgentTraceEvent[] {
-	const window = taskWindow(journal, taskId);
+	const window = agentTaskWindow(journal, taskId);
 	if (!window) return [];
 	const toolResults = new Map<string, boolean>();
 	let terminal: Extract<FileEntry, { type: "agent_task" }> | undefined;
@@ -109,18 +113,20 @@ function buildTraceEvents(journal: readonly FileEntry[], taskId: string): AgentT
 		.slice(window.start, window.end + 1)
 		.filter(
 			(entry): entry is Extract<FileEntry, { type: "message" }> =>
-				entry.type === "message" &&
-				entry.message.role === "assistant" &&
-				visibleAssistantText(entry.message) !== undefined,
+				entry.type === "message" && entry.message.role === "assistant",
 		);
-	const finalEntry = terminal
-		? [...assistantEntries]
-				.reverse()
-				.find(
-					(entry) =>
-						assistantToolCalls(entry.message as Extract<AgentMessage, { role: "assistant" }>).length === 0,
-				)
-		: undefined;
+	const lastAssistantEntry = assistantEntries.at(-1);
+	const lastAssistantMessage = lastAssistantEntry?.message as Extract<AgentMessage, { role: "assistant" }> | undefined;
+	const finalEntry =
+		terminal?.status === "done" &&
+		lastAssistantEntry &&
+		lastAssistantMessage &&
+		visibleAssistantText(lastAssistantMessage) !== undefined &&
+		assistantToolCalls(lastAssistantMessage).length === 0 &&
+		lastAssistantMessage.stopReason !== "error" &&
+		lastAssistantMessage.stopReason !== "aborted"
+			? lastAssistantEntry
+			: undefined;
 	const events: AgentTraceEvent[] = [];
 	for (let index = window.start; index <= window.end; index++) {
 		const entry = journal[index]!;
@@ -149,7 +155,7 @@ function buildTraceEvents(journal: readonly FileEntry[], taskId: string): AgentT
 			}
 			continue;
 		}
-		if (entry === terminal && terminal.finalMessage && !finalEntry) {
+		if (entry === terminal && terminal.status === "done" && terminal.finalMessage && !finalEntry) {
 			events.push({
 				eventId: entry.id,
 				taskId,

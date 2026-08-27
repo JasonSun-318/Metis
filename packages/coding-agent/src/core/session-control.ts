@@ -420,7 +420,7 @@ export function parseSessionControlEntry(value: unknown): SessionControlEntry {
 			...parseBase(fields),
 			agentId: requiredString(fields, "agentId", { maxLength: 256, noControls: true }),
 			taskId: requiredString(fields, "taskId", { maxLength: 256, noControls: true }),
-			text: requiredString(fields, "text", { maxBytes: 2 * 1024 * 1024 }),
+			text: requiredString(fields, "text", { maxBytes: 64 * 1024 }),
 			taskSummary: requiredString(fields, "taskSummary", { maxLength: 240 }),
 			status: status as AgentTaskStatus,
 			...(reason === undefined ? {} : { reason: reason as AgentStateReason }),
@@ -441,7 +441,7 @@ export function parseSessionControlEntry(value: unknown): SessionControlEntry {
 			agentId: requiredString(fields, "agentId", { maxLength: 256, noControls: true }),
 			taskId: requiredString(fields, "taskId", { maxLength: 256, noControls: true }),
 			messageId: requiredString(fields, "messageId", { maxLength: 256, noControls: true }),
-			text: requiredString(fields, "text", { maxBytes: 2 * 1024 * 1024 }),
+			text: requiredString(fields, "text", { maxBytes: 64 * 1024 }),
 			state,
 		};
 	}

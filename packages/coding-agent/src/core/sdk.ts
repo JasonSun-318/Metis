@@ -287,8 +287,13 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 	if (options.authStorage && options.modelRegistry && options.modelRegistry.authStorage !== options.authStorage) {
 		throw new Error("authStorage must match modelRegistry.authStorage");
 	}
-	if (options.unattendedExecution && options.mcpManager) {
-		throw new TypeError("Unattended execution cannot use an MCP manager");
+	const childWriteDenied = suppliedSessionManager?.getHeader()?.agent?.writePolicy === "deny";
+	if ((options.unattendedExecution || childWriteDenied) && options.mcpManager) {
+		throw new TypeError(
+			childWriteDenied
+				? "Write-denied child agents cannot use an MCP manager"
+				: "Unattended execution cannot use an MCP manager",
+		);
 	}
 
 	const mode = options.agentMode ?? DEFAULT_AGENT_MODE;
@@ -331,8 +336,9 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		throw error;
 	}
 	const ownsSessionManager = suppliedSessionManager === undefined;
-	let mcpManager = options.unattendedExecution ? undefined : options.mcpManager;
-	const ownsMcpManager = !options.unattendedExecution && mcpManager === undefined;
+	const mcpDisabled = options.unattendedExecution !== undefined || childWriteDenied;
+	let mcpManager = mcpDisabled ? undefined : options.mcpManager;
+	const ownsMcpManager = !mcpDisabled && mcpManager === undefined;
 	let completed = false;
 
 	try {
@@ -371,7 +377,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 				store.close();
 			}
 		}
-		if (!options.unattendedExecution) {
+		if (!mcpDisabled) {
 			mcpManager ??= await McpManager.create({
 				settingsManager,
 				authStorage,
@@ -504,7 +510,6 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			modelFallbackMessage = modelFallbackMessage ? `${modelFallbackMessage}. ${warning}` : warning;
 		}
 
-		const isChildAgent = sessionManager.getHeader()?.agent !== undefined;
 		const defaultActiveToolNames: ToolName[] = [
 			"read",
 			"grep",
@@ -516,12 +521,14 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 				? (["describe_image"] as const)
 				: []),
 			...(settingsManager.getWebSearchSettings().enabled ? (["web_search"] as const) : []),
-			...(isChildAgent ? [] : (["set_tasks", "get_goal", "create_goal", "update_goal"] as const)),
+			...(suppliedSessionManager?.getHeader()?.agent
+				? []
+				: (["set_tasks", "get_goal", "create_goal", "update_goal"] as const)),
 		];
 		const allowedToolNames = options.unattendedExecution
 			? [...UNATTENDED_TOOL_NAMES]
 			: (options.tools ?? (options.noTools === "all" ? [] : undefined));
-		const excludedToolNames = isChildAgent
+		const excludedToolNames = suppliedSessionManager?.getHeader()?.agent
 			? [...new Set([...(options.excludeTools ?? []), "set_tasks", "get_goal", "create_goal", "update_goal"])]
 			: options.excludeTools;
 		const excludedToolNameSet = excludedToolNames ? new Set(excludedToolNames) : undefined;

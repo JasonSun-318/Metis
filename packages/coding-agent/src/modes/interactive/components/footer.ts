@@ -186,11 +186,7 @@ export class FooterComponent implements Component {
 		const thinkingLevel = this.session.getThinkingSelection?.() ?? state.thinkingLevel ?? "off";
 		if (state.model?.reasoning || thinkingLevel === "ultra") {
 			rightSideWithoutProvider =
-				thinkingLevel === "off"
-					? `${modelName} • thinking off`
-					: thinkingLevel === "ultra"
-						? `${modelName} • ultra · multi-agent`
-						: `${modelName} • ${thinkingLevel}`;
+				thinkingLevel === "off" ? `${modelName} • thinking off` : `${modelName} • ${thinkingLevel}`;
 		}
 
 		// Prepend the provider in parentheses if there are multiple providers and there's enough room

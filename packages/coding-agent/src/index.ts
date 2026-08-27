@@ -546,6 +546,7 @@ export {
 	buildChildSystemPrompt,
 	safePromptJson,
 } from "./core/subagents/prompts.ts";
+export { agentTaskWindow } from "./core/subagents/trace.ts";
 export {
 	AGENT_TOOL_NAMES,
 	type AgentConfig,

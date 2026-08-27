@@ -47,6 +47,7 @@ export interface PermissionActor {
 	readonly type: "agent";
 	readonly id: string;
 	readonly name: string;
+	readonly taskId: string;
 }
 
 export interface PermissionApprovalRequest {
@@ -530,6 +531,7 @@ export function formatPermissionApproval(request: PermissionApprovalRequest): Pe
 	const { action: value } = request;
 	const lines = [
 		request.actor ? `Agent: ${request.actor.name} (${request.actor.id})` : undefined,
+		request.actor ? `Task: ${request.actor.taskId}` : undefined,
 		request.executionTarget === "sandbox" ? undefined : DIRECT_HOST_WARNING,
 		value.toolName === "bash"
 			? request.executionTarget === "sandbox"

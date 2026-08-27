@@ -17,6 +17,12 @@ export const AGENT_TOOL_NAMES = [
 ] as const;
 
 export const AGENT_TYPES = ["default", "explorer", "worker", "reviewer"] as const;
+export const MAX_AGENT_INPUT_UTF8_BYTES = 64 * 1024;
+export const MAX_AGENT_QUEUED_TASKS = 32;
+export const MAX_AGENT_TASKS = 256;
+export const MAX_AGENT_MAILBOX_PENDING_EVENTS = 256;
+export const MAX_AGENT_MAILBOX_DELIVERY_EVENTS = 8;
+export const MAX_AGENT_MAILBOX_DELIVERY_UTF8_BYTES = 32 * 1024;
 export type AgentToolName = (typeof AGENT_TOOL_NAMES)[number];
 export type AgentType = (typeof AGENT_TYPES)[number];
 export type AgentStatus = "queued" | "running" | "done" | "failed" | "stopped";
@@ -197,8 +203,6 @@ export interface AgentTombstone {
 	readonly agentId: string;
 	readonly name: string;
 	readonly status: "deleted";
-	readonly taskSummary: string;
-	readonly finalMessage?: string;
 	readonly deletedAt: string;
 }
 
@@ -218,7 +222,12 @@ export interface AgentMailboxTerminalEvent {
 export type AgentManagerEvent =
 	| { readonly type: "updated"; readonly summary: AgentSummary }
 	| { readonly type: "deleted"; readonly agentId: string; readonly deletedAgentIds: readonly string[] }
-	| { readonly type: "activity"; readonly agentId: string; readonly taskId: string; readonly event: AgentTraceEvent }
+	| {
+			readonly type: "activity";
+			readonly agentId: string;
+			readonly taskId: string;
+			readonly event: AgentVisibleActivity;
+	  }
 	| {
 			readonly type: "approval_required";
 			readonly summary: AgentSummary;

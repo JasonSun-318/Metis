@@ -1,12 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { AgentSummary } from "../src/core/subagents/types.ts";
-import {
-	normalizeWaitAgentIds,
-	pendingApprovalAgentIds,
-	pendingMailboxAgentIds,
-	selectedLiveAgents,
-	waitAgentsSnapshot,
-} from "../src/core/subagents/wait.ts";
+import { normalizeWaitAgentIds, waitAgentsSnapshot } from "../src/core/subagents/wait.ts";
 
 function summary(agentId: string, status: AgentSummary["status"], archived = false): AgentSummary {
 	return {
@@ -31,14 +25,6 @@ describe("agent wait helpers", () => {
 		for (const invalid of [[], ["a", "a"], Array.from({ length: 9 }, (_, index) => `agent-${index}`)]) {
 			expect(() => normalizeWaitAgentIds(invalid)).toThrow(/1-8 unique agent IDs/);
 		}
-	});
-
-	it("maps pending terminal mailbox events to selected agent ids", () => {
-		const ids = pendingMailboxAgentIds(
-			["agent:child-1:task-1:terminal", "agent:child-2:task-2:terminal", "other:event"],
-			new Set(["child-1", "child-3"]),
-		);
-		expect(ids).toEqual(["child-1"]);
 	});
 
 	it("returns approval attention before a terminal mailbox event", () => {
@@ -70,7 +56,23 @@ describe("agent wait helpers", () => {
 			mailboxEventIds: ["agent:child-1:task-1:terminal"],
 		});
 		expect(waitAgentsSnapshot([summary("child-1", "running")], new Set(["child-1"]), [], new Map())).toBe(undefined);
-		expect(selectedLiveAgents([done], new Set(["child-1"]))).toBe(false);
-		expect(pendingApprovalAgentIds(["child-2"], new Set(["child-2"]))).toEqual(["child-2"]);
+	});
+
+	it("returns when any selected agent is terminal even if another remains live", () => {
+		const done = summary("child-1", "done");
+		const running = summary("child-2", "running");
+		expect(waitAgentsSnapshot([done, running], new Set(["child-1", "child-2"]), [], new Map())).toEqual({
+			timedOut: false,
+			agents: [done, running],
+			mailboxEventIds: [],
+		});
+	});
+
+	it("limits each mailbox wake-up to one bounded delivery batch", () => {
+		const done = summary("child-1", "done");
+		const eventIds = Array.from({ length: 9 }, (_, index) => `agent:child-1:task-${index}:terminal`);
+		expect(waitAgentsSnapshot([done], new Set(["child-1"]), eventIds, new Map())?.mailboxEventIds).toEqual(
+			eventIds.slice(0, 8),
+		);
 	});
 });

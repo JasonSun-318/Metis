@@ -292,6 +292,7 @@ export {
 	buildChildSystemPrompt,
 	safePromptJson,
 } from "./subagents/prompts.ts";
+export { agentTaskWindow } from "./subagents/trace.ts";
 export {
 	AGENT_TOOL_NAMES,
 	type AgentConfig,

@@ -30,6 +30,7 @@ import { SessionManager } from "./session-manager.ts";
 import { removeOwnedManagedWorkspace, resolveNewSessionWorkspace } from "./session-workspace.ts";
 import { SubagentManager } from "./subagents/manager.ts";
 import { AGENT_COORDINATION_PROMPT } from "./subagents/prompts.ts";
+import { AgentStore } from "./subagents/store.ts";
 import { createSubagentTools } from "./subagents/tools.ts";
 import { AGENT_TOOL_NAMES, type AgentConfig } from "./subagents/types.ts";
 
@@ -246,6 +247,7 @@ export class AgentSessionRuntime {
 	private readonly pendingAgentContinuationIds = new Set<string>();
 	private readonly attemptedAgentContinuationIds = new Set<string>();
 	private agentContinuationTask?: Promise<void>;
+	private subagentsInitialized = false;
 
 	constructor(
 		_session: AgentSession,
@@ -269,7 +271,10 @@ export class AgentSessionRuntime {
 		this.hostCwd = resolvePath(hostCwd);
 		this.queuedTurnQueue = new QueuedTurnQueue(_session.sessionManager);
 		this.bindDurableSession(_session);
-		this.bindSubagents(_session);
+		if (inheritedSubagentManager) {
+			this.bindSubagents(_session);
+			this.subagentsInitialized = true;
+		}
 	}
 
 	get services(): AgentSessionServices {
@@ -323,7 +328,23 @@ export class AgentSessionRuntime {
 
 	async initializeSubagents(): Promise<void> {
 		this.assertPubliclyAccessible();
-		await this.subagentManagerValue?.recoverDeleteMarkers();
+		if (this.subagentsInitialized) return;
+		await this.recoverSubagentDeletes(this._session);
+		this.bindSubagents(this._session);
+		this.subagentsInitialized = true;
+	}
+
+	private async recoverSubagentDeletes(session: AgentSession): Promise<void> {
+		const header = session.sessionManager.getHeader();
+		if (
+			this.inheritedSubagentManager ||
+			!session.sessionManager.isPersisted() ||
+			header?.agent ||
+			header?.scheduled ||
+			session.mode !== "code"
+		)
+			return;
+		await new AgentStore(session.sessionManager, this._services.agentDir).recoverDeleteMarkers();
 	}
 
 	private bindDurableSession(session: AgentSession): void {
@@ -335,6 +356,7 @@ export class AgentSessionRuntime {
 	}
 
 	private bindSubagents(session: AgentSession): void {
+		session.setCollaborationModeGuard(undefined);
 		this.pendingAgentContinuationIds.clear();
 		this.attemptedAgentContinuationIds.clear();
 		this.agentContinuationTask = undefined;
@@ -367,6 +389,7 @@ export class AgentSessionRuntime {
 			});
 			if (header.agent.mayDelegate) this.installAgentControlTools(session);
 			this.syncAgentCapabilities(session, header.agent);
+			this.resumePendingAgentContinuations(session);
 			return;
 		}
 
@@ -381,6 +404,7 @@ export class AgentSessionRuntime {
 			this.subagentActorDetach = this.inheritedSubagentManager.attachActor(session);
 			if (session.mode === "code") this.installAgentControlTools(session);
 			this.syncAgentCapabilities(session);
+			this.resumePendingAgentContinuations(session);
 			return;
 		}
 
@@ -415,6 +439,9 @@ export class AgentSessionRuntime {
 		});
 		this.subagentManagerValue = manager;
 		this.ownsSubagentCoordinator = true;
+		session.setCollaborationModeGuard((mode) => {
+			if (mode === "plan") manager.assertCanEnterPlan(session.sessionManager.getSessionId());
+		});
 		if (session.mode === "code") this.installAgentControlTools(session);
 		this.subagentManagerUnsubscribe = manager.subscribe((event) => {
 			this.syncAgentCapabilities(session);
@@ -432,6 +459,7 @@ export class AgentSessionRuntime {
 		});
 		this.subagentActorDetach = manager.attachActor(session);
 		this.syncAgentCapabilities(session);
+		this.resumePendingAgentContinuations(session);
 	}
 
 	private installAgentControlTools(session: AgentSession): void {
@@ -448,6 +476,12 @@ export class AgentSessionRuntime {
 		if (session !== this._session || this.disposeRequested || this.disposed) return;
 		this.pendingAgentContinuationIds.add(eventId);
 		this.scheduleAgentContinuation(session);
+	}
+
+	private resumePendingAgentContinuations(session: AgentSession): void {
+		for (const eventId of session.getPendingAgentMailboxEventIds()) {
+			this.requestAgentContinuation(session, eventId);
+		}
 	}
 
 	private scheduleAgentContinuation(session: AgentSession): void {
@@ -491,10 +525,15 @@ export class AgentSessionRuntime {
 		if (unattempted.length === 0) return;
 		for (const eventId of unattempted) this.attemptedAgentContinuationIds.add(eventId);
 
-		await session.continueAgentMailbox(unattempted);
+		const continued = await session.continueAgentMailbox(unattempted);
 		const remaining = new Set(session.getPendingAgentMailboxEventIds());
 		for (const eventId of [...this.pendingAgentContinuationIds]) {
 			if (!remaining.has(eventId)) this.pendingAgentContinuationIds.delete(eventId);
+		}
+		if (continued) {
+			for (const eventId of unattempted) {
+				if (remaining.has(eventId)) this.attemptedAgentContinuationIds.delete(eventId);
+			}
 		}
 	}
 
@@ -1187,8 +1226,8 @@ export class AgentSessionRuntime {
 		this.queuedTurnQueue = new QueuedTurnQueue(prepared.result.session.sessionManager);
 		this.submissionDisabled = false;
 		this.bindDurableSession(prepared.result.session);
+		await this.recoverSubagentDeletes(prepared.result.session);
 		this.bindSubagents(prepared.result.session);
-		await this.subagentManagerValue?.recoverDeleteMarkers();
 		this.emitQueuedTurns();
 	}
 

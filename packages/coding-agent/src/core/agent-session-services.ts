@@ -42,6 +42,8 @@ export interface AgentSessionRuntimeDiagnostic {
 export interface CreateAgentSessionServicesOptions {
 	cwd: string;
 	agentDir?: string;
+	/** @internal Prevent child runtimes from loading executable extension code. */
+	isolatedChild?: boolean;
 	/** Runtime-owned auth view. Use separate instances when runtimes share one credential file. */
 	authStorage?: AuthStorage;
 	settingsManager?: SettingsManager;
@@ -163,7 +165,15 @@ export async function createAgentSessionServices(
 		options.modelRegistry?.authStorage ?? options.authStorage ?? AuthStorage.create(join(agentDir, "auth.json"));
 	const settingsManager = options.settingsManager ?? SettingsManager.create(cwd, agentDir);
 	const modelRegistry = options.modelRegistry ?? ModelRegistry.create(authStorage, join(agentDir, "models.json"));
-	const resourceLoaderOptions = options.resourceLoaderOptions ?? {};
+	const requestedResourceLoaderOptions = options.resourceLoaderOptions ?? {};
+	const resourceLoaderOptions = options.isolatedChild
+		? {
+				...requestedResourceLoaderOptions,
+				additionalExtensionPaths: [],
+				extensionFactories: [],
+				noExtensions: true,
+			}
+		: requestedResourceLoaderOptions;
 	// Declarative hooks from hooks.json ride along as an inline extension, but
 	// only when extensions load: unattended execution requires zero extensions.
 	const hooksBridge = resourceLoaderOptions.noExtensions ? undefined : createDeclarativeHooksBridge(agentDir);

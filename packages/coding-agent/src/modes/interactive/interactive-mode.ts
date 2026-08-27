@@ -4108,7 +4108,7 @@ export class InteractiveMode {
 		} else {
 			this.footer.invalidate();
 			this.updateEditorBorderColor();
-			this.showStatus(newLevel === "ultra" ? "Thinking: Ultra · multi-agent" : `Thinking level: ${newLevel}`);
+			this.showStatus(`Thinking level: ${newLevel}`);
 		}
 	}
 

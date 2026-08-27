@@ -4,7 +4,7 @@ import { beforeAll, describe, expect, it, vi } from "vitest";
 import type { AgentSession } from "../src/core/agent-session.ts";
 import type { SubagentManager } from "../src/core/subagents/manager.ts";
 import { createSubagentTools } from "../src/core/subagents/tools.ts";
-import { AGENT_TOOL_NAMES } from "../src/core/subagents/types.ts";
+import { AGENT_TOOL_NAMES, MAX_AGENT_INPUT_UTF8_BYTES } from "../src/core/subagents/types.ts";
 import { ToolExecutionComponent } from "../src/modes/interactive/components/tool-execution.ts";
 import { initTheme } from "../src/modes/interactive/theme/theme.ts";
 import { stripAnsi } from "../src/utils/ansi.ts";
@@ -51,7 +51,7 @@ function setup() {
 			cancelledTaskIds: [],
 		})),
 	} as unknown as SubagentManager;
-	const stageAgentMailboxDelivery = vi.fn();
+	const stageAgentMailboxDelivery = vi.fn((eventIds: readonly string[]) => eventIds);
 	const session = {
 		sessionManager: { getSessionId: () => ACTOR_ID },
 		stageAgentMailboxDelivery,
@@ -73,7 +73,13 @@ describe("agent control tools", () => {
 		const followUp = tools.find((tool) => tool.name === "followup_task")!;
 		const wait = tools.find((tool) => tool.name === "wait_agents")!;
 		expect(Value.Check(spawn.parameters, { name: "researcher", task: "inspect", agentType: "explorer" })).toBe(true);
+		expect(Value.Check(spawn.parameters, { name: "researcher", task: "inspect", model: "together/Qwen/Qwen3" })).toBe(
+			true,
+		);
 		expect(Value.Check(spawn.parameters, { name: "researcher", task: "inspect", background: true })).toBe(false);
+		expect(
+			Value.Check(spawn.parameters, { name: "researcher", task: "x".repeat(MAX_AGENT_INPUT_UTF8_BYTES + 1) }),
+		).toBe(false);
 		expect(Value.Check(followUp.parameters, { agentId: "child-1", task: "continue", background: true })).toBe(false);
 		expect(Value.Check(wait.parameters, { agentIds: ["child-1"], timeoutMs: 10 })).toBe(true);
 		expect(Value.Check(wait.parameters, {})).toBe(false);
@@ -146,6 +152,119 @@ describe("agent control tools", () => {
 		expect(manager.interrupt).toHaveBeenCalledWith(ACTOR_ID, "child-1");
 	});
 
+	it("returns only compact wait identities, statuses, and terminal results to the model", async () => {
+		const { manager, tools } = setup();
+		vi.mocked(manager.waitAgents).mockResolvedValueOnce({
+			timedOut: false,
+			agents: [
+				{
+					agentId: "child-1",
+					name: "secret worker",
+					agentType: "worker",
+					depth: 1,
+					status: "done",
+					archived: false,
+					parentSessionId: ACTOR_ID,
+					rootSessionId: ACTOR_ID,
+					agentPath: ["child-1"],
+					tasks: [
+						{
+							taskId: "task-1",
+							taskSummary: "private task summary",
+							status: "done",
+							finalMessage: "SECRET_FINAL_TRANSCRIPT",
+							createdAt: new Date(0).toISOString(),
+							updatedAt: new Date(0).toISOString(),
+						},
+					],
+					latestTask: {
+						taskId: "task-1",
+						taskSummary: "private task summary",
+						status: "done",
+						finalMessage: "SECRET_FINAL_TRANSCRIPT",
+						createdAt: new Date(0).toISOString(),
+						updatedAt: new Date(0).toISOString(),
+					},
+					createdAt: new Date(0).toISOString(),
+					updatedAt: new Date(0).toISOString(),
+				},
+			],
+			mailboxEventIds: ["agent:child-1:task-1:terminal"],
+		});
+
+		const waited = await execute(tools.find((tool) => tool.name === "wait_agents")!, {
+			agentIds: ["child-1"],
+		});
+		const serialized = JSON.stringify(waited);
+		expect(waited.details).toEqual({
+			timedOut: false,
+			agents: [{ agentId: "child-1", taskId: "task-1", status: "done" }],
+			mailboxEventIds: ["agent:child-1:task-1:terminal"],
+			terminalResults: [
+				{
+					agentId: "child-1",
+					taskId: "task-1",
+					status: "done",
+					finalMessage: "SECRET_FINAL_TRANSCRIPT",
+				},
+			],
+		});
+		expect(serialized).toContain("SECRET_FINAL_TRANSCRIPT");
+		expect(serialized).not.toContain("private task summary");
+	});
+
+	it("returns the mailbox task result when a queued follow-up is already running", async () => {
+		const { manager, tools } = setup();
+		const createdAt = new Date(0).toISOString();
+		const first = {
+			taskId: "task-1",
+			taskSummary: "first private task",
+			status: "done" as const,
+			finalMessage: "first final",
+			createdAt,
+			updatedAt: createdAt,
+		};
+		const second = {
+			taskId: "task-2",
+			taskSummary: "second private task",
+			status: "running" as const,
+			createdAt,
+			updatedAt: createdAt,
+		};
+		vi.mocked(manager.waitAgents).mockResolvedValueOnce({
+			timedOut: false,
+			agents: [
+				{
+					agentId: "child-1",
+					name: "worker",
+					agentType: "worker",
+					depth: 1,
+					status: "running",
+					archived: false,
+					parentSessionId: ACTOR_ID,
+					rootSessionId: ACTOR_ID,
+					agentPath: ["child-1"],
+					tasks: [first, second],
+					currentTask: second,
+					latestTask: second,
+					createdAt,
+					updatedAt: createdAt,
+				},
+			],
+			mailboxEventIds: ["agent:child-1:task-1:terminal"],
+		});
+
+		const waited = await execute(tools.find((tool) => tool.name === "wait_agents")!, {
+			agentIds: ["child-1"],
+		});
+		expect(waited.details).toEqual({
+			timedOut: false,
+			agents: [{ agentId: "child-1", taskId: "task-2", status: "running" }],
+			mailboxEventIds: ["agent:child-1:task-1:terminal"],
+			terminalResults: [{ agentId: "child-1", taskId: "task-1", status: "done", finalMessage: "first final" }],
+		});
+	});
+
 	it("keeps full inspect activity behind expansion", async () => {
 		const { manager, tools } = setup();
 		const marker = "FULL_TRACE_PAYLOAD";
@@ -175,9 +294,13 @@ describe("agent control tools", () => {
 					text: marker,
 				},
 			],
+			nextBeforeEventId: "event-older",
 		});
 		const inspect = tools.find((tool) => tool.name === "inspect_agents")!;
 		const result = await execute(inspect, { agentId: "child-1", taskId: "task-1", limit: 10 });
+		const modelText = result.content.find((block) => block.type === "text")?.text ?? "";
+		expect(modelText).toContain("Task task-1");
+		expect(modelText).toContain("Next before event event-older");
 		const component = new ToolExecutionComponent(
 			"inspect_agents",
 			"call",
@@ -191,5 +314,99 @@ describe("agent control tools", () => {
 		expect(stripAnsi(component.render(120).join("\n"))).not.toContain(marker);
 		component.setExpanded(true);
 		expect(stripAnsi(component.render(120).join("\n"))).toContain(marker);
+	});
+
+	it("exposes compact relation, task identity, usage, and update time to the model", async () => {
+		const { manager, tools } = setup();
+		const at = new Date(0).toISOString();
+		const task = {
+			taskId: "task-1",
+			taskSummary: "review the boundary",
+			status: "done" as const,
+			finalMessage: "private full-history result",
+			usage: {
+				model: { provider: "faux", modelId: "faux" },
+				input: 3,
+				output: 5,
+				cacheRead: 0,
+				cacheWrite: 0,
+				elapsedMs: 10,
+				toolCalls: 2,
+			},
+			createdAt: at,
+			updatedAt: at,
+		};
+		vi.mocked(manager.inspect).mockResolvedValueOnce({
+			kind: "list",
+			agents: [
+				{
+					agentId: "child-1",
+					name: "reviewer",
+					agentType: "reviewer",
+					depth: 2,
+					status: "done",
+					archived: false,
+					parentSessionId: "parent-agent",
+					rootSessionId: ACTOR_ID,
+					agentPath: ["parent-agent", "child-1"],
+					tasks: [task],
+					latestTask: task,
+					createdAt: at,
+					updatedAt: at,
+				},
+			],
+			usage: { input: 3, output: 5, cacheRead: 0, cacheWrite: 0, elapsedMs: 10 },
+		});
+		const inspected = await execute(tools.find((tool) => tool.name === "inspect_agents")!, {});
+		const content = inspected.content.find((block) => block.type === "text")?.text ?? "";
+		expect(content).toContain("parent=parent-agent depth=2");
+		expect(content).toContain("Latest task task-1");
+		expect(content).toContain("input=3 output=5 toolCalls=2");
+		expect(content).toContain(`updated=${at}`);
+		expect(JSON.stringify(inspected.details)).not.toContain("private full-history result");
+		expect(inspected.details).not.toHaveProperty("agents.0.tasks");
+	});
+
+	it("returns terminal results only for the mailbox ids actually staged", async () => {
+		const { manager, stageAgentMailboxDelivery, tools } = setup();
+		const at = new Date(0).toISOString();
+		const tasks = ["task-1", "task-2"].map((taskId) => ({
+			taskId,
+			taskSummary: taskId,
+			status: "done" as const,
+			finalMessage: `${taskId} final`,
+			createdAt: at,
+			updatedAt: at,
+		}));
+		vi.mocked(stageAgentMailboxDelivery).mockReturnValueOnce(["agent:child-1:task-1:terminal"]);
+		vi.mocked(manager.waitAgents).mockResolvedValueOnce({
+			timedOut: false,
+			agents: [
+				{
+					agentId: "child-1",
+					name: "worker",
+					agentType: "worker",
+					depth: 1,
+					status: "done",
+					archived: false,
+					parentSessionId: ACTOR_ID,
+					rootSessionId: ACTOR_ID,
+					agentPath: ["child-1"],
+					tasks,
+					latestTask: tasks[1],
+					createdAt: at,
+					updatedAt: at,
+				},
+			],
+			mailboxEventIds: ["agent:child-1:task-1:terminal", "agent:child-1:task-2:terminal"],
+		});
+		const waited = await execute(tools.find((tool) => tool.name === "wait_agents")!, {
+			agentIds: ["child-1"],
+		});
+		expect(waited.details).toMatchObject({
+			mailboxEventIds: ["agent:child-1:task-1:terminal"],
+			terminalResults: [{ taskId: "task-1", finalMessage: "task-1 final" }],
+		});
+		expect(JSON.stringify(waited.details)).not.toContain("task-2 final");
 	});
 });

@@ -831,6 +831,7 @@ export async function main(args: string[], options?: MainOptions) {
 			const services = await createAgentSessionServices({
 				cwd,
 				agentDir,
+				isolatedChild: childConfig?.writePolicy === "deny",
 				authStorage,
 				settingsManager: runtimeSettingsManager,
 				extensionFlagValues: parsed.unknownFlags,
@@ -863,14 +864,14 @@ export async function main(args: string[], options?: MainOptions) {
 					additionalSkillPaths: childConfig ? [] : resolvedSkillPaths,
 					additionalPromptTemplatePaths: childConfig ? [] : resolvedPromptTemplatePaths,
 					additionalThemePaths: childConfig ? [] : resolvedThemePaths,
-					noExtensions: parsed.noExtensions,
+					noExtensions: childConfig?.writePolicy === "deny" ? true : parsed.noExtensions,
 					noSkills: childConfig ? true : parsed.noSkills,
 					noPromptTemplates: childConfig ? true : parsed.noPromptTemplates,
 					noThemes: childConfig ? true : parsed.noThemes,
 					noContextFiles: parsed.noContextFiles,
 					systemPrompt: childConfig ? undefined : parsed.systemPrompt,
 					appendSystemPrompt: childConfig ? undefined : parsed.appendSystemPrompt,
-					extensionFactories: options?.extensionFactories,
+					extensionFactories: childConfig?.writePolicy === "deny" ? [] : options?.extensionFactories,
 					...(childConfig
 						? {
 								systemPromptOverride: () => undefined,

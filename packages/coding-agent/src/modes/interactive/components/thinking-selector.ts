@@ -35,7 +35,7 @@ export class ThinkingSelectorComponent extends Container {
 
 		const thinkingLevels: SelectItem[] = availableLevels.map((level) => ({
 			value: level,
-			label: level === "ultra" ? "Ultra · multi-agent" : level,
+			label: level,
 			description: LEVEL_DESCRIPTIONS[level],
 		}));
 

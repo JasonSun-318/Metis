@@ -526,7 +526,7 @@ export class SettingsSelectorComponent extends Container {
 						"Select reasoning depth for thinking-capable models",
 						config.availableThinkingSelections.map((level) => ({
 							value: level,
-							label: level === "ultra" ? "Ultra · multi-agent" : level,
+							label: level,
 							description: THINKING_DESCRIPTIONS[level],
 						})),
 						currentValue,

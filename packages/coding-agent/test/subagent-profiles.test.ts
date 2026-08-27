@@ -13,6 +13,8 @@ const parentTools = [
 	"web_fetch",
 	"web_search",
 	"spawn_agent",
+	"ask_user",
+	"deliver_file",
 	"get_goal",
 	"custom_mcp_write",
 ];

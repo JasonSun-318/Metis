@@ -2,7 +2,15 @@ import { AGENT_TOOL_NAMES, type AgentType } from "./types.ts";
 
 const READ_TOOLS = new Set(["read", "grep", "find", "ls", "web_fetch", "web_search"]);
 const REVIEW_TOOLS = new Set(["read", "grep", "find", "ls", "bash"]);
-const RESERVED_TOOLS = new Set<string>([...AGENT_TOOL_NAMES, "set_tasks", "get_goal", "create_goal", "update_goal"]);
+const RESERVED_TOOLS = new Set<string>([
+	...AGENT_TOOL_NAMES,
+	"ask_user",
+	"deliver_file",
+	"set_tasks",
+	"get_goal",
+	"create_goal",
+	"update_goal",
+]);
 
 export const AGENT_TYPE_CATALOG: Readonly<Record<AgentType, string>> = Object.freeze({
 	default: "General analysis and execution; use when no narrower type fits.",

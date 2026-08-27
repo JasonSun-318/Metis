@@ -28,6 +28,17 @@ function journal(): FileEntry[] {
 			status: "queued",
 		}),
 		entry({
+			type: "agent_task",
+			id: "task-record-running",
+			parentId: null,
+			timestamp: "2026-01-01T00:00:01.500Z",
+			agentId: "child-1",
+			taskId: TASK_ID,
+			text: "Review the patch",
+			taskSummary: "Review the patch",
+			status: "running",
+		}),
+		entry({
 			type: "message",
 			id: "user-1",
 			parentId: "header",
@@ -134,10 +145,110 @@ describe("projectAgentTrace", () => {
 		}
 	});
 
+	it("keeps queued-never-run tasks empty and does not borrow another task's messages", () => {
+		const secondTaskId = "task-2";
+		const overlapping = [
+			...journal().slice(0, 3),
+			entry({
+				type: "agent_task",
+				id: "task-2-queued",
+				timestamp: "2026-01-01T00:00:02.000Z",
+				agentId: "child-1",
+				taskId: secondTaskId,
+				text: "Queued follow-up",
+				taskSummary: "Queued follow-up",
+				status: "queued",
+			}),
+			entry({
+				type: "message",
+				id: "other-task-message",
+				timestamp: "2026-01-01T00:00:03.000Z",
+				message: { role: "assistant", content: [{ type: "text", text: "belongs to task 1" }] },
+			}),
+			entry({
+				type: "agent_task",
+				id: "task-2-stopped",
+				timestamp: "2026-01-01T00:00:04.000Z",
+				agentId: "child-1",
+				taskId: secondTaskId,
+				text: "Queued follow-up",
+				taskSummary: "Queued follow-up",
+				status: "stopped",
+			}),
+		];
+
+		expect(projectAgentTrace({ journal: overlapping, taskId: secondTaskId }).events).toEqual([]);
+	});
+
+	it("does not label errored assistant text as a final reply", () => {
+		const failed = journal().map((candidate) =>
+			candidate.type === "message" && candidate.id === "assistant-1"
+				? entry({
+						...candidate,
+						message: {
+							role: "assistant",
+							stopReason: "error",
+							content: [{ type: "text", text: "provider failed" }],
+						},
+					})
+				: candidate.type === "agent_task" && candidate.status === "done"
+					? entry({ ...candidate, status: "failed", reason: "error" })
+					: candidate,
+		);
+		const result = projectAgentTrace({ journal: failed, taskId: TASK_ID });
+		expect(result.events).toContainEqual(expect.objectContaining({ kind: "llm", text: "provider failed" }));
+		expect(result.events.some((event) => event.kind === "final")).toBe(false);
+	});
+
+	it("does not project stopped task output as a final reply", () => {
+		const stopped = journal().map((candidate) =>
+			candidate.type === "agent_task" && candidate.status === "done"
+				? entry({ ...candidate, status: "stopped", reason: "interrupted" })
+				: candidate,
+		);
+		const result = projectAgentTrace({ journal: stopped, taskId: TASK_ID });
+		expect(result.events).toContainEqual(expect.objectContaining({ kind: "llm", text: "Checking files." }));
+		expect(result.events.some((event) => event.kind === "final")).toBe(false);
+	});
+
+	it("does not promote older assistant text when the last assistant still calls a tool", () => {
+		const base = journal().filter((candidate) => !(candidate.type === "agent_task" && candidate.status === "done"));
+		const withTrailingToolCall = [
+			...base,
+			entry({
+				type: "message",
+				id: "assistant-2",
+				timestamp: "2026-01-01T00:00:05.500Z",
+				message: {
+					role: "assistant",
+					stopReason: "toolUse",
+					content: [
+						{ type: "text", text: "One more check." },
+						{ type: "toolCall", id: "call-2", name: "grep", arguments: { pattern: "TODO" } },
+					],
+				},
+			}),
+			entry({
+				type: "agent_task",
+				id: "task-record-done",
+				timestamp: "2026-01-01T00:00:06.000Z",
+				agentId: "child-1",
+				taskId: TASK_ID,
+				text: "Review the patch",
+				taskSummary: "Review the patch",
+				status: "done",
+			}),
+		];
+		const result = projectAgentTrace({ journal: withTrailingToolCall, taskId: TASK_ID });
+		expect(result.events).toContainEqual(expect.objectContaining({ kind: "llm", text: "Checking files." }));
+		expect(result.events).toContainEqual(expect.objectContaining({ kind: "llm", text: "One more check." }));
+		expect(result.events.some((event) => event.kind === "final")).toBe(false);
+	});
+
 	it("truncates oversized text events and enforces the page budget", () => {
 		const huge = "x".repeat(MAX_TRACE_EVENT_UTF8_BYTES + 128);
 		const heavyJournal = [
-			...journal().slice(0, 2),
+			...journal().slice(0, 3),
 			entry({
 				type: "message",
 				id: "assistant-huge",
@@ -164,6 +275,7 @@ describe("projectAgentTrace", () => {
 		const budgetJournal: FileEntry[] = [
 			journal()[0]!,
 			journal()[1]!,
+			journal()[2]!,
 			...Array.from({ length: 5 }, (_, index) =>
 				entry({
 					type: "message",

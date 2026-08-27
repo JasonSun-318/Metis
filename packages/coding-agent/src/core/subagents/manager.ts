@@ -17,7 +17,7 @@ import {
 	agentStatusFromTasks,
 	summarizeAgentTask,
 } from "./store.ts";
-import { projectAgentTrace, utf8Length, utf8Prefix } from "./trace.ts";
+import { agentTaskWindow, projectAgentTrace, utf8Length, utf8Prefix } from "./trace.ts";
 import {
 	AGENT_TOOL_NAMES,
 	type AgentConfig,
@@ -35,6 +35,10 @@ import {
 	type InspectAgentsInput,
 	type InspectAgentsResult,
 	type InterruptAgentResult,
+	MAX_AGENT_INPUT_UTF8_BYTES,
+	MAX_AGENT_MAILBOX_PENDING_EVENTS,
+	MAX_AGENT_QUEUED_TASKS,
+	MAX_AGENT_TASKS,
 	type WaitAgentsInput,
 	type WaitAgentsResult,
 } from "./types.ts";
@@ -99,9 +103,9 @@ export interface SubagentManagerApi {
 	deleteAgent(actorId: string, agentId: string): Promise<DeleteAgentResult>;
 	listSummaries(actorId: string, includeArchived?: boolean): readonly AgentSummary[];
 	listTasks(agentId: string): readonly AgentTaskSummary[];
+	assertCanEnterPlan(actorId: string): void;
 	readJournal(actorId: string, agentId: string): Promise<readonly FileEntry[]>;
 	subscribe(listener: (event: AgentManagerEvent) => void): () => void;
-	recoverDeleteMarkers(): Promise<void>;
 	unload(reason: "parent_unloaded"): Promise<void>;
 }
 
@@ -139,19 +143,25 @@ function selectChildThinkingLevel(
 		const level = THINKING_LEVELS[index];
 		if (level && supported.includes(level)) return level;
 	}
-	return supported[0];
+	return undefined;
 }
 
-function lastAssistant(session: AgentSession): { stopReason?: string; errorMessage?: string } | undefined {
-	return [...session.messages].reverse().find((candidate) => candidate.role === "assistant") as
-		| { stopReason?: string; errorMessage?: string }
-		| undefined;
+function taskAssistant(
+	journal: readonly FileEntry[],
+	taskId: string,
+): { readonly content?: unknown; readonly stopReason?: string; readonly errorMessage?: string } | undefined {
+	const window = agentTaskWindow(journal, taskId);
+	if (!window) return undefined;
+	const entry = journal
+		.slice(window.start, window.end + 1)
+		.reverse()
+		.find((candidate) => candidate.type === "message" && candidate.message.role === "assistant");
+	return entry?.type === "message"
+		? (entry.message as { readonly content?: unknown; readonly stopReason?: string; readonly errorMessage?: string })
+		: undefined;
 }
 
-function assistantText(session: AgentSession): string | undefined {
-	const message = [...session.messages].reverse().find((candidate) => candidate.role === "assistant") as
-		| { content?: unknown }
-		| undefined;
+function assistantText(message: { readonly content?: unknown } | undefined): string | undefined {
 	if (!message) return undefined;
 	if (typeof message.content === "string") return utf8Prefix(message.content, 4 * 1024);
 	if (!Array.isArray(message.content)) return undefined;
@@ -166,6 +176,16 @@ function assistantText(session: AgentSession): string | undefined {
 		.map((block) => block.text)
 		.join("\n");
 	return text ? utf8Prefix(text, 4 * 1024) : undefined;
+}
+
+function assistantHasToolCalls(message: { readonly content?: unknown } | undefined): boolean {
+	return (
+		Array.isArray(message?.content) &&
+		message.content.some(
+			(block) =>
+				typeof block === "object" && block !== null && (block as { readonly type?: unknown }).type === "toolCall",
+		)
+	);
 }
 
 function isInside(root: string, target: string): boolean {
@@ -253,10 +273,13 @@ export class SubagentManager implements SubagentManagerApi {
 			}),
 		};
 		this.actors.set(sessionId, attached);
-		if (sessionId === this.rootSessionId) {
+		if (
+			sessionId === this.rootSessionId ||
+			this.store.listTree().agents.some((record) => record.agentId === sessionId)
+		) {
 			this.narrowDescendantsTo(sessionId, session.sessionManager.getPermissionSettings().mode);
-			this.recoverMailboxEvents(session);
 		}
+		this.recoverMailboxEvents(session);
 		return () => {
 			const current = this.actors.get(sessionId);
 			if (current === attached) {
@@ -275,13 +298,21 @@ export class SubagentManager implements SubagentManagerApi {
 		this.assertActive();
 		const actor = this.requireActor(actorId);
 		if (actor.mode !== "code") throw new AgentError("INVALID_STATE", "Agents can start only from a Code session");
-		if (!input.name || input.name.length > 128 || /[\u0000-\u001f\u007f-\u009f]/u.test(input.name)) {
-			throw new AgentError("INVALID_INPUT", "Agent name must be 1-128 characters with no control characters");
+		if (
+			!input.name ||
+			input.name.trim() !== input.name ||
+			input.name.length > 128 ||
+			/[\u0000-\u001f\u007f-\u009f]/u.test(input.name)
+		) {
+			throw new AgentError(
+				"INVALID_INPUT",
+				"Agent name must be 1-128 trimmed characters with no control characters",
+			);
 		}
 		if (actorId !== this.rootSessionId) this.assertOperable(actorId);
 		const summary = summarizeAgentTask(input.task);
-		if (!summary || utf8Length(input.task) > 2 * 1024 * 1024) {
-			throw new AgentError("INVALID_INPUT", "Agent task must be non-empty and at most 2 MiB");
+		if (!summary || utf8Length(input.task) > MAX_AGENT_INPUT_UTF8_BYTES) {
+			throw new AgentError("INVALID_INPUT", "Agent task must be non-empty and at most 64 KiB");
 		}
 		if (
 			input.forkTurns !== undefined &&
@@ -294,19 +325,28 @@ export class SubagentManager implements SubagentManagerApi {
 		if (tree.diagnostics.length > 0) {
 			throw new AgentError("INVALID_STATE", "Cannot create an agent while an existing child session is unreadable");
 		}
+		if (
+			tree.agents.flatMap((record) => record.tasks).filter((task) => task.status === "queued").length >=
+			MAX_AGENT_QUEUED_TASKS
+		) {
+			throw new AgentError("QUEUE_FULL", `Agent task queue is limited to ${MAX_AGENT_QUEUED_TASKS} tasks`);
+		}
 		const actorPath = this.actorPath(actorId);
 		const depth = actorPath.length + 1;
 		if (depth > MAX_AGENT_DEPTH) {
 			throw new AgentError("DEPTH_LIMIT", `Agent depth cannot exceed ${MAX_AGENT_DEPTH}`);
 		}
-		const names = new Set(this.store.listTree().agents.map((candidate) => candidate.name));
+		const names = new Set(tree.agents.map((candidate) => candidate.name));
 		for (const tombstone of this.store.listTombstones()) names.add(tombstone.name);
 		if (names.has(input.name))
 			throw new AgentError("INVALID_INPUT", `Agent name has already been used: ${input.name}`);
 		const agentType = input.agentType ?? "default";
+		const inheritedWriteDenied =
+			actor.sessionManager.getCollaborationMode() === "plan" ||
+			actor.sessionManager.getHeader()?.agent?.writePolicy === "deny";
 		const profile = resolveAgentProfile({
 			agentType,
-			parentTools: actor.getActiveToolNames(),
+			parentTools: actor.getDelegatableToolNames(inheritedWriteDenied ? "deny" : "inherit"),
 			depth,
 		});
 		const parentMode = actor.sessionManager.getPermissionSettings().mode;
@@ -323,7 +363,7 @@ export class SubagentManager implements SubagentManagerApi {
 			agentType: profile.agentType,
 			initialTask: input.task,
 			tools: [...profile.tools],
-			writePolicy: profile.writePolicy,
+			writePolicy: inheritedWriteDenied ? "deny" : profile.writePolicy,
 			permissionMode: parentMode,
 			model: { provider: model.provider, modelId: model.id },
 			thinkingLevel,
@@ -338,6 +378,7 @@ export class SubagentManager implements SubagentManagerApi {
 		this.store.create(config, actor.messages, taskId);
 		this.childPermissionCeilings.set(agentId, parentMode);
 		const status = this.scheduleNext(agentId) ?? "queued";
+		this.emitUpdate(this.buildSummary(this.store.load(agentId)));
 		return { agentId, taskId, status, name: config.name, agentType: config.agentType };
 	}
 
@@ -347,10 +388,14 @@ export class SubagentManager implements SubagentManagerApi {
 			throw new AgentError("INVALID_INPUT", "Inspect limit must be from 1 through 100");
 		}
 		if (!input.agentId) {
+			if (input.taskId || input.beforeEventId) {
+				throw new AgentError("INVALID_INPUT", "inspect_agents requires agentId with taskId or beforeEventId");
+			}
+			const summaries = this.listSummaries(actorId);
 			return {
 				kind: "list",
-				agents: this.listSummaries(actorId).slice(0, limit),
-				usage: this.aggregateUsage(this.listSummaries(actorId)),
+				agents: summaries.slice(0, limit),
+				usage: this.aggregateUsage(summaries),
 			};
 		}
 		const record = this.assertDescendant(actorId, input.agentId);
@@ -377,8 +422,8 @@ export class SubagentManager implements SubagentManagerApi {
 		signal?.throwIfAborted();
 		this.assertDescendant(actorId, input.agentId);
 		this.assertOperable(input.agentId);
-		if (!input.message || utf8Length(input.message) > 2 * 1024 * 1024) {
-			throw new AgentError("INVALID_INPUT", "Agent message must be non-empty and at most 2 MiB");
+		if (!input.message || utf8Length(input.message) > MAX_AGENT_INPUT_UTF8_BYTES) {
+			throw new AgentError("INVALID_INPUT", "Agent message must be non-empty and at most 64 KiB");
 		}
 		const hot = this.hot.get(input.agentId);
 		if (!hot) {
@@ -393,7 +438,26 @@ export class SubagentManager implements SubagentManagerApi {
 			text: input.message,
 			state: "accepted",
 		});
-		await hot.runtime.submitPrompt({ requestId: messageId, text: input.message, streamingBehavior: "steer" });
+		try {
+			await hot.runtime.submitPrompt({ requestId: messageId, text: input.message, streamingBehavior: "steer" });
+		} catch (error) {
+			try {
+				hot.runtime.session.sessionManager.appendAgentControl({
+					type: "agent_message",
+					agentId: input.agentId,
+					taskId: hot.taskId,
+					messageId,
+					text: input.message,
+					state: "cancelled",
+				});
+			} catch (compensationError) {
+				throw new AggregateError(
+					[error, compensationError],
+					"Agent message admission and cancellation both failed",
+				);
+			}
+			throw error;
+		}
 		return { agentId: input.agentId, taskId: hot.taskId, delivery: "accepted" };
 	}
 
@@ -403,18 +467,33 @@ export class SubagentManager implements SubagentManagerApi {
 		signal?: AbortSignal,
 	): Promise<AgentTaskReceipt> {
 		signal?.throwIfAborted();
-		this.assertDescendant(actorId, input.agentId);
+		const actor = this.requireActor(actorId);
+		const record = this.assertDescendant(actorId, input.agentId);
 		this.assertOperable(input.agentId);
-		const record = this.store.load(input.agentId);
-		if (record.archived) {
+		if (actor.sessionManager.getCollaborationMode() === "plan" && record.config.writePolicy !== "deny") {
+			throw new AgentError("INVALID_STATE", "Writable agents cannot receive follow-up tasks in Plan mode");
+		}
+		const tree = this.store.listTree();
+		const archivedIds = new Set(
+			tree.agents.filter((candidate) => candidate.archived).map((candidate) => candidate.agentId),
+		);
+		if (record.config.agentPath.some((agentId) => archivedIds.has(agentId))) {
 			throw new AgentError("INVALID_STATE", "Archived agents must be unarchived before follow-up tasks");
 		}
 		const summary = summarizeAgentTask(input.task);
-		if (!summary || utf8Length(input.task) > 2 * 1024 * 1024) {
-			throw new AgentError("INVALID_INPUT", "Agent task must be non-empty and at most 2 MiB");
+		if (!summary || utf8Length(input.task) > MAX_AGENT_INPUT_UTF8_BYTES) {
+			throw new AgentError("INVALID_INPUT", "Agent task must be non-empty and at most 64 KiB");
 		}
-		const queued = this.store.listTasks(input.agentId).filter((task) => task.status === "queued");
-		if (queued.length >= 32) throw new AgentError("QUEUE_FULL", "Agent task queue is full");
+		const tasks = this.store.listTasks(input.agentId);
+		if (tasks.length >= MAX_AGENT_TASKS) {
+			throw new AgentError("QUEUE_FULL", `Agent task history is limited to ${MAX_AGENT_TASKS} tasks`);
+		}
+		if (
+			tree.agents.flatMap((candidate) => candidate.tasks).filter((task) => task.status === "queued").length >=
+			MAX_AGENT_QUEUED_TASKS
+		) {
+			throw new AgentError("QUEUE_FULL", `Agent task queue is limited to ${MAX_AGENT_QUEUED_TASKS} tasks`);
+		}
 		const taskId = this.createId();
 		const hot = this.hot.get(input.agentId);
 		if (hot) {
@@ -430,6 +509,7 @@ export class SubagentManager implements SubagentManagerApi {
 			this.store.appendTask(input.agentId, { taskId, text: input.task, status: "queued" });
 		}
 		const status = this.scheduleNext(input.agentId) ?? "queued";
+		this.emitUpdate(this.buildSummary(this.store.load(input.agentId)));
 		return { agentId: input.agentId, taskId, status };
 	}
 
@@ -491,8 +571,8 @@ export class SubagentManager implements SubagentManagerApi {
 	}
 
 	deleteAgent(actorId: string, agentId: string): Promise<DeleteAgentResult> {
-		const target = this.assertDescendant(actorId, agentId);
 		return this.serialize(agentId, async () => {
+			const target = this.assertDescendant(actorId, agentId);
 			if (this.deleting.has(agentId)) {
 				throw new AgentError("INVALID_STATE", `Agent is already deleting: ${agentId}`);
 			}
@@ -502,38 +582,37 @@ export class SubagentManager implements SubagentManagerApi {
 					target.config.agentPath.every((id, index) => record.config.agentPath[index] === id),
 				)
 				.sort((left, right) => right.config.agentPath.length - left.config.agentPath.length);
+			const overlap = subtree.find((record) => this.deleting.has(record.agentId));
+			if (overlap) {
+				throw new AgentError("INVALID_STATE", `Agent tree overlaps an active deletion: ${overlap.agentId}`);
+			}
 			for (const record of subtree) this.deleting.add(record.agentId);
-			const deletedAgentIds: string[] = [];
 			try {
 				for (const record of subtree) {
 					await this.interruptNow(actorId, record.agentId, { allowDeleting: true });
 				}
-				for (const record of subtree) {
-					const latestTask = this.store.listTasks(record.agentId).at(-1);
-					const tombstone: AgentTombstone = {
+				const tombstones = subtree.map(
+					(record): AgentTombstone => ({
 						agentId: record.agentId,
 						name: record.name,
 						status: "deleted",
-						taskSummary: latestTask?.taskSummary ?? summarizeAgentTask(record.config.initialTask),
-						...(latestTask?.finalMessage ? { finalMessage: latestTask.finalMessage } : {}),
 						deletedAt: new Date(this.now()).toISOString(),
-					};
-					this.store.beginDelete(record.agentId, tombstone);
-					const result = await this.store.finishDelete(record.agentId);
-					if (result.status !== "deleted") {
-						if (deletedAgentIds.length > 0) {
-							this.emitEvent({ type: "deleted", agentId, deletedAgentIds });
-						}
-						return {
-							agentId,
-							...result,
-							error: `Failed to delete ${record.agentId}: ${result.error ?? "unknown error"}`,
-						};
-					}
-					deletedAgentIds.push(record.agentId);
-					this.childPermissionCeilings.delete(record.agentId);
+					}),
+				);
+				this.store.beginDeleteGroup(agentId, tombstones);
+				const result = await this.store.finishDeleteGroup(agentId);
+				for (const deletedId of result.deletedAgentIds) this.childPermissionCeilings.delete(deletedId);
+				if (result.deletedAgentIds.length > 0) {
+					this.emitEvent({ type: "deleted", agentId, deletedAgentIds: result.deletedAgentIds });
 				}
-				this.emitEvent({ type: "deleted", agentId, deletedAgentIds });
+				if (result.status !== "deleted") {
+					return {
+						agentId,
+						status: result.status,
+						...(result.residualPath ? { residualPath: result.residualPath } : {}),
+						error: `Failed to delete agent tree: ${result.error ?? "unknown error"}`,
+					};
+				}
 				return { agentId, status: "deleted" };
 			} finally {
 				for (const record of subtree) this.deleting.delete(record.agentId);
@@ -546,15 +625,20 @@ export class SubagentManager implements SubagentManagerApi {
 		return this.serialize(agentId, async () => {
 			this.assertOperable(agentId);
 			const record = this.store.load(agentId);
-			const status = agentStatusFromTasks(this.store.listTasks(agentId));
-			const activeDescendant = this.store
-				.listTree()
-				.agents.some(
-					(candidate) =>
-						candidate.config.agentPath.length > record.config.agentPath.length &&
-						record.config.agentPath.every((id, index) => candidate.config.agentPath[index] === id) &&
-						["queued", "running"].includes(agentStatusFromTasks(this.store.listTasks(candidate.agentId))),
-				);
+			const records = this.store.listTree().agents;
+			const archivedIds = new Set(
+				records.filter((candidate) => candidate.archived).map((candidate) => candidate.agentId),
+			);
+			if (!archived && record.config.agentPath.slice(0, -1).some((id) => archivedIds.has(id))) {
+				throw new AgentError("INVALID_STATE", "Archived ancestors must be unarchived first");
+			}
+			const status = agentStatusFromTasks(record.tasks);
+			const activeDescendant = records.some(
+				(candidate) =>
+					candidate.config.agentPath.length > record.config.agentPath.length &&
+					record.config.agentPath.every((id, index) => candidate.config.agentPath[index] === id) &&
+					["queued", "running"].includes(agentStatusFromTasks(candidate.tasks)),
+			);
 			if (status === "running" || status === "queued" || activeDescendant) {
 				throw new AgentError("INVALID_STATE", "Only terminal agents can be archived");
 			}
@@ -572,10 +656,11 @@ export class SubagentManager implements SubagentManagerApi {
 	listSummaries(actorId: string, includeArchived = false): readonly AgentSummary[] {
 		this.requireActor(actorId);
 		const actorPath = this.actorPath(actorId);
-		return this.store
-			.listTree()
-			.agents.filter((record) => {
-				if (!includeArchived && record.archived) return false;
+		const records = this.store.listTree().agents;
+		const archivedIds = new Set(records.filter((record) => record.archived).map((record) => record.agentId));
+		return records
+			.filter((record) => {
+				if (!includeArchived && record.config.agentPath.some((id) => archivedIds.has(id))) return false;
 				return this.isDescendantPath(actorPath, record.config.agentPath);
 			})
 			.map((record) => this.buildSummary(record))
@@ -589,13 +674,25 @@ export class SubagentManager implements SubagentManagerApi {
 		return this.store.listTasks(agentId);
 	}
 
+	assertCanEnterPlan(actorId: string): void {
+		this.requireActor(actorId);
+		const actorPath = this.actorPath(actorId);
+		const writable = this.store
+			.listTree()
+			.agents.find(
+				(record) =>
+					this.isDescendantPath(actorPath, record.config.agentPath) &&
+					record.config.writePolicy !== "deny" &&
+					["queued", "running"].includes(agentStatusFromTasks(record.tasks)),
+			);
+		if (writable) {
+			throw new AgentError("INVALID_STATE", `Stop writable agent ${writable.name} before entering Plan mode`);
+		}
+	}
+
 	subscribe(listener: (event: AgentManagerEvent) => void): () => void {
 		this.listeners.add(listener);
 		return () => this.listeners.delete(listener);
-	}
-
-	async recoverDeleteMarkers(): Promise<void> {
-		await this.store.recoverDeleteMarkers();
 	}
 
 	async unload(reason: "parent_unloaded"): Promise<void> {
@@ -619,7 +716,6 @@ export class SubagentManager implements SubagentManagerApi {
 					await hot.runtime.interrupt({ requestId: this.requestId("unload", record.agentId) });
 					await hot.completion;
 					if (hot.lifecycleError) errors.push(hot.lifecycleError);
-					continue;
 				}
 				for (const task of this.store.listTasks(record.agentId)) {
 					if (task.status !== "queued" && task.status !== "running") continue;
@@ -634,6 +730,7 @@ export class SubagentManager implements SubagentManagerApi {
 	}
 
 	private scheduleNext(agentId: string): "queued" | "running" | undefined {
+		if (this.unloaded || this.deleting.has(agentId)) return undefined;
 		if (this.hot.has(agentId) || this.starting.has(agentId)) return undefined;
 		const task = this.store.listTasks(agentId).find((candidate) => candidate.status === "queued");
 		if (!task) return undefined;
@@ -734,7 +831,7 @@ export class SubagentManager implements SubagentManagerApi {
 		let runtime: AgentSessionRuntime | undefined;
 		try {
 			const onPermissionRequest: RequestPermissionApproval = async (request) => {
-				const summary = this.buildSummary(record);
+				const summary = this.buildSummary(this.store.load(agentId));
 				this.approvalRequests.set(config.agentId, { taskId, toolName: request.action.toolName });
 				this.emitApprovalRequired(summary, taskId, request.action.toolName);
 				this.notifyApprovalWaiters(config.agentId);
@@ -748,6 +845,7 @@ export class SubagentManager implements SubagentManagerApi {
 							type: "agent",
 							id: config.agentId,
 							name: config.name,
+							taskId,
 						},
 					});
 				} finally {
@@ -790,6 +888,9 @@ export class SubagentManager implements SubagentManagerApi {
 			};
 			const childSession = runtime.session;
 			hot.unsubscribe = childSession.subscribe((event) => {
+				if (event.type === "message_start" || event.type === "message_update" || event.type === "message_end") {
+					this.emitEvent({ type: "activity", agentId, taskId, event });
+				}
 				if (event.type === "agent_settled") hot.resolveSettled();
 			});
 			this.hot.set(agentId, hot);
@@ -801,6 +902,7 @@ export class SubagentManager implements SubagentManagerApi {
 			});
 			this.emitUpdate(this.buildSummary(this.store.load(agentId)));
 			const text = taskText(runtime.session.sessionManager.getDurableJournalSnapshot(), taskId);
+			const baselineStats = runtime.session.getSessionStats();
 			await runtime.submitPrompt({ requestId: this.requestId("task", agentId), text });
 			let timeout: ReturnType<typeof setTimeout> | undefined;
 			const timedOut = new Promise<"timeout">((resolvePromise) => {
@@ -817,32 +919,44 @@ export class SubagentManager implements SubagentManagerApi {
 				runtime.session.model ?? ({ provider: config.model.provider, id: config.model.modelId } as Model<any>);
 			const usage: AgentUsage = {
 				model: { provider: model.provider, modelId: model.id },
-				input: stats.tokens.input,
-				output: stats.tokens.output,
-				cacheRead: stats.tokens.cacheRead,
-				cacheWrite: stats.tokens.cacheWrite,
+				input: Math.max(0, stats.tokens.input - baselineStats.tokens.input),
+				output: Math.max(0, stats.tokens.output - baselineStats.tokens.output),
+				cacheRead: Math.max(0, stats.tokens.cacheRead - baselineStats.tokens.cacheRead),
+				cacheWrite: Math.max(0, stats.tokens.cacheWrite - baselineStats.tokens.cacheWrite),
 				elapsedMs: Math.max(0, this.now() - hot.startedAt),
-				toolCalls: stats.toolCalls,
-				...(Number.isFinite(stats.cost) ? { cost: stats.cost } : {}),
+				toolCalls: Math.max(0, stats.toolCalls - baselineStats.toolCalls),
+				...(Number.isFinite(stats.cost) && Number.isFinite(baselineStats.cost)
+					? { cost: Math.max(0, stats.cost - baselineStats.cost) }
+					: {}),
 			};
-			const finalMessage = assistantText(runtime.session);
-			const assistant = lastAssistant(runtime.session);
+			const assistant = taskAssistant(runtime.session.sessionManager.getDurableJournalSnapshot(), taskId);
 			const status =
 				outcome === "timeout"
 					? "failed"
 					: hot.stopReason
 						? "stopped"
-						: assistant?.stopReason === "error"
-							? "failed"
-							: "done";
+						: assistant?.stopReason === "aborted"
+							? "stopped"
+							: assistant?.stopReason === "error"
+								? "failed"
+								: "done";
 			const reason =
 				outcome === "timeout"
 					? "timeout"
-					: (hot.stopReason ?? (assistant?.stopReason === "error" ? "error" : "completed"));
+					: (hot.stopReason ??
+						(assistant?.stopReason === "error"
+							? "error"
+							: assistant?.stopReason === "aborted"
+								? "interrupted"
+								: "completed"));
 			const terminalError =
-				assistant?.stopReason === "error"
-					? (assistant.errorMessage ?? "Child model response ended with an error")
-					: undefined;
+				outcome === "timeout"
+					? `Agent task timed out after ${config.timeoutSeconds} seconds`
+					: assistant?.stopReason === "error"
+						? (assistant.errorMessage ?? "Child model response ended with an error")
+						: undefined;
+			const finalMessage =
+				status === "done" && !assistantHasToolCalls(assistant) ? assistantText(assistant) : undefined;
 			this.appendHotTaskState(runtime, {
 				taskId,
 				status,
@@ -957,6 +1071,7 @@ export class SubagentManager implements SubagentManagerApi {
 			}
 		}
 		const cancelledTaskIds: string[] = [];
+		const cancelledTasks: AgentTaskSummary[] = [];
 		for (const task of this.store.listTasks(agentId)) {
 			if (task.status !== "queued") continue;
 			this.appendTaskState(agentId, {
@@ -965,8 +1080,11 @@ export class SubagentManager implements SubagentManagerApi {
 				reason: "interrupted",
 			});
 			cancelledTaskIds.push(task.taskId);
+			const stopped = this.store.listTasks(agentId).find((candidate) => candidate.taskId === task.taskId);
+			if (stopped) cancelledTasks.push(stopped);
 		}
 		this.cancelScheduled(agentId);
+		for (const task of cancelledTasks) this.publishTerminal(this.store.load(agentId), task);
 		await this.starting.get(agentId)?.ready;
 		const hot = this.hot.get(agentId);
 		if (hot) {
@@ -999,7 +1117,7 @@ export class SubagentManager implements SubagentManagerApi {
 
 	private recoverInterruptedWork(): void {
 		for (const record of this.store.listTree().agents) {
-			for (const task of this.store.listTasks(record.agentId)) {
+			for (const task of record.tasks) {
 				if (task.status !== "queued" && task.status !== "running") continue;
 				this.appendTaskState(record.agentId, {
 					taskId: task.taskId,
@@ -1078,7 +1196,7 @@ export class SubagentManager implements SubagentManagerApi {
 			return parent.model;
 		}
 		const slash = requested.indexOf("/");
-		if (slash <= 0 || slash === requested.length - 1 || requested.indexOf("/", slash + 1) !== -1) {
+		if (slash <= 0 || slash === requested.length - 1 || requested.length > 512 || /\s/u.test(requested)) {
 			throw new AgentError("INVALID_INPUT", "Child model must use exact provider/modelId syntax");
 		}
 		const registry = parent.modelRegistry as {
@@ -1103,12 +1221,18 @@ export class SubagentManager implements SubagentManagerApi {
 	}
 
 	private buildSummary(record: AgentDiskRecord): AgentSummary {
-		const tasks = this.store.listTasks(record.agentId);
+		const tasks = record.tasks;
 		const hot = this.hot.get(record.agentId);
 		const running =
 			tasks.find((task) => task.taskId === hot?.taskId) ?? tasks.find((task) => task.status === "running");
+		const current = running ?? tasks.find((task) => task.status === "queued");
 		const latest = tasks.at(-1);
 		const status = hot ? "running" : agentStatusFromTasks(tasks);
+		const createdAt = tasks[0]?.createdAt ?? new Date(this.now()).toISOString();
+		const updatedAt = tasks.reduce(
+			(latestTimestamp, task) => (task.updatedAt > latestTimestamp ? task.updatedAt : latestTimestamp),
+			createdAt,
+		);
 		return {
 			agentId: record.agentId,
 			name: record.name,
@@ -1120,10 +1244,10 @@ export class SubagentManager implements SubagentManagerApi {
 			parentSessionId: record.config.parentSessionId,
 			rootSessionId: record.config.rootSessionId,
 			agentPath: record.config.agentPath,
-			...(running ? { currentTask: running } : {}),
+			...(current ? { currentTask: current } : {}),
 			...(latest ? { latestTask: latest } : {}),
-			createdAt: tasks[0]?.createdAt ?? new Date(this.now()).toISOString(),
-			updatedAt: latest?.updatedAt ?? tasks[0]?.createdAt ?? new Date(this.now()).toISOString(),
+			createdAt,
+			updatedAt,
 		};
 	}
 
@@ -1230,10 +1354,16 @@ export class SubagentManager implements SubagentManagerApi {
 						? this.parentSessionManager
 						: SessionManager.open(this.store.load(parentId).path);
 				try {
-					const exists = manager
-						.getDurableJournalSnapshot()
-						.some((entry) => entry.type === "agent_mailbox_event" && entry.event.eventId === event.eventId);
-					if (!exists) manager.appendAgentControl({ type: "agent_mailbox_event", event: mailboxEvent });
+					const journal = manager.getDurableJournalSnapshot();
+					const exists = journal.some(
+						(entry) => entry.type === "agent_mailbox_event" && entry.event.eventId === event.eventId,
+					);
+					if (!exists) {
+						if (this.pendingMailboxCount(journal) >= MAX_AGENT_MAILBOX_PENDING_EVENTS) {
+							throw new Error("Agent mailbox is full");
+						}
+						manager.appendAgentControl({ type: "agent_mailbox_event", event: mailboxEvent });
+					}
 					accepted = !exists;
 				} finally {
 					if (manager !== this.parentSessionManager) manager.close();
@@ -1249,20 +1379,35 @@ export class SubagentManager implements SubagentManagerApi {
 				event,
 				error: error instanceof Error ? error.message : String(error),
 			});
-			throw error;
 		}
+		resolveWaiters(this.waiters, record.agentId);
 		return summary;
+	}
+
+	private pendingMailboxCount(journal: readonly FileEntry[]): number {
+		const pending = new Set<string>();
+		const started = new Set<string>();
+		for (const entry of journal) {
+			if (entry.type === "agent_mailbox_event") {
+				pending.add(entry.event.eventId);
+				continue;
+			}
+			if (entry.type !== "agent_mailbox_delivery") continue;
+			const key = `${entry.deliveryId}\n${JSON.stringify(entry.eventIds)}`;
+			if (entry.state === "started") started.add(key);
+			else if (started.has(key)) for (const eventId of entry.eventIds) pending.delete(eventId);
+		}
+		return pending.size;
 	}
 
 	private recoverMailboxEvents(session: AgentSession): void {
 		for (const record of this.store.listTree().agents) {
-			for (const task of this.store.listTasks(record.agentId)) {
+			for (const task of record.tasks) {
 				if (!isTerminalTaskStatus(task.status)) continue;
-				const loaded = this.store.load(record.agentId);
-				if (loaded.config.parentSessionId !== session.sessionManager.getSessionId()) continue;
-				const event = terminalMailboxEvent(loaded, task);
+				if (record.config.parentSessionId !== session.sessionManager.getSessionId()) continue;
+				const event = terminalMailboxEvent(record, task);
 				if (session.hasAgentMailboxEvent(event.eventId)) continue;
-				this.publishTerminal(loaded, task);
+				this.publishTerminal(record, task);
 			}
 		}
 	}

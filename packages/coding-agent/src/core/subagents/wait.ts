@@ -1,4 +1,4 @@
-import { AgentError, type AgentSummary, type WaitAgentsResult } from "./types.ts";
+import { AgentError, type AgentSummary, MAX_AGENT_MAILBOX_DELIVERY_EVENTS, type WaitAgentsResult } from "./types.ts";
 
 export interface AgentWaitHandle {
 	readonly actorId: string;
@@ -9,10 +9,13 @@ export interface AgentWaitHandle {
 	dispose(): void;
 }
 
-const TERMINAL_EVENT_ID = /^agent:([^:]+):[^:]+:terminal$/;
+const TERMINAL_EVENT_ID = /^agent:([^:]+):([^:]+):terminal$/;
 
-export function terminalEventAgentId(eventId: string): string | undefined {
-	return TERMINAL_EVENT_ID.exec(eventId)?.[1];
+export function terminalEventIdentity(
+	eventId: string,
+): { readonly agentId: string; readonly taskId: string } | undefined {
+	const match = TERMINAL_EVENT_ID.exec(eventId);
+	return match?.[1] && match[2] ? { agentId: match[1], taskId: match[2] } : undefined;
 }
 
 export function normalizeWaitAgentIds(requested: readonly string[]): readonly string[] {
@@ -23,29 +26,8 @@ export function normalizeWaitAgentIds(requested: readonly string[]): readonly st
 	return ids;
 }
 
-export function selectedLiveAgents(summaries: readonly AgentSummary[], selected: ReadonlySet<string>): boolean {
-	return summaries.some(
-		(summary) => selected.has(summary.agentId) && (summary.status === "queued" || summary.status === "running"),
-	);
-}
-
-export function pendingMailboxAgentIds(
-	pendingEventIds: Iterable<string>,
-	selected: ReadonlySet<string>,
-): readonly string[] {
-	const updated = new Set<string>();
-	for (const eventId of pendingEventIds) {
-		const agentId = terminalEventAgentId(eventId);
-		if (agentId && selected.has(agentId)) updated.add(agentId);
-	}
-	return [...updated];
-}
-
-export function pendingApprovalAgentIds(
-	blockedAgentIds: Iterable<string>,
-	selected: ReadonlySet<string>,
-): readonly string[] {
-	return [...new Set([...blockedAgentIds].filter((agentId) => selected.has(agentId)))];
+function isTerminalAgent(status: AgentSummary["status"]): boolean {
+	return status === "done" || status === "failed" || status === "stopped";
 }
 
 export function waitAgentsSnapshot(
@@ -71,11 +53,13 @@ export function waitAgentsSnapshot(
 			};
 		}
 	}
-	const mailboxEventIds = [...pendingEventIds].filter((eventId) => {
-		const agentId = terminalEventAgentId(eventId);
-		return agentId !== undefined && selected.has(agentId);
-	});
-	if (mailboxEventIds.length > 0 || !selectedLiveAgents(summaries, selected)) {
+	const mailboxEventIds = [...pendingEventIds]
+		.filter((eventId) => {
+			const identity = terminalEventIdentity(eventId);
+			return identity !== undefined && selected.has(identity.agentId);
+		})
+		.slice(0, MAX_AGENT_MAILBOX_DELIVERY_EVENTS);
+	if (mailboxEventIds.length > 0 || agents.some((agent) => isTerminalAgent(agent.status))) {
 		return { timedOut: false, agents, mailboxEventIds };
 	}
 	return undefined;

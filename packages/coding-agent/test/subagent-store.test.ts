@@ -98,4 +98,47 @@ describe("AgentStore", () => {
 		expect(journal.some((entry) => entry.type === "agent_task")).toBe(true);
 		expect(existsSync(created.path)).toBe(true);
 	});
+
+	it("recovers a whole delete group after a leaf session disappears", async () => {
+		const { root, agentDir, store } = setup();
+		const sentinel = join(root, "project", "keep.txt");
+		writeFileSync(sentinel, "keep");
+		const parent = config(root, { agentId: "agent-1", name: "parent", taskId: "task-1" });
+		const child = config(root, {
+			agentId: "agent-2",
+			name: "child",
+			taskId: "task-2",
+			parentSessionId: "agent-1",
+			agentPath: ["agent-1", "agent-2"],
+		});
+		const parentRecord = store.create(parent.config, [], parent.taskId);
+		const childRecord = store.create(child.config, [], child.taskId);
+		const deletedAt = new Date(0).toISOString();
+		store.beginDeleteGroup("agent-1", [
+			{
+				agentId: "agent-2",
+				name: "child",
+				status: "deleted",
+				deletedAt,
+			},
+			{
+				agentId: "agent-1",
+				name: "parent",
+				status: "deleted",
+				deletedAt,
+			},
+		]);
+		await expect(SessionManager.deleteSession(childRecord.path, { agentDir })).resolves.toMatchObject({ ok: true });
+
+		await store.recoverDeleteMarkers();
+
+		expect(existsSync(childRecord.path)).toBe(false);
+		expect(existsSync(parentRecord.path)).toBe(false);
+		expect(store.listTree().agents).toEqual([]);
+		const tombstones = store.listTombstones();
+		expect(tombstones.map((tombstone) => tombstone.agentId).sort()).toEqual(["agent-1", "agent-2"]);
+		expect(JSON.stringify(tombstones)).not.toContain("taskSummary");
+		expect(JSON.stringify(tombstones)).not.toContain("finalMessage");
+		expect(existsSync(sentinel)).toBe(true);
+	});
 });

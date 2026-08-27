@@ -4,7 +4,9 @@ import { keyHint } from "../../modes/interactive/components/keybinding-hints.ts"
 import type { AgentSession } from "../agent-session.ts";
 import { defineTool, type ToolDefinition } from "../extensions/types.ts";
 import type { SubagentManager } from "./manager.ts";
-import { AGENT_TYPES, type InspectAgentsResult } from "./types.ts";
+import { utf8Prefix } from "./trace.ts";
+import { AGENT_TYPES, type InspectAgentsResult, MAX_AGENT_INPUT_UTF8_BYTES } from "./types.ts";
+import { terminalEventIdentity } from "./wait.ts";
 
 function actorId(session: AgentSession): string {
 	return session.sessionManager.getSessionId();
@@ -22,7 +24,7 @@ const Spawn = Type.Object(
 		}),
 		task: Type.String({
 			minLength: 1,
-			maxLength: 2 * 1024 * 1024,
+			maxLength: MAX_AGENT_INPUT_UTF8_BYTES,
 			description:
 				"Self-contained assignment with the objective, owned scope, non-goals, expected handoff, and focused verification.",
 		}),
@@ -38,7 +40,8 @@ const Spawn = Type.Object(
 		),
 		model: Type.Optional(
 			Type.String({
-				pattern: "^[^/]+/[^/]+$",
+				maxLength: 512,
+				pattern: "^[^/\\s]+/\\S+$",
 				description: "Optional provider/modelId; defaults to your current model.",
 			}),
 		),
@@ -65,7 +68,7 @@ const SendMessage = Type.Object(
 		agentId: Type.String({ minLength: 1, description: "Owned child ID." }),
 		message: Type.String({
 			minLength: 1,
-			maxLength: 2 * 1024 * 1024,
+			maxLength: MAX_AGENT_INPUT_UTF8_BYTES,
 			description: "New bounded instructions for the running task.",
 		}),
 	},
@@ -77,7 +80,7 @@ const FollowUp = Type.Object(
 		agentId: Type.String({ minLength: 1, description: "Owned child ID." }),
 		task: Type.String({
 			minLength: 1,
-			maxLength: 2 * 1024 * 1024,
+			maxLength: MAX_AGENT_INPUT_UTF8_BYTES,
 			description: "Self-contained follow-up assignment that always creates a new task.",
 		}),
 	},
@@ -141,19 +144,114 @@ function inspectText(inspected: InspectAgentsResult): string {
 		if (inspected.agents.length === 0) return "No agent sessions.";
 		return inspected.agents
 			.map((agent) => {
-				const task = agent.currentTask ?? agent.latestTask;
-				return `Agent ${JSON.stringify(agent.name)} (${agent.agentId}) · ${agent.agentType} · ${agent.status}${
-					task ? `\nTask ${task.taskId} · ${task.taskSummary}` : ""
-				}`;
+				const usage = agent.tasks.reduce(
+					(total, task) => ({
+						input: total.input + (task.usage?.input ?? 0),
+						output: total.output + (task.usage?.output ?? 0),
+						toolCalls: total.toolCalls + (task.usage?.toolCalls ?? 0),
+					}),
+					{ input: 0, output: 0, toolCalls: 0 },
+				);
+				const lines = [
+					`Agent ${JSON.stringify(agent.name)} (${agent.agentId}) · ${agent.agentType} · ${agent.status}`,
+					`Relation parent=${agent.parentSessionId} depth=${agent.depth} · updated=${agent.updatedAt}`,
+				];
+				if (agent.currentTask) {
+					lines.push(
+						`Current task ${agent.currentTask.taskId} · ${agent.currentTask.status} · ${agent.currentTask.taskSummary}`,
+					);
+				}
+				if (agent.latestTask && agent.latestTask.taskId !== agent.currentTask?.taskId) {
+					lines.push(
+						`Latest task ${agent.latestTask.taskId} · ${agent.latestTask.status} · ${agent.latestTask.taskSummary}`,
+					);
+				}
+				lines.push(`Usage input=${usage.input} output=${usage.output} toolCalls=${usage.toolCalls}`);
+				return lines.join("\n");
 			})
-			.join("\n");
+			.join("\n\n");
 	}
 	const events = inspected.events.map((event) => {
 		if (event.kind === "tool") return `[Tool ${event.status}] ${event.toolName}`;
 		if (event.kind === "final") return `[Final] ${event.text}`;
 		return `[LLM] ${event.text}`;
 	});
-	return [`Agent ${inspected.agent.name} (${inspected.agent.agentId})`, "", ...events].join("\n");
+	const task = inspected.agent.tasks.find((candidate) => candidate.taskId === inspected.taskId);
+	return [
+		`Agent ${inspected.agent.name} (${inspected.agent.agentId})`,
+		`Task ${inspected.taskId}${task ? ` · ${task.status}` : ""}`,
+		...(inspected.nextBeforeEventId ? [`Next before event ${inspected.nextBeforeEventId}`] : []),
+		"",
+		...events,
+	].join("\n");
+}
+
+function inspectDetails(inspected: InspectAgentsResult): unknown {
+	if (inspected.kind === "trace") {
+		const task = inspected.agent.tasks.find((candidate) => candidate.taskId === inspected.taskId);
+		return {
+			kind: "trace",
+			agent: {
+				agentId: inspected.agent.agentId,
+				name: inspected.agent.name,
+				agentType: inspected.agent.agentType,
+				status: inspected.agent.status,
+				depth: inspected.agent.depth,
+				parentSessionId: inspected.agent.parentSessionId,
+			},
+			taskId: inspected.taskId,
+			...(task
+				? {
+						task: {
+							taskId: task.taskId,
+							status: task.status,
+							taskSummary: task.taskSummary,
+							updatedAt: task.updatedAt,
+						},
+					}
+				: {}),
+			events: inspected.events,
+			...(inspected.nextBeforeEventId ? { nextBeforeEventId: inspected.nextBeforeEventId } : {}),
+		};
+	}
+	return {
+		kind: "list",
+		agents: inspected.agents.map((agent) => {
+			const usage = agent.tasks.reduce(
+				(total, task) => ({
+					input: total.input + (task.usage?.input ?? 0),
+					output: total.output + (task.usage?.output ?? 0),
+					cacheRead: total.cacheRead + (task.usage?.cacheRead ?? 0),
+					cacheWrite: total.cacheWrite + (task.usage?.cacheWrite ?? 0),
+					elapsedMs: total.elapsedMs + (task.usage?.elapsedMs ?? 0),
+					toolCalls: total.toolCalls + (task.usage?.toolCalls ?? 0),
+				}),
+				{ input: 0, output: 0, cacheRead: 0, cacheWrite: 0, elapsedMs: 0, toolCalls: 0 },
+			);
+			const compactTask = (task: typeof agent.currentTask) =>
+				task
+					? {
+							taskId: task.taskId,
+							status: task.status,
+							taskSummary: task.taskSummary,
+							updatedAt: task.updatedAt,
+						}
+					: undefined;
+			return {
+				agentId: agent.agentId,
+				name: agent.name,
+				agentType: agent.agentType,
+				status: agent.status,
+				depth: agent.depth,
+				parentSessionId: agent.parentSessionId,
+				...(agent.currentTask ? { currentTask: compactTask(agent.currentTask) } : {}),
+				...(agent.latestTask ? { latestTask: compactTask(agent.latestTask) } : {}),
+				usage,
+				updatedAt: agent.updatedAt,
+			};
+		}),
+		usage: inspected.usage,
+	};
 }
 
 function compactResult(value: unknown): string {
@@ -263,7 +361,7 @@ export function createSubagentTools(host: SubagentToolHost): ToolDefinition[] {
 					beforeEventId: params.beforeEventId,
 					limit: params.limit,
 				});
-				return result(inspected, false, inspectText(inspected));
+				return result(inspectDetails(inspected), false, inspectText(inspected));
 			},
 		}),
 		defineTool({
@@ -299,14 +397,59 @@ export function createSubagentTools(host: SubagentToolHost): ToolDefinition[] {
 			name: "wait_agents",
 			label: "Wait for agents",
 			description:
-				"Wait only when the next critical step depends on a new child terminal event or approval and no useful independent work remains. Completed children notify automatically; do not poll. Returns IDs, never transcripts.",
+				"Wait only when the next critical step depends on a new child terminal event or approval and no useful independent work remains. Completed children notify automatically; do not poll. Returns compact identities, statuses, and terminal results, never transcripts.",
 			parameters: Wait,
 			renderResult: renderSubagentResult,
 			async execute(_id, params, signal) {
 				const session = host.getSession();
 				const waited = await manager().waitAgents(actorId(session), params, signal);
-				session.stageAgentMailboxDelivery(waited.mailboxEventIds);
-				return result(waited);
+				const deliveredEventIds = session.stageAgentMailboxDelivery(waited.mailboxEventIds);
+				const terminalResults: Array<Record<string, unknown>> = [];
+				const representedTasks = new Set<string>();
+				const appendTerminal = (agentId: string, taskId: string) => {
+					const key = `${agentId}\0${taskId}`;
+					if (representedTasks.has(key)) return;
+					const agent = waited.agents.find((candidate) => candidate.agentId === agentId);
+					const task = agent?.tasks.find((candidate) => candidate.taskId === taskId);
+					if (!task || (task.status !== "done" && task.status !== "failed" && task.status !== "stopped")) return;
+					representedTasks.add(key);
+					terminalResults.push({
+						agentId,
+						taskId,
+						status: task.status,
+						...(task.finalMessage ? { finalMessage: utf8Prefix(task.finalMessage, 4 * 1024) } : {}),
+						...(task.error ? { error: utf8Prefix(task.error, 4 * 1024) } : {}),
+					});
+				};
+				for (const eventId of deliveredEventIds) {
+					const identity = terminalEventIdentity(eventId);
+					if (identity) appendTerminal(identity.agentId, identity.taskId);
+				}
+				const agentsWithPendingEvents = new Set(
+					waited.mailboxEventIds
+						.map(terminalEventIdentity)
+						.filter((identity): identity is NonNullable<typeof identity> => identity !== undefined)
+						.map((identity) => identity.agentId),
+				);
+				for (const agent of waited.agents) {
+					if (agentsWithPendingEvents.has(agent.agentId)) continue;
+					const task = agent.currentTask ?? agent.latestTask;
+					if (task) appendTerminal(agent.agentId, task.taskId);
+				}
+				return result({
+					timedOut: waited.timedOut,
+					agents: waited.agents.map((agent) => {
+						const task = agent.currentTask ?? agent.latestTask;
+						return {
+							agentId: agent.agentId,
+							status: agent.status,
+							...(task?.taskId ? { taskId: task.taskId } : {}),
+						};
+					}),
+					mailboxEventIds: deliveredEventIds,
+					...(terminalResults.length > 0 ? { terminalResults } : {}),
+					...(waited.attention ? { attention: waited.attention } : {}),
+				});
 			},
 		}),
 		defineTool({

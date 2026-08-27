@@ -2,7 +2,7 @@ import { existsSync, lstatSync, readdirSync, readFileSync, renameSync, rmSync } 
 import { join } from "node:path";
 import type { AgentMessage } from "@metis/agent-core";
 import { createFileAtomicallySync, ensureDirectoryDurablySync, syncDirectorySync } from "../durable-file.ts";
-import type { AgentArchivedEntry, AgentMessageEntry, AgentStateReason, AgentTaskEntry } from "../session-control.ts";
+import type { AgentArchivedEntry, AgentStateReason, AgentTaskEntry } from "../session-control.ts";
 import { assertValidSessionId, createSessionId } from "../session-id.ts";
 import {
 	type FileEntry,
@@ -20,6 +20,7 @@ import type {
 	AgentTombstone,
 	AgentUsage,
 } from "./types.ts";
+import { MAX_AGENT_QUEUED_TASKS, MAX_AGENT_TASKS } from "./types.ts";
 
 export interface AgentDiskRecord {
 	readonly agentId: string;
@@ -27,6 +28,7 @@ export interface AgentDiskRecord {
 	readonly path: string;
 	readonly config: AgentConfig;
 	readonly archived: boolean;
+	readonly tasks: readonly AgentTaskSummary[];
 	readonly header: NonNullable<SessionHeader["agent"]>;
 }
 
@@ -57,22 +59,14 @@ export interface AgentStoreApi {
 			readonly usage?: AgentUsage;
 		},
 	): AgentDiskRecord;
-	appendMessage(
-		agentId: string,
-		input: {
-			readonly taskId: string;
-			readonly messageId: string;
-			readonly text: string;
-			readonly state: "accepted" | "cancelled";
-		},
-	): AgentDiskRecord;
 	listTasks(agentId: string): readonly AgentTaskSummary[];
 	listTombstones(): readonly AgentTombstone[];
 	readJournal(agentId: string): readonly FileEntry[];
 	setArchived(agentId: string, archived: boolean): AgentDiskRecord;
-	beginDelete(agentId: string, tombstone: AgentTombstone): void;
-	finishDelete(agentId: string): Promise<{
+	beginDeleteGroup(rootAgentId: string, tombstones: readonly AgentTombstone[]): void;
+	finishDeleteGroup(rootAgentId: string): Promise<{
 		readonly status: "deleted" | "delete_failed";
+		readonly deletedAgentIds: readonly string[];
 		readonly residualPath?: string;
 		readonly error?: string;
 	}>;
@@ -196,29 +190,54 @@ function reduceRecord(path: string, rootSessionId: string): AgentDiskRecord {
 		path,
 		config,
 		archived: reduceArchived(entries, header.id),
+		tasks: reduceTasks(entries, header.id),
 		header: header.agent,
 	};
 }
 
+function validateTombstone(value: unknown): AgentTombstone {
+	if (typeof value !== "object" || value === null) throw new Error("Invalid agent delete marker");
+	const tombstone = value as AgentTombstone;
+	if (
+		tombstone.status !== "deleted" ||
+		typeof tombstone.agentId !== "string" ||
+		typeof tombstone.name !== "string" ||
+		typeof tombstone.deletedAt !== "string"
+	) {
+		throw new Error("Invalid agent delete marker");
+	}
+	assertValidSessionId(tombstone.agentId);
+	if (!Number.isFinite(Date.parse(tombstone.deletedAt))) {
+		throw new Error("Invalid agent delete marker");
+	}
+	return tombstone;
+}
+
 function markerTombstone(path: string): AgentTombstone {
-	const value = JSON.parse(readFileSync(path, "utf8")) as AgentTombstone;
-	if (
-		value.status !== "deleted" ||
-		typeof value.agentId !== "string" ||
-		typeof value.name !== "string" ||
-		typeof value.taskSummary !== "string" ||
-		typeof value.deletedAt !== "string"
-	) {
-		throw new Error("Invalid agent delete marker");
+	return validateTombstone(JSON.parse(readFileSync(path, "utf8")));
+}
+
+interface AgentDeleteGroup {
+	readonly version: 1;
+	readonly rootAgentId: string;
+	readonly tombstones: readonly AgentTombstone[];
+}
+
+function deleteGroup(path: string): AgentDeleteGroup {
+	const value = JSON.parse(readFileSync(path, "utf8")) as Partial<AgentDeleteGroup>;
+	if (value.version !== 1 || typeof value.rootAgentId !== "string" || !Array.isArray(value.tombstones)) {
+		throw new Error("Invalid agent delete group");
 	}
-	assertValidSessionId(value.agentId);
+	assertValidSessionId(value.rootAgentId);
+	const tombstones = value.tombstones.map(validateTombstone);
 	if (
-		!Number.isFinite(Date.parse(value.deletedAt)) ||
-		(value.finalMessage !== undefined && typeof value.finalMessage !== "string")
+		tombstones.length === 0 ||
+		!tombstones.some((tombstone) => tombstone.agentId === value.rootAgentId) ||
+		new Set(tombstones.map((tombstone) => tombstone.agentId)).size !== tombstones.length
 	) {
-		throw new Error("Invalid agent delete marker");
+		throw new Error("Invalid agent delete group");
 	}
-	return value;
+	return { version: 1, rootAgentId: value.rootAgentId, tombstones };
 }
 
 function agentHeaderFromConfig(config: AgentConfig): NonNullable<SessionHeader["agent"]> {
@@ -343,7 +362,7 @@ export class AgentStore implements AgentStoreApi {
 	load(agentId: string): AgentDiskRecord {
 		const match = this.listTree().agents.find((agent) => agent.agentId === agentId);
 		if (!match) throw new Error(`Unknown agent: ${agentId}`);
-		return reduceRecord(match.path, this.rootSessionId);
+		return match;
 	}
 
 	appendTask(
@@ -360,13 +379,14 @@ export class AgentStore implements AgentStoreApi {
 	): AgentDiskRecord {
 		if (!input.text || !input.taskId) throw new Error("Agent task requires id and text");
 		const record = this.load(agentId);
-		const existing = this.listTasks(agentId);
+		const existing = record.tasks;
 		if (existing.some((task) => task.taskId === input.taskId)) {
 			throw new Error(`Agent task already exists: ${input.taskId}`);
 		}
-		if (existing.filter((task) => task.status === "queued").length >= 32) {
+		if (existing.filter((task) => task.status === "queued").length >= MAX_AGENT_QUEUED_TASKS) {
 			throw new Error("Agent task queue is full");
 		}
+		if (existing.length >= MAX_AGENT_TASKS) throw new Error("Agent task history is full");
 		const manager = SessionManager.open(record.path);
 		try {
 			manager.appendAgentControl({
@@ -424,35 +444,8 @@ export class AgentStore implements AgentStoreApi {
 		return this.load(agentId);
 	}
 
-	appendMessage(
-		agentId: string,
-		input: {
-			readonly taskId: string;
-			readonly messageId: string;
-			readonly text: string;
-			readonly state: "accepted" | "cancelled";
-		},
-	): AgentDiskRecord {
-		const record = this.load(agentId);
-		const manager = SessionManager.open(record.path);
-		try {
-			manager.appendAgentControl({
-				type: "agent_message",
-				agentId,
-				taskId: input.taskId,
-				messageId: input.messageId,
-				text: input.text,
-				state: input.state,
-			});
-		} finally {
-			manager.close();
-		}
-		return this.load(agentId);
-	}
-
 	listTasks(agentId: string): readonly AgentTaskSummary[] {
-		this.load(agentId);
-		return reduceTasks(this.readJournal(agentId), agentId);
+		return this.load(agentId).tasks;
 	}
 
 	listTombstones(): readonly AgentTombstone[] {
@@ -487,15 +480,14 @@ export class AgentStore implements AgentStoreApi {
 		return this.load(agentId);
 	}
 
-	beginDelete(agentId: string, tombstone: AgentTombstone): void {
-		if (tombstone.agentId !== agentId) throw new Error("Agent delete marker id mismatch");
-		this.load(agentId);
+	private writeDeleteMarker(tombstone: AgentTombstone): void {
+		validateTombstone(tombstone);
 		ensureDirectoryDurablySync(this.deletingDirectory);
-		const path = join(this.deletingDirectory, `${agentId}.json`);
+		const path = join(this.deletingDirectory, `${tombstone.agentId}.json`);
 		if (!existsSync(path)) createFileAtomicallySync(path, `${JSON.stringify(tombstone)}\n`, { mode: 0o600 });
 	}
 
-	async finishDelete(
+	private async finishDelete(
 		agentId: string,
 	): Promise<{ status: "deleted" | "delete_failed"; residualPath?: string; error?: string }> {
 		assertValidSessionId(agentId);
@@ -525,16 +517,90 @@ export class AgentStore implements AgentStoreApi {
 		return { status: "deleted" };
 	}
 
+	beginDeleteGroup(rootAgentId: string, tombstones: readonly AgentTombstone[]): void {
+		assertValidSessionId(rootAgentId);
+		const group: AgentDeleteGroup = {
+			version: 1,
+			rootAgentId,
+			tombstones: tombstones.map(validateTombstone),
+		};
+		if (
+			group.tombstones.length === 0 ||
+			!group.tombstones.some((tombstone) => tombstone.agentId === rootAgentId) ||
+			new Set(group.tombstones.map((tombstone) => tombstone.agentId)).size !== group.tombstones.length
+		) {
+			throw new Error("Invalid agent delete group");
+		}
+		for (const tombstone of group.tombstones) this.load(tombstone.agentId);
+		ensureDirectoryDurablySync(this.deletingDirectory);
+		const path = join(this.deletingDirectory, `${rootAgentId}.group`);
+		if (!existsSync(path)) createFileAtomicallySync(path, `${JSON.stringify(group)}\n`, { mode: 0o600 });
+	}
+
+	async finishDeleteGroup(rootAgentId: string): Promise<{
+		status: "deleted" | "delete_failed";
+		deletedAgentIds: readonly string[];
+		residualPath?: string;
+		error?: string;
+	}> {
+		assertValidSessionId(rootAgentId);
+		const groupPath = join(this.deletingDirectory, `${rootAgentId}.group`);
+		if (!existsSync(groupPath)) throw new Error(`Agent delete group is not active: ${rootAgentId}`);
+		const group = deleteGroup(groupPath);
+		if (group.rootAgentId !== rootAgentId) throw new Error("Agent delete group id mismatch");
+		const deletedAgentIds: string[] = [];
+		for (const tombstone of group.tombstones) {
+			const deletedPath = join(this.deletedDirectory, `${tombstone.agentId}.json`);
+			if (existsSync(deletedPath)) {
+				const deleted = markerTombstone(deletedPath);
+				if (deleted.agentId !== tombstone.agentId) throw new Error("Agent deleted marker id mismatch");
+				deletedAgentIds.push(tombstone.agentId);
+				continue;
+			}
+			this.writeDeleteMarker(tombstone);
+			const result = await this.finishDelete(tombstone.agentId);
+			if (result.status !== "deleted") return { ...result, deletedAgentIds };
+			deletedAgentIds.push(tombstone.agentId);
+		}
+		rmSync(groupPath, { force: true });
+		syncDirectorySync(this.deletingDirectory);
+		return { status: "deleted", deletedAgentIds };
+	}
+
 	async recoverDeleteMarkers(): Promise<void> {
 		if (!existsSync(this.deletingDirectory)) return;
+		const groupedAgentIds = new Set<string>();
+		const failures: unknown[] = [];
+		for (const entry of readdirSync(this.deletingDirectory, { withFileTypes: true })) {
+			if (!entry.isFile() || !entry.name.endsWith(".group")) continue;
+			try {
+				const group = deleteGroup(join(this.deletingDirectory, entry.name));
+				for (const tombstone of group.tombstones) groupedAgentIds.add(tombstone.agentId);
+				const result = await this.finishDeleteGroup(group.rootAgentId);
+				if (result.status === "delete_failed") {
+					failures.push(new Error(result.error ?? `Failed to recover agent delete group: ${group.rootAgentId}`));
+				}
+			} catch (error) {
+				// Leave invalid or failed groups and their owned markers for diagnostics/retry.
+				failures.push(error);
+			}
+		}
 		for (const entry of readdirSync(this.deletingDirectory, { withFileTypes: true })) {
 			if (!entry.isFile() || !entry.name.endsWith(".json")) continue;
 			try {
 				const tombstone = markerTombstone(join(this.deletingDirectory, entry.name));
-				await this.finishDelete(tombstone.agentId);
-			} catch {
+				if (groupedAgentIds.has(tombstone.agentId)) continue;
+				const result = await this.finishDelete(tombstone.agentId);
+				if (result.status === "delete_failed") {
+					failures.push(new Error(result.error ?? `Failed to recover agent delete marker: ${tombstone.agentId}`));
+				}
+			} catch (error) {
 				// Leave invalid or failed markers for diagnostics/retry.
+				failures.push(error);
 			}
+		}
+		if (failures.length > 0) {
+			throw new AggregateError(failures, "Failed to recover pending agent deletions");
 		}
 	}
 }
@@ -548,4 +614,4 @@ export function agentStatusFromTasks(tasks: readonly AgentTaskSummary[]): AgentS
 	return latest?.status ?? "queued";
 }
 
-export type { AgentTaskEntry, AgentMessageEntry, AgentArchivedEntry };
+export type { AgentTaskEntry, AgentArchivedEntry };

@@ -208,7 +208,14 @@ import { SKILL_USAGE_CUSTOM_TYPE, type SkillUsageRecord } from "./skills.ts";
 import type { SlashCommandInfo } from "./slash-commands.ts";
 import { createSyntheticSourceInfo, type SourceInfo } from "./source-info.ts";
 import { buildAgentMailboxContent } from "./subagents/prompts.ts";
-import { AGENT_TOOL_NAMES, type AgentMailboxTerminalEvent } from "./subagents/types.ts";
+import { utf8Length } from "./subagents/trace.ts";
+import {
+	AGENT_TOOL_NAMES,
+	type AgentMailboxTerminalEvent,
+	MAX_AGENT_MAILBOX_DELIVERY_EVENTS,
+	MAX_AGENT_MAILBOX_DELIVERY_UTF8_BYTES,
+	MAX_AGENT_MAILBOX_PENDING_EVENTS,
+} from "./subagents/types.ts";
 import { createSubmitPlanToolDefinition } from "./submit-plan.ts";
 import { type BuildSystemPromptOptions, buildSystemPromptWithParts, type SystemPromptPart } from "./system-prompt.ts";
 import { canUseUltra, getHighestSupportedThinkingLevel, type ThinkingSelection } from "./thinking-selection.ts";
@@ -629,6 +636,7 @@ export class AgentSession {
 	private _contextUsageCalibration: ContextUsageCalibration | undefined;
 	private readonly _trustedControlTools = new Map<string, ToolDefinition>();
 	private _configuredActiveToolNames: string[] = [];
+	private _collaborationModeGuard?: (collaborationMode: CollaborationMode) => void | Promise<void>;
 
 	constructor(config: AgentSessionConfig) {
 		if (config.unattendedExecution) {
@@ -792,6 +800,10 @@ export class AgentSession {
 		this._requestPermissionApproval = handler;
 	}
 
+	setCollaborationModeGuard(guard?: (collaborationMode: CollaborationMode) => void | Promise<void>): void {
+		this._collaborationModeGuard = guard;
+	}
+
 	/** Forward a child approval through the frontend currently attached to this session. */
 	requestPermissionApproval(request: Parameters<RequestPermissionApproval>[0]): ReturnType<RequestPermissionApproval> {
 		return this._queuePermissionApproval(request);
@@ -892,7 +904,9 @@ export class AgentSession {
 		if (this._knownAgentMailboxEventIds.has(event.eventId)) {
 			return this._pendingAgentMailboxEvents.has(event.eventId);
 		}
-		if (this._pendingAgentMailboxEvents.size >= 256) throw new Error("Agent mailbox is full");
+		if (this._pendingAgentMailboxEvents.size >= MAX_AGENT_MAILBOX_PENDING_EVENTS) {
+			throw new Error("Agent mailbox is full");
+		}
 		this.sessionManager.appendAgentControl({ type: "agent_mailbox_event", event });
 		this._knownAgentMailboxEventIds.add(event.eventId);
 		this._pendingAgentMailboxEvents.set(event.eventId, { event });
@@ -907,9 +921,27 @@ export class AgentSession {
 		return [...this._pendingAgentMailboxEvents.keys()];
 	}
 
-	stageAgentMailboxDelivery(eventIds: readonly string[]): void {
-		const pending = [...new Set(eventIds)].filter((eventId) => this._pendingAgentMailboxEvents.has(eventId));
-		if (pending.length === 0) return;
+	private _agentMailboxDeliveryBatch(eventIds: Iterable<string>): readonly string[] {
+		const batch: string[] = [];
+		let bytes = 0;
+		for (const eventId of new Set(eventIds)) {
+			const pending = this._pendingAgentMailboxEvents.get(eventId);
+			if (!pending) continue;
+			const eventBytes = buildAgentMailboxContent(pending.event).reduce(
+				(total, block) => total + utf8Length(block.text),
+				0,
+			);
+			if (batch.length > 0 && bytes + eventBytes > MAX_AGENT_MAILBOX_DELIVERY_UTF8_BYTES) break;
+			batch.push(eventId);
+			bytes += eventBytes;
+			if (batch.length >= MAX_AGENT_MAILBOX_DELIVERY_EVENTS) break;
+		}
+		return batch;
+	}
+
+	stageAgentMailboxDelivery(eventIds: readonly string[]): readonly string[] {
+		const pending = this._agentMailboxDeliveryBatch(eventIds);
+		if (pending.length === 0) return [];
 		if (this._activeAgentMailboxDelivery) throw new Error("An agent mailbox delivery is already active");
 		const deliveryId = createSessionId();
 		this.sessionManager.appendAgentControl({
@@ -919,11 +951,12 @@ export class AgentSession {
 			state: "started",
 		});
 		this._activeAgentMailboxDelivery = { deliveryId, eventIds: pending };
+		return pending;
 	}
 
 	async continueAgentMailbox(eventIds?: readonly string[]): Promise<boolean> {
 		const requested = eventIds ?? this.getPendingAgentMailboxEventIds();
-		const pending = [...new Set(requested)].filter((eventId) => this._pendingAgentMailboxEvents.has(eventId));
+		const pending = this._agentMailboxDeliveryBatch(requested);
 		if (this._runtimeTeardownRequested || pending.length === 0 || !this.isIdle || this._isAgentSettling) return false;
 		this._requestedAgentMailboxEventIds = new Set(pending);
 		try {
@@ -971,9 +1004,7 @@ export class AgentSession {
 		const transformContext = this.agent.transformContext;
 		this.agent.transformContext = async (messages, signal) => {
 			const requested = this._requestedAgentMailboxEventIds ?? this._pendingAgentMailboxEvents.keys();
-			this._stagedAgentMailboxEventIds = [...requested].filter((eventId) =>
-				this._pendingAgentMailboxEvents.has(eventId),
-			);
+			this._stagedAgentMailboxEventIds = this._agentMailboxDeliveryBatch(requested);
 			const visible = this._currentBranchAgentMailboxEventIds();
 			const pendingMessages = this._stagedAgentMailboxEventIds
 				.filter((eventId) => !visible.has(eventId))
@@ -2390,6 +2421,15 @@ export class AgentSession {
 		return this.agent.state.tools.map((t) => t.name);
 	}
 
+	/** Active tools that a persisted child runtime can reconstruct from project resources. */
+	getDelegatableToolNames(writePolicy: "inherit" | "deny" = "inherit"): string[] {
+		return this.getActiveToolNames().filter((name) => {
+			const source = this._toolDefinitions.get(name)?.sourceInfo.source;
+			if (source === "sdk") return false;
+			return writePolicy === "inherit" || (source === "builtin" && !this._mcpToolNames.has(name));
+		});
+	}
+
 	getConfiguredActiveToolNames(): string[] {
 		return [...this._configuredActiveToolNames];
 	}
@@ -2399,6 +2439,7 @@ export class AgentSession {
 			throw new Error("Plan mode is unavailable for this session");
 		}
 		if (this.isStreaming || this.isCompacting) throw new Error("Cannot change Plan mode during active work");
+		await this._collaborationModeGuard?.(collaborationMode);
 		await this._persistCollaborationMode(collaborationMode);
 	}
 
@@ -5246,6 +5287,8 @@ export class AgentSession {
 		const isAllowedTool = (name: string): boolean =>
 			this._trustedControlTools.has(name) ||
 			((!allowedToolNames || allowedToolNames.has(name)) && !excludedToolNames?.has(name));
+		const isProtectedReadOnlyBuiltin = (name: string): boolean =>
+			this._workspaceWritePolicy === "deny" && this._baseToolDefinitions.has(name);
 
 		const registeredTools = this._extensionRunner.getAllRegisteredTools();
 		const baseToolSource = this._baseToolsOverride ? "sdk" : "builtin";
@@ -5255,12 +5298,16 @@ export class AgentSession {
 				definition,
 				sourceInfo: createSyntheticSourceInfo(`<sdk:${definition.name}>`, { source: "sdk" }),
 			})),
-		].filter((tool) => isAllowedTool(tool.definition.name));
+		].filter((tool) => isAllowedTool(tool.definition.name) && !isProtectedReadOnlyBuiltin(tool.definition.name));
 		const mcpTools = this._mcpManager
 			? createMcpToolDefinitions(this._mcpManager, this)
 			: { direct: [], deferred: [] };
-		const directMcpTools = mcpTools.direct.filter((definition) => isAllowedTool(definition.name));
-		const deferredMcpTools = mcpTools.deferred.filter(({ definition }) => isAllowedTool(definition.name));
+		const directMcpTools = mcpTools.direct.filter(
+			(definition) => isAllowedTool(definition.name) && !isProtectedReadOnlyBuiltin(definition.name),
+		);
+		const deferredMcpTools = mcpTools.deferred.filter(
+			({ definition }) => isAllowedTool(definition.name) && !isProtectedReadOnlyBuiltin(definition.name),
+		);
 		this._mcpToolNames = new Set([
 			...directMcpTools.map((definition) => definition.name),
 			...deferredMcpTools.map(({ definition }) => definition.name),

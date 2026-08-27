@@ -2870,7 +2870,6 @@ All examples in [examples/extensions/](../examples/extensions/).
 | `ssh.ts` | SSH remote execution | `registerFlag`, `on("user_bash")`, `on("before_agent_start")`, tool operations |
 | `interactive-shell.ts` | Persistent shell session | `on("user_bash")` |
 | `gondolin/` | Route built-in tools and `!` commands into a Gondolin micro-VM | Tool operations, built-in tool overrides, `on("user_bash")` |
-| `subagent/` | Spawn sub-agents | `registerTool`, `exec` |
 | **Games** |||
 | `snake.ts` | Snake game | `registerCommand`, `ui.custom`, keyboard handling |
 | `space-invaders.ts` | Space Invaders game | `registerCommand`, `ui.custom` |

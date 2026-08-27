@@ -488,13 +488,14 @@ describe("Ask/Auto/Full permission policy", () => {
 			action: action("bash", { command }),
 			args: { command },
 			reason: "This action affects the host",
-			actor: { type: "agent", id: "child-1", name: "researcher" },
+			actor: { type: "agent", id: "child-1", name: "researcher", taskId: "task-1" },
 		});
 		expect(view.title).toBe("Approve bash?");
 		expect(view.details).toContain(`Command: ${command}`);
 		expect(view.details).toContain("Metis does not sandbox this action");
 		expect(view.details).toContain("may be irreversible");
 		expect(view.details).toContain("Agent: researcher (child-1)");
+		expect(view.details).toContain("Task: task-1");
 
 		const writeArgs = { path: "new.txt", content: "complete file contents" };
 		const writeView = formatPermissionApproval({
