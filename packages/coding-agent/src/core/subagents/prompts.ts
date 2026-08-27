@@ -1,4 +1,4 @@
-import { AGENT_TYPE_CATALOG } from "./profiles.ts";
+import { AGENT_TYPE_GUIDE, AGENT_TYPE_PROFILES, effectiveAgentToolNames } from "./profiles.ts";
 import type { AgentConfig, AgentMailboxTerminalEvent } from "./types.ts";
 
 export const AGENT_COORDINATION_PROMPT = `<agent_coordination>
@@ -7,7 +7,9 @@ export const AGENT_COORDINATION_PROMPT = `<agent_coordination>
 - send_message only steers a running task. followup_task always creates a new task.
 - inspect_agents shows durable visible activity newest first; it is not hidden reasoning.
 - Before answering the user, integrate every required result and verify important claims.
-- Agent types: default=general; explorer=read/search only; worker=implement/test; reviewer=read-only review.
+- Agent type maximum capabilities follow; effective tools are intersected with your current delegatable tools:
+${AGENT_TYPE_GUIDE}
+- spawn_agent returns the child's effective tool, write, and delegation snapshot; inspect_agents can verify it later.
 </agent_coordination>`;
 
 export function safePromptJson(value: unknown): string {
@@ -36,7 +38,7 @@ Identity and ownership
 
 Capabilities and safety
 - Agent type: ${safePromptJson(config.agentType)}.
-- Tool snapshot: ${safePromptJson(config.tools)}.
+- Tool snapshot: ${safePromptJson(effectiveAgentToolNames(config))}.
 - Permission mode: ${safePromptJson(config.permissionMode)}.
 - Write policy: ${safePromptJson(config.writePolicy)}.
 - Working directory: ${safePromptJson(config.cwd)}.
@@ -63,7 +65,7 @@ export function buildChildSystemPrompt(config: AgentConfig): string {
 		buildCommonAgentContract(config),
 		`<agent_type>${safePromptJson({
 			name: config.agentType,
-			instructions: AGENT_TYPE_CATALOG[config.agentType],
+			instructions: AGENT_TYPE_PROFILES[config.agentType].purpose,
 		})}</agent_type>`,
 	].join("\n");
 }

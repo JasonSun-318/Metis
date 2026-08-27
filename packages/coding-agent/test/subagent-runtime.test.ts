@@ -76,14 +76,15 @@ function agentConfig(overrides: Partial<AgentConfig> = {}): AgentConfig {
 
 describe("subagent runtime prompt and mailbox", () => {
 	it("keeps the activated parent coordinator compact and responsibility-focused", () => {
-		expect(AGENT_COORDINATION_PROMPT).toBe(`<agent_coordination>
-- Delegate only independent, bounded work and choose the narrowest fitting agent type.
-- spawn_agent and followup_task are asynchronous; continue useful work or use wait_agents when a result is required now.
-- send_message only steers a running task. followup_task always creates a new task.
-- inspect_agents shows durable visible activity newest first; it is not hidden reasoning.
-- Before answering the user, integrate every required result and verify important claims.
-- Agent types: default=general; explorer=read/search only; worker=implement/test; reviewer=read-only review.
-</agent_coordination>`);
+		expect(AGENT_COORDINATION_PROMPT).toContain(
+			"explorer: tools=parent intersection [read, grep, find, ls, web_fetch, web_search]; filesystem writes=denied; delegation=denied",
+		);
+		expect(AGENT_COORDINATION_PROMPT).toContain(
+			"reviewer: tools=parent intersection [read, grep, find, ls, bash]; filesystem writes=denied; delegation=denied",
+		);
+		expect(AGENT_COORDINATION_PROMPT).toContain(
+			"spawn_agent returns the child's effective tool, write, and delegation snapshot; inspect_agents can verify it later",
+		);
 	});
 
 	it("safely encodes adversarial agent metadata in the child contract", () => {
@@ -98,6 +99,13 @@ describe("subagent runtime prompt and mailbox", () => {
 		expect(prompt).toContain('Write policy: "deny".');
 		expect(prompt).toContain("filesystem writes are denied");
 		expect(safePromptJson({ value: "<>&" })).toBe('{"value":"\\u003c\\u003e\\u0026"}');
+	});
+
+	it("shows delegating children their complete runtime tool snapshot", () => {
+		const prompt = buildChildSystemPrompt(
+			agentConfig({ agentType: "worker", tools: ["read"], writePolicy: "inherit", mayDelegate: true }),
+		);
+		expect(prompt).toContain(`Tool snapshot: ${JSON.stringify(["read", ...AGENT_TOOL_NAMES])}`);
 	});
 
 	it("keeps trusted read-only tools when an extension reuses a built-in name", async () => {

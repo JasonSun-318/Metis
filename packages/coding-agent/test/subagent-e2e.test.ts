@@ -286,6 +286,19 @@ describe("agent system e2e", () => {
 			task: "Return a concise verified handoff",
 			agentType: "default",
 		});
+		expect(spawned.details).toMatchObject({
+			tools: [
+				"read",
+				"spawn_agent",
+				"inspect_agents",
+				"send_message",
+				"followup_task",
+				"wait_agents",
+				"interrupt_agent",
+			],
+			writePolicy: "inherit",
+			mayDelegate: true,
+		});
 		const receipt = spawned.details as { agentId: string; taskId: string };
 		const waited = await run("wait_agents", { agentIds: [receipt.agentId], timeoutMs: 5_000 });
 		expect(waited.details).toMatchObject({
@@ -323,6 +336,12 @@ describe("agent system e2e", () => {
 			task: "Inspect the module boundary",
 			agentType: "explorer",
 		});
+		expect(spawnResult.details).toMatchObject({
+			agentType: "explorer",
+			tools: ["read", "grep", "find", "ls", "web_fetch", "web_search"],
+			writePolicy: "deny",
+			mayDelegate: false,
+		});
 		const created = spawnResult.details as { agentId: string; taskId: string };
 		await vi.waitFor(() => expect(runtimes).toHaveLength(1));
 		const send = tools.find((tool) => tool.name === "send_message")!;
@@ -341,6 +360,16 @@ describe("agent system e2e", () => {
 		const inspect = tools.find((tool) => tool.name === "inspect_agents")!;
 		const inspectResult = await executeTool(inspect, {});
 		expect(inspectResult.content.find((block) => block.type === "text")?.text ?? "").toContain("researcher");
+		expect(inspectResult.details).toMatchObject({
+			agents: [
+				{
+					agentType: "explorer",
+					tools: ["read", "grep", "find", "ls", "web_fetch", "web_search"],
+					writePolicy: "deny",
+					mayDelegate: false,
+				},
+			],
+		});
 
 		const followUp = tools.find((tool) => tool.name === "followup_task")!;
 		await executeTool(followUp, { agentId: created.agentId, task: "Check the edge case" });

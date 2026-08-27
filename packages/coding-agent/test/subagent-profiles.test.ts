@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resolveAgentProfile } from "../src/core/subagents/profiles.ts";
+import { effectiveAgentToolNames, resolveAgentProfile } from "../src/core/subagents/profiles.ts";
 import { AGENT_TOOL_NAMES, type AgentType } from "../src/core/subagents/types.ts";
 
 const parentTools = [
@@ -55,5 +55,10 @@ describe("built-in agent profiles", () => {
 
 	it("removes delegation at the depth ceiling", () => {
 		expect(resolveAgentProfile({ agentType: "worker", parentTools, depth: 2 }).mayDelegate).toBe(false);
+	});
+
+	it("reports coordination tools only when the child may delegate", () => {
+		expect(effectiveAgentToolNames({ tools: ["read"], mayDelegate: true })).toEqual(["read", ...AGENT_TOOL_NAMES]);
+		expect(effectiveAgentToolNames({ tools: ["read"], mayDelegate: false })).toEqual(["read"]);
 	});
 });

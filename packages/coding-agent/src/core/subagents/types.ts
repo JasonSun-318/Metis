@@ -85,6 +85,9 @@ export interface AgentSummary extends AgentRelation {
 	readonly depth: number;
 	readonly status: AgentStatus;
 	readonly archived: boolean;
+	readonly tools: readonly string[];
+	readonly writePolicy: "inherit" | "deny";
+	readonly mayDelegate: boolean;
 	readonly tasks: readonly AgentTaskSummary[];
 	readonly currentTask?: AgentTaskSummary;
 	readonly latestTask?: AgentTaskSummary;

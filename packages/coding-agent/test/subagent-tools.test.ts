@@ -27,6 +27,9 @@ function setup() {
 			name: input.name,
 			agentType: input.agentType ?? ("default" as const),
 			status: "running" as const,
+			tools: input.agentType === "explorer" ? ["read", "grep"] : ["read", "bash"],
+			writePolicy: input.agentType === "explorer" ? ("deny" as const) : ("inherit" as const),
+			mayDelegate: input.agentType !== "explorer",
 		})),
 		inspect: vi.fn(async () => ({ kind: "list" as const, agents: [] })),
 		sendMessage: vi.fn(async (_actorId, input) => ({
@@ -83,6 +86,9 @@ describe("agent control tools", () => {
 		expect(Value.Check(followUp.parameters, { agentId: "child-1", task: "continue", background: true })).toBe(false);
 		expect(Value.Check(wait.parameters, { agentIds: ["child-1"], timeoutMs: 10 })).toBe(true);
 		expect(Value.Check(wait.parameters, {})).toBe(false);
+		expect(JSON.stringify(spawn.parameters)).toContain(
+			"explorer: tools=parent intersection [read, grep, find, ls, web_fetch, web_search]",
+		);
 	});
 
 	it("forwards the public inputs and returns receipts without implicit waiting", async () => {
@@ -164,6 +170,9 @@ describe("agent control tools", () => {
 					depth: 1,
 					status: "done",
 					archived: false,
+					tools: ["read", "bash"],
+					writePolicy: "inherit",
+					mayDelegate: true,
 					parentSessionId: ACTOR_ID,
 					rootSessionId: ACTOR_ID,
 					agentPath: ["child-1"],
@@ -241,6 +250,9 @@ describe("agent control tools", () => {
 					depth: 1,
 					status: "running",
 					archived: false,
+					tools: ["read", "bash"],
+					writePolicy: "inherit",
+					mayDelegate: true,
 					parentSessionId: ACTOR_ID,
 					rootSessionId: ACTOR_ID,
 					agentPath: ["child-1"],
@@ -277,6 +289,9 @@ describe("agent control tools", () => {
 				depth: 1,
 				status: "done",
 				archived: false,
+				tools: ["read", "grep"],
+				writePolicy: "deny",
+				mayDelegate: false,
 				parentSessionId: ACTOR_ID,
 				rootSessionId: ACTOR_ID,
 				agentPath: ["child-1"],
@@ -299,6 +314,7 @@ describe("agent control tools", () => {
 		const inspect = tools.find((tool) => tool.name === "inspect_agents")!;
 		const result = await execute(inspect, { agentId: "child-1", taskId: "task-1", limit: 10 });
 		const modelText = result.content.find((block) => block.type === "text")?.text ?? "";
+		expect(modelText).toContain("Capabilities tools=[read, grep] · writes=deny · delegation=denied");
 		expect(modelText).toContain("Task task-1");
 		expect(modelText).toContain("Next before event event-older");
 		const component = new ToolExecutionComponent(
@@ -312,6 +328,9 @@ describe("agent control tools", () => {
 		);
 		component.updateResult({ ...result, isError: false });
 		expect(stripAnsi(component.render(120).join("\n"))).not.toContain(marker);
+		expect(result.details).toMatchObject({
+			agent: { tools: ["read", "grep"], writePolicy: "deny", mayDelegate: false },
+		});
 		component.setExpanded(true);
 		expect(stripAnsi(component.render(120).join("\n"))).toContain(marker);
 	});
@@ -346,6 +365,9 @@ describe("agent control tools", () => {
 					depth: 2,
 					status: "done",
 					archived: false,
+					tools: ["read", "grep", "bash"],
+					writePolicy: "deny",
+					mayDelegate: false,
 					parentSessionId: "parent-agent",
 					rootSessionId: ACTOR_ID,
 					agentPath: ["parent-agent", "child-1"],
@@ -389,6 +411,9 @@ describe("agent control tools", () => {
 					depth: 1,
 					status: "done",
 					archived: false,
+					tools: ["read", "bash"],
+					writePolicy: "inherit",
+					mayDelegate: true,
 					parentSessionId: ACTOR_ID,
 					rootSessionId: ACTOR_ID,
 					agentPath: ["child-1"],

@@ -10,8 +10,8 @@ The model sees exactly six controls:
 
 | Tool | Purpose |
 | --- | --- |
-| `spawn_agent` | Start a uniquely named child with a self-contained task and optional built-in role, context fork, or configured model |
-| `inspect_agents` | List owned descendants or read one task's safe durable activity, newest first |
+| `spawn_agent` | Start a uniquely named child and return its effective tools, write policy, and delegation capability |
+| `inspect_agents` | List owned descendants with capability snapshots or read one task's safe durable activity, newest first |
 | `send_message` | Steer a currently running task |
 | `followup_task` | Queue a new task on an existing Agent |
 | `wait_agents` | Wait for one to eight terminal or approval events when progress truly depends on them |
@@ -21,7 +21,14 @@ Spawning and follow-up are always asynchronous. Completed work also reaches the 
 
 ## Roles and permissions
 
-Built-in roles are `default`, `explorer`, `worker`, and `reviewer`. The runtime owns each role's prompt, tool ceiling, write policy, and delegation capability. Explorer and reviewer are read-only; they do not load extension hooks, and extension or MCP tools cannot replace their trusted built-in read tools by reusing a name. Worker and default inherit the parent's write policy. The model chooses a role but cannot grant arbitrary tools, filesystem roots, permission mode, cwd, thinking level, timeout, or developer instructions.
+Built-in roles are `default`, `explorer`, `worker`, and `reviewer`. Effective tools are always intersected with the parent's currently delegatable tools:
+
+- `default`: all parent tools plus the six coordination tools when delegation is allowed; inherited write policy; may delegate below the depth limit.
+- `explorer`: `read`, `grep`, `find`, `ls`, `web_fetch`, and `web_search`; filesystem writes and delegation denied.
+- `worker`: all parent tools plus the six coordination tools when delegation is allowed; inherited write policy; may delegate below the depth limit.
+- `reviewer`: `read`, `grep`, `find`, `ls`, and `bash`; filesystem writes and delegation denied.
+
+The runtime owns each role's prompt, tool ceiling, write policy, and delegation capability. Explorer and reviewer do not load extension hooks, and extension or MCP tools cannot replace their trusted built-in read tools by reusing a name. The model chooses a role but cannot grant arbitrary tools, filesystem roots, permission mode, cwd, thinking level, timeout, or developer instructions. The same role definitions generate the parent prompt and tool schema, while `spawn_agent` and `inspect_agents` expose the final runtime snapshot.
 
 Every child inherits a permission ceiling from its parent. A later parent downgrade narrows all descendants, including queued, starting, running, and cold sessions. Child approval requests identify the Agent and route to the owning parent UI. A child model must already be configured; its actual thinking level is the highest supported level not above the parent's current level.
 

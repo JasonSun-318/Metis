@@ -8,7 +8,7 @@ import { narrowPermissionMode, type PermissionMode } from "../permission-mode.ts
 import type { RequestPermissionApproval } from "../permission-policy.ts";
 import { createSessionId } from "../session-id.ts";
 import { type FileEntry, SessionManager } from "../session-manager.ts";
-import { MAX_AGENT_DEPTH, resolveAgentProfile } from "./profiles.ts";
+import { effectiveAgentToolNames, MAX_AGENT_DEPTH, resolveAgentProfile } from "./profiles.ts";
 import { defaultSubagentScheduler, type SubagentSchedulerApi } from "./scheduler.ts";
 import {
 	type AgentDiskRecord,
@@ -58,6 +58,14 @@ export interface AgentTaskReceipt {
 	readonly status: "queued" | "running";
 }
 
+export interface SpawnAgentReceipt extends AgentTaskReceipt {
+	readonly name: string;
+	readonly agentType: AgentType;
+	readonly tools: readonly string[];
+	readonly writePolicy: "inherit" | "deny";
+	readonly mayDelegate: boolean;
+}
+
 export interface ChildRuntimeFactoryInput {
 	readonly config: AgentConfig;
 	readonly permissionModeCeiling: () => PermissionMode;
@@ -81,11 +89,7 @@ export interface SubagentManagerOptions {
 
 export interface SubagentManagerApi {
 	attachActor(session: AgentSession): () => void;
-	spawn(
-		actorId: string,
-		input: SpawnAgentInput,
-		signal?: AbortSignal,
-	): Promise<AgentTaskReceipt & { readonly name: string; readonly agentType: AgentType }>;
+	spawn(actorId: string, input: SpawnAgentInput, signal?: AbortSignal): Promise<SpawnAgentReceipt>;
 	inspect(actorId: string, input: InspectAgentsInput): Promise<InspectAgentsResult>;
 	sendMessage(
 		actorId: string,
@@ -289,11 +293,7 @@ export class SubagentManager implements SubagentManagerApi {
 		};
 	}
 
-	async spawn(
-		actorId: string,
-		input: SpawnAgentInput,
-		signal?: AbortSignal,
-	): Promise<AgentTaskReceipt & { name: string; agentType: AgentType }> {
+	async spawn(actorId: string, input: SpawnAgentInput, signal?: AbortSignal): Promise<SpawnAgentReceipt> {
 		signal?.throwIfAborted();
 		this.assertActive();
 		const actor = this.requireActor(actorId);
@@ -379,7 +379,16 @@ export class SubagentManager implements SubagentManagerApi {
 		this.childPermissionCeilings.set(agentId, parentMode);
 		const status = this.scheduleNext(agentId) ?? "queued";
 		this.emitUpdate(this.buildSummary(this.store.load(agentId)));
-		return { agentId, taskId, status, name: config.name, agentType: config.agentType };
+		return {
+			agentId,
+			taskId,
+			status,
+			name: config.name,
+			agentType: config.agentType,
+			tools: effectiveAgentToolNames(config),
+			writePolicy: config.writePolicy,
+			mayDelegate: config.mayDelegate,
+		};
 	}
 
 	async inspect(actorId: string, input: InspectAgentsInput): Promise<InspectAgentsResult> {
@@ -1240,6 +1249,9 @@ export class SubagentManager implements SubagentManagerApi {
 			depth: record.config.agentPath.length,
 			status,
 			archived: record.archived,
+			tools: effectiveAgentToolNames(record.config),
+			writePolicy: record.config.writePolicy,
+			mayDelegate: record.config.mayDelegate,
 			tasks,
 			parentSessionId: record.config.parentSessionId,
 			rootSessionId: record.config.rootSessionId,

@@ -4,6 +4,7 @@ import { keyHint } from "../../modes/interactive/components/keybinding-hints.ts"
 import type { AgentSession } from "../agent-session.ts";
 import { defineTool, type ToolDefinition } from "../extensions/types.ts";
 import type { SubagentManager } from "./manager.ts";
+import { AGENT_TYPE_GUIDE } from "./profiles.ts";
 import { utf8Prefix } from "./trace.ts";
 import { AGENT_TYPES, type InspectAgentsResult, MAX_AGENT_INPUT_UTF8_BYTES } from "./types.ts";
 import { terminalEventIdentity } from "./wait.ts";
@@ -30,7 +31,7 @@ const Spawn = Type.Object(
 		}),
 		agentType: Type.Optional(
 			Type.Union([AgentTypeLiteral], {
-				description: "Optional built-in role; defaults to default when omitted.",
+				description: `Optional built-in role; defaults to default when omitted. Maximum capabilities:\n${AGENT_TYPE_GUIDE}`,
 			}),
 		),
 		forkTurns: Type.Optional(
@@ -155,6 +156,7 @@ function inspectText(inspected: InspectAgentsResult): string {
 				const lines = [
 					`Agent ${JSON.stringify(agent.name)} (${agent.agentId}) · ${agent.agentType} · ${agent.status}`,
 					`Relation parent=${agent.parentSessionId} depth=${agent.depth} · updated=${agent.updatedAt}`,
+					`Capabilities tools=[${agent.tools.join(", ")}] · writes=${agent.writePolicy} · delegation=${agent.mayDelegate ? "allowed" : "denied"}`,
 				];
 				if (agent.currentTask) {
 					lines.push(
@@ -179,6 +181,7 @@ function inspectText(inspected: InspectAgentsResult): string {
 	const task = inspected.agent.tasks.find((candidate) => candidate.taskId === inspected.taskId);
 	return [
 		`Agent ${inspected.agent.name} (${inspected.agent.agentId})`,
+		`Capabilities tools=[${inspected.agent.tools.join(", ")}] · writes=${inspected.agent.writePolicy} · delegation=${inspected.agent.mayDelegate ? "allowed" : "denied"}`,
 		`Task ${inspected.taskId}${task ? ` · ${task.status}` : ""}`,
 		...(inspected.nextBeforeEventId ? [`Next before event ${inspected.nextBeforeEventId}`] : []),
 		"",
@@ -198,6 +201,9 @@ function inspectDetails(inspected: InspectAgentsResult): unknown {
 				status: inspected.agent.status,
 				depth: inspected.agent.depth,
 				parentSessionId: inspected.agent.parentSessionId,
+				tools: inspected.agent.tools,
+				writePolicy: inspected.agent.writePolicy,
+				mayDelegate: inspected.agent.mayDelegate,
 			},
 			taskId: inspected.taskId,
 			...(task
@@ -244,6 +250,9 @@ function inspectDetails(inspected: InspectAgentsResult): unknown {
 				status: agent.status,
 				depth: agent.depth,
 				parentSessionId: agent.parentSessionId,
+				tools: agent.tools,
+				writePolicy: agent.writePolicy,
+				mayDelegate: agent.mayDelegate,
 				...(agent.currentTask ? { currentTask: compactTask(agent.currentTask) } : {}),
 				...(agent.latestTask ? { latestTask: compactTask(agent.latestTask) } : {}),
 				usage,
