@@ -385,7 +385,7 @@ ${chalk.bold("Examples:")}
   # Start with a specific thinking level
   ${APP_NAME} --thinking high "Solve this complex problem"
 
-  # Use maximum model reasoning plus subagent orchestration
+  # Use the highest supported model reasoning level
   ${APP_NAME} --thinking ultra "Handle this multi-part task"
 
   # Read-only mode (no file modifications possible)

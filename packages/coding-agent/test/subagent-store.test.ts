@@ -65,6 +65,18 @@ describe("AgentStore", () => {
 		expect(store.listTasks("agent-1").map((task) => task.taskId)).toEqual(["task-1", "task-2"]);
 	});
 
+	it("preserves task creation time across state transitions", () => {
+		const { root, store } = setup();
+		const { config: agentConfig, taskId } = config(root);
+		store.create(agentConfig, [], taskId);
+		const createdAt = store.listTasks(agentConfig.agentId)[0]!.createdAt;
+		store.appendTaskState(agentConfig.agentId, { taskId, status: "running" });
+		store.appendTaskState(agentConfig.agentId, { taskId, status: "done", finalMessage: "complete" });
+		const task = store.listTasks(agentConfig.agentId)[0]!;
+		expect(task.createdAt).toBe(createdAt);
+		expect(task.updatedAt >= task.createdAt).toBe(true);
+	});
+
 	it("does not scan the removed subagents directory", () => {
 		const { agentDir, store } = setup();
 		mkdirSync(join(agentDir, "subagents", ROOT_ID), { recursive: true });

@@ -72,7 +72,7 @@ export interface ModeProjectDeleteHooks {
 	readonly getSessionUnreadStatePath: (path: string) => string;
 	readonly getSessionImageDir: (path: string) => string;
 	readonly getSessionToolOutputDir: (path: string) => string;
-	readonly getSessionSubagentDir: (agentDir: string, sessionId: string) => string;
+	readonly getSessionAgentDir: (agentDir: string, sessionId: string) => string;
 	readonly trash?: (operationDir: string) => unknown | Promise<unknown>;
 	readonly rename?: (source: string, destination: string) => void;
 	readonly operationId?: () => string;
@@ -442,12 +442,7 @@ async function collectTargets(
 			}
 		}
 		addOwnedTarget(targets, roots.agentDir, getSessionAttachmentDir(roots.agentDir, target.sessionId), "directory");
-		addOwnedTarget(
-			targets,
-			roots.agentDir,
-			hooks.getSessionSubagentDir(roots.agentDir, target.sessionId),
-			"directory",
-		);
+		addOwnedTarget(targets, roots.agentDir, hooks.getSessionAgentDir(roots.agentDir, target.sessionId), "directory");
 		for (const workDir of getOwnedSessionWorkDirs(roots.agentDir, target.sessionId)) {
 			addOwnedTarget(targets, roots.agentDir, workDir, "directory");
 		}

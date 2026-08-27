@@ -45,13 +45,13 @@ describe("built-in agent profiles", () => {
 		],
 		["reviewer", ["read", "grep", "find", "ls", "bash"], "deny", false],
 	])("resolves %s deterministically", (agentType, tools, writePolicy, mayDelegate) => {
-		const resolved = resolveAgentProfile({ agentType, parentTools, depth: 1, maxDepth: 2 });
+		const resolved = resolveAgentProfile({ agentType, parentTools, depth: 1 });
 		expect(resolved.tools).toEqual(tools);
 		expect(resolved.writePolicy).toBe(writePolicy);
 		expect(resolved.mayDelegate).toBe(mayDelegate);
 	});
 
 	it("removes delegation at the depth ceiling", () => {
-		expect(resolveAgentProfile({ agentType: "worker", parentTools, depth: 2, maxDepth: 2 }).mayDelegate).toBe(false);
+		expect(resolveAgentProfile({ agentType: "worker", parentTools, depth: 2 }).mayDelegate).toBe(false);
 	});
 });

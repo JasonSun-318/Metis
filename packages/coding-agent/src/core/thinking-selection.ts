@@ -32,7 +32,7 @@ export function canUseUltra(input: {
 	readonly hostAllowsUltra: boolean;
 	readonly persisted: boolean;
 	readonly mode: AgentMode;
-	readonly isSubagent: boolean;
+	readonly isAgent: boolean;
 }): boolean {
-	return input.hostAllowsUltra && input.persisted && input.mode === "code" && !input.isSubagent;
+	return input.hostAllowsUltra && input.persisted && input.mode === "code" && !input.isAgent;
 }

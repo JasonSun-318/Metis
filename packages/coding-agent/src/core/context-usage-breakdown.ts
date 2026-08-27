@@ -11,7 +11,7 @@ export const CONTEXT_USAGE_CATEGORY_ORDER: readonly ContextUsageCategory[] = [
 	"rules",
 	"skills",
 	"mcp_dynamic_tools",
-	"subagent_definitions",
+	"agent_definitions",
 	"summarized_conversation",
 	"conversation",
 ];
@@ -22,10 +22,10 @@ export const FIXED_CONTEXT_USAGE_CATEGORIES: ReadonlySet<ContextUsageCategory> =
 	"rules",
 	"skills",
 	"mcp_dynamic_tools",
-	"subagent_definitions",
+	"agent_definitions",
 ]);
 
-type ToolCategory = "tool_definitions" | "mcp_dynamic_tools" | "subagent_definitions";
+type ToolCategory = "tool_definitions" | "mcp_dynamic_tools" | "agent_definitions";
 
 export interface EstimateContextUsageBreakdownInput {
 	readonly systemPromptParts: readonly SystemPromptPart[];

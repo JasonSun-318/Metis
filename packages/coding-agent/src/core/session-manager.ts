@@ -83,11 +83,9 @@ import {
 	isPlanControlEntryType,
 	isSessionControlEntryType,
 	isSessionDirectoryControlEntryType,
-	isSubagentControlEntryType,
 	parseSessionControlEntry,
 	type SessionControlEntry,
 	type SessionControlPayload,
-	type SubagentControlPayload,
 } from "./session-control.ts";
 import { assertValidSessionId, createSessionId } from "./session-id.ts";
 import {
@@ -297,12 +295,6 @@ export function migrateSessionDisplayMetadata(
 		}
 	}
 	return migrated;
-}
-
-/** Parent-ID-owned directory for first-class child session journals. */
-export function getSessionSubagentDir(agentDir: string, parentSessionId: string): string {
-	assertValidSessionId(parentSessionId);
-	return join(resolvePath(agentDir), "subagents", parentSessionId);
 }
 
 /** Root-session-owned directory for Agent System v2 child session journals. */
@@ -806,11 +798,6 @@ export interface SessionHeader {
 	/** Legacy v6-v8 field. New writers omit it. */
 	reviewerEnabled?: boolean;
 	parentSession?: string;
-	subagent?: {
-		agentId: string;
-		name: string;
-		parentSessionId: string;
-	};
 	agent?: {
 		agentId: string;
 		name: string;
@@ -845,7 +832,6 @@ export interface NewSessionOptions {
 	permissionMode?: PersistedPermissionMode;
 	/** @deprecated Ignored. Ask/Auto/Full have no reviewer. */
 	reviewerEnabled?: boolean;
-	subagent?: SessionHeader["subagent"];
 	agent?: SessionHeader["agent"];
 	scheduled?: SessionHeader["scheduled"];
 }
@@ -1062,7 +1048,7 @@ export type ReadonlySessionManager = Pick<
 	| "getMode"
 	| "getCwdOrigin"
 	| "getPermissionSettings"
-	| "getSubagentsEnabled"
+	| "getUltraSelected"
 	| "getAdditionalDirectories"
 	| "getWorkspaceRoots"
 	| "getDurableJournalSnapshot"
@@ -1103,7 +1089,7 @@ function readonlySessionSnapshot(manager: SessionManager): ReadonlySessionManage
 		getMode: () => manager.getMode(),
 		getCwdOrigin: () => manager.getCwdOrigin(),
 		getPermissionSettings: () => manager.getPermissionSettings(),
-		getSubagentsEnabled: () => manager.getSubagentsEnabled(),
+		getUltraSelected: () => manager.getUltraSelected(),
 		getAdditionalDirectories: () => manager.getAdditionalDirectories(),
 		getWorkspaceRoots: () => manager.getWorkspaceRoots(),
 		getDurableJournalSnapshot: () => manager.getDurableJournalSnapshot(),
@@ -1226,7 +1212,7 @@ function migrateV9ToV10(entries: FileEntry[]): void {
 	}
 }
 
-/** Migrate v10 → v11: reserve durable Subagent mailbox delivery controls. */
+/** Migrate v10 → v11: reserve the retired child mailbox control range. */
 function migrateV10ToV11(entries: FileEntry[]): void {
 	for (const entry of entries) {
 		if (entry.type === "session") entry.version = 11;
@@ -1240,14 +1226,11 @@ function migrateV11ToV12(entries: FileEntry[]): void {
 	}
 }
 
-function isV11SubagentRecord(entry: unknown): boolean {
-	if (typeof entry !== "object" || entry === null) return false;
-	const value = entry as { type?: unknown; background?: unknown };
-	return (
-		value.type === "subagent_mailbox_event" ||
-		value.type === "subagent_mailbox_delivery" ||
-		(value.type === "subagent_state" && Object.hasOwn(value, "background"))
-	);
+/** Migrate v12 → v13: reserve canonical Agent/Task controls. */
+function migrateV12ToV13(entries: FileEntry[]): void {
+	for (const entry of entries) {
+		if (entry.type === "session") entry.version = 13;
+	}
 }
 
 /**
@@ -1271,9 +1254,6 @@ function migrateToCurrentVersion(entries: FileEntry[]): boolean {
 	) {
 		throw new TypeError("Session control entries require a v6 session header");
 	}
-	if (version < 7 && entries.some((entry) => isSubagentControlEntryType(entry.type))) {
-		throw new TypeError("Subagent control entries require a v7 session header");
-	}
 	if (version < 8 && entries.some((entry) => isSessionDirectoryControlEntryType(entry.type))) {
 		throw new TypeError("Directory control entries require a v8 session header");
 	}
@@ -1285,9 +1265,6 @@ function migrateToCurrentVersion(entries: FileEntry[]): boolean {
 	}
 	if (version < 10 && header?.scheduled !== undefined) {
 		throw new TypeError("Scheduled session markers require a v10 session header");
-	}
-	if (version < 11 && entries.some(isV11SubagentRecord)) {
-		throw new TypeError("Subagent mailbox controls require a v11 session header");
 	}
 	if (version < 12 && entries.some((entry) => isPlanControlEntryType(entry.type))) {
 		throw new TypeError("Plan control entries require a v12 session header");
@@ -1306,6 +1283,7 @@ function migrateToCurrentVersion(entries: FileEntry[]): boolean {
 	if (version < 10) migrateV9ToV10(entries);
 	if (version < 11) migrateV10ToV11(entries);
 	if (version < 12) migrateV11ToV12(entries);
+	if (version < 13) migrateV12ToV13(entries);
 
 	return true;
 }
@@ -1410,18 +1388,6 @@ export function sessionEntryToContextMessages(entry: SessionEntry): AgentMessage
 		return [message];
 	}
 	if (entry.type === "custom_message") {
-		const details = entry.details;
-		// Old releases persisted child approval notices as model-visible mailbox
-		// messages. Keep those journal records for audit, but user approval is UI-only.
-		if (
-			entry.customType === "subagent_mailbox" &&
-			typeof details === "object" &&
-			details !== null &&
-			"type" in details &&
-			details.type === "approval_required"
-		) {
-			return [];
-		}
 		return [
 			createCustomMessage(entry.customType, entry.content ?? [], entry.display, entry.details, entry.timestamp),
 		];
@@ -1604,32 +1570,6 @@ function validateSessionHeader(record: Record<string, unknown>, filePath: string
 	if (header.reviewerEnabled !== undefined && typeof header.reviewerEnabled !== "boolean") {
 		corruptSession(filePath, 1, "Session header has an invalid reviewerEnabled");
 	}
-	if (header.subagent !== undefined) {
-		if (!isJsonObject(header.subagent)) corruptSession(filePath, 1, "Session header has an invalid subagent marker");
-		const fields = Object.keys(header.subagent);
-		if (
-			fields.length !== 3 ||
-			!fields.includes("agentId") ||
-			!fields.includes("name") ||
-			!fields.includes("parentSessionId")
-		) {
-			corruptSession(filePath, 1, "Session header has an invalid subagent marker");
-		}
-		try {
-			assertValidSessionId(header.subagent.agentId);
-			assertValidSessionId(header.subagent.parentSessionId);
-		} catch (error) {
-			throw new CorruptSessionError(filePath, 1, "Session header has an invalid subagent id", { cause: error });
-		}
-		if (
-			typeof header.subagent.name !== "string" ||
-			header.subagent.name.length < 1 ||
-			header.subagent.name.length > 128 ||
-			/[\u0000-\u001f\u007f-\u009f]/u.test(header.subagent.name)
-		) {
-			corruptSession(filePath, 1, "Session header has an invalid subagent name");
-		}
-	}
 	if (header.agent !== undefined) {
 		if (!isJsonObject(header.agent)) corruptSession(filePath, 1, "Session header has an invalid agent marker");
 		const agent = header.agent;
@@ -1712,17 +1652,10 @@ function validateSessionHeader(record: Record<string, unknown>, filePath: string
 		} catch (error) {
 			throw new CorruptSessionError(filePath, 1, "Session header has an invalid scheduled id", { cause: error });
 		}
-		if (header.subagent !== undefined) {
-			corruptSession(filePath, 1, "Session header cannot be both scheduled and a subagent");
-		}
 		if (header.agent !== undefined) {
 			corruptSession(filePath, 1, "Session header cannot be both scheduled and an agent");
 		}
 	}
-	if (header.subagent !== undefined && header.agent !== undefined) {
-		corruptSession(filePath, 1, "Session header cannot be both a subagent and an agent");
-	}
-
 	const version = header.version ?? 1;
 	if (!Number.isInteger(version) || version < 1) {
 		corruptSession(filePath, 1, "Session header has an invalid version");
@@ -1739,9 +1672,6 @@ function validateSessionHeader(record: Record<string, unknown>, filePath: string
 		(header.cwdOrigin !== undefined || header.permissionMode !== undefined || header.reviewerEnabled !== undefined)
 	) {
 		corruptSession(filePath, 1, "Workspace and permission header fields require a v6 session header");
-	}
-	if (version < 7 && header.subagent !== undefined) {
-		corruptSession(filePath, 1, "Subagent header fields require a v7 session header");
 	}
 	if (version < 10 && header.scheduled !== undefined) {
 		corruptSession(filePath, 1, "Scheduled header fields require a v10 session header");
@@ -1772,22 +1702,19 @@ function validateRawSessionRecords(records: readonly unknown[], filePath: string
 			continue;
 		}
 		if (isSessionControlEntryType(type)) {
-			if (version < 11 && isV11SubagentRecord(records[index])) {
-				corruptSession(filePath, index + 1, "Subagent mailbox controls require a v11 session header");
-			}
 			if (isSessionDirectoryControlEntryType(type) && version < 8) {
 				corruptSession(filePath, index + 1, "Directory control entries require a v8 session header");
 			}
 			if (isSessionDirectoryControlEntryType(type) && (header.mode ?? DEFAULT_AGENT_MODE) !== "code") {
 				corruptSession(filePath, index + 1, "Directory controls are only valid for Code sessions");
 			}
-			if (isSubagentControlEntryType(type) && version < 7) {
-				corruptSession(filePath, index + 1, "Subagent control entries require a v7 session header");
-			}
 			if (isAgentControlEntryType(type) && version < 13) {
 				corruptSession(filePath, index + 1, "Agent control entries require a v13 session header");
 			}
-			if (!isSubagentControlEntryType(type) && version < 6) {
+			if (type === "session_ultra_selection" && version < 13) {
+				corruptSession(filePath, index + 1, "Ultra selection controls require a v13 session header");
+			}
+			if (!isAgentControlEntryType(type) && version < 6) {
 				corruptSession(filePath, index + 1, "Session control entries require a v6 session header");
 			}
 			parseSessionControlRecord(records[index], index + 1, filePath);
@@ -1797,9 +1724,6 @@ function validateRawSessionRecords(records: readonly unknown[], filePath: string
 			corruptSession(filePath, index + 1, `Unknown session control entry type: ${type}`);
 		}
 		if (type.startsWith("session_directory_")) {
-			corruptSession(filePath, index + 1, `Unknown session control entry type: ${type}`);
-		}
-		if (type.startsWith("subagent_")) {
 			corruptSession(filePath, index + 1, `Unknown session control entry type: ${type}`);
 		}
 	}
@@ -2489,7 +2413,7 @@ interface ManagedSessionState {
 	sessionId: string;
 	cwdOrigin: CwdOrigin;
 	permissionSettings: PermissionSettings;
-	subagentsEnabled: boolean;
+	ultraSelected: boolean;
 	additionalDirectories: string[];
 	sessionFile: string | undefined;
 	/** Canonical path pinned when a persisted session is opened. */
@@ -2517,12 +2441,12 @@ function reducePermissionSettings(entries: readonly FileEntry[]): PermissionSett
 	return { mode };
 }
 
-function reduceSubagentsEnabled(entries: readonly FileEntry[]): boolean {
-	let enabled = false;
+function reduceUltraSelected(entries: readonly FileEntry[]): boolean {
+	let selected = false;
 	for (const entry of entries.slice(1)) {
-		if (entry.type === "subagent_mode_change") enabled = entry.enabled;
+		if (entry.type === "session_ultra_selection") selected = entry.selected;
 	}
-	return enabled;
+	return selected;
 }
 
 function reduceAdditionalDirectories(entries: readonly FileEntry[]): string[] {
@@ -2556,7 +2480,7 @@ function buildManagedSessionState(
 	const labelTimestampsById = new Map<string, string>();
 	let leafId: string | null = null;
 	const permissionSettings = reducePermissionSettings(rawFileEntries);
-	const subagentsEnabled = reduceSubagentsEnabled(rawFileEntries);
+	const ultraSelected = reduceUltraSelected(rawFileEntries);
 	const primaryRoot = canonicalizePathForCreation(header.cwd);
 	const additionalDirectories = reduceAdditionalDirectories(rawFileEntries).filter((path) => path !== primaryRoot);
 	for (const rawEntry of rawFileEntries.slice(1)) {
@@ -2580,7 +2504,7 @@ function buildManagedSessionState(
 		sessionId: header.id,
 		cwdOrigin: header.cwdOrigin ?? "user-selected",
 		permissionSettings,
-		subagentsEnabled,
+		ultraSelected,
 		additionalDirectories,
 		sessionFile,
 		storagePath,
@@ -2618,7 +2542,7 @@ function journalOptions(_storagePath: string, lease: SessionLease, displayPath: 
 function projectSessionDirForCreate(storagePath: string, header: SessionHeader): string {
 	const namespaceRoot = dirname(dirname(storagePath));
 	const namespace = basename(namespaceRoot);
-	return namespace === "sessions" || namespace === "subagents"
+	return namespace === "sessions" || namespace === "agents"
 		? getDefaultSessionDir(header.cwd, dirname(namespaceRoot))
 		: dirname(storagePath);
 }
@@ -2870,7 +2794,7 @@ export class SessionManager {
 	private cwdOrigin: CwdOrigin = "user-selected";
 	private permissionSettings: PermissionSettings = defaultPermissionSettings();
 	private permissionSettingsListeners = new Set<(next: PermissionSettings, previous: PermissionSettings) => void>();
-	private subagentsEnabled = false;
+	private ultraSelected = false;
 	private additionalDirectories: string[] = [];
 	private sessionFile: string | undefined;
 	private storagePath: string | undefined;
@@ -2964,18 +2888,6 @@ export class SessionManager {
 		if (options?.reviewerEnabled !== undefined && typeof options.reviewerEnabled !== "boolean") {
 			throw new TypeError("reviewerEnabled must be a boolean");
 		}
-		if (options?.subagent) {
-			assertValidSessionId(options.subagent.agentId);
-			assertValidSessionId(options.subagent.parentSessionId);
-			if (
-				typeof options.subagent.name !== "string" ||
-				options.subagent.name.length < 1 ||
-				options.subagent.name.length > 128 ||
-				/[\u0000-\u001f\u007f-\u009f]/u.test(options.subagent.name)
-			) {
-				throw new TypeError("Invalid subagent name");
-			}
-		}
 		if (options?.agent) {
 			if (options.agent.agentId !== sessionId) throw new TypeError("Agent header id must match session id");
 			assertValidSessionId(options.agent.parentSessionId);
@@ -2990,7 +2902,6 @@ export class SessionManager {
 			}
 		}
 		if (options?.scheduled) {
-			if (options.subagent) throw new TypeError("A session cannot be both scheduled and a subagent");
 			if (options.agent) throw new TypeError("A session cannot be both scheduled and an agent");
 			assertValidSessionId(options.scheduled.taskId);
 			assertValidSessionId(options.scheduled.runId);
@@ -3005,7 +2916,6 @@ export class SessionManager {
 			cwdOrigin: options?.cwdOrigin ?? "user-selected",
 			permissionMode,
 			parentSession: options?.parentSession,
-			subagent: options?.subagent,
 			agent: options?.agent,
 			scheduled: options?.scheduled,
 		};
@@ -3029,7 +2939,7 @@ export class SessionManager {
 		this.sessionId = state.sessionId;
 		this.cwdOrigin = state.cwdOrigin;
 		this.permissionSettings = state.permissionSettings;
-		this.subagentsEnabled = state.subagentsEnabled;
+		this.ultraSelected = state.ultraSelected;
 		this.additionalDirectories = state.additionalDirectories.filter((path) => path !== this.primaryWorkspaceRoot);
 		this.sessionFile = state.sessionFile;
 		this.storagePath = state.storagePath;
@@ -3055,7 +2965,7 @@ export class SessionManager {
 			sessionId: this.sessionId,
 			cwdOrigin: this.cwdOrigin,
 			permissionSettings: this.permissionSettings,
-			subagentsEnabled: this.subagentsEnabled,
+			ultraSelected: this.ultraSelected,
 			additionalDirectories: this.additionalDirectories,
 			sessionFile: this.sessionFile,
 			storagePath: this.storagePath,
@@ -3384,13 +3294,6 @@ export class SessionManager {
 		return entry.id;
 	}
 
-	/** Append one validated first-class subagent control without advancing the transcript leaf. */
-	appendSubagentControl(payload: SubagentControlPayload): string {
-		const entry = this._appendSessionControl(payload);
-		if (!isSubagentControlEntryType(entry.type)) throw new Error("Unexpected session control entry");
-		return entry.id;
-	}
-
 	getPlanState(): PlanState {
 		const branchIds = new Set(this.getBranch().map(({ id }) => id));
 		return reducePlanState(this.rawFileEntries, branchIds);
@@ -3437,11 +3340,11 @@ export class SessionManager {
 		return this.getPlanState().plans.find((plan) => plan.entryId === current.entryId)!;
 	}
 
-	/** Persist the user-facing Ultra orchestration flag independently from provider thinking. */
-	setSubagentsEnabled(enabled: boolean): string {
-		if (typeof enabled !== "boolean") throw new TypeError("enabled must be a boolean");
-		const id = this.appendSubagentControl({ type: "subagent_mode_change", enabled });
-		this.subagentsEnabled = enabled;
+	/** Persist whether the user selected the virtual Ultra thinking level. */
+	setUltraSelected(selected: boolean): string {
+		if (typeof selected !== "boolean") throw new TypeError("selected must be a boolean");
+		const id = this._appendSessionControl({ type: "session_ultra_selection", selected }).id;
+		this.ultraSelected = selected;
 		return id;
 	}
 
@@ -3717,9 +3620,9 @@ export class SessionManager {
 		return { ...this.permissionSettings };
 	}
 
-	/** Effective Ultra orchestration flag after reducing journal-order controls. */
-	getSubagentsEnabled(): boolean {
-		return this.subagentsEnabled;
+	/** Whether the user selected the virtual Ultra thinking level. */
+	getUltraSelected(): boolean {
+		return this.ultraSelected;
 	}
 
 	/**
@@ -4318,7 +4221,7 @@ export class SessionManager {
 				cwdOrigin: header.cwdOrigin ?? "user-selected",
 				agentDir,
 			});
-			const subagentDir = getSessionSubagentDir(agentDir, header.id);
+			const ownedAgentTree = getSessionAgentDir(agentDir, header.id);
 			const pathDerivedTargets = sessionStoragePathVariants(storagePath, options.sessionsRoot).flatMap((path) => [
 				{ label: "display metadata", path: getSessionDisplayMetadataPath(path) },
 				{ label: "unread state", path: getSessionUnreadStatePath(path) },
@@ -4328,7 +4231,7 @@ export class SessionManager {
 			]);
 			const ownedTargets = [
 				...pathDerivedTargets,
-				{ label: "subagents", path: subagentDir },
+				{ label: "agents", path: ownedAgentTree },
 				...(attachmentDir ? [{ label: "attachment", path: attachmentDir }] : []),
 				...(workspace ? [{ label: "managed workspace", path: workspace }] : []),
 				...getOwnedSessionWorkDirs(agentDir, header.id).map((path) => ({ label: "document work", path })),
@@ -4374,7 +4277,7 @@ export class SessionManager {
 			getSessionUnreadStatePath,
 			getSessionImageDir,
 			getSessionToolOutputDir,
-			getSessionSubagentDir,
+			getSessionAgentDir,
 		});
 	}
 

@@ -26,13 +26,15 @@ Sessions have a version field in the header:
 - **Version 4**: Stores session images as content-addressed file references
 - **Version 5**: Reserves durable runtime operation/queue/turn controls
 - **Version 6**: Stores immutable mode/workspace ownership and permission controls
-- **Version 7**: Adds child ownership markers and first-class subagent controls
+- **Version 7**: Reserved the original child-session control family
 - **Version 8**: Adds Code-session additional-directory controls
 - **Version 9**: Adds policy-owned unattended permission decisions
 - **Version 10**: Adds hidden scheduled-session ownership markers
-- **Version 11**: Adds per-run Subagent delivery mode and durable mailbox delivery controls
+- **Version 11**: Reserved durable child mailbox delivery controls
+- **Version 12**: Adds durable Plan collaboration controls
+- **Version 13**: Adds canonical Agent headers, tasks, archive state, mailbox delivery, and Ultra selection
 
-Existing sessions are automatically migrated to the current version (v11) when loaded. A journal containing a newer control family under an older header is rejected rather than guessed.
+Existing sessions are automatically migrated to the current version (v13) when loaded. A journal containing a newer control family under an older header is rejected rather than guessed.
 
 ## Image Storage
 
@@ -250,25 +252,23 @@ Each record permits only the base control fields and one normalized canonical ab
 
 Opening or resuming the same journal preserves these controls. `/tree` and compaction stay within that journal and preserve them. Clone, fork, `newSession()`, and import into a new destination exclude these authority-bearing controls.
 
-### Subagent headers and controls (v7)
+### Agent headers and controls (v13)
 
 A first-class child adds an immutable ownership marker to its normal session header:
 
 ```json
-{"type":"session","version":11,"id":"child-id","timestamp":"2026-07-18T00:00:00.000Z","cwd":"/path/to/project","mode":"code","cwdOrigin":"user-selected","permissionMode":"ask","subagent":{"agentId":"child-id","name":"researcher","parentSessionId":"parent-id"}}
+{"type":"session","version":13,"id":"child-id","timestamp":"2026-07-18T00:00:00.000Z","cwd":"/path/to/project","mode":"code","cwdOrigin":"user-selected","permissionMode":"ask","agent":{"agentId":"child-id","name":"researcher","agentType":"explorer","parentSessionId":"parent-id","rootSessionId":"parent-id","agentPath":["child-id"],"cwd":"/path/to/project","tools":["read","grep"],"writePolicy":"deny","permissionMode":"ask","model":{"provider":"openai","modelId":"gpt-test"},"thinkingLevel":"high","initialTask":"Inspect the boundary","forkTurns":0,"timeoutSeconds":1800,"mayDelegate":false}}
 ```
 
-Its journal begins with `subagent_created`, which snapshots inherited Code mode, exact model/real thinking level, tools, permission mode, cwd, fork policy, timeout, and optional assignment profile. Auto remains a first-class permission mode. Every admitted initial/follow-up run has an immutable `runId`; `subagent_state` and queued/accepted/cancelled `subagent_follow_up` records use that ID.
+The immutable header records ownership and the runtime-resolved capability snapshot. Each initial or follow-up task has an immutable `taskId`; append-only `agent_task` records move it through queued, running, and terminal states. `agent_message` audits steering, and `agent_archived` records reversible terminal-history visibility.
 
-The parent records `subagent_mode_change` for Ultra selection. Child permission requests go directly to the active user approval UI and remain audited only in the child session. Full child transcripts and configuration never enter the parent journal.
+Ultra selection is stored independently as `session_ultra_selection` and never controls Agent availability. Child permission requests go directly to the active owning UI and remain audited in the child session. Full child transcripts and configuration never enter the parent journal.
 
-### Subagent mailbox controls (v11)
+### Agent mailbox controls (v13)
 
-`subagent_state.background` records the delivery choice for one `runId`; omitted legacy values mean background.
+`agent_mailbox_event` stores one bounded terminal task event in the direct parent's journal. `agent_mailbox_delivery` records `started` and `completed` for one `deliveryId` and the exact ordered event IDs included in a provider request. A started delivery without a matching completed record remains pending after recovery.
 
-`subagent_mailbox_event` stores one bounded terminal event globally in the parent session. `subagent_mailbox_delivery` records `started` and `completed` for one `deliveryId` and the exact ordered event IDs included in a provider request. A started delivery without a matching completed record remains pending after recovery. Pre-v11 generic mailbox custom messages are considered delivered and are not replayed during migration.
-
-Children live under `<agentDir>/subagents/<parentSessionId>/`. Close markers live in that directory's `.closing/` child. Only successful deletion appends one minimal `subagent_closed` tombstone to the parent. See [Ultra and Subagents](subagents.md).
+Agents live under `<agentDir>/agents/<rootSessionId>/`. Durable `.deleting` and `.deleted` markers make subtree deletion recoverable and keep names reserved. Removed child layouts are not read, migrated, indexed, or deleted. See [Agents](subagents.md).
 
 ### SessionMessageEntry
 

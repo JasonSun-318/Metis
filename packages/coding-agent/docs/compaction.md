@@ -17,7 +17,7 @@ Immediately before each main-model provider request, Metis inspects text results
 
 `web_fetch` and `web_search` also use immediate large-output handling: a result over 50,000 characters is saved under the session's `tool-results` directory as soon as the tool finishes, before persistence or the next model request. The active result keeps a bounded preview and the full-output path so the model can read details on demand.
 
-This is an immutable context projection: agent state and the append-only session journal keep their original messages. A later request can project them again, and the model can use `read` on the saved path when detail is needed. Image results, `set_tasks`, subagent, MCP, SDK, extension, custom, and unknown tools are excluded. Text error results from eligible built-ins are not specially excluded.
+This is an immutable context projection: agent state and the append-only session journal keep their original messages. A later request can project them again, and the model can use `read` on the saved path when detail is needed. Image results, `set_tasks`, Agent-control, MCP, SDK, extension, custom, and unknown tools are excluded. Text error results from eligible built-ins are not specially excluded.
 
 If a declared complete-output file is missing or cannot be copied into session-owned storage, Metis keeps that result unchanged. Microcompaction does not call a model and is separate from the summarizing compaction described below.
 

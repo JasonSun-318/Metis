@@ -206,7 +206,7 @@ describe("AgentSession.getSessionStats", () => {
 			"rules",
 			"skills",
 			"mcp_dynamic_tools",
-			"subagent_definitions",
+			"agent_definitions",
 		]);
 		const fixed = (breakdown: NonNullable<ReturnType<typeof harness.session.getContextUsage>>["breakdown"]) =>
 			new Map(

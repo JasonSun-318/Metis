@@ -18,11 +18,12 @@ export interface ResolvedAgentProfile {
 	readonly mayDelegate: boolean;
 }
 
+export const MAX_AGENT_DEPTH = 2;
+
 export function resolveAgentProfile(input: {
 	readonly agentType: AgentType;
 	readonly parentTools: readonly string[];
 	readonly depth: number;
-	readonly maxDepth: number;
 }): ResolvedAgentProfile {
 	const inherited = input.parentTools.filter((name) => !RESERVED_TOOLS.has(name));
 	const allowed =
@@ -31,6 +32,6 @@ export function resolveAgentProfile(input: {
 		agentType: input.agentType,
 		tools: allowed ? inherited.filter((name) => allowed.has(name)) : inherited,
 		writePolicy: input.agentType === "explorer" || input.agentType === "reviewer" ? "deny" : "inherit",
-		mayDelegate: (input.agentType === "default" || input.agentType === "worker") && input.depth < input.maxDepth,
+		mayDelegate: (input.agentType === "default" || input.agentType === "worker") && input.depth < MAX_AGENT_DEPTH,
 	};
 }

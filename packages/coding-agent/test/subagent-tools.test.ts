@@ -4,7 +4,7 @@ import { beforeAll, describe, expect, it, vi } from "vitest";
 import type { AgentSession } from "../src/core/agent-session.ts";
 import type { SubagentManager } from "../src/core/subagents/manager.ts";
 import { createSubagentTools } from "../src/core/subagents/tools.ts";
-import { type ActivateSubagentsResult, SUBAGENT_ACTIVATION_TOOL_NAME } from "../src/core/subagents/types.ts";
+import { AGENT_TOOL_NAMES } from "../src/core/subagents/types.ts";
 import { ToolExecutionComponent } from "../src/modes/interactive/components/tool-execution.ts";
 import { initTheme } from "../src/modes/interactive/theme/theme.ts";
 import { stripAnsi } from "../src/utils/ansi.ts";
@@ -19,24 +19,30 @@ function execute(
 	return tool.execute("call", params, signal, undefined, {} as never);
 }
 
-function createFakeTui(): TUI {
-	return { requestRender: () => undefined } as unknown as TUI;
-}
-
 function setup() {
-	let selection: "high" | "ultra" = "ultra";
 	const manager = {
 		spawn: vi.fn(async (_actorId, input) => ({
 			agentId: "child-1",
 			taskId: "task-1",
 			name: input.name,
-			agentType: "default" as const,
+			agentType: input.agentType ?? ("default" as const),
 			status: "running" as const,
 		})),
-		inspect: vi.fn(async () => ({
-			kind: "list" as const,
+		inspect: vi.fn(async () => ({ kind: "list" as const, agents: [] })),
+		sendMessage: vi.fn(async (_actorId, input) => ({
+			agentId: input.agentId,
+			taskId: "task-1",
+			delivery: "accepted" as const,
+		})),
+		followUpTask: vi.fn(async (_actorId, input) => ({
+			agentId: input.agentId,
+			taskId: "task-2",
+			status: "queued" as const,
+		})),
+		waitAgents: vi.fn(async () => ({
+			timedOut: false,
 			agents: [],
-			usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, elapsedMs: 0 },
+			mailboxEventIds: ["agent:child-1:task-1:terminal"],
 		})),
 		interrupt: vi.fn(async (_actorId, agentId) => ({
 			agentId,
@@ -45,130 +51,103 @@ function setup() {
 			cancelledTaskIds: [],
 		})),
 	} as unknown as SubagentManager;
-	const activationResults: ActivateSubagentsResult[] = [
-		{ activated: true, alreadyActivated: false },
-		{ activated: true, alreadyActivated: true },
-	];
-	const activateSubagents = vi.fn(
-		() => activationResults.shift() ?? { activated: true as const, alreadyActivated: true },
-	);
+	const stageAgentMailboxDelivery = vi.fn();
 	const session = {
-		getThinkingSelection: () => selection,
 		sessionManager: { getSessionId: () => ACTOR_ID },
+		stageAgentMailboxDelivery,
 	} as unknown as AgentSession;
-	const tools = createSubagentTools({ getManager: () => manager, getSession: () => session, activateSubagents });
 	return {
-		activateSubagents,
 		manager,
-		tools,
-		setSelection: (value: "high" | "ultra") => {
-			selection = value;
-		},
+		stageAgentMailboxDelivery,
+		tools: createSubagentTools({ getManager: () => manager, getSession: () => session }),
 	};
 }
 
-describe("subagent control tools", () => {
+describe("agent control tools", () => {
 	beforeAll(() => initTheme("dark"));
 
-	it("defines one strict idempotent activation tool with the agreed model copy", async () => {
-		const { activateSubagents, tools } = setup();
-		const activate = tools.find((tool) => tool.name === SUBAGENT_ACTIVATION_TOOL_NAME)!;
-
-		expect(activate.executionMode).toBe("sequential");
-		expect(Value.Check(activate.parameters, {})).toBe(true);
-		expect(Value.Check(activate.parameters, { extra: true })).toBe(false);
-
-		const first = await execute(activate, {});
-		expect(first.details).toEqual({ activated: true, alreadyActivated: false });
-		await expect(execute(activate, {})).resolves.toMatchObject({
-			details: { activated: true, alreadyActivated: true },
-		});
-		expect(activateSubagents).toHaveBeenCalledTimes(2);
-
-		const component = new ToolExecutionComponent(
-			SUBAGENT_ACTIVATION_TOOL_NAME,
-			"call",
-			{},
-			{},
-			activate,
-			createFakeTui(),
-			process.cwd(),
-		);
-		component.updateResult({ ...first, isError: false });
-		expect(stripAnsi(component.render(120).join("\n"))).toContain("Subagents activated");
+	it("installs exactly the six asynchronous orchestration tools", () => {
+		const { tools } = setup();
+		expect(tools.map((tool) => tool.name)).toEqual([...AGENT_TOOL_NAMES]);
+		const spawn = tools.find((tool) => tool.name === "spawn_agent")!;
+		const followUp = tools.find((tool) => tool.name === "followup_task")!;
+		const wait = tools.find((tool) => tool.name === "wait_agents")!;
+		expect(Value.Check(spawn.parameters, { name: "researcher", task: "inspect", agentType: "explorer" })).toBe(true);
+		expect(Value.Check(spawn.parameters, { name: "researcher", task: "inspect", background: true })).toBe(false);
+		expect(Value.Check(followUp.parameters, { agentId: "child-1", task: "continue", background: true })).toBe(false);
+		expect(Value.Check(wait.parameters, { agentIds: ["child-1"], timeoutMs: 10 })).toBe(true);
+		expect(Value.Check(wait.parameters, {})).toBe(false);
 	});
 
-	it("forwards actor-scoped spawn and inspect calls while Ultra is active", async () => {
+	it("forwards the public inputs and returns receipts without implicit waiting", async () => {
 		const { manager, tools } = setup();
-		const spawn = tools.find((tool) => tool.name === "spawn_agent")!;
-		expect(Value.Check(spawn.parameters, { name: "researcher", task: "inspect", tools: [], background: true })).toBe(
-			true,
+		const controller = new AbortController();
+		const spawnResult = await execute(
+			tools.find((tool) => tool.name === "spawn_agent")!,
+			{ name: "researcher", task: "inspect", agentType: "explorer", forkTurns: 2, model: "faux/faux" },
+			controller.signal,
 		);
-
-		const response = await execute(spawn, {
-			name: "researcher",
-			task: "inspect",
-			tools: [],
-			background: true,
-		});
 		expect(manager.spawn).toHaveBeenCalledWith(
 			ACTOR_ID,
 			{
 				name: "researcher",
 				task: "inspect",
-				forkTurns: undefined,
-				model: undefined,
+				agentType: "explorer",
+				forkTurns: 2,
+				model: "faux/faux",
 			},
+			controller.signal,
+		);
+		expect(manager.waitAgents).not.toHaveBeenCalled();
+		expect(spawnResult.details).toMatchObject({ agentId: "child-1", taskId: "task-1", status: "running" });
+
+		await execute(tools.find((tool) => tool.name === "followup_task")!, {
+			agentId: "child-1",
+			task: "check edge case",
+		});
+		expect(manager.followUpTask).toHaveBeenCalledWith(
+			ACTOR_ID,
+			{ agentId: "child-1", task: "check edge case" },
 			undefined,
 		);
-		expect(response.details).toMatchObject({ agentId: "child-1", status: "running" });
-
-		await execute(tools.find((tool) => tool.name === "inspect_agents")!, {});
-		expect(manager.inspect).toHaveBeenCalledWith(ACTOR_ID, {
-			agentId: undefined,
-			beforeEventId: undefined,
-			limit: undefined,
-		});
+		expect(manager.waitAgents).not.toHaveBeenCalled();
 	});
 
-	it("rejects stale creation outside Ultra while cleanup remains callable", async () => {
-		const { activateSubagents, manager, tools, setSelection } = setup();
-		setSelection("high");
-		await expect(execute(tools.find((tool) => tool.name === SUBAGENT_ACTIVATION_TOOL_NAME)!, {})).rejects.toThrow(
-			"Ultra is required",
-		);
-		expect(activateSubagents).not.toHaveBeenCalled();
-		await expect(
-			execute(tools.find((tool) => tool.name === "spawn_agent")!, {
-				name: "child",
-				task: "task",
-				tools: [],
-			}),
-		).rejects.toThrow("Ultra is required");
-		await execute(tools.find((tool) => tool.name === "inspect_agents")!, {});
+	it("keeps inspect task-scoped and stages only mailbox ids returned by wait", async () => {
+		const { manager, stageAgentMailboxDelivery, tools } = setup();
+		await execute(tools.find((tool) => tool.name === "inspect_agents")!, {
+			agentId: "child-1",
+			taskId: "task-1",
+			beforeEventId: "event-2",
+			limit: 10,
+		});
+		expect(manager.inspect).toHaveBeenCalledWith(ACTOR_ID, {
+			agentId: "child-1",
+			taskId: "task-1",
+			beforeEventId: "event-2",
+			limit: 10,
+		});
+
+		await execute(tools.find((tool) => tool.name === "send_message")!, {
+			agentId: "child-1",
+			message: "stay focused",
+		});
+		await execute(tools.find((tool) => tool.name === "wait_agents")!, {
+			agentIds: ["child-1"],
+			timeoutMs: 50,
+		});
 		await execute(tools.find((tool) => tool.name === "interrupt_agent")!, { agentId: "child-1" });
-		expect(manager.inspect).toHaveBeenCalled();
+		expect(manager.sendMessage).toHaveBeenCalledWith(ACTOR_ID, {
+			agentId: "child-1",
+			message: "stay focused",
+		});
+		expect(manager.waitAgents).toHaveBeenCalledWith(ACTOR_ID, { agentIds: ["child-1"], timeoutMs: 50 }, undefined);
+		expect(stageAgentMailboxDelivery).toHaveBeenCalledWith(["agent:child-1:task-1:terminal"]);
 		expect(manager.interrupt).toHaveBeenCalledWith(ACTOR_ID, "child-1");
 	});
 
-	it("forwards abort signals for spawn", async () => {
+	it("keeps full inspect activity behind expansion", async () => {
 		const { manager, tools } = setup();
-		const controller = new AbortController();
-		await execute(
-			tools.find((tool) => tool.name === "spawn_agent")!,
-			{ name: "child", task: "inspect", tools: [] },
-			controller.signal,
-		);
-		expect(manager.spawn).toHaveBeenCalledWith(
-			ACTOR_ID,
-			{ name: "child", task: "inspect", forkTurns: undefined, model: undefined },
-			controller.signal,
-		);
-	});
-
-	it("collapses structured inspect results until the user expands them", async () => {
-		const { manager, tools } = setup();
-		const inspect = tools.find((tool) => tool.name === "inspect_agents")!;
 		const marker = "FULL_TRACE_PAYLOAD";
 		vi.mocked(manager.inspect).mockResolvedValueOnce({
 			kind: "trace",
@@ -182,58 +161,35 @@ describe("subagent control tools", () => {
 				parentSessionId: ACTOR_ID,
 				rootSessionId: ACTOR_ID,
 				agentPath: ["child-1"],
+				tasks: [],
 				createdAt: new Date(0).toISOString(),
 				updatedAt: new Date(0).toISOString(),
 			},
 			taskId: "task-1",
-			events: Array.from({ length: 20 }, (_, index) => ({
-				eventId: `event-${index}`,
-				taskId: "task-1",
-				timestamp: new Date(0).toISOString(),
-				kind: "llm" as const,
-				text: marker,
-			})),
+			events: [
+				{
+					eventId: "event-1",
+					taskId: "task-1",
+					timestamp: new Date(0).toISOString(),
+					kind: "final",
+					text: marker,
+				},
+			],
 		});
-
-		const response = await execute(inspect, { agentId: "child-1" });
-		expect(response.content[0]?.type === "text" ? response.content[0].text : "").toContain("researcher");
-
-		const component = new ToolExecutionComponent(
-			"inspect_agents",
-			"call",
-			{ agentId: "child-1" },
-			{},
-			inspect,
-			createFakeTui(),
-			process.cwd(),
-		);
-		component.updateResult({ ...response, isError: false });
-
-		component.setExpanded(true);
-		const expanded = stripAnsi(component.render(120).join("\n"));
-		expect(expanded).toContain(marker);
-	});
-
-	it("shows the real error in collapsed output", () => {
-		const { tools } = setup();
 		const inspect = tools.find((tool) => tool.name === "inspect_agents")!;
+		const result = await execute(inspect, { agentId: "child-1", taskId: "task-1", limit: 10 });
 		const component = new ToolExecutionComponent(
 			"inspect_agents",
 			"call",
-			{},
+			{ agentId: "child-1", taskId: "task-1", limit: 10 },
 			{},
 			inspect,
-			createFakeTui(),
+			{ requestRender: () => undefined } as unknown as TUI,
 			process.cwd(),
 		);
-		component.updateResult({ content: [{ type: "text", text: "Permission denied" }], isError: true });
-
-		const collapsed = stripAnsi(component.render(120).join("\n"));
-		expect(collapsed).toContain("Permission denied");
-		expect(collapsed).not.toContain("Completed");
-
-		component.updateResult({ content: [], isError: true });
-		const emptyError = stripAnsi(component.render(120).join("\n"));
-		expect(emptyError).toContain("Failed");
+		component.updateResult({ ...result, isError: false });
+		expect(stripAnsi(component.render(120).join("\n"))).not.toContain(marker);
+		component.setExpanded(true);
+		expect(stripAnsi(component.render(120).join("\n"))).toContain(marker);
 	});
 });

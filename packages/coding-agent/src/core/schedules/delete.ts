@@ -25,9 +25,9 @@ import { getOwnedSessionJournalArtifacts } from "../session-journal.ts";
 import { SessionLease } from "../session-lease.ts";
 import {
 	getDefaultSessionDir,
+	getSessionAgentDir,
 	getSessionDisplayMetadataPath,
 	getSessionImageDir,
-	getSessionSubagentDir,
 	getSessionToolOutputDir,
 	SessionManager,
 	sessionStoragePathVariants,
@@ -278,7 +278,7 @@ function collectTargets(
 					),
 					...existing([
 						getOwnedSessionAttachmentDir(agentDir, header.id),
-						getSessionSubagentDir(agentDir, header.id),
+						getSessionAgentDir(agentDir, header.id),
 						getOwnedManagedWorkspace({
 							id: header.id,
 							cwd: header.cwd,

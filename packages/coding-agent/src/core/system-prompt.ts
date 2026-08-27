@@ -46,7 +46,7 @@ export interface BuildSystemPromptOptions {
 	autoMemoryRetrieved?: Array<{ scope: "global" | "project"; text: string }>;
 }
 
-export type SystemPromptPartCategory = "system_prompt" | "rules" | "skills" | "subagent_definitions";
+export type SystemPromptPartCategory = "system_prompt" | "rules" | "skills" | "agent_definitions";
 
 export interface SystemPromptPart {
 	readonly category: SystemPromptPartCategory;

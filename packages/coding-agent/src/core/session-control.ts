@@ -1,7 +1,7 @@
 import { isAbsolute, normalize } from "node:path";
 import { isPersistedPermissionMode, type PersistedPermissionMode } from "./permission-mode.ts";
 import { type CollaborationMode, MAX_PLAN_MARKDOWN_UTF8_BYTES, MAX_PLAN_TITLE_UTF16_UNITS } from "./plan-state.ts";
-import type { AgentTaskStatus, AgentUsage, SubagentMailboxEvent, SubagentUsage } from "./subagents/types.ts";
+import type { AgentMailboxTerminalEvent, AgentTaskStatus, AgentUsage } from "./subagents/types.ts";
 
 interface SessionControlEntryBase {
 	readonly id: string;
@@ -38,10 +38,14 @@ export interface SessionDirectoryRemovedEntry extends SessionControlEntryBase {
 	readonly path: string;
 }
 
+export interface SessionUltraSelectionEntry extends SessionControlEntryBase {
+	readonly type: "session_ultra_selection";
+	readonly selected: boolean;
+}
+
 export type SessionDirectoryControlEntry = SessionDirectoryAddedEntry | SessionDirectoryRemovedEntry;
 
 export type AgentStateReason = "completed" | "error" | "interrupted" | "timeout" | "parent_unloaded" | "recovered";
-export type SubagentStateReason = AgentStateReason;
 
 export interface AgentTaskEntry extends SessionControlEntryBase {
 	readonly type: "agent_task";
@@ -71,24 +75,24 @@ export interface AgentArchivedEntry extends SessionControlEntryBase {
 	readonly archived: boolean;
 }
 
-export type AgentControlEntry = AgentTaskEntry | AgentMessageEntry | AgentArchivedEntry;
-
-export interface SubagentMailboxEventEntry extends SessionControlEntryBase {
-	readonly type: "subagent_mailbox_event";
-	readonly event: SubagentMailboxEvent;
+export interface AgentMailboxEventEntry extends SessionControlEntryBase {
+	readonly type: "agent_mailbox_event";
+	readonly event: AgentMailboxTerminalEvent;
 }
 
-export interface SubagentMailboxDeliveryEntry extends SessionControlEntryBase {
-	readonly type: "subagent_mailbox_delivery";
+export interface AgentMailboxDeliveryEntry extends SessionControlEntryBase {
+	readonly type: "agent_mailbox_delivery";
 	readonly deliveryId: string;
 	readonly eventIds: readonly string[];
 	readonly state: "started" | "completed";
 }
 
-export interface SubagentModeChangeEntry extends SessionControlEntryBase {
-	readonly type: "subagent_mode_change";
-	readonly enabled: boolean;
-}
+export type AgentControlEntry =
+	| AgentTaskEntry
+	| AgentMessageEntry
+	| AgentArchivedEntry
+	| AgentMailboxEventEntry
+	| AgentMailboxDeliveryEntry;
 
 export interface SessionCollaborationModeEntry extends SessionControlEntryBase {
 	readonly type: "session_collaboration_mode";
@@ -110,17 +114,15 @@ export interface SessionPlanStatusEntry extends SessionControlEntryBase {
 	readonly status: "accepted" | "cancelled";
 }
 
-export type SubagentControlEntry = SubagentMailboxEventEntry | SubagentMailboxDeliveryEntry | SubagentModeChangeEntry;
-
 export type SessionControlEntry =
 	| SessionPermissionsEntry
 	| SessionPermissionDecisionEntry
+	| SessionUltraSelectionEntry
 	| SessionDirectoryControlEntry
 	| SessionCollaborationModeEntry
 	| SessionPlanProposalEntry
 	| SessionPlanStatusEntry
-	| AgentControlEntry
-	| SubagentControlEntry;
+	| AgentControlEntry;
 
 export type SessionControlPayload = SessionControlEntry extends infer Entry
 	? Entry extends SessionControlEntry
@@ -130,12 +132,6 @@ export type SessionControlPayload = SessionControlEntry extends infer Entry
 
 export type AgentControlPayload = AgentControlEntry extends infer Entry
 	? Entry extends AgentControlEntry
-		? Omit<Entry, "id" | "parentId" | "timestamp">
-		: never
-	: never;
-
-export type SubagentControlPayload = SubagentControlEntry extends infer Entry
-	? Entry extends SubagentControlEntry
 		? Omit<Entry, "id" | "parentId" | "timestamp">
 		: never
 	: never;
@@ -234,7 +230,7 @@ function parseModel(value: unknown, label: string): AgentUsage["model"] {
 	};
 }
 
-function parseUsage(value: unknown): SubagentUsage {
+function parseUsage(value: unknown): AgentUsage {
 	const label = "Session control entry.usage";
 	const fields = dataFields(value, label);
 	assertOnlyFields(
@@ -258,12 +254,23 @@ function parseUsage(value: unknown): SubagentUsage {
 	};
 }
 
-function parseSubagentMailboxEvent(value: unknown): SubagentMailboxEvent {
+function parseAgentMailboxEvent(value: unknown): AgentMailboxTerminalEvent {
 	const label = "Session control entry.event";
 	const fields = dataFields(value, label);
 	assertOnlyFields(
 		fields,
-		["eventId", "runId", "agentId", "name", "type", "status", "finalMessage", "error", "completedAt"],
+		[
+			"eventId",
+			"taskId",
+			"agentId",
+			"parentSessionId",
+			"name",
+			"type",
+			"status",
+			"finalMessage",
+			"error",
+			"completedAt",
+		],
 		label,
 	);
 	if (fields.get("type") !== "terminal") invalid(`${label}.type must be terminal`);
@@ -275,8 +282,9 @@ function parseSubagentMailboxEvent(value: unknown): SubagentMailboxEvent {
 	if (!Number.isFinite(Date.parse(completedAt))) invalid(`${label}.completedAt is invalid`);
 	return {
 		eventId: requiredString(fields, "eventId", { label, maxLength: 512, noControls: true }),
-		runId: requiredString(fields, "runId", { label, maxLength: 256, noControls: true }),
+		taskId: requiredString(fields, "taskId", { label, maxLength: 256, noControls: true }),
 		agentId: requiredString(fields, "agentId", { label, maxLength: 256, noControls: true }),
+		parentSessionId: requiredString(fields, "parentSessionId", { label, maxLength: 256, noControls: true }),
 		name: requiredString(fields, "name", { label, maxLength: 128, noControls: true }),
 		type: "terminal",
 		status,
@@ -289,11 +297,13 @@ function parseSubagentMailboxEvent(value: unknown): SubagentMailboxEvent {
 }
 
 export function isAgentControlEntryType(type: unknown): type is AgentControlEntry["type"] {
-	return type === "agent_task" || type === "agent_message" || type === "agent_archived";
-}
-
-export function isSubagentControlEntryType(type: unknown): type is SubagentControlEntry["type"] {
-	return type === "subagent_mailbox_event" || type === "subagent_mailbox_delivery" || type === "subagent_mode_change";
+	return (
+		type === "agent_task" ||
+		type === "agent_message" ||
+		type === "agent_archived" ||
+		type === "agent_mailbox_event" ||
+		type === "agent_mailbox_delivery"
+	);
 }
 
 export function isSessionDirectoryControlEntryType(type: unknown): type is SessionDirectoryControlEntry["type"] {
@@ -310,10 +320,10 @@ export function isSessionControlEntryType(type: unknown): type is SessionControl
 	return (
 		type === "session_permissions" ||
 		type === "session_permission_decision" ||
+		type === "session_ultra_selection" ||
 		isSessionDirectoryControlEntryType(type) ||
 		isPlanControlEntryType(type) ||
-		isAgentControlEntryType(type) ||
-		isSubagentControlEntryType(type)
+		isAgentControlEntryType(type)
 	);
 }
 
@@ -354,6 +364,12 @@ export function parseSessionControlEntry(value: unknown): SessionControlEntry {
 			decision,
 			reason: requiredString(fields, "reason"),
 		};
+	}
+	if (type === "session_ultra_selection") {
+		assertOnlyFields(fields, [...baseFields, "selected"]);
+		const selected = fields.get("selected");
+		if (typeof selected !== "boolean") invalid("Session control entry.selected must be a boolean");
+		return { type, ...parseBase(fields), selected };
 	}
 	if (isSessionDirectoryControlEntryType(type)) {
 		assertOnlyFields(fields, [...baseFields, "path"]);
@@ -440,11 +456,11 @@ export function parseSessionControlEntry(value: unknown): SessionControlEntry {
 			archived,
 		};
 	}
-	if (type === "subagent_mailbox_event") {
+	if (type === "agent_mailbox_event") {
 		assertOnlyFields(fields, [...baseFields, "event"]);
-		return { type, ...parseBase(fields), event: parseSubagentMailboxEvent(fields.get("event")) };
+		return { type, ...parseBase(fields), event: parseAgentMailboxEvent(fields.get("event")) };
 	}
-	if (type === "subagent_mailbox_delivery") {
+	if (type === "agent_mailbox_delivery") {
 		assertOnlyFields(fields, [...baseFields, "deliveryId", "eventIds", "state"]);
 		const rawEventIds = fields.get("eventIds");
 		if (!Array.isArray(rawEventIds) || rawEventIds.length === 0) {
@@ -474,12 +490,6 @@ export function parseSessionControlEntry(value: unknown): SessionControlEntry {
 			eventIds,
 			state,
 		};
-	}
-	if (type === "subagent_mode_change") {
-		assertOnlyFields(fields, [...baseFields, "enabled"]);
-		const enabled = fields.get("enabled");
-		if (typeof enabled !== "boolean") invalid("Session control entry.enabled must be a boolean");
-		return { type, ...parseBase(fields), enabled };
 	}
 	if (type === "session_collaboration_mode") {
 		assertOnlyFields(fields, [...baseFields, "collaborationMode"]);

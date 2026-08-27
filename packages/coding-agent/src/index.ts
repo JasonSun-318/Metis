@@ -479,7 +479,6 @@ export {
 	getLatestCompactionEntry,
 	getSessionAgentDir,
 	getSessionDisplayMetadataPath,
-	getSessionSubagentDir,
 	getSessionUnreadStatePath,
 	MAX_SESSION_RECORD_BYTES,
 	type ModelChangeEntry,
@@ -543,29 +542,20 @@ export {
 } from "./core/skills.ts";
 export { createSyntheticSourceInfo } from "./core/source-info.ts";
 export {
+	AGENT_COORDINATION_PROMPT,
 	buildChildSystemPrompt,
-	buildChildSystemPromptFromAgentConfig,
-	buildParentAssignmentProfile,
-	buildSubagentContract,
-	SUBAGENT_COORDINATION_PROMPT,
 	safePromptJson,
 } from "./core/subagents/prompts.ts";
 export {
-	type ActivateSubagentsResult,
+	AGENT_TOOL_NAMES,
 	type AgentConfig,
+	AgentError,
+	type AgentMailboxTerminalEvent,
 	type AgentSummary,
-	SUBAGENT_ACTIVATION_TOOL_NAME,
-	SUBAGENT_TOOL_NAMES,
-	type SubagentConfig,
-	type SubagentDisplayConfig,
-	type SubagentMailboxEvent,
-	type SubagentMailboxTerminalEvent,
-	type SubagentManagerEvent,
-	type SubagentStatus,
-	type SubagentSummary,
-	type SubagentTombstone,
-	type SubagentUsage,
-	type SubagentVisibleActivity,
+	type AgentToolName,
+	type AgentVisibleActivity,
+	type WaitAgentsInput,
+	type WaitAgentsResult,
 } from "./core/subagents/types.ts";
 export {
 	canUseUltra,

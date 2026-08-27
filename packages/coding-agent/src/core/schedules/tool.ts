@@ -118,7 +118,7 @@ export function resolveScheduleCreateTarget(input: {
 
 export function isScheduleSessionEligible(manager: Pick<SessionManager, "getHeader" | "getMode">): boolean {
 	const header = manager.getHeader();
-	return manager.getMode() === "chat" && !header?.scheduled && !header?.subagent;
+	return manager.getMode() === "chat" && !header?.scheduled && !header?.agent;
 }
 
 function compactTaskView(task: ScheduleTask) {

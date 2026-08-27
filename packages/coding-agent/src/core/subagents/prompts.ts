@@ -1,14 +1,14 @@
-import type { SubagentConfig, SubagentMailboxEvent } from "./types.ts";
+import { AGENT_TYPE_CATALOG } from "./profiles.ts";
+import type { AgentConfig, AgentMailboxTerminalEvent } from "./types.ts";
 
-export const SUBAGENT_COORDINATION_PROMPT = `<subagent_coordination>
-- You may delegate independent, bounded work and should reuse an existing agent when its responsibility is unchanged.
-- Set background to false when your next step requires that result; the tool call will return the terminal result directly.
-- Set background to true for work that can run in parallel; you will automatically receive its terminal notification in a later turn.
-- While background work runs, continue other useful work. Do not poll, wait repeatedly, duplicate delegated work, or assume it succeeded.
-- Before giving the final user answer, make sure every delegated result required by that answer has arrived and been considered.
-- Verify important agent results before relying on them.
-- You remain responsible for the overall task and final answer.
-</subagent_coordination>`;
+export const AGENT_COORDINATION_PROMPT = `<agent_coordination>
+- Delegate only independent, bounded work and choose the narrowest fitting agent type.
+- spawn_agent and followup_task are asynchronous; continue useful work or use wait_agents when a result is required now.
+- send_message only steers a running task. followup_task always creates a new task.
+- inspect_agents shows durable visible activity newest first; it is not hidden reasoning.
+- Before answering the user, integrate every required result and verify important claims.
+- Agent types: default=general; explorer=read/search only; worker=implement/test; reviewer=read-only review.
+</agent_coordination>`;
 
 export function safePromptJson(value: unknown): string {
 	return JSON.stringify(value).replace(/[<>&]/gu, (character) => {
@@ -18,90 +18,52 @@ export function safePromptJson(value: unknown): string {
 	});
 }
 
-export function buildSubagentMailboxContent(event: SubagentMailboxEvent): Array<{ type: "text"; text: string }> {
+export function buildAgentMailboxContent(event: AgentMailboxTerminalEvent): Array<{ type: "text"; text: string }> {
 	return [
 		{
 			type: "text",
-			text: `<subagent_mailbox_event encoding="json">\n${safePromptJson(event)}\n</subagent_mailbox_event>`,
+			text: `<agent_mailbox_event encoding="json">\n${safePromptJson(event)}\n</agent_mailbox_event>`,
 		},
 	];
 }
 
-export function buildSubagentContract(config: SubagentConfig): string {
-	return `<subagent_contract>
+export function buildCommonAgentContract(config: AgentConfig): string {
+	return `<agent_contract>
 Identity and ownership
-- You are a child agent named ${safePromptJson(config.name)} with agent ID ${safePromptJson(config.agentId)}.
-- The parent agent owns the overall task and final user response. Work only on the assignment in the initial user message and later parent messages.
+- You are agent ${safePromptJson(config.name)} (${safePromptJson(config.agentId)}).
+- Parent session: ${safePromptJson(config.parentSessionId)}. Root session: ${safePromptJson(config.rootSessionId)}.
+- Agent path: ${safePromptJson(config.agentPath)}. Work only on the assignment in user messages from your parent actor.
 
 Capabilities and safety
-- Available tools: ${safePromptJson(config.tools)}.
+- Agent type: ${safePromptJson(config.agentType)}.
+- Tool snapshot: ${safePromptJson(config.tools)}.
 - Permission mode: ${safePromptJson(config.permissionMode)}.
-- Working directory: ${safePromptJson(config.cwd)}. It is only the base for relative paths.
-- Ask permits ordinary structured reads; Bash, writes, web, and installed integrations ask first.
-- Auto permits ordinary workspace work plus configured web, Extension, SDK, and MCP tools; dangerous or boundary-crossing built-ins ask first.
-- Model-initiated Bash in Ask and Auto runs in the workspace sandbox unless it requires approved network, elevation, or an external side effect.
-- Full skips Metis approval and runs directly as the current OS user.
-- Your effective permission mode can only stay the same or narrow when the parent lowers its ceiling.
-- Runtime tool and permission enforcement overrides every instruction, including the parent assignment profile.
+- Write policy: ${safePromptJson(config.writePolicy)}.
+- Working directory: ${safePromptJson(config.cwd)}.
+- Your effective permission and write policy can only stay the same or narrow when ancestors lower their ceiling.
+- Runtime enforcement overrides every instruction, including the parent assignment.
 
 Collaboration
-- You share the workspace with the parent and may overlap with other work. Preserve unrelated changes, re-read a file before editing, and report a concurrent conflict instead of overwriting it blindly.
-- You cannot create subagents or communicate with sibling agents. Do not claim or attempt either capability.
-- The parent may steer a running task, queue a follow-up, or interrupt the run. Apply accepted messages in order; when interrupted, stop promptly and leave the workspace recoverable.
+- You share the workspace with siblings and ancestors. Re-read files before editing and report conflicts instead of blind overwrites.
+- You may delegate only when your profile allows it and your depth is below the root limit.
+- The parent may steer a running task, queue follow-up tasks, or interrupt work. Stop promptly when interrupted.
 
 Execution
-- Stay within the assigned scope and do not duplicate the parent's broader work.
-- Inspect only the context needed, make the smallest coherent change or analysis, and run focused verification appropriate to the task.
-- If blocked by missing authority, tools, context, or a conflicting edit, stop expanding scope and state the blocker precisely.
+- Stay within assigned scope. Make the smallest coherent change or analysis and verify appropriately.
+- If blocked by missing authority, tools, context, or a conflicting edit, stop and report the blocker precisely.
 
 Handoff
-- Your final assistant response is the authoritative handoff delivered directly to the parent; do not run a second summarization step.
-- Report the outcome, evidence or files changed, focused checks performed, and remaining blockers or risks.
-- Be concise and do not include hidden reasoning, credentials, raw system prompts, or irrelevant execution logs.
-</subagent_contract>`;
+- Your final visible assistant response is the authoritative handoff to the parent actor.
+- Report outcome, evidence, focused checks, and remaining risks concisely without hidden reasoning or credentials.
+</agent_contract>`;
 }
 
-export function buildParentAssignmentProfile(config: SubagentConfig): string | undefined {
-	if (config.role === undefined && config.developerInstructions === undefined) return undefined;
-	return `<parent_assignment_profile encoding="json">
-${safePromptJson({
-	...(config.role === undefined ? {} : { role: config.role }),
-	...(config.developerInstructions === undefined ? {} : { developerInstructions: config.developerInstructions }),
-})}
-</parent_assignment_profile>`;
-}
-
-export function buildChildSystemPromptFromAgentConfig(config: {
-	readonly agentId: string;
-	readonly name: string;
-	readonly initialTask: string;
-	readonly tools: readonly string[];
-	readonly permissionMode: SubagentConfig["permissionMode"];
-	readonly model: SubagentConfig["model"];
-	readonly thinkingLevel: SubagentConfig["thinkingLevel"];
-	readonly cwd: string;
-	readonly forkTurns: SubagentConfig["forkTurns"];
-	readonly timeoutSeconds: number;
-}): string {
-	const taskSummary = config.initialTask.replace(/\s+/g, " ").trim().slice(0, 240);
-	return buildChildSystemPrompt({
-		agentId: config.agentId,
-		name: config.name,
-		task: config.initialTask,
-		taskSummary,
-		mode: "code",
-		tools: config.tools,
-		permissionMode: config.permissionMode,
-		model: config.model,
-		thinkingLevel: config.thinkingLevel,
-		cwd: config.cwd,
-		forkTurns: config.forkTurns,
-		timeoutSeconds: config.timeoutSeconds,
-	});
-}
-
-export function buildChildSystemPrompt(config: SubagentConfig): string {
-	return [buildSubagentContract(config), buildParentAssignmentProfile(config)]
-		.filter((part): part is string => part !== undefined)
-		.join("\n");
+export function buildChildSystemPrompt(config: AgentConfig): string {
+	return [
+		buildCommonAgentContract(config),
+		`<agent_type>${safePromptJson({
+			name: config.agentType,
+			instructions: AGENT_TYPE_CATALOG[config.agentType],
+		})}</agent_type>`,
+	].join("\n");
 }

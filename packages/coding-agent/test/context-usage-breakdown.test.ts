@@ -11,7 +11,7 @@ import { formatProjectContext } from "../src/core/system-prompt.ts";
 describe("context usage breakdown", () => {
 	it("classifies prompt sections, summaries, explicit skills, tools, and conversation", () => {
 		const rules = formatProjectContext([{ path: "AGENTS.md", content: "RULES" }]);
-		const subagentPrompt = "<subagent_coordination>COORDINATE</subagent_coordination>";
+		const agentPrompt = "<agent_coordination>COORDINATE</agent_coordination>";
 		const messages: AgentMessage[] = [
 			{ role: "compactionSummary", summary: "summary", tokensBefore: 100, timestamp: 1 },
 			{
@@ -32,7 +32,7 @@ describe("context usage breakdown", () => {
 				{ category: "system_prompt", content: "BASE" },
 				{ category: "rules", content: rules },
 				{ category: "skills", content: "SKILL INDEX" },
-				{ category: "subagent_definitions", content: `\n\n${subagentPrompt}` },
+				{ category: "agent_definitions", content: `\n\n${agentPrompt}` },
 			],
 			messages,
 			tools: [
@@ -43,7 +43,7 @@ describe("context usage breakdown", () => {
 			toolCategories: new Map([
 				["read", "tool_definitions" as const],
 				["tool_search", "mcp_dynamic_tools" as const],
-				["spawn_agent", "subagent_definitions" as const],
+				["spawn_agent", "agent_definitions" as const],
 			]),
 		});
 
@@ -54,7 +54,7 @@ describe("context usage breakdown", () => {
 			"skills",
 			"tool_definitions",
 			"mcp_dynamic_tools",
-			"subagent_definitions",
+			"agent_definitions",
 			"summarized_conversation",
 			"conversation",
 		] as const) {

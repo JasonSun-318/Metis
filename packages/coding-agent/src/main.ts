@@ -57,7 +57,7 @@ import { createSessionId } from "./core/session-id.ts";
 import { assertValidSessionId, SessionManager } from "./core/session-manager.ts";
 import { removeOwnedManagedWorkspace, resolveNewSessionWorkspace } from "./core/session-workspace.ts";
 import { SettingsManager } from "./core/settings-manager.ts";
-import { buildChildSystemPromptFromAgentConfig } from "./core/subagents/prompts.ts";
+import { buildChildSystemPrompt } from "./core/subagents/prompts.ts";
 import { printTimings, resetTimings, time } from "./core/timings.ts";
 import { hasTrustRequiringProjectResources, ProjectTrustStore } from "./core/trust-manager.ts";
 import { handleMcpCliCommand } from "./mcp-cli.ts";
@@ -938,12 +938,17 @@ export async function main(args: string[], options?: MainOptions) {
 					thinkingSelection: childConfig ? undefined : sessionOptions.thinkingSelection,
 					scopedModels: childConfig ? [] : sessionOptions.scopedModels,
 					tools: childConfig ? [...childConfig.tools] : sessionOptions.tools,
-					excludeTools: childConfig ? undefined : sessionOptions.excludeTools,
+					excludeTools: childConfig
+						? [...new Set([...(childConfig.writePolicy === "deny" ? (["edit", "write"] as const) : [])])]
+						: sessionOptions.excludeTools,
 					noTools: childConfig ? undefined : sessionOptions.noTools,
 					customTools: childConfig ? [] : sessionOptions.customTools,
 					ultraAvailable,
 					...(childConfig
-						? { additionalSystemPrompt: buildChildSystemPromptFromAgentConfig(childConfig) }
+						? {
+								additionalSystemPrompt: buildChildSystemPrompt(childConfig),
+								workspaceWritePolicy: childConfig.writePolicy,
+							}
 						: scheduleEligible
 							? { additionalSystemPrompt: SCHEDULE_MAIN_PROMPT }
 							: {}),

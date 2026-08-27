@@ -113,6 +113,8 @@ export interface CreateAgentSessionOptions {
 	includeAutoMemory?: boolean;
 	/** @internal Host-owned monotonic permission ceiling for a child runtime. */
 	permissionModeCeiling?: AgentSessionConfig["permissionModeCeiling"];
+	/** @internal Host-owned workspace write ceiling for a child runtime. */
+	workspaceWritePolicy?: AgentSessionConfig["workspaceWritePolicy"];
 	/** @internal Host-only fail-closed profile for unattended runs. */
 	unattendedExecution?: UnattendedExecutionProfile;
 
@@ -445,7 +447,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 				hostAllowsUltra: options.ultraAvailable === true && !options.unattendedExecution,
 				persisted: sessionManager.isPersisted(),
 				mode: sessionManager.getMode(),
-				isSubagent: sessionManager.getHeader()?.subagent !== undefined,
+				isAgent: sessionManager.getHeader()?.agent !== undefined,
 			});
 			if (supportsSavedUltra) {
 				thinkingSelection = "ultra";
@@ -488,13 +490,13 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			hostAllowsUltra: options.ultraAvailable === true && !options.unattendedExecution,
 			persisted: sessionManager.isPersisted(),
 			mode: sessionManager.getMode(),
-			isSubagent: sessionManager.getHeader()?.subagent !== undefined,
+			isAgent: sessionManager.getHeader()?.agent !== undefined,
 		});
-		if (sessionManager.getSubagentsEnabled() && !ultraCapable) {
-			if (sessionManager.getHeader()?.subagent) {
-				throw new Error("A subagent session cannot restore Ultra");
+		if (sessionManager.getUltraSelected() && !ultraCapable) {
+			if (sessionManager.getHeader()?.agent) {
+				throw new Error("An agent session cannot restore Ultra");
 			}
-			sessionManager.setSubagentsEnabled(false);
+			sessionManager.setUltraSelected(false);
 			thinkingSelection = undefined;
 			thinkingLevel = getHighestSupportedThinkingLevel(model);
 			const warning =
@@ -502,7 +504,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			modelFallbackMessage = modelFallbackMessage ? `${modelFallbackMessage}. ${warning}` : warning;
 		}
 
-		const isSubagent = sessionManager.getHeader()?.subagent !== undefined;
+		const isChildAgent = sessionManager.getHeader()?.agent !== undefined;
 		const defaultActiveToolNames: ToolName[] = [
 			"read",
 			"grep",
@@ -514,12 +516,12 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 				? (["describe_image"] as const)
 				: []),
 			...(settingsManager.getWebSearchSettings().enabled ? (["web_search"] as const) : []),
-			...(isSubagent ? [] : (["set_tasks", "get_goal", "create_goal", "update_goal"] as const)),
+			...(isChildAgent ? [] : (["set_tasks", "get_goal", "create_goal", "update_goal"] as const)),
 		];
 		const allowedToolNames = options.unattendedExecution
 			? [...UNATTENDED_TOOL_NAMES]
 			: (options.tools ?? (options.noTools === "all" ? [] : undefined));
-		const excludedToolNames = isSubagent
+		const excludedToolNames = isChildAgent
 			? [...new Set([...(options.excludeTools ?? []), "set_tasks", "get_goal", "create_goal", "update_goal"])]
 			: options.excludeTools;
 		const excludedToolNameSet = excludedToolNames ? new Set(excludedToolNames) : undefined;
@@ -662,6 +664,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			additionalSystemPrompt: options.additionalSystemPrompt,
 			includeAutoMemory: options.includeAutoMemory,
 			permissionModeCeiling: options.permissionModeCeiling,
+			workspaceWritePolicy: options.workspaceWritePolicy,
 			unattendedExecution: options.unattendedExecution,
 		});
 		if (thinkingSelection === "ultra") session.setThinkingSelection("ultra");

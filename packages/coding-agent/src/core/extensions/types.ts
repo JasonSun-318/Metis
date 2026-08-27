@@ -288,7 +288,7 @@ export type ContextUsageCategory =
 	| "rules"
 	| "skills"
 	| "mcp_dynamic_tools"
-	| "subagent_definitions"
+	| "agent_definitions"
 	| "summarized_conversation"
 	| "conversation";
 

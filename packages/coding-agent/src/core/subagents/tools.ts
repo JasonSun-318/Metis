@@ -4,14 +4,13 @@ import { keyHint } from "../../modes/interactive/components/keybinding-hints.ts"
 import type { AgentSession } from "../agent-session.ts";
 import { defineTool, type ToolDefinition } from "../extensions/types.ts";
 import type { SubagentManager } from "./manager.ts";
-import { type ActivateSubagentsResult, type InspectAgentsResult, SUBAGENT_ACTIVATION_TOOL_NAME } from "./types.ts";
+import { AGENT_TYPES, type InspectAgentsResult } from "./types.ts";
 
 function actorId(session: AgentSession): string {
 	return session.sessionManager.getSessionId();
 }
 
-const REAL_THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
-const Activate = Type.Object({}, { additionalProperties: false });
+const AgentTypeLiteral = Type.Union(AGENT_TYPES.map((agentType) => Type.Literal(agentType)));
 
 const Spawn = Type.Object(
 	{
@@ -27,29 +26,14 @@ const Spawn = Type.Object(
 			description:
 				"Self-contained assignment with the objective, owned scope, non-goals, expected handoff, and focused verification.",
 		}),
-		tools: Type.Array(Type.String({ minLength: 1, maxLength: 256 }), {
-			maxItems: 128,
-			uniqueItems: true,
-			description: "Minimum subset of your currently active tools required for the assignment.",
-		}),
-		role: Type.Optional(
-			Type.String({
-				minLength: 1,
-				maxLength: 8 * 1024,
-				description: "Optional role guidance for the child.",
+		agentType: Type.Optional(
+			Type.Union([AgentTypeLiteral], {
+				description: "Optional built-in role; defaults to default when omitted.",
 			}),
 		),
-		developerInstructions: Type.Optional(
-			Type.String({
-				minLength: 1,
-				maxLength: 64 * 1024,
-				description: "Optional assignment constraints. They cannot override the child's enforced contract.",
-			}),
-		),
-		permissionMode: Type.Optional(
-			Type.Union([Type.Literal("ask"), Type.Literal("auto"), Type.Literal("full")], {
-				description:
-					"Optional child permission mode; cannot be broader than yours and defaults to your current mode.",
+		forkTurns: Type.Optional(
+			Type.Union([Type.Integer({ minimum: 1, maximum: 1_000 }), Type.Literal("all")], {
+				description: 'Number of your visible turns to copy, or "all"; omit to copy none.',
 			}),
 		),
 		model: Type.Optional(
@@ -58,36 +42,6 @@ const Spawn = Type.Object(
 				description: "Optional provider/modelId; defaults to your current model.",
 			}),
 		),
-		thinkingLevel: Type.Optional(
-			Type.Union(
-				REAL_THINKING_LEVELS.map((level) => Type.Literal(level)),
-				{
-					description: "Optional supported real thinking level; defaults to your current real thinking level.",
-				},
-			),
-		),
-		cwd: Type.Optional(
-			Type.String({
-				minLength: 1,
-				description: "Working directory used for relative path resolution; it grants no read or write authority.",
-			}),
-		),
-		forkTurns: Type.Optional(
-			Type.Union([Type.Integer({ minimum: 1, maximum: 1_000 }), Type.Literal("all")], {
-				description: 'Number of your visible turns to copy, or "all"; omit to copy none.',
-			}),
-		),
-		timeoutSeconds: Type.Optional(
-			Type.Integer({
-				minimum: 1,
-				maximum: 1_800,
-				description: "Maximum runtime in seconds, from 1 through 1800.",
-			}),
-		),
-		background: Type.Boolean({
-			description:
-				"False returns this run's terminal result in the current tool call; true returns after admission and delivers the terminal result automatically in a later turn.",
-		}),
 	},
 	{ additionalProperties: false },
 );
@@ -95,8 +49,9 @@ const Spawn = Type.Object(
 const Inspect = Type.Object(
 	{
 		agentId: Type.Optional(Type.String({ minLength: 1, description: "Owned child ID; omit to list all children." })),
-		beforeEntryId: Type.Optional(
-			Type.String({ minLength: 1, description: "Durable journal cursor; returns entries before this ID." }),
+		taskId: Type.Optional(Type.String({ minLength: 1, description: "Task history entry to inspect." })),
+		beforeEventId: Type.Optional(
+			Type.String({ minLength: 1, description: "Visible activity cursor; returns older events." }),
 		),
 		limit: Type.Optional(
 			Type.Integer({ minimum: 1, maximum: 100, description: "Maximum results to return; defaults to 20." }),
@@ -105,35 +60,54 @@ const Inspect = Type.Object(
 	{ additionalProperties: false },
 );
 
-const AgentIdField = Type.String({ minLength: 1, description: "Owned child ID." });
-const MessageField = Type.String({
-	minLength: 1,
-	maxLength: 2 * 1024 * 1024,
-	description: "New bounded instructions for the child.",
-});
-const _Message = Type.Union([
-	Type.Object(
-		{ agentId: AgentIdField, mode: Type.Literal("steer"), message: MessageField },
-		{ additionalProperties: false },
-	),
-	Type.Object(
-		{
-			agentId: AgentIdField,
-			mode: Type.Literal("follow_up"),
-			message: MessageField,
-			background: Type.Boolean({
-				description:
-					"False returns this run's terminal result in the current tool call; true returns after admission and delivers the terminal result automatically in a later turn.",
+const SendMessage = Type.Object(
+	{
+		agentId: Type.String({ minLength: 1, description: "Owned child ID." }),
+		message: Type.String({
+			minLength: 1,
+			maxLength: 2 * 1024 * 1024,
+			description: "New bounded instructions for the running task.",
+		}),
+	},
+	{ additionalProperties: false },
+);
+
+const FollowUp = Type.Object(
+	{
+		agentId: Type.String({ minLength: 1, description: "Owned child ID." }),
+		task: Type.String({
+			minLength: 1,
+			maxLength: 2 * 1024 * 1024,
+			description: "Self-contained follow-up assignment that always creates a new task.",
+		}),
+	},
+	{ additionalProperties: false },
+);
+
+const Wait = Type.Object(
+	{
+		agentIds: Type.Array(Type.String({ minLength: 1 }), {
+			minItems: 1,
+			maxItems: 8,
+			uniqueItems: true,
+			description: "One through eight owned child IDs to watch.",
+		}),
+		timeoutMs: Type.Optional(
+			Type.Integer({
+				minimum: 10,
+				maximum: 300_000,
+				description: "Wait timeout in milliseconds; defaults to 30000.",
 			}),
-		},
-		{ additionalProperties: false },
-	),
-]);
+		),
+	},
+	{ additionalProperties: false },
+);
 
 const AgentId = Type.Object(
 	{ agentId: Type.String({ minLength: 1, description: "Owned child ID." }) },
 	{ additionalProperties: false },
 );
+
 const COMPACT_AGENT_LIMIT = 5;
 const COMPACT_TEXT_LINES = 10;
 const COMPACT_TEXT_CHARS = 2_000;
@@ -162,34 +136,6 @@ function agentSummary(value: unknown): string | undefined {
 	return status ? `${label} · ${status}` : label;
 }
 
-function textBlocks(content: unknown): string[] {
-	if (typeof content === "string") return content ? [content] : [];
-	if (!Array.isArray(content)) return [];
-	return content.flatMap((block) => {
-		const value = record(block);
-		return value?.type === "text" && typeof value.text === "string" && value.text ? [value.text] : [];
-	});
-}
-
-function _transcriptLines(entry: unknown): string[] {
-	const value = record(entry);
-	if (value?.type === "custom_message") return textBlocks(value.content).map((text) => `[user] ${text}`);
-	if (value?.type !== "message") return [];
-	const message = record(value.message);
-	if (message?.role === "user") return textBlocks(message.content).map((text) => `[user] ${text}`);
-	if (message?.role !== "assistant" || !Array.isArray(message.content)) return [];
-	return message.content.flatMap((block) => {
-		const content = record(block);
-		if (content?.type === "text" && typeof content.text === "string" && content.text) {
-			return [`[assistant] ${content.text}`];
-		}
-		if (content?.type === "toolCall" && typeof content.name === "string") {
-			return [`[assistant] (called ${content.name})`];
-		}
-		return [];
-	});
-}
-
 function inspectText(inspected: InspectAgentsResult): string {
 	if (inspected.kind === "list") {
 		if (inspected.agents.length === 0) return "No agent sessions.";
@@ -213,9 +159,6 @@ function inspectText(inspected: InspectAgentsResult): string {
 function compactResult(value: unknown): string {
 	const details = record(value);
 	if (!details) return "Completed";
-	if (details.activated === true) {
-		return details.alreadyActivated === true ? "Subagents already active" : "Subagents activated";
-	}
 	if (Array.isArray(details.agents)) {
 		const summaries = details.agents.map(agentSummary).filter((line): line is string => line !== undefined);
 		if (summaries.length === 0) return "No agents";
@@ -224,14 +167,8 @@ function compactResult(value: unknown): string {
 		if (Array.isArray(details.journal)) lines[lines.length - 1] += ` · ${details.journal.length} recent entries`;
 		return lines.join("\n");
 	}
-	if (Array.isArray(details.updatedAgentIds)) {
-		const ids = details.updatedAgentIds.filter((id): id is string => typeof id === "string");
-		return ids.length > 0 ? `Updated: ${ids.join(", ")}` : "No live agents";
-	}
 	const summary = agentSummary(details);
-	const mode =
-		typeof details.background === "boolean" ? (details.background ? "background" : "foreground") : undefined;
-	const suffix = [mode, details.delivery, details.reason]
+	const suffix = [details.delivery, details.reason]
 		.filter((part): part is string => typeof part === "string")
 		.join(" · ");
 	return suffix ? `${summary ?? "Completed"} · ${suffix}` : (summary ?? "Completed");
@@ -280,7 +217,6 @@ const renderSubagentResult: NonNullable<ToolDefinition["renderResult"]> = (resul
 export interface SubagentToolHost {
 	getManager(): SubagentManager | undefined;
 	getSession(): AgentSession;
-	activateSubagents(): ActivateSubagentsResult;
 }
 
 export function createSubagentTools(host: SubagentToolHost): ToolDefinition[] {
@@ -289,46 +225,28 @@ export function createSubagentTools(host: SubagentToolHost): ToolDefinition[] {
 		if (!value) throw new Error("Subagent manager is unavailable");
 		return value;
 	};
-	const requireUltra = (): void => {
-		if (host.getSession().getThinkingSelection() !== "ultra")
-			throw new Error("Ultra is required for this subagent operation");
-	};
 	return [
-		defineTool({
-			name: SUBAGENT_ACTIVATION_TOOL_NAME,
-			label: "Activate subagents",
-			description:
-				"Enable subagent tools for a complex task when the work can be divided into independent, bounded assignments or requires broad multi-file exploration. Call this once before the first delegation. Do not use it for simple tasks, known-location lookups, or work that must be completed sequentially. After activation, use spawn_agent and avoid duplicating delegated work.",
-			promptSnippet: "Enable subagents for complex work that can be delegated independently",
-			parameters: Activate,
-			executionMode: "sequential",
-			renderResult: renderSubagentResult,
-			async execute() {
-				requireUltra();
-				return result(host.activateSubagents());
-			},
-		}),
 		defineTool({
 			name: "spawn_agent",
 			label: "Spawn agent",
 			description:
-				"Create one child agent for independent, bounded work. Use a unique name, a self-contained task, and the minimum necessary tools.",
+				"Create one child agent for independent, bounded work. Use a unique name, a self-contained task, and the narrowest fitting agent type.",
 			parameters: Spawn,
 			renderResult: renderSubagentResult,
 			async execute(_id, params, signal) {
-				requireUltra();
-				return result(
-					await manager().spawn(
-						actorId(host.getSession()),
-						{
-							name: params.name,
-							task: params.task,
-							forkTurns: params.forkTurns,
-							model: params.model,
-						},
-						signal,
-					),
+				const actor = actorId(host.getSession());
+				const receipt = await manager().spawn(
+					actor,
+					{
+						name: params.name,
+						task: params.task,
+						agentType: params.agentType,
+						forkTurns: params.forkTurns,
+						model: params.model,
+					},
+					signal,
 				);
+				return result(receipt);
 			},
 		}),
 		defineTool({
@@ -341,10 +259,54 @@ export function createSubagentTools(host: SubagentToolHost): ToolDefinition[] {
 			async execute(_id, params) {
 				const inspected = await manager().inspect(actorId(host.getSession()), {
 					agentId: params.agentId,
-					beforeEventId: params.beforeEntryId,
+					taskId: params.taskId,
+					beforeEventId: params.beforeEventId,
 					limit: params.limit,
 				});
 				return result(inspected, false, inspectText(inspected));
+			},
+		}),
+		defineTool({
+			name: "send_message",
+			label: "Send message",
+			description: "Steer a running child task without creating a new task.",
+			parameters: SendMessage,
+			renderResult: renderSubagentResult,
+			async execute(_id, params, signal) {
+				signal?.throwIfAborted();
+				return result(
+					await manager().sendMessage(actorId(host.getSession()), {
+						agentId: params.agentId,
+						message: params.message,
+					}),
+					false,
+				);
+			},
+		}),
+		defineTool({
+			name: "followup_task",
+			label: "Follow up task",
+			description: "Queue a new bounded task for an existing child agent.",
+			parameters: FollowUp,
+			renderResult: renderSubagentResult,
+			async execute(_id, params, signal) {
+				const actor = actorId(host.getSession());
+				const receipt = await manager().followUpTask(actor, { agentId: params.agentId, task: params.task }, signal);
+				return result(receipt);
+			},
+		}),
+		defineTool({
+			name: "wait_agents",
+			label: "Wait for agents",
+			description:
+				"Wait only when the next critical step depends on a new child terminal event or approval and no useful independent work remains. Completed children notify automatically; do not poll. Returns IDs, never transcripts.",
+			parameters: Wait,
+			renderResult: renderSubagentResult,
+			async execute(_id, params, signal) {
+				const session = host.getSession();
+				const waited = await manager().waitAgents(actorId(session), params, signal);
+				session.stageAgentMailboxDelivery(waited.mailboxEventIds);
+				return result(waited);
 			},
 		}),
 		defineTool({

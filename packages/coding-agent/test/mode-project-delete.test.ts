@@ -31,9 +31,9 @@ import {
 import { getOwnedSessionJournalArtifacts } from "../src/core/session-journal.ts";
 import {
 	getDefaultSessionDir,
+	getSessionAgentDir,
 	getSessionDisplayMetadataPath,
 	getSessionImageDir,
-	getSessionSubagentDir,
 	getSessionToolOutputDir,
 	getSessionUnreadStatePath,
 	moveSessionFileWithLease,
@@ -113,7 +113,7 @@ function hooks(overrides: Partial<ModeProjectDeleteHooks> = {}): ModeProjectDele
 		getSessionUnreadStatePath,
 		getSessionImageDir,
 		getSessionToolOutputDir,
-		getSessionSubagentDir,
+		getSessionAgentDir,
 		trash: (operationDir) => rmSync(operationDir, { recursive: true }),
 		...overrides,
 	};
@@ -179,18 +179,8 @@ describe("mode project Trash", () => {
 				owned.add(write(join(getSessionToolOutputDir(path), "tool.txt")));
 			}
 			owned.add(write(join(getSessionAttachmentDir(layout.agentDir, session.target.sessionId), "attachment.txt")));
-			const subagentDir = getSessionSubagentDir(layout.agentDir, session.target.sessionId);
-			const subagentId = `sub-${session.target.sessionId}`;
-			const subagent = SessionManager.create(layout.cwd, subagentDir, {
-				id: subagentId,
-				mode: "chat",
-				subagent: { agentId: subagentId, name: "owned", parentSessionId: session.target.sessionId },
-			});
-			const subagentPath = subagent.getSessionFile()!;
-			subagent.close();
-			owned.add(subagentPath);
-			owned.add(write(join(getSessionImageDir(subagentPath), "image.png")));
-			owned.add(write(join(getSessionToolOutputDir(subagentPath), "tool.txt")));
+			const agentDir = getSessionAgentDir(layout.agentDir, session.target.sessionId);
+			owned.add(write(join(agentDir, "child", "session.jsonl")));
 			owned.add(write(join(createSessionWorkDir(layout.agentDir, session.target.sessionId), "draft-a.txt")));
 			owned.add(write(join(createSessionWorkDir(layout.agentDir, session.target.sessionId), "draft-b.txt")));
 

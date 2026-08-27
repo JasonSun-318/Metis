@@ -46,7 +46,7 @@ For the full first-run flow, see [Quickstart](quickstart.md).
 - [Settings](settings.md) - global and project settings.
 - [Keybindings](keybindings.md) - default shortcuts and custom keybindings.
 - [Sessions](sessions.md) - session management, branching, and tree navigation.
-- [Ultra and Subagents](subagents.md) - highest model reasoning plus recoverable multi-agent orchestration.
+- [Agents](subagents.md) - durable child tasks, roles, permissions, mailbox delivery, and lifecycle.
 - [Compaction](compaction.md) - context compaction and branch summarization.
 
 ## Customization

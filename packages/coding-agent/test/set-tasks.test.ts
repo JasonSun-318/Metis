@@ -139,10 +139,10 @@ describe("set_tasks", () => {
 		]);
 	});
 
-	it("uses normal primary activation, explicit filtering, and no subagent exposure", async () => {
+	it("uses normal primary activation, explicit filtering, and no child-agent exposure", async () => {
 		const createSession = async (
 			options: { noTools?: "all" | "builtin"; tools?: string[]; excludeTools?: string[] } = {},
-			subagent = false,
+			agent = false,
 		) => {
 			const services = await createAgentSessionServices({
 				cwd: process.cwd(),
@@ -156,13 +156,26 @@ describe("set_tasks", () => {
 			});
 			const sessionManager = SessionManager.inMemory(process.cwd(), {
 				mode: "code",
-				...(subagent
+				...(agent
 					? {
-							parentSession: "parent-session",
-							subagent: {
+							id: "child-agent",
+							agent: {
 								agentId: "child-agent",
 								name: "child",
+								agentType: "worker" as const,
 								parentSessionId: "parent-session",
+								rootSessionId: "parent-session",
+								agentPath: ["child-agent"],
+								cwd: process.cwd(),
+								tools: ["read"],
+								writePolicy: "inherit" as const,
+								permissionMode: "ask" as const,
+								model: { provider: "anthropic", modelId: "claude-sonnet-4-5" },
+								thinkingLevel: "high" as const,
+								initialTask: "test",
+								forkTurns: 0,
+								timeoutSeconds: 60,
+								mayDelegate: true,
 							},
 						}
 					: {}),

@@ -21,9 +21,10 @@ describe("v13 agent control records", () => {
 	it("parses mailbox delivery and two-phase mailbox controls", () => {
 		const base = { id: "record-1", parentId: null, timestamp: new Date(0).toISOString() };
 		const event = {
-			eventId: "subagent:agent-child-1:task-1:terminal",
-			runId: "task-1",
+			eventId: "agent:agent-child-1:task-1:terminal",
+			taskId: "task-1",
 			agentId: "agent-child-1",
+			parentSessionId: "parent-session-1",
 			name: "researcher",
 			type: "terminal" as const,
 			status: "done" as const,
@@ -31,19 +32,19 @@ describe("v13 agent control records", () => {
 			completedAt: new Date(0).toISOString(),
 		};
 
-		const eventEntry = parseSessionControlEntry({ ...base, type: "subagent_mailbox_event", event });
-		expect(eventEntry).toMatchObject({ type: "subagent_mailbox_event", event });
+		const eventEntry = parseSessionControlEntry({ ...base, type: "agent_mailbox_event", event });
+		expect(eventEntry).toMatchObject({ type: "agent_mailbox_event", event });
 
 		for (const state of ["started", "completed"] as const) {
 			const delivery = parseSessionControlEntry({
 				...base,
-				type: "subagent_mailbox_delivery",
+				type: "agent_mailbox_delivery",
 				deliveryId: "delivery-1",
 				eventIds: [event.eventId],
 				state,
 			});
 			expect(delivery).toMatchObject({
-				type: "subagent_mailbox_delivery",
+				type: "agent_mailbox_delivery",
 				state,
 				eventIds: [event.eventId],
 			});
@@ -55,7 +56,7 @@ describe("v13 agent control records", () => {
 		expect(() =>
 			parseSessionControlEntry({
 				...base,
-				type: "subagent_mailbox_delivery",
+				type: "agent_mailbox_delivery",
 				deliveryId: "delivery-1",
 				eventIds: [],
 				state: "started",
@@ -64,7 +65,7 @@ describe("v13 agent control records", () => {
 		expect(() =>
 			parseSessionControlEntry({
 				...base,
-				type: "subagent_mailbox_delivery",
+				type: "agent_mailbox_delivery",
 				deliveryId: "delivery-1",
 				eventIds: ["event-1", "event-1"],
 				state: "completed",
@@ -100,36 +101,29 @@ describe("v13 agent control records", () => {
 		);
 	});
 
-	it("requires v11 for mailbox controls and migrates an ordinary v10 journal", () => {
+	it("rejects removed legacy mailbox controls and migrates an ordinary v12 journal", () => {
 		const root = tempRoot();
-		const ordinaryPath = join(root, "ordinary-v10.jsonl");
-		const badPath = join(root, "bad-v10-mailbox.jsonl");
+		const ordinaryPath = join(root, "ordinary-v12.jsonl");
 		const header = {
 			type: "session",
-			version: 10,
+			version: 12,
 			id: "parent-v10",
 			timestamp: new Date(0).toISOString(),
 			cwd: root,
 			mode: "code",
 		};
 		writeFileSync(ordinaryPath, `${JSON.stringify(header)}\n`);
-		writeFileSync(
-			badPath,
-			`${JSON.stringify(header)}\n${JSON.stringify({
-				type: "subagent_mailbox_delivery",
+		const migrated = SessionManager.open(ordinaryPath);
+		expect(migrated.getHeader()?.version).toBe(CURRENT_SESSION_VERSION);
+		migrated.close();
+		expect(() =>
+			parseSessionControlEntry({
 				id: "record-1",
 				parentId: null,
 				timestamp: new Date(0).toISOString(),
-				deliveryId: "delivery-1",
-				eventIds: ["event-1"],
-				state: "started",
-			})}\n`,
-		);
-
-		const migrated = SessionManager.open(ordinaryPath);
-		expect(migrated.getHeader()?.version).toBe(12);
-		migrated.close();
-		expect(() => SessionManager.open(badPath)).toThrow("Subagent mailbox controls require a v11 session header");
+				type: ["subagent", "mailbox", "delivery"].join("_"),
+			}),
+		).toThrow("Unknown session control entry type");
 	});
 
 	it("persists agent_task controls on a child session", () => {

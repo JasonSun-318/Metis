@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { getModel } from "@metis/ai/compat";
+import { getModel, type Model } from "@metis/ai/compat";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AgentSession, AgentSessionEvent } from "../src/core/agent-session.ts";
 import type { AgentSessionRuntime } from "../src/core/agent-session-runtime.ts";
@@ -10,7 +10,11 @@ import type { PermissionApprovalRequest } from "../src/core/permission-policy.ts
 import { SessionManager } from "../src/core/session-manager.ts";
 import { type ChildRuntimeFactoryInput, SubagentManager } from "../src/core/subagents/manager.ts";
 import { SubagentScheduler } from "../src/core/subagents/scheduler.ts";
-import type { AgentManagerEvent, SubagentMailboxTerminalEvent } from "../src/core/subagents/types.ts";
+import {
+	AGENT_TOOL_NAMES,
+	type AgentMailboxTerminalEvent,
+	type AgentManagerEvent,
+} from "../src/core/subagents/types.ts";
 import { assistantMsg, userMsg } from "./utilities.ts";
 
 const ROOT_ID = "parent-session-1";
@@ -32,6 +36,8 @@ class FakeChildSession {
 	readonly messages: unknown[] = [];
 	readonly model = getModel("anthropic", "claude-sonnet-4-5")!;
 	readonly sessionManager: SessionManager;
+	readonly mode = "code";
+	readonly thinkingLevel = "high";
 	activeDurableTurnId: string | undefined;
 	private readonly activeTools: readonly string[];
 	private readonly listeners = new Set<(event: AgentSessionEvent) => void>();
@@ -124,6 +130,7 @@ interface SetupOptions {
 	readonly factoryGate?: Promise<void>;
 	readonly scheduler?: SubagentScheduler;
 	readonly childRuntimeTools?: readonly string[];
+	readonly childModel?: Model<any>;
 }
 
 function setup(options: SetupOptions = {}): Harness {
@@ -147,20 +154,24 @@ function setup(options: SetupOptions = {}): Harness {
 		model,
 		modelRegistry: {
 			find: (provider: string, modelId: string) =>
-				provider === model.provider && modelId === model.id ? model : undefined,
+				provider === model.provider && modelId === model.id
+					? model
+					: options.childModel?.provider === provider && options.childModel.id === modelId
+						? options.childModel
+						: undefined,
 			hasConfiguredAuth: () => true,
 		},
 		getActiveToolNames: () => ["read", "bash", "grep", "find", "ls", "edit", "write", "web_fetch", "web_search"],
-		enqueueSubagentMailboxEvent: vi.fn((event: SubagentMailboxTerminalEvent) => {
+		enqueueAgentMailboxEvent: vi.fn((event: AgentMailboxTerminalEvent) => {
 			if (!knownMailbox.has(event.eventId)) {
-				parentManager.appendSubagentControl({ type: "subagent_mailbox_event", event });
+				parentManager.appendAgentControl({ type: "agent_mailbox_event", event });
 				knownMailbox.add(event.eventId);
 				pendingMailbox.add(event.eventId);
 			}
 			return true;
 		}),
-		hasSubagentMailboxEvent: (eventId: string) => knownMailbox.has(eventId),
-		getPendingSubagentMailboxEventIds: () => [...pendingMailbox],
+		hasAgentMailboxEvent: (eventId: string) => knownMailbox.has(eventId),
+		getPendingAgentMailboxEventIds: () => [...pendingMailbox],
 	} as unknown as AgentSession;
 	const runtimes: FakeChildRuntime[] = [];
 	const factoryInputs: ChildRuntimeFactoryInput[] = [];
@@ -175,7 +186,10 @@ function setup(options: SetupOptions = {}): Harness {
 		createChildRuntime: async (input) => {
 			factoryInputs.push(input);
 			await options.factoryGate;
-			const runtime = new FakeChildRuntime(input.sessionManager, options.childRuntimeTools ?? input.config.tools);
+			const runtime = new FakeChildRuntime(
+				input.sessionManager,
+				options.childRuntimeTools ?? [...input.config.tools, ...(input.config.mayDelegate ? AGENT_TOOL_NAMES : [])],
+			);
 			runtimes.push(runtime);
 			return runtime as unknown as AgentSessionRuntime;
 		},
@@ -201,6 +215,9 @@ function setup(options: SetupOptions = {}): Harness {
 async function finishTask(harness: Harness, agentId: string, taskId: string, text = "done"): Promise<void> {
 	const runtime = harness.runtimes.at(-1);
 	if (!runtime) throw new Error("No child runtime available");
+	await vi.waitFor(() =>
+		expect(harness.manager.listTasks(agentId).find((task) => task.taskId === taskId)?.status).toBe("running"),
+	);
 	runtime.session.settle(text);
 	await vi.waitFor(() =>
 		expect(harness.manager.listTasks(agentId).find((task) => task.taskId === taskId)?.status).toBe("done"),
@@ -208,6 +225,20 @@ async function finishTask(harness: Harness, agentId: string, taskId: string, tex
 }
 
 describe("SubagentManager", () => {
+	it("falls back to the highest child thinking level not above the parent", async () => {
+		const childModel = getModel("openai", "gpt-4.1")!;
+		const harness = setup({ childModel });
+		const created = await harness.manager.spawn(ROOT_ID, {
+			name: "non reasoning worker",
+			task: "Check compatibility",
+			agentType: "worker",
+			model: `${childModel.provider}/${childModel.id}`,
+		});
+		await vi.waitFor(() => expect(harness.factoryInputs).toHaveLength(1));
+		expect(harness.factoryInputs[0]!.config.thinkingLevel).toBe("off");
+		await finishTask(harness, created.agentId, created.taskId);
+	});
+
 	it("keeps one agent id while every follow-up receives a new task id", async () => {
 		const harness = setup();
 		const first = await harness.manager.spawn(ROOT_ID, {
@@ -224,6 +255,24 @@ describe("SubagentManager", () => {
 			first.taskId,
 			second.taskId,
 		]);
+	});
+
+	it("aggregates usage across every task, not only the latest task", async () => {
+		const harness = setup();
+		const first = await harness.manager.spawn(ROOT_ID, {
+			name: "usage worker",
+			task: "first",
+			agentType: "worker",
+		});
+		await vi.waitFor(() => expect(harness.runtimes).toHaveLength(1));
+		await finishTask(harness, first.agentId, first.taskId);
+		const second = await harness.manager.followUpTask(ROOT_ID, { agentId: first.agentId, task: "second" });
+		await vi.waitFor(() => expect(harness.runtimes).toHaveLength(2));
+		await finishTask(harness, first.agentId, second.taskId);
+		await expect(harness.manager.inspect(ROOT_ID, {})).resolves.toMatchObject({
+			kind: "list",
+			usage: { input: 6, output: 10, cacheRead: 2, cacheWrite: 4, cost: 0.5 },
+		});
 	});
 
 	it("queues follow-up tasks FIFO without merging them into the running task", async () => {
@@ -440,7 +489,7 @@ describe("SubagentManager", () => {
 		await vi.waitFor(() => expect(harness.manager.listSummaries(ROOT_ID)[0]?.status).toBe("failed"));
 		expect(harness.manager.listSummaries(ROOT_ID)[0]?.latestTask).toMatchObject({
 			status: "failed",
-			error: "Child runtime tool snapshot mismatch (missing: read, bash, grep, find, ls, edit, write, web_fetch, web_search; unexpected: none)",
+			error: expect.stringContaining("Child runtime tool snapshot mismatch (missing: read"),
 		});
 		expect(harness.runtimes[0]?.disposed).toBe(true);
 		expect(created.agentId).toBeTruthy();
@@ -492,7 +541,7 @@ describe("SubagentManager", () => {
 		});
 		await vi.waitFor(() => expect(harness.runtimes).toHaveLength(1));
 		const childPath = harness.runtimes[0]!.session.sessionManager.getSessionFile()!;
-		const enqueueMailbox = vi.spyOn(harness.parent, "enqueueSubagentMailboxEvent");
+		const enqueueMailbox = vi.spyOn(harness.parent, "enqueueAgentMailboxEvent");
 		vi.spyOn(harness.runtimes[0]!, "dispose").mockRejectedValueOnce(new Error("dispose failed during parent unload"));
 
 		await expect(harness.manager.unload("parent_unloaded")).rejects.toThrow("dispose failed during parent unload");
@@ -512,7 +561,7 @@ describe("SubagentManager", () => {
 		const harness = setup();
 		const events: AgentManagerEvent[] = [];
 		harness.manager.subscribe((event) => events.push(event));
-		vi.mocked(harness.parent.enqueueSubagentMailboxEvent).mockImplementation(() => {
+		vi.mocked(harness.parent.enqueueAgentMailboxEvent).mockImplementation(() => {
 			throw new Error("mailbox disk full");
 		});
 		const created = await harness.manager.spawn(ROOT_ID, {
@@ -559,7 +608,7 @@ describe("SubagentManager", () => {
 			}),
 		).resolves.toEqual({ decision: "allow" });
 		expect(approvals.mock.calls[0]?.[0].actor).toEqual({
-			type: "subagent",
+			type: "agent",
 			id: created.agentId,
 			name: "researcher",
 		});
@@ -573,7 +622,7 @@ describe("SubagentManager", () => {
 	it("returns an async receipt and publishes ready only after mailbox persistence", async () => {
 		const harness = setup();
 		const order: string[] = [];
-		vi.mocked(harness.parent.enqueueSubagentMailboxEvent).mockImplementation((event) => {
+		vi.mocked(harness.parent.enqueueAgentMailboxEvent).mockImplementation((event) => {
 			order.push(`persist:${event.eventId}`);
 			return true;
 		});
@@ -647,6 +696,42 @@ describe("SubagentManager", () => {
 		expect(existsSync(childPath)).toBe(false);
 	});
 
+	it("returns a safe projected trace for inspect_agents", async () => {
+		const harness = setup();
+		const created = await harness.manager.spawn(ROOT_ID, {
+			name: "worker",
+			task: "Inspect me",
+			agentType: "worker",
+		});
+		await vi.waitFor(() => expect(harness.runtimes).toHaveLength(1));
+		await finishTask(harness, created.agentId, created.taskId, "done handoff");
+		const inspected = await harness.manager.inspect(ROOT_ID, { agentId: created.agentId });
+		expect(inspected.kind).toBe("trace");
+		if (inspected.kind !== "trace") return;
+		expect(inspected.events.length).toBeGreaterThan(0);
+		expect(inspected.events[0]?.timestamp >= inspected.events.at(-1)!.timestamp).toBe(true);
+		expect(inspected.events.some((event) => event.kind === "final" && event.text === "done handoff")).toBe(true);
+	});
+
+	it("marks depth-2 workers as non-delegating", async () => {
+		const harness = setup();
+		const first = await harness.manager.spawn(ROOT_ID, {
+			name: "worker",
+			task: "first",
+			agentType: "worker",
+		});
+		await vi.waitFor(() => expect(harness.runtimes).toHaveLength(1));
+		harness.manager.attachActor(harness.runtimes[0]!.session as unknown as AgentSession);
+		const second = await harness.manager.spawn(first.agentId, {
+			name: "nested",
+			task: "nested",
+			agentType: "worker",
+		});
+		expect(second.agentId).not.toBe(first.agentId);
+		expect(harness.factoryInputs.at(-1)!.config.mayDelegate).toBe(false);
+		expect(harness.factoryInputs.at(-1)!.config.agentPath).toHaveLength(2);
+	});
+
 	it("rejects invalid ingress before creating a child journal", async () => {
 		const harness = setup();
 		await expect(
@@ -659,5 +744,124 @@ describe("SubagentManager", () => {
 			harness.manager.spawn(ROOT_ID, { name: "fork-zero", task: "task", agentType: "worker", forkTurns: 0 }),
 		).rejects.toMatchObject({ code: "INVALID_INPUT" });
 		expect(harness.manager.listSummaries(ROOT_ID)).toEqual([]);
+	});
+
+	it("returns pending mailbox updates immediately from wait_agents", async () => {
+		const harness = setup();
+		const created = await harness.manager.spawn(ROOT_ID, {
+			name: "worker",
+			task: "Inspect",
+			agentType: "worker",
+		});
+		await vi.waitFor(() => expect(harness.runtimes).toHaveLength(1));
+		await finishTask(harness, created.agentId, created.taskId);
+		await expect(harness.manager.waitAgents(ROOT_ID, { agentIds: [created.agentId] })).resolves.toMatchObject({
+			timedOut: false,
+			agents: [{ agentId: created.agentId, status: "done" }],
+			mailboxEventIds: [`agent:${created.agentId}:${created.taskId}:terminal`],
+		});
+	});
+
+	it("waits event-driven for a terminal mailbox update", async () => {
+		const harness = setup();
+		const created = await harness.manager.spawn(ROOT_ID, {
+			name: "worker",
+			task: "Inspect",
+			agentType: "worker",
+		});
+		await vi.waitFor(() => expect(harness.runtimes).toHaveLength(1));
+		const waitPromise = harness.manager.waitAgents(ROOT_ID, { agentIds: [created.agentId] });
+		await finishTask(harness, created.agentId, created.taskId);
+		await expect(waitPromise).resolves.toMatchObject({
+			timedOut: false,
+			agents: [{ agentId: created.agentId, status: "done" }],
+			mailboxEventIds: [`agent:${created.agentId}:${created.taskId}:terminal`],
+		});
+	});
+
+	it("returns approval_required while a child waits for parent permission", async () => {
+		const approvals = vi.fn((_request: PermissionApprovalRequest) => new Promise<{ decision: "allow" }>(() => {}));
+		const harness = setup({ onPermissionRequest: approvals });
+		const created = await harness.manager.spawn(ROOT_ID, {
+			name: "researcher",
+			task: "Inspect",
+			agentType: "worker",
+		});
+		await vi.waitFor(() => expect(harness.runtimes).toHaveLength(1));
+		const waitPromise = harness.manager.waitAgents(ROOT_ID, { agentIds: [created.agentId] });
+		const callback = harness.factoryInputs[0]!.onPermissionRequest!;
+		void callback({
+			action: {
+				actionId: "action-1",
+				toolName: "bash",
+				provenance: "builtin",
+				risks: ["network"],
+				paths: [],
+				networkTargets: [],
+			},
+			args: { command: "curl example.test" },
+			reason: "network requires confirmation",
+		});
+		await expect(waitPromise).resolves.toMatchObject({
+			timedOut: false,
+			agents: [{ agentId: created.agentId, status: "running" }],
+			mailboxEventIds: [],
+			attention: {
+				agentId: created.agentId,
+				taskId: created.taskId,
+				kind: "approval_required",
+				toolName: "bash",
+			},
+		});
+	});
+
+	it("returns no_live_agents when selected children are already terminal with no pending mailbox", async () => {
+		const harness = setup();
+		const created = await harness.manager.spawn(ROOT_ID, {
+			name: "worker",
+			task: "Inspect",
+			agentType: "worker",
+		});
+		await vi.waitFor(() => expect(harness.runtimes).toHaveLength(1));
+		await finishTask(harness, created.agentId, created.taskId);
+		harness.pendingMailbox.clear();
+		await expect(harness.manager.waitAgents(ROOT_ID, { agentIds: [created.agentId] })).resolves.toMatchObject({
+			timedOut: false,
+			agents: [{ agentId: created.agentId, status: "done" }],
+			mailboxEventIds: [],
+		});
+	});
+
+	it("does not republish durable terminal mailbox events on recover", async () => {
+		const harness = setup();
+		let readyCount = 0;
+		harness.manager.subscribe((event) => {
+			if (event.type === "notification_ready") readyCount += 1;
+		});
+		const created = await harness.manager.spawn(ROOT_ID, {
+			name: "worker",
+			task: "Inspect",
+			agentType: "worker",
+		});
+		await vi.waitFor(() => expect(harness.runtimes).toHaveLength(1));
+		await finishTask(harness, created.agentId, created.taskId);
+		expect(readyCount).toBe(1);
+		const eventId = `agent:${created.agentId}:${created.taskId}:terminal`;
+		harness.pendingMailbox.delete(eventId);
+
+		const recoveredManager = new SubagentManager({
+			parentSessionManager: harness.parentManager,
+			agentDir: join(harness.root, "agent"),
+			getWorkspaceRoots: () => harness.parentManager.getWorkspaceRoots(),
+			createChildRuntime: async () => {
+				throw new Error("recover should not start children");
+			},
+		});
+		let recoveredReadyCount = 0;
+		recoveredManager.subscribe((event) => {
+			if (event.type === "notification_ready") recoveredReadyCount += 1;
+		});
+		recoveredManager.attachActor(harness.parent);
+		expect(recoveredReadyCount).toBe(0);
 	});
 });

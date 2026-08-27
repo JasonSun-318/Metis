@@ -79,6 +79,7 @@ export interface HarnessOptions {
 	unattendedExecution?: UnattendedExecutionProfile;
 	interactiveBashBoundary?: InteractiveBashBoundary;
 	withAgentDir?: boolean;
+	workspaceWritePolicy?: "inherit" | "deny";
 	/** Optional caller-owned manager; cleanup does not close it. */
 	sessionManager?: SessionManager;
 }
@@ -204,6 +205,7 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
 		includeAutoMemory: options.includeAutoMemory,
 		unattendedExecution: options.unattendedExecution,
 		interactiveBashBoundary: options.interactiveBashBoundary,
+		workspaceWritePolicy: options.workspaceWritePolicy,
 	});
 
 	const events: AgentSessionEvent[] = [];

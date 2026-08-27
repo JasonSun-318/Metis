@@ -24,7 +24,7 @@ function setup(): { root: string; cwd: string; agentDir: string } {
 }
 
 describe("Ultra composite thinking selection", () => {
-	it("keeps ultra out of provider thinking and persists orchestration independently", async () => {
+	it("keeps ultra out of provider thinking and persists the selection independently", async () => {
 		const { cwd, agentDir } = setup();
 		const model = getModel("anthropic", "claude-sonnet-4-5")!;
 		const { session } = await createAgentSession({ cwd, agentDir, model, ultraAvailable: true });
@@ -33,17 +33,17 @@ describe("Ultra composite thinking selection", () => {
 		expect(session.getThinkingSelection()).toBe("ultra");
 		expect(session.thinkingLevel).toBe(getHighestSupportedThinkingLevel(model));
 		expect(getSupportedThinkingLevels(model)).toContain(session.thinkingLevel);
-		expect(session.sessionManager.getSubagentsEnabled()).toBe(true);
+		expect(session.sessionManager.getUltraSelected()).toBe(true);
 		expect(session.sessionManager.getDurableJournalSnapshot().at(-2)?.type).not.toBe("thinking_level_change");
 		expect(
 			session.sessionManager
 				.getDurableJournalSnapshot()
-				.some((entry) => entry.type === "subagent_mode_change" && entry.enabled),
+				.some((entry) => entry.type === "session_ultra_selection" && entry.selected),
 		).toBe(true);
 
 		session.setThinkingSelection("low");
 		expect(session.getThinkingSelection()).toBe("low");
-		expect(session.sessionManager.getSubagentsEnabled()).toBe(false);
+		expect(session.sessionManager.getUltraSelected()).toBe(false);
 		session.dispose();
 	});
 
@@ -70,7 +70,7 @@ describe("Ultra composite thinking selection", () => {
 
 		expect(created.session.getAvailableThinkingSelections()).not.toContain("ultra");
 		expect(() => created.session.setThinkingSelection("ultra")).toThrow("persisted primary Code AgentSessionRuntime");
-		expect(created.session.sessionManager.getSubagentsEnabled()).toBe(false);
+		expect(created.session.sessionManager.getUltraSelected()).toBe(false);
 		created.session.dispose();
 	});
 

@@ -484,7 +484,7 @@ Metis is aggressively extensible so it doesn't have to dictate your workflow. Fe
 
 **MCP:** Run `/mcp` to add and authenticate trusted stdio or Streamable HTTP servers without editing JSON. Metis supports token-backed authentication, resources, prompts, permission-aware calls, and Codex-style lazy tool discovery. See [docs/mcp.md](docs/mcp.md).
 
-**Explicit multi-agent tier.** Persisted primary Code sessions can select Ultra for maximum model reasoning plus recoverable first-class subagents. The process-spawning extension remains available for custom isolation and chained workflows. See [Ultra and Subagents](docs/subagents.md).
+**First-class Agents.** Every persisted primary Code session has six durable Agent controls at every thinking level. Ultra only selects the model's highest supported reasoning level. See [Agents](docs/subagents.md).
 
 **Explicit permission boundary.** Auto is the default. Ask and Auto sandbox model-initiated Bash unless an approved action explicitly shows host execution; exact current-project approvals can be revoked. Full runs directly with the current user's OS authority. Installed integration code remains trusted. See [Permissions](docs/permissions.md).
 

@@ -351,4 +351,4 @@ metis --exclude-tools ask_question
 
 Metis keeps the core small and pushes workflow-specific behavior into extensions, skills, prompt templates, and packages.
 
-It intentionally does not include built-in MCP, a separate plan mode, a manual to-do manager, or background bash. The core `set_tasks` tool only publishes the current visible checklist for complex work. Persisted primary Code sessions can select [Ultra](subagents.md) for first-class recoverable subagents. Auto is the default; Ask prompts more often, and both sandbox ordinary model-initiated Bash. Full skips approval and runs on the host. See [Permissions](permissions.md).
+It intentionally does not include built-in MCP, a separate plan mode, a manual to-do manager, or background bash. The core `set_tasks` tool only publishes the current visible checklist for complex work. Persisted primary Code sessions have [first-class Agents](subagents.md) at every thinking level. Auto is the default; Ask prompts more often, and both sandbox ordinary model-initiated Bash. Full skips approval and runs on the host. See [Permissions](permissions.md).

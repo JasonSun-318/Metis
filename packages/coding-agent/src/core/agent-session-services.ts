@@ -76,6 +76,7 @@ export interface CreateAgentSessionFromServicesOptions {
 	additionalSystemPrompt?: string | (() => string | undefined);
 	includeAutoMemory?: boolean;
 	permissionModeCeiling?: CreateAgentSessionOptions["permissionModeCeiling"];
+	workspaceWritePolicy?: CreateAgentSessionOptions["workspaceWritePolicy"];
 	/** Host-only fail-closed profile for unattended runs. */
 	unattendedExecution?: UnattendedExecutionProfile;
 }
@@ -243,6 +244,7 @@ export async function createAgentSessionFromServices(
 		additionalSystemPrompt: options.additionalSystemPrompt,
 		includeAutoMemory: options.includeAutoMemory,
 		permissionModeCeiling: options.permissionModeCeiling,
+		workspaceWritePolicy: options.workspaceWritePolicy,
 		unattendedExecution: options.unattendedExecution,
 		sessionStartEvent: options.sessionStartEvent,
 	});

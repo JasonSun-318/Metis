@@ -44,7 +44,7 @@ export type PermissionRoute = "allow" | "user";
 export type PermissionExecutionTarget = "sandbox" | "host";
 
 export interface PermissionActor {
-	readonly type: "subagent";
+	readonly type: "agent";
 	readonly id: string;
 	readonly name: string;
 }
@@ -529,7 +529,7 @@ function approvalArguments(args: unknown): string {
 export function formatPermissionApproval(request: PermissionApprovalRequest): PermissionApprovalView {
 	const { action: value } = request;
 	const lines = [
-		request.actor ? `Subagent: ${request.actor.name} (${request.actor.id})` : undefined,
+		request.actor ? `Agent: ${request.actor.name} (${request.actor.id})` : undefined,
 		request.executionTarget === "sandbox" ? undefined : DIRECT_HOST_WARNING,
 		value.toolName === "bash"
 			? request.executionTarget === "sandbox"

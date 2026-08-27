@@ -369,7 +369,7 @@ const { session } = await createAgentSession({
 });
 ```
 
-`thinkingSelection: "ultra"` is the composite runtime selection used only by persisted primary Code `AgentSessionRuntime` hosts. The session's `thinkingLevel` remains the resolved real provider value. Raw `createAgentSession`, Chat, child, and in-memory runtimes cannot enable Ultra; first-class children require a persisted Code `AgentSessionRuntime`. See [Ultra and Subagents](subagents.md).
+`thinkingSelection: "ultra"` is a runtime selection used only by persisted primary Code `AgentSessionRuntime` hosts. The session's `thinkingLevel` remains the resolved real provider value. Raw `createAgentSession`, Chat, child, and in-memory runtimes cannot select Ultra; Agent availability is independent of this selection. See [Agents](subagents.md).
 
 The effective session `cwd` is used by `DefaultResourceLoader` for:
 - Project extensions (`.metis/extensions/`)

@@ -4,20 +4,33 @@ import { createAgentSessionFromServices, createAgentSessionServices } from "../.
 import { SessionManager } from "../../src/core/session-manager.ts";
 
 describe("AgentSession goal tools", () => {
-	it("activates goal tools on primary sessions and hides them from subagents", async () => {
+	it("activates goal tools on primary sessions and hides them from agents", async () => {
 		const createSession = async (
 			options: { tools?: string[]; excludeTools?: string[]; noTools?: "builtin" } = {},
-			subagent = false,
+			agent = false,
 		) => {
 			const services = await createAgentSessionServices({ cwd: process.cwd() });
 			const sessionManager = SessionManager.create(process.cwd(), undefined, {
-				...(subagent
+				...(agent
 					? {
-							parentSession: "parent-session",
-							subagent: {
+							id: "child-agent",
+							agent: {
 								agentId: "child-agent",
 								name: "child",
+								agentType: "worker" as const,
 								parentSessionId: "parent-session",
+								rootSessionId: "parent-session",
+								agentPath: ["child-agent"],
+								cwd: process.cwd(),
+								tools: ["read"],
+								writePolicy: "inherit" as const,
+								permissionMode: "ask" as const,
+								model: { provider: "anthropic", modelId: "claude-sonnet-4-5" },
+								thinkingLevel: "high" as const,
+								initialTask: "test",
+								forkTurns: 0,
+								timeoutSeconds: 60,
+								mayDelegate: true,
 							},
 						}
 					: {}),

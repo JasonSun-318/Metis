@@ -11,7 +11,6 @@ import type { AgentMessage, AgentToolResult } from "@metis/agent-core";
 import { fauxAssistantMessage, fauxToolCall } from "@metis/ai";
 import { Type } from "typebox";
 import { describe, expect, it } from "vitest";
-import { prepareBranchEntries } from "../../src/core/compaction/branch-summarization.ts";
 import { type SessionEntry, sessionEntryToContextMessages } from "../../src/core/session-manager.ts";
 import type { ExtensionFactory } from "../../src/index.ts";
 import { createHarness } from "./harness.ts";
@@ -152,28 +151,6 @@ describe("lax message content handling", () => {
 
 		const [message] = sessionEntryToContextMessages(entry);
 		expect(message).toMatchObject({ role: "custom", content: [] });
-	});
-
-	it("keeps legacy subagent approvals out of model context while retaining terminal events", () => {
-		const base = {
-			type: "custom_message",
-			id: "entry-1",
-			parentId: null,
-			timestamp: new Date().toISOString(),
-			customType: "subagent_mailbox",
-			content: "mailbox event",
-			display: true,
-		};
-		const approval = { ...base, details: { type: "approval_required" } } as SessionEntry;
-		const terminal = { ...base, id: "entry-2", details: { type: "terminal" } } as SessionEntry;
-
-		expect(sessionEntryToContextMessages(approval)).toEqual([]);
-		expect(sessionEntryToContextMessages(terminal)).toMatchObject([
-			{ role: "custom", customType: "subagent_mailbox", content: "mailbox event" },
-		]);
-		expect(prepareBranchEntries([approval, terminal]).messages).toMatchObject([
-			{ role: "custom", customType: "subagent_mailbox", content: "mailbox event", details: { type: "terminal" } },
-		]);
 	});
 
 	it("keeps valid message content untouched when loading session entries", () => {

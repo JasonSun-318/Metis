@@ -75,10 +75,27 @@ describe("scheduled session metadata", () => {
 			`${JSON.stringify({
 				...base,
 				scheduled: { taskId: "task-1", runId: "run-1" },
-				subagent: { agentId: "agent-1", name: "child", parentSessionId: "parent-1" },
+				agent: {
+					agentId: "session-invalid",
+					name: "child",
+					agentType: "worker",
+					parentSessionId: "parent-1",
+					rootSessionId: "parent-1",
+					agentPath: ["session-invalid"],
+					cwd,
+					tools: ["read"],
+					writePolicy: "inherit",
+					permissionMode: "ask",
+					model: { provider: "openai", modelId: "gpt-test" },
+					thinkingLevel: "off",
+					initialTask: "test",
+					forkTurns: 0,
+					timeoutSeconds: 60,
+					mayDelegate: false,
+				},
 			})}\n`,
 		);
-		expect(() => SessionManager.openReadOnly(mixed)).toThrow(/both scheduled and a subagent/);
+		expect(() => SessionManager.openReadOnly(mixed)).toThrow(/both scheduled and an agent/);
 	});
 
 	it("rejects branch, fork, import, and every single-session deletion path", async () => {

@@ -21,7 +21,7 @@ Use `/session` in interactive mode to see the current session file, session ID, 
 
 For the JSONL file format and SessionManager API, see [Session Format](session-format.md).
 
-Only persisted primary Code sessions may select [Ultra](subagents.md). Ordinary Chat sessions never receive subagent tools. A legacy Chat session with existing children receives cleanup-only controls until those children are closed.
+Only persisted primary Code sessions may select [Ultra](subagents.md). Persisted primary Code sessions receive the six Agent controls at every thinking level; Chat, scheduled, in-memory, and raw sessions do not.
 
 ## Chat and Code modes
 

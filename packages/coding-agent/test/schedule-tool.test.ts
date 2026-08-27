@@ -96,7 +96,7 @@ function fakeSession(input: {
 	cwd: string;
 	header?: {
 		scheduled?: { taskId: string; runId: string };
-		subagent?: { agentId: string; name: string; parentSessionId: string };
+		agent?: { agentId: string };
 	};
 }) {
 	const installed = new Map<string, ToolDefinition>();
@@ -250,7 +250,7 @@ describe("schedule host tool", () => {
 			{ mode: "chat" as const, header: { scheduled: { taskId: "task-1", runId: "run-1" } } },
 			{
 				mode: "chat" as const,
-				header: { subagent: { agentId: "agent-1", name: "child", parentSessionId: "parent-1" } },
+				header: { agent: { agentId: "agent-1" } },
 			},
 		]) {
 			const host = fakeSession({

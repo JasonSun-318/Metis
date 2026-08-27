@@ -576,4 +576,26 @@ describe("AgentSession permission enforcement", () => {
 			]);
 		});
 	});
+
+	it("routes Bash through the read-only sandbox when workspaceWritePolicy is deny", async () => {
+		const fake = fakeBashBoundary();
+		const harness = await createHarness({
+			permissionSettings: { mode: "full" },
+			workspaceWritePolicy: "deny",
+			excludedToolNames: ["edit", "write"],
+			initialActiveToolNames: ["bash", "read"],
+			interactiveBashBoundary: fake.boundary,
+		});
+		harnesses.push(harness);
+		harness.setResponses([
+			fauxAssistantMessage([fauxToolCall("bash", { command: "pwd" })], { stopReason: "toolUse" }),
+			fauxAssistantMessage("done"),
+		]);
+
+		await harness.session.prompt("run it");
+
+		expect(fake.sandboxExec).toHaveBeenCalledOnce();
+		expect(fake.hostExec).not.toHaveBeenCalled();
+		expect(harness.session.getActiveToolNames()).not.toEqual(expect.arrayContaining(["edit", "write"]));
+	});
 });

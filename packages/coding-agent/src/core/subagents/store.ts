@@ -1,4 +1,4 @@
-import { existsSync, lstatSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, lstatSync, readdirSync, readFileSync, renameSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import type { AgentMessage } from "@metis/agent-core";
 import { createFileAtomicallySync, ensureDirectoryDurablySync, syncDirectorySync } from "../durable-file.ts";
@@ -67,6 +67,7 @@ export interface AgentStoreApi {
 		},
 	): AgentDiskRecord;
 	listTasks(agentId: string): readonly AgentTaskSummary[];
+	listTombstones(): readonly AgentTombstone[];
 	readJournal(agentId: string): readonly FileEntry[];
 	setArchived(agentId: string, archived: boolean): AgentDiskRecord;
 	beginDelete(agentId: string, tombstone: AgentTombstone): void;
@@ -78,7 +79,7 @@ export interface AgentStoreApi {
 	recoverDeleteMarkers(): Promise<void>;
 }
 
-function taskSummary(task: string): string {
+export function summarizeAgentTask(task: string): string {
 	const normalized = task.replace(/\s+/g, " ").trim();
 	let end = Math.min(normalized.length, 240);
 	if (end < normalized.length && /[\uD800-\uDBFF]/u.test(normalized[end - 1]!)) end -= 1;
@@ -119,11 +120,12 @@ function reduceTasks(entries: readonly FileEntry[], agentId: string): AgentTaskS
 	const tasks = new Map<string, AgentTaskSummary>();
 	for (const entry of entries) {
 		if (entry.type !== "agent_task" || entry.agentId !== agentId) continue;
+		const prior = tasks.get(entry.taskId);
 		tasks.set(entry.taskId, {
 			taskId: entry.taskId,
 			status: entry.status,
 			taskSummary: entry.taskSummary,
-			createdAt: entry.timestamp,
+			createdAt: prior?.createdAt ?? entry.timestamp,
 			updatedAt: entry.timestamp,
 			...(entry.finalMessage ? { finalMessage: entry.finalMessage } : {}),
 			...(entry.error ? { error: entry.error } : {}),
@@ -243,6 +245,7 @@ function agentHeaderFromConfig(config: AgentConfig): NonNullable<SessionHeader["
 export class AgentStore implements AgentStoreApi {
 	readonly directory: string;
 	private readonly deletingDirectory: string;
+	private readonly deletedDirectory: string;
 	private readonly rootSessionId: string;
 	private readonly agentDir: string;
 
@@ -254,6 +257,7 @@ export class AgentStore implements AgentStoreApi {
 		this.agentDir = agentDir;
 		this.directory = getSessionAgentDir(agentDir, this.rootSessionId);
 		this.deletingDirectory = join(this.directory, ".deleting");
+		this.deletedDirectory = join(this.directory, ".deleted");
 	}
 
 	static createAgentId(): string {
@@ -289,7 +293,10 @@ export class AgentStore implements AgentStoreApi {
 		if (tree.agents.some((agent) => agent.agentId === config.agentId)) {
 			throw new Error(`Agent already exists: ${config.agentId}`);
 		}
-		if (tree.agents.some((agent) => agent.name === config.name && !agent.archived)) {
+		if (
+			tree.agents.some((agent) => agent.name === config.name) ||
+			this.listTombstones().some((tombstone) => tombstone.name === config.name)
+		) {
 			throw new Error(`Agent name has already been used: ${config.name}`);
 		}
 		const taskId = firstTaskId ?? AgentStore.createTaskId();
@@ -307,7 +314,7 @@ export class AgentStore implements AgentStoreApi {
 				agentId: config.agentId,
 				taskId,
 				text: config.initialTask,
-				taskSummary: taskSummary(config.initialTask),
+				taskSummary: summarizeAgentTask(config.initialTask),
 				status: "queued",
 			});
 			for (const message of selectForkMessages(forkedMessages, config.forkTurns)) {
@@ -360,9 +367,6 @@ export class AgentStore implements AgentStoreApi {
 		if (existing.filter((task) => task.status === "queued").length >= 32) {
 			throw new Error("Agent task queue is full");
 		}
-		if (existing.some((task) => task.status === "running")) {
-			// Additional queued tasks are allowed while one task is running.
-		}
 		const manager = SessionManager.open(record.path);
 		try {
 			manager.appendAgentControl({
@@ -370,7 +374,7 @@ export class AgentStore implements AgentStoreApi {
 				agentId,
 				taskId: input.taskId,
 				text: input.text,
-				taskSummary: taskSummary(input.text),
+				taskSummary: summarizeAgentTask(input.text),
 				status: input.status,
 				...(input.reason ? { reason: input.reason } : {}),
 				...(input.finalMessage ? { finalMessage: input.finalMessage } : {}),
@@ -447,8 +451,24 @@ export class AgentStore implements AgentStoreApi {
 	}
 
 	listTasks(agentId: string): readonly AgentTaskSummary[] {
-		const _record = this.load(agentId);
+		this.load(agentId);
 		return reduceTasks(this.readJournal(agentId), agentId);
+	}
+
+	listTombstones(): readonly AgentTombstone[] {
+		const tombstones: AgentTombstone[] = [];
+		for (const directory of [this.deletedDirectory, this.deletingDirectory]) {
+			if (!existsSync(directory)) continue;
+			for (const entry of readdirSync(directory, { withFileTypes: true })) {
+				if (!entry.isFile() || !entry.name.endsWith(".json")) continue;
+				try {
+					tombstones.push(markerTombstone(join(directory, entry.name)));
+				} catch {
+					// Invalid markers remain on disk for diagnostics and never enter the live index.
+				}
+			}
+		}
+		return tombstones;
 	}
 
 	readJournal(agentId: string): readonly FileEntry[] {
@@ -491,8 +511,6 @@ export class AgentStore implements AgentStoreApi {
 		if (record) {
 			const deletion = await SessionManager.deleteSession(record.path, { agentDir: this.agentDir });
 			if (!deletion.ok) {
-				rmSync(markerPath, { force: true });
-				if (existsSync(this.deletingDirectory)) syncDirectorySync(this.deletingDirectory);
 				return {
 					status: "delete_failed",
 					residualPath: record.path,
@@ -500,9 +518,10 @@ export class AgentStore implements AgentStoreApi {
 				};
 			}
 		}
-		rmSync(markerPath, { force: true });
-		if (existsSync(this.deletingDirectory)) syncDirectorySync(this.deletingDirectory);
-		void tombstone;
+		ensureDirectoryDurablySync(this.deletedDirectory);
+		renameSync(markerPath, join(this.deletedDirectory, `${tombstone.agentId}.json`));
+		syncDirectorySync(this.deletingDirectory);
+		syncDirectorySync(this.deletedDirectory);
 		return { status: "deleted" };
 	}
 

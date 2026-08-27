@@ -8,10 +8,18 @@ import { narrowPermissionMode, type PermissionMode } from "../permission-mode.ts
 import type { RequestPermissionApproval } from "../permission-policy.ts";
 import { createSessionId } from "../session-id.ts";
 import { type FileEntry, SessionManager } from "../session-manager.ts";
-import { resolveAgentProfile } from "./profiles.ts";
+import { MAX_AGENT_DEPTH, resolveAgentProfile } from "./profiles.ts";
 import { defaultSubagentScheduler, type SubagentSchedulerApi } from "./scheduler.ts";
-import { type AgentDiskRecord, AgentStore, type AgentStoreApi, agentStatusFromTasks } from "./store.ts";
 import {
+	type AgentDiskRecord,
+	AgentStore,
+	type AgentStoreApi,
+	agentStatusFromTasks,
+	summarizeAgentTask,
+} from "./store.ts";
+import { projectAgentTrace, utf8Length, utf8Prefix } from "./trace.ts";
+import {
+	AGENT_TOOL_NAMES,
 	type AgentConfig,
 	AgentError,
 	type AgentForkTurns,
@@ -27,7 +35,10 @@ import {
 	type InspectAgentsInput,
 	type InspectAgentsResult,
 	type InterruptAgentResult,
+	type WaitAgentsInput,
+	type WaitAgentsResult,
 } from "./types.ts";
+import { type AgentWaitHandle, normalizeWaitAgentIds, resolveWaiters, waitAgentsSnapshot } from "./wait.ts";
 
 export interface SpawnAgentInput {
 	readonly name: string;
@@ -62,7 +73,6 @@ export interface SubagentManagerOptions {
 	readonly onPermissionRequest?: RequestPermissionApproval;
 	readonly now?: () => number;
 	readonly createId?: () => string;
-	readonly maxDepth?: number;
 }
 
 export interface SubagentManagerApi {
@@ -84,6 +94,7 @@ export interface SubagentManagerApi {
 		signal?: AbortSignal,
 	): Promise<AgentTaskReceipt>;
 	interrupt(actorId: string, agentId: string): Promise<InterruptAgentResult>;
+	waitAgents(actorId: string, input: WaitAgentsInput, signal?: AbortSignal): Promise<WaitAgentsResult>;
 	setArchived(actorId: string, agentId: string, archived: boolean): Promise<AgentSummary>;
 	deleteAgent(actorId: string, agentId: string): Promise<DeleteAgentResult>;
 	listSummaries(actorId: string, includeArchived?: boolean): readonly AgentSummary[];
@@ -117,31 +128,18 @@ interface AttachedActor {
 	readonly unsubscribePermissions: () => void;
 }
 
-const DEFAULT_MAX_DEPTH = 2;
+const THINKING_LEVELS: readonly ThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
 
-function utf8Prefix(value: string, maxBytes: number): string {
-	const bytes = new TextEncoder().encode(value);
-	if (bytes.byteLength <= maxBytes) return value;
-	const decoder = new TextDecoder("utf-8", { fatal: true });
-	for (let end = maxBytes; end > 0; end--) {
-		try {
-			return decoder.decode(bytes.slice(0, end));
-		} catch {
-			// Move to the preceding complete code point.
-		}
+function selectChildThinkingLevel(
+	parentLevel: ThinkingLevel,
+	supported: readonly ThinkingLevel[],
+): ThinkingLevel | undefined {
+	const parentRank = THINKING_LEVELS.indexOf(parentLevel);
+	for (let index = parentRank; index >= 0; index -= 1) {
+		const level = THINKING_LEVELS[index];
+		if (level && supported.includes(level)) return level;
 	}
-	return "";
-}
-
-function taskSummary(task: string): string {
-	const normalized = task.replace(/\s+/g, " ").trim();
-	let end = Math.min(normalized.length, 240);
-	if (end < normalized.length && /[\uD800-\uDBFF]/u.test(normalized[end - 1]!)) end -= 1;
-	return normalized.slice(0, end);
-}
-
-function utf8Length(value: string): number {
-	return new TextEncoder().encode(value).byteLength;
+	return supported[0];
 }
 
 function lastAssistant(session: AgentSession): { stopReason?: string; errorMessage?: string } | undefined {
@@ -212,12 +210,13 @@ export class SubagentManager implements SubagentManagerApi {
 	private readonly onPermissionRequest?: RequestPermissionApproval;
 	private readonly now: () => number;
 	private readonly createId: () => string;
-	private readonly maxDepth: number;
 	private readonly hot = new Map<string, HotChild>();
 	private readonly starting = new Map<string, StartingChild>();
 	private readonly deleting = new Set<string>();
 	private readonly actors = new Map<string, AttachedActor>();
 	private readonly listeners = new Set<(event: AgentManagerEvent) => void>();
+	private readonly waiters = new Set<AgentWaitHandle>();
+	private readonly approvalRequests = new Map<string, { readonly taskId: string; readonly toolName: string }>();
 	private readonly tails = new Map<string, Promise<unknown>>();
 	private readonly scheduledRuns = new Map<string, string>();
 	private readonly childPermissionCeilings = new Map<string, PermissionMode>();
@@ -236,7 +235,6 @@ export class SubagentManager implements SubagentManagerApi {
 		this.onPermissionRequest = options.onPermissionRequest;
 		this.now = options.now ?? Date.now;
 		this.createId = options.createId ?? createSessionId;
-		this.maxDepth = options.maxDepth ?? DEFAULT_MAX_DEPTH;
 		this.recoverInterruptedWork();
 		for (const record of this.store.listTree().agents) {
 			this.childPermissionCeilings.set(record.agentId, record.config.permissionMode);
@@ -251,12 +249,12 @@ export class SubagentManager implements SubagentManagerApi {
 		const attached: AttachedActor = {
 			session,
 			unsubscribePermissions: session.sessionManager.subscribePermissionSettings((next) => {
-				this.narrowChildrenTo(next.mode);
+				this.narrowDescendantsTo(sessionId, next.mode);
 			}),
 		};
 		this.actors.set(sessionId, attached);
 		if (sessionId === this.rootSessionId) {
-			this.narrowChildrenTo(session.sessionManager.getPermissionSettings().mode);
+			this.narrowDescendantsTo(sessionId, session.sessionManager.getPermissionSettings().mode);
 			this.recoverMailboxEvents(session);
 		}
 		return () => {
@@ -280,7 +278,8 @@ export class SubagentManager implements SubagentManagerApi {
 		if (!input.name || input.name.length > 128 || /[\u0000-\u001f\u007f-\u009f]/u.test(input.name)) {
 			throw new AgentError("INVALID_INPUT", "Agent name must be 1-128 characters with no control characters");
 		}
-		const summary = taskSummary(input.task);
+		if (actorId !== this.rootSessionId) this.assertOperable(actorId);
+		const summary = summarizeAgentTask(input.task);
 		if (!summary || utf8Length(input.task) > 2 * 1024 * 1024) {
 			throw new AgentError("INVALID_INPUT", "Agent task must be non-empty and at most 2 MiB");
 		}
@@ -297,14 +296,11 @@ export class SubagentManager implements SubagentManagerApi {
 		}
 		const actorPath = this.actorPath(actorId);
 		const depth = actorPath.length + 1;
-		if (depth > this.maxDepth) {
-			throw new AgentError("DEPTH_LIMIT", `Agent depth cannot exceed ${this.maxDepth}`);
+		if (depth > MAX_AGENT_DEPTH) {
+			throw new AgentError("DEPTH_LIMIT", `Agent depth cannot exceed ${MAX_AGENT_DEPTH}`);
 		}
-		const names = new Set(
-			this.listSummaries(actorId, true)
-				.filter((candidate) => !candidate.archived)
-				.map((candidate) => candidate.name),
-		);
+		const names = new Set(this.store.listTree().agents.map((candidate) => candidate.name));
+		for (const tombstone of this.store.listTombstones()) names.add(tombstone.name);
 		if (names.has(input.name))
 			throw new AgentError("INVALID_INPUT", `Agent name has already been used: ${input.name}`);
 		const agentType = input.agentType ?? "default";
@@ -312,15 +308,12 @@ export class SubagentManager implements SubagentManagerApi {
 			agentType,
 			parentTools: actor.getActiveToolNames(),
 			depth,
-			maxDepth: this.maxDepth,
 		});
 		const parentMode = actor.sessionManager.getPermissionSettings().mode;
 		const model = this.resolveModel(actor, input.model);
 		const levels = getSupportedThinkingLevels(model) as ThinkingLevel[];
-		const thinkingLevel = actor.thinkingLevel;
-		if (!levels.includes(thinkingLevel)) {
-			throw new AgentError("MODEL_UNAVAILABLE", `Thinking level is unavailable for child model: ${thinkingLevel}`);
-		}
+		const thinkingLevel = selectChildThinkingLevel(actor.thinkingLevel, levels);
+		if (!thinkingLevel) throw new AgentError("MODEL_UNAVAILABLE", "Child model has no supported thinking level");
 		const cwd = this.resolveCwd(actor.sessionManager.getCwd());
 		const agentId = this.createId();
 		const taskId = this.createId();
@@ -367,7 +360,13 @@ export class SubagentManager implements SubagentManagerApi {
 		if (input.taskId && !this.store.listTasks(input.agentId).some((task) => task.taskId === input.taskId)) {
 			throw new AgentError("UNKNOWN_TASK", `Unknown agent task: ${input.taskId}`);
 		}
-		return { kind: "trace", agent: summary, taskId, events: [] };
+		const trace = projectAgentTrace({
+			journal: this.store.readJournal(input.agentId),
+			taskId,
+			beforeEventId: input.beforeEventId,
+			limit,
+		});
+		return { kind: "trace", agent: summary, taskId, ...trace };
 	}
 
 	async sendMessage(
@@ -410,7 +409,7 @@ export class SubagentManager implements SubagentManagerApi {
 		if (record.archived) {
 			throw new AgentError("INVALID_STATE", "Archived agents must be unarchived before follow-up tasks");
 		}
-		const summary = taskSummary(input.task);
+		const summary = summarizeAgentTask(input.task);
 		if (!summary || utf8Length(input.task) > 2 * 1024 * 1024) {
 			throw new AgentError("INVALID_INPUT", "Agent task must be non-empty and at most 2 MiB");
 		}
@@ -438,43 +437,130 @@ export class SubagentManager implements SubagentManagerApi {
 		return this.serialize(agentId, () => this.interruptNow(actorId, agentId));
 	}
 
+	waitAgents(actorId: string, input: WaitAgentsInput, signal?: AbortSignal): Promise<WaitAgentsResult> {
+		signal?.throwIfAborted();
+		this.assertActive();
+		this.requireActor(actorId);
+		const timeoutMs = input.timeoutMs ?? 30_000;
+		if (!Number.isInteger(timeoutMs) || timeoutMs < 10 || timeoutMs > 300_000) {
+			throw new AgentError("INVALID_INPUT", "wait_agents timeoutMs must be from 10 through 300000");
+		}
+		const summaries = this.listSummaries(actorId, true);
+		const ids = normalizeWaitAgentIds(input.agentIds);
+		for (const id of ids) this.assertDescendant(actorId, id);
+		const selected = new Set(ids);
+		const immediate = this.waitAgentsSnapshot(actorId, summaries, selected);
+		if (immediate) return Promise.resolve(immediate);
+		if (signal?.aborted) {
+			return Promise.reject(signal.reason instanceof Error ? signal.reason : new Error("Aborted"));
+		}
+		return new Promise<WaitAgentsResult>((resolvePromise, rejectPromise) => {
+			let timeout: ReturnType<typeof setTimeout> | undefined;
+			const onAbort = (): void =>
+				waiter.reject(signal?.reason instanceof Error ? signal.reason : new Error("Aborted"));
+			const waiter: AgentWaitHandle = {
+				actorId,
+				ids: selected,
+				snapshot: () => this.waitAgentsSnapshot(actorId, this.listSummaries(actorId, true), selected),
+				resolve: (result) => {
+					waiter.dispose();
+					resolvePromise(result);
+				},
+				reject: (error) => {
+					waiter.dispose();
+					rejectPromise(error);
+				},
+				dispose: () => {
+					this.waiters.delete(waiter);
+					if (timeout) clearTimeout(timeout);
+					signal?.removeEventListener("abort", onAbort);
+				},
+			};
+			this.waiters.add(waiter);
+			signal?.addEventListener("abort", onAbort, { once: true });
+			timeout = setTimeout(() => {
+				waiter.resolve({
+					timedOut: true,
+					agents: this.listSummaries(actorId, true).filter((summary) => selected.has(summary.agentId)),
+					mailboxEventIds: [],
+				});
+			}, timeoutMs);
+			const afterRegister = this.waitAgentsSnapshot(actorId, this.listSummaries(actorId, true), selected);
+			if (afterRegister) waiter.resolve(afterRegister);
+		});
+	}
+
 	deleteAgent(actorId: string, agentId: string): Promise<DeleteAgentResult> {
-		this.assertDescendant(actorId, agentId);
+		const target = this.assertDescendant(actorId, agentId);
 		return this.serialize(agentId, async () => {
 			if (this.deleting.has(agentId)) {
 				throw new AgentError("INVALID_STATE", `Agent is already deleting: ${agentId}`);
 			}
+			const subtree = this.store
+				.listTree()
+				.agents.filter((record) =>
+					target.config.agentPath.every((id, index) => record.config.agentPath[index] === id),
+				)
+				.sort((left, right) => right.config.agentPath.length - left.config.agentPath.length);
+			for (const record of subtree) this.deleting.add(record.agentId);
+			const deletedAgentIds: string[] = [];
 			try {
-				await this.interruptNow(actorId, agentId);
-				this.deleting.add(agentId);
-				const record = this.store.load(agentId);
-				const latestTask = this.store.listTasks(agentId).at(-1);
-				const tombstone: AgentTombstone = {
-					agentId,
-					name: record.name,
-					status: "deleted",
-					taskSummary: latestTask?.taskSummary ?? taskSummary(record.config.initialTask),
-					...(latestTask?.finalMessage ? { finalMessage: latestTask.finalMessage } : {}),
-					deletedAt: new Date(this.now()).toISOString(),
-				};
-				this.store.beginDelete(agentId, tombstone);
-				const result = await this.store.finishDelete(agentId);
-				if (result.status === "deleted") this.childPermissionCeilings.delete(agentId);
-				return { agentId, ...result };
+				for (const record of subtree) {
+					await this.interruptNow(actorId, record.agentId, { allowDeleting: true });
+				}
+				for (const record of subtree) {
+					const latestTask = this.store.listTasks(record.agentId).at(-1);
+					const tombstone: AgentTombstone = {
+						agentId: record.agentId,
+						name: record.name,
+						status: "deleted",
+						taskSummary: latestTask?.taskSummary ?? summarizeAgentTask(record.config.initialTask),
+						...(latestTask?.finalMessage ? { finalMessage: latestTask.finalMessage } : {}),
+						deletedAt: new Date(this.now()).toISOString(),
+					};
+					this.store.beginDelete(record.agentId, tombstone);
+					const result = await this.store.finishDelete(record.agentId);
+					if (result.status !== "deleted") {
+						if (deletedAgentIds.length > 0) {
+							this.emitEvent({ type: "deleted", agentId, deletedAgentIds });
+						}
+						return {
+							agentId,
+							...result,
+							error: `Failed to delete ${record.agentId}: ${result.error ?? "unknown error"}`,
+						};
+					}
+					deletedAgentIds.push(record.agentId);
+					this.childPermissionCeilings.delete(record.agentId);
+				}
+				this.emitEvent({ type: "deleted", agentId, deletedAgentIds });
+				return { agentId, status: "deleted" };
 			} finally {
-				this.deleting.delete(agentId);
+				for (const record of subtree) this.deleting.delete(record.agentId);
 			}
 		});
 	}
 
-	async setArchived(actorId: string, agentId: string, archived: boolean): Promise<AgentSummary> {
+	setArchived(actorId: string, agentId: string, archived: boolean): Promise<AgentSummary> {
 		this.assertDescendant(actorId, agentId);
-		const status = agentStatusFromTasks(this.store.listTasks(agentId));
-		if (archived && (status === "running" || status === "queued")) {
-			throw new AgentError("INVALID_STATE", "Only terminal agents can be archived");
-		}
-		this.store.setArchived(agentId, archived);
-		return this.emitUpdate(this.buildSummary(this.store.load(agentId)));
+		return this.serialize(agentId, async () => {
+			this.assertOperable(agentId);
+			const record = this.store.load(agentId);
+			const status = agentStatusFromTasks(this.store.listTasks(agentId));
+			const activeDescendant = this.store
+				.listTree()
+				.agents.some(
+					(candidate) =>
+						candidate.config.agentPath.length > record.config.agentPath.length &&
+						record.config.agentPath.every((id, index) => candidate.config.agentPath[index] === id) &&
+						["queued", "running"].includes(agentStatusFromTasks(this.store.listTasks(candidate.agentId))),
+				);
+			if (status === "running" || status === "queued" || activeDescendant) {
+				throw new AgentError("INVALID_STATE", "Only terminal agents can be archived");
+			}
+			this.store.setArchived(agentId, archived);
+			return this.emitUpdate(this.buildSummary(this.store.load(agentId)));
+		});
 	}
 
 	async readJournal(actorId: string, agentId: string): Promise<readonly FileEntry[]> {
@@ -515,6 +601,11 @@ export class SubagentManager implements SubagentManagerApi {
 	async unload(reason: "parent_unloaded"): Promise<void> {
 		if (this.unloaded) return;
 		this.unloaded = true;
+		for (const waiter of [...this.waiters]) {
+			waiter.reject(new AgentError("INVALID_STATE", "Agent manager is unloaded"));
+		}
+		this.waiters.clear();
+		this.approvalRequests.clear();
 		for (const actor of this.actors.values()) actor.unsubscribePermissions();
 		this.actors.clear();
 		const errors: unknown[] = [];
@@ -595,6 +686,7 @@ export class SubagentManager implements SubagentManagerApi {
 	}
 
 	private async runChild(agentId: string, taskId: string, starting: StartingChild): Promise<void> {
+		let completedHot: HotChild | undefined;
 		try {
 			let terminalTask: AgentTaskSummary | undefined;
 			try {
@@ -617,10 +709,12 @@ export class SubagentManager implements SubagentManagerApi {
 				}
 			}
 			if (terminalTask && isTerminalTaskStatus(terminalTask.status)) {
+				completedHot = this.hot.get(agentId);
+				this.hot.delete(agentId);
 				this.publishTerminal(this.store.load(agentId), terminalTask);
 			}
 		} finally {
-			const hot = this.hot.get(agentId);
+			const hot = completedHot ?? this.hot.get(agentId);
 			this.hot.delete(agentId);
 			hot?.resolveCompletion();
 			starting.resolveReady();
@@ -641,18 +735,24 @@ export class SubagentManager implements SubagentManagerApi {
 		try {
 			const onPermissionRequest: RequestPermissionApproval = async (request) => {
 				const summary = this.buildSummary(record);
+				this.approvalRequests.set(config.agentId, { taskId, toolName: request.action.toolName });
 				this.emitApprovalRequired(summary, taskId, request.action.toolName);
-				if (!this.onPermissionRequest) {
-					throw new Error("No interactive parent session owner is available");
+				this.notifyApprovalWaiters(config.agentId);
+				try {
+					if (!this.onPermissionRequest) {
+						throw new Error("No interactive parent session owner is available");
+					}
+					return await this.onPermissionRequest({
+						...request,
+						actor: {
+							type: "agent",
+							id: config.agentId,
+							name: config.name,
+						},
+					});
+				} finally {
+					this.approvalRequests.delete(config.agentId);
 				}
-				return this.onPermissionRequest({
-					...request,
-					actor: {
-						type: "subagent",
-						id: config.agentId,
-						name: config.name,
-					},
-				});
 			};
 			runtime = await this.createChildRuntime({
 				config,
@@ -661,9 +761,9 @@ export class SubagentManager implements SubagentManagerApi {
 				onPermissionRequest,
 			});
 			this.persistRuntimeCeiling(runtime, agentId);
-			const configuredTools = new Set(config.tools);
+			const configuredTools = new Set([...config.tools, ...(config.mayDelegate ? AGENT_TOOL_NAMES : [])]);
 			const activeTools = runtime.session.getActiveToolNames();
-			const missingTools = config.tools.filter((tool) => !activeTools.includes(tool));
+			const missingTools = [...configuredTools].filter((tool) => !activeTools.includes(tool));
 			const unexpectedTools = activeTools.filter((tool) => !configuredTools.has(tool));
 			if (missingTools.length > 0 || unexpectedTools.length > 0) {
 				throw new Error(
@@ -831,12 +931,16 @@ export class SubagentManager implements SubagentManagerApi {
 			this.appendHotTaskState(hot.runtime, input);
 			return;
 		}
-		(this.store as AgentStore).appendTaskState(agentId, input);
+		this.store.appendTaskState(agentId, input);
 	}
 
-	private async interruptNow(actorId: string, agentId: string): Promise<InterruptAgentResult> {
+	private async interruptNow(
+		actorId: string,
+		agentId: string,
+		options: { readonly allowDeleting?: boolean } = {},
+	): Promise<InterruptAgentResult> {
 		this.assertDescendant(actorId, agentId);
-		this.assertOperable(agentId);
+		if (!options.allowDeleting) this.assertOperable(agentId);
 		const existingTasks = this.store.listTasks(agentId);
 		if (
 			!this.hot.has(agentId) &&
@@ -906,8 +1010,11 @@ export class SubagentManager implements SubagentManagerApi {
 		}
 	}
 
-	private narrowChildrenTo(parentMode: PermissionMode): void {
-		const records = this.store.listTree().agents;
+	private narrowDescendantsTo(actorId: string, parentMode: PermissionMode): void {
+		const actorPath = this.actorPath(actorId);
+		const records = this.store
+			.listTree()
+			.agents.filter((record) => this.isDescendantPath(actorPath, record.config.agentPath));
 		const changed = records.filter((record) => {
 			const current = this.childPermissionCeilings.get(record.agentId) ?? "ask";
 			return narrowPermissionMode(current, parentMode) !== current;
@@ -1009,6 +1116,7 @@ export class SubagentManager implements SubagentManagerApi {
 			depth: record.config.agentPath.length,
 			status,
 			archived: record.archived,
+			tasks,
 			parentSessionId: record.config.parentSessionId,
 			rootSessionId: record.config.rootSessionId,
 			agentPath: record.config.agentPath,
@@ -1028,23 +1136,25 @@ export class SubagentManager implements SubagentManagerApi {
 		let cost = 0;
 		let hasCost = false;
 		for (const summary of summaries) {
-			const usage = summary.latestTask?.usage;
-			if (!usage) continue;
-			input += usage.input;
-			output += usage.output;
-			cacheRead += usage.cacheRead;
-			cacheWrite += usage.cacheWrite;
-			elapsedMs += usage.elapsedMs;
-			if (usage.cost !== undefined) {
-				cost += usage.cost;
-				hasCost = true;
+			for (const task of summary.tasks) {
+				const usage = task.usage;
+				if (!usage) continue;
+				input += usage.input;
+				output += usage.output;
+				cacheRead += usage.cacheRead;
+				cacheWrite += usage.cacheWrite;
+				elapsedMs += usage.elapsedMs;
+				if (usage.cost !== undefined) {
+					cost += usage.cost;
+					hasCost = true;
+				}
 			}
 		}
 		return { input, output, cacheRead, cacheWrite, elapsedMs, ...(hasCost ? { cost } : {}) };
 	}
 
 	private assertDescendant(actorId: string, targetAgentId: string): AgentDiskRecord {
-		const target = this.store.load(targetAgentId);
+		const target = this.loadKnown(targetAgentId);
 		const actorPath = this.actorPath(actorId);
 		if (target.agentId === actorId) {
 			throw new AgentError("NOT_DESCENDANT", "An agent cannot target itself");
@@ -1065,7 +1175,7 @@ export class SubagentManager implements SubagentManagerApi {
 
 	private actorPath(actorId: string): readonly string[] {
 		if (actorId === this.rootSessionId) return [];
-		return [...this.store.load(actorId).config.agentPath];
+		return [...this.loadKnown(actorId).config.agentPath];
 	}
 
 	private emitUpdate(summary: AgentSummary): AgentSummary {
@@ -1077,6 +1187,30 @@ export class SubagentManager implements SubagentManagerApi {
 		this.emitEvent({ type: "approval_required", summary, taskId, toolName });
 	}
 
+	private waitAgentsSnapshot(
+		actorId: string,
+		summaries: readonly AgentSummary[],
+		selected: ReadonlySet<string>,
+	): WaitAgentsResult | undefined {
+		return waitAgentsSnapshot(summaries, selected, this.pendingMailboxEventIds(actorId), this.approvalRequests);
+	}
+
+	private pendingMailboxEventIds(actorId: string): readonly string[] {
+		return this.actors.get(actorId)?.session.getPendingAgentMailboxEventIds() ?? [];
+	}
+
+	private notifyMailboxWaiters(actorId: string): void {
+		for (const waiter of this.waiters) {
+			if (waiter.actorId !== actorId) continue;
+			const result = waiter.snapshot();
+			if (result) waiter.resolve(result);
+		}
+	}
+
+	private notifyApprovalWaiters(agentId: string): void {
+		resolveWaiters(this.waiters, agentId);
+	}
+
 	private emitEvent(event: AgentManagerEvent): void {
 		for (const listener of this.listeners) listener(event);
 	}
@@ -1085,23 +1219,29 @@ export class SubagentManager implements SubagentManagerApi {
 		const summary = this.emitUpdate(this.buildSummary(record));
 		if (!isTerminalTaskStatus(task.status) || this.unloaded) return summary;
 		const event = terminalMailboxEvent(record, task);
-		const parentActor =
-			this.actors.get(record.config.parentSessionId)?.session ?? this.actors.get(this.rootSessionId)?.session;
+		const mailboxEvent = event;
+		const parentId = record.config.parentSessionId;
 		try {
-			if (
-				parentActor?.enqueueSubagentMailboxEvent({
-					eventId: event.eventId,
-					runId: event.taskId,
-					agentId: event.agentId,
-					name: event.name,
-					type: "terminal",
-					status: event.status,
-					...(event.finalMessage ? { finalMessage: event.finalMessage } : {}),
-					...(event.error ? { error: event.error } : {}),
-					completedAt: event.completedAt,
-				})
-			) {
+			const hotParent = this.actors.get(parentId)?.session;
+			let accepted = hotParent?.enqueueAgentMailboxEvent(mailboxEvent) ?? false;
+			if (!hotParent) {
+				const manager =
+					parentId === this.rootSessionId
+						? this.parentSessionManager
+						: SessionManager.open(this.store.load(parentId).path);
+				try {
+					const exists = manager
+						.getDurableJournalSnapshot()
+						.some((entry) => entry.type === "agent_mailbox_event" && entry.event.eventId === event.eventId);
+					if (!exists) manager.appendAgentControl({ type: "agent_mailbox_event", event: mailboxEvent });
+					accepted = !exists;
+				} finally {
+					if (manager !== this.parentSessionManager) manager.close();
+				}
+			}
+			if (accepted) {
 				this.emitEvent({ type: "notification_ready", event });
+				this.notifyMailboxWaiters(parentId);
 			}
 		} catch (error) {
 			this.emitEvent({
@@ -1120,6 +1260,8 @@ export class SubagentManager implements SubagentManagerApi {
 				if (!isTerminalTaskStatus(task.status)) continue;
 				const loaded = this.store.load(record.agentId);
 				if (loaded.config.parentSessionId !== session.sessionManager.getSessionId()) continue;
+				const event = terminalMailboxEvent(loaded, task);
+				if (session.hasAgentMailboxEvent(event.eventId)) continue;
 				this.publishTerminal(loaded, task);
 			}
 		}
@@ -1155,8 +1297,16 @@ export class SubagentManager implements SubagentManagerApi {
 	}
 
 	private assertKnown(agentId: string): void {
+		this.loadKnown(agentId);
+	}
+
+	private loadKnown(agentId: string): AgentDiskRecord {
 		this.assertActive();
-		this.store.load(agentId);
+		try {
+			return this.store.load(agentId);
+		} catch {
+			throw new AgentError("UNKNOWN_AGENT", `Unknown agent: ${agentId}`);
+		}
 	}
 
 	private assertOperable(agentId: string): void {

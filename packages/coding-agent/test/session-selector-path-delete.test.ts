@@ -16,9 +16,9 @@ import { KeybindingsManager } from "../src/core/keybindings.ts";
 import { persistToolOutputText } from "../src/core/large-tool-output.ts";
 import { getSessionAttachmentDir, importSessionAttachments } from "../src/core/session-attachments.ts";
 import {
+	getSessionAgentDir,
 	getSessionDisplayMetadataPath,
 	getSessionImageDir,
-	getSessionSubagentDir,
 	getSessionToolOutputDir,
 	type SessionInfo,
 	SessionManager,
@@ -311,7 +311,7 @@ describe("session selector path/delete interactions", () => {
 		session.appendMessage(assistantMsg("ok"));
 		const sessionFile = session.getSessionFile()!;
 		const sessionId = session.getSessionId();
-		const subagentDir = getSessionSubagentDir(agentDir, sessionId);
+		const subagentDir = getSessionAgentDir(agentDir, sessionId);
 		const workRoot = join(agentDir, "tmp", "document-work");
 		const workDir = join(workRoot, `${sessionId}-ABC123`);
 		const unrelatedWorkDir = join(workRoot, "unrelated-session-ABC123");

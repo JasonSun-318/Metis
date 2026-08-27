@@ -1,127 +1,11 @@
 import type { ThinkingLevel } from "@metis/agent-core";
-import type { AgentMode } from "../agent-mode.ts";
 import type { AgentSessionEvent } from "../agent-session.ts";
 import type { PermissionMode } from "../permission-mode.ts";
 
-export const SUBAGENT_ACTIVATION_TOOL_NAME = "activate_subagents" as const;
-
-export interface ActivateSubagentsResult {
-	readonly activated: true;
-	readonly alreadyActivated: boolean;
-}
-
-export const SUBAGENT_TOOL_NAMES = [
-	"spawn_agent",
-	"inspect_agents",
-	"message_agent",
-	"interrupt_agent",
-	"close_agent",
-] as const;
-
-export type SubagentToolName = (typeof SUBAGENT_TOOL_NAMES)[number];
-export type SubagentStatus = "queued" | "running" | "done" | "failed" | "stopped" | "close_failed" | "closed";
-export type SubagentForkTurns = number | "all";
-export type SubagentTerminalStatus = "done" | "failed" | "stopped";
-
-export interface SubagentMailboxTerminalEvent {
-	readonly eventId: string;
-	readonly runId: string;
-	readonly agentId: string;
-	readonly name: string;
-	readonly type: "terminal";
-	readonly status: SubagentTerminalStatus;
-	readonly finalMessage?: string;
-	readonly error?: string;
-	readonly completedAt: string;
-}
-
-export type SubagentMailboxEvent = SubagentMailboxTerminalEvent;
-
-export interface SubagentModelRef {
-	readonly provider: string;
-	readonly modelId: string;
-}
-
-export interface SubagentConfig {
-	readonly agentId: string;
-	readonly name: string;
-	readonly task: string;
-	readonly taskSummary: string;
-	readonly mode: AgentMode;
-	readonly tools: readonly string[];
-	readonly permissionMode: PermissionMode;
-	readonly model: SubagentModelRef;
-	readonly thinkingLevel: ThinkingLevel;
-	readonly cwd: string;
-	readonly forkTurns: SubagentForkTurns;
-	readonly timeoutSeconds: number;
-	readonly role?: string;
-	readonly developerInstructions?: string;
-}
-
-export interface SubagentUsage {
-	readonly model: SubagentModelRef;
-	readonly input: number;
-	readonly output: number;
-	readonly cacheRead: number;
-	readonly cacheWrite: number;
-	readonly elapsedMs: number;
-	readonly toolCalls?: number;
-	readonly cost?: number;
-}
-
-export interface SubagentDisplayConfig {
-	readonly mode: AgentMode;
-	readonly tools: readonly string[];
-	readonly permissionMode: PermissionMode;
-	readonly model: SubagentModelRef;
-	readonly thinkingLevel: ThinkingLevel;
-	readonly cwd: string;
-	readonly forkTurns: SubagentForkTurns;
-	readonly timeoutSeconds: number;
-}
-
-export interface SubagentSummary {
-	readonly agentId: string;
-	readonly runId?: string;
-	readonly name: string;
-	readonly status: SubagentStatus;
-	readonly background?: boolean;
-	readonly taskSummary: string;
-	readonly configuration?: SubagentDisplayConfig;
-	readonly finalSummary?: string;
-	readonly error?: string;
-	readonly residualPath?: string;
-	readonly usage?: SubagentUsage;
-	readonly createdAt: string;
-	readonly updatedAt: string;
-}
-
-export interface SubagentTombstone {
-	readonly agentId: string;
-	readonly name: string;
-	readonly status: "closed";
-	readonly taskSummary: string;
-	readonly finalSummary?: string;
-	readonly closedAt: string;
-}
-
-export type SubagentVisibleActivity = Extract<
+export type AgentVisibleActivity = Extract<
 	AgentSessionEvent,
 	{ type: "message_start" | "message_update" | "message_end" }
 >;
-
-export type SubagentManagerEvent =
-	| { readonly type: "updated"; readonly summary: SubagentSummary }
-	| {
-			readonly type: "activity";
-			readonly agentId: string;
-			readonly turnId?: string;
-			readonly event: SubagentVisibleActivity;
-	  }
-	| { readonly type: "approval_required"; readonly summary: SubagentSummary; readonly toolName: string }
-	| { readonly type: "notification_ready"; readonly event: SubagentMailboxEvent }
-	| { readonly type: "notification_failed"; readonly event: SubagentMailboxEvent; readonly error: string };
 
 export const AGENT_TOOL_NAMES = [
 	"spawn_agent",
@@ -195,6 +79,7 @@ export interface AgentSummary extends AgentRelation {
 	readonly depth: number;
 	readonly status: AgentStatus;
 	readonly archived: boolean;
+	readonly tasks: readonly AgentTaskSummary[];
 	readonly currentTask?: AgentTaskSummary;
 	readonly latestTask?: AgentTaskSummary;
 	readonly createdAt: string;
@@ -277,6 +162,23 @@ export type InspectAgentsResult =
 			readonly nextBeforeEventId?: string;
 	  };
 
+export interface WaitAgentsInput {
+	readonly agentIds: readonly string[];
+	readonly timeoutMs?: number;
+}
+
+export interface WaitAgentsResult {
+	readonly timedOut: boolean;
+	readonly agents: readonly AgentSummary[];
+	readonly mailboxEventIds: readonly string[];
+	readonly attention?: {
+		readonly agentId: string;
+		readonly taskId: string;
+		readonly kind: "approval_required";
+		readonly toolName: string;
+	};
+}
+
 export interface InterruptAgentResult {
 	readonly agentId: string;
 	readonly taskId?: string;
@@ -315,6 +217,7 @@ export interface AgentMailboxTerminalEvent {
 
 export type AgentManagerEvent =
 	| { readonly type: "updated"; readonly summary: AgentSummary }
+	| { readonly type: "deleted"; readonly agentId: string; readonly deletedAgentIds: readonly string[] }
 	| { readonly type: "activity"; readonly agentId: string; readonly taskId: string; readonly event: AgentTraceEvent }
 	| {
 			readonly type: "approval_required";
