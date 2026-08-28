@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:metis:schemas:app-server:v22",
-  "title": "Metis App-Server Protocol v22",
+  "$id": "urn:metis:schemas:app-server:v23",
+  "title": "Metis App-Server Protocol v23",
   "$ref": "#/$defs/AppProtocolEnvelope",
   "$defs": {
     "AppProtocolEnvelope": {
@@ -5605,6 +5605,182 @@
                 },
                 "method": {
                   "type": "string",
+                  "const": "agentType/list"
+                },
+                "params": {
+                  "type": "object",
+                  "properties": {},
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "jsonrpc",
+                "id",
+                "method",
+                "params"
+              ],
+              "properties": {
+                "jsonrpc": {
+                  "type": "string",
+                  "const": "2.0"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "x-metis-maxUtf16Units": 128
+                },
+                "method": {
+                  "type": "string",
+                  "const": "agentType/upsert"
+                },
+                "params": {
+                  "type": "object",
+                  "required": [
+                    "requestId",
+                    "type"
+                  ],
+                  "properties": {
+                    "requestId": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "type": {
+                      "type": "object",
+                      "required": [
+                        "id",
+                        "displayName",
+                        "description",
+                        "allowedTools",
+                        "systemPrompt",
+                        "writePolicy",
+                        "mayDelegate"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 64,
+                          "pattern": "^[a-z][a-z0-9-]{0,63}$"
+                        },
+                        "displayName": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 256,
+                          "x-metis-maxUtf16Units": 256
+                        },
+                        "description": {
+                          "type": "string",
+                          "maxLength": 512
+                        },
+                        "allowedTools": {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 64
+                          },
+                          "maxItems": 32
+                        },
+                        "systemPrompt": {
+                          "type": "string",
+                          "maxLength": 8192
+                        },
+                        "writePolicy": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "const": "inherit"
+                            },
+                            {
+                              "type": "string",
+                              "const": "deny"
+                            }
+                          ]
+                        },
+                        "mayDelegate": {
+                          "type": "boolean"
+                        }
+                      },
+                      "additionalProperties": false
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "jsonrpc",
+                "id",
+                "method",
+                "params"
+              ],
+              "properties": {
+                "jsonrpc": {
+                  "type": "string",
+                  "const": "2.0"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "x-metis-maxUtf16Units": 128
+                },
+                "method": {
+                  "type": "string",
+                  "const": "agentType/remove"
+                },
+                "params": {
+                  "type": "object",
+                  "required": [
+                    "requestId",
+                    "id"
+                  ],
+                  "properties": {
+                    "requestId": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64,
+                      "pattern": "^[a-z][a-z0-9-]{0,63}$"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "jsonrpc",
+                "id",
+                "method",
+                "params"
+              ],
+              "properties": {
+                "jsonrpc": {
+                  "type": "string",
+                  "const": "2.0"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "x-metis-maxUtf16Units": 128
+                },
+                "method": {
+                  "type": "string",
                   "const": "turn/start"
                 },
                 "params": {
@@ -10309,24 +10485,10 @@
                                 "x-metis-maxUtf16Units": 256
                               },
                               "agentType": {
-                                "anyOf": [
-                                  {
-                                    "type": "string",
-                                    "const": "default"
-                                  },
-                                  {
-                                    "type": "string",
-                                    "const": "explorer"
-                                  },
-                                  {
-                                    "type": "string",
-                                    "const": "worker"
-                                  },
-                                  {
-                                    "type": "string",
-                                    "const": "reviewer"
-                                  }
-                                ]
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 64,
+                                "pattern": "^[a-z][a-z0-9-]{0,63}$"
                               },
                               "depth": {
                                 "type": "integer",
@@ -13137,7 +13299,7 @@
                   "properties": {
                     "protocolVersion": {
                       "type": "number",
-                      "const": 22
+                      "const": 23
                     },
                     "server": {
                       "type": "object",
@@ -21594,24 +21756,10 @@
                                 "x-metis-maxUtf16Units": 256
                               },
                               "agentType": {
-                                "anyOf": [
-                                  {
-                                    "type": "string",
-                                    "const": "default"
-                                  },
-                                  {
-                                    "type": "string",
-                                    "const": "explorer"
-                                  },
-                                  {
-                                    "type": "string",
-                                    "const": "worker"
-                                  },
-                                  {
-                                    "type": "string",
-                                    "const": "reviewer"
-                                  }
-                                ]
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 64,
+                                "pattern": "^[a-z][a-z0-9-]{0,63}$"
                               },
                               "depth": {
                                 "type": "integer",
@@ -25141,24 +25289,10 @@
                             "x-metis-maxUtf16Units": 256
                           },
                           "agentType": {
-                            "anyOf": [
-                              {
-                                "type": "string",
-                                "const": "default"
-                              },
-                              {
-                                "type": "string",
-                                "const": "explorer"
-                              },
-                              {
-                                "type": "string",
-                                "const": "worker"
-                              },
-                              {
-                                "type": "string",
-                                "const": "reviewer"
-                              }
-                            ]
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 64,
+                            "pattern": "^[a-z][a-z0-9-]{0,63}$"
                           },
                           "depth": {
                             "type": "integer",
@@ -26250,24 +26384,10 @@
                           "x-metis-maxUtf16Units": 256
                         },
                         "agentType": {
-                          "anyOf": [
-                            {
-                              "type": "string",
-                              "const": "default"
-                            },
-                            {
-                              "type": "string",
-                              "const": "explorer"
-                            },
-                            {
-                              "type": "string",
-                              "const": "worker"
-                            },
-                            {
-                              "type": "string",
-                              "const": "reviewer"
-                            }
-                          ]
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 64,
+                          "pattern": "^[a-z][a-z0-9-]{0,63}$"
                         },
                         "depth": {
                           "type": "integer",
@@ -26799,24 +26919,10 @@
                           "x-metis-maxUtf16Units": 256
                         },
                         "agentType": {
-                          "anyOf": [
-                            {
-                              "type": "string",
-                              "const": "default"
-                            },
-                            {
-                              "type": "string",
-                              "const": "explorer"
-                            },
-                            {
-                              "type": "string",
-                              "const": "worker"
-                            },
-                            {
-                              "type": "string",
-                              "const": "reviewer"
-                            }
-                          ]
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 64,
+                          "pattern": "^[a-z][a-z0-9-]{0,63}$"
                         },
                         "depth": {
                           "type": "integer",
@@ -27328,6 +27434,232 @@
                     "status": {
                       "type": "string",
                       "const": "deleted"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "jsonrpc",
+                "id",
+                "result"
+              ],
+              "properties": {
+                "jsonrpc": {
+                  "type": "string",
+                  "const": "2.0"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "x-metis-maxUtf16Units": 128
+                },
+                "result": {
+                  "type": "object",
+                  "required": [
+                    "types"
+                  ],
+                  "properties": {
+                    "types": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "id",
+                          "displayName",
+                          "description",
+                          "allowedTools",
+                          "systemPrompt",
+                          "writePolicy",
+                          "mayDelegate",
+                          "builtIn"
+                        ],
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 64,
+                            "pattern": "^[a-z][a-z0-9-]{0,63}$"
+                          },
+                          "displayName": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 256,
+                            "x-metis-maxUtf16Units": 256
+                          },
+                          "description": {
+                            "type": "string",
+                            "maxLength": 512
+                          },
+                          "allowedTools": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 64
+                            },
+                            "maxItems": 32
+                          },
+                          "systemPrompt": {
+                            "type": "string",
+                            "maxLength": 8192
+                          },
+                          "writePolicy": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "const": "inherit"
+                              },
+                              {
+                                "type": "string",
+                                "const": "deny"
+                              }
+                            ]
+                          },
+                          "mayDelegate": {
+                            "type": "boolean"
+                          },
+                          "builtIn": {
+                            "type": "boolean"
+                          }
+                        },
+                        "additionalProperties": false
+                      },
+                      "maxItems": 20
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "jsonrpc",
+                "id",
+                "result"
+              ],
+              "properties": {
+                "jsonrpc": {
+                  "type": "string",
+                  "const": "2.0"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "x-metis-maxUtf16Units": 128
+                },
+                "result": {
+                  "type": "object",
+                  "required": [
+                    "type"
+                  ],
+                  "properties": {
+                    "type": {
+                      "type": "object",
+                      "required": [
+                        "id",
+                        "displayName",
+                        "description",
+                        "allowedTools",
+                        "systemPrompt",
+                        "writePolicy",
+                        "mayDelegate",
+                        "builtIn"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 64,
+                          "pattern": "^[a-z][a-z0-9-]{0,63}$"
+                        },
+                        "displayName": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 256,
+                          "x-metis-maxUtf16Units": 256
+                        },
+                        "description": {
+                          "type": "string",
+                          "maxLength": 512
+                        },
+                        "allowedTools": {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 64
+                          },
+                          "maxItems": 32
+                        },
+                        "systemPrompt": {
+                          "type": "string",
+                          "maxLength": 8192
+                        },
+                        "writePolicy": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "const": "inherit"
+                            },
+                            {
+                              "type": "string",
+                              "const": "deny"
+                            }
+                          ]
+                        },
+                        "mayDelegate": {
+                          "type": "boolean"
+                        },
+                        "builtIn": {
+                          "type": "boolean"
+                        }
+                      },
+                      "additionalProperties": false
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "jsonrpc",
+                "id",
+                "result"
+              ],
+              "properties": {
+                "jsonrpc": {
+                  "type": "string",
+                  "const": "2.0"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "x-metis-maxUtf16Units": 128
+                },
+                "result": {
+                  "type": "object",
+                  "required": [
+                    "id"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64,
+                      "pattern": "^[a-z][a-z0-9-]{0,63}$"
                     }
                   },
                   "additionalProperties": false
@@ -39869,6 +40201,182 @@
             },
             "method": {
               "type": "string",
+              "const": "agentType/list"
+            },
+            "params": {
+              "type": "object",
+              "properties": {},
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "type": "string",
+              "const": "2.0"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "x-metis-maxUtf16Units": 128
+            },
+            "method": {
+              "type": "string",
+              "const": "agentType/upsert"
+            },
+            "params": {
+              "type": "object",
+              "required": [
+                "requestId",
+                "type"
+              ],
+              "properties": {
+                "requestId": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "type": {
+                  "type": "object",
+                  "required": [
+                    "id",
+                    "displayName",
+                    "description",
+                    "allowedTools",
+                    "systemPrompt",
+                    "writePolicy",
+                    "mayDelegate"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64,
+                      "pattern": "^[a-z][a-z0-9-]{0,63}$"
+                    },
+                    "displayName": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256,
+                      "x-metis-maxUtf16Units": 256
+                    },
+                    "description": {
+                      "type": "string",
+                      "maxLength": 512
+                    },
+                    "allowedTools": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 64
+                      },
+                      "maxItems": 32
+                    },
+                    "systemPrompt": {
+                      "type": "string",
+                      "maxLength": 8192
+                    },
+                    "writePolicy": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "const": "inherit"
+                        },
+                        {
+                          "type": "string",
+                          "const": "deny"
+                        }
+                      ]
+                    },
+                    "mayDelegate": {
+                      "type": "boolean"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "type": "string",
+              "const": "2.0"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "x-metis-maxUtf16Units": 128
+            },
+            "method": {
+              "type": "string",
+              "const": "agentType/remove"
+            },
+            "params": {
+              "type": "object",
+              "required": [
+                "requestId",
+                "id"
+              ],
+              "properties": {
+                "requestId": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 64,
+                  "pattern": "^[a-z][a-z0-9-]{0,63}$"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "type": "string",
+              "const": "2.0"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "x-metis-maxUtf16Units": 128
+            },
+            "method": {
+              "type": "string",
               "const": "turn/start"
             },
             "params": {
@@ -41526,7 +42034,7 @@
               "properties": {
                 "protocolVersion": {
                   "type": "number",
-                  "const": 22
+                  "const": 23
                 },
                 "server": {
                   "type": "object",
@@ -49983,24 +50491,10 @@
                             "x-metis-maxUtf16Units": 256
                           },
                           "agentType": {
-                            "anyOf": [
-                              {
-                                "type": "string",
-                                "const": "default"
-                              },
-                              {
-                                "type": "string",
-                                "const": "explorer"
-                              },
-                              {
-                                "type": "string",
-                                "const": "worker"
-                              },
-                              {
-                                "type": "string",
-                                "const": "reviewer"
-                              }
-                            ]
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 64,
+                            "pattern": "^[a-z][a-z0-9-]{0,63}$"
                           },
                           "depth": {
                             "type": "integer",
@@ -53530,24 +54024,10 @@
                         "x-metis-maxUtf16Units": 256
                       },
                       "agentType": {
-                        "anyOf": [
-                          {
-                            "type": "string",
-                            "const": "default"
-                          },
-                          {
-                            "type": "string",
-                            "const": "explorer"
-                          },
-                          {
-                            "type": "string",
-                            "const": "worker"
-                          },
-                          {
-                            "type": "string",
-                            "const": "reviewer"
-                          }
-                        ]
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 64,
+                        "pattern": "^[a-z][a-z0-9-]{0,63}$"
                       },
                       "depth": {
                         "type": "integer",
@@ -54639,24 +55119,10 @@
                       "x-metis-maxUtf16Units": 256
                     },
                     "agentType": {
-                      "anyOf": [
-                        {
-                          "type": "string",
-                          "const": "default"
-                        },
-                        {
-                          "type": "string",
-                          "const": "explorer"
-                        },
-                        {
-                          "type": "string",
-                          "const": "worker"
-                        },
-                        {
-                          "type": "string",
-                          "const": "reviewer"
-                        }
-                      ]
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64,
+                      "pattern": "^[a-z][a-z0-9-]{0,63}$"
                     },
                     "depth": {
                       "type": "integer",
@@ -55188,24 +55654,10 @@
                       "x-metis-maxUtf16Units": 256
                     },
                     "agentType": {
-                      "anyOf": [
-                        {
-                          "type": "string",
-                          "const": "default"
-                        },
-                        {
-                          "type": "string",
-                          "const": "explorer"
-                        },
-                        {
-                          "type": "string",
-                          "const": "worker"
-                        },
-                        {
-                          "type": "string",
-                          "const": "reviewer"
-                        }
-                      ]
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64,
+                      "pattern": "^[a-z][a-z0-9-]{0,63}$"
                     },
                     "depth": {
                       "type": "integer",
@@ -55717,6 +56169,232 @@
                 "status": {
                   "type": "string",
                   "const": "deleted"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "jsonrpc",
+            "id",
+            "result"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "type": "string",
+              "const": "2.0"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "x-metis-maxUtf16Units": 128
+            },
+            "result": {
+              "type": "object",
+              "required": [
+                "types"
+              ],
+              "properties": {
+                "types": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": [
+                      "id",
+                      "displayName",
+                      "description",
+                      "allowedTools",
+                      "systemPrompt",
+                      "writePolicy",
+                      "mayDelegate",
+                      "builtIn"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 64,
+                        "pattern": "^[a-z][a-z0-9-]{0,63}$"
+                      },
+                      "displayName": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256,
+                        "x-metis-maxUtf16Units": 256
+                      },
+                      "description": {
+                        "type": "string",
+                        "maxLength": 512
+                      },
+                      "allowedTools": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 64
+                        },
+                        "maxItems": 32
+                      },
+                      "systemPrompt": {
+                        "type": "string",
+                        "maxLength": 8192
+                      },
+                      "writePolicy": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "const": "inherit"
+                          },
+                          {
+                            "type": "string",
+                            "const": "deny"
+                          }
+                        ]
+                      },
+                      "mayDelegate": {
+                        "type": "boolean"
+                      },
+                      "builtIn": {
+                        "type": "boolean"
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "maxItems": 20
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "jsonrpc",
+            "id",
+            "result"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "type": "string",
+              "const": "2.0"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "x-metis-maxUtf16Units": 128
+            },
+            "result": {
+              "type": "object",
+              "required": [
+                "type"
+              ],
+              "properties": {
+                "type": {
+                  "type": "object",
+                  "required": [
+                    "id",
+                    "displayName",
+                    "description",
+                    "allowedTools",
+                    "systemPrompt",
+                    "writePolicy",
+                    "mayDelegate",
+                    "builtIn"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64,
+                      "pattern": "^[a-z][a-z0-9-]{0,63}$"
+                    },
+                    "displayName": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256,
+                      "x-metis-maxUtf16Units": 256
+                    },
+                    "description": {
+                      "type": "string",
+                      "maxLength": 512
+                    },
+                    "allowedTools": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 64
+                      },
+                      "maxItems": 32
+                    },
+                    "systemPrompt": {
+                      "type": "string",
+                      "maxLength": 8192
+                    },
+                    "writePolicy": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "const": "inherit"
+                        },
+                        {
+                          "type": "string",
+                          "const": "deny"
+                        }
+                      ]
+                    },
+                    "mayDelegate": {
+                      "type": "boolean"
+                    },
+                    "builtIn": {
+                      "type": "boolean"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "jsonrpc",
+            "id",
+            "result"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "type": "string",
+              "const": "2.0"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "x-metis-maxUtf16Units": 128
+            },
+            "result": {
+              "type": "object",
+              "required": [
+                "id"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 64,
+                  "pattern": "^[a-z][a-z0-9-]{0,63}$"
                 }
               },
               "additionalProperties": false
@@ -63994,24 +64672,10 @@
                         "x-metis-maxUtf16Units": 256
                       },
                       "agentType": {
-                        "anyOf": [
-                          {
-                            "type": "string",
-                            "const": "default"
-                          },
-                          {
-                            "type": "string",
-                            "const": "explorer"
-                          },
-                          {
-                            "type": "string",
-                            "const": "worker"
-                          },
-                          {
-                            "type": "string",
-                            "const": "reviewer"
-                          }
-                        ]
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 64,
+                        "pattern": "^[a-z][a-z0-9-]{0,63}$"
                       },
                       "depth": {
                         "type": "integer",
@@ -69276,24 +69940,10 @@
                   "x-metis-maxUtf16Units": 256
                 },
                 "agentType": {
-                  "anyOf": [
-                    {
-                      "type": "string",
-                      "const": "default"
-                    },
-                    {
-                      "type": "string",
-                      "const": "explorer"
-                    },
-                    {
-                      "type": "string",
-                      "const": "worker"
-                    },
-                    {
-                      "type": "string",
-                      "const": "reviewer"
-                    }
-                  ]
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 64,
+                  "pattern": "^[a-z][a-z0-9-]{0,63}$"
                 },
                 "depth": {
                   "type": "integer",
@@ -77689,24 +78339,10 @@
                             "x-metis-maxUtf16Units": 256
                           },
                           "agentType": {
-                            "anyOf": [
-                              {
-                                "type": "string",
-                                "const": "default"
-                              },
-                              {
-                                "type": "string",
-                                "const": "explorer"
-                              },
-                              {
-                                "type": "string",
-                                "const": "worker"
-                              },
-                              {
-                                "type": "string",
-                                "const": "reviewer"
-                              }
-                            ]
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 64,
+                            "pattern": "^[a-z][a-z0-9-]{0,63}$"
                           },
                           "depth": {
                             "type": "integer",
@@ -82880,24 +83516,10 @@
                 "x-metis-maxUtf16Units": 256
               },
               "agentType": {
-                "anyOf": [
-                  {
-                    "type": "string",
-                    "const": "default"
-                  },
-                  {
-                    "type": "string",
-                    "const": "explorer"
-                  },
-                  {
-                    "type": "string",
-                    "const": "worker"
-                  },
-                  {
-                    "type": "string",
-                    "const": "reviewer"
-                  }
-                ]
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64,
+                "pattern": "^[a-z][a-z0-9-]{0,63}$"
               },
               "depth": {
                 "type": "integer",

@@ -6,7 +6,7 @@
 			"jsonrpc": "2.0",
 			"id": "client-1",
 			"result": {
-				"protocolVersion": 22,
+				"protocolVersion": 23,
 				"server": {
 					"name": "metis-app-server",
 					"version": "0.80.6"
@@ -40,12 +40,24 @@
 				"usedSkillCount": 2,
 				"skillUseCount": 3,
 				"activity": [
-					{ "date": "2026-07-31", "tokens": 200 },
-					{ "date": "2026-08-01", "tokens": 400 }
+					{
+						"date": "2026-07-31",
+						"tokens": 200
+					},
+					{
+						"date": "2026-08-01",
+						"tokens": 400
+					}
 				],
 				"topSkills": [
-					{ "name": "pdf", "count": 2 },
-					{ "name": "documents", "count": 1 }
+					{
+						"name": "pdf",
+						"count": 2
+					},
+					{
+						"name": "documents",
+						"count": 1
+					}
 				]
 			}
 		}
@@ -56,7 +68,9 @@
 		"envelope": {
 			"jsonrpc": "2.0",
 			"id": "client-personalization-get",
-			"result": { "instructions": "" }
+			"result": {
+				"instructions": ""
+			}
 		}
 	},
 	{
@@ -65,7 +79,9 @@
 		"envelope": {
 			"jsonrpc": "2.0",
 			"id": "client-personalization-update",
-			"result": { "instructions": "Keep explanations concise." }
+			"result": {
+				"instructions": "Keep explanations concise."
+			}
 		}
 	},
 	{
@@ -104,7 +120,10 @@
 			"id": "client-skills",
 			"result": {
 				"skills": [
-					{ "name": "pdf", "description": "Read and create PDF documents" }
+					{
+						"name": "pdf",
+						"description": "Read and create PDF documents"
+					}
 				]
 			}
 		}
@@ -122,7 +141,10 @@
 				"revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 				"directoryPath": "/Users/example/.metis/agent/skills/writing-plans",
 				"entryFile": "SKILL.md",
-				"files": ["SKILL.md", "templates/plan.md"],
+				"files": [
+					"SKILL.md",
+					"templates/plan.md"
+				],
 				"content": "---\nname: writing-plans\ndescription: Write implementation plans\n---\n\n# Instructions\nWrite the plan.",
 				"instructions": "# Instructions\nWrite the plan.",
 				"updatedAt": "2026-08-11T06:32:00.000Z",
@@ -143,7 +165,9 @@
 				"revision": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
 				"directoryPath": "/Users/example/.metis/agent/skills/writing-plans",
 				"entryFile": "SKILL.md",
-				"files": ["SKILL.md"],
+				"files": [
+					"SKILL.md"
+				],
 				"content": "---\nname: writing-plans\ndescription: Write implementation plans\n---\n\n# Instructions\nWrite the plan.",
 				"instructions": "# Instructions\nWrite the plan.",
 				"updatedAt": "2026-08-11T06:33:00.000Z",
@@ -158,7 +182,13 @@
 			"jsonrpc": "2.0",
 			"id": "client-skill-remove",
 			"result": {
-				"skills": [{ "name": "pdf", "description": "Read and create PDF documents", "source": "system" }]
+				"skills": [
+					{
+						"name": "pdf",
+						"description": "Read and create PDF documents",
+						"source": "system"
+					}
+				]
 			}
 		}
 	},
@@ -189,7 +219,11 @@
 			"id": "client-skill-import",
 			"result": {
 				"skills": [
-					{ "name": "writing-plans", "description": "Write implementation plans", "source": "project" }
+					{
+						"name": "writing-plans",
+						"description": "Write implementation plans",
+						"source": "project"
+					}
 				]
 			}
 		}
@@ -316,7 +350,9 @@
 		"envelope": {
 			"jsonrpc": "2.0",
 			"id": "client-mcp-remove",
-			"result": { "servers": [] }
+			"result": {
+				"servers": []
+			}
 		}
 	},
 	{
@@ -345,10 +381,21 @@
 					"resourceCount": 0,
 					"resourceTemplateCount": 0,
 					"promptCount": 0,
-					"capabilities": ["tools"],
-					"serverInfo": { "name": "web", "version": "1.0.0" }
+					"capabilities": [
+						"tools"
+					],
+					"serverInfo": {
+						"name": "web",
+						"version": "1.0.0"
+					}
 				},
-				"tools": [{ "id": "search", "name": "Search", "description": "Search documentation" }],
+				"tools": [
+					{
+						"id": "search",
+						"name": "Search",
+						"description": "Search documentation"
+					}
+				],
 				"resources": [],
 				"resourceTemplates": [],
 				"prompts": []
@@ -381,9 +428,17 @@
 					"resourceCount": 0,
 					"resourceTemplateCount": 0,
 					"promptCount": 0,
-					"capabilities": ["tools"]
+					"capabilities": [
+						"tools"
+					]
 				},
-				"tools": [{ "id": "search", "name": "Search", "description": "Search documentation" }],
+				"tools": [
+					{
+						"id": "search",
+						"name": "Search",
+						"description": "Search documentation"
+					}
+				],
 				"resources": [],
 				"resourceTemplates": [],
 				"prompts": []
@@ -416,9 +471,17 @@
 					"resourceCount": 0,
 					"resourceTemplateCount": 0,
 					"promptCount": 0,
-					"capabilities": ["tools"]
+					"capabilities": [
+						"tools"
+					]
 				},
-				"tools": [{ "id": "search", "name": "Search", "description": "Search documentation" }],
+				"tools": [
+					{
+						"id": "search",
+						"name": "Search",
+						"description": "Search documentation"
+					}
+				],
 				"resources": [],
 				"resourceTemplates": [],
 				"prompts": []
@@ -449,7 +512,9 @@
 		"envelope": {
 			"jsonrpc": "2.0",
 			"id": "client-permissions",
-			"result": { "permissionMode": "full" }
+			"result": {
+				"permissionMode": "full"
+			}
 		}
 	},
 	{
@@ -458,7 +523,9 @@
 		"envelope": {
 			"jsonrpc": "2.0",
 			"id": "plan-mode-1",
-			"result": { "collaborationMode": "plan" }
+			"result": {
+				"collaborationMode": "plan"
+			}
 		}
 	},
 	{
@@ -506,10 +573,19 @@
 						"id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 						"toolName": "bash",
 						"command": "npm test",
-						"paths": ["/tmp/metis-project"],
-						"details": [{ "label": "Command", "value": "npm test" }],
+						"paths": [
+							"/tmp/metis-project"
+						],
+						"details": [
+							{
+								"label": "Command",
+								"value": "npm test"
+							}
+						],
 						"omittedDetails": 0,
-						"risks": ["shell"],
+						"risks": [
+							"shell"
+						],
 						"executionTarget": "sandbox",
 						"createdAt": "2026-08-11T00:00:00.000Z"
 					}
@@ -523,7 +599,10 @@
 		"envelope": {
 			"jsonrpc": "2.0",
 			"id": "permission-rules-delete",
-			"result": { "projectPath": "/tmp/metis-project", "rules": [] }
+			"result": {
+				"projectPath": "/tmp/metis-project",
+				"rules": []
+			}
 		}
 	},
 	{
@@ -532,7 +611,10 @@
 		"envelope": {
 			"jsonrpc": "2.0",
 			"id": "permission-rules-clear",
-			"result": { "projectPath": "/tmp/metis-project", "rules": [] }
+			"result": {
+				"projectPath": "/tmp/metis-project",
+				"rules": []
+			}
 		}
 	},
 	{
@@ -542,10 +624,17 @@
 			"jsonrpc": "2.0",
 			"id": "client-model",
 			"result": {
-				"model": { "provider": "openai", "modelId": "gpt-test" },
+				"model": {
+					"provider": "openai",
+					"modelId": "gpt-test"
+				},
 				"thinkingSelection": "high",
 				"actualThinkingLevel": "high",
-				"availableThinkingSelections": ["off", "high", "max"]
+				"availableThinkingSelections": [
+					"off",
+					"high",
+					"max"
+				]
 			}
 		}
 	},
@@ -589,14 +678,18 @@
 					"archived": false,
 					"parentSessionId": "11111111-1111-4111-8111-111111111111",
 					"rootSessionId": "11111111-1111-4111-8111-111111111111",
-					"agentPath": ["22222222-2222-4222-8222-222222222222"],
-					"tasks": [{
-						"taskId": "33333333-3333-4333-8333-333333333333",
-						"status": "stopped",
-						"taskSummary": "Inspect the runtime",
-						"createdAt": "2026-07-16T00:00:12.000Z",
-						"updatedAt": "2026-07-16T00:00:13.000Z"
-					}],
+					"agentPath": [
+						"22222222-2222-4222-8222-222222222222"
+					],
+					"tasks": [
+						{
+							"taskId": "33333333-3333-4333-8333-333333333333",
+							"status": "stopped",
+							"taskSummary": "Inspect the runtime",
+							"createdAt": "2026-07-16T00:00:12.000Z",
+							"updatedAt": "2026-07-16T00:00:13.000Z"
+						}
+					],
 					"latestTask": {
 						"taskId": "33333333-3333-4333-8333-333333333333",
 						"status": "stopped",
@@ -626,7 +719,9 @@
 					"archived": true,
 					"parentSessionId": "11111111-1111-4111-8111-111111111111",
 					"rootSessionId": "11111111-1111-4111-8111-111111111111",
-					"agentPath": ["22222222-2222-4222-8222-222222222222"],
+					"agentPath": [
+						"22222222-2222-4222-8222-222222222222"
+					],
 					"tasks": [],
 					"createdAt": "2026-07-16T00:00:12.000Z",
 					"updatedAt": "2026-07-16T00:00:13.000Z"
@@ -783,8 +878,14 @@
 				"contextWindow": 128000,
 				"contextBasis": "reported_total",
 				"contextBreakdown": [
-					{ "category": "system_prompt", "tokens": 4000 },
-					{ "category": "conversation", "tokens": 60000 }
+					{
+						"category": "system_prompt",
+						"tokens": 4000
+					},
+					{
+						"category": "conversation",
+						"tokens": 60000
+					}
 				],
 				"remainingPercent": 50,
 				"cacheHitPercent": 25
@@ -1150,7 +1251,9 @@
 		"envelope": {
 			"jsonrpc": "2.0",
 			"id": "client-mcp-import",
-			"result": { "servers": [] }
+			"result": {
+				"servers": []
+			}
 		}
 	},
 	{
@@ -1161,6 +1264,75 @@
 			"id": "host-1",
 			"result": {
 				"accepted": true
+			}
+		}
+	},
+	{
+		"direction": "client",
+		"method": "agentType/list",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "client-agent-type-list",
+			"result": {
+				"types": [
+					{
+						"id": "default",
+						"displayName": "default",
+						"description": "General analysis and execution; use when no narrower type fits.",
+						"allowedTools": [],
+						"systemPrompt": "",
+						"writePolicy": "inherit",
+						"mayDelegate": true,
+						"builtIn": true
+					},
+					{
+						"id": "auditor",
+						"displayName": "Auditor",
+						"description": "Read-only audit role.",
+						"allowedTools": [
+							"read",
+							"grep"
+						],
+						"systemPrompt": "",
+						"writePolicy": "deny",
+						"mayDelegate": false,
+						"builtIn": false
+					}
+				]
+			}
+		}
+	},
+	{
+		"direction": "client",
+		"method": "agentType/upsert",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "client-agent-type-upsert",
+			"result": {
+				"type": {
+					"id": "auditor",
+					"displayName": "Auditor",
+					"description": "Read-only audit role.",
+					"allowedTools": [
+						"read",
+						"grep"
+					],
+					"systemPrompt": "",
+					"writePolicy": "deny",
+					"mayDelegate": false,
+					"builtIn": false
+				}
+			}
+		}
+	},
+	{
+		"direction": "client",
+		"method": "agentType/remove",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "client-agent-type-remove",
+			"result": {
+				"id": "auditor"
 			}
 		}
 	}

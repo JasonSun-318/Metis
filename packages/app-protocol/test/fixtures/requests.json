@@ -7,9 +7,15 @@
 			"id": "client-1",
 			"method": "initialize",
 			"params": {
-				"protocolVersion": 22,
-				"client": { "name": "Metis Desktop", "version": "0.80.6" },
-				"capabilities": ["interaction.v1", "session.cursor.v1"]
+				"protocolVersion": 23,
+				"client": {
+					"name": "Metis Desktop",
+					"version": "0.80.6"
+				},
+				"capabilities": [
+					"interaction.v1",
+					"session.cursor.v1"
+				]
 			}
 		}
 	},
@@ -20,7 +26,9 @@
 			"jsonrpc": "2.0",
 			"id": "client-skills",
 			"method": "skill/list",
-			"params": { "cwd": null }
+			"params": {
+				"cwd": null
+			}
 		}
 	},
 	{
@@ -30,7 +38,11 @@
 			"jsonrpc": "2.0",
 			"id": "client-skill-get",
 			"method": "skill/get",
-			"params": { "cwd": null, "source": "user", "name": "writing-plans" }
+			"params": {
+				"cwd": null,
+				"source": "user",
+				"name": "writing-plans"
+			}
 		}
 	},
 	{
@@ -76,7 +88,10 @@
 			"params": {
 				"cwd": "/work/project",
 				"source": "project",
-				"input": { "kind": "github", "url": "https://github.com/example/skills" }
+				"input": {
+					"kind": "github",
+					"url": "https://github.com/example/skills"
+				}
 			}
 		}
 	},
@@ -91,9 +106,14 @@
 				"requestId": "20000000-0000-4000-8000-000000000003",
 				"cwd": "/work/project",
 				"source": "project",
-				"input": { "kind": "github", "url": "https://github.com/example/skills" },
+				"input": {
+					"kind": "github",
+					"url": "https://github.com/example/skills"
+				},
 				"sourceRevision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-				"candidateIds": ["skills/writing-plans"]
+				"candidateIds": [
+					"skills/writing-plans"
+				]
 			}
 		}
 	},
@@ -104,7 +124,9 @@
 			"jsonrpc": "2.0",
 			"id": "client-mcp-list",
 			"method": "mcp/list",
-			"params": { "cwd": null }
+			"params": {
+				"cwd": null
+			}
 		}
 	},
 	{
@@ -114,7 +136,11 @@
 			"jsonrpc": "2.0",
 			"id": "client-mcp-get",
 			"method": "mcp/get",
-			"params": { "cwd": null, "scope": "user", "name": "web" }
+			"params": {
+				"cwd": null,
+				"scope": "user",
+				"name": "web"
+			}
 		}
 	},
 	{
@@ -200,7 +226,9 @@
 				"expectedRevision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 				"credential": {
 					"bearerToken": "fixture-secret",
-					"environment": { "MCP_TENANT": "fixture-tenant-secret" }
+					"environment": {
+						"MCP_TENANT": "fixture-tenant-secret"
+					}
 				}
 			}
 		}
@@ -248,7 +276,9 @@
 			"jsonrpc": "2.0",
 			"id": "client-personalization-update",
 			"method": "personalization/update",
-			"params": { "instructions": "Keep explanations concise." }
+			"params": {
+				"instructions": "Keep explanations concise."
+			}
 		}
 	},
 	{
@@ -258,7 +288,10 @@
 			"jsonrpc": "2.0",
 			"id": "project-preview",
 			"method": "project/deletePreview",
-			"params": { "mode": "chat", "cwd": "/tmp/metis-project" }
+			"params": {
+				"mode": "chat",
+				"cwd": "/tmp/metis-project"
+			}
 		}
 	},
 	{
@@ -283,7 +316,11 @@
 			"jsonrpc": "2.0",
 			"id": "client-2",
 			"method": "session/list",
-			"params": { "includeArchived": false, "afterSessionId": null, "limit": 200 }
+			"params": {
+				"includeArchived": false,
+				"afterSessionId": null,
+				"limit": 200
+			}
 		}
 	},
 	{
@@ -308,7 +345,9 @@
 			"jsonrpc": "2.0",
 			"id": "client-4",
 			"method": "session/open",
-			"params": { "sessionId": "my-custom-id" }
+			"params": {
+				"sessionId": "my-custom-id"
+			}
 		}
 	},
 	{
@@ -318,7 +357,9 @@
 			"jsonrpc": "2.0",
 			"id": "client-mark-read",
 			"method": "session/markRead",
-			"params": { "sessionId": "my-custom-id" }
+			"params": {
+				"sessionId": "my-custom-id"
+			}
 		}
 	},
 	{
@@ -369,7 +410,9 @@
 			"jsonrpc": "2.0",
 			"id": "client-status",
 			"method": "session/status",
-			"params": { "sessionId": "11111111-1111-4111-8111-111111111111" }
+			"params": {
+				"sessionId": "11111111-1111-4111-8111-111111111111"
+			}
 		}
 	},
 	{
@@ -503,7 +546,9 @@
 			"jsonrpc": "2.0",
 			"id": "permission-rules-list",
 			"method": "permission/rules/list",
-			"params": { "sessionId": "11111111-1111-4111-8111-111111111111" }
+			"params": {
+				"sessionId": "11111111-1111-4111-8111-111111111111"
+			}
 		}
 	},
 	{
@@ -708,7 +753,9 @@
 			"jsonrpc": "2.0",
 			"id": "client-9",
 			"method": "session/subscribe",
-			"params": { "sessionId": "11111111-1111-4111-8111-111111111111" }
+			"params": {
+				"sessionId": "11111111-1111-4111-8111-111111111111"
+			}
 		}
 	},
 	{
@@ -718,7 +765,9 @@
 			"jsonrpc": "2.0",
 			"id": "client-10",
 			"method": "session/unsubscribe",
-			"params": { "sessionId": "11111111-1111-4111-8111-111111111111" }
+			"params": {
+				"sessionId": "11111111-1111-4111-8111-111111111111"
+			}
 		}
 	},
 	{
@@ -831,7 +880,10 @@
 			"jsonrpc": "2.0",
 			"id": "client-14",
 			"method": "connection/ack",
-			"params": { "serverEpoch": "33333333-3333-4333-8333-333333333333", "cursor": 42 }
+			"params": {
+				"serverEpoch": "33333333-3333-4333-8333-333333333333",
+				"cursor": 42
+			}
 		}
 	},
 	{
@@ -861,7 +913,12 @@
 				"scope": "project",
 				"text": "{ \"mcpServers\": { \"web\": { \"url\": \"https://mcp.example.test/rpc\" } } }",
 				"sourceRevision": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-				"candidates": [{ "id": "web", "expectedRevision": null }]
+				"candidates": [
+					{
+						"id": "web",
+						"expectedRevision": null
+					}
+				]
 			}
 		}
 	},
@@ -875,6 +932,53 @@
 			"params": {
 				"requestId": "22222222-2222-4222-8222-222222222215",
 				"reason": "application_quit"
+			}
+		}
+	},
+	{
+		"direction": "client",
+		"method": "agentType/list",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "client-agent-type-list",
+			"method": "agentType/list",
+			"params": {}
+		}
+	},
+	{
+		"direction": "client",
+		"method": "agentType/upsert",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "client-agent-type-upsert",
+			"method": "agentType/upsert",
+			"params": {
+				"requestId": "11111111-1111-4111-8111-111111111111",
+				"type": {
+					"id": "auditor",
+					"displayName": "Auditor",
+					"description": "Read-only audit role.",
+					"allowedTools": [
+						"read",
+						"grep"
+					],
+					"systemPrompt": "",
+					"writePolicy": "deny",
+					"mayDelegate": false
+				}
+			}
+		}
+	},
+	{
+		"direction": "client",
+		"method": "agentType/remove",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "client-agent-type-remove",
+			"method": "agentType/remove",
+			"params": {
+				"requestId": "11111111-1111-4111-8111-111111111111",
+				"id": "auditor"
 			}
 		}
 	}

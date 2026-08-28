@@ -769,12 +769,22 @@ export const UsageSummaryViewSchema = Type.Refine(
 		value.totalTokens === value.chatTokens + value.codeTokens,
 	"usage summary fields are inconsistent",
 );
-export const AgentTypeViewSchema = Type.Union([
-	Type.Literal("default"),
-	Type.Literal("explorer"),
-	Type.Literal("worker"),
-	Type.Literal("reviewer"),
-]);
+export const AgentTypeIdSchema = Type.String({
+	minLength: 1,
+	maxLength: 64,
+	pattern: "^[a-z][a-z0-9-]{0,63}$",
+});
+export const AgentTypeViewSchema = AgentTypeIdSchema;
+export const CustomAgentTypeViewSchema = StrictObject({
+	id: AgentTypeIdSchema,
+	displayName: NameSchema,
+	description: Type.String({ maxLength: 512 }),
+	allowedTools: Type.Array(Type.String({ minLength: 1, maxLength: 64 }), { maxItems: 32 }),
+	systemPrompt: Type.String({ maxLength: 8192 }),
+	writePolicy: Type.Union([Type.Literal("inherit"), Type.Literal("deny")]),
+	mayDelegate: Type.Boolean(),
+	builtIn: Type.Boolean(),
+});
 export const AgentStatusViewSchema = Type.Union([
 	Type.Literal("queued"),
 	Type.Literal("running"),

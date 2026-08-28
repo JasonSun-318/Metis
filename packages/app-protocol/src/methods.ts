@@ -26,8 +26,10 @@ import {
 	ActualThinkingLevelSchema,
 	AgentModeSchema,
 	AgentSummaryViewSchema,
+	AgentTypeIdSchema,
 	CollaborationModeSchema,
 	ConnectionEventsParamsSchema,
+	CustomAgentTypeViewSchema,
 	DeclarativeHookViewSchema,
 	DurableImageRefViewSchema,
 	HooksListViewSchema,
@@ -596,6 +598,26 @@ export const AgentDeleteResultSchema = StrictObject({
 	status: Type.Literal("deleted"),
 });
 
+export const AgentTypeListParamsSchema = StrictObject({});
+export const AgentTypeListResultSchema = StrictObject({
+	types: Type.Array(CustomAgentTypeViewSchema, { maxItems: 20 }),
+});
+export const AgentTypeUpsertParamsSchema = StrictObject({
+	requestId: UuidSchema,
+	type: StrictObject({
+		id: AgentTypeIdSchema,
+		displayName: NameSchema,
+		description: Type.String({ maxLength: 512 }),
+		allowedTools: Type.Array(Type.String({ minLength: 1, maxLength: 64 }), { maxItems: 32 }),
+		systemPrompt: Type.String({ maxLength: 8192 }),
+		writePolicy: Type.Union([Type.Literal("inherit"), Type.Literal("deny")]),
+		mayDelegate: Type.Boolean(),
+	}),
+});
+export const AgentTypeUpsertResultSchema = StrictObject({ type: CustomAgentTypeViewSchema });
+export const AgentTypeRemoveParamsSchema = StrictObject({ requestId: UuidSchema, id: AgentTypeIdSchema });
+export const AgentTypeRemoveResultSchema = StrictObject({ id: AgentTypeIdSchema });
+
 export const FileAttachmentInputSchema = StrictObject({
 	path: PathSchema,
 	name: Type.Optional(Type.String({ minLength: 1, maxLength: 255 })),
@@ -1034,6 +1056,9 @@ export const ClientRequestMethods = {
 	"agent/interrupt": method(AgentInterruptParamsSchema, AgentResultSchema),
 	"agent/archive": method(AgentArchiveParamsSchema, AgentResultSchema),
 	"agent/delete": method(AgentDeleteParamsSchema, AgentDeleteResultSchema),
+	"agentType/list": method(AgentTypeListParamsSchema, AgentTypeListResultSchema),
+	"agentType/upsert": method(AgentTypeUpsertParamsSchema, AgentTypeUpsertResultSchema),
+	"agentType/remove": method(AgentTypeRemoveParamsSchema, AgentTypeRemoveResultSchema),
 	"turn/start": method(TurnInputSchema, AcceptedOperationSchema),
 	"turn/steer": method(TurnSteerParamsSchema, AcceptedOperationSchema),
 	"turn/queue": method(TurnInputSchema, QueuedTurnResultSchema),
