@@ -23,6 +23,7 @@ import {
 import { useTranslation } from "react-i18next";
 import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
 import type { AppStore } from "../store/app-store.ts";
+import { MenuSelect } from "./MenuSelect.tsx";
 import { Transcript } from "./Transcript.tsx";
 
 interface AgentTreePanelProps {
@@ -47,6 +48,13 @@ function isActive(agent: AgentSummaryView): boolean {
 
 function agentTaskSummary(agent: AgentSummaryView): string {
 	return agent.currentTask?.taskSummary ?? agent.latestTask?.taskSummary ?? "";
+}
+
+const TASK_OPTION_SUMMARY_CHARS = 48;
+
+function taskOptionSummary(summary: string): string {
+	const chars = Array.from(summary);
+	return chars.length <= TASK_OPTION_SUMMARY_CHARS ? summary : `${chars.slice(0, TASK_OPTION_SUMMARY_CHARS).join("")}…`;
 }
 
 function agentUsage(agent: AgentSummaryView): { readonly tokens: number; readonly toolUses: number } {
@@ -727,16 +735,13 @@ export function AgentTreePanel({ api, onError, sessionId, store, visible }: Agen
 						>
 							<ArrowLeft aria-hidden="true" size={14} />
 						</button>
-						<div className="subagent-detail-title">
+						<div className="subagent-detail-title" title={selectedAgent?.agentId}>
 							<strong>{selectedAgent?.name ?? t("Agents")}</strong>
 							{selectedAgent && (
-								<>
-									<span>
-										<StatusIcon status={selectedAgent.status} />
-										{t(statusLabel(selectedAgent.status))} · {selectedAgent.agentType}
-									</span>
-									<code>{selectedAgent.agentId}</code>
-								</>
+								<span>
+									<StatusIcon status={selectedAgent.status} />
+									{t(statusLabel(selectedAgent.status))} · {selectedAgent.agentType}
+								</span>
 							)}
 						</div>
 						{selectedAgent && isActive(selectedAgent) && (
@@ -779,21 +784,24 @@ export function AgentTreePanel({ api, onError, sessionId, store, visible }: Agen
 							</div>
 						)}
 					</header>
-					{selectedAgent && (
-						<label className="subagent-task-selector">
+					{selectedAgent && selectedAgent.tasks.length > 1 && (
+						<div className="subagent-task-selector">
 							<span>{t("Task")}</span>
-							<select
-								onChange={(event) => store.selectAgentTranscript(selectedAgent.agentId, event.target.value || null)}
+							<MenuSelect
+								ariaLabel={t("Task")}
+								className="subagent-task-menu"
+								onChange={(taskId) => store.selectAgentTranscript(selectedAgent.agentId, taskId || null)}
+								options={[
+									{ value: "", label: t("Latest task") },
+									...[...selectedAgent.tasks].reverse().map((task) => ({
+										label: `${task.taskId.slice(0, 8)} · ${taskOptionSummary(task.taskSummary)} · ${t(statusLabel(task.status))}`,
+										value: task.taskId,
+									})),
+								]}
+								placeholder={t("Latest task")}
 								value={selectedTaskId ?? ""}
-							>
-								<option value="">{t("Latest task")}</option>
-								{[...selectedAgent.tasks].reverse().map((task) => (
-									<option key={task.taskId} value={task.taskId}>
-										{task.taskId.slice(0, 8)} · {task.taskSummary} · {t(statusLabel(task.status))}
-									</option>
-								))}
-							</select>
-						</label>
+							/>
+						</div>
 					)}
 					{snapshot.agentTranscript.itemOrder.length > 0 ? (
 						<Transcript

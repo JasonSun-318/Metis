@@ -2783,10 +2783,15 @@ test("packaged Code agent sidebar lists durable work and opens its transcript", 
 		const transcript = page.getByRole("region", { name: "Agent transcript", exact: true });
 		await expect(transcript).toBeVisible();
 		await expect(page.getByText("Packaged child completed", { exact: true })).toBeVisible();
-		const taskSelector = page.locator(".subagent-task-selector select");
-		await taskSelector.selectOption(oldTaskId);
+		const taskSelector = page.locator(".subagent-task-selector .menu-select-trigger");
+		const taskMenu = page.locator(".menu-select-popover");
+		const chooseAgentTask = async (summary: string) => {
+			await taskSelector.click();
+			await taskMenu.getByRole("option", { name: summary }).click();
+		};
+		await chooseAgentTask("Inspect initial packaged state");
 		await expect(page.getByText("Initial packaged handoff", { exact: true })).toBeVisible();
-		await taskSelector.selectOption(taskId);
+		await chooseAgentTask("Inspect packaged project");
 		await expect(page.getByText("Packaged child completed", { exact: true })).toBeVisible();
 		expect(await transcript.locator("[data-transcript-item]").count()).toBeLessThanOrEqual(24);
 		expect(await transcript.locator(".code-execution > summary").count()).toBeGreaterThanOrEqual(2);

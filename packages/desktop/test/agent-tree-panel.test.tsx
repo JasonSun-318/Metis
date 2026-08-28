@@ -422,13 +422,53 @@ describe("AgentTreePanel", () => {
 		await flush();
 		expect(desktopApi.readAgentItems).toHaveBeenLastCalledWith(expect.objectContaining({ taskId: "task-new" }));
 
-		const select = rendered.container.querySelector<HTMLSelectElement>(".subagent-task-selector select")!;
-		await act(async () => {
-			select.value = "task-old";
-			select.dispatchEvent(new Event("change", { bubbles: true }));
-		});
-		await flush();
+		const chooseOption = async (text: string) => {
+			await act(async () => button(rendered.container, "Task").click());
+			await flush();
+			const option = [...document.body.querySelectorAll<HTMLButtonElement>('[role="option"]')].find((candidate) =>
+				candidate.textContent?.includes(text),
+			);
+			expect(option).toBeTruthy();
+			await act(async () => option!.click());
+			await flush();
+		};
+		await chooseOption("task-old");
 		expect(desktopApi.readAgentItems).toHaveBeenLastCalledWith(expect.objectContaining({ taskId: "task-old" }));
+		await chooseOption("Latest task");
+		expect(desktopApi.readAgentItems).toHaveBeenLastCalledWith(expect.objectContaining({ taskId: "task-new" }));
+	});
+
+	it("hides the task selector for single-task agents and truncates long option labels", async () => {
+		const longSummary = "这是一段非常长的任务摘要".repeat(19) + "唯一结尾哨兵唯一结尾";
+		const longTask = { ...taskSummary(longSummary, "done"), taskId: "tasklong1" };
+		const firstTask = { ...taskSummary("First task", "done"), taskId: "task-old" };
+		const store = new AppStore();
+		store.applySnapshot(
+			snapshot("parent", [
+				agentSummary("solo", "Only task", "done", "Solo"),
+				agentSummary("child", longSummary, "done", "Historian", {
+					tasks: [firstTask, longTask],
+					latestTask: longTask,
+				}),
+			]),
+		);
+		const rendered = renderPanel(store, api());
+		roots.push(rendered.root);
+
+		await act(async () => button(rendered.container, "View transcript for Solo").click());
+		await flush();
+		expect(rendered.container.querySelector(".subagent-task-selector")).toBeNull();
+
+		await act(async () => button(rendered.container, "Back to agents").click());
+		await act(async () => button(rendered.container, "View transcript for Historian").click());
+		await flush();
+		await act(async () => button(rendered.container, "Task").click());
+		await flush();
+		const option = [...document.body.querySelectorAll<HTMLButtonElement>('[role="option"]')].find((candidate) =>
+			candidate.textContent?.includes("tasklong"),
+		);
+		expect(option?.textContent).toContain("…");
+		expect(option?.textContent).not.toContain(longSummary.slice(-12));
 	});
 
 	it("loads the next 100-agent page from the snapshot cursor", async () => {

@@ -228,14 +228,16 @@ textarea { resize: none; }
 .subagent-stop:hover:not(:disabled), .subagent-detail-stop:hover:not(:disabled), .subagent-back:hover:not(:disabled) { color: var(--text); }
 .subagent-panel .is-spinning { animation: browser-spin 900ms linear infinite; }
 .subagent-detail { --code-body-size: 12px; --code-meta-size: 11px; --code-mono-size: 11px; display: flex; height: 100%; min-width: 0; flex-direction: column; }
-.subagent-detail-header { display: flex; min-height: 38px; align-items: center; gap: 7px; border-bottom: 1px solid var(--border); padding: 0 9px; }
-.subagent-detail-title { display: grid; min-width: 0; flex: 1; gap: 1px; }
+.subagent-detail-header { display: flex; min-height: 42px; align-items: center; gap: 9px; border-bottom: 1px solid var(--border); padding: 0 11px; }
+.subagent-detail-header > button { flex: none; }
+.subagent-detail-title { display: grid; min-width: 0; flex: 1; gap: 3px; }
 .subagent-detail-title strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 500; }
-.subagent-detail-title span { display: flex; align-items: center; gap: 4px; color: var(--muted); font-size: 10px; }
-.subagent-detail-title code { overflow: hidden; color: var(--text-03); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
-.subagent-task-selector { display: flex; align-items: center; gap: 7px; border-bottom: 1px solid var(--border); padding: 6px 10px; color: var(--muted); font-size: 10px; }
-.subagent-task-selector select { min-width: 0; flex: 1; border: 1px solid var(--border); border-radius: 5px; background: var(--surface-03); color: var(--text); padding: 3px 5px; font-size: 10px; }
-.subagent-detail .transcript-scroll { padding: 12px 10px 16px; }
+.subagent-detail-title span { display: flex; align-items: center; gap: 5px; color: var(--muted); font-size: 10px; }
+.subagent-task-selector { display: flex; align-items: center; gap: 8px; border-bottom: 1px solid var(--border); padding: 7px 11px; color: var(--muted); font-size: 10px; }
+.subagent-task-selector .menu-select { min-width: 0; flex: 1; }
+.subagent-task-selector .menu-select-trigger { height: 22px; border: 1px solid var(--border); border-radius: 5px; background: var(--surface-03); color: var(--text); padding: 2px 6px; font-size: 10px; gap: 6px; }
+.subagent-task-selector .menu-select-trigger > svg { color: var(--muted); }
+.subagent-detail .transcript-scroll { padding: 12px 11px 16px; }
 .subagent-detail .code-turn-user > div { max-width: 88%; }
 .subagent-empty-detail { display: grid; min-height: 0; flex: 1; place-items: center; align-content: center; gap: 7px; color: var(--muted); }
 .terminal-panel { position: absolute; display: none; overflow: hidden; background: var(--sidebar); inset: 0; }
