@@ -284,6 +284,18 @@ const api = {
 		invoke(DESKTOP_IPC_CHANNELS.archiveAgent, "agent/archive", input) as ReturnType<MetisDesktopApi["archiveAgent"]>,
 	deleteAgent: (input: ClientParams<"agent/delete">) =>
 		invoke(DESKTOP_IPC_CHANNELS.deleteAgent, "agent/delete", input) as ReturnType<MetisDesktopApi["deleteAgent"]>,
+	listAgentTypes: () =>
+		invoke(DESKTOP_IPC_CHANNELS.listAgentTypes, "agentType/list", {}) as ReturnType<
+			MetisDesktopApi["listAgentTypes"]
+		>,
+	upsertAgentType: (input: ClientParams<"agentType/upsert">) =>
+		invoke(DESKTOP_IPC_CHANNELS.upsertAgentType, "agentType/upsert", input) as ReturnType<
+			MetisDesktopApi["upsertAgentType"]
+		>,
+	removeAgentType: (input: ClientParams<"agentType/remove">) =>
+		invoke(DESKTOP_IPC_CHANNELS.removeAgentType, "agentType/remove", input) as ReturnType<
+			MetisDesktopApi["removeAgentType"]
+		>,
 	setThinkingSelection: (input: ClientParams<"session/setThinkingSelection">) =>
 		invoke(DESKTOP_IPC_CHANNELS.setThinkingSelection, "session/setThinkingSelection", input) as ReturnType<
 			MetisDesktopApi["setThinkingSelection"]

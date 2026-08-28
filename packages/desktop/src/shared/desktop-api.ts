@@ -48,6 +48,9 @@ export const DESKTOP_IPC_CHANNELS = {
 	getSkill: "metis:get-skill",
 	upsertSkill: "metis:upsert-skill",
 	removeSkill: "metis:remove-skill",
+	listAgentTypes: "metis:list-agent-types",
+	upsertAgentType: "metis:upsert-agent-type",
+	removeAgentType: "metis:remove-agent-type",
 	inspectSkillImport: "metis:inspect-skill-import",
 	importSkills: "metis:import-skills",
 	openSkillFolder: "metis:open-skill-folder",
@@ -556,6 +559,9 @@ export interface MetisDesktopApi {
 	interruptAgent(input: ClientParams<"agent/interrupt">): Promise<ClientResult<"agent/interrupt">>;
 	archiveAgent(input: ClientParams<"agent/archive">): Promise<ClientResult<"agent/archive">>;
 	deleteAgent(input: ClientParams<"agent/delete">): Promise<ClientResult<"agent/delete">>;
+	listAgentTypes(): Promise<ClientResult<"agentType/list">>;
+	upsertAgentType(input: ClientParams<"agentType/upsert">): Promise<ClientResult<"agentType/upsert">>;
+	removeAgentType(input: ClientParams<"agentType/remove">): Promise<ClientResult<"agentType/remove">>;
 	setThinkingSelection(
 		input: ClientParams<"session/setThinkingSelection">,
 	): Promise<ClientResult<"session/setThinkingSelection">>;

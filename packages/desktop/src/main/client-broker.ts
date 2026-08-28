@@ -677,6 +677,15 @@ export class ClientBroker {
 		this.register(DESKTOP_IPC_CHANNELS.deleteAgent, 1, async (_event, [input]) =>
 			this.clientCall("agent/delete", input),
 		);
+		this.register(DESKTOP_IPC_CHANNELS.listAgentTypes, 1, async (_event, [input]) =>
+			this.clientCall("agentType/list", input),
+		);
+		this.register(DESKTOP_IPC_CHANNELS.upsertAgentType, 1, async (_event, [input]) =>
+			this.clientCall("agentType/upsert", input),
+		);
+		this.register(DESKTOP_IPC_CHANNELS.removeAgentType, 1, async (_event, [input]) =>
+			this.clientCall("agentType/remove", input),
+		);
 		this.register(DESKTOP_IPC_CHANNELS.setThinkingSelection, 1, async (_event, [input]) =>
 			this.clientCall("session/setThinkingSelection", input),
 		);
