@@ -86,7 +86,7 @@ for (const [lockPath, expected] of Object.entries(installLock.packages)) {
 	}
 	const destination = join(runtimeRoot, lockPath);
 	await mkdir(dirname(destination), { recursive: true });
-	await cp(source, destination, { recursive: true });
+	await cp(source, destination, { recursive: true, dereference: true });
 }
 
 for (const [packageName, packageRoot] of workspacePackages) {
