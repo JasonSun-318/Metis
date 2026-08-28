@@ -1,8 +1,9 @@
-import { AGENT_TOOL_NAMES, AGENT_TYPES, type AgentType } from "./types.ts";
+import { AGENT_TOOL_NAMES } from "./types.ts";
 
-interface AgentTypeProfile {
+export interface AgentTypeProfile {
 	readonly purpose: string;
 	readonly allowedTools?: readonly string[];
+	readonly systemPrompt?: string;
 	readonly writePolicy: "inherit" | "deny";
 	readonly mayDelegate: boolean;
 }
@@ -30,21 +31,7 @@ export const AGENT_TYPE_PROFILES = {
 		writePolicy: "deny",
 		mayDelegate: false,
 	},
-} as const satisfies Readonly<Record<AgentType, AgentTypeProfile>>;
-
-export const AGENT_TYPE_GUIDE = AGENT_TYPES.map((agentType) => {
-	const profile = AGENT_TYPE_PROFILES[agentType];
-	const tools =
-		"allowedTools" in profile
-			? `parent intersection [${profile.allowedTools.join(", ")}]`
-			: "all parent delegatable tools";
-	const effectiveTools = profile.mayDelegate
-		? `${tools} plus [${AGENT_TOOL_NAMES.join(", ")}] when delegation is allowed`
-		: tools;
-	const writes = profile.writePolicy === "deny" ? "denied" : "inherited";
-	const delegation = profile.mayDelegate ? "allowed below depth limit" : "denied";
-	return `${agentType}: tools=${effectiveTools}; filesystem writes=${writes}; delegation=${delegation}; purpose=${profile.purpose}`;
-}).join("\n");
+} as const satisfies Readonly<Record<string, AgentTypeProfile>>;
 
 const RESERVED_TOOLS = new Set<string>([
 	...AGENT_TOOL_NAMES,
@@ -57,7 +44,6 @@ const RESERVED_TOOLS = new Set<string>([
 ]);
 
 export interface ResolvedAgentProfile {
-	readonly agentType: AgentType;
 	readonly tools: readonly string[];
 	readonly writePolicy: "inherit" | "deny";
 	readonly mayDelegate: boolean;
@@ -72,18 +58,32 @@ export function effectiveAgentToolNames(input: {
 	return input.mayDelegate ? [...input.tools, ...AGENT_TOOL_NAMES] : input.tools;
 }
 
+export function buildAgentTypeGuide(definitions: Readonly<Record<string, AgentTypeProfile>>): string {
+	return Object.entries(definitions)
+		.map(([agentType, profile]) => {
+			const tools = profile.allowedTools
+				? `parent intersection [${profile.allowedTools.join(", ")}]`
+				: "all parent delegatable tools";
+			const effectiveTools = profile.mayDelegate
+				? `${tools} plus [${AGENT_TOOL_NAMES.join(", ")}] when delegation is allowed`
+				: tools;
+			const writes = profile.writePolicy === "deny" ? "denied" : "inherited";
+			const delegation = profile.mayDelegate ? "allowed below depth limit" : "denied";
+			return `${agentType}: tools=${effectiveTools}; filesystem writes=${writes}; delegation=${delegation}; purpose=${profile.purpose}`;
+		})
+		.join("\n");
+}
+
 export function resolveAgentProfile(input: {
-	readonly agentType: AgentType;
+	readonly definition: AgentTypeProfile;
 	readonly parentTools: readonly string[];
 	readonly depth: number;
 }): ResolvedAgentProfile {
 	const inherited = input.parentTools.filter((name) => !RESERVED_TOOLS.has(name));
-	const definition = AGENT_TYPE_PROFILES[input.agentType];
-	const allowed = "allowedTools" in definition ? new Set<string>(definition.allowedTools) : undefined;
+	const allowed = input.definition.allowedTools ? new Set<string>(input.definition.allowedTools) : undefined;
 	return {
-		agentType: input.agentType,
 		tools: allowed ? inherited.filter((name) => allowed.has(name)) : inherited,
-		writePolicy: definition.writePolicy,
-		mayDelegate: definition.mayDelegate && input.depth < MAX_AGENT_DEPTH,
+		writePolicy: input.definition.writePolicy,
+		mayDelegate: input.definition.mayDelegate && input.depth < MAX_AGENT_DEPTH,
 	};
 }

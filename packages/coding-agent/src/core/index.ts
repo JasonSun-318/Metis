@@ -288,7 +288,7 @@ export type {
 } from "./settings-manager.ts";
 export { createSyntheticSourceInfo } from "./source-info.ts";
 export {
-	AGENT_COORDINATION_PROMPT,
+	buildAgentCoordinationPrompt,
 	buildChildSystemPrompt,
 	safePromptJson,
 } from "./subagents/prompts.ts";

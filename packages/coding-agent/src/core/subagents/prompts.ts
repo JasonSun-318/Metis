@@ -1,16 +1,20 @@
-import { AGENT_TYPE_GUIDE, AGENT_TYPE_PROFILES, effectiveAgentToolNames } from "./profiles.ts";
+import { loadAgentTypeDefinitions } from "./agent-type-registry.ts";
+import type { AgentTypeProfile } from "./profiles.ts";
+import { AGENT_TYPE_PROFILES, buildAgentTypeGuide, effectiveAgentToolNames } from "./profiles.ts";
 import type { AgentConfig, AgentMailboxTerminalEvent } from "./types.ts";
 
-export const AGENT_COORDINATION_PROMPT = `<agent_coordination>
+export function buildAgentCoordinationPrompt(definitions: Readonly<Record<string, AgentTypeProfile>>): string {
+	return `<agent_coordination>
 - Delegate only independent, bounded work and choose the narrowest fitting agent type.
 - spawn_agent and followup_task are asynchronous; continue useful work or use wait_agents when a result is required now.
 - send_message only steers a running task. followup_task always creates a new task.
 - inspect_agents shows durable visible activity newest first; it is not hidden reasoning.
 - Before answering the user, integrate every required result and verify important claims.
 - Agent type maximum capabilities follow; effective tools are intersected with your current delegatable tools:
-${AGENT_TYPE_GUIDE}
+${buildAgentTypeGuide(definitions)}
 - spawn_agent returns the child's effective tool, write, and delegation snapshot; inspect_agents can verify it later.
 </agent_coordination>`;
+}
 
 export function safePromptJson(value: unknown): string {
 	return JSON.stringify(value).replace(/[<>&]/gu, (character) => {
@@ -61,11 +65,14 @@ Handoff
 }
 
 export function buildChildSystemPrompt(config: AgentConfig): string {
-	return [
+	const definition = loadAgentTypeDefinitions()[config.agentType];
+	const purpose = definition?.purpose ?? AGENT_TYPE_PROFILES.default.purpose;
+	const sections = [
 		buildCommonAgentContract(config),
-		`<agent_type>${safePromptJson({
-			name: config.agentType,
-			instructions: AGENT_TYPE_PROFILES[config.agentType].purpose,
-		})}</agent_type>`,
-	].join("\n");
+		`<agent_type>${safePromptJson({ name: config.agentType, instructions: purpose })}</agent_type>`,
+	];
+	if (definition?.systemPrompt) {
+		sections.push(`<agent_role_instructions>\n${definition.systemPrompt}\n</agent_role_instructions>`);
+	}
+	return sections.join("\n");
 }

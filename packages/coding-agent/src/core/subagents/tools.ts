@@ -4,16 +4,13 @@ import { keyHint } from "../../modes/interactive/components/keybinding-hints.ts"
 import type { AgentSession } from "../agent-session.ts";
 import { defineTool, type ToolDefinition } from "../extensions/types.ts";
 import type { SubagentManager } from "./manager.ts";
-import { AGENT_TYPE_GUIDE } from "./profiles.ts";
 import { utf8Prefix } from "./trace.ts";
-import { AGENT_TYPES, type InspectAgentsResult, MAX_AGENT_INPUT_UTF8_BYTES } from "./types.ts";
+import { type InspectAgentsResult, MAX_AGENT_INPUT_UTF8_BYTES } from "./types.ts";
 import { terminalEventIdentity } from "./wait.ts";
 
 function actorId(session: AgentSession): string {
 	return session.sessionManager.getSessionId();
 }
-
-const AgentTypeLiteral = Type.Union(AGENT_TYPES.map((agentType) => Type.Literal(agentType)));
 
 const Spawn = Type.Object(
 	{
@@ -30,8 +27,12 @@ const Spawn = Type.Object(
 				"Self-contained assignment with the objective, owned scope, non-goals, expected handoff, and focused verification.",
 		}),
 		agentType: Type.Optional(
-			Type.Union([AgentTypeLiteral], {
-				description: `Optional built-in role; defaults to default when omitted. Maximum capabilities:\n${AGENT_TYPE_GUIDE}`,
+			Type.String({
+				minLength: 1,
+				maxLength: 64,
+				pattern: "^[a-z][a-z0-9-]{0,63}$",
+				description:
+					"Optional role id: a built-in role (default, explorer, worker, reviewer) or a configured custom role. The agent_coordination prompt lists every available role with its tool, write, and delegation capabilities. Defaults to default.",
 			}),
 		),
 		forkTurns: Type.Optional(

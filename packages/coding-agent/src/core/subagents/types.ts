@@ -54,7 +54,7 @@ export interface AgentRelation {
 export interface AgentConfig extends AgentRelation {
 	readonly agentId: string;
 	readonly name: string;
-	readonly agentType: AgentType;
+	readonly agentType: string;
 	readonly initialTask: string;
 	readonly tools: readonly string[];
 	readonly writePolicy: "inherit" | "deny";
@@ -81,7 +81,7 @@ export interface AgentTaskSummary {
 export interface AgentSummary extends AgentRelation {
 	readonly agentId: string;
 	readonly name: string;
-	readonly agentType: AgentType;
+	readonly agentType: string;
 	readonly depth: number;
 	readonly status: AgentStatus;
 	readonly archived: boolean;

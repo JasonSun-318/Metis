@@ -8,6 +8,7 @@ import { narrowPermissionMode, type PermissionMode } from "../permission-mode.ts
 import type { RequestPermissionApproval } from "../permission-policy.ts";
 import { createSessionId } from "../session-id.ts";
 import { type FileEntry, SessionManager } from "../session-manager.ts";
+import { loadAgentTypeDefinitions } from "./agent-type-registry.ts";
 import { effectiveAgentToolNames, MAX_AGENT_DEPTH, resolveAgentProfile } from "./profiles.ts";
 import { defaultSubagentScheduler, type SubagentSchedulerApi } from "./scheduler.ts";
 import {
@@ -28,7 +29,6 @@ import {
 	type AgentSummary,
 	type AgentTaskSummary,
 	type AgentTombstone,
-	type AgentType,
 	type AgentUsage,
 	type AgentUsageTotals,
 	type DeleteAgentResult,
@@ -47,7 +47,7 @@ import { type AgentWaitHandle, normalizeWaitAgentIds, resolveWaiters, waitAgents
 export interface SpawnAgentInput {
 	readonly name: string;
 	readonly task: string;
-	readonly agentType?: AgentType;
+	readonly agentType?: string;
 	readonly forkTurns?: AgentForkTurns;
 	readonly model?: string;
 }
@@ -60,7 +60,7 @@ export interface AgentTaskReceipt {
 
 export interface SpawnAgentReceipt extends AgentTaskReceipt {
 	readonly name: string;
-	readonly agentType: AgentType;
+	readonly agentType: string;
 	readonly tools: readonly string[];
 	readonly writePolicy: "inherit" | "deny";
 	readonly mayDelegate: boolean;
@@ -341,11 +341,13 @@ export class SubagentManager implements SubagentManagerApi {
 		if (names.has(input.name))
 			throw new AgentError("INVALID_INPUT", `Agent name has already been used: ${input.name}`);
 		const agentType = input.agentType ?? "default";
+		const definition = loadAgentTypeDefinitions()[agentType];
+		if (!definition) throw new AgentError("INVALID_INPUT", `Unknown agent type: ${agentType}`);
 		const inheritedWriteDenied =
 			actor.sessionManager.getCollaborationMode() === "plan" ||
 			actor.sessionManager.getHeader()?.agent?.writePolicy === "deny";
 		const profile = resolveAgentProfile({
-			agentType,
+			definition,
 			parentTools: actor.getDelegatableToolNames(inheritedWriteDenied ? "deny" : "inherit"),
 			depth,
 		});
@@ -360,7 +362,7 @@ export class SubagentManager implements SubagentManagerApi {
 		const config: AgentConfig = {
 			agentId,
 			name: input.name,
-			agentType: profile.agentType,
+			agentType,
 			initialTask: input.task,
 			tools: [...profile.tools],
 			writePolicy: inheritedWriteDenied ? "deny" : profile.writePolicy,

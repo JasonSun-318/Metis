@@ -542,7 +542,7 @@ export {
 } from "./core/skills.ts";
 export { createSyntheticSourceInfo } from "./core/source-info.ts";
 export {
-	AGENT_COORDINATION_PROMPT,
+	buildAgentCoordinationPrompt,
 	buildChildSystemPrompt,
 	safePromptJson,
 } from "./core/subagents/prompts.ts";

@@ -13,8 +13,9 @@ import { createAgentSessionFromServices, createAgentSessionServices } from "../s
 import { AuthStorage } from "../src/core/auth-storage.ts";
 import { getSessionAgentDir, SessionManager } from "../src/core/session-manager.ts";
 import { SettingsManager } from "../src/core/settings-manager.ts";
+import { loadAgentTypeDefinitions } from "../src/core/subagents/agent-type-registry.ts";
 import { SubagentManager } from "../src/core/subagents/manager.ts";
-import { AGENT_COORDINATION_PROMPT, buildChildSystemPrompt, safePromptJson } from "../src/core/subagents/prompts.ts";
+import { buildAgentCoordinationPrompt, buildChildSystemPrompt, safePromptJson } from "../src/core/subagents/prompts.ts";
 import { AgentStore } from "../src/core/subagents/store.ts";
 import type { AgentConfig } from "../src/core/subagents/types.ts";
 import { AGENT_TOOL_NAMES } from "../src/core/subagents/types.ts";
@@ -76,13 +77,14 @@ function agentConfig(overrides: Partial<AgentConfig> = {}): AgentConfig {
 
 describe("subagent runtime prompt and mailbox", () => {
 	it("keeps the activated parent coordinator compact and responsibility-focused", () => {
-		expect(AGENT_COORDINATION_PROMPT).toContain(
+		const prompt = buildAgentCoordinationPrompt(loadAgentTypeDefinitions());
+		expect(prompt).toContain(
 			"explorer: tools=parent intersection [read, grep, find, ls, web_fetch, web_search]; filesystem writes=denied; delegation=denied",
 		);
-		expect(AGENT_COORDINATION_PROMPT).toContain(
+		expect(prompt).toContain(
 			"reviewer: tools=parent intersection [read, grep, find, ls, bash]; filesystem writes=denied; delegation=denied",
 		);
-		expect(AGENT_COORDINATION_PROMPT).toContain(
+		expect(prompt).toContain(
 			"spawn_agent returns the child's effective tool, write, and delegation snapshot; inspect_agents can verify it later",
 		);
 	});

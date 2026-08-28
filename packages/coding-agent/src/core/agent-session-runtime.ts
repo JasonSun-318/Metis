@@ -28,8 +28,9 @@ import { assertSessionCwdExists } from "./session-cwd.ts";
 import { createSessionId } from "./session-id.ts";
 import { SessionManager } from "./session-manager.ts";
 import { removeOwnedManagedWorkspace, resolveNewSessionWorkspace } from "./session-workspace.ts";
+import { loadAgentTypeDefinitions } from "./subagents/agent-type-registry.ts";
 import { SubagentManager } from "./subagents/manager.ts";
-import { AGENT_COORDINATION_PROMPT } from "./subagents/prompts.ts";
+import { buildAgentCoordinationPrompt } from "./subagents/prompts.ts";
 import { AgentStore } from "./subagents/store.ts";
 import { createSubagentTools } from "./subagents/tools.ts";
 import { AGENT_TOOL_NAMES, type AgentConfig } from "./subagents/types.ts";
@@ -560,7 +561,7 @@ export class AgentSessionRuntime {
 		}
 
 		session.setActiveToolsByName([...base, ...INSTALLED_AGENT_TOOLS]);
-		session.setHostSystemPrompt(() => AGENT_COORDINATION_PROMPT);
+		session.setHostSystemPrompt(() => buildAgentCoordinationPrompt(loadAgentTypeDefinitions()));
 	}
 
 	setRebindSession(rebindSession?: (session: AgentSession) => Promise<void>): void {

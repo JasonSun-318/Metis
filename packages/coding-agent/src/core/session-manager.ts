@@ -96,7 +96,7 @@ import {
 } from "./session-journal.ts";
 import { acquireModeProjectMutationLease, SessionLease, SessionLeaseError } from "./session-lease.ts";
 import { type CwdOrigin, getOwnedManagedWorkspace, publishManagedWorkspaceCopy } from "./session-workspace.ts";
-import type { AgentType } from "./subagents/types.ts";
+import { isValidAgentTypeId } from "./subagents/agent-type-registry.ts";
 
 export const CURRENT_SESSION_VERSION = 13;
 
@@ -804,7 +804,7 @@ export interface SessionHeader {
 		parentSessionId: string;
 		rootSessionId: string;
 		agentPath: readonly string[];
-		agentType: AgentType;
+		agentType: string;
 		tools: readonly string[];
 		writePolicy: "inherit" | "deny";
 		permissionMode: PersistedPermissionMode;
@@ -1595,13 +1595,7 @@ function validateSessionHeader(record: Record<string, unknown>, filePath: string
 		if (agent.agentPath.at(-1) !== agent.agentId) {
 			corruptSession(filePath, 1, "Session header agent path must end with agent id");
 		}
-		if (
-			typeof agent.agentType !== "string" ||
-			(agent.agentType !== "default" &&
-				agent.agentType !== "explorer" &&
-				agent.agentType !== "worker" &&
-				agent.agentType !== "reviewer")
-		) {
+		if (typeof agent.agentType !== "string" || !isValidAgentTypeId(agent.agentType)) {
 			corruptSession(filePath, 1, "Session header has an invalid agent type");
 		}
 		if (agent.writePolicy !== "inherit" && agent.writePolicy !== "deny") {

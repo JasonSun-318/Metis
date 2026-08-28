@@ -87,7 +87,7 @@ describe("agent control tools", () => {
 		expect(Value.Check(wait.parameters, { agentIds: ["child-1"], timeoutMs: 10 })).toBe(true);
 		expect(Value.Check(wait.parameters, {})).toBe(false);
 		expect(JSON.stringify(spawn.parameters)).toContain(
-			"explorer: tools=parent intersection [read, grep, find, ls, web_fetch, web_search]",
+			"The agent_coordination prompt lists every available role with its tool, write, and delegation capabilities.",
 		);
 	});
 
