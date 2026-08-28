@@ -2019,6 +2019,30 @@ textarea { resize: none; }
 .personalization-card textarea:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 .personalization-card textarea:disabled { opacity: .62; }
 .personalization-footer { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.agent-types-page { display: grid; align-content: start; gap: 14px; }
+.agent-types-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.agent-types-search { min-width: 0; flex: 1; max-width: 320px; height: 32px; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--surface-03); color: var(--text-25); padding: 0 11px; font-size: 13px; }
+.agent-types-heading { display: flex; align-items: center; gap: 7px; margin: 0 0 8px; color: var(--text-17); font-size: 12px; font-weight: 560; }
+.agent-types-count { border-radius: 999px; background: var(--surface-05); color: var(--text-20); padding: 1px 8px; font-size: 11px; }
+.agent-types-list { display: grid; gap: 6px; }
+.agent-types-card { display: flex; align-items: center; gap: 10px; border: 1px solid var(--border-weak); border-radius: 9px; background: var(--surface-02); padding: 9px 12px; }
+.agent-types-card > svg { flex: none; color: var(--text-17); }
+.agent-types-card-main { min-width: 0; flex: 1; display: grid; gap: 2px; }
+.agent-types-card-main strong { font-size: 13px; font-weight: 560; color: var(--text-27); }
+.agent-types-card-main p { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 12px; }
+.agent-types-tools-badge { flex: none; border-radius: 999px; background: var(--surface-05); color: var(--text-20); padding: 2px 9px; font-size: 11px; }
+.agent-types-empty { margin: 0; color: var(--muted); font-size: 12px; }
+.agent-types-editor { display: grid; gap: 12px; max-width: 720px; }
+.agent-types-row { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
+.agent-types-field { display: grid; gap: 5px; color: var(--text-17); font-size: 12px; font-weight: 500; }
+.agent-types-field input:not([type="checkbox"]), .agent-types-field textarea { width: 100%; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--surface-01); color: var(--text-27); padding: 8px 11px; font-size: 13px; }
+.agent-types-field textarea { min-height: 96px; resize: vertical; line-height: 1.5; }
+.agent-types-field input:focus-visible, .agent-types-field textarea:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.agent-types-tools { display: flex; flex-wrap: wrap; gap: 6px 14px; border: 1px solid var(--border-weak); border-radius: 8px; background: var(--surface-02); padding: 9px 12px; }
+.agent-types-tool { display: inline-flex; align-items: center; gap: 6px; color: var(--text-25); font-size: 12px; font-weight: 400; }
+.agent-types-toggle { flex-direction: row; align-items: center; }
+.agent-types-hint { margin: 0; color: var(--muted); font-size: 11px; font-weight: 400; }
+.agent-types-actions { display: flex; justify-content: flex-end; gap: 8px; }
 .personalization-meta { display: flex; min-width: 0; align-items: center; gap: 12px; color: var(--text-08); font-size: 11px; }
 .personalization-saved-badge { color: var(--success-msg-text); font-size: 12px; font-weight: 500; }
 .personalization-actions { display: flex; align-items: center; gap: 8px; }

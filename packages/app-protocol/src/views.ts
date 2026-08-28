@@ -1407,3 +1407,4 @@ export type ScheduleSnapshotView = Static<typeof ScheduleSnapshotViewSchema>;
 export type ScheduleTaskSnapshotView = Static<typeof ScheduleTaskSnapshotViewSchema>;
 export type DomainEvent = Static<typeof DomainEventSchema>;
 export type ConnectionEventsParams = Static<typeof ConnectionEventsParamsSchema>;
+export type CustomAgentTypeView = Static<typeof CustomAgentTypeViewSchema>;
