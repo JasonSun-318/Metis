@@ -542,6 +542,13 @@ export {
 } from "./core/skills.ts";
 export { createSyntheticSourceInfo } from "./core/source-info.ts";
 export {
+	BUILT_IN_AGENT_TYPE_IDS,
+	loadAgentTypeDefinitions,
+	readCustomAgentTypes,
+	removeCustomAgentType,
+	upsertCustomAgentType,
+} from "./core/subagents/agent-type-registry.ts";
+export {
 	buildAgentCoordinationPrompt,
 	buildChildSystemPrompt,
 	safePromptJson,

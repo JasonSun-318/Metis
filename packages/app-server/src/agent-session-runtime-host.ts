@@ -39,6 +39,7 @@ import {
 	importSessionAttachments,
 	installScheduleHost,
 	isScheduleSessionEligible,
+	loadAgentTypeDefinitions,
 	MAX_SESSION_DELIVERED_FILES,
 	type McpCredentialIdentity,
 	type McpServerSettings,
@@ -51,9 +52,11 @@ import {
 	QueuedTurnLimitError,
 	QueuedTurnNotFoundError,
 	RequestIdReusedError,
+	readCustomAgentTypes,
 	readThreadGoal,
 	reducePlanState,
 	reduceRuntimeJournal,
+	removeCustomAgentType,
 	removeSessionAttachment,
 	resolveMcpServerSettings,
 	SCHEDULE_MAIN_PROMPT,
@@ -62,6 +65,7 @@ import {
 	SettingsManager,
 	type Skill,
 	splitSessionAttachmentPrompt,
+	upsertCustomAgentType,
 } from "@metis/coding-agent";
 import { AgentLiveProjector } from "./agent-live-projector.ts";
 import type { CredentialCoordinator } from "./credential-coordinator.ts";
@@ -2270,6 +2274,50 @@ export class AgentSessionRuntimeHost implements SessionRuntimeHost {
 			await trashSkill(context, input);
 			return publicSkills(await this.draftSkills(input.cwd, settingsContext));
 		});
+	}
+
+	async listAgentTypes(): Promise<ClientResult<"agentType/list">> {
+		const definitions = loadAgentTypeDefinitions(this.agentDir);
+		const customs = new Map(readCustomAgentTypes(this.agentDir).map((entry) => [entry.id, entry]));
+		return {
+			types: Object.keys(definitions).map((id) => {
+				const custom = customs.get(id);
+				if (custom) return { ...custom, allowedTools: [...custom.allowedTools], builtIn: false };
+				const profile = definitions[id]!;
+				return {
+					id,
+					displayName: id,
+					description: profile.purpose,
+					allowedTools: [...(profile.allowedTools ?? [])],
+					systemPrompt: profile.systemPrompt ?? "",
+					writePolicy: profile.writePolicy,
+					mayDelegate: profile.mayDelegate,
+					builtIn: true,
+				};
+			}),
+		};
+	}
+
+	async upsertAgentType(input: ClientParams<"agentType/upsert">): Promise<ClientResult<"agentType/upsert">> {
+		try {
+			upsertCustomAgentType(this.agentDir, { ...input.type });
+		} catch (cause) {
+			const failure = new AppServerError("OPERATION_FAILED", { requestId: input.requestId });
+			failure.cause = cause;
+			throw failure;
+		}
+		return { type: { ...input.type, builtIn: false } };
+	}
+
+	async removeAgentType(input: ClientParams<"agentType/remove">): Promise<ClientResult<"agentType/remove">> {
+		try {
+			removeCustomAgentType(this.agentDir, input.id);
+		} catch (cause) {
+			const failure = new AppServerError("OPERATION_FAILED", { requestId: input.requestId });
+			failure.cause = cause;
+			throw failure;
+		}
+		return { id: input.id };
 	}
 
 	async inspectSkillImport(

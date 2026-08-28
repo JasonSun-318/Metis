@@ -62,6 +62,21 @@ export class SessionRegistry {
 		return await this.host.removeSkill(input);
 	}
 
+	async listAgentTypes(): Promise<ClientResult<"agentType/list">> {
+		if (!this.host.listAgentTypes) throw new AppServerError("NOT_FOUND");
+		return await this.host.listAgentTypes({});
+	}
+
+	async upsertAgentType(input: ClientParams<"agentType/upsert">): Promise<ClientResult<"agentType/upsert">> {
+		if (!this.host.upsertAgentType) throw new AppServerError("OPERATION_FAILED", { requestId: input.requestId });
+		return await this.host.upsertAgentType(input);
+	}
+
+	async removeAgentType(input: ClientParams<"agentType/remove">): Promise<ClientResult<"agentType/remove">> {
+		if (!this.host.removeAgentType) throw new AppServerError("OPERATION_FAILED", { requestId: input.requestId });
+		return await this.host.removeAgentType(input);
+	}
+
 	async inspectDraftSkillImport(
 		input: ClientParams<"skill/import/inspect">,
 	): Promise<ClientResult<"skill/import/inspect">> {

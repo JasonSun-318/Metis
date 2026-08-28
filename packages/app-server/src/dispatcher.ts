@@ -659,6 +659,12 @@ export class Dispatcher {
 					const ref = this.runtimeRef(request.params.sessionId);
 					return await this.registry.run(ref, (runtime) => runtime.archiveAgent(request.params));
 				});
+			case "agentType/list":
+				return await this.registry.listAgentTypes();
+			case "agentType/upsert":
+				return await this.replayMutation(request, () => this.registry.upsertAgentType(request.params));
+			case "agentType/remove":
+				return await this.replayMutation(request, () => this.registry.removeAgentType(request.params));
 			case "agent/delete":
 				return await this.replayMutation(request, async () => {
 					const ref = this.runtimeRef(request.params.sessionId);

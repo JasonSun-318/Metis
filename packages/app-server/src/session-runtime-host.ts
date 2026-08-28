@@ -93,6 +93,9 @@ export interface SessionRuntimeHost {
 	getSkill?(input: ClientParams<"skill/get">): Promise<ClientResult<"skill/get">>;
 	upsertSkill?(input: ClientParams<"skill/upsert">): Promise<ClientResult<"skill/upsert">>;
 	removeSkill?(input: ClientParams<"skill/remove">): Promise<ClientResult<"skill/remove">>;
+	listAgentTypes?(input: ClientParams<"agentType/list">): Promise<ClientResult<"agentType/list">>;
+	upsertAgentType?(input: ClientParams<"agentType/upsert">): Promise<ClientResult<"agentType/upsert">>;
+	removeAgentType?(input: ClientParams<"agentType/remove">): Promise<ClientResult<"agentType/remove">>;
 	inspectSkillImport?(input: ClientParams<"skill/import/inspect">): Promise<ClientResult<"skill/import/inspect">>;
 	importSkills?(input: ClientParams<"skill/import">): Promise<ClientResult<"skill/import">>;
 	listMcpServers?(cwd: string | null): Promise<ClientResult<"mcp/list">>;

@@ -288,6 +288,13 @@ export type {
 } from "./settings-manager.ts";
 export { createSyntheticSourceInfo } from "./source-info.ts";
 export {
+	BUILT_IN_AGENT_TYPE_IDS,
+	loadAgentTypeDefinitions,
+	readCustomAgentTypes,
+	removeCustomAgentType,
+	upsertCustomAgentType,
+} from "./subagents/agent-type-registry.ts";
+export {
 	buildAgentCoordinationPrompt,
 	buildChildSystemPrompt,
 	safePromptJson,
