@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
@@ -31,11 +31,27 @@ import type {
 	DesktopDownloadState,
 	DesktopHistoryEntry,
 } from "../shared/desktop-api.ts";
+import { validateBrowserHistoryEntry } from "../shared/desktop-api.ts";
 
 const BLANK_URL = "about:blank";
 const BROWSER_PARTITION = "persist:metis-browser";
+const HISTORY_STORAGE_FILE = "browser-history.json";
 const MAX_HISTORY_ENTRIES = 500;
+const HISTORY_SAVE_DELAY_MS = 500;
 const ZOOM_PERCENTAGES = [25, 33, 50, 67, 75, 80, 90, 100, 110, 125, 150, 175, 200, 250, 300, 400, 500] as const;
+
+function sanitizePersistedHistory(value: unknown): readonly DesktopHistoryEntry[] {
+	if (!Array.isArray(value)) return [];
+	const valid: DesktopHistoryEntry[] = [];
+	for (const item of value) {
+		try {
+			valid.push(validateBrowserHistoryEntry(item));
+		} catch {
+			// Skip malformed entries instead of discarding the whole stored history.
+		}
+	}
+	return valid.slice(0, MAX_HISTORY_ENTRIES);
+}
 
 interface BrowserRecord {
 	readonly view: WebContentsView;
@@ -67,6 +83,8 @@ interface BrowserManagerDependencies {
 	readonly pathExists: (path: string) => boolean;
 	readonly openPath: (path: string) => Promise<void>;
 	readonly showItemInFolder: (path: string) => void;
+	readonly loadHistory: () => readonly DesktopHistoryEntry[];
+	readonly saveHistory: (entries: readonly DesktopHistoryEntry[]) => void;
 }
 
 function normalizeBrowserUrl(value: string): string {
@@ -174,6 +192,7 @@ export class BrowserManager {
 	private historyEntries: DesktopHistoryEntry[] = [];
 	private readonly listeners = new Set<(event: DesktopBrowserEvent) => void>();
 	private downloadEmitTimer?: NodeJS.Timeout;
+	private historySaveTimer?: NodeJS.Timeout;
 	private owner?: Pick<BrowserWindow, "contentView">;
 
 	constructor(
@@ -187,9 +206,29 @@ export class BrowserManager {
 			pathExists: (path) => existsSync(path),
 			openPath: (path) => shell.openPath(path).then(() => undefined),
 			showItemInFolder: (path) => shell.showItemInFolder(path),
+			loadHistory: () => {
+				try {
+					return sanitizePersistedHistory(
+						JSON.parse(readFileSync(join(app.getPath("userData"), HISTORY_STORAGE_FILE), "utf8")),
+					);
+				} catch {
+					return [];
+				}
+			},
+			saveHistory: (entries) => {
+				try {
+					writeFileSync(
+						join(app.getPath("userData"), HISTORY_STORAGE_FILE),
+						`${JSON.stringify(entries, null, "\t")}\n`,
+					);
+				} catch {
+					// History is best-effort; a failed write must not break browsing.
+				}
+			},
 		},
 	) {
 		this.dependencies = dependencies;
+		this.historyEntries = [...dependencies.loadHistory()].slice(0, MAX_HISTORY_ENTRIES);
 		dependencies.browserSession.setPermissionCheckHandler(() => false);
 		dependencies.browserSession.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false));
 		dependencies.browserSession.on("will-download", this.onWillDownload);
@@ -299,6 +338,7 @@ export class BrowserManager {
 		if (this.historyEntries.length === 0) return;
 		this.historyEntries = [];
 		this.emitHistory();
+		this.persistHistory(true);
 	}
 
 	async control(input: DesktopBrowserControlInput): Promise<void> {
@@ -410,6 +450,7 @@ export class BrowserManager {
 	}
 
 	closeAll(): void {
+		if (this.historySaveTimer) this.persistHistory(true);
 		for (const browserId of [...this.records.keys()]) this.close(browserId);
 	}
 
@@ -637,6 +678,23 @@ export class BrowserManager {
 
 	private emitHistory(): void {
 		this.emit({ type: "history", entries: this.listHistory() });
+		this.persistHistory();
+	}
+
+	private persistHistory(immediate = false): void {
+		if (this.historySaveTimer) {
+			clearTimeout(this.historySaveTimer);
+			this.historySaveTimer = undefined;
+		}
+		if (immediate) {
+			this.dependencies.saveHistory(this.historyEntries);
+			return;
+		}
+		this.historySaveTimer = setTimeout(() => {
+			this.historySaveTimer = undefined;
+			this.dependencies.saveHistory(this.historyEntries);
+		}, HISTORY_SAVE_DELAY_MS);
+		this.historySaveTimer.unref?.();
 	}
 
 	private emit(event: DesktopBrowserEvent): void {

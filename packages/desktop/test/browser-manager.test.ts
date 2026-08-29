@@ -46,7 +46,7 @@ function latestHistory(events: unknown[]): readonly DesktopHistoryEntry[] {
 	throw new Error("No history event emitted");
 }
 
-function browserHarness() {
+function browserHarness(options: { initialHistory?: unknown[] } = {}) {
 	const listeners = new Map<string, Set<(...args: any[]) => void>>();
 	let currentUrl = "about:blank";
 	let windowOpenHandler: ((details: { url: string }) => { action: "deny" }) | undefined;
@@ -119,6 +119,11 @@ function browserHarness() {
 	const pathExists = vi.fn((_path: string) => false);
 	const openPath = vi.fn(async () => undefined);
 	const showItemInFolder = vi.fn();
+	let persisted: unknown = [...(options.initialHistory ?? [])];
+	const loadHistory = vi.fn((): readonly DesktopHistoryEntry[] => structuredClone(persisted) as DesktopHistoryEntry[]);
+	const saveHistory = vi.fn((entries: readonly DesktopHistoryEntry[]) => {
+		persisted = [...entries];
+	});
 	const manager = new BrowserManager({
 		browserSession: browserSession as never,
 		createView: (options) => {
@@ -132,6 +137,8 @@ function browserHarness() {
 		savePdf,
 		saveScreenshot,
 		showItemInFolder,
+		loadHistory,
+		saveHistory,
 	});
 	return {
 		browserSession,
@@ -140,13 +147,16 @@ function browserHarness() {
 		emit: (name: string, ...args: any[]) => {
 			for (const listener of listeners.get(name) ?? []) listener(...args);
 		},
+		loadHistory,
 		manager,
 		nativeImage,
 		navigationHistory,
 		openExternal,
 		openPath,
 		pathExists,
+		persisted: () => persisted,
 		resolveDownloadDirectory,
+		saveHistory,
 		savePdf,
 		saveScreenshot,
 		showItemInFolder,
@@ -569,5 +579,37 @@ describe("BrowserManager", () => {
 		expect(entries).toHaveLength(500);
 		expect(entries[0]!.url).toBe("https://example.com/501");
 		expect(entries.at(-1)!.url).toBe("https://example.com/2");
+	});
+
+	it("restores history from storage on startup and persists changes", async () => {
+		vi.useFakeTimers();
+		try {
+			const restored = [
+				{
+					entryId: "20000000-0000-4000-8000-000000000001",
+					url: "https://previous.example/",
+					title: "Previous session",
+					faviconUrl: null,
+					visitedAt: 1_756_000_000_000,
+				},
+			];
+			const harness = browserHarness({ initialHistory: restored });
+			const browserId = "10000000-0000-4000-8000-000000000092";
+			harness.manager.create({ browserId });
+			expect(harness.manager.listHistory()).toEqual(restored);
+			expect(harness.saveHistory).not.toHaveBeenCalled();
+
+			harness.emit("did-navigate", {}, "https://example.com/first");
+			expect(harness.manager.listHistory()[0]!.url).toBe("https://example.com/first");
+			expect(harness.manager.listHistory()[1]!.url).toBe("https://previous.example/");
+			await vi.advanceTimersByTimeAsync(500);
+			expect(harness.saveHistory).toHaveBeenLastCalledWith(harness.manager.listHistory());
+			expect(harness.persisted()).toHaveLength(2);
+
+			await harness.manager.clearHistory();
+			expect(harness.persisted()).toHaveLength(0);
+		} finally {
+			vi.useRealTimers();
+		}
 	});
 });

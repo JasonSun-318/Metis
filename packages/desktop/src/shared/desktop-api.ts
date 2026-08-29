@@ -1245,7 +1245,7 @@ export function validateBrowserDownloadControlInput(value: unknown): DesktopDown
 	return { type: input.type as DesktopDownloadControlType, downloadId: browserId(input.downloadId) };
 }
 
-function validateBrowserHistoryEntry(value: unknown): DesktopHistoryEntry {
+export function validateBrowserHistoryEntry(value: unknown): DesktopHistoryEntry {
 	const entry = exactRecord(value, ["entryId", "url", "title", "faviconUrl", "visitedAt"], "browser history entry");
 	return {
 		entryId: browserId(entry.entryId),
