@@ -148,6 +148,8 @@ export const DESKTOP_IPC_CHANNELS = {
 	captureBrowserPreview: "metis:capture-browser-preview",
 	controlBrowser: "metis:control-browser",
 	closeBrowser: "metis:close-browser",
+	listBrowserDownloads: "metis:list-browser-downloads",
+	controlBrowserDownload: "metis:control-browser-download",
 	listWorkspaceDirectory: "metis:list-workspace-directory",
 	searchWorkspaceFiles: "metis:search-workspace-files",
 	readWorkspaceFile: "metis:read-workspace-file",
@@ -274,7 +276,28 @@ export type DesktopBrowserEvent =
 			readonly activeMatchOrdinal: number;
 			readonly matches: number;
 	  }
-	| { readonly type: "command"; readonly browserId: string; readonly command: DesktopBrowserCommand };
+	| { readonly type: "command"; readonly browserId: string; readonly command: DesktopBrowserCommand }
+	| { readonly type: "downloads"; readonly downloads: readonly DesktopDownloadItem[] };
+
+export type DesktopDownloadState = "progressing" | "paused" | "completed" | "cancelled" | "interrupted";
+
+export interface DesktopDownloadItem {
+	readonly downloadId: string;
+	readonly url: string;
+	readonly filename: string;
+	readonly savePath: string;
+	readonly state: DesktopDownloadState;
+	readonly receivedBytes: number;
+	readonly totalBytes: number;
+	readonly startedAt: number;
+}
+
+export type DesktopDownloadControlType = "pause" | "resume" | "cancel" | "remove" | "open" | "reveal" | "retry";
+
+export interface DesktopDownloadControlInput {
+	readonly type: DesktopDownloadControlType;
+	readonly downloadId: string;
+}
 
 export interface DesktopWorkspaceTarget {
 	readonly sessionId: string;
@@ -601,6 +624,8 @@ export interface MetisDesktopApi {
 	captureBrowserPreview(input: DesktopCloseBrowserInput): Promise<string>;
 	controlBrowser(input: DesktopBrowserControlInput): Promise<void>;
 	closeBrowser(input: DesktopCloseBrowserInput): Promise<void>;
+	listBrowserDownloads(): Promise<readonly DesktopDownloadItem[]>;
+	controlBrowserDownload(input: DesktopDownloadControlInput): Promise<void>;
 	subscribeBrowser(listener: (event: DesktopBrowserEvent) => void): () => void;
 	listWorkspaceDirectory(input: DesktopWorkspaceTarget): Promise<readonly DesktopWorkspaceEntry[]>;
 	searchWorkspaceFiles(input: DesktopWorkspaceSearchInput): Promise<readonly string[]>;
@@ -1142,7 +1167,64 @@ export function validateDesktopBrowserEvent(value: unknown): DesktopBrowserEvent
 		}
 		return { type, browserId: browserId(event.browserId), command: event.command as DesktopBrowserCommand };
 	}
+	if (type === "downloads") {
+		const event = exactRecord(value, ["type", "downloads"], "browser downloads event");
+		if (!Array.isArray(event.downloads)) throw new TypeError("Invalid browser downloads");
+		return { type, downloads: event.downloads.map(validateBrowserDownloadItem) };
+	}
 	throw new TypeError("Invalid browser event");
+}
+
+const DOWNLOAD_STATES: readonly DesktopDownloadState[] = [
+	"progressing",
+	"paused",
+	"completed",
+	"cancelled",
+	"interrupted",
+];
+
+const DOWNLOAD_CONTROL_TYPES: readonly DesktopDownloadControlType[] = [
+	"pause",
+	"resume",
+	"cancel",
+	"remove",
+	"open",
+	"reveal",
+	"retry",
+];
+
+function validateBrowserDownloadItem(value: unknown): DesktopDownloadItem {
+	const item = exactRecord(
+		value,
+		["downloadId", "url", "filename", "savePath", "state", "receivedBytes", "totalBytes", "startedAt"],
+		"browser download item",
+	);
+	if (!(DOWNLOAD_STATES as readonly string[]).includes(item.state as DesktopDownloadState)) {
+		throw new TypeError("Invalid download state");
+	}
+	return {
+		downloadId: browserId(item.downloadId),
+		url: browserText(item.url, "download URL", 8_192),
+		filename: browserText(item.filename, "download filename", 256),
+		savePath: browserText(item.savePath, "download path", 4_096),
+		state: item.state as DesktopDownloadState,
+		receivedBytes: browserInteger(item.receivedBytes, "received bytes", 0, Number.MAX_SAFE_INTEGER),
+		totalBytes: browserInteger(item.totalBytes, "total bytes", 0, Number.MAX_SAFE_INTEGER),
+		startedAt: browserInteger(item.startedAt, "started at", 0, Number.MAX_SAFE_INTEGER),
+	};
+}
+
+export function validateBrowserDownloadList(value: unknown): readonly DesktopDownloadItem[] {
+	if (!Array.isArray(value)) throw new TypeError("Invalid browser downloads");
+	return value.map(validateBrowserDownloadItem);
+}
+
+export function validateBrowserDownloadControlInput(value: unknown): DesktopDownloadControlInput {
+	const input = exactRecord(value, ["type", "downloadId"], "browser download control input");
+	if (!(DOWNLOAD_CONTROL_TYPES as readonly string[]).includes(input.type as DesktopDownloadControlType)) {
+		throw new TypeError("Invalid download control type");
+	}
+	return { type: input.type as DesktopDownloadControlType, downloadId: browserId(input.downloadId) };
 }
 
 export function validateDesktopClientParams<Method extends Exclude<ClientRequestMethod, "initialize">>(

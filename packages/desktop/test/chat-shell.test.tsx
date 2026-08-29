@@ -337,6 +337,8 @@ function createHarness(options: {
 		captureBrowserPreview: vi.fn().mockResolvedValue("data:image/png;base64,cHJldmlldw=="),
 		controlBrowser: vi.fn().mockResolvedValue(undefined),
 		closeBrowser: vi.fn().mockResolvedValue(undefined),
+		listBrowserDownloads: vi.fn().mockResolvedValue([]),
+		controlBrowserDownload: vi.fn().mockResolvedValue(undefined),
 		subscribeBrowser: vi.fn((listener) => {
 			browserSubscribers.add(listener);
 			return () => browserSubscribers.delete(listener);

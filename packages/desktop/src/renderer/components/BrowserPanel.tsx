@@ -8,9 +8,13 @@ import {
 	ArrowUp,
 	Camera,
 	DotsThreeVertical,
+	DownloadSimple,
+	Folder,
 	Globe,
 	MagnifyingGlass,
 	Minus,
+	Pause,
+	Play,
 	Plus,
 	Printer,
 	Trash,
@@ -23,6 +27,8 @@ import type {
 	DesktopBrowserBounds,
 	DesktopBrowserCommand,
 	DesktopBrowserState,
+	DesktopDownloadControlType,
+	DesktopDownloadItem,
 } from "../../shared/desktop-api.ts";
 
 interface BrowserPanelProps {
@@ -31,6 +37,79 @@ interface BrowserPanelProps {
 	readonly onError: (cause: unknown) => void;
 	readonly onState: (state: DesktopBrowserState) => void;
 	readonly visible: boolean;
+}
+
+function formatBytes(bytes: number): string {
+	const units = ["B", "KB", "MB", "GB", "TB"] as const;
+	let value = bytes;
+	let index = 0;
+	while (value >= 1024 && index < units.length - 1) {
+		value /= 1024;
+		index += 1;
+	}
+	const rounded = index === 0 ? value : value >= 100 ? Math.round(value) : Math.round(value * 10) / 10;
+	return `${rounded} ${units[index]}`;
+}
+
+function BrowserDownloadRow({
+	download,
+	onAction,
+}: {
+	readonly download: DesktopDownloadItem;
+	readonly onAction: (type: DesktopDownloadControlType, downloadId: string) => void;
+}) {
+	const { t } = useTranslation();
+	const percent = download.totalBytes > 0 ? Math.min(100, Math.floor((download.receivedBytes / download.totalBytes) * 100)) : null;
+	const size = download.totalBytes > 0
+		? `${formatBytes(download.receivedBytes)} / ${formatBytes(download.totalBytes)}`
+		: formatBytes(download.receivedBytes);
+	const stateLabel =
+		download.state === "progressing"
+			? t("Downloading")
+			: download.state === "paused"
+				? t("Paused")
+				: download.state === "completed"
+					? t("Completed")
+					: download.state === "cancelled"
+						? t("Cancelled")
+						: t("Download failed");
+	return (
+		<div className="browser-download-row" data-download-state={download.state}>
+			<div className="browser-download-main">
+				<div className="browser-download-info">
+					<span className="browser-download-name" title={download.filename}>{download.filename}</span>
+					<span className="browser-download-meta">
+						{size} · {stateLabel}
+						{percent !== null && download.state === "progressing" ? ` · ${percent}%` : ""}
+					</span>
+				</div>
+				<div className="browser-download-actions">
+					{download.state === "progressing" && (
+						<button aria-label={t("Pause download")} onClick={() => onAction("pause", download.downloadId)} role="menuitem" type="button"><Pause aria-hidden="true" size={12} /></button>
+					)}
+					{download.state === "paused" && (
+						<button aria-label={t("Resume download")} onClick={() => onAction("resume", download.downloadId)} role="menuitem" type="button"><Play aria-hidden="true" size={12} /></button>
+					)}
+					{(download.state === "progressing" || download.state === "paused") && (
+						<button aria-label={t("Cancel download")} onClick={() => onAction("cancel", download.downloadId)} role="menuitem" type="button"><X aria-hidden="true" size={12} /></button>
+					)}
+					{download.state === "completed" && (
+						<>
+							<button aria-label={t("Open file")} onClick={() => onAction("open", download.downloadId)} role="menuitem" type="button"><ArrowSquareOut aria-hidden="true" size={12} /></button>
+							<button aria-label={t("Show in folder")} onClick={() => onAction("reveal", download.downloadId)} role="menuitem" type="button"><Folder aria-hidden="true" size={12} /></button>
+						</>
+					)}
+					{(download.state === "interrupted" || download.state === "cancelled") && (
+						<button aria-label={t("Retry download")} onClick={() => onAction("retry", download.downloadId)} role="menuitem" type="button"><ArrowCounterClockwise aria-hidden="true" size={12} /></button>
+					)}
+					<button aria-label={t("Remove from list")} onClick={() => onAction("remove", download.downloadId)} role="menuitem" type="button"><Trash aria-hidden="true" size={12} /></button>
+				</div>
+			</div>
+			{(download.state === "progressing" || download.state === "paused") && (
+				<div aria-hidden="true" className="browser-download-progress"><i style={{ width: `${percent ?? 0}%` }} /></div>
+			)}
+		</div>
+	);
 }
 
 const emptyState = (browserId: string): DesktopBrowserState => ({
@@ -96,9 +175,12 @@ export function BrowserPanel({ api, browserId, onError, onState, visible }: Brow
 	const [clearConfirmOpen, setClearConfirmOpen] = useState(false);
 	const [clearBusy, setClearBusy] = useState(false);
 	const [notice, setNotice] = useState<string | null>(null);
+	const [downloads, setDownloads] = useState<readonly DesktopDownloadItem[]>([]);
+	const [downloadsOpen, setDownloadsOpen] = useState(false);
 	const anchorRef = useRef<HTMLDivElement>(null);
 	const findInputRef = useRef<HTMLInputElement>(null);
 	const moreRef = useRef<HTMLDivElement>(null);
+	const downloadsRef = useRef<HTMLDivElement>(null);
 	const presentationRef = useRef("");
 	const boundsRef = useRef<DesktopBrowserBounds | null>(null);
 	const presentRef = useRef<(() => void) | null>(null);
@@ -117,6 +199,49 @@ export function BrowserPanel({ api, browserId, onError, onState, visible }: Brow
 	visibleRef.current = visible;
 	moreOpenRef.current = moreOpen;
 
+	function closeDownloads() {
+		previewRequestRef.current += 1;
+		setDownloadsOpen(false);
+	}
+
+	function toggleDownloads() {
+		if (downloadsOpen) {
+			closeDownloads();
+			return;
+		}
+		previewRequestRef.current += 1;
+		setMoreOpen(false);
+		if (state.url === "") {
+			setDownloadsOpen(true);
+			return;
+		}
+		const request = ++previewRequestRef.current;
+		setPreviewBusy(true);
+		void (async () => {
+			try {
+				// ponytail: WebContentsView sits above React; use a static frame until a live native overlay is required.
+				const preview = await capturePreview(request);
+				if (preview) setPagePreview(preview);
+				setDownloadsOpen(true);
+			} catch (cause) {
+				if (request !== previewRequestRef.current) return;
+				setStatus(translateRef.current("Browser action failed"));
+				onErrorRef.current(cause);
+			} finally {
+				if (request === previewRequestRef.current) setPreviewBusy(false);
+			}
+		})();
+	}
+
+	function runDownloadAction(type: DesktopDownloadControlType, downloadId: string) {
+		setNotice(null);
+		setStatus(null);
+		void api.controlBrowserDownload({ type, downloadId }).catch((cause) => {
+			setStatus(translateRef.current("Browser action failed"));
+			onErrorRef.current(cause);
+		});
+	}
+
 	async function capturePreview(request: number): Promise<string | null> {
 		const preview = await api.captureBrowserPreview({ browserId });
 		const image = new Image();
@@ -131,6 +256,7 @@ export function BrowserPanel({ api, browserId, onError, onState, visible }: Brow
 			setMoreOpen(false);
 			return;
 		}
+		closeDownloads();
 		if (state.url === "") {
 			setMoreOpen(true);
 			return;
@@ -263,6 +389,10 @@ export function BrowserPanel({ api, browserId, onError, onState, visible }: Brow
 				if (event.browserId === browserId) setFindResult(event);
 				return;
 			}
+			if (event.type === "downloads") {
+				setDownloads(event.downloads);
+				return;
+			}
 			if (event.type === "command") {
 				if (event.browserId === browserId && visibleRef.current) runCommand(event.command);
 				return;
@@ -272,6 +402,12 @@ export function BrowserPanel({ api, browserId, onError, onState, visible }: Brow
 			setAddress(event.state.url);
 			onStateRef.current(event.state);
 		});
+		void api.listBrowserDownloads().then(
+			(listed) => {
+				if (active) setDownloads(listed);
+			},
+			() => undefined,
+		);
 		creationRef.current ??= api.createBrowser({ browserId });
 		void creationRef.current.then(
 			(created) => {
@@ -295,12 +431,17 @@ export function BrowserPanel({ api, browserId, onError, onState, visible }: Brow
 	useEffect(() => setZoomDraft(String(state.zoomPercent)), [state.zoomPercent]);
 
 	useEffect(() => {
-		if (!moreOpen) return;
+		if (!moreOpen && !downloadsOpen) return;
 		const close = (event: PointerEvent) => {
-			if (!moreRef.current?.contains(event.target as Node)) setMoreOpen(false);
+			const target = event.target as Node;
+			if (!moreRef.current?.contains(target)) setMoreOpen(false);
+			if (!downloadsRef.current?.contains(target)) setDownloadsOpen(false);
 		};
 		const escape = (event: KeyboardEvent) => {
-			if (event.key === "Escape") setMoreOpen(false);
+			if (event.key === "Escape") {
+				setMoreOpen(false);
+				setDownloadsOpen(false);
+			}
 		};
 		document.addEventListener("pointerdown", close);
 		document.addEventListener("keydown", escape);
@@ -308,7 +449,7 @@ export function BrowserPanel({ api, browserId, onError, onState, visible }: Brow
 			document.removeEventListener("pointerdown", close);
 			document.removeEventListener("keydown", escape);
 		};
-	}, [moreOpen]);
+	}, [moreOpen, downloadsOpen]);
 
 	useEffect(() => {
 		if (!visible || clearConfirmOpen) return;
@@ -381,9 +522,9 @@ export function BrowserPanel({ api, browserId, onError, onState, visible }: Brow
 
 	useLayoutEffect(() => {
 		shouldPresentRef.current =
-			visible && state.url !== "" && !moreOpen && !clearConfirmOpen && status === null;
+			visible && state.url !== "" && !moreOpen && !downloadsOpen && !clearConfirmOpen && status === null;
 		presentRef.current?.();
-	}, [clearConfirmOpen, moreOpen, state.url, status, visible]);
+	}, [clearConfirmOpen, downloadsOpen, moreOpen, state.url, status, visible]);
 
 	const control = (type: "back" | "forward" | "reload" | "open-external") => {
 		setStatus(null);
@@ -425,6 +566,34 @@ export function BrowserPanel({ api, browserId, onError, onState, visible }: Brow
 						<button aria-label={t("Open in default browser")} className="browser-address-open" disabled={state.url === ""} onClick={(event) => { event.preventDefault(); control("open-external"); }} type="button"><ArrowSquareOut aria-hidden="true" size={13} /></button>
 					</div>
 				</form>
+				<div className="browser-downloads" ref={downloadsRef}>
+					<button
+						aria-busy={previewBusy}
+						aria-expanded={downloadsOpen}
+						aria-label={t("Downloads")}
+						className="browser-toolbar-button browser-downloads-button"
+						disabled={previewBusy}
+						onClick={toggleDownloads}
+						type="button"
+					>
+						<DownloadSimple aria-hidden="true" size={14} />
+						{downloads.some((download) => download.state === "progressing" || download.state === "paused") && (
+							<span aria-hidden="true" className="browser-download-badge" />
+						)}
+					</button>
+					{downloadsOpen && (
+						<div aria-label={t("Downloads")} className="browser-downloads-menu" role="menu">
+							<div className="browser-downloads-header">{t("Downloads")}</div>
+							{downloads.length === 0 ? (
+								<p className="browser-downloads-empty">{t("No downloads yet")}</p>
+							) : (
+								downloads.map((download) => (
+									<BrowserDownloadRow download={download} key={download.downloadId} onAction={runDownloadAction} />
+								))
+							)}
+						</div>
+					)}
+				</div>
 				<div className="browser-more" ref={moreRef}>
 					<button aria-busy={previewBusy} aria-expanded={moreOpen} aria-haspopup="menu" aria-label={t("More browser actions")} className="browser-toolbar-button" disabled={previewBusy} onClick={toggleMore} type="button"><DotsThreeVertical aria-hidden="true" size={16} weight="bold" /></button>
 					{moreOpen && (

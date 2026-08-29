@@ -1,5 +1,42 @@
 import { describe, expect, it, vi } from "vitest";
 import { BrowserManager } from "../src/main/browser-manager.ts";
+import type { DesktopDownloadItem } from "../src/shared/desktop-api.ts";
+
+function downloadItemHarness(overrides: { filename?: string; url?: string } = {}) {
+	const listeners = new Map<string, Set<(...args: any[]) => void>>();
+	const item: Record<string, any> = {
+		getURL: vi.fn(() => overrides.url ?? "https://example.com/files/report.pdf"),
+		getFilename: vi.fn(() => overrides.filename ?? "report.pdf"),
+		setSavePath: vi.fn(),
+		getTotalBytes: vi.fn(() => 1_000),
+		getReceivedBytes: vi.fn(() => 0),
+		isPaused: vi.fn(() => false),
+		pause: vi.fn(),
+		resume: vi.fn(),
+		cancel: vi.fn(),
+		on: vi.fn((name: string, listener: (...args: any[]) => void) => {
+			const eventListeners = listeners.get(name) ?? new Set();
+			eventListeners.add(listener);
+			listeners.set(name, eventListeners);
+			return item;
+		}),
+	};
+	item.once = item.on;
+	return {
+		emit: (name: string, ...args: any[]) => {
+			for (const listener of listeners.get(name) ?? []) listener({}, ...args);
+		},
+		item,
+	};
+}
+
+function latestDownloads(events: unknown[]): readonly DesktopDownloadItem[] {
+	for (let index = events.length - 1; index >= 0; index -= 1) {
+		const event = events[index] as { type?: string; downloads?: readonly DesktopDownloadItem[] };
+		if (event.type === "downloads") return event.downloads ?? [];
+	}
+	throw new Error("No downloads event emitted");
+}
 
 function browserHarness() {
 	const listeners = new Map<string, Set<(...args: any[]) => void>>();
@@ -51,10 +88,16 @@ function browserHarness() {
 		setVisible: vi.fn(),
 	};
 	const contentView = { addChildView: vi.fn(), removeChildView: vi.fn() };
+	const willDownloadHandlers: ((...args: any[]) => void)[] = [];
 	const browserSession = {
 		setPermissionCheckHandler: vi.fn(),
 		setPermissionRequestHandler: vi.fn(),
 		clearData: vi.fn(async () => undefined),
+		on: vi.fn((name: string, listener: (...args: any[]) => void) => {
+			if (name === "will-download") willDownloadHandlers.push(listener);
+			return browserSession;
+		}),
+		downloadURL: vi.fn(),
 	};
 	const nativeImage = {
 		toDataURL: vi.fn(() => "data:image/png;base64,cHJldmlldw=="),
@@ -64,6 +107,10 @@ function browserHarness() {
 	const openExternal = vi.fn(async () => undefined);
 	const savePdf = vi.fn(async () => undefined);
 	const saveScreenshot = vi.fn(async () => undefined);
+	const resolveDownloadDirectory = vi.fn(() => "/tmp/metis-downloads");
+	const pathExists = vi.fn((_path: string) => false);
+	const openPath = vi.fn(async () => undefined);
+	const showItemInFolder = vi.fn();
 	const manager = new BrowserManager({
 		browserSession: browserSession as never,
 		createView: (options) => {
@@ -71,8 +118,12 @@ function browserHarness() {
 			return view as never;
 		},
 		openExternal,
+		pathExists,
+		openPath,
+		resolveDownloadDirectory,
 		savePdf,
 		saveScreenshot,
+		showItemInFolder,
 	});
 	return {
 		browserSession,
@@ -85,10 +136,17 @@ function browserHarness() {
 		nativeImage,
 		navigationHistory,
 		openExternal,
+		openPath,
+		pathExists,
+		resolveDownloadDirectory,
 		savePdf,
 		saveScreenshot,
+		showItemInFolder,
 		view,
 		webContents,
+		willDownload: (item: Record<string, any>) => {
+			for (const handler of willDownloadHandlers) handler({}, item);
+		},
 		windowOpen: (url: string) => windowOpenHandler?.({ url }),
 	};
 }
@@ -378,5 +436,79 @@ describe("BrowserManager", () => {
 			},
 		);
 		expect(events).toHaveLength(before);
+	});
+
+	it("tracks download lifecycle with pause, resume, cancel, retry, and file actions", async () => {
+		vi.useFakeTimers();
+		try {
+			const harness = browserHarness();
+			const events: unknown[] = [];
+			harness.manager.onEvent((event) => events.push(event));
+
+			const first = downloadItemHarness();
+			harness.willDownload(first.item);
+			expect(first.item.setSavePath).toHaveBeenCalledWith("/tmp/metis-downloads/report.pdf");
+			expect(latestDownloads(events)).toHaveLength(1);
+			const downloadId = latestDownloads(events)[0]!.downloadId;
+			expect(latestDownloads(events)[0]).toMatchObject({
+				filename: "report.pdf",
+				savePath: "/tmp/metis-downloads/report.pdf",
+				state: "progressing",
+				totalBytes: 1_000,
+				url: "https://example.com/files/report.pdf",
+			});
+
+			first.item.getReceivedBytes.mockReturnValue(500);
+			first.emit("updated", "progressing");
+			expect(latestDownloads(events)[0]!.receivedBytes).toBe(0);
+			await vi.advanceTimersByTimeAsync(200);
+			expect(latestDownloads(events)[0]!.receivedBytes).toBe(500);
+
+			await harness.manager.controlDownload({ type: "pause", downloadId });
+			expect(first.item.pause).toHaveBeenCalledOnce();
+			expect(latestDownloads(events)[0]!.state).toBe("paused");
+
+			first.item.isPaused.mockReturnValue(true);
+			await harness.manager.controlDownload({ type: "resume", downloadId });
+			expect(first.item.resume).toHaveBeenCalledOnce();
+			expect(latestDownloads(events)[0]!.state).toBe("progressing");
+
+			await harness.manager.controlDownload({ type: "cancel", downloadId });
+			expect(first.item.cancel).toHaveBeenCalledOnce();
+			first.emit("done", "cancelled");
+			expect(latestDownloads(events)[0]!.state).toBe("cancelled");
+
+			harness.pathExists.mockImplementation((path: string) => path === "/tmp/metis-downloads/report.pdf");
+			const second = downloadItemHarness();
+			harness.willDownload(second.item);
+			expect(second.item.setSavePath).toHaveBeenCalledWith("/tmp/metis-downloads/report (1).pdf");
+			const secondId = latestDownloads(events)[0]!.downloadId;
+			expect(latestDownloads(events)).toHaveLength(2);
+
+			second.item.getReceivedBytes.mockReturnValue(1_000);
+			second.emit("done", "completed");
+			expect(latestDownloads(events)[0]!).toMatchObject({
+				downloadId: secondId,
+				state: "completed",
+				receivedBytes: 1_000,
+			});
+
+			await expect(harness.manager.controlDownload({ type: "open", downloadId })).rejects.toThrow("not complete");
+			await harness.manager.controlDownload({ type: "open", downloadId: secondId });
+			expect(harness.openPath).toHaveBeenCalledWith("/tmp/metis-downloads/report (1).pdf");
+			await harness.manager.controlDownload({ type: "reveal", downloadId: secondId });
+			expect(harness.showItemInFolder).toHaveBeenCalledWith("/tmp/metis-downloads/report (1).pdf");
+
+			await harness.manager.controlDownload({ type: "retry", downloadId: secondId });
+			expect(harness.browserSession.downloadURL).toHaveBeenCalledWith("https://example.com/files/report.pdf");
+
+			await harness.manager.controlDownload({ type: "remove", downloadId: secondId });
+			expect(latestDownloads(events)).toHaveLength(1);
+			await expect(harness.manager.controlDownload({ type: "remove", downloadId: secondId })).rejects.toThrow(
+				"Download is not running",
+			);
+		} finally {
+			vi.useRealTimers();
+		}
 	});
 });

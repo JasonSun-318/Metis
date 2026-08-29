@@ -14,6 +14,8 @@ import {
 	type DesktopUpdateState,
 	type MetisDesktopApi,
 	validateBrowserControlInput,
+	validateBrowserDownloadControlInput,
+	validateBrowserDownloadList,
 	validateCloseBrowserInput,
 	validateCloseTerminalInput,
 	validateCreateBrowserInput,
@@ -394,6 +396,11 @@ const api = {
 	},
 	closeBrowser: async (input) => {
 		await ipcRenderer.invoke(DESKTOP_IPC_CHANNELS.closeBrowser, validateCloseBrowserInput(input));
+	},
+	listBrowserDownloads: async () =>
+		validateBrowserDownloadList(await ipcRenderer.invoke(DESKTOP_IPC_CHANNELS.listBrowserDownloads)),
+	controlBrowserDownload: async (input) => {
+		await ipcRenderer.invoke(DESKTOP_IPC_CHANNELS.controlBrowserDownload, validateBrowserDownloadControlInput(input));
 	},
 	listWorkspaceDirectory: (input) =>
 		ipcRenderer.invoke(DESKTOP_IPC_CHANNELS.listWorkspaceDirectory, validateListWorkspaceDirectoryInput(input)),

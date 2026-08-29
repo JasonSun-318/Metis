@@ -1,6 +1,11 @@
-import { writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
+import { rm, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import {
+	app,
 	type BrowserWindow,
+	type DownloadItem,
 	dialog,
 	type Event,
 	type FoundInPageResult,
@@ -21,6 +26,9 @@ import type {
 	DesktopBrowserEvent,
 	DesktopBrowserState,
 	DesktopCreateBrowserInput,
+	DesktopDownloadControlInput,
+	DesktopDownloadItem,
+	DesktopDownloadState,
 } from "../shared/desktop-api.ts";
 
 const BLANK_URL = "about:blank";
@@ -35,12 +43,28 @@ interface BrowserRecord {
 	findRequestId: number;
 }
 
+interface DownloadRecord {
+	readonly downloadId: string;
+	readonly url: string;
+	readonly filename: string;
+	readonly savePath: string;
+	readonly startedAt: number;
+	item?: DownloadItem;
+	state: DesktopDownloadState;
+	receivedBytes: number;
+	totalBytes: number;
+}
+
 interface BrowserManagerDependencies {
 	readonly browserSession: Session;
 	readonly createView: (options: WebContentsViewConstructorOptions) => WebContentsView;
 	readonly openExternal: (url: string) => Promise<void>;
 	readonly savePdf: (data: Buffer, defaultFilename: string) => Promise<void>;
 	readonly saveScreenshot: (image: NativeImage, defaultFilename: string) => Promise<void>;
+	readonly resolveDownloadDirectory: () => string;
+	readonly pathExists: (path: string) => boolean;
+	readonly openPath: (path: string) => Promise<void>;
+	readonly showItemInFolder: (path: string) => void;
 }
 
 function normalizeBrowserUrl(value: string): string {
@@ -123,10 +147,30 @@ function isAbortedNavigation(cause: unknown): boolean {
 	);
 }
 
+function sanitizeFilename(value: string): string {
+	const name = (value || "download").split(/[\\/]/u).pop()?.trim() ?? "";
+	const bounded = (name.length > 0 ? name : "download").slice(0, 180);
+	return bounded;
+}
+
+function uniqueFilename(directory: string, filename: string, pathExists: (path: string) => boolean): string {
+	const dot = filename.lastIndexOf(".");
+	const stem = dot > 0 ? filename.slice(0, dot) : filename;
+	const extension = dot > 0 ? filename.slice(dot) : "";
+	let candidate = filename;
+	for (let index = 1; index < 1000; index += 1) {
+		if (!pathExists(join(directory, candidate))) return candidate;
+		candidate = `${stem} (${index})${extension}`;
+	}
+	return `${stem}-${Date.now()}${extension}`;
+}
+
 export class BrowserManager {
 	private readonly dependencies: BrowserManagerDependencies;
 	private readonly records = new Map<string, BrowserRecord>();
+	private readonly downloads = new Map<string, DownloadRecord>();
 	private readonly listeners = new Set<(event: DesktopBrowserEvent) => void>();
+	private downloadEmitTimer?: NodeJS.Timeout;
 	private owner?: Pick<BrowserWindow, "contentView">;
 
 	constructor(
@@ -136,11 +180,16 @@ export class BrowserManager {
 			openExternal: (url) => shell.openExternal(url),
 			savePdf: (data, defaultFilename) => saveBuffer(data, defaultFilename, "PDF document", "pdf"),
 			saveScreenshot: (image, defaultFilename) => saveBuffer(image.toPNG(), defaultFilename, "PNG image", "png"),
+			resolveDownloadDirectory: () => app.getPath("downloads"),
+			pathExists: (path) => existsSync(path),
+			openPath: (path) => shell.openPath(path).then(() => undefined),
+			showItemInFolder: (path) => shell.showItemInFolder(path),
 		},
 	) {
 		this.dependencies = dependencies;
 		dependencies.browserSession.setPermissionCheckHandler(() => false);
 		dependencies.browserSession.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false));
+		dependencies.browserSession.on("will-download", this.onWillDownload);
 	}
 
 	attach(window: Pick<BrowserWindow, "contentView">): void {
@@ -188,6 +237,55 @@ export class BrowserManager {
 
 	async capturePreview(browserId: string): Promise<string> {
 		return (await this.record(browserId).view.webContents.capturePage()).toDataURL();
+	}
+
+	listDownloads(): readonly DesktopDownloadItem[] {
+		return [...this.downloads.values()]
+			.sort((first, second) => second.startedAt - first.startedAt)
+			.map(({ item: _item, ...download }) => download);
+	}
+
+	async controlDownload(input: DesktopDownloadControlInput): Promise<void> {
+		const record = this.downloads.get(input.downloadId);
+		if (!record) throw new Error("Download is not running");
+		const item = record.item;
+		switch (input.type) {
+			case "pause":
+				if (item && !item.isPaused()) {
+					item.pause();
+					record.state = "paused";
+					this.emitDownloads();
+				}
+				return;
+			case "resume":
+				if (item?.isPaused()) {
+					item.resume();
+					record.state = "progressing";
+					this.emitDownloads();
+				}
+				return;
+			case "cancel":
+				item?.cancel();
+				return;
+			case "remove": {
+				this.downloads.delete(input.downloadId);
+				item?.cancel();
+				if (record.state !== "completed") await rm(record.savePath, { force: true }).catch(() => undefined);
+				this.emitDownloads();
+				return;
+			}
+			case "open":
+				if (record.state !== "completed") throw new Error("Download is not complete");
+				await this.dependencies.openPath(record.savePath);
+				return;
+			case "reveal":
+				this.dependencies.showItemInFolder(record.savePath);
+				return;
+			case "retry":
+				if (item) return;
+				this.dependencies.browserSession.downloadURL(record.url);
+				return;
+		}
 	}
 
 	async control(input: DesktopBrowserControlInput): Promise<void> {
@@ -429,6 +527,58 @@ export class BrowserManager {
 			});
 			return { action: "deny" };
 		});
+	}
+
+	private readonly onWillDownload = (_event: Event, item: DownloadItem): void => {
+		const downloadId = randomUUID();
+		const directory = this.dependencies.resolveDownloadDirectory();
+		const filename = uniqueFilename(directory, sanitizeFilename(item.getFilename()), this.dependencies.pathExists);
+		const savePath = join(directory, filename);
+		item.setSavePath(savePath);
+		const record: DownloadRecord = {
+			downloadId,
+			url: item.getURL(),
+			filename,
+			savePath,
+			startedAt: Date.now(),
+			item,
+			state: "progressing",
+			receivedBytes: item.getReceivedBytes(),
+			totalBytes: item.getTotalBytes(),
+		};
+		this.downloads.set(downloadId, record);
+		item.on("updated", (_updateEvent, state) => {
+			record.receivedBytes = item.getReceivedBytes();
+			record.totalBytes = item.getTotalBytes();
+			record.state = state === "interrupted" ? "interrupted" : item.isPaused() ? "paused" : "progressing";
+			this.scheduleDownloadEmit();
+		});
+		item.once("done", (_doneEvent, state) => {
+			record.item = undefined;
+			record.receivedBytes = item.getReceivedBytes();
+			record.totalBytes = item.getTotalBytes();
+			record.state = state === "completed" ? "completed" : state === "cancelled" ? "cancelled" : "interrupted";
+			if (record.state !== "completed") void rm(record.savePath, { force: true }).catch(() => undefined);
+			this.emitDownloads();
+		});
+		this.emitDownloads();
+	};
+
+	private scheduleDownloadEmit(): void {
+		if (this.downloadEmitTimer) return;
+		this.downloadEmitTimer = setTimeout(() => {
+			this.downloadEmitTimer = undefined;
+			this.emitDownloads();
+		}, 200);
+		this.downloadEmitTimer.unref?.();
+	}
+
+	private emitDownloads(): void {
+		if (this.downloadEmitTimer) {
+			clearTimeout(this.downloadEmitTimer);
+			this.downloadEmitTimer = undefined;
+		}
+		this.emit({ type: "downloads", downloads: this.listDownloads() });
 	}
 
 	private emit(event: DesktopBrowserEvent): void {

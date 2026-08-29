@@ -33,6 +33,7 @@ import {
 	type DesktopWorkspaceEditState,
 	type SupervisorView,
 	validateBrowserControlInput,
+	validateBrowserDownloadControlInput,
 	validateCloseBrowserInput,
 	validateCloseTerminalInput,
 	validateCreateBrowserInput,
@@ -84,7 +85,15 @@ interface ClientBrokerOptions {
 	readonly terminalManager?: Pick<TerminalManager, "create" | "write" | "resize" | "close" | "closeAll" | "onEvent">;
 	readonly browserManager?: Pick<
 		BrowserManager,
-		"attach" | "create" | "capturePreview" | "control" | "close" | "closeAll" | "onEvent"
+		| "attach"
+		| "create"
+		| "capturePreview"
+		| "control"
+		| "close"
+		| "closeAll"
+		| "listDownloads"
+		| "controlDownload"
+		| "onEvent"
 	>;
 	readonly workspaceFiles?: Pick<
 		WorkspaceFileManager,
@@ -218,7 +227,15 @@ export class ClientBroker {
 	>;
 	private readonly browserManager: Pick<
 		BrowserManager,
-		"attach" | "create" | "capturePreview" | "control" | "close" | "closeAll" | "onEvent"
+		| "attach"
+		| "create"
+		| "capturePreview"
+		| "control"
+		| "close"
+		| "closeAll"
+		| "listDownloads"
+		| "controlDownload"
+		| "onEvent"
 	>;
 	private readonly workspaceFiles: Pick<
 		WorkspaceFileManager,
@@ -303,6 +320,10 @@ export class ClientBroker {
 			},
 			close: () => undefined,
 			closeAll: () => undefined,
+			listDownloads: () => [],
+			controlDownload: async () => {
+				throw new Error("Browser is unavailable");
+			},
 			onEvent: () => () => undefined,
 		};
 		this.workspaceFiles = options.workspaceFiles ?? {
@@ -778,6 +799,10 @@ export class ClientBroker {
 		);
 		this.register(DESKTOP_IPC_CHANNELS.controlBrowser, 1, async (_event, [input]) => {
 			await this.browserManager.control(validateBrowserControlInput(input));
+		});
+		this.register(DESKTOP_IPC_CHANNELS.listBrowserDownloads, 0, async () => this.browserManager.listDownloads());
+		this.register(DESKTOP_IPC_CHANNELS.controlBrowserDownload, 1, async (_event, [input]) => {
+			await this.browserManager.controlDownload(validateBrowserDownloadControlInput(input));
 		});
 		this.register(DESKTOP_IPC_CHANNELS.closeBrowser, 1, async (_event, [input]) => {
 			this.browserManager.close(validateCloseBrowserInput(input).browserId);

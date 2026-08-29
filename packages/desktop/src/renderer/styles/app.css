@@ -385,6 +385,23 @@ textarea { resize: none; }
 .browser-more-menu button:disabled { color: var(--text-03); cursor: default; }
 .browser-more-menu kbd { margin-left: auto; color: var(--text-07); font: inherit; font-size: 10px; }
 .browser-menu-separator { height: 1px; margin: 4px 6px; background: var(--border); }
+.browser-downloads { position: relative; flex: none; }
+.browser-downloads-button { position: relative; }
+.browser-download-badge { position: absolute; top: 3px; right: 3px; width: 5px; height: 5px; border-radius: 999px; background: var(--focus); }
+.browser-downloads-menu { position: absolute; z-index: 5; top: calc(100% + 4px); right: 0; width: 324px; max-height: 380px; overflow-y: auto; display: grid; gap: 1px; border: 1px solid var(--border-strong); border-radius: 9px; background: var(--surface-05); box-shadow: var(--overlay-shadow); padding: 4px; }
+.browser-downloads-header { color: var(--text-20); font-size: 11px; font-weight: 560; padding: 6px 9px 4px; }
+.browser-downloads-empty { margin: 0; color: var(--text-07); font-size: 12px; padding: 14px 9px 16px; text-align: center; }
+.browser-download-row { position: relative; display: grid; gap: 2px; border-radius: 7px; padding: 6px 9px 8px; }
+.browser-download-row:hover { background: var(--surface-08); }
+.browser-download-main { display: flex; align-items: center; gap: 8px; }
+.browser-download-info { display: grid; min-width: 0; flex: 1; gap: 1px; }
+.browser-download-name { overflow: hidden; color: var(--text-26); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.browser-download-meta { color: var(--text-07); font-size: 11px; }
+.browser-download-actions { display: flex; flex: none; gap: 2px; }
+.browser-download-actions button { display: grid; width: 22px; height: 22px; place-items: center; border-radius: 6px; color: var(--text-14); }
+.browser-download-actions button:hover:not(:disabled), .browser-download-actions button:focus-visible { background: var(--surface-05); color: var(--text); outline: 0; }
+.browser-download-progress { height: 2px; border-radius: 999px; background: var(--surface-08); overflow: hidden; }
+.browser-download-progress i { display: block; height: 100%; border-radius: 999px; background: var(--focus); transition: width 240ms ease; }
 .browser-zoom-row { display: grid; height: 32px; grid-template-columns: 1fr 24px 46px 24px 24px; align-items: center; gap: 2px; padding: 0 7px 0 9px; color: var(--text-26); font-size: 12px; }
 .browser-zoom-row button { display: grid; width: 24px; height: 24px; place-items: center; padding: 0; }
 .browser-zoom-value { display: flex; width: 46px; align-items: center; justify-content: center; color: var(--text-19); font-size: 11px; }
