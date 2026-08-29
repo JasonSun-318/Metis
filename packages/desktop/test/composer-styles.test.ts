@@ -64,7 +64,7 @@ describe("Composer visual states", () => {
 			'.composer-add > .composer-plain-button:hover:not(:disabled), .composer-add > .composer-plain-button[aria-expanded="true"]',
 		);
 		expect(activeAddButton.background).not.toBe("transparent");
-		expect(activeAddButton.boxShadow).not.toBe("none");
+		expect(activeAddButton.boxShadow).toBe("");
 		expect(activeAddButton.transform).toBe("none");
 
 		const menu = rule(".composer-add-menu, .composer-skill-menu");
@@ -169,7 +169,7 @@ describe("Composer visual states", () => {
 	it("uses the shared neutral hover surface for ask-user choices", () => {
 		const hover = rule(".ask-user-option:hover:not(:disabled), .ask-user-option:focus");
 		expect(hover.background).toBe("var(--surface-11)");
-		expect(hover.boxShadow).toBe("var(--shadow)");
+		expect(hover.boxShadow).toBe("");
 	});
 
 	it("uses the compact narrow rectangular box and bottom actions for Code mode", () => {

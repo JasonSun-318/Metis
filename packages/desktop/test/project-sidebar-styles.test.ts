@@ -32,12 +32,12 @@ describe("Project sidebar motion", () => {
 		expect(css).not.toContain(".turn-answer { color: var(--text-27); font-family: ui-serif");
 	});
 
-	it("uses a flat neutral-gray active state and a subtle gray hover shadow", () => {
+	it("uses flat neutral-gray hover and active states", () => {
 		const hover = rule(
 			".session-row:hover > .session-button:not(:disabled), .session-row:focus-within > .session-button:not(:disabled)",
 		);
 		expect(hover.background).toBe("var(--surface-09)");
-		expect(hover.boxShadow).toBe("var(--shadow)");
+		expect(hover.boxShadow).toBe("");
 		const active = rule('.session-button[aria-current="page"]');
 		expect(active.background).toBe("var(--panel-selected)");
 		expect(active.boxShadow).toBe("none");
@@ -50,11 +50,12 @@ describe("Project sidebar motion", () => {
 			'.session-actions > button:hover:not(:disabled), .session-actions > button[aria-expanded="true"]',
 		);
 		expect(action.background).toBe("var(--surface-18)");
-		expect(action.boxShadow).toBe("var(--shadow)");
+		expect(action.boxShadow).toBe("");
+		expect(rule(".session-action-menu").boxShadow).toBe("var(--overlay-shadow)");
 		expect(rule(".mode-switch").boxShadow).toBe("var(--mode-switch-track-shadow)");
 		expect(rule(".mode-switch-indicator").background).toBe("var(--mode-switch-active)");
 		expect(rule(".mode-switch-indicator").boxShadow).toBe("var(--mode-switch-shadow)");
-		expect(tokens).toContain("--shadow: 0 1px 4px rgb(150 150 150 / 9%);");
+		expect(tokens).toContain("--shadow: 0 1px 3px rgb(0 0 0 / 12%);");
 	});
 
 	it("routes visible shadows through the shared surface or overlay theme tokens", () => {
@@ -69,7 +70,21 @@ describe("Project sidebar motion", () => {
 					value === "var(--mode-switch-track-shadow)",
 			),
 		).toBe(true);
-		expect(tokens).toContain("--overlay-shadow: 0 12px 28px rgb(0 0 0 / 35%), 0 2px 6px rgb(0 0 0 / 24%);");
+		expect(tokens).toContain("--overlay-shadow: 0 10px 24px rgb(0 0 0 / 28%), 0 1px 4px rgb(0 0 0 / 18%);");
+	});
+
+	it("keeps flat navigation and titlebar hover states shadow-free", () => {
+		for (const selector of [
+			".new-task-button:hover:not(:disabled), .sidebar-nav-button:hover:not(:disabled)",
+			".project-heading:hover:not(:disabled)",
+			".session-row:hover > .session-button:not(:disabled)",
+			".workspace-titlebar-actions button:hover",
+		]) {
+			const start = css.indexOf(selector);
+			const hoverRule = css.slice(start, css.indexOf("}", start) + 1);
+			expect(hoverRule).not.toContain("box-shadow");
+			expect(hoverRule).not.toContain("translateY");
+		}
 	});
 
 	it("matches the nested session grouping menu geometry and neutral palette", () => {
@@ -176,7 +191,7 @@ describe("Project sidebar motion", () => {
 			'.project-action-buttons > button:hover:not(:disabled), .project-action-buttons > button[aria-expanded="true"]',
 		);
 		expect(projectAction.background).toBe("var(--surface-18)");
-		expect(projectAction.boxShadow).toBe("var(--shadow)");
+		expect(projectAction.boxShadow).toBe("");
 		expect(
 			rule(
 				".project-heading:hover:not(:disabled), .project-heading:has(+ .project-actions:hover):not(:disabled), .project-heading:has(+ .project-actions:focus-within):not(:disabled)",
