@@ -53,6 +53,9 @@ const zhCN = {
 	Dark: "深色",
 	Light: "浅色",
 	"Follow system": "跟随系统",
+	"Content font size": "内容字号",
+	"Adjust Chat and Code reading text without changing interface controls or layout.":
+		"调整 Chat 与 Code 阅读内容的字号，不改变界面控件或布局。",
 	"Chat font": "Chat 字体",
 	"Font used for assistant prose in Chat mode.": "用于 Chat 模式助手正文的字体。",
 	"Code font": "Code 字体",

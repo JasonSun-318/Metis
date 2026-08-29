@@ -2,6 +2,8 @@ import { Desktop, Moon, Sun } from "@phosphor-icons/react";
 import { useTranslation } from "react-i18next";
 import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
 import {
+	CONTENT_FONT_SIZE_OPTIONS,
+	type ContentFontSizePreference,
 	type GeneralPreferences,
 	PROSE_FONT_OPTIONS,
 	type ProseFontPreference,
@@ -114,6 +116,22 @@ export function GeneralPanel({
 					<h3>{t("Typography")}</h3>
 				</header>
 				<div className="settings-card">
+					<div className="general-setting-row">
+						<div className="general-setting-copy">
+							<span>{t("Content font size")}</span>
+							<p>{t("Adjust Chat and Code reading text without changing interface controls or layout.")}</p>
+						</div>
+						<div className="general-setting-control">
+							<MenuSelect<ContentFontSizePreference>
+								ariaLabel={t("Content font size")}
+								className="general-font-select"
+								menuAlign="end"
+								onChange={(contentFontSize) => onGeneralPreferencesChange({ ...generalPreferences, contentFontSize })}
+								options={CONTENT_FONT_SIZE_OPTIONS}
+								value={generalPreferences.contentFontSize}
+							/>
+						</div>
+					</div>
 					<div className="general-setting-row">
 						<div className="general-setting-copy">
 							<span>{t("Chat font")}</span>
