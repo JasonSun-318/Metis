@@ -445,11 +445,12 @@ test("packaged task list uses the Metis composer UI in Chat and Code", async ({}
 		expect(slashLabels.slice(0, 6)).toEqual([
 			"/compact",
 			"/goal",
+			"/plan",
 			"/model",
 			"/thinking",
 			"/status",
-			"/mcp",
 		]);
+		expect(slashLabels).toContain("/mcp");
 		expect(slashLabels).toContain("skill:e2e-skill");
 		await expect(slashMenu).not.toContainText("/usage");
 		await page.locator(".composer-dock").screenshot({
@@ -739,6 +740,7 @@ test("packaged queued messages edit, guide, drain in order, and pause across App
 		const input = page.locator("#composer-input");
 		const queuedRows = page.getByRole("group", { name: /Queued message \d+/u });
 		const submit = async (text: string, action: "Send message" | "Queue message") => {
+			await expect(input).toHaveAttribute("contenteditable", "true");
 			await input.fill(text);
 			await page!.getByRole("button", { name: action, exact: true }).click();
 		};
@@ -1004,17 +1006,17 @@ test("packaged permission sandbox keeps Auto bounded and project rules revocable
 		await expect(page!.locator(".permission-approval-panel")).toHaveCount(0);
 
 		phase = "revoking the exact project rule";
-		await page!.evaluate(async () => {
+		await page!.evaluate(async (activeSessionId) => {
 			const api = (globalThis as unknown as { metis: MetisDesktopApi }).metis;
-			const rules = await api.listPermissionRules({ sessionId: "71000000-0000-4000-8000-000000000001" });
+			const rules = await api.listPermissionRules({ sessionId: activeSessionId });
 			const rule = rules.rules.find((candidate) => candidate.toolName === "bash");
 			if (!rule) throw new Error("Expected a persisted bash permission rule");
 			await api.deletePermissionRule({
-				sessionId: "71000000-0000-4000-8000-000000000001",
+				sessionId: activeSessionId,
 				ruleId: rule.id,
 				requestId: crypto.randomUUID(),
 			});
-		});
+		}, sessionId);
 		await mkdir(path.join(projectDir, "build"));
 		await submit("case-exact-four");
 		await expect(page!.locator(".permission-approval-panel")).toBeVisible();
