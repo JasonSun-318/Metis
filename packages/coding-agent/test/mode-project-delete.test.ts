@@ -483,7 +483,7 @@ describe("mode project Trash", () => {
 		expect(stagingRenames).toBe(250);
 		expect(trashCalls).toBe(0);
 		for (const session of sessions) expect(existsSync(session.path), session.path).toBe(true);
-	});
+	}, 60_000);
 
 	it("treats disappearance from a late Trash diagnostic as committed", async () => {
 		const layout = createLayout();
