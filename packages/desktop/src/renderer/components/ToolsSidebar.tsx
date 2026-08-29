@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
 	DEFAULT_BROWSER_PROFILE_ID,
+	type DesktopBrowserHandoffReason,
 	type DesktopBrowserProfile,
 	type DesktopBrowserState,
 	type DesktopWorkspaceMutationResult,
@@ -37,6 +38,8 @@ interface BrowserTab {
 	readonly url: string;
 	readonly profileId: string;
 	readonly profileName: string;
+	readonly controlState: "idle" | "agent" | "handoff";
+	readonly handoffReason?: DesktopBrowserHandoffReason;
 }
 
 interface FileTab {
@@ -94,6 +97,7 @@ interface ToolsSidebarProps {
 	readonly cleanupSessionIds: readonly string[];
 	readonly mode: AgentMode;
 	readonly onClose: () => void;
+	readonly onActivateSession: (sessionId: string) => void;
 	readonly onCleanupSessionIdsHandled: (sessionIds: readonly string[]) => void;
 	readonly onDirtySessionIdsChange: (sessionIds: readonly string[]) => void;
 	readonly onError: (cause: unknown) => void;
@@ -169,7 +173,7 @@ function remapPath(path: string, previous: string, next: string): string {
 	return path === previous ? next : `${next}${path.slice(previous.length)}`;
 }
 
-export function ToolsSidebar({ activeSession, api, cleanupSessionIds, mode, onClose, onCleanupSessionIdsHandled, onDirtySessionIdsChange, onError, onWidthChange, open, planPreviewRequest, preferredWidth, previewRequest, store, theme, width }: ToolsSidebarProps) {
+export function ToolsSidebar({ activeSession, api, cleanupSessionIds, mode, onActivateSession, onClose, onCleanupSessionIdsHandled, onDirtySessionIdsChange, onError, onWidthChange, open, planPreviewRequest, preferredWidth, previewRequest, store, theme, width }: ToolsSidebarProps) {
 	const { t } = useTranslation();
 	const [workspaces, setWorkspaces] = useState<ReadonlyMap<string, ToolWorkspace>>(new Map());
 	const [expandedBySession, setExpandedBySession] = useState<ReadonlyMap<string, readonly string[]>>(new Map());
@@ -183,6 +187,8 @@ export function ToolsSidebar({ activeSession, api, cleanupSessionIds, mode, onCl
 		sourceId: null,
 		sourceProfileId: null,
 	}]);
+	const browserProfilesRef = useRef(browserProfiles);
+	browserProfilesRef.current = browserProfiles;
 	const preferredBrowserProfileId = useRef(localStorage.getItem(BROWSER_PROFILE_STORAGE_KEY));
 	const menuRef = useRef<HTMLDivElement>(null);
 	const resizeRef = useRef<{ readonly pointerId: number; readonly x: number; readonly width: number } | null>(null);
@@ -209,6 +215,83 @@ export function ToolsSidebar({ activeSession, api, cleanupSessionIds, mode, onCl
 		return () => { active = false; };
 	}, [api, onError]);
 
+	useEffect(
+		() =>
+			api.subscribeBrowser((event) => {
+				if (event.type === "opened") {
+					const profile = browserProfilesRef.current.find(({ profileId }) => profileId === event.profileId);
+					setWorkspaces((current) => {
+						const workspace = current.get(event.sessionId) ?? { tabs: [], activeId: "", nextNumber: 1 };
+						if (workspace.tabs.some(({ id }) => id === event.browserId)) return current;
+						const next = new Map(current);
+						next.set(event.sessionId, {
+							...workspace,
+							activeId: event.browserId,
+							tabs: [
+								...workspace.tabs,
+								{
+									kind: "browser",
+									id: event.browserId,
+									title: t("New tab"),
+									url: "",
+									profileId: event.profileId,
+									profileName: profile?.name ?? t("Browser"),
+									controlState: "idle",
+								},
+							],
+						});
+						return next;
+					});
+					return;
+				}
+				if (event.type === "closed") {
+					setWorkspaces((current) => {
+						const workspace = current.get(event.sessionId);
+						if (!workspace?.tabs.some(({ id }) => id === event.browserId)) return current;
+						const tabs = workspace.tabs.filter(({ id }) => id !== event.browserId);
+						const next = new Map(current);
+						next.set(event.sessionId, {
+							...workspace,
+							tabs,
+							activeId: workspace.activeId === event.browserId ? (tabs.at(-1)?.id ?? "") : workspace.activeId,
+						});
+						return next;
+					});
+					return;
+				}
+				if (event.type !== "activity" && event.type !== "handoff") return;
+				setWorkspaces((current) => {
+					const workspace = current.get(event.sessionId);
+					if (!workspace) return current;
+					let changed = false;
+					const tabs = workspace.tabs.map((tab) => {
+						if (tab.kind !== "browser" || tab.id !== event.browserId) return tab;
+						changed = true;
+						if (event.type === "activity") {
+							return { ...tab, controlState: event.active ? "agent" as const : "idle" as const, handoffReason: undefined };
+						}
+						return event.status === "requested"
+							? { ...tab, controlState: "handoff" as const, handoffReason: event.reason }
+							: { ...tab, controlState: "idle" as const, handoffReason: undefined };
+					});
+					if (!changed) return current;
+					const next = new Map(current);
+					next.set(event.sessionId, {
+						...workspace,
+						tabs,
+						activeId: event.type === "handoff" && event.status === "requested"
+							? event.browserId
+							: workspace.activeId,
+					});
+					return next;
+				});
+				if (event.type === "handoff" && event.status === "requested") {
+					onActivateSession(event.sessionId);
+				}
+			}),
+		[api, onActivateSession, t],
+	);
+
 	useEffect(() => setMenuOpen(false), [mode, sessionId]);
 	useEffect(() => onDirtySessionIdsChange(dirtySessionIds), [dirtySessionKey, onDirtySessionIdsChange]);
 	useEffect(() => {
@@ -219,7 +302,7 @@ export function ToolsSidebar({ activeSession, api, cleanupSessionIds, mode, onCl
 			for (const tab of workspaces.get(ownerSessionId)?.tabs ?? []) {
 				removedTabIds.add(tab.id);
 				if (tab.kind === "terminal") void api.closeTerminal({ terminalId: tab.id }).catch(onError);
-				else if (tab.kind === "browser") void api.closeBrowser({ browserId: tab.id }).catch(onError);
+				else if (tab.kind === "browser") void api.closeBrowser({ sessionId: ownerSessionId, browserId: tab.id }).catch(onError);
 			}
 			try {
 				localStorage.removeItem(`${FILE_BROWSER_STORAGE_PREFIX}${ownerSessionId}`);
@@ -376,6 +459,7 @@ export function ToolsSidebar({ activeSession, api, cleanupSessionIds, mode, onCl
 				url: "",
 				profileId: profile.profileId,
 				profileName: profile.name,
+				controlState: "idle",
 			};
 			next.set(activeSession.sessionId, {
 				...previous,
@@ -689,7 +773,7 @@ export function ToolsSidebar({ activeSession, api, cleanupSessionIds, mode, onCl
 		const closing = workspaces.get(ownerSessionId)?.tabs.find((tab) => tab.id === id);
 		if (!closing) return;
 		if (closing.kind === "terminal") void api.closeTerminal({ terminalId: id }).catch(onError);
-		else if (closing.kind === "browser") void api.closeBrowser({ browserId: id }).catch(onError);
+		else if (closing.kind === "browser") void api.closeBrowser({ sessionId: ownerSessionId, browserId: id }).catch(onError);
 		else if (closing.kind === "agent" && ownerSessionId === sessionId) store.selectAgentTranscript(null);
 		setFileDrafts((current) => {
 			if (!current.has(id)) return current;
@@ -871,6 +955,9 @@ export function ToolsSidebar({ activeSession, api, cleanupSessionIds, mode, onCl
 							<BrowserPanel
 								api={api}
 								browserId={tab.id}
+								controlState={tab.controlState}
+								handoffReason={tab.handoffReason}
+								sessionId={ownerSessionId}
 								key={tab.id}
 								onError={onError}
 								onOpenProfile={(profile) => {

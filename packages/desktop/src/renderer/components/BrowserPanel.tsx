@@ -25,15 +25,16 @@ import {
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type {
-	MetisDesktopApi,
 	DesktopBrowserBounds,
 	DesktopBrowserCommand,
+	DesktopBrowserHandoffReason,
 	DesktopBrowserProfile,
 	DesktopBrowserSourceId,
 	DesktopBrowserState,
 	DesktopDownloadControlType,
 	DesktopDownloadItem,
 	DesktopHistoryEntry,
+	MetisDesktopApi,
 } from "../../shared/desktop-api.ts";
 import { BrowserImportDialog } from "./BrowserImportDialog.tsx";
 import { MenuSelect } from "./MenuSelect.tsx";
@@ -44,7 +45,10 @@ type BrowserProfileChoice = Pick<DesktopBrowserProfile, "profileId" | "name"> & 
 
 interface BrowserPanelProps {
 	readonly api: MetisDesktopApi;
+	readonly sessionId: string;
 	readonly browserId: string;
+	readonly controlState: "idle" | "agent" | "handoff";
+	readonly handoffReason?: DesktopBrowserHandoffReason;
 	readonly onError: (cause: unknown) => void;
 	readonly onOpenProfile?: (profile: BrowserProfileChoice) => void;
 	readonly onProfileImported: (profile: DesktopBrowserProfile) => void;
@@ -186,7 +190,7 @@ function BrowserClearDialog({ busy, onCancel, onConfirm }: {
 	);
 }
 
-export function BrowserPanel({ api, browserId, onError, onOpenProfile, onProfileImported, onState, profile, profiles, visible }: BrowserPanelProps) {
+export function BrowserPanel({ api, sessionId, browserId, controlState, handoffReason, onError, onOpenProfile, onProfileImported, onState, profile, profiles, visible }: BrowserPanelProps) {
 	const { t } = useTranslation();
 	const availableProfiles = profiles ?? [profile];
 	const currentProfile = availableProfiles.find((candidate) => candidate.profileId === profile.profileId) ?? profile;
@@ -212,7 +216,13 @@ export function BrowserPanel({ api, browserId, onError, onOpenProfile, onProfile
 	const [downloadsOpen, setDownloadsOpen] = useState(false);
 	const [history, setHistory] = useState<readonly DesktopHistoryEntry[]>([]);
 	const [historyOpen, setHistoryOpen] = useState(false);
+	const [takeoverBusy, setTakeoverBusy] = useState(false);
+	const [handoffBusy, setHandoffBusy] = useState(false);
+	const takeoverBusyRef = useRef(false);
+	const handoffBusyRef = useRef(false);
 	const anchorRef = useRef<HTMLDivElement>(null);
+	const handoffHeadingRef = useRef<HTMLHeadingElement>(null);
+	const previousControlStateRef = useRef(controlState);
 	const findInputRef = useRef<HTMLInputElement>(null);
 	const moreRef = useRef<HTMLDivElement>(null);
 	const downloadsRef = useRef<HTMLDivElement>(null);
@@ -317,7 +327,7 @@ export function BrowserPanel({ api, browserId, onError, onOpenProfile, onProfile
 	function openHistoryEntry(url: string) {
 		closeHistory();
 		setStatus(null);
-		void api.controlBrowser({ type: "navigate", browserId, url }).catch((cause) => {
+		void api.controlBrowser({ type: "navigate", sessionId, browserId, url }).catch((cause) => {
 			setStatus(t("Browser could not load this page"));
 			onErrorRef.current(cause);
 		});
@@ -332,7 +342,7 @@ export function BrowserPanel({ api, browserId, onError, onOpenProfile, onProfile
 	}
 
 	async function capturePreview(request: number): Promise<string | null> {
-		const preview = await api.captureBrowserPreview({ browserId });
+		const preview = await api.captureBrowserPreview({ sessionId, browserId });
 		const image = new Image();
 		image.src = preview;
 		await image.decode?.();
@@ -383,7 +393,7 @@ export function BrowserPanel({ api, browserId, onError, onOpenProfile, onProfile
 		const request = ++previewRequestRef.current;
 		void (async () => {
 			try {
-				await api.controlBrowser({ ...action, browserId });
+					await api.controlBrowser({ ...action, sessionId, browserId });
 				if (!moreOpenRef.current) return;
 				const preview = await capturePreview(request);
 				if (preview && moreOpenRef.current) setPagePreview(preview);
@@ -413,7 +423,7 @@ export function BrowserPanel({ api, browserId, onError, onOpenProfile, onProfile
 		setMoreOpen(false);
 		setNotice(null);
 		setStatus(null);
-		void api.controlBrowser({ type, browserId }).catch((cause) => {
+		void api.controlBrowser({ type, sessionId, browserId }).catch((cause) => {
 			setStatus(translateRef.current(type === "capture-page" ? "Screenshot could not be saved" : "Browser action failed"));
 			onErrorRef.current(cause);
 		});
@@ -429,12 +439,12 @@ export function BrowserPanel({ api, browserId, onError, onOpenProfile, onProfile
 		setFindOpen(false);
 		setFindText("");
 		setFindResult({ activeMatchOrdinal: 0, matches: 0 });
-		void api.controlBrowser({ type: "stop-find", browserId }).catch(onErrorRef.current);
+		void api.controlBrowser({ type: "stop-find", sessionId, browserId }).catch(onErrorRef.current);
 	}
 
 	function find(forward: boolean, findNext: boolean, text = findText) {
 		// Electron starts a new find session when findNext is true; follow-up navigation uses false.
-		void api.controlBrowser({ type: "find", browserId, text, forward, findNext }).catch(onErrorRef.current);
+		void api.controlBrowser({ type: "find", sessionId, browserId, text, forward, findNext }).catch(onErrorRef.current);
 	}
 
 	function runCommand(command: DesktopBrowserCommand) {
@@ -448,7 +458,7 @@ export function BrowserPanel({ api, browserId, onError, onOpenProfile, onProfile
 	function clearBrowserData() {
 		if (clearBusy) return;
 		setClearBusy(true);
-		void api.controlBrowser({ type: "clear-data", browserId }).then(
+		void api.controlBrowser({ type: "clear-data", sessionId, browserId }).then(
 			() => {
 				setClearBusy(false);
 				setClearConfirmOpen(false);
@@ -487,11 +497,12 @@ export function BrowserPanel({ api, browserId, onError, onOpenProfile, onProfile
 				if (event.profileId === profile.profileId) setHistory(event.entries);
 				return;
 			}
-			if (event.type === "command") {
+				if (event.type === "command") {
 				if (event.browserId === browserId && visibleRef.current) runCommand(event.command);
-				return;
-			}
-			if (event.state.browserId !== browserId) return;
+					return;
+				}
+				if (event.type !== "state") return;
+				if (event.state.browserId !== browserId) return;
 			setState(event.state);
 			setAddress(event.state.url);
 			onStateRef.current(event.state);
@@ -508,7 +519,7 @@ export function BrowserPanel({ api, browserId, onError, onOpenProfile, onProfile
 			},
 			() => undefined,
 		);
-		creationRef.current ??= api.createBrowser({ browserId, profileId: profile.profileId });
+			creationRef.current ??= api.createBrowser({ sessionId, browserId, profileId: profile.profileId });
 		void creationRef.current.then(
 			(created) => {
 				if (!active) return;
@@ -526,9 +537,36 @@ export function BrowserPanel({ api, browserId, onError, onOpenProfile, onProfile
 			previewRequestRef.current += 1;
 			removeBrowserListener();
 		};
-	}, [api, browserId, profile.profileId]);
+	}, [api, sessionId, browserId, profile.profileId]);
 
 	useEffect(() => setZoomDraft(String(state.zoomPercent)), [state.zoomPercent]);
+
+	useEffect(() => {
+		const previous = previousControlStateRef.current;
+		previousControlStateRef.current = controlState;
+		takeoverBusyRef.current = false;
+		handoffBusyRef.current = false;
+		setTakeoverBusy(false);
+		setHandoffBusy(false);
+		setMoreOpen(false);
+		setDownloadsOpen(false);
+		setHistoryOpen(false);
+		setFindOpen(false);
+		if (controlState === "handoff" && previous !== "handoff") {
+			requestAnimationFrame(() => handoffHeadingRef.current?.focus());
+		}
+	}, [controlState]);
+
+	useEffect(() => {
+		if (controlState !== "agent" || !visible || state.url === "") return;
+		const request = ++previewRequestRef.current;
+		void capturePreview(request).then(
+			(preview) => {
+				if (preview) setPagePreview(preview);
+			},
+			() => undefined,
+		);
+	}, [controlState, state.url, visible]);
 
 	useEffect(() => {
 		if (!moreOpen && !downloadsOpen && !historyOpen) return;
@@ -590,7 +628,7 @@ export function BrowserPanel({ api, browserId, onError, onOpenProfile, onProfile
 			const key = `${presented}:${bounds.x}:${bounds.y}:${bounds.width}:${bounds.height}`;
 			if (key === presentationRef.current) return;
 			presentationRef.current = key;
-			void api.controlBrowser({ type: "present", browserId, visible: presented, bounds }).then(
+			void api.controlBrowser({ type: "present", sessionId, browserId, visible: presented, bounds }).then(
 				() => {
 					if (presented) setPagePreview(null);
 				},
@@ -617,7 +655,7 @@ export function BrowserPanel({ api, browserId, onError, onOpenProfile, onProfile
 			presentRef.current = null;
 			const bounds = boundsRef.current;
 			if (bounds && shouldPresentRef.current) {
-				void api.controlBrowser({ type: "present", browserId, visible: false, bounds }).catch(() => undefined);
+				void api.controlBrowser({ type: "present", sessionId, browserId, visible: false, bounds }).catch(() => undefined);
 			}
 		};
 	}, [api, browserId]);
@@ -626,6 +664,7 @@ export function BrowserPanel({ api, browserId, onError, onOpenProfile, onProfile
 		shouldPresentRef.current =
 			visible
 			&& state.url !== ""
+			&& controlState !== "agent"
 			&& !moreOpen
 			&& !downloadsOpen
 			&& !historyOpen
@@ -633,11 +672,47 @@ export function BrowserPanel({ api, browserId, onError, onOpenProfile, onProfile
 			&& !importOpen
 			&& status === null;
 		presentRef.current?.();
-	}, [clearConfirmOpen, downloadsOpen, historyOpen, importOpen, moreOpen, state.url, status, visible]);
+	}, [clearConfirmOpen, controlState, downloadsOpen, historyOpen, importOpen, moreOpen, state.url, status, visible]);
+
+	const takeControl = () => {
+		if (takeoverBusyRef.current) return;
+		takeoverBusyRef.current = true;
+		setTakeoverBusy(true);
+		void api.takeBrowserControl({ sessionId, browserId }).catch((cause) => {
+			takeoverBusyRef.current = false;
+			setTakeoverBusy(false);
+			onErrorRef.current(cause);
+		});
+	};
+
+	const resolveHandoff = (decision: "complete" | "cancel") => {
+		if (handoffBusyRef.current) return;
+		handoffBusyRef.current = true;
+		setHandoffBusy(true);
+		void api.resolveBrowserHandoff({ sessionId, browserId, decision }).catch((cause) => {
+			handoffBusyRef.current = false;
+			setHandoffBusy(false);
+			onErrorRef.current(cause);
+		});
+	};
+
+	const handoffMessage = handoffReason === "login"
+		? t("Sign in on this page, then continue when you are done.")
+		: handoffReason === "otp"
+			? t("Enter the verification code on this page, then continue.")
+			: handoffReason === "passkey"
+				? t("Complete the passkey prompt, then continue.")
+				: handoffReason === "device_approval"
+					? t("Approve this sign-in on your device, then continue.")
+					: handoffReason === "captcha"
+						? t("Complete the human verification on this page, then continue.")
+						: handoffReason === "sensitive_action"
+							? t("Review and complete the sensitive action yourself, then continue.")
+							: t("Complete the requested step on this page, then continue.");
 
 	const control = (type: "back" | "forward" | "reload" | "open-external") => {
 		setStatus(null);
-		void api.controlBrowser({ type, browserId }).catch((cause) => {
+		void api.controlBrowser({ type, sessionId, browserId }).catch((cause) => {
 			setStatus(t("Browser could not load this page"));
 			onErrorRef.current(cause);
 		});
@@ -647,11 +722,11 @@ export function BrowserPanel({ api, browserId, onError, onOpenProfile, onProfile
 		<section
 			aria-hidden={!visible}
 			aria-label={t("Browser")}
-			className={`browser-panel${visible ? " is-visible" : ""}`}
+			className={`browser-panel${visible ? " is-visible" : ""}${controlState !== "idle" ? " has-control-bar" : ""}`}
 			id={`browser-panel-${browserId}`}
 			role="tabpanel"
 		>
-			<div className="browser-toolbar">
+			<div aria-disabled={controlState !== "idle"} className="browser-toolbar" inert={controlState !== "idle"}>
 				<MenuSelect
 					ariaLabel={t("Browser profile: {{name}}", { name: profileLabel(currentProfile) })}
 					className="browser-profile-select"
@@ -676,7 +751,7 @@ export function BrowserPanel({ api, browserId, onError, onOpenProfile, onProfile
 						if (!url) return;
 						setStatus(null);
 						setNotice(null);
-						void api.controlBrowser({ type: "navigate", browserId, url }).catch((cause) => {
+						void api.controlBrowser({ type: "navigate", sessionId, browserId, url }).catch((cause) => {
 							setStatus(t("Browser could not load this page"));
 							onErrorRef.current(cause);
 						});
@@ -806,6 +881,28 @@ export function BrowserPanel({ api, browserId, onError, onOpenProfile, onProfile
 					)}
 				</div>
 			</div>
+			{controlState === "agent" && (
+				<div className="browser-control-bar" role="status">
+					<span>{t("Metis is controlling this page")}</span>
+					<button disabled={takeoverBusy} onClick={takeControl} type="button">
+						{t(takeoverBusy ? "Taking control…" : "Take control")}
+					</button>
+				</div>
+			)}
+			{controlState === "handoff" && (
+				<div className="browser-control-bar browser-handoff-bar" role="alert">
+					<div>
+						<h2 ref={handoffHeadingRef} tabIndex={-1}>{t("Your action is needed")}</h2>
+						<p>{handoffMessage}</p>
+					</div>
+					<div className="browser-control-actions">
+						<button disabled={handoffBusy} onClick={() => resolveHandoff("cancel")} type="button">{t("Cancel")}</button>
+						<button className="is-primary" disabled={handoffBusy} onClick={() => resolveHandoff("complete")} type="button">
+							{t(handoffBusy ? "Continuing…" : "Done, continue")}
+						</button>
+					</div>
+				</div>
+			)}
 			{findOpen && (
 				<div aria-label={t("Find in page")} className="browser-find-panel" role="search">
 					<div className="browser-find-query">

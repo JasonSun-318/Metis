@@ -3905,6 +3905,7 @@ describe("Chat desktop shell", () => {
 			terminalId: vi.mocked(api.createTerminal).mock.calls[0]![0].terminalId,
 		});
 		expect(api.closeBrowser).toHaveBeenCalledWith({
+			sessionId: "code-existing",
 			browserId: vi.mocked(api.createBrowser).mock.calls[0]![0].browserId,
 		});
 		expect(localStorage.getItem("metis.file-browser.v1:code-existing")).toBeNull();
@@ -4394,7 +4395,12 @@ describe("Chat desktop shell", () => {
 		const address = container.querySelector<HTMLInputElement>('[aria-label="Browser address"]')!;
 		changeInput(address, "example.com");
 		await act(async () => container.querySelector<HTMLFormElement>(".browser-address-form")!.requestSubmit());
-		expect(api.controlBrowser).toHaveBeenCalledWith({ type: "navigate", browserId, url: "example.com" });
+		expect(api.controlBrowser).toHaveBeenCalledWith({
+			type: "navigate",
+			sessionId: "chat-existing",
+			browserId,
+			url: "example.com",
+		});
 
 		act(() => emitBrowser({
 			type: "state",
@@ -4418,7 +4424,7 @@ describe("Chat desktop shell", () => {
 		vi.mocked(api.controlBrowser).mockClear();
 		await act(async () => button(container, "More browser actions").click());
 		await flush();
-		expect(api.captureBrowserPreview).toHaveBeenCalledWith({ browserId });
+		expect(api.captureBrowserPreview).toHaveBeenCalledWith({ sessionId: "chat-existing", browserId });
 		expect(container.querySelector<HTMLImageElement>(".browser-view-preview")?.src).toBe(
 			"data:image/png;base64,cHJldmlldw==",
 		);
@@ -4445,6 +4451,7 @@ describe("Chat desktop shell", () => {
 		changeInput(findInput, "open");
 		expect(api.controlBrowser).toHaveBeenCalledWith({
 			type: "find",
+			sessionId: "chat-existing",
 			browserId,
 			text: "open",
 			forward: true,
@@ -4457,6 +4464,7 @@ describe("Chat desktop shell", () => {
 		);
 		expect(api.controlBrowser).toHaveBeenLastCalledWith({
 			type: "find",
+			sessionId: "chat-existing",
 			browserId,
 			text: "open",
 			forward: false,
@@ -4465,7 +4473,11 @@ describe("Chat desktop shell", () => {
 		await act(async () =>
 			findInput.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })),
 		);
-		expect(api.controlBrowser).toHaveBeenLastCalledWith({ type: "stop-find", browserId });
+		expect(api.controlBrowser).toHaveBeenLastCalledWith({
+			type: "stop-find",
+			sessionId: "chat-existing",
+			browserId,
+		});
 		expect(container.querySelector(".browser-find-panel")).toBeNull();
 
 		act(() => emitBrowser({ type: "command", browserId, command: "find" }));
@@ -4477,12 +4489,12 @@ describe("Chat desktop shell", () => {
 				.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })),
 		);
 		act(() => emitBrowser({ type: "command", browserId, command: "print" }));
-		expect(api.controlBrowser).toHaveBeenCalledWith({ type: "print", browserId });
+		expect(api.controlBrowser).toHaveBeenCalledWith({ type: "print", sessionId: "chat-existing", browserId });
 
 		await act(async () => button(container, "More browser actions").click());
 		await act(async () => button(container, "Zoom in").click());
 		await flush();
-		expect(api.controlBrowser).toHaveBeenCalledWith({ type: "zoom-in", browserId });
+		expect(api.controlBrowser).toHaveBeenCalledWith({ type: "zoom-in", sessionId: "chat-existing", browserId });
 		expect(container.querySelector(".browser-more-menu")).not.toBeNull();
 		const zoomInput = container.querySelector<HTMLInputElement>('input[aria-label="Zoom percentage"]')!;
 		expect(zoomInput).not.toBeNull();
@@ -4490,7 +4502,12 @@ describe("Chat desktop shell", () => {
 		await act(async () =>
 			zoomInput.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })),
 		);
-		expect(api.controlBrowser).toHaveBeenCalledWith({ type: "set-zoom", browserId, zoomPercent: 137 });
+		expect(api.controlBrowser).toHaveBeenCalledWith({
+			type: "set-zoom",
+			sessionId: "chat-existing",
+			browserId,
+			zoomPercent: 137,
+		});
 		act(() => emitBrowser({
 			type: "state",
 			state: {
@@ -4514,7 +4531,11 @@ describe("Chat desktop shell", () => {
 		expect(container.querySelector(".browser-clear-dialog")).not.toBeNull();
 		await act(async () => container.querySelector<HTMLButtonElement>('[data-browser-confirm-clear]')!.click());
 		await flush();
-		expect(api.controlBrowser).toHaveBeenCalledWith({ type: "clear-data", browserId });
+		expect(api.controlBrowser).toHaveBeenCalledWith({
+			type: "clear-data",
+			sessionId: "chat-existing",
+			browserId,
+		});
 		expect(container.querySelector(".browser-toolbar-notice")?.textContent).toContain("Browser data cleared");
 
 		await act(async () =>
@@ -4532,7 +4553,7 @@ describe("Chat desktop shell", () => {
 			await act(async () =>
 				window.dispatchEvent(new KeyboardEvent("keydown", { key, metaKey: true })),
 			);
-			expect(api.controlBrowser).toHaveBeenCalledWith({ type, browserId });
+			expect(api.controlBrowser).toHaveBeenCalledWith({ type, sessionId: "chat-existing", browserId });
 		}
 
 		await act(async () => button(container, "Add tool").click());
@@ -4554,7 +4575,7 @@ describe("Chat desktop shell", () => {
 		await act(async () => button(container, "Close New tab").click());
 		await act(async () => button(container, "Close Example Domain").click());
 		expect(api.closeBrowser).toHaveBeenCalledTimes(2);
-		expect(api.closeBrowser).toHaveBeenCalledWith({ browserId });
+		expect(api.closeBrowser).toHaveBeenCalledWith({ sessionId: "chat-existing", browserId });
 		expect(container.querySelectorAll('[role="tab"]')).toHaveLength(0);
 
 		await act(async () => root.unmount());

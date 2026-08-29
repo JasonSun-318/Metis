@@ -47,7 +47,7 @@ function renderPanel(api: MetisDesktopApi) {
 	void act(() =>
 		root.render(
 			<StrictMode>
-				<BrowserPanel api={api} browserId="browser-1" onError={vi.fn()} onProfileImported={vi.fn()} onState={vi.fn()} profile={{ profileId: DEFAULT_BROWSER_PROFILE_ID, name: "Default" }} visible />
+				<BrowserPanel api={api} sessionId="11111111-1111-4111-8111-111111111111" browserId="browser-1" controlState="idle" onError={vi.fn()} onProfileImported={vi.fn()} onState={vi.fn()} profile={{ profileId: DEFAULT_BROWSER_PROFILE_ID, name: "Default" }} visible />
 			</StrictMode>,
 		),
 	);

@@ -482,6 +482,22 @@ export function App({ api, store }: AppProps) {
 		},
 		[api, markSessionRead, reportError, store],
 	);
+	const activateBrowserSession = useCallback(
+		(sessionId: string) => {
+			setDestination("tasks");
+			setNewTaskDraft(null);
+			setToolsSidebarOpen(true);
+			const current = store.getSnapshot();
+			const summary = current.sessionsById.get(sessionId);
+			if (summary) setMode(summary.mode);
+			if (current.activeSessionId === sessionId) return;
+			void openSession(sessionId).then(
+				(snapshot) => setMode(snapshot.session.mode),
+				() => undefined,
+			);
+		},
+		[openSession, store],
+	);
 
 	const requestResnapshot = useCallback(
 		(sessionId: string) => {
@@ -1948,6 +1964,7 @@ export function App({ api, store }: AppProps) {
 					api={api}
 					cleanupSessionIds={toolCleanupSessionIds}
 					mode={mode}
+					onActivateSession={activateBrowserSession}
 					onClose={() => setToolsSidebarOpen(false)}
 					onCleanupSessionIdsHandled={handleToolCleanupHandled}
 					onDirtySessionIdsChange={handleDirtySessionIdsChange}
