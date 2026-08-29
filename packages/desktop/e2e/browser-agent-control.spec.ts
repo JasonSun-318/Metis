@@ -193,18 +193,39 @@ test("packaged agent controls accessible pages, frames, screenshots, popups, sta
 		).toBe(true);
 		expect(fixture.calls.filter((call) => call.marker === "ordinary-control" && call.name === "browser_tabs").at(-1)?.result).toContain(mainBrowserId);
 
+		await app.page.evaluate(() => {
+			const state = window as typeof window & { __browserActivityEvents?: number[] };
+			state.__browserActivityEvents = [];
+			(globalThis as unknown as { metis: MetisDesktopApi }).metis.subscribeBrowser((event) => {
+				if (event.type === "activity") state.__browserActivityEvents!.push(performance.now());
+			});
+		});
 		await sendFixturePrompt(app.page, "performance-cycle");
 		await waitForDone(app, "performance-cycle");
-		const observationDurations = fixture.calls
-			.filter((call) => call.marker === "performance-cycle" && call.name === "browser_observe" && call.completedAt)
+		const performanceCalls = fixture.calls.filter((call) => call.marker === "performance-cycle");
+		expect(performanceCalls.every((call) => call.completedAt !== undefined)).toBe(true);
+		expect(Math.max(...performanceCalls.map((call) => Buffer.byteLength(call.result ?? "", "utf8")))).toBeLessThan(
+			256 * 1024,
+		);
+		const observationDurations = performanceCalls
+			.filter((call) => call.name === "browser_observe" && call.completedAt)
 			.map((call) => call.completedAt! - call.issuedAt);
-		const actionDurations = fixture.calls
-			.filter((call) => call.marker === "performance-cycle" && call.name === "browser_act" && call.completedAt)
+		const actionDurations = performanceCalls
+			.filter((call) => call.name === "browser_act" && call.completedAt)
 			.map((call) => call.completedAt! - call.issuedAt);
 		expect(observationDurations).toHaveLength(PERFORMANCE_OBSERVATIONS);
 		expect(actionDurations).toHaveLength(PERFORMANCE_ACTIONS);
 		expect(p95(observationDurations.slice(PERFORMANCE_WARMUPS))).toBeLessThan(1_000);
 		expect(p95(actionDurations.slice(PERFORMANCE_WARMUPS))).toBeLessThan(1_500);
+		const activityEvents = await app.page.evaluate(
+			() => (window as typeof window & { __browserActivityEvents?: number[] }).__browserActivityEvents ?? [],
+		);
+		const peakEventsPerSecond = activityEvents.reduce(
+			(maximum, startedAt) =>
+				Math.max(maximum, activityEvents.filter((timestamp) => timestamp >= startedAt && timestamp < startedAt + 1_000).length),
+			0,
+		);
+		expect(peakEventsPerSecond).toBeLessThanOrEqual(20);
 		await expect(embedded.locator("#count")).toHaveText("Count: 101");
 
 		await sendFixturePrompt(app.page, "stale-observe");

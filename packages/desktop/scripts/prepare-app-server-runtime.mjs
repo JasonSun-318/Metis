@@ -67,8 +67,8 @@ const buildSteps = [
 	["run", "build", "--workspace", "@metis/tui"],
 	["exec", "--workspace", "@metis/ai", "--", "tsgo", "-p", "tsconfig.build.json"],
 	["run", "build", "--workspace", "@metis/agent-core"],
-	["run", "build", "--workspace", "@metis/coding-agent"],
 	["run", "build", "--workspace", "@metis/app-protocol"],
+	["run", "build", "--workspace", "@metis/coding-agent"],
 	["run", "build", "--workspace", "@metis/app-server"],
 ];
 for (const args of buildSteps) await runNpm(args, `Building ${args.at(-1)} failed`);

@@ -158,6 +158,10 @@ export class InteractionBroker {
 		this.owners.set(sessionId, peer);
 	}
 
+	hasOwner(sessionId: string): boolean {
+		return this.owners.has(sessionId);
+	}
+
 	release(sessionId: string, peer: InteractionPeer): void {
 		if (this.owners.get(sessionId) === peer) this.owners.delete(sessionId);
 	}
@@ -207,11 +211,12 @@ export class InteractionBroker {
 		const interactionId = this.createId();
 		const action = input.action;
 		const target =
-			"elementId" in action
+			input.targetLabel ??
+			("elementId" in action
 				? action.elementId
 				: "target" in action && "elementId" in action.target
 					? action.target.elementId
-					: action.type;
+					: action.type);
 		const response = await this.request(
 			sessionId,
 			{

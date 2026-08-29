@@ -480,17 +480,20 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 	private async bindExtensionUI(session: AgentSession): Promise<void> {
 		const uiContext = this.interactions?.createExtensionUIContext(this.sessionId, (event) => this.publish(event));
 		if (this.interactions) {
-			session.installHostTools(
-				[
-					createAskUserToolDefinition((request) => this.interactions!.requestUserInput(this.sessionId, request)),
-					...createBrowserToolDefinitions(({ toolCallId, tool, input, signal }) =>
+			const browserTools = this.interactions.hasOwner(this.sessionId)
+				? createBrowserToolDefinitions(({ toolCallId, tool, input, signal }) =>
 						this.interactions!.requestBrowserTool(
 							this.sessionId,
 							toolCallId,
 							{ tool, input } as BrowserToolCall,
 							signal,
 						),
-					),
+					)
+				: [];
+			session.installHostTools(
+				[
+					createAskUserToolDefinition((request) => this.interactions!.requestUserInput(this.sessionId, request)),
+					...browserTools,
 					createDeliverFileToolDefinition(() => ({
 						cwd: session.sessionManager.getCwd(),
 						agentDir: this.agentDir,
@@ -499,7 +502,13 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 						activeDeliveredFileCount: this.deliveredFiles.length,
 					})),
 				],
-				{ automaticPermissionToolNames: ["ask_user", ...BROWSER_TOOL_NAMES, "deliver_file"] },
+				{
+					automaticPermissionToolNames: [
+						"ask_user",
+						...(browserTools.length > 0 ? BROWSER_TOOL_NAMES : []),
+						"deliver_file",
+					],
+				},
 			);
 		}
 		session.setPermissionApprovalHandler((request) =>

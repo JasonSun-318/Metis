@@ -4,6 +4,7 @@ import { rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
 	type BrowserHandoffDetails,
+	type BrowserNavigateInput,
 	type BrowserToolCall,
 	type BrowserToolResult,
 	MAX_BROWSER_TABS_PER_SESSION,
@@ -56,6 +57,7 @@ const BLANK_URL = "about:blank";
 const DEFAULT_BROWSER_BOUNDS: DesktopBrowserBounds = { x: 0, y: 0, width: 1_024, height: 768 };
 const MAX_HISTORY_ENTRIES = 500;
 const HISTORY_SAVE_DELAY_MS = 500;
+const ACTIVITY_IDLE_DELAY_MS = 50;
 const ZOOM_PERCENTAGES = [25, 33, 50, 67, 75, 80, 90, 100, 110, 125, 150, 175, 200, 250, 300, 400, 500] as const;
 
 interface BrowserRecord {
@@ -76,6 +78,8 @@ interface BrowserRecord {
 	};
 	findRequestId: number;
 	controlState: "idle" | "agent" | "handoff";
+	activityActive: boolean;
+	activityIdleTimer?: NodeJS.Timeout;
 	activeAbort?: AbortController;
 	takeoverRequested: boolean;
 	handoff?: HandoffRecord;
@@ -447,6 +451,7 @@ export class BrowserManager {
 			presentationKey: "",
 			findRequestId: 0,
 			controlState: "idle",
+			activityActive: false,
 			takeoverRequested: false,
 			commandTail: Promise.resolve(),
 		};
@@ -537,24 +542,19 @@ export class BrowserManager {
 		const record = this.recordForSession(input.sessionId, input.browserId);
 		if (record.controlState !== "idle") throw new Error("Browser is currently controlled by the user or agent");
 		if (input.type === "navigate") {
-			await this.navigateRecord(record, input.url);
+			await this.applyNavigation(record, { action: "goto", browserId: input.browserId, url: input.url });
 			return;
 		}
 		if (input.type === "back") {
-			record.controller.invalidate();
-			if (record.contents.navigationHistory.canGoBack()) record.contents.navigationHistory.goBack();
+			await this.applyNavigation(record, { action: "back", browserId: input.browserId });
 			return;
 		}
 		if (input.type === "forward") {
-			record.controller.invalidate();
-			if (record.contents.navigationHistory.canGoForward()) {
-				record.contents.navigationHistory.goForward();
-			}
+			await this.applyNavigation(record, { action: "forward", browserId: input.browserId });
 			return;
 		}
 		if (input.type === "reload") {
-			record.controller.invalidate();
-			record.contents.reload();
+			await this.applyNavigation(record, { action: "reload", browserId: input.browserId });
 			return;
 		}
 		if (input.type === "find") {
@@ -639,20 +639,7 @@ export class BrowserManager {
 				const record = this.recordForSession(sessionId, call.input.browserId);
 				const details = await this.runAgentMutation(record, signal, async (operationSignal) => {
 					operationSignal.throwIfAborted();
-					if (call.input.action === "goto") {
-						await this.navigateRecord(record, call.input.url, operationSignal);
-					} else if (call.input.action === "back") {
-						record.controller.invalidate();
-						if (record.contents.navigationHistory.canGoBack()) record.contents.navigationHistory.goBack();
-					} else if (call.input.action === "forward") {
-						record.controller.invalidate();
-						if (record.contents.navigationHistory.canGoForward()) {
-							record.contents.navigationHistory.goForward();
-						}
-					} else {
-						record.controller.invalidate();
-						record.contents.reload();
-					}
+					await this.applyNavigation(record, call.input, operationSignal);
 					return {
 						status: "completed" as const,
 						observation: await record.controller.observe({ browserId: record.browserId }, operationSignal),
@@ -677,6 +664,27 @@ export class BrowserManager {
 				return { tool: call.tool, details: await this.runDirectHandoff(record, call.input.reason, signal) };
 			}
 		}
+	}
+
+	private async applyNavigation(
+		record: BrowserRecord,
+		input: BrowserNavigateInput,
+		signal?: AbortSignal,
+	): Promise<void> {
+		if (input.action === "goto") {
+			await this.navigateRecord(record, input.url, signal);
+			return;
+		}
+		record.controller.invalidate();
+		if (input.action === "back") {
+			if (record.contents.navigationHistory.canGoBack()) record.contents.navigationHistory.goBack();
+			return;
+		}
+		if (input.action === "forward") {
+			if (record.contents.navigationHistory.canGoForward()) record.contents.navigationHistory.goForward();
+			return;
+		}
+		record.contents.reload();
 	}
 
 	takeControl(sessionId: string, browserId: string): void {
@@ -737,6 +745,12 @@ export class BrowserManager {
 		if (this.records.get(browserId) !== record) return;
 		this.records.delete(browserId);
 		record.activeAbort?.abort();
+		if (record.activityIdleTimer) clearTimeout(record.activityIdleTimer);
+		record.activityIdleTimer = undefined;
+		if (record.activityActive) {
+			record.activityActive = false;
+			this.emit({ type: "activity", sessionId: record.sessionId, browserId: record.browserId, active: false });
+		}
 		this.cancelHandoff(record, cancellationReason);
 		record.controller.close();
 		for (const cleanup of record.cleanup.splice(0)) cleanup();
@@ -986,13 +1000,30 @@ export class BrowserManager {
 		const previous = record.controlState;
 		if (previous === state) return;
 		record.controlState = state;
-		if (previous === "agent") {
-			this.emit({ type: "activity", sessionId: record.sessionId, browserId: record.browserId, active: false });
-		}
 		if (state === "agent") {
+			if (record.activityIdleTimer) clearTimeout(record.activityIdleTimer);
+			record.activityIdleTimer = undefined;
 			this.placeSurface(record, false);
-			this.emit({ type: "activity", sessionId: record.sessionId, browserId: record.browserId, active: true });
+			if (!record.activityActive) {
+				record.activityActive = true;
+				this.emit({ type: "activity", sessionId: record.sessionId, browserId: record.browserId, active: true });
+			}
 			return;
+		}
+		if (previous === "agent") {
+			if (record.activityIdleTimer) clearTimeout(record.activityIdleTimer);
+			record.activityIdleTimer = setTimeout(() => {
+				record.activityIdleTimer = undefined;
+				if (
+					!record.activityActive ||
+					record.controlState === "agent" ||
+					this.records.get(record.browserId) !== record
+				)
+					return;
+				record.activityActive = false;
+				this.emit({ type: "activity", sessionId: record.sessionId, browserId: record.browserId, active: false });
+			}, ACTIVITY_IDLE_DELAY_MS);
+			record.activityIdleTimer.unref?.();
 		}
 		this.placeSurface(record, Boolean(record.presentation?.visible));
 	}

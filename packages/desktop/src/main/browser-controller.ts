@@ -109,6 +109,7 @@ interface ElementTarget {
 	readonly backendNodeId: number;
 	readonly sessionId?: string;
 	readonly role: string;
+	readonly label: string;
 }
 
 interface Snapshot {
@@ -128,6 +129,17 @@ function stringValue(value: AxValue | undefined): string {
 
 function booleanProperty(node: AxNode, name: string): boolean {
 	return node.properties?.some((property) => property.name === name && property.value?.value === true) ?? false;
+}
+
+function propertyValue(node: AxNode, name: string): unknown {
+	return node.properties?.find((property) => property.name === name)?.value?.value;
+}
+
+function supportedActions(role: string, focusable: boolean): readonly string[] {
+	if (["button", "checkbox", "link", "menuitem", "radio", "switch", "tab"].includes(role)) return ["click"];
+	if (["combobox", "listbox"].includes(role)) return ["click", "select"];
+	if (EDITABLE_ROLES.has(role)) return ["click", "type"];
+	return focusable ? ["click"] : [];
 }
 
 function safeText(value: string): string {
@@ -208,6 +220,32 @@ function contentQuad(value: unknown): readonly number[] | undefined {
 	);
 }
 
+function viewportSize(value: unknown): { readonly width: number; readonly height: number } | undefined {
+	if (typeof value !== "object" || value === null) return undefined;
+	const metrics = value as {
+		readonly cssVisualViewport?: unknown;
+		readonly visualViewport?: unknown;
+		readonly cssLayoutViewport?: unknown;
+		readonly layoutViewport?: unknown;
+	};
+	for (const candidate of [
+		metrics.cssVisualViewport,
+		metrics.visualViewport,
+		metrics.cssLayoutViewport,
+		metrics.layoutViewport,
+	]) {
+		if (typeof candidate !== "object" || candidate === null) continue;
+		const { clientWidth, clientHeight } = candidate as {
+			readonly clientWidth?: unknown;
+			readonly clientHeight?: unknown;
+		};
+		if (typeof clientWidth === "number" && clientWidth > 0 && typeof clientHeight === "number" && clientHeight > 0) {
+			return { width: clientWidth, height: clientHeight };
+		}
+	}
+	return undefined;
+}
+
 function describedNodeText(value: unknown): string {
 	if (typeof value !== "object" || value === null) return "";
 	const node = value as { readonly nodeValue?: unknown; readonly children?: unknown };
@@ -273,8 +311,7 @@ export class BrowserController {
 			if (this.referencesMissingElement(input.action))
 				return { status: "stale", reason: "element_missing", observation: fresh };
 			try {
-				const outcome = await this.performAction(input.action, signal);
-				if (outcome === "skip_observe") return { status: "completed", observation: fresh };
+				await this.performAction(input.action, signal);
 			} catch (cause) {
 				if (signal.aborted) throw cause;
 				if (cause instanceof MissingElementError) {
@@ -470,6 +507,7 @@ export class BrowserController {
 					backendNodeId: node.backendDOMNodeId!,
 					...(sessionId ? { sessionId } : {}),
 					role,
+					label: name,
 				});
 			}
 			let depth = 0;
@@ -478,10 +516,16 @@ export class BrowserController {
 				depth += 1;
 				parentId = byId.get(parentId)?.parentId;
 			}
+			const checked = propertyValue(node, "checked");
+			const selected = propertyValue(node, "selected");
+			const actions = supportedActions(role, focusable);
 			const flags = [
 				booleanProperty(node, "focused") ? "focused" : "",
-				booleanProperty(node, "disabled") ? "disabled" : "",
+				actionable ? (booleanProperty(node, "disabled") ? "disabled" : "enabled") : "",
+				typeof checked === "boolean" || checked === "mixed" ? `checked=${String(checked)}` : "",
+				typeof selected === "boolean" ? `selected=${String(selected)}` : "",
 				EDITABLE_ROLES.has(role) ? (stringValue(node.value) === "" ? "empty" : "non-empty") : "",
+				actions.length > 0 ? `actions=${actions.join("|")}` : "",
 			].filter(Boolean);
 			lines.push(
 				`${"  ".repeat(depth)}${elementId ? `${elementId} ` : ""}${role}${name ? ` ${safeText(name)}` : ""}${flags.length ? ` [${flags.join(", ")}]` : ""}`,
@@ -526,7 +570,7 @@ export class BrowserController {
 		}
 	}
 
-	private async performAction(action: BrowserAction, signal: AbortSignal): Promise<"skip_observe" | undefined> {
+	private async performAction(action: BrowserAction, signal: AbortSignal): Promise<void> {
 		this.markStateChange();
 		switch (action.type) {
 			case "click": {
@@ -534,7 +578,7 @@ export class BrowserController {
 				const button = action.button ?? "left";
 				if (!point.sessionId && this.dependencies.dispatchMainFrameClick) {
 					this.dependencies.dispatchMainFrameClick({ x: point.x, y: point.y, button });
-					return "skip_observe";
+					return;
 				}
 				const buttons = button === "left" ? 1 : 2;
 				await this.command(
@@ -668,7 +712,13 @@ export class BrowserController {
 		target: { readonly elementId: string } | { readonly x: number; readonly y: number },
 		signal: AbortSignal,
 	): Promise<Point> {
-		if ("x" in target) return { x: target.x, y: target.y };
+		if ("x" in target) {
+			const viewport = viewportSize(await this.command("Page.getLayoutMetrics", {}, undefined, signal));
+			if (!viewport || target.x < 0 || target.y < 0 || target.x >= viewport.width || target.y >= viewport.height) {
+				throw new RangeError("Browser coordinates must stay within the current viewport");
+			}
+			return { x: target.x, y: target.y };
+		}
 		const element = this.requiredElement(target.elementId);
 		let quad: readonly number[] | undefined;
 		try {

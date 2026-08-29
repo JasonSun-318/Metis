@@ -117,8 +117,10 @@ describe("InteractionBroker", () => {
 	it("routes an ordinary browser tool directly to the desktop owner", async () => {
 		const broker = new InteractionBroker({ serverEpoch: EPOCH });
 		const peer = new FakePeer();
+		expect(broker.hasOwner(SESSION_ID)).toBe(false);
 		peer.browserResponse = browserTabsResponse("browser-call-1");
 		broker.assign(SESSION_ID, peer);
+		expect(broker.hasOwner(SESSION_ID)).toBe(true);
 
 		await expect(
 			broker.requestBrowserTool(SESSION_ID, "browser-call-1", browserTabsCall(), new AbortController().signal),
@@ -129,6 +131,8 @@ describe("InteractionBroker", () => {
 			method: "browser/tool",
 			params: { serverEpoch: EPOCH, sessionId: SESSION_ID, toolCallId: "browser-call-1" },
 		});
+		broker.release(SESSION_ID, peer);
+		expect(broker.hasOwner(SESSION_ID)).toBe(false);
 	});
 
 	it("confirms a high-risk browser action immediately before dispatch", async () => {
@@ -157,6 +161,7 @@ describe("InteractionBroker", () => {
 				snapshotRevision: 4,
 				origin: "https://example.test",
 				intent: "Delete the fixture record",
+				targetLabel: "Delete account",
 				risk: "destructive",
 				action: { type: "click", target: { elementId: "e4" } },
 			},
@@ -169,7 +174,7 @@ describe("InteractionBroker", () => {
 		expect(peer.requests[0]).toMatchObject({
 			kind: "confirm",
 			title: "Allow browser action?",
-			message: expect.stringContaining("Site: https://example.test"),
+			message: expect.stringMatching(/Site: https:\/\/example\.test[\s\S]*Target: Delete account/u),
 		});
 		expect(peer.browserRequests).toHaveLength(1);
 	});

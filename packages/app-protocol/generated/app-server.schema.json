@@ -8239,6 +8239,11 @@
                                   "minLength": 1,
                                   "x-metis-maxUtf8Bytes": 1024
                                 },
+                                "targetLabel": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "x-metis-maxUtf8Bytes": 512
+                                },
                                 "risk": {
                                   "anyOf": [
                                     {
@@ -83693,6 +83698,11 @@
                               "type": "string",
                               "minLength": 1,
                               "x-metis-maxUtf8Bytes": 1024
+                            },
+                            "targetLabel": {
+                              "type": "string",
+                              "minLength": 1,
+                              "x-metis-maxUtf8Bytes": 512
                             },
                             "risk": {
                               "anyOf": [

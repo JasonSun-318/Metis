@@ -61,6 +61,17 @@ function axTree(name = "Continue", value = "secret") {
 				role: { value: "button" },
 				name: { value: name },
 			},
+			{
+				nodeId: "checkbox",
+				parentId: "root",
+				backendDOMNodeId: 9,
+				role: { value: "checkbox" },
+				name: { value: "Remember" },
+				properties: [
+					{ name: "checked", value: { value: true } },
+					{ name: "selected", value: { value: false } },
+				],
+			},
 		],
 	};
 }
@@ -73,6 +84,7 @@ function fixture(
 	const debug = new FakeDebugger();
 	debug.responses.set("Accessibility.getFullAXTree", axTree());
 	debug.responses.set("DOM.getBoxModel", { model: { content: [10, 20, 30, 20, 30, 40, 10, 40] } });
+	debug.responses.set("Page.getLayoutMetrics", { cssVisualViewport: { clientWidth: 800, clientHeight: 600 } });
 	const page = { url: "https://example.test/page", title: "Fixture", loading: false };
 	let message: ((method: string, params: Record<string, unknown>, sessionId?: string) => void) | undefined;
 	let detach: (() => void) | undefined;
@@ -105,6 +117,7 @@ function fixture(
 		debug,
 		page,
 		captureScreenshot,
+		subscriptions: () => ({ message: Boolean(message), detach: Boolean(detach) }),
 		emit: (method: string, params = {}, sessionId?: string) => message?.(method, params, sessionId),
 		detach: () => {
 			debug.attached = false;
@@ -133,6 +146,33 @@ function action(
 }
 
 describe("BrowserController", () => {
+	it("keeps 100 observe/action cycles bounded and releases debugger subscriptions", async () => {
+		let debug!: FakeDebugger;
+		let sequence = 0;
+		const dispatchMainFrameClick = vi.fn(() => {
+			sequence += 1;
+			debug.responses.set("Accessibility.getFullAXTree", axTree(`Step ${sequence}`));
+		});
+		const created = fixture({ dispatchMainFrameClick });
+		debug = created.debug;
+		let current = await observe(created.controller);
+		for (let index = 0; index < 100; index += 1) {
+			const result = await created.controller.act(
+				action(current, { type: "click", target: { elementId: "e2" } }),
+				new AbortController().signal,
+			);
+			expect(result.status).toBe("completed");
+			if (result.status === "completed") current = result.observation;
+			expect(Buffer.byteLength(current.state, "utf8")).toBeLessThanOrEqual(MAX_BROWSER_STATE_UTF8_BYTES);
+		}
+		expect(current.revision).toBe(101);
+		expect(dispatchMainFrameClick).toHaveBeenCalledTimes(100);
+		expect(created.subscriptions()).toEqual({ message: true, detach: true });
+		created.controller.close();
+		expect(created.subscriptions()).toEqual({ message: false, detach: false });
+		expect(debug.attached).toBe(false);
+	});
+
 	it("attaches lazily, enables CDP domains, and emits an AX-first redacted state", async () => {
 		const { controller, debug } = fixture();
 		expect(debug.attached).toBe(false);
@@ -145,8 +185,9 @@ describe("BrowserController", () => {
 			"Target.setAutoAttach",
 		]);
 		expect(result.change).toBe("full");
-		expect(result.state).toContain('e1 textbox "Email" [non-empty]');
-		expect(result.state).toContain('e2 button "Continue"');
+		expect(result.state).toContain('e1 textbox "Email" [enabled, non-empty, actions=click|type]');
+		expect(result.state).toContain('e2 button "Continue" [enabled, actions=click]');
+		expect(result.state).toContain('e3 checkbox "Remember" [enabled, checked=true, selected=false, actions=click]');
 		expect(result.state).not.toContain("secret");
 		expect(debug.commands.some(({ method }) => method.startsWith("Runtime."))).toBe(false);
 	});
@@ -261,15 +302,39 @@ describe("BrowserController", () => {
 		expect(debug.commands.filter(({ method }) => method === "Input.dispatchKeyEvent")).toHaveLength(0);
 	});
 
-	it("uses non-blocking native pointer input for top-level popup windows", async () => {
-		const dispatchMainFrameClick = vi.fn();
-		const { controller, debug } = fixture({ dispatchMainFrameClick });
+	it("uses native popup input and still returns a fresh post-action observation", async () => {
+		let debug!: FakeDebugger;
+		const dispatchMainFrameClick = vi.fn(() => {
+			debug.responses.set("Accessibility.getFullAXTree", axTree("Authorized"));
+		});
+		const created = fixture({ dispatchMainFrameClick });
+		const { controller } = created;
+		debug = created.debug;
 		const first = await observe(controller);
-		await expect(
-			controller.act(action(first, { type: "click", target: { elementId: "e2" } }), new AbortController().signal),
-		).resolves.toMatchObject({ status: "completed" });
+		const result = await controller.act(
+			action(first, { type: "click", target: { elementId: "e2" } }),
+			new AbortController().signal,
+		);
+		expect(result).toMatchObject({ status: "completed", observation: { revision: 2 } });
+		if (result.status === "completed") expect(result.observation.state).toContain('button "Authorized"');
 		expect(dispatchMainFrameClick).toHaveBeenCalledWith({ x: 20, y: 30, button: "left" });
 		expect(debug.commands.filter(({ method }) => method === "Input.dispatchMouseEvent")).toHaveLength(0);
+	});
+
+	it("rejects coordinate input outside the current viewport", async () => {
+		const { controller, debug } = fixture();
+		const first = await observe(controller);
+		await expect(
+			controller.act(action(first, { type: "hover", target: { x: 799, y: 599 } }), new AbortController().signal),
+		).resolves.toMatchObject({ status: "completed" });
+		const beforeRejected = debug.commands.filter(({ method }) => method === "Input.dispatchMouseEvent").length;
+		await expect(
+			controller.act(action(first, { type: "hover", target: { x: 800, y: 599 } }), new AbortController().signal),
+		).rejects.toThrow("within the current viewport");
+		await expect(
+			controller.act(action(first, { type: "hover", target: { x: -1, y: 0 } }), new AbortController().signal),
+		).rejects.toThrow("within the current viewport");
+		expect(debug.commands.filter(({ method }) => method === "Input.dispatchMouseEvent")).toHaveLength(beforeRejected);
 	});
 
 	it("cancels an in-flight CDP command when the page closes", async () => {

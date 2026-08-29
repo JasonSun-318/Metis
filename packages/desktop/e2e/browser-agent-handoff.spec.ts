@@ -161,6 +161,7 @@ test("packaged confirmation rejects safely, approves once, and Take control ente
 					...input,
 					observation: undefined,
 					intent: "Delete the local fixture record",
+					targetLabel: "Delete fixture record",
 					risk: "destructive",
 					action: { type: "click", target: { elementId: elementId(input.observation.state, "Delete fixture record") } },
 				} };
@@ -187,6 +188,7 @@ test("packaged confirmation rejects safely, approves once, and Take control ente
 		await expect(confirmation).toContainText(`Site: ${fixture.origin}`);
 		await expect(confirmation).toContainText("Risk: destructive");
 		await expect(confirmation).toContainText("Intent: Delete the local fixture record");
+		await expect(confirmation).toContainText("Target: Delete fixture record");
 		await confirmation.getByRole("button", { name: "Reject", exact: true }).click();
 		await waitForDone(app, "delete-reject");
 		expect(fixture.deleteCount()).toBe(0);

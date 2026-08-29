@@ -289,6 +289,47 @@ function browserHarness(
 }
 
 describe("BrowserManager", () => {
+	it("coalesces rapid agent activity and releases the tab after 100 completed actions", async () => {
+		vi.useFakeTimers();
+		try {
+			const harness = browserHarness();
+			const browserId = "10000000-0000-4000-8000-000000000069";
+			const activity: Array<{ readonly active: boolean }> = [];
+			harness.manager.onEvent((event) => {
+				if (event.type === "activity") activity.push(event);
+			});
+			harness.manager.create({ sessionId: SESSION_ID, browserId, profileId: DEFAULT_BROWSER_PROFILE_ID });
+			for (let index = 0; index < 100; index += 1) {
+				await harness.manager.executeTool(
+					SESSION_ID,
+					{
+						tool: "browser_act",
+						input: {
+							browserId,
+							documentId: "30000000-0000-4000-8000-000000000001",
+							snapshotRevision: 1,
+							origin: "https://example.test",
+							intent: "Exercise bounded activity",
+							risk: "ordinary",
+							action: { type: "click", target: { elementId: "e1" } },
+						},
+					},
+					new AbortController().signal,
+				);
+			}
+			expect(activity).toEqual([{ type: "activity", sessionId: SESSION_ID, browserId, active: true }]);
+			await vi.advanceTimersByTimeAsync(50);
+			expect(activity).toEqual([
+				{ type: "activity", sessionId: SESSION_ID, browserId, active: true },
+				{ type: "activity", sessionId: SESSION_ID, browserId, active: false },
+			]);
+			harness.manager.closeAll();
+			expect(harness.controllers.get(browserId)?.close).toHaveBeenCalledOnce();
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
 	it("keeps tabs task-owned and makes duplicate renderer creation idempotent", async () => {
 		const harness = browserHarness();
 		const browserId = "10000000-0000-4000-8000-000000000070";
@@ -486,7 +527,9 @@ describe("BrowserManager", () => {
 			tool: "browser_act",
 			details: { status: "cancelled", reason: "user_cancelled" },
 		});
-		expect(events).toContainEqual({ type: "activity", sessionId: SESSION_ID, browserId, active: false });
+		await vi.waitFor(() =>
+			expect(events).toContainEqual({ type: "activity", sessionId: SESSION_ID, browserId, active: false }),
+		);
 	});
 
 	it("interrupts a hanging navigation immediately when the user takes control", async () => {
