@@ -1,5 +1,7 @@
 // @vitest-environment jsdom
 
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -131,6 +133,24 @@ describe("DeliveredFileCard", () => {
 });
 
 describe("UniversalFilePreviewer", () => {
+	it("does not reference legacy dark-only theme aliases", () => {
+		const css = readFileSync(path.join(process.cwd(), "src/renderer/styles/app.css"), "utf8");
+		const previewCss = css.slice(css.indexOf("Universal File Previewer"));
+		for (const token of [
+			"--surface-main",
+			"--surface-card",
+			"--surface-nested",
+			"--surface-hover",
+			"--surface-inset",
+			"--text-secondary",
+			"--text-tertiary",
+			"--accent-subtle",
+			"--accent-text",
+			"--accent-border",
+			"--danger-text",
+		]) expect(previewCss).not.toContain(token);
+	});
+
 	it("loads delivered file and renders text content", async () => {
 		const readPreviewFile = vi.fn().mockResolvedValue({
 			ok: true,

@@ -2379,7 +2379,7 @@ classes so their inline layout wins the cascade. */
 	height: 100%;
 	min-height: 0;
 	overflow: hidden;
-	background: var(--surface-main, #0d0d0f);
+	background: var(--app-bg);
 	-webkit-app-region: no-drag;
 }
 
@@ -2394,8 +2394,8 @@ classes so their inline layout wins the cascade. */
 	height: 100%;
 	min-height: 0;
 	flex: 1 1 0%;
-	background: var(--surface-main, #0d0d0f);
-	color: var(--text, #e3e3e8);
+	background: var(--app-bg);
+	color: var(--text);
 	overflow: hidden;
 	position: relative;
 	-webkit-app-region: no-drag;
@@ -2409,8 +2409,8 @@ classes so their inline layout wins the cascade. */
 	height: 38px;
 	min-height: 38px;
 	padding: 0 12px;
-	background: var(--surface-card, #141418);
-	border-bottom: 1px solid var(--border-weak, rgba(255, 255, 255, 0.08));
+	background: var(--panel);
+	border-bottom: 1px solid var(--border-weak);
 	font-size: 12px;
 	user-select: none;
 	z-index: 5;
@@ -2428,7 +2428,7 @@ classes so their inline layout wins the cascade. */
 .preview-toolbar-title {
 	font-weight: 500;
 	font-size: 12px;
-	color: var(--text, #e3e3e8);
+	color: var(--text);
 	white-space: nowrap;
 	overflow: hidden;
 	text-overflow: ellipsis;
@@ -2437,11 +2437,11 @@ classes so their inline layout wins the cascade. */
 
 .preview-toolbar-size {
 	font-size: 11px;
-	color: var(--text-tertiary, rgba(255, 255, 255, 0.45));
+	color: var(--text-09);
 	padding: 1px 5px;
-	background: var(--surface-nested, rgba(255, 255, 255, 0.04));
+	background: var(--surface-04);
 	border-radius: 4px;
-	border: 1px solid var(--border-weak, rgba(255, 255, 255, 0.06));
+	border: 1px solid var(--border-weak);
 }
 
 .preview-toolbar-center {
@@ -2468,15 +2468,15 @@ classes so their inline layout wins the cascade. */
 	border-radius: 5px;
 	border: 1px solid transparent;
 	background: transparent;
-	color: var(--text-secondary, rgba(255, 255, 255, 0.65));
+	color: var(--text-18);
 	cursor: pointer;
 	transition: all 0.15s ease;
 }
 
 .preview-toolbar-btn:hover:not(:disabled) {
-	background: var(--surface-hover, rgba(255, 255, 255, 0.08));
-	color: var(--text, #ffffff);
-	border-color: var(--border-weak, rgba(255, 255, 255, 0.1));
+	background: var(--surface-08);
+	color: var(--text);
+	border-color: var(--border-weak);
 }
 
 .preview-toolbar-btn:disabled {
@@ -2485,16 +2485,16 @@ classes so their inline layout wins the cascade. */
 }
 
 .preview-toolbar-btn.is-active {
-	background: var(--accent-subtle, rgba(82, 139, 255, 0.15));
-	color: var(--accent-text, #70a1ff);
-	border-color: var(--accent-border, rgba(82, 139, 255, 0.3));
+	background: var(--surface-08);
+	color: var(--link);
+	border-color: var(--border-xstrong);
 }
 
 .preview-zoom-controls {
 	display: flex;
 	align-items: center;
-	background: var(--surface-nested, rgba(255, 255, 255, 0.04));
-	border: 1px solid var(--border-weak, rgba(255, 255, 255, 0.08));
+	background: var(--surface-04);
+	border: 1px solid var(--border-weak);
 	border-radius: 5px;
 	padding: 1px;
 }
@@ -2502,7 +2502,7 @@ classes so their inline layout wins the cascade. */
 .preview-zoom-label {
 	font-size: 11px;
 	font-variant-numeric: tabular-nums;
-	color: var(--text-secondary, rgba(255, 255, 255, 0.7));
+	color: var(--text-18);
 	background: transparent;
 	border: none;
 	padding: 0 4px;
@@ -2512,15 +2512,15 @@ classes so their inline layout wins the cascade. */
 }
 
 .preview-zoom-label:hover {
-	color: var(--text, #ffffff);
+	color: var(--text);
 }
 
 .preview-page-navigator {
 	display: flex;
 	align-items: center;
 	gap: 4px;
-	background: var(--surface-nested, rgba(255, 255, 255, 0.04));
-	border: 1px solid var(--border-weak, rgba(255, 255, 255, 0.08));
+	background: var(--surface-04);
+	border: 1px solid var(--border-weak);
 	border-radius: 5px;
 	padding: 1px 4px;
 }
@@ -2528,7 +2528,7 @@ classes so their inline layout wins the cascade. */
 .preview-page-info {
 	font-size: 11px;
 	font-variant-numeric: tabular-nums;
-	color: var(--text-secondary, rgba(255, 255, 255, 0.75));
+	color: var(--text-18);
 	padding: 0 4px;
 	min-width: 44px;
 	text-align: center;
@@ -2542,10 +2542,10 @@ classes so their inline layout wins the cascade. */
 	height: 100%;
 	overflow: auto;
 	position: relative;
-	background: var(--surface-main, #0d0d0f);
+	background: var(--app-bg);
 	-webkit-app-region: no-drag;
 	scrollbar-width: thin;
-	scrollbar-color: var(--surface-13, rgba(255, 255, 255, 0.15)) transparent;
+	scrollbar-color: var(--surface-13) transparent;
 }
 
 .preview-viewport.is-inverted {
@@ -2563,12 +2563,12 @@ classes so their inline layout wins the cascade. */
 	height: 100%;
 	padding: 24px;
 	text-align: center;
-	color: var(--text-tertiary, rgba(255, 255, 255, 0.5));
+	color: var(--text-09);
 	font-size: 12px;
 }
 
 .preview-error-state {
-	color: var(--danger-text, #ff6b6b);
+	color: var(--danger);
 }
 
 /* PDF Previewer */
@@ -2576,7 +2576,7 @@ classes so their inline layout wins the cascade. */
 	display: flex;
 	justify-content: center;
 	padding: 16px;
-	background: var(--surface-inset, #09090b);
+	background: var(--surface-00);
 }
 
 .pdf-canvas-container {
@@ -2637,8 +2637,8 @@ classes so their inline layout wins the cascade. */
 	display: flex;
 	align-items: center;
 	gap: 5px;
-	background: var(--surface-nested, rgba(255, 255, 255, 0.04));
-	border: 1px solid var(--border-weak, rgba(255, 255, 255, 0.08));
+	background: var(--surface-04);
+	border: 1px solid var(--border-weak);
 	border-radius: 5px;
 	padding: 2px 7px;
 	width: 130px;
@@ -2647,7 +2647,7 @@ classes so their inline layout wins the cascade. */
 .excel-search-bar input {
 	background: transparent;
 	border: none;
-	color: var(--text, #e3e3e8);
+	color: var(--text);
 	font-size: 11px;
 	outline: none;
 	width: 100%;
@@ -2688,7 +2688,7 @@ classes so their inline layout wins the cascade. */
 	position: sticky;
 	top: 0;
 	z-index: 3;
-	background: var(--surface-card, #141418);
+	background: var(--panel);
 }
 
 .excel-grid-body {
@@ -2705,7 +2705,7 @@ classes so their inline layout wins the cascade. */
 .excel-row-header,
 .excel-cell {
 	box-sizing: border-box;
-	border: 1px solid var(--border-weak, rgba(255, 255, 255, 0.08));
+	border: 1px solid var(--border-weak);
 	padding: 4px 8px;
 	white-space: nowrap;
 	overflow: hidden;
@@ -2718,8 +2718,8 @@ classes so their inline layout wins the cascade. */
 .excel-corner-cell,
 .excel-col-header,
 .excel-row-header {
-	background: var(--surface-nested, rgba(255, 255, 255, 0.05));
-	color: var(--text-tertiary, rgba(255, 255, 255, 0.5));
+	background: var(--surface-04);
+	color: var(--text-09);
 	font-weight: 600;
 	text-align: center;
 	user-select: none;
@@ -2738,8 +2738,8 @@ classes so their inline layout wins the cascade. */
 }
 
 .excel-cell {
-	background: var(--surface-card, #141418);
-	color: var(--text, #e3e3e8);
+	background: var(--panel);
+	color: var(--text);
 	flex: 0 0 auto;
 }
 
@@ -2753,7 +2753,7 @@ classes so their inline layout wins the cascade. */
 	box-sizing: border-box;
 	display: flex;
 	align-items: center;
-	border: 1px solid var(--border-weak, rgba(255, 255, 255, 0.08));
+	border: 1px solid var(--border-weak);
 	padding: 4px 8px;
 	overflow: hidden;
 	text-overflow: ellipsis;
@@ -2761,8 +2761,8 @@ classes so their inline layout wins the cascade. */
 	font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
 	font-size: 11px;
 	line-height: 1.4;
-	background: var(--surface-card, #141418);
-	color: var(--text, #e3e3e8);
+	background: var(--panel);
+	color: var(--text);
 }
 
 .excel-cell.is-search-match,
@@ -2777,8 +2777,8 @@ classes so their inline layout wins the cascade. */
 	gap: 2px;
 	height: 28px;
 	padding: 0 8px;
-	background: var(--surface-card, #141418);
-	border-top: 1px solid var(--border-weak, rgba(255, 255, 255, 0.08));
+	background: var(--panel);
+	border-top: 1px solid var(--border-weak);
 	overflow-x: auto;
 }
 
@@ -2789,19 +2789,19 @@ classes so their inline layout wins the cascade. */
 	background: transparent;
 	border: none;
 	border-radius: 4px;
-	color: var(--text-secondary, rgba(255, 255, 255, 0.6));
+	color: var(--text-18);
 	cursor: pointer;
 	white-space: nowrap;
 }
 
 .excel-sheet-tab:hover {
-	background: var(--surface-hover, rgba(255, 255, 255, 0.06));
-	color: var(--text, #ffffff);
+	background: var(--surface-08);
+	color: var(--text);
 }
 
 .excel-sheet-tab.is-active {
-	background: var(--surface-nested, rgba(255, 255, 255, 0.1));
-	color: var(--accent-text, #70a1ff);
+	background: var(--surface-04);
+	color: var(--link);
 	font-weight: 500;
 }
 
@@ -2810,7 +2810,7 @@ classes so their inline layout wins the cascade. */
 	display: flex;
 	justify-content: center;
 	padding: 20px 12px;
-	background: var(--surface-inset, #09090b);
+	background: var(--surface-00);
 }
 
 .docx-render-wrapper {
@@ -2847,8 +2847,8 @@ classes so their inline layout wins the cascade. */
 	flex-direction: column;
 	gap: 8px;
 	padding: 10px 8px;
-	background: var(--surface-card, #141418);
-	border-right: 1px solid var(--border-weak, rgba(255, 255, 255, 0.08));
+	background: var(--panel);
+	border-right: 1px solid var(--border-weak);
 	overflow-y: auto;
 }
 
@@ -2857,24 +2857,24 @@ classes so their inline layout wins the cascade. */
 	flex-direction: column;
 	gap: 4px;
 	padding: 6px;
-	background: var(--surface-nested, rgba(255, 255, 255, 0.04));
-	border: 1px solid var(--border-weak, rgba(255, 255, 255, 0.06));
+	background: var(--surface-04);
+	border: 1px solid var(--border-weak);
 	border-radius: 6px;
-	color: var(--text-secondary, rgba(255, 255, 255, 0.7));
+	color: var(--text-18);
 	cursor: pointer;
 	text-align: left;
 	transition: all 0.15s ease;
 }
 
 .pptx-thumbnail-card:hover {
-	background: var(--surface-hover, rgba(255, 255, 255, 0.08));
-	border-color: var(--border, rgba(255, 255, 255, 0.12));
+	background: var(--surface-08);
+	border-color: var(--border);
 }
 
 .pptx-thumbnail-card.is-active {
-	background: var(--accent-subtle, rgba(82, 139, 255, 0.15));
-	border-color: var(--accent-border, rgba(82, 139, 255, 0.4));
-	color: var(--accent-text, #70a1ff);
+	background: var(--surface-08);
+	border-color: var(--border-xstrong);
+	color: var(--link);
 }
 
 .pptx-thumbnail-index {
@@ -2898,7 +2898,7 @@ classes so their inline layout wins the cascade. */
 	justify-content: center;
 	padding: 24px;
 	overflow: auto;
-	background: var(--surface-inset, #09090b);
+	background: var(--surface-00);
 }
 
 .pptx-slide-canvas {
@@ -2962,5 +2962,5 @@ classes so their inline layout wins the cascade. */
 	line-height: 1.5;
 	white-space: pre-wrap;
 	word-break: break-all;
-	color: var(--text, #e3e3e8);
+	color: var(--text);
 }
