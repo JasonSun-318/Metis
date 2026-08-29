@@ -809,7 +809,7 @@ textarea { resize: none; }
 .scheduled-task-state.state-active { border-color: var(--success-chip-border); background: var(--success-chip-bg); color: var(--success-chip-text); }
 .scheduled-task-state.state-deleting { color: var(--danger-form); }
 .scheduled-tasks-empty { display: flex; min-height: 260px; align-items: center; justify-content: center; flex-direction: column; color: var(--text-06); text-align: center; }
-.scheduled-tasks-empty-icon { width: 64px; height: 64px; color: var(--text); margin-bottom: 16px; }
+.scheduled-tasks-empty-icon { width: 96px; height: 96px; color: var(--text); margin-bottom: 16px; }
 .scheduled-tasks-empty h2 { margin: 0; color: var(--text-09); font-size: 15px; font-weight: 400; }
 .scheduled-tasks-empty p { margin: 8px 0 0; font-size: 12px; }
 .scheduled-task-loading { display: grid; min-height: 210px; color: var(--text-09); place-items: center; font-size: 12px; }

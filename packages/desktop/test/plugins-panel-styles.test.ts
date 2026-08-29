@@ -43,7 +43,7 @@ describe("Plugin Center visual contract", () => {
 		expect(rule(".plugins-detail-document").fontSize).toBe("13px");
 		expect(rule(".plugins-detail-document pre").overflowX).toBe("auto");
 		expect(rule(".scheduled-tasks-empty").minHeight).toBe("260px");
-		expect(rule(".scheduled-tasks-empty-icon").width).toBe("64px");
+		expect(rule(".scheduled-tasks-empty-icon").width).toBe("96px");
 		expect(css).toContain(".mcp-dialog { position: relative; width: min(760px, calc(100vw - 48px));");
 		expect(rule(".mcp-dialog").borderRadius).toBe("16px");
 		expect(rule(".mcp-dialog").background).toBe("var(--surface-04)");
