@@ -194,10 +194,10 @@ test("packaged agent controls accessible pages, frames, screenshots, popups, sta
 		expect(fixture.calls.filter((call) => call.marker === "ordinary-control" && call.name === "browser_tabs").at(-1)?.result).toContain(mainBrowserId);
 
 		await app.page.evaluate(() => {
-			const state = window as typeof window & { __browserActivityEvents?: number[] };
-			state.__browserActivityEvents = [];
+			const state = window as typeof window & { __browserProgressEvents?: number[] };
+			state.__browserProgressEvents = [];
 			(globalThis as unknown as { metis: MetisDesktopApi }).metis.subscribeBrowser((event) => {
-				if (event.type === "activity") state.__browserActivityEvents!.push(performance.now());
+				if (event.type === "activity" || event.type === "state") state.__browserProgressEvents!.push(performance.now());
 			});
 		});
 		await sendFixturePrompt(app.page, "performance-cycle");
@@ -217,12 +217,12 @@ test("packaged agent controls accessible pages, frames, screenshots, popups, sta
 		expect(actionDurations).toHaveLength(PERFORMANCE_ACTIONS);
 		expect(p95(observationDurations.slice(PERFORMANCE_WARMUPS))).toBeLessThan(1_000);
 		expect(p95(actionDurations.slice(PERFORMANCE_WARMUPS))).toBeLessThan(1_500);
-		const activityEvents = await app.page.evaluate(
-			() => (window as typeof window & { __browserActivityEvents?: number[] }).__browserActivityEvents ?? [],
+		const progressEvents = await app.page.evaluate(
+			() => (window as typeof window & { __browserProgressEvents?: number[] }).__browserProgressEvents ?? [],
 		);
-		const peakEventsPerSecond = activityEvents.reduce(
+		const peakEventsPerSecond = progressEvents.reduce(
 			(maximum, startedAt) =>
-				Math.max(maximum, activityEvents.filter((timestamp) => timestamp >= startedAt && timestamp < startedAt + 1_000).length),
+				Math.max(maximum, progressEvents.filter((timestamp) => timestamp >= startedAt && timestamp < startedAt + 1_000).length),
 			0,
 		);
 		expect(peakEventsPerSecond).toBeLessThanOrEqual(20);

@@ -444,13 +444,19 @@ describe("BrowserController", () => {
 		});
 	});
 
-	it("downshifts JPEG quality and omits screenshots that cannot fit the cap", async () => {
+	it("uses fixed JPEG quality 75 and rejects screenshots that cannot fit the cap", async () => {
+		const small = fixture();
+		const result = await observe(small.controller, { mode: "both" });
+		expect(small.captureScreenshot).toHaveBeenCalledOnce();
+		expect(small.captureScreenshot).toHaveBeenCalledWith(75);
+		expect(result.screenshot?.data).toBe(Buffer.from("jpeg").toString("base64"));
+
 		const large = Buffer.alloc(Math.ceil((MAX_BROWSER_SCREENSHOT_UTF8_BYTES * 3) / 4) + 128);
 		const { controller, captureScreenshot } = fixture();
-		captureScreenshot.mockImplementation(async (quality) => (quality === 75 ? large : Buffer.from("small")));
-		const result = await observe(controller, { mode: "both" });
-		expect(captureScreenshot).toHaveBeenCalledTimes(2);
-		expect(result.screenshot?.data).toBe(Buffer.from("small").toString("base64"));
+		captureScreenshot.mockResolvedValue(large);
+		await expect(observe(controller, { mode: "both" })).rejects.toThrow("4 MiB");
+		expect(captureScreenshot).toHaveBeenCalledOnce();
+		expect(captureScreenshot).toHaveBeenCalledWith(75);
 	});
 
 	it("does not start queued input after cancellation", async () => {

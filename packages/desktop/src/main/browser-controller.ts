@@ -12,7 +12,7 @@ const MAX_AX_NODES = 3_000;
 const MAX_ELEMENT_ID = 999_999;
 const DEFAULT_STABILIZATION_QUIET_MS = 150;
 const DEFAULT_STABILIZATION_TIMEOUT_MS = 2_000;
-const SCREENSHOT_QUALITIES = [75, 60, 45, 30] as const;
+const SCREENSHOT_QUALITY = 75;
 const INTERACTIVE_ROLES = new Set([
 	"button",
 	"checkbox",
@@ -539,14 +539,12 @@ export class BrowserController {
 	}
 
 	private async screenshot(signal: AbortSignal): Promise<BrowserObservation["screenshot"] | undefined> {
-		for (const quality of SCREENSHOT_QUALITIES) {
-			signal.throwIfAborted();
-			const data = (await this.dependencies.captureScreenshot(quality)).toString("base64");
-			if (Buffer.byteLength(data, "utf8") <= MAX_BROWSER_SCREENSHOT_UTF8_BYTES) {
-				return { mediaType: "image/jpeg", data };
-			}
+		signal.throwIfAborted();
+		const data = (await this.dependencies.captureScreenshot(SCREENSHOT_QUALITY)).toString("base64");
+		if (Buffer.byteLength(data, "utf8") > MAX_BROWSER_SCREENSHOT_UTF8_BYTES) {
+			throw new RangeError("Browser screenshot exceeds the 4 MiB limit");
 		}
-		return undefined;
+		return { mediaType: "image/jpeg", data };
 	}
 
 	private referencesMissingElement(action: BrowserAction): boolean {

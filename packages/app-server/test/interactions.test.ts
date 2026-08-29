@@ -31,14 +31,17 @@ class FakePeer implements InteractionPeer {
 	readonly browserRequests: ServerRpcRequest<"browser/tool">[] = [];
 	response?: InteractionResponseInput;
 	browserResponse?: BrowserToolRequestResult;
+	browserResponseFor?: (request: ServerRpcRequest<"browser/tool">) => BrowserToolRequestResult;
 	responseFor?: (interaction: InteractionView) => InteractionResponseInput;
 	waitForever = false;
 
 	async request(request: ServerRpcRequest, signal: AbortSignal): Promise<ServerResult<ServerRequestMethod>> {
 		if (request.method === "browser/tool") {
-			this.browserRequests.push(request as ServerRpcRequest<"browser/tool">);
-			if (!this.browserResponse) throw new Error("Browser response is unavailable");
-			return this.browserResponse;
+			const browserRequest = request as ServerRpcRequest<"browser/tool">;
+			this.browserRequests.push(browserRequest);
+			const response = this.browserResponseFor?.(browserRequest) ?? this.browserResponse;
+			if (!response) throw new Error("Browser response is unavailable");
+			return response;
 		}
 		const interactionRequest = request as ServerRpcRequest<"interaction/request">;
 		this.requests.push(interactionRequest.params.interaction);
@@ -113,6 +116,24 @@ describe("InteractionBroker", () => {
 			},
 		},
 	});
+	const browserObservation = (
+		revision: number,
+		state = 'document WebArea "Fixture"\n  e4 button "Delete account"',
+	) => ({
+		browserId: "88888888-8888-4888-8888-888888888888",
+		profileId: "00000000-0000-4000-8000-000000000001",
+		documentId: "99999999-9999-4999-8999-999999999999",
+		revision,
+		change: "full" as const,
+		url: "https://example.test/page",
+		title: "Fixture",
+		loading: false,
+		state,
+	});
+	const browserObserveResponse = (toolCallId: string, revision: number): BrowserToolRequestResult => ({
+		toolCallId,
+		result: { tool: "browser_observe", observation: browserObservation(revision) },
+	});
 
 	it("routes an ordinary browser tool directly to the desktop owner", async () => {
 		const broker = new InteractionBroker({ serverEpoch: EPOCH });
@@ -140,6 +161,8 @@ describe("InteractionBroker", () => {
 			"00000000-0000-4000-8000-000000000401",
 			"00000000-0000-4000-8000-000000000402",
 			"00000000-0000-4000-8000-000000000403",
+			"00000000-0000-4000-8000-000000000404",
+			"00000000-0000-4000-8000-000000000405",
 		];
 		const broker = new InteractionBroker({ serverEpoch: EPOCH, createId: () => ids.shift()! });
 		const peer = new FakePeer();
@@ -148,10 +171,14 @@ describe("InteractionBroker", () => {
 			kind: "confirm",
 			confirmed: true,
 		});
-		peer.browserResponse = {
+		const actionResponse: BrowserToolRequestResult = {
 			toolCallId: "browser-call-2",
 			result: { tool: "browser_act", details: { status: "cancelled", reason: "user_cancelled" } },
 		};
+		peer.browserResponseFor = (request) =>
+			request.params.call.tool === "browser_observe"
+				? browserObserveResponse(request.params.toolCallId, 4)
+				: actionResponse;
 		broker.assign(SESSION_ID, peer);
 		const call: BrowserToolCall = {
 			tool: "browser_act",
@@ -161,7 +188,6 @@ describe("InteractionBroker", () => {
 				snapshotRevision: 4,
 				origin: "https://example.test",
 				intent: "Delete the fixture record",
-				targetLabel: "Delete account",
 				risk: "destructive",
 				action: { type: "click", target: { elementId: "e4" } },
 			},
@@ -169,14 +195,17 @@ describe("InteractionBroker", () => {
 
 		await expect(
 			broker.requestBrowserTool(SESSION_ID, "browser-call-2", call, new AbortController().signal),
-		).resolves.toEqual(peer.browserResponse.result);
+		).resolves.toEqual(actionResponse.result);
 		expect(peer.requests).toHaveLength(1);
 		expect(peer.requests[0]).toMatchObject({
 			kind: "confirm",
 			title: "Allow browser action?",
 			message: expect.stringMatching(/Site: https:\/\/example\.test[\s\S]*Target: Delete account/u),
 		});
-		expect(peer.browserRequests).toHaveLength(1);
+		expect(peer.browserRequests.map((request) => request.params.call.tool)).toEqual([
+			"browser_observe",
+			"browser_act",
+		]);
 	});
 
 	it("does not dispatch a rejected or unowned browser action", async () => {
@@ -191,6 +220,7 @@ describe("InteractionBroker", () => {
 			kind: "confirm",
 			confirmed: false,
 		});
+		peer.browserResponseFor = (request) => browserObserveResponse(request.params.toolCallId, 1);
 		broker.assign(SESSION_ID, peer);
 		const action: BrowserToolCall = {
 			tool: "browser_act",
@@ -207,7 +237,32 @@ describe("InteractionBroker", () => {
 		await expect(
 			broker.requestBrowserTool(SESSION_ID, "browser-call-4", action, new AbortController().signal),
 		).rejects.toThrow("rejected");
-		expect(peer.browserRequests).toHaveLength(0);
+		expect(peer.browserRequests.map((request) => request.params.call.tool)).toEqual(["browser_observe"]);
+	});
+
+	it("returns a trusted stale result before confirmation when the live target changed", async () => {
+		const broker = new InteractionBroker({ serverEpoch: EPOCH });
+		const peer = new FakePeer();
+		peer.browserResponseFor = (request) => browserObserveResponse(request.params.toolCallId, 2);
+		broker.assign(SESSION_ID, peer);
+		const call: BrowserToolCall = {
+			tool: "browser_act",
+			input: {
+				browserId: "88888888-8888-4888-8888-888888888888",
+				documentId: "99999999-9999-4999-8999-999999999999",
+				snapshotRevision: 1,
+				origin: "https://example.test",
+				intent: "Delete the fixture record",
+				risk: "destructive",
+				action: { type: "click", target: { elementId: "e4" } },
+			},
+		};
+
+		await expect(
+			broker.requestBrowserTool(SESSION_ID, "browser-call-stale", call, new AbortController().signal),
+		).resolves.toMatchObject({ tool: "browser_act", details: { status: "stale", reason: "revision_changed" } });
+		expect(peer.requests).toHaveLength(0);
+		expect(peer.browserRequests.map((request) => request.params.call.tool)).toEqual(["browser_observe"]);
 	});
 
 	it("routes ask_user questions and maps selected IDs back to ordered option indexes", async () => {

@@ -50,6 +50,11 @@ export interface InteractionBrokerOptions {
 }
 
 type NotificationEvent = Extract<DomainEvent, { type: "interaction/notify" }>;
+type BrowserObservation = Extract<BrowserToolResult, { tool: "browser_observe" }>["observation"];
+type BrowserStaleReason = Extract<
+	Extract<BrowserToolResult, { tool: "browser_act" }>["details"],
+	{ status: "stale" }
+>["reason"];
 
 function choiceId(index: number): string {
 	return `choice:${index}`;
@@ -79,6 +84,65 @@ function boundedPublicText(value: string): string {
 
 function validTimeout(value: number): boolean {
 	return Number.isSafeInteger(value) && value >= 1 && value <= MAX_TIMEOUT_MS;
+}
+
+function browserOrigin(url: string): string {
+	try {
+		return new URL(url).origin;
+	} catch {
+		return "";
+	}
+}
+
+function browserActionElementIds(action: BrowserActInput["action"]): readonly string[] {
+	switch (action.type) {
+		case "click":
+		case "hover":
+			return "elementId" in action.target ? [action.target.elementId] : [];
+		case "type":
+		case "select":
+			return [action.elementId];
+		case "scroll":
+			return action.elementId ? [action.elementId] : [];
+		case "drag":
+			return [action.to, action.from].flatMap((target) => ("elementId" in target ? [target.elementId] : []));
+		case "press":
+		case "dialog":
+			return [];
+	}
+}
+
+function observedTarget(state: string, elementId: string): { readonly found: boolean; readonly label?: string } {
+	const prefix = `${elementId} `;
+	const line = state.split("\n").find((candidate) => candidate.trimStart().startsWith(prefix));
+	if (!line) return { found: false };
+	const remainder = line.trimStart().slice(prefix.length);
+	const role = remainder.split(/[\s[]/u, 1)[0];
+	const encodedLabel = remainder.match(/"(?:\\.|[^"\\])*"/u)?.[0];
+	if (!encodedLabel) return { found: true, ...(role ? { label: role } : {}) };
+	try {
+		const label = JSON.parse(encodedLabel) as unknown;
+		return { found: true, label: typeof label === "string" && label !== "" ? label : role };
+	} catch {
+		return { found: true, ...(role ? { label: role } : {}) };
+	}
+}
+
+function preflightBrowserAction(
+	input: BrowserActInput,
+	observation: BrowserObservation,
+): { readonly staleReason?: BrowserStaleReason; readonly target: string } {
+	if (observation.documentId !== input.documentId)
+		return { staleReason: "document_changed", target: input.action.type };
+	if (browserOrigin(observation.url) !== input.origin)
+		return { staleReason: "origin_changed", target: input.action.type };
+	if (observation.revision !== input.snapshotRevision)
+		return { staleReason: "revision_changed", target: input.action.type };
+	const targets = browserActionElementIds(input.action).map((elementId) =>
+		observedTarget(observation.state, elementId),
+	);
+	if (targets.some(({ found }) => !found)) return { staleReason: "element_missing", target: input.action.type };
+	return { target: targets.find(({ label }) => label)?.label ?? input.action.type };
 }
 
 function permissionOperation(request: PermissionApprovalRequest) {
@@ -133,7 +197,7 @@ function permissionOperation(request: PermissionApprovalRequest) {
 	};
 }
 
-/** Routes typed interaction requests to the client that owns a session. */
+/** Routes session-owned interactive and browser-host requests to the attached desktop peer. */
 export class InteractionBroker {
 	private readonly serverEpoch: string;
 	private readonly defaultTimeoutMs: number;
@@ -189,9 +253,32 @@ export class InteractionBroker {
 		const peer = this.owners.get(sessionId);
 		if (!peer) throw new Error("No interactive desktop owner is available for browser tools");
 		if (call.tool === "browser_act" && call.input.risk !== "ordinary") {
-			const confirmed = await this.requestBrowserActionConfirmation(sessionId, call.input, signal);
+			const preflightCall = {
+				tool: "browser_observe",
+				input: { browserId: call.input.browserId },
+			} satisfies BrowserToolCall;
+			const preflight = await this.dispatchBrowserTool(peer, sessionId, this.createId(), preflightCall, signal);
+			if (preflight.tool !== "browser_observe") throw new Error("Browser preflight returned the wrong tool result");
+			const { staleReason, target } = preflightBrowserAction(call.input, preflight.observation);
+			if (staleReason) {
+				return {
+					tool: "browser_act",
+					details: { status: "stale", reason: staleReason, observation: preflight.observation },
+				};
+			}
+			const confirmed = await this.requestBrowserActionConfirmation(sessionId, call.input, target, signal);
 			if (!confirmed) throw new Error("The user rejected this browser action");
 		}
+		return this.dispatchBrowserTool(peer, sessionId, toolCallId, call, signal);
+	}
+
+	private async dispatchBrowserTool(
+		peer: InteractionPeer,
+		sessionId: string,
+		toolCallId: string,
+		call: BrowserToolCall,
+		signal: AbortSignal,
+	): Promise<BrowserToolResult> {
 		const request = validateServerRequest({
 			jsonrpc: "2.0",
 			id: this.createId(),
@@ -200,23 +287,19 @@ export class InteractionBroker {
 		}) as ServerRpcRequest<"browser/tool">;
 		const result = (await peer.request(request, signal)) as ServerResult<"browser/tool">;
 		validateResponseFor("server", request, { jsonrpc: "2.0", id: request.id, result });
+		if (result.toolCallId !== toolCallId || result.result.tool !== call.tool) {
+			throw new Error("Browser tool response did not match its request");
+		}
 		return result.result;
 	}
 
 	private async requestBrowserActionConfirmation(
 		sessionId: string,
 		input: BrowserActInput,
+		target: string,
 		signal: AbortSignal,
 	): Promise<boolean> {
 		const interactionId = this.createId();
-		const action = input.action;
-		const target =
-			input.targetLabel ??
-			("elementId" in action
-				? action.elementId
-				: "target" in action && "elementId" in action.target
-					? action.target.elementId
-					: action.type);
 		const response = await this.request(
 			sessionId,
 			{

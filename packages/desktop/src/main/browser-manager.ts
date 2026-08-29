@@ -58,6 +58,7 @@ const DEFAULT_BROWSER_BOUNDS: DesktopBrowserBounds = { x: 0, y: 0, width: 1_024,
 const MAX_HISTORY_ENTRIES = 500;
 const HISTORY_SAVE_DELAY_MS = 500;
 const ACTIVITY_IDLE_DELAY_MS = 50;
+const STATE_EVENT_INTERVAL_MS = 50;
 const ZOOM_PERCENTAGES = [25, 33, 50, 67, 75, 80, 90, 100, 110, 125, 150, 175, 200, 250, 300, 400, 500] as const;
 
 interface BrowserRecord {
@@ -80,6 +81,8 @@ interface BrowserRecord {
 	controlState: "idle" | "agent" | "handoff";
 	activityActive: boolean;
 	activityIdleTimer?: NodeJS.Timeout;
+	stateEventTimer?: NodeJS.Timeout;
+	lastStateEventAt: number;
 	activeAbort?: AbortController;
 	takeoverRequested: boolean;
 	handoff?: HandoffRecord;
@@ -452,6 +455,7 @@ export class BrowserManager {
 			findRequestId: 0,
 			controlState: "idle",
 			activityActive: false,
+			lastStateEventAt: Number.NEGATIVE_INFINITY,
 			takeoverRequested: false,
 			commandTail: Promise.resolve(),
 		};
@@ -601,7 +605,7 @@ export class BrowserManager {
 			if (zoomPercent === current) return;
 			record.contents.setZoomFactor(zoomPercent / 100);
 			record.state = { ...record.state, zoomPercent };
-			this.emit({ type: "state", state: structuredClone(record.state) });
+			this.emitState(record);
 			return;
 		}
 		if (input.type === "capture-page") {
@@ -747,6 +751,8 @@ export class BrowserManager {
 		record.activeAbort?.abort();
 		if (record.activityIdleTimer) clearTimeout(record.activityIdleTimer);
 		record.activityIdleTimer = undefined;
+		if (record.stateEventTimer) clearTimeout(record.stateEventTimer);
+		record.stateEventTimer = undefined;
 		if (record.activityActive) {
 			record.activityActive = false;
 			this.emit({ type: "activity", sessionId: record.sessionId, browserId: record.browserId, active: false });
@@ -848,7 +854,7 @@ export class BrowserManager {
 		const url = normalizeBrowserUrl(value);
 		record.controller.invalidate();
 		record.state = { ...record.state, url, loading: true };
-		this.emit({ type: "state", state: structuredClone(record.state) });
+		this.emitState(record);
 		const navigation = record.contents.loadURL(url).catch((cause) => {
 			if (!isAbortedNavigation(cause)) throw cause;
 		});
@@ -1012,6 +1018,12 @@ export class BrowserManager {
 		}
 		if (previous === "agent") {
 			if (record.activityIdleTimer) clearTimeout(record.activityIdleTimer);
+			if (state === "handoff") {
+				record.activityIdleTimer = undefined;
+				record.activityActive = false;
+				this.placeSurface(record, Boolean(record.presentation?.visible));
+				return;
+			}
 			record.activityIdleTimer = setTimeout(() => {
 				record.activityIdleTimer = undefined;
 				if (
@@ -1138,7 +1150,7 @@ export class BrowserManager {
 				canGoBack: contents.navigationHistory.canGoBack(),
 				canGoForward: contents.navigationHistory.canGoForward(),
 			};
-			this.emit({ type: "state", state: structuredClone(record.state) });
+			this.emitState(record);
 		};
 		const onDidStartLoading = () => {
 			record.state = { ...record.state, loading: true };
@@ -1215,6 +1227,11 @@ export class BrowserManager {
 			if (this.records.get(browserId) !== record) return;
 			this.records.delete(browserId);
 			record.activeAbort?.abort();
+			if (record.activityIdleTimer) clearTimeout(record.activityIdleTimer);
+			record.activityIdleTimer = undefined;
+			if (record.stateEventTimer) clearTimeout(record.stateEventTimer);
+			record.stateEventTimer = undefined;
+			record.activityActive = false;
 			this.cancelHandoff(record, "tab_closed");
 			record.controller.close();
 			for (const cleanup of record.cleanup.splice(0)) cleanup();
@@ -1422,5 +1439,26 @@ export class BrowserManager {
 
 	private emit(event: DesktopBrowserEvent): void {
 		for (const listener of this.listeners) listener(event);
+	}
+
+	private emitState(record: BrowserRecord): void {
+		if (this.records.get(record.browserId) !== record) return;
+		const delay = STATE_EVENT_INTERVAL_MS - (Date.now() - record.lastStateEventAt);
+		if (!record.stateEventTimer && delay <= 0) {
+			record.lastStateEventAt = Date.now();
+			this.emit({ type: "state", state: structuredClone(record.state) });
+			return;
+		}
+		if (record.stateEventTimer) return;
+		record.stateEventTimer = setTimeout(
+			() => {
+				record.stateEventTimer = undefined;
+				if (this.records.get(record.browserId) !== record) return;
+				record.lastStateEventAt = Date.now();
+				this.emit({ type: "state", state: structuredClone(record.state) });
+			},
+			Math.max(0, delay),
+		);
+		record.stateEventTimer.unref?.();
 	}
 }

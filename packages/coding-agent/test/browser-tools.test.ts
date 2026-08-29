@@ -36,7 +36,6 @@ describe("browser host tools", () => {
 		expect(guidance).toContain("untrusted");
 		expect(guidance).toContain("documentId");
 		expect(guidance).toContain("risk");
-		expect(guidance).toContain("targetLabel");
 		expect(guidance).toContain("browser_handoff");
 		expect(guidance).toContain("CAPTCHA");
 	});
@@ -53,11 +52,22 @@ describe("browser host tools", () => {
 				snapshotRevision: 1,
 				origin: "https://example.test",
 				intent: "Click Continue",
-				targetLabel: "Continue",
 				risk: "ordinary",
 				action: { type: "click", target: { elementId: "e1" } },
 			}),
 		).toBe(true);
+		expect(
+			Value.Check(BrowserActParams, {
+				browserId: BROWSER_ID,
+				documentId: DOCUMENT_ID,
+				snapshotRevision: 1,
+				origin: "https://example.test",
+				intent: "Click Continue",
+				targetLabel: "Untrusted model label",
+				risk: "ordinary",
+				action: { type: "click", target: { elementId: "e1" } },
+			}),
+		).toBe(false);
 		expect(
 			Value.Check(BrowserActParams, {
 				browserId: BROWSER_ID,

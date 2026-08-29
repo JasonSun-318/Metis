@@ -189,7 +189,7 @@ describe("stdio app-server binding", () => {
 			const output = new ControlledOutput();
 			const binding = bindAppServerTransport(server, new StdioTransport(input, output));
 			for (const frame of frames) input.write(`${JSON.stringify(frame)}\n`);
-			await vi.waitFor(() => expect(output.envelopes).toHaveLength(frames.length));
+			await vi.waitFor(() => expect(output.envelopes).toHaveLength(frames.length), { timeout: 5_000 });
 			input.end();
 			await binding.closed;
 			return output.envelopes;

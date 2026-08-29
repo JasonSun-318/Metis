@@ -931,7 +931,6 @@ export const MAX_BROWSER_STATE_UTF8_BYTES = 256 * 1024;
 export const MAX_BROWSER_SCREENSHOT_UTF8_BYTES = 4 * 1024 * 1024;
 export const MAX_BROWSER_ACTION_TEXT_UTF8_BYTES = 32 * 1024;
 export const MAX_BROWSER_INTENT_UTF8_BYTES = 1024;
-export const MAX_BROWSER_TARGET_LABEL_UTF8_BYTES = 512;
 
 const BrowserIdSchema = UuidSchema;
 const BrowserProfileIdSchema = UuidSchema;
@@ -1039,7 +1038,6 @@ export const BrowserActInputSchema = StrictObject({
 	snapshotRevision: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
 	origin: BrowserOriginSchema,
 	intent: Utf8String(MAX_BROWSER_INTENT_UTF8_BYTES, { minLength: 1 }),
-	targetLabel: Type.Optional(Utf8String(MAX_BROWSER_TARGET_LABEL_UTF8_BYTES, { minLength: 1 })),
 	risk: BrowserRiskSchema,
 	action: BrowserActionSchema,
 });

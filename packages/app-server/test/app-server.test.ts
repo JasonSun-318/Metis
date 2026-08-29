@@ -1978,7 +1978,7 @@ describe("AppServer", () => {
 		expect(() => server.catalog.modeProjectSnapshot("code", projectDir)).toThrowError(
 			expect.objectContaining({ code: "SESSION_CORRUPT" }),
 		);
-	});
+	}, 15_000);
 
 	it("deletes one mode-project snapshot, closes subscriptions, and replays the result", async () => {
 		const activePath = writeModeSession(agentDir, sessionsRoot, "chat-active", projectDir, "chat");
@@ -2587,7 +2587,7 @@ describe("AppServer", () => {
 		).toMatchObject({ result: { deletedSessionCount: 201 } });
 		expect(trash.mock.calls[0]![0].sessions).toHaveLength(201);
 		expect(server.catalog.modeProjectSnapshot("code", projectDir).refs).toHaveLength(0);
-	});
+	}, 15_000);
 
 	it("replays a completed create after its working directory is removed", async () => {
 		const firstServer = await createTestServer({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });

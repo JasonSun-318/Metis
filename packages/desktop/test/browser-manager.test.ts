@@ -295,10 +295,19 @@ describe("BrowserManager", () => {
 			const harness = browserHarness();
 			const browserId = "10000000-0000-4000-8000-000000000069";
 			const activity: Array<{ readonly active: boolean }> = [];
+			const states: Array<{ readonly title: string }> = [];
 			harness.manager.onEvent((event) => {
 				if (event.type === "activity") activity.push(event);
+				if (event.type === "state") states.push(event.state);
 			});
 			harness.manager.create({ sessionId: SESSION_ID, browserId, profileId: DEFAULT_BROWSER_PROFILE_ID });
+			for (let index = 0; index < 100; index += 1) {
+				harness.emit("page-title-updated", {}, `Burst ${index}`, true);
+			}
+			expect(states).toHaveLength(1);
+			await vi.advanceTimersByTimeAsync(50);
+			expect(states).toHaveLength(2);
+			expect(states.at(-1)?.title).toBe("Burst 99");
 			for (let index = 0; index < 100; index += 1) {
 				await harness.manager.executeTool(
 					SESSION_ID,
@@ -522,14 +531,14 @@ describe("BrowserManager", () => {
 				reason: "other",
 			}),
 		);
+		await new Promise((resolve) => setTimeout(resolve, 75));
+		expect(events).not.toContainEqual({ type: "activity", sessionId: SESSION_ID, browserId, active: false });
 		harness.manager.resolveHandoff(SESSION_ID, browserId, "cancel");
 		await expect(pending).resolves.toEqual({
 			tool: "browser_act",
 			details: { status: "cancelled", reason: "user_cancelled" },
 		});
-		await vi.waitFor(() =>
-			expect(events).toContainEqual({ type: "activity", sessionId: SESSION_ID, browserId, active: false }),
-		);
+		expect(events).not.toContainEqual({ type: "activity", sessionId: SESSION_ID, browserId, active: false });
 	});
 
 	it("interrupts a hanging navigation immediately when the user takes control", async () => {
@@ -760,20 +769,22 @@ describe("BrowserManager", () => {
 		harness.emit("page-title-updated", {}, "Example Domain", true);
 		harness.emit("page-favicon-updated", {}, ["https://example.com/favicon.ico"]);
 		harness.emit("did-stop-loading");
-		expect(events).toContainEqual({
-			type: "state",
-			state: {
-				browserId,
-				profileId: DEFAULT_BROWSER_PROFILE_ID,
-				url: "https://example.com:8080/",
-				title: "Example Domain",
-				faviconUrl: "https://example.com/favicon.ico",
-				loading: false,
-				canGoBack: true,
-				canGoForward: true,
-				zoomPercent: 100,
-			},
-		});
+		await vi.waitFor(() =>
+			expect(events).toContainEqual({
+				type: "state",
+				state: {
+					browserId,
+					profileId: DEFAULT_BROWSER_PROFILE_ID,
+					url: "https://example.com:8080/",
+					title: "Example Domain",
+					faviconUrl: "https://example.com/favicon.ico",
+					loading: false,
+					canGoBack: true,
+					canGoForward: true,
+					zoomPercent: 100,
+				},
+			}),
+		);
 
 		expect(harness.windowOpen("https://openai.com")).toMatchObject({
 			action: "allow",
