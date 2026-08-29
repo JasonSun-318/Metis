@@ -1,4 +1,6 @@
 import {
+	type BrowserToolCall,
+	type BrowserToolRequestResult,
 	type InteractionResponseInput,
 	type InteractionView,
 	MAX_INTERACTION_CHOICES,
@@ -6,6 +8,8 @@ import {
 	MAX_PERMISSION_OPERATION_ROWS,
 	MAX_PUBLIC_TEXT_UTF8_BYTES,
 	PROTOCOL_VERSION,
+	type ServerRequestMethod,
+	type ServerResult,
 	type ServerRpcRequest,
 } from "@metis/app-protocol";
 import {
@@ -24,18 +28,26 @@ const SESSION_ID = "session-1";
 
 class FakePeer implements InteractionPeer {
 	readonly requests: InteractionView[] = [];
+	readonly browserRequests: ServerRpcRequest<"browser/tool">[] = [];
 	response?: InteractionResponseInput;
+	browserResponse?: BrowserToolRequestResult;
 	responseFor?: (interaction: InteractionView) => InteractionResponseInput;
 	waitForever = false;
 
-	async request(request: ServerRpcRequest, signal: AbortSignal): Promise<InteractionResponseInput> {
-		this.requests.push(request.params.interaction);
+	async request(request: ServerRpcRequest, signal: AbortSignal): Promise<ServerResult<ServerRequestMethod>> {
+		if (request.method === "browser/tool") {
+			this.browserRequests.push(request as ServerRpcRequest<"browser/tool">);
+			if (!this.browserResponse) throw new Error("Browser response is unavailable");
+			return this.browserResponse;
+		}
+		const interactionRequest = request as ServerRpcRequest<"interaction/request">;
+		this.requests.push(interactionRequest.params.interaction);
 		if (this.waitForever) {
-			return await new Promise<InteractionResponseInput>((_resolve, reject) => {
+			return await new Promise<ServerResult<ServerRequestMethod>>((_resolve, reject) => {
 				signal.addEventListener("abort", () => reject(signal.reason), { once: true });
 			});
 		}
-		const response = this.responseFor?.(request.params.interaction) ?? this.response;
+		const response = this.responseFor?.(interactionRequest.params.interaction) ?? this.response;
 		if (!response) throw new Error("Interaction cancelled");
 		return response;
 	}
@@ -89,6 +101,108 @@ describe("InteractionBroker", () => {
 			multiple: question.multiple,
 			options: question.options.map((option) => ({ ...option })),
 		})),
+	});
+	const browserTabsCall = (): BrowserToolCall => ({ tool: "browser_tabs", input: { action: "list" } });
+	const browserTabsResponse = (toolCallId: string): BrowserToolRequestResult => ({
+		toolCallId,
+		result: {
+			tool: "browser_tabs",
+			details: {
+				profiles: [{ profileId: "00000000-0000-4000-8000-000000000001", name: "Default", sourceId: null }],
+				tabs: [],
+			},
+		},
+	});
+
+	it("routes an ordinary browser tool directly to the desktop owner", async () => {
+		const broker = new InteractionBroker({ serverEpoch: EPOCH });
+		const peer = new FakePeer();
+		peer.browserResponse = browserTabsResponse("browser-call-1");
+		broker.assign(SESSION_ID, peer);
+
+		await expect(
+			broker.requestBrowserTool(SESSION_ID, "browser-call-1", browserTabsCall(), new AbortController().signal),
+		).resolves.toEqual(peer.browserResponse.result);
+		expect(peer.requests).toHaveLength(0);
+		expect(peer.browserRequests).toHaveLength(1);
+		expect(peer.browserRequests[0]).toMatchObject({
+			method: "browser/tool",
+			params: { serverEpoch: EPOCH, sessionId: SESSION_ID, toolCallId: "browser-call-1" },
+		});
+	});
+
+	it("confirms a high-risk browser action immediately before dispatch", async () => {
+		const ids = [
+			"00000000-0000-4000-8000-000000000401",
+			"00000000-0000-4000-8000-000000000402",
+			"00000000-0000-4000-8000-000000000403",
+		];
+		const broker = new InteractionBroker({ serverEpoch: EPOCH, createId: () => ids.shift()! });
+		const peer = new FakePeer();
+		peer.responseFor = (interaction) => ({
+			interactionId: interaction.interactionId,
+			kind: "confirm",
+			confirmed: true,
+		});
+		peer.browserResponse = {
+			toolCallId: "browser-call-2",
+			result: { tool: "browser_act", details: { status: "cancelled", reason: "user_cancelled" } },
+		};
+		broker.assign(SESSION_ID, peer);
+		const call: BrowserToolCall = {
+			tool: "browser_act",
+			input: {
+				browserId: "88888888-8888-4888-8888-888888888888",
+				documentId: "99999999-9999-4999-8999-999999999999",
+				snapshotRevision: 4,
+				origin: "https://example.test",
+				intent: "Delete the fixture record",
+				risk: "destructive",
+				action: { type: "click", target: { elementId: "e4" } },
+			},
+		};
+
+		await expect(
+			broker.requestBrowserTool(SESSION_ID, "browser-call-2", call, new AbortController().signal),
+		).resolves.toEqual(peer.browserResponse.result);
+		expect(peer.requests).toHaveLength(1);
+		expect(peer.requests[0]).toMatchObject({
+			kind: "confirm",
+			title: "Allow browser action?",
+			message: expect.stringContaining("Site: https://example.test"),
+		});
+		expect(peer.browserRequests).toHaveLength(1);
+	});
+
+	it("does not dispatch a rejected or unowned browser action", async () => {
+		const broker = new InteractionBroker({ serverEpoch: EPOCH });
+		await expect(
+			broker.requestBrowserTool(SESSION_ID, "browser-call-3", browserTabsCall(), new AbortController().signal),
+		).rejects.toThrow("No interactive desktop owner");
+
+		const peer = new FakePeer();
+		peer.responseFor = (interaction) => ({
+			interactionId: interaction.interactionId,
+			kind: "confirm",
+			confirmed: false,
+		});
+		broker.assign(SESSION_ID, peer);
+		const action: BrowserToolCall = {
+			tool: "browser_act",
+			input: {
+				browserId: "88888888-8888-4888-8888-888888888888",
+				documentId: "99999999-9999-4999-8999-999999999999",
+				snapshotRevision: 1,
+				origin: "https://example.test",
+				intent: "Submit the fixture form",
+				risk: "external_side_effect",
+				action: { type: "press", key: "Enter" },
+			},
+		};
+		await expect(
+			broker.requestBrowserTool(SESSION_ID, "browser-call-4", action, new AbortController().signal),
+		).rejects.toThrow("rejected");
+		expect(peer.browserRequests).toHaveLength(0);
 	});
 
 	it("routes ask_user questions and maps selected IDs back to ordered option indexes", async () => {
@@ -699,6 +813,54 @@ describe("InteractionBroker", () => {
 			}),
 		).toBe(true);
 		await expect(confirmed).resolves.toBe(true);
+		connection.close();
+	});
+
+	it("notifies desktop when an in-flight browser request is aborted", async () => {
+		const connection = new AppServerConnection({
+			dispatcher: { dispatch: vi.fn() } as never,
+			serverEpoch: EPOCH,
+			serverVersion: "test",
+			subscriptionHub: new SessionSubscriptions(EPOCH),
+		});
+		const outbound: unknown[] = [];
+		connection.onMessage((envelope) => {
+			outbound.push(envelope);
+		});
+		await connection.handle({
+			jsonrpc: "2.0",
+			id: "initialize",
+			method: "initialize",
+			params: { protocolVersion: PROTOCOL_VERSION, client: { name: "test", version: "1" }, capabilities: [] },
+		});
+		const request = {
+			jsonrpc: "2.0",
+			id: "server-browser-abort",
+			method: "browser/tool",
+			params: {
+				serverEpoch: EPOCH,
+				sessionId: SESSION_ID,
+				toolCallId: "browser-call-abort",
+				call: { tool: "browser_tabs", input: { action: "list" } },
+			},
+		} as const;
+		const controller = new AbortController();
+		const pending = connection.request(request, controller.signal);
+		await vi.waitFor(() => expect(outbound).toContainEqual(request));
+		controller.abort(new Error("turn interrupted"));
+		await expect(pending).rejects.toThrow("OPERATION_FAILED");
+		await vi.waitFor(() =>
+			expect(outbound).toContainEqual({
+				jsonrpc: "2.0",
+				method: "browser/tool/cancelled",
+				params: {
+					serverEpoch: EPOCH,
+					sessionId: SESSION_ID,
+					toolCallId: "browser-call-abort",
+					requestId: "server-browser-abort",
+				},
+			}),
+		);
 		connection.close();
 	});
 

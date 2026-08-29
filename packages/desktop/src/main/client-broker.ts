@@ -132,7 +132,7 @@ interface ClientBrokerOptions {
 type InvokeHandler = (event: IpcMainInvokeEvent, ...args: unknown[]) => Promise<unknown>;
 
 interface PendingInteraction {
-	readonly request: ServerRpcRequest;
+	readonly request: ServerRpcRequest<"interaction/request">;
 	readonly timer?: ReturnType<typeof setTimeout>;
 }
 
@@ -742,23 +742,37 @@ export class ClientBroker {
 			const request = validateServerRequest(value);
 			const view = this.supervisor.view();
 			if (view.state !== "ready" || request.params.serverEpoch !== view.serverEpoch) return;
-			if (this.pendingInteractions.has(request.params.interaction.interactionId)) {
+			if (request.method !== "interaction/request") {
+				const response: RpcErrorResponse = {
+					jsonrpc: "2.0",
+					id: request.id,
+					error: createRpcError("OPERATION_FAILED", { sessionId: request.params.sessionId }),
+				};
+				this.supervisor.respondToServerRequest(request, response);
+				return;
+			}
+			const interactionRequest = request as ServerRpcRequest<"interaction/request">;
+			if (this.pendingInteractions.has(interactionRequest.params.interaction.interactionId)) {
 				throw new Error("App-server reused a pending interaction id");
 			}
-			const interaction = request.params.interaction;
+			const interaction = interactionRequest.params.interaction;
 			const expiresAt = interaction.expiresAt ? Date.parse(interaction.expiresAt) : Number.NaN;
 			const delay = expiresAt - Date.now();
 			const timer = Number.isFinite(delay)
 				? setTimeout(() => this.expireInteraction(interaction.interactionId), Math.max(0, delay))
 				: undefined;
 			timer?.unref?.();
-			this.pendingInteractions.set(interaction.interactionId, { request, ...(timer ? { timer } : {}) });
-			if (!this.sendEvent({ type: "app-server", envelope: request })) this.cancelPendingInteractions();
+			this.pendingInteractions.set(interaction.interactionId, {
+				request: interactionRequest,
+				...(timer ? { timer } : {}),
+			});
+			if (!this.sendEvent({ type: "app-server", envelope: interactionRequest })) this.cancelPendingInteractions();
 			return;
 		}
 		const notification = validateServerNotification(value);
 		const view = this.supervisor.view();
 		if (view.state !== "ready" || notification.params.serverEpoch !== view.serverEpoch) return;
+		if (notification.method !== "connection/events") return;
 		for (const event of notification.params.events) {
 			if (event.type === "session/updated") this.onSessionUpdated?.(event.session);
 			else if (event.type === "session/invalidated" && event.reason === "deleted") {
@@ -849,7 +863,7 @@ export class ClientBroker {
 		this.sendEvent({ type: "interaction-cancelled", interactionId });
 	}
 
-	private cancelServerInteraction(request: ServerRpcRequest): void {
+	private cancelServerInteraction(request: ServerRpcRequest<"interaction/request">): void {
 		const interaction = request.params.interaction;
 		const response: RpcErrorResponse = {
 			jsonrpc: "2.0",

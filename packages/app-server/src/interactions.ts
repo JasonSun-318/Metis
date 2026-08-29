@@ -1,5 +1,8 @@
 import { randomUUID } from "node:crypto";
 import {
+	type BrowserActInput,
+	type BrowserToolCall,
+	type BrowserToolResult,
 	type DomainEvent,
 	type InteractionResponseInput,
 	type InteractionView,
@@ -7,6 +10,8 @@ import {
 	MAX_NAME_UTF16_UNITS,
 	MAX_PERMISSION_OPERATION_ROWS,
 	MAX_PUBLIC_TEXT_UTF8_BYTES,
+	type ServerRequestMethod,
+	type ServerResult,
 	type ServerRpcRequest,
 	validateResponseFor,
 	validateServerRequest,
@@ -33,7 +38,7 @@ const ALWAYS_PROJECT = "permission:always-project";
 const DENY = "permission:deny";
 
 export interface InteractionPeer {
-	request(request: ServerRpcRequest, signal: AbortSignal): Promise<InteractionResponseInput>;
+	request(request: ServerRpcRequest, signal: AbortSignal): Promise<ServerResult<ServerRequestMethod>>;
 }
 
 export interface InteractionBrokerOptions {
@@ -169,6 +174,62 @@ export class InteractionBroker {
 
 	hasPending(sessionId: string): boolean {
 		return [...this.pending.values()].some((pendingSessionId) => pendingSessionId === sessionId);
+	}
+
+	async requestBrowserTool(
+		sessionId: string,
+		toolCallId: string,
+		call: BrowserToolCall,
+		signal: AbortSignal,
+	): Promise<BrowserToolResult> {
+		const peer = this.owners.get(sessionId);
+		if (!peer) throw new Error("No interactive desktop owner is available for browser tools");
+		if (call.tool === "browser_act" && call.input.risk !== "ordinary") {
+			const confirmed = await this.requestBrowserActionConfirmation(sessionId, call.input, signal);
+			if (!confirmed) throw new Error("The user rejected this browser action");
+		}
+		const request = validateServerRequest({
+			jsonrpc: "2.0",
+			id: this.createId(),
+			method: "browser/tool",
+			params: { serverEpoch: this.serverEpoch, sessionId, toolCallId, call },
+		}) as ServerRpcRequest<"browser/tool">;
+		const result = (await peer.request(request, signal)) as ServerResult<"browser/tool">;
+		validateResponseFor("server", request, { jsonrpc: "2.0", id: request.id, result });
+		return result.result;
+	}
+
+	private async requestBrowserActionConfirmation(
+		sessionId: string,
+		input: BrowserActInput,
+		signal: AbortSignal,
+	): Promise<boolean> {
+		const interactionId = this.createId();
+		const action = input.action;
+		const target =
+			"elementId" in action
+				? action.elementId
+				: "target" in action && "elementId" in action.target
+					? action.target.elementId
+					: action.type;
+		const response = await this.request(
+			sessionId,
+			{
+				interactionId,
+				sessionId,
+				title: "Allow browser action?",
+				message: boundedPublicText(
+					`Site: ${input.origin}\nRisk: ${input.risk}\nIntent: ${input.intent}\nTarget: ${target}`,
+				),
+				createdAt: new Date(this.now()).toISOString(),
+				expiresAt: deadline(this.now(), this.defaultTimeoutMs),
+				kind: "confirm",
+				confirmLabel: "Allow once",
+				cancelLabel: "Reject",
+			},
+			{ signal },
+		);
+		return response?.kind === "confirm" && response.confirmed;
 	}
 
 	async requestProjectTrust(
@@ -370,14 +431,14 @@ export class InteractionBroker {
 		if (!peer) return undefined;
 		const timeout = options?.timeout ?? this.defaultTimeoutMs;
 		if (!validTimeout(timeout)) return undefined;
-		let request: ServerRpcRequest;
+		let request: ServerRpcRequest<"interaction/request">;
 		try {
 			request = validateServerRequest({
 				jsonrpc: "2.0",
 				id: this.createId(),
 				method: "interaction/request",
 				params: { serverEpoch: this.serverEpoch, interaction: interactionValue },
-			});
+			}) as ServerRpcRequest<"interaction/request">;
 		} catch {
 			return undefined;
 		}
@@ -399,7 +460,10 @@ export class InteractionBroker {
 			const aborted = new Promise<never>((_resolve, reject) => {
 				controller.signal.addEventListener("abort", () => reject(controller.signal.reason), { once: true });
 			});
-			const result = await Promise.race([peer.request(request, controller.signal), aborted]);
+			const result = (await Promise.race([
+				peer.request(request, controller.signal),
+				aborted,
+			])) as InteractionResponseInput;
 			validateResponseFor("server", request, { jsonrpc: "2.0", id: request.id, result });
 			return result;
 		} catch {

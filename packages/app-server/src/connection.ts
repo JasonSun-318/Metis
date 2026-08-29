@@ -2,17 +2,20 @@ import {
 	type ClientRpcRequest,
 	type ClientRpcSuccessResponse,
 	createRpcError,
-	type InteractionResponseInput,
 	PROTOCOL_VERSION,
 	ProtocolValidationError,
 	type RpcErrorContext,
 	type RpcErrorName,
 	type RpcErrorResponse,
 	rpcErrorNameForCode,
+	type ServerRequestMethod,
+	type ServerResult,
+	type ServerRpcNotification,
 	type ServerRpcRequest,
 	type ServerRpcSuccessResponse,
 	validateClientRequest,
 	validateResponseFor,
+	validateServerNotification,
 	validateServerRequest,
 } from "@metis/app-protocol";
 import type { ConnectionState, Dispatcher } from "./dispatcher.ts";
@@ -99,29 +102,42 @@ export interface ConnectionOptions {
 	readonly onClose?: (connection: AppServerConnection) => void;
 }
 
-export type ConnectionOutboundEnvelope = OutboundEnvelope | ServerRpcRequest;
+export type ConnectionOutboundEnvelope =
+	| OutboundEnvelope
+	| ServerRpcNotification<"browser/tool/cancelled">
+	| ServerRpcRequest;
 export type ConnectionOutboundSender = (envelope: ConnectionOutboundEnvelope) => Promise<void> | void;
 
-interface PendingInteraction {
+interface PendingServerRequest {
 	readonly request: ServerRpcRequest;
 	readonly signal: AbortSignal;
 	readonly onAbort: () => void;
-	readonly resolve: (result: InteractionResponseInput) => void;
+	readonly resolve: (result: unknown) => void;
 	readonly reject: (error: Error) => void;
 }
 
-function interactionContext(request: ServerRpcRequest): RpcErrorContext {
-	return {
-		interactionId: request.params.interaction.interactionId,
-		sessionId: request.params.interaction.sessionId,
-	};
+function serverRequestContext(request: ServerRpcRequest): RpcErrorContext {
+	if (request.method === "interaction/request") {
+		return {
+			interactionId: request.params.interaction.interactionId,
+			sessionId: request.params.interaction.sessionId,
+		};
+	}
+	return { sessionId: (request as ServerRpcRequest<"browser/tool">).params.sessionId };
+}
+
+function cancelledRequestError(request: ServerRpcRequest): AppServerError {
+	return new AppServerError(
+		request.method === "interaction/request" ? "INTERACTION_CANCELLED" : "OPERATION_FAILED",
+		serverRequestContext(request),
+	);
 }
 
 /** One independently initialized client connection. */
 export class AppServerConnection {
 	private readonly options: ConnectionOptions;
 	private readonly outbound: OutboundQueue;
-	private readonly pendingInteractions = new Map<string, PendingInteraction>();
+	private readonly pendingServerRequests = new Map<string, PendingServerRequest>();
 	private sender?: ConnectionOutboundSender;
 	private initialized = false;
 	private closed = false;
@@ -152,49 +168,67 @@ export class AppServerConnection {
 			detachOutbound();
 			if (this.sender === sender) {
 				this.sender = undefined;
-				this.rejectPendingInteractions();
+				this.rejectPendingServerRequests();
 			}
 		};
 	}
 
-	request(requestValue: ServerRpcRequest, signal: AbortSignal): Promise<InteractionResponseInput> {
+	request<Method extends ServerRequestMethod>(
+		requestValue: ServerRpcRequest<Method>,
+		signal: AbortSignal,
+	): Promise<ServerResult<Method>>;
+	request(requestValue: ServerRpcRequest, signal: AbortSignal): Promise<ServerResult<ServerRequestMethod>> {
 		if (this.closed || !this.initialized || !this.sender) {
-			return Promise.reject(new AppServerError("INTERACTION_CANCELLED", interactionContext(requestValue)));
+			return Promise.reject(cancelledRequestError(requestValue));
 		}
-		if (this.pendingInteractions.size >= 128) {
-			return Promise.reject(new AppServerError("OVERLOADED", interactionContext(requestValue)));
+		if (this.pendingServerRequests.size >= 128) {
+			return Promise.reject(new AppServerError("OVERLOADED", serverRequestContext(requestValue)));
 		}
 		let request: ServerRpcRequest;
 		try {
 			request = validateServerRequest(requestValue);
-			if (request.params.serverEpoch !== this.options.serverEpoch) throw new Error("Interaction epoch mismatch");
+			if (request.params.serverEpoch !== this.options.serverEpoch) throw new Error("Server request epoch mismatch");
 		} catch {
 			return Promise.reject(new AppServerError("INVALID_REQUEST"));
 		}
-		if (this.pendingInteractions.has(request.id)) {
-			return Promise.reject(new AppServerError("INVALID_REQUEST", interactionContext(request)));
+		if (this.pendingServerRequests.has(request.id)) {
+			return Promise.reject(new AppServerError("INVALID_REQUEST", serverRequestContext(request)));
 		}
 
-		return new Promise<InteractionResponseInput>((resolve, reject) => {
+		return new Promise<ServerResult<ServerRequestMethod>>((resolve, reject) => {
 			const onAbort = () => {
-				const pending = this.takePendingInteraction(request.id);
-				pending?.reject(new AppServerError("INTERACTION_CANCELLED", interactionContext(request)));
+				if (request.method === "browser/tool" && this.sender) {
+					const browserRequest = request as ServerRpcRequest<"browser/tool">;
+					const notification = validateServerNotification({
+						jsonrpc: "2.0",
+						method: "browser/tool/cancelled",
+						params: {
+							serverEpoch: browserRequest.params.serverEpoch,
+							sessionId: browserRequest.params.sessionId,
+							toolCallId: browserRequest.params.toolCallId,
+							requestId: request.id,
+						},
+					});
+					void Promise.resolve(this.sender(notification)).catch(() => undefined);
+				}
+				const pending = this.takePendingServerRequest(request.id);
+				pending?.reject(cancelledRequestError(request));
 			};
-			const pending: PendingInteraction = {
+			const pending: PendingServerRequest = {
 				request,
 				signal,
 				onAbort,
-				resolve,
+				resolve: (result) => resolve(result as ServerResult<ServerRequestMethod>),
 				reject,
 			};
-			this.pendingInteractions.set(request.id, pending);
+			this.pendingServerRequests.set(request.id, pending);
 			if (signal.aborted) {
 				onAbort();
 				return;
 			}
 			signal.addEventListener("abort", onAbort, { once: true });
 			Promise.resolve(this.sender!(request)).catch((error) => {
-				const failed = this.takePendingInteraction(request.id);
+				const failed = this.takePendingServerRequest(request.id);
 				failed?.reject(error instanceof Error ? error : new Error(String(error)));
 			});
 		});
@@ -205,7 +239,7 @@ export class AppServerConnection {
 		const record = value as Record<string, unknown>;
 		if (!Object.hasOwn(record, "result") && !Object.hasOwn(record, "error")) return false;
 		if (typeof record.id !== "string") return true;
-		const pending = this.takePendingInteraction(record.id);
+		const pending = this.takePendingServerRequest(record.id);
 		if (!pending) return true;
 		try {
 			const response = validateResponseFor("server", pending.request, value) as
@@ -215,7 +249,7 @@ export class AppServerConnection {
 				const name = rpcErrorNameForCode(response.error.code) ?? "OPERATION_FAILED";
 				pending.reject(new AppServerError(name, "data" in response.error ? response.error.data : {}));
 			} else {
-				pending.resolve(response.result as InteractionResponseInput);
+				pending.resolve(response.result);
 			}
 		} catch (error) {
 			pending.reject(error instanceof Error ? error : new Error(String(error)));
@@ -223,17 +257,18 @@ export class AppServerConnection {
 		return true;
 	}
 
-	private takePendingInteraction(id: string): PendingInteraction | undefined {
-		const pending = this.pendingInteractions.get(id);
+	private takePendingServerRequest(id: string): PendingServerRequest | undefined {
+		const pending = this.pendingServerRequests.get(id);
 		if (!pending) return undefined;
-		this.pendingInteractions.delete(id);
+		this.pendingServerRequests.delete(id);
 		pending.signal.removeEventListener("abort", pending.onAbort);
 		return pending;
 	}
 
-	private rejectPendingInteractions(): void {
-		for (const id of [...this.pendingInteractions.keys()]) {
-			this.takePendingInteraction(id)?.reject(new AppServerError("INTERACTION_CANCELLED"));
+	private rejectPendingServerRequests(): void {
+		for (const id of [...this.pendingServerRequests.keys()]) {
+			const pending = this.takePendingServerRequest(id);
+			if (pending) pending.reject(cancelledRequestError(pending.request));
 		}
 	}
 
@@ -312,7 +347,7 @@ export class AppServerConnection {
 		if (this.closed) return;
 		this.closed = true;
 		this.sender = undefined;
-		this.rejectPendingInteractions();
+		this.rejectPendingServerRequests();
 		this.state.subscriptions.close();
 		this.outbound.close();
 		this.options.onClose?.(this);

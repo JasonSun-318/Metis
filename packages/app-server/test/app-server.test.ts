@@ -662,16 +662,18 @@ describe("AppServer", () => {
 		const server = await createTestServer({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
 		let finish!: () => void;
 		server.interactions.assign("attention-session", {
-			request: (request: ServerRpcRequest) =>
-				new Promise<InteractionResponseInput>((resolve) => {
+			request: (request: ServerRpcRequest) => {
+				const interactionRequest = request as ServerRpcRequest<"interaction/request">;
+				return new Promise<InteractionResponseInput>((resolve) => {
 					finish = () =>
 						resolve({
-							interactionId: request.params.interaction.interactionId,
+							interactionId: interactionRequest.params.interaction.interactionId,
 							kind: "ask_user",
 							cancelled: true,
 							answers: [],
 						});
-				}),
+				});
+			},
 		});
 
 		const waiting = server.interactions.requestUserInput("attention-session", {
@@ -3191,11 +3193,12 @@ describe("AppServer", () => {
 
 		const server = await createTestServer({ agentDir, sessionsRoot });
 		const connection = server.connect();
-		const interactions: ServerRpcRequest[] = [];
+		const interactions: ServerRpcRequest<"interaction/request">[] = [];
 		connection.onMessage((envelope) => {
 			if (!("method" in envelope) || envelope.method !== "interaction/request") return;
-			interactions.push(envelope);
-			const interaction = envelope.params.interaction;
+			const interactionRequest = envelope as ServerRpcRequest<"interaction/request">;
+			interactions.push(interactionRequest);
+			const interaction = interactionRequest.params.interaction;
 			if (interaction.kind === "project_trust") {
 				const label =
 					interaction.projectPath === realpathSync(parentProject)

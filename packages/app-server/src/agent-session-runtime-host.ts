@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import {
+	type BrowserToolCall,
 	type ClientParams,
 	type ClientResult,
 	type DomainEvent,
@@ -23,6 +24,7 @@ import {
 	type AuthStorage,
 	type AuthStorageChange,
 	agentTaskWindow,
+	BROWSER_TOOL_NAMES,
 	buildChildSystemPrompt,
 	type CreateAgentSessionRuntimeFactory,
 	copySessionDeliveredFiles,
@@ -30,6 +32,7 @@ import {
 	createAgentSessionRuntime,
 	createAgentSessionServices,
 	createAskUserToolDefinition,
+	createBrowserToolDefinitions,
 	createDeliverFileToolDefinition,
 	DefaultResourceLoader,
 	formatSessionAttachments,
@@ -480,6 +483,14 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 			session.installHostTools(
 				[
 					createAskUserToolDefinition((request) => this.interactions!.requestUserInput(this.sessionId, request)),
+					...createBrowserToolDefinitions(({ toolCallId, tool, input, signal }) =>
+						this.interactions!.requestBrowserTool(
+							this.sessionId,
+							toolCallId,
+							{ tool, input } as BrowserToolCall,
+							signal,
+						),
+					),
 					createDeliverFileToolDefinition(() => ({
 						cwd: session.sessionManager.getCwd(),
 						agentDir: this.agentDir,
@@ -488,7 +499,7 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 						activeDeliveredFileCount: this.deliveredFiles.length,
 					})),
 				],
-				{ automaticPermissionToolNames: ["ask_user", "deliver_file"] },
+				{ automaticPermissionToolNames: ["ask_user", ...BROWSER_TOOL_NAMES, "deliver_file"] },
 			);
 		}
 		session.setPermissionApprovalHandler((request) =>

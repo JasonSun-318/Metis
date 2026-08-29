@@ -12,7 +12,7 @@ import { AppServerError } from "./session-runtime-host.ts";
 export const DEFAULT_MAX_UNACKNOWLEDGED_BYTES = 4 * 1024 * 1024;
 export const DEFAULT_MAX_UNACKNOWLEDGED_EVENTS = 1024;
 
-export type OutboundEnvelope = ServerRpcNotification | RpcErrorResponse;
+export type OutboundEnvelope = ServerRpcNotification<"connection/events"> | RpcErrorResponse;
 export type OutboundSender = (envelope: OutboundEnvelope) => Promise<void> | void;
 
 export interface OutboundQueueLimits {
@@ -53,7 +53,10 @@ function eventBytes(event: DomainEvent): number {
 	return Buffer.byteLength(JSON.stringify(event), "utf8");
 }
 
-function notification(serverEpoch: string, records: readonly QueuedEvent[]): ServerRpcNotification {
+function notification(
+	serverEpoch: string,
+	records: readonly QueuedEvent[],
+): ServerRpcNotification<"connection/events"> {
 	return validateServerNotification({
 		jsonrpc: "2.0",
 		method: "connection/events",
@@ -63,7 +66,7 @@ function notification(serverEpoch: string, records: readonly QueuedEvent[]): Ser
 			toCursor: records.at(-1)!.cursor,
 			events: records.map((record) => structuredClone(record.event)),
 		},
-	});
+	}) as ServerRpcNotification<"connection/events">;
 }
 
 function envelopeBytes(value: OutboundEnvelope): number {

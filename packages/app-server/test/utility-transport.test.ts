@@ -239,12 +239,12 @@ describe("utility-process app-server binding", () => {
 			),
 		);
 		const trustRequest = port.sent.find(
-			(message): message is ServerRpcRequest =>
+			(message): message is ServerRpcRequest<"interaction/request"> =>
 				typeof message === "object" &&
 				message !== null &&
 				"method" in message &&
 				message.method === "interaction/request" &&
-				(message as ServerRpcRequest).params.interaction.kind === "project_trust",
+				(message as ServerRpcRequest<"interaction/request">).params.interaction.kind === "project_trust",
 		);
 		if (!trustRequest || trustRequest.params.interaction.kind !== "project_trust") {
 			throw new Error("Missing project trust request");
@@ -274,12 +274,12 @@ describe("utility-process app-server binding", () => {
 			),
 		);
 		const confirmRequest = port.sent.find(
-			(message): message is ServerRpcRequest =>
+			(message): message is ServerRpcRequest<"interaction/request"> =>
 				typeof message === "object" &&
 				message !== null &&
 				"method" in message &&
 				message.method === "interaction/request" &&
-				(message as ServerRpcRequest).params.interaction.kind === "confirm",
+				(message as ServerRpcRequest<"interaction/request">).params.interaction.kind === "confirm",
 		);
 		if (!confirmRequest || confirmRequest.params.interaction.kind !== "confirm") {
 			throw new Error("Missing extension confirmation request");

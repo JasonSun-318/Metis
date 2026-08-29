@@ -42,8 +42,8 @@ function completedItem(itemId = "item-stream"): ItemView {
 	};
 }
 
-function notifications(messages: readonly OutboundEnvelope[]): ServerRpcNotification[] {
-	return messages.filter((message): message is ServerRpcNotification => "method" in message);
+function notifications(messages: readonly OutboundEnvelope[]): ServerRpcNotification<"connection/events">[] {
+	return messages.filter((message): message is ServerRpcNotification<"connection/events"> => "method" in message);
 }
 
 describe("OutboundQueue backpressure", () => {

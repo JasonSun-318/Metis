@@ -38,7 +38,10 @@ export type DesktopUpdateState =
 	| { readonly status: "downloading"; readonly version: string; readonly progress: number };
 
 export type DesktopApiEvent =
-	| { readonly type: "app-server"; readonly envelope: ServerRpcRequest | ServerRpcNotification }
+	| {
+			readonly type: "app-server";
+			readonly envelope: ServerRpcRequest<"interaction/request"> | ServerRpcNotification<"connection/events">;
+	  }
 	| { readonly type: "interaction-cancelled"; readonly interactionId: string }
 	| { readonly type: "open-session"; readonly sessionId: string; readonly mode: "chat" | "code" }
 	| { readonly type: "supervisor"; readonly view: SupervisorView };
@@ -1297,11 +1300,15 @@ export function validateDesktopApiEvent(value: unknown): DesktopApiEvent {
 	const event = value as Record<string, unknown>;
 	if (event.type === "app-server" && Object.keys(event).length === 2) {
 		const envelope = event.envelope as Record<string, unknown>;
+		const validated = Object.hasOwn(envelope, "id")
+			? validateServerRequest(envelope)
+			: validateServerNotification(envelope);
+		if (validated.method !== "interaction/request" && validated.method !== "connection/events") {
+			throw new TypeError("Invalid renderer app-server event");
+		}
 		return {
 			type: "app-server",
-			envelope: Object.hasOwn(envelope, "id")
-				? validateServerRequest(envelope)
-				: validateServerNotification(envelope),
+			envelope: validated as ServerRpcRequest<"interaction/request"> | ServerRpcNotification<"connection/events">,
 		};
 	}
 	if (event.type === "supervisor" && Object.keys(event).length === 2 && isSupervisorView(event.view)) {
