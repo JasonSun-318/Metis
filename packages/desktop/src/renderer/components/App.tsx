@@ -1,11 +1,9 @@
 import {
 	type AgentMode,
 	type ClientResult,
-	type CollaborationModeView,
 	type DomainEvent,
 	type InteractionResponseInput,
 	type InteractionView,
-	type ItemContentBlockView,
 	type ItemView,
 	type McpServerSummaryView,
 	type ModelOptionView,
@@ -32,6 +30,11 @@ import {
 	saveGeneralPreferences,
 } from "../general-preferences.ts";
 import { useAppStore } from "../hooks/use-app-store.ts";
+import {
+	composerPayload,
+	composerRequestKey,
+	useConversationPlanFlow,
+} from "../hooks/use-conversation-plan-flow.ts";
 import { useScheduleStore } from "../hooks/use-schedule-store.ts";
 import type { AppStore, AppStoreSnapshot } from "../store/app-store.ts";
 import { ScheduleStore } from "../store/schedule-store.ts";
@@ -143,57 +146,6 @@ export function sessionDisplayTitle(session: Pick<SessionSummary, "cwd" | "cwdOr
 	return session.name || (session.cwdOrigin === "managed" ? "Chat" : session.cwd) || "Metis";
 }
 
-function composerText(input: ComposerSubmission): string {
-	return input.skill ? `/skill:${input.skill.name}${input.text ? ` ${input.text}` : ""}` : input.text;
-}
-
-function composerPayload(input: ComposerSubmission) {
-	return {
-		text: composerText(input),
-		...(input.attachments.length > 0 ? { attachments: input.attachments.map(({ path, name }) => ({ path, name })) } : {}),
-	};
-}
-
-function composerRequestKey(input: ComposerSubmission): string {
-	return JSON.stringify({
-		text: input.text,
-		attachments: input.attachments.map(({ path, name }) => ({ path, name })),
-		skill: input.skill?.name ?? null,
-	});
-}
-
-function planFromItem(item: ItemView): PlanView | undefined {
-	const block = item.content.find(
-		(candidate): candidate is Extract<ItemContentBlockView, { type: "plan" }> => candidate.type === "plan",
-	);
-	return block?.plan;
-}
-
-function latestProposedPlan(itemOrder: readonly string[], itemsById: ReadonlyMap<string, ItemView>): PlanView | undefined {
-	for (let index = itemOrder.length - 1; index >= 0; index -= 1) {
-		const item = itemsById.get(itemOrder[index]!);
-		if (!item) continue;
-		const plan = planFromItem(item);
-		if (plan?.status === "proposed") return plan;
-	}
-	return undefined;
-}
-
-function findPlanRevision(
-	itemOrder: readonly string[],
-	itemsById: ReadonlyMap<string, ItemView>,
-	planId: string,
-	revision: number,
-): PlanView | undefined {
-	for (const itemId of itemOrder) {
-		const item = itemsById.get(itemId);
-		if (!item) continue;
-		const plan = planFromItem(item);
-		if (plan?.planId === planId && plan.revision === revision) return plan;
-	}
-	return undefined;
-}
-
 export function shouldResnapshotAfterReady(
 	before: AppStoreSnapshot,
 	next: Awaited<ReturnType<MetisDesktopApi["getServerState"]>>,
@@ -273,13 +225,6 @@ export function App({ api, store }: AppProps) {
 	const [toolsSidebarWidth, setToolsSidebarWidth] = useState(393);
 	const [previewRequest, setPreviewRequest] = useState<UniversalPreviewTarget | null>(null);
 	const [planPreviewRequest, setPlanPreviewRequest] = useState<PlanView | null>(null);
-	const [planRevisionTarget, setPlanRevisionTarget] = useState<PlanView | null>(null);
-	const [pendingPlanAction, setPendingPlanAction] = useState<{
-		readonly action: "start" | "cancel";
-		readonly planId: string;
-		readonly revision: number;
-	} | null>(null);
-	const [pendingCollaborationMode, setPendingCollaborationMode] = useState<CollaborationModeView | null>(null);
 	const [bootstrapped, setBootstrapped] = useState(false);
 	const [theme, setTheme] = useState<AppTheme>(() => loadTheme(localStorage));
 	const [generalPreferences, setGeneralPreferences] = useState(() => loadGeneralPreferences(localStorage));
@@ -401,11 +346,6 @@ export function App({ api, store }: AppProps) {
 		setToolsSidebarPreferredWidth(preferredWidth);
 		setToolsSidebarWidth(clampToolsSidebarWidth(preferredWidth, workspaceWidth));
 	}, [state.activeSessionId, toolsSidebarOpen]);
-	const activeTurnRequest = useRef<{
-		key: string;
-		method: "start" | "queue";
-		requestId: string;
-	} | null>(null);
 	const skillListGeneration = useRef(0);
 	const scheduleSubscriptionGeneration = useRef(0);
 	const scheduleSnapshotRequest = useRef<Promise<void> | null>(null);
@@ -425,6 +365,7 @@ export function App({ api, store }: AppProps) {
 	const reportError = useCallback((cause: unknown) => {
 		setError(cause instanceof Error ? cause.message : "Metis could not complete the request.");
 	}, []);
+	const clearError = useCallback(() => setError(null), []);
 	useEffect(() => {
 		if (notice === null) return;
 		const timer = setTimeout(() => setNotice(null), 4000);
@@ -699,7 +640,6 @@ export function App({ api, store }: AppProps) {
 				openGeneration.current += 1;
 				openingSessionId.current = null;
 				if (before.activeSessionId) resnapshots.current.delete(before.activeSessionId);
-				activeTurnRequest.current = null;
 				newTaskCreateRequest.current = null;
 				newTaskTurnRequest.current = null;
 				if (removedSession) {
@@ -968,7 +908,6 @@ export function App({ api, store }: AppProps) {
 				setMode(session.mode);
 				setDestination("tasks");
 				setNewTaskDraft(emptyNewTaskDraft(session.mode));
-				activeTurnRequest.current = null;
 				newTaskCreateRequest.current = null;
 				newTaskTurnRequest.current = null;
 			}
@@ -1177,9 +1116,6 @@ export function App({ api, store }: AppProps) {
 		requestComposerControl(null);
 		setCompactingSession((current) => current?.sessionId === visibleActiveSession?.sessionId ? current : null);
 		setPlanPreviewRequest(null);
-		setPlanRevisionTarget(null);
-		setPendingPlanAction(null);
-		setPendingCollaborationMode(null);
 	}, [requestComposerControl, visibleActiveSession?.sessionId]);
 	const skillSessionId = visibleActiveSession?.sessionId ?? visibleNewTaskDraft?.sessionId;
 	const shouldListSkills = destination === "tasks" && (newTaskOpen || visibleActiveSession !== undefined);
@@ -1271,28 +1207,36 @@ export function App({ api, store }: AppProps) {
 	const latestNotification = [...state.notifications]
 		.reverse()
 		.find((notification) => notification.sessionId === undefined || notification.sessionId === visibleActiveSession?.sessionId);
-
-	const submit = async (input: ComposerSubmission) => {
-		if (!visibleActiveSession || pendingCollaborationMode !== null) return;
-		setError(null);
-		try {
-			const key = JSON.stringify({ sessionId: visibleActiveSession.sessionId, input: composerRequestKey(input) });
-			const request = activeTurnRequest.current?.key === key
-				? activeTurnRequest.current
-				: { key, method: running || state.queuedTurns.length > 0 ? "queue" as const : "start" as const, requestId: crypto.randomUUID() };
-			activeTurnRequest.current = request;
-			if (request.method === "queue") {
-				await api.queueTurn({ sessionId: visibleActiveSession.sessionId, requestId: request.requestId, ...composerPayload(input) });
-			} else {
-				await api.startTurn({ sessionId: visibleActiveSession.sessionId, requestId: request.requestId, ...composerPayload(input) });
-			}
-			activeTurnRequest.current = null;
-			setPlanRevisionTarget(null);
-		} catch (cause) {
-			reportError(cause);
-			throw cause;
-		}
-	};
+	const writableSessionId = visibleActiveSession?.scheduled === undefined ? visibleActiveSession?.sessionId : undefined;
+	const {
+		collaborationMode: collaborationModeValue,
+		collaborationModeBlocked,
+		collaborationModeChanging,
+		currentProposedPlan,
+		planActionsBusy,
+		planRevisionTarget,
+		submit,
+		changeCollaborationMode,
+		revisePlan,
+		clearPlanRevision,
+		startPlan,
+		cancelPlan,
+	} = useConversationPlanFlow({
+		api,
+		sessionId: visibleActiveSession?.sessionId,
+		writableSessionId,
+		running,
+		queuedTurnCount: state.queuedTurns.length,
+		serverReady,
+		syncReady: state.syncStatus === "ready",
+		compacting: compactingSession !== null,
+		interactionPending: inlineInteraction !== undefined,
+		collaborationMode: state.collaborationMode,
+		itemOrder: state.itemOrder,
+		itemsById: state.itemsById,
+		clearError,
+		reportError,
+	});
 
 	const updateQueuedTurn = async (turn: QueuedTurnView, text: string) => {
 		if (!visibleActiveSession) return;
@@ -1460,108 +1404,11 @@ export function App({ api, store }: AppProps) {
 	const configurationSession = visibleActiveSession ?? (
 		newTaskOpen && activeSession?.mode === mode ? activeSession : undefined
 	);
-	const writableSessionId = visibleActiveSession?.scheduled === undefined ? visibleActiveSession?.sessionId : undefined;
-	const currentProposedPlan = latestProposedPlan(state.itemOrder, state.itemsById);
-	const planActionsBusy =
-		pendingPlanAction !== null ||
-		!serverReady ||
-		state.syncStatus !== "ready" ||
-		compactingSession !== null ||
-		inlineInteraction !== undefined ||
-		running;
-	const collaborationModeValue = pendingCollaborationMode ?? state.collaborationMode;
-	const collaborationModeBlocked =
-		planActionsBusy ||
-		pendingCollaborationMode !== null ||
-		currentProposedPlan !== undefined;
-
-	const changeCollaborationMode = useCallback(async (next: CollaborationModeView) => {
-		if (!writableSessionId || pendingCollaborationMode !== null || planActionsBusy) return;
-		if (next === "default" && currentProposedPlan) return;
-		setPendingCollaborationMode(next);
-		try {
-			await api.setCollaborationMode({
-				sessionId: writableSessionId,
-				requestId: crypto.randomUUID(),
-				collaborationMode: next,
-			});
-		} catch (cause) {
-			setPendingCollaborationMode(null);
-			reportError(cause);
-			throw cause;
-		}
-	}, [api, currentProposedPlan, pendingCollaborationMode, planActionsBusy, reportError, writableSessionId]);
-
-	const revisePlan = useCallback((plan: PlanView) => {
-		setPlanRevisionTarget(plan);
-		requestAnimationFrame(() => document.getElementById("composer-input")?.focus());
-	}, []);
 
 	const openPlan = useCallback((plan: PlanView) => {
 		setPlanPreviewRequest(plan);
 		showToolsSidebar();
 	}, [showToolsSidebar]);
-
-	const startPlan = useCallback(async (plan: PlanView) => {
-		if (!writableSessionId || planActionsBusy) return;
-		setPendingPlanAction({ action: "start", planId: plan.planId, revision: plan.revision });
-		setPlanRevisionTarget(null);
-		try {
-			await api.startPlanExecution({
-				sessionId: writableSessionId,
-				requestId: crypto.randomUUID(),
-				planId: plan.planId,
-				revision: plan.revision,
-			});
-		} catch (cause) {
-			setPendingPlanAction(null);
-			reportError(cause);
-		}
-	}, [api, planActionsBusy, reportError, writableSessionId]);
-
-	const cancelPlan = useCallback(async (plan: PlanView) => {
-		if (!writableSessionId || planActionsBusy) return;
-		setPendingPlanAction({ action: "cancel", planId: plan.planId, revision: plan.revision });
-		setPlanRevisionTarget(null);
-		try {
-			await api.cancelPlan({
-				sessionId: writableSessionId,
-				requestId: crypto.randomUUID(),
-				planId: plan.planId,
-				revision: plan.revision,
-			});
-		} catch (cause) {
-			setPendingPlanAction(null);
-			reportError(cause);
-		}
-	}, [api, planActionsBusy, reportError, writableSessionId]);
-
-	useEffect(() => {
-		if (pendingCollaborationMode === null) return;
-		if (state.collaborationMode === pendingCollaborationMode) setPendingCollaborationMode(null);
-	}, [pendingCollaborationMode, state.collaborationMode]);
-
-	useEffect(() => {
-		if (!pendingPlanAction) return;
-		const plan = findPlanRevision(
-			state.itemOrder,
-			state.itemsById,
-			pendingPlanAction.planId,
-			pendingPlanAction.revision,
-		);
-		if (!plan || plan.status !== "proposed") setPendingPlanAction(null);
-	}, [pendingPlanAction, state.itemOrder, state.itemsById]);
-
-	useEffect(() => {
-		if (!planRevisionTarget) return;
-		const plan = findPlanRevision(
-			state.itemOrder,
-			state.itemsById,
-			planRevisionTarget.planId,
-			planRevisionTarget.revision,
-		);
-		if (!plan || plan.status !== "proposed") setPlanRevisionTarget(null);
-	}, [planRevisionTarget, state.itemOrder, state.itemsById]);
 
 	const compactBlocked = running || inlineInteraction !== undefined || compactingSession !== null;
 	const isCompacting = compactingSession !== null;
@@ -1848,7 +1695,7 @@ export function App({ api, store }: AppProps) {
 			<span className="composer-plan-revision-chip">
 				{t("Revise plan")}: {planRevisionTarget.title} · r{planRevisionTarget.revision}
 			</span>
-			<button aria-label={t("Remove revision context")} onClick={() => setPlanRevisionTarget(null)} type="button">
+			<button aria-label={t("Remove revision context")} onClick={clearPlanRevision} type="button">
 				×
 			</button>
 		</div>
@@ -2053,7 +1900,7 @@ export function App({ api, store }: AppProps) {
 									onOpenContextUsage={writableSessionId ? toggleSessionStatus : undefined}
 								commandPanel={sessionStatusPanel?.sessionId === visibleActiveSession.sessionId ? <SessionStatusPanel closing={sessionStatusPanel.closing} error={sessionStatusPanel.error} loading={sessionStatusPanel.loading} onClose={closeSessionStatus} status={sessionStatusPanel.status} /> : undefined}
 								commandRequest={{ id: composerControl.id, open: composerControl.target === "mcp" }}
-								disabled={!serverReady || state.syncStatus !== "ready" || compactingSession !== null || pendingCollaborationMode !== null}
+								disabled={!serverReady || state.syncStatus !== "ready" || compactingSession !== null || collaborationModeChanging}
 								disabledSlashCommands={disabledSlashCommands}
 								disabledSlashReasons={disabledSlashReasons}
 								interactionControl={inlineInteraction ? <InteractionHost interaction={inlineInteraction} key={inlineInteraction.interactionId} onRespond={respond} /> : undefined}
