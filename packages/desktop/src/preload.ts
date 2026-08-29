@@ -38,6 +38,7 @@ import {
 	validateReadPreviewFileInput,
 	validateReadWorkspaceFileInput,
 	validateResizeTerminalInput,
+	validateResolveBrowserHandoffInput,
 	validateSearchWorkspaceFilesInput,
 	validateWorkspaceEditState,
 	validateWorkspaceMutationInput,
@@ -146,6 +147,12 @@ const api = {
 	},
 	closeBrowser: async (input) => {
 		await ipcRenderer.invoke(DESKTOP_IPC_CHANNELS.closeBrowser, validateCloseBrowserInput(input));
+	},
+	takeBrowserControl: async (input) => {
+		await ipcRenderer.invoke(DESKTOP_IPC_CHANNELS.takeBrowserControl, validateCloseBrowserInput(input));
+	},
+	resolveBrowserHandoff: async (input) => {
+		await ipcRenderer.invoke(DESKTOP_IPC_CHANNELS.resolveBrowserHandoff, validateResolveBrowserHandoffInput(input));
 	},
 	listBrowserDownloads: async () =>
 		validateBrowserDownloadList(await ipcRenderer.invoke(DESKTOP_IPC_CHANNELS.listBrowserDownloads)),

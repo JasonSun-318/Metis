@@ -65,7 +65,9 @@ function axTree(name = "Continue", value = "secret") {
 	};
 }
 
-function fixture() {
+function fixture(
+	overrides: Pick<BrowserControllerDependencies, "stabilizationQuietMs" | "stabilizationTimeoutMs"> = {},
+) {
 	const debug = new FakeDebugger();
 	debug.responses.set("Accessibility.getFullAXTree", axTree());
 	debug.responses.set("DOM.getBoxModel", { model: { content: [10, 20, 30, 20, 30, 40, 10, 40] } });
@@ -92,6 +94,8 @@ function fixture() {
 			};
 		},
 		acceleratorModifier: 4,
+		stabilizationQuietMs: 0,
+		...overrides,
 	};
 	const controller = new BrowserController(dependencies);
 	return {
@@ -232,6 +236,18 @@ describe("BrowserController", () => {
 		expect(debug.commands).toContainEqual({ method: "DOM.focus", params: { backendNodeId: 7 } });
 		expect(debug.commands).toContainEqual({ method: "Input.insertText", params: { text: "hello" } });
 		expect(debug.commands.some(({ method }) => method.startsWith("Runtime."))).toBe(false);
+	});
+
+	it("waits for a bounded accessibility quiet window after input", async () => {
+		const { controller } = fixture({ stabilizationQuietMs: 12, stabilizationTimeoutMs: 50 });
+		const first = await observe(controller);
+		const startedAt = Date.now();
+		const result = await controller.act(
+			action(first, { type: "click", target: { elementId: "e2" } }),
+			new AbortController().signal,
+		);
+		expect(result.status).toBe("completed");
+		expect(Date.now() - startedAt).toBeGreaterThanOrEqual(10);
 	});
 
 	it("covers hover, press, scroll, drag, select, and dialog with native CDP commands", async () => {

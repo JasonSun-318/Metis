@@ -13,10 +13,12 @@ describe("desktop browser profile contracts", () => {
 	it("accepts safe profile and import payloads", () => {
 		expect(
 			validateCreateBrowserInput({
+				sessionId: "20000000-0000-4000-8000-000000000001",
 				browserId: "10000000-0000-4000-8000-000000000001",
 				profileId: DEFAULT_BROWSER_PROFILE_ID,
 			}),
 		).toEqual({
+			sessionId: "20000000-0000-4000-8000-000000000001",
 			browserId: "10000000-0000-4000-8000-000000000001",
 			profileId: DEFAULT_BROWSER_PROFILE_ID,
 		});

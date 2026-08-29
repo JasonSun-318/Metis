@@ -48,6 +48,7 @@ import {
 	validateReadPreviewFileInput,
 	validateReadWorkspaceFileInput,
 	validateResizeTerminalInput,
+	validateResolveBrowserHandoffInput,
 	validateSearchWorkspaceFilesInput,
 	validateWorkspaceEditState,
 	validateWorkspaceMutationInput,
@@ -90,6 +91,7 @@ interface ClientBrokerOptions {
 	readonly browserManager?: Pick<
 		BrowserManager,
 		| "attach"
+		| "suspendRenderer"
 		| "create"
 		| "capturePreview"
 		| "control"
@@ -103,6 +105,11 @@ interface ClientBrokerOptions {
 		| "listHistory"
 		| "clearHistory"
 		| "onEvent"
+		| "executeTool"
+		| "takeControl"
+		| "resolveHandoff"
+		| "cancelSessionHandoffs"
+		| "replayEvents"
 	>;
 	readonly workspaceFiles?: Pick<
 		WorkspaceFileManager,
@@ -134,6 +141,11 @@ type InvokeHandler = (event: IpcMainInvokeEvent, ...args: unknown[]) => Promise<
 interface PendingInteraction {
 	readonly request: ServerRpcRequest<"interaction/request">;
 	readonly timer?: ReturnType<typeof setTimeout>;
+}
+
+interface PendingBrowserCall {
+	readonly request: ServerRpcRequest<"browser/tool">;
+	readonly abort: AbortController;
 }
 
 export function isTrustedRendererUrl(value: string): boolean {
@@ -237,6 +249,7 @@ export class ClientBroker {
 	private readonly browserManager: Pick<
 		BrowserManager,
 		| "attach"
+		| "suspendRenderer"
 		| "create"
 		| "capturePreview"
 		| "control"
@@ -250,6 +263,11 @@ export class ClientBroker {
 		| "listHistory"
 		| "clearHistory"
 		| "onEvent"
+		| "executeTool"
+		| "takeControl"
+		| "resolveHandoff"
+		| "cancelSessionHandoffs"
+		| "replayEvents"
 	>;
 	private readonly workspaceFiles: Pick<
 		WorkspaceFileManager,
@@ -276,6 +294,7 @@ export class ClientBroker {
 	private readonly onSessionOpened?: (sessionId: string) => void;
 	private pendingRendererOpenSession?: Extract<DesktopApiEvent, { type: "open-session" }>;
 	private readonly pendingInteractions = new Map<string, PendingInteraction>();
+	private readonly pendingBrowserCalls = new Map<string, PendingBrowserCall>();
 	private readonly subscribedSessions = new Set<string>();
 	private readonly subscribedSessionScopes = new Map<string, { readonly mode: string; readonly cwd?: string }>();
 	private scheduleSubscribed = false;
@@ -323,6 +342,7 @@ export class ClientBroker {
 		};
 		this.browserManager = options.browserManager ?? {
 			attach: () => undefined,
+			suspendRenderer: () => undefined,
 			create: () => {
 				throw new Error("Browser is unavailable");
 			},
@@ -353,6 +373,17 @@ export class ClientBroker {
 			listHistory: () => [],
 			clearHistory: async () => undefined,
 			onEvent: () => () => undefined,
+			executeTool: async () => {
+				throw new Error("Browser is unavailable");
+			},
+			takeControl: () => {
+				throw new Error("Browser is unavailable");
+			},
+			resolveHandoff: () => {
+				throw new Error("Browser is unavailable");
+			},
+			cancelSessionHandoffs: () => undefined,
+			replayEvents: () => [],
 		};
 		this.workspaceFiles = options.workspaceFiles ?? {
 			authorize: () => undefined,
@@ -402,6 +433,7 @@ export class ClientBroker {
 		this.removeSupervisorListeners = [
 			this.supervisor.onState((view) => {
 				if (view.state !== "ready") {
+					this.cancelPendingBrowserCalls();
 					this.dropPendingInteractions();
 					this.subscribedSessions.clear();
 					this.subscribedSessionScopes.clear();
@@ -432,7 +464,8 @@ export class ClientBroker {
 			if (this.owner !== owner || !isMainFrame) return;
 			this.ownerSubscribed = false;
 			this.terminalManager.closeAll();
-			this.browserManager.closeAll();
+			this.cancelPendingBrowserCalls("tab_closed");
+			this.browserManager.suspendRenderer();
 			this.workspaceFiles.clear();
 			this.cancelPendingInteractions();
 			this.releaseSessionSubscriptions();
@@ -536,6 +569,7 @@ export class ClientBroker {
 				await this.unsubscribeSessions(previousSessionIds, true);
 				// A request can cross the process boundary while unsubscribe is in flight.
 				this.cancelPendingInteractionsForSessions(previousSessions);
+				for (const event of this.browserManager.replayEvents(params.sessionId)) this.sendBrowserEvent(event);
 				this.onSessionOpened?.(params.sessionId);
 				return subscribed.snapshot;
 			});
@@ -603,9 +637,10 @@ export class ClientBroker {
 		this.register(DESKTOP_IPC_CHANNELS.createBrowser, 1, async (_event, [input]) =>
 			this.browserManager.create(validateCreateBrowserInput(input)),
 		);
-		this.register(DESKTOP_IPC_CHANNELS.captureBrowserPreview, 1, async (_event, [input]) =>
-			this.browserManager.capturePreview(validateCloseBrowserInput(input).browserId),
-		);
+		this.register(DESKTOP_IPC_CHANNELS.captureBrowserPreview, 1, async (_event, [input]) => {
+			const target = validateCloseBrowserInput(input);
+			return this.browserManager.capturePreview(target.sessionId, target.browserId);
+		});
 		this.register(DESKTOP_IPC_CHANNELS.controlBrowser, 1, async (_event, [input]) => {
 			await this.browserManager.control(validateBrowserControlInput(input));
 		});
@@ -627,7 +662,16 @@ export class ClientBroker {
 			this.browserManager.clearHistory(validateListBrowserHistoryInput(input)),
 		);
 		this.register(DESKTOP_IPC_CHANNELS.closeBrowser, 1, async (_event, [input]) => {
-			this.browserManager.close(validateCloseBrowserInput(input).browserId);
+			const target = validateCloseBrowserInput(input);
+			this.browserManager.close(target.sessionId, target.browserId);
+		});
+		this.register(DESKTOP_IPC_CHANNELS.takeBrowserControl, 1, async (_event, [input]) => {
+			const target = validateCloseBrowserInput(input);
+			this.browserManager.takeControl(target.sessionId, target.browserId);
+		});
+		this.register(DESKTOP_IPC_CHANNELS.resolveBrowserHandoff, 1, async (_event, [input]) => {
+			const target = validateResolveBrowserHandoffInput(input);
+			this.browserManager.resolveHandoff(target.sessionId, target.browserId, target.decision);
 		});
 		this.register(DESKTOP_IPC_CHANNELS.listWorkspaceDirectory, 1, async (_event, [input]) =>
 			this.workspaceFiles.listDirectory(validateListWorkspaceDirectoryInput(input)),
@@ -742,13 +786,8 @@ export class ClientBroker {
 			const request = validateServerRequest(value);
 			const view = this.supervisor.view();
 			if (view.state !== "ready" || request.params.serverEpoch !== view.serverEpoch) return;
-			if (request.method !== "interaction/request") {
-				const response: RpcErrorResponse = {
-					jsonrpc: "2.0",
-					id: request.id,
-					error: createRpcError("OPERATION_FAILED", { sessionId: request.params.sessionId }),
-				};
-				this.supervisor.respondToServerRequest(request, response);
+			if (request.method === "browser/tool") {
+				this.startBrowserCall(request as ServerRpcRequest<"browser/tool">);
 				return;
 			}
 			const interactionRequest = request as ServerRpcRequest<"interaction/request">;
@@ -772,6 +811,19 @@ export class ClientBroker {
 		const notification = validateServerNotification(value);
 		const view = this.supervisor.view();
 		if (view.state !== "ready" || notification.params.serverEpoch !== view.serverEpoch) return;
+		if (notification.method === "browser/tool/cancelled") {
+			const pending = this.pendingBrowserCalls.get(notification.params.requestId);
+			if (
+				pending &&
+				pending.request.params.serverEpoch === notification.params.serverEpoch &&
+				pending.request.params.sessionId === notification.params.sessionId &&
+				pending.request.params.toolCallId === notification.params.toolCallId
+			) {
+				pending.abort.abort();
+				this.pendingBrowserCalls.delete(notification.params.requestId);
+			}
+			return;
+		}
 		if (notification.method !== "connection/events") return;
 		for (const event of notification.params.events) {
 			if (event.type === "session/updated") this.onSessionUpdated?.(event.session);
@@ -786,6 +838,47 @@ export class ClientBroker {
 			serverEpoch: notification.params.serverEpoch,
 			cursor: notification.params.toCursor,
 		}).catch(() => undefined);
+	}
+
+	private startBrowserCall(request: ServerRpcRequest<"browser/tool">): void {
+		if (this.pendingBrowserCalls.has(request.id)) throw new Error("App-server reused a pending browser request id");
+		const owner = this.owner;
+		if (!owner || owner.isDestroyed()) {
+			this.supervisor.respondToServerRequest(request, {
+				jsonrpc: "2.0",
+				id: request.id,
+				error: createRpcError("OPERATION_FAILED", { sessionId: request.params.sessionId }),
+			});
+			return;
+		}
+		const abort = new AbortController();
+		const pending = { request, abort };
+		this.pendingBrowserCalls.set(request.id, pending);
+		void this.browserManager
+			.executeTool(request.params.sessionId, request.params.call, abort.signal)
+			.then((result) => {
+				if (this.pendingBrowserCalls.get(request.id) !== pending) return;
+				const view = this.supervisor.view();
+				if (view.state !== "ready" || view.serverEpoch !== request.params.serverEpoch) return;
+				this.supervisor.respondToServerRequest(request, {
+					jsonrpc: "2.0",
+					id: request.id,
+					result: { toolCallId: request.params.toolCallId, result },
+				});
+			})
+			.catch(() => {
+				if (this.pendingBrowserCalls.get(request.id) !== pending) return;
+				const view = this.supervisor.view();
+				if (view.state !== "ready" || view.serverEpoch !== request.params.serverEpoch) return;
+				this.supervisor.respondToServerRequest(request, {
+					jsonrpc: "2.0",
+					id: request.id,
+					error: createRpcError("OPERATION_FAILED", { sessionId: request.params.sessionId }),
+				});
+			})
+			.finally(() => {
+				if (this.pendingBrowserCalls.get(request.id) === pending) this.pendingBrowserCalls.delete(request.id);
+			});
 	}
 
 	private respondToInteraction(value: unknown): void {
@@ -821,13 +914,37 @@ export class ClientBroker {
 	}
 
 	private sendBrowserEvent(event: DesktopBrowserEvent): void {
+		if (event.type === "closed") this.cancelBrowserCallsForTab(event.sessionId, event.browserId);
 		const owner = this.owner;
 		if (!owner || owner.isDestroyed()) return;
 		try {
 			owner.send(DESKTOP_BROWSER_EVENT_CHANNEL, structuredClone(event));
 		} catch {
-			this.browserManager.closeAll();
+			this.cancelPendingBrowserCalls("tab_closed");
+			this.browserManager.suspendRenderer();
 		}
+	}
+
+	private cancelBrowserCallsForTab(sessionId: string, browserId: string): void {
+		for (const [requestId, pending] of this.pendingBrowserCalls) {
+			if (pending.request.params.sessionId !== sessionId) continue;
+			const call = pending.request.params.call;
+			const targetsBrowser =
+				(call.tool === "browser_tabs" && call.input.action === "close" && call.input.browserId === browserId) ||
+				(call.tool !== "browser_tabs" && call.input.browserId === browserId);
+			const isClosingCall = call.tool === "browser_tabs" && call.input.action === "close";
+			if (!targetsBrowser || isClosingCall) continue;
+			pending.abort.abort();
+			this.pendingBrowserCalls.delete(requestId);
+		}
+	}
+
+	private cancelPendingBrowserCalls(reason: "server_restarted" | "tab_closed" = "server_restarted"): void {
+		const sessionIds = new Set([...this.pendingBrowserCalls.values()].map(({ request }) => request.params.sessionId));
+		for (const sessionId of sessionIds) this.browserManager.cancelSessionHandoffs(sessionId, reason);
+		const pending = [...this.pendingBrowserCalls.values()];
+		this.pendingBrowserCalls.clear();
+		for (const call of pending) call.abort.abort();
 	}
 
 	private cancelPendingInteractions(): void {
@@ -886,6 +1003,7 @@ export class ClientBroker {
 		this.owner = undefined;
 		this.ownerSubscribed = false;
 		this.terminalManager.closeAll();
+		this.cancelPendingBrowserCalls("tab_closed");
 		this.browserManager.closeAll();
 		this.workspaceFiles.clear();
 		this.cancelPendingInteractions();
@@ -900,7 +1018,17 @@ export class ClientBroker {
 			this.subscribedSessions.delete(sessionId);
 			this.subscribedSessionScopes.delete(sessionId);
 		}
+		this.cancelPendingBrowserCallsForSessions(ids);
 		this.cancelPendingInteractionsForSessions(ids);
+	}
+
+	private cancelPendingBrowserCallsForSessions(sessionIds: ReadonlySet<string>): void {
+		for (const sessionId of sessionIds) this.browserManager.cancelSessionHandoffs(sessionId, "tab_closed");
+		for (const [requestId, pending] of this.pendingBrowserCalls) {
+			if (!sessionIds.has(pending.request.params.sessionId)) continue;
+			this.pendingBrowserCalls.delete(requestId);
+			pending.abort.abort();
+		}
 	}
 
 	private releaseSessionSubscriptions(): void {

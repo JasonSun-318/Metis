@@ -75,6 +75,8 @@ export const DESKTOP_IPC_CHANNELS = {
 	captureBrowserPreview: "metis:capture-browser-preview",
 	controlBrowser: "metis:control-browser",
 	closeBrowser: "metis:close-browser",
+	takeBrowserControl: "metis:take-browser-control",
+	resolveBrowserHandoff: "metis:resolve-browser-handoff",
 	listBrowserDownloads: "metis:list-browser-downloads",
 	controlBrowserDownload: "metis:control-browser-download",
 	listBrowserProfiles: "metis:list-browser-profiles",
@@ -143,11 +145,13 @@ export interface DesktopBrowserBounds {
 }
 
 export interface DesktopCreateBrowserInput {
+	readonly sessionId: string;
 	readonly browserId: string;
 	readonly profileId: string;
 }
 
 export interface DesktopCloseBrowserInput {
+	readonly sessionId: string;
 	readonly browserId: string;
 }
 
@@ -166,9 +170,10 @@ export interface DesktopBrowserState {
 }
 
 export type DesktopBrowserControlInput =
-	| { readonly type: "navigate"; readonly browserId: string; readonly url: string }
+	| { readonly type: "navigate"; readonly sessionId: string; readonly browserId: string; readonly url: string }
 	| {
 			readonly type: "find";
+			readonly sessionId: string;
 			readonly browserId: string;
 			readonly text: string;
 			readonly forward: boolean;
@@ -187,19 +192,35 @@ export type DesktopBrowserControlInput =
 				| "zoom-reset"
 				| "capture-page"
 				| "clear-data";
+			readonly sessionId: string;
 			readonly browserId: string;
 	  }
 	| {
 			readonly type: "set-zoom";
+			readonly sessionId: string;
 			readonly browserId: string;
 			readonly zoomPercent: number;
 	  }
 	| {
 			readonly type: "present";
+			readonly sessionId: string;
 			readonly browserId: string;
 			readonly visible: boolean;
 			readonly bounds: DesktopBrowserBounds;
 	  };
+
+export type DesktopBrowserHandoffReason =
+	| "login"
+	| "otp"
+	| "passkey"
+	| "device_approval"
+	| "captcha"
+	| "sensitive_action"
+	| "other";
+
+export interface DesktopResolveBrowserHandoffInput extends DesktopCloseBrowserInput {
+	readonly decision: "complete" | "cancel";
+}
 
 export type DesktopBrowserEvent =
 	| { readonly type: "state"; readonly state: DesktopBrowserState }
@@ -212,7 +233,17 @@ export type DesktopBrowserEvent =
 	  }
 	| { readonly type: "command"; readonly browserId: string; readonly command: DesktopBrowserCommand }
 	| { readonly type: "downloads"; readonly downloads: readonly DesktopDownloadItem[] }
-	| { readonly type: "history"; readonly profileId: string; readonly entries: readonly DesktopHistoryEntry[] };
+	| { readonly type: "history"; readonly profileId: string; readonly entries: readonly DesktopHistoryEntry[] }
+	| { readonly type: "opened"; readonly sessionId: string; readonly browserId: string; readonly profileId: string }
+	| { readonly type: "closed"; readonly sessionId: string; readonly browserId: string }
+	| { readonly type: "activity"; readonly sessionId: string; readonly browserId: string; readonly active: boolean }
+	| {
+			readonly type: "handoff";
+			readonly sessionId: string;
+			readonly browserId: string;
+			readonly status: "requested" | "completed" | "cancelled";
+			readonly reason?: DesktopBrowserHandoffReason;
+	  };
 
 export const DEFAULT_BROWSER_PROFILE_ID = "00000000-0000-4000-8000-000000000001";
 export type DesktopBrowserSourceId = "chrome" | "edge" | "brave" | "chromium";
@@ -514,6 +545,8 @@ export interface MetisDesktopApi extends DesktopRpcForwardingApi {
 	captureBrowserPreview(input: DesktopCloseBrowserInput): Promise<string>;
 	controlBrowser(input: DesktopBrowserControlInput): Promise<void>;
 	closeBrowser(input: DesktopCloseBrowserInput): Promise<void>;
+	takeBrowserControl(input: DesktopCloseBrowserInput): Promise<void>;
+	resolveBrowserHandoff(input: DesktopResolveBrowserHandoffInput): Promise<void>;
 	listBrowserDownloads(): Promise<readonly DesktopDownloadItem[]>;
 	controlBrowserDownload(input: DesktopDownloadControlInput): Promise<void>;
 	listBrowserProfiles(): Promise<readonly DesktopBrowserProfile[]>;
@@ -898,6 +931,11 @@ function browserId(value: unknown): string {
 	return value as string;
 }
 
+function browserSessionId(value: unknown): string {
+	assertSchema(sessionIdValidator, value, "invalid_params", "browser session id");
+	return value as string;
+}
+
 function browserCoordinate(value: unknown, label: string, allowZero: boolean): number {
 	if (!Number.isInteger(value) || Number(value) < (allowZero ? 0 : 1) || Number(value) > 32_768) {
 		throw new TypeError(`Invalid browser ${label}`);
@@ -1026,13 +1064,27 @@ export function validateListBrowserHistoryInput(value: unknown): DesktopListBrow
 }
 
 export function validateCreateBrowserInput(value: unknown): DesktopCreateBrowserInput {
-	const input = exactRecord(value, ["browserId", "profileId"], "browser create input");
-	return { browserId: browserId(input.browserId), profileId: browserProfileId(input.profileId) };
+	const input = exactRecord(value, ["sessionId", "browserId", "profileId"], "browser create input");
+	return {
+		sessionId: browserSessionId(input.sessionId),
+		browserId: browserId(input.browserId),
+		profileId: browserProfileId(input.profileId),
+	};
 }
 
 export function validateCloseBrowserInput(value: unknown): DesktopCloseBrowserInput {
-	const input = exactRecord(value, ["browserId"], "browser close input");
-	return { browserId: browserId(input.browserId) };
+	const input = exactRecord(value, ["sessionId", "browserId"], "browser close input");
+	return { sessionId: browserSessionId(input.sessionId), browserId: browserId(input.browserId) };
+}
+
+export function validateResolveBrowserHandoffInput(value: unknown): DesktopResolveBrowserHandoffInput {
+	const input = exactRecord(value, ["sessionId", "browserId", "decision"], "browser handoff input");
+	if (input.decision !== "complete" && input.decision !== "cancel") throw new TypeError("Invalid handoff decision");
+	return {
+		sessionId: browserSessionId(input.sessionId),
+		browserId: browserId(input.browserId),
+		decision: input.decision,
+	};
 }
 
 export function validateBrowserControlInput(value: unknown): DesktopBrowserControlInput {
@@ -1041,18 +1093,23 @@ export function validateBrowserControlInput(value: unknown): DesktopBrowserContr
 	}
 	const type = (value as { type?: unknown }).type;
 	if (type === "navigate") {
-		const input = exactRecord(value, ["type", "browserId", "url"], "browser navigate input");
+		const input = exactRecord(value, ["type", "sessionId", "browserId", "url"], "browser navigate input");
 		const url = browserText(input.url, "URL", 8_192);
 		if (url.length === 0) throw new TypeError("Invalid browser URL");
-		return { type, browserId: browserId(input.browserId), url };
+		return { type, sessionId: browserSessionId(input.sessionId), browserId: browserId(input.browserId), url };
 	}
 	if (type === "find") {
-		const input = exactRecord(value, ["type", "browserId", "text", "forward", "findNext"], "browser find input");
+		const input = exactRecord(
+			value,
+			["type", "sessionId", "browserId", "text", "forward", "findNext"],
+			"browser find input",
+		);
 		if (typeof input.forward !== "boolean" || typeof input.findNext !== "boolean") {
 			throw new TypeError("Invalid browser find direction");
 		}
 		return {
 			type,
+			sessionId: browserSessionId(input.sessionId),
 			browserId: browserId(input.browserId),
 			text: browserText(input.text, "find text", 2_048),
 			forward: input.forward,
@@ -1060,9 +1117,10 @@ export function validateBrowserControlInput(value: unknown): DesktopBrowserContr
 		};
 	}
 	if (type === "set-zoom") {
-		const input = exactRecord(value, ["type", "browserId", "zoomPercent"], "browser zoom input");
+		const input = exactRecord(value, ["type", "sessionId", "browserId", "zoomPercent"], "browser zoom input");
 		return {
 			type,
+			sessionId: browserSessionId(input.sessionId),
 			browserId: browserId(input.browserId),
 			zoomPercent: browserInteger(input.zoomPercent, "zoom percent", 25, 500),
 		};
@@ -1080,15 +1138,20 @@ export function validateBrowserControlInput(value: unknown): DesktopBrowserContr
 		type === "capture-page" ||
 		type === "clear-data"
 	) {
-		const input = exactRecord(value, ["type", "browserId"], "browser control input");
-		return { type, browserId: browserId(input.browserId) };
+		const input = exactRecord(value, ["type", "sessionId", "browserId"], "browser control input");
+		return { type, sessionId: browserSessionId(input.sessionId), browserId: browserId(input.browserId) };
 	}
 	if (type === "present") {
-		const input = exactRecord(value, ["type", "browserId", "visible", "bounds"], "browser present input");
+		const input = exactRecord(
+			value,
+			["type", "sessionId", "browserId", "visible", "bounds"],
+			"browser present input",
+		);
 		const bounds = exactRecord(input.bounds, ["x", "y", "width", "height"], "browser bounds");
 		if (typeof input.visible !== "boolean") throw new TypeError("Invalid browser visibility");
 		return {
 			type,
+			sessionId: browserSessionId(input.sessionId),
 			browserId: browserId(input.browserId),
 			visible: input.visible,
 			bounds: {
@@ -1193,7 +1256,65 @@ export function validateDesktopBrowserEvent(value: unknown): DesktopBrowserEvent
 			entries: event.entries.map(validateBrowserHistoryEntry),
 		};
 	}
+	if (type === "opened") {
+		const event = exactRecord(value, ["type", "sessionId", "browserId", "profileId"], "browser opened event");
+		return {
+			type,
+			sessionId: browserSessionId(event.sessionId),
+			browserId: browserId(event.browserId),
+			profileId: browserProfileId(event.profileId),
+		};
+	}
+	if (type === "closed") {
+		const event = exactRecord(value, ["type", "sessionId", "browserId"], "browser closed event");
+		return { type, sessionId: browserSessionId(event.sessionId), browserId: browserId(event.browserId) };
+	}
+	if (type === "activity") {
+		const event = exactRecord(value, ["type", "sessionId", "browserId", "active"], "browser activity event");
+		if (typeof event.active !== "boolean") throw new TypeError("Invalid browser activity");
+		return {
+			type,
+			sessionId: browserSessionId(event.sessionId),
+			browserId: browserId(event.browserId),
+			active: event.active,
+		};
+	}
+	if (type === "handoff") {
+		const event = exactRecord(
+			value,
+			eventHasReason(value)
+				? ["type", "sessionId", "browserId", "status", "reason"]
+				: ["type", "sessionId", "browserId", "status"],
+			"browser handoff event",
+		);
+		if (event.status !== "requested" && event.status !== "completed" && event.status !== "cancelled") {
+			throw new TypeError("Invalid browser handoff status");
+		}
+		const reasons: readonly DesktopBrowserHandoffReason[] = [
+			"login",
+			"otp",
+			"passkey",
+			"device_approval",
+			"captcha",
+			"sensitive_action",
+			"other",
+		];
+		if ((event.status === "requested") !== reasons.includes(event.reason as DesktopBrowserHandoffReason)) {
+			throw new TypeError("Invalid browser handoff reason");
+		}
+		return {
+			type,
+			sessionId: browserSessionId(event.sessionId),
+			browserId: browserId(event.browserId),
+			status: event.status,
+			...(event.status === "requested" ? { reason: event.reason as DesktopBrowserHandoffReason } : {}),
+		};
+	}
 	throw new TypeError("Invalid browser event");
+}
+
+function eventHasReason(value: object): boolean {
+	return Object.hasOwn(value, "reason");
 }
 
 const DOWNLOAD_STATES: readonly DesktopDownloadState[] = [

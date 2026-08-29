@@ -9,6 +9,9 @@ import type {
 import { MAX_BROWSER_SCREENSHOT_UTF8_BYTES, MAX_BROWSER_STATE_UTF8_BYTES } from "@metis/app-protocol";
 
 const MAX_AX_NODES = 3_000;
+const MAX_ELEMENT_ID = 999_999;
+const DEFAULT_STABILIZATION_QUIET_MS = 150;
+const DEFAULT_STABILIZATION_TIMEOUT_MS = 2_000;
 const SCREENSHOT_QUALITIES = [75, 60, 45, 30] as const;
 const INTERACTIVE_ROLES = new Set([
 	"button",
@@ -57,6 +60,8 @@ export interface BrowserControllerDependencies {
 	readonly subscribeMessage: (listener: (method: string, params: CdpParams, sessionId?: string) => void) => () => void;
 	readonly subscribeDetach: (listener: () => void) => () => void;
 	readonly acceleratorModifier?: number;
+	readonly stabilizationQuietMs?: number;
+	readonly stabilizationTimeoutMs?: number;
 }
 
 interface AxValue {
@@ -187,6 +192,7 @@ export class BrowserController {
 	private attachPromise?: Promise<void>;
 	private queue: Promise<void> = Promise.resolve();
 	private closed = false;
+	private lastStateChangeAt = 0;
 	private readonly unsubscribeMessage: () => void;
 	private readonly unsubscribeDetach: () => void;
 
@@ -255,6 +261,7 @@ export class BrowserController {
 	}
 
 	invalidate(): void {
+		this.markStateChange();
 		this.documentId = randomUUID();
 		this.previous = undefined;
 		this.current = undefined;
@@ -319,6 +326,7 @@ export class BrowserController {
 	}
 
 	private onDebuggerMessage(method: string, params: CdpParams, sessionId?: string): void {
+		if (/^(?:Accessibility|DOM|Page|Target)\./u.test(method)) this.markStateChange();
 		if (method === "Target.attachedToTarget" && typeof params.sessionId === "string") {
 			this.targetSessions.add(params.sessionId);
 			const controller = new AbortController();
@@ -344,6 +352,7 @@ export class BrowserController {
 
 	private async observeCurrent(input: BrowserObserveInput, signal: AbortSignal): Promise<BrowserObservation> {
 		await this.ensureAttached(signal);
+		await this.waitForStableState(signal);
 		const state = await this.readState(signal);
 		if (!this.current) this.current = { revision: 1, state };
 		else if (this.current.state !== state) {
@@ -391,6 +400,10 @@ export class BrowserController {
 		const selected = [...candidates]
 			.sort((left, right) => left.priority - right.priority || left.index - right.index)
 			.slice(0, MAX_AX_NODES);
+		if (this.nextElementId + selected.length > MAX_ELEMENT_ID) {
+			this.elementIds.clear();
+			this.nextElementId = 1;
+		}
 		const nodesBySession = new Map(
 			trees.map(({ sessionId, nodes }) => [
 				sessionId ?? "main",
@@ -398,6 +411,7 @@ export class BrowserController {
 			]),
 		);
 		const nextElements = new Map<string, ElementTarget>();
+		const activeElementKeys = new Set<string>();
 		const lines: string[] = [];
 		for (const { sessionId, node } of selected) {
 			if (node.ignored || !node.nodeId) continue;
@@ -409,6 +423,7 @@ export class BrowserController {
 			let elementId = "";
 			if (actionable && Number.isSafeInteger(node.backendDOMNodeId)) {
 				const key = `${sessionId ?? "main"}:${node.backendDOMNodeId}`;
+				activeElementKeys.add(key);
 				elementId = this.elementIds.get(key) ?? `e${this.nextElementId++}`;
 				this.elementIds.set(key, elementId);
 				nextElements.set(elementId, {
@@ -432,6 +447,9 @@ export class BrowserController {
 			lines.push(
 				`${"  ".repeat(depth)}${elementId ? `${elementId} ` : ""}${role}${name ? ` ${safeText(name)}` : ""}${flags.length ? ` [${flags.join(", ")}]` : ""}`,
 			);
+		}
+		for (const key of this.elementIds.keys()) {
+			if (!activeElementKeys.has(key)) this.elementIds.delete(key);
 		}
 		this.elements = nextElements;
 		return limitUtf8(lines.join("\n"), MAX_BROWSER_STATE_UTF8_BYTES);
@@ -470,6 +488,7 @@ export class BrowserController {
 	}
 
 	private async performAction(action: BrowserAction, signal: AbortSignal): Promise<void> {
+		this.markStateChange();
 		switch (action.type) {
 			case "click": {
 				const point = await this.resolvePoint(action.target, signal);
@@ -564,6 +583,41 @@ export class BrowserController {
 					signal,
 				);
 		}
+	}
+
+	private markStateChange(): void {
+		this.lastStateChangeAt = Date.now();
+	}
+
+	private async waitForStableState(signal: AbortSignal): Promise<void> {
+		const quietMs = this.dependencies.stabilizationQuietMs ?? DEFAULT_STABILIZATION_QUIET_MS;
+		const timeoutMs = this.dependencies.stabilizationTimeoutMs ?? DEFAULT_STABILIZATION_TIMEOUT_MS;
+		if (quietMs <= 0 || this.lastStateChangeAt === 0) return;
+		const deadline = Date.now() + timeoutMs;
+		while (true) {
+			signal.throwIfAborted();
+			const now = Date.now();
+			const quietRemaining = quietMs - (now - this.lastStateChangeAt);
+			const timeoutRemaining = deadline - now;
+			if (quietRemaining <= 0 || timeoutRemaining <= 0) return;
+			await this.delay(Math.min(quietRemaining, timeoutRemaining), signal);
+		}
+	}
+
+	private delay(milliseconds: number, signal: AbortSignal): Promise<void> {
+		return new Promise((resolve, reject) => {
+			const onAbort = () => {
+				clearTimeout(timer);
+				reject(signal.reason ?? new DOMException("Aborted", "AbortError"));
+			};
+			const timer = setTimeout(() => {
+				signal.removeEventListener("abort", onAbort);
+				resolve();
+			}, milliseconds);
+			timer.unref?.();
+			signal.addEventListener("abort", onAbort, { once: true });
+			if (signal.aborted) onAbort();
+		});
 	}
 
 	private async resolvePoint(

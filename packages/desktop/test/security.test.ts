@@ -316,39 +316,48 @@ describe("desktop trust boundaries", () => {
 
 	it("accepts exact browser commands and rejects unsafe renderer payloads", () => {
 		const browserId = "10000000-0000-4000-8000-000000000077";
-		expect(validateCreateBrowserInput({ browserId, profileId: DEFAULT_BROWSER_PROFILE_ID })).toEqual({
+		const sessionId = "20000000-0000-4000-8000-000000000077";
+		expect(validateCreateBrowserInput({ sessionId, browserId, profileId: DEFAULT_BROWSER_PROFILE_ID })).toEqual({
+			sessionId,
 			browserId,
 			profileId: DEFAULT_BROWSER_PROFILE_ID,
 		});
 		expect(
 			validateBrowserControlInput({
 				type: "present",
+				sessionId,
 				browserId,
 				visible: true,
 				bounds: { x: 800, y: 86, width: 393, height: 747 },
 			}),
 		).toEqual({
 			type: "present",
+			sessionId,
 			browserId,
 			visible: true,
 			bounds: { x: 800, y: 86, width: 393, height: 747 },
 		});
-		expect(validateBrowserControlInput({ type: "navigate", browserId, url: "https://example.com" })).toEqual({
+		expect(
+			validateBrowserControlInput({ type: "navigate", sessionId, browserId, url: "https://example.com" }),
+		).toEqual({
 			type: "navigate",
+			sessionId,
 			browserId,
 			url: "https://example.com",
 		});
 		expect(
 			validateBrowserControlInput({
 				type: "find",
+				sessionId,
 				browserId,
 				text: "openai",
 				forward: true,
 				findNext: false,
 			}),
-		).toEqual({ type: "find", browserId, text: "openai", forward: true, findNext: false });
-		expect(validateBrowserControlInput({ type: "set-zoom", browserId, zoomPercent: 137 })).toEqual({
+		).toEqual({ type: "find", sessionId, browserId, text: "openai", forward: true, findNext: false });
+		expect(validateBrowserControlInput({ type: "set-zoom", sessionId, browserId, zoomPercent: 137 })).toEqual({
 			type: "set-zoom",
+			sessionId,
 			browserId,
 			zoomPercent: 137,
 		});
@@ -361,17 +370,17 @@ describe("desktop trust boundaries", () => {
 			"capture-page",
 			"clear-data",
 		] as const) {
-			expect(validateBrowserControlInput({ type, browserId })).toEqual({ type, browserId });
+			expect(validateBrowserControlInput({ type, sessionId, browserId })).toEqual({ type, sessionId, browserId });
 		}
 		for (const value of [
-			{ browserId: "not-a-uuid" },
-			{ type: "navigate", browserId, url: "x".repeat(8_193) },
-			{ type: "find", browserId, text: "x".repeat(2_049), forward: true, findNext: false },
-			{ type: "find", browserId, text: "x", forward: "yes", findNext: false },
-			{ type: "set-zoom", browserId, zoomPercent: 24 },
-			{ type: "set-zoom", browserId, zoomPercent: 501 },
-			{ type: "set-zoom", browserId, zoomPercent: 100.5 },
-			{ type: "present", browserId, visible: true, bounds: { x: -1, y: 0, width: 300, height: 300 } },
+			{ sessionId, browserId: "not-a-uuid" },
+			{ type: "navigate", sessionId, browserId, url: "x".repeat(8_193) },
+			{ type: "find", sessionId, browserId, text: "x".repeat(2_049), forward: true, findNext: false },
+			{ type: "find", sessionId, browserId, text: "x", forward: "yes", findNext: false },
+			{ type: "set-zoom", sessionId, browserId, zoomPercent: 24 },
+			{ type: "set-zoom", sessionId, browserId, zoomPercent: 501 },
+			{ type: "set-zoom", sessionId, browserId, zoomPercent: 100.5 },
+			{ type: "present", sessionId, browserId, visible: true, bounds: { x: -1, y: 0, width: 300, height: 300 } },
 		]) {
 			expect(() =>
 				Object.hasOwn(value, "type") ? validateBrowserControlInput(value) : validateCreateBrowserInput(value),
@@ -611,12 +620,13 @@ describe("desktop trust boundaries", () => {
 		broker.dispose();
 	});
 
-	it("keeps browser views behind validated IPC and closes them with their renderer owner", async () => {
+	it("keeps browser views behind validated IPC and suspends them across renderer reload", async () => {
 		const ipcMain = new FakeIpcMain();
 		const { supervisor } = supervisorHarness();
 		let browserListener: ((event: DesktopBrowserEvent) => void) | undefined;
 		const browserManager = {
 			attach: vi.fn(),
+			suspendRenderer: vi.fn(),
 			create: vi.fn((input) => ({
 				browserId: input.browserId,
 				profileId: input.profileId,
@@ -661,6 +671,11 @@ describe("desktop trust boundaries", () => {
 			})),
 			listHistory: vi.fn(() => []),
 			clearHistory: vi.fn(),
+			executeTool: vi.fn(),
+			takeControl: vi.fn(),
+			resolveHandoff: vi.fn(),
+			cancelSessionHandoffs: vi.fn(),
+			replayEvents: vi.fn(() => []),
 			onEvent: vi.fn((listener) => {
 				browserListener = listener;
 				return () => {
@@ -679,10 +694,12 @@ describe("desktop trust boundaries", () => {
 		browserManager.closeAll.mockClear();
 		const event = { sender: webContents, senderFrame: webContents.mainFrame };
 		const browserId = "10000000-0000-4000-8000-000000000089";
+		const sessionId = "20000000-0000-4000-8000-000000000089";
 
 		expect(browserManager.attach).toHaveBeenCalledTimes(1);
 		await expect(
 			ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.createBrowser)!(event, {
+				sessionId,
 				browserId,
 				profileId: DEFAULT_BROWSER_PROFILE_ID,
 			}),
@@ -693,14 +710,15 @@ describe("desktop trust boundaries", () => {
 		await expect(
 			ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.controlBrowser)!(event, {
 				type: "navigate",
+				sessionId,
 				browserId,
 				url: "https://example.com",
 			}),
 		).resolves.toBeUndefined();
 		await expect(
-			ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.captureBrowserPreview)!(event, { browserId }),
+			ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.captureBrowserPreview)!(event, { sessionId, browserId }),
 		).resolves.toBe("data:image/png;base64,cHJldmlldw==");
-		expect(browserManager.capturePreview).toHaveBeenCalledWith(browserId);
+		expect(browserManager.capturePreview).toHaveBeenCalledWith(sessionId, browserId);
 		await expect(ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.listBrowserProfiles)!(event)).resolves.toHaveLength(1);
 		await expect(ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.listBrowserImportSources)!(event)).resolves.toHaveLength(
 			1,
@@ -725,7 +743,121 @@ describe("desktop trust boundaries", () => {
 			{ type: "error", browserId, message: "fixture error" },
 		]);
 		webContents.emit("did-start-navigation", {}, "app://renderer/index.html", false, true);
-		expect(browserManager.closeAll).toHaveBeenCalledTimes(1);
+		expect(browserManager.suspendRenderer).toHaveBeenCalledTimes(1);
+		expect(browserManager.closeAll).not.toHaveBeenCalled();
+		broker.dispose();
+	});
+
+	it("executes browser RPCs only in main and cancels the exact correlated call", async () => {
+		const ipcMain = new FakeIpcMain();
+		const { emitMessage, supervisor } = supervisorHarness();
+		let browserSignal: AbortSignal | undefined;
+		let rejectBrowser!: (cause: unknown) => void;
+		const browserManager = {
+			attach: vi.fn(),
+			suspendRenderer: vi.fn(),
+			create: vi.fn(),
+			capturePreview: vi.fn(),
+			control: vi.fn(),
+			close: vi.fn(),
+			closeAll: vi.fn(),
+			listDownloads: vi.fn(() => []),
+			controlDownload: vi.fn(),
+			listProfiles: vi.fn(() => []),
+			listImportSources: vi.fn(async () => []),
+			importData: vi.fn(),
+			listHistory: vi.fn(() => []),
+			clearHistory: vi.fn(),
+			onEvent: vi.fn(() => () => undefined),
+			executeTool: vi.fn(
+				(_sessionId: string, _call: unknown, signal: AbortSignal) =>
+					new Promise((_resolve, reject) => {
+						browserSignal = signal;
+						rejectBrowser = reject;
+						signal.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), {
+							once: true,
+						});
+					}),
+			),
+			takeControl: vi.fn(),
+			resolveHandoff: vi.fn(),
+			cancelSessionHandoffs: vi.fn(),
+			replayEvents: vi.fn(() => []),
+		};
+		const broker = new ClientBroker({
+			ipcMain: ipcMain as never,
+			supervisor,
+			browserManager: browserManager as never,
+		});
+		const webContents = new FakeWebContents();
+		broker.attach({ webContents: webContents as never });
+		browserManager.executeTool.mockResolvedValueOnce({
+			tool: "browser_tabs",
+			details: { profiles: [], tabs: [] },
+		});
+		const successRequest = {
+			jsonrpc: "2.0" as const,
+			id: "browser-rpc-success",
+			method: "browser/tool" as const,
+			params: {
+				serverEpoch: "11111111-1111-4111-8111-111111111111",
+				sessionId: "20000000-0000-4000-8000-000000000090",
+				toolCallId: "browser-call-success",
+				call: { tool: "browser_tabs" as const, input: { action: "list" as const } },
+			},
+		};
+		emitMessage(successRequest);
+		await vi.waitFor(() => expect(supervisor.respondToServerRequest).toHaveBeenCalledOnce());
+		expect(supervisor.respondToServerRequest).toHaveBeenCalledWith(successRequest, {
+			jsonrpc: "2.0",
+			id: successRequest.id,
+			result: {
+				toolCallId: successRequest.params.toolCallId,
+				result: { tool: "browser_tabs", details: { profiles: [], tabs: [] } },
+			},
+		});
+		supervisor.respondToServerRequest.mockClear();
+		browserManager.executeTool.mockClear();
+		const request = {
+			jsonrpc: "2.0" as const,
+			id: "browser-rpc-1",
+			method: "browser/tool" as const,
+			params: {
+				serverEpoch: "11111111-1111-4111-8111-111111111111",
+				sessionId: "20000000-0000-4000-8000-000000000090",
+				toolCallId: "browser-call-1",
+				call: { tool: "browser_observe" as const, input: { browserId: "10000000-0000-4000-8000-000000000090" } },
+			},
+		};
+		emitMessage(request);
+		await vi.waitFor(() => expect(browserManager.executeTool).toHaveBeenCalledOnce());
+		expect(webContents.sent.flat()).not.toContain("browser/tool");
+
+		emitMessage({
+			jsonrpc: "2.0",
+			method: "browser/tool/cancelled",
+			params: {
+				serverEpoch: request.params.serverEpoch,
+				sessionId: request.params.sessionId,
+				requestId: request.id,
+				toolCallId: "wrong-call",
+			},
+		});
+		expect(browserSignal?.aborted).toBe(false);
+		emitMessage({
+			jsonrpc: "2.0",
+			method: "browser/tool/cancelled",
+			params: {
+				serverEpoch: request.params.serverEpoch,
+				sessionId: request.params.sessionId,
+				toolCallId: request.params.toolCallId,
+				requestId: request.id,
+			},
+		});
+		expect(browserSignal?.aborted).toBe(true);
+		await Promise.resolve();
+		expect(supervisor.respondToServerRequest).not.toHaveBeenCalled();
+		rejectBrowser(new Error("late"));
 		broker.dispose();
 	});
 

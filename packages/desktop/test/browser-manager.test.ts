@@ -10,6 +10,9 @@ import {
 	type DesktopHistoryEntry,
 } from "../src/shared/desktop-api.ts";
 
+const SESSION_ID = "20000000-0000-4000-8000-000000000001";
+const OTHER_SESSION_ID = "20000000-0000-4000-8000-000000000002";
+
 function downloadItemHarness(overrides: { filename?: string; url?: string } = {}) {
 	const listeners = new Map<string, Set<(...args: any[]) => void>>();
 	const item: Record<string, any> = {
@@ -57,6 +60,8 @@ function latestHistory(events: unknown[]): readonly DesktopHistoryEntry[] {
 function browserHarness(
 	options: {
 		initialHistory?: unknown[];
+		handoffTimeoutMs?: number;
+		navigationTimeoutMs?: number;
 		importedData?: {
 			readonly cookies: readonly { readonly url: string; readonly name: string; readonly value: string }[];
 			readonly cookieSkipped: number;
@@ -66,7 +71,12 @@ function browserHarness(
 ) {
 	const listeners = new Map<string, Set<(...args: any[]) => void>>();
 	let currentUrl = "about:blank";
-	let windowOpenHandler: ((details: { url: string }) => { action: "deny" }) | undefined;
+	let windowOpenHandler:
+		| ((details: { url: string }) => {
+				action: "allow" | "deny";
+				createWindow?: (options: Record<string, unknown>) => unknown;
+		  })
+		| undefined;
 	const navigationHistory = {
 		canGoBack: vi.fn(() => false),
 		canGoForward: vi.fn(() => false),
@@ -164,6 +174,15 @@ function browserHarness(
 		),
 		readProfile: vi.fn(async () => options.importedData ?? { cookies: [], cookieSkipped: 0, history: [] }),
 	};
+	const controllers = new Map<
+		string,
+		{
+			observe: ReturnType<typeof vi.fn>;
+			act: ReturnType<typeof vi.fn>;
+			invalidate: ReturnType<typeof vi.fn>;
+			close: ReturnType<typeof vi.fn>;
+		}
+	>();
 	const manager = new BrowserManager({
 		profileStore,
 		importer,
@@ -179,10 +198,34 @@ function browserHarness(
 		savePdf,
 		saveScreenshot,
 		showItemInFolder,
+		createController: ({ browserId, profileId }) => {
+			const observation = () => ({
+				browserId,
+				profileId,
+				documentId: "30000000-0000-4000-8000-000000000001",
+				revision: 1,
+				change: "full" as const,
+				url: currentUrl === "about:blank" ? "" : currentUrl,
+				title: "Fixture",
+				loading: false,
+				state: "e1 button Continue",
+			});
+			const controller = {
+				observe: vi.fn(async () => observation()),
+				act: vi.fn(async () => ({ status: "completed" as const, observation: observation() })),
+				invalidate: vi.fn(),
+				close: vi.fn(),
+			};
+			controllers.set(browserId, controller);
+			return controller;
+		},
+		handoffTimeoutMs: options.handoffTimeoutMs ?? 1_000,
+		navigationTimeoutMs: options.navigationTimeoutMs ?? 1_000,
 	});
 	return {
 		browserSession,
 		contentView,
+		controllers,
 		createdPreferences: () => createdPreferences,
 		emit: (name: string, ...args: any[]) => {
 			for (const listener of listeners.get(name) ?? []) listener(...args);
@@ -213,6 +256,329 @@ function browserHarness(
 }
 
 describe("BrowserManager", () => {
+	it("keeps tabs task-owned and makes duplicate renderer creation idempotent", async () => {
+		const harness = browserHarness();
+		const browserId = "10000000-0000-4000-8000-000000000070";
+		const otherBrowserId = "10000000-0000-4000-8000-000000000071";
+		const first = harness.manager.create({ sessionId: SESSION_ID, browserId, profileId: DEFAULT_BROWSER_PROFILE_ID });
+		expect(
+			harness.manager.create({ sessionId: SESSION_ID, browserId, profileId: DEFAULT_BROWSER_PROFILE_ID }),
+		).toEqual(first);
+		expect(harness.contentView.addChildView).not.toHaveBeenCalled();
+		expect(() =>
+			harness.manager.create({ sessionId: OTHER_SESSION_ID, browserId, profileId: DEFAULT_BROWSER_PROFILE_ID }),
+		).toThrow("another task");
+		harness.manager.create({
+			sessionId: OTHER_SESSION_ID,
+			browserId: otherBrowserId,
+			profileId: DEFAULT_BROWSER_PROFILE_ID,
+		});
+
+		const own = await harness.manager.executeTool(
+			SESSION_ID,
+			{ tool: "browser_tabs", input: { action: "list" } },
+			new AbortController().signal,
+		);
+		expect(own.tool === "browser_tabs" && own.details.tabs.map(({ browserId: id }) => id)).toEqual([browserId]);
+		await expect(
+			harness.manager.executeTool(
+				SESSION_ID,
+				{ tool: "browser_observe", input: { browserId: otherBrowserId } },
+				new AbortController().signal,
+			),
+		).rejects.toThrow("does not belong");
+		expect(() => harness.manager.close(SESSION_ID, otherBrowserId)).toThrow("does not belong");
+	});
+
+	it("adopts safe popups as owned tabs and enforces the per-task tab cap", async () => {
+		const harness = browserHarness();
+		const events: unknown[] = [];
+		harness.manager.onEvent((event) => events.push(event));
+		const openerId = "10000000-0000-4000-8000-000000000072";
+		harness.manager.create({ sessionId: SESSION_ID, browserId: openerId, profileId: DEFAULT_BROWSER_PROFILE_ID });
+		expect(harness.windowOpen("file:///tmp/unsafe")).toEqual({ action: "deny" });
+		const popup = harness.windowOpen("https://accounts.example.test/oauth");
+		expect(popup).toMatchObject({ action: "allow", createWindow: expect.any(Function) });
+		expect(popup?.createWindow?.({})).toBe(harness.webContents);
+		const listed = await harness.manager.executeTool(
+			SESSION_ID,
+			{ tool: "browser_tabs", input: { action: "list" } },
+			new AbortController().signal,
+		);
+		expect(listed.tool === "browser_tabs" && listed.details.tabs).toHaveLength(2);
+		expect(events.filter((event) => (event as { type?: string }).type === "opened")).toHaveLength(2);
+
+		for (let index = 2; index < 16; index++) {
+			harness.manager.create({
+				sessionId: SESSION_ID,
+				browserId: `10000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
+				profileId: DEFAULT_BROWSER_PROFILE_ID,
+			});
+		}
+		expect(() =>
+			harness.manager.create({
+				sessionId: SESSION_ID,
+				browserId: "10000000-0000-4000-8000-000000000099",
+				profileId: DEFAULT_BROWSER_PROFILE_ID,
+			}),
+		).toThrow("maximum");
+		expect(harness.windowOpen("https://example.test/popup")).toEqual({ action: "deny" });
+	});
+
+	it("holds direct handoff until validated completion and rejects automation meanwhile", async () => {
+		const harness = browserHarness();
+		const browserId = "10000000-0000-4000-8000-000000000073";
+		const events: unknown[] = [];
+		harness.manager.onEvent((event) => events.push(event));
+		harness.manager.attach({ contentView: harness.contentView } as never);
+		harness.manager.create({ sessionId: SESSION_ID, browserId, profileId: DEFAULT_BROWSER_PROFILE_ID });
+		await harness.manager.control({
+			type: "present",
+			sessionId: SESSION_ID,
+			browserId,
+			visible: true,
+			bounds: { x: 1, y: 2, width: 300, height: 400 },
+		});
+		const pending = harness.manager.executeTool(
+			SESSION_ID,
+			{ tool: "browser_handoff", input: { browserId, reason: "login" } },
+			new AbortController().signal,
+		);
+		await vi.waitFor(() =>
+			expect(events).toContainEqual({
+				type: "handoff",
+				sessionId: SESSION_ID,
+				browserId,
+				status: "requested",
+				reason: "login",
+			}),
+		);
+		await expect(
+			harness.manager.executeTool(
+				SESSION_ID,
+				{ tool: "browser_observe", input: { browserId } },
+				new AbortController().signal,
+			),
+		).rejects.toThrow("controlled");
+		await expect(harness.manager.control({ type: "reload", sessionId: SESSION_ID, browserId })).rejects.toThrow(
+			"controlled",
+		);
+		await harness.manager.control({
+			type: "present",
+			sessionId: SESSION_ID,
+			browserId,
+			visible: true,
+			bounds: { x: 1, y: 2, width: 300, height: 400 },
+		});
+		expect(harness.view.setVisible).toHaveBeenLastCalledWith(true);
+		harness.manager.resolveHandoff(SESSION_ID, browserId, "complete");
+		await expect(pending).resolves.toMatchObject({ tool: "browser_handoff", details: { status: "completed" } });
+		expect(harness.controllers.get(browserId)?.invalidate).toHaveBeenCalledTimes(2);
+	});
+
+	it("turns Take control during an action into the same pending handoff RPC", async () => {
+		const harness = browserHarness();
+		const browserId = "10000000-0000-4000-8000-000000000074";
+		const events: unknown[] = [];
+		harness.manager.onEvent((event) => events.push(event));
+		harness.manager.create({ sessionId: SESSION_ID, browserId, profileId: DEFAULT_BROWSER_PROFILE_ID });
+		const controller = harness.controllers.get(browserId)!;
+		controller.act.mockImplementation(
+			(_input: unknown, signal: AbortSignal) =>
+				new Promise((_resolve, reject) => {
+					signal.addEventListener(
+						"abort",
+						() => reject(signal.reason ?? new DOMException("Aborted", "AbortError")),
+						{
+							once: true,
+						},
+					);
+				}),
+		);
+		const pending = harness.manager.executeTool(
+			SESSION_ID,
+			{
+				tool: "browser_act",
+				input: {
+					browserId,
+					documentId: "30000000-0000-4000-8000-000000000001",
+					snapshotRevision: 1,
+					origin: "https://example.test",
+					intent: "Click",
+					risk: "ordinary",
+					action: { type: "click", target: { elementId: "e1" } },
+				},
+			},
+			new AbortController().signal,
+		);
+		await vi.waitFor(() =>
+			expect(events).toContainEqual({ type: "activity", sessionId: SESSION_ID, browserId, active: true }),
+		);
+		harness.manager.takeControl(SESSION_ID, browserId);
+		await vi.waitFor(() =>
+			expect(events).toContainEqual({
+				type: "handoff",
+				sessionId: SESSION_ID,
+				browserId,
+				status: "requested",
+				reason: "other",
+			}),
+		);
+		harness.manager.resolveHandoff(SESSION_ID, browserId, "cancel");
+		await expect(pending).resolves.toEqual({
+			tool: "browser_act",
+			details: { status: "cancelled", reason: "user_cancelled" },
+		});
+		expect(events).toContainEqual({ type: "activity", sessionId: SESSION_ID, browserId, active: false });
+	});
+
+	it("interrupts a hanging navigation immediately when the user takes control", async () => {
+		const harness = browserHarness({ navigationTimeoutMs: 10_000 });
+		const browserId = "10000000-0000-4000-8000-000000000075";
+		const events: unknown[] = [];
+		harness.manager.onEvent((event) => events.push(event));
+		harness.manager.create({ sessionId: SESSION_ID, browserId, profileId: DEFAULT_BROWSER_PROFILE_ID });
+		harness.webContents.loadURL.mockReturnValueOnce(new Promise(() => undefined));
+		const pending = harness.manager.executeTool(
+			SESSION_ID,
+			{
+				tool: "browser_navigate",
+				input: { action: "goto", browserId, url: "https://login.example.test" },
+			},
+			new AbortController().signal,
+		);
+		await vi.waitFor(() =>
+			expect(events).toContainEqual({ type: "activity", sessionId: SESSION_ID, browserId, active: true }),
+		);
+		harness.manager.takeControl(SESSION_ID, browserId);
+		await vi.waitFor(() =>
+			expect(events).toContainEqual({
+				type: "handoff",
+				sessionId: SESSION_ID,
+				browserId,
+				status: "requested",
+				reason: "other",
+			}),
+		);
+		harness.manager.resolveHandoff(SESSION_ID, browserId, "cancel");
+		await expect(pending).resolves.toEqual({
+			tool: "browser_navigate",
+			details: { status: "cancelled", reason: "user_cancelled" },
+		});
+	});
+
+	it("settles handoff on interruption, timeout, and tab close without retaining a lock", async () => {
+		const interrupted = browserHarness();
+		const interruptedId = "10000000-0000-4000-8000-000000000076";
+		interrupted.manager.create({
+			sessionId: SESSION_ID,
+			browserId: interruptedId,
+			profileId: DEFAULT_BROWSER_PROFILE_ID,
+		});
+		const abort = new AbortController();
+		const interruptedResult = interrupted.manager.executeTool(
+			SESSION_ID,
+			{ tool: "browser_handoff", input: { browserId: interruptedId, reason: "otp" } },
+			abort.signal,
+		);
+		await vi.waitFor(() => expect(interrupted.manager.replayEvents(SESSION_ID)).toHaveLength(2));
+		abort.abort();
+		await expect(interruptedResult).resolves.toMatchObject({
+			tool: "browser_handoff",
+			details: { status: "cancelled", reason: "turn_interrupted" },
+		});
+
+		const timedOut = browserHarness({ handoffTimeoutMs: 5 });
+		const timedOutId = "10000000-0000-4000-8000-000000000077";
+		timedOut.manager.create({ sessionId: SESSION_ID, browserId: timedOutId, profileId: DEFAULT_BROWSER_PROFILE_ID });
+		await expect(
+			timedOut.manager.executeTool(
+				SESSION_ID,
+				{ tool: "browser_handoff", input: { browserId: timedOutId, reason: "captcha" } },
+				new AbortController().signal,
+			),
+		).resolves.toMatchObject({ tool: "browser_handoff", details: { status: "cancelled", reason: "timed_out" } });
+
+		const closed = browserHarness();
+		const closedId = "10000000-0000-4000-8000-000000000084";
+		closed.manager.create({ sessionId: SESSION_ID, browserId: closedId, profileId: DEFAULT_BROWSER_PROFILE_ID });
+		const closedResult = closed.manager.executeTool(
+			SESSION_ID,
+			{ tool: "browser_handoff", input: { browserId: closedId, reason: "passkey" } },
+			new AbortController().signal,
+		);
+		await vi.waitFor(() => expect(closed.manager.replayEvents(SESSION_ID)).toHaveLength(2));
+		closed.manager.close(SESSION_ID, closedId);
+		await expect(closedResult).resolves.toMatchObject({
+			tool: "browser_handoff",
+			details: { status: "cancelled", reason: "tab_closed" },
+		});
+	});
+
+	it("suspends native presentation while retaining replayable task tabs", async () => {
+		const harness = browserHarness();
+		const browserId = "10000000-0000-4000-8000-000000000085";
+		harness.manager.attach({ contentView: harness.contentView } as never);
+		const first = harness.manager.create({
+			sessionId: SESSION_ID,
+			browserId,
+			profileId: DEFAULT_BROWSER_PROFILE_ID,
+		});
+		await harness.manager.control({
+			type: "present",
+			sessionId: SESSION_ID,
+			browserId,
+			visible: true,
+			bounds: { x: 4, y: 5, width: 300, height: 400 },
+		});
+		harness.manager.suspendRenderer();
+		expect(harness.view.setVisible).toHaveBeenLastCalledWith(false);
+		expect(harness.manager.replayEvents(SESSION_ID)).toEqual([
+			{ type: "opened", sessionId: SESSION_ID, browserId, profileId: DEFAULT_BROWSER_PROFILE_ID },
+		]);
+		expect(
+			harness.manager.create({ sessionId: SESSION_ID, browserId, profileId: DEFAULT_BROWSER_PROFILE_ID }),
+		).toEqual(first);
+		expect(harness.controllers).toHaveLength(1);
+	});
+
+	it("serializes mutations per tab without blocking another task-owned tab", async () => {
+		const harness = browserHarness();
+		const firstId = "10000000-0000-4000-8000-000000000086";
+		const secondId = "10000000-0000-4000-8000-000000000087";
+		harness.manager.create({ sessionId: SESSION_ID, browserId: firstId, profileId: DEFAULT_BROWSER_PROFILE_ID });
+		harness.manager.create({ sessionId: SESSION_ID, browserId: secondId, profileId: DEFAULT_BROWSER_PROFILE_ID });
+		const firstAbort = new AbortController();
+		harness.controllers.get(firstId)!.act.mockImplementation(
+			(_input: unknown, signal: AbortSignal) =>
+				new Promise((_resolve, reject) => {
+					signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+				}),
+		);
+		const call = (browserId: string, signal: AbortSignal) =>
+			harness.manager.executeTool(
+				SESSION_ID,
+				{
+					tool: "browser_act",
+					input: {
+						browserId,
+						documentId: "30000000-0000-4000-8000-000000000001",
+						snapshotRevision: 1,
+						origin: "https://example.test",
+						intent: "Click",
+						risk: "ordinary",
+						action: { type: "click" as const, target: { elementId: "e1" } },
+					},
+				},
+				signal,
+			);
+		const first = call(firstId, firstAbort.signal);
+		await vi.waitFor(() => expect(harness.controllers.get(firstId)!.act).toHaveBeenCalledOnce());
+		await expect(call(secondId, new AbortController().signal)).resolves.toMatchObject({ tool: "browser_act" });
+		firstAbort.abort();
+		await expect(first).rejects.toBeDefined();
+	});
+
 	it("owns safe Chromium views through navigation, presentation, events, and cleanup", async () => {
 		const harness = browserHarness();
 		const browserId = "10000000-0000-4000-8000-000000000078";
@@ -220,7 +586,9 @@ describe("BrowserManager", () => {
 		harness.manager.onEvent((event) => events.push(event));
 		harness.manager.attach({ contentView: harness.contentView } as never);
 
-		expect(harness.manager.create({ browserId, profileId: DEFAULT_BROWSER_PROFILE_ID })).toMatchObject({
+		expect(
+			harness.manager.create({ sessionId: SESSION_ID, browserId, profileId: DEFAULT_BROWSER_PROFILE_ID }),
+		).toMatchObject({
 			browserId,
 			profileId: DEFAULT_BROWSER_PROFILE_ID,
 			url: "",
@@ -240,20 +608,26 @@ describe("BrowserManager", () => {
 		expect(harness.browserSession.setPermissionCheckHandler).toHaveBeenCalledOnce();
 		expect(harness.browserSession.setPermissionRequestHandler).toHaveBeenCalledOnce();
 
-		await harness.manager.control({ type: "navigate", browserId, url: "openai" });
+		await harness.manager.control({ sessionId: SESSION_ID, type: "navigate", browserId, url: "openai" });
 		expect(harness.webContents.loadURL).toHaveBeenCalledWith("https://www.google.com/search?q=openai");
-		await harness.manager.control({ type: "navigate", browserId, url: "example.com" });
+		await harness.manager.control({ sessionId: SESSION_ID, type: "navigate", browserId, url: "example.com" });
 		expect(harness.webContents.loadURL).toHaveBeenCalledWith("https://example.com/");
-		await harness.manager.control({ type: "navigate", browserId, url: "example.com:8080" });
+		await harness.manager.control({ sessionId: SESSION_ID, type: "navigate", browserId, url: "example.com:8080" });
 		expect(harness.webContents.loadURL).toHaveBeenLastCalledWith("https://example.com:8080/");
 		await expect(
-			harness.manager.control({ type: "navigate", browserId, url: "javascript:alert(1)" }),
+			harness.manager.control({ sessionId: SESSION_ID, type: "navigate", browserId, url: "javascript:alert(1)" }),
 		).rejects.toThrow("Unsupported browser URL");
 		await expect(
-			harness.manager.control({ type: "navigate", browserId, url: "https://user:secret@example.com" }),
+			harness.manager.control({
+				sessionId: SESSION_ID,
+				type: "navigate",
+				browserId,
+				url: "https://user:secret@example.com",
+			}),
 		).rejects.toThrow("cannot contain credentials");
 
 		await harness.manager.control({
+			sessionId: SESSION_ID,
 			type: "present",
 			browserId,
 			visible: true,
@@ -262,6 +636,7 @@ describe("BrowserManager", () => {
 		expect(harness.view.setBounds).toHaveBeenCalledWith({ x: 800, y: 86, width: 393, height: 747 });
 		expect(harness.view.setVisible).toHaveBeenLastCalledWith(true);
 		await harness.manager.control({
+			sessionId: SESSION_ID,
 			type: "present",
 			browserId,
 			visible: true,
@@ -271,8 +646,8 @@ describe("BrowserManager", () => {
 
 		harness.navigationHistory.canGoBack.mockReturnValue(true);
 		harness.navigationHistory.canGoForward.mockReturnValue(true);
-		await harness.manager.control({ type: "back", browserId });
-		await harness.manager.control({ type: "forward", browserId });
+		await harness.manager.control({ sessionId: SESSION_ID, type: "back", browserId });
+		await harness.manager.control({ sessionId: SESSION_ID, type: "forward", browserId });
 		expect(harness.navigationHistory.goBack).toHaveBeenCalledOnce();
 		expect(harness.navigationHistory.goForward).toHaveBeenCalledOnce();
 
@@ -295,9 +670,10 @@ describe("BrowserManager", () => {
 			},
 		});
 
-		expect(harness.windowOpen("https://openai.com")).toEqual({ action: "deny" });
-		await Promise.resolve();
-		expect(harness.webContents.loadURL).toHaveBeenLastCalledWith("https://openai.com/");
+		expect(harness.windowOpen("https://openai.com")).toMatchObject({
+			action: "allow",
+			createWindow: expect.any(Function),
+		});
 		const preventDefault = vi.fn();
 		harness.emit("will-navigate", { url: "file:///etc/passwd", preventDefault });
 		expect(preventDefault).toHaveBeenCalledOnce();
@@ -306,21 +682,22 @@ describe("BrowserManager", () => {
 
 		harness.emit("render-process-gone");
 		expect(events).toContainEqual({ type: "error", browserId, message: "Browser page crashed" });
-		await harness.manager.control({ type: "open-external", browserId });
-		expect(harness.openExternal).toHaveBeenCalledWith("https://openai.com/");
+		await harness.manager.control({ sessionId: SESSION_ID, type: "open-external", browserId });
+		expect(harness.openExternal).toHaveBeenCalledWith("https://example.com:8080/");
 
 		const beforeClose = events.length;
-		harness.manager.close(browserId);
+		harness.manager.close(SESSION_ID, browserId);
+		expect(events).toContainEqual({ type: "closed", sessionId: SESSION_ID, browserId });
 		expect(harness.contentView.removeChildView).toHaveBeenCalledWith(harness.view);
 		expect(harness.webContents.close).toHaveBeenCalledOnce();
 		harness.emit("did-stop-loading");
-		expect(events).toHaveLength(beforeClose);
+		expect(events).toHaveLength(beforeClose + 1);
 	});
 
 	it("lets a newer navigation supersede an aborted in-flight load", async () => {
 		const harness = browserHarness();
 		const browserId = "10000000-0000-4000-8000-000000000079";
-		harness.manager.create({ browserId, profileId: DEFAULT_BROWSER_PROFILE_ID });
+		harness.manager.create({ sessionId: SESSION_ID, browserId, profileId: DEFAULT_BROWSER_PROFILE_ID });
 		let rejectFirst: ((cause: unknown) => void) | undefined;
 		harness.webContents.loadURL
 			.mockImplementationOnce(
@@ -331,8 +708,18 @@ describe("BrowserManager", () => {
 			)
 			.mockResolvedValueOnce(undefined);
 
-		const first = harness.manager.control({ type: "navigate", browserId, url: "https://first.example" });
-		const second = harness.manager.control({ type: "navigate", browserId, url: "https://second.example" });
+		const first = harness.manager.control({
+			sessionId: SESSION_ID,
+			type: "navigate",
+			browserId,
+			url: "https://first.example",
+		});
+		const second = harness.manager.control({
+			sessionId: SESSION_ID,
+			type: "navigate",
+			browserId,
+			url: "https://second.example",
+		});
 		rejectFirst?.(Object.assign(new Error("navigation aborted"), { code: "ERR_ABORTED" }));
 
 		await expect(Promise.all([first, second])).resolves.toEqual([undefined, undefined]);
@@ -342,13 +729,18 @@ describe("BrowserManager", () => {
 	it("does not report Electron's redirect abort as a failed navigation", async () => {
 		const harness = browserHarness();
 		const browserId = "10000000-0000-4000-8000-000000000080";
-		harness.manager.create({ browserId, profileId: DEFAULT_BROWSER_PROFILE_ID });
+		harness.manager.create({ sessionId: SESSION_ID, browserId, profileId: DEFAULT_BROWSER_PROFILE_ID });
 		harness.webContents.loadURL.mockRejectedValueOnce(
 			Object.assign(new Error("(-3) loading redirected page"), { code: "", errno: -3 }),
 		);
 
 		await expect(
-			harness.manager.control({ type: "navigate", browserId, url: "https://www.google.com/search?q=openai" }),
+			harness.manager.control({
+				sessionId: SESSION_ID,
+				type: "navigate",
+				browserId,
+				url: "https://www.google.com/search?q=openai",
+			}),
 		).resolves.toBeUndefined();
 	});
 
@@ -357,11 +749,14 @@ describe("BrowserManager", () => {
 		const browserId = "10000000-0000-4000-8000-000000000081";
 		const events: unknown[] = [];
 		harness.manager.onEvent((event) => events.push(event));
-		expect(harness.manager.create({ browserId, profileId: DEFAULT_BROWSER_PROFILE_ID })).toMatchObject({
+		expect(
+			harness.manager.create({ sessionId: SESSION_ID, browserId, profileId: DEFAULT_BROWSER_PROFILE_ID }),
+		).toMatchObject({
 			zoomPercent: 100,
 		});
 
 		await harness.manager.control({
+			sessionId: SESSION_ID,
 			type: "find",
 			browserId,
 			text: "openai",
@@ -400,57 +795,67 @@ describe("BrowserManager", () => {
 			matches: 52,
 		});
 
-		await harness.manager.control({ type: "stop-find", browserId });
+		await harness.manager.control({ sessionId: SESSION_ID, type: "stop-find", browserId });
 		expect(harness.webContents.stopFindInPage).toHaveBeenCalledWith("clearSelection");
 
-		await harness.manager.control({ type: "print", browserId });
+		await harness.manager.control({ sessionId: SESSION_ID, type: "print", browserId });
 		expect(harness.webContents.print).toHaveBeenCalledWith({ printBackground: true }, expect.any(Function));
 		harness.webContents.print.mockImplementationOnce((_options, callback) => callback(false, "Print job canceled"));
-		await expect(harness.manager.control({ type: "print", browserId })).resolves.toBeUndefined();
+		await expect(
+			harness.manager.control({ sessionId: SESSION_ID, type: "print", browserId }),
+		).resolves.toBeUndefined();
 		harness.webContents.print.mockImplementationOnce((_options, callback) =>
 			callback(false, "No printers available on the network"),
 		);
-		await expect(harness.manager.control({ type: "print", browserId })).resolves.toBeUndefined();
+		await expect(
+			harness.manager.control({ sessionId: SESSION_ID, type: "print", browserId }),
+		).resolves.toBeUndefined();
 		expect(harness.webContents.printToPDF).toHaveBeenCalledWith({ printBackground: true });
 		expect(harness.savePdf).toHaveBeenCalledWith(
 			Buffer.from("pdf"),
 			expect.stringMatching(/^Metis-Print-\d{4}-\d{2}-\d{2}-\d{6}\.pdf$/u),
 		);
 		harness.webContents.print.mockImplementationOnce((_options, callback) => callback(false, "Printer unavailable"));
-		await expect(harness.manager.control({ type: "print", browserId })).rejects.toThrow("Printer unavailable");
+		await expect(harness.manager.control({ sessionId: SESSION_ID, type: "print", browserId })).rejects.toThrow(
+			"Printer unavailable",
+		);
 
-		await harness.manager.control({ type: "zoom-out", browserId });
-		await harness.manager.control({ type: "zoom-in", browserId });
-		await harness.manager.control({ type: "zoom-reset", browserId });
+		await harness.manager.control({ sessionId: SESSION_ID, type: "zoom-out", browserId });
+		await harness.manager.control({ sessionId: SESSION_ID, type: "zoom-in", browserId });
+		await harness.manager.control({ sessionId: SESSION_ID, type: "zoom-reset", browserId });
 		expect(harness.webContents.setZoomFactor.mock.calls.map(([factor]) => factor)).toEqual([0.9, 1]);
 		for (let index = 0; index < 30; index += 1) {
-			await harness.manager.control({ type: "zoom-in", browserId });
+			await harness.manager.control({ sessionId: SESSION_ID, type: "zoom-in", browserId });
 		}
 		expect(harness.webContents.setZoomFactor).toHaveBeenLastCalledWith(5);
 		expect(harness.webContents.setZoomFactor).toHaveBeenCalledTimes(11);
-		await harness.manager.control({ type: "set-zoom", browserId, zoomPercent: 137 });
-		await harness.manager.control({ type: "zoom-in", browserId });
-		await harness.manager.control({ type: "zoom-out", browserId });
+		await harness.manager.control({ sessionId: SESSION_ID, type: "set-zoom", browserId, zoomPercent: 137 });
+		await harness.manager.control({ sessionId: SESSION_ID, type: "zoom-in", browserId });
+		await harness.manager.control({ sessionId: SESSION_ID, type: "zoom-out", browserId });
 		expect(harness.webContents.setZoomFactor.mock.calls.slice(-3).map(([factor]) => factor)).toEqual([
 			1.37, 1.5, 1.25,
 		]);
 
-		await harness.manager.control({ type: "capture-page", browserId });
+		await harness.manager.control({ sessionId: SESSION_ID, type: "capture-page", browserId });
 		expect(harness.webContents.capturePage).toHaveBeenCalledWith();
 		expect(harness.saveScreenshot).toHaveBeenCalledWith(
 			harness.nativeImage,
 			expect.stringMatching(/^Metis-Screenshot-\d{4}-\d{2}-\d{2}-\d{6}\.png$/u),
 		);
-		await expect(harness.manager.capturePreview(browserId)).resolves.toBe("data:image/png;base64,cHJldmlldw==");
+		await expect(harness.manager.capturePreview(SESSION_ID, browserId)).resolves.toBe(
+			"data:image/png;base64,cHJldmlldw==",
+		);
 		expect(harness.nativeImage.toDataURL).toHaveBeenCalledOnce();
 
-		await harness.manager.control({ type: "clear-data", browserId });
+		await harness.manager.control({ sessionId: SESSION_ID, type: "clear-data", browserId });
 		expect(harness.browserSession.clearData).toHaveBeenCalledWith({
 			dataTypes: ["cache", "cookies", "indexedDB", "localStorage", "serviceWorkers"],
 		});
 
-		harness.manager.close(browserId);
-		expect(harness.manager.create({ browserId, profileId: DEFAULT_BROWSER_PROFILE_ID })).toMatchObject({
+		harness.manager.close(SESSION_ID, browserId);
+		expect(
+			harness.manager.create({ sessionId: SESSION_ID, browserId, profileId: DEFAULT_BROWSER_PROFILE_ID }),
+		).toMatchObject({
 			zoomPercent: 100,
 		});
 	});
@@ -460,7 +865,7 @@ describe("BrowserManager", () => {
 		const browserId = "10000000-0000-4000-8000-000000000082";
 		const events: unknown[] = [];
 		harness.manager.onEvent((event) => events.push(event));
-		harness.manager.create({ browserId, profileId: DEFAULT_BROWSER_PROFILE_ID });
+		harness.manager.create({ sessionId: SESSION_ID, browserId, profileId: DEFAULT_BROWSER_PROFILE_ID });
 
 		for (const [key, command] of [
 			["f", "find"],
@@ -487,7 +892,7 @@ describe("BrowserManager", () => {
 			expect(events).toContainEqual({ type: "command", browserId, command });
 		}
 
-		harness.manager.close(browserId);
+		harness.manager.close(SESSION_ID, browserId);
 		const before = events.length;
 		harness.emit(
 			"before-input-event",
@@ -512,6 +917,7 @@ describe("BrowserManager", () => {
 			const events: unknown[] = [];
 			harness.manager.onEvent((event) => events.push(event));
 			harness.manager.create({
+				sessionId: SESSION_ID,
 				browserId: "10000000-0000-4000-8000-000000000083",
 				profileId: DEFAULT_BROWSER_PROFILE_ID,
 			});
@@ -588,9 +994,14 @@ describe("BrowserManager", () => {
 		const browserId = "10000000-0000-4000-8000-000000000090";
 		const events: unknown[] = [];
 		harness.manager.onEvent((event) => events.push(event));
-		harness.manager.create({ browserId, profileId: DEFAULT_BROWSER_PROFILE_ID });
+		harness.manager.create({ sessionId: SESSION_ID, browserId, profileId: DEFAULT_BROWSER_PROFILE_ID });
 
-		await harness.manager.control({ type: "navigate", browserId, url: "https://example.com/" });
+		await harness.manager.control({
+			sessionId: SESSION_ID,
+			type: "navigate",
+			browserId,
+			url: "https://example.com/",
+		});
 		harness.emit("did-navigate", {}, "https://example.com/");
 		expect(latestHistory(events)).toHaveLength(1);
 		expect(latestHistory(events)[0]).toMatchObject({
@@ -627,6 +1038,7 @@ describe("BrowserManager", () => {
 	it("caps history at 500 entries with newest first", () => {
 		const harness = browserHarness();
 		harness.manager.create({
+			sessionId: SESSION_ID,
 			browserId: "10000000-0000-4000-8000-000000000091",
 			profileId: DEFAULT_BROWSER_PROFILE_ID,
 		});
@@ -653,7 +1065,7 @@ describe("BrowserManager", () => {
 			];
 			const harness = browserHarness({ initialHistory: restored });
 			const browserId = "10000000-0000-4000-8000-000000000092";
-			harness.manager.create({ browserId, profileId: DEFAULT_BROWSER_PROFILE_ID });
+			harness.manager.create({ sessionId: SESSION_ID, browserId, profileId: DEFAULT_BROWSER_PROFILE_ID });
 			expect(harness.manager.listHistory({ profileId: DEFAULT_BROWSER_PROFILE_ID })).toEqual(restored);
 			expect(harness.saveHistory).not.toHaveBeenCalled();
 
