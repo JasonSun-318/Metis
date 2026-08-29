@@ -323,7 +323,8 @@ test("packaged task list uses the Metis composer UI in Chat and Code", async ({}
 	const homeDir = path.join(tempRoot, "home");
 	const projectDir = path.join(tempRoot, "project");
 	const userDataDir = path.join(tempRoot, "electron");
-	await Promise.all([mkdir(agentDir), mkdir(homeDir), mkdir(projectDir), mkdir(userDataDir)]);
+	const qaDir = path.join(desktopRoot, "test-results", "design-qa", "transcript");
+	await Promise.all([mkdir(agentDir), mkdir(homeDir), mkdir(projectDir), mkdir(userDataDir), mkdir(qaDir, { recursive: true })]);
 
 	const taskItems = [
 		{ task: "Inspect implementation", completed: false },
@@ -394,6 +395,10 @@ test("packaged task list uses the Metis composer UI in Chat and Code", async ({}
 				timestamp: Date.now() + 2,
 			});
 		}
+		if (withTranscriptFixture) manager.appendMessage({
+			...assistantMessage(Date.now() + 3, 0),
+			content: [{ type: "text", text: "Metis keeps readable content rhythm while the selected font size changes." }],
+		});
 		manager.close();
 	};
 	createTaskSession(CHAT_ACTIVE_ID, "chat", "Task list Chat fixture", taskItems, true, true);
@@ -419,7 +424,7 @@ test("packaged task list uses the Metis composer UI in Chat and Code", async ({}
 	try {
 		({ browser, page } = await connectToApp(debuggingPort));
 		page.setDefaultTimeout(10_000);
-		await page.setViewportSize({ width: 1100, height: 760 });
+		await page.setViewportSize({ width: 1280, height: 840 });
 		await waitForServerReady(page);
 
 		phase = "checking expanded Chat task list";
@@ -434,6 +439,18 @@ test("packaged task list uses the Metis composer UI in Chat and Code", async ({}
 		await expect(chatToolChain).not.toContainText('"questions"');
 		await expect(chatToolChain).not.toContainText('"multiple"');
 		await expect(chatToolChain).not.toContainText('"selected"');
+		for (const size of [13, 15, 20]) {
+			await page.evaluate((fontSize) => {
+				document.documentElement.style.setProperty("--content-font-size", `${fontSize}px`);
+			}, size);
+			await expect(page.locator(".turn-answer").first()).toHaveCSS("font-size", `${size}px`);
+			expect(await page.locator(".transcript-scroll").evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+			await page.screenshot({
+				animations: "disabled",
+				path: path.join(qaDir, `chat-dark-${size}px-1280x840.png`),
+			});
+		}
+		await page.evaluate(() => document.documentElement.style.removeProperty("--content-font-size"));
 
 		phase = "checking packaged slash commands and Skill chip";
 		const composerInput = page.getByRole("textbox", { name: "Message Metis", exact: true });
@@ -442,9 +459,10 @@ test("packaged task list uses the Metis composer UI in Chat and Code", async ({}
 		await expect(slashMenu).toBeVisible();
 		await expect(slashMenu.getByText("skill:e2e-skill", { exact: true })).toBeVisible();
 		const slashLabels = await slashMenu.locator("[role=option] strong").allTextContents();
-		expect(slashLabels.slice(0, 6)).toEqual([
+		expect(slashLabels.slice(0, 7)).toEqual([
 			"/compact",
 			"/goal",
+			"/plan",
 			"/model",
 			"/thinking",
 			"/status",
@@ -462,10 +480,9 @@ test("packaged task list uses the Metis composer UI in Chat and Code", async ({}
 
 		await composerInput.fill("/status");
 		await slashMenu.getByRole("option").click();
-		const statusPanel = page.getByRole("dialog", { name: "Session status", exact: true });
+		const statusPanel = page.getByRole("dialog", { name: "Context Usage", exact: true });
 		await expect(statusPanel).toBeVisible();
-		await expect(statusPanel).toContainText(CHAT_ACTIVE_ID);
-		await expect(statusPanel).toContainText("Chat");
+		await expect(statusPanel).toContainText("Context usage unavailable");
 		await page.locator(".composer-dock").screenshot({
 			animations: "disabled",
 			path: testInfo.outputPath("slash-status-panel.png"),
@@ -482,8 +499,8 @@ test("packaged task list uses the Metis composer UI in Chat and Code", async ({}
 		await composerInput.fill("/skill:e2e");
 		await slashMenu.getByRole("option").click();
 		await expect(page.getByRole("button", { name: "Remove skill e2e-skill", exact: true })).toBeVisible();
-		await composerInput.fill("Use the packaged fixture");
-		await expect(page.locator(".composer-skill-token")).toHaveCSS("color", "rgb(169, 201, 238)");
+		await composerInput.pressSequentially("Use the packaged fixture");
+		await expect(page.locator(".composer-skill-token")).toHaveCSS("color", "rgb(165, 214, 255)");
 		await page.locator(".composer-dock").screenshot({
 			animations: "disabled",
 			path: testInfo.outputPath("slash-skill-token.png"),
@@ -584,6 +601,11 @@ test("packaged task list uses the Metis composer UI in Chat and Code", async ({}
 		await codeTask.locator(":scope > summary").click();
 		await expect(codeTask).toContainText("○ Inspect implementation");
 		await expect(codeTask).not.toContainText('"tasks"');
+		await page.evaluate(() => document.documentElement.style.setProperty("--content-font-size", "20px"));
+		await expect(page.locator(".code-turn-answer").first()).toHaveCSS("font-size", "20px");
+		expect(await page.locator(".transcript-scroll").evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+		await page.screenshot({ animations: "disabled", path: path.join(qaDir, "code-dark-20px-1280x840.png") });
+		await page.evaluate(() => document.documentElement.style.removeProperty("--content-font-size"));
 		panel = page.getByRole("region", { name: "Tasks", exact: true });
 		await expect(panel.locator(".task-list-row")).toHaveCount(6);
 		await expect(page.locator(".composer-dock > .task-list-slot + .composer-code")).toHaveCount(1);
@@ -3705,6 +3727,7 @@ test("packaged General settings and Personalization persist across restart", asy
 	const projectDir = path.join(tempRoot, "settings-project");
 	const userDataDir = path.join(tempRoot, "electron");
 	const qaDir = path.join(desktopRoot, "test-results", "design-qa", "settings");
+	const viewport = { width: 1280, height: 840 };
 	await Promise.all([
 		mkdir(agentDir),
 		mkdir(homeDir),
@@ -3736,7 +3759,7 @@ test("packaged General settings and Personalization persist across restart", asy
 		({ browser, page } = await connectToApp(firstPort));
 		captureConsoleErrors(page);
 		page.setDefaultTimeout(10_000);
-		await page.setViewportSize({ width: 1440, height: 900 });
+		await page.setViewportSize(viewport);
 		await waitForServerReady(page);
 		const settingsSession = page.locator('.session-button[aria-label="Settings session"]');
 		await settingsSession.click();
@@ -3756,26 +3779,23 @@ test("packaged General settings and Personalization persist across restart", asy
 		const fontMenuBox = await page.getByRole("listbox", { name: "Chat 字体", exact: true }).boundingBox();
 		expect(fontMenuBox).not.toBeNull();
 		expect(fontMenuBox!.x).toBeGreaterThanOrEqual(0);
-		expect(fontMenuBox!.x + fontMenuBox!.width).toBeLessThanOrEqual(1_440);
-		expect(fontMenuBox!.y + fontMenuBox!.height).toBeLessThanOrEqual(900);
+		expect(fontMenuBox!.x + fontMenuBox!.width).toBeLessThanOrEqual(viewport.width);
+		expect(fontMenuBox!.y + fontMenuBox!.height).toBeLessThanOrEqual(viewport.height);
 		await page.getByRole("option", { name: "系统无衬线", exact: true }).click();
 		await page.getByRole("button", { name: "Code 字体", exact: true }).click();
 		await page.getByRole("option", { name: "系统衬线", exact: true }).click();
-		const fixedLayoutBeforeFontSizeChange = await page.evaluate(() => ({
+		const measureFixedSettingsLayout = () => page!.evaluate(() => ({
 			settingsWidth: document.querySelector(".settings-dialog")?.getBoundingClientRect().width,
 			sidebarWidth: document.querySelector(".settings-sidebar")?.getBoundingClientRect().width,
 			controlHeight: document.querySelector('[aria-label="内容字号"]')?.getBoundingClientRect().height,
 		}));
+		const fixedLayoutBeforeFontSizeChange = await measureFixedSettingsLayout();
 		await page.getByRole("button", { name: "内容字号", exact: true }).click();
 		await page.getByRole("option", { name: "20 px", exact: true }).click();
 		await expect.poll(() => page!.evaluate(() =>
 			getComputedStyle(document.documentElement).getPropertyValue("--content-font-size").trim(),
 		)).toBe("20px");
-		expect(await page.evaluate(() => ({
-			settingsWidth: document.querySelector(".settings-dialog")?.getBoundingClientRect().width,
-			sidebarWidth: document.querySelector(".settings-sidebar")?.getBoundingClientRect().width,
-			controlHeight: document.querySelector('[aria-label="内容字号"]')?.getBoundingClientRect().height,
-		}))).toEqual(fixedLayoutBeforeFontSizeChange);
+		expect(await measureFixedSettingsLayout()).toEqual(fixedLayoutBeforeFontSizeChange);
 		await page.getByRole("button", { name: "减少动效", exact: true }).click();
 		expect(await page.locator("html").getAttribute("data-motion")).toBe("reduced");
 		const fonts = await page.evaluate(() => ({
@@ -3797,7 +3817,7 @@ test("packaged General settings and Personalization persist across restart", asy
 			),
 		).toBe(true);
 		await expect(page.getByRole("button", { name: "深色", exact: true })).toHaveAttribute("aria-pressed", "true");
-		await page.screenshot({ animations: "disabled", path: path.join(qaDir, "general-dark-1440x900.png") });
+		await page.screenshot({ animations: "disabled", path: path.join(qaDir, "general-dark-1280x840.png") });
 
 		phase = "configuring and revealing web search credentials";
 		const searchSection = page.locator(".web-search-section");
@@ -3816,7 +3836,7 @@ test("packaged General settings and Personalization persist across restart", asy
 		await searchSection.getByRole("button", { name: "隐藏 API Key", exact: true }).click();
 		await expect(searchApiKey).toHaveValue("");
 		await searchSection.scrollIntoViewIfNeeded();
-		await page.screenshot({ animations: "disabled", path: path.join(qaDir, "web-search-dark-1440x900.png") });
+		await page.screenshot({ animations: "disabled", path: path.join(qaDir, "web-search-dark-1280x840.png") });
 
 		phase = "saving global instructions without reloading the open session";
 		const statusBefore = await page.evaluate(async (sessionId) =>
@@ -3832,19 +3852,30 @@ test("packaged General settings and Personalization persist across restart", asy
 			(globalThis as unknown as { metis: MetisDesktopApi }).metis.getSessionStatus({ sessionId }), CHAT_ACTIVE_ID);
 		expect(statusAfter).toEqual(statusBefore);
 		await instructions.focus();
-		await page.screenshot({ animations: "disabled", path: path.join(qaDir, "personalization-dark-1440x900.png") });
+		await page.screenshot({ animations: "disabled", path: path.join(qaDir, "personalization-dark-1280x840.png") });
+
+		phase = "checking flat Memory engine choices";
+		await page.getByRole("button", { name: "记忆", exact: true }).click();
+		await expect(page.getByRole("heading", { name: "记忆", exact: true })).toBeVisible();
+		const memoryGrid = page.locator(".memory-engine-grid");
+		await expect(memoryGrid).toHaveCSS("gap", "0px");
+		await expect(memoryGrid.locator(".memory-engine-card").first()).toHaveCSS("border-radius", "0px");
+		await expect(memoryGrid.locator(".memory-engine-card").nth(1)).toHaveCSS("border-left-width", "1px");
+		await page.screenshot({ animations: "disabled", path: path.join(qaDir, "memory-dark-1280x840.png") });
 
 		phase = "capturing matched light settings";
 		await page.getByRole("button", { name: "通用", exact: true }).click();
 		await page.getByRole("button", { name: "浅色", exact: true }).click();
 		await expect(page.getByRole("button", { name: "浅色", exact: true })).toHaveAttribute("aria-pressed", "true");
-		await page.screenshot({ animations: "disabled", path: path.join(qaDir, "general-light-1440x900.png") });
+		await page.screenshot({ animations: "disabled", path: path.join(qaDir, "general-light-1280x840.png") });
 		await page.locator(".web-search-section").scrollIntoViewIfNeeded();
-		await page.screenshot({ animations: "disabled", path: path.join(qaDir, "web-search-light-1440x900.png") });
+		await page.screenshot({ animations: "disabled", path: path.join(qaDir, "web-search-light-1280x840.png") });
+		await page.getByRole("button", { name: "记忆", exact: true }).click();
+		await page.screenshot({ animations: "disabled", path: path.join(qaDir, "memory-light-1280x840.png") });
 		await page.getByRole("button", { name: "个性化", exact: true }).click();
 		await expect(page.getByRole("textbox", { name: "全局指令", exact: true })).toHaveValue("Prefer concise answers.");
 		await page.getByRole("textbox", { name: "全局指令", exact: true }).focus();
-		await page.screenshot({ animations: "disabled", path: path.join(qaDir, "personalization-light-1440x900.png") });
+		await page.screenshot({ animations: "disabled", path: path.join(qaDir, "personalization-light-1280x840.png") });
 		await page.getByRole("button", { name: "返回应用", exact: true }).click();
 		await expect(settingsSession).toHaveAttribute("aria-current", "page");
 
@@ -3857,7 +3888,7 @@ test("packaged General settings and Personalization persist across restart", asy
 		({ browser, page } = await connectToApp(restartPort));
 		captureConsoleErrors(page);
 		page.setDefaultTimeout(10_000);
-		await page.setViewportSize({ width: 1440, height: 900 });
+		await page.setViewportSize(viewport);
 		await waitForServerReady(page);
 		await expect(page.getByRole("button", { name: "新建任务", exact: true })).toBeVisible();
 		expect(await page.evaluate(() => document.documentElement.lang)).toBe("zh-CN");
@@ -3889,6 +3920,22 @@ test("packaged General settings and Personalization persist across restart", asy
 		expect(restartedFonts.code).toContain("Songti SC");
 		await page.getByRole("button", { name: "个性化", exact: true }).click();
 		await expect(page.getByRole("textbox", { name: "全局指令", exact: true })).toHaveValue("Prefer concise answers.");
+		phase = "checking keyboard containment and 200 percent zoom-equivalent reflow";
+		await page.setViewportSize({ width: viewport.width / 2, height: viewport.height / 2 });
+		const settingsDialog = page.getByRole("dialog", { name: "设置", exact: true });
+		const settingsDialogBox = await settingsDialog.boundingBox();
+		expect(settingsDialogBox).not.toBeNull();
+		expect(settingsDialogBox!.x).toBeGreaterThanOrEqual(0);
+		expect(settingsDialogBox!.y).toBeGreaterThanOrEqual(0);
+		expect(settingsDialogBox!.x + settingsDialogBox!.width).toBeLessThanOrEqual(viewport.width / 2);
+		expect(settingsDialogBox!.y + settingsDialogBox!.height).toBeLessThanOrEqual(viewport.height / 2);
+		expect(await settingsDialog.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+		await page.keyboard.press("Tab");
+		expect(await page.evaluate(() => document.activeElement?.closest(".settings-dialog") !== null)).toBe(true);
+		await page.screenshot({
+			animations: "disabled",
+			path: path.join(qaDir, "personalization-light-200pct-reflow-640x420.png"),
+		});
 		expect(consoleErrors).toEqual([]);
 	} catch (error) {
 		const bodyText = await page?.locator("body").innerText().catch(() => "renderer unavailable");

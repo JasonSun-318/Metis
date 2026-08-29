@@ -65,8 +65,13 @@ describe("Code transcript visual contract", () => {
 	});
 
 	it("keeps the runtime spinner the same height as its status text", () => {
-		expect(rule(".turn-runtime-status").fontSize).toBe("12px");
+		expect(rule(".turn-runtime-status").fontSize).toBe("var(--chat-meta-size)");
+		expect(rule(".turn-runtime-status").lineHeight).toBe("1.4");
 		expect(rule(".turn-runtime-spinner").getPropertyValue("--uib-size")).toBe("1em");
+	});
+
+	it("scales raw Markdown HTML with the selected content size", () => {
+		expect(rule(".markdown-raw-html").fontSize).toBe("var(--code-mono-size)");
 	});
 
 	it("fixes the plan card scroll viewport", () => {

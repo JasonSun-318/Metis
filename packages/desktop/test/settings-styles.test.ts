@@ -6,22 +6,46 @@ import { describe, expect, it } from "vitest";
 
 const css = readFileSync(path.join(process.cwd(), "src/renderer/styles/app.css"), "utf8");
 
+let parsedRules: CSSStyleRule[] | null = null;
+function rule(selector: string): CSSStyleDeclaration {
+	if (!parsedRules) {
+		const style = document.createElement("style");
+		style.textContent = css;
+		document.head.replaceChildren(style);
+		parsedRules = Array.from(style.sheet?.cssRules ?? []) as CSSStyleRule[];
+	}
+	const match = parsedRules.find((candidate) => candidate.selectorText === selector);
+	if (!match) throw new Error(`Missing CSS rule: ${selector}`);
+	return match.style;
+}
+
 describe("Settings visual states", () => {
 	it("uses restrained overlays and a flatter content hierarchy", () => {
-		expect(css).toContain("background: rgb(0 0 0 / 46%); backdrop-filter: blur(4px)");
-		expect(css).toContain(
-			".model-provider-grid { display: grid; min-height: 0; align-content: start; gap: 10px; margin-top: 4px; grid-template-columns: repeat(2, minmax(0, 1fr)); }",
-		);
-		expect(css).toContain(
-			".usage-detail-card { border: 0; border-radius: 0; background: transparent; padding: 4px 16px; }",
-		);
-		expect(css).toContain(".model-provider-card small { color: var(--text-10);");
-		expect(css).toContain(".usage-metric-card small { color: var(--text-10);");
-		expect(css).toContain(
-			".usage-chart-axis { display: flex; justify-content: space-between; color: var(--text-10);",
-		);
-		expect(css).toContain(".usage-detail-card li small { color: var(--text-09); }");
-		expect(css).toContain(".memory-engine-card-desc { margin: 0; color: var(--text-10);");
+		expect(rule(".settings-backdrop").background).toBe("rgba(0, 0, 0, 0.46)");
+		expect(rule(".settings-backdrop").backdropFilter).toBe("blur(4px)");
+		expect(rule(".model-provider-grid").gridTemplateColumns).toBe("repeat(2, minmax(0, 1fr))");
+		expect(rule(".usage-detail-card").borderWidth).toBe("0px");
+		expect(rule(".usage-detail-card").borderRadius).toBe("0px");
+		expect(rule(".usage-detail-card").background).toBe("transparent");
+		expect(rule(".usage-detail-card").padding).toBe("4px 16px");
+		expect(rule(".model-provider-card small").color).toBe("var(--text-10)");
+		expect(rule(".usage-metric-card small").color).toBe("var(--text-10)");
+		expect(rule(".usage-chart-axis").color).toBe("var(--text-10)");
+		expect(rule(".usage-chart-axis").fontSize).toBe("11px");
+		expect(rule(".usage-detail-card li small").color).toBe("var(--text-09)");
+		expect(rule(".memory-engine-card-desc").color).toBe("var(--text-10)");
+		expect(rule(".profile-section-heading small").color).toBe("var(--text-09)");
+		expect(rule(".profile-section-heading small").fontSize).toBe("11px");
+	});
+
+	it("groups Memory engines as two flat choices inside one shared surface", () => {
+		expect(rule(".memory-engine-grid").gap).toBe("0px");
+		expect(rule(".memory-engine-grid").background).toBe("var(--surface-02)");
+		expect(rule(".memory-engine-grid").padding).toBe("0px");
+		expect(rule(".memory-engine-card").borderWidth).toBe("0px");
+		expect(rule(".memory-engine-card").borderRadius).toBe("0px");
+		expect(rule(".memory-engine-card").background).toBe("transparent");
+		expect(rule(".memory-engine-card + .memory-engine-card").borderLeft).toBe("1px solid var(--border-weak)");
 	});
 
 	it("keeps API key text clear of the reveal control", () => {
