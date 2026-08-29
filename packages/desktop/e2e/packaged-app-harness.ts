@@ -1,6 +1,6 @@
-import { type ChildProcess, spawnSync } from "node:child_process";
+import { type ChildProcess, spawn, spawnSync } from "node:child_process";
 import { once } from "node:events";
-import { createServer, type Server } from "node:http";
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import path from "node:path";
 import { chromium, expect, type Browser, type Page } from "@playwright/test";
 import type { MetisDesktopApi } from "../src/shared/desktop-api.ts";
@@ -34,6 +34,110 @@ export function packagedAsar(): string {
 	return process.platform === "darwin"
 		? path.join(packageRoot, "Metis.app", "Contents", "Resources", "app.asar")
 		: path.join(packageRoot, "resources", "app.asar");
+}
+
+export interface PackagedDesktopLaunchOptions {
+	readonly executable: string;
+	readonly debuggingPort: number;
+	readonly userDataDir: string;
+	readonly projectDir: string;
+	readonly agentDir: string;
+	readonly homeDir: string;
+	readonly diagnostics: string[];
+	readonly extraArguments?: readonly string[];
+}
+
+export function launchPackagedDesktop(options: PackagedDesktopLaunchOptions): ChildProcess {
+	const child = spawn(options.executable, [
+		`--remote-debugging-port=${options.debuggingPort}`,
+		`--user-data-dir=${options.userDataDir}`,
+		...(options.extraArguments ?? []),
+	], {
+		cwd: options.projectDir,
+		env: {
+			...process.env,
+			ALL_PROXY: "",
+			METIS_CODING_AGENT_DIR: options.agentDir,
+			HOME: options.homeDir,
+			HTTP_PROXY: "",
+			HTTPS_PROXY: "",
+			NO_PROXY: "127.0.0.1,localhost",
+			USERPROFILE: options.homeDir,
+		},
+		stdio: ["ignore", "pipe", "pipe"],
+	});
+	child.stdout?.on("data", (chunk) => options.diagnostics.push(String(chunk)));
+	child.stderr?.on("data", (chunk) => options.diagnostics.push(String(chunk)));
+	return child;
+}
+
+export interface OpenAiChatMessage {
+	readonly role?: string;
+	readonly content?: unknown;
+	readonly tool_call_id?: string;
+}
+
+export interface OpenAiChatRequest {
+	readonly messages?: readonly OpenAiChatMessage[];
+}
+
+export async function readOpenAiChatRequest(request: IncomingMessage): Promise<OpenAiChatRequest> {
+	let body = "";
+	for await (const chunk of request) body += chunk;
+	return JSON.parse(body) as OpenAiChatRequest;
+}
+
+function writeOpenAiChunk(response: ServerResponse, chunk: object): void {
+	response.writeHead(200, { "content-type": "text/event-stream" });
+	response.end(`data: ${JSON.stringify(chunk)}\n\ndata: [DONE]\n\n`);
+}
+
+export function respondWithToolCall(
+	response: ServerResponse,
+	input: { readonly callId: string; readonly name: string; readonly arguments: object },
+): void {
+	writeOpenAiChunk(response, {
+		id: input.callId,
+		object: "chat.completion.chunk",
+		created: 1,
+		model: "browser-agent-fixture",
+		choices: [{
+			index: 0,
+			delta: {
+				role: "assistant",
+				tool_calls: [{
+					index: 0,
+					id: input.callId,
+					type: "function",
+					function: { name: input.name, arguments: JSON.stringify(input.arguments) },
+				}],
+			},
+			finish_reason: "tool_calls",
+		}],
+	});
+}
+
+export function respondWithText(response: ServerResponse, text: string): void {
+	writeOpenAiChunk(response, {
+		id: `fixture-${Date.now()}`,
+		object: "chat.completion.chunk",
+		created: 1,
+		model: "browser-agent-fixture",
+		choices: [{ index: 0, delta: { role: "assistant", content: text }, finish_reason: "stop" }],
+	});
+}
+
+export function messageText(value: unknown): string {
+	if (typeof value === "string") return value;
+	if (Array.isArray(value)) return value.map(messageText).join("\n");
+	if (!value || typeof value !== "object") return "";
+	const record = value as Record<string, unknown>;
+	return typeof record.text === "string" ? record.text : messageText(record.content);
+}
+
+export function latestToolResult(messages: readonly OpenAiChatMessage[]): string {
+	const message = [...messages].reverse().find((candidate) => candidate.role === "tool");
+	return messageText(message?.content);
 }
 
 export async function listen(server: Server): Promise<number> {

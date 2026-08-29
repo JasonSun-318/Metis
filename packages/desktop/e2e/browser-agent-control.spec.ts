@@ -1,0 +1,299 @@
+import { existsSync } from "node:fs";
+import { expect, test } from "@playwright/test";
+import type { MetisDesktopApi } from "../src/shared/desktop-api.ts";
+import {
+	closeBrowserAgentApp,
+	createBrowserAgentEnvironment,
+	createBrowserAgentFixture,
+	elementId,
+	launchBrowserAgentApp,
+	observationInput,
+	parseToolJson,
+	removeBrowserAgentEnvironment,
+	sendFixturePrompt,
+	type BrowserAgentFixture,
+	type RunningBrowserAgentApp,
+} from "./browser-agent-fixture.ts";
+import { packagedExecutable } from "./packaged-app-harness.ts";
+
+function tabs(result: string) {
+	const value = parseToolJson(result);
+	if (!Array.isArray(value.tabs)) throw new Error(`Expected browser tabs: ${result}`);
+	return value.tabs as Array<Record<string, unknown>>;
+}
+
+function profileBrowser(result: string, profileId: string): string {
+	const tab = tabs(result).find((candidate) => candidate.profileId === profileId);
+	if (!tab) throw new Error(`Profile ${profileId} had no browser tab: ${result}`);
+	return String(tab.browserId);
+}
+
+function p95(values: readonly number[]): number {
+	if (values.length === 0) throw new Error("No browser-tool durations were captured");
+	const ordered = [...values].sort((left, right) => left - right);
+	return ordered[Math.max(0, Math.ceil(ordered.length * 0.95) - 1)]!;
+}
+
+const PERFORMANCE_WARMUPS = 5;
+const PERFORMANCE_OBSERVATIONS = 35;
+const PERFORMANCE_ACTIONS = 100;
+
+async function waitForDone(app: RunningBrowserAgentApp, marker: string): Promise<void> {
+	await expect(app.page.getByText(`done:${marker}`, { exact: true })).toBeVisible({ timeout: 60_000 });
+}
+
+test("packaged agent controls accessible pages, frames, screenshots, popups, stale state, caps, and budgets", async () => {
+	test.setTimeout(360_000);
+	expect(existsSync(packagedExecutable()), `Package the desktop app first: ${packagedExecutable()}`).toBe(true);
+	const fixture = await createBrowserAgentFixture();
+	const environment = await createBrowserAgentEnvironment(fixture.providerPort);
+	let app: RunningBrowserAgentApp | undefined;
+	let mainBrowserId = "";
+	let currentObservation = "";
+	let controlState = "";
+	let staleObservation = "";
+	let performanceState = "";
+	let popupActResult = "";
+	let popupObservation = "";
+	let popupSourceId = "";
+	try {
+		fixture.setScript("ordinary-control", async ({ step, lastResult, origin }) => {
+			if (step === 0) return { tool: "browser_tabs", arguments: { action: "open" } };
+			if (step === 1) {
+				mainBrowserId = String(tabs(lastResult)[0]?.browserId);
+				return { tool: "browser_navigate", arguments: { browserId: mainBrowserId, action: "goto", url: `${origin}/controls` } };
+			}
+			if (step === 2) return { tool: "browser_observe", arguments: { browserId: mainBrowserId, mode: "both" } };
+			if (step >= 3 && step <= 6) currentObservation = lastResult;
+			if (step === 3) controlState = lastResult;
+			if (step === 3) {
+				const input = observationInput(currentObservation);
+				return { tool: "browser_act", arguments: { ...input, observation: undefined, intent: "Increment fixture counter", risk: "ordinary", action: { type: "click", target: { elementId: elementId(parseToolJson(controlState).state, "Increment") } } } };
+			}
+			if (step === 4) {
+				const input = observationInput(currentObservation);
+				return { tool: "browser_act", arguments: { ...input, observation: undefined, intent: "Enter fixture message", risk: "ordinary", action: { type: "type", elementId: elementId(parseToolJson(controlState).state, "Message"), text: "typed-marker-e2e", replace: true } } };
+			}
+			if (step === 5) {
+				const input = observationInput(currentObservation);
+				return { tool: "browser_act", arguments: { ...input, observation: undefined, intent: "Commit fixture message", risk: "ordinary", action: { type: "press", key: "Enter" } } };
+			}
+			if (step === 6) {
+				const input = observationInput(currentObservation);
+				return { tool: "browser_act", arguments: { ...input, observation: undefined, intent: "Choose dark fixture theme", risk: "ordinary", action: { type: "select", elementId: elementId(parseToolJson(controlState).state, "Theme"), value: "dark" } } };
+			}
+			if (step === 7) {
+				return { tool: "browser_tabs", arguments: { action: "open" } };
+			}
+			if (step === 8) {
+				const popupSource = tabs(lastResult).find((candidate) => candidate.browserId !== mainBrowserId);
+				if (!popupSource) throw new Error(`Popup source tab was not opened: ${lastResult}`);
+				popupSourceId = String(popupSource.browserId);
+				return { tool: "browser_navigate", arguments: { browserId: popupSourceId, action: "goto", url: `${origin}/popup-fixture` } };
+			}
+			if (step === 9) {
+				popupObservation = lastResult;
+				const input = observationInput(lastResult);
+				return { tool: "browser_act", arguments: { ...input, observation: undefined, intent: "Open mock OAuth popup", risk: "ordinary", action: { type: "click", target: { elementId: elementId(input.observation.state, "Open OAuth popup") } } } };
+			}
+			if (step === 10) {
+				popupActResult = lastResult;
+				return { tool: "browser_tabs", arguments: { action: "list" } };
+			}
+			if (step === 11) {
+				const popup = tabs(lastResult).find((candidate) => String(candidate.url).includes("/oauth"));
+				if (!popup) throw new Error(`OAuth popup was not adopted. observation=${popupObservation} act=${popupActResult} tabs=${lastResult}`);
+				return { tool: "browser_observe", arguments: { browserId: String(popup.browserId), mode: "state" } };
+			}
+			if (step === 12) {
+				const input = observationInput(lastResult);
+				return { tool: "browser_act", arguments: { ...input, observation: undefined, intent: "Authorize mock OAuth", risk: "ordinary", action: { type: "click", target: { elementId: elementId(input.observation.state, "Authorize") } } } };
+			}
+			if (step === 13) return { tool: "browser_tabs", arguments: { action: "list" } };
+			if (step === 14) return { tool: "browser_observe", arguments: { browserId: popupSourceId, mode: "state" } };
+			if (step === 15) return { tool: "browser_tabs", arguments: { action: "close", browserId: popupSourceId } };
+			if (step === 16) {
+				return { tool: "browser_observe", arguments: { browserId: mainBrowserId, mode: "state" } };
+			}
+			if (step === 17) {
+				controlState = lastResult;
+				const input = observationInput(lastResult);
+				return { tool: "browser_act", arguments: { ...input, observation: undefined, intent: "Scroll fixture", risk: "ordinary", action: { type: "scroll", direction: "down", pages: 1, elementId: elementId(input.observation.state, "Bottom action") } } };
+			}
+			if (step === 18) {
+				const input = observationInput(lastResult);
+				return { tool: "browser_act", arguments: { ...input, observation: undefined, intent: "Use bottom fixture action", risk: "ordinary", action: { type: "click", target: { elementId: elementId(parseToolJson(controlState).state, "Bottom action") } } } };
+			}
+			if (step === 19) return { tool: "browser_observe", arguments: { browserId: mainBrowserId, mode: "state" } };
+			if (step === 20) {
+				const input = observationInput(lastResult);
+				return { tool: "browser_act", arguments: { ...input, observation: undefined, intent: "Use cross-origin frame action", risk: "ordinary", action: { type: "click", target: { elementId: elementId(input.observation.state, "Frame action") } } } };
+			}
+			if (step === 21) return { tool: "browser_tabs", arguments: { action: "list" } };
+			return { text: "done:ordinary-control" };
+		});
+
+		fixture.setScript("performance-cycle", ({ step, lastResult }) => {
+			if (step < PERFORMANCE_OBSERVATIONS) {
+				return { tool: "browser_observe", arguments: { browserId: mainBrowserId, mode: "state" } };
+			}
+			if (step < PERFORMANCE_OBSERVATIONS + PERFORMANCE_ACTIONS) {
+				if (step === PERFORMANCE_OBSERVATIONS) performanceState = lastResult;
+				const input = observationInput(lastResult);
+				return { tool: "browser_act", arguments: { ...input, observation: undefined, intent: "Measure local fixture action", risk: "ordinary", action: { type: "click", target: { elementId: elementId(parseToolJson(performanceState).state, "Increment") } } } };
+			}
+			return { text: "done:performance-cycle" };
+		});
+
+		fixture.setScript("stale-observe", ({ step, lastResult, origin }) => {
+			if (step === 0) return { tool: "browser_navigate", arguments: { browserId: mainBrowserId, action: "goto", url: `${origin}/stale?v=1` } };
+			if (step === 1) staleObservation = lastResult;
+			return { text: "done:stale-observe" };
+		});
+		fixture.setScript("stale-act", ({ step }) => {
+			if (step === 0) {
+				const input = observationInput(staleObservation);
+				return { tool: "browser_act", arguments: { ...input, observation: undefined, intent: "Exercise stale protection", risk: "ordinary", action: { type: "click", target: { elementId: elementId(input.observation.state, "Stale action") } } } };
+			}
+			return { text: "done:stale-act" };
+		});
+
+		let capCount = 0;
+		let attemptedOverflow = false;
+		fixture.setScript("tab-cap", ({ step, lastResult }) => {
+			if (step === 0) return { tool: "browser_tabs", arguments: { action: "list" } };
+			if (lastResult.startsWith("{")) capCount = tabs(lastResult).length;
+			if (capCount < 16) return { tool: "browser_tabs", arguments: { action: "open" } };
+			if (!attemptedOverflow) {
+				attemptedOverflow = true;
+				return { tool: "browser_tabs", arguments: { action: "open" } };
+			}
+			if (step > 1 && !lastResult.startsWith("{")) return { tool: "browser_tabs", arguments: { action: "list" } };
+			return { text: "done:tab-cap" };
+		});
+
+		app = await launchBrowserAgentApp(environment);
+		await sendFixturePrompt(app.page, "ordinary-control");
+		await waitForDone(app, "ordinary-control");
+		await expect.poll(() => fixture.calls.find((call) => call.marker === "ordinary-control" && call.name === "browser_observe")?.result).toBeTruthy();
+		const ordinaryRequests = fixture.requests.filter((request) => request.includes("ordinary-control"));
+		expect(ordinaryRequests.some((request) => request.includes("data:image/jpeg;base64"))).toBe(true);
+		expect(Math.max(...ordinaryRequests.map((request) => Buffer.byteLength(request, "utf8")))).toBeLessThan(8 * 1024 * 1024);
+		const embedded = app.browser.contexts().flatMap((context) => context.pages()).find((page) => page.url() === `${fixture.origin}/controls`);
+		if (!embedded) throw new Error("Controlled fixture target was not exposed");
+		await expect(embedded.locator("#count")).toHaveText("Count: 1");
+		await expect(embedded.locator("#message-status")).toHaveText("Message: typed-marker-e2e");
+		await expect(embedded.locator("#theme-status")).toHaveText("Theme: dark");
+		await expect(embedded.locator("#bottom-status")).toHaveText("Bottom: complete");
+		await expect(embedded.locator("iframe").contentFrame().locator("#frame-status")).toHaveText("Frame: complete");
+		expect(
+			fixture.calls.some(
+				(call) => call.marker === "ordinary-control" && call.name === "browser_observe" && call.result?.includes("OAuth: complete"),
+			),
+		).toBe(true);
+		expect(fixture.calls.filter((call) => call.marker === "ordinary-control" && call.name === "browser_tabs").at(-1)?.result).toContain(mainBrowserId);
+
+		await sendFixturePrompt(app.page, "performance-cycle");
+		await waitForDone(app, "performance-cycle");
+		const observationDurations = fixture.calls
+			.filter((call) => call.marker === "performance-cycle" && call.name === "browser_observe" && call.completedAt)
+			.map((call) => call.completedAt! - call.issuedAt);
+		const actionDurations = fixture.calls
+			.filter((call) => call.marker === "performance-cycle" && call.name === "browser_act" && call.completedAt)
+			.map((call) => call.completedAt! - call.issuedAt);
+		expect(observationDurations).toHaveLength(PERFORMANCE_OBSERVATIONS);
+		expect(actionDurations).toHaveLength(PERFORMANCE_ACTIONS);
+		expect(p95(observationDurations.slice(PERFORMANCE_WARMUPS))).toBeLessThan(1_000);
+		expect(p95(actionDurations.slice(PERFORMANCE_WARMUPS))).toBeLessThan(1_500);
+		await expect(embedded.locator("#count")).toHaveText("Count: 101");
+
+		await sendFixturePrompt(app.page, "stale-observe");
+		await waitForDone(app, "stale-observe");
+		const stalePage = app.browser.contexts().flatMap((context) => context.pages()).find((page) => page.url().includes("/stale?v=1"));
+		if (!stalePage) throw new Error("Stale-state target was not exposed");
+		await stalePage.goto(`${fixture.origin}/stale?v=2`);
+		await sendFixturePrompt(app.page, "stale-act");
+		await waitForDone(app, "stale-act");
+		const staleResult = fixture.calls.find((call) => call.marker === "stale-act")?.result ?? "";
+		expect(staleResult).toContain("stale");
+		expect(fixture.staleActionCount()).toBe(0);
+
+		await sendFixturePrompt(app.page, "tab-cap");
+		await waitForDone(app, "tab-cap");
+		const capResults = fixture.calls.filter((call) => call.marker === "tab-cap");
+		expect(capResults.some((call) => call.result === "OVERLOADED")).toBe(true);
+		expect(tabs(capResults.at(-1)?.result ?? "")).toHaveLength(16);
+		expect(stalePage.isClosed()).toBe(false);
+	} catch (error) {
+		throw new Error(`${error instanceof Error ? error.message : String(error)}\ntrace=${JSON.stringify(fixture.calls, null, 2).slice(-24_000)}\n${environment.diagnostics.join("").slice(-12_000)}`);
+	} finally {
+		if (app) await closeBrowserAgentApp(app);
+		await fixture.close();
+		await removeBrowserAgentEnvironment(environment);
+	}
+});
+
+test("packaged profiles isolate cookies and persist them across restart", async () => {
+	test.setTimeout(120_000);
+	const importedProfileId = "20000000-0000-4000-8000-000000000001";
+	const defaultProfileId = "00000000-0000-4000-8000-000000000001";
+	const fixture: BrowserAgentFixture = await createBrowserAgentFixture();
+	const environment = await createBrowserAgentEnvironment(fixture.providerPort, [{
+		profileId: importedProfileId,
+		name: "Chrome – Work",
+		sourceProfileId: "Profile 1",
+	}]);
+	let app: RunningBrowserAgentApp | undefined;
+	let defaultBrowserId = "";
+	let workBrowserId = "";
+	try {
+		fixture.setScript("profile-seed", ({ step, lastResult, origin }) => {
+			if (step === 0) return { tool: "browser_tabs", arguments: { action: "open", profileId: defaultProfileId } };
+			if (step === 1) {
+				defaultBrowserId = profileBrowser(lastResult, defaultProfileId);
+				return { tool: "browser_navigate", arguments: { browserId: defaultBrowserId, action: "goto", url: `${origin}/set-cookie?value=default` } };
+			}
+			if (step === 2) return { tool: "browser_tabs", arguments: { action: "open", profileId: importedProfileId } };
+			if (step === 3) {
+				workBrowserId = profileBrowser(lastResult, importedProfileId);
+				return { tool: "browser_navigate", arguments: { browserId: workBrowserId, action: "goto", url: `${origin}/set-cookie?value=work` } };
+			}
+			return { text: "done:profile-seed" };
+		});
+		fixture.setScript("profile-check", ({ step, lastResult, origin }) => {
+			if (step === 0) return { tool: "browser_tabs", arguments: { action: "open", profileId: defaultProfileId } };
+			if (step === 1) {
+				defaultBrowserId = profileBrowser(lastResult, defaultProfileId);
+				return { tool: "browser_navigate", arguments: { browserId: defaultBrowserId, action: "goto", url: `${origin}/cookie` } };
+			}
+			if (step === 2) {
+				expect(lastResult).toContain("profile=default");
+				return { tool: "browser_tabs", arguments: { action: "open", profileId: importedProfileId } };
+			}
+			if (step === 3) {
+				workBrowserId = profileBrowser(lastResult, importedProfileId);
+				return { tool: "browser_navigate", arguments: { browserId: workBrowserId, action: "goto", url: `${origin}/cookie` } };
+			}
+			if (step === 4) {
+				expect(lastResult).toContain("profile=work");
+				expect(lastResult).not.toContain("profile=default");
+			}
+			return { text: "done:profile-check" };
+		});
+
+		app = await launchBrowserAgentApp(environment);
+		await sendFixturePrompt(app.page, "profile-seed");
+		await waitForDone(app, "profile-seed");
+		await closeBrowserAgentApp(app);
+		app = undefined;
+		app = await launchBrowserAgentApp(environment, { createSession: false });
+		await sendFixturePrompt(app.page, "profile-check");
+		await waitForDone(app, "profile-check");
+	} catch (error) {
+		throw new Error(`${error instanceof Error ? error.message : String(error)}\n${environment.diagnostics.join("").slice(-12_000)}`);
+	} finally {
+		if (app) await closeBrowserAgentApp(app);
+		await fixture.close();
+		await removeBrowserAgentEnvironment(environment);
+	}
+});

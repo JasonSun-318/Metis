@@ -153,6 +153,9 @@ async function stageRipgrepRuntime(buildPath: string, platform: string, arch: st
 const config: ForgeConfig = {
 	packagerConfig: {
 		asar: { unpackDir: "{.webpack/main/node_modules/node-pty,.webpack/main/native-tools}" },
+		// Electron Packager otherwise shares one global temp root. Concurrent
+		// packaging jobs can delete each other's staging trees mid-ASAR creation.
+		tmpdir: process.env.METIS_ELECTRON_PACKAGER_TMPDIR,
 		appBundleId: "ai.metis.desktop",
 		appCategoryType: "public.app-category.developer-tools",
 		extraResource: process.platform === "darwin" ? [path.join(desktopRoot, "assets", "metis.icns")] : [],

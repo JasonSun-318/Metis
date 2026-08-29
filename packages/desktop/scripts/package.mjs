@@ -1,5 +1,8 @@
 import { spawnSync } from "node:child_process";
+import { mkdtempSync, rmSync } from "node:fs";
 import { createRequire } from "node:module";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 function nativeArch() {
 	const machine = process.platform === "darwin"
@@ -18,6 +21,14 @@ if (!args.some((argument) => argument === "--arch" || argument.startsWith("--arc
 	args.push(`--arch=${nativeArch()}`);
 }
 const forge = createRequire(import.meta.url).resolve("@electron-forge/cli/dist/electron-forge.js");
-const result = spawnSync(process.execPath, [forge, command, ...args], { stdio: "inherit" });
-if (result.error) throw result.error;
-process.exitCode = result.status ?? 1;
+const packagerTempRoot = mkdtempSync(join(tmpdir(), "metis-electron-packager-"));
+try {
+	const result = spawnSync(process.execPath, [forge, command, ...args], {
+		stdio: "inherit",
+		env: { ...process.env, METIS_ELECTRON_PACKAGER_TMPDIR: packagerTempRoot },
+	});
+	if (result.error) throw result.error;
+	process.exitCode = result.status ?? 1;
+} finally {
+	rmSync(packagerTempRoot, { recursive: true, force: true });
+}
