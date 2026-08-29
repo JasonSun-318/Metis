@@ -339,6 +339,8 @@ function createHarness(options: {
 		closeBrowser: vi.fn().mockResolvedValue(undefined),
 		listBrowserDownloads: vi.fn().mockResolvedValue([]),
 		controlBrowserDownload: vi.fn().mockResolvedValue(undefined),
+		listBrowserHistory: vi.fn().mockResolvedValue([]),
+		clearBrowserHistory: vi.fn().mockResolvedValue(undefined),
 		subscribeBrowser: vi.fn((listener) => {
 			browserSubscribers.add(listener);
 			return () => browserSubscribers.delete(listener);

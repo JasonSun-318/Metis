@@ -7,6 +7,7 @@ import {
 	ArrowSquareOut,
 	ArrowUp,
 	Camera,
+	ClockCounterClockwise,
 	DotsThreeVertical,
 	DownloadSimple,
 	Folder,
@@ -29,6 +30,7 @@ import type {
 	DesktopBrowserState,
 	DesktopDownloadControlType,
 	DesktopDownloadItem,
+	DesktopHistoryEntry,
 } from "../../shared/desktop-api.ts";
 
 interface BrowserPanelProps {
@@ -49,6 +51,10 @@ function formatBytes(bytes: number): string {
 	}
 	const rounded = index === 0 ? value : value >= 100 ? Math.round(value) : Math.round(value * 10) / 10;
 	return `${rounded} ${units[index]}`;
+}
+
+function formatHistoryTime(visitedAt: number): string {
+	return new Date(visitedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
 function BrowserDownloadRow({
@@ -177,10 +183,13 @@ export function BrowserPanel({ api, browserId, onError, onState, visible }: Brow
 	const [notice, setNotice] = useState<string | null>(null);
 	const [downloads, setDownloads] = useState<readonly DesktopDownloadItem[]>([]);
 	const [downloadsOpen, setDownloadsOpen] = useState(false);
+	const [history, setHistory] = useState<readonly DesktopHistoryEntry[]>([]);
+	const [historyOpen, setHistoryOpen] = useState(false);
 	const anchorRef = useRef<HTMLDivElement>(null);
 	const findInputRef = useRef<HTMLInputElement>(null);
 	const moreRef = useRef<HTMLDivElement>(null);
 	const downloadsRef = useRef<HTMLDivElement>(null);
+	const historyRef = useRef<HTMLDivElement>(null);
 	const presentationRef = useRef("");
 	const boundsRef = useRef<DesktopBrowserBounds | null>(null);
 	const presentRef = useRef<(() => void) | null>(null);
@@ -211,6 +220,7 @@ export function BrowserPanel({ api, browserId, onError, onState, visible }: Brow
 		}
 		previewRequestRef.current += 1;
 		setMoreOpen(false);
+		setHistoryOpen(false);
 		if (state.url === "") {
 			setDownloadsOpen(true);
 			return;
@@ -242,6 +252,58 @@ export function BrowserPanel({ api, browserId, onError, onState, visible }: Brow
 		});
 	}
 
+	function closeHistory() {
+		previewRequestRef.current += 1;
+		setHistoryOpen(false);
+	}
+
+	function toggleHistory() {
+		if (historyOpen) {
+			closeHistory();
+			return;
+		}
+		previewRequestRef.current += 1;
+		setMoreOpen(false);
+		setDownloadsOpen(false);
+		if (state.url === "") {
+			setHistoryOpen(true);
+			return;
+		}
+		const request = ++previewRequestRef.current;
+		setPreviewBusy(true);
+		void (async () => {
+			try {
+				// ponytail: WebContentsView sits above React; use a static frame until a live native overlay is required.
+				const preview = await capturePreview(request);
+				if (preview) setPagePreview(preview);
+				setHistoryOpen(true);
+			} catch (cause) {
+				if (request !== previewRequestRef.current) return;
+				setStatus(translateRef.current("Browser action failed"));
+				onErrorRef.current(cause);
+			} finally {
+				if (request === previewRequestRef.current) setPreviewBusy(false);
+			}
+		})();
+	}
+
+	function openHistoryEntry(url: string) {
+		closeHistory();
+		setStatus(null);
+		void api.controlBrowser({ type: "navigate", browserId, url }).catch((cause) => {
+			setStatus(t("Browser could not load this page"));
+			onErrorRef.current(cause);
+		});
+	}
+
+	function clearBrowserHistoryEntries() {
+		setStatus(null);
+		void api.clearBrowserHistory().catch((cause) => {
+			setStatus(translateRef.current("Browser action failed"));
+			onErrorRef.current(cause);
+		});
+	}
+
 	async function capturePreview(request: number): Promise<string | null> {
 		const preview = await api.captureBrowserPreview({ browserId });
 		const image = new Image();
@@ -257,6 +319,7 @@ export function BrowserPanel({ api, browserId, onError, onState, visible }: Brow
 			return;
 		}
 		closeDownloads();
+		closeHistory();
 		if (state.url === "") {
 			setMoreOpen(true);
 			return;
@@ -393,7 +456,10 @@ export function BrowserPanel({ api, browserId, onError, onState, visible }: Brow
 				setDownloads(event.downloads);
 				return;
 			}
-			if (event.type === "history") return;
+			if (event.type === "history") {
+				setHistory(event.entries);
+				return;
+			}
 			if (event.type === "command") {
 				if (event.browserId === browserId && visibleRef.current) runCommand(event.command);
 				return;
@@ -406,6 +472,12 @@ export function BrowserPanel({ api, browserId, onError, onState, visible }: Brow
 		void api.listBrowserDownloads().then(
 			(listed) => {
 				if (active) setDownloads(listed);
+			},
+			() => undefined,
+		);
+		void api.listBrowserHistory().then(
+			(listed) => {
+				if (active) setHistory(listed);
 			},
 			() => undefined,
 		);
@@ -432,16 +504,18 @@ export function BrowserPanel({ api, browserId, onError, onState, visible }: Brow
 	useEffect(() => setZoomDraft(String(state.zoomPercent)), [state.zoomPercent]);
 
 	useEffect(() => {
-		if (!moreOpen && !downloadsOpen) return;
+		if (!moreOpen && !downloadsOpen && !historyOpen) return;
 		const close = (event: PointerEvent) => {
 			const target = event.target as Node;
 			if (!moreRef.current?.contains(target)) setMoreOpen(false);
 			if (!downloadsRef.current?.contains(target)) setDownloadsOpen(false);
+			if (!historyRef.current?.contains(target)) setHistoryOpen(false);
 		};
 		const escape = (event: KeyboardEvent) => {
 			if (event.key === "Escape") {
 				setMoreOpen(false);
 				setDownloadsOpen(false);
+				setHistoryOpen(false);
 			}
 		};
 		document.addEventListener("pointerdown", close);
@@ -450,7 +524,7 @@ export function BrowserPanel({ api, browserId, onError, onState, visible }: Brow
 			document.removeEventListener("pointerdown", close);
 			document.removeEventListener("keydown", escape);
 		};
-	}, [moreOpen, downloadsOpen]);
+	}, [moreOpen, downloadsOpen, historyOpen]);
 
 	useEffect(() => {
 		if (!visible || clearConfirmOpen) return;
@@ -523,9 +597,15 @@ export function BrowserPanel({ api, browserId, onError, onState, visible }: Brow
 
 	useLayoutEffect(() => {
 		shouldPresentRef.current =
-			visible && state.url !== "" && !moreOpen && !downloadsOpen && !clearConfirmOpen && status === null;
+			visible
+			&& state.url !== ""
+			&& !moreOpen
+			&& !downloadsOpen
+			&& !historyOpen
+			&& !clearConfirmOpen
+			&& status === null;
 		presentRef.current?.();
-	}, [clearConfirmOpen, downloadsOpen, moreOpen, state.url, status, visible]);
+	}, [clearConfirmOpen, downloadsOpen, historyOpen, moreOpen, state.url, status, visible]);
 
 	const control = (type: "back" | "forward" | "reload" | "open-external") => {
 		setStatus(null);
@@ -567,6 +647,52 @@ export function BrowserPanel({ api, browserId, onError, onState, visible }: Brow
 						<button aria-label={t("Open in default browser")} className="browser-address-open" disabled={state.url === ""} onClick={(event) => { event.preventDefault(); control("open-external"); }} type="button"><ArrowSquareOut aria-hidden="true" size={13} /></button>
 					</div>
 				</form>
+				<div className="browser-history" ref={historyRef}>
+					<button
+						aria-busy={previewBusy}
+						aria-expanded={historyOpen}
+						aria-label={t("History")}
+						className="browser-toolbar-button"
+						disabled={previewBusy}
+						onClick={toggleHistory}
+						type="button"
+					>
+						<ClockCounterClockwise aria-hidden="true" size={14} />
+					</button>
+					{historyOpen && (
+						<div aria-label={t("History")} className="browser-downloads-menu" role="menu">
+							<div className="browser-downloads-header">
+								<span>{t("History")}</span>
+								<button
+									className="browser-history-clear"
+									disabled={history.length === 0}
+									onClick={clearBrowserHistoryEntries}
+									role="menuitem"
+									type="button"
+								>
+									{t("Clear history")}
+								</button>
+							</div>
+							{history.length === 0 ? (
+								<p className="browser-downloads-empty">{t("No history yet")}</p>
+							) : (
+								history.map((entry) => (
+									<button
+										className="browser-history-row"
+										key={entry.entryId}
+										onClick={() => openHistoryEntry(entry.url)}
+										role="menuitem"
+										title={entry.url}
+										type="button"
+									>
+										<span className="browser-download-name">{entry.title}</span>
+										<span className="browser-download-meta">{formatHistoryTime(entry.visitedAt)} · {entry.url}</span>
+									</button>
+								))
+							)}
+						</div>
+					)}
+				</div>
 				<div className="browser-downloads" ref={downloadsRef}>
 					<button
 						aria-busy={previewBusy}

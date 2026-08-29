@@ -93,6 +93,8 @@ interface ClientBrokerOptions {
 		| "closeAll"
 		| "listDownloads"
 		| "controlDownload"
+		| "listHistory"
+		| "clearHistory"
 		| "onEvent"
 	>;
 	readonly workspaceFiles?: Pick<
@@ -235,6 +237,8 @@ export class ClientBroker {
 		| "closeAll"
 		| "listDownloads"
 		| "controlDownload"
+		| "listHistory"
+		| "clearHistory"
 		| "onEvent"
 	>;
 	private readonly workspaceFiles: Pick<
@@ -324,6 +328,8 @@ export class ClientBroker {
 			controlDownload: async () => {
 				throw new Error("Browser is unavailable");
 			},
+			listHistory: () => [],
+			clearHistory: async () => undefined,
 			onEvent: () => () => undefined,
 		};
 		this.workspaceFiles = options.workspaceFiles ?? {
@@ -804,6 +810,8 @@ export class ClientBroker {
 		this.register(DESKTOP_IPC_CHANNELS.controlBrowserDownload, 1, async (_event, [input]) => {
 			await this.browserManager.controlDownload(validateBrowserDownloadControlInput(input));
 		});
+		this.register(DESKTOP_IPC_CHANNELS.listBrowserHistory, 0, async () => this.browserManager.listHistory());
+		this.register(DESKTOP_IPC_CHANNELS.clearBrowserHistory, 0, async () => this.browserManager.clearHistory());
 		this.register(DESKTOP_IPC_CHANNELS.closeBrowser, 1, async (_event, [input]) => {
 			this.browserManager.close(validateCloseBrowserInput(input).browserId);
 		});

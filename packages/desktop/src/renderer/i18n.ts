@@ -991,6 +991,9 @@ const zhCN = {
 	"Cancel download": "取消下载",
 	"Retry download": "重新下载",
 	"Remove from list": "从列表中移除",
+	History: "历史记录",
+	"No history yet": "暂无历史记录",
+	"Clear history": "清除历史记录",
 	"Add tool": "添加工具",
 	"Close {{name}}": "关闭{{name}}",
 	"Resize tools sidebar": "调整工具侧边栏宽度",
@@ -1216,7 +1219,6 @@ const zhCN = {
 	"Run now": "立即运行",
 	"The selected model is no longer available. Edit the task and choose a configured model.":
 		"所选模型已不可用，请编辑任务并选择已配置的模型。",
-	History: "历史记录",
 	"Loading run history…": "正在加载运行记录…",
 	"No runs yet.": "暂无运行记录。",
 	"Load older runs": "加载更早的运行记录",

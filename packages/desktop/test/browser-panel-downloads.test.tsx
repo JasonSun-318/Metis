@@ -76,6 +76,8 @@ function browserPanelApi(overrides: {
 		closeBrowser: vi.fn().mockResolvedValue(undefined),
 		listBrowserDownloads: vi.fn().mockResolvedValue(overrides.downloads ?? []),
 		controlBrowserDownload: overrides.controlBrowserDownload ?? vi.fn().mockResolvedValue(undefined),
+		listBrowserHistory: vi.fn().mockResolvedValue([]),
+		clearBrowserHistory: vi.fn().mockResolvedValue(undefined),
 		subscribeBrowser: (incoming: (event: DesktopBrowserEvent) => void) => {
 			listener = incoming;
 			return () => undefined;
