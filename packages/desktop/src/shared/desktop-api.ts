@@ -150,6 +150,8 @@ export const DESKTOP_IPC_CHANNELS = {
 	closeBrowser: "metis:close-browser",
 	listBrowserDownloads: "metis:list-browser-downloads",
 	controlBrowserDownload: "metis:control-browser-download",
+	listBrowserHistory: "metis:list-browser-history",
+	clearBrowserHistory: "metis:clear-browser-history",
 	listWorkspaceDirectory: "metis:list-workspace-directory",
 	searchWorkspaceFiles: "metis:search-workspace-files",
 	readWorkspaceFile: "metis:read-workspace-file",
@@ -277,7 +279,8 @@ export type DesktopBrowserEvent =
 			readonly matches: number;
 	  }
 	| { readonly type: "command"; readonly browserId: string; readonly command: DesktopBrowserCommand }
-	| { readonly type: "downloads"; readonly downloads: readonly DesktopDownloadItem[] };
+	| { readonly type: "downloads"; readonly downloads: readonly DesktopDownloadItem[] }
+	| { readonly type: "history"; readonly entries: readonly DesktopHistoryEntry[] };
 
 export type DesktopDownloadState = "progressing" | "paused" | "completed" | "cancelled" | "interrupted";
 
@@ -297,6 +300,14 @@ export type DesktopDownloadControlType = "pause" | "resume" | "cancel" | "remove
 export interface DesktopDownloadControlInput {
 	readonly type: DesktopDownloadControlType;
 	readonly downloadId: string;
+}
+
+export interface DesktopHistoryEntry {
+	readonly entryId: string;
+	readonly url: string;
+	readonly title: string;
+	readonly faviconUrl: string | null;
+	readonly visitedAt: number;
 }
 
 export interface DesktopWorkspaceTarget {
@@ -626,6 +637,8 @@ export interface MetisDesktopApi {
 	closeBrowser(input: DesktopCloseBrowserInput): Promise<void>;
 	listBrowserDownloads(): Promise<readonly DesktopDownloadItem[]>;
 	controlBrowserDownload(input: DesktopDownloadControlInput): Promise<void>;
+	listBrowserHistory(): Promise<readonly DesktopHistoryEntry[]>;
+	clearBrowserHistory(): Promise<void>;
 	subscribeBrowser(listener: (event: DesktopBrowserEvent) => void): () => void;
 	listWorkspaceDirectory(input: DesktopWorkspaceTarget): Promise<readonly DesktopWorkspaceEntry[]>;
 	searchWorkspaceFiles(input: DesktopWorkspaceSearchInput): Promise<readonly string[]>;
@@ -1172,6 +1185,11 @@ export function validateDesktopBrowserEvent(value: unknown): DesktopBrowserEvent
 		if (!Array.isArray(event.downloads)) throw new TypeError("Invalid browser downloads");
 		return { type, downloads: event.downloads.map(validateBrowserDownloadItem) };
 	}
+	if (type === "history") {
+		const event = exactRecord(value, ["type", "entries"], "browser history event");
+		if (!Array.isArray(event.entries)) throw new TypeError("Invalid browser history");
+		return { type, entries: event.entries.map(validateBrowserHistoryEntry) };
+	}
 	throw new TypeError("Invalid browser event");
 }
 
@@ -1225,6 +1243,22 @@ export function validateBrowserDownloadControlInput(value: unknown): DesktopDown
 		throw new TypeError("Invalid download control type");
 	}
 	return { type: input.type as DesktopDownloadControlType, downloadId: browserId(input.downloadId) };
+}
+
+function validateBrowserHistoryEntry(value: unknown): DesktopHistoryEntry {
+	const entry = exactRecord(value, ["entryId", "url", "title", "faviconUrl", "visitedAt"], "browser history entry");
+	return {
+		entryId: browserId(entry.entryId),
+		url: browserText(entry.url, "history URL", 8_192),
+		title: browserText(entry.title, "history title", 512),
+		faviconUrl: entry.faviconUrl === null ? null : browserText(entry.faviconUrl, "history favicon URL", 8_192),
+		visitedAt: browserInteger(entry.visitedAt, "visited at", 0, Number.MAX_SAFE_INTEGER),
+	};
+}
+
+export function validateBrowserHistoryList(value: unknown): readonly DesktopHistoryEntry[] {
+	if (!Array.isArray(value)) throw new TypeError("Invalid browser history");
+	return value.map(validateBrowserHistoryEntry);
 }
 
 export function validateDesktopClientParams<Method extends Exclude<ClientRequestMethod, "initialize">>(

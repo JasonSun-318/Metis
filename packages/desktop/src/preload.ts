@@ -16,6 +16,7 @@ import {
 	validateBrowserControlInput,
 	validateBrowserDownloadControlInput,
 	validateBrowserDownloadList,
+	validateBrowserHistoryList,
 	validateCloseBrowserInput,
 	validateCloseTerminalInput,
 	validateCreateBrowserInput,
@@ -401,6 +402,11 @@ const api = {
 		validateBrowserDownloadList(await ipcRenderer.invoke(DESKTOP_IPC_CHANNELS.listBrowserDownloads)),
 	controlBrowserDownload: async (input) => {
 		await ipcRenderer.invoke(DESKTOP_IPC_CHANNELS.controlBrowserDownload, validateBrowserDownloadControlInput(input));
+	},
+	listBrowserHistory: async () =>
+		validateBrowserHistoryList(await ipcRenderer.invoke(DESKTOP_IPC_CHANNELS.listBrowserHistory)),
+	clearBrowserHistory: async () => {
+		await ipcRenderer.invoke(DESKTOP_IPC_CHANNELS.clearBrowserHistory);
 	},
 	listWorkspaceDirectory: (input) =>
 		ipcRenderer.invoke(DESKTOP_IPC_CHANNELS.listWorkspaceDirectory, validateListWorkspaceDirectoryInput(input)),

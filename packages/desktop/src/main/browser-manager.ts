@@ -29,10 +29,12 @@ import type {
 	DesktopDownloadControlInput,
 	DesktopDownloadItem,
 	DesktopDownloadState,
+	DesktopHistoryEntry,
 } from "../shared/desktop-api.ts";
 
 const BLANK_URL = "about:blank";
 const BROWSER_PARTITION = "persist:metis-browser";
+const MAX_HISTORY_ENTRIES = 500;
 const ZOOM_PERCENTAGES = [25, 33, 50, 67, 75, 80, 90, 100, 110, 125, 150, 175, 200, 250, 300, 400, 500] as const;
 
 interface BrowserRecord {
@@ -169,6 +171,7 @@ export class BrowserManager {
 	private readonly dependencies: BrowserManagerDependencies;
 	private readonly records = new Map<string, BrowserRecord>();
 	private readonly downloads = new Map<string, DownloadRecord>();
+	private historyEntries: DesktopHistoryEntry[] = [];
 	private readonly listeners = new Set<(event: DesktopBrowserEvent) => void>();
 	private downloadEmitTimer?: NodeJS.Timeout;
 	private owner?: Pick<BrowserWindow, "contentView">;
@@ -286,6 +289,16 @@ export class BrowserManager {
 				this.dependencies.browserSession.downloadURL(record.url);
 				return;
 		}
+	}
+
+	listHistory(): readonly DesktopHistoryEntry[] {
+		return [...this.historyEntries];
+	}
+
+	async clearHistory(): Promise<void> {
+		if (this.historyEntries.length === 0) return;
+		this.historyEntries = [];
+		this.emitHistory();
 	}
 
 	async control(input: DesktopBrowserControlInput): Promise<void> {
@@ -427,16 +440,24 @@ export class BrowserManager {
 			record.state = { ...record.state, loading: false };
 			sync();
 		};
-		const onDidNavigate = () => {
+		const onDidNavigate = (_event: Event, url: string) => {
 			contents.setZoomFactor(record.state.zoomPercent / 100);
+			this.recordHistoryVisit(url === "" ? contents.getURL() : url);
+			sync();
+		};
+		const onDidNavigateInPage = (_event: Event, url: string, isMainFrame: boolean) => {
+			if (isMainFrame) this.recordHistoryVisit(url);
 			sync();
 		};
 		const onPageTitleUpdated = (_event: Event, title: string) => {
-			record.state = { ...record.state, title: title.trim() || "New tab" };
+			const trimmed = title.trim() || "New tab";
+			record.state = { ...record.state, title: trimmed };
+			this.updateHistoryEntry(contents.getURL(), { title: trimmed });
 			sync();
 		};
 		const onPageFaviconUpdated = (_event: Event, favicons: string[]) => {
 			record.state = { ...record.state, faviconUrl: favicons[0] ?? null };
+			this.updateHistoryEntry(contents.getURL(), { faviconUrl: favicons[0] ?? null });
 			sync();
 		};
 		const onDidFailLoad = (
@@ -492,7 +513,7 @@ export class BrowserManager {
 		contents.on("did-start-loading", onDidStartLoading);
 		contents.on("did-stop-loading", onDidStopLoading);
 		contents.on("did-navigate", onDidNavigate);
-		contents.on("did-navigate-in-page", sync);
+		contents.on("did-navigate-in-page", onDidNavigateInPage);
 		contents.on("page-title-updated", onPageTitleUpdated);
 		contents.on("page-favicon-updated", onPageFaviconUpdated);
 		contents.on("did-fail-load", onDidFailLoad);
@@ -506,7 +527,7 @@ export class BrowserManager {
 			() => contents.off("did-start-loading", onDidStartLoading),
 			() => contents.off("did-stop-loading", onDidStopLoading),
 			() => contents.off("did-navigate", onDidNavigate),
-			() => contents.off("did-navigate-in-page", sync),
+			() => contents.off("did-navigate-in-page", onDidNavigateInPage),
 			() => contents.off("page-title-updated", onPageTitleUpdated),
 			() => contents.off("page-favicon-updated", onPageFaviconUpdated),
 			() => contents.off("did-fail-load", onDidFailLoad),
@@ -579,6 +600,43 @@ export class BrowserManager {
 			this.downloadEmitTimer = undefined;
 		}
 		this.emit({ type: "downloads", downloads: this.listDownloads() });
+	}
+
+	private recordHistoryVisit(url: string): void {
+		if (url === "" || url === BLANK_URL) return;
+		try {
+			normalizeBrowserUrl(url);
+		} catch {
+			return;
+		}
+		const visitedAt = Date.now();
+		const newest = this.historyEntries[0];
+		if (newest && newest.url === url) {
+			this.historyEntries[0] = { ...newest, visitedAt };
+			this.emitHistory();
+			return;
+		}
+		this.historyEntries = [
+			{ entryId: randomUUID(), url, title: "New tab", faviconUrl: null, visitedAt },
+			...this.historyEntries,
+		].slice(0, MAX_HISTORY_ENTRIES);
+		this.emitHistory();
+	}
+
+	private updateHistoryEntry(url: string, patch: { title?: string; faviconUrl?: string | null }): void {
+		const index = this.historyEntries.findIndex((entry) => entry.url === url);
+		if (index === -1) return;
+		const entry = this.historyEntries[index]!;
+		this.historyEntries[index] = {
+			...entry,
+			title: patch.title ?? entry.title,
+			faviconUrl: patch.faviconUrl ?? entry.faviconUrl,
+		};
+		this.emitHistory();
+	}
+
+	private emitHistory(): void {
+		this.emit({ type: "history", entries: this.listHistory() });
 	}
 
 	private emit(event: DesktopBrowserEvent): void {

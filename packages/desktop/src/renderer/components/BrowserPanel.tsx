@@ -393,6 +393,7 @@ export function BrowserPanel({ api, browserId, onError, onState, visible }: Brow
 				setDownloads(event.downloads);
 				return;
 			}
+			if (event.type === "history") return;
 			if (event.type === "command") {
 				if (event.browserId === browserId && visibleRef.current) runCommand(event.command);
 				return;

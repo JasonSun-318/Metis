@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { BrowserManager } from "../src/main/browser-manager.ts";
-import type { DesktopDownloadItem } from "../src/shared/desktop-api.ts";
+import type { DesktopDownloadItem, DesktopHistoryEntry } from "../src/shared/desktop-api.ts";
 
 function downloadItemHarness(overrides: { filename?: string; url?: string } = {}) {
 	const listeners = new Map<string, Set<(...args: any[]) => void>>();
@@ -36,6 +36,14 @@ function latestDownloads(events: unknown[]): readonly DesktopDownloadItem[] {
 		if (event.type === "downloads") return event.downloads ?? [];
 	}
 	throw new Error("No downloads event emitted");
+}
+
+function latestHistory(events: unknown[]): readonly DesktopHistoryEntry[] {
+	for (let index = events.length - 1; index >= 0; index -= 1) {
+		const event = events[index] as { type?: string; entries?: readonly DesktopHistoryEntry[] };
+		if (event.type === "history") return event.entries ?? [];
+	}
+	throw new Error("No history event emitted");
 }
 
 function browserHarness() {
@@ -510,5 +518,56 @@ describe("BrowserManager", () => {
 		} finally {
 			vi.useRealTimers();
 		}
+	});
+
+	it("records main-frame history with metadata, consecutive dedupe, and clear", async () => {
+		const harness = browserHarness();
+		const browserId = "10000000-0000-4000-8000-000000000090";
+		const events: unknown[] = [];
+		harness.manager.onEvent((event) => events.push(event));
+		harness.manager.create({ browserId });
+
+		await harness.manager.control({ type: "navigate", browserId, url: "https://example.com/" });
+		harness.emit("did-navigate", {}, "https://example.com/");
+		expect(latestHistory(events)).toHaveLength(1);
+		expect(latestHistory(events)[0]).toMatchObject({
+			url: "https://example.com/",
+			title: "New tab",
+			faviconUrl: null,
+		});
+
+		harness.emit("page-title-updated", {}, "Example Domain");
+		expect(latestHistory(events)[0]).toMatchObject({ url: "https://example.com/", title: "Example Domain" });
+		harness.emit("page-favicon-updated", {}, ["https://example.com/favicon.ico"]);
+		expect(latestHistory(events)[0]!.faviconUrl).toBe("https://example.com/favicon.ico");
+
+		harness.emit("did-navigate", {}, "https://example.com/");
+		expect(latestHistory(events)).toHaveLength(1);
+
+		harness.emit("did-navigate-in-page", {}, "https://example.com/docs", true);
+		expect(latestHistory(events)).toHaveLength(2);
+		harness.emit("did-navigate-in-page", {}, "https://example.com/frame", false);
+		expect(latestHistory(events)).toHaveLength(2);
+
+		harness.emit("did-navigate", {}, "about:blank");
+		expect(latestHistory(events)).toHaveLength(2);
+
+		expect(harness.manager.listHistory()[0]!.url).toBe("https://example.com/docs");
+
+		await harness.manager.clearHistory();
+		expect(latestHistory(events)).toHaveLength(0);
+		expect(harness.manager.listHistory()).toHaveLength(0);
+	});
+
+	it("caps history at 500 entries with newest first", () => {
+		const harness = browserHarness();
+		harness.manager.create({ browserId: "10000000-0000-4000-8000-000000000091" });
+		for (let index = 0; index <= 501; index += 1) {
+			harness.emit("did-navigate", {}, `https://example.com/${index}`);
+		}
+		const entries = harness.manager.listHistory();
+		expect(entries).toHaveLength(500);
+		expect(entries[0]!.url).toBe("https://example.com/501");
+		expect(entries.at(-1)!.url).toBe("https://example.com/2");
 	});
 });
