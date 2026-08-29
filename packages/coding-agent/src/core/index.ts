@@ -30,6 +30,25 @@ export {
 	createAgentSessionServices,
 } from "./agent-session-services.ts";
 export { type BashExecutorOptions, type BashResult, executeBashWithOperations } from "./bash-executor.ts";
+export {
+	BROWSER_TOOL_NAMES,
+	type BrowserActInput,
+	BrowserActParams,
+	type BrowserHandoffInput,
+	BrowserHandoffParams,
+	type BrowserHostExecutor,
+	type BrowserHostObservation,
+	type BrowserHostRequest,
+	type BrowserHostResult,
+	type BrowserNavigateInput,
+	BrowserNavigateParams,
+	type BrowserObserveInput,
+	BrowserObserveParams,
+	type BrowserTabsInput,
+	BrowserTabsParams,
+	type BrowserToolName,
+	createBrowserToolDefinitions,
+} from "./browser-tools.ts";
 export type { CompactionResult } from "./compaction/index.ts";
 export { createEventBus, type EventBus, type EventBusController } from "./event-bus.ts";
 export { areExperimentalFeaturesEnabled } from "./experimental.ts";
