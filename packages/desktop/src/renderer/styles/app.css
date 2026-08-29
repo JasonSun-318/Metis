@@ -2039,8 +2039,10 @@ textarea { resize: none; }
 .agent-types-field textarea { min-height: 96px; resize: vertical; line-height: 1.5; }
 .agent-types-field input:focus-visible, .agent-types-field textarea:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 .agent-types-tools { display: flex; flex-wrap: wrap; gap: 6px 14px; border: 1px solid var(--border-weak); border-radius: 8px; background: var(--surface-02); padding: 9px 12px; }
-.agent-types-tool { display: inline-flex; align-items: center; gap: 6px; color: var(--text-25); font-size: 12px; font-weight: 400; }
-.agent-types-toggle { flex-direction: row; align-items: center; }
+/* .settings-page label (0,1,1) forces display: grid on every label; these need two
+classes so their inline layout wins the cascade. */
+.settings-page .agent-types-tool { display: inline-flex; align-items: center; gap: 6px; color: var(--text-25); font-size: 12px; font-weight: 400; }
+.settings-page .agent-types-toggle { display: flex; flex-direction: row; align-items: center; gap: 8px; }
 .agent-types-hint { margin: 0; color: var(--muted); font-size: 11px; font-weight: 400; }
 .agent-types-actions { display: flex; justify-content: flex-end; gap: 8px; }
 .personalization-meta { display: flex; min-width: 0; align-items: center; gap: 12px; color: var(--text-08); font-size: 11px; }
