@@ -18,6 +18,7 @@ import {
 	validateServerRequest,
 } from "@metis/app-protocol";
 import type { BrowserWindow, IpcMain, IpcMainInvokeEvent, WebContents } from "electron";
+import { DESKTOP_RPC_FORWARDING } from "../shared/app-server-rpc-forwarding.ts";
 import {
 	DESKTOP_BROWSER_EVENT_CHANNEL,
 	DESKTOP_EVENT_CHANNEL,
@@ -445,135 +446,12 @@ export class ClientBroker {
 	}
 
 	private registerHandlers(): void {
-		this.register(DESKTOP_IPC_CHANNELS.listSessions, 1, async (_event, [input]) =>
-			this.clientCall("session/list", input),
-		);
-		this.register(DESKTOP_IPC_CHANNELS.listSkills, 1, async (_event, [input]) =>
-			this.clientCall("skill/list", input),
-		);
-		this.register(DESKTOP_IPC_CHANNELS.getSkill, 1, async (_event, [input]) => this.clientCall("skill/get", input));
-		this.register(DESKTOP_IPC_CHANNELS.upsertSkill, 1, async (_event, [input]) =>
-			this.clientCall("skill/upsert", input),
-		);
-		this.register(DESKTOP_IPC_CHANNELS.removeSkill, 1, async (_event, [input]) =>
-			this.clientCall("skill/remove", input),
-		);
-		this.register(DESKTOP_IPC_CHANNELS.inspectSkillImport, 1, async (_event, [input]) =>
-			this.clientCall("skill/import/inspect", input),
-		);
-		this.register(DESKTOP_IPC_CHANNELS.importSkills, 1, async (_event, [input]) =>
-			this.clientCall("skill/import", input),
-		);
+		this.registerAppServerForwarders();
 		this.register(DESKTOP_IPC_CHANNELS.openSkillFolder, 1, async (_event, [input]) => {
 			const detail = await this.clientCall("skill/get", input);
 			const error = await this.openPath(detail.directoryPath);
 			if (error) throw new Error(error);
 		});
-		this.register(DESKTOP_IPC_CHANNELS.listMcpServers, 1, async (_event, [input]) =>
-			this.clientCall("mcp/list", input),
-		);
-		this.register(DESKTOP_IPC_CHANNELS.inspectMcpImport, 1, async (_event, [input]) =>
-			this.clientCall("mcp/import/inspect", input),
-		);
-		this.register(DESKTOP_IPC_CHANNELS.importMcpServers, 1, async (_event, [input]) =>
-			this.clientCall("mcp/import", input),
-		);
-		this.register(DESKTOP_IPC_CHANNELS.getMcpServer, 1, async (_event, [input]) => this.clientCall("mcp/get", input));
-		this.register(DESKTOP_IPC_CHANNELS.getMcpCatalogItem, 1, async (_event, [input]) =>
-			this.clientCall("mcp/catalog/get", input),
-		);
-		this.register(DESKTOP_IPC_CHANNELS.upsertMcpServer, 1, async (_event, [input]) =>
-			this.clientCall("mcp/upsert", input),
-		);
-		this.register(DESKTOP_IPC_CHANNELS.removeMcpServer, 1, async (_event, [input]) =>
-			this.clientCall("mcp/remove", input),
-		);
-		this.register(DESKTOP_IPC_CHANNELS.restartMcpServer, 1, async (_event, [input]) =>
-			this.clientCall("mcp/restart", input),
-		);
-		this.register(DESKTOP_IPC_CHANNELS.setMcpCredential, 1, async (_event, [input]) =>
-			this.clientCall("mcp/credential/set", input),
-		);
-		this.register(DESKTOP_IPC_CHANNELS.clearMcpCredential, 1, async (_event, [input]) =>
-			this.clientCall("mcp/credential/clear", input),
-		);
-		this.register(DESKTOP_IPC_CHANNELS.getProfile, 1, async (_event, [input]) =>
-			this.clientCall("profile/get", input),
-		);
-		this.register(DESKTOP_IPC_CHANNELS.listModels, 1, async (_event, [input]) =>
-			this.clientCall("model/list", input),
-		);
-		this.register(DESKTOP_IPC_CHANNELS.getModelSettings, 1, async (_event, [input]) =>
-			this.clientCall("model/settings/get", input),
-		);
-		this.register(DESKTOP_IPC_CHANNELS.updateModelSettings, 1, async (_event, [input]) =>
-			this.clientCall("model/settings/update", input),
-		);
-		this.register(DESKTOP_IPC_CHANNELS.getPersonalization, 1, async (_event, [input]) =>
-			this.clientCall("personalization/get", input),
-		);
-		this.register(DESKTOP_IPC_CHANNELS.updatePersonalization, 1, async (_event, [input]) =>
-			this.clientCall("personalization/update", input),
-		);
-		this.register(DESKTOP_IPC_CHANNELS.getWebSearchSettings, 1, async (_event, [input]) =>
-			this.clientCall("webSearch/get", input),
-		);
-		this.register(DESKTOP_IPC_CHANNELS.revealWebSearchCredential, 1, async (_event, [input]) =>
-			this.clientCall("webSearch/credential/reveal", input),
-		);
-		this.register(DESKTOP_IPC_CHANNELS.updateWebSearchSettings, 1, async (_event, [input]) =>
-			this.clientCall("webSearch/update", input),
-		);
-		this.register(DESKTOP_IPC_CHANNELS.getMemorySettings, 1, async (_event, [input]) =>
-			this.clientCall("memory/get", input),
-		);
-		this.register(DESKTOP_IPC_CHANNELS.updateMemorySettings, 1, async (_event, [input]) =>
-			this.clientCall("memory/update", input),
-		);
-		this.register(DESKTOP_IPC_CHANNELS.listHooks, 1, async (_event, [input]) => this.clientCall("hooks/list", input));
-		this.register(DESKTOP_IPC_CHANNELS.upsertHook, 1, async (_event, [input]) =>
-			this.clientCall("hooks/upsert", input),
-		);
-		this.register(DESKTOP_IPC_CHANNELS.deleteHook, 1, async (_event, [input]) =>
-			this.clientCall("hooks/delete", input),
-		);
-		this.register(DESKTOP_IPC_CHANNELS.testModelConnection, 1, async (_event, [input]) =>
-			this.clientCall("model/testConnection", input),
-		);
-		this.register(DESKTOP_IPC_CHANNELS.getUsage, 1, async (_event, [input]) => this.clientCall("usage/get", input));
-		this.register(DESKTOP_IPC_CHANNELS.createSchedule, 1, async (_event, [input]) =>
-			this.clientCall("schedule/create", input),
-		);
-		this.register(DESKTOP_IPC_CHANNELS.listSchedules, 1, async (_event, [input]) =>
-			this.clientCall("schedule/list", input),
-		);
-		this.register(DESKTOP_IPC_CHANNELS.getSchedule, 1, async (_event, [input]) =>
-			this.clientCall("schedule/get", input),
-		);
-		this.register(DESKTOP_IPC_CHANNELS.updateSchedule, 1, async (_event, [input]) =>
-			this.clientCall("schedule/update", input),
-		);
-		this.register(DESKTOP_IPC_CHANNELS.pauseSchedule, 1, async (_event, [input]) =>
-			this.clientCall("schedule/pause", input),
-		);
-		this.register(DESKTOP_IPC_CHANNELS.resumeSchedule, 1, async (_event, [input]) =>
-			this.clientCall("schedule/resume", input),
-		);
-		this.register(DESKTOP_IPC_CHANNELS.deleteSchedule, 1, async (_event, [input]) =>
-			this.clientCall("schedule/delete", input),
-		);
-		this.register(DESKTOP_IPC_CHANNELS.runScheduleNow, 1, async (_event, [input]) =>
-			this.clientCall("schedule/run-now", input),
-		);
-		this.register(DESKTOP_IPC_CHANNELS.listScheduleRuns, 1, async (_event, [input]) =>
-			this.clientCall("schedule/run/list", input),
-		);
-		this.register(DESKTOP_IPC_CHANNELS.getScheduleRun, 1, async (_event, [input]) =>
-			this.clientCall("schedule/run/get", input),
-		);
-		this.register(DESKTOP_IPC_CHANNELS.markScheduleRunRead, 1, async (_event, [input]) =>
-			this.clientCall("schedule/run/mark-read", input),
-		);
 		this.register(DESKTOP_IPC_CHANNELS.subscribeSchedule, 1, async (_event, [input]) =>
 			this.enqueueSubscriptionMutation(async () => {
 				const result = await this.clientCall("schedule/subscribe", input);
@@ -607,15 +485,6 @@ export class ClientBroker {
 				return outcome;
 			});
 		});
-		this.register(DESKTOP_IPC_CHANNELS.createSession, 1, async (_event, [input]) =>
-			this.clientCall("session/create", input),
-		);
-		this.register(DESKTOP_IPC_CHANNELS.renameSession, 1, async (_event, [input]) =>
-			this.clientCall("session/rename", input),
-		);
-		this.register(DESKTOP_IPC_CHANNELS.forkSession, 1, async (_event, [input]) =>
-			this.clientCall("session/fork", input),
-		);
 		this.register(DESKTOP_IPC_CHANNELS.deleteSession, 1, async (_event, [input]) => {
 			const params = this.validatedParams("session/delete", input);
 			return this.enqueueSubscriptionMutation(async () => {
@@ -650,18 +519,6 @@ export class ClientBroker {
 				return subscribed.snapshot;
 			});
 		});
-		this.register(DESKTOP_IPC_CHANNELS.markSessionRead, 1, async (_event, [input]) =>
-			this.clientCall("session/markRead", input),
-		);
-		this.register(DESKTOP_IPC_CHANNELS.readItems, 1, async (_event, [input]) =>
-			this.clientCall("session/readItems", input),
-		);
-		this.register(DESKTOP_IPC_CHANNELS.readSessionImage, 1, async (_event, [input]) =>
-			this.clientCall("session/readImage", input),
-		);
-		this.register(DESKTOP_IPC_CHANNELS.openDeliveredFile, 1, async (_event, [input]) =>
-			this.clientCall("session/openDeliveredFile", input),
-		);
 		this.register(DESKTOP_IPC_CHANNELS.readDeliveredFile, 1, async (_event, [input]) => {
 			const params = input as ClientParams<"session/readDeliveredFile">;
 			const direct = await readDeliveredFileDirect(params.sessionId, params.fileId);
@@ -677,81 +534,6 @@ export class ClientBroker {
 			}
 			return { ok: false, reason: "not-found" };
 		});
-		this.register(DESKTOP_IPC_CHANNELS.getSessionStatus, 1, async (_event, [input]) =>
-			this.clientCall("session/status", input),
-		);
-		this.register(DESKTOP_IPC_CHANNELS.compactSession, 1, async (_event, [input]) =>
-			this.clientCall("session/compact", input),
-		);
-		this.register(DESKTOP_IPC_CHANNELS.setSessionGoal, 1, async (_event, [input]) =>
-			this.clientCall("session/goal/set", input),
-		);
-		this.register(DESKTOP_IPC_CHANNELS.clearSessionGoal, 1, async (_event, [input]) =>
-			this.clientCall("session/goal/clear", input),
-		);
-		this.register(DESKTOP_IPC_CHANNELS.listAgents, 1, async (_event, [input]) =>
-			this.clientCall("agent/list", input),
-		);
-		this.register(DESKTOP_IPC_CHANNELS.readAgentItems, 1, async (_event, [input]) =>
-			this.clientCall("agent/readItems", input),
-		);
-		this.register(DESKTOP_IPC_CHANNELS.interruptAgent, 1, async (_event, [input]) =>
-			this.clientCall("agent/interrupt", input),
-		);
-		this.register(DESKTOP_IPC_CHANNELS.archiveAgent, 1, async (_event, [input]) =>
-			this.clientCall("agent/archive", input),
-		);
-		this.register(DESKTOP_IPC_CHANNELS.deleteAgent, 1, async (_event, [input]) =>
-			this.clientCall("agent/delete", input),
-		);
-		this.register(DESKTOP_IPC_CHANNELS.listAgentTypes, 1, async (_event, [input]) =>
-			this.clientCall("agentType/list", input),
-		);
-		this.register(DESKTOP_IPC_CHANNELS.upsertAgentType, 1, async (_event, [input]) =>
-			this.clientCall("agentType/upsert", input),
-		);
-		this.register(DESKTOP_IPC_CHANNELS.removeAgentType, 1, async (_event, [input]) =>
-			this.clientCall("agentType/remove", input),
-		);
-		this.register(DESKTOP_IPC_CHANNELS.setThinkingSelection, 1, async (_event, [input]) =>
-			this.clientCall("session/setThinkingSelection", input),
-		);
-		this.register(DESKTOP_IPC_CHANNELS.setPermissionMode, 1, async (_event, [input]) =>
-			this.clientCall("session/setPermissionMode", input),
-		);
-		this.register(DESKTOP_IPC_CHANNELS.setCollaborationMode, 1, async (_event, [input]) =>
-			this.clientCall("session/setCollaborationMode", input),
-		);
-		this.register(DESKTOP_IPC_CHANNELS.startPlanExecution, 1, async (_event, [input]) =>
-			this.clientCall("plan/startExecution", input),
-		);
-		this.register(DESKTOP_IPC_CHANNELS.cancelPlan, 1, async (_event, [input]) =>
-			this.clientCall("plan/cancel", input),
-		);
-		this.register(DESKTOP_IPC_CHANNELS.listPermissionRules, 1, async (_event, [input]) =>
-			this.clientCall("permission/rules/list", input),
-		);
-		this.register(DESKTOP_IPC_CHANNELS.deletePermissionRule, 1, async (_event, [input]) =>
-			this.clientCall("permission/rules/delete", input),
-		);
-		this.register(DESKTOP_IPC_CHANNELS.clearPermissionRules, 1, async (_event, [input]) =>
-			this.clientCall("permission/rules/clear", input),
-		);
-		this.register(DESKTOP_IPC_CHANNELS.setModel, 1, async (_event, [input]) =>
-			this.clientCall("session/setModel", input),
-		);
-		this.register(DESKTOP_IPC_CHANNELS.startTurn, 1, async (_event, [input]) => this.clientCall("turn/start", input));
-		this.register(DESKTOP_IPC_CHANNELS.steerTurn, 1, async (_event, [input]) => this.clientCall("turn/steer", input));
-		this.register(DESKTOP_IPC_CHANNELS.queueTurn, 1, async (_event, [input]) => this.clientCall("turn/queue", input));
-		this.register(DESKTOP_IPC_CHANNELS.updateQueuedTurn, 1, async (_event, [input]) =>
-			this.clientCall("turn/queue/update", input),
-		);
-		this.register(DESKTOP_IPC_CHANNELS.deleteQueuedTurn, 1, async (_event, [input]) =>
-			this.clientCall("turn/queue/delete", input),
-		);
-		this.register(DESKTOP_IPC_CHANNELS.sendQueuedTurn, 1, async (_event, [input]) =>
-			this.clientCall("turn/queue/send", input),
-		);
 		this.register(DESKTOP_IPC_CHANNELS.interruptTurn, 1, async (_event, [input]) => {
 			const params = this.validatedParams("turn/interrupt", input);
 			this.onUserInterruptPending?.(params.sessionId, true);
@@ -848,6 +630,12 @@ export class ClientBroker {
 		this.register(DESKTOP_IPC_CHANNELS.setWorkspaceEditState, 1, async (_event, [input]) => {
 			this.setWorkspaceEditState(validateWorkspaceEditState(input));
 		});
+	}
+
+	private registerAppServerForwarders(): void {
+		for (const definition of Object.values(DESKTOP_RPC_FORWARDING)) {
+			this.register(definition.channel, 1, async (_event, [input]) => this.clientCall(definition.method, input));
+		}
 	}
 
 	private register(

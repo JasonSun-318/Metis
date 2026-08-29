@@ -15,6 +15,7 @@ import {
 	validateServerNotification,
 	validateServerRequest,
 } from "@metis/app-protocol";
+import { DESKTOP_RPC_FORWARDING_CHANNELS, type DesktopRpcForwardingApi } from "./app-server-rpc-forwarding.ts";
 
 export type SupervisorState = "stopped" | "starting" | "ready" | "restarting" | "failed" | "shuttingDown";
 
@@ -43,94 +44,17 @@ export type DesktopApiEvent =
 	| { readonly type: "supervisor"; readonly view: SupervisorView };
 
 export const DESKTOP_IPC_CHANNELS = {
-	listSessions: "metis:list-sessions",
-	listSkills: "metis:list-skills",
-	getSkill: "metis:get-skill",
-	upsertSkill: "metis:upsert-skill",
-	removeSkill: "metis:remove-skill",
-	listAgentTypes: "metis:list-agent-types",
-	upsertAgentType: "metis:upsert-agent-type",
-	removeAgentType: "metis:remove-agent-type",
-	inspectSkillImport: "metis:inspect-skill-import",
-	importSkills: "metis:import-skills",
+	...DESKTOP_RPC_FORWARDING_CHANNELS,
 	openSkillFolder: "metis:open-skill-folder",
-	listMcpServers: "metis:list-mcp-servers",
-	inspectMcpImport: "metis:inspect-mcp-import",
-	importMcpServers: "metis:import-mcp-servers",
-	getMcpServer: "metis:get-mcp-server",
-	getMcpCatalogItem: "metis:get-mcp-catalog-item",
-	upsertMcpServer: "metis:upsert-mcp-server",
-	removeMcpServer: "metis:remove-mcp-server",
-	restartMcpServer: "metis:restart-mcp-server",
-	setMcpCredential: "metis:set-mcp-credential",
-	clearMcpCredential: "metis:clear-mcp-credential",
-	getProfile: "metis:get-profile",
-	listModels: "metis:list-models",
-	getModelSettings: "metis:get-model-settings",
-	updateModelSettings: "metis:update-model-settings",
-	getPersonalization: "metis:get-personalization",
-	updatePersonalization: "metis:update-personalization",
-	getWebSearchSettings: "metis:get-web-search-settings",
-	revealWebSearchCredential: "metis:reveal-web-search-credential",
-	updateWebSearchSettings: "metis:update-web-search-settings",
-	getMemorySettings: "metis:get-memory-settings",
-	updateMemorySettings: "metis:update-memory-settings",
-	listHooks: "metis:list-hooks",
-	upsertHook: "metis:upsert-hook",
-	deleteHook: "metis:delete-hook",
-	testModelConnection: "metis:test-model-connection",
-	getUsage: "metis:get-usage",
-	createSchedule: "metis:create-schedule",
-	listSchedules: "metis:list-schedules",
-	getSchedule: "metis:get-schedule",
-	updateSchedule: "metis:update-schedule",
-	pauseSchedule: "metis:pause-schedule",
-	resumeSchedule: "metis:resume-schedule",
-	deleteSchedule: "metis:delete-schedule",
-	runScheduleNow: "metis:run-schedule-now",
-	listScheduleRuns: "metis:list-schedule-runs",
-	getScheduleRun: "metis:get-schedule-run",
-	markScheduleRunRead: "metis:mark-schedule-run-read",
 	subscribeSchedule: "metis:subscribe-schedule",
 	unsubscribeSchedule: "metis:unsubscribe-schedule",
 	setScheduleKeepAwake: "metis:set-schedule-keep-awake",
 	previewProjectDelete: "metis:preview-project-delete",
 	deleteProject: "metis:delete-project",
-	createSession: "metis:create-session",
-	renameSession: "metis:rename-session",
-	forkSession: "metis:fork-session",
 	deleteSession: "metis:delete-session",
 	openSession: "metis:open-session",
-	markSessionRead: "metis:mark-session-read",
-	readItems: "metis:read-items",
-	readSessionImage: "metis:read-session-image",
-	openDeliveredFile: "metis:open-delivered-file",
 	readDeliveredFile: "metis:read-delivered-file",
 	readPreviewFile: "metis:read-preview-file",
-	getSessionStatus: "metis:get-session-status",
-	compactSession: "metis:compact-session",
-	setSessionGoal: "metis:set-session-goal",
-	clearSessionGoal: "metis:clear-session-goal",
-	listAgents: "metis:list-agents",
-	readAgentItems: "metis:read-agent-items",
-	interruptAgent: "metis:interrupt-agent",
-	archiveAgent: "metis:archive-agent",
-	deleteAgent: "metis:delete-agent",
-	setThinkingSelection: "metis:set-thinking-selection",
-	setPermissionMode: "metis:set-permission-mode",
-	setCollaborationMode: "metis:set-collaboration-mode",
-	startPlanExecution: "metis:start-plan-execution",
-	cancelPlan: "metis:cancel-plan",
-	listPermissionRules: "metis:list-permission-rules",
-	deletePermissionRule: "metis:delete-permission-rule",
-	clearPermissionRules: "metis:clear-permission-rules",
-	setModel: "metis:set-model",
-	startTurn: "metis:start-turn",
-	steerTurn: "metis:steer-turn",
-	queueTurn: "metis:queue-turn",
-	updateQueuedTurn: "metis:update-queued-turn",
-	deleteQueuedTurn: "metis:delete-queued-turn",
-	sendQueuedTurn: "metis:send-queued-turn",
 	interruptTurn: "metis:interrupt-turn",
 	respondToInteraction: "metis:respond-to-interaction",
 	selectProjectFolder: "metis:select-project-folder",
@@ -511,57 +435,9 @@ export type DesktopRpcOutcome<Result> =
 	| { readonly ok: true; readonly result: Result }
 	| { readonly ok: false; readonly error: { readonly code: number; readonly message: string } };
 
-export interface MetisDesktopApi {
+export interface MetisDesktopApi extends DesktopRpcForwardingApi {
 	readonly platform: string;
-	listSessions(input?: ClientParams<"session/list">): Promise<ClientResult<"session/list">>;
-	listSkills(input: ClientParams<"skill/list">): Promise<ClientResult<"skill/list">>;
-	getSkill(input: ClientParams<"skill/get">): Promise<ClientResult<"skill/get">>;
-	upsertSkill(input: ClientParams<"skill/upsert">): Promise<ClientResult<"skill/upsert">>;
-	removeSkill(input: ClientParams<"skill/remove">): Promise<ClientResult<"skill/remove">>;
-	inspectSkillImport(input: ClientParams<"skill/import/inspect">): Promise<ClientResult<"skill/import/inspect">>;
-	importSkills(input: ClientParams<"skill/import">): Promise<ClientResult<"skill/import">>;
 	openSkillFolder(input: ClientParams<"skill/get">): Promise<void>;
-	listMcpServers(input: ClientParams<"mcp/list">): Promise<ClientResult<"mcp/list">>;
-	inspectMcpImport(input: ClientParams<"mcp/import/inspect">): Promise<ClientResult<"mcp/import/inspect">>;
-	importMcpServers(input: ClientParams<"mcp/import">): Promise<ClientResult<"mcp/import">>;
-	getMcpServer(input: ClientParams<"mcp/get">): Promise<ClientResult<"mcp/get">>;
-	getMcpCatalogItem(input: ClientParams<"mcp/catalog/get">): Promise<ClientResult<"mcp/catalog/get">>;
-	upsertMcpServer(input: ClientParams<"mcp/upsert">): Promise<ClientResult<"mcp/upsert">>;
-	removeMcpServer(input: ClientParams<"mcp/remove">): Promise<ClientResult<"mcp/remove">>;
-	restartMcpServer(input: ClientParams<"mcp/restart">): Promise<ClientResult<"mcp/restart">>;
-	setMcpCredential(input: ClientParams<"mcp/credential/set">): Promise<ClientResult<"mcp/credential/set">>;
-	clearMcpCredential(input: ClientParams<"mcp/credential/clear">): Promise<ClientResult<"mcp/credential/clear">>;
-	getProfile(): Promise<ClientResult<"profile/get">>;
-	listModels(): Promise<ClientResult<"model/list">>;
-	getModelSettings(): Promise<ClientResult<"model/settings/get">>;
-	updateModelSettings(input: ClientParams<"model/settings/update">): Promise<ClientResult<"model/settings/update">>;
-	getPersonalization(): Promise<ClientResult<"personalization/get">>;
-	updatePersonalization(
-		input: ClientParams<"personalization/update">,
-	): Promise<ClientResult<"personalization/update">>;
-	getWebSearchSettings(): Promise<ClientResult<"webSearch/get">>;
-	revealWebSearchCredential(
-		input: ClientParams<"webSearch/credential/reveal">,
-	): Promise<ClientResult<"webSearch/credential/reveal">>;
-	updateWebSearchSettings(input: ClientParams<"webSearch/update">): Promise<ClientResult<"webSearch/update">>;
-	getMemorySettings(): Promise<ClientResult<"memory/get">>;
-	updateMemorySettings(input: ClientParams<"memory/update">): Promise<ClientResult<"memory/update">>;
-	listHooks(): Promise<ClientResult<"hooks/list">>;
-	upsertHook(input: ClientParams<"hooks/upsert">): Promise<ClientResult<"hooks/upsert">>;
-	deleteHook(input: ClientParams<"hooks/delete">): Promise<ClientResult<"hooks/delete">>;
-	testModelConnection(input: ClientParams<"model/testConnection">): Promise<ClientResult<"model/testConnection">>;
-	getUsage(input: ClientParams<"usage/get">): Promise<ClientResult<"usage/get">>;
-	createSchedule(input: ClientParams<"schedule/create">): Promise<ClientResult<"schedule/create">>;
-	listSchedules(input?: ClientParams<"schedule/list">): Promise<ClientResult<"schedule/list">>;
-	getSchedule(input: ClientParams<"schedule/get">): Promise<ClientResult<"schedule/get">>;
-	updateSchedule(input: ClientParams<"schedule/update">): Promise<ClientResult<"schedule/update">>;
-	pauseSchedule(input: ClientParams<"schedule/pause">): Promise<ClientResult<"schedule/pause">>;
-	resumeSchedule(input: ClientParams<"schedule/resume">): Promise<ClientResult<"schedule/resume">>;
-	deleteSchedule(input: ClientParams<"schedule/delete">): Promise<ClientResult<"schedule/delete">>;
-	runScheduleNow(input: ClientParams<"schedule/run-now">): Promise<ClientResult<"schedule/run-now">>;
-	listScheduleRuns(input: ClientParams<"schedule/run/list">): Promise<ClientResult<"schedule/run/list">>;
-	getScheduleRun(input: ClientParams<"schedule/run/get">): Promise<ClientResult<"schedule/run/get">>;
-	markScheduleRunRead(input: ClientParams<"schedule/run/mark-read">): Promise<ClientResult<"schedule/run/mark-read">>;
 	subscribeSchedule(): Promise<ClientResult<"schedule/subscribe">>;
 	unsubscribeSchedule(): Promise<ClientResult<"schedule/unsubscribe">>;
 	setScheduleKeepAwake(enabled: boolean): Promise<void>;
@@ -569,56 +445,12 @@ export interface MetisDesktopApi {
 		input: ClientParams<"project/deletePreview">,
 	): Promise<DesktopRpcOutcome<ClientResult<"project/deletePreview">>>;
 	deleteProject(input: ClientParams<"project/delete">): Promise<DesktopRpcOutcome<ClientResult<"project/delete">>>;
-	createSession(input: ClientParams<"session/create">): Promise<ClientResult<"session/create">>;
-	renameSession(input: ClientParams<"session/rename">): Promise<ClientResult<"session/rename">>;
-	forkSession(input: ClientParams<"session/fork">): Promise<ClientResult<"session/fork">>;
 	deleteSession(input: ClientParams<"session/delete">): Promise<ClientResult<"session/delete">>;
 	openSession(input: ClientParams<"session/open">): Promise<ClientResult<"session/subscribe">["snapshot"]>;
-	markSessionRead(input: ClientParams<"session/markRead">): Promise<ClientResult<"session/markRead">>;
-	readItems(input: ClientParams<"session/readItems">): Promise<ClientResult<"session/readItems">>;
-	readSessionImage(input: ClientParams<"session/readImage">): Promise<ClientResult<"session/readImage">>;
-	openDeliveredFile(
-		input: ClientParams<"session/openDeliveredFile">,
-	): Promise<ClientResult<"session/openDeliveredFile">>;
 	readDeliveredFile(
 		input: ClientParams<"session/readDeliveredFile">,
 	): Promise<ClientResult<"session/readDeliveredFile">>;
 	readPreviewFile(input: DesktopPreviewFileInput): Promise<DesktopPreviewFile>;
-	getSessionStatus(input: ClientParams<"session/status">): Promise<ClientResult<"session/status">>;
-	compactSession(input: ClientParams<"session/compact">): Promise<ClientResult<"session/compact">>;
-	setSessionGoal(input: ClientParams<"session/goal/set">): Promise<ClientResult<"session/goal/set">>;
-	clearSessionGoal(input: ClientParams<"session/goal/clear">): Promise<ClientResult<"session/goal/clear">>;
-	listAgents(input: ClientParams<"agent/list">): Promise<ClientResult<"agent/list">>;
-	readAgentItems(input: ClientParams<"agent/readItems">): Promise<ClientResult<"agent/readItems">>;
-	interruptAgent(input: ClientParams<"agent/interrupt">): Promise<ClientResult<"agent/interrupt">>;
-	archiveAgent(input: ClientParams<"agent/archive">): Promise<ClientResult<"agent/archive">>;
-	deleteAgent(input: ClientParams<"agent/delete">): Promise<ClientResult<"agent/delete">>;
-	listAgentTypes(): Promise<ClientResult<"agentType/list">>;
-	upsertAgentType(input: ClientParams<"agentType/upsert">): Promise<ClientResult<"agentType/upsert">>;
-	removeAgentType(input: ClientParams<"agentType/remove">): Promise<ClientResult<"agentType/remove">>;
-	setThinkingSelection(
-		input: ClientParams<"session/setThinkingSelection">,
-	): Promise<ClientResult<"session/setThinkingSelection">>;
-	setPermissionMode(
-		input: ClientParams<"session/setPermissionMode">,
-	): Promise<ClientResult<"session/setPermissionMode">>;
-	setCollaborationMode(
-		input: ClientParams<"session/setCollaborationMode">,
-	): Promise<ClientResult<"session/setCollaborationMode">>;
-	startPlanExecution(input: ClientParams<"plan/startExecution">): Promise<ClientResult<"plan/startExecution">>;
-	cancelPlan(input: ClientParams<"plan/cancel">): Promise<ClientResult<"plan/cancel">>;
-	listPermissionRules(input: ClientParams<"permission/rules/list">): Promise<ClientResult<"permission/rules/list">>;
-	deletePermissionRule(
-		input: ClientParams<"permission/rules/delete">,
-	): Promise<ClientResult<"permission/rules/delete">>;
-	clearPermissionRules(input: ClientParams<"permission/rules/clear">): Promise<ClientResult<"permission/rules/clear">>;
-	setModel(input: ClientParams<"session/setModel">): Promise<ClientResult<"session/setModel">>;
-	startTurn(input: ClientParams<"turn/start">): Promise<ClientResult<"turn/start">>;
-	steerTurn(input: ClientParams<"turn/steer">): Promise<ClientResult<"turn/steer">>;
-	queueTurn(input: ClientParams<"turn/queue">): Promise<ClientResult<"turn/queue">>;
-	updateQueuedTurn(input: ClientParams<"turn/queue/update">): Promise<ClientResult<"turn/queue/update">>;
-	deleteQueuedTurn(input: ClientParams<"turn/queue/delete">): Promise<ClientResult<"turn/queue/delete">>;
-	sendQueuedTurn(input: ClientParams<"turn/queue/send">): Promise<ClientResult<"turn/queue/send">>;
 	interruptTurn(input: ClientParams<"turn/interrupt">): Promise<ClientResult<"turn/interrupt">>;
 	respondToInteraction(input: InteractionResponseInput): Promise<void>;
 	selectProjectFolder(): Promise<string | null>;

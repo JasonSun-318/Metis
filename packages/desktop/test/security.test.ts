@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 import { resolveRendererAsset } from "../src/main/app-protocol-scheme.ts";
 import { ClientBroker, isTrustedRendererUrl } from "../src/main/client-broker.ts";
 import { isSafeExternalUrl } from "../src/main/external-url.ts";
+import { DESKTOP_RPC_FORWARDING } from "../src/shared/app-server-rpc-forwarding.ts";
 import {
 	DESKTOP_BROWSER_EVENT_CHANNEL,
 	DESKTOP_IPC_CHANNELS,
@@ -477,29 +478,29 @@ describe("desktop trust boundaries", () => {
 		const preload = source("src/preload.ts");
 		expect(preload).toContain('"project/deletePreview"');
 		expect(preload).toContain('"project/delete"');
-		expect(preload).toContain('"session/rename"');
 		expect(preload).toContain('"session/delete"');
+		expect(DESKTOP_RPC_FORWARDING.renameSession.method).toBe("session/rename");
 		expect(preload).toContain("const frozenApi = Object.freeze(api)");
 		expect(preload).toContain('exposeInMainWorld("metis", frozenApi)');
 		for (const method of [
-			'"session/setCollaborationMode"',
-			'"plan/startExecution"',
-			'"plan/cancel"',
-			'"skill/get"',
-			'"skill/upsert"',
-			'"skill/remove"',
-			'"skill/import/inspect"',
-			'"skill/import"',
-			'"mcp/list"',
-			'"mcp/get"',
-			'"mcp/catalog/get"',
-			'"mcp/upsert"',
-			'"mcp/remove"',
-			'"mcp/restart"',
-			'"mcp/credential/set"',
-			'"mcp/credential/clear"',
+			"session/setCollaborationMode",
+			"plan/startExecution",
+			"plan/cancel",
+			"skill/get",
+			"skill/upsert",
+			"skill/remove",
+			"skill/import/inspect",
+			"skill/import",
+			"mcp/list",
+			"mcp/get",
+			"mcp/catalog/get",
+			"mcp/upsert",
+			"mcp/remove",
+			"mcp/restart",
+			"mcp/credential/set",
+			"mcp/credential/clear",
 		]) {
-			expect(preload).toContain(method);
+			expect(Object.values(DESKTOP_RPC_FORWARDING).some((definition) => definition.method === method)).toBe(true);
 		}
 		expect(preload).not.toContain('exposeInMainWorld("arcMind"');
 		expect(preload).not.toContain('exposeInMainWorld("metis", ipcRenderer');
