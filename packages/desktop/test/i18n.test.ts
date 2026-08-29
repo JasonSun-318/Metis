@@ -33,6 +33,9 @@ describe("Desktop locale preference", () => {
 		expect(i18n.t("Working")).toBe("进行中");
 		expect(i18n.t("New Skill")).toBe("新建技能");
 		expect(i18n.t("New MCP")).toBe("新建 MCP");
+		expect(i18n.t("Quick presets")).toBe("快速预设");
+		expect(i18n.t("Concise and direct")).toBe("简洁直击");
+		expect(i18n.t("Strict TypeScript")).toBe("严格类型");
 		expect(i18n.t("All sources")).toBe("全部来源");
 		expect(i18n.t("All scopes")).toBe("全部范围");
 		expect(i18n.t("Back to Skills")).toBe("返回技能列表");

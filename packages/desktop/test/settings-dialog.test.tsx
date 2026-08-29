@@ -232,6 +232,15 @@ describe("SettingsDialog", () => {
 		expect(button(container, "Save instructions").disabled).toBe(true);
 		expect(container.textContent).toContain("Global instructions are too large.");
 		expect(updatePersonalization).toHaveBeenCalledTimes(1);
+
+		await act(async () => setLocale("zh-CN"));
+		await flush();
+		expect(container.textContent).toContain("快速预设");
+		expect(container.textContent).not.toContain("Quick presets");
+		const presetText = [...container.querySelectorAll(".personalization-preset-chip")]
+			.map((node) => node.textContent ?? "")
+			.join(" ");
+		expect(presetText).not.toMatch(/[⚡🔍💻🌐🛡️]/u);
 		await act(async () => root.unmount());
 	});
 });

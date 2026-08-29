@@ -2036,7 +2036,8 @@ textarea { resize: none; }
 .personalization-presets-block { display: grid; gap: 8px; margin-bottom: 10px; }
 .personalization-presets-label { display: inline-flex; align-items: center; gap: 6px; color: var(--text-17); font-size: 12px; font-weight: 560; }
 .personalization-presets-grid { display: flex; flex-wrap: wrap; gap: 8px; }
-.personalization-preset-chip { display: inline-flex; align-items: center; border: 1px solid var(--border-weak); border-radius: 999px; background: var(--surface-03); color: var(--text-20); padding: 5px 11px; font-size: 12px; font-weight: 500; cursor: pointer; transition: all 120ms ease; }
+.personalization-preset-chip { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--border-weak); border-radius: 999px; background: var(--surface-03); color: var(--text-20); padding: 5px 11px; font-size: 12px; font-weight: 500; cursor: pointer; transition: all 120ms ease; }
+.personalization-preset-chip svg { flex: none; color: var(--text-14); }
 .personalization-preset-chip:hover { border-color: var(--border-strong); background: var(--surface-05); color: var(--text-28); }
 .personalization-input-label { display: grid; width: 100%; }
 .personalization-card { display: grid; gap: 12px; padding: 14px 16px 14px; }
