@@ -7,6 +7,9 @@ import {
 	ClientRequestMethods,
 	createRpcError,
 	HostRequestMethods,
+	MAX_BROWSER_ACTION_TEXT_UTF8_BYTES,
+	MAX_BROWSER_SCREENSHOT_UTF8_BYTES,
+	MAX_BROWSER_STATE_UTF8_BYTES,
 	MAX_DELTA_UTF8_BYTES,
 	MAX_ENVELOPE_UTF8_BYTES,
 	MAX_EVENT_BATCH,
@@ -35,6 +38,9 @@ const SESSION_ID = "11111111-1111-4111-8111-111111111111";
 const EPOCH = "33333333-3333-4333-8333-333333333333";
 const TASK_ID = "66666666-6666-4666-8666-666666666666";
 const RUN_ID = "77777777-7777-4777-8777-777777777777";
+const BROWSER_ID = "88888888-8888-4888-8888-888888888888";
+const PROFILE_ID = "00000000-0000-4000-8000-000000000001";
+const DOCUMENT_ID = "99999999-9999-4999-8999-999999999999";
 
 interface RequestFixture {
 	direction: "client" | "host";
@@ -49,7 +55,7 @@ interface ResponseFixture {
 }
 
 interface ServerRequestFixture {
-	method: "interaction/request";
+	method: "interaction/request" | "browser/tool";
 	kind: string;
 	request: Record<string, unknown>;
 	response: Record<string, unknown>;
@@ -57,7 +63,7 @@ interface ServerRequestFixture {
 }
 
 interface NotificationFixture {
-	method: "connection/events";
+	method: "connection/events" | "browser/tool/cancelled";
 	envelope: Record<string, unknown>;
 }
 
@@ -94,6 +100,27 @@ function makeServerInteraction(interaction: Record<string, unknown>): Record<str
 		params: { serverEpoch: EPOCH, interaction },
 	};
 }
+
+function makeBrowserTool(call: Record<string, unknown>, id = "browser-call"): Record<string, unknown> {
+	return {
+		jsonrpc: "2.0",
+		id,
+		method: "browser/tool",
+		params: { serverEpoch: EPOCH, sessionId: SESSION_ID, toolCallId: `${id}:tool`, call },
+	};
+}
+
+const browserObservation = {
+	browserId: BROWSER_ID,
+	profileId: PROFILE_ID,
+	documentId: DOCUMENT_ID,
+	revision: 1,
+	change: "full",
+	url: "https://example.test/",
+	title: "Example",
+	loading: false,
+	state: "document WebArea Example\n  e1 button Continue",
+} as const;
 
 const scheduleTask = {
 	id: TASK_ID,
@@ -462,7 +489,7 @@ describe("golden protocol fixtures", () => {
 	it("validates every server request and kind-correlated response", () => {
 		expect(new Set(serverRequests.map((entry) => entry.method))).toEqual(new Set(Object.keys(ServerRequestMethods)));
 		expect(new Set(serverRequests.map((entry) => entry.kind))).toEqual(
-			new Set(["project_trust", "select", "confirm", "input", "ask_user"]),
+			new Set(["project_trust", "select", "confirm", "input", "ask_user", "browser_tabs"]),
 		);
 		for (const entry of serverRequests) {
 			expect(validateServerRequest(entry.request)).toEqual(entry.request);
@@ -471,6 +498,154 @@ describe("golden protocol fixtures", () => {
 				expect(validateResponseFor("server", entry.request, entry.cancelResponse)).toEqual(entry.cancelResponse);
 			}
 		}
+	});
+
+	it("validates every browser call and action variant", () => {
+		const calls = [
+			{ tool: "browser_tabs", input: { action: "list" } },
+			{ tool: "browser_tabs", input: { action: "open", profileId: PROFILE_ID } },
+			{ tool: "browser_tabs", input: { action: "close", browserId: BROWSER_ID } },
+			{ tool: "browser_navigate", input: { browserId: BROWSER_ID, action: "goto", url: "https://example.test" } },
+			{ tool: "browser_navigate", input: { browserId: BROWSER_ID, action: "goto", url: "metis browser search" } },
+			...(["back", "forward", "reload"] as const).map((action) => ({
+				tool: "browser_navigate",
+				input: { browserId: BROWSER_ID, action },
+			})),
+			{ tool: "browser_observe", input: { browserId: BROWSER_ID, mode: "both", sinceRevision: 1 } },
+			...[
+				{ type: "click", target: { elementId: "e1" }, button: "left" },
+				{ type: "hover", target: { x: 10, y: 20 } },
+				{ type: "type", elementId: "e1", text: "hello", replace: true },
+				{ type: "press", key: "Enter" },
+				{ type: "scroll", direction: "down", pages: 2, elementId: "e1" },
+				{ type: "drag", from: { elementId: "e1" }, to: { x: 10, y: 20 } },
+				{ type: "select", elementId: "e1", value: "one" },
+				{ type: "dialog", decision: "dismiss" },
+			].map((action) => ({
+				tool: "browser_act",
+				input: {
+					browserId: BROWSER_ID,
+					documentId: DOCUMENT_ID,
+					snapshotRevision: 1,
+					origin: "https://example.test",
+					intent: "Test the fixture",
+					risk: "ordinary",
+					action,
+				},
+			})),
+			...(["login", "otp", "passkey", "device_approval", "captcha", "sensitive_action", "other"] as const).map(
+				(reason) => ({ tool: "browser_handoff", input: { browserId: BROWSER_ID, reason } }),
+			),
+		];
+		for (const [index, call] of calls.entries()) {
+			const request = makeBrowserTool(call, `browser-call-${index}`);
+			expect(validateServerRequest(request)).toEqual(request);
+		}
+	});
+
+	it("correlates bounded browser results with their pending call", () => {
+		const request = makeBrowserTool({ tool: "browser_observe", input: { browserId: BROWSER_ID } });
+		const response = {
+			jsonrpc: "2.0",
+			id: request.id,
+			result: {
+				toolCallId: (request.params as { toolCallId: string }).toolCallId,
+				result: { tool: "browser_observe", observation: browserObservation },
+			},
+		};
+		expect(validateResponseFor("server", request, response)).toEqual(response);
+		expect(() =>
+			validateResponseFor("server", request, {
+				...response,
+				result: { ...response.result, toolCallId: "another-tool-call" },
+			}),
+		).toThrow("does not match");
+		expect(() =>
+			validateResponseFor("server", request, {
+				...response,
+				result: {
+					...response.result,
+					result: { tool: "browser_act", details: { status: "completed", observation: browserObservation } },
+				},
+			}),
+		).toThrow("does not match");
+	});
+
+	it("rejects unsafe or oversized browser payloads", () => {
+		const valid = makeBrowserTool({
+			tool: "browser_act",
+			input: {
+				browserId: BROWSER_ID,
+				documentId: DOCUMENT_ID,
+				snapshotRevision: 1,
+				origin: "https://example.test",
+				intent: "Type fixture text",
+				risk: "ordinary",
+				action: { type: "type", elementId: "e1", text: "safe" },
+			},
+		});
+		expect(() => validateServerRequest({ ...valid, extra: true })).toThrow();
+		expect(() =>
+			validateServerRequest(
+				makeBrowserTool({
+					tool: "browser_navigate",
+					input: { browserId: BROWSER_ID, action: "goto", url: "https://user:secret@example.test" },
+				}),
+			),
+		).toThrow();
+		expect(() =>
+			validateServerRequest(
+				makeBrowserTool({
+					tool: "browser_navigate",
+					input: { browserId: BROWSER_ID, action: "goto", url: "file:///tmp/x" },
+				}),
+			),
+		).toThrow();
+		const oversizedText = structuredClone(valid);
+		(oversizedText.params as { call: { input: { action: { text: string } } } }).call.input.action.text = "x".repeat(
+			MAX_BROWSER_ACTION_TEXT_UTF8_BYTES + 1,
+		);
+		expect(() => validateServerRequest(oversizedText)).toThrow();
+
+		const observeRequest = makeBrowserTool(
+			{ tool: "browser_observe", input: { browserId: BROWSER_ID } },
+			"observe-limit",
+		);
+		const result = {
+			jsonrpc: "2.0",
+			id: observeRequest.id,
+			result: {
+				toolCallId: (observeRequest.params as { toolCallId: string }).toolCallId,
+				result: { tool: "browser_observe", observation: browserObservation },
+			},
+		};
+		expect(() =>
+			validateResponseFor("server", observeRequest, {
+				...result,
+				result: {
+					...result.result,
+					result: {
+						tool: "browser_observe",
+						observation: { ...browserObservation, state: "x".repeat(MAX_BROWSER_STATE_UTF8_BYTES + 1) },
+					},
+				},
+			}),
+		).toThrow();
+		expect(() =>
+			validateResponseFor("server", observeRequest, {
+				...result,
+				result: {
+					...result.result,
+					result: {
+						tool: "browser_observe",
+						observation: {
+							...browserObservation,
+							screenshot: { mediaType: "image/jpeg", data: "A".repeat(MAX_BROWSER_SCREENSHOT_UTF8_BYTES + 1) },
+						},
+					},
+				},
+			}),
+		).toThrow();
 	});
 
 	it("validates every server notification and domain event kind", () => {

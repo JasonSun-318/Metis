@@ -210,5 +210,40 @@
 				]
 			}
 		}
+	},
+	{
+		"method": "browser/tool",
+		"kind": "browser_tabs",
+		"request": {
+			"jsonrpc": "2.0",
+			"id": "server-browser-1",
+			"method": "browser/tool",
+			"params": {
+				"serverEpoch": "33333333-3333-4333-8333-333333333333",
+				"sessionId": "11111111-1111-4111-8111-111111111111",
+				"toolCallId": "browser-call-1",
+				"call": { "tool": "browser_tabs", "input": { "action": "list" } }
+			}
+		},
+		"response": {
+			"jsonrpc": "2.0",
+			"id": "server-browser-1",
+			"result": {
+				"toolCallId": "browser-call-1",
+				"result": {
+					"tool": "browser_tabs",
+					"details": {
+						"profiles": [
+							{
+								"profileId": "00000000-0000-4000-8000-000000000001",
+								"name": "Default",
+								"sourceId": null
+							}
+						],
+						"tabs": []
+					}
+				}
+			}
+		}
 	}
 ]

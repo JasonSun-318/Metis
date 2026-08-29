@@ -2,6 +2,7 @@ import { type Static, type TSchema, Type } from "typebox";
 import type { Validator } from "typebox/compile";
 import { RPC_ERROR_CODES, type RpcErrorObject, RpcErrorObjectSchema } from "./errors.ts";
 import {
+	type BrowserToolRequestResult,
 	type ClientParams,
 	type ClientRequestMethod,
 	ClientRequestMethods,
@@ -128,22 +129,22 @@ export type HostRpcRequest = {
 	};
 }[HostRequestMethod];
 
-export type ServerRpcRequest = {
-	[Method in ServerRequestMethod]: {
+export type ServerRpcRequest<Method extends ServerRequestMethod = ServerRequestMethod> = {
+	[CurrentMethod in Method]: {
 		jsonrpc: "2.0";
 		id: string;
-		method: Method;
-		params: ServerParams<Method>;
+		method: CurrentMethod;
+		params: ServerParams<CurrentMethod>;
 	};
-}[ServerRequestMethod];
+}[Method];
 
-export type ServerRpcNotification = {
-	[Method in ServerNotificationMethod]: {
+export type ServerRpcNotification<Method extends ServerNotificationMethod = ServerNotificationMethod> = {
+	[CurrentMethod in Method]: {
 		jsonrpc: "2.0";
-		method: Method;
-		params: Static<(typeof ServerNotificationMethods)[Method]>;
+		method: CurrentMethod;
+		params: Static<(typeof ServerNotificationMethods)[CurrentMethod]>;
 	};
-}[ServerNotificationMethod];
+}[Method];
 
 export type RpcErrorResponse = {
 	jsonrpc: "2.0";
@@ -242,7 +243,10 @@ export function validateServerNotification(value: unknown): ServerRpcNotificatio
 	return envelope as ServerRpcNotification;
 }
 
-function validateInteractionCorrelation(request: ServerRpcRequest, result: InteractionResponseInput): void {
+function validateInteractionCorrelation(
+	request: ServerRpcRequest<"interaction/request">,
+	result: InteractionResponseInput,
+): void {
 	const interaction = request.params.interaction as InteractionView;
 	if (result.interactionId !== interaction.interactionId || result.kind !== interaction.kind) {
 		throw new ProtocolValidationError("invalid_response", "Interaction response does not match its request");
@@ -561,6 +565,15 @@ function validateErrorCorrelation(request: PendingRpcRequest, error: RpcErrorObj
 	}
 }
 
+function validateBrowserToolCorrelation(
+	request: ServerRpcRequest<"browser/tool">,
+	result: BrowserToolRequestResult,
+): void {
+	if (result.toolCallId !== request.params.toolCallId || result.result.tool !== request.params.call.tool) {
+		failResponseCorrelation("Browser tool result does not match its pending request");
+	}
+}
+
 export type PendingRequestDirection = "client" | "host" | "server";
 export type PendingRpcRequest = ClientRpcRequest | HostRpcRequest | ServerRpcRequest;
 
@@ -594,7 +607,7 @@ export function validateResponseFor(
 		assertSchema(validatorFor(RpcErrorObjectSchema), response.error, "invalid_response", "RPC error");
 		validateErrorCorrelation(request, response.error as RpcErrorObject);
 		if (direction === "server" && request.method === "interaction/request") {
-			const interactionId = (request as ServerRpcRequest).params.interaction.interactionId;
+			const interactionId = (request as ServerRpcRequest<"interaction/request">).params.interaction.interactionId;
 			const error = response.error as RpcErrorObject;
 			if (
 				error.code !== RPC_ERROR_CODES.INTERACTION_CANCELLED ||
@@ -614,7 +627,15 @@ export function validateResponseFor(
 	if (direction === "client") {
 		validateClientResultCorrelation(request as ClientRpcRequest, response.result);
 	} else if (direction === "server" && request.method === "interaction/request") {
-		validateInteractionCorrelation(request as ServerRpcRequest, response.result as InteractionResponseInput);
+		validateInteractionCorrelation(
+			request as ServerRpcRequest<"interaction/request">,
+			response.result as InteractionResponseInput,
+		);
+	} else if (direction === "server" && request.method === "browser/tool") {
+		validateBrowserToolCorrelation(
+			request as ServerRpcRequest<"browser/tool">,
+			response.result as BrowserToolRequestResult,
+		);
 	}
 	return response as ClientRpcSuccessResponse | HostRpcSuccessResponse | ServerRpcSuccessResponse;
 }

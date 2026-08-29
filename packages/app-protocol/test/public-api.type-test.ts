@@ -1,4 +1,7 @@
 import type {
+	BrowserObservation,
+	BrowserToolCall,
+	BrowserToolRequestResult,
 	ClientParams,
 	ClientResult,
 	ConnectionEventsParams,
@@ -8,6 +11,8 @@ import type {
 	McpServerSummaryView,
 	PermissionModeView,
 	ProjectPermissionRuleView,
+	ServerParams,
+	ServerResult,
 	SessionSnapshot,
 	SessionStatusView,
 	SessionSummary,
@@ -381,6 +386,40 @@ const askUserInteractionResponse: InteractionResponseInput = {
 	cancelled: false,
 	answers: [{ questionId: "question:0", choiceIds: ["choice:1"] }],
 };
+const browserCall = {
+	tool: "browser_act",
+	input: {
+		browserId: "88888888-8888-4888-8888-888888888888",
+		documentId: "99999999-9999-4999-8999-999999999999",
+		snapshotRevision: 1,
+		origin: "https://example.test",
+		intent: "Open the fixture",
+		risk: "ordinary",
+		action: { type: "click", target: { elementId: "e1" } },
+	},
+} satisfies BrowserToolCall;
+const browserRequest = {
+	serverEpoch: "33333333-3333-4333-8333-333333333333",
+	sessionId: session.sessionId,
+	toolCallId: "browser-call-1",
+	call: browserCall,
+} satisfies ServerParams<"browser/tool">;
+const browserObservation = {
+	browserId: browserCall.input.browserId,
+	profileId: "00000000-0000-4000-8000-000000000001",
+	documentId: browserCall.input.documentId,
+	revision: 2,
+	change: "full",
+	url: "https://example.test/",
+	title: "Fixture",
+	loading: false,
+	state: "document WebArea Fixture\n  e1 button Open",
+} satisfies BrowserObservation;
+const browserResult = {
+	toolCallId: browserRequest.toolCallId,
+	result: { tool: "browser_act", details: { status: "completed", observation: browserObservation } },
+} satisfies BrowserToolRequestResult;
+const browserServerResult: ServerResult<"browser/tool"> = browserResult;
 
 void events;
 void interactionResponse;
@@ -410,3 +449,6 @@ void permissionMode;
 void permissionRule;
 void agentInterruptResult;
 void goalSet;
+void browserRequest;
+void browserResult;
+void browserServerResult;

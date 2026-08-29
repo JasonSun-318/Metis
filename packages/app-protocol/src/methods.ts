@@ -925,6 +925,231 @@ export const ServerShutdownParamsSchema = StrictObject({
 });
 export const ServerShutdownResultSchema = StrictObject({ accepted: Type.Literal(true) });
 
+export const MAX_BROWSER_TABS_PER_SESSION = 16;
+export const MAX_BROWSER_PROFILES = 64;
+export const MAX_BROWSER_STATE_UTF8_BYTES = 256 * 1024;
+export const MAX_BROWSER_SCREENSHOT_UTF8_BYTES = 4 * 1024 * 1024;
+export const MAX_BROWSER_ACTION_TEXT_UTF8_BYTES = 32 * 1024;
+export const MAX_BROWSER_INTENT_UTF8_BYTES = 1024;
+
+const BrowserIdSchema = UuidSchema;
+const BrowserProfileIdSchema = UuidSchema;
+const BrowserElementIdSchema = Type.String({ pattern: "^e[1-9][0-9]{0,5}$", maxLength: 7 });
+const BrowserSourceIdSchema = Type.Union([
+	Type.Literal("chrome"),
+	Type.Literal("edge"),
+	Type.Literal("brave"),
+	Type.Literal("chromium"),
+]);
+const BrowserControlStateSchema = Type.Union([Type.Literal("idle"), Type.Literal("agent"), Type.Literal("handoff")]);
+const BrowserUrlSchema = Utf8String(8192);
+const BrowserOriginSchema = Type.Refine(
+	Utf8String(2048, { minLength: 1 }),
+	(value) => {
+		try {
+			const parsed = new URL(value);
+			return (parsed.protocol === "http:" || parsed.protocol === "https:") && parsed.origin === value;
+		} catch {
+			return false;
+		}
+	},
+	"must be an exact HTTP(S) origin",
+);
+const BrowserNavigationTargetSchema = Type.Refine(
+	Utf8String(8192, { minLength: 1 }),
+	(value) => {
+		try {
+			const parsed = new URL(value);
+			return (parsed.protocol === "http:" || parsed.protocol === "https:") && !parsed.username && !parsed.password;
+		} catch {
+			return !/^[A-Za-z][A-Za-z0-9+.-]*:/.test(value);
+		}
+	},
+	"must be HTTP(S) without credentials or search text",
+);
+const BrowserCoordinateSchema = Type.Number({ minimum: -2_147_483_648, maximum: 2_147_483_647 });
+const BrowserCoordinateTargetSchema = StrictObject({ x: BrowserCoordinateSchema, y: BrowserCoordinateSchema });
+const BrowserElementTargetSchema = StrictObject({ elementId: BrowserElementIdSchema });
+const BrowserPointTargetSchema = Type.Union([BrowserElementTargetSchema, BrowserCoordinateTargetSchema]);
+
+export const BrowserTabsInputSchema = Type.Union([
+	StrictObject({ action: Type.Literal("list") }),
+	StrictObject({ action: Type.Literal("open"), profileId: Type.Optional(BrowserProfileIdSchema) }),
+	StrictObject({ action: Type.Literal("close"), browserId: BrowserIdSchema }),
+]);
+
+export const BrowserNavigateInputSchema = Type.Union([
+	StrictObject({ browserId: BrowserIdSchema, action: Type.Literal("goto"), url: BrowserNavigationTargetSchema }),
+	StrictObject({
+		browserId: BrowserIdSchema,
+		action: Type.Union([Type.Literal("back"), Type.Literal("forward"), Type.Literal("reload")]),
+	}),
+]);
+
+export const BrowserObserveInputSchema = StrictObject({
+	browserId: BrowserIdSchema,
+	mode: Type.Optional(Type.Union([Type.Literal("state"), Type.Literal("screenshot"), Type.Literal("both")])),
+	sinceRevision: Type.Optional(Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER })),
+});
+
+export const BrowserRiskSchema = Type.Union([
+	Type.Literal("ordinary"),
+	Type.Literal("external_side_effect"),
+	Type.Literal("sensitive_data"),
+	Type.Literal("destructive"),
+	Type.Literal("financial"),
+]);
+
+export const BrowserActionSchema = Type.Union([
+	StrictObject({
+		type: Type.Literal("click"),
+		target: BrowserPointTargetSchema,
+		button: Type.Optional(Type.Union([Type.Literal("left"), Type.Literal("right")])),
+	}),
+	StrictObject({ type: Type.Literal("hover"), target: BrowserPointTargetSchema }),
+	StrictObject({
+		type: Type.Literal("type"),
+		elementId: BrowserElementIdSchema,
+		text: Utf8String(MAX_BROWSER_ACTION_TEXT_UTF8_BYTES),
+		replace: Type.Optional(Type.Boolean()),
+	}),
+	StrictObject({ type: Type.Literal("press"), key: Utf8String(64, { minLength: 1 }) }),
+	StrictObject({
+		type: Type.Literal("scroll"),
+		direction: Type.Union([Type.Literal("up"), Type.Literal("down"), Type.Literal("left"), Type.Literal("right")]),
+		pages: Type.Optional(Type.Integer({ minimum: 1, maximum: 20 })),
+		elementId: Type.Optional(BrowserElementIdSchema),
+	}),
+	StrictObject({ type: Type.Literal("drag"), from: BrowserPointTargetSchema, to: BrowserPointTargetSchema }),
+	StrictObject({
+		type: Type.Literal("select"),
+		elementId: BrowserElementIdSchema,
+		value: Utf8String(4096),
+	}),
+	StrictObject({
+		type: Type.Literal("dialog"),
+		decision: Type.Union([Type.Literal("accept"), Type.Literal("dismiss")]),
+	}),
+]);
+
+export const BrowserActInputSchema = StrictObject({
+	browserId: BrowserIdSchema,
+	documentId: UuidSchema,
+	snapshotRevision: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
+	origin: BrowserOriginSchema,
+	intent: Utf8String(MAX_BROWSER_INTENT_UTF8_BYTES, { minLength: 1 }),
+	risk: BrowserRiskSchema,
+	action: BrowserActionSchema,
+});
+
+export const BrowserHandoffInputSchema = StrictObject({
+	browserId: BrowserIdSchema,
+	reason: Type.Union([
+		Type.Literal("login"),
+		Type.Literal("otp"),
+		Type.Literal("passkey"),
+		Type.Literal("device_approval"),
+		Type.Literal("captcha"),
+		Type.Literal("sensitive_action"),
+		Type.Literal("other"),
+	]),
+});
+
+export const BrowserObservationSchema = StrictObject({
+	browserId: BrowserIdSchema,
+	profileId: BrowserProfileIdSchema,
+	documentId: UuidSchema,
+	revision: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
+	change: Type.Union([Type.Literal("full"), Type.Literal("diff"), Type.Literal("unchanged")]),
+	url: BrowserUrlSchema,
+	title: Utf8String(4096),
+	loading: Type.Boolean(),
+	state: Utf8String(MAX_BROWSER_STATE_UTF8_BYTES),
+	screenshot: Type.Optional(
+		StrictObject({
+			mediaType: Type.Literal("image/jpeg"),
+			data: Utf8String(MAX_BROWSER_SCREENSHOT_UTF8_BYTES, { pattern: "^[A-Za-z0-9+/]*={0,2}$" }),
+		}),
+	),
+});
+
+export const BrowserTabsDetailsSchema = StrictObject({
+	profiles: Type.Array(
+		StrictObject({
+			profileId: BrowserProfileIdSchema,
+			name: Utf8String(256, { minLength: 1 }),
+			sourceId: Type.Union([BrowserSourceIdSchema, Type.Null()]),
+		}),
+		{ maxItems: MAX_BROWSER_PROFILES },
+	),
+	tabs: Type.Array(
+		StrictObject({
+			browserId: BrowserIdSchema,
+			profileId: BrowserProfileIdSchema,
+			profileName: Utf8String(256, { minLength: 1 }),
+			title: Utf8String(4096),
+			url: BrowserUrlSchema,
+			loading: Type.Boolean(),
+			controlState: BrowserControlStateSchema,
+		}),
+		{ maxItems: MAX_BROWSER_TABS_PER_SESSION },
+	),
+});
+
+export const BrowserOperationDetailsSchema = Type.Union([
+	StrictObject({ status: Type.Literal("completed"), observation: BrowserObservationSchema }),
+	StrictObject({ status: Type.Literal("cancelled"), reason: Type.Literal("user_cancelled") }),
+]);
+
+export const BrowserHandoffDetailsSchema = Type.Union([
+	StrictObject({ status: Type.Literal("completed"), observation: BrowserObservationSchema }),
+	StrictObject({
+		status: Type.Literal("cancelled"),
+		reason: Type.Union([
+			Type.Literal("user_cancelled"),
+			Type.Literal("tab_closed"),
+			Type.Literal("turn_interrupted"),
+			Type.Literal("server_restarted"),
+			Type.Literal("timed_out"),
+		]),
+	}),
+]);
+
+export const BrowserToolCallSchema = Type.Union([
+	StrictObject({ tool: Type.Literal("browser_tabs"), input: BrowserTabsInputSchema }),
+	StrictObject({ tool: Type.Literal("browser_navigate"), input: BrowserNavigateInputSchema }),
+	StrictObject({ tool: Type.Literal("browser_observe"), input: BrowserObserveInputSchema }),
+	StrictObject({ tool: Type.Literal("browser_act"), input: BrowserActInputSchema }),
+	StrictObject({ tool: Type.Literal("browser_handoff"), input: BrowserHandoffInputSchema }),
+]);
+
+export const BrowserToolResultSchema = Type.Union([
+	StrictObject({ tool: Type.Literal("browser_tabs"), details: BrowserTabsDetailsSchema }),
+	StrictObject({ tool: Type.Literal("browser_navigate"), details: BrowserOperationDetailsSchema }),
+	StrictObject({ tool: Type.Literal("browser_observe"), observation: BrowserObservationSchema }),
+	StrictObject({ tool: Type.Literal("browser_act"), details: BrowserOperationDetailsSchema }),
+	StrictObject({ tool: Type.Literal("browser_handoff"), details: BrowserHandoffDetailsSchema }),
+]);
+
+export const BrowserToolRequestParamsSchema = StrictObject({
+	serverEpoch: UuidSchema,
+	sessionId: SessionIdSchema,
+	toolCallId: OpaqueIdSchema,
+	call: BrowserToolCallSchema,
+});
+
+export const BrowserToolRequestResultSchema = StrictObject({
+	toolCallId: OpaqueIdSchema,
+	result: BrowserToolResultSchema,
+});
+
+export const BrowserToolCancelledParamsSchema = StrictObject({
+	serverEpoch: UuidSchema,
+	sessionId: SessionIdSchema,
+	toolCallId: OpaqueIdSchema,
+	requestId: OpaqueIdSchema,
+});
+
 export const InteractionRequestParamsSchema = StrictObject({
 	serverEpoch: UuidSchema,
 	interaction: InteractionViewSchema,
@@ -1088,10 +1313,12 @@ export const HostRequestMethods = {
 
 export const ServerRequestMethods = {
 	"interaction/request": method(InteractionRequestParamsSchema, InteractionResultSchema),
+	"browser/tool": method(BrowserToolRequestParamsSchema, BrowserToolRequestResultSchema),
 } as const;
 
 export const ServerNotificationMethods = {
 	"connection/events": ConnectionEventsParamsSchema,
+	"browser/tool/cancelled": BrowserToolCancelledParamsSchema,
 } as const;
 
 export type ClientRequestMethod = keyof typeof ClientRequestMethods;
@@ -1115,3 +1342,19 @@ export type HostResult<Method extends HostRequestMethod> = DefinitionResult<(typ
 export type ServerParams<Method extends ServerRequestMethod> = DefinitionParams<(typeof ServerRequestMethods)[Method]>;
 export type ServerResult<Method extends ServerRequestMethod> = DefinitionResult<(typeof ServerRequestMethods)[Method]>;
 export type InteractionResponseInput = Static<typeof InteractionResultSchema>;
+export type BrowserTabsInput = Static<typeof BrowserTabsInputSchema>;
+export type BrowserNavigateInput = Static<typeof BrowserNavigateInputSchema>;
+export type BrowserObserveInput = Static<typeof BrowserObserveInputSchema>;
+export type BrowserRisk = Static<typeof BrowserRiskSchema>;
+export type BrowserAction = Static<typeof BrowserActionSchema>;
+export type BrowserActInput = Static<typeof BrowserActInputSchema>;
+export type BrowserHandoffInput = Static<typeof BrowserHandoffInputSchema>;
+export type BrowserObservation = Static<typeof BrowserObservationSchema>;
+export type BrowserTabsDetails = Static<typeof BrowserTabsDetailsSchema>;
+export type BrowserOperationDetails = Static<typeof BrowserOperationDetailsSchema>;
+export type BrowserHandoffDetails = Static<typeof BrowserHandoffDetailsSchema>;
+export type BrowserToolCall = Static<typeof BrowserToolCallSchema>;
+export type BrowserToolResult = Static<typeof BrowserToolResultSchema>;
+export type BrowserToolRequestParams = Static<typeof BrowserToolRequestParamsSchema>;
+export type BrowserToolRequestResult = Static<typeof BrowserToolRequestResultSchema>;
+export type BrowserToolCancelledParams = Static<typeof BrowserToolCancelledParamsSchema>;
