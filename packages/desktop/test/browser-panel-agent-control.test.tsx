@@ -102,6 +102,7 @@ describe("BrowserPanel agent control", () => {
 		const { container, render } = mount(api);
 		await render("agent");
 
+		expect(container.querySelector('[role="status"]')?.getAttribute("aria-label")).toBe("Browser automation active");
 		expect(container.querySelector('[role="status"]')?.textContent).toContain("Metis is controlling this page");
 		expect(container.querySelector(".browser-toolbar")?.hasAttribute("inert")).toBe(true);
 		await vi.waitFor(() =>
@@ -135,6 +136,7 @@ describe("BrowserPanel agent control", () => {
 		await render("handoff", "login");
 
 		const alert = container.querySelector<HTMLElement>('[role="alert"]');
+		expect(alert?.getAttribute("aria-label")).toBe("Your action is needed");
 		expect(alert?.textContent).toContain("Sign in on this page");
 		const heading = alert?.querySelector<HTMLHeadingElement>("h2");
 		await vi.waitFor(() => expect(document.activeElement).toBe(heading));

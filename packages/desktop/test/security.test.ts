@@ -4,6 +4,7 @@ import { pathToFileURL } from "node:url";
 import type { SessionSummary } from "@metis/app-protocol";
 import { describe, expect, it, vi } from "vitest";
 import { resolveRendererAsset } from "../src/main/app-protocol-scheme.ts";
+import { BrowserToolError } from "../src/main/browser-manager.ts";
 import { ClientBroker, isTrustedRendererUrl } from "../src/main/client-broker.ts";
 import { isSafeExternalUrl } from "../src/main/external-url.ts";
 import { DESKTOP_RPC_FORWARDING } from "../src/shared/app-server-rpc-forwarding.ts";
@@ -690,7 +691,7 @@ describe("desktop trust boundaries", () => {
 		});
 		const webContents = new FakeWebContents();
 		const contentView = { addChildView: vi.fn(), removeChildView: vi.fn() };
-		broker.attach({ webContents: webContents as never, contentView } as never);
+		broker.attach({ webContents: webContents as never, contentView, getBounds: vi.fn() } as never);
 		browserManager.closeAll.mockClear();
 		const event = { sender: webContents, senderFrame: webContents.mainFrame };
 		const browserId = "10000000-0000-4000-8000-000000000089";
@@ -751,6 +752,7 @@ describe("desktop trust boundaries", () => {
 	it("executes browser RPCs only in main and cancels the exact correlated call", async () => {
 		const ipcMain = new FakeIpcMain();
 		const { emitMessage, supervisor } = supervisorHarness();
+		let browserListener: ((event: DesktopBrowserEvent) => void) | undefined;
 		let browserSignal: AbortSignal | undefined;
 		let rejectBrowser!: (cause: unknown) => void;
 		const browserManager = {
@@ -768,7 +770,12 @@ describe("desktop trust boundaries", () => {
 			importData: vi.fn(),
 			listHistory: vi.fn(() => []),
 			clearHistory: vi.fn(),
-			onEvent: vi.fn(() => () => undefined),
+			onEvent: vi.fn((listener) => {
+				browserListener = listener;
+				return () => {
+					browserListener = undefined;
+				};
+			}),
 			executeTool: vi.fn(
 				(_sessionId: string, _call: unknown, signal: AbortSignal) =>
 					new Promise((_resolve, reject) => {
@@ -814,6 +821,64 @@ describe("desktop trust boundaries", () => {
 			result: {
 				toolCallId: successRequest.params.toolCallId,
 				result: { tool: "browser_tabs", details: { profiles: [], tabs: [] } },
+			},
+		});
+		supervisor.respondToServerRequest.mockClear();
+		browserManager.executeTool.mockClear();
+		browserManager.executeTool.mockRejectedValueOnce(
+			new BrowserToolError("OVERLOADED", "This task already has the maximum number of browser tabs"),
+		);
+		const limitRequest = {
+			...successRequest,
+			id: "browser-rpc-limit",
+			params: { ...successRequest.params, toolCallId: "browser-call-limit" },
+		};
+		emitMessage(limitRequest);
+		await vi.waitFor(() => expect(supervisor.respondToServerRequest).toHaveBeenCalledOnce());
+		expect(supervisor.respondToServerRequest.mock.calls[0]?.[1]).toMatchObject({
+			error: { data: { name: "OVERLOADED" } },
+		});
+		supervisor.respondToServerRequest.mockClear();
+		browserManager.executeTool.mockClear();
+		browserManager.executeTool.mockImplementationOnce(
+			(_sessionId: string, _call: unknown, signal: AbortSignal) =>
+				new Promise((resolve) => {
+					signal.addEventListener(
+						"abort",
+						() =>
+							resolve({
+								tool: "browser_handoff",
+								details: { status: "cancelled", reason: "tab_closed" },
+							}),
+						{ once: true },
+					);
+				}),
+		);
+		const closedBrowserId = "10000000-0000-4000-8000-000000000091";
+		const handoffRequest = {
+			jsonrpc: "2.0" as const,
+			id: "browser-rpc-closed",
+			method: "browser/tool" as const,
+			params: {
+				...successRequest.params,
+				toolCallId: "browser-call-closed",
+				call: { tool: "browser_handoff" as const, input: { browserId: closedBrowserId, reason: "login" as const } },
+			},
+		};
+		emitMessage(handoffRequest);
+		await vi.waitFor(() => expect(browserManager.executeTool).toHaveBeenCalledOnce());
+		browserListener?.({
+			type: "closed",
+			sessionId: handoffRequest.params.sessionId,
+			browserId: closedBrowserId,
+		});
+		await vi.waitFor(() => expect(supervisor.respondToServerRequest).toHaveBeenCalledOnce());
+		expect(supervisor.respondToServerRequest).toHaveBeenCalledWith(handoffRequest, {
+			jsonrpc: "2.0",
+			id: handoffRequest.id,
+			result: {
+				toolCallId: handoffRequest.params.toolCallId,
+				result: { tool: "browser_handoff", details: { status: "cancelled", reason: "tab_closed" } },
 			},
 		});
 		supervisor.respondToServerRequest.mockClear();

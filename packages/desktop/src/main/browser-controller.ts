@@ -41,6 +41,21 @@ const LANDMARK_ROLES = new Set([
 	"search",
 ]);
 const EDITABLE_ROLES = new Set(["combobox", "searchbox", "spinbutton", "textbox"]);
+const KEY_DETAILS: Readonly<
+	Record<string, { readonly code: string; readonly keyCode: number; readonly text?: string }>
+> = {
+	" ": { code: "Space", keyCode: 32, text: " " },
+	ArrowDown: { code: "ArrowDown", keyCode: 40 },
+	ArrowLeft: { code: "ArrowLeft", keyCode: 37 },
+	ArrowRight: { code: "ArrowRight", keyCode: 39 },
+	ArrowUp: { code: "ArrowUp", keyCode: 38 },
+	Backspace: { code: "Backspace", keyCode: 8 },
+	End: { code: "End", keyCode: 35 },
+	Enter: { code: "Enter", keyCode: 13 },
+	Escape: { code: "Escape", keyCode: 27 },
+	Home: { code: "Home", keyCode: 36 },
+	Tab: { code: "Tab", keyCode: 9 },
+};
 
 type CdpParams = Record<string, unknown>;
 
@@ -57,6 +72,11 @@ export interface BrowserControllerDependencies {
 	readonly debugger: BrowserDebuggerTransport;
 	readonly pageState: () => { readonly url: string; readonly title: string; readonly loading: boolean };
 	readonly captureScreenshot: (quality: number) => Promise<Buffer>;
+	readonly dispatchMainFrameClick?: (input: {
+		readonly x: number;
+		readonly y: number;
+		readonly button: "left" | "right";
+	}) => void;
 	readonly subscribeMessage: (listener: (method: string, params: CdpParams, sessionId?: string) => void) => () => void;
 	readonly subscribeDetach: (listener: () => void) => () => void;
 	readonly acceleratorModifier?: number;
@@ -178,6 +198,24 @@ function boxQuad(value: unknown): readonly number[] | undefined {
 		: undefined;
 }
 
+function contentQuad(value: unknown): readonly number[] | undefined {
+	if (typeof value !== "object" || value === null) return undefined;
+	const quads = (value as { quads?: unknown }).quads;
+	if (!Array.isArray(quads)) return undefined;
+	return quads.find(
+		(quad): quad is number[] =>
+			Array.isArray(quad) && quad.length >= 8 && quad.every((point) => typeof point === "number"),
+	);
+}
+
+function describedNodeText(value: unknown): string {
+	if (typeof value !== "object" || value === null) return "";
+	const node = value as { readonly nodeValue?: unknown; readonly children?: unknown };
+	const own = typeof node.nodeValue === "string" ? node.nodeValue : "";
+	const children = Array.isArray(node.children) ? node.children.map(describedNodeText).join("") : "";
+	return `${own}${children}`;
+}
+
 /** CDP-only browser observation and input controller. It never evaluates page JavaScript. */
 export class BrowserController {
 	private readonly dependencies: BrowserControllerDependencies;
@@ -235,7 +273,8 @@ export class BrowserController {
 			if (this.referencesMissingElement(input.action))
 				return { status: "stale", reason: "element_missing", observation: fresh };
 			try {
-				await this.performAction(input.action, signal);
+				const outcome = await this.performAction(input.action, signal);
+				if (outcome === "skip_observe") return { status: "completed", observation: fresh };
 			} catch (cause) {
 				if (signal.aborted) throw cause;
 				if (cause instanceof MissingElementError) {
@@ -487,12 +526,17 @@ export class BrowserController {
 		}
 	}
 
-	private async performAction(action: BrowserAction, signal: AbortSignal): Promise<void> {
+	private async performAction(action: BrowserAction, signal: AbortSignal): Promise<"skip_observe" | undefined> {
 		this.markStateChange();
 		switch (action.type) {
 			case "click": {
 				const point = await this.resolvePoint(action.target, signal);
 				const button = action.button ?? "left";
+				if (!point.sessionId && this.dependencies.dispatchMainFrameClick) {
+					this.dependencies.dispatchMainFrameClick({ x: point.x, y: point.y, button });
+					return "skip_observe";
+				}
+				const buttons = button === "left" ? 1 : 2;
 				await this.command(
 					"Input.dispatchMouseEvent",
 					{ type: "mouseMoved", x: point.x, y: point.y },
@@ -501,13 +545,13 @@ export class BrowserController {
 				);
 				await this.command(
 					"Input.dispatchMouseEvent",
-					{ type: "mousePressed", x: point.x, y: point.y, button, clickCount: 1 },
+					{ type: "mousePressed", x: point.x, y: point.y, button, buttons, clickCount: 1 },
 					point.sessionId,
 					signal,
 				);
 				await this.command(
 					"Input.dispatchMouseEvent",
-					{ type: "mouseReleased", x: point.x, y: point.y, button, clickCount: 1 },
+					{ type: "mouseReleased", x: point.x, y: point.y, button, buttons: 0, clickCount: 1 },
 					point.sessionId,
 					signal,
 				);
@@ -554,7 +598,7 @@ export class BrowserController {
 				const sessionId = from.sessionId ?? to.sessionId;
 				await this.command(
 					"Input.dispatchMouseEvent",
-					{ type: "mousePressed", x: from.x, y: from.y, button: "left", clickCount: 1 },
+					{ type: "mousePressed", x: from.x, y: from.y, button: "left", buttons: 1, clickCount: 1 },
 					sessionId,
 					signal,
 				);
@@ -566,7 +610,7 @@ export class BrowserController {
 				);
 				await this.command(
 					"Input.dispatchMouseEvent",
-					{ type: "mouseReleased", x: to.x, y: to.y, button: "left", clickCount: 1 },
+					{ type: "mouseReleased", x: to.x, y: to.y, button: "left", buttons: 0, clickCount: 1 },
 					sessionId,
 					signal,
 				);
@@ -628,7 +672,21 @@ export class BrowserController {
 		const element = this.requiredElement(target.elementId);
 		let quad: readonly number[] | undefined;
 		try {
-			quad = boxQuad(
+			await this.command(
+				"DOM.scrollIntoViewIfNeeded",
+				{ backendNodeId: element.backendNodeId },
+				element.sessionId,
+				signal,
+			);
+			quad = contentQuad(
+				await this.command(
+					"DOM.getContentQuads",
+					{ backendNodeId: element.backendNodeId },
+					element.sessionId,
+					signal,
+				),
+			);
+			quad ??= boxQuad(
 				await this.command("DOM.getBoxModel", { backendNodeId: element.backendNodeId }, element.sessionId, signal),
 			);
 		} catch (cause) {
@@ -667,8 +725,21 @@ export class BrowserController {
 	}
 
 	private async press(key: string, sessionId: string | undefined, signal: AbortSignal): Promise<void> {
-		await this.command("Input.dispatchKeyEvent", { type: "rawKeyDown", key }, sessionId, signal);
-		await this.command("Input.dispatchKeyEvent", { type: "keyUp", key }, sessionId, signal);
+		const detail = KEY_DETAILS[key];
+		const identity = detail
+			? { key, code: detail.code, windowsVirtualKeyCode: detail.keyCode, nativeVirtualKeyCode: detail.keyCode }
+			: { key };
+		await this.command(
+			"Input.dispatchKeyEvent",
+			{
+				type: detail?.text ? "keyDown" : "rawKeyDown",
+				...identity,
+				...(detail?.text ? { text: detail.text, unmodifiedText: detail.text } : {}),
+			},
+			sessionId,
+			signal,
+		);
+		await this.command("Input.dispatchKeyEvent", { type: "keyUp", ...identity }, sessionId, signal);
 	}
 
 	private async select(elementId: string, value: string, signal: AbortSignal): Promise<void> {
@@ -683,7 +754,8 @@ export class BrowserController {
 			typeof described === "object" && described !== null ? (described as { node?: unknown }).node : undefined;
 		const children =
 			typeof node === "object" && node !== null && Array.isArray((node as { children?: unknown }).children)
-				? ((node as { children: Array<{ attributes?: unknown; nodeValue?: unknown }> }).children ?? [])
+				? ((node as { children: Array<{ attributes?: unknown; nodeValue?: unknown; children?: unknown }> })
+						.children ?? [])
 				: [];
 		const index = children.findIndex((child) => {
 			const attributes = Array.isArray(child.attributes) ? child.attributes : [];
@@ -694,9 +766,21 @@ export class BrowserController {
 		});
 		if (index < 0) throw new MissingElementError();
 		await this.command("DOM.focus", { backendNodeId: element.backendNodeId }, element.sessionId, signal);
-		await this.press("Home", element.sessionId, signal);
-		for (let offset = 0; offset < index; offset++) await this.press("ArrowDown", element.sessionId, signal);
-		await this.press("Enter", element.sessionId, signal);
+		const label = (describedNodeText(children[index]).trim() || value).toLocaleLowerCase();
+		for (const character of label) {
+			const upper = character.toLocaleUpperCase();
+			const asciiLetter = /^[A-Z]$/u.test(upper);
+			const identity = asciiLetter
+				? { key: character, code: `Key${upper}`, windowsVirtualKeyCode: upper.charCodeAt(0) }
+				: { key: character };
+			await this.command(
+				"Input.dispatchKeyEvent",
+				{ type: "keyDown", ...identity, text: character, unmodifiedText: character },
+				element.sessionId,
+				signal,
+			);
+			await this.command("Input.dispatchKeyEvent", { type: "keyUp", ...identity }, element.sessionId, signal);
+		}
 	}
 
 	private async command(
@@ -707,7 +791,22 @@ export class BrowserController {
 	): Promise<unknown> {
 		if (method.startsWith("Runtime.")) throw new Error("Page JavaScript evaluation is forbidden");
 		signal.throwIfAborted();
-		return this.dependencies.debugger.sendCommand(method, params, sessionId);
+		return new Promise((resolve, reject) => {
+			let settled = false;
+			const finish = (complete: () => void) => {
+				if (settled) return;
+				settled = true;
+				signal.removeEventListener("abort", onAbort);
+				complete();
+			};
+			const onAbort = () => finish(() => reject(signal.reason ?? new DOMException("Aborted", "AbortError")));
+			signal.addEventListener("abort", onAbort, { once: true });
+			void this.dependencies.debugger.sendCommand(method, params, sessionId).then(
+				(result) => finish(() => resolve(result)),
+				(cause) => finish(() => reject(cause)),
+			);
+			if (signal.aborted) onAbort();
+		});
 	}
 }
 

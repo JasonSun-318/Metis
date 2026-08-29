@@ -66,7 +66,9 @@ function axTree(name = "Continue", value = "secret") {
 }
 
 function fixture(
-	overrides: Pick<BrowserControllerDependencies, "stabilizationQuietMs" | "stabilizationTimeoutMs"> = {},
+	overrides: Partial<
+		Pick<BrowserControllerDependencies, "dispatchMainFrameClick" | "stabilizationQuietMs" | "stabilizationTimeoutMs">
+	> = {},
 ) {
 	const debug = new FakeDebugger();
 	debug.responses.set("Accessibility.getFullAXTree", axTree());
@@ -220,13 +222,21 @@ describe("BrowserController", () => {
 		const { controller, debug } = fixture();
 		const first = await observe(controller);
 		const clicked = await controller.act(
-			action(first, { type: "click", target: { elementId: "e2" } }),
+			action(first, { type: "click", target: { elementId: "e1" } }),
 			new AbortController().signal,
 		);
 		expect(clicked.status).toBe("completed");
 		expect(
 			debug.commands.filter(({ method }) => method === "Input.dispatchMouseEvent").map(({ params }) => params.type),
 		).toEqual(["mouseMoved", "mousePressed", "mouseReleased"]);
+		expect(debug.commands).toContainEqual({
+			method: "Input.dispatchMouseEvent",
+			params: { type: "mousePressed", x: 20, y: 30, button: "left", buttons: 1, clickCount: 1 },
+		});
+		expect(debug.commands).toContainEqual({
+			method: "Input.dispatchMouseEvent",
+			params: { type: "mouseReleased", x: 20, y: 30, button: "left", buttons: 0, clickCount: 1 },
+		});
 		const afterClick = clicked.status === "completed" ? clicked.observation : first;
 		const typed = await controller.act(
 			action(afterClick, { type: "type", elementId: "e1", text: "hello", replace: true }),
@@ -236,6 +246,47 @@ describe("BrowserController", () => {
 		expect(debug.commands).toContainEqual({ method: "DOM.focus", params: { backendNodeId: 7 } });
 		expect(debug.commands).toContainEqual({ method: "Input.insertText", params: { text: "hello" } });
 		expect(debug.commands.some(({ method }) => method.startsWith("Runtime."))).toBe(false);
+	});
+
+	it("uses physical pointer activation for accessible element clicks", async () => {
+		const { controller, debug } = fixture();
+		const first = await observe(controller);
+		await expect(
+			controller.act(action(first, { type: "click", target: { elementId: "e2" } }), new AbortController().signal),
+		).resolves.toMatchObject({ status: "completed" });
+		expect(debug.commands).toContainEqual({
+			method: "Input.dispatchMouseEvent",
+			params: { type: "mousePressed", x: 20, y: 30, button: "left", buttons: 1, clickCount: 1 },
+		});
+		expect(debug.commands.filter(({ method }) => method === "Input.dispatchKeyEvent")).toHaveLength(0);
+	});
+
+	it("uses non-blocking native pointer input for top-level popup windows", async () => {
+		const dispatchMainFrameClick = vi.fn();
+		const { controller, debug } = fixture({ dispatchMainFrameClick });
+		const first = await observe(controller);
+		await expect(
+			controller.act(action(first, { type: "click", target: { elementId: "e2" } }), new AbortController().signal),
+		).resolves.toMatchObject({ status: "completed" });
+		expect(dispatchMainFrameClick).toHaveBeenCalledWith({ x: 20, y: 30, button: "left" });
+		expect(debug.commands.filter(({ method }) => method === "Input.dispatchMouseEvent")).toHaveLength(0);
+	});
+
+	it("cancels an in-flight CDP command when the page closes", async () => {
+		const { controller, debug } = fixture();
+		const first = await observe(controller);
+		debug.handler = async (method) => {
+			if (method === "Input.dispatchMouseEvent") return new Promise(() => undefined);
+			return debug.responses.get(method) ?? {};
+		};
+		const abort = new AbortController();
+		const pending = controller.act(action(first, { type: "click", target: { elementId: "e2" } }), abort.signal);
+		await vi.waitFor(() =>
+			expect(debug.commands.some(({ method }) => method === "Input.dispatchMouseEvent")).toBe(true),
+		);
+		abort.abort(new DOMException("Page closed", "AbortError"));
+
+		await expect(pending).rejects.toThrow("Page closed");
 	});
 
 	it("waits for a bounded accessibility quiet window after input", async () => {
@@ -280,6 +331,27 @@ describe("BrowserController", () => {
 		expect(debug.commands).toContainEqual({
 			method: "DOM.describeNode",
 			params: { backendNodeId: 7, depth: 2, pierce: true },
+		});
+		expect(debug.commands).toContainEqual({
+			method: "Input.dispatchKeyEvent",
+			params: {
+				type: "keyDown",
+				key: "t",
+				code: "KeyT",
+				windowsVirtualKeyCode: 84,
+				text: "t",
+				unmodifiedText: "t",
+			},
+		});
+		expect(debug.commands).toContainEqual({
+			method: "Input.dispatchKeyEvent",
+			params: {
+				type: "rawKeyDown",
+				key: "Enter",
+				code: "Enter",
+				windowsVirtualKeyCode: 13,
+				nativeVirtualKeyCode: 13,
+			},
 		});
 		expect(debug.commands).toContainEqual({ method: "Page.handleJavaScriptDialog", params: { accept: false } });
 		expect(debug.commands.some(({ method }) => method.startsWith("Runtime."))).toBe(false);

@@ -122,7 +122,32 @@ function browserHarness(
 		setBounds: vi.fn(),
 		setVisible: vi.fn(),
 	};
-	const contentView = { addChildView: vi.fn(), removeChildView: vi.fn() };
+	const contentView = {
+		addChildView: vi.fn(),
+		getBounds: vi.fn(() => ({ x: 0, y: 0, width: 1_280, height: 840 })),
+		removeChildView: vi.fn(),
+	};
+	const backgroundContentView = {
+		addChildView: vi.fn(),
+		removeChildView: vi.fn(),
+	};
+	const backgroundWindow = {
+		contentView: backgroundContentView,
+		destroy: vi.fn(),
+		isDestroyed: vi.fn(() => false),
+	};
+	const popupWindow = {
+		webContents,
+		destroy: vi.fn(),
+		focus: vi.fn(),
+		isDestroyed: vi.fn(() => false),
+		setBounds: vi.fn(),
+		setFocusable: vi.fn(),
+		setIgnoreMouseEvents: vi.fn(),
+		setOpacity: vi.fn(),
+		show: vi.fn(),
+		showInactive: vi.fn(),
+	};
 	const willDownloadHandlers: ((...args: any[]) => void)[] = [];
 	const browserSession = {
 		cookies: {
@@ -191,6 +216,11 @@ function browserHarness(
 			createdPreferences = options.webPreferences as Record<string, unknown>;
 			return view as never;
 		},
+		createBackgroundWindow: vi.fn(() => backgroundWindow as never),
+		createPopupWindow: vi.fn((options) => {
+			createdPreferences = options.webPreferences as Record<string, unknown>;
+			return popupWindow as never;
+		}),
 		openExternal,
 		pathExists,
 		openPath,
@@ -223,6 +253,8 @@ function browserHarness(
 		navigationTimeoutMs: options.navigationTimeoutMs ?? 1_000,
 	});
 	return {
+		backgroundContentView,
+		backgroundWindow,
 		browserSession,
 		contentView,
 		controllers,
@@ -238,6 +270,7 @@ function browserHarness(
 		openPath,
 		pathExists,
 		persisted: () => profileStore.loadHistory(DEFAULT_BROWSER_PROFILE_ID),
+		popupWindow,
 		profileStore,
 		importer,
 		resolveDownloadDirectory,
@@ -290,6 +323,18 @@ describe("BrowserManager", () => {
 		expect(() => harness.manager.close(SESSION_ID, otherBrowserId)).toThrow("does not belong");
 	});
 
+	it("keeps non-presented browser tabs out of the renderer view tree", () => {
+		const harness = browserHarness();
+		harness.manager.attach({ contentView: harness.contentView } as never);
+		harness.manager.create({
+			sessionId: SESSION_ID,
+			browserId: "10000000-0000-4000-8000-000000000069",
+			profileId: DEFAULT_BROWSER_PROFILE_ID,
+		});
+
+		expect(harness.contentView.addChildView).not.toHaveBeenCalled();
+	});
+
 	it("adopts safe popups as owned tabs and enforces the per-task tab cap", async () => {
 		const harness = browserHarness();
 		const events: unknown[] = [];
@@ -299,7 +344,8 @@ describe("BrowserManager", () => {
 		expect(harness.windowOpen("file:///tmp/unsafe")).toEqual({ action: "deny" });
 		const popup = harness.windowOpen("https://accounts.example.test/oauth");
 		expect(popup).toMatchObject({ action: "allow", createWindow: expect.any(Function) });
-		expect(popup?.createWindow?.({})).toBe(harness.webContents);
+		expect(popup?.createWindow?.({ webPreferences: { openerId: 42 } } as never)).toBe(harness.webContents);
+		expect(harness.createdPreferences()).toMatchObject({ openerId: 42 });
 		const listed = await harness.manager.executeTool(
 			SESSION_ID,
 			{ tool: "browser_tabs", input: { action: "list" } },
@@ -381,6 +427,7 @@ describe("BrowserManager", () => {
 		const browserId = "10000000-0000-4000-8000-000000000074";
 		const events: unknown[] = [];
 		harness.manager.onEvent((event) => events.push(event));
+		harness.manager.attach({ contentView: harness.contentView } as never);
 		harness.manager.create({ sessionId: SESSION_ID, browserId, profileId: DEFAULT_BROWSER_PROFILE_ID });
 		const controller = harness.controllers.get(browserId)!;
 		controller.act.mockImplementation(
@@ -414,6 +461,16 @@ describe("BrowserManager", () => {
 		await vi.waitFor(() =>
 			expect(events).toContainEqual({ type: "activity", sessionId: SESSION_ID, browserId, active: true }),
 		);
+		expect(harness.view.setVisible).toHaveBeenLastCalledWith(true);
+		expect(harness.backgroundContentView.addChildView).toHaveBeenLastCalledWith(harness.view);
+		await harness.manager.control({
+			type: "present",
+			sessionId: SESSION_ID,
+			browserId,
+			visible: false,
+			bounds: { x: 1, y: 2, width: 300, height: 400 },
+		});
+		expect(harness.view.setVisible).toHaveBeenLastCalledWith(true);
 		harness.manager.takeControl(SESSION_ID, browserId);
 		await vi.waitFor(() =>
 			expect(events).toContainEqual({
@@ -532,7 +589,9 @@ describe("BrowserManager", () => {
 			bounds: { x: 4, y: 5, width: 300, height: 400 },
 		});
 		harness.manager.suspendRenderer();
-		expect(harness.view.setVisible).toHaveBeenLastCalledWith(false);
+		expect(harness.view.setVisible).toHaveBeenLastCalledWith(true);
+		expect(harness.contentView.removeChildView).toHaveBeenCalledWith(harness.view);
+		expect(harness.backgroundContentView.addChildView).toHaveBeenLastCalledWith(harness.view);
 		expect(harness.manager.replayEvents(SESSION_ID)).toEqual([
 			{ type: "opened", sessionId: SESSION_ID, browserId, profileId: DEFAULT_BROWSER_PROFILE_ID },
 		]);
@@ -596,6 +655,7 @@ describe("BrowserManager", () => {
 			zoomPercent: 100,
 		});
 		expect(harness.createdPreferences()).toMatchObject({
+			backgroundThrottling: false,
 			contextIsolation: true,
 			nodeIntegration: false,
 			sandbox: true,
@@ -603,8 +663,10 @@ describe("BrowserManager", () => {
 		});
 		expect(harness.createdPreferences()).not.toHaveProperty("preload");
 		expect(harness.view.setBorderRadius).toHaveBeenCalledWith(7);
-		expect(harness.view.setVisible).toHaveBeenCalledWith(false);
-		expect(harness.contentView.addChildView).toHaveBeenCalledWith(harness.view);
+		expect(harness.view.setBounds).toHaveBeenCalledWith({ x: 0, y: 0, width: 1_024, height: 768 });
+		expect(harness.view.setVisible).toHaveBeenCalledWith(true);
+		expect(harness.backgroundContentView.addChildView).toHaveBeenCalledWith(harness.view);
+		expect(harness.contentView.addChildView).not.toHaveBeenCalled();
 		expect(harness.browserSession.setPermissionCheckHandler).toHaveBeenCalledOnce();
 		expect(harness.browserSession.setPermissionRequestHandler).toHaveBeenCalledOnce();
 
@@ -642,7 +704,7 @@ describe("BrowserManager", () => {
 			visible: true,
 			bounds: { x: 800, y: 86, width: 393, height: 747 },
 		});
-		expect(harness.view.setBounds).toHaveBeenCalledTimes(1);
+		expect(harness.view.setBounds).toHaveBeenCalledTimes(2);
 
 		harness.navigationHistory.canGoBack.mockReturnValue(true);
 		harness.navigationHistory.canGoForward.mockReturnValue(true);
@@ -680,18 +742,19 @@ describe("BrowserManager", () => {
 		harness.emit("will-redirect", { url: "file:///etc/passwd", preventDefault });
 		expect(preventDefault).toHaveBeenCalledTimes(2);
 
-		harness.emit("render-process-gone");
-		expect(events).toContainEqual({ type: "error", browserId, message: "Browser page crashed" });
 		await harness.manager.control({ sessionId: SESSION_ID, type: "open-external", browserId });
 		expect(harness.openExternal).toHaveBeenCalledWith("https://example.com:8080/");
 
 		const beforeClose = events.length;
-		harness.manager.close(SESSION_ID, browserId);
+		harness.emit("render-process-gone");
+		expect(events).toContainEqual({ type: "error", browserId, message: "Browser page crashed" });
 		expect(events).toContainEqual({ type: "closed", sessionId: SESSION_ID, browserId });
 		expect(harness.contentView.removeChildView).toHaveBeenCalledWith(harness.view);
 		expect(harness.webContents.close).toHaveBeenCalledOnce();
+		expect(harness.controllers.get(browserId)?.close).toHaveBeenCalledOnce();
+		expect(() => harness.manager.close(SESSION_ID, browserId)).toThrow("Browser is not running");
 		harness.emit("did-stop-loading");
-		expect(events).toHaveLength(beforeClose + 1);
+		expect(events).toHaveLength(beforeClose + 2);
 	});
 
 	it("lets a newer navigation supersede an aborted in-flight load", async () => {

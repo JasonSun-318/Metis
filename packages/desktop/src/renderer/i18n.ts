@@ -956,6 +956,7 @@ const zhCN = {
 	"Start browsing": "开始浏览",
 	"Enter a URL to open a page": "输入 URL 以打开页面",
 	"Metis is controlling this page": "Metis 正在控制此页面",
+	"Browser automation active": "浏览器自动控制中",
 	"Take control": "接管控制",
 	"Taking control…": "正在接管…",
 	"Your action is needed": "需要你操作",

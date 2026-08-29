@@ -882,7 +882,7 @@ export function BrowserPanel({ api, sessionId, browserId, controlState, handoffR
 				</div>
 			</div>
 			{controlState === "agent" && (
-				<div className="browser-control-bar" role="status">
+				<div aria-label={t("Browser automation active")} className="browser-control-bar" role="status">
 					<span>{t("Metis is controlling this page")}</span>
 					<button disabled={takeoverBusy} onClick={takeControl} type="button">
 						{t(takeoverBusy ? "Taking control…" : "Take control")}
@@ -890,7 +890,7 @@ export function BrowserPanel({ api, sessionId, browserId, controlState, handoffR
 				</div>
 			)}
 			{controlState === "handoff" && (
-				<div className="browser-control-bar browser-handoff-bar" role="alert">
+				<div aria-label={t("Your action is needed")} className="browser-control-bar browser-handoff-bar" role="alert">
 					<div>
 						<h2 ref={handoffHeadingRef} tabIndex={-1}>{t("Your action is needed")}</h2>
 						<p>{handoffMessage}</p>

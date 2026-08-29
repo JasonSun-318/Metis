@@ -7,10 +7,13 @@ import {
 	type BrowserToolCall,
 	type BrowserToolResult,
 	MAX_BROWSER_TABS_PER_SESSION,
+	type RpcErrorName,
 } from "@metis/app-protocol";
 import {
 	app,
-	type BrowserWindow,
+	BaseWindow,
+	BrowserWindow,
+	type BrowserWindowConstructorOptions,
 	type DownloadItem,
 	dialog,
 	type Event,
@@ -20,6 +23,7 @@ import {
 	type Session,
 	session,
 	shell,
+	type View,
 	type WebContents,
 	WebContentsView,
 	type WebContentsViewConstructorOptions,
@@ -28,6 +32,7 @@ import {
 } from "electron";
 import {
 	DEFAULT_BROWSER_PROFILE_ID,
+	type DesktopBrowserBounds,
 	type DesktopBrowserCommand,
 	type DesktopBrowserControlInput,
 	type DesktopBrowserEvent,
@@ -43,11 +48,12 @@ import {
 	type DesktopHistoryEntry,
 	type DesktopListBrowserHistoryInput,
 } from "../shared/desktop-api.ts";
-import { BrowserController } from "./browser-controller.ts";
+import { BrowserController, type BrowserControllerDependencies } from "./browser-controller.ts";
 import { BrowserProfileStore, mergeBrowserHistory } from "./browser-profile-store.ts";
 import { ChromiumBrowserImporter } from "./chromium-browser-import.ts";
 
 const BLANK_URL = "about:blank";
+const DEFAULT_BROWSER_BOUNDS: DesktopBrowserBounds = { x: 0, y: 0, width: 1_024, height: 768 };
 const MAX_HISTORY_ENTRIES = 500;
 const HISTORY_SAVE_DELAY_MS = 500;
 const ZOOM_PERCENTAGES = [25, 33, 50, 67, 75, 80, 90, 100, 110, 125, 150, 175, 200, 250, 300, 400, 500] as const;
@@ -56,9 +62,12 @@ interface BrowserRecord {
 	readonly browserId: string;
 	readonly sessionId: string;
 	readonly profileId: string;
-	readonly view: WebContentsView;
+	readonly contents: WebContents;
+	readonly view?: WebContentsView;
+	readonly popupWindow?: BrowserPopupWindow;
 	readonly controller: BrowserControllerLike;
 	readonly cleanup: (() => void)[];
+	host?: BrowserViewHost;
 	state: DesktopBrowserState;
 	presentationKey: string;
 	presentation?: {
@@ -73,7 +82,33 @@ interface BrowserRecord {
 	commandTail: Promise<void>;
 }
 
+type BrowserViewHost = Pick<View, "addChildView" | "removeChildView">;
+type BrowserBackgroundWindow = Pick<BaseWindow, "contentView" | "destroy" | "isDestroyed">;
+type BrowserPopupWindow = Pick<
+	BrowserWindow,
+	| "webContents"
+	| "destroy"
+	| "focus"
+	| "isDestroyed"
+	| "setBounds"
+	| "setFocusable"
+	| "setIgnoreMouseEvents"
+	| "setOpacity"
+	| "show"
+	| "showInactive"
+>;
+
 type BrowserControllerLike = Pick<BrowserController, "observe" | "act" | "invalidate" | "close">;
+
+export class BrowserToolError extends Error {
+	readonly rpcErrorName: RpcErrorName;
+
+	constructor(rpcErrorName: RpcErrorName, message: string) {
+		super(message);
+		this.name = "BrowserToolError";
+		this.rpcErrorName = rpcErrorName;
+	}
+}
 
 interface HandoffRecord {
 	readonly reason: Extract<BrowserToolCall, { tool: "browser_handoff" }>["input"]["reason"];
@@ -105,6 +140,8 @@ interface BrowserManagerDependencies {
 	readonly importer: Pick<ChromiumBrowserImporter, "listSources" | "readProfile">;
 	readonly sessionForPartition: (partition: string) => Session;
 	readonly createView: (options: WebContentsViewConstructorOptions) => WebContentsView;
+	readonly createBackgroundWindow: () => BrowserBackgroundWindow;
+	readonly createPopupWindow: (options: BrowserWindowConstructorOptions) => BrowserPopupWindow;
 	readonly openExternal: (url: string) => Promise<void>;
 	readonly savePdf: (data: Buffer, defaultFilename: string) => Promise<void>;
 	readonly saveScreenshot: (image: NativeImage, defaultFilename: string) => Promise<void>;
@@ -229,7 +266,8 @@ export class BrowserManager {
 	private readonly listeners = new Set<(event: DesktopBrowserEvent) => void>();
 	private downloadEmitTimer?: NodeJS.Timeout;
 	private readonly historySaveTimers = new Map<string, NodeJS.Timeout>();
-	private owner?: Pick<BrowserWindow, "contentView">;
+	private owner?: Pick<BrowserWindow, "contentView" | "getBounds">;
+	private automationWindow?: BrowserBackgroundWindow;
 
 	constructor(
 		dependencies: BrowserManagerDependencies = {
@@ -237,6 +275,16 @@ export class BrowserManager {
 			importer: new ChromiumBrowserImporter(),
 			sessionForPartition: (partition) => session.fromPartition(partition),
 			createView: (options) => new WebContentsView(options),
+			createBackgroundWindow: () =>
+				new BaseWindow({
+					show: false,
+					frame: false,
+					focusable: false,
+					skipTaskbar: true,
+					width: DEFAULT_BROWSER_BOUNDS.width,
+					height: DEFAULT_BROWSER_BOUNDS.height,
+				}),
+			createPopupWindow: (options) => new BrowserWindow(options),
 			openExternal: (url) => shell.openExternal(url),
 			savePdf: (data, defaultFilename) => saveBuffer(data, defaultFilename, "PDF document", "pdf"),
 			saveScreenshot: (image, defaultFilename) => saveBuffer(image.toPNG(), defaultFilename, "PNG image", "png"),
@@ -249,22 +297,20 @@ export class BrowserManager {
 		this.dependencies = dependencies;
 	}
 
-	attach(window: Pick<BrowserWindow, "contentView">): void {
+	attach(window: Pick<BrowserWindow, "contentView" | "getBounds">): void {
 		if (this.owner === window) return;
-		for (const record of this.records.values()) {
-			record.view.setVisible(false);
-			record.presentationKey = "";
-			this.owner?.contentView.removeChildView(record.view);
-		}
 		this.owner = window;
-		for (const record of this.records.values()) window.contentView.addChildView(record.view);
+		for (const record of this.records.values()) {
+			record.presentationKey = "";
+			this.placeSurface(record, record.controlState !== "agent" && Boolean(record.presentation?.visible));
+		}
 	}
 
 	suspendRenderer(): void {
 		for (const record of this.records.values()) {
-			record.view.setVisible(false);
 			record.presentation = undefined;
 			record.presentationKey = "";
+			this.placeSurface(record, false);
 		}
 	}
 
@@ -339,11 +385,12 @@ export class BrowserManager {
 			[...this.records.values()].filter(({ sessionId }) => sessionId === input.sessionId).length >=
 			MAX_BROWSER_TABS_PER_SESSION
 		) {
-			throw new Error("This task already has the maximum number of browser tabs");
+			throw new BrowserToolError("OVERLOADED", "This task already has the maximum number of browser tabs");
 		}
 		const browserSession = this.sessionForProfile(input.profileId);
 		const view = this.dependencies.createView({
 			webPreferences: {
+				backgroundThrottling: false,
 				contextIsolation: true,
 				nodeIntegration: false,
 				sandbox: true,
@@ -357,13 +404,43 @@ export class BrowserManager {
 	private registerView(input: DesktopCreateBrowserInput, view: WebContentsView): DesktopBrowserState {
 		view.setBackgroundColor("#191a19");
 		view.setBorderRadius(7);
-		view.setVisible(false);
-		const controller = this.createController(input.browserId, input.profileId, view.webContents);
+		return this.registerRecord(input, view.webContents, { view });
+	}
+
+	private registerPopup(input: DesktopCreateBrowserInput, popupWindow: BrowserPopupWindow): DesktopBrowserState {
+		return this.registerRecord(input, popupWindow.webContents, { popupWindow });
+	}
+
+	private registerRecord(
+		input: DesktopCreateBrowserInput,
+		contents: WebContents,
+		surface: { readonly view: WebContentsView } | { readonly popupWindow: BrowserPopupWindow },
+	): DesktopBrowserState {
+		const popupWindow = "popupWindow" in surface ? surface.popupWindow : undefined;
+		const controller = this.createController(
+			input.browserId,
+			input.profileId,
+			contents,
+			popupWindow
+				? ({ x, y, button }) => {
+						if (popupWindow.isDestroyed()) return;
+						popupWindow.setFocusable(true);
+						popupWindow.show();
+						popupWindow.focus();
+						const point = { x: Math.round(x), y: Math.round(y), button, clickCount: 1 } as const;
+						contents.sendInputEvent({ type: "mouseMove", ...point });
+						contents.sendInputEvent({ type: "mouseDown", ...point });
+						contents.sendInputEvent({ type: "mouseUp", ...point });
+						if (!popupWindow.isDestroyed()) popupWindow.setFocusable(false);
+					}
+				: undefined,
+		);
 		const record: BrowserRecord = {
 			browserId: input.browserId,
 			sessionId: input.sessionId,
 			profileId: input.profileId,
-			view,
+			contents,
+			...surface,
 			controller,
 			cleanup: [],
 			state: initialState(input.browserId, input.profileId),
@@ -374,14 +451,14 @@ export class BrowserManager {
 			commandTail: Promise.resolve(),
 		};
 		this.records.set(input.browserId, record);
-		this.owner?.contentView.addChildView(view);
+		if (record.view) this.placeSurface(record, false);
 		this.bind(input.browserId, record);
 		this.emit({ type: "opened", sessionId: input.sessionId, browserId: input.browserId, profileId: input.profileId });
 		return structuredClone(record.state);
 	}
 
 	async capturePreview(sessionId: string, browserId: string): Promise<string> {
-		return (await this.recordForSession(sessionId, browserId).view.webContents.capturePage()).toDataURL();
+		return (await this.recordForSession(sessionId, browserId).contents.capturePage()).toDataURL();
 	}
 
 	listDownloads(): readonly DesktopDownloadItem[] {
@@ -445,20 +522,19 @@ export class BrowserManager {
 	}
 
 	async control(input: DesktopBrowserControlInput): Promise<void> {
-		const record = this.recordForSession(input.sessionId, input.browserId);
 		if (input.type === "present") {
+			const record = this.records.get(input.browserId);
+			if (!record) return;
+			if (record.sessionId !== input.sessionId) throw new Error("Browser does not belong to this task");
+			if (record.controlState === "agent") return;
 			record.presentation = { visible: input.visible, bounds: input.bounds };
-			if (record.controlState === "agent" && input.visible) {
-				record.view.setVisible(false);
-				return;
-			}
 			const key = `${input.visible}:${input.bounds.x}:${input.bounds.y}:${input.bounds.width}:${input.bounds.height}`;
 			if (key === record.presentationKey) return;
 			record.presentationKey = key;
-			record.view.setBounds(input.bounds);
-			record.view.setVisible(input.visible);
+			this.placeSurface(record, input.visible);
 			return;
 		}
+		const record = this.recordForSession(input.sessionId, input.browserId);
 		if (record.controlState !== "idle") throw new Error("Browser is currently controlled by the user or agent");
 		if (input.type === "navigate") {
 			await this.navigateRecord(record, input.url);
@@ -466,29 +542,29 @@ export class BrowserManager {
 		}
 		if (input.type === "back") {
 			record.controller.invalidate();
-			if (record.view.webContents.navigationHistory.canGoBack()) record.view.webContents.navigationHistory.goBack();
+			if (record.contents.navigationHistory.canGoBack()) record.contents.navigationHistory.goBack();
 			return;
 		}
 		if (input.type === "forward") {
 			record.controller.invalidate();
-			if (record.view.webContents.navigationHistory.canGoForward()) {
-				record.view.webContents.navigationHistory.goForward();
+			if (record.contents.navigationHistory.canGoForward()) {
+				record.contents.navigationHistory.goForward();
 			}
 			return;
 		}
 		if (input.type === "reload") {
 			record.controller.invalidate();
-			record.view.webContents.reload();
+			record.contents.reload();
 			return;
 		}
 		if (input.type === "find") {
 			if (input.text === "") {
 				record.findRequestId = 0;
-				record.view.webContents.stopFindInPage("clearSelection");
+				record.contents.stopFindInPage("clearSelection");
 				this.emit({ type: "find-result", browserId: input.browserId, activeMatchOrdinal: 0, matches: 0 });
 				return;
 			}
-			record.findRequestId = record.view.webContents.findInPage(input.text, {
+			record.findRequestId = record.contents.findInPage(input.text, {
 				forward: input.forward,
 				findNext: input.findNext,
 			});
@@ -496,13 +572,13 @@ export class BrowserManager {
 		}
 		if (input.type === "stop-find") {
 			record.findRequestId = 0;
-			record.view.webContents.stopFindInPage("clearSelection");
+			record.contents.stopFindInPage("clearSelection");
 			this.emit({ type: "find-result", browserId: input.browserId, activeMatchOrdinal: 0, matches: 0 });
 			return;
 		}
 		if (input.type === "print") {
-			if ((await printPage(record.view.webContents)) === "no-printer") {
-				const pdf = await record.view.webContents.printToPDF({ printBackground: true });
+			if ((await printPage(record.contents)) === "no-printer") {
+				const pdf = await record.contents.printToPDF({ printBackground: true });
 				await this.dependencies.savePdf(pdf, printFilename());
 			}
 			return;
@@ -523,13 +599,13 @@ export class BrowserManager {
 							? (ZOOM_PERCENTAGES.find((value) => value > current) ?? ZOOM_PERCENTAGES.at(-1)!)
 							: ([...ZOOM_PERCENTAGES].reverse().find((value) => value < current) ?? ZOOM_PERCENTAGES[0]);
 			if (zoomPercent === current) return;
-			record.view.webContents.setZoomFactor(zoomPercent / 100);
+			record.contents.setZoomFactor(zoomPercent / 100);
 			record.state = { ...record.state, zoomPercent };
 			this.emit({ type: "state", state: structuredClone(record.state) });
 			return;
 		}
 		if (input.type === "capture-page") {
-			const image = await record.view.webContents.capturePage();
+			const image = await record.contents.capturePage();
 			await this.dependencies.saveScreenshot(image, screenshotFilename());
 			return;
 		}
@@ -567,16 +643,15 @@ export class BrowserManager {
 						await this.navigateRecord(record, call.input.url, operationSignal);
 					} else if (call.input.action === "back") {
 						record.controller.invalidate();
-						if (record.view.webContents.navigationHistory.canGoBack())
-							record.view.webContents.navigationHistory.goBack();
+						if (record.contents.navigationHistory.canGoBack()) record.contents.navigationHistory.goBack();
 					} else if (call.input.action === "forward") {
 						record.controller.invalidate();
-						if (record.view.webContents.navigationHistory.canGoForward()) {
-							record.view.webContents.navigationHistory.goForward();
+						if (record.contents.navigationHistory.canGoForward()) {
+							record.contents.navigationHistory.goForward();
 						}
 					} else {
 						record.controller.invalidate();
-						record.view.webContents.reload();
+						record.contents.reload();
 					}
 					return {
 						status: "completed" as const,
@@ -665,14 +740,18 @@ export class BrowserManager {
 		this.cancelHandoff(record, cancellationReason);
 		record.controller.close();
 		for (const cleanup of record.cleanup.splice(0)) cleanup();
-		this.owner?.contentView.removeChildView(record.view);
-		if (!record.view.webContents.isDestroyed()) record.view.webContents.close();
+		if (record.view) record.host?.removeChildView(record.view);
+		record.host = undefined;
+		if (record.popupWindow && !record.popupWindow.isDestroyed()) record.popupWindow.destroy();
+		else if (!record.contents.isDestroyed()) record.contents.close();
 		this.emit({ type: "closed", sessionId: record.sessionId, browserId });
 	}
 
 	closeAll(): void {
 		for (const profileId of this.historySaveTimers.keys()) this.persistHistory(profileId, true);
 		for (const record of [...this.records.values()]) this.closeRecord(record, "server_restarted");
+		if (this.automationWindow && !this.automationWindow.isDestroyed()) this.automationWindow.destroy();
+		this.automationWindow = undefined;
 	}
 
 	private record(browserId: string): BrowserRecord {
@@ -687,7 +766,12 @@ export class BrowserManager {
 		return record;
 	}
 
-	private createController(browserId: string, profileId: string, contents: WebContents): BrowserControllerLike {
+	private createController(
+		browserId: string,
+		profileId: string,
+		contents: WebContents,
+		dispatchMainFrameClick?: NonNullable<BrowserControllerDependencies["dispatchMainFrameClick"]>,
+	): BrowserControllerLike {
 		if (this.dependencies.createController)
 			return this.dependencies.createController({ browserId, profileId, contents });
 		const browserDebugger = contents.debugger;
@@ -708,6 +792,7 @@ export class BrowserManager {
 				}
 				return image.toJPEG(quality);
 			},
+			dispatchMainFrameClick,
 			subscribeMessage: (listener) => {
 				const onMessage = (_event: Event, method: string, params: Record<string, unknown>, sessionId?: string) =>
 					listener(method, params, sessionId);
@@ -750,7 +835,7 @@ export class BrowserManager {
 		record.controller.invalidate();
 		record.state = { ...record.state, url, loading: true };
 		this.emit({ type: "state", state: structuredClone(record.state) });
-		const navigation = record.view.webContents.loadURL(url).catch((cause) => {
+		const navigation = record.contents.loadURL(url).catch((cause) => {
 			if (!isAbortedNavigation(cause)) throw cause;
 		});
 		if (!signal) {
@@ -872,9 +957,17 @@ export class BrowserManager {
 		signal.removeEventListener("abort", onAbort);
 		clearTimeout(timer);
 		if (record.handoff?.promise === promise) record.handoff = undefined;
-		this.setControlState(record, "idle");
+		const open = this.records.get(record.browserId) === record;
+		if (open) this.setControlState(record, "idle");
 		if (outcome.status === "cancel") {
-			this.emit({ type: "handoff", sessionId: record.sessionId, browserId: record.browserId, status: "cancelled" });
+			if (open) {
+				this.emit({
+					type: "handoff",
+					sessionId: record.sessionId,
+					browserId: record.browserId,
+					status: "cancelled",
+				});
+			}
 			return { status: "cancelled", reason: outcome.reason };
 		}
 		this.emit({ type: "handoff", sessionId: record.sessionId, browserId: record.browserId, status: "completed" });
@@ -897,14 +990,67 @@ export class BrowserManager {
 			this.emit({ type: "activity", sessionId: record.sessionId, browserId: record.browserId, active: false });
 		}
 		if (state === "agent") {
-			record.view.setVisible(false);
+			this.placeSurface(record, false);
 			this.emit({ type: "activity", sessionId: record.sessionId, browserId: record.browserId, active: true });
 			return;
 		}
-		if (record.presentation) {
-			record.view.setBounds(record.presentation.bounds);
-			record.view.setVisible(record.presentation.visible);
+		this.placeSurface(record, Boolean(record.presentation?.visible));
+	}
+
+	private backgroundBounds(preferred: DesktopBrowserBounds = DEFAULT_BROWSER_BOUNDS): DesktopBrowserBounds {
+		const desired = preferred.width >= 320 && preferred.height >= 240 ? preferred : DEFAULT_BROWSER_BOUNDS;
+		return { x: 0, y: 0, width: desired.width, height: desired.height };
+	}
+
+	private backgroundHost(): BrowserViewHost {
+		if (!this.automationWindow || this.automationWindow.isDestroyed()) {
+			this.automationWindow = this.dependencies.createBackgroundWindow();
 		}
+		return this.automationWindow.contentView;
+	}
+
+	private placeSurface(record: BrowserRecord, foreground: boolean): void {
+		if (record.popupWindow) {
+			this.placePopupWindow(record, foreground);
+			return;
+		}
+		if (!record.view) return;
+		const host = foreground && this.owner ? this.owner.contentView : this.backgroundHost();
+		if (record.host !== host) {
+			record.host?.removeChildView(record.view);
+			host.addChildView(record.view);
+			record.host = host;
+		}
+		record.view.setBounds(
+			foreground && record.presentation
+				? record.presentation.bounds
+				: this.backgroundBounds(record.presentation?.bounds),
+		);
+		record.view.setVisible(true);
+	}
+
+	private placePopupWindow(record: BrowserRecord, foreground: boolean): void {
+		const popup = record.popupWindow;
+		if (!popup || popup.isDestroyed()) return;
+		if (!foreground || !record.presentation) {
+			popup.setIgnoreMouseEvents(true);
+			popup.setFocusable(false);
+			popup.setOpacity(0);
+			popup.setBounds({ ...this.backgroundBounds(record.presentation?.bounds), x: -10_000, y: 0 });
+			popup.showInactive();
+			return;
+		}
+		const ownerBounds = this.owner?.getBounds();
+		popup.setBounds({
+			x: (ownerBounds?.x ?? 0) + record.presentation.bounds.x,
+			y: (ownerBounds?.y ?? 0) + record.presentation.bounds.y,
+			width: record.presentation.bounds.width,
+			height: record.presentation.bounds.height,
+		});
+		popup.setOpacity(1);
+		popup.setFocusable(true);
+		popup.setIgnoreMouseEvents(false);
+		popup.show();
 	}
 
 	private async enqueueRecord<T>(record: BrowserRecord, signal: AbortSignal, operation: () => Promise<T>): Promise<T> {
@@ -951,7 +1097,7 @@ export class BrowserManager {
 	}
 
 	private bind(browserId: string, record: BrowserRecord): void {
-		const contents = record.view.webContents;
+		const contents = record.contents;
 		const sync = () => {
 			if (this.records.get(browserId) !== record) return;
 			const url = contents.getURL();
@@ -1001,11 +1147,8 @@ export class BrowserManager {
 			if (isMainFrame && errorCode !== -3) this.emit({ type: "error", browserId, message: errorDescription });
 		};
 		const onRenderProcessGone = () => {
-			record.activeAbort?.abort();
-			this.cancelHandoff(record, "tab_closed");
-			record.controller.invalidate();
-			if (record.controlState === "agent") this.setControlState(record, "idle");
 			this.emit({ type: "error", browserId, message: "Browser page crashed" });
+			this.closeRecord(record, "tab_closed");
 		};
 		const onWillNavigate = (
 			event: Event<WebContentsWillNavigateEventParams | WebContentsWillRedirectEventParams>,
@@ -1044,7 +1187,8 @@ export class BrowserManager {
 			this.cancelHandoff(record, "tab_closed");
 			record.controller.close();
 			for (const cleanup of record.cleanup.splice(0)) cleanup();
-			this.owner?.contentView.removeChildView(record.view);
+			if (record.view) record.host?.removeChildView(record.view);
+			record.host = undefined;
 			this.emit({ type: "closed", sessionId: record.sessionId, browserId });
 			this.emit({ type: "error", browserId, message: "Browser page crashed" });
 		};
@@ -1096,10 +1240,20 @@ export class BrowserManager {
 			}
 			return {
 				action: "allow",
-				createWindow: () => {
+				createWindow: (options) => {
 					const popupId = randomUUID();
-					const popup = this.dependencies.createView({
+					const popup = this.dependencies.createPopupWindow({
+						...options,
+						show: true,
+						frame: false,
+						focusable: false,
+						opacity: 0,
+						skipTaskbar: true,
+						x: -10_000,
+						y: 0,
 						webPreferences: {
+							...options.webPreferences,
+							backgroundThrottling: false,
 							contextIsolation: true,
 							nodeIntegration: false,
 							sandbox: true,
@@ -1107,7 +1261,7 @@ export class BrowserManager {
 							webSecurity: true,
 						},
 					});
-					this.registerView(
+					this.registerPopup(
 						{ sessionId: record.sessionId, browserId: popupId, profileId: record.profileId },
 						popup,
 					);

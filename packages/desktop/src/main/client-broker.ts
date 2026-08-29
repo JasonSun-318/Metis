@@ -58,7 +58,7 @@ import {
 	validateWriteTerminalInput,
 	validateWriteWorkspaceFileInput,
 } from "../shared/desktop-api.ts";
-import type { BrowserManager } from "./browser-manager.ts";
+import { type BrowserManager, BrowserToolError } from "./browser-manager.ts";
 import { deliveredPreviewDirectories, readDeliveredPreviewBytes } from "./preview-file-reader.ts";
 import type { TerminalManager } from "./terminal-manager.ts";
 import type { WorkspaceFileManager } from "./workspace-file-manager.ts";
@@ -446,13 +446,17 @@ export class ClientBroker {
 		];
 	}
 
-	attach(window: Pick<BrowserWindow, "webContents"> & Partial<Pick<BrowserWindow, "contentView">>): void {
+	attach(
+		window: Pick<BrowserWindow, "webContents"> & Partial<Pick<BrowserWindow, "contentView" | "getBounds">>,
+	): void {
 		if (this.disposed) throw new Error("Desktop client broker is disposed");
 		this.detachOwner();
 		const owner = window.webContents;
 		this.owner = owner;
 		this.ownerSubscribed = false;
-		if (window.contentView) this.browserManager.attach(window as Pick<BrowserWindow, "contentView">);
+		if (window.contentView && window.getBounds) {
+			this.browserManager.attach(window as Pick<BrowserWindow, "contentView" | "getBounds">);
+		}
 
 		const onDestroyed = () => {
 			if (this.owner === owner) this.detachOwner();
@@ -866,14 +870,16 @@ export class ClientBroker {
 					result: { toolCallId: request.params.toolCallId, result },
 				});
 			})
-			.catch(() => {
+			.catch((cause) => {
 				if (this.pendingBrowserCalls.get(request.id) !== pending) return;
 				const view = this.supervisor.view();
 				if (view.state !== "ready" || view.serverEpoch !== request.params.serverEpoch) return;
 				this.supervisor.respondToServerRequest(request, {
 					jsonrpc: "2.0",
 					id: request.id,
-					error: createRpcError("OPERATION_FAILED", { sessionId: request.params.sessionId }),
+					error: createRpcError(cause instanceof BrowserToolError ? cause.rpcErrorName : "OPERATION_FAILED", {
+						sessionId: request.params.sessionId,
+					}),
 				});
 			})
 			.finally(() => {
@@ -926,7 +932,7 @@ export class ClientBroker {
 	}
 
 	private cancelBrowserCallsForTab(sessionId: string, browserId: string): void {
-		for (const [requestId, pending] of this.pendingBrowserCalls) {
+		for (const pending of this.pendingBrowserCalls.values()) {
 			if (pending.request.params.sessionId !== sessionId) continue;
 			const call = pending.request.params.call;
 			const targetsBrowser =
@@ -935,7 +941,6 @@ export class ClientBroker {
 			const isClosingCall = call.tool === "browser_tabs" && call.input.action === "close";
 			if (!targetsBrowser || isClosingCall) continue;
 			pending.abort.abort();
-			this.pendingBrowserCalls.delete(requestId);
 		}
 	}
 
@@ -943,7 +948,7 @@ export class ClientBroker {
 		const sessionIds = new Set([...this.pendingBrowserCalls.values()].map(({ request }) => request.params.sessionId));
 		for (const sessionId of sessionIds) this.browserManager.cancelSessionHandoffs(sessionId, reason);
 		const pending = [...this.pendingBrowserCalls.values()];
-		this.pendingBrowserCalls.clear();
+		if (reason === "server_restarted") this.pendingBrowserCalls.clear();
 		for (const call of pending) call.abort.abort();
 	}
 
