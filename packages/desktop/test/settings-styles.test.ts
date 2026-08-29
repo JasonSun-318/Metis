@@ -7,6 +7,16 @@ import { describe, expect, it } from "vitest";
 const css = readFileSync(path.join(process.cwd(), "src/renderer/styles/app.css"), "utf8");
 
 describe("Settings visual states", () => {
+	it("uses restrained overlays and a flatter content hierarchy", () => {
+		expect(css).toContain("background: rgb(0 0 0 / 46%); backdrop-filter: blur(4px)");
+		expect(css).toContain(
+			".model-provider-grid { display: grid; min-height: 0; align-content: start; gap: 10px; margin-top: 4px; grid-template-columns: repeat(2, minmax(0, 1fr)); }",
+		);
+		expect(css).toContain(
+			".usage-detail-card { border: 0; border-radius: 0; background: transparent; padding: 4px 16px; }",
+		);
+	});
+
 	it("keeps API key text clear of the reveal control", () => {
 		const style = document.createElement("style");
 		style.textContent = css;
