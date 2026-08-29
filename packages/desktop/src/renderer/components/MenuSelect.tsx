@@ -20,6 +20,7 @@ export function MenuSelect<T extends string>({
 	onChange,
 	options,
 	placeholder = "Select",
+	popoverClassName = "",
 	prefix,
 	triggerIcon,
 	value,
@@ -32,6 +33,7 @@ export function MenuSelect<T extends string>({
 	readonly onChange: (value: T) => void;
 	readonly options: readonly MenuSelectOption<T>[];
 	readonly placeholder?: string;
+	readonly popoverClassName?: string;
 	readonly prefix?: string;
 	readonly triggerIcon?: ReactNode;
 	readonly value: T;
@@ -107,7 +109,7 @@ export function MenuSelect<T extends string>({
 	const popover = open ? (
 		<div
 			aria-label={ariaLabel}
-			className="menu-select-popover"
+			className={`menu-select-popover ${popoverClassName}`.trim()}
 			id={id}
 			onKeyDown={(event) => {
 				if (event.key === "Escape") {

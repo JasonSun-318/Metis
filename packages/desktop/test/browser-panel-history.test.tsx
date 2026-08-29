@@ -11,6 +11,7 @@ import type {
 	DesktopHistoryEntry,
 	MetisDesktopApi,
 } from "../src/shared/desktop-api.ts";
+import { DEFAULT_BROWSER_PROFILE_ID } from "../src/shared/desktop-api.ts";
 
 let roots: Root[] = [];
 
@@ -43,7 +44,7 @@ function renderPanel(api: MetisDesktopApi) {
 	void act(() =>
 		root.render(
 			<StrictMode>
-				<BrowserPanel api={api} browserId="browser-1" onError={vi.fn()} onState={vi.fn()} visible />
+				<BrowserPanel api={api} browserId="browser-1" onError={vi.fn()} onProfileImported={vi.fn()} onState={vi.fn()} profile={{ profileId: DEFAULT_BROWSER_PROFILE_ID, name: "Default" }} visible />
 			</StrictMode>,
 		),
 	);
@@ -58,6 +59,7 @@ function browserPanelApi(overrides: {
 	let listener: ((event: DesktopBrowserEvent) => void) | undefined;
 	const state: DesktopBrowserState = {
 		browserId: "browser-1",
+		profileId: DEFAULT_BROWSER_PROFILE_ID,
 		url: "",
 		title: "New tab",
 		faviconUrl: null,
@@ -124,7 +126,7 @@ describe("BrowserPanel history", () => {
 		await flush();
 
 		await act(async () => {
-			emitBrowserEvent({ type: "history", entries: [historyEntry({ entryId: "h-2", title: "Docs" })] });
+			emitBrowserEvent({ type: "history", profileId: DEFAULT_BROWSER_PROFILE_ID, entries: [historyEntry({ entryId: "h-2", title: "Docs" })] });
 		});
 		await act(async () => button(container, "History")!.click());
 		await flush();
@@ -132,7 +134,7 @@ describe("BrowserPanel history", () => {
 		expect(container.textContent).toContain("Docs");
 
 		await act(async () => button(container, "Clear history")!.click());
-		expect(clearBrowserHistory).toHaveBeenCalledOnce();
+		expect(clearBrowserHistory).toHaveBeenCalledWith({ profileId: DEFAULT_BROWSER_PROFILE_ID });
 	});
 
 	it("shows an empty placeholder without entries", async () => {

@@ -19,6 +19,7 @@ import {
 	Plus,
 	Printer,
 	Trash,
+	User,
 	X,
 } from "@phosphor-icons/react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
@@ -27,17 +28,29 @@ import type {
 	MetisDesktopApi,
 	DesktopBrowserBounds,
 	DesktopBrowserCommand,
+	DesktopBrowserProfile,
+	DesktopBrowserSourceId,
 	DesktopBrowserState,
 	DesktopDownloadControlType,
 	DesktopDownloadItem,
 	DesktopHistoryEntry,
 } from "../../shared/desktop-api.ts";
+import { BrowserImportDialog } from "./BrowserImportDialog.tsx";
+import { MenuSelect } from "./MenuSelect.tsx";
+
+type BrowserProfileChoice = Pick<DesktopBrowserProfile, "profileId" | "name"> & {
+	readonly sourceId?: DesktopBrowserSourceId | null;
+};
 
 interface BrowserPanelProps {
 	readonly api: MetisDesktopApi;
 	readonly browserId: string;
 	readonly onError: (cause: unknown) => void;
+	readonly onOpenProfile?: (profile: BrowserProfileChoice) => void;
+	readonly onProfileImported: (profile: DesktopBrowserProfile) => void;
 	readonly onState: (state: DesktopBrowserState) => void;
+	readonly profile: BrowserProfileChoice;
+	readonly profiles?: readonly BrowserProfileChoice[];
 	readonly visible: boolean;
 }
 
@@ -118,8 +131,9 @@ function BrowserDownloadRow({
 	);
 }
 
-const emptyState = (browserId: string): DesktopBrowserState => ({
+const emptyState = (browserId: string, profileId: string): DesktopBrowserState => ({
 	browserId,
+	profileId,
 	url: "",
 	title: "New tab",
 	faviconUrl: null,
@@ -128,6 +142,13 @@ const emptyState = (browserId: string): DesktopBrowserState => ({
 	canGoForward: false,
 	zoomPercent: 100,
 });
+
+const BROWSER_SOURCE_NAMES: Record<DesktopBrowserSourceId, string> = {
+	chrome: "Google Chrome",
+	edge: "Microsoft Edge",
+	brave: "Brave",
+	chromium: "Chromium",
+};
 
 function BrowserClearDialog({ busy, onCancel, onConfirm }: {
 	readonly busy: boolean;
@@ -155,7 +176,7 @@ function BrowserClearDialog({ busy, onCancel, onConfirm }: {
 		>
 			<form method="dialog">
 				<h2 id="browser-clear-title">{t("Clear browsing data?")}</h2>
-				<p>{t("This clears cookies and site data for every Metis browser tab. Open tabs will stay open.")}</p>
+				<p>{t("This clears cookies and site data for the current browser profile. Open tabs will stay open.")}</p>
 				<div className="browser-clear-actions">
 					<button disabled={busy} onClick={onCancel} type="button">{t("Cancel")}</button>
 					<button className="is-danger" data-browser-confirm-clear disabled={busy} onClick={onConfirm} type="button">{t(busy ? "Clearing…" : "Clear data")}</button>
@@ -165,9 +186,14 @@ function BrowserClearDialog({ busy, onCancel, onConfirm }: {
 	);
 }
 
-export function BrowserPanel({ api, browserId, onError, onState, visible }: BrowserPanelProps) {
+export function BrowserPanel({ api, browserId, onError, onOpenProfile, onProfileImported, onState, profile, profiles, visible }: BrowserPanelProps) {
 	const { t } = useTranslation();
-	const [state, setState] = useState(() => emptyState(browserId));
+	const availableProfiles = profiles ?? [profile];
+	const currentProfile = availableProfiles.find((candidate) => candidate.profileId === profile.profileId) ?? profile;
+	const profileLabel = (candidate: BrowserProfileChoice) => candidate.sourceId
+		? `${BROWSER_SOURCE_NAMES[candidate.sourceId]} — ${candidate.name}`
+		: `Metis — ${t("Default profile")}`;
+	const [state, setState] = useState(() => emptyState(browserId, profile.profileId));
 	const [address, setAddress] = useState("");
 	const [status, setStatus] = useState<string | null>(null);
 	const [moreOpen, setMoreOpen] = useState(false);
@@ -179,6 +205,7 @@ export function BrowserPanel({ api, browserId, onError, onState, visible }: Brow
 	const [findText, setFindText] = useState("");
 	const [findResult, setFindResult] = useState({ activeMatchOrdinal: 0, matches: 0 });
 	const [clearConfirmOpen, setClearConfirmOpen] = useState(false);
+	const [importOpen, setImportOpen] = useState(false);
 	const [clearBusy, setClearBusy] = useState(false);
 	const [notice, setNotice] = useState<string | null>(null);
 	const [downloads, setDownloads] = useState<readonly DesktopDownloadItem[]>([]);
@@ -298,7 +325,7 @@ export function BrowserPanel({ api, browserId, onError, onState, visible }: Brow
 
 	function clearBrowserHistoryEntries() {
 		setStatus(null);
-		void api.clearBrowserHistory().catch((cause) => {
+		void api.clearBrowserHistory({ profileId: profile.profileId }).catch((cause) => {
 			setStatus(translateRef.current("Browser action failed"));
 			onErrorRef.current(cause);
 		});
@@ -457,7 +484,7 @@ export function BrowserPanel({ api, browserId, onError, onState, visible }: Brow
 				return;
 			}
 			if (event.type === "history") {
-				setHistory(event.entries);
+				if (event.profileId === profile.profileId) setHistory(event.entries);
 				return;
 			}
 			if (event.type === "command") {
@@ -475,13 +502,13 @@ export function BrowserPanel({ api, browserId, onError, onState, visible }: Brow
 			},
 			() => undefined,
 		);
-		void api.listBrowserHistory().then(
+		void api.listBrowserHistory({ profileId: profile.profileId }).then(
 			(listed) => {
 				if (active) setHistory(listed);
 			},
 			() => undefined,
 		);
-		creationRef.current ??= api.createBrowser({ browserId });
+		creationRef.current ??= api.createBrowser({ browserId, profileId: profile.profileId });
 		void creationRef.current.then(
 			(created) => {
 				if (!active) return;
@@ -499,7 +526,7 @@ export function BrowserPanel({ api, browserId, onError, onState, visible }: Brow
 			previewRequestRef.current += 1;
 			removeBrowserListener();
 		};
-	}, [api, browserId]);
+	}, [api, browserId, profile.profileId]);
 
 	useEffect(() => setZoomDraft(String(state.zoomPercent)), [state.zoomPercent]);
 
@@ -527,7 +554,7 @@ export function BrowserPanel({ api, browserId, onError, onState, visible }: Brow
 	}, [moreOpen, downloadsOpen, historyOpen]);
 
 	useEffect(() => {
-		if (!visible || clearConfirmOpen) return;
+		if (!visible || clearConfirmOpen || importOpen) return;
 		const onKeyDown = (event: KeyboardEvent) => {
 			if (!(event.metaKey || event.ctrlKey) || event.altKey) return;
 			const key = event.key.toLowerCase();
@@ -543,7 +570,7 @@ export function BrowserPanel({ api, browserId, onError, onState, visible }: Brow
 		};
 		window.addEventListener("keydown", onKeyDown);
 		return () => window.removeEventListener("keydown", onKeyDown);
-	}, [api, browserId, clearConfirmOpen, visible]);
+	}, [api, browserId, clearConfirmOpen, importOpen, visible]);
 
 	useEffect(() => {
 		let frame = 0;
@@ -603,9 +630,10 @@ export function BrowserPanel({ api, browserId, onError, onState, visible }: Brow
 			&& !downloadsOpen
 			&& !historyOpen
 			&& !clearConfirmOpen
+			&& !importOpen
 			&& status === null;
 		presentRef.current?.();
-	}, [clearConfirmOpen, downloadsOpen, historyOpen, moreOpen, state.url, status, visible]);
+	}, [clearConfirmOpen, downloadsOpen, historyOpen, importOpen, moreOpen, state.url, status, visible]);
 
 	const control = (type: "back" | "forward" | "reload" | "open-external") => {
 		setStatus(null);
@@ -624,6 +652,19 @@ export function BrowserPanel({ api, browserId, onError, onState, visible }: Brow
 			role="tabpanel"
 		>
 			<div className="browser-toolbar">
+				<MenuSelect
+					ariaLabel={t("Browser profile: {{name}}", { name: profileLabel(currentProfile) })}
+					className="browser-profile-select"
+					menuMinWidth={220}
+					onChange={(profileId) => {
+						const selected = availableProfiles.find((candidate) => candidate.profileId === profileId);
+						if (selected) onOpenProfile?.(selected);
+					}}
+					options={availableProfiles.map((candidate) => ({ value: candidate.profileId, label: profileLabel(candidate) }))}
+					popoverClassName="browser-profile-popover"
+					triggerIcon={<User aria-hidden="true" size={13} weight="fill" />}
+					value={profile.profileId}
+				/>
 				<button aria-label={t("Back")} className="browser-toolbar-button" disabled={!state.canGoBack} onClick={() => control("back")} type="button"><ArrowLeft aria-hidden="true" size={14} /></button>
 				<button aria-label={t("Forward")} className="browser-forward browser-toolbar-button" disabled={!state.canGoForward} onClick={() => control("forward")} type="button"><ArrowRight aria-hidden="true" size={14} /></button>
 				<button aria-label={t("Reload")} className="browser-toolbar-button" disabled={state.url === ""} onClick={() => control("reload")} type="button"><ArrowClockwise aria-hidden="true" className={state.loading ? "is-spinning" : undefined} size={14} /></button>
@@ -759,6 +800,7 @@ export function BrowserPanel({ api, browserId, onError, onState, visible }: Brow
 							</div>
 							<button disabled={state.url === ""} onClick={() => runPageAction("capture-page")} role="menuitem" type="button"><Camera aria-hidden="true" size={14} /><span>{t("Screenshot")}</span></button>
 							<div className="browser-menu-separator" role="separator" />
+							<button onClick={() => { setMoreOpen(false); setImportOpen(true); }} role="menuitem" type="button"><DownloadSimple aria-hidden="true" size={14} /><span>{t("Import browser data…")}</span></button>
 							<button data-browser-action="clear-data" onClick={() => { setMoreOpen(false); setClearConfirmOpen(true); }} role="menuitem" type="button"><Trash aria-hidden="true" size={14} /><span>{t("Clear browsing data")}</span></button>
 						</div>
 					)}
@@ -809,6 +851,21 @@ export function BrowserPanel({ api, browserId, onError, onState, visible }: Brow
 				</div>
 			)}
 			{clearConfirmOpen && <BrowserClearDialog busy={clearBusy} onCancel={() => setClearConfirmOpen(false)} onConfirm={clearBrowserData} />}
+			{importOpen && (
+				<BrowserImportDialog
+					api={api}
+					onCancel={() => setImportOpen(false)}
+					onImported={(result) => {
+						const summary = [
+							result.cookies ? t("Imported {{count}} Cookies ({{skipped}} skipped).", { count: result.cookies.imported, skipped: result.cookies.skipped }) : "",
+							result.history ? t("{{count}} history entries retained.", { count: result.history.retained }) : "",
+						].filter(Boolean).join(" ");
+						setImportOpen(false);
+						setNotice(summary);
+						onProfileImported(result.profile);
+					}}
+				/>
+			)}
 			{notice && <div className="browser-toolbar-notice" role="status">{notice}</div>}
 			{status && <div className="browser-status" role="status">{status}</div>}
 		</section>

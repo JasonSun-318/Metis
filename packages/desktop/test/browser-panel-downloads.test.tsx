@@ -11,6 +11,7 @@ import type {
 	DesktopDownloadItem,
 	MetisDesktopApi,
 } from "../src/shared/desktop-api.ts";
+import { DEFAULT_BROWSER_PROFILE_ID } from "../src/shared/desktop-api.ts";
 
 let roots: Root[] = [];
 
@@ -46,7 +47,7 @@ function renderPanel(api: MetisDesktopApi) {
 	void act(() =>
 		root.render(
 			<StrictMode>
-				<BrowserPanel api={api} browserId="browser-1" onError={vi.fn()} onState={vi.fn()} visible />
+				<BrowserPanel api={api} browserId="browser-1" onError={vi.fn()} onProfileImported={vi.fn()} onState={vi.fn()} profile={{ profileId: DEFAULT_BROWSER_PROFILE_ID, name: "Default" }} visible />
 			</StrictMode>,
 		),
 	);
@@ -61,6 +62,7 @@ function browserPanelApi(overrides: {
 	let listener: ((event: DesktopBrowserEvent) => void) | undefined;
 	const state: DesktopBrowserState = {
 		browserId: "browser-1",
+		profileId: DEFAULT_BROWSER_PROFILE_ID,
 		url: "",
 		title: "New tab",
 		faviconUrl: null,

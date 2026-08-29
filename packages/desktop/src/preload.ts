@@ -18,6 +18,10 @@ import {
 	validateBrowserDownloadControlInput,
 	validateBrowserDownloadList,
 	validateBrowserHistoryList,
+	validateBrowserImportInput,
+	validateBrowserImportResult,
+	validateBrowserImportSourceList,
+	validateBrowserProfileList,
 	validateCloseBrowserInput,
 	validateCloseTerminalInput,
 	validateCreateBrowserInput,
@@ -28,6 +32,7 @@ import {
 	validateDesktopTerminalEvent,
 	validateDesktopUpdateState,
 	validateInteractionResponseInput,
+	validateListBrowserHistoryInput,
 	validateListWorkspaceDirectoryInput,
 	validateOpenWorkspaceFileInput,
 	validateReadPreviewFileInput,
@@ -147,10 +152,20 @@ const api = {
 	controlBrowserDownload: async (input) => {
 		await ipcRenderer.invoke(DESKTOP_IPC_CHANNELS.controlBrowserDownload, validateBrowserDownloadControlInput(input));
 	},
-	listBrowserHistory: async () =>
-		validateBrowserHistoryList(await ipcRenderer.invoke(DESKTOP_IPC_CHANNELS.listBrowserHistory)),
-	clearBrowserHistory: async () => {
-		await ipcRenderer.invoke(DESKTOP_IPC_CHANNELS.clearBrowserHistory);
+	listBrowserProfiles: async () =>
+		validateBrowserProfileList(await ipcRenderer.invoke(DESKTOP_IPC_CHANNELS.listBrowserProfiles)),
+	listBrowserImportSources: async () =>
+		validateBrowserImportSourceList(await ipcRenderer.invoke(DESKTOP_IPC_CHANNELS.listBrowserImportSources)),
+	importBrowserData: async (input) =>
+		validateBrowserImportResult(
+			await ipcRenderer.invoke(DESKTOP_IPC_CHANNELS.importBrowserData, validateBrowserImportInput(input)),
+		),
+	listBrowserHistory: async (input) =>
+		validateBrowserHistoryList(
+			await ipcRenderer.invoke(DESKTOP_IPC_CHANNELS.listBrowserHistory, validateListBrowserHistoryInput(input)),
+		),
+	clearBrowserHistory: async (input) => {
+		await ipcRenderer.invoke(DESKTOP_IPC_CHANNELS.clearBrowserHistory, validateListBrowserHistoryInput(input));
 	},
 	listWorkspaceDirectory: (input) =>
 		ipcRenderer.invoke(DESKTOP_IPC_CHANNELS.listWorkspaceDirectory, validateListWorkspaceDirectoryInput(input)),

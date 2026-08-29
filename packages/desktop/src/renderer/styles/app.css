@@ -366,6 +366,12 @@ textarea { resize: none; }
 .browser-panel { position: absolute; display: none; overflow: visible; background: var(--sidebar); inset: 0; }
 .browser-panel.is-visible { z-index: 4; display: block; }
 .browser-toolbar { position: relative; z-index: 2; display: flex; height: 42px; align-items: center; gap: 3px; border-bottom: 1px solid var(--border); padding: 0 7px; }
+.browser-profile-select { flex: none; }
+.browser-profile-select .menu-select-trigger { width: 26px; height: 26px; justify-content: center; gap: 0; border: 0; border-radius: 6px; background: transparent; color: var(--text-14); padding: 0; }
+.browser-profile-select .menu-select-trigger:hover:not(:disabled), .browser-profile-select .menu-select-trigger[aria-expanded="true"] { background: var(--surface-05); color: var(--text); }
+.browser-profile-select .menu-select-trigger > svg { color: currentColor; }
+.browser-profile-select .menu-select-value, .browser-profile-select .menu-select-caret { display: none; }
+.browser-profile-popover { border-color: var(--border-strong); background: var(--surface-05); box-shadow: var(--overlay-shadow); }
 .browser-toolbar-button { display: grid; width: 26px; height: 26px; flex: none; place-items: center; border-radius: 6px; color: var(--text-14); }
 .browser-toolbar-button:hover:not(:disabled), .browser-toolbar-button:focus-visible { background: var(--surface-05); color: var(--text); outline: 0; }
 .browser-toolbar-button:disabled { color: var(--text-01); cursor: default; }
@@ -421,6 +427,16 @@ textarea { resize: none; }
 .browser-find-controls { display: flex; align-items: center; gap: 3px; }
 .browser-find-controls button:disabled { color: var(--text-01); cursor: default; }
 .browser-find-count { margin-left: auto; color: var(--muted); font-size: 11px; }
+.mcp-dialog.browser-import-dialog { width: min(380px, calc(100% - 28px)); }
+.browser-import-fields { display: grid; gap: 10px; margin-top: 16px; }
+.browser-import-data { display: grid; gap: 1px; overflow: hidden; border: 1px solid var(--border-strong); border-radius: 10px; background: var(--surface-04); }
+.browser-import-data label { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 12px; padding: 11px 12px; }
+.browser-import-data label + label { border-top: 1px solid var(--border); }
+.browser-import-data small { color: var(--muted); font-size: 11px; line-height: 1.4; }
+.browser-import-data input { grid-column: 2; grid-row: 1 / span 2; align-self: center; }
+.browser-import-warning { display: grid; gap: 8px; border: 1px solid var(--warning-banner-border); border-radius: 8px; background: var(--warning-banner-bg); color: var(--warning-banner-text); padding: 9px 10px; font-size: 12px; line-height: 1.4; }
+.browser-import-warning button { justify-self: start; border: 1px solid var(--warning-banner-border); border-radius: 6px; padding: 4px 8px; }
+.browser-import-empty { margin: 0; color: var(--muted); font-size: 12px; }
 .browser-clear-dialog { width: min(330px, calc(100% - 28px)); border: 1px solid var(--border-strong); border-radius: 10px; background: var(--surface-04); color: var(--text); box-shadow: var(--overlay-shadow); padding: 16px; }
 .browser-clear-dialog::backdrop { background: rgb(0 0 0 / 45%); }
 .browser-clear-dialog h2 { margin: 0 0 7px; font-size: 14px; }

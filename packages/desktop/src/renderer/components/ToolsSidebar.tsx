@@ -2,7 +2,13 @@ import type { AgentMode, PlanView, SessionSummary } from "@metis/app-protocol";
 import { ClipboardText, FileText, FolderSimple, Globe, Plus, Robot, SidebarSimple, TerminalWindow, X } from "@phosphor-icons/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import type { MetisDesktopApi, DesktopBrowserState, DesktopWorkspaceMutationResult } from "../../shared/desktop-api.ts";
+import {
+	DEFAULT_BROWSER_PROFILE_ID,
+	type DesktopBrowserProfile,
+	type DesktopBrowserState,
+	type DesktopWorkspaceMutationResult,
+	type MetisDesktopApi,
+} from "../../shared/desktop-api.ts";
 import type { AppStore } from "../store/app-store.ts";
 import { BrowserPanel } from "./BrowserPanel.tsx";
 import { FilePanel, type WorkspaceFileDraft } from "./FilePanel.tsx";
@@ -15,6 +21,7 @@ import { TerminalPanel } from "./TerminalPanel.tsx";
 import { WorkspaceFileIcon } from "./WorkspaceFileIcon.tsx";
 
 const FILE_BROWSER_STORAGE_PREFIX = "metis.file-browser.v1:";
+const BROWSER_PROFILE_STORAGE_KEY = "metis.browser-profile.v1";
 
 interface TerminalTab {
 	readonly kind: "terminal";
@@ -28,6 +35,8 @@ interface BrowserTab {
 	readonly id: string;
 	readonly title: string;
 	readonly url: string;
+	readonly profileId: string;
+	readonly profileName: string;
 }
 
 interface FileTab {
@@ -168,6 +177,13 @@ export function ToolsSidebar({ activeSession, api, cleanupSessionIds, mode, onCl
 	const [savingFileTabIds, setSavingFileTabIds] = useState<ReadonlySet<string>>(new Set());
 	const [pendingFileClose, setPendingFileClose] = useState<PendingFileClose | null>(null);
 	const [menuOpen, setMenuOpen] = useState(false);
+	const [browserProfiles, setBrowserProfiles] = useState<readonly DesktopBrowserProfile[]>([{
+		profileId: DEFAULT_BROWSER_PROFILE_ID,
+		name: "Default",
+		sourceId: null,
+		sourceProfileId: null,
+	}]);
+	const preferredBrowserProfileId = useRef(localStorage.getItem(BROWSER_PROFILE_STORAGE_KEY));
 	const menuRef = useRef<HTMLDivElement>(null);
 	const resizeRef = useRef<{ readonly pointerId: number; readonly x: number; readonly width: number } | null>(null);
 	const sessionId = activeSession?.sessionId ?? null;
@@ -181,6 +197,17 @@ export function ToolsSidebar({ activeSession, api, cleanupSessionIds, mode, onCl
 		.map(([ownerSessionId]) => ownerSessionId)
 		.sort(), [fileDrafts, workspaces]);
 	const dirtySessionKey = dirtySessionIds.join("\0");
+
+	useEffect(() => {
+		let active = true;
+		void api.listBrowserProfiles().then(
+			(profiles) => {
+				if (active && profiles.length > 0) setBrowserProfiles(profiles);
+			},
+			onError,
+		);
+		return () => { active = false; };
+	}, [api, onError]);
 
 	useEffect(() => setMenuOpen(false), [mode, sessionId]);
 	useEffect(() => onDirtySessionIdsChange(dirtySessionIds), [dirtySessionKey, onDirtySessionIdsChange]);
@@ -327,13 +354,29 @@ export function ToolsSidebar({ activeSession, api, cleanupSessionIds, mode, onCl
 		setMenuOpen(false);
 	};
 
-	const addBrowser = () => {
-		if (!activeSession) return;
+	const addBrowser = (
+		profile = browserProfiles.find((candidate) => candidate.profileId === preferredBrowserProfileId.current)
+			?? browserProfiles[0],
+	) => {
+		if (!activeSession || !profile) return;
+		preferredBrowserProfileId.current = profile.profileId;
+		try {
+			localStorage.setItem(BROWSER_PROFILE_STORAGE_KEY, profile.profileId);
+		} catch {
+			// Browsing still works when preference storage is unavailable.
+		}
 		const id = crypto.randomUUID();
 		setWorkspaces((current) => {
 			const next = new Map(current);
 			const previous = current.get(activeSession.sessionId) ?? { tabs: [], activeId: "", nextNumber: 1 };
-			const tab: BrowserTab = { kind: "browser", id, title: t("New tab"), url: "" };
+			const tab: BrowserTab = {
+				kind: "browser",
+				id,
+				title: t("New tab"),
+				url: "",
+				profileId: profile.profileId,
+				profileName: profile.name,
+			};
 			next.set(activeSession.sessionId, {
 				...previous,
 				tabs: [...previous.tabs, tab],
@@ -342,6 +385,13 @@ export function ToolsSidebar({ activeSession, api, cleanupSessionIds, mode, onCl
 			return next;
 		});
 		setMenuOpen(false);
+	};
+
+	const browserProfileImported = (profile: DesktopBrowserProfile) => {
+		setBrowserProfiles((current) => current.some((candidate) => candidate.profileId === profile.profileId)
+			? current.map((candidate) => candidate.profileId === profile.profileId ? profile : candidate)
+			: [...current, profile]);
+		addBrowser(profile);
 	};
 
 	const addFiles = () => {
@@ -721,7 +771,7 @@ export function ToolsSidebar({ activeSession, api, cleanupSessionIds, mode, onCl
 		<nav aria-label={t("Available tools")} className={compact ? "tool-add-menu" : "tool-sidebar-menu"} role={compact ? "menu" : undefined}>
 			{mode === "code" && <button disabled={!activeSession?.cwd} onClick={addReview} role={compact ? "menuitem" : undefined} title={activeSession?.cwd ? undefined : t("Open a task before reviewing changes")} type="button"><ClipboardText aria-hidden="true" size={14} /><span>{t("Review")}</span></button>}
 			<button disabled={!activeSession?.cwd} onClick={addTerminal} role={compact ? "menuitem" : undefined} title={activeSession?.cwd ? undefined : t("Open a task before starting a terminal")} type="button"><TerminalWindow aria-hidden="true" size={14} /><span>{t("Terminal")}</span></button>
-			<button disabled={!activeSession} onClick={addBrowser} role={compact ? "menuitem" : undefined} title={activeSession ? undefined : t("Open a task before starting a browser")} type="button"><Globe aria-hidden="true" size={14} /><span>{t("Browser")}</span></button>
+			<button disabled={!activeSession} onClick={() => addBrowser()} role={compact ? "menuitem" : undefined} title={activeSession ? undefined : t("Open a task before starting a browser")} type="button"><Globe aria-hidden="true" size={14} /><span>{t("Browser")}</span></button>
 			{mode === "code" && <button disabled={!activeSession?.cwd} onClick={addFiles} role={compact ? "menuitem" : undefined} title={activeSession?.cwd ? undefined : t("Open a task before browsing files")} type="button"><FolderSimple aria-hidden="true" size={14} /><span>{t("Files")}</span></button>}
 			{mode === "code" && <button disabled={!activeSession} onClick={addAgent} role={compact ? "menuitem" : undefined} type="button"><Robot aria-hidden="true" size={14} /><span>{t("Agents")}</span></button>}
 		</nav>
@@ -823,7 +873,14 @@ export function ToolsSidebar({ activeSession, api, cleanupSessionIds, mode, onCl
 								browserId={tab.id}
 								key={tab.id}
 								onError={onError}
+								onOpenProfile={(profile) => {
+									const selected = browserProfiles.find((candidate) => candidate.profileId === profile.profileId);
+									if (selected) addBrowser(selected);
+								}}
+								onProfileImported={browserProfileImported}
 								onState={(state) => updateBrowserState(ownerSessionId, state)}
+								profile={{ profileId: tab.profileId, name: tab.profileName }}
+								profiles={browserProfiles}
 								visible={open && !menuOpen && ownerSessionId === sessionId && ownerWorkspace.activeId === tab.id}
 							/>
 						) : tab.kind === "review" ? (

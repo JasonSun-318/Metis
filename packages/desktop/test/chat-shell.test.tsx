@@ -22,7 +22,7 @@ import {
 	setProjectPinned,
 } from "../src/renderer/store/project-preferences.ts";
 import { loadSessionPins, saveSessionPins } from "../src/renderer/store/session-pins.ts";
-import type { DesktopUpdateState, MetisDesktopApi } from "../src/shared/desktop-api.ts";
+import { DEFAULT_BROWSER_PROFILE_ID, type DesktopUpdateState, type MetisDesktopApi } from "../src/shared/desktop-api.ts";
 
 const EPOCH = "11111111-1111-4111-8111-111111111111";
 
@@ -326,6 +326,7 @@ function createHarness(options: {
 		}),
 		createBrowser: vi.fn(async (input) => ({
 			browserId: input.browserId,
+			profileId: input.profileId,
 			url: "",
 			title: "New tab",
 			faviconUrl: null,
@@ -339,6 +340,14 @@ function createHarness(options: {
 		closeBrowser: vi.fn().mockResolvedValue(undefined),
 		listBrowserDownloads: vi.fn().mockResolvedValue([]),
 		controlBrowserDownload: vi.fn().mockResolvedValue(undefined),
+		listBrowserProfiles: vi.fn().mockResolvedValue([{
+			profileId: DEFAULT_BROWSER_PROFILE_ID,
+			name: "Default",
+			sourceId: null,
+			sourceProfileId: null,
+		}]),
+		listBrowserImportSources: vi.fn().mockResolvedValue([]),
+		importBrowserData: vi.fn(),
 		listBrowserHistory: vi.fn().mockResolvedValue([]),
 		clearBrowserHistory: vi.fn().mockResolvedValue(undefined),
 		subscribeBrowser: vi.fn((listener) => {
@@ -4376,6 +4385,9 @@ describe("Chat desktop shell", () => {
 		await act(async () => browserButton.click());
 		await flush();
 		expect(api.createBrowser).toHaveBeenCalledTimes(1);
+		expect(api.createBrowser).toHaveBeenCalledWith(expect.objectContaining({
+			profileId: DEFAULT_BROWSER_PROFILE_ID,
+		}));
 		expect(container.querySelector('[aria-label="Browser address"]')).not.toBeNull();
 		expect(container.textContent).toContain("Start browsing");
 		const browserId = vi.mocked(api.createBrowser).mock.calls[0]![0].browserId;
@@ -4388,6 +4400,7 @@ describe("Chat desktop shell", () => {
 			type: "state",
 			state: {
 				browserId,
+				profileId: DEFAULT_BROWSER_PROFILE_ID,
 				url: "https://example.com/",
 				title: "Example Domain",
 				faviconUrl: null,
@@ -4482,6 +4495,7 @@ describe("Chat desktop shell", () => {
 			type: "state",
 			state: {
 				browserId,
+				profileId: DEFAULT_BROWSER_PROFILE_ID,
 				url: "https://example.com/",
 				title: "Example Domain",
 				faviconUrl: null,
@@ -4543,6 +4557,41 @@ describe("Chat desktop shell", () => {
 		expect(api.closeBrowser).toHaveBeenCalledWith({ browserId });
 		expect(container.querySelectorAll('[role="tab"]')).toHaveLength(0);
 
+		await act(async () => root.unmount());
+	});
+
+	it("opens a browser with the selected isolated profile", async () => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
+		const { api } = createHarness();
+		vi.mocked(api.listBrowserProfiles).mockResolvedValue([
+			{ profileId: DEFAULT_BROWSER_PROFILE_ID, name: "Default", sourceId: null, sourceProfileId: null },
+			{ profileId: "22222222-2222-4222-8222-222222222222", name: "Work", sourceId: "chrome", sourceProfileId: "Profile 2" },
+		]);
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<App api={api} store={new AppStore()} />));
+		await flush();
+
+		await act(async () => button(container, "Show tools sidebar").click());
+		await flush();
+		await act(async () => button(container, "Browser").click());
+		await flush();
+		expect(api.createBrowser).toHaveBeenLastCalledWith(expect.objectContaining({
+			profileId: DEFAULT_BROWSER_PROFILE_ID,
+		}));
+		await act(async () => button(container, "Browser profile: Metis — Default profile").click());
+		await flush();
+		expect(document.body.textContent).toContain("Google Chrome — Work");
+		await act(async () => button(document.body, "Google Chrome — Work").click());
+		await flush();
+
+		expect(api.createBrowser).toHaveBeenLastCalledWith(expect.objectContaining({
+			profileId: "22222222-2222-4222-8222-222222222222",
+		}));
+		expect(localStorage.getItem("metis.browser-profile.v1")).toBe("22222222-2222-4222-8222-222222222222");
+		expect(container.querySelector('.browser-panel.is-visible button[aria-label="Browser profile: Google Chrome — Work"] svg')).not.toBeNull();
 		await act(async () => root.unmount());
 	});
 

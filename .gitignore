@@ -50,3 +50,4 @@ plans/
 collect.sh
 pnpm-lock.yaml
 docs/
+.cursor

@@ -1,6 +1,14 @@
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { BrowserManager } from "../src/main/browser-manager.ts";
-import type { DesktopDownloadItem, DesktopHistoryEntry } from "../src/shared/desktop-api.ts";
+import { BrowserProfileStore } from "../src/main/browser-profile-store.ts";
+import {
+	DEFAULT_BROWSER_PROFILE_ID,
+	type DesktopDownloadItem,
+	type DesktopHistoryEntry,
+} from "../src/shared/desktop-api.ts";
 
 function downloadItemHarness(overrides: { filename?: string; url?: string } = {}) {
 	const listeners = new Map<string, Set<(...args: any[]) => void>>();
@@ -46,7 +54,16 @@ function latestHistory(events: unknown[]): readonly DesktopHistoryEntry[] {
 	throw new Error("No history event emitted");
 }
 
-function browserHarness(options: { initialHistory?: unknown[] } = {}) {
+function browserHarness(
+	options: {
+		initialHistory?: unknown[];
+		importedData?: {
+			readonly cookies: readonly { readonly url: string; readonly name: string; readonly value: string }[];
+			readonly cookieSkipped: number;
+			readonly history: readonly DesktopHistoryEntry[];
+		};
+	} = {},
+) {
 	const listeners = new Map<string, Set<(...args: any[]) => void>>();
 	let currentUrl = "about:blank";
 	let windowOpenHandler: ((details: { url: string }) => { action: "deny" }) | undefined;
@@ -98,6 +115,10 @@ function browserHarness(options: { initialHistory?: unknown[] } = {}) {
 	const contentView = { addChildView: vi.fn(), removeChildView: vi.fn() };
 	const willDownloadHandlers: ((...args: any[]) => void)[] = [];
 	const browserSession = {
+		cookies: {
+			set: vi.fn(async () => undefined),
+			flushStore: vi.fn(async () => undefined),
+		},
 		setPermissionCheckHandler: vi.fn(),
 		setPermissionRequestHandler: vi.fn(),
 		clearData: vi.fn(async () => undefined),
@@ -119,13 +140,34 @@ function browserHarness(options: { initialHistory?: unknown[] } = {}) {
 	const pathExists = vi.fn((_path: string) => false);
 	const openPath = vi.fn(async () => undefined);
 	const showItemInFolder = vi.fn();
-	let persisted: unknown = [...(options.initialHistory ?? [])];
-	const loadHistory = vi.fn((): readonly DesktopHistoryEntry[] => structuredClone(persisted) as DesktopHistoryEntry[]);
-	const saveHistory = vi.fn((entries: readonly DesktopHistoryEntry[]) => {
-		persisted = [...entries];
-	});
+	const profileStore = new BrowserProfileStore(mkdtempSync(join(tmpdir(), "metis-browser-manager-")));
+	if (options.initialHistory)
+		profileStore.saveHistory(DEFAULT_BROWSER_PROFILE_ID, options.initialHistory as DesktopHistoryEntry[]);
+	const loadHistory = vi.spyOn(profileStore, "loadHistory");
+	const saveHistory = vi.spyOn(profileStore, "saveHistory");
+	const sessionForPartition = vi.fn(() => browserSession as never);
+	const importer = {
+		listSources: vi.fn(async () =>
+			options.importedData
+				? [
+						{
+							sourceId: "chrome" as const,
+							name: "Google Chrome",
+							running: false,
+							profiles: [
+								{ sourceProfileId: "Default", name: "Personal", email: null },
+								{ sourceProfileId: "Profile 2", name: "Work", email: null },
+							],
+						},
+					]
+				: [],
+		),
+		readProfile: vi.fn(async () => options.importedData ?? { cookies: [], cookieSkipped: 0, history: [] }),
+	};
 	const manager = new BrowserManager({
-		browserSession: browserSession as never,
+		profileStore,
+		importer,
+		sessionForPartition,
 		createView: (options) => {
 			createdPreferences = options.webPreferences as Record<string, unknown>;
 			return view as never;
@@ -137,8 +179,6 @@ function browserHarness(options: { initialHistory?: unknown[] } = {}) {
 		savePdf,
 		saveScreenshot,
 		showItemInFolder,
-		loadHistory,
-		saveHistory,
 	});
 	return {
 		browserSession,
@@ -154,11 +194,14 @@ function browserHarness(options: { initialHistory?: unknown[] } = {}) {
 		openExternal,
 		openPath,
 		pathExists,
-		persisted: () => persisted,
+		persisted: () => profileStore.loadHistory(DEFAULT_BROWSER_PROFILE_ID),
+		profileStore,
+		importer,
 		resolveDownloadDirectory,
 		saveHistory,
 		savePdf,
 		saveScreenshot,
+		sessionForPartition,
 		showItemInFolder,
 		view,
 		webContents,
@@ -177,8 +220,9 @@ describe("BrowserManager", () => {
 		harness.manager.onEvent((event) => events.push(event));
 		harness.manager.attach({ contentView: harness.contentView } as never);
 
-		expect(harness.manager.create({ browserId })).toMatchObject({
+		expect(harness.manager.create({ browserId, profileId: DEFAULT_BROWSER_PROFILE_ID })).toMatchObject({
 			browserId,
+			profileId: DEFAULT_BROWSER_PROFILE_ID,
 			url: "",
 			title: "New tab",
 			zoomPercent: 100,
@@ -240,6 +284,7 @@ describe("BrowserManager", () => {
 			type: "state",
 			state: {
 				browserId,
+				profileId: DEFAULT_BROWSER_PROFILE_ID,
 				url: "https://example.com:8080/",
 				title: "Example Domain",
 				faviconUrl: "https://example.com/favicon.ico",
@@ -275,7 +320,7 @@ describe("BrowserManager", () => {
 	it("lets a newer navigation supersede an aborted in-flight load", async () => {
 		const harness = browserHarness();
 		const browserId = "10000000-0000-4000-8000-000000000079";
-		harness.manager.create({ browserId });
+		harness.manager.create({ browserId, profileId: DEFAULT_BROWSER_PROFILE_ID });
 		let rejectFirst: ((cause: unknown) => void) | undefined;
 		harness.webContents.loadURL
 			.mockImplementationOnce(
@@ -297,7 +342,7 @@ describe("BrowserManager", () => {
 	it("does not report Electron's redirect abort as a failed navigation", async () => {
 		const harness = browserHarness();
 		const browserId = "10000000-0000-4000-8000-000000000080";
-		harness.manager.create({ browserId });
+		harness.manager.create({ browserId, profileId: DEFAULT_BROWSER_PROFILE_ID });
 		harness.webContents.loadURL.mockRejectedValueOnce(
 			Object.assign(new Error("(-3) loading redirected page"), { code: "", errno: -3 }),
 		);
@@ -312,7 +357,9 @@ describe("BrowserManager", () => {
 		const browserId = "10000000-0000-4000-8000-000000000081";
 		const events: unknown[] = [];
 		harness.manager.onEvent((event) => events.push(event));
-		expect(harness.manager.create({ browserId })).toMatchObject({ zoomPercent: 100 });
+		expect(harness.manager.create({ browserId, profileId: DEFAULT_BROWSER_PROFILE_ID })).toMatchObject({
+			zoomPercent: 100,
+		});
 
 		await harness.manager.control({
 			type: "find",
@@ -403,7 +450,9 @@ describe("BrowserManager", () => {
 		});
 
 		harness.manager.close(browserId);
-		expect(harness.manager.create({ browserId })).toMatchObject({ zoomPercent: 100 });
+		expect(harness.manager.create({ browserId, profileId: DEFAULT_BROWSER_PROFILE_ID })).toMatchObject({
+			zoomPercent: 100,
+		});
 	});
 
 	it("routes native-page shortcuts and removes their listeners on close", () => {
@@ -411,7 +460,7 @@ describe("BrowserManager", () => {
 		const browserId = "10000000-0000-4000-8000-000000000082";
 		const events: unknown[] = [];
 		harness.manager.onEvent((event) => events.push(event));
-		harness.manager.create({ browserId });
+		harness.manager.create({ browserId, profileId: DEFAULT_BROWSER_PROFILE_ID });
 
 		for (const [key, command] of [
 			["f", "find"],
@@ -462,6 +511,10 @@ describe("BrowserManager", () => {
 			const harness = browserHarness();
 			const events: unknown[] = [];
 			harness.manager.onEvent((event) => events.push(event));
+			harness.manager.create({
+				browserId: "10000000-0000-4000-8000-000000000083",
+				profileId: DEFAULT_BROWSER_PROFILE_ID,
+			});
 
 			const first = downloadItemHarness();
 			harness.willDownload(first.item);
@@ -535,7 +588,7 @@ describe("BrowserManager", () => {
 		const browserId = "10000000-0000-4000-8000-000000000090";
 		const events: unknown[] = [];
 		harness.manager.onEvent((event) => events.push(event));
-		harness.manager.create({ browserId });
+		harness.manager.create({ browserId, profileId: DEFAULT_BROWSER_PROFILE_ID });
 
 		await harness.manager.control({ type: "navigate", browserId, url: "https://example.com/" });
 		harness.emit("did-navigate", {}, "https://example.com/");
@@ -562,20 +615,25 @@ describe("BrowserManager", () => {
 		harness.emit("did-navigate", {}, "about:blank");
 		expect(latestHistory(events)).toHaveLength(2);
 
-		expect(harness.manager.listHistory()[0]!.url).toBe("https://example.com/docs");
+		expect(harness.manager.listHistory({ profileId: DEFAULT_BROWSER_PROFILE_ID })[0]!.url).toBe(
+			"https://example.com/docs",
+		);
 
-		await harness.manager.clearHistory();
+		await harness.manager.clearHistory({ profileId: DEFAULT_BROWSER_PROFILE_ID });
 		expect(latestHistory(events)).toHaveLength(0);
-		expect(harness.manager.listHistory()).toHaveLength(0);
+		expect(harness.manager.listHistory({ profileId: DEFAULT_BROWSER_PROFILE_ID })).toHaveLength(0);
 	});
 
 	it("caps history at 500 entries with newest first", () => {
 		const harness = browserHarness();
-		harness.manager.create({ browserId: "10000000-0000-4000-8000-000000000091" });
+		harness.manager.create({
+			browserId: "10000000-0000-4000-8000-000000000091",
+			profileId: DEFAULT_BROWSER_PROFILE_ID,
+		});
 		for (let index = 0; index <= 501; index += 1) {
 			harness.emit("did-navigate", {}, `https://example.com/${index}`);
 		}
-		const entries = harness.manager.listHistory();
+		const entries = harness.manager.listHistory({ profileId: DEFAULT_BROWSER_PROFILE_ID });
 		expect(entries).toHaveLength(500);
 		expect(entries[0]!.url).toBe("https://example.com/501");
 		expect(entries.at(-1)!.url).toBe("https://example.com/2");
@@ -595,21 +653,68 @@ describe("BrowserManager", () => {
 			];
 			const harness = browserHarness({ initialHistory: restored });
 			const browserId = "10000000-0000-4000-8000-000000000092";
-			harness.manager.create({ browserId });
-			expect(harness.manager.listHistory()).toEqual(restored);
+			harness.manager.create({ browserId, profileId: DEFAULT_BROWSER_PROFILE_ID });
+			expect(harness.manager.listHistory({ profileId: DEFAULT_BROWSER_PROFILE_ID })).toEqual(restored);
 			expect(harness.saveHistory).not.toHaveBeenCalled();
 
 			harness.emit("did-navigate", {}, "https://example.com/first");
-			expect(harness.manager.listHistory()[0]!.url).toBe("https://example.com/first");
-			expect(harness.manager.listHistory()[1]!.url).toBe("https://previous.example/");
+			expect(harness.manager.listHistory({ profileId: DEFAULT_BROWSER_PROFILE_ID })[0]!.url).toBe(
+				"https://example.com/first",
+			);
+			expect(harness.manager.listHistory({ profileId: DEFAULT_BROWSER_PROFILE_ID })[1]!.url).toBe(
+				"https://previous.example/",
+			);
 			await vi.advanceTimersByTimeAsync(500);
-			expect(harness.saveHistory).toHaveBeenLastCalledWith(harness.manager.listHistory());
+			expect(harness.saveHistory).toHaveBeenLastCalledWith(
+				DEFAULT_BROWSER_PROFILE_ID,
+				harness.manager.listHistory({ profileId: DEFAULT_BROWSER_PROFILE_ID }),
+			);
 			expect(harness.persisted()).toHaveLength(2);
 
-			await harness.manager.clearHistory();
+			await harness.manager.clearHistory({ profileId: DEFAULT_BROWSER_PROFILE_ID });
 			expect(harness.persisted()).toHaveLength(0);
 		} finally {
 			vi.useRealTimers();
 		}
+	});
+
+	it("imports source profiles into stable isolated partitions and caps merged history", async () => {
+		const history = Array.from(
+			{ length: 520 },
+			(_, index): DesktopHistoryEntry => ({
+				entryId: crypto.randomUUID(),
+				url: `https://imported.example/${index}`,
+				title: `Imported ${index}`,
+				faviconUrl: null,
+				visitedAt: 2_000 + index,
+			}),
+		);
+		const harness = browserHarness({
+			importedData: {
+				cookies: [{ url: "https://example.com/", name: "session", value: "secret" }],
+				cookieSkipped: 2,
+				history,
+			},
+		});
+		const input = {
+			sourceId: "chrome" as const,
+			sourceProfileId: "Default",
+			dataTypes: { cookies: true, history: true },
+		};
+		const personal = await harness.manager.importData(input);
+		const work = await harness.manager.importData({ ...input, sourceProfileId: "Profile 2" });
+		const personalAgain = await harness.manager.importData({
+			...input,
+			dataTypes: { cookies: true, history: false },
+		});
+
+		expect(personal.profile.profileId).not.toBe(work.profile.profileId);
+		expect(personalAgain.profile.profileId).toBe(personal.profile.profileId);
+		expect(personal.cookies).toEqual({ imported: 1, skipped: 2 });
+		expect(personal.history).toEqual({ accepted: 520, retained: 500 });
+		expect(harness.manager.listHistory({ profileId: personal.profile.profileId })).toHaveLength(500);
+		expect(harness.sessionForPartition).toHaveBeenCalledWith(`persist:metis-browser-${personal.profile.profileId}`);
+		expect(harness.sessionForPartition).toHaveBeenCalledWith(`persist:metis-browser-${work.profile.profileId}`);
+		expect(harness.browserSession.cookies.flushStore).toHaveBeenCalledTimes(3);
 	});
 });

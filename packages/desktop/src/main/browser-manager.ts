@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
@@ -20,40 +20,33 @@ import {
 	type WebContentsWillNavigateEventParams,
 	type WebContentsWillRedirectEventParams,
 } from "electron";
-import type {
-	DesktopBrowserCommand,
-	DesktopBrowserControlInput,
-	DesktopBrowserEvent,
-	DesktopBrowserState,
-	DesktopCreateBrowserInput,
-	DesktopDownloadControlInput,
-	DesktopDownloadItem,
-	DesktopDownloadState,
-	DesktopHistoryEntry,
+import {
+	DEFAULT_BROWSER_PROFILE_ID,
+	type DesktopBrowserCommand,
+	type DesktopBrowserControlInput,
+	type DesktopBrowserEvent,
+	type DesktopBrowserImportInput,
+	type DesktopBrowserImportResult,
+	type DesktopBrowserImportSource,
+	type DesktopBrowserProfile,
+	type DesktopBrowserState,
+	type DesktopCreateBrowserInput,
+	type DesktopDownloadControlInput,
+	type DesktopDownloadItem,
+	type DesktopDownloadState,
+	type DesktopHistoryEntry,
+	type DesktopListBrowserHistoryInput,
 } from "../shared/desktop-api.ts";
-import { validateBrowserHistoryEntry } from "../shared/desktop-api.ts";
+import { BrowserProfileStore, mergeBrowserHistory } from "./browser-profile-store.ts";
+import { ChromiumBrowserImporter } from "./chromium-browser-import.ts";
 
 const BLANK_URL = "about:blank";
-const BROWSER_PARTITION = "persist:metis-browser";
-const HISTORY_STORAGE_FILE = "browser-history.json";
 const MAX_HISTORY_ENTRIES = 500;
 const HISTORY_SAVE_DELAY_MS = 500;
 const ZOOM_PERCENTAGES = [25, 33, 50, 67, 75, 80, 90, 100, 110, 125, 150, 175, 200, 250, 300, 400, 500] as const;
 
-function sanitizePersistedHistory(value: unknown): readonly DesktopHistoryEntry[] {
-	if (!Array.isArray(value)) return [];
-	const valid: DesktopHistoryEntry[] = [];
-	for (const item of value) {
-		try {
-			valid.push(validateBrowserHistoryEntry(item));
-		} catch {
-			// Skip malformed entries instead of discarding the whole stored history.
-		}
-	}
-	return valid.slice(0, MAX_HISTORY_ENTRIES);
-}
-
 interface BrowserRecord {
+	readonly profileId: string;
 	readonly view: WebContentsView;
 	readonly cleanup: (() => void)[];
 	state: DesktopBrowserState;
@@ -62,6 +55,7 @@ interface BrowserRecord {
 }
 
 interface DownloadRecord {
+	readonly profileId: string;
 	readonly downloadId: string;
 	readonly url: string;
 	readonly filename: string;
@@ -74,7 +68,9 @@ interface DownloadRecord {
 }
 
 interface BrowserManagerDependencies {
-	readonly browserSession: Session;
+	readonly profileStore: BrowserProfileStore;
+	readonly importer: Pick<ChromiumBrowserImporter, "listSources" | "readProfile">;
+	readonly sessionForPartition: (partition: string) => Session;
 	readonly createView: (options: WebContentsViewConstructorOptions) => WebContentsView;
 	readonly openExternal: (url: string) => Promise<void>;
 	readonly savePdf: (data: Buffer, defaultFilename: string) => Promise<void>;
@@ -83,8 +79,6 @@ interface BrowserManagerDependencies {
 	readonly pathExists: (path: string) => boolean;
 	readonly openPath: (path: string) => Promise<void>;
 	readonly showItemInFolder: (path: string) => void;
-	readonly loadHistory: () => readonly DesktopHistoryEntry[];
-	readonly saveHistory: (entries: readonly DesktopHistoryEntry[]) => void;
 }
 
 function normalizeBrowserUrl(value: string): string {
@@ -116,9 +110,10 @@ function normalizeBrowserUrl(value: string): string {
 	return url.toString();
 }
 
-function initialState(browserId: string): DesktopBrowserState {
+function initialState(browserId: string, profileId: string): DesktopBrowserState {
 	return {
 		browserId,
+		profileId,
 		url: "",
 		title: "New tab",
 		faviconUrl: null,
@@ -189,15 +184,18 @@ export class BrowserManager {
 	private readonly dependencies: BrowserManagerDependencies;
 	private readonly records = new Map<string, BrowserRecord>();
 	private readonly downloads = new Map<string, DownloadRecord>();
-	private historyEntries: DesktopHistoryEntry[] = [];
+	private readonly sessions = new Map<string, Session>();
+	private readonly histories = new Map<string, DesktopHistoryEntry[]>();
 	private readonly listeners = new Set<(event: DesktopBrowserEvent) => void>();
 	private downloadEmitTimer?: NodeJS.Timeout;
-	private historySaveTimer?: NodeJS.Timeout;
+	private readonly historySaveTimers = new Map<string, NodeJS.Timeout>();
 	private owner?: Pick<BrowserWindow, "contentView">;
 
 	constructor(
 		dependencies: BrowserManagerDependencies = {
-			browserSession: session.fromPartition(BROWSER_PARTITION),
+			profileStore: new BrowserProfileStore(app.getPath("userData")),
+			importer: new ChromiumBrowserImporter(),
+			sessionForPartition: (partition) => session.fromPartition(partition),
 			createView: (options) => new WebContentsView(options),
 			openExternal: (url) => shell.openExternal(url),
 			savePdf: (data, defaultFilename) => saveBuffer(data, defaultFilename, "PDF document", "pdf"),
@@ -206,32 +204,9 @@ export class BrowserManager {
 			pathExists: (path) => existsSync(path),
 			openPath: (path) => shell.openPath(path).then(() => undefined),
 			showItemInFolder: (path) => shell.showItemInFolder(path),
-			loadHistory: () => {
-				try {
-					return sanitizePersistedHistory(
-						JSON.parse(readFileSync(join(app.getPath("userData"), HISTORY_STORAGE_FILE), "utf8")),
-					);
-				} catch {
-					return [];
-				}
-			},
-			saveHistory: (entries) => {
-				try {
-					writeFileSync(
-						join(app.getPath("userData"), HISTORY_STORAGE_FILE),
-						`${JSON.stringify(entries, null, "\t")}\n`,
-					);
-				} catch {
-					// History is best-effort; a failed write must not break browsing.
-				}
-			},
 		},
 	) {
 		this.dependencies = dependencies;
-		this.historyEntries = [...dependencies.loadHistory()].slice(0, MAX_HISTORY_ENTRIES);
-		dependencies.browserSession.setPermissionCheckHandler(() => false);
-		dependencies.browserSession.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false));
-		dependencies.browserSession.on("will-download", this.onWillDownload);
 	}
 
 	attach(window: Pick<BrowserWindow, "contentView">): void {
@@ -250,14 +225,69 @@ export class BrowserManager {
 		return () => this.listeners.delete(listener);
 	}
 
+	listProfiles(): readonly DesktopBrowserProfile[] {
+		return this.dependencies.profileStore.listProfiles();
+	}
+
+	async listImportSources(): Promise<readonly DesktopBrowserImportSource[]> {
+		return this.dependencies.importer.listSources();
+	}
+
+	async importData(input: DesktopBrowserImportInput): Promise<DesktopBrowserImportResult> {
+		const source = (await this.dependencies.importer.listSources()).find(
+			(candidate) => candidate.sourceId === input.sourceId,
+		);
+		const sourceProfile = source?.profiles.find((candidate) => candidate.sourceProfileId === input.sourceProfileId);
+		if (!source || !sourceProfile) throw new Error("Browser profile is no longer available");
+		if (source.running) throw new Error(`Close ${source.name} before importing`);
+		const imported = await this.dependencies.importer.readProfile(input);
+		if (imported.cookies.length === 0 && imported.history.length === 0) {
+			throw new Error("No browser data could be imported");
+		}
+		const profile = this.dependencies.profileStore.ensureImportedProfile({
+			sourceId: input.sourceId,
+			sourceProfileId: input.sourceProfileId,
+			name: sourceProfile.name,
+		});
+		let importedCount = 0;
+		let skippedCount = imported.cookieSkipped;
+		if (input.dataTypes.cookies) {
+			const target = this.sessionForProfile(profile.profileId).cookies;
+			for (let index = 0; index < imported.cookies.length; index += 32) {
+				const results = await Promise.allSettled(
+					imported.cookies.slice(index, index + 32).map((cookie) => target.set(cookie)),
+				);
+				for (const result of results) {
+					if (result.status === "fulfilled") importedCount += 1;
+					else skippedCount += 1;
+				}
+			}
+			await target.flushStore();
+		}
+		const merged = input.dataTypes.history
+			? mergeBrowserHistory(this.historyForProfile(profile.profileId), imported.history)
+			: null;
+		if (merged) {
+			this.histories.set(profile.profileId, [...merged]);
+			this.dependencies.profileStore.saveHistory(profile.profileId, merged);
+			this.emit({ type: "history", profileId: profile.profileId, entries: merged });
+		}
+		return {
+			profile,
+			cookies: input.dataTypes.cookies ? { imported: importedCount, skipped: skippedCount } : null,
+			history: input.dataTypes.history ? { accepted: imported.history.length, retained: merged!.length } : null,
+		};
+	}
+
 	create(input: DesktopCreateBrowserInput): DesktopBrowserState {
 		if (this.records.has(input.browserId)) throw new Error("Browser already exists");
+		const browserSession = this.sessionForProfile(input.profileId);
 		const view = this.dependencies.createView({
 			webPreferences: {
 				contextIsolation: true,
 				nodeIntegration: false,
 				sandbox: true,
-				session: this.dependencies.browserSession,
+				session: browserSession,
 				webSecurity: true,
 			},
 		});
@@ -265,9 +295,10 @@ export class BrowserManager {
 		view.setBorderRadius(7);
 		view.setVisible(false);
 		const record: BrowserRecord = {
+			profileId: input.profileId,
 			view,
 			cleanup: [],
-			state: initialState(input.browserId),
+			state: initialState(input.browserId, input.profileId),
 			presentationKey: "",
 			findRequestId: 0,
 		};
@@ -284,7 +315,7 @@ export class BrowserManager {
 	listDownloads(): readonly DesktopDownloadItem[] {
 		return [...this.downloads.values()]
 			.sort((first, second) => second.startedAt - first.startedAt)
-			.map(({ item: _item, ...download }) => download);
+			.map(({ item: _item, profileId: _profileId, ...download }) => download);
 	}
 
 	async controlDownload(input: DesktopDownloadControlInput): Promise<void> {
@@ -325,20 +356,20 @@ export class BrowserManager {
 				return;
 			case "retry":
 				if (item) return;
-				this.dependencies.browserSession.downloadURL(record.url);
+				this.sessionForProfile(record.profileId).downloadURL(record.url);
 				return;
 		}
 	}
 
-	listHistory(): readonly DesktopHistoryEntry[] {
-		return [...this.historyEntries];
+	listHistory(input: DesktopListBrowserHistoryInput): readonly DesktopHistoryEntry[] {
+		return [...this.historyForProfile(input.profileId)];
 	}
 
-	async clearHistory(): Promise<void> {
-		if (this.historyEntries.length === 0) return;
-		this.historyEntries = [];
-		this.emitHistory();
-		this.persistHistory(true);
+	async clearHistory(input: DesktopListBrowserHistoryInput): Promise<void> {
+		if (this.historyForProfile(input.profileId).length === 0) return;
+		this.histories.set(input.profileId, []);
+		this.emitHistory(input.profileId);
+		this.persistHistory(input.profileId, true);
 	}
 
 	async control(input: DesktopBrowserControlInput): Promise<void> {
@@ -430,7 +461,7 @@ export class BrowserManager {
 			return;
 		}
 		if (input.type === "clear-data") {
-			await this.dependencies.browserSession.clearData({
+			await this.sessionForProfile(record.profileId).clearData({
 				dataTypes: ["cache", "cookies", "indexedDB", "localStorage", "serviceWorkers"],
 			});
 			return;
@@ -450,7 +481,7 @@ export class BrowserManager {
 	}
 
 	closeAll(): void {
-		if (this.historySaveTimer) this.persistHistory(true);
+		for (const profileId of this.historySaveTimers.keys()) this.persistHistory(profileId, true);
 		for (const browserId of [...this.records.keys()]) this.close(browserId);
 	}
 
@@ -458,6 +489,33 @@ export class BrowserManager {
 		const record = this.records.get(browserId);
 		if (!record) throw new Error("Browser is not running");
 		return record;
+	}
+
+	private sessionForProfile(profileId: string): Session {
+		if (!this.dependencies.profileStore.listProfiles().some((profile) => profile.profileId === profileId)) {
+			throw new Error("Browser profile does not exist");
+		}
+		const existing = this.sessions.get(profileId);
+		if (existing) return existing;
+		const partition =
+			profileId === DEFAULT_BROWSER_PROFILE_ID ? "persist:metis-browser" : `persist:metis-browser-${profileId}`;
+		const created = this.dependencies.sessionForPartition(partition);
+		created.setPermissionCheckHandler(() => false);
+		created.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false));
+		created.on("will-download", (event, item) => this.onWillDownload(profileId, event, item));
+		this.sessions.set(profileId, created);
+		return created;
+	}
+
+	private historyForProfile(profileId: string): DesktopHistoryEntry[] {
+		if (!this.dependencies.profileStore.listProfiles().some((profile) => profile.profileId === profileId)) {
+			throw new Error("Browser profile does not exist");
+		}
+		const existing = this.histories.get(profileId);
+		if (existing) return existing;
+		const loaded = [...this.dependencies.profileStore.loadHistory(profileId)];
+		this.histories.set(profileId, loaded);
+		return loaded;
 	}
 
 	private bind(browserId: string, record: BrowserRecord): void {
@@ -483,22 +541,22 @@ export class BrowserManager {
 		};
 		const onDidNavigate = (_event: Event, url: string) => {
 			contents.setZoomFactor(record.state.zoomPercent / 100);
-			this.recordHistoryVisit(url === "" ? contents.getURL() : url);
+			this.recordHistoryVisit(record.profileId, url === "" ? contents.getURL() : url);
 			sync();
 		};
 		const onDidNavigateInPage = (_event: Event, url: string, isMainFrame: boolean) => {
-			if (isMainFrame) this.recordHistoryVisit(url);
+			if (isMainFrame) this.recordHistoryVisit(record.profileId, url);
 			sync();
 		};
 		const onPageTitleUpdated = (_event: Event, title: string) => {
 			const trimmed = title.trim() || "New tab";
 			record.state = { ...record.state, title: trimmed };
-			this.updateHistoryEntry(contents.getURL(), { title: trimmed });
+			this.updateHistoryEntry(record.profileId, contents.getURL(), { title: trimmed });
 			sync();
 		};
 		const onPageFaviconUpdated = (_event: Event, favicons: string[]) => {
 			record.state = { ...record.state, faviconUrl: favicons[0] ?? null };
-			this.updateHistoryEntry(contents.getURL(), { faviconUrl: favicons[0] ?? null });
+			this.updateHistoryEntry(record.profileId, contents.getURL(), { faviconUrl: favicons[0] ?? null });
 			sync();
 		};
 		const onDidFailLoad = (
@@ -591,13 +649,14 @@ export class BrowserManager {
 		});
 	}
 
-	private readonly onWillDownload = (_event: Event, item: DownloadItem): void => {
+	private readonly onWillDownload = (profileId: string, _event: Event, item: DownloadItem): void => {
 		const downloadId = randomUUID();
 		const directory = this.dependencies.resolveDownloadDirectory();
 		const filename = uniqueFilename(directory, sanitizeFilename(item.getFilename()), this.dependencies.pathExists);
 		const savePath = join(directory, filename);
 		item.setSavePath(savePath);
 		const record: DownloadRecord = {
+			profileId,
 			downloadId,
 			url: item.getURL(),
 			filename,
@@ -643,7 +702,7 @@ export class BrowserManager {
 		this.emit({ type: "downloads", downloads: this.listDownloads() });
 	}
 
-	private recordHistoryVisit(url: string): void {
+	private recordHistoryVisit(profileId: string, url: string): void {
 		if (url === "" || url === BLANK_URL) return;
 		try {
 			normalizeBrowserUrl(url);
@@ -651,50 +710,61 @@ export class BrowserManager {
 			return;
 		}
 		const visitedAt = Date.now();
-		const newest = this.historyEntries[0];
+		const historyEntries = this.historyForProfile(profileId);
+		const newest = historyEntries[0];
 		if (newest && newest.url === url) {
-			this.historyEntries[0] = { ...newest, visitedAt };
-			this.emitHistory();
+			historyEntries[0] = { ...newest, visitedAt };
+			this.emitHistory(profileId);
 			return;
 		}
-		this.historyEntries = [
-			{ entryId: randomUUID(), url, title: "New tab", faviconUrl: null, visitedAt },
-			...this.historyEntries,
-		].slice(0, MAX_HISTORY_ENTRIES);
-		this.emitHistory();
+		this.histories.set(
+			profileId,
+			[{ entryId: randomUUID(), url, title: "New tab", faviconUrl: null, visitedAt }, ...historyEntries].slice(
+				0,
+				MAX_HISTORY_ENTRIES,
+			),
+		);
+		this.emitHistory(profileId);
 	}
 
-	private updateHistoryEntry(url: string, patch: { title?: string; faviconUrl?: string | null }): void {
-		const index = this.historyEntries.findIndex((entry) => entry.url === url);
+	private updateHistoryEntry(
+		profileId: string,
+		url: string,
+		patch: { title?: string; faviconUrl?: string | null },
+	): void {
+		const historyEntries = this.historyForProfile(profileId);
+		const index = historyEntries.findIndex((entry) => entry.url === url);
 		if (index === -1) return;
-		const entry = this.historyEntries[index]!;
-		this.historyEntries[index] = {
+		const entry = historyEntries[index]!;
+		historyEntries[index] = {
 			...entry,
 			title: patch.title ?? entry.title,
 			faviconUrl: patch.faviconUrl ?? entry.faviconUrl,
 		};
-		this.emitHistory();
+		this.emitHistory(profileId);
 	}
 
-	private emitHistory(): void {
-		this.emit({ type: "history", entries: this.listHistory() });
-		this.persistHistory();
+	private emitHistory(profileId: string): void {
+		this.emit({ type: "history", profileId, entries: this.listHistory({ profileId }) });
+		this.persistHistory(profileId);
 	}
 
-	private persistHistory(immediate = false): void {
-		if (this.historySaveTimer) {
-			clearTimeout(this.historySaveTimer);
-			this.historySaveTimer = undefined;
+	private persistHistory(profileId: string, immediate = false): void {
+		const timer = this.historySaveTimers.get(profileId);
+		if (timer) {
+			clearTimeout(timer);
+			this.historySaveTimers.delete(profileId);
 		}
 		if (immediate) {
-			this.dependencies.saveHistory(this.historyEntries);
+			this.dependencies.profileStore.saveHistory(profileId, this.historyForProfile(profileId));
 			return;
 		}
-		this.historySaveTimer = setTimeout(() => {
-			this.historySaveTimer = undefined;
-			this.dependencies.saveHistory(this.historyEntries);
+		const next = setTimeout(() => {
+			this.historySaveTimers.delete(profileId);
+			this.dependencies.profileStore.saveHistory(profileId, this.historyForProfile(profileId));
 		}, HISTORY_SAVE_DELAY_MS);
-		this.historySaveTimer.unref?.();
+		next.unref?.();
+		this.historySaveTimers.set(profileId, next);
 	}
 
 	private emit(event: DesktopBrowserEvent): void {

@@ -74,6 +74,9 @@ export const DESKTOP_IPC_CHANNELS = {
 	closeBrowser: "metis:close-browser",
 	listBrowserDownloads: "metis:list-browser-downloads",
 	controlBrowserDownload: "metis:control-browser-download",
+	listBrowserProfiles: "metis:list-browser-profiles",
+	listBrowserImportSources: "metis:list-browser-import-sources",
+	importBrowserData: "metis:import-browser-data",
 	listBrowserHistory: "metis:list-browser-history",
 	clearBrowserHistory: "metis:clear-browser-history",
 	listWorkspaceDirectory: "metis:list-workspace-directory",
@@ -138,6 +141,7 @@ export interface DesktopBrowserBounds {
 
 export interface DesktopCreateBrowserInput {
 	readonly browserId: string;
+	readonly profileId: string;
 }
 
 export interface DesktopCloseBrowserInput {
@@ -148,6 +152,7 @@ export type DesktopBrowserCommand = "find" | "print" | "zoom-in" | "zoom-out" | 
 
 export interface DesktopBrowserState {
 	readonly browserId: string;
+	readonly profileId: string;
 	readonly url: string;
 	readonly title: string;
 	readonly faviconUrl: string | null;
@@ -204,7 +209,46 @@ export type DesktopBrowserEvent =
 	  }
 	| { readonly type: "command"; readonly browserId: string; readonly command: DesktopBrowserCommand }
 	| { readonly type: "downloads"; readonly downloads: readonly DesktopDownloadItem[] }
-	| { readonly type: "history"; readonly entries: readonly DesktopHistoryEntry[] };
+	| { readonly type: "history"; readonly profileId: string; readonly entries: readonly DesktopHistoryEntry[] };
+
+export const DEFAULT_BROWSER_PROFILE_ID = "00000000-0000-4000-8000-000000000001";
+export type DesktopBrowserSourceId = "chrome" | "edge" | "brave" | "chromium";
+
+export interface DesktopBrowserProfile {
+	readonly profileId: string;
+	readonly name: string;
+	readonly sourceId: DesktopBrowserSourceId | null;
+	readonly sourceProfileId: string | null;
+}
+
+export interface DesktopBrowserImportSourceProfile {
+	readonly sourceProfileId: string;
+	readonly name: string;
+	readonly email: string | null;
+}
+
+export interface DesktopBrowserImportSource {
+	readonly sourceId: DesktopBrowserSourceId;
+	readonly name: string;
+	readonly running: boolean;
+	readonly profiles: readonly DesktopBrowserImportSourceProfile[];
+}
+
+export interface DesktopBrowserImportInput {
+	readonly sourceId: DesktopBrowserSourceId;
+	readonly sourceProfileId: string;
+	readonly dataTypes: { readonly cookies: boolean; readonly history: boolean };
+}
+
+export interface DesktopBrowserImportResult {
+	readonly profile: DesktopBrowserProfile;
+	readonly cookies: { readonly imported: number; readonly skipped: number } | null;
+	readonly history: { readonly accepted: number; readonly retained: number } | null;
+}
+
+export interface DesktopListBrowserHistoryInput {
+	readonly profileId: string;
+}
 
 export type DesktopDownloadState = "progressing" | "paused" | "completed" | "cancelled" | "interrupted";
 
@@ -469,8 +513,11 @@ export interface MetisDesktopApi extends DesktopRpcForwardingApi {
 	closeBrowser(input: DesktopCloseBrowserInput): Promise<void>;
 	listBrowserDownloads(): Promise<readonly DesktopDownloadItem[]>;
 	controlBrowserDownload(input: DesktopDownloadControlInput): Promise<void>;
-	listBrowserHistory(): Promise<readonly DesktopHistoryEntry[]>;
-	clearBrowserHistory(): Promise<void>;
+	listBrowserProfiles(): Promise<readonly DesktopBrowserProfile[]>;
+	listBrowserImportSources(): Promise<readonly DesktopBrowserImportSource[]>;
+	importBrowserData(input: DesktopBrowserImportInput): Promise<DesktopBrowserImportResult>;
+	listBrowserHistory(input: DesktopListBrowserHistoryInput): Promise<readonly DesktopHistoryEntry[]>;
+	clearBrowserHistory(input: DesktopListBrowserHistoryInput): Promise<void>;
 	subscribeBrowser(listener: (event: DesktopBrowserEvent) => void): () => void;
 	listWorkspaceDirectory(input: DesktopWorkspaceTarget): Promise<readonly DesktopWorkspaceEntry[]>;
 	searchWorkspaceFiles(input: DesktopWorkspaceSearchInput): Promise<readonly string[]>;
@@ -869,9 +916,115 @@ function browserText(value: unknown, label: string, maximum: number): string {
 	return value;
 }
 
+const BROWSER_SOURCE_IDS: readonly DesktopBrowserSourceId[] = ["chrome", "edge", "brave", "chromium"];
+
+function browserProfileId(value: unknown): string {
+	assertSchema(interactionIdValidator, value, "invalid_params", "browser profile id");
+	return value as string;
+}
+
+function browserSourceId(value: unknown): DesktopBrowserSourceId {
+	if (!(BROWSER_SOURCE_IDS as readonly unknown[]).includes(value)) throw new TypeError("Invalid browser source");
+	return value as DesktopBrowserSourceId;
+}
+
+export function validateBrowserSourceProfileId(value: unknown): string {
+	const id = browserText(value, "source profile id", 128);
+	if (id === "" || id === "." || id === ".." || id.includes("/") || id.includes("\\")) {
+		throw new TypeError("Invalid source profile id");
+	}
+	return id;
+}
+
+function validateBrowserProfile(value: unknown): DesktopBrowserProfile {
+	const profile = exactRecord(value, ["profileId", "name", "sourceId", "sourceProfileId"], "browser profile");
+	const sourceId = profile.sourceId === null ? null : browserSourceId(profile.sourceId);
+	const sourceProfileId =
+		profile.sourceProfileId === null ? null : validateBrowserSourceProfileId(profile.sourceProfileId);
+	if ((sourceId === null) !== (sourceProfileId === null)) throw new TypeError("Invalid browser profile source");
+	const name = browserText(profile.name, "profile name", 128).trim();
+	if (name === "") throw new TypeError("Invalid browser profile name");
+	return { profileId: browserProfileId(profile.profileId), name, sourceId, sourceProfileId };
+}
+
+export function validateBrowserProfileList(value: unknown): readonly DesktopBrowserProfile[] {
+	assertEnvelopeByteLimit(value);
+	if (!Array.isArray(value) || value.length > 128) throw new TypeError("Invalid browser profiles");
+	return value.map(validateBrowserProfile);
+}
+
+function validateBrowserImportSourceProfile(value: unknown): DesktopBrowserImportSourceProfile {
+	const profile = exactRecord(value, ["sourceProfileId", "name", "email"], "browser import source profile");
+	return {
+		sourceProfileId: validateBrowserSourceProfileId(profile.sourceProfileId),
+		name: browserText(profile.name, "source profile name", 128),
+		email: profile.email === null ? null : browserText(profile.email, "source profile email", 320),
+	};
+}
+
+export function validateBrowserImportSourceList(value: unknown): readonly DesktopBrowserImportSource[] {
+	assertEnvelopeByteLimit(value);
+	if (!Array.isArray(value) || value.length > BROWSER_SOURCE_IDS.length)
+		throw new TypeError("Invalid browser import sources");
+	return value.map((candidate) => {
+		const source = exactRecord(candidate, ["sourceId", "name", "running", "profiles"], "browser import source");
+		if (typeof source.running !== "boolean" || !Array.isArray(source.profiles) || source.profiles.length > 128) {
+			throw new TypeError("Invalid browser import source");
+		}
+		return {
+			sourceId: browserSourceId(source.sourceId),
+			name: browserText(source.name, "source name", 128),
+			running: source.running,
+			profiles: source.profiles.map(validateBrowserImportSourceProfile),
+		};
+	});
+}
+
+export function validateBrowserImportInput(value: unknown): DesktopBrowserImportInput {
+	const input = exactRecord(value, ["sourceId", "sourceProfileId", "dataTypes"], "browser import input");
+	const dataTypes = exactRecord(input.dataTypes, ["cookies", "history"], "browser import data types");
+	if (typeof dataTypes.cookies !== "boolean" || typeof dataTypes.history !== "boolean") {
+		throw new TypeError("Invalid browser import data types");
+	}
+	if (!dataTypes.cookies && !dataTypes.history) throw new TypeError("Select browser data to import");
+	return {
+		sourceId: browserSourceId(input.sourceId),
+		sourceProfileId: validateBrowserSourceProfileId(input.sourceProfileId),
+		dataTypes: { cookies: dataTypes.cookies, history: dataTypes.history },
+	};
+}
+
+export function validateBrowserImportResult(value: unknown): DesktopBrowserImportResult {
+	const result = exactRecord(value, ["profile", "cookies", "history"], "browser import result");
+	const counts = (candidate: unknown, label: string, retained = false) => {
+		if (candidate === null) return null;
+		const names = retained ? ["accepted", "retained"] : ["imported", "skipped"];
+		const record = exactRecord(candidate, names, label);
+		return retained
+			? {
+					accepted: browserInteger(record.accepted, "history accepted count", 0, Number.MAX_SAFE_INTEGER),
+					retained: browserInteger(record.retained, "history retained count", 0, 500),
+				}
+			: {
+					imported: browserInteger(record.imported, "cookie imported count", 0, Number.MAX_SAFE_INTEGER),
+					skipped: browserInteger(record.skipped, "cookie skipped count", 0, Number.MAX_SAFE_INTEGER),
+				};
+	};
+	return {
+		profile: validateBrowserProfile(result.profile),
+		cookies: counts(result.cookies, "browser cookie import result") as DesktopBrowserImportResult["cookies"],
+		history: counts(result.history, "browser history import result", true) as DesktopBrowserImportResult["history"],
+	};
+}
+
+export function validateListBrowserHistoryInput(value: unknown): DesktopListBrowserHistoryInput {
+	const input = exactRecord(value, ["profileId"], "browser history input");
+	return { profileId: browserProfileId(input.profileId) };
+}
+
 export function validateCreateBrowserInput(value: unknown): DesktopCreateBrowserInput {
-	const input = exactRecord(value, ["browserId"], "browser create input");
-	return { browserId: browserId(input.browserId) };
+	const input = exactRecord(value, ["browserId", "profileId"], "browser create input");
+	return { browserId: browserId(input.browserId), profileId: browserProfileId(input.profileId) };
 }
 
 export function validateCloseBrowserInput(value: unknown): DesktopCloseBrowserInput {
@@ -955,7 +1108,17 @@ export function validateDesktopBrowserEvent(value: unknown): DesktopBrowserEvent
 		const event = exactRecord(value, ["type", "state"], "browser state event");
 		const state = exactRecord(
 			event.state,
-			["browserId", "url", "title", "faviconUrl", "loading", "canGoBack", "canGoForward", "zoomPercent"],
+			[
+				"browserId",
+				"profileId",
+				"url",
+				"title",
+				"faviconUrl",
+				"loading",
+				"canGoBack",
+				"canGoForward",
+				"zoomPercent",
+			],
 			"browser state",
 		);
 		if (
@@ -970,6 +1133,7 @@ export function validateDesktopBrowserEvent(value: unknown): DesktopBrowserEvent
 			type,
 			state: {
 				browserId: browserId(state.browserId),
+				profileId: browserProfileId(state.profileId),
 				url: browserText(state.url, "state URL", 8_192),
 				title: browserText(state.title, "title", 512),
 				faviconUrl: state.faviconUrl === null ? null : browserText(state.faviconUrl, "favicon URL", 8_192),
@@ -1018,9 +1182,13 @@ export function validateDesktopBrowserEvent(value: unknown): DesktopBrowserEvent
 		return { type, downloads: event.downloads.map(validateBrowserDownloadItem) };
 	}
 	if (type === "history") {
-		const event = exactRecord(value, ["type", "entries"], "browser history event");
+		const event = exactRecord(value, ["type", "profileId", "entries"], "browser history event");
 		if (!Array.isArray(event.entries)) throw new TypeError("Invalid browser history");
-		return { type, entries: event.entries.map(validateBrowserHistoryEntry) };
+		return {
+			type,
+			profileId: browserProfileId(event.profileId),
+			entries: event.entries.map(validateBrowserHistoryEntry),
+		};
 	}
 	throw new TypeError("Invalid browser event");
 }

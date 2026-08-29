@@ -8,6 +8,7 @@ import { ClientBroker, isTrustedRendererUrl } from "../src/main/client-broker.ts
 import { isSafeExternalUrl } from "../src/main/external-url.ts";
 import { DESKTOP_RPC_FORWARDING } from "../src/shared/app-server-rpc-forwarding.ts";
 import {
+	DEFAULT_BROWSER_PROFILE_ID,
 	DESKTOP_BROWSER_EVENT_CHANNEL,
 	DESKTOP_IPC_CHANNELS,
 	DESKTOP_TERMINAL_EVENT_CHANNEL,
@@ -315,7 +316,10 @@ describe("desktop trust boundaries", () => {
 
 	it("accepts exact browser commands and rejects unsafe renderer payloads", () => {
 		const browserId = "10000000-0000-4000-8000-000000000077";
-		expect(validateCreateBrowserInput({ browserId })).toEqual({ browserId });
+		expect(validateCreateBrowserInput({ browserId, profileId: DEFAULT_BROWSER_PROFILE_ID })).toEqual({
+			browserId,
+			profileId: DEFAULT_BROWSER_PROFILE_ID,
+		});
 		expect(
 			validateBrowserControlInput({
 				type: "present",
@@ -378,6 +382,7 @@ describe("desktop trust boundaries", () => {
 				type: "state",
 				state: {
 					browserId,
+					profileId: DEFAULT_BROWSER_PROFILE_ID,
 					url: "https://example.com/",
 					title: "Example",
 					faviconUrl: null,
@@ -407,6 +412,7 @@ describe("desktop trust boundaries", () => {
 					type: "state",
 					state: {
 						browserId,
+						profileId: DEFAULT_BROWSER_PROFILE_ID,
 						url: "https://example.com/",
 						title: "Example",
 						faviconUrl: null,
@@ -613,6 +619,7 @@ describe("desktop trust boundaries", () => {
 			attach: vi.fn(),
 			create: vi.fn((input) => ({
 				browserId: input.browserId,
+				profileId: input.profileId,
 				url: "",
 				title: "New tab",
 				faviconUrl: null,
@@ -624,6 +631,36 @@ describe("desktop trust boundaries", () => {
 			capturePreview: vi.fn().mockResolvedValue("data:image/png;base64,cHJldmlldw=="),
 			close: vi.fn(),
 			closeAll: vi.fn(),
+			listDownloads: vi.fn(() => []),
+			controlDownload: vi.fn(),
+			listProfiles: vi.fn(() => [
+				{
+					profileId: DEFAULT_BROWSER_PROFILE_ID,
+					name: "Default",
+					sourceId: null,
+					sourceProfileId: null,
+				},
+			]),
+			listImportSources: vi.fn(async () => [
+				{
+					sourceId: "chrome" as const,
+					name: "Google Chrome",
+					running: false,
+					profiles: [{ sourceProfileId: "Default", name: "Personal", email: null }],
+				},
+			]),
+			importData: vi.fn(async () => ({
+				profile: {
+					profileId: "20000000-0000-4000-8000-000000000001",
+					name: "Personal",
+					sourceId: "chrome" as const,
+					sourceProfileId: "Default",
+				},
+				cookies: { imported: 3, skipped: 1 },
+				history: { accepted: 40, retained: 100 },
+			})),
+			listHistory: vi.fn(() => []),
+			clearHistory: vi.fn(),
 			onEvent: vi.fn((listener) => {
 				browserListener = listener;
 				return () => {
@@ -645,7 +682,10 @@ describe("desktop trust boundaries", () => {
 
 		expect(browserManager.attach).toHaveBeenCalledTimes(1);
 		await expect(
-			ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.createBrowser)!(event, { browserId }),
+			ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.createBrowser)!(event, {
+				browserId,
+				profileId: DEFAULT_BROWSER_PROFILE_ID,
+			}),
 		).resolves.toMatchObject({
 			browserId,
 			title: "New tab",
@@ -661,6 +701,24 @@ describe("desktop trust boundaries", () => {
 			ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.captureBrowserPreview)!(event, { browserId }),
 		).resolves.toBe("data:image/png;base64,cHJldmlldw==");
 		expect(browserManager.capturePreview).toHaveBeenCalledWith(browserId);
+		await expect(ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.listBrowserProfiles)!(event)).resolves.toHaveLength(1);
+		await expect(ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.listBrowserImportSources)!(event)).resolves.toHaveLength(
+			1,
+		);
+		await expect(
+			ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.importBrowserData)!(event, {
+				sourceId: "chrome",
+				sourceProfileId: "Default",
+				dataTypes: { cookies: true, history: true },
+			}),
+		).resolves.toMatchObject({ cookies: { imported: 3, skipped: 1 } });
+		await expect(
+			ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.importBrowserData)!(event, {
+				sourceId: "chrome",
+				sourceProfileId: "../Default",
+				dataTypes: { cookies: true, history: true },
+			}),
+		).rejects.toThrow("Invalid source profile id");
 		browserListener?.({ type: "error", browserId, message: "fixture error" });
 		expect(webContents.sent.at(-1)).toEqual([
 			DESKTOP_BROWSER_EVENT_CHANNEL,

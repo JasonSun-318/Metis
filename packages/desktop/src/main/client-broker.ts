@@ -20,6 +20,7 @@ import {
 import type { BrowserWindow, IpcMain, IpcMainInvokeEvent, WebContents } from "electron";
 import { DESKTOP_RPC_FORWARDING } from "../shared/app-server-rpc-forwarding.ts";
 import {
+	DEFAULT_BROWSER_PROFILE_ID,
 	DESKTOP_BROWSER_EVENT_CHANNEL,
 	DESKTOP_EVENT_CHANNEL,
 	DESKTOP_IPC_CHANNELS,
@@ -35,11 +36,13 @@ import {
 	type SupervisorView,
 	validateBrowserControlInput,
 	validateBrowserDownloadControlInput,
+	validateBrowserImportInput,
 	validateCloseBrowserInput,
 	validateCloseTerminalInput,
 	validateCreateBrowserInput,
 	validateCreateTerminalInput,
 	validateInteractionResponseInput,
+	validateListBrowserHistoryInput,
 	validateListWorkspaceDirectoryInput,
 	validateOpenWorkspaceFileInput,
 	validateReadPreviewFileInput,
@@ -94,6 +97,9 @@ interface ClientBrokerOptions {
 		| "closeAll"
 		| "listDownloads"
 		| "controlDownload"
+		| "listProfiles"
+		| "listImportSources"
+		| "importData"
 		| "listHistory"
 		| "clearHistory"
 		| "onEvent"
@@ -238,6 +244,9 @@ export class ClientBroker {
 		| "closeAll"
 		| "listDownloads"
 		| "controlDownload"
+		| "listProfiles"
+		| "listImportSources"
+		| "importData"
 		| "listHistory"
 		| "clearHistory"
 		| "onEvent"
@@ -328,6 +337,18 @@ export class ClientBroker {
 			listDownloads: () => [],
 			controlDownload: async () => {
 				throw new Error("Browser is unavailable");
+			},
+			listProfiles: () => [
+				{
+					profileId: DEFAULT_BROWSER_PROFILE_ID,
+					name: "Default",
+					sourceId: null,
+					sourceProfileId: null,
+				},
+			],
+			listImportSources: async () => [],
+			importData: async () => {
+				throw new Error("Browser import is unavailable");
 			},
 			listHistory: () => [],
 			clearHistory: async () => undefined,
@@ -592,8 +613,19 @@ export class ClientBroker {
 		this.register(DESKTOP_IPC_CHANNELS.controlBrowserDownload, 1, async (_event, [input]) => {
 			await this.browserManager.controlDownload(validateBrowserDownloadControlInput(input));
 		});
-		this.register(DESKTOP_IPC_CHANNELS.listBrowserHistory, 0, async () => this.browserManager.listHistory());
-		this.register(DESKTOP_IPC_CHANNELS.clearBrowserHistory, 0, async () => this.browserManager.clearHistory());
+		this.register(DESKTOP_IPC_CHANNELS.listBrowserProfiles, 0, async () => this.browserManager.listProfiles());
+		this.register(DESKTOP_IPC_CHANNELS.listBrowserImportSources, 0, async () =>
+			this.browserManager.listImportSources(),
+		);
+		this.register(DESKTOP_IPC_CHANNELS.importBrowserData, 1, async (_event, [input]) =>
+			this.browserManager.importData(validateBrowserImportInput(input)),
+		);
+		this.register(DESKTOP_IPC_CHANNELS.listBrowserHistory, 1, async (_event, [input]) =>
+			this.browserManager.listHistory(validateListBrowserHistoryInput(input)),
+		);
+		this.register(DESKTOP_IPC_CHANNELS.clearBrowserHistory, 1, async (_event, [input]) =>
+			this.browserManager.clearHistory(validateListBrowserHistoryInput(input)),
+		);
 		this.register(DESKTOP_IPC_CHANNELS.closeBrowser, 1, async (_event, [input]) => {
 			this.browserManager.close(validateCloseBrowserInput(input).browserId);
 		});
