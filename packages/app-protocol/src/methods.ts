@@ -1098,6 +1098,16 @@ export const BrowserTabsDetailsSchema = StrictObject({
 
 export const BrowserOperationDetailsSchema = Type.Union([
 	StrictObject({ status: Type.Literal("completed"), observation: BrowserObservationSchema }),
+	StrictObject({
+		status: Type.Literal("stale"),
+		reason: Type.Union([
+			Type.Literal("origin_changed"),
+			Type.Literal("document_changed"),
+			Type.Literal("revision_changed"),
+			Type.Literal("element_missing"),
+		]),
+		observation: BrowserObservationSchema,
+	}),
 	StrictObject({ status: Type.Literal("cancelled"), reason: Type.Literal("user_cancelled") }),
 ]);
 

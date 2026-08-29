@@ -571,6 +571,33 @@ describe("golden protocol fixtures", () => {
 		).toThrow("does not match");
 	});
 
+	it("accepts a fail-closed stale browser action with a fresh observation", () => {
+		const request = makeBrowserTool({
+			tool: "browser_act",
+			input: {
+				browserId: BROWSER_ID,
+				documentId: DOCUMENT_ID,
+				snapshotRevision: 1,
+				origin: "https://example.test",
+				intent: "Click the fixture",
+				risk: "ordinary",
+				action: { type: "click", target: { elementId: "e1" } },
+			},
+		});
+		const response = {
+			jsonrpc: "2.0",
+			id: request.id,
+			result: {
+				toolCallId: (request.params as { toolCallId: string }).toolCallId,
+				result: {
+					tool: "browser_act",
+					details: { status: "stale", reason: "revision_changed", observation: browserObservation },
+				},
+			},
+		};
+		expect(validateResponseFor("server", request, response)).toEqual(response);
+	});
+
 	it("rejects unsafe or oversized browser payloads", () => {
 		const valid = makeBrowserTool({
 			tool: "browser_act",

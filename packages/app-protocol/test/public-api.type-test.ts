@@ -419,6 +419,13 @@ const browserResult = {
 	toolCallId: browserRequest.toolCallId,
 	result: { tool: "browser_act", details: { status: "completed", observation: browserObservation } },
 } satisfies BrowserToolRequestResult;
+const staleBrowserResult = {
+	toolCallId: browserRequest.toolCallId,
+	result: {
+		tool: "browser_act",
+		details: { status: "stale", reason: "revision_changed", observation: browserObservation },
+	},
+} satisfies BrowserToolRequestResult;
 const browserServerResult: ServerResult<"browser/tool"> = browserResult;
 
 void events;
@@ -451,4 +458,5 @@ void agentInterruptResult;
 void goalSet;
 void browserRequest;
 void browserResult;
+void staleBrowserResult;
 void browserServerResult;

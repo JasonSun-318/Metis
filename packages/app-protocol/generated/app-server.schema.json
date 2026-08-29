@@ -34712,6 +34712,125 @@
                                   "type": "object",
                                   "required": [
                                     "status",
+                                    "reason",
+                                    "observation"
+                                  ],
+                                  "properties": {
+                                    "status": {
+                                      "type": "string",
+                                      "const": "stale"
+                                    },
+                                    "reason": {
+                                      "anyOf": [
+                                        {
+                                          "type": "string",
+                                          "const": "origin_changed"
+                                        },
+                                        {
+                                          "type": "string",
+                                          "const": "document_changed"
+                                        },
+                                        {
+                                          "type": "string",
+                                          "const": "revision_changed"
+                                        },
+                                        {
+                                          "type": "string",
+                                          "const": "element_missing"
+                                        }
+                                      ]
+                                    },
+                                    "observation": {
+                                      "type": "object",
+                                      "required": [
+                                        "browserId",
+                                        "profileId",
+                                        "documentId",
+                                        "revision",
+                                        "change",
+                                        "url",
+                                        "title",
+                                        "loading",
+                                        "state"
+                                      ],
+                                      "properties": {
+                                        "browserId": {
+                                          "type": "string",
+                                          "format": "uuid"
+                                        },
+                                        "profileId": {
+                                          "type": "string",
+                                          "format": "uuid"
+                                        },
+                                        "documentId": {
+                                          "type": "string",
+                                          "format": "uuid"
+                                        },
+                                        "revision": {
+                                          "type": "integer",
+                                          "minimum": 0,
+                                          "maximum": 9007199254740991
+                                        },
+                                        "change": {
+                                          "anyOf": [
+                                            {
+                                              "type": "string",
+                                              "const": "full"
+                                            },
+                                            {
+                                              "type": "string",
+                                              "const": "diff"
+                                            },
+                                            {
+                                              "type": "string",
+                                              "const": "unchanged"
+                                            }
+                                          ]
+                                        },
+                                        "url": {
+                                          "type": "string",
+                                          "x-metis-maxUtf8Bytes": 8192
+                                        },
+                                        "title": {
+                                          "type": "string",
+                                          "x-metis-maxUtf8Bytes": 4096
+                                        },
+                                        "loading": {
+                                          "type": "boolean"
+                                        },
+                                        "state": {
+                                          "type": "string",
+                                          "x-metis-maxUtf8Bytes": 262144
+                                        },
+                                        "screenshot": {
+                                          "type": "object",
+                                          "required": [
+                                            "mediaType",
+                                            "data"
+                                          ],
+                                          "properties": {
+                                            "mediaType": {
+                                              "type": "string",
+                                              "const": "image/jpeg"
+                                            },
+                                            "data": {
+                                              "type": "string",
+                                              "pattern": "^[A-Za-z0-9+/]*={0,2}$",
+                                              "x-metis-maxUtf8Bytes": 4194304
+                                            }
+                                          },
+                                          "additionalProperties": false
+                                        }
+                                      },
+                                      "additionalProperties": false
+                                    }
+                                  },
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "object",
+                                  "required": [
+                                    "status",
                                     "reason"
                                   ],
                                   "properties": {
@@ -34852,6 +34971,125 @@
                                     "status": {
                                       "type": "string",
                                       "const": "completed"
+                                    },
+                                    "observation": {
+                                      "type": "object",
+                                      "required": [
+                                        "browserId",
+                                        "profileId",
+                                        "documentId",
+                                        "revision",
+                                        "change",
+                                        "url",
+                                        "title",
+                                        "loading",
+                                        "state"
+                                      ],
+                                      "properties": {
+                                        "browserId": {
+                                          "type": "string",
+                                          "format": "uuid"
+                                        },
+                                        "profileId": {
+                                          "type": "string",
+                                          "format": "uuid"
+                                        },
+                                        "documentId": {
+                                          "type": "string",
+                                          "format": "uuid"
+                                        },
+                                        "revision": {
+                                          "type": "integer",
+                                          "minimum": 0,
+                                          "maximum": 9007199254740991
+                                        },
+                                        "change": {
+                                          "anyOf": [
+                                            {
+                                              "type": "string",
+                                              "const": "full"
+                                            },
+                                            {
+                                              "type": "string",
+                                              "const": "diff"
+                                            },
+                                            {
+                                              "type": "string",
+                                              "const": "unchanged"
+                                            }
+                                          ]
+                                        },
+                                        "url": {
+                                          "type": "string",
+                                          "x-metis-maxUtf8Bytes": 8192
+                                        },
+                                        "title": {
+                                          "type": "string",
+                                          "x-metis-maxUtf8Bytes": 4096
+                                        },
+                                        "loading": {
+                                          "type": "boolean"
+                                        },
+                                        "state": {
+                                          "type": "string",
+                                          "x-metis-maxUtf8Bytes": 262144
+                                        },
+                                        "screenshot": {
+                                          "type": "object",
+                                          "required": [
+                                            "mediaType",
+                                            "data"
+                                          ],
+                                          "properties": {
+                                            "mediaType": {
+                                              "type": "string",
+                                              "const": "image/jpeg"
+                                            },
+                                            "data": {
+                                              "type": "string",
+                                              "pattern": "^[A-Za-z0-9+/]*={0,2}$",
+                                              "x-metis-maxUtf8Bytes": 4194304
+                                            }
+                                          },
+                                          "additionalProperties": false
+                                        }
+                                      },
+                                      "additionalProperties": false
+                                    }
+                                  },
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "object",
+                                  "required": [
+                                    "status",
+                                    "reason",
+                                    "observation"
+                                  ],
+                                  "properties": {
+                                    "status": {
+                                      "type": "string",
+                                      "const": "stale"
+                                    },
+                                    "reason": {
+                                      "anyOf": [
+                                        {
+                                          "type": "string",
+                                          "const": "origin_changed"
+                                        },
+                                        {
+                                          "type": "string",
+                                          "const": "document_changed"
+                                        },
+                                        {
+                                          "type": "string",
+                                          "const": "revision_changed"
+                                        },
+                                        {
+                                          "type": "string",
+                                          "const": "element_missing"
+                                        }
+                                      ]
                                     },
                                     "observation": {
                                       "type": "object",
@@ -84371,6 +84609,125 @@
                               "type": "object",
                               "required": [
                                 "status",
+                                "reason",
+                                "observation"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "const": "stale"
+                                },
+                                "reason": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "const": "origin_changed"
+                                    },
+                                    {
+                                      "type": "string",
+                                      "const": "document_changed"
+                                    },
+                                    {
+                                      "type": "string",
+                                      "const": "revision_changed"
+                                    },
+                                    {
+                                      "type": "string",
+                                      "const": "element_missing"
+                                    }
+                                  ]
+                                },
+                                "observation": {
+                                  "type": "object",
+                                  "required": [
+                                    "browserId",
+                                    "profileId",
+                                    "documentId",
+                                    "revision",
+                                    "change",
+                                    "url",
+                                    "title",
+                                    "loading",
+                                    "state"
+                                  ],
+                                  "properties": {
+                                    "browserId": {
+                                      "type": "string",
+                                      "format": "uuid"
+                                    },
+                                    "profileId": {
+                                      "type": "string",
+                                      "format": "uuid"
+                                    },
+                                    "documentId": {
+                                      "type": "string",
+                                      "format": "uuid"
+                                    },
+                                    "revision": {
+                                      "type": "integer",
+                                      "minimum": 0,
+                                      "maximum": 9007199254740991
+                                    },
+                                    "change": {
+                                      "anyOf": [
+                                        {
+                                          "type": "string",
+                                          "const": "full"
+                                        },
+                                        {
+                                          "type": "string",
+                                          "const": "diff"
+                                        },
+                                        {
+                                          "type": "string",
+                                          "const": "unchanged"
+                                        }
+                                      ]
+                                    },
+                                    "url": {
+                                      "type": "string",
+                                      "x-metis-maxUtf8Bytes": 8192
+                                    },
+                                    "title": {
+                                      "type": "string",
+                                      "x-metis-maxUtf8Bytes": 4096
+                                    },
+                                    "loading": {
+                                      "type": "boolean"
+                                    },
+                                    "state": {
+                                      "type": "string",
+                                      "x-metis-maxUtf8Bytes": 262144
+                                    },
+                                    "screenshot": {
+                                      "type": "object",
+                                      "required": [
+                                        "mediaType",
+                                        "data"
+                                      ],
+                                      "properties": {
+                                        "mediaType": {
+                                          "type": "string",
+                                          "const": "image/jpeg"
+                                        },
+                                        "data": {
+                                          "type": "string",
+                                          "pattern": "^[A-Za-z0-9+/]*={0,2}$",
+                                          "x-metis-maxUtf8Bytes": 4194304
+                                        }
+                                      },
+                                      "additionalProperties": false
+                                    }
+                                  },
+                                  "additionalProperties": false
+                                }
+                              },
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "required": [
+                                "status",
                                 "reason"
                               ],
                               "properties": {
@@ -84511,6 +84868,125 @@
                                 "status": {
                                   "type": "string",
                                   "const": "completed"
+                                },
+                                "observation": {
+                                  "type": "object",
+                                  "required": [
+                                    "browserId",
+                                    "profileId",
+                                    "documentId",
+                                    "revision",
+                                    "change",
+                                    "url",
+                                    "title",
+                                    "loading",
+                                    "state"
+                                  ],
+                                  "properties": {
+                                    "browserId": {
+                                      "type": "string",
+                                      "format": "uuid"
+                                    },
+                                    "profileId": {
+                                      "type": "string",
+                                      "format": "uuid"
+                                    },
+                                    "documentId": {
+                                      "type": "string",
+                                      "format": "uuid"
+                                    },
+                                    "revision": {
+                                      "type": "integer",
+                                      "minimum": 0,
+                                      "maximum": 9007199254740991
+                                    },
+                                    "change": {
+                                      "anyOf": [
+                                        {
+                                          "type": "string",
+                                          "const": "full"
+                                        },
+                                        {
+                                          "type": "string",
+                                          "const": "diff"
+                                        },
+                                        {
+                                          "type": "string",
+                                          "const": "unchanged"
+                                        }
+                                      ]
+                                    },
+                                    "url": {
+                                      "type": "string",
+                                      "x-metis-maxUtf8Bytes": 8192
+                                    },
+                                    "title": {
+                                      "type": "string",
+                                      "x-metis-maxUtf8Bytes": 4096
+                                    },
+                                    "loading": {
+                                      "type": "boolean"
+                                    },
+                                    "state": {
+                                      "type": "string",
+                                      "x-metis-maxUtf8Bytes": 262144
+                                    },
+                                    "screenshot": {
+                                      "type": "object",
+                                      "required": [
+                                        "mediaType",
+                                        "data"
+                                      ],
+                                      "properties": {
+                                        "mediaType": {
+                                          "type": "string",
+                                          "const": "image/jpeg"
+                                        },
+                                        "data": {
+                                          "type": "string",
+                                          "pattern": "^[A-Za-z0-9+/]*={0,2}$",
+                                          "x-metis-maxUtf8Bytes": 4194304
+                                        }
+                                      },
+                                      "additionalProperties": false
+                                    }
+                                  },
+                                  "additionalProperties": false
+                                }
+                              },
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "required": [
+                                "status",
+                                "reason",
+                                "observation"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "const": "stale"
+                                },
+                                "reason": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "const": "origin_changed"
+                                    },
+                                    {
+                                      "type": "string",
+                                      "const": "document_changed"
+                                    },
+                                    {
+                                      "type": "string",
+                                      "const": "revision_changed"
+                                    },
+                                    {
+                                      "type": "string",
+                                      "const": "element_missing"
+                                    }
+                                  ]
                                 },
                                 "observation": {
                                   "type": "object",

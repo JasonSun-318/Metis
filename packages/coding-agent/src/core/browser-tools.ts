@@ -164,6 +164,11 @@ export type BrowserHostResult =
 			readonly tool: "browser_navigate" | "browser_act";
 			readonly details:
 				| { readonly status: "completed"; readonly observation: BrowserHostObservation }
+				| {
+						readonly status: "stale";
+						readonly reason: "origin_changed" | "document_changed" | "revision_changed" | "element_missing";
+						readonly observation: BrowserHostObservation;
+				  }
 				| { readonly status: "cancelled"; readonly reason: "user_cancelled" };
 	  }
 	| { readonly tool: "browser_observe"; readonly observation: BrowserHostObservation }
@@ -192,6 +197,19 @@ function observationContent(observation: BrowserHostObservation) {
 	];
 }
 
+function staleContent(
+	details: Extract<
+		Extract<BrowserHostResult, { tool: "browser_navigate" | "browser_act" }>["details"],
+		{ status: "stale" }
+	>,
+) {
+	const { screenshot, ...observation } = details.observation;
+	return [
+		{ type: "text" as const, text: JSON.stringify({ status: details.status, reason: details.reason, observation }) },
+		...(screenshot ? [{ type: "image" as const, data: screenshot.data, mimeType: screenshot.mediaType }] : []),
+	];
+}
+
 function resultContent(result: BrowserHostResult) {
 	if (result.tool === "browser_tabs") {
 		return [{ type: "text" as const, text: JSON.stringify(result.details) }];
@@ -200,6 +218,7 @@ function resultContent(result: BrowserHostResult) {
 	if (result.details.status === "cancelled") {
 		return [{ type: "text" as const, text: `Browser control cancelled: ${result.details.reason}` }];
 	}
+	if (result.tool !== "browser_handoff" && result.details.status === "stale") return staleContent(result.details);
 	return observationContent(result.details.observation);
 }
 

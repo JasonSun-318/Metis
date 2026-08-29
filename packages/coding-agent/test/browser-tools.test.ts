@@ -108,6 +108,43 @@ describe("browser host tools", () => {
 		expect(JSON.stringify(result.content[0])).not.toContain(data);
 	});
 
+	it("returns stale action state explicitly without duplicating screenshots", async () => {
+		const data = "c3RhbGUtanBlZw==";
+		const tool = createBrowserToolDefinitions(async () => ({
+			tool: "browser_act",
+			details: {
+				status: "stale",
+				reason: "revision_changed",
+				observation: { ...observation, revision: 2, screenshot: { mediaType: "image/jpeg", data } },
+			},
+		})).find(({ name }) => name === "browser_act")!;
+		const result = await tool.execute(
+			"tool-call-stale",
+			{
+				browserId: BROWSER_ID,
+				documentId: DOCUMENT_ID,
+				snapshotRevision: 1,
+				origin: "https://example.test",
+				intent: "Click Continue",
+				risk: "ordinary",
+				action: { type: "click", target: { elementId: "e1" } },
+			},
+			undefined,
+			undefined,
+			{} as never,
+		);
+		expect(result.content[0]).toEqual({
+			type: "text",
+			text: JSON.stringify({
+				status: "stale",
+				reason: "revision_changed",
+				observation: { ...observation, revision: 2 },
+			}),
+		});
+		expect(result.content[1]).toEqual({ type: "image", data, mimeType: "image/jpeg" });
+		expect(JSON.stringify(result.content[0])).not.toContain(data);
+	});
+
 	it("rejects a result for a different browser tool", async () => {
 		const tool = createBrowserToolDefinitions(async () => ({ tool: "browser_tabs", details: {} })).find(
 			({ name }) => name === "browser_observe",
