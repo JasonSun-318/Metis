@@ -3761,6 +3761,21 @@ test("packaged General settings and Personalization persist across restart", asy
 		await page.getByRole("option", { name: "系统无衬线", exact: true }).click();
 		await page.getByRole("button", { name: "Code 字体", exact: true }).click();
 		await page.getByRole("option", { name: "系统衬线", exact: true }).click();
+		const fixedLayoutBeforeFontSizeChange = await page.evaluate(() => ({
+			settingsWidth: document.querySelector(".settings-dialog")?.getBoundingClientRect().width,
+			sidebarWidth: document.querySelector(".settings-sidebar")?.getBoundingClientRect().width,
+			controlHeight: document.querySelector('[aria-label="内容字号"]')?.getBoundingClientRect().height,
+		}));
+		await page.getByRole("button", { name: "内容字号", exact: true }).click();
+		await page.getByRole("option", { name: "20 px", exact: true }).click();
+		await expect.poll(() => page!.evaluate(() =>
+			getComputedStyle(document.documentElement).getPropertyValue("--content-font-size").trim(),
+		)).toBe("20px");
+		expect(await page.evaluate(() => ({
+			settingsWidth: document.querySelector(".settings-dialog")?.getBoundingClientRect().width,
+			sidebarWidth: document.querySelector(".settings-sidebar")?.getBoundingClientRect().width,
+			controlHeight: document.querySelector('[aria-label="内容字号"]')?.getBoundingClientRect().height,
+		}))).toEqual(fixedLayoutBeforeFontSizeChange);
 		await page.getByRole("button", { name: "减少动效", exact: true }).click();
 		expect(await page.locator("html").getAttribute("data-motion")).toBe("reduced");
 		const fonts = await page.evaluate(() => ({
@@ -3794,7 +3809,7 @@ test("packaged General settings and Personalization persist across restart", asy
 		await searchSection.getByRole("button", { name: "保存", exact: true }).click();
 		await expect(searchSection.getByRole("status")).toContainText("已保存");
 		await expect(searchApiKey).toHaveAttribute("type", "password");
-		await expect(searchApiKey).toHaveAttribute("placeholder", "••••••••••••");
+		await expect(searchApiKey).toHaveAttribute("placeholder", "••••••••••••••••••••••••••••••••");
 		await searchSection.getByRole("button", { name: "显示 API Key", exact: true }).click();
 		await expect(searchApiKey).toHaveAttribute("type", "text");
 		await expect(searchApiKey).toHaveValue("packaged-search-secret");
@@ -3855,12 +3870,16 @@ test("packaged General settings and Personalization persist across restart", asy
 		await expect(page.getByRole("button", { name: "浅色", exact: true })).toHaveAttribute("aria-pressed", "true");
 		await expect(page.getByRole("button", { name: "Chat 字体", exact: true })).toContainText("系统无衬线");
 		await expect(page.getByRole("button", { name: "Code 字体", exact: true })).toContainText("系统衬线");
+		await expect(page.getByRole("button", { name: "内容字号", exact: true })).toContainText("20 px");
+		expect(await page.evaluate(() =>
+			getComputedStyle(document.documentElement).getPropertyValue("--content-font-size").trim(),
+		)).toBe("20px");
 		await expect(page.getByRole("button", { name: "减少动效", exact: true })).toHaveAttribute("aria-pressed", "true");
 		const restartedSearchSection = page.locator(".web-search-section");
 		await expect(restartedSearchSection.getByRole("switch", { name: "启用网络搜索", exact: true })).toBeChecked();
 		await expect(restartedSearchSection.getByLabel("API Key", { exact: true })).toHaveAttribute(
 			"placeholder",
-			"••••••••••••",
+			"••••••••••••••••••••••••••••••••",
 		);
 		const restartedFonts = await page.evaluate(() => ({
 			chat: getComputedStyle(document.documentElement).getPropertyValue("--chat-prose-font"),
