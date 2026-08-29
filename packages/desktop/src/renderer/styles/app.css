@@ -462,6 +462,8 @@ textarea { resize: none; }
 
 .new-task-home { position: relative; display: flex; min-height: 0; flex: 1; align-items: flex-start; overflow: hidden; padding: clamp(104px, 17vh, 146px) 24px 24px; }
 .new-task-side-rays { position: absolute; z-index: 0; inset: 0; overflow: hidden; pointer-events: none; }
+:root[data-theme="dark"] .new-task-side-rays { opacity: .38; }
+:root[data-theme="light"] .new-task-side-rays { opacity: .16; }
 .new-task-side-rays canvas { display: block; width: 100%; height: 100%; }
 .new-task-home-content { position: relative; z-index: 1; width: min(var(--conversation-width), 100%); margin: 0 auto; }
 .new-task-home-heading { margin: 0 8px 24px; }

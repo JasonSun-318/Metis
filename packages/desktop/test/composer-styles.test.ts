@@ -24,6 +24,11 @@ function rule(selector: string): CSSStyleDeclaration {
 }
 
 describe("Composer visual states", () => {
+	it("uses quieter new-task rays in light mode", () => {
+		expect(css).toContain(':root[data-theme="dark"] .new-task-side-rays { opacity: .38; }');
+		expect(css).toContain(':root[data-theme="light"] .new-task-side-rays { opacity: .16; }');
+	});
+
 	it("keeps the composer and disabled chrome visually stationary", () => {
 		expect(rule(".composer").transition).not.toContain("transform");
 		expect(rule(".composer").borderRadius).toBe("var(--composer-radius)");
