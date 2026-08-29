@@ -15,6 +15,13 @@ describe("Settings visual states", () => {
 		expect(css).toContain(
 			".usage-detail-card { border: 0; border-radius: 0; background: transparent; padding: 4px 16px; }",
 		);
+		expect(css).toContain(".model-provider-card small { color: var(--text-10);");
+		expect(css).toContain(".usage-metric-card small { color: var(--text-10);");
+		expect(css).toContain(
+			".usage-chart-axis { display: flex; justify-content: space-between; color: var(--text-10);",
+		);
+		expect(css).toContain(".usage-detail-card li small { color: var(--text-09); }");
+		expect(css).toContain(".memory-engine-card-desc { margin: 0; color: var(--text-10);");
 	});
 
 	it("keeps API key text clear of the reveal control", () => {

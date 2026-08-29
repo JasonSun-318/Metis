@@ -520,6 +520,7 @@ textarea { resize: none; }
 .plugins-search input::placeholder { color: var(--text-07); }
 .plugins-filter .menu-select-trigger { height: 42px; border-radius: 9px; background: var(--surface-03); font-size: 13px; }
 .plugins-full-list { overflow-y: auto; margin-top: 18px; border: 1px solid var(--border); border-radius: 10px; scrollbar-color: var(--scrollbar-thumb) transparent; }
+.plugins-full-list:has(.plugins-catalog-message) { border-color: transparent; }
 .plugins-list-row { display: flex; width: 100%; min-height: 64px; align-items: center; gap: 12px; border-radius: 0; color: var(--text-25); padding: 9px 13px; text-align: left; }
 .plugins-list-row + .plugins-list-row { border-top: 1px solid var(--border); }
 .plugins-list-row:hover, .plugins-list-row:focus-visible, .plugins-list-row[aria-selected="true"] { background: var(--surface-04); outline: 0; }
@@ -807,11 +808,10 @@ textarea { resize: none; }
 .scheduled-task-state { width: fit-content; border: 1px solid var(--surface-14); border-radius: 999px; color: var(--text-11); padding: 2px 7px; font-size: 9px; text-transform: capitalize; }
 .scheduled-task-state.state-active { border-color: var(--success-chip-border); background: var(--success-chip-bg); color: var(--success-chip-text); }
 .scheduled-task-state.state-deleting { color: var(--danger-form); }
-.scheduled-tasks-empty { display: flex; min-height: 330px; align-items: center; justify-content: center; flex-direction: column; color: var(--text-06); text-align: center; }
-.scheduled-tasks-empty-icon { width: 96px; height: 96px; color: var(--text); margin-bottom: 20px; }
+.scheduled-tasks-empty { display: flex; min-height: 260px; align-items: center; justify-content: center; flex-direction: column; color: var(--text-06); text-align: center; }
+.scheduled-tasks-empty-icon { width: 64px; height: 64px; color: var(--text); margin-bottom: 16px; }
 .scheduled-tasks-empty h2 { margin: 0; color: var(--text-09); font-size: 15px; font-weight: 400; }
-.scheduled-tasks-empty p { margin: 8px 0 18px; font-size: 12px; }
-.scheduled-task-empty-menu { min-width: 112px; }
+.scheduled-tasks-empty p { margin: 8px 0 0; font-size: 12px; }
 .scheduled-task-loading { display: grid; min-height: 210px; color: var(--text-09); place-items: center; font-size: 12px; }
 .scheduled-tasks-error, .scheduled-task-warning { display: flex; align-items: center; justify-content: space-between; gap: 12px; border: 1px solid var(--task-warning-border); border-radius: 9px; background: var(--task-warning-bg); color: var(--task-warning-text); margin-top: 14px; padding: 9px 11px; font-size: 11px; }
 .scheduled-tasks-error button { border: 1px solid var(--border); padding: 4px 8px; }
@@ -1877,7 +1877,7 @@ textarea { resize: none; }
 .model-provider-card-heading strong { display: block; flex: 1 1 0%; min-width: 0; overflow: hidden; font-size: 13px; font-weight: 560; line-height: 1.25; text-overflow: ellipsis; white-space: nowrap; }
 .model-provider-badge { flex: none; border-radius: 999px; background: var(--provider-badge-bg); color: var(--provider-badge-text); padding: 2px 7px; font-size: 10px; font-weight: 520; white-space: nowrap; }
 .model-provider-badge.configured { background: var(--success-soft-bg); color: var(--success-soft-text); }
-.model-provider-card small { color: var(--text-06); font-size: 11px; }
+.model-provider-card small { color: var(--text-10); font-size: 11px; }
 .model-add-provider { justify-self: start; margin-top: 10px; }
 .model-service-section { margin-top: 12px; }
 .model-service-panel { display: grid; gap: 14px; padding: 16px 18px; }
@@ -1955,7 +1955,7 @@ textarea { resize: none; }
 .usage-metric-badge.chat { background: var(--surface-08); color: var(--accent); }
 .usage-metric-badge.code { background: var(--surface-08); color: var(--usage-code); }
 .usage-metric-card strong { color: var(--text-28); font-size: 22px; font-weight: 600; letter-spacing: -.02em; }
-.usage-metric-card small { color: var(--text-04); font-size: 11px; }
+.usage-metric-card small { color: var(--text-10); font-size: 11px; }
 .usage-chart-card { position: relative; overflow: hidden; padding: 16px 18px; margin-bottom: 16px; }
 .usage-chart-header { display: flex; justify-content: space-between; gap: 24px; }
 .usage-chart-header p { margin: 3px 0 0; }
@@ -1973,7 +1973,7 @@ textarea { resize: none; }
 .usage-bar > i { display: block; width: 100%; min-height: 0; }
 .usage-bar > i.code { border-radius: 3px 3px 0 0; background: var(--usage-code); }
 .usage-bar > i.chat { background: var(--accent); }
-.usage-chart-axis { display: flex; justify-content: space-between; color: var(--text-05); margin-top: 6px; font-size: 10px; font-weight: 500; }
+.usage-chart-axis { display: flex; justify-content: space-between; color: var(--text-10); margin-top: 6px; font-size: 10px; font-weight: 500; }
 .usage-tooltip { position: absolute; z-index: 2; top: 12px; display: grid; min-width: 165px; gap: 6px; border: 1px solid var(--border-strong); border-radius: 9px; background: var(--surface-08); box-shadow: var(--overlay-shadow); color: var(--text-22); padding: 10px 12px; font-size: 11px; transform: translateX(-50%); pointer-events: none; }
 .usage-tooltip strong { color: var(--text-28); font-weight: 560; }
 .usage-table-wrap { overflow: auto; }
@@ -1993,7 +1993,7 @@ textarea { resize: none; }
 .usage-detail-card li > span { display: grid; min-width: 0; }
 .usage-detail-card li strong, .usage-detail-card li small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .usage-detail-card li strong { color: var(--text-23); font-weight: 520; }
-.usage-detail-card li small { color: var(--text-02); }
+.usage-detail-card li small { color: var(--text-09); }
 .usage-detail-card li b { color: var(--text-14); font-weight: 500; }
 
 .settings-page-scroll-profile { overflow: hidden; }
@@ -2108,7 +2108,7 @@ classes so their inline layout wins the cascade. */
 .memory-engine-badge { border-radius: 999px; background: var(--surface-08); color: var(--text-14); padding: 2px 7px; font-size: 10px; font-weight: 520; }
 .memory-engine-badge.configured { background: var(--success-soft-bg); color: var(--success-soft-text); }
 .memory-engine-badge.warning { background: var(--surface-08); color: var(--text-11); }
-.memory-engine-card-desc { margin: 0; color: var(--text-08); font-size: 11.5px; line-height: 1.5; }
+.memory-engine-card-desc { margin: 0; color: var(--text-10); font-size: 11.5px; line-height: 1.5; }
 .memory-info-banner { display: flex; align-items: flex-start; gap: 8px; margin: 0 16px 14px; border-top: 1px solid var(--border-weak); color: var(--text-09); padding: 12px 0 0; font-size: 12px; line-height: 1.45; }
 .memory-info-banner svg { flex: none; margin-top: 2px; color: var(--text-14); }
 .memory-warning-banner { display: flex; align-items: flex-start; gap: 8px; margin: 0 16px 14px; padding: 10px 12px; border-radius: 8px; background: var(--danger-soft-bg); color: var(--danger-soft-text); font-size: 12px; line-height: 1.45; }

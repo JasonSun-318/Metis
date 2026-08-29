@@ -96,6 +96,7 @@ describe("ScheduledTasksPanel", () => {
 		const root = createRoot(container);
 		await act(async () => root.render(<ScheduledTasksPanel api={api} onCreateWithMetis={onCreateWithMetis} onOpenSession={() => undefined} onSelectTask={() => undefined} selectedTaskId={null} serverReady sessions={[]} store={store} />));
 		await wait(220);
+		expect([...container.querySelectorAll("button")].filter((button) => button.textContent?.trim() === "New task")).toHaveLength(1);
 
 		const openAssisted = async () => {
 			const newTask = [...container.querySelectorAll<HTMLButtonElement>("button")]

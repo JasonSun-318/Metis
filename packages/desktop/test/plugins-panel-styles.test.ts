@@ -24,6 +24,7 @@ describe("Plugin Center visual contract", () => {
 		);
 		expect(rule(".plugins-catalog-page").overflowY).toBe("auto");
 		expect(rule(".plugins-full-list").overflowY).toBe("auto");
+		expect(rule(".plugins-full-list:has(.plugins-catalog-message)").borderColor).toBe("transparent");
 		expect(rule(".plugins-detail-page").overflowY).toBe("auto");
 		expect(css).toContain(
 			".plugins-page-header, .plugins-section-switch-row, .plugins-list-controls, .plugins-full-list { width: min(832px, 100%);",
@@ -41,6 +42,8 @@ describe("Plugin Center visual contract", () => {
 		expect(rule(".plugins-detail-actions button").minHeight).toBe("34px");
 		expect(rule(".plugins-detail-document").fontSize).toBe("13px");
 		expect(rule(".plugins-detail-document pre").overflowX).toBe("auto");
+		expect(rule(".scheduled-tasks-empty").minHeight).toBe("260px");
+		expect(rule(".scheduled-tasks-empty-icon").width).toBe("64px");
 		expect(css).toContain(".mcp-dialog { position: relative; width: min(760px, calc(100vw - 48px));");
 		expect(rule(".mcp-dialog").borderRadius).toBe("16px");
 		expect(rule(".mcp-dialog").background).toBe("var(--surface-04)");

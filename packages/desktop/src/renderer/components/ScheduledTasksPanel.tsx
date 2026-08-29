@@ -1,5 +1,5 @@
 import type { ModelOptionView, ScheduleTaskView, SessionSummary } from "@metis/app-protocol";
-import { ChatCircleDots, FolderSimple, Gear, Info, MagnifyingGlass, Plus, Sun, X } from "@phosphor-icons/react";
+import { ChatCircleDots, FolderSimple, Gear, Info, MagnifyingGlass, Sun, X } from "@phosphor-icons/react";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
@@ -26,13 +26,11 @@ function NewTaskMenu({
 	disabled,
 	onAssisted,
 	onManual,
-	showPlus = false,
 }: {
 	readonly className?: string;
 	readonly disabled: boolean;
 	readonly onAssisted: () => void;
 	readonly onManual: () => void;
-	readonly showPlus?: boolean;
 }) {
 	const { t } = useTranslation();
 	return (
@@ -49,9 +47,8 @@ function NewTaskMenu({
 			options={[
 				{ value: "assisted", label: t("Create with Metis"), icon: <ChatCircleDots aria-hidden="true" size={17} /> },
 				{ value: "manual", label: t("Set up manually"), icon: <Gear aria-hidden="true" size={17} /> },
-				]}
-				placeholder={t("New task")}
-				triggerIcon={showPlus ? <Plus aria-hidden="true" size={14} /> : undefined}
+			]}
+			placeholder={t("New task")}
 			value=""
 		/>
 	);
@@ -286,7 +283,7 @@ export function ScheduledTasksPanel({ api, onCreateWithMetis, onOpenSession, onS
 				{error && <div className="scheduled-tasks-error" role="alert"><span>{t(error)}</span><button onClick={retry} type="button">{t("Retry")}</button></div>}
 				{!modelsLoading && models.length === 0 && !modelError && <div className="scheduled-task-warning" role="status">{t("Configure a model provider before creating a scheduled task.")}</div>}
 				<div className="scheduled-tasks-content">
-										{loading && tasks.length === 0 ? <div className="scheduled-task-loading" role="status">{t("Loading scheduled tasks…")}</div> : tasks.length === 0 ? <div className="scheduled-tasks-empty"><TracedSvgIcon className="scheduled-tasks-empty-icon" src={scheduleEmptyIcon} /><h2>{t(query ? "No matching scheduled tasks" : "Create your first scheduled task")}</h2><p>{t(query ? "Try another name or description." : "Set a task to run once or on a recurring schedule.")}</p>{!query && <NewTaskMenu className="scheduled-task-empty-menu" disabled={modelsLoading || models.length === 0} onAssisted={() => setWorkspaceDialogOpen(true)} onManual={() => setDialogTask(null)} showPlus />}</div> : <div className="scheduled-task-cards">{tasks.map((task) => <button className="scheduled-task-card" key={task.id} onClick={() => onSelectTask(task.id)} type="button"><span className={`scheduled-task-state state-${task.status}`}>{t(task.activeRunId ? "Running" : task.status.replace("_", " "))}</span><strong>{task.name}</strong>{task.description && <p>{task.description}</p>}<small>{scheduleLabel(task.schedule, t)}</small><footer><span>{t("Next: {{value}}", { value: nextRunLabel(task, intlLocale, t) })}</span>{task.lastRun && <span>{t("Last: {{status}}", { status: t(task.lastRun.status) })}</span>}{task.unreadCount > 0 && <i aria-label={t("{{count}} unread runs", { count: task.unreadCount })}>{task.unreadCount}</i>}</footer></button>)}</div>}
+										{loading && tasks.length === 0 ? <div className="scheduled-task-loading" role="status">{t("Loading scheduled tasks…")}</div> : tasks.length === 0 ? <div className="scheduled-tasks-empty"><TracedSvgIcon className="scheduled-tasks-empty-icon" src={scheduleEmptyIcon} /><h2>{t(query ? "No matching scheduled tasks" : "Create your first scheduled task")}</h2><p>{t(query ? "Try another name or description." : "Set a task to run once or on a recurring schedule.")}</p></div> : <div className="scheduled-task-cards">{tasks.map((task) => <button className="scheduled-task-card" key={task.id} onClick={() => onSelectTask(task.id)} type="button"><span className={`scheduled-task-state state-${task.status}`}>{t(task.activeRunId ? "Running" : task.status.replace("_", " "))}</span><strong>{task.name}</strong>{task.description && <p>{task.description}</p>}<small>{scheduleLabel(task.schedule, t)}</small><footer><span>{t("Next: {{value}}", { value: nextRunLabel(task, intlLocale, t) })}</span>{task.lastRun && <span>{t("Last: {{status}}", { status: t(task.lastRun.status) })}</span>}{task.unreadCount > 0 && <i aria-label={t("{{count}} unread runs", { count: task.unreadCount })}>{task.unreadCount}</i>}</footer></button>)}</div>}
 					{nextAfterTaskId && <button className="scheduled-task-load-more" disabled={loadingMore} onClick={() => void loadMore()} type="button">{t(loadingMore ? "Loading…" : "Load more")}</button>}
 				</div>
 				</div></div>
