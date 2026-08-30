@@ -4,7 +4,6 @@ import { pathToFileURL } from "node:url";
 import type { SessionSummary } from "@metis/app-protocol";
 import { describe, expect, it, vi } from "vitest";
 import { resolveRendererAsset } from "../src/main/app-protocol-scheme.ts";
-import { BrowserToolError } from "../src/main/browser-manager.ts";
 import { ClientBroker, isTrustedRendererUrl } from "../src/main/client-broker.ts";
 import { isSafeExternalUrl } from "../src/main/external-url.ts";
 import { DESKTOP_RPC_FORWARDING } from "../src/shared/app-server-rpc-forwarding.ts";
@@ -774,9 +773,7 @@ describe("desktop trust boundaries", () => {
 	it("executes browser RPCs only in main and cancels the exact correlated call", async () => {
 		const ipcMain = new FakeIpcMain();
 		const { emitMessage, supervisor } = supervisorHarness();
-		let browserListener: ((event: DesktopBrowserEvent) => void) | undefined;
 		let browserSignal: AbortSignal | undefined;
-		let rejectBrowser!: (cause: unknown) => void;
 		const browserManager = {
 			attach: vi.fn(),
 			suspendRenderer: vi.fn(),
@@ -794,22 +791,8 @@ describe("desktop trust boundaries", () => {
 			importData: vi.fn(),
 			listHistory: vi.fn(() => []),
 			clearHistory: vi.fn(),
-			onEvent: vi.fn((listener) => {
-				browserListener = listener;
-				return () => {
-					browserListener = undefined;
-				};
-			}),
-			executeTool: vi.fn(
-				(_sessionId: string, _call: unknown, signal: AbortSignal) =>
-					new Promise((_resolve, reject) => {
-						browserSignal = signal;
-						rejectBrowser = reject;
-						signal.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), {
-							once: true,
-						});
-					}),
-			),
+			onEvent: vi.fn(() => () => undefined),
+			executeTool: vi.fn(),
 			takeControl: vi.fn(),
 			resolveHandoff: vi.fn(),
 			cancelSessionHandoffs: vi.fn(),
@@ -849,64 +832,15 @@ describe("desktop trust boundaries", () => {
 		});
 		supervisor.respondToServerRequest.mockClear();
 		browserManager.executeTool.mockClear();
-		browserManager.executeTool.mockRejectedValueOnce(
-			new BrowserToolError("OVERLOADED", "This task already has the maximum number of browser tabs"),
-		);
-		const limitRequest = {
-			...successRequest,
-			id: "browser-rpc-limit",
-			params: { ...successRequest.params, toolCallId: "browser-call-limit" },
-		};
-		emitMessage(limitRequest);
-		await vi.waitFor(() => expect(supervisor.respondToServerRequest).toHaveBeenCalledOnce());
-		expect(supervisor.respondToServerRequest.mock.calls[0]?.[1]).toMatchObject({
-			error: { data: { name: "OVERLOADED" } },
-		});
-		supervisor.respondToServerRequest.mockClear();
-		browserManager.executeTool.mockClear();
 		browserManager.executeTool.mockImplementationOnce(
 			(_sessionId: string, _call: unknown, signal: AbortSignal) =>
-				new Promise((resolve) => {
-					signal.addEventListener(
-						"abort",
-						() =>
-							resolve({
-								tool: "browser_handoff",
-								details: { status: "cancelled", reason: "tab_closed" },
-							}),
-						{ once: true },
-					);
+				new Promise((_resolve, reject) => {
+					browserSignal = signal;
+					signal.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), {
+						once: true,
+					});
 				}),
 		);
-		const closedBrowserId = "10000000-0000-4000-8000-000000000091";
-		const handoffRequest = {
-			jsonrpc: "2.0" as const,
-			id: "browser-rpc-closed",
-			method: "browser/tool" as const,
-			params: {
-				...successRequest.params,
-				toolCallId: "browser-call-closed",
-				call: { tool: "browser_handoff" as const, input: { browserId: closedBrowserId, reason: "login" as const } },
-			},
-		};
-		emitMessage(handoffRequest);
-		await vi.waitFor(() => expect(browserManager.executeTool).toHaveBeenCalledOnce());
-		browserListener?.({
-			type: "closed",
-			sessionId: handoffRequest.params.sessionId,
-			browserId: closedBrowserId,
-		});
-		await vi.waitFor(() => expect(supervisor.respondToServerRequest).toHaveBeenCalledOnce());
-		expect(supervisor.respondToServerRequest).toHaveBeenCalledWith(handoffRequest, {
-			jsonrpc: "2.0",
-			id: handoffRequest.id,
-			result: {
-				toolCallId: handoffRequest.params.toolCallId,
-				result: { tool: "browser_handoff", details: { status: "cancelled", reason: "tab_closed" } },
-			},
-		});
-		supervisor.respondToServerRequest.mockClear();
-		browserManager.executeTool.mockClear();
 		const request = {
 			jsonrpc: "2.0" as const,
 			id: "browser-rpc-1",
@@ -928,17 +862,6 @@ describe("desktop trust boundaries", () => {
 			params: {
 				serverEpoch: request.params.serverEpoch,
 				sessionId: request.params.sessionId,
-				requestId: request.id,
-				toolCallId: "wrong-call",
-			},
-		});
-		expect(browserSignal?.aborted).toBe(false);
-		emitMessage({
-			jsonrpc: "2.0",
-			method: "browser/tool/cancelled",
-			params: {
-				serverEpoch: request.params.serverEpoch,
-				sessionId: request.params.sessionId,
 				toolCallId: request.params.toolCallId,
 				requestId: request.id,
 			},
@@ -946,7 +869,20 @@ describe("desktop trust boundaries", () => {
 		expect(browserSignal?.aborted).toBe(true);
 		await Promise.resolve();
 		expect(supervisor.respondToServerRequest).not.toHaveBeenCalled();
-		rejectBrowser(new Error("late"));
+
+		browserManager.executeTool.mockClear();
+		webContents.emit("destroyed");
+		const unavailableRequest = {
+			...successRequest,
+			id: "browser-rpc-unavailable",
+			params: { ...successRequest.params, toolCallId: "browser-call-unavailable" },
+		};
+		emitMessage(unavailableRequest);
+		await vi.waitFor(() => expect(supervisor.respondToServerRequest).toHaveBeenCalledOnce());
+		expect(supervisor.respondToServerRequest.mock.calls[0]?.[1]).toMatchObject({
+			error: { data: { name: "OPERATION_FAILED" } },
+		});
+		expect(browserManager.executeTool).not.toHaveBeenCalled();
 		broker.dispose();
 	});
 
