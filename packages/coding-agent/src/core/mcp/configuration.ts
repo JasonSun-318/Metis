@@ -5,6 +5,7 @@ import {
 	type AuthStorageChange,
 	legacyMcpCredentialKey,
 	type McpCredentialIdentity,
+	type McpRevokedCredential,
 	type McpSecretCredential,
 	mcpCredentialKey,
 	mcpVersionedCredentialKey,
@@ -12,7 +13,7 @@ import {
 } from "../auth-storage.ts";
 import type { McpServerSettings, SettingsManager } from "../settings-manager.ts";
 import { mcpServerFingerprint, resolveMcpServerSettings } from "./config.ts";
-import type { McpManager, McpPreparedConfiguration } from "./manager.ts";
+import type { McpCredentialOverlay, McpManager, McpPreparedConfiguration } from "./manager.ts";
 
 export type McpConfigurationScope = "user" | "project";
 
@@ -87,6 +88,8 @@ interface NormalizedChange {
 	readonly previous: McpServerSettings | undefined;
 	readonly next: McpServerSettings | undefined;
 	readonly stagedCredential?: AuthStorageChange;
+	readonly credentialConfigured: boolean;
+	readonly credentialState?: string;
 	readonly keepCredentialKey?: string;
 	readonly cleanupCredentialKeys: readonly string[];
 }
@@ -100,6 +103,12 @@ function credentialIdentity(scope: McpConfigurationScope, name: string, cwd: str
 	return scope === "user" ? { scope, name } : { scope, name, cwd };
 }
 
+type MatchingMcpCredential = {
+	readonly key: string;
+	readonly credential: McpSecretCredential | McpRevokedCredential;
+	readonly fingerprint: string;
+};
+
 function matchingMcpCredential(
 	authStorage: AuthStorage,
 	cwd: string,
@@ -107,17 +116,46 @@ function matchingMcpCredential(
 	name: string,
 	server: McpServerSettings,
 	environment: NodeJS.ProcessEnv,
-): { key: string; credential: McpSecretCredential; fingerprint: string } | undefined {
+): MatchingMcpCredential | undefined {
 	const identity = credentialIdentity(scope, name, cwd);
 	const resolved = resolveMcpServerSettings(name, server, cwd, environment, identity);
 	const fingerprint = mcpServerFingerprint(resolved);
 	for (const key of new Set([resolved.credentialKey, mcpCredentialKey(identity), legacyMcpCredentialKey(name)])) {
 		const credential = authStorage.get(key);
-		if (credential?.type === "mcp_secret" && credential.serverFingerprint === fingerprint) {
+		if (
+			(credential?.type === "mcp_secret" || credential?.type === "mcp_revoked") &&
+			credential.serverFingerprint === fingerprint
+		) {
 			return { key, credential: structuredClone(credential), fingerprint };
 		}
 	}
 	return undefined;
+}
+
+export interface McpCredentialStatus {
+	readonly revisionState: string;
+	readonly configured: boolean;
+}
+
+export function mcpCredentialStatus(
+	authStorage: AuthStorage | undefined,
+	cwd: string,
+	scope: McpConfigurationScope,
+	name: string,
+	server: McpServerSettings,
+	environment: NodeJS.ProcessEnv = process.env,
+): McpCredentialStatus | undefined {
+	if (!authStorage) return undefined;
+	try {
+		const matched = matchingMcpCredential(authStorage, cwd, scope, name, server, environment);
+		if (!matched) return undefined;
+		return {
+			revisionState: server.credentialVersion ?? (matched.credential.type === "mcp_revoked" ? "revoked" : "legacy"),
+			configured: matched.credential.type === "mcp_secret",
+		};
+	} catch {
+		return undefined;
+	}
 }
 
 export function mcpCredentialState(
@@ -128,14 +166,7 @@ export function mcpCredentialState(
 	server: McpServerSettings,
 	environment: NodeJS.ProcessEnv = process.env,
 ): string | undefined {
-	if (!authStorage) return undefined;
-	try {
-		return matchingMcpCredential(authStorage, cwd, scope, name, server, environment)
-			? (server.credentialVersion ?? "legacy")
-			: undefined;
-	} catch {
-		return undefined;
-	}
+	return mcpCredentialStatus(authStorage, cwd, scope, name, server, environment)?.revisionState;
 }
 
 function nonEmptyCredential(credential: McpSecretCredential | undefined): McpSecretCredential | undefined {
@@ -177,21 +208,16 @@ export class McpConfigurationCoordinator {
 		name: string,
 		server: McpServerSettings | undefined,
 		cwd: string,
-	): { key: string; credential: McpSecretCredential; fingerprint: string } | undefined {
+	): MatchingMcpCredential | undefined {
 		if (!server) return undefined;
 		return matchingMcpCredential(this.authStorage, cwd, identity.scope, name, server, process.env);
 	}
 
-	private credentialKeys(identity: McpCredentialIdentity, name: string): string[] {
+	private credentialKeys(identity: McpCredentialIdentity): string[] {
 		const versionedPrefix = mcpVersionedCredentialPrefix(identity);
 		return this.authStorage
 			.list()
-			.filter(
-				(key) =>
-					key.startsWith(versionedPrefix) ||
-					key === mcpCredentialKey(identity) ||
-					key === legacyMcpCredentialKey(name),
-			);
+			.filter((key) => key.startsWith(versionedPrefix) || key === mcpCredentialKey(identity));
 	}
 
 	private normalizeChange(
@@ -201,8 +227,16 @@ export class McpConfigurationCoordinator {
 	): NormalizedChange {
 		const identity = credentialIdentity(mutation.scope, change.name, mutation.cwd);
 		const previousCredential = this.matchingCredential(identity, change.name, previous, mutation.cwd);
-		const cleanupCredentialKeys = this.credentialKeys(identity, change.name);
-		if (!change.next) return { name: change.name, previous, next: undefined, cleanupCredentialKeys };
+		const cleanupCredentialKeys = this.credentialKeys(identity);
+		if (!change.next) {
+			return {
+				name: change.name,
+				previous,
+				next: undefined,
+				credentialConfigured: false,
+				cleanupCredentialKeys,
+			};
+		}
 
 		const next = structuredClone(change.next);
 		const inlineEnvironment = typeof next.command === "string" ? { ...(next.env ?? {}) } : {};
@@ -210,6 +244,54 @@ export class McpConfigurationCoordinator {
 		delete next.credentialVersion;
 		const resolved = resolveMcpServerSettings(change.name, next, mutation.cwd, process.env, identity);
 		const fingerprint = mcpServerFingerprint(resolved);
+		const nextCredential =
+			previousCredential?.fingerprint === fingerprint
+				? previousCredential
+				: this.matchingCredential(identity, change.name, next, mutation.cwd);
+		const matchingCredential =
+			previousCredential?.fingerprint === fingerprint
+				? previousCredential
+				: nextCredential?.credential.type === "mcp_revoked"
+					? nextCredential
+					: undefined;
+		const stageRevocation = (): NormalizedChange => {
+			const credentialVersion = randomUUID();
+			next.credentialVersion = credentialVersion;
+			const key = mcpVersionedCredentialKey(identity, fingerprint, credentialVersion);
+			return {
+				name: change.name,
+				previous,
+				next,
+				stagedCredential: {
+					provider: key,
+					credential: { type: "mcp_revoked", serverFingerprint: fingerprint },
+				},
+				credentialConfigured: false,
+				credentialState: credentialVersion,
+				keepCredentialKey: key,
+				cleanupCredentialKeys,
+			};
+		};
+		if (change.credential.action === "remove") {
+			return stageRevocation();
+		}
+
+		if (
+			change.credential.action === "preserve" &&
+			matchingCredential?.credential.type === "mcp_revoked" &&
+			Object.keys(inlineEnvironment).length === 0
+		) {
+			if (previous?.credentialVersion) next.credentialVersion = previous.credentialVersion;
+			return {
+				name: change.name,
+				previous,
+				next,
+				credentialConfigured: false,
+				credentialState: previous?.credentialVersion ?? "revoked",
+				keepCredentialKey: matchingCredential.key,
+				cleanupCredentialKeys,
+			};
+		}
 
 		let credential: McpSecretCredential | undefined;
 		if (change.credential.action === "replace") {
@@ -229,17 +311,18 @@ export class McpConfigurationCoordinator {
 				...(Object.keys(environment).length > 0 ? { env: environment } : {}),
 				serverFingerprint: fingerprint,
 			});
-		} else if (change.credential.action === "preserve") {
-			const canPreserve = previousCredential?.fingerprint === fingerprint;
+		} else {
+			const canPreserve =
+				matchingCredential?.credential.type === "mcp_secret" && matchingCredential.fingerprint === fingerprint;
 			credential = nonEmptyCredential({
 				type: "mcp_secret",
-				...(canPreserve && previousCredential?.credential.bearerToken
-					? { bearerToken: previousCredential.credential.bearerToken }
+				...(canPreserve && matchingCredential.credential.bearerToken
+					? { bearerToken: matchingCredential.credential.bearerToken }
 					: {}),
-				...((canPreserve && previousCredential?.credential.env) || Object.keys(inlineEnvironment).length > 0
+				...((canPreserve && matchingCredential.credential.env) || Object.keys(inlineEnvironment).length > 0
 					? {
 							env: {
-								...(canPreserve ? previousCredential?.credential.env : {}),
+								...(canPreserve ? matchingCredential.credential.env : {}),
 								...inlineEnvironment,
 							},
 						}
@@ -248,13 +331,22 @@ export class McpConfigurationCoordinator {
 			});
 		}
 
-		if (!credential) return { name: change.name, previous, next, cleanupCredentialKeys };
+		if (!credential) {
+			if (change.credential.action === "preserve") return stageRevocation();
+			return {
+				name: change.name,
+				previous,
+				next,
+				credentialConfigured: false,
+				cleanupCredentialKeys,
+			};
+		}
 
 		const canReuseVersion = Boolean(
 			change.credential.action === "preserve" &&
 				Object.keys(inlineEnvironment).length === 0 &&
 				previous?.credentialVersion &&
-				previousCredential?.key.startsWith(mcpVersionedCredentialPrefix(identity)),
+				matchingCredential?.key.startsWith(mcpVersionedCredentialPrefix(identity)),
 		);
 		const credentialVersion = canReuseVersion ? previous!.credentialVersion! : randomUUID();
 		next.credentialVersion = credentialVersion;
@@ -264,6 +356,8 @@ export class McpConfigurationCoordinator {
 			previous,
 			next,
 			...(canReuseVersion ? {} : { stagedCredential: { provider: key, credential } }),
+			credentialConfigured: true,
+			credentialState: credentialVersion,
 			keepCredentialKey: key,
 			cleanupCredentialKeys,
 		};
@@ -286,13 +380,48 @@ export class McpConfigurationCoordinator {
 		);
 	}
 
-	private rollbackStaged(staged: readonly AuthStorageChange[]): Error[] {
-		if (staged.length === 0) return [];
+	private rollbackCredentials(previous: readonly AuthStorageChange[]): Error[] {
+		if (previous.length === 0) return [];
 		try {
-			this.authStorage.applyChanges(staged.map(({ provider }) => ({ provider, credential: undefined })));
+			this.authStorage.applyChanges(previous);
 			return [];
 		} catch (error) {
 			return [error instanceof Error ? error : new Error(String(error))];
+		}
+	}
+
+	private async rollbackableStagedCredentials(
+		mutation: McpConfigurationMutation,
+		settingsScope: "global" | "project",
+		normalized: readonly NormalizedChange[],
+		previous: readonly AuthStorageChange[],
+	): Promise<readonly AuthStorageChange[]> {
+		if (previous.length === 0) return previous;
+		try {
+			await mutation.settingsManager.reload();
+			const loadError = mutation.settingsManager.getLoadError(settingsScope);
+			if (loadError) throw loadError;
+			const settings =
+				settingsScope === "global"
+					? mutation.settingsManager.getGlobalSettings()
+					: mutation.settingsManager.getProjectSettings();
+			const servers = settings.mcpServers ?? {};
+			const retained = new Set<string>();
+			for (const change of normalized) {
+				const staged = change.stagedCredential;
+				const current = servers[change.name];
+				if (!staged || !current) continue;
+				const identity = credentialIdentity(mutation.scope, change.name, mutation.cwd);
+				if (this.matchingCredential(identity, change.name, current, mutation.cwd)?.key === staged.provider) {
+					retained.add(staged.provider);
+				}
+			}
+			return previous.filter(({ provider }) => !retained.has(provider));
+		} catch (error) {
+			// An unreadable or concurrently changing settings file may still reference
+			// the staged generation. Retaining it is safer than breaking a live config.
+			this.diagnostics.push(error instanceof Error ? error : new Error(String(error)));
+			return [];
 		}
 	}
 
@@ -313,9 +442,9 @@ export class McpConfigurationCoordinator {
 		const conflicts: string[] = [];
 		for (const change of mutation.changes) {
 			const current = currentServers[change.name];
-			const identity = credentialIdentity(mutation.scope, change.name, mutation.cwd);
-			const credential = this.matchingCredential(identity, change.name, current, mutation.cwd);
-			const credentialState = credential ? (current?.credentialVersion ?? "legacy") : undefined;
+			const credentialState = current
+				? mcpCredentialState(this.authStorage, mutation.cwd, mutation.scope, change.name, current)
+				: undefined;
 			const revision = current
 				? mcpConfigurationRevision(mutation.scope, change.name, current, credentialState)
 				: null;
@@ -328,13 +457,22 @@ export class McpConfigurationCoordinator {
 		);
 		const expected = new Map(normalized.map((change) => [change.name, change.previous]));
 		const definitions = new Map(normalized.map((change) => [change.name, change.next]));
-		const staged = normalized.flatMap((change) => (change.stagedCredential ? [change.stagedCredential] : []));
-		if (staged.length > 0) this.authStorage.applyChanges(staged);
+		const stagedCredentials = normalized.flatMap((change) =>
+			change.stagedCredential ? [change.stagedCredential] : [],
+		);
+		const previousStagedCredentials = stagedCredentials.map(({ provider }) => {
+			const credential = this.authStorage.get(provider);
+			return { provider, credential: credential ? structuredClone(credential) : undefined };
+		});
+		if (stagedCredentials.length > 0) this.authStorage.applyChanges(stagedCredentials);
+		const credentialOverlay = new Map(
+			stagedCredentials.map(({ provider, credential }) => [provider, credential]),
+		) satisfies McpCredentialOverlay;
 
 		const runtimeResults = await Promise.allSettled(
 			this.affectedRuntimes(mutation.scope, mutation.cwd).map(async (manager) => ({
 				manager,
-				prepared: await manager.prepareConfigurationChanges(settingsScope, definitions),
+				prepared: await manager.prepareConfigurationChanges(settingsScope, definitions, credentialOverlay),
 			})),
 		);
 		const prepared = runtimeResults.flatMap((result) => (result.status === "fulfilled" ? [result.value] : []));
@@ -342,7 +480,10 @@ export class McpConfigurationCoordinator {
 			(result): result is PromiseRejectedResult => result.status === "rejected",
 		);
 		if (prepareFailure) {
-			const recoveryErrors = [...(await this.discardPrepared(prepared)), ...this.rollbackStaged(staged)];
+			const recoveryErrors = [
+				...(await this.discardPrepared(prepared)),
+				...this.rollbackCredentials(previousStagedCredentials),
+			];
 			if (recoveryErrors.length > 0) {
 				throw new AggregateError([prepareFailure.reason, ...recoveryErrors], "MCP prepare and recovery failed");
 			}
@@ -353,7 +494,16 @@ export class McpConfigurationCoordinator {
 			const committed = await mutation.settingsManager.commitMcpServerChanges(settingsScope, expected, definitions);
 			if (!committed) throw new McpConfigurationConflictError(names);
 		} catch (error) {
-			const recoveryErrors = [...(await this.discardPrepared(prepared)), ...this.rollbackStaged(staged)];
+			const rollbackableCredentials = await this.rollbackableStagedCredentials(
+				mutation,
+				settingsScope,
+				normalized,
+				previousStagedCredentials,
+			);
+			const recoveryErrors = [
+				...(await this.discardPrepared(prepared)),
+				...this.rollbackCredentials(rollbackableCredentials),
+			];
 			if (recoveryErrors.length > 0) {
 				throw new AggregateError([error, ...recoveryErrors], "MCP commit and recovery failed");
 			}
@@ -392,11 +542,11 @@ export class McpConfigurationCoordinator {
 								mutation.scope,
 								change.name,
 								change.next,
-								change.keepCredentialKey ? change.next.credentialVersion : undefined,
+								change.credentialState,
 							),
 						}
 					: {}),
-				credentialConfigured: Boolean(change.keepCredentialKey),
+				credentialConfigured: change.credentialConfigured,
 			})),
 		};
 	}

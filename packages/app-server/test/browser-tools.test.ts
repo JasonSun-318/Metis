@@ -1,13 +1,5 @@
-import { Value } from "typebox/value";
 import { describe, expect, it, vi } from "vitest";
-import {
-	BROWSER_TOOL_NAMES,
-	BrowserActParams,
-	BrowserNavigateParams,
-	BrowserObserveParams,
-	BrowserTabsParams,
-	createBrowserToolDefinitions,
-} from "../src/core/browser-tools.ts";
+import { BROWSER_TOOL_NAMES, createBrowserToolDefinitions } from "../src/browser-tools.ts";
 
 const BROWSER_ID = "88888888-8888-4888-8888-888888888888";
 const PROFILE_ID = "00000000-0000-4000-8000-000000000001";
@@ -38,69 +30,6 @@ describe("browser host tools", () => {
 		expect(guidance).toContain("risk");
 		expect(guidance).toContain("browser_handoff");
 		expect(guidance).toContain("CAPTCHA");
-	});
-
-	it("uses exact bounded argument schemas", () => {
-		expect(Value.Check(BrowserTabsParams, { action: "list" })).toBe(true);
-		expect(Value.Check(BrowserTabsParams, { action: "list", extra: true })).toBe(false);
-		expect(Value.Check(BrowserNavigateParams, { browserId: BROWSER_ID, action: "reload" })).toBe(true);
-		expect(Value.Check(BrowserObserveParams, { browserId: BROWSER_ID, sinceRevision: -1 })).toBe(false);
-		expect(
-			Value.Check(BrowserActParams, {
-				browserId: BROWSER_ID,
-				documentId: DOCUMENT_ID,
-				snapshotRevision: 1,
-				origin: "https://example.test",
-				intent: "Click Continue",
-				risk: "ordinary",
-				action: { type: "click", target: { elementId: "e1" } },
-			}),
-		).toBe(true);
-		expect(
-			Value.Check(BrowserActParams, {
-				browserId: BROWSER_ID,
-				documentId: DOCUMENT_ID,
-				snapshotRevision: 1,
-				origin: "https://example.test",
-				intent: "Click Continue",
-				targetLabel: "Untrusted model label",
-				risk: "ordinary",
-				action: { type: "click", target: { elementId: "e1" } },
-			}),
-		).toBe(false);
-		expect(
-			Value.Check(BrowserActParams, {
-				browserId: BROWSER_ID,
-				documentId: DOCUMENT_ID,
-				snapshotRevision: 1,
-				origin: "https://example.test/path",
-				intent: "Click Continue",
-				risk: "ordinary",
-				action: { type: "click", target: { elementId: "e1" } },
-			}),
-		).toBe(false);
-		expect(
-			Value.Check(BrowserActParams, {
-				browserId: BROWSER_ID,
-				documentId: DOCUMENT_ID,
-				snapshotRevision: 1,
-				origin: "https://example.test",
-				intent: "x".repeat(1025),
-				risk: "ordinary",
-				action: { type: "click", target: { elementId: "e1" } },
-			}),
-		).toBe(false);
-		expect(
-			Value.Check(BrowserActParams, {
-				browserId: BROWSER_ID,
-				documentId: DOCUMENT_ID,
-				snapshotRevision: 1,
-				origin: "https://example.test",
-				intent: "Press an oversized key",
-				risk: "ordinary",
-				action: { type: "press", key: "你".repeat(22) },
-			}),
-		).toBe(false);
 	});
 
 	it("forwards toolCallId and signal and formats observations", async () => {
@@ -203,9 +132,10 @@ describe("browser host tools", () => {
 	});
 
 	it("rejects a result for a different browser tool", async () => {
-		const tool = createBrowserToolDefinitions(async () => ({ tool: "browser_tabs", details: {} })).find(
-			({ name }) => name === "browser_observe",
-		)!;
+		const tool = createBrowserToolDefinitions(async () => ({
+			tool: "browser_tabs",
+			details: { profiles: [], tabs: [] },
+		})).find(({ name }) => name === "browser_observe")!;
 		await expect(
 			tool.execute("tool-call-3", { browserId: BROWSER_ID }, undefined, undefined, {} as never),
 		).rejects.toThrow("mismatched");

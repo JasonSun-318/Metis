@@ -5,9 +5,9 @@ import { createRoot } from "react-dom/client";
 import type { ConnectionEventsParams, ItemView, SessionSnapshot } from "@metis/app-protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { InteractionHost } from "../src/renderer/components/InteractionHost.tsx";
-import { shouldResnapshotAfterReady } from "../src/renderer/components/App.tsx";
 import { RecoveryBanner } from "../src/renderer/components/RecoveryBanner.tsx";
 import { Transcript } from "../src/renderer/components/Transcript.tsx";
+import { shouldResnapshotAfterReady } from "../src/renderer/session-workspace-workflow.ts";
 import { AppStore } from "../src/renderer/store/app-store.ts";
 
 const EPOCH_A = "11111111-1111-4111-8111-111111111111";

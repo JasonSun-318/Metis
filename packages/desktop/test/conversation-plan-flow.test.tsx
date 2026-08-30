@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import type { ItemView, PlanView } from "@metis/app-protocol";
+import { RPC_ERROR_CODES, type ItemView, type PlanView } from "@metis/app-protocol";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -69,6 +69,16 @@ describe("useConversationPlanFlow", () => {
 		expect(api.startTurn).toHaveBeenCalledTimes(2);
 		expect(vi.mocked(api.startTurn).mock.calls[0]?.[0].requestId)
 			.toBe(vi.mocked(api.startTurn).mock.calls[1]?.[0].requestId);
+
+		vi.mocked(api.startTurn)
+			.mockRejectedValueOnce(Object.assign(new Error("turn rejected"), { code: RPC_ERROR_CODES.OPERATION_FAILED }))
+			.mockResolvedValueOnce({});
+		await expect(act(async () => flow.submit({ text: "known failure", attachments: [] }))).rejects.toThrow(
+			"turn rejected",
+		);
+		await act(async () => flow.submit({ text: "known failure", attachments: [] }));
+		expect(vi.mocked(api.startTurn).mock.calls[2]?.[0].requestId)
+			.not.toBe(vi.mocked(api.startTurn).mock.calls[3]?.[0].requestId);
 
 		running = true;
 		await act(async () => root.render(<Harness />));

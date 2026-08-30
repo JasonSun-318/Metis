@@ -7,6 +7,7 @@ import type {
 	ToolAnnotations,
 } from "@modelcontextprotocol/sdk/types.js";
 import {
+	type AuthCredential,
 	type AuthStorage,
 	legacyMcpCredentialKey,
 	type McpSecretCredential,
@@ -54,6 +55,8 @@ export interface McpManagerCreateOptions {
 export interface McpPreparedConfiguration {
 	readonly revision: string;
 }
+
+export type McpCredentialOverlay = ReadonlyMap<string, AuthCredential | undefined>;
 
 interface ClientGeneration {
 	readonly clients: Map<string, McpServerClient>;
@@ -301,16 +304,19 @@ export class McpManager {
 		return manager;
 	}
 
-	private createClients(settings: ResolvedMcpSettings): Map<string, McpServerClient> {
+	private createClients(
+		settings: ResolvedMcpSettings,
+		credentialOverlay?: McpCredentialOverlay,
+	): Map<string, McpServerClient> {
 		return new Map(
 			settings.servers.map((config) => {
-				const resolved = this.applyStoredCredential(config);
+				const resolved = this.applyStoredCredential(config, credentialOverlay);
 				return [resolved.name, new McpServerClient(resolved, this.authStorage)] as const;
 			}),
 		);
 	}
 
-	private storedSecret(config: ResolvedMcpServerConfig) {
+	private storedSecret(config: ResolvedMcpServerConfig, credentialOverlay?: McpCredentialOverlay) {
 		const fingerprint = mcpServerFingerprint(config);
 		const keys = [
 			config.credentialKey,
@@ -318,14 +324,18 @@ export class McpManager {
 			legacyMcpCredentialKey(config.name),
 		];
 		for (const key of new Set(keys)) {
-			const credential = this.authStorage.get(key);
+			const credential = credentialOverlay?.has(key) ? credentialOverlay.get(key) : this.authStorage.get(key);
+			if (credential?.type === "mcp_revoked" && credential.serverFingerprint === fingerprint) return undefined;
 			if (credential?.type === "mcp_secret" && credential.serverFingerprint === fingerprint) return credential;
 		}
 		return undefined;
 	}
 
-	private applyStoredCredential(config: ResolvedMcpServerConfig): ResolvedMcpServerConfig {
-		const credential = this.storedSecret(config);
+	private applyStoredCredential(
+		config: ResolvedMcpServerConfig,
+		credentialOverlay?: McpCredentialOverlay,
+	): ResolvedMcpServerConfig {
+		const credential = this.storedSecret(config, credentialOverlay);
 		if (!credential) return config;
 		const storedHeaders = Object.fromEntries(
 			Object.entries(config.httpHeaderEnv ?? {}).flatMap(([header, environmentName]) =>
@@ -371,9 +381,20 @@ export class McpManager {
 			client.subscribeCatalog(() => {
 				if (this.clients.get(client.name) !== client) return;
 				this.rebuildRecords();
-				for (const listener of this.catalogListeners) listener();
+				this.notifyCatalogListeners();
 			}),
 		);
+	}
+
+	private notifyCatalogListeners(): void {
+		for (const listener of [...this.catalogListeners]) {
+			try {
+				listener();
+			} catch (cause) {
+				this.catalogListeners.delete(listener);
+				this.cleanupErrors.push(new Error("MCP catalog listener failed", { cause }));
+			}
+		}
 	}
 
 	private async initialize(settings: ResolvedMcpSettings, backgroundOptionalStartup: boolean): Promise<void> {
@@ -385,9 +406,14 @@ export class McpManager {
 		this.rebuildRecords();
 	}
 
-	private runtimeConfigurationRevision(settings: ResolvedMcpSettings): string {
+	private runtimeConfigurationRevision(
+		settings: ResolvedMcpSettings,
+		credentialOverlay?: McpCredentialOverlay,
+	): string {
 		return createHash("sha256")
-			.update(JSON.stringify(settings.servers.map((server) => [server, this.storedSecret(server)])))
+			.update(
+				JSON.stringify(settings.servers.map((server) => [server, this.storedSecret(server, credentialOverlay)])),
+			)
 			.digest("hex");
 	}
 
@@ -689,11 +715,12 @@ export class McpManager {
 
 	async prepareConfiguration(
 		settings: ResolvedMcpSettings = resolveMcpSettings(this.settingsManager, this.cwd, this.environment),
+		credentialOverlay?: McpCredentialOverlay,
 	): Promise<McpPreparedConfiguration> {
 		this.authStorage.reload();
-		const nextClients = this.createClients(settings);
+		const nextClients = this.createClients(settings, credentialOverlay);
 		await this.startClients(nextClients);
-		const prepared = { revision: this.runtimeConfigurationRevision(settings) };
+		const prepared = { revision: this.runtimeConfigurationRevision(settings, credentialOverlay) };
 		this.preparedGenerations.set(prepared, { clients: nextClients, inFlight: 0, retired: false });
 		return prepared;
 	}
@@ -706,10 +733,13 @@ export class McpManager {
 		const previous = this.activeGeneration;
 		this.activeGeneration = next;
 		this.activeRevision = prepared.revision;
-		this.attachClientSubscriptions();
-		this.rebuildRecords();
-		for (const listener of this.catalogListeners) listener();
-		this.retire(previous);
+		try {
+			this.attachClientSubscriptions();
+			this.rebuildRecords();
+			this.notifyCatalogListeners();
+		} finally {
+			this.retire(previous);
+		}
 	}
 
 	async discardConfiguration(prepared: McpPreparedConfiguration): Promise<void> {
@@ -760,6 +790,7 @@ export class McpManager {
 	async prepareConfigurationChanges(
 		scope: "global" | "project",
 		changes: ReadonlyMap<string, McpServerSettings | undefined>,
+		credentialOverlay?: McpCredentialOverlay,
 	): Promise<McpPreparedConfiguration> {
 		await this.settingsManager.reload();
 		const globalServers = { ...(this.settingsManager.getGlobalSettings().mcpServers ?? {}) };
@@ -771,6 +802,7 @@ export class McpManager {
 		}
 		return this.prepareConfiguration(
 			resolveMcpServerDefinitions(globalServers, projectServers, this.cwd, this.environment),
+			credentialOverlay,
 		);
 	}
 
@@ -832,7 +864,7 @@ export class McpManager {
 			}),
 		);
 		this.rebuildRecords();
-		for (const listener of this.catalogListeners) listener();
+		this.notifyCatalogListeners();
 	}
 
 	async close(): Promise<void> {

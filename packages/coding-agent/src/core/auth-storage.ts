@@ -19,6 +19,7 @@ import { getOAuthProviders as getCompatibilityOAuthProviders } from "@metis/ai/o
 import { existsSync } from "fs";
 import { dirname, join } from "path";
 import lockfile from "proper-lockfile";
+import { isDeepStrictEqual } from "util";
 import { getAgentDir } from "../config.ts";
 import { canonicalizePathForCreation, normalizePath } from "../utils/paths.ts";
 import {
@@ -52,6 +53,11 @@ export type McpSecretCredential = {
 	serverFingerprint?: string;
 	bearerToken?: string;
 	env?: Record<string, string>;
+};
+
+export type McpRevokedCredential = {
+	type: "mcp_revoked";
+	serverFingerprint: string;
 };
 
 export type McpCredentialIdentity =
@@ -95,7 +101,12 @@ export function mcpVersionedCredentialKey(
 	return `${mcpVersionedCredentialPrefix(identity)}${serverFingerprint}:${encodeURIComponent(credentialVersion)}`;
 }
 
-export type AuthCredential = ApiKeyCredential | OAuthCredential | LegacyMcpOAuthCredential | McpSecretCredential;
+export type AuthCredential =
+	| ApiKeyCredential
+	| OAuthCredential
+	| LegacyMcpOAuthCredential
+	| McpSecretCredential
+	| McpRevokedCredential;
 
 export type AuthStorageData = Record<string, AuthCredential>;
 
@@ -143,6 +154,7 @@ export class FileAuthStorageBackend implements AuthStorageBackend {
 		try {
 			createFileAtomicallySync(this.authPath, "{}", { mode: AUTH_FILE_MODE });
 		} catch (error) {
+			if (existsSync(this.authPath)) return;
 			if (
 				typeof error !== "object" ||
 				error === null ||
@@ -151,6 +163,22 @@ export class FileAuthStorageBackend implements AuthStorageBackend {
 			) {
 				throw error;
 			}
+		}
+	}
+
+	private replaceUnderLock(next: string): void {
+		try {
+			replaceFileAtomicallySync(this.authPath, next, { mode: AUTH_FILE_MODE });
+		} catch (error) {
+			try {
+				if (readSingleLinkTextFileSync(this.authPath) === next) return;
+			} catch (reconciliationError) {
+				throw new AggregateError(
+					[error, reconciliationError],
+					"Auth write failed and its published state could not be reconciled",
+				);
+			}
+			throw error;
 		}
 	}
 
@@ -190,9 +218,7 @@ export class FileAuthStorageBackend implements AuthStorageBackend {
 			release = this.acquireLockSyncWithRetry(this.authPath);
 			const current = readSingleLinkTextFileSync(this.authPath);
 			const { result, next } = fn(current);
-			if (next !== undefined) {
-				replaceFileAtomicallySync(this.authPath, next, { mode: AUTH_FILE_MODE });
-			}
+			if (next !== undefined) this.replaceUnderLock(next);
 			return result;
 		} finally {
 			if (release) {
@@ -235,9 +261,7 @@ export class FileAuthStorageBackend implements AuthStorageBackend {
 			const current = readSingleLinkTextFileSync(this.authPath);
 			const { result, next } = await fn(current);
 			throwIfCompromised();
-			if (next !== undefined) {
-				replaceFileAtomicallySync(this.authPath, next, { mode: AUTH_FILE_MODE });
-			}
+			if (next !== undefined) this.replaceUnderLock(next);
 			throwIfCompromised();
 			return result;
 		} finally {
@@ -377,6 +401,7 @@ export class AuthStorage {
 			throw error;
 		}
 
+		let intendedData: AuthStorageData | undefined;
 		try {
 			let persistedData: AuthStorageData = {};
 			this.storage.withLock((current) => {
@@ -387,11 +412,34 @@ export class AuthStorage {
 					else delete merged[provider];
 				}
 				persistedData = merged;
+				intendedData = merged;
 				return { result: undefined, next: JSON.stringify(merged, null, 2) };
 			});
 			this.loadError = null;
 			return persistedData;
 		} catch (error) {
+			if (intendedData) {
+				try {
+					let currentData: AuthStorageData = {};
+					this.storage.withLock((current) => {
+						currentData = this.parseStorageData(current);
+						return { result: undefined };
+					});
+					if (
+						changes.every(({ provider }) => isDeepStrictEqual(currentData[provider], intendedData?.[provider]))
+					) {
+						this.loadError = null;
+						return currentData;
+					}
+				} catch (reconciliationError) {
+					const failure = new AggregateError(
+						[error, reconciliationError],
+						"Auth write failed and its published state could not be reconciled",
+					);
+					this.recordError(failure);
+					throw failure;
+				}
+			}
 			this.recordError(error);
 			throw error;
 		}

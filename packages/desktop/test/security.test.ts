@@ -633,6 +633,60 @@ describe("desktop trust boundaries", () => {
 		broker.dispose();
 	});
 
+	it("isolates renderer teardown failures and still disposes every broker capability", () => {
+		const ipcMain = new FakeIpcMain();
+		const { supervisor } = supervisorHarness();
+		const removeTerminalListener = vi.fn(() => {
+			throw new Error("terminal listener cleanup failed");
+		});
+		const removeBrowserListener = vi.fn();
+		let failTerminalCleanup = false;
+		const terminalManager = {
+			create: vi.fn(),
+			write: vi.fn(),
+			resize: vi.fn(),
+			close: vi.fn(),
+			closeAll: vi.fn(() => {
+				if (failTerminalCleanup) throw new Error("terminal cleanup failed");
+			}),
+			onEvent: vi.fn(() => removeTerminalListener),
+		};
+		const browserManager = {
+			onEvent: vi.fn(() => removeBrowserListener),
+			suspendRenderer: vi.fn(),
+			closeAll: vi.fn(),
+		};
+		const workspaceFiles = { clear: vi.fn() };
+		const onDiagnostic = vi.fn();
+		const broker = new ClientBroker({
+			ipcMain: ipcMain as never,
+			supervisor,
+			terminalManager: terminalManager as never,
+			browserManager: browserManager as never,
+			workspaceFiles: workspaceFiles as never,
+			onDiagnostic,
+		});
+		const webContents = new FakeWebContents();
+		broker.attach({ webContents: webContents as never });
+		terminalManager.closeAll.mockClear();
+		browserManager.closeAll.mockClear();
+		workspaceFiles.clear.mockClear();
+		failTerminalCleanup = true;
+
+		expect(() =>
+			webContents.emit("did-start-navigation", {}, "app://renderer/index.html", false, true),
+		).not.toThrow();
+		expect(browserManager.suspendRenderer).toHaveBeenCalledOnce();
+		expect(workspaceFiles.clear).toHaveBeenCalledOnce();
+		expect(onDiagnostic).toHaveBeenCalledWith(expect.stringContaining("terminal cleanup failed"));
+
+		expect(() => broker.dispose()).toThrow("Desktop client broker disposal failed");
+		expect(removeTerminalListener).toHaveBeenCalledOnce();
+		expect(removeBrowserListener).toHaveBeenCalledOnce();
+		expect(browserManager.closeAll).toHaveBeenCalledOnce();
+		expect(ipcMain.handlers.size).toBe(0);
+	});
+
 	it("keeps browser views behind validated IPC and suspends them across renderer reload", async () => {
 		const ipcMain = new FakeIpcMain();
 		const { supervisor } = supervisorHarness();
@@ -1779,7 +1833,7 @@ describe("desktop trust boundaries", () => {
 		broker.dispose();
 	});
 
-	it("retries a session unsubscribe that was lost during renderer navigation", async () => {
+	it("forgets a local session subscription when renderer teardown loses the unsubscribe response", async () => {
 		const ipcMain = new FakeIpcMain();
 		const { supervisor } = supervisorHarness();
 		const currentSessionId = "11111111-1111-4111-8111-111111111221";
@@ -1816,7 +1870,7 @@ describe("desktop trust boundaries", () => {
 		supervisor.request.mockClear();
 
 		await openSession(event, { sessionId: replacementSessionId });
-		expect(supervisor.request).toHaveBeenCalledWith(
+		expect(supervisor.request).not.toHaveBeenCalledWith(
 			expect.objectContaining({ method: "session/unsubscribe", params: { sessionId: currentSessionId } }),
 		);
 		broker.dispose();

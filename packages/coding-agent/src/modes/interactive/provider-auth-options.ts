@@ -66,7 +66,14 @@ export function listLogoutProviderOptions(modelRegistry: ModelRegistry): AuthSel
 	const options: AuthSelectorProvider[] = [];
 	for (const providerId of modelRegistry.authStorage.list()) {
 		const credential = modelRegistry.authStorage.get(providerId);
-		if (!credential || credential.type === "mcp_oauth" || credential.type === "mcp_secret") continue;
+		if (
+			!credential ||
+			credential.type === "mcp_oauth" ||
+			credential.type === "mcp_secret" ||
+			credential.type === "mcp_revoked"
+		) {
+			continue;
+		}
 		const searchProvider = webSearchProviderFromCredentialId(providerId);
 		options.push({
 			id: providerId,

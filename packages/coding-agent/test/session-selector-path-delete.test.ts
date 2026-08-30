@@ -420,6 +420,32 @@ describe("session selector path/delete interactions", () => {
 		expect(existsSync(toolOutputRoot)).toBe(true);
 	});
 
+	it("commits session deletion before reporting best-effort asset cleanup failure", async () => {
+		const baseDir = mkdtempSync(join(tmpdir(), "metis-session-delete-asset-trash-failure-"));
+		tempDirs.push(baseDir);
+		const session = SessionManager.create(baseDir, baseDir);
+		const sessionFile = session.getSessionFile()!;
+		const imageDir = getSessionImageDir(sessionFile);
+		mkdirSync(imageDir, { recursive: true });
+		writeFileSync(join(imageDir, "owned.png"), "image");
+		session.close();
+		let calls = 0;
+		trashMocks.trashPathsSync.mockImplementation((paths) => {
+			calls += 1;
+			if (calls === 1) {
+				for (const path of paths) rmSync(path, { recursive: true, force: true });
+				return undefined;
+			}
+			return "asset trash unavailable";
+		});
+
+		const result = await deleteSessionFile(sessionFile);
+
+		expect(result).toMatchObject({ ok: true, method: "trash", warning: expect.stringContaining("incomplete") });
+		expect(existsSync(sessionFile)).toBe(false);
+		expect(existsSync(imageDir)).toBe(true);
+	});
+
 	it("removes a tool output directory symlink without deleting its target", async () => {
 		const baseDir = mkdtempSync(join(tmpdir(), "metis-session-delete-tool-output-link-"));
 		tempDirs.push(baseDir);

@@ -1,6 +1,7 @@
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { BrowserObservation } from "@metis/app-protocol";
 import { describe, expect, it, vi } from "vitest";
 import { BrowserManager } from "../src/main/browser-manager.ts";
 import { BrowserProfileStore } from "../src/main/browser-profile-store.ts";
@@ -415,6 +416,39 @@ describe("BrowserManager", () => {
 		expect(() => harness.manager.close(SESSION_ID, otherBrowserId)).toThrow("does not belong");
 	});
 
+	it("closes native contents when controller teardown fails", () => {
+		const harness = browserHarness();
+		const browserId = "10000000-0000-4000-8000-000000000085";
+		harness.manager.attach({ contentView: harness.contentView } as never);
+		harness.manager.create({ sessionId: SESSION_ID, browserId, profileId: DEFAULT_BROWSER_PROFILE_ID });
+		harness.controllers.get(browserId)!.close.mockImplementationOnce(() => {
+			throw new Error("controller close failed");
+		});
+
+		expect(() => harness.manager.close(SESSION_ID, browserId)).toThrow("controller close failed");
+		expect(harness.webContents.close).toHaveBeenCalledOnce();
+		expect(harness.backgroundContentView.removeChildView).toHaveBeenCalledWith(harness.view);
+		expect(() => harness.manager.close(SESSION_ID, browserId)).toThrow("Browser is not running");
+	});
+
+	it("closes every tab and the background host when one controller teardown fails", () => {
+		const harness = browserHarness();
+		const firstId = "10000000-0000-4000-8000-000000000086";
+		const secondId = "10000000-0000-4000-8000-000000000087";
+		harness.manager.create({ sessionId: SESSION_ID, browserId: firstId, profileId: DEFAULT_BROWSER_PROFILE_ID });
+		harness.manager.create({ sessionId: SESSION_ID, browserId: secondId, profileId: DEFAULT_BROWSER_PROFILE_ID });
+		harness.controllers.get(firstId)!.close.mockImplementationOnce(() => {
+			throw new Error("first controller close failed");
+		});
+
+		expect(() => harness.manager.closeAll()).toThrow("Browser shutdown failed");
+		expect(harness.controllers.get(firstId)?.close).toHaveBeenCalledOnce();
+		expect(harness.controllers.get(secondId)?.close).toHaveBeenCalledOnce();
+		expect(harness.webContents.close).toHaveBeenCalledTimes(2);
+		expect(harness.backgroundWindow.destroy).toHaveBeenCalledOnce();
+		expect(() => harness.manager.close(SESSION_ID, secondId)).toThrow("Browser is not running");
+	});
+
 	it("keeps non-presented browser tabs out of the renderer view tree", () => {
 		const harness = browserHarness();
 		harness.manager.attach({ contentView: harness.contentView } as never);
@@ -806,10 +840,92 @@ describe("BrowserManager", () => {
 			browserId,
 			url: "https://second.example",
 		});
+		await vi.waitFor(() => expect(rejectFirst).toBeTypeOf("function"));
 		rejectFirst?.(Object.assign(new Error("navigation aborted"), { code: "ERR_ABORTED" }));
 
 		await expect(Promise.all([first, second])).resolves.toEqual([undefined, undefined]);
 		expect(harness.webContents.loadURL).toHaveBeenNthCalledWith(2, "https://second.example/");
+	});
+
+	it("does not run agent work while a renderer navigation owns the tab", async () => {
+		const harness = browserHarness();
+		const browserId = "10000000-0000-4000-8000-000000000089";
+		harness.manager.create({ sessionId: SESSION_ID, browserId, profileId: DEFAULT_BROWSER_PROFILE_ID });
+		let finishNavigation!: () => void;
+		harness.webContents.loadURL.mockReturnValueOnce(
+			new Promise<void>((resolve) => {
+				finishNavigation = resolve;
+			}),
+		);
+
+		const navigation = harness.manager.control({
+			sessionId: SESSION_ID,
+			type: "navigate",
+			browserId,
+			url: "https://user.example",
+		});
+		await vi.waitFor(() => expect(harness.webContents.loadURL).toHaveBeenCalledOnce());
+
+		await expect(
+			harness.manager.executeTool(
+				SESSION_ID,
+				{ tool: "browser_observe", input: { browserId } },
+				new AbortController().signal,
+			),
+		).rejects.toThrow("controlled");
+		await expect(
+			harness.manager.executeTool(
+				SESSION_ID,
+				{ tool: "browser_navigate", input: { browserId, action: "reload" } },
+				new AbortController().signal,
+			),
+		).rejects.toThrow("controlled by the user");
+
+		finishNavigation();
+		await navigation;
+	});
+
+	it("does not run renderer navigation while an agent observation owns the tab", async () => {
+		const harness = browserHarness();
+		const browserId = "10000000-0000-4000-8000-000000000090";
+		harness.manager.create({ sessionId: SESSION_ID, browserId, profileId: DEFAULT_BROWSER_PROFILE_ID });
+		const controller = harness.controllers.get(browserId)!;
+		let finishObservation!: () => void;
+		controller.observe.mockImplementationOnce(
+			() =>
+				new Promise<BrowserObservation>((resolve) => {
+					finishObservation = () =>
+						resolve({
+							browserId,
+							profileId: DEFAULT_BROWSER_PROFILE_ID,
+							documentId: "30000000-0000-4000-8000-000000000001",
+							revision: 1,
+							change: "full",
+							url: "https://observed.example/",
+							title: "Observed",
+							loading: false,
+							state: "e1 button Continue",
+						});
+				}),
+		);
+
+		const observing = harness.manager.executeTool(
+			SESSION_ID,
+			{ tool: "browser_observe", input: { browserId } },
+			new AbortController().signal,
+		);
+		await vi.waitFor(() => expect(controller.observe).toHaveBeenCalledOnce());
+
+		await expect(
+			harness.manager.control({
+				sessionId: SESSION_ID,
+				type: "navigate",
+				browserId,
+				url: "https://user.example",
+			}),
+		).rejects.toThrow("controlled by the agent");
+		finishObservation();
+		await expect(observing).resolves.toMatchObject({ tool: "browser_observe" });
 	});
 
 	it("does not report Electron's redirect abort as a failed navigation", async () => {

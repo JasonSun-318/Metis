@@ -213,6 +213,7 @@ async function launch(): Promise<void> {
 		createProjectFolder,
 		setScheduleKeepAwake: (enabled) => scheduleKeepAwake.set(enabled),
 		updater,
+		onDiagnostic: (message) => void diagnostics.append("supervisor", `Client broker: ${message}\n`),
 		onSessionUpdated: (session) => completionTracker.update(session),
 		onSessionDeleted: (sessionId) => completionTracker.forgetSession(sessionId),
 		onProjectDeleted: (mode, cwd) => completionTracker.forgetProject(mode, cwd),

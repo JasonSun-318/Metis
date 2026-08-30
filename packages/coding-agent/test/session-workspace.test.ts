@@ -126,6 +126,33 @@ describe("managed session workspaces", () => {
 		expect(existsSync(workspace.cwd)).toBe(true);
 	});
 
+	it("recovers a deterministic managed copy after publication is interrupted", () => {
+		const workspace = resolveNewSessionWorkspace({ id: "source", mode: "chat", hostCwd, agentDir });
+		writeFileSync(join(workspace.cwd, "inside.txt"), "inside");
+		const input = {
+			sourceId: "source",
+			sourceCwd: workspace.cwd,
+			targetId: "recoverable",
+			agentDir,
+			recoveryKey: "request-1",
+		};
+		expect(() =>
+			publishManagedWorkspaceCopy({
+				...input,
+				publish: () => {
+					throw new Error("interrupted after workspace publish");
+				},
+			}),
+		).toThrow("interrupted after workspace publish");
+		expect(existsSync(getManagedWorkspaceDir("recoverable", agentDir))).toBe(true);
+
+		const recovered = publishManagedWorkspaceCopy({ ...input, publish: (targetCwd) => targetCwd });
+		expect(readFileSync(join(recovered, "inside.txt"), "utf8")).toBe("inside");
+		expect(() =>
+			publishManagedWorkspaceCopy({ ...input, recoveryKey: "different-request", publish: (targetCwd) => targetCwd }),
+		).toThrow("cannot be recovered");
+	});
+
 	it("copies the workspace and uses the new encoded session directory for branches", () => {
 		const workspace = resolveNewSessionWorkspace({ id: "source", mode: "chat", hostCwd, agentDir });
 		writeFileSync(join(workspace.cwd, "state.txt"), "copied");

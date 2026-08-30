@@ -3,6 +3,7 @@ import {
 	createDesktopRpcForwarders,
 	DESKTOP_RPC_FORWARDING,
 	DESKTOP_RPC_FORWARDING_CHANNELS,
+	desktopRpcIpcFailure,
 } from "../src/shared/app-server-rpc-forwarding.ts";
 import { DESKTOP_IPC_CHANNELS } from "../src/shared/desktop-api.ts";
 
@@ -31,5 +32,21 @@ describe("desktop App Server RPC forwarding", () => {
 			["session/list", {}],
 			["skill/get", skill],
 		]);
+	});
+
+	it("reconstructs a coded RPC error after the structured-clone boundary", async () => {
+		const api = createDesktopRpcForwarders(
+			vi.fn().mockResolvedValue(desktopRpcIpcFailure(-32011, "Operation failed")),
+		);
+
+		const failure = await api
+			.renameSession({
+				sessionId: "session-1",
+				requestId: "11111111-1111-4111-8111-111111111111",
+				name: "Renamed",
+			})
+			.catch((cause: unknown) => cause);
+
+		expect(failure).toMatchObject({ name: "MetisRpcError", message: "Operation failed", code: -32011 });
 	});
 });

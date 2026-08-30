@@ -24,8 +24,11 @@ import { createMcpTestServer, type McpTestServer } from "./helpers/mcp-test-serv
 const managers: McpManager[] = [];
 const servers: McpTestServer[] = [];
 const userMcpKey = (name: string) => mcpCredentialKey({ scope: "user", name });
-const hasVersionedUserCredential = (storage: AuthStorage, name: string) =>
-	storage.list().some((key) => key.startsWith(mcpVersionedCredentialPrefix({ scope: "user", name })));
+const hasVersionedUserSecret = (storage: AuthStorage, name: string) =>
+	storage
+		.list()
+		.filter((key) => key.startsWith(mcpVersionedCredentialPrefix({ scope: "user", name })))
+		.some((key) => storage.get(key)?.type === "mcp_secret");
 
 async function managerWithTools(
 	serverName: string,
@@ -485,11 +488,11 @@ describe("McpManager", () => {
 
 		await manager.setSecret("docs", { bearerToken: "stored-secret" });
 		expect(manager.getStatus()[0]).toMatchObject({ state: "connected" });
-		expect(hasVersionedUserCredential(storage, "docs")).toBe(true);
+		expect(hasVersionedUserSecret(storage, "docs")).toBe(true);
 
 		await manager.logout("docs");
 		expect(manager.getStatus()[0]).toMatchObject({ state: "auth_required" });
-		expect(hasVersionedUserCredential(storage, "docs")).toBe(false);
+		expect(hasVersionedUserSecret(storage, "docs")).toBe(false);
 	});
 
 	it("rejects empty static credentials without replacing the active auth state", async () => {
@@ -505,7 +508,7 @@ describe("McpManager", () => {
 		managers.push(manager);
 
 		await expect(manager.setSecret("docs", { bearerToken: "" })).rejects.toThrow("must not be empty");
-		expect(hasVersionedUserCredential(storage, "docs")).toBe(false);
+		expect(hasVersionedUserSecret(storage, "docs")).toBe(false);
 		expect(manager.getStatus()[0]).toMatchObject({ state: "auth_required" });
 	});
 
@@ -534,7 +537,7 @@ describe("McpManager", () => {
 		await expect(manager.setSecret("docs", { bearerToken: "wrong-secret" })).rejects.toThrow(
 			'Failed to initialize required MCP server "docs"',
 		);
-		expect(hasVersionedUserCredential(storage, "docs")).toBe(false);
+		expect(hasVersionedUserSecret(storage, "docs")).toBe(false);
 		expect(manager.getStatus()[0]).toMatchObject({ state: "connected" });
 	});
 
@@ -622,6 +625,46 @@ describe("McpManager", () => {
 		await vi.waitFor(() => expect(manager.getToolRecords().map((tool) => tool.rawName)).toEqual(["new_tool"]));
 		expect(manager.searchTools("new tool")[0]?.rawName).toBe("new_tool");
 		expect(changed).toHaveBeenCalled();
+	});
+
+	it("retires the previous generation when a catalog listener fails", async () => {
+		const settings = SettingsManager.inMemory({
+			mcpServers: { previous: { command: "node", enabled: false } },
+		});
+		const manager = await McpManager.create({
+			settingsManager: settings,
+			authStorage: AuthStorage.inMemory(),
+			cwd: process.cwd(),
+		});
+		managers.push(manager);
+		const close = vi.spyOn(McpServerClient.prototype, "close");
+		const failingListener = vi.fn(() => {
+			throw new Error("listener failed");
+		});
+		manager.subscribeCatalog(failingListener);
+
+		try {
+			settings.applyMcpServerChanges(
+				"global",
+				new Map([
+					["previous", undefined],
+					["next", { command: "node", enabled: false }],
+				]),
+			);
+			await settings.flushOrThrow();
+
+			await expect(manager.reload()).resolves.toBeUndefined();
+			await vi.waitFor(() => expect(close).toHaveBeenCalled());
+			expect(manager.getStatus().map((status) => status.name)).toEqual(["next"]);
+			expect(manager.drainCleanupErrors()).toEqual([
+				expect.objectContaining({ message: "MCP catalog listener failed" }),
+			]);
+
+			await manager.restart();
+			expect(failingListener).toHaveBeenCalledOnce();
+		} finally {
+			close.mockRestore();
+		}
 	});
 
 	it("keeps optional failures as status and rejects required failures", async () => {

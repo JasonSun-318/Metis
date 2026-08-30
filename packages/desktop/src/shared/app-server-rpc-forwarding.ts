@@ -9,6 +9,37 @@ interface ForwardingSpec {
 	readonly input: ForwardingInputMode;
 }
 
+export interface DesktopRpcIpcFailure {
+	readonly kind: "metis-rpc-failure-v1";
+	readonly error: { readonly code: number; readonly message: string };
+}
+
+export function desktopRpcIpcFailure(code: number, message: string): DesktopRpcIpcFailure {
+	return { kind: "metis-rpc-failure-v1", error: { code, message } };
+}
+
+export function unwrapDesktopRpcIpcResult(value: unknown): unknown {
+	if (typeof value !== "object" || value === null || !("kind" in value) || value.kind !== "metis-rpc-failure-v1") {
+		return value;
+	}
+	if (
+		!("error" in value) ||
+		typeof value.error !== "object" ||
+		value.error === null ||
+		!("code" in value.error) ||
+		typeof value.error.code !== "number" ||
+		!Number.isFinite(value.error.code) ||
+		!("message" in value.error) ||
+		typeof value.error.message !== "string"
+	) {
+		throw new TypeError("Invalid desktop RPC failure envelope");
+	}
+	const error = new Error(value.error.message);
+	error.name = "MetisRpcError";
+	Object.defineProperty(error, "code", { value: value.error.code, enumerable: true });
+	throw error;
+}
+
 export const DESKTOP_RPC_FORWARDING = {
 	listSessions: { channel: "metis:list-sessions", method: "session/list", input: "optional" },
 	listSkills: { channel: "metis:list-skills", method: "skill/list", input: "required" },
@@ -202,9 +233,10 @@ export function createDesktopRpcForwarders(
 ): DesktopRpcForwardingApi {
 	const api: Record<string, (input?: unknown) => Promise<unknown>> = {};
 	for (const [name, definition] of Object.entries(DESKTOP_RPC_FORWARDING)) {
-		if (definition.input === "none") api[name] = () => invoke(definition, {});
-		else if (definition.input === "optional") api[name] = (input = {}) => invoke(definition, input);
-		else api[name] = (input) => invoke(definition, input);
+		const forward = async (input: unknown) => unwrapDesktopRpcIpcResult(await invoke(definition, input));
+		if (definition.input === "none") api[name] = () => forward({});
+		else if (definition.input === "optional") api[name] = (input = {}) => forward(input);
+		else api[name] = (input) => forward(input);
 	}
 	return api as DesktopRpcForwardingApi;
 }

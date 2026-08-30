@@ -17,6 +17,7 @@ import lockfile from "proper-lockfile";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
 	AuthStorage,
+	type AuthStorageBackend,
 	InMemoryAuthStorageBackend,
 	legacyMcpCredentialKey,
 	mcpCredentialKey,
@@ -25,6 +26,27 @@ import { clearConfigValueCache, resolveConfigValueUncached } from "../src/core/r
 import * as shellModule from "../src/utils/shell.ts";
 
 describe("AuthStorage", () => {
+	class PublishThenThrowAuthBackend implements AuthStorageBackend {
+		private value: string | undefined;
+		private failAfterPublish = true;
+
+		withLock<T>(fn: (current: string | undefined) => { result: T; next?: string }): T {
+			const { result, next } = fn(this.value);
+			if (next !== undefined) this.value = next;
+			if (next !== undefined && this.failAfterPublish) {
+				this.failAfterPublish = false;
+				throw new Error("directory sync failed after rename");
+			}
+			return result;
+		}
+
+		async withLockAsync<T>(fn: (current: string | undefined) => Promise<{ result: T; next?: string }>): Promise<T> {
+			const { result, next } = await fn(this.value);
+			if (next !== undefined) this.value = next;
+			return result;
+		}
+	}
+
 	let tempDir: string;
 	let authJsonPath: string;
 	let authStorage: AuthStorage;
@@ -108,6 +130,17 @@ describe("AuthStorage", () => {
 		expect(secondView.get(legacyKey)).toBeUndefined();
 		expect(secondView.get(userKey)).toEqual(legacy);
 		expect(secondView.get(docsKey)).toEqual(docs);
+	});
+
+	test("reconciles a credential write published before durability reporting failed", () => {
+		const backend = new PublishThenThrowAuthBackend();
+		const storage = AuthStorage.fromStorage(backend);
+		const key = mcpCredentialKey({ scope: "user", name: "docs" });
+		const credential = { type: "mcp_secret", bearerToken: "secret" } as const;
+
+		expect(() => storage.set(key, credential)).not.toThrow();
+		expect(storage.get(key)).toEqual(credential);
+		expect(AuthStorage.fromStorage(backend).get(key)).toEqual(credential);
 	});
 
 	test("supports auth storage beneath an existing symlinked agent directory", ({ skip }) => {

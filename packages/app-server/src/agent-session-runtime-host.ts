@@ -1,7 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { join } from "node:path";
 import {
-	type BrowserToolCall,
 	type ClientParams,
 	type ClientResult,
 	type DomainEvent,
@@ -23,15 +22,12 @@ import {
 	type AgentSummary,
 	AuthStorage,
 	agentTaskWindow,
-	BROWSER_TOOL_NAMES,
-	type BrowserHostRequest,
 	buildChildSystemPrompt,
 	type CreateAgentSessionRuntimeFactory,
 	createAgentSessionFromServices,
 	createAgentSessionRuntime,
 	createAgentSessionServices,
 	createAskUserToolDefinition,
-	createBrowserToolDefinitions,
 	DefaultResourceLoader,
 	formatSessionAttachments,
 	getLatestCacheHitPercent,
@@ -46,6 +42,7 @@ import {
 	type McpCredentialChange,
 	type McpServerSettings,
 	mcpCredentialState,
+	mcpCredentialStatus,
 	ProjectTrustStore,
 	QueuedTurnBusyError,
 	QueuedTurnConflictError,
@@ -69,6 +66,7 @@ import {
 	upsertCustomAgentType,
 } from "@metis/coding-agent";
 import { AgentLiveProjector } from "./agent-live-projector.ts";
+import { BROWSER_TOOL_NAMES, browserToolCall, createBrowserToolDefinitions } from "./browser-tools.ts";
 import type { CredentialCoordinator } from "./credential-coordinator.ts";
 import {
 	type DurableSessionMutation,
@@ -126,21 +124,6 @@ function mcpCredentialChange(input?: McpCredentialInput): McpCredentialChange {
 				...(input.environment ? { environment: input.environment } : {}),
 			}
 		: { action: "preserve" };
-}
-
-function protocolBrowserToolCall(request: BrowserHostRequest): BrowserToolCall {
-	switch (request.tool) {
-		case "browser_tabs":
-			return { tool: request.tool, input: request.input };
-		case "browser_navigate":
-			return { tool: request.tool, input: request.input };
-		case "browser_observe":
-			return { tool: request.tool, input: request.input };
-		case "browser_act":
-			return { tool: request.tool, input: request.input };
-		case "browser_handoff":
-			return { tool: request.tool, input: request.input };
-	}
 }
 
 function queuedTurnView(draft: QueuedTurnDraft): QueuedTurnView {
@@ -426,7 +409,7 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 				this.interactions!.requestBrowserTool(
 					this.sessionId,
 					request.toolCallId,
-					protocolBrowserToolCall(request),
+					browserToolCall(request),
 					request.signal,
 				),
 			);
@@ -854,7 +837,7 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 		return this.getSummary();
 	}
 
-	async fork(input: { entryId: string; name: string }): Promise<string> {
+	async fork(input: { entryId: string; name: string; requestId: string; targetSessionId: string }): Promise<string> {
 		// Create an independent branch file rooted at the reply (inclusive).
 		// The current runtime stays on the original session; the caller opens
 		// the forked session as its own runtime. We deliberately do not call
@@ -872,10 +855,22 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 			if (!persistedEntryId) throw new AppServerError("NOT_FOUND", { sessionId: this.sessionId });
 			entryId = persistedEntryId;
 		}
-		const branched = manager.createBranchedSessionManager(entryId);
+		const branched = manager.createBranchedSessionManager(entryId, {
+			id: input.targetSessionId,
+			initialName: optionalName(input.name),
+			managedWorkspaceRecoveryKey: input.requestId,
+			initialCustomEntries: [
+				{
+					customType: "metis.app-server.session-fork.v1",
+					data: {
+						requestId: input.requestId,
+						sourceSessionId: this.sessionId,
+						entryId: input.entryId,
+					},
+				},
+			],
+		});
 		try {
-			const next = optionalName(input.name);
-			if (next) branched.appendSessionInfo(next);
 			const forkedSessionId = branched.getSessionId();
 			this.session.deliveredArtifacts?.copyTo(branched);
 			return forkedSessionId;
@@ -906,8 +901,8 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 		return {
 			servers: publicMcpServers(this.session.settingsManager, {
 				statuses: this.session.mcp?.getStatus() ?? [],
-				credentialState: (scope, name, server) =>
-					mcpCredentialState(this.authStorage, this.mcpCwd(), scope, name, server),
+				credentialStatus: (scope, name, server) =>
+					mcpCredentialStatus(this.authStorage, this.mcpCwd(), scope, name, server),
 			}),
 		};
 	}
@@ -997,6 +992,7 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 	async inspectMcpImport(input: ClientParams<"mcp/import/inspect">): Promise<ClientResult<"mcp/import/inspect">> {
 		this.assertMcpSession(input);
 		this.assertProjectMcpWrite(input.scope, "inspect");
+		await this.session.mcp?.ensureCurrent();
 		const settings =
 			input.scope === "user"
 				? this.session.settingsManager.getGlobalSettings()
@@ -2336,18 +2332,26 @@ export class AgentSessionRuntimeHost implements SessionRuntimeHost {
 		});
 	}
 
-	private draftMcpRows(cwd: string | null, settingsManager?: SettingsManager): ClientResult<"mcp/list"> {
-		const context = settingsManager ? { cwd: cwd ?? this.agentDir, settingsManager } : this.draftSettings(cwd);
+	private draftMcpReadContext(cwd: string | null) {
+		const context = this.draftSettings(cwd);
+		this.authStorage.reload();
+		return context;
+	}
+
+	private draftMcpRows(context: {
+		readonly cwd: string;
+		readonly settingsManager: SettingsManager;
+	}): ClientResult<"mcp/list"> {
 		return {
 			servers: publicMcpServers(context.settingsManager, {
-				credentialState: (scope, name, server) =>
-					mcpCredentialState(this.authStorage, context.cwd, scope, name, server),
+				credentialStatus: (scope, name, server) =>
+					mcpCredentialStatus(this.authStorage, context.cwd, scope, name, server),
 			}),
 		};
 	}
 
 	async listMcpServers(cwd: string | null): Promise<ClientResult<"mcp/list">> {
-		return this.draftMcpRows(cwd);
+		return this.draftMcpRows(this.draftMcpReadContext(cwd));
 	}
 
 	async inspectMcpImport(input: ClientParams<"mcp/import/inspect">): Promise<ClientResult<"mcp/import/inspect">> {
@@ -2402,7 +2406,7 @@ export class AgentSessionRuntimeHost implements SessionRuntimeHost {
 				scope: input.scope,
 				changes,
 			});
-			return this.draftMcpRows(context.targetCwd, context.settingsManager);
+			return this.draftMcpRows(context);
 		} catch (error) {
 			if (error instanceof McpConfigurationConflictError) {
 				throw new AppServerError("CONFLICT", { requestId: input.requestId });
@@ -2416,7 +2420,7 @@ export class AgentSessionRuntimeHost implements SessionRuntimeHost {
 		if (input.scope === "project" && input.cwd === null) {
 			throw new AppServerError("OPERATION_FAILED", { requestId: input.requestId });
 		}
-		const context = this.draftSettings(input.cwd ?? null);
+		const context = this.draftMcpReadContext(input.cwd ?? null);
 		if (input.scope === "project" && !context.settingsManager.isProjectTrusted()) {
 			throw new AppServerError("OPERATION_FAILED", { requestId: input.requestId });
 		}
@@ -2425,7 +2429,7 @@ export class AgentSessionRuntimeHost implements SessionRuntimeHost {
 
 	async getMcpServer(input: ClientParams<"mcp/get">): Promise<ClientResult<"mcp/get">> {
 		const context = this.draftMcpContext(input);
-		const server = this.draftMcpRows(context.targetCwd, context.settingsManager).servers.find(
+		const server = this.draftMcpRows(context).servers.find(
 			(row) => row.scope === input.scope && row.name === input.name,
 		);
 		if (!server) throw new AppServerError("NOT_FOUND");
@@ -2450,7 +2454,7 @@ export class AgentSessionRuntimeHost implements SessionRuntimeHost {
 					},
 				],
 			});
-			return this.draftMcpRows(context.targetCwd, context.settingsManager);
+			return this.draftMcpRows(context);
 		} catch (error) {
 			if (error instanceof McpConfigurationConflictError) {
 				throw new AppServerError("CONFLICT", { requestId: input.requestId });
@@ -2476,7 +2480,7 @@ export class AgentSessionRuntimeHost implements SessionRuntimeHost {
 					},
 				],
 			});
-			return this.draftMcpRows(context.targetCwd, context.settingsManager);
+			return this.draftMcpRows(context);
 		} catch (error) {
 			if (error instanceof McpConfigurationConflictError) {
 				throw new AppServerError("CONFLICT", { requestId: input.requestId });

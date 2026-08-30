@@ -18,7 +18,11 @@ import {
 	validateServerRequest,
 } from "@metis/app-protocol";
 import type { BrowserWindow, IpcMain, IpcMainInvokeEvent, WebContents } from "electron";
-import { DESKTOP_RPC_FORWARDING } from "../shared/app-server-rpc-forwarding.ts";
+import {
+	DESKTOP_RPC_FORWARDING,
+	type DesktopRpcIpcFailure,
+	desktopRpcIpcFailure,
+} from "../shared/app-server-rpc-forwarding.ts";
 import {
 	DEFAULT_BROWSER_PROFILE_ID,
 	DESKTOP_BROWSER_EVENT_CHANNEL,
@@ -137,9 +141,17 @@ interface ClientBrokerOptions {
 	readonly onProjectDeleted?: (mode: SessionSummary["mode"], cwd: string) => void;
 	readonly onUserInterruptPending?: (sessionId: string, pending: boolean) => void;
 	readonly onSessionOpened?: (sessionId: string) => void;
+	readonly onDiagnostic?: (message: string) => void;
 }
 
 type InvokeHandler = (event: IpcMainInvokeEvent, ...args: unknown[]) => Promise<unknown>;
+
+function diagnosticError(error: unknown): string {
+	if (error instanceof AggregateError) {
+		return [error.message, ...error.errors.map(diagnosticError)].join(": ");
+	}
+	return error instanceof Error ? error.message : String(error);
+}
 
 interface PendingInteraction {
 	readonly request: ServerRpcRequest<"interaction/request">;
@@ -293,6 +305,7 @@ export class ClientBroker {
 	private readonly onProjectDeleted?: (mode: SessionSummary["mode"], cwd: string) => void;
 	private readonly onUserInterruptPending?: (sessionId: string, pending: boolean) => void;
 	private readonly onSessionOpened?: (sessionId: string) => void;
+	private readonly onDiagnostic?: (message: string) => void;
 	private pendingRendererOpenSession?: Extract<DesktopApiEvent, { type: "open-session" }>;
 	private readonly pendingInteractions = new Map<string, PendingInteraction>();
 	private readonly subscribedSessions = new Set<string>();
@@ -441,6 +454,7 @@ export class ClientBroker {
 		this.onProjectDeleted = options.onProjectDeleted;
 		this.onUserInterruptPending = options.onUserInterruptPending;
 		this.onSessionOpened = options.onSessionOpened;
+		this.onDiagnostic = options.onDiagnostic;
 		this.registerHandlers();
 		this.removeTerminalListener = this.terminalManager.onEvent((event) => this.sendTerminalEvent(event));
 		this.removeBrowserListener = this.browserManager.onEvent((event) => this.sendBrowserEvent(event));
@@ -473,20 +487,14 @@ export class ClientBroker {
 		}
 
 		const onDestroyed = () => {
-			if (this.owner === owner) this.detachOwner();
+			if (this.owner === owner) this.runLifecycleCleanup("renderer destroyed", () => this.detachOwner());
 		};
 		const onRenderProcessGone = () => {
-			if (this.owner === owner) this.detachOwner();
+			if (this.owner === owner) this.runLifecycleCleanup("renderer process exited", () => this.detachOwner());
 		};
 		const onDidStartNavigation = (_event: unknown, _url: string, _isInPlace: boolean, isMainFrame: boolean) => {
 			if (this.owner !== owner || !isMainFrame) return;
-			this.ownerSubscribed = false;
-			this.terminalManager.closeAll();
-			this.browserToolHost.cancelAll("tab_closed");
-			this.browserManager.suspendRenderer();
-			this.workspaceFiles.clear();
-			this.cancelPendingInteractions();
-			this.releaseSessionSubscriptions();
+			this.runLifecycleCleanup("renderer navigation", () => this.resetRendererResources());
 		};
 
 		owner.on("destroyed", onDestroyed);
@@ -502,11 +510,13 @@ export class ClientBroker {
 	dispose(): void {
 		if (this.disposed) return;
 		this.disposed = true;
-		this.detachOwner();
-		this.removeTerminalListener();
-		this.removeBrowserListener();
-		for (const remove of this.removeSupervisorListeners) remove();
-		for (const channel of Object.values(DESKTOP_IPC_CHANNELS)) this.ipcMain.removeHandler(channel);
+		this.performCleanup("Desktop client broker disposal failed", [
+			() => this.detachOwner(),
+			() => this.removeTerminalListener(),
+			() => this.removeBrowserListener(),
+			...this.removeSupervisorListeners,
+			...Object.values(DESKTOP_IPC_CHANNELS).map((channel) => () => this.ipcMain.removeHandler(channel)),
+		]);
 	}
 
 	requestRendererOpenSession(sessionId: string, mode: "chat" | "code"): boolean {
@@ -519,24 +529,30 @@ export class ClientBroker {
 
 	private registerHandlers(): void {
 		this.registerAppServerForwarders();
-		this.register(DESKTOP_IPC_CHANNELS.openSkillFolder, 1, async (_event, [input]) => {
-			const detail = await this.clientCall("skill/get", input);
-			const error = await this.openPath(detail.directoryPath);
-			if (error) throw new Error(error);
-		});
-		this.register(DESKTOP_IPC_CHANNELS.subscribeSchedule, 1, async (_event, [input]) =>
-			this.enqueueSubscriptionMutation(async () => {
-				const result = await this.clientCall("schedule/subscribe", input);
-				this.scheduleSubscribed = true;
-				return result;
+		this.register(DESKTOP_IPC_CHANNELS.openSkillFolder, 1, async (_event, [input]) =>
+			this.rpcIpcResult(async () => {
+				const detail = await this.clientCall("skill/get", input);
+				const error = await this.openPath(detail.directoryPath);
+				if (error) throw new Error(error);
 			}),
 		);
+		this.register(DESKTOP_IPC_CHANNELS.subscribeSchedule, 1, async (_event, [input]) =>
+			this.rpcIpcResult(() =>
+				this.enqueueSubscriptionMutation(async () => {
+					const result = await this.clientCall("schedule/subscribe", input);
+					this.scheduleSubscribed = true;
+					return result;
+				}),
+			),
+		);
 		this.register(DESKTOP_IPC_CHANNELS.unsubscribeSchedule, 1, async (_event, [input]) =>
-			this.enqueueSubscriptionMutation(async () => {
-				const result = await this.clientCall("schedule/unsubscribe", input);
-				this.scheduleSubscribed = false;
-				return result;
-			}),
+			this.rpcIpcResult(() =>
+				this.enqueueSubscriptionMutation(async () => {
+					const result = await this.clientCall("schedule/unsubscribe", input);
+					this.scheduleSubscribed = false;
+					return result;
+				}),
+			),
 		);
 		this.register(DESKTOP_IPC_CHANNELS.setScheduleKeepAwake, 1, async (_event, [enabled]) => {
 			if (typeof enabled !== "boolean") throw new TypeError("Keep Awake state must be a boolean");
@@ -559,45 +575,52 @@ export class ClientBroker {
 		});
 		this.register(DESKTOP_IPC_CHANNELS.deleteSession, 1, async (_event, [input]) => {
 			const params = this.validatedParams("session/delete", input);
-			return this.enqueueSubscriptionMutation(async () => {
-				const result = await this.clientCall("session/delete", params);
-				this.forgetSessions([params.sessionId]);
-				return result;
-			});
+			return this.rpcIpcResult(() =>
+				this.enqueueSubscriptionMutation(async () => {
+					const result = await this.clientCall("session/delete", params);
+					this.forgetSessions([params.sessionId]);
+					return result;
+				}),
+			);
 		});
 		this.register(DESKTOP_IPC_CHANNELS.openSession, 1, async (_event, [input]) => {
 			const params = this.validatedParams("session/open", input);
-			return this.enqueueSubscriptionMutation(async () => {
-				const previousSessionIds = [...this.subscribedSessions].filter(
-					(sessionId) => sessionId !== params.sessionId,
-				);
-				await this.clientCall("session/open", params);
-				const subscribed = await this.clientCall("session/subscribe", { sessionId: params.sessionId });
-				this.subscribedSessions.add(params.sessionId);
-				const session = subscribed.snapshot.session;
-				this.subscribedSessionScopes.set(session.sessionId, {
-					mode: session.mode,
-					...(session.cwd ? { cwd: session.cwd } : {}),
-				});
-				if (session.mode === "code" && session.cwd) this.workspaceFiles.authorize(session.sessionId, session.cwd);
-				else this.workspaceFiles.revoke(params.sessionId);
-				for (const previousSessionId of previousSessionIds) this.workspaceFiles.revoke(previousSessionId);
-				const previousSessions = new Set(previousSessionIds);
-				this.cancelPendingInteractionsForSessions(previousSessions);
-				await this.unsubscribeSessions(previousSessionIds, true);
-				// A request can cross the process boundary while unsubscribe is in flight.
-				this.cancelPendingInteractionsForSessions(previousSessions);
-				for (const event of this.browserManager.replayEvents(params.sessionId)) this.sendBrowserEvent(event);
-				this.onSessionOpened?.(params.sessionId);
-				return subscribed.snapshot;
-			});
+			return this.rpcIpcResult(() =>
+				this.enqueueSubscriptionMutation(async () => {
+					const previousSessionIds = [...this.subscribedSessions].filter(
+						(sessionId) => sessionId !== params.sessionId,
+					);
+					await this.clientCall("session/open", params);
+					const subscribed = await this.clientCall("session/subscribe", { sessionId: params.sessionId });
+					this.subscribedSessions.add(params.sessionId);
+					const session = subscribed.snapshot.session;
+					this.subscribedSessionScopes.set(session.sessionId, {
+						mode: session.mode,
+						...(session.cwd ? { cwd: session.cwd } : {}),
+					});
+					if (session.mode === "code" && session.cwd)
+						this.workspaceFiles.authorize(session.sessionId, session.cwd);
+					else this.workspaceFiles.revoke(params.sessionId);
+					for (const previousSessionId of previousSessionIds) this.workspaceFiles.revoke(previousSessionId);
+					const previousSessions = new Set(previousSessionIds);
+					this.cancelPendingInteractionsForSessions(previousSessions);
+					await this.unsubscribeSessions(previousSessionIds, true);
+					// A request can cross the process boundary while unsubscribe is in flight.
+					this.cancelPendingInteractionsForSessions(previousSessions);
+					for (const event of this.browserManager.replayEvents(params.sessionId)) this.sendBrowserEvent(event);
+					this.onSessionOpened?.(params.sessionId);
+					return subscribed.snapshot;
+				}),
+			);
 		});
-		this.register(DESKTOP_IPC_CHANNELS.readDeliveredFile, 1, async (_event, [input]) => {
-			const params = input as ClientParams<"session/readDeliveredFile">;
-			const direct = await readDeliveredFileDirect(params.sessionId, params.fileId);
-			if (direct) return direct;
-			return this.clientCall("session/readDeliveredFile", params);
-		});
+		this.register(DESKTOP_IPC_CHANNELS.readDeliveredFile, 1, async (_event, [input]) =>
+			this.rpcIpcResult(async () => {
+				const params = input as ClientParams<"session/readDeliveredFile">;
+				const direct = await readDeliveredFileDirect(params.sessionId, params.fileId);
+				if (direct) return direct;
+				return this.clientCall("session/readDeliveredFile", params);
+			}),
+		);
 		this.register(DESKTOP_IPC_CHANNELS.readPreviewFile, 1, async (_event, [input]) => {
 			const params = validateReadPreviewFileInput(input);
 			if (params.source === "workspace") return this.workspaceFiles.readPreviewBytes(params);
@@ -610,12 +633,14 @@ export class ClientBroker {
 		this.register(DESKTOP_IPC_CHANNELS.interruptTurn, 1, async (_event, [input]) => {
 			const params = this.validatedParams("turn/interrupt", input);
 			this.onUserInterruptPending?.(params.sessionId, true);
-			try {
-				return await this.clientCall("turn/interrupt", params);
-			} catch (cause) {
-				this.onUserInterruptPending?.(params.sessionId, false);
-				throw cause;
-			}
+			return this.rpcIpcResult(async () => {
+				try {
+					return await this.clientCall("turn/interrupt", params);
+				} catch (cause) {
+					this.onUserInterruptPending?.(params.sessionId, false);
+					throw cause;
+				}
+			});
 		});
 		this.register(DESKTOP_IPC_CHANNELS.respondToInteraction, 1, async (_event, [input]) => {
 			this.respondToInteraction(input);
@@ -734,7 +759,9 @@ export class ClientBroker {
 
 	private registerAppServerForwarders(): void {
 		for (const definition of Object.values(DESKTOP_RPC_FORWARDING)) {
-			this.register(definition.channel, 1, async (_event, [input]) => this.clientCall(definition.method, input));
+			this.register(definition.channel, 1, async (_event, [input]) =>
+				this.rpcIpcResult(() => this.clientCall(definition.method, input)),
+			);
 		}
 	}
 
@@ -798,6 +825,21 @@ export class ClientBroker {
 					ok: false,
 					error: { code: (cause as Error & { code: number }).code, message: cause.message },
 				};
+			}
+			throw cause;
+		}
+	}
+
+	private async rpcIpcResult<Result>(operation: () => Promise<Result>): Promise<Result | DesktopRpcIpcFailure> {
+		try {
+			return await operation();
+		} catch (cause) {
+			if (
+				cause instanceof Error &&
+				cause.name === "MetisRpcError" &&
+				typeof (cause as Error & { code?: unknown }).code === "number"
+			) {
+				return desktopRpcIpcFailure((cause as Error & { code: number }).code, cause.message);
 			}
 			throw cause;
 		}
@@ -950,17 +992,56 @@ export class ClientBroker {
 	}
 
 	private detachOwner(): void {
-		for (const cleanup of this.ownerCleanup) cleanup();
+		const cleanup = this.ownerCleanup;
 		this.ownerCleanup = [];
 		this.owner = undefined;
 		this.ownerSubscribed = false;
-		this.terminalManager.closeAll();
-		this.browserToolHost.cancelAll("tab_closed");
-		this.browserManager.closeAll();
-		this.workspaceFiles.clear();
-		this.cancelPendingInteractions();
-		this.releaseSessionSubscriptions();
-		this.setWorkspaceEditState({ dirty: false, language: "en", visibleSessionId: null });
+		this.performCleanup("Desktop owner teardown failed", [
+			...cleanup,
+			() => this.terminalManager.closeAll(),
+			() => this.browserToolHost.cancelAll("tab_closed"),
+			() => this.browserManager.closeAll(),
+			() => this.workspaceFiles.clear(),
+			() => this.cancelPendingInteractions(),
+			() => this.releaseSessionSubscriptions(),
+			() => this.setWorkspaceEditState({ dirty: false, language: "en", visibleSessionId: null }),
+		]);
+	}
+
+	private resetRendererResources(): void {
+		this.ownerSubscribed = false;
+		this.performCleanup("Desktop renderer reset failed", [
+			() => this.terminalManager.closeAll(),
+			() => this.browserToolHost.cancelAll("tab_closed"),
+			() => this.browserManager.suspendRenderer(),
+			() => this.workspaceFiles.clear(),
+			() => this.cancelPendingInteractions(),
+			() => this.releaseSessionSubscriptions(),
+		]);
+	}
+
+	private performCleanup(message: string, operations: readonly (() => void)[]): void {
+		const failures: unknown[] = [];
+		for (const operation of operations) {
+			try {
+				operation();
+			} catch (cause) {
+				failures.push(cause);
+			}
+		}
+		if (failures.length > 0) throw new AggregateError(failures, message);
+	}
+
+	private runLifecycleCleanup(context: string, operation: () => void): void {
+		try {
+			operation();
+		} catch (error) {
+			try {
+				this.onDiagnostic?.(`${context}: ${diagnosticError(error)}`);
+			} catch {
+				// Lifecycle cleanup must never escape an Electron EventEmitter callback.
+			}
+		}
 	}
 
 	private forgetSessions(sessionIds: readonly string[]): void {
@@ -980,9 +1061,10 @@ export class ClientBroker {
 			if (!this.scheduleSubscribed) return;
 			try {
 				await this.clientCall("schedule/unsubscribe", {});
-				this.scheduleSubscribed = false;
 			} catch {
 				// App-server restarts clear the remote subscription.
+			} finally {
+				this.scheduleSubscribed = false;
 			}
 		});
 	}
@@ -1009,8 +1091,13 @@ export class ClientBroker {
 					this.subscribedSessions.delete(sessionId);
 					this.subscribedSessionScopes.delete(sessionId);
 				} catch (error) {
-					// A later session switch or renderer teardown retries tracked cleanup.
-					if (!ignoreErrors) errors.push(error);
+					if (ignoreErrors) {
+						// Renderer teardown is authoritative locally; reconnect builds a fresh subscription set.
+						this.subscribedSessions.delete(sessionId);
+						this.subscribedSessionScopes.delete(sessionId);
+					} else {
+						errors.push(error);
+					}
 				}
 			}),
 		);

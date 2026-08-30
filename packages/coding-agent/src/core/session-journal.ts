@@ -292,16 +292,42 @@ function openReadSnapshot(path: string): { identity: FileIdentity; snapshot: Rea
 
 function createJournalFile(path: string, data: string, hooks: SessionJournalHooks | undefined): FileIdentity {
 	let fd: number | undefined;
+	let identity: FileIdentity | undefined;
 	try {
 		fd = openRegularFile(path, fsConstants.O_CREAT | fsConstants.O_EXCL | fsConstants.O_RDWR);
 		writeAllSync(fd, Buffer.from(data, "utf8"));
 		(hooks?.syncFile ?? syncFileSync)(fd);
 		const stats = fstatSync(fd);
-		return { device: stats.dev, inode: stats.ino, size: stats.size, modifiedAt: stats.mtimeMs };
+		identity = { device: stats.dev, inode: stats.ino, size: stats.size, modifiedAt: stats.mtimeMs };
 	} finally {
 		closeQuietly(fd);
-		if (fd !== undefined) (hooks?.syncDirectory ?? syncDirectorySync)(dirname(path));
 	}
+	try {
+		(hooks?.syncDirectory ?? syncDirectorySync)(dirname(path));
+	} catch (error) {
+		// Creating the directory entry is the publication point. A directory fsync
+		// can report failure after that publication; if the exact file we created is
+		// still canonical, returning failure would make a retry create a duplicate
+		// session while leaving this one visible.
+		let published: FileIdentity;
+		try {
+			published = readFileIdentity(path, fsConstants.O_RDONLY);
+		} catch (verificationError) {
+			throw new AggregateError([error, verificationError], `Failed to verify created session journal: ${path}`);
+		}
+		if (
+			published.device !== identity.device ||
+			published.inode !== identity.inode ||
+			published.size !== identity.size ||
+			published.modifiedAt !== identity.modifiedAt
+		) {
+			throw new AggregateError(
+				[error, new SessionJournalIdentityError(path)],
+				`Created session journal changed while confirming publication: ${path}`,
+			);
+		}
+	}
+	return identity;
 }
 
 function validateJsonlFile<T = unknown>(

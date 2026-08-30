@@ -12,8 +12,11 @@ import { createMcpTestServer } from "./helpers/mcp-test-server.ts";
 
 describe("MCP CLI", () => {
 	const userMcpKey = (name: string) => mcpCredentialKey({ scope: "user", name });
-	const hasVersionedUserCredential = (storage: AuthStorage, name: string) =>
-		storage.list().some((key) => key.startsWith(mcpVersionedCredentialPrefix({ scope: "user", name })));
+	const hasVersionedUserSecret = (storage: AuthStorage, name: string) =>
+		storage
+			.list()
+			.filter((key) => key.startsWith(mcpVersionedCredentialPrefix({ scope: "user", name })))
+			.some((key) => storage.get(key)?.type === "mcp_secret");
 	let tempDir: string;
 	let agentDir: string;
 	let projectDir: string;
@@ -64,9 +67,18 @@ describe("MCP CLI", () => {
 			"DOCS_TOKEN",
 		]);
 
-		expect(readGlobalSettings().mcpServers).toEqual({
-			local: { command: "node", args: ["server.mjs"], envVars: ["LOCAL_TOKEN"] },
-			docs: { url: "https://mcp.example.test/mcp", bearerTokenEnvVar: "DOCS_TOKEN" },
+		expect(readGlobalSettings().mcpServers).toMatchObject({
+			local: {
+				command: "node",
+				args: ["server.mjs"],
+				envVars: ["LOCAL_TOKEN"],
+				credentialVersion: expect.any(String),
+			},
+			docs: {
+				url: "https://mcp.example.test/mcp",
+				bearerTokenEnvVar: "DOCS_TOKEN",
+				credentialVersion: expect.any(String),
+			},
 		});
 		expect(process.exitCode).toBeUndefined();
 	});
@@ -113,7 +125,8 @@ describe("MCP CLI", () => {
 		await handleMcpCliCommand(["mcp", "remove", "docs"]);
 
 		expect(readGlobalSettings().mcpServers?.docs).toBeUndefined();
-		expect(AuthStorage.create(join(agentDir, "auth.json")).has(userMcpKey("docs"))).toBe(false);
+		expect(AuthStorage.create(join(agentDir, "auth.json")).get(userMcpKey("docs"))).toBeUndefined();
+		expect(readFileSync(join(agentDir, "auth.json"), "utf8")).not.toContain("stored-secret");
 	});
 
 	it("lists and gets configuration without reading auth.json or printing env values", async () => {
@@ -181,10 +194,10 @@ describe("MCP CLI", () => {
 
 			await manager.logout("protected");
 			expect(manager.getStatus()[0]).toMatchObject({ state: "auth_required" });
-			expect(hasVersionedUserCredential(authStorage, "protected")).toBe(false);
+			expect(hasVersionedUserSecret(authStorage, "protected")).toBe(false);
 
 			await manager.setSecret("protected", { bearerToken: secret });
-			expect(hasVersionedUserCredential(authStorage, "protected")).toBe(true);
+			expect(hasVersionedUserSecret(authStorage, "protected")).toBe(true);
 			await manager.close();
 			await handleMcpCliCommand(["mcp", "remove", "protected"]);
 
@@ -194,7 +207,7 @@ describe("MCP CLI", () => {
 				cwd: projectDir,
 			});
 			expect(manager.getStatus()).toEqual([]);
-			expect(hasVersionedUserCredential(AuthStorage.create(authPath), "protected")).toBe(false);
+			expect(hasVersionedUserSecret(AuthStorage.create(authPath), "protected")).toBe(false);
 			expect(readFileSync(join(agentDir, "settings.json"), "utf8")).not.toContain(secret);
 		} finally {
 			await manager.close();

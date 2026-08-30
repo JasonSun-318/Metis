@@ -130,6 +130,7 @@ export class ToolAuthorizationRuntime {
 					return tool.execute(toolCallId, args, signal, onUpdate);
 				}
 				const denial = this.denials.get(toolCallId);
+				this.denials.delete(toolCallId);
 				if (denial) throw new Error(denial);
 				const authorization = this.take(toolCallId, tool.name, args);
 				if (tool.name === "bash") this.options.bashBoundary?.bind(toolCallId, authorization.executionTarget);

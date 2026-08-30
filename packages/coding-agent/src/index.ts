@@ -66,25 +66,6 @@ export {
 	getMemorySqlitePath,
 	initializeAutoMemory,
 } from "./core/auto-memory.ts";
-export {
-	BROWSER_TOOL_NAMES,
-	type BrowserActInput,
-	BrowserActParams,
-	type BrowserHandoffInput,
-	BrowserHandoffParams,
-	type BrowserHostExecutor,
-	type BrowserHostObservation,
-	type BrowserHostRequest,
-	type BrowserHostResult,
-	type BrowserNavigateInput,
-	BrowserNavigateParams,
-	type BrowserObserveInput,
-	BrowserObserveParams,
-	type BrowserTabsInput,
-	BrowserTabsParams,
-	type BrowserToolName,
-	createBrowserToolDefinitions,
-} from "./core/browser-tools.ts";
 export { getLatestCacheHitPercent } from "./core/cache-stats.ts";
 // Compaction
 export {
@@ -282,6 +263,7 @@ export {
 	type McpToolRecord,
 	mcpConfigurationRevision,
 	mcpCredentialState,
+	mcpCredentialStatus,
 	mcpServerFingerprint,
 	resolveMcpServerSettings,
 } from "./core/mcp/index.ts";

@@ -28,7 +28,7 @@ export interface OpenedSessionRuntime {
 	markRead(): Promise<SessionSummary>;
 	renameSession(name: string): Promise<SessionSummary>;
 	/** Create an independent branch session rooted at the given entry and return its session id. */
-	fork(input: { entryId: string; name: string }): Promise<string>;
+	fork(input: { entryId: string; name: string; requestId: string; targetSessionId: string }): Promise<string>;
 	listSkills(): Promise<ClientResult<"skill/list">>;
 	listMcpServers(): Promise<ClientResult<"mcp/list">>;
 	inspectMcpImport(input: ClientParams<"mcp/import/inspect">): Promise<ClientResult<"mcp/import/inspect">>;

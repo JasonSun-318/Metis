@@ -5,6 +5,7 @@ import {
 	AuthStorage,
 	mcpCredentialKey,
 	mcpServerFingerprint,
+	mcpVersionedCredentialKey,
 	ProjectTrustStore,
 	resolveMcpServerSettings,
 	SettingsManager,
@@ -157,6 +158,41 @@ describe("MCP settings projection", () => {
 			status: "rejected",
 			reason: { code: "CONFLICT" },
 		});
+	});
+
+	it("refreshes draft credentials written by another process before projecting a revision", async () => {
+		const server = { url: "https://mcp.example.test/shared", enabled: false };
+		const settings = SettingsManager.create(cwd, agentDir, { projectTrusted: true });
+		settings.setMcpServer("global", "shared", server);
+		await settings.flush();
+		const host = new AgentSessionRuntimeHost({ agentDir });
+		expect((await host.listMcpServers(null)).servers[0]?.credentialConfigured).toBe(false);
+
+		const credentialVersion = "20000000-0000-4000-8000-000000000001";
+		const identity = { scope: "user", name: "shared" } as const;
+		const fingerprint = mcpServerFingerprint(resolveMcpServerSettings("shared", server, cwd, process.env, identity));
+		const externalAuth = AuthStorage.create(join(agentDir, "auth.json"));
+		externalAuth.set(mcpVersionedCredentialKey(identity, fingerprint, credentialVersion), {
+			type: "mcp_secret",
+			serverFingerprint: fingerprint,
+			bearerToken: "external-secret",
+		});
+		const externalSettings = SettingsManager.create(cwd, agentDir, { projectTrusted: true });
+		externalSettings.setMcpServer("global", "shared", { ...server, credentialVersion });
+		await externalSettings.flush();
+
+		const refreshed = (await host.listMcpServers(null)).servers[0]!;
+		expect(refreshed.credentialConfigured).toBe(true);
+		await expect(
+			host.upsertMcpServer({
+				cwd: null,
+				scope: "user",
+				name: "shared",
+				requestId: REQUEST_A,
+				expectedRevision: refreshed.revision,
+				server: { transport: "http", url: server.url, enabled: true },
+			}),
+		).resolves.toMatchObject({ servers: [expect.objectContaining({ name: "shared" })] });
 	});
 
 	it("isolates same-name User and Project credentials and enforces project trust", async () => {

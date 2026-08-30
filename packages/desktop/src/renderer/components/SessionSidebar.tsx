@@ -45,9 +45,25 @@ export function clampSessionSidebarWidth(value: number, viewportWidth = window.i
 interface SessionSidebarProps {
 	readonly state: AppStoreSnapshot;
 	readonly platform: string;
+	readonly destination: SidebarDestination;
+	readonly onSettings: () => void;
+	readonly onUpdate: () => void;
+	readonly onSkills: () => void;
+	readonly onSchedules: () => void;
+	readonly onOpenSchedule: (taskId: string) => void;
+	readonly onDeleteSchedule: MetisDesktopApi["deleteSchedule"];
+	readonly onToggle: () => void;
+	readonly onWidthChange: (width: number, persist?: boolean) => void;
+	readonly scheduleTasks: readonly ScheduleTaskView[];
+	readonly selectedScheduleTaskId: string | null;
+	readonly updateState: DesktopUpdateState;
+	readonly width: number;
+	readonly workspace: SessionSidebarWorkspace;
+}
+
+export interface SessionSidebarWorkspace {
 	readonly busy: boolean;
 	readonly mode: AgentMode;
-	readonly destination: SidebarDestination;
 	readonly newTaskOpen: boolean;
 	readonly onModeChange: (mode: AgentMode) => void;
 	readonly onNewTask: () => void;
@@ -65,21 +81,9 @@ interface SessionSidebarProps {
 		group: ProjectSessionGroup,
 	) => Promise<ClientResult<"project/deletePreview">>;
 	readonly onRenameProject: (group: ProjectSessionGroup, alias: string) => void;
-	readonly onSettings: () => void;
-	readonly onUpdate: () => void;
-	readonly onSkills: () => void;
-	readonly onSchedules: () => void;
-	readonly onOpenSchedule: (taskId: string) => void;
-	readonly onDeleteSchedule: MetisDesktopApi["deleteSchedule"];
-	readonly onToggle: () => void;
-	readonly onWidthChange: (width: number, persist?: boolean) => void;
 	readonly projectBusy: (group: ProjectSessionGroup) => boolean;
 	readonly preferences: ProjectPreferenceMap;
 	readonly pinnedSessionIds: ReadonlySet<string>;
-	readonly scheduleTasks: readonly ScheduleTaskView[];
-	readonly selectedScheduleTaskId: string | null;
-	readonly updateState: DesktopUpdateState;
-	readonly width: number;
 }
 
 export interface ProjectSessionGroup {
@@ -231,46 +235,24 @@ function SessionSection({ children, label }: { readonly children: ReactNode; rea
 
 function ProjectGroup({
 	actionsActive,
-	busy,
 	group,
 	onActivateActions,
-	onCreateProjectSession,
 	onDeactivateActions,
-	onDeleteProject,
-	onDeleteSession,
-	onOpen,
-	onPinSession,
-	onPinProject,
-	onPreviewProjectDelete,
-	onRenameProject,
-	onRenameSession,
 	isDeleteDisabled,
 	selectedSessionId,
+	workspace,
 }: {
 	readonly actionsActive: boolean;
-	readonly busy: boolean;
 	readonly group: ProjectSessionGroup;
 	readonly onActivateActions: () => void;
-	readonly onCreateProjectSession: (group: ProjectSessionGroup) => Promise<void>;
 	readonly onDeactivateActions: () => void;
-	readonly onDeleteProject: (
-		group: ProjectSessionGroup,
-		preview: ClientResult<"project/deletePreview">,
-	) => Promise<void>;
-	readonly onDeleteSession: (session: SessionSummary) => Promise<void>;
-	readonly onOpen: (sessionId: string) => Promise<void>;
-	readonly onPinSession: (session: SessionSummary, pinned: boolean) => void;
-	readonly onPinProject: (group: ProjectSessionGroup, pinned: boolean) => void;
-	readonly onPreviewProjectDelete: (
-		group: ProjectSessionGroup,
-	) => Promise<ClientResult<"project/deletePreview">>;
-	readonly onRenameProject: (group: ProjectSessionGroup, alias: string) => void;
-	readonly onRenameSession: (session: SessionSummary, name: string) => Promise<void>;
 	readonly isDeleteDisabled: (session: SessionSummary) => boolean;
 	readonly selectedSessionId: string | null;
+	readonly workspace: SessionSidebarWorkspace;
 }) {
 	const { t } = useTranslation();
 	const [open, setOpen] = useState(true);
+	const busy = workspace.busy || workspace.projectBusy(group);
 	return (
 		<div className="project-group" data-open={open}>
 			<button
@@ -289,17 +271,17 @@ function ProjectGroup({
 				busy={busy}
 				group={group}
 				onActivate={onActivateActions}
-				onCreate={onCreateProjectSession}
+				onCreate={workspace.onCreateProjectSession}
 				onDeactivate={onDeactivateActions}
-				onDelete={onDeleteProject}
-				onPin={onPinProject}
-				onPreviewDelete={onPreviewProjectDelete}
-				onRename={onRenameProject}
+				onDelete={workspace.onDeleteProject}
+				onPin={workspace.onPinProject}
+				onPreviewDelete={workspace.onPreviewProjectDelete}
+				onRename={workspace.onRenameProject}
 			/>
 			<div className="project-drawer" inert={!open}>
 				<div className="project-sessions">
 					{group.sessions.map((session) => (
-						<SessionButton busy={busy} deleteDisabled={isDeleteDisabled(session)} key={session.sessionId} onDelete={onDeleteSession} onOpen={onOpen} onPin={onPinSession} onRename={onRenameSession} pinned={false} selected={selectedSessionId === session.sessionId} session={session} />
+						<SessionButton busy={busy} deleteDisabled={isDeleteDisabled(session)} key={session.sessionId} onDelete={workspace.onDeleteSession} onOpen={workspace.onOpen} onPin={workspace.onPinSession} onRename={workspace.onRenameSession} pinned={false} selected={selectedSessionId === session.sessionId} session={session} />
 					))}
 				</div>
 			</div>
@@ -310,21 +292,7 @@ function ProjectGroup({
 export function SessionSidebar({
 	state,
 	platform,
-	busy,
-	mode,
 	destination,
-	newTaskOpen,
-	onModeChange,
-	onNewTask,
-	onOpen,
-	onDeleteSession,
-	onPinSession,
-	onCreateProjectSession,
-	onDeleteProject,
-	onPinProject,
-	onPreviewProjectDelete,
-	onRenameProject,
-	onRenameSession,
 	onSettings,
 	onUpdate,
 	onSkills,
@@ -333,15 +301,26 @@ export function SessionSidebar({
 	onDeleteSchedule,
 	onToggle,
 	onWidthChange,
-	projectBusy,
-	preferences,
-	pinnedSessionIds,
 	scheduleTasks,
 	selectedScheduleTaskId,
 	updateState,
 	width,
+	workspace,
 }: SessionSidebarProps) {
 	const { t, i18n } = useTranslation();
+	const {
+		busy,
+		mode,
+		newTaskOpen,
+		onDeleteSession,
+		onModeChange,
+		onNewTask,
+		onOpen,
+		onPinSession,
+		onRenameSession,
+		pinnedSessionIds,
+		preferences,
+	} = workspace;
 	const locale = localeForIntl(i18n.resolvedLanguage);
 	const scheduledTaskIds = useMemo(() => new Set(scheduleTasks.map(({ id }) => id)), [scheduleTasks]);
 	const visibleScheduleTasks = scheduleTasks.filter(
@@ -456,22 +435,13 @@ export function SessionSidebar({
 				{grouping === "project" && tree.projects.map((group) => (
 					<ProjectGroup
 						actionsActive={activeProjectActions === JSON.stringify([group.mode, group.cwd])}
-						busy={busy || projectBusy(group)}
 						group={group}
 						key={JSON.stringify([group.mode, group.cwd])}
 						onActivateActions={() => setActiveProjectActions(JSON.stringify([group.mode, group.cwd]))}
-						onCreateProjectSession={onCreateProjectSession}
 						onDeactivateActions={() => setActiveProjectActions(null)}
-						onDeleteProject={onDeleteProject}
-						onDeleteSession={onDeleteSession}
 						isDeleteDisabled={isDeleteDisabled}
-						onOpen={onOpen}
-						onPinSession={onPinSession}
-						onPinProject={onPinProject}
-						onPreviewProjectDelete={onPreviewProjectDelete}
-						onRenameProject={onRenameProject}
-						onRenameSession={onRenameSession}
 						selectedSessionId={selectedSessionId}
+						workspace={workspace}
 					/>
 				))}
 				{grouping === "project" && tree.tasks.length > 0 && (

@@ -62,6 +62,30 @@ function replayKey(request: ClientRpcRequest, id: string): string {
 	return sessionId === undefined ? `global\0${id}` : `session\0${sessionId}\0${id}`;
 }
 
+function forkedSessionId(sourceSessionId: string, requestId: string): string {
+	const digest = createHash("sha256").update(sourceSessionId).update("\0").update(requestId).digest("hex");
+	return `fork-${digest}`;
+}
+
+function validatePersistedFork(
+	ref: SessionRef,
+	input: { readonly requestId: string; readonly sessionId: string; readonly entryId: string },
+): void {
+	const manager = SessionManager.openReadOnly(ref.path);
+	const markers = manager.getDurableJournalSnapshot().filter((raw) => {
+		if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return false;
+		const entry = raw as unknown as Record<string, unknown>;
+		if (entry.type !== "custom" || entry.customType !== "metis.app-server.session-fork.v1") return false;
+		const data = entry.data as Record<string, unknown> | undefined;
+		return (
+			data?.requestId === input.requestId &&
+			data.sourceSessionId === input.sessionId &&
+			data.entryId === input.entryId
+		);
+	});
+	if (markers.length !== 1) throw new AppServerError("REQUEST_ID_REUSED", { requestId: input.requestId });
+}
+
 export class Dispatcher {
 	private readonly replay = new Map<string, ReplayEntry>();
 	private readonly catalog: SessionCatalog;
@@ -719,6 +743,18 @@ export class Dispatcher {
 				});
 			case "session/fork":
 				return await this.replayMutation(request, async () => {
+					const targetSessionId = forkedSessionId(request.params.sessionId, request.params.requestId);
+					await this.catalog.refresh();
+					let persisted: SessionRef | undefined;
+					try {
+						persisted = this.catalog.get(targetSessionId);
+					} catch (cause) {
+						if (!(cause instanceof AppServerError) || cause.code !== "NOT_FOUND") throw cause;
+					}
+					if (persisted) {
+						validatePersistedFork(persisted, request.params);
+						return { session: persisted.summary, entryId: request.params.entryId };
+					}
 					this.assertMutableSession(request.params.sessionId);
 					const ref = this.catalog.get(request.params.sessionId);
 					if (ref.summary.state === "corrupt") {
@@ -727,14 +763,17 @@ export class Dispatcher {
 						});
 					}
 					const originalName = ref.summary.name ?? `Metis session ${ref.summary.sessionId.slice(0, 8)}`;
-					const forkedSessionId = await this.registry.run(ref, (runtime) =>
+					const createdSessionId = await this.registry.run(ref, (runtime) =>
 						runtime.fork({
 							entryId: request.params.entryId,
 							name: `fork ${originalName}`,
+							requestId: request.params.requestId,
+							targetSessionId,
 						}),
 					);
+					if (createdSessionId !== targetSessionId) throw new AppServerError("SESSION_CORRUPT");
 					await this.catalog.refresh();
-					const session = this.catalog.get(forkedSessionId).summary;
+					const session = this.catalog.get(createdSessionId).summary;
 					return { session, entryId: request.params.entryId };
 				});
 			case "session/delete": {

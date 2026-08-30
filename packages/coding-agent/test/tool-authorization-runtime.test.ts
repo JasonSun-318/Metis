@@ -116,6 +116,15 @@ describe("ToolAuthorizationRuntime", () => {
 		expect(
 			sessionManager.getDurableJournalSnapshot().filter((entry) => entry.type === "session_permission_decision"),
 		).toHaveLength(0);
+
+		runtime.setApprovalHandler(async () => ({ decision: "allow" }));
+		await runtime.beforeToolExecute(
+			{ actionId: "call-2", toolName: tool.name, args: { value: "x" } },
+			new AbortController().signal,
+		);
+		await expect(runtime.guard(tool).execute("call-2", { value: "x" })).resolves.toMatchObject({
+			content: [{ type: "text", text: "done" }],
+		});
 	});
 
 	it("rejects changed args, cwd, workspace roots, and provenance before execution", async () => {

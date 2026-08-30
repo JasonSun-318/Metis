@@ -1,12 +1,25 @@
 import { randomUUID } from "node:crypto";
-import { cpSync, existsSync, lstatSync, mkdirSync, realpathSync, renameSync, rmSync, statSync } from "node:fs";
+import {
+	cpSync,
+	existsSync,
+	lstatSync,
+	mkdirSync,
+	readFileSync,
+	realpathSync,
+	renameSync,
+	rmSync,
+	statSync,
+} from "node:fs";
 import { dirname, isAbsolute, join, relative, sep } from "node:path";
 import { getWorkspacesDir as getConfiguredWorkspacesDir } from "../config.ts";
 import { canonicalizePathForCreation, resolvePath } from "../utils/paths.ts";
 import type { AgentMode } from "./agent-mode.ts";
+import { replaceFileAtomicallySync, syncDirectorySync } from "./durable-file.ts";
 import { assertValidSessionId } from "./session-id.ts";
 
 export type CwdOrigin = "managed" | "user-selected";
+
+const MANAGED_WORKSPACE_OWNER_FILE = ".metis-managed-workspace.json";
 
 export interface SessionWorkspace {
 	readonly cwd: string;
@@ -160,6 +173,7 @@ export function publishManagedWorkspaceCopy<T>(options: {
 	sourceCwd: string;
 	targetId: string;
 	agentDir: string;
+	recoveryKey?: string;
 	publish: (targetCwd: string) => T;
 }): T {
 	const source = getOwnedManagedWorkspace({
@@ -176,7 +190,36 @@ export function publishManagedWorkspaceCopy<T>(options: {
 	const temporaryTarget = join(root, temporaryName);
 	assertExactRootChild(root, canonicalRoot, target, options.targetId);
 	assertExactRootChild(root, canonicalRoot, temporaryTarget, temporaryName);
-	if (existsSync(target) || existsSync(temporaryTarget)) throw new Error("Managed workspace target already exists");
+	if (existsSync(temporaryTarget)) throw new Error("Managed workspace temporary target already exists");
+	if (existsSync(target)) {
+		if (!options.recoveryKey) throw new Error("Managed workspace target already exists");
+		const canonicalTarget = getExactOwnedDirectory(root, options.targetId, target);
+		if (!canonicalTarget) throw new Error("Managed workspace target is not owned by Metis");
+		try {
+			const markerPath = join(canonicalTarget, MANAGED_WORKSPACE_OWNER_FILE);
+			const markerStats = lstatSync(markerPath);
+			if (
+				!markerStats.isFile() ||
+				markerStats.isSymbolicLink() ||
+				markerStats.nlink !== 1 ||
+				markerStats.size > 4096
+			) {
+				throw new Error("Managed workspace recovery marker is unsafe");
+			}
+			const marker = JSON.parse(readFileSync(markerPath, "utf8")) as Record<string, unknown>;
+			if (
+				marker.version !== 1 ||
+				marker.sourceId !== options.sourceId ||
+				marker.targetId !== options.targetId ||
+				marker.recoveryKey !== options.recoveryKey
+			) {
+				throw new Error("Managed workspace recovery marker does not match this operation");
+			}
+			return options.publish(canonicalTarget);
+		} catch (error) {
+			throw new Error("Managed workspace target cannot be recovered", { cause: error });
+		}
+	}
 
 	try {
 		cpSync(source, temporaryTarget, {
@@ -186,13 +229,28 @@ export function publishManagedWorkspaceCopy<T>(options: {
 			verbatimSymlinks: true,
 		});
 		assertRealDirectory(temporaryTarget, "Temporary managed workspace");
+		if (options.recoveryKey) {
+			const markerPath = join(temporaryTarget, MANAGED_WORKSPACE_OWNER_FILE);
+			rmSync(markerPath, { force: true });
+			replaceFileAtomicallySync(
+				markerPath,
+				`${JSON.stringify({
+					version: 1,
+					sourceId: options.sourceId,
+					targetId: options.targetId,
+					recoveryKey: options.recoveryKey,
+				})}\n`,
+				{ mode: 0o600 },
+			);
+		}
 		renameSync(temporaryTarget, target);
+		syncDirectorySync(root);
 		const canonicalTarget = assertRealDirectory(target, "Managed workspace copy");
 		if (dirname(canonicalTarget) !== canonicalRoot) throw new Error("Managed workspace copy escaped its root");
 		return options.publish(canonicalTarget);
 	} catch (error) {
 		rmSync(temporaryTarget, { recursive: true, force: true });
-		rmSync(target, { recursive: true, force: true });
+		if (!options.recoveryKey) rmSync(target, { recursive: true, force: true });
 		throw error;
 	}
 }

@@ -3123,6 +3123,46 @@ describe("AppServer", () => {
 			}),
 		).toMatchObject({ result: { servers: [] } });
 
+		const externalSettings = SettingsManager.create(projectDir, agentDir, { projectTrusted: true });
+		externalSettings.setMcpServer("global", "z-external", {
+			url: "https://mcp.example.test/external",
+			enabled: false,
+		});
+		await externalSettings.flush();
+		const externalImportText = JSON.stringify({
+			mcpServers: {
+				"z-external": {
+					type: "streamable-http",
+					url: "https://mcp.example.test/external-updated",
+					enabled: false,
+				},
+			},
+		});
+		const externalInspection = await connection.handle({
+			jsonrpc: "2.0",
+			id: "inspect-external-mcp-import",
+			method: "mcp/import/inspect",
+			params: { sessionId, scope: "user", text: externalImportText },
+		});
+		const externalInspectionResult = (externalInspection as { result: ClientResult<"mcp/import/inspect"> }).result;
+		const externalRevision = externalInspectionResult.candidates[0]?.existingRevision;
+		expect(externalRevision).toEqual(expect.any(String));
+		expect(
+			await connection.handle({
+				jsonrpc: "2.0",
+				id: "apply-external-mcp-import",
+				method: "mcp/import",
+				params: {
+					sessionId,
+					scope: "user",
+					text: externalImportText,
+					sourceRevision: externalInspectionResult.sourceRevision,
+					candidates: [{ id: "z-external", expectedRevision: externalRevision! }],
+					requestId: "00000000-0000-4000-8000-000000000009",
+				},
+			}),
+		).toMatchObject({ result: { servers: [expect.objectContaining({ name: "z-external" })] } });
+
 		const importText = `{
 			// JSONC import stays inspection-only until explicitly applied.
 			"mcpServers": {
@@ -3160,7 +3200,9 @@ describe("AppServer", () => {
 		});
 		expect(imported).toMatchObject({
 			result: {
-				servers: [expect.objectContaining({ name: "github", state: "disabled", credentialConfigured: true })],
+				servers: expect.arrayContaining([
+					expect.objectContaining({ name: "github", state: "disabled", credentialConfigured: true }),
+				]),
 			},
 		});
 		expect(JSON.stringify(imported)).not.toContain("imported-secret");

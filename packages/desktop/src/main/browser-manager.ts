@@ -551,9 +551,13 @@ export class BrowserManager {
 			return;
 		}
 		const record = this.recordForSession(input.sessionId, input.browserId);
-		if (record.runtime.view().controlState !== "idle") {
-			throw new Error("Browser is currently controlled by the user or agent");
-		}
+		await record.runtime.runUserMutation(() => this.applyUserControl(record, input));
+	}
+
+	private async applyUserControl(
+		record: BrowserRecord,
+		input: Exclude<DesktopBrowserControlInput, { readonly type: "present" }>,
+	): Promise<void> {
 		if (input.type === "navigate") {
 			await this.applyNavigation(record, { action: "goto", browserId: input.browserId, url: input.url });
 			return;
@@ -662,10 +666,10 @@ export class BrowserManager {
 			}
 			case "browser_observe": {
 				const record = this.recordForSession(sessionId, call.input.browserId);
-				if (record.runtime.view().controlState !== "idle") {
-					throw new Error("Browser is currently controlled by the user or agent");
-				}
-				return { tool: call.tool, observation: await record.controller.observe(call.input, signal) };
+				const observation = await record.runtime.runObservation(signal, (operationSignal) =>
+					record.controller.observe(call.input, operationSignal),
+				);
+				return { tool: call.tool, observation };
 			}
 			case "browser_act": {
 				const record = this.recordForSession(sessionId, call.input.browserId);
@@ -757,8 +761,12 @@ export class BrowserManager {
 	}
 
 	private closeRecord(record: BrowserRecord, cancellationReason: "server_restarted" | "tab_closed"): void {
-		if (!this.finalizeRecord(record, cancellationReason)) return;
-		if (!record.contents.isDestroyed()) record.contents.close();
+		if (this.records.get(record.browserId) !== record) return;
+		try {
+			this.finalizeRecord(record, cancellationReason);
+		} finally {
+			if (!record.contents.isDestroyed()) record.contents.close();
+		}
 	}
 
 	private finalizeRecord(record: BrowserRecord, cancellationReason: "server_restarted" | "tab_closed"): boolean {
@@ -770,10 +778,29 @@ export class BrowserManager {
 	}
 
 	closeAll(): void {
-		for (const profileId of this.historySaveTimers.keys()) this.persistHistory(profileId, true);
-		for (const record of [...this.records.values()]) this.closeRecord(record, "server_restarted");
-		if (this.automationWindow && !this.automationWindow.isDestroyed()) this.automationWindow.destroy();
-		this.automationWindow = undefined;
+		const failures: unknown[] = [];
+		for (const profileId of this.historySaveTimers.keys()) {
+			try {
+				this.persistHistory(profileId, true);
+			} catch (cause) {
+				failures.push(cause);
+			}
+		}
+		for (const record of [...this.records.values()]) {
+			try {
+				this.closeRecord(record, "server_restarted");
+			} catch (cause) {
+				failures.push(cause);
+			}
+		}
+		try {
+			if (this.automationWindow && !this.automationWindow.isDestroyed()) this.automationWindow.destroy();
+		} catch (cause) {
+			failures.push(cause);
+		} finally {
+			this.automationWindow = undefined;
+		}
+		if (failures.length > 0) throw new AggregateError(failures, "Browser shutdown failed");
 	}
 
 	private record(browserId: string): BrowserRecord {

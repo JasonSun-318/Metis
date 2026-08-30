@@ -216,12 +216,12 @@ export function publicMcpServers(
 	settingsManager: SettingsManager,
 	options: {
 		statuses?: readonly McpServerStatus[];
-		credentialState?: (
+		credentialStatus?: (
 			scope: "user" | "project",
 			name: string,
 			server: McpServerSettings,
 			effective: boolean,
-		) => string | undefined;
+		) => { readonly revisionState: string; readonly configured: boolean } | undefined;
 	} = {},
 ): McpServerSummaryView[] {
 	const user = settingsManager.getGlobalSettings().mcpServers ?? {};
@@ -231,7 +231,7 @@ export function publicMcpServers(
 	for (const [name, server] of Object.entries(user)) {
 		if (name.length === 0 || name.length > 256) continue;
 		const effective = !(name in project);
-		const credentialState = options.credentialState?.("user", name, server, effective);
+		const credentialStatus = options.credentialStatus?.("user", name, server, effective);
 		rows.push(
 			publicMcpServer({
 				scope: "user",
@@ -239,14 +239,14 @@ export function publicMcpServers(
 				server,
 				effective,
 				...(effective ? { status: statusByName.get(name) } : {}),
-				credentialConfigured: credentialState !== undefined,
-				credentialState,
+				credentialConfigured: credentialStatus?.configured ?? false,
+				credentialState: credentialStatus?.revisionState,
 			}),
 		);
 	}
 	for (const [name, server] of Object.entries(project)) {
 		if (name.length === 0 || name.length > 256) continue;
-		const credentialState = options.credentialState?.("project", name, server, true);
+		const credentialStatus = options.credentialStatus?.("project", name, server, true);
 		rows.push(
 			publicMcpServer({
 				scope: "project",
@@ -254,8 +254,8 @@ export function publicMcpServers(
 				server,
 				effective: true,
 				status: statusByName.get(name),
-				credentialConfigured: credentialState !== undefined,
-				credentialState,
+				credentialConfigured: credentialStatus?.configured ?? false,
+				credentialState: credentialStatus?.revisionState,
 			}),
 		);
 	}

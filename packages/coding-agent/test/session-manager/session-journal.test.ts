@@ -52,6 +52,25 @@ describe("session journal", () => {
 		expect(journal.readStrict()).toEqual({ records: [header], recovery: { status: "clean" } });
 	});
 
+	it("accepts an exactly published journal when the final directory sync reports failure", () => {
+		const header = { type: "session", version: 4, id: "session-1" };
+		const journal = openSessionJournal(path, {
+			create: true,
+			initialRecords: [header],
+			hooks: {
+				syncDirectory: () => {
+					throw new Error("directory sync reported failure after publish");
+				},
+			},
+		});
+
+		expect(journal.readStrict()).toEqual({ records: [header], recovery: { status: "clean" } });
+		expect(() => openSessionJournal(path, { create: true })).toThrowError(
+			expect.objectContaining({ code: "EEXIST" }),
+		);
+		journal.close();
+	});
+
 	it("keeps a read-only snapshot stable across a writer append", () => {
 		const initial = { id: "initial" };
 		const appended = { id: "appended" };

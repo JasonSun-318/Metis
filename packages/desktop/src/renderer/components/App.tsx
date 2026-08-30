@@ -1,7 +1,5 @@
 import {
 	type AgentMode,
-	type ClientResult,
-	type DomainEvent,
 	type InteractionResponseInput,
 	type InteractionView,
 	type ItemView,
@@ -22,7 +20,7 @@ import {
 import { Lightbulb, SidebarSimple, XCircle } from "@phosphor-icons/react";
 import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import type { DesktopUpdateState, MetisDesktopApi } from "../../shared/desktop-api.ts";
+import type { DesktopApiEvent, DesktopUpdateState, MetisDesktopApi } from "../../shared/desktop-api.ts";
 import {
 	applyGeneralPreferencesToDocument,
 	loadGeneralPreferences,
@@ -30,23 +28,12 @@ import {
 	saveGeneralPreferences,
 } from "../general-preferences.ts";
 import { useAppStore } from "../hooks/use-app-store.ts";
-import {
-	composerPayload,
-	composerRequestKey,
-	useConversationPlanFlow,
-} from "../hooks/use-conversation-plan-flow.ts";
+import { useConversationPlanFlow } from "../hooks/use-conversation-plan-flow.ts";
 import { useScheduleStore } from "../hooks/use-schedule-store.ts";
+import { useSessionWorkspace } from "../hooks/use-session-workspace.ts";
+import { SessionWorkspaceWorkflow, sessionProjectKey } from "../session-workspace-workflow.ts";
 import type { AppStore, AppStoreSnapshot } from "../store/app-store.ts";
 import { ScheduleStore } from "../store/schedule-store.ts";
-import {
-	loadProjectPreferences,
-	type ProjectPreferenceMap,
-	removeProjectPreference,
-	saveProjectPreferences,
-	setProjectAlias,
-	setProjectPinned,
-} from "../store/project-preferences.ts";
-import { loadSessionPins, saveSessionPins, setSessionPinned } from "../store/session-pins.ts";
 import { applyThemeToDocument, loadTheme, resolveTheme, saveTheme, type AppTheme, watchSystemTheme } from "../theme.ts";
 import { contextUsagePercent } from "../context-usage.ts";
 import { Composer, type ComposerSubmission } from "./Composer.tsx";
@@ -78,6 +65,7 @@ import type { UniversalPreviewTarget } from "./preview/UniversalFilePreviewer.ts
 import { Transcript } from "./Transcript.tsx";
 import { WorkspaceSessionHeader } from "./WorkspaceSessionHeader.tsx";
 import { GOAL_SLASH_USAGE, type GoalSlashCommand } from "../goal-slash.ts";
+import { rpcErrorCode } from "../rpc-error.ts";
 import type { ComposerSlashCommand } from "./SlashCommandMenu.tsx";
 
 interface AppProps {
@@ -85,53 +73,10 @@ interface AppProps {
 	readonly store: AppStore;
 }
 
-interface NewTaskDraft {
-	readonly mode: AgentMode;
-	readonly folder: string | null;
-	readonly sessionId: string | null;
-	readonly permissionMode: PermissionModeView;
-}
-
 const ASSISTED_SCHEDULE_PROMPT =
 	"I want to set up a scheduled task. Briefly explain how scheduled tasks work in Metis, then ask me a few concise questions to determine what it should do, when it should run, and whether it should use an available Skill. Do not create the task until I confirm the details.";
 const MCP_STATUS_POLL_MS = 500;
 const MCP_RECONNECT_POLL_MS = 4_000;
-
-function emptyNewTaskDraft(mode: AgentMode): NewTaskDraft {
-	return { mode, folder: null, sessionId: null, permissionMode: "auto" };
-}
-
-function activeSessionKey(mode: AgentMode): string {
-	return `metis.activeSessionId.${mode}`;
-}
-
-function projectKey(mode: AgentMode, cwd: string): string {
-	return JSON.stringify([mode, cwd]);
-}
-
-function projectActionError(cause: unknown): Error {
-	const code = rpcErrorCode(cause);
-	if (code === RPC_ERROR_CODES.BUSY) return new Error("The project changed or is busy. Load a fresh preview and retry.");
-	if (code === RPC_ERROR_CODES.SESSION_IN_USE) return new Error("A project session is still in use. Close it and retry.");
-	if (code === RPC_ERROR_CODES.SESSION_CORRUPT) return new Error("A project session is corrupt or ambiguous. Nothing was removed.");
-	if (code === RPC_ERROR_CODES.SCHEDULE_STORE_CORRUPT) return new Error("Scheduled tasks could not be checked safely. Repair them before retrying.");
-	if (code === RPC_ERROR_CODES.OPERATION_FAILED) return new Error("The project could not be moved to Trash. Nothing was permanently deleted.");
-	return cause instanceof Error ? cause : new Error("The project operation could not be completed.");
-}
-
-function rpcErrorCode(cause: unknown): number | undefined {
-	return typeof cause === "object" && cause !== null && "code" in cause ? Number(cause.code) : undefined;
-}
-
-function sessionActionError(cause: unknown, action: "rename" | "delete"): Error {
-	const code = rpcErrorCode(cause);
-	if (code === RPC_ERROR_CODES.SESSION_IN_USE) return new Error("This session is still running or waiting for input.");
-	if (code === RPC_ERROR_CODES.READ_ONLY_SESSION) return new Error("Scheduled sessions are read-only.");
-	if (code === RPC_ERROR_CODES.OPERATION_FAILED) {
-		return new Error(action === "delete" ? "The session could not be moved to Trash." : "The session could not be renamed.");
-	}
-	return cause instanceof Error ? cause : new Error("The session operation could not be completed.");
-}
 
 function queuedTurnActionError(cause: unknown): Error {
 	const code = rpcErrorCode(cause);
@@ -144,17 +89,6 @@ function queuedTurnActionError(cause: unknown): Error {
 
 export function sessionDisplayTitle(session: Pick<SessionSummary, "cwd" | "cwdOrigin" | "name">): string {
 	return session.name || (session.cwdOrigin === "managed" ? "Chat" : session.cwd) || "Metis";
-}
-
-export function shouldResnapshotAfterReady(
-	before: AppStoreSnapshot,
-	next: Awaited<ReturnType<MetisDesktopApi["getServerState"]>>,
-): boolean {
-	return (
-		next.state === "ready" &&
-		before.activeSessionId !== null &&
-		(before.supervisor.state !== "ready" || before.serverEpoch !== next.serverEpoch)
-	);
 }
 
 export function firstInteractionForSession(
@@ -208,15 +142,30 @@ export function App({ api, store }: AppProps) {
 	if (!scheduleStoreRef.current) scheduleStoreRef.current = new ScheduleStore();
 	const scheduleStore = scheduleStoreRef.current;
 	const scheduleState = useScheduleStore(scheduleStore);
-	const [mode, setMode] = useState<AgentMode>("chat");
+	const workspaceEventObserver = useRef<(event: DesktopApiEvent) => void>(() => undefined);
+	const workspaceVisibleSession = useRef<string | null>(null);
+	const workspaceWorkflowRef = useRef<SessionWorkspaceWorkflow | null>(null);
+	if (!workspaceWorkflowRef.current) {
+		workspaceWorkflowRef.current = new SessionWorkspaceWorkflow({
+			api,
+			store,
+			storage: localStorage,
+			getVisibleSessionId: () => workspaceVisibleSession.current,
+			onDesktopEvent: (event) => workspaceEventObserver.current(event),
+		});
+	}
+	const workspaceWorkflow = workspaceWorkflowRef.current;
+	const workspaceState = useSessionWorkspace(workspaceWorkflow);
+	const mode = workspaceState.mode;
+	const newTaskDraft = workspaceState.draft;
+	const bootstrapped = workspaceState.bootstrapped;
+	const draftBusy = workspaceState.draftBusy;
 	const [destination, setDestination] = useState<SidebarDestination>("tasks");
 	const [settingsOpen, setSettingsOpen] = useState(false);
 	const settingsReturnFocusRef = useRef<HTMLElement | null>(null);
 	const [selectedScheduleTaskId, setSelectedScheduleTaskId] = useState<string | null>(null);
-	const [projectPreferences, setProjectPreferences] = useState(() => loadProjectPreferences(localStorage));
-	const [pinnedSessionIds, setPinnedSessionIds] = useState(() => loadSessionPins(localStorage));
-	const [busyProjectKeys, setBusyProjectKeys] = useState<ReadonlySet<string>>(new Set());
-	const [newTaskDraft, setNewTaskDraft] = useState<NewTaskDraft | null>(() => emptyNewTaskDraft("chat"));
+	const projectPreferences = workspaceState.projectPreferences;
+	const pinnedSessionIds = workspaceState.pinnedSessionIds;
 	const [sessionsSidebarOpen, setSessionsSidebarOpen] = useState(true);
 	const [sessionSidebarPreferredWidth, setSessionSidebarPreferredWidth] = useState(loadSessionSidebarPreferredWidth);
 	const [sessionSidebarWidth, setSessionSidebarWidth] = useState(() => clampSessionSidebarWidth(sessionSidebarPreferredWidth));
@@ -225,7 +174,6 @@ export function App({ api, store }: AppProps) {
 	const [toolsSidebarWidth, setToolsSidebarWidth] = useState(393);
 	const [previewRequest, setPreviewRequest] = useState<UniversalPreviewTarget | null>(null);
 	const [planPreviewRequest, setPlanPreviewRequest] = useState<PlanView | null>(null);
-	const [bootstrapped, setBootstrapped] = useState(false);
 	const [theme, setTheme] = useState<AppTheme>(() => loadTheme(localStorage));
 	const [generalPreferences, setGeneralPreferences] = useState(() => loadGeneralPreferences(localStorage));
 	const [reducedMotion, setReducedMotion] = useState(() =>
@@ -238,7 +186,6 @@ export function App({ api, store }: AppProps) {
 		resolveTheme(loadTheme(localStorage), globalThis.matchMedia?.("(prefers-color-scheme: light)") ?? { matches: false }),
 	);
 	const [modelSettings, setModelSettings] = useState<ModelSettingsView | null>(null);
-	const [draftBusy, setDraftBusy] = useState(false);
 	const [loadingOlder, setLoadingOlder] = useState(false);
 	const [skills, setSkills] = useState<readonly SkillSummaryView[]>([]);
 	const [mcpServers, setMcpServers] = useState<readonly McpServerSummaryView[]>([]);
@@ -257,16 +204,11 @@ export function App({ api, store }: AppProps) {
 	} | null>(null);
 	const [contextStatus, setContextStatus] = useState<SessionStatusView | null>(null);
 	const [compactingSession, setCompactingSession] = useState<{ readonly sessionId: string; readonly startedAt: string } | null>(null);
-	const [dirtyToolSessionIds, setDirtyToolSessionIds] = useState<readonly string[]>([]);
-	const [toolCleanupSessionIds, setToolCleanupSessionIds] = useState<readonly string[]>([]);
+	const dirtyToolSessionIds = [...workspaceState.dirtySessionIds];
+	const toolCleanupSessionIds = workspaceState.cleanupSessionIds;
 	const [updateState, setUpdateState] = useState<DesktopUpdateState>({ status: "unavailable" });
-	const openGeneration = useRef(0);
 	const mcpListGeneration = useRef(0);
 	const modelSettingsGeneration = useRef(0);
-	const openingSessionId = useRef<string | null>(null);
-	const resnapshots = useRef(new Map<string, Promise<void>>());
-	const newTaskCreateRequest = useRef<{ key: string; requestId: string } | null>(null);
-	const newTaskTurnRequest = useRef<{ key: string; requestId: string } | null>(null);
 	const updateToolsSidebarWidth = useCallback((width: number, persist = true) => {
 		setToolsSidebarWidth(width);
 		if (persist && state.activeSessionId) {
@@ -349,23 +291,21 @@ export function App({ api, store }: AppProps) {
 	const skillListGeneration = useRef(0);
 	const scheduleSubscriptionGeneration = useRef(0);
 	const scheduleSnapshotRequest = useRef<Promise<void> | null>(null);
-	const projectCreateRequests = useRef(
-		new Map<string, { requestId: string; promise?: Promise<void> }>(),
-	);
-	const projectDeleteRequests = useRef(new Map<string, { requestId: string; revision: string }>());
-	const sessionRenameRequests = useRef(new Map<string, { name: string; requestId: string }>());
-	const sessionDeleteRequests = useRef(new Map<string, string>());
-	const sessionMarkReadRequests = useRef(new Set<string>());
 	const statusGeneration = useRef(0);
 	const contextStatusRef = useRef<SessionStatusView | null>(null);
 	const visibleSessionId = !settingsOpen && destination === "tasks" && newTaskDraft === null ? state.activeSessionId : null;
-	const visibleSessionIdRef = useRef<string | null>(visibleSessionId);
-	visibleSessionIdRef.current = visibleSessionId;
-
+	workspaceVisibleSession.current = visibleSessionId;
 	const reportError = useCallback((cause: unknown) => {
 		setError(cause instanceof Error ? cause.message : "Metis could not complete the request.");
 	}, []);
-	const clearError = useCallback(() => setError(null), []);
+	const clearError = useCallback(() => {
+		setError(null);
+		workspaceWorkflow.dismissFailure();
+	}, [workspaceWorkflow]);
+	useEffect(() => {
+		setError(workspaceState.failure?.reason ?? null);
+	}, [workspaceState.failure]);
+	useEffect(() => setMessage(workspaceState.message), [workspaceState.message]);
 	useEffect(() => {
 		if (notice === null) return;
 		const timer = setTimeout(() => setNotice(null), 4000);
@@ -406,17 +346,14 @@ export function App({ api, store }: AppProps) {
 	const startDesktopUpdate = useCallback(() => {
 		void api.startUpdate().catch(reportError);
 	}, [api, reportError]);
-	const queueToolCleanup = useCallback((sessionIds: readonly string[]) => {
-		if (sessionIds.length === 0) return;
-		setToolCleanupSessionIds((current) => [...new Set([...current, ...sessionIds])]);
-	}, []);
-	const handleDirtySessionIdsChange = useCallback((sessionIds: readonly string[]) => {
-		setDirtyToolSessionIds((current) => current.join("\0") === sessionIds.join("\0") ? current : sessionIds);
-	}, []);
-	const handleToolCleanupHandled = useCallback((sessionIds: readonly string[]) => {
-		const handled = new Set(sessionIds);
-		setToolCleanupSessionIds((current) => current.filter((sessionId) => !handled.has(sessionId)));
-	}, []);
+	const handleDirtySessionIdsChange = useCallback(
+		(sessionIds: readonly string[]) => workspaceWorkflow.reportDirtySessionIds(sessionIds),
+		[workspaceWorkflow],
+	);
+	const handleToolCleanupHandled = useCallback(
+		(sessionIds: readonly string[]) => workspaceWorkflow.acknowledgeCleanup(sessionIds),
+		[workspaceWorkflow],
+	);
 
 	useEffect(() => {
 		void api.setWorkspaceEditState({
@@ -426,108 +363,17 @@ export function App({ api, store }: AppProps) {
 		}).catch(reportError);
 	}, [api, dirtyToolSessionIds.length, i18n.resolvedLanguage, reportError, visibleSessionId]);
 
-	const markSessionRead = useCallback(
-		async (sessionId: string): Promise<void> => {
-			if (sessionMarkReadRequests.current.has(sessionId)) return;
-			if (!store.getSnapshot().sessionsById.get(sessionId)?.unread) return;
-			sessionMarkReadRequests.current.add(sessionId);
-			try {
-				const result = await api.markSessionRead({ sessionId });
-				store.upsertSession(result.session);
-			} catch (cause) {
-				reportError(cause);
-			} finally {
-				sessionMarkReadRequests.current.delete(sessionId);
-			}
-		},
-		[api, reportError, store],
-	);
-
-	const openSession = useCallback(
-		async (sessionId: string) => {
-			const projectionBeforeOpen = store.getSnapshot();
-			const generation = ++openGeneration.current;
-			openingSessionId.current = sessionId;
-			setError(null);
-			store.markResubscribing();
-			try {
-				const snapshot = await api.openSession({ sessionId });
-				if (generation !== openGeneration.current) return snapshot;
-				store.applySnapshot(snapshot);
-				if (snapshot.session.unread) await markSessionRead(sessionId);
-				if (generation !== openGeneration.current) return snapshot;
-				localStorage.setItem(activeSessionKey(snapshot.session.mode), sessionId);
-				setMessage("Session ready");
-				return snapshot;
-			} catch (cause) {
-				if (generation === openGeneration.current) {
-					store.restoreSyncStatusAfterFailedOpen(projectionBeforeOpen);
-					const afterFailure = store.getSnapshot();
-					if (afterFailure.syncStatus === "resnapshot_required" && projectionBeforeOpen.activeSessionId) {
-						try {
-							const recovered = await api.openSession({ sessionId: projectionBeforeOpen.activeSessionId });
-							if (generation === openGeneration.current) store.applySnapshot(recovered);
-						} catch {
-							// Keep resnapshot_required so the next server or session event retries recovery.
-						}
-					}
-					reportError(cause);
-				}
-				throw cause;
-			} finally {
-				if (generation === openGeneration.current) {
-					openingSessionId.current = null;
-				}
-			}
-		},
-		[api, markSessionRead, reportError, store],
-	);
 	const activateBrowserSession = useCallback(
 		(sessionId: string) => {
 			setDestination("tasks");
-			setNewTaskDraft(null);
 			setToolsSidebarOpen(true);
-			const current = store.getSnapshot();
-			const summary = current.sessionsById.get(sessionId);
-			if (summary) setMode(summary.mode);
-			if (current.activeSessionId === sessionId) return;
-			void openSession(sessionId).then(
-				(snapshot) => setMode(snapshot.session.mode),
-				() => undefined,
-			);
-		},
-		[openSession, store],
-	);
-
-	const requestResnapshot = useCallback(
-		(sessionId: string) => {
-			const existing = resnapshots.current.get(sessionId);
-			if (existing) return existing;
-			const pending = openSession(sessionId)
-				.then(() => undefined)
-				.catch(() => undefined)
-				.finally(() => {
-					if (resnapshots.current.get(sessionId) === pending) resnapshots.current.delete(sessionId);
-				});
-			resnapshots.current.set(sessionId, pending);
-			return pending;
-		},
-		[openSession],
-	);
-	const openNotifiedSession = useCallback(
-		async (sessionId: string, targetMode: AgentMode) => {
-			setMode(targetMode);
-			setDestination("tasks");
-			try {
-				await openSession(sessionId);
-				setNewTaskDraft(null);
-				newTaskCreateRequest.current = null;
-				newTaskTurnRequest.current = null;
-			} catch {
-				// openSession already reports the error while preserving the current projection.
+			if (store.getSnapshot().activeSessionId === sessionId) {
+				workspaceWorkflow.cancelNewTask();
+				return;
 			}
+			void workspaceWorkflow.openVisibleSession(sessionId).catch(() => undefined);
 		},
-		[openSession],
+		[store, workspaceWorkflow],
 	);
 	const requestScheduleSnapshot = useCallback(
 		(replace = false): Promise<void> => {
@@ -556,440 +402,77 @@ export function App({ api, store }: AppProps) {
 		[api, reportError, scheduleStore, store],
 	);
 
+	workspaceEventObserver.current = (event) => {
+		if (event.type === "open-session") {
+			setDestination("tasks");
+			return;
+		}
+		if (event.type === "supervisor") {
+			if (event.view.state === "ready") void requestScheduleSnapshot();
+			return;
+		}
+		if (event.type !== "app-server" || "id" in event.envelope) return;
+		scheduleStore.applyBatch(event.envelope.params);
+		if (scheduleStore.getSnapshot().syncStatus === "resnapshot_required") void requestScheduleSnapshot(true);
+	};
+
 	useEffect(() => {
 		let active = true;
 		void api
 			.setScheduleKeepAwake(localStorage.getItem(SCHEDULE_KEEP_AWAKE_KEY) === "true")
 			.catch(reportError);
-		const unsubscribe = api.subscribe((event) => {
-			if (!active) return;
-			if (event.type === "open-session") {
-				void openNotifiedSession(event.sessionId, event.mode);
-				return;
-			}
-			if (event.type === "interaction-cancelled") {
-				store.removeInteraction(event.interactionId);
-				return;
-			}
-			if (event.type === "supervisor") {
-				const before = store.getSnapshot();
-				store.setSupervisor(event.view);
-				if (shouldResnapshotAfterReady(before, event.view)) void requestResnapshot(before.activeSessionId!);
-				if (
-					event.view.state === "ready" &&
-					(before.supervisor.state !== "ready" || before.supervisor.serverEpoch !== event.view.serverEpoch)
-				) {
-					void requestScheduleSnapshot();
-				}
-				return;
-			}
-			const envelope = event.envelope;
-			if ("id" in envelope) {
-				store.addInteraction(envelope.params.interaction);
-				return;
-			}
-			const before = store.getSnapshot();
-			scheduleStore.applyBatch(envelope.params);
-			if (scheduleStore.getSnapshot().syncStatus === "resnapshot_required") void requestScheduleSnapshot(true);
-			const activeSessionBefore = before.activeSessionId ? before.sessionsById.get(before.activeSessionId) : undefined;
-			const deletedInvalidations = envelope.params.events.filter(
-				(candidate): candidate is Extract<DomainEvent, { type: "session/invalidated" }> =>
-					candidate.type === "session/invalidated" && candidate.reason === "deleted",
-			);
-			const deletedProjects = envelope.params.events.filter(
-				(candidate): candidate is Extract<DomainEvent, { type: "project/invalidated" }> =>
-					candidate.type === "project/invalidated" && candidate.reason === "deleted",
-			);
-			const deletedSessionIds = new Set(deletedInvalidations.map((event) => event.sessionId));
-			for (const project of deletedProjects) {
-				for (const session of before.sessionsById.values()) {
-					if (session.mode === project.mode && session.cwd === project.cwd && session.scheduled === undefined) {
-						deletedSessionIds.add(session.sessionId);
-					}
-				}
-			}
-			queueToolCleanup([...deletedSessionIds]);
-			if (before.activeSessionId === null) {
-				for (const updated of envelope.params.events) {
-					if (updated.type === "session/updated") store.upsertSession(updated.session);
-				}
-				for (const deleted of deletedInvalidations) store.removeSession(deleted.sessionId);
-				for (const deleted of deletedProjects) store.removeModeProject(deleted.mode, deleted.cwd);
-				return;
-			}
-			const sessionInvalidations = envelope.params.events.filter(
-				(candidate): candidate is Extract<DomainEvent, { type: "session/invalidated" }> =>
-					candidate.type === "session/invalidated" && candidate.sessionId === before.activeSessionId,
-			);
-			const invalidation =
-				sessionInvalidations.find((candidate) => candidate.reason === "deleted") ?? sessionInvalidations[0];
-			const invalidatedSession =
-				invalidation?.type === "session/invalidated" ? before.sessionsById.get(invalidation.sessionId) : undefined;
-			const projectInvalidations = activeSessionBefore && activeSessionBefore.scheduled === undefined
-				? envelope.params.events.filter(
-						(candidate): candidate is Extract<DomainEvent, { type: "project/invalidated" }> =>
-							candidate.type === "project/invalidated" &&
-							candidate.mode === activeSessionBefore.mode &&
-							candidate.cwd === activeSessionBefore.cwd,
-					)
-				: [];
-			const projectInvalidation =
-				projectInvalidations.find((candidate) => candidate.reason === "deleted") ?? projectInvalidations[0];
-			const applyResult = store.applyBatch(envelope.params);
-			for (const deleted of deletedInvalidations) store.removeSession(deleted.sessionId);
-			for (const deleted of deletedProjects) store.removeModeProject(deleted.mode, deleted.cwd);
-			const visibleUnread = envelope.params.events.find(
-				(candidate): candidate is Extract<DomainEvent, { type: "session/updated" }> =>
-					candidate.type === "session/updated" &&
-					openingSessionId.current === null &&
-					candidate.session.sessionId === visibleSessionIdRef.current &&
-					candidate.session.unread,
-			);
-			if (visibleUnread) void markSessionRead(visibleUnread.session.sessionId);
-			if (
-				(invalidation?.type === "session/invalidated" &&
-					invalidation.reason === "deleted" &&
-					before.activeSessionId === invalidation.sessionId) ||
-				(projectInvalidation?.type === "project/invalidated" && projectInvalidation.reason === "deleted")
-			) {
-				const removedSession = invalidatedSession ?? activeSessionBefore;
-				openGeneration.current += 1;
-				openingSessionId.current = null;
-				if (before.activeSessionId) resnapshots.current.delete(before.activeSessionId);
-				newTaskCreateRequest.current = null;
-				newTaskTurnRequest.current = null;
-				if (removedSession) {
-					try {
-						if (localStorage.getItem(activeSessionKey(removedSession.mode)) === removedSession.sessionId) {
-							localStorage.removeItem(activeSessionKey(removedSession.mode));
-						}
-					} catch (cause) {
-						reportError(cause);
-					}
-					setMode(removedSession.mode);
-					setDestination("tasks");
-					setNewTaskDraft(emptyNewTaskDraft(removedSession.mode));
-				}
-				return;
-			}
-			if (applyResult === "resnapshot_required") {
-				if (openingSessionId.current) return;
-				const sessionId = store.getSnapshot().activeSessionId;
-				if (sessionId) void requestResnapshot(sessionId);
-			}
+		void workspaceWorkflow.start().then(() => {
+			if (active) void requestScheduleSnapshot();
 		});
-
-		void (async () => {
-			try {
-				store.setSupervisor(await api.getServerState());
-				const sessions = await api.listSessions({ limit: 200 });
-				await requestScheduleSnapshot();
-				if (!active) return;
-				store.setSessions(sessions);
-				const rememberedSessionId = localStorage.getItem(activeSessionKey("chat"));
-				if (rememberedSessionId && sessions.sessions.some((session) => session.mode === "chat" && session.sessionId === rememberedSessionId)) {
-					await openSession(rememberedSessionId);
-					if (active) setNewTaskDraft(null);
-				} else {
-					setMessage("Start a new Chat task");
-				}
-			} catch (cause) {
-				if (active) reportError(cause);
-			} finally {
-				if (active) setBootstrapped(true);
-			}
-		})();
 
 		return () => {
 			active = false;
-			openGeneration.current += 1;
+			workspaceWorkflow.dispose();
 			scheduleSubscriptionGeneration.current += 1;
 			void api.unsubscribeSchedule().catch(() => undefined);
-			unsubscribe();
 		};
-	}, [api, markSessionRead, openNotifiedSession, openSession, queueToolCleanup, reportError, requestResnapshot, requestScheduleSnapshot, scheduleStore, store]);
+	}, [api, reportError, requestScheduleSnapshot, workspaceWorkflow]);
 
-	const refreshSessions = async () => {
-		store.setSessions(await api.listSessions({ limit: 200 }));
-	};
-
-	const setProjectBusy = (key: string, value: boolean) => {
-		setBusyProjectKeys((current) => {
-			const next = new Set(current);
-			if (value) next.add(key);
-			else next.delete(key);
-			return next;
-		});
-	};
-	const updateProjectPreferences = (
-		update: (value: ProjectPreferenceMap) => ProjectPreferenceMap,
-	) => {
-		setProjectPreferences((current) => {
-			const next = update(current);
-			try {
-				saveProjectPreferences(localStorage, next);
-			} catch (cause) {
-				reportError(cause);
-			}
-			return next;
-		});
-	};
-	const renameProject = (group: ProjectSessionGroup, alias: string) => {
-		updateProjectPreferences((current) => setProjectAlias(current, group.mode, group.cwd, alias));
-	};
-	const pinProject = (group: ProjectSessionGroup, pinned: boolean) => {
-		updateProjectPreferences((current) => setProjectPinned(current, group.mode, group.cwd, pinned));
-	};
-	const updateSessionPins = (update: (current: ReadonlySet<string>) => ReadonlySet<string>) => {
-		setPinnedSessionIds((current) => {
-			const next = update(current);
-			if (next === current) return current;
-			try {
-				saveSessionPins(localStorage, next);
-			} catch (cause) {
-				reportError(cause);
-			}
-			return next;
-		});
-	};
-	const pinSession = (session: SessionSummary, pinned: boolean) => {
-		updateSessionPins((current) => setSessionPinned(current, session.sessionId, pinned));
-	};
-	const previewProjectDelete = async (group: ProjectSessionGroup) => {
-		try {
-			const outcome = await api.previewProjectDelete({ mode: group.mode, cwd: group.cwd });
-			if (!outcome.ok) throw outcome.error;
-			return outcome.result;
-		} catch (cause) {
-			throw projectActionError(cause);
-		}
-	};
+	const renameProject = (group: ProjectSessionGroup, alias: string) =>
+		workspaceWorkflow.renameProject(group, alias);
+	const pinProject = (group: ProjectSessionGroup, pinned: boolean) =>
+		workspaceWorkflow.pinProject(group, pinned);
+	const pinSession = (session: SessionSummary, pinned: boolean) =>
+		workspaceWorkflow.pinSession(session, pinned);
+	const previewProjectDelete = (group: ProjectSessionGroup) =>
+		workspaceWorkflow.previewProjectDelete(group);
 	const createEmptySessionInProject = async (projectMode: AgentMode, cwd: string): Promise<void> => {
-		const key = projectKey(projectMode, cwd);
-		const existing = projectCreateRequests.current.get(key);
-		if (existing?.promise) return existing.promise;
-		const requestId = existing?.requestId ?? crypto.randomUUID();
-		const promise = (async () => {
-			setProjectBusy(key, true);
-			setError(null);
-			try {
-				const created = await api.createSession({ requestId, mode: projectMode, cwd });
-				setMode(projectMode);
-				setDestination("tasks");
-				await openSession(created.session.sessionId);
-				setNewTaskDraft(null);
-				projectCreateRequests.current.delete(key);
-				try {
-					await refreshSessions();
-				} catch (cause) {
-					reportError(cause);
-				}
-			} catch (cause) {
-				projectCreateRequests.current.set(key, { requestId });
-				reportError(cause);
-				throw cause;
-			} finally {
-				setProjectBusy(key, false);
-			}
-		})();
-		projectCreateRequests.current.set(key, { requestId, promise });
-		return promise;
+		setDestination("tasks");
+		await workspaceWorkflow.createSessionInProject(projectMode, cwd);
 	};
 	const createEmptyProjectSession = (group: ProjectSessionGroup): Promise<void> =>
 		createEmptySessionInProject(group.mode, group.cwd);
-	const deleteProject = async (
-		group: ProjectSessionGroup,
-		preview: ClientResult<"project/deletePreview">,
-	): Promise<void> => {
-		const projectSessionIds = [...store.getSnapshot().sessionsById.values()]
-			.filter((session) => session.mode === group.mode && session.cwd === group.cwd && session.scheduled === undefined)
-			.map((session) => session.sessionId);
-		if (projectSessionIds.some((sessionId) => dirtyToolSessionIds.includes(sessionId))) {
-			const cause = new Error("Save or close unsaved files before deleting this task or project.");
-			reportError(cause);
-			throw cause;
-		}
-		const key = projectKey(group.mode, group.cwd);
-		const previousRequest = projectDeleteRequests.current.get(key);
-		const requestId = previousRequest?.revision === preview.revision
-			? previousRequest.requestId
-			: crypto.randomUUID();
-		projectDeleteRequests.current.set(key, { requestId, revision: preview.revision });
-		setProjectBusy(key, true);
-		setError(null);
-		try {
-			const outcome = await api.deleteProject({
-				requestId,
-				mode: group.mode,
-				cwd: group.cwd,
-				expectedRevision: preview.revision,
-			});
-			if (!outcome.ok) {
-				projectDeleteRequests.current.delete(key);
-				throw outcome.error;
-			}
-			projectDeleteRequests.current.delete(key);
-			updateSessionPins((current) => {
-				const next = new Set(current);
-				for (const sessionId of projectSessionIds) next.delete(sessionId);
-				return next.size === current.size ? current : next;
-			});
-			queueToolCleanup(projectSessionIds);
-			const before = store.getSnapshot();
-			const active = before.activeSessionId ? before.sessionsById.get(before.activeSessionId) : undefined;
-			const removedActive = active?.mode === group.mode && active.cwd === group.cwd && active.scheduled === undefined;
-			let clearRememberedSession = false;
-			try {
-				const rememberedId = localStorage.getItem(activeSessionKey(group.mode));
-				const remembered = rememberedId ? before.sessionsById.get(rememberedId) : undefined;
-				clearRememberedSession =
-					remembered?.mode === group.mode &&
-					remembered.cwd === group.cwd &&
-					remembered.scheduled === undefined;
-			} catch (cause) {
-				reportError(cause);
-			}
-			if (removedActive) openGeneration.current += 1;
-			store.removeModeProject(group.mode, group.cwd);
-			if (clearRememberedSession) {
-				try {
-					localStorage.removeItem(activeSessionKey(group.mode));
-				} catch (cause) {
-					reportError(cause);
-				}
-			}
-			updateProjectPreferences((current) => removeProjectPreference(current, group.mode, group.cwd));
-			if (removedActive) {
-				setMode(group.mode);
-				setDestination("tasks");
-				setNewTaskDraft(emptyNewTaskDraft(group.mode));
-			}
-			try {
-				await refreshSessions();
-			} catch (cause) {
-				reportError(cause);
-			}
-		} catch (cause) {
-			const error = projectActionError(cause);
-			reportError(error);
-			throw error;
-		} finally {
-			setProjectBusy(key, false);
-		}
-	};
-	const renameSession = async (session: SessionSummary, name: string): Promise<void> => {
-		setError(null);
-		const previous = sessionRenameRequests.current.get(session.sessionId);
-		const requestId = previous?.name === name ? previous.requestId : crypto.randomUUID();
-		sessionRenameRequests.current.set(session.sessionId, { name, requestId });
-		try {
-			await api.renameSession({ sessionId: session.sessionId, requestId, name });
-			sessionRenameRequests.current.delete(session.sessionId);
-			await refreshSessions();
-		} catch (cause) {
-			const error = sessionActionError(cause, "rename");
-			reportError(error);
-			throw error;
-		}
-	};
-	const deleteSession = async (session: SessionSummary): Promise<void> => {
-		if (dirtyToolSessionIds.includes(session.sessionId)) {
-			const cause = new Error("Save or close unsaved files before deleting this task or project.");
-			reportError(cause);
-			throw cause;
-		}
-		setError(null);
-		const removedActive = store.getSnapshot().activeSessionId === session.sessionId;
-		const requestId = sessionDeleteRequests.current.get(session.sessionId) ?? crypto.randomUUID();
-		sessionDeleteRequests.current.set(session.sessionId, requestId);
-		try {
-			const deleted = await api.deleteSession({ sessionId: session.sessionId, requestId });
-			sessionDeleteRequests.current.delete(session.sessionId);
-			pinSession(session, false);
-			queueToolCleanup([session.sessionId]);
-			if (removedActive) {
-				openGeneration.current += 1;
-				openingSessionId.current = null;
-				resnapshots.current.delete(session.sessionId);
-			}
-			store.removeSession(session.sessionId);
-			try {
-				if (localStorage.getItem(activeSessionKey(session.mode)) === session.sessionId) {
-					localStorage.removeItem(activeSessionKey(session.mode));
-				}
-			} catch (cause) {
-				reportError(cause);
-			}
-			if (removedActive) {
-				setMode(session.mode);
-				setDestination("tasks");
-				setNewTaskDraft(emptyNewTaskDraft(session.mode));
-				newTaskCreateRequest.current = null;
-				newTaskTurnRequest.current = null;
-			}
-			if (deleted.warning) setError(deleted.warning);
-			try {
-				await refreshSessions();
-			} catch (cause) {
-				reportError(cause);
-			}
-		} catch (cause) {
-			if (removedActive && rpcErrorCode(cause) === RPC_ERROR_CODES.OPERATION_FAILED) {
-				await requestResnapshot(session.sessionId);
-			}
-			const error = sessionActionError(cause, "delete");
-			reportError(error);
-			throw error;
-		}
-	};
+	const deleteProject = (group: ProjectSessionGroup, preview: Parameters<SessionWorkspaceWorkflow["deleteProject"]>[1]) =>
+		workspaceWorkflow.deleteProject(group, preview);
+	const renameSession = (session: SessionSummary, name: string) => workspaceWorkflow.renameSession(session, name);
+	const deleteSession = (session: SessionSummary) => workspaceWorkflow.deleteSession(session);
 
 	const openVisibleSession = async (sessionId: string) => {
 		setDestination("tasks");
 		try {
-			await openSession(sessionId);
-			setNewTaskDraft(null);
-			newTaskCreateRequest.current = null;
-			newTaskTurnRequest.current = null;
+			await workspaceWorkflow.openVisibleSession(sessionId);
 		} catch {
-			// openSession already reports the error while preserving the current projection.
+			// The workflow reports the error while preserving the current projection.
 		}
 	};
 	const forkFromReply = async (entryId: string) => {
-		const sessionId = state.activeSessionId;
-		if (!sessionId) return;
 		try {
-			const result = await api.forkSession({
-				sessionId,
-				requestId: crypto.randomUUID(),
-				entryId,
-			});
-			setMessage(t("Forked conversation"));
-			await refreshSessions();
-			await openVisibleSession(result.session.sessionId);
+			await workspaceWorkflow.forkSession(entryId);
 		} catch (cause) {
 			reportError(cause);
 		}
 	};
 	const openScheduledSession = (sessionId: string) => {
-		setMode("chat");
 		setDestination("tasks");
 		void openVisibleSession(sessionId);
 	};
 
-	const chooseNewTaskFolder = async () => {
-		setDraftBusy(true);
-		setError(null);
-		try {
-			const folder = await api.selectProjectFolder();
-			if (folder) {
-				setNewTaskDraft((draft) => draft?.mode === mode ? { ...draft, folder } : draft);
-			}
-		} catch (cause) {
-			reportError(cause);
-		} finally {
-			setDraftBusy(false);
-		}
-	};
+	const chooseNewTaskFolder = () => workspaceWorkflow.chooseDraftFolder().catch(() => undefined);
 	const chooseCodeProjectFolder = () => api.selectProjectFolder();
 	const createCodeProjectFolder = (input: Parameters<MetisDesktopApi["createProjectFolder"]>[0]) =>
 		api.createProjectFolder(input);
@@ -997,126 +480,51 @@ export function App({ api, store }: AppProps) {
 	const startNewTask = () => {
 		setDestination("tasks");
 		setError(null);
-		setNewTaskDraft(emptyNewTaskDraft(mode));
-		newTaskCreateRequest.current = null;
-		newTaskTurnRequest.current = null;
+		workspaceWorkflow.startNewTask();
 	};
 	const cancelNewTask = () => {
 		setError(null);
-		setNewTaskDraft(null);
-		newTaskCreateRequest.current = null;
-		newTaskTurnRequest.current = null;
+		workspaceWorkflow.cancelNewTask();
 	};
 
 	const changeMode = (nextMode: AgentMode) => {
 		if (nextMode === mode) return;
-		setMode(nextMode);
 		setDestination("tasks");
 		setError(null);
-		const rememberedSessionId = localStorage.getItem(activeSessionKey(nextMode));
-		const rememberedSession = rememberedSessionId ? state.sessionsById.get(rememberedSessionId) : undefined;
-		if (!rememberedSession || rememberedSession.mode !== nextMode) {
-			setNewTaskDraft(emptyNewTaskDraft(nextMode));
-			newTaskCreateRequest.current = null;
-			newTaskTurnRequest.current = null;
-			return;
-		}
-		void openSession(rememberedSession.sessionId)
-			.then(() => {
-				setNewTaskDraft(null);
-				newTaskCreateRequest.current = null;
-				newTaskTurnRequest.current = null;
-			})
-			.catch(() => {
-				setNewTaskDraft(emptyNewTaskDraft(nextMode));
-				newTaskCreateRequest.current = null;
-				newTaskTurnRequest.current = null;
-			});
+		void workspaceWorkflow.selectMode(nextMode);
 	};
 
 	const visibleNewTaskDraft = destination === "tasks" && newTaskDraft?.mode === mode ? newTaskDraft : null;
 
-	const submitNewTask = async (draft: NewTaskDraft, input: ComposerSubmission, sessionName?: string) => {
-		if (draft.mode === "code" && !draft.folder) return;
-		setDraftBusy(true);
-		setError(null);
-		try {
-			let sessionId = draft.sessionId;
-			if (!sessionId) {
-				const createKey = JSON.stringify({
-					mode: draft.mode,
-					cwd: draft.folder,
-					name: sessionName ?? null,
-					permissionMode: draft.permissionMode,
-				});
-				const createRequest = newTaskCreateRequest.current?.key === createKey
-					? newTaskCreateRequest.current
-					: { key: createKey, requestId: crypto.randomUUID() };
-				newTaskCreateRequest.current = createRequest;
-				const created = await api.createSession({
-					requestId: createRequest.requestId,
-					mode: draft.mode,
-					...(draft.folder ? { cwd: draft.folder } : {}),
-					...(sessionName ? { name: sessionName } : {}),
-					permissionMode: draft.permissionMode,
-				});
-				sessionId = created.session.sessionId;
-				setNewTaskDraft((current) => current?.mode === draft.mode ? { ...current, sessionId } : current);
-				newTaskCreateRequest.current = null;
-			}
-			await refreshSessions();
-			await openSession(sessionId);
-			const turnKey = JSON.stringify({ sessionId, input: composerRequestKey(input) });
-			const turnRequest = newTaskTurnRequest.current?.key === turnKey
-				? newTaskTurnRequest.current
-				: { key: turnKey, requestId: crypto.randomUUID() };
-			newTaskTurnRequest.current = turnRequest;
-			await api.startTurn({ sessionId, requestId: turnRequest.requestId, ...composerPayload(input) });
-			setNewTaskDraft(null);
-			newTaskCreateRequest.current = null;
-			newTaskTurnRequest.current = null;
-		} catch (cause) {
-			reportError(cause);
-			throw cause;
-		} finally {
-			setDraftBusy(false);
-		}
-	};
-
 	const submitNewTaskDraft = async (input: ComposerSubmission) => {
 		if (!visibleNewTaskDraft) return;
-		await submitNewTask(visibleNewTaskDraft, input);
+		await workspaceWorkflow.submitNewTask(input);
 	};
 
 	const createScheduleWithMetis = async (cwd: string | null) => {
-		const draft = { ...emptyNewTaskDraft("chat"), folder: cwd };
-		setMode("chat");
 		setDestination("tasks");
-		setNewTaskDraft(draft);
-		newTaskCreateRequest.current = null;
-		newTaskTurnRequest.current = null;
-		await submitNewTask(
-			draft,
+		workspaceWorkflow.startNewTask("chat");
+		workspaceWorkflow.setDraftFolder(cwd);
+		await workspaceWorkflow.submitNewTask(
 			{ text: ASSISTED_SCHEDULE_PROMPT, attachments: [] },
 			t("Set up a scheduled task"),
 		);
 	};
 
 	const createSkillWithMetis = async (target: SkillCreationTarget) => {
-		const draft = { ...emptyNewTaskDraft("chat"), folder: target.cwd };
 		const prompt = target.source === "project"
 			? `I want to create a project-level Skill in ${target.cwd}. Use the create-skill Skill and ask me for the information you need before creating it.`
 			: "I want to create a user-level Skill. Use the create-skill Skill and ask me for the information you need before creating it.";
-		setMode("chat");
 		setDestination("tasks");
-		setNewTaskDraft(draft);
-		newTaskCreateRequest.current = null;
-		newTaskTurnRequest.current = null;
-		await submitNewTask(draft, { text: prompt, attachments: [] });
+		workspaceWorkflow.startNewTask("chat");
+		workspaceWorkflow.setDraftFolder(target.cwd);
+		await workspaceWorkflow.submitNewTask({ text: prompt, attachments: [] });
 	};
 
 	const activeSession = state.activeSessionId ? state.sessionsById.get(state.activeSessionId) : undefined;
-	const openingSession = openingSessionId.current ? state.sessionsById.get(openingSessionId.current) : undefined;
+	const openingSession = workspaceState.openingSessionId
+		? state.sessionsById.get(workspaceState.openingSessionId)
+		: undefined;
 	const newTaskOpen = visibleNewTaskDraft !== null;
 	const visibleActiveSession = destination === "tasks" && activeSession && (activeSession.mode === mode || openingSession?.mode === mode) && !newTaskOpen
 		? activeSession
@@ -1339,7 +747,7 @@ export function App({ api, store }: AppProps) {
 		try {
 			await api.setThinkingSelection({ sessionId, requestId: crypto.randomUUID(), selection });
 		} catch (cause) {
-			if (store.getSnapshot().activeSessionId === sessionId) await requestResnapshot(sessionId);
+			if (store.getSnapshot().activeSessionId === sessionId) await workspaceWorkflow.resnapshotSession(sessionId);
 			reportError(cause);
 		}
 	};
@@ -1411,7 +819,7 @@ export function App({ api, store }: AppProps) {
 		try {
 			await api.setPermissionMode({ sessionId, requestId: crypto.randomUUID(), permissionMode });
 		} catch (cause) {
-			if (store.getSnapshot().activeSessionId === sessionId) await requestResnapshot(sessionId);
+			if (store.getSnapshot().activeSessionId === sessionId) await workspaceWorkflow.resnapshotSession(sessionId);
 			reportError(cause);
 			throw cause;
 		}
@@ -1665,7 +1073,7 @@ export function App({ api, store }: AppProps) {
 	const permissionSessionOpen = permissionSessionId === undefined || state.activeSessionId === permissionSessionId;
 	const permissionSessionRunning = permissionSession?.state === "running" ||
 		(permissionSessionId !== undefined && state.activeSessionId === permissionSessionId && state.activeTurnId !== null);
-	const draftCreatePending = visibleNewTaskDraft?.sessionId === null && newTaskCreateRequest.current !== null;
+	const draftCreatePending = workspaceState.draftCreatePending;
 	const permissionControl = visibleNewTaskDraft ? (
 		<PermissionSelector
 			disabled={
@@ -1678,7 +1086,7 @@ export function App({ api, store }: AppProps) {
 			}
 			onChange={(permissionMode) => permissionSessionId
 				? changePermissionMode(permissionSessionId, permissionMode)
-				: setNewTaskDraft((draft) => draft?.mode === mode ? { ...draft, permissionMode } : draft)}
+				: workspaceWorkflow.setDraftPermission(permissionMode)}
 			value={permissionSessionId && permissionSessionOpen ? state.permissionMode : visibleNewTaskDraft.permissionMode}
 		/>
 	) : visibleActiveSession ? (
@@ -1764,23 +1172,9 @@ export function App({ api, store }: AppProps) {
 			style={{ "--sidebar-width": `${sessionSidebarWidth}px` } as CSSProperties}
 		>
 			{sessionsSidebarOpen && <SessionSidebar
-				busy={!bootstrapped || draftBusy || !serverReady}
 				destination={destination}
-				mode={mode}
-				newTaskOpen={newTaskOpen}
-				onCreateProjectSession={createEmptyProjectSession}
-				onDeleteProject={deleteProject}
 				platform={api.platform}
 				onDeleteSchedule={deleteScheduledTask}
-				onDeleteSession={deleteSession}
-				onModeChange={changeMode}
-				onNewTask={startNewTask}
-				onOpen={openVisibleSession}
-				onPinSession={pinSession}
-				onPinProject={pinProject}
-				onPreviewProjectDelete={previewProjectDelete}
-				onRenameProject={renameProject}
-					onRenameSession={renameSession}
 					onSettings={openSettings}
 					onUpdate={startDesktopUpdate}
 					onSkills={() => { setPluginSection("skills"); setDestination("skills"); }}
@@ -1788,14 +1182,30 @@ export function App({ api, store }: AppProps) {
 					onOpenSchedule={(taskId) => { setDestination("schedules"); setSelectedScheduleTaskId(taskId); }}
 				onToggle={() => setSessionsSidebarOpen(false)}
 				onWidthChange={updateSessionSidebarWidth}
-				preferences={projectPreferences}
-				pinnedSessionIds={pinnedSessionIds}
-					projectBusy={(group) => busyProjectKeys.has(projectKey(group.mode, group.cwd))}
 					scheduleTasks={scheduleState.taskOrder.map((id) => scheduleState.tasksById.get(id)).filter((task): task is ScheduleTaskView => task !== undefined)}
 					selectedScheduleTaskId={selectedScheduleTaskId}
 					state={state}
 					updateState={updateState}
 				width={sessionSidebarWidth}
+				workspace={{
+					busy: !bootstrapped || draftBusy || !serverReady,
+					mode,
+					newTaskOpen,
+					onCreateProjectSession: createEmptyProjectSession,
+					onDeleteProject: deleteProject,
+					onDeleteSession: deleteSession,
+					onModeChange: changeMode,
+					onNewTask: startNewTask,
+					onOpen: openVisibleSession,
+					onPinProject: pinProject,
+					onPinSession: pinSession,
+					onPreviewProjectDelete: previewProjectDelete,
+					onRenameProject: renameProject,
+					onRenameSession: renameSession,
+					pinnedSessionIds,
+					preferences: projectPreferences,
+					projectBusy: (group) => workspaceState.busyProjectKeys.has(sessionProjectKey(group.mode, group.cwd)),
+				}}
 			/>}
 			<main
 				className={`workspace${toolsSidebarAvailable && toolsSidebarOpen ? " tools-sidebar-open" : ""}`}

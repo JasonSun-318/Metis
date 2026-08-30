@@ -1,11 +1,12 @@
 import type { Transport } from "@metis/ai";
 import { randomUUID } from "crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, readFileSync } from "fs";
 import { dirname, join } from "path";
 import lockfile from "proper-lockfile";
 import { isDeepStrictEqual } from "util";
 import { getAgentDir, getMetisEnv, getProjectConfigDir } from "../config.ts";
 import { normalizePath, resolvePath } from "../utils/paths.ts";
+import { replaceFileAtomicallySync } from "./durable-file.ts";
 import { DEFAULT_HTTP_IDLE_TIMEOUT_MS, parseHttpIdleTimeoutMs } from "./http-dispatcher.ts";
 import {
 	type EmbeddingSettings,
@@ -247,6 +248,22 @@ export interface SettingsError {
 	error: Error;
 }
 
+function replaceSettingsFileUnderLock(path: string, next: string): void {
+	try {
+		replaceFileAtomicallySync(path, next);
+	} catch (error) {
+		try {
+			if (existsSync(path) && readFileSync(path, "utf-8") === next) return;
+		} catch (reconciliationError) {
+			throw new AggregateError(
+				[error, reconciliationError],
+				"Settings write failed and its published state could not be reconciled",
+			);
+		}
+		throw error;
+	}
+}
+
 export class FileSettingsStorage implements SettingsStorage {
 	private globalSettingsPath: string;
 	private projectSettingsPath: string;
@@ -306,7 +323,7 @@ export class FileSettingsStorage implements SettingsStorage {
 				if (!release) {
 					release = this.acquireLockSyncWithRetry(path);
 				}
-				writeFileSync(path, next, "utf-8");
+				replaceSettingsFileUnderLock(path, next);
 			}
 		} finally {
 			if (release) {
@@ -324,7 +341,7 @@ export class FileSettingsStorage implements SettingsStorage {
 		try {
 			const current = existsSync(path) ? readFileSync(path, "utf-8") : undefined;
 			const next = fn(current);
-			if (next !== undefined) writeFileSync(path, next, "utf-8");
+			if (next !== undefined) replaceSettingsFileUnderLock(path, next);
 		} finally {
 			release();
 		}
@@ -623,27 +640,55 @@ export class SettingsManager {
 		await this.flushOrThrow();
 		let committed = false;
 		const withWriteLock = this.storage.withWriteLock?.bind(this.storage) ?? this.storage.withLock.bind(this.storage);
-		withWriteLock(scope, (current) => {
-			const fileSettings = current
-				? SettingsManager.migrateSettings(JSON.parse(current) as Record<string, unknown>)
-				: {};
-			const servers = fileSettings.mcpServers ?? {};
-			for (const [name, definition] of expected) {
-				if (!isDeepStrictEqual(servers[name], definition)) return undefined;
-			}
+		try {
+			withWriteLock(scope, (current) => {
+				const fileSettings = current
+					? SettingsManager.migrateSettings(JSON.parse(current) as Record<string, unknown>)
+					: {};
+				const servers = fileSettings.mcpServers ?? {};
+				for (const [name, definition] of expected) {
+					if (!isDeepStrictEqual(servers[name], definition)) return undefined;
+				}
 
-			const nextServers = { ...servers };
-			for (const [name, definition] of changes) {
-				if (definition) nextServers[name] = structuredClone(definition);
-				else delete nextServers[name];
+				const nextServers = { ...servers };
+				for (const [name, definition] of changes) {
+					if (definition) nextServers[name] = structuredClone(definition);
+					else delete nextServers[name];
+				}
+				fileSettings.mcpServers = nextServers;
+				const serialized = JSON.stringify(fileSettings, null, 2);
+				committed = true;
+				return serialized;
+			});
+		} catch (error) {
+			if (!committed) throw error;
+			let published = false;
+			try {
+				withWriteLock(scope, (current) => {
+					const fileSettings = current
+						? SettingsManager.migrateSettings(JSON.parse(current) as Record<string, unknown>)
+						: {};
+					const servers = fileSettings.mcpServers ?? {};
+					published = [...changes].every(([name, definition]) => isDeepStrictEqual(servers[name], definition));
+					return undefined;
+				});
+			} catch (reconciliationError) {
+				throw new AggregateError(
+					[error, reconciliationError],
+					"MCP settings commit failed and its published state could not be reconciled",
+				);
 			}
-			fileSettings.mcpServers = nextServers;
-			committed = true;
-			return JSON.stringify(fileSettings, null, 2);
-		});
+			if (!published) throw error;
+		}
 
 		await this.reload();
+		const loadError = this.getLoadError(scope);
+		if (loadError) throw loadError;
 		return committed;
+	}
+
+	getLoadError(scope: SettingsScope): Error | null {
+		return scope === "global" ? this.globalSettingsLoadError : this.projectSettingsLoadError;
 	}
 
 	setMcpServer(scope: SettingsScope, name: string, server: McpServerSettings): void {

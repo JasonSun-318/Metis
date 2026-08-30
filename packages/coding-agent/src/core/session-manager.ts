@@ -3810,9 +3810,17 @@ export class SessionManager {
 	}
 
 	/** Create an independent candidate containing the path from root to the selected leaf. */
-	createBranchedSessionManager(leafId: string | null): SessionManager {
+	createBranchedSessionManager(
+		leafId: string | null,
+		options?: Pick<NewSessionOptions, "id"> & {
+			readonly initialName?: string;
+			readonly initialCustomEntries?: readonly { readonly customType: string; readonly data?: unknown }[];
+			readonly managedWorkspaceRecoveryKey?: string;
+		},
+	): SessionManager {
 		this._assertOpen();
 		if (this.getHeader()?.scheduled) throw new Error("Scheduled sessions are read-only and cannot be branched");
+		if (options?.id !== undefined) assertValidSessionId(options.id);
 		let sourceStoragePath: string | undefined;
 		let path: SessionEntry[];
 		if (this.persist) {
@@ -3853,7 +3861,7 @@ export class SessionManager {
 			pathParentId = entry.id;
 		}
 
-		const sessionId = createSessionId();
+		const sessionId = options?.id ?? createSessionId();
 		const timestamp = new Date().toISOString();
 		const header: SessionHeader = {
 			type: "session",
@@ -3887,7 +3895,35 @@ export class SessionManager {
 
 		const createManager = (targetCwd: string, targetSessionDir: string): SessionManager => {
 			header.cwd = targetCwd;
-			const records: FileEntry[] = [header, ...pathWithoutLabels, ...labelEntries];
+			const initialEntries: SessionEntry[] = [];
+			let initialParentId =
+				labelEntries[labelEntries.length - 1]?.id ?? pathWithoutLabels[pathWithoutLabels.length - 1]?.id ?? null;
+			if (options?.initialName !== undefined) {
+				const entry: SessionInfoEntry = {
+					type: "session_info",
+					id: generateId(pathEntryIds),
+					parentId: initialParentId,
+					timestamp,
+					name: options.initialName.replace(/[\r\n]+/g, " ").trim(),
+				};
+				pathEntryIds.add(entry.id);
+				initialEntries.push(entry);
+				initialParentId = entry.id;
+			}
+			for (const custom of options?.initialCustomEntries ?? []) {
+				const entry: CustomEntry = {
+					type: "custom",
+					id: generateId(pathEntryIds),
+					parentId: initialParentId,
+					timestamp,
+					customType: custom.customType,
+					data: custom.data,
+				};
+				pathEntryIds.add(entry.id);
+				initialEntries.push(entry);
+				initialParentId = entry.id;
+			}
+			const records: FileEntry[] = [header, ...pathWithoutLabels, ...labelEntries, ...initialEntries];
 			let state: ManagedSessionState;
 			if (this.persist) {
 				const sessionFile = join(targetSessionDir, `${timestamp.replace(/[:.]/g, "-")}_${sessionId}.jsonl`);
@@ -3915,6 +3951,7 @@ export class SessionManager {
 				sourceCwd: this.cwd,
 				targetId: sessionId,
 				agentDir,
+				recoveryKey: options?.managedWorkspaceRecoveryKey,
 				publish: (targetCwd) => {
 					const defaultSessionDir =
 						canonicalPath(this.sessionDir) === canonicalPath(getDefaultSessionDirPath(this.cwd, agentDir));
@@ -4248,13 +4285,24 @@ export class SessionManager {
 				return `Trash did not remove ${remaining.length} target(s)${detail ? `: ${detail}` : ""}`;
 			};
 			const assetPaths = ownedTargets.filter(({ path }) => exists(path)).map(({ path }) => path);
-			const assetError = moveToTrash(assetPaths);
-			if (assetError) return { ok: false, method: "trash", code: "OPERATION_FAILED", error: assetError };
+			for (const path of assetPaths) lstatSync(path);
 			const journalError = moveToTrash([storagePath]);
 			if (journalError) return { ok: false, method: "trash", code: "OPERATION_FAILED", error: journalError };
-			return { ok: true, method: "trash" };
+			const assetError = moveToTrash(assetPaths);
+			return assetError
+				? {
+						ok: true,
+						method: "trash",
+						warning: `Session deleted, but owned asset cleanup is incomplete: ${assetError}`,
+					}
+				: { ok: true, method: "trash" };
 		} catch (error) {
-			return { ok: false, method: "unlink", error: error instanceof Error ? error.message : String(error) };
+			return {
+				ok: false,
+				method: "trash",
+				code: "OPERATION_FAILED",
+				error: error instanceof Error ? error.message : String(error),
+			};
 		} finally {
 			lease.close();
 		}

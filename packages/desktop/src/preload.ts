@@ -1,6 +1,6 @@
 import type { ClientParams, ClientRequestMethod, InteractionResponseInput } from "@metis/app-protocol";
 import { contextBridge, type IpcRendererEvent, ipcRenderer, webUtils } from "electron";
-import { createDesktopRpcForwarders } from "./shared/app-server-rpc-forwarding.ts";
+import { createDesktopRpcForwarders, unwrapDesktopRpcIpcResult } from "./shared/app-server-rpc-forwarding.ts";
 import {
 	DESKTOP_BROWSER_EVENT_CHANNEL,
 	DESKTOP_EVENT_CHANNEL,
@@ -50,7 +50,7 @@ import {
 	validateWriteWorkspaceFileInput,
 } from "./shared/desktop-api.ts";
 
-function invoke<Method extends Exclude<ClientRequestMethod, "initialize">>(
+function invokeRaw<Method extends Exclude<ClientRequestMethod, "initialize">>(
 	channel: string,
 	method: Method,
 	input: unknown,
@@ -58,8 +58,16 @@ function invoke<Method extends Exclude<ClientRequestMethod, "initialize">>(
 	return ipcRenderer.invoke(channel, validateDesktopClientParams(method, input));
 }
 
+async function invoke<Method extends Exclude<ClientRequestMethod, "initialize">>(
+	channel: string,
+	method: Method,
+	input: unknown,
+): Promise<unknown> {
+	return unwrapDesktopRpcIpcResult(await invokeRaw(channel, method, input));
+}
+
 const rpcForwarders = createDesktopRpcForwarders((definition, input) =>
-	invoke(definition.channel, definition.method, input),
+	invokeRaw(definition.channel, definition.method, input),
 );
 
 const api = {
@@ -81,11 +89,11 @@ const api = {
 		await ipcRenderer.invoke(DESKTOP_IPC_CHANNELS.setScheduleKeepAwake, enabled);
 	},
 	previewProjectDelete: (input: ClientParams<"project/deletePreview">) =>
-		invoke(DESKTOP_IPC_CHANNELS.previewProjectDelete, "project/deletePreview", input) as ReturnType<
+		invokeRaw(DESKTOP_IPC_CHANNELS.previewProjectDelete, "project/deletePreview", input) as ReturnType<
 			MetisDesktopApi["previewProjectDelete"]
 		>,
 	deleteProject: (input: ClientParams<"project/delete">) =>
-		invoke(DESKTOP_IPC_CHANNELS.deleteProject, "project/delete", input) as ReturnType<
+		invokeRaw(DESKTOP_IPC_CHANNELS.deleteProject, "project/delete", input) as ReturnType<
 			MetisDesktopApi["deleteProject"]
 		>,
 	deleteSession: (input: ClientParams<"session/delete">) =>

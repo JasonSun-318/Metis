@@ -1,12 +1,8 @@
 import type { CollaborationModeView, ItemContentBlockView, ItemView, PlanView } from "@metis/app-protocol";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
-
-interface ConversationSubmission {
-	readonly text: string;
-	readonly attachments: readonly { readonly path: string; readonly name: string }[];
-	readonly skill?: { readonly name: string };
-}
+import { type ConversationSubmission, composerPayload, composerRequestKey } from "../composer-submission.ts";
+import { shouldReuseMutationRequest } from "../rpc-error.ts";
 
 interface ConversationPlanFlowOptions {
 	readonly api: Pick<
@@ -41,27 +37,6 @@ export interface ConversationPlanFlow {
 	readonly clearPlanRevision: () => void;
 	readonly startPlan: (plan: PlanView) => Promise<void>;
 	readonly cancelPlan: (plan: PlanView) => Promise<void>;
-}
-
-function composerText(input: ConversationSubmission): string {
-	return input.skill ? `/skill:${input.skill.name}${input.text ? ` ${input.text}` : ""}` : input.text;
-}
-
-export function composerPayload(input: ConversationSubmission) {
-	return {
-		text: composerText(input),
-		...(input.attachments.length > 0
-			? { attachments: input.attachments.map(({ path, name }) => ({ path, name })) }
-			: {}),
-	};
-}
-
-export function composerRequestKey(input: ConversationSubmission): string {
-	return JSON.stringify({
-		text: input.text,
-		attachments: input.attachments.map(({ path, name }) => ({ path, name })),
-		skill: input.skill?.name ?? null,
-	});
 }
 
 function planFromItem(item: ItemView): PlanView | undefined {
@@ -162,17 +137,17 @@ export function useConversationPlanFlow({
 		async (input: ConversationSubmission) => {
 			if (!sessionId || pendingCollaborationMode !== null) return;
 			clearError();
+			const key = JSON.stringify({ sessionId, input: composerRequestKey(input) });
+			const request =
+				activeTurnRequest.current?.key === key
+					? activeTurnRequest.current
+					: {
+							key,
+							method: running || queuedTurnCount > 0 ? ("queue" as const) : ("start" as const),
+							requestId: crypto.randomUUID(),
+						};
+			activeTurnRequest.current = request;
 			try {
-				const key = JSON.stringify({ sessionId, input: composerRequestKey(input) });
-				const request =
-					activeTurnRequest.current?.key === key
-						? activeTurnRequest.current
-						: {
-								key,
-								method: running || queuedTurnCount > 0 ? ("queue" as const) : ("start" as const),
-								requestId: crypto.randomUUID(),
-							};
-				activeTurnRequest.current = request;
 				if (request.method === "queue") {
 					await api.queueTurn({ sessionId, requestId: request.requestId, ...composerPayload(input) });
 				} else {
@@ -181,6 +156,9 @@ export function useConversationPlanFlow({
 				activeTurnRequest.current = null;
 				setPlanRevisionTarget(null);
 			} catch (cause) {
+				if (!shouldReuseMutationRequest(cause) && activeTurnRequest.current === request) {
+					activeTurnRequest.current = null;
+				}
 				reportError(cause);
 				throw cause;
 			}
