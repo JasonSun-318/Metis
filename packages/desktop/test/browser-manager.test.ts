@@ -442,6 +442,7 @@ describe("BrowserManager", () => {
 		const popup = harness.windowOpen("https://accounts.example.test/oauth");
 		expect(popup).toMatchObject({ action: "allow", createWindow: expect.any(Function) });
 		expect(popup?.createWindow?.({ webPreferences: { openerId: 42 } } as never)).toBe(harness.webContents);
+		expect(harness.popupWindow.on).toHaveBeenCalledWith("close", expect.any(Function));
 		expect(harness.popupWindow.on).toHaveBeenCalledWith("closed", expect.any(Function));
 		expect(harness.createdPreferences()).toMatchObject({ openerId: 42 });
 		const listed = await harness.manager.executeTool(
@@ -948,6 +949,58 @@ describe("BrowserManager", () => {
 		});
 		expect(events).toContainEqual({ type: "closed", sessionId: SESSION_ID, browserId });
 		expect(events).not.toContainEqual({ type: "error", browserId, message: "Browser page crashed" });
+	});
+
+	it("defers popup destruction until a self-closing action leaves the native callback", async () => {
+		const harness = browserHarness();
+		const openerId = "10000000-0000-4000-8000-000000000068";
+		harness.manager.create({ sessionId: SESSION_ID, browserId: openerId, profileId: DEFAULT_BROWSER_PROFILE_ID });
+		const popup = harness.windowOpen("https://example.test/oauth");
+		popup?.createWindow?.({ webPreferences: {} } as never);
+		const listed = await harness.manager.executeTool(
+			SESSION_ID,
+			{ tool: "browser_tabs", input: { action: "list" } },
+			new AbortController().signal,
+		);
+		if (listed.tool !== "browser_tabs") throw new Error("Expected browser tabs");
+		const popupId = listed.details.tabs.find(({ browserId }) => browserId !== openerId)?.browserId;
+		if (!popupId) throw new Error("Expected adopted popup");
+		const controller = harness.controllers.get(popupId)!;
+		controller.act.mockImplementationOnce(
+			(_input: unknown, signal: AbortSignal) =>
+				new Promise((_resolve, reject) => {
+					const onAbort = () => reject(signal.reason ?? new DOMException("Aborted", "AbortError"));
+					signal.addEventListener("abort", onAbort, { once: true });
+					if (signal.aborted) onAbort();
+				}),
+		);
+		const result = harness.manager.executeTool(
+			SESSION_ID,
+			{
+				tool: "browser_act",
+				input: {
+					browserId: popupId,
+					documentId: "30000000-0000-4000-8000-000000000001",
+					snapshotRevision: 1,
+					origin: "https://example.test",
+					intent: "Authorize and close the popup",
+					risk: "ordinary",
+					action: { type: "click", target: { elementId: "e1" } },
+				},
+			},
+			new AbortController().signal,
+		);
+		await vi.waitFor(() => expect(controller.act).toHaveBeenCalledOnce());
+		const closeListener = harness.popupWindow.on.mock.calls.find(([name]) => name === "close")?.[1];
+		const closeEvent = { preventDefault: vi.fn() };
+		closeListener?.(closeEvent);
+		expect(closeEvent.preventDefault).toHaveBeenCalledOnce();
+		expect(harness.popupWindow.destroy).not.toHaveBeenCalled();
+		await expect(result).resolves.toEqual({
+			tool: "browser_act",
+			details: { status: "cancelled", reason: "tab_closed" },
+		});
+		await vi.waitFor(() => expect(harness.popupWindow.destroy).toHaveBeenCalledOnce());
 	});
 
 	it("waits for the final redirected and history pages before model observation", async () => {

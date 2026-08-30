@@ -1258,6 +1258,14 @@ export class BrowserManager {
 			event.preventDefault();
 			this.emit({ type: "command", browserId, command });
 		};
+		const onPopupClose = (event: Event) => {
+			if (this.records.get(browserId) !== record || record.closingReason) return;
+			event.preventDefault();
+			record.closingReason = "tab_closed";
+			record.activeAbort?.abort();
+			record.controller.close();
+			setImmediate(() => this.closeRecord(record, "tab_closed"));
+		};
 		const onDestroyed = () => {
 			if (this.records.get(browserId) !== record) return;
 			this.records.delete(browserId);
@@ -1291,6 +1299,7 @@ export class BrowserManager {
 		contents.on("found-in-page", onFoundInPage);
 		contents.on("before-input-event", onBeforeInput);
 		contents.on("destroyed", onDestroyed);
+		record.popupWindow?.on("close", onPopupClose);
 		record.popupWindow?.on("closed", onDestroyed);
 		record.cleanup.push(
 			() => contents.off("did-start-loading", onDidStartLoading),
@@ -1306,6 +1315,7 @@ export class BrowserManager {
 			() => contents.off("found-in-page", onFoundInPage),
 			() => contents.off("before-input-event", onBeforeInput),
 			() => contents.off("destroyed", onDestroyed),
+			() => record.popupWindow?.off("close", onPopupClose),
 			() => record.popupWindow?.off("closed", onDestroyed),
 		);
 		contents.setWindowOpenHandler(({ url }) => {
