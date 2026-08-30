@@ -424,6 +424,7 @@ export const SessionDeliveredFileViewSchema = StrictObject({
 	byteLength: Type.Integer({ minimum: 1, maximum: 128 * 1024 * 1024 }),
 	message: Type.Optional(Utf8String(512, { minLength: 1, maxLength: 512 })),
 	deliveredAt: TimestampSchema,
+	availability: Type.Union([Type.Literal("available"), Type.Literal("unavailable")]),
 });
 
 export const ToolResultBlockViewSchema = StrictObject({

@@ -28,13 +28,11 @@ import {
 	type BrowserHostRequest,
 	buildChildSystemPrompt,
 	type CreateAgentSessionRuntimeFactory,
-	copySessionDeliveredFiles,
 	createAgentSessionFromServices,
 	createAgentSessionRuntime,
 	createAgentSessionServices,
 	createAskUserToolDefinition,
 	createBrowserToolDefinitions,
-	createDeliverFileToolDefinition,
 	DefaultResourceLoader,
 	formatSessionAttachments,
 	getLatestCacheHitPercent,
@@ -44,7 +42,6 @@ import {
 	installScheduleHost,
 	isScheduleSessionEligible,
 	loadAgentTypeDefinitions,
-	MAX_SESSION_DELIVERED_FILES,
 	type McpCredentialIdentity,
 	type McpServerSettings,
 	mcpCredentialKey,
@@ -65,6 +62,7 @@ import {
 	resolveMcpServerSettings,
 	SCHEDULE_MAIN_PROMPT,
 	type ScheduleManager,
+	SessionDeliveredArtifacts,
 	SessionManager,
 	SettingsManager,
 	type Skill,
@@ -81,9 +79,7 @@ import {
 import type { InteractionBroker } from "./interactions.ts";
 import {
 	opaqueId,
-	projectAllDeliveredFiles,
 	projectAssistantOutputTokens,
-	projectDeliveredFileFromToolResult,
 	projectGoal,
 	projectLatestTasks,
 	projectLiveMessage as projectLiveItemMessage,
@@ -414,7 +410,6 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 	private readonly mutateMcp: McpMutationRunner;
 	private unread: boolean;
 	private readonly notifiedQueueFailureRevisions = new Set<string>();
-	private deliveredFiles: SessionDeliveredFileView[];
 
 	constructor(
 		runtime: AgentSessionRuntime,
@@ -443,13 +438,13 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 				this.notifiedQueueFailureRevisions.add(turn.revision);
 			}
 		}
-		this.deliveredFiles = projectAllDeliveredFiles(this.session.sessionManager.getBranch());
+		const deliveredFiles = this.deliveredFileViews();
 		this.projection = new SessionProjection({
 			session: this.summaryFromRuntime(journal, reduced),
 			turns,
 			items,
 			tasks: projectLatestTasks(this.session.sessionManager.getBranch()),
-			deliveredFiles: this.deliveredFiles,
+			deliveredFiles,
 			goal: projectGoal(this.session.getGoal()),
 			queuedTurns: queuedTurns.map(queuedTurnView),
 		});
@@ -496,6 +491,8 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 	private async bindExtensionUI(session: AgentSession): Promise<void> {
 		const uiContext = this.interactions?.createExtensionUIContext(this.sessionId, (event) => this.publish(event));
 		if (this.interactions) {
+			const deliveredArtifacts = session.deliveredArtifacts;
+			if (!deliveredArtifacts) throw new Error("Interactive session is missing delivered artifact storage");
 			const browserTools = createBrowserToolDefinitions((request) =>
 				this.interactions!.requestBrowserTool(
 					this.sessionId,
@@ -508,13 +505,7 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 				[
 					createAskUserToolDefinition((request) => this.interactions!.requestUserInput(this.sessionId, request)),
 					...browserTools,
-					createDeliverFileToolDefinition(() => ({
-						cwd: session.sessionManager.getCwd(),
-						agentDir: this.agentDir,
-						sessionId: this.sessionId,
-						additionalDirectories: session.sessionManager.getAdditionalDirectories(),
-						activeDeliveredFileCount: this.deliveredFiles.length,
-					})),
+					deliveredArtifacts.createToolDefinition(),
 				],
 				{
 					automaticPermissionToolNames: ["ask_user", ...BROWSER_TOOL_NAMES, "deliver_file"],
@@ -594,6 +585,14 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 		}
 	}
 
+	private deliveredFileViews(): SessionDeliveredFileView[] {
+		return this.session.deliveredArtifacts?.list() ?? [];
+	}
+
+	private deliveredFileMap(): ReadonlyMap<string, SessionDeliveredFileView> {
+		return new Map(this.deliveredFileViews().map((file) => [file.fileId, file]));
+	}
+
 	private onAgentEvent(event: AgentSessionEvent): void {
 		if (event.type === "message_start") {
 			const assistant = event.message.role === "assistant";
@@ -628,13 +627,15 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 			if (tasks !== undefined) {
 				this.publish({ type: "session/tasksChanged", sessionId: this.sessionId, tasks });
 			}
-			const delivered = projectDeliveredFileFromToolResult(event.message);
-			if (delivered) {
-				this.deliveredFiles = [...this.deliveredFiles, delivered].slice(-MAX_SESSION_DELIVERED_FILES);
+			if (
+				event.message.role === "toolResult" &&
+				event.message.toolName === "deliver_file" &&
+				event.message.isError === false
+			) {
 				this.publish({
 					type: "session/deliveredFilesChanged",
 					sessionId: this.sessionId,
-					deliveredFiles: this.deliveredFiles,
+					deliveredFiles: this.deliveredFileViews(),
 				});
 			}
 			if (event.message.role === "assistant") this.liveAssistantItemId = undefined;
@@ -765,6 +766,7 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 			...(turnId === undefined ? {} : { turnId }),
 			message,
 			state,
+			deliveredFiles: this.deliveredFileMap(),
 			fallbackTimestamp: this.ref.summary.updatedAt,
 		});
 	}
@@ -812,6 +814,7 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 			sessionId: this.sessionId,
 			turnStates: new Map(reduced.turns.map((turn) => [opaqueId(turn.turnId, "turn"), turn.state])),
 			toolStates: new Map(reduced.tools.map((tool) => [opaqueId(tool.toolCallId, "tool"), tool.state])),
+			deliveredFiles: this.deliveredFileMap(),
 			fallbackTimestamp: this.ref.summary.createdAt,
 		});
 	}
@@ -825,6 +828,7 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 		const planByEntryId = new Map(planState.plans.map((plan) => [plan.entryId, plan]));
 		const turnStates = new Map(reduced.turns.map((turn) => [opaqueId(turn.turnId, "turn"), turn.state]));
 		const toolStates = new Map(reduced.tools.map((tool) => [opaqueId(tool.toolCallId, "tool"), tool.state]));
+		const deliveredFiles = this.deliveredFileMap();
 		return journal
 			.map((entry) => {
 				const record = entry as Record<string, unknown>;
@@ -843,6 +847,7 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 					sessionId: this.sessionId,
 					turnStates,
 					toolStates,
+					deliveredFiles,
 					fallbackTimestamp: this.ref.summary.createdAt,
 				});
 			})
@@ -943,12 +948,7 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 			const next = optionalName(input.name);
 			if (next) branched.appendSessionInfo(next);
 			const forkedSessionId = branched.getSessionId();
-			copySessionDeliveredFiles({
-				agentDir: this.agentDir,
-				sourceSessionId: this.sessionId,
-				targetSessionId: forkedSessionId,
-				fileIds: projectAllDeliveredFiles(branched.getBranch()).map((file) => file.fileId),
-			});
+			this.session.deliveredArtifacts?.copyTo(branched);
 			return forkedSessionId;
 		} finally {
 			branched.close();
@@ -1282,10 +1282,10 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 		input: ClientParams<"session/openDeliveredFile">,
 	): Promise<ClientResult<"session/openDeliveredFile">> {
 		try {
+			const resolved = this.session.deliveredArtifacts?.resolve(input.fileId);
+			if (!resolved) throw new Error("Delivered file was not found");
 			await openDeliveredFileOnDisk({
-				agentDir: this.agentDir,
-				sessionId: input.sessionId,
-				fileId: input.fileId,
+				path: resolved.path,
 				action: input.action,
 			});
 			return {};
@@ -1301,11 +1301,9 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 		input: ClientParams<"session/readDeliveredFile">,
 	): Promise<ClientResult<"session/readDeliveredFile">> {
 		try {
-			return await readDeliveredFileOnDisk({
-				agentDir: this.agentDir,
-				sessionId: input.sessionId,
-				fileId: input.fileId,
-			});
+			const resolved = this.session.deliveredArtifacts?.resolve(input.fileId);
+			if (!resolved) throw new Error("Delivered file was not found");
+			return await readDeliveredFileOnDisk(resolved);
 		} catch (error) {
 			if (error instanceof Error && error.message === "Delivered file was not found") {
 				throw new AppServerError("NOT_FOUND", { sessionId: this.sessionId });
@@ -1803,13 +1801,12 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 
 class ReadonlyScheduledSessionRuntime implements OpenedSessionRuntime {
 	readonly sessionId: string;
-	private readonly agentDir: string;
+	private readonly deliveredArtifacts: SessionDeliveredArtifacts;
 	private readonly projection: SessionProjection;
 	private readonly mcpServers: ClientResult<"mcp/list">;
 
 	constructor(ref: SessionRef, agentDir: string, mcpServers: ClientResult<"mcp/list"> = { servers: [] }) {
 		this.sessionId = ref.summary.sessionId;
-		this.agentDir = agentDir;
 		this.mcpServers = mcpServers;
 		let manager: ReturnType<typeof SessionManager.openReadOnly>;
 		try {
@@ -1829,6 +1826,9 @@ class ReadonlyScheduledSessionRuntime implements OpenedSessionRuntime {
 		} catch {
 			throw new AppServerError("SESSION_CORRUPT", { sessionId: this.sessionId });
 		}
+		this.deliveredArtifacts = new SessionDeliveredArtifacts(agentDir, manager);
+		const deliveredFiles = this.deliveredArtifacts.list();
+		const deliveredFileMap = new Map(deliveredFiles.map((file) => [file.fileId, file]));
 		const journal = manager.getDurableJournalSnapshot();
 		const reduced = reduceRuntimeJournal(journal);
 		const legacyTurnId =
@@ -1860,6 +1860,7 @@ class ReadonlyScheduledSessionRuntime implements OpenedSessionRuntime {
 					sessionId: this.sessionId,
 					turnStates,
 					toolStates,
+					deliveredFiles: deliveredFileMap,
 					fallbackTimestamp: ref.summary.createdAt,
 				});
 			})
@@ -1869,7 +1870,7 @@ class ReadonlyScheduledSessionRuntime implements OpenedSessionRuntime {
 			turns,
 			items,
 			tasks: projectLatestTasks(manager.getBranch()),
-			deliveredFiles: projectAllDeliveredFiles(manager.getBranch()),
+			deliveredFiles,
 			goal: projectGoal(readThreadGoal(manager)),
 		});
 	}
@@ -1959,10 +1960,10 @@ class ReadonlyScheduledSessionRuntime implements OpenedSessionRuntime {
 		input: ClientParams<"session/openDeliveredFile">,
 	): Promise<ClientResult<"session/openDeliveredFile">> {
 		try {
+			const resolved = this.deliveredArtifacts.resolve(input.fileId);
+			if (!resolved) throw new Error("Delivered file was not found");
 			await openDeliveredFileOnDisk({
-				agentDir: this.agentDir,
-				sessionId: input.sessionId,
-				fileId: input.fileId,
+				path: resolved.path,
 				action: input.action,
 			});
 			return {};
@@ -1978,11 +1979,9 @@ class ReadonlyScheduledSessionRuntime implements OpenedSessionRuntime {
 		input: ClientParams<"session/readDeliveredFile">,
 	): Promise<ClientResult<"session/readDeliveredFile">> {
 		try {
-			return await readDeliveredFileOnDisk({
-				agentDir: this.agentDir,
-				sessionId: input.sessionId,
-				fileId: input.fileId,
-			});
+			const resolved = this.deliveredArtifacts.resolve(input.fileId);
+			if (!resolved) throw new Error("Delivered file was not found");
+			return await readDeliveredFileOnDisk(resolved);
 		} catch (error) {
 			if (error instanceof Error && error.message === "Delivered file was not found") {
 				throw new AppServerError("NOT_FOUND", { sessionId: this.sessionId });

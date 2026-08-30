@@ -9614,7 +9614,8 @@
                                                 "fileId",
                                                 "name",
                                                 "byteLength",
-                                                "deliveredAt"
+                                                "deliveredAt",
+                                                "availability"
                                               ],
                                               "properties": {
                                                 "fileId": {
@@ -9643,6 +9644,18 @@
                                                   "type": "string",
                                                   "format": "date-time",
                                                   "maxLength": 40
+                                                },
+                                                "availability": {
+                                                  "anyOf": [
+                                                    {
+                                                      "type": "string",
+                                                      "const": "available"
+                                                    },
+                                                    {
+                                                      "type": "string",
+                                                      "const": "unavailable"
+                                                    }
+                                                  ]
                                                 }
                                               },
                                               "additionalProperties": false
@@ -10203,7 +10216,8 @@
                                                 "fileId",
                                                 "name",
                                                 "byteLength",
-                                                "deliveredAt"
+                                                "deliveredAt",
+                                                "availability"
                                               ],
                                               "properties": {
                                                 "fileId": {
@@ -10232,6 +10246,18 @@
                                                   "type": "string",
                                                   "format": "date-time",
                                                   "maxLength": 40
+                                                },
+                                                "availability": {
+                                                  "anyOf": [
+                                                    {
+                                                      "type": "string",
+                                                      "const": "available"
+                                                    },
+                                                    {
+                                                      "type": "string",
+                                                      "const": "unavailable"
+                                                    }
+                                                  ]
                                                 }
                                               },
                                               "additionalProperties": false
@@ -10953,7 +10979,8 @@
                                     "fileId",
                                     "name",
                                     "byteLength",
-                                    "deliveredAt"
+                                    "deliveredAt",
+                                    "availability"
                                   ],
                                   "properties": {
                                     "fileId": {
@@ -10982,6 +11009,18 @@
                                       "type": "string",
                                       "format": "date-time",
                                       "maxLength": 40
+                                    },
+                                    "availability": {
+                                      "anyOf": [
+                                        {
+                                          "type": "string",
+                                          "const": "available"
+                                        },
+                                        {
+                                          "type": "string",
+                                          "const": "unavailable"
+                                        }
+                                      ]
                                     }
                                   },
                                   "additionalProperties": false
@@ -12053,7 +12092,8 @@
                                                 "fileId",
                                                 "name",
                                                 "byteLength",
-                                                "deliveredAt"
+                                                "deliveredAt",
+                                                "availability"
                                               ],
                                               "properties": {
                                                 "fileId": {
@@ -12082,6 +12122,18 @@
                                                   "type": "string",
                                                   "format": "date-time",
                                                   "maxLength": 40
+                                                },
+                                                "availability": {
+                                                  "anyOf": [
+                                                    {
+                                                      "type": "string",
+                                                      "const": "available"
+                                                    },
+                                                    {
+                                                      "type": "string",
+                                                      "const": "unavailable"
+                                                    }
+                                                  ]
                                                 }
                                               },
                                               "additionalProperties": false
@@ -12650,7 +12702,8 @@
                                                 "fileId",
                                                 "name",
                                                 "byteLength",
-                                                "deliveredAt"
+                                                "deliveredAt",
+                                                "availability"
                                               ],
                                               "properties": {
                                                 "fileId": {
@@ -12679,6 +12732,18 @@
                                                   "type": "string",
                                                   "format": "date-time",
                                                   "maxLength": 40
+                                                },
+                                                "availability": {
+                                                  "anyOf": [
+                                                    {
+                                                      "type": "string",
+                                                      "const": "available"
+                                                    },
+                                                    {
+                                                      "type": "string",
+                                                      "const": "unavailable"
+                                                    }
+                                                  ]
                                                 }
                                               },
                                               "additionalProperties": false
@@ -19167,7 +19232,8 @@
                                         "fileId",
                                         "name",
                                         "byteLength",
-                                        "deliveredAt"
+                                        "deliveredAt",
+                                        "availability"
                                       ],
                                       "properties": {
                                         "fileId": {
@@ -19196,6 +19262,18 @@
                                           "type": "string",
                                           "format": "date-time",
                                           "maxLength": 40
+                                        },
+                                        "availability": {
+                                          "anyOf": [
+                                            {
+                                              "type": "string",
+                                              "const": "available"
+                                            },
+                                            {
+                                              "type": "string",
+                                              "const": "unavailable"
+                                            }
+                                          ]
                                         }
                                       },
                                       "additionalProperties": false
@@ -21485,7 +21563,8 @@
                                             "fileId",
                                             "name",
                                             "byteLength",
-                                            "deliveredAt"
+                                            "deliveredAt",
+                                            "availability"
                                           ],
                                           "properties": {
                                             "fileId": {
@@ -21514,6 +21593,18 @@
                                               "type": "string",
                                               "format": "date-time",
                                               "maxLength": 40
+                                            },
+                                            "availability": {
+                                              "anyOf": [
+                                                {
+                                                  "type": "string",
+                                                  "const": "available"
+                                                },
+                                                {
+                                                  "type": "string",
+                                                  "const": "unavailable"
+                                                }
+                                              ]
                                             }
                                           },
                                           "additionalProperties": false
@@ -22291,7 +22382,8 @@
                               "fileId",
                               "name",
                               "byteLength",
-                              "deliveredAt"
+                              "deliveredAt",
+                              "availability"
                             ],
                             "properties": {
                               "fileId": {
@@ -22320,6 +22412,18 @@
                                 "type": "string",
                                 "format": "date-time",
                                 "maxLength": 40
+                              },
+                              "availability": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "const": "available"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "unavailable"
+                                  }
+                                ]
                               }
                             },
                             "additionalProperties": false
@@ -26895,7 +26999,8 @@
                                         "fileId",
                                         "name",
                                         "byteLength",
-                                        "deliveredAt"
+                                        "deliveredAt",
+                                        "availability"
                                       ],
                                       "properties": {
                                         "fileId": {
@@ -26924,6 +27029,18 @@
                                           "type": "string",
                                           "format": "date-time",
                                           "maxLength": 40
+                                        },
+                                        "availability": {
+                                          "anyOf": [
+                                            {
+                                              "type": "string",
+                                              "const": "available"
+                                            },
+                                            {
+                                              "type": "string",
+                                              "const": "unavailable"
+                                            }
+                                          ]
                                         }
                                       },
                                       "additionalProperties": false
@@ -48839,7 +48956,8 @@
                                     "fileId",
                                     "name",
                                     "byteLength",
-                                    "deliveredAt"
+                                    "deliveredAt",
+                                    "availability"
                                   ],
                                   "properties": {
                                     "fileId": {
@@ -48868,6 +48986,18 @@
                                       "type": "string",
                                       "format": "date-time",
                                       "maxLength": 40
+                                    },
+                                    "availability": {
+                                      "anyOf": [
+                                        {
+                                          "type": "string",
+                                          "const": "available"
+                                        },
+                                        {
+                                          "type": "string",
+                                          "const": "unavailable"
+                                        }
+                                      ]
                                     }
                                   },
                                   "additionalProperties": false
@@ -51157,7 +51287,8 @@
                                         "fileId",
                                         "name",
                                         "byteLength",
-                                        "deliveredAt"
+                                        "deliveredAt",
+                                        "availability"
                                       ],
                                       "properties": {
                                         "fileId": {
@@ -51186,6 +51317,18 @@
                                           "type": "string",
                                           "format": "date-time",
                                           "maxLength": 40
+                                        },
+                                        "availability": {
+                                          "anyOf": [
+                                            {
+                                              "type": "string",
+                                              "const": "available"
+                                            },
+                                            {
+                                              "type": "string",
+                                              "const": "unavailable"
+                                            }
+                                          ]
                                         }
                                       },
                                       "additionalProperties": false
@@ -51963,7 +52106,8 @@
                           "fileId",
                           "name",
                           "byteLength",
-                          "deliveredAt"
+                          "deliveredAt",
+                          "availability"
                         ],
                         "properties": {
                           "fileId": {
@@ -51992,6 +52136,18 @@
                             "type": "string",
                             "format": "date-time",
                             "maxLength": 40
+                          },
+                          "availability": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "const": "available"
+                              },
+                              {
+                                "type": "string",
+                                "const": "unavailable"
+                              }
+                            ]
                           }
                         },
                         "additionalProperties": false
@@ -56567,7 +56723,8 @@
                                     "fileId",
                                     "name",
                                     "byteLength",
-                                    "deliveredAt"
+                                    "deliveredAt",
+                                    "availability"
                                   ],
                                   "properties": {
                                     "fileId": {
@@ -56596,6 +56753,18 @@
                                       "type": "string",
                                       "format": "date-time",
                                       "maxLength": 40
+                                    },
+                                    "availability": {
+                                      "anyOf": [
+                                        {
+                                          "type": "string",
+                                          "const": "available"
+                                        },
+                                        {
+                                          "type": "string",
+                                          "const": "unavailable"
+                                        }
+                                      ]
                                     }
                                   },
                                   "additionalProperties": false
@@ -64792,7 +64961,8 @@
                                     "fileId",
                                     "name",
                                     "byteLength",
-                                    "deliveredAt"
+                                    "deliveredAt",
+                                    "availability"
                                   ],
                                   "properties": {
                                     "fileId": {
@@ -64821,6 +64991,18 @@
                                       "type": "string",
                                       "format": "date-time",
                                       "maxLength": 40
+                                    },
+                                    "availability": {
+                                      "anyOf": [
+                                        {
+                                          "type": "string",
+                                          "const": "available"
+                                        },
+                                        {
+                                          "type": "string",
+                                          "const": "unavailable"
+                                        }
+                                      ]
                                     }
                                   },
                                   "additionalProperties": false
@@ -65381,7 +65563,8 @@
                                     "fileId",
                                     "name",
                                     "byteLength",
-                                    "deliveredAt"
+                                    "deliveredAt",
+                                    "availability"
                                   ],
                                   "properties": {
                                     "fileId": {
@@ -65410,6 +65593,18 @@
                                       "type": "string",
                                       "format": "date-time",
                                       "maxLength": 40
+                                    },
+                                    "availability": {
+                                      "anyOf": [
+                                        {
+                                          "type": "string",
+                                          "const": "available"
+                                        },
+                                        {
+                                          "type": "string",
+                                          "const": "unavailable"
+                                        }
+                                      ]
                                     }
                                   },
                                   "additionalProperties": false
@@ -66131,7 +66326,8 @@
                         "fileId",
                         "name",
                         "byteLength",
-                        "deliveredAt"
+                        "deliveredAt",
+                        "availability"
                       ],
                       "properties": {
                         "fileId": {
@@ -66160,6 +66356,18 @@
                           "type": "string",
                           "format": "date-time",
                           "maxLength": 40
+                        },
+                        "availability": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "const": "available"
+                            },
+                            {
+                              "type": "string",
+                              "const": "unavailable"
+                            }
+                          ]
                         }
                       },
                       "additionalProperties": false
@@ -67231,7 +67439,8 @@
                                     "fileId",
                                     "name",
                                     "byteLength",
-                                    "deliveredAt"
+                                    "deliveredAt",
+                                    "availability"
                                   ],
                                   "properties": {
                                     "fileId": {
@@ -67260,6 +67469,18 @@
                                       "type": "string",
                                       "format": "date-time",
                                       "maxLength": 40
+                                    },
+                                    "availability": {
+                                      "anyOf": [
+                                        {
+                                          "type": "string",
+                                          "const": "available"
+                                        },
+                                        {
+                                          "type": "string",
+                                          "const": "unavailable"
+                                        }
+                                      ]
                                     }
                                   },
                                   "additionalProperties": false
@@ -67828,7 +68049,8 @@
                                     "fileId",
                                     "name",
                                     "byteLength",
-                                    "deliveredAt"
+                                    "deliveredAt",
+                                    "availability"
                                   ],
                                   "properties": {
                                     "fileId": {
@@ -67857,6 +68079,18 @@
                                       "type": "string",
                                       "format": "date-time",
                                       "maxLength": 40
+                                    },
+                                    "availability": {
+                                      "anyOf": [
+                                        {
+                                          "type": "string",
+                                          "const": "available"
+                                        },
+                                        {
+                                          "type": "string",
+                                          "const": "unavailable"
+                                        }
+                                      ]
                                     }
                                   },
                                   "additionalProperties": false
@@ -70060,7 +70294,8 @@
                               "fileId",
                               "name",
                               "byteLength",
-                              "deliveredAt"
+                              "deliveredAt",
+                              "availability"
                             ],
                             "properties": {
                               "fileId": {
@@ -70089,6 +70324,18 @@
                                 "type": "string",
                                 "format": "date-time",
                                 "maxLength": 40
+                              },
+                              "availability": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "const": "available"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "unavailable"
+                                  }
+                                ]
                               }
                             },
                             "additionalProperties": false
@@ -70649,7 +70896,8 @@
                               "fileId",
                               "name",
                               "byteLength",
-                              "deliveredAt"
+                              "deliveredAt",
+                              "availability"
                             ],
                             "properties": {
                               "fileId": {
@@ -70678,6 +70926,18 @@
                                 "type": "string",
                                 "format": "date-time",
                                 "maxLength": 40
+                              },
+                              "availability": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "const": "available"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "unavailable"
+                                  }
+                                ]
                               }
                             },
                             "additionalProperties": false
@@ -71399,7 +71659,8 @@
                   "fileId",
                   "name",
                   "byteLength",
-                  "deliveredAt"
+                  "deliveredAt",
+                  "availability"
                 ],
                 "properties": {
                   "fileId": {
@@ -71428,6 +71689,18 @@
                     "type": "string",
                     "format": "date-time",
                     "maxLength": 40
+                  },
+                  "availability": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "const": "available"
+                      },
+                      {
+                        "type": "string",
+                        "const": "unavailable"
+                      }
+                    ]
                   }
                 },
                 "additionalProperties": false
@@ -72499,7 +72772,8 @@
                               "fileId",
                               "name",
                               "byteLength",
-                              "deliveredAt"
+                              "deliveredAt",
+                              "availability"
                             ],
                             "properties": {
                               "fileId": {
@@ -72528,6 +72802,18 @@
                                 "type": "string",
                                 "format": "date-time",
                                 "maxLength": 40
+                              },
+                              "availability": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "const": "available"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "unavailable"
+                                  }
+                                ]
                               }
                             },
                             "additionalProperties": false
@@ -73096,7 +73382,8 @@
                               "fileId",
                               "name",
                               "byteLength",
-                              "deliveredAt"
+                              "deliveredAt",
+                              "availability"
                             ],
                             "properties": {
                               "fileId": {
@@ -73125,6 +73412,18 @@
                                 "type": "string",
                                 "format": "date-time",
                                 "maxLength": 40
+                              },
+                              "availability": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "const": "available"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "unavailable"
+                                  }
+                                ]
                               }
                             },
                             "additionalProperties": false
@@ -75436,7 +75735,8 @@
                       "fileId",
                       "name",
                       "byteLength",
-                      "deliveredAt"
+                      "deliveredAt",
+                      "availability"
                     ],
                     "properties": {
                       "fileId": {
@@ -75465,6 +75765,18 @@
                         "type": "string",
                         "format": "date-time",
                         "maxLength": 40
+                      },
+                      "availability": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "const": "available"
+                          },
+                          {
+                            "type": "string",
+                            "const": "unavailable"
+                          }
+                        ]
                       }
                     },
                     "additionalProperties": false
@@ -78461,7 +78773,8 @@
                                             "fileId",
                                             "name",
                                             "byteLength",
-                                            "deliveredAt"
+                                            "deliveredAt",
+                                            "availability"
                                           ],
                                           "properties": {
                                             "fileId": {
@@ -78490,6 +78803,18 @@
                                               "type": "string",
                                               "format": "date-time",
                                               "maxLength": 40
+                                            },
+                                            "availability": {
+                                              "anyOf": [
+                                                {
+                                                  "type": "string",
+                                                  "const": "available"
+                                                },
+                                                {
+                                                  "type": "string",
+                                                  "const": "unavailable"
+                                                }
+                                              ]
                                             }
                                           },
                                           "additionalProperties": false
@@ -79050,7 +79375,8 @@
                                             "fileId",
                                             "name",
                                             "byteLength",
-                                            "deliveredAt"
+                                            "deliveredAt",
+                                            "availability"
                                           ],
                                           "properties": {
                                             "fileId": {
@@ -79079,6 +79405,18 @@
                                               "type": "string",
                                               "format": "date-time",
                                               "maxLength": 40
+                                            },
+                                            "availability": {
+                                              "anyOf": [
+                                                {
+                                                  "type": "string",
+                                                  "const": "available"
+                                                },
+                                                {
+                                                  "type": "string",
+                                                  "const": "unavailable"
+                                                }
+                                              ]
                                             }
                                           },
                                           "additionalProperties": false
@@ -79800,7 +80138,8 @@
                                 "fileId",
                                 "name",
                                 "byteLength",
-                                "deliveredAt"
+                                "deliveredAt",
+                                "availability"
                               ],
                               "properties": {
                                 "fileId": {
@@ -79829,6 +80168,18 @@
                                   "type": "string",
                                   "format": "date-time",
                                   "maxLength": 40
+                                },
+                                "availability": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "const": "available"
+                                    },
+                                    {
+                                      "type": "string",
+                                      "const": "unavailable"
+                                    }
+                                  ]
                                 }
                               },
                               "additionalProperties": false
@@ -80900,7 +81251,8 @@
                                             "fileId",
                                             "name",
                                             "byteLength",
-                                            "deliveredAt"
+                                            "deliveredAt",
+                                            "availability"
                                           ],
                                           "properties": {
                                             "fileId": {
@@ -80929,6 +81281,18 @@
                                               "type": "string",
                                               "format": "date-time",
                                               "maxLength": 40
+                                            },
+                                            "availability": {
+                                              "anyOf": [
+                                                {
+                                                  "type": "string",
+                                                  "const": "available"
+                                                },
+                                                {
+                                                  "type": "string",
+                                                  "const": "unavailable"
+                                                }
+                                              ]
                                             }
                                           },
                                           "additionalProperties": false
@@ -81497,7 +81861,8 @@
                                             "fileId",
                                             "name",
                                             "byteLength",
-                                            "deliveredAt"
+                                            "deliveredAt",
+                                            "availability"
                                           ],
                                           "properties": {
                                             "fileId": {
@@ -81526,6 +81891,18 @@
                                               "type": "string",
                                               "format": "date-time",
                                               "maxLength": 40
+                                            },
+                                            "availability": {
+                                              "anyOf": [
+                                                {
+                                                  "type": "string",
+                                                  "const": "available"
+                                                },
+                                                {
+                                                  "type": "string",
+                                                  "const": "unavailable"
+                                                }
+                                              ]
                                             }
                                           },
                                           "additionalProperties": false
@@ -85909,7 +86286,8 @@
                             "fileId",
                             "name",
                             "byteLength",
-                            "deliveredAt"
+                            "deliveredAt",
+                            "availability"
                           ],
                           "properties": {
                             "fileId": {
@@ -85938,6 +86316,18 @@
                               "type": "string",
                               "format": "date-time",
                               "maxLength": 40
+                            },
+                            "availability": {
+                              "anyOf": [
+                                {
+                                  "type": "string",
+                                  "const": "available"
+                                },
+                                {
+                                  "type": "string",
+                                  "const": "unavailable"
+                                }
+                              ]
                             }
                           },
                           "additionalProperties": false
@@ -86715,7 +87105,8 @@
               "fileId",
               "name",
               "byteLength",
-              "deliveredAt"
+              "deliveredAt",
+              "availability"
             ],
             "properties": {
               "fileId": {
@@ -86744,6 +87135,18 @@
                 "type": "string",
                 "format": "date-time",
                 "maxLength": 40
+              },
+              "availability": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "const": "available"
+                  },
+                  {
+                    "type": "string",
+                    "const": "unavailable"
+                  }
+                ]
               }
             },
             "additionalProperties": false

@@ -1,6 +1,6 @@
 import { readFile, stat } from "node:fs/promises";
-import { basename, extname } from "node:path";
-import { resolveDeliveredFilePath } from "@metis/coding-agent";
+import { extname } from "node:path";
+import type { ResolvedSessionDeliveredArtifact } from "@metis/coding-agent";
 
 const MIME_MAP: Record<string, string> = {
 	pdf: "application/pdf",
@@ -29,11 +29,7 @@ const MIME_MAP: Record<string, string> = {
 	css: "text/css",
 };
 
-export async function readDeliveredFile(options: {
-	readonly agentDir: string;
-	readonly sessionId: string;
-	readonly fileId: string;
-}): Promise<{
+export async function readDeliveredFile(options: ResolvedSessionDeliveredArtifact): Promise<{
 	readonly fileId: string;
 	readonly name: string;
 	readonly byteLength: number;
@@ -41,18 +37,17 @@ export async function readDeliveredFile(options: {
 	readonly mediaType?: string;
 	readonly absolutePath: string;
 }> {
-	const path = resolveDeliveredFilePath(options.agentDir, options.sessionId, options.fileId);
-	if (!path) throw new Error("Delivered file was not found");
-	const metadata = await stat(path);
-	const contents = await readFile(path);
-	const ext = extname(path).replace(/^\./u, "").toLowerCase();
+	const metadata = await stat(options.path);
+	if (metadata.size !== options.artifact.byteLength) throw new Error("Delivered file was not found");
+	const contents = await readFile(options.path);
+	const ext = extname(options.artifact.name).replace(/^\./u, "").toLowerCase();
 	const mediaType = MIME_MAP[ext] || "application/octet-stream";
 	return {
-		fileId: options.fileId,
-		name: basename(path),
+		fileId: options.artifact.fileId,
+		name: options.artifact.name,
 		byteLength: metadata.size,
 		data: contents.toString("base64"),
 		mediaType,
-		absolutePath: path,
+		absolutePath: options.path,
 	};
 }

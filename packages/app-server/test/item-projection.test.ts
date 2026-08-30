@@ -2,7 +2,6 @@ import type { ItemView } from "@metis/app-protocol";
 import { describe, expect, it } from "vitest";
 import {
 	appendProjectedDelta,
-	projectAllDeliveredFiles,
 	projectDeliveredFileFromToolResult,
 	projectLiveMessage,
 	projectMessageEntry,
@@ -209,7 +208,7 @@ describe("delivered file projection", () => {
 		deliveredAt: "2026-08-18T00:00:00.000Z",
 	} as const;
 
-	it("projects deliver_file tool results onto tool_result blocks and session lists", () => {
+	it("projects deliver_file history conservatively until the session module proves availability", () => {
 		const message = {
 			role: "toolResult",
 			toolCallId: "call-deliver",
@@ -217,27 +216,25 @@ describe("delivered file projection", () => {
 			isError: false,
 			details: deliveredDetails,
 		};
-		expect(projectDeliveredFileFromToolResult(message)).toEqual(deliveredDetails);
+		expect(projectDeliveredFileFromToolResult(message)).toEqual({
+			...deliveredDetails,
+			availability: "unavailable",
+		});
+		const deliveredFile = { ...deliveredDetails, availability: "available" as const };
 
 		const item = projectMessageEntry({
 			entry: { type: "message", id: "tool-deliver", timestamp: CREATED_AT, message },
 			sessionId: "session-1",
 			turnStates: new Map(),
 			toolStates: new Map(),
+			deliveredFiles: new Map([[deliveredDetails.fileId, deliveredFile]]),
 			fallbackTimestamp: CREATED_AT,
 		});
 		expect(item?.content[0]).toMatchObject({
 			type: "tool_result",
 			name: "deliver_file",
-			deliveredFile: deliveredDetails,
+			deliveredFile,
 		});
-
-		expect(
-			projectAllDeliveredFiles([
-				{ type: "message", message },
-				{ type: "message", message: { ...message, details: { ...deliveredDetails, fileId: "bbbbbbbbbbbbbbbb" } } },
-			]),
-		).toHaveLength(2);
 	});
 
 	it("ignores invalid deliver_file payloads", () => {

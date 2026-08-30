@@ -1,6 +1,5 @@
 import { spawn } from "node:child_process";
 import { dirname } from "node:path";
-import { resolveDeliveredFilePath } from "@metis/coding-agent";
 
 function spawnCommand(command: string, args: readonly string[]): Promise<void> {
 	return new Promise((resolve, reject) => {
@@ -14,21 +13,16 @@ function spawnCommand(command: string, args: readonly string[]): Promise<void> {
 }
 
 export async function openDeliveredFile(options: {
-	readonly agentDir: string;
-	readonly sessionId: string;
-	readonly fileId: string;
+	readonly path: string;
 	readonly action: "default" | "reveal";
 }): Promise<void> {
-	const path = resolveDeliveredFilePath(options.agentDir, options.sessionId, options.fileId);
-	if (!path) throw new Error("Delivered file was not found");
-
 	if (process.platform === "darwin") {
-		await spawnCommand("open", options.action === "reveal" ? ["-R", path] : [path]);
+		await spawnCommand("open", options.action === "reveal" ? ["-R", options.path] : [options.path]);
 		return;
 	}
 	if (process.platform === "win32") {
-		await spawnCommand("explorer.exe", options.action === "reveal" ? [`/select,${path}`] : [path]);
+		await spawnCommand("explorer.exe", options.action === "reveal" ? [`/select,${options.path}`] : [options.path]);
 		return;
 	}
-	await spawnCommand("xdg-open", options.action === "reveal" ? [dirname(path)] : [path]);
+	await spawnCommand("xdg-open", options.action === "reveal" ? [dirname(options.path)] : [options.path]);
 }

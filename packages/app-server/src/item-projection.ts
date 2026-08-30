@@ -11,7 +11,6 @@ import type {
 } from "@metis/app-protocol";
 import {
 	formatSessionAttachmentDisplayText,
-	MAX_SESSION_DELIVERED_FILES,
 	parseDeliverFileDetails,
 	type StoredPlan,
 	type ThreadGoal,
@@ -209,6 +208,7 @@ export interface MessageProjectionInput {
 	readonly sessionId: string;
 	readonly turnStates: ReadonlyMap<string, "active" | "completed" | "interrupted">;
 	readonly toolStates: ReadonlyMap<string, "active" | "completed" | "interrupted">;
+	readonly deliveredFiles?: ReadonlyMap<string, SessionDeliveredFileView>;
 	readonly fallbackTimestamp: string;
 }
 
@@ -287,25 +287,18 @@ export function projectLatestTasks(entries: readonly unknown[]): SessionTaskView
 	return [];
 }
 
-export function projectDeliveredFileFromToolResult(message: unknown): SessionDeliveredFileView | undefined {
+export function projectDeliveredFileFromToolResult(
+	message: unknown,
+	deliveredFiles: ReadonlyMap<string, SessionDeliveredFileView> = new Map(),
+): SessionDeliveredFileView | undefined {
 	if (typeof message !== "object" || message === null) return undefined;
 	const record = message as Record<string, unknown>;
 	if (record.role !== "toolResult" || record.toolName !== "deliver_file" || record.isError !== false) {
 		return undefined;
 	}
-	return parseDeliverFileDetails(record.details);
-}
-
-export function projectAllDeliveredFiles(entries: readonly unknown[]): SessionDeliveredFileView[] {
-	const delivered: SessionDeliveredFileView[] = [];
-	for (const entry of entries) {
-		if (typeof entry !== "object" || entry === null) continue;
-		const record = entry as Record<string, unknown>;
-		if (record.type !== "message") continue;
-		const file = projectDeliveredFileFromToolResult(record.message);
-		if (file) delivered.push(file);
-	}
-	return delivered.slice(-MAX_SESSION_DELIVERED_FILES);
+	const details = parseDeliverFileDetails(record.details);
+	if (!details) return undefined;
+	return deliveredFiles.get(details.fileId) ?? { ...details, availability: "unavailable" };
 }
 
 export function projectPlanView(plan: StoredPlan): PlanView {
@@ -343,7 +336,7 @@ export function projectPlanEntry(input: {
 }
 
 export function projectMessageEntry(input: MessageProjectionInput): ItemView | undefined {
-	const { entry, sessionId, turnStates, toolStates, fallbackTimestamp } = input;
+	const { entry, sessionId, turnStates, toolStates, deliveredFiles, fallbackTimestamp } = input;
 	if (entry.type !== "message" || typeof entry.message !== "object" || entry.message === null) return undefined;
 	const message = entry.message as Record<string, unknown>;
 	const itemId = opaqueId(entry.id, "item");
@@ -406,7 +399,7 @@ export function projectMessageEntry(input: MessageProjectionInput): ItemView | u
 			.slice(0, 4);
 		const deliveredFile =
 			message.toolName === "deliver_file" && message.isError !== true
-				? projectDeliveredFileFromToolResult(message)
+				? projectDeliveredFileFromToolResult(message, deliveredFiles)
 				: undefined;
 		return {
 			itemId,
@@ -454,6 +447,7 @@ export function projectLiveMessage(input: {
 	readonly turnId?: string;
 	readonly message: object;
 	readonly state: ItemView["state"];
+	readonly deliveredFiles?: ReadonlyMap<string, SessionDeliveredFileView>;
 	readonly fallbackTimestamp: string;
 }): ItemView | undefined {
 	const record = input.message as Record<string, unknown>;
@@ -484,6 +478,7 @@ export function projectLiveMessage(input: {
 						] as const,
 					]),
 		toolStates: new Map(),
+		deliveredFiles: input.deliveredFiles,
 		fallbackTimestamp: createdAt,
 	});
 	return item

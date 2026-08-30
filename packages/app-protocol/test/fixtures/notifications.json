@@ -160,7 +160,8 @@
 								"name": "资料归集.xlsx",
 								"byteLength": 4096,
 								"message": "6个 xlsx 文件已经发送到聊天中",
-								"deliveredAt": "2026-08-18T00:00:00.000Z"
+								"deliveredAt": "2026-08-18T00:00:00.000Z",
+								"availability": "available"
 							}
 						]
 					},
