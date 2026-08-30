@@ -6,7 +6,12 @@ import type {
 	Tool,
 	ToolAnnotations,
 } from "@modelcontextprotocol/sdk/types.js";
-import { type AuthStorage, legacyMcpCredentialKey, type McpSecretCredential } from "../auth-storage.ts";
+import {
+	type AuthStorage,
+	legacyMcpCredentialKey,
+	type McpSecretCredential,
+	mcpCredentialKey,
+} from "../auth-storage.ts";
 import type { SettingsManager } from "../settings-manager.ts";
 import { type McpConnectionState, McpServerClient } from "./client.ts";
 import {
@@ -34,6 +39,17 @@ export interface McpManagerCreateOptions {
 	cwd: string;
 	environment?: NodeJS.ProcessEnv;
 	backgroundOptionalStartup?: boolean;
+}
+
+export interface McpPreparedConfiguration {
+	readonly revision: string;
+}
+
+interface ClientGeneration {
+	readonly clients: Map<string, McpServerClient>;
+	inFlight: number;
+	retired: boolean;
+	closePromise?: Promise<void>;
 }
 
 export interface McpServerStatus {
@@ -234,13 +250,24 @@ export class McpManager {
 	private readonly authStorage: AuthStorage;
 	private readonly cwd: string;
 	private readonly environment: NodeJS.ProcessEnv;
-	private clients = new Map<string, McpServerClient>();
+	private activeGeneration: ClientGeneration = {
+		clients: new Map<string, McpServerClient>(),
+		inFlight: 0,
+		retired: false,
+	};
+	private readonly retiredGenerations = new Set<ClientGeneration>();
+	private readonly preparedGenerations = new Map<McpPreparedConfiguration, ClientGeneration>();
+	private readonly cleanupErrors: Error[] = [];
 	private clientUnsubscribers: Array<() => void> = [];
 	private records: McpToolRecord[] = [];
 	private recordByModelName = new Map<string, McpToolRecord>();
 	private searchIndex = new ToolSearchIndex([]);
 	private readonly catalogListeners = new Set<() => void>();
 	private closed = false;
+
+	private get clients(): Map<string, McpServerClient> {
+		return this.activeGeneration.clients;
+	}
 
 	private constructor(options: McpManagerCreateOptions) {
 		this.settingsManager = options.settingsManager;
@@ -269,17 +296,16 @@ export class McpManager {
 
 	private storedSecret(config: ResolvedMcpServerConfig): McpSecretCredential | undefined {
 		const fingerprint = mcpServerFingerprint(config);
-		const scoped = this.authStorage.get(config.credentialKey);
-		if (scoped?.type === "mcp_secret" && scoped.serverFingerprint === fingerprint) return scoped;
-		if (scoped) return undefined;
-		const legacyKey = legacyMcpCredentialKey(config.name);
-		const legacy = this.authStorage.get(legacyKey);
-		if (legacy?.type !== "mcp_secret" || legacy.serverFingerprint !== fingerprint) return undefined;
-		this.authStorage.applyChanges([
-			{ provider: legacyKey, credential: undefined },
-			{ provider: config.credentialKey, credential: legacy },
-		]);
-		return legacy;
+		const keys = [
+			config.credentialKey,
+			mcpCredentialKey(config.credentialIdentity),
+			legacyMcpCredentialKey(config.name),
+		];
+		for (const key of new Set(keys)) {
+			const credential = this.authStorage.get(key);
+			if (credential?.type === "mcp_secret" && credential.serverFingerprint === fingerprint) return credential;
+		}
+		return undefined;
 	}
 
 	private applyStoredCredential(config: ResolvedMcpServerConfig): ResolvedMcpServerConfig {
@@ -337,9 +363,46 @@ export class McpManager {
 	private async initialize(settings: ResolvedMcpSettings, backgroundOptionalStartup: boolean): Promise<void> {
 		const clients = this.createClients(settings);
 		await this.startClients(clients, backgroundOptionalStartup);
-		this.clients = clients;
+		this.activeGeneration = { clients, inFlight: 0, retired: false };
 		this.attachClientSubscriptions();
 		this.rebuildRecords();
+	}
+
+	private error(error: unknown): Error {
+		return error instanceof Error ? error : new Error(String(error));
+	}
+
+	private closeRetiredGeneration(generation: ClientGeneration): Promise<void> {
+		if (generation.closePromise) return generation.closePromise;
+		generation.closePromise = Promise.all([...generation.clients.values()].map((client) => client.close()))
+			.then(() => undefined)
+			.catch((error) => {
+				this.cleanupErrors.push(this.error(error));
+			})
+			.finally(() => {
+				this.retiredGenerations.delete(generation);
+			});
+		return generation.closePromise;
+	}
+
+	private retire(generation: ClientGeneration): void {
+		generation.retired = true;
+		this.retiredGenerations.add(generation);
+		if (generation.inFlight === 0) void this.closeRetiredGeneration(generation);
+	}
+
+	private async withActiveGeneration<T>(
+		operation: (clients: ReadonlyMap<string, McpServerClient>) => Promise<T>,
+	): Promise<T> {
+		if (this.closed) throw new Error("MCP manager is closed");
+		const generation = this.activeGeneration;
+		generation.inFlight += 1;
+		try {
+			return await operation(generation.clients);
+		} finally {
+			generation.inFlight -= 1;
+			if (generation.retired && generation.inFlight === 0) void this.closeRetiredGeneration(generation);
+		}
 	}
 
 	private rebuildRecords(): void {
@@ -406,7 +469,11 @@ export class McpManager {
 
 	callTool(modelName: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<CallToolResult> {
 		const record = this.recordFor(modelName);
-		return this.clientFor(record.serverName).callTool(record.rawName, args, signal);
+		return this.withActiveGeneration((clients) => {
+			const client = clients.get(record.serverName);
+			if (!client) throw new Error(`Unknown MCP server "${record.serverName}"`);
+			return client.callTool(record.rawName, args, signal);
+		});
 	}
 
 	getToolAnnotations(modelName: string): ToolAnnotations | undefined {
@@ -417,47 +484,72 @@ export class McpManager {
 		capability: "resources" | "prompts",
 		operation: (client: McpServerClient) => Promise<object>,
 	): Promise<{ servers: object[] }> {
-		const clients = [...this.clients.values()].filter((client) => {
-			const status = client.status();
-			return status.state === "connected" && Boolean(client.snapshot().capabilities[capability]);
+		return this.withActiveGeneration(async (generationClients) => {
+			const clients = [...generationClients.values()].filter((client) => {
+				const status = client.status();
+				return status.state === "connected" && Boolean(client.snapshot().capabilities[capability]);
+			});
+			return {
+				servers: await Promise.all(
+					clients.map(async (client) => {
+						try {
+							return { server: client.name, ...(await operation(client)) };
+						} catch (error) {
+							return { server: client.name, error: errorMessage(error) };
+						}
+					}),
+				),
+			};
 		});
-		return {
-			servers: await Promise.all(
-				clients.map(async (client) => {
-					try {
-						return { server: client.name, ...(await operation(client)) };
-					} catch (error) {
-						return { server: client.name, error: errorMessage(error) };
-					}
-				}),
-			),
-		};
 	}
 
 	listResources(server?: string, cursor?: string): Promise<unknown> {
 		if (cursor && !server) return Promise.reject(new Error("cursor can only be used when a server is specified"));
-		if (server) return this.clientFor(server).listResources(cursor);
+		if (server)
+			return this.withActiveGeneration((clients) => {
+				const client = clients.get(server);
+				if (!client) throw new Error(`Unknown MCP server "${server}"`);
+				return client.listResources(cursor);
+			});
 		return this.aggregate("resources", (client) => client.listResources());
 	}
 
 	listResourceTemplates(server?: string, cursor?: string): Promise<unknown> {
 		if (cursor && !server) return Promise.reject(new Error("cursor can only be used when a server is specified"));
-		if (server) return this.clientFor(server).listResourceTemplates(cursor);
+		if (server)
+			return this.withActiveGeneration((clients) => {
+				const client = clients.get(server);
+				if (!client) throw new Error(`Unknown MCP server "${server}"`);
+				return client.listResourceTemplates(cursor);
+			});
 		return this.aggregate("resources", (client) => client.listResourceTemplates());
 	}
 
 	readResource(server: string, uri: string, signal?: AbortSignal): Promise<ReadResourceResult> {
-		return this.clientFor(server).readResource(uri, signal);
+		return this.withActiveGeneration((clients) => {
+			const client = clients.get(server);
+			if (!client) throw new Error(`Unknown MCP server "${server}"`);
+			return client.readResource(uri, signal);
+		});
 	}
 
 	listPrompts(server?: string, cursor?: string): Promise<unknown> {
 		if (cursor && !server) return Promise.reject(new Error("cursor can only be used when a server is specified"));
-		if (server) return this.clientFor(server).listPrompts(cursor);
+		if (server)
+			return this.withActiveGeneration((clients) => {
+				const client = clients.get(server);
+				if (!client) throw new Error(`Unknown MCP server "${server}"`);
+				return client.listPrompts(cursor);
+			});
 		return this.aggregate("prompts", (client) => client.listPrompts());
 	}
 
 	getPrompt(server: string, name: string, args?: Record<string, string>): Promise<GetPromptResult> {
-		return this.clientFor(server).getPrompt(name, args);
+		return this.withActiveGeneration((clients) => {
+			const client = clients.get(server);
+			if (!client) throw new Error(`Unknown MCP server "${server}"`);
+			return client.getPrompt(name, args);
+		});
 	}
 
 	getStatus(): McpServerStatus[] {
@@ -566,16 +658,43 @@ export class McpManager {
 		return () => this.catalogListeners.delete(listener);
 	}
 
-	async reload(): Promise<void> {
-		const settings = resolveMcpSettings(this.settingsManager, this.cwd, this.environment);
+	async prepareConfiguration(
+		settings: ResolvedMcpSettings = resolveMcpSettings(this.settingsManager, this.cwd, this.environment),
+	): Promise<McpPreparedConfiguration> {
 		const nextClients = this.createClients(settings);
 		await this.startClients(nextClients);
-		const previousClients = this.clients;
-		this.clients = nextClients;
+		const prepared = { revision: createHash("sha256").update(JSON.stringify(settings)).digest("hex") };
+		this.preparedGenerations.set(prepared, { clients: nextClients, inFlight: 0, retired: false });
+		return prepared;
+	}
+
+	activateConfiguration(prepared: McpPreparedConfiguration): void {
+		const next = this.preparedGenerations.get(prepared);
+		if (!next) throw new Error("Unknown or already consumed MCP configuration");
+		if (this.closed) throw new Error("MCP manager is closed");
+		this.preparedGenerations.delete(prepared);
+		const previous = this.activeGeneration;
+		this.activeGeneration = next;
 		this.attachClientSubscriptions();
 		this.rebuildRecords();
 		for (const listener of this.catalogListeners) listener();
-		await Promise.all([...previousClients.values()].map((client) => client.close()));
+		this.retire(previous);
+	}
+
+	async discardConfiguration(prepared: McpPreparedConfiguration): Promise<void> {
+		const generation = this.preparedGenerations.get(prepared);
+		if (!generation) return;
+		this.preparedGenerations.delete(prepared);
+		await Promise.all([...generation.clients.values()].map((client) => client.close()));
+	}
+
+	async reload(): Promise<void> {
+		const prepared = await this.prepareConfiguration();
+		this.activateConfiguration(prepared);
+	}
+
+	drainCleanupErrors(): Error[] {
+		return this.cleanupErrors.splice(0);
 	}
 
 	async setSecret(server: string, credential: Omit<McpSecretCredential, "type">): Promise<void> {
@@ -637,7 +756,14 @@ export class McpManager {
 		this.closed = true;
 		for (const unsubscribe of this.clientUnsubscribers) unsubscribe();
 		this.clientUnsubscribers = [];
-		await Promise.all([...this.clients.values()].map((client) => client.close()));
+		await Promise.all([
+			...[...this.clients.values()].map((client) => client.close()),
+			...[...this.retiredGenerations].map((generation) => this.closeRetiredGeneration(generation)),
+			...[...this.preparedGenerations.values()].flatMap((generation) =>
+				[...generation.clients.values()].map((client) => client.close()),
+			),
+		]);
+		this.preparedGenerations.clear();
 		this.catalogListeners.clear();
 	}
 
@@ -647,6 +773,14 @@ export class McpManager {
 		for (const unsubscribe of this.clientUnsubscribers) unsubscribe();
 		this.clientUnsubscribers = [];
 		for (const client of this.clients.values()) client.dispose();
+		for (const generation of this.retiredGenerations) {
+			for (const client of generation.clients.values()) client.dispose();
+		}
+		this.retiredGenerations.clear();
+		for (const generation of this.preparedGenerations.values()) {
+			for (const client of generation.clients.values()) client.dispose();
+		}
+		this.preparedGenerations.clear();
 		this.catalogListeners.clear();
 	}
 }

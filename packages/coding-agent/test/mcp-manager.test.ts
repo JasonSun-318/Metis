@@ -46,6 +46,34 @@ afterEach(async () => {
 });
 
 describe("McpManager", () => {
+	it("lets an active tool call finish on the retired client generation", async () => {
+		const previousServer = await createMcpTestServer({ callDelayMs: 150 });
+		const nextServer = await createMcpTestServer();
+		servers.push(previousServer, nextServer);
+		const settings = SettingsManager.inMemory({
+			mcpServers: { docs: { url: String(previousServer.url) } },
+		});
+		const manager = await McpManager.create({
+			settingsManager: settings,
+			authStorage: AuthStorage.inMemory(),
+			cwd: process.cwd(),
+		});
+		managers.push(manager);
+
+		const active = manager.callTool("mcp__docs__search_docs", { query: "old generation" });
+		await vi.waitFor(() => expect(previousServer.toolCallCount()).toBe(1));
+		settings.setMcpServer("global", "docs", { url: String(nextServer.url) });
+		await settings.flushOrThrow();
+		await manager.reload();
+
+		await expect(active).resolves.toMatchObject({
+			content: [{ type: "text", text: "match:old generation" }],
+		});
+		await expect(manager.callTool("mcp__docs__search_docs", { query: "new generation" })).resolves.toMatchObject({
+			content: [{ type: "text", text: "match:new generation" }],
+		});
+	});
+
 	it("exposes only safe selected-server catalog names and fingerprint-bound credential state", async () => {
 		const server = await createMcpTestServer({
 			resources: [
@@ -128,7 +156,7 @@ describe("McpManager", () => {
 		expect(manager.getStatus()[0]).toMatchObject({ state: "auth_required" });
 	});
 
-	it("moves one fingerprint-matched legacy credential to the effective scope", async () => {
+	it("reads a fingerprint-matched legacy credential without migrating an untouched definition", async () => {
 		const server = await createMcpTestServer({ requiredBearerToken: "legacy-secret" });
 		servers.push(server);
 		const fingerprint = mcpServerFingerprint(
@@ -150,8 +178,9 @@ describe("McpManager", () => {
 		managers.push(manager);
 
 		expect(manager.getStatus()[0]).toMatchObject({ state: "connected" });
-		expect(storage.has(legacyMcpCredentialKey("docs"))).toBe(false);
-		expect(storage.get(userMcpKey("docs"))).toMatchObject({
+		expect(storage.has(legacyMcpCredentialKey("docs"))).toBe(true);
+		expect(storage.get(userMcpKey("docs"))).toBeUndefined();
+		expect(storage.get(legacyMcpCredentialKey("docs"))).toMatchObject({
 			type: "mcp_secret",
 			bearerToken: "legacy-secret",
 		});
