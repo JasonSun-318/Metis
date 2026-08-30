@@ -25,6 +25,7 @@ import {
 	type AuthStorageChange,
 	agentTaskWindow,
 	BROWSER_TOOL_NAMES,
+	type BrowserHostRequest,
 	buildChildSystemPrompt,
 	type CreateAgentSessionRuntimeFactory,
 	copySessionDeliveredFiles,
@@ -123,6 +124,21 @@ import {
 
 const MAX_TURNS = 200;
 type McpMutationRunner = <T>(mutation: () => Promise<T>) => Promise<T>;
+
+function protocolBrowserToolCall(request: BrowserHostRequest): BrowserToolCall {
+	switch (request.tool) {
+		case "browser_tabs":
+			return { tool: request.tool, input: request.input };
+		case "browser_navigate":
+			return { tool: request.tool, input: request.input };
+		case "browser_observe":
+			return { tool: request.tool, input: request.input };
+		case "browser_act":
+			return { tool: request.tool, input: request.input };
+		case "browser_handoff":
+			return { tool: request.tool, input: request.input };
+	}
+}
 
 function queuedTurnView(draft: QueuedTurnDraft): QueuedTurnView {
 	const { text, attachments } = splitSessionAttachmentPrompt(draft.input.text);
@@ -481,12 +497,12 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 		const uiContext = this.interactions?.createExtensionUIContext(this.sessionId, (event) => this.publish(event));
 		if (this.interactions) {
 			const browserTools = this.interactions.hasOwner(this.sessionId)
-				? createBrowserToolDefinitions(({ toolCallId, tool, input, signal }) =>
+				? createBrowserToolDefinitions((request) =>
 						this.interactions!.requestBrowserTool(
 							this.sessionId,
-							toolCallId,
-							{ tool, input } as BrowserToolCall,
-							signal,
+							request.toolCallId,
+							protocolBrowserToolCall(request),
+							request.signal,
 						),
 					)
 				: [];

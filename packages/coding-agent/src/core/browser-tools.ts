@@ -1,15 +1,4 @@
-import {
-	BrowserActInputSchema,
-	BrowserHandoffInputSchema,
-	BrowserNavigateInputSchema,
-	BrowserObserveInputSchema,
-	BrowserTabsInputSchema,
-	type BrowserActInput as ProtocolBrowserActInput,
-	type BrowserHandoffInput as ProtocolBrowserHandoffInput,
-	type BrowserNavigateInput as ProtocolBrowserNavigateInput,
-	type BrowserObserveInput as ProtocolBrowserObserveInput,
-	type BrowserTabsInput as ProtocolBrowserTabsInput,
-} from "@metis/app-protocol";
+import { type Static, Type } from "typebox";
 import type { ToolDefinition } from "./extensions/types.ts";
 
 export const BROWSER_TOOL_NAMES = [
@@ -21,17 +10,155 @@ export const BROWSER_TOOL_NAMES = [
 ] as const;
 export type BrowserToolName = (typeof BROWSER_TOOL_NAMES)[number];
 
-export const BrowserTabsParams = BrowserTabsInputSchema;
-export const BrowserNavigateParams = BrowserNavigateInputSchema;
-export const BrowserObserveParams = BrowserObserveInputSchema;
-export const BrowserActParams = BrowserActInputSchema;
-export const BrowserHandoffParams = BrowserHandoffInputSchema;
+function utf8String(maximum: number, options: Record<string, unknown> = {}) {
+	return Type.Refine(
+		Type.String(options),
+		(value) => new TextEncoder().encode(value).byteLength <= maximum,
+		`must not exceed ${maximum} UTF-8 bytes`,
+	);
+}
 
-export type BrowserTabsInput = ProtocolBrowserTabsInput;
-export type BrowserNavigateInput = ProtocolBrowserNavigateInput;
-export type BrowserObserveInput = ProtocolBrowserObserveInput;
-export type BrowserActInput = ProtocolBrowserActInput;
-export type BrowserHandoffInput = ProtocolBrowserHandoffInput;
+const BrowserId = Type.String({ format: "uuid" });
+const ProfileId = Type.String({ format: "uuid" });
+const ElementId = Type.String({ pattern: "^e[1-9][0-9]{0,5}$", maxLength: 7 });
+const BrowserOrigin = Type.Refine(
+	utf8String(2048, { minLength: 1 }),
+	(value) => {
+		try {
+			const parsed = new URL(value);
+			return (parsed.protocol === "http:" || parsed.protocol === "https:") && parsed.origin === value;
+		} catch {
+			return false;
+		}
+	},
+	"must be an exact HTTP(S) origin",
+);
+const BrowserNavigationTarget = Type.Refine(
+	utf8String(8192, { minLength: 1 }),
+	(value) => {
+		try {
+			const parsed = new URL(value);
+			return (parsed.protocol === "http:" || parsed.protocol === "https:") && !parsed.username && !parsed.password;
+		} catch {
+			return !/^[A-Za-z][A-Za-z0-9+.-]*:/.test(value);
+		}
+	},
+	"must be HTTP(S) without credentials or search text",
+);
+const Coordinate = Type.Number({ minimum: -2_147_483_648, maximum: 2_147_483_647 });
+const CoordinateTarget = Type.Object({ x: Coordinate, y: Coordinate }, { additionalProperties: false });
+const ElementTarget = Type.Object({ elementId: ElementId }, { additionalProperties: false });
+const PointTarget = Type.Union([ElementTarget, CoordinateTarget]);
+
+export const BrowserTabsParams = Type.Union([
+	Type.Object({ action: Type.Literal("list") }, { additionalProperties: false }),
+	Type.Object({ action: Type.Literal("open"), profileId: Type.Optional(ProfileId) }, { additionalProperties: false }),
+	Type.Object({ action: Type.Literal("close"), browserId: BrowserId }, { additionalProperties: false }),
+]);
+
+export const BrowserNavigateParams = Type.Union([
+	Type.Object(
+		{ browserId: BrowserId, action: Type.Literal("goto"), url: BrowserNavigationTarget },
+		{ additionalProperties: false },
+	),
+	Type.Object(
+		{
+			browserId: BrowserId,
+			action: Type.Union([Type.Literal("back"), Type.Literal("forward"), Type.Literal("reload")]),
+		},
+		{ additionalProperties: false },
+	),
+]);
+
+export const BrowserObserveParams = Type.Object(
+	{
+		browserId: BrowserId,
+		mode: Type.Optional(Type.Union([Type.Literal("state"), Type.Literal("screenshot"), Type.Literal("both")])),
+		sinceRevision: Type.Optional(Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER })),
+	},
+	{ additionalProperties: false },
+);
+
+const BrowserAction = Type.Union([
+	Type.Object(
+		{
+			type: Type.Literal("click"),
+			target: PointTarget,
+			button: Type.Optional(Type.Union([Type.Literal("left"), Type.Literal("right")])),
+		},
+		{ additionalProperties: false },
+	),
+	Type.Object({ type: Type.Literal("hover"), target: PointTarget }, { additionalProperties: false }),
+	Type.Object(
+		{
+			type: Type.Literal("type"),
+			elementId: ElementId,
+			text: utf8String(32 * 1024),
+			replace: Type.Optional(Type.Boolean()),
+		},
+		{ additionalProperties: false },
+	),
+	Type.Object({ type: Type.Literal("press"), key: utf8String(64, { minLength: 1 }) }, { additionalProperties: false }),
+	Type.Object(
+		{
+			type: Type.Literal("scroll"),
+			direction: Type.Union([Type.Literal("up"), Type.Literal("down"), Type.Literal("left"), Type.Literal("right")]),
+			pages: Type.Optional(Type.Integer({ minimum: 1, maximum: 20 })),
+			elementId: Type.Optional(ElementId),
+		},
+		{ additionalProperties: false },
+	),
+	Type.Object({ type: Type.Literal("drag"), from: PointTarget, to: PointTarget }, { additionalProperties: false }),
+	Type.Object(
+		{ type: Type.Literal("select"), elementId: ElementId, value: utf8String(4096) },
+		{ additionalProperties: false },
+	),
+	Type.Object(
+		{ type: Type.Literal("dialog"), decision: Type.Union([Type.Literal("accept"), Type.Literal("dismiss")]) },
+		{ additionalProperties: false },
+	),
+]);
+
+export const BrowserActParams = Type.Object(
+	{
+		browserId: BrowserId,
+		documentId: Type.String({ format: "uuid" }),
+		snapshotRevision: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
+		origin: BrowserOrigin,
+		intent: utf8String(1024, { minLength: 1 }),
+		risk: Type.Union([
+			Type.Literal("ordinary"),
+			Type.Literal("external_side_effect"),
+			Type.Literal("sensitive_data"),
+			Type.Literal("destructive"),
+			Type.Literal("financial"),
+		]),
+		action: BrowserAction,
+	},
+	{ additionalProperties: false },
+);
+
+export const BrowserHandoffParams = Type.Object(
+	{
+		browserId: BrowserId,
+		reason: Type.Union([
+			Type.Literal("login"),
+			Type.Literal("otp"),
+			Type.Literal("passkey"),
+			Type.Literal("device_approval"),
+			Type.Literal("captcha"),
+			Type.Literal("sensitive_action"),
+			Type.Literal("other"),
+		]),
+	},
+	{ additionalProperties: false },
+);
+
+export type BrowserTabsInput = Static<typeof BrowserTabsParams>;
+export type BrowserNavigateInput = Static<typeof BrowserNavigateParams>;
+export type BrowserObserveInput = Static<typeof BrowserObserveParams>;
+export type BrowserActInput = Static<typeof BrowserActParams>;
+export type BrowserHandoffInput = Static<typeof BrowserHandoffParams>;
 
 type BrowserHostRequestBase = {
 	readonly toolCallId: string;
@@ -81,7 +208,15 @@ export type BrowserHostResult =
 			readonly tool: "browser_handoff";
 			readonly details:
 				| { readonly status: "completed"; readonly observation: BrowserHostObservation }
-				| { readonly status: "cancelled"; readonly reason: string };
+				| {
+						readonly status: "cancelled";
+						readonly reason:
+							| "user_cancelled"
+							| "tab_closed"
+							| "turn_interrupted"
+							| "server_restarted"
+							| "timed_out";
+				  };
 	  };
 
 export type BrowserHostExecutor = (request: BrowserHostRequest) => Promise<BrowserHostResult>;

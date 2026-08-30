@@ -90,6 +90,17 @@ describe("browser host tools", () => {
 				action: { type: "click", target: { elementId: "e1" } },
 			}),
 		).toBe(false);
+		expect(
+			Value.Check(BrowserActParams, {
+				browserId: BROWSER_ID,
+				documentId: DOCUMENT_ID,
+				snapshotRevision: 1,
+				origin: "https://example.test",
+				intent: "Press an oversized key",
+				risk: "ordinary",
+				action: { type: "press", key: "你".repeat(22) },
+			}),
+		).toBe(false);
 	});
 
 	it("forwards toolCallId and signal and formats observations", async () => {

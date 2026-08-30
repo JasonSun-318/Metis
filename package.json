@@ -11,7 +11,7 @@
 	],
 	"scripts": {
 		"clean": "npm run clean --workspaces",
-		"build": "cd packages/tui && npm run build && cd ../ai && npm run build && cd ../agent && npm run build && cd ../app-protocol && npm run build && cd ../coding-agent && npm run build && cd ../app-server && npm run build",
+		"build": "cd packages/tui && npm run build && cd ../ai && npm run build && cd ../agent && npm run build && cd ../coding-agent && npm run build && cd ../app-protocol && npm run build && cd ../app-server && npm run build",
 		"check": "biome check --write --error-on-warnings . && npm run check:pinned-deps && npm run check:ts-imports && npm run check:shrinkwrap && npm run check:install-lock:coding-agent && tsgo --noEmit && npm run check:desktop && npm run check:browser-smoke",
 		"check:desktop": "npm run check:types --workspace @metis/desktop",
 		"check:browser-smoke": "node scripts/check-browser-smoke.mjs",
