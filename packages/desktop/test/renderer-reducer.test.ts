@@ -599,6 +599,7 @@ describe("renderer projection reducer", () => {
 			name: "report.xlsx",
 			byteLength: 4096,
 			deliveredAt: "2026-08-18T00:00:00.000Z",
+			availability: "available" as const,
 		};
 		store.applySnapshot({
 			...snapshot(EPOCH_A, 0),
@@ -622,6 +623,7 @@ describe("renderer projection reducer", () => {
 								name: "notes.txt",
 								byteLength: 12,
 								deliveredAt: "2026-08-18T00:00:01.000Z",
+								availability: "unavailable",
 							},
 						],
 					},

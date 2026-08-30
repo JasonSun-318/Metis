@@ -109,6 +109,7 @@ describe("DeliveredFileCard", () => {
 					fileId: "1234567890abcdef",
 					name: "financial_model.xlsx",
 					message: "Here is the completed model.",
+					availability: "available",
 				}}
 				onOpen={onOpen}
 				onPreview={onPreview}
@@ -124,11 +125,38 @@ describe("DeliveredFileCard", () => {
 
 		act(() => previewBtn?.click());
 		expect(onPreview).toHaveBeenCalledTimes(1);
-		expect(onPreview).toHaveBeenCalledWith({
+			expect(onPreview).toHaveBeenCalledWith({
 			fileId: "1234567890abcdef",
 			name: "financial_model.xlsx",
 			message: "Here is the completed model.",
+			availability: "available",
 		});
+	});
+
+	it("keeps unavailable history visible and disables every file action", () => {
+		const onPreview = vi.fn();
+		const onOpen = vi.fn();
+		const { container } = mount(
+			<DeliveredFileCard
+				file={{
+					fileId: "1234567890abcdef",
+					name: "financial_model.xlsx",
+					message: "Here is the completed model.",
+					availability: "unavailable",
+				}}
+				onOpen={onOpen}
+				onPreview={onPreview}
+			/>,
+		);
+
+		expect(container.textContent).toContain("File unavailable");
+		expect(container.textContent).toContain("Here is the completed model.");
+		expect(container.querySelector<HTMLButtonElement>(".transcript-delivered-file-open")?.disabled).toBe(true);
+		expect(container.querySelector<HTMLButtonElement>(".transcript-delivered-file-menu-trigger")?.disabled).toBe(true);
+
+		act(() => container.querySelector("article")?.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+		expect(onPreview).not.toHaveBeenCalled();
+		expect(onOpen).not.toHaveBeenCalled();
 	});
 });
 

@@ -74,6 +74,7 @@ function DeliveredFileIcon({ name }: { readonly name: string }) {
 
 export function DeliveredFileCard({ file, onOpen, onPreview }: DeliveredFileCardProps) {
 	const { t } = useTranslation();
+	const available = file.availability === "available";
 	const [menuOpen, setMenuOpen] = useState(false);
 	const [menuPosition, setMenuPosition] = useState<CSSProperties>({});
 	const triggerRef = useRef<HTMLButtonElement>(null);
@@ -112,6 +113,7 @@ export function DeliveredFileCard({ file, onOpen, onPreview }: DeliveredFileCard
 	}, [menuOpen, updateMenuPosition]);
 
 	const handleMainAction = () => {
+		if (!available) return;
 		if (onPreview) {
 			onPreview(file);
 		} else {
@@ -121,8 +123,10 @@ export function DeliveredFileCard({ file, onOpen, onPreview }: DeliveredFileCard
 
 	return (
 		<article
-			className="transcript-delivered-file-card"
-			onClick={(e) => {
+				aria-disabled={!available}
+				className={`transcript-delivered-file-card${available ? "" : " is-unavailable"}`}
+				onClick={(e) => {
+					if (!available) return;
 				const target = e.target as HTMLElement;
 				if (!target.closest(".transcript-delivered-file-actions") && !target.closest(".transcript-delivered-file-menu")) {
 					handleMainAction();
@@ -135,17 +139,24 @@ export function DeliveredFileCard({ file, onOpen, onPreview }: DeliveredFileCard
 			<div className="transcript-delivered-file-copy">
 				<strong title={file.name}>{fileBaseName(file.name)}</strong>
 				<small>{fileTypeLabel(file.name, t)}</small>
-				{file.message ? <p title={file.message}>{file.message}</p> : null}
-			</div>
-			<div className="transcript-delivered-file-actions">
-				<button className="transcript-delivered-file-open" onClick={handleMainAction} type="button">
+					{file.message ? <p title={file.message}>{file.message}</p> : null}
+					{available ? null : <p className="transcript-delivered-file-unavailable">{t("File unavailable")}</p>}
+				</div>
+				<div className="transcript-delivered-file-actions">
+					<button
+						className="transcript-delivered-file-open"
+						disabled={!available}
+						onClick={handleMainAction}
+						type="button"
+					>
 					{t("Preview")}
 				</button>
 				<button
 					aria-expanded={menuOpen}
 					aria-haspopup="menu"
 					aria-label={t("More file actions")}
-					className="transcript-delivered-file-menu-trigger"
+						className="transcript-delivered-file-menu-trigger"
+						disabled={!available}
 					onClick={() => setMenuOpen((current) => !current)}
 					ref={triggerRef}
 					type="button"
@@ -153,7 +164,7 @@ export function DeliveredFileCard({ file, onOpen, onPreview }: DeliveredFileCard
 					<CaretDown aria-hidden="true" size={12} />
 				</button>
 			</div>
-			{menuOpen
+				{available && menuOpen
 				? createPortal(
 						<div className="transcript-delivered-file-menu" ref={menuRef} role="menu" style={menuPosition}>
 							<button

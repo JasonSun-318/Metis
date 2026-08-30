@@ -1412,6 +1412,7 @@ const zhCN = {
 	"Rule fingerprint": "规则指纹",
 	"{{count}} additional details omitted": "已省略另外 {{count}} 项详情",
 	File: "文件",
+	"File unavailable": "文件不可用",
 	Open: "打开",
 	"Show in folder": "在文件夹中显示",
 	"More file actions": "更多文件操作",

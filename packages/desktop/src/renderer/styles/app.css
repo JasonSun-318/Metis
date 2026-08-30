@@ -1179,15 +1179,19 @@ textarea { resize: none; }
 .task-list-panel.is-collapsed .task-list-toggle svg { transform: rotate(180deg); }
 .transcript-delivered-files { display: grid; gap: 8px; margin: 10px 0 4px; }
 .transcript-delivered-file-card { display: grid; align-items: center; gap: 12px; grid-template-columns: 44px minmax(0, 1fr) auto; border: 1px solid var(--border); border-radius: 14px; background: var(--panel); padding: 12px 14px; box-shadow: var(--shadow); }
+.transcript-delivered-file-card.is-unavailable { box-shadow: none; opacity: .72; }
 .transcript-delivered-file-icon { display: grid; width: 44px; height: 44px; place-items: center; border-radius: 10px; background: var(--surface-03); color: var(--text-16); }
 .transcript-delivered-file-icon svg { display: block; }
 .transcript-delivered-file-copy { display: grid; min-width: 0; gap: 2px; }
 .transcript-delivered-file-copy strong { overflow: hidden; color: var(--text); font-size: 14px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .transcript-delivered-file-copy small { color: var(--text-08); font-size: 12px; }
 .transcript-delivered-file-copy p { overflow: hidden; margin: 2px 0 0; color: var(--text-12); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.transcript-delivered-file-copy .transcript-delivered-file-unavailable { color: var(--danger); }
 .transcript-delivered-file-actions { display: inline-flex; align-items: stretch; overflow: hidden; border: 1px solid var(--border); border-radius: 999px; background: var(--surface-03); }
 .transcript-delivered-file-open { border: 0; background: transparent; color: var(--text-22); padding: 7px 12px; font-size: 12px; font-weight: 500; }
 .transcript-delivered-file-open:hover { background: var(--surface-08); color: var(--text); }
+.transcript-delivered-file-open:disabled, .transcript-delivered-file-menu-trigger:disabled { cursor: default; opacity: .55; }
+.transcript-delivered-file-open:disabled:hover, .transcript-delivered-file-menu-trigger:disabled:hover { background: transparent; color: inherit; }
 .transcript-delivered-file-menu-trigger { display: grid; width: 30px; place-items: center; border: 0; border-left: 1px solid var(--border); background: transparent; color: var(--text-14); }
 .transcript-delivered-file-menu-trigger:hover, .transcript-delivered-file-menu-trigger[aria-expanded="true"] { background: var(--surface-08); color: var(--text); }
 .transcript-delivered-file-menu { z-index: 10000; display: grid; min-width: 176px; border: 1px solid var(--border-strong); border-radius: 9px; background: var(--surface-05); box-shadow: var(--overlay-shadow); padding: 4px; }

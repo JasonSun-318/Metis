@@ -300,6 +300,7 @@ describe("transcript turn presentation", () => {
 			name: "report.xlsx",
 			byteLength: 4096,
 			deliveredAt: "2026-08-18T00:00:00.000Z",
+			availability: "available" as const,
 		};
 		const items: ItemView[] = [
 			item("user-deliver", "user", [{ type: "text", text: "send the file" }]),
