@@ -140,25 +140,17 @@ import { embeddingConfigKey, embedTexts as embedMemoryTexts } from "./memory/mem
 import { collectMemoryEvidenceBatch, serializeExtractEvidence } from "./memory/memory-evidence.ts";
 import {
 	awaitWithAbort,
-	hasDurableMemoryIntent,
 	MEMORY_EXTRACT_TIMEOUT_MS,
-	type MemoryExtractActiveRun,
-	type MemoryExtractMode,
-	type MemoryExtractResult,
 	type MemoryExtractStatusSnapshot,
 	type RunMemoryExtractOptions,
 	runMemoryExtract,
 } from "./memory/memory-extract.ts";
 import { memoryProjectIdentity } from "./memory/memory-project.ts";
-import {
-	backfillMemoryEmbeddings,
-	MEMORY_RETRIEVE_TIMEOUT_MS,
-	type RetrievedMemoryFact,
-	searchMemories,
-} from "./memory/memory-search.ts";
-import { MEMORY_EMBEDDING_CREDENTIAL_ID, MEMORY_RERANK_CREDENTIAL_ID } from "./memory/memory-service-settings.ts";
+import { searchMemories } from "./memory/memory-search.ts";
+import { MEMORY_EMBEDDING_CREDENTIAL_ID } from "./memory/memory-service-settings.ts";
 import { openMemoryStore } from "./memory/memory-store.ts";
-import type { MemoryExtractRun, MemoryHealth } from "./memory/memory-types.ts";
+import type { MemoryHealth } from "./memory/memory-types.ts";
+import { type SessionMemoryExtractInput, SessionMemoryRuntime } from "./memory/session-memory-runtime.ts";
 import type { BashExecutionMessage, CustomMessage } from "./messages.ts";
 import type { ModelRegistry } from "./model-registry.ts";
 import { isPermissionMode, narrowPermissionMode, type PermissionMode } from "./permission-mode.ts";
@@ -546,12 +538,9 @@ export class AgentSession {
 	private _compactionAbortController: AbortController | undefined = undefined;
 	private _autoCompactionAbortController: AbortController | undefined = undefined;
 	private _overflowRecoveryAttempted = false;
-	private _activeMemoryExtract: MemoryExtractActiveRun | undefined;
-	private _memoryExtractPromise: Promise<MemoryExtractResult> | undefined;
+	private readonly _memoryRuntime: SessionMemoryRuntime;
 	private _memoryExtractRunner = runMemoryExtract;
-	private _memoryExtractAbortController: AbortController | undefined;
 	private _memoryExtractTimeoutMs = MEMORY_EXTRACT_TIMEOUT_MS;
-	private _userTurnsSinceExtract = 0;
 
 	// Branch summarization state
 	private _branchSummaryAbortController: AbortController | undefined = undefined;
@@ -625,8 +614,6 @@ export class AgentSession {
 	private readonly _includeAutoMemory: boolean;
 	private _autoMemoryRetrieved: Array<{ scope: "global" | "project"; text: string }> = [];
 	private _searchMemories = searchMemories;
-	private _memoryBackfillPromise: Promise<void> | undefined;
-	private _memoryBackfillAbort: AbortController | undefined;
 	private readonly _permissionModeCeiling?: () => PermissionMode;
 	private readonly _workspaceWritePolicy: "inherit" | "deny";
 	private readonly _unattendedExecution?: UnattendedExecutionProfile;
@@ -755,6 +742,31 @@ export class AgentSession {
 			(request) => this._queuePermissionApproval(request),
 			this._agentDir && !this._unattendedExecution ? new ProjectPermissionRuleStore(this._agentDir) : undefined,
 		);
+		this._memoryRuntime = new SessionMemoryRuntime({
+			agentDir: this._agentDir,
+			cwd: () => this._cwd,
+			sessionId: () => this.sessionId,
+			mode: () => this.mode,
+			enabled: () => this._includeAutoMemory && this.settingsManager.getAutoMemoryEnabled(),
+			engine: () => this.settingsManager.getMemoryEngine(),
+			hasModel: () => this.model !== undefined,
+			lastUserText: () => this._lastUserMessageText(),
+			collectEvidence: (cursorEntryId) => collectMemoryEvidenceBatch(this.sessionManager.getBranch(), cursorEntryId),
+			createExtractOptions: (input) => this._createMemoryExtractOptions(input),
+			refreshPrompt: () => this.refreshSystemPrompt(),
+			applyRetrieved: (memories) => {
+				this._autoMemoryRetrieved = [...memories];
+			},
+			getEmbeddingSettings: () => this.settingsManager.getEmbeddingSettings(),
+			getRerankSettings: () => this.settingsManager.getRerankSettings(),
+			getCredential: (id) =>
+				this._modelRegistry.authStorage.getApiKey(id, {
+					includeFallback: false,
+				}),
+			runExtract: (options) => this._memoryExtractRunner(options),
+			search: (options) => this._searchMemories(options),
+			extractTimeoutMs: () => this._memoryExtractTimeoutMs,
+		});
 
 		// Always subscribe to agent events for internal handling
 		// (session persistence, extensions, auto-compaction, retry logic)
@@ -773,7 +785,6 @@ export class AgentSession {
 		this._unsubscribeMcpCatalog = this._mcpManager?.subscribeCatalog(() => {
 			this._refreshToolRegistry({ activeToolNames: this.getConfiguredActiveToolNames() });
 		});
-		this._maybeStartMemoryEmbeddingBackfill();
 	}
 
 	/** Model registry for API key resolution and model discovery */
@@ -2253,6 +2264,7 @@ export class AgentSession {
 				"Cannot dispose an active agent session; await abortAndDrainAgentEventPersistence() before disposing",
 			);
 		}
+		void this._memoryRuntime.dispose();
 		this._interactiveBashBoundary?.forceDispose();
 		const errors: unknown[] = [];
 		if (!this._disposeCoreComplete) {
@@ -2262,8 +2274,6 @@ export class AgentSession {
 					this.abortCompaction();
 					this.abortBranchSummary();
 					this.abortBash();
-					this._memoryExtractAbortController?.abort();
-					this._memoryBackfillAbort?.abort();
 					this.agent.abort();
 				} catch {
 					// Continue invalidating the session even if an abort hook throws.
@@ -2367,45 +2377,24 @@ export class AgentSession {
 	}
 
 	getMemoryExtractStatus(limit = 10): MemoryExtractStatusSnapshot {
-		let recent: MemoryExtractRun[] = [];
-		if (this._agentDir) {
-			try {
-				const store = openMemoryStore(getMemorySqlitePath(this._agentDir));
-				try {
-					recent = store.listExtractRuns(limit);
-				} finally {
-					store.close();
-				}
-			} catch {
-				recent = [];
-			}
-		}
+		const snapshot = this._memoryRuntime.snapshot(limit);
 		return {
-			enabled: this._includeAutoMemory && this.settingsManager.getAutoMemoryEnabled(),
-			active: this._activeMemoryExtract ? { ...this._activeMemoryExtract } : undefined,
-			recent,
+			enabled: snapshot.enabled,
+			...(snapshot.active ? { active: snapshot.active } : {}),
+			recent: snapshot.recent,
 		};
 	}
 
 	getMemoryHealth(): MemoryHealth[] {
-		if (!this._agentDir) return [];
-		try {
-			const store = openMemoryStore(getMemorySqlitePath(this._agentDir));
-			try {
-				const backfillRunning = store.getActiveBackfillLease(Date.now()) !== null;
-				return store
-					.listHealth()
-					.filter((row) => row.operation !== "backfill" || row.status !== "running" || backfillRunning);
-			} finally {
-				store.close();
-			}
-		} catch {
-			return [];
-		}
+		return [...this._memoryRuntime.snapshot().health];
 	}
 
 	async waitForMemoryExtract(): Promise<void> {
-		await this._memoryExtractPromise?.catch(() => undefined);
+		await this._memoryRuntime.waitForExtract();
+	}
+
+	async disposeMemoryRuntime(): Promise<void> {
+		await this._memoryRuntime.dispose();
 	}
 
 	/** Current retry attempt (0 if not retrying) */
@@ -2571,12 +2560,7 @@ export class AgentSession {
 	}
 
 	async prepareModelServiceSettingsRefresh(): Promise<void> {
-		this._memoryExtractAbortController?.abort("settings-refresh");
-		this._memoryBackfillAbort?.abort("settings-refresh");
-		const drains: Promise<unknown>[] = [];
-		if (this._memoryExtractPromise) drains.push(this._memoryExtractPromise);
-		if (this._memoryBackfillPromise) drains.push(this._memoryBackfillPromise);
-		await Promise.allSettled(drains);
+		await this._memoryRuntime.quiesce("settings-refresh");
 	}
 
 	async applyModelServiceSettingsRefresh(): Promise<void> {
@@ -2585,8 +2569,7 @@ export class AgentSession {
 		this._refreshCurrentModelFromRegistry();
 		this._applyImageToolSettings();
 		this.refreshSystemPrompt();
-		this._maybeSchedulePendingMemoryExtract();
-		this._maybeStartMemoryEmbeddingBackfill();
+		this._memoryRuntime.resume();
 	}
 
 	async updateMemorySettings(update: {
@@ -2813,83 +2796,39 @@ export class AgentSession {
 		this.agent.state.systemPrompt = this._effectiveSystemPrompt();
 	}
 
-	private _maybeStartMemoryEmbeddingBackfill(): void {
-		if (
-			!this._includeAutoMemory ||
-			!this._agentDir ||
-			!this.settingsManager.getAutoMemoryEnabled() ||
-			this.settingsManager.getMemoryEngine() !== "extract"
-		) {
-			return;
-		}
-		const embeddingSettings = this.settingsManager.getEmbeddingSettings();
-		if (!embeddingSettings || this._memoryBackfillPromise) return;
-
+	private async _createMemoryExtractOptions(
+		options: SessionMemoryExtractInput,
+	): Promise<RunMemoryExtractOptions | undefined> {
 		const agentDir = this._agentDir;
-		const authStorage = this._modelRegistry.authStorage;
-		this._memoryBackfillAbort?.abort();
-		const controller = new AbortController();
-		this._memoryBackfillAbort = controller;
-		const tracked = Promise.resolve()
-			.then(async () => {
-				const embeddingApiKey = await authStorage.getApiKey(MEMORY_EMBEDDING_CREDENTIAL_ID, {
-					includeFallback: false,
-				});
-				if (!embeddingApiKey) return;
-				const store = openMemoryStore(getMemorySqlitePath(agentDir));
-				try {
-					if (controller.signal.aborted) return;
-					await backfillMemoryEmbeddings({
-						store,
-						embeddingSettings,
-						embeddingApiKey,
-						signal: controller.signal,
-					});
-				} finally {
-					store.close();
-				}
-			})
-			.catch(() => undefined)
-			.finally(() => {
-				if (this._memoryBackfillAbort === controller) {
-					this._memoryBackfillAbort = undefined;
-				}
-				if (this._memoryBackfillPromise === tracked) this._memoryBackfillPromise = undefined;
-			});
-		this._memoryBackfillPromise = tracked;
-	}
-
-	private async _retrieveAutoMemories(query: string): Promise<Array<{ scope: "global" | "project"; text: string }>> {
-		this._maybeStartMemoryEmbeddingBackfill();
-		const agentDir = this._agentDir;
-		const embeddingSettings = this.settingsManager.getEmbeddingSettings();
-		if (!agentDir || !embeddingSettings) return [];
-		const embeddingApiKey = await this._modelRegistry.authStorage.getApiKey(MEMORY_EMBEDDING_CREDENTIAL_ID, {
-			includeFallback: false,
-		});
-		if (!embeddingApiKey) return [];
-		const rerankSettings = this.settingsManager.getRerankSettings();
-		const rerankApiKey = rerankSettings
-			? await this._modelRegistry.authStorage.getApiKey(MEMORY_RERANK_CREDENTIAL_ID, { includeFallback: false })
-			: undefined;
-
-		const projectKey = memoryProjectIdentity(this._cwd).projectKey;
-		const store = openMemoryStore(getMemorySqlitePath(agentDir));
-		try {
-			const hits: RetrievedMemoryFact[] = await this._searchMemories({
-				store,
-				query,
-				projectKey,
-				embeddingSettings,
-				embeddingApiKey,
-				...(rerankSettings ? { rerankSettings } : {}),
-				...(rerankApiKey ? { rerankApiKey } : {}),
-				retrieveTimeoutMs: MEMORY_RETRIEVE_TIMEOUT_MS,
-			});
-			return hits.map((hit) => ({ scope: hit.scope, text: hit.text }));
-		} finally {
-			store.close();
+		const model = this.model;
+		if (!agentDir || !model) return undefined;
+		const extractArgs: RunMemoryExtractOptions = {
+			mode: options.mode,
+			agentDir,
+			cwd: this._cwd,
+			agentMode: this.mode,
+			projectKey: memoryProjectIdentity(this._cwd).projectKey,
+			sessionId: this.sessionId,
+			evidence: options.evidence,
+			cursorEntryId: options.cursorEntryId,
+			trigger: options.trigger,
+			signal: options.signal,
+			model,
+			thinkingLevel: "off",
+			streamFn: this.agent.streamFn,
+			...(this.agent.getApiKey ? { getApiKey: this.agent.getApiKey } : {}),
+			transport: this.agent.transport,
+			...(this.agent.thinkingBudgets ? { thinkingBudgets: this.agent.thinkingBudgets } : {}),
+			...(this.agent.maxRetryDelayMs !== undefined ? { maxRetryDelayMs: this.agent.maxRetryDelayMs } : {}),
+		};
+		if (this.settingsManager.getMemoryEngine() === "extract") {
+			const embedder = await awaitWithAbort(this._createMemoryEmbedder(), options.signal);
+			if (embedder) {
+				extractArgs.embeddingKey = embedder.key;
+				extractArgs.embedTexts = embedder.embed;
+			}
 		}
+		return extractArgs;
 	}
 
 	private async _createMemoryEmbedder(): Promise<
@@ -3579,27 +3518,8 @@ export class AgentSession {
 			}
 
 			// Extract-engine retrieval: embed the user message and inject top hits (never fall back to catalog).
-			if (
-				this._includeAutoMemory &&
-				this.settingsManager.getAutoMemoryEnabled() &&
-				this.settingsManager.getMemoryEngine() === "extract"
-			) {
-				try {
-					this._autoMemoryRetrieved = await this._retrieveAutoMemories(expandedText);
-				} catch {
-					this._autoMemoryRetrieved = [];
-				}
-				this._baseSystemPrompt = this._rebuildSystemPrompt(this.getConfiguredActiveToolNames());
-				if (this._systemPromptOverride === undefined) {
-					this.agent.state.systemPrompt = this._effectiveSystemPrompt();
-				}
-				this._maybeStartMemoryEmbeddingBackfill();
-			} else if (
-				this._includeAutoMemory &&
-				this.settingsManager.getAutoMemoryEnabled() &&
-				this.settingsManager.getMemoryEngine() === "index"
-			) {
-				this.refreshSystemPrompt();
+			if (this._includeAutoMemory && this.settingsManager.getAutoMemoryEnabled()) {
+				await this._memoryRuntime.prepareTurn(expandedText);
 			}
 
 			// Build messages array (custom message if any, then user message)
@@ -4347,237 +4267,7 @@ export class AgentSession {
 	}
 
 	private _scheduleThrottledMemoryExtract(): void {
-		if (!this._includeAutoMemory || !this._agentDir || !this.settingsManager.getAutoMemoryEnabled() || !this.model) {
-			return;
-		}
-
-		this._userTurnsSinceExtract++;
-		const userText = this._lastUserMessageText();
-		if (this._userTurnsSinceExtract < 4 && !hasDurableMemoryIntent(userText)) {
-			return;
-		}
-
-		// Compact reconcile already covers uncompressed messages for this turn.
-		if (this._activeMemoryExtract?.extractMode === "reconcile") {
-			return;
-		}
-
-		// Coalesce an in-flight commit extract.
-		if (this._memoryExtractPromise && this._activeMemoryExtract?.extractMode === "commit") {
-			return;
-		}
-
-		const controller = new AbortController();
-		this._memoryExtractAbortController = controller;
-		void this._launchMemoryExtract({
-			mode: "commit",
-			trigger: "turn",
-			evidence: "",
-			cursorEntryId: null,
-			signal: controller.signal,
-		}).catch(() => undefined);
-	}
-
-	private _maybeSchedulePendingMemoryExtract(): void {
-		if (
-			this._memoryExtractPromise ||
-			!this._includeAutoMemory ||
-			!this._agentDir ||
-			!this.settingsManager.getAutoMemoryEnabled() ||
-			!this.model
-		) {
-			return;
-		}
-		const controller = new AbortController();
-		this._memoryExtractAbortController = controller;
-		void this._launchMemoryExtract({
-			mode: "commit",
-			trigger: "settings-refresh",
-			evidence: "",
-			cursorEntryId: null,
-			signal: controller.signal,
-		}).catch(() => undefined);
-	}
-
-	private _launchMemoryExtract(options: {
-		mode: MemoryExtractMode;
-		trigger: string;
-		evidence: string;
-		cursorEntryId: string | null;
-		signal: AbortSignal;
-	}): Promise<MemoryExtractResult> {
-		if (this._memoryExtractPromise && this._activeMemoryExtract?.extractMode === options.mode) {
-			return this._memoryExtractPromise;
-		}
-
-		const agentDir = this._agentDir;
-		const model = this.model;
-		if (!agentDir || !model) {
-			return Promise.resolve({
-				status: "skipped",
-				reason: "Memory extract unavailable",
-				runId: randomUUID(),
-			});
-		}
-
-		const active: MemoryExtractActiveRun = {
-			id: randomUUID(),
-			sessionId: this.sessionId,
-			mode: this.mode,
-			extractMode: options.mode,
-			cwd: this._cwd,
-			trigger: options.trigger,
-			startedAt: new Date().toISOString(),
-		};
-		this._activeMemoryExtract = active;
-		const timeoutSignal = AbortSignal.timeout(this._memoryExtractTimeoutMs);
-		const signal = AbortSignal.any([options.signal, timeoutSignal]);
-		const extractPromise = Promise.resolve().then(async () => {
-			try {
-				return options.mode === "commit"
-					? await this._drainMemoryExtract(options.trigger, signal)
-					: await this._invokeMemoryExtract({ ...options, signal });
-			} catch (error) {
-				const result: MemoryExtractResult = options.signal.aborted
-					? { status: "skipped", reason: "Aborted", runId: active.id }
-					: timeoutSignal.aborted
-						? {
-								status: "failed",
-								reason: `Timed out after ${this._memoryExtractTimeoutMs}ms`,
-								runId: active.id,
-							}
-						: {
-								status: "failed",
-								reason: error instanceof Error ? error.message : String(error),
-								runId: active.id,
-							};
-				this._recordMemoryExtractLifecycleFailure(result);
-				return result;
-			}
-		});
-		const tracked = extractPromise
-			.then((result) => {
-				if (result.status === "success") {
-					this.refreshSystemPrompt();
-				}
-				return result;
-			})
-			.finally(() => {
-				if (this._activeMemoryExtract?.id === active.id) this._activeMemoryExtract = undefined;
-				if (this._memoryExtractAbortController?.signal === options.signal) {
-					this._memoryExtractAbortController = undefined;
-				}
-			});
-		void tracked.catch(() => undefined);
-		this._memoryExtractPromise = tracked;
-		return tracked.finally(() => {
-			if (this._memoryExtractPromise === tracked) this._memoryExtractPromise = undefined;
-		});
-	}
-
-	private async _drainMemoryExtract(trigger: string, signal: AbortSignal): Promise<MemoryExtractResult> {
-		let lastResult: MemoryExtractResult = { status: "skipped", reason: "No pending evidence", runId: randomUUID() };
-		while (!signal.aborted && this._includeAutoMemory && this.settingsManager.getAutoMemoryEnabled()) {
-			const store = openMemoryStore(getMemorySqlitePath(this._agentDir!));
-			let cursor: string | null;
-			try {
-				cursor = store.getExtractCursor(this.sessionId);
-			} finally {
-				store.close();
-			}
-			const batch = collectMemoryEvidenceBatch(this.sessionManager.getBranch(), cursor);
-			if (!batch.cursorEntryId) {
-				this._userTurnsSinceExtract = 0;
-				return lastResult;
-			}
-			lastResult = await this._invokeMemoryExtract({
-				mode: "commit",
-				trigger,
-				evidence: batch.evidence,
-				cursorEntryId: batch.cursorEntryId,
-				signal,
-			});
-			if (lastResult.status !== "success") return lastResult;
-			signal.throwIfAborted();
-			// A successful injected runner has the same contract as production: facts and projection are complete.
-			const cursorStore = openMemoryStore(getMemorySqlitePath(this._agentDir!));
-			try {
-				cursorStore.setExtractCursor(this.sessionId, batch.cursorEntryId, new Date().toISOString());
-			} finally {
-				cursorStore.close();
-			}
-			await awaitWithAbort(new Promise<void>((resolve) => setImmediate(resolve)), signal);
-		}
-		signal.throwIfAborted();
-		return lastResult;
-	}
-
-	private async _invokeMemoryExtract(options: {
-		mode: MemoryExtractMode;
-		trigger: string;
-		evidence: string;
-		cursorEntryId: string | null;
-		signal: AbortSignal;
-	}): Promise<MemoryExtractResult> {
-		const agentDir = this._agentDir!;
-		const model = this.model!;
-		const extractArgs: RunMemoryExtractOptions = {
-			mode: options.mode,
-			agentDir,
-			cwd: this._cwd,
-			agentMode: this.mode,
-			projectKey: memoryProjectIdentity(this._cwd).projectKey,
-			sessionId: this.sessionId,
-			evidence: options.evidence,
-			cursorEntryId: options.cursorEntryId,
-			trigger: options.trigger,
-			signal: options.signal,
-			model,
-			thinkingLevel: "off",
-			streamFn: this.agent.streamFn,
-			...(this.agent.getApiKey ? { getApiKey: this.agent.getApiKey } : {}),
-			transport: this.agent.transport,
-			...(this.agent.thinkingBudgets ? { thinkingBudgets: this.agent.thinkingBudgets } : {}),
-			...(this.agent.maxRetryDelayMs !== undefined ? { maxRetryDelayMs: this.agent.maxRetryDelayMs } : {}),
-		};
-		if (this.settingsManager.getMemoryEngine() === "extract") {
-			const embedder = await awaitWithAbort(this._createMemoryEmbedder(), options.signal);
-			if (embedder) {
-				extractArgs.embeddingKey = embedder.key;
-				extractArgs.embedTexts = embedder.embed;
-			}
-		}
-		return awaitWithAbort(this._memoryExtractRunner(extractArgs), options.signal);
-	}
-
-	private _recordMemoryExtractLifecycleFailure(result: MemoryExtractResult): void {
-		if (!this._agentDir) return;
-		try {
-			const store = openMemoryStore(getMemorySqlitePath(this._agentDir));
-			try {
-				const active = this._activeMemoryExtract;
-				store.recordExtractRun({
-					id: result.runId,
-					startedAt: active?.startedAt ?? new Date().toISOString(),
-					trigger: active?.trigger ?? "lifecycle",
-					status: result.status,
-					reason: result.reason ?? null,
-				});
-				store.recordHealth({
-					operation: "extract",
-					status: "error",
-					updatedAt: new Date().toISOString(),
-					reason:
-						result.status === "skipped"
-							? "Aborted; pending evidence will retry"
-							: (result.reason ?? "Extract failed"),
-				});
-			} finally {
-				store.close();
-			}
-		} catch {
-			// Lifecycle health is best-effort; the durable cursor still proves no work was acknowledged.
-		}
+		this._memoryRuntime.afterTurn();
 	}
 
 	private async _compactWithMemoryExtract<T>(
@@ -4586,41 +4276,11 @@ export class AgentSession {
 		signal: AbortSignal,
 		compactWork: () => Promise<T>,
 	): Promise<T> {
-		signal.throwIfAborted();
-		if (!this._includeAutoMemory || !this._agentDir || !this.settingsManager.getAutoMemoryEnabled() || !this.model) {
-			return compactWork();
-		}
-
 		const evidence = serializeExtractEvidence([
 			...preparation.messagesToSummarize,
 			...preparation.turnPrefixMessages,
 		]);
-
-		// Wait for an in-flight commit so we do not overlap modes on the same store.
-		if (this._memoryExtractPromise && this._activeMemoryExtract?.extractMode === "commit") {
-			await this._memoryExtractPromise.catch(() => undefined);
-		}
-
-		const trackedExtract =
-			this._memoryExtractPromise && this._activeMemoryExtract?.extractMode === "reconcile"
-				? this._memoryExtractPromise
-				: this._launchMemoryExtract({
-						mode: "reconcile",
-						trigger: reason,
-						evidence,
-						cursorEntryId: null,
-						signal,
-					});
-
-		try {
-			return await compactWork();
-		} finally {
-			try {
-				await trackedExtract;
-			} catch {
-				// Extract must never replace the Compact result.
-			}
-		}
+		return this._memoryRuntime.withCompaction({ evidence, reason, signal }, compactWork);
 	}
 
 	/**

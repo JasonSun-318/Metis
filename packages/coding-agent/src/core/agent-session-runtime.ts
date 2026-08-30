@@ -962,7 +962,7 @@ export class AgentSessionRuntime {
 			errors.push(error);
 		}
 		try {
-			await session.waitForMemoryExtract();
+			await session.disposeMemoryRuntime();
 		} catch (error) {
 			errors.push(error);
 		}
@@ -1438,7 +1438,7 @@ export class AgentSessionRuntime {
 		if (!this.shutdownAttempted) {
 			this.shutdownAttempted = true;
 			try {
-				await session.waitForMemoryExtract();
+				await session.disposeMemoryRuntime();
 			} catch (error) {
 				errors.push(error);
 			}
