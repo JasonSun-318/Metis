@@ -141,6 +141,8 @@ function browserHarness(
 		destroy: vi.fn(),
 		focus: vi.fn(),
 		isDestroyed: vi.fn(() => false),
+		off: vi.fn(),
+		on: vi.fn(),
 		setBounds: vi.fn(),
 		setFocusable: vi.fn(),
 		setIgnoreMouseEvents: vi.fn(),
@@ -440,6 +442,7 @@ describe("BrowserManager", () => {
 		const popup = harness.windowOpen("https://accounts.example.test/oauth");
 		expect(popup).toMatchObject({ action: "allow", createWindow: expect.any(Function) });
 		expect(popup?.createWindow?.({ webPreferences: { openerId: 42 } } as never)).toBe(harness.webContents);
+		expect(harness.popupWindow.on).toHaveBeenCalledWith("closed", expect.any(Function));
 		expect(harness.createdPreferences()).toMatchObject({ openerId: 42 });
 		const listed = await harness.manager.executeTool(
 			SESSION_ID,

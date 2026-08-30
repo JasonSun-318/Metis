@@ -102,6 +102,8 @@ type BrowserPopupWindow = Pick<
 	| "destroy"
 	| "focus"
 	| "isDestroyed"
+	| "off"
+	| "on"
 	| "setBounds"
 	| "setFocusable"
 	| "setIgnoreMouseEvents"
@@ -1313,6 +1315,7 @@ export class BrowserManager {
 		contents.on("found-in-page", onFoundInPage);
 		contents.on("before-input-event", onBeforeInput);
 		contents.on("destroyed", onDestroyed);
+		record.popupWindow?.on("closed", onDestroyed);
 		record.cleanup.push(
 			() => contents.off("did-start-loading", onDidStartLoading),
 			() => contents.off("did-stop-loading", onDidStopLoading),
@@ -1327,6 +1330,7 @@ export class BrowserManager {
 			() => contents.off("found-in-page", onFoundInPage),
 			() => contents.off("before-input-event", onBeforeInput),
 			() => contents.off("destroyed", onDestroyed),
+			() => record.popupWindow?.off("closed", onDestroyed),
 		);
 		contents.setWindowOpenHandler(({ url }) => {
 			try {

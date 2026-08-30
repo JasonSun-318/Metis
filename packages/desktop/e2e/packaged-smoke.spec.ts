@@ -463,10 +463,10 @@ test("packaged task list uses the Metis composer UI in Chat and Code", async ({}
 
 		await composerInput.fill("/status");
 		await slashMenu.getByRole("option").click();
-		const statusPanel = page.getByRole("dialog", { name: "Session status", exact: true });
+		const statusPanel = page.getByRole("dialog", { name: "Context Usage", exact: true });
 		await expect(statusPanel).toBeVisible();
-		await expect(statusPanel).toContainText(CHAT_ACTIVE_ID);
-		await expect(statusPanel).toContainText("Chat");
+		await expect(statusPanel).toContainText("Context usage unavailable");
+		await expect(statusPanel).not.toContainText(CHAT_ACTIVE_ID);
 		await page.locator(".composer-dock").screenshot({
 			animations: "disabled",
 			path: testInfo.outputPath("slash-status-panel.png"),

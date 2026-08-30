@@ -34,7 +34,6 @@ describe("SessionStatusPanel", () => {
 				}}
 			/>,
 		));
-		expect(container.querySelector('[role="dialog"]')?.getAttribute("aria-label")).toBe("Session status");
 		expect(container.textContent).toContain("Context Usage");
 		expect(container.textContent).toContain("50% Full");
 		expect(container.textContent).toContain("~64.0K / 128K");
