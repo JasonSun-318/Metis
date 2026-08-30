@@ -1,4 +1,13 @@
-import { ArrowClockwise, Sparkle, Trash } from "@phosphor-icons/react";
+import {
+	ArrowClockwise,
+	Code,
+	GlobeHemisphereWest,
+	Lightning,
+	MagnifyingGlass,
+	ShieldCheck,
+	Sparkle,
+	Trash,
+} from "@phosphor-icons/react";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
@@ -6,11 +15,31 @@ import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
 const MAX_INSTRUCTION_BYTES = 64 * 1024;
 
 const PRESET_INSTRUCTIONS = [
-	{ label: "⚡ 简洁直击", text: "回答保持简洁高效，聚焦核心结论与代码改动，避免冗余寒暄。" },
-	{ label: "🔍 详细推导", text: "在修改代码前，先详细推导逻辑思路并评估边界情况与架构影响。" },
-	{ label: "💻 测试优先", text: "每次完成任务或逻辑修改后，务必补充并运行单元测试以确保验证完整。" },
-	{ label: "🌐 始终中文", text: "请始终使用中文进行所有思考、回复与代码注释说明。" },
-	{ label: "🛡️ 严格类型", text: "严格遵循 TypeScript 类型系统，严禁使用 any 或隐式类型绕过。" },
+	{
+		icon: Lightning,
+		label: "Concise and direct",
+		text: "Keep responses concise and efficient, focusing on core conclusions and code changes without unnecessary pleasantries.",
+	},
+	{
+		icon: MagnifyingGlass,
+		label: "Explain reasoning",
+		text: "Before changing code, explain the reasoning and assess edge cases and architectural impact.",
+	},
+	{
+		icon: Code,
+		label: "Test first",
+		text: "After completing a task or logic change, add and run the relevant tests to verify it.",
+	},
+	{
+		icon: GlobeHemisphereWest,
+		label: "Always use Chinese",
+		text: "Always use Chinese for reasoning, responses, and code comments.",
+	},
+	{
+		icon: ShieldCheck,
+		label: "Strict TypeScript",
+		text: "Follow the TypeScript type system strictly; do not use any or implicit type escapes.",
+	},
 ] as const;
 
 export function PersonalizationPanel({ api, serverReady }: {
@@ -104,16 +133,20 @@ export function PersonalizationPanel({ api, serverReady }: {
 						{t("Quick presets")}
 					</span>
 					<div className="personalization-presets-grid">
-						{PRESET_INSTRUCTIONS.map((preset) => (
-							<button
-								className="personalization-preset-chip"
-								key={preset.label}
-								onClick={() => applyPreset(preset.text)}
-								type="button"
-							>
-								{preset.label}
-							</button>
-						))}
+						{PRESET_INSTRUCTIONS.map((preset) => {
+							const Icon = preset.icon;
+							return (
+								<button
+									className="personalization-preset-chip"
+									key={preset.label}
+									onClick={() => applyPreset(t(preset.text))}
+									type="button"
+								>
+									<Icon aria-hidden="true" size={14} />
+									{t(preset.label)}
+								</button>
+							);
+						})}
 					</div>
 				</div>
 

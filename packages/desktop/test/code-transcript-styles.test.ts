@@ -23,7 +23,10 @@ function rule(selector: string): CSSStyleDeclaration {
 
 describe("Code transcript visual contract", () => {
 	it("keeps the dense Code transcript treatment scoped away from Chat", () => {
-		expect(tokens).toContain("--code-body-size: clamp(14px");
+		expect(tokens).toContain("--content-font-size: 15px;");
+		expect(tokens).toContain("--code-body-size: var(--content-font-size);");
+		expect(tokens).toContain("--code-meta-size: calc(var(--content-font-size) - 1px);");
+		expect(tokens).toContain("--code-mono-size: calc(var(--content-font-size) - 2px);");
 		expect(css).toContain(
 			".transcript-code .transcript-scroll { padding: 18px max(24px, calc((100% - var(--conversation-width)) / 2)) 28px; }",
 		);
@@ -62,8 +65,13 @@ describe("Code transcript visual contract", () => {
 	});
 
 	it("keeps the runtime spinner the same height as its status text", () => {
-		expect(rule(".turn-runtime-status").fontSize).toBe("12px");
+		expect(rule(".turn-runtime-status").fontSize).toBe("var(--chat-meta-size)");
+		expect(rule(".turn-runtime-status").lineHeight).toBe("1.4");
 		expect(rule(".turn-runtime-spinner").getPropertyValue("--uib-size")).toBe("1em");
+	});
+
+	it("scales raw Markdown HTML with the selected content size", () => {
+		expect(rule(".markdown-raw-html").fontSize).toBe("var(--code-mono-size)");
 	});
 
 	it("fixes the plan card scroll viewport", () => {

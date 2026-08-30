@@ -21,6 +21,7 @@ const generalPreferences: GeneralPreferences = {
 	motion: "system",
 	chatFont: "anthropic-serif",
 	codeFont: "system-sans",
+	contentFontSize: "15px",
 };
 
 const modelSettings: ModelSettingsView = {
@@ -150,7 +151,7 @@ describe("SettingsDialog", () => {
 		await act(async () => root.unmount());
 	});
 
-	it("changes language, appearance, motion, and independent prose fonts from General", async () => {
+	it("changes language, appearance, motion, content size, and independent prose fonts from General", async () => {
 		const api = {
 			getWebSearchSettings: vi.fn().mockResolvedValue({ enabled: false, provider: "brave", authConfigured: false }),
 		} as unknown as MetisDesktopApi;
@@ -189,6 +190,13 @@ describe("SettingsDialog", () => {
 		await act(async () => button(container, "Code 字体").click());
 		await act(async () => container.querySelectorAll<HTMLButtonElement>('[role="option"]')[1]!.click());
 		expect(onGeneralPreferencesChange).toHaveBeenCalledWith({ ...generalPreferences, codeFont: "system-serif" });
+		const contentFontSize = button(container, "内容字号");
+		expect(contentFontSize.closest(".settings-section")?.querySelector("h3")?.textContent).toBe("Typography");
+		await act(async () => contentFontSize.click());
+		const twentyPixels = [...container.querySelectorAll<HTMLButtonElement>('[role="option"]')]
+			.find((option) => option.textContent?.trim() === "20 px")!;
+		await act(async () => twentyPixels.click());
+		expect(onGeneralPreferencesChange).toHaveBeenCalledWith({ ...generalPreferences, contentFontSize: "20px" });
 		await act(async () => root.unmount());
 	});
 
@@ -232,6 +240,15 @@ describe("SettingsDialog", () => {
 		expect(button(container, "Save instructions").disabled).toBe(true);
 		expect(container.textContent).toContain("Global instructions are too large.");
 		expect(updatePersonalization).toHaveBeenCalledTimes(1);
+
+		await act(async () => setLocale("zh-CN"));
+		await flush();
+		expect(container.textContent).toContain("快速预设");
+		expect(container.textContent).not.toContain("Quick presets");
+		const presetText = [...container.querySelectorAll(".personalization-preset-chip")]
+			.map((node) => node.textContent ?? "")
+			.join(" ");
+		expect(presetText).not.toMatch(/[⚡🔍💻🌐🛡️]/u);
 		await act(async () => root.unmount());
 	});
 });

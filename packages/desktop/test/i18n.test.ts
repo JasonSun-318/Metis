@@ -33,6 +33,13 @@ describe("Desktop locale preference", () => {
 		expect(i18n.t("Working")).toBe("进行中");
 		expect(i18n.t("New Skill")).toBe("新建技能");
 		expect(i18n.t("New MCP")).toBe("新建 MCP");
+		expect(i18n.t("Quick presets")).toBe("快速预设");
+		expect(i18n.t("Concise and direct")).toBe("简洁直击");
+		expect(i18n.t("Strict TypeScript")).toBe("严格类型");
+		expect(i18n.t("Content font size")).toBe("内容字号");
+		expect(i18n.t("Adjust Chat and Code reading text without changing interface controls or layout.")).toBe(
+			"调整 Chat 与 Code 阅读内容的字号，不改变界面控件或布局。",
+		);
 		expect(i18n.t("All sources")).toBe("全部来源");
 		expect(i18n.t("All scopes")).toBe("全部范围");
 		expect(i18n.t("Back to Skills")).toBe("返回技能列表");

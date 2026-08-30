@@ -3,16 +3,31 @@ export const GENERAL_PREFERENCES_STORAGE_KEY = "metis.general-preferences.v1";
 export type MotionPreference = "system" | "reduced";
 export type ProseFontPreference = "anthropic-serif" | "system-serif" | "system-sans";
 
+export const CONTENT_FONT_SIZE_OPTIONS = [
+	{ value: "13px", label: "13 px" },
+	{ value: "14px", label: "14 px" },
+	{ value: "15px", label: "15 px" },
+	{ value: "16px", label: "16 px" },
+	{ value: "17px", label: "17 px" },
+	{ value: "18px", label: "18 px" },
+	{ value: "19px", label: "19 px" },
+	{ value: "20px", label: "20 px" },
+] as const;
+
+export type ContentFontSizePreference = (typeof CONTENT_FONT_SIZE_OPTIONS)[number]["value"];
+
 export interface GeneralPreferences {
 	readonly motion: MotionPreference;
 	readonly chatFont: ProseFontPreference;
 	readonly codeFont: ProseFontPreference;
+	readonly contentFontSize: ContentFontSizePreference;
 }
 
 export const DEFAULT_GENERAL_PREFERENCES: GeneralPreferences = {
 	motion: "system",
 	chatFont: "system-sans",
 	codeFont: "system-sans",
+	contentFontSize: "15px",
 };
 
 export const PROSE_FONT_OPTIONS = [
@@ -35,6 +50,10 @@ function isProseFontPreference(value: unknown): value is ProseFontPreference {
 	return value === "anthropic-serif" || value === "system-serif" || value === "system-sans";
 }
 
+function isContentFontSizePreference(value: unknown): value is ContentFontSizePreference {
+	return CONTENT_FONT_SIZE_OPTIONS.some((option) => option.value === value);
+}
+
 export function loadGeneralPreferences(storage: Pick<Storage, "getItem">): GeneralPreferences {
 	try {
 		const parsed = JSON.parse(storage.getItem(GENERAL_PREFERENCES_STORAGE_KEY) ?? "null") as Record<
@@ -45,6 +64,9 @@ export function loadGeneralPreferences(storage: Pick<Storage, "getItem">): Gener
 			motion: isMotionPreference(parsed?.motion) ? parsed.motion : DEFAULT_GENERAL_PREFERENCES.motion,
 			chatFont: isProseFontPreference(parsed?.chatFont) ? parsed.chatFont : DEFAULT_GENERAL_PREFERENCES.chatFont,
 			codeFont: isProseFontPreference(parsed?.codeFont) ? parsed.codeFont : DEFAULT_GENERAL_PREFERENCES.codeFont,
+			contentFontSize: isContentFontSizePreference(parsed?.contentFontSize)
+				? parsed.contentFontSize
+				: DEFAULT_GENERAL_PREFERENCES.contentFontSize,
 		};
 	} catch {
 		return DEFAULT_GENERAL_PREFERENCES;
@@ -70,4 +92,5 @@ export function applyGeneralPreferencesToDocument(
 	document.documentElement.dataset.motion = resolveReducedMotion(preferences.motion, media) ? "reduced" : "full";
 	document.documentElement.style.setProperty("--chat-prose-font", FONT_STACKS[preferences.chatFont]);
 	document.documentElement.style.setProperty("--code-prose-font", FONT_STACKS[preferences.codeFont]);
+	document.documentElement.style.setProperty("--content-font-size", preferences.contentFontSize);
 }

@@ -24,6 +24,22 @@ const zhCN = {
 	"For example: Keep explanations brief and focus on actionable changes.":
 		"例如：保持解释简洁，并优先给出可执行的修改。",
 	"Save instructions": "保存指令",
+	"Quick presets": "快速预设",
+	"Concise and direct": "简洁直击",
+	"Explain reasoning": "详细推导",
+	"Test first": "测试优先",
+	"Always use Chinese": "始终中文",
+	"Strict TypeScript": "严格类型",
+	"Keep responses concise and efficient, focusing on core conclusions and code changes without unnecessary pleasantries.":
+		"回答保持简洁高效，聚焦核心结论与代码改动，避免冗余寒暄。",
+	"Before changing code, explain the reasoning and assess edge cases and architectural impact.":
+		"在修改代码前，先详细推导逻辑思路并评估边界情况与架构影响。",
+	"After completing a task or logic change, add and run the relevant tests to verify it.":
+		"每次完成任务或逻辑修改后，务必补充并运行单元测试以确保验证完整。",
+	"Always use Chinese for reasoning, responses, and code comments.":
+		"请始终使用中文进行所有思考、回复与代码注释说明。",
+	"Follow the TypeScript type system strictly; do not use any or implicit type escapes.":
+		"严格遵循 TypeScript 类型系统，严禁使用 any 或隐式类型绕过。",
 	Saved: "已保存",
 	"Global instructions are too large.": "全局指令内容过大。",
 	"Couldn’t load global instructions.": "无法加载全局指令。",
@@ -37,6 +53,9 @@ const zhCN = {
 	Dark: "深色",
 	Light: "浅色",
 	"Follow system": "跟随系统",
+	"Content font size": "内容字号",
+	"Adjust Chat and Code reading text without changing interface controls or layout.":
+		"调整 Chat 与 Code 阅读内容的字号，不改变界面控件或布局。",
 	"Chat font": "Chat 字体",
 	"Font used for assistant prose in Chat mode.": "用于 Chat 模式助手正文的字体。",
 	"Code font": "Code 字体",
