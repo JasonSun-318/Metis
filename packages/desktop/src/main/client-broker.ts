@@ -97,6 +97,8 @@ interface ClientBrokerOptions {
 		| "control"
 		| "close"
 		| "closeAll"
+		| "getDownloadDirectory"
+		| "openDownloadDirectory"
 		| "listDownloads"
 		| "controlDownload"
 		| "listProfiles"
@@ -255,6 +257,8 @@ export class ClientBroker {
 		| "control"
 		| "close"
 		| "closeAll"
+		| "getDownloadDirectory"
+		| "openDownloadDirectory"
 		| "listDownloads"
 		| "controlDownload"
 		| "listProfiles"
@@ -354,6 +358,12 @@ export class ClientBroker {
 			},
 			close: () => undefined,
 			closeAll: () => undefined,
+			getDownloadDirectory: () => {
+				throw new Error("Browser is unavailable");
+			},
+			openDownloadDirectory: async () => {
+				throw new Error("Browser is unavailable");
+			},
 			listDownloads: () => [],
 			controlDownload: async () => {
 				throw new Error("Browser is unavailable");
@@ -651,6 +661,12 @@ export class ClientBroker {
 		this.register(DESKTOP_IPC_CHANNELS.listBrowserDownloads, 0, async () => this.browserManager.listDownloads());
 		this.register(DESKTOP_IPC_CHANNELS.controlBrowserDownload, 1, async (_event, [input]) => {
 			await this.browserManager.controlDownload(validateBrowserDownloadControlInput(input));
+		});
+		this.register(DESKTOP_IPC_CHANNELS.getBrowserDownloadDirectory, 0, async () =>
+			this.browserManager.getDownloadDirectory(),
+		);
+		this.register(DESKTOP_IPC_CHANNELS.openBrowserDownloadDirectory, 0, async () => {
+			await this.browserManager.openDownloadDirectory();
 		});
 		this.register(DESKTOP_IPC_CHANNELS.listBrowserProfiles, 0, async () => this.browserManager.listProfiles());
 		this.register(DESKTOP_IPC_CHANNELS.listBrowserImportSources, 0, async () =>

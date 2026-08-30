@@ -108,6 +108,35 @@ afterEach(async () => {
 });
 
 describe("ToolsSidebar browser lifecycle", () => {
+	it("uses profile updates emitted by imports outside the sidebar", async () => {
+		const { container, emit } = fixture();
+		const importedProfileId = "33333333-3333-4333-8333-333333333333";
+		await emit({
+			type: "profiles",
+			profiles: [
+				{
+					profileId: DEFAULT_BROWSER_PROFILE_ID,
+					name: "Default",
+					sourceId: null,
+					sourceProfileId: null,
+				},
+				{
+					profileId: importedProfileId,
+					name: "Work",
+					sourceId: "chrome",
+					sourceProfileId: "Profile 2",
+				},
+			],
+		});
+		await emit({ type: "opened", sessionId: SESSION_ID, browserId: BROWSER_ID, profileId: importedProfileId });
+
+		expect(
+			[...container.querySelectorAll<HTMLButtonElement>("button")]
+				.map((button) => button.getAttribute("aria-label"))
+				.join("\n"),
+		).toContain("Browser profile: Google Chrome — Work");
+	});
+
 	it("deduplicates background tabs and activates the owner only for a requested handoff", async () => {
 		const { container, emit, onActivateSession } = fixture();
 		const opened: DesktopBrowserEvent = {

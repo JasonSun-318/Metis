@@ -291,7 +291,10 @@ export class BrowserManager {
 			saveScreenshot: (image, defaultFilename) => saveBuffer(image.toPNG(), defaultFilename, "PNG image", "png"),
 			resolveDownloadDirectory: () => app.getPath("downloads"),
 			pathExists: (path) => existsSync(path),
-			openPath: (path) => shell.openPath(path).then(() => undefined),
+			openPath: async (path) => {
+				const error = await shell.openPath(path);
+				if (error) throw new Error("Path could not be opened");
+			},
 			showItemInFolder: (path) => shell.showItemInFolder(path),
 		},
 	) {
@@ -367,6 +370,7 @@ export class BrowserManager {
 			this.dependencies.profileStore.saveHistory(profile.profileId, merged);
 			this.emit({ type: "history", profileId: profile.profileId, entries: merged });
 		}
+		this.emit({ type: "profiles", profiles: this.listProfiles() });
 		return {
 			profile,
 			cookies: input.dataTypes.cookies ? { imported: importedCount, skipped: skippedCount } : null,
@@ -447,6 +451,14 @@ export class BrowserManager {
 		return [...this.downloads.values()]
 			.sort((first, second) => second.startedAt - first.startedAt)
 			.map(({ item: _item, profileId: _profileId, ...download }) => download);
+	}
+
+	getDownloadDirectory(): string {
+		return this.dependencies.resolveDownloadDirectory();
+	}
+
+	async openDownloadDirectory(): Promise<void> {
+		await this.dependencies.openPath(this.getDownloadDirectory());
 	}
 
 	async controlDownload(input: DesktopDownloadControlInput): Promise<void> {

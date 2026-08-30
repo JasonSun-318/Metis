@@ -16,6 +16,7 @@ import {
 	type MetisDesktopApi,
 	validateBrowserControlInput,
 	validateBrowserDownloadControlInput,
+	validateBrowserDownloadDirectory,
 	validateBrowserDownloadList,
 	validateBrowserHistoryList,
 	validateBrowserImportInput,
@@ -158,6 +159,11 @@ const api = {
 		validateBrowserDownloadList(await ipcRenderer.invoke(DESKTOP_IPC_CHANNELS.listBrowserDownloads)),
 	controlBrowserDownload: async (input) => {
 		await ipcRenderer.invoke(DESKTOP_IPC_CHANNELS.controlBrowserDownload, validateBrowserDownloadControlInput(input));
+	},
+	getBrowserDownloadDirectory: async () =>
+		validateBrowserDownloadDirectory(await ipcRenderer.invoke(DESKTOP_IPC_CHANNELS.getBrowserDownloadDirectory)),
+	openBrowserDownloadDirectory: async () => {
+		await ipcRenderer.invoke(DESKTOP_IPC_CHANNELS.openBrowserDownloadDirectory);
 	},
 	listBrowserProfiles: async () =>
 		validateBrowserProfileList(await ipcRenderer.invoke(DESKTOP_IPC_CHANNELS.listBrowserProfiles)),

@@ -4012,6 +4012,132 @@ test("packaged General settings and Personalization persist across restart", asy
 	}
 });
 
+test("packaged Browser settings manage existing profiles, history, imports, and downloads", async () => {
+	test.setTimeout(90_000);
+	const fixtures = await loadCodingFixtures();
+	const executable = packagedExecutable();
+	expect(existsSync(executable), `Package the desktop app first: ${executable}`).toBe(true);
+
+	const tempRoot = await mkdtemp(path.join(tmpdir(), "metis-browser-settings-"));
+	const agentDir = path.join(tempRoot, "agent");
+	const homeDir = path.join(tempRoot, "home");
+	const projectDir = path.join(tempRoot, "browser-settings-project");
+	const userDataDir = path.join(tempRoot, "electron");
+	const qaDir = path.join(desktopRoot, "test-results", "design-qa", "browser-settings");
+	const importedProfileId = "20000000-0000-4000-8000-000000000099";
+	await Promise.all([
+		mkdir(agentDir),
+		mkdir(path.join(homeDir, "Downloads"), { recursive: true }),
+		mkdir(projectDir),
+		mkdir(userDataDir),
+		mkdir(qaDir, { recursive: true }),
+	]);
+	createStoredSession(fixtures, agentDir, projectDir, CHAT_ACTIVE_ID, "chat", false, "Browser settings session");
+	const now = Date.now();
+	await Promise.all([
+		writeFile(path.join(userDataDir, "browser-profiles.json"), JSON.stringify({
+			schemaVersion: 1,
+			profiles: [{
+				profileId: importedProfileId,
+				name: "Work",
+				sourceId: "chrome",
+				sourceProfileId: "Profile 2",
+			}],
+		})),
+		writeFile(path.join(userDataDir, "browser-history.json"), JSON.stringify([
+			{ entryId: "30000000-0000-4000-8000-000000000001", url: "https://metis.example/docs", title: "Metis browser docs", faviconUrl: null, visitedAt: now - 30_000 },
+			{ entryId: "30000000-0000-4000-8000-000000000002", url: "https://example.com/research", title: "Research notes", faviconUrl: null, visitedAt: now - 3_600_000 },
+			{ entryId: "30000000-0000-4000-8000-000000000003", url: "https://example.com/archive", title: "Yesterday archive", faviconUrl: null, visitedAt: now - 86_400_000 },
+		])),
+		writeFile(path.join(userDataDir, `browser-history-${importedProfileId}.json`), JSON.stringify([
+			{ entryId: "30000000-0000-4000-8000-000000000004", url: "https://work.example/dashboard", title: "Work dashboard", faviconUrl: null, visitedAt: now - 60_000 },
+		])),
+	]);
+
+	const diagnostics: string[] = [];
+	const debuggingPort = await reservePort();
+	const app = launchPackagedApp(executable, debuggingPort, userDataDir, projectDir, agentDir, homeDir, diagnostics);
+	let browser: Browser | undefined;
+	let page: Page | undefined;
+	let phase = "connecting";
+	const consoleErrors: string[] = [];
+	try {
+		({ browser, page } = await connectToApp(debuggingPort));
+		page.setDefaultTimeout(10_000);
+		page.on("console", (message) => { if (message.type() === "error") consoleErrors.push(message.text()); });
+		await page.setViewportSize({ width: 1440, height: 900 });
+		await waitForServerReady(page);
+
+		phase = "opening Browser settings";
+		await page.getByRole("button", { name: "Metis User", exact: true }).click();
+		await page.getByRole("menuitem", { name: "Settings", exact: true }).click();
+		await page.getByRole("button", { name: "Browser", exact: true }).click();
+		await expect(page.getByRole("heading", { name: "Browser", exact: true })).toBeVisible();
+		await expect(page.getByText("Browser data", { exact: true })).toBeVisible();
+		await expect(page.getByText("System Downloads folder", { exact: true })).toBeVisible();
+		const downloadDirectory = await page.evaluate(() =>
+			(globalThis as unknown as { metis: MetisDesktopApi }).metis.getBrowserDownloadDirectory(),
+		);
+		expect(downloadDirectory).toMatch(/\/Downloads$/u);
+		await expect(page.getByText(downloadDirectory, { exact: true })).toBeVisible();
+		await expect(page.getByText("2 profiles · 3 entries in selected profile", { exact: true })).toBeVisible();
+		expect(await page.locator(".settings-page-scroll").evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+		await page.screenshot({ animations: "disabled", path: path.join(qaDir, "overview-dark-1440x900.png") });
+
+		phase = "checking browser import";
+		await page.getByRole("button", { name: "Import browser data", exact: true }).click();
+		const importDialog = page.getByRole("dialog", { name: "Import from browser", exact: true });
+		await expect(importDialog).toBeVisible();
+		await expect(importDialog.getByText("No supported browser profiles found", { exact: true })).toBeVisible();
+		await importDialog.getByRole("button", { name: "Close", exact: true }).click();
+
+		phase = "managing profile history";
+		await page.getByRole("button", { name: "Manage browsing history", exact: true }).click();
+		await expect(page.getByRole("heading", { name: "Browsing history", exact: true })).toBeVisible();
+		await expect(page.getByText("Metis browser docs", { exact: true })).toBeVisible();
+		await expect(page.locator(".browser-settings-history-group")).toHaveCount(2);
+		await page.screenshot({ animations: "disabled", path: path.join(qaDir, "history-dark-1440x900.png") });
+		await page.getByRole("button", { name: "Browser profile", exact: true }).click();
+		await page.getByRole("option", { name: "Google Chrome — Work", exact: true }).click();
+		await expect(page.getByText("Work dashboard", { exact: true })).toBeVisible();
+		const historySearch = page.getByRole("textbox", { name: "Search browsing history", exact: true });
+		await historySearch.fill("missing");
+		await expect(page.getByText("No matching history", { exact: true })).toBeVisible();
+		await historySearch.fill("Work");
+		await expect(page.getByText("Work dashboard", { exact: true })).toBeVisible();
+		await historySearch.fill("");
+		await page.getByRole("button", { name: "Clear browsing history", exact: true }).click();
+		const clearDialog = page.getByRole("dialog", { name: "Clear browsing history?", exact: true });
+		await expect(clearDialog).toBeVisible();
+		await clearDialog.getByRole("button", { name: "Cancel", exact: true }).click();
+		await expect(page.getByText("Work dashboard", { exact: true })).toBeVisible();
+
+		phase = "checking current-run downloads";
+		await page.getByRole("button", { name: "Back to browser settings", exact: true }).click();
+		await page.getByRole("button", { name: "Manage downloads", exact: true }).click();
+		await expect(page.getByText("No downloads in this run", { exact: true })).toBeVisible();
+
+		phase = "capturing Chinese visual QA states";
+		await page.getByRole("button", { name: "Back to browser settings", exact: true }).click();
+		await page.getByRole("button", { name: "General", exact: true }).click();
+		await page.getByRole("button", { name: "中文", exact: true }).click();
+		await page.getByRole("button", { name: "浏览器", exact: true }).click();
+		await expect(page.getByRole("heading", { name: "浏览器", exact: true })).toBeVisible();
+		await page.screenshot({ animations: "disabled", path: path.join(qaDir, "overview-dark-zh-1440x900.png") });
+		await page.getByRole("button", { name: "管理浏览记录", exact: true }).click();
+		await expect(page.getByRole("heading", { name: "浏览记录", exact: true })).toBeVisible();
+		await page.screenshot({ animations: "disabled", path: path.join(qaDir, "history-dark-zh-1440x900.png") });
+		expect(consoleErrors).toEqual([]);
+	} catch (error) {
+		const bodyText = await page?.locator("body").innerText().catch(() => "renderer unavailable");
+		throw new Error(`${error instanceof Error ? error.message : String(error)}\nphase=${phase}\nrenderer body:\n${bodyText ?? "unavailable"}\n${diagnostics.join("").slice(-8_000)}`);
+	} finally {
+		await browser?.close().catch(() => undefined);
+		await stopProcess(app);
+		await rm(tempRoot, { recursive: true, force: true });
+	}
+});
+
 test("packaged Code project setup creates and opens a project", async () => {
 	test.setTimeout(60_000);
 	const executable = packagedExecutable();

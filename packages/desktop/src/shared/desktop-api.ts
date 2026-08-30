@@ -79,6 +79,8 @@ export const DESKTOP_IPC_CHANNELS = {
 	resolveBrowserHandoff: "metis:resolve-browser-handoff",
 	listBrowserDownloads: "metis:list-browser-downloads",
 	controlBrowserDownload: "metis:control-browser-download",
+	getBrowserDownloadDirectory: "metis:get-browser-download-directory",
+	openBrowserDownloadDirectory: "metis:open-browser-download-directory",
 	listBrowserProfiles: "metis:list-browser-profiles",
 	listBrowserImportSources: "metis:list-browser-import-sources",
 	importBrowserData: "metis:import-browser-data",
@@ -232,6 +234,7 @@ export type DesktopBrowserEvent =
 			readonly matches: number;
 	  }
 	| { readonly type: "command"; readonly browserId: string; readonly command: DesktopBrowserCommand }
+	| { readonly type: "profiles"; readonly profiles: readonly DesktopBrowserProfile[] }
 	| { readonly type: "downloads"; readonly downloads: readonly DesktopDownloadItem[] }
 	| { readonly type: "history"; readonly profileId: string; readonly entries: readonly DesktopHistoryEntry[] }
 	| { readonly type: "opened"; readonly sessionId: string; readonly browserId: string; readonly profileId: string }
@@ -549,6 +552,8 @@ export interface MetisDesktopApi extends DesktopRpcForwardingApi {
 	resolveBrowserHandoff(input: DesktopResolveBrowserHandoffInput): Promise<void>;
 	listBrowserDownloads(): Promise<readonly DesktopDownloadItem[]>;
 	controlBrowserDownload(input: DesktopDownloadControlInput): Promise<void>;
+	getBrowserDownloadDirectory(): Promise<string>;
+	openBrowserDownloadDirectory(): Promise<void>;
 	listBrowserProfiles(): Promise<readonly DesktopBrowserProfile[]>;
 	listBrowserImportSources(): Promise<readonly DesktopBrowserImportSource[]>;
 	importBrowserData(input: DesktopBrowserImportInput): Promise<DesktopBrowserImportResult>;
@@ -1242,6 +1247,10 @@ export function validateDesktopBrowserEvent(value: unknown): DesktopBrowserEvent
 		}
 		return { type, browserId: browserId(event.browserId), command: event.command as DesktopBrowserCommand };
 	}
+	if (type === "profiles") {
+		const event = exactRecord(value, ["type", "profiles"], "browser profiles event");
+		return { type, profiles: validateBrowserProfileList(event.profiles) };
+	}
 	if (type === "downloads") {
 		const event = exactRecord(value, ["type", "downloads"], "browser downloads event");
 		if (!Array.isArray(event.downloads)) throw new TypeError("Invalid browser downloads");
@@ -1359,6 +1368,13 @@ function validateBrowserDownloadItem(value: unknown): DesktopDownloadItem {
 export function validateBrowserDownloadList(value: unknown): readonly DesktopDownloadItem[] {
 	if (!Array.isArray(value)) throw new TypeError("Invalid browser downloads");
 	return value.map(validateBrowserDownloadItem);
+}
+
+export function validateBrowserDownloadDirectory(value: unknown): string {
+	if (typeof value !== "string" || value.length === 0 || value.length > 4_096 || value.includes("\0")) {
+		throw new TypeError("Invalid browser download directory");
+	}
+	return value;
 }
 
 export function validateBrowserDownloadControlInput(value: unknown): DesktopDownloadControlInput {

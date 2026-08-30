@@ -189,6 +189,7 @@ export function ToolsSidebar({ activeSession, api, cleanupSessionIds, mode, onAc
 	}]);
 	const browserProfilesRef = useRef(browserProfiles);
 	browserProfilesRef.current = browserProfiles;
+	const browserProfilesRevision = useRef(0);
 	const preferredBrowserProfileId = useRef(localStorage.getItem(BROWSER_PROFILE_STORAGE_KEY));
 	const menuRef = useRef<HTMLDivElement>(null);
 	const resizeRef = useRef<{ readonly pointerId: number; readonly x: number; readonly width: number } | null>(null);
@@ -206,9 +207,12 @@ export function ToolsSidebar({ activeSession, api, cleanupSessionIds, mode, onAc
 
 	useEffect(() => {
 		let active = true;
+		const revision = browserProfilesRevision.current;
 		void api.listBrowserProfiles().then(
 			(profiles) => {
-				if (active && profiles.length > 0) setBrowserProfiles(profiles);
+				if (active && profiles.length > 0 && browserProfilesRevision.current === revision) {
+					setBrowserProfiles(profiles);
+				}
 			},
 			onError,
 		);
@@ -218,6 +222,13 @@ export function ToolsSidebar({ activeSession, api, cleanupSessionIds, mode, onAc
 	useEffect(
 		() =>
 			api.subscribeBrowser((event) => {
+				if (event.type === "profiles") {
+					if (event.profiles.length > 0) {
+						browserProfilesRevision.current += 1;
+						setBrowserProfiles(event.profiles);
+					}
+					return;
+				}
 				if (event.type === "opened") {
 					const profile = browserProfilesRef.current.find(({ profileId }) => profileId === event.profileId);
 					setWorkspaces((current) => {

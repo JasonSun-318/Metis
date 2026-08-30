@@ -416,6 +416,19 @@ describe("desktop trust boundaries", () => {
 			browserId,
 			command: "find",
 		});
+		expect(
+			validateDesktopBrowserEvent({
+				type: "profiles",
+				profiles: [
+					{
+						profileId: DEFAULT_BROWSER_PROFILE_ID,
+						name: "Default",
+						sourceId: null,
+						sourceProfileId: null,
+					},
+				],
+			}),
+		).toMatchObject({ type: "profiles", profiles: [{ profileId: DEFAULT_BROWSER_PROFILE_ID }] });
 		for (const zoomPercent of [24, 501, 100.5]) {
 			expect(() =>
 				validateDesktopBrowserEvent({
@@ -642,6 +655,8 @@ describe("desktop trust boundaries", () => {
 			capturePreview: vi.fn().mockResolvedValue("data:image/png;base64,cHJldmlldw=="),
 			close: vi.fn(),
 			closeAll: vi.fn(),
+			getDownloadDirectory: vi.fn(() => "/Users/test/Downloads"),
+			openDownloadDirectory: vi.fn(),
 			listDownloads: vi.fn(() => []),
 			controlDownload: vi.fn(),
 			listProfiles: vi.fn(() => [
@@ -720,6 +735,13 @@ describe("desktop trust boundaries", () => {
 			ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.captureBrowserPreview)!(event, { sessionId, browserId }),
 		).resolves.toBe("data:image/png;base64,cHJldmlldw==");
 		expect(browserManager.capturePreview).toHaveBeenCalledWith(sessionId, browserId);
+		await expect(ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.getBrowserDownloadDirectory)!(event)).resolves.toBe(
+			"/Users/test/Downloads",
+		);
+		await expect(
+			ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.openBrowserDownloadDirectory)!(event),
+		).resolves.toBeUndefined();
+		expect(browserManager.openDownloadDirectory).toHaveBeenCalledOnce();
 		await expect(ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.listBrowserProfiles)!(event)).resolves.toHaveLength(1);
 		await expect(ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.listBrowserImportSources)!(event)).resolves.toHaveLength(
 			1,
@@ -763,6 +785,8 @@ describe("desktop trust boundaries", () => {
 			control: vi.fn(),
 			close: vi.fn(),
 			closeAll: vi.fn(),
+			getDownloadDirectory: vi.fn(() => "/Users/test/Downloads"),
+			openDownloadDirectory: vi.fn(),
 			listDownloads: vi.fn(() => []),
 			controlDownload: vi.fn(),
 			listProfiles: vi.fn(() => []),

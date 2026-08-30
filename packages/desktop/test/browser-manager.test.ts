@@ -1182,6 +1182,15 @@ describe("BrowserManager", () => {
 		expect(events).toHaveLength(before);
 	});
 
+	it("returns and opens the fixed system download directory", async () => {
+		const harness = browserHarness();
+
+		expect(harness.manager.getDownloadDirectory()).toBe("/tmp/metis-downloads");
+		expect(harness.resolveDownloadDirectory).toHaveBeenCalledOnce();
+		await harness.manager.openDownloadDirectory();
+		expect(harness.openPath).toHaveBeenCalledWith("/tmp/metis-downloads");
+	});
+
 	it("tracks download lifecycle with pause, resume, cancel, retry, and file actions", async () => {
 		vi.useFakeTimers();
 		try {
@@ -1380,6 +1389,8 @@ describe("BrowserManager", () => {
 				history,
 			},
 		});
+		const events: unknown[] = [];
+		harness.manager.onEvent((event) => events.push(event));
 		const input = {
 			sourceId: "chrome" as const,
 			sourceProfileId: "Default",
@@ -1400,5 +1411,6 @@ describe("BrowserManager", () => {
 		expect(harness.sessionForPartition).toHaveBeenCalledWith(`persist:metis-browser-${personal.profile.profileId}`);
 		expect(harness.sessionForPartition).toHaveBeenCalledWith(`persist:metis-browser-${work.profile.profileId}`);
 		expect(harness.browserSession.cookies.flushStore).toHaveBeenCalledTimes(3);
+		expect(events).toContainEqual({ type: "profiles", profiles: harness.manager.listProfiles() });
 	});
 });

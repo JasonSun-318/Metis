@@ -85,6 +85,9 @@ afterEach(() => {
 
 describe("SettingsDialog", () => {
 	it("keeps only the active page mounted and closes with Escape", async () => {
+		const listBrowserProfiles = vi.fn().mockResolvedValue([]);
+		const listBrowserDownloads = vi.fn().mockResolvedValue([]);
+		const listBrowserHistory = vi.fn().mockResolvedValue([]);
 		const api = {
 			getProfile: vi.fn().mockResolvedValue({ generatedAt: "2026-08-08T12:00:00.000Z", totalTokens: 0, peakDailyTokens: 0, longestSessionMs: 0, currentStreakDays: 0, longestStreakDays: 0, sessionCount: 0, mostUsedMode: null, mostUsedModePercent: 0, mostUsedThinkingLevel: null, mostUsedThinkingLevelPercent: 0, usedSkillCount: 0, skillUseCount: 0, activity: [], topSkills: [] }),
 			getUsage: vi.fn(({ rangeDays }: { rangeDays: UsageRangeDays }) => Promise.resolve(usage(rangeDays))),
@@ -100,6 +103,12 @@ describe("SettingsDialog", () => {
 				lastError: null,
 				memoryMigrationNotice: null,
 			}),
+			listBrowserProfiles,
+			listBrowserDownloads,
+			listBrowserHistory,
+			getBrowserDownloadDirectory: vi.fn().mockResolvedValue("/Users/test/Downloads"),
+			openBrowserDownloadDirectory: vi.fn().mockResolvedValue(undefined),
+			subscribeBrowser: vi.fn(() => () => undefined),
 		} as unknown as MetisDesktopApi;
 		const onClose = vi.fn();
 		const onGeneralPreferencesChange = vi.fn();
@@ -122,6 +131,7 @@ describe("SettingsDialog", () => {
 		expect(api.getProfile).not.toHaveBeenCalled();
 		expect(api.getUsage).not.toHaveBeenCalled();
 		expect(api.getMemorySettings).not.toHaveBeenCalled();
+		expect(listBrowserProfiles).not.toHaveBeenCalled();
 		await act(async () => button(container, "Profile").click());
 		await flush();
 		expect(api.getProfile).toHaveBeenCalledTimes(1);
@@ -136,6 +146,12 @@ describe("SettingsDialog", () => {
 		await flush();
 		expect(api.getMemorySettings).toHaveBeenCalledTimes(1);
 		expect(container.querySelector(".memory-settings-section")).not.toBeNull();
+		await act(async () => button(container, "Browser").click());
+		await flush();
+		expect(listBrowserProfiles).toHaveBeenCalledTimes(1);
+		expect(listBrowserDownloads).toHaveBeenCalledTimes(1);
+		expect(listBrowserHistory).toHaveBeenCalledWith({ profileId: "00000000-0000-4000-8000-000000000001" });
+		expect(container.querySelector(".browser-settings-page")).not.toBeNull();
 		await act(async () => button(container, "Model").click());
 		await flush();
 		await act(async () => container.querySelector<HTMLButtonElement>(".model-provider-card")!.click());

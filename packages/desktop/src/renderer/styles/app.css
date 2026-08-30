@@ -2119,6 +2119,56 @@ classes so their inline layout wins the cascade. */
 .general-setting-copy > p { margin: 2px 0 0; color: var(--text-09); font-size: 12px; line-height: 1.45; }
 .general-setting-copy > small { display: block; margin: 3px 0 0; color: var(--text-06); font-size: 11px; }
 .general-setting-control { display: flex; min-width: 0; justify-content: flex-end; }
+.browser-settings-page { display: grid; align-content: start; gap: 2px; }
+.browser-settings-page > .settings-inline-error, .browser-settings-page > .settings-action-message { margin: 0 0 14px; }
+.browser-settings-path { max-width: 510px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.browser-settings-detail { gap: 16px; }
+.browser-settings-detail-header { display: grid; gap: 13px; }
+.browser-settings-detail-header > div { display: grid; gap: 3px; }
+.browser-settings-detail-header h2, .browser-settings-detail-header p { margin: 0; }
+.browser-settings-back { display: inline-flex; width: max-content; align-items: center; gap: 6px; border-radius: 7px; color: var(--text-13); padding: 5px 7px 5px 4px; font-size: 12px; }
+.browser-settings-back:hover:not(:disabled) { background: var(--surface-05); color: var(--text-25); }
+.browser-settings-toolbar { display: grid; align-items: center; gap: 10px; grid-template-columns: minmax(190px, 1fr) minmax(180px, 230px) auto; }
+.settings-page .browser-settings-search { position: relative; display: block; }
+.browser-settings-search svg { position: absolute; z-index: 1; top: 11px; left: 11px; color: var(--text-08); pointer-events: none; }
+.settings-page .browser-settings-search input { padding-left: 34px; }
+.browser-settings-profile-select { min-width: 0; }
+.browser-settings-state { display: grid; min-height: 150px; place-items: center; align-content: center; gap: 9px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-02); color: var(--text-08); padding: 24px; text-align: center; }
+.browser-settings-state strong { color: var(--text-15); font-size: 13px; font-weight: 540; }
+.browser-settings-history-groups { display: grid; gap: 10px; }
+.browser-settings-history-group { overflow: hidden; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-02); }
+.browser-settings-history-group h3 { margin: 0; color: var(--text-18); font-size: 12px; font-weight: 580; }
+.browser-settings-history-group h3 button { display: grid; width: 100%; min-height: 38px; align-items: center; gap: 9px; color: inherit; padding: 8px 13px; text-align: left; grid-template-columns: minmax(0, 1fr) auto auto; }
+.browser-settings-history-group h3 button:hover { background: var(--surface-04); }
+.browser-settings-history-group h3 button > span:nth-child(2) { color: var(--text-07); font-size: 10.5px; font-weight: 450; }
+.browser-settings-history-group h3 svg { color: var(--text-07); transition: transform 140ms ease; }
+.browser-settings-history-group h3 button[aria-expanded="true"] svg { transform: rotate(180deg); }
+.browser-settings-history-group ul, .browser-settings-download-list { margin: 0; padding: 0; list-style: none; }
+.browser-settings-history-group ul { border-top: 1px solid var(--border-weak); }
+.browser-settings-history-group li { display: grid; min-height: 54px; align-items: center; gap: 10px; border-top: 1px solid var(--border-weak); padding: 8px 14px; grid-template-columns: 22px minmax(0, 1fr) auto; }
+.browser-settings-history-group li:first-child { border-top: 0; }
+.browser-settings-history-icon { display: grid; width: 22px; height: 22px; place-items: center; border-radius: 50%; background: var(--surface-05); color: var(--text-11); }
+.browser-settings-history-group li > div { display: grid; min-width: 0; gap: 2px; }
+.browser-settings-history-group strong { overflow: hidden; color: var(--text-25); font-size: 12.5px; font-weight: 550; text-overflow: ellipsis; white-space: nowrap; }
+.browser-settings-history-group li > div > span { overflow: hidden; color: var(--text-07); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.browser-settings-history-group time { color: var(--text-07); font-size: 11px; }
+.browser-settings-download-list { overflow: hidden; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-02); }
+.browser-settings-download { position: relative; display: grid; min-height: 62px; align-items: center; gap: 12px; border-top: 1px solid var(--border-weak); padding: 10px 13px; grid-template-columns: minmax(0, 1fr) auto; }
+.browser-settings-download:first-child { border-top: 0; }
+.browser-settings-download-copy { display: grid; min-width: 0; gap: 3px; }
+.browser-settings-download-copy strong { overflow: hidden; color: var(--text-25); font-size: 12.5px; font-weight: 550; text-overflow: ellipsis; white-space: nowrap; }
+.browser-settings-download-copy span { color: var(--text-07); font-size: 11px; }
+.browser-settings-download-actions { display: flex; align-items: center; gap: 3px; }
+.browser-settings-download-actions button { display: grid; width: 29px; height: 29px; place-items: center; border-radius: 7px; color: var(--text-11); }
+.browser-settings-download-actions button:hover:not(:disabled) { background: var(--surface-06); color: var(--text-25); }
+.browser-settings-download-progress { position: absolute; right: 13px; bottom: 6px; left: 13px; height: 2px; overflow: hidden; border-radius: 999px; background: var(--surface-07); }
+.browser-settings-download-progress i { display: block; height: 100%; border-radius: inherit; background: var(--accent); }
+.browser-settings-confirm { width: min(430px, calc(100vw - 36px)); border: 1px solid var(--border-strong); border-radius: 14px; background: var(--surface-05); box-shadow: var(--overlay-shadow); color: var(--text-26); padding: 0; }
+.browser-settings-confirm::backdrop { background: rgb(8 8 8 / 68%); backdrop-filter: blur(6px); }
+.browser-settings-confirm > div { display: grid; gap: 10px; padding: 22px; }
+.browser-settings-confirm h2, .browser-settings-confirm p { margin: 0; }
+.browser-settings-confirm p { color: var(--text-09); font-size: 12px; line-height: 1.5; }
+.browser-settings-confirm footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
 .general-font-select, .web-search-provider-select { width: 220px; }
 .web-search-api-key { width: min(380px, 42vw); }
 .web-search-api-key-field { position: relative; width: 100%; }
@@ -2259,6 +2309,10 @@ classes so their inline layout wins the cascade. */
 	.settings-main-header { width: 100%; align-items: center; padding: 12px 20px; }
 	.settings-main-heading p { margin-top: 4px; font-size: 11px; }
 	.settings-page { padding: 25px 20px 42px; }
+	.browser-settings-toolbar { grid-template-columns: minmax(0, 1fr); }
+	.browser-settings-toolbar .settings-danger-button { justify-self: end; }
+	.browser-settings-history-group li { grid-template-columns: 22px minmax(0, 1fr); }
+	.browser-settings-history-group time { display: none; }
 	.settings-page-scroll-model { overflow: auto; }
 	.model-settings-page { display: block; height: auto; }
 	.usage-details-grid, .model-use-row { grid-template-columns: 1fr; }
