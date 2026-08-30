@@ -294,6 +294,11 @@ export {
 	validateRerankSettings,
 	validateServiceCredential,
 } from "./core/memory/memory-service-settings.ts";
+export {
+	MemorySettingsTransaction,
+	type MemorySettingsUpdate,
+	type MemorySettingsView,
+} from "./core/memory/memory-settings-transaction.ts";
 export { convertToLlm } from "./core/messages.ts";
 export type {
 	ModeProjectSessionTarget,

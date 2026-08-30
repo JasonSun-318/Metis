@@ -55,7 +55,6 @@ import {
 	type AutoMemorySnapshot,
 	getAutoMemoryRoot,
 	getGlobalMemoryDirectory,
-	getMemorySqlitePath,
 	getProjectMemoryDirectory,
 	loadAutoMemory,
 } from "./auto-memory.ts";
@@ -148,7 +147,7 @@ import {
 import { memoryProjectIdentity } from "./memory/memory-project.ts";
 import { searchMemories } from "./memory/memory-search.ts";
 import { MEMORY_EMBEDDING_CREDENTIAL_ID } from "./memory/memory-service-settings.ts";
-import { openMemoryStore } from "./memory/memory-store.ts";
+import { MemorySettingsTransaction } from "./memory/memory-settings-transaction.ts";
 import type { MemoryHealth } from "./memory/memory-types.ts";
 import { type SessionMemoryExtractInput, SessionMemoryRuntime } from "./memory/session-memory-runtime.ts";
 import type { BashExecutionMessage, CustomMessage } from "./messages.ts";
@@ -539,6 +538,7 @@ export class AgentSession {
 	private _autoCompactionAbortController: AbortController | undefined = undefined;
 	private _overflowRecoveryAttempted = false;
 	private readonly _memoryRuntime: SessionMemoryRuntime;
+	private readonly _memorySettingsTransaction: MemorySettingsTransaction;
 	private _memoryExtractRunner = runMemoryExtract;
 	private _memoryExtractTimeoutMs = MEMORY_EXTRACT_TIMEOUT_MS;
 
@@ -742,6 +742,11 @@ export class AgentSession {
 			(request) => this._queuePermissionApproval(request),
 			this._agentDir && !this._unattendedExecution ? new ProjectPermissionRuleStore(this._agentDir) : undefined,
 		);
+		this._memorySettingsTransaction = new MemorySettingsTransaction({
+			...(this._agentDir ? { agentDir: this._agentDir } : {}),
+			authStorage: this._modelRegistry.authStorage,
+			settingsManager: this.settingsManager,
+		});
 		this._memoryRuntime = new SessionMemoryRuntime({
 			agentDir: this._agentDir,
 			cwd: () => this._cwd,
@@ -2576,35 +2581,10 @@ export class AgentSession {
 		autoMemoryEnabled?: boolean;
 		memoryEngine?: "index" | "extract";
 	}): Promise<void> {
-		const enabled = update.autoMemoryEnabled ?? this.settingsManager.getAutoMemoryEnabled();
-		const engine = update.memoryEngine ?? this.settingsManager.getMemoryEngine();
-		if (enabled && engine === "extract") {
-			const apiKey = await this._modelRegistry.authStorage.getApiKey(MEMORY_EMBEDDING_CREDENTIAL_ID, {
-				includeFallback: false,
-			});
-			if (!this.settingsManager.getEmbeddingSettings() || !apiKey) {
-				throw new Error(
-					'Cannot enable memory engine "extract" without configured Embedding settings and credential.',
-				);
-			}
-		}
 		await this.prepareModelServiceSettingsRefresh();
 		let original: unknown;
 		try {
-			this.settingsManager.setMemorySettings(enabled, engine);
-			await this.settingsManager.flushOrThrow();
-			if (this._agentDir) {
-				try {
-					const store = openMemoryStore(getMemorySqlitePath(this._agentDir));
-					try {
-						store.clearHealth("extract", "backfill");
-					} finally {
-						store.close();
-					}
-				} catch {
-					// Health is derived state; settings are already durable.
-				}
-			}
+			await this._memorySettingsTransaction.update(update);
 		} catch (error) {
 			original = error;
 		}
