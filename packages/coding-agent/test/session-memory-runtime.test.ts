@@ -21,6 +21,9 @@ function createHarness(
 		search?: () => Promise<never>;
 		backfill?: typeof backfillMemoryEmbeddings;
 		engine?: "index" | "extract";
+		enabled?: boolean;
+		lastUserText?: string;
+		extractTimeoutMs?: number;
 		cleanupTimeoutMs?: number;
 	} = {},
 ) {
@@ -47,10 +50,10 @@ function createHarness(
 		cwd: () => join(root, "project"),
 		sessionId: () => "session-1",
 		mode: () => "code",
-		enabled: () => true,
+		enabled: () => options.enabled ?? true,
 		engine: () => options.engine ?? (options.search ? "extract" : "index"),
 		hasModel: () => true,
-		lastUserText: () => "please remember this",
+		lastUserText: () => options.lastUserText ?? "please remember this",
 		collectEvidence: (cursor) => {
 			const next = cursor === null ? evidence[0] : evidence.find((item) => item.cursorEntryId > cursor);
 			return next ?? { cursorEntryId: null, evidence: "" };
@@ -78,6 +81,7 @@ function createHarness(
 		runExtract,
 		...(options.search ? { search: options.search } : {}),
 		...(options.backfill ? { backfill: options.backfill } : {}),
+		...(options.extractTimeoutMs === undefined ? {} : { extractTimeoutMs: () => options.extractTimeoutMs! }),
 		...(options.cleanupTimeoutMs === undefined ? {} : { cleanupTimeoutMs: options.cleanupTimeoutMs }),
 	});
 	return {
@@ -220,5 +224,125 @@ describe("SessionMemoryRuntime", () => {
 			store.close();
 		}
 		vi.useRealTimers();
+	});
+
+	it("throttles generic turns but runs durable-intent turns immediately", async () => {
+		const generic = createHarness({ lastUserText: "fix this" });
+		generic.runtime.afterTurn();
+		generic.runtime.afterTurn();
+		generic.runtime.afterTurn();
+		await Promise.resolve();
+		expect(generic.runExtract).not.toHaveBeenCalled();
+		generic.runtime.afterTurn();
+		await generic.runtime.waitForExtract();
+		expect(generic.runExtract).toHaveBeenCalledOnce();
+
+		const durable = createHarness({ lastUserText: "请记住以后用中文回复" });
+		durable.runtime.afterTurn();
+		await durable.runtime.waitForExtract();
+		expect(durable.runExtract).toHaveBeenCalledOnce();
+	});
+
+	it("does not start background work while memory is disabled", async () => {
+		const harness = createHarness({ enabled: false });
+		harness.runtime.afterTurn();
+		await expect(
+			harness.runtime.withCompaction(
+				{ evidence: "fact", reason: "manual", signal: new AbortController().signal },
+				async () => "summary",
+			),
+		).resolves.toBe("summary");
+		expect(harness.runExtract).not.toHaveBeenCalled();
+	});
+
+	it("exposes active status and clears it after extraction", async () => {
+		let release!: () => void;
+		const held = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		const harness = createHarness({
+			runExtract: async () => {
+				await held;
+				return { status: "success", runId: "active-run" };
+			},
+		});
+		harness.runtime.afterTurn();
+		await vi.waitFor(() => expect(harness.runtime.snapshot().active).toBeDefined());
+		expect(harness.runtime.snapshot().active).toMatchObject({
+			sessionId: "session-1",
+			mode: "code",
+			extractMode: "commit",
+		});
+		release();
+		await harness.runtime.waitForExtract();
+		expect(harness.runtime.snapshot().active).toBeUndefined();
+	});
+
+	it("times out an unresponsive extractor without advancing its cursor", async () => {
+		const harness = createHarness({
+			extractTimeoutMs: 10,
+			runExtract: async () => new Promise<MemoryExtractResult>(() => {}),
+		});
+		harness.runtime.afterTurn();
+		await harness.runtime.waitForExtract();
+		const store = openMemoryStore(getMemorySqlitePath(harness.agentDir));
+		try {
+			expect(store.getExtractCursor("session-1")).toBeNull();
+			expect(store.listHealth()).toContainEqual(expect.objectContaining({ operation: "extract", status: "error" }));
+		} finally {
+			store.close();
+		}
+	});
+
+	it("resumes pending evidence after a settings refresh", async () => {
+		const harness = createHarness({
+			runExtract: async (options) => {
+				if (harness.runExtract.mock.calls.length === 1) {
+					await new Promise<void>((resolve) =>
+						options.signal.addEventListener("abort", () => resolve(), { once: true }),
+					);
+					return { status: "skipped", reason: "settings-refresh", runId: "aborted" };
+				}
+				return { status: "success", runId: "resumed" };
+			},
+		});
+		harness.runtime.afterTurn();
+		await vi.waitFor(() => expect(harness.runExtract).toHaveBeenCalledOnce());
+		await harness.runtime.quiesce("settings-refresh");
+		harness.runtime.resume();
+		await vi.waitFor(() => expect(harness.runExtract).toHaveBeenCalledTimes(2));
+		await harness.runtime.waitForExtract();
+	});
+
+	it("does not start a commit while reconcile is active", async () => {
+		let release!: () => void;
+		const held = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		const harness = createHarness({
+			runExtract: async () => {
+				await held;
+				return { status: "success", runId: "reconcile" };
+			},
+		});
+		const compacting = harness.runtime.withCompaction(
+			{ evidence: "fact", reason: "threshold", signal: new AbortController().signal },
+			async () => "summary",
+		);
+		await vi.waitFor(() => expect(harness.runExtract).toHaveBeenCalledOnce());
+		harness.runtime.afterTurn();
+		expect(harness.runExtract).toHaveBeenCalledOnce();
+		release();
+		await compacting;
+	});
+
+	it("returns the same disposal promise and performs cleanup once", async () => {
+		const harness = createHarness();
+		const first = harness.runtime.dispose();
+		const second = harness.runtime.dispose();
+		expect(second).toBe(first);
+		await first;
+		harness.runtime.afterTurn();
+		expect(harness.runExtract).not.toHaveBeenCalled();
 	});
 });

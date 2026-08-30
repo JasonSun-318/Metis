@@ -139,13 +139,10 @@ import { embeddingConfigKey, embedTexts as embedMemoryTexts } from "./memory/mem
 import { collectMemoryEvidenceBatch, serializeExtractEvidence } from "./memory/memory-evidence.ts";
 import {
 	awaitWithAbort,
-	MEMORY_EXTRACT_TIMEOUT_MS,
 	type MemoryExtractStatusSnapshot,
 	type RunMemoryExtractOptions,
-	runMemoryExtract,
 } from "./memory/memory-extract.ts";
 import { memoryProjectIdentity } from "./memory/memory-project.ts";
-import { searchMemories } from "./memory/memory-search.ts";
 import { MEMORY_EMBEDDING_CREDENTIAL_ID } from "./memory/memory-service-settings.ts";
 import { MemorySettingsTransaction } from "./memory/memory-settings-transaction.ts";
 import type { MemoryHealth } from "./memory/memory-types.ts";
@@ -539,8 +536,6 @@ export class AgentSession {
 	private _overflowRecoveryAttempted = false;
 	private readonly _memoryRuntime: SessionMemoryRuntime;
 	private readonly _memorySettingsTransaction: MemorySettingsTransaction;
-	private _memoryExtractRunner = runMemoryExtract;
-	private _memoryExtractTimeoutMs = MEMORY_EXTRACT_TIMEOUT_MS;
 
 	// Branch summarization state
 	private _branchSummaryAbortController: AbortController | undefined = undefined;
@@ -613,7 +608,6 @@ export class AgentSession {
 	private readonly _ultraAvailable: boolean;
 	private readonly _includeAutoMemory: boolean;
 	private _autoMemoryRetrieved: Array<{ scope: "global" | "project"; text: string }> = [];
-	private _searchMemories = searchMemories;
 	private readonly _permissionModeCeiling?: () => PermissionMode;
 	private readonly _workspaceWritePolicy: "inherit" | "deny";
 	private readonly _unattendedExecution?: UnattendedExecutionProfile;
@@ -768,9 +762,6 @@ export class AgentSession {
 				this._modelRegistry.authStorage.getApiKey(id, {
 					includeFallback: false,
 				}),
-			runExtract: (options) => this._memoryExtractRunner(options),
-			search: (options) => this._searchMemories(options),
-			extractTimeoutMs: () => this._memoryExtractTimeoutMs,
 		});
 
 		// Always subscribe to agent events for internal handling

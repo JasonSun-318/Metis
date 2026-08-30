@@ -280,14 +280,6 @@ describe("AgentSession auto memory", () => {
 			modelRegistry: ModelRegistry.inMemory(authStorage),
 			resourceLoader: createTestResourceLoader(),
 		});
-		(
-			session as unknown as {
-				_searchMemories: () => Promise<never>;
-			}
-		)._searchMemories = async () => {
-			throw new Error("embed failed");
-		};
-
 		try {
 			await session.prompt("What do you remember about me?");
 			expect(session.systemPrompt).toContain("No relevant long-term memory for this turn.");

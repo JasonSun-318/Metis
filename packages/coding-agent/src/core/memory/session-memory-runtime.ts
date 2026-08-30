@@ -120,13 +120,14 @@ export class SessionMemoryRuntime {
 		}
 		this.startBackfill();
 		if (this.retrieval?.query === query) return this.retrieval.promise;
+		this.retrieval?.abort.abort("superseded");
 
 		const generation = this.generation;
 		const abort = new AbortController();
 		const promise = this.retrieve(query, generation, abort.signal)
 			.catch(() => [] as readonly RetrievedAutoMemory[])
 			.then((memories) => {
-				if (!this.canMutate(generation)) return [];
+				if (!this.canMutate(generation) || this.retrieval?.promise !== promise) return [];
 				this.dependencies.applyRetrieved(memories);
 				this.dependencies.refreshPrompt();
 				this.startBackfill();
