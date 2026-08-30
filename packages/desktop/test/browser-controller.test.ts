@@ -77,9 +77,7 @@ function axTree(name = "Continue", value = "secret") {
 }
 
 function fixture(
-	overrides: Partial<
-		Pick<BrowserControllerDependencies, "dispatchMainFrameClick" | "stabilizationQuietMs" | "stabilizationTimeoutMs">
-	> = {},
+	overrides: Partial<Pick<BrowserControllerDependencies, "stabilizationQuietMs" | "stabilizationTimeoutMs">> = {},
 ) {
 	const debug = new FakeDebugger();
 	debug.responses.set("Accessibility.getFullAXTree", axTree());
@@ -147,14 +145,16 @@ function action(
 
 describe("BrowserController", () => {
 	it("keeps 100 observe/action cycles bounded and releases debugger subscriptions", async () => {
-		let debug!: FakeDebugger;
 		let sequence = 0;
-		const dispatchMainFrameClick = vi.fn(() => {
-			sequence += 1;
-			debug.responses.set("Accessibility.getFullAXTree", axTree(`Step ${sequence}`));
-		});
-		const created = fixture({ dispatchMainFrameClick });
-		debug = created.debug;
+		const created = fixture();
+		const { debug } = created;
+		debug.handler = async (method, params, sessionId) => {
+			if (method === "Input.dispatchMouseEvent" && params.type === "mouseReleased") {
+				sequence += 1;
+				debug.responses.set("Accessibility.getFullAXTree", axTree(`Step ${sequence}`));
+			}
+			return debug.responses.get(`${sessionId ?? "main"}:${method}`) ?? debug.responses.get(method) ?? {};
+		};
 		let current = await observe(created.controller);
 		for (let index = 0; index < 100; index += 1) {
 			const result = await created.controller.act(
@@ -166,7 +166,11 @@ describe("BrowserController", () => {
 			expect(Buffer.byteLength(current.state, "utf8")).toBeLessThanOrEqual(MAX_BROWSER_STATE_UTF8_BYTES);
 		}
 		expect(current.revision).toBe(101);
-		expect(dispatchMainFrameClick).toHaveBeenCalledTimes(100);
+		expect(
+			debug.commands.filter(
+				({ method, params }) => method === "Input.dispatchMouseEvent" && params.type === "mouseReleased",
+			),
+		).toHaveLength(100);
 		expect(created.subscriptions()).toEqual({ message: true, detach: true });
 		created.controller.close();
 		expect(created.subscriptions()).toEqual({ message: false, detach: false });
@@ -303,14 +307,15 @@ describe("BrowserController", () => {
 		expect(debug.commands.filter(({ method }) => method === "Input.dispatchKeyEvent")).toHaveLength(0);
 	});
 
-	it("uses native popup input and still returns a fresh post-action observation", async () => {
-		let debug!: FakeDebugger;
-		const dispatchMainFrameClick = vi.fn(() => {
-			debug.responses.set("Accessibility.getFullAXTree", axTree("Authorized"));
-		});
-		const created = fixture({ dispatchMainFrameClick });
-		const { controller } = created;
-		debug = created.debug;
+	it("returns a fresh post-action observation after CDP pointer input", async () => {
+		const created = fixture();
+		const { controller, debug } = created;
+		debug.handler = async (method, params, sessionId) => {
+			if (method === "Input.dispatchMouseEvent" && params.type === "mouseReleased") {
+				debug.responses.set("Accessibility.getFullAXTree", axTree("Authorized"));
+			}
+			return debug.responses.get(`${sessionId ?? "main"}:${method}`) ?? debug.responses.get(method) ?? {};
+		};
 		const first = await observe(controller);
 		const result = await controller.act(
 			action(first, { type: "click", target: { elementId: "e2" } }),
@@ -318,8 +323,10 @@ describe("BrowserController", () => {
 		);
 		expect(result).toMatchObject({ status: "completed", observation: { revision: 2 } });
 		if (result.status === "completed") expect(result.observation.state).toContain('button "Authorized"');
-		expect(dispatchMainFrameClick).toHaveBeenCalledWith({ x: 20, y: 30, button: "left" });
-		expect(debug.commands.filter(({ method }) => method === "Input.dispatchMouseEvent")).toHaveLength(0);
+		expect(debug.commands).toContainEqual({
+			method: "Input.dispatchMouseEvent",
+			params: { type: "mouseReleased", x: 20, y: 30, button: "left", buttons: 0, clickCount: 1 },
+		});
 	});
 
 	it("rejects coordinate input outside the current viewport", async () => {

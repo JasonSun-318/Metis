@@ -483,7 +483,7 @@ test("packaged task list uses the Metis composer UI in Chat and Code", async ({}
 		await composerInput.fill("/skill:e2e");
 		await slashMenu.getByRole("option").click();
 		await expect(page.getByRole("button", { name: "Remove skill e2e-skill", exact: true })).toBeVisible();
-		await composerInput.fill("Use the packaged fixture");
+		await composerInput.pressSequentially("Use the packaged fixture");
 		await expect(page.locator(".composer-skill-token")).toHaveCSS("color", "rgb(169, 201, 238)");
 		await page.locator(".composer-dock").screenshot({
 			animations: "disabled",

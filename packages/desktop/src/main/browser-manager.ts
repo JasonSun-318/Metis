@@ -49,7 +49,7 @@ import {
 	type DesktopHistoryEntry,
 	type DesktopListBrowserHistoryInput,
 } from "../shared/desktop-api.ts";
-import { BrowserController, type BrowserControllerDependencies } from "./browser-controller.ts";
+import { BrowserController } from "./browser-controller.ts";
 import { BrowserProfileStore, mergeBrowserHistory } from "./browser-profile-store.ts";
 import { ChromiumBrowserImporter } from "./chromium-browser-import.ts";
 
@@ -430,25 +430,7 @@ export class BrowserManager {
 		contents: WebContents,
 		surface: { readonly view: WebContentsView } | { readonly popupWindow: BrowserPopupWindow },
 	): DesktopBrowserState {
-		const popupWindow = "popupWindow" in surface ? surface.popupWindow : undefined;
-		const controller = this.createController(
-			input.browserId,
-			input.profileId,
-			contents,
-			popupWindow
-				? ({ x, y, button }) => {
-						if (popupWindow.isDestroyed()) return;
-						popupWindow.setFocusable(true);
-						popupWindow.show();
-						popupWindow.focus();
-						const point = { x: Math.round(x), y: Math.round(y), button, clickCount: 1 } as const;
-						contents.sendInputEvent({ type: "mouseMove", ...point });
-						contents.sendInputEvent({ type: "mouseDown", ...point });
-						contents.sendInputEvent({ type: "mouseUp", ...point });
-						if (!popupWindow.isDestroyed()) popupWindow.setFocusable(false);
-					}
-				: undefined,
-		);
+		const controller = this.createController(input.browserId, input.profileId, contents);
 		const record: BrowserRecord = {
 			browserId: input.browserId,
 			sessionId: input.sessionId,
@@ -804,12 +786,7 @@ export class BrowserManager {
 		return record;
 	}
 
-	private createController(
-		browserId: string,
-		profileId: string,
-		contents: WebContents,
-		dispatchMainFrameClick?: NonNullable<BrowserControllerDependencies["dispatchMainFrameClick"]>,
-	): BrowserControllerLike {
+	private createController(browserId: string, profileId: string, contents: WebContents): BrowserControllerLike {
 		if (this.dependencies.createController)
 			return this.dependencies.createController({ browserId, profileId, contents });
 		const browserDebugger = contents.debugger;
@@ -830,7 +807,6 @@ export class BrowserManager {
 				}
 				return image.toJPEG(quality);
 			},
-			dispatchMainFrameClick,
 			subscribeMessage: (listener) => {
 				const onMessage = (_event: Event, method: string, params: Record<string, unknown>, sessionId?: string) =>
 					listener(method, params, sessionId);

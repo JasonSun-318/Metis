@@ -75,11 +75,6 @@ export interface BrowserControllerDependencies {
 	readonly debugger: BrowserDebuggerTransport;
 	readonly pageState: () => { readonly url: string; readonly title: string; readonly loading: boolean };
 	readonly captureScreenshot: (quality: number) => Promise<Buffer>;
-	readonly dispatchMainFrameClick?: (input: {
-		readonly x: number;
-		readonly y: number;
-		readonly button: "left" | "right";
-	}) => void;
 	readonly subscribeMessage: (listener: (method: string, params: CdpParams, sessionId?: string) => void) => () => void;
 	readonly subscribeDetach: (listener: () => void) => () => void;
 	readonly acceleratorModifier?: number;
@@ -577,10 +572,6 @@ export class BrowserController {
 			case "click": {
 				const point = await this.resolvePoint(action.target, signal);
 				const button = action.button ?? "left";
-				if (!point.sessionId && this.dependencies.dispatchMainFrameClick) {
-					this.dependencies.dispatchMainFrameClick({ x: point.x, y: point.y, button });
-					return;
-				}
 				const buttons = button === "left" ? 1 : 2;
 				await this.command(
 					"Input.dispatchMouseEvent",
