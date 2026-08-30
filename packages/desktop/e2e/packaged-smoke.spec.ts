@@ -251,6 +251,17 @@ async function clickCenter(page: Page, target: Locator): Promise<void> {
 	await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
 }
 
+async function resolvedColor(page: Page, property: string): Promise<string> {
+	return page.evaluate((name) => {
+		const probe = document.createElement("span");
+		probe.style.color = `var(${name})`;
+		document.body.append(probe);
+		const color = getComputedStyle(probe).color;
+		probe.remove();
+		return color;
+	}, property);
+}
+
 async function resizeToolsSidebar(page: Page, targetWidth: number): Promise<void> {
 	const sidebar = page.locator(".tool-sidebar");
 	const resizer = page.getByRole("separator", { name: "Resize tools sidebar", exact: true });
@@ -1089,6 +1100,7 @@ test("packaged Plugin Center, worker, WASM, trusted extension, and utility lifec
 	]);
 	let providerRequests = 0;
 	let titleRequests = 0;
+	let approvalToolIssued = false;
 	const providerToolNames: string[][] = [];
 	const providerTranscripts: string[] = [];
 	const fakeProvider = createServer(async (request, response) => {
@@ -1103,6 +1115,9 @@ test("packaged Plugin Center, worker, WASM, trusted extension, and utility lifec
 			tools?: Array<{ function?: { name?: string }; name?: string }>;
 		};
 		const providerTranscript = JSON.stringify(payload.messages ?? []);
+		const toolNames = (payload.tools ?? [])
+			.map((tool) => tool.function?.name ?? tool.name)
+			.filter((name): name is string => Boolean(name));
 		if (providerTranscript.includes("conversation title generator")) {
 			titleRequests += 1;
 			response.writeHead(200, { "content-type": "text/event-stream" });
@@ -1117,10 +1132,36 @@ test("packaged Plugin Center, worker, WASM, trusted extension, and utility lifec
 			);
 			return;
 		}
+		if (toolNames.includes("commit_facts")) {
+			response.writeHead(200, { "content-type": "text/event-stream" });
+			const toolAlreadyCalled = providerTranscript.includes("call-packaged-memory");
+			response.end(
+				`data: ${JSON.stringify({
+					id: "chatcmpl-packaged-memory",
+					object: "chat.completion.chunk",
+					created: 1,
+					model: "packaged-smoke-model",
+					choices: [{
+						index: 0,
+						delta: toolAlreadyCalled
+							? { role: "assistant", content: "" }
+							: {
+								role: "assistant",
+								tool_calls: [{
+									index: 0,
+									id: "call-packaged-memory",
+									type: "function",
+									function: { name: "commit_facts", arguments: '{"facts":[]}' },
+								}],
+							},
+						finish_reason: toolAlreadyCalled ? "stop" : "tool_calls",
+					}],
+				})}\n\ndata: [DONE]\n\n`,
+			);
+			return;
+		}
 		providerTranscripts.push(providerTranscript);
-		providerToolNames.push(
-			(payload.tools ?? []).map((tool) => tool.function?.name ?? tool.name).filter((name): name is string => Boolean(name)),
-		);
+		providerToolNames.push(toolNames);
 		providerRequests += 1;
 		response.writeHead(200, { "content-type": "text/event-stream" });
 		if (providerTranscript.includes("request packaged questions") && !providerTranscript.includes("call-packaged-questions")) {
@@ -1211,7 +1252,8 @@ test("packaged Plugin Center, worker, WASM, trusted extension, and utility lifec
 			);
 			return;
 		}
-		if (providerTranscript.includes("request packaged approval") && !providerTranscript.includes("call-packaged-approval")) {
+		if (providerTranscript.includes("request packaged approval") && !approvalToolIssued) {
+			approvalToolIssued = true;
 			response.end(
 				`data: ${JSON.stringify({
 					id: "chatcmpl-packaged-approval",
@@ -1354,10 +1396,11 @@ test("packaged Plugin Center, worker, WASM, trusted extension, and utility lifec
 		await waitForServerReady(page);
 		await page.setViewportSize({ width: 1556, height: 1011 });
 		phase = "verifying packaged Plugin Center Skill lifecycle";
-		await page.getByRole("button", { name: "Plugins", exact: true }).click();
-		await expect(page.locator(".plugins-section-switch").getByRole("tab")).toHaveCount(2);
+		await page.getByRole("button", { name: "Customize", exact: true }).click();
+		await expect(page.locator(".plugins-section-switch").getByRole("tab")).toHaveCount(3);
 		await expect(page.locator(".plugins-section-switch").getByRole("tab", { name: "Skills", exact: true })).toBeVisible();
 		await expect(page.locator(".plugins-section-switch").getByRole("tab", { name: "MCP", exact: true })).toBeVisible();
+		await expect(page.locator(".plugins-section-switch").getByRole("tab", { name: "Hooks", exact: true })).toBeVisible();
 		await expect(page.getByRole("option", { name: "writing-plans", exact: true })).toBeVisible();
 
 		phase = "verifying packaged Skill creation methods and assisted Chat";
@@ -1413,7 +1456,7 @@ test("packaged Plugin Center, worker, WASM, trusted extension, and utility lifec
 		await expect.poll(async () => (await page!.evaluate(() =>
 			(globalThis as unknown as { metis: MetisDesktopApi }).metis.listSessions({ limit: 200 }),
 		)).sessions.length).toBe(0);
-		await page.getByRole("button", { name: "Plugins", exact: true }).click();
+		await page.getByRole("button", { name: "Customize", exact: true }).click();
 
 		phase = "creating a custom Skill from semantic fields";
 		await page.getByRole("button", { name: "New Skill", exact: true }).click();
@@ -1644,7 +1687,7 @@ test("packaged Plugin Center, worker, WASM, trusted extension, and utility lifec
 		await page.locator(`[data-active-session-id="${trustedSessionId}"]`).waitFor({ state: "visible", timeout: 15_000 });
 
 		phase = "verifying packaged Project Skill catalog";
-		await page.getByRole("button", { name: "Plugins", exact: true }).click();
+		await page.getByRole("button", { name: "Customize", exact: true }).click();
 		await expect(page.locator('.plugins-list-row[aria-label="packaged-project-skill"]')).toBeVisible();
 
 		phase = "verifying packaged live MCP actions and secret redaction";
@@ -1905,7 +1948,7 @@ test("packaged Plugin Center, worker, WASM, trusted extension, and utility lifec
 		expect(await runNowButton.evaluate((element) => {
 			const style = getComputedStyle(element);
 			return { backgroundColor: style.backgroundColor, opacity: style.opacity };
-		})).toEqual({ backgroundColor: "rgb(239, 238, 233)", opacity: "1" });
+		})).toEqual({ backgroundColor: await resolvedColor(page, "--button-primary-bg"), opacity: "1" });
 		await page.screenshot({ path: path.join(scheduleQaDir, "task-detail.png") });
 		await page.locator(".scheduled-task-history").getByRole("button").click();
 		await expect(page.locator(".scheduled-task-quick-list")).toContainText("Morning brief");
@@ -2041,6 +2084,7 @@ test("packaged personal profile renders cached Token and Skill activity", async 
 		await expect(page.getByRole("menuitem", { name: "Settings", exact: true })).toBeFocused();
 		await page.screenshot({ path: path.join(qaDir, "account-menu.png") });
 		await page.getByRole("menuitem", { name: "Settings", exact: true }).click();
+		await page.getByRole("button", { name: "Profile", exact: true }).click();
 		await expect(page.getByRole("heading", { name: "Metis User", exact: true })).toBeVisible();
 		await page.locator('.profile-avatar-actions input[type="file"]').setInputFiles({
 			name: "avatar.png",
@@ -2056,8 +2100,8 @@ test("packaged personal profile renders cached Token and Skill activity", async 
 		expect(storedAvatar).toMatch(/^data:image\/webp;base64,/u);
 		expect(storedAvatar!.length).toBeLessThan(50_000);
 		const settingsBox = await page.locator(".settings-dialog").boundingBox();
-		expect(settingsBox?.width).toBe(1_440);
-		expect(settingsBox?.height).toBe(900);
+		expect(settingsBox?.width).toBe(1_040);
+		expect(settingsBox?.height).toBe(740);
 		await expect(page.getByText("Most used Skills", { exact: true })).toBeVisible();
 		await expect(page.locator(".profile-heatmap-week")).toHaveCount(53);
 		await expect(page.getByText("pdf", { exact: true })).toBeVisible();
@@ -2151,9 +2195,13 @@ test("packaged personal profile renders cached Token and Skill activity", async 
 		});
 		await page.locator(".usage-bar").last().hover();
 		await page.setViewportSize({ width: 1440, height: 820 });
-		expect(await page.locator(".usage-toolbar").evaluate((element) => getComputedStyle(element).borderBottomWidth)).not.toBe("0px");
-		expect(await page.locator(".usage-details-grid").evaluate((element) => getComputedStyle(element).borderTopWidth)).not.toBe("0px");
-		expect.soft(await page.locator(".settings-page-scroll-usage").evaluate((element) => element.scrollHeight - element.clientHeight)).toBeLessThanOrEqual(1);
+		await expect(page.locator(".usage-toolbar")).toHaveCSS("margin-bottom", "8px");
+		await expect(page.locator(".usage-details-grid")).toHaveCSS("gap", "14px");
+		const chartOverflow = await page.locator(".settings-page-scroll-usage").evaluate(
+			(element) => element.scrollHeight - element.clientHeight,
+		);
+		expect(chartOverflow).toBeGreaterThan(0);
+		expect(chartOverflow).toBeLessThanOrEqual(64);
 		await page.screenshot({ path: path.join(settingsQaDir, "usage-1440x820.png") });
 		const tableView = page.getByRole("button", { name: "Table view", exact: true });
 		const chartView = page.getByRole("button", { name: "Chart view", exact: true });
@@ -2163,7 +2211,11 @@ test("packaged personal profile renders cached Token and Skill activity", async 
 		expect(await page.locator(".usage-table-wrap tbody tr")).toHaveCount(30);
 		const tableCardHeight = await page.locator(".usage-chart-card").evaluate((element) => element.getBoundingClientRect().height);
 		expect(Math.abs(chartCardHeight - tableCardHeight)).toBeLessThanOrEqual(1);
-		expect(await page.locator(".settings-page-scroll-usage").evaluate((element) => element.scrollHeight - element.clientHeight)).toBeLessThanOrEqual(1);
+		const tableOverflow = await page.locator(".settings-page-scroll-usage").evaluate(
+			(element) => element.scrollHeight - element.clientHeight,
+		);
+		expect(tableOverflow).toBeGreaterThan(0);
+		expect(tableOverflow).toBeLessThanOrEqual(64);
 		expect(await page.locator(".usage-view-toggle").evaluate((element) => getComputedStyle(element).backgroundColor)).toBe("rgba(0, 0, 0, 0)");
 		await page.screenshot({ path: path.join(settingsQaDir, "usage-table-30d-1440x820.png") });
 		await chartView.click();
@@ -2173,7 +2225,11 @@ test("packaged personal profile renders cached Token and Skill activity", async 
 		await tableView.click();
 		await expect(tableView).toHaveAttribute("aria-pressed", "true");
 		await expect(page.locator(".usage-table-wrap tbody tr")).toHaveCount(7);
-		expect(await page.locator(".settings-page-scroll-usage").evaluate((element) => element.scrollHeight - element.clientHeight)).toBeLessThanOrEqual(1);
+		const compactTableOverflow = await page.locator(".settings-page-scroll-usage").evaluate(
+			(element) => element.scrollHeight - element.clientHeight,
+		);
+		expect(compactTableOverflow).toBeGreaterThan(0);
+		expect(compactTableOverflow).toBeLessThanOrEqual(64);
 		await page.screenshot({ path: path.join(settingsQaDir, "usage-table-1440x820.png") });
 		await chartView.click();
 		await expect(chartView).toHaveAttribute("aria-pressed", "true");
@@ -2207,7 +2263,8 @@ test("packaged personal profile renders cached Token and Skill activity", async 
 				columns: getComputedStyle(grid).gridTemplateColumns.split(" ").length,
 			};
 		});
-		expect(modelLayout.outerOverflow).toBeLessThanOrEqual(1);
+		expect(modelLayout.outerOverflow).toBeGreaterThan(0);
+		await expect(page.locator(".settings-page-scroll-model")).toHaveCSS("overflow-y", "auto");
 		expect(modelLayout.columns).toBeGreaterThanOrEqual(3);
 		expect((await page.evaluate(() =>
 			(globalThis as unknown as { metis: MetisDesktopApi }).metis.getModelSettings(),
@@ -2217,8 +2274,12 @@ test("packaged personal profile renders cached Token and Skill activity", async 
 		await expect(page.getByText("Credentials cleared", { exact: true })).toBeVisible();
 		await page.getByRole("button", { name: "Close provider settings", exact: true }).click();
 		await expect(openAiProvider.getByText("Set up", { exact: true })).toBeVisible();
-		await expect(page.getByRole("button", { name: "Add provider", exact: true })).toHaveCount(0);
-		await expect(page.getByLabel("Provider ID", { exact: true })).toHaveCount(0);
+		await page.getByRole("button", { name: "Add provider", exact: true }).click();
+		const customProviderDialog = page.getByRole("dialog", { name: "Custom provider", exact: true });
+		await expect(customProviderDialog.getByLabel("Provider name", { exact: true })).toBeVisible();
+		await expect(customProviderDialog.getByLabel("Base URL", { exact: true })).toBeVisible();
+		await expect(customProviderDialog.getByLabel("Model ID", { exact: true })).toBeVisible();
+		await customProviderDialog.getByRole("button", { name: "Close provider settings", exact: true }).click();
 
 		phase = "checking compact layout";
 		await page.getByRole("button", { name: "Profile", exact: true }).click();
@@ -2301,7 +2362,7 @@ test("packaged MCP creation matrix connects URL, custom, and JSON transports", a
 		phase = "opening the MCP matrix fixture";
 		await page.getByRole("button", { name: "MCP matrix fixture", exact: true }).click();
 		await page.locator(`[data-active-session-id="${CHAT_ACTIVE_ID}"]`).waitFor({ state: "visible", timeout: 15_000 });
-		await page.getByRole("button", { name: "Plugins", exact: true }).click();
+		await page.getByRole("button", { name: "Customize", exact: true }).click();
 		await page.locator(".plugins-section-switch").getByRole("tab", { name: "MCP", exact: true }).click();
 
 		const openCreation = async (scope: "User" | "Project") => {
@@ -2970,10 +3031,10 @@ test("packaged terminal sidebar runs a real PTY and keeps independent tabs", asy
 		await expect(sidebar).toBeHidden();
 		await page.getByRole("button", { name: "Show tools sidebar", exact: true }).click();
 		await expect(page.getByRole("tab")).toHaveCount(2);
-		await clickCenter(page, page.getByRole("button", { name: "Close Terminal 2", exact: true }));
+		await page.getByRole("button", { name: "Close Terminal 2", exact: true }).click();
 		await expect(page.getByRole("tab")).toHaveCount(1);
 		await sidebar.screenshot({ path: path.join(qaDir, "single-terminal-resized-panel.png") });
-		await clickCenter(page, page.getByRole("button", { name: "Close Terminal", exact: true }));
+		await page.getByRole("button", { name: "Close Terminal", exact: true }).click();
 		await expect(page.locator(".tool-sidebar-menu")).toBeVisible();
 		expect(consoleErrors).toEqual([]);
 	} catch (error) {
@@ -3247,7 +3308,7 @@ test("packaged Code review lazily renders diffs and keeps folder-controlled deta
 		writeFixtureFile(path.join(projectDir, "context.md"), readme),
 		writeFixtureFile(path.join(projectDir, "src", "app.ts"), "export const app = true;\n"),
 	]);
-	git(projectDir, "init");
+	git(projectDir, "init", "-b", "master");
 	git(projectDir, "config", "user.email", "review@example.com");
 	git(projectDir, "config", "user.name", "Metis Review");
 	git(projectDir, "add", ".");
@@ -3796,7 +3857,7 @@ test("packaged General settings and Personalization persist across restart", asy
 		await searchSection.getByRole("button", { name: "保存", exact: true }).click();
 		await expect(searchSection.getByRole("status")).toContainText("已保存");
 		await expect(searchApiKey).toHaveAttribute("type", "password");
-		await expect(searchApiKey).toHaveAttribute("placeholder", "••••••••••••");
+		await expect(searchApiKey).toHaveAttribute("placeholder", "••••••••••••••••••••••••••••••••");
 		await searchSection.getByRole("button", { name: "显示 API Key", exact: true }).click();
 		await expect(searchApiKey).toHaveAttribute("type", "text");
 		await expect(searchApiKey).toHaveValue("packaged-search-secret");
@@ -3862,7 +3923,7 @@ test("packaged General settings and Personalization persist across restart", asy
 		await expect(restartedSearchSection.getByRole("switch", { name: "启用网络搜索", exact: true })).toBeChecked();
 		await expect(restartedSearchSection.getByLabel("API Key", { exact: true })).toHaveAttribute(
 			"placeholder",
-			"••••••••••••",
+			"••••••••••••••••••••••••••••••••",
 		);
 		const restartedFonts = await page.evaluate(() => ({
 			chat: getComputedStyle(document.documentElement).getPropertyValue("--chat-prose-font"),
@@ -4058,17 +4119,17 @@ test("packaged mode project actions preserve the other mode and shared project d
 		await expect(sessionActionButton).toHaveCSS("opacity", "0");
 		await sessionActionButton.focus();
 		await expect(sessionActionButton).toHaveCSS("opacity", "1");
-		await expect(sessionButton).toHaveCSS("background-color", "rgb(64, 64, 64)");
+		await expect(sessionButton).toHaveCSS("background-color", await resolvedColor(page, "--surface-09"));
 		await sessionActionButton.click();
-		await expect(sessionActionButton).toHaveCSS("background-color", "rgb(104, 104, 104)");
+		await expect(sessionActionButton).toHaveCSS("background-color", await resolvedColor(page, "--surface-18"));
 		await page.locator(".session-sidebar").screenshot({ path: path.join(qaDir, "session-row-hover-inactive.png") });
 		await page.keyboard.press("Escape");
 		await sessionActionRow.getByRole("button", { name: "Session action target", exact: true }).click();
 		await expect(page.locator(".workspace-header")).toHaveAttribute("data-active-session-id", SESSION_ACTION_ID);
 		await sessionActionButton.focus();
-		await expect(sessionButton).toHaveCSS("background-color", "rgb(88, 88, 88)");
+		await expect(sessionButton).toHaveCSS("background-color", await resolvedColor(page, "--panel-selected"));
 		await sessionActionButton.click();
-		await expect(sessionActionButton).toHaveCSS("background-color", "rgb(104, 104, 104)");
+		await expect(sessionActionButton).toHaveCSS("background-color", await resolvedColor(page, "--surface-18"));
 		await page.locator(".session-sidebar").screenshot({ path: path.join(qaDir, "session-row-hover-current.png") });
 		const sessionActionMenu = page.getByRole("menu", { name: "Session action target session actions" });
 		await expect(sessionActionMenu.getByRole("menuitem")).toHaveText(["Pin", "Rename", "Delete"]);
@@ -4253,7 +4314,7 @@ test("packaged mode project actions preserve the other mode and shared project d
 		await page.getByRole("button", { name: "Code", exact: true }).click();
 		await projectGroup(page, projectName).locator(".session-button").click();
 		await expect(page.locator(`[data-active-session-id="${CODE_ID}"]`)).toBeVisible();
-		await page.getByRole("button", { name: "Plugins", exact: true }).click();
+		await page.getByRole("button", { name: "Customize", exact: true }).click();
 		await page.getByRole("button", { name: "Skill sources", exact: true }).click();
 		await page.getByRole("option", { name: "Project", exact: true }).click();
 		await expect(page.getByText("shared-project-skill", { exact: true })).toBeVisible();

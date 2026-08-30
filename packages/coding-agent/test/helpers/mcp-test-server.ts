@@ -217,6 +217,7 @@ export async function createMcpTestServer(options: McpTestServerOptions = {}): P
 		lastToolCallName: () => lastToolCall,
 		async close() {
 			await server.close().catch(() => undefined);
+			httpServer.closeAllConnections();
 			await new Promise<void>((resolve) => httpServer.close(() => resolve()));
 		},
 	};
