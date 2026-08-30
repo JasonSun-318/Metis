@@ -136,6 +136,19 @@ function browserHarness(
 		destroy: vi.fn(),
 		isDestroyed: vi.fn(() => false),
 	};
+	const popupWindow = {
+		webContents,
+		destroy: vi.fn(),
+		focus: vi.fn(),
+		isDestroyed: vi.fn(() => false),
+		off: vi.fn(),
+		on: vi.fn(),
+		setBounds: vi.fn(),
+		setFocusable: vi.fn(),
+		setIgnoreMouseEvents: vi.fn(),
+		setOpacity: vi.fn(),
+		show: vi.fn(),
+	};
 	const willDownloadHandlers: ((...args: any[]) => void)[] = [];
 	const browserSession = {
 		cookies: {
@@ -244,7 +257,7 @@ function browserHarness(
 		controllers,
 		createdPreferences: () => createdPreferences,
 		emit: (name: string, ...args: any[]) => {
-			for (const listener of listeners.get(name) ?? []) listener(...args);
+			for (const listener of [...(listeners.get(name) ?? [])]) listener(...args);
 		},
 		loadHistory,
 		manager,
@@ -254,6 +267,7 @@ function browserHarness(
 		openPath,
 		pathExists,
 		persisted: () => profileStore.loadHistory(DEFAULT_BROWSER_PROFILE_ID),
+		popupWindow,
 		profileStore,
 		importer,
 		resolveDownloadDirectory,
@@ -421,9 +435,15 @@ describe("BrowserManager", () => {
 		harness.manager.create({ sessionId: SESSION_ID, browserId: openerId, profileId: DEFAULT_BROWSER_PROFILE_ID });
 		expect(harness.windowOpen("file:///tmp/unsafe")).toEqual({ action: "deny" });
 		const popup = harness.windowOpen("https://accounts.example.test/oauth");
-		expect(popup).toMatchObject({ action: "allow", createWindow: expect.any(Function) });
-		expect(popup?.createWindow?.({ webPreferences: { openerId: 42 } } as never)).toBe(harness.webContents);
-		expect(harness.createdPreferences()).toMatchObject({ openerId: 42 });
+		expect(popup).toMatchObject({
+			action: "allow",
+			overrideBrowserWindowOptions: {
+				show: false,
+				webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true },
+			},
+		});
+		expect(popup?.createWindow).toBeUndefined();
+		harness.emit("did-create-window", harness.popupWindow);
 		const listed = await harness.manager.executeTool(
 			SESSION_ID,
 			{ tool: "browser_tabs", input: { action: "list" } },
@@ -816,7 +836,7 @@ describe("BrowserManager", () => {
 
 		expect(harness.windowOpen("https://openai.com")).toMatchObject({
 			action: "allow",
-			createWindow: expect.any(Function),
+			overrideBrowserWindowOptions: expect.any(Object),
 		});
 		const preventDefault = vi.fn();
 		harness.emit("will-navigate", { url: "file:///etc/passwd", preventDefault });
