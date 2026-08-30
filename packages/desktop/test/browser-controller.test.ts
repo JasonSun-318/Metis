@@ -264,6 +264,189 @@ describe("BrowserController", () => {
 		expect(debug.commands.filter(({ method }) => method.startsWith("Input."))).toHaveLength(0);
 	});
 
+	it("rechecks the document after resolving a target and before dispatching input", async () => {
+		const created = fixture();
+		const first = await observe(created.controller);
+		created.debug.handler = async (method, _params, sessionId) => {
+			if (method === "DOM.getContentQuads") {
+				created.page.url = "https://other.test/replaced";
+				created.emit("Page.frameNavigated", { frame: { id: "main", loaderId: "loader-2" } });
+			}
+			return (
+				created.debug.responses.get(`${sessionId ?? "main"}:${method}`) ?? created.debug.responses.get(method) ?? {}
+			);
+		};
+
+		await expect(
+			created.controller.act(
+				action(first, { type: "click", target: { elementId: "e2" } }),
+				new AbortController().signal,
+			),
+		).resolves.toMatchObject({ status: "stale", reason: "document_changed" });
+		expect(created.debug.commands.filter(({ method }) => method.startsWith("Input."))).toHaveLength(0);
+	});
+
+	it("fails closed when the same document changes after target resolution", async () => {
+		const created = fixture();
+		const first = await observe(created.controller);
+		created.debug.handler = async (method, _params, sessionId) => {
+			if (method === "DOM.getContentQuads") created.emit("DOM.attributeModified", { nodeId: 8 });
+			return (
+				created.debug.responses.get(`${sessionId ?? "main"}:${method}`) ?? created.debug.responses.get(method) ?? {}
+			);
+		};
+
+		await expect(
+			created.controller.act(
+				action(first, { type: "click", target: { elementId: "e2" } }),
+				new AbortController().signal,
+			),
+		).resolves.toMatchObject({ status: "stale", reason: "revision_changed" });
+		expect(created.debug.commands.filter(({ method }) => method.startsWith("Input."))).toHaveLength(0);
+	});
+
+	it("finishes an atomic key sequence when keyDown navigates", async () => {
+		const created = fixture();
+		const first = await observe(created.controller);
+		created.debug.handler = async (method, params, sessionId) => {
+			if (method === "Input.dispatchKeyEvent" && params.type === "rawKeyDown") {
+				created.page.url = "https://example.test/next";
+				created.emit("Page.frameNavigated", { frame: { id: "main", loaderId: "loader-2" } });
+			}
+			return (
+				created.debug.responses.get(`${sessionId ?? "main"}:${method}`) ?? created.debug.responses.get(method) ?? {}
+			);
+		};
+
+		await expect(
+			created.controller.act(action(first, { type: "press", key: "Enter" }), new AbortController().signal),
+		).resolves.toMatchObject({ status: "completed", observation: { url: "https://example.test/next" } });
+		expect(
+			created.debug.commands
+				.filter(({ method }) => method === "Input.dispatchKeyEvent")
+				.map(({ params }) => params.type),
+		).toEqual(["rawKeyDown", "keyUp"]);
+	});
+
+	it("rechecks document identity after focus before inserting text", async () => {
+		const created = fixture();
+		const first = await observe(created.controller);
+		created.debug.handler = async (method, _params, sessionId) => {
+			if (method === "DOM.focus") {
+				created.page.url = "https://other.test/after-focus";
+				created.emit("Page.frameNavigated", { frame: { id: "main", loaderId: "loader-2" } });
+			}
+			return (
+				created.debug.responses.get(`${sessionId ?? "main"}:${method}`) ?? created.debug.responses.get(method) ?? {}
+			);
+		};
+
+		await expect(
+			created.controller.act(
+				action(first, { type: "type", elementId: "e1", text: "secret" }),
+				new AbortController().signal,
+			),
+		).resolves.toMatchObject({ status: "stale", reason: "document_changed" });
+		expect(created.debug.commands).not.toContainEqual({ method: "Input.insertText", params: { text: "secret" } });
+	});
+
+	it("does not send Backspace when select-all navigates during replace", async () => {
+		const created = fixture();
+		const first = await observe(created.controller);
+		created.debug.handler = async (method, params, sessionId) => {
+			if (method === "Input.dispatchKeyEvent" && params.type === "rawKeyDown" && params.key === "a") {
+				created.page.url = "https://other.test/after-select-all";
+				created.emit("Page.frameNavigated", { frame: { id: "main", loaderId: "loader-2" } });
+			}
+			return (
+				created.debug.responses.get(`${sessionId ?? "main"}:${method}`) ?? created.debug.responses.get(method) ?? {}
+			);
+		};
+
+		await expect(
+			created.controller.act(
+				action(first, { type: "type", elementId: "e1", text: "secret", replace: true }),
+				new AbortController().signal,
+			),
+		).resolves.toMatchObject({ status: "stale", reason: "document_changed" });
+		expect(
+			created.debug.commands.some(
+				({ method, params }) => method === "Input.dispatchKeyEvent" && params.key === "Backspace",
+			),
+		).toBe(false);
+	});
+
+	it("best-effort releases keys and pointer buttons when cancellation follows input down", async () => {
+		const keyFixture = fixture();
+		const keyObservation = await observe(keyFixture.controller);
+		const keyAbort = new AbortController();
+		keyFixture.debug.handler = async (method, params, sessionId) => {
+			if (method === "Input.dispatchKeyEvent" && params.type === "rawKeyDown") {
+				keyAbort.abort(new DOMException("Turn interrupted", "AbortError"));
+			}
+			return (
+				keyFixture.debug.responses.get(`${sessionId ?? "main"}:${method}`) ??
+				keyFixture.debug.responses.get(method) ??
+				{}
+			);
+		};
+		await expect(
+			keyFixture.controller.act(action(keyObservation, { type: "press", key: "Enter" }), keyAbort.signal),
+		).rejects.toThrow("Turn interrupted");
+		expect(
+			keyFixture.debug.commands
+				.filter(({ method }) => method === "Input.dispatchKeyEvent")
+				.map(({ params }) => params.type),
+		).toEqual(["rawKeyDown", "keyUp"]);
+
+		const pointerFixture = fixture();
+		const pointerObservation = await observe(pointerFixture.controller);
+		const pointerAbort = new AbortController();
+		pointerFixture.debug.handler = async (method, params, sessionId) => {
+			if (method === "Input.dispatchMouseEvent" && params.type === "mousePressed") {
+				pointerAbort.abort(new DOMException("Turn interrupted", "AbortError"));
+			}
+			return (
+				pointerFixture.debug.responses.get(`${sessionId ?? "main"}:${method}`) ??
+				pointerFixture.debug.responses.get(method) ??
+				{}
+			);
+		};
+		await expect(
+			pointerFixture.controller.act(
+				action(pointerObservation, { type: "click", target: { elementId: "e2" } }),
+				pointerAbort.signal,
+			),
+		).rejects.toThrow("Turn interrupted");
+		expect(
+			pointerFixture.debug.commands
+				.filter(({ method }) => method === "Input.dispatchMouseEvent")
+				.map(({ params }) => params.type),
+		).toEqual(["mouseMoved", "mousePressed", "mouseReleased"]);
+	});
+
+	it("bounds a hanging release and sends it only once", async () => {
+		const created = fixture();
+		const first = await observe(created.controller);
+		created.debug.handler = async (method, params, sessionId) => {
+			if (method === "Input.dispatchKeyEvent" && params.type === "keyUp") return new Promise(() => undefined);
+			return (
+				created.debug.responses.get(`${sessionId ?? "main"}:${method}`) ?? created.debug.responses.get(method) ?? {}
+			);
+		};
+		const startedAt = Date.now();
+
+		await expect(
+			created.controller.act(action(first, { type: "press", key: "Enter" }), new AbortController().signal),
+		).rejects.toThrow("Browser input release timed out");
+		expect(Date.now() - startedAt).toBeLessThan(1_500);
+		expect(
+			created.debug.commands.filter(
+				({ method, params }) => method === "Input.dispatchKeyEvent" && params.type === "keyUp",
+			),
+		).toHaveLength(1);
+	});
+
 	it("uses DOM geometry and Input domain commands for click and text actions", async () => {
 		const { controller, debug } = fixture();
 		const first = await observe(controller);
@@ -332,15 +515,18 @@ describe("BrowserController", () => {
 	it("rejects coordinate input outside the current viewport", async () => {
 		const { controller, debug } = fixture();
 		const first = await observe(controller);
-		await expect(
-			controller.act(action(first, { type: "hover", target: { x: 799, y: 599 } }), new AbortController().signal),
-		).resolves.toMatchObject({ status: "completed" });
+		const valid = await controller.act(
+			action(first, { type: "hover", target: { x: 799, y: 599 } }),
+			new AbortController().signal,
+		);
+		expect(valid).toMatchObject({ status: "completed" });
+		const current = valid.status === "completed" ? valid.observation : first;
 		const beforeRejected = debug.commands.filter(({ method }) => method === "Input.dispatchMouseEvent").length;
 		await expect(
-			controller.act(action(first, { type: "hover", target: { x: 800, y: 599 } }), new AbortController().signal),
+			controller.act(action(current, { type: "hover", target: { x: 800, y: 599 } }), new AbortController().signal),
 		).rejects.toThrow("within the current viewport");
 		await expect(
-			controller.act(action(first, { type: "hover", target: { x: -1, y: 0 } }), new AbortController().signal),
+			controller.act(action(current, { type: "hover", target: { x: -1, y: 0 } }), new AbortController().signal),
 		).rejects.toThrow("within the current viewport");
 		expect(debug.commands.filter(({ method }) => method === "Input.dispatchMouseEvent")).toHaveLength(beforeRejected);
 	});
@@ -360,6 +546,40 @@ describe("BrowserController", () => {
 		abort.abort(new DOMException("Page closed", "AbortError"));
 
 		await expect(pending).rejects.toThrow("Page closed");
+	});
+
+	it("rejects an in-flight command when Electron detaches the debugger", async () => {
+		const created = fixture();
+		const first = await observe(created.controller);
+		let release!: () => void;
+		let blocked = true;
+		created.debug.handler = async (method) => {
+			if (blocked && method === "Input.dispatchMouseEvent") {
+				await new Promise<void>((resolve) => {
+					release = resolve;
+				});
+			}
+			return created.debug.responses.get(method) ?? {};
+		};
+		const pending = created.controller.act(
+			action(first, { type: "click", target: { elementId: "e2" } }),
+			new AbortController().signal,
+		);
+		await vi.waitFor(() =>
+			expect(created.debug.commands.some(({ method }) => method === "Input.dispatchMouseEvent")).toBe(true),
+		);
+		created.detach();
+		const outcome = await Promise.race([
+			pending.then(
+				() => "resolved",
+				() => "rejected",
+			),
+			new Promise<"pending">((resolve) => setTimeout(() => resolve("pending"), 50)),
+		]);
+		blocked = false;
+		release();
+		await pending.catch(() => undefined);
+		expect(outcome).toBe("rejected");
 	});
 
 	it("waits for a bounded accessibility quiet window after input", async () => {
@@ -523,5 +743,23 @@ describe("BrowserController", () => {
 		expect(third.documentId).not.toBe(changedLoader.documentId);
 		controller.close();
 		expect(debug.attached).toBe(false);
+	});
+
+	it("clears retained snapshots and element mappings when closed", async () => {
+		const { controller } = fixture();
+		await observe(controller);
+		const retained = controller as unknown as {
+			current?: unknown;
+			previous?: unknown;
+			elements: Map<string, unknown>;
+			elementIds: Map<string, string>;
+		};
+		expect(retained.current).toBeDefined();
+		expect(retained.elements.size).toBeGreaterThan(0);
+		controller.close();
+		expect(retained.current).toBeUndefined();
+		expect(retained.previous).toBeUndefined();
+		expect(retained.elements.size).toBe(0);
+		expect(retained.elementIds.size).toBe(0);
 	});
 });

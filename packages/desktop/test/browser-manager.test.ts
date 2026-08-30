@@ -137,19 +137,6 @@ function browserHarness(
 		destroy: vi.fn(),
 		isDestroyed: vi.fn(() => false),
 	};
-	const popupWindow = {
-		webContents,
-		destroy: vi.fn(),
-		focus: vi.fn(),
-		isDestroyed: vi.fn(() => false),
-		off: vi.fn(),
-		on: vi.fn(),
-		setBounds: vi.fn(),
-		setFocusable: vi.fn(),
-		setIgnoreMouseEvents: vi.fn(),
-		setOpacity: vi.fn(),
-		show: vi.fn(),
-	};
 	const willDownloadHandlers: ((...args: any[]) => void)[] = [];
 	const browserSession = {
 		cookies: {
@@ -170,6 +157,7 @@ function browserHarness(
 		toPNG: vi.fn(() => Buffer.from("png")),
 	};
 	let createdPreferences: Record<string, unknown> | undefined;
+	let createdViewOptions: Record<string, unknown> | undefined;
 	const openExternal = vi.fn(async () => undefined);
 	const savePdf = vi.fn(async () => undefined);
 	const saveScreenshot = vi.fn(async () => undefined);
@@ -208,6 +196,9 @@ function browserHarness(
 			act: ReturnType<typeof vi.fn>;
 			invalidate: ReturnType<typeof vi.fn>;
 			close: ReturnType<typeof vi.fn>;
+			detach: () => void;
+			leaseAbort: AbortController;
+			leaseSignal: ReturnType<typeof vi.fn>;
 		}
 	>();
 	const manager = new BrowserManager({
@@ -215,6 +206,7 @@ function browserHarness(
 		importer,
 		sessionForPartition,
 		createView: (options) => {
+			createdViewOptions = options as Record<string, unknown>;
 			createdPreferences = options.webPreferences as Record<string, unknown>;
 			return view as never;
 		},
@@ -238,11 +230,18 @@ function browserHarness(
 				loading: false,
 				state: "e1 button Continue",
 			});
+			const leaseAbort = new AbortController();
 			const controller = {
 				observe: vi.fn(async () => observation()),
 				act: vi.fn(async () => ({ status: "completed" as const, observation: observation() })),
 				invalidate: vi.fn(),
 				close: vi.fn(),
+				leaseAbort,
+				leaseSignal: vi.fn(() => controller.leaseAbort.signal),
+				detach: vi.fn(() => {
+					controller.leaseAbort.abort(new Error("Browser debugger detached"));
+					controller.leaseAbort = new AbortController();
+				}),
 			};
 			controllers.set(browserId, controller);
 			return controller;
@@ -257,6 +256,7 @@ function browserHarness(
 		contentView,
 		controllers,
 		createdPreferences: () => createdPreferences,
+		createdViewOptions: () => createdViewOptions,
 		emit: (name: string, ...args: any[]) => {
 			for (const listener of [...(listeners.get(name) ?? [])]) listener(...args);
 		},
@@ -268,7 +268,6 @@ function browserHarness(
 		openPath,
 		pathExists,
 		persisted: () => profileStore.loadHistory(DEFAULT_BROWSER_PROFILE_ID),
-		popupWindow,
 		profileStore,
 		importer,
 		resolveDownloadDirectory,
@@ -438,13 +437,10 @@ describe("BrowserManager", () => {
 		const popup = harness.windowOpen("https://accounts.example.test/oauth");
 		expect(popup).toMatchObject({
 			action: "allow",
-			overrideBrowserWindowOptions: {
-				show: false,
-				webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true },
-			},
+			createWindow: expect.any(Function),
 		});
-		expect(popup?.createWindow).toBeUndefined();
-		harness.emit("did-create-window", harness.popupWindow);
+		expect(popup?.createWindow?.({ webContents: harness.webContents, webPreferences: {} })).toBe(harness.webContents);
+		expect(harness.createdViewOptions()?.webContents).toBe(harness.webContents);
 		const listed = await harness.manager.executeTool(
 			SESSION_ID,
 			{ tool: "browser_tabs", input: { action: "list" } },
@@ -528,6 +524,14 @@ describe("BrowserManager", () => {
 		harness.manager.onEvent((event) => events.push(event));
 		harness.manager.attach({ contentView: harness.contentView } as never);
 		harness.manager.create({ sessionId: SESSION_ID, browserId, profileId: DEFAULT_BROWSER_PROFILE_ID });
+		await harness.manager.control({
+			type: "present",
+			sessionId: SESSION_ID,
+			browserId,
+			visible: true,
+			bounds: { x: 1, y: 2, width: 300, height: 400 },
+		});
+		expect(harness.contentView.addChildView).toHaveBeenLastCalledWith(harness.view);
 		const controller = harness.controllers.get(browserId)!;
 		controller.act.mockImplementation(
 			(_input: unknown, signal: AbortSignal) =>
@@ -587,6 +591,7 @@ describe("BrowserManager", () => {
 			tool: "browser_act",
 			details: { status: "cancelled", reason: "user_cancelled" },
 		});
+		expect(harness.backgroundContentView.addChildView).toHaveBeenLastCalledWith(harness.view);
 		expect(events).not.toContainEqual({ type: "activity", sessionId: SESSION_ID, browserId, active: false });
 	});
 
@@ -623,6 +628,35 @@ describe("BrowserManager", () => {
 			tool: "browser_navigate",
 			details: { status: "cancelled", reason: "user_cancelled" },
 		});
+	});
+
+	it("releases the control lease when the debugger detaches during navigation", async () => {
+		const harness = browserHarness({ navigationTimeoutMs: 10_000 });
+		const browserId = "10000000-0000-4000-8000-000000000095";
+		harness.manager.create({ sessionId: SESSION_ID, browserId, profileId: DEFAULT_BROWSER_PROFILE_ID });
+		harness.webContents.loadURL.mockReturnValueOnce(new Promise(() => undefined));
+		const pending = harness.manager.executeTool(
+			SESSION_ID,
+			{
+				tool: "browser_navigate",
+				input: { action: "goto", browserId, url: "https://slow.example.test" },
+			},
+			new AbortController().signal,
+		);
+		await vi.waitFor(() => expect(harness.webContents.loadURL).toHaveBeenCalledOnce());
+		harness.controllers.get(browserId)!.detach();
+
+		await expect(pending).rejects.toThrow("Browser debugger detached");
+		await expect(
+			harness.manager.executeTool(
+				SESSION_ID,
+				{
+					tool: "browser_navigate",
+					input: { action: "goto", browserId, url: "https://recovered.example.test" },
+				},
+				new AbortController().signal,
+			),
+		).resolves.toMatchObject({ tool: "browser_navigate", details: { status: "completed" } });
 	});
 
 	it("settles handoff on interruption, timeout, and tab close without retaining a lock", async () => {
@@ -837,7 +871,7 @@ describe("BrowserManager", () => {
 
 		expect(harness.windowOpen("https://openai.com")).toMatchObject({
 			action: "allow",
-			overrideBrowserWindowOptions: expect.any(Object),
+			createWindow: expect.any(Function),
 		});
 		const preventDefault = vi.fn();
 		harness.emit("will-navigate", { url: "file:///etc/passwd", preventDefault });
@@ -910,7 +944,7 @@ describe("BrowserManager", () => {
 		).resolves.toBeUndefined();
 	});
 
-	it("returns a structured result when an action closes its own popup", async () => {
+	it("returns a bounded error when an action closes its own popup", async () => {
 		const harness = browserHarness();
 		const browserId = "10000000-0000-4000-8000-000000000067";
 		const events: unknown[] = [];
@@ -943,10 +977,7 @@ describe("BrowserManager", () => {
 		);
 		await vi.waitFor(() => expect(controller.act).toHaveBeenCalledOnce());
 		harness.emit("destroyed");
-		await expect(result).resolves.toEqual({
-			tool: "browser_act",
-			details: { status: "cancelled", reason: "tab_closed" },
-		});
+		await expect(result).rejects.toThrow();
 		expect(events).toContainEqual({ type: "closed", sessionId: SESSION_ID, browserId });
 		expect(events).not.toContainEqual({ type: "error", browserId, message: "Browser page crashed" });
 	});

@@ -15,6 +15,7 @@ const MAX_AX_NODES = 3_000;
 const MAX_ELEMENT_ID = 999_999;
 const DEFAULT_STABILIZATION_QUIET_MS = 150;
 const DEFAULT_STABILIZATION_TIMEOUT_MS = 2_000;
+const INPUT_RELEASE_TIMEOUT_MS = 500;
 const SCREENSHOT_QUALITY = 75;
 const INTERACTIVE_ROLES = new Set([
 	"button",
@@ -261,9 +262,11 @@ export class BrowserController {
 	private current?: Snapshot;
 	private attachedByController = false;
 	private attachPromise?: Promise<void>;
+	private debuggerAbort = new AbortController();
 	private queue: Promise<void> = Promise.resolve();
 	private closed = false;
 	private lastStateChangeAt = 0;
+	private stateChangeSequence = 0;
 	private readonly unsubscribeMessage: () => void;
 	private readonly unsubscribeDetach: () => void;
 
@@ -273,6 +276,8 @@ export class BrowserController {
 			this.onDebuggerMessage(method, params, sessionId);
 		});
 		this.unsubscribeDetach = dependencies.subscribeDetach(() => {
+			this.debuggerAbort.abort(new Error("Browser debugger detached"));
+			this.debuggerAbort = new AbortController();
 			this.attachedByController = false;
 			this.attachPromise = undefined;
 			this.loaderIds.clear();
@@ -282,6 +287,10 @@ export class BrowserController {
 
 	observe(input: BrowserObserveInput, signal: AbortSignal): Promise<BrowserObservation> {
 		return this.exclusive(signal, () => this.observeCurrent(input, signal));
+	}
+
+	leaseSignal(): AbortSignal {
+		return this.debuggerAbort.signal;
 	}
 
 	act(input: BrowserActInput, signal: AbortSignal): Promise<BrowserOperationDetails> {
@@ -307,9 +316,11 @@ export class BrowserController {
 			if (this.referencesMissingElement(input.action))
 				return { status: "stale", reason: "element_missing", observation: fresh };
 			try {
-				await this.performAction(input.action, signal);
+				await this.performAction(input, signal);
+				this.markStateChange();
 			} catch (cause) {
 				if (signal.aborted) throw cause;
+				if (cause instanceof StaleActionError) return stale(cause.reason);
 				if (cause instanceof MissingElementError) {
 					return {
 						status: "stale",
@@ -345,10 +356,12 @@ export class BrowserController {
 	close(): void {
 		if (this.closed) return;
 		this.closed = true;
+		this.debuggerAbort.abort(new Error("Browser controller is closed"));
 		this.unsubscribeMessage();
 		this.unsubscribeDetach();
 		this.targetSessions.clear();
 		this.loaderIds.clear();
+		this.invalidate();
 		if (this.attachedByController && this.dependencies.debugger.isAttached()) this.dependencies.debugger.detach();
 	}
 
@@ -566,35 +579,36 @@ export class BrowserController {
 		return browserActionElementIds(action).some((elementId) => !this.elements.has(elementId));
 	}
 
-	private async performAction(action: BrowserAction, signal: AbortSignal): Promise<void> {
-		this.markStateChange();
+	private async performAction(input: BrowserActInput, signal: AbortSignal): Promise<void> {
+		const { action } = input;
+		const verifiedSequence = await this.validateAction(input, signal);
+		const leaseSignal = this.debuggerAbort.signal;
 		switch (action.type) {
 			case "click": {
 				const point = await this.resolvePoint(action.target, signal);
 				const button = action.button ?? "left";
 				const buttons = button === "left" ? 1 : 2;
+				this.assertAction(input, verifiedSequence);
 				await this.command(
 					"Input.dispatchMouseEvent",
 					{ type: "mouseMoved", x: point.x, y: point.y },
 					point.sessionId,
 					signal,
 				);
-				await this.command(
+				this.assertActionIdentity(input);
+				await this.pressAndRelease(
 					"Input.dispatchMouseEvent",
 					{ type: "mousePressed", x: point.x, y: point.y, button, buttons, clickCount: 1 },
-					point.sessionId,
-					signal,
-				);
-				await this.command(
-					"Input.dispatchMouseEvent",
 					{ type: "mouseReleased", x: point.x, y: point.y, button, buttons: 0, clickCount: 1 },
 					point.sessionId,
 					signal,
+					leaseSignal,
 				);
 				return;
 			}
 			case "hover": {
 				const point = await this.resolvePoint(action.target, signal);
+				this.assertAction(input, verifiedSequence);
 				await this.command(
 					"Input.dispatchMouseEvent",
 					{ type: "mouseMoved", x: point.x, y: point.y },
@@ -605,13 +619,17 @@ export class BrowserController {
 			}
 			case "type": {
 				const element = this.requiredElement(action.elementId);
+				this.assertAction(input, verifiedSequence);
 				await this.command("DOM.focus", { backendNodeId: element.backendNodeId }, element.sessionId, signal);
-				if (action.replace) await this.replaceSelection(element.sessionId, signal);
+				this.assertActionIdentity(input);
+				if (action.replace) await this.replaceSelection(element.sessionId, input, signal, leaseSignal);
+				this.assertActionIdentity(input);
 				await this.command("Input.insertText", { text: action.text }, element.sessionId, signal);
 				return;
 			}
 			case "press":
-				await this.press(action.key, undefined, signal);
+				this.assertAction(input, verifiedSequence);
+				await this.press(action.key, undefined, signal, leaseSignal);
 				return;
 			case "scroll": {
 				const point = action.elementId
@@ -620,6 +638,7 @@ export class BrowserController {
 				const magnitude = (action.pages ?? 1) * 800;
 				const deltaX = action.direction === "left" ? -magnitude : action.direction === "right" ? magnitude : 0;
 				const deltaY = action.direction === "up" ? -magnitude : action.direction === "down" ? magnitude : 0;
+				this.assertAction(input, verifiedSequence);
 				await this.command(
 					"Input.dispatchMouseEvent",
 					{ type: "mouseWheel", x: point.x, y: point.y, deltaX, deltaY },
@@ -632,30 +651,32 @@ export class BrowserController {
 				const from = await this.resolvePoint(action.from, signal);
 				const to = await this.resolvePoint(action.to, signal);
 				const sessionId = from.sessionId ?? to.sessionId;
-				await this.command(
+				this.assertAction(input, verifiedSequence);
+				await this.pressAndRelease(
 					"Input.dispatchMouseEvent",
 					{ type: "mousePressed", x: from.x, y: from.y, button: "left", buttons: 1, clickCount: 1 },
-					sessionId,
-					signal,
-				);
-				await this.command(
-					"Input.dispatchMouseEvent",
-					{ type: "mouseMoved", x: to.x, y: to.y, button: "left", buttons: 1 },
-					sessionId,
-					signal,
-				);
-				await this.command(
-					"Input.dispatchMouseEvent",
 					{ type: "mouseReleased", x: to.x, y: to.y, button: "left", buttons: 0, clickCount: 1 },
 					sessionId,
 					signal,
+					leaseSignal,
+					() => {
+						this.assertActionIdentity(input);
+						return this.command(
+							"Input.dispatchMouseEvent",
+							{ type: "mouseMoved", x: to.x, y: to.y, button: "left", buttons: 1 },
+							sessionId,
+							signal,
+							leaseSignal,
+						);
+					},
 				);
 				return;
 			}
 			case "select":
-				await this.select(action.elementId, action.value, signal);
+				await this.select(action.elementId, action.value, input, verifiedSequence, signal, leaseSignal);
 				return;
 			case "dialog":
+				this.assertAction(input, verifiedSequence);
 				await this.command(
 					"Page.handleJavaScriptDialog",
 					{ accept: action.decision === "accept" },
@@ -667,6 +688,7 @@ export class BrowserController {
 
 	private markStateChange(): void {
 		this.lastStateChangeAt = Date.now();
+		this.stateChangeSequence += 1;
 	}
 
 	private async waitForStableState(signal: AbortSignal): Promise<void> {
@@ -733,6 +755,7 @@ export class BrowserController {
 			);
 		} catch (cause) {
 			if (signal.aborted) throw cause;
+			if (cause instanceof StaleActionError) throw cause;
 			throw new MissingElementError();
 		}
 		if (!quad) throw new MissingElementError();
@@ -749,42 +772,71 @@ export class BrowserController {
 		return element;
 	}
 
-	private async replaceSelection(sessionId: string | undefined, signal: AbortSignal): Promise<void> {
+	private async replaceSelection(
+		sessionId: string | undefined,
+		input: BrowserActInput,
+		signal: AbortSignal,
+		leaseSignal: AbortSignal,
+	): Promise<void> {
 		const modifiers = this.dependencies.acceleratorModifier ?? (process.platform === "darwin" ? 4 : 2);
-		await this.command(
+		await this.pressAndRelease(
 			"Input.dispatchKeyEvent",
 			{ type: "rawKeyDown", key: "a", code: "KeyA", modifiers },
-			sessionId,
-			signal,
-		);
-		await this.command(
-			"Input.dispatchKeyEvent",
 			{ type: "keyUp", key: "a", code: "KeyA", modifiers },
 			sessionId,
 			signal,
+			leaseSignal,
 		);
-		await this.press("Backspace", sessionId, signal);
+		this.assertActionIdentity(input);
+		const backspace = KEY_DETAILS.Backspace!;
+		const identity = {
+			key: "Backspace",
+			code: backspace.code,
+			windowsVirtualKeyCode: backspace.keyCode,
+			nativeVirtualKeyCode: backspace.keyCode,
+		};
+		await this.pressAndRelease(
+			"Input.dispatchKeyEvent",
+			{ type: "rawKeyDown", ...identity },
+			{ type: "keyUp", ...identity },
+			sessionId,
+			signal,
+			leaseSignal,
+		);
 	}
 
-	private async press(key: string, sessionId: string | undefined, signal: AbortSignal): Promise<void> {
+	private async press(
+		key: string,
+		sessionId: string | undefined,
+		signal: AbortSignal,
+		leaseSignal: AbortSignal,
+	): Promise<void> {
 		const detail = KEY_DETAILS[key];
 		const identity = detail
 			? { key, code: detail.code, windowsVirtualKeyCode: detail.keyCode, nativeVirtualKeyCode: detail.keyCode }
 			: { key };
-		await this.command(
+		await this.pressAndRelease(
 			"Input.dispatchKeyEvent",
 			{
 				type: detail?.text ? "keyDown" : "rawKeyDown",
 				...identity,
 				...(detail?.text ? { text: detail.text, unmodifiedText: detail.text } : {}),
 			},
+			{ type: "keyUp", ...identity },
 			sessionId,
 			signal,
+			leaseSignal,
 		);
-		await this.command("Input.dispatchKeyEvent", { type: "keyUp", ...identity }, sessionId, signal);
 	}
 
-	private async select(elementId: string, value: string, signal: AbortSignal): Promise<void> {
+	private async select(
+		elementId: string,
+		value: string,
+		input: BrowserActInput,
+		verifiedSequence: number,
+		signal: AbortSignal,
+		leaseSignal: AbortSignal,
+	): Promise<void> {
 		const element = this.requiredElement(elementId);
 		const described = await this.command(
 			"DOM.describeNode",
@@ -807,22 +859,98 @@ export class BrowserController {
 			return child.nodeValue === value;
 		});
 		if (index < 0) throw new MissingElementError();
+		this.assertAction(input, verifiedSequence);
 		await this.command("DOM.focus", { backendNodeId: element.backendNodeId }, element.sessionId, signal);
+		this.assertActionIdentity(input);
 		const label = (describedNodeText(children[index]).trim() || value).toLocaleLowerCase();
 		for (const character of label) {
+			this.assertActionIdentity(input);
 			const upper = character.toLocaleUpperCase();
 			const asciiLetter = /^[A-Z]$/u.test(upper);
 			const identity = asciiLetter
 				? { key: character, code: `Key${upper}`, windowsVirtualKeyCode: upper.charCodeAt(0) }
 				: { key: character };
-			await this.command(
+			await this.pressAndRelease(
 				"Input.dispatchKeyEvent",
 				{ type: "keyDown", ...identity, text: character, unmodifiedText: character },
+				{ type: "keyUp", ...identity },
 				element.sessionId,
 				signal,
+				leaseSignal,
 			);
-			await this.command("Input.dispatchKeyEvent", { type: "keyUp", ...identity }, element.sessionId, signal);
 		}
+	}
+
+	private async pressAndRelease(
+		method: "Input.dispatchKeyEvent" | "Input.dispatchMouseEvent",
+		down: CdpParams,
+		release: CdpParams,
+		sessionId: string | undefined,
+		signal: AbortSignal,
+		leaseSignal: AbortSignal,
+		between?: () => Promise<unknown>,
+	): Promise<void> {
+		signal.throwIfAborted();
+		let operationFailure: unknown;
+		try {
+			await this.command(method, down, sessionId, signal, leaseSignal);
+			await between?.();
+			signal.throwIfAborted();
+		} catch (cause) {
+			operationFailure = cause;
+		}
+		let releaseFailure: unknown;
+		try {
+			await this.releaseCommand(method, release, sessionId, leaseSignal);
+		} catch (cause) {
+			releaseFailure = cause;
+		}
+		if (operationFailure) throw operationFailure;
+		signal.throwIfAborted();
+		if (releaseFailure) throw releaseFailure;
+	}
+
+	private async releaseCommand(
+		method: "Input.dispatchKeyEvent" | "Input.dispatchMouseEvent",
+		params: CdpParams,
+		sessionId: string | undefined,
+		leaseSignal: AbortSignal,
+	): Promise<void> {
+		const releaseAbort = new AbortController();
+		const timer = setTimeout(
+			() => releaseAbort.abort(new Error("Browser input release timed out")),
+			INPUT_RELEASE_TIMEOUT_MS,
+		);
+		timer.unref?.();
+		try {
+			await this.command(method, params, sessionId, releaseAbort.signal, leaseSignal);
+		} finally {
+			clearTimeout(timer);
+		}
+	}
+
+	private async validateAction(input: BrowserActInput, signal: AbortSignal): Promise<number> {
+		this.assertActionIdentity(input);
+		if (this.current?.revision !== input.snapshotRevision) throw new StaleActionError("revision_changed");
+		const sequence = this.stateChangeSequence;
+		const state = await this.readState(signal);
+		this.assertActionIdentity(input);
+		if (sequence !== this.stateChangeSequence || this.current.state !== state) {
+			throw new StaleActionError("revision_changed");
+		}
+		if (this.referencesMissingElement(input.action)) throw new StaleActionError("element_missing");
+		return sequence;
+	}
+
+	private assertAction(input: BrowserActInput, verifiedSequence: number): void {
+		this.assertActionIdentity(input);
+		if (verifiedSequence !== this.stateChangeSequence) throw new StaleActionError("revision_changed");
+		if (this.referencesMissingElement(input.action)) throw new StaleActionError("element_missing");
+	}
+
+	private assertActionIdentity(input: Pick<BrowserActInput, "documentId" | "origin">): void {
+		if (input.documentId !== this.documentId) throw new StaleActionError("document_changed");
+		if (input.origin !== originOf(this.dependencies.pageState().url)) throw new StaleActionError("origin_changed");
 	}
 
 	private async command(
@@ -830,26 +958,42 @@ export class BrowserController {
 		params: CdpParams,
 		sessionId: string | undefined,
 		signal: AbortSignal,
+		debuggerSignal = this.debuggerAbort.signal,
 	): Promise<unknown> {
 		if (method.startsWith("Runtime.")) throw new Error("Page JavaScript evaluation is forbidden");
 		signal.throwIfAborted();
+		debuggerSignal.throwIfAborted();
 		return new Promise((resolve, reject) => {
 			let settled = false;
 			const finish = (complete: () => void) => {
 				if (settled) return;
 				settled = true;
 				signal.removeEventListener("abort", onAbort);
+				debuggerSignal.removeEventListener("abort", onDebuggerAbort);
 				complete();
 			};
 			const onAbort = () => finish(() => reject(signal.reason ?? new DOMException("Aborted", "AbortError")));
+			const onDebuggerAbort = () =>
+				finish(() => reject(debuggerSignal.reason ?? new Error("Browser debugger detached")));
 			signal.addEventListener("abort", onAbort, { once: true });
+			debuggerSignal.addEventListener("abort", onDebuggerAbort, { once: true });
 			void this.dependencies.debugger.sendCommand(method, params, sessionId).then(
 				(result) => finish(() => resolve(result)),
 				(cause) => finish(() => reject(cause)),
 			);
 			if (signal.aborted) onAbort();
+			if (debuggerSignal.aborted) onDebuggerAbort();
 		});
 	}
 }
 
 class MissingElementError extends Error {}
+
+class StaleActionError extends Error {
+	readonly reason: Extract<BrowserOperationDetails, { status: "stale" }>["reason"];
+
+	constructor(reason: Extract<BrowserOperationDetails, { status: "stale" }>["reason"]) {
+		super(reason);
+		this.reason = reason;
+	}
+}

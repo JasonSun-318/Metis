@@ -200,7 +200,7 @@ export type BrowserHostResult =
 				  }
 				| {
 						readonly status: "cancelled";
-						readonly reason: "user_cancelled" | "tab_closed" | "server_restarted";
+						readonly reason: "user_cancelled";
 				  };
 	  }
 	| { readonly tool: "browser_observe"; readonly observation: BrowserHostObservation }

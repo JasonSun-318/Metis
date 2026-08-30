@@ -58,10 +58,12 @@ const MAX_HISTORY_ENTRIES = 500;
 const HISTORY_SAVE_DELAY_MS = 500;
 const ACTIVITY_IDLE_DELAY_MS = 50;
 const PROGRESS_EVENT_INTERVAL_MS = 50;
+const CAPTURE_INVALIDATION_DELAY_MS = 16;
 const ZOOM_PERCENTAGES = [25, 33, 50, 67, 75, 80, 90, 100, 110, 125, 150, 175, 200, 250, 300, 400, 500] as const;
 
 async function captureFreshPage(contents: WebContents): Promise<NativeImage> {
 	contents.invalidate();
+	await new Promise<void>((resolve) => setTimeout(resolve, CAPTURE_INVALIDATION_DELAY_MS));
 	return contents.capturePage(undefined, { stayHidden: true });
 }
 
@@ -70,8 +72,7 @@ interface BrowserRecord {
 	readonly sessionId: string;
 	readonly profileId: string;
 	readonly contents: WebContents;
-	readonly view?: WebContentsView;
-	readonly popupWindow?: BrowserPopupWindow;
+	readonly view: WebContentsView;
 	readonly controller: BrowserControllerLike;
 	readonly cleanup: (() => void)[];
 	host?: BrowserViewHost;
@@ -90,7 +91,6 @@ interface BrowserRecord {
 	lastProgressEventType?: BrowserProgressEvent["type"];
 	pendingStateEvent: boolean;
 	pendingActivityEvent?: boolean;
-	closingReason?: "server_restarted" | "tab_closed";
 	activeAbort?: AbortController;
 	takeoverRequested: boolean;
 	handoff?: HandoffRecord;
@@ -100,22 +100,8 @@ interface BrowserRecord {
 type BrowserViewHost = Pick<View, "addChildView" | "removeChildView">;
 type BrowserProgressEvent = Extract<DesktopBrowserEvent, { type: "activity" | "state" }>;
 type BrowserBackgroundWindow = Pick<BaseWindow, "contentView" | "destroy" | "isDestroyed">;
-type BrowserPopupWindow = Pick<
-	BrowserWindow,
-	| "webContents"
-	| "destroy"
-	| "focus"
-	| "isDestroyed"
-	| "off"
-	| "on"
-	| "setBounds"
-	| "setFocusable"
-	| "setIgnoreMouseEvents"
-	| "setOpacity"
-	| "show"
->;
 
-type BrowserControllerLike = Pick<BrowserController, "observe" | "act" | "invalidate" | "close">;
+type BrowserControllerLike = Pick<BrowserController, "observe" | "act" | "invalidate" | "close" | "leaseSignal">;
 
 export class BrowserToolError extends Error {
 	readonly rpcErrorName: RpcErrorName;
@@ -282,7 +268,7 @@ export class BrowserManager {
 	private readonly listeners = new Set<(event: DesktopBrowserEvent) => void>();
 	private downloadEmitTimer?: NodeJS.Timeout;
 	private readonly historySaveTimers = new Map<string, NodeJS.Timeout>();
-	private owner?: Pick<BrowserWindow, "contentView" | "getBounds">;
+	private owner?: Pick<BrowserWindow, "contentView">;
 	private automationWindow?: BrowserBackgroundWindow;
 
 	constructor(
@@ -312,7 +298,7 @@ export class BrowserManager {
 		this.dependencies = dependencies;
 	}
 
-	attach(window: Pick<BrowserWindow, "contentView" | "getBounds">): void {
+	attach(window: Pick<BrowserWindow, "contentView">): void {
 		if (this.owner === window) return;
 		this.owner = window;
 		for (const record of this.records.values()) {
@@ -422,14 +408,10 @@ export class BrowserManager {
 		return this.registerRecord(input, view.webContents, { view });
 	}
 
-	private registerPopup(input: DesktopCreateBrowserInput, popupWindow: BrowserPopupWindow): DesktopBrowserState {
-		return this.registerRecord(input, popupWindow.webContents, { popupWindow });
-	}
-
 	private registerRecord(
 		input: DesktopCreateBrowserInput,
 		contents: WebContents,
-		surface: { readonly view: WebContentsView } | { readonly popupWindow: BrowserPopupWindow },
+		surface: { readonly view: WebContentsView },
 	): DesktopBrowserState {
 		const controller = this.createController(input.browserId, input.profileId, contents);
 		const record: BrowserRecord = {
@@ -451,7 +433,7 @@ export class BrowserManager {
 			commandTail: Promise.resolve(),
 		};
 		this.records.set(input.browserId, record);
-		if (record.view) this.placeSurface(record, false);
+		this.placeSurface(record, false);
 		this.bind(input.browserId, record);
 		this.emit({ type: "opened", sessionId: input.sessionId, browserId: input.browserId, profileId: input.profileId });
 		return structuredClone(record.state);
@@ -526,11 +508,11 @@ export class BrowserManager {
 			const record = this.records.get(input.browserId);
 			if (!record) return;
 			if (record.sessionId !== input.sessionId) throw new Error("Browser does not belong to this task");
-			if (record.controlState === "agent") return;
 			record.presentation = { visible: input.visible, bounds: input.bounds };
 			const key = `${input.visible}:${input.bounds.x}:${input.bounds.y}:${input.bounds.width}:${input.bounds.height}`;
 			if (key === record.presentationKey) return;
 			record.presentationKey = key;
+			if (record.controlState === "agent") return;
 			this.placeSurface(record, input.visible);
 			return;
 		}
@@ -744,11 +726,15 @@ export class BrowserManager {
 	}
 
 	private closeRecord(record: BrowserRecord, cancellationReason: "server_restarted" | "tab_closed"): void {
+		if (!this.finalizeRecord(record, cancellationReason)) return;
+		if (!record.contents.isDestroyed()) record.contents.close();
+	}
+
+	private finalizeRecord(record: BrowserRecord, cancellationReason: "server_restarted" | "tab_closed"): boolean {
 		const { browserId } = record;
-		if (this.records.get(browserId) !== record) return;
+		if (this.records.get(browserId) !== record) return false;
 		this.records.delete(browserId);
-		record.closingReason = cancellationReason;
-		record.activeAbort?.abort();
+		record.activeAbort?.abort(new Error(`Browser ${cancellationReason.replace("_", " ")}`));
 		if (record.activityIdleTimer) clearTimeout(record.activityIdleTimer);
 		record.activityIdleTimer = undefined;
 		if (record.progressEventTimer) clearTimeout(record.progressEventTimer);
@@ -761,11 +747,10 @@ export class BrowserManager {
 		this.cancelHandoff(record, cancellationReason);
 		record.controller.close();
 		for (const cleanup of record.cleanup.splice(0)) cleanup();
-		if (record.view) record.host?.removeChildView(record.view);
+		record.host?.removeChildView(record.view);
 		record.host = undefined;
-		if (record.popupWindow && !record.popupWindow.isDestroyed()) record.popupWindow.destroy();
-		else if (!record.contents.isDestroyed()) record.contents.close();
 		this.emit({ type: "closed", sessionId: record.sessionId, browserId });
+		return true;
 	}
 
 	closeAll(): void {
@@ -931,15 +916,15 @@ export class BrowserManager {
 			const activeAbort = new AbortController();
 			const abortActive = () => activeAbort.abort(signal.reason);
 			signal.addEventListener("abort", abortActive, { once: true });
+			const operationSignal = AbortSignal.any([activeAbort.signal, record.controller.leaseSignal()]);
 			record.activeAbort = activeAbort;
 			record.takeoverRequested = false;
 			this.setControlState(record, "agent");
 			try {
 				let result: Extract<BrowserToolResult, { tool: "browser_act" }>["details"];
 				try {
-					result = await operation(activeAbort.signal);
+					result = await operation(operationSignal);
 				} catch (cause) {
-					if (record.closingReason) return { status: "cancelled", reason: record.closingReason };
 					if (!record.takeoverRequested) throw cause;
 					return this.takeoverHandoff(record, signal);
 				}
@@ -949,7 +934,7 @@ export class BrowserManager {
 				signal.removeEventListener("abort", abortActive);
 				record.activeAbort = undefined;
 				record.takeoverRequested = false;
-				this.setControlState(record, "idle");
+				if (this.records.get(record.browserId) === record) this.setControlState(record, "idle");
 			}
 		});
 	}
@@ -1089,11 +1074,6 @@ export class BrowserManager {
 	}
 
 	private placeSurface(record: BrowserRecord, foreground: boolean): void {
-		if (record.popupWindow) {
-			this.placePopupWindow(record, foreground);
-			return;
-		}
-		if (!record.view) return;
 		const host = foreground && this.owner ? this.owner.contentView : this.backgroundHost();
 		if (record.host !== host) {
 			record.host?.removeChildView(record.view);
@@ -1106,29 +1086,6 @@ export class BrowserManager {
 				: this.backgroundBounds(record.presentation?.bounds),
 		);
 		record.view.setVisible(true);
-	}
-
-	private placePopupWindow(record: BrowserRecord, foreground: boolean): void {
-		const popup = record.popupWindow;
-		if (!popup || popup.isDestroyed()) return;
-		if (!foreground || !record.presentation) {
-			popup.setIgnoreMouseEvents(true);
-			popup.setFocusable(false);
-			popup.setOpacity(0);
-			popup.setBounds({ ...this.backgroundBounds(record.presentation?.bounds), x: -10_000, y: 0 });
-			return;
-		}
-		const ownerBounds = this.owner?.getBounds();
-		popup.setBounds({
-			x: (ownerBounds?.x ?? 0) + record.presentation.bounds.x,
-			y: (ownerBounds?.y ?? 0) + record.presentation.bounds.y,
-			width: record.presentation.bounds.width,
-			height: record.presentation.bounds.height,
-		});
-		popup.setOpacity(1);
-		popup.setFocusable(true);
-		popup.setIgnoreMouseEvents(false);
-		popup.show();
 	}
 
 	private async enqueueRecord<T>(record: BrowserRecord, signal: AbortSignal, operation: () => Promise<T>): Promise<T> {
@@ -1259,23 +1216,7 @@ export class BrowserManager {
 			this.emit({ type: "command", browserId, command });
 		};
 		const onDestroyed = () => {
-			if (this.records.get(browserId) !== record) return;
-			this.records.delete(browserId);
-			record.closingReason = "tab_closed";
-			record.activeAbort?.abort();
-			if (record.activityIdleTimer) clearTimeout(record.activityIdleTimer);
-			record.activityIdleTimer = undefined;
-			if (record.progressEventTimer) clearTimeout(record.progressEventTimer);
-			record.progressEventTimer = undefined;
-			record.pendingStateEvent = false;
-			record.pendingActivityEvent = undefined;
-			record.activityActive = false;
-			this.cancelHandoff(record, "tab_closed");
-			record.controller.close();
-			for (const cleanup of record.cleanup.splice(0)) cleanup();
-			if (record.view) record.host?.removeChildView(record.view);
-			record.host = undefined;
-			this.emit({ type: "closed", sessionId: record.sessionId, browserId });
+			this.finalizeRecord(record, "tab_closed");
 		};
 
 		contents.on("did-start-loading", onDidStartLoading);
@@ -1291,7 +1232,6 @@ export class BrowserManager {
 		contents.on("found-in-page", onFoundInPage);
 		contents.on("before-input-event", onBeforeInput);
 		contents.on("destroyed", onDestroyed);
-		record.popupWindow?.on("closed", onDestroyed);
 		record.cleanup.push(
 			() => contents.off("did-start-loading", onDidStartLoading),
 			() => contents.off("did-stop-loading", onDidStopLoading),
@@ -1306,16 +1246,7 @@ export class BrowserManager {
 			() => contents.off("found-in-page", onFoundInPage),
 			() => contents.off("before-input-event", onBeforeInput),
 			() => contents.off("destroyed", onDestroyed),
-			() => record.popupWindow?.off("closed", onDestroyed),
 		);
-		const onDidCreateWindow = (popupWindow: BrowserWindow) => {
-			this.registerPopup(
-				{ sessionId: record.sessionId, browserId: randomUUID(), profileId: record.profileId },
-				popupWindow,
-			);
-		};
-		contents.on("did-create-window", onDidCreateWindow);
-		record.cleanup.push(() => contents.off("did-create-window", onDidCreateWindow));
 		contents.setWindowOpenHandler(({ url }) => {
 			try {
 				normalizeBrowserUrl(url);
@@ -1333,24 +1264,24 @@ export class BrowserManager {
 				});
 				return { action: "deny" };
 			}
+			const webPreferences = {
+				backgroundThrottling: false,
+				contextIsolation: true,
+				nodeIntegration: false,
+				sandbox: true,
+				session: this.sessionForProfile(record.profileId),
+				webSecurity: true,
+			};
 			return {
 				action: "allow",
-				overrideBrowserWindowOptions: {
-					show: false,
-					frame: false,
-					focusable: false,
-					opacity: 0,
-					skipTaskbar: true,
-					x: -10_000,
-					y: 0,
-					webPreferences: {
-						backgroundThrottling: false,
-						contextIsolation: true,
-						nodeIntegration: false,
-						sandbox: true,
-						session: this.sessionForProfile(record.profileId),
-						webSecurity: true,
-					},
+				overrideBrowserWindowOptions: { webPreferences },
+				createWindow: (options) => {
+					const view = this.dependencies.createView(options);
+					this.registerView(
+						{ sessionId: record.sessionId, browserId: randomUUID(), profileId: record.profileId },
+						view,
+					);
+					return view.webContents;
 				},
 			};
 		});

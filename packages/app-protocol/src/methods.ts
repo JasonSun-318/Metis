@@ -1110,11 +1110,7 @@ export const BrowserOperationDetailsSchema = Type.Union([
 	}),
 	StrictObject({
 		status: Type.Literal("cancelled"),
-		reason: Type.Union([
-			Type.Literal("user_cancelled"),
-			Type.Literal("tab_closed"),
-			Type.Literal("server_restarted"),
-		]),
+		reason: Type.Literal("user_cancelled"),
 	}),
 ]);
 

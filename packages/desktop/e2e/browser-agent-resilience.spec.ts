@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { expect, test } from "@playwright/test";
+import { type Browser, expect, type Page, test } from "@playwright/test";
 import type { MetisDesktopApi } from "../src/shared/desktop-api.ts";
 import {
 	closeBrowserAgentApp,
@@ -43,6 +43,59 @@ async function waitForDone(app: RunningBrowserAgentApp, marker: string): Promise
 	await expect(app.page.getByText(`done:${marker}`, { exact: true })).toBeVisible({ timeout: 45_000 });
 }
 
+function configureFaultingNavigation(
+	fixture: BrowserAgentFixture,
+	marker: string,
+	onBrowserId: (browserId: string) => void,
+): void {
+	let browserId = "";
+	fixture.setScript(marker, ({ step, lastResult, origin }) => {
+		if (step === 0) return { tool: "browser_tabs", arguments: { action: "open" } };
+		if (step === 1) {
+			browserId = openedBrowserId(lastResult);
+			onBrowserId(browserId);
+			return { tool: "browser_navigate", arguments: { browserId, action: "goto", url: `${origin}/controls?case=${marker}` } };
+		}
+		if (step === 2) return { tool: "browser_observe", arguments: { browserId } };
+		if (step === 3) return { tool: "browser_navigate", arguments: { browserId, action: "goto", url: `${origin}/slow?case=${marker}` } };
+		return { text: `done:${marker}` };
+	});
+}
+
+async function activeToolCall(fixture: BrowserAgentFixture, marker: string, name: string) {
+	let call: BrowserAgentFixture["calls"][number] | undefined;
+	await expect.poll(() => {
+		call = fixture.calls.find(
+			(candidate) => candidate.marker === marker && candidate.name === name && candidate.completedAt === undefined,
+		);
+		return call !== undefined;
+	}).toBe(true);
+	return call!;
+}
+
+function expectBoundedToolError(result: string | undefined): void {
+	expect(result).toBeTruthy();
+	expect(Buffer.byteLength(result ?? "", "utf8")).toBeLessThanOrEqual(4_096);
+	expect(result).toMatch(/error|fail|closed|detach|operation/iu);
+}
+
+function expectSettledWithin(call: BrowserAgentFixture["calls"][number], maximumMs: number): void {
+	expect(call.completedAt, `${call.marker}/${call.name} never settled`).toBeDefined();
+	expect(call.completedAt! - call.issuedAt, `${call.marker}/${call.name} exceeded its settlement bound`).toBeLessThanOrEqual(
+		maximumMs,
+	);
+}
+
+async function rendererProcessIds(browser: Browser): Promise<Set<number>> {
+	const session = await browser.newBrowserCDPSession();
+	try {
+		const { processInfo } = await session.send("SystemInfo.getProcessInfo");
+		return new Set(processInfo.filter(({ type }) => type === "renderer").map(({ id }) => id));
+	} finally {
+		await session.detach();
+	}
+}
+
 test("packaged browser control releases every pending state across cancel, close, interrupt, reload, restart, and crash", async () => {
 	test.setTimeout(180_000);
 	expect(existsSync(packagedExecutable()), `Package the desktop app first: ${packagedExecutable()}`).toBe(true);
@@ -51,6 +104,8 @@ test("packaged browser control releases every pending state across cancel, close
 	let app: RunningBrowserAgentApp | undefined;
 	let closeBrowserId = "";
 	let crashBrowserId = "";
+	let activeCrashBrowserId = "";
+	let detachBrowserId = "";
 	try {
 		configurePendingHandoff(fixture, "cancel-handoff", "login");
 		configurePendingHandoff(fixture, "close-handoff", "passkey", (browserId) => { closeBrowserId = browserId; });
@@ -69,6 +124,13 @@ test("packaged browser control releases every pending state across cancel, close
 			if (step === 0) return { tool: "browser_tabs", arguments: { action: "open" } };
 			if (step === 1) return { tool: "browser_navigate", arguments: { browserId: openedBrowserId(lastResult), action: "goto", url: `${origin}/controls` } };
 			return { text: "done:recover-tab" };
+		});
+		configureFaultingNavigation(fixture, "active-crash", (browserId) => { activeCrashBrowserId = browserId; });
+		configureFaultingNavigation(fixture, "debugger-detach", (browserId) => { detachBrowserId = browserId; });
+		fixture.setScript("recover-after-faults", ({ step, lastResult, origin }) => {
+			if (step === 0) return { tool: "browser_tabs", arguments: { action: "open" } };
+			if (step === 1) return { tool: "browser_navigate", arguments: { browserId: openedBrowserId(lastResult), action: "goto", url: `${origin}/controls?recovered=1` } };
+			return { text: "done:recover-after-faults" };
 		});
 
 		app = await launchBrowserAgentApp(environment);
@@ -130,6 +192,44 @@ test("packaged browser control releases every pending state across cancel, close
 		await sendFixturePrompt(app.page, "recover-tab");
 		await waitForDone(app, "recover-tab");
 		await expect.poll(() => app!.browser.contexts().flatMap((context) => context.pages()).some((page) => page.url() === `${fixture.origin}/controls`)).toBe(true);
+
+		const rendererPidsBeforeCrash = await rendererProcessIds(app.browser);
+		await sendFixturePrompt(app.page, "active-crash");
+		const activeCrashCall = await activeToolCall(fixture, "active-crash", "browser_navigate");
+		let activeCrashPage: Page | undefined;
+		await expect.poll(() => {
+			activeCrashPage = app!.browser.contexts().flatMap((context) => context.pages()).find((page) =>
+				page.url().includes("/controls?case=active-crash"),
+			);
+			return activeCrashPage !== undefined;
+		}).toBe(true);
+		if (!activeCrashPage) throw new Error(`Active crash fixture target was not exposed for ${activeCrashBrowserId}`);
+		const crashTarget = activeCrashPage;
+		const rendererPidsAfterCrash = await rendererProcessIds(app.browser);
+		const newRendererPids = [...rendererPidsAfterCrash].filter((pid) => !rendererPidsBeforeCrash.has(pid));
+		expect(newRendererPids, "Expected one renderer process for the active-crash tab").toHaveLength(1);
+		process.kill(newRendererPids[0]!, "SIGKILL");
+		await waitForDone(app, "active-crash");
+		expectBoundedToolError(activeCrashCall.result);
+		expectSettledWithin(activeCrashCall, 5_000);
+		await expect.poll(() => crashTarget.isClosed()).toBe(true);
+
+		await sendFixturePrompt(app.page, "debugger-detach");
+		const detachCall = await activeToolCall(fixture, "debugger-detach", "browser_navigate");
+		const detachPage = app.browser.contexts().flatMap((context) => context.pages()).find((page) => page.url().includes("/controls?case=debugger-detach"));
+		if (!detachPage) throw new Error(`Debugger detach fixture target was not exposed for ${detachBrowserId}`);
+		await detachPage.bringToFront();
+		await detachPage.keyboard.press(process.platform === "darwin" ? "Meta+Alt+I" : "Control+Shift+I");
+		await waitForDone(app, "debugger-detach");
+		expectBoundedToolError(detachCall.result);
+		expectSettledWithin(detachCall, 5_000);
+		await app.page.evaluate(async ({ sessionId, browserId }) => {
+			await (globalThis as unknown as { metis: MetisDesktopApi }).metis.closeBrowser({ sessionId, browserId });
+		}, { sessionId: app.sessionId, browserId: detachBrowserId });
+
+		await sendFixturePrompt(app.page, "recover-after-faults");
+		await waitForDone(app, "recover-after-faults");
+		await expect.poll(() => app!.browser.contexts().flatMap((context) => context.pages()).some((page) => page.url().includes("/controls?recovered=1"))).toBe(true);
 	} catch (error) {
 		throw new Error(`${error instanceof Error ? error.message : String(error)}\n${environment.diagnostics.join("").slice(-12_000)}`);
 	} finally {
