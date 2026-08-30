@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+	AuthStorage,
 	mcpCredentialKey,
 	mcpServerFingerprint,
 	ProjectTrustStore,
@@ -91,7 +92,12 @@ describe("MCP settings projection", () => {
 			expectedRevision: first.revision,
 			server: { transport: "stdio", command: "node", args: ["server.mjs"] },
 		});
-		expect(SettingsManager.create(cwd, agentDir).getGlobalSettings().mcpServers?.local).toMatchObject({
+		const saved = SettingsManager.create(cwd, agentDir).getGlobalSettings().mcpServers?.local;
+		expect(saved).not.toHaveProperty("env");
+		expect(saved?.credentialVersion).toEqual(expect.any(String));
+		const migrated = AuthStorage.create(join(agentDir, "auth.json"));
+		expect(migrated.get(migrated.list().find((key) => key.startsWith("mcp:v3:user:local:"))!)).toMatchObject({
+			type: "mcp_secret",
 			env: { TOKEN: "hidden" },
 		});
 

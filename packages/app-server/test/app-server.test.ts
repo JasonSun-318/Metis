@@ -3076,6 +3076,7 @@ describe("AppServer", () => {
 		});
 		expect(credential).toMatchObject({ result: { server: { credentialConfigured: true } } });
 		expect(JSON.stringify(credential)).not.toContain("stored-secret");
+		const credentialRevision = (credential as { result: ClientResult<"mcp/credential/set"> }).result.server.revision;
 
 		expect(
 			await connection.handle({
@@ -3087,25 +3088,25 @@ describe("AppServer", () => {
 					scope: "user",
 					name: "docs",
 					requestId: REQUEST_D,
-					expectedRevision: current.revision,
+					expectedRevision: credentialRevision,
 				},
 			}),
 		).toMatchObject({ result: { server: { state: "disabled" } } });
 
-		expect(
-			await connection.handle({
-				jsonrpc: "2.0",
-				id: "clear-mcp-credential",
-				method: "mcp/credential/clear",
-				params: {
-					sessionId,
-					scope: "user",
-					name: "docs",
-					requestId: "00000000-0000-4000-8000-000000000005",
-					expectedRevision: current.revision,
-				},
-			}),
-		).toMatchObject({ result: { server: { credentialConfigured: false } } });
+		const cleared = await connection.handle({
+			jsonrpc: "2.0",
+			id: "clear-mcp-credential",
+			method: "mcp/credential/clear",
+			params: {
+				sessionId,
+				scope: "user",
+				name: "docs",
+				requestId: "00000000-0000-4000-8000-000000000005",
+				expectedRevision: credentialRevision,
+			},
+		});
+		expect(cleared).toMatchObject({ result: { server: { credentialConfigured: false } } });
+		const clearedRevision = (cleared as { result: ClientResult<"mcp/credential/clear"> }).result.server.revision;
 
 		expect(
 			await connection.handle({
@@ -3117,7 +3118,7 @@ describe("AppServer", () => {
 					scope: "user",
 					name: "docs",
 					requestId: "00000000-0000-4000-8000-000000000006",
-					expectedRevision: current.revision,
+					expectedRevision: clearedRevision,
 				},
 			}),
 		).toMatchObject({ result: { servers: [] } });

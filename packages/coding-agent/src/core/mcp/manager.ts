@@ -253,6 +253,7 @@ export class McpManager {
 	private readonly authStorage: AuthStorage;
 	private readonly cwd: string;
 	private readonly environment: NodeJS.ProcessEnv;
+	private readonly configurationCoordinator?: McpConfigurationCoordinator;
 	private activeGeneration: ClientGeneration = {
 		clients: new Map<string, McpServerClient>(),
 		inFlight: 0,
@@ -280,6 +281,7 @@ export class McpManager {
 		this.authStorage = options.authStorage;
 		this.cwd = options.cwd;
 		this.environment = options.environment ?? process.env;
+		this.configurationCoordinator = options.configurationCoordinator;
 	}
 
 	static async create(options: McpManagerCreateOptions): Promise<McpManager> {
@@ -709,6 +711,10 @@ export class McpManager {
 
 	get configurationCwd(): string {
 		return this.cwd;
+	}
+
+	get configuration(): McpConfigurationCoordinator | undefined {
+		return this.configurationCoordinator;
 	}
 
 	async prepareConfigurationChanges(

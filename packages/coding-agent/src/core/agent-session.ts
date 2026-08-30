@@ -2329,6 +2329,10 @@ export class AgentSession {
 		return this._mcpManager?.getStatus() ?? [];
 	}
 
+	get mcp(): McpManager | undefined {
+		return this._mcpManager;
+	}
+
 	getMcpCatalog(name: string): McpCatalogSummary {
 		if (!this._mcpManager) throw new Error("MCP is not available in this session");
 		return this._mcpManager.getCatalog(name);

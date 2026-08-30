@@ -10,7 +10,7 @@ import { AuthStorage } from "./auth-storage.ts";
 import { prepareAutoMemoryWorkspace } from "./auto-memory.ts";
 import { DEFAULT_THINKING_LEVEL } from "./defaults.ts";
 import type { ExtensionRunner, LoadExtensionsResult, SessionStartEvent, ToolDefinition } from "./extensions/index.ts";
-import { McpManager } from "./mcp/index.ts";
+import { type McpConfigurationCoordinator, McpManager } from "./mcp/index.ts";
 import { convertToLlm } from "./messages.ts";
 import { ModelRegistry } from "./model-registry.ts";
 import { findInitialModel } from "./model-resolver.ts";
@@ -62,6 +62,8 @@ export interface CreateAgentSessionOptions {
 	modelRegistry?: ModelRegistry;
 	/** Injectable MCP manager. Ownership transfers to AgentSession after successful construction. */
 	mcpManager?: McpManager;
+	/** Process-owned MCP configuration coordinator shared by sibling sessions. */
+	mcpConfigurationCoordinator?: McpConfigurationCoordinator;
 	/** @internal Allow host UIs to render before optional MCP servers finish connecting. */
 	backgroundOptionalMcpStartup?: boolean;
 
@@ -344,6 +346,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 				authStorage,
 				cwd,
 				backgroundOptionalStartup: options.backgroundOptionalMcpStartup,
+				configurationCoordinator: options.mcpConfigurationCoordinator,
 			});
 		}
 		if (!resourceLoader) {

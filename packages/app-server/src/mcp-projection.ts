@@ -1,10 +1,11 @@
-import { createHash } from "node:crypto";
 import type { ClientParams, McpCatalogEntryView, McpServerDetailView, McpServerSummaryView } from "@metis/app-protocol";
 import {
 	type AuthStorage,
+	legacyMcpCredentialKey,
 	type McpServerSettings,
 	type McpServerStatus,
 	type McpStdioServerSettings,
+	mcpConfigurationRevision,
 	mcpCredentialKey,
 	mcpServerFingerprint,
 	resolveMcpServerSettings,
@@ -33,20 +34,13 @@ function publicEnvironmentMap(value: Record<string, string> | undefined): Record
 	);
 }
 
-function canonicalJson(value: unknown): string {
-	if (value === null || typeof value !== "object") return JSON.stringify(value);
-	if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
-	const record = value as Record<string, unknown>;
-	return `{${Object.keys(record)
-		.sort()
-		.map((key) => `${JSON.stringify(key)}:${canonicalJson(record[key])}`)
-		.join(",")}}`;
-}
-
-export function mcpRevision(scope: "user" | "project", name: string, server: McpServerSettings): string {
-	return createHash("sha256")
-		.update(canonicalJson([scope, name, server]))
-		.digest("hex");
+export function mcpRevision(
+	scope: "user" | "project",
+	name: string,
+	server: McpServerSettings,
+	credentialState?: string,
+): string {
+	return mcpConfigurationRevision(scope, name, server, credentialState);
 }
 
 function publicHttpUrl(value: string): { url?: string; error?: string } {
@@ -70,6 +64,7 @@ export function publicMcpServer(input: {
 	effective: boolean;
 	status?: McpServerStatus;
 	credentialConfigured?: boolean;
+	credentialState?: string;
 }): McpServerSummaryView {
 	const { scope, name, server, effective, status } = input;
 	const serverInfoName = status?.serverInfo?.name.slice(0, 256);
@@ -87,7 +82,7 @@ export function publicMcpServer(input: {
 		...(description && Buffer.byteLength(description, "utf8") <= 4096 ? { description } : {}),
 		scope,
 		effective,
-		revision: mcpRevision(scope, name, server),
+		revision: mcpRevision(scope, name, server, input.credentialState),
 		enabled: server.enabled ?? true,
 		required: server.required ?? false,
 		...(startupTimeoutSec === undefined ? {} : { startupTimeoutSec }),
@@ -221,24 +216,27 @@ export function mcpDefinitionAtScope(
 	return settings.mcpServers?.[name];
 }
 
-export function hasMatchingMcpCredential(
+export function matchingMcpCredentialState(
 	authStorage: AuthStorage | undefined,
 	cwd: string,
 	scope: "user" | "project",
 	name: string,
 	server: McpServerSettings,
-): boolean {
-	if (!authStorage) return false;
+): string | undefined {
+	if (!authStorage) return undefined;
 	try {
 		const identity = scope === "user" ? ({ scope, name } as const) : ({ scope, name, cwd } as const);
-		const credential = authStorage.get(mcpCredentialKey(identity));
-		return (
-			credential?.type === "mcp_secret" &&
-			credential.serverFingerprint ===
-				mcpServerFingerprint(resolveMcpServerSettings(name, server, cwd, process.env, identity))
-		);
+		const resolved = resolveMcpServerSettings(name, server, cwd, process.env, identity);
+		const fingerprint = mcpServerFingerprint(resolved);
+		for (const key of new Set([resolved.credentialKey, mcpCredentialKey(identity), legacyMcpCredentialKey(name)])) {
+			const credential = authStorage.get(key);
+			if (credential?.type === "mcp_secret" && credential.serverFingerprint === fingerprint) {
+				return server.credentialVersion ?? "legacy";
+			}
+		}
+		return undefined;
 	} catch {
-		return false;
+		return undefined;
 	}
 }
 
@@ -246,12 +244,12 @@ export function publicMcpServers(
 	settingsManager: SettingsManager,
 	options: {
 		statuses?: readonly McpServerStatus[];
-		credentialConfigured?: (
+		credentialState?: (
 			scope: "user" | "project",
 			name: string,
 			server: McpServerSettings,
 			effective: boolean,
-		) => boolean;
+		) => string | undefined;
 	} = {},
 ): McpServerSummaryView[] {
 	const user = settingsManager.getGlobalSettings().mcpServers ?? {};
@@ -261,6 +259,7 @@ export function publicMcpServers(
 	for (const [name, server] of Object.entries(user)) {
 		if (name.length === 0 || name.length > 256) continue;
 		const effective = !(name in project);
+		const credentialState = options.credentialState?.("user", name, server, effective);
 		rows.push(
 			publicMcpServer({
 				scope: "user",
@@ -268,12 +267,14 @@ export function publicMcpServers(
 				server,
 				effective,
 				...(effective ? { status: statusByName.get(name) } : {}),
-				credentialConfigured: options.credentialConfigured?.("user", name, server, effective) ?? false,
+				credentialConfigured: credentialState !== undefined,
+				credentialState,
 			}),
 		);
 	}
 	for (const [name, server] of Object.entries(project)) {
 		if (name.length === 0 || name.length > 256) continue;
+		const credentialState = options.credentialState?.("project", name, server, true);
 		rows.push(
 			publicMcpServer({
 				scope: "project",
@@ -281,7 +282,8 @@ export function publicMcpServers(
 				server,
 				effective: true,
 				status: statusByName.get(name),
-				credentialConfigured: options.credentialConfigured?.("project", name, server, true) ?? false,
+				credentialConfigured: credentialState !== undefined,
+				credentialState,
 			}),
 		);
 	}

@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { join } from "node:path";
 import {
 	type BrowserToolCall,
 	type ClientParams,
@@ -20,9 +21,7 @@ import {
 	type AgentSessionEvent,
 	type AgentSessionRuntime,
 	type AgentSummary,
-	type AuthCredential,
-	type AuthStorage,
-	type AuthStorageChange,
+	AuthStorage,
 	agentTaskWindow,
 	BROWSER_TOOL_NAMES,
 	type BrowserHostRequest,
@@ -42,10 +41,10 @@ import {
 	installScheduleHost,
 	isScheduleSessionEligible,
 	loadAgentTypeDefinitions,
-	type McpCredentialIdentity,
+	McpConfigurationConflictError,
+	McpConfigurationCoordinator,
+	type McpCredentialChange,
 	type McpServerSettings,
-	mcpCredentialKey,
-	mcpServerFingerprint,
 	ProjectTrustStore,
 	QueuedTurnBusyError,
 	QueuedTurnConflictError,
@@ -59,7 +58,6 @@ import {
 	reduceRuntimeJournal,
 	removeCustomAgentType,
 	removeSessionAttachment,
-	resolveMcpServerSettings,
 	SCHEDULE_MAIN_PROMPT,
 	type ScheduleManager,
 	SessionDeliveredArtifacts,
@@ -92,8 +90,8 @@ import {
 } from "./item-projection.ts";
 import { inspectMcpImport as inspectMcpImportSource, resolveMcpImport } from "./mcp-import.ts";
 import {
-	hasMatchingMcpCredential,
 	inputMcpServer,
+	matchingMcpCredentialState,
 	mcpDefinitionAtScope,
 	mcpRevision,
 	publicMcpDetail,
@@ -119,7 +117,16 @@ import {
 } from "./skill-files.ts";
 
 const MAX_TURNS = 200;
-type McpMutationRunner = <T>(mutation: () => Promise<T>) => Promise<T>;
+
+function mcpCredentialChange(input?: McpCredentialInput): McpCredentialChange {
+	return input
+		? {
+				action: "replace",
+				...(input.bearerToken ? { bearerToken: input.bearerToken } : {}),
+				...(input.environment ? { environment: input.environment } : {}),
+			}
+		: { action: "preserve" };
+}
 
 function protocolBrowserToolCall(request: BrowserHostRequest): BrowserToolCall {
 	switch (request.tool) {
@@ -171,85 +178,6 @@ function throwAgentError(error: unknown, input: { sessionId: string; requestId?:
 		if (error.code === "QUEUE_FULL") throw new AppServerError("OVERLOADED", input);
 	}
 	throw new AppServerError("OPERATION_FAILED", input);
-}
-
-function mcpCredentialIdentity(scope: "user" | "project", name: string, cwd: string): McpCredentialIdentity {
-	return scope === "user" ? { scope, name } : { scope, name, cwd };
-}
-
-export interface McpDefinitionChange {
-	readonly next: McpServerSettings | undefined;
-	readonly previous: McpServerSettings | undefined;
-	readonly credential?: McpCredentialInput;
-}
-
-async function flushMcpSettings(settingsManager: SettingsManager): Promise<void> {
-	await settingsManager.flushOrThrow();
-}
-
-export async function persistMcpChanges(options: {
-	readonly settingsManager: SettingsManager;
-	readonly authStorage?: AuthStorage;
-	readonly cwd: string;
-	readonly scope: "user" | "project";
-	readonly changes: ReadonlyMap<string, McpDefinitionChange>;
-	readonly reload?: () => Promise<void>;
-}): Promise<void> {
-	const { settingsManager, authStorage, cwd, scope, changes, reload } = options;
-	const settingsScope = scope === "user" ? "global" : "project";
-	const definitionChanges = new Map([...changes].map(([name, change]) => [name, change.next]));
-	const rollbackDefinitions = new Map([...changes].map(([name, change]) => [name, change.previous]));
-	const authChanges: AuthStorageChange[] = [];
-	const rollbackCredentials: AuthStorageChange[] = [];
-	await settingsManager.throwPendingWriteError();
-
-	for (const [name, change] of changes) {
-		const identity = mcpCredentialIdentity(scope, name, cwd);
-		const key = mcpCredentialKey(identity);
-		const previousCredential = authStorage?.get(key);
-		let nextCredential: AuthCredential | undefined;
-		if (change.next && change.credential) {
-			if (!authStorage || (change.credential.bearerToken && typeof change.next.url !== "string")) {
-				throw new Error("Invalid MCP credential for server transport");
-			}
-			nextCredential = {
-				type: "mcp_secret",
-				...(change.credential.bearerToken ? { bearerToken: change.credential.bearerToken } : {}),
-				...(change.credential.environment ? { env: { ...change.credential.environment } } : {}),
-				serverFingerprint: mcpServerFingerprint(
-					resolveMcpServerSettings(name, change.next, cwd, process.env, identity),
-				),
-			};
-		} else if (change.next && previousCredential?.type === "mcp_secret") {
-			const fingerprint = mcpServerFingerprint(
-				resolveMcpServerSettings(name, change.next, cwd, process.env, identity),
-			);
-			if (previousCredential.serverFingerprint === fingerprint) continue;
-		}
-		if (previousCredential === undefined && nextCredential === undefined) continue;
-		authChanges.push({ provider: key, credential: nextCredential });
-		rollbackCredentials.push({
-			provider: key,
-			credential: previousCredential && structuredClone(previousCredential),
-		});
-	}
-
-	try {
-		settingsManager.applyMcpServerChanges(settingsScope, definitionChanges);
-		await flushMcpSettings(settingsManager);
-		if (authChanges.length) authStorage!.applyChanges(authChanges);
-		await reload?.();
-	} catch (error) {
-		try {
-			settingsManager.applyMcpServerChanges(settingsScope, rollbackDefinitions);
-			await flushMcpSettings(settingsManager);
-			if (rollbackCredentials.length) authStorage?.applyChanges(rollbackCredentials);
-			await reload?.();
-		} catch {
-			// Preserve the initiating failure; recovery is best effort.
-		}
-		throw error;
-	}
 }
 
 export interface AgentSessionRuntimeHostOptions {
@@ -407,7 +335,7 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 	private readonly interactions?: InteractionBroker;
 	private readonly agentDir: string;
 	private readonly authStorage?: AuthStorage;
-	private readonly mutateMcp: McpMutationRunner;
+	private readonly mcpConfiguration: McpConfigurationCoordinator;
 	private unread: boolean;
 	private readonly notifiedQueueFailureRevisions = new Set<string>();
 
@@ -417,7 +345,7 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 		agentDir: string,
 		interactions?: InteractionBroker,
 		authStorage?: AuthStorage,
-		mutateMcp: McpMutationRunner = (mutation) => mutation(),
+		mcpConfiguration?: McpConfigurationCoordinator,
 	) {
 		this.runtime = runtime;
 		this.session = runtime.session;
@@ -425,7 +353,8 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 		this.agentDir = agentDir;
 		this.interactions = interactions;
 		this.authStorage = authStorage;
-		this.mutateMcp = mutateMcp;
+		if (!mcpConfiguration) throw new Error("Opened MCP session requires a configuration coordinator");
+		this.mcpConfiguration = mcpConfiguration;
 		this.unread = ref.summary.unread;
 		const journal = this.journal();
 		const reduced = reduceRuntimeJournal(journal);
@@ -976,9 +905,9 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 	private mcpRows(): ClientResult<"mcp/list"> {
 		return {
 			servers: publicMcpServers(this.session.settingsManager, {
-				statuses: this.session.getMcpStatus(),
-				credentialConfigured: (scope, name, server) =>
-					hasMatchingMcpCredential(this.authStorage, this.mcpCwd(), scope, name, server),
+				statuses: this.session.mcp?.getStatus() ?? [],
+				credentialState: (scope, name, server) =>
+					matchingMcpCredentialState(this.authStorage, this.mcpCwd(), scope, name, server),
 			}),
 		};
 	}
@@ -1002,44 +931,66 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 		requestId: string,
 	): McpServerSettings {
 		const current = mcpDefinitionAtScope(this.session.settingsManager, scope, name);
-		if (!current || mcpRevision(scope, name, current) !== expectedRevision) {
+		const credentialState = current
+			? matchingMcpCredentialState(this.authStorage, this.mcpCwd(), scope, name, current)
+			: undefined;
+		if (!current || mcpRevision(scope, name, current, credentialState) !== expectedRevision) {
 			throw new AppServerError("CONFLICT", { sessionId: this.sessionId, requestId });
 		}
 		return current;
 	}
 
 	private mutateMcpWhileIdle<T>(requestId: string, mutation: () => Promise<T>): Promise<T> {
-		return this.mutateMcp(async () => {
+		return (async () => {
 			if (this.isActive() || this.hasPendingInteractions()) {
 				throw new AppServerError("BUSY", { sessionId: this.sessionId, requestId });
 			}
-			return mutation();
-		});
+			await this.session.mcp?.ensureCurrent();
+			return await mutation();
+		})();
 	}
 
 	private async persistMcpDefinition(
 		scope: "user" | "project",
 		name: string,
 		next: McpServerSettings | undefined,
-		previous: McpServerSettings | undefined,
+		expectedRevision: string | null,
 		requestId: string,
-		credential?: McpCredentialInput,
+		credential?: McpCredentialInput | null,
 	): Promise<void> {
 		try {
-			await persistMcpChanges({
+			await this.mcpConfiguration.mutate({
 				settingsManager: this.session.settingsManager,
-				authStorage: this.authStorage,
 				cwd: this.mcpCwd(),
 				scope,
-				changes: new Map([[name, { next, previous, ...(credential ? { credential } : {}) }]]),
-				reload: () => this.session.reloadMcpServers(),
+				changes: [
+					{
+						name,
+						expectedRevision,
+						next,
+						credential:
+							credential === null
+								? { action: "remove" }
+								: credential
+									? {
+											action: "replace",
+											...(credential.bearerToken ? { bearerToken: credential.bearerToken } : {}),
+											...(credential.environment ? { environment: credential.environment } : {}),
+										}
+									: { action: next ? "preserve" : "remove" },
+					},
+				],
 			});
-		} catch {
+		} catch (error) {
+			if (error instanceof McpConfigurationConflictError) {
+				throw new AppServerError("CONFLICT", { sessionId: this.sessionId, requestId });
+			}
 			throw new AppServerError("OPERATION_FAILED", { sessionId: this.sessionId, requestId });
 		}
 	}
 
 	async listMcpServers(): Promise<ClientResult<"mcp/list">> {
+		await this.session.mcp?.ensureCurrent();
 		return this.mcpRows();
 	}
 
@@ -1053,7 +1004,12 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 		const existing = new Map(
 			Object.entries(settings.mcpServers ?? {}).map(([name, server]) => [
 				name,
-				mcpRevision(input.scope, name, server),
+				mcpRevision(
+					input.scope,
+					name,
+					server,
+					matchingMcpCredentialState(this.authStorage, this.mcpCwd(), input.scope, name, server),
+				),
 			]),
 		);
 		try {
@@ -1077,33 +1033,34 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 			} catch {
 				throw new AppServerError("CONFLICT", { sessionId: this.sessionId, requestId: input.requestId });
 			}
-			const changes = new Map<string, McpDefinitionChange>();
-			for (const entry of resolved.entries) {
+			await this.session.settingsManager.reload();
+			const changes = resolved.entries.map((entry) => {
 				const current = mcpDefinitionAtScope(this.session.settingsManager, input.scope, entry.name);
-				if (
-					entry.expectedRevision === null
-						? current !== undefined
-						: !current || mcpRevision(input.scope, entry.name, current) !== entry.expectedRevision
-				) {
-					throw new AppServerError("CONFLICT", { sessionId: this.sessionId, requestId: input.requestId });
-				}
-				changes.set(entry.name, {
+				return {
+					name: entry.name,
+					expectedRevision: entry.expectedRevision,
 					next: inputMcpServer(entry.server, current, this.mcpCwd()),
-					previous: current,
-					...(entry.credential ? { credential: entry.credential } : {}),
-				});
-			}
+					credential: entry.credential
+						? {
+								action: "replace" as const,
+								...(entry.credential.bearerToken ? { bearerToken: entry.credential.bearerToken } : {}),
+								...(entry.credential.environment ? { environment: entry.credential.environment } : {}),
+							}
+						: ({ action: "preserve" } as const),
+				};
+			});
 			try {
-				await persistMcpChanges({
+				await this.mcpConfiguration.mutate({
 					settingsManager: this.session.settingsManager,
-					authStorage: this.authStorage,
 					cwd: this.mcpCwd(),
 					scope: input.scope,
 					changes,
-					reload: () => this.session.reloadMcpServers(),
 				});
 				return this.mcpRows();
-			} catch {
+			} catch (error) {
+				if (error instanceof McpConfigurationConflictError) {
+					throw new AppServerError("CONFLICT", { sessionId: this.sessionId, requestId: input.requestId });
+				}
 				throw new AppServerError("OPERATION_FAILED", { sessionId: this.sessionId, requestId: input.requestId });
 			}
 		});
@@ -1111,14 +1068,17 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 
 	async getMcpServer(input: ClientParams<"mcp/get">): Promise<ClientResult<"mcp/get">> {
 		this.assertMcpSession(input);
+		await this.session.mcp?.ensureCurrent();
 		const server = this.mcpRow(input.scope, input.name);
-		return publicMcpDetail(server, server.effective ? this.session.getMcpCatalog(input.name) : undefined);
+		return publicMcpDetail(server, server.effective ? this.session.mcp?.getCatalog(input.name) : undefined);
 	}
 
 	async getMcpCatalogItem(input: ClientParams<"mcp/catalog/get">): Promise<ClientResult<"mcp/catalog/get">> {
 		this.assertMcpSession(input);
 		try {
-			return this.session.getMcpCatalogItem(input.server, input.kind, input.id);
+			await this.session.mcp?.ensureCurrent();
+			if (!this.session.mcp) throw new Error("MCP unavailable");
+			return this.session.mcp.getCatalogItem(input.server, input.kind, input.id);
 		} catch {
 			throw new AppServerError("NOT_FOUND", { sessionId: this.sessionId });
 		}
@@ -1128,21 +1088,22 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 		return this.mutateMcpWhileIdle(input.requestId, async () => {
 			this.assertMcpSession(input);
 			this.assertProjectMcpWrite(input.scope, input.requestId);
+			await this.session.settingsManager.reload();
 			const current = mcpDefinitionAtScope(this.session.settingsManager, input.scope, input.name);
-			if (
-				input.expectedRevision === null
-					? current !== undefined
-					: !current || mcpRevision(input.scope, input.name, current) !== input.expectedRevision
-			) {
-				throw new AppServerError("CONFLICT", { sessionId: this.sessionId, requestId: input.requestId });
-			}
 			let next: McpServerSettings;
 			try {
 				next = inputMcpServer(input.server, current, this.mcpCwd());
 			} catch {
 				throw new AppServerError("OPERATION_FAILED", { sessionId: this.sessionId, requestId: input.requestId });
 			}
-			await this.persistMcpDefinition(input.scope, input.name, next, current, input.requestId, input.credential);
+			await this.persistMcpDefinition(
+				input.scope,
+				input.name,
+				next,
+				input.expectedRevision,
+				input.requestId,
+				input.credential,
+			);
 			return this.mcpRows();
 		});
 	}
@@ -1151,8 +1112,7 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 		return this.mutateMcpWhileIdle(input.requestId, async () => {
 			this.assertMcpSession(input);
 			this.assertProjectMcpWrite(input.scope, input.requestId);
-			const current = this.currentMcpDefinition(input.scope, input.name, input.expectedRevision, input.requestId);
-			await this.persistMcpDefinition(input.scope, input.name, undefined, current, input.requestId);
+			await this.persistMcpDefinition(input.scope, input.name, undefined, input.expectedRevision, input.requestId);
 			return this.mcpRows();
 		});
 	}
@@ -1175,7 +1135,8 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 			this.assertMcpSession(input);
 			this.effectiveMcpDefinition(input);
 			try {
-				await this.session.restartMcpServers(input.name);
+				if (!this.session.mcp) throw new Error("MCP unavailable");
+				await this.session.mcp.restart(input.name);
 			} catch {
 				throw new AppServerError("OPERATION_FAILED", { sessionId: this.sessionId, requestId: input.requestId });
 			}
@@ -1190,14 +1151,14 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 			if (input.credential.bearerToken && typeof current.url !== "string") {
 				throw new AppServerError("OPERATION_FAILED", { sessionId: this.sessionId, requestId: input.requestId });
 			}
-			try {
-				await this.session.setMcpSecret(input.name, {
-					...(input.credential.bearerToken ? { bearerToken: input.credential.bearerToken } : {}),
-					...(input.credential.environment ? { env: input.credential.environment } : {}),
-				});
-			} catch {
-				throw new AppServerError("OPERATION_FAILED", { sessionId: this.sessionId, requestId: input.requestId });
-			}
+			await this.persistMcpDefinition(
+				input.scope,
+				input.name,
+				current,
+				input.expectedRevision,
+				input.requestId,
+				input.credential,
+			);
 			return await this.getMcpServer(input);
 		});
 	}
@@ -1207,12 +1168,15 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 	): Promise<ClientResult<"mcp/credential/clear">> {
 		return this.mutateMcpWhileIdle(input.requestId, async () => {
 			this.assertMcpSession(input);
-			this.effectiveMcpDefinition(input);
-			try {
-				await this.session.logoutMcpServer(input.name);
-			} catch {
-				throw new AppServerError("OPERATION_FAILED", { sessionId: this.sessionId, requestId: input.requestId });
-			}
+			const current = this.effectiveMcpDefinition(input);
+			await this.persistMcpDefinition(
+				input.scope,
+				input.name,
+				current,
+				input.expectedRevision,
+				input.requestId,
+				null,
+			);
 			return await this.getMcpServer(input);
 		});
 	}
@@ -2114,29 +2078,16 @@ export class AgentSessionRuntimeHost implements SessionRuntimeHost {
 	private readonly agentDir: string;
 	private readonly options: AgentSessionRuntimeHostOptions;
 	private readonly trustStore: ProjectTrustStore;
-	private readonly authStorage?: AuthStorage;
+	private readonly authStorage: AuthStorage;
+	private readonly mcpConfigurationCoordinator: McpConfigurationCoordinator;
 	private skillMutationTail: Promise<void> = Promise.resolve();
-	private mcpMutationTail: Promise<void> = Promise.resolve();
 
 	constructor(options: AgentSessionRuntimeHostOptions) {
 		this.options = options;
 		this.agentDir = options.agentDir;
 		this.trustStore = new ProjectTrustStore(options.agentDir);
-		this.authStorage = options.credentials?.createView();
-	}
-
-	private async mutateMcp<T>(mutation: () => Promise<T>): Promise<T> {
-		const previous = this.mcpMutationTail;
-		let release!: () => void;
-		this.mcpMutationTail = new Promise<void>((resolveMutation) => {
-			release = resolveMutation;
-		});
-		await previous;
-		try {
-			return await mutation();
-		} finally {
-			release();
-		}
+		this.authStorage = options.credentials?.createView() ?? AuthStorage.create(join(options.agentDir, "auth.json"));
+		this.mcpConfigurationCoordinator = new McpConfigurationCoordinator({ authStorage: this.authStorage });
 	}
 
 	private async mutateSkill<T>(mutation: () => Promise<T>): Promise<T> {
@@ -2192,6 +2143,7 @@ export class AgentSessionRuntimeHost implements SessionRuntimeHost {
 			agentDir: this.agentDir,
 			isolatedChild: child?.writePolicy === "deny",
 			settingsManager,
+			mcpConfigurationCoordinator: this.mcpConfigurationCoordinator,
 			...(this.options.credentials ? { authStorage: this.options.credentials.createView() } : {}),
 			...(child
 				? {
@@ -2388,8 +2340,8 @@ export class AgentSessionRuntimeHost implements SessionRuntimeHost {
 		const context = settingsManager ? { cwd: cwd ?? this.agentDir, settingsManager } : this.draftSettings(cwd);
 		return {
 			servers: publicMcpServers(context.settingsManager, {
-				credentialConfigured: (scope, name, server) =>
-					hasMatchingMcpCredential(this.authStorage, context.cwd, scope, name, server),
+				credentialState: (scope, name, server) =>
+					matchingMcpCredentialState(this.authStorage, context.cwd, scope, name, server),
 			}),
 		};
 	}
@@ -2407,7 +2359,12 @@ export class AgentSessionRuntimeHost implements SessionRuntimeHost {
 		const existing = new Map(
 			Object.entries(settings.mcpServers ?? {}).map(([name, server]) => [
 				name,
-				mcpRevision(input.scope, name, server),
+				mcpRevision(
+					input.scope,
+					name,
+					server,
+					matchingMcpCredentialState(this.authStorage, context.cwd, input.scope, name, server),
+				),
 			]),
 		);
 		try {
@@ -2418,47 +2375,40 @@ export class AgentSessionRuntimeHost implements SessionRuntimeHost {
 	}
 
 	async importMcpServers(input: ClientParams<"mcp/import">): Promise<ClientResult<"mcp/import">> {
-		return this.mutateMcp(async () => {
-			const context = this.draftMcpContext(input);
-			let resolved: ReturnType<typeof resolveMcpImport>;
-			try {
-				resolved = resolveMcpImport(
-					{ scope: input.scope, cwd: context.cwd, text: input.text },
-					input.candidates,
-					input.sourceRevision,
-				);
-			} catch {
+		const context = this.draftMcpContext(input);
+		let resolved: ReturnType<typeof resolveMcpImport>;
+		try {
+			resolved = resolveMcpImport(
+				{ scope: input.scope, cwd: context.cwd, text: input.text },
+				input.candidates,
+				input.sourceRevision,
+			);
+		} catch {
+			throw new AppServerError("CONFLICT", { requestId: input.requestId });
+		}
+		const changes = resolved.entries.map((entry) => {
+			const current = mcpDefinitionAtScope(context.settingsManager, input.scope, entry.name);
+			return {
+				name: entry.name,
+				expectedRevision: entry.expectedRevision,
+				next: inputMcpServer(entry.server, current, context.cwd),
+				credential: mcpCredentialChange(entry.credential),
+			};
+		});
+		try {
+			await this.mcpConfigurationCoordinator.mutate({
+				settingsManager: context.settingsManager,
+				cwd: context.cwd,
+				scope: input.scope,
+				changes,
+			});
+			return this.draftMcpRows(context.targetCwd, context.settingsManager);
+		} catch (error) {
+			if (error instanceof McpConfigurationConflictError) {
 				throw new AppServerError("CONFLICT", { requestId: input.requestId });
 			}
-			const changes = new Map<string, McpDefinitionChange>();
-			for (const entry of resolved.entries) {
-				const current = mcpDefinitionAtScope(context.settingsManager, input.scope, entry.name);
-				if (
-					entry.expectedRevision === null
-						? current !== undefined
-						: !current || mcpRevision(input.scope, entry.name, current) !== entry.expectedRevision
-				) {
-					throw new AppServerError("CONFLICT", { requestId: input.requestId });
-				}
-				changes.set(entry.name, {
-					next: inputMcpServer(entry.server, current, context.cwd),
-					previous: current,
-					...(entry.credential ? { credential: entry.credential } : {}),
-				});
-			}
-			try {
-				await persistMcpChanges({
-					settingsManager: context.settingsManager,
-					authStorage: this.authStorage,
-					cwd: context.cwd,
-					scope: input.scope,
-					changes,
-				});
-				return this.draftMcpRows(context.targetCwd, context.settingsManager);
-			} catch {
-				throw new AppServerError("OPERATION_FAILED", { requestId: input.requestId });
-			}
-		});
+			throw new AppServerError("OPERATION_FAILED", { requestId: input.requestId });
+		}
 	}
 
 	private draftMcpContext(input: { cwd?: string | null; scope: "user" | "project"; requestId?: string }) {
@@ -2483,59 +2433,57 @@ export class AgentSessionRuntimeHost implements SessionRuntimeHost {
 	}
 
 	async upsertMcpServer(input: ClientParams<"mcp/upsert">): Promise<ClientResult<"mcp/upsert">> {
-		return this.mutateMcp(async () => {
-			const context = this.draftMcpContext(input);
-			const current = mcpDefinitionAtScope(context.settingsManager, input.scope, input.name);
-			if (
-				input.expectedRevision === null
-					? current !== undefined
-					: !current || mcpRevision(input.scope, input.name, current) !== input.expectedRevision
-			) {
+		const context = this.draftMcpContext(input);
+		const current = mcpDefinitionAtScope(context.settingsManager, input.scope, input.name);
+		try {
+			const next = inputMcpServer(input.server, current, context.cwd);
+			await this.mcpConfigurationCoordinator.mutate({
+				settingsManager: context.settingsManager,
+				cwd: context.cwd,
+				scope: input.scope,
+				changes: [
+					{
+						name: input.name,
+						expectedRevision: input.expectedRevision,
+						next,
+						credential: mcpCredentialChange(input.credential),
+					},
+				],
+			});
+			return this.draftMcpRows(context.targetCwd, context.settingsManager);
+		} catch (error) {
+			if (error instanceof McpConfigurationConflictError) {
 				throw new AppServerError("CONFLICT", { requestId: input.requestId });
 			}
-			try {
-				const next = inputMcpServer(input.server, current, context.cwd);
-				await persistMcpChanges({
-					settingsManager: context.settingsManager,
-					authStorage: this.authStorage,
-					cwd: context.cwd,
-					scope: input.scope,
-					changes: new Map([
-						[
-							input.name,
-							{ next, previous: current, ...(input.credential ? { credential: input.credential } : {}) },
-						],
-					]),
-				});
-				return this.draftMcpRows(context.targetCwd, context.settingsManager);
-			} catch (error) {
-				if (error instanceof AppServerError) throw error;
-				throw new AppServerError("OPERATION_FAILED", { requestId: input.requestId });
-			}
-		});
+			if (error instanceof AppServerError) throw error;
+			throw new AppServerError("OPERATION_FAILED", { requestId: input.requestId });
+		}
 	}
 
 	async removeMcpServer(input: ClientParams<"mcp/remove">): Promise<ClientResult<"mcp/remove">> {
-		return this.mutateMcp(async () => {
-			const context = this.draftMcpContext(input);
-			const current = mcpDefinitionAtScope(context.settingsManager, input.scope, input.name);
-			if (!current || mcpRevision(input.scope, input.name, current) !== input.expectedRevision) {
+		const context = this.draftMcpContext(input);
+		try {
+			await this.mcpConfigurationCoordinator.mutate({
+				settingsManager: context.settingsManager,
+				cwd: context.cwd,
+				scope: input.scope,
+				changes: [
+					{
+						name: input.name,
+						expectedRevision: input.expectedRevision,
+						next: undefined,
+						credential: { action: "remove" },
+					},
+				],
+			});
+			return this.draftMcpRows(context.targetCwd, context.settingsManager);
+		} catch (error) {
+			if (error instanceof McpConfigurationConflictError) {
 				throw new AppServerError("CONFLICT", { requestId: input.requestId });
 			}
-			try {
-				await persistMcpChanges({
-					settingsManager: context.settingsManager,
-					authStorage: this.authStorage,
-					cwd: context.cwd,
-					scope: input.scope,
-					changes: new Map([[input.name, { next: undefined, previous: current }]]),
-				});
-				return this.draftMcpRows(context.targetCwd, context.settingsManager);
-			} catch (error) {
-				if (error instanceof AppServerError) throw error;
-				throw new AppServerError("OPERATION_FAILED", { requestId: input.requestId });
-			}
-		});
+			if (error instanceof AppServerError) throw error;
+			throw new AppServerError("OPERATION_FAILED", { requestId: input.requestId });
+		}
 	}
 
 	async open(ref: SessionRef): Promise<OpenedSessionRuntime> {
@@ -2569,7 +2517,7 @@ export class AgentSessionRuntimeHost implements SessionRuntimeHost {
 					this.agentDir,
 					this.options.interactions,
 					this.authStorage,
-					(mutation) => this.mutateMcp(mutation),
+					this.mcpConfigurationCoordinator,
 				);
 				await opened.initialize();
 				return opened;

@@ -5,7 +5,7 @@ import {
 	McpConfigurationCoordinator,
 	mcpConfigurationRevision,
 } from "../src/core/mcp/configuration.ts";
-import type { McpManager, McpPreparedConfiguration } from "../src/core/mcp/manager.ts";
+import { McpManager, type McpPreparedConfiguration } from "../src/core/mcp/manager.ts";
 import { InMemorySettingsStorage, SettingsManager } from "../src/core/settings-manager.ts";
 
 describe("MCP configuration transaction primitives", () => {
@@ -140,6 +140,45 @@ describe("MCP configuration transaction primitives", () => {
 
 		expect(first.prepareConfigurationChanges).toHaveBeenCalledTimes(2);
 		expect(second.prepareConfigurationChanges).toHaveBeenCalledTimes(1);
+	});
+
+	it("activates one global mutation in every registered real manager", async () => {
+		const storage = new InMemorySettingsStorage();
+		const authStorage = AuthStorage.inMemory();
+		const coordinator = new McpConfigurationCoordinator({ authStorage });
+		const first = await McpManager.create({
+			settingsManager: SettingsManager.fromStorage(storage),
+			authStorage,
+			cwd: "/work/first",
+			configurationCoordinator: coordinator,
+		});
+		const second = await McpManager.create({
+			settingsManager: SettingsManager.fromStorage(storage),
+			authStorage,
+			cwd: "/work/second",
+			configurationCoordinator: coordinator,
+		});
+
+		try {
+			await coordinator.mutate({
+				settingsManager: SettingsManager.fromStorage(storage),
+				cwd: "/work/first",
+				scope: "user",
+				changes: [
+					{
+						name: "docs",
+						expectedRevision: null,
+						next: { command: "node", enabled: false },
+						credential: { action: "preserve" },
+					},
+				],
+			});
+
+			expect(first.getStatus()).toMatchObject([{ name: "docs", state: "disabled" }]);
+			expect(second.getStatus()).toMatchObject([{ name: "docs", state: "disabled" }]);
+		} finally {
+			await Promise.all([first.close(), second.close()]);
+		}
 	});
 
 	it("keeps settings unchanged when one affected runtime cannot prepare", async () => {

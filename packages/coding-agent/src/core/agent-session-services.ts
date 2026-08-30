@@ -6,6 +6,7 @@ import { resolvePath } from "../utils/paths.ts";
 import { AuthStorage } from "./auth-storage.ts";
 import type { SessionStartEvent, ToolDefinition } from "./extensions/index.ts";
 import { createDeclarativeHooksBridge } from "./hooks/hook-bridge.ts";
+import type { McpConfigurationCoordinator } from "./mcp/configuration.ts";
 import { ModelRegistry } from "./model-registry.ts";
 import {
 	DefaultResourceLoader,
@@ -46,6 +47,7 @@ export interface CreateAgentSessionServicesOptions {
 	/** Runtime-owned auth view. Use separate instances when runtimes share one credential file. */
 	authStorage?: AuthStorage;
 	settingsManager?: SettingsManager;
+	mcpConfigurationCoordinator?: McpConfigurationCoordinator;
 	modelRegistry?: ModelRegistry;
 	extensionFlagValues?: Map<string, boolean | string>;
 	resourceLoaderOptions?: Omit<DefaultResourceLoaderOptions, "cwd" | "agentDir" | "settingsManager">;
@@ -96,6 +98,7 @@ export interface AgentSessionServices {
 	modelRegistry: ModelRegistry;
 	resourceLoader: ResourceLoader;
 	diagnostics: AgentSessionRuntimeDiagnostic[];
+	mcpConfigurationCoordinator?: McpConfigurationCoordinator;
 }
 
 function applyExtensionFlagValues(
@@ -212,6 +215,7 @@ export async function createAgentSessionServices(
 			modelRegistry,
 			resourceLoader,
 			diagnostics,
+			mcpConfigurationCoordinator: options.mcpConfigurationCoordinator,
 		};
 		completed = true;
 		return services;
@@ -247,6 +251,7 @@ export async function createAgentSessionFromServices(
 		noTools: options.noTools,
 		customTools: options.customTools,
 		backgroundOptionalMcpStartup: options.backgroundOptionalMcpStartup,
+		mcpConfigurationCoordinator: options.services.mcpConfigurationCoordinator,
 		onPermissionRequest: options.onPermissionRequest,
 		ultraAvailable: options.ultraAvailable,
 		additionalSystemPrompt: options.additionalSystemPrompt,
