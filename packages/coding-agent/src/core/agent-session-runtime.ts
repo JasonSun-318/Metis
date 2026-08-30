@@ -28,12 +28,9 @@ import { assertSessionCwdExists } from "./session-cwd.ts";
 import { createSessionId } from "./session-id.ts";
 import { SessionManager } from "./session-manager.ts";
 import { removeOwnedManagedWorkspace, resolveNewSessionWorkspace } from "./session-workspace.ts";
-import { loadAgentTypeDefinitions } from "./subagents/agent-type-registry.ts";
-import { SubagentManager } from "./subagents/manager.ts";
-import { buildAgentCoordinationPrompt } from "./subagents/prompts.ts";
-import { AgentStore } from "./subagents/store.ts";
-import { createSubagentTools } from "./subagents/tools.ts";
-import { AGENT_TOOL_NAMES, type AgentConfig } from "./subagents/types.ts";
+import type { SubagentManager } from "./subagents/manager.ts";
+import { SessionAgentCoordinator } from "./subagents/session-agent-coordinator.ts";
+import type { AgentConfig } from "./subagents/types.ts";
 
 /**
  * Result returned by runtime creation.
@@ -172,7 +169,6 @@ function recoverSessionManager(sessionManager: SessionManager): RecoveredSession
 }
 
 const lifecycleOperationContext = new AsyncLocalStorage<{ owner: object; active: boolean }>();
-const INSTALLED_AGENT_TOOLS = AGENT_TOOL_NAMES;
 const acceptedPromptTaskContext = new AsyncLocalStorage<{ owner: object; active: boolean }>();
 const REENTRANT_LIFECYCLE_ERROR = "Session lifecycle changes cannot be awaited from within another lifecycle operation";
 const ACCEPTED_PROMPT_LIFECYCLE_ERROR = "Session lifecycle changes cannot run from within an accepted prompt task";
@@ -240,15 +236,7 @@ export class AgentSessionRuntime {
 	private requestIndex: Map<string, IndexedRuntimeRequest>;
 	private operationIndex: Map<string, IndexedRuntimeRequest>;
 	private readonly hostCwd: string;
-	private subagentManagerValue?: SubagentManager;
-	private readonly inheritedSubagentManager?: SubagentManager;
-	private ownsSubagentCoordinator = false;
-	private subagentActorDetach?: () => void;
-	private subagentManagerUnsubscribe?: () => void;
-	private readonly pendingAgentContinuationIds = new Set<string>();
-	private readonly attemptedAgentContinuationIds = new Set<string>();
-	private agentContinuationTask?: Promise<void>;
-	private subagentsInitialized = false;
+	private readonly agentCoordinator: SessionAgentCoordinator;
 
 	constructor(
 		_session: AgentSession,
@@ -260,7 +248,6 @@ export class AgentSessionRuntime {
 		hostCwd: string = process.cwd(),
 		inheritedSubagentManager?: SubagentManager,
 	) {
-		this.inheritedSubagentManager = inheritedSubagentManager;
 		this._session = _session;
 		this._services = _services;
 		this.createRuntime = createRuntime;
@@ -270,12 +257,43 @@ export class AgentSessionRuntime {
 		this.requestIndex = _recovered?.requests ?? new Map();
 		this.operationIndex = _recovered?.operations ?? new Map();
 		this.hostCwd = resolvePath(hostCwd);
+		this.agentCoordinator = new SessionAgentCoordinator({
+			agentDir: _services.agentDir,
+			inheritedManager: inheritedSubagentManager,
+			isRuntimeAvailable: () => !this.disposeRequested && !this.disposed,
+			onDiagnostic: (message) => {
+				this._diagnostics = [...this._diagnostics, { type: "warning", message }];
+			},
+			createChildRuntime: async (
+				{ config, permissionModeCeiling, sessionManager, onPermissionRequest },
+				manager,
+			) => {
+				const recovered = recoverSessionManager(sessionManager);
+				const result = await this.createRuntime({
+					cwd: config.cwd,
+					agentDir: this._services.agentDir,
+					sessionManager,
+					ultraAvailable: false,
+					childConfig: config,
+					permissionModeCeiling,
+					sessionStartEvent: { type: "session_start", reason: "resume" },
+				});
+				result.session.setPermissionApprovalHandler(onPermissionRequest);
+				return new AgentSessionRuntime(
+					result.session,
+					result.services,
+					this.createRuntime,
+					result.diagnostics,
+					result.modelFallbackMessage,
+					recovered,
+					this.hostCwd,
+					manager,
+				);
+			},
+		});
 		this.queuedTurnQueue = new QueuedTurnQueue(_session.sessionManager);
 		this.bindDurableSession(_session);
-		if (inheritedSubagentManager) {
-			this.bindSubagents(_session);
-			this.subagentsInitialized = true;
-		}
+		if (inheritedSubagentManager) this.agentCoordinator.attach(_session);
 	}
 
 	get services(): AgentSessionServices {
@@ -324,28 +342,12 @@ export class AgentSessionRuntime {
 
 	get subagentManager(): SubagentManager | undefined {
 		this.assertPubliclyAccessible();
-		return this.subagentManagerValue;
+		return this.agentCoordinator.manager;
 	}
 
 	async initializeSubagents(): Promise<void> {
 		this.assertPubliclyAccessible();
-		if (this.subagentsInitialized) return;
-		await this.recoverSubagentDeletes(this._session);
-		this.bindSubagents(this._session);
-		this.subagentsInitialized = true;
-	}
-
-	private async recoverSubagentDeletes(session: AgentSession): Promise<void> {
-		const header = session.sessionManager.getHeader();
-		if (
-			this.inheritedSubagentManager ||
-			!session.sessionManager.isPersisted() ||
-			header?.agent ||
-			header?.scheduled ||
-			session.mode !== "code"
-		)
-			return;
-		await new AgentStore(session.sessionManager, this._services.agentDir).recoverDeleteMarkers();
+		await this.agentCoordinator.initialize(this._session);
 	}
 
 	private bindDurableSession(session: AgentSession): void {
@@ -354,214 +356,6 @@ export class AgentSessionRuntime {
 			if (indexed) indexed.turnId = turnId;
 			this.emitQueuedTurns();
 		});
-	}
-
-	private bindSubagents(session: AgentSession): void {
-		session.setCollaborationModeGuard(undefined);
-		this.pendingAgentContinuationIds.clear();
-		this.attemptedAgentContinuationIds.clear();
-		this.agentContinuationTask = undefined;
-		this.subagentActorDetach?.();
-		this.subagentActorDetach = undefined;
-		this.subagentManagerUnsubscribe?.();
-		this.subagentManagerUnsubscribe = undefined;
-
-		const header = session.sessionManager.getHeader();
-		if (!session.sessionManager.isPersisted() || header?.scheduled) {
-			this.subagentManagerValue = undefined;
-			this.ownsSubagentCoordinator = false;
-			return;
-		}
-		if (header?.agent) {
-			if (!this.inheritedSubagentManager) {
-				this.subagentManagerValue = undefined;
-				this.ownsSubagentCoordinator = false;
-				return;
-			}
-			this.subagentManagerValue = this.inheritedSubagentManager;
-			this.subagentActorDetach = this.inheritedSubagentManager.attachActor(session);
-			this.subagentManagerUnsubscribe = this.inheritedSubagentManager.subscribe((event) => {
-				if (
-					event.type === "notification_ready" &&
-					event.event.parentSessionId === session.sessionManager.getSessionId()
-				) {
-					this.requestAgentContinuation(session, event.event.eventId);
-				}
-			});
-			if (header.agent.mayDelegate) this.installAgentControlTools(session);
-			this.syncAgentCapabilities(session, header.agent);
-			this.resumePendingAgentContinuations(session);
-			return;
-		}
-
-		if (session.mode !== "code") {
-			this.subagentManagerValue = undefined;
-			this.ownsSubagentCoordinator = false;
-			return;
-		}
-
-		if (this.inheritedSubagentManager) {
-			this.subagentManagerValue = this.inheritedSubagentManager;
-			this.subagentActorDetach = this.inheritedSubagentManager.attachActor(session);
-			if (session.mode === "code") this.installAgentControlTools(session);
-			this.syncAgentCapabilities(session);
-			this.resumePendingAgentContinuations(session);
-			return;
-		}
-
-		const manager = new SubagentManager({
-			parentSessionManager: session.sessionManager,
-			agentDir: this._services.agentDir,
-			getWorkspaceRoots: () => session.sessionManager.getWorkspaceRoots(),
-			onPermissionRequest: (request) => session.requestPermissionApproval(request),
-			createChildRuntime: async ({ config, permissionModeCeiling, sessionManager, onPermissionRequest }) => {
-				const recovered = recoverSessionManager(sessionManager);
-				const result = await this.createRuntime({
-					cwd: config.cwd,
-					agentDir: this._services.agentDir,
-					sessionManager,
-					ultraAvailable: false,
-					childConfig: config,
-					permissionModeCeiling,
-					sessionStartEvent: { type: "session_start", reason: "resume" },
-				});
-				result.session.setPermissionApprovalHandler(onPermissionRequest);
-				return new AgentSessionRuntime(
-					result.session,
-					result.services,
-					this.createRuntime,
-					result.diagnostics,
-					result.modelFallbackMessage,
-					recovered,
-					this.hostCwd,
-					manager,
-				);
-			},
-		});
-		this.subagentManagerValue = manager;
-		this.ownsSubagentCoordinator = true;
-		session.setCollaborationModeGuard((mode) => {
-			if (mode === "plan") manager.assertCanEnterPlan(session.sessionManager.getSessionId());
-		});
-		if (session.mode === "code") this.installAgentControlTools(session);
-		this.subagentManagerUnsubscribe = manager.subscribe((event) => {
-			this.syncAgentCapabilities(session);
-			if (
-				event.type === "notification_ready" &&
-				event.event.parentSessionId === session.sessionManager.getSessionId()
-			) {
-				this.requestAgentContinuation(session, event.event.eventId);
-			} else if (event.type === "notification_failed") {
-				this._diagnostics = [
-					...this._diagnostics,
-					{ type: "warning", message: `Agent notification failed: ${event.error}` },
-				];
-			}
-		});
-		this.subagentActorDetach = manager.attachActor(session);
-		this.syncAgentCapabilities(session);
-		this.resumePendingAgentContinuations(session);
-	}
-
-	private installAgentControlTools(session: AgentSession): void {
-		session.installHostTools(
-			createSubagentTools({
-				getManager: () => this.subagentManagerValue,
-				getSession: () => session,
-			}),
-			{ automaticPermissionToolNames: ["inspect_agents"] },
-		);
-	}
-
-	private requestAgentContinuation(session: AgentSession, eventId: string): void {
-		if (session !== this._session || this.disposeRequested || this.disposed) return;
-		this.pendingAgentContinuationIds.add(eventId);
-		this.scheduleAgentContinuation(session);
-	}
-
-	private resumePendingAgentContinuations(session: AgentSession): void {
-		for (const eventId of session.getPendingAgentMailboxEventIds()) {
-			this.requestAgentContinuation(session, eventId);
-		}
-	}
-
-	private scheduleAgentContinuation(session: AgentSession): void {
-		if (this.agentContinuationTask || session !== this._session || this.disposeRequested || this.disposed) return;
-		let task!: Promise<void>;
-		task = this.drainAgentContinuation(session)
-			.catch((error) => {
-				this._diagnostics = [
-					...this._diagnostics,
-					{
-						type: "warning",
-						message: `Automatic agent continuation failed: ${error instanceof Error ? error.message : String(error)}`,
-					},
-				];
-			})
-			.finally(() => {
-				if (this.agentContinuationTask !== task) return;
-				this.agentContinuationTask = undefined;
-				if (session !== this._session || this.disposeRequested || this.disposed) return;
-				const pending = new Set(session.getPendingAgentMailboxEventIds());
-				const hasUnattempted = [...this.pendingAgentContinuationIds].some(
-					(eventId) => pending.has(eventId) && !this.attemptedAgentContinuationIds.has(eventId),
-				);
-				if (hasUnattempted) this.scheduleAgentContinuation(session);
-			});
-		this.agentContinuationTask = task;
-	}
-
-	private async drainAgentContinuation(session: AgentSession): Promise<void> {
-		await new Promise<void>((resolvePromise) => setImmediate(resolvePromise));
-		await session.waitForIdle();
-		if (session !== this._session || this.disposeRequested || this.disposed) return;
-
-		const pending = new Set(session.getPendingAgentMailboxEventIds());
-		for (const eventId of [...this.pendingAgentContinuationIds]) {
-			if (!pending.has(eventId)) this.pendingAgentContinuationIds.delete(eventId);
-		}
-		const unattempted = [...this.pendingAgentContinuationIds].filter(
-			(eventId) => !this.attemptedAgentContinuationIds.has(eventId),
-		);
-		if (unattempted.length === 0) return;
-		for (const eventId of unattempted) this.attemptedAgentContinuationIds.add(eventId);
-
-		const continued = await session.continueAgentMailbox(unattempted);
-		const remaining = new Set(session.getPendingAgentMailboxEventIds());
-		for (const eventId of [...this.pendingAgentContinuationIds]) {
-			if (!remaining.has(eventId)) this.pendingAgentContinuationIds.delete(eventId);
-		}
-		if (continued) {
-			for (const eventId of unattempted) {
-				if (remaining.has(eventId)) this.attemptedAgentContinuationIds.delete(eventId);
-			}
-		}
-	}
-
-	private syncAgentCapabilities(
-		session: AgentSession,
-		agentHeader?: NonNullable<ReturnType<SessionManager["getHeader"]>>["agent"],
-	): void {
-		const manager = this.subagentManagerValue;
-		if (!manager) return;
-		const reserved = new Set<string>(AGENT_TOOL_NAMES);
-		const base = session.getConfiguredActiveToolNames().filter((name) => !reserved.has(name));
-
-		if (agentHeader) {
-			const agentTools = agentHeader.mayDelegate ? INSTALLED_AGENT_TOOLS : [];
-			session.setActiveToolsByName([...base, ...agentTools]);
-			session.setHostSystemPrompt(() => undefined);
-			return;
-		}
-
-		if (session.mode !== "code") {
-			session.setActiveToolsByName(base);
-			session.setHostSystemPrompt(() => undefined);
-			return;
-		}
-
-		session.setActiveToolsByName([...base, ...INSTALLED_AGENT_TOOLS]);
-		session.setHostSystemPrompt(() => buildAgentCoordinationPrompt(loadAgentTypeDefinitions()));
 	}
 
 	setRebindSession(rebindSession?: (session: AgentSession) => Promise<void>): void {
@@ -1140,24 +934,13 @@ export class AgentSessionRuntime {
 	private async teardownCurrent(reason: SessionShutdownEvent["reason"], targetSessionFile?: string): Promise<void> {
 		const session = this._session;
 		session.beginRuntimeTeardown();
-		this.pendingAgentContinuationIds.clear();
-		this.attemptedAgentContinuationIds.clear();
 		this.submissionGateOpen = false;
 		const errors: unknown[] = [];
 		try {
-			if (this.ownsSubagentCoordinator) {
-				await this.subagentManagerValue?.unload("parent_unloaded");
-			} else {
-				this.subagentActorDetach?.();
-			}
+			await this.agentCoordinator.dispose();
 		} catch (error) {
 			errors.push(error);
 		}
-		this.subagentActorDetach = undefined;
-		this.subagentManagerUnsubscribe?.();
-		this.subagentManagerUnsubscribe = undefined;
-		this.subagentManagerValue = undefined;
-		this.ownsSubagentCoordinator = false;
 		try {
 			session.abortCompaction();
 		} catch (error) {
@@ -1227,8 +1010,7 @@ export class AgentSessionRuntime {
 		this.queuedTurnQueue = new QueuedTurnQueue(prepared.result.session.sessionManager);
 		this.submissionDisabled = false;
 		this.bindDurableSession(prepared.result.session);
-		await this.recoverSubagentDeletes(prepared.result.session);
-		this.bindSubagents(prepared.result.session);
+		await this.agentCoordinator.rebind(prepared.result.session);
 		this.emitQueuedTurns();
 	}
 
@@ -1619,19 +1401,10 @@ export class AgentSessionRuntime {
 		session.beginRuntimeTeardown();
 		const errors: unknown[] = [];
 		try {
-			if (this.ownsSubagentCoordinator) {
-				await this.subagentManagerValue?.unload("parent_unloaded");
-			} else {
-				this.subagentActorDetach?.();
-			}
+			await this.agentCoordinator.dispose();
 		} catch (error) {
 			errors.push(error);
 		}
-		this.subagentActorDetach = undefined;
-		this.subagentManagerUnsubscribe?.();
-		this.subagentManagerUnsubscribe = undefined;
-		this.subagentManagerValue = undefined;
-		this.ownsSubagentCoordinator = false;
 		if (!this.eventPersistenceDrained) {
 			try {
 				session.abortCompaction();
@@ -1711,8 +1484,6 @@ export class AgentSessionRuntime {
 		if (this.disposePromise) return this.disposePromise;
 		this._session.beginRuntimeTeardown();
 		this.disposeRequested = true;
-		this.pendingAgentContinuationIds.clear();
-		this.attemptedAgentContinuationIds.clear();
 		this.submissionGateOpen = false;
 		const attempt = this.lifecycleTail.then(() => this.runLifecycleOperation(() => this.disposeOnce()));
 		this.disposePromise = attempt;
