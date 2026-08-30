@@ -150,19 +150,9 @@ import { type SessionMemoryExtractInput, SessionMemoryRuntime } from "./memory/s
 import type { BashExecutionMessage, CustomMessage } from "./messages.ts";
 import type { ModelRegistry } from "./model-registry.ts";
 import { isPermissionMode, narrowPermissionMode, type PermissionMode } from "./permission-mode.ts";
-import {
-	classifyAction,
-	executionTargetFor,
-	type PermissionAction,
-	type PermissionExecutionTarget,
-	PermissionPolicy,
-	type RequestPermissionApproval,
-	type ToolProvenance,
-	unclassifiedAction,
-} from "./permission-policy.ts";
+import type { RequestPermissionApproval } from "./permission-policy.ts";
 import { PLAN_MODE_SYSTEM_PROMPT, planVisibleToolNames, projectPlanContext } from "./plan-mode.ts";
 import type { CollaborationMode, PlanRef, StoredPlan } from "./plan-state.ts";
-import { ProjectPermissionRuleStore } from "./project-permission-rules.ts";
 import { expandPromptTemplate, type PromptTemplate } from "./prompt-templates.ts";
 import type { ResourceExtensionPaths, ResourceLoader } from "./resource-loader.ts";
 import {
@@ -207,18 +197,14 @@ import {
 import { createSubmitPlanToolDefinition } from "./submit-plan.ts";
 import { type BuildSystemPromptOptions, buildSystemPromptWithParts, type SystemPromptPart } from "./system-prompt.ts";
 import { canUseUltra, getHighestSupportedThinkingLevel, type ThinkingSelection } from "./thinking-selection.ts";
+import { ToolAuthorizationRuntime } from "./tool-authorization-runtime.ts";
 import { createToolResultMicrocompactor } from "./tool-result-microcompaction.ts";
 import { type BashOperations, createLocalBashOperations } from "./tools/bash.ts";
 import { createDescribeImageToolDefinition } from "./tools/describe-image.ts";
 import { createAllToolDefinitions } from "./tools/index.ts";
 import { resolveReadPathAsync } from "./tools/path-utils.ts";
 import { createToolDefinitionFromAgentTool } from "./tools/tool-definition-wrapper.ts";
-import {
-	authorizeUnattendedAction,
-	revalidateUnattendedAction,
-	UNATTENDED_TOOL_NAMES,
-	type UnattendedExecutionProfile,
-} from "./unattended-execution.ts";
+import { UNATTENDED_TOOL_NAMES, type UnattendedExecutionProfile } from "./unattended-execution.ts";
 import { resolveWebSearchApiKey, WEB_SEARCH_PROVIDER_INFO, type WebSearchProvider } from "./web-search-config.ts";
 
 export { type ParsedSkillBlock, parseSkillBlock } from "./skills.ts";
@@ -397,15 +383,6 @@ export interface SessionStats {
 interface ToolDefinitionEntry {
 	definition: ToolDefinition;
 	sourceInfo: SourceInfo;
-}
-
-interface AuthorizedPermissionAction {
-	readonly action: PermissionAction;
-	readonly args: unknown;
-	readonly cwd: string;
-	readonly workspaceRoots: readonly string[];
-	readonly authorizedMode: PermissionMode | "unattended";
-	readonly executionTarget: PermissionExecutionTarget;
 }
 
 function estimateMessagesTokens(messages: AgentMessage[]): number {
@@ -598,12 +575,8 @@ export class AgentSession {
 	private _baseSystemPromptParts: readonly SystemPromptPart[] = [];
 	private _baseSystemPromptOptions!: BuildSystemPromptOptions;
 	private _systemPromptOverride?: string;
-	private readonly _permissionPolicy: PermissionPolicy;
+	private readonly _toolAuthorization: ToolAuthorizationRuntime;
 	private readonly _interactiveBashBoundary?: InteractiveBashBoundary;
-	private _requestPermissionApproval?: RequestPermissionApproval;
-	private readonly _permissionGrants = new Map<string, AuthorizedPermissionAction>();
-	private readonly _permissionDenials = new Map<string, string>();
-	private _permissionApprovalTail: Promise<void> = Promise.resolve();
 	private _runtimeShellCommandPrefix?: string;
 	private readonly _ultraAvailable: boolean;
 	private readonly _includeAutoMemory: boolean;
@@ -686,7 +659,6 @@ export class AgentSession {
 		if (this.sessionManager.getUltraSelected() && !this._ultraAvailable) {
 			throw new Error("Ultra sessions require AgentSessionRuntime");
 		}
-		this._requestPermissionApproval = config.requestPermissionApproval;
 		this._interactiveBashBoundary = config.unattendedExecution
 			? undefined
 			: (config.interactiveBashBoundary ??
@@ -732,10 +704,23 @@ export class AgentSession {
 						};
 					},
 				}));
-		this._permissionPolicy = new PermissionPolicy(
-			(request) => this._queuePermissionApproval(request),
-			this._agentDir && !this._unattendedExecution ? new ProjectPermissionRuleStore(this._agentDir) : undefined,
-		);
+		this._toolAuthorization = new ToolAuthorizationRuntime({
+			agentDir: this._agentDir,
+			sessionManager: this.sessionManager,
+			cwd: () => this._cwd,
+			readOnlyRoots: () => this.resourceLoader.getSkills().skills.map((skill) => skill.baseDir),
+			toolSource: (toolName) => this._toolDefinitions.get(toolName)?.sourceInfo.source,
+			mcpAnnotations: (toolName) => this._mcpManager?.getToolAnnotations(toolName),
+			webSearchNetworkTarget: () =>
+				WEB_SEARCH_PROVIDER_INFO[this.settingsManager.getWebSearchSettings().provider].networkTarget,
+			isTrustedControlTool: (toolName) => this._isTrustedControlTool(toolName),
+			runtimeShellCommandPrefix: () => this._runtimeShellCommandPrefix,
+			permissionModeCeiling: this._permissionModeCeiling,
+			workspaceWritePolicy: this._workspaceWritePolicy,
+			unattendedExecution: this._unattendedExecution,
+			bashBoundary: this._interactiveBashBoundary,
+			requestApproval: config.requestPermissionApproval,
+		});
 		this._memorySettingsTransaction = new MemorySettingsTransaction({
 			...(this._agentDir ? { agentDir: this._agentDir } : {}),
 			authStorage: this._modelRegistry.authStorage,
@@ -804,7 +789,7 @@ export class AgentSession {
 	}
 
 	setPermissionApprovalHandler(handler?: RequestPermissionApproval): void {
-		this._requestPermissionApproval = handler;
+		this._toolAuthorization.setApprovalHandler(handler);
 	}
 
 	setCollaborationModeGuard(guard?: (collaborationMode: CollaborationMode) => void | Promise<void>): void {
@@ -813,26 +798,7 @@ export class AgentSession {
 
 	/** Forward a child approval through the frontend currently attached to this session. */
 	requestPermissionApproval(request: Parameters<RequestPermissionApproval>[0]): ReturnType<RequestPermissionApproval> {
-		return this._queuePermissionApproval(request);
-	}
-
-	private _queuePermissionApproval(
-		request: Parameters<RequestPermissionApproval>[0],
-	): ReturnType<RequestPermissionApproval> {
-		const approval = request.cwd === undefined ? { ...request, cwd: this._cwd } : request;
-		const pending = this._permissionApprovalTail.then(async () => {
-			if (approval.signal?.aborted) throw new Error("Approval was aborted while queued");
-			const handler = this._requestPermissionApproval;
-			if (!handler) throw new Error("No interactive session owner is available");
-			const decision = await handler(approval);
-			if (approval.signal?.aborted) throw new Error("Approval was aborted before completion");
-			return decision;
-		});
-		this._permissionApprovalTail = pending.then(
-			() => undefined,
-			() => undefined,
-		);
-		return pending;
+		return this._toolAuthorization.requestApproval(request);
 	}
 
 	/** Install runtime-owned tools; only explicitly named no-host controls bypass approval. */
@@ -1135,244 +1101,8 @@ export class AgentSession {
 		return result.ok ? { apiKey: result.apiKey, headers: result.headers, env: result.env } : {};
 	}
 
-	private _toolProvenance(toolName: string): ToolProvenance {
-		const source = this._toolDefinitions.get(toolName)?.sourceInfo.source.toLowerCase();
-		if (source === "builtin") return "builtin";
-		if (source === "sdk") return "sdk";
-		if (source === "mcp" || source?.startsWith("mcp:")) return "mcp";
-		return "extension";
-	}
-
-	private _withPermissionGuard(tool: AgentTool): AgentTool {
-		return {
-			...tool,
-			execute: async (toolCallId, args, signal, onUpdate) => {
-				if (this._isTrustedControlTool(tool.name)) {
-					return tool.execute(toolCallId, args, signal, onUpdate);
-				}
-				const denial = this._permissionDenials.get(toolCallId);
-				if (denial) throw new Error(denial);
-				const authorization = this._takePermissionAction(toolCallId, tool.name, args);
-				if (tool.name === "bash") this._interactiveBashBoundary?.bind(toolCallId, authorization.executionTarget);
-				try {
-					return await tool.execute(toolCallId, args, signal, onUpdate);
-				} finally {
-					if (tool.name === "bash") this._interactiveBashBoundary?.unbind(toolCallId);
-				}
-			},
-		};
-	}
-
-	private _appendPermissionAudit(
-		action: PermissionAction,
-		decision: "allow" | "deny",
-		reason: string,
-		source: "user" | "policy" = "user",
-	): void {
-		this.sessionManager.appendPermissionDecision({
-			actionId: action.actionId,
-			toolName: action.toolName,
-			source,
-			decision,
-			reason,
-		});
-	}
-
-	private _getEffectivePermissionSettings() {
-		const stored = this.sessionManager.getPermissionSettings();
-		return {
-			mode: this._permissionModeCeiling
-				? narrowPermissionMode(stored.mode, this._permissionModeCeiling())
-				: stored.mode,
-		};
-	}
-
-	private _effectiveBashCommand(args: unknown): string | undefined {
-		if (typeof args !== "object" || args === null || Array.isArray(args)) return undefined;
-		const command = (args as Record<string, unknown>).command;
-		if (typeof command !== "string") return undefined;
-		return this._runtimeShellCommandPrefix ? `${this._runtimeShellCommandPrefix}\n${command}` : command;
-	}
-
-	private async _authorizePermissionAction(input: {
-		actionId: string;
-		toolName: string;
-		provenance: ToolProvenance;
-		args: unknown;
-		effectiveCommand?: string;
-		cwd?: string;
-		signal?: AbortSignal;
-	}): Promise<AuthorizedPermissionAction> {
-		if (this._permissionGrants.has(input.actionId)) {
-			throw new Error(`Permission action ID was reused: ${input.actionId}`);
-		}
-		const approvedArgs = structuredClone(input.args);
-		const approvedCwd = input.cwd ?? this._cwd;
-		const approvedWorkspaceRoots =
-			this._unattendedExecution?.workspaceRoots ?? this.sessionManager.getWorkspaceRoots();
-		const approvedReadOnlyRoots = this.resourceLoader.getSkills().skills.map((skill) => skill.baseDir);
-		const approvedSettings = this._getEffectivePermissionSettings();
-		const classificationArgs =
-			input.effectiveCommand === undefined
-				? structuredClone(approvedArgs)
-				: { ...(structuredClone(approvedArgs) as Record<string, unknown>), command: input.effectiveCommand };
-		const classifyInput = {
-			actionId: input.actionId,
-			toolName: input.toolName,
-			provenance: input.provenance,
-			args: classificationArgs,
-			cwd: approvedCwd,
-			workspaceRoots: approvedWorkspaceRoots,
-			readOnlyRoots: approvedReadOnlyRoots,
-			mcpAnnotations: input.provenance === "mcp" ? this._mcpManager?.getToolAnnotations(input.toolName) : undefined,
-			builtinNetworkTargets:
-				input.provenance === "builtin" && input.toolName === "web_search"
-					? [WEB_SEARCH_PROVIDER_INFO[this.settingsManager.getWebSearchSettings().provider].networkTarget]
-					: undefined,
-		};
-		const planBash = this.sessionManager.getCollaborationMode() === "plan" && input.toolName === "bash";
-		const action =
-			this._unattendedExecution || planBash
-				? classifyAction(classifyInput)
-				: approvedSettings.mode === "full"
-					? unclassifiedAction(classifyInput)
-					: classifyAction(classifyInput);
-		if (planBash) {
-			const forbidden = action.risks.filter((risk) =>
-				["sensitive-read", "unknown", "network", "elevation", "destructive", "external-side-effect"].includes(risk),
-			);
-			if (forbidden.length > 0) {
-				throw new Error(`Permission denied for bash in Plan mode: ${forbidden.join(", ")}`);
-			}
-		}
-		const writePolicyBash = this._workspaceWritePolicy === "deny" && input.toolName === "bash";
-		const executionTarget =
-			planBash || writePolicyBash
-				? "sandbox"
-				: this._unattendedExecution
-					? action.toolName === "bash"
-						? "sandbox"
-						: "host"
-					: executionTargetFor(approvedSettings, action);
-		const header = this.sessionManager.getHeader();
-		const authorization =
-			planBash || writePolicyBash
-				? {
-						decision: "allow" as const,
-						reason: writePolicyBash
-							? "Write-denied agents confine Bash to the read-only workspace sandbox"
-							: "Plan Bash is confined to the read-only workspace sandbox",
-						source: "automatic" as const,
-						action,
-						executionTarget: "sandbox" as const,
-					}
-				: this._unattendedExecution
-					? authorizeUnattendedAction({
-							profile: this._unattendedExecution,
-							action,
-							args: structuredClone(approvedArgs),
-							cwd: approvedCwd,
-						})
-					: await this._permissionPolicy.authorize({
-							settings: approvedSettings,
-							action,
-							args: structuredClone(approvedArgs),
-							projectPath: canonicalizeActionPath(this.sessionManager.getCwd(), this.sessionManager.getCwd()),
-							cwd: approvedCwd,
-							workspaceRoots: approvedWorkspaceRoots,
-							allowProjectRules: !header?.agent && !header?.scheduled,
-							executionTarget,
-							signal: input.signal,
-						});
-		if (authorization.decision === "deny") {
-			if (this._unattendedExecution) this._appendPermissionAudit(action, "deny", authorization.reason, "policy");
-			else if (authorization.source === "user") this._appendPermissionAudit(action, "deny", authorization.reason);
-			throw new Error(`Permission denied for ${input.toolName}: ${authorization.reason}`);
-		}
-		if (authorization.source === "user") this._appendPermissionAudit(action, "allow", authorization.reason);
-		const authorized = {
-			action,
-			args: approvedArgs,
-			cwd: approvedCwd,
-			workspaceRoots: approvedWorkspaceRoots,
-			authorizedMode: this._unattendedExecution ? "unattended" : approvedSettings.mode,
-			executionTarget: authorization.executionTarget,
-		} satisfies AuthorizedPermissionAction;
-		this._permissionGrants.set(input.actionId, authorized);
-		return authorized;
-	}
-
-	private _takePermissionAction(actionId: string, toolName: string, args: unknown): AuthorizedPermissionAction {
-		const authorized = this._permissionGrants.get(actionId);
-		this._permissionGrants.delete(actionId);
-		if (!authorized || authorized.action.toolName !== toolName || authorized.action.actionId !== actionId) {
-			throw new Error(`Invalid or expired one-action permission grant for ${toolName}`);
-		}
-		if (!isDeepStrictEqual(args, authorized.args)) {
-			throw new Error(`${toolName} arguments changed after permission approval`);
-		}
-		if (this._cwd !== authorized.cwd) {
-			throw new Error(`${toolName} working directory changed after permission approval`);
-		}
-		if (toolName === "bash" && authorized.action.command !== this._effectiveBashCommand(args)) {
-			throw new Error("Bash effective command changed after permission approval");
-		}
-		if (authorized.authorizedMode === "unattended") {
-			if (!this._unattendedExecution) throw new Error("Unattended execution profile is unavailable");
-			revalidateUnattendedAction({
-				profile: this._unattendedExecution,
-				authorized: authorized.action,
-				toolName,
-				args,
-				cwd: this._cwd,
-			});
-			return authorized;
-		}
-		const currentSettings = this._getEffectivePermissionSettings();
-		if (narrowPermissionMode(authorized.authorizedMode, currentSettings.mode) !== authorized.authorizedMode) {
-			throw new Error(`${toolName} permission mode narrowed before execution; retry requires approval`);
-		}
-		const currentWorkspaceRoots = this.sessionManager.getWorkspaceRoots();
-		if (
-			authorized.authorizedMode !== "full" &&
-			!isDeepStrictEqual(currentWorkspaceRoots, authorized.workspaceRoots)
-		) {
-			throw new Error(`${toolName} workspace roots changed after authorization; retry requires approval`);
-		}
-		if (authorized.authorizedMode !== "full") {
-			const provenance = this._toolProvenance(toolName);
-			if (provenance !== authorized.action.provenance) {
-				throw new Error(`${toolName} provenance changed after authorization; retry requires approval`);
-			}
-			const currentArgs =
-				toolName === "bash"
-					? { ...(structuredClone(args) as Record<string, unknown>), command: this._effectiveBashCommand(args) }
-					: structuredClone(args);
-			const currentAction = classifyAction({
-				actionId,
-				toolName,
-				provenance,
-				args: currentArgs,
-				cwd: authorized.cwd,
-				workspaceRoots: currentWorkspaceRoots,
-				readOnlyRoots: this.resourceLoader.getSkills().skills.map((skill) => skill.baseDir),
-				mcpAnnotations: provenance === "mcp" ? this._mcpManager?.getToolAnnotations(toolName) : undefined,
-				builtinNetworkTargets:
-					provenance === "builtin" && toolName === "web_search"
-						? [WEB_SEARCH_PROVIDER_INFO[this.settingsManager.getWebSearchSettings().provider].networkTarget]
-						: undefined,
-			});
-			if (
-				toolName === "web_search" &&
-				!isDeepStrictEqual(currentAction.networkTargets, authorized.action.networkTargets)
-			) {
-				throw new Error("web_search provider changed after permission approval; retry the search");
-			}
-			if (!isDeepStrictEqual(currentAction, authorized.action)) {
-				throw new Error(`${toolName} classification changed after authorization; retry requires approval`);
-			}
-		}
-		return authorized;
+	private _isBuiltinTool(toolName: string): boolean {
+		return this._toolDefinitions.get(toolName)?.sourceInfo.source.toLowerCase() === "builtin";
 	}
 
 	/**
@@ -1406,7 +1136,7 @@ export class AgentSession {
 		};
 
 		this.agent.afterToolCall = async ({ toolCall, args, result, isError }) => {
-			if (toolCall.name === "read" && this._toolProvenance(toolCall.name) === "builtin") {
+			if (toolCall.name === "read" && this._isBuiltinTool(toolCall.name)) {
 				await this._recordSkillRead(args, isError);
 			}
 			const runner = this._extensionRunner;
@@ -1422,9 +1152,7 @@ export class AgentSession {
 					})
 				: undefined;
 			const skillRefreshMessage =
-				!isError &&
-				this._toolProvenance(toolCall.name) === "builtin" &&
-				(toolCall.name === "write" || toolCall.name === "edit")
+				!isError && this._isBuiltinTool(toolCall.name) && (toolCall.name === "write" || toolCall.name === "edit")
 					? await this._refreshSkillAfterFileMutation(args)
 					: undefined;
 
@@ -1541,74 +1269,51 @@ export class AgentSession {
 				this._markDurableProviderEpoch();
 				this._capturePreparedContextUsage(prepared);
 			},
-			beforeToolExecute: async (context, signal) => {
-				const provenance = this._toolProvenance(context.toolCall.name);
-				const args =
-					typeof context.args === "object" && context.args !== null
-						? (context.args as Record<string, unknown>)
-						: {};
-				const command =
-					provenance === "builtin" && context.toolCall.name === "bash" && typeof args.command === "string"
-						? this._runtimeShellCommandPrefix
-							? `${this._runtimeShellCommandPrefix}\n${args.command}`
-							: args.command
-						: undefined;
-				try {
-					if (!this._isTrustedControlTool(context.toolCall.name)) {
-						await this._authorizePermissionAction({
-							actionId: context.toolCall.id,
-							toolName: context.toolCall.name,
-							provenance,
-							args: context.args,
-							effectiveCommand: command,
-							cwd: this._cwd,
-							signal,
-						});
-					}
-				} catch (error) {
-					this._permissionGrants.delete(context.toolCall.id);
-					this._permissionDenials.set(
-						context.toolCall.id,
-						error instanceof Error ? error.message : `Permission denied for ${context.toolCall.name}`,
-					);
-				}
-				let started = false;
-				try {
-					const turn = this._durableTurn;
-					if (!turn) return;
-					const expectedToolName = this._durablePendingToolCalls.get(context.toolCall.id);
-					if (expectedToolName === undefined) {
-						throw new Error(`Durable tool call is not pending: ${context.toolCall.id}`);
-					}
-					if (expectedToolName !== context.toolCall.name) {
-						throw new Error(`Durable tool call name changed for ${context.toolCall.id}`);
-					}
-					if (this._durableStartedTools.has(context.toolCall.id)) {
-						throw new Error(`Durable tool call already started: ${context.toolCall.id}`);
-					}
-					this.sessionManager.appendRuntimeControl({
-						type: "runtime_tool",
-						turnId: turn.turnId,
-						toolCallId: context.toolCall.id,
+			beforeToolExecute: (context, signal) =>
+				this._toolAuthorization.beforeToolExecute(
+					{
+						actionId: context.toolCall.id,
 						toolName: context.toolCall.name,
-						state: "started",
-					});
-					started = true;
-					this._durableStartedTools.set(context.toolCall.id, context.toolCall.name);
-				} catch (error) {
-					this._permissionGrants.delete(context.toolCall.id);
-					this._permissionDenials.delete(context.toolCall.id);
-					try {
-						this._repairRejectedDurableTool(context, started);
-					} catch (repairError) {
-						throw new AggregateError(
-							[error, repairError],
-							"Failed to mark and structurally repair a rejected tool call",
-						);
-					}
-					throw error;
-				}
-			},
+						args: context.args,
+					},
+					signal,
+					() => {
+						let started = false;
+						try {
+							const turn = this._durableTurn;
+							if (!turn) return;
+							const expectedToolName = this._durablePendingToolCalls.get(context.toolCall.id);
+							if (expectedToolName === undefined) {
+								throw new Error(`Durable tool call is not pending: ${context.toolCall.id}`);
+							}
+							if (expectedToolName !== context.toolCall.name) {
+								throw new Error(`Durable tool call name changed for ${context.toolCall.id}`);
+							}
+							if (this._durableStartedTools.has(context.toolCall.id)) {
+								throw new Error(`Durable tool call already started: ${context.toolCall.id}`);
+							}
+							this.sessionManager.appendRuntimeControl({
+								type: "runtime_tool",
+								turnId: turn.turnId,
+								toolCallId: context.toolCall.id,
+								toolName: context.toolCall.name,
+								state: "started",
+							});
+							started = true;
+							this._durableStartedTools.set(context.toolCall.id, context.toolCall.name);
+						} catch (error) {
+							try {
+								this._repairRejectedDurableTool(context, started);
+							} catch (repairError) {
+								throw new AggregateError(
+									[error, repairError],
+									"Failed to mark and structurally repair a rejected tool call",
+								);
+							}
+							throw error;
+						}
+					},
+				),
 		});
 	}
 
@@ -1843,8 +1548,7 @@ export class AgentSession {
 	/** Internal event implementation. The subscription wrapper below tracks durable message writes. */
 	private async _processAgentEvent(event: AgentEvent): Promise<void> {
 		if (event.type === "tool_execution_end") {
-			this._permissionGrants.delete(event.toolCallId);
-			this._permissionDenials.delete(event.toolCallId);
+			this._toolAuthorization.clear(event.toolCallId);
 		}
 		// When a user message starts, check if it's from either queue and remove it BEFORE emitting
 		// This ensures the UI sees the updated queue state
@@ -2274,6 +1978,7 @@ export class AgentSession {
 				} catch {
 					// Continue invalidating the session even if an abort hook throws.
 				}
+				this._toolAuthorization.dispose();
 
 				this._extensionRunner.invalidate(
 					"This extension ctx is stale after session replacement or reload. Do not use a captured metis or command ctx after ctx.newSession(), ctx.fork(), ctx.switchSession(), or ctx.reload(). For newSession, fork, and switchSession, move post-replacement work into withSession and use the ctx passed to withSession. For reload, do not use the old ctx after await ctx.reload().",
@@ -3946,6 +3651,7 @@ export class AgentSession {
 		} catch (error) {
 			if (!errors.includes(error)) errors.push(error);
 		}
+		this._toolAuthorization.clear();
 		if (errors.length === 1) throw errors[0];
 		if (errors.length > 1) throw new AggregateError(errors, "Failed to abort and persist the active agent turn");
 	}
@@ -3962,7 +3668,11 @@ export class AgentSession {
 		if (this._durableTurn) this._stopCurrentRunAfterAbort = true;
 		this.abortRetry();
 		this.agent.abort();
-		await this.waitForIdle();
+		try {
+			await this.waitForIdle();
+		} finally {
+			this._toolAuthorization.clear();
+		}
 	}
 
 	async waitForIdle(): Promise<void> {
@@ -5024,16 +4734,16 @@ export class AgentSession {
 
 		const toolRegistry = new Map(
 			wrappedBuiltInTools.map((tool) => {
-				const guarded = this._withPermissionGuard(tool);
+				const guarded = this._toolAuthorization.guard(tool);
 				return [guarded.name, guarded] as const;
 			}),
 		);
 		for (const tool of wrappedExtensionTools as AgentTool[]) {
-			const guarded = this._withPermissionGuard(tool);
+			const guarded = this._toolAuthorization.guard(tool);
 			toolRegistry.set(guarded.name, guarded);
 		}
 		for (const tool of [...wrappedDirectMcpTools, ...wrappedDeferredMcpTools]) {
-			const guarded = this._withPermissionGuard(tool);
+			const guarded = this._toolAuthorization.guard(tool);
 			toolRegistry.set(guarded.name, guarded);
 		}
 		for (const trustedName of ["ask_user", "submit_plan"] as const) {
@@ -5042,7 +4752,7 @@ export class AgentSession {
 			const sourceInfo = createSyntheticSourceInfo(`<trusted:${trustedName}>`, { source: "trusted" });
 			definitionRegistry.set(trustedName, { definition, sourceInfo });
 			const wrapped = wrapRegisteredTools([{ definition, sourceInfo }], runner)[0] as AgentTool;
-			toolRegistry.set(trustedName, this._withPermissionGuard(wrapped));
+			toolRegistry.set(trustedName, this._toolAuthorization.guard(wrapped));
 		}
 		this._toolRegistry = toolRegistry;
 
