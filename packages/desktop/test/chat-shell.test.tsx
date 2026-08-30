@@ -115,9 +115,18 @@ function snapshot(summary: SessionSummary): SessionSnapshot {
 function button(container: HTMLElement, label: string): HTMLButtonElement {
 	const matches = (root: ParentNode) => [...root.querySelectorAll<HTMLButtonElement>("button")]
 		.find((candidate) => candidate.getAttribute("aria-label") === label || candidate.textContent?.trim() === label);
-	const match = matches(container) ?? matches(document.querySelector(".session-action-menu, .project-action-menu") ?? document.createDocumentFragment());
+	const portalMatch = [...document.querySelectorAll(".session-action-menu, .project-action-menu, .modal-backdrop")]
+		.map((root) => matches(root))
+		.find((candidate) => candidate !== undefined);
+	const match = matches(container) ?? portalMatch;
 	if (!match) throw new Error(`Missing button: ${label}`);
 	return match;
+}
+
+function projectDialog(): HTMLElement {
+	const dialog = document.querySelector<HTMLElement>(".project-dialog");
+	if (!dialog) throw new Error("Missing project dialog");
+	return dialog;
 }
 
 function menuOption(container: HTMLElement, label: string): HTMLButtonElement {
@@ -1374,17 +1383,17 @@ describe("Chat desktop shell", () => {
 		await act(async () => button(chatGroup, "Project actions").click());
 		await act(async () => button(chatGroup, "Rename").click());
 		await flush();
-		const input = container.querySelector<HTMLInputElement>("#project-rename-input")!;
+		const input = document.querySelector<HTMLInputElement>("#project-rename-input")!;
 		expect(document.activeElement).toBe(input);
 		await act(async () => input.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
 		await flush();
-		expect(container.querySelector(".project-dialog")).toBeNull();
+		expect(document.querySelector(".project-dialog")).toBeNull();
 		expect(document.activeElement?.textContent?.trim()).toBe("Rename");
 		await act(async () => button(chatGroup, "Rename").click());
 		await flush();
-		const reopenedInput = container.querySelector<HTMLInputElement>("#project-rename-input")!;
+		const reopenedInput = document.querySelector<HTMLInputElement>("#project-rename-input")!;
 		await act(async () => changeInput(reopenedInput, "  Chat alias  "));
-		await act(async () => button(container.querySelector<HTMLElement>(".project-dialog")!, "Rename").click());
+		await act(async () => button(projectDialog(), "Rename").click());
 		await flush();
 		chatGroup = projectRow(container, "/work/shared");
 		expect(chatGroup.querySelector(".project-heading span")?.textContent).toBe("Chat alias");
@@ -1456,11 +1465,11 @@ describe("Chat desktop shell", () => {
 		await act(async () => button(group, "Project actions").click());
 		await act(async () => button(group, "Delete").click());
 		await flush();
-		expect(container.querySelector(".project-dialog")?.textContent).toContain("2 Chat sessions");
-		expect(container.querySelector(".project-dialog")?.textContent).toContain("/canonical/shared");
-		expect(container.querySelector(".project-dialog")?.textContent).toContain("Code project and its memory are unchanged");
-		expect(container.querySelector(".project-dialog")?.textContent).toContain("source folder and its files are unchanged");
-		expect(container.querySelector(".project-dialog")?.textContent).toContain("Schedules are not deleted automatically");
+		expect(projectDialog().textContent).toContain("2 Chat sessions");
+		expect(projectDialog().textContent).toContain("/canonical/shared");
+		expect(projectDialog().textContent).toContain("Code project and its memory are unchanged");
+		expect(projectDialog().textContent).toContain("source folder and its files are unchanged");
+		expect(projectDialog().textContent).toContain("Schedules are not deleted automatically");
 		expect(button(container, "Move to Trash").disabled).toBe(true);
 		await act(async () => button(container, "Cancel").click());
 		await act(async () => button(group, "Delete").click());
@@ -1507,7 +1516,7 @@ describe("Chat desktop shell", () => {
 		await flush();
 		await act(async () => button(container, "Move to Trash").click());
 		await flush();
-		expect(container.querySelector(".project-dialog")?.textContent).toContain("delete response was lost");
+		expect(projectDialog().textContent).toContain("delete response was lost");
 		expect(container.textContent).toContain("Keep me");
 		expect(localStorage.getItem("metis.activeSessionId.chat")).toBe(chat.sessionId);
 		await act(async () => button(container, "Retry").click());
@@ -1551,12 +1560,12 @@ describe("Chat desktop shell", () => {
 		const groupB = projectRow(container, "/work/b");
 		await act(async () => button(groupA, "Project actions").click());
 		await act(async () => button(groupA, "Delete").click());
-		expect(container.querySelector(".project-dialog")?.textContent).toContain("Checking project data");
+		expect(projectDialog().textContent).toContain("Checking project data");
 		await act(async () => button(container, "Cancel").click());
 		await act(async () => button(groupB, "Project actions").click());
 		await act(async () => button(groupB, "Delete").click());
 		await flush();
-		expect(container.querySelector(".project-dialog")?.textContent).toContain("/canonical/b");
+		expect(projectDialog().textContent).toContain("/canonical/b");
 		await act(async () => resolveA({
 			ok: true,
 			result: {
@@ -1568,8 +1577,8 @@ describe("Chat desktop shell", () => {
 			},
 		}));
 		await flush();
-		expect(container.querySelector(".project-dialog")?.textContent).toContain("/canonical/b");
-		expect(container.querySelector(".project-dialog")?.textContent).not.toContain("/canonical/a");
+		expect(projectDialog().textContent).toContain("/canonical/b");
+		expect(projectDialog().textContent).not.toContain("/canonical/a");
 		await act(async () => root.unmount());
 	});
 

@@ -3622,6 +3622,15 @@ test("packaged browser sidebar loads real pages and persists its isolated profil
 		await resizer.press("ArrowRight");
 		await expect(page.getByRole("tab", { name: "First fixture page", exact: true })).toBeVisible();
 
+		phase = "covering the native page with a global modal";
+		await page.getByRole("button", { name: "Metis User", exact: true }).click();
+		await page.getByRole("menuitem", { name: "Settings", exact: true }).click();
+		const settingsDialog = page.getByRole("dialog", { name: "Settings", exact: true });
+		await expect(settingsDialog).toBeVisible();
+		await settingsDialog.getByRole("button", { name: "Back to app", exact: true }).click();
+		await expect(settingsDialog).toBeHidden();
+		await expect(embeddedPage.locator("main")).toHaveText("first page");
+
 		await address.fill(`${fixtureOrigin}/set-cookie`);
 		await address.press("Enter");
 		await expect.poll(() =>

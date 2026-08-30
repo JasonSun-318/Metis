@@ -36,6 +36,8 @@ import type {
 	DesktopHistoryEntry,
 	MetisDesktopApi,
 } from "../../shared/desktop-api.ts";
+import { browserProfileLabel, formatBrowserBytes } from "../browser-display.ts";
+import { useModalPresence } from "../modal-presence.ts";
 import { BrowserImportDialog } from "./BrowserImportDialog.tsx";
 import { MenuSelect } from "./MenuSelect.tsx";
 
@@ -58,18 +60,6 @@ interface BrowserPanelProps {
 	readonly visible: boolean;
 }
 
-function formatBytes(bytes: number): string {
-	const units = ["B", "KB", "MB", "GB", "TB"] as const;
-	let value = bytes;
-	let index = 0;
-	while (value >= 1024 && index < units.length - 1) {
-		value /= 1024;
-		index += 1;
-	}
-	const rounded = index === 0 ? value : value >= 100 ? Math.round(value) : Math.round(value * 10) / 10;
-	return `${rounded} ${units[index]}`;
-}
-
 function formatHistoryTime(visitedAt: number): string {
 	return new Date(visitedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
@@ -84,8 +74,8 @@ function BrowserDownloadRow({
 	const { t } = useTranslation();
 	const percent = download.totalBytes > 0 ? Math.min(100, Math.floor((download.receivedBytes / download.totalBytes) * 100)) : null;
 	const size = download.totalBytes > 0
-		? `${formatBytes(download.receivedBytes)} / ${formatBytes(download.totalBytes)}`
-		: formatBytes(download.receivedBytes);
+		? `${formatBrowserBytes(download.receivedBytes)} / ${formatBrowserBytes(download.totalBytes)}`
+		: formatBrowserBytes(download.receivedBytes);
 	const stateLabel =
 		download.state === "progressing"
 			? t("Downloading")
@@ -147,13 +137,6 @@ const emptyState = (browserId: string, profileId: string): DesktopBrowserState =
 	zoomPercent: 100,
 });
 
-const BROWSER_SOURCE_NAMES: Record<DesktopBrowserSourceId, string> = {
-	chrome: "Google Chrome",
-	edge: "Microsoft Edge",
-	brave: "Brave",
-	chromium: "Chromium",
-};
-
 function BrowserClearDialog({ busy, onCancel, onConfirm }: {
 	readonly busy: boolean;
 	readonly onCancel: () => void;
@@ -192,11 +175,11 @@ function BrowserClearDialog({ busy, onCancel, onConfirm }: {
 
 export function BrowserPanel({ api, sessionId, browserId, controlState, handoffReason, onError, onOpenProfile, onProfileImported, onState, profile, profiles, visible }: BrowserPanelProps) {
 	const { t } = useTranslation();
+	const modalPresent = useModalPresence();
 	const availableProfiles = profiles ?? [profile];
 	const currentProfile = availableProfiles.find((candidate) => candidate.profileId === profile.profileId) ?? profile;
-	const profileLabel = (candidate: BrowserProfileChoice) => candidate.sourceId
-		? `${BROWSER_SOURCE_NAMES[candidate.sourceId]} — ${candidate.name}`
-		: `Metis — ${t("Default profile")}`;
+	const profileLabel = (candidate: BrowserProfileChoice) =>
+		browserProfileLabel({ name: candidate.name, sourceId: candidate.sourceId ?? null }, t("Default profile"));
 	const [state, setState] = useState(() => emptyState(browserId, profile.profileId));
 	const [address, setAddress] = useState("");
 	const [status, setStatus] = useState<string | null>(null);
@@ -663,6 +646,7 @@ export function BrowserPanel({ api, sessionId, browserId, controlState, handoffR
 	useLayoutEffect(() => {
 		shouldPresentRef.current =
 			visible
+			&& !modalPresent
 			&& state.url !== ""
 			&& controlState !== "agent"
 			&& !moreOpen
@@ -672,7 +656,7 @@ export function BrowserPanel({ api, sessionId, browserId, controlState, handoffR
 			&& !importOpen
 			&& status === null;
 		presentRef.current?.();
-	}, [clearConfirmOpen, controlState, downloadsOpen, historyOpen, importOpen, moreOpen, state.url, status, visible]);
+	}, [clearConfirmOpen, controlState, downloadsOpen, historyOpen, importOpen, modalPresent, moreOpen, state.url, status, visible]);
 
 	const takeControl = () => {
 		if (takeoverBusyRef.current) return;

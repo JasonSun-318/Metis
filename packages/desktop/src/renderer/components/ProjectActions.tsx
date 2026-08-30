@@ -331,7 +331,7 @@ export function ProjectActions({
 					</button>
 				</div>
 			), document.body)}
-			{dialog === "rename" && (
+			{dialog === "rename" && createPortal((
 				<DialogFrame
 					cancellable
 					descriptionId="project-rename-description"
@@ -356,8 +356,8 @@ export function ProjectActions({
 						</div>
 					</form>
 				</DialogFrame>
-			)}
-			{dialog === "delete" && (
+			), document.body)}
+			{dialog === "delete" && createPortal((
 				<DialogFrame
 					cancellable={deleteState.status !== "deleting"}
 					descriptionId="project-delete-description"
@@ -413,7 +413,7 @@ export function ProjectActions({
 						)}
 					</div>
 				</DialogFrame>
-			)}
+			), document.body)}
 		</div>
 	);
 }

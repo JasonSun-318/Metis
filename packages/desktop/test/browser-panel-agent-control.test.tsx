@@ -93,6 +93,44 @@ afterEach(async () => {
 });
 
 describe("BrowserPanel agent control", () => {
+	it("hides the native page for every global modal and restores it afterward", async () => {
+		const api = browserApi();
+		const { render } = mount(api);
+		await render("idle");
+		await vi.waitFor(() =>
+			expect(api.controlBrowser).toHaveBeenCalledWith(expect.objectContaining({
+				type: "present",
+				visible: true,
+			})),
+		);
+
+		vi.mocked(api.controlBrowser).mockClear();
+		const modal = document.createElement("dialog");
+		modal.setAttribute("open", "");
+		await act(async () => {
+			document.body.append(modal);
+			await Promise.resolve();
+		});
+		await vi.waitFor(() =>
+			expect(api.controlBrowser).toHaveBeenCalledWith(expect.objectContaining({
+				type: "present",
+				visible: false,
+			})),
+		);
+
+		vi.mocked(api.controlBrowser).mockClear();
+		await act(async () => {
+			modal.remove();
+			await Promise.resolve();
+		});
+		await vi.waitFor(() =>
+			expect(api.controlBrowser).toHaveBeenCalledWith(expect.objectContaining({
+				type: "present",
+				visible: true,
+			})),
+		);
+	});
+
 	it("shows a safe activity bar, hides native presentation, and requests takeover once", async () => {
 		let resolveTakeover!: () => void;
 		const takeBrowserControl = vi.fn().mockReturnValue(new Promise<void>((resolve) => {
