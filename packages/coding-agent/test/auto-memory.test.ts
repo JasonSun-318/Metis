@@ -22,6 +22,7 @@ import {
 	getMemorySqlitePath,
 	initializeAutoMemory,
 	loadAutoMemory,
+	prepareAutoMemoryWorkspace,
 } from "../src/core/auto-memory.ts";
 import { memoryProjectIdentity } from "../src/core/memory/memory-project.ts";
 import { openMemoryStore } from "../src/core/memory/memory-store.ts";
@@ -163,6 +164,24 @@ describe("auto memory", () => {
 		store = openMemoryStore(getMemorySqlitePath(agentDir));
 		expect(store.listHealth()).toContainEqual(expect.objectContaining({ operation: "extract", status: "running" }));
 		store.close();
+	});
+
+	it("prepares process and exact project memory through one workspace entrypoint", async () => {
+		const root = makeTemp();
+		const agentDir = join(root, "agent");
+		const cwd = join(root, "project");
+		mkdirSync(cwd, { recursive: true });
+
+		const identity = await prepareAutoMemoryWorkspace(agentDir, cwd);
+		expect(identity).toEqual(memoryProjectIdentity(cwd));
+		const store = openMemoryStore(getMemorySqlitePath(agentDir));
+		try {
+			expect(store.resolveProject(identity)).toMatchObject({ projectKey: identity.projectKey });
+			expect(store.listHealth()).toContainEqual(expect.objectContaining({ operation: "migration", status: "ok" }));
+		} finally {
+			store.close();
+		}
+		expect(existsSync(getAutoMemoryPaths(agentDir, cwd).project.indexPath)).toBe(true);
 	});
 
 	it.skipIf(process.platform === "win32")("rejects a symlinked projects directory and can retry", async () => {

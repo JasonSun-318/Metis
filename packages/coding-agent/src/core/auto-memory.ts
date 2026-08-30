@@ -2,14 +2,15 @@ import { chmodSync } from "node:fs";
 import { join } from "node:path";
 import { canonicalizePathForCreation, resolvePath } from "../utils/paths.ts";
 import { ensureRealDirectoryDurablySync, readSingleLinkFilePrefixSync } from "./durable-file.ts";
-import { ingestGlobalMarkdownOnce } from "./memory/memory-ingest.ts";
-import { memoryProjectIdentity } from "./memory/memory-project.ts";
-import { writeGlobalProjection } from "./memory/memory-projection.ts";
-import { openMemoryStore } from "./memory/memory-store.ts";
+import { ingestExactProjectProjectionOnce, ingestGlobalMarkdownOnce } from "./memory/memory-ingest.ts";
+import { type MemoryProjectIdentity, memoryProjectIdentity } from "./memory/memory-project.ts";
+import { writeGlobalProjection, writeProjection } from "./memory/memory-projection.ts";
+import { openMemoryStore, type ResolveMemoryProjectResult } from "./memory/memory-store.ts";
 
 export const AUTO_MEMORY_MAX_LINES = 200;
 export const AUTO_MEMORY_MAX_BYTES = 25 * 1024;
 const initializations = new Map<string, Promise<void>>();
+const workspacePreparations = new Map<string, Promise<MemoryProjectIdentity>>();
 
 export interface AutoMemoryIndex {
 	directory: string;
@@ -100,16 +101,60 @@ export function initializeAutoMemory(agentDir: string): Promise<void> {
 	return initialization;
 }
 
-/** @deprecated Compatibility entrypoint without startup recovery. */
+/** Prepare process-wide memory resources and the exact project projection for one session workspace. */
+export function prepareAutoMemoryWorkspace(agentDir: string, cwd: string): Promise<MemoryProjectIdentity> {
+	const identity = memoryProjectIdentity(cwd);
+	const key = `${getAutoMemoryRoot(agentDir)}:${identity.projectKey}`;
+	const existing = workspacePreparations.get(key);
+	if (existing) return existing;
+
+	const preparation = initializeAutoMemory(agentDir).then(async () => {
+		let migration: ResolveMemoryProjectResult;
+		const migrationStore = openMemoryStore(getMemorySqlitePath(agentDir));
+		try {
+			try {
+				migration = migrationStore.resolveProject(identity);
+			} catch (error) {
+				migrationStore.recordHealth({
+					operation: "migration",
+					status: "error",
+					updatedAt: new Date().toISOString(),
+					reason: error instanceof Error ? error.message : String(error),
+				});
+				throw error;
+			}
+		} finally {
+			migrationStore.close();
+		}
+
+		await ingestExactProjectProjectionOnce(agentDir, identity.projectKey);
+		const projectionStore = openMemoryStore(getMemorySqlitePath(agentDir));
+		try {
+			await writeProjection(agentDir, identity.projectKey, projectionStore);
+			projectionStore.recordHealth({
+				operation: "migration",
+				status: migration.legacyCollision ? "error" : "ok",
+				updatedAt: new Date().toISOString(),
+				reason: migration.legacyCollision
+					? "Legacy project key was already claimed; exact project started without legacy facts"
+					: null,
+			});
+		} finally {
+			projectionStore.close();
+		}
+		return identity;
+	});
+	workspacePreparations.set(key, preparation);
+	const clear = () => {
+		if (workspacePreparations.get(key) === preparation) workspacePreparations.delete(key);
+	};
+	void preparation.then(clear, clear);
+	return preparation;
+}
+
+/** @deprecated Compatibility entrypoint for process-wide memory preparation. */
 export async function ensureModeScopedMemoryLayout(agentDir: string): Promise<void> {
-	await ensureAutoMemoryLayout(agentDir);
-	await ingestGlobalMarkdownOnce(agentDir);
-	const store = openMemoryStore(getMemorySqlitePath(agentDir));
-	try {
-		await writeGlobalProjection(agentDir, store);
-	} finally {
-		store.close();
-	}
+	await initializeAutoMemory(agentDir);
 }
 
 function emptyIndex(directory: string, indexPath: string): AutoMemoryIndex {

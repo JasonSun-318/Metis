@@ -7,14 +7,10 @@ import { type AgentMode, DEFAULT_AGENT_MODE } from "./agent-mode.ts";
 import { AgentSession, type AgentSessionConfig } from "./agent-session.ts";
 import { formatNoModelsAvailableMessage } from "./auth-guidance.ts";
 import { AuthStorage } from "./auth-storage.ts";
-import { getMemorySqlitePath, initializeAutoMemory } from "./auto-memory.ts";
+import { prepareAutoMemoryWorkspace } from "./auto-memory.ts";
 import { DEFAULT_THINKING_LEVEL } from "./defaults.ts";
 import type { ExtensionRunner, LoadExtensionsResult, SessionStartEvent, ToolDefinition } from "./extensions/index.ts";
 import { McpManager } from "./mcp/index.ts";
-import { ingestExactProjectProjectionOnce } from "./memory/memory-ingest.ts";
-import { memoryProjectIdentity } from "./memory/memory-project.ts";
-import { writeProjection } from "./memory/memory-projection.ts";
-import { openMemoryStore, type ResolveMemoryProjectResult } from "./memory/memory-store.ts";
 import { convertToLlm } from "./messages.ts";
 import { ModelRegistry } from "./model-registry.ts";
 import { findInitialModel } from "./model-resolver.ts";
@@ -257,7 +253,6 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		throw new Error("thinkingLevel and thinkingSelection cannot both be supplied");
 	}
 	const agentDir = options.agentDir ? resolvePath(options.agentDir) : getDefaultAgentDir();
-	await initializeAutoMemory(agentDir);
 	const suppliedSessionManager = options.sessionManager;
 	const requestedPermissionMode =
 		options.permissionMode === undefined ? undefined : normalizePermissionMode(options.permissionMode);
@@ -342,41 +337,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 	let completed = false;
 
 	try {
-		const memoryIdentity = memoryProjectIdentity(cwd);
-		let memoryMigration: ResolveMemoryProjectResult;
-		{
-			const store = openMemoryStore(getMemorySqlitePath(agentDir));
-			try {
-				memoryMigration = store.resolveProject(memoryIdentity);
-			} catch (error) {
-				store.recordHealth({
-					operation: "migration",
-					status: "error",
-					updatedAt: new Date().toISOString(),
-					reason: error instanceof Error ? error.message : String(error),
-				});
-				throw error;
-			} finally {
-				store.close();
-			}
-		}
-		await ingestExactProjectProjectionOnce(agentDir, memoryIdentity.projectKey);
-		{
-			const store = openMemoryStore(getMemorySqlitePath(agentDir));
-			try {
-				await writeProjection(agentDir, memoryIdentity.projectKey, store);
-				store.recordHealth({
-					operation: "migration",
-					status: memoryMigration.legacyCollision ? "error" : "ok",
-					updatedAt: new Date().toISOString(),
-					reason: memoryMigration.legacyCollision
-						? "Legacy project key was already claimed; exact project started without legacy facts"
-						: null,
-				});
-			} finally {
-				store.close();
-			}
-		}
+		await prepareAutoMemoryWorkspace(agentDir, cwd);
 		if (!mcpDisabled) {
 			mcpManager ??= await McpManager.create({
 				settingsManager,
