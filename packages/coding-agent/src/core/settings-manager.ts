@@ -3,6 +3,7 @@ import { randomUUID } from "crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { dirname, join } from "path";
 import lockfile from "proper-lockfile";
+import { isDeepStrictEqual } from "util";
 import { getAgentDir, getMetisEnv, getProjectConfigDir } from "../config.ts";
 import { normalizePath, resolvePath } from "../utils/paths.ts";
 import { DEFAULT_HTTP_IDLE_TIMEOUT_MS, parseHttpIdleTimeoutMs } from "./http-dispatcher.ts";
@@ -87,6 +88,8 @@ export interface McpCommonServerSettings {
 	toolTimeoutSec?: number;
 	enabledTools?: string[];
 	disabledTools?: string[];
+	/** Internal, non-secret pointer to the active versioned credential. */
+	credentialVersion?: string;
 }
 
 export interface McpStdioServerSettings extends McpCommonServerSettings {
@@ -235,6 +238,8 @@ export interface SettingsManagerCreateOptions {
 
 export interface SettingsStorage {
 	withLock(scope: SettingsScope, fn: (current: string | undefined) => string | undefined): void;
+	/** Lock before reading, including when the settings file does not exist yet. */
+	withWriteLock?(scope: SettingsScope, fn: (current: string | undefined) => string | undefined): void;
 }
 
 export interface SettingsError {
@@ -309,6 +314,21 @@ export class FileSettingsStorage implements SettingsStorage {
 			}
 		}
 	}
+
+	withWriteLock(scope: SettingsScope, fn: (current: string | undefined) => string | undefined): void {
+		const path = scope === "global" ? this.globalSettingsPath : this.projectSettingsPath;
+		const dir = dirname(path);
+		if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+
+		const release = this.acquireLockSyncWithRetry(path);
+		try {
+			const current = existsSync(path) ? readFileSync(path, "utf-8") : undefined;
+			const next = fn(current);
+			if (next !== undefined) writeFileSync(path, next, "utf-8");
+		} finally {
+			release();
+		}
+	}
 }
 
 export class InMemorySettingsStorage implements SettingsStorage {
@@ -325,6 +345,10 @@ export class InMemorySettingsStorage implements SettingsStorage {
 				this.project = next;
 			}
 		}
+	}
+
+	withWriteLock(scope: SettingsScope, fn: (current: string | undefined) => string | undefined): void {
+		this.withLock(scope, fn);
 	}
 }
 
@@ -577,6 +601,49 @@ export class SettingsManager {
 		apply(projectSettings);
 		for (const name of changes.keys()) this.markProjectModified("mcpServers", name);
 		this.saveProjectSettings(projectSettings);
+	}
+
+	/**
+	 * Atomically compare and replace a set of MCP definitions.
+	 *
+	 * The comparison and write happen under the same storage lock, so another
+	 * process cannot commit a stale MCP edit between validation and persistence.
+	 */
+	async commitMcpServerChanges(
+		scope: SettingsScope,
+		expected: ReadonlyMap<string, McpServerSettings | undefined>,
+		changes: ReadonlyMap<string, McpServerSettings | undefined>,
+	): Promise<boolean> {
+		if (changes.size === 0) return true;
+		if (scope === "project") this.assertProjectTrustedForWrite();
+		for (const name of new Set([...expected.keys(), ...changes.keys()])) {
+			if (!name.trim()) throw new Error("MCP server name must not be empty");
+		}
+
+		await this.flushOrThrow();
+		let committed = false;
+		const withWriteLock = this.storage.withWriteLock?.bind(this.storage) ?? this.storage.withLock.bind(this.storage);
+		withWriteLock(scope, (current) => {
+			const fileSettings = current
+				? SettingsManager.migrateSettings(JSON.parse(current) as Record<string, unknown>)
+				: {};
+			const servers = fileSettings.mcpServers ?? {};
+			for (const [name, definition] of expected) {
+				if (!isDeepStrictEqual(servers[name], definition)) return undefined;
+			}
+
+			const nextServers = { ...servers };
+			for (const [name, definition] of changes) {
+				if (definition) nextServers[name] = structuredClone(definition);
+				else delete nextServers[name];
+			}
+			fileSettings.mcpServers = nextServers;
+			committed = true;
+			return JSON.stringify(fileSettings, null, 2);
+		});
+
+		await this.reload();
+		return committed;
 	}
 
 	setMcpServer(scope: SettingsScope, name: string, server: McpServerSettings): void {

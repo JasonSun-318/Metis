@@ -72,6 +72,29 @@ export function mcpCredentialKey(identity: McpCredentialIdentity): string {
 	return `mcp:v2:project:${projectId}:${name}`;
 }
 
+function mcpCredentialIdentityPath(identity: McpCredentialIdentity): string {
+	const name = encodeURIComponent(identity.name);
+	if (identity.scope === "user") return `user:${name}`;
+	const canonicalCwd = canonicalizePathForCreation(identity.cwd);
+	const projectId = createHash("sha256")
+		.update(process.platform === "win32" ? canonicalCwd.toLowerCase() : canonicalCwd)
+		.digest("hex");
+	return `project:${projectId}:${name}`;
+}
+
+export function mcpVersionedCredentialPrefix(identity: McpCredentialIdentity): string {
+	return `mcp:v3:${mcpCredentialIdentityPath(identity)}:`;
+}
+
+export function mcpVersionedCredentialKey(
+	identity: McpCredentialIdentity,
+	serverFingerprint: string,
+	credentialVersion: string,
+): string {
+	if (!serverFingerprint || !credentialVersion) throw new Error("MCP credential version must not be empty");
+	return `${mcpVersionedCredentialPrefix(identity)}${serverFingerprint}:${encodeURIComponent(credentialVersion)}`;
+}
+
 export type AuthCredential = ApiKeyCredential | OAuthCredential | LegacyMcpOAuthCredential | McpSecretCredential;
 
 export type AuthStorageData = Record<string, AuthCredential>;

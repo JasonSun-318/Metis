@@ -9,7 +9,12 @@ import type {
 import { type AuthStorage, legacyMcpCredentialKey, type McpSecretCredential } from "../auth-storage.ts";
 import type { SettingsManager } from "../settings-manager.ts";
 import { type McpConnectionState, McpServerClient } from "./client.ts";
-import { type ResolvedMcpServerConfig, type ResolvedMcpSettings, resolveMcpSettings } from "./config.ts";
+import {
+	mcpServerFingerprint,
+	type ResolvedMcpServerConfig,
+	type ResolvedMcpSettings,
+	resolveMcpSettings,
+} from "./config.ts";
 
 const MAX_TOOL_NAME = 64;
 
@@ -222,14 +227,6 @@ function boundedJson(value: unknown, label: string): string {
 	const json = JSON.stringify(value);
 	if (Buffer.byteLength(json, "utf8") > 256 * 1024) throw new Error(`MCP ${label} is too large to display`);
 	return json;
-}
-
-export function mcpServerFingerprint(config: ResolvedMcpServerConfig): string {
-	const identity =
-		config.transport === "http"
-			? ["http", config.url?.href]
-			: ["stdio", config.command, config.args ?? [], config.cwd];
-	return createHash("sha256").update(JSON.stringify(identity)).digest("hex");
 }
 
 export class McpManager {

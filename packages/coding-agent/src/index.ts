@@ -56,6 +56,8 @@ export {
 	type McpCredentialIdentity,
 	type McpSecretCredential,
 	mcpCredentialKey,
+	mcpVersionedCredentialKey,
+	mcpVersionedCredentialPrefix,
 	type OAuthCredential,
 } from "./core/auth-storage.ts";
 export {
@@ -268,9 +270,15 @@ export {
 	type McpCatalogItemDetail,
 	type McpCatalogItemKind,
 	type McpCatalogSummary,
+	type McpConfigurationChange,
+	McpConfigurationConflictError,
+	type McpConfigurationMutation,
+	type McpConfigurationScope,
 	type McpConnectionState,
+	type McpCredentialChange,
 	type McpServerStatus,
 	type McpToolRecord,
+	mcpConfigurationRevision,
 	mcpServerFingerprint,
 	resolveMcpServerSettings,
 } from "./core/mcp/index.ts";

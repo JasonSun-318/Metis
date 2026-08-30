@@ -1,5 +1,6 @@
+import { createHash } from "node:crypto";
 import { resolvePath } from "../../utils/paths.ts";
-import { type McpCredentialIdentity, mcpCredentialKey } from "../auth-storage.ts";
+import { type McpCredentialIdentity, mcpCredentialKey, mcpVersionedCredentialKey } from "../auth-storage.ts";
 import type {
 	McpHttpServerSettings,
 	McpServerSettings,
@@ -12,6 +13,7 @@ export interface ResolvedMcpServerConfig {
 	description?: string;
 	credentialIdentity: McpCredentialIdentity;
 	credentialKey: string;
+	credentialVersion?: string;
 	transport: "stdio" | "http";
 	enabled: boolean;
 	required: boolean;
@@ -32,6 +34,25 @@ export interface ResolvedMcpServerConfig {
 
 export interface ResolvedMcpSettings {
 	servers: ResolvedMcpServerConfig[];
+}
+
+type McpFingerprintSource = Pick<ResolvedMcpServerConfig, "transport" | "url" | "command" | "args" | "cwd">;
+
+export function mcpServerFingerprint(config: McpFingerprintSource): string {
+	const identity =
+		config.transport === "http"
+			? ["http", config.url?.href]
+			: ["stdio", config.command, config.args ?? [], config.cwd];
+	return createHash("sha256").update(JSON.stringify(identity)).digest("hex");
+}
+
+function withCredentialKey(config: Omit<ResolvedMcpServerConfig, "credentialKey">): ResolvedMcpServerConfig {
+	return {
+		...config,
+		credentialKey: config.credentialVersion
+			? mcpVersionedCredentialKey(config.credentialIdentity, mcpServerFingerprint(config), config.credentialVersion)
+			: mcpCredentialKey(config.credentialIdentity),
+	};
 }
 
 function positiveSeconds(value: unknown, key: string, fallback: number): number {
@@ -79,6 +100,14 @@ function optionalDescription(value: unknown): string | undefined {
 	return description;
 }
 
+function optionalCredentialVersion(value: unknown): string | undefined {
+	if (value === undefined) return undefined;
+	if (typeof value !== "string" || !value || value.length > 128) {
+		throw new Error("Invalid MCP credential version");
+	}
+	return value;
+}
+
 export function resolveMcpServerSettings(
 	name: string,
 	server: McpServerSettings,
@@ -97,11 +126,12 @@ export function resolveMcpServerSettings(
 		throw new Error(`MCP server "${name}" must define exactly one of command or url`);
 	}
 
+	const credentialVersion = optionalCredentialVersion(server.credentialVersion);
 	const common = {
 		name,
 		description: optionalDescription(server.description),
 		credentialIdentity,
-		credentialKey: mcpCredentialKey(credentialIdentity),
+		...(credentialVersion ? { credentialVersion } : {}),
 		enabled: optionalBoolean(server.enabled, "enabled", true),
 		required: optionalBoolean(server.required, "required", false),
 		startupTimeoutMs: positiveSeconds(server.startupTimeoutSec, "startupTimeoutSec", 10),
@@ -124,14 +154,14 @@ export function resolveMcpServerSettings(
 		const forwarded = Object.fromEntries(
 			envVars.flatMap((key) => (environment[key] === undefined ? [] : ([[key, environment[key]]] as const))),
 		);
-		return {
+		return withCredentialKey({
 			...common,
 			transport: "stdio",
 			command: stdio.command,
 			args,
 			env: { ...forwarded, ...literalEnv },
 			cwd: stdio.cwd ? resolvePath(stdio.cwd, cwd) : resolvePath(cwd),
-		};
+		});
 	}
 
 	const http = server as McpHttpServerSettings;
@@ -162,7 +192,7 @@ export function resolveMcpServerSettings(
 			environment[envName] === undefined ? [] : ([[header, environment[envName]]] as const),
 		),
 	);
-	return {
+	return withCredentialKey({
 		...common,
 		transport: "http",
 		url,
@@ -170,7 +200,7 @@ export function resolveMcpServerSettings(
 		bearerTokenEnvVar: http.bearerTokenEnvVar,
 		httpHeaders,
 		httpHeaderEnv: envHttpHeaders,
-	};
+	});
 }
 
 export function resolveMcpSettings(
