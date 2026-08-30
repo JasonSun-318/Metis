@@ -12,14 +12,16 @@ import {
 	type McpSecretCredential,
 	mcpCredentialKey,
 } from "../auth-storage.ts";
-import type { SettingsManager } from "../settings-manager.ts";
+import type { McpServerSettings, SettingsManager } from "../settings-manager.ts";
 import { type McpConnectionState, McpServerClient } from "./client.ts";
 import {
 	mcpServerFingerprint,
 	type ResolvedMcpServerConfig,
 	type ResolvedMcpSettings,
+	resolveMcpServerDefinitions,
 	resolveMcpSettings,
 } from "./config.ts";
+import type { McpConfigurationCoordinator } from "./configuration.ts";
 
 const MAX_TOOL_NAME = 64;
 
@@ -39,6 +41,7 @@ export interface McpManagerCreateOptions {
 	cwd: string;
 	environment?: NodeJS.ProcessEnv;
 	backgroundOptionalStartup?: boolean;
+	configurationCoordinator?: McpConfigurationCoordinator;
 }
 
 export interface McpPreparedConfiguration {
@@ -258,12 +261,15 @@ export class McpManager {
 	private readonly retiredGenerations = new Set<ClientGeneration>();
 	private readonly preparedGenerations = new Map<McpPreparedConfiguration, ClientGeneration>();
 	private readonly cleanupErrors: Error[] = [];
+	private activeRevision = "";
+	private refreshTail: Promise<void> = Promise.resolve();
 	private clientUnsubscribers: Array<() => void> = [];
 	private records: McpToolRecord[] = [];
 	private recordByModelName = new Map<string, McpToolRecord>();
 	private searchIndex = new ToolSearchIndex([]);
 	private readonly catalogListeners = new Set<() => void>();
 	private closed = false;
+	private unregisterCoordinator?: () => void;
 
 	private get clients(): Map<string, McpServerClient> {
 		return this.activeGeneration.clients;
@@ -282,6 +288,7 @@ export class McpManager {
 			resolveMcpSettings(options.settingsManager, options.cwd, options.environment),
 			options.backgroundOptionalStartup ?? false,
 		);
+		manager.unregisterCoordinator = options.configurationCoordinator?.register(manager);
 		return manager;
 	}
 
@@ -364,8 +371,13 @@ export class McpManager {
 		const clients = this.createClients(settings);
 		await this.startClients(clients, backgroundOptionalStartup);
 		this.activeGeneration = { clients, inFlight: 0, retired: false };
+		this.activeRevision = this.configurationRevision(settings);
 		this.attachClientSubscriptions();
 		this.rebuildRecords();
+	}
+
+	private configurationRevision(settings: ResolvedMcpSettings): string {
+		return createHash("sha256").update(JSON.stringify(settings)).digest("hex");
 	}
 
 	private error(error: unknown): Error {
@@ -661,9 +673,10 @@ export class McpManager {
 	async prepareConfiguration(
 		settings: ResolvedMcpSettings = resolveMcpSettings(this.settingsManager, this.cwd, this.environment),
 	): Promise<McpPreparedConfiguration> {
+		this.authStorage.reload();
 		const nextClients = this.createClients(settings);
 		await this.startClients(nextClients);
-		const prepared = { revision: createHash("sha256").update(JSON.stringify(settings)).digest("hex") };
+		const prepared = { revision: this.configurationRevision(settings) };
 		this.preparedGenerations.set(prepared, { clients: nextClients, inFlight: 0, retired: false });
 		return prepared;
 	}
@@ -675,6 +688,7 @@ export class McpManager {
 		this.preparedGenerations.delete(prepared);
 		const previous = this.activeGeneration;
 		this.activeGeneration = next;
+		this.activeRevision = prepared.revision;
 		this.attachClientSubscriptions();
 		this.rebuildRecords();
 		for (const listener of this.catalogListeners) listener();
@@ -691,6 +705,40 @@ export class McpManager {
 	async reload(): Promise<void> {
 		const prepared = await this.prepareConfiguration();
 		this.activateConfiguration(prepared);
+	}
+
+	get configurationCwd(): string {
+		return this.cwd;
+	}
+
+	async prepareConfigurationChanges(
+		scope: "global" | "project",
+		changes: ReadonlyMap<string, McpServerSettings | undefined>,
+	): Promise<McpPreparedConfiguration> {
+		await this.settingsManager.reload();
+		const globalServers = { ...(this.settingsManager.getGlobalSettings().mcpServers ?? {}) };
+		const projectServers = { ...(this.settingsManager.getProjectSettings().mcpServers ?? {}) };
+		const target = scope === "global" ? globalServers : projectServers;
+		for (const [name, definition] of changes) {
+			if (definition) target[name] = structuredClone(definition);
+			else delete target[name];
+		}
+		return this.prepareConfiguration(
+			resolveMcpServerDefinitions(globalServers, projectServers, this.cwd, this.environment),
+		);
+	}
+
+	async ensureCurrent(): Promise<void> {
+		const refresh = this.refreshTail.then(async () => {
+			await this.settingsManager.reload();
+			this.authStorage.reload();
+			const settings = resolveMcpSettings(this.settingsManager, this.cwd, this.environment);
+			if (this.configurationRevision(settings) === this.activeRevision) return;
+			const prepared = await this.prepareConfiguration(settings);
+			this.activateConfiguration(prepared);
+		});
+		this.refreshTail = refresh.catch(() => undefined);
+		await refresh;
 	}
 
 	drainCleanupErrors(): Error[] {
@@ -754,6 +802,8 @@ export class McpManager {
 	async close(): Promise<void> {
 		if (this.closed) return;
 		this.closed = true;
+		this.unregisterCoordinator?.();
+		this.unregisterCoordinator = undefined;
 		for (const unsubscribe of this.clientUnsubscribers) unsubscribe();
 		this.clientUnsubscribers = [];
 		await Promise.all([
@@ -770,6 +820,8 @@ export class McpManager {
 	dispose(): void {
 		if (this.closed) return;
 		this.closed = true;
+		this.unregisterCoordinator?.();
+		this.unregisterCoordinator = undefined;
 		for (const unsubscribe of this.clientUnsubscribers) unsubscribe();
 		this.clientUnsubscribers = [];
 		for (const client of this.clients.values()) client.dispose();

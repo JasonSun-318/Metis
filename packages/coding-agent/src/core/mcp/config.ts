@@ -208,14 +208,28 @@ export function resolveMcpSettings(
 	cwd: string,
 	environment: NodeJS.ProcessEnv = process.env,
 ): ResolvedMcpSettings {
+	return resolveMcpServerDefinitions(
+		settings.getGlobalSettings().mcpServers ?? {},
+		settings.getProjectSettings().mcpServers ?? {},
+		cwd,
+		environment,
+	);
+}
+
+export function resolveMcpServerDefinitions(
+	globalServers: Readonly<Record<string, McpServerSettings>>,
+	projectServers: Readonly<Record<string, McpServerSettings>>,
+	cwd: string,
+	environment: NodeJS.ProcessEnv = process.env,
+): ResolvedMcpSettings {
 	const effective = new Map<
 		string,
 		{ readonly server: McpServerSettings; readonly credentialIdentity: McpCredentialIdentity }
 	>();
-	for (const [name, server] of Object.entries(settings.getGlobalSettings().mcpServers ?? {})) {
+	for (const [name, server] of Object.entries(globalServers)) {
 		effective.set(name, { server, credentialIdentity: { scope: "user", name } });
 	}
-	for (const [name, server] of Object.entries(settings.getProjectSettings().mcpServers ?? {})) {
+	for (const [name, server] of Object.entries(projectServers)) {
 		effective.set(name, { server, credentialIdentity: { scope: "project", name, cwd } });
 	}
 	return {

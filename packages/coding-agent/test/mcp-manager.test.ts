@@ -74,6 +74,25 @@ describe("McpManager", () => {
 		});
 	});
 
+	it("refreshes an externally changed definition at the next explicit boundary", async () => {
+		const storage = new InMemorySettingsStorage();
+		const runtimeSettings = SettingsManager.fromStorage(storage);
+		const writer = SettingsManager.fromStorage(storage);
+		const manager = await McpManager.create({
+			settingsManager: runtimeSettings,
+			authStorage: AuthStorage.inMemory(),
+			cwd: process.cwd(),
+		});
+		managers.push(manager);
+		expect(manager.getStatus()).toEqual([]);
+
+		writer.setMcpServer("global", "external", { command: "node", enabled: false });
+		await writer.flushOrThrow();
+		await manager.ensureCurrent();
+
+		expect(manager.getStatus()).toMatchObject([{ name: "external", state: "disabled" }]);
+	});
+
 	it("exposes only safe selected-server catalog names and fingerprint-bound credential state", async () => {
 		const server = await createMcpTestServer({
 			resources: [
