@@ -13,8 +13,7 @@ import {
 import {
 	app,
 	BaseWindow,
-	BrowserWindow,
-	type BrowserWindowConstructorOptions,
+	type BrowserWindow,
 	type DownloadItem,
 	dialog,
 	type Event,
@@ -66,8 +65,7 @@ interface BrowserRecord {
 	readonly sessionId: string;
 	readonly profileId: string;
 	readonly contents: WebContents;
-	readonly view?: WebContentsView;
-	readonly popupWindow?: BrowserPopupWindow;
+	readonly view: WebContentsView;
 	readonly controller: BrowserControllerLike;
 	readonly cleanup: (() => void)[];
 	host?: BrowserViewHost;
@@ -96,21 +94,6 @@ interface BrowserRecord {
 type BrowserViewHost = Pick<View, "addChildView" | "removeChildView">;
 type BrowserProgressEvent = Extract<DesktopBrowserEvent, { type: "activity" | "state" }>;
 type BrowserBackgroundWindow = Pick<BaseWindow, "contentView" | "destroy" | "isDestroyed">;
-type BrowserPopupWindow = Pick<
-	BrowserWindow,
-	| "webContents"
-	| "destroy"
-	| "focus"
-	| "isDestroyed"
-	| "off"
-	| "on"
-	| "setBounds"
-	| "setFocusable"
-	| "setIgnoreMouseEvents"
-	| "setOpacity"
-	| "show"
-	| "showInactive"
->;
 
 type BrowserControllerLike = Pick<BrowserController, "observe" | "act" | "invalidate" | "close">;
 
@@ -155,7 +138,6 @@ interface BrowserManagerDependencies {
 	readonly sessionForPartition: (partition: string) => Session;
 	readonly createView: (options: WebContentsViewConstructorOptions) => WebContentsView;
 	readonly createBackgroundWindow: () => BrowserBackgroundWindow;
-	readonly createPopupWindow: (options: BrowserWindowConstructorOptions) => BrowserPopupWindow;
 	readonly openExternal: (url: string) => Promise<void>;
 	readonly savePdf: (data: Buffer, defaultFilename: string) => Promise<void>;
 	readonly saveScreenshot: (image: NativeImage, defaultFilename: string) => Promise<void>;
@@ -298,7 +280,6 @@ export class BrowserManager {
 					width: DEFAULT_BROWSER_BOUNDS.width,
 					height: DEFAULT_BROWSER_BOUNDS.height,
 				}),
-			createPopupWindow: (options) => new BrowserWindow(options),
 			openExternal: (url) => shell.openExternal(url),
 			savePdf: (data, defaultFilename) => saveBuffer(data, defaultFilename, "PDF document", "pdf"),
 			saveScreenshot: (image, defaultFilename) => saveBuffer(image.toPNG(), defaultFilename, "PNG image", "png"),
@@ -418,25 +399,14 @@ export class BrowserManager {
 	private registerView(input: DesktopCreateBrowserInput, view: WebContentsView): DesktopBrowserState {
 		view.setBackgroundColor("#191a19");
 		view.setBorderRadius(7);
-		return this.registerRecord(input, view.webContents, { view });
-	}
-
-	private registerPopup(input: DesktopCreateBrowserInput, popupWindow: BrowserPopupWindow): DesktopBrowserState {
-		return this.registerRecord(input, popupWindow.webContents, { popupWindow });
-	}
-
-	private registerRecord(
-		input: DesktopCreateBrowserInput,
-		contents: WebContents,
-		surface: { readonly view: WebContentsView } | { readonly popupWindow: BrowserPopupWindow },
-	): DesktopBrowserState {
+		const contents = view.webContents;
 		const controller = this.createController(input.browserId, input.profileId, contents);
 		const record: BrowserRecord = {
 			browserId: input.browserId,
 			sessionId: input.sessionId,
 			profileId: input.profileId,
 			contents,
-			...surface,
+			view,
 			controller,
 			cleanup: [],
 			state: initialState(input.browserId, input.profileId),
@@ -450,7 +420,7 @@ export class BrowserManager {
 			commandTail: Promise.resolve(),
 		};
 		this.records.set(input.browserId, record);
-		if (record.view) this.placeSurface(record, false);
+		this.placeSurface(record, false);
 		this.bind(input.browserId, record);
 		this.emit({ type: "opened", sessionId: input.sessionId, browserId: input.browserId, profileId: input.profileId });
 		return structuredClone(record.state);
@@ -760,10 +730,9 @@ export class BrowserManager {
 		this.cancelHandoff(record, cancellationReason);
 		record.controller.close();
 		for (const cleanup of record.cleanup.splice(0)) cleanup();
-		if (record.view) record.host?.removeChildView(record.view);
+		record.host?.removeChildView(record.view);
 		record.host = undefined;
-		if (record.popupWindow && !record.popupWindow.isDestroyed()) record.popupWindow.destroy();
-		else if (!record.contents.isDestroyed()) record.contents.close();
+		if (!record.contents.isDestroyed()) record.contents.close();
 		this.emit({ type: "closed", sessionId: record.sessionId, browserId });
 	}
 
@@ -1088,11 +1057,6 @@ export class BrowserManager {
 	}
 
 	private placeSurface(record: BrowserRecord, foreground: boolean): void {
-		if (record.popupWindow) {
-			this.placePopupWindow(record, foreground);
-			return;
-		}
-		if (!record.view) return;
 		const host = foreground && this.owner ? this.owner.contentView : this.backgroundHost();
 		if (record.host !== host) {
 			record.host?.removeChildView(record.view);
@@ -1105,30 +1069,6 @@ export class BrowserManager {
 				: this.backgroundBounds(record.presentation?.bounds),
 		);
 		record.view.setVisible(true);
-	}
-
-	private placePopupWindow(record: BrowserRecord, foreground: boolean): void {
-		const popup = record.popupWindow;
-		if (!popup || popup.isDestroyed()) return;
-		if (!foreground || !record.presentation) {
-			popup.setIgnoreMouseEvents(true);
-			popup.setFocusable(false);
-			popup.setOpacity(0);
-			popup.setBounds({ ...this.backgroundBounds(record.presentation?.bounds), x: -10_000, y: 0 });
-			popup.showInactive();
-			return;
-		}
-		const ownerBounds = this.owner?.getBounds();
-		popup.setBounds({
-			x: (ownerBounds?.x ?? 0) + record.presentation.bounds.x,
-			y: (ownerBounds?.y ?? 0) + record.presentation.bounds.y,
-			width: record.presentation.bounds.width,
-			height: record.presentation.bounds.height,
-		});
-		popup.setOpacity(1);
-		popup.setFocusable(true);
-		popup.setIgnoreMouseEvents(false);
-		popup.show();
 	}
 
 	private async enqueueRecord<T>(record: BrowserRecord, signal: AbortSignal, operation: () => Promise<T>): Promise<T> {
@@ -1258,14 +1198,6 @@ export class BrowserManager {
 			event.preventDefault();
 			this.emit({ type: "command", browserId, command });
 		};
-		const onPopupClose = (event: Event) => {
-			if (this.records.get(browserId) !== record || record.closingReason) return;
-			event.preventDefault();
-			record.closingReason = "tab_closed";
-			record.activeAbort?.abort();
-			record.controller.close();
-			setImmediate(() => this.closeRecord(record, "tab_closed"));
-		};
 		const onDestroyed = () => {
 			if (this.records.get(browserId) !== record) return;
 			this.records.delete(browserId);
@@ -1281,7 +1213,7 @@ export class BrowserManager {
 			this.cancelHandoff(record, "tab_closed");
 			record.controller.close();
 			for (const cleanup of record.cleanup.splice(0)) cleanup();
-			if (record.view) record.host?.removeChildView(record.view);
+			record.host?.removeChildView(record.view);
 			record.host = undefined;
 			this.emit({ type: "closed", sessionId: record.sessionId, browserId });
 		};
@@ -1299,8 +1231,6 @@ export class BrowserManager {
 		contents.on("found-in-page", onFoundInPage);
 		contents.on("before-input-event", onBeforeInput);
 		contents.on("destroyed", onDestroyed);
-		record.popupWindow?.on("close", onPopupClose);
-		record.popupWindow?.on("closed", onDestroyed);
 		record.cleanup.push(
 			() => contents.off("did-start-loading", onDidStartLoading),
 			() => contents.off("did-stop-loading", onDidStopLoading),
@@ -1315,8 +1245,6 @@ export class BrowserManager {
 			() => contents.off("found-in-page", onFoundInPage),
 			() => contents.off("before-input-event", onBeforeInput),
 			() => contents.off("destroyed", onDestroyed),
-			() => record.popupWindow?.off("close", onPopupClose),
-			() => record.popupWindow?.off("closed", onDestroyed),
 		);
 		contents.setWindowOpenHandler(({ url }) => {
 			try {
@@ -1339,15 +1267,7 @@ export class BrowserManager {
 				action: "allow",
 				createWindow: (options) => {
 					const popupId = randomUUID();
-					const popup = this.dependencies.createPopupWindow({
-						...options,
-						show: true,
-						frame: false,
-						focusable: false,
-						opacity: 0,
-						skipTaskbar: true,
-						x: -10_000,
-						y: 0,
+					const popup = this.dependencies.createView({
 						webPreferences: {
 							...options.webPreferences,
 							backgroundThrottling: false,
@@ -1358,7 +1278,7 @@ export class BrowserManager {
 							webSecurity: true,
 						},
 					});
-					this.registerPopup(
+					this.registerView(
 						{ sessionId: record.sessionId, browserId: popupId, profileId: record.profileId },
 						popup,
 					);
