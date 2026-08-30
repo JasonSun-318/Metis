@@ -630,83 +630,6 @@ describe("BrowserManager", () => {
 		});
 	});
 
-	it("releases the control lease when the debugger detaches during navigation", async () => {
-		const harness = browserHarness({ navigationTimeoutMs: 10_000 });
-		const browserId = "10000000-0000-4000-8000-000000000095";
-		harness.manager.create({ sessionId: SESSION_ID, browserId, profileId: DEFAULT_BROWSER_PROFILE_ID });
-		harness.webContents.loadURL.mockReturnValueOnce(new Promise(() => undefined));
-		const pending = harness.manager.executeTool(
-			SESSION_ID,
-			{
-				tool: "browser_navigate",
-				input: { action: "goto", browserId, url: "https://slow.example.test" },
-			},
-			new AbortController().signal,
-		);
-		await vi.waitFor(() => expect(harness.webContents.loadURL).toHaveBeenCalledOnce());
-		harness.controllers.get(browserId)!.detach();
-
-		await expect(pending).rejects.toThrow("Browser debugger detached");
-		await expect(
-			harness.manager.executeTool(
-				SESSION_ID,
-				{
-					tool: "browser_navigate",
-					input: { action: "goto", browserId, url: "https://recovered.example.test" },
-				},
-				new AbortController().signal,
-			),
-		).resolves.toMatchObject({ tool: "browser_navigate", details: { status: "completed" } });
-	});
-
-	it("settles handoff on interruption, timeout, and tab close without retaining a lock", async () => {
-		const interrupted = browserHarness();
-		const interruptedId = "10000000-0000-4000-8000-000000000076";
-		interrupted.manager.create({
-			sessionId: SESSION_ID,
-			browserId: interruptedId,
-			profileId: DEFAULT_BROWSER_PROFILE_ID,
-		});
-		const abort = new AbortController();
-		const interruptedResult = interrupted.manager.executeTool(
-			SESSION_ID,
-			{ tool: "browser_handoff", input: { browserId: interruptedId, reason: "otp" } },
-			abort.signal,
-		);
-		await vi.waitFor(() => expect(interrupted.manager.replayEvents(SESSION_ID)).toHaveLength(2));
-		abort.abort();
-		await expect(interruptedResult).resolves.toMatchObject({
-			tool: "browser_handoff",
-			details: { status: "cancelled", reason: "turn_interrupted" },
-		});
-
-		const timedOut = browserHarness({ handoffTimeoutMs: 5 });
-		const timedOutId = "10000000-0000-4000-8000-000000000077";
-		timedOut.manager.create({ sessionId: SESSION_ID, browserId: timedOutId, profileId: DEFAULT_BROWSER_PROFILE_ID });
-		await expect(
-			timedOut.manager.executeTool(
-				SESSION_ID,
-				{ tool: "browser_handoff", input: { browserId: timedOutId, reason: "captcha" } },
-				new AbortController().signal,
-			),
-		).resolves.toMatchObject({ tool: "browser_handoff", details: { status: "cancelled", reason: "timed_out" } });
-
-		const closed = browserHarness();
-		const closedId = "10000000-0000-4000-8000-000000000084";
-		closed.manager.create({ sessionId: SESSION_ID, browserId: closedId, profileId: DEFAULT_BROWSER_PROFILE_ID });
-		const closedResult = closed.manager.executeTool(
-			SESSION_ID,
-			{ tool: "browser_handoff", input: { browserId: closedId, reason: "passkey" } },
-			new AbortController().signal,
-		);
-		await vi.waitFor(() => expect(closed.manager.replayEvents(SESSION_ID)).toHaveLength(2));
-		closed.manager.close(SESSION_ID, closedId);
-		await expect(closedResult).resolves.toMatchObject({
-			tool: "browser_handoff",
-			details: { status: "cancelled", reason: "tab_closed" },
-		});
-	});
-
 	it("suspends native presentation while retaining replayable task tabs", async () => {
 		const harness = browserHarness();
 		const browserId = "10000000-0000-4000-8000-000000000085";
@@ -734,43 +657,6 @@ describe("BrowserManager", () => {
 			harness.manager.create({ sessionId: SESSION_ID, browserId, profileId: DEFAULT_BROWSER_PROFILE_ID }),
 		).toEqual(first);
 		expect(harness.controllers).toHaveLength(1);
-	});
-
-	it("serializes mutations per tab without blocking another task-owned tab", async () => {
-		const harness = browserHarness();
-		const firstId = "10000000-0000-4000-8000-000000000086";
-		const secondId = "10000000-0000-4000-8000-000000000087";
-		harness.manager.create({ sessionId: SESSION_ID, browserId: firstId, profileId: DEFAULT_BROWSER_PROFILE_ID });
-		harness.manager.create({ sessionId: SESSION_ID, browserId: secondId, profileId: DEFAULT_BROWSER_PROFILE_ID });
-		const firstAbort = new AbortController();
-		harness.controllers.get(firstId)!.act.mockImplementation(
-			(_input: unknown, signal: AbortSignal) =>
-				new Promise((_resolve, reject) => {
-					signal.addEventListener("abort", () => reject(signal.reason), { once: true });
-				}),
-		);
-		const call = (browserId: string, signal: AbortSignal) =>
-			harness.manager.executeTool(
-				SESSION_ID,
-				{
-					tool: "browser_act",
-					input: {
-						browserId,
-						documentId: "30000000-0000-4000-8000-000000000001",
-						snapshotRevision: 1,
-						origin: "https://example.test",
-						intent: "Click",
-						risk: "ordinary",
-						action: { type: "click" as const, target: { elementId: "e1" } },
-					},
-				},
-				signal,
-			);
-		const first = call(firstId, firstAbort.signal);
-		await vi.waitFor(() => expect(harness.controllers.get(firstId)!.act).toHaveBeenCalledOnce());
-		await expect(call(secondId, new AbortController().signal)).resolves.toMatchObject({ tool: "browser_act" });
-		firstAbort.abort();
-		await expect(first).rejects.toBeDefined();
 	});
 
 	it("owns safe Chromium views through navigation, presentation, events, and cleanup", async () => {

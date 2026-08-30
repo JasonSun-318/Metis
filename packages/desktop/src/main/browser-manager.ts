@@ -50,6 +50,7 @@ import {
 } from "../shared/desktop-api.ts";
 import { BrowserController } from "./browser-controller.ts";
 import { BrowserProfileStore, mergeBrowserHistory } from "./browser-profile-store.ts";
+import { BrowserTabRuntime } from "./browser-tab-runtime.ts";
 import { ChromiumBrowserImporter } from "./chromium-browser-import.ts";
 
 const BLANK_URL = "about:blank";
@@ -74,6 +75,7 @@ interface BrowserRecord {
 	readonly contents: WebContents;
 	readonly view: WebContentsView;
 	readonly controller: BrowserControllerLike;
+	readonly runtime: BrowserTabRuntime;
 	readonly cleanup: (() => void)[];
 	host?: BrowserViewHost;
 	state: DesktopBrowserState;
@@ -83,18 +85,11 @@ interface BrowserRecord {
 		readonly bounds: { x: number; y: number; width: number; height: number };
 	};
 	findRequestId: number;
-	controlState: "idle" | "agent" | "handoff";
-	activityActive: boolean;
-	activityIdleTimer?: NodeJS.Timeout;
 	progressEventTimer?: NodeJS.Timeout;
 	lastProgressEventAt: number;
 	lastProgressEventType?: BrowserProgressEvent["type"];
 	pendingStateEvent: boolean;
 	pendingActivityEvent?: boolean;
-	activeAbort?: AbortController;
-	takeoverRequested: boolean;
-	handoff?: HandoffRecord;
-	commandTail: Promise<void>;
 }
 
 type BrowserViewHost = Pick<View, "addChildView" | "removeChildView">;
@@ -113,17 +108,7 @@ export class BrowserToolError extends Error {
 	}
 }
 
-interface HandoffRecord {
-	readonly reason: Extract<BrowserToolCall, { tool: "browser_handoff" }>["input"]["reason"];
-	readonly promise: Promise<HandoffOutcome>;
-	readonly resolve: (outcome: HandoffOutcome) => void;
-	readonly timer: NodeJS.Timeout;
-}
-
 type BrowserHandoffCancellationReason = Extract<BrowserHandoffDetails, { status: "cancelled" }>["reason"];
-type HandoffOutcome =
-	| { readonly status: "complete" }
-	| { readonly status: "cancel"; readonly reason: BrowserHandoffCancellationReason };
 
 interface DownloadRecord {
 	readonly profileId: string;
@@ -306,7 +291,7 @@ export class BrowserManager {
 		this.owner = window;
 		for (const record of this.records.values()) {
 			record.presentationKey = "";
-			this.placeSurface(record, record.controlState !== "agent" && Boolean(record.presentation?.visible));
+			record.runtime.syncPresentation(Boolean(record.presentation?.visible));
 		}
 	}
 
@@ -314,7 +299,7 @@ export class BrowserManager {
 		for (const record of this.records.values()) {
 			record.presentation = undefined;
 			record.presentationKey = "";
-			this.placeSurface(record, false);
+			record.runtime.syncPresentation(false);
 		}
 	}
 
@@ -418,26 +403,64 @@ export class BrowserManager {
 		surface: { readonly view: WebContentsView },
 	): DesktopBrowserState {
 		const controller = this.createController(input.browserId, input.profileId, contents);
-		const record: BrowserRecord = {
+		const cleanup: (() => void)[] = [];
+		let record!: BrowserRecord;
+		const runtime = new BrowserTabRuntime({
+			browserId: input.browserId,
+			controller,
+			handoffTimeoutMs: this.dependencies.handoffTimeoutMs ?? 15 * 60 * 1_000,
+			activityIdleDelayMs: ACTIVITY_IDLE_DELAY_MS,
+			placeSurface: (foreground) => this.placeSurface(record, foreground),
+			emitActivity: (active) => this.emitActivity(record, active),
+			clearPendingActivity: () => {
+				record.pendingActivityEvent = undefined;
+			},
+			emitHandoff: (event) => {
+				if (event.status === "requested") {
+					this.emit({
+						type: "handoff",
+						sessionId: record.sessionId,
+						browserId: record.browserId,
+						status: event.status,
+						reason: event.reason,
+					});
+					return;
+				}
+				this.emit({
+					type: "handoff",
+					sessionId: record.sessionId,
+					browserId: record.browserId,
+					status: event.status,
+				});
+			},
+			cleanup: () => {
+				if (record.progressEventTimer) clearTimeout(record.progressEventTimer);
+				record.progressEventTimer = undefined;
+				record.pendingStateEvent = false;
+				record.pendingActivityEvent = undefined;
+				for (const remove of cleanup.splice(0)) remove();
+				record.host?.removeChildView(record.view);
+				record.host = undefined;
+				this.emit({ type: "closed", sessionId: record.sessionId, browserId: record.browserId });
+			},
+		});
+		record = {
 			browserId: input.browserId,
 			sessionId: input.sessionId,
 			profileId: input.profileId,
 			contents,
 			...surface,
 			controller,
-			cleanup: [],
+			runtime,
+			cleanup,
 			state: initialState(input.browserId, input.profileId),
 			presentationKey: "",
 			findRequestId: 0,
-			controlState: "idle",
-			activityActive: false,
 			lastProgressEventAt: Number.NEGATIVE_INFINITY,
 			pendingStateEvent: false,
-			takeoverRequested: false,
-			commandTail: Promise.resolve(),
 		};
 		this.records.set(input.browserId, record);
-		this.placeSurface(record, false);
+		runtime.syncPresentation(false);
 		this.bind(input.browserId, record);
 		this.emit({ type: "opened", sessionId: input.sessionId, browserId: input.browserId, profileId: input.profileId });
 		return structuredClone(record.state);
@@ -524,12 +547,13 @@ export class BrowserManager {
 			const key = `${input.visible}:${input.bounds.x}:${input.bounds.y}:${input.bounds.width}:${input.bounds.height}`;
 			if (key === record.presentationKey) return;
 			record.presentationKey = key;
-			if (record.controlState === "agent") return;
-			this.placeSurface(record, input.visible);
+			record.runtime.syncPresentation(input.visible);
 			return;
 		}
 		const record = this.recordForSession(input.sessionId, input.browserId);
-		if (record.controlState !== "idle") throw new Error("Browser is currently controlled by the user or agent");
+		if (record.runtime.view().controlState !== "idle") {
+			throw new Error("Browser is currently controlled by the user or agent");
+		}
 		if (input.type === "navigate") {
 			await this.applyNavigation(record, { action: "goto", browserId: input.browserId, url: input.url });
 			return;
@@ -626,7 +650,7 @@ export class BrowserManager {
 			}
 			case "browser_navigate": {
 				const record = this.recordForSession(sessionId, call.input.browserId);
-				const details = await this.runAgentMutation(record, signal, async (operationSignal) => {
+				const details = await record.runtime.runMutation(signal, async (operationSignal) => {
 					operationSignal.throwIfAborted();
 					await this.applyNavigation(record, call.input, operationSignal);
 					return {
@@ -638,19 +662,21 @@ export class BrowserManager {
 			}
 			case "browser_observe": {
 				const record = this.recordForSession(sessionId, call.input.browserId);
-				if (record.controlState !== "idle") throw new Error("Browser is currently controlled by the user or agent");
+				if (record.runtime.view().controlState !== "idle") {
+					throw new Error("Browser is currently controlled by the user or agent");
+				}
 				return { tool: call.tool, observation: await record.controller.observe(call.input, signal) };
 			}
 			case "browser_act": {
 				const record = this.recordForSession(sessionId, call.input.browserId);
-				const details = await this.runAgentMutation(record, signal, (operationSignal) =>
+				const details = await record.runtime.runMutation(signal, (operationSignal) =>
 					record.controller.act(call.input, operationSignal),
 				);
 				return { tool: call.tool, details };
 			}
 			case "browser_handoff": {
 				const record = this.recordForSession(sessionId, call.input.browserId);
-				return { tool: call.tool, details: await this.runDirectHandoff(record, call.input.reason, signal) };
+				return { tool: call.tool, details: await record.runtime.handoff(call.input.reason, signal) };
 			}
 		}
 	}
@@ -685,24 +711,16 @@ export class BrowserManager {
 	}
 
 	takeControl(sessionId: string, browserId: string): void {
-		const record = this.recordForSession(sessionId, browserId);
-		if (record.controlState === "handoff") return;
-		if (record.controlState !== "agent" || !record.activeAbort) throw new Error("Browser automation is not active");
-		record.takeoverRequested = true;
-		record.activeAbort.abort();
+		this.recordForSession(sessionId, browserId).runtime.takeControl();
 	}
 
 	resolveHandoff(sessionId: string, browserId: string, decision: "complete" | "cancel"): void {
-		const record = this.recordForSession(sessionId, browserId);
-		if (!record.handoff) throw new Error("Browser handoff is not active");
-		record.handoff.resolve(
-			decision === "complete" ? { status: "complete" } : { status: "cancel", reason: "user_cancelled" },
-		);
+		this.recordForSession(sessionId, browserId).runtime.resolveHandoff(decision);
 	}
 
 	cancelSessionHandoffs(sessionId: string, reason: BrowserHandoffCancellationReason): void {
 		for (const record of this.records.values()) {
-			if (record.sessionId === sessionId) this.cancelHandoff(record, reason);
+			if (record.sessionId === sessionId) record.runtime.cancelHandoff(reason);
 		}
 	}
 
@@ -717,15 +735,16 @@ export class BrowserManager {
 					profileId: record.profileId,
 				},
 			];
-			if (record.controlState === "agent") {
+			const runtime = record.runtime.view();
+			if (runtime.controlState === "agent") {
 				events.push({ type: "activity", sessionId: record.sessionId, browserId: record.browserId, active: true });
-			} else if (record.handoff) {
+			} else if (runtime.controlState === "handoff" && runtime.handoffReason) {
 				events.push({
 					type: "handoff",
 					sessionId: record.sessionId,
 					browserId: record.browserId,
 					status: "requested",
-					reason: record.handoff.reason,
+					reason: runtime.handoffReason,
 				});
 			}
 			return events;
@@ -746,22 +765,7 @@ export class BrowserManager {
 		const { browserId } = record;
 		if (this.records.get(browserId) !== record) return false;
 		this.records.delete(browserId);
-		record.activeAbort?.abort(new Error(`Browser ${cancellationReason.replace("_", " ")}`));
-		if (record.activityIdleTimer) clearTimeout(record.activityIdleTimer);
-		record.activityIdleTimer = undefined;
-		if (record.progressEventTimer) clearTimeout(record.progressEventTimer);
-		record.progressEventTimer = undefined;
-		record.pendingStateEvent = false;
-		record.pendingActivityEvent = undefined;
-		if (record.activityActive) {
-			record.activityActive = false;
-		}
-		this.cancelHandoff(record, cancellationReason);
-		record.controller.close();
-		for (const cleanup of record.cleanup.splice(0)) cleanup();
-		record.host?.removeChildView(record.view);
-		record.host = undefined;
-		this.emit({ type: "closed", sessionId: record.sessionId, browserId });
+		record.runtime.close(cancellationReason);
 		return true;
 	}
 
@@ -837,7 +841,7 @@ export class BrowserManager {
 					title: record.state.title,
 					url: record.state.url,
 					loading: record.state.loading,
-					controlState: record.controlState,
+					controlState: record.runtime.view().controlState,
 				})),
 		};
 	}
@@ -917,162 +921,6 @@ export class BrowserManager {
 		});
 	}
 
-	private async runAgentMutation(
-		record: BrowserRecord,
-		signal: AbortSignal,
-		operation: (signal: AbortSignal) => Promise<Extract<BrowserToolResult, { tool: "browser_act" }>["details"]>,
-	): Promise<Extract<BrowserToolResult, { tool: "browser_act" }>["details"]> {
-		if (record.controlState === "handoff") throw new Error("Browser handoff is active");
-		return this.enqueueRecord(record, signal, async () => {
-			if (record.controlState !== "idle") throw new Error("Browser control is unavailable");
-			const activeAbort = new AbortController();
-			const abortActive = () => activeAbort.abort(signal.reason);
-			signal.addEventListener("abort", abortActive, { once: true });
-			const operationSignal = AbortSignal.any([activeAbort.signal, record.controller.leaseSignal()]);
-			record.activeAbort = activeAbort;
-			record.takeoverRequested = false;
-			this.setControlState(record, "agent");
-			try {
-				let result: Extract<BrowserToolResult, { tool: "browser_act" }>["details"];
-				try {
-					result = await operation(operationSignal);
-				} catch (cause) {
-					if (!record.takeoverRequested) throw cause;
-					return this.takeoverHandoff(record, signal);
-				}
-				if (record.takeoverRequested) return this.takeoverHandoff(record, signal);
-				return result;
-			} finally {
-				signal.removeEventListener("abort", abortActive);
-				record.activeAbort = undefined;
-				record.takeoverRequested = false;
-				if (this.records.get(record.browserId) === record) this.setControlState(record, "idle");
-			}
-		});
-	}
-
-	private async takeoverHandoff(
-		record: BrowserRecord,
-		signal: AbortSignal,
-	): Promise<Extract<BrowserToolResult, { tool: "browser_act" }>["details"]> {
-		const result = await this.awaitHandoff(record, "other", signal);
-		if (result.status === "completed") return result;
-		if (result.reason === "user_cancelled") return { status: "cancelled", reason: "user_cancelled" };
-		throw new Error(`Browser handoff ended: ${result.reason}`);
-	}
-
-	private runDirectHandoff(
-		record: BrowserRecord,
-		reason: HandoffRecord["reason"],
-		signal: AbortSignal,
-	): Promise<BrowserHandoffDetails> {
-		if (record.controlState === "handoff") throw new Error("Browser handoff is already active");
-		return this.enqueueRecord(record, signal, async () => {
-			if (record.controlState !== "idle") throw new Error("Browser control is unavailable");
-			return this.awaitHandoff(record, reason, signal);
-		});
-	}
-
-	private async awaitHandoff(
-		record: BrowserRecord,
-		reason: HandoffRecord["reason"],
-		signal: AbortSignal,
-	): Promise<BrowserHandoffDetails> {
-		record.controller.invalidate();
-		this.setControlState(record, "handoff");
-		let settled = false;
-		let resolvePromise!: (outcome: HandoffOutcome) => void;
-		const promise = new Promise<HandoffOutcome>((resolve) => {
-			resolvePromise = (outcome) => {
-				if (settled) return;
-				settled = true;
-				resolve(outcome);
-			};
-		});
-		const timer = setTimeout(
-			() => resolvePromise({ status: "cancel", reason: "timed_out" }),
-			this.dependencies.handoffTimeoutMs ?? 15 * 60 * 1_000,
-		);
-		timer.unref?.();
-		record.handoff = { reason, promise, resolve: resolvePromise, timer };
-		this.emit({
-			type: "handoff",
-			sessionId: record.sessionId,
-			browserId: record.browserId,
-			status: "requested",
-			reason,
-		});
-		const onAbort = () => resolvePromise({ status: "cancel", reason: "turn_interrupted" });
-		signal.addEventListener("abort", onAbort, { once: true });
-		if (signal.aborted) onAbort();
-		const outcome = await promise;
-		signal.removeEventListener("abort", onAbort);
-		clearTimeout(timer);
-		if (record.handoff?.promise === promise) record.handoff = undefined;
-		const open = this.records.get(record.browserId) === record;
-		if (open) this.setControlState(record, "idle");
-		if (outcome.status === "cancel") {
-			if (open) {
-				this.emit({
-					type: "handoff",
-					sessionId: record.sessionId,
-					browserId: record.browserId,
-					status: "cancelled",
-				});
-			}
-			return { status: "cancelled", reason: outcome.reason };
-		}
-		this.emit({ type: "handoff", sessionId: record.sessionId, browserId: record.browserId, status: "completed" });
-		record.controller.invalidate();
-		return {
-			status: "completed",
-			observation: await record.controller.observe({ browserId: record.browserId }, signal),
-		};
-	}
-
-	private cancelHandoff(record: BrowserRecord, reason: BrowserHandoffCancellationReason): void {
-		record.handoff?.resolve({ status: "cancel", reason });
-	}
-
-	private setControlState(record: BrowserRecord, state: BrowserRecord["controlState"]): void {
-		const previous = record.controlState;
-		if (previous === state) return;
-		record.controlState = state;
-		if (state === "agent") {
-			if (record.activityIdleTimer) clearTimeout(record.activityIdleTimer);
-			record.activityIdleTimer = undefined;
-			this.placeSurface(record, false);
-			if (!record.activityActive) {
-				record.activityActive = true;
-				this.emitActivity(record, true);
-			}
-			return;
-		}
-		if (previous === "agent") {
-			if (record.activityIdleTimer) clearTimeout(record.activityIdleTimer);
-			if (state === "handoff") {
-				record.activityIdleTimer = undefined;
-				record.activityActive = false;
-				record.pendingActivityEvent = undefined;
-				this.placeSurface(record, Boolean(record.presentation?.visible));
-				return;
-			}
-			record.activityIdleTimer = setTimeout(() => {
-				record.activityIdleTimer = undefined;
-				if (
-					!record.activityActive ||
-					record.controlState === "agent" ||
-					this.records.get(record.browserId) !== record
-				)
-					return;
-				record.activityActive = false;
-				this.emitActivity(record, false);
-			}, ACTIVITY_IDLE_DELAY_MS);
-			record.activityIdleTimer.unref?.();
-		}
-		this.placeSurface(record, Boolean(record.presentation?.visible));
-	}
-
 	private backgroundBounds(preferred: DesktopBrowserBounds = DEFAULT_BROWSER_BOUNDS): DesktopBrowserBounds {
 		const desired = preferred.width >= 320 && preferred.height >= 240 ? preferred : DEFAULT_BROWSER_BOUNDS;
 		return { x: 0, y: 0, width: desired.width, height: desired.height };
@@ -1098,22 +946,6 @@ export class BrowserManager {
 				: this.backgroundBounds(record.presentation?.bounds),
 		);
 		record.view.setVisible(true);
-	}
-
-	private async enqueueRecord<T>(record: BrowserRecord, signal: AbortSignal, operation: () => Promise<T>): Promise<T> {
-		const previous = record.commandTail.catch(() => undefined);
-		let release!: () => void;
-		record.commandTail = new Promise<void>((resolve) => {
-			release = resolve;
-		});
-		await previous;
-		try {
-			signal.throwIfAborted();
-			if (this.records.get(record.browserId) !== record) throw new Error("Browser is not running");
-			return await operation();
-		} finally {
-			release();
-		}
 	}
 
 	private sessionForProfile(profileId: string): Session {
