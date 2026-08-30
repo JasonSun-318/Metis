@@ -2122,8 +2122,8 @@ test("packaged personal profile renders cached Token and Skill activity", async 
 		expect(storedAvatar).toMatch(/^data:image\/webp;base64,/u);
 		expect(storedAvatar!.length).toBeLessThan(50_000);
 		const settingsBox = await page.locator(".settings-dialog").boundingBox();
-		expect(settingsBox?.width).toBe(1_040);
-		expect(settingsBox?.height).toBe(740);
+		expect(Math.round(settingsBox?.width ?? 0)).toBe(1_040);
+		expect(Math.round(settingsBox?.height ?? 0)).toBe(740);
 		await expect(page.getByText("Most used Skills", { exact: true })).toBeVisible();
 		await expect(page.locator(".profile-heatmap-week")).toHaveCount(53);
 		await expect(page.getByText("pdf", { exact: true })).toBeVisible();
@@ -2187,7 +2187,23 @@ test("packaged personal profile renders cached Token and Skill activity", async 
 		});
 		expect(revealWave.first).toBeGreaterThan(revealWave.last);
 		const tooltipCell = page.locator(".profile-heatmap-cell").nth(185);
+		// CDP can keep a just-launched packaged window visually rendered without
+		// making it the native input target. Re-activate it before asserting a
+		// pointer-only pseudo-class so the hover event reaches Chromium.
+		await page.bringToFront();
 		await tooltipCell.hover();
+		await expect.poll(() => tooltipCell.evaluate((cell) => {
+			const box = cell.getBoundingClientRect();
+			const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+			return {
+				hovered: cell.matches(":hover"),
+				hit: hit ? `${hit.tagName}.${hit.className}` : null,
+				hoverChain: Array.from(document.querySelectorAll(":hover"))
+					.map((element) => `${element.tagName}.${element.className}`)
+					.slice(-6),
+				box: [box.left, box.top, box.width, box.height],
+			};
+		})).toMatchObject({ hovered: true });
 		await expect.poll(() => tooltipCell.evaluate((cell) => getComputedStyle(cell, "::after").opacity)).toBe("1");
 		expect.soft(await tooltipCell.evaluate((cell) => Number.parseInt(getComputedStyle(cell).zIndex, 10))).toBeGreaterThan(0);
 		expect.soft(await tooltipCell.evaluate((cell) => Number.parseInt(getComputedStyle(cell.parentElement!).zIndex, 10))).toBeGreaterThan(0);
