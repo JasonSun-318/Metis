@@ -169,6 +169,8 @@ export interface TestSessionOptions {
 	systemPrompt?: string;
 	/** Custom settings overrides */
 	settingsOverrides?: Record<string, unknown>;
+	/** Construct the session-owned delivered-artifact runtime. */
+	withAgentDir?: boolean;
 }
 
 /**
@@ -266,6 +268,8 @@ export function createTestSession(options: TestSessionOptions = {}): TestSession
 
 	const authStorage = AuthStorage.create(join(tempDir, "auth.json"));
 	const modelRegistry = ModelRegistry.create(authStorage, tempDir);
+	const agentDir = options.withAgentDir ? join(tempDir, "agent") : undefined;
+	if (agentDir) mkdirSync(agentDir);
 	sessionManager.setPermissionSettings({ mode: "full" });
 
 	const session = new AgentSession({
@@ -273,6 +277,7 @@ export function createTestSession(options: TestSessionOptions = {}): TestSession
 		sessionManager,
 		settingsManager,
 		cwd: tempDir,
+		agentDir,
 		modelRegistry,
 		resourceLoader: createTestResourceLoader(),
 	});

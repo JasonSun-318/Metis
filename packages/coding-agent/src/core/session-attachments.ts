@@ -333,6 +333,13 @@ export interface StagedDeliveredFile {
 	readonly byteLength: number;
 }
 
+export function deliveredFileStorageName(fileId: string, name: string): string {
+	if (!/^[a-f0-9]{16}$/u.test(fileId)) throw new TypeError("Invalid delivered file id");
+	const extension = extname(name);
+	const suffix = /^\.[a-z0-9_-]{1,31}$/i.test(extension) ? extension : "";
+	return `${fileId}${suffix}`;
+}
+
 /** Collect filesystem roots the agent may deliver from for one session. */
 export function collectSessionDeliverableRoots(options: {
 	readonly cwd: string;
@@ -374,18 +381,10 @@ export function stageDeliveredFile(options: {
 	readonly additionalDirectories?: readonly string[];
 	readonly sourcePath: string;
 	readonly name?: string;
-	readonly activeDeliveredFileCount?: number;
+	readonly activeDeliveredFileCount: number;
 }): StagedDeliveredFile {
 	const deliveredDir = ensureOwnedSessionDeliveredDir(options.agentDir, options.sessionId);
-	const existingNames = readdirSync(deliveredDir).filter((name) => {
-		try {
-			return lstatSync(join(deliveredDir, name)).isFile();
-		} catch {
-			return false;
-		}
-	});
-	const activeCount = options.activeDeliveredFileCount ?? existingNames.length;
-	if (activeCount >= MAX_SESSION_DELIVERED_FILES) {
+	if (options.activeDeliveredFileCount >= MAX_SESSION_DELIVERED_FILES) {
 		throw new Error(`A session can deliver at most ${MAX_SESSION_DELIVERED_FILES} files`);
 	}
 
@@ -407,9 +406,7 @@ export function stageDeliveredFile(options: {
 
 	const name = attachmentName(options.name ?? canonicalSource);
 	const token = randomUUID().replaceAll("-", "").slice(0, 16);
-	const extension = extname(name);
-	const suffix = /^\.[a-z0-9_-]{1,31}$/i.test(extension) ? extension : "";
-	const destination = join(deliveredDir, `${token}${suffix}`);
+	const destination = join(deliveredDir, deliveredFileStorageName(token, name));
 	copyFileSync(canonicalSource, destination, fsConstants.COPYFILE_EXCL);
 	if (process.platform !== "win32") chmodSync(destination, 0o600);
 	const copied = lstatSync(destination);
@@ -426,19 +423,21 @@ export function stageDeliveredFile(options: {
 }
 
 /** Resolve one staged delivered file by id within a Metis-owned session directory. */
-export function resolveDeliveredFilePath(agentDir: string, sessionId: string, fileId: string): string | undefined {
-	if (!/^[a-f0-9]{16}$/iu.test(fileId)) return undefined;
-	const deliveredDir = getOwnedSessionDeliveredDir(agentDir, sessionId);
-	if (!deliveredDir) return undefined;
-	let names: string[];
+export function resolveDeliveredFilePath(
+	agentDir: string,
+	sessionId: string,
+	fileId: string,
+	name: string,
+): string | undefined {
+	let storageName: string;
 	try {
-		names = readdirSync(deliveredDir);
+		storageName = deliveredFileStorageName(fileId, name);
 	} catch {
 		return undefined;
 	}
-	const match = names.find((name) => name.startsWith(fileId));
-	if (!match) return undefined;
-	const path = join(deliveredDir, match);
+	const deliveredDir = getOwnedSessionDeliveredDir(agentDir, sessionId);
+	if (!deliveredDir) return undefined;
+	const path = join(deliveredDir, storageName);
 	try {
 		const metadata = lstatSync(path);
 		if (metadata.isSymbolicLink() || !metadata.isFile()) return undefined;
@@ -455,31 +454,66 @@ export function copySessionDeliveredFiles(options: {
 	readonly agentDir: string;
 	readonly sourceSessionId: string;
 	readonly targetSessionId: string;
-	readonly fileIds: readonly string[];
+	readonly artifacts: readonly { readonly fileId: string; readonly name: string; readonly byteLength: number }[];
 }): void {
-	if (options.fileIds.length === 0) return;
-	const sourceDir = getOwnedSessionDeliveredDir(options.agentDir, options.sourceSessionId);
-	if (!sourceDir) return;
-	const targetDir = ensureOwnedSessionDeliveredDir(options.agentDir, options.targetSessionId);
-	let sourceNames: string[];
 	try {
-		sourceNames = readdirSync(sourceDir);
+		if (options.artifacts.length === 0) return;
+		const sourceDir = getOwnedSessionDeliveredDir(options.agentDir, options.sourceSessionId);
+		if (!sourceDir) return;
+		const targetDir = ensureOwnedSessionDeliveredDir(options.agentDir, options.targetSessionId);
+		for (const artifact of options.artifacts) {
+			let storageName: string;
+			try {
+				storageName = deliveredFileStorageName(artifact.fileId, artifact.name);
+			} catch {
+				continue;
+			}
+			const sourcePath = join(sourceDir, storageName);
+			const destination = join(targetDir, storageName);
+			try {
+				const metadata = lstatSync(sourcePath);
+				if (metadata.isSymbolicLink() || !metadata.isFile() || metadata.size !== artifact.byteLength) continue;
+				copyFileSync(sourcePath, destination, fsConstants.COPYFILE_EXCL);
+				if (process.platform !== "win32") chmodSync(destination, 0o600);
+			} catch {
+				// Best-effort copy keeps fork usable even when one file is missing.
+			}
+		}
+	} catch {
+		// Best-effort copy also keeps fork usable when its target directory is unavailable.
+		return;
+	}
+}
+
+/** Remove files in one owned delivered directory that have no durable journal reference. */
+export function removeUnreferencedSessionDeliveredFiles(
+	agentDir: string,
+	sessionId: string,
+	referencedArtifacts: readonly { readonly fileId: string; readonly name: string }[],
+): void {
+	const deliveredDir = getOwnedSessionDeliveredDir(agentDir, sessionId);
+	if (!deliveredDir) return;
+	let names: string[];
+	try {
+		names = readdirSync(deliveredDir);
 	} catch {
 		return;
 	}
-	for (const fileId of options.fileIds) {
-		if (!/^[a-f0-9]{16}$/iu.test(fileId)) continue;
-		const match = sourceNames.find((name) => name.startsWith(fileId));
-		if (!match) continue;
-		const sourcePath = join(sourceDir, match);
-		const destination = join(targetDir, match);
+	const referencedNames = new Set(
+		referencedArtifacts.flatMap((artifact) => {
+			try {
+				return [deliveredFileStorageName(artifact.fileId, artifact.name)];
+			} catch {
+				return [];
+			}
+		}),
+	);
+	for (const name of names) {
+		if (referencedNames.has(name)) continue;
 		try {
-			const metadata = lstatSync(sourcePath);
-			if (metadata.isSymbolicLink() || !metadata.isFile()) continue;
-			copyFileSync(sourcePath, destination, fsConstants.COPYFILE_EXCL);
-			if (process.platform !== "win32") chmodSync(destination, 0o600);
+			rmSync(join(deliveredDir, name), { force: true });
 		} catch {
-			// Best-effort copy keeps fork usable even when one file is missing.
+			// Reconciliation is best-effort; an unsafe entry remains inaccessible through resolve().
 		}
 	}
 }

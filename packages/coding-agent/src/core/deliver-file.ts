@@ -1,6 +1,4 @@
 import { type Static, Type } from "typebox";
-import type { ToolDefinition } from "./extensions/types.ts";
-import { stageDeliveredFile } from "./session-attachments.ts";
 
 export const MAX_DELIVER_FILE_MESSAGE_LENGTH = 512;
 
@@ -15,14 +13,6 @@ export const DeliverFileParams = Type.Object(
 
 export type DeliverFileInput = Static<typeof DeliverFileParams>;
 
-export interface DeliverFileContext {
-	readonly cwd: string;
-	readonly agentDir: string;
-	readonly sessionId: string;
-	readonly additionalDirectories?: readonly string[];
-	readonly activeDeliveredFileCount?: number;
-}
-
 export interface DeliverFileDetails {
 	readonly fileId: string;
 	readonly name: string;
@@ -31,9 +21,7 @@ export interface DeliverFileDetails {
 	readonly deliveredAt: string;
 }
 
-export type GetDeliverFileContext = () => DeliverFileContext;
-
-const DELIVERED_FILE_ID_PATTERN = /^[a-f0-9]{16}$/iu;
+const DELIVERED_FILE_ID_PATTERN = /^[a-f0-9]{16}$/u;
 
 export function parseDeliverFileDetails(details: unknown): DeliverFileDetails | undefined {
 	if (typeof details !== "object" || details === null) return undefined;
@@ -70,7 +58,7 @@ export function parseDeliverFileDetails(details: unknown): DeliverFileDetails | 
 	};
 }
 
-function normalizeInput(input: DeliverFileInput): { path: string; name?: string; message?: string } {
+export function normalizeDeliverFileInput(input: DeliverFileInput): { path: string; name?: string; message?: string } {
 	const path = input.path.trim();
 	if (!path) throw new TypeError("Deliverable path cannot be blank");
 	const name = input.name?.trim();
@@ -84,51 +72,5 @@ function normalizeInput(input: DeliverFileInput): { path: string; name?: string;
 		path,
 		...(name === undefined ? {} : { name }),
 		...(message === undefined ? {} : { message }),
-	};
-}
-
-export function createDeliverFileToolDefinition(
-	getContext: GetDeliverFileContext,
-): ToolDefinition<typeof DeliverFileParams, DeliverFileDetails> {
-	return {
-		name: "deliver_file",
-		label: "Deliver file",
-		description:
-			"Push a finished file to the user in the Desktop app so they can open or locate it. Use after creating or updating a deliverable the user should receive. The file must already exist on disk and stay within the current workspace, Metis attachment directory, or session work directory.",
-		promptSnippet: "Send a finished file to the user in the Desktop app",
-		parameters: DeliverFileParams,
-		executionMode: "sequential",
-		async execute(_toolCallId, input, signal) {
-			if (signal?.aborted) throw new Error("Deliver file was aborted");
-			const context = getContext();
-			const normalized = normalizeInput(input);
-			const staged = stageDeliveredFile({
-				agentDir: context.agentDir,
-				sessionId: context.sessionId,
-				cwd: context.cwd,
-				additionalDirectories: context.additionalDirectories,
-				sourcePath: normalized.path,
-				name: normalized.name,
-				activeDeliveredFileCount: context.activeDeliveredFileCount,
-			});
-			if (signal?.aborted) throw new Error("Deliver file was aborted");
-			const deliveredAt = new Date().toISOString();
-			const details: DeliverFileDetails = {
-				fileId: staged.fileId,
-				name: staged.name,
-				byteLength: staged.byteLength,
-				deliveredAt,
-				...(normalized.message === undefined ? {} : { message: normalized.message }),
-			};
-			const lines = [
-				`Delivered "${staged.name}" to the user (${staged.byteLength} bytes).`,
-				normalized.message ? `Message: ${normalized.message}` : undefined,
-				"The user can open the file from the inline delivery card in the chat transcript.",
-			].filter((line): line is string => line !== undefined);
-			return {
-				content: [{ type: "text", text: lines.join("\n") }],
-				details,
-			};
-		},
 	};
 }

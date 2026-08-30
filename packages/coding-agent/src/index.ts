@@ -108,11 +108,8 @@ export {
 	shouldCompact,
 } from "./core/compaction/index.ts";
 export {
-	createDeliverFileToolDefinition,
-	type DeliverFileContext,
 	type DeliverFileDetails,
 	type DeliverFileInput,
-	type GetDeliverFileContext,
 	MAX_DELIVER_FILE_MESSAGE_LENGTH,
 	parseDeliverFileDetails,
 } from "./core/deliver-file.ts";
@@ -453,25 +450,19 @@ export {
 	type SubmitPromptResult,
 } from "./core/sdk.ts";
 export {
-	copySessionDeliveredFiles,
 	formatSessionAttachmentDisplayText,
 	formatSessionAttachments,
 	getOwnedSessionAttachmentDir,
-	getOwnedSessionDeliveredDir,
 	getSessionAttachmentDir,
 	importSessionAttachments,
 	MAX_SESSION_ATTACHMENT_BYTES,
 	MAX_SESSION_ATTACHMENTS,
 	MAX_SESSION_ATTACHMENTS_BYTES,
-	MAX_SESSION_DELIVERED_FILES,
 	pruneStaleSessionWorkDirs,
 	removeSessionAttachment,
-	resolveDeliveredFilePath,
 	type SessionAttachment,
 	type SessionAttachmentInput,
-	type StagedDeliveredFile,
 	splitSessionAttachmentPrompt,
-	stageDeliveredFile,
 } from "./core/session-attachments.ts";
 export {
 	isSessionControlEntryType,
@@ -487,6 +478,12 @@ export {
 	type SessionPermissionDecisionEntry,
 	type SessionPermissionsEntry,
 } from "./core/session-control.ts";
+export {
+	type DeliveredArtifactAvailability,
+	type ResolvedSessionDeliveredArtifact,
+	type SessionDeliveredArtifact,
+	SessionDeliveredArtifacts,
+} from "./core/session-delivered-artifacts.ts";
 export { createSessionId } from "./core/session-id.ts";
 export {
 	assertValidSessionId,

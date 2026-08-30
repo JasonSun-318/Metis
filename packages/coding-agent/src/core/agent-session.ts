@@ -177,6 +177,7 @@ import {
 	getOwnedSessionWorkDirs,
 	getSessionAttachmentDir,
 } from "./session-attachments.ts";
+import { SessionDeliveredArtifacts } from "./session-delivered-artifacts.ts";
 import { createSessionId } from "./session-id.ts";
 import type { BranchSummaryEntry, CompactionEntry, SessionEntry, SessionHeader } from "./session-manager.ts";
 import { CURRENT_SESSION_VERSION, getLatestCompactionEntry, type SessionManager } from "./session-manager.ts";
@@ -466,6 +467,7 @@ export class AgentSession {
 	readonly agent: Agent;
 	readonly sessionManager: SessionManager;
 	readonly settingsManager: SettingsManager;
+	readonly deliveredArtifacts: SessionDeliveredArtifacts | undefined;
 	private readonly _toolOutputDir: string;
 	private readonly _ephemeralToolOutputDir: string | undefined;
 
@@ -624,6 +626,9 @@ export class AgentSession {
 		this._customTools = config.unattendedExecution ? [] : (config.customTools ?? []);
 		this._cwd = config.cwd;
 		this._agentDir = config.agentDir;
+		this.deliveredArtifacts = config.agentDir
+			? new SessionDeliveredArtifacts(config.agentDir, this.sessionManager)
+			: undefined;
 		this._modelRegistry = config.modelRegistry;
 		this._mcpManager = config.unattendedExecution ? undefined : config.mcpManager;
 		this._extensionRunnerRef = config.extensionRunnerRef;
@@ -1533,6 +1538,7 @@ export class AgentSession {
 		this._isAgentSettling = true;
 		this._isAgentRunActive = false;
 		try {
+			this.deliveredArtifacts?.rollbackAll();
 			await this._extensionRunner.emit({ type: "agent_settled" });
 			this._emit({ type: "agent_settled" });
 		} finally {
@@ -1593,8 +1599,19 @@ export class AgentSession {
 			}
 		}
 
-		// Notify all listeners
-		this._emit(event.type === "agent_end" ? { ...event, willRetry: this._willRetryAfterAgentEnd(event) } : event);
+		const deliveryMessage =
+			event.type === "message_end" &&
+			event.message.role === "toolResult" &&
+			event.message.toolName === "deliver_file"
+				? event.message
+				: undefined;
+		const durableDelivery = deliveryMessage?.isError === false;
+		if (deliveryMessage && !durableDelivery) this.deliveredArtifacts?.rollback(deliveryMessage.toolCallId);
+
+		// Successful delivery completion is published only after its journal fact is durable.
+		if (!durableDelivery) {
+			this._emit(event.type === "agent_end" ? { ...event, willRetry: this._willRetryAfterAgentEnd(event) } : event);
+		}
 
 		// Handle session persistence
 		if (event.type === "message_end") {
@@ -1609,6 +1626,7 @@ export class AgentSession {
 					}
 				} catch (error) {
 					this._discardUnpersistedAgentMessage(event.message);
+					if (deliveryMessage) this.deliveredArtifacts?.rollback(deliveryMessage.toolCallId);
 					throw new DurableMessageValidationError(error);
 				}
 			}
@@ -1627,11 +1645,20 @@ export class AgentSession {
 				event.message.role === "toolResult"
 			) {
 				// Regular LLM message - persist as SessionMessageEntry
-				this.sessionManager.appendMessage(
-					event.message,
-					event.message.role === "toolResult" ? toolOutput : undefined,
-					this._durableTurn?.turnId,
-				);
+				try {
+					this.sessionManager.appendMessage(
+						event.message,
+						event.message.role === "toolResult" ? toolOutput : undefined,
+						this._durableTurn?.turnId,
+					);
+				} catch (error) {
+					if (deliveryMessage) this.deliveredArtifacts?.rollback(deliveryMessage.toolCallId);
+					throw error;
+				}
+				if (durableDelivery) {
+					this.deliveredArtifacts?.commitToolResult(deliveryMessage);
+					this._emit(event);
+				}
 				if (
 					event.message.role === "assistant" ||
 					(event.message.role === "toolResult" && event.message.toolName === "wait_agents")
@@ -1978,6 +2005,7 @@ export class AgentSession {
 				} catch {
 					// Continue invalidating the session even if an abort hook throws.
 				}
+				this.deliveredArtifacts?.rollbackAll();
 				this._toolAuthorization.dispose();
 
 				this._extensionRunner.invalidate(
