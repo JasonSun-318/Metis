@@ -100,6 +100,7 @@ function browserHarness(
 		),
 		printToPDF: vi.fn(async () => Buffer.from("pdf")),
 		setZoomFactor: vi.fn(),
+		invalidate: vi.fn(),
 		capturePage: vi.fn(async () => nativeImage),
 		on: vi.fn((name: string, listener: (...args: any[]) => void) => {
 			const eventListeners = listeners.get(name) ?? new Set();
@@ -1076,7 +1077,7 @@ describe("BrowserManager", () => {
 		]);
 
 		await harness.manager.control({ sessionId: SESSION_ID, type: "capture-page", browserId });
-		expect(harness.webContents.capturePage).toHaveBeenCalledWith();
+		expect(harness.webContents.capturePage).toHaveBeenCalledWith(undefined, { stayHidden: true });
 		expect(harness.saveScreenshot).toHaveBeenCalledWith(
 			harness.nativeImage,
 			expect.stringMatching(/^Metis-Screenshot-\d{4}-\d{2}-\d{2}-\d{6}\.png$/u),
@@ -1084,6 +1085,7 @@ describe("BrowserManager", () => {
 		await expect(harness.manager.capturePreview(SESSION_ID, browserId)).resolves.toBe(
 			"data:image/png;base64,cHJldmlldw==",
 		);
+		expect(harness.webContents.invalidate).toHaveBeenCalledTimes(2);
 		expect(harness.nativeImage.toDataURL).toHaveBeenCalledOnce();
 
 		await harness.manager.control({ sessionId: SESSION_ID, type: "clear-data", browserId });

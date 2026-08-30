@@ -60,6 +60,11 @@ const ACTIVITY_IDLE_DELAY_MS = 50;
 const PROGRESS_EVENT_INTERVAL_MS = 50;
 const ZOOM_PERCENTAGES = [25, 33, 50, 67, 75, 80, 90, 100, 110, 125, 150, 175, 200, 250, 300, 400, 500] as const;
 
+async function captureFreshPage(contents: WebContents): Promise<NativeImage> {
+	contents.invalidate();
+	return contents.capturePage(undefined, { stayHidden: true });
+}
+
 interface BrowserRecord {
 	readonly browserId: string;
 	readonly sessionId: string;
@@ -453,7 +458,7 @@ export class BrowserManager {
 	}
 
 	async capturePreview(sessionId: string, browserId: string): Promise<string> {
-		return (await this.recordForSession(sessionId, browserId).contents.capturePage()).toDataURL();
+		return (await captureFreshPage(this.recordForSession(sessionId, browserId).contents)).toDataURL();
 	}
 
 	listDownloads(): readonly DesktopDownloadItem[] {
@@ -595,7 +600,7 @@ export class BrowserManager {
 			return;
 		}
 		if (input.type === "capture-page") {
-			const image = await record.contents.capturePage();
+			const image = await captureFreshPage(record.contents);
 			await this.dependencies.saveScreenshot(image, screenshotFilename());
 			return;
 		}
@@ -792,7 +797,7 @@ export class BrowserManager {
 			debugger: browserDebugger,
 			pageState: () => ({ url: contents.getURL(), title: contents.getTitle(), loading: contents.isLoading() }),
 			captureScreenshot: async (quality) => {
-				let image = await contents.capturePage();
+				let image = await captureFreshPage(contents);
 				const { width, height } = image.getSize();
 				const scale = Math.min(1, 1_600 / width, 1_200 / height);
 				if (scale < 1) {
