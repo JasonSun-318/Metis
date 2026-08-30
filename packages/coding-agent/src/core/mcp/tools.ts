@@ -143,6 +143,7 @@ Some of the tools may not have been provided to you upfront, and you should use 
 		async execute(_toolCallId, { query, limit }) {
 			const normalizedQuery = query.trim();
 			if (!normalizedQuery) throw new Error("tool_search query must not be empty");
+			await manager.ensureCurrent();
 			const hits = manager.searchTools(normalizedQuery, limit ?? 8);
 			const before = new Set(activation.getActiveToolNames());
 			activation.setActiveToolsByName([...before, ...hits.map((hit) => hit.modelName)]);

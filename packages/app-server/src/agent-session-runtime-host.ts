@@ -45,6 +45,7 @@ import {
 	McpConfigurationCoordinator,
 	type McpCredentialChange,
 	type McpServerSettings,
+	mcpCredentialState,
 	ProjectTrustStore,
 	QueuedTurnBusyError,
 	QueuedTurnConflictError,
@@ -91,7 +92,6 @@ import {
 import { inspectMcpImport as inspectMcpImportSource, resolveMcpImport } from "./mcp-import.ts";
 import {
 	inputMcpServer,
-	matchingMcpCredentialState,
 	mcpDefinitionAtScope,
 	mcpRevision,
 	publicMcpDetail,
@@ -907,7 +907,7 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 			servers: publicMcpServers(this.session.settingsManager, {
 				statuses: this.session.mcp?.getStatus() ?? [],
 				credentialState: (scope, name, server) =>
-					matchingMcpCredentialState(this.authStorage, this.mcpCwd(), scope, name, server),
+					mcpCredentialState(this.authStorage, this.mcpCwd(), scope, name, server),
 			}),
 		};
 	}
@@ -932,7 +932,7 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 	): McpServerSettings {
 		const current = mcpDefinitionAtScope(this.session.settingsManager, scope, name);
 		const credentialState = current
-			? matchingMcpCredentialState(this.authStorage, this.mcpCwd(), scope, name, current)
+			? mcpCredentialState(this.authStorage, this.mcpCwd(), scope, name, current)
 			: undefined;
 		if (!current || mcpRevision(scope, name, current, credentialState) !== expectedRevision) {
 			throw new AppServerError("CONFLICT", { sessionId: this.sessionId, requestId });
@@ -1008,7 +1008,7 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 					input.scope,
 					name,
 					server,
-					matchingMcpCredentialState(this.authStorage, this.mcpCwd(), input.scope, name, server),
+					mcpCredentialState(this.authStorage, this.mcpCwd(), input.scope, name, server),
 				),
 			]),
 		);
@@ -2341,7 +2341,7 @@ export class AgentSessionRuntimeHost implements SessionRuntimeHost {
 		return {
 			servers: publicMcpServers(context.settingsManager, {
 				credentialState: (scope, name, server) =>
-					matchingMcpCredentialState(this.authStorage, context.cwd, scope, name, server),
+					mcpCredentialState(this.authStorage, context.cwd, scope, name, server),
 			}),
 		};
 	}
@@ -2363,7 +2363,7 @@ export class AgentSessionRuntimeHost implements SessionRuntimeHost {
 					input.scope,
 					name,
 					server,
-					matchingMcpCredentialState(this.authStorage, context.cwd, input.scope, name, server),
+					mcpCredentialState(this.authStorage, context.cwd, input.scope, name, server),
 				),
 			]),
 		);

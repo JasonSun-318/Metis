@@ -217,7 +217,7 @@ describe("MCP configuration transaction primitives", () => {
 		});
 		const current = settings.getGlobalSettings().mcpServers!.local!;
 
-		await coordinator.mutate({
+		const result = await coordinator.mutate({
 			settingsManager: settings,
 			cwd: "/work/project",
 			scope: "user",
@@ -239,6 +239,10 @@ describe("MCP configuration transaction primitives", () => {
 		expect(authStorage.get(authStorage.list()[0]!)).toMatchObject({
 			type: "mcp_secret",
 			env: { TOKEN: "literal-secret" },
+		});
+		expect(result.entries[0]).toMatchObject({
+			credentialConfigured: true,
+			revision: mcpConfigurationRevision("user", "local", saved, saved.credentialVersion),
 		});
 	});
 

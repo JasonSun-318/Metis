@@ -21,7 +21,14 @@ import {
 	resolveMcpServerDefinitions,
 	resolveMcpSettings,
 } from "./config.ts";
-import type { McpConfigurationCoordinator } from "./configuration.ts";
+import {
+	type McpConfigurationChange,
+	type McpConfigurationCoordinator,
+	type McpConfigurationResult,
+	type McpConfigurationScope,
+	mcpConfigurationRevision,
+	mcpCredentialState,
+} from "./configuration.ts";
 
 const MAX_TOOL_NAME = 64;
 
@@ -303,7 +310,7 @@ export class McpManager {
 		);
 	}
 
-	private storedSecret(config: ResolvedMcpServerConfig): McpSecretCredential | undefined {
+	private storedSecret(config: ResolvedMcpServerConfig) {
 		const fingerprint = mcpServerFingerprint(config);
 		const keys = [
 			config.credentialKey,
@@ -373,13 +380,15 @@ export class McpManager {
 		const clients = this.createClients(settings);
 		await this.startClients(clients, backgroundOptionalStartup);
 		this.activeGeneration = { clients, inFlight: 0, retired: false };
-		this.activeRevision = this.configurationRevision(settings);
+		this.activeRevision = this.runtimeConfigurationRevision(settings);
 		this.attachClientSubscriptions();
 		this.rebuildRecords();
 	}
 
-	private configurationRevision(settings: ResolvedMcpSettings): string {
-		return createHash("sha256").update(JSON.stringify(settings)).digest("hex");
+	private runtimeConfigurationRevision(settings: ResolvedMcpSettings): string {
+		return createHash("sha256")
+			.update(JSON.stringify(settings.servers.map((server) => [server, this.storedSecret(server)])))
+			.digest("hex");
 	}
 
 	private error(error: unknown): Error {
@@ -481,7 +490,8 @@ export class McpManager {
 		return client;
 	}
 
-	callTool(modelName: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<CallToolResult> {
+	async callTool(modelName: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<CallToolResult> {
+		await this.ensureCurrent();
 		const record = this.recordFor(modelName);
 		return this.withActiveGeneration((clients) => {
 			const client = clients.get(record.serverName);
@@ -517,8 +527,9 @@ export class McpManager {
 		});
 	}
 
-	listResources(server?: string, cursor?: string): Promise<unknown> {
-		if (cursor && !server) return Promise.reject(new Error("cursor can only be used when a server is specified"));
+	async listResources(server?: string, cursor?: string): Promise<unknown> {
+		if (cursor && !server) throw new Error("cursor can only be used when a server is specified");
+		await this.ensureCurrent();
 		if (server)
 			return this.withActiveGeneration((clients) => {
 				const client = clients.get(server);
@@ -528,8 +539,9 @@ export class McpManager {
 		return this.aggregate("resources", (client) => client.listResources());
 	}
 
-	listResourceTemplates(server?: string, cursor?: string): Promise<unknown> {
-		if (cursor && !server) return Promise.reject(new Error("cursor can only be used when a server is specified"));
+	async listResourceTemplates(server?: string, cursor?: string): Promise<unknown> {
+		if (cursor && !server) throw new Error("cursor can only be used when a server is specified");
+		await this.ensureCurrent();
 		if (server)
 			return this.withActiveGeneration((clients) => {
 				const client = clients.get(server);
@@ -539,7 +551,8 @@ export class McpManager {
 		return this.aggregate("resources", (client) => client.listResourceTemplates());
 	}
 
-	readResource(server: string, uri: string, signal?: AbortSignal): Promise<ReadResourceResult> {
+	async readResource(server: string, uri: string, signal?: AbortSignal): Promise<ReadResourceResult> {
+		await this.ensureCurrent();
 		return this.withActiveGeneration((clients) => {
 			const client = clients.get(server);
 			if (!client) throw new Error(`Unknown MCP server "${server}"`);
@@ -547,8 +560,9 @@ export class McpManager {
 		});
 	}
 
-	listPrompts(server?: string, cursor?: string): Promise<unknown> {
-		if (cursor && !server) return Promise.reject(new Error("cursor can only be used when a server is specified"));
+	async listPrompts(server?: string, cursor?: string): Promise<unknown> {
+		if (cursor && !server) throw new Error("cursor can only be used when a server is specified");
+		await this.ensureCurrent();
 		if (server)
 			return this.withActiveGeneration((clients) => {
 				const client = clients.get(server);
@@ -558,7 +572,8 @@ export class McpManager {
 		return this.aggregate("prompts", (client) => client.listPrompts());
 	}
 
-	getPrompt(server: string, name: string, args?: Record<string, string>): Promise<GetPromptResult> {
+	async getPrompt(server: string, name: string, args?: Record<string, string>): Promise<GetPromptResult> {
+		await this.ensureCurrent();
 		return this.withActiveGeneration((clients) => {
 			const client = clients.get(server);
 			if (!client) throw new Error(`Unknown MCP server "${server}"`);
@@ -678,7 +693,7 @@ export class McpManager {
 		this.authStorage.reload();
 		const nextClients = this.createClients(settings);
 		await this.startClients(nextClients);
-		const prepared = { revision: this.configurationRevision(settings) };
+		const prepared = { revision: this.runtimeConfigurationRevision(settings) };
 		this.preparedGenerations.set(prepared, { clients: nextClients, inFlight: 0, retired: false });
 		return prepared;
 	}
@@ -717,6 +732,31 @@ export class McpManager {
 		return this.configurationCoordinator;
 	}
 
+	currentDefinitionRevision(scope: McpConfigurationScope, name: string, server: McpServerSettings): string {
+		this.authStorage.reload();
+		return mcpConfigurationRevision(
+			scope,
+			name,
+			server,
+			mcpCredentialState(this.authStorage, this.cwd, scope, name, server, this.environment),
+		);
+	}
+
+	mutateConfiguration(
+		scope: McpConfigurationScope,
+		changes: readonly McpConfigurationChange[],
+	): Promise<McpConfigurationResult> {
+		if (!this.configurationCoordinator) {
+			return Promise.reject(new Error("MCP configuration is not available in this process"));
+		}
+		return this.configurationCoordinator.mutate({
+			settingsManager: this.settingsManager,
+			cwd: this.cwd,
+			scope,
+			changes,
+		});
+	}
+
 	async prepareConfigurationChanges(
 		scope: "global" | "project",
 		changes: ReadonlyMap<string, McpServerSettings | undefined>,
@@ -739,7 +779,7 @@ export class McpManager {
 			await this.settingsManager.reload();
 			this.authStorage.reload();
 			const settings = resolveMcpSettings(this.settingsManager, this.cwd, this.environment);
-			if (this.configurationRevision(settings) === this.activeRevision) return;
+			if (this.runtimeConfigurationRevision(settings) === this.activeRevision) return;
 			const prepared = await this.prepareConfiguration(settings);
 			this.activateConfiguration(prepared);
 		});
@@ -751,46 +791,36 @@ export class McpManager {
 		return this.cleanupErrors.splice(0);
 	}
 
-	async setSecret(server: string, credential: Omit<McpSecretCredential, "type">): Promise<void> {
-		const client = this.clientFor(server);
-		const environment = Object.entries(credential.env ?? {});
-		if (credential.bearerToken === "" || environment.some(([name, value]) => !name || !value)) {
-			throw new Error("MCP secret names and values must not be empty");
-		}
-		if (!credential.bearerToken && environment.length === 0) {
-			throw new Error("MCP secret must contain a bearer token or environment value");
-		}
-		const key = client.resolvedConfig.credentialKey;
-		const previous = this.authStorage.get(key);
-		this.authStorage.set(key, {
-			type: "mcp_secret",
-			...credential,
-			serverFingerprint: mcpServerFingerprint(client.resolvedConfig),
+	private async mutateCredential(
+		name: string,
+		credential: Extract<McpConfigurationChange["credential"], { action: "replace" | "remove" }>,
+	): Promise<void> {
+		await this.settingsManager.reload();
+		const project = this.settingsManager.getProjectSettings().mcpServers?.[name];
+		const user = this.settingsManager.getGlobalSettings().mcpServers?.[name];
+		const scope = project ? "project" : "user";
+		const current = project ?? user;
+		if (!current) throw new Error(`Unknown MCP server "${name}"`);
+		await this.mutateConfiguration(scope, [
+			{
+				name,
+				expectedRevision: this.currentDefinitionRevision(scope, name, current),
+				next: current,
+				credential,
+			},
+		]);
+	}
+
+	setSecret(server: string, credential: Omit<McpSecretCredential, "type">): Promise<void> {
+		return this.mutateCredential(server, {
+			action: "replace",
+			...(credential.bearerToken === undefined ? {} : { bearerToken: credential.bearerToken }),
+			...(credential.env === undefined ? {} : { environment: credential.env }),
 		});
-		try {
-			await this.reload();
-		} catch (error) {
-			if (previous) this.authStorage.set(key, previous);
-			else this.authStorage.remove(key);
-			throw error;
-		}
 	}
 
-	deleteCredential(server: string): void {
-		this.authStorage.remove(this.clientFor(server).resolvedConfig.credentialKey);
-	}
-
-	async logout(server: string): Promise<void> {
-		this.clientFor(server);
-		const key = this.clientFor(server).resolvedConfig.credentialKey;
-		const previous = this.authStorage.get(key);
-		this.authStorage.remove(key);
-		try {
-			await this.reload();
-		} catch (error) {
-			if (previous) this.authStorage.set(key, previous);
-			throw error;
-		}
+	logout(server: string): Promise<void> {
+		return this.mutateCredential(server, { action: "remove" });
 	}
 
 	async restart(server?: string): Promise<void> {

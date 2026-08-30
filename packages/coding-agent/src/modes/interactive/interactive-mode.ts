@@ -80,8 +80,8 @@ import type {
 import { FooterDataProvider, type ReadonlyFooterDataProvider } from "../../core/footer-data-provider.ts";
 import { configureHttpDispatcher, formatHttpIdleTimeoutMs } from "../../core/http-dispatcher.ts";
 import { type AppKeybinding, KeybindingsManager } from "../../core/keybindings.ts";
-import { resolveMcpServerSettings } from "../../core/mcp/config.ts";
-import type { McpServerStatus } from "../../core/mcp/manager.ts";
+import type { McpCredentialChange } from "../../core/mcp/configuration.ts";
+import type { McpManager, McpServerStatus } from "../../core/mcp/manager.ts";
 import type { MemoryExtractRun } from "../../core/memory/memory-types.ts";
 import { createCompactionSummaryMessage } from "../../core/messages.ts";
 import { defaultModelPerProvider, findExactModelReferenceMatch, resolveModelScope } from "../../core/model-resolver.ts";
@@ -5702,15 +5702,30 @@ export class InteractiveMode {
 	private async persistMcpDefinition(
 		scope: SettingsScope,
 		name: string,
-		server: McpServerSettings,
-		reload = true,
+		server: McpServerSettings | undefined,
+		credential: McpCredentialChange = { action: server ? "preserve" : "remove" },
 	): Promise<void> {
-		resolveMcpServerSettings(name, server, process.cwd(), process.env);
-		this.settingsManager.setMcpServer(scope, name, server);
-		await this.settingsManager.flush();
-		const errors = this.settingsManager.drainErrors();
-		if (errors.length > 0) throw errors[0]!.error;
-		if (reload) await this.session.reload();
+		const manager = this.mcpManager();
+		const current =
+			scope === "global"
+				? this.settingsManager.getGlobalSettings().mcpServers?.[name]
+				: this.settingsManager.getProjectSettings().mcpServers?.[name];
+		await manager.mutateConfiguration(scope === "global" ? "user" : "project", [
+			{
+				name,
+				expectedRevision: current
+					? manager.currentDefinitionRevision(scope === "global" ? "user" : "project", name, current)
+					: null,
+				next: server,
+				credential,
+			},
+		]);
+	}
+
+	private mcpManager(): McpManager {
+		const manager = this.session.mcp;
+		if (!manager) throw new Error("MCP is not available in this session");
+		return manager;
 	}
 
 	private mcpStatusRow(status: McpServerStatus): string {
@@ -6049,7 +6064,9 @@ export class InteractiveMode {
 
 	private async showMcpManager(): Promise<void> {
 		while (true) {
-			const statuses = this.session.getMcpStatus();
+			const manager = this.mcpManager();
+			await manager.ensureCurrent();
+			const statuses = manager.getStatus();
 			const rows = new Map(statuses.map((status) => [this.mcpStatusRow(status), status.name]));
 			const selected = await this.showExtensionSelector("MCP servers", ["Add server", ...rows.keys(), "Close"]);
 			if (!selected || selected === "Close") return;
@@ -6139,7 +6156,9 @@ export class InteractiveMode {
 	}
 
 	private async handleMcpPostAdd(name: string): Promise<void> {
-		const status = this.session.getMcpStatus().find((item) => item.name === name);
+		const status = this.mcpManager()
+			.getStatus()
+			.find((item) => item.name === name);
 		if (!status) {
 			this.showStatus(`Added MCP server "${name}"`);
 			return;
@@ -6157,9 +6176,12 @@ export class InteractiveMode {
 
 	private async showMcpServerMenu(name: string): Promise<void> {
 		while (true) {
-			const status = this.session.getMcpStatus().find((item) => item.name === name);
-			if (!status || !this.getMcpDefinition(name)) return;
-			const stored = this.session.hasMcpCredential(name);
+			const manager = this.mcpManager();
+			await manager.ensureCurrent();
+			const status = manager.getStatus().find((item) => item.name === name);
+			const definition = this.getMcpDefinition(name);
+			if (!status || !definition) return;
+			const stored = manager.hasCredential(name);
 			const actions = ["Details", "Authentication", "Restart", ...(stored ? ["Sign out"] : []), "Remove", "Back"];
 			const selected = await this.showExtensionSelector(`MCP server · ${name}`, actions);
 			if (!selected || selected === "Back") return;
@@ -6171,10 +6193,10 @@ export class InteractiveMode {
 			try {
 				if (selected === "Authentication") await this.showMcpAuthenticationMenu(name);
 				else if (selected === "Restart") {
-					await this.session.restartMcpServers(name);
+					await manager.restart(name);
 					this.showStatus(`Restarted MCP server "${name}"`);
 				} else if (selected === "Sign out") {
-					await this.session.logoutMcpServer(name);
+					await this.persistMcpDefinition(definition.scope, name, definition.server, { action: "remove" });
 					this.showStatus(`Signed out MCP server "${name}"`);
 				} else if (selected === "Remove" && (await this.removeMcpServer(name))) return;
 			} catch (error) {
@@ -6188,7 +6210,9 @@ export class InteractiveMode {
 	}
 
 	private showMcpConnectionResult(name: string, connectedMessage: string): void {
-		const status = this.session.getMcpStatus().find((item) => item.name === name);
+		const status = this.mcpManager()
+			.getStatus()
+			.find((item) => item.name === name);
 		if (status?.state === "connected") this.showStatus(connectedMessage);
 		else if (status?.state === "auth_required") this.showWarning(`Authentication failed for MCP server "${name}"`);
 		else if (status?.lastError) this.showError(status.lastError);
@@ -6217,8 +6241,10 @@ export class InteractiveMode {
 						continue;
 					}
 					const { bearerTokenEnvVar: _bearerTokenEnvVar, ...server } = definition.server as McpHttpServerSettings;
-					await this.persistMcpDefinition(definition.scope, name, server, false);
-					await this.session.setMcpSecret(name, { bearerToken: token });
+					await this.persistMcpDefinition(definition.scope, name, server, {
+						action: "replace",
+						bearerToken: token,
+					});
 					this.showMcpConnectionResult(name, `Updated authentication for MCP server "${name}"`);
 					return;
 				}
@@ -6236,9 +6262,8 @@ export class InteractiveMode {
 							...(definition.server as McpHttpServerSettings),
 							bearerTokenEnvVar: envName,
 						},
-						false,
+						{ action: "remove" },
 					);
-					await this.session.logoutMcpServer(name);
 					if (process.env[envName] === undefined) {
 						this.showWarning(`Environment variable ${envName} is not available. Restart Metis after setting it.`);
 					} else this.showMcpConnectionResult(name, `Updated authentication for MCP server "${name}"`);
@@ -6259,8 +6284,7 @@ export class InteractiveMode {
 								definition.server as McpHttpServerSettings,
 							)
 						: { ...(definition.server as McpStdioServerSettings), envVars: undefined };
-					await this.persistMcpDefinition(definition.scope, name, server, false);
-					await this.session.logoutMcpServer(name);
+					await this.persistMcpDefinition(definition.scope, name, server, { action: "remove" });
 					this.showMcpConnectionResult(name, `Cleared authentication for MCP server "${name}"`);
 					return;
 				}
@@ -6296,37 +6320,37 @@ export class InteractiveMode {
 						this.showWarning("Environment value must not be empty");
 						continue;
 					}
-					const literal = { ...(server.env ?? {}) };
-					delete literal[envName];
+					const environment = {
+						...(server.env ?? {}),
+						...this.mcpManager().getSecretEnvironment(name),
+						[envName]: value,
+					};
 					await this.persistMcpDefinition(
 						scope,
 						name,
 						{
 							...server,
-							env: Object.keys(literal).length > 0 ? literal : undefined,
+							env: undefined,
 							envVars: server.envVars?.filter((item) => item !== envName),
 						},
-						false,
+						{ action: "replace", environment },
 					);
-					const existing = this.session.getMcpSecretEnvironment(name);
-					await this.session.setMcpSecret(name, { env: { ...existing, [envName]: value } });
 					this.showMcpConnectionResult(name, `Updated authentication for MCP server "${name}"`);
 					return true;
 				}
 
-				const remaining = this.session.getMcpSecretEnvironment(name);
+				const remaining = {
+					...(server.env ?? {}),
+					...this.mcpManager().getSecretEnvironment(name),
+				};
 				delete remaining[envName];
-				const literal = { ...(server.env ?? {}) };
-				delete literal[envName];
 				const envVars = [...new Set([...(server.envVars ?? []), envName])];
 				await this.persistMcpDefinition(
 					scope,
 					name,
-					{ ...server, env: Object.keys(literal).length > 0 ? literal : undefined, envVars },
-					false,
+					{ ...server, env: undefined, envVars },
+					Object.keys(remaining).length > 0 ? { action: "replace", environment: remaining } : { action: "remove" },
 				);
-				if (Object.keys(remaining).length > 0) await this.session.setMcpSecret(name, { env: remaining });
-				else await this.session.logoutMcpServer(name);
 				if (process.env[envName] === undefined) {
 					this.showWarning(`Environment variable ${envName} is not available. Restart Metis after setting it.`);
 				} else this.showMcpConnectionResult(name, `Updated authentication for MCP server "${name}"`);
@@ -6356,12 +6380,7 @@ export class InteractiveMode {
 			`Remove the ${scope === "global" ? "personal" : "project"} definition for "${name}" and its stored credential?`,
 		);
 		if (!confirmed) return false;
-		if (!this.settingsManager.removeMcpServer(scope, name)) return false;
-		await this.settingsManager.flush();
-		const errors = this.settingsManager.drainErrors();
-		if (errors.length > 0) throw errors[0]!.error;
-		this.session.deleteMcpCredential(name);
-		await this.session.reload();
+		await this.persistMcpDefinition(scope, name, undefined, { action: "remove" });
 		this.showStatus(`Removed MCP server "${name}"`);
 		return true;
 	}

@@ -1,13 +1,9 @@
 import type { ClientParams, McpCatalogEntryView, McpServerDetailView, McpServerSummaryView } from "@metis/app-protocol";
 import {
-	type AuthStorage,
-	legacyMcpCredentialKey,
 	type McpServerSettings,
 	type McpServerStatus,
 	type McpStdioServerSettings,
 	mcpConfigurationRevision,
-	mcpCredentialKey,
-	mcpServerFingerprint,
 	resolveMcpServerSettings,
 	type SettingsManager,
 } from "@metis/coding-agent";
@@ -214,30 +210,6 @@ export function mcpDefinitionAtScope(
 ): McpServerSettings | undefined {
 	const settings = scope === "user" ? settingsManager.getGlobalSettings() : settingsManager.getProjectSettings();
 	return settings.mcpServers?.[name];
-}
-
-export function matchingMcpCredentialState(
-	authStorage: AuthStorage | undefined,
-	cwd: string,
-	scope: "user" | "project",
-	name: string,
-	server: McpServerSettings,
-): string | undefined {
-	if (!authStorage) return undefined;
-	try {
-		const identity = scope === "user" ? ({ scope, name } as const) : ({ scope, name, cwd } as const);
-		const resolved = resolveMcpServerSettings(name, server, cwd, process.env, identity);
-		const fingerprint = mcpServerFingerprint(resolved);
-		for (const key of new Set([resolved.credentialKey, mcpCredentialKey(identity), legacyMcpCredentialKey(name)])) {
-			const credential = authStorage.get(key);
-			if (credential?.type === "mcp_secret" && credential.serverFingerprint === fingerprint) {
-				return server.credentialVersion ?? "legacy";
-			}
-		}
-		return undefined;
-	} catch {
-		return undefined;
-	}
 }
 
 export function publicMcpServers(

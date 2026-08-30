@@ -30,6 +30,7 @@ function fakeManager(
 ): McpManager {
 	const tool = record(options.instructions);
 	return {
+		ensureCurrent: vi.fn(async () => {}),
 		getToolRecords: () => [tool],
 		getDirectToolNames: () => options.directNames ?? ["tool_search"],
 		searchTools: vi.fn(() => [tool]),

@@ -50,7 +50,6 @@ import { canonicalizeActionPath, isPathInside, resolvePath } from "../utils/path
 import { sleep } from "../utils/sleep.ts";
 import type { AgentMode } from "./agent-mode.ts";
 import { formatNoApiKeyFoundMessage, formatNoModelSelectedMessage } from "./auth-guidance.ts";
-import type { McpSecretCredential } from "./auth-storage.ts";
 import {
 	type AutoMemorySnapshot,
 	getAutoMemoryRoot,
@@ -127,14 +126,7 @@ import {
 	type InteractiveBashBoundary,
 } from "./interactive-bash-boundary.ts";
 import { externalizeLargeToolOutput, type PersistedToolOutput } from "./large-tool-output.ts";
-import {
-	createMcpToolDefinitions,
-	type McpCatalogItemDetail,
-	type McpCatalogItemKind,
-	type McpCatalogSummary,
-	type McpManager,
-	type McpServerStatus,
-} from "./mcp/index.ts";
+import { createMcpToolDefinitions, type McpManager } from "./mcp/index.ts";
 import { embeddingConfigKey, embedTexts as embedMemoryTexts } from "./memory/memory-embedder.ts";
 import { collectMemoryEvidenceBatch, serializeExtractEvidence } from "./memory/memory-evidence.ts";
 import {
@@ -2325,54 +2317,8 @@ export class AgentSession {
 		this.settingsManager.setWebSearchProvider(provider);
 	}
 
-	getMcpStatus(): McpServerStatus[] {
-		return this._mcpManager?.getStatus() ?? [];
-	}
-
 	get mcp(): McpManager | undefined {
 		return this._mcpManager;
-	}
-
-	getMcpCatalog(name: string): McpCatalogSummary {
-		if (!this._mcpManager) throw new Error("MCP is not available in this session");
-		return this._mcpManager.getCatalog(name);
-	}
-
-	getMcpCatalogItem(name: string, kind: McpCatalogItemKind, id: string): McpCatalogItemDetail {
-		if (!this._mcpManager) throw new Error("MCP is not available in this session");
-		return this._mcpManager.getCatalogItem(name, kind, id);
-	}
-
-	hasMcpCredential(name: string): boolean {
-		return this._mcpManager?.hasCredential(name) ?? false;
-	}
-
-	getMcpSecretEnvironment(name: string): Record<string, string> {
-		return this._mcpManager?.getSecretEnvironment(name) ?? {};
-	}
-
-	logoutMcpServer(name: string): Promise<void> {
-		if (!this._mcpManager) return Promise.reject(new Error("MCP is not available in this session"));
-		return this._mcpManager.logout(name);
-	}
-
-	setMcpSecret(name: string, credential: Omit<McpSecretCredential, "type">): Promise<void> {
-		if (!this._mcpManager) return Promise.reject(new Error("MCP is not available in this session"));
-		return this._mcpManager.setSecret(name, credential);
-	}
-
-	deleteMcpCredential(name: string): void {
-		this._mcpManager?.deleteCredential(name);
-	}
-
-	restartMcpServers(name?: string): Promise<void> {
-		if (!this._mcpManager) return Promise.reject(new Error("MCP is not available in this session"));
-		return this._mcpManager.restart(name);
-	}
-
-	reloadMcpServers(): Promise<void> {
-		if (!this._mcpManager) return Promise.reject(new Error("MCP is not available in this session"));
-		return this._mcpManager.reload();
 	}
 
 	getGoal(): ThreadGoal | null {

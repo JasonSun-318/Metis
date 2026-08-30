@@ -281,6 +281,7 @@ export {
 	type McpServerStatus,
 	type McpToolRecord,
 	mcpConfigurationRevision,
+	mcpCredentialState,
 	mcpServerFingerprint,
 	resolveMcpServerSettings,
 } from "./core/mcp/index.ts";

@@ -3,8 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Component } from "@metis/tui";
 import { beforeAll, describe, expect, it, vi } from "vitest";
-import { AuthStorage, type McpSecretCredential } from "../src/core/auth-storage.ts";
-import { McpManager, type McpServerStatus } from "../src/core/mcp/index.ts";
+import { AuthStorage } from "../src/core/auth-storage.ts";
+import { McpConfigurationCoordinator, McpManager, type McpServerStatus } from "../src/core/mcp/index.ts";
 import { SettingsManager } from "../src/core/settings-manager.ts";
 import { InteractiveMode } from "../src/modes/interactive/interactive-mode.ts";
 import { initTheme } from "../src/modes/interactive/theme/theme.ts";
@@ -37,36 +37,45 @@ function createContext(
 		isProjectTrusted: vi.fn(() => true),
 		getGlobalSettings: vi.fn(() => globalSettings),
 		getProjectSettings: vi.fn(() => projectSettings),
-		setMcpServer: vi.fn((scope: "global" | "project", name: string, server: object) => {
-			const settings = scope === "global" ? globalSettings : projectSettings;
-			settings.mcpServers[name] = server;
+	};
+	const mcp = {
+		ensureCurrent: vi.fn().mockResolvedValue(undefined),
+		getStatus: vi.fn(options.statuses ?? (() => (globalSettings.mcpServers.docs ? [connectedStatus] : []))),
+		hasCredential: vi.fn((name: string) => credentials.has(`mcp:${name}`)),
+		restart: vi.fn().mockResolvedValue(undefined),
+		getSecretEnvironment: vi.fn((name: string) => {
+			const credential = credentials.get(`mcp:${name}`);
+			return credential !== null && typeof credential === "object" && "environment" in credential
+				? { ...((credential as { environment?: Record<string, string> }).environment ?? {}) }
+				: {};
 		}),
-		removeMcpServer: vi.fn((scope: "global" | "project", name: string) => {
-			const settings = scope === "global" ? globalSettings : projectSettings;
-			return delete settings.mcpServers[name];
-		}),
-		flush: vi.fn().mockResolvedValue(undefined),
-		drainErrors: vi.fn(() => []),
+		currentDefinitionRevision: vi.fn(() => "current-revision"),
+		mutateConfiguration: vi.fn(
+			async (
+				scope: "user" | "project",
+				changes: Array<{
+					name: string;
+					next?: object;
+					credential: { action: "preserve" | "remove" | "replace"; environment?: object; bearerToken?: string };
+				}>,
+			) => {
+				const settings = scope === "user" ? globalSettings : projectSettings;
+				for (const change of changes) {
+					if (change.next) settings.mcpServers[change.name] = change.next;
+					else delete settings.mcpServers[change.name];
+					if (change.credential.action === "remove") credentials.delete(`mcp:${change.name}`);
+					else if (change.credential.action === "replace") {
+						credentials.set(`mcp:${change.name}`, { type: "mcp_secret", ...change.credential });
+					}
+				}
+				return { scope, entries: [] };
+			},
+		),
 	};
 	const session = {
 		settingsManager,
-		getMcpStatus: vi.fn(options.statuses ?? (() => (globalSettings.mcpServers.docs ? [connectedStatus] : []))),
-		hasMcpCredential: vi.fn((name: string) => credentials.has(`mcp:${name}`)),
+		mcp,
 		reload: vi.fn().mockResolvedValue(undefined),
-		restartMcpServers: vi.fn().mockResolvedValue(undefined),
-		logoutMcpServer: vi.fn(async (name: string) => {
-			credentials.delete(`mcp:${name}`);
-		}),
-		getMcpSecretEnvironment: vi.fn((name: string) => {
-			const credential = credentials.get(`mcp:${name}`);
-			return credential !== null && typeof credential === "object" && "env" in credential
-				? { ...((credential as { env?: Record<string, string> }).env ?? {}) }
-				: {};
-		}),
-		setMcpSecret: vi.fn(async (name: string, credential: object) => {
-			credentials.set(`mcp:${name}`, { type: "mcp_secret", ...credential });
-		}),
-		deleteMcpCredential: vi.fn((name: string) => credentials.delete(`mcp:${name}`)),
 		modelRegistry: {
 			authStorage: {
 				has: vi.fn((key: string) => credentials.has(key)),
@@ -88,7 +97,7 @@ function createContext(
 		showError: vi.fn(),
 		showStatus: vi.fn(),
 	});
-	return { target, session, settingsManager, globalSettings, projectSettings, credentials };
+	return { target, session, mcp, settingsManager, globalSettings, projectSettings, credentials };
 }
 
 const handler = Reflect.get(InteractiveMode.prototype, "handleMcpCommand") as (this: object) => Promise<void>;
@@ -107,11 +116,14 @@ describe("InteractiveMode /mcp", () => {
 
 		await handler.call(context.target);
 
-		expect(context.settingsManager.setMcpServer).toHaveBeenCalledWith("global", "docs", {
-			url: "https://docs.example/mcp",
-		});
-		expect(context.settingsManager.flush).toHaveBeenCalledOnce();
-		expect(context.session.reload).toHaveBeenCalledOnce();
+		expect(context.mcp.mutateConfiguration).toHaveBeenCalledWith("user", [
+			{
+				name: "docs",
+				expectedRevision: null,
+				next: { url: "https://docs.example/mcp" },
+				credential: { action: "preserve" },
+			},
+		]);
 		expect(context.target.showStatus).toHaveBeenCalledWith('Connected MCP server "docs"');
 	});
 
@@ -129,8 +141,7 @@ describe("InteractiveMode /mcp", () => {
 			"MCP server · docs",
 			"MCP servers",
 		]);
-		expect(context.settingsManager.setMcpServer).not.toHaveBeenCalled();
-		expect(context.session.setMcpSecret).not.toHaveBeenCalled();
+		expect(context.mcp.mutateConfiguration).not.toHaveBeenCalled();
 	});
 
 	it("returns one level at a time when secret entry is cancelled", async () => {
@@ -161,8 +172,7 @@ describe("InteractiveMode /mcp", () => {
 			"No authentication",
 			"Back",
 		]);
-		expect(context.settingsManager.setMcpServer).not.toHaveBeenCalled();
-		expect(context.session.setMcpSecret).not.toHaveBeenCalled();
+		expect(context.mcp.mutateConfiguration).not.toHaveBeenCalled();
 	});
 
 	it("walks back through each stdio credential form level on Escape", async () => {
@@ -193,8 +203,7 @@ describe("InteractiveMode /mcp", () => {
 			"MCP server · docs",
 			"MCP servers",
 		]);
-		expect(context.settingsManager.setMcpServer).not.toHaveBeenCalled();
-		expect(context.session.setMcpSecret).not.toHaveBeenCalled();
+		expect(context.mcp.mutateConfiguration).not.toHaveBeenCalled();
 	});
 
 	it("stores an entered token only in credential storage", async () => {
@@ -211,10 +220,13 @@ describe("InteractiveMode /mcp", () => {
 
 		await handler.call(context.target);
 
-		expect(context.settingsManager.setMcpServer).toHaveBeenCalledWith("global", "docs", {
-			url: "https://docs.example/mcp",
-		});
-		expect(context.session.setMcpSecret).toHaveBeenCalledWith("docs", { bearerToken: "super-secret-value" });
+		expect(context.mcp.mutateConfiguration).toHaveBeenCalledWith("user", [
+			expect.objectContaining({
+				name: "docs",
+				next: { url: "https://docs.example/mcp" },
+				credential: { action: "replace", bearerToken: "super-secret-value" },
+			}),
+		]);
 		expect(JSON.stringify(context.globalSettings)).not.toContain("super-secret-value");
 		expect(JSON.stringify(context.target.showStatus.mock.calls)).not.toContain("super-secret-value");
 		expect(JSON.stringify(context.target.showError.mock.calls)).not.toContain("super-secret-value");
@@ -223,7 +235,7 @@ describe("InteractiveMode /mcp", () => {
 	it("keeps the old credential when environment settings fail to persist", async () => {
 		const context = createContext({ globalServers: { docs: { url: "https://docs.example/mcp" } } });
 		context.credentials.set("mcp:docs", { type: "mcp_secret", bearerToken: "old-secret" });
-		context.settingsManager.flush.mockRejectedValueOnce(new Error("disk full"));
+		context.mcp.mutateConfiguration.mockRejectedValueOnce(new Error("disk full"));
 		context.target.showExtensionSelector
 			.mockResolvedValueOnce("docs · connected · http · 3 tools")
 			.mockResolvedValueOnce("Authentication")
@@ -235,8 +247,6 @@ describe("InteractiveMode /mcp", () => {
 
 		await handler.call(context.target);
 
-		expect(context.session.deleteMcpCredential).not.toHaveBeenCalled();
-		expect(context.session.logoutMcpServer).not.toHaveBeenCalled();
 		expect(context.credentials.get("mcp:docs")).toMatchObject({ bearerToken: "old-secret" });
 		expect(context.target.showError).toHaveBeenCalledWith("disk full");
 	});
@@ -276,9 +286,10 @@ describe("InteractiveMode /mcp", () => {
 
 		await handler.call(context.target);
 
-		expect(context.settingsManager.removeMcpServer).toHaveBeenCalledWith("global", "docs");
-		expect(context.session.deleteMcpCredential).toHaveBeenCalledWith("docs");
-		expect(context.session.reload).toHaveBeenCalledOnce();
+		expect(context.mcp.mutateConfiguration).toHaveBeenCalledWith("user", [
+			expect.objectContaining({ name: "docs", next: undefined, credential: { action: "remove" } }),
+		]);
+		expect(context.credentials.has("mcp:docs")).toBe(false);
 		expect(context.target.showStatus).toHaveBeenCalledWith('Removed MCP server "docs"');
 	});
 
@@ -311,19 +322,18 @@ describe("InteractiveMode /mcp", () => {
 		try {
 			const settingsManager = SettingsManager.create(projectDir, agentDir);
 			const authStorage = AuthStorage.create(join(agentDir, "auth.json"));
-			manager = await McpManager.create({ settingsManager, authStorage, cwd: projectDir });
+			const coordinator = new McpConfigurationCoordinator({ authStorage });
+			manager = await McpManager.create({
+				settingsManager,
+				authStorage,
+				cwd: projectDir,
+				configurationCoordinator: coordinator,
+			});
 			const context = createContext();
 			Object.assign(context.target.runtimeHost.session, {
 				settingsManager,
-				getMcpStatus: () => manager!.getStatus(),
-				hasMcpCredential: (name: string) => manager!.hasCredential(name),
+				mcp: manager,
 				reload: () => manager!.reload(),
-				restartMcpServers: (name?: string) => manager!.restart(name),
-				logoutMcpServer: (name: string) => manager!.logout(name),
-				getMcpSecretEnvironment: (name: string) => manager!.getSecretEnvironment(name),
-				setMcpSecret: (name: string, credential: Omit<McpSecretCredential, "type">) =>
-					manager!.setSecret(name, credential),
-				deleteMcpCredential: (name: string) => manager!.deleteCredential(name),
 				modelRegistry: { authStorage },
 			});
 			context.target.showExtensionSelector

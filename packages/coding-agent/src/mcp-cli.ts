@@ -1,9 +1,9 @@
 import { join } from "node:path";
 import chalk from "chalk";
 import { APP_NAME, CONFIG_DIR_NAME, getAgentDir } from "./config.ts";
-import { AuthStorage, mcpCredentialKey } from "./core/auth-storage.ts";
-import { resolveMcpServerSettings } from "./core/mcp/config.ts";
-import type { McpServerSettings, McpStdioServerSettings, SettingsScope } from "./core/settings-manager.ts";
+import { AuthStorage } from "./core/auth-storage.ts";
+import { McpConfigurationCoordinator, mcpConfigurationRevision, mcpCredentialState } from "./core/mcp/configuration.ts";
+import type { McpServerSettings, McpStdioServerSettings } from "./core/settings-manager.ts";
 import {
 	createCommandSettingsManager,
 	type PackageCommandRuntimeOptions,
@@ -150,10 +150,6 @@ function parseMcpCommand(args: string[]): McpCliCommand {
 	throw new Error(`Unknown MCP command "${action}"`);
 }
 
-function settingsScope(scope: McpCliScope): SettingsScope {
-	return scope === "user" ? "global" : "project";
-}
-
 function safeConfiguration(server: McpServerSettings): McpServerSettings {
 	if (!("command" in server)) return server;
 	const stdio = server as McpStdioServerSettings;
@@ -240,33 +236,52 @@ export async function handleMcpCliCommand(
 			return true;
 		}
 
-		const scope = settingsScope(command.scope);
-		const servers = scope === "global" ? globalServers : projectServers;
+		const servers = command.scope === "user" ? globalServers : projectServers;
+		const authStorage = AuthStorage.create(join(agentDir, "auth.json"));
+		const coordinator = new McpConfigurationCoordinator({ authStorage });
 		if (command.action === "add") {
 			if (servers[command.name])
 				throw new Error(`MCP server "${command.name}" already exists in ${command.scope} settings`);
-			resolveMcpServerSettings(command.name, command.server, cwd, process.env);
-			settingsManager.setMcpServer(scope, command.name, command.server);
-			await settingsManager.flush();
-			const errors = settingsManager.drainErrors();
-			if (errors.length > 0) throw errors[0]!.error;
+			await coordinator.mutate({
+				settingsManager,
+				cwd,
+				scope: command.scope,
+				changes: [
+					{
+						name: command.name,
+						expectedRevision: null,
+						next: command.server,
+						credential: { action: "preserve" },
+					},
+				],
+			});
 			console.log(chalk.green(`Added MCP server "${command.name}" to ${command.scope} settings.`));
 			return true;
 		}
 
-		if (!settingsManager.removeMcpServer(scope, command.name)) {
+		const current = servers[command.name];
+		if (!current) {
 			throw new Error(`MCP server "${command.name}" is not configured in ${command.scope} settings`);
 		}
-		await settingsManager.flush();
-		const errors = settingsManager.drainErrors();
-		if (errors.length > 0) throw errors[0]!.error;
-		AuthStorage.create(join(agentDir, "auth.json")).remove(
-			mcpCredentialKey(
-				command.scope === "user"
-					? { scope: "user", name: command.name }
-					: { scope: "project", name: command.name, cwd },
-			),
-		);
+		authStorage.reload();
+		await coordinator.mutate({
+			settingsManager,
+			cwd,
+			scope: command.scope,
+			changes: [
+				{
+					name: command.name,
+					expectedRevision: mcpConfigurationRevision(
+						command.scope,
+						command.name,
+						current,
+						mcpCredentialState(authStorage, cwd, command.scope, command.name, current),
+					),
+					next: undefined,
+					credential: { action: "remove" },
+				},
+			],
+		});
 		console.log(chalk.green(`Removed MCP server "${command.name}" from ${command.scope} settings.`));
 		return true;
 	} catch (error) {

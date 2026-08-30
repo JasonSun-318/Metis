@@ -100,6 +100,44 @@ function credentialIdentity(scope: McpConfigurationScope, name: string, cwd: str
 	return scope === "user" ? { scope, name } : { scope, name, cwd };
 }
 
+function matchingMcpCredential(
+	authStorage: AuthStorage,
+	cwd: string,
+	scope: McpConfigurationScope,
+	name: string,
+	server: McpServerSettings,
+	environment: NodeJS.ProcessEnv,
+): { key: string; credential: McpSecretCredential; fingerprint: string } | undefined {
+	const identity = credentialIdentity(scope, name, cwd);
+	const resolved = resolveMcpServerSettings(name, server, cwd, environment, identity);
+	const fingerprint = mcpServerFingerprint(resolved);
+	for (const key of new Set([resolved.credentialKey, mcpCredentialKey(identity), legacyMcpCredentialKey(name)])) {
+		const credential = authStorage.get(key);
+		if (credential?.type === "mcp_secret" && credential.serverFingerprint === fingerprint) {
+			return { key, credential: structuredClone(credential), fingerprint };
+		}
+	}
+	return undefined;
+}
+
+export function mcpCredentialState(
+	authStorage: AuthStorage | undefined,
+	cwd: string,
+	scope: McpConfigurationScope,
+	name: string,
+	server: McpServerSettings,
+	environment: NodeJS.ProcessEnv = process.env,
+): string | undefined {
+	if (!authStorage) return undefined;
+	try {
+		return matchingMcpCredential(authStorage, cwd, scope, name, server, environment)
+			? (server.credentialVersion ?? "legacy")
+			: undefined;
+	} catch {
+		return undefined;
+	}
+}
+
 function nonEmptyCredential(credential: McpSecretCredential | undefined): McpSecretCredential | undefined {
 	if (!credential) return undefined;
 	if (credential.bearerToken || Object.keys(credential.env ?? {}).length > 0) return credential;
@@ -141,15 +179,7 @@ export class McpConfigurationCoordinator {
 		cwd: string,
 	): { key: string; credential: McpSecretCredential; fingerprint: string } | undefined {
 		if (!server) return undefined;
-		const resolved = resolveMcpServerSettings(name, server, cwd, process.env, identity);
-		const fingerprint = mcpServerFingerprint(resolved);
-		for (const key of new Set([resolved.credentialKey, mcpCredentialKey(identity), legacyMcpCredentialKey(name)])) {
-			const credential = this.authStorage.get(key);
-			if (credential?.type === "mcp_secret" && credential.serverFingerprint === fingerprint) {
-				return { key, credential: structuredClone(credential), fingerprint };
-			}
-		}
-		return undefined;
+		return matchingMcpCredential(this.authStorage, cwd, identity.scope, name, server, process.env);
 	}
 
 	private credentialKeys(identity: McpCredentialIdentity, name: string): string[] {
@@ -285,7 +315,7 @@ export class McpConfigurationCoordinator {
 			const current = currentServers[change.name];
 			const identity = credentialIdentity(mutation.scope, change.name, mutation.cwd);
 			const credential = this.matchingCredential(identity, change.name, current, mutation.cwd);
-			const credentialState = current?.credentialVersion ?? (credential ? "legacy" : undefined);
+			const credentialState = credential ? (current?.credentialVersion ?? "legacy") : undefined;
 			const revision = current
 				? mcpConfigurationRevision(mutation.scope, change.name, current, credentialState)
 				: null;
@@ -358,7 +388,12 @@ export class McpConfigurationCoordinator {
 				...(change.next
 					? {
 							server: structuredClone(change.next),
-							revision: mcpConfigurationRevision(mutation.scope, change.name, change.next),
+							revision: mcpConfigurationRevision(
+								mutation.scope,
+								change.name,
+								change.next,
+								change.keepCredentialKey ? change.next.credentialVersion : undefined,
+							),
 						}
 					: {}),
 				credentialConfigured: Boolean(change.keepCredentialKey),

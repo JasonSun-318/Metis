@@ -4,14 +4,16 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ENV_AGENT_DIR } from "../src/config.ts";
-import { AuthStorage, mcpCredentialKey } from "../src/core/auth-storage.ts";
-import { McpManager } from "../src/core/mcp/index.ts";
+import { AuthStorage, mcpCredentialKey, mcpVersionedCredentialPrefix } from "../src/core/auth-storage.ts";
+import { McpConfigurationCoordinator, McpManager } from "../src/core/mcp/index.ts";
 import { SettingsManager } from "../src/core/settings-manager.ts";
 import { handleMcpCliCommand } from "../src/mcp-cli.ts";
 import { createMcpTestServer } from "./helpers/mcp-test-server.ts";
 
 describe("MCP CLI", () => {
 	const userMcpKey = (name: string) => mcpCredentialKey({ scope: "user", name });
+	const hasVersionedUserCredential = (storage: AuthStorage, name: string) =>
+		storage.list().some((key) => key.startsWith(mcpVersionedCredentialPrefix({ scope: "user", name })));
 	let tempDir: string;
 	let agentDir: string;
 	let projectDir: string;
@@ -164,6 +166,7 @@ describe("MCP CLI", () => {
 			settingsManager: SettingsManager.create(projectDir, agentDir),
 			authStorage,
 			cwd: projectDir,
+			configurationCoordinator: new McpConfigurationCoordinator({ authStorage }),
 		});
 
 		try {
@@ -178,10 +181,10 @@ describe("MCP CLI", () => {
 
 			await manager.logout("protected");
 			expect(manager.getStatus()[0]).toMatchObject({ state: "auth_required" });
-			expect(authStorage.has(userMcpKey("protected"))).toBe(false);
+			expect(hasVersionedUserCredential(authStorage, "protected")).toBe(false);
 
 			await manager.setSecret("protected", { bearerToken: secret });
-			expect(authStorage.has(userMcpKey("protected"))).toBe(true);
+			expect(hasVersionedUserCredential(authStorage, "protected")).toBe(true);
 			await manager.close();
 			await handleMcpCliCommand(["mcp", "remove", "protected"]);
 
@@ -191,7 +194,7 @@ describe("MCP CLI", () => {
 				cwd: projectDir,
 			});
 			expect(manager.getStatus()).toEqual([]);
-			expect(AuthStorage.create(authPath).has(userMcpKey("protected"))).toBe(false);
+			expect(hasVersionedUserCredential(AuthStorage.create(authPath), "protected")).toBe(false);
 			expect(readFileSync(join(agentDir, "settings.json"), "utf8")).not.toContain(secret);
 		} finally {
 			await manager.close();

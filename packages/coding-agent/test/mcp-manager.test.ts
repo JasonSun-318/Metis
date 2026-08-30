@@ -2,8 +2,21 @@ import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { AuthStorage, legacyMcpCredentialKey, mcpCredentialKey } from "../src/core/auth-storage.ts";
-import { McpManager, McpServerClient, mcpServerFingerprint, resolveMcpServerSettings } from "../src/core/mcp/index.ts";
+import {
+	AuthStorage,
+	InMemoryAuthStorageBackend,
+	legacyMcpCredentialKey,
+	mcpCredentialKey,
+	mcpVersionedCredentialPrefix,
+} from "../src/core/auth-storage.ts";
+import {
+	McpConfigurationCoordinator,
+	McpManager,
+	McpServerClient,
+	mcpConfigurationRevision,
+	mcpServerFingerprint,
+	resolveMcpServerSettings,
+} from "../src/core/mcp/index.ts";
 import type { McpHttpServerSettings } from "../src/core/settings-manager.ts";
 import { InMemorySettingsStorage, SettingsManager } from "../src/core/settings-manager.ts";
 import { createMcpTestServer, type McpTestServer } from "./helpers/mcp-test-server.ts";
@@ -11,6 +24,8 @@ import { createMcpTestServer, type McpTestServer } from "./helpers/mcp-test-serv
 const managers: McpManager[] = [];
 const servers: McpTestServer[] = [];
 const userMcpKey = (name: string) => mcpCredentialKey({ scope: "user", name });
+const hasVersionedUserCredential = (storage: AuthStorage, name: string) =>
+	storage.list().some((key) => key.startsWith(mcpVersionedCredentialPrefix({ scope: "user", name })));
 
 async function managerWithTools(
 	serverName: string,
@@ -93,6 +108,45 @@ describe("McpManager", () => {
 		expect(manager.getStatus()).toMatchObject([{ name: "external", state: "disabled" }]);
 	});
 
+	it("refreshes an externally changed credential at the next tool boundary", async () => {
+		const server = await createMcpTestServer({ requiredBearerToken: "external-secret" });
+		servers.push(server);
+		const definition = { url: String(server.url) };
+		const settingsStorage = new InMemorySettingsStorage();
+		const writerSettings = SettingsManager.fromStorage(settingsStorage);
+		writerSettings.setMcpServer("global", "docs", definition);
+		await writerSettings.flushOrThrow();
+		const authBackend = new InMemoryAuthStorageBackend();
+		const runtimeAuth = AuthStorage.fromStorage(authBackend);
+		const writerAuth = AuthStorage.fromStorage(authBackend);
+		const manager = await McpManager.create({
+			settingsManager: SettingsManager.fromStorage(settingsStorage),
+			authStorage: runtimeAuth,
+			cwd: process.cwd(),
+		});
+		managers.push(manager);
+		expect(manager.getStatus()[0]).toMatchObject({ state: "auth_required" });
+
+		await new McpConfigurationCoordinator({ authStorage: writerAuth }).mutate({
+			settingsManager: writerSettings,
+			cwd: process.cwd(),
+			scope: "user",
+			changes: [
+				{
+					name: "docs",
+					expectedRevision: mcpConfigurationRevision("user", "docs", definition),
+					next: definition,
+					credential: { action: "replace", bearerToken: "external-secret" },
+				},
+			],
+		});
+
+		await expect(manager.callTool("mcp__docs__search_docs", { query: "lazy refresh" })).resolves.toMatchObject({
+			content: [{ type: "text", text: "match:lazy refresh" }],
+		});
+		expect(manager.getStatus()[0]).toMatchObject({ state: "connected" });
+	});
+
 	it("exposes only safe selected-server catalog names and fingerprint-bound credential state", async () => {
 		const server = await createMcpTestServer({
 			resources: [
@@ -103,10 +157,12 @@ describe("McpManager", () => {
 			prompts: [{ name: "summarize_docs" }],
 		});
 		servers.push(server);
+		const authStorage = AuthStorage.inMemory();
 		const manager = await McpManager.create({
 			settingsManager: SettingsManager.inMemory({ mcpServers: { docs: { url: String(server.url) } } }),
-			authStorage: AuthStorage.inMemory(),
+			authStorage,
 			cwd: process.cwd(),
+			configurationCoordinator: new McpConfigurationCoordinator({ authStorage }),
 		});
 		managers.push(manager);
 
@@ -252,11 +308,12 @@ describe("McpManager", () => {
 		const server = await createMcpTestServer({ requiredBearerToken: "stored-secret" });
 		servers.push(server);
 		const storage = AuthStorage.inMemory();
-		const settings = { mcpServers: { docs: { url: String(server.url) } } };
+		const settings = SettingsManager.inMemory({ mcpServers: { docs: { url: String(server.url) } } });
 		const initial = await McpManager.create({
-			settingsManager: SettingsManager.inMemory(settings),
+			settingsManager: settings,
 			authStorage: storage,
 			cwd: process.cwd(),
+			configurationCoordinator: new McpConfigurationCoordinator({ authStorage: storage }),
 		});
 		managers.push(initial);
 		expect(initial.getStatus()[0]).toMatchObject({ state: "auth_required" });
@@ -265,7 +322,7 @@ describe("McpManager", () => {
 		await initial.close();
 
 		const restarted = await McpManager.create({
-			settingsManager: SettingsManager.inMemory({ mcpServers: { docs: { url: String(server.url) } } }),
+			settingsManager: settings,
 			authStorage: storage,
 			cwd: process.cwd(),
 		});
@@ -334,6 +391,7 @@ describe("McpManager", () => {
 			}),
 			authStorage: storage,
 			cwd: process.cwd(),
+			configurationCoordinator: new McpConfigurationCoordinator({ authStorage: storage }),
 		});
 		managers.push(manager);
 
@@ -354,6 +412,7 @@ describe("McpManager", () => {
 			}),
 			authStorage,
 			cwd: process.cwd(),
+			configurationCoordinator: new McpConfigurationCoordinator({ authStorage }),
 		});
 		managers.push(personal);
 		await personal.setSecret("docs", { bearerToken: "personal-secret" });
@@ -386,6 +445,7 @@ describe("McpManager", () => {
 			}),
 			authStorage,
 			cwd: process.cwd(),
+			configurationCoordinator: new McpConfigurationCoordinator({ authStorage }),
 		});
 		managers.push(initial);
 		await initial.setSecret("local", { env: { LOCAL_TOKEN: "stored-secret" } });
@@ -418,17 +478,18 @@ describe("McpManager", () => {
 			settingsManager: SettingsManager.inMemory({ mcpServers: { docs: { url: String(server.url) } } }),
 			authStorage: storage,
 			cwd: process.cwd(),
+			configurationCoordinator: new McpConfigurationCoordinator({ authStorage: storage }),
 		});
 		managers.push(manager);
 		expect(manager.getStatus()[0]).toMatchObject({ state: "auth_required" });
 
 		await manager.setSecret("docs", { bearerToken: "stored-secret" });
 		expect(manager.getStatus()[0]).toMatchObject({ state: "connected" });
-		expect(storage.get(userMcpKey("docs"))).toMatchObject({ type: "mcp_secret" });
+		expect(hasVersionedUserCredential(storage, "docs")).toBe(true);
 
 		await manager.logout("docs");
 		expect(manager.getStatus()[0]).toMatchObject({ state: "auth_required" });
-		expect(storage.has(userMcpKey("docs"))).toBe(false);
+		expect(hasVersionedUserCredential(storage, "docs")).toBe(false);
 	});
 
 	it("rejects empty static credentials without replacing the active auth state", async () => {
@@ -439,11 +500,12 @@ describe("McpManager", () => {
 			settingsManager: SettingsManager.inMemory({ mcpServers: { docs: { url: String(server.url) } } }),
 			authStorage: storage,
 			cwd: process.cwd(),
+			configurationCoordinator: new McpConfigurationCoordinator({ authStorage: storage }),
 		});
 		managers.push(manager);
 
 		await expect(manager.setSecret("docs", { bearerToken: "" })).rejects.toThrow("must not be empty");
-		expect(storage.has(userMcpKey("docs"))).toBe(false);
+		expect(hasVersionedUserCredential(storage, "docs")).toBe(false);
 		expect(manager.getStatus()[0]).toMatchObject({ state: "auth_required" });
 	});
 
@@ -464,6 +526,7 @@ describe("McpManager", () => {
 			authStorage: storage,
 			cwd: process.cwd(),
 			environment: { MCP_TOKEN: "environment-secret" },
+			configurationCoordinator: new McpConfigurationCoordinator({ authStorage: storage }),
 		});
 		managers.push(manager);
 		expect(manager.getStatus()[0]).toMatchObject({ state: "connected" });
@@ -471,7 +534,7 @@ describe("McpManager", () => {
 		await expect(manager.setSecret("docs", { bearerToken: "wrong-secret" })).rejects.toThrow(
 			'Failed to initialize required MCP server "docs"',
 		);
-		expect(storage.has(userMcpKey("docs"))).toBe(false);
+		expect(hasVersionedUserCredential(storage, "docs")).toBe(false);
 		expect(manager.getStatus()[0]).toMatchObject({ state: "connected" });
 	});
 
