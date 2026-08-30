@@ -496,16 +496,14 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 	private async bindExtensionUI(session: AgentSession): Promise<void> {
 		const uiContext = this.interactions?.createExtensionUIContext(this.sessionId, (event) => this.publish(event));
 		if (this.interactions) {
-			const browserTools = this.interactions.hasOwner(this.sessionId)
-				? createBrowserToolDefinitions((request) =>
-						this.interactions!.requestBrowserTool(
-							this.sessionId,
-							request.toolCallId,
-							protocolBrowserToolCall(request),
-							request.signal,
-						),
-					)
-				: [];
+			const browserTools = createBrowserToolDefinitions((request) =>
+				this.interactions!.requestBrowserTool(
+					this.sessionId,
+					request.toolCallId,
+					protocolBrowserToolCall(request),
+					request.signal,
+				),
+			);
 			session.installHostTools(
 				[
 					createAskUserToolDefinition((request) => this.interactions!.requestUserInput(this.sessionId, request)),
@@ -519,11 +517,7 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 					})),
 				],
 				{
-					automaticPermissionToolNames: [
-						"ask_user",
-						...(browserTools.length > 0 ? BROWSER_TOOL_NAMES : []),
-						"deliver_file",
-					],
+					automaticPermissionToolNames: ["ask_user", ...BROWSER_TOOL_NAMES, "deliver_file"],
 				},
 			);
 		}

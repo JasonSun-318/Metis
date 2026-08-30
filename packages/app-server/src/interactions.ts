@@ -191,10 +191,6 @@ export class InteractionBroker {
 		this.owners.set(sessionId, peer);
 	}
 
-	hasOwner(sessionId: string): boolean {
-		return this.owners.has(sessionId);
-	}
-
 	release(sessionId: string, peer: InteractionPeer): void {
 		if (this.owners.get(sessionId) === peer) this.owners.delete(sessionId);
 	}

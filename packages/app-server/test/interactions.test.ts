@@ -137,23 +137,46 @@ describe("InteractionBroker", () => {
 
 	it("routes an ordinary browser tool directly to the desktop owner", async () => {
 		const broker = new InteractionBroker({ serverEpoch: EPOCH });
-		const peer = new FakePeer();
-		expect(broker.hasOwner(SESSION_ID)).toBe(false);
-		peer.browserResponse = browserTabsResponse("browser-call-1");
-		broker.assign(SESSION_ID, peer);
-		expect(broker.hasOwner(SESSION_ID)).toBe(true);
+		await expect(
+			broker.requestBrowserTool(SESSION_ID, "browser-call-unowned", browserTabsCall(), new AbortController().signal),
+		).rejects.toThrow("No interactive desktop owner");
+
+		const firstPeer = new FakePeer();
+		firstPeer.browserResponse = browserTabsResponse("browser-call-1");
+		broker.assign(SESSION_ID, firstPeer);
 
 		await expect(
 			broker.requestBrowserTool(SESSION_ID, "browser-call-1", browserTabsCall(), new AbortController().signal),
-		).resolves.toEqual(peer.browserResponse.result);
-		expect(peer.requests).toHaveLength(0);
-		expect(peer.browserRequests).toHaveLength(1);
-		expect(peer.browserRequests[0]).toMatchObject({
+		).resolves.toEqual(firstPeer.browserResponse.result);
+		expect(firstPeer.requests).toHaveLength(0);
+		expect(firstPeer.browserRequests).toHaveLength(1);
+		expect(firstPeer.browserRequests[0]).toMatchObject({
 			method: "browser/tool",
 			params: { serverEpoch: EPOCH, sessionId: SESSION_ID, toolCallId: "browser-call-1" },
 		});
-		broker.release(SESSION_ID, peer);
-		expect(broker.hasOwner(SESSION_ID)).toBe(false);
+
+		broker.release(SESSION_ID, firstPeer);
+		await expect(
+			broker.requestBrowserTool(
+				SESSION_ID,
+				"browser-call-released",
+				browserTabsCall(),
+				new AbortController().signal,
+			),
+		).rejects.toThrow("No interactive desktop owner");
+
+		const replacementPeer = new FakePeer();
+		replacementPeer.browserResponse = browserTabsResponse("browser-call-reconnected");
+		broker.assign(SESSION_ID, replacementPeer);
+		await expect(
+			broker.requestBrowserTool(
+				SESSION_ID,
+				"browser-call-reconnected",
+				browserTabsCall(),
+				new AbortController().signal,
+			),
+		).resolves.toEqual(replacementPeer.browserResponse.result);
+		expect(replacementPeer.browserRequests).toHaveLength(1);
 	});
 
 	it("confirms a high-risk browser action immediately before dispatch", async () => {
@@ -955,6 +978,48 @@ describe("InteractionBroker", () => {
 					kind: "confirm",
 					confirmed: true,
 				},
+			}),
+		).toBe(true);
+	});
+
+	it("rejects an in-flight browser request when its owner connection closes", async () => {
+		const connection = new AppServerConnection({
+			dispatcher: { dispatch: vi.fn() } as never,
+			serverEpoch: EPOCH,
+			serverVersion: "test",
+			subscriptionHub: new SessionSubscriptions(EPOCH),
+		});
+		const outbound: unknown[] = [];
+		connection.onMessage((envelope) => {
+			outbound.push(envelope);
+		});
+		await connection.handle({
+			jsonrpc: "2.0",
+			id: "initialize-browser-disconnect",
+			method: "initialize",
+			params: { protocolVersion: PROTOCOL_VERSION, client: { name: "test", version: "1" }, capabilities: [] },
+		});
+		const requestId = "00000000-0000-4000-8000-000000000311";
+		const broker = new InteractionBroker({ serverEpoch: EPOCH, createId: () => requestId });
+		broker.assign(SESSION_ID, connection);
+
+		const pending = broker.requestBrowserTool(
+			SESSION_ID,
+			"browser-call-disconnect",
+			browserTabsCall(),
+			new AbortController().signal,
+		);
+		await vi.waitFor(() =>
+			expect(outbound).toContainEqual(expect.objectContaining({ id: requestId, method: "browser/tool" })),
+		);
+
+		connection.close();
+		await expect(pending).rejects.toThrow("OPERATION_FAILED");
+		expect(
+			connection.handleServerResponse({
+				jsonrpc: "2.0",
+				id: requestId,
+				result: browserTabsResponse("browser-call-disconnect"),
 			}),
 		).toBe(true);
 	});
