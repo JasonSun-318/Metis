@@ -168,6 +168,29 @@ describe("browser host tools", () => {
 		expect(JSON.stringify(result.content[0])).not.toContain(data);
 	});
 
+	it("returns tab closure as a normal browser tool result", async () => {
+		const tool = createBrowserToolDefinitions(async () => ({
+			tool: "browser_act",
+			details: { status: "cancelled", reason: "tab_closed" },
+		})).find(({ name }) => name === "browser_act")!;
+		const result = await tool.execute(
+			"tool-call-closed",
+			{
+				browserId: BROWSER_ID,
+				documentId: DOCUMENT_ID,
+				snapshotRevision: 1,
+				origin: "https://example.test",
+				intent: "Authorize and close the popup",
+				risk: "ordinary",
+				action: { type: "click", target: { elementId: "e1" } },
+			},
+			undefined,
+			undefined,
+			{} as never,
+		);
+		expect(result.content).toEqual([{ type: "text", text: "Browser control cancelled: tab_closed" }]);
+	});
+
 	it("rejects a result for a different browser tool", async () => {
 		const tool = createBrowserToolDefinitions(async () => ({ tool: "browser_tabs", details: {} })).find(
 			({ name }) => name === "browser_observe",

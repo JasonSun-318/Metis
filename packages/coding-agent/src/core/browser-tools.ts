@@ -71,7 +71,10 @@ export type BrowserHostResult =
 						readonly reason: "origin_changed" | "document_changed" | "revision_changed" | "element_missing";
 						readonly observation: BrowserHostObservation;
 				  }
-				| { readonly status: "cancelled"; readonly reason: "user_cancelled" };
+				| {
+						readonly status: "cancelled";
+						readonly reason: "user_cancelled" | "tab_closed" | "server_restarted";
+				  };
 	  }
 	| { readonly tool: "browser_observe"; readonly observation: BrowserHostObservation }
 	| {

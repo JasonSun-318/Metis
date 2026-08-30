@@ -620,6 +620,9 @@ describe("golden protocol fixtures", () => {
 			},
 		};
 		expect(validateResponseFor("server", request, response)).toEqual(response);
+		const closed = structuredClone(response);
+		closed.result.result.details = { status: "cancelled", reason: "tab_closed" } as never;
+		expect(validateResponseFor("server", request, closed)).toEqual(closed);
 	});
 
 	it("rejects unsafe or oversized browser payloads", () => {

@@ -64,9 +64,9 @@ export function SessionStatusPanel({ closing = false, error, loading, onClose, s
 			: null;
 
 	return (
-		<div aria-labelledby="session-status-title" className={`session-status-panel${closing ? " is-closing" : ""}`} id="session-status-panel" ref={rootRef} role="dialog">
+		<div aria-label={t("Session status")} className={`session-status-panel${closing ? " is-closing" : ""}`} id="session-status-panel" ref={rootRef} role="dialog">
 			<header>
-				<strong id="session-status-title">{t("Context Usage")}</strong>
+				<strong>{t("Context Usage")}</strong>
 				<button aria-label={t("Close status")} onClick={onClose} ref={closeButtonRef} type="button"><X aria-hidden="true" size={16} /></button>
 			</header>
 			{loading ? <p className="session-status-message" role="status">{t("Loading session status…")}</p> : error ? (

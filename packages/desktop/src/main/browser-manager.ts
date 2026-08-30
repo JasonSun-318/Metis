@@ -86,6 +86,7 @@ interface BrowserRecord {
 	lastProgressEventType?: BrowserProgressEvent["type"];
 	pendingStateEvent: boolean;
 	pendingActivityEvent?: boolean;
+	closingReason?: "server_restarted" | "tab_closed";
 	activeAbort?: AbortController;
 	takeoverRequested: boolean;
 	handoff?: HandoffRecord;
@@ -757,10 +758,11 @@ export class BrowserManager {
 		this.closeRecord(record, "tab_closed");
 	}
 
-	private closeRecord(record: BrowserRecord, cancellationReason: BrowserHandoffCancellationReason): void {
+	private closeRecord(record: BrowserRecord, cancellationReason: "server_restarted" | "tab_closed"): void {
 		const { browserId } = record;
 		if (this.records.get(browserId) !== record) return;
 		this.records.delete(browserId);
+		record.closingReason = cancellationReason;
 		record.activeAbort?.abort();
 		if (record.activityIdleTimer) clearTimeout(record.activityIdleTimer);
 		record.activityIdleTimer = undefined;
@@ -958,6 +960,7 @@ export class BrowserManager {
 				try {
 					result = await operation(activeAbort.signal);
 				} catch (cause) {
+					if (record.closingReason) return { status: "cancelled", reason: record.closingReason };
 					if (!record.takeoverRequested) throw cause;
 					return this.takeoverHandoff(record, signal);
 				}
@@ -1280,6 +1283,7 @@ export class BrowserManager {
 		const onDestroyed = () => {
 			if (this.records.get(browserId) !== record) return;
 			this.records.delete(browserId);
+			record.closingReason = "tab_closed";
 			record.activeAbort?.abort();
 			if (record.activityIdleTimer) clearTimeout(record.activityIdleTimer);
 			record.activityIdleTimer = undefined;
@@ -1294,7 +1298,6 @@ export class BrowserManager {
 			if (record.view) record.host?.removeChildView(record.view);
 			record.host = undefined;
 			this.emit({ type: "closed", sessionId: record.sessionId, browserId });
-			this.emit({ type: "error", browserId, message: "Browser page crashed" });
 		};
 
 		contents.on("did-start-loading", onDidStartLoading);

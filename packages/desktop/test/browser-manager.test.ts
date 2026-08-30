@@ -906,6 +906,47 @@ describe("BrowserManager", () => {
 		).resolves.toBeUndefined();
 	});
 
+	it("returns a structured result when an action closes its own popup", async () => {
+		const harness = browserHarness();
+		const browserId = "10000000-0000-4000-8000-000000000067";
+		const events: unknown[] = [];
+		harness.manager.onEvent((event) => events.push(event));
+		harness.manager.create({ sessionId: SESSION_ID, browserId, profileId: DEFAULT_BROWSER_PROFILE_ID });
+		const controller = harness.controllers.get(browserId)!;
+		controller.act.mockImplementationOnce(
+			(_input: unknown, signal: AbortSignal) =>
+				new Promise((_resolve, reject) => {
+					const onAbort = () => reject(signal.reason ?? new DOMException("Aborted", "AbortError"));
+					signal.addEventListener("abort", onAbort, { once: true });
+					if (signal.aborted) onAbort();
+				}),
+		);
+		const result = harness.manager.executeTool(
+			SESSION_ID,
+			{
+				tool: "browser_act",
+				input: {
+					browserId,
+					documentId: "30000000-0000-4000-8000-000000000001",
+					snapshotRevision: 1,
+					origin: "https://example.test",
+					intent: "Authorize and close the popup",
+					risk: "ordinary",
+					action: { type: "click", target: { elementId: "e1" } },
+				},
+			},
+			new AbortController().signal,
+		);
+		await vi.waitFor(() => expect(controller.act).toHaveBeenCalledOnce());
+		harness.emit("destroyed");
+		await expect(result).resolves.toEqual({
+			tool: "browser_act",
+			details: { status: "cancelled", reason: "tab_closed" },
+		});
+		expect(events).toContainEqual({ type: "closed", sessionId: SESSION_ID, browserId });
+		expect(events).not.toContainEqual({ type: "error", browserId, message: "Browser page crashed" });
+	});
+
 	it("waits for the final redirected and history pages before model observation", async () => {
 		const harness = browserHarness();
 		const browserId = "10000000-0000-4000-8000-000000000086";
