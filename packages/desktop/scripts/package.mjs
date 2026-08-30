@@ -2,7 +2,7 @@ import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
 function nativeArch() {
 	const machine = process.platform === "darwin"
@@ -20,7 +20,33 @@ if (command !== "package" && command !== "make") throw new TypeError("Expected p
 if (!args.some((argument) => argument === "--arch" || argument.startsWith("--arch="))) {
 	args.push(`--arch=${nativeArch()}`);
 }
-const forge = createRequire(import.meta.url).resolve("@electron-forge/cli/dist/electron-forge.js");
+const require = createRequire(import.meta.url);
+if (command === "make" && process.platform === "darwin") {
+	// Repository setup skips lifecycle scripts; Forge's DMG maker still needs
+	// these two locked native transitive dependencies before it can run.
+	const dmgNativeDependencies = [
+		{ name: "fs-xattr", artifact: "fs-xattr/build/Release/xattr.node" },
+		{ name: "macos-alias", artifact: "macos-alias/build/Release/volume.node" },
+	];
+	const missing = dmgNativeDependencies.filter(({ artifact }) => {
+		try {
+			require.resolve(artifact);
+			return false;
+		} catch {
+			return true;
+		}
+	});
+	if (missing.length > 0) {
+		const rebuild = spawnSync("npm", ["rebuild", ...missing.map(({ name }) => name)], {
+			cwd: resolve(import.meta.dirname, "../../.."),
+			stdio: "inherit",
+		});
+		if (rebuild.error) throw rebuild.error;
+		if (rebuild.status !== 0) throw new Error(`DMG native dependency rebuild failed with exit code ${rebuild.status ?? "unknown"}`);
+		for (const { artifact } of dmgNativeDependencies) require.resolve(artifact);
+	}
+}
+const forge = require.resolve("@electron-forge/cli/dist/electron-forge.js");
 const packagerTempRoot = mkdtempSync(join(tmpdir(), "metis-electron-packager-"));
 try {
 	const result = spawnSync(process.execPath, [forge, command, ...args], {
