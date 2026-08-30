@@ -1,12 +1,15 @@
 import { randomUUID } from "node:crypto";
-import type {
-	BrowserActInput,
-	BrowserAction,
-	BrowserObservation,
-	BrowserObserveInput,
-	BrowserOperationDetails,
+import {
+	type BrowserActInput,
+	type BrowserAction,
+	type BrowserObservation,
+	type BrowserObserveInput,
+	type BrowserOperationDetails,
+	browserActionElementIds,
+	formatBrowserStateNode,
+	MAX_BROWSER_SCREENSHOT_UTF8_BYTES,
+	MAX_BROWSER_STATE_UTF8_BYTES,
 } from "@metis/app-protocol";
-import { MAX_BROWSER_SCREENSHOT_UTF8_BYTES, MAX_BROWSER_STATE_UTF8_BYTES } from "@metis/app-protocol";
 
 const MAX_AX_NODES = 3_000;
 const MAX_ELEMENT_ID = 999_999;
@@ -142,10 +145,6 @@ function supportedActions(role: string, focusable: boolean): readonly string[] {
 	return focusable ? ["click"] : [];
 }
 
-function safeText(value: string): string {
-	return JSON.stringify(value.replace(/[\r\n\t]+/gu, " ").trim());
-}
-
 function limitUtf8(value: string, maximumBytes: number): string {
 	if (Buffer.byteLength(value, "utf8") <= maximumBytes) return value;
 	const suffix = "\n[truncated]";
@@ -258,6 +257,7 @@ function describedNodeText(value: unknown): string {
 export class BrowserController {
 	private readonly dependencies: BrowserControllerDependencies;
 	private readonly targetSessions = new Set<string>();
+	private readonly loaderIds = new Map<string, string>();
 	private readonly elementIds = new Map<string, string>();
 	private elements = new Map<string, ElementTarget>();
 	private documentId = randomUUID();
@@ -280,6 +280,7 @@ export class BrowserController {
 		this.unsubscribeDetach = dependencies.subscribeDetach(() => {
 			this.attachedByController = false;
 			this.attachPromise = undefined;
+			this.loaderIds.clear();
 			this.invalidate();
 		});
 	}
@@ -352,6 +353,7 @@ export class BrowserController {
 		this.unsubscribeMessage();
 		this.unsubscribeDetach();
 		this.targetSessions.clear();
+		this.loaderIds.clear();
 		if (this.attachedByController && this.dependencies.debugger.isAttached()) this.dependencies.debugger.detach();
 	}
 
@@ -399,6 +401,7 @@ export class BrowserController {
 		await this.command("Page.enable", {}, sessionId, signal);
 		await this.command("DOM.enable", {}, sessionId, signal);
 		await this.command("Accessibility.enable", {}, sessionId, signal);
+		await this.command("Page.setLifecycleEventsEnabled", { enabled: true }, sessionId, signal);
 	}
 
 	private onDebuggerMessage(method: string, params: CdpParams, sessionId?: string): void {
@@ -413,15 +416,34 @@ export class BrowserController {
 		}
 		if (method === "Target.detachedFromTarget" && typeof params.sessionId === "string") {
 			this.targetSessions.delete(params.sessionId);
+			for (const key of this.loaderIds.keys()) {
+				if (key.startsWith(`${params.sessionId}:`)) this.loaderIds.delete(key);
+			}
 			this.invalidate();
 			return;
 		}
 		if (
-			method === "DOM.documentUpdated" ||
-			method === "Page.frameDetached" ||
-			method === "Inspector.targetCrashed" ||
-			(method === "Page.frameNavigated" && !sessionId)
+			method === "Page.lifecycleEvent" &&
+			typeof params.frameId === "string" &&
+			typeof params.loaderId === "string"
 		) {
+			const key = `${sessionId ?? "main"}:${params.frameId}`;
+			const previous = this.loaderIds.get(key);
+			this.loaderIds.set(key, params.loaderId);
+			if (previous && previous !== params.loaderId) this.invalidate();
+			return;
+		}
+		if (method === "Page.frameNavigated") {
+			const frame =
+				typeof params.frame === "object" && params.frame !== null ? (params.frame as CdpParams) : undefined;
+			if (typeof frame?.id === "string" && typeof frame.loaderId === "string") {
+				this.loaderIds.set(`${sessionId ?? "main"}:${frame.id}`, frame.loaderId);
+			}
+			this.invalidate();
+			return;
+		}
+		if (method === "DOM.documentUpdated" || method === "Page.frameDetached" || method === "Inspector.targetCrashed") {
+			if (method === "Page.frameDetached") this.loaderIds.clear();
 			this.invalidate();
 		}
 	}
@@ -527,9 +549,7 @@ export class BrowserController {
 				EDITABLE_ROLES.has(role) ? (stringValue(node.value) === "" ? "empty" : "non-empty") : "",
 				actions.length > 0 ? `actions=${actions.join("|")}` : "",
 			].filter(Boolean);
-			lines.push(
-				`${"  ".repeat(depth)}${elementId ? `${elementId} ` : ""}${role}${name ? ` ${safeText(name)}` : ""}${flags.length ? ` [${flags.join(", ")}]` : ""}`,
-			);
+			lines.push(formatBrowserStateNode({ depth, ...(elementId ? { elementId } : {}), role, label: name, flags }));
 		}
 		for (const key of this.elementIds.keys()) {
 			if (!activeElementKeys.has(key)) this.elementIds.delete(key);
@@ -548,24 +568,7 @@ export class BrowserController {
 	}
 
 	private referencesMissingElement(action: BrowserAction): boolean {
-		const has = (elementId: string) => this.elements.has(elementId);
-		switch (action.type) {
-			case "click":
-			case "hover":
-				return "elementId" in action.target && !has(action.target.elementId);
-			case "type":
-			case "select":
-				return !has(action.elementId);
-			case "scroll":
-				return action.elementId !== undefined && !has(action.elementId);
-			case "drag":
-				return (
-					("elementId" in action.from && !has(action.from.elementId)) ||
-					("elementId" in action.to && !has(action.to.elementId))
-				);
-			default:
-				return false;
-		}
+		return browserActionElementIds(action).some((elementId) => !this.elements.has(elementId));
 	}
 
 	private async performAction(action: BrowserAction, signal: AbortSignal): Promise<void> {

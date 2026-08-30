@@ -4,8 +4,11 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
 	assertEnvelopeByteLimit,
+	browserActionElementIds,
 	ClientRequestMethods,
 	createRpcError,
+	findBrowserStateElement,
+	formatBrowserStateNode,
 	HostRequestMethods,
 	MAX_BROWSER_ACTION_TEXT_UTF8_BYTES,
 	MAX_BROWSER_SCREENSHOT_UTF8_BYTES,
@@ -541,6 +544,27 @@ describe("golden protocol fixtures", () => {
 			const request = makeBrowserTool(call, `browser-call-${index}`);
 			expect(validateServerRequest(request)).toEqual(request);
 		}
+	});
+
+	it("shares browser state element formatting and action target enumeration", () => {
+		const line = formatBrowserStateNode({
+			depth: 1,
+			elementId: "e7",
+			role: "button",
+			label: 'Delete\n"all"',
+			flags: ["enabled", "actions=click"],
+		});
+		expect(line).toBe('  e7 button "Delete \\"all\\"" [enabled, actions=click]');
+		expect(findBrowserStateElement(`document WebArea\n${line}`, "e7")).toEqual({
+			elementId: "e7",
+			role: "button",
+			label: 'Delete "all"',
+		});
+		expect(browserActionElementIds({ type: "drag", from: { elementId: "e1" }, to: { elementId: "e2" } })).toEqual([
+			"e2",
+			"e1",
+		]);
+		expect(browserActionElementIds({ type: "press", key: "Enter" })).toEqual([]);
 	});
 
 	it("correlates bounded browser results with their pending call", () => {

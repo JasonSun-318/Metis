@@ -326,6 +326,7 @@ describe("BrowserManager", () => {
 					new AbortController().signal,
 				);
 			}
+			await vi.advanceTimersByTimeAsync(50);
 			expect(activity).toEqual([{ type: "activity", sessionId: SESSION_ID, browserId, active: true }]);
 			await vi.advanceTimersByTimeAsync(50);
 			expect(activity).toEqual([
@@ -334,6 +335,50 @@ describe("BrowserManager", () => {
 			]);
 			harness.manager.closeAll();
 			expect(harness.controllers.get(browserId)?.close).toHaveBeenCalledOnce();
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it("shares one fair 20-per-second budget across state and activity events", async () => {
+		vi.useFakeTimers();
+		try {
+			const harness = browserHarness();
+			const browserId = "10000000-0000-4000-8000-000000000068";
+			const progress: Array<{ readonly at: number; readonly type: "activity" | "state" }> = [];
+			harness.manager.onEvent((event) => {
+				if (event.type === "activity" || event.type === "state")
+					progress.push({ at: Date.now(), type: event.type });
+			});
+			harness.manager.create({ sessionId: SESSION_ID, browserId, profileId: DEFAULT_BROWSER_PROFILE_ID });
+			for (let index = 0; index < 20; index += 1) {
+				harness.emit("page-title-updated", {}, `Sustained ${index}`, true);
+				await harness.manager.executeTool(
+					SESSION_ID,
+					{
+						tool: "browser_act",
+						input: {
+							browserId,
+							documentId: "30000000-0000-4000-8000-000000000001",
+							snapshotRevision: 1,
+							origin: "https://example.test",
+							intent: "Exercise the shared progress budget",
+							risk: "ordinary",
+							action: { type: "click", target: { elementId: "e1" } },
+						},
+					},
+					new AbortController().signal,
+				);
+				await vi.advanceTimersByTimeAsync(100);
+			}
+			expect(new Set(progress.map(({ type }) => type))).toEqual(new Set(["activity", "state"]));
+			const peak = progress.reduce(
+				(maximum, event) =>
+					Math.max(maximum, progress.filter(({ at }) => at >= event.at && at < event.at + 1_000).length),
+				0,
+			);
+			expect(peak).toBeLessThanOrEqual(20);
+			harness.manager.closeAll();
 		} finally {
 			vi.useRealTimers();
 		}
@@ -859,6 +904,39 @@ describe("BrowserManager", () => {
 				url: "https://www.google.com/search?q=openai",
 			}),
 		).resolves.toBeUndefined();
+	});
+
+	it("waits for the final redirected and history pages before model observation", async () => {
+		const harness = browserHarness();
+		const browserId = "10000000-0000-4000-8000-000000000086";
+		harness.manager.create({ sessionId: SESSION_ID, browserId, profileId: DEFAULT_BROWSER_PROFILE_ID });
+		const controller = harness.controllers.get(browserId)!;
+		harness.webContents.loadURL.mockRejectedValueOnce(
+			Object.assign(new Error("(-3) loading redirected page"), { code: "", errno: -3 }),
+		);
+		const redirected = harness.manager.executeTool(
+			SESSION_ID,
+			{ tool: "browser_navigate", input: { browserId, action: "goto", url: "https://redirect.example" } },
+			new AbortController().signal,
+		);
+		await vi.waitFor(() => expect(harness.webContents.loadURL).toHaveBeenCalledOnce());
+		expect(controller.observe).not.toHaveBeenCalled();
+		harness.emit("did-stop-loading");
+		await expect(redirected).resolves.toMatchObject({ tool: "browser_navigate", details: { status: "completed" } });
+		expect(controller.observe).toHaveBeenCalledOnce();
+
+		harness.navigationHistory.canGoBack.mockReturnValue(true);
+		const back = harness.manager.executeTool(
+			SESSION_ID,
+			{ tool: "browser_navigate", input: { browserId, action: "back" } },
+			new AbortController().signal,
+		);
+		await vi.waitFor(() => expect(harness.navigationHistory.goBack).toHaveBeenCalledOnce());
+		expect(controller.observe).toHaveBeenCalledOnce();
+		harness.emit("did-start-loading");
+		harness.emit("did-stop-loading");
+		await expect(back).resolves.toMatchObject({ tool: "browser_navigate", details: { status: "completed" } });
+		expect(controller.observe).toHaveBeenCalledTimes(2);
 	});
 
 	it("uses native page actions and resets tab-local state when a browser closes", async () => {

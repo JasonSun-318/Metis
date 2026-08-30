@@ -200,7 +200,21 @@ test("packaged agent controls accessible pages, frames, screenshots, popups, sta
 				if (event.type === "activity" || event.type === "state") state.__browserProgressEvents!.push(performance.now());
 			});
 		});
+		const stateBurst = embedded.evaluate(
+			() =>
+				new Promise<void>((resolve) => {
+					let index = 0;
+					const timer = setInterval(() => {
+						document.title = `Browser control burst ${index}`;
+						index += 1;
+						if (index < 200) return;
+						clearInterval(timer);
+						resolve();
+					}, 5);
+				}),
+		);
 		await sendFixturePrompt(app.page, "performance-cycle");
+		await stateBurst;
 		await waitForDone(app, "performance-cycle");
 		const performanceCalls = fixture.calls.filter((call) => call.marker === "performance-cycle");
 		expect(performanceCalls.every((call) => call.completedAt !== undefined)).toBe(true);

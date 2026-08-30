@@ -58,7 +58,7 @@ const DEFAULT_BROWSER_BOUNDS: DesktopBrowserBounds = { x: 0, y: 0, width: 1_024,
 const MAX_HISTORY_ENTRIES = 500;
 const HISTORY_SAVE_DELAY_MS = 500;
 const ACTIVITY_IDLE_DELAY_MS = 50;
-const STATE_EVENT_INTERVAL_MS = 50;
+const PROGRESS_EVENT_INTERVAL_MS = 50;
 const ZOOM_PERCENTAGES = [25, 33, 50, 67, 75, 80, 90, 100, 110, 125, 150, 175, 200, 250, 300, 400, 500] as const;
 
 interface BrowserRecord {
@@ -81,8 +81,11 @@ interface BrowserRecord {
 	controlState: "idle" | "agent" | "handoff";
 	activityActive: boolean;
 	activityIdleTimer?: NodeJS.Timeout;
-	stateEventTimer?: NodeJS.Timeout;
-	lastStateEventAt: number;
+	progressEventTimer?: NodeJS.Timeout;
+	lastProgressEventAt: number;
+	lastProgressEventType?: BrowserProgressEvent["type"];
+	pendingStateEvent: boolean;
+	pendingActivityEvent?: boolean;
 	activeAbort?: AbortController;
 	takeoverRequested: boolean;
 	handoff?: HandoffRecord;
@@ -90,6 +93,7 @@ interface BrowserRecord {
 }
 
 type BrowserViewHost = Pick<View, "addChildView" | "removeChildView">;
+type BrowserProgressEvent = Extract<DesktopBrowserEvent, { type: "activity" | "state" }>;
 type BrowserBackgroundWindow = Pick<BaseWindow, "contentView" | "destroy" | "isDestroyed">;
 type BrowserPopupWindow = Pick<
 	BrowserWindow,
@@ -455,7 +459,8 @@ export class BrowserManager {
 			findRequestId: 0,
 			controlState: "idle",
 			activityActive: false,
-			lastStateEventAt: Number.NEGATIVE_INFINITY,
+			lastProgressEventAt: Number.NEGATIVE_INFINITY,
+			pendingStateEvent: false,
 			takeoverRequested: false,
 			commandTail: Promise.resolve(),
 		};
@@ -681,14 +686,22 @@ export class BrowserManager {
 		}
 		record.controller.invalidate();
 		if (input.action === "back") {
-			if (record.contents.navigationHistory.canGoBack()) record.contents.navigationHistory.goBack();
+			if (!record.contents.navigationHistory.canGoBack()) return;
+			const settled = signal ? this.waitForNavigationStop(record, signal, true) : undefined;
+			record.contents.navigationHistory.goBack();
+			await settled;
 			return;
 		}
 		if (input.action === "forward") {
-			if (record.contents.navigationHistory.canGoForward()) record.contents.navigationHistory.goForward();
+			if (!record.contents.navigationHistory.canGoForward()) return;
+			const settled = signal ? this.waitForNavigationStop(record, signal, true) : undefined;
+			record.contents.navigationHistory.goForward();
+			await settled;
 			return;
 		}
+		const settled = signal ? this.waitForNavigationStop(record, signal, true) : undefined;
 		record.contents.reload();
+		await settled;
 	}
 
 	takeControl(sessionId: string, browserId: string): void {
@@ -751,11 +764,12 @@ export class BrowserManager {
 		record.activeAbort?.abort();
 		if (record.activityIdleTimer) clearTimeout(record.activityIdleTimer);
 		record.activityIdleTimer = undefined;
-		if (record.stateEventTimer) clearTimeout(record.stateEventTimer);
-		record.stateEventTimer = undefined;
+		if (record.progressEventTimer) clearTimeout(record.progressEventTimer);
+		record.progressEventTimer = undefined;
+		record.pendingStateEvent = false;
+		record.pendingActivityEvent = undefined;
 		if (record.activityActive) {
 			record.activityActive = false;
-			this.emit({ type: "activity", sessionId: record.sessionId, browserId: record.browserId, active: false });
 		}
 		this.cancelHandoff(record, cancellationReason);
 		record.controller.close();
@@ -855,13 +869,17 @@ export class BrowserManager {
 		record.controller.invalidate();
 		record.state = { ...record.state, url, loading: true };
 		this.emitState(record);
+		let redirected = false;
 		const navigation = record.contents.loadURL(url).catch((cause) => {
 			if (!isAbortedNavigation(cause)) throw cause;
+			redirected = true;
 		});
 		if (!signal) {
 			await navigation;
 			return;
 		}
+		const startedAt = Date.now();
+		const timeoutMs = this.dependencies.navigationTimeoutMs ?? 15_000;
 		await new Promise<void>((resolve, reject) => {
 			let settled = false;
 			const finish = (next: () => void) => {
@@ -872,10 +890,7 @@ export class BrowserManager {
 				next();
 			};
 			const onAbort = () => finish(() => reject(signal.reason ?? new DOMException("Aborted", "AbortError")));
-			const timer = setTimeout(
-				() => finish(() => reject(new Error("Browser navigation timed out"))),
-				this.dependencies.navigationTimeoutMs ?? 15_000,
-			);
+			const timer = setTimeout(() => finish(() => reject(new Error("Browser navigation timed out"))), timeoutMs);
 			timer.unref?.();
 			signal.addEventListener("abort", onAbort, { once: true });
 			if (signal.aborted) onAbort();
@@ -883,6 +898,44 @@ export class BrowserManager {
 				() => finish(resolve),
 				(cause) => finish(() => reject(cause)),
 			);
+		});
+		if (redirected) {
+			await this.waitForNavigationStop(record, signal, false, Math.max(1, timeoutMs - (Date.now() - startedAt)));
+		}
+	}
+
+	private waitForNavigationStop(
+		record: BrowserRecord,
+		signal: AbortSignal,
+		waitForStart: boolean,
+		timeoutMs = this.dependencies.navigationTimeoutMs ?? 15_000,
+	): Promise<void> {
+		if (!waitForStart && !record.state.loading) return Promise.resolve();
+		return new Promise<void>((resolve, reject) => {
+			let started = !waitForStart || record.state.loading;
+			let settled = false;
+			const finish = (next: () => void) => {
+				if (settled) return;
+				settled = true;
+				clearTimeout(timer);
+				record.contents.off("did-start-loading", onStart);
+				record.contents.off("did-stop-loading", onStop);
+				signal.removeEventListener("abort", onAbort);
+				next();
+			};
+			const onStart = () => {
+				started = true;
+			};
+			const onStop = () => {
+				if (started) finish(resolve);
+			};
+			const onAbort = () => finish(() => reject(signal.reason ?? new DOMException("Aborted", "AbortError")));
+			const timer = setTimeout(() => finish(() => reject(new Error("Browser navigation timed out"))), timeoutMs);
+			timer.unref?.();
+			record.contents.on("did-start-loading", onStart);
+			record.contents.on("did-stop-loading", onStop);
+			signal.addEventListener("abort", onAbort, { once: true });
+			if (signal.aborted) onAbort();
 		});
 	}
 
@@ -1012,7 +1065,7 @@ export class BrowserManager {
 			this.placeSurface(record, false);
 			if (!record.activityActive) {
 				record.activityActive = true;
-				this.emit({ type: "activity", sessionId: record.sessionId, browserId: record.browserId, active: true });
+				this.emitActivity(record, true);
 			}
 			return;
 		}
@@ -1021,6 +1074,7 @@ export class BrowserManager {
 			if (state === "handoff") {
 				record.activityIdleTimer = undefined;
 				record.activityActive = false;
+				record.pendingActivityEvent = undefined;
 				this.placeSurface(record, Boolean(record.presentation?.visible));
 				return;
 			}
@@ -1033,7 +1087,7 @@ export class BrowserManager {
 				)
 					return;
 				record.activityActive = false;
-				this.emit({ type: "activity", sessionId: record.sessionId, browserId: record.browserId, active: false });
+				this.emitActivity(record, false);
 			}, ACTIVITY_IDLE_DELAY_MS);
 			record.activityIdleTimer.unref?.();
 		}
@@ -1229,8 +1283,10 @@ export class BrowserManager {
 			record.activeAbort?.abort();
 			if (record.activityIdleTimer) clearTimeout(record.activityIdleTimer);
 			record.activityIdleTimer = undefined;
-			if (record.stateEventTimer) clearTimeout(record.stateEventTimer);
-			record.stateEventTimer = undefined;
+			if (record.progressEventTimer) clearTimeout(record.progressEventTimer);
+			record.progressEventTimer = undefined;
+			record.pendingStateEvent = false;
+			record.pendingActivityEvent = undefined;
 			record.activityActive = false;
 			this.cancelHandoff(record, "tab_closed");
 			record.controller.close();
@@ -1442,23 +1498,47 @@ export class BrowserManager {
 	}
 
 	private emitState(record: BrowserRecord): void {
-		if (this.records.get(record.browserId) !== record) return;
-		const delay = STATE_EVENT_INTERVAL_MS - (Date.now() - record.lastStateEventAt);
-		if (!record.stateEventTimer && delay <= 0) {
-			record.lastStateEventAt = Date.now();
-			this.emit({ type: "state", state: structuredClone(record.state) });
+		record.pendingStateEvent = true;
+		this.flushProgressEvent(record);
+	}
+
+	private emitActivity(record: BrowserRecord, active: boolean): void {
+		record.pendingActivityEvent = active;
+		this.flushProgressEvent(record);
+	}
+
+	private flushProgressEvent(record: BrowserRecord): void {
+		if (this.records.get(record.browserId) !== record || record.progressEventTimer) return;
+		const delay = PROGRESS_EVENT_INTERVAL_MS - (Date.now() - record.lastProgressEventAt);
+		if (delay > 0) {
+			record.progressEventTimer = setTimeout(() => {
+				record.progressEventTimer = undefined;
+				this.flushProgressEvent(record);
+			}, delay);
+			record.progressEventTimer.unref?.();
 			return;
 		}
-		if (record.stateEventTimer) return;
-		record.stateEventTimer = setTimeout(
-			() => {
-				record.stateEventTimer = undefined;
-				if (this.records.get(record.browserId) !== record) return;
-				record.lastStateEventAt = Date.now();
-				this.emit({ type: "state", state: structuredClone(record.state) });
-			},
-			Math.max(0, delay),
-		);
-		record.stateEventTimer.unref?.();
+		let event: BrowserProgressEvent;
+		if (
+			record.pendingActivityEvent !== undefined &&
+			(!record.pendingStateEvent || record.lastProgressEventType !== "activity")
+		) {
+			event = {
+				type: "activity",
+				sessionId: record.sessionId,
+				browserId: record.browserId,
+				active: record.pendingActivityEvent,
+			};
+			record.pendingActivityEvent = undefined;
+		} else if (record.pendingStateEvent) {
+			event = { type: "state", state: structuredClone(record.state) };
+			record.pendingStateEvent = false;
+		} else {
+			return;
+		}
+		record.lastProgressEventAt = Date.now();
+		record.lastProgressEventType = event.type;
+		this.emit(event);
+		this.flushProgressEvent(record);
 	}
 }

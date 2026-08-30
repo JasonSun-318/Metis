@@ -178,10 +178,11 @@ describe("BrowserController", () => {
 		expect(debug.attached).toBe(false);
 		const result = await observe(controller);
 		expect(debug.attached).toBe(true);
-		expect(debug.commands.slice(0, 4).map(({ method }) => method)).toEqual([
+		expect(debug.commands.slice(0, 5).map(({ method }) => method)).toEqual([
 			"Page.enable",
 			"DOM.enable",
 			"Accessibility.enable",
+			"Page.setLifecycleEventsEnabled",
 			"Target.setAutoAttach",
 		]);
 		expect(result.change).toBe("full");
@@ -501,12 +502,18 @@ describe("BrowserController", () => {
 	it("invalidates the document on navigation events and detaches only its own debugger", async () => {
 		const { controller, debug, emit, detach } = fixture();
 		const first = await observe(controller);
-		emit("Page.frameNavigated", {});
+		emit("Page.frameNavigated", { frame: { id: "frame-1", loaderId: "loader-1" } }, "target-1");
 		const second = await observe(controller);
 		expect(second.documentId).not.toBe(first.documentId);
+		emit("Page.lifecycleEvent", { frameId: "frame-1", loaderId: "loader-1", name: "load" }, "target-1");
+		const sameLoader = await observe(controller);
+		expect(sameLoader.documentId).toBe(second.documentId);
+		emit("Page.lifecycleEvent", { frameId: "frame-1", loaderId: "loader-2", name: "init" }, "target-1");
+		const changedLoader = await observe(controller);
+		expect(changedLoader.documentId).not.toBe(sameLoader.documentId);
 		detach();
 		const third = await observe(controller);
-		expect(third.documentId).not.toBe(second.documentId);
+		expect(third.documentId).not.toBe(changedLoader.documentId);
 		controller.close();
 		expect(debug.attached).toBe(false);
 	});

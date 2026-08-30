@@ -3,7 +3,9 @@ import {
 	type BrowserActInput,
 	type BrowserToolCall,
 	type BrowserToolResult,
+	browserActionElementIds,
 	type DomainEvent,
+	findBrowserStateElement,
 	type InteractionResponseInput,
 	type InteractionView,
 	MAX_INTERACTION_CHOICES,
@@ -94,40 +96,6 @@ function browserOrigin(url: string): string {
 	}
 }
 
-function browserActionElementIds(action: BrowserActInput["action"]): readonly string[] {
-	switch (action.type) {
-		case "click":
-		case "hover":
-			return "elementId" in action.target ? [action.target.elementId] : [];
-		case "type":
-		case "select":
-			return [action.elementId];
-		case "scroll":
-			return action.elementId ? [action.elementId] : [];
-		case "drag":
-			return [action.to, action.from].flatMap((target) => ("elementId" in target ? [target.elementId] : []));
-		case "press":
-		case "dialog":
-			return [];
-	}
-}
-
-function observedTarget(state: string, elementId: string): { readonly found: boolean; readonly label?: string } {
-	const prefix = `${elementId} `;
-	const line = state.split("\n").find((candidate) => candidate.trimStart().startsWith(prefix));
-	if (!line) return { found: false };
-	const remainder = line.trimStart().slice(prefix.length);
-	const role = remainder.split(/[\s[]/u, 1)[0];
-	const encodedLabel = remainder.match(/"(?:\\.|[^"\\])*"/u)?.[0];
-	if (!encodedLabel) return { found: true, ...(role ? { label: role } : {}) };
-	try {
-		const label = JSON.parse(encodedLabel) as unknown;
-		return { found: true, label: typeof label === "string" && label !== "" ? label : role };
-	} catch {
-		return { found: true, ...(role ? { label: role } : {}) };
-	}
-}
-
 function preflightBrowserAction(
 	input: BrowserActInput,
 	observation: BrowserObservation,
@@ -139,10 +107,11 @@ function preflightBrowserAction(
 	if (observation.revision !== input.snapshotRevision)
 		return { staleReason: "revision_changed", target: input.action.type };
 	const targets = browserActionElementIds(input.action).map((elementId) =>
-		observedTarget(observation.state, elementId),
+		findBrowserStateElement(observation.state, elementId),
 	);
-	if (targets.some(({ found }) => !found)) return { staleReason: "element_missing", target: input.action.type };
-	return { target: targets.find(({ label }) => label)?.label ?? input.action.type };
+	if (targets.some((target) => !target)) return { staleReason: "element_missing", target: input.action.type };
+	const target = targets.find((candidate) => candidate?.label ?? candidate?.role);
+	return { target: target?.label ?? target?.role ?? input.action.type };
 }
 
 function permissionOperation(request: PermissionApprovalRequest) {
@@ -287,9 +256,6 @@ export class InteractionBroker {
 		}) as ServerRpcRequest<"browser/tool">;
 		const result = (await peer.request(request, signal)) as ServerResult<"browser/tool">;
 		validateResponseFor("server", request, { jsonrpc: "2.0", id: request.id, result });
-		if (result.toolCallId !== toolCallId || result.result.tool !== call.tool) {
-			throw new Error("Browser tool response did not match its request");
-		}
 		return result.result;
 	}
 
