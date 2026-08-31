@@ -1,9 +1,8 @@
-import { spawnSync } from "child_process";
 import { randomUUID } from "crypto";
 import { readFileSync, unlinkSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-
+import { runClipboardCommand } from "./clipboard-process.ts";
 import { detectSupportedImageMimeType } from "./mime.ts";
 import { loadPhoton } from "./photon.ts";
 
@@ -101,37 +100,20 @@ async function convertToPng(bytes: Uint8Array): Promise<Uint8Array | null> {
 	}
 }
 
-function runCommand(
+async function runCommand(
 	command: string,
 	args: string[],
 	options?: { timeoutMs?: number; maxBufferBytes?: number; env?: NodeJS.ProcessEnv },
-): { stdout: Buffer; ok: boolean } {
-	const timeoutMs = options?.timeoutMs ?? DEFAULT_READ_TIMEOUT_MS;
-	const maxBufferBytes = options?.maxBufferBytes ?? DEFAULT_MAX_BUFFER_BYTES;
-
-	const result = spawnSync(command, args, {
-		timeout: timeoutMs,
-		maxBuffer: maxBufferBytes,
+): Promise<{ stdout: Buffer; ok: boolean }> {
+	return runClipboardCommand(command, args, {
+		timeoutMs: options?.timeoutMs ?? DEFAULT_READ_TIMEOUT_MS,
+		maxBufferBytes: options?.maxBufferBytes ?? DEFAULT_MAX_BUFFER_BYTES,
 		env: options?.env,
 	});
-
-	if (result.error) {
-		return { ok: false, stdout: Buffer.alloc(0) };
-	}
-
-	if (result.status !== 0) {
-		return { ok: false, stdout: Buffer.alloc(0) };
-	}
-
-	const stdout = Buffer.isBuffer(result.stdout)
-		? result.stdout
-		: Buffer.from(result.stdout ?? "", typeof result.stdout === "string" ? "utf-8" : undefined);
-
-	return { ok: true, stdout };
 }
 
-function readClipboardImageViaWlPaste(): ClipboardImage | null {
-	const list = runCommand("wl-paste", ["--list-types"], { timeoutMs: DEFAULT_LIST_TIMEOUT_MS });
+async function readClipboardImageViaWlPaste(): Promise<ClipboardImage | null> {
+	const list = await runCommand("wl-paste", ["--list-types"], { timeoutMs: DEFAULT_LIST_TIMEOUT_MS });
 	if (!list.ok) {
 		return null;
 	}
@@ -147,7 +129,7 @@ function readClipboardImageViaWlPaste(): ClipboardImage | null {
 		return null;
 	}
 
-	const data = runCommand("wl-paste", ["--type", selectedType, "--no-newline"]);
+	const data = await runCommand("wl-paste", ["--type", selectedType, "--no-newline"]);
 	if (!data.ok || data.stdout.length === 0) {
 		return null;
 	}
@@ -173,11 +155,11 @@ function isWSL(env: NodeJS.ProcessEnv = process.env): boolean {
  * Windows screenshots (Win+Shift+S). PowerShell can access the Windows clipboard
  * directly, so we use it as a fallback.
  */
-function readClipboardImageViaPowerShell(): ClipboardImage | null {
+async function readClipboardImageViaPowerShell(): Promise<ClipboardImage | null> {
 	const tmpFile = join(tmpdir(), `metis-wsl-clip-${randomUUID()}.png`);
 
 	try {
-		const winPathResult = runCommand("wslpath", ["-w", tmpFile], { timeoutMs: DEFAULT_LIST_TIMEOUT_MS });
+		const winPathResult = await runCommand("wslpath", ["-w", tmpFile], { timeoutMs: DEFAULT_LIST_TIMEOUT_MS });
 		if (!winPathResult.ok) {
 			return null;
 		}
@@ -196,7 +178,7 @@ function readClipboardImageViaPowerShell(): ClipboardImage | null {
 			"if ($img) { $img.Save($path, [System.Drawing.Imaging.ImageFormat]::Png); Write-Output 'ok' } else { Write-Output 'empty' }",
 		].join("; ");
 
-		const result = runCommand("powershell.exe", ["-NoProfile", "-Command", psScript], {
+		const result = await runCommand("powershell.exe", ["-NoProfile", "-Command", psScript], {
 			timeoutMs: DEFAULT_POWERSHELL_TIMEOUT_MS,
 		});
 		if (!result.ok) {
@@ -220,7 +202,7 @@ function readClipboardImageViaPowerShell(): ClipboardImage | null {
 	}
 }
 
-function readClipboardImageViaWindowsPowerShell(): ClipboardImage | null {
+async function readClipboardImageViaWindowsPowerShell(): Promise<ClipboardImage | null> {
 	const tmpFile = join(tmpdir(), `metis-clip-${randomUUID()}.png`);
 	const quotedPath = tmpFile.replaceAll("'", "''");
 	const script = [
@@ -231,7 +213,7 @@ function readClipboardImageViaWindowsPowerShell(): ClipboardImage | null {
 		"if ($img) { $img.Save($path, [System.Drawing.Imaging.ImageFormat]::Png); Write-Output 'ok' } else { Write-Output 'empty' }",
 	].join("; ");
 
-	const result = runCommand("powershell.exe", ["-NoProfile", "-Command", script], {
+	const result = await runCommand("powershell.exe", ["-NoProfile", "-Command", script], {
 		timeoutMs: DEFAULT_POWERSHELL_TIMEOUT_MS,
 	});
 	if (!result.ok || result.stdout.toString("utf-8").trim() !== "ok") {
@@ -246,10 +228,10 @@ function readClipboardImageViaWindowsPowerShell(): ClipboardImage | null {
 	return readTemporaryImage(tmpFile, "image/png");
 }
 
-function readClipboardImageViaAppleScriptFormat(
+async function readClipboardImageViaAppleScriptFormat(
 	clipboardClass: "PNGf" | "TIFF",
 	mimeType: "image/png" | "image/tiff",
-): ClipboardImage | null {
+): Promise<ClipboardImage | null> {
 	const tmpFile = join(tmpdir(), `metis-clip-${randomUUID()}.${mimeType === "image/png" ? "png" : "tiff"}`);
 	const script = [
 		"on run argv",
@@ -272,7 +254,7 @@ function readClipboardImageViaAppleScriptFormat(
 	const args = script.flatMap((line) => ["-e", line]);
 	args.push(tmpFile);
 
-	const result = runCommand("osascript", args);
+	const result = await runCommand("osascript", args);
 	if (!result.ok || result.stdout.toString("utf-8").trim() !== "ok") {
 		try {
 			unlinkSync(tmpFile);
@@ -285,7 +267,7 @@ function readClipboardImageViaAppleScriptFormat(
 	return readTemporaryImage(tmpFile, mimeType);
 }
 
-function readClipboardImageFileViaAppleScript(): ClipboardImage | null {
+async function readClipboardImageFileViaAppleScript(): Promise<ClipboardImage | null> {
 	const script = [
 		"try",
 		"set fileURL to the clipboard as «class furl»",
@@ -295,7 +277,7 @@ function readClipboardImageFileViaAppleScript(): ClipboardImage | null {
 		'return ""',
 		"end try",
 	];
-	const result = runCommand(
+	const result = await runCommand(
 		"osascript",
 		script.flatMap((line) => ["-e", line]),
 		{ timeoutMs: DEFAULT_LIST_TIMEOUT_MS },
@@ -314,16 +296,16 @@ function readClipboardImageFileViaAppleScript(): ClipboardImage | null {
 	}
 }
 
-function readClipboardImageViaAppleScript(): ClipboardImage | null {
+async function readClipboardImageViaAppleScript(): Promise<ClipboardImage | null> {
 	return (
-		readClipboardImageFileViaAppleScript() ??
-		readClipboardImageViaAppleScriptFormat("PNGf", "image/png") ??
-		readClipboardImageViaAppleScriptFormat("TIFF", "image/tiff")
+		(await readClipboardImageFileViaAppleScript()) ??
+		(await readClipboardImageViaAppleScriptFormat("PNGf", "image/png")) ??
+		(await readClipboardImageViaAppleScriptFormat("TIFF", "image/tiff"))
 	);
 }
 
-function readClipboardImageViaXclip(): ClipboardImage | null {
-	const targets = runCommand("xclip", ["-selection", "clipboard", "-t", "TARGETS", "-o"], {
+async function readClipboardImageViaXclip(): Promise<ClipboardImage | null> {
+	const targets = await runCommand("xclip", ["-selection", "clipboard", "-t", "TARGETS", "-o"], {
 		timeoutMs: DEFAULT_LIST_TIMEOUT_MS,
 	});
 
@@ -340,7 +322,7 @@ function readClipboardImageViaXclip(): ClipboardImage | null {
 	const tryTypes = preferred ? [preferred, ...SUPPORTED_IMAGE_MIME_TYPES] : [...SUPPORTED_IMAGE_MIME_TYPES];
 
 	for (const mimeType of tryTypes) {
-		const data = runCommand("xclip", ["-selection", "clipboard", "-t", mimeType, "-o"]);
+		const data = await runCommand("xclip", ["-selection", "clipboard", "-t", mimeType, "-o"]);
 		if (data.ok && data.stdout.length > 0) {
 			return { bytes: data.stdout, mimeType: baseMimeType(mimeType) };
 		}
@@ -367,20 +349,20 @@ export async function readClipboardImage(options?: {
 		const wayland = isWaylandSession(env);
 
 		if (wayland || wsl) {
-			image = readClipboardImageViaWlPaste() ?? readClipboardImageViaXclip();
+			image = (await readClipboardImageViaWlPaste()) ?? (await readClipboardImageViaXclip());
 		}
 
 		if (!image && wsl) {
-			image = readClipboardImageViaPowerShell();
+			image = await readClipboardImageViaPowerShell();
 		}
 
 		if (!image && !wayland) {
-			image = readClipboardImageViaXclip();
+			image = await readClipboardImageViaXclip();
 		}
 	} else if (platform === "darwin") {
-		image = readClipboardImageViaAppleScript();
+		image = await readClipboardImageViaAppleScript();
 	} else if (platform === "win32") {
-		image = readClipboardImageViaWindowsPowerShell();
+		image = await readClipboardImageViaWindowsPowerShell();
 	}
 
 	if (!image) {

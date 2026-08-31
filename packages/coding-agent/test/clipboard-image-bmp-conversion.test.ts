@@ -41,22 +41,17 @@ function createTinyBmp1x1Red24bpp(): Uint8Array {
 	return new Uint8Array(buffer);
 }
 
-// Mock wl-paste to return BMP
-vi.mock("child_process", async () => {
-	const actual = await vi.importActual<typeof import("child_process")>("child_process");
-	return {
-		...actual,
-		spawnSync: vi.fn((command: string, args: string[]) => {
-			if (command === "wl-paste" && args.includes("--list-types")) {
-				return { status: 0, stdout: Buffer.from("image/bmp\n"), error: null };
-			}
-			if (command === "wl-paste" && args.includes("image/bmp")) {
-				return { status: 0, stdout: Buffer.from(createTinyBmp1x1Red24bpp()), error: null };
-			}
-			return { status: 1, stdout: Buffer.alloc(0), error: null };
-		}),
-	};
-});
+vi.mock("../src/utils/clipboard-process.js", () => ({
+	runClipboardCommand: vi.fn(async (command: string, args: string[]) => {
+		if (command === "wl-paste" && args.includes("--list-types")) {
+			return { ok: true, stdout: Buffer.from("image/bmp\n") };
+		}
+		if (command === "wl-paste" && args.includes("image/bmp")) {
+			return { ok: true, stdout: Buffer.from(createTinyBmp1x1Red24bpp()) };
+		}
+		return { ok: false, stdout: Buffer.alloc(0) };
+	}),
+}));
 
 describe("readClipboardImage BMP conversion", () => {
 	test("converts BMP to PNG on Wayland/WSLg", async () => {
