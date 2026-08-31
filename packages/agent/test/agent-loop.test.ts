@@ -664,7 +664,7 @@ describe("agentLoop with AgentMessage", () => {
 	});
 
 	it.each(["sequential", "parallel"] as const)(
-		"does not execute a tool when the marker aborts the run in %s mode",
+		"emits aborted results for every unexecuted tool when the marker aborts the run in %s mode",
 		async (toolExecution) => {
 			const parameters = Type.Object({});
 			const controller = new AbortController();
@@ -701,7 +701,11 @@ describe("agentLoop with AgentMessage", () => {
 						type: "done",
 						reason: "toolUse",
 						message: createAssistantMessage(
-							[{ type: "toolCall", id: "tool-1", name: "write", arguments: {} }],
+							[
+								{ type: "toolCall", id: "tool-1", name: "write", arguments: {} },
+								{ type: "toolCall", id: "tool-2", name: "write", arguments: {} },
+								{ type: "toolCall", id: "tool-3", name: "write", arguments: {} },
+							],
 							"toolUse",
 						),
 					});
@@ -729,13 +733,13 @@ describe("agentLoop with AgentMessage", () => {
 			expect(executions).toBe(0);
 			expect(afterCalls).toBe(0);
 			expect(providerCalls).toBe(1);
-			const result = events.find((event) => event.type === "message_end" && event.message.role === "toolResult");
-			expect(result).toMatchObject({
-				type: "message_end",
-				message: { role: "toolResult", toolCallId: "tool-1", isError: true },
-			});
-			if (result?.type === "message_end" && result.message.role === "toolResult") {
-				expect(result.message.content).toEqual([{ type: "text", text: "Operation aborted" }]);
+			const results = events.flatMap((event) =>
+				event.type === "message_end" && event.message.role === "toolResult" ? [event.message] : [],
+			);
+			expect(results.map((result) => result.toolCallId)).toEqual(["tool-1", "tool-2", "tool-3"]);
+			for (const result of results) {
+				expect(result).toMatchObject({ role: "toolResult", isError: true });
+				expect(result.content).toEqual([{ type: "text", text: "Operation aborted" }]);
 			}
 		},
 	);
