@@ -4,6 +4,7 @@
  */
 import { visibleWidth } from "@metis/tui";
 import { beforeAll, describe, expect, it } from "vitest";
+import { DEFAULT_MAX_BYTES } from "../src/core/tools/truncate.ts";
 import { BashExecutionComponent } from "../src/modes/interactive/components/bash-execution.ts";
 import { initTheme } from "../src/modes/interactive/theme/theme.ts";
 
@@ -76,5 +77,16 @@ describe("BashExecutionComponent width handling (#2569)", () => {
 			const w = visibleWidth(lines60[i]);
 			expect(w, `Line ${i} visibleWidth=${w} > 60`).toBeLessThanOrEqual(60);
 		}
+	});
+
+	it("keeps streaming display state bounded while preserving exact raw output", () => {
+		const { stub } = createTuiStub(120);
+		const component = new BashExecutionComponent("build", stub);
+		const chunks = Array.from({ length: 2_000 }, (_, index) => `line-${index}-${"x".repeat(80)}\n`);
+		for (const chunk of chunks) component.appendOutput(chunk);
+
+		expect(component.getOutput()).toBe(chunks.join(""));
+		const displayTail = (component as unknown as { displayTail: string }).displayTail;
+		expect(Buffer.byteLength(displayTail, "utf8")).toBeLessThanOrEqual(DEFAULT_MAX_BYTES);
 	});
 });

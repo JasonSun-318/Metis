@@ -111,6 +111,33 @@ describe("McpManager", () => {
 		expect(manager.getStatus()).toMatchObject([{ name: "external", state: "disabled" }]);
 	});
 
+	it("backs off a failed external revision while allowing a new revision to retry immediately", async () => {
+		const storage = new InMemorySettingsStorage();
+		const runtimeSettings = SettingsManager.fromStorage(storage);
+		const writer = SettingsManager.fromStorage(storage);
+		const manager = await McpManager.create({
+			settingsManager: runtimeSettings,
+			authStorage: AuthStorage.inMemory(),
+			cwd: process.cwd(),
+		});
+		managers.push(manager);
+		const start = vi.spyOn(McpServerClient.prototype, "start").mockRejectedValue(new Error("offline"));
+		try {
+			writer.setMcpServer("global", "broken", { command: "first", required: true });
+			await writer.flushOrThrow();
+			await expect(manager.ensureCurrent()).rejects.toThrow('Failed to initialize required MCP server "broken"');
+			await expect(manager.ensureCurrent()).resolves.toBeUndefined();
+			expect(start).toHaveBeenCalledTimes(1);
+
+			writer.setMcpServer("global", "broken", { command: "second", required: true });
+			await writer.flushOrThrow();
+			await expect(manager.ensureCurrent()).rejects.toThrow('Failed to initialize required MCP server "broken"');
+			expect(start).toHaveBeenCalledTimes(2);
+		} finally {
+			start.mockRestore();
+		}
+	});
+
 	it("refreshes an externally changed credential at the next tool boundary", async () => {
 		const server = await createMcpTestServer({ requiredBearerToken: "external-secret" });
 		servers.push(server);

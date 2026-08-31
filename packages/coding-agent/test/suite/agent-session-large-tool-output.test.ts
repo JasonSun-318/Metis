@@ -194,7 +194,7 @@ describe("large tool output", () => {
 		}
 	});
 
-	it("keeps the original external result when persistence fails", async () => {
+	it("keeps a bounded external result when persistence fails", async () => {
 		const fullText = "f".repeat(LARGE_TOOL_OUTPUT_MAX_CHARS + 1);
 		const extensionFactories: ExtensionFactory[] = [
 			(metis) => {
@@ -227,8 +227,10 @@ describe("large tool output", () => {
 				.getEntries()
 				.find((item): item is SessionMessageEntry => item.type === "message" && item.message.role === "toolResult");
 			expect(entry?.toolOutput).toBeUndefined();
-			expect(entry?.message.role === "toolResult" ? getMessageText(entry.message) : "").toBe(fullText);
-			expect(providerText).toBe(fullText);
+			const persistedText = entry?.message.role === "toolResult" ? getMessageText(entry.message) : "";
+			expect(persistedText).toContain("Full output could not be saved");
+			expect(persistedText.length).toBeLessThan(fullText.length);
+			expect(providerText).toBe(persistedText);
 		} finally {
 			rmSync(blockedOutputDir, { recursive: true, force: true });
 			await harness.cleanup();

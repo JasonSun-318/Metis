@@ -274,6 +274,7 @@ export class McpManager {
 	private readonly cleanupErrors: Error[] = [];
 	private activeRevision = "";
 	private refreshTail: Promise<void> = Promise.resolve();
+	private failedRefresh?: { revision: string; retryAfter: number };
 	private clientUnsubscribers: Array<() => void> = [];
 	private records: McpToolRecord[] = [];
 	private recordByModelName = new Map<string, McpToolRecord>();
@@ -733,6 +734,7 @@ export class McpManager {
 		const previous = this.activeGeneration;
 		this.activeGeneration = next;
 		this.activeRevision = prepared.revision;
+		this.failedRefresh = undefined;
 		try {
 			this.attachClientSubscriptions();
 			this.rebuildRecords();
@@ -811,9 +813,19 @@ export class McpManager {
 			await this.settingsManager.reload();
 			this.authStorage.reload();
 			const settings = resolveMcpSettings(this.settingsManager, this.cwd, this.environment);
-			if (this.runtimeConfigurationRevision(settings) === this.activeRevision) return;
-			const prepared = await this.prepareConfiguration(settings);
-			this.activateConfiguration(prepared);
+			const revision = this.runtimeConfigurationRevision(settings);
+			if (revision === this.activeRevision) {
+				this.failedRefresh = undefined;
+				return;
+			}
+			if (this.failedRefresh?.revision === revision && Date.now() < this.failedRefresh.retryAfter) return;
+			try {
+				const prepared = await this.prepareConfiguration(settings);
+				this.activateConfiguration(prepared);
+			} catch (error) {
+				this.failedRefresh = { revision, retryAfter: Date.now() + 5_000 };
+				throw error;
+			}
 		});
 		this.refreshTail = refresh.catch(() => undefined);
 		await refresh;

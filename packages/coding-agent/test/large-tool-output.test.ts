@@ -21,6 +21,8 @@ import {
 	isOwnedToolOutputFile,
 	LARGE_TOOL_OUTPUT_MAX_CHARS,
 	persistToolOutputText,
+	TOOL_OUTPUT_IMAGE_MAX_BYTES,
+	TOOL_OUTPUT_IMAGES_MAX_BYTES,
 	TOOL_OUTPUT_PREVIEW_BYTES,
 } from "../src/core/large-tool-output.ts";
 
@@ -58,30 +60,69 @@ describe("externalizeLargeToolOutput", () => {
 			originalBytes: Buffer.byteLength(fullText, "utf8"),
 			previewBytes: TOOL_OUTPUT_PREVIEW_BYTES - 1,
 		});
-		expect(readFileSync(result!.toolOutput.fullOutputPath, "utf8")).toBe(fullText);
+		expect(readFileSync(result!.toolOutput!.fullOutputPath, "utf8")).toBe(fullText);
 		if (process.platform !== "win32") {
 			expect(statSync(outputDir).mode & 0o777).toBe(0o700);
-			expect(statSync(result!.toolOutput.fullOutputPath).mode & 0o777).toBe(0o600);
+			expect(statSync(result!.toolOutput!.fullOutputPath).mode & 0o777).toBe(0o600);
 		}
-		expect(statSync(result!.toolOutput.fullOutputPath).nlink).toBe(1);
+		expect(statSync(result!.toolOutput!.fullOutputPath).nlink).toBe(1);
 		expect(result?.content[0]).toEqual(image);
 		const noticeBlock = result?.content.find((block) => block.type === "text");
 		const notice = noticeBlock?.type === "text" ? noticeBlock.text : "";
 		expect(notice).toContain("Tool output truncated: preview only");
 		expect(notice).toContain(`Original size: ${Buffer.byteLength(fullText, "utf8")} bytes`);
 		expect(notice).toContain(`Preview size: ${TOOL_OUTPUT_PREVIEW_BYTES - 1} bytes`);
-		expect(notice).toContain(`Full output: ${result?.toolOutput.fullOutputPath}`);
+		expect(notice).toContain(`Full output: ${result?.toolOutput?.fullOutputPath}`);
 		expect(notice).toContain("If you need the full output, read the saved file.");
 		expect(notice).not.toContain("�");
 	});
 
-	it("fails without returning a truncated replacement when persistence is unavailable", async () => {
+	it("returns a bounded preview when persistence is unavailable", async () => {
 		const blockedPath = join(tempDir, "not-a-directory");
 		writeFileSync(blockedPath, "block mkdir");
 
-		await expect(
-			externalizeLargeToolOutput([{ type: "text", text: "x".repeat(LARGE_TOOL_OUTPUT_MAX_CHARS + 1) }], blockedPath),
-		).rejects.toThrow();
+		const result = await externalizeLargeToolOutput(
+			[{ type: "text", text: "x".repeat(LARGE_TOOL_OUTPUT_MAX_CHARS + 1) }],
+			blockedPath,
+		);
+		expect(result?.toolOutput).toBeUndefined();
+		const notice = result?.content[0];
+		expect(notice?.type).toBe("text");
+		if (notice?.type === "text") {
+			expect(notice.text).toContain("Full output could not be saved");
+			expect(Buffer.byteLength(notice.text, "utf8")).toBeLessThan(TOOL_OUTPUT_PREVIEW_BYTES + 300);
+		}
+	});
+
+	it("omits an image that exceeds the decoded-byte limit", async () => {
+		const image = {
+			type: "image" as const,
+			data: Buffer.alloc(TOOL_OUTPUT_IMAGE_MAX_BYTES + 1).toString("base64"),
+			mimeType: "image/png",
+		};
+		const result = await externalizeLargeToolOutput([image], join(tempDir, "tool-results"));
+
+		expect(result?.toolOutput).toBeUndefined();
+		expect(result?.content).toEqual([{ type: "text", text: expect.stringContaining("Image omitted") }]);
+	});
+
+	it("enforces an aggregate decoded-byte limit across images", async () => {
+		const partBytes = Math.floor(TOOL_OUTPUT_IMAGES_MAX_BYTES / 3) + 1;
+		const image = () => ({
+			type: "image" as const,
+			data: Buffer.alloc(partBytes).toString("base64"),
+			mimeType: "image/png",
+		});
+		const first = image();
+		const second = image();
+		const third = image();
+		const fourth = image();
+		const result = await externalizeLargeToolOutput([first, second, third, fourth], join(tempDir, "tool-results"));
+
+		expect(result?.content[0]).toEqual(first);
+		expect(result?.content[1]).toEqual(second);
+		expect(result?.content[2]).toEqual({ type: "text", text: expect.stringContaining("Image omitted") });
+		expect(result?.content[3]).toEqual({ type: "text", text: expect.stringContaining("Image omitted") });
 	});
 
 	it("persists arbitrary text through the same hardened output store", async () => {
@@ -147,9 +188,12 @@ describe("externalizeLargeToolOutput", () => {
 			throw error;
 		}
 
-		await expect(
-			externalizeLargeToolOutput([{ type: "text", text: "secret".repeat(LARGE_TOOL_OUTPUT_MAX_CHARS) }], outputDir),
-		).rejects.toThrow("not a real directory");
+		const result = await externalizeLargeToolOutput(
+			[{ type: "text", text: "secret".repeat(LARGE_TOOL_OUTPUT_MAX_CHARS) }],
+			outputDir,
+		);
+		expect(result?.toolOutput).toBeUndefined();
+		expect(result?.content[0]).toEqual({ type: "text", text: expect.stringContaining("could not be saved") });
 		expect(readdirSync(targetDir)).toEqual([]);
 	});
 
@@ -173,7 +217,7 @@ describe("externalizeLargeToolOutput", () => {
 			join(linkedParent, "tool-results"),
 		);
 
-		expect(readFileSync(result!.toolOutput.fullOutputPath, "utf8")).toBe(fullText);
+		expect(readFileSync(result!.toolOutput!.fullOutputPath, "utf8")).toBe(fullText);
 	});
 
 	it("rejects a directory swap before writing output content", async () => {
@@ -187,9 +231,11 @@ describe("externalizeLargeToolOutput", () => {
 			return realRandomUUID();
 		});
 
-		await expect(
-			externalizeLargeToolOutput([{ type: "text", text: "secret".repeat(LARGE_TOOL_OUTPUT_MAX_CHARS) }], outputDir),
-		).rejects.toThrow("directory identity changed");
+		const result = await externalizeLargeToolOutput(
+			[{ type: "text", text: "secret".repeat(LARGE_TOOL_OUTPUT_MAX_CHARS) }],
+			outputDir,
+		);
+		expect(result?.toolOutput).toBeUndefined();
 		expect(readdirSync(movedDir)).toEqual([]);
 		const replacementFiles = readdirSync(outputDir);
 		expect(replacementFiles).toHaveLength(1);
@@ -220,9 +266,8 @@ describe("externalizeLargeToolOutput", () => {
 		});
 
 		const fullText = "secret".repeat(LARGE_TOOL_OUTPUT_MAX_CHARS);
-		await expect(externalizeLargeToolOutput([{ type: "text", text: fullText }], outputDir)).rejects.toThrow(
-			"forced persistence failure",
-		);
+		const result = await externalizeLargeToolOutput([{ type: "text", text: fullText }], outputDir);
+		expect(result?.toolOutput).toBeUndefined();
 
 		expect(replacedPath).toBeDefined();
 		expect(readFileSync(replacedPath!, "utf8")).toBe("replacement");

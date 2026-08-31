@@ -2769,6 +2769,33 @@ describe("AgentSessionRuntime characterization", () => {
 		expect(shutdownCount).toBe(2);
 	});
 
+	it("rolls back assistant messages that fail durable persistence", async () => {
+		const { runtime } = await createRuntimeForTest(() => {});
+		const manager = runtime.session.sessionManager;
+		const originalAppendMessage = manager.appendMessage.bind(manager);
+		let failed = false;
+		const appendMessage = vi.spyOn(manager, "appendMessage").mockImplementation((message, toolOutput, turnId) => {
+			if (message.role === "assistant" && !failed) {
+				failed = true;
+				throw new Error("assistant persistence failed");
+			}
+			return originalAppendMessage(message, toolOutput, turnId);
+		});
+
+		await expect(runtime.session.prompt("hello")).rejects.toSatisfy((error: unknown) =>
+			errorTreeIncludesMessage(error, "assistant persistence failed"),
+		);
+		expect(runtime.session.messages.filter((message) => message.role === "assistant")).toEqual([]);
+		expect(
+			manager.getEntries().filter((entry) => entry.type === "message" && entry.message.role === "assistant"),
+		).toEqual([]);
+		await expect(runtime.session.abortAndDrainAgentEventPersistence()).rejects.toSatisfy((error: unknown) =>
+			errorTreeIncludesMessage(error, "assistant persistence failed"),
+		);
+
+		appendMessage.mockRestore();
+	});
+
 	it("releases the current lease after a quit persistence failure without repeating shutdown", async () => {
 		let releaseMessageEnd!: () => void;
 		let markMessageEndStarted!: () => void;

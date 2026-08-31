@@ -8,6 +8,8 @@ import { ensureDirectoryDurablySync } from "./durable-file.ts";
 
 export const LARGE_TOOL_OUTPUT_MAX_CHARS = 50_000;
 export const TOOL_OUTPUT_PREVIEW_BYTES = 2 * 1024;
+export const TOOL_OUTPUT_IMAGE_MAX_BYTES = 5 * 1024 * 1024;
+export const TOOL_OUTPUT_IMAGES_MAX_BYTES = 10 * 1024 * 1024;
 
 export interface PersistedToolOutput {
 	truncated: true;
@@ -18,7 +20,7 @@ export interface PersistedToolOutput {
 
 export interface ExternalizedToolOutput {
 	content: (TextContent | ImageContent)[];
-	toolOutput: PersistedToolOutput;
+	toolOutput?: PersistedToolOutput;
 }
 
 interface FileIdentity {
@@ -290,36 +292,56 @@ export async function externalizeLargeToolOutput(
 ): Promise<ExternalizedToolOutput | undefined> {
 	const textBlocks = content.filter((block): block is TextContent => block.type === "text");
 	const totalChars = textBlocks.reduce((sum, block) => sum + block.text.length, 0);
-	if (totalChars <= LARGE_TOOL_OUTPUT_MAX_CHARS) return undefined;
+	const oversizedText = totalChars > LARGE_TOOL_OUTPUT_MAX_CHARS;
+	let toolOutput: PersistedToolOutput | undefined;
+	let textNotice: string | undefined;
+	if (oversizedText) {
+		const fullText = textBlocks.map((block) => block.text).join("");
+		const originalBytes = Buffer.byteLength(fullText, "utf8");
+		const preview = firstUtf8Bytes(fullText, TOOL_OUTPUT_PREVIEW_BYTES);
+		try {
+			const fullOutputPath = await persistToolOutputText(fullText, outputDir);
+			toolOutput = { truncated: true, originalBytes, previewBytes: preview.bytes, fullOutputPath };
+			textNotice = [
+				"[Tool output truncated: preview only]",
+				`Original size: ${originalBytes} bytes`,
+				`Preview size: ${preview.bytes} bytes`,
+				`Full output: ${fullOutputPath}`,
+				"If you need the full output, read the saved file.",
+				"",
+				preview.text,
+			].join("\n");
+		} catch {
+			textNotice = [
+				"[Tool output truncated: preview only]",
+				`Original size: ${originalBytes} bytes`,
+				`Preview size: ${preview.bytes} bytes`,
+				"Full output could not be saved; omitted content is unavailable.",
+				"",
+				preview.text,
+			].join("\n");
+		}
+	}
 
-	const fullText = textBlocks.map((block) => block.text).join("");
-	const originalBytes = Buffer.byteLength(fullText, "utf8");
-	const fullOutputPath = await persistToolOutputText(fullText, outputDir);
-
-	const preview = firstUtf8Bytes(fullText, TOOL_OUTPUT_PREVIEW_BYTES);
-	const toolOutput: PersistedToolOutput = {
-		truncated: true,
-		originalBytes,
-		previewBytes: preview.bytes,
-		fullOutputPath,
-	};
-	const notice = [
-		"[Tool output truncated: preview only]",
-		`Original size: ${toolOutput.originalBytes} bytes`,
-		`Preview size: ${toolOutput.previewBytes} bytes`,
-		`Full output: ${toolOutput.fullOutputPath}`,
-		"If you need the full output, read the saved file.",
-		"",
-		preview.text,
-	].join("\n");
-
-	let noticeInserted = false;
+	let imageBytes = 0;
+	let imageOmitted = false;
+	let textNoticeInserted = false;
 	const boundedContent = content.flatMap((block): (TextContent | ImageContent)[] => {
-		if (block.type === "image") return [block];
-		if (noticeInserted) return [];
-		noticeInserted = true;
-		return [{ type: "text", text: notice }];
+		if (block.type === "image") {
+			const bytes = Buffer.byteLength(block.data, "base64");
+			if (bytes > TOOL_OUTPUT_IMAGE_MAX_BYTES || imageBytes + bytes > TOOL_OUTPUT_IMAGES_MAX_BYTES) {
+				imageOmitted = true;
+				return [{ type: "text", text: `[Image omitted: ${bytes} decoded bytes exceeds the tool output limit]` }];
+			}
+			imageBytes += bytes;
+			return [block];
+		}
+		if (!oversizedText) return [block];
+		if (textNoticeInserted) return [];
+		textNoticeInserted = true;
+		return [{ type: "text", text: textNotice! }];
 	});
 
+	if (!oversizedText && !imageOmitted) return undefined;
 	return { content: boundedContent, toolOutput };
 }

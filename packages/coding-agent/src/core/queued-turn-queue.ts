@@ -55,13 +55,24 @@ type PauseReason = "delivery_failed" | "turn_interrupted" | "server_restarted";
 
 export class QueuedTurnQueue {
 	private readonly sessionManager: SessionManager;
+	private journalSnapshot?: ReturnType<SessionManager["getDurableJournalSnapshot"]>;
+	private journalProjection?: ReturnType<typeof reduceRuntimeJournal>;
 	constructor(sessionManager: SessionManager) {
 		this.sessionManager = sessionManager;
 	}
 
+	private reduced(): ReturnType<typeof reduceRuntimeJournal> {
+		const snapshot = this.sessionManager.getDurableJournalSnapshot();
+		if (snapshot !== this.journalSnapshot) {
+			this.journalSnapshot = snapshot;
+			this.journalProjection = reduceRuntimeJournal(snapshot);
+		}
+		return this.journalProjection!;
+	}
+
 	list(): readonly QueuedTurnDraft[] {
 		return structuredClone(
-			reduceRuntimeJournal(this.sessionManager.getDurableJournalSnapshot()).queues.flatMap((item) => {
+			this.reduced().queues.flatMap((item) => {
 				if (item.queue !== "next_turn" || !item.requestId) return [];
 				const state =
 					item.state === "enqueued"
@@ -96,7 +107,7 @@ export class QueuedTurnQueue {
 
 	enqueue(input: { requestId: string; input: DurablePromptInput; state: "enqueued" | "paused" }): QueuedTurnDraft {
 		const identity = identifyRuntimeRequest("turn/queue", input.requestId, input.input);
-		const reduced = reduceRuntimeJournal(this.sessionManager.getDurableJournalSnapshot());
+		const reduced = this.reduced();
 		const existing = reduced.queues.find((item) => item.queue === "next_turn" && item.requestId === input.requestId);
 		if (existing) {
 			if (existing.enqueueHash !== identity.requestHash) throw new RequestIdReusedError(input.requestId);
@@ -187,9 +198,7 @@ export class QueuedTurnQueue {
 		reason?: PauseReason,
 		delivery?: { readonly operationId: string; readonly deliveryRequestId: string },
 	): void {
-		const reduced = reduceRuntimeJournal(this.sessionManager.getDurableJournalSnapshot()).queues.find(
-			(item) => item.queueItemId === current.queueItemId,
-		);
+		const reduced = this.reduced().queues.find((item) => item.queueItemId === current.queueItemId);
 		if (!reduced?.enqueueHash) throw new QueuedTurnNotFoundError(current.queueItemId);
 		const operationId = delivery?.operationId ?? current.operationId;
 		const deliveryRequestId = delivery?.deliveryRequestId ?? reduced.deliveryRequestId;

@@ -37,6 +37,10 @@ export interface RpcClientOptions {
 	model?: string;
 	/** Additional CLI arguments */
 	args?: string[];
+	/** Timeout for ordinary RPC requests (default: 30 seconds). */
+	requestTimeoutMs?: number;
+	/** Timeout for bash, compact, and export requests (default: 5 minutes). */
+	longRunningRequestTimeoutMs?: number;
 }
 
 export interface ModelInfo {
@@ -500,11 +504,12 @@ export class RpcClient {
 		try {
 			const data = JSON.parse(line);
 
-			// Check if it's a response to a pending request
-			if (data.type === "response" && data.id && this.pendingRequests.has(data.id)) {
-				const pending = this.pendingRequests.get(data.id)!;
-				this.pendingRequests.delete(data.id);
-				pending.resolve(data as RpcResponse);
+			if (data.type === "response") {
+				const pending = typeof data.id === "string" ? this.pendingRequests.get(data.id) : undefined;
+				if (pending) {
+					this.pendingRequests.delete(data.id);
+					pending.resolve(data as RpcResponse);
+				}
 				return;
 			}
 
@@ -552,10 +557,14 @@ export class RpcClient {
 		const fullCommand = { ...command, id } as RpcCommand;
 
 		return new Promise((resolve, reject) => {
+			const isLongRunning = command.type === "bash" || command.type === "compact" || command.type === "export_html";
+			const timeoutMs = isLongRunning
+				? (this.options.longRunningRequestTimeoutMs ?? 300_000)
+				: (this.options.requestTimeoutMs ?? 30_000);
 			const timeout = setTimeout(() => {
 				this.pendingRequests.delete(id);
 				reject(new Error(`Timeout waiting for response to ${command.type}. Stderr: ${this.stderr}`));
-			}, 30000);
+			}, timeoutMs);
 
 			this.pendingRequests.set(id, {
 				resolve: (response) => {

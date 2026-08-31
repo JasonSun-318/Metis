@@ -46,6 +46,18 @@ describe("QueuedTurnQueue", () => {
 		);
 	});
 
+	it("reuses its reduced journal projection until the journal changes", () => {
+		const internal = queue as unknown as { journalProjection?: object };
+		queue.list();
+		const first = internal.journalProjection;
+		queue.list();
+		expect(internal.journalProjection).toBe(first);
+
+		manager.appendMessage({ role: "user", content: "changed", timestamp: 1 });
+		queue.list();
+		expect(internal.journalProjection).not.toBe(first);
+	});
+
 	it("claims once, pauses without reordering, and blocks behind a paused head", () => {
 		const first = queue.enqueue({ requestId: requestId(1), input: { text: "first" }, state: "enqueued" });
 		queue.enqueue({ requestId: requestId(2), input: { text: "second" }, state: "enqueued" });

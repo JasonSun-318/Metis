@@ -20,7 +20,9 @@ const PREVIEW_LINES = 20;
 
 export class BashExecutionComponent extends Container {
 	private command: string;
-	private outputLines: string[] = [];
+	private outputChunks: string[] = [];
+	private displayTail = "";
+	private displayWasTruncated = false;
 	private status: "running" | "complete" | "cancelled" | "error" = "running";
 	private exitCode: number | undefined = undefined;
 	private loader: Loader;
@@ -82,15 +84,13 @@ export class BashExecutionComponent extends Container {
 		// Note: binary data is already sanitized in tui-renderer.ts executeBashCommand
 		const clean = stripAnsi(chunk).replace(/\r\n/g, "\n").replace(/\r/g, "\n");
 
-		// Append to output lines
-		const newLines = clean.split("\n");
-		if (this.outputLines.length > 0 && newLines.length > 0) {
-			// Append first chunk to last line (incomplete line continuation)
-			this.outputLines[this.outputLines.length - 1] += newLines[0];
-			this.outputLines.push(...newLines.slice(1));
-		} else {
-			this.outputLines.push(...newLines);
-		}
+		this.outputChunks.push(clean);
+		const nextDisplay = truncateTail(this.displayTail + clean, {
+			maxLines: DEFAULT_MAX_LINES,
+			maxBytes: DEFAULT_MAX_BYTES,
+		});
+		this.displayTail = nextDisplay.content;
+		this.displayWasTruncated ||= nextDisplay.truncated;
 
 		this.updateDisplay();
 	}
@@ -118,14 +118,8 @@ export class BashExecutionComponent extends Container {
 
 	private updateDisplay(): void {
 		// Apply truncation for LLM context limits (same limits as bash tool)
-		const fullOutput = this.outputLines.join("\n");
-		const contextTruncation = truncateTail(fullOutput, {
-			maxLines: DEFAULT_MAX_LINES,
-			maxBytes: DEFAULT_MAX_BYTES,
-		});
-
 		// Get the lines to potentially display (after context truncation)
-		const availableLines = contextTruncation.content ? contextTruncation.content.split("\n") : [];
+		const availableLines = this.displayTail ? this.displayTail.split("\n") : [];
 
 		// Apply preview truncation based on expanded state
 		const previewLogicalLines = availableLines.slice(-PREVIEW_LINES);
@@ -193,7 +187,7 @@ export class BashExecutionComponent extends Container {
 			}
 
 			// Add truncation warning (context truncation, not preview truncation)
-			const wasTruncated = this.truncationResult?.truncated || contextTruncation.truncated;
+			const wasTruncated = this.truncationResult?.truncated || this.displayWasTruncated;
 			if (wasTruncated && this.fullOutputPath) {
 				statusParts.push(theme.fg("warning", `Output truncated. Full output: ${this.fullOutputPath}`));
 			}
@@ -208,7 +202,7 @@ export class BashExecutionComponent extends Container {
 	 * Get the raw output for creating BashExecutionMessage.
 	 */
 	getOutput(): string {
-		return this.outputLines.join("\n");
+		return this.outputChunks.join("");
 	}
 
 	/**

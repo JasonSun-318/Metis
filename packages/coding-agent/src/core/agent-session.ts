@@ -393,7 +393,15 @@ function estimateMessagesTokens(messages: AgentMessage[]): number {
 /** Standard thinking levels */
 const THINKING_LEVELS: ThinkingLevel[] = ["off", "minimal", "low", "medium", "high"];
 const MAX_DURABLE_TURN_OPERATIONS = 256;
-const IMMEDIATE_EXTERNALIZATION_BUILTINS = new Set(["web_fetch", "web_search"]);
+const IMMEDIATE_EXTERNALIZATION_BUILTINS = new Set([
+	"web_fetch",
+	"web_search",
+	"list_mcp_resources",
+	"list_mcp_resource_templates",
+	"read_mcp_resource",
+	"list_mcp_prompts",
+	"get_mcp_prompt",
+]);
 
 // ============================================================================
 // AgentSession Class
@@ -1607,6 +1615,11 @@ export class AgentSession {
 
 		// Handle session persistence
 		if (event.type === "message_end") {
+			if (this._eventPersistenceFailure !== undefined) {
+				this._discardUnpersistedAgentMessage(event.message);
+				if (deliveryMessage) this.deliveredArtifacts?.rollback(deliveryMessage.toolCallId);
+				throw this._eventPersistenceFailure;
+			}
 			let durableAssistantEvidence: RuntimeAssistantMessageEvidence | undefined;
 			if (this._durableTurn && (event.message.role === "assistant" || event.message.role === "toolResult")) {
 				try {
@@ -1625,12 +1638,17 @@ export class AgentSession {
 			// Check if this is a custom message from extensions
 			if (event.message.role === "custom") {
 				// Persist as CustomMessageEntry
-				this.sessionManager.appendCustomMessageEntry(
-					event.message.customType,
-					event.message.content,
-					event.message.display,
-					event.message.details,
-				);
+				try {
+					this.sessionManager.appendCustomMessageEntry(
+						event.message.customType,
+						event.message.content,
+						event.message.display,
+						event.message.details,
+					);
+				} catch (error) {
+					this._discardUnpersistedAgentMessage(event.message);
+					throw error;
+				}
 			} else if (
 				event.message.role === "user" ||
 				event.message.role === "assistant" ||
@@ -1644,6 +1662,7 @@ export class AgentSession {
 						this._durableTurn?.turnId,
 					);
 				} catch (error) {
+					this._discardUnpersistedAgentMessage(event.message);
 					if (deliveryMessage) this.deliveredArtifacts?.rollback(deliveryMessage.toolCallId);
 					throw error;
 				}

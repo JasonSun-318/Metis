@@ -65,6 +65,19 @@ function acceptedTurn(requestId: string, text = "hello"): RuntimeControlPayload 
 }
 
 describe("SessionManager runtime journal", () => {
+	it("reuses an immutable journal snapshot until the next append", () => {
+		const manager = SessionManager.create(directory, directory, { id: "snapshot-cache" });
+		const first = manager.getDurableJournalSnapshot();
+
+		expect(manager.getDurableJournalSnapshot()).toBe(first);
+		manager.appendMessage({ role: "user", content: "changed", timestamp: 1 });
+		const second = manager.getDurableJournalSnapshot();
+		expect(second).not.toBe(first);
+		expect(manager.getDurableJournalSnapshot()).toBe(second);
+		expect(Object.isFrozen(second)).toBe(true);
+		manager.close();
+	});
+
 	let directory: string;
 
 	beforeEach(() => {

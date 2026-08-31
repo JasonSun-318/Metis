@@ -2798,6 +2798,7 @@ export class SessionManager {
 	private readonly primaryWorkspaceRoot: string;
 	private persist: boolean;
 	private rawFileEntries: FileEntry[] = [];
+	private durableJournalSnapshot?: readonly FileEntry[];
 	private fileEntries: FileEntry[] = [];
 	private imageReadBudget: ImageReadBudget = { used: 0, limit: MAX_SESSION_IMAGE_BLOB_BYTES };
 	private recordIds: Set<string> = new Set();
@@ -2939,6 +2940,7 @@ export class SessionManager {
 		this.storagePath = state.storagePath;
 		this.toolOutputDir = state.toolOutputDir;
 		this.rawFileEntries = state.rawFileEntries;
+		this.durableJournalSnapshot = undefined;
 		this.fileEntries = state.fileEntries;
 		this.imageReadBudget = state.imageReadBudget;
 		this.recordIds = state.recordIds;
@@ -3152,6 +3154,7 @@ export class SessionManager {
 			hydratedEntry = hydrateSessionRecords([rawEntry], this.storagePath, this.imageReadBudget)[0] as SessionEntry;
 		}
 		this.rawFileEntries.push(rawEntry);
+		this.durableJournalSnapshot = undefined;
 		this.fileEntries.push(hydratedEntry);
 		this.recordIds.add(entry.id);
 		this.byId.set(entry.id, hydratedEntry);
@@ -3216,6 +3219,7 @@ export class SessionManager {
 		const entry = parseRuntimeControlEntry(candidate);
 		this.journal.append(entry);
 		this.rawFileEntries.push(entry);
+		this.durableJournalSnapshot = undefined;
 		this.recordIds.add(entry.id);
 		return entry.id;
 	}
@@ -3246,6 +3250,7 @@ export class SessionManager {
 			this.journal.append(entry);
 		}
 		this.rawFileEntries.push(entry);
+		this.durableJournalSnapshot = undefined;
 		this.recordIds.add(entry.id);
 		return entry;
 	}
@@ -3345,7 +3350,8 @@ export class SessionManager {
 	/** Raw journal-order snapshot for runtime reduction; callers cannot mutate manager state. */
 	getDurableJournalSnapshot(): readonly FileEntry[] {
 		this._assertOpen();
-		return deepFreeze(structuredClone(this.rawFileEntries));
+		this.durableJournalSnapshot ??= deepFreeze(structuredClone(this.rawFileEntries));
+		return this.durableJournalSnapshot;
 	}
 
 	/** Append a thinking level change as child of current leaf, then advance leaf. Returns entry id. */
