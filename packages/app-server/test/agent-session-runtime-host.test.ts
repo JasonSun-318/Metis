@@ -135,6 +135,45 @@ describe("AgentSessionRuntimeHost browser tools", () => {
 			expect(session?.getToolDefinition("browser_tabs")).toBe(browserTabs);
 			expect(firstPeer.requests).toHaveLength(1);
 			expect(replacementPeer.requests).toHaveLength(1);
+
+			const message = {
+				role: "assistant" as const,
+				content: [{ type: "text" as const, text: "persisted live reply" }],
+				api: "openai-completions" as const,
+				provider: "local",
+				model: "runtime-host-test",
+				usage: {
+					input: 1,
+					output: 1,
+					cacheRead: 0,
+					cacheWrite: 0,
+					totalTokens: 2,
+					cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+				},
+				stopReason: "stop" as const,
+				timestamp: Date.now(),
+			};
+			const persistedEntryId = session!.sessionManager.appendMessage(message);
+			const internal = opened as unknown as {
+				onAgentEvent(event: unknown): void;
+				liveMessagesByItemId: Map<string, object>;
+				durableEntryIdsByLiveItemId: Map<string, string>;
+			};
+			internal.onAgentEvent({ type: "message_start", message });
+			internal.onAgentEvent({ type: "message_end", message });
+			const [liveItemId] = internal.liveMessagesByItemId.keys();
+			expect(liveItemId).toBeDefined();
+			internal.onAgentEvent({ type: "agent_end", messages: [message] });
+			expect(internal.liveMessagesByItemId).toHaveLength(0);
+			expect(internal.durableEntryIdsByLiveItemId.get(liveItemId!)).toBe(persistedEntryId);
+			await expect(
+				opened.fork({
+					entryId: liveItemId!,
+					name: "Live fork",
+					requestId: "22222222-2222-4222-8222-222222222222",
+					targetSessionId: "33333333-3333-4333-8333-333333333333",
+				}),
+			).resolves.toBe("33333333-3333-4333-8333-333333333333");
 		} finally {
 			await opened?.close();
 		}

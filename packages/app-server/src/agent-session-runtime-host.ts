@@ -307,6 +307,7 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 	private readonly agentLive: AgentLiveProjector;
 	private readonly liveItemIds = new WeakMap<object, string>();
 	private readonly liveMessagesByItemId = new Map<string, object>();
+	private readonly durableEntryIdsByLiveItemId = new Map<string, string>();
 	private liveAssistantItemId?: string;
 	private readonly projectedTurnStates = new Map<string, TurnView["state"]>();
 	private liveItemSequence = 0;
@@ -594,6 +595,10 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 			this.refreshLifecycleProjection();
 			return;
 		}
+		if (event.type === "agent_end") {
+			this.releasePersistedLiveMessages();
+			return;
+		}
 		if (event.type === "agent_settled") {
 			const journal = this.journal();
 			const lastTurn = reduceRuntimeJournal(journal).turns.at(-1);
@@ -663,6 +668,14 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 		this.liveItemIds.set(message, itemId);
 		this.liveMessagesByItemId.set(itemId, message);
 		return itemId;
+	}
+
+	private releasePersistedLiveMessages(): void {
+		for (const [itemId, message] of this.liveMessagesByItemId) {
+			const entryId = this.session.sessionManager.getMessageEntryId(message);
+			if (entryId) this.durableEntryIdsByLiveItemId.set(itemId, entryId);
+			this.liveMessagesByItemId.delete(itemId);
+		}
 	}
 
 	private currentTurnId(): string | undefined {
@@ -851,7 +864,8 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 		let entryId = input.entryId;
 		if (manager.getEntry(entryId) === undefined) {
 			const message = this.liveMessagesByItemId.get(entryId);
-			const persistedEntryId = message ? manager.getMessageEntryId(message) : undefined;
+			const persistedEntryId =
+				this.durableEntryIdsByLiveItemId.get(entryId) ?? (message ? manager.getMessageEntryId(message) : undefined);
 			if (!persistedEntryId) throw new AppServerError("NOT_FOUND", { sessionId: this.sessionId });
 			entryId = persistedEntryId;
 		}
@@ -1748,6 +1762,8 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 					this.unsubscribeQueuedTurns?.();
 					this.unsubscribeQueuedTurns = undefined;
 					this.agentLive.clear();
+					this.liveMessagesByItemId.clear();
+					this.durableEntryIdsByLiveItemId.clear();
 					this.listeners.clear();
 					this.closed = true;
 				})

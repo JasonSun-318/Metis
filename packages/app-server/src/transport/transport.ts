@@ -39,6 +39,12 @@ function isInitializeRequest(value: unknown): boolean {
 	return descriptor !== undefined && "value" in descriptor && descriptor.value === "initialize";
 }
 
+function isConnectionAckRequest(value: unknown): boolean {
+	if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+	const descriptor = Object.getOwnPropertyDescriptor(value, "method");
+	return descriptor !== undefined && "value" in descriptor && descriptor.value === "connection/ack";
+}
+
 /** Connects protocol framing to one app-server client connection. */
 export function bindAppServerTransport(server: AppServer, transport: TransportConnection): AppServerTransportBinding {
 	let connection = server.connect();
@@ -48,6 +54,7 @@ export function bindAppServerTransport(server: AppServer, transport: TransportCo
 	});
 	let closePromise: Promise<void> | undefined;
 	let requestTail = Promise.resolve();
+	let controlTail = Promise.resolve();
 	let detachOutbound = connection.onMessage((envelope) => transport.send(envelope));
 
 	const close = (): Promise<void> => {
@@ -70,20 +77,28 @@ export function bindAppServerTransport(server: AppServer, transport: TransportCo
 		return closePromise;
 	};
 
+	const processRequest = async (envelope: unknown): Promise<void> => {
+		if (isInitializeRequest(envelope) && connection.isClosed) {
+			detachOutbound();
+			connection = server.connect();
+			detachOutbound = connection.onMessage((message) => transport.send(message));
+		}
+		if (!isShutdownRequest(envelope)) {
+			await transport.send(await connection.handle(envelope));
+			return;
+		}
+		await transport.send(await server.handleHost(envelope));
+		await close();
+	};
+
 	const enqueueRequest = (envelope: unknown): void => {
-		requestTail = requestTail.then(async () => {
-			if (isInitializeRequest(envelope) && connection.isClosed) {
-				detachOutbound();
-				connection = server.connect();
-				detachOutbound = connection.onMessage((message) => transport.send(message));
-			}
-			if (!isShutdownRequest(envelope)) {
-				await transport.send(await connection.handle(envelope));
-				return;
-			}
-			await transport.send(await server.handleHost(envelope));
-			await close();
-		});
+		if (isConnectionAckRequest(envelope)) {
+			controlTail = controlTail.then(() => processRequest(envelope));
+			void controlTail.catch(() => close()).catch(() => undefined);
+			return;
+		}
+
+		requestTail = requestTail.then(() => processRequest(envelope));
 		void requestTail.catch(() => close()).catch(() => undefined);
 	};
 

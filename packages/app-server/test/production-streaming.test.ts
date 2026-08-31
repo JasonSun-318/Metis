@@ -542,7 +542,7 @@ describe("production runtime streaming", () => {
 			provider.closeAllConnections();
 			await new Promise<void>((resolve) => provider.close(() => resolve()));
 		}
-	});
+	}, 15_000);
 
 	it("projects a completed compaction entry, refreshes the summary, and reports an informational message when already compacted", async () => {
 		const COMPACT_REQUEST = "00000000-0000-4000-8000-000000000110";

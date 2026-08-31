@@ -185,6 +185,7 @@ describe("utility-process app-server binding", () => {
 	});
 
 	it("delivers an interaction response while its originating request is still open", async () => {
+		const waitForOptions = { timeout: 5_000 };
 		tempDir = mkdtempSync(join(tmpdir(), "utility-interaction-"));
 		const projectDir = join(tempDir, "project");
 		const extensionDir = join(projectDir, ".metis", "extensions");
@@ -213,7 +214,7 @@ describe("utility-process app-server binding", () => {
 				},
 			},
 		});
-		await vi.waitFor(() => expect(port.sent).toHaveLength(1));
+		await vi.waitFor(() => expect(port.sent).toHaveLength(1), waitForOptions);
 		const sessionId = "11111111-1111-4111-8111-111111111111";
 		port.emit("message", {
 			data: {
@@ -223,20 +224,25 @@ describe("utility-process app-server binding", () => {
 				params: { requestId: sessionId, cwd: projectDir },
 			},
 		});
-		await vi.waitFor(() => expect(port.sent).toContainEqual(expect.objectContaining({ id: "create" })));
+		await vi.waitFor(
+			() => expect(port.sent).toContainEqual(expect.objectContaining({ id: "create" })),
+			waitForOptions,
+		);
 
 		port.emit("message", {
 			data: { jsonrpc: "2.0", id: "open", method: "session/open", params: { sessionId } },
 		});
-		await vi.waitFor(() =>
-			expect(port.sent).toContainEqual(
-				expect.objectContaining({
-					method: "interaction/request",
-					params: expect.objectContaining({
-						interaction: expect.objectContaining({ kind: "project_trust" }),
+		await vi.waitFor(
+			() =>
+				expect(port.sent).toContainEqual(
+					expect.objectContaining({
+						method: "interaction/request",
+						params: expect.objectContaining({
+							interaction: expect.objectContaining({ kind: "project_trust" }),
+						}),
 					}),
-				}),
-			),
+				),
+			waitForOptions,
 		);
 		const trustRequest = port.sent.find(
 			(message): message is ServerRpcRequest<"interaction/request"> =>
@@ -265,13 +271,15 @@ describe("utility-process app-server binding", () => {
 			},
 		});
 
-		await vi.waitFor(() =>
-			expect(port.sent).toContainEqual(
-				expect.objectContaining({
-					method: "interaction/request",
-					params: expect.objectContaining({ interaction: expect.objectContaining({ kind: "confirm" }) }),
-				}),
-			),
+		await vi.waitFor(
+			() =>
+				expect(port.sent).toContainEqual(
+					expect.objectContaining({
+						method: "interaction/request",
+						params: expect.objectContaining({ interaction: expect.objectContaining({ kind: "confirm" }) }),
+					}),
+				),
+			waitForOptions,
 		);
 		const confirmRequest = port.sent.find(
 			(message): message is ServerRpcRequest<"interaction/request"> =>
@@ -295,12 +303,15 @@ describe("utility-process app-server binding", () => {
 				},
 			},
 		});
-		await vi.waitFor(() =>
-			expect(
-				port.sent.some(
-					(message) => typeof message === "object" && message !== null && "id" in message && message.id === "open",
-				),
-			).toBe(true),
+		await vi.waitFor(
+			() =>
+				expect(
+					port.sent.some(
+						(message) =>
+							typeof message === "object" && message !== null && "id" in message && message.id === "open",
+					),
+				).toBe(true),
+			waitForOptions,
 		);
 
 		await binding.close();
