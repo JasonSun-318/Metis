@@ -3683,6 +3683,7 @@ describe("Editor component", () => {
 
 		it("undo restores marker after backspace deletion", () => {
 			const editor = new Editor(createTestTUI(), defaultEditorTheme);
+			const pastedContent = "line\n".repeat(20).trimEnd();
 			editor.handleInput("A");
 			pasteWithMarker(editor);
 			editor.handleInput("B");
@@ -3701,6 +3702,17 @@ describe("Editor component", () => {
 			// Undo
 			editor.handleInput("\x1b[45;5u");
 			assert.strictEqual(editor.getText(), textBefore);
+			assert.strictEqual(editor.getExpandedText(), `A${pastedContent}B`);
+		});
+
+		it("keeps paste IDs monotonic after deleting a marker", () => {
+			const editor = new Editor(createTestTUI(), defaultEditorTheme);
+			pasteWithMarker(editor);
+			editor.handleInput("\x7f");
+			assert.strictEqual(editor.getText(), "");
+
+			pasteWithMarker(editor);
+			assert.match(editor.getText(), /\[paste #2 \+\d+ lines\]/);
 		});
 
 		it("handles multiple paste markers in same line", () => {
