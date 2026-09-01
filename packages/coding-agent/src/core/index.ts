@@ -336,6 +336,8 @@ export {
 } from "./unattended-execution.ts";
 export {
 	createWorkspaceSandbox,
-	type WorkspaceSandbox,
+	WorkspaceSandbox,
 	WorkspaceSandboxError,
+	type WorkspaceSandboxHealthReport,
+	type WorkspaceSandboxHealthStatus,
 } from "./workspace-sandbox.ts";

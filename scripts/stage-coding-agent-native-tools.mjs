@@ -23,9 +23,15 @@ const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const packageDir = join(repoRoot, "packages", "coding-agent");
 const packageJson = JSON.parse(readFileSync(join(packageDir, "package.json"), "utf8"));
 const versions = packageJson.metisNativeTools;
+const sandboxRuntimePackage = JSON.parse(
+	readFileSync(join(repoRoot, "node_modules", "@anthropic-ai", "sandbox-runtime", "package.json"), "utf8"),
+);
 
 if (versions?.rg !== "15.2.0" || versions?.fd !== "10.4.2" || versions?.officecli !== "1.0.140") {
 	throw new Error("Update the pinned native-tool archive table before changing metisNativeTools");
+}
+if (packageJson.dependencies?.["@anthropic-ai/sandbox-runtime"] !== sandboxRuntimePackage.version) {
+	throw new Error("Installed sandbox runtime does not match the pinned coding-agent dependency");
 }
 
 const pairs = {
@@ -105,7 +111,8 @@ function option(name, fallback) {
 
 const target = process.env.METIS_NATIVE_TOOLS_TARGET ?? option("--target", "all");
 const outputDir = resolve(packageDir, option("--output", "dist/vendor/tools"));
-const dispatcher = new EnvHttpProxyAgent();
+const sandboxOnly = process.argv.includes("--sandbox-only");
+let dispatcher;
 // Optional GitHub mirror base (e.g. https://ghproxy.net/) for networks where
 // github.com and raw.githubusercontent.com are slow or unreachable.
 const mirror = process.env.METIS_NATIVE_TOOLS_MIRROR;
@@ -132,6 +139,7 @@ function stageSandboxRuntime() {
 			: [...new Set(selectedPairs.map((pair) => pair.split("-").at(-1)).filter(Boolean))];
 	rmSync(staged, { recursive: true, force: true });
 	try {
+		const helpers = [];
 		for (const architecture of architectures) {
 			for (const [kind, executable] of [
 				["seccomp", "apply-seccomp"],
@@ -143,12 +151,33 @@ function stageSandboxRuntime() {
 				mkdirSync(dirname(output), { recursive: true });
 				cpSync(input, output);
 				if (kind === "seccomp") chmodSync(output, 0o755);
+				helpers.push({
+					kind,
+					architecture,
+					file: `${kind}/${architecture}/${executable}`,
+					sha256: sha256(readFileSync(output)),
+					executable: kind === "seccomp",
+				});
 			}
 		}
 		const license = join(source, "LICENSE");
 		if (!statSync(license).isFile()) throw new Error(`Sandbox runtime license is missing: ${license}`);
 		mkdirSync(join(staged, "licenses"), { recursive: true });
 		cpSync(license, join(staged, "licenses", "LICENSE"));
+		writeFileSync(
+			join(staged, "manifest.json"),
+			`${JSON.stringify(
+				{
+					schemaVersion: 1,
+					package: "@anthropic-ai/sandbox-runtime",
+					version: sandboxRuntimePackage.version,
+					architectures,
+					helpers,
+				},
+				null,
+				2,
+			)}\n`,
+		);
 		rmSync(destination, { recursive: true, force: true });
 		renameSync(staged, destination);
 	} catch (error) {
@@ -173,7 +202,7 @@ async function download(url) {
 	for (let attempt = 1; attempt <= 3; attempt += 1) {
 		try {
 			const response = await fetch(finalUrl, {
-				dispatcher,
+				dispatcher: (dispatcher ??= new EnvHttpProxyAgent()),
 				headers: {
 					"accept-encoding": "identity",
 					...(received > 0 ? { range: `bytes=${received}-` } : {}),
@@ -352,7 +381,7 @@ async function stageTools() {
 
 try {
 	stageSandboxRuntime();
-	await stageTools();
+	if (!sandboxOnly) await stageTools();
 } finally {
-	await dispatcher.close();
+	if (dispatcher) await dispatcher.close();
 }

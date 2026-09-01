@@ -11,6 +11,10 @@ import { spawnProcess } from "../utils/child-process.ts";
 import { canonicalizeActionPath, isPathInside, pathsIntersect } from "../utils/paths.ts";
 import { killProcessTree } from "../utils/shell.ts";
 import type { BashOperations } from "./tools/bash.ts";
+import { type WorkspaceSandboxHealthReport, workspaceSandboxHealth } from "./workspace-sandbox-health.ts";
+
+export type { WorkspaceSandboxHealthReport, WorkspaceSandboxHealthStatus } from "./workspace-sandbox-health.ts";
+
 import {
 	normalizeSandboxNetworkEndpoints,
 	parseSandboxResponse,
@@ -38,6 +42,10 @@ export interface WorkspaceSandbox {
 	dispose(): Promise<void>;
 	forceDispose(): void;
 }
+
+export const WorkspaceSandbox = Object.freeze({
+	health: (): Promise<WorkspaceSandboxHealthReport> => workspaceSandboxHealth(),
+});
 
 type PendingCommand = {
 	id: string;

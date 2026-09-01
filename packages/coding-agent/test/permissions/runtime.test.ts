@@ -128,25 +128,31 @@ describe("ToolAuthorizationRuntime", () => {
 		expect(execute).not.toHaveBeenCalled();
 	});
 
-	it.each(["settings", "cwd", "model", "tool-registry", "project-rules", "session", "sandbox-health"] as const)(
-		"invalidates a pending review after a %s lifecycle change",
-		async (reason) => {
-			const execute = vi.fn(async () => "executed");
-			let runtime: ToolAuthorizationRuntime;
-			runtime = new ToolAuthorizationRuntime({
-				sessionId: "session-1",
-				reviewerFactory: () => ({
-					review: async () => {
-						runtime.invalidate(reason);
-						return allow();
-					},
-				}),
-			});
+	it.each([
+		"settings",
+		"cwd",
+		"model",
+		"tool-registry",
+		"provenance",
+		"project-rules",
+		"session",
+		"sandbox-health",
+	] as const)("invalidates a pending review after a %s lifecycle change", async (reason) => {
+		const execute = vi.fn(async () => "executed");
+		let runtime: ToolAuthorizationRuntime;
+		runtime = new ToolAuthorizationRuntime({
+			sessionId: "session-1",
+			reviewerFactory: () => ({
+				review: async () => {
+					runtime.invalidate(reason);
+					return allow();
+				},
+			}),
+		});
 
-			await expect(runtime.authorizeAndExecute(highRiskRequest({ execute }))).rejects.toThrow("Permission denied");
-			expect(execute).not.toHaveBeenCalled();
-		},
-	);
+		await expect(runtime.authorizeAndExecute(highRiskRequest({ execute }))).rejects.toThrow("Permission denied");
+		expect(execute).not.toHaveBeenCalled();
+	});
 
 	it("keeps hard denies above remembered rules and reviewer decisions", async () => {
 		const execute = vi.fn(async () => "executed");

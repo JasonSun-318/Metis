@@ -6,6 +6,7 @@ import { digestCanonical } from "./permissions/normalize.ts";
 import type { ExecutionGrant, NetworkEndpoint } from "./permissions/types.ts";
 import type { BashOperations } from "./tools/bash.ts";
 import { createWorkspaceSandbox, type WorkspaceSandbox } from "./workspace-sandbox.ts";
+import { SANDBOX_RUNTIME_ID } from "./workspace-sandbox-health.ts";
 
 export interface InteractiveBashContext {
 	readonly cwd: string;
@@ -92,7 +93,7 @@ function normalizeContext(value: InteractiveBashContext): InteractiveBashContext
 export function workspaceSandboxProfileKey(value: InteractiveBashContext): string {
 	return digestCanonical({
 		version: 1,
-		sandboxRuntime: "@anthropic-ai/sandbox-runtime@0.0.67",
+		sandboxRuntime: SANDBOX_RUNTIME_ID,
 		platform: process.platform,
 		architecture: process.arch,
 		context: normalizeContext(value),

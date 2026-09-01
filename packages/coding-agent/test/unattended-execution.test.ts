@@ -165,4 +165,32 @@ describe("unattended workspace-write execution", () => {
 			await harness.cleanup();
 		}
 	});
+
+	it("denies an approval-required shell action headlessly without invoking the sandbox or user reviewer", async () => {
+		const requestPermissionApproval = vi.fn();
+		const operations = { exec: vi.fn() };
+		const harness = await createHarness({
+			sessionManager: SessionManager.inMemory(cwd),
+			requestPermissionApproval,
+			unattendedExecution: createUnattendedExecutionProfile({ workspaceRoots: [cwd], bashOperations: operations }),
+		});
+		try {
+			harness.setResponses([
+				fauxAssistantMessage([fauxToolCall("bash", { command: "git push origin main" })], {
+					stopReason: "toolUse",
+				}),
+				fauxAssistantMessage("done"),
+			]);
+			await harness.session.prompt("push it");
+			expect(operations.exec).not.toHaveBeenCalled();
+			expect(requestPermissionApproval).not.toHaveBeenCalled();
+			expect(
+				harness.sessionManager
+					.getDurableJournalSnapshot()
+					.filter((entry) => entry.type === "session_permission_decision"),
+			).toEqual([expect.objectContaining({ source: "policy", decision: "deny", toolName: "bash" })]);
+		} finally {
+			await harness.cleanup();
+		}
+	});
 });

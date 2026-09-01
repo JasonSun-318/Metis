@@ -36,6 +36,7 @@ export type PermissionRuntimeInvalidation =
 	| "cwd"
 	| "model"
 	| "tool-registry"
+	| "provenance"
 	| "project-rules"
 	| "session"
 	| "sandbox-health";
@@ -158,6 +159,7 @@ export class ToolAuthorizationRuntime {
 		this.epoch += 1;
 		this.lifecycle.abort(new Error(`Permission runtime invalidated: ${reason}`));
 		this.lifecycle = new AbortController();
+		this.reviewTail = Promise.resolve();
 		this.grants.revokeAll();
 		if (reason === "model" || reason === "session") this.reviewer = undefined;
 		return this.epoch;

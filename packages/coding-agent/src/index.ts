@@ -666,8 +666,10 @@ export {
 export type { WebSearchProvider } from "./core/web-search-config.ts";
 export {
 	createWorkspaceSandbox,
-	type WorkspaceSandbox,
+	WorkspaceSandbox,
 	WorkspaceSandboxError,
+	type WorkspaceSandboxHealthReport,
+	type WorkspaceSandboxHealthStatus,
 } from "./core/workspace-sandbox.ts";
 // Main entry point
 export { type MainOptions, main } from "./main.ts";
