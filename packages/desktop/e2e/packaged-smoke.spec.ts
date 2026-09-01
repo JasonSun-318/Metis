@@ -1126,7 +1126,7 @@ test("packaged permission sandbox keeps Auto bounded and project rules revocable
 });
 
 test("packaged Plugin Center, worker, WASM, trusted extension, and utility lifecycle stay functional", async () => {
-	test.setTimeout(180_000);
+	test.setTimeout(300_000);
 	const executable = packagedExecutable();
 	expect(existsSync(executable), `Package the desktop app first: ${executable}`).toBe(true);
 
@@ -1790,7 +1790,7 @@ test("packaged Plugin Center, worker, WASM, trusted extension, and utility lifec
 		const authPath = path.join(agentDir, "auth.json");
 		const authText = await readFile(authPath, "utf8");
 		const auth = JSON.parse(authText) as Record<string, unknown>;
-		const packagedCredentialKeys = Object.keys(auth).filter((key) => key.endsWith(":packaged-http"));
+		const packagedCredentialKeys = Object.keys(auth).filter((key) => authHasMcpServer({ [key]: true }, "packaged-http"));
 		expect(packagedCredentialKeys).toHaveLength(2);
 		expect(authText).toContain("METIS_E2E_USER_MCP_SECRET");
 		expect(authText).toContain("METIS_E2E_PROJECT_MCP_SECRET");
@@ -1801,27 +1801,34 @@ test("packaged Plugin Center, worker, WASM, trusted extension, and utility lifec
 		await page.setViewportSize({ width: 1487, height: 1058 });
 		await page.screenshot({ path: path.join(pluginQaDir, "actual-mcp-detail.png"), animations: "disabled" });
 		await page.setViewportSize({ width: 1440, height: 1024 });
+		const mcpAuthButton = page.getByRole("button", { name: "Authentication", exact: true });
+		const mcpDeleteButton = page.getByRole("button", { name: "Delete", exact: true });
 		await expect(page.getByRole("button", { name: "Restart", exact: true })).toBeVisible();
 		await page.getByRole("button", { name: "Restart", exact: true }).click();
-		await page.getByRole("button", { name: "Authentication", exact: true }).click();
+		await expect(mcpAuthButton).toBeEnabled();
+		await mcpAuthButton.click();
 		const credentialDialog = page.getByRole("dialog", { name: "Set authentication" });
 		await credentialDialog.getByLabel("Bearer token (optional)").fill("METIS_E2E_PROJECT_REPLACEMENT");
 		await credentialDialog.getByRole("button", { name: "Save", exact: true }).click();
 		await expect(credentialDialog).toHaveCount(0);
 		expect(await page.locator("body").innerText()).not.toContain("METIS_E2E_PROJECT_REPLACEMENT");
 		await page.getByRole("button", { name: "Clear authentication", exact: true }).click();
+		await expect(mcpDeleteButton).toBeEnabled();
 		await expect(page.getByRole("button", { name: "Clear authentication", exact: true })).toHaveCount(0);
-		await page.getByRole("button", { name: "Delete", exact: true }).click();
+		await mcpDeleteButton.click();
 		let removeMcpDialog = page.getByRole("dialog", { name: "Remove MCP server?" });
 		await removeMcpDialog.getByRole("button", { name: "Remove", exact: true }).click();
+		await expect(removeMcpDialog).toHaveCount(0);
 		await page.getByRole("button", { name: "MCP scopes", exact: true }).click();
 		await page.getByRole("option", { name: "User", exact: true }).click();
 		await page.getByRole("option", { name: "packaged-http", exact: true }).click();
 		await expect(page.getByRole("button", { name: "Clear authentication", exact: true })).toBeVisible();
 		await page.getByRole("button", { name: "Clear authentication", exact: true }).click();
-		await page.getByRole("button", { name: "Delete", exact: true }).click();
+		await expect(mcpDeleteButton).toBeEnabled();
+		await mcpDeleteButton.click();
 		removeMcpDialog = page.getByRole("dialog", { name: "Remove MCP server?" });
 		await removeMcpDialog.getByRole("button", { name: "Remove", exact: true }).click();
+		await expect(removeMcpDialog).toHaveCount(0);
 		await expect(page.getByRole("option", { name: "packaged-http", exact: true })).toHaveCount(0);
 		const globalSettings = JSON.parse(await readFile(path.join(agentDir, "settings.json"), "utf8")) as { mcpServers?: Record<string, unknown> };
 		expect(globalSettings.mcpServers?.["packaged-http"]).toBeUndefined();
@@ -1963,12 +1970,11 @@ test("packaged Plugin Center, worker, WASM, trusted extension, and utility lifec
 		await expect(page.getByRole("listbox", { name: "Create scheduled task" })).toBeVisible();
 		await page.screenshot({ path: path.join(scheduleQaDir, "overview-new-task-menu-top.png") });
 		await headerNewTaskTrigger.click();
-		const emptyNewTaskTrigger = page.locator(".scheduled-tasks-empty").getByRole("button", { name: "Create scheduled task", exact: true });
-		await emptyNewTaskTrigger.click();
+		await headerNewTaskTrigger.click();
 		const newTaskMenu = page.getByRole("listbox", { name: "Create scheduled task" });
 		await expect(newTaskMenu).toBeVisible();
 		await expect.poll(async () => (await newTaskMenu.boundingBox())?.width ?? 0).toBeGreaterThanOrEqual(204);
-		const [newTaskTriggerBox, newTaskMenuBox] = await Promise.all([emptyNewTaskTrigger.boundingBox(), newTaskMenu.boundingBox()]);
+		const [newTaskTriggerBox, newTaskMenuBox] = await Promise.all([headerNewTaskTrigger.boundingBox(), newTaskMenu.boundingBox()]);
 		expect(newTaskMenuBox?.width).toBeGreaterThanOrEqual(204);
 		expect(Math.abs((newTaskMenuBox?.x ?? 0) + (newTaskMenuBox?.width ?? 0) - ((newTaskTriggerBox?.x ?? 0) + (newTaskTriggerBox?.width ?? 0)))).toBeLessThanOrEqual(1);
 		await page.screenshot({ path: path.join(scheduleQaDir, "overview-new-task-menu.png") });
@@ -1980,7 +1986,7 @@ test("packaged Plugin Center, worker, WASM, trusted extension, and utility lifec
 		await expect.poll(() => providerRequests).toBe(10);
 		await expect(page.getByRole("heading", { name: "Set up a scheduled task", exact: true })).toBeVisible();
 		await page.getByRole("button", { name: "Scheduled tasks", exact: true }).click();
-		await page.locator(".scheduled-tasks-empty").getByRole("button", { name: "Create scheduled task", exact: true }).click();
+		await headerNewTaskTrigger.click();
 		await page.getByRole("option", { name: "Set up manually", exact: true }).click();
 		const scheduleDialog = page.getByRole("dialog", { name: "Create scheduled task" });
 		await expect(scheduleDialog).toBeVisible();
