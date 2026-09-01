@@ -38,7 +38,9 @@ fi
 # Restage files that were previously staged and may have been modified by formatting
 for file in $STAGED_FILES; do
   if [ -f "$file" ]; then
-    git add "$file"
+    # The path was already staged, so force only allows tracked files that are
+    # now covered by an ignore rule to be restaged after formatting.
+    git add -f -- "$file"
   fi
 done
 
