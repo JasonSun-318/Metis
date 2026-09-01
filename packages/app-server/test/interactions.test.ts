@@ -263,6 +263,38 @@ describe("InteractionBroker", () => {
 		expect(peer.browserRequests.map((request) => request.params.call.tool)).toEqual(["browser_observe"]);
 	});
 
+	it("distinguishes cancelled and unavailable browser confirmation from a user rejection", async () => {
+		const action: BrowserToolCall = {
+			tool: "browser_act",
+			input: {
+				browserId: "88888888-8888-4888-8888-888888888888",
+				documentId: "99999999-9999-4999-8999-999999999999",
+				snapshotRevision: 1,
+				origin: "https://example.test",
+				intent: "Submit the fixture form",
+				risk: "external_side_effect",
+				action: { type: "press", key: "Enter" },
+			},
+		};
+		const unavailableBroker = new InteractionBroker({ serverEpoch: EPOCH });
+		const unavailablePeer = new FakePeer();
+		unavailablePeer.browserResponseFor = (request) => browserObserveResponse(request.params.toolCallId, 1);
+		unavailableBroker.assign(SESSION_ID, unavailablePeer);
+		await expect(
+			unavailableBroker.requestBrowserTool(SESSION_ID, "browser-unavailable", action, new AbortController().signal),
+		).rejects.toMatchObject({ name: "BrowserPermissionDecisionUnavailableError", outcome: "unavailable" });
+
+		const cancelledBroker = new InteractionBroker({ serverEpoch: EPOCH });
+		const cancelledPeer = new FakePeer();
+		cancelledPeer.browserResponseFor = (request) => browserObserveResponse(request.params.toolCallId, 1);
+		cancelledBroker.assign(SESSION_ID, cancelledPeer);
+		const controller = new AbortController();
+		controller.abort(new Error("session cancelled"));
+		await expect(
+			cancelledBroker.requestBrowserTool(SESSION_ID, "browser-cancelled", action, controller.signal),
+		).rejects.toMatchObject({ name: "BrowserPermissionDecisionUnavailableError", outcome: "cancelled" });
+	});
+
 	it("returns a trusted stale result before confirmation when the live target changed", async () => {
 		const broker = new InteractionBroker({ serverEpoch: EPOCH });
 		const peer = new FakePeer();

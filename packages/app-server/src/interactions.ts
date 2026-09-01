@@ -29,6 +29,7 @@ import {
 	type PermissionApprovalRequest,
 	type ProjectTrustOption,
 } from "@metis/coding-agent";
+import { BrowserPermissionDecisionUnavailableError, BrowserPermissionDeniedError } from "./browser-permission-audit.ts";
 
 const DEFAULT_TIMEOUT_MS = 120_000;
 const ASK_USER_TIMEOUT_MS = 15 * 60_000;
@@ -53,6 +54,10 @@ export interface InteractionBrokerOptions {
 
 type NotificationEvent = Extract<DomainEvent, { type: "interaction/notify" }>;
 type BrowserObservation = Extract<BrowserToolResult, { tool: "browser_observe" }>["observation"];
+type BrowserActionConfirmation = "allow" | "deny" | "cancelled" | "unavailable";
+type InteractionRequestOutcome =
+	| { readonly status: "response"; readonly response: InteractionResponseInput }
+	| { readonly status: "cancelled" | "unavailable" };
 type BrowserStaleReason = Extract<
 	Extract<BrowserToolResult, { tool: "browser_act" }>["details"],
 	{ status: "stale" }
@@ -216,23 +221,52 @@ export class InteractionBroker {
 		signal: AbortSignal,
 	): Promise<BrowserToolResult> {
 		const peer = this.owners.get(sessionId);
-		if (!peer) throw new Error("No interactive desktop owner is available for browser tools");
+		if (!peer) {
+			throw new BrowserPermissionDecisionUnavailableError(
+				signal.aborted ? "cancelled" : "unavailable",
+				"No interactive desktop owner is available for browser tools",
+			);
+		}
 		if (call.tool === "browser_act" && call.input.risk !== "ordinary") {
-			const preflightCall = {
-				tool: "browser_observe",
-				input: { browserId: call.input.browserId },
-			} satisfies BrowserToolCall;
-			const preflight = await this.dispatchBrowserTool(peer, sessionId, this.createId(), preflightCall, signal);
-			if (preflight.tool !== "browser_observe") throw new Error("Browser preflight returned the wrong tool result");
-			const { staleReason, target } = preflightBrowserAction(call.input, preflight.observation);
-			if (staleReason) {
-				return {
-					tool: "browser_act",
-					details: { status: "stale", reason: staleReason, observation: preflight.observation },
-				};
+			try {
+				const preflightCall = {
+					tool: "browser_observe",
+					input: { browserId: call.input.browserId },
+				} satisfies BrowserToolCall;
+				const preflight = await this.dispatchBrowserTool(peer, sessionId, this.createId(), preflightCall, signal);
+				if (preflight.tool !== "browser_observe")
+					throw new Error("Browser preflight returned the wrong tool result");
+				const { staleReason, target } = preflightBrowserAction(call.input, preflight.observation);
+				if (staleReason) {
+					return {
+						tool: "browser_act",
+						details: { status: "stale", reason: staleReason, observation: preflight.observation },
+					};
+				}
+				const confirmation = await this.requestBrowserActionConfirmation(sessionId, call.input, target, signal);
+				if (confirmation === "deny") {
+					throw new BrowserPermissionDeniedError("The user rejected this browser action");
+				}
+				if (confirmation !== "allow") {
+					throw new BrowserPermissionDecisionUnavailableError(
+						confirmation,
+						confirmation === "cancelled"
+							? "Browser permission review was cancelled"
+							: "Browser permission review is unavailable",
+					);
+				}
+			} catch (error) {
+				if (
+					error instanceof BrowserPermissionDeniedError ||
+					error instanceof BrowserPermissionDecisionUnavailableError
+				) {
+					throw error;
+				}
+				throw new BrowserPermissionDecisionUnavailableError(
+					signal.aborted ? "cancelled" : "unavailable",
+					signal.aborted ? "Browser permission review was cancelled" : "Browser permission review is unavailable",
+				);
 			}
-			const confirmed = await this.requestBrowserActionConfirmation(sessionId, call.input, target, signal);
-			if (!confirmed) throw new Error("The user rejected this browser action");
 		}
 		return this.dispatchBrowserTool(peer, sessionId, toolCallId, call, signal);
 	}
@@ -260,9 +294,9 @@ export class InteractionBroker {
 		input: BrowserActInput,
 		target: string,
 		signal: AbortSignal,
-	): Promise<boolean> {
+	): Promise<BrowserActionConfirmation> {
 		const interactionId = this.createId();
-		const response = await this.request(
+		const outcome = await this.requestOutcome(
 			sessionId,
 			{
 				interactionId,
@@ -279,7 +313,9 @@ export class InteractionBroker {
 			},
 			{ signal },
 		);
-		return response?.kind === "confirm" && response.confirmed;
+		if (outcome.status !== "response") return outcome.status;
+		if (outcome.response.kind !== "confirm") return "unavailable";
+		return outcome.response.confirmed ? "allow" : "deny";
 	}
 
 	async requestProjectTrust(
@@ -477,10 +513,19 @@ export class InteractionBroker {
 		interactionValue: InteractionView,
 		options?: ExtensionUIDialogOptions,
 	): Promise<InteractionResponseInput | undefined> {
+		const outcome = await this.requestOutcome(sessionId, interactionValue, options);
+		return outcome.status === "response" ? outcome.response : undefined;
+	}
+
+	private async requestOutcome(
+		sessionId: string,
+		interactionValue: InteractionView,
+		options?: ExtensionUIDialogOptions,
+	): Promise<InteractionRequestOutcome> {
 		const peer = this.owners.get(sessionId);
-		if (!peer) return undefined;
+		if (!peer) return { status: options?.signal?.aborted ? "cancelled" : "unavailable" };
 		const timeout = options?.timeout ?? this.defaultTimeoutMs;
-		if (!validTimeout(timeout)) return undefined;
+		if (!validTimeout(timeout)) return { status: "unavailable" };
 		let request: ServerRpcRequest<"interaction/request">;
 		try {
 			request = validateServerRequest({
@@ -490,7 +535,7 @@ export class InteractionBroker {
 				params: { serverEpoch: this.serverEpoch, interaction: interactionValue },
 			}) as ServerRpcRequest<"interaction/request">;
 		} catch {
-			return undefined;
+			return { status: "unavailable" };
 		}
 
 		const controller = new AbortController();
@@ -499,7 +544,7 @@ export class InteractionBroker {
 		else options?.signal?.addEventListener("abort", abort, { once: true });
 		if (controller.signal.aborted) {
 			options?.signal?.removeEventListener("abort", abort);
-			return undefined;
+			return { status: "cancelled" };
 		}
 		const timer = setTimeout(() => controller.abort(new Error("Interaction timed out")), timeout);
 		timer.unref?.();
@@ -515,9 +560,9 @@ export class InteractionBroker {
 				aborted,
 			])) as InteractionResponseInput;
 			validateResponseFor("server", request, { jsonrpc: "2.0", id: request.id, result });
-			return result;
+			return { status: "response", response: result };
 		} catch {
-			return undefined;
+			return { status: options?.signal?.aborted ? "cancelled" : "unavailable" };
 		} finally {
 			clearTimeout(timer);
 			options?.signal?.removeEventListener("abort", abort);

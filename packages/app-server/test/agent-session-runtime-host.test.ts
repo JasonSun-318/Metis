@@ -93,6 +93,8 @@ describe("AgentSessionRuntimeHost browser tools", () => {
 
 		const broker = new InteractionBroker({ serverEpoch: EPOCH });
 		let installedSession: AgentSession | undefined;
+		let interactiveHostToolOptions: Parameters<AgentSession["installHostTools"]>[1];
+		const appendAudit = vi.spyOn(AgentSession.prototype, "appendPermissionAuditEvent");
 		const originalInstall = AgentSession.prototype.installHostTools;
 		vi.spyOn(AgentSession.prototype, "installHostTools").mockImplementation(function (
 			this: AgentSession,
@@ -100,6 +102,7 @@ describe("AgentSessionRuntimeHost browser tools", () => {
 			options,
 		) {
 			installedSession = this;
+			if (definitions.some(({ name }) => name === "deliver_file")) interactiveHostToolOptions = options;
 			return originalInstall.call(this, definitions, options);
 		});
 
@@ -110,6 +113,8 @@ describe("AgentSessionRuntimeHost browser tools", () => {
 			const browserTabs = session?.getToolDefinition("browser_tabs");
 			expect(browserTabs).toBeDefined();
 			expect(session?.getActiveToolNames()).toEqual(expect.arrayContaining([...BROWSER_TOOL_NAMES]));
+			expect(interactiveHostToolOptions?.automaticPermissionToolNames).toEqual(["ask_user", ...BROWSER_TOOL_NAMES]);
+			expect(interactiveHostToolOptions?.automaticPermissionToolNames).not.toContain("deliver_file");
 
 			await expect(
 				browserTabs!.execute("call-detached", { action: "list" }, undefined, undefined, {} as never),
@@ -135,6 +140,11 @@ describe("AgentSessionRuntimeHost browser tools", () => {
 			expect(session?.getToolDefinition("browser_tabs")).toBe(browserTabs);
 			expect(firstPeer.requests).toHaveLength(1);
 			expect(replacementPeer.requests).toHaveLength(1);
+			expect(appendAudit.mock.calls.map(([event]) => [event.toolName, event.stage, event.outcome])).toContainEqual([
+				"browser_tabs",
+				"execution",
+				"success",
+			]);
 
 			const message = {
 				role: "assistant" as const,

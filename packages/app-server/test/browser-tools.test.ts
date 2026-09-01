@@ -24,6 +24,7 @@ describe("browser host tools", () => {
 		}));
 		expect(tools.map(({ name }) => name)).toEqual(BROWSER_TOOL_NAMES);
 		expect(tools.every(({ executionMode }) => executionMode === "sequential")).toBe(true);
+		expect(tools.every(({ permission }) => permission.version === 1)).toBe(true);
 		const guidance = tools.flatMap(({ promptGuidelines = [] }) => promptGuidelines).join("\n");
 		expect(guidance).toContain("untrusted");
 		expect(guidance).toContain("documentId");

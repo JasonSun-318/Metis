@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:
 import { createServer, type Server, type ServerResponse } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { PROTOCOL_VERSION } from "@metis/app-protocol";
+import { PROTOCOL_VERSION, type ServerRpcRequest } from "@metis/app-protocol";
 import { getSessionAgentDir, SessionManager } from "@metis/coding-agent";
 import { afterEach, describe, expect, it } from "vitest";
 import { AppServer } from "../src/app-server.ts";
@@ -178,8 +178,23 @@ describe("agent runtime e2e", () => {
 		});
 		const connection = server.connect();
 		const outbound: ConnectionOutboundEnvelope[] = [];
+		let permissionApprovals = 0;
 		connection.onMessage((message) => {
 			outbound.push(message);
+			if (!("method" in message) || message.method !== "interaction/request") return;
+			const request = message as ServerRpcRequest<"interaction/request">;
+			const interaction = request.params.interaction;
+			if (interaction.kind !== "select" || interaction.presentation !== "permission_approval") return;
+			permissionApprovals += 1;
+			connection.handleServerResponse({
+				jsonrpc: "2.0",
+				id: request.id,
+				result: {
+					interactionId: interaction.interactionId,
+					kind: "select",
+					choiceId: "permission:allow-once",
+				},
+			});
 		});
 		const events = () =>
 			outbound.flatMap((message) =>
@@ -273,6 +288,7 @@ describe("agent runtime e2e", () => {
 					return response.result.agents.map((agent) => agent.status);
 				})
 				.toEqual(["done", "done"]);
+			expect(permissionApprovals).toBe(2);
 			expect(existsSync(reviewerWritePath)).toBe(false);
 
 			const archived = await connection.handle({

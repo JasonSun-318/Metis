@@ -222,12 +222,14 @@ describe("real process recovery", () => {
 			writeFileSync(
 				join(extensionDir, "crash-tool.ts"),
 				`import { appendFileSync } from "node:fs";
+import { permissionClaim, permissionDescriptor } from "@metis/coding-agent";
 export default function (metis) {
 	metis.registerTool({
 		name: "crash_side_effect",
 		label: "Crash side effect",
 		description: "Records one test side effect",
 		parameters: { type: "object", properties: {}, additionalProperties: false },
+		permission: permissionDescriptor(() => permissionClaim({ writePaths: [${JSON.stringify(sideEffects)}] })),
 		execute: async () => {
 			appendFileSync(${JSON.stringify(sideEffects)}, "run\\n");
 			if (process.env.METIS_TEST_CRASH_POINT === "tool_side_effect") process.kill(process.pid, "SIGKILL");

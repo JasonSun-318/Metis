@@ -66,6 +66,7 @@ import {
 	upsertCustomAgentType,
 } from "@metis/coding-agent";
 import { AgentLiveProjector } from "./agent-live-projector.ts";
+import { createBrowserPermissionAudit } from "./browser-permission-audit.ts";
 import { BROWSER_TOOL_NAMES, browserToolCall, createBrowserToolDefinitions } from "./browser-tools.ts";
 import type { CredentialCoordinator } from "./credential-coordinator.ts";
 import {
@@ -406,13 +407,22 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 		if (this.interactions) {
 			const deliveredArtifacts = session.deliveredArtifacts;
 			if (!deliveredArtifacts) throw new Error("Interactive session is missing delivered artifact storage");
-			const browserTools = createBrowserToolDefinitions((request) =>
-				this.interactions!.requestBrowserTool(
-					this.sessionId,
-					request.toolCallId,
-					browserToolCall(request),
-					request.signal,
-				),
+			const browserTools = createBrowserToolDefinitions(
+				(request) =>
+					this.interactions!.requestBrowserTool(
+						this.sessionId,
+						request.toolCallId,
+						browserToolCall(request),
+						request.signal,
+					),
+				createBrowserPermissionAudit({
+					sessionId: this.sessionId,
+					sink: {
+						append: async (event) => {
+							await session.appendPermissionAuditEvent(event);
+						},
+					},
+				}),
 			);
 			session.installHostTools(
 				[
@@ -421,7 +431,7 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 					deliveredArtifacts.createToolDefinition(),
 				],
 				{
-					automaticPermissionToolNames: ["ask_user", ...BROWSER_TOOL_NAMES, "deliver_file"],
+					automaticPermissionToolNames: ["ask_user", ...BROWSER_TOOL_NAMES],
 				},
 			);
 		}
