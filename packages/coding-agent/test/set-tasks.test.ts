@@ -3,7 +3,7 @@ import type { TUI } from "@metis/tui";
 import { Value } from "typebox/value";
 import { beforeAll, describe, expect, it } from "vitest";
 import { createAgentSessionFromServices, createAgentSessionServices } from "../src/core/agent-session-runtime.ts";
-import { classifyAction, routeAction } from "../src/core/permission-policy.ts";
+import { classifyAction } from "../src/core/permissions/classify.ts";
 import { SessionManager } from "../src/core/session-manager.ts";
 import { createSetTasksToolDefinition, type SetTasksInput } from "../src/core/set-tasks.ts";
 import { ToolExecutionComponent } from "../src/modes/interactive/components/tool-execution.ts";
@@ -221,6 +221,5 @@ describe("set_tasks", () => {
 			workspaceRoots: [process.cwd()],
 		});
 		expect(action.risks).toEqual(["ordinary-read"]);
-		expect(routeAction({ mode: "ask" }, action)).toBe("allow");
 	});
 });

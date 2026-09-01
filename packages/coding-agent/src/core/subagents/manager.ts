@@ -4,7 +4,7 @@ import type { ThinkingLevel } from "@metis/agent-core";
 import { getSupportedThinkingLevels, type Model } from "@metis/ai/compat";
 import type { AgentSession } from "../agent-session.ts";
 import type { AgentSessionRuntime } from "../agent-session-runtime.ts";
-import type { RequestPermissionApproval } from "../permission-policy.ts";
+import type { RequestPermissionApproval } from "../permissions/approval.ts";
 import {
 	intersectPermissionSettings,
 	isPermissionPreset,

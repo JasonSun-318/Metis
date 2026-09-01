@@ -8,7 +8,7 @@ import {
 	type AskUserRequest,
 	createAskUserToolDefinition,
 } from "../src/core/ask-user.ts";
-import { classifyAction, routeAction } from "../src/core/permission-policy.ts";
+import { classifyAction } from "../src/core/permissions/classify.ts";
 import { SessionManager } from "../src/core/session-manager.ts";
 import { createAllToolDefinitions } from "../src/core/tools/index.ts";
 
@@ -192,7 +192,6 @@ describe("ask_user", () => {
 			workspaceRoots: [process.cwd()],
 		});
 		expect(action.risks).toEqual(["ordinary-read"]);
-		expect(routeAction({ mode: "ask" }, action)).toBe("allow");
 		expect(Object.keys(createAllToolDefinitions(process.cwd()))).not.toContain("ask_user");
 	});
 

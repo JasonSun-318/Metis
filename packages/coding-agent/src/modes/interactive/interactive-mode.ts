@@ -90,7 +90,7 @@ import {
 	formatPermissionApproval,
 	type PermissionApprovalDecision,
 	type PermissionApprovalRequest,
-} from "../../core/permission-policy.ts";
+} from "../../core/permissions/approval.ts";
 import { parseCommandArgs } from "../../core/prompt-templates.ts";
 import type { ResourceDiagnostic } from "../../core/resource-loader.ts";
 import { readScheduledSessionView } from "../../core/schedules/executor.ts";
@@ -4646,12 +4646,12 @@ export class InteractiveMode {
 		if (this.guardSessionMutation()) return;
 		this.showSelector((done) => {
 			const selector = new PermissionsSelectorComponent(
-				{ mode: this.sessionManager.getPermissionPreset() },
-				(settings) => {
-					this.sessionManager.setPermissionPreset(settings.mode);
+				this.sessionManager.getPermissionPreset(),
+				(preset) => {
+					this.sessionManager.setPermissionPreset(preset);
 					done();
 					this.footer.invalidate();
-					this.showStatus(`Permissions: ${settings.mode}`);
+					this.showStatus(`Permissions: ${preset}`);
 					this.ui.requestRender();
 				},
 				() => {

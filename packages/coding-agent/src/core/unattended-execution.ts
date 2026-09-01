@@ -1,7 +1,8 @@
 import { isAbsolute } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { canonicalizeActionPath, isPathInside } from "../utils/paths.ts";
-import { classifyAction, type PermissionAction, type PermissionAuthorization } from "./permission-policy.ts";
+import type { PermissionAction, PermissionAuthorization } from "./permissions/approval.ts";
+import { classifyAction } from "./permissions/classify.ts";
 import type { BashOperations } from "./tools/bash.ts";
 
 export const UNATTENDED_TOOL_NAMES = Object.freeze([

@@ -3,7 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fauxAssistantMessage, fauxToolCall } from "@metis/ai";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { classifyAction, type PermissionAction, type ToolProvenance } from "../src/core/permission-policy.ts";
+import type { PermissionAction, ToolProvenance } from "../src/core/permissions/approval.ts";
+import { classifyAction } from "../src/core/permissions/classify.ts";
 import { SessionManager } from "../src/core/session-manager.ts";
 import {
 	authorizeUnattendedAction,

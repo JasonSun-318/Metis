@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { PermissionApprovalRequest, RequestPermissionApproval } from "../../src/core/permission-policy.ts";
+import type { PermissionApprovalRequest, RequestPermissionApproval } from "../../src/core/permissions/approval.ts";
 import {
 	digestCanonical,
 	digestPermissionAction,

@@ -4,9 +4,8 @@ import type {
 	PermissionAction,
 	PermissionApprovalDecision,
 	PermissionApprovalRequest,
-	PermissionExecutionTarget,
 	RequestPermissionApproval,
-} from "../permission-policy.ts";
+} from "./approval.ts";
 import { digestCanonical, digestPermissionAction } from "./normalize.ts";
 import type {
 	ProjectPermissionRuleInput,
@@ -128,12 +127,6 @@ function scopeIsComplete(request: PermissionReviewRequest): boolean {
 	return true;
 }
 
-function legacyExecutionTarget(
-	target: PermissionReviewRequest["decision"]["grant"]["executionTarget"],
-): PermissionExecutionTarget {
-	return target === "sandbox" ? "sandbox" : "host";
-}
-
 function exactProjectPath(action: NormalizedPermissionAction, configured: string | undefined): string | undefined {
 	if (!configured) return undefined;
 	const canonical = canonicalizeActionPath(configured, action.cwd);
@@ -164,7 +157,7 @@ function structuredApprovalRequest(
 		}),
 		reason: decision.reason,
 		cwd: action.cwd,
-		executionTarget: legacyExecutionTarget(decision.grant.executionTarget),
+		executionTarget: decision.grant.executionTarget,
 		rememberProjectEligible,
 		signal: request.signal,
 	});

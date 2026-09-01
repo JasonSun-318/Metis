@@ -28,21 +28,17 @@ describe("PermissionRulesService", () => {
 		]);
 		const catalog = { get: (sessionId: string) => refs.get(sessionId)! } as SessionCatalog;
 		const store = new ProjectPermissionRuleStore(agentDir);
-		const rule = store.remember({
+		const rule = store.rememberAllow({
 			projectPath: projectA,
-			cwd: projectA,
-			workspaceRoots: [projectA],
-			action: {
-				actionId: "action-1",
-				toolName: "bash",
-				provenance: "builtin",
-				risks: ["shell"],
-				paths: [],
-				networkTargets: [],
-				command: "pwd",
-			},
-			args: { command: "pwd" },
-			executionTarget: "sandbox",
+			actionDigest: "a".repeat(64),
+			grantDigest: "b".repeat(64),
+			toolName: "bash",
+			toolIdentity: "builtin:bash",
+			riskLevel: "low",
+			summary: [
+				{ label: "Command", value: "pwd" },
+				{ label: "Working directory", value: projectA },
+			],
 		});
 		const service = new PermissionRulesService(agentDir, catalog);
 
@@ -51,7 +47,7 @@ describe("PermissionRulesService", () => {
 			rules: [
 				{
 					id: rule.id,
-					command: "pwd",
+					toolName: "bash",
 					executionTarget: "sandbox",
 					details: [
 						{ label: "Command", value: "pwd" },

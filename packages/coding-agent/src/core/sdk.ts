@@ -14,7 +14,7 @@ import { type McpConfigurationCoordinator, McpManager } from "./mcp/index.ts";
 import { convertToLlm } from "./messages.ts";
 import { ModelRegistry } from "./model-registry.ts";
 import { findInitialModel } from "./model-resolver.ts";
-import { formatPermissionApproval, type PermissionApprovalRequest } from "./permission-policy.ts";
+import { formatPermissionApproval, type PermissionApprovalRequest } from "./permissions/approval.ts";
 import { isPermissionPreset, type PermissionPreset } from "./permissions/settings.ts";
 import { mergeProviderAttributionHeaders } from "./provider-attribution.ts";
 import type { ResourceLoader } from "./resource-loader.ts";

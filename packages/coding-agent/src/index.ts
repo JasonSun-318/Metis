@@ -317,21 +317,17 @@ export type {
 } from "./core/package-manager.ts";
 export { DefaultPackageManager } from "./core/package-manager.ts";
 export {
-	defaultPermissionSettings,
-	isPermissionMode,
-	isPersistedPermissionMode,
-	narrowPermissionMode,
-	normalizePermissionMode,
-	type PermissionMode,
-	type PermissionSettings,
-	type PersistedPermissionMode,
-} from "./core/permission-mode.ts";
+	createPermissionAuditEvent,
+	type PermissionAuditEvent,
+	type PermissionAuditEventInput,
+	type PermissionAuditFailure,
+	type PermissionAuditSink,
+	PermissionAuditWriter,
+} from "./core/permissions/audit.ts";
 export {
 	type ActionRisk,
-	type ClassifiedAction,
 	type ClassifyActionInput,
 	classifyAction,
-	executionTargetFor,
 	formatPermissionApproval,
 	type NetworkTarget,
 	type PermissionAction,
@@ -343,22 +339,26 @@ export {
 	type PermissionAuthorizationSource,
 	type PermissionExecutionTarget,
 	PermissionPolicy,
-	type PermissionRoute,
 	type RequestPermissionApproval,
 	revalidateStructuredActionBinding,
-	routeAction,
 	type ToolProvenance,
 	unclassifiedAction,
-} from "./core/permission-policy.ts";
-export {
-	createPermissionAuditEvent,
-	type PermissionAuditEvent,
-	type PermissionAuditEventInput,
-	type PermissionAuditFailure,
-	type PermissionAuditSink,
-	PermissionAuditWriter,
-} from "./core/permissions/audit.ts";
+} from "./core/permissions/index.ts";
 export { digestCanonical } from "./core/permissions/normalize.ts";
+export {
+	type ProjectPermissionRule,
+	type ProjectPermissionRuleInput,
+	ProjectPermissionRuleStore,
+	type ProjectPermissionRuleSummary,
+} from "./core/permissions/project-rules.ts";
+export {
+	DEFAULT_PERMISSION_PRESET,
+	isPermissionPreset,
+	PERMISSION_PRESETS,
+	type PermissionPreset,
+	type PermissionSettings,
+	settingsForPreset,
+} from "./core/permissions/settings.ts";
 export {
 	type CollaborationMode,
 	MAX_PLAN_MARKDOWN_UTF8_BYTES,
@@ -369,11 +369,6 @@ export {
 	reducePlanState,
 	type StoredPlan,
 } from "./core/plan-state.ts";
-export {
-	ProjectPermissionRuleStore,
-	type ProjectPermissionRuleView,
-	type ProjectPermissionSignatureInput,
-} from "./core/project-permission-rules.ts";
 export {
 	MAX_QUEUED_TURNS,
 	QueuedTurnConflictError,

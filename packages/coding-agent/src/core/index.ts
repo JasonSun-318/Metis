@@ -135,21 +135,17 @@ export type {
 	TrashModeProjectDataResult,
 } from "./mode-project-delete.ts";
 export {
-	defaultPermissionSettings,
-	isPermissionMode,
-	isPersistedPermissionMode,
-	narrowPermissionMode,
-	normalizePermissionMode,
-	type PermissionMode,
-	type PermissionSettings,
-	type PersistedPermissionMode,
-} from "./permission-mode.ts";
+	createPermissionAuditEvent,
+	type PermissionAuditEvent,
+	type PermissionAuditEventInput,
+	type PermissionAuditFailure,
+	type PermissionAuditSink,
+	PermissionAuditWriter,
+} from "./permissions/audit.ts";
 export {
 	type ActionRisk,
-	type ClassifiedAction,
 	type ClassifyActionInput,
 	classifyAction,
-	executionTargetFor,
 	formatPermissionApproval,
 	type NetworkTarget,
 	type PermissionAction,
@@ -161,22 +157,26 @@ export {
 	type PermissionAuthorizationSource,
 	type PermissionExecutionTarget,
 	PermissionPolicy,
-	type PermissionRoute,
 	type RequestPermissionApproval,
 	revalidateStructuredActionBinding,
-	routeAction,
 	type ToolProvenance,
 	unclassifiedAction,
-} from "./permission-policy.ts";
-export {
-	createPermissionAuditEvent,
-	type PermissionAuditEvent,
-	type PermissionAuditEventInput,
-	type PermissionAuditFailure,
-	type PermissionAuditSink,
-	PermissionAuditWriter,
-} from "./permissions/audit.ts";
+} from "./permissions/index.ts";
 export { digestCanonical } from "./permissions/normalize.ts";
+export {
+	type ProjectPermissionRule,
+	type ProjectPermissionRuleInput,
+	ProjectPermissionRuleStore,
+	type ProjectPermissionRuleSummary,
+} from "./permissions/project-rules.ts";
+export {
+	DEFAULT_PERMISSION_PRESET,
+	isPermissionPreset,
+	PERMISSION_PRESETS,
+	type PermissionPreset,
+	type PermissionSettings,
+	settingsForPreset,
+} from "./permissions/settings.ts";
 export {
 	PLAN_MODE_SYSTEM_PROMPT,
 	type PlanContextProjectionInput,
@@ -193,11 +193,6 @@ export {
 	reducePlanState,
 	type StoredPlan,
 } from "./plan-state.ts";
-export {
-	ProjectPermissionRuleStore,
-	type ProjectPermissionRuleView,
-	type ProjectPermissionSignatureInput,
-} from "./project-permission-rules.ts";
 export {
 	MAX_QUEUED_TURNS,
 	QueuedTurnConflictError,

@@ -278,7 +278,7 @@ function validateCreationOnlyFlags(parsed: Args): void {
 
 	const conflictingFlags = [
 		parsed.cwd !== undefined ? "--cwd" : undefined,
-		parsed.permissionMode !== undefined ? "--permission-mode" : undefined,
+		parsed.permissionPreset !== undefined ? "--permission-preset" : undefined,
 		parsed.agentMode !== undefined && !parsed.continue ? "--agent-mode" : undefined,
 	].filter((flag): flag is string => flag !== undefined);
 	if (conflictingFlags.length === 0) return;
@@ -295,7 +295,7 @@ function rejectCreationOverridesForExistingSession(parsed: Args): void {
 	const conflictingFlags = [
 		parsed.agentMode !== undefined ? "--agent-mode" : undefined,
 		parsed.cwd !== undefined ? "--cwd" : undefined,
-		parsed.permissionMode !== undefined ? "--permission-mode" : undefined,
+		parsed.permissionPreset !== undefined ? "--permission-preset" : undefined,
 	].filter((flag): flag is string => flag !== undefined);
 	if (conflictingFlags.length === 0) return;
 	console.error(
@@ -356,7 +356,7 @@ async function createSessionManager(
 		return SessionManager.inMemory(ephemeralCwd, {
 			id: parsed.sessionId,
 			mode: parsed.agentMode,
-			permissionPreset: parsed.permissionMode,
+			permissionPreset: parsed.permissionPreset,
 		});
 	}
 
@@ -458,7 +458,7 @@ async function createSessionManager(
 			id: sessionId,
 			mode,
 			cwdOrigin: workspace.cwdOrigin,
-			permissionPreset: parsed.permissionMode,
+			permissionPreset: parsed.permissionPreset,
 		});
 	} catch (error) {
 		if (workspace.cwdOrigin === "managed") {

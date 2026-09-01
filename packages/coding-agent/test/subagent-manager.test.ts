@@ -6,7 +6,7 @@ import { getModel, type Model } from "@metis/ai/compat";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AgentSession, AgentSessionEvent } from "../src/core/agent-session.ts";
 import type { AgentSessionRuntime } from "../src/core/agent-session-runtime.ts";
-import type { PermissionApprovalRequest } from "../src/core/permission-policy.ts";
+import type { PermissionApprovalRequest } from "../src/core/permissions/approval.ts";
 import type { PermissionPreset } from "../src/core/permissions/settings.ts";
 import {
 	intersectPermissionSettings,

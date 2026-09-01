@@ -5,24 +5,24 @@ import {
 	MAX_PERMISSION_OPERATION_ROWS,
 	type ProjectPermissionRuleView,
 } from "@metis/app-protocol";
-import {
-	ProjectPermissionRuleStore,
-	type ProjectPermissionRuleView as StoredPermissionRule,
-} from "@metis/coding-agent";
+import { type ProjectPermissionRule, ProjectPermissionRuleStore } from "@metis/coding-agent";
 import type { SessionCatalog } from "./session-catalog.ts";
 import { AppServerError } from "./session-runtime-host.ts";
 
-function projectRuleView(rule: StoredPermissionRule): ProjectPermissionRuleView {
-	const details = rule.details.slice(0, MAX_PERMISSION_OPERATION_ROWS);
+function projectRuleView(rule: ProjectPermissionRule): ProjectPermissionRuleView {
+	const details = rule.summary.slice(0, MAX_PERMISSION_OPERATION_ROWS).map((entry) => ({
+		label: entry.label,
+		value: entry.value,
+	}));
+	const network = rule.summary.some((entry) => entry.label === "Network");
 	return {
 		id: rule.id,
 		toolName: rule.toolName,
-		...(rule.command === undefined ? {} : { command: rule.command }),
-		paths: rule.paths.slice(0, MAX_PERMISSION_OPERATION_ROWS),
+		paths: rule.summary.filter((entry) => entry.label === "Path").map((entry) => entry.value),
 		details,
-		omittedDetails: rule.omittedDetails + rule.details.length - details.length,
-		risks: [...rule.risks],
-		executionTarget: rule.executionTarget,
+		omittedDetails: Math.max(0, rule.summary.length - details.length),
+		risks: [rule.riskLevel],
+		executionTarget: network ? "external" : "sandbox",
 		createdAt: rule.createdAt,
 	};
 }

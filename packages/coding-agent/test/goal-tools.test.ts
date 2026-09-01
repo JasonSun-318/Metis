@@ -9,7 +9,7 @@ import {
 	createGetGoalToolDefinition,
 	createUpdateGoalToolDefinition,
 } from "../src/core/goal/tools.ts";
-import { classifyAction } from "../src/core/permission-policy.ts";
+import { classifyAction } from "../src/core/permissions/classify.ts";
 import { SessionManager } from "../src/core/session-manager.ts";
 
 function manager(): SessionManager {

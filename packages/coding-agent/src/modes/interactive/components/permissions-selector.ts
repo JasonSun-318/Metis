@@ -1,5 +1,5 @@
 import { Container, type SelectItem, SelectList, type SelectListLayoutOptions } from "@metis/tui";
-import type { PermissionMode, PermissionSettings } from "../../../core/permission-mode.ts";
+import type { PermissionPreset } from "../../../core/permissions/settings.ts";
 import { getSelectListTheme } from "../theme/theme.ts";
 import { DynamicBorder } from "./dynamic-border.ts";
 
@@ -8,36 +8,36 @@ const PERMISSIONS_SELECT_LIST_LAYOUT: SelectListLayoutOptions = {
 	maxPrimaryColumnWidth: 32,
 };
 
-const MODE_ITEMS: SelectItem[] = [
+const PRESET_ITEMS: SelectItem[] = [
 	{
 		value: "ask",
 		label: "Ask",
-		description: "Read ordinary workspace files; ask before Bash, writes, web, and integrations",
+		description: "Runs in the workspace sandbox and asks you when approval is needed.",
 	},
 	{
 		value: "auto",
 		label: "Auto",
-		description: "Work in the project sandbox; ask for dangerous or boundary-crossing actions",
+		description: "Runs in the workspace sandbox. The current model reviews risky actions when needed.",
 	},
 	{
 		value: "full",
-		label: "Full access",
-		description: "Run model tool actions directly on the host with no Metis approval",
+		label: "Full",
+		description: "May run on the host. Critical actions still ask you.",
 	},
 ];
 
 export class PermissionsSelectorComponent extends Container {
 	private selectList!: SelectList;
-	private readonly current: PermissionSettings;
-	private readonly onSave: (settings: PermissionSettings) => void;
+	private readonly current: PermissionPreset;
+	private readonly onSave: (preset: PermissionPreset) => void;
 	private readonly onCancel: () => void;
 
-	constructor(current: PermissionSettings, onSave: (settings: PermissionSettings) => void, onCancel: () => void) {
+	constructor(current: PermissionPreset, onSave: (preset: PermissionPreset) => void, onCancel: () => void) {
 		super();
 		this.current = current;
 		this.onSave = onSave;
 		this.onCancel = onCancel;
-		this.showModes();
+		this.showPresets();
 	}
 
 	private setItems(
@@ -57,13 +57,8 @@ export class PermissionsSelectorComponent extends Container {
 		this.addChild(new DynamicBorder());
 	}
 
-	private showModes(): void {
-		this.setItems(
-			MODE_ITEMS,
-			this.current.mode,
-			(value) => this.onSave({ mode: value as PermissionMode }),
-			this.onCancel,
-		);
+	private showPresets(): void {
+		this.setItems(PRESET_ITEMS, this.current, (value) => this.onSave(value as PermissionPreset), this.onCancel);
 	}
 
 	handleInput(data: string): void {

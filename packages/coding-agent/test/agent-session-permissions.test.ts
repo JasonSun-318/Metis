@@ -6,7 +6,7 @@ import { Type } from "typebox";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ToolDefinition } from "../src/core/extensions/types.ts";
 import { createInteractiveBashBoundary } from "../src/core/interactive-bash-boundary.ts";
-import type { PermissionApprovalRequest } from "../src/core/permission-policy.ts";
+import type { PermissionApprovalRequest } from "../src/core/permissions/approval.ts";
 import { permissionClaim, permissionDescriptor } from "../src/core/tool-permission-adapter.ts";
 import type { BashOperations } from "../src/core/tools/bash.ts";
 import type { WorkspaceSandbox } from "../src/core/workspace-sandbox.ts";

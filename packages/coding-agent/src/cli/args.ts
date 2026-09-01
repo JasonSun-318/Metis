@@ -6,7 +6,7 @@ import chalk from "chalk";
 import { APP_NAME, CONFIG_DIR_NAME, ENV_AGENT_DIR, ENV_SESSION_DIR } from "../config.ts";
 import { type AgentMode, isAgentMode } from "../core/agent-mode.ts";
 import type { ExtensionFlag } from "../core/extensions/types.ts";
-import { isPermissionMode, type PermissionMode } from "../core/permission-mode.ts";
+import { isPermissionPreset, type PermissionPreset } from "../core/permissions/settings.ts";
 import { isThinkingSelection, type ThinkingSelection } from "../core/thinking-selection.ts";
 
 export type Mode = "text" | "json" | "rpc";
@@ -25,7 +25,7 @@ export interface Args {
 	mode?: Mode;
 	agentMode?: AgentMode;
 	cwd?: string;
-	permissionMode?: PermissionMode;
+	permissionPreset?: PermissionPreset;
 	name?: string;
 	noSession?: boolean;
 	session?: string;
@@ -116,18 +116,18 @@ export function parseArgs(args: string[]): Args {
 				result.cwd = path;
 				i++;
 			}
-		} else if (arg === "--permission-mode") {
+		} else if (arg === "--permission-preset") {
 			const mode = args[i + 1];
 			if (mode === undefined || mode.startsWith("-")) {
-				result.diagnostics.push({ type: "error", message: "--permission-mode requires ask, auto, or full" });
+				result.diagnostics.push({ type: "error", message: "--permission-preset requires ask, auto, or full" });
 			} else {
 				i++;
-				if (isPermissionMode(mode)) {
-					result.permissionMode = mode;
+				if (isPermissionPreset(mode)) {
+					result.permissionPreset = mode;
 				} else {
 					result.diagnostics.push({
 						type: "error",
-						message: `Invalid permission mode "${mode}". Valid values: ask, auto, full`,
+						message: `Invalid permission preset "${mode}". Valid values: ask, auto, full`,
 					});
 				}
 			}
@@ -300,7 +300,7 @@ ${chalk.bold("Options:")}
   --mode <mode>                  Output mode: text (default), json, or rpc
   --agent-mode <mode>            New-session classification: chat or code (default: code)
   --cwd <path>                   Bind a new session to an existing directory
-  --permission-mode <ask|auto|full> New-session approval mode (default: auto)
+  --permission-preset <ask|auto|full> New-session permission preset (default: auto)
   --print, -p                    Non-interactive mode: process prompt and exit
   --continue, -c                 Continue previous session
   --resume, -r                   Select a session to resume

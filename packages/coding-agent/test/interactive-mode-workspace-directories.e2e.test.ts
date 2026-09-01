@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fauxAssistantMessage, fauxToolCall } from "@metis/ai";
 import { describe, expect, it, vi } from "vitest";
-import type { PermissionApprovalRequest } from "../src/core/permission-policy.ts";
+import type { PermissionApprovalRequest } from "../src/core/permissions/approval.ts";
 import { SessionManager } from "../src/core/session-manager.ts";
 import { InteractiveMode } from "../src/modes/interactive/interactive-mode.ts";
 import { createHarness, getMessageText, type Harness } from "./suite/harness.ts";

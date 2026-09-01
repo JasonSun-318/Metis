@@ -4,7 +4,7 @@ import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AuthStorage } from "../src/core/auth-storage.ts";
 import { McpManager } from "../src/core/mcp/index.ts";
-import type { PermissionApprovalRequest } from "../src/core/permission-policy.ts";
+import type { PermissionApprovalRequest } from "../src/core/permissions/approval.ts";
 import { createAgentSession } from "../src/core/sdk.ts";
 import { SessionManager } from "../src/core/session-manager.ts";
 import { SettingsManager } from "../src/core/settings-manager.ts";

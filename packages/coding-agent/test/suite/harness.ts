@@ -16,7 +16,7 @@ import type { InteractiveBashBoundary } from "../../src/core/interactive-bash-bo
 import type { McpManager } from "../../src/core/mcp/index.ts";
 import { convertToLlm } from "../../src/core/messages.ts";
 import { ModelRegistry } from "../../src/core/model-registry.ts";
-import type { RequestPermissionApproval } from "../../src/core/permission-policy.ts";
+import type { RequestPermissionApproval } from "../../src/core/permissions/approval.ts";
 import type { PermissionPreset, PermissionSettings } from "../../src/core/permissions/settings.ts";
 import { SessionManager } from "../../src/core/session-manager.ts";
 import type { Settings } from "../../src/core/settings-manager.ts";

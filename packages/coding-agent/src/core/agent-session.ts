@@ -141,7 +141,7 @@ import type { MemoryHealth } from "./memory/memory-types.ts";
 import { type SessionMemoryExtractInput, SessionMemoryRuntime } from "./memory/session-memory-runtime.ts";
 import type { BashExecutionMessage, CustomMessage } from "./messages.ts";
 import type { ModelRegistry } from "./model-registry.ts";
-import type { RequestPermissionApproval } from "./permission-policy.ts";
+import type { RequestPermissionApproval } from "./permissions/approval.ts";
 import {
 	AgentModelReviewTransport,
 	claimConsumedExecutionGrant,

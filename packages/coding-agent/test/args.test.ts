@@ -56,18 +56,18 @@ describe("parseArgs", () => {
 
 	describe("new-session workspace and permissions", () => {
 		test("accepts auto and consumes deprecated reviewer flags", () => {
-			const result = parseArgs(["--cwd", "./project", "--permission-mode", "auto", "--no-reviewer"]);
+			const result = parseArgs(["--cwd", "./project", "--permission-preset", "auto", "--no-reviewer"]);
 			expect(result.cwd).toBe("./project");
-			expect(result.permissionMode).toBe("auto");
+			expect(result.permissionPreset).toBe("auto");
 			expect(result).not.toHaveProperty("reviewerEnabled");
 			expect(result.diagnostics).toEqual([
 				{ type: "warning", message: "--no-reviewer is deprecated and ignored; permissions use Ask, Auto, or Full" },
 			]);
 		});
 
-		test.each(["ask", "auto", "full"] as const)("parses permission mode %s", (mode) => {
-			const result = parseArgs(["--permission-mode", mode]);
-			expect(result.permissionMode).toBe(mode);
+		test.each(["ask", "auto", "full"] as const)("parses permission preset %s", (preset) => {
+			const result = parseArgs(["--permission-preset", preset]);
+			expect(result.permissionPreset).toBe(preset);
 			expect(result.diagnostics).toEqual([]);
 		});
 
@@ -75,11 +75,11 @@ describe("parseArgs", () => {
 			expect(parseArgs(["--cwd"]).diagnostics).toEqual([
 				{ type: "error", message: "--cwd requires a directory path" },
 			]);
-			expect(parseArgs(["--permission-mode"]).diagnostics).toEqual([
-				{ type: "error", message: "--permission-mode requires ask, auto, or full" },
+			expect(parseArgs(["--permission-preset"]).diagnostics).toEqual([
+				{ type: "error", message: "--permission-preset requires ask, auto, or full" },
 			]);
-			expect(parseArgs(["--permission-mode", "trusted"]).diagnostics).toEqual([
-				{ type: "error", message: 'Invalid permission mode "trusted". Valid values: ask, auto, full' },
+			expect(parseArgs(["--permission-preset", "trusted"]).diagnostics).toEqual([
+				{ type: "error", message: 'Invalid permission preset "trusted". Valid values: ask, auto, full' },
 			]);
 		});
 

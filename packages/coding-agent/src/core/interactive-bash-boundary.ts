@@ -1,6 +1,6 @@
 import { isAbsolute } from "node:path";
 import { canonicalizeActionPath } from "../utils/paths.ts";
-import type { PermissionExecutionTarget } from "./permission-policy.ts";
+import type { PermissionExecutionTarget } from "./permissions/approval.ts";
 import { assertConsumedExecutionGrant, claimConsumedExecutionGrant } from "./permissions/grant-store.ts";
 import { digestCanonical } from "./permissions/normalize.ts";
 import type { ExecutionGrant, NetworkEndpoint } from "./permissions/types.ts";
