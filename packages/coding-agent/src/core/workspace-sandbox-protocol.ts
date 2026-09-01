@@ -1,3 +1,10 @@
+import { isIP } from "node:net";
+
+export interface SandboxNetworkEndpoint {
+	readonly hostname: string;
+	readonly port: number;
+}
+
 export type SandboxErrorCode = "SANDBOX_UNAVAILABLE" | "SANDBOX_PROTOCOL" | "SANDBOX_CLOSED";
 
 export type SandboxRequest =
@@ -8,6 +15,8 @@ export type SandboxRequest =
 			readOnlyRoots: string[];
 			writeRoots: string[];
 			protectedRoots: string[];
+			writeProtectedRoots: string[];
+			networkEndpoints: SandboxNetworkEndpoint[];
 			shellPath?: string;
 			workspaceReadOnly?: boolean;
 	  }
@@ -64,6 +73,42 @@ function paths(value: unknown, field: string, allowEmpty: boolean): string[] {
 	});
 }
 
+export function normalizeSandboxNetworkEndpoints(value: unknown): SandboxNetworkEndpoint[] {
+	if (!Array.isArray(value) || value.length > MAX_PATHS) {
+		throw new TypeError("Sandbox networkEndpoints must be a bounded array");
+	}
+	const endpoints = value.map((item) => {
+		const record = strictRecord(item, ["hostname", "port"]);
+		const hostname = nonEmptyString(record.hostname, "network hostname");
+		if (
+			/[*@/?#\\\s]/u.test(hostname) ||
+			!Number.isInteger(record.port) ||
+			(record.port as number) < 1 ||
+			(record.port as number) > 65_535
+		) {
+			throw new TypeError("Sandbox network endpoint is invalid");
+		}
+		let authority = hostname;
+		if (isIP(hostname) === 6) authority = `[${hostname}]`;
+		let normalized: string;
+		try {
+			normalized = new URL(`https://${authority}`).hostname
+				.replace(/^\[|\]$/gu, "")
+				.replace(/\.$/u, "")
+				.toLowerCase();
+		} catch {
+			throw new TypeError("Sandbox network endpoint is invalid");
+		}
+		if (normalized !== hostname) throw new TypeError("Sandbox network endpoint must be canonical");
+		return Object.freeze({ hostname, port: record.port as number });
+	});
+	const unique = new Map(endpoints.map((endpoint) => [`${endpoint.hostname}\0${endpoint.port}`, endpoint]));
+	if (unique.size !== endpoints.length) throw new TypeError("Sandbox network endpoints must be unique");
+	return [...endpoints].sort((left, right) =>
+		left.hostname === right.hostname ? left.port - right.port : left.hostname < right.hostname ? -1 : 1,
+	);
+}
+
 function environment(value: unknown): Record<string, string> {
 	const record = strictRecord(value, typeof value === "object" && value !== null ? Object.keys(value) : []);
 	const entries = Object.entries(record);
@@ -103,6 +148,8 @@ export function parseSandboxRequest(line: string): SandboxRequest {
 		"readOnlyRoots",
 		"writeRoots",
 		"protectedRoots",
+		"writeProtectedRoots",
+		"networkEndpoints",
 		"shellPath",
 		"workspaceReadOnly",
 		"id",
@@ -120,6 +167,8 @@ export function parseSandboxRequest(line: string): SandboxRequest {
 				"readOnlyRoots",
 				"writeRoots",
 				"protectedRoots",
+				"writeProtectedRoots",
+				"networkEndpoints",
 				"shellPath",
 				"workspaceReadOnly",
 			]);
@@ -134,6 +183,8 @@ export function parseSandboxRequest(line: string): SandboxRequest {
 				readOnlyRoots: paths(record.readOnlyRoots, "readOnlyRoots", true),
 				writeRoots: paths(record.writeRoots, "writeRoots", true),
 				protectedRoots: paths(record.protectedRoots, "protectedRoots", true),
+				writeProtectedRoots: paths(record.writeProtectedRoots, "writeProtectedRoots", true),
+				networkEndpoints: normalizeSandboxNetworkEndpoints(record.networkEndpoints),
 				...(record.shellPath === undefined ? {} : { shellPath: nonEmptyString(record.shellPath, "shellPath") }),
 				...(workspaceReadOnly === undefined ? {} : { workspaceReadOnly }),
 			};

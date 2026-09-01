@@ -37,7 +37,13 @@ function isOutsideWorkspace(action: NormalizedPermissionAction): boolean {
 
 function protectedRootsFor(action: NormalizedPermissionAction): readonly string[] {
 	return Object.freeze(
-		[...new Set(action.workspaceRoots.flatMap((root) => [join(root, ".git"), join(root, ".metis")]))].sort(),
+		[
+			...new Set(
+				action.workspaceRoots.flatMap((root) =>
+					[".git", ".metis", ".codex", ".agents"].map((name) => join(root, name)),
+				),
+			),
+		].sort(),
 	);
 }
 

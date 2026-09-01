@@ -3,12 +3,22 @@ import { homedir } from "node:os";
 import { basename, delimiter, dirname, isAbsolute, join } from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
-import { getDefaultWritePaths, SandboxManager, type SandboxRuntimeConfig } from "@anthropic-ai/sandbox-runtime";
+import {
+	getDefaultWritePaths,
+	type NetworkHostPattern,
+	SandboxManager,
+	type SandboxRuntimeConfig,
+} from "@anthropic-ai/sandbox-runtime";
 import { getBundledToolsDir, getPackageDir, isBunBinary } from "../config.ts";
 import { spawnProcess, waitForChildProcess } from "../utils/child-process.ts";
 import { canonicalizeActionPath, isPathInside, pathsIntersect } from "../utils/paths.ts";
 import { getShellConfig, killProcessTree } from "../utils/shell.ts";
-import { parseSandboxRequest, type SandboxErrorCode, type SandboxResponse } from "./workspace-sandbox-protocol.ts";
+import {
+	parseSandboxRequest,
+	type SandboxErrorCode,
+	type SandboxNetworkEndpoint,
+	type SandboxResponse,
+} from "./workspace-sandbox-protocol.ts";
 
 function send(response: SandboxResponse): boolean {
 	return process.stdout.write(`${JSON.stringify(response)}\n`);
@@ -119,30 +129,67 @@ function deniedReadRoots(callerHome: string): string[] {
 	return [...roots];
 }
 
-function runtimeConfig(
-	workspaceRoots: readonly string[],
-	readOnlyRoots: readonly string[],
-	writeRoots: readonly string[],
-	temporaryDir: string,
-	runtimeReads: readonly string[],
-	shellPath?: string,
-	workspaceReadOnly = false,
-): SandboxRuntimeConfig {
+export interface SandboxRuntimeConfigInput {
+	readonly workspaceRoots: readonly string[];
+	readonly readOnlyRoots: readonly string[];
+	readonly writeRoots: readonly string[];
+	readonly protectedRoots: readonly string[];
+	readonly writeProtectedRoots: readonly string[];
+	readonly temporaryDir: string;
+	readonly runtimeReads: readonly string[];
+	readonly shellPath?: string;
+	readonly workspaceReadOnly?: boolean;
+}
+
+function canonicalNetworkHost(host: string): string | undefined {
+	if (!host || /[*@/?#\\\s%]/u.test(host)) return undefined;
+	try {
+		const authority = host.includes(":") && !host.startsWith("[") ? `[${host}]` : host;
+		return new URL(`https://${authority}`).hostname
+			.replace(/^\[|\]$/gu, "")
+			.replace(/\.$/u, "")
+			.toLowerCase();
+	} catch {
+		return undefined;
+	}
+}
+
+export function exactNetworkGrantAllows(
+	endpoints: readonly SandboxNetworkEndpoint[],
+	target: NetworkHostPattern,
+): boolean {
+	const hostname = canonicalNetworkHost(target.host);
+	return Boolean(
+		hostname &&
+			Number.isInteger(target.port) &&
+			endpoints.some((endpoint) => endpoint.hostname === hostname && endpoint.port === target.port),
+	);
+}
+
+export function createSandboxRuntimeConfig(input: SandboxRuntimeConfigInput): SandboxRuntimeConfig {
 	const callerHome = homedir();
 	const denyRead = deniedReadRoots(callerHome);
-	const allowedWrite = [...new Set([...(workspaceReadOnly ? [] : workspaceRoots), ...writeRoots, temporaryDir])];
+	const allowedWrite = [
+		...new Set([...(input.workspaceReadOnly ? [] : input.workspaceRoots), ...input.writeRoots, input.temporaryDir]),
+	];
 	const allowedRead = [
 		...new Set([
-			...workspaceRoots,
+			...input.workspaceRoots,
 			...allowedWrite,
-			...readOnlyRoots,
-			...runtimeReads,
-			...(shellPath ? [shellPath] : []),
+			...input.readOnlyRoots,
+			...input.runtimeReads,
+			...(input.shellPath ? [input.shellPath] : []),
 		]),
 	];
-	const denyWrite = getDefaultWritePaths().filter(
-		(path) => !path.startsWith("/dev/") && !allowedWrite.some((root) => isPathInside(root, path)),
-	);
+	const denyWrite = [
+		...new Set([
+			...getDefaultWritePaths().filter(
+				(path) => !path.startsWith("/dev/") && !allowedWrite.some((root) => pathsIntersect(root, path)),
+			),
+			...input.protectedRoots,
+			...input.writeProtectedRoots,
+		]),
+	];
 	return {
 		filesystem: {
 			denyRead,
@@ -152,8 +199,8 @@ function runtimeConfig(
 		},
 		network: {
 			allowedDomains: [],
-			deniedDomains: ["*"],
-			strictAllowlist: true,
+			deniedDomains: [],
+			strictAllowlist: false,
 			allowLocalBinding: false,
 		},
 		...(isBunBinary && process.platform === "linux" ? { seccomp: { applyPath: bundledHelperPath("seccomp") } } : {}),
@@ -170,6 +217,7 @@ function sanitizedMessage(error: unknown, fallback: string): string {
 
 export async function runWorkspaceSandboxBroker(): Promise<void> {
 	let workspaceRoots: readonly string[] | undefined;
+	let networkEndpoints: readonly SandboxNetworkEndpoint[] = [];
 	let shellPath: string | undefined;
 	let initializationStarted = false;
 	let active:
@@ -310,6 +358,7 @@ export async function runWorkspaceSandboxBroker(): Promise<void> {
 							...request.readOnlyRoots,
 							...request.writeRoots,
 							...request.protectedRoots,
+							...request.writeProtectedRoots,
 						].some((root) => !isAbsolute(root))
 					) {
 						throw new Error("Sandbox paths must be absolute");
@@ -320,6 +369,10 @@ export async function runWorkspaceSandboxBroker(): Promise<void> {
 					const readOnlyRoots = canonicalRoots(request.readOnlyRoots);
 					const writeRoots = canonicalRoots(request.writeRoots);
 					const protectedRoots = canonicalRoots(request.protectedRoots);
+					const writeProtectedRoots = canonicalRoots(request.writeProtectedRoots);
+					networkEndpoints = Object.freeze(
+						request.networkEndpoints.map((endpoint) => Object.freeze({ ...endpoint })),
+					);
 					const cwd = canonicalizeActionPath(request.cwd, request.cwd);
 					if (!workspaceRoots.some((root) => isPathInside(root, cwd))) {
 						throw new Error("Sandbox cwd is outside the workspace");
@@ -337,6 +390,11 @@ export async function runWorkspaceSandboxBroker(): Promise<void> {
 							throw new Error("Sandbox read roots expose a protected root");
 						}
 					}
+					for (const protectedRoot of writeProtectedRoots) {
+						if (writeRoots.some((root) => pathsIntersect(root, protectedRoot))) {
+							throw new Error("Sandbox write roots overlap a protected root");
+						}
+					}
 					const runtimeReads = runtimeReadPaths();
 					for (const protectedRoot of protectedRoots) {
 						if (
@@ -352,15 +410,18 @@ export async function runWorkspaceSandboxBroker(): Promise<void> {
 					mkdirSync(temporaryDir, { recursive: true });
 					process.env.CLAUDE_CODE_TMPDIR = temporaryDir;
 					await SandboxManager.initialize(
-						runtimeConfig(
+						createSandboxRuntimeConfig({
 							workspaceRoots,
 							readOnlyRoots,
 							writeRoots,
+							protectedRoots,
+							writeProtectedRoots,
 							temporaryDir,
 							runtimeReads,
-							shellPath,
-							request.workspaceReadOnly === true,
-						),
+							...(shellPath ? { shellPath } : {}),
+							workspaceReadOnly: request.workspaceReadOnly === true,
+						}),
+						(target) => Promise.resolve(exactNetworkGrantAllows(networkEndpoints, target)),
 					);
 					send({ type: "ready" });
 				} catch (error) {

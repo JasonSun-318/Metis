@@ -174,7 +174,7 @@ describe.runIf(process.env.METIS_TEST_OS_SANDBOX === "1")("workspace sandbox", (
 
 	it("mounts Plan workspaces read-only while preserving Metis temp writes", async () => {
 		const workspace = temporaryDirectory();
-		const sessionWorkDir = temporaryDirectory();
+		const sessionWorkDir = realpathSync(temporaryDirectory());
 		writeFileSync(join(workspace, "tracked.txt"), "original");
 		let sandbox: Awaited<ReturnType<typeof createWorkspaceSandbox>>;
 		try {
@@ -188,14 +188,55 @@ describe.runIf(process.env.METIS_TEST_OS_SANDBOX === "1")("workspace sandbox", (
 			if (error instanceof WorkspaceSandboxError && error.code === "SANDBOX_UNAVAILABLE") return;
 			throw error;
 		}
+		let output = "";
 		const exec = (command: string) =>
-			sandbox.operations.exec(command, workspace, { onData: () => {}, env: { METIS_WORK_DIR: sessionWorkDir } });
+			sandbox.operations.exec(command, workspace, {
+				onData: (data) => {
+					output += data.toString();
+				},
+				env: { METIS_WORK_DIR: sessionWorkDir },
+			});
 		try {
 			const writeResult = await exec("printf changed > tracked.txt");
 			expect(writeResult.exitCode).not.toBe(0);
 			expect(readFileSync(join(workspace, "tracked.txt"), "utf8")).toBe("original");
 			await expect(exec("cat tracked.txt")).resolves.toMatchObject({ exitCode: 0 });
-			await expect(exec('printf ok > "$METIS_WORK_DIR/result.txt"')).resolves.toMatchObject({ exitCode: 0 });
+			output = "";
+			const result = await exec('printf ok > "$METIS_WORK_DIR/result.txt"');
+			expect(result, output).toMatchObject({ exitCode: 0 });
+		} finally {
+			await sandbox.dispose();
+		}
+	});
+
+	it("keeps repository metadata read-only while ordinary workspace files remain writable", async () => {
+		const workspace = temporaryDirectory();
+		const protectedRoots = [".git", ".metis", ".codex", ".agents"].map((name) => join(workspace, name));
+		for (const protectedRoot of protectedRoots) {
+			mkdirSync(protectedRoot);
+			writeFileSync(join(protectedRoot, "sentinel"), "original");
+		}
+		const sandbox = await createWorkspaceSandbox({
+			cwd: workspace,
+			workspaceRoots: [workspace],
+			writeProtectedRoots: protectedRoots,
+		});
+		try {
+			for (const protectedRoot of protectedRoots) {
+				await expect(
+					sandbox.operations.exec(
+						`printf changed > ${JSON.stringify(join(protectedRoot, "sentinel"))}`,
+						workspace,
+						{
+							onData: () => {},
+						},
+					),
+				).resolves.not.toMatchObject({ exitCode: 0 });
+				expect(readFileSync(join(protectedRoot, "sentinel"), "utf8")).toBe("original");
+			}
+			await expect(
+				sandbox.operations.exec("printf ok > ordinary.txt", workspace, { onData: () => {} }),
+			).resolves.toMatchObject({ exitCode: 0 });
 		} finally {
 			await sandbox.dispose();
 		}

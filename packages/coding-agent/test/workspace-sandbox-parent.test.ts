@@ -1,6 +1,6 @@
 import type { ChildProcess } from "node:child_process";
 import { EventEmitter } from "node:events";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
@@ -56,6 +56,37 @@ describe("workspace sandbox parent fail-closed behavior", () => {
 
 	it("does not spawn a broker merely by importing the host module", () => {
 		expect(mocks.spawnProcess).not.toHaveBeenCalled();
+	});
+
+	it("sends the complete immutable filesystem and network profile before readiness", async () => {
+		let initialization: Record<string, unknown> | undefined;
+		mocks.spawnProcess.mockReturnValue(
+			fakeBroker((request, child) => {
+				if (request.type === "init") {
+					initialization = request;
+					respond(child, { type: "ready" });
+				}
+			}),
+		);
+		const root = cwd();
+		const protectedRoot = join(realpathSync(root), ".git");
+		const sandbox = await createWorkspaceSandbox({
+			cwd: root,
+			workspaceRoots: [root],
+			readOnlyRoots: [join(root, "read")],
+			writeRoots: [join(root, "write")],
+			writeProtectedRoots: [protectedRoot],
+			networkEndpoints: [{ hostname: "api.example.com", port: 443 }],
+			workspaceReadOnly: true,
+		});
+
+		expect(initialization).toMatchObject({
+			type: "init",
+			writeProtectedRoots: [protectedRoot],
+			networkEndpoints: [{ hostname: "api.example.com", port: 443 }],
+			workspaceReadOnly: true,
+		});
+		sandbox.forceDispose();
 	});
 
 	it("rejects malformed broker output", async () => {

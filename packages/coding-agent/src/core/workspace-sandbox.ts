@@ -12,6 +12,7 @@ import { canonicalizeActionPath, isPathInside, pathsIntersect } from "../utils/p
 import { killProcessTree } from "../utils/shell.ts";
 import type { BashOperations } from "./tools/bash.ts";
 import {
+	normalizeSandboxNetworkEndpoints,
 	parseSandboxResponse,
 	type SandboxErrorCode,
 	type SandboxRequest,
@@ -78,6 +79,7 @@ function minimalEnvironment(temporaryDir: string, preferred?: NodeJS.ProcessEnv)
 		"ProgramFiles",
 		"ProgramFiles(x86)",
 		"ProgramData",
+		"METIS_WORK_DIR",
 	]) {
 		if (source[key] !== undefined) environment[key] = source[key];
 	}
@@ -158,6 +160,8 @@ class SandboxBroker {
 		readOnlyRoots?: readonly string[];
 		writeRoots?: readonly string[];
 		protectedRoots?: readonly string[];
+		writeProtectedRoots?: readonly string[];
+		networkEndpoints?: readonly { readonly hostname: string; readonly port: number }[];
 		shellPath?: string;
 		workspaceReadOnly?: boolean;
 		signal?: AbortSignal;
@@ -168,6 +172,7 @@ class SandboxBroker {
 			...(input.readOnlyRoots ?? []),
 			...(input.writeRoots ?? []),
 			...(input.protectedRoots ?? []),
+			...(input.writeProtectedRoots ?? []),
 		];
 		if (
 			!isAbsolute(input.cwd) ||
@@ -185,12 +190,19 @@ class SandboxBroker {
 		const readOnlyRoots = normalizeRoots(input.readOnlyRoots ?? []);
 		const writeRoots = normalizeRoots(input.writeRoots ?? []);
 		const protectedRoots = normalizeRoots(input.protectedRoots ?? []);
+		const writeProtectedRoots = normalizeRoots(input.writeProtectedRoots ?? []);
+		const networkEndpoints = normalizeSandboxNetworkEndpoints(input.networkEndpoints ?? []);
 		for (const protectedRoot of protectedRoots) {
 			if ([...workspaceRoots, ...writeRoots].some((root) => pathsIntersect(root, protectedRoot))) {
 				throw new TypeError("Workspace sandbox write roots overlap a protected root");
 			}
 			if (readOnlyRoots.some((root) => isPathInside(root, protectedRoot))) {
 				throw new TypeError("Workspace sandbox read roots expose a protected root");
+			}
+		}
+		for (const protectedRoot of writeProtectedRoots) {
+			if (writeRoots.some((root) => pathsIntersect(root, protectedRoot))) {
+				throw new TypeError("Workspace sandbox write roots overlap a protected root");
 			}
 		}
 		if (!workspaceRoots.some((root) => isPathInside(root, cwd))) {
@@ -242,6 +254,8 @@ class SandboxBroker {
 				readOnlyRoots,
 				writeRoots,
 				protectedRoots,
+				writeProtectedRoots,
+				networkEndpoints,
 				...(shellPath ? { shellPath } : {}),
 				...(input.workspaceReadOnly === true ? { workspaceReadOnly: true } : {}),
 			});
@@ -490,6 +504,8 @@ export async function createWorkspaceSandbox(input: {
 	readOnlyRoots?: readonly string[];
 	writeRoots?: readonly string[];
 	protectedRoots?: readonly string[];
+	writeProtectedRoots?: readonly string[];
+	networkEndpoints?: readonly { readonly hostname: string; readonly port: number }[];
 	shellPath?: string;
 	workspaceReadOnly?: boolean;
 	signal?: AbortSignal;

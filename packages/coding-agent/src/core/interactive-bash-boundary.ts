@@ -3,7 +3,7 @@ import { canonicalizeActionPath } from "../utils/paths.ts";
 import type { PermissionExecutionTarget } from "./permission-policy.ts";
 import { assertConsumedExecutionGrant, claimConsumedExecutionGrant } from "./permissions/grant-store.ts";
 import { digestCanonical } from "./permissions/normalize.ts";
-import type { ExecutionGrant } from "./permissions/types.ts";
+import type { ExecutionGrant, NetworkEndpoint } from "./permissions/types.ts";
 import type { BashOperations } from "./tools/bash.ts";
 import { createWorkspaceSandbox, type WorkspaceSandbox } from "./workspace-sandbox.ts";
 
@@ -13,6 +13,8 @@ export interface InteractiveBashContext {
 	readonly readOnlyRoots: readonly string[];
 	readonly writeRoots: readonly string[];
 	readonly protectedRoots?: readonly string[];
+	readonly writeProtectedRoots?: readonly string[];
+	readonly networkEndpoints?: readonly NetworkEndpoint[];
 	readonly shellPath?: string;
 	readonly workspaceReadOnly?: boolean;
 }
@@ -52,6 +54,7 @@ function normalizeContext(value: InteractiveBashContext): InteractiveBashContext
 		...value.readOnlyRoots,
 		...value.writeRoots,
 		...(value.protectedRoots ?? []),
+		...(value.writeProtectedRoots ?? []),
 	];
 	if (
 		!isAbsolute(value.cwd) ||
@@ -62,12 +65,19 @@ function normalizeContext(value: InteractiveBashContext): InteractiveBashContext
 	}
 	const roots = (items: readonly string[]) =>
 		[...new Set(items.map((path) => canonicalizeActionPath(path, path)))].sort();
+	const networkEndpoints = [...(value.networkEndpoints ?? [])]
+		.map(({ hostname, port }) => Object.freeze({ hostname: hostname.toLowerCase().replace(/\.$/, ""), port }))
+		.sort((left, right) =>
+			left.hostname === right.hostname ? left.port - right.port : left.hostname < right.hostname ? -1 : 1,
+		);
 	return {
 		cwd: canonicalizeActionPath(value.cwd, value.cwd),
 		workspaceRoots: roots(value.workspaceRoots),
 		readOnlyRoots: roots(value.readOnlyRoots),
 		writeRoots: roots(value.writeRoots),
 		protectedRoots: roots(value.protectedRoots ?? []),
+		writeProtectedRoots: roots(value.writeProtectedRoots ?? []),
+		networkEndpoints: Object.freeze(networkEndpoints),
 		workspaceReadOnly: value.workspaceReadOnly === true,
 		...(value.shellPath === undefined
 			? {}
@@ -77,6 +87,16 @@ function normalizeContext(value: InteractiveBashContext): InteractiveBashContext
 						: value.shellPath,
 				}),
 	};
+}
+
+export function workspaceSandboxProfileKey(value: InteractiveBashContext): string {
+	return digestCanonical({
+		version: 1,
+		sandboxRuntime: "@anthropic-ai/sandbox-runtime@0.0.67",
+		platform: process.platform,
+		architecture: process.arch,
+		context: normalizeContext(value),
+	});
 }
 
 class DefaultInteractiveBashBoundary implements InteractiveBashBoundary {
@@ -181,8 +201,10 @@ class DefaultInteractiveBashBoundary implements InteractiveBashBoundary {
 						workspaceRoots: grant.workspaceRoots,
 						readOnlyRoots: grant.readRoots,
 						writeRoots: grant.writeRoots,
-						protectedRoots: grant.protectedRoots,
-						workspaceReadOnly: grant.writeRoots.length === 0,
+						protectedRoots: [],
+						writeProtectedRoots: grant.protectedRoots,
+						networkEndpoints: grant.networkEndpoints,
+						workspaceReadOnly: true,
 					})
 				: baseContext;
 			const sandbox = await this.getSandbox(context, generation);
@@ -198,7 +220,7 @@ class DefaultInteractiveBashBoundary implements InteractiveBashBoundary {
 	}
 
 	private async getSandbox(context: InteractiveBashContext, generation: number): Promise<WorkspaceSandbox> {
-		const key = JSON.stringify(context);
+		const key = workspaceSandboxProfileKey(context);
 		if (this.sandbox?.key === key) return this.sandbox.promise;
 		const previous = this.sandbox;
 		this.sandbox = undefined;
