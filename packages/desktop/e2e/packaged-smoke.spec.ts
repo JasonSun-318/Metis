@@ -33,6 +33,23 @@ const SCHEDULE_ID = "10000000-0000-4000-8000-000000000004";
 const SESSION_ACTION_ID = "10000000-0000-4000-8000-000000000005";
 const COMPLETED_TASK_ID = "10000000-0000-4000-8000-000000000006";
 
+function cssGridTrackCount(template: string): number {
+	const repeat = /^repeat\((\d+)/u.exec(template.trim());
+	if (repeat) return Number(repeat[1]);
+	return template.split(/\s+(?![^(]*\))/u).filter(Boolean).length;
+}
+
+function authHasMcpServer(auth: Record<string, unknown>, name: string): boolean {
+	const encoded = encodeURIComponent(name);
+	return Object.keys(auth).some(
+		(key) =>
+			key.endsWith(`:${name}`) ||
+			key.endsWith(`:${encoded}`) ||
+			key.includes(`:${name}:`) ||
+			key.includes(`:${encoded}:`),
+	);
+}
+
 interface FixtureSessionManager {
 	appendAgentControl(payload: object): string;
 	appendCompaction(summary: string, firstKeptEntryId: string, tokensBefore: number, details?: unknown, fromHook?: boolean): string;
@@ -2322,12 +2339,12 @@ test("packaged personal profile renders cached Token and Skill activity", async 
 			const grid = page.querySelector<HTMLElement>(".model-provider-grid")!;
 			return {
 				outerOverflow: scroll.scrollHeight - scroll.clientHeight,
-				columns: getComputedStyle(grid).gridTemplateColumns.split(" ").length,
+				columns: getComputedStyle(grid).gridTemplateColumns,
 			};
 		});
 		expect(modelLayout.outerOverflow).toBeGreaterThan(0);
 		await expect(page.locator(".settings-page-scroll-model")).toHaveCSS("overflow-y", "auto");
-		expect(modelLayout.columns).toBeGreaterThanOrEqual(3);
+		expect(cssGridTrackCount(modelLayout.columns)).toBe(2);
 		expect((await page.evaluate(() =>
 			(globalThis as unknown as { metis: MetisDesktopApi }).metis.getModelSettings(),
 		)).defaultModel?.provider).toBe("openai");
@@ -2574,7 +2591,9 @@ test("packaged MCP creation matrix connects URL, custom, and JSON transports", a
 		const auth = JSON.parse(authText) as Record<string, unknown>;
 		expect(Object.keys(auth)).toHaveLength(5);
 		for (const name of ["url-http", "custom-http", "custom-stdio", "json-http", "json-stdio"]) {
-			expect(Object.keys(auth).some((key) => key.endsWith(`:${name}`))).toBe(true);
+			expect(authHasMcpServer(auth, name), `missing MCP credential for ${name} in ${Object.keys(auth).join(", ")}`).toBe(
+				true,
+			);
 		}
 		for (const secret of secrets) expect(authText).toContain(secret);
 		if (process.platform !== "win32") expect((await stat(authPath)).mode & 0o077).toBe(0);
