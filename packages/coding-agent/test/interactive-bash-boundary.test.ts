@@ -46,15 +46,15 @@ describe("interactive Bash boundary", () => {
 		const createSandbox = vi.fn(async () => instance);
 		const value = boundary({ hostExec, createSandbox });
 
-		value.bind("safe-1", "sandbox");
+		value.bindLegacy("safe-1", "sandbox");
 		await value.operations.exec("pwd", cwd, options("safe-1"));
-		value.bind("safe-2", "sandbox");
+		value.bindLegacy("safe-2", "sandbox");
 		await value.operations.exec("npm test", cwd, options("safe-2"));
 		expect(createSandbox).toHaveBeenCalledOnce();
 		expect(sandboxExec).toHaveBeenCalledTimes(2);
 		expect(hostExec).not.toHaveBeenCalled();
 
-		value.bind("host-1", "host");
+		value.bindLegacy("host-1", "host");
 		await value.operations.exec("git push", cwd, options("host-1"));
 		expect(hostExec).toHaveBeenCalledOnce();
 		expect(createSandbox).toHaveBeenCalledOnce();
@@ -64,9 +64,9 @@ describe("interactive Bash boundary", () => {
 	it("rejects missing, reused, and unbound action IDs without host fallback", async () => {
 		const hostExec = vi.fn(async () => ({ exitCode: 0 }));
 		const value = boundary({ hostExec, createSandbox: vi.fn(async () => sandbox()) });
-		expect(() => value.bind("", "sandbox")).toThrow("action ID is required");
-		value.bind("one", "sandbox");
-		expect(() => value.bind("one", "host")).toThrow("was reused");
+		expect(() => value.bindLegacy("", "sandbox")).toThrow("action ID is required");
+		value.bindLegacy("one", "sandbox");
+		expect(() => value.bindLegacy("one", "host")).toThrow("was reused");
 		await expect(value.operations.exec("pwd", cwd, options())).rejects.toThrow("requires an action ID");
 		await expect(value.operations.exec("pwd", cwd, options("missing"))).rejects.toThrow("no permission binding");
 		expect(hostExec).not.toHaveBeenCalled();
@@ -81,15 +81,15 @@ describe("interactive Bash boundary", () => {
 			createSandbox,
 			context: () => ({ cwd, workspaceRoots: roots, readOnlyRoots: [], writeRoots: [] }),
 		});
-		value.bind("one", "sandbox");
+		value.bindLegacy("one", "sandbox");
 		await value.operations.exec("pwd", cwd, options("one"));
 		roots = ["/tmp", cwd];
-		value.bind("two", "sandbox");
+		value.bindLegacy("two", "sandbox");
 		await value.operations.exec("pwd", cwd, options("two"));
 		expect(createSandbox).toHaveBeenCalledOnce();
 
 		roots = [cwd];
-		value.bind("three", "sandbox");
+		value.bindLegacy("three", "sandbox");
 		await value.operations.exec("pwd", cwd, options("three"));
 		expect(createSandbox).toHaveBeenCalledTimes(2);
 		expect(first.dispose).toHaveBeenCalledOnce();
@@ -107,7 +107,7 @@ describe("interactive Bash boundary", () => {
 				workspaceReadOnly: true,
 			}),
 		});
-		value.bind("one", "sandbox");
+		value.bindLegacy("one", "sandbox");
 		await value.operations.exec("pwd", cwd, options("one"));
 		expect(createSandbox).toHaveBeenCalledWith(expect.objectContaining({ workspaceReadOnly: true }));
 	});
@@ -127,7 +127,7 @@ describe("interactive Bash boundary", () => {
 				protectedRoots: [memoryRoot],
 			}),
 		});
-		value.bind("safe", "sandbox");
+		value.bindLegacy("safe", "sandbox");
 		await value.operations.exec("pwd", cwd, options("safe"));
 		expect(createSandbox).toHaveBeenCalledWith(
 			expect.objectContaining({
@@ -150,8 +150,8 @@ describe("interactive Bash boundary", () => {
 			.mockResolvedValue({ exitCode: 0 });
 		const value = boundary({ createSandbox: vi.fn(async () => sandbox(sandboxExec)) });
 		const controller = new AbortController();
-		value.bind("one", "sandbox");
-		value.bind("two", "sandbox");
+		value.bindLegacy("one", "sandbox");
+		value.bindLegacy("two", "sandbox");
 		const first = value.operations.exec("sleep", cwd, options("one"));
 		const second = value.operations.exec("pwd", cwd, options("two", controller.signal));
 		await vi.waitFor(() => expect(sandboxExec).toHaveBeenCalledOnce());
@@ -168,11 +168,11 @@ describe("interactive Bash boundary", () => {
 			throw new Error("sandbox unavailable");
 		});
 		const value = boundary({ hostExec, createSandbox });
-		value.bind("safe", "sandbox");
+		value.bindLegacy("safe", "sandbox");
 		await expect(value.operations.exec("pwd", cwd, options("safe"))).rejects.toThrow("sandbox unavailable");
 		expect(hostExec).not.toHaveBeenCalled();
 
-		value.bind("full", "host");
+		value.bindLegacy("full", "host");
 		await value.operations.exec("pwd", cwd, options("full"));
 		expect(hostExec).toHaveBeenCalledOnce();
 		expect(createSandbox).toHaveBeenCalledOnce();
@@ -189,8 +189,8 @@ describe("interactive Bash boundary", () => {
 		const instance = sandbox(sandboxExec);
 		vi.mocked(instance.dispose).mockImplementation(async () => rejectRunning(new Error("sandbox disposed")));
 		const value = boundary({ createSandbox: vi.fn(async () => instance) });
-		value.bind("one", "sandbox");
-		value.bind("two", "sandbox");
+		value.bindLegacy("one", "sandbox");
+		value.bindLegacy("two", "sandbox");
 		const running = value.operations.exec("sleep", cwd, options("one"));
 		const queued = value.operations.exec("pwd", cwd, options("two"));
 		await vi.waitFor(() => expect(sandboxExec).toHaveBeenCalledOnce());
@@ -202,7 +202,7 @@ describe("interactive Bash boundary", () => {
 
 		const forceInstance = sandbox();
 		const forced = boundary({ createSandbox: vi.fn(async () => forceInstance) });
-		forced.bind("three", "sandbox");
+		forced.bindLegacy("three", "sandbox");
 		await forced.operations.exec("pwd", cwd, options("three"));
 		forced.forceDispose();
 		expect(forceInstance.forceDispose).toHaveBeenCalledOnce();

@@ -1,6 +1,9 @@
 import { isAbsolute } from "node:path";
 import { canonicalizeActionPath } from "../utils/paths.ts";
 import type { PermissionExecutionTarget } from "./permission-policy.ts";
+import { assertConsumedExecutionGrant, claimConsumedExecutionGrant } from "./permissions/grant-store.ts";
+import { digestCanonical } from "./permissions/normalize.ts";
+import type { ExecutionGrant } from "./permissions/types.ts";
 import type { BashOperations } from "./tools/bash.ts";
 import { createWorkspaceSandbox, type WorkspaceSandbox } from "./workspace-sandbox.ts";
 
@@ -27,7 +30,9 @@ export function buildInteractiveBashReadOnlyRoots(input: {
 
 export interface InteractiveBashBoundary {
 	readonly operations: BashOperations;
-	bind(actionId: string, target: PermissionExecutionTarget): void;
+	bind(grant: ExecutionGrant): void;
+	/** @internal Temporary old-runtime entry; removed at the Plan 05 cutover. */
+	bindLegacy(actionId: string, target: PermissionExecutionTarget): void;
 	unbind(actionId: string): void;
 	reset(): Promise<void>;
 	dispose(): Promise<void>;
@@ -79,7 +84,8 @@ class DefaultInteractiveBashBoundary implements InteractiveBashBoundary {
 	private readonly hostOperations: BashOperations;
 	private readonly context: (env: NodeJS.ProcessEnv | undefined) => InteractiveBashContext;
 	private readonly createSandbox: typeof createWorkspaceSandbox;
-	private readonly bindings = new Map<string, PermissionExecutionTarget>();
+	private readonly bindings = new Map<string, ExecutionGrant>();
+	private readonly legacyBindings = new Map<string, PermissionExecutionTarget>();
 	private tail: Promise<void> = Promise.resolve();
 	private sandbox?: SandboxState;
 	private generation = 0;
@@ -97,15 +103,31 @@ class DefaultInteractiveBashBoundary implements InteractiveBashBoundary {
 		this.operations = { exec: (command, cwd, options) => this.exec(command, cwd, options) };
 	}
 
-	bind(actionId: string, target: PermissionExecutionTarget): void {
+	bind(grant: ExecutionGrant): void {
+		if (this.closed) throw new Error("Interactive Bash boundary is closed");
+		assertConsumedExecutionGrant(grant);
+		if (grant.toolName !== "bash") throw new TypeError("Interactive Bash requires a Bash execution grant");
+		if (grant.executionTarget === "external") {
+			throw new TypeError("External execution grants cannot run through Interactive Bash");
+		}
+		if (this.bindings.has(grant.actionId) || this.legacyBindings.has(grant.actionId)) {
+			throw new Error(`Interactive Bash action ID was reused: ${grant.actionId}`);
+		}
+		this.bindings.set(grant.actionId, grant);
+	}
+
+	bindLegacy(actionId: string, target: PermissionExecutionTarget): void {
 		if (this.closed) throw new Error("Interactive Bash boundary is closed");
 		if (!actionId) throw new TypeError("Interactive Bash action ID is required");
-		if (this.bindings.has(actionId)) throw new Error(`Interactive Bash action ID was reused: ${actionId}`);
-		this.bindings.set(actionId, target);
+		if (this.bindings.has(actionId) || this.legacyBindings.has(actionId)) {
+			throw new Error(`Interactive Bash action ID was reused: ${actionId}`);
+		}
+		this.legacyBindings.set(actionId, target);
 	}
 
 	unbind(actionId: string): void {
 		this.bindings.delete(actionId);
+		this.legacyBindings.delete(actionId);
 	}
 
 	private exec(
@@ -115,16 +137,54 @@ class DefaultInteractiveBashBoundary implements InteractiveBashBoundary {
 	): Promise<{ exitCode: number | null }> {
 		if (this.closed) return Promise.reject(new Error("Interactive Bash boundary is closed"));
 		if (!options.actionId) return Promise.reject(new Error("Interactive Bash execution requires an action ID"));
-		const target = this.bindings.get(options.actionId);
+		const grant = this.bindings.get(options.actionId);
+		const legacyTarget = this.legacyBindings.get(options.actionId);
 		this.bindings.delete(options.actionId);
-		if (!target) return Promise.reject(new Error("Interactive Bash execution has no permission binding"));
+		this.legacyBindings.delete(options.actionId);
+		if (!grant && !legacyTarget) {
+			return Promise.reject(new Error("Interactive Bash execution has no permission binding"));
+		}
+		let target = legacyTarget;
+		if (grant) {
+			if (grant.executionTarget === "external") {
+				return Promise.reject(new Error("External execution grants cannot run through Interactive Bash"));
+			}
+			const canonicalCwd = canonicalizeActionPath(cwd, grant.cwd);
+			if (canonicalCwd !== grant.cwd) {
+				return Promise.reject(new Error("Interactive Bash cwd does not match the execution grant"));
+			}
+			const argsDigest = digestCanonical({
+				command,
+				...(options.timeout === undefined ? {} : { timeout: options.timeout }),
+			});
+			if (argsDigest !== grant.argsDigest) {
+				return Promise.reject(new Error("Interactive Bash command does not match the execution grant"));
+			}
+			try {
+				claimConsumedExecutionGrant(grant);
+			} catch (error) {
+				return Promise.reject(error);
+			}
+			target = grant.executionTarget;
+		}
 		if (target === "host") return this.hostOperations.exec(command, cwd, options);
 
 		const generation = this.generation;
 		const run = this.tail.then(async () => {
 			if (this.closed || generation !== this.generation) throw new Error("Interactive Bash execution was reset");
 			if (options.signal?.aborted) throw new Error("aborted");
-			const context = normalizeContext(this.context(options.env));
+			const baseContext = normalizeContext(this.context(options.env));
+			const context = grant
+				? normalizeContext({
+						...baseContext,
+						cwd: grant.cwd,
+						workspaceRoots: grant.workspaceRoots,
+						readOnlyRoots: grant.readRoots,
+						writeRoots: grant.writeRoots,
+						protectedRoots: grant.protectedRoots,
+						workspaceReadOnly: grant.writeRoots.length === 0,
+					})
+				: baseContext;
 			const sandbox = await this.getSandbox(context, generation);
 			if (this.closed || generation !== this.generation) throw new Error("Interactive Bash execution was reset");
 			if (options.signal?.aborted) throw new Error("aborted");
@@ -177,6 +237,7 @@ class DefaultInteractiveBashBoundary implements InteractiveBashBoundary {
 	private async resetOpenBoundary(): Promise<void> {
 		this.generation += 1;
 		this.bindings.clear();
+		this.legacyBindings.clear();
 		const state = this.sandbox;
 		this.sandbox = undefined;
 		if (state) {
@@ -201,6 +262,7 @@ class DefaultInteractiveBashBoundary implements InteractiveBashBoundary {
 		this.closed = true;
 		this.generation += 1;
 		this.bindings.clear();
+		this.legacyBindings.clear();
 		const state = this.sandbox;
 		this.sandbox = undefined;
 		if (state?.instance) state.instance.forceDispose();

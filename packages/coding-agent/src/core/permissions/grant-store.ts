@@ -38,6 +38,20 @@ interface StoredGrant {
 	readonly profileDigest: string;
 }
 
+type GrantState = "active" | "consumed" | "claimed" | "revoked";
+const grantStates = new WeakMap<ExecutionGrant, GrantState>();
+
+export function assertConsumedExecutionGrant(grant: ExecutionGrant): void {
+	if (grantStates.get(grant) !== "consumed") {
+		throw new Error("Execution grant was not consumed or is no longer usable");
+	}
+}
+
+export function claimConsumedExecutionGrant(grant: ExecutionGrant): void {
+	assertConsumedExecutionGrant(grant);
+	grantStates.set(grant, "claimed");
+}
+
 function exactArray(left: readonly unknown[], right: readonly unknown[]): boolean {
 	return isDeepStrictEqual(left, right);
 }
@@ -160,6 +174,7 @@ export class ExecutionGrantStore {
 		}) satisfies ExecutionGrant;
 		this.highestSettingsEpoch = epoch;
 		this.active.set(id, { grant, profileDigest: digestExecutionGrantProfile(profile) });
+		grantStates.set(grant, "active");
 		return grant;
 	}
 
@@ -168,6 +183,7 @@ export class ExecutionGrantStore {
 		if (!stored) throw new Error("Execution grant is not active or was already consumed");
 		this.active.delete(id);
 		const { grant } = stored;
+		grantStates.set(grant, "revoked");
 		if (this.currentTime() >= Date.parse(grant.expiresAt)) {
 			throw new Error("Execution grant expired before consumption");
 		}
@@ -183,6 +199,7 @@ export class ExecutionGrantStore {
 		assertCompleteAction(current.action);
 		if (digestPermissionAction(current.action) !== grant.actionDigest) mismatch("action");
 		if (digestExecutionGrantProfile(executionGrantProfile(grant)) !== stored.profileDigest) mismatch("profile");
+		grantStates.set(grant, "consumed");
 		return grant;
 	}
 
@@ -191,11 +208,20 @@ export class ExecutionGrantStore {
 	}
 
 	revoke(id: string): boolean {
-		return this.active.delete(id);
+		const stored = this.active.get(id);
+		if (!stored) return false;
+		this.active.delete(id);
+		grantStates.set(stored.grant, "revoked");
+		return true;
+	}
+
+	retire(grant: ExecutionGrant): void {
+		if (grantStates.has(grant)) grantStates.set(grant, "revoked");
 	}
 
 	revokeAll(): number {
 		const count = this.active.size;
+		for (const { grant } of this.active.values()) grantStates.set(grant, "revoked");
 		this.active.clear();
 		return count;
 	}

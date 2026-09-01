@@ -47,7 +47,7 @@ interface ToolAuthorizationRuntimeOptions {
 	readonly permissionModeCeiling?: () => PermissionMode;
 	readonly workspaceWritePolicy: "inherit" | "deny";
 	readonly unattendedExecution?: UnattendedExecutionProfile;
-	readonly bashBoundary?: Pick<InteractiveBashBoundary, "bind" | "unbind">;
+	readonly bashBoundary?: Pick<InteractiveBashBoundary, "bindLegacy" | "unbind">;
 	readonly requestApproval?: RequestPermissionApproval;
 }
 
@@ -133,7 +133,7 @@ export class ToolAuthorizationRuntime {
 				this.denials.delete(toolCallId);
 				if (denial) throw new Error(denial);
 				const authorization = this.take(toolCallId, tool.name, args);
-				if (tool.name === "bash") this.options.bashBoundary?.bind(toolCallId, authorization.executionTarget);
+				if (tool.name === "bash") this.options.bashBoundary?.bindLegacy(toolCallId, authorization.executionTarget);
 				try {
 					return await tool.execute(toolCallId, args, signal, onUpdate);
 				} finally {

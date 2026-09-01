@@ -493,7 +493,7 @@ describe("AgentSession permission enforcement", () => {
 
 		it("routes harmless Bash to sandbox without approval and rejects risky commands", async () => {
 			const fake = fakeBashBoundary();
-			const bindSpy = vi.spyOn(fake.boundary, "bind");
+			const bindSpy = vi.spyOn(fake.boundary, "bindLegacy");
 			const requestApproval = vi.fn(async () => ({ decision: "allow" as const }));
 			const harness = await createHarness({
 				permissionSettings: { mode: "ask" },

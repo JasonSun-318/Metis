@@ -404,6 +404,7 @@ export class ToolAuthorizationRuntime {
 				throw error;
 			}
 		} finally {
+			this.grants.retire(grant);
 			if (this.grants.revoke(grant.grantId)) {
 				await this.appendAudit(
 					reviewed.action,
