@@ -1,0 +1,215 @@
+import { isAbsolute } from "node:path";
+import { assertCompleteAction, canonicalJson } from "./normalize.ts";
+import type { PermissionReviewRequest, TrustedUserMessage } from "./reviewer.ts";
+import type { GrantRequest, NetworkEndpoint, NormalizedPermissionAction, RiskLevel } from "./types.ts";
+
+const MAX_REVIEW_INPUT_BYTES = 48 * 1024;
+const MAX_REDACTED_ARGUMENT_BYTES = 16 * 1024;
+const MAX_TRUSTED_MESSAGES = 20;
+const MAX_COLLECTION_ITEMS = 256;
+const MAX_DEPTH = 20;
+const MAX_DISPLAY_STRING_BYTES = 4 * 1024;
+const SECRET_KEY_PATTERN =
+	/(?:authorization|cookie|credential|password|privatekey|secret|session|token|(?:api|access|auth)?key)/i;
+const EXACT_VALUE_KEY_PATTERN =
+	/(?:path|root|cwd|destination|host|url|endpoint|command|repository|branch|target|scope|payload|content|body|message)/i;
+
+export interface ModelReviewInput {
+	readonly schemaVersion: 1;
+	readonly action: NormalizedPermissionAction;
+	readonly policy: {
+		readonly riskLevel: RiskLevel;
+		readonly minimumReviewer: "model" | "user";
+		readonly reason: string;
+		readonly grant: GrantRequest;
+	};
+	readonly trustedUserMessages: readonly TrustedUserMessage[];
+	readonly redactedArguments: unknown;
+}
+
+function normalizedKey(key: string): string {
+	return key.replaceAll(/[^a-z0-9]/gi, "").toLowerCase();
+}
+
+function binaryMetadata(value: string, key: string): Readonly<Record<string, unknown>> | undefined {
+	const dataUrl = /^data:([^;,]+)?(?:;[^,]*)?,(.*)$/isu.exec(value);
+	if (dataUrl) {
+		return Object.freeze({
+			kind: "binary",
+			mediaType: dataUrl[1] || "application/octet-stream",
+			encodedBytes: Buffer.byteLength(dataUrl[2] ?? "", "utf8"),
+		});
+	}
+	if (
+		/(?:base64|binary|blob|bytes|data|image)/i.test(normalizedKey(key)) &&
+		value.length > 1024 &&
+		/^[a-z0-9+/=\r\n]+$/iu.test(value)
+	) {
+		return Object.freeze({ kind: "binary", encodedBytes: Buffer.byteLength(value, "utf8") });
+	}
+	return undefined;
+}
+
+function truncateUtf8(value: string, maximum: number): string {
+	if (Buffer.byteLength(value, "utf8") <= maximum) return value;
+	const truncated = Buffer.from(value)
+		.subarray(0, maximum - 3)
+		.toString("utf8")
+		.replace(/�$/u, "");
+	return `${truncated}…`;
+}
+
+function redactValue(value: unknown, ancestors: Set<object>, depth: number, key = ""): unknown {
+	if (SECRET_KEY_PATTERN.test(normalizedKey(key))) return "<redacted>";
+	if (value === null || typeof value === "boolean") return value;
+	if (typeof value === "number") {
+		if (!Number.isFinite(value)) throw new TypeError("Reviewer arguments contain a non-finite number");
+		return value;
+	}
+	if (typeof value === "string") {
+		const binary = binaryMetadata(value, key);
+		if (binary) return binary;
+		return EXACT_VALUE_KEY_PATTERN.test(normalizedKey(key)) ? value : truncateUtf8(value, MAX_DISPLAY_STRING_BYTES);
+	}
+	if (typeof value !== "object") throw new TypeError(`Reviewer arguments contain unsupported ${typeof value}`);
+	if (depth >= MAX_DEPTH) throw new TypeError("Reviewer arguments exceed the maximum depth");
+	if (ArrayBuffer.isView(value) || value instanceof ArrayBuffer) {
+		return Object.freeze({ kind: "binary", bytes: value.byteLength });
+	}
+	if (ancestors.has(value)) throw new TypeError("Reviewer arguments contain a cycle");
+
+	ancestors.add(value);
+	try {
+		if (Array.isArray(value)) {
+			if (value.length > MAX_COLLECTION_ITEMS) throw new TypeError("Reviewer arguments contain too many items");
+			for (let index = 0; index < value.length; index += 1) {
+				const descriptor = Object.getOwnPropertyDescriptor(value, index);
+				if (!descriptor || !("value" in descriptor) || !descriptor.enumerable) {
+					throw new TypeError("Reviewer arguments contain a sparse or accessor array");
+				}
+			}
+			return Object.freeze(value.map((entry) => redactValue(entry, ancestors, depth + 1)));
+		}
+		const prototype = Object.getPrototypeOf(value);
+		if (prototype !== Object.prototype && prototype !== null) {
+			throw new TypeError("Reviewer arguments must contain only plain objects");
+		}
+		const descriptors = Object.getOwnPropertyDescriptors(value);
+		const keys = Reflect.ownKeys(descriptors);
+		if (keys.length > MAX_COLLECTION_ITEMS || keys.some((entry) => typeof entry === "symbol")) {
+			throw new TypeError("Reviewer arguments contain invalid object keys");
+		}
+		const result: Record<string, unknown> = Object.create(null);
+		for (const entry of (keys as string[]).sort()) {
+			const descriptor = descriptors[entry];
+			if (!descriptor || !("value" in descriptor) || !descriptor.enumerable) {
+				throw new TypeError("Reviewer arguments contain an accessor or hidden property");
+			}
+			result[entry] = redactValue(descriptor.value, ancestors, depth + 1, entry);
+		}
+		return Object.freeze(result);
+	} finally {
+		ancestors.delete(value);
+	}
+}
+
+function sameStrings(left: readonly string[], right: readonly string[]): boolean {
+	return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
+function sameEndpoints(left: readonly NetworkEndpoint[], right: readonly NetworkEndpoint[]): boolean {
+	return (
+		left.length === right.length &&
+		left.every(
+			(endpoint, index) => endpoint.hostname === right[index]?.hostname && endpoint.port === right[index]?.port,
+		)
+	);
+}
+
+function isNormalizedPathSet(paths: readonly string[]): boolean {
+	return (
+		paths.length <= 4_096 &&
+		paths.every(
+			(path, index) =>
+				typeof path === "string" &&
+				isAbsolute(path) &&
+				!path.includes("\0") &&
+				(index === 0 || (paths[index - 1] ?? "") < path),
+		)
+	);
+}
+
+function freezeGrant(action: NormalizedPermissionAction, grant: GrantRequest): GrantRequest {
+	if (
+		!grant ||
+		Object.keys(grant).sort().join(",") !==
+			"executionTarget,networkEndpoints,protectedRoots,readRoots,writeRoots".split(",").sort().join(",") ||
+		!(["sandbox", "host", "external"] as const).includes(grant.executionTarget) ||
+		!Array.isArray(grant.readRoots) ||
+		!Array.isArray(grant.writeRoots) ||
+		!Array.isArray(grant.protectedRoots) ||
+		!Array.isArray(grant.networkEndpoints) ||
+		!isNormalizedPathSet(grant.protectedRoots) ||
+		!sameStrings(action.readPaths, grant.readRoots) ||
+		!sameStrings(action.writePaths, grant.writeRoots) ||
+		!sameEndpoints(action.networkEndpoints, grant.networkEndpoints)
+	) {
+		throw new TypeError("Permission review grant does not match the normalized action");
+	}
+	return Object.freeze({
+		executionTarget: grant.executionTarget,
+		readRoots: Object.freeze([...grant.readRoots]),
+		writeRoots: Object.freeze([...grant.writeRoots]),
+		protectedRoots: Object.freeze([...grant.protectedRoots]),
+		networkEndpoints: Object.freeze(
+			grant.networkEndpoints.map((endpoint) => Object.freeze({ hostname: endpoint.hostname, port: endpoint.port })),
+		),
+	});
+}
+
+function trustedMessages(messages: readonly TrustedUserMessage[]): readonly TrustedUserMessage[] {
+	if (!Array.isArray(messages)) throw new TypeError("trustedUserMessages must be an array");
+	const recent = messages.slice(-MAX_TRUSTED_MESSAGES);
+	const seen = new Set<string>();
+	const normalized: TrustedUserMessage[] = [];
+	for (const message of recent.reverse()) {
+		if (!message || typeof message !== "object" || Object.keys(message).sort().join(",") !== "messageId,text") {
+			throw new TypeError("Trusted user message is invalid");
+		}
+		const messageId = message.messageId.trim();
+		const text = message.text.trim();
+		if (!messageId || messageId.length > 256 || !text || messageId.includes("\0") || text.includes("\0")) {
+			throw new TypeError("Trusted user message is invalid");
+		}
+		if (!seen.has(messageId)) {
+			seen.add(messageId);
+			normalized.push(Object.freeze({ messageId, text }));
+		}
+	}
+	return Object.freeze(normalized.reverse());
+}
+
+export function buildModelReviewInput(request: PermissionReviewRequest): ModelReviewInput {
+	assertCompleteAction(request.action);
+	const grant = freezeGrant(request.action, request.decision.grant);
+	const redactedArguments = redactValue(request.redactedArguments, new Set(), 0);
+	if (Buffer.byteLength(canonicalJson(redactedArguments), "utf8") > MAX_REDACTED_ARGUMENT_BYTES) {
+		throw new TypeError("Redacted reviewer arguments exceed 16 KiB");
+	}
+	const input: ModelReviewInput = Object.freeze({
+		schemaVersion: 1,
+		action: request.action,
+		policy: Object.freeze({
+			riskLevel: request.decision.riskLevel,
+			minimumReviewer: request.decision.minimumReviewer,
+			reason: request.decision.reason,
+			grant,
+		}),
+		trustedUserMessages: trustedMessages(request.trustedUserMessages),
+		redactedArguments,
+	});
+	if (Buffer.byteLength(canonicalJson(input), "utf8") > MAX_REVIEW_INPUT_BYTES) {
+		throw new TypeError("Permission reviewer input exceeds 48 KiB");
+	}
+	return input;
+}
